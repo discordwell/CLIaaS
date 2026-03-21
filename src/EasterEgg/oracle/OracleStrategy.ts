@@ -8,6 +8,7 @@
 
 import type { RAGameState, RAEntity, RAStructure, RABuildable } from './WasmAdapter';
 import { getCoastalCellsFromText, parseMapPack } from './mapParser';
+import { STRUCTURE_SIZE, getBibCells } from '../engine/scenario';
 
 /**
  * TS engine runs at 20 Hz. Oracle tick constants should use sec() to
@@ -72,17 +73,17 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 
 // SCG11EA "Aftermath / Naval Supremacy": bootstrap the island, then hand off to navy fast.
 // Strategy:
-//   1. Get a stable local base: POWR + PROC + WEAP + second PROC + second POWR.
-//   2. Stop there and rush the east-coast shipyard once the shore is revealed.
+//   1. Get a stable local base: POWR + PROC + WEAP + second POWR.
+//   2. Rush the east-coast shipyard as soon as that core is online.
 //   3. Keep enough tanks alive to hold the island while destroyers clear the river.
-//   4. Only spend on static tech or heavy macro after the fleet is established.
+//   4. Add the second refinery after the naval handoff instead of gating on it.
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // First power
   { names: ['PROC'],         type_ids: [12] },              // First refinery
   { names: ['WEAP'],         type_ids: [2] },               // Tank line online
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery
   { names: ['POWR'],         type_ids: [17], maxCount: 2 }, // Power for SYRD + DDs
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Rush navy once the coast is mapped
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery after shipyard
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
@@ -429,23 +430,34 @@ export class OracleStrategy {
     cx: number, cy: number,
     state: RAGameState,
     naval: boolean,
+    structureType = naval ? 'SYRD' : 'POWR',
   ): boolean {
     const terrain = this.getTerrain();
     if (!terrain) return true; // no terrain data — can't validate, try anyway
 
-    // Foundation cells for a 2x2 building
-    const cells = [[cx, cy], [cx + 1, cy], [cx, cy + 1], [cx + 1, cy + 1]];
+    const [fw, fh] = STRUCTURE_SIZE[structureType] ?? [2, 2];
+    const cells: Array<[number, number]> = [];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        cells.push([cx + dx, cy + dy]);
+      }
+    }
+    for (const bib of getBibCells(structureType, cx, cy)) {
+      cells.push([bib.cx, bib.cy]);
+    }
 
     // Build set of cells occupied by allied structures
     const occupied = new Set<string>();
     for (const s of state.structures) {
       if (!s.ally) continue;
-      // Most buildings 2x2, WEAP/FACT are wider
-      const w = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
-      for (let dy = 0; dy < 2; dy++) {
-        for (let dx = 0; dx < w; dx++) {
+      const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
+      for (let dy = 0; dy < sh; dy++) {
+        for (let dx = 0; dx < sw; dx++) {
           occupied.add(`${s.cx + dx},${s.cy + dy}`);
         }
+      }
+      for (const bib of getBibCells(s.t, s.cx, s.cy)) {
+        occupied.add(`${bib.cx},${bib.cy}`);
       }
     }
 
@@ -469,9 +481,12 @@ export class OracleStrategy {
     for (const s of state.structures) {
       if (!s.ally) continue;
       const sight = OracleStrategy.SIGHT[s.t] ?? 3;
-      // Reveal from each cell the building occupies (approximation)
-      addSight(s.cx, s.cy, sight);
-      addSight(s.cx + 1, s.cy, sight);
+      const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
+      for (let dy = 0; dy < sh; dy++) {
+        for (let dx = 0; dx < sw; dx++) {
+          addSight(s.cx + dx, s.cy + dy, sight);
+        }
+      }
     }
     for (const u of state.units) {
       if (!u.ally) continue;
@@ -493,6 +508,26 @@ export class OracleStrategy {
         if (tt !== 255 && tt !== 0xFFFF) return false;
       }
     }
+
+    let adjacent = false;
+    for (const s of state.structures) {
+      if (!s.ally) continue;
+      const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
+      const exL = s.cx - 2;
+      const exT = s.cy - 2;
+      const exR = s.cx + sw + 2;
+      const exB = s.cy + sh + 2;
+      const nL = cx;
+      const nT = cy;
+      const nR = cx + fw;
+      const nB = cy + fh;
+      if (nL < exR && nR > exL && nT < exB && nB > exT) {
+        adjacent = true;
+        break;
+      }
+    }
+    if (!adjacent) return false;
+
     return true;
   }
 
@@ -504,10 +539,11 @@ export class OracleStrategy {
     positions: Point[],
     state: RAGameState,
     naval: boolean,
+    structureType = naval ? 'SYRD' : 'POWR',
   ): Point | null {
     let best: Point | null = null;
     for (const pos of positions) {
-      if (this.canPlaceBuilding(pos.cx, pos.cy, state, naval)) {
+      if (this.canPlaceBuilding(pos.cx, pos.cy, state, naval, structureType)) {
         if (!best || pos.cx > best.cx) {
           best = pos;
         }
@@ -568,18 +604,12 @@ export class OracleStrategy {
     const powerCount = alliedStructures.filter((s) => s.t === 'POWR' || s.t === 'APWR').length;
     const procCount = alliedStructures.filter((s) => s.t === 'PROC').length;
     const weapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
-    return powerCount >= 2 && procCount >= 2 && weapCount >= 1;
+    return powerCount >= 2 && procCount >= 1 && weapCount >= 1;
   }
 
   private scg11eaCoastLinkReady(alliedStructures: RAStructure[]): boolean {
-    return alliedStructures.some((s) => {
-      if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return false;
-      const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
-      const right = s.cx + width - 1 + SCG11EA_BUILD_RADIUS;
-      const top = s.cy - SCG11EA_BUILD_RADIUS;
-      const bottom = s.cy + 1 + SCG11EA_BUILD_RADIUS;
-      return right >= 63 && bottom >= 84 && top <= 92;
-    });
+    return this.getScg11eaShipyardCandidates().some((pos) =>
+      this.scg11eaChainReachable(pos, alliedStructures, 'SYRD'));
   }
 
   private getScg11eaBootstrapCandidates(buildingType: string, alliedStructures: RAStructure[]): Point[] {
@@ -616,58 +646,86 @@ export class OracleStrategy {
       ];
     } else if (normalizedType === 'POWR' && powerCount === 1 && weapCount >= 1) {
       anchors = [
-        { cx: 25, cy: 98 }, { cx: 25, cy: 94 }, { cx: 28, cy: 98 },
+        { cx: 25, cy: 98 }, { cx: 25, cy: 92 }, { cx: 25, cy: 94 },
         { cx: 28, cy: 94 }, { cx: 22, cy: 98 }, { cx: 22, cy: 94 },
       ];
     }
 
     if (anchors.length === 0) return [];
 
-    const offsets = [
-      { cx: 0, cy: 0 },
-      { cx: 1, cy: 0 }, { cx: -1, cy: 0 },
-      { cx: 0, cy: 1 }, { cx: 0, cy: -1 },
-      { cx: 1, cy: 1 }, { cx: -1, cy: 1 },
-      { cx: 1, cy: -1 }, { cx: -1, cy: -1 },
-      { cx: 2, cy: 0 }, { cx: 0, cy: 2 }, { cx: 0, cy: -2 },
-    ];
     const seen = new Set<string>();
     const candidates: Point[] = [];
     for (const anchor of anchors) {
-      for (const offset of offsets) {
-        const candidate = { cx: anchor.cx + offset.cx, cy: anchor.cy + offset.cy };
-        if (candidate.cx < 0 || candidate.cx >= 128 || candidate.cy < 0 || candidate.cy >= 128) continue;
-        const key = `${candidate.cx},${candidate.cy}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        candidates.push(candidate);
-      }
+      if (anchor.cx < 0 || anchor.cx >= 128 || anchor.cy < 0 || anchor.cy >= 128) continue;
+      const key = `${anchor.cx},${anchor.cy}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(anchor);
     }
     return candidates;
   }
 
   private getScg11eaPowerChainCandidates(): Point[] {
-    const xs = [26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 59, 60];
+    const xs: number[] = [];
+    for (let cx = 28; cx <= 60; cx++) xs.push(cx);
     const candidates: Point[] = [];
     for (const cx of xs) {
-      candidates.push({ cx, cy: 90 }, { cx, cy: 88 }, { cx, cy: 86 });
+      candidates.push(
+        { cx, cy: 92 },
+        { cx, cy: 90 },
+        { cx, cy: 94 },
+        { cx, cy: 88 },
+        { cx, cy: 86 },
+      );
     }
     return candidates;
   }
 
-  private scg11eaChainReachable(pos: Point, alliedStructures: RAStructure[]): boolean {
+  private getPlacementCells(structureType: string, cx: number, cy: number): Point[] {
+    const [fw, fh] = STRUCTURE_SIZE[structureType] ?? [2, 2];
+    const cells: Point[] = [];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) {
+        cells.push({ cx: cx + dx, cy: cy + dy });
+      }
+    }
+    for (const bib of getBibCells(structureType, cx, cy)) {
+      cells.push({ cx: bib.cx, cy: bib.cy });
+    }
+    return cells;
+  }
+
+  private scg11eaChainFrontierX(alliedStructures: RAStructure[]): number {
+    let frontier = -1;
+    for (const s of alliedStructures) {
+      if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') continue;
+      const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
+      const top = s.cy;
+      const bottom = s.cy + 1;
+      if (bottom < 84 || top > 96) continue;
+      frontier = Math.max(frontier, s.cx + width - 1);
+    }
+    return frontier;
+  }
+
+  private scg11eaChainReachable(
+    pos: Point,
+    alliedStructures: RAStructure[],
+    structureType = 'POWR',
+  ): boolean {
+    const [fw, fh] = STRUCTURE_SIZE[structureType] ?? [2, 2];
     return alliedStructures.some((s) => {
       if (!s.ally || s.t === 'SYRD' || s.t === 'SPEN') return false;
-      const width = (s.t === 'WEAP' || s.t === 'FACT') ? 3 : 2;
-      const left = s.cx - SCG11EA_BUILD_RADIUS;
-      const right = s.cx + width - 1 + SCG11EA_BUILD_RADIUS;
-      const top = s.cy - SCG11EA_BUILD_RADIUS;
-      const bottom = s.cy + 1 + SCG11EA_BUILD_RADIUS;
-      const candidateLeft = pos.cx;
-      const candidateRight = pos.cx + 1;
-      const candidateTop = pos.cy;
-      const candidateBottom = pos.cy + 1;
-      return !(candidateRight < left || candidateLeft > right || candidateBottom < top || candidateTop > bottom);
+      const [sw, sh] = STRUCTURE_SIZE[s.t] ?? [2, 2];
+      const exL = s.cx - 2;
+      const exT = s.cy - 2;
+      const exR = s.cx + sw + 2;
+      const exB = s.cy + sh + 2;
+      const nL = pos.cx;
+      const nT = pos.cy;
+      const nR = pos.cx + fw;
+      const nB = pos.cy + fh;
+      return nL < exR && nR > exL && nT < exB && nB > exT;
     });
   }
 
@@ -1192,7 +1250,7 @@ export class OracleStrategy {
 
         if (uniqueCandidates.length > 0) {
           // Use placement validator to find the first valid cell (skip fog/terrain failures)
-          const validCell = this.findBestChainPosition(uniqueCandidates, state, true);
+          const validCell = this.findBestChainPosition(uniqueCandidates, state, true, 'SYRD');
           const cell = validCell ?? uniqueCandidates[this.shipyardPlacementAttempts % uniqueCandidates.length];
           commands.push({
             cmd: 'place',
@@ -1329,29 +1387,41 @@ export class OracleStrategy {
         // Find first offset that passes terrain/fog/occupancy validation
         let foundValid = false;
         if (scg11eaBootstrapCandidates.length > 0) {
-          const validBootstrapCell = this.findBestChainPosition(scg11eaBootstrapCandidates, state, false);
-          if (validBootstrapCell) {
-            placeCx = validBootstrapCell.cx;
-            placeCy = validBootstrapCell.cy;
-            foundValid = true;
+          let bootstrapTarget: Point | null = null;
+          for (let i = 0; i < scg11eaBootstrapCandidates.length; i++) {
+            const idx = (this.placementAttempts + i) % scg11eaBootstrapCandidates.length;
+            const candidate = scg11eaBootstrapCandidates[idx];
+            if (this.canPlaceBuilding(candidate.cx, candidate.cy, state, false, buildingProduction.t)) {
+              bootstrapTarget = candidate;
+              break;
+            }
           }
+          bootstrapTarget ??=
+            scg11eaBootstrapCandidates[this.placementAttempts % scg11eaBootstrapCandidates.length];
+          placeCx = bootstrapTarget.cx;
+          placeCy = bootstrapTarget.cy;
+          foundValid = true;
         } else if (scg11eaPowerChainCandidates.length > 0) {
           const reachableChain = scg11eaPowerChainCandidates.filter((pos) =>
             this.scg11eaChainReachable(pos, alliedStructures));
           if (reachableChain.length > 0) {
-            const validChain = reachableChain.filter((pos) =>
-              this.canPlaceBuilding(pos.cx, pos.cy, state, false));
+            const frontierX = this.scg11eaChainFrontierX(alliedStructures);
             const unoccupiedReachable = reachableChain.filter((pos) =>
               !this.scg11eaChainOccupied(pos, alliedStructures));
-            const chainTarget = validChain[validChain.length - 1] ??
-              unoccupiedReachable[unoccupiedReachable.length - 1] ??
+            const forwardReachable = unoccupiedReachable.filter((pos) =>
+              frontierX < 0 || pos.cx > frontierX);
+            const validChain = forwardReachable.filter((pos) =>
+              this.canPlaceBuilding(pos.cx, pos.cy, state, false, buildingProduction.t));
+            const chainTarget = validChain[0] ??
+              forwardReachable[0] ??
+              unoccupiedReachable[0] ??
               reachableChain[0];
             placeCx = chainTarget.cx;
             placeCy = chainTarget.cy;
             foundValid = true;
           }
         } else if (scg11eaShoreDefenseCandidates.length > 0) {
-          const validDefenseCell = this.findBestChainPosition(scg11eaShoreDefenseCandidates, state, false);
+          const validDefenseCell = this.findBestChainPosition(scg11eaShoreDefenseCandidates, state, false, buildingProduction.t);
           if (validDefenseCell) {
             placeCx = validDefenseCell.cx;
             placeCy = validDefenseCell.cy;
@@ -1364,7 +1434,7 @@ export class OracleStrategy {
             const key = `${pos.cx},${pos.cy}`;
             if (seenCandidates.has(key)) continue;
             seenCandidates.add(key);
-            if (this.canPlaceBuilding(pos.cx, pos.cy, state, false)) {
+            if (this.canPlaceBuilding(pos.cx, pos.cy, state, false, buildingProduction.t)) {
               placeCx = pos.cx;
               placeCy = pos.cy;
               foundValid = true;
@@ -1377,7 +1447,7 @@ export class OracleStrategy {
             const idx = (this.placementAttempts + i) % offsets.length;
             const cx = placeRef.cx + offsets[idx].cx;
             const cy = placeRef.cy + offsets[idx].cy;
-            if (this.canPlaceBuilding(cx, cy, state, false)) {
+            if (this.canPlaceBuilding(cx, cy, state, false, buildingProduction.t)) {
               placeCx = cx;
               placeCy = cy;
               foundValid = true;
@@ -1407,13 +1477,17 @@ export class OracleStrategy {
             scg11eaPowerChainCandidates.length > 0 ||
             scg11eaShoreDefenseCandidates.length > 0
           );
+        const scg11eaPlacementCells = scg11eaLandChainPlacement
+          ? this.getPlacementCells(buildingProduction.t, placeCx, placeCy)
+          : [];
+        const scg11eaPlacementCellSet = new Set(
+          scg11eaPlacementCells.map((cell) => `${cell.cx},${cell.cy}`),
+        );
         const scg11eaPlacementBlockers = scg11eaLandChainPlacement
           ? playerUnits.filter((u) =>
             !NAVAL_COMBAT_TYPES.has(u.t) &&
             !AIRCRAFT_TYPES.has(u.t) &&
-            u.t !== 'MCV' &&
-            u.cx >= placeCx - 1 && u.cx <= placeCx + 2 &&
-            u.cy >= placeCy - 1 && u.cy <= placeCy + 2)
+            scg11eaPlacementCellSet.has(`${u.cx},${u.cy}`))
           : [];
 
         if (scg11eaPlacementBlockers.length > 0) {

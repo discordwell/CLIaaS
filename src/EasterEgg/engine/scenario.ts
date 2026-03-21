@@ -1832,7 +1832,10 @@ function classifyOutdoorTerrain(
         // on peninsulas where shore cells blocked all exits.
         map.setTerrain(cx, cy, Terrain.BEACH);
       } else if (tmpl >= 59 && tmpl <= 96) {
-        // Water cliff edges — always water
+        // Water cliff edges — blanket WATER for now.
+        // TODO: C++ classifies per-icon via TEMPERAT.INI. Some icons within
+        // cliff templates are passable land (cliff tops). Need per-template
+        // icon classification to match C++ exactly.
         map.setTerrain(cx, cy, Terrain.WATER);
       } else if ((tmpl >= 112 && tmpl <= 130) || (tmpl >= 229 && tmpl <= 234)) {
         // River segments (112-130) and river crossings (229-234):
