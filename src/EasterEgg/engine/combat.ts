@@ -15,7 +15,7 @@ import {
   HOUSE_FACTION,
 } from './types';
 import { Entity } from './entity';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
@@ -446,8 +446,9 @@ export function fireWeaponAtStructure(
 ): void {
   const wh = (weapon.warhead ?? 'HE') as WarheadType;
   const houseBias = ctx.getFirepowerBias(attacker.house);
-  const whMult = getWarheadMult(wh, 'concrete', ctx.warheadOverrides);
-  const damage = modifyDamage(weapon.damage, wh, 'concrete', 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
+  const armor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
+  const whMult = getWarheadMult(wh, armor, ctx.warheadOverrides);
+  const damage = modifyDamage(weapon.damage, wh, armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
   const destroyed = structureDamage(ctx, s, damage);
   if (destroyed) attacker.creditKill();
   ctx.effects.push({
@@ -1022,10 +1023,11 @@ export function applySplashDamage(
       distCells = worldDist(center, { x: swx, y: swy });
     }
     if (distCells > splashRange) continue;
-    // Apply damage using concrete armor (all buildings use concrete armor)
+    // Apply damage using per-building armor from rules.ini (C++ bdata.cpp)
     const distPixels = distCells * CELL_SIZE;
-    const whMult = getWarheadMult(weapon.warhead, 'concrete', ctx.warheadOverrides);
-    const splashDmg = modifyDamage(weapon.damage, weapon.warhead, 'concrete', distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
+    const sArmor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
+    const whMult = getWarheadMult(weapon.warhead, sArmor, ctx.warheadOverrides);
+    const splashDmg = modifyDamage(weapon.damage, weapon.warhead, sArmor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
     if (splashDmg <= 0) continue;
     structureDamage(ctx, s, splashDmg);
   }

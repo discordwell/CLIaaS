@@ -610,6 +610,13 @@ export class Entity {
     if (!w2) return w1;
     if (!w1) return w2;
 
+    // C++ techno.cpp:1898-1941 What_Weapon_Should_I_Use — AG/AA projectile constraints
+    // If primary weapon has AG=no (isAntiGround===false, e.g. RedEye/AAMissile), it cannot
+    // fire at ground targets. Use secondary for ground targets.
+    const targetIsAircraft = !!target.stats.isAircraft;
+    if (w1.isAntiGround === false && !targetIsAircraft && w2) return w2;
+    if (w2.isAntiGround === false && !targetIsAircraft && w1) return w1;
+
     const w1InRange = dist <= w1.range;
     const w2InRange = dist <= w2.range;
     const w1Ready = this.attackCooldown <= 0 && w1InRange;

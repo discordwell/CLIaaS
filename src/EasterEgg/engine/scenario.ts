@@ -4,7 +4,7 @@
  */
 
 import {
-  type CellPos, type UnitStats, type WeaponStats,
+  type CellPos, type UnitStats, type WeaponStats, type ArmorType,
   CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
   House, Mission, UnitType, AnimState,
   CIVILIAN_UNIT_TYPES,
@@ -1133,6 +1133,7 @@ export interface MapStructure {
   cy: number;
   hp: number;         // current HP (0-256 scale)
   maxHp: number;      // max HP (256 = full)
+  armor?: ArmorType;   // C++ bdata.cpp Armor= from rules.ini (wood/light/heavy per building)
   alive: boolean;     // whether structure is still standing
   rubble: boolean;    // destroyed structure leaves rubble
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
@@ -1163,6 +1164,45 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   AGUN:  { damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isAntiAir: true },  // ZSU-23
   FTUR:  { damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },            // FireballLauncher
   QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant (TeslaZap)
+};
+
+/** Per-building armor types from rules.ini (C++ bdata.cpp constructors parse Armor= at startup).
+ *  No building uses 'concrete' armor — the distribution is wood (19), light (3), heavy (8).
+ *  Default fallback is 'wood' for unknown building types. */
+export const STRUCTURE_ARMOR: Record<string, ArmorType> = {
+  // wood armor (19 buildings)
+  POWR: 'wood',   // rules.ini: Armor=wood
+  APWR: 'wood',   // rules.ini: Armor=wood
+  PROC: 'wood',   // rules.ini: Armor=wood
+  SILO: 'wood',   // rules.ini: Armor=wood
+  TENT: 'wood',   // rules.ini: Armor=wood
+  BARR: 'wood',   // rules.ini: Armor=wood
+  KENN: 'wood',   // rules.ini: Armor=wood
+  DOME: 'wood',   // rules.ini: Armor=wood
+  ATEK: 'wood',   // rules.ini: Armor=wood
+  STEK: 'wood',   // rules.ini: Armor=wood
+  HPAD: 'wood',   // rules.ini: Armor=wood
+  PBOX: 'wood',   // rules.ini: Armor=wood
+  HBOX: 'wood',   // rules.ini: Armor=wood
+  GAP:  'wood',   // rules.ini: Armor=wood
+  PDOX: 'wood',   // rules.ini: Armor=wood
+  IRON: 'wood',   // rules.ini: Armor=wood
+  HOSP: 'wood',   // rules.ini: Armor=wood
+  BIO:  'wood',   // rules.ini: Armor=wood
+  FIX:  'wood',   // rules.ini: Armor=wood
+  // light armor (3 buildings)
+  WEAP: 'light',  // rules.ini: Armor=light
+  SYRD: 'light',  // rules.ini: Armor=light
+  SPEN: 'light',  // rules.ini: Armor=light
+  // heavy armor (8 buildings)
+  FACT: 'heavy',  // rules.ini: Armor=heavy
+  TSLA: 'heavy',  // rules.ini: Armor=heavy
+  GUN:  'heavy',  // rules.ini: Armor=heavy
+  AGUN: 'heavy',  // rules.ini: Armor=heavy
+  SAM:  'heavy',  // rules.ini: Armor=heavy
+  MSLO: 'heavy',  // rules.ini: Armor=heavy
+  AFLD: 'heavy',  // rules.ini: Armor=heavy
+  FTUR: 'heavy',  // rules.ini: Armor=heavy
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)
@@ -1458,6 +1498,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       cy: pos.cy,
       hp: Math.round((s.hp / 256) * maxHp),
       maxHp,
+      armor: STRUCTURE_ARMOR[s.type] ?? 'wood',
       alive: s.hp > 0,
       rubble: false,
       weapon: STRUCTURE_WEAPONS[s.type],

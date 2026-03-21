@@ -32,6 +32,7 @@ import {
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
+import { STRUCTURE_ARMOR } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
@@ -226,9 +227,12 @@ describe('damageEntity behavior (via Entity.takeDamage)', () => {
 // =========================================================================
 describe('damageStructure behavior', () => {
   function makeStructure(overrides: Partial<MapStructure> = {}): MapStructure {
+    const type = overrides.type ?? 'POWR';
     return {
-      type: 'POWR', image: 'powr', house: House.USSR,
-      cx: 5, cy: 5, hp: 256, maxHp: 256, alive: true, rubble: false,
+      type, image: 'powr', house: House.USSR,
+      cx: 5, cy: 5, hp: 256, maxHp: 256,
+      armor: STRUCTURE_ARMOR[type] ?? 'wood',
+      alive: true, rubble: false,
       attackCooldown: 0, ammo: -1, maxAmmo: -1,
       ...overrides,
     };
@@ -285,17 +289,20 @@ describe('damageStructure behavior', () => {
     expect(nearby.hp).toBeLessThan(hpBefore);
   });
 
-  it('fireWeaponAtStructure uses concrete armor for warhead mult', () => {
+  it('fireWeaponAtStructure uses per-building armor for warhead mult (POWR=wood)', () => {
     const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
-    const structure = makeStructure();
+    const structure = makeStructure(); // POWR, armor=wood
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker);
     const weapon = WEAPON_STATS['90mm']; // AP warhead, 30 damage
     const hpBefore = structure.hp;
     fireWeaponAtStructure(ctx, attacker, structure, weapon);
-    // AP vs concrete = 0.5, houseBias=1.0, spreadFactor=1
-    // damage = modifyDamage(30, 'AP', 'concrete', 0, 1.0, 0.5, 1) = round(30*0.5) = 15
-    expect(structure.hp).toBe(hpBefore - 15);
+    // AP vs wood = 0.75, houseBias=1.0, spreadFactor=1
+    // damage = modifyDamage(30, 'AP', 'wood', 0, 1.0, 0.75, 1) = round(30*0.75) = 23
+    const armor = STRUCTURE_ARMOR['POWR'] ?? 'wood';
+    const whMult = getWarheadMult('AP', armor, {});
+    const expected = modifyDamage(30, 'AP', armor, 0, 1.0, whMult, 1);
+    expect(structure.hp).toBe(hpBefore - expected);
   });
 });
 

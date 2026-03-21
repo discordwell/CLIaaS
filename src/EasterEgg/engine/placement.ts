@@ -9,7 +9,7 @@ import {
   type House, UnitType, Mission,
 } from './types';
 import { getEffectiveCost } from './production';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, getBibCells } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, getBibCells } from './scenario';
 import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type Effect } from './renderer';
@@ -91,6 +91,7 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     cx, cy,
     hp: maxHp,
     maxHp,
+    armor: STRUCTURE_ARMOR[item.type] ?? 'wood',
     alive: true,
     rubble: false,
     weapon: STRUCTURE_WEAPONS[item.type],
@@ -176,6 +177,7 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     cx, cy,
     hp: factHp,
     maxHp: factMaxHp,
+    armor: STRUCTURE_ARMOR['FACT'] ?? 'heavy',
     alive: true,
     rubble: false,
     attackCooldown: 0,

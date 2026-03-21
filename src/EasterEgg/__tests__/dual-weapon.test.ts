@@ -112,15 +112,14 @@ describe('Weapon selection based on target armor effectiveness', () => {
     expect(selected).toBe(mammoth.weapon2); // MammothTusk (HE is better vs no armor)
   });
 
-  it('E3 Rocket Soldier selects RedEye (primary) when more effective vs heavy armor', () => {
+  it('E3 Rocket Soldier selects Dragon (secondary) vs ground target — RedEye is AA-only', () => {
     const rocket = makeEntity(UnitType.I_E3, House.Spain, 100, 100);
     const heavyTarget = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
 
-    // RedEye (primary): AP warhead, 50 damage, vs heavy: 1.0 → eff = 50
-    // Dragon (secondary): AP warhead, 35 damage, vs heavy: 1.0 → eff = 35
-    // RedEye has higher damage with same warhead — should be preferred
+    // C++ techno.cpp:1898-1941 What_Weapon_Should_I_Use — RedEye has AG=no (isAntiGround=false)
+    // so it cannot fire at ground targets. Dragon is the only valid weapon vs ground.
     const selected = rocket.selectWeapon(heavyTarget, getWarheadMult);
-    expect(selected).toBe(rocket.weapon); // RedEye (primary, more raw damage)
+    expect(selected).toBe(rocket.weapon2); // Dragon (secondary, only valid vs ground)
   });
 });
 
@@ -267,13 +266,14 @@ describe('inRange with dual weapons', () => {
 });
 
 describe('selectWeapon respects range', () => {
-  it('selects primary when target is only in primary weapon range', () => {
+  it('selects Dragon vs ground target even when only RedEye is in range (AG constraint)', () => {
     const rocket = makeEntity(UnitType.I_E3, House.Spain, 100, 100);
     // Target at 6 cells: beyond Dragon/secondary (5.0) but within RedEye/primary (7.5)
     const target = makeEntity(UnitType.ANT1, House.USSR, 100 + 24 * 6, 100);
 
     const selected = rocket.selectWeapon(target, getWarheadMult);
-    expect(selected).toBe(rocket.weapon); // Only RedEye (primary) can reach
+    // C++ AG constraint: RedEye isAntiGround=false, cannot fire at ground → Dragon returned
+    expect(selected).toBe(rocket.weapon2); // Dragon (AG constraint overrides range)
   });
 
   it('selects primary when target is only in primary weapon range (secondary on cooldown or out of range)', () => {

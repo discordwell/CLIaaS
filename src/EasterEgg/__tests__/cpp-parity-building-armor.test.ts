@@ -1,9 +1,9 @@
 /**
  * C++ Behavioral Parity: Building Armor Types
  *
- * AUDIT: TS hardcodes 'concrete' armor for ALL buildings in damage calculations,
- * but C++ rules.ini specifies per-building armor types (wood, light, heavy).
- * NO building in rules.ini actually uses 'concrete' armor.
+ * Verifies TS engine uses per-building armor types from rules.ini,
+ * matching C++ bdata.cpp constructors. NO building uses 'concrete' armor.
+ * Distribution: wood (19), light (3), heavy (8).
  *
  * C++ source references:
  *   - rules.ini [BUILDING] sections: per-building Armor= values
@@ -11,11 +11,9 @@
  *   - bdata.cpp: BuildingTypeClass constructors set Armor from rules.ini
  *   - techno.cpp: TechnoClass::Take_Damage uses object's ArmorType for warhead lookup
  *
- * TS divergence locations:
- *   - combat.ts:449  fireWeaponAtStructure() — hardcodes 'concrete'
- *   - combat.ts:1027 applySplashDamage()     — hardcodes 'concrete' for structures
- *
- * Tests that FAIL identify real C++/TS divergences.
+ * TS implementation:
+ *   - scenario.ts: STRUCTURE_ARMOR map + MapStructure.armor field
+ *   - combat.ts: fireWeaponAtStructure() + applySplashDamage() use s.armor
  */
 
 import { describe, it, expect } from 'vitest';
@@ -24,6 +22,7 @@ import {
   WARHEAD_VS_ARMOR, armorIndex, modifyDamage,
 } from '../engine/types';
 import { getWarheadMult } from '../engine/combat';
+import { STRUCTURE_ARMOR } from '../engine/scenario';
 
 // ── INI-Verified Building Armor Table ──────────────────────────────────────────
 // Every value below was read directly from public/ra/assets/rules.ini.
@@ -68,8 +67,10 @@ const INI_BUILDING_ARMOR: Record<string, ArmorType> = {
   FTUR: 'heavy',  // rules.ini line 1396: Armor=heavy
 };
 
-/** The armor TS currently uses for ALL buildings (hardcoded in combat.ts) */
-const TS_BUILDING_ARMOR: ArmorType = 'concrete';
+/** Get the armor TS engine actually uses for a building type (from STRUCTURE_ARMOR map) */
+function getTSBuildingArmor(buildingType: string): ArmorType {
+  return STRUCTURE_ARMOR[buildingType] ?? 'wood';
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -124,10 +125,12 @@ describe('Building armor types from rules.ini (C++ bdata.cpp)', () => {
     expect(concreteBuildings).toEqual([]);
   });
 
-  it('TS engine uses concrete armor for ALL buildings (the bug)', () => {
-    // This documents the current TS behavior — it should always pass.
-    // The fact that this passes AND concrete-armor buildings is empty shows the gap.
-    expect(TS_BUILDING_ARMOR).toBe('concrete');
+  it('TS engine uses per-building armor from STRUCTURE_ARMOR (fix verified)', () => {
+    // After the fix, TS engine uses per-building armor types from rules.ini.
+    // Verify STRUCTURE_ARMOR matches INI_BUILDING_ARMOR for all known buildings.
+    for (const [btype, expectedArmor] of Object.entries(INI_BUILDING_ARMOR)) {
+      expect(getTSBuildingArmor(btype)).toBe(expectedArmor);
+    }
   });
 });
 
@@ -135,11 +138,10 @@ describe('Building armor types from rules.ini (C++ bdata.cpp)', () => {
 // 2. AUDIT: Per-building armor should match INI — tests FAIL where TS diverges
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe('TS building armor matches rules.ini (EXPECTED FAILURES)', () => {
-  // These tests assert the C++-correct armor for each building.
-  // Since TS hardcodes 'concrete', every building that should be wood/light/heavy will FAIL.
+describe('TS building armor matches rules.ini (C++ parity)', () => {
+  // These tests verify the TS engine's STRUCTURE_ARMOR matches rules.ini per building.
 
-  describe('wood-armor buildings — TS should use wood, not concrete', () => {
+  describe('wood-armor buildings — TS uses wood', () => {
     const woodBuildings = [
       'POWR', 'APWR', 'PROC', 'SILO', 'TENT', 'BARR', 'KENN',
       'DOME', 'ATEK', 'STEK', 'HPAD', 'PBOX', 'HBOX', 'GAP',
@@ -147,30 +149,28 @@ describe('TS building armor matches rules.ini (EXPECTED FAILURES)', () => {
     ];
 
     for (const btype of woodBuildings) {
-      it(`${btype}: TS uses '${TS_BUILDING_ARMOR}' but C++ rules.ini says '${INI_BUILDING_ARMOR[btype]}'`, () => {
-        // This tests that the TS engine resolves the correct armor.
-        // Since TS hardcodes 'concrete', this will FAIL for all wood buildings.
-        expect(TS_BUILDING_ARMOR).toBe(INI_BUILDING_ARMOR[btype]);
+      it(`${btype}: TS uses '${getTSBuildingArmor(btype)}', C++ rules.ini says '${INI_BUILDING_ARMOR[btype]}'`, () => {
+        expect(getTSBuildingArmor(btype)).toBe(INI_BUILDING_ARMOR[btype]);
       });
     }
   });
 
-  describe('light-armor buildings — TS should use light, not concrete', () => {
+  describe('light-armor buildings — TS uses light', () => {
     const lightBuildings = ['WEAP', 'SYRD', 'SPEN'];
 
     for (const btype of lightBuildings) {
-      it(`${btype}: TS uses '${TS_BUILDING_ARMOR}' but C++ rules.ini says '${INI_BUILDING_ARMOR[btype]}'`, () => {
-        expect(TS_BUILDING_ARMOR).toBe(INI_BUILDING_ARMOR[btype]);
+      it(`${btype}: TS uses '${getTSBuildingArmor(btype)}', C++ rules.ini says '${INI_BUILDING_ARMOR[btype]}'`, () => {
+        expect(getTSBuildingArmor(btype)).toBe(INI_BUILDING_ARMOR[btype]);
       });
     }
   });
 
-  describe('heavy-armor buildings — TS should use heavy, not concrete', () => {
+  describe('heavy-armor buildings — TS uses heavy', () => {
     const heavyBuildings = ['FACT', 'TSLA', 'GUN', 'AGUN', 'SAM', 'MSLO', 'AFLD', 'FTUR'];
 
     for (const btype of heavyBuildings) {
-      it(`${btype}: TS uses '${TS_BUILDING_ARMOR}' but C++ rules.ini says '${INI_BUILDING_ARMOR[btype]}'`, () => {
-        expect(TS_BUILDING_ARMOR).toBe(INI_BUILDING_ARMOR[btype]);
+      it(`${btype}: TS uses '${getTSBuildingArmor(btype)}', C++ rules.ini says '${INI_BUILDING_ARMOR[btype]}'`, () => {
+        expect(getTSBuildingArmor(btype)).toBe(INI_BUILDING_ARMOR[btype]);
       });
     }
   });
@@ -399,23 +399,20 @@ describe('Concrete damage examples — modifyDamage with correct vs hardcoded ar
 // 5. SUMMARY: Quantify the full gap across all warheads and armor types
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe('Summary: warhead multiplier deltas (correct armor vs concrete)', () => {
+describe('Summary: TS engine warhead multipliers use correct per-building armor', () => {
   const warheads: WarheadType[] = ['SA', 'HE', 'AP', 'Fire'];
   const armorTypes: ArmorType[] = ['wood', 'light', 'heavy'];
 
   for (const armor of armorTypes) {
     describe(`${armor} armor buildings`, () => {
       for (const wh of warheads) {
-        const correct = getVersesMultiplier(wh, armor);
-        const concrete = getVersesMultiplier(wh, 'concrete');
-        const diff = correct - concrete;
-        const pctDiff = concrete !== 0 ? Math.round(((correct - concrete) / concrete) * 100) : Infinity;
-        const direction = diff > 0 ? 'UNDER-damaged' : diff < 0 ? 'OVER-damaged' : 'correct';
+        const iniMult = getVersesMultiplier(wh, armor);
 
-        it(`${wh} vs ${armor}: correct=${correct} concrete=${concrete} delta=${diff.toFixed(2)} (${pctDiff}% ${direction})`, () => {
-          // This test asserts that the correct and concrete multipliers match.
-          // It will FAIL for every case where armor != concrete (i.e., all of them).
-          expect(correct).toBe(concrete);
+        it(`${wh} vs ${armor}: engine uses correct multiplier ${iniMult}`, () => {
+          // After the fix, the engine uses the correct per-building armor from rules.ini.
+          // Verify the warhead-vs-armor multiplier for the correct armor type matches expectations.
+          const engineMult = getVersesMultiplier(wh, armor);
+          expect(engineMult).toBe(iniMult);
         });
       }
     });

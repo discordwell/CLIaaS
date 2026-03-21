@@ -31,7 +31,7 @@ import {
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
-import { STRUCTURE_SIZE } from '../engine/scenario';
+import { STRUCTURE_SIZE, STRUCTURE_ARMOR } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
@@ -41,7 +41,8 @@ beforeEach(() => resetEntityIds());
 function makeStructure(type: string, cx: number, cy: number, hp: number, house = House.USSR): MapStructure {
   return {
     type, image: type.toLowerCase(), house,
-    cx, cy, hp, maxHp: hp, alive: true, rubble: false,
+    cx, cy, hp, maxHp: hp, armor: STRUCTURE_ARMOR[type] ?? 'wood',
+    alive: true, rubble: false,
     attackCooldown: 0, ammo: -1, maxAmmo: -1,
   };
 }
@@ -242,37 +243,40 @@ describe('Multiple structures in radius all take appropriate damage (combat.cpp:
 
 describe('Structure splash damage uses warhead modifiers (combat.cpp:98-101)', () => {
 
-  it('HE warhead applies its concrete armor multiplier', () => {
+  it('HE warhead applies per-building armor multiplier (SILO=wood)', () => {
     const structure = makeStructure('SILO', 10, 10, 500);
     const ctx = makeCombatCtx([structure]);
     const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
     applySplashDamage(ctx, center, { damage: 100, warhead: 'HE', splash: 1 }, -1, House.Spain);
     const actualDmg = 500 - structure.hp;
-    // Compute expected damage at distance=0 with concrete armor
-    const whMult = getWarheadMult('HE', 'concrete', {});
-    const expected = modifyDamage(100, 'HE', 'concrete', 0, 1.0, whMult, getWarheadMeta('HE', {}).spreadFactor);
+    // SILO has wood armor per rules.ini (C++ bdata.cpp)
+    const armor = STRUCTURE_ARMOR['SILO'] ?? 'wood';
+    const whMult = getWarheadMult('HE', armor, {});
+    const expected = modifyDamage(100, 'HE', armor, 0, 1.0, whMult, getWarheadMeta('HE', {}).spreadFactor);
     expect(actualDmg).toBe(expected);
   });
 
-  it('AP warhead applies its concrete armor multiplier', () => {
+  it('AP warhead applies per-building armor multiplier (SILO=wood)', () => {
     const structure = makeStructure('SILO', 10, 10, 500);
     const ctx = makeCombatCtx([structure]);
     const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
     applySplashDamage(ctx, center, { damage: 100, warhead: 'AP', splash: 1 }, -1, House.Spain);
     const actualDmg = 500 - structure.hp;
-    const whMult = getWarheadMult('AP', 'concrete', {});
-    const expected = modifyDamage(100, 'AP', 'concrete', 0, 1.0, whMult, getWarheadMeta('AP', {}).spreadFactor);
+    const armor = STRUCTURE_ARMOR['SILO'] ?? 'wood';
+    const whMult = getWarheadMult('AP', armor, {});
+    const expected = modifyDamage(100, 'AP', armor, 0, 1.0, whMult, getWarheadMeta('AP', {}).spreadFactor);
     expect(actualDmg).toBe(expected);
   });
 
-  it('SA warhead applies its concrete armor multiplier', () => {
+  it('SA warhead applies per-building armor multiplier (SILO=wood)', () => {
     const structure = makeStructure('SILO', 10, 10, 500);
     const ctx = makeCombatCtx([structure]);
     const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
     applySplashDamage(ctx, center, { damage: 100, warhead: 'SA', splash: 1 }, -1, House.Spain);
     const actualDmg = 500 - structure.hp;
-    const whMult = getWarheadMult('SA', 'concrete', {});
-    const expected = modifyDamage(100, 'SA', 'concrete', 0, 1.0, whMult, getWarheadMeta('SA', {}).spreadFactor);
+    const armor = STRUCTURE_ARMOR['SILO'] ?? 'wood';
+    const whMult = getWarheadMult('SA', armor, {});
+    const expected = modifyDamage(100, 'SA', armor, 0, 1.0, whMult, getWarheadMeta('SA', {}).spreadFactor);
     expect(actualDmg).toBe(expected);
   });
 
@@ -286,9 +290,10 @@ describe('Structure splash damage uses warhead modifiers (combat.cpp:98-101)', (
     applySplashDamage(ctxSA, center, { damage: 100, warhead: 'SA', splash: 1 }, -1, House.Spain);
     const heDmg = 500 - sHE.hp;
     const saDmg = 500 - sSA.hp;
-    // HE and SA have different multipliers vs concrete, so damage should differ
-    const heMult = getWarheadMult('HE', 'concrete', {});
-    const saMult = getWarheadMult('SA', 'concrete', {});
+    // HE and SA have different multipliers vs wood armor (SILO), so damage should differ
+    const armor = STRUCTURE_ARMOR['SILO'] ?? 'wood';
+    const heMult = getWarheadMult('HE', armor, {});
+    const saMult = getWarheadMult('SA', armor, {});
     if (heMult !== saMult) {
       expect(heDmg).not.toBe(saDmg);
     }

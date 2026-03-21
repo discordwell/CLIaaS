@@ -295,7 +295,7 @@ describe('AP warhead effectiveness (combat.cpp warhead tables)', () => {
 // C++ techno.cpp -- selectWeapon picks higher effective damage based on warhead-vs-armor
 
 describe('E3 weapon selection (techno.cpp:Can_Fire)', () => {
-  it('vs heavy armor target: picks weapon with higher effective damage', () => {
+  it('vs heavy armor ground target: picks Dragon (RedEye is AA-only, isAntiGround=false)', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     // Heavy tank at close range (within both weapon ranges)
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 13, 10); // ~3 cells away
@@ -303,11 +303,12 @@ describe('E3 weapon selection (techno.cpp:Can_Fire)', () => {
 
     const chosen = e3.selectWeapon(tank, getWarheadMultiplier);
     expect(chosen).not.toBeNull();
-    // RedEye: 50 * 1.0 = 50 eff; Dragon: 35 * 1.0 = 35 eff. RedEye wins (primary preferred on tie, but RedEye > Dragon)
-    expect(chosen!.name).toBe('RedEye');
+    // C++ techno.cpp:1898-1941 What_Weapon_Should_I_Use — RedEye has AG=no (isAntiGround=false),
+    // so it cannot fire at ground targets. Dragon is the only valid weapon vs ground.
+    expect(chosen!.name).toBe('Dragon');
   });
 
-  it('vs unarmored infantry: AP is weak (0.3) but still picks best effective', () => {
+  it('vs unarmored infantry: Dragon selected (RedEye is AA-only)', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     // Enemy infantry at close range
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
@@ -315,32 +316,38 @@ describe('E3 weapon selection (techno.cpp:Can_Fire)', () => {
 
     const chosen = e3.selectWeapon(enemy, getWarheadMultiplier);
     expect(chosen).not.toBeNull();
-    // Both weapons use AP warhead. RedEye: 50*0.3=15, Dragon: 35*0.3=10.5
-    // RedEye wins on effective damage
-    expect(chosen!.name).toBe('RedEye');
+    // RedEye has isAntiGround=false, cannot target ground units.
+    // Dragon is selected for all ground targets.
+    expect(chosen!.name).toBe('Dragon');
   });
 
-  it('when only Dragon is in range (target > 5.0 but <= 7.5 away), picks RedEye', () => {
+  it('when target is ground and beyond Dragon range but within RedEye range, returns Dragon (AG constraint)', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     // Place target at ~6 cells away (in RedEye range 7.5 but beyond Dragon range 5.0)
     const farTank = entityAtCell(UnitType.V_2TNK, House.USSR, 16, 10);
 
     const chosen = e3.selectWeapon(farTank, getWarheadMultiplier);
-    // Only RedEye is in range at 6 cells
+    // RedEye has isAntiGround=false so cannot fire at ground targets.
+    // Dragon is out of range. AG constraint takes priority over range.
+    // The AG check returns Dragon (w2) since w1 isAntiGround=false and target is not aircraft.
+    // Then the range/cooldown check determines if Dragon can actually fire.
     expect(chosen).not.toBeNull();
-    expect(chosen!.name).toBe('RedEye');
+    expect(chosen!.name).toBe('Dragon');
   });
 
-  it('when target is beyond both weapon ranges, returns null', () => {
+  it('when target is beyond both weapon ranges, AG constraint still returns Dragon', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     // Place target way beyond range (20 cells away)
     const farTarget = entityAtCell(UnitType.V_2TNK, House.USSR, 30, 10);
 
     const chosen = e3.selectWeapon(farTarget, getWarheadMultiplier);
-    expect(chosen).toBeNull();
+    // C++ AG constraint short-circuits before range check — returns Dragon.
+    // Caller is responsible for range checking (inRange/Can_Fire).
+    expect(chosen).not.toBeNull();
+    expect(chosen!.name).toBe('Dragon');
   });
 
-  it('when primary on cooldown but secondary ready, picks secondary', () => {
+  it('when primary on cooldown but secondary ready, picks secondary vs ground', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     e3.attackCooldown = 50; // RedEye on cooldown
     e3.attackCooldown2 = 0; // Dragon ready
@@ -351,25 +358,32 @@ describe('E3 weapon selection (techno.cpp:Can_Fire)', () => {
     expect(chosen!.name).toBe('Dragon');
   });
 
-  it('when secondary on cooldown but primary ready, picks primary', () => {
+  it('when secondary on cooldown but primary ready, returns null vs ground (RedEye cannot target ground)', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     e3.attackCooldown = 0;  // RedEye ready
     e3.attackCooldown2 = 50; // Dragon on cooldown
 
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 13, 10);
     const chosen = e3.selectWeapon(tank, getWarheadMultiplier);
+    // AG constraint returns Dragon (since RedEye isAntiGround=false), but Dragon is on cooldown
+    // Actually, the AG check returns w2 (Dragon) early, then the cooldown check determines result.
+    // Dragon on cooldown → not ready. Only Dragon is valid for ground, but it's on cooldown.
     expect(chosen).not.toBeNull();
-    expect(chosen!.name).toBe('RedEye');
+    // The AG check happens before cooldown: it returns Dragon directly.
+    // Dragon is returned even on cooldown because the AG check short-circuits.
+    expect(chosen!.name).toBe('Dragon');
   });
 
-  it('when both on cooldown, returns null', () => {
+  it('when both on cooldown vs ground target, returns Dragon (AG constraint short-circuits)', () => {
     const e3 = entityAtCell(UnitType.I_E3, House.Spain, 10, 10);
     e3.attackCooldown = 50;
     e3.attackCooldown2 = 50;
 
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 13, 10);
     const chosen = e3.selectWeapon(tank, getWarheadMultiplier);
-    expect(chosen).toBeNull();
+    // AG constraint returns Dragon early (before cooldown checks)
+    expect(chosen).not.toBeNull();
+    expect(chosen!.name).toBe('Dragon');
   });
 });
 

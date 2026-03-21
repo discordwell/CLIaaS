@@ -15,7 +15,7 @@ import {
 import { Entity } from './entity';
 import {
   type MapStructure, type TeamType,
-  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
+  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_ARMOR, getBibCells,
   applyScenarioOverrides,
 } from './scenario';
 import { type GameMap, Terrain } from './map';
@@ -814,6 +814,7 @@ export function spawnAIStructure(ctx: AIContext, type: string, house: House, cx:
     cy,
     hp: maxHp,
     maxHp,
+    armor: STRUCTURE_ARMOR[type] ?? 'wood',
     alive: true,
     rubble: false,
     weapon: STRUCTURE_WEAPONS[type],
