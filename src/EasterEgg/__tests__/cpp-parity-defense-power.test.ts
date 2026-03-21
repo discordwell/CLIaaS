@@ -195,8 +195,8 @@ describe('STRUCTURE_POWERED set membership (C++ rules.ini Powered= flag)', () =>
     expect(STRUCTURE_POWERED.has('TSLA')).toBe(true);
   });
 
-  it('SAM is powered (C++ rules.ini Powered=yes)', () => {
-    expect(STRUCTURE_POWERED.has('SAM')).toBe(true);
+  it('SAM is NOT powered (C++ rules.ini does not set Powered=yes for SAM)', () => {
+    expect(STRUCTURE_POWERED.has('SAM')).toBe(false);
   });
 
   it('GAP is powered (C++ rules.ini Powered=yes)', () => {
@@ -211,8 +211,8 @@ describe('STRUCTURE_POWERED set membership (C++ rules.ini Powered= flag)', () =>
     expect(STRUCTURE_POWERED.has('IRON')).toBe(true);
   });
 
-  it('MSLO is powered (C++ rules.ini Powered=yes)', () => {
-    expect(STRUCTURE_POWERED.has('MSLO')).toBe(true);
+  it('MSLO is NOT powered (C++ rules.ini does not set Powered=yes for MSLO)', () => {
+    expect(STRUCTURE_POWERED.has('MSLO')).toBe(false);
   });
 
   // PARITY GAP: C++ does NOT have GUN (Turret) as Powered=yes
@@ -293,9 +293,8 @@ describe('TSLA does not fire during power deficit (building.cpp:2853)', () => {
   });
 });
 
-describe('SAM does not fire during power deficit (building.cpp:3619)', () => {
-  // C++ building.cpp:3619: if ((Class->IsPowered && House->Power_Fraction() < 1) || IsJammed) return 1;
-  // SAM has Powered=yes in rules.ini. SAM only targets aircraft.
+describe('SAM fires regardless of power state (not in STRUCTURE_POWERED)', () => {
+  // C++ rules.ini: SAM does NOT have Powered=yes. SAM fires regardless of power state.
 
   it('fires at airborne aircraft when power is sufficient', () => {
     const sam = makeStructure('SAM', 10, 10);
@@ -307,15 +306,14 @@ describe('SAM does not fire during power deficit (building.cpp:3619)', () => {
     expect(aircraft.hp).toBeLessThan(aircraft.maxHp);
   });
 
-  it('does NOT fire at aircraft during power deficit', () => {
+  it('fires at aircraft even during power deficit (SAM not power-dependent)', () => {
     const sam = makeStructure('SAM', 10, 10);
     sam.turretDir = 2;
     sam.desiredTurretDir = 2;
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
-    const hpBefore = aircraft.hp;
     const ctx = makeCombatCtx([sam], [aircraft], { powerProduced: 50, powerConsumed: 200 });
     updateStructureCombat(ctx);
-    expect(aircraft.hp).toBe(hpBefore);
+    expect(aircraft.hp).toBeLessThan(aircraft.maxHp);
   });
 });
 

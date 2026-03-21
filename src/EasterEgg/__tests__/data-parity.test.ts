@@ -1050,8 +1050,8 @@ describe('SUPERWEAPON_DEFS parity', () => {
     expect(IRON_CURTAIN_DURATION).toBe(675);
   });
 
-  it('NUKE_DAMAGE = 200 (C++ building.cpp:4191)', () => {
-    expect(NUKE_DAMAGE).toBe(200);
+  it('NUKE_DAMAGE = 1000 (C++ rules.ini AtomDamage=1000)', () => {
+    expect(NUKE_DAMAGE).toBe(1000);
   });
 
   it('NUKE_BLAST_CELLS = 10', () => {
@@ -1229,13 +1229,13 @@ describe('TERRAIN_SPEED parity', () => {
 
   // Full array assertions: [Foot, Track, Wheel, Winged, Float]
   const expected: Record<string, [number, number, number, number, number]> = {
-    Clear:  [0.90, 0.80, 0.60, 1.0, 0.0],
+    Clear:  [0.90, 0.80, 0.70, 1.0, 0.0],
     Rough:  [0.80, 0.70, 0.40, 1.0, 0.0],
     Road:   [1.00, 1.00, 1.00, 1.0, 0.0],
     Water:  [0.00, 0.00, 0.00, 1.0, 1.0],
     Rock:   [0.00, 0.00, 0.00, 1.0, 0.0],
     Wall:   [0.00, 0.00, 0.00, 1.0, 0.0],
-    Ore:    [0.90, 0.70, 0.50, 1.0, 0.0],
+    Ore:    [0.90, 0.70, 0.60, 1.0, 0.0],
     Beach:  [0.80, 0.70, 0.40, 1.0, 0.0],
     River:  [0.00, 0.00, 0.00, 1.0, 0.0],
   };

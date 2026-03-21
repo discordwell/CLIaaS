@@ -110,8 +110,8 @@ describe('MGG stats verification (udata.cpp / rules.ini)', () => {
     expect(stats.isInfantry).toBe(false);
   });
 
-  it('crusher is true (wheeled support vehicle)', () => {
-    expect(stats.crusher).toBe(true);
+  it('crusher is falsy (no Tracked=yes in rules.ini for MGG)', () => {
+    expect(stats.crusher).toBeFalsy();
   });
 
   it('ROT is 5 (rotation rate)', () => {
@@ -234,8 +234,8 @@ describe('MGG vs MRJ sibling comparison (udata.cpp)', () => {
     expect(mrjStats.primaryWeapon).toBeNull();
   });
 
-  it('both are crushers', () => {
-    expect(mggStats.crusher).toBe(true);
+  it('MRJ is crusher, MGG is not (no Tracked=yes in rules.ini for MGG)', () => {
+    expect(mggStats.crusher).toBeFalsy();
     expect(mrjStats.crusher).toBe(true);
   });
 
@@ -256,57 +256,18 @@ describe('MGG vs MRJ sibling comparison (udata.cpp)', () => {
 // C++ drive.cpp -- when a Crusher vehicle enters a cell with Crushable infantry,
 // the infantry dies instantly. Only crusher vehicles crush; only crushable targets die.
 
-describe('MGG crusher (drive.cpp:Ok_To_Move)', () => {
-  it('crushes enemy infantry on same cell', () => {
+describe('MGG is NOT a crusher (no Tracked=yes in rules.ini)', () => {
+  it('MGG does NOT have crusher flag', () => {
+    expect(UNIT_STATS.MGG.crusher).toBeFalsy();
+  });
+
+  it('does NOT crush enemy infantry on same cell', () => {
     const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const ctx = makeCombatCtx([mgg, infantry]);
     checkVehicleCrush(ctx, mgg);
-    expect(infantry.alive).toBe(false);
-  });
-
-  it('does NOT crush allied infantry (IsAFriend check)', () => {
-    const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
-    const ally = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
-    const ctx = makeCombatCtx([mgg, ally]);
-    checkVehicleCrush(ctx, mgg);
-    expect(ally.alive).toBe(true);
-    expect(ally.hp).toBe(ally.maxHp);
-  });
-
-  it('does NOT crush cross-allied infantry (Greece allied with Spain)', () => {
-    const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
-    const ally = entityAtCell(UnitType.I_E1, House.Greece, 10, 10);
-    const ctx = makeCombatCtx([mgg, ally]);
-    checkVehicleCrush(ctx, mgg);
-    expect(ally.alive).toBe(true);
-  });
-
-  it('does NOT crush enemy vehicles (vehicles are not crushable)', () => {
-    const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
-    const enemyVehicle = entityAtCell(UnitType.V_JEEP, House.USSR, 10, 10);
-    const ctx = makeCombatCtx([mgg, enemyVehicle]);
-    checkVehicleCrush(ctx, mgg);
-    expect(enemyVehicle.alive).toBe(true);
-    expect(enemyVehicle.hp).toBe(enemyVehicle.maxHp);
-  });
-
-  it('crush credits the kill to the MGG', () => {
-    const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
-    const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    const ctx = makeCombatCtx([mgg, infantry]);
-    const killsBefore = mgg.kills;
-    checkVehicleCrush(ctx, mgg);
-    expect(mgg.kills).toBe(killsBefore + 1);
-  });
-
-  it('crushing produces blood effect', () => {
-    const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
-    const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    const ctx = makeCombatCtx([mgg, infantry]);
-    checkVehicleCrush(ctx, mgg);
-    const bloodEffects = ctx.effects.filter(e => e.type === 'blood');
-    expect(bloodEffects.length).toBeGreaterThanOrEqual(1);
+    expect(infantry.alive).toBe(true);
+    expect(infantry.hp).toBe(infantry.maxHp);
   });
 });
 

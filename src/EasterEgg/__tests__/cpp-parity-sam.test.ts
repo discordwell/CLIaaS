@@ -137,8 +137,8 @@ describe('SAM structure stats (rules.ini [SAM])', () => {
     expect(STRUCTURE_SIZE['SAM']).toEqual([2, 1]);
   });
 
-  it('is in STRUCTURE_POWERED (Powered=true)', () => {
-    expect(STRUCTURE_POWERED.has('SAM')).toBe(true);
+  it('is NOT in STRUCTURE_POWERED (C++ rules.ini has no Powered=yes for SAM)', () => {
+    expect(STRUCTURE_POWERED.has('SAM')).toBe(false);
   });
 });
 
@@ -286,13 +286,12 @@ describe('SAM AA override — prefers airborne over ground (building.cpp)', () =
   });
 });
 
-// ── Power Dependency (building.cpp PW1/PW3) ─────────────────────────────────
+// ── Power Independence (C++ rules.ini: SAM has no Powered=yes) ──────────────
 //
-// C++ building.cpp: SAM is in STRUCTURE_POWERED — cannot fire when
-// power consumed > power produced (any deficit disables powered defenses).
+// C++ rules.ini: SAM does NOT have Powered=yes. SAM fires regardless of power state.
 
-describe('SAM power dependency (building.cpp PW1/PW3)', () => {
-  it('cannot fire during power deficit (consumed > produced)', () => {
+describe('SAM fires regardless of power state (not in STRUCTURE_POWERED)', () => {
+  it('fires during power deficit (SAM is not power-dependent)', () => {
     const sam = makeSAM(10, 10);
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind], {
@@ -303,8 +302,8 @@ describe('SAM power dependency (building.cpp PW1/PW3)', () => {
 
     updateStructureCombat(ctx);
 
-    // Should NOT fire — power deficit disables SAM
-    expect(hind.hp).toBe(hpBefore);
+    // SAM fires even during power deficit (not in STRUCTURE_POWERED)
+    expect(hind.hp).toBeLessThan(hpBefore);
   });
 
   it('fires normally when power is sufficient', () => {
@@ -318,21 +317,6 @@ describe('SAM power dependency (building.cpp PW1/PW3)', () => {
 
     updateStructureCombat(ctx);
 
-    expect(hind.hp).toBeLessThan(hpBefore);
-  });
-
-  it('fires when power consumed equals power produced (no deficit)', () => {
-    const sam = makeSAM(10, 10);
-    const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
-    const ctx = makeCombatCtx([sam], [hind], {
-      powerConsumed: 100,
-      powerProduced: 100,
-    });
-    const hpBefore = hind.hp;
-
-    updateStructureCombat(ctx);
-
-    // consumed === produced is NOT a deficit (isLowPower requires consumed > produced)
     expect(hind.hp).toBeLessThan(hpBefore);
   });
 });

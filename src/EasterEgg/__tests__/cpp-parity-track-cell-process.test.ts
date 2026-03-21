@@ -228,13 +228,13 @@ describe('Per-cell processing effects (C++ unit.cpp PCP_DURING)', () => {
     // This is verified by the entity.stats.crusher check in the implementation.
     // Test the data: verify which vehicles are crushers.
     const crushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV', 'MCV',
-                       'STNK', 'CTNK', 'TTNK', 'QTNK', 'MRJ', 'MGG', 'V2RL', 'MNLY'];
+                       'STNK', 'CTNK', 'TTNK', 'QTNK', 'MRJ', 'V2RL', 'MNLY'];
     for (const key of crushers) {
       const stats = UNIT_STATS[key];
       expect(stats?.crusher, `${key} should be a crusher`).toBe(true);
     }
-    // Non-crushers
-    const nonCrushers = ['JEEP', 'TRUK', 'DTRK'];
+    // Non-crushers (MGG has no Tracked=yes in rules.ini)
+    const nonCrushers = ['JEEP', 'TRUK', 'DTRK', 'MGG'];
     for (const key of nonCrushers) {
       const stats = UNIT_STATS[key];
       expect(stats?.crusher, `${key} should NOT be a crusher`).toBeFalsy();

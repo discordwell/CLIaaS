@@ -42,7 +42,7 @@ const PASSABLE = new Set([Terrain.CLEAR, Terrain.ROAD, Terrain.ORE, Terrain.ROUG
 const BUILDABLE = new Set([Terrain.CLEAR, Terrain.ROAD]);
 
 /** Map Terrain enum values to TERRAIN_SPEED table keys.
- *  C++ parity: TREE maps to 'Rock' (trees are impassable terrain objects in C++). */
+ *  C++ parity: TREE maps to 'Clear' (trees are TerrainClass objects placed on CLEAR cells). */
 const TERRAIN_NAME_MAP: Record<number, string> = {
   [Terrain.CLEAR]: 'Clear',
   [Terrain.ROAD]: 'Road',
@@ -53,7 +53,7 @@ const TERRAIN_NAME_MAP: Record<number, string> = {
   [Terrain.BEACH]: 'Beach',
   [Terrain.ROUGH]: 'Rough',
   [Terrain.RIVER]: 'River',
-  [Terrain.TREE]: 'Rock', // C++ parity — trees are TerrainClass on CLEAR, but impassable like Rock
+  [Terrain.TREE]: 'Clear', // C++ parity — trees are TerrainClass on CLEAR cells, speed = CLEAR
 };
 
 export class GameMap {
@@ -250,7 +250,7 @@ export class GameMap {
   /** C++ drive.cpp Ground[terrain].Cost[speed_class] — terrain speed multiplier.
    *  cpp-parity: uses TERRAIN_SPEED lookup table from types.ts which matches RULES.INI values.
    *  Defaults to WHEEL if no speedClass provided (backward compat with pathfinding).
-   *  WINGED always 1.0 (rules.cpp:862 hardcoded). TREE treated as Rock (C++ parity). */
+   *  WINGED always 1.0 (rules.cpp:862 hardcoded). TREE treated as Clear (C++ parity). */
   getSpeedMultiplier(cx: number, cy: number, speedClass: SpeedClass = SpeedClass.WHEEL): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 1.0;
     // C++ rules.cpp:862 — WINGED always fixed(1), aircraft ignore terrain
@@ -258,7 +258,7 @@ export class GameMap {
     const terrain = this.cells[cy * MAP_CELLS + cx];
 
     // Map Terrain enum to TERRAIN_SPEED table key
-    // C++ parity: TREE cells use Rock speed (impassable, 0.0 for all ground)
+    // C++ parity: TREE cells use Clear speed (trees are TerrainClass on CLEAR cells)
     const terrainKey = TERRAIN_NAME_MAP[terrain];
     const entry = TERRAIN_SPEED[terrainKey];
     if (!entry) return 1.0; // unknown terrain defaults to full speed

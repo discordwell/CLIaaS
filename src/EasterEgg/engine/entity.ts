@@ -35,9 +35,9 @@ export const CLOAK_TRANSITION_FRAMES = 38;
 export const SONAR_PULSE_DURATION = 225;
 
 /** C++ techno.cpp:2468: CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE
- *  Rule.CloakDelay is read from RULES.INI "SubmergeDelay" (default 0, standard RA1 = .016 fixed).
- *  .016 * 900 (TICKS_PER_MINUTE at 15Hz) ≈ 14 ticks. Prevents immediate recloak after uncloaking. */
-export const CLOAK_DELAY_TICKS = 14;
+ *  Rule.CloakDelay is read from RULES.INI "SubmergeDelay=.02".
+ *  .02 * 900 (TICKS_PER_MINUTE at 15Hz) = 18 ticks. Prevents immediate recloak after uncloaking. */
+export const CLOAK_DELAY_TICKS = 18;
 
 // Structure reference is typed loosely to avoid circular dependency with scenario.ts
 export interface StructureRef {

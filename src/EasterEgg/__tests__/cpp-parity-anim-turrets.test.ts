@@ -425,8 +425,8 @@ describe('SAM targets air only (building.cpp:2338, scenario.ts:1125)', () => {
     expect(samWeapon.warhead).toBe('AP');
   });
 
-  it('SAM is a powered structure (requires power to fire)', () => {
-    expect(STRUCTURE_POWERED.has('SAM')).toBe(true);
+  it('SAM is NOT a powered structure (C++ rules.ini has no Powered=yes for SAM)', () => {
+    expect(STRUCTURE_POWERED.has('SAM')).toBe(false);
   });
 });
 

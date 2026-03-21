@@ -187,11 +187,11 @@ describe('BulletTypeClass properties (Phase 6)', () => {
 
 describe('Per-building IsPowered (Phase 4)', () => {
   // C++ bdata.cpp:2836 — GUN and AGUN have IsPowered=false (default).
-  // Only 6 structures have IsPowered=true: TSLA, SAM, GAP, PDOX, IRON, MSLO.
-  const EXPECTED_POWERED = ['TSLA', 'SAM', 'GAP', 'PDOX', 'IRON', 'MSLO'];
+  // Only 5 structures have IsPowered=true in rules.ini: TSLA, DOME, GAP, PDOX, IRON.
+  const EXPECTED_POWERED = ['TSLA', 'DOME', 'GAP', 'PDOX', 'IRON'];
 
-  it('STRUCTURE_POWERED contains all 6 powered structures', () => {
-    expect(STRUCTURE_POWERED.size).toBe(6);
+  it('STRUCTURE_POWERED contains all 5 powered structures', () => {
+    expect(STRUCTURE_POWERED.size).toBe(5);
     for (const s of EXPECTED_POWERED) {
       expect(STRUCTURE_POWERED.has(s), `${s} should be in STRUCTURE_POWERED`).toBe(true);
     }
@@ -203,7 +203,7 @@ describe('Per-building IsPowered (Phase 4)', () => {
   });
 
   it('non-powered structures are not in the set', () => {
-    const nonPowered = ['POWR', 'APWR', 'FACT', 'WEAP', 'PROC', 'SILO', 'BARR', 'TENT'];
+    const nonPowered = ['POWR', 'APWR', 'FACT', 'WEAP', 'PROC', 'SILO', 'BARR', 'TENT', 'SAM', 'MSLO'];
     for (const s of nonPowered) {
       expect(STRUCTURE_POWERED.has(s), `${s} should NOT be in STRUCTURE_POWERED`).toBe(false);
     }

@@ -664,9 +664,9 @@ describe('MRJ and MGG sibling stats (C++ udata.cpp parity)', () => {
     expect(UNIT_STATS.MGG.primaryWeapon).toBeNull();
   });
 
-  it('both crushers', () => {
+  it('MRJ is crusher, MGG is not (no Tracked=yes in rules.ini for MGG)', () => {
     expect(UNIT_STATS.MRJ.crusher).toBe(true);
-    expect(UNIT_STATS.MGG.crusher).toBe(true);
+    expect(UNIT_STATS.MGG.crusher).toBeFalsy();
   });
 
   it('both allied owner', () => {

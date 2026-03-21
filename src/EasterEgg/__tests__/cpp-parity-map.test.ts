@@ -654,9 +654,9 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   // -- WHEEL (default, all vehicles) --
 
-  it('WHEEL: CLEAR = 0.60 (C++ RULES.INI)', () => {
+  it('WHEEL: CLEAR = 0.70 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.70);
   });
 
   it('WHEEL: RIVER = 0.0 (C++ RULES.INI impassable)', () => {
@@ -674,14 +674,14 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.40);
   });
 
-  it('WHEEL: ORE = 0.50 (C++ RULES.INI)', () => {
+  it('WHEEL: ORE = 0.60 (C++ RULES.INI)', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.50);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
-  it('WHEEL: TREE = 0.0 (TREE maps to Rock, impassable)', () => {
+  it('WHEEL: TREE = 0.70 (TREE maps to Clear, C++ parity)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.0);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.70);
   });
 
   it('WHEEL: road template = 1.0', () => {
@@ -717,9 +717,9 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
-  it('FOOT: TREE = 0.0 (TREE maps to Rock, impassable)', () => {
+  it('FOOT: TREE = 0.90 (TREE maps to Clear, C++ parity)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.0);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
   it('FOOT: road template = 1.0', () => {
@@ -773,7 +773,7 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   it('defaults to WHEEL if no speedClass provided', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15)).toBe(0.50); // WHEEL ore speed (C++ RULES.INI)
+    expect(map.getSpeedMultiplier(15, 15)).toBe(0.60); // WHEEL ore speed (C++ RULES.INI)
   });
 
   // -- Road template range --
@@ -798,12 +798,12 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   // -- FOOT vs WHEEL difference on TREE --
 
-  it('TREE terrain is impassable (maps to Rock speeds, all 0.0)', () => {
+  it('TREE terrain uses Clear speeds (C++ trees are TerrainClass on CLEAR cells)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
     const footSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.FOOT);
     const wheelSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL);
-    expect(footSpeed).toBe(0.0);
-    expect(wheelSpeed).toBe(0.0);
+    expect(footSpeed).toBe(0.90);
+    expect(wheelSpeed).toBe(0.70);
   });
 });
 

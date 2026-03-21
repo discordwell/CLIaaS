@@ -410,8 +410,8 @@ describe('5. Power-down blocks turret rotation for powered structures only', () 
     expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
   });
 
-  it('SAM is a powered structure', () => {
-    expect(STRUCTURE_POWERED.has('SAM')).toBe(true);
+  it('SAM is NOT a powered structure (C++ rules.ini has no Powered=yes)', () => {
+    expect(STRUCTURE_POWERED.has('SAM')).toBe(false);
   });
 
   it('AGUN is NOT a powered structure (C++ bdata.cpp:2836 IsPowered=false)', () => {

@@ -335,7 +335,7 @@ describe('Nuke detonation during low power', () => {
     detonateNuke(ctx, target);
 
     // Direct hit at ground zero: falloff = 1.0
-    // Nuke vs none = 0.9, damage = round(200 * 0.9 * 1.0) = 180 — lethal to infantry (50 HP)
+    // Nuke vs none = 0.9, damage = round(1000 * 0.9 * 1.0) = 900 — lethal to infantry (50 HP)
     expect(inf.alive).toBe(false);
     // Damage applied was NUKE_DAMAGE * mult, not scaled by power
     expect(hpBefore).toBeLessThan(NUKE_DAMAGE);
@@ -1748,10 +1748,10 @@ describe('Silo capacity calculation edge cases', () => {
     expect(cap).toBe(0);
   });
 
-  it('fully built PROC contributes 1000', () => {
+  it('fully built PROC contributes 2000 (rules.ini Storage=2000)', () => {
     const proc = makeStructure('PROC', House.Spain, 5, 5);
     const cap = calculateSiloCapacity([proc], House.Spain, (a: House, b: House) => a === b);
-    expect(cap).toBe(1000);
+    expect(cap).toBe(2000);
   });
 
   it('SILO contributes 1500', () => {

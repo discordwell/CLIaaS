@@ -853,14 +853,14 @@ describe('Scanner adjacency detection (foot.cpp:1373-1386)', () => {
   it('non-scanner unit does not detect adjacent cloaked sub', () => {
     // C++ foot.cpp:1380: techno->Techno_Type_Class()->IsScanner must be true
     // Only units with isAntiSub (maps to IsScanner) detect subs
-    const cruiser = entityAtCell(UnitType.V_CA, House.Spain, 10, 10); // no isAntiSub
+    const lst = entityAtCell(UnitType.V_LST, House.Spain, 10, 10); // no isAntiSub
     const ss = entityAtCell(UnitType.V_SS, House.USSR, 11, 10);
     ss.cloakState = CloakState.CLOAKED;
 
-    expect(cruiser.stats.isAntiSub).toBeFalsy();
+    expect(lst.stats.isAntiSub).toBeFalsy();
 
     // TS updateSubDetection only iterates entities with isAntiSub
-    // So cruiser should not detect the sub via adjacency
+    // So LST should not detect the sub via adjacency
   });
 
   it('CLOAKING sub is also detected by adjacent scanner', () => {

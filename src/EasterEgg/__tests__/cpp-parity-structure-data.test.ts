@@ -496,8 +496,7 @@ describe('Defense weapons: STRUCTURE_WEAPONS vs INI Primary=', () => {
 describe('Powered flag: INI Powered= structures', () => {
   // From rules.ini, only these have explicit Powered=true (or Powered=yes):
   // TSLA, DOME, GAP, PDOX, IRON
-  // SAM does NOT have Powered= in rules.ini (C++ default false),
-  // but TS includes it in STRUCTURE_POWERED.
+  // SAM does NOT have Powered= in rules.ini (C++ default false).
   // MSLO does NOT have Powered= in rules.ini either.
 
   const BUILDINGS_WITH_POWERED_INI: string[] = [];

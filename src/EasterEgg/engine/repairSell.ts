@@ -129,7 +129,7 @@ export function powerMultiplier(produced: number, consumed: number): number {
 }
 
 /** Calculate silo storage capacity from structures.
- *  PROC=1000, SILO=1500 (C++ building.cpp Capacity()) */
+ *  PROC=2000, SILO=1500 (C++ rules.ini Storage= values) */
 export function calculateSiloCapacity(
   structures: MapStructure[],
   playerHouse: House,
@@ -139,7 +139,7 @@ export function calculateSiloCapacity(
   for (const s of structures) {
     if (!s.alive || !isAllied(s.house, playerHouse)) continue;
     if (s.buildProgress !== undefined && s.buildProgress < 1) continue;
-    if (s.type === 'PROC') capacity += 1000;
+    if (s.type === 'PROC') capacity += 2000;
     else if (s.type === 'SILO') capacity += 1500;
   }
   return capacity;

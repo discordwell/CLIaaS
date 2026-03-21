@@ -538,8 +538,8 @@ describe('MSLO stats (rules.ini parity)', () => {
     expect(POWER_DRAIN['MSLO']).toBe(100);
   });
 
-  it('is a powered structure (disabled during low power)', () => {
-    expect(STRUCTURE_POWERED.has('MSLO')).toBe(true);
+  it('is NOT a powered structure (C++ rules.ini has no Powered=yes for MSLO)', () => {
+    expect(STRUCTURE_POWERED.has('MSLO')).toBe(false);
   });
 
   it('production item has correct cost (2500) and prerequisite (STEK)', () => {
@@ -701,10 +701,10 @@ describe('superweapon structures — shared behavioral invariants', () => {
     }
   });
 
-  it('all three are powered structures (disabled during low power)', () => {
-    for (const type of ['PDOX', 'IRON', 'MSLO']) {
-      expect(STRUCTURE_POWERED.has(type)).toBe(true);
-    }
+  it('PDOX and IRON are powered structures; MSLO is not', () => {
+    expect(STRUCTURE_POWERED.has('PDOX')).toBe(true);
+    expect(STRUCTURE_POWERED.has('IRON')).toBe(true);
+    expect(STRUCTURE_POWERED.has('MSLO')).toBe(false);
   });
 
   it('none have weapons (superweapon buildings are unarmed)', () => {

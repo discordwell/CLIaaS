@@ -417,7 +417,7 @@ describe('Crusher mechanics — C++ drive.cpp Ok_To_Move', () => {
 
   const expectedCrushers = [
     '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV', 'MCV',
-    'V2RL', 'MNLY', 'MRJ', 'MGG',
+    'V2RL', 'MNLY', 'MRJ',
   ];
 
   for (const unit of expectedCrushers) {

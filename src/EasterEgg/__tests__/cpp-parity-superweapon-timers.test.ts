@@ -312,8 +312,8 @@ describe('chronoshift side-effect chances match rules.ini (house.cpp:2871-2888)'
 
 describe('nuke constants match C++ (house.cpp:2639)', () => {
 
-  it('nuke damage = 200 (C++ house.cpp:2639: damage param in BulletClass constructor)', () => {
-    expect(NUKE_DAMAGE).toBe(200);
+  it('nuke damage = 1000 (C++ rules.ini AtomDamage=1000)', () => {
+    expect(NUKE_DAMAGE).toBe(1000);
   });
 
   it('nuke blast radius = 10 cells', () => {

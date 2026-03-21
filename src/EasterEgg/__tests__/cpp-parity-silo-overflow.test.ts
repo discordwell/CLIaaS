@@ -165,34 +165,34 @@ describe('destroying a SILO with excess credits causes credit loss (house.cpp:19
 // -- Destroying a refinery (PROC) with excess credits causes credit loss ------
 //
 // C++ building.cpp:2986 applies to ALL buildings with Capacity > 0.
-// PROC has Capacity=1000 in rules.ini.
+// PROC has Capacity=2000 in rules.ini.
 
 describe('destroying a PROC with excess credits causes credit loss', () => {
 
-  it('PROC + SILO at max capacity: destroying PROC loses 1000 credits', () => {
+  it('PROC + SILO at max capacity: destroying PROC loses 2000 credits', () => {
     const proc = makePROC(10, 10);
     const silo = makeSILO(14, 10);
     const structures = [proc, silo];
-    const credits = 2500; // full capacity (1000 + 1500)
+    const credits = 3500; // full capacity (2000 + 1500)
 
     const result = simulateStorageDestruction(structures, credits, proc);
 
     expect(result.newCapacity).toBe(1500); // only SILO remains
     expect(result.newCredits).toBe(1500);  // capped
-    expect(result.creditsLost).toBe(1000); // excess spilled
+    expect(result.creditsLost).toBe(2000); // excess spilled
   });
 
-  it('2 PROCs at max capacity: destroying one loses 1000 credits', () => {
+  it('2 PROCs at max capacity: destroying one loses 2000 credits', () => {
     const p1 = makePROC(10, 10);
     const p2 = makePROC(14, 10);
     const structures = [p1, p2];
-    const credits = 2000; // full capacity (2 * 1000)
+    const credits = 4000; // full capacity (2 * 2000)
 
     const result = simulateStorageDestruction(structures, credits, p1);
 
-    expect(result.newCapacity).toBe(1000);
-    expect(result.newCredits).toBe(1000);
-    expect(result.creditsLost).toBe(1000);
+    expect(result.newCapacity).toBe(2000);
+    expect(result.newCredits).toBe(2000);
+    expect(result.creditsLost).toBe(2000);
   });
 
   it('PROC with credits below remaining capacity: no loss', () => {
@@ -229,19 +229,19 @@ describe('credits are capped to new total capacity', () => {
     expect(result.creditsLost).toBe(1500);
   });
 
-  it('mixed storage (2 PROC + 2 SILO = 5000): lose PROC -> cap to 4000', () => {
+  it('mixed storage (2 PROC + 2 SILO = 7000): lose PROC -> cap to 5000', () => {
     const p1 = makePROC(10, 10);
     const p2 = makePROC(14, 10);
     const s1 = makeSILO(18, 10);
     const s2 = makeSILO(20, 10);
     const structures = [p1, p2, s1, s2];
-    const credits = 5000; // full capacity
+    const credits = 7000; // full capacity
 
     const result = simulateStorageDestruction(structures, credits, p1);
 
-    expect(result.newCapacity).toBe(4000); // 1000 + 1500 + 1500
-    expect(result.newCredits).toBe(4000);
-    expect(result.creditsLost).toBe(1000);
+    expect(result.newCapacity).toBe(5000); // 2000 + 1500 + 1500
+    expect(result.newCredits).toBe(5000);
+    expect(result.creditsLost).toBe(2000);
   });
 
   it('cap is exact: credits=2501, capacity drops to 2500 -> lose exactly 1', () => {
@@ -342,13 +342,13 @@ describe('multiple storage buildings destroyed sequentially', () => {
     const s1 = makeSILO(14, 10);
     const s2 = makeSILO(16, 10);
     const structures = [proc, s1, s2];
-    let credits = 4000; // full (1000 + 1500 + 1500)
+    let credits = 5000; // full (2000 + 1500 + 1500)
 
-    // Destroy PROC: 4000 -> cap to 3000 (lose 1000)
+    // Destroy PROC: 5000 -> cap to 3000 (lose 2000)
     const r1 = simulateStorageDestruction(structures, credits, proc);
     expect(r1.newCapacity).toBe(3000);
     expect(r1.newCredits).toBe(3000);
-    expect(r1.creditsLost).toBe(1000);
+    expect(r1.creditsLost).toBe(2000);
     credits = r1.newCredits;
 
     // Destroy SILO: 3000 -> cap to 1500 (lose 1500)
@@ -432,14 +432,14 @@ describe('silo overflow edge cases', () => {
     expect(playerCap).toBe(1500); // player SILO unaffected
   });
 
-  it('large economy: 4 PROCs + 6 SILOs = 13000 capacity, lose 3 SILOs', () => {
+  it('large economy: 4 PROCs + 6 SILOs = 17000 capacity, lose 3 SILOs', () => {
     const structures: MapStructure[] = [];
     for (let i = 0; i < 4; i++) structures.push(makePROC(i * 4, 0));
     for (let i = 0; i < 6; i++) structures.push(makeSILO(i + 20, 0));
-    // Total: 4*1000 + 6*1500 = 4000 + 9000 = 13000
-    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(13000);
+    // Total: 4*2000 + 6*1500 = 8000 + 9000 = 17000
+    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(17000);
 
-    let credits = 13000; // full
+    let credits = 17000; // full
 
     // Destroy 3 SILOs sequentially
     for (let i = 0; i < 3; i++) {
@@ -448,9 +448,9 @@ describe('silo overflow edge cases', () => {
       credits = result.newCredits;
     }
 
-    // Remaining: 4 PROCs + 3 SILOs = 4000 + 4500 = 8500
+    // Remaining: 4 PROCs + 3 SILOs = 8000 + 4500 = 12500
     const finalCap = calculateSiloCapacity(structures, House.Spain, isAllied);
-    expect(finalCap).toBe(8500);
-    expect(credits).toBe(8500); // capped down from 13000
+    expect(finalCap).toBe(12500);
+    expect(credits).toBe(12500); // capped down from 17000
   });
 });

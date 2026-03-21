@@ -407,13 +407,13 @@ export enum SpeedClass {
 // even though udata.cpp forces all vehicles to WHEEL class.
 export const TERRAIN_SPEED: Record<string, [number, number, number, number, number]> = {
   //                     Foot  Track Wheel Winged Float
-  Clear:              [0.90, 0.80, 0.60, 1.0,  0.0 ],
+  Clear:              [0.90, 0.80, 0.70, 1.0,  0.0 ],
   Rough:              [0.80, 0.70, 0.40, 1.0,  0.0 ],
   Road:               [1.00, 1.00, 1.00, 1.0,  0.0 ],
   Water:              [0.00, 0.00, 0.00, 1.0,  1.0 ],
   Rock:               [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable cliffs
   Wall:               [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable walls
-  Ore:                [0.90, 0.70, 0.50, 1.0,  0.0 ],
+  Ore:                [0.90, 0.70, 0.60, 1.0,  0.0 ],
   Beach:              [0.80, 0.70, 0.40, 1.0,  0.0 ],
   River:              [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable riverbed
 };
@@ -632,15 +632,15 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
   DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge' },
   MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600 },
-  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600 },
+  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, owner: 'allied', cost: 600 },
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true },
   // Naval vessels (C++ vdata.cpp MPH values)
   SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true },
   DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
-  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 4, speedClass: SpeedClass.FLOAT, sight: 7, rot: 5, isInfantry: false, primaryWeapon: '8Inch', secondaryWeapon: '8Inch', isVessel: true },
-  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true },
+  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 4, speedClass: SpeedClass.FLOAT, sight: 7, rot: 5, isInfantry: false, primaryWeapon: '8Inch', secondaryWeapon: '8Inch', isVessel: true, isAntiSub: true },
+  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
   MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'SubSCUD', isVessel: true, isCloakable: true },
   // Aircraft (C++ aadata.cpp MPH values)
   BADR: { type: UnitType.V_BADR, name: 'Badger', image: 'badr', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ParaBomb', passengers: 5, isAircraft: true, isFixedWing: true, maxAmmo: 5, owner: 'soviet', cost: 10 },
@@ -779,7 +779,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
 // Superweapon gameplay constants
 export const IRON_CURTAIN_DURATION = 675;       // rules.ini IronCurtain=.75 → 0.75 * 60 * 15 = 675 ticks (C++ default=fixed(1,2)=0.5, overridden by rules.ini)
 export const IRON_CURTAIN_DEMO_TRUCK_DURATION = 11; // C++ house.cpp:2753-2755: IronCurtainDuration * TICKS_PER_SECOND = 0.75 * 15
-export const NUKE_DAMAGE = 200;  // C++ building.cpp:4191: damage=200, warhead=WARHEAD_NUKE
+export const NUKE_DAMAGE = 1000;  // C++ rules.ini AtomDamage=1000
 export const NUKE_BLAST_CELLS = 10;             // blast radius in cells
 export const NUKE_FLIGHT_TICKS = 45;            // missile travel time
 export const NUKE_MIN_FALLOFF = 0.1;            // minimum damage fraction at edge

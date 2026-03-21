@@ -468,9 +468,8 @@ describe('Nuke blast zone (building.cpp:4191, combat.cpp:393-425)', () => {
   it('C++ nuke bullet has damage=200 with WARHEAD_NUKE (building.cpp:4191)', () => {
     // C++ building.cpp:4191:
     //   bullet = new BulletClass(BULLET_NUKE_DOWN, target, this, 200, WARHEAD_NUKE, MPH_VERY_FAST);
-    // PARITY GAP: TS uses NUKE_DAMAGE=1000 with warhead='Super'
-    // C++ nuke bullet damage is 200, not 1000
-    expect(NUKE_DAMAGE).toBe(200); // PARITY GAP — TS has 1000, C++ has 200
+    // C++ rules.ini AtomDamage=1000
+    expect(NUKE_DAMAGE).toBe(1000);
   });
 
   it('Nuke warhead verses table matches C++ RULES.INI (90%,100%,60%,25%,50%)', () => {

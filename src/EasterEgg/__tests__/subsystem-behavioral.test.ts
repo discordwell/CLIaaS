@@ -978,9 +978,9 @@ describe('powerMultiplier — from repairSell.ts', () => {
 describe('calculateSiloCapacity — from repairSell.ts', () => {
   const isAllied = (a: House, b: House) => a === b;
 
-  it('PROC provides 1000 storage', () => {
+  it('PROC provides 2000 storage (rules.ini Storage=2000)', () => {
     const structures = [makeStructure('PROC', House.Spain, 10, 10)];
-    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(2000);
   });
 
   it('SILO provides 1500 storage', () => {
@@ -993,7 +993,7 @@ describe('calculateSiloCapacity — from repairSell.ts', () => {
       makeStructure('PROC', House.Spain, 10, 10),
       makeStructure('SILO', House.Spain, 15, 10),
     ];
-    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(2500);
+    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(3500);
   });
 
   it('excludes dead structures', () => {
@@ -1019,14 +1019,14 @@ describe('calculateSiloCapacity — from repairSell.ts', () => {
 
   it('includes structures with undefined buildProgress (pre-placed)', () => {
     const structures = [makeStructure('PROC', House.Spain, 10, 10)];
-    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(2000);
   });
 
   it('includes structures with buildProgress = 1 (completed)', () => {
     const s = makeStructure('PROC', House.Spain, 10, 10);
     (s as any).buildProgress = 1;
     const structures = [s];
-    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(2000);
   });
 
   it('returns 0 for empty structures list', () => {

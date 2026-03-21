@@ -197,28 +197,28 @@ describe('PROC power consumption in grid (calculatePowerGrid)', () => {
 
 // -- Silo Capacity (building.cpp Capacity()) ----------------------------------
 //
-// C++ building.cpp Capacity(): PROC provides 1000 ore storage, SILO provides 1500.
+// C++ rules.ini: [PROC] Storage=2000, [SILO] Storage=1500.
 // Only alive, allied structures with completed construction count.
 
 describe('PROC silo capacity (building.cpp Capacity())', () => {
   const alliances = buildDefaultAlliances();
   const isAllied = (a: House, b: House) => alliances.get(a)?.has(b) ?? false;
 
-  it('single PROC provides 1000 ore storage', () => {
+  it('single PROC provides 2000 ore storage (rules.ini Storage=2000)', () => {
     const proc = makePROC(10, 10, 900, House.Spain);
-    expect(calculateSiloCapacity([proc], House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity([proc], House.Spain, isAllied)).toBe(2000);
   });
 
-  it('two PROCs provide 2000 ore storage', () => {
+  it('two PROCs provide 4000 ore storage', () => {
     const p1 = makePROC(10, 10, 900, House.Spain);
     const p2 = makePROC(16, 10, 900, House.Spain);
-    expect(calculateSiloCapacity([p1, p2], House.Spain, isAllied)).toBe(2000);
+    expect(calculateSiloCapacity([p1, p2], House.Spain, isAllied)).toBe(4000);
   });
 
-  it('PROC + SILO provides 2500 ore storage', () => {
+  it('PROC + SILO provides 3500 ore storage', () => {
     const proc = makePROC(10, 10, 900, House.Spain);
     const silo = makeBuilding('SILO', 14, 10, 256, House.Spain);
-    expect(calculateSiloCapacity([proc, silo], House.Spain, isAllied)).toBe(2500);
+    expect(calculateSiloCapacity([proc, silo], House.Spain, isAllied)).toBe(3500);
   });
 
   it('dead PROC provides 0 storage', () => {
@@ -241,12 +241,12 @@ describe('PROC silo capacity (building.cpp Capacity())', () => {
   it('fully constructed PROC (buildProgress=1) counts', () => {
     const proc = makePROC(10, 10, 900, House.Spain);
     proc.buildProgress = 1;
-    expect(calculateSiloCapacity([proc], House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity([proc], House.Spain, isAllied)).toBe(2000);
   });
 
-  it('damaged PROC still provides full 1000 storage (capacity is binary)', () => {
+  it('damaged PROC still provides full 2000 storage (capacity is binary)', () => {
     const proc = makePROC(10, 10, 1, House.Spain);
-    expect(calculateSiloCapacity([proc], House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity([proc], House.Spain, isAllied)).toBe(2000);
   });
 });
 
@@ -404,7 +404,7 @@ describe('PROC destruction triggers silo capacity recalculation', () => {
     expect(recalcCalled).toBe(false);
   });
 
-  it('capacity drops by 1000 when a PROC is destroyed', () => {
+  it('capacity drops by 2000 when a PROC is destroyed', () => {
     const alliances = buildDefaultAlliances();
     const isAllied = (a: House, b: House) => alliances.get(a)?.has(b) ?? false;
 
@@ -413,8 +413,8 @@ describe('PROC destruction triggers silo capacity recalculation', () => {
     const silo = makeBuilding('SILO', 20, 10, 256, House.Spain);
     const structs = [proc1, proc2, silo];
 
-    // Before destruction: 1000 + 1000 + 1500 = 3500
-    expect(calculateSiloCapacity(structs, House.Spain, isAllied)).toBe(3500);
+    // Before destruction: 2000 + 2000 + 1500 = 5500
+    expect(calculateSiloCapacity(structs, House.Spain, isAllied)).toBe(5500);
 
     // Destroy proc2
     const ctx = makeCombatCtx(structs);
@@ -424,8 +424,8 @@ describe('PROC destruction triggers silo capacity recalculation', () => {
     structureDamage(ctx, proc2, 100);
     expect(proc2.alive).toBe(false);
 
-    // After destruction: 1000 + 0 + 1500 = 2500
-    expect(calculateSiloCapacity(structs, House.Spain, isAllied)).toBe(2500);
+    // After destruction: 2000 + 0 + 1500 = 3500
+    expect(calculateSiloCapacity(structs, House.Spain, isAllied)).toBe(3500);
   });
 });
 

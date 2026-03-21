@@ -192,10 +192,10 @@ describe('SILO storage capacity (building.cpp Capacity())', () => {
     expect(calculateSiloCapacity([s1, s2], House.Spain, isAllied)).toBe(3000);
   });
 
-  it('SILO + PROC = 2500 capacity (1500 + 1000)', () => {
+  it('SILO + PROC = 3500 capacity (1500 + 2000)', () => {
     const silo = makeSILO(10, 10, 300, House.Spain);
     const proc = makeBuilding('PROC', 12, 10, 900, House.Spain);
-    expect(calculateSiloCapacity([silo, proc], House.Spain, isAllied)).toBe(2500);
+    expect(calculateSiloCapacity([silo, proc], House.Spain, isAllied)).toBe(3500);
   });
 
   it('dead SILO does not contribute capacity', () => {
@@ -227,7 +227,7 @@ describe('SILO storage capacity (building.cpp Capacity())', () => {
     expect(calculateSiloCapacity([silo], House.Spain, isAllied)).toBe(1500);
   });
 
-  it('three SILOs + two PROCs = 6500 capacity', () => {
+  it('three SILOs + two PROCs = 8500 capacity', () => {
     const structures = [
       makeSILO(10, 10, 300, House.Spain),
       makeSILO(12, 10, 300, House.Spain),
@@ -235,7 +235,7 @@ describe('SILO storage capacity (building.cpp Capacity())', () => {
       makeBuilding('PROC', 16, 10, 900, House.Spain),
       makeBuilding('PROC', 20, 10, 900, House.Spain),
     ];
-    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(6500);
+    expect(calculateSiloCapacity(structures, House.Spain, isAllied)).toBe(8500);
   });
 
   it('allied SILO (Greece) contributes to player capacity', () => {
@@ -436,10 +436,10 @@ describe('SILO capacity recalculation on destruction', () => {
 
     const silo = makeSILO(10, 10, 300, House.Spain);
     const proc = makeBuilding('PROC', 12, 10, 900, House.Spain);
-    expect(calculateSiloCapacity([silo, proc], House.Spain, isAllied)).toBe(2500);
+    expect(calculateSiloCapacity([silo, proc], House.Spain, isAllied)).toBe(3500);
 
     silo.alive = false;
-    expect(calculateSiloCapacity([silo, proc], House.Spain, isAllied)).toBe(1000);
+    expect(calculateSiloCapacity([silo, proc], House.Spain, isAllied)).toBe(2000);
   });
 });
 
