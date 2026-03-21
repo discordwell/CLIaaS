@@ -971,27 +971,27 @@ describe('Section 8: Building footprint sizes (bdata.cpp)', () => {
     ['FACT', 3, 3],   // Construction Yard
     ['WEAP', 3, 2],   // War Factory
     ['POWR', 2, 2],   // Power Plant
-    ['APWR', 2, 2],   // Advanced Power Plant
-    ['PROC', 3, 2],   // Ore Refinery
+    ['APWR', 3, 3],   // Advanced Power Plant (BSIZE_33)
+    ['PROC', 3, 3],   // Ore Refinery (BSIZE_33)
     ['BARR', 2, 2],   // Barracks (Soviet)
     ['TENT', 2, 2],   // Barracks (Allied)
-    ['FIX', 3, 2],    // Service Depot
+    ['FIX', 3, 3],    // Service Depot (BSIZE_33)
     ['SILO', 1, 1],   // Ore Silo
     ['DOME', 2, 2],   // Radar Dome
     ['GUN', 1, 1],    // Turret
     ['SAM', 2, 1],    // SAM Site
     ['HPAD', 2, 2],   // Helipad
-    ['AFLD', 2, 2],   // Airfield
+    ['AFLD', 3, 2],   // Airfield (BSIZE_32)
     ['ATEK', 2, 2],   // Allied Tech Center
-    ['STEK', 2, 2],   // Soviet Tech Center
-    ['TSLA', 1, 1],   // Tesla Coil
-    ['AGUN', 1, 1],   // AA Gun
-    ['GAP', 1, 1],    // Gap Generator (1x1 footprint, has special size)
+    ['STEK', 3, 3],   // Soviet Tech Center (BSIZE_33)
+    ['TSLA', 1, 2],   // Tesla Coil (BSIZE_12)
+    ['AGUN', 1, 2],   // AA Gun (BSIZE_12)
+    ['GAP', 1, 2],    // Gap Generator (BSIZE_12)
     ['PBOX', 1, 1],   // Pillbox
     ['HBOX', 1, 1],   // Camo Pillbox
     ['PDOX', 2, 2],   // Chronosphere
     ['IRON', 2, 2],   // Iron Curtain
-    ['MSLO', 2, 2],   // Missile Silo
+    ['MSLO', 2, 1],   // Missile Silo (BSIZE_21)
     ['SYRD', 3, 3],   // Naval Yard (Allied)
     ['SPEN', 3, 3],   // Sub Pen (Soviet)
     // Walls are 1x1
@@ -1027,15 +1027,17 @@ describe('Section 9: Bibbed building set (bdata.cpp:3775)', () => {
 
   const EXPECTED_BIBBED = [
     'FACT', 'WEAP', 'PROC', 'POWR', 'APWR', 'BARR', 'TENT',
-    'FIX', 'HPAD', 'AFLD', 'DOME',
-    'ATEK', 'STEK', 'IRON', 'PDOX',
-    'SYRD', 'SPEN', 'BIO', 'HOSP', 'MISS', 'FCOM',
+    'HPAD', 'DOME',
+    'ATEK', 'STEK',
+    'BIO', 'HOSP', 'MISS', 'FCOM',
+    'FACF', 'WEAF', 'DOMF', 'FENC', 'MINP',
   ];
 
   const EXPECTED_NOT_BIBBED = [
     'SILO', 'GUN', 'SAM', 'TSLA', 'AGUN', 'GAP', 'PBOX', 'HBOX',
-    'SBAG', 'FENC', 'BARB', 'BRIK',
+    'SBAG', 'BARB', 'BRIK',
     'KENN', 'MSLO',
+    'FIX', 'AFLD', 'IRON', 'PDOX', 'SYRD', 'SPEN',
   ];
 
   for (const type of EXPECTED_BIBBED) {

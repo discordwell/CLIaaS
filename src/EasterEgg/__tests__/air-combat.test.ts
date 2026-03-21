@@ -487,8 +487,8 @@ describe('HPAD/AFLD structure config', () => {
     expect(STRUCTURE_SIZE.HPAD).toEqual([2, 2]);
   });
 
-  it('AFLD has size [2, 2]', () => {
-    expect(STRUCTURE_SIZE.AFLD).toEqual([2, 2]);
+  it('AFLD has size [3, 2]', () => {
+    expect(STRUCTURE_SIZE.AFLD).toEqual([3, 2]);
   });
 
   it('HPAD has positive max HP (exact value verified by ini-parity.test.ts)', () => {

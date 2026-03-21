@@ -111,8 +111,8 @@ describe('GAP stats (rules.ini parity)', () => {
     expect(STRUCTURE_MAX_HP['GAP']).toBe(1000);
   });
 
-  it('size is 1x1', () => {
-    expect(STRUCTURE_SIZE['GAP']).toEqual([1, 1]);
+  it('size is 1x2', () => {
+    expect(STRUCTURE_SIZE['GAP']).toEqual([1, 2]);
   });
 
   it('has NO weapon — not in STRUCTURE_WEAPONS', () => {

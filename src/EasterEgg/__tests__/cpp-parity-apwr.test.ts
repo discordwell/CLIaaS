@@ -117,8 +117,8 @@ describe('APWR stats (rules.ini parity)', () => {
     expect(STRUCTURE_MAX_HP['APWR']).toBe(700);
   });
 
-  it('footprint is 2x2 cells', () => {
-    expect(STRUCTURE_SIZE['APWR']).toEqual([2, 2]);
+  it('footprint is 3x3 cells', () => {
+    expect(STRUCTURE_SIZE['APWR']).toEqual([3, 3]);
   });
 
   it('has no weapon (purely economic)', () => {
@@ -273,24 +273,28 @@ describe('APWR economic functions (rules.ini Cost=500)', () => {
   });
 });
 
-// -- 2x2 Footprint -----------------------------------------------------------
+// -- 3x3 Footprint -----------------------------------------------------------
 //
-// C++ STRUCTURE_SIZE: APWR is 2x2. The origin cell is top-left;
-// the structure occupies (cx,cy), (cx+1,cy), (cx,cy+1), (cx+1,cy+1).
+// C++ STRUCTURE_SIZE: APWR is 3x3 (BSIZE_33). The origin cell is top-left;
+// the structure occupies 9 cells total.
 
-describe('APWR 2x2 footprint', () => {
+describe('APWR 3x3 footprint', () => {
 
-  it('footprint occupies 4 cells from origin', () => {
+  it('footprint occupies 9 cells from origin', () => {
     const [w, h] = STRUCTURE_SIZE['APWR']!;
-    expect(w * h).toBe(4);
-    // Origin at (10,10) -> cells: (10,10), (11,10), (10,11), (11,11)
+    expect(w * h).toBe(9);
+    // Origin at (10,10) -> 3x3 grid
     const cells: [number, number][] = [];
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) {
         cells.push([10 + dx, 10 + dy]);
       }
     }
-    expect(cells).toEqual([[10, 10], [11, 10], [10, 11], [11, 11]]);
+    expect(cells).toEqual([
+      [10, 10], [11, 10], [12, 10],
+      [10, 11], [11, 11], [12, 11],
+      [10, 12], [11, 12], [12, 12],
+    ]);
   });
 });
 

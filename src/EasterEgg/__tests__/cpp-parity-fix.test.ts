@@ -153,8 +153,8 @@ describe('FIX stats (rules.ini parity)', () => {
     expect(STRUCTURE_MAX_HP['FIX']).toBe(800);
   });
 
-  it('footprint is 3x2 cells', () => {
-    expect(STRUCTURE_SIZE['FIX']).toEqual([3, 2]);
+  it('footprint is 3x3 cells', () => {
+    expect(STRUCTURE_SIZE['FIX']).toEqual([3, 3]);
   });
 
   it('has no weapon (support structure)', () => {
@@ -235,18 +235,18 @@ describe('FIX as prerequisite for MNLY and MECH', () => {
   });
 });
 
-// -- 3x2 Footprint -----------------------------------------------------------
+// -- 3x3 Footprint -----------------------------------------------------------
 //
-// C++ STRUCTURE_SIZE: FIX is 3x2. The origin cell is top-left;
-// the structure occupies 6 cells total.
+// C++ STRUCTURE_SIZE: FIX is 3x3 (BSIZE_33). The origin cell is top-left;
+// the structure occupies 9 cells total.
 
-describe('FIX 3x2 footprint', () => {
+describe('FIX 3x3 footprint', () => {
 
-  it('footprint occupies 6 cells from origin', () => {
+  it('footprint occupies 9 cells from origin', () => {
     const [w, h] = STRUCTURE_SIZE['FIX']!;
     expect(w).toBe(3);
-    expect(h).toBe(2);
-    expect(w * h).toBe(6);
+    expect(h).toBe(3);
+    expect(w * h).toBe(9);
   });
 
   it('cells enumeration from origin (10,10)', () => {
@@ -260,6 +260,7 @@ describe('FIX 3x2 footprint', () => {
     expect(cells).toEqual([
       [10, 10], [11, 10], [12, 10],
       [10, 11], [11, 11], [12, 11],
+      [10, 12], [11, 12], [12, 12],
     ]);
   });
 });

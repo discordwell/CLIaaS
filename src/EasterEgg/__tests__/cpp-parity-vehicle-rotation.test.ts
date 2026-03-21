@@ -958,3 +958,378 @@ describe('14. Accumulator reset when facing matches desired (entity.ts:649-651)'
     expect(tank.turretFacing32).toBe(Dir.S * 4);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 15. Comprehensive Speed values — rules.ini / aftrmath.ini (all unit types)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('15. All vehicle Speed values match rules.ini / aftrmath.ini', () => {
+  // Each tuple: [unit key, expected Speed, source]
+  const VEHICLE_SPEEDS: [string, number, string][] = [
+    // Base game vehicles — rules.ini
+    ['V2RL',  7,  'rules.ini [V2RL] Speed=7'],
+    ['1TNK',  9,  'rules.ini [1TNK] Speed=9'],
+    ['2TNK',  8,  'rules.ini [2TNK] Speed=8'],
+    ['3TNK',  7,  'rules.ini [3TNK] Speed=7'],
+    ['4TNK',  4,  'rules.ini [4TNK] Speed=4'],
+    ['MRJ',   9,  'rules.ini [MRJ] Speed=9'],
+    ['MGG',   9,  'rules.ini [MGG] Speed=9'],
+    ['ARTY',  6,  'rules.ini [ARTY] Speed=6'],
+    ['HARV',  6,  'rules.ini [HARV] Speed=6'],
+    ['MCV',   6,  'rules.ini [MCV] Speed=6'],
+    ['JEEP',  10, 'rules.ini [JEEP] Speed=10'],
+    ['APC',   10, 'rules.ini [APC] Speed=10'],
+    ['MNLY',  9,  'rules.ini [MNLY] Speed=9'],
+    ['TRUK',  10, 'rules.ini [TRUK] Speed=10'],
+    // Expansion vehicles — aftrmath.ini
+    ['STNK',  10, 'aftrmath.ini [STNK] Speed=10'],
+    ['CTNK',  5,  'aftrmath.ini [CTNK] Speed=5'],
+    ['TTNK',  8,  'aftrmath.ini [TTNK] Speed=8'],
+    ['DTRK',  8,  'aftrmath.ini [DTRK] Speed=8'],
+    ['QTNK',  3,  'aftrmath.ini [QTNK] Speed=3'],
+  ];
+
+  for (const [key, expected, ref] of VEHICLE_SPEEDS) {
+    it(`${key} speed = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.speed).toBe(expected);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 16. Expansion + naval + aircraft ROT values — rules.ini / aftrmath.ini
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('16. Expansion, naval, aircraft ROT values match rules.ini / aftrmath.ini', () => {
+  const EXPANSION_ROTS: [string, number, string][] = [
+    // Expansion vehicles — aftrmath.ini
+    ['STNK',  5,  'aftrmath.ini [STNK] ROT=5'],
+    ['CTNK',  5,  'aftrmath.ini [CTNK] ROT=5'],
+    ['TTNK',  5,  'aftrmath.ini [TTNK] ROT=5'],
+    ['DTRK',  5,  'aftrmath.ini [DTRK] ROT=5'],
+    ['QTNK',  5,  'aftrmath.ini [QTNK] ROT=5'],
+    ['MNLY',  5,  'rules.ini [MNLY] ROT=5'],
+    ['MGG',   5,  'rules.ini [MGG] ROT=5'],
+    ['MRJ',   5,  'rules.ini [MRJ] ROT=5'],
+  ];
+
+  for (const [key, expected, ref] of EXPANSION_ROTS) {
+    it(`${key} rot = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.rot).toBe(expected);
+    });
+  }
+
+  const NAVAL_ROTS: [string, number, string][] = [
+    ['SS',   7,  'rules.ini [SS] ROT=7'],
+    ['DD',   7,  'rules.ini [DD] ROT=7'],
+    ['CA',   5,  'rules.ini [CA] ROT=5'],
+    ['LST',  10, 'rules.ini [LST] ROT=10'],
+    ['PT',   7,  'rules.ini [PT] ROT=7'],
+    ['MSUB', 7,  'aftrmath.ini [MSUB] ROT=7'],
+  ];
+
+  for (const [key, expected, ref] of NAVAL_ROTS) {
+    it(`${key} rot = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.rot).toBe(expected);
+    });
+  }
+
+  const AIRCRAFT_ROTS: [string, number, string][] = [
+    ['BADR', 5, 'rules.ini [BADR] ROT=5'],
+    ['U2',   7, 'rules.ini [U2] ROT=7'],
+    ['MIG',  5, 'rules.ini [MIG] ROT=5'],
+    ['YAK',  5, 'rules.ini [YAK] ROT=5'],
+    ['TRAN', 5, 'rules.ini [TRAN] ROT=5'],
+    ['HELI', 4, 'rules.ini [HELI] ROT=4'],
+    ['HIND', 4, 'rules.ini [HIND] ROT=4'],
+  ];
+
+  for (const [key, expected, ref] of AIRCRAFT_ROTS) {
+    it(`${key} rot = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.rot).toBe(expected);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 17. Naval unit Speed values — rules.ini / aftrmath.ini
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('17. Naval unit Speed values match rules.ini / aftrmath.ini', () => {
+  const NAVAL_SPEEDS: [string, number, string][] = [
+    ['SS',   6,  'rules.ini [SS] Speed=6'],
+    ['DD',   6,  'rules.ini [DD] Speed=6'],
+    ['CA',   4,  'rules.ini [CA] Speed=4'],
+    ['LST',  14, 'rules.ini [LST] Speed=14'],
+    ['PT',   9,  'rules.ini [PT] Speed=9'],
+    ['MSUB', 5,  'aftrmath.ini [MSUB] Speed=5'],
+  ];
+
+  for (const [key, expected, ref] of NAVAL_SPEEDS) {
+    it(`${key} speed = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.speed).toBe(expected);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 18. Aircraft Speed values — rules.ini
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('18. Aircraft Speed values match rules.ini', () => {
+  const AIRCRAFT_SPEEDS: [string, number, string][] = [
+    ['BADR', 16, 'rules.ini [BADR] Speed=16'],
+    ['U2',   40, 'rules.ini [U2] Speed=40'],
+    ['MIG',  20, 'rules.ini [MIG] Speed=20'],
+    ['YAK',  16, 'rules.ini [YAK] Speed=16'],
+    ['TRAN', 12, 'rules.ini [TRAN] Speed=12'],
+    ['HELI', 16, 'rules.ini [HELI] Speed=16'],
+    ['HIND', 12, 'rules.ini [HIND] Speed=12'],
+  ];
+
+  for (const [key, expected, ref] of AIRCRAFT_SPEEDS) {
+    it(`${key} speed = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.speed).toBe(expected);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 19. Infantry Speed values — rules.ini / aftrmath.ini
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('19. Infantry Speed values match rules.ini / aftrmath.ini', () => {
+  const INFANTRY_SPEEDS: [string, number, string][] = [
+    ['DOG',  4, 'rules.ini [DOG] Speed=4'],
+    ['E1',   4, 'rules.ini [E1] Speed=4'],
+    ['E2',   5, 'rules.ini [E2] Speed=5'],
+    ['E3',   3, 'rules.ini [E3] Speed=3'],
+    ['E4',   3, 'rules.ini [E4] Speed=3'],
+    ['E6',   4, 'rules.ini [E6] Speed=4'],
+    ['SPY',  4, 'rules.ini [SPY] Speed=4'],
+    ['THF',  4, 'rules.ini [THF] Speed=4'],
+    ['E7',   5, 'rules.ini [E7] Speed=5'],
+    ['MEDI', 4, 'rules.ini [MEDI] Speed=4'],
+    ['GNRL', 5, 'rules.ini [GNRL] Speed=5'],
+    // Expansion infantry — aftrmath.ini
+    ['SHOK', 3, 'aftrmath.ini [SHOK] Speed=3'],
+    ['MECH', 4, 'aftrmath.ini [MECH] Speed=4'],
+    // Civilians — rules.ini all Speed=5
+    ['C1',   5, 'rules.ini [C1] Speed=5'],
+    ['C2',   5, 'rules.ini [C2] Speed=5'],
+    ['C3',   5, 'rules.ini [C3] Speed=5'],
+    ['C4',   5, 'rules.ini [C4] Speed=5'],
+    ['C5',   5, 'rules.ini [C5] Speed=5'],
+    ['C6',   5, 'rules.ini [C6] Speed=5'],
+    ['C7',   5, 'rules.ini [C7] Speed=5'],
+    ['C8',   5, 'rules.ini [C8] Speed=5'],
+    ['C9',   5, 'rules.ini [C9] Speed=5'],
+    ['C10',  5, 'rules.ini [C10] Speed=5'],
+    ['EINSTEIN', 5, 'rules.ini [EINSTEIN] Speed=5'],
+    ['CHAN',  5, 'rules.ini [CHAN] Speed=5'],
+  ];
+
+  for (const [key, expected, ref] of INFANTRY_SPEEDS) {
+    it(`${key} speed = ${expected} (${ref})`, () => {
+      const stats = UNIT_STATS[key];
+      expect(stats, `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(stats.speed).toBe(expected);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 20. Turret flags — C++ udata.cpp IsTurretEquipped constructor flag
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('20. Turret flags match C++ udata.cpp IsTurretEquipped', () => {
+  // Units WITH turrets (IsTurretEquipped=true in udata.cpp)
+  // Note: JEEP has IsTurretEquipped=true in C++ (udata.cpp:393) but TS
+  // excludes it in entity.ts:407 — this is a known divergence.
+  const TURRETED: [string, string][] = [
+    ['1TNK', 'udata.cpp:114 UnitLTank'],
+    ['3TNK', 'udata.cpp:145 UnitMTank'],
+    ['2TNK', 'udata.cpp:176 UnitMTank2'],
+    ['4TNK', 'udata.cpp:207 UnitHTank'],
+  ];
+
+  // Units WITHOUT turrets (IsTurretEquipped=false in udata.cpp)
+  const NON_TURRETED: [string, string][] = [
+    ['V2RL', 'udata.cpp:83 UnitV2Launcher'],
+    ['MRJ',  'udata.cpp:238 UnitMRJammer'],
+    ['MGG',  'udata.cpp:269 UnitMGG'],
+    ['ARTY', 'udata.cpp:300 UnitArty'],
+    ['HARV', 'udata.cpp:331 UnitHarvester'],
+    ['MCV',  'udata.cpp:362 UnitMCV'],
+    ['APC',  'udata.cpp:424 UnitAPC'],
+    ['MNLY', 'udata.cpp:455 UnitMineLayer'],
+    ['TRUK', 'udata.cpp:486 UnitConvoyTruck'],
+    // Expansion
+    ['CTNK', 'udata.cpp:638 UnitChrono'],
+    ['TTNK', 'udata.cpp:669 UnitTesla'],
+    ['QTNK', 'udata.cpp:700 UnitMAD'],
+    ['DTRK', 'udata.cpp:732 UnitDemoTruck'],
+    // Ants
+    ['ANT1', 'udata.cpp:547 UnitAnt1'],
+    ['ANT2', 'udata.cpp:576 UnitAnt2'],
+    ['ANT3', 'udata.cpp:605 UnitAnt3'],
+  ];
+
+  for (const [key, ref] of TURRETED) {
+    it(`${key} HAS turret (${ref})`, () => {
+      const entity = new Entity(UNIT_STATS[key].type, House.Spain, 100, 100);
+      expect(entity.hasTurret, `${key} should have turret`).toBe(true);
+    });
+  }
+
+  for (const [key, ref] of NON_TURRETED) {
+    it(`${key} has NO turret (${ref})`, () => {
+      const entity = new Entity(UNIT_STATS[key].type, House.Spain, 100, 100);
+      expect(entity.hasTurret, `${key} should NOT have turret`).toBe(false);
+    });
+  }
+
+  // C++ says STNK (Phase Transport) IsTurretEquipped=true (udata.cpp:762)
+  // TS hasTurret getter explicitly excludes STNK — known divergence
+  it('STNK turret divergence: C++ has turret (udata.cpp:762), TS excludes it', () => {
+    const entity = new Entity(UnitType.V_STNK, House.Spain, 100, 100);
+    // Current TS: false (entity.ts:411 excludes V_STNK). C++ has IsTurretEquipped=true.
+    expect(entity.hasTurret).toBe(false);
+  });
+
+  // C++ says JEEP IsTurretEquipped=true (udata.cpp:393)
+  // TS hasTurret getter explicitly excludes JEEP — known divergence
+  it('JEEP turret divergence: C++ has turret (udata.cpp:393), TS excludes it', () => {
+    const entity = new Entity(UnitType.V_JEEP, House.Spain, 100, 100);
+    // Current TS: false (entity.ts:407 excludes V_JEEP). C++ has IsTurretEquipped=true.
+    expect(entity.hasTurret).toBe(false);
+  });
+
+  it('infantry never have turrets', () => {
+    const infantry = ['E1', 'E2', 'E3', 'E4', 'E6', 'E7', 'DOG', 'SPY', 'MEDI', 'GNRL', 'SHOK', 'MECH'];
+    for (const key of infantry) {
+      const entity = new Entity(UNIT_STATS[key].type, House.Spain, 100, 100);
+      expect(entity.hasTurret, `${key} infantry should not have turret`).toBe(false);
+    }
+  });
+
+  it('aircraft never have turrets', () => {
+    const aircraft = ['BADR', 'U2', 'MIG', 'YAK', 'TRAN', 'HELI', 'HIND'];
+    for (const key of aircraft) {
+      const entity = new Entity(UNIT_STATS[key].type, House.Spain, 100, 100);
+      expect(entity.hasTurret, `${key} aircraft should not have turret`).toBe(false);
+    }
+  });
+
+  // Naval turret behavior: entity.ts:415 says "DD, CA, PT do have turrets"
+  // while SS, MSUB, LST do not. This follows the C++ vessel data.
+  it('SS, MSUB, LST have no turret', () => {
+    const noTurretNaval = ['SS', 'MSUB', 'LST'];
+    for (const key of noTurretNaval) {
+      const entity = new Entity(UNIT_STATS[key].type, House.Spain, 100, 100);
+      expect(entity.hasTurret, `${key} should not have turret`).toBe(false);
+    }
+  });
+
+  it('DD, CA, PT have turrets (entity.ts:415 comment)', () => {
+    const turretedNaval = ['DD', 'CA', 'PT'];
+    for (const key of turretedNaval) {
+      const entity = new Entity(UNIT_STATS[key].type, House.Spain, 100, 100);
+      expect(entity.hasTurret, `${key} should have turret`).toBe(true);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 21. All infantry share rot=8 (instant 8-facing snap)
+// C++ infantry don't use ROT= in rules.ini — facing changes instantly.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('21. All infantry rot=8 (C++ instant facing snap)', () => {
+  const ALL_INFANTRY = [
+    'E1', 'E2', 'E3', 'E4', 'E6', 'E7', 'DOG', 'SPY', 'THF', 'MEDI', 'GNRL', 'CHAN',
+    'SHOK', 'MECH',
+    'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'EINSTEIN',
+  ];
+
+  for (const key of ALL_INFANTRY) {
+    it(`${key} rot = 8`, () => {
+      expect(UNIT_STATS[key], `UNIT_STATS['${key}'] should exist`).toBeDefined();
+      expect(UNIT_STATS[key].rot).toBe(8);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 22. Speed ordering invariants from rules.ini
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('22. Speed ordering invariants (rules.ini)', () => {
+  it('fastest ground vehicles: JEEP, APC, TRUK, STNK all Speed=10', () => {
+    expect(UNIT_STATS.JEEP.speed).toBe(10);
+    expect(UNIT_STATS.APC.speed).toBe(10);
+    expect(UNIT_STATS.TRUK.speed).toBe(10);
+    expect(UNIT_STATS.STNK.speed).toBe(10);
+  });
+
+  it('tank speed ordering: 1TNK(9) > 2TNK(8) > 3TNK(7) > 4TNK(4)', () => {
+    expect(UNIT_STATS['1TNK'].speed).toBeGreaterThan(UNIT_STATS['2TNK'].speed);
+    expect(UNIT_STATS['2TNK'].speed).toBeGreaterThan(UNIT_STATS['3TNK'].speed);
+    expect(UNIT_STATS['3TNK'].speed).toBeGreaterThan(UNIT_STATS['4TNK'].speed);
+  });
+
+  it('LST is fastest naval vessel (Speed=14)', () => {
+    expect(UNIT_STATS.LST.speed).toBe(14);
+    expect(UNIT_STATS.LST.speed).toBeGreaterThan(UNIT_STATS.PT.speed);
+    expect(UNIT_STATS.PT.speed).toBeGreaterThan(UNIT_STATS.DD.speed);
+  });
+
+  it('U2 spy plane is fastest aircraft (Speed=40)', () => {
+    expect(UNIT_STATS.U2.speed).toBe(40);
+    expect(UNIT_STATS.U2.speed).toBeGreaterThan(UNIT_STATS.MIG.speed);
+    expect(UNIT_STATS.MIG.speed).toBeGreaterThan(UNIT_STATS.HELI.speed);
+  });
+
+  it('ARTY has slowest body ROT of all vehicles (ROT=2)', () => {
+    const artyRot = UNIT_STATS.ARTY.rot;
+    const vehicles = Object.entries(UNIT_STATS).filter(
+      ([k, s]) => !s.isInfantry && !s.isAircraft && !s.isVessel && k !== 'ARTY'
+        && !k.startsWith('ANT')
+    );
+    for (const [key, stats] of vehicles) {
+      expect(artyRot, `ARTY rot(${artyRot}) should be <= ${key} rot(${stats.rot})`).toBeLessThanOrEqual(stats.rot);
+    }
+  });
+
+  it('JEEP has fastest body ROT among ground vehicles (ROT=10)', () => {
+    const jeepRot = UNIT_STATS.JEEP.rot;
+    const groundVehicles = Object.entries(UNIT_STATS).filter(
+      ([, s]) => !s.isInfantry && !s.isAircraft && !s.isVessel
+        && !['ANT1', 'ANT2', 'ANT3'].includes(s.type)
+    );
+    for (const [key, stats] of groundVehicles) {
+      expect(jeepRot, `JEEP rot(${jeepRot}) should be >= ${key} rot(${stats.rot})`).toBeGreaterThanOrEqual(stats.rot);
+    }
+  });
+
+  it('helicopters have slower ROT (4) than fixed-wing (5+)', () => {
+    expect(UNIT_STATS.HELI.rot).toBe(4);
+    expect(UNIT_STATS.HIND.rot).toBe(4);
+    expect(UNIT_STATS.MIG.rot).toBeGreaterThanOrEqual(5);
+    expect(UNIT_STATS.YAK.rot).toBeGreaterThanOrEqual(5);
+    expect(UNIT_STATS.BADR.rot).toBeGreaterThanOrEqual(5);
+    expect(UNIT_STATS.U2.rot).toBeGreaterThanOrEqual(5);
+  });
+});

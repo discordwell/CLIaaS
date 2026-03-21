@@ -574,10 +574,10 @@ describe('aiIsFactoryExit (HOUSE.CPP exit zone check)', () => {
   });
 
   it('checks PROC as factory exit', () => {
-    // PROC is 3x2 at (10,10) → exit row cy=12, cx=10..12
+    // PROC is 3x3 at (10,10) → exit row cy=13, cx=10..12
     const structures = [makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 })];
     const ctx = makeAIContext({ structures });
-    expect(aiIsFactoryExit(ctx, 10, 12, House.USSR)).toBe(true);
+    expect(aiIsFactoryExit(ctx, 10, 13, House.USSR)).toBe(true);
   });
 });
 
@@ -1765,7 +1765,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     expect(unit.mission).toBe(Mission.MOVE);
     expect(unit.moveTarget).not.toBeNull();
     // Should be heading toward FIX center
-    const [fw, fh] = STRUCTURE_SIZE['FIX'] ?? [3, 2];
+    const [fw, fh] = STRUCTURE_SIZE['FIX'] ?? [3, 3];
     const fixCenter = { x: (20 + fw / 2) * CELL_SIZE, y: (20 + fh / 2) * CELL_SIZE };
     expect(unit.moveTarget!.x).toBe(fixCenter.x);
     expect(unit.moveTarget!.y).toBe(fixCenter.y);

@@ -127,8 +127,8 @@ describe('QUEE structure stats (rules.ini)', () => {
     expect(STRUCTURE_MAX_HP['QUEE']).toBe(800);
   });
 
-  it('has 2x2 footprint', () => {
-    expect(STRUCTURE_SIZE['QUEE']).toEqual([2, 2]);
+  it('has 2x1 footprint', () => {
+    expect(STRUCTURE_SIZE['QUEE']).toEqual([2, 1]);
   });
 
   it('is NOT power-dependent (not in STRUCTURE_POWERED)', () => {
@@ -399,17 +399,16 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     expect(projectiles.length).toBe(0);
   });
 
-  it('tesla effect has startX/startY at structure center (2x2)', () => {
+  it('tesla effect has startX/startY at structure center (2x1)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
     updateStructureCombat(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
-    // 2x2 structure: center = cx * CELL_SIZE + CELL_SIZE * (width / 2)
-    const [w, h] = STRUCTURE_SIZE['QUEE'];
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE * w / 2;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE * h / 2;
+    // Combat center uses fixed +CELL_SIZE offset (combat.ts:1378-1379)
+    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
+    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
     expect((tesla as any).startX).toBe(expectedX);
     expect((tesla as any).startY).toBe(expectedY);
   });
@@ -582,9 +581,9 @@ describe('QUEE vs TSLA comparison (rules.ini)', () => {
     expect(STRUCTURE_WEAPONS['TSLA'].warhead).toBe('Super');
   });
 
-  it('QUEE is larger than TSLA (2x2 vs 1x1)', () => {
-    expect(STRUCTURE_SIZE['QUEE']).toEqual([2, 2]);
-    expect(STRUCTURE_SIZE['TSLA']).toEqual([1, 1]);
+  it('QUEE is wider than TSLA (2x1 vs 1x2)', () => {
+    expect(STRUCTURE_SIZE['QUEE']).toEqual([2, 1]);
+    expect(STRUCTURE_SIZE['TSLA']).toEqual([1, 2]);
   });
 
   it('both produce tesla effect (not projectile)', () => {
@@ -629,17 +628,16 @@ describe('QUEE vs TSLA comparison (rules.ini)', () => {
 // -- Muzzle Effect (rendering parity) -----------------------------------------
 
 describe('QUEE muzzle effect originates from structure center (rendering parity)', () => {
-  it('muzzle effect originates from 2x2 structure center', () => {
+  it('muzzle effect originates from 2x1 structure center', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
     updateStructureCombat(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    // 2x2 structure: center = cx * CELL_SIZE + CELL_SIZE * (width / 2)
-    const [w, h] = STRUCTURE_SIZE['QUEE'];
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE * w / 2;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE * h / 2;
+    // Combat center uses fixed +CELL_SIZE offset (combat.ts:1378-1379)
+    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
+    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });

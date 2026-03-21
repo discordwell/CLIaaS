@@ -365,7 +365,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
 
     updateAIRetreat(ctx);
 
-    // PROC size is [3, 2], so center = (cx + 3/2) * CELL_SIZE, (cy + 2/2) * CELL_SIZE
+    // PROC size is [3, 3], so center = (cx + 3/2) * CELL_SIZE, (cy + 3/2) * CELL_SIZE
     const [w, h] = STRUCTURE_SIZE['PROC']!;
     const expectedX = (procCx + w / 2) * CELL_SIZE;
     const expectedY = (procCy + h / 2) * CELL_SIZE;
@@ -778,8 +778,8 @@ describe('Edge cases and multi-unit interactions', () => {
   });
 
   it('STRUCTURE_SIZE for PROC and FIX are as expected', () => {
-    // PROC is 3x2, FIX is 3x2
-    expect(STRUCTURE_SIZE['PROC']).toEqual([3, 2]);
-    expect(STRUCTURE_SIZE['FIX']).toEqual([3, 2]);
+    // PROC is 3x3, FIX is 3x3
+    expect(STRUCTURE_SIZE['PROC']).toEqual([3, 3]);
+    expect(STRUCTURE_SIZE['FIX']).toEqual([3, 3]);
   });
 });

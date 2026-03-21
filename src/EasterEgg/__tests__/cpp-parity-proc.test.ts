@@ -118,8 +118,8 @@ describe('PROC stats (rules.ini parity)', () => {
     expect(STRUCTURE_MAX_HP['PROC']).toBe(900);
   });
 
-  it('footprint is 3x2 cells', () => {
-    expect(STRUCTURE_SIZE['PROC']).toEqual([3, 2]);
+  it('footprint is 3x3 cells', () => {
+    expect(STRUCTURE_SIZE['PROC']).toEqual([3, 3]);
   });
 
   it('has no weapon (purely economic)', () => {
@@ -267,19 +267,19 @@ describe('PROC economic functions (rules.ini Cost=2000)', () => {
   });
 });
 
-// -- 3x2 Footprint -----------------------------------------------------------
+// -- 3x3 Footprint -----------------------------------------------------------
 //
-// C++ STRUCTURE_SIZE: PROC is 3x2. The origin cell is top-left;
-// the structure occupies 6 cells total.
+// C++ STRUCTURE_SIZE: PROC is 3x3 (BSIZE_33). The origin cell is top-left;
+// the structure occupies 9 cells total.
 
-describe('PROC 3x2 footprint', () => {
+describe('PROC 3x3 footprint', () => {
 
-  it('footprint occupies 6 cells from origin', () => {
+  it('footprint occupies 9 cells from origin', () => {
     const [w, h] = STRUCTURE_SIZE['PROC']!;
     expect(w).toBe(3);
-    expect(h).toBe(2);
-    expect(w * h).toBe(6);
-    // Origin at (10,10) -> cells across 3 wide, 2 tall
+    expect(h).toBe(3);
+    expect(w * h).toBe(9);
+    // Origin at (10,10) -> cells across 3 wide, 3 tall
     const cells: [number, number][] = [];
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) {
@@ -289,6 +289,7 @@ describe('PROC 3x2 footprint', () => {
     expect(cells).toEqual([
       [10, 10], [11, 10], [12, 10],
       [10, 11], [11, 11], [12, 11],
+      [10, 12], [11, 12], [12, 12],
     ]);
   });
 });

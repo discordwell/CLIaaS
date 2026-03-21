@@ -1202,13 +1202,14 @@ function mapStructureHp(types: string[], hp: number): Record<string, number> {
 
 // Building footprint sizes in cells (w, h) — defaults to 1x1
 export const STRUCTURE_SIZE: Record<string, [number, number]> = {
-  FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], APWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
-  PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
-  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], TSLA: [1, 1], AGUN: [1, 1], GAP: [1, 1], PBOX: [1, 1],
-  HPAD: [2, 2], AFLD: [2, 2], ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2], KENN: [1, 1],
+  // C++ bdata.cpp BSIZE_* constants → [width, height]
+  FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], APWR: [3, 3], BARR: [2, 2], TENT: [2, 2],
+  PROC: [3, 3], FIX: [3, 3], SILO: [1, 1], DOME: [2, 2],
+  GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], TSLA: [1, 2], AGUN: [1, 2], GAP: [1, 2], PBOX: [1, 1],
+  HPAD: [2, 2], AFLD: [3, 2], ATEK: [2, 2], STEK: [3, 3], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 1], KENN: [1, 1],
   SYRD: [3, 3], SPEN: [3, 3], BIO: [2, 2], HOSP: [2, 2],
   FACF: [3, 3], DOMF: [2, 2], WEAF: [3, 2],
-  QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1], FTUR: [1, 1],
+  QUEE: [2, 1], LAR1: [1, 1], LAR2: [1, 1], FTUR: [1, 1],
   FCOM: [2, 2], MISS: [3, 2],
   MINP: [1, 1], MINV: [1, 1],
   // Bridge structures (destroyable)
@@ -1227,10 +1228,12 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
 // width as the building. C++ only generates bibs for buildings with Width() >= 2
 // (Width 2 → SMUDGE_BIB3, Width 3 → SMUDGE_BIB2, Width 4 → SMUDGE_BIB1).
 export const BIBBED_BUILDINGS: ReadonlySet<string> = new Set([
+  // All buildings with Bib=yes in rules.ini. getBibCells() handles Width < 2 guard.
   'FACT', 'WEAP', 'PROC', 'POWR', 'APWR', 'BARR', 'TENT',
-  'FIX', 'HPAD', 'AFLD', 'DOME',
-  'ATEK', 'STEK', 'IRON', 'PDOX',
-  'SYRD', 'SPEN', 'BIO', 'HOSP', 'MISS', 'FCOM',
+  'HPAD', 'DOME', 'ATEK', 'STEK',
+  'BIO', 'HOSP', 'MISS', 'FCOM',
+  'FACF', 'WEAF', 'DOMF',  // fake buildings (Bib=yes in rules.ini)
+  'FENC', 'MINP',           // Bib=yes but Width=1, so no bib generated
 ]);
 
 /** C++ bdata.cpp:3597-3629 — Compute bib cells for a building.
@@ -2247,7 +2250,7 @@ export function executeTriggerAction(
         data: m.data,
       })) : null;
       let transport: Entity | null = null;
-      const infantry: Entity[] = [];
+      const cargo: Entity[] = [];
       // C++ parity (reinf.cpp:441): ground reinforcements spawn at the map edge
       // and walk in. The team's origin waypoint determines which edge to use.
       // Only aircraft spawn at the edge cell AND fly — ground units get MISSION_GUARD
@@ -2324,25 +2327,27 @@ export function executeTriggerAction(
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.
             entity.mission = Mission.GUARD;
           }
-          // Track transports and infantry for auto-loading
+          // Track transports and cargo for auto-loading (C++ reinf.cpp:217-254)
+          // LSTs carry ALL unit types (infantry, tanks, MCVs), not just infantry.
           if (entity.isTransport && !transport) {
             transport = entity;
-          } else if (entity.stats.isInfantry) {
-            infantry.push(entity);
+          } else if (!stats.isAircraft) {
+            cargo.push(entity);
           }
           result.spawned.push(entity);
         }
       }
-      // Auto-load infantry into transport when team has both
-      if (transport && infantry.length > 0) {
+      // Auto-load cargo into transport when team has both (C++ reinf.cpp:217-254)
+      // In C++, ALL non-transport team members are loaded — infantry, tanks, MCVs, etc.
+      if (transport && cargo.length > 0) {
         const maxLoad = transport.maxPassengers;
-        for (let i = 0; i < Math.min(infantry.length, maxLoad); i++) {
-          const inf = infantry[i];
-          transport.passengers.push(inf);
-          inf.transportRef = transport;
-          // Remove loaded infantry from spawned list — they live in transport.passengers
+        for (let i = 0; i < Math.min(cargo.length, maxLoad); i++) {
+          const unit = cargo[i];
+          transport.passengers.push(unit);
+          unit.transportRef = transport;
+          // Remove loaded unit from spawned list — it lives in transport.passengers
           // and will be re-added to the entity list when unloaded (TMISSION_UNLOAD)
-          const idx = result.spawned.indexOf(inf);
+          const idx = result.spawned.indexOf(unit);
           if (idx >= 0) result.spawned.splice(idx, 1);
         }
       }

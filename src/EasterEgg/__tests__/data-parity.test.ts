@@ -1497,13 +1497,13 @@ describe('CIVILIAN_UNIT_TYPES parity', () => {
 // ============================================================
 describe('STRUCTURE_SIZE parity', () => {
   const expected: Record<string, [number, number]> = {
-    FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], APWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
-    PROC: [3, 2], FIX: [3, 2], SILO: [1, 1], DOME: [2, 2],
-    GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], TSLA: [1, 1], AGUN: [1, 1], GAP: [1, 1], PBOX: [1, 1],
-    HPAD: [2, 2], AFLD: [2, 2], ATEK: [2, 2], STEK: [2, 2], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 2], KENN: [1, 1],
+    FACT: [3, 3], WEAP: [3, 2], POWR: [2, 2], APWR: [3, 3], BARR: [2, 2], TENT: [2, 2],
+    PROC: [3, 3], FIX: [3, 3], SILO: [1, 1], DOME: [2, 2],
+    GUN: [1, 1], SAM: [2, 1], HBOX: [1, 1], TSLA: [1, 2], AGUN: [1, 2], GAP: [1, 2], PBOX: [1, 1],
+    HPAD: [2, 2], AFLD: [3, 2], ATEK: [2, 2], STEK: [3, 3], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 1], KENN: [1, 1],
     SYRD: [3, 3], SPEN: [3, 3], BIO: [2, 2], HOSP: [2, 2],
     FACF: [3, 3], DOMF: [2, 2], WEAF: [3, 2],
-    QUEE: [2, 2], LAR1: [1, 1], LAR2: [1, 1], FTUR: [1, 1],
+    QUEE: [2, 1], LAR1: [1, 1], LAR2: [1, 1], FTUR: [1, 1],
     BARL: [1, 1], BRL3: [1, 1],
     MINP: [1, 1], MINV: [1, 1],
     SBAG: [1, 1], FENC: [1, 1], BARB: [1, 1], BRIK: [1, 1], WOOD: [1, 1], CYCL: [1, 1],

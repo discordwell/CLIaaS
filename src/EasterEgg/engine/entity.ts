@@ -211,7 +211,7 @@ export class Entity {
   waveRallyTick = 0;       // tick when wave should start attacking (rally delay)
 
   // Transport passengers
-  passengers: Entity[] = [];       // loaded infantry (hidden from entity list)
+  passengers: Entity[] = [];       // loaded cargo: infantry + vehicles (hidden from entity list)
   transportRef: Entity | null = null; // reference to transport carrying this unit
 
   // Harvester economy (EC3: bail-based capacity — 28 bails max per harvester load)

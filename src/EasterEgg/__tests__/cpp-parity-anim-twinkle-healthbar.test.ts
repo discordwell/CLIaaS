@@ -576,9 +576,9 @@ describe('building health bar width matches C++ formula (bdata.cpp:3399-3405)', 
   it('key building structures have correct STRUCTURE_SIZE footprint widths', () => {
     // Verify a representative set of buildings
     const expected: [string, number][] = [
-      ['FACT', 3], ['WEAP', 3], ['PROC', 3],  // 3-wide
-      ['POWR', 2], ['APWR', 2], ['BARR', 2], ['TENT', 2], // 2-wide
-      ['DOME', 2], ['HPAD', 2], ['AFLD', 2],  // 2-wide
+      ['FACT', 3], ['WEAP', 3], ['PROC', 3], ['APWR', 3], // 3-wide
+      ['POWR', 2], ['BARR', 2], ['TENT', 2], // 2-wide
+      ['DOME', 2], ['HPAD', 2], ['AFLD', 3],  // 2-3 wide
       ['GUN', 1], ['SAM', 2], ['SILO', 1], ['TSLA', 1], // 1-2 wide defenses
     ];
     for (const [type, expectedW] of expected) {

@@ -134,8 +134,8 @@ describe('AFLD stats (rules.ini parity)', () => {
     expect(STRUCTURE_MAX_HP['AFLD']).toBe(1000);
   });
 
-  it('footprint is 2x2 cells', () => {
-    expect(STRUCTURE_SIZE['AFLD']).toEqual([2, 2]);
+  it('footprint is 3x2 cells', () => {
+    expect(STRUCTURE_SIZE['AFLD']).toEqual([3, 2]);
   });
 
   it('has no weapon (purely economic/aircraft support)', () => {
@@ -160,24 +160,27 @@ describe('AFLD stats (rules.ini parity)', () => {
   });
 });
 
-// -- 2x2 Footprint -----------------------------------------------------------
+// -- 3x2 Footprint -----------------------------------------------------------
 //
-// C++ STRUCTURE_SIZE: AFLD is 2x2. The origin cell is top-left;
-// the structure occupies (cx,cy), (cx+1,cy), (cx,cy+1), (cx+1,cy+1).
+// C++ STRUCTURE_SIZE: AFLD is 3x2 (BSIZE_32). The origin cell is top-left;
+// the structure occupies 6 cells total.
 
-describe('AFLD 2x2 footprint', () => {
+describe('AFLD 3x2 footprint', () => {
 
-  it('footprint occupies 4 cells from origin', () => {
+  it('footprint occupies 6 cells from origin', () => {
     const [w, h] = STRUCTURE_SIZE['AFLD']!;
-    expect(w * h).toBe(4);
-    // Origin at (10,10) -> cells: (10,10), (11,10), (10,11), (11,11)
+    expect(w * h).toBe(6);
+    // Origin at (10,10) -> 3 wide, 2 tall
     const cells: [number, number][] = [];
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) {
         cells.push([10 + dx, 10 + dy]);
       }
     }
-    expect(cells).toEqual([[10, 10], [11, 10], [10, 11], [11, 11]]);
+    expect(cells).toEqual([
+      [10, 10], [11, 10], [12, 10],
+      [10, 11], [11, 11], [12, 11],
+    ]);
   });
 });
 

@@ -89,8 +89,8 @@ const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
 const SCG11EA_PRE_NAVAL_TANK_TARGET = 20;  // Mass 18+ tanks before assaulting
 const SCG11EA_SHIPYARD_TANK_FLOOR = 8;     // Finish SYRD once we have a credible beachhead
-const SCG11EA_SUB_HUNT_TANK_FLOOR = 6;     // Keep a real island hold while DDs clear the river
-const SCG11EA_LATE_SUB_HUNT_TANK_FLOOR = 4; // Once the base is stable, spend the rest on DD rebuilds
+const SCG11EA_SUB_HUNT_TANK_FLOOR = 8;     // Keep a real island hold while DDs clear the river
+const SCG11EA_LATE_SUB_HUNT_TANK_FLOOR = 6; // Once the base is stable, spend the rest on DD rebuilds
 const SCG11EA_SUB_HUNT_EMERGENCY_TANK_FLOOR = 4; // Panic rebuild only when the beachhead is collapsing
 const SCG11EA_POST_NAVAL_TANK_TARGET = 10; // Refill for the westward push once the river is effectively open
 const SCG11EA_POST_NAVAL_SUB_THRESHOLD = 1;
@@ -596,6 +596,21 @@ export class OracleStrategy {
   private scg11eaCoastLinkReady(alliedStructures: RAStructure[]): boolean {
     return this.getScg11eaShipyardCandidates().some((pos) =>
       this.scg11eaChainReachable(pos, alliedStructures, 'SYRD'));
+  }
+
+  private scg11eaMustReopenCoast(
+    state: RAGameState,
+    alliedStructures: RAStructure[],
+    playerUnits: RAEntity[],
+  ): boolean {
+    if (this.scenario !== 'SCG11EA') return false;
+
+    const enemySubCount = state.enemies.filter((e) => e.t === 'SS' || e.t === 'MSUB').length;
+    const fleetCount = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length;
+
+    if (!this.scg11eaNavalPhaseStarted(alliedStructures)) return true;
+    if (fleetCount === 0) return true;
+    return enemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS;
   }
 
   private getScg11eaForwardConYard(alliedStructures: RAStructure[]): RAStructure | undefined {
@@ -1443,10 +1458,14 @@ export class OracleStrategy {
         const scg11eaShipyardExists = alliedStructures.some((s) => s.t === 'SYRD' || s.t === 'SPEN');
         const scg11eaBootstrapReady =
           this.scenario === 'SCG11EA' && this.scg11eaBootstrapReady(alliedStructures);
+        const scg11eaCoastChainCritical =
+          this.scenario === 'SCG11EA' &&
+          this.scg11eaMustReopenCoast(state, alliedStructures, playerUnits);
         const scg11eaExtendCoastChain =
           this.scenario === 'SCG11EA' &&
           (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR') &&
           scg11eaBootstrapReady &&
+          scg11eaCoastChainCritical &&
           !scg11eaShipyardExists &&
           !this.scg11eaCoastLinkReady(alliedStructures);
         const scg11eaPowerChainCandidates =
@@ -1701,6 +1720,9 @@ export class OracleStrategy {
         this.scenario === 'SCG11EA' && this.scg11eaShipyardReady(state, alliedStructures);
       const scg11eaBootstrapReady =
         this.scenario === 'SCG11EA' && this.scg11eaBootstrapReady(alliedStructures);
+      const scg11eaCoastChainCritical =
+        this.scenario === 'SCG11EA' &&
+        this.scg11eaMustReopenCoast(state, alliedStructures, playerUnits);
       const scg11eaExistingFleet =
         this.scenario === 'SCG11EA'
           ? playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length
@@ -1724,6 +1746,7 @@ export class OracleStrategy {
         this.scenario === 'SCG11EA' &&
         !shipyardExists &&
         scg11eaBootstrapReady &&
+        scg11eaCoastChainCritical &&
         !scg11eaShipyardReady &&
         (buildable.structures.includes('POWR') || buildable.structures.includes('APWR'))
       ) {
@@ -1754,6 +1777,7 @@ export class OracleStrategy {
       } else if (this.scenario === 'SCG11EA' && shipyardExists) {
         const powerDeficit = state.power.consumed - state.power.produced;
         const aaCount = alliedStructures.filter((s) => s.t === 'AGUN').length;
+        const barracksCount = alliedStructures.filter((s) => s.t === 'BARR' || s.t === 'TENT').length;
         const domeCount = alliedStructures.filter((s) => s.t === 'DOME').length;
         const gunCount = alliedStructures.filter(
           (s) => s.t === 'GUN' || s.t === 'FTUR',
@@ -1775,15 +1799,25 @@ export class OracleStrategy {
           scg11eaSubHuntLive &&
           !scg11eaEconomyCollapsed &&
           scg11eaEconomyFragile &&
-          shipCount > 0 &&
-          scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS;
+          (
+            shipCount > 0 ||
+            scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
+            scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER
+          ) &&
+          (
+            scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS ||
+            scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
+            scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER
+          );
         const scg11eaPressureDefenseUnlock =
           scg11eaSubHuntLive &&
           procCount >= 1 &&
-          shipCount >= SCG11EA_HUNT_MIN_SHIPS &&
+          shipCount >= 1 &&
+          survivingTanks >= SCG11EA_SUB_HUNT_TANK_FLOOR &&
           (
-            scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 2 ||
-            scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER ||
+            scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 1 ||
+            scg11eaLocalAirThreatCount >= 1 ||
+            scg11eaEnemyAirCount > 0 ||
             (!scg11eaFleetShort &&
               scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER)
           );
@@ -1795,21 +1829,32 @@ export class OracleStrategy {
             procCount >= 2
           ) ||
           scg11eaPressureDefenseUnlock;
+        const scg11eaDesiredAA =
+          scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS ? 1 : SCG11EA_AA_DEFENSE_TARGET;
+        const scg11eaDesiredGroundDefense =
+          scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS ? 1 : SCG11EA_GROUND_DEFENSE_TARGET;
+        const scg11eaGroundDefenseTechReady =
+          scg11eaStaticDefenseUnlocked &&
+          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          barracksCount === 0 &&
+          (buildable.structures.includes('BARR') || buildable.structures.includes('TENT')) &&
+          state.credits >= 500;
         const scg11eaGroundDefenseReady =
           scg11eaStaticDefenseUnlocked &&
           scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
-          gunCount < SCG11EA_GROUND_DEFENSE_TARGET &&
+          barracksCount > 0 &&
+          gunCount < scg11eaDesiredGroundDefense &&
           state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE &&
           (buildable.structures.includes('FTUR') || buildable.structures.includes('GUN'));
         const scg11eaAAReady =
           scg11eaStaticDefenseUnlocked &&
-          scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
-          aaCount < SCG11EA_AA_DEFENSE_TARGET &&
+          (scg11eaLocalAirThreatCount >= 1 || scg11eaEnemyAirCount > 0) &&
+          aaCount < scg11eaDesiredAA &&
           buildable.structures.includes('AGUN') &&
           state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE;
         const scg11eaAATechReady =
           scg11eaStaticDefenseUnlocked &&
-          scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
+          (scg11eaLocalAirThreatCount >= 1 || scg11eaEnemyAirCount > 0) &&
           domeCount === 0 &&
           buildable.structures.includes('DOME') &&
           state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE;
@@ -1857,7 +1902,7 @@ export class OracleStrategy {
             rtti: RTTI_BUILDINGTYPE,
             type_id: defenseType === 'FTUR' ? 10 : 8,
           });
-          reasons.push(`produce ${defenseType} (${gunCount + 1}/${SCG11EA_GROUND_DEFENSE_TARGET}, threats=${scg11eaGroundThreatCount})`);
+          reasons.push(`produce ${defenseType} (${gunCount + 1}/${scg11eaDesiredGroundDefense}, threats=${scg11eaGroundThreatCount})`);
         } else if (
           scg11eaAAReady
         ) {
@@ -1866,7 +1911,7 @@ export class OracleStrategy {
             rtti: RTTI_BUILDINGTYPE,
             type_id: 9,
           });
-          reasons.push(`produce AGUN (${aaCount + 1}/${SCG11EA_AA_DEFENSE_TARGET}, air=${scg11eaLocalAirThreatCount})`);
+          reasons.push(`produce AGUN (${aaCount + 1}/${scg11eaDesiredAA}, air=${scg11eaLocalAirThreatCount})`);
         } else if (
           scg11eaAATechReady
         ) {
@@ -1876,6 +1921,16 @@ export class OracleStrategy {
             type_id: 6,
           });
           reasons.push(`produce DOME for AA (air=${scg11eaLocalAirThreatCount})`);
+        } else if (
+          scg11eaGroundDefenseTechReady
+        ) {
+          const barracksType = buildable.structures.includes('BARR') ? 'BARR' : 'TENT';
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: barracksType === 'BARR' ? 21 : 22,
+          });
+          reasons.push(`produce ${barracksType} for pillboxes`);
         } else if (
           scg11eaSubHuntLive &&
           scg11eaEconomyFragile &&
@@ -2061,6 +2116,10 @@ export class OracleStrategy {
     const harvCount = playerUnits.filter((u) => u.t === 'HARV').length;
     const navalCount = playerUnits.filter((u) => NAVAL_COMBAT_TYPES.has(u.t)).length;
     const refCount = alliedStructures.filter((s) => s.t === 'PROC').length;
+    const aaCount = alliedStructures.filter((s) => s.t === 'AGUN').length;
+    const barracksCount = alliedStructures.filter((s) => s.t === 'BARR' || s.t === 'TENT').length;
+    const domeCount = alliedStructures.filter((s) => s.t === 'DOME').length;
+    const gunCount = alliedStructures.filter((s) => s.t === 'GUN' || s.t === 'FTUR').length;
     const targetHarvesters = Math.max(2, refCount);
     const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
@@ -2224,6 +2283,49 @@ export class OracleStrategy {
       (scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER ||
         scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER ||
         tankCount < (scg11eaSubHuntPhase ? scg11eaTankTarget : SCG11EA_ASSAULT_MIN_ARMOR));
+    const scg11eaDesiredAA =
+      this.scenario === 'SCG11EA' &&
+      scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS
+        ? 1
+        : SCG11EA_AA_DEFENSE_TARGET;
+    const scg11eaDesiredGroundDefense =
+      this.scenario === 'SCG11EA' &&
+      scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS
+        ? 1
+        : SCG11EA_GROUND_DEFENSE_TARGET;
+    const scg11eaFirstWaveDefenseLock =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      navalCount > 0 &&
+      (
+        domeCount === 0 ||
+        aaCount < scg11eaDesiredAA ||
+        (
+          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          (barracksCount === 0 || gunCount < scg11eaDesiredGroundDefense)
+        )
+      );
+    const scg11eaDefenseStructureGap =
+      this.scenario === 'SCG11EA' &&
+      scg11eaSubHuntPhase &&
+      (
+        scg11eaFirstWaveDefenseLock ||
+        navalCount > 0
+      ) &&
+      (
+        (
+          scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
+          (domeCount === 0 || aaCount < scg11eaDesiredAA)
+        ) ||
+        (
+          scg11eaEnemyAirCount > 0 &&
+          (domeCount === 0 || aaCount < scg11eaDesiredAA)
+        ) ||
+        (
+          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          (barracksCount === 0 || gunCount < scg11eaDesiredGroundDefense)
+        )
+      );
     // SCG11EA: always produce ships (we know subs are there), lower credit threshold
     const shipCreditThreshold = this.scenario === 'SCG11EA'
       ? (scg11eaNavalEconomyFragile
@@ -2240,7 +2342,7 @@ export class OracleStrategy {
     // Ground-first — spending credits on DD starves tank production.
     const scg11eaGroundFirst = this.scenario === 'SCG11EA' && tankCount < 8;
     const shouldProduceShips = scg11eaGroundFirst ? false
-      : this.scenario === 'SCG11EA' ? scg11eaFleetShort
+      : this.scenario === 'SCG11EA' ? (scg11eaFleetShort && !scg11eaDefenseStructureGap)
       : enemyNaval;
     if (
       hasShipyard &&

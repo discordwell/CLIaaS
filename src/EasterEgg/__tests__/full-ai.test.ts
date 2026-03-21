@@ -179,11 +179,11 @@ describe('AI base construction', () => {
     expect(STRUCTURE_SIZE.WEAP).toEqual([3, 2]);
     expect(STRUCTURE_SIZE.POWR).toEqual([2, 2]);
     expect(STRUCTURE_SIZE.TENT).toEqual([2, 2]);
-    expect(STRUCTURE_SIZE.PROC).toEqual([3, 2]);
+    expect(STRUCTURE_SIZE.PROC).toEqual([3, 3]);
     expect(STRUCTURE_SIZE.DOME).toEqual([2, 2]);
     expect(STRUCTURE_SIZE.GUN).toEqual([1, 1]);
     expect(STRUCTURE_SIZE.HBOX).toEqual([1, 1]);
-    // TSLA uses default [1,1] fallback — not explicitly in STRUCTURE_SIZE
+    // TSLA is [1,2] per C++ bdata.cpp
     expect(STRUCTURE_MAX_HP.TSLA).toBe(400);
   });
 
@@ -472,7 +472,7 @@ describe('AI retreat and defense', () => {
     const fix = PRODUCTION_ITEMS.find(p => p.type === 'FIX' && p.isStructure);
     expect(fix).toBeDefined();
     expect(fix!.faction).toBe('both');
-    expect(STRUCTURE_SIZE.FIX).toEqual([3, 2]);
+    expect(STRUCTURE_SIZE.FIX).toEqual([3, 3]);
   });
 
   it('ants never retreat', () => {

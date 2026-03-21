@@ -118,8 +118,8 @@ describe('AGUN structure stats (rules.ini)', () => {
     expect(STRUCTURE_MAX_HP['AGUN']).toBe(400);
   });
 
-  it('has size 1x1', () => {
-    expect(STRUCTURE_SIZE['AGUN']).toEqual([1, 1]);
+  it('has size 1x2', () => {
+    expect(STRUCTURE_SIZE['AGUN']).toEqual([1, 2]);
   });
 
   it('is NOT in STRUCTURE_POWERED set (fires regardless of power)', () => {

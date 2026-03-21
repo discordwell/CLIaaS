@@ -110,16 +110,17 @@ describe('C++ parity: GAP generator activates when powered (building.cpp:996-999
 
     updateGapGenerators(ctx);
 
-    // Center of GAP (1x1 building) should be jammed
-    expect(isCellJammed(ctx.map, 30, 30)).toBe(true);
+    // Center of GAP (1x2 building at 30,30) = (30, 31) — cy + floor(2/2)
+    const centerY = 31;
+    expect(isCellJammed(ctx.map, 30, centerY)).toBe(true);
 
     // Cells within GAP_RADIUS should be jammed
-    expect(isCellJammed(ctx.map, 30 + GAP_RADIUS, 30)).toBe(true);
-    expect(isCellJammed(ctx.map, 30, 30 + GAP_RADIUS)).toBe(true);
-    expect(isCellJammed(ctx.map, 30 - GAP_RADIUS, 30)).toBe(true);
+    expect(isCellJammed(ctx.map, 30 + GAP_RADIUS, centerY)).toBe(true);
+    expect(isCellJammed(ctx.map, 30, centerY + GAP_RADIUS)).toBe(true);
+    expect(isCellJammed(ctx.map, 30 - GAP_RADIUS, centerY)).toBe(true);
 
     // Cells outside radius should NOT be jammed
-    expect(isCellJammed(ctx.map, 30 + GAP_RADIUS + 1, 30)).toBe(false);
+    expect(isCellJammed(ctx.map, 30 + GAP_RADIUS + 1, centerY)).toBe(false);
   });
 
   it('GAP uses C++ octagonal radius, not square or Euclidean', () => {
@@ -133,23 +134,25 @@ describe('C++ parity: GAP generator activates when powered (building.cpp:996-999
 
     updateGapGenerators(ctx);
 
+    // GAP is 1x2, center = (50, 51)
+    const cY = 51;
     const r = GAP_RADIUS;
     // Corner of bounding box: (r, r) big=10,small=10 => 20+10=30 > 20 → NOT jammed
-    expect(isCellJammed(ctx.map, 50 + r, 50 + r)).toBe(false);
+    expect(isCellJammed(ctx.map, 50 + r, cY + r)).toBe(false);
 
     // (r, 0) and (0, r) are on the boundary → jammed
     // big=10,small=0 => 20+0=20 <= 20
-    expect(isCellJammed(ctx.map, 50 + r, 50)).toBe(true);
-    expect(isCellJammed(ctx.map, 50, 50 + r)).toBe(true);
+    expect(isCellJammed(ctx.map, 50 + r, cY)).toBe(true);
+    expect(isCellJammed(ctx.map, 50, cY + r)).toBe(true);
 
     // (7, 7): big=7,small=7 => 14+7=21 > 20 → NOT jammed (octagonal clips diagonals)
-    expect(isCellJammed(ctx.map, 50 + 7, 50 + 7)).toBe(false);
+    expect(isCellJammed(ctx.map, 50 + 7, cY + 7)).toBe(false);
 
     // (7, 6): big=7,small=6 => 14+6=20 <= 20 → jammed (on the boundary)
-    expect(isCellJammed(ctx.map, 50 + 7, 50 + 6)).toBe(true);
+    expect(isCellJammed(ctx.map, 50 + 7, cY + 6)).toBe(true);
 
     // (8, 7): big=8,small=7 => 16+7=23 > 20 → NOT jammed
-    expect(isCellJammed(ctx.map, 50 + 8, 50 + 7)).toBe(false);
+    expect(isCellJammed(ctx.map, 50 + 8, cY + 7)).toBe(false);
   });
 });
 
@@ -453,13 +456,13 @@ describe('C++ parity: overlapping GAP jam counts (cell.h:124 bitmask vs counter)
 // =============================================================================
 
 describe('C++ parity: GAP jam center calculation', () => {
-  it('1x1 GAP: center is at structure position', () => {
-    // C++ Center_Coord() for a 1x1 building returns the center of that cell
-    // Coord_Cell() converts back to cell coords → same cell as placement
-    // TS: STRUCTURE_SIZE['GAP'] = [1,1], so cx + floor(1/2)=0 = cx, cy + floor(1/2)=0 = cy
-    const [gw, gh] = STRUCTURE_SIZE['GAP'] ?? [1, 1];
+  it('1x2 GAP: center is offset by floor(h/2) in Y', () => {
+    // C++ Center_Coord() for a 1x2 building returns center of the footprint
+    // Coord_Cell() converts back to cell coords
+    // TS: STRUCTURE_SIZE['GAP'] = [1,2], so cx + floor(1/2)=0 = cx, cy + floor(2/2)=1 = cy+1
+    const [gw, gh] = STRUCTURE_SIZE['GAP'] ?? [1, 2];
     expect(gw).toBe(1);
-    expect(gh).toBe(1);
+    expect(gh).toBe(2);
 
     const ctx = makeFogContext({
       structures: [makeGapStructure(40, 40)],
@@ -470,16 +473,17 @@ describe('C++ parity: GAP jam center calculation', () => {
 
     updateGapGenerators(ctx);
 
-    // The center of jamming should be at (40, 40), not offset
+    // The center of jamming should be at (40, 41) — cy + floor(2/2) = 41
+    const centerY = 41;
     // Verify by checking symmetry: cells at +r and -r from center should both be jammed
-    expect(isCellJammed(ctx.map, 40 + GAP_RADIUS, 40)).toBe(true);
-    expect(isCellJammed(ctx.map, 40 - GAP_RADIUS, 40)).toBe(true);
-    expect(isCellJammed(ctx.map, 40, 40 + GAP_RADIUS)).toBe(true);
-    expect(isCellJammed(ctx.map, 40, 40 - GAP_RADIUS)).toBe(true);
+    expect(isCellJammed(ctx.map, 40 + GAP_RADIUS, centerY)).toBe(true);
+    expect(isCellJammed(ctx.map, 40 - GAP_RADIUS, centerY)).toBe(true);
+    expect(isCellJammed(ctx.map, 40, centerY + GAP_RADIUS)).toBe(true);
+    expect(isCellJammed(ctx.map, 40, centerY - GAP_RADIUS)).toBe(true);
 
     // One cell beyond radius: NOT jammed
-    expect(isCellJammed(ctx.map, 40 + GAP_RADIUS + 1, 40)).toBe(false);
-    expect(isCellJammed(ctx.map, 40 - GAP_RADIUS - 1, 40)).toBe(false);
+    expect(isCellJammed(ctx.map, 40 + GAP_RADIUS + 1, centerY)).toBe(false);
+    expect(isCellJammed(ctx.map, 40 - GAP_RADIUS - 1, centerY)).toBe(false);
   });
 });
 
@@ -633,14 +637,17 @@ describe('C++ parity: GAP near map edge clips to bounds', () => {
 
     updateGapGenerators(ctx);
 
-    // Only cells in positive quadrant should be jammed (others are out of bounds)
-    expect(isCellJammed(ctx.map, 0, 0)).toBe(true);
+    // GAP is 1x2 at (0,0), center = (0, 1)
+    const centerY = 1;
+    // Center and nearby cells should be jammed (others are out of bounds)
+    expect(isCellJammed(ctx.map, 0, centerY)).toBe(true);
     expect(isCellJammed(ctx.map, 5, 5)).toBe(true);
     // Negative coords are out of bounds — should not cause errors
     expect(countJammedCells(ctx.map)).toBeGreaterThan(0);
 
     // Calculate expected: only cells where cx>=0 && cy>=0
     // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
+    // Center is at (0, centerY)
     const r = GAP_RADIUS;
     let expected = 0;
     for (let dy = -r; dy <= r; dy++) {
@@ -649,7 +656,7 @@ describe('C++ parity: GAP near map edge clips to bounds', () => {
         const ady = Math.abs(dy);
         const big = adx > ady ? adx : ady;
         const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= r * 2 && dx >= 0 && dy >= 0) {
+        if (big * 2 + small <= r * 2 && (0 + dx) >= 0 && (centerY + dy) >= 0) {
           expected++;
         }
       }

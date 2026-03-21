@@ -172,7 +172,7 @@ describe('serializeState', () => {
 
     const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
     expect(s.structures[0].cx).toBe(72);
-    expect(s.structures[0].cy).toBe(69); // FIX is [3,2]: cy = 69 + floor((2-1)/2) = 69
+    expect(s.structures[0].cy).toBe(70); // FIX is [3,3]: cy = 69 + floor((3-1)/2) = 70
   });
 
   it('includes cell coordinates not pixel coords', () => {

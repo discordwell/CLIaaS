@@ -104,7 +104,7 @@ describe('Superweapon structure config', () => {
   });
 
   it('STEK has correct size and HP', () => {
-    expect(STRUCTURE_SIZE['STEK']).toEqual([2, 2]);
+    expect(STRUCTURE_SIZE['STEK']).toEqual([3, 3]);
     expect(STRUCTURE_MAX_HP['STEK']).toBeGreaterThan(0);
   });
 
@@ -119,14 +119,17 @@ describe('Superweapon structure config', () => {
   });
 
   it('MSLO has correct size and HP', () => {
-    expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 2]);
+    expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 1]);
     expect(STRUCTURE_MAX_HP['MSLO']).toBeGreaterThan(0);
   });
 
   it('all 5 superweapon structures are in STRUCTURE_SIZE', () => {
+    const expectedSizes: Record<string, [number, number]> = {
+      ATEK: [2, 2], STEK: [3, 3], PDOX: [2, 2], IRON: [2, 2], MSLO: [2, 1],
+    };
     for (const type of ['ATEK', 'STEK', 'PDOX', 'IRON', 'MSLO']) {
       expect(STRUCTURE_SIZE[type]).toBeDefined();
-      expect(STRUCTURE_SIZE[type]).toEqual([2, 2]);
+      expect(STRUCTURE_SIZE[type]).toEqual(expectedSizes[type]);
     }
   });
 

@@ -128,8 +128,8 @@ describe('TSLA structure stats (rules.ini)', () => {
     expect(STRUCTURE_MAX_HP['TSLA']).toBe(400);
   });
 
-  it('has 1x1 footprint', () => {
-    expect(STRUCTURE_SIZE['TSLA']).toEqual([1, 1]);
+  it('has 1x2 footprint', () => {
+    expect(STRUCTURE_SIZE['TSLA']).toEqual([1, 2]);
   });
 
   it('IS power-dependent (in STRUCTURE_POWERED)', () => {

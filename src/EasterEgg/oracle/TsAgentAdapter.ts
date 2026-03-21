@@ -41,7 +41,10 @@ export class TsAgentAdapter {
   }
 
   async connect(): Promise<void> {
-    this.browser = await chromium.launch({ headless: this.config.headless });
+    this.browser = await chromium.launch({
+      headless: this.config.headless,
+      args: ['--mute-audio'],
+    });
     const context = await this.browser.newContext({ viewport: this.config.viewport });
     this.page = await context.newPage();
     this.page.on('console', (msg) => this.consoleLogs.push(`[${msg.type()}] ${msg.text()}`));

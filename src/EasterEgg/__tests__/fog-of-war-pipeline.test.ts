@@ -757,10 +757,11 @@ describe('Gap generators', () => {
 
     updateGapGenerators(ctx);
 
-    // Cell at exact distance GAP_RADIUS along axis should be jammed
-    expect(map.getVisibility(64 + GAP_RADIUS, 64)).toBe(0);
-    // Cell at diagonal distance sqrt(GAP_RADIUS^2 + 1) > GAP_RADIUS should NOT be jammed
-    expect(map.getVisibility(64 + GAP_RADIUS, 65)).toBe(2); // just outside circle
+    // GAP is 1x2 at (64,64), center = (64, 65) — cy + floor(2/2)
+    // Cell at exact distance GAP_RADIUS along axis from center should be jammed
+    expect(map.getVisibility(64 + GAP_RADIUS, 65)).toBe(0);
+    // Cell at diagonal distance from center should NOT be jammed
+    expect(map.getVisibility(64 + GAP_RADIUS, 66)).toBe(2); // just outside circle
   });
 });
 

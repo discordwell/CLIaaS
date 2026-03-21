@@ -526,8 +526,8 @@ describe('MSLO stats (rules.ini parity)', () => {
     expect(STRUCTURE_MAX_HP['MSLO']).toBe(400);
   });
 
-  it('footprint is 2x2 cells', () => {
-    expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 2]);
+  it('footprint is 2x1 cells', () => {
+    expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 1]);
   });
 
   it('has no weapon (superweapon structure, not defensive)', () => {
@@ -636,20 +636,20 @@ describe('MSLO economic functions (rules.ini Cost=2500)', () => {
   });
 });
 
-// -- MSLO 2x2 Footprint -------------------------------------------------------
+// -- MSLO 2x1 Footprint -------------------------------------------------------
 
-describe('MSLO 2x2 footprint', () => {
+describe('MSLO 2x1 footprint', () => {
 
-  it('footprint occupies 4 cells from origin', () => {
+  it('footprint occupies 2 cells from origin', () => {
     const [w, h] = STRUCTURE_SIZE['MSLO']!;
-    expect(w * h).toBe(4);
+    expect(w * h).toBe(2);
     const cells: [number, number][] = [];
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) {
         cells.push([10 + dx, 10 + dy]);
       }
     }
-    expect(cells).toEqual([[10, 10], [11, 10], [10, 11], [11, 11]]);
+    expect(cells).toEqual([[10, 10], [11, 10]]);
   });
 });
 
@@ -689,10 +689,10 @@ describe('MSLO destruction blast — radial HE (non-barrel)', () => {
 
 describe('superweapon structures — shared behavioral invariants', () => {
 
-  it('all three are 2x2 footprint', () => {
-    for (const type of ['PDOX', 'IRON', 'MSLO']) {
-      expect(STRUCTURE_SIZE[type]).toEqual([2, 2]);
-    }
+  it('PDOX and IRON are 2x2, MSLO is 2x1', () => {
+    expect(STRUCTURE_SIZE['PDOX']).toEqual([2, 2]);
+    expect(STRUCTURE_SIZE['IRON']).toEqual([2, 2]);
+    expect(STRUCTURE_SIZE['MSLO']).toEqual([2, 1]);
   });
 
   it('all three have 400 max HP', () => {

@@ -24,8 +24,8 @@ import { GameMap, Terrain } from '../engine/map';
 describe('C++ parity: getBibCells (bdata.cpp:3597-3629)', () => {
   describe('bibbed buildings produce correct bib cells', () => {
     // Width-2 buildings: bib is 2 cells wide, 1 row below
-    const WIDTH_2_BIBBED = ['POWR', 'APWR', 'BARR', 'TENT', 'HPAD', 'AFLD', 'DOME',
-                            'ATEK', 'STEK', 'IRON', 'PDOX', 'BIO', 'HOSP', 'FCOM'];
+    const WIDTH_2_BIBBED = ['POWR', 'BARR', 'TENT', 'HPAD', 'DOME',
+                            'ATEK', 'BIO', 'HOSP', 'FCOM', 'DOMF'];
 
     for (const type of WIDTH_2_BIBBED) {
       it(`${type} (2-wide): bib is 2 cells at row cy+h`, () => {
@@ -39,7 +39,7 @@ describe('C++ parity: getBibCells (bdata.cpp:3597-3629)', () => {
     }
 
     // Width-3 buildings: bib is 3 cells wide, 1 row below
-    const WIDTH_3_BIBBED = ['FACT', 'WEAP', 'PROC', 'FIX', 'SYRD', 'SPEN', 'MISS'];
+    const WIDTH_3_BIBBED = ['FACT', 'WEAP', 'PROC', 'APWR', 'STEK', 'MISS', 'FACF', 'WEAF'];
 
     for (const type of WIDTH_3_BIBBED) {
       it(`${type} (3-wide): bib is 3 cells at row cy+h`, () => {
@@ -96,9 +96,10 @@ describe('C++ parity: getBibCells (bdata.cpp:3597-3629)', () => {
     it('contains all standard bibbed buildings', () => {
       const expected = [
         'FACT', 'WEAP', 'PROC', 'POWR', 'APWR', 'BARR', 'TENT',
-        'FIX', 'HPAD', 'AFLD', 'DOME',
-        'ATEK', 'STEK', 'IRON', 'PDOX',
-        'SYRD', 'SPEN', 'BIO', 'HOSP', 'MISS', 'FCOM',
+        'HPAD', 'DOME',
+        'ATEK', 'STEK',
+        'BIO', 'HOSP', 'MISS', 'FCOM',
+        'FACF', 'WEAF', 'DOMF',
       ];
       for (const type of expected) {
         expect(BIBBED_BUILDINGS.has(type), `${type} should be bibbed`).toBe(true);
@@ -107,7 +108,8 @@ describe('C++ parity: getBibCells (bdata.cpp:3597-3629)', () => {
 
     it('does not contain non-bibbed buildings', () => {
       const excluded = ['SILO', 'GUN', 'TSLA', 'GAP', 'PBOX', 'HBOX', 'AGUN',
-                         'SAM', 'FTUR', 'KENN', 'MSLO', 'SBAG', 'FENC', 'BRIK', 'WOOD'];
+                         'SAM', 'FTUR', 'KENN', 'MSLO', 'SBAG', 'BRIK', 'WOOD',
+                         'FIX', 'AFLD', 'IRON', 'PDOX', 'SYRD', 'SPEN'];
       for (const type of excluded) {
         expect(BIBBED_BUILDINGS.has(type), `${type} should NOT be bibbed`).toBe(false);
       }

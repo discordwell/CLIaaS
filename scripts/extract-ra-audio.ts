@@ -179,13 +179,14 @@ interface AudioSource {
 
 const AUDIO_SOURCES: AudioSource[] = [
   // === Weapon sounds ===
-  { outputName: 'rifle', sources: [{ from: 'sounds', audFile: 'GUN5.AUD' }] },
-  { outputName: 'machinegun', sources: [{ from: 'sounds', audFile: 'GUN11.AUD' }] },
-  { outputName: 'cannon', sources: [{ from: 'sounds', audFile: 'CANNON1.AUD' }] },
-  { outputName: 'artillery', sources: [{ from: 'sounds', audFile: 'CANNON2.AUD' }] },
-  { outputName: 'teslazap', sources: [{ from: 'sounds', audFile: 'TESLA1.AUD' }] },
-  { outputName: 'grenade', sources: [{ from: 'sounds', audFile: 'GRENADE1.AUD' }] },
-  { outputName: 'bazooka', sources: [{ from: 'sounds', audFile: 'ROKROLL1.AUD' }] },
+  // C++ audio.cpp SFX table cross-reference:
+  { outputName: 'rifle', sources: [{ from: 'sounds', audFile: 'GUN27.AUD' }] },         // audio.cpp:119 VOC_GUN_RIFLE "Rifle shot"
+  { outputName: 'machinegun', sources: [{ from: 'sounds', audFile: 'GUN11.AUD' }] },     // audio.cpp:116 VOC_GUN_5 "5 round gun burst (slow)"
+  { outputName: 'cannon', sources: [{ from: 'sounds', audFile: 'CANNON1.AUD' }] },       // audio.cpp:102 VOC_CANNON1 "Cannon sound (medium)"
+  { outputName: 'artillery', sources: [{ from: 'sounds', audFile: 'CANNON2.AUD' }] },    // audio.cpp:103 VOC_CANNON2 "Cannon sound (short)"
+  { outputName: 'teslazap', sources: [{ from: 'sounds', audFile: 'TESLA1.AUD' }] },      // audio.cpp:144 VOC_TESLA_ZAP "Tesla zap effect"
+  { outputName: 'grenade', sources: [{ from: 'sounds', audFile: 'GRENADE1.AUD' }] },     // audio.cpp:115 VOC_GRENADE_TOSS
+  { outputName: 'bazooka', sources: [{ from: 'sounds', audFile: 'MISSILE1.AUD' }] },     // audio.cpp:131 VOC_MISSILE_1 "Missile with high tech effect"
 
   // === Ant-specific sounds (Aftermath expansion) ===
   { outputName: 'mandible', sources: [{ from: 'aftermath', audFile: 'ANTBITE.AUD' }] },
@@ -193,19 +194,19 @@ const AUDIO_SOURCES: AudioSource[] = [
   { outputName: 'fireball', sources: [{ from: 'aftermath', audFile: 'BUZZY1.AUD' }] },
 
   // === Dog sounds ===
-  { outputName: 'dogjaw', sources: [{ from: 'sounds', audFile: 'DOGW5.AUD' }] },
+  { outputName: 'dogjaw', sources: [{ from: 'sounds', audFile: 'DOGY1.AUD' }] },         // audio.cpp:110 VOC_DOG_BARK "Dog bark" (attack sound)
   { outputName: 'select_dog', sources: [{ from: 'sounds', audFile: 'DOGW7.AUD' }] },
-  { outputName: 'move_ack_dog', sources: [{ from: 'sounds', audFile: 'DOGW6.AUD' }] },
+  { outputName: 'move_ack_dog', sources: [{ from: 'sounds', audFile: 'DOGY1.AUD' }] }, // audio.cpp:110 VOC_DOG_BARK "Dog bark"
 
   // === Explosions ===
   // C++ audio.cpp: VOC_GUN_5=GUN5, VOC_KABOOM1=KABOOM1, VOC_KABOOM22=KABOOM22, VOC_KABOOM25=KABOOM25
   // NOTE: TANK01.AUD is VOX_MADTANK_DEPLOYED speech ("M.A.D. Tank Deployed"), NOT an explosion.
-  { outputName: 'explode_sm', sources: [{ from: 'sounds', audFile: 'GUN13.AUD' }] },
-  { outputName: 'explode_lg', sources: [{ from: 'sounds', audFile: 'KABOOM22.AUD' }] },
-  { outputName: 'building_explode', sources: [{ from: 'sounds', audFile: 'IRONCUR9.AUD' }] },
+  { outputName: 'explode_sm', sources: [{ from: 'sounds', audFile: 'KABOOM30.AUD' }] },    // audio.cpp:150 VOC_KABOOM30 "Short explosion (HE)"
+  { outputName: 'explode_lg', sources: [{ from: 'sounds', audFile: 'KABOOM22.AUD' }] },   // audio.cpp:127 VOC_KABOOM22 "Long explosion (sharp)"
+  { outputName: 'building_explode', sources: [{ from: 'sounds', audFile: 'CRMBLE2.AUD' }] }, // audio.cpp:155 VOC_CRUMBLE "Building crumble"
 
   // === Flamethrower ===
-  { outputName: 'flamethrower', sources: [{ from: 'sounds', audFile: 'BLEEP9.AUD' }] },
+  { outputName: 'flamethrower', sources: [{ from: 'sounds', audFile: 'FIREBL3.AUD' }] }, // audio.cpp:113 VOC_FIRE_LAUNCH "Fireball launch sound"
 
   // === Unit acknowledgments (Aftermath Stavros voices) ===
   { outputName: 'move_ack', sources: [
@@ -239,20 +240,20 @@ const AUDIO_SOURCES: AudioSource[] = [
   { outputName: 'sell', sources: [{ from: 'sounds', audFile: 'CASHTURN.AUD' }] },
   { outputName: 'repair', sources: [{ from: 'sounds', audFile: 'BUILD5.AUD' }] },
   { outputName: 'crate_pickup', sources: [{ from: 'sounds', audFile: 'CASHUP1.AUD' }] },
-  { outputName: 'tesla_charge', sources: [{ from: 'sounds', audFile: 'CHRONO2.AUD' }] },
+  { outputName: 'tesla_charge', sources: [{ from: 'sounds', audFile: 'TSLACHG2.AUD' }] }, // audio.cpp:143 VOC_TESLA_POWER_UP "Hum charge up"
 
   // === EVA voice lines (SPEECH.MIX) ===
   { outputName: 'eva_acknowledged', sources: [
-    { from: 'speech', audFile: 'COMNDOR1.AUD' },
+    { from: 'sounds', audFile: 'ACKNO.AUD' },      // audio.cpp:77 VOC_ACKNOWL "acknowledged"
   ]},
   { outputName: 'eva_unit_lost', sources: [
-    { from: 'speech', audFile: 'UNITRDY1.AUD' },
+    { from: 'speech', audFile: 'UNITLST1.AUD' },   // audio.cpp:505 VOX_UNIT_LOST "unit lost"
   ]},
   { outputName: 'eva_base_attack', sources: [
-    { from: 'speech', audFile: 'BASEATK1.AUD' },
+    { from: 'speech', audFile: 'BASEATK1.AUD' },    // audio.cpp:492 VOX_BASE_UNDER_ATTACK
   ]},
   { outputName: 'eva_construction_complete', sources: [
-    { from: 'speech', audFile: 'BLDGINF1.AUD' },
+    { from: 'speech', audFile: 'CONSCMP1.AUD' },    // audio.cpp:479 VOX_CONSTRUCTION "construction complete"
   ]},
   { outputName: 'eva_unit_ready', sources: [
     { from: 'speech', audFile: 'UNITRDY1.AUD' },

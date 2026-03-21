@@ -56,7 +56,7 @@ describe('Audio extraction mappings match C++ audio.cpp', () => {
     const explosionMappings = [
       { name: 'explode_sm', expected: /^(GUN|KABOOM)/ },
       { name: 'explode_lg', expected: /^(GUN|KABOOM)/ },
-      { name: 'building_explode', expected: /^(CRUMBLE|IRONCUR|KABOOM)/ },
+      { name: 'building_explode', expected: /^(CRMBLE|KABOOM)/ },
     ];
     for (const { name, expected } of explosionMappings) {
       const match = scriptSource.match(
@@ -77,12 +77,15 @@ describe('Audio extraction mappings match C++ audio.cpp', () => {
   // Verify weapon sound mappings against C++ audio.cpp SFX table
   const WEAPON_MAPPINGS: [string, string, string][] = [
     // [outputName, expectedAudFile, C++ reference]
-    ['rifle',       'GUN5.AUD',      'audio.cpp:109 VOC_RIFLE'],
-    ['machinegun',  'GUN11.AUD',     'audio.cpp:115 VOC_MGUN11'],
-    ['cannon',      'CANNON1.AUD',   'audio.cpp:99 VOC_CANNON1'],
-    ['artillery',   'CANNON2.AUD',   'audio.cpp:100 VOC_CANNON2'],
-    ['teslazap',    'TESLA1.AUD',    'audio.cpp:103 VOC_TESLA1'],
-    ['grenade',     'GRENADE1.AUD',  'audio.cpp:101 VOC_GRENADE1'],
+    ['rifle',       'GUN27.AUD',     'audio.cpp:119 VOC_GUN_RIFLE "Rifle shot"'],
+    ['machinegun',  'GUN11.AUD',     'audio.cpp:116 VOC_GUN_5 "5 round gun burst"'],
+    ['cannon',      'CANNON1.AUD',   'audio.cpp:102 VOC_CANNON1 "Cannon (medium)"'],
+    ['artillery',   'CANNON2.AUD',   'audio.cpp:103 VOC_CANNON2 "Cannon (short)"'],
+    ['teslazap',    'TESLA1.AUD',    'audio.cpp:144 VOC_TESLA_ZAP "Tesla zap effect"'],
+    ['grenade',     'GRENADE1.AUD',  'audio.cpp:115 VOC_GRENADE_TOSS'],
+    ['bazooka',     'MISSILE1.AUD',  'audio.cpp:131 VOC_MISSILE_1 "Missile launch"'],
+    ['flamethrower','FIREBL3.AUD',   'audio.cpp:113 VOC_FIRE_LAUNCH "Fireball launch"'],
+    ['tesla_charge','TSLACHG2.AUD',  'audio.cpp:143 VOC_TESLA_POWER_UP "Hum charge up"'],
   ];
 
   for (const [name, audFile, cppRef] of WEAPON_MAPPINGS) {
@@ -98,11 +101,12 @@ describe('Audio extraction mappings match C++ audio.cpp', () => {
   // EVA speech mappings against C++ audio.cpp speech table
   const EVA_MAPPINGS: [string, string, string][] = [
     ['eva_unit_ready',             'UNITRDY1.AUD',  'audio.cpp:480 VOX_UNIT_READY'],
-    ['eva_construction_complete',  'BLDGINF1.AUD',  'audio.cpp:479 VOX_CONSTRUCTION'],
-    ['eva_base_attack',            'BASEATK1.AUD',  'audio.cpp:478 VOX_BASE_UNDER_ATTACK'],
-    ['eva_low_power',              'LOPOWER1.AUD',  'audio.cpp:481 VOX_LOW_POWER'],
-    ['eva_new_options',            'NEWOPT1.AUD',    'audio.cpp:482 VOX_NEW_OPTIONS'],
-    ['eva_reinforcements',         'REINFOR1.AUD',   'audio.cpp:476 VOX_REINFORCEMENTS'],
+    ['eva_construction_complete',  'CONSCMP1.AUD',  'audio.cpp:479 VOX_CONSTRUCTION "construction complete"'],
+    ['eva_unit_lost',              'UNITLST1.AUD',  'audio.cpp:505 VOX_UNIT_LOST "unit lost"'],
+    ['eva_base_attack',            'BASEATK1.AUD',  'audio.cpp:492 VOX_BASE_UNDER_ATTACK'],
+    ['eva_low_power',              'LOPOWER1.AUD',  'audio.cpp:490 VOX_LOW_POWER'],
+    ['eva_new_options',            'NEWOPT1.AUD',    'audio.cpp:481 VOX_NEW_CONSTRUCT'],
+    ['eva_reinforcements',         'REINFOR1.AUD',   'audio.cpp:487 VOX_REINFORCEMENTS'],
   ];
 
   for (const [name, audFile, cppRef] of EVA_MAPPINGS) {

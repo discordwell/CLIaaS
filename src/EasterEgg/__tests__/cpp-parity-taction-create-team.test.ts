@@ -9,7 +9,7 @@
  *   1. Spawns entities from team members (type * count) at the origin waypoint
  *   2. Returns spawned entities in result.spawned
  *   3. Skips gracefully if team index doesn't exist
- *   4. Auto-loads infantry into transport when team has both (APC/TRAN + infantry)
+ *   4. Auto-loads ALL cargo (infantry + vehicles) into transport (C++ reinf.cpp:217-254)
  *   5. IsSuicide flag (team.flags & 2) sets entity.isSuicide on all members
  *   6. Team trigger attachment — entity.triggerName set from team.trigger index
  *   7. Civilian VIP invulnerability — invulnTick=120 for CIVILIAN_UNIT_TYPES
@@ -344,10 +344,10 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
   });
 
   // =====================================================================
-  // 4. Auto-load infantry into transport
+  // 4. Auto-load cargo into transport (C++ reinf.cpp:217-254)
   // =====================================================================
 
-  describe('auto-load infantry into transport', () => {
+  describe('auto-load cargo into transport', () => {
     it('loads infantry into APC when team has both APC and infantry', () => {
       resetEntityIds();
       const teamTypes: TeamType[] = [{
@@ -450,7 +450,10 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
       }
     });
 
-    it('does not auto-load non-infantry into transport', () => {
+    it('auto-loads vehicles into transport during team spawn (C++ reinf.cpp:217-254)', () => {
+      // C++ _Create_Group loads ALL non-transport team members into the transport
+      // via CargoClass::Attach — no infantry-only restriction at spawn time.
+      // The RADIO_CAN_LOAD infantry check only applies to player-initiated loading.
       resetEntityIds();
       const teamTypes: TeamType[] = [{
         name: 'vehicles',
@@ -460,7 +463,7 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
         trigger: -1,
         members: [
           { type: 'APC', count: 1 },
-          { type: '1TNK', count: 2 }, // tanks, not infantry
+          { type: '1TNK', count: 2 },
         ],
         missions: [],
       }];
@@ -473,10 +476,96 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
         [],
       );
 
-      // All 3 in spawned — tanks are not loaded into APC
-      expect(result.spawned).toHaveLength(3);
+      // C++ loads tanks into APC during team creation — only APC in spawned list
+      expect(result.spawned).toHaveLength(1);
       const apc = result.spawned.find(e => e.type === 'APC');
-      expect(apc!.passengers).toHaveLength(0);
+      expect(apc!.passengers).toHaveLength(2);
+      for (const p of apc!.passengers) {
+        expect(p.type).toBe('1TNK');
+        expect(p.transportRef).toBe(apc);
+      }
+    });
+
+    it('auto-loads MCV + tanks into LST — landing mission parity (SCG06EA)', () => {
+      // SCG06EA team "start": 1TNK:2,MCV:1,LST:1 — MCV and tanks arrive inside LST.
+      // C++ reinf.cpp:217-254: all non-transport members loaded into the LST.
+      // Bug was: only infantry was loaded, so MCV spawned directly on water.
+      resetEntityIds();
+      const teamTypes: TeamType[] = [{
+        name: 'start',
+        house: 2, // USSR
+        flags: 0,
+        origin: 0,
+        trigger: -1,
+        members: [
+          { type: '1TNK', count: 2 },
+          { type: 'MCV', count: 1 },
+          { type: 'LST', count: 1 },
+        ],
+        missions: [
+          { mission: 3, data: 0 },  // TMISSION_MOVE to waypoint 0
+          { mission: 8, data: 0 },  // TMISSION_UNLOAD
+        ],
+      }];
+
+      const result = executeTriggerAction(
+        createTeamAction(0),
+        teamTypes,
+        makeWaypoints(),
+        new Set(),
+        [],
+      );
+
+      // Only LST should be in spawned list — tanks and MCV are passengers
+      expect(result.spawned).toHaveLength(1);
+      const lst = result.spawned[0];
+      expect(lst.type).toBe('LST');
+      expect(lst.passengers).toHaveLength(3);
+
+      const passengerTypes = lst.passengers.map(p => p.type).sort();
+      expect(passengerTypes).toEqual(['1TNK', '1TNK', 'MCV']);
+      for (const p of lst.passengers) {
+        expect(p.transportRef).toBe(lst);
+      }
+    });
+
+    it('auto-loads mixed infantry + vehicles into LST (SCG12EA arnf1)', () => {
+      // SCG12EA team "arnf1": E1:2,E3:2,MCV:1,LST:1
+      resetEntityIds();
+      const teamTypes: TeamType[] = [{
+        name: 'arnf1',
+        house: 1, // Greece
+        flags: 0,
+        origin: 0,
+        trigger: -1,
+        members: [
+          { type: 'E1', count: 2 },
+          { type: 'E3', count: 2 },
+          { type: 'MCV', count: 1 },
+          { type: 'LST', count: 1 },
+        ],
+        missions: [
+          { mission: 3, data: 1 },
+          { mission: 8, data: 0 },
+        ],
+      }];
+
+      const result = executeTriggerAction(
+        createTeamAction(0),
+        teamTypes,
+        makeWaypoints(),
+        new Set(),
+        [],
+      );
+
+      // LST has passengers=5, team has 5 cargo units — all fit
+      expect(result.spawned).toHaveLength(1);
+      const lst = result.spawned[0];
+      expect(lst.type).toBe('LST');
+      expect(lst.passengers).toHaveLength(5);
+
+      const passengerTypes = lst.passengers.map(p => p.type).sort();
+      expect(passengerTypes).toEqual(['E1', 'E1', 'E3', 'E3', 'MCV']);
     });
   });
 
