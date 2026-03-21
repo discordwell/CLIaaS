@@ -1273,7 +1273,7 @@ export const STRUCTURE_MAX_HP: Record<string, number> = {
 // C++ bdata.cpp: GUN (Turret) and AGUN (AA Gun) have IsPowered=false (default).
 // They fire regardless of power state, like PBOX/HBOX/FTUR.
 export const STRUCTURE_POWERED: Set<string> = new Set([
-  'TSLA', 'SAM', 'GAP', 'PDOX', 'IRON', 'MSLO',
+  'TSLA', 'DOME', 'GAP', 'PDOX', 'IRON',
 ]);
 
 export interface ScenarioResult {

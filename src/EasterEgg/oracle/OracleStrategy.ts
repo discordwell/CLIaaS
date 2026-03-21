@@ -3138,10 +3138,19 @@ export class OracleStrategy {
           commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: sam.id });
           reasons.push(`SHOOT SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
         } else {
-          // Walk toward SAM — try direct path first, if stuck try going via (15,100)
-          // which is the western coast area likely to be clear terrain
-          commands.push({ cmd: 'move', ids: [tanya.id], cx: sam.cx, cy: sam.cy });
-          reasons.push(`→ SAM(${sam.cx},${sam.cy}) via (${mx},${my}) [${remainingSams.length} left]`);
+          // Walk via waypoints through passable terrain gaps.
+          // Template map: x=23-24 has ROCK_DEBRIS (passable) at y=102-104,
+          // then CLEAR cells at y=100-97. Water (59-96) blocks x=19-22.
+          // Route: east to x=24, north through clear corridor, then west to SAM.
+          const waypoints = [
+            { cx: 24, cy: 104 }, // east through rock debris gap
+            { cx: 23, cy: 100 }, // north through clear cells
+            { cx: 22, cy: 97 },  // continue north
+            { cx: 18, cy: 94 },  // west to SAM area
+          ];
+          const wp = waypoints.find(w => this.distanceSq(tanya, w) > 4) ?? waypoints[waypoints.length - 1];
+          commands.push({ cmd: 'move', ids: [tanya.id], cx: wp.cx, cy: wp.cy });
+          reasons.push(`→ SAM(${sam.cx},${sam.cy}) via (${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
         }
       }
 
