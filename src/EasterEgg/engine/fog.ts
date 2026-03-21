@@ -28,7 +28,7 @@ export const STRUCTURE_SIGHT: Record<string, number> = {
   PDOX: 10, IRON: 10, MSLO: 5,  KENN: 4,
   SYRD: 4,  SPEN: 4,  GAP: 10,
   PBOX: 5,  HBOX: 5,  GUN: 6,   SAM: 5,   AGUN: 6,
-  TSLA: 8,  FTUR: 6,  BIO: 4,   HOSP: 4,
+  TSLA: 8,  FTUR: 6,  BIO: 4,   HOSP: 4,  FCOM: 10,
 };
 
 // ---------------------------------------------------------------------------
@@ -190,10 +190,17 @@ export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: n
   // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
   // Radius 0 reveals nothing — early return.
   if (radius === 0) return;
-  const r2 = radius * radius;
+  // C++ coord.cpp:124-136 — Distance() uses octagonal approximation:
+  //   max(|dy|,|dx|) + min(|dy|,|dx|)/2, compared in lepton units.
+  // Simplified for cell coords: max*2 + min <= radius*2
+  const threshold = radius * 2;
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
-      if (dx * dx + dy * dy <= r2) {
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+      const big = adx > ady ? adx : ady;
+      const small = adx > ady ? ady : adx;
+      if (big * 2 + small <= threshold) {
         const rx = cx + dx;
         const ry = cy + dy;
         if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
@@ -284,11 +291,15 @@ export function updateGapGenerators(ctx: FogContext): void {
     const cx = s.cx + Math.floor(gw / 2);
     const cy = s.cy + Math.floor(gh / 2);
     const r = GAP_RADIUS;
-    const r2 = r * r;
+    const rThreshold = r * 2;  // C++ octagonal distance: max*2+min <= r*2
 
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy <= r2) {
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= rThreshold) {
           ctx.map.jamCell(cx + dx, cy + dy);
         }
       }

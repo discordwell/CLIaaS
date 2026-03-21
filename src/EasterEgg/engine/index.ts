@@ -3489,7 +3489,7 @@ export class Game {
   private static readonly TMISSION_HOUND_DOG = 10;   // move to waypoint then guard (C++ TMission_Hound_Dog)
   private static readonly TMISSION_DO = 11;          // assign mission to members (C++ Coordinate_Do)
   private static readonly TMISSION_SET_GLOBAL = 12;  // set global variable (C++ TMission_Set_Global)
-  private static readonly TMISSION_IDLE = 13;        // idle at position
+  private static readonly TMISSION_INVULNERABLE = 13;  // C++ teamtype.h:57 — applies iron curtain to team (simplified: idle wait)
   private static readonly TMISSION_LOAD = 14;
   private static readonly TMISSION_SPY = 15;         // infiltrate building at waypoint (C++ TMission_Spy)
   private static readonly TMISSION_PATROL = 16;
@@ -3845,7 +3845,7 @@ export class Game {
         break;
       }
 
-      case Game.TMISSION_IDLE: {
+      case Game.TMISSION_INVULNERABLE: {
         // Idle at current position — data is in 1/10th minute units (0 = skip immediately)
         if (tm.data === 0) { entity.teamMissionIndex++; break; }
         if (entity.teamMissionWaiting === 0) {

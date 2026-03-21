@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-20T23:10Z — Parallel Parity Blitz: 5 Domains, 4 Fixes, 378 New Tests
+- **5 subagents** wrote parity tests in parallel: repair/sell (64), harvester economics (33), team missions (109), fog/sight/gap (121), superweapon timers (51)
+- **TMISSION_INVULNERABLE gap fixed**: team.ts was missing enum value 13, shifting LOAD/SPY/PATROL by -1. Also renamed TMISSION_IDLE→TMISSION_INVULNERABLE in index.ts for consistency.
+- **Superweapon power flags fixed**: SONAR_PULSE, PARABOMB, PARAINFANTRY, SPY_PLANE now have requiresPower:false per HOUSE.CPP:654-658. These charge during brownouts.
+- **FCOM sight range added**: Forward Command (FCOM) Sight=10 was missing from STRUCTURE_SIGHT, defaulting to 5.
+- **Circle rasterization fixed**: Replaced Euclidean dx²+dy²≤r² with C++ octagonal distance max*2+min≤r*2 (coord.cpp:124-136) across fog.ts, map.ts, superweapon.ts, OracleStrategy.ts. C++ reveals fewer cells at large radii.
+- **120mm burst:2 test fixed**: rules.ini has no Burst= for 120mm (default 1).
+- **All 34,263 tests passing**, 0 failures.
+
 ## 2026-03-20T18:50Z — Radar Display C++ Parity: Faction Emblem
 - **Fixed no-radar display**: Replaced static noise + "NO RADAR" text with faction-specific emblem (C++ radar.cpp:370-381)
 - **Allied**: Gold 4-pointed compass rose (matching natoradr.shp) on dark blue background

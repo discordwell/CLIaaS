@@ -767,7 +767,7 @@ export default function AntGame({ onExit }: AntGameProps) {
             // Only batch after tick 3000 — early game needs precise micro every step.
             const batchSize = (document.hidden && totalTicks > 3000) ? 10 : 1;
             for (let b = 0; b < batchSize && w.__autoPlayRunning && totalTicks < maxTicks; b++) {
-              const step = totalTicks < 3000 ? ticksPerStep : ticksPerStep * 2;
+              const step = ticksPerStep;
               game.step(step);
               totalTicks += step;
               iteration++;

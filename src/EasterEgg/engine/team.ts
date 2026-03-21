@@ -39,13 +39,10 @@ export const TMISSION_DEPLOY       = 9;
 export const TMISSION_HOUND_DOG    = 10;
 export const TMISSION_DO           = 11;
 export const TMISSION_SET_GLOBAL   = 12;
-export const TMISSION_LOAD         = 13;  // C++ TMISSION_LOAD = 13 in the enum but 14 in index.ts; keep as 13 for team.ts parity
-export const TMISSION_SPY          = 14;
-export const TMISSION_PATROL       = 15;
-
-// Note: index.ts uses slightly different numbering (LOAD=14, SPY=15, PATROL=16).
-// The Team class works with the mission numbers as they appear in scenario INI data,
-// which may use either numbering. The important thing is behavioral parity.
+export const TMISSION_INVULNERABLE = 13;  // C++ teamtype.h:57 — makes team invulnerable (iron curtain)
+export const TMISSION_LOAD         = 14;  // C++ teamtype.h:58
+export const TMISSION_SPY          = 15;  // C++ teamtype.h:59
+export const TMISSION_PATROL       = 16;  // C++ teamtype.h:60
 
 let nextTeamId = 1;
 

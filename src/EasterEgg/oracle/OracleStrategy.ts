@@ -1319,11 +1319,42 @@ export class OracleStrategy {
           scg11eaEconomyFragile &&
           shipCount > 0 &&
           scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS;
+        const scg11eaPressureDefenseUnlock =
+          scg11eaSubHuntLive &&
+          procCount >= 1 &&
+          shipCount >= SCG11EA_HUNT_MIN_SHIPS &&
+          (
+            scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 2 ||
+            scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER ||
+            (!scg11eaFleetShort &&
+              scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER)
+          );
         const scg11eaStaticDefenseUnlocked =
-          !scg11eaFleetShort &&
-          shipCount >= SCG11EA_STATIC_DEFENSE_MIN_SHIPS &&
-          scg11eaEnemySubCount <= SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
-          procCount >= 2;
+          (
+            !scg11eaFleetShort &&
+            shipCount >= SCG11EA_STATIC_DEFENSE_MIN_SHIPS &&
+            scg11eaEnemySubCount <= SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
+            procCount >= 2
+          ) ||
+          scg11eaPressureDefenseUnlock;
+        const scg11eaGroundDefenseReady =
+          scg11eaStaticDefenseUnlocked &&
+          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
+          gunCount < SCG11EA_GROUND_DEFENSE_TARGET &&
+          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE &&
+          (buildable.structures.includes('FTUR') || buildable.structures.includes('GUN'));
+        const scg11eaAAReady =
+          scg11eaStaticDefenseUnlocked &&
+          scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
+          aaCount < SCG11EA_AA_DEFENSE_TARGET &&
+          buildable.structures.includes('AGUN') &&
+          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE;
+        const scg11eaAATechReady =
+          scg11eaStaticDefenseUnlocked &&
+          scg11eaLocalAirThreatCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
+          domeCount === 0 &&
+          buildable.structures.includes('DOME') &&
+          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE;
         if (
           scg11eaEconomyCollapsed &&
           buildable.structures.includes('PROC')
@@ -1343,6 +1374,50 @@ export class OracleStrategy {
           } else {
             reasons.push(`save for PROC rebuild (${state.credits}/${SCG11EA_PROC_REBUILD_RESERVE})`);
           }
+        } else if (powerDeficit > 0 && scg11eaPowerRebuildDeferred) {
+          reasons.push(`defer APWR for fleet (${state.power.produced}/${state.power.consumed}, ${shipCount}/${scg11eaDesiredShips} DD)`);
+        } else if (powerDeficit > 0 && buildable.structures.includes('APWR')) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 18,
+          });
+          reasons.push(`produce APWR (power ${state.power.produced}/${state.power.consumed})`);
+        } else if (powerDeficit > 0 && buildable.structures.includes('POWR')) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 17,
+          });
+          reasons.push('produce POWR (power deficit)');
+        } else if (
+          scg11eaGroundDefenseReady
+        ) {
+          const defenseType = buildable.structures.includes('FTUR') ? 'FTUR' : 'GUN';
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: defenseType === 'FTUR' ? 10 : 8,
+          });
+          reasons.push(`produce ${defenseType} (${gunCount + 1}/${SCG11EA_GROUND_DEFENSE_TARGET}, threats=${scg11eaGroundThreatCount})`);
+        } else if (
+          scg11eaAAReady
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 9,
+          });
+          reasons.push(`produce AGUN (${aaCount + 1}/${SCG11EA_AA_DEFENSE_TARGET}, air=${scg11eaLocalAirThreatCount})`);
+        } else if (
+          scg11eaAATechReady
+        ) {
+          commands.push({
+            cmd: 'produce',
+            rtti: RTTI_BUILDINGTYPE,
+            type_id: 6,
+          });
+          reasons.push(`produce DOME for AA (air=${scg11eaLocalAirThreatCount})`);
         } else if (
           scg11eaSubHuntLive &&
           scg11eaEconomyFragile &&
@@ -1374,62 +1449,6 @@ export class OracleStrategy {
             type_id: 2,
           });
           reasons.push(`emergency rebuild WEAP (${survivingTanks} tanks, ships=${shipCount}, threats=${scg11eaGroundThreatCount})`);
-        } else if (powerDeficit > 0 && scg11eaPowerRebuildDeferred) {
-          reasons.push(`defer APWR for fleet (${state.power.produced}/${state.power.consumed}, ${shipCount}/${scg11eaDesiredShips} DD)`);
-        } else if (powerDeficit > 0 && buildable.structures.includes('APWR')) {
-          commands.push({
-            cmd: 'produce',
-            rtti: RTTI_BUILDINGTYPE,
-            type_id: 18,
-          });
-          reasons.push(`produce APWR (power ${state.power.produced}/${state.power.consumed})`);
-        } else if (powerDeficit > 0 && buildable.structures.includes('POWR')) {
-          commands.push({
-            cmd: 'produce',
-            rtti: RTTI_BUILDINGTYPE,
-            type_id: 17,
-          });
-          reasons.push('produce POWR (power deficit)');
-        } else if (
-          scg11eaStaticDefenseUnlocked &&
-          scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
-          domeCount === 0 &&
-          buildable.structures.includes('DOME') &&
-          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE
-        ) {
-          commands.push({
-            cmd: 'produce',
-            rtti: RTTI_BUILDINGTYPE,
-            type_id: 6,
-          });
-          reasons.push(`produce DOME for AA (air=${scg11eaEnemyAirCount})`);
-        } else if (
-          scg11eaStaticDefenseUnlocked &&
-          scg11eaEnemyAirCount >= SCG11EA_AA_DEFENSE_TRIGGER &&
-          aaCount < SCG11EA_AA_DEFENSE_TARGET &&
-          buildable.structures.includes('AGUN') &&
-          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE
-        ) {
-          commands.push({
-            cmd: 'produce',
-            rtti: RTTI_BUILDINGTYPE,
-            type_id: 9,
-          });
-          reasons.push(`produce AGUN (${aaCount + 1}/${SCG11EA_AA_DEFENSE_TARGET}, air=${scg11eaEnemyAirCount})`);
-        } else if (
-          scg11eaStaticDefenseUnlocked &&
-          scg11eaGroundThreatCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
-          gunCount < SCG11EA_GROUND_DEFENSE_TARGET &&
-          state.credits >= SCG11EA_DEFENSE_CREDIT_RESERVE &&
-          (buildable.structures.includes('FTUR') || buildable.structures.includes('GUN'))
-        ) {
-          const defenseType = buildable.structures.includes('FTUR') ? 'FTUR' : 'GUN';
-          commands.push({
-            cmd: 'produce',
-            rtti: RTTI_BUILDINGTYPE,
-            type_id: defenseType === 'FTUR' ? 10 : 8,
-          });
-          reasons.push(`produce ${defenseType} (${gunCount + 1}/${SCG11EA_GROUND_DEFENSE_TARGET}, threats=${scg11eaGroundThreatCount})`);
         } else if (
           !scg11eaSubHuntLive &&
           weapCount === 0 &&
@@ -1650,7 +1669,7 @@ export class OracleStrategy {
       scg11eaSubHuntPhase &&
       scg11eaEnemySubCount > SCG11EA_STATIC_DEFENSE_MAX_SUBS &&
       navalCount >= Math.max(2, SCG11EA_HUNT_MIN_SHIPS - 1) &&
-      tankCount >= SCG11EA_GROUND_DEFENSE_TRIGGER + 1 &&
+      tankCount >= SCG11EA_GROUND_DEFENSE_TRIGGER &&
       scg11eaGroundThreatCount <= SCG11EA_GROUND_DEFENSE_TRIGGER + 1;
     const scg11eaShipyardPriority =
       this.scenario === 'SCG11EA' &&
@@ -1759,8 +1778,11 @@ export class OracleStrategy {
             : (scg11eaBasePressure ? SCG11EA_DEFENSE_CREDIT_RESERVE : 250)
           : 400)
       : 800;
-    const shouldProduceShips = this.scenario === 'SCG11EA'
-      ? scg11eaFleetShort
+    // SCG11EA: don't produce ships until we have enough tanks for the assault.
+    // Ground-first — spending credits on DD starves tank production.
+    const scg11eaGroundFirst = this.scenario === 'SCG11EA' && tankCount < 8;
+    const shouldProduceShips = scg11eaGroundFirst ? false
+      : this.scenario === 'SCG11EA' ? scg11eaFleetShort
       : enemyNaval;
     if (
       hasShipyard &&
@@ -3261,10 +3283,8 @@ export class OracleStrategy {
       (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58 && islandProductionTypes.has(s.t),
     );
     const islandBaseDestroyed = islandProduction.length === 0 && state.tick > 5000;
-    const holdArmorForBase = baseThreats.length > 0;
-    if (holdArmorForBase) {
-      reasons.push(`hold armor (${baseThreats.length} base threats)`);
-    } else if (islandBaseDestroyed) {
+    // Never hold armor — attacking enemy production IS the defense.
+    if (islandBaseDestroyed) {
       // Base destroyed — mop up remaining island structures, then tanks come home
       const remainingIsland = enemyStructures.filter(
         (s) => s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58,
@@ -3298,7 +3318,7 @@ export class OracleStrategy {
     // Continuous pressure: every new tank from WEAP marches north to join the fight.
     const assaultActive = this.scg11eaAssaultStarted || assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
     if (assaultActive) this.scg11eaAssaultStarted = true;
-    if (!holdArmorForBase && !islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
+    if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
       const armyCentroid = this.centroid(assaultArmor);
       const stagingPoint: Point = { cx: 45, cy: 65 };
       const atStaging = armyCentroid.cy <= 70;

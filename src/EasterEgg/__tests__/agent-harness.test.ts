@@ -414,3 +414,111 @@ describe('processCommands — structure ops', () => {
     expect(game.deployMCV).toHaveBeenCalledWith(mcv);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// Stutter-stepping dedup — repeated commands to same destination
+// must NOT reset path/pathIndex
+// ═══════════════════════════════════════════════════════════
+
+describe('stutter-stepping dedup — move', () => {
+  it('repeated move to same cell does not reset pathIndex', () => {
+    const game = makeGame();
+    const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    addEntity(game, unit);
+
+    // First move — sets path and pathIndex
+    const cmds: AgentCommand[] = [{ cmd: 'move', unitIds: [1], cx: 55, cy: 55 }];
+    processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(unit.mission).toBe(Mission.MOVE);
+    expect(unit.pathIndex).toBe(0);
+    expect(unit.path!.length).toBeGreaterThan(0);
+
+    // Simulate the unit advancing along its path
+    unit.pathIndex = 3;
+
+    // Send the SAME move command again — should NOT reset pathIndex
+    processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(unit.pathIndex).toBe(3); // preserved, not reset to 0
+    expect(unit.mission).toBe(Mission.MOVE);
+  });
+
+  it('move to a DIFFERENT cell DOES reset pathIndex', () => {
+    const game = makeGame();
+    const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    addEntity(game, unit);
+
+    processCommands(game as unknown as Parameters<typeof processCommands>[0],
+      [{ cmd: 'move', unitIds: [1], cx: 55, cy: 55 }]);
+    unit.pathIndex = 3;
+
+    // Different destination — must repath
+    processCommands(game as unknown as Parameters<typeof processCommands>[0],
+      [{ cmd: 'move', unitIds: [1], cx: 60, cy: 60 }]);
+
+    expect(unit.pathIndex).toBe(0); // reset for new destination
+  });
+});
+
+describe('stutter-stepping dedup — attack', () => {
+  it('repeated attack on same target does not reset pathIndex', () => {
+    const game = makeGame();
+    const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    const enemy = makeEntity(2, UnitType.V_3TNK, House.USSR, 55, 55);
+    addEntity(game, unit);
+    addEntity(game, enemy);
+
+    const cmds: AgentCommand[] = [{ cmd: 'attack', unitIds: [1], targetId: 2 }];
+    processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(unit.mission).toBe(Mission.ATTACK);
+    expect(unit.target).toBe(enemy);
+    unit.pathIndex = 4;
+
+    // Same attack command — should not reset
+    processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(unit.pathIndex).toBe(4);
+    expect(unit.target).toBe(enemy);
+  });
+
+  it('attack on a DIFFERENT target DOES reset pathIndex', () => {
+    const game = makeGame();
+    const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    const enemy1 = makeEntity(2, UnitType.V_3TNK, House.USSR, 55, 55);
+    const enemy2 = makeEntity(3, UnitType.V_3TNK, House.USSR, 60, 60);
+    addEntity(game, unit);
+    addEntity(game, enemy1);
+    addEntity(game, enemy2);
+
+    processCommands(game as unknown as Parameters<typeof processCommands>[0],
+      [{ cmd: 'attack', unitIds: [1], targetId: 2 }]);
+    unit.pathIndex = 4;
+
+    processCommands(game as unknown as Parameters<typeof processCommands>[0],
+      [{ cmd: 'attack', unitIds: [1], targetId: 3 }]);
+
+    expect(unit.pathIndex).toBe(0);
+    expect(unit.target).toBe(enemy2);
+  });
+});
+
+describe('stutter-stepping dedup — attack_move', () => {
+  it('repeated attack_move to same cell does not reset pathIndex', () => {
+    const game = makeGame();
+    const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    addEntity(game, unit);
+
+    const cmds: AgentCommand[] = [{ cmd: 'attack_move', unitIds: [1], cx: 55, cy: 55 }];
+    processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(unit.mission).toBe(Mission.HUNT);
+    unit.pathIndex = 2;
+
+    processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(unit.pathIndex).toBe(2);
+    expect(unit.mission).toBe(Mission.HUNT);
+  });
+});

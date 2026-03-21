@@ -337,10 +337,22 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
+
+            const destX = c.cx * CELL_SIZE + CELL_SIZE / 2;
+            const destY = c.cy * CELL_SIZE + CELL_SIZE / 2;
+
+            // Skip path reset if already moving to the same destination —
+            // resending a move to the same cell restarts pathfinding from
+            // waypoint 0 which causes visible stutter-stepping.
+            if (e.moveTarget && e.moveTarget.x === destX && e.moveTarget.y === destY
+                && e.mission === Mission.MOVE && e.path && e.path.length > 0) {
+              continue;
+            }
+
             clearTeamScripts(e);
             e.mission = Mission.MOVE;
             e.target = null;
-            e.moveTarget = { x: c.cx * CELL_SIZE + CELL_SIZE / 2, y: c.cy * CELL_SIZE + CELL_SIZE / 2 };
+            e.moveTarget = { x: destX, y: destY };
             if (e.stats.isAircraft) {
               // Aircraft fly directly — no ground pathfinding needed
               e.path = [{ cx: c.cx, cy: c.cy }];
@@ -368,6 +380,10 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
+            // Skip if already attacking the same target
+            if (e.mission === Mission.ATTACK && e.target === target && e.path && e.path.length > 0) {
+              continue;
+            }
             clearTeamScripts(e);
             e.mission = Mission.ATTACK;
             e.target = target;
@@ -386,10 +402,17 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
+            const destX = c.cx * CELL_SIZE + CELL_SIZE / 2;
+            const destY = c.cy * CELL_SIZE + CELL_SIZE / 2;
+            // Skip if already attack-moving to the same destination
+            if (e.moveTarget && e.moveTarget.x === destX && e.moveTarget.y === destY
+                && e.mission === Mission.HUNT && e.path && e.path.length > 0) {
+              continue;
+            }
             clearTeamScripts(e);
             e.mission = Mission.HUNT;
             e.target = null;
-            e.moveTarget = { x: c.cx * CELL_SIZE + CELL_SIZE / 2, y: c.cy * CELL_SIZE + CELL_SIZE / 2 };
+            e.moveTarget = { x: destX, y: destY };
             e.path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
             e.pathIndex = 0;
           }

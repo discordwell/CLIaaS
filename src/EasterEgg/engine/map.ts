@@ -458,10 +458,14 @@ export class GameMap {
       const cx = Math.floor(u.x / CELL_SIZE);
       const cy = Math.floor(u.y / CELL_SIZE);
       const s = u.sight;
-      const s2 = s * s;
+      const sThreshold = s * 2;  // C++ coord.cpp:124-136 octagonal distance
       for (let dy = -s; dy <= s; dy++) {
         for (let dx = -s; dx <= s; dx++) {
-          if (dx * dx + dy * dy <= s2) {
+          const adx = Math.abs(dx);
+          const ady = Math.abs(dy);
+          const big = adx > ady ? adx : ady;
+          const small = adx > ady ? ady : adx;
+          if (big * 2 + small <= sThreshold) {
             const rx = cx + dx;
             const ry = cy + dy;
             if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
@@ -732,12 +736,17 @@ export class GameMap {
     }
   }
 
-  /** Unjam all cells in a radius around a position. */
+  /** Unjam all cells in a radius around a position.
+   *  C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2 */
   unjamRadius(cx: number, cy: number, radius: number): void {
-    const r2 = radius * radius;
+    const threshold = radius * 2;
     for (let dy = -radius; dy <= radius; dy++) {
       for (let dx = -radius; dx <= radius; dx++) {
-        if (dx * dx + dy * dy <= r2) {
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= threshold) {
           this.unjamCell(cx + dx, cy + dy);
         }
       }

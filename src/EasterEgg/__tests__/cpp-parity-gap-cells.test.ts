@@ -122,9 +122,8 @@ describe('C++ parity: GAP generator activates when powered (building.cpp:996-999
     expect(isCellJammed(ctx.map, 30 + GAP_RADIUS + 1, 30)).toBe(false);
   });
 
-  it('GAP uses circular radius, not square (dx^2+dy^2 <= r^2)', () => {
-    // C++ Jam_From iterates cells and checks distance — circular radius
-    // TS fog.ts:272: if (dx * dx + dy * dy <= r2)
+  it('GAP uses C++ octagonal radius, not square or Euclidean', () => {
+    // C++ coord.cpp:124-136 octagonal distance: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
     const ctx = makeFogContext({
       structures: [makeGapStructure(50, 50)],
       powerProduced: 200,
@@ -135,18 +134,21 @@ describe('C++ parity: GAP generator activates when powered (building.cpp:996-999
     updateGapGenerators(ctx);
 
     const r = GAP_RADIUS;
-    // Corner of bounding box: (r, r) has distance r*sqrt(2) > r → NOT jammed
-    // diagonal at 45 degrees: r*sqrt(2) ≈ 14.14 > 10
+    // Corner of bounding box: (r, r) big=10,small=10 => 20+10=30 > 20 → NOT jammed
     expect(isCellJammed(ctx.map, 50 + r, 50 + r)).toBe(false);
 
-    // But (r, 0) and (0, r) are exactly on the circle → jammed
+    // (r, 0) and (0, r) are on the boundary → jammed
+    // big=10,small=0 => 20+0=20 <= 20
     expect(isCellJammed(ctx.map, 50 + r, 50)).toBe(true);
     expect(isCellJammed(ctx.map, 50, 50 + r)).toBe(true);
 
-    // (7, 7) → 49+49=98 <= 100 → jammed
-    expect(isCellJammed(ctx.map, 50 + 7, 50 + 7)).toBe(true);
+    // (7, 7): big=7,small=7 => 14+7=21 > 20 → NOT jammed (octagonal clips diagonals)
+    expect(isCellJammed(ctx.map, 50 + 7, 50 + 7)).toBe(false);
 
-    // (8, 7) → 64+49=113 > 100 → NOT jammed
+    // (7, 6): big=7,small=6 => 14+6=20 <= 20 → jammed (on the boundary)
+    expect(isCellJammed(ctx.map, 50 + 7, 50 + 6)).toBe(true);
+
+    // (8, 7): big=8,small=7 => 16+7=23 > 20 → NOT jammed
     expect(isCellJammed(ctx.map, 50 + 8, 50 + 7)).toBe(false);
   });
 });
@@ -584,14 +586,18 @@ describe('C++ parity: GAP sell/capture removes jamming (building.cpp:2970-2974, 
 // C++ Jam_From iterates cells checking Lepton distance; TS uses dx^2+dy^2<=r^2
 // =============================================================================
 
-describe('C++ parity: GAP jam cell count matches discrete circle area', () => {
-  it('GAP_RADIUS=10 jams the correct number of cells (discrete circle)', () => {
-    // Count cells in a discrete circle: sum of all (dx,dy) where dx^2+dy^2 <= r^2
+describe('C++ parity: GAP jam cell count matches C++ octagonal distance area', () => {
+  it('GAP_RADIUS=10 jams the correct number of cells (C++ octagonal)', () => {
+    // C++ coord.cpp:124-136 octagonal distance: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
     const r = GAP_RADIUS;
     let expectedCount = 0;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy <= r * r) {
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= r * 2) {
           expectedCount++;
         }
       }
@@ -634,11 +640,16 @@ describe('C++ parity: GAP near map edge clips to bounds', () => {
     expect(countJammedCells(ctx.map)).toBeGreaterThan(0);
 
     // Calculate expected: only cells where cx>=0 && cy>=0
+    // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
     const r = GAP_RADIUS;
     let expected = 0;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy <= r * r && dx >= 0 && dy >= 0) {
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= r * 2 && dx >= 0 && dy >= 0) {
           expected++;
         }
       }

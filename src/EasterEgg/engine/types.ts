@@ -757,22 +757,22 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   [SuperweaponType.SONAR_PULSE]: {
     type: SuperweaponType.SONAR_PULSE, name: 'Sonar Pulse',
     building: '', rechargeTicks: 9000, faction: 'both',    // spy-only — granted by spyInfiltrate() on SPEN
-    requiresPower: true, needsTarget: false, targetMode: 'none',
+    requiresPower: false, needsTarget: false, targetMode: 'none',  // C++ HOUSE.CPP:654 IsPowered=false
   },
   [SuperweaponType.PARABOMB]: {
     type: SuperweaponType.PARABOMB, name: 'Parabomb',
     building: 'AFLD', rechargeTicks: 12600, faction: 'soviet',  // rules.ini [Recharge] ParaBomb=14 min
-    requiresPower: true, needsTarget: true, targetMode: 'ground',
+    requiresPower: false, needsTarget: true, targetMode: 'ground',  // C++ HOUSE.CPP:656 IsPowered=false
   },
   [SuperweaponType.PARAINFANTRY]: {
     type: SuperweaponType.PARAINFANTRY, name: 'Paratroopers',
     building: 'AFLD', rechargeTicks: 6300, faction: 'both',  // rules.ini [Recharge] Paratrooper=7 min
-    requiresPower: true, needsTarget: true, targetMode: 'ground',
+    requiresPower: false, needsTarget: true, targetMode: 'ground',  // C++ HOUSE.CPP:657 IsPowered=false
   },
   [SuperweaponType.SPY_PLANE]: {
     type: SuperweaponType.SPY_PLANE, name: 'Spy Plane',
     building: 'AFLD', rechargeTicks: 2700, faction: 'both',  // rules.ini [Recharge] SpyPlane=3 min
-    requiresPower: true, needsTarget: true, targetMode: 'ground',
+    requiresPower: false, needsTarget: true, targetMode: 'ground',  // C++ HOUSE.CPP:658 IsPowered=false
   },
 };
 

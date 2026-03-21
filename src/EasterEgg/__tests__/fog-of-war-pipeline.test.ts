@@ -249,18 +249,21 @@ describe('Sight range geometry', () => {
     expect(vis).toBe(5); // (0,0),(1,0),(-1,0),(0,1),(0,-1)
   });
 
-  it('sight=5 reveals cells within radius 5 (circular, not square)', () => {
+  it('sight=5 reveals cells within radius 5 (C++ octagonal, not Euclidean)', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
 
-    // Cell at exact distance 5 (e.g., (5,0)) should be visible: 25 <= 25
+    // C++ coord.cpp:124-136 octagonal distance: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
+    // Cell at exact distance 5 (e.g., (5,0)) should be visible: big=5,small=0 => 10+0=10 <= 10
     expect(map.getVisibility(69, 64)).toBe(2);
-    // Cell at (4,3) distance = sqrt(25) = 5 — should be visible: 16+9=25 <= 25
-    expect(map.getVisibility(68, 67)).toBe(2);
-    // Cell at (5,1) distance = sqrt(26) > 5 — should NOT be visible
+    // Cell at (4,3): big=4,small=3 => 8+3=11 > 10 — NOT visible (octagonal excludes this)
+    expect(map.getVisibility(68, 67)).toBe(0);
+    // Cell at (5,1): big=5,small=1 => 10+1=11 > 10 — NOT visible
     expect(map.getVisibility(69, 65)).toBe(0);
-    // Cell at (4,4) distance = sqrt(32) > 5 — should NOT be visible (circular not square)
+    // Cell at (4,4): big=4,small=4 => 8+4=12 > 10 — NOT visible
     expect(map.getVisibility(68, 68)).toBe(0);
+    // Cell at (3,3): big=3,small=3 => 6+3=9 <= 10 — visible
+    expect(map.getVisibility(67, 67)).toBe(2);
   });
 
   it('sight range area approximates pi*r^2', () => {
@@ -793,25 +796,33 @@ describe('Spy plane reveal', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 10);
     const vis = countVis(map, 2);
-    // Should match discrete circle area for r=10
+    // Should match C++ octagonal distance area for r=10
+    // C++ coord.cpp:124-136: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
     let expected = 0;
     for (let dy = -10; dy <= 10; dy++) {
       for (let dx = -10; dx <= 10; dx++) {
-        if (dx * dx + dy * dy <= 100) expected++;
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= 20) expected++;
       }
     }
     expect(vis).toBe(expected);
   });
 
-  it('revealAroundCell uses circular geometry (not square)', () => {
+  it('revealAroundCell uses C++ octagonal geometry (not square)', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 10);
-    // (10,0) = 100 <= 100 — included
+    // C++ coord.cpp:124-136 octagonal: max*2+min <= radius*2
+    // (10,0): big=10,small=0 => 20+0=20 <= 20 — included
     expect(map.getVisibility(74, 64)).toBe(2);
-    // (8,7) = 64+49=113 > 100 — excluded
+    // (8,7): big=8,small=7 => 16+7=23 > 20 — excluded
     expect(map.getVisibility(72, 71)).toBe(0);
-    // (7,7) = 49+49=98 <= 100 — included
-    expect(map.getVisibility(71, 71)).toBe(2);
+    // (7,7): big=7,small=7 => 14+7=21 > 20 — excluded (octagonal clips diagonals)
+    expect(map.getVisibility(71, 71)).toBe(0);
+    // (7,6): big=7,small=6 => 14+6=20 <= 20 — included
+    expect(map.getVisibility(71, 70)).toBe(2);
   });
 
   it('revealAroundCell sets visibility directly to 2 (does not go through updateFogOfWar)', () => {
@@ -949,15 +960,18 @@ describe('Unit death and fog recalculation', () => {
 // ========================================================================
 
 describe('revealAroundCell', () => {
-  it('revealAroundCell uses circular geometry (dx^2 + dy^2 <= r^2)', () => {
+  it('revealAroundCell uses C++ octagonal distance (max*2+min <= r*2)', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 5);
-    // (5,0) = 25 <= 25 — included
+    // C++ coord.cpp:124-136 octagonal: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
+    // (5,0): big=5,small=0 => 10+0=10 <= 10 — included
     expect(map.getVisibility(69, 64)).toBe(2);
-    // (4,3) = 25 <= 25 — included
-    expect(map.getVisibility(68, 67)).toBe(2);
-    // (5,1) = 26 > 25 — excluded
+    // (4,3): big=4,small=3 => 8+3=11 > 10 — excluded (octagonal clips this)
+    expect(map.getVisibility(68, 67)).toBe(0);
+    // (5,1): big=5,small=1 => 10+1=11 > 10 — excluded
     expect(map.getVisibility(69, 65)).toBe(0);
+    // (3,3): big=3,small=3 => 6+3=9 <= 10 — included
+    expect(map.getVisibility(67, 67)).toBe(2);
   });
 
   it('revealAroundCell sets visibility directly to 2 (visible)', () => {
@@ -982,10 +996,15 @@ describe('revealAroundCell', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 15);
     const vis = countVis(map, 2);
+    // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
     let expected = 0;
     for (let dy = -15; dy <= 15; dy++) {
       for (let dx = -15; dx <= 15; dx++) {
-        if (dx * dx + dy * dy <= 225) expected++;
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= 30) expected++;
       }
     }
     expect(vis).toBe(expected);
@@ -1226,15 +1245,19 @@ describe('Mathematical sight area verification', () => {
     });
   }
 
-  it('sight=5 cell count is correct for discrete circle (r^2=25)', () => {
+  it('sight=5 cell count is correct for C++ octagonal distance', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
     const vis = countVis(map, 2);
-    // Count manually: all (dx,dy) pairs where dx*dx+dy*dy <= 25
+    // C++ coord.cpp:124-136 octagonal: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
     let expected = 0;
     for (let dy = -5; dy <= 5; dy++) {
       for (let dx = -5; dx <= 5; dx++) {
-        if (dx * dx + dy * dy <= 25) expected++;
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= 10) expected++;
       }
     }
     expect(vis).toBe(expected);

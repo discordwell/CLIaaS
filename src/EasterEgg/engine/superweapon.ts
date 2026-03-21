@@ -643,12 +643,17 @@ export function activateSuperweapon(
     }
     case SuperweaponType.SPY_PLANE: {
       // SW6: Spy Plane — permanently reveals 10-cell radius around target (matches C++ fog behavior)
+      // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
       const revealRadius = 10;
       const tc = worldToCell(target.x, target.y);
-      const r2 = revealRadius * revealRadius;
+      const rThreshold = revealRadius * 2;
       for (let dy = -revealRadius; dy <= revealRadius; dy++) {
         for (let dx = -revealRadius; dx <= revealRadius; dx++) {
-          if (dx * dx + dy * dy <= r2) {
+          const adx = Math.abs(dx);
+          const ady = Math.abs(dy);
+          const big = adx > ady ? adx : ady;
+          const small = adx > ady ? ady : adx;
+          if (big * 2 + small <= rThreshold) {
             ctx.map.setVisibility(tc.cx + dx, tc.cy + dy, 2);
           }
         }

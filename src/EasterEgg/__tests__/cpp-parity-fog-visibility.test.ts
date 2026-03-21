@@ -1083,10 +1083,14 @@ describe('GAP generator Jam_From distance (map.cpp:437-486)', () => {
     // Cell at distance 10 on axis should be jammed (10^2 = 100 <= 100)
     expect(map.jammedCells.has(cy * MAP_CELLS + (cx + 10))).toBe(true);
 
-    // Cell at (7,7) should be jammed (49+49=98 <= 100)
-    expect(map.jammedCells.has((cy + 7) * MAP_CELLS + (cx + 7))).toBe(true);
+    // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
+    // Cell at (7,7): big=7,small=7 => 14+7=21 > 20 — NOT jammed (octagonal clips diagonals)
+    expect(map.jammedCells.has((cy + 7) * MAP_CELLS + (cx + 7))).toBe(false);
 
-    // Cell at (8,7) should NOT be jammed (64+49=113 > 100)
+    // Cell at (7,6): big=7,small=6 => 14+6=20 <= 20 — jammed (on the octagonal boundary)
+    expect(map.jammedCells.has((cy + 6) * MAP_CELLS + (cx + 7))).toBe(true);
+
+    // Cell at (8,7): big=8,small=7 => 16+7=23 > 20 — NOT jammed
     expect(map.jammedCells.has((cy + 7) * MAP_CELLS + (cx + 8))).toBe(false);
   });
 });
