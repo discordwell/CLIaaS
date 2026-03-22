@@ -15,7 +15,7 @@ import { STRUCTURE_SIZE, getBibCells } from '../engine/scenario';
  * convert from game seconds to TS ticks so timing is correct regardless
  * of engine tick rate.
  */
-const TS_HZ = 20;
+const TS_HZ = 15; // C++ GameSpeed=4 → 15 ticks/sec (matching GAME_TICKS_PER_SEC)
 function sec(seconds: number): number { return Math.round(seconds * TS_HZ); }
 
 export interface OracleDecision {

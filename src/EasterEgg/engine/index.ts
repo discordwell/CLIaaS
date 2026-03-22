@@ -1465,7 +1465,7 @@ export class Game {
     }
 
     // Render interpolation: fraction of tick elapsed since last update (0-1)
-    // Smooths entity movement between 20fps game ticks for 60fps visual rendering
+    // Smooths entity movement between 15fps game ticks for 60fps visual rendering
     this.renderer.interpolationAlpha = this.tickInterval > 0
       ? Math.min(1, this.accumulator / this.tickInterval)
       : 1;
@@ -1478,7 +1478,7 @@ export class Game {
   private scheduleNext(): void {
     if (this.state !== 'playing') return;
     // Use setTimeout as the primary timer — immune to Chrome RAF throttling.
-    // 16ms ≈ 60fps render rate, game ticks at fixed 20fps inside (C++ default GameSpeed=3).
+    // 16ms ≈ 60fps render rate, game ticks at fixed 15fps inside (C++ default GameSpeed=4).
     this.timerId = window.setTimeout(this.gameLoop, 16);
   }
 
@@ -1870,7 +1870,7 @@ export class Game {
       }
     }
     this.entities = this.entities.filter(
-      e => e.alive || e.deathTick < 45 // ~2.25 seconds at 20fps
+      e => e.alive || e.deathTick < 45 // 3 seconds at 15fps
     );
     if (this.entities.length < before) {
       this.entityById.clear();

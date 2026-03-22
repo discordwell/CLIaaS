@@ -14,7 +14,7 @@ import { type MapStructure, STRUCTURE_SIZE, getBibCells } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex } from './shadow';
 
 /** Interpolate between two values on a 0-31 ring (shortest path).
- *  Used for smooth 60fps visual rotation between 20fps game ticks. */
+ *  Used for smooth 60fps visual rotation between 15fps game ticks. */
 function lerpFacing32(prev: number, curr: number, alpha: number): number {
   if (prev === curr) return curr;
   let diff = (curr - prev + 32) % 32;
