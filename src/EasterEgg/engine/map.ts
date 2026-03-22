@@ -616,8 +616,8 @@ export class GameMap {
             const rx = cx + dx;
             const ry = cy + dy;
             if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-              // Check line of sight from unit to this cell
-              if (!this.hasLineOfSight(cx, cy, rx, ry)) continue;
+              // C++ map.cpp:286-344 Sight_From: reveals ALL cells in radius
+              // using precomputed octagonal offset table — NO LOS terrain blocking.
               const idx = ry * MAP_CELLS + rx;
               if (this.visibility[idx] !== 2) {
                 this.visibility[idx] = 2;

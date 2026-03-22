@@ -1201,8 +1201,9 @@ export const STRUCTURE_ARMOR: Record<string, ArmorType> = {
   MSLO: 'heavy',  // rules.ini: Armor=heavy
   AFLD: 'heavy',  // rules.ini: Armor=heavy
   FTUR: 'heavy',  // rules.ini: Armor=heavy
-  // none armor (walls) — rules.ini: Armor=none
-  SBAG: 'none', FENC: 'none', BRIK: 'none', CYCL: 'none',
+  // wall armor types from rules.ini
+  SBAG: 'none', FENC: 'none', BRIK: 'none', CYCL: 'none', WOOD: 'none',
+  BARB: 'wood',  // rules.ini: Armor=wood (barbed wire)
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)
