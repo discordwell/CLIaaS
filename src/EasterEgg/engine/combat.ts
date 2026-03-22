@@ -1383,8 +1383,10 @@ export function updateStructureCombat(ctx: CombatContext): void {
     for (const e of ctx.entities) {
       if (!e.alive || e.inLimbo) continue;
       if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
-      // AA gate: non-AA structures can't target airborne aircraft
+      // AA gate: non-AA structures can't target airborne aircraft.
+      // AA-only structures (SAM, AGUN) can't target ground units — C++ parity.
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
+      if (s.weapon!.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
       const dist = worldDist(structPos, e.pos);
       if (dist >= range) continue;
       // LOS check
