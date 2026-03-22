@@ -3423,16 +3423,18 @@ export class OracleStrategy {
         }
       }
 
-      // Engineers: move toward ConYard, capture when below 25%
+      // Engineers: hold back until tanks have cleared the area, then move up.
       if (engineers.length > 0 && enemyFact) {
         if (factCapturable) {
+          // ConYard below 25% — send engineer to capture NOW
           commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyFact.id });
           reasons.push(`CAPTURE! FACT ${Math.round(enemyFact.hp / enemyFact.mhp * 100)}%`);
-        } else {
-          // Stage near ConYard so engineer is ready when HP drops
+        } else if (nearTarget && nearbyEnemies.length <= 2) {
+          // Tanks near ConYard AND area mostly clear — move engineers up
           commands.push({ cmd: 'move', ids: engineers.map(u => u.id),
-            cx: nearTarget ? target.cx - 3 : 18, cy: nearTarget ? target.cy + 2 : 72 });
+            cx: target.cx - 3, cy: target.cy + 2 });
         }
+        // Otherwise engineers stay put at the landing zone — too dangerous
       }
     }
 
@@ -4170,10 +4172,13 @@ export class OracleStrategy {
       if (!this.scg11eaStrikeActive) {
         const mammothsClear = patrolMammoths.length === 0; // no Mammoths south of garrison
         const firstPush = this.scg11eaStrikeTick === 0;
-        const minForPush = firstPush ? 10 : 7; /* human-requested: subsequent pushes need less */
+        const minForPush = firstPush ? 10 : 7;
+        /* human-requested: push when massed. If 14+ tanks, push regardless of patrols.
+           With 14 tanks we can handle 2 Mammoths + 6 garrison. */
+        const overwhelm = assaultArmor.length >= 14;
         const readyToStrike = atRally.length >= Math.min(minForPush, assaultArmor.length)
           && assaultArmor.length >= minForPush
-          && mammothsClear;
+          && (mammothsClear || overwhelm);
         if (readyToStrike) {
           this.scg11eaStrikeActive = true;
           this.scg11eaStrikeTick = state.tick;
@@ -4187,16 +4192,16 @@ export class OracleStrategy {
         const tankCentroid = this.centroid(assaultArmor as unknown as RAEntity[]);
         const pushTarget: Point = { cx: 48, cy: 50 }; // garrison center
 
-        // All enemy armor/V2RL within 15 cells — focus-fire nearest
+        // Enemy armor/V2RL within 10 cells — fight what's blocking the path, don't chase
         const nearEnemies = state.enemies.filter(
           (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            this.distanceSq(e, tankCentroid) <= 225,
+            this.distanceSq(e, tankCentroid) <= 100,
         ).sort((a, b) => this.distanceSq(a, tankCentroid) - this.distanceSq(b, tankCentroid));
 
-        // Enemy buildings within 8 cells
+        // Enemy buildings within 12 cells — wider range to catch WEAP
         const prodPriority = ['WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD'];
         const nearBuildings = enemyStructures.filter(
-          (s) => this.distanceSq(s, tankCentroid) <= 64,
+          (s) => this.distanceSq(s, tankCentroid) <= 144,
         ).sort((a, b) => {
           const aR = prodPriority.indexOf(a.t);
           const bR = prodPriority.indexOf(b.t);
