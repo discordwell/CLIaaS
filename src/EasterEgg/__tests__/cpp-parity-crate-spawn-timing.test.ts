@@ -318,6 +318,7 @@ describe('CPP parity: spawnCrate lifetime tick values', () => {
         getVisibility: () => 1,
         revealAll: () => {},
         setVisibility: () => {},
+        shroudAll: () => {},
       } as any,
       crateOverrides: {},
       addCredits: () => {},

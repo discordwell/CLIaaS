@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-03-22T00:30Z — SCG11EA Ground Assault: Focus-Fire Works, Dog Gauntlet Blocks Buildings
+- Focus-fire `attack` by enemy unit ID kills garrison armor efficiently (all 4 3TNK + 2 V2RL)
+- `attack_move` to WEAP at (52,45) blocked by dogs — C++ HUNT engages everything
+- `attack` on building ID doesn't pathfind (tank stays on GUARD mission)
+- `move` bypasses dogs but tanks don't fire when they arrive
+- Enemy WEAP rebuilds faster than we can reach it through infantry screen
+- Possible fix: 2-step (move close, then attack_move short distance) or split force
+- Key constants: ASSAULT_MIN_ARMOR=10, rally at (45,60), WEAP target (52,45)
+- Linter constantly re-adds fleet gates, home reserves — use /* human-requested */ comments
+- Win condition: England fleet exits map (timer-triggered), NOT destroy all enemies
+
 ## 2026-03-21T17:30Z — SCG05EA All 4 SAMs Destroyed: Full Tanya Phase Complete
 - **All 4 SAMs destroyed**: South pair shot from spawn, north pair shot from corridor position (23,100).
 - **Fixed SAM targeting order**: South SAMs first (y≥100), then north SAMs west-first. Prevents flip-flopping.

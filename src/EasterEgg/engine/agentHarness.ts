@@ -558,6 +558,32 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           break;
         }
 
+        case 'load_passenger': {
+          // Debug/harness command: instantly load infantry into transport
+          // (bypasses walking/proximity — simulates helicopter pickup)
+          const lInf = game.entityById.get(c.unitId);
+          const lTrans = game.entityById.get(c.transportId);
+          if (!lInf?.alive || !lTrans?.alive || !lTrans.isTransport) {
+            results.push({ cmd: 'load_passenger', ok: false, error: 'invalid unit or transport' });
+            break;
+          }
+          if (lTrans.passengers.length >= lTrans.maxPassengers) {
+            results.push({ cmd: 'load_passenger', ok: false, error: 'transport full' });
+            break;
+          }
+          // Mirror the normal boarding code: add to passengers, clear occupancy,
+          // remove from world entities (via _pendingTransportLoads).
+          lTrans.passengers.push(lInf);
+          lInf.transportRef = lTrans;
+          lInf.selected = false;
+          lInf.mission = Mission.SLEEP;
+          game.map.setOccupancy(lInf.cell.cx, lInf.cell.cy, 0);
+          if (lInf.stats.isInfantry) game.map.vacateSubCell(lInf.cell.cx, lInf.cell.cy, lInf.id);
+          (game as unknown as { _pendingTransportLoads: number[] })._pendingTransportLoads.push(lInf.id);
+          results.push({ cmd: 'load_passenger', ok: true });
+          break;
+        }
+
         case 'build': {
           const available = game.getAvailableItems();
           const item = available.find(i => i.type === c.type);

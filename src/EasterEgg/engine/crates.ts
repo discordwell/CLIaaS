@@ -6,7 +6,7 @@
 import {
   type WorldPos, type House,
   CELL_SIZE, GAME_TICKS_PER_SEC,
-  UnitType, Mission, worldToCell, worldDist,
+  UnitType, Mission, worldDist,
   EXPLOSION_FRAMES, WEAPON_STATS,
 } from './types';
 import { Entity, SONAR_PULSE_DURATION } from './entity';
@@ -306,13 +306,9 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       ctx.evaMessages.push({ text: 'MAP REVEALED', tick: ctx.tick });
       break;
     case 'darkness': {
-      // Shroud 7x7 cells around crate
-      const cc = worldToCell(crate.x, crate.y);
-      for (let dy = -3; dy <= 3; dy++) {
-        for (let dx = -3; dx <= 3; dx++) {
-          ctx.map.setVisibility(cc.cx + dx, cc.cy + dy, 0);
-        }
-      }
+      // C++ cell.cpp:2347-2351: Map.Shroud_The_Map() — shrouds ENTIRE map
+      // Normal fog-of-war update will re-reveal around player units next tick.
+      ctx.map.shroudAll();
       ctx.evaMessages.push({ text: 'DARKNESS', tick: ctx.tick });
       break;
     }
@@ -330,8 +326,15 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       break;
     }
     case 'squad': {
-      // Spawn 5 random infantry at crate location
-      const infTypes = [UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4, UnitType.I_E1];
+      // C++ cell.cpp:2443-2457: spawn 5 infantry from weighted pool.
+      // C++ pool: {E1x6, E2, E3, RENOVATOR} — 9 entries, E1 at 67% probability.
+      // INFANTRY_RENOVATOR = engineer (E6 in TS).
+      const infTypes = [
+        UnitType.I_E1, UnitType.I_E1, UnitType.I_E1, UnitType.I_E1, UnitType.I_E1, UnitType.I_E1,
+        UnitType.I_E2,
+        UnitType.I_E3,
+        UnitType.I_E6, // INFANTRY_RENOVATOR (engineer)
+      ];
       for (let i = 0; i < 5; i++) {
         const t = infTypes[Math.floor(Math.random() * infTypes.length)];
         const ox = (Math.random() - 0.5) * CELL_SIZE * 2;
@@ -377,17 +380,34 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       ctx.evaMessages.push({ text: 'NAPALM STRIKE', tick: ctx.tick });
       break;
     }
-    case 'cloak':
-      // CR5: Permanent cloaking ability (C++ IsCloakable from crate)
+    case 'cloak': {
+      // C++ cell.cpp:2516-2524: all LAYER_GROUND techno within CrateRadius get IsCloakable.
+      // C++ does NOT filter by house — even enemy units get cloaked.
+      for (const e of ctx.entities) {
+        if (!e.alive) continue;
+        if (worldDist({ x: crate.x, y: crate.y }, e.pos) >= CRATE_RADIUS) continue;
+        e.isCloakable = true;
+      }
+      // Always cloak the collector too (may not be in ctx.entities)
       unit.isCloakable = true;
       ctx.evaMessages.push({ text: 'UNIT CLOAKED', tick: ctx.tick });
       break;
-    case 'invulnerability':
-      // 60 seconds invincibility (C++ TICKS_PER_MINUTE * 1.0 = 900 C++ ticks = 60s real time)
-      // At TS 20 TPS: 60 * 20 = 1200 ticks
-      unit.invulnTick = 1200;
+    }
+    case 'invulnerability': {
+      // C++ cell.cpp:2594-2603: all LAYER_GROUND techno within CrateRadius get IronCurtain.
+      // Duration: TICKS_PER_MINUTE * 1.0 = 900 C++ ticks = 60s. At TS 20 TPS: 1200 ticks.
+      // C++ does NOT filter by house — even enemy units get invulnerability.
+      const invulnDuration = 1200;
+      for (const e of ctx.entities) {
+        if (!e.alive) continue;
+        if (worldDist({ x: crate.x, y: crate.y }, e.pos) >= CRATE_RADIUS) continue;
+        e.invulnTick = invulnDuration;
+      }
+      // Always apply to the collector too (may not be in ctx.entities)
+      unit.invulnTick = invulnDuration;
       ctx.evaMessages.push({ text: 'INVULNERABILITY', tick: ctx.tick });
       break;
+    }
     case 'parabomb': {
       // CR8: ParaBomb — airstrike at crate location (C++ RULES.INI ParaBomb weapon)
       const crateBombDmg = WEAPON_STATS.ParaBomb.damage;
@@ -456,12 +476,15 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       break;
     }
     case 'vortex': {
-      // CR8: Vortex — spawns a wandering energy vortex that damages nearby units for ~30 seconds
-      ctx.activeVortices.push({
-        x: crate.x, y: crate.y, angle: Math.random() * Math.PI * 2, ticksLeft: 450, id: ctx.tick,
-      });
-      ctx.playSound('teslazap');
-      ctx.evaMessages.push({ text: 'VORTEX SPAWNED', tick: ctx.tick });
+      // C++ cell.cpp:2608-2614: singleton — only spawn if no vortex already active.
+      // C++ ChronalVortex.Is_Active() check prevents multiple vortices.
+      if (ctx.activeVortices.length === 0) {
+        ctx.activeVortices.push({
+          x: crate.x, y: crate.y, angle: Math.random() * Math.PI * 2, ticksLeft: 450, id: ctx.tick,
+        });
+        ctx.playSound('teslazap');
+        ctx.evaMessages.push({ text: 'VORTEX SPAWNED', tick: ctx.tick });
+      }
       break;
     }
   }

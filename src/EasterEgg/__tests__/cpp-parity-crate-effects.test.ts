@@ -101,6 +101,7 @@ function makeMockContext(overrides: Partial<CrateContext> = {}): CrateContext {
       getVisibility: () => 1,
       setVisibility: () => {},
       revealAll: () => {},
+      shroudAll: () => {},
     } as any,
     crateOverrides: {},
     addCredits: function(amount: number) { this.credits += amount; },
@@ -321,6 +322,7 @@ describe('reveal crate effect (cell.cpp:2356-2364)', () => {
         getVisibility: () => 1,
         setVisibility: () => {},
         revealAll: () => { revealCalled = true; },
+        shroudAll: () => {},
       } as any,
     });
     const unit = makeEntity();
@@ -350,33 +352,31 @@ describe('reveal crate effect (cell.cpp:2356-2364)', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('darkness crate effect (cell.cpp:2347-2351)', () => {
-  it('shrouds cells around crate location', () => {
-    const shrouded: Array<{cx: number, cy: number}> = [];
+  it('calls shroudAll() to shroud the ENTIRE map (C++ Map.Shroud_The_Map())', () => {
+    // C++ cell.cpp:2349: Map.Shroud_The_Map() — shrouds ALL cells on the map.
+    // Normal fog-of-war update re-reveals around player units next tick.
+    let shroudAllCalled = false;
     const ctx = makeMockContext({
       map: {
         boundsX: 0, boundsY: 0, boundsW: 64, boundsH: 64,
         isPassable: () => true,
         getVisibility: () => 1,
-        setVisibility: (cx: number, cy: number, vis: number) => {
-          if (vis === 0) shrouded.push({ cx, cy });
-        },
+        setVisibility: () => {},
         revealAll: () => {},
+        shroudAll: () => { shroudAllCalled = true; },
       } as any,
     });
     const unit = makeEntity();
     pickupCrate(ctx, makeCrate('darkness', 100, 100), unit);
 
-    // TS crates.ts:311-315: 7x7 grid centered on crate = 49 cells
-    expect(shrouded.length).toBe(49);
+    expect(shroudAllCalled).toBe(true);
   });
 
-  it('PARITY GAP: C++ shrouds ENTIRE map, TS shrouds only 7x7 local area', () => {
-    // C++ cell.cpp:2349: Map.Shroud_The_Map() — shrouds ALL cells
-    // TS crates.ts:310-316: 7x7 grid around crate
-    // This is a known divergence — C++ effect is map-wide.
-    const cppBehavior = 'entire_map';
-    const tsBehavior = '7x7_local';
-    expect(cppBehavior).not.toBe(tsBehavior);
+  it('DARKNESS eva message', () => {
+    const ctx = makeMockContext();
+    const unit = makeEntity();
+    pickupCrate(ctx, makeCrate('darkness'), unit);
+    expect(ctx.evaMessages.some(m => m.text === 'DARKNESS')).toBe(true);
   });
 
   it('uses EMPULSE animation (RULES.INI Darkness=1,EMPULSE)', () => {
@@ -546,10 +546,9 @@ describe('cloak crate effect (cell.cpp:2516-2524)', () => {
     expect(cloakEntry?.shares).toBe(0);
   });
 
-  it('PARITY GAP: C++ cloaks ALL nearby units within CrateRadius, TS only cloaks collector', () => {
-    // C++ cell.cpp:2520: Distance(Cell_Coord(), obj->Center_Coord()) < Rule.CrateRadius
+  it('cloaks ALL nearby units within CrateRadius (cell.cpp:2516-2524)', () => {
+    // C++ cell.cpp:2520: iterates LAYER_GROUND, all Techno within CrateRadius
     // C++ does NOT filter by house — even enemy units get cloaked
-    // TS crates.ts:382: only unit.isCloakable = true
     const ctx = makeMockContext();
     const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
     const nearby = makeEntity(UnitType.V_JEEP, House.Greece, 110, 100);
@@ -558,8 +557,32 @@ describe('cloak crate effect (cell.cpp:2516-2524)', () => {
     pickupCrate(ctx, makeCrate('cloak', 100, 100), collector);
 
     expect(collector.isCloakable).toBe(true);
-    // C++ would also cloak 'nearby', but TS does not
-    expect(nearby.isCloakable).toBe(false); // PARITY GAP
+    expect(nearby.isCloakable).toBe(true); // C++ parity: area-of-effect
+  });
+
+  it('cloaks enemy units within CrateRadius (C++ has no house filter)', () => {
+    // C++ cell.cpp:2520: no house check — all techno within radius
+    const ctx = makeMockContext();
+    const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
+    const enemy = makeEntity(UnitType.V_JEEP, House.USSR, 110, 100);
+    ctx.entities.push(collector, enemy);
+
+    pickupCrate(ctx, makeCrate('cloak', 100, 100), collector);
+
+    expect(collector.isCloakable).toBe(true);
+    expect(enemy.isCloakable).toBe(true); // C++ parity: no house filter
+  });
+
+  it('does NOT cloak units beyond CrateRadius', () => {
+    const ctx = makeMockContext();
+    const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
+    const farUnit = makeEntity(UnitType.V_JEEP, House.Greece, 500, 500);
+    ctx.entities.push(collector, farUnit);
+
+    pickupCrate(ctx, makeCrate('cloak', 100, 100), collector);
+
+    expect(collector.isCloakable).toBe(true);
+    expect(farUnit.isCloakable).toBe(false); // too far
   });
 
   it('uses STEALTH2 animation (RULES.INI Cloak=0,STEALTH2)', () => {
@@ -789,10 +812,9 @@ describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {
     expect(unit.invulnTick).toBe(1200);
   });
 
-  it('PARITY GAP: C++ applies iron curtain to ALL nearby units, TS only to collector', () => {
+  it('applies invulnerability to ALL nearby units within CrateRadius (cell.cpp:2594-2603)', () => {
     // C++ cell.cpp:2598: iterates LAYER_GROUND, applies to all Techno within CrateRadius
     // C++ does NOT check house — even enemy units get invulnerability
-    // TS crates.ts:388: only sets unit.invulnTick on the collector
     const ctx = makeMockContext();
     const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
     const nearby = makeEntity(UnitType.V_JEEP, House.Greece, 110, 100);
@@ -801,8 +823,32 @@ describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {
     pickupCrate(ctx, makeCrate('invulnerability', 100, 100), collector);
 
     expect(collector.invulnTick).toBe(1200);
-    // C++ would also set nearby.invulnTick, but TS does not
-    expect(nearby.invulnTick).toBe(0); // PARITY GAP
+    expect(nearby.invulnTick).toBe(1200); // C++ parity: area-of-effect
+  });
+
+  it('applies invulnerability to enemy units within CrateRadius (C++ has no house filter)', () => {
+    // C++ cell.cpp:2598: no house check — all techno within radius
+    const ctx = makeMockContext();
+    const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
+    const enemy = makeEntity(UnitType.V_JEEP, House.USSR, 110, 100);
+    ctx.entities.push(collector, enemy);
+
+    pickupCrate(ctx, makeCrate('invulnerability', 100, 100), collector);
+
+    expect(collector.invulnTick).toBe(1200);
+    expect(enemy.invulnTick).toBe(1200); // C++ parity: no house filter
+  });
+
+  it('does NOT apply invulnerability to units beyond CrateRadius', () => {
+    const ctx = makeMockContext();
+    const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
+    const farUnit = makeEntity(UnitType.V_JEEP, House.Greece, 500, 500);
+    ctx.entities.push(collector, farUnit);
+
+    pickupCrate(ctx, makeCrate('invulnerability', 100, 100), collector);
+
+    expect(collector.invulnTick).toBe(1200);
+    expect(farUnit.invulnTick).toBe(0); // too far
   });
 
   it('uses INVULBOX animation (RULES.INI Invulnerability=3,INVULBOX,1.0)', () => {
@@ -913,7 +959,7 @@ describe('squad crate effect (cell.cpp:2443-2457)', () => {
     expect(ctx.entities.length).toBe(initialCount + 5);
   });
 
-  it('C++ uses weighted pool: 6x E1, 1x E2, 1x E3, 1x RENOVATOR (9 entries)', () => {
+  it('uses C++ weighted pool: 6x E1, 1x E2, 1x E3, 1x E6/RENOVATOR (9 entries)', () => {
     // C++ cell.cpp:2445-2449:
     //   static InfantryType _inf[] = {
     //     INFANTRY_E1,INFANTRY_E1,INFANTRY_E1,INFANTRY_E1,INFANTRY_E1,INFANTRY_E1,
@@ -921,26 +967,23 @@ describe('squad crate effect (cell.cpp:2443-2457)', () => {
     //     INFANTRY_E3,
     //     INFANTRY_RENOVATOR
     //   };
-    const cppSquadPool = [
-      'E1', 'E1', 'E1', 'E1', 'E1', 'E1', // 6/9 = 66.7% chance
-      'E2',                                   // 1/9 = 11.1% chance
-      'E3',                                   // 1/9 = 11.1% chance
-      'RENOVATOR',                            // 1/9 = 11.1% chance (engineer)
-    ];
-    expect(cppSquadPool.length).toBe(9);
-
-    // E1 dominates the pool (67% chance each pick)
-    const e1Count = cppSquadPool.filter(t => t === 'E1').length;
-    expect(e1Count).toBe(6);
-  });
-
-  it('PARITY NOTE: TS uses different pool (E1,E2,E3,E4) vs C++ (E1x6,E2,E3,RENOVATOR)', () => {
-    // TS crates.ts:334: [I_E1, I_E2, I_E3, I_E4, I_E1]
-    // C++ has RENOVATOR (engineer), TS has E4 (Tanya-like).
-    // Also C++ is 9-entry pool weighted toward E1; TS is 5-entry pool with 2x E1.
-    const tsPoolSize = 5;
-    const cppPoolSize = 9;
-    expect(tsPoolSize).not.toBe(cppPoolSize);
+    // TS now matches this pool: E1x6, E2, E3, E6 (engineer = RENOVATOR)
+    // Verify by spawning many squads and checking that only E1, E2, E3, E6 appear
+    const seenTypes = new Set<string>();
+    for (let trial = 0; trial < 50; trial++) {
+      const ctx = makeMockContext();
+      const unit = makeEntity();
+      pickupCrate(ctx, makeCrate('squad'), unit);
+      for (const e of ctx.entities) {
+        seenTypes.add(e.stats.type);
+      }
+    }
+    // Should only contain types from the C++ pool
+    for (const t of seenTypes) {
+      expect(['E1', 'E2', 'E3', 'E6']).toContain(t);
+    }
+    // E4 should NOT appear (was in old TS pool, not in C++ pool)
+    expect(seenTypes.has('E4')).toBe(false);
   });
 
   it('spawned infantry belong to player house', () => {
@@ -1246,22 +1289,32 @@ describe('vortex crate effect (cell.cpp:2608-2614)', () => {
     expect(ctx.activeVortices[0].ticksLeft).toBeGreaterThan(0);
   });
 
-  it('C++ only spawns vortex if none already active (singleton)', () => {
+  it('singleton: does NOT spawn vortex if one already active (cell.cpp:2609)', () => {
     // C++ cell.cpp:2609: if (!ChronalVortex.Is_Active())
-    // Only one chronal vortex can exist at a time in C++.
-    // TS does not enforce this — multiple vortices can spawn.
+    // Only one chronal vortex can exist at a time.
     const ctx = makeMockContext();
     ctx.activeVortices.push({ x: 50, y: 50, angle: 0, ticksLeft: 100, id: 1 });
 
     const collector = makeEntity();
     pickupCrate(ctx, makeCrate('vortex', 200, 200), collector);
 
-    // TS allows multiple vortices
-    expect(ctx.activeVortices.length).toBe(2);
-    // C++ would have kept only 1 (the existing one)
+    // C++ parity: only 1 vortex should exist (the pre-existing one)
+    expect(ctx.activeVortices.length).toBe(1);
+    expect(ctx.activeVortices[0].x).toBe(50); // original vortex unchanged
   });
 
-  it('VORTEX SPAWNED eva message', () => {
+  it('singleton: no eva message when vortex already active', () => {
+    const ctx = makeMockContext();
+    ctx.activeVortices.push({ x: 50, y: 50, angle: 0, ticksLeft: 100, id: 1 });
+
+    const collector = makeEntity();
+    pickupCrate(ctx, makeCrate('vortex', 200, 200), collector);
+
+    // No VORTEX SPAWNED message when blocked by singleton check
+    expect(ctx.evaMessages.some(m => m.text === 'VORTEX SPAWNED')).toBe(false);
+  });
+
+  it('VORTEX SPAWNED eva message when no vortex active', () => {
     const ctx = makeMockContext();
     const collector = makeEntity();
     pickupCrate(ctx, makeCrate('vortex'), collector);

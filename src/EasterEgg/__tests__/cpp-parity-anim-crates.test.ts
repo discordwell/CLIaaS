@@ -163,6 +163,7 @@ function makeMockCtx(overrides?: Partial<CrateContext>): CrateContext {
       getVisibility: () => 1,
       setVisibility: () => {},
       revealAll: () => {},
+      shroudAll: () => {},
     } as any,
     crateOverrides: {},
     addCredits: () => {},

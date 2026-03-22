@@ -164,7 +164,7 @@ describe('STRUCTURE_POWERED set (C++ bdata.cpp:3774 IsPowered from rules.ini)', 
 describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', () => {
   it('Tesla coil (TSLA) does not fire when powerConsumed > powerProduced', () => {
     const tsla = makeStructure('TSLA', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     const ctx = makeCombatCtx([tsla], [target], { powerConsumed: 200, powerProduced: 100 });
     const hpBefore = target.hp;
     for (let i = 0; i < 30; i++) {
@@ -179,7 +179,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
   it('Turret (GUN) DOES fire when low power — GUN is not powered (C++ bdata.cpp)', () => {
     // C++ bdata.cpp: GUN has IsPowered=false — fires regardless of power state
     const gun = makeStructure('GUN', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     const ctx = makeCombatCtx([gun], [target], { powerConsumed: 200, powerProduced: 100 });
     const hpBefore = target.hp;
     for (let i = 0; i < 30; i++) {
@@ -191,7 +191,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
 
   it('SAM DOES fire at aircraft when low power — SAM is not powered (C++ rules.ini)', () => {
     const sam = makeStructure('SAM', 10, 10, House.USSR);
-    const aircraft = makeAircraft(UnitType.HELI, House.Greece, 11, 10);
+    const aircraft = makeAircraft(UnitType.V_HELI, House.Greece, 11, 10);
     const ctx = makeCombatCtx([sam], [aircraft], { powerConsumed: 200, powerProduced: 100 });
     const hpBefore = aircraft.hp;
     for (let i = 0; i < 30; i++) {
@@ -204,7 +204,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
   it('AA Gun (AGUN) DOES fire at aircraft when low power — AGUN is not powered (C++ bdata.cpp)', () => {
     // C++ bdata.cpp: AGUN has IsPowered=false — fires regardless of power state
     const agun = makeStructure('AGUN', 10, 10, House.USSR);
-    const aircraft = makeAircraft(UnitType.HELI, House.Greece, 11, 10);
+    const aircraft = makeAircraft(UnitType.V_HELI, House.Greece, 11, 10);
     const ctx = makeCombatCtx([agun], [aircraft], { powerConsumed: 200, powerProduced: 100 });
     const hpBefore = aircraft.hp;
     for (let i = 0; i < 30; i++) {
@@ -223,7 +223,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
 describe('unpowered defenses fire regardless of power (C++ building.cpp:2853 — no IsPowered gate)', () => {
   it('Pillbox (PBOX) fires even when low power', () => {
     const pbox = makeStructure('PBOX', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     const ctx = makeCombatCtx([pbox], [target], { powerConsumed: 200, powerProduced: 100 });
     const hpBefore = target.hp;
     // Run enough ticks for at least one shot
@@ -243,7 +243,7 @@ describe('unpowered defenses fire regardless of power (C++ building.cpp:2853 —
 describe('powered defenses fire when power is sufficient (C++ Power_Fraction() >= 1)', () => {
   it('Tesla fires when power >= drain', () => {
     const tsla = makeStructure('TSLA', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     const ctx = makeCombatCtx([tsla], [target], { powerConsumed: 100, powerProduced: 200 });
     const hpBefore = target.hp;
     for (let i = 0; i < 60; i++) {
@@ -255,7 +255,7 @@ describe('powered defenses fire when power is sufficient (C++ Power_Fraction() >
 
   it('SAM fires at aircraft when power >= drain', () => {
     const sam = makeStructure('SAM', 10, 10, House.USSR);
-    const aircraft = makeAircraft(UnitType.HELI, House.Greece, 11, 10);
+    const aircraft = makeAircraft(UnitType.V_HELI, House.Greece, 11, 10);
     const ctx = makeCombatCtx([sam], [aircraft], { powerConsumed: 100, powerProduced: 200 });
     const hpBefore = aircraft.hp;
     for (let i = 0; i < 60; i++) {
@@ -502,7 +502,7 @@ describe('production speed penalty (C++ techno.cpp:677-682 vs factory.cpp:434)',
 describe('low power is binary — any deficit disables (C++ Power_Fraction() < 1)', () => {
   it('drain exceeding production by 1 is still low power', () => {
     const tsla = makeStructure('TSLA', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     // 101 consumed vs 100 produced — fraction < 1
     const ctx = makeCombatCtx([tsla], [target], { powerConsumed: 101, powerProduced: 100 });
     const hpBefore = target.hp;
@@ -515,7 +515,7 @@ describe('low power is binary — any deficit disables (C++ Power_Fraction() < 1
 
   it('exact balance (drain == produced) is NOT low power', () => {
     const tsla = makeStructure('TSLA', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     // 100 consumed == 100 produced — fraction = 1 (not < 1)
     const ctx = makeCombatCtx([tsla], [target], { powerConsumed: 100, powerProduced: 100 });
     const hpBefore = target.hp;
@@ -537,7 +537,7 @@ describe('zero drain = never low power (C++ house.cpp:4164)', () => {
   it('0 produced, 0 consumed = full power (not low)', () => {
     // C++ Drain == 0 → return(1)
     const pbox = makeStructure('PBOX', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     const ctx = makeCombatCtx([pbox], [target], { powerConsumed: 0, powerProduced: 0 });
     const hpBefore = target.hp;
     for (let i = 0; i < 60; i++) {
@@ -744,8 +744,8 @@ describe('integration: mixed powered/unpowered structures during low power', () 
   it('PBOX fires but TSLA does not in same low-power context', () => {
     const pbox = makeStructure('PBOX', 10, 10, House.USSR);
     const tsla = makeStructure('TSLA', 14, 10, House.USSR);
-    const pboxTarget = entityAtCell(UnitType.E1, House.Greece, 11, 10);
-    const tslaTarget = entityAtCell(UnitType.E1, House.Greece, 15, 10);
+    const pboxTarget = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
+    const tslaTarget = entityAtCell(UnitType.I_E1, House.Greece, 15, 10);
     const ctx = makeCombatCtx(
       [pbox, tsla],
       [pboxTarget, tslaTarget],
@@ -773,7 +773,7 @@ describe('integration: mixed powered/unpowered structures during low power', () 
 describe('power restoration re-enables defenses (C++ per-tick check)', () => {
   it('TSLA resumes firing after power is restored', () => {
     const tsla = makeStructure('TSLA', 10, 10, House.USSR);
-    const target = entityAtCell(UnitType.E1, House.Greece, 11, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 11, 10);
     const ctx = makeCombatCtx([tsla], [target], { powerConsumed: 200, powerProduced: 100 });
 
     // Phase 1: low power — should not fire

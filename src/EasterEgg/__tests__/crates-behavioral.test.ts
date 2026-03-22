@@ -323,7 +323,7 @@ describe('pickupCrate', () => {
     expect(ctx.evaMessages.some(m => m.text === 'BOOBY TRAP!')).toBe(true);
   });
 
-  it('DARKNESS crate shrouds 7x7 cells around crate', () => {
+  it('DARKNESS crate shrouds the ENTIRE map (C++ Map.Shroud_The_Map parity)', () => {
     const ctx = makeCrateCtx();
     // Map starts fully revealed
     const crateCX = 50;
@@ -334,13 +334,12 @@ describe('pickupCrate', () => {
     const unit = new Entity(UnitType.V_JEEP, House.Greece, crateX, crateY);
 
     pickupCrate(ctx, crate, unit);
-    // Center of shroud should be 0
+    // C++ cell.cpp:2349: Map.Shroud_The_Map() — entire map shrouded
     expect(ctx.map.getVisibility(crateCX, crateCY)).toBe(0);
-    // Corners of 7x7 area (±3)
-    expect(ctx.map.getVisibility(crateCX - 3, crateCY - 3)).toBe(0);
-    expect(ctx.map.getVisibility(crateCX + 3, crateCY + 3)).toBe(0);
-    // Just outside the 7x7 area should still be revealed
-    expect(ctx.map.getVisibility(crateCX + 4, crateCY)).toBe(2);
+    // Far cells also shrouded (not just 7x7 local)
+    expect(ctx.map.getVisibility(crateCX + 4, crateCY)).toBe(0);
+    expect(ctx.map.getVisibility(10, 10)).toBe(0);
+    expect(ctx.map.getVisibility(100, 100)).toBe(0);
     expect(ctx.evaMessages.some(m => m.text === 'DARKNESS')).toBe(true);
   });
 

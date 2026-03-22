@@ -266,6 +266,11 @@ export function translateOracleDecisionToTs(
       continue;
     }
 
+    if (kind === 'load_passenger' && typeof command.target === 'number' && ids.length === 1) {
+      commands.push({ cmd: 'load_passenger', unitId: ids[0], transportId: command.target } as never);
+      continue;
+    }
+
     if (kind === 'deploy' && ids.length === 1) {
       commands.push({ cmd: 'deploy', unitId: ids[0] });
       continue;

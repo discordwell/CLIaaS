@@ -45,6 +45,7 @@ function makeMockContext(overrides: Partial<CrateContext> = {}): CrateContext {
       getVisibility: () => 1,
       setVisibility: () => {},
       revealAll: () => {},
+      shroudAll: () => {},
     } as any,
     crateOverrides: {},
     addCredits: function(amount: number) { this.credits += amount; },
@@ -644,7 +645,8 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
    * C++ cell.cpp:2516-2523 (cloak):
    *   All TechnoClass objects within CrateRadius get IsCloakable=true.
    */
-  it('PARITY GAP: cloak crate should affect all nearby units within CrateRadius', () => {
+  it('cloak crate affects all nearby units within CrateRadius (C++ parity)', () => {
+    // C++ cell.cpp:2516-2523: all TechnoClass within CrateRadius get IsCloakable=true
     const ctx = makeMockContext();
     const collector = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100);
     const nearby = makeEntity(UnitType.V_JEEP, House.Greece, 115, 100);
@@ -653,7 +655,7 @@ describe('area-of-effect radius for upgrade crates (cell.cpp:2516-2603)', () => 
     pickupCrate(ctx, makeCrate('cloak', 100, 100), collector);
 
     expect(collector.isCloakable).toBe(true);
-    expect(nearby.isCloakable).toBe(false); // PARITY GAP: C++ would cloak this too
+    expect(nearby.isCloakable).toBe(true); // C++ parity: area-of-effect cloaking
   });
 });
 

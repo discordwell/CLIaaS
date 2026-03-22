@@ -234,6 +234,7 @@ function makeMockCtx(overrides?: Partial<CrateContext>): CrateContext {
       getVisibility: () => 1,
       setVisibility: () => {},
       revealAll: () => {},
+      shroudAll: () => {},
     } as any,
     crateOverrides: {},
     addCredits: () => {},
@@ -409,6 +410,7 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
           getVisibility: () => 1,
           setVisibility: () => {},
           revealAll: () => {},
+          shroudAll: () => {},
         } as any,
       });
 
@@ -436,6 +438,7 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
           getVisibility: () => 1,
           setVisibility: () => {},
           revealAll: () => {},
+          shroudAll: () => {},
         } as any,
       });
 
@@ -452,6 +455,7 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
           getVisibility: () => 0,
           setVisibility: () => {},
           revealAll: () => {},
+          shroudAll: () => {},
         } as any,
       });
 
@@ -473,6 +477,7 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
           getVisibility: () => 1,
           setVisibility: () => {},
           revealAll: () => {},
+          shroudAll: () => {},
         } as any,
       });
 
@@ -924,6 +929,7 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
           getVisibility: () => 1,
           setVisibility: () => {},
           revealAll: () => { revealed = true; },
+          shroudAll: () => {},
         } as any,
       });
       const unit = makeUnit();
@@ -936,22 +942,23 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
 
     it('darkness crate shrouds the map (C++ cell.cpp:2348-2350)', () => {
       // C++ calls Map.Shroud_The_Map() which hides everything
-      // TS shrouds a 7x7 area around crate
-      let shrouded = false;
+      // TS now calls shroudAll() for C++ parity
+      let shroudAllCalled = false;
       const ctx = makeMockCtx({
         map: {
           boundsX: 0, boundsY: 0, boundsW: 128, boundsH: 128,
           isPassable: () => true,
           getVisibility: () => 1,
-          setVisibility: () => { shrouded = true; },
+          setVisibility: () => {},
           revealAll: () => {},
+          shroudAll: () => { shroudAllCalled = true; },
         } as any,
       });
       const unit = makeUnit();
 
       pickupCrate(ctx, makeCrate('darkness'), unit);
 
-      expect(shrouded).toBe(true);
+      expect(shroudAllCalled).toBe(true);
     });
 
     it('timequake damages ALL entities and structures (C++ sets TimeQuake=true)', () => {
