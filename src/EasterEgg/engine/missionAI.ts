@@ -218,10 +218,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
-  // Force-uncloak submarine when attacking
-  if (entity.stats.isCloakable && (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) && entity.target) {
-    entity.cloakState = CloakState.UNCLOAKING;
-    entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+  // C++ techno.cpp:2747 — cannot fire unless fully UNCLOAKED. Start uncloaking and wait.
+  if (entity.stats.isCloakable && entity.cloakState !== CloakState.UNCLOAKED && entity.target) {
+    if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+      entity.cloakState = CloakState.UNCLOAKING;
+      entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+    }
+    return; // wait until fully uncloaked before firing
   }
 
   // Minimum range check: artillery can't fire at point-blank

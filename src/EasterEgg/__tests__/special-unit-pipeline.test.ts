@@ -1284,9 +1284,9 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
   });
 
   it('static constants match C++ parity', () => {
-    expect(MAD_TANK_CHARGE_TICKS).toBe(90);
+    expect(MAD_TANK_CHARGE_TICKS).toBe(120);  // aftrmath.ini QuakeDelay=120
     expect(MAD_TANK_DAMAGE).toBe(600);
-    expect(MAD_TANK_RADIUS).toBe(8);
+    expect(MAD_TANK_RADIUS).toBe(20);          // aftrmath.ini MTankDistance=20
   });
 
   it('deployMADTank sets isDeployed = true and starts timer', () => {

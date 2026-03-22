@@ -22,9 +22,9 @@ export const DEMO_TRUCK_DAMAGE = 1000;
 export const DEMO_TRUCK_RADIUS = 3;
 export const DEMO_TRUCK_FUSE_TICKS = 45;
 export const CHRONO_TANK_COOLDOWN = 2700;
-export const MAD_TANK_CHARGE_TICKS = 90;
-export const MAD_TANK_DAMAGE = 600;
-export const MAD_TANK_RADIUS = 8;
+export const MAD_TANK_CHARGE_TICKS = 120;  // aftrmath.ini QuakeDelay=120
+export const MAD_TANK_DAMAGE = 600;        // TODO: should be % of target MaxStrength (45% units, 40% buildings)
+export const MAD_TANK_RADIUS = 20;         // aftrmath.ini MTankDistance=20
 export const MECHANIC_HEAL_RANGE = 6;
 export const MECHANIC_HEAL_AMOUNT = 100; // C++ GoodWrench weapon Damage=-100 (heals 100 HP per application)
 

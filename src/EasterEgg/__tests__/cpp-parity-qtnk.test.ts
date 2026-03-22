@@ -207,22 +207,22 @@ describe('QTNK deploy fields (entity.ts / unit.cpp:2667)', () => {
     expect(qtnk.isDeployed).toBe(true);
   });
 
-  it('deployTimer can be set to MAD_TANK_CHARGE_TICKS (90)', () => {
+  it('deployTimer can be set to MAD_TANK_CHARGE_TICKS (120)', () => {
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     qtnk.deployTimer = MAD_TANK_CHARGE_TICKS;
-    expect(qtnk.deployTimer).toBe(90);
+    expect(qtnk.deployTimer).toBe(120);
   });
 
-  it('MAD_TANK_CHARGE_TICKS constant is 90 (6 seconds at 15 FPS)', () => {
-    expect(MAD_TANK_CHARGE_TICKS).toBe(90);
+  it('MAD_TANK_CHARGE_TICKS constant is 120 (8 seconds at 15 FPS, aftrmath.ini QuakeDelay=120)', () => {
+    expect(MAD_TANK_CHARGE_TICKS).toBe(120);
   });
 
   it('MAD_TANK_DAMAGE constant is 600', () => {
     expect(MAD_TANK_DAMAGE).toBe(600);
   });
 
-  it('MAD_TANK_RADIUS constant is 8 cells', () => {
-    expect(MAD_TANK_RADIUS).toBe(8);
+  it('MAD_TANK_RADIUS constant is 20 cells (aftrmath.ini MTankDistance=20)', () => {
+    expect(MAD_TANK_RADIUS).toBe(20);
   });
 });
 
