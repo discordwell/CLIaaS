@@ -1,10 +1,22 @@
 /**
  * C++ Parity Audit: Spy Infiltration Effects per Building Type
  *
- * C++ house.cpp:2600-2700 (HouseClass::Spy_Next) and infantry.cpp:645-676
- * define spy infiltration effects. Each building type triggers a distinct
- * effect. This file audits the TS spyInfiltrate() implementation against
- * those C++ behaviors.
+ * Authoritative C++ source: infantry.cpp:645-671 (InfantryClass::Per_Cell_Process)
+ *
+ * The C++ spy infiltration handler is deliberately simple:
+ *   1. Fire TEVENT_SPIED trigger on the building (line 649-651)
+ *   2. Speak VOX_BUILDING_INFILTRATED (line 653)
+ *   3. Set SpiedBy flag on the building — ALL buildings (line 656)
+ *   4. If STRUCT_RADAR: additionally set House->RadarSpied (shared radar minimap, line 660-662)
+ *   5. If STRUCT_SUB_PEN: grant SPC_SONAR_PULSE superweapon (line 664-670)
+ *   6. Delete the spy (line 706: `delete this`)
+ *
+ * That is ALL. No credit theft (spy != thief), no power sabotage, no production
+ * reset, no ATEK/STEK effects, no full map reveal. The existing TS implementation
+ * fabricates numerous effects that do not exist in C++.
+ *
+ * Sonar recharge: rules.cpp:210 SonarTime(14) => TICKS_PER_MINUTE * 14 = 900*14 = 12600 ticks
+ * (No rules.ini override found in the codebase.)
  *
  * Tests that FAIL are GOOD — they identify real C++ divergences.
  */
@@ -13,33 +25,24 @@ import { describe, it, expect } from 'vitest';
 import {
   SuperweaponType, SUPERWEAPON_DEFS,
   SONAR_REVEAL_TICKS,
-  UnitType, House, Mission,
 } from '../engine/types';
 
-// ---------------------------------------------------------------------------
-// We test against the *source code text* of spyInfiltrate() to verify which
-// building types are handled and what effects they produce, since the Game
-// class is not unit-testable in isolation (requires canvas, audio, etc.).
-// ---------------------------------------------------------------------------
-
-// Read the spyInfiltrate source at import time so tests can inspect it.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
+// ---------------------------------------------------------------------------
+// Read the spyInfiltrate source at import time so tests can inspect it.
+// ---------------------------------------------------------------------------
 
 const indexSrc = fs.readFileSync(
   path.resolve(__dirname, '../engine/index.ts'),
   'utf-8',
 );
 
-// Extract the spyInfiltrate method body (from "private spyInfiltrate" to the
-// next "// ===" section or next private/public method).
 function extractSpyInfiltrate(): string {
   const start = indexSrc.indexOf('private spyInfiltrate(');
   if (start === -1) throw new Error('spyInfiltrate method not found in index.ts');
-  // Find the closing of the method — look for the next top-level method
-  // by finding unindented `}` followed by blank line or next method.
   const methodRegion = indexSrc.slice(start);
-  // Find end: next "// ===" marker or next "private " / "public " at same indent
   const endMatch = methodRegion.match(/\n  (?:\/\/ ===|(?:private|public|protected) \w)/);
   if (!endMatch || endMatch.index === undefined) return methodRegion;
   return methodRegion.slice(0, endMatch.index);
@@ -47,7 +50,7 @@ function extractSpyInfiltrate(): string {
 
 const spyMethodRaw = extractSpyInfiltrate();
 
-/** Strip single-line comments (// ...) from source so regex tests only match executable code */
+/** Strip single-line and multi-line comments so regex tests only match executable code */
 function stripComments(src: string): string {
   return src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
@@ -55,251 +58,287 @@ function stripComments(src: string): string {
 const spyMethod = stripComments(spyMethodRaw);
 
 // ---------------------------------------------------------------------------
-// 1. PROC/SILO: C++ steals half of enemy credits
-//    C++ house.cpp:2612-2620: stolen = enemy->Credits / 2; Credits += stolen
+// Helper: extract the code block between two case labels (or case to default)
 // ---------------------------------------------------------------------------
+function sliceBetween(from: string, to: string): string {
+  const a = spyMethod.indexOf(from);
+  const b = spyMethod.indexOf(to, a + 1);
+  if (a === -1) return '';
+  if (b === -1) return spyMethod.slice(a);
+  return spyMethod.slice(a, b);
+}
 
-describe('PROC/SILO spy infiltration — credit theft (C++ house.cpp:2612-2620)', () => {
-  it('PROC case should steal half of enemy credits (not just set spiedBy flag)', () => {
-    // C++ behavior: steals floor(enemyCredits / 2) and adds to spy owner
-    // TS behavior: only does spiedHouses.add(targetHouse) — NO credit theft
-    const procSection = spyMethod.slice(
-      spyMethod.indexOf("case 'PROC'"),
-      spyMethod.indexOf("case 'DOME'"),
-    );
-    const stealsCredits = /credits|stolen|steal/i.test(procSection);
-    expect(stealsCredits, 'PROC spy should steal credits per C++ house.cpp:2612-2620').toBe(true);
-  });
+// ===========================================================================
+// 1. PROC/SILO: C++ does NOT steal credits for spy (only Thief does)
+//    C++ infantry.cpp:645-671 — spy handler has no STRUCT_REFINERY or
+//    STRUCT_STORAGE case. Only the generic SpiedBy flag is set.
+//    Credit theft is ONLY in the Thief handler (infantry.cpp:675-701).
+// ===========================================================================
 
-  it('SILO case should exist and also steal half of enemy credits', () => {
-    // C++ house.cpp:2610: STRUCT_STORAGE (SILO) is handled same as PROC
-    const hasSiloCase = /case\s+['"]SILO['"]/.test(spyMethod);
-    expect(hasSiloCase, 'SILO should have its own case in spyInfiltrate (C++ STRUCT_STORAGE)').toBe(true);
-  });
-
-  it('credit theft amount should be floor(enemyCredits / 2)', () => {
-    // C++ house.cpp:2614: int stolen = IsHuman ? Credits / 2 : Credits
-    // For spy vs AI: steals ALL credits. For spy vs human: steals half.
-    // The standard formula for spy infiltration is half.
-    const hasHalfCalc = /0\.5|\/\s*2|>>.*1|Math\.floor.*\/\s*2/.test(spyMethod);
-    expect(hasHalfCalc, 'credit theft should calculate half of enemy credits').toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 2. BARR/TENT: C++ reveals enemy unit types (disguise ability)
-//    C++ house.cpp:2622-2630: SpiedBy flag lets you see enemy production queues
-//    Distinct from WEAP which resets production
-// ---------------------------------------------------------------------------
-
-describe('BARR/TENT spy infiltration — reveal enemy units (C++ house.cpp:2622-2630)', () => {
-  it('BARR should have a distinct effect from WEAP (not grouped together)', () => {
-    // C++ treats BARR/TENT differently from WEAP
-    // TS groups WEAP, TENT, BARR all under "productionSpiedHouses" — divergence
-    // Check if BARR falls through to WEAP case
-    const barrIdx = spyMethod.indexOf("case 'BARR'");
-    const weapIdx = spyMethod.indexOf("case 'WEAP'");
-    expect(barrIdx, 'BARR case must exist').toBeGreaterThan(-1);
-    expect(weapIdx, 'WEAP case must exist').toBeGreaterThan(-1);
-
-    // In C++ BARR/TENT set SpiedBy (reveal production) but WEAP resets production.
-    // If they share the same case block in TS, that's a divergence.
-    // Check that BARR and WEAP have different effects
-    const barrToWeap = spyMethod.slice(
-      Math.min(barrIdx, weapIdx),
-      Math.max(barrIdx, weapIdx) + 50,
-    );
-    // If BARR falls through to WEAP (or vice versa), they share the same handler
-    const shareHandler = /case\s+['"](?:WEAP|BARR|TENT)['"]\s*:\s*\n?\s*case\s+['"](?:WEAP|BARR|TENT)['"]/.test(barrToWeap);
-    // C++ has DISTINCT effects for barracks vs war factory
-    // TS should NOT group them if we want parity
+describe('PROC/SILO spy infiltration — C++ sets SpiedBy only, NO credit theft (infantry.cpp:645-671)', () => {
+  it('PROC spy should NOT steal credits (credit theft is Thief-only in C++)', () => {
+    // C++ infantry.cpp:645-671: spy handler does NOT check building type for
+    // STRUCT_REFINERY. It just sets SpiedBy on ALL buildings.
+    // The TS implementation INCORRECTLY steals half of enemy credits.
+    const procSection = sliceBetween("case 'PROC'", "case 'DOME'");
+    const stealsCredits = /houseCredits|stolen|steal|enemyCredits|addCredits/i.test(procSection);
     expect(
-      shareHandler,
-      'BARR/TENT should NOT share a case block with WEAP — C++ has distinct effects',
+      stealsCredits,
+      'PROC spy should NOT steal credits — C++ infantry.cpp:645-671 has no credit theft for spy. ' +
+      'Only the Thief (infantry.cpp:675-701) steals. TS diverges by stealing Math.floor(enemyCredits*0.5).',
+    ).toBe(false);
+  });
+
+  it('SILO spy should NOT have its own case (C++ has no STRUCT_STORAGE spy case)', () => {
+    // C++ infantry.cpp:645-671: no per-building-type switch at all for spy.
+    // Only STRUCT_RADAR and STRUCT_SUB_PEN get special treatment.
+    // The TS fallthrough from PROC → SILO with credit theft is fabricated.
+    const procSection = sliceBetween("case 'PROC'", "case 'DOME'");
+    const hasSiloWithCredits = /case\s+['"]SILO['"]/.test(procSection) &&
+      /houseCredits|stolen|steal|enemyCredits/i.test(procSection);
+    expect(
+      hasSiloWithCredits,
+      'SILO spy case with credit theft is fabricated — C++ has no STRUCT_STORAGE spy handler.',
     ).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. WEAP: C++ resets enemy production (kills active build)
-//    C++ house.cpp:2640-2650: Factory->Abandon() — resets production queue
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 2. DOME: C++ sets RadarSpied only (shared radar minimap), NOT full map reveal
+//    C++ infantry.cpp:660-662: if (build == STRUCT_RADAR) tech->House->RadarSpied |= housespy
+//    C++ display.cpp:1435: RadarSpied causes shared cell visibility on radar only
+//    There is NO fogDisabled, NO full map reveal, NO timer.
+// ===========================================================================
 
-describe('WEAP spy infiltration — reset enemy production (C++ house.cpp:2640-2650)', () => {
-  it('WEAP infiltration should reset/abandon enemy production, not just reveal it', () => {
-    // C++ behavior: Factory->Abandon() — kills active build item
-    // TS behavior: productionSpiedHouses.add() — only reveals, doesn't reset
-    const weapSection = spyMethod.slice(
-      spyMethod.indexOf("case 'WEAP'"),
-      spyMethod.indexOf('default:'),
-    );
-    const resetsProduction = /abandon|reset|cancel|clear.*production|production.*reset/i.test(weapSection);
+describe('DOME spy infiltration — C++ sets RadarSpied only, NOT full map reveal (infantry.cpp:660-662)', () => {
+  it('DOME should set radarSpiedHouses (shared radar), NOT fogDisabled (full map reveal)', () => {
+    // C++ behavior: tech->House->RadarSpied |= housespy
+    // This shares the enemy's explored radar cells, NOT a full map reveal.
+    // TS INCORRECTLY sets fogDisabled=true which reveals EVERYTHING.
+    const domeSection = sliceBetween("case 'DOME'", "case 'POWR'");
+    const setsFogDisabled = /fogDisabled\s*=\s*true/.test(domeSection);
     expect(
-      resetsProduction,
-      'WEAP spy should reset/abandon enemy production per C++ house.cpp:2640-2650',
-    ).toBe(true);
+      setsFogDisabled,
+      'DOME spy should NOT set fogDisabled — C++ only sets RadarSpied (shared radar minimap, display.cpp:1435). ' +
+      'Full map reveal is fabricated.',
+    ).toBe(false);
+  });
+
+  it('DOME should NOT have a fogReEnableTick timer (no such concept in C++)', () => {
+    // C++ infantry.cpp:660-662: RadarSpied is a permanent flag, not timed.
+    // The TS fogReEnableTick=450 is entirely fabricated.
+    const domeSection = sliceBetween("case 'DOME'", "case 'POWR'");
+    const hasFogTimer = /fogReEnableTick/.test(domeSection);
+    expect(
+      hasFogTimer,
+      'fogReEnableTick is fabricated — C++ RadarSpied is a permanent flag, not timed.',
+    ).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. POWR/APWR: C++ sabotages power (temporary drain)
-//    C++ house.cpp:2632-2638: Power -= PowerDrain (or sets PowerBlackout timer)
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 3. POWR/APWR: C++ has NO power sabotage for spy infiltration
+//    C++ infantry.cpp:645-671: no STRUCT_POWER or STRUCT_ADVANCED_POWER case.
+//    The SpiedBy flag is set (generic for all buildings) and that's it.
+// ===========================================================================
 
-describe('POWR/APWR spy infiltration — power sabotage (C++ house.cpp:2632-2638)', () => {
-  it('POWR/APWR infiltration should drain/sabotage enemy power, not just set spiedBy', () => {
-    // C++ behavior: causes power blackout or drains power output for duration
-    // TS behavior: only sets spiedHouses.add() — NO power effect
-    const powrSection = spyMethod.slice(
-      spyMethod.indexOf("case 'POWR'"),
-      spyMethod.indexOf("case 'SPEN'"),
-    );
-    const affectsPower = /power.*drain|blackout|power.*sabotag|powerProduced|powerConsumed|drain/i.test(powrSection);
+describe('POWR/APWR spy infiltration — C++ has NO power sabotage effect (infantry.cpp:645-671)', () => {
+  it('POWR spy should NOT sabotage power (no such effect in C++)', () => {
+    // C++ infantry.cpp:645-671: spy handler has no check for STRUCT_POWER.
+    // SpiedBy is set (same as all buildings). No power drain, no blackout.
+    // The TS power sabotage (powerSabotageTicks, powerDrainAmount) is fabricated.
+    const powrSection = sliceBetween("case 'POWR'", "case 'SPEN'");
+    const hasPowerSabotage = /powerSabotage|powerDrain|blackout/i.test(powrSection);
     expect(
-      affectsPower,
-      'POWR/APWR spy should sabotage enemy power per C++ house.cpp:2632-2638',
-    ).toBe(true);
+      hasPowerSabotage,
+      'POWR spy power sabotage is fabricated — C++ infantry.cpp has no STRUCT_POWER spy case.',
+    ).toBe(false);
   });
 
-  it('power sabotage should be temporary (has a timer/duration)', () => {
-    // C++ uses a blackout timer — effect is not permanent
-    const powrSection = spyMethod.slice(
-      spyMethod.indexOf("case 'POWR'"),
-      spyMethod.indexOf("case 'SPEN'"),
-    );
-    const hasTimer = /timer|duration|ticks|countdown|temporary|blackout/i.test(powrSection);
+  it('APWR should NOT have its own spy case (no such effect in C++)', () => {
+    const apwrSection = sliceBetween("case 'APWR'", "case 'SPEN'");
+    const hasPowerEffect = /powerSabotage|powerDrain|blackout/i.test(apwrSection);
     expect(
-      hasTimer,
-      'POWR/APWR spy sabotage should be temporary (timed) per C++',
-    ).toBe(true);
+      hasPowerEffect,
+      'APWR spy power sabotage is fabricated — C++ has no STRUCT_ADVANCED_POWER spy case.',
+    ).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. DOME: C++ reveals entire map (full map sight)
-//    C++ house.cpp:2626-2630: Map revealed, like GPS but temporary
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 4. SPEN (Sub Pen): C++ grants SPC_SONAR_PULSE — this is CORRECT in TS
+//    C++ infantry.cpp:664-670:
+//      if (build == STRUCT_SUB_PEN) {
+//        House->SuperWeapon[SPC_SONAR_PULSE].Enable(false, true, false);
+//      }
+// ===========================================================================
 
-describe('DOME spy infiltration — full map reveal (C++ house.cpp:2626-2630)', () => {
-  it('DOME infiltration should reveal the entire map, not just share radar', () => {
-    // C++ behavior: reveals entire map (like GPS satellite, temporary)
-    // TS behavior: radarSpiedHouses.add() — only shares enemy radar, not full reveal
-    const domeSection = spyMethod.slice(
-      spyMethod.indexOf("case 'DOME'"),
-      spyMethod.indexOf("case 'POWR'"),
-    );
-    const revealsMap = /fogDisabled|revealAll|disableFog|map.*reveal|reveal.*map/i.test(domeSection);
-    expect(
-      revealsMap,
-      'DOME spy should reveal entire map (fogDisabled) per C++ house.cpp:2626-2630',
-    ).toBe(true);
-  });
-
-  it('DOME map reveal should be temporary (fog re-enables after timer)', () => {
-    // C++ uses a timer to re-enable fog after spy-granted map reveal
-    const domeSection = spyMethod.slice(
-      spyMethod.indexOf("case 'DOME'"),
-      spyMethod.indexOf("case 'POWR'"),
-    );
-    const hasTimer = /fogReEnableTick|timer|duration|temporary/i.test(domeSection);
-    expect(
-      hasTimer,
-      'DOME spy map reveal should be temporary (fogReEnableTick)',
-    ).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. SPEN/SYRD: C++ grants sonar pulse superweapon from both naval yards
-//    C++ infantry.cpp:664-670: STRUCT_SUB_PEN and STRUCT_SHIP_YARD both grant sonar
-// ---------------------------------------------------------------------------
-
-describe('SPEN/SYRD spy infiltration — sonar pulse (C++ infantry.cpp:664-670)', () => {
-  it('SPEN infiltration should grant sonar pulse superweapon', () => {
-    // TS handles SPEN — verify it creates/readies SONAR_PULSE
+describe('SPEN spy infiltration — sonar pulse grant (infantry.cpp:664-670)', () => {
+  it('SPEN case should exist and grant sonar pulse (matches C++)', () => {
     const hasSpen = /case\s+['"]SPEN['"]/.test(spyMethod);
     expect(hasSpen, 'SPEN case exists in spyInfiltrate').toBe(true);
 
-    const spenSection = spyMethod.slice(
-      spyMethod.indexOf("case 'SPEN'"),
-      spyMethod.indexOf("case 'WEAP'"),
-    );
-    const grantsSonar = /SONAR_PULSE|sonar/i.test(spenSection);
-    expect(grantsSonar, 'SPEN should grant sonar pulse superweapon').toBe(true);
+    const spenSection = sliceBetween("case 'SPEN'", "case 'BARR'");
+    if (!spenSection) {
+      // Try alternate boundary
+      const spenSection2 = sliceBetween("case 'SPEN'", "case 'WEAP'");
+      const grantsSonar = /SONAR_PULSE|sonar/i.test(spenSection2);
+      expect(grantsSonar, 'SPEN should grant sonar pulse superweapon').toBe(true);
+    } else {
+      const grantsSonar = /SONAR_PULSE|sonar/i.test(spenSection);
+      expect(grantsSonar, 'SPEN should grant sonar pulse superweapon').toBe(true);
+    }
   });
 
-  it('SYRD infiltration should also grant sonar pulse (C++ STRUCT_SHIP_YARD)', () => {
-    // C++ infantry.cpp:664-670: both STRUCT_SUB_PEN (SPEN) and STRUCT_SHIP_YARD (SYRD)
-    // grant sonar pulse. TS only handles SPEN — SYRD is missing.
-    const hasSyrd = /case\s+['"]SYRD['"]/.test(spyMethod);
-    expect(
-      hasSyrd,
-      'SYRD should have a case in spyInfiltrate that grants sonar (C++ STRUCT_SHIP_YARD)',
-    ).toBe(true);
+  it('SYRD should NOT grant sonar pulse (C++ only handles STRUCT_SUB_PEN, not STRUCT_SHIP_YARD)', () => {
+    // C++ infantry.cpp:664: if (build == STRUCT_SUB_PEN) — ONLY sub pen.
+    // STRUCT_SHIP_YARD is NOT checked. The TS case 'SYRD' with sonar is fabricated.
+    const hasSyrdSonar = /case\s+['"]SYRD['"]/.test(spyMethod);
+    // If SYRD case exists and grants sonar, that's a divergence
+    if (hasSyrdSonar) {
+      const syrdSection = sliceBetween("case 'SYRD'", "case 'BARR'");
+      const syrdSonar = /SONAR_PULSE|sonar/i.test(syrdSection || '');
+      expect(
+        syrdSonar,
+        'SYRD (Ship Yard) should NOT grant sonar pulse — C++ infantry.cpp:664 checks ' +
+        'STRUCT_SUB_PEN only, not STRUCT_SHIP_YARD. SYRD sonar is fabricated.',
+      ).toBe(false);
+    }
+    // If no SYRD case at all, that's actually correct per C++
   });
+});
 
-  it('sonar pulse recharge time matches C++ (9000 ticks = 10 min)', () => {
+// ===========================================================================
+// 5. SONAR_PULSE recharge time: C++ = TICKS_PER_MINUTE * SonarTime = 900 * 14 = 12600
+//    rules.cpp:210: SonarTime(14) — constructor default, no rules.ini override found
+//    rules.cpp:575: SonarTime = ini.Get_Fixed(RECHARGE, "Sonar", SonarTime)
+//    house.cpp:654:  new (&SuperWeapon[SPC_SONAR_PULSE]) SuperClass(TICKS_PER_MINUTE * Rule.SonarTime, ...)
+//    TICKS_PER_SECOND=15, TICKS_PER_MINUTE=900
+//    TS has rechargeTicks=9000 (10 min) — MISMATCH
+// ===========================================================================
+
+describe('SONAR_PULSE recharge time (rules.cpp:210, house.cpp:654)', () => {
+  it('sonar pulse recharge should be 12600 ticks (14 min), not 9000 (10 min)', () => {
+    // C++ rules.cpp:210: SonarTime(14) — 14 minutes
+    // C++ house.cpp:654: TICKS_PER_MINUTE * Rule.SonarTime = 900 * 14 = 12600
+    // TS has 9000 (10 min) — off by 3600 ticks (4 minutes)
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(def.rechargeTicks).toBe(9000);
+    expect(def.rechargeTicks).toBe(12600);
   });
+});
 
-  it('sonar reveal duration matches C++ SONAR_TIME (225 ticks = 15s)', () => {
+// ===========================================================================
+// 6. SONAR_REVEAL_TICKS: C++ uses 15 * TICKS_PER_SECOND = 225 for sub pulse
+//    house.cpp:1218: sub->PulseCountDown = 15 * TICKS_PER_SECOND (auto-sonar context)
+//    TS SONAR_REVEAL_TICKS = 225 — this is CORRECT
+// ===========================================================================
+
+describe('SONAR_REVEAL_TICKS (house.cpp:1218)', () => {
+  it('sonar reveal duration should be 225 ticks (15s) — matches C++', () => {
     expect(SONAR_REVEAL_TICKS).toBe(225);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 7. ATEK: C++ grants GPS satellite superweapon
-//    C++ house.cpp:2652-2660: grants one-shot GPS (reveals entire map permanently)
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 7. WEAP: C++ has NO production reset for spy infiltration
+//    C++ infantry.cpp:645-671: no STRUCT_WEAP case. SpiedBy is set (generic).
+//    The SpiedBy flag on WEAP lets the player see the production cameo overlay
+//    (building.cpp:517-548), but does NOT reset/abandon the factory.
+// ===========================================================================
 
-describe('ATEK spy infiltration — GPS satellite (C++ house.cpp:2652-2660)', () => {
-  it('ATEK infiltration should grant GPS satellite, not fall to default', () => {
-    // C++ behavior: grants GPS satellite superweapon (permanent map reveal)
-    // TS behavior: falls to default case — "BUILDING INFILTRATED" with no effect
+describe('WEAP spy infiltration — C++ has NO production reset (infantry.cpp:645-671)', () => {
+  it('WEAP spy should NOT reset/abandon enemy production', () => {
+    // C++ infantry.cpp:645-671: no STRUCT_WEAP spy case. SpiedBy is set same as all.
+    // building.cpp:517-548: SpiedBy on a factory shows cameo overlay (visual only).
+    // The TS productionQueue.delete() for WEAP is fabricated.
+    const weapSection = sliceBetween("case 'WEAP'", 'default:');
+    const resetsProduction = /productionQueue\.delete|abandon|cancel.*production/i.test(weapSection);
+    expect(
+      resetsProduction,
+      'WEAP spy should NOT reset production — C++ only sets SpiedBy (shows cameo overlay). ' +
+      'Production queue deletion is fabricated.',
+    ).toBe(false);
+  });
+});
+
+// ===========================================================================
+// 8. BARR/TENT: C++ has NO special barracks spy case
+//    C++ infantry.cpp:645-671: no STRUCT_BARRACKS or STRUCT_TENT case.
+//    SpiedBy is set (generic). building.cpp:5705 uses SpiedBy on BARR/TENT
+//    for a wider overlap list (rendering detail), not a distinct spy effect.
+// ===========================================================================
+
+describe('BARR/TENT spy infiltration — C++ has no special case (infantry.cpp:645-671)', () => {
+  it('BARR/TENT spy handling should be same as generic SpiedBy (no productionSpiedHouses)', () => {
+    // C++ infantry.cpp:645-671: no check for STRUCT_BARRACKS or STRUCT_TENT.
+    // The SpiedBy flag is set on ALL buildings equally.
+    // building.cpp:5705: SpiedBy on BARR/TENT only affects Overlap_List (rendering).
+    // TS creates a distinct "productionSpiedHouses" concept that doesn't exist in C++.
+    // Per C++, BARR should be treated same as any other building (SpiedBy only).
+    const barrSection = sliceBetween("case 'BARR'", "case 'TENT'");
+    const hasDistinctEffect = /productionSpiedHouses/.test(barrSection);
+    // This is an over-specification but acceptable; the real issue is that WEAP/ATEK/etc
+    // have fabricated effects. We flag it here as a note.
+    expect(
+      hasDistinctEffect,
+      'BARR spy uses productionSpiedHouses — C++ only sets SpiedBy (generic for all buildings). ' +
+      'productionSpiedHouses is a TS invention. In C++, SpiedBy on any factory shows cameo overlay.',
+    ).toBe(false);
+  });
+});
+
+// ===========================================================================
+// 9. ATEK: C++ has NO GPS satellite grant for spy infiltration
+//    C++ infantry.cpp:645-671: no STRUCT_ADVANCED_TECH case.
+//    GPS satellite is a separate superweapon that charges from owning ATEK,
+//    not from spy infiltration.
+// ===========================================================================
+
+describe('ATEK spy infiltration — C++ has NO GPS satellite grant (infantry.cpp:645-671)', () => {
+  it('ATEK spy should NOT grant GPS satellite (fabricated effect)', () => {
+    // C++ infantry.cpp:645-671: no STRUCT_ADVANCED_TECH spy case.
+    // The TS creates a GPS_SATELLITE superweapon and sets gpsActive=true — fabricated.
     const hasAtek = /case\s+['"]ATEK['"]/.test(spyMethod);
-    expect(
-      hasAtek,
-      'ATEK should have its own case in spyInfiltrate to grant GPS satellite',
-    ).toBe(true);
-  });
-
-  it('ATEK effect should set gpsActive or grant GPS_SATELLITE superweapon', () => {
-    const atekIdx = spyMethod.indexOf("case 'ATEK'");
-    if (atekIdx === -1) {
-      // If no ATEK case, this confirms the divergence
-      expect.fail('ATEK case missing — cannot check GPS grant');
+    if (hasAtek) {
+      const atekSection = sliceBetween("case 'ATEK'", "case 'STEK'");
+      const grantsGps = /GPS_SATELLITE|gpsActive/i.test(atekSection);
+      expect(
+        grantsGps,
+        'ATEK spy GPS satellite grant is fabricated — C++ infantry.cpp has no STRUCT_ADVANCED_TECH spy case.',
+      ).toBe(false);
     }
-    const atekSection = spyMethod.slice(atekIdx, atekIdx + 300);
-    const grantsGps = /gpsActive|GPS_SATELLITE|gps/i.test(atekSection);
-    expect(grantsGps, 'ATEK spy should grant GPS satellite per C++').toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 8. STEK: C++ resets enemy tech level / steals tech
-//    C++ house.cpp:2662-2668: reveals all buildable objects or resets tech
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 10. STEK: C++ has NO tech reveal for spy infiltration
+//     C++ infantry.cpp:645-671: no STRUCT_SOVIET_TECH case.
+// ===========================================================================
 
-describe('STEK spy infiltration — tech steal/reset (C++ house.cpp:2662-2668)', () => {
-  it('STEK infiltration should have its own case, not fall to default', () => {
-    // C++ behavior: reveals buildable tech or resets enemy tech level
-    // TS behavior: falls to default case — no effect
+describe('STEK spy infiltration — C++ has NO tech reveal (infantry.cpp:645-671)', () => {
+  it('STEK spy should NOT have a special case (fabricated effect)', () => {
+    // C++ infantry.cpp:645-671: no STRUCT_SOVIET_TECH spy case.
+    // The TS sets spiedHouses + productionSpiedHouses — fabricated.
     const hasStek = /case\s+['"]STEK['"]/.test(spyMethod);
-    expect(
-      hasStek,
-      'STEK should have its own case in spyInfiltrate for tech effects',
-    ).toBe(true);
+    if (hasStek) {
+      const stekSection = sliceBetween("case 'STEK'", 'default:');
+      const hasTechEffect = /productionSpiedHouses|spiedHouses/i.test(stekSection);
+      expect(
+        hasTechEffect,
+        'STEK spy tech reveal is fabricated — C++ infantry.cpp has no STRUCT_SOVIET_TECH spy case.',
+      ).toBe(false);
+    }
   });
 });
 
-// ---------------------------------------------------------------------------
-// 9. Spy consumption — spy dies after infiltration (both C++ and TS agree)
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 11. Spy consumption — spy dies after infiltration
+//     C++ infantry.cpp:706: `delete this` (spy is removed from game)
+//     TS sets alive=false, mission=DIE, clears disguise and trigger
+// ===========================================================================
 
-describe('Spy consumption after infiltration', () => {
+describe('Spy consumption after infiltration (infantry.cpp:706)', () => {
   it('spy should be killed after infiltration (alive=false, mission=DIE)', () => {
-    // Both C++ and TS should consume the spy
     const killsSpy = /spy\.alive\s*=\s*false/.test(spyMethod) &&
                      /spy\.mission\s*=\s*Mission\.DIE/.test(spyMethod);
     expect(killsSpy, 'spy should be consumed (alive=false, mission=DIE) after infiltration').toBe(true);
@@ -311,64 +350,97 @@ describe('Spy consumption after infiltration', () => {
   });
 
   it('spy trigger name should be cleared before death (prevent TEVENT_DESTROYED)', () => {
-    // C++ parity: clear trigger so spy death doesn't fire destroy events
     const clearsTrigger = /spy\.triggerName\s*=\s*undefined/.test(spyMethod);
     expect(clearsTrigger, 'spy triggerName should be cleared before death').toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 10. Thief vs Spy credit theft distinction
-//     C++ has TWO different credit-theft paths:
-//     - Thief (THF): infiltrates PROC/SILO, steals 50% of houseCredits
-//     - Spy on PROC: steals 50% of enemy Credits (player credits)
-//     The TS Thief implementation correctly steals, but Spy on PROC does not.
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 12. TEVENT_SPIED trigger — C++ fires before any effect
+//     C++ infantry.cpp:649-651: if (tech->Trigger.Is_Valid()) tech->Trigger->Spring(TEVENT_SPIED, this)
+//     TS stores building trigger name into spiedBuildingTriggers set
+// ===========================================================================
 
-describe('Thief vs Spy credit theft — both should steal (C++ parity)', () => {
+describe('TEVENT_SPIED trigger firing (infantry.cpp:649-651)', () => {
+  it('spy infiltration should record the building trigger for TEVENT_SPIED', () => {
+    const firesTrigger = /spiedBuildingTriggers\.add/.test(spyMethodRaw); // use raw (with comments) is fine
+    expect(firesTrigger, 'spiedBuildingTriggers should be populated for TEVENT_SPIED').toBe(true);
+  });
+});
+
+// ===========================================================================
+// 13. Building type coverage — C++ only has special handling for 2 building types
+//     STRUCT_RADAR and STRUCT_SUB_PEN get extra effects beyond SpiedBy.
+//     ALL other building types only get the generic SpiedBy flag.
+//     The TS switch statement should NOT have distinct cases for:
+//     PROC, SILO, POWR, APWR, WEAP, BARR, TENT, ATEK, STEK, SYRD
+// ===========================================================================
+
+describe('Spy infiltration building type coverage — C++ only has RADAR and SUB_PEN special cases', () => {
+  const fabricatedCases = ['PROC', 'SILO', 'POWR', 'APWR', 'WEAP', 'ATEK', 'STEK', 'SYRD'];
+
+  for (const btype of fabricatedCases) {
+    it(`${btype} should NOT have a distinct spy case with special effects (fabricated)`, () => {
+      // C++ infantry.cpp:645-671: only STRUCT_RADAR (RadarSpied) and
+      // STRUCT_SUB_PEN (sonar pulse) have special handling.
+      // All other buildings just get SpiedBy flag.
+      const caseRegex = new RegExp(`case\\s+['"]${btype}['"]`);
+      const hasCase = caseRegex.test(spyMethod);
+      if (hasCase) {
+        // Having the case is acceptable IF it only does what C++ does (set SpiedBy).
+        // But if it has side effects beyond that, it's fabricated.
+        const caseStart = spyMethod.indexOf(`case '${btype}'`);
+        if (caseStart === -1) return; // double-check
+        const nextCase = spyMethod.indexOf('case ', caseStart + 10);
+        const defaultIdx = spyMethod.indexOf('default:', caseStart);
+        const end = Math.min(
+          nextCase > -1 ? nextCase : Infinity,
+          defaultIdx > -1 ? defaultIdx : Infinity,
+        );
+        const section = spyMethod.slice(caseStart, end);
+        const hasFabricatedEffect = /houseCredits|fogDisabled|powerSabotage|powerDrain|productionQueue\.delete|GPS_SATELLITE|gpsActive|productionSpiedHouses|SONAR_PULSE/.test(section);
+        expect(
+          hasFabricatedEffect,
+          `${btype} spy case has fabricated effects — C++ infantry.cpp:645-671 only sets SpiedBy for this building type.`,
+        ).toBe(false);
+      }
+    });
+  }
+
+  // SPEN (Sub Pen) SHOULD have a special case — this is correct per C++
+  it('SPEN should have a distinct spy case with sonar pulse (matches C++ infantry.cpp:664-670)', () => {
+    const hasSpen = /case\s+['"]SPEN['"]/.test(spyMethod);
+    expect(hasSpen, 'SPEN case should exist — C++ grants sonar pulse on sub pen spy').toBe(true);
+  });
+});
+
+// ===========================================================================
+// 14. Thief vs Spy distinction — credit theft is Thief-only
+//     C++ infantry.cpp:675-701: Thief (INFANTRY_THIEF) steals Available_Money()/2
+//     C++ infantry.cpp:645-671: Spy (INFANTRY_SPY) only sets SpiedBy
+//     The two code paths are completely separate in C++.
+// ===========================================================================
+
+describe('Thief vs Spy credit theft distinction (infantry.cpp:645-701)', () => {
   const specialUnitsSrc = fs.readFileSync(
     path.resolve(__dirname, '../engine/specialUnits.ts'),
     'utf-8',
   );
 
   it('Thief correctly steals 50% credits from PROC/SILO (baseline)', () => {
-    // Thief implementation in specialUnits.ts IS correct
+    // C++ infantry.cpp:696: cash = bldg->House->Available_Money() / 2
     const thiefSteals = /enemyCredits\s*\*\s*0\.5|Math\.floor.*0\.5/.test(specialUnitsSrc);
     expect(thiefSteals, 'Thief should steal 50% of enemy credits').toBe(true);
   });
 
-  it('Spy on PROC should ALSO steal credits (distinct from Thief)', () => {
-    // In C++, spy infiltrating PROC steals half credits (house.cpp:2612-2620)
-    // This is separate from the Thief unit which uses infantry.cpp enter logic
-    const procSection = spyMethod.slice(
-      spyMethod.indexOf("case 'PROC'"),
-      spyMethod.indexOf("case 'DOME'"),
-    );
-    const spySteals = /credit|stolen|steal/i.test(procSection);
+  it('Spy on PROC should NOT steal credits (only set SpiedBy)', () => {
+    // C++ infantry.cpp:645-671: spy handler has NO credit theft.
+    // Only the Thief handler (infantry.cpp:675-701) steals.
+    const procSection = sliceBetween("case 'PROC'", "case 'DOME'");
+    const spySteals = /houseCredits|stolen|steal|addCredits/i.test(procSection);
     expect(
       spySteals,
-      'Spy infiltrating PROC should steal credits per C++ house.cpp:2612-2620',
-    ).toBe(true);
+      'Spy infiltrating PROC should NOT steal credits — that is Thief-only (infantry.cpp:675-701).',
+    ).toBe(false);
   });
-});
-
-// ---------------------------------------------------------------------------
-// 11. Building type coverage — all C++ spy-target building types accounted for
-// ---------------------------------------------------------------------------
-
-describe('Spy infiltration building type coverage', () => {
-  const cppBuildingTypes = [
-    'PROC', 'SILO', 'BARR', 'TENT', 'WEAP', 'POWR', 'APWR',
-    'DOME', 'SPEN', 'SYRD', 'ATEK', 'STEK',
-  ];
-
-  for (const btype of cppBuildingTypes) {
-    it(`${btype} should have an explicit case in spyInfiltrate`, () => {
-      const hasCase = new RegExp(`case\\s+['"]${btype}['"]`).test(spyMethod);
-      expect(
-        hasCase,
-        `${btype} should have an explicit case (not fall to default)`,
-      ).toBe(true);
-    });
-  }
 });

@@ -4041,22 +4041,22 @@ export class OracleStrategy {
       const groupCenter = this.centroid(assaultArmor);
       let target: { id: number; cx: number; cy: number; t?: string } | null = null;
 
-      // 1. Enemy tanks/V2RL within 15 cells
-      const nearbyArmor = state.enemies.filter(
+      // 1. Kill ALL enemy tanks/V2RL in the base zone FIRST.
+      //    Don't touch structures while mobile threats exist — we don't want to
+      //    fight tanks and static defense simultaneously.
+      const baseZoneArmor = state.enemies.filter(
         (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-          e.cx >= 35 && e.cx <= 62 &&
-          this.distanceSq(e, groupCenter) <= 225,
+          e.cx >= 35 && e.cx <= 62 && e.cy >= 35 && e.cy <= 65,
       ).sort((a, b) => {
-        // Prioritize by threat: mammoth > heavy > V2RL > medium
         const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
         const pd = p(a.t) - p(b.t);
         return pd !== 0 ? pd : this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter);
       });
-      if (nearbyArmor.length > 0) {
-        target = nearbyArmor[0];
+      if (baseZoneArmor.length > 0) {
+        target = baseZoneArmor[0];
       }
 
-      // 2-3. Static defense then production (from chooseScg11eaAssaultTarget)
+      // 2-3. Only target structures once ALL mobile threats are dead
       if (!target) {
         const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
         if (structTarget) target = structTarget;
@@ -4073,10 +4073,19 @@ export class OracleStrategy {
       }
 
       if (target) {
-        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
-        for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+        // Only re-issue attack command to idle tanks or every 500 ticks.
+        // Don't spam attack every tick — it resets pathfinding and tanks never arrive.
+        // Re-issue attack every 100 ticks — C++ resets MISSION_ATTACK to GUARD
+        // after tanks engage enemies, causing them to walk home. Must re-attack.
+        const retargetDue = (state.tick % 100) < 5;
+        const idleTanks = assaultArmor.filter((u) => this.isIdle(u) || u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA);
+        const toCommand = retargetDue ? assaultArmor : idleTanks;
+        if (toCommand.length > 0) {
+          commands.push({ cmd: 'attack', ids: toCommand.map((u) => u.id), target: target.id });
+          for (const u of toCommand) this.recordMove(u.id, target.cx, target.cy);
+        }
         const tName = (target as any).t ?? '?';
-        reasons.push(`assault ${tName} (${assaultArmor.length} → ${target.cx},${target.cy})`);
+        reasons.push(`assault ${tName} (${toCommand.length}/${assaultArmor.length} → ${target.cx},${target.cy})`);
       }
     }
 

@@ -407,14 +407,14 @@ export enum SpeedClass {
 // Winged is always 100% (aircraft ignore terrain). Track included for completeness
 // even though udata.cpp forces all vehicles to WHEEL class.
 export const TERRAIN_SPEED: Record<string, [number, number, number, number, number]> = {
-  //                     Foot  Track Wheel Winged Float
-  Clear:              [0.90, 0.80, 0.70, 1.0,  0.0 ],
+  //                     Foot  Track Wheel Winged Float   (rules.ini [terrain] sections)
+  Clear:              [0.90, 0.80, 0.60, 1.0,  0.0 ],   // rules.ini [Clear] Wheel=60%
   Rough:              [0.80, 0.70, 0.40, 1.0,  0.0 ],
   Road:               [1.00, 1.00, 1.00, 1.0,  0.0 ],
   Water:              [0.00, 0.00, 0.00, 1.0,  1.0 ],
   Rock:               [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable cliffs
   Wall:               [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable walls
-  Ore:                [0.90, 0.70, 0.60, 1.0,  0.0 ],
+  Ore:                [0.90, 0.70, 0.50, 1.0,  0.0 ],   // rules.ini [Ore] Wheel=50%
   Beach:              [0.80, 0.70, 0.40, 1.0,  0.0 ],
   River:              [0.00, 0.00, 0.00, 1.0,  0.0 ], // impassable riverbed
 };

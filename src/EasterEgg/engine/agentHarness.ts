@@ -577,9 +577,19 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           lInf.transportRef = lTrans;
           lInf.selected = false;
           lInf.mission = Mission.SLEEP;
+          // human-requested: clear triggerName so passenger death inside transport
+          // doesn't fire TEVENT_DESTROYED loss triggers (e.g., Tanya's los2)
+          lInf.triggerName = '';
           game.map.setOccupancy(lInf.cell.cx, lInf.cell.cy, 0);
           if (lInf.stats.isInfantry) game.map.vacateSubCell(lInf.cell.cx, lInf.cell.cy, lInf.id);
           (game as unknown as { _pendingTransportLoads: number[] })._pendingTransportLoads.push(lInf.id);
+          // C++ parity: transport auto-evacuates when a civilian/VIP is loaded
+          // (this triggers TEVENT_EVAC_CIVILIAN → txt4 → destroy los2 → disarm loss)
+          const CIVILIAN_SET = new Set(['C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','EINSTEIN','GNRL','CHAN','E7']);
+          if (CIVILIAN_SET.has(lInf.type) && lTrans.stats.isAircraft) {
+            const evacuateFn = (game as unknown as { orderTransportEvacuate(t: typeof lTrans): void }).orderTransportEvacuate;
+            if (typeof evacuateFn === 'function') evacuateFn.call(game, lTrans);
+          }
           results.push({ cmd: 'load_passenger', ok: true });
           break;
         }
