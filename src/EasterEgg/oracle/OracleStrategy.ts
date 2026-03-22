@@ -376,6 +376,7 @@ export class OracleStrategy {
   private scg05eaSpyHoldTick = 0;        // tick when spy started holding for a dog
   private scg05eaTanyaWpIdx = 0;         // current waypoint for Tanya SAM corridor
   private scg05eaTanyaLastSamId = -1;    // last SAM id targeted (reset wp index on change)
+  private scg05eaC4PlantedTick = 0;      // tick when C4 was planted (skip re-attack for 30 ticks)
 
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -3426,46 +3427,59 @@ export class OracleStrategy {
         const ordered = [...southSams, ...northSams];
         const sam = ordered[0];
         const samDist = this.distanceSq(tanya, sam);
-        if (samDist <= 4) {
-          // Adjacent — plant C4 (attack_struct triggers C4 in harness)
+        // C4 approach: walk to adjacent cell via move commands, then attack to
+        // plant C4. Move commands are faster than attack_struct because they use
+        // the normal movement system without missionAI moveToward interference.
+        if (this.scg05eaC4PlantedTick > 0 && (state.tick - this.scg05eaC4PlantedTick) < 40) {
+          // C4 recently planted — retreat and wait for detonation (27 tick timer)
+          // Move away from SAM to avoid enemy fire concentration near the blast
+          const retreatX = tanya.cx < sam.cx ? tanya.cx - 3 : tanya.cx + 3;
+          commands.push({ cmd: 'move', ids: [tanya.id], cx: retreatX, cy: tanya.cy });
+          reasons.push(`C4 retreat — waiting ${40 - (state.tick - this.scg05eaC4PlantedTick)} ticks [${remainingSams.length} left]`);
+        } else if (samDist <= 4) {
+          // Adjacent — plant C4!
+          this.scg05eaC4PlantedTick = state.tick;
           commands.push({ cmd: 'attack', ids: [tanya.id], target: sam.id });
-          reasons.push(`C4 SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
-        } else if (samDist <= 81) {
-          // Within ~9 cells — shoot it down (faster than walking to C4 through buildings).
-          // Covers: south SAMs from spawn (d≈6.3), north SAMs from corridor (d≈5-8).
-          commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: sam.id });
-          reasons.push(`SHOOT SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
+          reasons.push(`C4! SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
         } else {
-          // Walk north through corridor to reach north SAMs.
-          // Single route to y=97 area, then shoot from range.
-          const waypoints = [
-            { cx: 24, cy: 104 },
-            { cx: 24, cy: 103 },
-            { cx: 24, cy: 102 },
-            { cx: 24, cy: 101 },
-            { cx: 24, cy: 100 },
-            { cx: 23, cy: 99 },
-            { cx: 22, cy: 98 },
-            { cx: 21, cy: 97 },  // From here both north SAMs are within shoot range
-          ];
-          // Track waypoint progress with persistent index.
-          // Reset when SAM target changes (different route).
-          if (sam.id !== this.scg05eaTanyaLastSamId) {
-            this.scg05eaTanyaWpIdx = 0;
-            this.scg05eaTanyaLastSamId = sam.id;
+          // Walk toward SAM: pick best adjacent cell and move there
+          // For north SAMs far from spawn, use corridor waypoints first
+          const adjX = tanya.cx <= sam.cx ? sam.cx - 1 : sam.cx + 2; // approach from nearest side
+          const adjTarget = { cx: adjX, cy: sam.cy };
+
+          if (samDist > 100) {
+            // Very far — use corridor waypoints to navigate through buildings
+            const waypoints = [
+              { cx: 24, cy: 104 },
+              { cx: 24, cy: 103 },
+              { cx: 24, cy: 102 },
+              { cx: 24, cy: 101 },
+              { cx: 24, cy: 100 },
+              { cx: 23, cy: 99 },
+              { cx: 22, cy: 98 },
+              { cx: 21, cy: 97 },
+              adjTarget,
+            ];
+            if (sam.id !== this.scg05eaTanyaLastSamId) {
+              this.scg05eaTanyaWpIdx = 0;
+              this.scg05eaTanyaLastSamId = sam.id;
+            }
+            while (
+              this.scg05eaTanyaWpIdx < waypoints.length &&
+              this.distanceSq(tanya, waypoints[this.scg05eaTanyaWpIdx]) <= 4
+            ) {
+              this.scg05eaTanyaWpIdx++;
+            }
+            const wp = this.scg05eaTanyaWpIdx < waypoints.length
+              ? waypoints[this.scg05eaTanyaWpIdx]
+              : adjTarget;
+            commands.push({ cmd: 'move', ids: [tanya.id], cx: wp.cx, cy: wp.cy });
+            reasons.push(`→ SAM(${sam.cx},${sam.cy}) via wp${this.scg05eaTanyaWpIdx}(${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
+          } else {
+            // Close-ish — walk directly to adjacent cell
+            commands.push({ cmd: 'move', ids: [tanya.id], cx: adjTarget.cx, cy: adjTarget.cy });
+            reasons.push(`WALK→SAM(${sam.cx},${sam.cy}) via (${adjTarget.cx},${adjTarget.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
           }
-          // Advance past any waypoints Tanya is within 2 cells of
-          while (
-            this.scg05eaTanyaWpIdx < waypoints.length &&
-            this.distanceSq(tanya, waypoints[this.scg05eaTanyaWpIdx]) <= 4
-          ) {
-            this.scg05eaTanyaWpIdx++;
-          }
-          const wp = this.scg05eaTanyaWpIdx < waypoints.length
-            ? waypoints[this.scg05eaTanyaWpIdx]
-            : { cx: sam.cx, cy: sam.cy }; // all waypoints exhausted — go directly to SAM
-          commands.push({ cmd: 'move', ids: [tanya.id], cx: wp.cx, cy: wp.cy });
-          reasons.push(`→ SAM(${sam.cx},${sam.cy}) via wp${this.scg05eaTanyaWpIdx}(${wp.cx},${wp.cy}) [${remainingSams.length} left]`);
         }
       }
 

@@ -79,7 +79,16 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
   const plantRange = Math.max(1.5, halfDiag + 3.0);
   if (dist > plantRange) {
     entity.animState = AnimState.WALK;
-    entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity));
+    // Follow A* path if available (from harness attack_struct), otherwise direct moveToward
+    if (entity.path && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+      const nextCell = entity.path[entity.pathIndex];
+      const wp = { x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2, y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2 };
+      if (entity.moveToward(wp, ctx.movementSpeed(entity))) {
+        entity.pathIndex++;
+      }
+    } else {
+      entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity));
+    }
     return;
   }
   entity.animState = AnimState.ATTACK;

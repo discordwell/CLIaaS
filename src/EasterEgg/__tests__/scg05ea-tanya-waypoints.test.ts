@@ -137,7 +137,7 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     expect((strategy as any).scg05eaTanyaWpIdx).toBeGreaterThanOrEqual(5);
   });
 
-  it('shoots SAM from corridor endpoint when in range', () => {
+  it('C4s SAM after completing corridor waypoints', () => {
     const strategy = new OracleStrategy('SCG05EA');
     (strategy as any).scg05eaSpyInfiltrated = true;
 
@@ -151,10 +151,10 @@ describe('SCG05EA Tanya waypoint navigation', () => {
       strategy.decide(tanyaSamState(pos.cx, pos.cy, 900, 17, 94));
     }
 
-    // SAM comes into shoot range before all waypoints are exhausted.
-    // From wp6 (22,98), SAM(17,94) is distSq=41 ≤ 64 → shoot_struct triggers.
-    const d = strategy.decide(tanyaSamState(22, 98, 900, 17, 94));
-    expect(d.reason).toContain('SHOOT SAM');
+    // After corridor complete, oracle walks to adjacent cell or C4s
+    const d = strategy.decide(tanyaSamState(21, 97, 900, 17, 94));
+    // From (21,97), SAM(17,94) is distSq=25 — within walk range, sends WALK→SAM
+    expect(d.reason).toMatch(/WALK→SAM|C4!/);
   });
 
   it('resets waypoint index when SAM target changes', () => {

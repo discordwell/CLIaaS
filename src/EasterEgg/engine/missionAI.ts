@@ -1171,7 +1171,20 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
     }
   } else {
     entity.animState = AnimState.WALK;
-    entity.moveToward(structPos, ctx.movementSpeed(entity));
+    // Follow A* path if available (set by harness attack_struct). This routes
+    // around buildings instead of moveToward's straight line which gets stuck.
+    if (entity.path && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+      const nextCell = entity.path[entity.pathIndex];
+      const wp: WorldPos = {
+        x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+      if (entity.moveToward(wp, ctx.movementSpeed(entity))) {
+        entity.pathIndex++;
+      }
+    } else {
+      entity.moveToward(structPos, ctx.movementSpeed(entity));
+    }
   }
   if (entity.attackCooldown > 0) entity.attackCooldown--;
   if (entity.attackCooldown2 > 0) entity.attackCooldown2--;

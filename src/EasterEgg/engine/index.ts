@@ -1403,7 +1403,10 @@ export class Game {
   step(n = 1): void {
     const wasPaused = this.state === 'paused';
     if (wasPaused) this.state = 'playing';
-    for (let i = 0; i < n && this.state === 'playing'; i++) {
+    for (let i = 0; i < n; i++) {
+      // Don't skip ticks after win/loss — delayed effects (C4 timers, barrel
+      // chains) must resolve before the agent reads state.
+      if (this.state !== 'playing' && this.state !== 'won' && this.state !== 'lost') break;
       this.update();
     }
     this.renderer.interpolationAlpha = 1; // agent step: show latest state, no interpolation
@@ -1768,11 +1771,13 @@ export class Game {
       this._runRepairSell(ctx => _tickServiceDepot(ctx));
     }
 
+    // Tick C4 timers on structures (Tanya plants) — must run BEFORE
+    // processTriggers so C4 explosions occur before loss conditions are checked.
+    // Without this, the step loop exits on state=lost before C4 can detonate.
+    this.tickC4Timers();
+
     // Defensive structure auto-fire
     this._runCombat(ctx => _updateStructureCombat(ctx));
-
-    // Tick C4 timers on structures (Tanya plants)
-    this.tickC4Timers();
 
     // Tick mine triggers (Minelayer AP mines)
     this.tickMines();
