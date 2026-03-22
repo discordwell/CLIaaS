@@ -3433,14 +3433,6 @@ export class OracleStrategy {
       const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
       const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
 
-      // Disarm los2 trigger immediately — Tanya must not cause loss during SAM phase.
-      // In the real game, txt4 (TEVENT_EVAC_CIVILIAN) destroys los2 when she's evacuated.
-      // We clear it early since she takes damage during the corridor walk.
-      if (!this.scg05eaLos2Disarmed) {
-        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: tanya.cx, cy: tanya.cy, clearTrigger: true } as never);
-        this.scg05eaLos2Disarmed = true;
-      }
-
       // Unstick from team script's impassable zone
       if (tanya.cy > 108) {
         commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
@@ -3573,8 +3565,8 @@ export class OracleStrategy {
 
       if (remainingSams.length === 0) {
         this.scg05eaSamIndex = SCG05EA_SAM_TARGETS.length;
-        // Warp Tanya to safety and disarm los2 — she has low HP
-        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50, clearTrigger: true });
+        // Warp Tanya to landing zone to wait for chinook safely
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50 });
         // Fall through to chinook phase below
       } else {
         return { commands, reason: reasons.join('; ') };
@@ -3593,10 +3585,11 @@ export class OracleStrategy {
         this.scg05eaTanyaEvacuated = true;
         reasons.push('Tanya → board chinook');
       } else {
-        // Warp Tanya to landing zone — she has 10 HP and los2 attached,
-        // so ANY combat damage kills her and ends the mission.
-        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50 });
-        reasons.push('Tanya warped to safety — waiting for chinook');
+        // Keep Tanya at landing zone — safe from enemies while waiting
+        if (this.distanceSq(tanya, { cx: 15, cy: 50 }) > 4) {
+          commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50 });
+        }
+        reasons.push('waiting for chinook at LZ');
       }
       return { commands, reason: reasons.join('; ') };
     }
