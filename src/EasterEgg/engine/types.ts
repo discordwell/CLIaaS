@@ -61,6 +61,7 @@ export const POWER_DRAIN: Record<string, number> = {
   SPEN: 30,
   BIO: 40,
   HOSP: 20,
+  FCOM: 200,  // rules.ini [FCOM] Power=-200
 };
 
 // === Directions ===
@@ -683,7 +684,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, burst: 2, isDegenerate: true },
   MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projSpeed: 30, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },
   '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true, isHigh: true },
-  TeslaCannon:      { name: 'TeslaCannon',       damage: 150, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
+  TeslaCannon:      { name: 'TeslaCannon',       damage: 100, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
   PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 100, isInvisible: true }, // Shock Trooper
   GoodWrench:       { name: 'GoodWrench',        damage: -100, rof: 80, range: 1.83, warhead: 'Mechanical', projSpeed: 100, isInvisible: true },        // Mechanic (heals vehicles)
@@ -692,7 +693,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Naval weapons (C++ RULES.INI — vessel.cpp)
   Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 20, burst: 2, isDegenerate: true, isAntiAir: true, isHigh: true, isFueled: true, projectileROT: 20 },                                 // DD primary naval gun
   TorpTube:         { name: 'TorpTube',         damage: 90,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true }, // SS torpedo, underwater travel
-  DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 5, isAntiSub: true, isArcing: true, isHigh: true, isInaccurate: true },                          // DD secondary, hits submerged subs
+  DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 5, isAntiSub: true, isAntiGround: false, isArcing: true, isHigh: true, isInaccurate: true },  // DD secondary, ASW-only (Catapult AG=no, rules.ini:2584)
   Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // CA cruise missile
   SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // MSUB missiles
   SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true }, // Aftermath missile sub missile

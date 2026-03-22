@@ -519,9 +519,9 @@ describe('WEAPON_STATS parity', () => {
     expect(w.burst).toBe(2);  // rules.ini [120mm] Burst=2
   });
 
-  it('TeslaCannon — damage=150, rof=120, range=8.5 (C++ RULES.INI TeslaZap)', () => {
+  it('TeslaCannon — damage=100, rof=120, range=8.5 (rules.ini [TeslaZap] Damage=100)', () => {
     const w = WEAPON_STATS.TeslaCannon;
-    expect(w.damage).toBe(150);
+    expect(w.damage).toBe(100);
     expect(w.rof).toBe(120);
     expect(w.range).toBe(8.5);
     expect(w.warhead).toBe('Super');
@@ -1287,9 +1287,9 @@ describe('STRUCTURE_WEAPONS parity', () => {
     expect(w.projSpeed).toBe(40);
   });
 
-  it('TSLA — damage=150, range=8.5, rof=120, warhead=Super, splash=1, projSpeed=100 (C++ RULES.INI TeslaZap)', () => {
+  it('TSLA — damage=100, range=8.5, rof=120, warhead=Super, splash=1, projSpeed=100 (rules.ini [TeslaZap] Damage=100)', () => {
     const w = STRUCTURE_WEAPONS.TSLA;
-    expect(w.damage).toBe(150);
+    expect(w.damage).toBe(100);
     expect(w.range).toBe(8.5);
     expect(w.rof).toBe(120);
     expect(w.warhead).toBe('Super');

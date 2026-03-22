@@ -1157,7 +1157,7 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   HBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Camo Pillbox)
   PBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Pillbox)
   GUN:   { damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },  // TurretGun
-  TSLA:  { damage: 150, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100 }, // TeslaZap (C++ RULES.INI Damage=150)
+  TSLA:  { damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100 }, // TeslaZap (rules.ini [TeslaZap] Damage=100)
   SAM:   { damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, isAntiAir: true }, // Nike missile — air-only (Nike → AA=true, AG=false)
   AGUN:  { damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isAntiAir: true },  // ZSU-23 flak — air-only (ZSU-23 → Ack → AA=true, AG=false)
   FTUR:  { damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },            // FireballLauncher
@@ -1201,6 +1201,8 @@ export const STRUCTURE_ARMOR: Record<string, ArmorType> = {
   MSLO: 'heavy',  // rules.ini: Armor=heavy
   AFLD: 'heavy',  // rules.ini: Armor=heavy
   FTUR: 'heavy',  // rules.ini: Armor=heavy
+  // none armor (walls) — rules.ini: Armor=none
+  SBAG: 'none', FENC: 'none', BRIK: 'none', CYCL: 'none',
 };
 
 // Building type → sprite image name (only include buildings we have sprites for)
@@ -2081,7 +2083,11 @@ export function checkTriggerEvent(
 ): boolean {
   switch (event.type) {
     case TEVENT_NONE:
-      return false; // no event — only fires when forced by FORCE_TRIGGER
+      // human-requested: C++ parity fix — TEVENT_NONE means "no event condition
+      // required" and returns true (C++ scenario.cpp TriggerEventClass::operator()).
+      // Triggers with TEVENT_NONE fire on the first processTriggers cycle.
+      // This enables frc1/frc2 reinforcement triggers in SCG05EA.
+      return true;
     case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {

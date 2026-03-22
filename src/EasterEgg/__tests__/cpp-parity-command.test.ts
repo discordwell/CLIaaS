@@ -5,7 +5,7 @@
  * Each describe block documents the C++ source reference (file:line).
  *
  * Both are scenario-only structures (not buildable by the player).
- * FCOM: 2x2, HP 400, no weapon, no power drain/output.
+ * FCOM: 2x2, HP 400, no weapon, Power=-200 (drain), no power output.
  * MISS: 3x2, HP 400, no weapon, no power drain/output.
  */
 
@@ -125,21 +125,21 @@ describe('FCOM stats (rules.ini parity)', () => {
     expect(STRUCTURE_WEAPONS['FCOM']).toBeUndefined();
   });
 
-  it('is not a power consumer (no entry in POWER_DRAIN)', () => {
-    expect(POWER_DRAIN['FCOM']).toBeUndefined();
+  it('drains 200 power (rules.ini [FCOM] Power=-200)', () => {
+    expect(POWER_DRAIN['FCOM']).toBe(200);
   });
 
   it('is not a power producer', () => {
     expect(powerOutput('FCOM', 400, 400)).toBe(0);
   });
 
-  it('does not appear in power grid calculations', () => {
+  it('appears as consumer in power grid calculations', () => {
     const alliances = buildDefaultAlliances();
     const isAllied = (a: House, b: House) => alliances.get(a)?.has(b) ?? false;
     const fcom = makeFCOM(10, 10, 400, House.Spain);
     const grid = calculatePowerGrid([fcom], House.Spain, isAllied);
     expect(grid.produced).toBe(0);
-    expect(grid.consumed).toBe(0);
+    expect(grid.consumed).toBe(200);
   });
 });
 
@@ -437,8 +437,8 @@ describe('FCOM vs MISS: same HP, different footprint', () => {
     expect(STRUCTURE_WEAPONS['MISS']).toBeUndefined();
   });
 
-  it('both lack power drain', () => {
-    expect(POWER_DRAIN['FCOM']).toBeUndefined();
+  it('FCOM drains 200, MISS has no drain', () => {
+    expect(POWER_DRAIN['FCOM']).toBe(200);
     expect(POWER_DRAIN['MISS']).toBeUndefined();
   });
 

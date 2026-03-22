@@ -6,7 +6,7 @@
  *
  * TSLA key stats (rules.ini / building.cpp):
  *   HP: 400, Size: 1x1, Cost: 1500, Soviet faction
- *   Weapon: Super warhead, 150 damage, range 8.5, ROF 120, splash 1.0
+ *   Weapon: Super warhead, 100 damage, range 8.5, ROF 120, splash 1.0
  *   Super warhead vs armor: 1.0 vs ALL armor types (universal damage)
  *   POWER-DEPENDENT (in STRUCTURE_POWERED) — cannot fire during power outage
  *   NOT turreted (not in TURRETED_STRUCTURES)
@@ -144,8 +144,8 @@ describe('TSLA weapon stats (rules.ini: Weapon=TeslaZap)', () => {
     expect(STRUCTURE_WEAPONS['TSLA'].warhead).toBe('Super');
   });
 
-  it('has 150 base damage (C++ RULES.INI TeslaZap Damage=150)', () => {
-    expect(STRUCTURE_WEAPONS['TSLA'].damage).toBe(150);
+  it('has 100 base damage (rules.ini [TeslaZap] Damage=100)', () => {
+    expect(STRUCTURE_WEAPONS['TSLA'].damage).toBe(100);
   });
 
   it('has range 8.5 cells — longest defense range', () => {
@@ -221,37 +221,37 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('applies Super warhead — full 150 damage (1.0x vs heavy armor)', () => {
+  it('applies Super warhead — full 100 damage (1.0x vs heavy armor)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     // Medium Tank: 400 HP, heavy armor — survives one shot to verify exact damage
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 13, 10);
     const hpBefore = tank.hp;
-    expect(hpBefore).toBeGreaterThan(150); // precondition: must survive the hit
+    expect(hpBefore).toBeGreaterThan(100); // precondition: must survive the hit
     const ctx = makeCombatCtx([tsla], [tank]);
     updateStructureCombat(ctx);
-    // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs heavy = 1.0, base 150
-    expect(hpBefore - tank.hp).toBe(150);
+    // rules.ini [TeslaZap] Damage=100. Super vs heavy = 1.0, base 100
+    expect(hpBefore - tank.hp).toBe(100);
   });
 
-  it('applies full 150 damage to heavy armor (Super = 1.0x vs all)', () => {
+  it('applies full 100 damage to heavy armor (Super = 1.0x vs all)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     // Heavy tank: armor = 'heavy'
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 13, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([tsla], [tank]);
     updateStructureCombat(ctx);
-    // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs heavy = 1.0, base 150
-    expect(hpBefore - tank.hp).toBe(150);
+    // rules.ini [TeslaZap] Damage=100. Super vs heavy = 1.0, base 100
+    expect(hpBefore - tank.hp).toBe(100);
   });
 
-  it('applies full 150 damage to light armor (Super = 1.0x vs all)', () => {
+  it('applies full 100 damage to light armor (Super = 1.0x vs all)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const apc = entityAtCell(UnitType.V_APC, House.USSR, 13, 10);
     const hpBefore = apc.hp;
     const ctx = makeCombatCtx([tsla], [apc]);
     updateStructureCombat(ctx);
-    // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs light = 1.0, base 150
-    expect(hpBefore - apc.hp).toBe(150);
+    // rules.ini [TeslaZap] Damage=100. Super vs light = 1.0, base 100
+    expect(hpBefore - apc.hp).toBe(100);
   });
 
   it('does NOT fire at enemy outside range 8.5', () => {
@@ -600,7 +600,7 @@ describe('TSLA target selection — threat-based scoring (building.cpp)', () => 
 describe('TSLA kill tracking (building.cpp)', () => {
   it('increments killCount when player-allied TSLA kills an enemy', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
-    // Weak enemy that will die from 150 Super damage
+    // Weak enemy that will die from 100 Super damage
     const weakEnemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     weakEnemy.hp = 1;
     const ctx = makeCombatCtx([tsla], [weakEnemy]);
@@ -610,10 +610,10 @@ describe('TSLA kill tracking (building.cpp)', () => {
     expect(ctx.killCount).toBe(1);
   });
 
-  it('one-shots infantry with 150 damage (most infantry have <= 125 HP)', () => {
+  it('one-shots infantry with 100 damage (most infantry have <= 125 HP)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const rifleman = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
-    // E1 Rifle Infantry has 50 HP; Super warhead 1.0 mult => 150 damage kills
+    // E1 Rifle Infantry has 50 HP; Super warhead 1.0 mult => 100 damage kills
     const ctx = makeCombatCtx([tsla], [rifleman]);
     updateStructureCombat(ctx);
     expect(rifleman.alive).toBe(false);

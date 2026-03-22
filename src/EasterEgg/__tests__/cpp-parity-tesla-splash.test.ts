@@ -15,7 +15,7 @@
  *   combat.cpp:393-425      — Wide_Area_Damage: nuke blast radius with cell-by-cell falloff
  *   building.cpp:4170       — BULLET_NUKE_UP: damage=200, warhead=WARHEAD_HE
  *   building.cpp:4191       — BULLET_NUKE_DOWN: damage=200, warhead=WARHEAD_NUKE
- *   RULES.INI [TeslaZap]    — Damage=150, Range=8.5, ROF=120, Warhead=Super, Charges=yes
+ *   RULES.INI [TeslaZap]    — Damage=100, Range=8.5, ROF=120, Warhead=Super, Charges=yes
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -99,24 +99,22 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
 
 describe('Tesla Coil zap mechanics (building.cpp:5382-5413, RULES.INI [TeslaZap])', () => {
 
-  // C++ RULES.INI [TeslaZap]: Damage=150, ROF=120, Range=8.5, Warhead=Super, Charges=yes
+  // rules.ini [TeslaZap]: Damage=100, ROF=120, Range=8.5, Warhead=Super, Charges=yes
   // TS STRUCTURE_WEAPONS.TSLA: damage=100, rof=120, range=8.5, warhead='Super'
   // TS WEAPON_STATS.TeslaCannon: damage=100, rof=120, range=8.5, warhead='Super'
 
-  it('TSLA structure weapon damage should be 150 (C++ RULES.INI TeslaZap Damage=150)', () => {
-    // C++ RULES.INI [TeslaZap]: Damage=150
-    // PARITY GAP: TS uses damage=100 in STRUCTURE_WEAPONS.TSLA
+  it('TSLA structure weapon damage should be 100 (rules.ini [TeslaZap] Damage=100)', () => {
+    // rules.ini [TeslaZap]: Damage=100
     const tsla = STRUCTURE_WEAPONS['TSLA'];
     expect(tsla).toBeDefined();
-    expect(tsla.damage).toBe(150); // PARITY GAP — TS has 100, C++ has 150
+    expect(tsla.damage).toBe(100);
   });
 
-  it('TeslaCannon weapon damage should be 150 (C++ RULES.INI TeslaZap Damage=150)', () => {
-    // C++ RULES.INI [TeslaZap]: Damage=150
-    // PARITY GAP: TS uses damage=100 in WEAPON_STATS.TeslaCannon
+  it('TeslaCannon weapon damage should be 100 (rules.ini [TeslaZap] Damage=100)', () => {
+    // rules.ini [TeslaZap]: Damage=100
     const cannon = WEAPON_STATS['TeslaCannon'];
     expect(cannon).toBeDefined();
-    expect(cannon.damage).toBe(150); // PARITY GAP — TS has 100, C++ has 150
+    expect(cannon.damage).toBe(100);
   });
 
   it('Tesla Coil uses Super warhead (C++ RULES.INI TeslaZap Warhead=Super)', () => {

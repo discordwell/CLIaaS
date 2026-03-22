@@ -728,9 +728,9 @@ describe('Tesla charging requires power (C++ building.cpp:5385)', () => {
     expect(POWER_DRAIN['TSLA']).toBe(150);
   });
 
-  it('TSLA damage is 150 (C++ RULES.INI TeslaZap Damage=150)', () => {
+  it('TSLA damage is 100 (rules.ini [TeslaZap] Damage=100)', () => {
     const weapon = STRUCTURE_WEAPONS['TSLA'];
-    expect(weapon.damage).toBe(150);
+    expect(weapon.damage).toBe(100);
   });
 });
 
