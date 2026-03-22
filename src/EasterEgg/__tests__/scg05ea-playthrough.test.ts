@@ -48,13 +48,17 @@ describe('SCG05EA live playthrough', () => {
           `[${i}] tick=${lastState.tick} ` +
           `units=${lastState.units.length} enemies=${lastState.structures.filter(s => !s.ally).length}s ` +
           `spy=${spy ? `(${spy.cx},${spy.cy})` : 'none'} ` +
-          `tanya=${tanya ? `(${tanya.cx},${tanya.cy})` : 'none'} ` +
+          `tanya=${tanya ? `(${tanya.cx},${tanya.cy}) hp=${tanya.hp}` : 'none'} ` +
           `lst=${lastState.units.find((u: {t:string}) => u.t === 'LST') ? `(${lastState.units.find((u: {t:string}) => u.t === 'LST')!.cx},${lastState.units.find((u: {t:string}) => u.t === 'LST')!.cy})` : ''} ` +
           `dogs=${dogs.length}` +
           (spy ? ` near=[${dogs.filter((d: { cx: number; cy: number }) => {
             const dx = d.cx - spy.cx, dy = d.cy - spy.cy;
             return dx*dx + dy*dy <= 36;
           }).map((d: { cx: number; cy: number }) => `(${d.cx},${d.cy})`).join(',')}]` : '') +
+          (tanya ? ` threats=[${lastState.enemies.filter((e: {cx:number;cy:number;t:string}) => {
+            const dx = e.cx - tanya.cx, dy = e.cy - tanya.cy;
+            return dx*dx + dy*dy <= 100 && e.t !== 'DOG';
+          }).map((e: {cx:number;cy:number;t:string}) => `${e.t}(${e.cx},${e.cy})`).join(',')}]` : '') +
           ` | ${note}`,
         );
         if (decision.warnings.length > 0) {

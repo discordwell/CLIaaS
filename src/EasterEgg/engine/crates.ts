@@ -19,7 +19,7 @@ import { type MapStructure } from './scenario';
  * 1 cell = 256 leptons (CELL_LEPTON_W), so CrateRadius = 640/256 = 2.5 cells.
  * Upgrade crates (armor, speed, firepower) affect all friendly units within this radius.
  */
-export const CRATE_RADIUS = 2.5;
+export const CRATE_RADIUS = 3.0;
 
 // ── Crate types ─────────────────────────────────────────────────────────────
 
@@ -44,10 +44,10 @@ export const CRATE_NAME_MAP: Record<string, CrateType> = {
   money: 'money', heal: 'heal', veterancy: 'heal', unit: 'unit',
   armor: 'armor', firepower: 'firepower', speed: 'speed',
   reveal: 'reveal', darkness: 'darkness', explosion: 'explosion',
-  squad: 'squad', heal_base: 'heal_base', napalm: 'napalm',
+  squad: 'squad', heal_base: 'heal_base', healbase: 'heal_base', napalm: 'napalm',
   cloak: 'cloak', invulnerability: 'invulnerability',
   parabomb: 'parabomb', sonar: 'sonar', icbm: 'icbm',
-  timequake: 'timequake', vortex: 'vortex',
+  timequake: 'timequake', vortex: 'vortex', chronalvortex: 'vortex',
 };
 
 /**
@@ -160,7 +160,7 @@ export function spawnCrate(ctx: CrateContext): void {
   }
   // CR6: Crate lifetime = Random(CrateTime/2, CrateTime*2) in minutes, default CrateTime=10
   // So 5-20 minutes, converted to ticks (x 15 FPS x 60 seconds/min)
-  const crateTimeMin = 10; // minutes (C++ default CrateTime)
+  const crateTimeMin = 3; // minutes (RULES.INI CrateRegen=3, overrides C++ default 10)
   const minLifetime = Math.floor(crateTimeMin / 2); // 5 minutes
   const maxLifetime = crateTimeMin * 2; // 20 minutes
   const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
@@ -322,7 +322,7 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
         if (!e.alive) continue;
         const d = worldDist(e.pos, { x: crate.x, y: crate.y });
         if (d <= 3) {
-          ctx.damageEntity(e, 200, 'HE');
+          ctx.damageEntity(e, 500, 'HE');
         }
       }
       ctx.effects.push({ type: 'explosion', x: crate.x, y: crate.y, frame: 0, maxFrames: EXPLOSION_FRAMES.atomsfx, size: 20, sprite: 'atomsfx', spriteStart: 0, blendMode: 'screen' });
@@ -370,7 +370,7 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
           for (const e of ctx.entities) {
             if (!e.alive) continue;
             const d = worldDist(e.pos, { x: fx, y: fy });
-            if (d <= 1) ctx.damageEntity(e, 80, 'Fire');
+            if (d <= 1) ctx.damageEntity(e, 600, 'Fire');
           }
         }
       }
@@ -383,8 +383,9 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       ctx.evaMessages.push({ text: 'UNIT CLOAKED', tick: ctx.tick });
       break;
     case 'invulnerability':
-      // 20 seconds invincibility (300 ticks)
-      unit.invulnTick = 300;
+      // 60 seconds invincibility (C++ TICKS_PER_MINUTE * 1.0 = 900 C++ ticks = 60s real time)
+      // At TS 20 TPS: 60 * 20 = 1200 ticks
+      unit.invulnTick = 1200;
       ctx.evaMessages.push({ text: 'INVULNERABILITY', tick: ctx.tick });
       break;
     case 'parabomb': {

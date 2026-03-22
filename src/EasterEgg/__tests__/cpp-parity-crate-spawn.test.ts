@@ -365,17 +365,17 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
       expect(cppMaxTicks).toBe(18000);
     });
 
-    it('spawnCrate() creates crate with lifetime in C++ expected range', () => {
-      // TS uses GAME_TICKS_PER_SEC=20 (not 15 like C++), but the formula should
-      // use the same CrateTime=10 minutes and convert to TS ticks.
+    it('spawnCrate() creates crate with lifetime in RULES.INI CrateRegen=3 range', () => {
+      // TS now uses RULES.INI CrateRegen=3 (overrides C++ compiled default of 10)
       // TS formula from crates.ts:
-      //   minLifetime = CrateTime/2 = 5 minutes
-      //   maxLifetime = CrateTime*2 = 20 minutes
+      //   minLifetime = Math.floor(CrateTime/2) = Math.floor(1.5) = 1 minute
+      //   maxLifetime = CrateTime*2 = 6 minutes
       //   lifetimeTicks = lifetimeMinutes * 60 * GAME_TICKS_PER_SEC
-      // TS min ticks = 5 * 60 * 20 = 6000
-      // TS max ticks = 20 * 60 * 20 = 24000
-      const tsMinTicks = Math.floor((CPP_CRATE_TIME / 2) * 60 * GAME_TICKS_PER_SEC);
-      const tsMaxTicks = Math.floor(CPP_CRATE_TIME * 2 * 60 * GAME_TICKS_PER_SEC);
+      // TS min ticks = 1 * 60 * 20 = 1200
+      // TS max ticks = 6 * 60 * 20 = 7200
+      const INI_CRATE_REGEN = 3; // RULES.INI CrateRegen=3
+      const tsMinTicks = Math.floor(INI_CRATE_REGEN / 2) * 60 * GAME_TICKS_PER_SEC;
+      const tsMaxTicks = INI_CRATE_REGEN * 2 * 60 * GAME_TICKS_PER_SEC;
 
       // Run spawnCrate many times and verify lifetime range
       for (let trial = 0; trial < 50; trial++) {

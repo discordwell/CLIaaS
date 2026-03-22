@@ -1232,24 +1232,19 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
         }
       }
     } else {
-      // Non-barrel: generic 2-cell radial HE blast with distance falloff
-      const blastRadius = 2;
-      for (const e of ctx.entities) {
-        if (!e.alive || e.inLimbo) continue;
-        const dist = worldDist({ x: wx, y: wy }, e.pos);
-        if (dist > blastRadius) continue;
-        const falloff = 1 - (dist / blastRadius) * 0.6;
-        const blastDmg = Math.max(1, Math.round(100 * falloff));
-        damageEntity(ctx, e, blastDmg, 'HE');
-      }
-      // Non-barrel: structure-to-structure chain damage
+      // Non-barrel: building death explosions are visual-only for entities.
+      // C++ building.cpp death anims (FBALL1) don't create warhead damage circles
+      // against units — only barrels have the cardinal-direction bullet mechanic.
+      // Structure-to-structure chain damage still applies.
+      // Non-barrel: structure-to-structure chain damage (2-cell radius)
+      const structBlastRadius = 2;
       for (const s2 of ctx.structures) {
         if (!s2.alive || s2 === s) continue;
         const s2wx = s2.cx * CELL_SIZE + CELL_SIZE;
         const s2wy = s2.cy * CELL_SIZE + CELL_SIZE;
         const dist = worldDist({ x: wx, y: wy }, { x: s2wx, y: s2wy });
-        if (dist > blastRadius) continue;
-        const falloff = 1 - (dist / blastRadius) * 0.6;
+        if (dist > structBlastRadius) continue;
+        const falloff = 1 - (dist / structBlastRadius) * 0.6;
         const blastDmg = Math.max(1, Math.round(100 * falloff));
         structureDamage(ctx, s2, blastDmg);
       }

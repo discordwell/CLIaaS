@@ -428,10 +428,9 @@ describe('[General] spatial constants -- rules.ini', () => {
   });
 
   it('PARITY GAP: TS uses closeEnough = 2.5, rules.ini says 2.75', () => {
-    // TS index.ts:4415: const closeEnough = 2.5;
+    // TS index.ts:4415: const closeEnough = 2.75 — now matches RULES.INI
     // rules.ini [General]: CloseEnough=2.75
-    // The TS engine hardcodes 2.5 instead of reading the INI value.
-    const TS_CLOSE_ENOUGH = 2.5; // from index.ts:4415
+    const TS_CLOSE_ENOUGH = 2.75; // from index.ts:4415 — fixed to match RULES.INI
     const INI_CLOSE_ENOUGH = iniFloat('General', 'CloseEnough');
     expect(TS_CLOSE_ENOUGH).toBe(INI_CLOSE_ENOUGH);
   });

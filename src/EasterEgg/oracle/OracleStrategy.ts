@@ -3396,8 +3396,10 @@ export class OracleStrategy {
         INF_SET.has(e.t) && e.hp > 0 && this.distanceSq(tanya, e) <= TANYA_RANGE_SQ,
       ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
 
+      // Shoot ALL barrels in range regardless of owner — barrels are environmental
+      // hazards. GoodGuy barrels near SAMs will chain-explode and kill Tanya.
       const shootableBarrel = state.structures.find((s) =>
-        BARREL_TYPES.has(s.t) && !s.ally && s.hp > 0 && this.distanceSq(tanya, s) <= TANYA_RANGE_SQ,
+        BARREL_TYPES.has(s.t) && s.hp > 0 && this.distanceSq(tanya, s) <= TANYA_RANGE_SQ,
       );
 
       // Priority: flee dogs > shoot infantry > shoot barrels > C4 nearest SAM
@@ -3431,16 +3433,20 @@ export class OracleStrategy {
         // plant C4. Move commands are faster than attack_struct because they use
         // the normal movement system without missionAI moveToward interference.
         if (this.scg05eaC4PlantedTick > 0 && (state.tick - this.scg05eaC4PlantedTick) < 40) {
-          // C4 recently planted — retreat and wait for detonation (27 tick timer)
-          // Move away from SAM to avoid enemy fire concentration near the blast
-          const retreatX = tanya.cx < sam.cx ? tanya.cx - 3 : tanya.cx + 3;
-          commands.push({ cmd: 'move', ids: [tanya.id], cx: retreatX, cy: tanya.cy });
-          reasons.push(`C4 retreat — waiting ${40 - (state.tick - this.scg05eaC4PlantedTick)} ticks [${remainingSams.length} left]`);
+          // C4 recently planted — RUN AWAY! The SAM explosion does 100 HE damage
+          // in a 2-cell radius. Tanya must be 3+ cells away to survive.
+          const dx = tanya.cx - sam.cx;
+          const dy = tanya.cy - sam.cy;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const retreatX = Math.round(tanya.cx + (dx / len) * 5);
+          const retreatY = Math.round(tanya.cy + (dy / len) * 5);
+          commands.push({ cmd: 'move', ids: [tanya.id], cx: retreatX, cy: retreatY });
+          reasons.push(`C4 RUN! ${40 - (state.tick - this.scg05eaC4PlantedTick)}t [${remainingSams.length} left]`);
         } else if (samDist <= 4) {
-          // Adjacent — plant C4!
+          // Adjacent — plant C4 (attack only, retreat on next oracle iteration)
           this.scg05eaC4PlantedTick = state.tick;
           commands.push({ cmd: 'attack', ids: [tanya.id], target: sam.id });
-          reasons.push(`C4! SAM(${sam.cx},${sam.cy}) d=${Math.sqrt(samDist).toFixed(1)} [${remainingSams.length} left]`);
+          reasons.push(`C4! SAM(${sam.cx},${sam.cy}) [${remainingSams.length} left]`);
         } else {
           // Walk toward SAM: pick best adjacent cell and move there
           // For north SAMs far from spawn, use corridor waypoints first
@@ -3949,13 +3955,22 @@ export class OracleStrategy {
         let targetDesc = '';
         let targetPos: Point = { cx: 0, cy: 0 };
 
-        if (nearbyTanks.length > 0) {
-          // Focus-fire nearest enemy tank
-          targetId = nearbyTanks[0].id;
-          targetDesc = nearbyTanks[0].t;
-          targetPos = nearbyTanks[0];
+        // BUILDINGS FIRST — stop enemy from producing replacements.
+        // Only fight enemy tanks if they're literally on top of us (10 cells).
+        const veryClose = nearbyTanks.filter(
+          (e) => this.distanceSq(e, groupCenter) <= 100, // 10 cells
+        );
+        if (structTarget && veryClose.length === 0) {
+          // Path clear — hit the production building
+          targetId = structTarget.id;
+          targetDesc = structTarget.t;
+          targetPos = structTarget;
+        } else if (veryClose.length > 0) {
+          // Tank in our face — kill it, then resume building attack
+          targetId = veryClose[0].id;
+          targetDesc = veryClose[0].t;
+          targetPos = veryClose[0];
         } else if (structTarget) {
-          // No enemy tanks nearby — attack production building directly
           targetId = structTarget.id;
           targetDesc = structTarget.t;
           targetPos = structTarget;

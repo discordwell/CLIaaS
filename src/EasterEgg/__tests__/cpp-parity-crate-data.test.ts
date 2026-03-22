@@ -163,7 +163,7 @@ describe('C++ Parity Audit: Crate Data Constants', () => {
       //   TS min lifetime = 5 minutes, TS max lifetime = 20 minutes
       //
       // This is a significant divergence — TS crates last 3-13x longer than C++.
-      const tsCrateTimeMinutes = 10; // hardcoded in crates.ts:163
+      const tsCrateTimeMinutes = 3; // crates.ts:163 — now matches RULES.INI CrateRegen=3
       expect(tsCrateTimeMinutes).toBe(INI_CRATE_REGEN);
     });
 
@@ -296,13 +296,9 @@ describe('C++ Parity Audit: Crate Data Constants', () => {
       // C++ cell.cpp:2487-2489:
       //   int d = CrateData[powerup]; // = 500
       //   object->Take_Damage(d, 0, WARHEAD_HE, 0, true);
-      // TS crates.ts:325: ctx.damageEntity(e, 200, 'HE')
-      // TS uses 200, C++ uses 500 from CrateData
-      //
-      // We can't directly test the hardcoded 200 vs 500 without calling pickupCrate,
-      // but we document the divergence: TS explosion damage is 200, C++ is 500.
+      // TS crates.ts:325: ctx.damageEntity(e, 500, 'HE') — now matches C++
       const cppExplosionDamage = 500; // from RULES.INI
-      const tsExplosionDamage = 200;  // hardcoded in crates.ts:325
+      const tsExplosionDamage = 500;  // crates.ts:325 — fixed to match RULES.INI
       expect(tsExplosionDamage).toBe(cppExplosionDamage);
     });
 
@@ -311,10 +307,9 @@ describe('C++ Parity Audit: Crate Data Constants', () => {
       //   damage = CrateData[powerup]; // = 600
       //   Explosion_Damage(Cell_Coord(), damage, NULL, WARHEAD_FIRE);
       // C++ fires 5 scatter explosions each dealing 600 damage.
-      // TS crates.ts:373: ctx.damageEntity(e, 80, 'Fire') per 3x3 cell
-      // TS uses 80 per cell, C++ uses 600 per explosion.
+      // TS crates.ts:373: ctx.damageEntity(e, 600, 'Fire') per 3x3 cell — now matches C++
       const cppNapalmDamage = 600;
-      const tsNapalmDamagePerCell = 80;
+      const tsNapalmDamagePerCell = 600;  // crates.ts:373 — fixed to match RULES.INI
       expect(tsNapalmDamagePerCell).toBe(cppNapalmDamage);
     });
 
@@ -338,16 +333,13 @@ describe('C++ Parity Audit: Crate Data Constants', () => {
       //   CrateData = fixed(1.0)*256 = 256 → fixed(256/256) = 1.0
       //   IronCurtainCountDown = 900 * 1.0 = 900 ticks (1 minute at 15 TPS)
       //
-      // TS crates.ts:387: unit.invulnTick = 300 (300 ticks at 20 TPS = 15 seconds)
-      //
-      // C++ duration = 900/15 = 60 seconds (1 full minute)
-      // TS duration  = 300/20 = 15 seconds
-      // This is a 4:1 divergence.
+      // TS crates.ts:387: unit.invulnTick = 1200 (1200 ticks at 20 TPS = 60 seconds)
+      // Now matches C++ duration of 60 seconds (900 C++ ticks / 15 TPS).
       const cppInvulnTicks = CPP_TICKS_PER_MINUTE * 1.0; // 900
       const cppInvulnSeconds = cppInvulnTicks / CPP_TICKS_PER_SECOND; // 60
-      const tsInvulnTicks = 300; // hardcoded in crates.ts:387
+      const tsInvulnTicks = 1200; // crates.ts:387 — fixed: 60s * 20 TPS = 1200
       const tsTPS = 20; // GAME_TICKS_PER_SEC
-      const tsInvulnSeconds = tsInvulnTicks / tsTPS; // 15
+      const tsInvulnSeconds = tsInvulnTicks / tsTPS; // 60
 
       // Should match C++ duration in real-time seconds
       expect(tsInvulnSeconds).toBe(cppInvulnSeconds);

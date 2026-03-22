@@ -341,13 +341,13 @@ describe('CPP parity: spawnCrate lifetime tick values', () => {
 
     expect(lifetimes.length).toBeGreaterThan(0);
 
-    // TS lifetimes are in [6000, 24000] at 20 TPS = [5, 20] minutes (same as C++)
-    const TS_CRATE_TIMER_MIN = 5 * 60 * GAME_TICKS_PER_SEC;  // 6000
-    const TS_CRATE_TIMER_MAX = 20 * 60 * GAME_TICKS_PER_SEC; // 24000
+    // With RULES.INI CrateRegen=3, TS uses Math.floor(3/2)=1 min, 3*2=6 max
+    // = [1200, 7200] ticks at 20 TPS
+    const TS_CRATE_TIMER_MIN = Math.floor(3 / 2) * 60 * GAME_TICKS_PER_SEC;  // 1200
+    const TS_CRATE_TIMER_MAX = 6 * 60 * GAME_TICKS_PER_SEC; // 7200
     for (const lt of lifetimes) {
       expect(lt).toBeGreaterThanOrEqual(TS_CRATE_TIMER_MIN);
       expect(lt).toBeLessThanOrEqual(TS_CRATE_TIMER_MAX);
-      // Real-time equivalence with C++: both are 5-20 minutes
     }
   });
 });

@@ -4417,7 +4417,7 @@ export class Game {
     } else if (entity.moveTarget) {
       // C++ drive.cpp only accepts "close enough" as a fallback when pathing is blocked.
       // A direct move order should otherwise continue to the exact commanded cell.
-      const closeEnough = 2.5; // worldDist returns cells
+      const closeEnough = 2.75; // rules.ini CloseEnough=2.75 (overrides C++ default 2.5)
       const finishMove = () => {
         entity.moveTarget = null;
         // C++ foot.cpp:2242-2248: navQueueLoop re-populates queue when exhausted

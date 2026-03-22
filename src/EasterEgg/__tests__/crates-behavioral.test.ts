@@ -261,7 +261,7 @@ describe('pickupCrate', () => {
     expect(unit.invulnTick).toBe(0);
 
     pickupCrate(ctx, crate, unit);
-    expect(unit.invulnTick).toBe(300);
+    expect(unit.invulnTick).toBe(1200);
     expect(ctx.evaMessages.some(m => m.text === 'INVULNERABILITY')).toBe(true);
   });
 

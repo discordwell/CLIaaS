@@ -703,15 +703,15 @@ describe('heal_base crate effect (cell.cpp:2529-2540)', () => {
 // PARITY GAP: C++ gives 900 ticks (1 minute). TS gives 300 ticks (20 sec).
 // ═══════════════════════════════════════════════════════════════════════════
 describe('invulnerability crate duration (cell.cpp:2594-2603)', () => {
-  it('PARITY GAP: invulnerability should last 900 ticks (1 min), TS gives 300', () => {
+  it('invulnerability lasts 1200 ticks (60s at 20 TPS, matching C++ 900 ticks at 15 TPS)', () => {
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
 
     pickupCrate(ctx, makeCrate('invulnerability'), unit);
 
-    // C++ duration: TICKS_PER_MINUTE * 1.0 = 900 ticks
-    // TS duration: 300 ticks
-    expect(unit.invulnTick).toBe(300); // TS gives 300 — PARITY GAP vs C++ 900
+    // C++ duration: TICKS_PER_MINUTE * 1.0 = 900 ticks at 15 TPS = 60 seconds
+    // TS duration: 1200 ticks at 20 TPS = 60 seconds — matches C++ real-time duration
+    expect(unit.invulnTick).toBe(1200);
   });
 });
 
