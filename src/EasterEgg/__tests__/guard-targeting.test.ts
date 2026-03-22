@@ -19,8 +19,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const fireAnt = makeEntity(UnitType.ANT2, House.USSR, 150, 100);
     const scoutAnt = makeEntity(UnitType.ANT3, House.USSR, 150, 100);
 
-    const fireScore = threatScore(scanner, fireAnt, 2, false);
-    const scoutScore = threatScore(scanner, scoutAnt, 2, false);
+    const fireScore = threatScore(scanner, fireAnt, 2);
+    const scoutScore = threatScore(scanner, scoutAnt, 2);
 
     // C++ parity: scored by 2*points — whichever has higher cost/points scores higher
     expect(fireScore).toBeGreaterThan(0);
@@ -33,8 +33,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const wounded = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     wounded.hp = wounded.maxHp * 0.3;
 
-    const healthyScore = threatScore(scanner, healthy, 2, false);
-    const woundedScore = threatScore(scanner, wounded, 2, false);
+    const healthyScore = threatScore(scanner, healthy, 2);
+    const woundedScore = threatScore(scanner, wounded, 2);
 
     // C++ Evaluate_Object has no HP modifier
     expect(woundedScore).toBe(healthyScore);
@@ -45,8 +45,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const passive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const aggressive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
 
-    const passiveScore = threatScore(scanner, passive, 2, false);
-    const aggressiveScore = threatScore(scanner, aggressive, 2, true);
+    const passiveScore = threatScore(scanner, passive, 2);
+    const aggressiveScore = threatScore(scanner, aggressive, 2);
 
     // C++ handles retaliation in Assign_Target, not Evaluate_Object
     expect(aggressiveScore).toBe(passiveScore);
@@ -57,8 +57,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const near = makeEntity(UnitType.ANT1, House.USSR, 120, 100);
     const far = makeEntity(UnitType.ANT1, House.USSR, 200, 100);
 
-    const nearScore = threatScore(scanner, near, 1, false);
-    const farScore = threatScore(scanner, far, 5, false);
+    const nearScore = threatScore(scanner, near, 1);
+    const farScore = threatScore(scanner, far, 5);
 
     expect(nearScore).toBeGreaterThan(farScore);
   });
@@ -69,8 +69,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const veteran = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     veteran.kills = 5; // +15 score bonus
 
-    const rookieScore = threatScore(scanner, rookie, 2, false);
-    const vetScore = threatScore(scanner, veteran, 2, false);
+    const rookieScore = threatScore(scanner, rookie, 2);
+    const vetScore = threatScore(scanner, veteran, 2);
 
     expect(vetScore).toBeGreaterThan(rookieScore);
   });
@@ -83,8 +83,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const closeAnt = makeEntity(UnitType.ANT2, House.USSR, 150, 100);
     const farAnt = makeEntity(UnitType.ANT2, House.USSR, 200, 100);
 
-    const closeScore = threatScore(scanner, closeAnt, 2, false);
-    const farScore = threatScore(scanner, farAnt, 4, false);
+    const closeScore = threatScore(scanner, closeAnt, 2);
+    const farScore = threatScore(scanner, farAnt, 4);
 
     // Same unit type at different distances — closer always wins in C++
     expect(closeScore).toBeGreaterThan(farScore);
@@ -97,8 +97,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const vehicle = makeEntity(UnitType.V_2TNK, House.USSR, 150, 100);
     const infantry = makeEntity(UnitType.I_E1, House.USSR, 150, 100);
 
-    const vehScore = threatScore(scanner, vehicle, 2, false);
-    const infScore = threatScore(scanner, infantry, 2, false);
+    const vehScore = threatScore(scanner, vehicle, 2);
+    const infScore = threatScore(scanner, infantry, 2);
 
     expect(vehScore).toBeGreaterThan(infScore);
   });
@@ -108,8 +108,8 @@ describe('threatScore — threat-weighted targeting', () => {
     const rifle = makeEntity(UnitType.I_E1, House.Greece, 150, 100);
     const einstein = makeEntity(UnitType.I_EINSTEIN, House.Greece, 150, 100);
 
-    const rifleScore = threatScore(scanner, rifle, 2, false);
-    const einsteinScore = threatScore(scanner, einstein, 2, false);
+    const rifleScore = threatScore(scanner, rifle, 2);
+    const einsteinScore = threatScore(scanner, einstein, 2);
 
     expect(rifleScore).toBeGreaterThan(einsteinScore);
   });

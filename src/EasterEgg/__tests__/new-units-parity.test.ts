@@ -733,10 +733,10 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
-    const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
-    const scoreOne = threatScore(scanner, target, 1, false, 0, null, 1);
-    const scoreTwo = threatScore(scanner, target, 1, false, 0, null, 2);
-    const scoreThree = threatScore(scanner, target, 1, false, 0, null, 3);
+    const scoreNone = threatScore(scanner, target, 1, null, 0);
+    const scoreOne = threatScore(scanner, target, 1, null, 1);
+    const scoreTwo = threatScore(scanner, target, 1, null, 2);
+    const scoreThree = threatScore(scanner, target, 1, null, 3);
 
     // More nearby structures = lower score
     expect(scoreOne).toBeLessThan(scoreNone);
@@ -755,10 +755,10 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
-    const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
+    const scoreNone = threatScore(scanner, target, 1, null, 0);
     // C++ has no floor — keeps halving
-    const scoreFive = threatScore(scanner, target, 1, false, 0, null, 5);
-    const scoreTen = threatScore(scanner, target, 1, false, 0, null, 10);
+    const scoreFive = threatScore(scanner, target, 1, null, 5);
+    const scoreTen = threatScore(scanner, target, 1, null, 10);
 
     // 5 buildings: ~1/32 = 0.03125x (use ratio for integer truncation tolerance)
     expect(scoreFive / scoreNone).toBeCloseTo(Math.pow(0.5, 5), 1);
@@ -771,8 +771,8 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
-    const scoreNone = threatScore(scanner, target, 1, false, 0, null, 0);
-    const scoreThree = threatScore(scanner, target, 1, false, 0, null, 3);
+    const scoreNone = threatScore(scanner, target, 1, null, 0);
+    const scoreThree = threatScore(scanner, target, 1, null, 3);
 
     // No splash weapon means no penalty regardless of structure count
     expect(scoreThree).toBe(scoreNone);
@@ -782,8 +782,8 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
-    const scoreUndefined = threatScore(scanner, target, 1, false, 0, null, undefined);
-    const scoreZero = threatScore(scanner, target, 1, false, 0, null, 0);
+    const scoreUndefined = threatScore(scanner, target, 1, null, undefined);
+    const scoreZero = threatScore(scanner, target, 1, null, 0);
 
     expect(scoreZero).toBe(scoreUndefined);
   });
@@ -797,7 +797,7 @@ describe('AI6: Spy target exclusion', () => {
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
     const spy = makeEntity(UnitType.I_SPY, House.USSR, 220, 200);
 
-    const score = threatScore(scanner, spy, 1, false);
+    const score = threatScore(scanner, spy, 1);
     expect(score).toBe(0);
   });
 
@@ -805,7 +805,7 @@ describe('AI6: Spy target exclusion', () => {
     const dog = makeEntity(UnitType.I_DOG, House.Spain, 200, 200);
     const spy = makeEntity(UnitType.I_SPY, House.USSR, 220, 200);
 
-    const score = threatScore(dog, spy, 1, false);
+    const score = threatScore(dog, spy, 1);
     expect(score).toBeGreaterThan(0);
   });
 
@@ -813,7 +813,7 @@ describe('AI6: Spy target exclusion', () => {
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
     const enemy = makeEntity(UnitType.I_E1, House.USSR, 220, 200);
 
-    const score = threatScore(scanner, enemy, 1, false);
+    const score = threatScore(scanner, enemy, 1);
     expect(score).toBeGreaterThan(0);
   });
 });

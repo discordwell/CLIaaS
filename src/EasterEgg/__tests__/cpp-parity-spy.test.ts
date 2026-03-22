@@ -237,35 +237,35 @@ describe('SPY threat exclusion AI6 (techno.cpp Evaluate_Object)', () => {
   it('threatScore returns 0 when scanner is E1 and target is SPY', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    const score = threatScore(scanner, spy, 1, false);
+    const score = threatScore(scanner, spy, 1);
     expect(score).toBe(0);
   });
 
   it('threatScore returns 0 when scanner is a tank (V_2TNK) and target is SPY', () => {
     const scanner = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    const score = threatScore(scanner, spy, 1, false);
+    const score = threatScore(scanner, spy, 1);
     expect(score).toBe(0);
   });
 
   it('threatScore returns 0 when scanner is E3 (rocket soldier) and target is SPY', () => {
     const scanner = entityAtCell(UnitType.I_E3, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    const score = threatScore(scanner, spy, 1, false);
+    const score = threatScore(scanner, spy, 1);
     expect(score).toBe(0);
   });
 
   it('threatScore returns 0 for SPY even when spy is attacking ally (isTargetAttackingAlly=true)', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    const score = threatScore(scanner, spy, 1, true);
+    const score = threatScore(scanner, spy, 1);
     expect(score).toBe(0);
   });
 
   it('threatScore returns 0 for SPY even at zero distance', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 10, 10); // same cell
-    const score = threatScore(scanner, spy, 0, false);
+    const score = threatScore(scanner, spy, 0);
     expect(score).toBe(0);
   });
 });
@@ -277,7 +277,7 @@ describe('SPY dog counter (techno.cpp -- dogs detect spies)', () => {
   it('threatScore returns > 0 when scanner is DOG and target is SPY', () => {
     const dog = entityAtCell(UnitType.I_DOG, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    const score = threatScore(dog, spy, 1, false);
+    const score = threatScore(dog, spy, 1);
     expect(score).toBeGreaterThan(0);
   });
 

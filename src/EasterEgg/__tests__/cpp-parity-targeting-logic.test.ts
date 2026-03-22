@@ -197,7 +197,7 @@ describe('dog infantry-only targeting (C++ techno.cpp:2017-2026)', () => {
     const infantry = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     expect(infantry.stats.isInfantry).toBe(true);
 
-    const score = threatScore(dog, infantry, 2, false);
+    const score = threatScore(dog, infantry, 2);
     expect(score).toBeGreaterThan(0);
   });
 
@@ -223,7 +223,7 @@ describe('dog infantry-only targeting (C++ techno.cpp:2017-2026)', () => {
     expect(spy.stats.isInfantry).toBe(true);
 
     // And dogs are the IsDog exception to spy invisibility
-    const score = threatScore(dog, spy, 2, false);
+    const score = threatScore(dog, spy, 2);
     expect(score).toBeGreaterThan(0);
   });
 
@@ -714,7 +714,7 @@ describe('score floor max(value, 1) (C++ techno.cpp:1756)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     // Test at very large distance where score could theoretically be < 1
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
-    const score = threatScore(scanner, target, 100, false);
+    const score = threatScore(scanner, target, 100);
     expect(score).toBeGreaterThanOrEqual(1);
   });
 
@@ -722,7 +722,7 @@ describe('score floor max(value, 1) (C++ techno.cpp:1756)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     // Very large distance — hyperbolic falloff drives score very low
-    const score = threatScore(scanner, target, 500, false);
+    const score = threatScore(scanner, target, 500);
     // C++ techno.cpp:1756: value = max(value, 1)
     expect(score).toBeGreaterThanOrEqual(1);
   });
@@ -732,7 +732,7 @@ describe('score floor max(value, 1) (C++ techno.cpp:1756)', () => {
     const spy = makeEntity(UnitType.I_SPY, House.Greece, 200, 200);
     // Spy exclusion returns 0 BEFORE the scoring formula runs
     // C++ techno.cpp:1557 returns false (reject) — Evaluate_Object never scores
-    const score = threatScore(scanner, spy, 2, false);
+    const score = threatScore(scanner, spy, 2);
     expect(score).toBe(0);
   });
 });
@@ -757,11 +757,11 @@ describe('cross-unit relative threat ordering', () => {
     // 2TNK has more points than E1
     expect(tankPoints).toBeGreaterThan(e1Points);
 
-    const infScore = threatScore(scanner, makeEntity(UnitType.I_E1, House.Greece, 200, 200), 3, false);
-    const tankScore = threatScore(scanner, makeEntity(UnitType.V_2TNK, House.Greece, 200, 200), 3, false);
+    const infScore = threatScore(scanner, makeEntity(UnitType.I_E1, House.Greece, 200, 200), 3);
+    const tankScore = threatScore(scanner, makeEntity(UnitType.V_2TNK, House.Greece, 200, 200), 3);
 
-    // Even with warhead penalty (SA vs heavy), tank base value is much higher
-    // 2TNK=30pts, E1=5pts. Even at 0.5x penalty: 30*2*0.5=30 > 5*2=10
+    // Tank base value is much higher (no warhead modifier in Evaluate_Object)
+    // 2TNK=30pts → value=60, E1=5pts → value=10
     expect(infScore).toBeGreaterThan(0);
     expect(tankScore).toBeGreaterThan(0);
   });
@@ -772,10 +772,10 @@ describe('cross-unit relative threat ordering', () => {
     const mediumPoints = parseInt(ini['2TNK']?.Points ?? '0', 10);
     expect(mammothPoints).toBeGreaterThan(mediumPoints);
 
-    const medScore = threatScore(scanner, makeEntity(UnitType.V_2TNK, House.Greece, 200, 200), 3, false);
-    const mamScore = threatScore(scanner, makeEntity(UnitType.V_4TNK, House.Greece, 200, 200), 3, false);
+    const medScore = threatScore(scanner, makeEntity(UnitType.V_2TNK, House.Greece, 200, 200), 3);
+    const mamScore = threatScore(scanner, makeEntity(UnitType.V_4TNK, House.Greece, 200, 200), 3);
 
-    // Both should have same armor class (heavy), so warhead penalties cancel out
+    // No warhead modifier in threat scoring — pure Points-based comparison
     expect(mamScore).toBeGreaterThan(medScore);
   });
 
@@ -785,9 +785,9 @@ describe('cross-unit relative threat ordering', () => {
     const e1Points = parseInt(ini['E1']?.Points ?? '0', 10);
     expect(tanyaPoints).toBeGreaterThan(e1Points);
 
-    const e1Score = threatScore(scanner, makeEntity(UnitType.I_E1, House.Greece, 200, 200), 3, false);
+    const e1Score = threatScore(scanner, makeEntity(UnitType.I_E1, House.Greece, 200, 200), 3);
     // UnitType.I_TANYA = 'E7' — use the correct enum value
-    const tanyaScore = threatScore(scanner, makeEntity(UnitType.I_TANYA, House.Greece, 200, 200), 3, false);
+    const tanyaScore = threatScore(scanner, makeEntity(UnitType.I_TANYA, House.Greece, 200, 200), 3);
 
     expect(tanyaScore).toBeGreaterThan(e1Score);
   });
@@ -797,8 +797,8 @@ describe('cross-unit relative threat ordering', () => {
     const near = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     const far = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
 
-    const nearScore = threatScore(scanner, near, 1, false);
-    const farScore = threatScore(scanner, far, 10, false);
+    const nearScore = threatScore(scanner, near, 1);
+    const farScore = threatScore(scanner, far, 10);
 
     // Hyperbolic falloff: score at 1 cell = value*32000/2 = 160000
     //                     score at 10 cells = value*32000/11 ~ 29090
@@ -812,8 +812,8 @@ describe('cross-unit relative threat ordering', () => {
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
-    const normal = threatScore(scanner, target, 3, false, 0, null);
-    const designated = threatScore(scanner, target, 3, false, 0, House.Greece);
+    const normal = threatScore(scanner, target, 3, null);
+    const designated = threatScore(scanner, target, 3, House.Greece);
 
     // C++ formula: designated = (value+500)*3
     // For E1 (5pts): value=10, designated=(10+500)*3=1530
@@ -1121,14 +1121,14 @@ describe('numerical threat score verification against C++ formula', () => {
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
-    const score = threatScore(scanner, target, 0.001, false);
+    const score = threatScore(scanner, target, 0.001);
     // floor(0.001) = 0, divisor = 1
     // score = trunc(2*5*32000/1) = 320000
     const expected = Math.trunc(2 * e1Points * 32000 / 1);
     expect(score).toBe(expected);
   });
 
-  it('4TNK at distance 5: score = trunc(2*Points*warhead_mod*32000/6)', () => {
+  it('4TNK at distance 5: score = trunc(2*Points*32000/6) — no warhead modifier', () => {
     const tankPoints = parseInt(ini['4TNK']?.Points ?? '0', 10);
     expect(tankPoints).toBeGreaterThan(0);
 
@@ -1136,13 +1136,11 @@ describe('numerical threat score verification against C++ formula', () => {
     const target = makeEntity(UnitType.V_4TNK, House.Greece, 200, 200);
     target.kills = 0;
 
-    const score = threatScore(scanner, target, 5, false);
+    const score = threatScore(scanner, target, 5);
 
-    // E1 scans with SA warhead. SA vs heavy armor < 0.5 → value *= 0.5
+    // C++ Evaluate_Object: no warhead modifier — pure 2*Points base value
     const baseValue = 2 * tankPoints;
-    const warheadMod = WARHEAD_VS_ARMOR['SA']?.[armorIndex('heavy')] ?? 1.0;
-    const modifiedValue = warheadMod < 0.5 ? Math.trunc(baseValue * 0.5) : baseValue;
-    const expected = Math.max(Math.trunc(modifiedValue * 32000 / (5 + 1)), 1);
+    const expected = Math.max(Math.trunc(baseValue * 32000 / (5 + 1)), 1);
 
     expect(score).toBe(expected);
   });
@@ -1153,11 +1151,11 @@ describe('numerical threat score verification against C++ formula', () => {
 
     const target0 = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target0.kills = 0;
-    const score0 = threatScore(scanner, target0, 3, false);
+    const score0 = threatScore(scanner, target0, 3);
 
     const target5 = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target5.kills = 5;
-    const score5 = threatScore(scanner, target5, 3, false);
+    const score5 = threatScore(scanner, target5, 3);
 
     // value0 = 2*5 + 0 = 10, value5 = 2*5 + 5 = 15
     // delta = trunc(5 * 32000 / (3+1)) = trunc(40000) = 40000
@@ -1171,8 +1169,8 @@ describe('numerical threat score verification against C++ formula', () => {
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
-    const normal = threatScore(scanner, target, 3, false, 0, null);
-    const designated = threatScore(scanner, target, 3, false, 0, House.Greece);
+    const normal = threatScore(scanner, target, 3, null);
+    const designated = threatScore(scanner, target, 3, House.Greece);
 
     // normal value = 2*5 = 10, designated = (10+500)*3 = 1530
     const normalValue = 2 * e1Points;

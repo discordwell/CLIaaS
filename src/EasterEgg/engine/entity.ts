@@ -821,10 +821,11 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
  *  @param designatedEnemy AI4: enemy house that gets massive bonus (or null)
  *  @param nearFriendlyStructureCount AI5: count of friendly structures within splash radius of target */
 export function threatScore(
-  scanner: Entity, target: Entity, dist: number, isTargetAttackingAlly: boolean,
-  closingSpeed?: number,
+  scanner: Entity, target: Entity, dist: number,
   designatedEnemy?: House | null,
   nearFriendlyStructureCount?: number,
+  isTargetOutOfZone?: boolean,
+  nervousBias?: number,
 ): number {
   // AI6: Spy target exclusion — spies are not normal targets (except for dogs)
   // C++ techno.cpp:1557-1563
@@ -839,25 +840,16 @@ export function threatScore(
   const points = target.stats.points ?? UNIT_POINTS[target.type] ?? target.stats.strength;
   let value = Math.trunc(points * 2) + target.kills;  // Value() + Crew.Kills
 
-  // A11: Warhead effectiveness — prefer targets we can actually damage
-  // (C++ per-weapon-class threat multipliers from techno.cpp)
-  if (scanner.weapon) {
-    const warhead = scanner.weapon.warhead;
-    const verses = WARHEAD_VS_ARMOR[warhead];
-    if (verses) {
-      const mult = verses[armorIndex(target.stats.armor)];
-      if (mult > 1.0) {
-        value = Math.trunc(value * 1.5);   // scanner's weapon is effective vs this armor
-      } else if (mult < 0.5) {
-        value = Math.trunc(value * 0.5);   // scanner's weapon is poor vs this armor
-      }
-    }
-  }
-
   // AI4: Designated enemy house bonus — +500 then multiply by 3
   // C++ techno.cpp:1659-1662
   if (designatedEnemy != null && target.house === designatedEnemy) {
     value = (value + 500) * 3;
+  }
+
+  // C++ techno.cpp:1668-1670: targets outside their own base zone get 2x value
+  // Encourages attacking exposed/straggling units
+  if (isTargetOutOfZone) {
+    value *= 2;
   }
 
   // AI5: Area_Modify — reduce threat when target is near friendly structures
@@ -867,6 +859,12 @@ export function threatScore(
   if (nearFriendlyStructureCount !== undefined && nearFriendlyStructureCount > 0 &&
       scanner.weapon?.splash && scanner.weapon.splash > 0) {
     value = Math.trunc(value * Math.pow(0.5, nearFriendlyStructureCount));
+  }
+
+  // C++ techno.cpp:1742-1744: NervousBias — boost targets near scanner's own base
+  // rules.ini [General] BaseBias=2 (overrides C++ default of 1)
+  if (nervousBias !== undefined && nervousBias !== 1) {
+    value = Math.trunc(value * nervousBias);
   }
 
   // AI2: Hyperbolic distance falloff (C++ techno.cpp:1752)

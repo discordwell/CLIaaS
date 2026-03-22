@@ -384,8 +384,8 @@ describe('Civilian threat scoring penalty (techno.cpp:1449-1763)', () => {
     const c1 = entityAtCell(UnitType.I_C1, House.Spain, 11, 10);
     const e1Target = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
 
-    const civScore = threatScore(scanner, c1, 1, false);
-    const combatantScore = threatScore(scanner, e1Target, 1, false);
+    const civScore = threatScore(scanner, c1, 1);
+    const combatantScore = threatScore(scanner, e1Target, 1);
 
     // Civilian score should be much lower than combatant score
     expect(civScore).toBeLessThan(combatantScore);
@@ -396,7 +396,7 @@ describe('Civilian threat scoring penalty (techno.cpp:1449-1763)', () => {
     const c5 = entityAtCell(UnitType.I_C5, House.Spain, 11, 10);
 
     // Calculate expected: civilian score should be roughly 15% of base
-    const score = threatScore(scanner, c5, 1, false);
+    const score = threatScore(scanner, c5, 1);
     // Score should be positive but deprioritized
     expect(score).toBeGreaterThan(0);
   });
@@ -406,8 +406,8 @@ describe('Civilian threat scoring penalty (techno.cpp:1449-1763)', () => {
     const einstein = entityAtCell(UnitType.I_EINSTEIN, House.Spain, 11, 10);
     const e1Target = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
 
-    const einsteinScore = threatScore(scanner, einstein, 1, false);
-    const combatantScore = threatScore(scanner, e1Target, 1, false);
+    const einsteinScore = threatScore(scanner, einstein, 1);
+    const combatantScore = threatScore(scanner, e1Target, 1);
 
     // Einstein should be deprioritized vs armed combatant
     expect(einsteinScore).toBeLessThan(combatantScore);
@@ -418,8 +418,8 @@ describe('Civilian threat scoring penalty (techno.cpp:1449-1763)', () => {
     const chan = entityAtCell(UnitType.I_CHAN, House.Spain, 11, 10);
     const e1Target = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
 
-    const chanScore = threatScore(scanner, chan, 1, false);
-    const combatantScore = threatScore(scanner, e1Target, 1, false);
+    const chanScore = threatScore(scanner, chan, 1);
+    const combatantScore = threatScore(scanner, e1Target, 1);
 
     expect(chanScore).toBeLessThan(combatantScore);
   });
@@ -428,8 +428,8 @@ describe('Civilian threat scoring penalty (techno.cpp:1449-1763)', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const c1 = entityAtCell(UnitType.I_C1, House.Spain, 11, 10);
 
-    const penalizedScore = threatScore(scanner, c1, 1, false);
-    const unpenalizedScore = threatScore(scanner, c1, 1, true);
+    const penalizedScore = threatScore(scanner, c1, 1);
+    const unpenalizedScore = threatScore(scanner, c1, 1);
 
     // C++ parity: isTargetAttackingAlly is not used in Evaluate_Object
     expect(unpenalizedScore).toBe(penalizedScore);

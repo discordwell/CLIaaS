@@ -338,8 +338,8 @@ describe('AI2: threatScore uses cost-proportional scoring', () => {
     const heavyTank = makeEntity(UnitType.V_3TNK, House.USSR, 200, 100);
     const rifleman = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const tankScore = threatScore(scanner, heavyTank, 3, false);
-    const rifleScore = threatScore(scanner, rifleman, 3, false);
+    const tankScore = threatScore(scanner, heavyTank, 3);
+    const rifleScore = threatScore(scanner, rifleman, 3);
 
     expect(tankScore).toBeGreaterThan(rifleScore);
   });
@@ -349,7 +349,7 @@ describe('AI2: threatScore uses cost-proportional scoring', () => {
     const target = makeEntity(UnitType.V_3TNK, House.USSR, 200, 100);
 
     // V_3TNK base value ~ 550 (strength 400 + weapon 30*5)
-    const score = threatScore(scanner, target, 1, false);
+    const score = threatScore(scanner, target, 1);
     // At dist=1 (256 leptons): (550 * 32000) / (256 + 1) ~ 68,482
     // (before warhead/weapon modifiers)
     expect(score).toBeGreaterThan(1000);
@@ -359,7 +359,7 @@ describe('AI2: threatScore uses cost-proportional scoring', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const ant = makeEntity(UnitType.ANT1, House.USSR, 200, 100);
 
-    const score = threatScore(scanner, ant, 2, false);
+    const score = threatScore(scanner, ant, 2);
     // Should produce a reasonable score, not zero
     expect(score).toBeGreaterThan(0);
   });
@@ -373,8 +373,8 @@ describe('AI2: Hyperbolic distance falloff', () => {
     const near = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const far = makeEntity(UnitType.ANT1, House.USSR, 600, 100);
 
-    const nearScore = threatScore(scanner, near, 1, false);
-    const farScore = threatScore(scanner, far, 10, false);
+    const nearScore = threatScore(scanner, near, 1);
+    const farScore = threatScore(scanner, far, 10);
 
     expect(nearScore).toBeGreaterThan(farScore);
     // Hyperbolic falloff: at dist=1 (256 leptons) vs dist=10 (2560 leptons)
@@ -386,7 +386,7 @@ describe('AI2: Hyperbolic distance falloff', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
 
-    const score = threatScore(scanner, target, 0, false);
+    const score = threatScore(scanner, target, 0);
     // At dist=0: score = (value * 32000) / (0 + 1) = value * 32000
     // value ~ HP (125) + weapon_danger = fairly large
     expect(score).toBeGreaterThan(1000);
@@ -401,8 +401,8 @@ describe('AI4: Designated enemy house bonus', () => {
     const normalEnemy = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
     const designatedEnemy = makeEntity(UnitType.I_E1, House.Greece, 200, 100);
 
-    const normalScore = threatScore(scanner, normalEnemy, 3, false, undefined, House.Greece);
-    const designatedScore = threatScore(scanner, designatedEnemy, 3, false, undefined, House.Greece);
+    const normalScore = threatScore(scanner, normalEnemy, 3, House.Greece);
+    const designatedScore = threatScore(scanner, designatedEnemy, 3, House.Greece);
 
     // Designated enemy: (value + 500) * 3 vs value alone
     expect(designatedScore).toBeGreaterThan(normalScore);
@@ -414,8 +414,8 @@ describe('AI4: Designated enemy house bonus', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const scoreWithNull = threatScore(scanner, target, 3, false, undefined, null);
-    const scoreWithout = threatScore(scanner, target, 3, false, undefined);
+    const scoreWithNull = threatScore(scanner, target, 3, null);
+    const scoreWithout = threatScore(scanner, target, 3);
 
     expect(scoreWithNull).toBe(scoreWithout);
   });
@@ -429,8 +429,8 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const normalScore = threatScore(scanner, target, 3, false, undefined, null, 0);
-    const nearOneStruct = threatScore(scanner, target, 3, false, undefined, null, 1);
+    const normalScore = threatScore(scanner, target, 3, null, 0);
+    const nearOneStruct = threatScore(scanner, target, 3, null, 1);
 
     expect(nearOneStruct).toBeLessThan(normalScore);
     // C++ Area_Modify: odds /= 2 per building → pow(0.5, count)
@@ -443,8 +443,8 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const scoreDefault = threatScore(scanner, target, 3, false);
-    const scoreWithStructures = threatScore(scanner, target, 3, false, undefined, null, 3);
+    const scoreDefault = threatScore(scanner, target, 3);
+    const scoreWithStructures = threatScore(scanner, target, 3, null, 3);
 
     // Non-splash weapons are unaffected by nearby structure count
     expect(scoreDefault).toBe(scoreWithStructures);
@@ -454,8 +454,8 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const scoreDefault = threatScore(scanner, target, 3, false);
-    const scoreZero = threatScore(scanner, target, 3, false, undefined, null, 0);
+    const scoreDefault = threatScore(scanner, target, 3);
+    const scoreZero = threatScore(scanner, target, 3, null, 0);
 
     expect(scoreDefault).toBe(scoreZero);
   });
@@ -468,7 +468,7 @@ describe('AI6: Spy target exclusion', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.USSR, 200, 100);
 
-    const score = threatScore(scanner, spy, 3, false);
+    const score = threatScore(scanner, spy, 3);
     expect(score).toBe(0);
   });
 
@@ -476,7 +476,7 @@ describe('AI6: Spy target exclusion', () => {
     const scanner = makeEntity(UnitType.V_1TNK, House.Spain, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.USSR, 200, 100);
 
-    const score = threatScore(scanner, spy, 3, false);
+    const score = threatScore(scanner, spy, 3);
     expect(score).toBe(0);
   });
 
@@ -484,7 +484,7 @@ describe('AI6: Spy target exclusion', () => {
     const dog = makeEntity(UnitType.I_DOG, House.Spain, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.USSR, 200, 100);
 
-    const score = threatScore(dog, spy, 3, false);
+    const score = threatScore(dog, spy, 3);
     expect(score).toBeGreaterThan(0);
   });
 
@@ -492,7 +492,7 @@ describe('AI6: Spy target exclusion', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const infantry = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
-    const score = threatScore(scanner, infantry, 3, false);
+    const score = threatScore(scanner, infantry, 3);
     expect(score).toBeGreaterThan(0);
   });
 });
@@ -506,8 +506,8 @@ describe('C++ parity: no TS-only wounded/retaliation/closing-speed bonuses', () 
     const wounded = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     wounded.hp = wounded.maxHp * 0.3;
 
-    const healthyScore = threatScore(scanner, healthy, 2, false);
-    const woundedScore = threatScore(scanner, wounded, 2, false);
+    const healthyScore = threatScore(scanner, healthy, 2);
+    const woundedScore = threatScore(scanner, wounded, 2);
 
     // C++ parity: threatScore uses Value()+Crew.Kills, not current HP
     expect(woundedScore).toBe(healthyScore);
@@ -518,21 +518,22 @@ describe('C++ parity: no TS-only wounded/retaliation/closing-speed bonuses', () 
     const passive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
     const aggressive = makeEntity(UnitType.ANT1, House.USSR, 150, 100);
 
-    const passiveScore = threatScore(scanner, passive, 2, false);
-    const aggressiveScore = threatScore(scanner, aggressive, 2, true);
+    const passiveScore = threatScore(scanner, passive, 2);
+    const aggressiveScore = threatScore(scanner, aggressive, 2);
 
     // C++ parity: no retaliation multiplier in Evaluate_Object
     expect(aggressiveScore).toBe(passiveScore);
   });
 
-  it('closing speed has no effect (C++ has no closing speed bonus)', () => {
+  it('closing speed parameter removed (C++ has no closing speed bonus)', () => {
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.ANT1, House.USSR, 200, 100);
 
-    const stationaryScore = threatScore(scanner, target, 3, false, 0);
-    const closingScore = threatScore(scanner, target, 3, false, 2);
+    // closingSpeed param no longer exists — calling twice to confirm determinism
+    const score1 = threatScore(scanner, target, 3);
+    const score2 = threatScore(scanner, target, 3);
 
     // C++ parity: no closing speed factor in Evaluate_Object
-    expect(closingScore).toBe(stationaryScore);
+    expect(score1).toBe(score2);
   });
 });

@@ -899,31 +899,31 @@ describe('Dog spy detection — threatScore (techno.cpp:1557-1563)', () => {
   it('threatScore returns 0 when E1 scans SPY (spy invisible to rifle)', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    expect(threatScore(scanner, spy, 1, false)).toBe(0);
+    expect(threatScore(scanner, spy, 1)).toBe(0);
   });
 
   it('threatScore returns 0 when 2TNK scans SPY (spy invisible to tanks)', () => {
     const scanner = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    expect(threatScore(scanner, spy, 1, false)).toBe(0);
+    expect(threatScore(scanner, spy, 1)).toBe(0);
   });
 
   it('threatScore returns 0 when E3 scans SPY (spy invisible to rockets)', () => {
     const scanner = entityAtCell(UnitType.I_E3, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    expect(threatScore(scanner, spy, 1, false)).toBe(0);
+    expect(threatScore(scanner, spy, 1)).toBe(0);
   });
 
   it('threatScore returns 0 for SPY even at zero distance', () => {
     const scanner = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 10, 10);
-    expect(threatScore(scanner, spy, 0, false)).toBe(0);
+    expect(threatScore(scanner, spy, 0)).toBe(0);
   });
 
   it('threatScore returns > 0 when DOG scans SPY (dogs detect spies)', () => {
     const dog = entityAtCell(UnitType.I_DOG, House.USSR, 10, 10);
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 11, 10);
-    const score = threatScore(dog, spy, 1, false);
+    const score = threatScore(dog, spy, 1);
     expect(score).toBeGreaterThan(0);
   });
 
@@ -936,7 +936,7 @@ describe('Dog spy detection — threatScore (techno.cpp:1557-1563)', () => {
     const dist = 1;
     // Organic warhead vs none armor = 1.0 (no mult adjustment)
     const expectedScore = Math.max(Math.trunc((expectedValue * 32000) / (Math.floor(dist) + 1)), 1);
-    const score = threatScore(dog, spy, dist, false);
+    const score = threatScore(dog, spy, dist);
     expect(score).toBe(expectedScore);
   });
 });

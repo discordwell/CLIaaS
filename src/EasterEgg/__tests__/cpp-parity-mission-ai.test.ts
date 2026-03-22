@@ -90,7 +90,7 @@ function makeCtx(overrides?: Partial<MissionAIContext>): MissionAIContext {
     weaponProjectileStyle: () => 'bullet',
     idleMission: () => Mission.GUARD,
     retreatFromTarget: () => {},
-    threatScore: (s, t, d) => threatScore(s, t, d, false),
+    threatScore: (s, t, d) => threatScore(s, t, d),
     updateDemoTruck: () => {},
     updateMedic: () => {},
     updateMechanicUnit: () => {},
@@ -134,10 +134,10 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     const target = makeEntity(UnitType.E1, House.Greece, 200, 200);
     target.kills = 0;
 
-    const score0kills = threatScore(scanner, target, 1, false);
+    const score0kills = threatScore(scanner, target, 1);
 
     target.kills = 3;
-    const score3kills = threatScore(scanner, target, 1, false);
+    const score3kills = threatScore(scanner, target, 1);
 
     // More kills should increase threat score
     expect(score3kills).toBeGreaterThan(score0kills);
@@ -152,8 +152,8 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     const scanner = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.E1, House.Greece, 200, 200);
 
-    const scoreNoEnemy = threatScore(scanner, target, 1, false, 0, null);
-    const scoreDesignated = threatScore(scanner, target, 1, false, 0, House.Greece);
+    const scoreNoEnemy = threatScore(scanner, target, 1, null);
+    const scoreDesignated = threatScore(scanner, target, 1, House.Greece);
 
     // Designated enemy should have significantly higher score
     // C++ formula: (value+500)*3 vs just value
@@ -170,8 +170,8 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     const scanner = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.E1, House.Greece, 200, 200);
 
-    const scoreNear = threatScore(scanner, target, 1, false);   // 1 cell
-    const scoreFar = threatScore(scanner, target, 5, false);    // 5 cells
+    const scoreNear = threatScore(scanner, target, 1);   // 1 cell
+    const scoreFar = threatScore(scanner, target, 5);    // 5 cells
 
     // Score should decrease with distance
     expect(scoreNear).toBeGreaterThan(scoreFar);
@@ -196,8 +196,8 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     const dogScanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.Greece, 200, 200);
 
-    const normalVsSpy = threatScore(normalScanner, spy, 2, false);
-    const dogVsSpy = threatScore(dogScanner, spy, 2, false);
+    const normalVsSpy = threatScore(normalScanner, spy, 2);
+    const dogVsSpy = threatScore(dogScanner, spy, 2);
 
     expect(normalVsSpy).toBe(0);     // spies invisible to non-dogs
     expect(dogVsSpy).toBeGreaterThan(0); // dogs can detect spies
@@ -217,8 +217,8 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     const infantry = makeEntity(UnitType.E1, House.Greece, 200, 200);
     const tank = makeEntity(UnitType.V_3TNK, House.Greece, 200, 200);
 
-    const scoreVsInfantry = threatScore(scanner, infantry, 2, false);
-    const scoreVsTank = threatScore(scanner, tank, 2, false);
+    const scoreVsInfantry = threatScore(scanner, infantry, 2);
+    const scoreVsTank = threatScore(scanner, tank, 2);
 
     // Scanner with SA weapon should prefer infantry (none armor) over heavy tank
     // SA vs none = 1.0, SA vs heavy = 0.25 (< 0.5 → half value)
@@ -242,9 +242,9 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     // truncation artifacts in pow(0.5, n) since Math.trunc(value * 0.25) loses precision
     const target = makeEntity(UnitType.V_4TNK, House.Greece, 200, 200);
 
-    const score0 = threatScore(scanner, target, 2, false, 0, null, 0);
-    const score1 = threatScore(scanner, target, 2, false, 0, null, 1);
-    const score2 = threatScore(scanner, target, 2, false, 0, null, 2);
+    const score0 = threatScore(scanner, target, 2, null, 0);
+    const score1 = threatScore(scanner, target, 2, null, 1);
+    const score2 = threatScore(scanner, target, 2, null, 2);
 
     // Each nearby friendly structure should halve the threat score
     expect(score1).toBeLessThan(score0);
@@ -1388,10 +1388,10 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
     const target = makeEntity(UnitType.E1, House.Greece, 200, 200);
 
     target.kills = 0;
-    const score0 = threatScore(scanner, target, 2, false);
+    const score0 = threatScore(scanner, target, 2);
 
     target.kills = 1;
-    const score1 = threatScore(scanner, target, 2, false);
+    const score1 = threatScore(scanner, target, 2);
 
     // The delta from one kill
     const delta = score1 - score0;
@@ -1444,15 +1444,15 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
 
     // Verify the formula produces finite, positive results at various distances
     for (const dist of [0.5, 1, 2, 5, 10]) {
-      const score = threatScore(scanner, target, dist, false);
+      const score = threatScore(scanner, target, dist);
       expect(score).toBeGreaterThan(0);
       expect(Number.isFinite(score)).toBe(true);
     }
 
     // Verify monotonic decrease with distance
-    let prev = threatScore(scanner, target, 0.1, false);
+    let prev = threatScore(scanner, target, 0.1);
     for (const dist of [0.5, 1, 2, 5, 10, 20]) {
-      const score = threatScore(scanner, target, dist, false);
+      const score = threatScore(scanner, target, dist);
       expect(score).toBeLessThanOrEqual(prev);
       prev = score;
     }
@@ -1469,8 +1469,8 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
     const unarmed = makeEntity(UnitType.V_MCV, House.Greece, 200, 200);
     const armed = makeEntity(UnitType.V_3TNK, House.Greece, 200, 200);
 
-    const scoreUnarmed = threatScore(scanner, unarmed, 2, false);
-    const scoreArmed = threatScore(scanner, armed, 2, false);
+    const scoreUnarmed = threatScore(scanner, unarmed, 2);
+    const scoreArmed = threatScore(scanner, armed, 2);
 
     // Both should have positive scores
     expect(scoreUnarmed).toBeGreaterThan(0);

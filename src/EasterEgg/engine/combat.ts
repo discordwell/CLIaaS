@@ -1410,13 +1410,12 @@ export function updateStructureCombat(ctx: CombatContext): void {
       // LOS check
       const ec = e.cell;
       if (!ctx.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
-      // Threat scoring: prioritize dangerous/wounded enemies over merely close ones
-      const isAttackingAlly = e.targetStructure?.alive && ctx.isAllied(s.house, (e.targetStructure.house as House) ?? House.Neutral);
-      let score = e.stats.isInfantry ? 10 : 25;
-      score += (e.weapon?.damage ?? 0) * 0.2;
-      if (e.hp < e.maxHp * 0.5) score *= 1.5; // wounded bonus
-      if (isAttackingAlly) score *= 2; // retaliation
-      score *= Math.max(0.3, 1 - (dist / range) * 0.7); // distance weighting
+      // C++ techno.cpp:1651-1752 Evaluate_Object threat scoring formula
+      // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
+      const points = e.stats.points ?? e.stats.strength ?? 5;
+      const value = Math.trunc(points * 2) + (e.kills ?? 0);
+      const distCells = Math.floor(dist / CELL_SIZE); // dist is in world units, convert to cells
+      const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
       if (score > bestScore) {
         bestTarget = e;
         bestScore = score;

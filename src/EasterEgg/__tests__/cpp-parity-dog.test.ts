@@ -277,14 +277,14 @@ describe('Anti-spy role: dogs are the counter to Spy', () => {
   it('AI6: non-dog units ignore spies in threat scoring (spy returns 0)', () => {
     const rifleman = new Entity(UnitType.I_E1, House.USSR, 100, 100);
     const spy = new Entity(UnitType.I_SPY, House.England, 110, 100);
-    const score = threatScore(rifleman, spy, 3, false);
+    const score = threatScore(rifleman, spy, 3);
     expect(score).toBe(0);
   });
 
   it('AI6: dogs DO target spies in threat scoring (spy returns > 0)', () => {
     const dog = new Entity(UnitType.I_DOG, House.USSR, 100, 100);
     const spy = new Entity(UnitType.I_SPY, House.England, 110, 100);
-    const score = threatScore(dog, spy, 3, false);
+    const score = threatScore(dog, spy, 3);
     expect(score).toBeGreaterThan(0);
   });
 });

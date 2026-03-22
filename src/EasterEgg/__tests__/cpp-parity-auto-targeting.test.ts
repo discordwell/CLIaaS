@@ -134,7 +134,7 @@ describe('threat score formula: value = 2*Points + kills (C++ techno.cpp:1651-16
       target.kills = 0;
 
       // At distance 0 (epsilon), score = trunc(value * 32000 / (floor(0)+1)) = value * 32000
-      const score0 = threatScore(scanner, target, 0.001, false);
+      const score0 = threatScore(scanner, target, 0.001);
       // Expected base value from C++: 2 * iniPoints
       // score = trunc(2*iniPoints * 32000 / 1) = 2*iniPoints*32000
       const cppExpected = 2 * iniPoints * 32000;
@@ -142,16 +142,15 @@ describe('threat score formula: value = 2*Points + kills (C++ techno.cpp:1651-16
     });
   }
 
-  // Heavy-armor units: SA warhead vs heavy = 0.25, which triggers 0.5x penalty in TS
-  // C++ Evaluate_Object does NOT apply warhead effectiveness (PARITY GAP)
-  // Heavy-armor units where SA vs heavy=0.25 triggers the 0.5x penalty
+  // Heavy-armor units: C++ Evaluate_Object does NOT apply warhead effectiveness
+  // TS now matches C++ — no warhead modifier in threat scoring
   const HEAVY_ARMOR_UNITS = [
     { type: UnitType.V_2TNK, iniSection: '2TNK', label: 'Medium Tank' },
     { type: UnitType.V_4TNK, iniSection: '4TNK', label: 'Mammoth Tank' },
   ];
 
   for (const { type, iniSection, label } of HEAVY_ARMOR_UNITS) {
-    it(`${label}: TS applies warhead penalty to base value (PARITY GAP — C++ does not)`, () => {
+    it(`${label}: no warhead modifier — matches C++ Evaluate_Object`, () => {
       const iniPoints = parseInt(ini[iniSection]?.Points ?? '0', 10);
       expect(iniPoints).toBeGreaterThan(0);
 
@@ -159,17 +158,11 @@ describe('threat score formula: value = 2*Points + kills (C++ techno.cpp:1651-16
       const target = makeEntity(type, House.Greece, 200, 200);
       target.kills = 0;
 
-      const score0 = threatScore(scanner, target, 0.001, false);
+      const score0 = threatScore(scanner, target, 0.001);
 
-      // TS applies SA vs heavy (0.25 < 0.5 threshold) → value *= 0.5
-      // C++ Evaluate_Object does NOT apply warhead modifier
-      const cppExpectedNoWarhead = 2 * iniPoints * 32000;
-      const tsExpectedWithWarhead = Math.trunc(2 * iniPoints * 0.5) * 32000;
-
-      // TS score matches the warhead-modified value
-      expect(score0).toBe(tsExpectedWithWarhead);
-      // PARITY GAP: C++ would produce cppExpectedNoWarhead (2x higher)
-      expect(cppExpectedNoWarhead).toBe(tsExpectedWithWarhead * 2);
+      // C++ Evaluate_Object: value = 2*Points, no warhead modifier
+      const cppExpected = 2 * iniPoints * 32000;
+      expect(score0).toBe(cppExpected);
     });
   }
 
@@ -179,9 +172,9 @@ describe('threat score formula: value = 2*Points + kills (C++ techno.cpp:1651-16
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
 
     target.kills = 0;
-    const score0 = threatScore(scanner, target, 2, false);
+    const score0 = threatScore(scanner, target, 2);
     target.kills = 3;
-    const score3 = threatScore(scanner, target, 2, false);
+    const score3 = threatScore(scanner, target, 2);
 
     // C++ adds literal kill count to value
     // value0 = 2*points + 0, value3 = 2*points + 3
@@ -197,9 +190,9 @@ describe('threat score formula: value = 2*Points + kills (C++ techno.cpp:1651-16
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
 
     target.kills = 0;
-    const score0 = threatScore(scanner, target, 1, false);
+    const score0 = threatScore(scanner, target, 1);
     target.kills = 1;
-    const score1 = threatScore(scanner, target, 1, false);
+    const score1 = threatScore(scanner, target, 1);
 
     // C++ at 1 cell: divisor = floor(1)+1 = 2
     // 1 kill adds 1 to value: delta = trunc((value+1)*32000/2) - trunc(value*32000/2)
@@ -235,8 +228,8 @@ describe('target selection: highest threat wins, not nearest (C++ foot.cpp)', ()
     const infantry = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     const tank = makeEntity(UnitType.V_3TNK, House.Greece, 200, 200);
 
-    const infScore = threatScore(scanner, infantry, 2, false);
-    const tankScore = threatScore(scanner, tank, 2, false);
+    const infScore = threatScore(scanner, infantry, 2);
+    const tankScore = threatScore(scanner, tank, 2);
 
     // Tank has higher points, so should have higher score at same distance
     // (unless warhead effectiveness penalty overrides — SA vs heavy armor)
@@ -252,8 +245,8 @@ describe('target selection: highest threat wins, not nearest (C++ foot.cpp)', ()
     const near = makeEntity(UnitType.I_E1, House.Greece, 150, 100);
     const far = makeEntity(UnitType.I_E1, House.Greece, 300, 100);
 
-    const nearScore = threatScore(scanner, near, 1, false);
-    const farScore = threatScore(scanner, far, 5, false);
+    const nearScore = threatScore(scanner, near, 1);
+    const farScore = threatScore(scanner, far, 5);
 
     // At 1 cell: score = trunc(value*32000/2)
     // At 5 cells: score = trunc(value*32000/6)
@@ -271,8 +264,8 @@ describe('target selection: highest threat wins, not nearest (C++ foot.cpp)', ()
     // C++ score = 2*points*32000/(distCells+1)
     // E1 at 1 cell: 2*5*32000/2 = 160000
     // 4TNK at 5 cells: 2*60*32000/6 = 640000
-    const e1Score = threatScore(scanner, makeEntity(UnitType.I_E1, House.Greece, 200, 200), 1, false);
-    const mammothScore = threatScore(scanner, makeEntity(UnitType.V_4TNK, House.Greece, 200, 200), 5, false);
+    const e1Score = threatScore(scanner, makeEntity(UnitType.I_E1, House.Greece, 200, 200), 1);
+    const mammothScore = threatScore(scanner, makeEntity(UnitType.V_4TNK, House.Greece, 200, 200), 5);
 
     // High-value target at 5x distance still wins if value ratio > distance ratio
     // 4TNK:E1 points ratio = mammothPoints/e1Points = 12
@@ -530,7 +523,7 @@ describe('cloaked unit targeting (C++ techno.cpp:1555-1564)', () => {
     const rifle = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.Greece, 200, 200);
 
-    const score = threatScore(rifle, spy, 2, false);
+    const score = threatScore(rifle, spy, 2);
     expect(score).toBe(0);
   });
 
@@ -538,7 +531,7 @@ describe('cloaked unit targeting (C++ techno.cpp:1555-1564)', () => {
     const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.Greece, 200, 200);
 
-    const score = threatScore(dog, spy, 2, false);
+    const score = threatScore(dog, spy, 2);
     expect(score).toBeGreaterThan(0);
   });
 
@@ -953,8 +946,8 @@ describe('warhead effectiveness in threat scoring', () => {
     heavyTarget.kills = 0;
     lightTarget.kills = 0;
 
-    const heavyScore = threatScore(scanner, heavyTarget, 2, false);
-    const lightScore = threatScore(scanner, lightTarget, 2, false);
+    const heavyScore = threatScore(scanner, heavyTarget, 2);
+    const lightScore = threatScore(scanner, lightTarget, 2);
 
     // 3TNK has higher points but SA vs heavy gets 0.5x penalty
     // E1 has lower points but SA vs none gets no penalty
@@ -996,8 +989,8 @@ describe('designated enemy bonus uses C++ formula (+500, *3)', () => {
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
-    const normal = threatScore(scanner, target, 2, false, 0, null);
-    const designated = threatScore(scanner, target, 2, false, 0, House.Greece);
+    const normal = threatScore(scanner, target, 2, null);
+    const designated = threatScore(scanner, target, 2, House.Greece);
 
     // C++ formula: value_designated = (2*points + 500) * 3
     // vs value_normal = 2*points

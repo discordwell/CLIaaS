@@ -3767,7 +3767,8 @@ export class Game {
           for (let pi = entity.passengers.length - 1; pi >= 0; pi--) {
             const passenger = entity.passengers[pi];
             passenger.alive = true;
-            passenger.hp = passenger.maxHp;
+            // C++ parity: preserve passenger HP through transport — do NOT reset to maxHp.
+            // C++ cargo.cpp does not heal passengers on unload.
             passenger.transportRef = null;
             passenger.deathTick = 0;
 
@@ -4752,11 +4753,6 @@ export class Game {
   }
 
   private threatScore(scanner: Entity, target: Entity, dist: number): number {
-    const isTargetAttackingAlly = !!(target.target && target.mission === Mission.ATTACK &&
-      this.entitiesAllied(scanner, target.target));
-    // A9: Closing speed — positive means target is approaching (approximated via prevPos)
-    const prevDist = worldDist(scanner.pos, target.prevPos);
-    const closingSpeed = prevDist - dist;
     // AI4: Designated enemy from AI house state (if any)
     const aiState = this.aiStates.get(scanner.house);
     const designatedEnemy = aiState?.designatedEnemy ?? null;
@@ -4775,7 +4771,26 @@ export class Game {
         if (d <= 1.0) nearFriendlyCount++;
       }
     }
-    return computeThreatScore(scanner, target, dist, isTargetAttackingAlly, closingSpeed, designatedEnemy, nearFriendlyCount);
+    // C++ techno.cpp:1668-1670: out-of-zone check — target outside its own base zone
+    // Approximate via: target's house has structures, but target is far from them
+    const targetAIState = this.aiStates.get(target.house);
+    let isTargetOutOfZone = false;
+    if (targetAIState) {
+      // Check if target is within range of any of its own structures (simple zone approximation)
+      let nearOwnBase = false;
+      for (const s of this.structures) {
+        if (!s.alive || s.house !== target.house) continue;
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+        const scx = (s.cx + sw / 2) * CELL_SIZE;
+        const scy = (s.cy + sh / 2) * CELL_SIZE;
+        const d = Math.sqrt((scx - target.pos.x) ** 2 + (scy - target.pos.y) ** 2);
+        if (d <= 10 * CELL_SIZE) { nearOwnBase = true; break; } // ~10 cells = base zone radius
+      }
+      isTargetOutOfZone = !nearOwnBase;
+    }
+    // C++ techno.cpp:1742-1744: NervousBias = BaseBias from rules.ini = 2
+    // Applied when target is in scanner's own base zone (not implemented: always pass 1 for now)
+    return computeThreatScore(scanner, target, dist, designatedEnemy, nearFriendlyCount, isTargetOutOfZone);
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
