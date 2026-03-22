@@ -14,6 +14,12 @@
 ## Easter Egg Development
 - When committing Easter Egg changes, also run `scripts/deploy_vps.sh` to deploy to cliaas.com.
 
+## C++ Parity: rules.ini Is God
+- `rules.ini` / `aftrmath.ini` are the **authoritative source** for all game constants — NOT `.cpp` constructor defaults, NOT C++ comments, NOT variable names.
+- Trace the full chain: rules.ini → INI parser → runtime value. C++ constructors set defaults that INI overrides at startup.
+- When writing parity tests, parse expected values from INI files. Never hardcode values from `.cpp` without checking INI first.
+- When a C++ comment says one thing but rules.ini says another, rules.ini wins.
+
 ## Connectors
 - Kayako and Kayako Classic will remain unconfigured — this is expected (no active accounts).
 

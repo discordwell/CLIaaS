@@ -41,6 +41,11 @@ it('ant missions return undefined', () => {
 4. **Parameterized assertions with context** — `expect(x, \`${id} should have movies\`)` gives clear failure messages
 5. **Separate concerns** — data module has zero DOM/network deps, so tests run in milliseconds
 
+### C++ Parity: rules.ini Is God
+- `rules.ini` / `aftrmath.ini` override ALL `.cpp` constructor defaults. Never trust C++ comments or variable names — trace INI → parser → runtime.
+- Parity tests must derive expected values from INI files, not `.cpp` source.
+- Example: AGUN is named "Anti-Aircraft Gun" but its weapon (ZSU-23 → Ack → AA=true, AG=false) makes it air-only. The name lies, the INI doesn't.
+
 ### When to Use This Pattern
 - Static lookup tables / config maps
 - URL builders, formatters, normalizers
