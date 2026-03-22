@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-22T01:50Z — Fix 17 Failing Tests: AA Ground Targeting + UnitType Enum Fixes
+- **Engine fix (combat.ts:1389)**: Removed AA-only ground target filter. C++ SAM/AGUN CAN target ground units as fallback; the AA override prefers airborne targets. Removed `isAntiAirOnly` property from scenario.ts StructureWeapon interface and SAM/AGUN weapon definitions.
+- **Test fix (cpp-parity-power-down.test.ts)**: Fixed `UnitType.HELI` → `UnitType.V_HELI` and `UnitType.E1` → `UnitType.I_E1` (nonexistent enum members that silently resolved to undefined, falling back to E1 infantry stats).
+- **Files changed**: `src/EasterEgg/engine/combat.ts`, `src/EasterEgg/engine/scenario.ts`, `src/EasterEgg/__tests__/cpp-parity-power-down.test.ts`
+- **Result**: All 7 target test files pass (458 tests). Full suite: 37730 pass, 7 pre-existing failures (map-data parity gaps, mission-orders timing, Tanya probe).
+
 ## 2026-03-22T00:30Z — SCG11EA Ground Assault: Focus-Fire Works, Dog Gauntlet Blocks Buildings
 - Focus-fire `attack` by enemy unit ID kills garrison armor efficiently (all 4 3TNK + 2 V2RL)
 - `attack_move` to WEAP at (52,45) blocked by dogs — C++ HUNT engages everything
