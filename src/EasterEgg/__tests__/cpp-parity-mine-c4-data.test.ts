@@ -71,7 +71,7 @@ function makeStructure(
 function makeSpecialCtx(
   entities: Entity[] = [],
   structures: MapStructure[] = [],
-  mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [],
+  mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [],
 ): SpecialUnitsContext {
   const map = new GameMap();
   const alliances = buildDefaultAlliances();
@@ -126,37 +126,38 @@ describe('APMineDamage / AVMineDamage constants (rules.ini:55-56, rules.cpp:202-
   // C++ rules.ini:55 APMineDamage=1000
   // C++ rules.ini:56 AVMineDamage=1200
 
-  it('minelayer places mines with damage=1000 (APMineDamage from rules.ini)', () => {
+  it('allied minelayer places AV mines with damage=1200 (AVMineDamage from rules.ini)', () => {
+    // C++ unit.cpp:2616: Allied houses place STRUCT_AVMINE, Soviet houses place STRUCT_APMINE
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
 
     expect(mines.length).toBe(1);
-    // C++ rules.ini APMineDamage=1000 — the minelayer places AP mines
-    expect(mines[0].damage).toBe(1000);
+    // C++ rules.ini AVMineDamage=1200 — Allied minelayer places AV mines
+    expect(mines[0].damage).toBe(1200);
+    expect(mines[0].type).toBe('AV');
   });
 
-  it('TS engine does NOT have AVMineDamage (1200) — no AV mine placement mechanic', () => {
-    // C++ rules.ini AVMineDamage=1200 is for anti-vehicle mines (MINV building type).
-    // The minelayer only places AP mines in the TS engine. This test documents
-    // that the AV mine constant (1200) is not used by the minelayer.
-    const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
+  it('soviet minelayer places AP mines with damage=1000 (APMineDamage from rules.ini)', () => {
+    // C++ unit.cpp:2616: Soviet houses (USSR, Ukraine, BadGuy) place STRUCT_APMINE
+    const mnly = entityAtCell(UnitType.V_MNLY, House.USSR, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
 
-    // Mine damage should be AP (1000), not AV (1200)
-    expect(mines[0].damage).not.toBe(1200);
+    expect(mines.length).toBe(1);
+    // C++ rules.ini APMineDamage=1000 — Soviet minelayer places AP mines
     expect(mines[0].damage).toBe(1000);
+    expect(mines[0].type).toBe('AP');
   });
 });
 
@@ -191,7 +192,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
@@ -207,7 +208,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
@@ -220,7 +221,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
@@ -235,7 +236,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.ammo = 0;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
@@ -249,8 +250,8 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [
-      { cx: 10, cy: 10, house: House.Spain, damage: 1000 },
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [
+      { cx: 10, cy: 10, house: House.Spain, damage: 1200, type: 'AV' },
     ];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -265,7 +266,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.maxAmmo = 5;
     mnly.mineCount = 0;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
     updateMinelayer(ctx, mnly);
@@ -290,9 +291,9 @@ describe('Mine limit per house (specialUnits.ts MAX_MINES_PER_HOUSE)', () => {
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
     // Fill up to 50 mines for this house
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     for (let i = 0; i < 50; i++) {
-      mines.push({ cx: i, cy: 0, house: House.Spain, damage: 1000 });
+      mines.push({ cx: i, cy: 0, house: House.Spain, damage: 1200, type: 'AV' });
     }
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -307,9 +308,9 @@ describe('Mine limit per house (specialUnits.ts MAX_MINES_PER_HOUSE)', () => {
     mnly.maxAmmo = 5;
     mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
     // 50 mines for USSR, but Spain has 0
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     for (let i = 0; i < 50; i++) {
-      mines.push({ cx: i, cy: 0, house: House.USSR, damage: 1000 });
+      mines.push({ cx: i, cy: 0, house: House.USSR, damage: 1000, type: 'AP' });
     }
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -324,9 +325,9 @@ describe('Mine limit per house (specialUnits.ts MAX_MINES_PER_HOUSE)', () => {
 // =============================================================================
 
 describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () => {
-  it('mine detonates when enemy unit enters mined cell', () => {
+  it('AP mine detonates when enemy infantry enters mined cell (infantry.cpp:920)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([enemy], [], mines);
 
     tickMines(ctx);
@@ -335,9 +336,46 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
     expect(mines.length).toBe(0);
   });
 
+  it('AV mine detonates when enemy vehicle enters mined cell (unit.cpp:1815)', () => {
+    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1200, type: 'AV' }];
+    const ctx = makeSpecialCtx([enemy], [], mines);
+
+    tickMines(ctx);
+
+    expect(mines.length).toBe(0);
+  });
+
+  it('AV mine does NOT detonate on infantry (infantry.cpp:920 — infantry only triggers AP)', () => {
+    const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1200, type: 'AV' }];
+    const ctx = makeSpecialCtx([enemy], [], mines);
+
+    tickMines(ctx);
+
+    expect(mines.length).toBe(1); // mine still present
+  });
+
+  it('AP mine triggers on vehicles but deals only 10 damage (unit.cpp:1828-1830)', () => {
+    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
+    let recordedDamage = 0;
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
+    const ctx = makeSpecialCtx([enemy], [], mines);
+    ctx.damageEntity = (_target: Entity, amount: number, _warhead: string) => {
+      recordedDamage = amount;
+      return true;
+    };
+
+    tickMines(ctx);
+
+    // C++ unit.cpp:1829: AP mine does only 10 damage to vehicles
+    expect(recordedDamage).toBe(10);
+    expect(mines.length).toBe(0);
+  });
+
   it('mine does NOT detonate when allied unit enters mined cell', () => {
     const ally = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([ally], [], mines);
 
     tickMines(ctx);
@@ -348,7 +386,7 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
   it('mine does NOT detonate for air units (isAirUnit check)', () => {
     // C++ air units fly over mines without triggering them
     const heli = entityAtCell(UnitType.V_HELI, House.USSR, 10, 10);
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1200, type: 'AV' }];
     const ctx = makeSpecialCtx([heli], [], mines);
 
     tickMines(ctx);
@@ -359,7 +397,7 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
   it('mine does NOT detonate for dead units', () => {
     const dead = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     dead.alive = false;
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([dead], [], mines);
 
     tickMines(ctx);
@@ -367,12 +405,12 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
     expect(mines.length).toBe(1); // mine still present
   });
 
-  it('mine deals its damage value to the triggering unit', () => {
+  it('AP mine deals APMineDamage (1000) to triggering infantry (infantry.cpp:933)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     enemy.hp = 50;
     enemy.maxHp = 50;
     let recordedDamage = 0;
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([enemy], [], mines);
     ctx.damageEntity = (_target: Entity, amount: number, _warhead: string) => {
       recordedDamage = amount;
@@ -386,7 +424,7 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
 
   it('mine is consumed (removed from array) after detonation', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([enemy], [], mines);
 
     tickMines(ctx);
@@ -396,7 +434,7 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
 
   it('mine creates an explosion effect on detonation', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([enemy], [], mines);
 
     tickMines(ctx);
@@ -408,7 +446,7 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
   it('only one mine detonates per tick even with multiple enemies', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const e2 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([e1, e2], [], mines);
 
     tickMines(ctx);
@@ -423,11 +461,13 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
 // =============================================================================
 
 describe('Mine damage warhead type (specialUnits.ts tickMines)', () => {
-  it('mine uses AP warhead for damage', () => {
-    // C++ rules.cpp:202: APMineDamage — warhead is WARHEAD_AP (anti-personnel)
+  it('all mine explosions use WARHEAD_HE (infantry.cpp:925, unit.cpp:1827)', () => {
+    // C++ infantry.cpp:925: new AnimClass(Combat_Anim(Rule.APMineDamage, WARHEAD_HE, ...))
+    // C++ infantry.cpp:934: obj->Take_Damage(damage, 0, WARHEAD_HE)
+    // C++ unit.cpp:1827: Take_Damage(damage, 0, WARHEAD_HE)
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     let usedWarhead = '';
-    const mines = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000 }];
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1000, type: 'AP' }];
     const ctx = makeSpecialCtx([enemy], [], mines);
     ctx.damageEntity = (_target: Entity, _amount: number, warhead: string) => {
       usedWarhead = warhead;
@@ -436,7 +476,22 @@ describe('Mine damage warhead type (specialUnits.ts tickMines)', () => {
 
     tickMines(ctx);
 
-    expect(usedWarhead).toBe('AP');
+    expect(usedWarhead).toBe('HE');
+  });
+
+  it('AV mine also uses WARHEAD_HE (unit.cpp:1827)', () => {
+    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
+    let usedWarhead = '';
+    const mines: SpecialUnitsContext['mines'] = [{ cx: 10, cy: 10, house: House.Spain, damage: 1200, type: 'AV' }];
+    const ctx = makeSpecialCtx([enemy], [], mines);
+    ctx.damageEntity = (_target: Entity, _amount: number, warhead: string) => {
+      usedWarhead = warhead;
+      return true;
+    };
+
+    tickMines(ctx);
+
+    expect(usedWarhead).toBe('HE');
   });
 });
 

@@ -9,7 +9,7 @@ import {
   type WorldPos, CELL_SIZE,
   type House, UnitType, Mission, AnimState,
   worldDist, worldToCell, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
-  directionTo,
+  directionTo, HOUSE_FACTION,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -33,7 +33,7 @@ export interface SpecialUnitsContext {
   entities: Entity[];
   entityById: Map<number, Entity>;
   structures: MapStructure[];
-  mines: Array<{ cx: number; cy: number; house: House; damage: number }>;
+  mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }>;
   activeVortices: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }>;
   effects: Effect[];
   tick: number;
@@ -155,7 +155,12 @@ export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void 
   const houseMines = ctx.mines.filter(m => m.house === entity.house).length;
   if (houseMines >= MAX_MINES_PER_HOUSE) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
   if (!ctx.mines.find(m => m.cx === targetCell.cx && m.cy === targetCell.cy)) {
-    ctx.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: 1000 });
+    // C++ unit.cpp:2616: Soviet houses (USSR, Ukraine, BadGuy) place AP mines, Allied place AV mines
+    const faction = HOUSE_FACTION[entity.house] ?? 'allied';
+    const mineType: 'AP' | 'AV' = faction === 'soviet' ? 'AP' : 'AV';
+    // C++ rules.ini: APMineDamage=1000, AVMineDamage=1200
+    const mineDamage = mineType === 'AP' ? 1000 : 1200;
+    ctx.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: mineDamage, type: mineType });
     entity.mineCount++;
     if (entity.ammo > 0) entity.ammo--;
   }
@@ -164,7 +169,14 @@ export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void 
 
 // === 5. Mine Trigger ===
 
-/** Mine trigger check — enemy enters mined cell. */
+/** Mine trigger check — enemy enters mined cell.
+ *  C++ parity (infantry.cpp:920-937, unit.cpp:1815-1837):
+ *  - AP mines (STRUCT_APMINE) only trigger on infantry (infantry.cpp:920)
+ *  - AV mines (STRUCT_AVMINE) only trigger on vehicles (unit.cpp:1815)
+ *  - Both use WARHEAD_HE (infantry.cpp:925, unit.cpp:1827)
+ *  - Vehicles hitting AP mines take only 10 damage (unit.cpp:1829)
+ *  - AP mine splash damages all infantry within 0xC0 leptons (~3 cells) (infantry.cpp:928-936)
+ */
 export function tickMines(ctx: SpecialUnitsContext): void {
   for (let i = ctx.mines.length - 1; i >= 0; i--) {
     const mine = ctx.mines[i];
@@ -172,8 +184,37 @@ export function tickMines(ctx: SpecialUnitsContext): void {
       if (!e.alive || ctx.isAllied(e.house, mine.house) || e.isAirUnit) continue;
       const ec = e.cell;
       if (ec.cx === mine.cx && ec.cy === mine.cy) {
-        ctx.damageEntity(e, mine.damage, 'AP');
-        ctx.effects.push({ type: 'explosion', x: mine.cx * CELL_SIZE + CELL_SIZE / 2, y: mine.cy * CELL_SIZE + CELL_SIZE / 2, frame: 0, maxFrames: 12, size: 10 });
+        const isInfantry = e.stats.isInfantry;
+
+        // C++ infantry.cpp:920: infantry only triggers AP mines (not AV)
+        if (isInfantry && mine.type === 'AV') continue;
+
+        const blastX = mine.cx * CELL_SIZE + CELL_SIZE / 2;
+        const blastY = mine.cy * CELL_SIZE + CELL_SIZE / 2;
+
+        if (mine.type === 'AP' && isInfantry) {
+          // C++ infantry.cpp:928-936: AP mine splash damages all infantry within 0xC0 leptons
+          // 0xC0 = 192 leptons. In our world scale: ~3 cells
+          const SPLASH_RANGE = 3;
+          for (const other of ctx.entities) {
+            if (!other.alive || !other.stats.isInfantry || other.isAirUnit) continue;
+            const dist = worldDist(other.pos, { x: blastX, y: blastY });
+            if (dist <= SPLASH_RANGE) {
+              ctx.damageEntity(other, mine.damage, 'HE');
+            }
+          }
+        } else if (!isInfantry) {
+          // C++ unit.cpp:1815-1837: vehicles trigger both mine types
+          if (mine.type === 'AV') {
+            // C++ unit.cpp:1825-1827: AV mine deals AVMineDamage (1200) with WARHEAD_HE
+            ctx.damageEntity(e, mine.damage, 'HE');
+          } else {
+            // C++ unit.cpp:1828-1830: AP mine deals only 10 damage to vehicles with WARHEAD_HE
+            ctx.damageEntity(e, 10, 'HE');
+          }
+        }
+
+        ctx.effects.push({ type: 'explosion', x: blastX, y: blastY, frame: 0, maxFrames: 12, size: 10 });
         ctx.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
         ctx.mines.splice(i, 1);
         break;

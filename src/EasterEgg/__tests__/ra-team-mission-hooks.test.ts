@@ -99,6 +99,7 @@ describe('Team mission parity hooks', () => {
       cy: 8,
       house: House.USSR,
       damage: 1000,
+      type: 'AP',  // C++ unit.cpp:2616: Soviet houses place AP mines
     });
   });
 

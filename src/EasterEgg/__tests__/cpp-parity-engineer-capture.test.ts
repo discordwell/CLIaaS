@@ -57,7 +57,7 @@ import {
   updateAttackStructure,
   type MissionAIContext,
 } from '../engine/missionAI';
-import { type MapStructure } from '../engine/scenario';
+import { type MapStructure, CAPTURABLE_BUILDINGS as ENGINE_CAPTURABLE_BUILDINGS } from '../engine/scenario';
 
 beforeEach(() => resetEntityIds());
 
@@ -1010,6 +1010,51 @@ describe('Engineer capture edge cases', () => {
         expect(s.alive).toBe(true);
         expect(s.hp).toBeGreaterThanOrEqual(1);
       }
+    }
+  });
+});
+
+// ===========================================================================
+// Section 14b: Non-capturable buildings — engineer only damages, never captures
+// C++ infantry.cpp:614-618: iscapturable = ((BuildingClass *)tech)->Class->IsCaptureable;
+// Buildings without Capturable=yes in rules.ini can NEVER be captured regardless of HP.
+// ===========================================================================
+
+describe('Non-capturable buildings are only damaged, never captured (infantry.cpp:614-618)', () => {
+  // Defensive structures: PBOX, HBOX, GUN, AGUN, FTUR, TSLA, SAM
+  const NON_CAPTURABLE = ['PBOX', 'HBOX', 'GUN', 'AGUN', 'FTUR', 'TSLA', 'SAM', 'KENN', 'MSLO'];
+
+  for (const type of NON_CAPTURABLE) {
+    it(`${type} at red health is NOT captured — only damaged (no Capturable= flag)`, () => {
+      // Building at 1 HP (well below red health threshold) — would be captured if capturable
+      const s = makeStructure({ type, hp: 1, maxHp: 200, house: House.USSR });
+      const eng = engineerNearStructure(House.Greece, s);
+      const ctx = makeMissionAIContext({
+        playerHouse: House.Greece,
+        isAllied: (a: House, b: House) => a === b,
+      });
+
+      updateAttackStructure(ctx, eng, s);
+
+      // Building should NOT change ownership — non-capturable buildings are only damaged
+      expect(s.house).toBe(House.USSR);
+      // Engineer is still consumed
+      expect(eng.alive).toBe(false);
+    });
+  }
+
+  it('engine CAPTURABLE_BUILDINGS set matches rules.ini Capturable=true list', () => {
+    // Verify that our engine set includes the same buildings as parsed from INI
+    for (const type of CAPTURABLE_BUILDINGS) {
+      expect(ENGINE_CAPTURABLE_BUILDINGS.has(type),
+        `${type} should be in ENGINE_CAPTURABLE_BUILDINGS`).toBe(true);
+    }
+  });
+
+  it('engine CAPTURABLE_BUILDINGS set does NOT include non-capturable buildings', () => {
+    for (const type of NON_CAPTURABLE) {
+      expect(ENGINE_CAPTURABLE_BUILDINGS.has(type),
+        `${type} should NOT be in ENGINE_CAPTURABLE_BUILDINGS`).toBe(false);
     }
   });
 });

@@ -1364,6 +1364,26 @@ export const STRUCTURE_POWERED: Set<string> = new Set([
   'TSLA', 'DOME', 'GAP', 'PDOX', 'IRON', 'AGUN',
 ]);
 
+/** Buildings with Capturable=true in rules.ini (C++ infantry.cpp:614-618, bdata.cpp:3773).
+ *  Only buildings in this set can be captured by engineers at red health.
+ *  Non-capturable buildings (defenses, walls, kennels, etc.) are only damaged.
+ *  Source: rules.ini per-building Capturable= field + aftrmath.ini overrides.
+ *  aftrmath.ini: BIO Capturable=false, FACF/DOMF/WEAF Capturable=true. */
+export const CAPTURABLE_BUILDINGS: Set<string> = new Set([
+  // Production / economy buildings (rules.ini Capturable=true)
+  'FACT', 'POWR', 'APWR', 'PROC', 'SILO', 'WEAP', 'DOME',
+  'TENT', 'BARR', 'HPAD', 'AFLD', 'FIX', 'GAP',
+  'ATEK', 'STEK', 'HOSP', 'SYRD', 'SPEN',
+  // Superweapon buildings
+  'IRON', 'PDOX',
+  // Civilian capturable (rules.ini Capturable=true)
+  'V01', 'FCOM',
+  // Mission-specific (MISS = civilian tech center)
+  'MISS',
+  // Fake structures (aftrmath.ini Capturable=true)
+  'FACF', 'WEAF', 'SYRF', 'SPEF', 'DOMF',
+]);
+
 export interface ScenarioResult {
   map: GameMap;
   entities: Entity[];

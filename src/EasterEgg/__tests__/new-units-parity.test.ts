@@ -886,12 +886,14 @@ describe('Minelayer entity loop integration', () => {
     expect(mnly.weapon).toBeNull();
   });
 
-  it('Minelayer mine damage matches C++ APMineDamage (1000 dmg)', () => {
-    // C++ RULES.CPP: APMineDamage=1000
-    const mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+  it('Minelayer mine damage matches C++ (Allied=AVMineDamage 1200, Soviet=APMineDamage 1000)', () => {
+    // C++ unit.cpp:2616: Allied houses place AV mines (AVMineDamage=1200)
+    // C++ unit.cpp:2616: Soviet houses place AP mines (APMineDamage=1000)
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: string }> = [];
     const targetCell = worldToCell(200, 200);
-    mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: House.Spain, damage: 1000 });
-    expect(mines[0].damage).toBe(1000);
+    mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: House.Spain, damage: 1200, type: 'AV' });
+    expect(mines[0].damage).toBe(1200);
+    expect(mines[0].type).toBe('AV');
   });
 
   it('Minelayer tracks mineCount on entity', () => {

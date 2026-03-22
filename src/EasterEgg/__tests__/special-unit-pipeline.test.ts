@@ -1086,20 +1086,22 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
     const targetCell = worldToCell(mnly.pos.x, mnly.pos.y);
     mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
     const ctx = makeMockSpecialUnitsContext({
-      mines: [{ cx: targetCell.cx, cy: targetCell.cy, house: House.USSR, damage: 1000 }],
+      mines: [{ cx: targetCell.cx, cy: targetCell.cy, house: House.USSR, damage: 1000, type: 'AP' as const }],
     });
     const prevCount = ctx.mines.length;
     updateMinelayer(ctx, mnly);
     expect(ctx.mines.length).toBe(prevCount); // no new mine
   });
 
-  it('updateMinelayer places mine with 1000 damage', () => {
+  it('updateMinelayer places AV mine with 1200 damage for allied house', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
     mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
     expect(ctx.mines.length).toBe(1);
-    expect(ctx.mines[0].damage).toBe(1000);
+    // C++ unit.cpp:2616: Allied houses place AV mines (AVMineDamage=1200)
+    expect(ctx.mines[0].damage).toBe(1200);
+    expect(ctx.mines[0].type).toBe('AV');
   });
 
   it('updateMinelayer decrements ammo on mine placement', () => {
@@ -1147,8 +1149,8 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 // 10. MINE SYSTEM — tickMines
 // =========================================================================
 describe('Mine System — tickMines proximity detonation', () => {
-  it('tickMines triggers on enemy entering mined cell', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+  it('tickMines triggers AV mine on enemy vehicle entering mined cell', () => {
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR);
     enemy.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
     enemy.pos.y = mine.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -1158,12 +1160,13 @@ describe('Mine System — tickMines proximity detonation', () => {
       isAllied: (a, b) => a === b,
     });
     tickMines(ctx);
-    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, 1000, 'AP');
+    // C++ unit.cpp:1826-1827: AV mine deals AVMineDamage with WARHEAD_HE
+    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, 1200, 'HE');
     expect(ctx.mines.length).toBe(0); // mine consumed
   });
 
   it('tickMines skips allied units and air units', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     // Allied unit on mine
     const ally = makeEntity(UnitType.V_2TNK, House.Spain);
     ally.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
@@ -1183,8 +1186,8 @@ describe('Mine System — tickMines proximity detonation', () => {
     expect(ctx.mines.length).toBe(1); // mine not consumed
   });
 
-  it('tickMines applies mine damage via damageEntity', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+  it('tickMines applies AV mine damage via damageEntity with HE warhead', () => {
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR);
     enemy.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
     enemy.pos.y = mine.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -1193,11 +1196,11 @@ describe('Mine System — tickMines proximity detonation', () => {
       entities: [enemy],
     });
     tickMines(ctx);
-    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, mine.damage, 'AP');
+    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, mine.damage, 'HE');
   });
 
   it('tickMines removes mine after detonation', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR);
     enemy.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
     enemy.pos.y = mine.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -1210,7 +1213,7 @@ describe('Mine System — tickMines proximity detonation', () => {
   });
 
   it('tickMines creates explosion effect', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR);
     enemy.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
     enemy.pos.y = mine.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -1222,8 +1225,8 @@ describe('Mine System — tickMines proximity detonation', () => {
     expect(ctx.effects.some(e => e.type === 'explosion')).toBe(true);
   });
 
-  it('tickMines uses AP warhead for mine damage', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+  it('tickMines uses HE warhead for mine damage (C++ WARHEAD_HE)', () => {
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR);
     enemy.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
     enemy.pos.y = mine.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -1232,15 +1235,16 @@ describe('Mine System — tickMines proximity detonation', () => {
       entities: [enemy],
     });
     tickMines(ctx);
-    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, 1000, 'AP');
+    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, 1200, 'HE');
   });
 
-  it('mine data structure has cx, cy, house, damage fields', () => {
-    const mine = { cx: 5, cy: 5, house: House.Spain, damage: 1000 };
+  it('mine data structure has cx, cy, house, damage, type fields', () => {
+    const mine = { cx: 5, cy: 5, house: House.Spain, damage: 1200, type: 'AV' as const };
     expect(mine.cx).toBe(5);
     expect(mine.cy).toBe(5);
     expect(mine.house).toBe(House.Spain);
-    expect(mine.damage).toBe(1000);
+    expect(mine.damage).toBe(1200);
+    expect(mine.type).toBe('AV');
   });
 
   it('air units are immune to mines', () => {
@@ -1252,7 +1256,7 @@ describe('Mine System — tickMines proximity detonation', () => {
 
   it('mines do not trigger on allied units', () => {
     // Verify same-house check
-    const mine = { cx: 5, cy: 5, house: House.Spain, damage: 1000 };
+    const mine = { cx: 5, cy: 5, house: House.Spain, damage: 1200, type: 'AV' as const };
     const ally = makeEntity(UnitType.V_2TNK, House.Spain);
     expect(mine.house).toBe(ally.house);
     // isAllied(e.house, mine.house) would be true -> skip
@@ -1769,7 +1773,7 @@ describe('Game tick loop — special unit update integration', () => {
   });
 
   it('tickMines runs and processes mine detonations', () => {
-    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1000 };
+    const mine = { cx: 4, cy: 4, house: House.Spain, damage: 1200, type: 'AV' as const };
     const enemy = makeEntity(UnitType.V_2TNK, House.USSR);
     enemy.pos.x = mine.cx * CELL_SIZE + CELL_SIZE / 2;
     enemy.pos.y = mine.cy * CELL_SIZE + CELL_SIZE / 2;

@@ -6868,7 +6868,7 @@ export class Game {
 
   /** Agent 9: Minelayer places AP mines — delegates to specialUnits.ts */
   static readonly MAX_MINES_PER_HOUSE = _MAX_MINES_PER_HOUSE;
-  mines: Array<{ cx: number; cy: number; house: House; damage: number }> = [];
+  mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
 
   updateMinelayer(entity: Entity): void {
     this._runSpecialUnits(ctx => _updateMinelayer(ctx, entity));

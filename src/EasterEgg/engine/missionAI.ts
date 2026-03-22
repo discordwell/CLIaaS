@@ -14,7 +14,7 @@ import {
   calcProjectileTravelFrames, modifyDamage,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure } from './scenario';
+import { type MapStructure, CAPTURABLE_BUILDINGS } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 import { findPath } from './pathfinding';
@@ -1057,8 +1057,10 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
         return;
       }
       // Enemy capture/damage (existing logic below)
+      // C++ infantry.cpp:614-618: only buildings with IsCaptureable (Capturable=yes in rules.ini) can be captured
       // C++ uses fixed-point: fixed(hp, maxHp) <= fixed(ConditionRed)
-      if (Math.floor(s.hp * 256 / s.maxHp) <= Math.floor(CONDITION_RED * 256)) {
+      const isCapturable = CAPTURABLE_BUILDINGS.has(s.type);
+      if (isCapturable && Math.floor(s.hp * 256 / s.maxHp) <= Math.floor(CONDITION_RED * 256)) {
         // Capture: building at red health — convert to engineer's house
         // C++ building.cpp:2936: Captured() changes ownership but does NOT restore HP
         s.house = entity.house;
