@@ -592,21 +592,23 @@ describe('Civilian death panic (isFraidyCat scatter, infantry.cpp:442-457)', () 
   });
 
   it('isFraidyCat civilians jump to FEAR_PANIC (200) on damage, not FEAR_SCARED (100)', () => {
-    // C++ infantry.cpp:443-444: IsFraidyCat → fear = FEAR_PANIC
+    // C++ infantry.cpp:443-444: IsFraidyCat → fear = FEAR_PANIC (requires known attacker)
     const civilian = new Entity(UnitType.I_C1, House.Neutral, 100, 100);
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 200, 200);
     expect(civilian.fear).toBe(0);
 
-    civilian.takeDamage(5, 'SA');
+    civilian.takeDamage(5, 'SA', attacker);
     // IsFraidyCat → FEAR_PANIC (200), plus additional fear from health ratio
     expect(civilian.fear).toBeGreaterThanOrEqual(Entity.FEAR_PANIC);
   });
 
   it('non-FraidyCat infantry jumps to FEAR_SCARED (100) on damage, not FEAR_PANIC', () => {
-    // C++ infantry.cpp:442: non-FraidyCat → fear = FEAR_SCARED (100)
+    // C++ infantry.cpp:442: non-FraidyCat → fear = FEAR_SCARED (100) (requires known attacker)
     const soldier = new Entity(UnitType.I_E1, House.England, 100, 100);
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 200, 200);
     expect(soldier.fear).toBe(0);
 
-    soldier.takeDamage(5, 'SA');
+    soldier.takeDamage(5, 'SA', attacker);
     expect(soldier.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
     // Non-fraidycat starts at FEAR_SCARED (100), not FEAR_PANIC (200)
     // With additional fear from health ratio, total should be ~100+2 = 102 range

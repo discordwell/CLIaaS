@@ -241,24 +241,24 @@ const SPEED_CLASSES: [string, SpeedClass, string][] = [
 // Vehicle-specific flags: Tracked= (crusher), NoMovingFire=
 // ============================================================================
 
-/** [unit, hasTrackedFlag, source] — Tracked=yes in INI means the vehicle can crush infantry */
+/** [unit, isCrusher, source] — C++ udata.cpp IsCrusher constructor value (NOT always = INI Tracked) */
 const TRACKED_UNITS: [string, boolean, string][] = [
-  // rules.ini Tracked=yes units
-  ['V2RL', true,  'rules.ini [V2RL] Tracked=yes'],
-  ['1TNK', true,  'rules.ini [1TNK] Tracked=yes'],
-  ['3TNK', true,  'rules.ini [3TNK] Tracked=yes'],
-  ['2TNK', true,  'rules.ini [2TNK] Tracked=yes'],
-  ['4TNK', true,  'rules.ini [4TNK] Tracked=yes'],
-  ['MRJ',  true,  'rules.ini [MRJ] Tracked=yes'],
-  ['ARTY', true,  'rules.ini [ARTY] Tracked=yes'],
-  ['HARV', true,  'rules.ini [HARV] Tracked=yes'],
-  ['APC',  true,  'rules.ini [APC] Tracked=yes'],
-  ['MNLY', true,  'rules.ini [MNLY] Tracked=yes'],
+  // rules.ini Tracked=yes units (IsCrusher=true in C++ constructor)
+  ['V2RL', true,  'udata.cpp:79 IsCrusher=true, rules.ini Tracked=yes'],
+  ['1TNK', true,  'udata.cpp:110 IsCrusher=true, rules.ini Tracked=yes'],
+  ['3TNK', true,  'udata.cpp:141 IsCrusher=true, rules.ini Tracked=yes'],
+  ['2TNK', true,  'udata.cpp:172 IsCrusher=true, rules.ini Tracked=yes'],
+  ['4TNK', true,  'udata.cpp:203 IsCrusher=true, rules.ini Tracked=yes'],
+  ['MRJ',  true,  'udata.cpp:234 IsCrusher=true, rules.ini Tracked=yes'],
+  ['ARTY', false, 'udata.cpp:296 IsCrusher=false DESPITE rules.ini Tracked=yes'],
+  ['HARV', true,  'udata.cpp:327 IsCrusher=true, rules.ini Tracked=yes'],
+  ['APC',  true,  'udata.cpp:420 IsCrusher=true, rules.ini Tracked=yes'],
+  ['MNLY', true,  'udata.cpp:451 IsCrusher=true, rules.ini Tracked=yes'],
 
   // rules.ini: NO Tracked= (wheeled, cannot crush)
   ['JEEP', false, 'rules.ini [JEEP] no Tracked= (wheeled)'],
   ['TRUK', false, 'rules.ini [TRUK] no Tracked= (wheeled)'],
-  ['MCV',  false, 'rules.ini [MCV] no Tracked= (wheeled, note: debatable)'],
+  ['MCV',  true,  'udata.cpp:358 IsCrusher=true DESPITE no Tracked= in rules.ini'],
 
   // aftrmath.ini Tracked=yes units
   ['STNK', true,  'aftrmath.ini [STNK] Tracked=yes'],
@@ -269,8 +269,8 @@ const TRACKED_UNITS: [string, boolean, string][] = [
   // aftrmath.ini: NO Tracked= (wheeled)
   ['DTRK', false, 'aftrmath.ini [DTRK] no Tracked= (wheeled)'],
 
-  // MGG has no Tracked= in rules.ini
-  ['MGG',  false, 'rules.ini [MGG] no Tracked= (wheeled)'],
+  // MGG has no Tracked= in rules.ini but C++ udata.cpp:265 sets IsCrusher=true
+  ['MGG',  true,  'udata.cpp:265 IsCrusher=true DESPITE no Tracked= in rules.ini'],
 ];
 
 /** [unit, hasNoMovingFire, source] */
@@ -495,26 +495,19 @@ describe('cpp-parity: speed consistency cross-checks', () => {
   });
 });
 
-describe('cpp-parity: MCV tracked/crusher status', () => {
-  // C++ rules.ini [MCV] does NOT have Tracked=yes — MCV is NOT a tracked vehicle.
-  // However, TS may set crusher=true. This test checks the real INI value.
-  it('MCV does NOT have Tracked=yes in rules.ini', () => {
-    // rules.ini [MCV] section (lines 628-639) has no Tracked= line
-    // C++ default for Tracked is false when not specified
-    // Therefore MCV should NOT be a crusher
+describe('cpp-parity: MCV crusher status (C++ udata.cpp:358 IsCrusher=true)', () => {
+  it('MCV has IsCrusher=true in C++ despite no Tracked=yes in rules.ini', () => {
     const mcv = UNIT_STATS['MCV'];
     expect(mcv).toBeDefined();
-    // Per strict INI parity, MCV.crusher should be false (no Tracked=yes)
-    expect(mcv.crusher).toBeFalsy();
+    expect(mcv.crusher).toBe(true);
   });
 });
 
-describe('cpp-parity: MGG tracked/crusher status', () => {
-  // C++ rules.ini [MGG] does NOT have Tracked=yes
-  it('MGG does NOT have Tracked=yes in rules.ini', () => {
+describe('cpp-parity: MGG crusher status (C++ udata.cpp:265 IsCrusher=true)', () => {
+  it('MGG has IsCrusher=true in C++ despite no Tracked=yes in rules.ini', () => {
     const mgg = UNIT_STATS['MGG'];
     expect(mgg).toBeDefined();
-    expect(mgg.crusher).toBeFalsy();
+    expect(mgg.crusher).toBe(true);
   });
 });
 

@@ -413,27 +413,29 @@ describe('Crusher mechanics — C++ drive.cpp Ok_To_Move', () => {
    * In RA, the Tracked=yes flag in rules.ini does NOT mean they use TRACK SpeedClass —
    * udata.cpp:865 forces them to WHEEL. But Tracked=yes DOES set the crusher flag.
    *
-   * Crushers: 1TNK, 2TNK, 3TNK, 4TNK, APC, ARTY, HARV, MCV, V2RL, MNLY, MRJ, MGG
-   * Non-crushers: JEEP, TRUK (wheeled, not tracked)
+   * Crushers (C++ udata.cpp IsCrusher=true): 1TNK, 2TNK, 3TNK, 4TNK, APC, HARV, MCV, V2RL, MNLY, MRJ, MGG
+   * Non-crushers: JEEP, TRUK, ARTY (IsCrusher=false despite Tracked=yes)
    */
 
+  // C++ udata.cpp IsCrusher constructor values — note ARTY is NOT a crusher
+  // despite Tracked=yes, and MCV/MGG ARE crushers despite no Tracked=yes
   const expectedCrushers = [
-    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV',
-    'V2RL', 'MNLY', 'MRJ',
+    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'HARV',
+    'V2RL', 'MNLY', 'MRJ', 'MCV', 'MGG',
   ];
 
   for (const unit of expectedCrushers) {
-    it(`${unit} should be a crusher (Tracked=yes in rules.ini)`, () => {
+    it(`${unit} should be a crusher (C++ udata.cpp IsCrusher=true)`, () => {
       const stats = UNIT_STATS[unit];
       expect(stats, `UNIT_STATS['${unit}'] should exist`).toBeDefined();
       expect(stats.crusher).toBe(true);
     });
   }
 
-  // Non-tracked vehicles should NOT be crushers (no Tracked=yes in rules.ini)
-  const nonCrushers = ['JEEP', 'TRUK', 'MCV'];
+  // Non-crusher vehicles (C++ udata.cpp IsCrusher=false)
+  const nonCrushers = ['JEEP', 'TRUK', 'ARTY'];
   for (const unit of nonCrushers) {
-    it(`${unit} should NOT be a crusher (not tracked)`, () => {
+    it(`${unit} should NOT be a crusher (C++ udata.cpp IsCrusher=false)`, () => {
       const stats = UNIT_STATS[unit];
       expect(stats, `UNIT_STATS['${unit}'] should exist`).toBeDefined();
       expect(stats.crusher).toBeFalsy();
@@ -478,14 +480,12 @@ describe('Crusher mechanics — C++ drive.cpp Ok_To_Move', () => {
    * It has no Tracked=yes line. So in C++ it should NOT be a crusher.
    * But the TS engine marks MGG as crusher=true — this may be a PARITY GAP.
    */
-  it('PARITY GAP: MGG has no Tracked=yes in rules.ini, should NOT be crusher', () => {
-    // rules.ini [MGG] has no Tracked=yes line
+  it('PARITY FIXED: MGG has IsCrusher=true in C++ udata.cpp:265 despite no Tracked=yes', () => {
+    // rules.ini [MGG] has no Tracked=yes line, but C++ udata.cpp:265 sets IsCrusher=true
     const mggSection = sections.get('MGG');
     const tracked = mggSection?.get('Tracked')?.toLowerCase();
-    // C++ default for Tracked is 'no' — so MGG should not be a crusher
-    if (tracked !== 'yes') {
-      expect(UNIT_STATS['MGG'].crusher).toBeFalsy();
-    }
+    expect(tracked).not.toBe('yes'); // no Tracked=yes in INI
+    expect(UNIT_STATS['MGG'].crusher).toBe(true); // but IsCrusher=true in C++
   });
 });
 

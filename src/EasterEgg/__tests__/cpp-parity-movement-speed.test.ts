@@ -768,16 +768,29 @@ describe('cpp-parity: damage speed factor (combat.ts:249-253, drive.cpp:1157-116
 //     C++ DriveClass: tracked vehicles crush infantry when entering their cell.
 // ============================================================================
 
-describe('cpp-parity: crusher flag from rules.ini Tracked=yes', () => {
-  // Vehicles with Tracked=yes in rules.ini should have crusher=true
+describe('cpp-parity: crusher flag from C++ udata.cpp IsCrusher constructor', () => {
+  // C++ IsCrusher is set in udata.cpp constructor and is NOT always correlated
+  // with INI Tracked=yes. Three known exceptions:
+  //   ARTY: Tracked=yes but IsCrusher=false (udata.cpp:296)
+  //   MCV:  no Tracked=yes but IsCrusher=true (udata.cpp:358)
+  //   MGG:  no Tracked=yes but IsCrusher=true (udata.cpp:265)
+  const CPP_CRUSHER_EXCEPTIONS: Record<string, boolean> = {
+    ARTY: false, // udata.cpp:296 IsCrusher=false despite Tracked=yes
+    MCV: true,   // udata.cpp:358 IsCrusher=true despite no Tracked=yes
+    MGG: true,   // udata.cpp:265 IsCrusher=true despite no Tracked=yes
+  };
+
   for (const unitKey of ALL_VEHICLES) {
     const tracked = iniTracked(unitKey);
-    if (tracked) {
-      it(`${unitKey} has Tracked=yes in INI → crusher=true`, () => {
+    const exception = CPP_CRUSHER_EXCEPTIONS[unitKey];
+    const expectedCrusher = exception !== undefined ? exception : tracked;
+
+    if (expectedCrusher) {
+      it(`${unitKey} has crusher=true (C++ udata.cpp IsCrusher)`, () => {
         expect(UNIT_STATS[unitKey].crusher, `${unitKey} should be crusher`).toBe(true);
       });
     } else {
-      it(`${unitKey} has no Tracked=yes in INI → no crusher`, () => {
+      it(`${unitKey} has no crusher (C++ udata.cpp IsCrusher=false)`, () => {
         expect(UNIT_STATS[unitKey].crusher, `${unitKey} should NOT be crusher`).toBeFalsy();
       });
     }
@@ -796,9 +809,9 @@ describe('cpp-parity: crusher flag from rules.ini Tracked=yes', () => {
     expect(UNIT_STATS.HARV.crusher).toBe(true);
   });
 
-  it('MCV does NOT have Tracked=yes in rules.ini', () => {
+  it('MCV has IsCrusher=true despite no Tracked=yes in rules.ini (C++ udata.cpp:358)', () => {
     expect(iniTracked('MCV')).toBe(false);
-    expect(UNIT_STATS.MCV.crusher).toBeFalsy();
+    expect(UNIT_STATS.MCV.crusher).toBe(true);
   });
 
   it('JEEP does NOT have Tracked=yes in rules.ini', () => {

@@ -278,7 +278,8 @@ describe('SHOK fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when SHOK takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const shok = entityAtCell(UnitType.I_SHOK, House.USSR, 10, 10);
-    shok.takeDamage(10, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 20, 20);
+    shok.takeDamage(10, 'SA', attacker);
     expect(shok.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -294,10 +295,11 @@ describe('SHOK fear / prone system (infantry.cpp:329-457)', () => {
 
   it('damage -> fear -> prone -> next hit deals ~half: full sequence', () => {
     const shok = entityAtCell(UnitType.I_SHOK, House.USSR, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 20, 20);
     expect(shok.isProne).toBe(false);
 
     // Step 1: Take first hit — fear jumps to >= FEAR_SCARED (100)
-    shok.takeDamage(10, 'SA');
+    shok.takeDamage(10, 'SA', attacker);
     expect(shok.alive).toBe(true);
     expect(shok.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
 

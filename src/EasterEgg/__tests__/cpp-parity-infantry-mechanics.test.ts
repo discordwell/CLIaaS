@@ -340,19 +340,31 @@ describe('Fear constants match C++ FearType enum (defines.h:617-623)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Fear increase on damage (infantry.cpp:427-458)', () => {
-  it('military infantry (E1) fear jumps to at least FEAR_SCARED on first hit', () => {
+  it('military infantry (E1) fear jumps to FEAR_SCARED on first hit with known attacker', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     expect(e1.fear).toBe(0);
-    e1.takeDamage(5, 'SA');
+    // C++ infantry.cpp:442: source != NULL && Fear < FEAR_SCARED → jump
+    e1.takeDamage(5, 'SA', attacker);
     expect(e1.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
-  it('IsFraidyCat civilian (C1) fear jumps to at least FEAR_PANIC on first hit', () => {
+  it('anonymous damage (no attacker) uses incremental moreFear, not jump', () => {
+    const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+    expect(e1.fear).toBe(0);
+    // C++ infantry.cpp:448-457: source == NULL → else branch (incremental)
+    e1.takeDamage(5, 'SA');
+    expect(e1.fear).toBeLessThan(Entity.FEAR_SCARED);
+    expect(e1.fear).toBeGreaterThan(0);
+  });
+
+  it('IsFraidyCat civilian (C1) fear jumps to FEAR_PANIC on first hit with known attacker', () => {
     // C++ infantry.cpp:443-444: IsFraidyCat → Fear = FEAR_PANIC
     const civ = entityAtCell(UnitType.I_C1, House.Spain, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     expect(UNIT_STATS.C1.isFraidyCat).toBe(true);
     expect(civ.fear).toBe(0);
-    civ.takeDamage(5, 'SA');
+    civ.takeDamage(5, 'SA', attacker);
     expect(civ.fear).toBeGreaterThanOrEqual(Entity.FEAR_PANIC);
   });
 

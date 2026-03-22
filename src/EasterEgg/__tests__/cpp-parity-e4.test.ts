@@ -381,7 +381,8 @@ describe('E4 standard infantry behaviors', () => {
 
     it('taking damage increases fear to at least FEAR_SCARED (100)', () => {
       const e4 = new Entity(UnitType.I_E4, House.USSR, 100, 100);
-      e4.takeDamage(10, 'Fire');
+      const attacker = new Entity(UnitType.I_E1, House.Spain, 200, 200);
+      e4.takeDamage(10, 'Fire', attacker);
       // C++ infantry.cpp:442-457 — fear jumps to FEAR_SCARED on any damage
       expect(e4.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
     });

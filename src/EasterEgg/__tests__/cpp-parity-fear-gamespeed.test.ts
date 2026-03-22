@@ -216,6 +216,9 @@ describe('Prone state transitions (C++ infantry.cpp:3486-3499)', () => {
 // ─── 4. Fear Increase on Damage — C++ infantry.cpp:442-457 ──────────────────
 
 describe('Fear increase on damage (C++ infantry.cpp:442-457)', () => {
+  // C++ infantry.cpp:442: fear jump requires a known attacker (source != NULL)
+  const attacker = () => new Entity(UnitType.I_E1, House.USSR, 200, 200);
+
   it('taking damage sets fear to at least FEAR_SCARED for non-civilians', () => {
     // C++ infantry.cpp:443-444: fear = IsFraidyCat ? FEAR_PANIC : FEAR_SCARED
     const unit = new Entity(UnitType.I_E1, House.Greece, 100, 100);
@@ -223,16 +226,22 @@ describe('Fear increase on damage (C++ infantry.cpp:442-457)', () => {
     unit.maxHp = 100;
     expect(unit.fear).toBe(0);
 
-    unit.takeDamage(5, 'SA');
+    unit.takeDamage(5, 'SA', attacker());
     expect(unit.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
-  it('additional fear added based on health ratio (C++ infantry.cpp:454-457)', () => {
-    // moreFear starts at FEAR_ANXIOUS (10), halved if HP > CONDITION_RED, halved again if > CONDITION_YELLOW
+  it('first hit sets fear to FEAR_SCARED; second hit adds moreFear (C++ infantry.cpp:442-457 mutually exclusive branches)', () => {
+    // C++ infantry.cpp:442-457: if/else — first hit sets SCARED/PANIC, subsequent hits add moreFear
+    // First hit: fear starts at 0 (< FEAR_SCARED) → sets to FEAR_SCARED
     const unit = new Entity(UnitType.I_E1, House.Greece, 100, 100);
     unit.hp = 100;
     unit.maxHp = 100;
 
+    unit.takeDamage(1, 'SA', attacker());
+    // First hit: fear was 0 < FEAR_SCARED → set to exactly FEAR_SCARED
+    expect(unit.fear).toBe(Entity.FEAR_SCARED);
+
+    // Second hit: fear is now >= FEAR_SCARED → moreFear branch adds incremental fear
     unit.takeDamage(1, 'SA');
     // At near-full health, moreFear is FEAR_ANXIOUS/4 = 2 (halved twice)
     // So fear = FEAR_SCARED + 2 = 102

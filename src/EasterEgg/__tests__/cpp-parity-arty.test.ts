@@ -63,8 +63,8 @@ describe('ARTY unit stats (udata.cpp)', () => {
     expect(stats.rot).toBe(2);
   });
 
-  it('is a crusher (drives over infantry)', () => {
-    expect(stats.crusher).toBe(true);
+  it('is NOT a crusher (C++ udata.cpp:296 IsCrusher=false despite Tracked=yes)', () => {
+    expect(stats.crusher).toBeFalsy();
   });
 
   it('is NOT infantry', () => {

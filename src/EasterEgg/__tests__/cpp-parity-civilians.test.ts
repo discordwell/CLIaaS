@@ -448,7 +448,8 @@ describe('Civilian fear / prone system (infantry.cpp:329-457)', () => {
 
   it('civilian fear increases to FEAR_SCARED on damage', () => {
     const c5 = entityAtCell(UnitType.I_C5, House.Spain, 10, 10);
-    c5.takeDamage(5, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    c5.takeDamage(5, 'SA', attacker);
     expect(c5.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -464,13 +465,15 @@ describe('Civilian fear / prone system (infantry.cpp:329-457)', () => {
 
   it('EINSTEIN fear increases on damage like standard infantry', () => {
     const einstein = entityAtCell(UnitType.I_EINSTEIN, House.Spain, 10, 10);
-    einstein.takeDamage(5, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    einstein.takeDamage(5, 'SA', attacker);
     expect(einstein.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
   it('CHAN fear increases on damage like standard infantry', () => {
     const chan = entityAtCell(UnitType.I_CHAN, House.Spain, 10, 10);
-    chan.takeDamage(5, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    chan.takeDamage(5, 'SA', attacker);
     expect(chan.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 

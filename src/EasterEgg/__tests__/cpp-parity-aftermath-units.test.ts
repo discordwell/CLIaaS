@@ -731,9 +731,9 @@ describe('MGG stats audit (rules.ini [MGG])', () => {
     expect(prod!.cost).toBe(600);
   });
 
-  it('no Tracked=yes in rules.ini — NOT a crusher', () => {
-    // rules.ini [MGG] has no Tracked=yes line → not a crusher
-    expect(stats.crusher ?? false).toBe(false);
+  it('IS a crusher (C++ udata.cpp:265 IsCrusher=true)', () => {
+    // C++ udata.cpp:265 IsCrusher=true — crusher despite no Tracked=yes in rules.ini
+    expect(stats.crusher).toBe(true);
   });
 
   it('isInfantry=false (vehicle)', () => {

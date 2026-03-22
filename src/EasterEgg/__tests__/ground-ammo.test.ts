@@ -91,10 +91,10 @@ describe('Ground Unit Ammo Consumption (C++ Parity)', () => {
   });
 
   describe('Crusher parity (Tracked=yes)', () => {
-    it('all tracked vehicles have crusher=true', () => {
-      // C++ INI: Tracked=yes implies crusher behavior
-      const trackedUnits = ['1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV', 'V2RL', 'MNLY', 'STNK', 'CTNK', 'TTNK', 'QTNK'];
-      for (const unit of trackedUnits) {
+    it('all C++ IsCrusher=true vehicles have crusher=true', () => {
+      // C++ udata.cpp IsCrusher constructor — ARTY excluded (IsCrusher=false), MCV/MGG included
+      const crusherUnits = ['1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'HARV', 'V2RL', 'MNLY', 'STNK', 'CTNK', 'TTNK', 'QTNK', 'MCV', 'MGG', 'MRJ'];
+      for (const unit of crusherUnits) {
         const stats = UNIT_STATS[unit];
         expect(stats?.crusher, `${unit} should be crusher`).toBe(true);
       }

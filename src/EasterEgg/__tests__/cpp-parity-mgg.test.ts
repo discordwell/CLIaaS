@@ -110,8 +110,8 @@ describe('MGG stats verification (udata.cpp / rules.ini)', () => {
     expect(stats.isInfantry).toBe(false);
   });
 
-  it('crusher is falsy (no Tracked=yes in rules.ini for MGG)', () => {
-    expect(stats.crusher).toBeFalsy();
+  it('crusher is true (C++ udata.cpp:265 IsCrusher=true)', () => {
+    expect(stats.crusher).toBe(true);
   });
 
   it('ROT is 5 (rotation rate)', () => {
@@ -234,8 +234,8 @@ describe('MGG vs MRJ sibling comparison (udata.cpp)', () => {
     expect(mrjStats.primaryWeapon).toBeNull();
   });
 
-  it('MRJ is crusher, MGG is not (no Tracked=yes in rules.ini for MGG)', () => {
-    expect(mggStats.crusher).toBeFalsy();
+  it('both MRJ and MGG are crushers (C++ udata.cpp IsCrusher=true for both)', () => {
+    expect(mggStats.crusher).toBe(true);
     expect(mrjStats.crusher).toBe(true);
   });
 
@@ -256,18 +256,17 @@ describe('MGG vs MRJ sibling comparison (udata.cpp)', () => {
 // C++ drive.cpp -- when a Crusher vehicle enters a cell with Crushable infantry,
 // the infantry dies instantly. Only crusher vehicles crush; only crushable targets die.
 
-describe('MGG is NOT a crusher (no Tracked=yes in rules.ini)', () => {
-  it('MGG does NOT have crusher flag', () => {
-    expect(UNIT_STATS.MGG.crusher).toBeFalsy();
+describe('MGG IS a crusher (C++ udata.cpp:265 IsCrusher=true)', () => {
+  it('MGG DOES have crusher flag', () => {
+    expect(UNIT_STATS.MGG.crusher).toBe(true);
   });
 
-  it('does NOT crush enemy infantry on same cell', () => {
+  it('DOES crush enemy infantry on same cell', () => {
     const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const ctx = makeCombatCtx([mgg, infantry]);
     checkVehicleCrush(ctx, mgg);
-    expect(infantry.alive).toBe(true);
-    expect(infantry.hp).toBe(infantry.maxHp);
+    expect(infantry.alive).toBe(false);
   });
 });
 

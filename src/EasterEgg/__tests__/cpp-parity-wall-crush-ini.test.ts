@@ -195,14 +195,15 @@ describe('CRUSHABLE_WALLS set matches C++ odata.cpp IsCrushable (odata.cpp:58-15
 describe('Crusher flag on vehicles (C++ udata.cpp IsCrusher / rules.ini Tracked=yes)', () => {
   // C++ udata.cpp: IsCrusher is set for tracked vehicles (equivalent to Tracked=yes)
   // unit.cpp:1859 — if (Class->IsCrusher && cellptr->Overlay != OVERLAY_NONE)
+  // C++ udata.cpp IsCrusher constructor values
   const EXPECTED_CRUSHERS = [
-    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV',
-    'V2RL', 'MNLY', 'MRJ',
+    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'HARV',
+    'V2RL', 'MNLY', 'MRJ', 'MCV', 'MGG',
     'STNK', 'CTNK', 'TTNK', 'QTNK', // Aftermath expansion
   ];
 
   const EXPECTED_NON_CRUSHERS = [
-    'JEEP', 'MCV', 'TRUK', 'MGG', 'DTRK',
+    'JEEP', 'TRUK', 'ARTY', 'DTRK',
   ];
 
   for (const unitId of EXPECTED_CRUSHERS) {

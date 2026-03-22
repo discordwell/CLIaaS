@@ -281,7 +281,8 @@ describe('THF fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when THF takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const thf = entityAtCell(UnitType.I_THF, House.Spain, 10, 10);
-    thf.takeDamage(5, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    thf.takeDamage(5, 'SA', attacker);
     expect(thf.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -306,10 +307,11 @@ describe('THF fear / prone system (infantry.cpp:329-457)', () => {
 
   it('damage -> fear -> prone -> next hit deals ~half: full sequence', () => {
     const thf = entityAtCell(UnitType.I_THF, House.Spain, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
     expect(thf.isProne).toBe(false);
 
     // Step 1: Take first hit -- fear should jump to >= FEAR_SCARED (100)
-    thf.takeDamage(5, 'SA');
+    thf.takeDamage(5, 'SA', attacker);
     expect(thf.alive).toBe(true);
     expect(thf.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
 

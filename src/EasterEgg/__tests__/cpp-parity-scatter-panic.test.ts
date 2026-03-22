@@ -219,15 +219,16 @@ describe('IsFraidyCat scatter: civilians scatter more readily (infantry.cpp:1885
 
   // C++ infantry.cpp:3506: IsFraidyCat && Fear > FEAR_ANXIOUS → auto-scatter
   it('FraidyCat civilians get FEAR_PANIC (200) on first hit vs military FEAR_SCARED (100)', () => {
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
     const civ = entityAtCell(UnitType.I_C1, House.Spain, 10, 10);
     expect(civ.fear).toBe(0);
-    civ.takeDamage(1, 'SA');
+    civ.takeDamage(1, 'SA', attacker);
     // C++ infantry.cpp:443-444: IsFraidyCat → FEAR_PANIC
     expect(civ.fear).toBeGreaterThanOrEqual(Entity.FEAR_PANIC);
 
     const mil = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
     expect(mil.fear).toBe(0);
-    mil.takeDamage(1, 'SA');
+    mil.takeDamage(1, 'SA', attacker);
     // C++ infantry.cpp:443: non-FraidyCat → FEAR_SCARED
     expect(mil.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
     // Military fear should be lower than civilian fear
@@ -364,8 +365,10 @@ describe('Dog instant kill and fear (infantry.cpp:339-345)', () => {
   // Infantry that survive dog encounters will have high fear and scatter
   it('infantry that takes damage gains fear (enabling scatter)', () => {
     const e = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+    // Use non-dog attacker to avoid DG2 collateral prevention
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 10, 11);
     expect(e.fear).toBe(0);
-    e.takeDamage(5, 'SA');
+    e.takeDamage(5, 'SA', attacker);
     expect(e.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 });
@@ -823,7 +826,8 @@ describe('Fear increase on damage (infantry.cpp:442-457)', () => {
   // Verify TS takeDamage actually adds moreFear incrementally
   it('second hit adds incremental fear (not resets to FEAR_SCARED)', () => {
     const e = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
-    e.takeDamage(5, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    e.takeDamage(5, 'SA', attacker);
     const fearAfterFirst = e.fear;
     expect(fearAfterFirst).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
 

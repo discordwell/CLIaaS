@@ -396,7 +396,8 @@ describe('E2 fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when E2 takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const e2 = entityAtCell(UnitType.I_E2, House.USSR, 10, 10);
-    e2.takeDamage(10, 'HE');
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 20, 20);
+    e2.takeDamage(10, 'HE', attacker);
     expect(e2.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
     expect(e2.fear).toBeGreaterThanOrEqual(100);
   });
@@ -417,10 +418,11 @@ describe('E2 fear / prone system (infantry.cpp:329-457)', () => {
 
   it('damage -> fear -> prone -> next hit deals ~half: full sequence', () => {
     const e2 = entityAtCell(UnitType.I_E2, House.USSR, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 20, 20);
     expect(e2.isProne).toBe(false);
 
     // Step 1: Take first hit — fear should jump to >= FEAR_SCARED (100)
-    e2.takeDamage(10, 'HE');
+    e2.takeDamage(10, 'HE', attacker);
     expect(e2.alive).toBe(true);
     expect(e2.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
 

@@ -447,8 +447,15 @@ describe('INI Parity: Unit Owner/Faction', () => {
 // 14. Tracked/Crusher Parity
 // ---------------------------------------------------------------------------
 
-// INI Tracked=yes implies crusher=true in C++ (DriveClass crusher behavior)
-describe('INI Parity: Tracked → Crusher', () => {
+// C++ udata.cpp IsCrusher constructor — NOT always correlated with INI Tracked=
+// Three known exceptions: ARTY (Tracked=yes, IsCrusher=false), MCV/MGG (no Tracked=, IsCrusher=true)
+describe('INI Parity: Tracked → Crusher (with C++ udata.cpp overrides)', () => {
+  const CPP_CRUSHER_OVERRIDES: Record<string, boolean> = {
+    ARTY: false, // udata.cpp:296 IsCrusher=false despite Tracked=yes
+    MCV: true,   // udata.cpp:358 IsCrusher=true despite no Tracked=yes
+    MGG: true,   // udata.cpp:265 IsCrusher=true despite no Tracked=yes
+  };
+
   for (const [unit, stats] of Object.entries(UNIT_STATS)) {
     if (EXEMPT_UNITS.has(unit)) continue;
     const iniData = ini[unit];
@@ -456,8 +463,13 @@ describe('INI Parity: Tracked → Crusher', () => {
     const iniTracked = iniData.Tracked.toLowerCase() === 'yes';
 
     if (iniTracked) {
-      it(`${unit} crusher = true (INI Tracked=yes)`, () => {
-        expect(stats.crusher, `INI Tracked=yes → should be crusher`).toBe(true);
+      const expected = CPP_CRUSHER_OVERRIDES[unit] ?? true;
+      it(`${unit} crusher = ${expected} (INI Tracked=yes, C++ udata.cpp IsCrusher=${expected})`, () => {
+        if (expected) {
+          expect(stats.crusher, `INI Tracked=yes + C++ IsCrusher=true → should be crusher`).toBe(true);
+        } else {
+          expect(stats.crusher, `C++ udata.cpp overrides IsCrusher=false despite INI Tracked=yes`).toBeFalsy();
+        }
       });
     }
   }

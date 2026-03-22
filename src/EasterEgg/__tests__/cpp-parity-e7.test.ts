@@ -390,7 +390,8 @@ describe('E7 fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when Tanya takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const tanya = entityAtCell(UnitType.I_TANYA, House.Spain, 10, 10);
-    tanya.takeDamage(10, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    tanya.takeDamage(10, 'SA', attacker);
     expect(tanya.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 

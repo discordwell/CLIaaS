@@ -150,11 +150,11 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
       // Auto-fire GPS Satellite (one-shot)
       // C++ bullet.cpp:413,1067 — sets IsGPSActive=true, IsVisionary=true, Map_Cell for all cells
       if (def.type === SuperweaponType.GPS_SATELLITE && state.ready && !state.fired) {
-        ctx.map.revealAll();
         state.fired = true;
         state.ready = false;
-        // C++ house.h:268 — IsGPSActive persists until ATEK is destroyed
+        // C++ bullet.cpp:404 — only reveals map for the house that owns the GPS
         if (ctx.isAllied(s.house, ctx.playerHouse)) {
+          ctx.map.revealAll();
           ctx.gpsActive = true;
           ctx.pushEva('GPS satellite launched');
           // GPS sweep visual

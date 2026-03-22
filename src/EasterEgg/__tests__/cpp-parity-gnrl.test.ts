@@ -237,14 +237,16 @@ describe('GNRL — crushable, fear, and prone (standard infantry)', () => {
 
   it('taking damage raises fear above FEAR_ANXIOUS threshold', () => {
     const gnrl = spawnGNRL();
-    gnrl.takeDamage(10, 'SA');
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 200, 200);
+    gnrl.takeDamage(10, 'SA', attacker);
     // C++ infantry.cpp:442-457 — damage sets fear to at least FEAR_SCARED (100)
     expect(gnrl.fear).toBeGreaterThanOrEqual(Entity.FEAR_ANXIOUS);
   });
 
   it('fear reaches FEAR_SCARED (100) on first damage', () => {
     const gnrl = spawnGNRL();
-    gnrl.takeDamage(5, 'SA');
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 200, 200);
+    gnrl.takeDamage(5, 'SA', attacker);
     // Entity.takeDamage: if fear < FEAR_SCARED, set to FEAR_SCARED
     expect(gnrl.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });

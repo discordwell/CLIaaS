@@ -462,7 +462,8 @@ describe('ANT1 no fear/prone — ants bypass infantry fear system (infantry.cpp)
 
   it('E1 infantry DOES get fear on damage (contrast with ANT1)', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
-    e1.takeDamage(10, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    e1.takeDamage(10, 'SA', attacker);
     expect(e1.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 

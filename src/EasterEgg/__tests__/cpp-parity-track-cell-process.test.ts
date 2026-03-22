@@ -227,14 +227,15 @@ describe('Per-cell processing effects (C++ unit.cpp PCP_DURING)', () => {
     // Non-crusher vehicles (e.g., JEEP, TRUK) should NOT trigger crush
     // This is verified by the entity.stats.crusher check in the implementation.
     // Test the data: verify which vehicles are crushers.
-    const crushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV',
-                       'STNK', 'CTNK', 'TTNK', 'QTNK', 'MRJ', 'V2RL', 'MNLY'];
+    // C++ udata.cpp IsCrusher constructor values
+    const crushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'HARV',
+                       'STNK', 'CTNK', 'TTNK', 'QTNK', 'MRJ', 'V2RL', 'MNLY', 'MCV', 'MGG'];
     for (const key of crushers) {
       const stats = UNIT_STATS[key];
       expect(stats?.crusher, `${key} should be a crusher`).toBe(true);
     }
-    // Non-crushers (no Tracked=yes in rules.ini)
-    const nonCrushers = ['JEEP', 'TRUK', 'DTRK', 'MGG', 'MCV'];
+    // Non-crushers (C++ udata.cpp IsCrusher=false)
+    const nonCrushers = ['JEEP', 'TRUK', 'DTRK', 'ARTY'];
     for (const key of nonCrushers) {
       const stats = UNIT_STATS[key];
       expect(stats?.crusher, `${key} should NOT be a crusher`).toBeFalsy();

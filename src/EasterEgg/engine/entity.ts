@@ -544,18 +544,19 @@ export class Entity {
       this.cloakState = CloakState.UNCLOAKING;
       this.cloakTimer = CLOAK_TRANSITION_FRAMES;
     }
-    // C++ infantry.cpp:442-457 — increase fear on damage
+    // C++ infantry.cpp:442-457 — fear on damage (mutually exclusive branches)
+    // Branch A: known attacker + low fear → jump to SCARED/PANIC
+    // Branch B: no attacker OR already scared → incremental moreFear
     if (this.stats.isInfantry && amount > 0) {
-      if (this.fear < Entity.FEAR_SCARED) {
-        // C++ infantry.cpp:443-444: IsFraidyCat civilians jump to FEAR_PANIC (200)
+      if (attacker && this.fear < Entity.FEAR_SCARED) {
         this.fear = this.stats.isFraidyCat ? Entity.FEAR_PANIC : Entity.FEAR_SCARED;
+      } else {
+        let moreFear = Entity.FEAR_ANXIOUS;
+        const hpRatio = this.hp / this.maxHp;
+        if (hpRatio > CONDITION_RED) moreFear = Math.floor(moreFear / 2);
+        if (hpRatio > CONDITION_YELLOW) moreFear = Math.floor(moreFear / 2);
+        this.fear = Math.min(this.fear + moreFear, Entity.FEAR_MAXIMUM);
       }
-      // Additional fear based on health ratio (C++ infantry.cpp:454-457)
-      let moreFear = Entity.FEAR_ANXIOUS;
-      const hpRatio = this.hp / this.maxHp;
-      if (hpRatio > CONDITION_RED) moreFear = Math.floor(moreFear / 2);
-      if (hpRatio > CONDITION_YELLOW) moreFear = Math.floor(moreFear / 2);
-      this.fear = Math.min(this.fear + moreFear, Entity.FEAR_MAXIMUM);
     }
     if (this.hp <= 0) {
       this.hp = 0;

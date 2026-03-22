@@ -399,7 +399,8 @@ describe('SPY fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when SPY takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 10, 10);
-    spy.takeDamage(10, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    spy.takeDamage(10, 'SA', attacker);
     expect(spy.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -415,10 +416,11 @@ describe('SPY fear / prone system (infantry.cpp:329-457)', () => {
 
   it('damage -> fear -> prone -> second hit halved: full sequence', () => {
     const spy = entityAtCell(UnitType.I_SPY, House.Spain, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
     expect(spy.isProne).toBe(false);
 
     // Step 1: Take first hit -- fear jumps to >= FEAR_SCARED
-    spy.takeDamage(5, 'SA');
+    spy.takeDamage(5, 'SA', attacker);
     expect(spy.alive).toBe(true);
     expect(spy.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
 

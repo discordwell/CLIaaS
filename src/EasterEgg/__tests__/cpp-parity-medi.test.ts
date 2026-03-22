@@ -403,7 +403,8 @@ describe('MEDI fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when MEDI takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const medi = entityAtCell(UnitType.I_MEDI, House.Spain, 10, 10);
-    medi.takeDamage(10, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    medi.takeDamage(10, 'SA', attacker);
     expect(medi.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 

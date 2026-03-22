@@ -125,11 +125,14 @@ describe('Health condition thresholds (rules.cpp:234-235)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Fear increase on damage (infantry.cpp:442-457)', () => {
+  // C++ infantry.cpp:442: fear jump requires known attacker (source != NULL)
+  const mkAttacker = () => entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+
   // C++ infantry.cpp:442-447: if source and fear < FEAR_SCARED, set to FEAR_SCARED (or PANIC for civilians)
   it('military infantry fear jumps to FEAR_SCARED (100) on first hit', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
     expect(e1.fear).toBe(0);
-    e1.takeDamage(5, 'SA');
+    e1.takeDamage(5, 'SA', mkAttacker());
     expect(e1.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -138,7 +141,7 @@ describe('Fear increase on damage (infantry.cpp:442-457)', () => {
     const civ = entityAtCell(UnitType.I_C1, House.Spain, 10, 10);
     expect(UNIT_STATS.C1.isFraidyCat).toBe(true);
     expect(civ.fear).toBe(0);
-    civ.takeDamage(5, 'SA');
+    civ.takeDamage(5, 'SA', mkAttacker());
     expect(civ.fear).toBeGreaterThanOrEqual(Entity.FEAR_PANIC);
   });
 
@@ -149,7 +152,7 @@ describe('Fear increase on damage (infantry.cpp:442-457)', () => {
   it('subsequent hits add incremental fear based on health ratio', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
     // First hit: sets to FEAR_SCARED (100) + moreFear based on health
-    e1.takeDamage(5, 'SA');
+    e1.takeDamage(5, 'SA', mkAttacker());
     const fearAfterFirstHit = e1.fear;
     // Should be at least FEAR_SCARED (100)
     expect(fearAfterFirstHit).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
@@ -545,13 +548,14 @@ describe('Scatter preconditions (infantry.cpp:1852-1883)', () => {
 describe('Fear/prone lifecycle integration', () => {
   it('full cycle: no fear → damage → fear → prone → decay → stand up', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
 
     // 1. Start: no fear, standing
     expect(e1.fear).toBe(0);
     expect(e1.isProne).toBe(false);
 
     // 2. Take damage: fear jumps to >= FEAR_SCARED
-    e1.takeDamage(5, 'SA');
+    e1.takeDamage(5, 'SA', attacker);
     expect(e1.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
     expect(e1.alive).toBe(true);
 

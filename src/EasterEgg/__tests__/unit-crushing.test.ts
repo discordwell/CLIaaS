@@ -20,10 +20,10 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 
 // === 1. Crusher stats are correctly set for heavy tracked vehicles ===
 describe('crusher flag on UNIT_STATS', () => {
-  // C++ INI: Tracked=yes → crusher. APC/ARTY/V2RL/MNLY are tracked per rules.ini
-  const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'CTNK', 'TTNK', 'QTNK', 'APC', 'ARTY', 'V2RL', 'MNLY'];
+  // C++ udata.cpp IsCrusher constructor — ARTY excluded, MCV/MGG included
+  const expectedCrushers = ['1TNK', '2TNK', '3TNK', '4TNK', 'HARV', 'CTNK', 'TTNK', 'QTNK', 'APC', 'V2RL', 'MNLY', 'MCV', 'MGG', 'MRJ'];
   const expectedCrushersExpansion = ['STNK']; // Phase Transport has crusher per C++ parity
-  const expectedNonCrushers = ['JEEP', 'TRUK', 'DTRK', 'TRAN', 'LST', 'MCV'];
+  const expectedNonCrushers = ['JEEP', 'TRUK', 'DTRK', 'TRAN', 'LST', 'ARTY'];
 
   it.each(expectedCrushers)('%s has crusher=true', (unitKey) => {
     expect(UNIT_STATS[unitKey].crusher).toBe(true);
@@ -171,9 +171,9 @@ describe('non-crusher vehicles do NOT crush', () => {
     expect(apc.stats.crusher).toBe(true);
   });
 
-  it('Artillery IS a crusher (C++ INI Tracked=yes)', () => {
+  it('Artillery is NOT a crusher (C++ udata.cpp:296 IsCrusher=false)', () => {
     const arty = makeEntity(UnitType.V_ARTY, House.Spain, 100, 100);
-    expect(arty.stats.crusher).toBe(true);
+    expect(arty.stats.crusher).toBeFalsy();
   });
 
   it('Supply Truck should NOT have crusher flag', () => {
@@ -299,8 +299,8 @@ describe('heavy vehicle crusher status', () => {
     expect(UNIT_STATS.HARV.crusher).toBe(true);
   });
 
-  it('MCV is NOT a crusher (no Tracked=yes in rules.ini)', () => {
-    expect(UNIT_STATS.MCV.crusher).toBeFalsy();
+  it('MCV IS a crusher (C++ udata.cpp:358 IsCrusher=true)', () => {
+    expect(UNIT_STATS.MCV.crusher).toBe(true);
   });
 });
 

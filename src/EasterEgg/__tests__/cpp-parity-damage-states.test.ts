@@ -250,6 +250,9 @@ describe('Infantry Fear Constants (defines.h:617-623)', () => {
 });
 
 describe('Infantry Fear on Damage (infantry.cpp:442-457)', () => {
+  // C++ infantry.cpp:442: fear jump requires known attacker (source != NULL)
+  const mkAttacker = () => new Entity(UnitType.I_E1, House.USSR, 200, 200);
+
   it('first hit on unafraid infantry sets fear to FEAR_SCARED (100)', () => {
     // C++ infantry.cpp:442-446:
     //   if (source != NULL && Fear < FEAR_SCARED) {
@@ -257,7 +260,7 @@ describe('Infantry Fear on Damage (infantry.cpp:442-457)', () => {
     //     else Fear = FEAR_SCARED;
     const e = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     expect(e.fear).toBe(0);
-    e.takeDamage(5, 'SA');
+    e.takeDamage(5, 'SA', mkAttacker());
     expect(e.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -315,8 +318,7 @@ describe('Infantry Fear on Damage (infantry.cpp:442-457)', () => {
     const c = new Entity(UnitType.I_C1, House.Spain, 100, 100);
     expect(c.stats.isFraidyCat).toBe(true);
     expect(c.fear).toBe(0);
-    c.takeDamage(1, 'SA');
-    // PARITY GAP: TS sets fear to FEAR_SCARED for all infantry, not FEAR_PANIC for civilians.
+    c.takeDamage(1, 'SA', mkAttacker());
     // C++ differentiates: IsFraidyCat civilians get FEAR_PANIC (200), soldiers get FEAR_SCARED (100).
     expect(c.fear).toBeGreaterThanOrEqual(Entity.FEAR_PANIC); // C++ expectation: FEAR_PANIC (200)
   });

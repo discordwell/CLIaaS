@@ -326,14 +326,13 @@ describe('IsCrusher flag matches C++ udata.cpp / rules.ini', () => {
     expect(UNIT_STATS.HARV.crusher).toBe(true);
   });
 
-  it('MCV is NOT a crusher (no Tracked=yes in rules.ini)', () => {
-    // rules.ini [MCV] has no Tracked=yes — MCV is wheeled, cannot crush
-    expect(UNIT_STATS.MCV.crusher).toBeFalsy();
+  it('MCV IS a crusher (C++ udata.cpp:358 IsCrusher=true)', () => {
+    expect(UNIT_STATS.MCV.crusher).toBe(true);
   });
 
-  it('Artillery is a crusher', () => {
-    // C++ udata.cpp: ARTY has Crusher=yes (tracked)
-    expect(UNIT_STATS.ARTY.crusher).toBe(true);
+  it('Artillery is NOT a crusher (C++ udata.cpp:296 IsCrusher=false)', () => {
+    // C++ udata.cpp:296 IsCrusher=false despite Tracked=yes in rules.ini
+    expect(UNIT_STATS.ARTY.crusher).toBeFalsy();
   });
 });
 

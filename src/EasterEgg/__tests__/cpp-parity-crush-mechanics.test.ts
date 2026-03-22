@@ -149,17 +149,13 @@ describe('IsCrusher flag — C++ udata.cpp constructor values', () => {
   // C++ behavior: ARTY is NOT a crusher. It is tracked but cannot squash infantry.
   // TS behavior: ARTY has crusher=true (derived from Tracked=yes).
   // This is a TS bug if we follow C++ behavior exactly.
-  it('ARTY: C++ has IsCrusher=false despite Tracked=yes — TS has crusher=true (PARITY GAP)', () => {
+  it('ARTY: C++ has IsCrusher=false despite Tracked=yes — TS now matches C++ (PARITY FIXED)', () => {
     // C++ udata.cpp:296: false, // Can this unit squash infantry?
     // rules.ini [ARTY]: Tracked=yes (affects Speed only, not IsCrusher)
     // In C++, ARTY cannot crush infantry even though it uses SPEED_TRACK.
-    // TS sets crusher=true based on Tracked=yes. This is a known parity gap.
-    //
-    // To match C++ exactly: ARTY.crusher should be false.
-    // Current TS value:
+    // TS now correctly sets crusher=false to match C++ behavior.
     const artyCrusher = UNIT_STATS.ARTY.crusher;
-    // Document the gap: TS says true, C++ says false
-    expect(artyCrusher).toBe(true); // TS current behavior (C++ would be false)
+    expect(artyCrusher).toBeFalsy(); // matches C++ udata.cpp:296 IsCrusher=false
   });
 
   // PARITY DISCREPANCY: MCV has no Tracked= in INI
@@ -167,32 +163,24 @@ describe('IsCrusher flag — C++ udata.cpp constructor values', () => {
   // C++ behavior: MCV IS a crusher. It can squash infantry on cell entry.
   // TS behavior: MCV has no crusher flag (falsy).
   // This is a TS bug if we follow C++ behavior exactly.
-  it('MCV: C++ has IsCrusher=true but no Tracked= in INI — TS has crusher=falsy (PARITY GAP)', () => {
+  it('MCV: C++ has IsCrusher=true — TS now matches C++ (PARITY FIXED)', () => {
     // C++ udata.cpp:358: true, // Can this unit squash infantry?
     // rules.ini [MCV]: no Tracked= key (Speed stays SPEED_TRACK by default)
-    // In C++, MCV can crush infantry.
-    // TS does not set crusher=true because it derives from Tracked=.
-    //
-    // To match C++ exactly: MCV.crusher should be true.
-    // Current TS value:
+    // In C++, MCV can crush infantry. TS now matches.
     const mcvCrusher = UNIT_STATS.MCV.crusher;
-    // Document the gap: TS says falsy, C++ says true
-    expect(mcvCrusher).toBeFalsy(); // TS current behavior (C++ would be true)
+    expect(mcvCrusher).toBe(true); // matches C++ udata.cpp:358 IsCrusher=true
   });
 
   // PARITY DISCREPANCY: MGG has no Tracked= in INI
   // but IsCrusher=true in C++ constructor (udata.cpp:265).
   // C++ behavior: MGG IS a crusher. It can squash infantry on cell entry.
   // TS behavior: MGG has no crusher flag (falsy).
-  it('MGG: C++ has IsCrusher=true but no Tracked= in INI — TS has crusher=falsy (PARITY GAP)', () => {
+  it('MGG: C++ has IsCrusher=true — TS now matches C++ (PARITY FIXED)', () => {
     // C++ udata.cpp:265: true, // Can this unit squash infantry?
     // rules.ini [MGG]: no Tracked= key
-    // In C++, MGG can crush infantry.
-    // TS does not set crusher=true.
-    //
-    // To match C++ exactly: MGG.crusher should be true.
+    // In C++, MGG can crush infantry. TS now matches.
     const mggCrusher = UNIT_STATS.MGG.crusher;
-    expect(mggCrusher).toBeFalsy(); // TS current behavior (C++ would be true)
+    expect(mggCrusher).toBe(true); // matches C++ udata.cpp:265 IsCrusher=true
   });
 });
 
@@ -668,22 +656,19 @@ describe('PARITY GAP SUMMARY — C++ IsCrusher vs TS crusher', () => {
   // The C++ source (udata.cpp constructor) is the ground truth.
   // rules.ini Tracked= only controls Speed, not IsCrusher.
 
-  it('GAP: ARTY — C++ IsCrusher=false, TS crusher=true (udata.cpp:296)', () => {
-    // C++ ARTY cannot crush infantry. TS ARTY can.
-    // To fix: remove crusher=true from ARTY in types.ts
-    expect(UNIT_STATS.ARTY.crusher).toBe(true); // current TS (incorrect per C++)
+  it('FIXED: ARTY — C++ IsCrusher=false, TS crusher now false (udata.cpp:296)', () => {
+    // C++ ARTY cannot crush infantry. TS now matches.
+    expect(UNIT_STATS.ARTY.crusher).toBeFalsy(); // matches C++
   });
 
-  it('GAP: MCV — C++ IsCrusher=true, TS crusher=falsy (udata.cpp:358)', () => {
-    // C++ MCV CAN crush infantry. TS MCV cannot.
-    // To fix: add crusher=true to MCV in types.ts
-    expect(UNIT_STATS.MCV.crusher).toBeFalsy(); // current TS (incorrect per C++)
+  it('FIXED: MCV — C++ IsCrusher=true, TS crusher now true (udata.cpp:358)', () => {
+    // C++ MCV CAN crush infantry. TS now matches.
+    expect(UNIT_STATS.MCV.crusher).toBe(true); // matches C++
   });
 
-  it('GAP: MGG — C++ IsCrusher=true, TS crusher=falsy (udata.cpp:265)', () => {
-    // C++ MGG CAN crush infantry. TS MGG cannot.
-    // To fix: add crusher=true to MGG in types.ts
-    expect(UNIT_STATS.MGG.crusher).toBeFalsy(); // current TS (incorrect per C++)
+  it('FIXED: MGG — C++ IsCrusher=true, TS crusher now true (udata.cpp:265)', () => {
+    // C++ MGG CAN crush infantry. TS now matches.
+    expect(UNIT_STATS.MGG.crusher).toBe(true); // matches C++
   });
 
   it('GAP: Crush sound — C++ uses single VOC_SQUISH, TS uses die_infantry/die_ant', () => {

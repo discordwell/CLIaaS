@@ -478,7 +478,8 @@ describe('MECH fear / prone system (infantry.cpp:329-457)', () => {
 
   it('when MECH takes damage, fear increases to at least FEAR_SCARED (100)', () => {
     const mech = entityAtCell(UnitType.I_MECH, House.Spain, 10, 10);
-    mech.takeDamage(10, 'SA');
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
+    mech.takeDamage(10, 'SA', attacker);
     expect(mech.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 
@@ -503,10 +504,11 @@ describe('MECH fear / prone system (infantry.cpp:329-457)', () => {
 
   it('damage -> fear -> prone -> next hit deals half: full sequence', () => {
     const mech = entityAtCell(UnitType.I_MECH, House.Spain, 10, 10);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 20, 20);
     expect(mech.isProne).toBe(false);
 
     // Step 1: Take first hit -- fear should jump to >= FEAR_SCARED (100)
-    mech.takeDamage(10, 'SA');
+    mech.takeDamage(10, 'SA', attacker);
     expect(mech.alive).toBe(true);
     expect(mech.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
 

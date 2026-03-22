@@ -148,27 +148,54 @@ describe('Passengers= parity (rules.ini Passengers vs TS passengers)', () => {
 //    In RA, Tracked=yes in rules.ini means the vehicle can crush infantry.
 //    TS uses the 'crusher' boolean flag for this.
 // ==========================================================================
-describe('Tracked= vs crusher parity (rules.ini Tracked=yes -> TS crusher=true)', () => {
+describe('IsCrusher parity (C++ udata.cpp constructor — overrides INI Tracked=)', () => {
+  // C++ udata.cpp IsCrusher is set in the constructor and NOT always correlated
+  // with INI Tracked=yes. Three known exceptions:
+  //   ARTY: Tracked=yes but IsCrusher=false (udata.cpp:296)
+  //   MCV:  no Tracked=yes but IsCrusher=true (udata.cpp:358)
+  //   MGG:  no Tracked=yes but IsCrusher=true (udata.cpp:265)
+  const CPP_CRUSHER_OVERRIDES: Record<string, boolean> = {
+    ARTY: false,
+    MCV: true,
+    MGG: true,
+  };
+
   const trackedUnits = ALL_INI_UNITS.filter(u => ynBool(ini[u]?.Tracked) === true);
   const nonTrackedIniUnits = ALL_INI_UNITS.filter(
     u => ini[u] !== undefined && ynBool(ini[u]?.Tracked) !== true,
   );
 
-  it.each(trackedUnits)('%s: Tracked=yes in INI -> crusher=true in TS', (unit) => {
-    expect(
-      UNIT_STATS[unit].crusher,
-      `${unit}: INI has Tracked=yes but TS crusher=${UNIT_STATS[unit].crusher}`,
-    ).toBe(true);
+  it.each(trackedUnits)('%s: Tracked=yes in INI -> crusher per C++ udata.cpp', (unit) => {
+    const expected = CPP_CRUSHER_OVERRIDES[unit] ?? true;
+    if (expected) {
+      expect(
+        UNIT_STATS[unit].crusher,
+        `${unit}: should be crusher`,
+      ).toBe(true);
+    } else {
+      expect(
+        UNIT_STATS[unit].crusher,
+        `${unit}: C++ udata.cpp overrides IsCrusher=false despite Tracked=yes`,
+      ).toBeFalsy();
+    }
   });
 
   it.each(nonTrackedIniUnits)(
-    '%s: no Tracked=yes in INI -> crusher should be absent/false in TS',
+    '%s: no Tracked=yes in INI -> crusher per C++ udata.cpp',
     (unit) => {
+      const expected = CPP_CRUSHER_OVERRIDES[unit] ?? false;
       const tsCrusher = UNIT_STATS[unit].crusher;
-      expect(
-        tsCrusher,
-        `${unit}: INI has no Tracked=yes but TS has crusher=${tsCrusher}`,
-      ).toBeFalsy();
+      if (expected) {
+        expect(
+          tsCrusher,
+          `${unit}: C++ udata.cpp sets IsCrusher=true despite no Tracked=yes`,
+        ).toBe(true);
+      } else {
+        expect(
+          tsCrusher,
+          `${unit}: INI has no Tracked=yes and C++ IsCrusher=false`,
+        ).toBeFalsy();
+      }
     },
   );
 });

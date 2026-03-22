@@ -1203,7 +1203,8 @@ describe('Fear system on damage', () => {
 
   it('taking damage increases infantry fear to at least FEAR_SCARED', () => {
     const inf = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
-    inf.takeDamage(10, 'SA');
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    inf.takeDamage(10, 'SA', attacker);
     expect(inf.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 

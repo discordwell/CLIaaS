@@ -936,12 +936,9 @@ describe('GPS is house-specific (bullet.cpp:403-414)', () => {
     expect(state?.fired).toBe(true);
   });
 
-  it('PARITY BUG: enemy GPS incorrectly calls revealAll (superweapon.ts:153)', () => {
+  it('PARITY FIXED: enemy GPS does not call revealAll (superweapon.ts — revealAll inside isAllied)', () => {
     // C++ bullet.cpp:404: Map_Cell only runs if Payback->House == PlayerPtr
-    // TS superweapon.ts:153: revealAll() runs unconditionally before isAllied check
-    //
-    // This documents the bug. The revealAll() on line 153 should be moved
-    // inside the `if (ctx.isAllied(...))` block on line 157.
+    // TS superweapon.ts: revealAll() now correctly gated behind isAllied check.
     const enemyAtek = makeStructure('ATEK', House.USSR, 10, 10);
     const ctx = makeSuperweaponCtx({
       structures: [enemyAtek],
@@ -955,10 +952,9 @@ describe('GPS is house-specific (bullet.cpp:403-414)', () => {
 
     updateSuperweapons(ctx);
 
-    // BUG: revealAll() was called even though GPS was fired by enemy
-    // C++ would NOT reveal the map for the player in this case.
-    // Once fixed, this should be false:
-    expect(ctx._revealCalled()).toBe(true); // DOCUMENTS BUG — should be false per C++
+    // FIXED: revealAll() is NOT called when GPS is fired by enemy
+    // C++ bullet.cpp:404: Map_Cell only runs if Payback->House == PlayerPtr
+    expect(ctx._revealCalled()).toBe(false); // matches C++ behavior
   });
 });
 

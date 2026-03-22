@@ -834,10 +834,10 @@ describe('Fear/Prone system — C++ infantry.cpp, rules.cpp:202', () => {
   });
 
   it('damage sets fear to at least FEAR_SCARED (C++ infantry.cpp:442-457)', () => {
-    // C++ infantry.cpp:515-517 in TS entity.ts:
-    //   if (this.fear < Entity.FEAR_SCARED) this.fear = Entity.FEAR_SCARED;
+    // C++ infantry.cpp:442: fear jump requires known attacker (source != NULL)
     const e = new Entity(UnitType.E1, House.Greece, 100, 100);
-    e.takeDamage(10, 'SA');
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 200, 200);
+    e.takeDamage(10, 'SA', attacker);
     expect(e.fear).toBeGreaterThanOrEqual(Entity.FEAR_SCARED);
   });
 });
