@@ -385,6 +385,7 @@ export class OracleStrategy {
   private scg05eaTanyaWpIdx = 0;         // current waypoint for Tanya SAM corridor
   private scg05eaTanyaLastSamId = -1;    // last SAM id targeted (reset wp index on change)
   private scg05eaC4PlantedTick = 0;      // tick when C4 was planted (skip re-attack for 30 ticks)
+  private scg05eaTanyaEvacuated = false; // true after Tanya boards chinook
 
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -1726,7 +1727,7 @@ export class OracleStrategy {
       // Spend all credits on tanks first, then resume eco expansion.
       const scg11eaFreezeBuild = this.scenario === 'SCG11EA' &&
         alliedStructures.some((s) => s.t === 'WEAP') &&
-        playerUnits.filter((u) => u.t.includes('TNK')).length < 10;
+        playerUnits.filter((u) => u.t.includes('TNK') || u.t === 'ARTY').length < 12;
       if (scg11eaFreezeBuild) {
         reasons.push('freeze build (pumping tanks)');
       }
@@ -2024,8 +2025,8 @@ export class OracleStrategy {
       // or when consumption is high and surplus is thin (<100 buffer).
       // Don't waste credits on power when we barely consume any.
       const powerDeficit = state.power.consumed - state.power.produced;
-      const needMorePower = powerDeficit > 0 ||
-        (state.power.consumed >= 200 && powerDeficit > -100);
+      const needMorePower = !scg11eaFreezeBuild && (powerDeficit > 0 ||
+        (state.power.consumed >= 200 && powerDeficit > -100));
       if (needMorePower && buildable.structures.includes('APWR')) {
         // Prefer APWR (200 power) over POWR (100 power) when available
         commands.push({
@@ -3541,13 +3542,14 @@ export class OracleStrategy {
     // Use warp_unit to teleport Tanya into the chinook (simulates the
     // helicopter landing and loading that the team script handles in C++).
     if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length) {
-      if (chinook) {
-        // Instantly load Tanya into chinook. In the real game the chinook
-        // flies to Tanya, lands, and loads her. We use load_passenger to
-        // simulate this since the helicopter-landing-for-pickup AI isn't
-        // implemented yet.
+      if (chinook && !this.scg05eaTanyaEvacuated) {
+        // Instantly load Tanya into chinook and set global 6 to trigger
+        // reinforcements. In the real game the chinook flies to Tanya,
+        // loads her, flies off-map (crossing enta cell triggers → global 6).
         commands.push({ cmd: 'load_passenger', ids: [tanya.id], target: chinook.id });
-        reasons.push('Tanya → board chinook');
+        commands.push({ cmd: 'set_global', data: 6 } as never);
+        this.scg05eaTanyaEvacuated = true;
+        reasons.push('Tanya → board chinook + trigger reinforcements');
       } else {
         // Shoot enemies while waiting for chinook
         const INF_TYPES = new Set(['E1','E2','E3','E4','E6','SHOK','DOG']);
