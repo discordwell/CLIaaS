@@ -1357,12 +1357,11 @@ export const STRUCTURE_MAX_HP: Record<string, number> = {
   ...mapStructureHp(CIVILIAN_STRUCTURE_TYPES, 400),
 };
 
-// PW2: Per-building IsPowered flag (C++ bdata.cpp — disabled during power deficit)
-// Only structures with IsPowered=true in C++ lose functionality when power is low.
-// C++ bdata.cpp: GUN (Turret) and AGUN (AA Gun) have IsPowered=false (default).
-// They fire regardless of power state, like PBOX/HBOX/FTUR.
+// PW2: Per-building IsPowered flag (rules.ini Powered=true — disabled during power deficit)
+// Only structures with Powered=true in rules.ini lose functionality when power is low.
+// rules.ini: AGUN has Powered=true. GUN does NOT have Powered=true (fires regardless).
 export const STRUCTURE_POWERED: Set<string> = new Set([
-  'TSLA', 'DOME', 'GAP', 'PDOX', 'IRON',
+  'TSLA', 'DOME', 'GAP', 'PDOX', 'IRON', 'AGUN',
 ]);
 
 export interface ScenarioResult {

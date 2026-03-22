@@ -424,7 +424,8 @@ describe('STRUCTURE_POWERED — IsPowered flag (rules.ini Powered=true)', () => 
   });
 
   // Structures that should NOT be powered (common check)
-  const CPP_NOT_POWERED = ['GUN', 'AGUN', 'PBOX', 'HBOX', 'FTUR', 'PROC', 'WEAP', 'TENT', 'BARR'];
+  // Note: AGUN has Powered=true in rules.ini, so it IS powered (removed from this list)
+  const CPP_NOT_POWERED = ['GUN', 'PBOX', 'HBOX', 'FTUR', 'PROC', 'WEAP', 'TENT', 'BARR'];
   for (const type of CPP_NOT_POWERED) {
     it(`${type} should NOT be in STRUCTURE_POWERED (C++ IsPowered=false)`, () => {
       expect(STRUCTURE_POWERED.has(type)).toBe(false);

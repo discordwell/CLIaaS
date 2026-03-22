@@ -524,8 +524,8 @@ describe('Powered flag: INI Powered= structures', () => {
     expect(powered).toBeUndefined();
   });
 
-  it('AGUN should NOT have Powered= in INI (fires without power in C++)', () => {
+  it('AGUN has Powered=true in rules.ini (disabled when low power)', () => {
     const powered = iniStr('AGUN', 'Powered');
-    expect(powered).toBeUndefined();
+    expect(powered?.toLowerCase()).toBe('true');
   });
 });

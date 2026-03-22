@@ -569,10 +569,10 @@ describe('C++ Parity — Weapon Assignment (INI-parsed, comprehensive)', () => {
       expect(tsPrimary('C7')).toBe('Pistol');
     });
 
-    it('Scenario-only units: DELPHI in INI but not UNIT_STATS, ants in UNIT_STATS but not INI', () => {
-      // DELPHI is in rules.ini but not in UNIT_STATS (scenario-only NPC)
+    it('Scenario-only units: DELPHI now in both INI and UNIT_STATS, ants in UNIT_STATS but not INI', () => {
+      // DELPHI is in rules.ini AND now in UNIT_STATS (scenario-only NPC)
       expect(ini['DELPHI']).toBeDefined();
-      expect(UNIT_STATS['DELPHI']).toBeUndefined();
+      expect(UNIT_STATS['DELPHI']).toBeDefined();
     });
 
     it('Ant units (ANT1/ANT2/ANT3) are not in rules.ini but have weapons in UNIT_STATS', () => {

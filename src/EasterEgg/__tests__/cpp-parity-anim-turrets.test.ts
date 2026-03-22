@@ -464,8 +464,8 @@ describe('AGUN targets air (scenario.ts:1126)', () => {
     expect(agunWeapon.isAntiAir).toBe(true);
   });
 
-  it('AGUN is NOT a powered structure (C++ bdata.cpp:2836 IsPowered=false default)', () => {
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+  it('AGUN IS a powered structure (rules.ini Powered=true)', () => {
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
   });
 });
 

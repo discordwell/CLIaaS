@@ -166,8 +166,8 @@ describe('1. Turreted building identification (C++ bdata.cpp)', () => {
   it('TS TURRETED_STRUCTURES includes AGUN (C++ bdata.cpp:621)', () => {
     // AGUN has a weapon defined (can fire)
     expect(STRUCTURE_WEAPONS['AGUN']).toBeDefined();
-    // AGUN is NOT powered (C++ bdata.cpp:2836 IsPowered=false default)
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+    // AGUN IS powered (rules.ini Powered=true)
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
     // In C++, AGUN has IsTurretEquipped=true — now included in TS TURRETED_STRUCTURES.
     expect(CPP_TURRETED_BUILDINGS).toContain('AGUN');
   });
@@ -401,30 +401,28 @@ describe('4. PARITY GAP: rotation resolution and speed', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('5. Power-down blocks turret rotation for powered structures only', () => {
-  // C++ Rotation_AI checks: (!Class->IsPowered || House->Power_Fraction() >= 1)
-  // Only buildings with IsPowered=true have rotation blocked during low power.
-  // GUN and AGUN have IsPowered=false (bdata.cpp:2836 default), so they always rotate.
-  // SAM has IsPowered=true, so its rotation IS blocked during low power.
+  // rules.ini Powered=true: TSLA, AGUN, DOME, GAP, PDOX, IRON
+  // GUN and SAM do NOT have Powered=true — they always rotate.
+  // AGUN has Powered=true — rotation is blocked during low power.
 
-  it('GUN is NOT a powered structure (C++ bdata.cpp:2836 IsPowered=false)', () => {
+  it('GUN is NOT a powered structure (no Powered=true in rules.ini)', () => {
     expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
   });
 
-  it('SAM is NOT a powered structure (C++ rules.ini has no Powered=yes)', () => {
+  it('SAM is NOT a powered structure (no Powered=true in rules.ini)', () => {
     expect(STRUCTURE_POWERED.has('SAM')).toBe(false);
   });
 
-  it('AGUN is NOT a powered structure (C++ bdata.cpp:2836 IsPowered=false)', () => {
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+  it('AGUN IS a powered structure (rules.ini Powered=true)', () => {
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
   });
 
-  // For powered structures (SAM), TS blocks the entire defense tick during low power
-  // (combat.ts:1171-1172). This means turret rotation is never reached for SAM during
-  // low power — effectively matching C++ Rotation_AI behavior.
-  // GUN and AGUN are NOT powered, so they continue to rotate and fire during low power.
+  // For powered structures (AGUN, TSLA), TS blocks the entire defense tick during low power
+  // (combat.ts). This means turret rotation is never reached during low power.
+  // GUN and SAM are NOT powered, so they continue to rotate and fire during low power.
   it('TS blocks entire defense tick during low power for powered structures only', () => {
-    // SAM: powered, rotation blocked during low power (matches C++)
-    // GUN/AGUN: not powered, rotation continues during low power (matches C++)
+    // AGUN: powered, rotation blocked during low power
+    // GUN/SAM: not powered, rotation continues during low power
     expect(true).toBe(true); // Documents the mechanism
   });
 });

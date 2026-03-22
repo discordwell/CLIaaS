@@ -136,18 +136,18 @@ function makeCombatCtx(
 // ═════════════════════════════════════════════════════════════════════════════
 // 1. STRUCTURE_POWERED set membership
 //    C++ bdata.cpp:2836 — IsPowered defaults false, set via rules.ini Powered=yes
-//    In Red Alert: TSLA, GUN, SAM, AGUN, GAP, PDOX, IRON, MSLO are powered.
+//    rules.ini Powered=true: TSLA, AGUN, DOME, GAP, PDOX, IRON (6 structures).
 // ═════════════════════════════════════════════════════════════════════════════
 
-describe('STRUCTURE_POWERED set (C++ bdata.cpp:3774 IsPowered from rules.ini)', () => {
-  // C++ bdata.cpp: GUN and AGUN have IsPowered=false (default) — they fire without power
-  const EXPECTED_POWERED = ['TSLA', 'DOME', 'GAP', 'PDOX', 'IRON'];
+describe('STRUCTURE_POWERED set (rules.ini Powered=true)', () => {
+  // rules.ini Powered=true: TSLA, DOME, GAP, PDOX, IRON, AGUN (6 total)
+  const EXPECTED_POWERED = ['TSLA', 'DOME', 'GAP', 'PDOX', 'IRON', 'AGUN'];
 
   it.each(EXPECTED_POWERED)('%s is a powered structure', (type) => {
     expect(STRUCTURE_POWERED.has(type), `${type} should be in STRUCTURE_POWERED`).toBe(true);
   });
 
-  const EXPECTED_UNPOWERED = ['GUN', 'AGUN', 'PBOX', 'HBOX', 'FTUR', 'POWR', 'APWR', 'PROC', 'WEAP', 'TENT', 'BARR', 'SAM', 'MSLO'];
+  const EXPECTED_UNPOWERED = ['GUN', 'PBOX', 'HBOX', 'FTUR', 'POWR', 'APWR', 'PROC', 'WEAP', 'TENT', 'BARR', 'SAM', 'MSLO'];
 
   it.each(EXPECTED_UNPOWERED)('%s is NOT a powered structure', (type) => {
     expect(STRUCTURE_POWERED.has(type), `${type} should NOT be in STRUCTURE_POWERED`).toBe(false);
@@ -201,8 +201,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
     expect(aircraft.hp).toBeLessThan(hpBefore);
   });
 
-  it('AA Gun (AGUN) DOES fire at aircraft when low power — AGUN is not powered (C++ bdata.cpp)', () => {
-    // C++ bdata.cpp: AGUN has IsPowered=false — fires regardless of power state
+  it('AA Gun (AGUN) does NOT fire at aircraft when low power — AGUN is powered (rules.ini Powered=true)', () => {
     const agun = makeStructure('AGUN', 10, 10, House.USSR);
     const aircraft = makeAircraft(UnitType.V_HELI, House.Greece, 11, 10);
     const ctx = makeCombatCtx([agun], [aircraft], { powerConsumed: 200, powerProduced: 100 });
@@ -211,7 +210,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
       ctx.tick = i;
       updateStructureCombat(ctx);
     }
-    expect(aircraft.hp).toBeLessThan(hpBefore);
+    expect(aircraft.hp).toBe(hpBefore);
   });
 });
 
@@ -679,7 +678,7 @@ describe('EVA power gate (C++ house.cpp:1120 vs TS index.ts:3114)', () => {
 //     C++ building.cpp:5349-5352:
 //       if (Class->IsTurretEquipped && ... && (!Class->IsPowered || House->Power_Fraction() >= 1))
 //         { rotate turret }
-//     Turrets on IsPowered buildings (GUN, SAM, AGUN) freeze when power drops.
+//     Only IsPowered buildings (AGUN has Powered=true) have turret freeze during low power.
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('turret rotation freezes on powered structures during low power (C++ building.cpp:5352)', () => {
@@ -696,9 +695,9 @@ describe('turret rotation freezes on powered structures during low power (C++ bu
     // C++ rules.ini has no Powered=yes for SAM
   });
 
-  it('AGUN is turreted but NOT powered — turret rotates even without power', () => {
-    // C++ bdata.cpp: AGUN (AA Gun) has IsPowered=false (default)
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+  it('AGUN is turreted AND powered — turret freezes during low power', () => {
+    // rules.ini: AGUN has Powered=true
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
   });
 
   it('PBOX is not turreted — rotation freeze is not applicable', () => {

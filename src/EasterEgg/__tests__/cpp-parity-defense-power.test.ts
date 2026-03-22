@@ -13,13 +13,9 @@
  *   building.cpp:5382-5413 — Charging_AI(): Tesla only charges when Power_Fraction() >= 1.
  *                           Power loss mid-charge resets IsCharged=false, IsCharging=false.
  *   bdata.cpp:2836        — IsPowered defaults to false for ALL building types.
- *   rules.ini (original)  — Powered=yes ONLY for: TSLA, SAM, GAP, PDOX, IRON, MSLO.
- *                           GUN (Turret) and AGUN (AA Gun) are NOT powered in C++.
- *
- * PARITY GAP IDENTIFIED:
- *   TS includes GUN and AGUN in STRUCTURE_POWERED, but C++ does not set Powered=yes
- *   for these structures. In original RA, Turret and AA Gun fire normally during
- *   power outages. Only TSLA and SAM (among defense structures) are power-gated.
+ *   rules.ini              — Powered=true for: TSLA, AGUN, GAP, PDOX, IRON, DOME.
+ *                           GUN (Turret) is NOT powered.
+ *                           AGUN (AA Gun) IS powered per rules.ini Powered=true.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -189,7 +185,8 @@ describe('STRUCTURE_POWERED set membership (C++ rules.ini Powered= flag)', () =>
   // C++ bdata.cpp:2836 — IsPowered defaults false for ALL buildings.
   // Only buildings with Powered=yes in rules.ini are power-gated.
   // Original RA rules.ini Powered=yes: TSLA, SAM, GAP, PDOX, IRON, MSLO
-  // Original RA rules.ini Powered is NOT set for: GUN, AGUN, PBOX, HBOX, FTUR
+  // rules.ini Powered is NOT set for: GUN, PBOX, HBOX, FTUR
+  // rules.ini Powered=true IS set for: AGUN
 
   it('TSLA is powered (C++ rules.ini Powered=yes)', () => {
     expect(STRUCTURE_POWERED.has('TSLA')).toBe(true);
@@ -224,11 +221,8 @@ describe('STRUCTURE_POWERED set membership (C++ rules.ini Powered= flag)', () =>
     expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
   });
 
-  // PARITY GAP: C++ does NOT have AGUN (AA Gun) as Powered=yes
-  // Same reasoning: bdata.cpp:2836 default is false, rules.ini doesn't override.
-  it('AGUN should NOT be powered (C++ rules.ini does not set Powered=yes for AA Gun)', () => {
-    // PARITY GAP — TS has AGUN in STRUCTURE_POWERED but C++ does not
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+  it('AGUN IS powered (rules.ini Powered=true)', () => {
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
   });
 
   it('PBOX is NOT powered', () => {
@@ -381,19 +375,16 @@ describe('GUN (Turret) should fire during power deficit — C++ IsPowered=false'
   });
 });
 
-describe('AGUN (AA Gun) should fire during power deficit — C++ IsPowered=false', () => {
-  // C++ bdata.cpp:2836 — IsPowered defaults false. RA rules.ini does NOT set Powered=yes for AGUN.
-  // PARITY GAP: TS has AGUN in STRUCTURE_POWERED.
-
-  it('fires at airborne aircraft during power deficit', () => {
+describe('AGUN (AA Gun) does NOT fire during power deficit — rules.ini Powered=true', () => {
+  it('does NOT fire at airborne aircraft during power deficit (AGUN is powered)', () => {
     const agun = makeStructure('AGUN', 10, 10);
     agun.turretDir = 2; // East
     agun.desiredTurretDir = 2;
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [aircraft], { powerProduced: 50, powerConsumed: 200 });
     updateStructureCombat(ctx);
-    // PARITY GAP — C++ expects fire (IsPowered=false), TS skips fire (AGUN in STRUCTURE_POWERED)
-    expect(aircraft.hp).toBeLessThan(aircraft.maxHp);
+    // AGUN has Powered=true in rules.ini, so it does NOT fire during power deficit
+    expect(aircraft.hp).toBe(aircraft.maxHp);
   });
 });
 
@@ -544,7 +535,7 @@ describe('Dead structures do not participate in combat', () => {
 });
 
 // ── Summary of PARITY GAPS found ─────────────────────────────────────────────
-// 1. GUN in STRUCTURE_POWERED — C++ Turret has IsPowered=false (bdata.cpp:2836 default)
-// 2. AGUN in STRUCTURE_POWERED — C++ AA Gun has IsPowered=false (bdata.cpp:2836 default)
+// 1. GUN NOT in STRUCTURE_POWERED — C++ Turret has IsPowered=false (bdata.cpp:2836 default)
+// 2. AGUN IS in STRUCTURE_POWERED — rules.ini has Powered=true for AGUN
 // 3. Zero-power edge case — C++ Power_Fraction() returns 0 when Power=0 && Drain>0,
 //    but TS isLowPower requires powerProduced > 0, so it treats zero power as "not low power"

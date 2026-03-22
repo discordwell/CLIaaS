@@ -124,8 +124,8 @@ describe('AGUN structure stats (rules.ini)', () => {
     expect(STRUCTURE_SIZE['AGUN']).toEqual([1, 2]);
   });
 
-  it('is NOT in STRUCTURE_POWERED set (fires regardless of power)', () => {
-    expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+  it('IS in STRUCTURE_POWERED set (rules.ini Powered=true)', () => {
+    expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
   });
 });
 
@@ -243,10 +243,10 @@ describe('AGUN range enforcement (range=6 cells)', () => {
   });
 });
 
-// ── Power Independence (C++ bdata.cpp:2836 IsPowered=false) ─────────────────
-// AGUN is NOT power-dependent. It fires regardless of power state.
+// ── Power Dependence (rules.ini Powered=true) ───────────────────────────────
+// AGUN IS power-dependent per rules.ini. It stops firing during power deficit.
 
-describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () => {
+describe('AGUN is powered — fires only with sufficient power (rules.ini Powered=true)', () => {
   it('fires at aircraft when power is sufficient (produced >= consumed)', () => {
     const agun = makeAGUN(10, 10);
     const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
@@ -258,7 +258,7 @@ describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () =
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
-  it('fires at aircraft even during power deficit (AGUN is unpowered)', () => {
+  it('does NOT fire at aircraft during power deficit (AGUN is powered)', () => {
     const agun = makeAGUN(10, 10);
     const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [heli], {
@@ -266,10 +266,10 @@ describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () =
       powerConsumed: 100,
     });
     updateStructureCombat(ctx);
-    expect(heli.hp).toBeLessThan(heli.maxHp);
+    expect(heli.hp).toBe(heli.maxHp);
   });
 
-  it('fires AA even during power deficit (AGUN is unpowered)', () => {
+  it('does NOT fire AA during power deficit (AGUN is powered)', () => {
     const agun = makeAGUN(10, 10);
     const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [heli], {
@@ -277,10 +277,10 @@ describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () =
       powerConsumed: 100,
     });
     updateStructureCombat(ctx);
-    expect(heli.hp).toBeLessThan(heli.maxHp);
+    expect(heli.hp).toBe(heli.maxHp);
   });
 
-  it('fires at aircraft when powerProduced=0 (no power buildings)', () => {
+  it('fires at aircraft when powerProduced=powerConsumed=0 (no power grid)', () => {
     const agun = makeAGUN(10, 10);
     const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [heli], {
@@ -288,6 +288,7 @@ describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () =
       powerConsumed: 0,
     });
     updateStructureCombat(ctx);
+    // When produced=consumed=0, isLowPower is false (0 > 0 is false), so AGUN fires
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 });

@@ -19,8 +19,8 @@
  * Powered flag (rules.ini per-building Powered= key):
  *   Default is false (bdata.cpp:2836 — IsPowered defaults to false)
  *   Only buildings with explicit Powered=true in rules.ini are affected.
- *   rules.ini: IRON, PDOX, TSLA, DOME, GAP have Powered=true
- *   GUN, AGUN, SAM, MSLO etc. do NOT have Powered=true
+ *   rules.ini: IRON, PDOX, TSLA, AGUN, DOME, GAP have Powered=true
+ *   GUN, SAM, MSLO etc. do NOT have Powered=true
  *
  * Capturable flag (rules.ini per-building Capturable= key):
  *   Default is false (bdata.cpp). Engineers capture buildings with this flag.
@@ -103,7 +103,7 @@ const ALL_BUILDING_TYPES = [...MAIN_BUILDINGS, ...WALLS];
 // ============================================================
 // Section 1: Powered= flag parity
 //
-// rules.ini Powered=true appears on: IRON, PDOX, TSLA, DOME, GAP
+// rules.ini Powered=true appears on: IRON, PDOX, TSLA, AGUN, DOME, GAP
 // Default is false (C++ bdata.cpp:2836)
 // ============================================================
 describe('Powered= flag (rules.ini vs STRUCTURE_POWERED)', () => {
@@ -116,8 +116,8 @@ describe('Powered= flag (rules.ini vs STRUCTURE_POWERED)', () => {
     }
   }
 
-  it('rules.ini has exactly 5 buildings with Powered=true: IRON, PDOX, TSLA, DOME, GAP', () => {
-    expect([...iniPowered].sort()).toEqual(['DOME', 'GAP', 'IRON', 'PDOX', 'TSLA']);
+  it('rules.ini has exactly 6 buildings with Powered=true: IRON, PDOX, TSLA, AGUN, DOME, GAP', () => {
+    expect([...iniPowered].sort()).toEqual(['AGUN', 'DOME', 'GAP', 'IRON', 'PDOX', 'TSLA']);
   });
 
   it('STRUCTURE_POWERED matches rules.ini Powered=true set exactly', () => {
@@ -129,7 +129,7 @@ describe('Powered= flag (rules.ini vs STRUCTURE_POWERED)', () => {
   it('buildings WITHOUT Powered=true in rules.ini are NOT in STRUCTURE_POWERED', () => {
     // Specifically test the tricky ones — defense structures that consume power
     // but are NOT IsPowered (they fire even during blackouts)
-    const notPowered = ['GUN', 'AGUN', 'SAM', 'MSLO', 'PBOX', 'HBOX', 'FTUR'];
+    const notPowered = ['GUN', 'SAM', 'MSLO', 'PBOX', 'HBOX', 'FTUR'];
     for (const type of notPowered) {
       const section = getMergedSection(type);
       expect(section, `${type} should exist in rules.ini`).toBeDefined();

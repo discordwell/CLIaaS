@@ -340,7 +340,8 @@ describe('C++ parity: TechLevel= from rules.ini / aftrmath.ini', () => {
     it('every PRODUCTION_ITEMS entry has a matching INI TechLevel', () => {
       // Some non-buildable items may not have TechLevel in INI
       // (e.g. MISS is a civilian tech center with no INI TechLevel)
-      const KNOWN_MISSING_TECHLEVEL = new Set(['MISS']);
+      // MISS has no INI section; CYCL/BARB/WOOD are walls with no TechLevel in INI
+      const KNOWN_MISSING_TECHLEVEL = new Set(['MISS', 'CYCL', 'BARB', 'WOOD']);
       const missing: string[] = [];
       for (const item of PRODUCTION_ITEMS) {
         if (KNOWN_MISSING_TECHLEVEL.has(item.type)) continue;

@@ -658,15 +658,15 @@ describe('low-power effects — data-level verification', () => {
     });
   });
 
-  describe('GUN and AGUN are NOT powered — fire regardless of power (from INI)', () => {
-    it('GUN is not in STRUCTURE_POWERED', () => {
+  describe('GUN is NOT powered, AGUN IS powered — per rules.ini', () => {
+    it('GUN is not in STRUCTURE_POWERED (no Powered=true in INI)', () => {
       expect(INI['GUN']?.powered).not.toBe(true);
       expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
     });
 
-    it('AGUN is not in STRUCTURE_POWERED', () => {
-      expect(INI['AGUN']?.powered).not.toBe(true);
-      expect(STRUCTURE_POWERED.has('AGUN')).toBe(false);
+    it('AGUN IS in STRUCTURE_POWERED (rules.ini has Powered=true)', () => {
+      expect(INI['AGUN']?.powered).toBe(true);
+      expect(STRUCTURE_POWERED.has('AGUN')).toBe(true);
     });
 
     it('SAM is not in STRUCTURE_POWERED', () => {
