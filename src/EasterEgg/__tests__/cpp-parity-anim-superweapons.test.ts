@@ -198,7 +198,7 @@ describe('Nuke (ATOM_BLAST) animation — C++ adata.cpp:48-71, house.cpp:2636-26
 
     // C++ nuke detonation: White_Count_Down (screen flash) + Shake_The_Screen
     expect(ctx.screenFlash).toBe(30);
-    expect(ctx.screenShake).toBe(30);
+    expect(ctx.screenShake).toBe(3);
   });
 
   it('nuke detonation creates secondary ground explosions around impact', () => {

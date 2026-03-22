@@ -2017,7 +2017,7 @@ export class Game {
             const E1_COST = 100;
             const SURVIVOR_FRACTION = 0.4; // rules.ini SurvivorRate=.4 (rules.cpp default was 0.5)
             // C++ bdata.cpp:3672-3683 Raw_Cost(): subtract free unit cost for buildings that come with one
-            const FACT_COST = 2000;        // Construction Yard — not in PRODUCTION_ITEMS (pre-placed)
+            const FACT_COST = 2500;        // rules.ini [FACT] Cost=2500 — not in PRODUCTION_ITEMS (pre-placed)
             const HARVESTER_COST = 1400;   // UnitTypeClass::As_Reference(UNIT_HARVESTER).Cost
             const HIND_COST = 1200;        // AircraftTypeClass::As_Reference(AIRCRAFT_HIND).Cost
             let buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300);

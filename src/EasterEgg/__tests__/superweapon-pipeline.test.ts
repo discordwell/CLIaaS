@@ -279,10 +279,10 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
     }
   });
 
-  it('blast radius covers 10 cells (NUKE_BLAST_CELLS)', () => {
-    expect(NUKE_BLAST_CELLS).toBe(10);
+  it('blast radius covers 4 cells (NUKE_BLAST_CELLS)', () => {
+    expect(NUKE_BLAST_CELLS).toBe(4);
     const blastRadiusPx = CELL_SIZE * NUKE_BLAST_CELLS;
-    expect(blastRadiusPx).toBe(240); // 24 * 10
+    expect(blastRadiusPx).toBe(96); // 24 * 4
   });
 
   it('missile flight takes 45 ticks (NUKE_FLIGHT_TICKS)', () => {
@@ -401,7 +401,7 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
     const ctx = makeMockSuperweaponContext();
     detonateNuke(ctx, { x: 200, y: 200 });
     expect(ctx.screenFlash).toBe(30);
-    expect(ctx.screenShake).toBe(30);
+    expect(ctx.screenShake).toBe(3);
   });
 
   it('detonateNuke damages structures in blast radius', () => {
@@ -1625,19 +1625,18 @@ describe('Superweapon edge cases and interactions', () => {
     // Wait — let me re-check: worldDist = sqrt(dx²+dy²) where dx = (x1-x2)/CELL_SIZE
     // So worldDist returns CELLS. blastRadius = CELL_SIZE * 10 = 240.
     // The comparison "dist > blastRadius" compares cells vs pixels — which means
-    // only entities within 240 cells (not 10) would be excluded.
-    // Actually re-reading: the code has `const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS`
+    // The code has `const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS`
     // and `worldDist(e.pos, target)` returns cells. So dist is in cells but blastRadius is in pixels.
-    // This means the blast is effectively 240 cells (entire map) — but the falloff formula
-    // `1 - dist / blastRadius` means at 10 cells, falloff = 1 - 10/240 = 0.958, so nearly full damage.
+    // This means the blast is effectively 96 cells — but the falloff formula
+    // `1 - dist / blastRadius` means at 10 cells, falloff = 1 - 10/96 = 0.896, so nearly full damage.
     // This is the actual implementation — verified from source.
     const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;
-    expect(blastRadius).toBe(240);
-    // Entity 10 cells away: worldDist = 10, which is < 240, so it's inside blast
+    expect(blastRadius).toBe(96);
+    // Entity 10 cells away: worldDist = 10, which is < 96, so it's inside blast
     expect(10 < blastRadius).toBe(true);
-    // Falloff at 10 cells: max(0.1, 1 - 10/240) = max(0.1, 0.9583) = 0.9583
+    // Falloff at 10 cells: max(0.1, 1 - 10/96) = max(0.1, 0.8958) = 0.8958
     const falloff10 = Math.max(NUKE_MIN_FALLOFF, 1 - 10 / blastRadius);
-    expect(falloff10).toBeCloseTo(0.9583, 3);
+    expect(falloff10).toBeCloseTo(0.8958, 3);
   });
 
   it('SuperweaponState interface has all required fields', () => {

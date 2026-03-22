@@ -588,8 +588,8 @@ describe('Nuke launch sequence (C++ house.cpp nuke mechanics)', () => {
     expect(NUKE_DAMAGE).toBe(1000);
   });
 
-  it('NUKE_BLAST_CELLS equals 10', () => {
-    expect(NUKE_BLAST_CELLS).toBe(10);
+  it('NUKE_BLAST_CELLS equals 4', () => {
+    expect(NUKE_BLAST_CELLS).toBe(4);
   });
 
   it('NUKE_MIN_FALLOFF equals 0.1', () => {

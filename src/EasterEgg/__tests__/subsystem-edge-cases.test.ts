@@ -375,7 +375,7 @@ describe('Nuke detonation during low power', () => {
     detonateNuke(ctx, { x: 500, y: 500 });
 
     expect(ctx.screenFlash).toBe(30);
-    expect(ctx.screenShake).toBe(30);
+    expect(ctx.screenShake).toBe(3);
     // Mushroom cloud + 6 secondary blasts
     expect(ctx.effects.length).toBeGreaterThanOrEqual(7);
   });

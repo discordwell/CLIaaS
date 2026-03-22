@@ -680,9 +680,9 @@ export function activateSuperweapon(
 export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
   // AU5: Nuke detonation SFX
   ctx.playSound('nuke_explode');
-  // Intense screen flash + extended shake (C++ nuke visual impact)
+  // C++ anim.cpp:1102 — Shake_The_Screen(3)
   ctx.screenFlash = 30;
-  ctx.screenShake = 30;
+  ctx.screenShake = 3;
 
   // Apply nuke damage in blast radius using Nuke warhead (C++ building.cpp:4191: WARHEAD_NUKE)
   const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;

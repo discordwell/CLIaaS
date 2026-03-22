@@ -316,8 +316,8 @@ describe('nuke constants match C++ (house.cpp:2639)', () => {
     expect(NUKE_DAMAGE).toBe(1000);
   });
 
-  it('nuke blast radius = 10 cells', () => {
-    expect(NUKE_BLAST_CELLS).toBe(10);
+  it('nuke blast radius = 4 cells', () => {
+    expect(NUKE_BLAST_CELLS).toBe(4);
   });
 
   it('nuke flight time = 45 ticks (missile travel animation)', () => {

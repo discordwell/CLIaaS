@@ -704,8 +704,8 @@ describe('Nuke and superweapon constants (rules.ini, building.cpp)', () => {
     expect(NUKE_DAMAGE).toBe(1000);
   });
 
-  it('NUKE_BLAST_CELLS = 10', () => {
-    expect(NUKE_BLAST_CELLS).toBe(10);
+  it('NUKE_BLAST_CELLS = 4', () => {
+    expect(NUKE_BLAST_CELLS).toBe(4);
   });
 
   it('NUKE_FLIGHT_TICKS = 45', () => {

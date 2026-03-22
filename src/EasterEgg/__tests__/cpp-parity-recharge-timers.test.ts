@@ -190,8 +190,8 @@ describe('nuke flight time', () => {
     expect(NUKE_FLIGHT_TICKS / CPP_TICKS_PER_SECOND).toBe(3);
   });
 
-  it('NUKE_BLAST_CELLS = 10 cells blast radius', () => {
-    expect(NUKE_BLAST_CELLS).toBe(10);
+  it('NUKE_BLAST_CELLS = 4 cells blast radius', () => {
+    expect(NUKE_BLAST_CELLS).toBe(4);
   });
 
   it('NUKE_MIN_FALLOFF = 0.1 (10% damage at blast edge)', () => {
