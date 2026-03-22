@@ -93,6 +93,8 @@ function makeTeamType(overrides: Partial<TeamType> = {}): TeamType {
     name: 'TestTeam',
     house: 2,       // USSR by default (houseIdToHouse(2) === House.USSR)
     flags: 4,       // autocreate flag set
+    recruitPriority: 7,
+    initNum: 0,
     maxAllowed: 1,  // C++ MaxAllowed — default 1 so most tests get deterministic counts
     origin: 0,      // waypoint 0
     trigger: -1,

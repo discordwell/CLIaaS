@@ -244,6 +244,7 @@ export class Entity {
 
   // Team behavior flags
   isSuicide = false; // IsSuicide team flag: don't retreat, fight to death
+  isALoaner?: boolean; // C++ reinf.cpp:251: transport doesn't count toward limits, auto-retreats after unload
 
   // C++ parity: back-pointer to owning Team object (C++ FootClass::Team in team.h)
   // Set by Team.add(), cleared by Team.remove() and Team.dissolve()
@@ -530,10 +531,13 @@ export class Entity {
       amount = Math.max(1, Math.round(amount / this.armorBias));
     }
     // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
-    if (this.isProne && amount > 0) {
+    // C++ only applies ProneDamageBias in infantry.cpp, not unit.cpp — vehicles are unaffected
+    if (this.isProne && amount > 0 && this.stats.isInfantry) {
       amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));
     }
     this.hp -= amount;
+    // C++ object.cpp:1614 — Strength capped at MaxStrength (healing cannot exceed max HP)
+    if (this.hp > this.maxHp) this.hp = this.maxHp;
     this.damageFlash = 4;
     // Force-uncloak cloaked subs on damage
     if (this.stats.isCloakable && (this.cloakState === CloakState.CLOAKED || this.cloakState === CloakState.CLOAKING)) {

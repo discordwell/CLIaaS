@@ -154,6 +154,8 @@ function makeTeamType(overrides: Partial<TeamType> = {}): TeamType {
     name: 'test_team',
     house: 1,     // Greece
     flags: 0,
+    recruitPriority: 7,
+    initNum: 0,
     maxAllowed: 0,
     origin: 0,
     trigger: -1,
@@ -749,27 +751,22 @@ describe('House edge calculation (display.cpp:2467-2491)', () => {
     expect(cell!.cx).toBe(BOUNDS.x + BOUNDS.w - 1);
   });
 
-  it('C++ Calculated_Cell uses SOURCE_* param directly, TS infers edge from waypoint proximity', () => {
+  it('C++ Calculated_Cell uses SOURCE_* param directly — house edge takes priority over waypoint inference', () => {
     // C++ display.cpp:2467-2491 — Calculated_Cell takes a SourceType parameter
     // (SOURCE_NORTH=0, SOURCE_EAST=1, SOURCE_SOUTH=2, SOURCE_WEST=3) which directly
     // determines the edge. When a waypoint is provided, C++ passes the SOURCE_*
     // from HouseClass::Control.Edge.
     //
-    // TS divergence: when alignedCell (waypoint) is provided, TS ignores houseEdges
-    // and instead calls inferClosestMapEdge() based on waypoint proximity to map bounds.
-    //
-    // This means a team with origin waypoint at map center + house edge "north"
-    // will NOT necessarily spawn at the north edge in TS — it will use whichever
-    // edge the waypoint is closest to.
+    // Fixed: TS now uses houseEdges when available (matching C++ SOURCE_* behavior),
+    // only falling back to waypoint inference when no house edge is configured.
     const houseEdges = new Map<House, string>([[House.Greece, 'north']]);
     const wp = { cx: 50, cy: 50 }; // center of map
     const cell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, BOUNDS, wp);
-    // C++ would use north (from house edge), TS infers from waypoint proximity
-    // TS picks south for this waypoint position
+    // C++ uses north (from house edge) — TS now matches this behavior
     expect(
-      cell!.cy === BOUNDS.y,
-      'TS ignores houseEdges when waypoint is provided — infers from proximity instead of SOURCE_* param',
-    ).toBe(false);
+      cell!.cy,
+      'House edge "north" should be used even when waypoint is at map center',
+    ).toBe(BOUNDS.y);
   });
 
   it('aligned coordinate is preserved on perpendicular axis (waypoint near north edge)', () => {

@@ -6,7 +6,7 @@
 import {
   type CellPos, type UnitStats, type WeaponStats, type ArmorType,
   CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
-  House, Mission, UnitType, AnimState,
+  House, Mission, UnitType, AnimState, Dir,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
 } from './types';
@@ -146,6 +146,8 @@ export interface TeamType {
   name: string;
   house: number;        // house ID
   flags: number;        // bitfield: bit1=IsSuicide, bit2=IsAutocreate, etc.
+  recruitPriority?: number; // C++ teamtype.h:198 — priority for stealing members from lower-priority teams (default 7)
+  initNum?: number;      // C++ teamtype.h:200 — number of this team to pre-spawn at scenario init (default 0)
   maxAllowed: number;   // C++ MaxAllowed — max active instances of this team type
   origin: number;       // starting waypoint
   trigger: number;      // trigger index to assign to spawned members (-1 = none)
@@ -750,6 +752,8 @@ export function parseScenarioINI(text: string): ScenarioData {
       if (parts.length < 8) continue;
       const house = parseInt(parts[0]);
       const flags = parseInt(parts[1]) || 0;
+      const recruitPriority = parseInt(parts[2]) || 7; // C++ teamtype.cpp:65 — field[2], default 7
+      const initNum = parseInt(parts[3]) || 0;         // C++ teamtype.cpp:65 — field[3], default 0
       const origin = parseInt(parts[5]);
       const trigger = parseInt(parts[6]);  // trigger index assigned to spawned members (-1 = none)
       const classCount = parseInt(parts[7]);
@@ -773,7 +777,7 @@ export function parseScenarioINI(text: string): ScenarioData {
       }
 
       const maxAllowed = parseInt(parts[4]) || 0;
-      teamTypes.push({ name, house, flags, maxAllowed, origin, trigger, members, missions });
+      teamTypes.push({ name, house, flags, recruitPriority, initNum, maxAllowed, origin, trigger, members, missions });
     }
   }
 
@@ -1075,11 +1079,17 @@ export function calculateHouseEdgeSpawnCell(
     return null;
   }
 
-  // Original RA infers the reinforcement edge from the origin waypoint when one exists
-  // (DisplayClass::Calculated_Cell), and only falls back to the house edge otherwise.
-  const edge = alignedCell
-    ? inferClosestMapEdge(alignedCell, mapBounds)
-    : normalizeHouseEdge(houseEdges?.get(house));
+  // C++ display.cpp:2467-2491: Calculated_Cell takes a SourceType parameter
+  // (SOURCE_NORTH=0, SOURCE_EAST=1, etc.) from HouseClass::Control.Edge.
+  // The house edge directly determines the spawn edge. The origin waypoint only
+  // determines the aligned coordinate on the perpendicular axis.
+  // Fall back to waypoint inference only when no house edge is configured.
+  const houseEdge = houseEdges?.get(house);
+  const edge = houseEdge
+    ? normalizeHouseEdge(houseEdge)
+    : alignedCell
+      ? inferClosestMapEdge(alignedCell, mapBounds)
+      : normalizeHouseEdge(undefined);
   const { x, y, w, h } = mapBounds;
   const randOffset = Math.floor(random() * Math.max(w, h));
   const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
@@ -1097,6 +1107,36 @@ export function calculateHouseEdgeSpawnCell(
     default:
       console.warn(`Unknown house edge: '${edge}' — expected north/south/east/west`);
       return null;
+  }
+}
+
+/** Determine which map edge would be used for reinforcement spawn.
+ *  Same logic as calculateHouseEdgeSpawnCell — returns the edge name. */
+export function getSpawnEdge(
+  house: House,
+  houseEdges: Map<House, string> | undefined,
+  mapBounds: { x: number; y: number; w: number; h: number } | undefined,
+  alignedCell?: CellPos,
+): string {
+  if (!mapBounds) return 'north';
+  const houseEdge = houseEdges?.get(house);
+  return houseEdge
+    ? normalizeHouseEdge(houseEdge)
+    : alignedCell
+      ? inferClosestMapEdge(alignedCell, mapBounds)
+      : normalizeHouseEdge(undefined);
+}
+
+/** C++ reinf.cpp:439: FacingType eface = (FacingType)(source << 1);
+ *  Maps spawn edge to the inward-facing direction (Dir enum, 0-7).
+ *  north→4 (S), south→0 (N), east→6 (W), west→2 (E) */
+function edgeToFacing(edge: string): number {
+  switch (edge) {
+    case 'north': return 4; // face south (inward)
+    case 'south': return 0; // face north (inward)
+    case 'east':  return 6; // face west (inward)
+    case 'west':  return 2; // face east (inward)
+    default:      return 4;
   }
 }
 
@@ -2325,6 +2365,11 @@ export function executeTriggerAction(
       })) : null;
       let transport: Entity | null = null;
       const cargo: Entity[] = [];
+      // C++ reinf.cpp:439: Determine spawn edge for deterministic facing
+      const spawnEdge = getSpawnEdge(teamHouse, houseEdges, mapBounds, wp);
+      const spawnFacing = edgeToFacing(spawnEdge);
+      // C++ reinf.cpp:251: Check if team has TMISSION_UNLOAD for IsALoaner flag
+      const hasUnloadMission = team.missions.some(m => m.mission === 8); // TMISSION_UNLOAD = 8
       // C++ parity (reinf.cpp:441): ground reinforcements spawn at the map edge
       // and walk in. The team's origin waypoint determines which edge to use.
       // Only aircraft spawn at the edge cell AND fly — ground units get MISSION_GUARD
@@ -2364,7 +2409,10 @@ export function executeTriggerAction(
           }
 
           const entity = new Entity(unitType, house, spawnX, spawnY);
-          entity.facing = Math.floor(Math.random() * 8);
+          // C++ reinf.cpp:439: FacingType eface = (FacingType)(source << 1);
+          // All reinforcement units face inward from their spawn edge (deterministic)
+          entity.facing = spawnFacing as Dir;
+          entity.desiredFacing = spawnFacing as Dir;
           entity.bodyFacing32 = entity.facing * 4;
           // Assign team mission script to each member
           if (teamMissionScript) {
@@ -2400,6 +2448,12 @@ export function executeTriggerAction(
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.
             entity.mission = Mission.GUARD;
+          }
+          // C++ reinf.cpp:251: IsALoaner on aircraft/vessel transports with UNLOAD mission
+          // Transport doesn't count toward unit limits, auto-retreats after unloading
+          if (entity.isTransport && hasUnloadMission &&
+              (stats.isAircraft || stats.isVessel)) {
+            entity.isALoaner = true;
           }
           // Track transports and cargo for auto-loading (C++ reinf.cpp:217-254)
           // LSTs carry ALL unit types (infantry, tanks, MCVs), not just infantry.

@@ -86,6 +86,8 @@ function makeTeamType(overrides: Partial<TeamType> = {}): TeamType {
     name: 'TestTeam',
     house: 2,        // USSR
     flags: 4,        // autocreate flag
+    recruitPriority: 7,
+    initNum: 0,
     maxAllowed: 5,   // C++ MaxAllowed
     origin: 0,
     trigger: -1,
