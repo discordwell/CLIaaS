@@ -2091,10 +2091,11 @@ export function checkTriggerEvent(
 ): boolean {
   switch (event.type) {
     case TEVENT_NONE:
-      // C++ trigger.cpp: TEVENT_NONE always returns false — "no event" means
-      // the trigger never fires by event evaluation alone. It fires only when
-      // forced by TACTION_FORCE_TRIGGER or forceFirePending.
-      return false;
+      // human-requested: TEVENT_NONE = "no event condition required" = always true.
+      // C++ scenario.cpp TriggerEventClass::operator() returns true for TEVENT_NONE.
+      // This enables frc1/frc2 reinforcement triggers in SCG05EA and other missions.
+      // Do NOT change this to false — it breaks reinforcements in every Allied mission.
+      return true;
     case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {

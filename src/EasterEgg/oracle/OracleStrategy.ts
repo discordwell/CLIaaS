@@ -3306,25 +3306,33 @@ export class OracleStrategy {
     const chinook = state.units.find((u: { t: string }) => u.t === 'TRAN');
     const dogs = state.enemies.filter((e) => e.t === 'DOG');
 
-    // ─── CONCURRENT: Attack-move reinforcements toward Soviet base ────
-    // Reinforcements arrive at game start via frc1/frc2 (TEVENT_NONE).
-    // Don't wait for Tanya — send tanks to attack the Soviet base NOW.
+    // ─── CONCURRENT: Assault toward Soviet ConYard(16,78) ──────────────
+    // Reinforcements arrive at game start via frc1/frc2. Attack-move south
+    // along x=15 to reach the western ConYard — completely avoiding Tesla
+    // coils at (40,73)/(48,73) which have 8.5-cell range.
+    // Once ConYard is damaged to red, engineers capture it → base building.
     const ASSAULT_TYPES = new Set(['2TNK', '3TNK', '4TNK', '1TNK', 'ARTY', 'JEEP', 'E1', 'E3']);
     const assaultUnits = playerUnits.filter(u => ASSAULT_TYPES.has(u.t));
-    if (assaultUnits.length > 0) {
-      const enemyConYard = state.structures.find(s => s.t === 'FACT' && !s.ally);
-      const target = enemyConYard ?? { cx: 36, cy: 60 };
+    const engineers = playerUnits.filter(u => u.t === 'E6');
+    const hasConYard = state.structures.some(s => s.ally && s.t === 'FACT');
+    if (assaultUnits.length > 0 && !hasConYard) {
+      // Target: ConYard at (16,78) — approach via western route (x=15)
+      const enemyFact = state.structures.find(s => s.t === 'FACT' && !s.ally);
+      const target = enemyFact ?? { cx: 16, cy: 78 };
       commands.push({
         cmd: 'attack_move',
         ids: assaultUnits.map(u => u.id),
         cx: target.cx, cy: target.cy,
       });
-      // Engineers follow if Phase 4 has started
-      if (this.scg05eaTanyaEvacuated) {
-        const engineers = playerUnits.filter(u => u.t === 'E6');
-        if (engineers.length > 0 && enemyConYard && enemyConYard.hp < enemyConYard.mhp * 0.25) {
-          commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyConYard.id });
-          reasons.push(`engineer capture FACT hp=${enemyConYard.hp}/${enemyConYard.mhp}`);
+      // Engineers capture ConYard when at red health (< 25% HP)
+      if (engineers.length > 0 && enemyFact) {
+        if (enemyFact.hp < enemyFact.mhp * 0.25) {
+          commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyFact.id });
+          reasons.push(`CAPTURE FACT(${enemyFact.cx},${enemyFact.cy}) hp=${enemyFact.hp}/${enemyFact.mhp}`);
+        } else {
+          // Engineers follow tanks but stay back
+          commands.push({ cmd: 'move', ids: engineers.map(u => u.id),
+            cx: target.cx - 3, cy: target.cy + 3 });
         }
       }
     }
@@ -3588,65 +3596,11 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // ─── PHASE 4: Base assault ─────────────────────────────────────────
-    // Reinforcements (tanks, arty, engineers) arrived at game start via frc1/frc2.
-    // Strategy per walkthrough:
-    // 1. Attack-move tanks toward Soviet ConYard at (16,78) or (36,49)
-    // 2. Damage ConYard/WEAP/Barracks to red health with tanks
-    // 3. Capture with engineers
-    // 4. Once ConYard captured, decideGeneric takes over with base building
-    if (this.scg05eaTanyaEvacuated || state.structures.some(s => s.ally && s.t === 'FACT')) {
-      // If we have a ConYard, use normal base building logic
-      const hasConYard = state.structures.some(s => s.ally && s.t === 'FACT');
-      if (hasConYard) {
-        return this.decideGeneric(state);
-      }
-
-      // No ConYard yet — attack-move all combat units toward Soviet base
-      const commands: Array<Record<string, unknown>> = [];
-      const reasons: string[] = [];
-      const playerUnits = this.playerOwnedUnits(state);
-      const COMBAT_TYPES = new Set(['2TNK', '3TNK', '4TNK', '1TNK', 'ARTY', 'JEEP', 'E1', 'E3']);
-      const combatUnits = playerUnits.filter(u => COMBAT_TYPES.has(u.t));
-      const engineers = playerUnits.filter(u => u.t === 'E6');
-
-      // Find nearest enemy ConYard to capture
-      const enemyConYard = state.structures.find(s => s.t === 'FACT' && !s.ally);
-      const attackTarget = enemyConYard
-        ? { cx: enemyConYard.cx, cy: enemyConYard.cy }
-        : { cx: 36, cy: 49 }; // fallback to known position
-
-      // Attack-move combat units toward Soviet base
-      if (combatUnits.length > 0) {
-        commands.push({
-          cmd: 'attack_move',
-          ids: combatUnits.map(u => u.id),
-          cx: attackTarget.cx,
-          cy: attackTarget.cy,
-        });
-        reasons.push(`assault ${combatUnits.length} units → (${attackTarget.cx},${attackTarget.cy})`);
-      }
-
-      // Engineers: capture enemy ConYard if at red health (hp < 25%)
-      if (engineers.length > 0 && enemyConYard && enemyConYard.hp < enemyConYard.mhp * 0.25) {
-        commands.push({
-          cmd: 'attack',
-          ids: [engineers[0].id],
-          target: enemyConYard.id,
-        });
-        reasons.push(`engineer capture FACT(${enemyConYard.cx},${enemyConYard.cy}) hp=${enemyConYard.hp}/${enemyConYard.mhp}`);
-      } else if (engineers.length > 0) {
-        // Engineers follow combat units but stay behind
-        commands.push({
-          cmd: 'move',
-          ids: engineers.map(u => u.id),
-          cx: attackTarget.cx - 3,
-          cy: attackTarget.cy + 3,
-        });
-        reasons.push(`${engineers.length} engineers following`);
-      }
-
-      return { commands, reason: reasons.join('; ') };
+    // ─── PHASE 4: Base building (after ConYard captured) ────────────────
+    // The concurrent assault code above handles tanks + engineer capture.
+    // Once we have a ConYard, switch to full base building + production.
+    if (hasConYard) {
+      return this.decideGeneric(state);
     }
 
     if (this.scg05eaSpyInfiltrated) {
