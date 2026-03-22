@@ -78,12 +78,17 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 //   3. Keep enough tanks alive to hold the island while destroyers clear the river.
 //   4. Let the coast-chain POWRs provide the extra power instead of stalling on a local second POWR.
 //   5. Add the second refinery after the naval handoff instead of gating on it.
+/* human-requested build order: ground-first, destroy base, THEN navy */
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
-  { names: ['POWR'],         type_ids: [17] },              // First power
-  { names: ['PROC'],         type_ids: [12] },              // First refinery
-  { names: ['WEAP'],         type_ids: [2] },               // Tank line online
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Rush navy once the coast is mapped
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // Second refinery after shipyard
+  { names: ['POWR'],         type_ids: [17] },              // Power
+  { names: ['PROC'],         type_ids: [12] },              // Economy
+  { names: ['WEAP'],         type_ids: [2] },               // Tanks
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // More economy
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Double tank output
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Sustain assault
+  { names: ['PROC'],         type_ids: [12], maxCount: 4 }, // Even more economy for 15+ tanks
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 }, // Power
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Navy AFTER ground assault
   { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
@@ -3982,19 +3987,11 @@ export class OracleStrategy {
         for (const u of assaultArmor) this.recordMove(u.id, nearbyTanks[0].cx, nearbyTanks[0].cy);
         reasons.push(`assault KILL ${nearbyTanks[0].t} (${assaultArmor.length} → ${nearbyTanks[0].cx},${nearbyTanks[0].cy})`);
       } else if (structTarget) {
-        // No enemy tanks — 'move' to 2 cells south of building (bypasses dogs),
-        // then attack_move the last 2 cells when close enough.
-        const nearBuilding = assaultArmor.some((u) => this.distanceSq(u, structTarget) <= 16); // 4 cells
-        if (nearBuilding) {
-          // RIGHT NEXT TO IT — attack_move the last few cells
-          commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
-          reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
-        } else {
-          // Far away — 'move' to skip the dog gauntlet
-          commands.push({ cmd: 'move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy + 2 });
-          reasons.push(`assault CHARGE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy + 2})`);
-        }
+        // No enemy tanks within 20 cells — attack_move to building.
+        // Dogs die in 1 shot. With no enemy tanks, this should push through.
+        commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
         for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+        reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
       }
     }
 
