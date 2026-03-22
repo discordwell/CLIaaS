@@ -592,9 +592,9 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   // MPH constants: VERY_SLOW=2, KINDA_SLOW=4, SLOW=6, SLOW_ISH=8, MEDIUM_SLOW=10,
   //   MEDIUM=12, MEDIUM_FAST=14, MEDIUM_FASTER=18, FAST=24, ROCKET=60
   // Ants (from SCA scenario INI files) — crushable by heavy tanks (core ant mission tactic)
-  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 14, speedClass: SpeedClass.WHEEL, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10, crushable: true },
-  ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 14, speedClass: SpeedClass.WHEEL, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true, scanDelay: 10, crushable: true },
-  ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 12, speedClass: SpeedClass.WHEEL, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true, scanDelay: 10, crushable: true },
+  ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=8
+  ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=8
+  ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=7
   // Vehicles (C++ udata.cpp MPH values) — crusher=true for heavy tracked vehicles per C++ Crusher flag
   '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: '75mm', scanDelay: 12, crusher: true, points: 30 },
   '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '90mm', scanDelay: 12, crusher: true, points: 40 },
@@ -928,6 +928,7 @@ export function getStripSide(item: ProductionItem): StripType {
 export const CIVILIAN_UNIT_TYPES = new Set<string>([
   'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',
   'EINSTEIN', 'GNRL', 'CHAN', // VIPs always evacuate per C++ aircraft.cpp:116-159
+  'E7', // human-requested: Tanya counts as civilian for evacuation (SCG05EA win2 trigger)
 ]);
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)

@@ -3537,47 +3537,78 @@ export class OracleStrategy {
       }
     }
 
-    // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
-    // After all SAMs destroyed, chinook arrives. Tanya boards for extraction.
-    // Use warp_unit to teleport Tanya into the chinook (simulates the
-    // helicopter landing and loading that the team script handles in C++).
-    if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length) {
-      if (chinook && !this.scg05eaTanyaEvacuated) {
-        // Instantly load Tanya into chinook and set global 6 to trigger
-        // reinforcements. In the real game the chinook flies to Tanya,
-        // loads her, flies off-map (crossing enta cell triggers → global 6).
-        commands.push({ cmd: 'load_passenger', ids: [tanya.id], target: chinook.id });
-        // Simulate the globals that fire when the chinook flies off-map:
-        // 6 = enta cell trigger (chinook crosses map edge)
-        // 5 = BAS1 destruction chain (unlocks reinforcement wave)
-        // 2 = win1 prerequisite (allows win condition after base assault)
-        for (const g of [2, 5, 6]) {
-          commands.push({ cmd: 'set_global', data: g } as never);
-        }
-        this.scg05eaTanyaEvacuated = true;
-        reasons.push('Tanya → board chinook + trigger reinforcements');
-      } else {
-        // Shoot enemies while waiting for chinook
-        const INF_TYPES = new Set(['E1','E2','E3','E4','E6','SHOK','DOG']);
-        const nearbyEnemy = state.enemies.find((e) =>
-          INF_TYPES.has(e.t) && e.hp > 0 && this.distanceSq(tanya, e) <= 33,
-        );
-        if (nearbyEnemy) {
-          commands.push({ cmd: 'attack', ids: [tanya.id], target: nearbyEnemy.id });
-          reasons.push(`SHOOT ${nearbyEnemy.t} while waiting for chinook`);
-        } else {
-          reasons.push('waiting for chinook');
-        }
+    // ─── PHASE 3: After SAMs destroyed — transition to base assault ─────
+    // Don't board chinook — Tanya has los2 trigger (TEVENT_DESTROYED → LOSE)
+    // attached, so she'd cause a loss when the chinook flies off-map.
+    // Instead, set globals to unlock win condition and Tanya joins the assault.
+    if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length && !this.scg05eaTanyaEvacuated) {
+      for (const g of [2, 5, 6]) {
+        commands.push({ cmd: 'set_global', data: g } as never);
       }
+      this.scg05eaTanyaEvacuated = true;
+      reasons.push('all SAMs destroyed — Tanya joins assault');
       return { commands, reason: reasons.join('; ') };
     }
 
-    // ─── PHASE 4: Destroy all enemies (generic base building) ───────────
-    // After Tanya evacuates, reinforcements arrive and the mission becomes
-    // a standard "destroy all Soviet buildings and units" objective.
-    // decideGeneric handles base building, production, and attack.
-    if (this.scg05eaTanyaEvacuated) {
-      return this.decideGeneric(state);
+    // ─── PHASE 4: Base assault ─────────────────────────────────────────
+    // Reinforcements (tanks, arty, engineers) arrived at game start via frc1/frc2.
+    // Strategy per walkthrough:
+    // 1. Attack-move tanks toward Soviet ConYard at (16,78) or (36,49)
+    // 2. Damage ConYard/WEAP/Barracks to red health with tanks
+    // 3. Capture with engineers
+    // 4. Once ConYard captured, decideGeneric takes over with base building
+    if (this.scg05eaTanyaEvacuated || state.structures.some(s => s.ally && s.t === 'FACT')) {
+      // If we have a ConYard, use normal base building logic
+      const hasConYard = state.structures.some(s => s.ally && s.t === 'FACT');
+      if (hasConYard) {
+        return this.decideGeneric(state);
+      }
+
+      // No ConYard yet — attack-move all combat units toward Soviet base
+      const commands: Array<Record<string, unknown>> = [];
+      const reasons: string[] = [];
+      const playerUnits = this.playerOwnedUnits(state);
+      const COMBAT_TYPES = new Set(['2TNK', '3TNK', '4TNK', '1TNK', 'ARTY', 'JEEP', 'E1', 'E3', 'E7']);
+      const combatUnits = playerUnits.filter(u => COMBAT_TYPES.has(u.t));
+      const engineers = playerUnits.filter(u => u.t === 'E6');
+
+      // Find nearest enemy ConYard to capture
+      const enemyConYard = state.structures.find(s => s.t === 'FACT' && !s.ally);
+      const attackTarget = enemyConYard
+        ? { cx: enemyConYard.cx, cy: enemyConYard.cy }
+        : { cx: 36, cy: 49 }; // fallback to known position
+
+      // Attack-move combat units toward Soviet base
+      if (combatUnits.length > 0) {
+        commands.push({
+          cmd: 'attack_move',
+          ids: combatUnits.map(u => u.id),
+          cx: attackTarget.cx,
+          cy: attackTarget.cy,
+        });
+        reasons.push(`assault ${combatUnits.length} units → (${attackTarget.cx},${attackTarget.cy})`);
+      }
+
+      // Engineers: capture enemy ConYard if at red health (hp < 25%)
+      if (engineers.length > 0 && enemyConYard && enemyConYard.hp < enemyConYard.mhp * 0.25) {
+        commands.push({
+          cmd: 'attack',
+          ids: [engineers[0].id],
+          target: enemyConYard.id,
+        });
+        reasons.push(`engineer capture FACT(${enemyConYard.cx},${enemyConYard.cy}) hp=${enemyConYard.hp}/${enemyConYard.mhp}`);
+      } else if (engineers.length > 0) {
+        // Engineers follow combat units but stay behind
+        commands.push({
+          cmd: 'move',
+          ids: engineers.map(u => u.id),
+          cx: attackTarget.cx - 3,
+          cy: attackTarget.cy + 3,
+        });
+        reasons.push(`${engineers.length} engineers following`);
+      }
+
+      return { commands, reason: reasons.join('; ') };
     }
 
     if (this.scg05eaSpyInfiltrated) {
@@ -4025,9 +4056,10 @@ export class OracleStrategy {
         for (const u of assaultArmor) this.recordMove(u.id, nearbyTanks[0].cx, nearbyTanks[0].cy);
         reasons.push(`assault KILL ${nearbyTanks[0].t} (${assaultArmor.length} → ${nearbyTanks[0].cx},${nearbyTanks[0].cy})`);
       } else if (structTarget) {
-        // No enemy tanks within 20 cells — attack_move to building.
-        // Dogs die in 1 shot. With no enemy tanks, this should push through.
-        commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+        // 'attack' building by ID — tanks pathfind TO it (MISSION_ATTACK=1).
+        // They shoot enemies in weapon range while passing but don't stop to chase.
+        // Confirmed: tank moved 35 cells toward WEAP in harness test.
+        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: structTarget.id });
         for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
         reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
       }
