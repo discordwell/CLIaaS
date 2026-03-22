@@ -255,8 +255,9 @@ export function tickServiceDepot(ctx: RepairSellContext): void {
         }
       }
       // Rearm alongside repair (free) — C++ building.cpp:4023-4025 formula
+      // tickServiceDepot runs every 14 game ticks, so decrement by 14 to match per-tick rate
       if (docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
-        docked.rearmTimer = (docked.rearmTimer ?? 0) - 1;
+        docked.rearmTimer = (docked.rearmTimer ?? 0) - 14;
         if (docked.rearmTimer <= 0) {
           docked.ammo++;
           const pfrac = ctx.powerConsumed <= 0 ? 1.0
