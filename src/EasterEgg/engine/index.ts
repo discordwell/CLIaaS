@@ -308,7 +308,7 @@ export class Game {
   // Economy
   credits = 0;
   displayCredits = 0; // animated counter shown in sidebar (ticks toward credits)
-  /** Cached silo storage capacity (PROC=1000, SILO=1500 each) — recalculated on structure change */
+  /** Cached silo storage capacity (PROC=2000, SILO=1500 each per rules.ini Storage=) — recalculated on structure change */
   siloCapacity = 0;
   /** Tick when last EVA "silos needed" warning played (throttle to 30s = 450 ticks) */
   private lastSiloWarningTick = -450;
@@ -6134,8 +6134,8 @@ export class Game {
   }
 
   /** Calculate total silo storage capacity from alive player structures.
-   *  C++ parity: HouseClass::Adjust_Capacity() — PROC provides 1000, SILO provides 1500.
-   *  (C++ building.cpp Capacity(): PROC=1000, SILO=1500) */
+   *  C++ parity: HouseClass::Adjust_Capacity() — rules.ini Storage= per building.
+   *  (PROC=2000, SILO=1500 per rules.ini) */
   calculateSiloCapacity(): number {
     return _calculateSiloCapacity(this.structures, this.playerHouse, (a, b) => this.isAllied(a, b));
   }
