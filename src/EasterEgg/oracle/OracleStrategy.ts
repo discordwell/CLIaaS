@@ -3306,6 +3306,29 @@ export class OracleStrategy {
     const chinook = state.units.find((u: { t: string }) => u.t === 'TRAN');
     const dogs = state.enemies.filter((e) => e.t === 'DOG');
 
+    // ─── CONCURRENT: Attack-move reinforcements toward Soviet base ────
+    // Reinforcements arrive at game start via frc1/frc2 (TEVENT_NONE).
+    // Don't wait for Tanya — send tanks to attack the Soviet base NOW.
+    const ASSAULT_TYPES = new Set(['2TNK', '3TNK', '4TNK', '1TNK', 'ARTY', 'JEEP', 'E1', 'E3']);
+    const assaultUnits = playerUnits.filter(u => ASSAULT_TYPES.has(u.t));
+    if (assaultUnits.length > 0) {
+      const enemyConYard = state.structures.find(s => s.t === 'FACT' && !s.ally);
+      const target = enemyConYard ?? { cx: 36, cy: 60 };
+      commands.push({
+        cmd: 'attack_move',
+        ids: assaultUnits.map(u => u.id),
+        cx: target.cx, cy: target.cy,
+      });
+      // Engineers follow if Phase 4 has started
+      if (this.scg05eaTanyaEvacuated) {
+        const engineers = playerUnits.filter(u => u.t === 'E6');
+        if (engineers.length > 0 && enemyConYard && enemyConYard.hp < enemyConYard.mhp * 0.25) {
+          commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyConYard.id });
+          reasons.push(`engineer capture FACT hp=${enemyConYard.hp}/${enemyConYard.mhp}`);
+        }
+      }
+    }
+
     // ─── PHASE 1: Spy walks east to WEAP, avoiding dogs ──────────────
     // Stop spy on first sight to intercept team script, then route NE to
     // y=48 (above dog patrol zone at y=51+), east to WEAP at (43,50).
@@ -3539,16 +3562,29 @@ export class OracleStrategy {
       }
     }
 
-    // ─── PHASE 3: After SAMs destroyed — transition to base assault ─────
-    // Don't board chinook — Tanya has los2 trigger (TEVENT_DESTROYED → LOSE)
-    // attached, so she'd cause a loss when the chinook flies off-map.
-    // Instead, set globals to unlock win condition and Tanya joins the assault.
+    // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
+    // Tanya boards chinook → flies off-map → civiliansEvacuated++ → win2.
+    // Evacuated passengers have triggerName cleared so los2 doesn't fire.
     if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length && !this.scg05eaTanyaEvacuated) {
-      for (const g of [2, 5, 6]) {
-        commands.push({ cmd: 'set_global', data: g } as never);
+      if (chinook) {
+        commands.push({ cmd: 'load_passenger', ids: [tanya.id], target: chinook.id });
+        for (const g of [2, 5, 6]) {
+          commands.push({ cmd: 'set_global', data: g } as never);
+        }
+        this.scg05eaTanyaEvacuated = true;
+        reasons.push('Tanya → board chinook');
+      } else {
+        const nearbyEnemy = state.enemies.find((e) =>
+          e.hp > 0 && this.distanceSq(tanya, e) <= 33 &&
+          (e.t === 'E1' || e.t === 'E2' || e.t === 'DOG'),
+        );
+        if (nearbyEnemy) {
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: nearbyEnemy.id });
+          reasons.push(`SHOOT ${nearbyEnemy.t} while waiting`);
+        } else {
+          reasons.push('waiting for chinook');
+        }
       }
-      this.scg05eaTanyaEvacuated = true;
-      reasons.push('all SAMs destroyed — Tanya joins assault');
       return { commands, reason: reasons.join('; ') };
     }
 
@@ -3570,7 +3606,7 @@ export class OracleStrategy {
       const commands: Array<Record<string, unknown>> = [];
       const reasons: string[] = [];
       const playerUnits = this.playerOwnedUnits(state);
-      const COMBAT_TYPES = new Set(['2TNK', '3TNK', '4TNK', '1TNK', 'ARTY', 'JEEP', 'E1', 'E3', 'E7']);
+      const COMBAT_TYPES = new Set(['2TNK', '3TNK', '4TNK', '1TNK', 'ARTY', 'JEEP', 'E1', 'E3']);
       const combatUnits = playerUnits.filter(u => COMBAT_TYPES.has(u.t));
       const engineers = playerUnits.filter(u => u.t === 'E6');
 

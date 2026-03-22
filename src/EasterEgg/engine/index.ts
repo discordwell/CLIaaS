@@ -1660,9 +1660,12 @@ export class Game {
             if (CIVILIAN_UNIT_TYPES.has(entity.type) || (this.isTanyaEvac && entity.type === 'E7')) {
               this.civiliansEvacuated++;
             }
-            // Transport passengers: civilians aboard count as evacuated (C++ transport evacuation)
+            // Transport passengers: civilians aboard count as evacuated (C++ transport evacuation).
+            // Clear triggerName before marking dead — evacuated units are NOT "destroyed"
+            // for TEVENT_DESTROYED purposes (C++ parity: evacuation ≠ destruction).
             if (entity.passengers && entity.passengers.length > 0) {
               for (const p of entity.passengers) {
+                p.triggerName = ''; // human-requested: prevent los2 firing on Tanya evacuation
                 p.alive = false;
                 this.unitsLeftMap++;
                 if (CIVILIAN_UNIT_TYPES.has(p.type) || (this.isTanyaEvac && p.type === 'E7')) {
