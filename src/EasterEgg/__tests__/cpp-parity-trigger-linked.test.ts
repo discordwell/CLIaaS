@@ -19,6 +19,9 @@
  * Key distinction from MULTI_OR:
  *   - OR: either event fires BOTH actions (per actionControl)
  *   - LINKED: event1 fires Action1, event2 fires Action2, independently
+ *
+ * Note: TEVENT_NONE (type=0) returns TRUE in C++ (no event condition = always pass).
+ * For a reliably-false event, we use TEVENT_GLOBAL_SET with an unset global.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -33,9 +36,7 @@ import {
 
 /** TEVENT_ANY always returns true — useful for testing eventControl logic */
 const TEVENT_ANY = 8;
-/** TEVENT_NONE always returns false — useful for testing eventControl logic */
-const TEVENT_NONE = 0;
-/** TEVENT_GLOBAL_SET — returns true if global is set */
+/** TEVENT_GLOBAL_SET — returns true only if global is set; with unset global, returns false */
 const TEVENT_GLOBAL_SET = 27;
 
 /** Create a minimal TriggerGameState with defaults */
@@ -78,6 +79,11 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
 
 function makeEvent(type: number, data = 0): TriggerEvent {
   return { type, team: -1, data };
+}
+
+/** An event that reliably returns false: TEVENT_GLOBAL_SET with global 9999 (never set) */
+function makeFalseEvent(): TriggerEvent {
+  return makeEvent(TEVENT_GLOBAL_SET, 9999);
 }
 
 /**
@@ -140,7 +146,7 @@ describe('MULTI_LINKED (eventControl=3) — C++ behavioral parity', () => {
       const result = checkTriggerEvents(
         3,
         makeEvent(TEVENT_ANY),       // e1 = true
-        makeEvent(TEVENT_NONE),      // e2 = false
+        makeFalseEvent(),            // e2 = false (global 9999 not set)
         createState(),
       );
       expect(result.shouldFire).toBe(true);
@@ -151,7 +157,7 @@ describe('MULTI_LINKED (eventControl=3) — C++ behavioral parity', () => {
     it('event1 false, event2 true → trigger fires', () => {
       const result = checkTriggerEvents(
         3,
-        makeEvent(TEVENT_NONE),      // e1 = false
+        makeFalseEvent(),            // e1 = false
         makeEvent(TEVENT_ANY),       // e2 = true
         createState(),
       );
@@ -175,8 +181,8 @@ describe('MULTI_LINKED (eventControl=3) — C++ behavioral parity', () => {
     it('neither event true → trigger does NOT fire', () => {
       const result = checkTriggerEvents(
         3,
-        makeEvent(TEVENT_NONE),
-        makeEvent(TEVENT_NONE),
+        makeFalseEvent(),
+        makeFalseEvent(),
         createState(),
       );
       expect(result.shouldFire).toBe(false);
@@ -283,7 +289,7 @@ describe('MULTI_ONLY (eventControl=0) — existing behavior preserved', () => {
     const result = checkTriggerEvents(
       0,
       makeEvent(TEVENT_ANY),
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
       createState(),
     );
     expect(result.shouldFire).toBe(true);
@@ -292,7 +298,7 @@ describe('MULTI_ONLY (eventControl=0) — existing behavior preserved', () => {
   it('event2 true but event1 false → trigger does NOT fire', () => {
     const result = checkTriggerEvents(
       0,
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
       makeEvent(TEVENT_ANY),
       createState(),
     );
@@ -325,7 +331,7 @@ describe('MULTI_AND (eventControl=1) — existing behavior preserved', () => {
     const result = checkTriggerEvents(
       1,
       makeEvent(TEVENT_ANY),
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
       createState(),
     );
     expect(result.shouldFire).toBe(false);
@@ -334,7 +340,7 @@ describe('MULTI_AND (eventControl=1) — existing behavior preserved', () => {
   it('only event2 true → trigger does NOT fire', () => {
     const result = checkTriggerEvents(
       1,
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
       makeEvent(TEVENT_ANY),
       createState(),
     );
@@ -357,7 +363,7 @@ describe('MULTI_OR (eventControl=2) — existing behavior preserved', () => {
     const result = checkTriggerEvents(
       2,
       makeEvent(TEVENT_ANY),
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
       createState(),
     );
     expect(result.shouldFire).toBe(true);
@@ -366,7 +372,7 @@ describe('MULTI_OR (eventControl=2) — existing behavior preserved', () => {
   it('event2 true → trigger fires', () => {
     const result = checkTriggerEvents(
       2,
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
       makeEvent(TEVENT_ANY),
       createState(),
     );
@@ -376,8 +382,8 @@ describe('MULTI_OR (eventControl=2) — existing behavior preserved', () => {
   it('neither event → trigger does NOT fire', () => {
     const result = checkTriggerEvents(
       2,
-      makeEvent(TEVENT_NONE),
-      makeEvent(TEVENT_NONE),
+      makeFalseEvent(),
+      makeFalseEvent(),
       createState(),
     );
     expect(result.shouldFire).toBe(false);

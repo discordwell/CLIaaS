@@ -1018,7 +1018,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
   it('SONAR_PULSE — all fields', () => {
     const d = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
     expect(d.building).toBe(''); // spy-only — granted via spyInfiltrate() on SPEN
-    expect(d.rechargeTicks).toBe(9000);
+    expect(d.rechargeTicks).toBe(12600); // C++ rules.cpp:210 SonarTime(14) => 900*14=12600
     expect(d.faction).toBe('both');
     expect(d.requiresPower).toBe(false);  // C++ house.cpp:654 IsPowered=false
     expect(d.needsTarget).toBe(false);
@@ -1229,13 +1229,13 @@ describe('TERRAIN_SPEED parity', () => {
 
   // Full array assertions: [Foot, Track, Wheel, Winged, Float]
   const expected: Record<string, [number, number, number, number, number]> = {
-    Clear:  [0.90, 0.80, 0.70, 1.0, 0.0],
+    Clear:  [0.90, 0.80, 0.60, 1.0, 0.0],  // rules.ini [Clear] Wheel=60%
     Rough:  [0.80, 0.70, 0.40, 1.0, 0.0],
     Road:   [1.00, 1.00, 1.00, 1.0, 0.0],
     Water:  [0.00, 0.00, 0.00, 1.0, 1.0],
     Rock:   [0.00, 0.00, 0.00, 1.0, 0.0],
     Wall:   [0.00, 0.00, 0.00, 1.0, 0.0],
-    Ore:    [0.90, 0.70, 0.60, 1.0, 0.0],
+    Ore:    [0.90, 0.70, 0.50, 1.0, 0.0],  // rules.ini [Ore] Wheel=50%
     Beach:  [0.80, 0.70, 0.40, 1.0, 0.0],
     River:  [0.00, 0.00, 0.00, 1.0, 0.0],
   };

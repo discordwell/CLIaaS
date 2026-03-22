@@ -1154,6 +1154,7 @@ export interface MapStructure {
   turretRotAccum?: number;   // C++ FacingClass ROT accumulator for smooth rotation (building.cpp:5347)
   firingFlash?: number;      // ticks remaining for muzzle flash frame
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
+  spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
 }
 
 /** Weapon stats for defensive structures */

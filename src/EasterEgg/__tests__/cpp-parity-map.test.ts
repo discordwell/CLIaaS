@@ -654,9 +654,9 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   // -- WHEEL (default, all vehicles) --
 
-  it('WHEEL: CLEAR = 0.70 (C++ RULES.INI)', () => {
+  it('WHEEL: CLEAR = 0.60 (rules.ini [Clear] Wheel=60%)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.70);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
   it('WHEEL: RIVER = 0.0 (C++ RULES.INI impassable)', () => {
@@ -674,14 +674,14 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.40);
   });
 
-  it('WHEEL: ORE = 0.60 (C++ RULES.INI)', () => {
+  it('WHEEL: ORE = 0.50 (rules.ini [Ore] Wheel=50%)', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.50);
   });
 
-  it('WHEEL: TREE = 0.70 (TREE maps to Clear, C++ parity)', () => {
+  it('WHEEL: TREE = 0.60 (TREE maps to Clear, rules.ini [Clear] Wheel=60%)', () => {
     map.setTerrain(15, 15, Terrain.TREE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.70);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
   it('WHEEL: road template = 1.0', () => {
@@ -773,7 +773,7 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
 
   it('defaults to WHEEL if no speedClass provided', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15)).toBe(0.60); // WHEEL ore speed (C++ RULES.INI)
+    expect(map.getSpeedMultiplier(15, 15)).toBe(0.50); // WHEEL ore speed (rules.ini [Ore] Wheel=50%)
   });
 
   // -- Road template range --
@@ -803,7 +803,7 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     const footSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.FOOT);
     const wheelSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL);
     expect(footSpeed).toBe(0.90);
-    expect(wheelSpeed).toBe(0.70);
+    expect(wheelSpeed).toBe(0.60);  // rules.ini [Clear] Wheel=60%
   });
 });
 

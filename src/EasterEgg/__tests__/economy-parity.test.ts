@@ -366,9 +366,9 @@ describe('Economy Parity (C++ Red Alert)', () => {
       expect(mult).toBeLessThanOrEqual(1.0);
     });
 
-    it('clear terrain speed is 0.70 for WHEEL (C++ RULES.INI)', () => {
+    it('clear terrain speed is 0.60 for WHEEL (rules.ini [Clear] Wheel=60%)', () => {
       const mult = map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL);
-      expect(mult).toBe(0.70);
+      expect(mult).toBe(0.60);
     });
 
     it('WINGED always returns 1.0', () => {
@@ -394,9 +394,9 @@ describe('Economy Parity (C++ Red Alert)', () => {
   // === MV5: Terrain speed values for Ore, Beach, Rough, River ===
 
   describe('MV5: Terrain speed values', () => {
-    it('Ore terrain gives 0.60 speed multiplier for WHEEL (C++ RULES.INI)', () => {
+    it('Ore terrain gives 0.50 speed multiplier for WHEEL (rules.ini [Ore] Wheel=50%)', () => {
       map.setTerrain(50, 50, Terrain.ORE);
-      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.60);
+      expect(map.getSpeedMultiplier(50, 50, SpeedClass.WHEEL)).toBe(0.50);
     });
 
     it('Ore terrain gives 0.90 speed multiplier for FOOT (C++ RULES.INI)', () => {

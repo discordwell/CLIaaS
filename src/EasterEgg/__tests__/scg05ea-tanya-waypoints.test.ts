@@ -83,7 +83,8 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     // Tanya starts at spawn (22,105), far from all waypoints and SAM
     const d = strategy.decide(tanyaSamState(22, 105));
     expect(d.commands.length).toBeGreaterThan(0);
-    const move = d.commands[0] as { cx: number; cy: number };
+    // First command may be warp (clearTrigger), then the move
+    const move = d.commands.find((c: Record<string, unknown>) => c.cmd === 'move') as { cx: number; cy: number };
     // Should target wp0 (24,104)
     expect(move.cx).toBe(24);
     expect(move.cy).toBe(104);
@@ -215,14 +216,14 @@ describe('SCG05EA Tanya waypoint navigation', () => {
     const strategy1 = new OracleStrategy('SCG05EA');
     (strategy1 as any).scg05eaSpyInfiltrated = true;
     const dWest = strategy1.decide(tanyaSamState(22, 105, 900, 17, 94));
-    const moveWest = dWest.commands[0] as { cx: number; cy: number };
+    const moveWest = dWest.commands.find((c: Record<string, unknown>) => c.cmd === 'move') as { cx: number; cy: number };
     expect(moveWest.cx).toBe(24);
     expect(moveWest.cy).toBe(104);
 
     const strategy2 = new OracleStrategy('SCG05EA');
     (strategy2 as any).scg05eaSpyInfiltrated = true;
     const dEast = strategy2.decide(tanyaSamState(22, 105, 901, 28, 94));
-    const moveEast = dEast.commands[0] as { cx: number; cy: number };
+    const moveEast = dEast.commands.find((c: Record<string, unknown>) => c.cmd === 'move') as { cx: number; cy: number };
     // Same corridor route for both north SAMs
     expect(moveEast.cx).toBe(24);
     expect(moveEast.cy).toBe(104);

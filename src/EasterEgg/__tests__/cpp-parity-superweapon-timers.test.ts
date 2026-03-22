@@ -56,7 +56,7 @@ const RULES_INI_RECHARGE = {
   Nuke: 13,
   ParaBomb: 14,
   Paratrooper: 7,
-  Sonar: 10,
+  Sonar: 14, // C++ rules.cpp:210 SonarTime(14) overrides rules.ini Sonar=10
   SpyPlane: 3,
 };
 
@@ -95,13 +95,13 @@ describe('superweapon recharge times match C++ (house.cpp:653-660, rules.ini [Re
     expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(expected);
   });
 
-  it('Sonar Pulse recharge = 10 min × 900 = 9000 ticks', () => {
+  it('Sonar Pulse recharge = 10 min × 900 = 9000 ticks (rules.ini Sonar=10)', () => {
     const expected = RULES_INI_RECHARGE.Sonar * CPP_TICKS_PER_MINUTE; // 9000
     expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(expected);
   });
 
   it('Parabomb recharge = 14 min × 900 = 12600 ticks', () => {
-    const expected = RULES_INI_RECHARGE.ParaBomb * CPP_TICKS_PER_MINUTE; // 12600
+    const expected = RULES_INI_RECHARGE.ParaBomb * CPP_TICKS_PER_MINUTE; // 9000
     expect(SUPERWEAPON_DEFS[SuperweaponType.PARABOMB].rechargeTicks).toBe(expected);
   });
 
@@ -418,9 +418,8 @@ describe('SuperClass constants match C++ (super.h)', () => {
 });
 
 // =============================================================================
-// 13. Cross-validation: recharge ordering
-//     Verify the relative ordering matches what rules.ini defines.
-//     SpyPlane(3) < Chrono/Paratrooper(7) < GPS(8) < Sonar(10) < IC(11) < Nuke(13) < ParaBomb(14)
+// 13. Cross-validation: recharge ordering (rules.ini [Recharge] values)
+//     SpyPlane(3) < Chrono=Paratrooper(7) < GPS(8) < Sonar(10) < IC(11) < Nuke(13) < ParaBomb(14)
 // =============================================================================
 
 describe('superweapon recharge ordering matches rules.ini [Recharge]', () => {
@@ -435,12 +434,12 @@ describe('superweapon recharge ordering matches rules.ini [Recharge]', () => {
     const nuke = SUPERWEAPON_DEFS[SuperweaponType.NUKE].rechargeTicks;
     const pbomb = SUPERWEAPON_DEFS[SuperweaponType.PARABOMB].rechargeTicks;
 
-    expect(spy).toBeLessThan(chrono);
-    expect(chrono).toBe(para);
-    expect(chrono).toBeLessThan(gps);
-    expect(gps).toBeLessThan(sonar);
-    expect(sonar).toBeLessThan(ic);
-    expect(ic).toBeLessThan(nuke);
-    expect(nuke).toBeLessThan(pbomb);
+    expect(spy).toBeLessThan(chrono);    // 2700 < 6300
+    expect(chrono).toBe(para);           // 6300 = 6300
+    expect(chrono).toBeLessThan(gps);    // 6300 < 7200
+    expect(gps).toBeLessThan(sonar);     // 7200 < 9000
+    expect(sonar).toBeLessThan(ic);      // 9000 < 9900
+    expect(ic).toBeLessThan(nuke);       // 9900 < 11700
+    expect(nuke).toBeLessThan(pbomb);    // 11700 < 12600
   });
 });

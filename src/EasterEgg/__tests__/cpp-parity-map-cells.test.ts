@@ -391,10 +391,10 @@ describe('TERRAIN_SPEED table vs C++ RULES.INI — matching values', () => {
 
   // === These all match stock RULES.INI ===
 
-  it('Clear: Foot=0.90, Track=0.80, Wheel=0.70, Winged=1.0, Float=0.0', () => {
+  it('Clear: Foot=0.90, Track=0.80, Wheel=0.60, Winged=1.0, Float=0.0', () => {
     expect(TERRAIN_SPEED['Clear'][SpeedClass.FOOT]).toBe(0.90);
     expect(TERRAIN_SPEED['Clear'][SpeedClass.TRACK]).toBe(0.80);
-    expect(TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]).toBe(0.70);
+    expect(TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]).toBe(0.60);  // rules.ini [Clear] Wheel=60%
     expect(TERRAIN_SPEED['Clear'][SpeedClass.WINGED]).toBe(1.0);
     expect(TERRAIN_SPEED['Clear'][SpeedClass.FLOAT]).toBe(0.0);
   });
@@ -427,10 +427,10 @@ describe('TERRAIN_SPEED table vs C++ RULES.INI — matching values', () => {
     expect(TERRAIN_SPEED['Wall'][SpeedClass.FLOAT]).toBe(0.0);
   });
 
-  it('Ore: Foot=0.90, Track=0.70, Wheel=0.60', () => {
+  it('Ore: Foot=0.90, Track=0.70, Wheel=0.50', () => {
     expect(TERRAIN_SPEED['Ore'][SpeedClass.FOOT]).toBe(0.90);
     expect(TERRAIN_SPEED['Ore'][SpeedClass.TRACK]).toBe(0.70);
-    expect(TERRAIN_SPEED['Ore'][SpeedClass.WHEEL]).toBe(0.60);
+    expect(TERRAIN_SPEED['Ore'][SpeedClass.WHEEL]).toBe(0.50);  // rules.ini [Ore] Wheel=50%
   });
 
   it('Beach: Foot=0.80, Track=0.70, Wheel=0.40', () => {
@@ -470,10 +470,10 @@ describe('map.getSpeedMultiplier vs C++ Ground[].Cost[] — divergences', () => 
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
-  // C++ Clear.Wheel = 0.70 (RULES.INI); now uses TERRAIN_SPEED table
-  it('C++ Clear/Wheel = 0.70; map.getSpeedMultiplier returns 0.70 — matches', () => {
+  // rules.ini [Clear] Wheel=60%; now uses TERRAIN_SPEED table
+  it('Clear/Wheel = 0.60; map.getSpeedMultiplier returns 0.60 — matches rules.ini', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.70);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
   // C++ Rough.Foot = 0.80 (RULES.INI); now uses TERRAIN_SPEED table
@@ -506,10 +506,10 @@ describe('map.getSpeedMultiplier vs C++ Ground[].Cost[] — divergences', () => 
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
-  // C++ Ore.Wheel = 0.60 (RULES.INI); now uses TERRAIN_SPEED table
-  it('C++ Ore/Wheel = 0.60; map.getSpeedMultiplier returns 0.60 — matches', () => {
+  // rules.ini [Ore] Wheel=50%; now uses TERRAIN_SPEED table
+  it('Ore/Wheel = 0.50; map.getSpeedMultiplier returns 0.50 — matches rules.ini', () => {
     map.setTerrain(15, 15, Terrain.ORE);
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.50);
   });
 
   // C++ River.Foot = 0.0 (impassable); now uses TERRAIN_SPEED table

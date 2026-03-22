@@ -1,11 +1,13 @@
 /**
  * C++ Behavioral Parity: TEVENT_NONE (type=0) — the "no event" trigger event
  *
- * Tests verify TEVENT_NONE behavior matches C++ RA source code (trigger.cpp).
- * C++ behavior: TEVENT_NONE always returns false. It never fires on its own —
- * it only fires when forced by TACTION_FORCE_TRIGGER.
+ * Tests verify TEVENT_NONE behavior matches C++ RA source code.
+ * C++ behavior: TEVENT_NONE always returns TRUE. It acts as "no event condition
+ * required" — the trigger fires unconditionally (unless gated by eventControl).
  *
- * Source: TEVENT.H:46 (enum value 0), TRIGGER.CPP checkTriggerEvent switch case.
+ * Source: TEVENT.H:46 (enum value 0), scenario.cpp TriggerEventClass::operator()
+ * In Red Alert C++, TEVENT_NONE falls through to the default case which returns
+ * true. This is critical for reinforcement triggers (frc1/frc2) in Allied missions.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -70,37 +72,37 @@ describe('TEVENT_NONE constant value (TEVENT.H:46)', () => {
   });
 });
 
-describe('TEVENT_NONE always returns false (trigger.cpp)', () => {
-  it('returns false with default/empty game state', () => {
+describe('TEVENT_NONE always returns true (C++ scenario.cpp operator())', () => {
+  it('returns true with default/empty game state', () => {
     const result = checkTriggerEvent(noneEvent(), makeGameState());
-    expect(result).toBe(false);
+    expect(result).toBe(true);
   });
 
-  it('returns false regardless of gameTick value', () => {
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 0 }))).toBe(false);
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 1 }))).toBe(false);
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 100 }))).toBe(false);
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 999999 }))).toBe(false);
+  it('returns true regardless of gameTick value', () => {
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 0 }))).toBe(true);
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 1 }))).toBe(true);
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 100 }))).toBe(true);
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ gameTick: 999999 }))).toBe(true);
   });
 
-  it('returns false regardless of globals state', () => {
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ globals: new Set([0, 1, 2, 3, 27]) }))).toBe(false);
+  it('returns true regardless of globals state', () => {
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ globals: new Set([0, 1, 2, 3, 27]) }))).toBe(true);
   });
 
-  it('returns false regardless of triggerStartTick', () => {
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ triggerStartTick: 0 }))).toBe(false);
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ triggerStartTick: 5000 }))).toBe(false);
+  it('returns true regardless of triggerStartTick', () => {
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ triggerStartTick: 0 }))).toBe(true);
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ triggerStartTick: 5000 }))).toBe(true);
   });
 
-  it('returns false even when playerEntered is true', () => {
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ playerEntered: true }))).toBe(false);
+  it('returns true even when playerEntered is true', () => {
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ playerEntered: true }))).toBe(true);
   });
 
-  it('returns false even when missionTimerExpired is true', () => {
-    expect(checkTriggerEvent(noneEvent(), makeGameState({ missionTimerExpired: true }))).toBe(false);
+  it('returns true even when missionTimerExpired is true', () => {
+    expect(checkTriggerEvent(noneEvent(), makeGameState({ missionTimerExpired: true }))).toBe(true);
   });
 
-  it('returns false even when every other condition is true', () => {
+  it('returns true even when every other condition is true', () => {
     const saturatedState = makeGameState({
       gameTick: 999999,
       globals: new Set([0, 1, 2, 3, 4, 5, 27, 28]),
@@ -134,16 +136,16 @@ describe('TEVENT_NONE always returns false (trigger.cpp)', () => {
       isThieved: true,
       pendingDestroyedCount: 5,
     });
-    expect(checkTriggerEvent(noneEvent(), saturatedState)).toBe(false);
+    expect(checkTriggerEvent(noneEvent(), saturatedState)).toBe(true);
   });
 
-  it('returns false with non-zero event.data', () => {
-    expect(checkTriggerEvent(noneEvent({ data: 42 }), makeGameState())).toBe(false);
-    expect(checkTriggerEvent(noneEvent({ data: 255 }), makeGameState())).toBe(false);
+  it('returns true with non-zero event.data', () => {
+    expect(checkTriggerEvent(noneEvent({ data: 42 }), makeGameState())).toBe(true);
+    expect(checkTriggerEvent(noneEvent({ data: 255 }), makeGameState())).toBe(true);
   });
 
-  it('returns false with non-default event.team', () => {
-    expect(checkTriggerEvent(noneEvent({ team: 0 }), makeGameState())).toBe(false);
-    expect(checkTriggerEvent(noneEvent({ team: 5 }), makeGameState())).toBe(false);
+  it('returns true with non-default event.team', () => {
+    expect(checkTriggerEvent(noneEvent({ team: 0 }), makeGameState())).toBe(true);
+    expect(checkTriggerEvent(noneEvent({ team: 5 }), makeGameState())).toBe(true);
   });
 });

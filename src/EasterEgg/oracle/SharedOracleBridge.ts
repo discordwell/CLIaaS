@@ -249,7 +249,7 @@ export function translateOracleDecisionToTs(
     }
 
     if (kind === 'warp_unit' && ids.length === 1) {
-      commands.push({ cmd: 'warp_unit', unitId: ids[0], cx: command.cx ?? 0, cy: command.cy ?? 0 } as never);
+      commands.push({ cmd: 'warp_unit', unitId: ids[0], cx: command.cx ?? 0, cy: command.cy ?? 0, clearTrigger: !!command.clearTrigger } as never);
       continue;
     }
 

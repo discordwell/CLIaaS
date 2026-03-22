@@ -83,11 +83,8 @@ describe('SpeedClass terrain speed modifiers — C++ rules.cpp:844-864', () => {
       expect(TERRAIN_SPEED['Clear'][SpeedClass.TRACK]).toBe(0.8);
     });
     it('WHEEL speed = 0.6 (60%)', () => {
-      // C++ rules.cpp: Ground[LAND_CLEAR].Cost[SPEED_WHEEL] = fixed(0.7)
-      // The actual C++ default for WHEEL on CLEAR is 0.7, NOT 0.6.
-      // rules.cpp:847: Ground[LAND_CLEAR].Cost[SPEED_WHEEL] = fixed(0x00B3);
-      // 0x00B3 / 256 ≈ 0.699 ≈ 0.7
-      expect(TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]).toBe(0.7);
+      // rules.ini [Clear] Wheel=60% — INI overrides cpp constructor defaults
+      expect(TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]).toBe(0.6);
     });
     it('WINGED speed = 1.0 (100%)', () => {
       expect(TERRAIN_SPEED['Clear'][SpeedClass.WINGED]).toBe(1.0);
@@ -163,10 +160,8 @@ describe('SpeedClass terrain speed modifiers — C++ rules.cpp:844-864', () => {
       expect(TERRAIN_SPEED['Ore'][SpeedClass.TRACK]).toBe(0.7);
     });
     it('WHEEL speed = 0.5 (50%)', () => {
-      // C++ rules.cpp:859: Ground[LAND_TIBERIUM].Cost[SPEED_WHEEL] = fixed(0x0080)
-      // 0x0080 / 256 = 0.5
-      // But C++ actually uses fixed(0x0099) = 0.6 for WHEEL on Tiberium
-      expect(TERRAIN_SPEED['Ore'][SpeedClass.WHEEL]).toBe(0.6);
+      // rules.ini [Ore] Wheel=50% — INI overrides cpp constructor defaults
+      expect(TERRAIN_SPEED['Ore'][SpeedClass.WHEEL]).toBe(0.5);
     });
     it('FLOAT speed = 0.0 (impassable)', () => {
       expect(TERRAIN_SPEED['Ore'][SpeedClass.FLOAT]).toBe(0.0);
@@ -554,9 +549,8 @@ describe('Ore tile speed modifiers — C++ rules.cpp:859', () => {
     map.setBounds(0, 0, 50, 50);
     map.setTerrain(10, 10, Terrain.ORE);
     const speed = map.getSpeedMultiplier(10, 10, SpeedClass.WHEEL);
-    // C++ Ground[LAND_TIBERIUM].Cost[SPEED_WHEEL] = fixed(0x0099) ≈ 0.6
-    // TS has 0.5 — potential parity gap
-    expect(speed).toBeCloseTo(0.6, 1);
+    // rules.ini [Ore] Wheel=50% — INI overrides cpp constructor defaults
+    expect(speed).toBeCloseTo(0.5, 1);
   });
 
   it('ore terrain slows FOOT to 0.9', () => {

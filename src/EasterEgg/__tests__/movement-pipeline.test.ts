@@ -844,22 +844,22 @@ describe('Rotation mechanics', () => {
 // ============================================================================
 
 describe('Terrain speed multipliers', () => {
-  it('CLEAR terrain — C++ RULES.INI: Foot=0.90, Wheel=0.70', () => {
+  it('CLEAR terrain — rules.ini: Foot=0.90, Wheel=0.60', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.CLEAR);
 
     expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.90);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.70);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.60);  // rules.ini [Clear] Wheel=60%
   });
 
-  it('ORE terrain — C++ RULES.INI: Foot=0.90, Wheel=0.60', () => {
+  it('ORE terrain — rules.ini: Foot=0.90, Wheel=0.50', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.setTerrain(5, 5, Terrain.ORE);
 
     expect(map.getSpeedMultiplier(5, 5, SpeedClass.FOOT)).toBe(0.90);
-    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.60);
+    expect(map.getSpeedMultiplier(5, 5, SpeedClass.WHEEL)).toBe(0.50);  // rules.ini [Ore] Wheel=50%
   });
 
   it('FLOAT speed class: water=1.0, non-water=0.0 (C++ RULES.INI)', () => {

@@ -729,7 +729,7 @@ describe('Nuke and superweapon constants (rules.ini, building.cpp)', () => {
     [SuperweaponType.NUKE, 13],           // Nuke=13
     [SuperweaponType.PARABOMB, 14],       // ParaBomb=14
     [SuperweaponType.PARAINFANTRY, 7],    // Paratrooper=7
-    [SuperweaponType.SONAR_PULSE, 10],    // Sonar=10
+    [SuperweaponType.SONAR_PULSE, 10],    // rules.ini [Recharge] Sonar=10
     [SuperweaponType.SPY_PLANE, 3],       // SpyPlane=3
   ];
 

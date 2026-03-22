@@ -214,8 +214,8 @@ describe('Superweapon recharge times match updated values', () => {
     expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(7200);
   });
 
-  it('Sonar Pulse recharges in 9000 ticks', () => {
-    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
+  it('Sonar Pulse recharges in 12600 ticks (C++ rules.cpp:210 SonarTime(14))', () => {
+    expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(12600);
   });
 
   it('ParaBomb recharges in 12600 ticks (C++ rules.ini ParaBomb=14 min)', () => {

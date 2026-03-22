@@ -326,7 +326,7 @@ describe('Terrain template ranges -- C++ defines.h TemplateType enum', () => {
 
     // Road speed for WHEEL = 1.0 (rules.ini: Road 100% for all classes)
     const roadSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL);
-    const clearSpeed = TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]; // 0.70
+    const clearSpeed = TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]; // 0.60 (rules.ini)
     expect(roadSpeed).toBeGreaterThan(clearSpeed);
     expect(roadSpeed).toBe(1.0); // Road gives full speed
   });
@@ -540,8 +540,8 @@ describe('Terrain speed table -- C++ rules.cpp:844-864 _lands[] defaults', () =>
   // Values are fixed-point: fixed(90,100)=0.9, fixed(80,100)=0.8, etc.
   // TS TERRAIN_SPEED stores as decimal: [Foot, Track, Wheel, Winged, Float]
 
-  it('Clear: Foot=0.9, Track=0.8, Wheel=0.7, Winged=1.0, Float=0.0', () => {
-    expect(TERRAIN_SPEED['Clear']).toEqual([0.90, 0.80, 0.70, 1.0, 0.0]);
+  it('Clear: Foot=0.9, Track=0.8, Wheel=0.6, Winged=1.0, Float=0.0', () => {
+    expect(TERRAIN_SPEED['Clear']).toEqual([0.90, 0.80, 0.60, 1.0, 0.0]);  // rules.ini [Clear] Wheel=60%
   });
 
   it('Road: all speed classes = 1.0 (full speed)', () => {
@@ -560,8 +560,8 @@ describe('Terrain speed table -- C++ rules.cpp:844-864 _lands[] defaults', () =>
     expect(TERRAIN_SPEED['Wall']).toEqual([0.00, 0.00, 0.00, 1.0, 0.0]);
   });
 
-  it('Ore: Foot=0.9, Track=0.7, Wheel=0.6, Winged=1.0, Float=0.0', () => {
-    expect(TERRAIN_SPEED['Ore']).toEqual([0.90, 0.70, 0.60, 1.0, 0.0]);
+  it('Ore: Foot=0.9, Track=0.7, Wheel=0.5, Winged=1.0, Float=0.0', () => {
+    expect(TERRAIN_SPEED['Ore']).toEqual([0.90, 0.70, 0.50, 1.0, 0.0]);  // rules.ini [Ore] Wheel=50%
   });
 
   it('Beach: Foot=0.8, Track=0.7, Wheel=0.4, Winged=1.0, Float=0.0', () => {
@@ -647,7 +647,7 @@ describe('Terrain enum ordinals -- C++ defines.h:2841-2855 LandType', () => {
     expect(treeSpeed).toBeDefined();
     expect(treeSpeed[0]).toBe(0.9);  // FOOT
     expect(treeSpeed[1]).toBe(0.8);  // TRACK
-    expect(treeSpeed[2]).toBe(0.7);  // WHEEL
+    expect(treeSpeed[2]).toBe(0.6);  // WHEEL — rules.ini [Clear] Wheel=60%
   });
 });
 

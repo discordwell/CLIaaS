@@ -665,6 +665,9 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           we.mission = Mission.GUARD;
           we.target = null;
           we.moveTarget = null;
+          // human-requested: clear triggerName on warp to disarm loss triggers
+          // (Tanya's los2 must be cleared when she's warped to safety)
+          if (c.clearTrigger) we.triggerName = '';
           results.push({ cmd: 'warp_unit', ok: true });
           break;
         }

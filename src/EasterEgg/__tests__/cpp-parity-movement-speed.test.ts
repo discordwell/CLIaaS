@@ -415,20 +415,20 @@ describe('cpp-parity: infantry vs vehicle speed ratios', () => {
   it('4TNK (Speed=4) matches E1 infantry (Speed=4) in base speed', () => {
     // Mammoth Tank and Rifle Infantry have the same INI Speed value.
     // The difference in gameplay comes from terrain modifiers:
-    // WHEEL on Clear = 0.70, FOOT on Clear = 0.90
+    // WHEEL on Clear = 0.60 (rules.ini), FOOT on Clear = 0.90
     expect(UNIT_STATS['4TNK'].speed).toBe(UNIT_STATS.E1.speed);
   });
 
-  it('infantry FOOT speed advantage on clear terrain (0.90 vs 0.70 WHEEL)', () => {
-    // Same base speed, but FOOT gets 0.90 terrain mult, WHEEL gets 0.70
+  it('infantry FOOT speed advantage on clear terrain (0.90 vs 0.60 WHEEL)', () => {
+    // Same base speed, but FOOT gets 0.90 terrain mult, WHEEL gets 0.60 (rules.ini)
     const footClear = getTerrainSpeed('Clear', SpeedClass.FOOT);
     const wheelClear = getTerrainSpeed('Clear', SpeedClass.WHEEL);
     expect(footClear).toBeCloseTo(0.90, 5);
-    expect(wheelClear).toBeCloseTo(0.70, 5);
-    // Effective 4TNK on clear: 4 * 0.09375 * 0.70 = 0.2625 px/tick
+    expect(wheelClear).toBeCloseTo(0.60, 5);
+    // Effective 4TNK on clear: 4 * 0.09375 * 0.60 = 0.225 px/tick
     // Effective E1 on clear: 4 * 0.09375 * 0.90 = 0.3375 px/tick
-    // E1 is ~1.286x faster on clear terrain despite same base speed
-    expect(footClear / wheelClear).toBeCloseTo(9 / 7, 5);
+    // E1 is 1.5x faster on clear terrain despite same base speed
+    expect(footClear / wheelClear).toBeCloseTo(9 / 6, 5);
   });
 });
 
@@ -454,10 +454,10 @@ describe('cpp-parity: terrain speed modifiers (rules.cpp:838-868)', () => {
     expect(getTerrainSpeed('Road', SpeedClass.WINGED)).toBe(1.0);
   });
 
-  it('Clear: FOOT=90%, TRACK=80%, WHEEL=70% (rules.ini values)', () => {
+  it('Clear: FOOT=90%, TRACK=80%, WHEEL=60% (rules.ini [Clear] Wheel=60%)', () => {
     expect(getTerrainSpeed('Clear', SpeedClass.FOOT)).toBeCloseTo(0.90, 5);
     expect(getTerrainSpeed('Clear', SpeedClass.TRACK)).toBeCloseTo(0.80, 5);
-    expect(getTerrainSpeed('Clear', SpeedClass.WHEEL)).toBeCloseTo(0.70, 5);
+    expect(getTerrainSpeed('Clear', SpeedClass.WHEEL)).toBeCloseTo(0.60, 5);
   });
 
   it('Rough: FOOT=80%, WHEEL=40% (infantry penalty less severe)', () => {
@@ -488,16 +488,16 @@ describe('cpp-parity: terrain speed modifiers (rules.cpp:838-868)', () => {
     expect(getTerrainSpeed('Beach', SpeedClass.WHEEL)).toBeCloseTo(0.40, 5);
   });
 
-  it('road bonus: 1TNK on road vs clear = 1.0/0.70 ≈ 1.43x faster', () => {
+  it('road bonus: 1TNK on road vs clear = 1.0/0.60 ≈ 1.67x faster', () => {
     const road = tsMovementSpeed('1TNK', 'Road');
     const clear = tsMovementSpeed('1TNK', 'Clear');
-    expect(road / clear).toBeCloseTo(1.0 / 0.70, 3);
+    expect(road / clear).toBeCloseTo(1.0 / 0.60, 3);
   });
 
-  it('rough penalty: 1TNK on rough vs clear = 0.40/0.70 ≈ 0.57x speed', () => {
+  it('rough penalty: 1TNK on rough vs clear = 0.40/0.60 ≈ 0.67x speed', () => {
     const rough = tsMovementSpeed('1TNK', 'Rough');
     const clear = tsMovementSpeed('1TNK', 'Clear');
-    expect(rough / clear).toBeCloseTo(0.40 / 0.70, 3);
+    expect(rough / clear).toBeCloseTo(0.40 / 0.60, 3);
   });
 });
 
@@ -656,9 +656,9 @@ describe('cpp-parity: diagonal movement costs (Track 2 has 32 steps vs Track 1 w
 describe('cpp-parity: terrain speed effect on cell crossing time', () => {
   // Test that terrain modifiers correctly affect the ticks to cross a cell.
 
-  it('1TNK on clear terrain (WHEEL=0.70): lepton budget = 9 * 0.70 = 6.3/tick', () => {
+  it('1TNK on clear terrain (WHEEL=0.60): lepton budget = 9 * 0.60 = 5.4/tick', () => {
     const budget = tsLeptonBudget('1TNK', 'Clear');
-    expect(budget).toBeCloseTo(9 * 0.70, 5);
+    expect(budget).toBeCloseTo(9 * 0.60, 5);
   });
 
   it('1TNK on rough terrain (WHEEL=0.40): lepton budget = 9 * 0.40 = 3.6/tick', () => {
@@ -678,10 +678,10 @@ describe('cpp-parity: terrain speed effect on cell crossing time', () => {
 
   it('rough terrain is worse for vehicles than infantry (ratio comparison)', () => {
     // On rough: WHEEL loses 60% speed (0.40), FOOT loses only 20% (0.80)
-    // Relative penalty: 0.40/0.70 = 0.571 for WHEEL, 0.80/0.90 = 0.889 for FOOT
+    // Relative penalty: 0.40/0.60 = 0.667 for WHEEL, 0.80/0.90 = 0.889 for FOOT
     const wheelPenalty = getTerrainSpeed('Rough', SpeedClass.WHEEL) / getTerrainSpeed('Clear', SpeedClass.WHEEL);
     const footPenalty = getTerrainSpeed('Rough', SpeedClass.FOOT) / getTerrainSpeed('Clear', SpeedClass.FOOT);
-    expect(wheelPenalty).toBeCloseTo(0.40 / 0.70, 3);
+    expect(wheelPenalty).toBeCloseTo(0.40 / 0.60, 3);
     expect(footPenalty).toBeCloseTo(0.80 / 0.90, 3);
     expect(wheelPenalty).toBeLessThan(footPenalty); // vehicles suffer more
   });
