@@ -78,18 +78,21 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 //   3. Keep enough tanks alive to hold the island while destroyers clear the river.
 //   4. Let the coast-chain POWRs provide the extra power instead of stalling on a local second POWR.
 //   5. Add the second refinery after the naval handoff instead of gating on it.
-/* human-requested build order: ground-first, destroy base, THEN navy */
+/* human-requested: POWR→PROC→WEAP then PURE TANKS until 10+.
+   4300 on buildings, remaining 10500 = 13 medium tanks. */
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
-  { names: ['POWR'],         type_ids: [17] },              // Power
-  { names: ['PROC'],         type_ids: [12] },              // Economy
-  { names: ['WEAP'],         type_ids: [2] },               // Tanks
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // More economy
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // Double tank output
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 }, // Sustain assault
-  { names: ['PROC'],         type_ids: [12], maxCount: 4 }, // Even more economy for 15+ tanks
-  { names: ['POWR'],         type_ids: [17], maxCount: 3 }, // Power
-  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },          // Navy AFTER ground assault
-  { names: ['POWR'],         type_ids: [17], maxCount: 99 }, // Extra power
+  { names: ['POWR'],         type_ids: [17] },              // 300
+  { names: ['PROC'],         type_ids: [12] },              // 2000
+  { names: ['WEAP'],         type_ids: [2] },               // 2000 → now pump tanks
+  // DON'T build anything else until we have 10+ tanks.
+  // The build order scan skips entries we already have, so these
+  // only trigger after the WEAP exists and tank production stalls.
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 },
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },
+  { names: ['PROC'],         type_ids: [12], maxCount: 3 },
+  { names: ['POWR'],         type_ids: [17], maxCount: 3 },
+  { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },
+  { names: ['POWR'],         type_ids: [17], maxCount: 99 },
 ];
 const SCG11EA_ORE_ANCHOR: Point = { cx: 29, cy: 61 };
 const SCG11EA_PRE_NAVAL_TANK_TARGET = 20;  // Mass 18+ tanks before assaulting
@@ -1719,6 +1722,14 @@ export class OracleStrategy {
         }
       }
     } else if ((!buildingProduction || suppressScg11eaLeftoverBuild) && buildable) {
+      // SCG11EA: once WEAP exists, freeze building production until 10+ tanks.
+      // Spend all credits on tanks first, then resume eco expansion.
+      const scg11eaFreezeBuild = this.scenario === 'SCG11EA' &&
+        alliedStructures.some((s) => s.t === 'WEAP') &&
+        playerUnits.filter((u) => u.t.includes('TNK')).length < 10;
+      if (scg11eaFreezeBuild) {
+        reasons.push('freeze build (pumping tanks)');
+      }
       // Nothing building — find next item in build order
       // Don't reset placementAttempts — keep advancing through offsets
       // so successive buildings don't land on the same cell
@@ -2035,6 +2046,7 @@ export class OracleStrategy {
         // Always scan from the start — buildings can be destroyed and
         // need rebuilding. Skip ones that currently exist on the map.
         let ordered = false;
+        if (!scg11eaFreezeBuild) { // human-requested: don't build structures while pumping tanks
         const buildOrder = this.getBuildOrder();
         for (let i = 0; i < buildOrder.length; i++) {
           const entry = buildOrder[i];
@@ -2091,6 +2103,7 @@ export class OracleStrategy {
           }
         }
       }
+      } // close !scg11eaFreezeBuild
       }
     }
 
@@ -2128,7 +2141,12 @@ export class OracleStrategy {
     const barracksCount = alliedStructures.filter((s) => s.t === 'BARR' || s.t === 'TENT').length;
     const domeCount = alliedStructures.filter((s) => s.t === 'DOME').length;
     const gunCount = alliedStructures.filter((s) => s.t === 'GUN' || s.t === 'FTUR').length;
-    const targetHarvesters = Math.max(2, refCount);
+    // SCG11EA: don't build extra harvesters early — each PROC comes with a free one.
+    // Save credits for tanks. Only build extra harvesters once we have 10+ tanks.
+    const scg11eaTankCountForHarv = playerUnits.filter((u) => u.t.includes('TNK')).length;
+    const targetHarvesters = (this.scenario === 'SCG11EA' && scg11eaTankCountForHarv < 10)
+      ? refCount  // 1 per refinery (the free one) — save credits for tanks
+      : Math.max(2, refCount);
     const needHarvester = harvCount < targetHarvesters && buildable?.units.includes('HARV');
 
     // SCG11EA: hold a bigger tank floor before switching to destroyers.
