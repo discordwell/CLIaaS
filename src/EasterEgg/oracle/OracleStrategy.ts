@@ -4047,7 +4047,7 @@ export class OracleStrategy {
       const nearbyTanks = state.enemies.filter(
         (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
           e.cx >= 35 && e.cx <= 62 &&
-          this.distanceSq(e, groupCenter) <= 400,
+          this.distanceSq(e, groupCenter) <= 100, // 10 cells — only fight tanks in our face
       ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
 
       if (nearbyTanks.length > 0) {
