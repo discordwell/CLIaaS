@@ -20,10 +20,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   GameMap, Terrain, MoveResult,
-  TREE_OCCUPY, TREE_MAX_HP,
+  TREE_OCCUPY, TREE_MAX_HP, TREE_CENTER_OFFSET,
   type MapTree,
 } from '../engine/map';
-import { modifyDamage } from '../engine/types';
+import { modifyDamage, CELL_SIZE } from '../engine/types';
 
 // ════════════════════════════════════════════════════════════════════
 // 1. Tree HP constants
@@ -375,4 +375,40 @@ describe('Clump immunity — C++ RA/tdata.cpp IsImmune=true', () => {
       expect(tree.immune).toBe(false);
     },
   );
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 8. Tree center offsets — C++ XYP_COORD (RA tdata.cpp)
+// ════════════════════════════════════════════════════════════════════
+
+describe('Tree center offsets — C++ RA/tdata.cpp XYP_COORD', () => {
+  it.each([
+    ['t01', 11, 41],   ['t02', 11, 44],   ['t03', 12, 45],
+    ['t05', 15, 41],   ['t06', 16, 37],   ['t07', 15, 41],
+    ['t08', 14, 22],   ['t10', 25, 43],   ['t11', 23, 44],
+    ['t12', 14, 36],   ['t13', 19, 40],   ['t14', 19, 40],
+    ['t15', 19, 40],   ['t16', 13, 36],   ['t17', 18, 44],
+    ['tc01', 28, 41],  ['tc02', 38, 41],  ['tc03', 33, 35],
+    ['tc04', 44, 49],  ['tc05', 49, 58],
+  ] as [string, number, number][])(
+    '%s center offset = (%d, %d)',
+    (type, px, py) => {
+      expect(TREE_CENTER_OFFSET[type]).toEqual([px, py]);
+    },
+  );
+
+  it('center offset produces pixel-level distance for damage calc', () => {
+    // T01 at cell (10,10): origin pixel = (240, 240), center = (240+11, 240+41) = (251, 281)
+    // Explosion at cell center (10,10) = (252, 252)
+    // Distance should use center, not origin
+    const off = TREE_CENTER_OFFSET['t01']!;
+    const treeCenterX = 10 * CELL_SIZE + off[0]; // 240 + 11 = 251
+    const treeCenterY = 10 * CELL_SIZE + off[1]; // 240 + 41 = 281
+    const explosionX = 10 * CELL_SIZE + CELL_SIZE / 2; // 252
+    const explosionY = 10 * CELL_SIZE + CELL_SIZE / 2; // 252
+    const dist = Math.sqrt((explosionX - treeCenterX) ** 2 + (explosionY - treeCenterY) ** 2);
+    // Center is 29 pixels below cell center → significant distance difference vs origin
+    expect(dist).toBeGreaterThan(28);
+    expect(dist).toBeLessThan(30);
+  });
 });

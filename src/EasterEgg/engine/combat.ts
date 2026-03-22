@@ -18,7 +18,7 @@ import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
-import { type GameMap, type MapTree, Terrain } from './map';
+import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
 import { canTargetNaval } from './aircraft';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -1072,11 +1072,14 @@ export function applySplashDamage(
         const hitTree = ctx.map.getTreeAtCell(tx, ty);
         if (hitTree && !hitTree.immune && hitTree.hp > 0 && weapon.warhead !== 'SA' && !damagedTrees.has(hitTree)) {
           damagedTrees.add(hitTree);
-          // Distance from explosion center to tree origin (C++ uses center of tree object)
-          const treeDx = hitTree.cx - cc.cx;
-          const treeDy = hitTree.cy - cc.cy;
-          const distCells = Math.sqrt(treeDx * treeDx + treeDy * treeDy);
-          const distPixels = distCells * CELL_SIZE;
+          // C++ terrain.cpp Center_Coord: distance from explosion to tree center (not origin).
+          // XYP_COORD gives pixel offset from origin cell's top-left to tree center.
+          const centerOff = TREE_CENTER_OFFSET[hitTree.type];
+          const treeCenterX = hitTree.cx * CELL_SIZE + (centerOff ? centerOff[0] : CELL_SIZE / 2);
+          const treeCenterY = hitTree.cy * CELL_SIZE + (centerOff ? centerOff[1] : CELL_SIZE / 2);
+          const distPixels = Math.sqrt(
+            (center.x - treeCenterX) ** 2 + (center.y - treeCenterY) ** 2,
+          );
           const treeDmg = modifyDamage(weapon.damage, weapon.warhead, 'wood', distPixels);
           if (treeDmg > 0) {
             hitTree.hp = Math.max(0, hitTree.hp - treeDmg);

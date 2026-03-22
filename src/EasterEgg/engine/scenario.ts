@@ -1417,12 +1417,12 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       map.setTerrain(pos.cx, pos.cy, Terrain.ROCK);
     } else if (/^tc?\d/.test(type)) {
       // T01-T17 = single trees, TC01-TC05 = tree clumps.
-      // C++ parity: trees are TerrainClass objects with HP on CLEAR ground (RA terrain.cpp).
-      // Clumps set TREE terrain for rendering; single trees stay on CLEAR.
+      // C++ parity: trees are TerrainClass objects on CLEAR ground (RA terrain.cpp).
+      // We set Terrain.TREE on origin cells for rendering (the renderer draws tree
+      // sprites only in the TREE case). Movement blocking uses the separate
+      // treeOccupied system, not the terrain enum.
       const isClump = type.startsWith('tc');
-      if (isClump) {
-        map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
-      }
+      map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
       map.setTreeType(pos.cx, pos.cy, type);
 
       // Build occupy cell index list from C++ tdata.cpp Occupy_List

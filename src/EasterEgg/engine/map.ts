@@ -108,6 +108,19 @@ export const TREE_OCCUPY: Record<string, [number, number][]> = {
   'tc05': [[2, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]],          // _List001011100110
 };
 
+/** C++ RA tdata.cpp XYP_COORD — pixel offset from origin cell top-left to tree center.
+ *  Used by C++ Center_Coord() for damage distance calculation (terrain.cpp).
+ *  Values are [px, py] in game pixels (CELL_SIZE = 24). */
+export const TREE_CENTER_OFFSET: Record<string, [number, number]> = {
+  't01': [11, 41],   't02': [11, 44],   't03': [12, 45],
+  't05': [15, 41],   't06': [16, 37],   't07': [15, 41],
+  't08': [14, 22],   't10': [25, 43],   't11': [23, 44],
+  't12': [14, 36],   't13': [19, 40],   't14': [19, 40],
+  't15': [19, 40],   't16': [13, 36],   't17': [18, 44],
+  'tc01': [28, 41],  'tc02': [38, 41],  'tc03': [33, 35],
+  'tc04': [44, 49],  'tc05': [49, 58],
+};
+
 export class GameMap {
   /** 128×128 grid of terrain types */
   cells: Terrain[];
