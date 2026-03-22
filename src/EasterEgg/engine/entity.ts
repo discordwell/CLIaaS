@@ -17,7 +17,7 @@ import {
 // Used by threatScore() to compute C++ Value() = Risk + Reward = 2 * Points
 const UNIT_POINTS: Record<string, number> = {};
 for (const item of PRODUCTION_ITEMS) {
-  UNIT_POINTS[item.type] = item.cost;
+  UNIT_POINTS[item.type] = item.points ?? item.cost;
 }
 
 // === Submarine Cloak State Machine ===
@@ -829,9 +829,9 @@ export function threatScore(
 
   // C++ techno.cpp:1651-1652: value = object->Value() + object->Crew.Kills
   // Value() = Risk() + Reward = 2 * Points (techno.cpp:4519, 6290: Risk = Reward = Points)
-  // Points comes from RULES.INI "Points=" which equals cost for most units.
-  // Lookup: UNIT_STATS.cost > PRODUCTION_ITEMS cost > strength fallback
-  const points = target.stats.cost ?? UNIT_POINTS[target.type] ?? target.stats.strength;
+  // Points comes from RULES.INI "Points=" — separate from Cost= (C++ techno.cpp:6290)
+  // Lookup: UNIT_STATS.points > PRODUCTION_ITEMS points > strength fallback
+  const points = target.stats.points ?? UNIT_POINTS[target.type] ?? target.stats.strength;
   let value = Math.trunc(points * 2) + target.kills;  // Value() + Crew.Kills
 
   // A11: Warhead effectiveness — prefer targets we can actually damage

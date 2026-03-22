@@ -238,7 +238,9 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     // Only applies when scanner has splash weapon
     const scanner = makeEntity(UnitType.V_ARTY, House.USSR, 100, 100);
     // ARTY has 155mm with splash: 2.0 (C++ AOE weapon)
-    const target = makeEntity(UnitType.E1, House.Greece, 200, 200);
+    // Use 4TNK (points=60) for larger base value — small points cause integer
+    // truncation artifacts in pow(0.5, n) since Math.trunc(value * 0.25) loses precision
+    const target = makeEntity(UnitType.V_4TNK, House.Greece, 200, 200);
 
     const score0 = threatScore(scanner, target, 2, false, 0, null, 0);
     const score1 = threatScore(scanner, target, 2, false, 0, null, 1);

@@ -632,35 +632,35 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: false, noMovingFire: true, owner: 'soviet', cost: 900, points: 15 },
   MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true, owner: 'allied', cost: 950, points: 15 },
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
-  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true },
-  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true },
-  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true, noMovingFire: true },
-  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true },
-  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge' },
-  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600 },
-  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, owner: 'allied', cost: 600 },
+  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true, points: 25 },
+  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true, points: 25 },
+  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true, noMovingFire: true, points: 30 },
+  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 60 },
+  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge', points: 5 },
+  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30 },
+  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, owner: 'allied', cost: 600, points: 40 },
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD' },
-  LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true },
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', points: 35 },
+  LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true, points: 25 },
   // Naval vessels (C++ vdata.cpp MPH values)
-  SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true },
-  DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
-  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 4, speedClass: SpeedClass.FLOAT, sight: 7, rot: 5, isInfantry: false, primaryWeapon: '8Inch', secondaryWeapon: '8Inch', isVessel: true, isAntiSub: true },
-  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true },
-  MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'SubSCUD', isVessel: true, isCloakable: true },
+  SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true, points: 45 },
+  DD: { type: UnitType.V_DD, name: 'Destroyer', image: 'dd', strength: 400, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'Stinger', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true, points: 50 },
+  CA: { type: UnitType.V_CA, name: 'Cruiser', image: 'ca', strength: 700, armor: 'heavy', speed: 4, speedClass: SpeedClass.FLOAT, sight: 7, rot: 5, isInfantry: false, primaryWeapon: '8Inch', secondaryWeapon: '8Inch', isVessel: true, isAntiSub: true, points: 60 },
+  PT: { type: UnitType.V_PT, name: 'Gunboat', image: 'pt', strength: 200, armor: 'heavy', speed: 9, speedClass: SpeedClass.FLOAT, sight: 7, rot: 7, isInfantry: false, primaryWeapon: '2Inch', secondaryWeapon: 'DepthCharge', isVessel: true, isAntiSub: true, points: 30 },
+  MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'SubSCUD', isVessel: true, isCloakable: true, points: 45 },
   // Aircraft (C++ aadata.cpp MPH values)
-  BADR: { type: UnitType.V_BADR, name: 'Badger', image: 'badr', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ParaBomb', passengers: 5, isAircraft: true, isFixedWing: true, maxAmmo: 5, owner: 'soviet', cost: 10 },
-  U2:   { type: UnitType.V_U2, name: 'Spy Plane', image: 'u2', strength: 2000, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 0, rot: 7, isInfantry: false, primaryWeapon: 'Camera', isAircraft: true, isFixedWing: true, maxAmmo: 1, owner: 'soviet', cost: 10 },
-  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 3 },
-  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 15 },
-  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6 },
-  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12 },
+  BADR: { type: UnitType.V_BADR, name: 'Badger', image: 'badr', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ParaBomb', passengers: 5, isAircraft: true, isFixedWing: true, maxAmmo: 5, owner: 'soviet', cost: 10, points: 20 },
+  U2:   { type: UnitType.V_U2, name: 'Spy Plane', image: 'u2', strength: 2000, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 0, rot: 7, isInfantry: false, primaryWeapon: 'Camera', isAircraft: true, isFixedWing: true, maxAmmo: 1, owner: 'soviet', cost: 10, points: 5 },
+  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 3, points: 50 },
+  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 15, points: 25 },
+  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6, points: 50 },
+  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12, points: 40 },
   // Tanya & Thief (new infantry)
-  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true },
-  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isFraidyCat: true, isInfiltrate: true },
+  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25 },
+  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isFraidyCat: true, isInfiltrate: true, points: 10 },
   // Expansion vehicles (V2 Rocket, Minelayer)
-  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true },
-  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5, crusher: true },
+  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true, points: 40 },
+  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5, crusher: true, points: 50 },
 };
 
 // Weapon stats from RULES.INI — real RA values
@@ -820,87 +820,87 @@ export interface ProductionItem {
 
 export const PRODUCTION_ITEMS: ProductionItem[] = [
   // Infantry (from TENT/BARR) — faction + techLevel from rules.ini
-  { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both', techLevel: 1 },
-  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'BARR', faction: 'soviet', techLevel: 1 },
-  { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },  // rules.ini Owner=allies (line 829)
-  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'STEK', techLevel: 6 },  // rules.ini Prerequisite=stek (line 836)
-  { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5 },
-  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'KENN', faction: 'soviet', techLevel: 3 },  // rules.ini Prerequisite=kenn (line 781)
-  { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
-  { type: 'SPY', name: 'Spy', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'DOME', techLevel: 6 },  // rules.ini Prerequisite=dome, Owner=allies
+  { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both', techLevel: 1, points: 5 },
+  { type: 'E2', name: 'Grenadier', cost: 160, buildTime: 55, prerequisite: 'BARR', faction: 'soviet', techLevel: 1, points: 10 },
+  { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'allied', techLevel: 2, points: 10 },  // rules.ini Owner=allies (line 829)
+  { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'STEK', techLevel: 6, points: 15 },  // rules.ini Prerequisite=stek (line 836)
+  { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5, points: 20 },
+  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'KENN', faction: 'soviet', techLevel: 3, points: 5 },  // rules.ini Prerequisite=kenn (line 781)
+  { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2, points: 15 },
+  { type: 'SPY', name: 'Spy', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'DOME', techLevel: 6, points: 15 },  // rules.ini Prerequisite=dome, Owner=allies
   // Vehicles (from WEAP) — faction + techLevel from rules.ini
-  { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techLevel: 3 },
-  { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 4 },
-  { type: '2TNK', name: 'Med Tank', cost: 800, buildTime: 140, prerequisite: 'WEAP', faction: 'allied', techLevel: 6 },
-  { type: '3TNK', name: 'Heavy Tank', cost: 950, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techLevel: 4 },
-  { type: '4TNK', name: 'Mammoth Tank', cost: 1700, buildTime: 240, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 10 },  // rules.ini Prerequisite=weap,stek (line 549)
-  { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 8 },  // TechLevel=8 gates it, no extra techPrereq needed (rules.ini line 596)
-  { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'TENT', techLevel: 5 },  // rules.ini Prerequisite=weap,tent (line 658)
-  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'PROC', techLevel: 1 },
+  { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techLevel: 3, points: 20 },
+  { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 4, points: 30 },
+  { type: '2TNK', name: 'Med Tank', cost: 800, buildTime: 140, prerequisite: 'WEAP', faction: 'allied', techLevel: 6, points: 40 },
+  { type: '3TNK', name: 'Heavy Tank', cost: 950, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techLevel: 4, points: 50 },
+  { type: '4TNK', name: 'Mammoth Tank', cost: 1700, buildTime: 240, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 10, points: 60 },  // rules.ini Prerequisite=weap,stek (line 549)
+  { type: 'ARTY', name: 'Artillery', cost: 600, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 8, points: 35 },  // TechLevel=8 gates it, no extra techPrereq needed (rules.ini line 596)
+  { type: 'APC', name: 'APC', cost: 800, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'TENT', techLevel: 5, points: 25 },  // rules.ini Prerequisite=weap,tent (line 658)
+  { type: 'HARV', name: 'Harvester', cost: 1400, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'PROC', techLevel: 1, points: 55 },
   // Counterstrike/Aftermath expansion units — techLevel=99 for units not in base rules.ini
-  { type: 'SHOK', name: 'Shock Trpr', cost: 900, buildTime: 80, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'TSLA', techLevel: 7 },  // TSLA prereq (expansion, Tesla Coil gate)
-  { type: 'MECH', name: 'Mechanic', cost: 950, buildTime: 70, prerequisite: 'TENT', faction: 'allied', techPrereq: 'FIX', techLevel: 7 },
-  { type: 'STNK', name: 'Phase Trns', cost: 800, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'ATEK', techLevel: -1 },
-  { type: 'CTNK', name: 'Chrono Tank', cost: 2400, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 12 },
-  { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'TSLA', techLevel: 8 },
-  { type: 'QTNK', name: 'M.A.D. Tank', cost: 2300, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 10 },  // aftrmath.ini Prerequisite=stek, Owner=soviet, Cost=2300
-  { type: 'DTRK', name: 'Demo Truck', cost: 2400, buildTime: 200, prerequisite: 'MSLO', faction: 'both', techLevel: 13 },  // aftrmath.ini Prerequisite=mslo, Owner=allies,soviet, Cost=2400
-  { type: 'MRJ', name: 'Radar Jammer', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME', techLevel: 12 },  // rules.ini Prerequisite=weap,dome, Owner=allies
-  { type: 'MGG', name: 'Mobile Gap Gen', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 11 },  // rules.ini Prerequisite=weap,atek, Owner=allies
-  { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'both', techPrereq: 'ATEK', techLevel: 11 },
-  { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11 },
-  { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'DOME', techLevel: 4 },  // rules.ini Prerequisite=weap,dome (line 482)
-  { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'both', techPrereq: 'FIX', techLevel: 3 },  // rules.ini Owner=allies,soviet (line 680), Prerequisite=weap,fix (line 674)
+  { type: 'SHOK', name: 'Shock Trpr', cost: 900, buildTime: 80, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'TSLA', techLevel: 7, points: 15 },  // TSLA prereq (expansion, Tesla Coil gate)
+  { type: 'MECH', name: 'Mechanic', cost: 950, buildTime: 70, prerequisite: 'TENT', faction: 'allied', techPrereq: 'FIX', techLevel: 7, points: 15 },
+  { type: 'STNK', name: 'Phase Trns', cost: 800, buildTime: 160, prerequisite: 'WEAP', faction: 'both', techPrereq: 'ATEK', techLevel: -1, points: 25 },
+  { type: 'CTNK', name: 'Chrono Tank', cost: 2400, buildTime: 180, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 12, points: 25 },
+  { type: 'TTNK', name: 'Tesla Tank', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'TSLA', techLevel: 8, points: 30 },
+  { type: 'QTNK', name: 'M.A.D. Tank', cost: 2300, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'STEK', techLevel: 10, points: 60 },  // aftrmath.ini Prerequisite=stek, Owner=soviet, Cost=2300
+  { type: 'DTRK', name: 'Demo Truck', cost: 2400, buildTime: 200, prerequisite: 'MSLO', faction: 'both', techLevel: 13, points: 5 },  // aftrmath.ini Prerequisite=mslo, Owner=allies,soviet, Cost=2400
+  { type: 'MRJ', name: 'Radar Jammer', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME', techLevel: 12, points: 30 },  // rules.ini Prerequisite=weap,dome, Owner=allies
+  { type: 'MGG', name: 'Mobile Gap Gen', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 11, points: 40 },  // rules.ini Prerequisite=weap,atek, Owner=allies
+  { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'both', techPrereq: 'ATEK', techLevel: 11, points: 25 },
+  { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11, points: 10 },
+  { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'DOME', techLevel: 4, points: 40 },  // rules.ini Prerequisite=weap,dome (line 482)
+  { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'both', techPrereq: 'FIX', techLevel: 3, points: 50 },  // rules.ini Owner=allies,soviet (line 680), Prerequisite=weap,fix (line 674)
   // Naval (from SYRD — Allied Shipyard)
-  { type: 'PT', name: 'Gunboat', cost: 500, buildTime: 100, prerequisite: 'SYRD', faction: 'allied', techLevel: 5 },
-  { type: 'DD', name: 'Destroyer', cost: 1000, buildTime: 160, prerequisite: 'SYRD', faction: 'allied', techLevel: 7 },
-  { type: 'LST', name: 'Transport', cost: 700, buildTime: 120, prerequisite: 'SYRD', faction: 'both', techLevel: 3 },
-  { type: 'CA', name: 'Cruiser', cost: 2000, buildTime: 240, prerequisite: 'SYRD', faction: 'allied', techPrereq: 'ATEK', techLevel: 10 },  // rules.ini Prerequisite=syrd,atek (line 735)
+  { type: 'PT', name: 'Gunboat', cost: 500, buildTime: 100, prerequisite: 'SYRD', faction: 'allied', techLevel: 5, points: 30 },
+  { type: 'DD', name: 'Destroyer', cost: 1000, buildTime: 160, prerequisite: 'SYRD', faction: 'allied', techLevel: 7, points: 50 },
+  { type: 'LST', name: 'Transport', cost: 700, buildTime: 120, prerequisite: 'SYRD', faction: 'both', techLevel: 3, points: 25 },
+  { type: 'CA', name: 'Cruiser', cost: 2000, buildTime: 240, prerequisite: 'SYRD', faction: 'allied', techPrereq: 'ATEK', techLevel: 10, points: 60 },  // rules.ini Prerequisite=syrd,atek (line 735)
   // Naval (from SPEN — Soviet Sub Pen)
-  { type: 'SS', name: 'Submarine', cost: 950, buildTime: 140, prerequisite: 'SPEN', faction: 'soviet', techLevel: 5 },
-  { type: 'MSUB', name: 'Missile Sub', cost: 1650, buildTime: 200, prerequisite: 'SPEN', faction: 'soviet', techPrereq: 'STEK', techLevel: 9 },
+  { type: 'SS', name: 'Submarine', cost: 950, buildTime: 140, prerequisite: 'SPEN', faction: 'soviet', techLevel: 5, points: 45 },
+  { type: 'MSUB', name: 'Missile Sub', cost: 1650, buildTime: 200, prerequisite: 'SPEN', faction: 'soviet', techPrereq: 'STEK', techLevel: 9, points: 45 },
   // Aircraft (from HPAD/AFLD)
-  { type: 'TRAN', name: 'Chinook', cost: 1200, buildTime: 120, prerequisite: 'HPAD', faction: 'soviet', techLevel: 11 },
-  { type: 'HELI', name: 'Longbow', cost: 1200, buildTime: 200, prerequisite: 'HPAD', faction: 'allied', techLevel: 9 },
-  { type: 'HIND', name: 'Hind', cost: 1200, buildTime: 180, prerequisite: 'HPAD', faction: 'soviet', techLevel: 9 },
-  { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet', techLevel: 10 },
-  { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet', techLevel: 5 },
+  { type: 'TRAN', name: 'Chinook', cost: 1200, buildTime: 120, prerequisite: 'HPAD', faction: 'soviet', techLevel: 11, points: 35 },
+  { type: 'HELI', name: 'Longbow', cost: 1200, buildTime: 200, prerequisite: 'HPAD', faction: 'allied', techLevel: 9, points: 50 },
+  { type: 'HIND', name: 'Hind', cost: 1200, buildTime: 180, prerequisite: 'HPAD', faction: 'soviet', techLevel: 9, points: 40 },
+  { type: 'MIG', name: 'MiG', cost: 1200, buildTime: 180, prerequisite: 'AFLD', faction: 'soviet', techLevel: 10, points: 50 },
+  { type: 'YAK', name: 'Yak', cost: 800, buildTime: 120, prerequisite: 'AFLD', faction: 'soviet', techLevel: 5, points: 25 },
   // Structures — rules.ini Prerequisite=, Cost=, Owner=, TechLevel= values
-  { type: 'FACT', name: 'Constr. Yard', cost: 2500, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1 },  // rules.ini TechLevel=-1, not buildable (MCV deploys into it)
-  { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 1 },
-  { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 8 },
-  { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1 },  // rules.ini Owner=soviet
-  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1 },  // rules.ini Owner=allies
-  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 1 },
-  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3 },
-  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 1 },
-  { type: 'DOME', name: 'Radar Dome', cost: 1000, buildTime: 150, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3 },
-  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'WEAP', faction: 'both', isStructure: true, techLevel: 3 },
-  { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'DOME', faction: 'both', isStructure: true, techLevel: 9 },
-  { type: 'AFLD', name: 'Airfield', cost: 600, buildTime: 200, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 5 },
+  { type: 'FACT', name: 'Constr. Yard', cost: 2500, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 80 },  // rules.ini TechLevel=-1, not buildable (MCV deploys into it)
+  { type: 'POWR', name: 'Power Plant', cost: 300, buildTime: 100, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 1, points: 40 },
+  { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 8, points: 50 },
+  { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1, points: 30 },  // rules.ini Owner=soviet
+  { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1, points: 30 },  // rules.ini Owner=allies
+  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 1, points: 80 },
+  { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3, points: 80 },
+  { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 1, points: 25 },
+  { type: 'DOME', name: 'Radar Dome', cost: 1000, buildTime: 150, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3, points: 60 },
+  { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'WEAP', faction: 'both', isStructure: true, techLevel: 3, points: 80 },
+  { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'DOME', faction: 'both', isStructure: true, techLevel: 9, points: 70 },
+  { type: 'AFLD', name: 'Airfield', cost: 600, buildTime: 200, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 5, points: 70 },
   // Defenses
-  { type: 'PBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 2 },  // rules.ini Prerequisite=tent
-  { type: 'HBOX', name: 'Camo Pillbox', cost: 600, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 3 },  // rules.ini Prerequisite=tent
-  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 4 },  // rules.ini Prerequisite=tent
-  { type: 'AGUN', name: 'AA Gun', cost: 600, buildTime: 100, prerequisite: 'DOME', faction: 'allied', isStructure: true, techLevel: 5 },
-  { type: 'GAP', name: 'Gap Generator', cost: 500, buildTime: 120, prerequisite: 'ATEK', faction: 'allied', isStructure: true, techLevel: 10 },
-  { type: 'FTUR', name: 'Flame Tower', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'soviet', isStructure: true, techLevel: 2 },  // rules.ini Prerequisite=barr
-  { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techLevel: 7 },
-  { type: 'SAM', name: 'SAM Site', cost: 750, buildTime: 120, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 9 },
-  { type: 'KENN', name: 'Kennel', cost: 200, buildTime: 60, prerequisite: 'BARR', faction: 'soviet', isStructure: true, techLevel: 3 },  // rules.ini Prerequisite=barr
+  { type: 'PBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 2, points: 50 },  // rules.ini Prerequisite=tent
+  { type: 'HBOX', name: 'Camo Pillbox', cost: 600, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 3, points: 60 },  // rules.ini Prerequisite=tent
+  { type: 'GUN', name: 'Turret', cost: 600, buildTime: 100, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 4, points: 50 },  // rules.ini Prerequisite=tent
+  { type: 'AGUN', name: 'AA Gun', cost: 600, buildTime: 100, prerequisite: 'DOME', faction: 'allied', isStructure: true, techLevel: 5, points: 50 },
+  { type: 'GAP', name: 'Gap Generator', cost: 500, buildTime: 120, prerequisite: 'ATEK', faction: 'allied', isStructure: true, techLevel: 10, points: 35 },
+  { type: 'FTUR', name: 'Flame Tower', cost: 600, buildTime: 100, prerequisite: 'BARR', faction: 'soviet', isStructure: true, techLevel: 2, points: 65 },  // rules.ini Prerequisite=barr
+  { type: 'TSLA', name: 'Tesla Coil', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techLevel: 7, points: 80 },
+  { type: 'SAM', name: 'SAM Site', cost: 750, buildTime: 120, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 9, points: 50 },
+  { type: 'KENN', name: 'Kennel', cost: 200, buildTime: 60, prerequisite: 'BARR', faction: 'soviet', isStructure: true, techLevel: 3, points: 25 },  // rules.ini Prerequisite=barr
   // Naval
-  { type: 'SYRD', name: 'Ship Yard', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 3 },
-  { type: 'SPEN', name: 'Sub Pen', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 3 },
+  { type: 'SYRD', name: 'Ship Yard', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 3, points: 80 },
+  { type: 'SPEN', name: 'Sub Pen', cost: 650, buildTime: 150, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 3, points: 80 },
   // Superweapon / tech structures
-  { type: 'ATEK', name: 'Allied Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'allied', isStructure: true, techPrereq: 'DOME', techLevel: 10 },
-  { type: 'STEK', name: 'Soviet Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techPrereq: 'DOME', techLevel: 6 },
-  { type: 'PDOX', name: 'Chronosphere', cost: 2800, buildTime: 300, prerequisite: 'ATEK', faction: 'allied', isStructure: true, techLevel: 12 },
-  { type: 'IRON', name: 'Iron Curtain', cost: 2800, buildTime: 300, prerequisite: 'STEK', faction: 'soviet', isStructure: true, techLevel: 12 },
-  { type: 'MSLO', name: 'Missile Silo', cost: 2500, buildTime: 280, prerequisite: 'STEK', faction: 'both', isStructure: true, techLevel: 13 },
+  { type: 'ATEK', name: 'Allied Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'allied', isStructure: true, techPrereq: 'DOME', techLevel: 10, points: 85 },
+  { type: 'STEK', name: 'Soviet Tech', cost: 1500, buildTime: 200, prerequisite: 'WEAP', faction: 'soviet', isStructure: true, techPrereq: 'DOME', techLevel: 6, points: 85 },
+  { type: 'PDOX', name: 'Chronosphere', cost: 2800, buildTime: 300, prerequisite: 'ATEK', faction: 'allied', isStructure: true, techLevel: 12, points: 100 },
+  { type: 'IRON', name: 'Iron Curtain', cost: 2800, buildTime: 300, prerequisite: 'STEK', faction: 'soviet', isStructure: true, techLevel: 12, points: 100 },
+  { type: 'MSLO', name: 'Missile Silo', cost: 2500, buildTime: 280, prerequisite: 'STEK', faction: 'both', isStructure: true, techLevel: 13, points: 90 },
   // Walls — rules.ini Cost=, Owner=, TechLevel= values (BARB removed: no Owner in rules.ini, not buildable)
-  { type: 'SBAG', name: 'Sandbag', cost: 25, buildTime: 15, prerequisite: 'FACT', faction: 'allied', isStructure: true, techLevel: 2 },
-  { type: 'FENC', name: 'Wire Fence', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'soviet', isStructure: true, techLevel: 2 },  // rules.ini: FENC is barbed wire fence (line 1695)
-  { type: 'BRIK', name: 'Concrete', cost: 100, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 8 },
+  { type: 'SBAG', name: 'Sandbag', cost: 25, buildTime: 15, prerequisite: 'FACT', faction: 'allied', isStructure: true, techLevel: 2, points: 1 },
+  { type: 'FENC', name: 'Wire Fence', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'soviet', isStructure: true, techLevel: 2, points: 1 },  // rules.ini: FENC is barbed wire fence (line 1695)
+  { type: 'BRIK', name: 'Concrete', cost: 100, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 8, points: 5 },
 ];
 
 // C++ parity (techno.cpp:6077): Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000

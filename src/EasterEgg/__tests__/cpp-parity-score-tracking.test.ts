@@ -230,13 +230,13 @@ describe('lossCount increments on player unit death (C++ techno.cpp:3971)', () =
 
 describe('pointTotal tracks net score (C++ techno.cpp:3911,3990)', () => {
 
-  it('pointTotal increases by unit cost on player kill', () => {
+  it('pointTotal increases by unit points on player kill', () => {
     // C++ techno.cpp:3911: source->House->PointTotal += points
-    // TS combat.ts:507: ctx.pointTotal += unitCost
+    // TS combat.ts:507: ctx.pointTotal += unitPoints
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
     enemy.hp = 0;
     enemy.alive = false;
-    const cost = enemy.stats.cost ?? enemy.stats.strength ?? 0;
+    const pts = enemy.stats.points ?? enemy.stats.strength ?? 0;
     const ctx = makeCombatCtx([enemy]);
 
     handleUnitDeath(ctx, enemy, {
@@ -245,17 +245,17 @@ describe('pointTotal tracks net score (C++ techno.cpp:3911,3990)', () => {
       friendlyFireLoss: false,
     });
 
-    expect(ctx.pointTotal).toBe(cost);
-    expect(cost).toBeGreaterThan(0); // Sanity: 2TNK should have a cost
+    expect(ctx.pointTotal).toBe(pts);
+    expect(pts).toBeGreaterThan(0); // Sanity: 2TNK should have points
   });
 
-  it('pointTotal decreases by unit cost on player loss', () => {
+  it('pointTotal decreases by unit points on player loss', () => {
     // C++ techno.cpp:3990: House->PointTotal -= points
-    // TS combat.ts:510: ctx.pointTotal -= unitCost
+    // TS combat.ts:510: ctx.pointTotal -= unitPoints
     const player = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     player.hp = 0;
     player.alive = false;
-    const cost = player.stats.cost ?? player.stats.strength ?? 0;
+    const pts = player.stats.points ?? player.stats.strength ?? 0;
     const ctx = makeCombatCtx([player]);
 
     handleUnitDeath(ctx, player, {
@@ -264,8 +264,8 @@ describe('pointTotal tracks net score (C++ techno.cpp:3911,3990)', () => {
       friendlyFireLoss: false,
     });
 
-    expect(ctx.pointTotal).toBe(-cost);
-    expect(cost).toBeGreaterThan(0);
+    expect(ctx.pointTotal).toBe(-pts);
+    expect(pts).toBeGreaterThan(0);
   });
 
   it('pointTotal is net of kills minus losses', () => {
@@ -283,16 +283,16 @@ describe('pointTotal tracks net score (C++ techno.cpp:3911,3990)', () => {
       trackLoss: false,
       friendlyFireLoss: false,
     });
-    const killCost = enemy.stats.cost ?? enemy.stats.strength ?? 0;
+    const killPts = enemy.stats.points ?? enemy.stats.strength ?? 0;
 
     handleUnitDeath(ctx, player, {
       attackerIsPlayer: false,
       trackLoss: true,
       friendlyFireLoss: false,
     });
-    const lossCost = player.stats.cost ?? player.stats.strength ?? 0;
+    const lossPts = player.stats.points ?? player.stats.strength ?? 0;
 
-    expect(ctx.pointTotal).toBe(killCost - lossCost);
+    expect(ctx.pointTotal).toBe(killPts - lossPts);
   });
 
   it('pointTotal unchanged when no player involvement', () => {
@@ -446,7 +446,7 @@ describe('vehicle crush tracks kills/losses (C++ drive.cpp, combat.ts:569-583)',
 
   it('crusher killing enemy infantry increments killCount and pointTotal', () => {
     // C++ drive.cpp:Ok_To_Move — crusher on crushable target
-    // TS combat.ts:571: ctx.killCount++; ctx.pointTotal += crushCost
+    // TS combat.ts:571: ctx.killCount++; ctx.pointTotal += crushPoints
     const tank = entityAtCell(UnitType.V_3TNK, House.Spain, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const ctx = makeCombatCtx([tank, infantry]);
@@ -454,13 +454,13 @@ describe('vehicle crush tracks kills/losses (C++ drive.cpp, combat.ts:569-583)',
     checkVehicleCrush(ctx, tank);
 
     expect(ctx.killCount).toBe(1);
-    const crushCost = infantry.stats.cost ?? infantry.stats.strength ?? 0;
-    expect(ctx.pointTotal).toBe(crushCost);
+    const crushPoints = infantry.stats.points ?? infantry.stats.strength ?? 0;
+    expect(ctx.pointTotal).toBe(crushPoints);
   });
 
   it('enemy crusher killing player infantry increments lossCount', () => {
     // C++ drive.cpp — enemy crusher kills player infantry
-    // TS combat.ts:574: ctx.lossCount++; ctx.pointTotal -= crushCost
+    // TS combat.ts:574: ctx.lossCount++; ctx.pointTotal -= crushPoints
     const tank = entityAtCell(UnitType.V_3TNK, House.USSR, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
     const ctx = makeCombatCtx([tank, infantry]);
@@ -468,8 +468,8 @@ describe('vehicle crush tracks kills/losses (C++ drive.cpp, combat.ts:569-583)',
     checkVehicleCrush(ctx, tank);
 
     expect(ctx.lossCount).toBe(1);
-    const crushCost = infantry.stats.cost ?? infantry.stats.strength ?? 0;
-    expect(ctx.pointTotal).toBe(-crushCost);
+    const crushPoints = infantry.stats.points ?? infantry.stats.strength ?? 0;
+    expect(ctx.pointTotal).toBe(-crushPoints);
   });
 
   it('crush tracks per-side soviet casualty', () => {
@@ -773,10 +773,10 @@ describe('combined battle scenario tracks all stats correctly', () => {
     expect(ctx.alliedBuildingsLost).toBe(0);
     expect(ctx.structuresLost).toBe(0); // enemy building, not player's
 
-    // PointTotal = sum of enemy kills - player losses
-    const e1Cost = enemy1.stats.cost ?? enemy1.stats.strength ?? 0;
-    const e2Cost = enemy2.stats.cost ?? enemy2.stats.strength ?? 0;
-    const tankCost = playerTank.stats.cost ?? playerTank.stats.strength ?? 0;
-    expect(ctx.pointTotal).toBe(e1Cost + e2Cost - tankCost);
+    // PointTotal = sum of enemy kills - player losses (uses rules.ini Points=, not Cost=)
+    const e1Pts = enemy1.stats.points ?? enemy1.stats.strength ?? 0;
+    const e2Pts = enemy2.stats.points ?? enemy2.stats.strength ?? 0;
+    const tankPts = playerTank.stats.points ?? playerTank.stats.strength ?? 0;
+    expect(ctx.pointTotal).toBe(e1Pts + e2Pts - tankPts);
   });
 });

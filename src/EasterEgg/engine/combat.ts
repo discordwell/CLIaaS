@@ -501,14 +501,14 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     ctx.minimapAlert(tc.cx, tc.cy);
   }
 
-  // C++ score tracking: PointTotal += cost for enemy kills, -= cost for own losses
-  // (techno.cpp: source->House->PointTotal += points; House->PointTotal -= points)
-  const unitCost = victim.stats.cost ?? victim.stats.strength ?? 0;
+  // C++ score tracking: PointTotal += points for enemy kills, -= points for own losses
+  // (techno.cpp:3911: source->House->PointTotal += points; techno.cpp:3990: House->PointTotal -= points)
+  const unitPoints = victim.stats.points ?? victim.stats.strength ?? 0;
   if (opts.attackerIsPlayer) {
-    ctx.pointTotal += unitCost;
+    ctx.pointTotal += unitPoints;
   }
   if ((opts.trackLoss && ctx.isPlayerControlled(victim)) || opts.friendlyFireLoss) {
-    ctx.pointTotal -= unitCost;
+    ctx.pointTotal -= unitPoints;
   }
 
   // Per-side casualty tracking for score screen bar graphs (C++ score.cpp:548-560)
@@ -567,13 +567,13 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
       const crushSound = other.isAnt ? 'die_ant' : 'die_infantry';
       ctx.playSoundAt(crushSound, other.pos.x, other.pos.y);
       ctx.map.addDecal(oc.cx, oc.cy, 3, 0.3);
-      const crushCost = other.stats.cost ?? other.stats.strength ?? 0;
+      const crushPoints = other.stats.points ?? other.stats.strength ?? 0;
       if (ctx.isPlayerControlled(vehicle)) {
         ctx.killCount++;
-        ctx.pointTotal += crushCost;
+        ctx.pointTotal += crushPoints;
       } else {
         ctx.lossCount++;
-        ctx.pointTotal -= crushCost;
+        ctx.pointTotal -= crushPoints;
         ctx.playEva('eva_unit_lost');
         const alertCell = other.cell;
         ctx.minimapAlert(alertCell.cx, alertCell.cy);

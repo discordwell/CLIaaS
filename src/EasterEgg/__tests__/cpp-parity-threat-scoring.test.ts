@@ -315,13 +315,14 @@ describe('designated enemy bonus (C++ techno.cpp:1659-1662)', () => {
 
     // Designated enemy gets (value+500)*3 vs just value
     // So designated/normal ratio should be approximately (value+500)*3/value
-    // For an E1 with cost not set: value = strength(50) + damage(15)*5 = 125
-    // Plus weaponDanger: min(15*2, 200) = 30, total = 155
-    // designated = (155+500)*3 = 1965
-    // ratio = 1965/155 = 12.68x
+    // E1 points=5 (rules.ini), so value = 2*5 = 10
+    // designated = (10+500)*3 = 1530
+    // ratio = 1530/10 = 153x — the fixed +500 bonus dominates for low-points units
+    // This matches C++ behavior: infantry are cheap (Points=5) so the designated
+    // enemy bonus makes them extremely high-priority targets.
     const ratio = scoreDesignated / scoreNoEnemy;
     expect(ratio).toBeGreaterThan(5);  // must be significantly higher
-    expect(ratio).toBeLessThan(20);    // but bounded
+    expect(ratio).toBeLessThan(200);   // bounded (with Points=5: ~153x)
   });
 
   it('designated enemy bonus applies BEFORE distance falloff', () => {
@@ -592,18 +593,21 @@ describe('Area_Modify (C++ techno.cpp:1342-1401, 1732-1735)', () => {
 
   it('exponential halving matches: pow(0.5, n) for n buildings', () => {
     const scanner = makeEntity(UnitType.V_ARTY, House.USSR, 100, 100);
-    // ARTY has 155mm with splash: 2.0
-    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    // ARTY has 155mm (HE warhead, splash: 2.0)
+    // Use 4TNK (points=60) as target. HE vs heavy=0.25 applies 0.5x penalty,
+    // giving base value=60. Integer truncation at n=3 causes slight drift.
+    const target = makeEntity(UnitType.V_4TNK, House.Greece, 200, 200);
 
     const score0 = threatScore(scanner, target, 2, false, 0, null, 0);
     const score1 = threatScore(scanner, target, 2, false, 0, null, 1);
     const score2 = threatScore(scanner, target, 2, false, 0, null, 2);
     const score3 = threatScore(scanner, target, 2, false, 0, null, 3);
 
-    // Each building halves the score
+    // Each building halves the score (pow(0.5, n) on integer value before distance)
+    // Precision limited by integer truncation of small values: toBeCloseTo(x, 1) = 0.05 tolerance
     expect(score1 / score0).toBeCloseTo(0.5, 2);
     expect(score2 / score0).toBeCloseTo(0.25, 2);
-    expect(score3 / score0).toBeCloseTo(0.125, 2);
+    expect(score3 / score0).toBeCloseTo(0.125, 1);
   });
 
   it('C++ applies Area_Modify to value BEFORE distance, TS applies AFTER', () => {
@@ -843,12 +847,12 @@ describe('numerical parity — exact C++ vs TS score comparison', () => {
 
     const tsScore = threatScore(scanner, target, 3, false);
 
-    // C++ equivalent: Value()=2*cost, distCells=3, divisor=4
-    // score = (200 * 32000) / 4 = 1,600,000
-    const cppScore = cppDistanceFalloff(200, 3 * 256);
-    expect(cppScore).toBe(1600000);
+    // C++ equivalent: Value()=2*Points=2*5=10, distCells=3, divisor=4
+    // score = (10 * 32000) / 4 = 80,000
+    const cppScore = cppDistanceFalloff(10, 3 * 256);
+    expect(cppScore).toBe(80000);
 
-    // TS now uses cell-based distance and 2*cost base value
+    // TS now uses cell-based distance and 2*points base value
     // Score should be in the same order of magnitude as C++
     expect(tsScore).toBe(cppScore);
   });
@@ -860,7 +864,8 @@ describe('numerical parity — exact C++ vs TS score comparison', () => {
 
     const tsScore = threatScore(scanner, target, 5, false);
 
-    // Should be in millions range (matching C++ scale)
+    // 3TNK points=50, Value()=2*50=100, distCells=5, divisor=6
+    // score = (100 * 32000) / 6 = 533,333 (but SA vs heavy armor halves: 266,666)
     expect(tsScore).toBeGreaterThan(100000);
   });
 
@@ -1015,49 +1020,37 @@ describe('parity gap assertions — C++ expected vs TS actual', () => {
     // At 3 cells (768 leptons): divisor = (768/256)+1 = 3+1 = 4
     // C++ expected score = value * 32000 / 4 = value * 8000
     //
-    // For E1: C++ Value() ≈ 200 (Risk+Reward ≈ 2*cost)
-    // C++ expected = 200 * 8000 = 1,600,000
+    // For E1: C++ Value() = 2*Points = 2*5 = 10
+    // C++ expected = (10 * 32000) / (3+1) = 80,000
     //
-    // TS uses: (value * 32000) / (3*256 + 1) = value * 32000 / 769
-    // TS value = 155 (strength+dmg*5+weaponDanger for E1)
-    // TS expected ≈ 155 * 32000 / 769 ≈ 6450
-    //
-    // PARITY GAP: C++ ~1,600,000 vs TS ~6,450
+    // TS now uses same formula: value=2*points, distCells=floor(dist), divisor=(distCells+1)
+    // FIXED: TS matches C++ after Points= parity fix.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
     const tsScore = threatScore(scanner, target, 3, false);
-    const cppExpected = 1600000; // C++ integer result
+    const cppExpected = 80000; // C++ integer result: (10 * 32000) / 4
 
-    // This SHOULD fail: TS uses leptons in denominator, C++ uses cells
-    // PARITY GAP: distance denominator is (distLeptons+1) not (distCells+1)
+    // TS now uses cell-based distance and 2*points base value
     expect(tsScore).toBe(cppExpected);
   });
 
-  it('GAP 2: base value — C++ uses ~2*cost, TS uses raw cost or strength fallback', () => {
-    // C++ techno.cpp:4519: Value() = Risk() + Reward
-    // For V2RL (cost=700): C++ Value() ≈ 1400
-    // TS: value = 700 (raw cost)
+  it('GAP 2: base value — C++ uses 2*Points, TS now matches via points field', () => {
+    // C++ techno.cpp:4519: Value() = Risk() + Reward = 2*Points
+    // For V2RL: Points=40, C++ Value() = 80
     //
     // At dist=1 cell:
-    // C++ expected: (1400+0) * 32000 / (1+1) = 22,400,000
-    // TS: (700 + min(600*2,200)) * 32000 / (256+1)
-    //   = (700 + 200) * 32000 / 257 = 900 * 32000 / 257 ≈ 112,062
-    //
-    // But wait — weaponDanger for SCUD is min(600*2, 200)=200
-    // PARITY GAP
+    // C++ expected: (80+0) * 32000 / (1+1) = 1,280,000
+    // TS now uses 2*points=80, divisor=2 → same result.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.V_V2RL, House.Greece, 200, 200);
     target.kills = 0;
 
     const tsScore = threatScore(scanner, target, 1, false);
 
-    // C++ expected with Value()≈1400, no designated enemy, assume outside zone (*2=2800)
-    // But to isolate base value gap, use in-zone (no *2): 1400 * 32000 / 2 = 22,400,000
-    // TS should match C++ if base value computation were the same
-    // PARITY GAP: base value diverges
-    const cppExpectedInZone = 22400000;
+    // C++ expected: (2*40) * 32000 / 2 = 1,280,000
+    const cppExpectedInZone = 1280000;
     expect(tsScore).toBe(cppExpectedInZone);
   });
 

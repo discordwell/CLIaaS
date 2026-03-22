@@ -66,7 +66,7 @@ const ALL_POINTS = new Map([...RULES_POINTS, ...AFTERMATH_POINTS]);
 function getTsUnitPoints(): Map<string, number> {
   const result = new Map<string, number>();
   for (const item of PRODUCTION_ITEMS) {
-    result.set(item.type, item.cost);
+    result.set(item.type, item.points ?? item.cost);
   }
   return result;
 }
@@ -359,27 +359,27 @@ describe('PointTotal should use Points= not Cost= (C++ techno.cpp:3911)', () => 
   });
 
   it('threat scoring: E1 Value() should be 2*5=10, not 2*100=200', () => {
-    // entity.ts:834: const points = target.stats.cost ?? UNIT_POINTS[target.type] ?? target.stats.strength;
+    // entity.ts:834: const points = target.stats.points ?? UNIT_POINTS[target.type] ?? target.stats.strength;
     // entity.ts:835: let value = Math.trunc(points * 2) + target.kills;
     //
     // C++ techno.cpp:4519: Value() = Risk() + Reward = 2 * Points
     //   where Points = rules.ini Points= field
     //
-    // EXPECTED FAILURE: TS AI treats infantry as 20x more valuable.
-    const e1ScoringValue = UNIT_STATS['E1'].cost ?? 100;  // what TS actually uses
+    // FIXED: TS now uses stats.points for threat scoring (C++ parity).
+    const e1ScoringValue = UNIT_STATS['E1'].points ?? UNIT_STATS['E1'].cost ?? 100;
     const e1CppPoints = ALL_POINTS.get('E1')!;            // what C++ uses (5)
 
-    // TS should use Points (5), not Cost (100) for threat value computation
+    // TS now uses Points (5), matching C++ for threat value computation
     expect(e1ScoringValue, 'E1 scoring value should be Points=5, not Cost=100').toBe(e1CppPoints);
   });
 
   it('threat scoring: 4TNK Value() should be 2*60=120, not 2*1700=3400', () => {
-    // EXPECTED FAILURE: Mammoth is scored at Cost not Points.
+    // FIXED: TS now uses points field for scoring.
     const mammothProd = PRODUCTION_ITEMS.find(i => i.type === '4TNK')!;
     const mammothCppPoints = ALL_POINTS.get('4TNK')!;  // 60
 
-    // TS UNIT_POINTS uses cost (1700), C++ uses Points (60)
-    expect(mammothProd.cost, '4TNK scoring should use Points=60, not Cost=1700').toBe(mammothCppPoints);
+    // TS now uses points (60), matching C++ Points=
+    expect(mammothProd.points, '4TNK scoring should use Points=60, not Cost=1700').toBe(mammothCppPoints);
   });
 });
 
