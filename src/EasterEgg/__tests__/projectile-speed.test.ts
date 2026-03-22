@@ -168,12 +168,12 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       const projSpeed = 25; // cells/sec (Dragon HeatSeeker)
       const dist = 5 * CELL_SIZE; // 120 pixels
       const pixelsPerTick = projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
-      // 25 * 24 / 20 = 30 pixels/tick
-      expect(pixelsPerTick).toBe(30);
+      // 25 * 24 / 15 = 40 pixels/tick
+      expect(pixelsPerTick).toBe(40);
 
       const expected = Math.max(1, Math.ceil(dist / pixelsPerTick));
-      // ceil(120 / 30) = 4
-      expect(expected).toBe(4);
+      // ceil(120 / 40) = 3
+      expect(expected).toBe(3);
 
       const actual = calcProjectileTravelFrames(dist, projSpeed);
       expect(actual).toBe(expected);

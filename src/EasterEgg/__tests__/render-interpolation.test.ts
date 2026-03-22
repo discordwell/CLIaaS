@@ -115,11 +115,11 @@ describe('Render interpolation: prevPos → pos smooth visual', () => {
     expect(inc1).toBeCloseTo(inc2, 1); // 1 decimal precision (floating-point rounding)
   });
 
-  it('tick interval is 50ms at 20fps game speed', () => {
+  it('tick interval is ~66.67ms at 15fps game speed', () => {
     const tickInterval = 1000 / GAME_TICKS_PER_SEC;
-    expect(tickInterval).toBe(50);
-    // At 60fps render (16.67ms), roughly 3 renders per tick
+    expect(tickInterval).toBeCloseTo(66.67, 1);
+    // At 60fps render (16.67ms), roughly 4 renders per tick
     const rendersPerTick = tickInterval / (1000 / 60);
-    expect(rendersPerTick).toBeCloseTo(3, 0);
+    expect(rendersPerTick).toBeCloseTo(4, 0);
   });
 });

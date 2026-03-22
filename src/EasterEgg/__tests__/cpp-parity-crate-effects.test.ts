@@ -792,24 +792,24 @@ describe('firepower crate area-of-effect (cell.cpp:2580-2592)', () => {
 // RULES.INI Invulnerability=3,INVULBOX,1.0
 // CrateData = fixed(1.0)*256 = 256
 // Duration = 900 * 1.0 = 900 C++ ticks = 60 seconds
-// TS: 1200 ticks at 20 TPS = 60 seconds (matches real-time)
+// TS: 900 ticks at 15 TPS = 60 seconds (exact C++ parity)
 //
 // PARITY GAP: C++ applies to ALL techno within radius (any house).
 // TS applies only to the collecting unit.
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {
-  it('sets invulnTick = 1200 (60s at 20 TPS, matching C++ 900 ticks at 15 TPS)', () => {
+  it('sets invulnTick = 900 (60s at 15 TPS, exact C++ parity)', () => {
     const ctx = makeMockContext();
     const unit = makeEntity();
     pickupCrate(ctx, makeCrate('invulnerability'), unit);
 
     // C++ duration: TICKS_PER_MINUTE * 1.0 = 900 ticks / 15 TPS = 60 seconds
-    // TS duration: 1200 ticks / 20 TPS = 60 seconds
+    // TS duration: 900 ticks / 15 TPS = 60 seconds — exact parity
     const cppSeconds = (CPP_TICKS_PER_MINUTE * CPP_CRATE_DATA.invuln_minutes) / CPP_TICKS_PER_SECOND;
-    const tsSeconds = unit.invulnTick / 20;
+    const tsSeconds = unit.invulnTick / 15;
     expect(tsSeconds).toBe(cppSeconds);
-    expect(unit.invulnTick).toBe(1200);
+    expect(unit.invulnTick).toBe(900);
   });
 
   it('applies invulnerability to ALL nearby units within CrateRadius (cell.cpp:2594-2603)', () => {
@@ -822,8 +822,8 @@ describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {
 
     pickupCrate(ctx, makeCrate('invulnerability', 100, 100), collector);
 
-    expect(collector.invulnTick).toBe(1200);
-    expect(nearby.invulnTick).toBe(1200); // C++ parity: area-of-effect
+    expect(collector.invulnTick).toBe(900);
+    expect(nearby.invulnTick).toBe(900); // C++ parity: area-of-effect
   });
 
   it('applies invulnerability to enemy units within CrateRadius (C++ has no house filter)', () => {
@@ -835,8 +835,8 @@ describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {
 
     pickupCrate(ctx, makeCrate('invulnerability', 100, 100), collector);
 
-    expect(collector.invulnTick).toBe(1200);
-    expect(enemy.invulnTick).toBe(1200); // C++ parity: no house filter
+    expect(collector.invulnTick).toBe(900);
+    expect(enemy.invulnTick).toBe(900); // C++ parity: no house filter
   });
 
   it('does NOT apply invulnerability to units beyond CrateRadius', () => {
@@ -847,8 +847,8 @@ describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {
 
     pickupCrate(ctx, makeCrate('invulnerability', 100, 100), collector);
 
-    expect(collector.invulnTick).toBe(1200);
-    expect(farUnit.invulnTick).toBe(0); // too far
+    expect(collector.invulnTick).toBe(900);
+    expect(farUnit.invulnTick).toBe(0);
   });
 
   it('uses INVULBOX animation (RULES.INI Invulnerability=3,INVULBOX,1.0)', () => {

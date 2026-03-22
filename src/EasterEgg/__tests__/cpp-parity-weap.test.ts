@@ -146,10 +146,10 @@ describe('WEAP stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(2000);
   });
 
-  it('build time is 1920 ticks (C++ cost-based: floor(2000 * 0.96))', () => {
+  it('build time is 1440 ticks (C++ cost-based: floor(2000 * 0.72))', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'WEAP');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(1920);
+    expect(prodItem!.buildTime).toBe(1440);
   });
 
   it('requires PROC (Refinery) as prerequisite', () => {

@@ -14,8 +14,8 @@
  *
  * C++ build time formula (techno.cpp:6075-6078):
  *   Time_To_Build = Cost * Rule.BuildSpeedBias * TICKS_PER_MINUTE / 1000
- *   With BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 (15Hz), scaled to 20Hz:
- *   buildTime_20hz = floor(Cost * 0.8 * 900 / 1000 * 20 / 15) = floor(Cost * 0.96)
+ *   With BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 (15Hz):
+ *   buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
  */
 
 import { readFileSync } from 'fs';
@@ -94,8 +94,8 @@ function iniOwnerToFaction(ownerStr: string): 'allied' | 'soviet' | 'both' {
 
 function cppBuildTime(cost: number): number {
   // techno.cpp:6077: Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
-  // BuildSpeedBias=0.8, TICKS_PER_MINUTE=900, scaled 20Hz/15Hz
-  return Math.floor(cost * 0.8 * 900 / 1000 * 20 / 15);
+  // BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 (15Hz, no scaling needed)
+  return Math.floor(cost * 0.8 * 900 / 1000);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,12 +179,12 @@ describe('4. PRODUCTION_ITEMS faction vs INI Owner=', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Build times: PRODUCTION_ITEMS.buildTime vs C++ formula floor(Cost*0.96)
+// 5. Build times: PRODUCTION_ITEMS.buildTime vs C++ formula floor(Cost*0.72)
 // ---------------------------------------------------------------------------
 
 describe('5. Build times: PRODUCTION_ITEMS.buildTime vs C++ formula', () => {
   for (const item of PRODUCTION_ITEMS) {
-    it(`${item.type}: buildTime=${item.buildTime} should equal floor(${item.cost} * 0.96) = ${cppBuildTime(item.cost)}`, () => {
+    it(`${item.type}: buildTime=${item.buildTime} should equal floor(${item.cost} * 0.72) = ${cppBuildTime(item.cost)}`, () => {
       expect(item.buildTime, `${item.type} buildTime mismatch`).toBe(cppBuildTime(item.cost));
     });
   }

@@ -11,7 +11,7 @@
  *   C++ source: conquer.cpp:2380-2387 (FrameTimer from GameSpeed)
  *   TS source:  engine/index.ts:478-479 (gameSpeed default = 2)
  *   TS source:  engine/index.ts:1312 (speed cycle 1→2→4→1)
- *   TS source:  engine/types.ts:17 (GAME_TICKS_PER_SEC = 20)
+ *   TS source:  engine/types.ts:17 (GAME_TICKS_PER_SEC = 15)
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -253,19 +253,18 @@ describe('Fear increase on damage (C++ infantry.cpp:442-457)', () => {
 
 // ─── 5. Game Speed Constants — C++ options.cpp:91, TS types.ts:17 ────────────
 
-describe('Game tick rate (C++ GameSpeed=3 → 20 tps)', () => {
-  // C++ options.cpp:91: GameSpeed(3) is the default
-  // C++ conquer.cpp comment + queue.cpp:1425: DesiredFrameRate = 60 / GameSpeed
-  // At GameSpeed=3: 60/3 = 20 fps = 20 ticks per second
-  // TS types.ts:17: GAME_TICKS_PER_SEC = 20
+describe('Game tick rate (C++ GameSpeed=4 → 15 tps)', () => {
+  // C++ options.cpp:91: GameSpeed(4) is the default
+  // C++ defines.h:3031: TICKS_PER_SECOND = 15
+  // TS types.ts:17: GAME_TICKS_PER_SEC = 15
 
-  it('GAME_TICKS_PER_SEC = 20 (C++ GameSpeed=3 → 60/3=20 tps)', () => {
-    expect(GAME_TICKS_PER_SEC).toBe(20);
+  it('GAME_TICKS_PER_SEC = 15 (C++ GameSpeed=4 → 60/4=15 tps)', () => {
+    expect(GAME_TICKS_PER_SEC).toBe(15);
   });
 
-  it('tick interval = 50ms (1000ms / 20 tps)', () => {
+  it('tick interval = 66.67ms (1000ms / 15 tps)', () => {
     const tickInterval = 1000 / GAME_TICKS_PER_SEC;
-    expect(tickInterval).toBe(50);
+    expect(tickInterval).toBeCloseTo(66.67, 1);
   });
 });
 
@@ -349,30 +348,30 @@ describe('Effective tick rate at each game speed', () => {
   // tickInterval = 50ms (1000/20)
   // Effective ticks/sec = GAME_TICKS_PER_SEC * turboMultiplier
 
-  it('speed 1: 20 * 1 = 20 effective ticks/sec', () => {
-    expect(GAME_TICKS_PER_SEC * 1).toBe(20);
+  it('speed 1: 15 * 1 = 15 effective ticks/sec', () => {
+    expect(GAME_TICKS_PER_SEC * 1).toBe(15);
   });
 
-  it('speed 2: 20 * 2 = 40 effective ticks/sec', () => {
-    expect(GAME_TICKS_PER_SEC * 2).toBe(40);
+  it('speed 2: 15 * 2 = 30 effective ticks/sec', () => {
+    expect(GAME_TICKS_PER_SEC * 2).toBe(30);
   });
 
-  it('speed 4: 20 * 4 = 80 effective ticks/sec', () => {
-    expect(GAME_TICKS_PER_SEC * 4).toBe(80);
+  it('speed 4: 15 * 4 = 60 effective ticks/sec', () => {
+    expect(GAME_TICKS_PER_SEC * 4).toBe(60);
   });
 
-  it('fear decay real-time at speed 1: 255 ticks / 20 tps = 12.75 seconds', () => {
+  it('fear decay real-time at speed 1: 255 ticks / 15 tps = 17 seconds', () => {
     const decaySeconds = Entity.FEAR_MAXIMUM / (GAME_TICKS_PER_SEC * 1);
-    expect(decaySeconds).toBe(12.75);
+    expect(decaySeconds).toBe(17);
   });
 
-  it('fear decay real-time at speed 2 (default): 255 ticks / 40 tps = 6.375 seconds', () => {
+  it('fear decay real-time at speed 2 (default): 255 ticks / 30 tps = 8.5 seconds', () => {
     const decaySeconds = Entity.FEAR_MAXIMUM / (GAME_TICKS_PER_SEC * 2);
-    expect(decaySeconds).toBe(6.375);
+    expect(decaySeconds).toBe(8.5);
   });
 
-  it('fear decay real-time at speed 4: 255 ticks / 80 tps = 3.1875 seconds', () => {
+  it('fear decay real-time at speed 4: 255 ticks / 60 tps = 4.25 seconds', () => {
     const decaySeconds = Entity.FEAR_MAXIMUM / (GAME_TICKS_PER_SEC * 4);
-    expect(decaySeconds).toBe(3.1875);
+    expect(decaySeconds).toBe(4.25);
   });
 });

@@ -120,18 +120,15 @@ describe('Tick rate -- C++ TICKS_PER_SECOND vs TS GAME_TICKS_PER_SEC', () => {
     expect(CPP_TICKS_PER_MINUTE).toBe(900);
   });
 
-  it('TS GAME_TICKS_PER_SEC = 20 (GameSpeed=3, DesiredFrameRate=60/3)', () => {
-    // TS types.ts:16-17: GAME_TICKS_PER_SEC = 20
-    // Derived from queue.cpp:1425 + options.cpp:91: 60 / GameSpeed(3) = 20
-    expect(GAME_TICKS_PER_SEC).toBe(20);
+  it('TS GAME_TICKS_PER_SEC = 15 (matching C++ TICKS_PER_SECOND)', () => {
+    // TS types.ts:16-17: GAME_TICKS_PER_SEC = 15
+    // Matches C++ defines.h:3031: TICKS_PER_SECOND = 15
+    expect(GAME_TICKS_PER_SEC).toBe(15);
   });
 
-  it('PARITY GAP: TS tick rate (20) != C++ tick rate (15)', () => {
+  it('PARITY: TS tick rate matches C++ tick rate (both 15)', () => {
     // C++ defines.h:3031: TICKS_PER_SECOND = 15
-    // TS types.ts:17: GAME_TICKS_PER_SEC = 20
-    // This is an architectural divergence: TS uses a different frame rate.
-    // All tick-based timing constants derived from TICKS_PER_SECOND/MINUTE
-    // will have different real-time durations in TS vs C++.
+    // TS types.ts:17: GAME_TICKS_PER_SEC = 15
     const CPP_TICKS_PER_SECOND = 15;
     expect(GAME_TICKS_PER_SEC).toBe(CPP_TICKS_PER_SECOND);
   });
@@ -382,19 +379,15 @@ describe('GrowthRate -- ore regrowth timing', () => {
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(fullCycle);
   });
 
-  it('PARITY NOTE: ORE_GROWTH_INTERVAL derived from C++ 15Hz timing, TS runs at 20Hz', () => {
+  it('ORE_GROWTH_INTERVAL derived from C++ 15Hz timing, TS now matches at 15Hz', () => {
     // The 1821-tick interval was calculated using TICKS_PER_MINUTE = 900 (15Hz).
-    // TS runs at GAME_TICKS_PER_SEC = 20, so 1821 ticks = 1821/20 = 91.05 seconds.
-    // C++ runs at 15Hz, so 1821 ticks = 1821/15 = 121.4 seconds.
-    // At 20Hz, the ore grows 33% faster in real time than C++.
+    // TS now runs at 15Hz (same as C++), so tick counts match exactly.
     const tsRealTimeSec = 1821 / GAME_TICKS_PER_SEC;
     const cppRealTimeSec = 1821 / 15;
-    expect(tsRealTimeSec).toBeCloseTo(91.05, 1);
+    expect(tsRealTimeSec).toBeCloseTo(121.4, 1);
     expect(cppRealTimeSec).toBeCloseTo(121.4, 1);
-    // If TS wanted C++ real-time parity, interval should be:
-    // 2 minutes * 60 * 20 ticks/sec = 2400 ticks (scanning cells each tick differently)
-    // But TS uses the C++ tick-count directly, causing faster real-time regrowth.
-    expect(tsRealTimeSec).toBeCloseTo(cppRealTimeSec, 0);
+    // Exact parity: TS and C++ ore regrowth timing now matches
+    expect(tsRealTimeSec).toBeCloseTo(cppRealTimeSec, 5);
   });
 
   it('ORE_DENSITY_CHANCE = 0.5 (50% growth probability per cycle)', () => {

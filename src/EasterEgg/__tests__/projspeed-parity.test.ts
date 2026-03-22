@@ -210,10 +210,10 @@ describe('travel time at typical combat ranges', () => {
     expect(calcProjectileTravelFrames(dist, 40)).toBe(expected);
   });
 
-  it('missile at 5 cells: projSpeed=30 → 4 ticks', () => {
+  it('missile at 5 cells: projSpeed=30 → 3 ticks', () => {
     const dist = 5 * CELL_SIZE;
-    // pixPerTick = 30*24/20 = 36, ceil(120/36) = 4
-    expect(calcProjectileTravelFrames(dist, 30)).toBe(4);
+    // pixPerTick = 30*24/15 = 48, ceil(120/48) = 3
+    expect(calcProjectileTravelFrames(dist, 30)).toBe(3);
   });
 
   it('artillery at 6 cells: projSpeed=12 → 10 ticks', () => {

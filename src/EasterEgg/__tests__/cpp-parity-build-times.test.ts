@@ -10,18 +10,16 @@
  *   TICKS_PER_MINUTE = 15 * 60 = 900 (defines.h:3032)
  *   Rule.BuildSpeedBias = 0.8 (rules.ini BuildSpeed=.8, line 79)
  *
- * The TS engine runs at 20 Hz (vs C++ 15 Hz), so build times must be
- * scaled by 20/15 to maintain the same real-time duration.
+ * TS engine now runs at 15 Hz (matching C++ TICKS_PER_SECOND), no scaling needed.
  *
- * Formula: buildTime_20hz = floor(Cost * 0.8 * 900 / 1000 * 20 / 15)
- *        = floor(Cost * 0.96)
+ * Formula: buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
  */
 
 import { describe, it, expect } from 'vitest';
 import { PRODUCTION_ITEMS } from '../engine/types';
 
 function cppBuildTime(cost: number): number {
-  return Math.floor(cost * 0.8 * 900 / 1000 * 20 / 15);
+  return Math.floor(cost * 0.8 * 900 / 1000);
 }
 
 describe('Production build times — C++ parity', () => {
@@ -49,7 +47,7 @@ describe('Production build times — C++ parity', () => {
     expect(weap!.buildTime).toBe(cppBuildTime(2000)); // 1920
   });
 
-  it('all items have buildTime = floor(cost * 0.96)', () => {
+  it('all items have buildTime = floor(cost * 0.72)', () => {
     for (const item of PRODUCTION_ITEMS) {
       const expected = cppBuildTime(item.cost);
       expect(item.buildTime, `${item.type} (cost=${item.cost})`).toBe(expected);

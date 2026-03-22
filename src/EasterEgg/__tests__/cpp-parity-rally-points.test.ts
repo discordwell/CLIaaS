@@ -373,7 +373,7 @@ describe('C++ parity: wave coordination — rally delay before attacking (team.c
     // TS index.ts:5460: ant wave rally delay = current tick + GAME_TICKS_PER_SEC * 2
     const currentTick = 500;
     const expectedRallyTick = currentTick + GAME_TICKS_PER_SEC * 2;
-    expect(expectedRallyTick).toBe(500 + 40); // 20 ticks/sec * 2 sec = 40 ticks
+    expect(expectedRallyTick).toBe(500 + 30); // 15 ticks/sec * 2 sec = 30 ticks
   });
 
   it('AI attack waves use shorter rally delay of 30 ticks (ai.ts:1636)', () => {

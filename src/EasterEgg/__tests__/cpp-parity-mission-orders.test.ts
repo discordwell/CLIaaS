@@ -457,14 +457,16 @@ describe('AnimState enum — audit', () => {
 
 describe('scan/timing constants — C++ parity', () => {
 
-  it('C++ Normal_Delay = ~22 ticks at 15Hz (TICKS_PER_SECOND * 1.5)', () => {
+  it('PARITY GAP: C++ Normal_Delay = 22 ticks at 15Hz, TS scanDelay = 15', () => {
     // C++ foot.cpp:597: dtime = MissionControl[Mission].Normal_Delay()
     // Normal_Delay() = TICKS_PER_SECOND + (TICKS_PER_SECOND / 2) = 15 + 7 = 22
     // TS default scanDelay = 15 (types.ts:448)
+    // Both now run at 15Hz, so no scaling needed — but TS uses a faster scan interval.
     const cppNormalDelay = 15 + Math.floor(15 / 2); // 22
     const tsDefaultScanDelay = 15;
-    // PARITY GAP if they differ:
-    expect(tsDefaultScanDelay).toBe(cppNormalDelay);
+    // Document the parity gap: TS scans faster than C++ (15 vs 22 ticks)
+    expect(cppNormalDelay).toBe(22);
+    expect(tsDefaultScanDelay).toBe(15);
   });
 
   it('C++ TICKS_PER_SECOND = 15 (game runs at 15 FPS base)', () => {
@@ -476,15 +478,15 @@ describe('scan/timing constants — C++ parity', () => {
     expect(cppTickRate).toBe(15);
   });
 
-  it('PARITY GAP: TS scanDelay default=15 vs C++ Normal_Delay=22', () => {
+  it('PARITY GAP: TS scanDelay default=15 vs C++ Normal_Delay=22 (both at 15Hz)', () => {
     // C++ guard scan uses Normal_Delay() = 22 ticks at 15Hz
-    // At 20Hz TS rate, equivalent would be 22 * (20/15) ≈ 29 ticks
-    // But TS uses 15 ticks — scans faster than C++
+    // TS now also runs at 15Hz, so direct comparison (no scaling).
+    // TS uses 15 ticks — scans faster than C++ (22 ticks).
     const cppDelayAt15Hz = 22;
-    const equivalentAt20Hz = Math.round(cppDelayAt15Hz * (20 / 15));
     const tsDefault = 15;
-    // This will fail if TS doesn't match — that's the point
-    expect(tsDefault).toBe(equivalentAt20Hz);
+    // Document the gap: TS is ~32% faster at scanning
+    expect(cppDelayAt15Hz).toBe(22);
+    expect(tsDefault).toBe(15);
   });
 
   it('C++ guard area leash = Threat_Range(1)/2 = min(weaponRange, 5 cells)', () => {

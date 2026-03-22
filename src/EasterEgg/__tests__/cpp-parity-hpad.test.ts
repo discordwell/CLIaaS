@@ -627,9 +627,9 @@ describe('HPAD as production prerequisite for helicopters', () => {
     expect(item!.prerequisite).toBe('DOME');
   });
 
-  it('HPAD build time is 1440 ticks (C++ cost-based: floor(1500 * 0.96))', () => {
+  it('HPAD build time is 1080 ticks (C++ cost-based: floor(1500 * 0.72))', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'HPAD' && p.isStructure);
     expect(item).toBeDefined();
-    expect(item!.buildTime).toBe(1440);
+    expect(item!.buildTime).toBe(1080);
   });
 });

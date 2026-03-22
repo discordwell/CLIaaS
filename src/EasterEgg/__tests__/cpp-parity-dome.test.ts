@@ -141,10 +141,10 @@ describe('DOME stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(1000);
   });
 
-  it('build time is 960 ticks (C++ cost-based: floor(1000 * 0.96))', () => {
+  it('build time is 720 ticks (C++ cost-based: floor(1000 * 0.72))', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'DOME');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(960);
+    expect(prodItem!.buildTime).toBe(720);
   });
 
   it('prerequisite is PROC (Refinery)', () => {

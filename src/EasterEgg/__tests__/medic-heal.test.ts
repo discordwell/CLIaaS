@@ -303,11 +303,11 @@ describe('Medic auto-heal behavior', () => {
     expect(healWeapon.warhead).toBe('Organic');
   });
 
-  it('medic cost is 800 credits with 768 tick build time (C++ cost-based: floor(800 * 0.96))', () => {
+  it('medic cost is 800 credits with 576 tick build time (C++ cost-based: floor(800 * 0.72))', () => {
     const mediProd = PRODUCTION_ITEMS.find((p) => p.type === 'MEDI');
     expect(mediProd).toBeDefined();
     expect(mediProd.cost).toBe(800);
-    expect(mediProd.buildTime).toBe(768);
+    expect(mediProd.buildTime).toBe(576);
     expect(mediProd.faction).toBe('allied');
   });
 });

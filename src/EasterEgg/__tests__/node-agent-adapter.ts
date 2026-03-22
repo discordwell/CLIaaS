@@ -195,9 +195,8 @@ export class NodeAgentAdapter {
   step(ticks = 15, commands?: AgentCommand[]): StepResult {
     if (!this.game) throw new Error('No game loaded — call loadScenario() first');
 
-    // Scale ticks: same as __agentStep (n * 20/15 for GameSpeed 3 parity)
-    const scaled = Math.round(ticks * 20 / 15);
-    const clamped = Math.max(0, Math.min(scaled, 1200));
+    // No tick scaling needed — engine now runs at 15Hz (matching C++ TICKS_PER_SECOND)
+    const clamped = Math.max(0, Math.min(ticks, 1200));
 
     // Process commands first
     const results = commands && Array.isArray(commands) ? processCommands(this.game, commands) : [];

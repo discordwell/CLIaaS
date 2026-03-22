@@ -504,11 +504,11 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
       expect(built!.house).toBe(House.USSR);
     });
 
-    it('sets baseRebuildCooldown to GAME_TICKS_PER_SEC * 30 (= 600 ticks)', () => {
+    it('sets baseRebuildCooldown to GAME_TICKS_PER_SEC * 30 (= 450 ticks)', () => {
       const ctx = makeReadyContext({ tick: 0 });
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(GAME_TICKS_PER_SEC * 30);
-      expect(ctx.baseRebuildCooldown).toBe(600);
+      expect(ctx.baseRebuildCooldown).toBe(450);
     });
 
     it('structure without production item builds without cost deduction', () => {
@@ -543,14 +543,14 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
       // Cycle 1: queue populated, POWR built (priority 0), cooldown set
       updateBaseRebuild(ctx);
-      expect(ctx.baseRebuildCooldown).toBe(600);
+      expect(ctx.baseRebuildCooldown).toBe(450); // GAME_TICKS_PER_SEC * 30 = 15 * 30 = 450
       const powr = ctx.structures.find(s => s.type === 'POWR' && s.cx === 50);
       expect(powr).toBeDefined();
       expect(ctx.baseRebuildQueue.length).toBe(1);
       expect(ctx.baseRebuildQueue[0].type).toBe('PROC');
 
       // Drain cooldown to 0
-      for (let i = 0; i < 600; i++) {
+      for (let i = 0; i < 450; i++) {
         ctx.tick = i + 1; // doesn't matter for cooldown path
         updateBaseRebuild(ctx);
       }
@@ -559,7 +559,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
       // Cycle 2: tick must be % 75 === 0
       ctx.tick = 750; // 750 % 75 === 0
       updateBaseRebuild(ctx);
-      expect(ctx.baseRebuildCooldown).toBe(600);
+      expect(ctx.baseRebuildCooldown).toBe(450);
       const proc = ctx.structures.find(s => s.type === 'PROC' && s.cx === 60);
       expect(proc).toBeDefined();
       expect(ctx.baseRebuildQueue.length).toBe(0);
@@ -605,29 +605,29 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     it('cooldown countdown across ticks', () => {
       const ctx = makeReadyContext({ tick: 0 });
       updateBaseRebuild(ctx);
-      expect(ctx.baseRebuildCooldown).toBe(600);
+      expect(ctx.baseRebuildCooldown).toBe(450); // 15 * 30
 
       // Each call decrements by 1
       ctx.tick = 1;
       updateBaseRebuild(ctx);
-      expect(ctx.baseRebuildCooldown).toBe(599);
+      expect(ctx.baseRebuildCooldown).toBe(449);
 
       ctx.tick = 2;
       updateBaseRebuild(ctx);
-      expect(ctx.baseRebuildCooldown).toBe(598);
+      expect(ctx.baseRebuildCooldown).toBe(448);
 
       // Jump ahead
-      for (let i = 0; i < 596; i++) {
+      for (let i = 0; i < 446; i++) {
         ctx.tick = 3 + i;
         updateBaseRebuild(ctx);
       }
       expect(ctx.baseRebuildCooldown).toBe(2);
 
-      ctx.tick = 599;
+      ctx.tick = 449;
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(1);
 
-      ctx.tick = 600;
+      ctx.tick = 450;
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(0);
     });

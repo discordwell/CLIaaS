@@ -473,43 +473,40 @@ describe('Power fraction for production — factory.cpp:434 parity', () => {
 //   fixed(900, 1000) = floor(900*256/1000) = 230
 //   So: Time_To_Build = Cost * 0.8 * (230/256) = Cost * 0.71875 (at 15Hz)
 //
-//   TS scales to 20Hz: multiply by 20/15 = 4/3
-//   TS formula: floor(Cost * 0.8 * 900 / 1000 * 4/3) = floor(Cost * 0.96)
+//   TS runs at 15Hz (matching C++), no scaling needed.
+//   TS formula: floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
 // ============================================================
 describe('Production speed — techno.cpp:6077 Time_To_Build', () => {
   /**
    * C++ at 15Hz: Time_To_Build = Cost * BuildSpeedBias * fixed(TICKS_PER_MINUTE, 1000)
    *   = Cost * 0.8 * fixed(900, 1000)
-   *   fixed(900, 1000) = floor(900 * 256 / 1000) = 230
-   *   Result uses 8.8 multiply: ((230 * (Cost * 0.8_raw)) + 128) / 256
    *
-   * But TS simplifies to: floor(Cost * 0.8 * 900 / 1000 * 4/3)
-   * which is floor(Cost * 0.96)
+   * TS now runs at 15Hz (matching C++), no scaling needed.
+   * Formula: floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
    */
   const CPP_BUILD_SPEED_BIAS = 0.8;
   const CPP_TICKS_PER_MINUTE = 900; // 15Hz * 60
-  const TS_TICK_SCALE = 20 / 15;     // 20Hz / 15Hz
 
   function expectedBuildTime(cost: number): number {
-    return Math.floor(cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000 * TS_TICK_SCALE);
+    return Math.floor(cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000);
   }
 
   // Import production items to verify computed buildTime values
   // We'll check a few representative items
-  it('POWR (cost=300) buildTime = floor(300 * 0.96) = 288', () => {
-    expect(expectedBuildTime(300)).toBe(288);
+  it('POWR (cost=300) buildTime = floor(300 * 0.72) = 216', () => {
+    expect(expectedBuildTime(300)).toBe(216);
   });
 
-  it('PROC (cost=2000) buildTime = floor(2000 * 0.96) = 1920', () => {
-    expect(expectedBuildTime(2000)).toBe(1920);
+  it('PROC (cost=2000) buildTime = floor(2000 * 0.72) = 1440', () => {
+    expect(expectedBuildTime(2000)).toBe(1440);
   });
 
-  it('SILO (cost=150) buildTime = floor(150 * 0.96) = 144', () => {
-    expect(expectedBuildTime(150)).toBe(144);
+  it('SILO (cost=150) buildTime = floor(150 * 0.72) = 108', () => {
+    expect(expectedBuildTime(150)).toBe(108);
   });
 
-  it('TSLA (cost=1500) buildTime = floor(1500 * 0.96) = 1440', () => {
-    expect(expectedBuildTime(1500)).toBe(1440);
+  it('TSLA (cost=1500) buildTime = floor(1500 * 0.72) = 1080', () => {
+    expect(expectedBuildTime(1500)).toBe(1080);
   });
 });
 

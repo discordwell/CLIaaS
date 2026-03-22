@@ -523,9 +523,9 @@ describe('C++ parity: Production prerequisites (tech tree)', () => {
   describe('buildTime computed from cost via C++ formula', () => {
     // techno.cpp:6077: Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
     // rules.ini: BuildSpeed=.8, 15 Hz tick rate → TICKS_PER_MINUTE=900
-    // Scaled to 20 Hz: multiply by 20/15 = 4/3
-    // buildTime = floor(Cost * 0.8 * 900 / 1000 * 4/3) = floor(Cost * 0.96)
-    const CPP_FORMULA = (cost: number) => Math.floor(cost * 0.96);
+    // TS runs at 15 Hz (matching C++), no scaling needed.
+    // buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
+    const CPP_FORMULA = (cost: number) => Math.floor(cost * 0.72);
 
     it.each([
       ['E1', 100],
@@ -536,7 +536,7 @@ describe('C++ parity: Production prerequisites (tech tree)', () => {
       ['4TNK', 1700],
       ['MSLO', 2500],
       ['SBAG', 25],
-    ])('%s buildTime = floor(cost * 0.96)', (type, cost) => {
+    ])('%s buildTime = floor(cost * 0.72)', (type, cost) => {
       const item = getItem(type);
       expect(item.buildTime, `${type} buildTime`).toBe(CPP_FORMULA(cost));
     });

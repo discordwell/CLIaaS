@@ -1037,16 +1037,16 @@ describe('C++ Parity: Crate Spawn/Placement Logic', () => {
     it('first crate spawns after 60 seconds (index.ts — nextCrateTick)', () => {
       // TS index.ts: this.nextCrateTick = GAME_TICKS_PER_SEC * 60;
       const firstCrateTick = GAME_TICKS_PER_SEC * 60;
-      expect(firstCrateTick).toBe(1200); // 20 FPS * 60 seconds
+      expect(firstCrateTick).toBe(900); // 15 FPS * 60 seconds
     });
 
     it('subsequent crates spawn every 60-90 seconds (index.ts interval)', () => {
       // TS index.ts:1664:
       //   this.nextCrateTick = this.tick + GAME_TICKS_PER_SEC * (60 + Math.floor(Math.random() * 30));
-      const minInterval = GAME_TICKS_PER_SEC * 60; // 1200 ticks
-      const maxInterval = GAME_TICKS_PER_SEC * 90; // 1800 ticks
-      expect(minInterval).toBe(1200);
-      expect(maxInterval).toBe(1800);
+      const minInterval = GAME_TICKS_PER_SEC * 60; // 900 ticks
+      const maxInterval = GAME_TICKS_PER_SEC * 90; // 1350 ticks
+      expect(minInterval).toBe(900);
+      expect(maxInterval).toBe(1350);
     });
   });
 

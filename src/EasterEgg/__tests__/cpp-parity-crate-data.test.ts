@@ -333,15 +333,16 @@ describe('C++ Parity Audit: Crate Data Constants', () => {
       //   CrateData = fixed(1.0)*256 = 256 → fixed(256/256) = 1.0
       //   IronCurtainCountDown = 900 * 1.0 = 900 ticks (1 minute at 15 TPS)
       //
-      // TS crates.ts:387: unit.invulnTick = 1200 (1200 ticks at 20 TPS = 60 seconds)
-      // Now matches C++ duration of 60 seconds (900 C++ ticks / 15 TPS).
+      // TS crates.ts: invulnDuration = 900 (900 ticks at 15 TPS = 60 seconds)
+      // Exact C++ parity: 900 ticks / 15 TPS = 60 seconds.
       const cppInvulnTicks = CPP_TICKS_PER_MINUTE * 1.0; // 900
       const cppInvulnSeconds = cppInvulnTicks / CPP_TICKS_PER_SECOND; // 60
-      const tsInvulnTicks = 1200; // crates.ts:387 — fixed: 60s * 20 TPS = 1200
-      const tsTPS = 20; // GAME_TICKS_PER_SEC
+      const tsInvulnTicks = 900; // crates.ts — exact C++ parity: 900 ticks at 15Hz
+      const tsTPS = 15; // GAME_TICKS_PER_SEC
       const tsInvulnSeconds = tsInvulnTicks / tsTPS; // 60
 
-      // Should match C++ duration in real-time seconds
+      // Exact parity: same tick count and same real-time duration
+      expect(tsInvulnTicks).toBe(cppInvulnTicks);
       expect(tsInvulnSeconds).toBe(cppInvulnSeconds);
     });
 

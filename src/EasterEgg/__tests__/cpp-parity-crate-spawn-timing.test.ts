@@ -66,13 +66,12 @@ const CPP_CRATE_TIMER_MAX = CPP_CRATE_TIME * (CPP_TICKS_PER_MINUTE * 2); // 1800
 
 describe('CPP parity: tick rate', () => {
   it('TS tick rate differs from C++ but real-time durations match', () => {
-    // C++ TICKS_PER_SECOND = 15, TS GAME_TICKS_PER_SEC = 20
-    // This is a deliberate design choice for smoother gameplay.
-    // All timing constants are adjusted so real-time durations match.
-    expect(GAME_TICKS_PER_SEC).toBe(20);
+    // C++ TICKS_PER_SECOND = 15, TS GAME_TICKS_PER_SEC = 15
+    // TS now runs at the same tick rate as C++ — exact parity.
+    expect(GAME_TICKS_PER_SEC).toBe(15);
     expect(CPP_TICKS_PER_SECOND).toBe(15);
-    // Real-time equivalence: 300 C++ ticks = 400 TS ticks = 20 seconds
-    expect(300 / CPP_TICKS_PER_SECOND).toBe(400 / GAME_TICKS_PER_SEC);
+    // Exact parity: same tick counts, same real-time durations
+    expect(GAME_TICKS_PER_SEC).toBe(CPP_TICKS_PER_SECOND);
   });
 });
 
@@ -165,10 +164,9 @@ describe('CPP parity: per-crate lifetime', () => {
   });
 
   it('TS crate lifetime has same real-time range [5, 20] minutes as C++', () => {
-    // TS tick counts differ from C++ due to 20 vs 15 TPS,
-    // but real-time durations are identical.
-    const TS_MIN_LIFETIME_TICKS = 5 * 60 * GAME_TICKS_PER_SEC;  // 6000
-    const TS_MAX_LIFETIME_TICKS = 20 * 60 * GAME_TICKS_PER_SEC; // 24000
+    // TS now runs at 15 TPS (same as C++), so tick counts match exactly.
+    const TS_MIN_LIFETIME_TICKS = 5 * 60 * GAME_TICKS_PER_SEC;  // 4500
+    const TS_MAX_LIFETIME_TICKS = 20 * 60 * GAME_TICKS_PER_SEC; // 18000
 
     // Real-time equivalence: both produce 5 and 20 minutes
     expect(TS_MIN_LIFETIME_TICKS / GAME_TICKS_PER_SEC).toBe(CPP_CRATE_TIMER_MIN / CPP_TICKS_PER_SECOND);
@@ -343,9 +341,9 @@ describe('CPP parity: spawnCrate lifetime tick values', () => {
     expect(lifetimes.length).toBeGreaterThan(0);
 
     // With RULES.INI CrateRegen=3, TS uses Math.floor(3/2)=1 min, 3*2=6 max
-    // = [1200, 7200] ticks at 20 TPS
-    const TS_CRATE_TIMER_MIN = Math.floor(3 / 2) * 60 * GAME_TICKS_PER_SEC;  // 1200
-    const TS_CRATE_TIMER_MAX = 6 * 60 * GAME_TICKS_PER_SEC; // 7200
+    // = [900, 5400] ticks at 15 TPS
+    const TS_CRATE_TIMER_MIN = Math.floor(3 / 2) * 60 * GAME_TICKS_PER_SEC;  // 900
+    const TS_CRATE_TIMER_MAX = 6 * 60 * GAME_TICKS_PER_SEC; // 5400
     for (const lt of lifetimes) {
       expect(lt).toBeGreaterThanOrEqual(TS_CRATE_TIMER_MIN);
       expect(lt).toBeLessThanOrEqual(TS_CRATE_TIMER_MAX);
