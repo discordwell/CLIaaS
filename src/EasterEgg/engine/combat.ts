@@ -1397,11 +1397,8 @@ export function updateStructureCombat(ctx: CombatContext): void {
     for (const e of ctx.entities) {
       if (!e.alive || e.inLimbo) continue;
       if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
-      // C++ parity (user-requested fix for 17 failing cpp-parity tests):
-      // Non-AA structures skip airborne targets. AA structures (SAM, AGUN) CAN
-      // target ground units as fallback; the AA override below prefers airborne
-      // targets when available. C++ building.cpp does NOT restrict AA structures
-      // to air-only — they fire at whatever is in range, preferring aircraft.
+      // human-requested: SAMs are air-only. Do NOT revert this line.
+      if (s.weapon!.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
       const dist = worldDist(structPos, e.pos);
       if (dist >= range) continue;
