@@ -1480,8 +1480,8 @@ describe('Edge cases', () => {
     target.hp = 30;
     const killed = target.takeDamage(-50, 'Organic');
     expect(killed).toBe(false);
-    // HP goes above current value (healing)
-    expect(target.hp).toBe(80);
+    // C++ object.cpp:1614: healing is capped at maxHp (Strength capped at MaxStrength)
+    expect(target.hp).toBe(target.maxHp);
     expect(target.alive).toBe(true);
   });
 

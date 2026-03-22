@@ -147,6 +147,11 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
     }
     case 'harvesting': {
       entity.harvestTick++;
+      // C++ unit.cpp:2280: if (Tiberium_Load() < 1) — return when already full
+      if (entity.oreLoad >= Entity.BAIL_COUNT) {
+        entity.harvesterState = 'returning';
+        break;
+      }
       // Harvest every 10 ticks (~0.67s)
       if (entity.harvestTick % 10 === 0) {
         const ec = entity.cell;
@@ -155,10 +160,15 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
           // EC3: bail-based capacity — track bail count, not credit amount
           entity.oreLoad += 1;
           entity.oreCreditValue += bailCredits;
-          // EC4: gem bonus bails — C++ unit.cpp:2306-2308, 3 extra bails per gem harvest (total 4)
+          // EC4: gem bonus bails — C++ unit.cpp:2306-2308, up to 3 extra bails per gem harvest
+          // C++ guards each bonus bail with (BailCount > Tiberium) to prevent exceeding capacity
           if (bailCredits >= 50) {
-            entity.oreLoad += 3;
-            entity.oreCreditValue += 150; // 3 bonus bails x 50 credits (rules.ini GemValue)
+            const gemValue = 50; // rules.ini GemValue
+            for (let bonus = 0; bonus < 3; bonus++) {
+              if (entity.oreLoad >= Entity.BAIL_COUNT) break;
+              entity.oreLoad += 1;
+              entity.oreCreditValue += gemValue;
+            }
           }
         }
         // C++ parity: check cell state AFTER depleting — when the last ore bail is

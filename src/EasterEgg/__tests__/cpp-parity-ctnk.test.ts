@@ -479,16 +479,13 @@ describe('CTNK damage and death (combat.cpp)', () => {
   it('CTNK is not infantry — no prone damage reduction', () => {
     const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 10, 10);
     expect(ctnk.stats.isInfantry).toBe(false);
-    // Vehicles don't have prone behavior
+    // Vehicles don't have prone behavior — C++ only applies ProneDamageBias in infantry.cpp
     ctnk.isProne = true; // setting it shouldn't matter for non-infantry damage path
     const hpBefore = ctnk.hp;
-    // For non-infantry, isProne still applies in takeDamage (it checks isProne not isInfantry)
-    // but vehicles don't go prone in practice. Let's just verify damage is taken.
     ctnk.takeDamage(100, 'AP');
     const damageTaken = hpBefore - ctnk.hp;
-    // Prone bias applies to any entity with isProne=true
-    // 100 * 0.5 = 50 (prone damage bias)
-    expect(damageTaken).toBe(50);
+    // C++ infantry.cpp:329-330 — ProneDamageBias only applies to infantry, not vehicles
+    expect(damageTaken).toBe(100);
   });
 });
 
