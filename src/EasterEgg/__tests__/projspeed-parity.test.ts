@@ -47,9 +47,10 @@ describe('unit system conversion: C++ leptons/tick ↔ TS cells/sec', () => {
     expect(tsProjSpeedToCppSpeed(tsSpeed)).toBeCloseTo(cppSpeed, 10);
   });
 
-  it('C++ ROCKET speed (60 MPH) → ~4.69 cells/sec', () => {
+  it('C++ ROCKET speed (60 MPH) → ~3.52 cells/sec', () => {
+    // 60 * 15 / 256 = 3.515625
     const result = cppSpeedToTSProjSpeed(60);
-    expect(result).toBeCloseTo(4.6875, 3);
+    expect(result).toBeCloseTo(3.515625, 3);
   });
 });
 
@@ -173,24 +174,25 @@ describe('pixelsPerTick derivation from projSpeed', () => {
     return projSpeed * CELL_SIZE / GAME_TICKS_PER_SEC;
   }
 
-  it('projSpeed=100 → 120 pixels/tick (hitscan instant)', () => {
-    expect(pixelsPerTick(100)).toBe(120);
+  // At 15 TPS: pixelsPerTick = projSpeed * 24 / 15 = projSpeed * 1.6
+  it('projSpeed=100 → 160 pixels/tick (hitscan instant)', () => {
+    expect(pixelsPerTick(100)).toBe(160);
   });
 
-  it('projSpeed=40 → 48 pixels/tick (cannon shells)', () => {
-    expect(pixelsPerTick(40)).toBe(48);
+  it('projSpeed=40 → 64 pixels/tick (cannon shells)', () => {
+    expect(pixelsPerTick(40)).toBe(64);
   });
 
-  it('projSpeed=30 → 36 pixels/tick (missiles)', () => {
-    expect(pixelsPerTick(30)).toBe(36);
+  it('projSpeed=30 → 48 pixels/tick (missiles)', () => {
+    expect(pixelsPerTick(30)).toBe(48);
   });
 
-  it('projSpeed=12 → 14.4 pixels/tick (arcing/fireball)', () => {
-    expect(pixelsPerTick(12)).toBeCloseTo(14.4, 5);
+  it('projSpeed=12 → 19.2 pixels/tick (arcing/fireball)', () => {
+    expect(pixelsPerTick(12)).toBeCloseTo(19.2, 5);
   });
 
-  it('projSpeed=5 → 6 pixels/tick (parabombs/grenades)', () => {
-    expect(pixelsPerTick(5)).toBe(6);
+  it('projSpeed=5 → 8 pixels/tick (parabombs/grenades)', () => {
+    expect(pixelsPerTick(5)).toBe(8);
   });
 });
 

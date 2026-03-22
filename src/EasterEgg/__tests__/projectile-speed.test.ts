@@ -39,25 +39,27 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       const frames = calcProjectileTravelFrames(distPixels, rocketSpeed);
 
       // 5 cells * 24 px/cell = 120 px
-      // pixels/tick = 25 * 24 / 20 = 30
-      // frames = ceil(120 / 30) = 4
-      expect(frames).toBe(4);
+      // pixels/tick = 25 * 24 / 15 = 40
+      // frames = ceil(120 / 40) = 3
+      expect(frames).toBe(3);
       expect(frames).toBeGreaterThan(1);
     });
 
     it('travel time scales linearly with distance', () => {
       const speed = 25; // cells/sec (Dragon rocket speed)
+      // pixelsPerTick = 25 * 24 / 15 = 40
 
-      const frames2 = calcProjectileTravelFrames(2 * CELL_SIZE, speed);
-      const frames4 = calcProjectileTravelFrames(4 * CELL_SIZE, speed);
+      const frames3 = calcProjectileTravelFrames(3 * CELL_SIZE, speed);
       const frames6 = calcProjectileTravelFrames(6 * CELL_SIZE, speed);
+      const frames9 = calcProjectileTravelFrames(9 * CELL_SIZE, speed);
 
-      // Double the distance should approximately double the frames
+      // Double/triple the distance should approximately double/triple the frames
       // (exact linearity depends on ceiling rounding)
-      expect(frames4).toBeGreaterThanOrEqual(frames2 * 2 - 1);
-      expect(frames4).toBeLessThanOrEqual(frames2 * 2 + 1);
-      expect(frames6).toBeGreaterThanOrEqual(frames2 * 3 - 1);
-      expect(frames6).toBeLessThanOrEqual(frames2 * 3 + 1);
+      // 3 cells: ceil(72/40)=2, 6 cells: ceil(144/40)=4, 9 cells: ceil(216/40)=6
+      expect(frames6).toBeGreaterThanOrEqual(frames3 * 2 - 1);
+      expect(frames6).toBeLessThanOrEqual(frames3 * 2 + 1);
+      expect(frames9).toBeGreaterThanOrEqual(frames3 * 3 - 1);
+      expect(frames9).toBeLessThanOrEqual(frames3 * 3 + 1);
     });
 
     it('maxFrames is capped at MAX_PROJECTILE_FRAMES (45)', () => {
