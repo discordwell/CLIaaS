@@ -3396,13 +3396,22 @@ export class OracleStrategy {
         INF_SET.has(e.t) && e.hp > 0 && this.distanceSq(tanya, e) <= TANYA_RANGE_SQ,
       ).sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
 
-      // Shoot ALL barrels in range regardless of owner — barrels are environmental
-      // hazards. GoodGuy barrels near SAMs will chain-explode and kill Tanya.
+      // Pop every barrel in sight — chain reactions clear buildings, infantry,
+      // and hazards. 10-cell range since shoot_struct works at any distance.
+      // Ignore ally flag: barrels are environmental hazards regardless of owner.
+      const BARREL_SCAN_SQ = 100; // 10 cells
       const shootableBarrel = state.structures.find((s) =>
-        BARREL_TYPES.has(s.t) && s.hp > 0 && this.distanceSq(tanya, s) <= TANYA_RANGE_SQ,
+        BARREL_TYPES.has(s.t) && s.hp > 0 && this.distanceSq(tanya, s) <= BARREL_SCAN_SQ,
       );
 
-      // Priority: flee dogs > shoot infantry > shoot barrels > C4 nearest SAM
+      // C4 any adjacent non-SAM enemy building (blow up everything in reach)
+      const WALL_SET = new Set(['SBAG', 'CYCL', 'BRIK', 'BARB', 'WOOD', 'FENC']);
+      const adjacentBuilding = !BARREL_TYPES.has('') && state.structures.find((s) =>
+        !s.ally && s.hp > 0 && !BARREL_TYPES.has(s.t) && !WALL_SET.has(s.t) &&
+        s.t !== 'SAM' && this.distanceSq(tanya, s) <= 4,
+      );
+
+      // Priority: flee dogs > shoot infantry > pop barrels > C4 adjacent buildings > SAMs
       if (dogDist <= 36) {
         const dx = tanya.cx - nearestDog!.cx;
         const dy = tanya.cy - nearestDog!.cy;
@@ -3417,6 +3426,10 @@ export class OracleStrategy {
       } else if (shootableBarrel) {
         commands.push({ cmd: 'shoot_struct', ids: [tanya.id], target: shootableBarrel.id });
         reasons.push(`BOOM ${shootableBarrel.t}(${shootableBarrel.cx},${shootableBarrel.cy})`);
+      } else if (adjacentBuilding) {
+        // Blow up any enemy building she's standing next to
+        commands.push({ cmd: 'attack', ids: [tanya.id], target: adjacentBuilding.id });
+        reasons.push(`C4 ${adjacentBuilding.t}(${adjacentBuilding.cx},${adjacentBuilding.cy})`);
       } else if (remainingSams.length > 0) {
         // Target SAMs in fixed order to prevent flip-flopping:
         // 1. South pair (y≥100) — shoot from spawn, nearest first
@@ -3948,36 +3961,35 @@ export class OracleStrategy {
         const groupCenter = this.centroid(atRally);
         const nearbyTanks = state.enemies.filter(
           (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            this.distanceSq(e, groupCenter) <= 900, // 30 cells
+            this.distanceSq(e, groupCenter) <= 225, // 15 cells — base defenders only
         ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
 
         let targetId: number | null = null;
         let targetDesc = '';
         let targetPos: Point = { cx: 0, cy: 0 };
 
-        // BUILDINGS FIRST — stop enemy from producing replacements.
-        // Only fight enemy tanks if they're literally on top of us (10 cells).
-        const veryClose = nearbyTanks.filter(
-          (e) => this.distanceSq(e, groupCenter) <= 100, // 10 cells
-        );
-        if (structTarget && veryClose.length === 0) {
-          // Path clear — hit the production building
-          targetId = structTarget.id;
-          targetDesc = structTarget.t;
-          targetPos = structTarget;
-        } else if (veryClose.length > 0) {
-          // Tank in our face — kill it, then resume building attack
-          targetId = veryClose[0].id;
-          targetDesc = veryClose[0].t;
-          targetPos = veryClose[0];
+        // Kill enemy tanks/V2RL FIRST (we do this fast with focus-fire).
+        // Once no more tanks within 30 cells, path is clear → attack_move to building.
+        if (nearbyTanks.length > 0) {
+          // Focus-fire nearest enemy tank — all tanks on one target
+          targetId = nearbyTanks[0].id;
+          targetDesc = nearbyTanks[0].t;
+          targetPos = nearbyTanks[0];
         } else if (structTarget) {
+          // ALL enemy tanks dead — path is clear, hit the building
           targetId = structTarget.id;
           targetDesc = structTarget.t;
           targetPos = structTarget;
         }
 
         if (targetId != null) {
-          commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: targetId });
+          if (nearbyTanks.length > 0 && nearbyTanks[0].id === targetId) {
+            // Enemy unit — 'attack' by ID (pathfinds to unit, ignores infantry)
+            commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: targetId });
+          } else {
+            // Building — 'attack_move' to coords (path should be clear of tanks now)
+            commands.push({ cmd: 'attack_move', ids: atRally.map((u) => u.id), cx: targetPos.cx, cy: targetPos.cy });
+          }
           for (const u of atRally) this.recordMove(u.id, targetPos.cx, targetPos.cy);
           reasons.push(`assault KILL ${targetDesc} (${atRally.length} → ${targetPos.cx},${targetPos.cy})`);
         }
