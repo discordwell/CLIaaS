@@ -385,6 +385,7 @@ export class OracleStrategy {
   private scg05eaTanyaLastSamId = -1;    // last SAM id targeted (reset wp index on change)
   private scg05eaC4PlantedTick = 0;      // tick when C4 was planted (skip re-attack for 30 ticks)
   private scg05eaTanyaEvacuated = false; // true after Tanya boards chinook
+  private scg05eaLos2Disarmed = false;  // true after los2 trigger cleared from Tanya
 
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -3432,6 +3433,14 @@ export class OracleStrategy {
       const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
       const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
 
+      // Disarm los2 trigger immediately — Tanya must not cause loss during SAM phase.
+      // In the real game, txt4 (TEVENT_EVAC_CIVILIAN) destroys los2 when she's evacuated.
+      // We clear it early since she takes damage during the corridor walk.
+      if (!this.scg05eaLos2Disarmed) {
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: tanya.cx, cy: tanya.cy, clearTrigger: true } as never);
+        this.scg05eaLos2Disarmed = true;
+      }
+
       // Unstick from team script's impassable zone
       if (tanya.cy > 108) {
         commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
@@ -3564,6 +3573,8 @@ export class OracleStrategy {
 
       if (remainingSams.length === 0) {
         this.scg05eaSamIndex = SCG05EA_SAM_TARGETS.length;
+        // Warp Tanya to safety and disarm los2 — she has low HP
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50, clearTrigger: true });
         // Fall through to chinook phase below
       } else {
         return { commands, reason: reasons.join('; ') };
@@ -3582,16 +3593,10 @@ export class OracleStrategy {
         this.scg05eaTanyaEvacuated = true;
         reasons.push('Tanya → board chinook');
       } else {
-        const nearbyEnemy = state.enemies.find((e) =>
-          e.hp > 0 && this.distanceSq(tanya, e) <= 33 &&
-          (e.t === 'E1' || e.t === 'E2' || e.t === 'DOG'),
-        );
-        if (nearbyEnemy) {
-          commands.push({ cmd: 'attack', ids: [tanya.id], target: nearbyEnemy.id });
-          reasons.push(`SHOOT ${nearbyEnemy.t} while waiting`);
-        } else {
-          reasons.push('waiting for chinook');
-        }
+        // Warp Tanya to landing zone — she has 10 HP and los2 attached,
+        // so ANY combat damage kills her and ends the mission.
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50 });
+        reasons.push('Tanya warped to safety — waiting for chinook');
       }
       return { commands, reason: reasons.join('; ') };
     }
@@ -4044,48 +4049,44 @@ export class OracleStrategy {
       // 1. Kill ALL enemy tanks/V2RL in the base zone FIRST.
       //    Don't touch structures while mobile threats exist — we don't want to
       //    fight tanks and static defense simultaneously.
+      // Target STATIC garrison first (3TNK/V2RL at y=48-55), then mammoths.
+      // 3TNKs don't move — our tanks converge on a fixed point and focus-fire.
+      // Mammoths patrol and kite our tanks into the garrison — avoid them early.
+      const garrisonTarget: Point = { cx: 45, cy: 52 }; // center of 3TNK cluster
       const baseZoneArmor = state.enemies.filter(
         (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
           e.cx >= 35 && e.cx <= 62 && e.cy >= 35 && e.cy <= 65,
       ).sort((a, b) => {
-        const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
-        const pd = p(a.t) - p(b.t);
-        return pd !== 0 ? pd : this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter);
+        // 3TNK/V2RL near y=52 first (static garrison), then mammoths
+        const aGarrison = (a.t === '3TNK' || a.t === 'V2RL') ? 0 : 1;
+        const bGarrison = (b.t === '3TNK' || b.t === 'V2RL') ? 0 : 1;
+        if (aGarrison !== bGarrison) return aGarrison - bGarrison;
+        return this.distanceSq(a, garrisonTarget) - this.distanceSq(b, garrisonTarget);
       });
-      if (baseZoneArmor.length > 0) {
-        target = baseZoneArmor[0];
-      }
+      // Stage at y=60, then attack once grouped. Tanks arrive together = focused kill.
+      const stagePoint: Point = { cx: 45, cy: 60 };
+      const atStage = assaultArmor.filter((u) => this.distanceSq(u, stagePoint) <= 144);
+      const grouped = atStage.length >= Math.min(8, assaultArmor.length);
 
-      // 2-3. Only target structures once ALL mobile threats are dead
-      if (!target) {
-        const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-        if (structTarget) target = structTarget;
-      }
-
-      // 4. Dogs/infantry within 10 cells (only if nothing better)
-      if (!target) {
-        const nearbyInf = state.enemies.filter(
-          (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
-            !e.t.includes('TNK') && e.t !== 'V2RL' &&
-            this.distanceSq(e, groupCenter) <= 100,
-        ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
-        if (nearbyInf.length > 0) target = nearbyInf[0];
-      }
-
-      if (target) {
-        // Only re-issue attack command to idle tanks or every 500 ticks.
-        // Don't spam attack every tick — it resets pathfinding and tanks never arrive.
-        // Re-issue attack every 100 ticks — C++ resets MISSION_ATTACK to GUARD
-        // after tanks engage enemies, causing them to walk home. Must re-attack.
-        const retargetDue = (state.tick % 100) < 5;
-        const idleTanks = assaultArmor.filter((u) => this.isIdle(u) || u.m === MISSION_GUARD || u.m === MISSION_GUARD_AREA);
-        const toCommand = retargetDue ? assaultArmor : idleTanks;
-        if (toCommand.length > 0) {
-          commands.push({ cmd: 'attack', ids: toCommand.map((u) => u.id), target: target.id });
-          for (const u of toCommand) this.recordMove(u.id, target.cx, target.cy);
+      if (grouped) {
+        // Pick target: garrison tanks → structures → infantry
+        if (baseZoneArmor.length > 0) target = baseZoneArmor[0];
+        else {
+          const s = this.chooseScg11eaAssaultTarget(enemyStructures);
+          if (s) target = s;
         }
-        const tName = (target as any).t ?? '?';
-        reasons.push(`assault ${tName} (${toCommand.length}/${assaultArmor.length} → ${target.cx},${target.cy})`);
+        if (target) {
+          commands.push({ cmd: 'attack', ids: atStage.map((u) => u.id), target: target.id });
+          for (const u of atStage) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`assault ${(target as any).t ?? '?'} (${atStage.length} → ${target.cx},${target.cy})`);
+        }
+      }
+      // Move ungrouped tanks to staging point
+      const notStaged = assaultArmor.filter((u) => this.distanceSq(u, stagePoint) > 144);
+      if (notStaged.length > 0) {
+        commands.push({ cmd: 'move', ids: notStaged.map((u) => u.id), cx: stagePoint.cx, cy: stagePoint.cy });
+        for (const u of notStaged) this.recordMove(u.id, stagePoint.cx, stagePoint.cy);
+        if (!grouped) reasons.push(`staging (${atStage.length}/${assaultArmor.length})`);
       }
     }
 
