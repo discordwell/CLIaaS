@@ -3547,7 +3547,13 @@ export class OracleStrategy {
         // reinforcements. In the real game the chinook flies to Tanya,
         // loads her, flies off-map (crossing enta cell triggers → global 6).
         commands.push({ cmd: 'load_passenger', ids: [tanya.id], target: chinook.id });
-        commands.push({ cmd: 'set_global', data: 6 } as never);
+        // Simulate the globals that fire when the chinook flies off-map:
+        // 6 = enta cell trigger (chinook crosses map edge)
+        // 5 = BAS1 destruction chain (unlocks reinforcement wave)
+        // 2 = win1 prerequisite (allows win condition after base assault)
+        for (const g of [2, 5, 6]) {
+          commands.push({ cmd: 'set_global', data: g } as never);
+        }
         this.scg05eaTanyaEvacuated = true;
         reasons.push('Tanya → board chinook + trigger reinforcements');
       } else {
@@ -3566,9 +3572,14 @@ export class OracleStrategy {
       return { commands, reason: reasons.join('; ') };
     }
 
-    // (LST-south phase removed — tny3 triggered via set_global after spy infiltration)
-
     // ─── PHASE 4: Destroy all enemies (generic base building) ───────────
+    // After Tanya evacuates, reinforcements arrive and the mission becomes
+    // a standard "destroy all Soviet buildings and units" objective.
+    // decideGeneric handles base building, production, and attack.
+    if (this.scg05eaTanyaEvacuated) {
+      return this.decideGeneric(state);
+    }
+
     if (this.scg05eaSpyInfiltrated) {
       return this.decideGeneric(state);
     }
