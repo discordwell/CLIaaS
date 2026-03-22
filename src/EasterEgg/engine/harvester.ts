@@ -87,7 +87,7 @@ export function findHarvesterOre(
       for (const ft of friendlyTargets) {
         const tdx = Math.abs(ft.cx - rx);
         const tdy = Math.abs(ft.cy - ry);
-        if (tdx <= 3 && tdy <= 3) { isTargeted = true; break; }
+        if (tdx <= 5 && tdy <= 5) { isTargeted = true; break; }
       }
       if (isTargeted) continue;
 
@@ -111,7 +111,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
       if (!isIdleMission(entity.mission)) break;
       // Find nearest ore cell — AI harvesters spread to avoid clustering
       const ec = entity.cell;
-      const oreCell = findHarvesterOre(ctx, entity, ec.cx, ec.cy, 32);
+      const oreCell = findHarvesterOre(ctx, entity, ec.cx, ec.cy, 48);
       if (oreCell) {
         entity.harvesterState = 'seeking';
         entity.mission = Mission.MOVE;
@@ -161,10 +161,15 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
             entity.oreCreditValue += 150; // 3 bonus bails x 50 credits (rules.ini GemValue)
           }
         }
+        // C++ parity: check cell state AFTER depleting — when the last ore bail is
+        // taken, depleteOre() returns credits > 0 AND sets overlay to 0xFF. The
+        // harvester must detect this on the SAME tick and immediately seek new ore.
+        const cellOvl = ctx.map.overlay[ec.cy * MAP_CELLS + ec.cx];
+        const cellDepleted = bailCredits === 0 || (bailCredits > 0 && (cellOvl < 0x03 || cellOvl > 0x12));
         // Check if full or current cell depleted
         if (entity.oreLoad >= Entity.BAIL_COUNT) {
           entity.harvesterState = 'returning';
-        } else if (bailCredits === 0) {
+        } else if (cellDepleted) {
           // No more ore at this cell — look for adjacent ore
           const newOre = ctx.map.findNearestOre(ec.cx, ec.cy, 6);
           if (newOre && entity.oreLoad < Entity.BAIL_COUNT) {

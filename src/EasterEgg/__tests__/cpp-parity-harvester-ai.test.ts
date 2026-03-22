@@ -1215,18 +1215,12 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     // Place more ore nearby so there's somewhere to go
     placeGold(ctx.map, 52, 50, 5);
 
-    // First harvest tick: depletes the last density level (returns 25 credits),
-    // oreLoad goes from 5 to 6. bailCredits > 0 so no re-seek yet.
+    // C++ parity: depletes the last density level (returns 25 credits),
+    // oreLoad goes from 5 to 6. Cell is now empty — harvester detects
+    // depletion on the SAME tick and immediately seeks adjacent ore.
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(6);
-    expect(harv.harvesterState).toBe('harvesting'); // still harvesting
-
-    // Second harvest tick: cell is now empty (0xFF), depleteOre returns 0.
-    // bailCredits === 0 triggers re-seek to (52,50).
-    harv.harvestTick = 19; // set to trigger harvest on tick 20
-    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('seeking');
-    expect(harv.oreLoad).toBe(6); // no new bail (cell was empty)
   });
 
   it('returns with partial load when no ore remains', () => {
@@ -1240,15 +1234,9 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     // Place minimal ore that depletes, with no nearby replacement
     placeGold(ctx.map, 50, 50, 0);
 
-    // First harvest tick: depletes the last density level (25 credits collected).
-    // oreLoad 5→6. Cell is now empty but bailCredits was > 0 this tick.
-    updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(6);
-    expect(harv.harvesterState).toBe('harvesting');
-
-    // Second harvest tick: cell is empty (0xFF), depleteOre returns 0.
-    // No nearby ore → return with partial load.
-    harv.harvestTick = 19;
+    // C++ parity: depletes the last density level (25 credits collected).
+    // oreLoad 5→6. Cell is now empty — harvester detects depletion on the
+    // SAME tick and returns with partial load (no nearby ore).
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(6);
     expect(harv.harvesterState).toBe('returning');

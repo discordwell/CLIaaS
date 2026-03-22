@@ -349,9 +349,9 @@ describe('calcProjectileTravelFrames — projSpeed parity', () => {
   });
 
   it('conversion formula: pixelsPerTick = projSpeed × CELL_SIZE / GAME_TICKS_PER_SEC', () => {
-    // projSpeed=15 cells/sec → pixelsPerTick = 15 * 24 / 20 = 18.0 px/tick
+    // projSpeed=15 cells/sec → pixelsPerTick = 15 * 24 / 15 = 24.0 px/tick
     const pixelsPerTick = 15 * CELL_SIZE / GAME_TICKS_PER_SEC;
-    expect(pixelsPerTick).toBe(18);
+    expect(pixelsPerTick).toBe(24);
   });
 
   it('short distance, fast projectile = 1 tick minimum', () => {
@@ -368,14 +368,14 @@ describe('calcProjectileTravelFrames — projSpeed parity', () => {
 
   it('specific example: 5 cells distance, projSpeed=15', () => {
     const distPx = 5 * CELL_SIZE; // 120 pixels
-    const pixelsPerTick = 15 * CELL_SIZE / GAME_TICKS_PER_SEC; // 24 px/tick
+    const pixelsPerTick = 15 * CELL_SIZE / GAME_TICKS_PER_SEC; // 24 px/tick at 15Hz
     const expected = Math.ceil(distPx / pixelsPerTick); // ceil(120/24) = 5
     expect(calcProjectileTravelFrames(distPx, 15)).toBe(expected);
   });
 
   it('specific example: 3 cells distance, projSpeed=40 (hitscan-like)', () => {
     const distPx = 3 * CELL_SIZE; // 72 pixels
-    const pixelsPerTick = 40 * CELL_SIZE / GAME_TICKS_PER_SEC; // 64 px/tick
+    const pixelsPerTick = 40 * CELL_SIZE / GAME_TICKS_PER_SEC; // 64 px/tick at 15Hz
     const expected = Math.ceil(distPx / pixelsPerTick); // ceil(72/64) = 2
     expect(calcProjectileTravelFrames(distPx, 40)).toBe(expected);
   });
@@ -393,7 +393,7 @@ describe('unit system constants', () => {
     expect(LEPTON_SIZE).toBe(256);
   });
 
-  it('GAME_TICKS_PER_SEC = 20 (C++ default GameSpeed=3: 60/3)', () => {
-    expect(GAME_TICKS_PER_SEC).toBe(20);
+  it('GAME_TICKS_PER_SEC = 15 (C++ default GameSpeed=4: 60/4)', () => {
+    expect(GAME_TICKS_PER_SEC).toBe(15);
   });
 });

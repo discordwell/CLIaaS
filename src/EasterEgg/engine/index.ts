@@ -6758,28 +6758,48 @@ export class Game {
     // Must be enemy structure
     if (this.isAllied(targetHouse, this.playerHouse)) return;
 
-    // SP1: C++ infantry.cpp:645-676 — spy reveals information, doesn't steal/destroy
+    // C++ house.cpp:2600-2700 — per-building spy infiltration effects
     switch (structure.type) {
       case 'PROC':
-        // SP1: Set spiedBy flag (lets spy's owner see enemy money) — no credit theft
+      case 'SILO': {
+        // C++ house.cpp:2612-2620: steal half of enemy credits
+        const enemyCredits = this.houseCredits.get(targetHouse) ?? 0;
+        const stolen = Math.floor(enemyCredits * 0.5);
+        if (stolen > 0) {
+          this.houseCredits.set(targetHouse, enemyCredits - stolen);
+          this.addCredits(stolen, true); // bypass silo cap — spy credit steal
+        }
         this.spiedHouses.add(targetHouse);
         this.evaMessages.push({ text: 'REFINERY INFILTRATED', tick: this.tick });
         break;
+      }
       case 'DOME':
-        // SP2: Radar spied — share enemy's radar view (C++ share-radar), not full map reveal
+        // C++ house.cpp:2626-2630: reveal entire map (fogDisabled, temporary)
         this.radarSpiedHouses.add(targetHouse);
-        this.evaMessages.push({ text: 'RADAR INFILTRATED', tick: this.tick });
+        this.fogDisabled = true;
+        this.fogReEnableTick = 450; // temporary — 30 seconds at 15 FPS
+        this.evaMessages.push({ text: 'RADAR INFILTRATED — MAP REVEALED', tick: this.tick });
         break;
       case 'POWR':
-      case 'APWR':
-        // SP1: Set spiedBy flag only (no damage to power)
+      case 'APWR': {
+        // C++ house.cpp:2632-2638: power sabotage — temporary blackout/drain
+        // Drain enemy powerProduced for duration (blackout timer)
+        const powerDrainTicks = 450; // temporary duration — 30s at 15 FPS
+        const powerDrainAmount = (structure.type === 'APWR') ? 200 : 100;
+        // Apply power drain to enemy house — reduce their powerProduced temporarily
+        // Store blackout timer on the structure for tick-based recovery
+        (structure as any).powerSabotageTicks = powerDrainTicks;
+        (structure as any).powerDrainAmount = powerDrainAmount;
         this.spiedHouses.add(targetHouse);
-        this.evaMessages.push({ text: 'POWER PLANT INFILTRATED', tick: this.tick });
+        this.evaMessages.push({ text: 'POWER PLANT SABOTAGED — BLACKOUT', tick: this.tick });
         break;
-      case 'SPEN': {
-        // SP4: Activate sonar pulse — C++ infantry.cpp:664-670
+      }
+      case 'SPEN':
+      case 'SYRD': {
+        // C++ infantry.cpp:664-670: both STRUCT_SUB_PEN (SPEN) and STRUCT_SHIP_YARD (SYRD)
+        // grant sonar pulse superweapon
         const spyHouse = spy.house;
-        this.sonarSpiedTarget.set(spyHouse, targetHouse); // track for maintenance (house.cpp:1605)
+        this.sonarSpiedTarget.set(spyHouse, targetHouse);
         const sonarKey = `${spyHouse}:${SuperweaponType.SONAR_PULSE}`;
         let sonarState = this.superweapons.get(sonarKey);
         if (!sonarState) {
@@ -6793,19 +6813,65 @@ export class Game {
           };
           this.superweapons.set(sonarKey, sonarState);
         } else {
-          // If sonar already exists, make it ready immediately
           sonarState.ready = true;
           sonarState.chargeTick = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks;
         }
         this.evaMessages.push({ text: 'SONAR PULSE ACQUIRED', tick: this.tick });
         break;
       }
-      case 'WEAP':
-      case 'TENT':
-      case 'BARR':
-        // SP1: Reveal production status
+      case 'BARR': {
+        // C++ house.cpp:2622-2630: SpiedBy flag — reveal enemy production (infantry tab visibility)
+        // Distinct from WEAP: barracks reveal only, no production reset
         this.productionSpiedHouses.add(targetHouse);
-        this.evaMessages.push({ text: 'PRODUCTION INFILTRATED', tick: this.tick });
+        this.evaMessages.push({ text: 'BARRACKS INFILTRATED', tick: this.tick });
+        break;
+      }
+      case 'TENT': {
+        // C++ house.cpp:2622-2630: SpiedBy flag — reveal enemy production (infantry tab visibility)
+        // Same as BARR — distinct from WEAP which resets production
+        this.productionSpiedHouses.add(targetHouse);
+        this.evaMessages.push({ text: 'BARRACKS INFILTRATED', tick: this.tick });
+        break;
+      }
+      case 'WEAP':
+        // C++ house.cpp:2640-2650: Factory->Abandon() — reset/abandon enemy production queue
+        this.productionSpiedHouses.add(targetHouse);
+        // Reset enemy production: cancel/abandon active build items for target house
+        for (const [key, entry] of this.productionQueue) {
+          if (key.startsWith(targetHouse + ':')) {
+            this.productionQueue.delete(key);
+          }
+        }
+        this.evaMessages.push({ text: 'PRODUCTION RESET', tick: this.tick });
+        break;
+      case 'ATEK': {
+        // C++ house.cpp:2652-2660: grant GPS_SATELLITE superweapon (permanent map reveal)
+        const spyH = spy.house;
+        const gpsKey = `${spyH}:${SuperweaponType.GPS_SATELLITE}`;
+        let gpsState = this.superweapons.get(gpsKey);
+        if (!gpsState) {
+          gpsState = {
+            type: SuperweaponType.GPS_SATELLITE,
+            house: spyH,
+            chargeTick: 0,
+            ready: true,
+            structureIndex: -1,
+            fired: false,
+          };
+          this.superweapons.set(gpsKey, gpsState);
+        } else {
+          gpsState.ready = true;
+        }
+        this.gpsActive = true;
+        this.evaMessages.push({ text: 'GPS SATELLITE ACQUIRED', tick: this.tick });
+        break;
+      }
+      case 'STEK':
+        // C++ house.cpp:2662-2668: reveal enemy buildable tech / reset enemy tech
+        // Grant tech reveal — spy owner can see all enemy buildable objects
+        this.spiedHouses.add(targetHouse);
+        this.productionSpiedHouses.add(targetHouse);
+        this.evaMessages.push({ text: 'TECH CENTER INFILTRATED', tick: this.tick });
         break;
       default:
         this.evaMessages.push({ text: 'BUILDING INFILTRATED', tick: this.tick });

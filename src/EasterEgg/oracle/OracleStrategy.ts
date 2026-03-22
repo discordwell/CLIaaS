@@ -3450,16 +3450,23 @@ export class OracleStrategy {
         commands.push({ cmd: 'attack', ids: [tanya.id], target: adjacentBuilding.id });
         reasons.push(`C4 ${adjacentBuilding.t}(${adjacentBuilding.cx},${adjacentBuilding.cy})`);
       } else if (remainingSams.length > 0) {
-        // Target SAMs in fixed order to prevent flip-flopping:
-        // 1. South pair (y≥100) — shoot from spawn, nearest first
-        // 2. West north SAM (17,94) — closest via corridor
-        // 3. East north SAM (28,94) — shoot from corridor position
-        const southSams = remainingSams.filter(s => s.cy >= 100)
-          .sort((a, b) => this.distanceSq(tanya, a) - this.distanceSq(tanya, b));
-        const northSams = remainingSams.filter(s => s.cy < 100)
-          .sort((a, b) => a.cx - b.cx); // west first
-        const ordered = [...southSams, ...northSams];
-        const sam = ordered[0];
+        // Fixed SAM order to minimize time in SAM fire zones:
+        // SW(16,107) → NW(17,94) → NE(28,94) → SE(28,107)
+        // After C4-ing the first south SAM, go NORTH through corridor
+        // to avoid crossing the other south SAM's 7.5-cell firing zone.
+        const samOrder = [
+          { cx: 16, cy: 107 }, // SW — closest from spawn
+          { cx: 17, cy: 94 },  // NW — via corridor
+          { cx: 28, cy: 94 },  // NE — walk east at y=94
+          { cx: 28, cy: 107 }, // SE — approach from north
+        ];
+        // Pick first SAM from order that still exists
+        let sam = remainingSams[0];
+        for (const target of samOrder) {
+          const match = remainingSams.find(s =>
+            Math.abs(s.cx - target.cx) <= 2 && Math.abs(s.cy - target.cy) <= 2);
+          if (match) { sam = match; break; }
+        }
         const samDist = this.distanceSq(tanya, sam);
         // C4 approach: walk to adjacent cell via move commands, then attack to
         // plant C4. Move commands are faster than attack_struct because they use

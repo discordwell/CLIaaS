@@ -629,7 +629,7 @@ export class GameMap {
   }
 
   /** Find nearest ore/gem cell to a given position (returns null if none).
-   *  C++ parity: short scan=6, long scan=32 (unit.cpp:2230-2234). */
+   *  C++ parity: OreNearScan=6, OreFarScan=48 (unit.cpp:2230-2234). */
   findNearestOre(cx: number, cy: number, maxRange = 6): CellPos | null {
     let bestDist = Infinity;
     let best: CellPos | null = null;

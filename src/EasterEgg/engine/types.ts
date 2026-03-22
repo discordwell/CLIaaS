@@ -13,8 +13,8 @@ export const LEPTON_SIZE = 256; // leptons per cell
 /** Convert C++ MPH (leptons/tick) to pixels/tick: MPH * CELL_SIZE / LEPTON_SIZE */
 export const MPH_TO_PX = CELL_SIZE / LEPTON_SIZE; // 0.09375
 export const MAP_CELLS = 128; // cells per map side
-/** C++ default GameSpeed=3 → DesiredFrameRate = 60/3 = 20 (queue.cpp:1425, options.cpp:91) */
-export const GAME_TICKS_PER_SEC = 20;
+/** C++ default GameSpeed=4 → DesiredFrameRate = 60/4 = 15 (queue.cpp:1425, options.cpp:91) */
+export const GAME_TICKS_PER_SEC = 15;
 
 // TEMPERATE theatre template type ranges (from TEMPERAT.INI)
 export const TEMPLATE_ROAD_MIN = 173;
@@ -905,16 +905,13 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
 
 // C++ parity (techno.cpp:6077): Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
 // At 15 Hz: TICKS_PER_MINUTE = 900, BuildSpeedBias = 0.8 (rules.ini BuildSpeed=.8)
-// Scale to 20 Hz: multiply by 20/15 = 4/3
-// Formula: buildTime_20hz = Math.floor(Cost * 0.8 * 900 / 1000 * 4 / 3)
-// = Math.floor(Cost * 0.96)
+// Formula: buildTime = Math.floor(Cost * 0.8 * 900 / 1000) = Math.floor(Cost * 0.72)
 const CPP_BUILD_SPEED_BIAS = 0.8;
 const CPP_TICKS_PER_MINUTE = 900; // 15 Hz * 60
-const TS_TICK_SCALE = 20 / 15;    // 20 Hz / 15 Hz
 
 for (const item of PRODUCTION_ITEMS) {
   item.buildTime = Math.floor(
-    item.cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000 * TS_TICK_SCALE
+    item.cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000
   );
 }
 

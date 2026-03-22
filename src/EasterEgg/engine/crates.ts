@@ -395,9 +395,9 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
     }
     case 'invulnerability': {
       // C++ cell.cpp:2594-2603: all LAYER_GROUND techno within CrateRadius get IronCurtain.
-      // Duration: TICKS_PER_MINUTE * 1.0 = 900 C++ ticks = 60s. At TS 20 TPS: 1200 ticks.
+      // Duration: TICKS_PER_MINUTE * 1.0 = 900 ticks = 60s at 15 Hz (C++ cell.cpp:2596)
       // C++ does NOT filter by house — even enemy units get invulnerability.
-      const invulnDuration = 1200;
+      const invulnDuration = 900;
       for (const e of ctx.entities) {
         if (!e.alive) continue;
         if (worldDist({ x: crate.x, y: crate.y }, e.pos) >= CRATE_RADIUS) continue;
