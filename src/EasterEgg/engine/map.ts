@@ -266,9 +266,12 @@ export class GameMap {
   addTree(tree: MapTree): void {
     const idx = tree.cy * MAP_CELLS + tree.cx;
     this.trees.set(idx, tree);
+    const maxIdx = MAP_CELLS * MAP_CELLS;
     for (const cellIdx of tree.occupyCells) {
-      this.treeOccupied.add(cellIdx);
-      this.treeCellToTree.set(cellIdx, tree);
+      if (cellIdx >= 0 && cellIdx < maxIdx) {
+        this.treeOccupied.add(cellIdx);
+        this.treeCellToTree.set(cellIdx, tree);
+      }
     }
   }
 
