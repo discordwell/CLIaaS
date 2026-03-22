@@ -861,7 +861,7 @@ describe('IQ-gated AI behaviors — TS implementation (ai.ts, combat.ts, superwe
     { behavior: 'base rebuild', iq: 2 /* ai.ts:821 */ },
     { behavior: 'attack groups', iq: 2 /* ai.ts:1493 */ },
     { behavior: 'defense', iq: 2 /* ai.ts:1677 */ },
-    { behavior: 'scatter on damage', iq: 2 /* combat.ts:339 */ },
+    { behavior: 'scatter on damage', iq: 3 /* combat.ts:339 — matches C++ IQScatter=3 */ },
     { behavior: 'retreat', iq: 3 /* ai.ts:1726 */ },
     { behavior: 'superweapons', iq: 3 /* superweapon.ts:266 */ },
   ];
@@ -870,11 +870,10 @@ describe('IQ-gated AI behaviors — TS implementation (ai.ts, combat.ts, superwe
     expect(cppIQGates.find(g => g.behavior === 'scatter on damage')?.iq).toBe(3);
   });
 
-  it('TS scatter on damage requires IQ >= 2 — diverges from C++ IQScatter=3', () => {
-    // combat.ts:338-339: if (ctx.aiIQ(entity.house) < 2) return;
+  it('TS scatter on damage requires IQ >= 3 — matches C++ IQScatter=3', () => {
+    // combat.ts:338-339: if (ctx.aiIQ(entity.house) < 3) return;
     // C++ IQScatter=3 (rules.cpp:149)
-    expect(tsIQGates.find(g => g.behavior === 'scatter on damage')?.iq).toBe(2);
-    // PARITY GAP: TS gates scatter at IQ 2, C++ at IQ 3
+    expect(tsIQGates.find(g => g.behavior === 'scatter on damage')?.iq).toBe(3);
   });
 
   it('C++ IQSuperWeapons requires IQ >= 4', () => {

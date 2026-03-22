@@ -3317,37 +3317,45 @@ export class OracleStrategy {
     const engineers = playerUnits.filter(u => u.t === 'E6');
     const hasConYard = state.structures.some(s => s.ally && s.t === 'FACT');
     if (assaultUnits.length > 0 && !hasConYard) {
-      // Tank rush to western ConYard(16,78) — hug western edge to avoid Teslas.
-      // Use MOVE (not attack_move) to prevent tanks chasing enemies off-course.
-      // Once near the ConYard, switch to attack_move for the final push.
+      // Rush to western ConYard(16,78) and capture it.
+      // Target-fire defenders near the ConYard, never the ConYard itself.
       const enemyFact = state.structures.find(s => s.t === 'FACT' && !s.ally);
       const target = enemyFact ?? { cx: 16, cy: 78 };
-      // Check if tanks are near the target already
-      const nearTarget = assaultUnits.some(u => this.distanceSq(u, target) <= 100);
-      if (nearTarget) {
-        // Close enough — attack_move for the final push
-        commands.push({
-          cmd: 'attack_move',
-          ids: assaultUnits.map(u => u.id),
-          cx: target.cx, cy: target.cy,
-        });
+      const nearTarget = assaultUnits.some(u => this.distanceSq(u, target) <= 144);
+      const factCapturable = enemyFact && (enemyFact.hp / enemyFact.mhp) < 0.25;
+
+      if (!nearTarget) {
+        // Move to staging area — inland route avoiding coastal water and Teslas
+        commands.push({ cmd: 'move', ids: assaultUnits.map(u => u.id), cx: 20, cy: 75 });
       } else {
-        // Move inland then south — coast at x=15 is impassable for vehicles.
-        // Route: east to x=20 (inland), then south to y=75 (near ConYard).
-        // Stays 20+ cells from Tesla coils at (40,73)/(48,73).
-        commands.push({
-          cmd: 'move',
-          ids: assaultUnits.map(u => u.id),
-          cx: 20, cy: 75,
-        });
-      }
-      // Engineers capture ConYard when at red health (< 25% HP)
-      if (engineers.length > 0 && enemyFact) {
-        if (enemyFact.hp < enemyFact.mhp * 0.25) {
-          commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyFact.id });
-          reasons.push(`CAPTURE FACT hp=${enemyFact.hp}/${enemyFact.mhp}`);
+        // Near the ConYard — target-fire nearby enemies, don't attack_move.
+        // Find enemy units near the ConYard and assign tanks to kill them.
+        const nearbyEnemies = state.enemies
+          .filter(e => e.hp > 0 && this.distanceSq(e, target) <= 225) // within 15 cells
+          .sort((a, b) => this.distanceSq(a, target) - this.distanceSq(b, target));
+
+        if (nearbyEnemies.length > 0) {
+          // Each tank targets the nearest enemy to the ConYard
+          for (let i = 0; i < assaultUnits.length; i++) {
+            const enemy = nearbyEnemies[Math.min(i, nearbyEnemies.length - 1)];
+            commands.push({ cmd: 'attack', ids: [assaultUnits[i].id], target: enemy.id });
+          }
         } else {
-          commands.push({ cmd: 'move', ids: engineers.map(u => u.id), cx: 13, cy: 80 });
+          // No defenders left — just hold near the ConYard
+          commands.push({ cmd: 'move', ids: assaultUnits.map(u => u.id),
+            cx: target.cx - 2, cy: target.cy });
+        }
+      }
+
+      // Engineers: move toward ConYard, capture when below 25%
+      if (engineers.length > 0 && enemyFact) {
+        if (factCapturable) {
+          commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyFact.id });
+          reasons.push(`CAPTURE! FACT ${Math.round(enemyFact.hp / enemyFact.mhp * 100)}%`);
+        } else {
+          // Stage near ConYard so engineer is ready when HP drops
+          commands.push({ cmd: 'move', ids: engineers.map(u => u.id),
+            cx: nearTarget ? target.cx - 3 : 18, cy: nearTarget ? target.cy + 2 : 72 });
         }
       }
     }

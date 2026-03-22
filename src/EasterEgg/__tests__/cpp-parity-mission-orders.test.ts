@@ -208,7 +208,7 @@ describe('MissionControl metadata — C++ mission.cpp parity', () => {
     QMOVE:          { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },
     RETREAT:        { noThreat: true,  zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
     GUARD:          { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },
-    STICKY:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },
+    STICKY:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: false }, // rules.ini [Sticky] Scatter=no
     ENTER:          { noThreat: false, zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
     CAPTURE:        { noThreat: false, zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
     HARVEST:        { noThreat: true,  zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },

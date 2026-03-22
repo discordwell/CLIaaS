@@ -1202,19 +1202,15 @@ describe('20. Turret flags match C++ udata.cpp IsTurretEquipped', () => {
   }
 
   // C++ says STNK (Phase Transport) IsTurretEquipped=true (udata.cpp:762)
-  // TS hasTurret getter explicitly excludes STNK — known divergence
-  it('STNK turret divergence: C++ has turret (udata.cpp:762), TS excludes it', () => {
+  it('STNK has turret (C++ udata.cpp:762 IsTurretEquipped=true)', () => {
     const entity = new Entity(UnitType.V_STNK, House.Spain, 100, 100);
-    // Current TS: false (entity.ts:411 excludes V_STNK). C++ has IsTurretEquipped=true.
-    expect(entity.hasTurret).toBe(false);
+    expect(entity.hasTurret).toBe(true);
   });
 
   // C++ says JEEP IsTurretEquipped=true (udata.cpp:393)
-  // TS hasTurret getter explicitly excludes JEEP — known divergence
-  it('JEEP turret divergence: C++ has turret (udata.cpp:393), TS excludes it', () => {
+  it('JEEP has turret (C++ udata.cpp:393 IsTurretEquipped=true)', () => {
     const entity = new Entity(UnitType.V_JEEP, House.Spain, 100, 100);
-    // Current TS: false (entity.ts:407 excludes V_JEEP). C++ has IsTurretEquipped=true.
-    expect(entity.hasTurret).toBe(false);
+    expect(entity.hasTurret).toBe(true);
   });
 
   it('infantry never have turrets', () => {

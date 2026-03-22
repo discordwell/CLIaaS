@@ -227,7 +227,7 @@ describe('MISSION_CONTROL parity (C++ mission.cpp:532-543 defaults + rules.ini o
     [Mission.QMOVE,          'QMove',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],
     [Mission.RETREAT,        'Retreat',         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
     [Mission.GUARD,          'Guard',           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],
-    [Mission.STICKY,         'Sticky',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],
+    [Mission.STICKY,         'Sticky',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false }],
     [Mission.ENTER,          'Enter',           { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
     [Mission.CAPTURE,        'Capture',         { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
     [Mission.HARVEST,        'Harvest',         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],

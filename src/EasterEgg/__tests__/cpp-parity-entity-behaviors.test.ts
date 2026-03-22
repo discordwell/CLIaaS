@@ -899,14 +899,15 @@ describe('Mission AI dispatch — C++ mission.cpp:233-318', () => {
     //   case MISSION_STICKY:
     //   case MISSION_GUARD:
     //     Timer = Mission_Guard();
-    // Both use the same guard AI, but STICKY is not recruitable
+    // Both use the same guard AI, but STICKY is not recruitable and has Scatter=no (rules.ini)
     const mcSticky = MISSION_CONTROL[Mission.STICKY];
     const mcGuard = MISSION_CONTROL[Mission.GUARD];
     expect(mcSticky.isRetaliate).toBe(mcGuard.isRetaliate);
-    expect(mcSticky.isScatter).toBe(mcGuard.isScatter);
-    // Key difference: recruitable
+    // Key differences: recruitable and scatter
     expect(mcSticky.isRecruitable).toBe(false);
     expect(mcGuard.isRecruitable).toBe(true);
+    expect(mcSticky.isScatter).toBe(false); // rules.ini [Sticky] Scatter=no
+    expect(mcGuard.isScatter).toBe(true);
   });
 
   it('HARMLESS and SLEEP mission dispatch to same handler (mission.cpp:238-241)', () => {

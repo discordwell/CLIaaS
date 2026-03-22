@@ -470,16 +470,6 @@ describe('Comprehensive: every INI Points= section has TS coverage', () => {
   const EXPECTED_MISSING = new Set([
     // Terrain objects V01-V37 (map decorations)
     ...Array.from({ length: 37 }, (_, i) => `V${(i + 1).toString().padStart(2, '0')}`),
-    // Walls not in TS production
-    'CYCL', 'BARB', 'WOOD',
-    // Non-buildable buildings not in TS
-    'BIO', 'HOSP', 'FCOM', 'MISS',
-    // Fake buildings not in TS
-    'FACF', 'WEAF', 'SYRF', 'SPEF', 'DOMF',
-    // Civilians/characters not in TS
-    'DELPHI',
-    // Aftermath naval not in TS
-    'CARR',
   ]);
 
   for (const [section, iniPoints] of ALL_INI_POINTS) {
@@ -512,9 +502,8 @@ describe('Comprehensive: every INI Points= section has TS coverage', () => {
       }
     }
     // This documents the gap; the count should match what we expect
-    // 51 sections: V01-V37 (37) + CYCL, BARB, WOOD (3) + BIO, HOSP, FCOM, MISS (4)
-    //              + FACF, WEAF, SYRF, SPEF, DOMF (5) + DELPHI (1) + CARR (1) = 51
-    expect(missing.length).toBe(51);
+    // 37 sections: V01-V37 terrain objects (map decorations, not combat units)
+    expect(missing.length).toBe(37);
   });
 });
 

@@ -85,19 +85,20 @@ describe('recoil field initialization (techno.cpp:602)', () => {
 // TS missionAI.ts:325 — if (entity.hasTurret) entity.isInRecoilState = true;
 // ============================================================
 describe('recoil trigger: IsTurretEquipped / hasTurret (techno.cpp:3114)', () => {
-  // C++ IsTurretEquipped = true for: 1TNK, 2TNK, 3TNK, 4TNK, DD, CA, PT
-  // C++ IsTurretEquipped = false for: ARTY, APC, HARV, MCV, JEEP, TRUK, STNK, V2RL, etc.
+  // C++ IsTurretEquipped = true for: 1TNK, 2TNK, 3TNK, 4TNK, JEEP, STNK, DD, CA, PT
+  // C++ IsTurretEquipped = false for: ARTY, APC, HARV, MCV, TRUK, V2RL, etc.
   // TS hasTurret getter should match.
 
   const TURRETED: UnitType[] = [
     UnitType.V_1TNK, UnitType.V_2TNK, UnitType.V_3TNK, UnitType.V_4TNK,
+    UnitType.V_JEEP, UnitType.V_STNK,
     UnitType.V_DD, UnitType.V_CA, UnitType.V_PT,
   ];
 
   const NOT_TURRETED: UnitType[] = [
     UnitType.V_ARTY, UnitType.V_APC, UnitType.V_HARV, UnitType.V_MCV,
-    UnitType.V_JEEP, UnitType.V_TRUK, UnitType.V_MRJ, UnitType.V_MGG,
-    UnitType.V_LST, UnitType.V_STNK, UnitType.V_CTNK, UnitType.V_TTNK,
+    UnitType.V_TRUK, UnitType.V_MRJ, UnitType.V_MGG,
+    UnitType.V_LST, UnitType.V_CTNK, UnitType.V_TTNK,
     UnitType.V_QTNK, UnitType.V_DTRK, UnitType.V_V2RL, UnitType.V_MNLY,
     UnitType.V_SS, UnitType.V_MSUB,
   ];
@@ -578,8 +579,8 @@ describe('naval unit recoil parity', () => {
 // ============================================================
 describe('Counterstrike/Aftermath expansion unit recoil', () => {
   // These units fire without turret rotation — body-based firing
+  // Note: STNK has IsTurretEquipped=true in C++ (udata.cpp:762), excluded from this list
   const EXPANSION_NO_TURRET: Array<[UnitType, string]> = [
-    [UnitType.V_STNK, 'Phase Transport — stealth APC, no turret'],
     [UnitType.V_CTNK, 'Chrono Tank — body-aimed, no turret'],
     [UnitType.V_TTNK, 'Tesla Tank — body-aimed tesla weapon, no turret'],
     [UnitType.V_QTNK, 'M.A.D. Tank — seismic weapon, no turret'],

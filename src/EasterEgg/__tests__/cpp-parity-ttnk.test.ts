@@ -340,12 +340,13 @@ describe('TTNK no turret (unit.cpp)', () => {
   });
 
   it('other non-turreted expansion vehicles also lack turrets', () => {
-    // STNK, CTNK, QTNK, DTRK are all in the exclusion list with TTNK
+    // CTNK, QTNK, DTRK are in the exclusion list with TTNK
+    // Note: STNK has IsTurretEquipped=true in C++ (udata.cpp:762)
     const stnk = entityAtCell(UnitType.V_STNK, House.USSR, 10, 10);
     const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 10, 10);
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     const dtrk = entityAtCell(UnitType.V_DTRK, House.USSR, 10, 10);
-    expect(stnk.hasTurret).toBe(false);
+    expect(stnk.hasTurret).toBe(true);
     expect(ctnk.hasTurret).toBe(false);
     expect(qtnk.hasTurret).toBe(false);
     expect(dtrk.hasTurret).toBe(false);

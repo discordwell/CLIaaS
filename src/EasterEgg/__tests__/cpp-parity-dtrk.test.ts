@@ -254,10 +254,11 @@ describe('DTRK has no turret (udata.cpp hasTurret exclusion)', () => {
 
   it('DTRK is in the explicit exclusion list alongside other non-turreted vehicles', () => {
     // All these vehicles should lack turrets per C++ udata.cpp
+    // Note: JEEP (udata.cpp:393) and STNK (udata.cpp:762) have IsTurretEquipped=true
     const nonTurreted = [
       UnitType.V_APC, UnitType.V_HARV, UnitType.V_MCV, UnitType.V_ARTY,
-      UnitType.V_JEEP, UnitType.V_TRUK, UnitType.V_MRJ,
-      UnitType.V_STNK, UnitType.V_CTNK, UnitType.V_TTNK, UnitType.V_QTNK,
+      UnitType.V_TRUK, UnitType.V_MRJ,
+      UnitType.V_CTNK, UnitType.V_TTNK, UnitType.V_QTNK,
       UnitType.V_DTRK, UnitType.V_V2RL, UnitType.V_MNLY,
     ];
     for (const type of nonTurreted) {

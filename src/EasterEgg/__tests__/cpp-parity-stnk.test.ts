@@ -429,16 +429,16 @@ describe('STNK passengers killed on death (unit.cpp / entity.ts)', () => {
   });
 });
 
-// ── No Turret (udata.cpp exclusion list) ─────────────────────────────────────
-// C++ udata.cpp — STNK is in the non-turreted exclusion list
+// ── Turret (C++ udata.cpp:762 IsTurretEquipped=true) ─────────────────────────
+// C++ udata.cpp — STNK (Phase Transport) has IsTurretEquipped=true
 
-describe('STNK no turret (udata.cpp exclusion list)', () => {
-  it('hasTurret is false', () => {
+describe('STNK has turret (C++ udata.cpp:762 IsTurretEquipped=true)', () => {
+  it('hasTurret is true', () => {
     const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
-    expect(stnk.hasTurret).toBe(false);
+    expect(stnk.hasTurret).toBe(true);
   });
 
-  it('STNK is not infantry (confirmed vehicle without turret)', () => {
+  it('STNK is not infantry (confirmed vehicle with turret)', () => {
     const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
     expect(stnk.stats.isInfantry).toBe(false);
     expect(stnk.isAnt).toBe(false);

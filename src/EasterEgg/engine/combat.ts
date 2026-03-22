@@ -335,8 +335,8 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
   // Player units don't AI-scatter (C++ infantry.cpp:1883 — human house check)
   if (entity.isPlayerUnit) return;
 
-  // AI IQ gate (C++ techno.cpp scatter requires IQ >= 2)
-  if (ctx.aiIQ(entity.house) < 2) return;
+  // AI IQ gate (C++ techno.cpp scatter requires IQ >= [IQ] Scatter=3)
+  if (ctx.aiIQ(entity.house) < 3) return;
 
   // Only infantry uses directional scatter (C++ infantry.cpp override)
   if (!entity.stats.isInfantry) {

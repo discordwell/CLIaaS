@@ -277,10 +277,10 @@ describe('JEEP is NOT a crusher (C++ Crusher=no)', () => {
 // 5. No turret — hasTurret=false, body faces target direction
 //    (C++ udata.cpp NoTurret flag for JEEP)
 // ============================================================
-describe('JEEP has no turret (C++ NoTurret parity)', () => {
-  it('hasTurret getter returns false', () => {
+describe('JEEP has turret (C++ udata.cpp:393 IsTurretEquipped=true)', () => {
+  it('hasTurret getter returns true', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
-    expect(jeep.hasTurret).toBe(false);
+    expect(jeep.hasTurret).toBe(true);
   });
 
   it('contrast: Light Tank has a turret', () => {
@@ -293,11 +293,10 @@ describe('JEEP has no turret (C++ NoTurret parity)', () => {
     expect(tank.hasTurret).toBe(true);
   });
 
-  it('JEEP type is in the hasTurret exclusion list', () => {
-    // The hasTurret getter explicitly excludes V_JEEP
+  it('JEEP has turret (C++ udata.cpp:393 IsTurretEquipped=true)', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     expect(jeep.type).toBe(UnitType.V_JEEP);
-    expect(jeep.hasTurret).toBe(false);
+    expect(jeep.hasTurret).toBe(true);
   });
 });
 

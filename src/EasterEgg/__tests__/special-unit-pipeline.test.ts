@@ -1557,9 +1557,9 @@ describe('Vehicle Cloaking (STNK) — cloak state machine', () => {
     expect(stnk.cloakTimer).toBe(CLOAK_TRANSITION_FRAMES);
   });
 
-  it('STNK is NOT turreted (C++ udata.cpp)', () => {
+  it('STNK IS turreted (C++ udata.cpp:762 IsTurretEquipped=true)', () => {
     const stnk = makeEntity(UnitType.V_STNK, House.Spain);
-    expect(stnk.hasTurret).toBe(false);
+    expect(stnk.hasTurret).toBe(true);
   });
 
   it('cloak state transition: UNCLOAKED -> CLOAKING -> CLOAKED', () => {
