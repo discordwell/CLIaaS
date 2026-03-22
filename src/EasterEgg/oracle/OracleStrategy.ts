@@ -3982,10 +3982,19 @@ export class OracleStrategy {
         for (const u of assaultArmor) this.recordMove(u.id, nearbyTanks[0].cx, nearbyTanks[0].cy);
         reasons.push(`assault KILL ${nearbyTanks[0].t} (${assaultArmor.length} → ${nearbyTanks[0].cx},${nearbyTanks[0].cy})`);
       } else if (structTarget) {
-        // No enemy tanks — attack_move to building (only dogs in the way, die fast)
-        commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+        // No enemy tanks — 'move' to 2 cells south of building (bypasses dogs),
+        // then attack_move the last 2 cells when close enough.
+        const nearBuilding = assaultArmor.some((u) => this.distanceSq(u, structTarget) <= 16); // 4 cells
+        if (nearBuilding) {
+          // RIGHT NEXT TO IT — attack_move the last few cells
+          commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+          reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
+        } else {
+          // Far away — 'move' to skip the dog gauntlet
+          commands.push({ cmd: 'move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy + 2 });
+          reasons.push(`assault CHARGE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy + 2})`);
+        }
         for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-        reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
       }
     }
 

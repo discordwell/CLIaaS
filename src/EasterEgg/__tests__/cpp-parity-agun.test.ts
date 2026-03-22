@@ -5,7 +5,7 @@
  * Each describe block documents the C++ source reference (file:line).
  *
  * AGUN key stats (rules.ini / building.cpp):
- *   HP 400, Size 1x1, Cost 600, Allied faction
+ *   HP 400, Size 1x2, Cost 600, Allied faction
  *   Weapon: AP warhead, 25 damage, range 6, ROF 10 (rapid fire), isAntiAir=true
  *   NOT power-dependent: fires regardless of power state (C++ bdata.cpp:2836 IsPowered=false)
  */
