@@ -4063,30 +4063,19 @@ export class OracleStrategy {
         if (aGarrison !== bGarrison) return aGarrison - bGarrison;
         return this.distanceSq(a, garrisonTarget) - this.distanceSq(b, garrisonTarget);
       });
-      // Stage at y=60, then attack once grouped. Tanks arrive together = focused kill.
-      const stagePoint: Point = { cx: 45, cy: 60 };
-      const atStage = assaultArmor.filter((u) => this.distanceSq(u, stagePoint) <= 144);
-      const grouped = atStage.length >= Math.min(8, assaultArmor.length);
-
-      if (grouped) {
-        // Pick target: garrison tanks → structures → infantry
-        if (baseZoneArmor.length > 0) target = baseZoneArmor[0];
-        else {
-          const s = this.chooseScg11eaAssaultTarget(enemyStructures);
-          if (s) target = s;
-        }
-        if (target) {
-          commands.push({ cmd: 'attack', ids: atStage.map((u) => u.id), target: target.id });
-          for (const u of atStage) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`assault ${(target as any).t ?? '?'} (${atStage.length} → ${target.cx},${target.cy})`);
-        }
+      // Pick target: garrison tanks → structures
+      if (baseZoneArmor.length > 0) target = baseZoneArmor[0];
+      else {
+        const s = this.chooseScg11eaAssaultTarget(enemyStructures);
+        if (s) target = s;
       }
-      // Move ungrouped tanks to staging point
-      const notStaged = assaultArmor.filter((u) => this.distanceSq(u, stagePoint) > 144);
-      if (notStaged.length > 0) {
-        commands.push({ cmd: 'move', ids: notStaged.map((u) => u.id), cx: stagePoint.cx, cy: stagePoint.cy });
-        for (const u of notStaged) this.recordMove(u.id, stagePoint.cx, stagePoint.cy);
-        if (!grouped) reasons.push(`staging (${atStage.length}/${assaultArmor.length})`);
+      // Spam attack EVERY tick on ALL tanks. The C++ guard behavior teleports
+      // tanks home every ~800 ticks, but re-issuing attack every 50 ticks
+      // (each oracle step) overrides it. Tanks make progress in bursts.
+      if (target) {
+        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
+        for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+        reasons.push(`assault ${(target as any).t ?? '?'} (${assaultArmor.length} → ${target.cx},${target.cy})`);
       }
     }
 
