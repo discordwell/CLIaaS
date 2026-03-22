@@ -97,6 +97,12 @@ const INI_SPEEDS: [string, number, string][] = [
   // === Aftermath expansion infantry (aftrmath.ini) ===
   ['SHOK', 3,  'aftrmath.ini [SHOK] Speed=3'],
   ['MECH', 4,  'aftrmath.ini [MECH] Speed=4'],
+
+  // === Aftermath expansion vessels (aftrmath.ini) ===
+  ['CARR', 6,  'aftrmath.ini [CARR] Speed=6'],
+
+  // === Scenario-only units ===
+  ['DELPHI', 5, 'rules.ini [DELPHI] Speed=5'],
 ];
 
 // ============================================================================
@@ -222,6 +228,12 @@ const SPEED_CLASSES: [string, SpeedClass, string][] = [
   ['HELI', SpeedClass.WINGED, 'aadata.cpp: aircraft speed class = WINGED'],
   ['HIND', SpeedClass.WINGED, 'aadata.cpp: aircraft speed class = WINGED'],
   ['TRAN', SpeedClass.WINGED, 'aadata.cpp: aircraft speed class = WINGED'],
+
+  // Aftermath expansion vessels
+  ['CARR', SpeedClass.FLOAT, 'aftrmath.ini: vessel speed class = FLOAT'],
+
+  // Scenario-only units
+  ['DELPHI', SpeedClass.FOOT, 'rules.ini: infantry speed class = FOOT'],
 ];
 
 // ============================================================================

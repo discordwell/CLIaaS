@@ -164,15 +164,20 @@ describe('CPP Parity: UNIT_STATS.owner vs rules.ini/aftrmath.ini Owner=', () => 
 
 describe('CPP Parity: PRODUCTION_ITEMS.faction vs rules.ini/aftrmath.ini Owner=', () => {
   it('every PRODUCTION_ITEMS faction matches INI Owner=', () => {
+    // Non-buildable items may have no Owner= in INI or Owner=none.
+    // These are tracked in PRODUCTION_ITEMS for completeness but have TS-assigned faction.
+    const NO_INI_OWNER = new Set([
+      'BARB', 'WOOD', 'CYCL',       // walls/fences with no Owner= in INI
+      'BIO', 'HOSP', 'MISS',        // scenario buildings with no Owner= or Owner=none
+    ]);
     const mismatches: string[] = [];
 
     for (const item of PRODUCTION_ITEMS) {
+      if (NO_INI_OWNER.has(item.type)) continue;
       const iniOwner = getIniOwner(item.type);
       const expected = iniOwnerToTsFaction(iniOwner);
 
       if (expected === null) {
-        // INI has empty Owner= — could be unbuildable special or missing from INI
-        // Some items (like FACT) have Owner=allies,soviet in INI, so this is a real problem
         mismatches.push(
           `${item.type}: TS faction='${item.faction}' but INI Owner= is empty/missing`
         );

@@ -107,21 +107,14 @@ describe('C++ Parity: Projectile boolean/numeric flags from INI', () => {
   // These are expected failures documented in the test spec. Each entry lists
   // the weapon name and the TS flag that is missing but should be present per INI.
   const KNOWN_MISSING_FLAGS: Record<string, Set<string>> = {
-    // TorpTube: INI Projectile has ASW=yes but TS uses isSubSurface instead of isAntiSub
-    TorpTube: new Set(['isAntiSub']),
+    // All previously missing flags have been resolved
   };
 
   // TS engine additions: flags set in TS WEAPON_STATS that have no basis in INI.
   // These are intentional behavioral overrides, not data errors.
   const KNOWN_TS_ADDITIONS: Record<string, Set<string>> = {
-    // DogJaw: TS sets isInvisible but LeapDog projectile has no Inviso=yes.
-    // Engine treats dog jaw as instant-hit despite having projectileSpeed for limbo travel.
-    DogJaw: new Set(['isInvisible']),
-
-    // SCUD: TS sets isGigundo but FROG projectile has no Gigundo=yes.
-    // FROG in INI only has Proximity=yes; Gigundo is on GPSSatellite/NukeUp/NukeDown sections.
-    // TS adds isGigundo for the large V2 explosion visual.
-    SCUD: new Set(['isGigundo']),
+    // All previously fabricated engine additions (DogJaw isInvisible, SCUD isGigundo)
+    // have been removed to match rules.ini exactly.
   };
 
   it('all WEAPON_STATS weapons with INI sections have resolvable projectile types', () => {
@@ -225,13 +218,11 @@ describe('C++ Parity: Projectile boolean/numeric flags from INI', () => {
 
 // ── Test 2: isDegenerate audit ───────────────────────────────────────────────
 
-describe('C++ Parity: isDegenerate audit — TS engine additions not from INI', () => {
-  // These weapons have isDegenerate: true in TS WEAPON_STATS but their
-  // INI projectile sections do NOT have Degenerates=yes.
-  // In the original C++ code, Degenerates defaults to false (bbdata.cpp).
-  // The [Invisible] and [Cannon] projectile sections never set Degenerates=yes.
-  // These isDegenerate flags are intentional engine-level additions in the TS port.
-  const DEGENERATE_WEAPONS = [
+describe('C++ Parity: isDegenerate audit — no weapon has Degenerates=yes in INI', () => {
+  // C++ bbdata.cpp:93 — IsDegenerate defaults to false.
+  // No projectile section in rules.ini sets Degenerates=yes.
+  // The previous TS engine additions of isDegenerate were fabricated and have been removed.
+  const PREVIOUSLY_FABRICATED_DEGENERATE = [
     'M1Carbine',   // Invisible projectile
     'DogJaw',      // LeapDog projectile
     'Sniper',      // Invisible projectile
@@ -247,11 +238,11 @@ describe('C++ Parity: isDegenerate audit — TS engine additions not from INI', 
     'Pistol',      // Invisible projectile
   ];
 
-  for (const wName of DEGENERATE_WEAPONS) {
-    it(`${wName}: TS has isDegenerate=true (engine addition, not from INI)`, () => {
+  for (const wName of PREVIOUSLY_FABRICATED_DEGENERATE) {
+    it(`${wName}: correctly has NO isDegenerate (matches INI — no Degenerates=yes)`, () => {
       const ts = WEAPON_STATS[wName];
       expect(ts, `${wName} should exist in WEAPON_STATS`).toBeDefined();
-      expect(ts.isDegenerate, `${wName} should have isDegenerate=true in TS`).toBe(true);
+      expect(ts.isDegenerate, `${wName} should NOT have isDegenerate`).toBeFalsy();
 
       // Verify the INI projectile section does NOT have Degenerates=yes
       const weaponIni = ini[wName];
@@ -261,18 +252,16 @@ describe('C++ Parity: isDegenerate audit — TS engine additions not from INI', 
         const projSection = ini[projName];
         if (projSection) {
           const iniDegen = iniBool(projSection.Degenerates);
-          expect(iniDegen, `[${projName}].Degenerates should NOT be yes — isDegenerate is a TS engine addition`).toBe(false);
+          expect(iniDegen, `[${projName}].Degenerates should NOT be yes`).toBe(false);
         }
       }
     });
   }
 
-  it('no other WEAPON_STATS entries have isDegenerate besides the documented set', () => {
-    const degenerateSet = new Set(DEGENERATE_WEAPONS);
+  it('no WEAPON_STATS entries have isDegenerate (none exist in INI)', () => {
     for (const [wName, stats] of Object.entries(WEAPON_STATS)) {
-      if (stats.isDegenerate && !degenerateSet.has(wName)) {
-        // Fail with a clear message so new isDegenerate additions get documented
-        expect.fail(`${wName} has isDegenerate=true but is not in DEGENERATE_WEAPONS list — add it to the audit`);
+      if (stats.isDegenerate) {
+        expect.fail(`${wName} has isDegenerate=true but no INI projectile has Degenerates=yes`);
       }
     }
   });

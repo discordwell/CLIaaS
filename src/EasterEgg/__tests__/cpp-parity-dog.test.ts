@@ -92,8 +92,8 @@ describe('DogJaw weapon stats match C++ RULES.INI', () => {
     expect(jaw.warhead).toBe('Organic');
   });
 
-  it('isInvisible = true (instant hit, no projectile visual)', () => {
-    expect(jaw.isInvisible).toBe(true);
+  it('isInvisible is falsy (LeapDog projectile has no Inviso=yes in rules.ini)', () => {
+    expect(jaw.isInvisible).toBeFalsy();
   });
 });
 

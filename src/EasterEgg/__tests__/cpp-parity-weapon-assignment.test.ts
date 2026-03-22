@@ -554,12 +554,12 @@ describe('C++ Parity — Weapon Assignment (INI-parsed, comprehensive)', () => {
       expect(tsSecondary('HIND')).toBeNull();
     });
 
-    it('DELPHI has Primary=Pistol in INI (scenario-only NPC, not in UNIT_STATS)', () => {
+    it('DELPHI has Primary=Pistol in INI (scenario-only NPC, now in UNIT_STATS)', () => {
       const iniSection = ini['DELPHI'];
       expect(normaliseWeapon(iniSection.Primary)).toBe('Pistol');
-      // DELPHI is a scenario-only NPC like ants — present in rules.ini but
-      // not tracked in UNIT_STATS since it only appears in specific missions
-      expect(UNIT_STATS['DELPHI']).toBeUndefined();
+      // DELPHI is a scenario-only NPC — now tracked in UNIT_STATS
+      expect(UNIT_STATS['DELPHI']).toBeDefined();
+      expect(UNIT_STATS['DELPHI'].primaryWeapon).toBe('Pistol');
     });
 
     it('C1 and C7 are armed civilians (Primary=Pistol)', () => {

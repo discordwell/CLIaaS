@@ -71,6 +71,8 @@ function generateIconAssets(): [string, string, string][] {
     'SYRD', 'SPEN', 'BIO', 'MISS', 'FCOM', 'HOSP',
     // Walls
     'FENC', 'BRIK', 'SBAG', 'BARB', 'WOOD', 'CYCL',
+    // Fake buildings (C++ bdata.cpp:3109 — icon name = real graphic + 'F' at pos 3)
+    'FACF', 'WEAF', 'DOMF', 'SYRF', 'SPEF',
   ];
   // Prefer HIRES.MIX (64x48 English icons) — fallback chain handles LORES.MIX
   return types.map(t =>

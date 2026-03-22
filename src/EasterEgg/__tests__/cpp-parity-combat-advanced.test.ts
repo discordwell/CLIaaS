@@ -871,7 +871,8 @@ describe('Cross-cutting: IsDegenerate strength loss during flight (bullet.cpp:47
     const target = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 5);
     const ctx = makeCombatCtx([attacker, target]);
 
-    const weapon = { ...WEAPON_STATS['90mm'], projectileSpeed: 0.5 };
+    // 90mm no longer has isDegenerate (removed per rules.ini parity), so we manually add it
+    const weapon = { ...WEAPON_STATS['90mm'], projectileSpeed: 0.5, isDegenerate: true };
     expect(weapon.isDegenerate).toBe(true);
 
     launchProjectile(ctx, attacker, target, weapon, 30, target.pos.x, target.pos.y, true);
@@ -959,12 +960,12 @@ describe('Cross-cutting: Projectile weapon flag data correctness (bbdata.cpp)', 
     expect(WEAPON_STATS['SCUD'].isFueled).toBe(true);
   });
 
-  it('DogJaw has isDegenerate=true (C++ RULES.INI: [LeapDog] Degenerates=yes)', () => {
-    expect(WEAPON_STATS['DogJaw'].isDegenerate).toBe(true);
+  it('DogJaw does NOT have isDegenerate (no Degenerates=yes in [LeapDog] INI)', () => {
+    expect(WEAPON_STATS['DogJaw'].isDegenerate).toBeFalsy();
   });
 
-  it('90mm has isDegenerate=true (C++ RULES.INI: [Cannon] Degenerates=yes)', () => {
-    expect(WEAPON_STATS['90mm'].isDegenerate).toBe(true);
+  it('90mm does NOT have isDegenerate (no Degenerates=yes in [Cannon] INI)', () => {
+    expect(WEAPON_STATS['90mm'].isDegenerate).toBeFalsy();
   });
 
   it('regular weapons default to no special flags (bbdata.cpp:79-96 defaults)', () => {

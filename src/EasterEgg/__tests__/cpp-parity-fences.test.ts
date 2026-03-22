@@ -484,14 +484,18 @@ describe('WOOD and CYCL are not sidebar-buildable (map overlay only)', () => {
     PRODUCTION_ITEMS = types.PRODUCTION_ITEMS;
   });
 
-  it('WOOD is not in PRODUCTION_ITEMS', () => {
+  it('WOOD is in PRODUCTION_ITEMS (tracked for completeness, not sidebar-buildable)', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'WOOD');
-    expect(item).toBeUndefined();
+    expect(item).toBeDefined();
+    expect(item!.isStructure).toBe(true);
+    expect(item!.techLevel).toBe(-1); // unbuildable
   });
 
-  it('CYCL is not in PRODUCTION_ITEMS', () => {
+  it('CYCL is in PRODUCTION_ITEMS (tracked for completeness, not sidebar-buildable)', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'CYCL');
-    expect(item).toBeUndefined();
+    expect(item).toBeDefined();
+    expect(item!.isStructure).toBe(true);
+    expect(item!.techLevel).toBe(-1); // unbuildable
   });
 
   it('WOOD still exists in STRUCTURE_MAX_HP (used by map overlay parsing)', () => {

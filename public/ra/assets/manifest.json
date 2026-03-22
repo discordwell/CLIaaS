@@ -2609,6 +2609,51 @@
     "sheetWidth": 32,
     "sheetHeight": 24
   },
+  "facficon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "weaficon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "domficon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "syrficon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
+  "speficon": {
+    "frameWidth": 32,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 32,
+    "sheetHeight": 24
+  },
   "sc1": {
     "frameWidth": 24,
     "frameHeight": 19,

@@ -557,10 +557,14 @@ describe('C++ parity: Production prerequisites (tech tree)', () => {
       }
     });
 
-    it('every non-FACT item has a non-empty prerequisite', () => {
+    it('every buildable non-FACT item has a non-empty prerequisite', () => {
+      // Non-buildable items (scenario-placed, fakes with no prereq) have empty prerequisites
+      const NO_PREREQ_ALLOWED = new Set([
+        'FACT', 'CYCL', 'BARB', 'WOOD', 'BIO', 'HOSP', 'FCOM', 'MISS', 'FACF', 'SPEF',
+      ]);
       for (const item of PRODUCTION_ITEMS) {
-        if (item.type === 'FACT') {
-          expect(item.prerequisite, 'FACT prerequisite should be empty').toBe('');
+        if (NO_PREREQ_ALLOWED.has(item.type)) {
+          expect(item.prerequisite, `${item.type} prerequisite should be empty`).toBe('');
           continue;
         }
         expect(item.prerequisite.length, `${item.type} should have a prerequisite`).toBeGreaterThan(0);

@@ -185,10 +185,13 @@ describe('CA dual weapon — 8Inch (weapon.cpp / rules.ini)', () => {
     expect(ca.weapon2!.name).toBe('8Inch');
   });
 
-  it('22.0 range is the longest weapon range in the game', () => {
-    const allRanges = Object.values(WEAPON_STATS).map(w => w.range);
-    const maxRange = Math.max(...allRanges);
-    expect(weapon.range).toBe(maxRange);
+  it('22.0 range is the longest conventional weapon range (excluding AirAssault)', () => {
+    // AirAssault (helicarrier) has range=127 but does 0 damage — carrier weapon, not conventional
+    const conventionalRanges = Object.entries(WEAPON_STATS)
+      .filter(([name]) => name !== 'AirAssault')
+      .map(([, w]) => w.range);
+    const maxConventionalRange = Math.max(...conventionalRanges);
+    expect(weapon.range).toBe(maxConventionalRange);
   });
 });
 

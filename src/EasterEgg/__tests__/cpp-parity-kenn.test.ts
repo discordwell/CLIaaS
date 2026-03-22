@@ -98,16 +98,20 @@ describe('KENN is prerequisite for DOG training (rules.ini line 781)', () => {
 
 describe('KENN is the cheapest buildable structure (cost 200)', () => {
 
-  it('no non-wall structure costs less than KENN', () => {
-    // Wall types (SBAG, FENC, BRIK, BARB, WOOD) are excluded — they are
-    // barriers, not buildings. SILO (150) is a storage structure.
-    // KENN at 200 is the cheapest actual building.
-    const wallTypes = new Set(['SBAG', 'FENC', 'BRIK', 'BARB', 'WOOD']);
+  it('no non-wall, non-fake, non-scenario structure costs less than KENN', () => {
+    // Excluded: wall/fence types, fake decoys, scenario-only buildings (cost 0),
+    // and SILO (150, storage structure).
+    const EXCLUDED = new Set([
+      'SBAG', 'FENC', 'BRIK', 'BARB', 'WOOD', 'CYCL',  // walls/fences
+      'FACF', 'WEAF', 'DOMF', 'SYRF', 'SPEF',           // fake decoys (cost 50)
+      'BIO', 'HOSP', 'FCOM', 'MISS',                     // scenario-only (cost 0)
+      'SILO',                                             // storage structure (cost 150)
+    ]);
     const structures = PRODUCTION_ITEMS.filter(
-      i => i.isStructure && !wallTypes.has(i.type) && i.type !== 'SILO'
+      i => i.isStructure && !EXCLUDED.has(i.type)
     );
     const cheaperThanKenn = structures.filter(s => s.cost < 200);
-    expect(cheaperThanKenn, 'no building should be cheaper than KENN at 200').toHaveLength(0);
+    expect(cheaperThanKenn, 'no real buildable building should be cheaper than KENN at 200').toHaveLength(0);
   });
 
   it('KENN costs less than the next cheapest buildings (POWR/BARR/TENT at 300)', () => {

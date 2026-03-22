@@ -1003,6 +1003,12 @@ describe('C++ parity: prerequisite/tech tree chain audit', () => {
       'FTUR', 'TSLA', 'SAM', 'KENN', 'SYRD', 'SPEN',
       'ATEK', 'STEK', 'PDOX', 'IRON', 'MSLO',
       'SBAG', 'FENC', 'BRIK',
+      // Non-buildable walls/fences (scenario-placed only)
+      'CYCL', 'BARB', 'WOOD',
+      // Non-buildable buildings (scenario-placed only)
+      'BIO', 'HOSP', 'FCOM', 'MISS',
+      // Fake buildings (decoys)
+      'FACF', 'WEAF', 'DOMF', 'SYRF', 'SPEF',
     ]);
 
     for (const item of PRODUCTION_ITEMS) {

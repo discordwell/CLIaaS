@@ -134,8 +134,8 @@ describe('Per-weapon projectile speed (C++ BulletClass::AI parity)', () => {
       expect(WEAPON_STATS['155mm'].projSpeed).toBe(12);
     });
 
-    it('ant mandible has melee-instant projSpeed (40, engine custom)', () => {
-      expect(WEAPON_STATS.Mandible.projSpeed).toBe(40);
+    it('ant mandible has projSpeed=100 (SCA INI: Projectile=Invisible, Speed=100)', () => {
+      expect(WEAPON_STATS.Mandible.projSpeed).toBe(100);
     });
 
     it('sniper has instant projSpeed=100 (Invisible Speed=100)', () => {

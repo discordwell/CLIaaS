@@ -166,15 +166,15 @@ describe('BulletTypeClass properties (Phase 6)', () => {
     expect(w.isInvisible).toBe(true);
   });
 
-  it('SCUD has isGigundo and isFueled flags', () => {
+  it('SCUD has isFueled but NOT isGigundo (FROG projectile has no Gigundo=yes in INI)', () => {
     const w = WEAPON_STATS['SCUD'];
-    expect(w.isGigundo).toBe(true);
+    expect(w.isGigundo).toBeFalsy();
     expect(w.isFueled).toBe(true);
   });
 
-  it('DogJaw has isInvisible (instant melee)', () => {
+  it('DogJaw does NOT have isInvisible (LeapDog has no Inviso=yes in INI)', () => {
     const w = WEAPON_STATS['DogJaw'];
-    expect(w.isInvisible).toBe(true);
+    expect(w.isInvisible).toBeFalsy();
   });
 
   it('Sniper has isInvisible flag', () => {

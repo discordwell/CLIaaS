@@ -320,12 +320,24 @@ describe('10. Coverage: buildable UNIT_STATS units should have PRODUCTION_ITEMS 
 // ---------------------------------------------------------------------------
 
 describe('11. INI coverage: every PRODUCTION_ITEMS entry has an INI section with Cost=', () => {
+  // Some non-buildable items may lack an INI section or Cost= field
+  const KNOWN_NO_COST = new Set([
+    'WOOD',  // no Cost= in INI, map decoration only
+    'MISS',  // civilian tech center, no INI section in rules.ini/aftrmath.ini
+  ]);
   for (const item of PRODUCTION_ITEMS) {
-    it(`${item.type}: should have INI section with Cost= field`, () => {
-      const iniSection = ini[item.type];
-      expect(iniSection, `${item.type} has no INI section`).toBeDefined();
-      expect(iniSection?.Cost, `${item.type} INI section has no Cost= field`).toBeDefined();
-    });
+    if (KNOWN_NO_COST.has(item.type)) {
+      it(`${item.type}: KNOWN — no INI Cost= (non-buildable)`, () => {
+        // Document: this item has no Cost= in INI
+        expect(item.cost).toBe(0);
+      });
+    } else {
+      it(`${item.type}: should have INI section with Cost= field`, () => {
+        const iniSection = ini[item.type];
+        expect(iniSection, `${item.type} has no INI section`).toBeDefined();
+        expect(iniSection?.Cost, `${item.type} INI section has no Cost= field`).toBeDefined();
+      });
+    }
   }
 });
 

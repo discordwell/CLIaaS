@@ -161,8 +161,8 @@ describe('weapon projSpeed values — all defined weapons', () => {
     expect(WEAPON_STATS.TeslaCannon?.projSpeed).toBe(40);
   });
 
-  it('Mandible has projSpeed=40 (engine custom, ant melee)', () => {
-    expect(WEAPON_STATS.Mandible?.projSpeed).toBe(40);
+  it('Mandible has projSpeed=100 (SCA INI: Projectile=Invisible, Speed=100)', () => {
+    expect(WEAPON_STATS.Mandible?.projSpeed).toBe(100);
   });
 });
 

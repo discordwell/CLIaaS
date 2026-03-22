@@ -119,19 +119,20 @@ function makeProjectile(
 
 // -- WeaponStats flag verification (bbdata.cpp / RULES.INI) -------------------
 
-describe('IsDegenerate flag on weapon types (C++ RULES.INI Degenerates=yes)', () => {
-  // C++ Invisible bullet type: Degenerates=yes
+describe('IsDegenerate flag on weapon types — no projectile in rules.ini has Degenerates=yes', () => {
+  // C++ bbdata.cpp:93 — IsDegenerate defaults to false.
+  // No projectile section in rules.ini sets Degenerates=yes.
+  // The previous TS engine additions of isDegenerate were fabricated.
   it.each([
     'M1Carbine', 'M60mg', 'DogJaw', 'Sniper', 'Colt45', 'Pistol', 'ChainGun',
-  ])('%s has isDegenerate=true (Invisible bullet)', (name) => {
-    expect(WEAPON_STATS[name]?.isDegenerate, `${name} should be degenerate`).toBe(true);
+  ])('%s does NOT have isDegenerate (Invisible bullet — no Degenerates=yes in INI)', (name) => {
+    expect(WEAPON_STATS[name]?.isDegenerate).toBeFalsy();
   });
 
-  // C++ Cannon bullet type: Degenerates=yes
   it.each([
     '75mm', '90mm', '105mm', '120mm', 'Stinger', '2Inch',
-  ])('%s has isDegenerate=true (Cannon bullet)', (name) => {
-    expect(WEAPON_STATS[name]?.isDegenerate, `${name} should be degenerate`).toBe(true);
+  ])('%s does NOT have isDegenerate (Cannon bullet — no Degenerates=yes in INI)', (name) => {
+    expect(WEAPON_STATS[name]?.isDegenerate).toBeFalsy();
   });
 
   // C++ Non-degenerate bullet types: Lobbed, HeatSeeker, FROG, etc.
@@ -146,8 +147,11 @@ describe('IsDegenerate flag on weapon types (C++ RULES.INI Degenerates=yes)', ()
 // -- Degenerate projectile decay behavior (bullet.cpp:478-480) ----------------
 
 describe('IsDegenerate projectile strength decay (C++ bullet.cpp:478-480)', () => {
+  // No weapon in rules.ini has Degenerates=yes (bbdata.cpp:93 default=false).
+  // These tests verify the decay LOGIC is correct when isDegenerate is manually
+  // set, but no real weapon triggers it. Using a synthetic degenerate weapon.
   it('degenerate projectile loses 1 strength per tick during flight', () => {
-    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 1 };
+    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 1, isDegenerate: true };
     const proj = makeProjectile(weapon, 25, 10);
 
     // Simulate 3 ticks of flight
@@ -163,7 +167,7 @@ describe('IsDegenerate projectile strength decay (C++ bullet.cpp:478-480)', () =
   });
 
   it('damage stops decaying at 5 (minimum) — C++ bullet.cpp:478 guard: Strength > 5', () => {
-    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 1 };
+    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 1, isDegenerate: true };
     // Start with damage=8, so after 3 ticks it should reach 5 and stop
     const proj = makeProjectile(weapon, 8, 100);
 
@@ -194,7 +198,7 @@ describe('IsDegenerate projectile strength decay (C++ bullet.cpp:478-480)', () =
   });
 
   it('damage at impact equals original minus ticks-in-flight (capped at 5)', () => {
-    const weapon = { ...WEAPON_STATS['90mm'], projectileSpeed: 1 };
+    const weapon = { ...WEAPON_STATS['90mm'], projectileSpeed: 1, isDegenerate: true };
     const originalDamage = 30;
     const ticksInFlight = 7;
     const proj = makeProjectile(weapon, originalDamage, ticksInFlight);
@@ -211,7 +215,7 @@ describe('IsDegenerate projectile strength decay (C++ bullet.cpp:478-480)', () =
   });
 
   it('damage at impact is capped at 5 for very long flights', () => {
-    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 1 };
+    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 1, isDegenerate: true };
     const originalDamage = 25;
     const ticksInFlight = 50;
     const proj = makeProjectile(weapon, originalDamage, ticksInFlight);
@@ -230,32 +234,21 @@ describe('IsDegenerate projectile strength decay (C++ bullet.cpp:478-480)', () =
 
 // -- Integration: updateInflightProjectiles applies degeneration --------------
 
-describe('updateInflightProjectiles integration — degenerate decay', () => {
-  it('long-range degenerate shot deals less damage than short-range', () => {
-    // Use a slower projectile speed to ensure measurable travel time difference
-    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 0.5 }; // slow projectile for clear travelFrame difference
+describe('updateInflightProjectiles integration — no degenerate decay with real weapons', () => {
+  // Since no real weapon has isDegenerate=true (removed per rules.ini parity),
+  // both short and long range shots deal the same damage — no degeneration.
+  it('75mm (non-degenerate) deals same damage at short and long range', () => {
+    const weapon = { ...WEAPON_STATS['75mm'], projectileSpeed: 0.5 };
 
     const attacker = entityAtCell(UnitType.V_1TNK, House.Spain, 5, 5);
-    const shortTarget = entityAtCell(UnitType.V_2TNK, House.USSR, 6, 5); // 1 cell away
-    const longTarget = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 5); // 10 cells away
+    const shortTarget = entityAtCell(UnitType.V_2TNK, House.USSR, 6, 5);
+    const longTarget = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 5);
 
     const ctxShort = makeCombatCtx([attacker, shortTarget]);
     const ctxLong = makeCombatCtx([attacker, longTarget]);
 
-    // Launch short-range projectile
     launchProjectile(ctxShort, attacker, shortTarget, weapon, 25, shortTarget.pos.x, shortTarget.pos.y, true);
-    const shortProj = ctxShort.inflightProjectiles[0];
-
-    // Launch long-range projectile
     launchProjectile(ctxLong, attacker, longTarget, weapon, 25, longTarget.pos.x, longTarget.pos.y, true);
-    const longProj = ctxLong.inflightProjectiles[0];
-
-    // Long range should have more travel frames
-    expect(longProj.travelFrames).toBeGreaterThan(shortProj.travelFrames);
-
-    // Both start with same strength
-    expect(shortProj.strength).toBe(25);
-    expect(longProj.strength).toBe(25);
 
     // Simulate flight for both until arrival
     while (ctxShort.inflightProjectiles.length > 0) {
@@ -267,19 +260,18 @@ describe('updateInflightProjectiles integration — degenerate decay', () => {
       updateInflightProjectiles(ctxLong);
     }
 
-    // Short-range target took more damage (less degeneration)
-    // longTarget has more HP remaining because the projectile lost strength during flight
+    // Both targets take the same damage (no degeneration)
     const shortDamageTaken = 400 - shortTarget.hp;
     const longDamageTaken = 400 - longTarget.hp;
 
     expect(shortDamageTaken).toBeGreaterThan(0);
     expect(longDamageTaken).toBeGreaterThan(0);
-    expect(shortDamageTaken).toBeGreaterThan(longDamageTaken);
+    expect(shortDamageTaken).toBe(longDamageTaken);
   });
 
-  it('strength field is decremented each tick via updateInflightProjectiles', () => {
+  it('strength field stays constant for non-degenerate 75mm', () => {
     const attacker = entityAtCell(UnitType.V_1TNK, House.Spain, 5, 5);
-    const target = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 5); // far away
+    const target = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 5);
 
     const ctx = makeCombatCtx([attacker, target]);
     const weapon75 = WEAPON_STATS['75mm'];
@@ -295,9 +287,9 @@ describe('updateInflightProjectiles integration — degenerate decay', () => {
       updateInflightProjectiles(ctx);
     }
 
-    // If projectile is still in flight, strength should have decayed by 3
+    // No degeneration — strength stays at 25
     if (ctx.inflightProjectiles.length > 0) {
-      expect(ctx.inflightProjectiles[0].strength).toBe(22);
+      expect(ctx.inflightProjectiles[0].strength).toBe(25);
     }
   });
 

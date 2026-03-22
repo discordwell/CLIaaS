@@ -685,20 +685,28 @@ describe('Fake vs Real HP comparison (decoy fragility)', () => {
 // C++ rules.ini: Fakes have no Owner= line or TechLevel=-1, making them
 // unavailable in the production sidebar. They're placed by mission designers.
 
-describe('Fakes are not in PRODUCTION_ITEMS (scenario-only)', () => {
+describe('Fakes are in PRODUCTION_ITEMS with low cost (decoy structures)', () => {
+  // Fakes are now tracked in PRODUCTION_ITEMS for completeness,
+  // but have very low cost (50) and techLevel gates.
 
-  it('FACF is not player-buildable', () => {
+  it('FACF is in PRODUCTION_ITEMS with cost 50', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'FACF');
-    expect(item).toBeUndefined();
+    expect(item).toBeDefined();
+    expect(item!.cost).toBe(50);
+    expect(item!.isStructure).toBe(true);
   });
 
-  it('DOMF is not player-buildable', () => {
+  it('DOMF is in PRODUCTION_ITEMS with cost 50', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'DOMF');
-    expect(item).toBeUndefined();
+    expect(item).toBeDefined();
+    expect(item!.cost).toBe(50);
+    expect(item!.isStructure).toBe(true);
   });
 
-  it('WEAF is not player-buildable', () => {
+  it('WEAF is in PRODUCTION_ITEMS with cost 50', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'WEAF');
-    expect(item).toBeUndefined();
+    expect(item).toBeDefined();
+    expect(item!.cost).toBe(50);
+    expect(item!.isStructure).toBe(true);
   });
 });

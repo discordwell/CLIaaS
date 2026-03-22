@@ -234,10 +234,17 @@ describe('FACT is root of the build tree', () => {
   });
 
   it('everything in the build tree traces back to FACT via prerequisite chain', () => {
-    const structures = PRODUCTION_ITEMS.filter(p => p.isStructure);
+    // Non-buildable items (techLevel=-1 with empty prerequisite) are excluded from
+    // the build tree — they are scenario-placed or map-overlay structures.
+    const NON_BUILDABLE_ROOTS = new Set([
+      'CYCL', 'BARB', 'WOOD',    // non-buildable walls/fences
+      'BIO', 'HOSP', 'FCOM', 'MISS',  // scenario-placed buildings
+      'FACF', 'SPEF',            // fakes with empty prerequisite
+    ]);
+    const structures = PRODUCTION_ITEMS.filter(p => p.isStructure && !NON_BUILDABLE_ROOTS.has(p.type));
     // Build a prerequisite lookup
     const prereqOf: Record<string, string> = {};
-    for (const s of structures) {
+    for (const s of PRODUCTION_ITEMS.filter(p => p.isStructure)) {
       prereqOf[s.type] = s.prerequisite;
     }
     // Every buildable structure should eventually reach FACT

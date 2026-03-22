@@ -104,10 +104,17 @@ describe('movementSpeed default fraction', () => {
 // ── Sidebar production gating ─────────────────────────────
 
 describe('sidebar production gating for no-base missions', () => {
-  it('PRODUCTION_ITEMS all require prerequisite buildings (except FACT)', () => {
+  it('PRODUCTION_ITEMS all require prerequisite buildings (except FACT and non-buildable items)', () => {
+    // Non-buildable items (techLevel=-1 with empty prerequisite) are excluded:
+    // scenario-placed structures, non-buildable walls/fences, some fakes
+    const NON_BUILDABLE_NO_PREREQ = new Set([
+      'FACT',       // root of build tree
+      'CYCL', 'BARB', 'WOOD',     // non-buildable walls/fences
+      'BIO', 'HOSP', 'FCOM', 'MISS',  // scenario-placed buildings
+      'FACF', 'SPEF',             // fakes with no prerequisite
+    ]);
     for (const item of PRODUCTION_ITEMS) {
-      // FACT has no prerequisite (TechLevel=-1, MCV deploys into it)
-      if (item.type === 'FACT') {
+      if (NON_BUILDABLE_NO_PREREQ.has(item.type)) {
         expect(item.prerequisite).toBe('');
         continue;
       }
@@ -131,12 +138,13 @@ describe('sidebar production gating for no-base missions', () => {
     // In SCG01EA, all structures belong to USSR, player is Greece
     // isAllied(USSR, Greece) = false, so hasBuilding returns false
     // This means getAvailableItems returns [] — no production
-    // We test the data assumption here
+    // We test the data assumption: buildable structures have prerequisites
+    const NON_BUILDABLE_NO_PREREQ = new Set([
+      'FACT', 'CYCL', 'BARB', 'WOOD', 'BIO', 'HOSP', 'FCOM', 'MISS', 'FACF', 'SPEF',
+    ]);
     const alliedStructures = PRODUCTION_ITEMS.filter(p => p.isStructure);
-    // All buildable structures require FACT or another building as prerequisite
-    // FACT itself has no prerequisite (TechLevel=-1, deployed from MCV)
     for (const s of alliedStructures) {
-      if (s.type === 'FACT') continue;
+      if (NON_BUILDABLE_NO_PREREQ.has(s.type)) continue;
       expect(s.prerequisite).toBeTruthy();
     }
   });

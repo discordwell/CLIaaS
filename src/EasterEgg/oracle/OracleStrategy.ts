@@ -3334,14 +3334,30 @@ export class OracleStrategy {
           .filter(e => e.hp > 0 && this.distanceSq(e, target) <= 225) // within 15 cells
           .sort((a, b) => this.distanceSq(a, target) - this.distanceSq(b, target));
 
+        // Check if an engineer is staged nearby
+        const engNearby = engineers.some(u => this.distanceSq(u, target) <= 144);
+        const factHpRatio = enemyFact ? enemyFact.hp / enemyFact.mhp : 1;
+
+        // Target-fire nearby defenders
         if (nearbyEnemies.length > 0) {
-          // Each tank targets the nearest enemy to the ConYard
           for (let i = 0; i < assaultUnits.length; i++) {
             const enemy = nearbyEnemies[Math.min(i, nearbyEnemies.length - 1)];
             commands.push({ cmd: 'attack', ids: [assaultUnits[i].id], target: enemy.id });
           }
-        } else {
-          // No defenders left — just hold near the ConYard
+        }
+
+        // When engineer is staged and defenders are thinned, weaken the ConYard.
+        // 2 tanks fire at it. Stop when below 25% so engineer can capture.
+        if (engNearby && enemyFact && factHpRatio >= 0.25) {
+          const shooters = assaultUnits.slice(0, 2); // just 2 tanks
+          for (const s of shooters) {
+            commands.push({ cmd: 'shoot_struct', ids: [s.id], target: enemyFact.id });
+          }
+          reasons.push(`weakening FACT ${Math.round(factHpRatio * 100)}%`);
+        }
+
+        // If no enemies AND ConYard not capturable, hold position
+        if (nearbyEnemies.length === 0 && !(engNearby && factHpRatio >= 0.25)) {
           commands.push({ cmd: 'move', ids: assaultUnits.map(u => u.id),
             cx: target.cx - 2, cy: target.cy });
         }
@@ -4057,40 +4073,45 @@ export class OracleStrategy {
     // 3. Production (WEAP/FACT/BARR/AFLD) — attack by structure ID
     // 4. Dogs/infantry within 10 cells (only if nothing better)
     // 5. Everything else (POWR/PROC/etc)
+    // GATHER + STRIKE: tanks rally at y=65, then focus-fire as a group.
+    // Tanks that arrive staggered get killed individually. Must group up first.
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
-      const groupCenter = this.centroid(assaultArmor);
-      let target: { id: number; cx: number; cy: number; t?: string } | null = null;
+      const rallyPoint: Point = { cx: 45, cy: 65 };
+      const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 225); // 15 cells
+      const enRoute = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 225);
+      const readyToStrike = atRally.length >= Math.min(8, assaultArmor.length);
 
-      // 1. Kill ALL enemy tanks/V2RL in the base zone FIRST.
-      //    Don't touch structures while mobile threats exist — we don't want to
-      //    fight tanks and static defense simultaneously.
-      // Target STATIC garrison first (3TNK/V2RL at y=48-55), then mammoths.
-      // 3TNKs don't move — our tanks converge on a fixed point and focus-fire.
-      // Mammoths patrol and kite our tanks into the garrison — avoid them early.
-      const garrisonTarget: Point = { cx: 45, cy: 52 }; // center of 3TNK cluster
-      const baseZoneArmor = state.enemies.filter(
-        (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-          e.cx >= 35 && e.cx <= 62 && e.cy >= 35 && e.cy <= 65,
-      ).sort((a, b) => {
-        // 3TNK/V2RL near y=52 first (static garrison), then mammoths
-        const aGarrison = (a.t === '3TNK' || a.t === 'V2RL') ? 0 : 1;
-        const bGarrison = (b.t === '3TNK' || b.t === 'V2RL') ? 0 : 1;
-        if (aGarrison !== bGarrison) return aGarrison - bGarrison;
-        return this.distanceSq(a, garrisonTarget) - this.distanceSq(b, garrisonTarget);
-      });
-      // Pick target: garrison tanks → structures
-      if (baseZoneArmor.length > 0) target = baseZoneArmor[0];
-      else {
-        const s = this.chooseScg11eaAssaultTarget(enemyStructures);
-        if (s) target = s;
+      // Tanks en route: 'move' to rally (don't fight, just get there)
+      if (enRoute.length > 0) {
+        commands.push({ cmd: 'move', ids: enRoute.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
+        for (const u of enRoute) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
       }
-      // Spam attack EVERY tick on ALL tanks. The C++ guard behavior teleports
-      // tanks home every ~800 ticks, but re-issuing attack every 50 ticks
-      // (each oracle step) overrides it. Tanks make progress in bursts.
-      if (target) {
-        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
-        for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
-        reasons.push(`assault ${(target as any).t ?? '?'} (${assaultArmor.length} → ${target.cx},${target.cy})`);
+
+      if (readyToStrike) {
+        // STRIKE: pick highest priority target, all grouped tanks attack by ID
+        const garrisonTarget: Point = { cx: 45, cy: 52 };
+        const baseZoneArmor = state.enemies.filter(
+          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
+            e.cx >= 35 && e.cx <= 62 && e.cy >= 35 && e.cy <= 65,
+        ).sort((a, b) => {
+          const aG = (a.t === '3TNK' || a.t === 'V2RL') ? 0 : 1;
+          const bG = (b.t === '3TNK' || b.t === 'V2RL') ? 0 : 1;
+          return aG !== bG ? aG - bG : this.distanceSq(a, garrisonTarget) - this.distanceSq(b, garrisonTarget);
+        });
+        let target: { id: number; cx: number; cy: number; t?: string } | null = null;
+        if (baseZoneArmor.length > 0) target = baseZoneArmor[0];
+        else {
+          const s = this.chooseScg11eaAssaultTarget(enemyStructures);
+          if (s) target = s;
+        }
+        if (target) {
+          // ALL grouped tanks attack the SAME target — arrive together, focus-fire
+          commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: target.id });
+          for (const u of atRally) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`STRIKE ${(target as any).t ?? '?'} (${atRally.length} → ${target.cx},${target.cy})`);
+        }
+      } else {
+        reasons.push(`GATHER (${atRally.length}/${assaultArmor.length} at rally)`);
       }
     }
 

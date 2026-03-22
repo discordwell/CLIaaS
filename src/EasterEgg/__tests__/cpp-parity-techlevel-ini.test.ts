@@ -338,8 +338,12 @@ describe('C++ parity: TechLevel= from rules.ini / aftrmath.ini', () => {
   // --- Comprehensive coverage check ---
   describe('Coverage', () => {
     it('every PRODUCTION_ITEMS entry has a matching INI TechLevel', () => {
+      // Some non-buildable items may not have TechLevel in INI
+      // (e.g. MISS is a civilian tech center with no INI TechLevel)
+      const KNOWN_MISSING_TECHLEVEL = new Set(['MISS']);
       const missing: string[] = [];
       for (const item of PRODUCTION_ITEMS) {
+        if (KNOWN_MISSING_TECHLEVEL.has(item.type)) continue;
         if (mergedTechLevels[item.type] === undefined) {
           missing.push(item.type);
         }
@@ -360,8 +364,8 @@ describe('C++ parity: TechLevel= from rules.ini / aftrmath.ini', () => {
       expect(mismatches, `TechLevel mismatches:\n${mismatches.join('\n')}`).toEqual([]);
     });
 
-    it('all 71 PRODUCTION_ITEMS are covered', () => {
-      expect(PRODUCTION_ITEMS.length).toBe(71);
+    it('all 83 PRODUCTION_ITEMS are covered', () => {
+      expect(PRODUCTION_ITEMS.length).toBe(83);
     });
   });
 });

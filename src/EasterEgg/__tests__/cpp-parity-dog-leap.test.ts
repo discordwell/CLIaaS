@@ -335,11 +335,11 @@ describe('DogJaw weapon enables projectile travel (not instant hit)', () => {
     expect(jaw.projectileSpeed).toBeGreaterThan(0);
   });
 
-  it('DogJaw isInvisible = true (no projectile visual, but still travels)', () => {
-    expect(WEAPON_STATS.DogJaw.isInvisible).toBe(true);
+  it('DogJaw isInvisible is falsy (LeapDog projectile has no Inviso=yes in INI)', () => {
+    expect(WEAPON_STATS.DogJaw.isInvisible).toBeFalsy();
   });
 
-  it('DogJaw isDegenerate = true (damage degrades during flight)', () => {
-    expect(WEAPON_STATS.DogJaw.isDegenerate).toBe(true);
+  it('DogJaw isDegenerate is falsy (no Degenerates=yes in INI)', () => {
+    expect(WEAPON_STATS.DogJaw.isDegenerate).toBeFalsy();
   });
 });

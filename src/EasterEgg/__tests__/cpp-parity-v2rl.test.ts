@@ -186,8 +186,8 @@ describe('SCUD weapon stats (weapon.cpp / rules.ini)', () => {
     expect(weapon.isFueled).toBe(true);
   });
 
-  it('isGigundo is true (large explosion sprite)', () => {
-    expect(weapon.isGigundo).toBe(true);
+  it('isGigundo is falsy (FROG projectile has no Gigundo=yes in rules.ini)', () => {
+    expect(weapon.isGigundo).toBeFalsy();
   });
 
   it('ROF is 400 (very long reload — single-shot doctrine)', () => {

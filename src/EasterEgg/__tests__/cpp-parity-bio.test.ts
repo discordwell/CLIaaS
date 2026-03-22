@@ -137,9 +137,12 @@ describe('BIO stats (rules.ini parity)', () => {
     expect(STRUCTURE_POWERED.has('BIO')).toBe(false);
   });
 
-  it('is not player-buildable (scenario-only, not in PRODUCTION_ITEMS)', () => {
+  it('is in PRODUCTION_ITEMS but not player-buildable (techLevel=-1, scenario-only)', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'BIO');
-    expect(prodItem).toBeUndefined();
+    expect(prodItem).toBeDefined();
+    expect(prodItem!.isStructure).toBe(true);
+    expect(prodItem!.techLevel).toBe(-1);
+    expect(prodItem!.cost).toBe(0);
   });
 });
 

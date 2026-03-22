@@ -319,12 +319,12 @@ describe('Torpedo travel — underwater projectile (bullet.cpp:920-941)', () => 
     expect(canTargetNaval(ss1, ss2)).toBe(true);
   });
 
-  it('SS CANNOT target cloaked submarine (no isAntiSub weapon)', () => {
+  it('SS CAN target cloaked submarine (TorpTube has isAntiSub=true per rules.ini ASW=yes)', () => {
     const ss1 = entityAtCell(UnitType.V_SS, House.USSR, 10, 10);
     const ss2 = entityAtCell(UnitType.V_SS, House.Spain, 12, 10);
     ss2.cloakState = CloakState.CLOAKED;
-    // SS doesn't have isAntiSub, so it can't detect/target cloaked subs
-    expect(canTargetNaval(ss1, ss2)).toBe(false);
+    // TorpTube now correctly has isAntiSub=true (Torpedo ASW=yes in rules.ini)
+    expect(canTargetNaval(ss1, ss2)).toBe(true);
   });
 });
 
@@ -623,10 +623,13 @@ describe('Cruiser 8Inch range — longest in game (weapon.cpp / rules.ini)', () 
     expect(WEAPON_STATS['8Inch'].range).toBe(22.0);
   });
 
-  it('8Inch is the longest-range weapon in the game', () => {
-    const allRanges = Object.values(WEAPON_STATS).map(w => w.range);
-    const maxRange = Math.max(...allRanges);
-    expect(WEAPON_STATS['8Inch'].range).toBe(maxRange);
+  it('8Inch is the longest-range conventional weapon in the game (excluding AirAssault)', () => {
+    // AirAssault (helicarrier) has range=127 but does 0 damage — it's a carrier weapon, not conventional
+    const conventionalRanges = Object.entries(WEAPON_STATS)
+      .filter(([name]) => name !== 'AirAssault')
+      .map(([, w]) => w.range);
+    const maxConventionalRange = Math.max(...conventionalRanges);
+    expect(WEAPON_STATS['8Inch'].range).toBe(maxConventionalRange);
   });
 
   it('8Inch damage is 500 (highest conventional weapon damage)', () => {
@@ -722,8 +725,8 @@ describe('Destroyer dual-weapon switching (techno.cpp:1898-1941)', () => {
     expect(WEAPON_STATS['Stinger'].isAntiAir).toBe(true);
   });
 
-  it('Stinger isDegenerate=true (damage reduces over distance)', () => {
-    expect(WEAPON_STATS['Stinger'].isDegenerate).toBe(true);
+  it('Stinger does NOT have isDegenerate (no Degenerates=yes in [LaserGuided] INI)', () => {
+    expect(WEAPON_STATS['Stinger'].isDegenerate).toBeFalsy();
   });
 
   it('Stinger isHigh=true (flies over walls)', () => {
@@ -853,9 +856,9 @@ describe('Gunboat (PT) weapon behavior (vdata.cpp / rules.ini)', () => {
     expect(weapon.rof).toBe(60);
   });
 
-  it('2Inch isDegenerate=true (damage decreases over distance)', () => {
+  it('2Inch does NOT have isDegenerate (no Degenerates=yes in [Cannon] INI)', () => {
     const weapon = WEAPON_STATS['2Inch'];
-    expect(weapon.isDegenerate).toBe(true);
+    expect(weapon.isDegenerate).toBeFalsy();
   });
 
   it('2Inch projSpeed is 25 (fast projectile)', () => {

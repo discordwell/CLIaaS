@@ -122,6 +122,7 @@ const INFANTRY_RULES: [string, ArmorType][] = [
   ['C10',      'none'],  // rules.ini line 1044: Armor=none
   ['EINSTEIN', 'none'],  // rules.ini line 1056: Armor=none
   ['CHAN',      'none'],  // rules.ini line 1081: Armor=none
+  ['DELPHI',   'none'],  // rules.ini: Armor=none (scenario-only NPC)
 ];
 
 // Aircraft from rules.ini
@@ -145,6 +146,7 @@ const AFTERMATH_UNITS: [string, ArmorType][] = [
   ['MSUB', 'light'],     // aftrmath.ini line 113: Armor=light
   ['SHOK', 'none'],      // aftrmath.ini line 129: Armor=none
   ['MECH', 'none'],      // aftrmath.ini line 145: Armor=none
+  ['CARR', 'heavy'],     // aftrmath.ini: Armor=heavy (Helicarrier)
 ];
 
 // Ant units from SCA01EA.ini
