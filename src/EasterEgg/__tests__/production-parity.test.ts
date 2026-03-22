@@ -552,10 +552,9 @@ describe('Data parity: wall entries match rules.ini', () => {
     expect(fenc!.name).toBe('Wire Fence');
   });
 
-  it('BARB is in PRODUCTION_ITEMS but not sidebar-buildable (techLevel=-1, no Owner in rules.ini)', () => {
+  it('BARB is NOT in PRODUCTION_ITEMS (no Owner in rules.ini, tracked in STRUCTURE_POINTS)', () => {
     const barb = PRODUCTION_ITEMS.find(p => p.type === 'BARB');
-    expect(barb).toBeDefined();
-    expect(barb!.techLevel).toBe(-1);
+    expect(barb).toBeUndefined();
   });
 });
 

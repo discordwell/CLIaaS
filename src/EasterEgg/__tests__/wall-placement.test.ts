@@ -22,10 +22,9 @@ describe('Wall Placement', () => {
     expect(brik!.cost).toBe(100);
   });
 
-  it('BARB is in production items but not sidebar-buildable (techLevel=-1, no Owner in rules.ini)', () => {
+  it('BARB is NOT in production items (no Owner in rules.ini, tracked in STRUCTURE_POINTS)', () => {
     const barb = PRODUCTION_ITEMS.find(p => p.type === 'BARB');
-    expect(barb).toBeDefined();
-    expect(barb!.techLevel).toBe(-1);
+    expect(barb).toBeUndefined();
   });
 
   it('all wall types are structures', () => {

@@ -365,8 +365,8 @@ describe('C++ parity: TechLevel= from rules.ini / aftrmath.ini', () => {
       expect(mismatches, `TechLevel mismatches:\n${mismatches.join('\n')}`).toEqual([]);
     });
 
-    it('all 83 PRODUCTION_ITEMS are covered', () => {
-      expect(PRODUCTION_ITEMS.length).toBe(83);
+    it('all 76 PRODUCTION_ITEMS are covered', () => {
+      expect(PRODUCTION_ITEMS.length).toBe(76);
     });
   });
 });

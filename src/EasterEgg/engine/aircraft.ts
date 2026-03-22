@@ -288,9 +288,9 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.flightAltitude = 0;
         if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
           entity.aircraftState = 'rearming';
-          // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
-          // C++ house.cpp:293,303: ROFBias includes difficulty scaling
-          entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * ctx.getROFBias(entity.house)));
+          // C++ building.cpp:4023-4025: building-driven rearm delay
+          // time = Inverse(pfrac) * Rule.ReloadRate * TICKS_PER_MINUTE
+          entity.rearmTimer = computeRearmDelay(ctx.getPowerFraction(entity.house));
         } else {
           entity.aircraftState = 'landed';
         }
@@ -308,9 +308,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         if (entity.ammo >= entity.maxAmmo) {
           entity.aircraftState = 'landed';
         } else {
-          // C++ AIRCRAFT.CPP: rearm delay = weapon ROF * house ROF bias
-          // C++ house.cpp:293,303: ROFBias includes difficulty scaling
-          entity.rearmTimer = Math.max(1, Math.round((entity.weapon?.rof ?? 30) * ctx.getROFBias(entity.house)));
+          // C++ building.cpp:4023-4025: building-driven rearm delay
+          entity.rearmTimer = computeRearmDelay(ctx.getPowerFraction(entity.house));
         }
       }
       return true;

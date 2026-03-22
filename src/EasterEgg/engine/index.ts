@@ -875,7 +875,20 @@ export class Game {
       fireWeaponAt: (a, t, w) => this.fireWeaponAt(a, t, w),
       fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
       getROFBias: (h) => this.getROFBias(h),
+      getPowerFraction: (h) => this._housePowerFraction(h),
     };
+  }
+
+  /** C++ house.cpp:4160: Power_Fraction() = Power/Drain, capped at 1.0.
+   *  Player house uses tracked powerProduced/powerConsumed.
+   *  AI houses assume full power (1.0) — per-house power tracking not yet modeled. */
+  private _housePowerFraction(house: House): number {
+    if (house === this.playerHouse || this.isAllied(house, this.playerHouse)) {
+      if (this.powerConsumed <= 0) return 1.0;
+      return Math.min(1.0, this.powerProduced / this.powerConsumed);
+    }
+    // AI houses: assume full power
+    return 1.0;
   }
 
   /** Run aircraft subsystem function with mutable state sync */

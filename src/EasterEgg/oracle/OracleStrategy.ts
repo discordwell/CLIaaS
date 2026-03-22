@@ -3383,8 +3383,9 @@ export class OracleStrategy {
         }
 
         // When engineer is staged and defenders are thinned, weaken the ConYard.
-        // 2 tanks fire at it. Stop when below 25% so engineer can capture.
-        if (engNearby && enemyFact && factHpRatio >= 0.25) {
+        // 2 tanks fire at it. Stop at 20% — enemy AI repairs buildings, so we
+        // need buffer below the 25% capture threshold for the engineer to arrive.
+        if (engNearby && enemyFact && factHpRatio >= 0.20) {
           const shooters = assaultUnits.slice(0, 2); // just 2 tanks
           for (const s of shooters) {
             commands.push({ cmd: 'shoot_struct', ids: [s.id], target: enemyFact.id });
@@ -3393,7 +3394,7 @@ export class OracleStrategy {
         }
 
         // If no enemies AND ConYard not capturable, hold position
-        if (nearbyEnemies.length === 0 && !(engNearby && factHpRatio >= 0.25)) {
+        if (nearbyEnemies.length === 0 && !(engNearby && factHpRatio >= 0.20)) {
           commands.push({ cmd: 'move', ids: assaultUnits.map(u => u.id),
             cx: target.cx - 2, cy: target.cy });
         }

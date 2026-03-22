@@ -201,25 +201,22 @@ describe('Wall Cost= from rules.ini', () => {
     expect(prodItem!.cost).toBe(iniCost);
   });
 
-  it('BARB: INI has Cost= but no Owner=, tracked in PRODUCTION_ITEMS with techLevel=-1', () => {
+  it('BARB: INI has Cost= but no Owner=, NOT in PRODUCTION_ITEMS (tracked in STRUCTURE_POINTS)', () => {
     const iniCost = iniInt('BARB', 'Cost');
     expect(iniCost).toBeGreaterThan(0); // INI defines a cost
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'BARB');
     const iniOwner = iniGet('BARB', 'Owner');
     expect(iniOwner).toBeUndefined(); // no Owner= key in INI
-    // Now tracked in PRODUCTION_ITEMS for completeness, but not sidebar-buildable
-    expect(prodItem).toBeDefined();
-    expect(prodItem!.techLevel).toBe(-1);
+    // Not in PRODUCTION_ITEMS — no Owner means not buildable, tracked in STRUCTURE_POINTS instead
+    expect(prodItem).toBeUndefined();
   });
 
-  it('WOOD: INI has no Cost=, tracked in PRODUCTION_ITEMS with cost=0', () => {
+  it('WOOD: INI has no Cost=, NOT in PRODUCTION_ITEMS (tracked in STRUCTURE_POINTS)', () => {
     const iniCost = iniGet('WOOD', 'Cost');
     expect(iniCost).toBeUndefined(); // no Cost= in INI
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'WOOD');
-    // Now tracked in PRODUCTION_ITEMS for completeness
-    expect(prodItem).toBeDefined();
-    expect(prodItem!.cost).toBe(0);
-    expect(prodItem!.techLevel).toBe(-1);
+    // Not in PRODUCTION_ITEMS — no Owner/Cost means not buildable, tracked in STRUCTURE_POINTS instead
+    expect(prodItem).toBeUndefined();
   });
 });
 
@@ -294,12 +291,12 @@ describe('Wall Owner= (faction) from rules.ini', () => {
     expect(prodItem!.faction).toBe('both');
   });
 
-  it('BARB: no Owner= in INI, tracked in PRODUCTION_ITEMS but not sidebar-buildable', () => {
+  it('BARB: no Owner= in INI, NOT in PRODUCTION_ITEMS (tracked in STRUCTURE_POINTS)', () => {
     const iniOwner = iniGet('BARB', 'Owner');
     expect(iniOwner).toBeUndefined();
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'BARB');
-    expect(prodItem).toBeDefined();
-    expect(prodItem!.techLevel).toBe(-1); // not sidebar-buildable
+    // No Owner= means not buildable — not in PRODUCTION_ITEMS, tracked in STRUCTURE_POINTS instead
+    expect(prodItem).toBeUndefined();
   });
 });
 
