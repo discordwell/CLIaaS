@@ -78,17 +78,16 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 //   3. Keep enough tanks alive to hold the island while destroyers clear the river.
 //   4. Let the coast-chain POWRs provide the extra power instead of stalling on a local second POWR.
 //   5. Add the second refinery after the naval handoff instead of gating on it.
-/* human-requested: POWR→PROC→WEAP then PURE TANKS until 10+.
-   4300 on buildings, remaining 10500 = 13 medium tanks. */
+/* human-requested: 2 WEAPs for double tank production speed.
+   POWR(300)+PROC(2000)+WEAP(2000)+WEAP(2000)=6300.
+   Remaining 8500 ÷ 800/tank = 10 tanks, built 2× faster. */
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // 300
   { names: ['PROC'],         type_ids: [12] },              // 2000
-  { names: ['WEAP'],         type_ids: [2] },               // 2000 → now pump tanks
-  // DON'T build anything else until we have 10+ tanks.
-  // The build order scan skips entries we already have, so these
-  // only trigger after the WEAP exists and tank production stalls.
+  { names: ['WEAP'],         type_ids: [2] },               // 2000
+  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // 2000 — double production!
+  // Freeze building here until 12 armor, then expand economy
   { names: ['PROC'],         type_ids: [12], maxCount: 2 },
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },
   { names: ['PROC'],         type_ids: [12], maxCount: 3 },
   { names: ['POWR'],         type_ids: [17], maxCount: 3 },
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },
@@ -1725,8 +1724,9 @@ export class OracleStrategy {
     } else if ((!buildingProduction || suppressScg11eaLeftoverBuild) && buildable) {
       // SCG11EA: once WEAP exists, freeze building production until 10+ tanks.
       // Spend all credits on tanks first, then resume eco expansion.
+      const scg11eaWeapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
       const scg11eaFreezeBuild = this.scenario === 'SCG11EA' &&
-        alliedStructures.some((s) => s.t === 'WEAP') &&
+        scg11eaWeapCount >= 2 && // freeze AFTER both WEAPs built
         playerUnits.filter((u) => u.t.includes('TNK') || u.t === 'ARTY').length < 12;
       if (scg11eaFreezeBuild) {
         reasons.push('freeze build (pumping tanks)');
