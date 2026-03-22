@@ -3317,23 +3317,35 @@ export class OracleStrategy {
     const engineers = playerUnits.filter(u => u.t === 'E6');
     const hasConYard = state.structures.some(s => s.ally && s.t === 'FACT');
     if (assaultUnits.length > 0 && !hasConYard) {
-      // Target: ConYard at (16,78) — approach via western route (x=15)
+      // Tank rush to western ConYard(16,78) — hug western edge to avoid Teslas.
+      // Use MOVE (not attack_move) to prevent tanks chasing enemies off-course.
+      // Once near the ConYard, switch to attack_move for the final push.
       const enemyFact = state.structures.find(s => s.t === 'FACT' && !s.ally);
       const target = enemyFact ?? { cx: 16, cy: 78 };
-      commands.push({
-        cmd: 'attack_move',
-        ids: assaultUnits.map(u => u.id),
-        cx: target.cx, cy: target.cy,
-      });
+      // Check if tanks are near the target already
+      const nearTarget = assaultUnits.some(u => this.distanceSq(u, target) <= 100);
+      if (nearTarget) {
+        // Close enough — attack_move for the final push
+        commands.push({
+          cmd: 'attack_move',
+          ids: assaultUnits.map(u => u.id),
+          cx: target.cx, cy: target.cy,
+        });
+      } else {
+        // Move to staging area on western edge — don't engage enemies en route
+        commands.push({
+          cmd: 'move',
+          ids: assaultUnits.map(u => u.id),
+          cx: 15, cy: 75, // staging point west of ConYard
+        });
+      }
       // Engineers capture ConYard when at red health (< 25% HP)
       if (engineers.length > 0 && enemyFact) {
         if (enemyFact.hp < enemyFact.mhp * 0.25) {
           commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyFact.id });
-          reasons.push(`CAPTURE FACT(${enemyFact.cx},${enemyFact.cy}) hp=${enemyFact.hp}/${enemyFact.mhp}`);
+          reasons.push(`CAPTURE FACT hp=${enemyFact.hp}/${enemyFact.mhp}`);
         } else {
-          // Engineers follow tanks but stay back
-          commands.push({ cmd: 'move', ids: engineers.map(u => u.id),
-            cx: target.cx - 3, cy: target.cy + 3 });
+          commands.push({ cmd: 'move', ids: engineers.map(u => u.id), cx: 13, cy: 80 });
         }
       }
     }
