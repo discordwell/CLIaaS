@@ -3332,11 +3332,13 @@ export class OracleStrategy {
           cx: target.cx, cy: target.cy,
         });
       } else {
-        // Move to staging area on western edge — don't engage enemies en route
+        // Move inland then south — coast at x=15 is impassable for vehicles.
+        // Route: east to x=20 (inland), then south to y=75 (near ConYard).
+        // Stays 20+ cells from Tesla coils at (40,73)/(48,73).
         commands.push({
           cmd: 'move',
           ids: assaultUnits.map(u => u.id),
-          cx: 15, cy: 75, // staging point west of ConYard
+          cx: 20, cy: 75,
         });
       }
       // Engineers capture ConYard when at red health (< 25% HP)
