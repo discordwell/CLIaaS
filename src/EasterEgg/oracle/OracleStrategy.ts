@@ -3506,10 +3506,33 @@ export class OracleStrategy {
       }
     }
 
-    // ─── PHASE 3: After SAMs destroyed — proceed to base assault ───────
-    // Chinook arrives but Tanya boarding isn't needed for mission completion.
-    // The mission objective is to destroy all Soviet buildings and units.
-    // Fall through to Phase 4 (generic base building + destruction).
+    // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
+    // After all SAMs destroyed, chinook arrives. Tanya boards for extraction.
+    // Use warp_unit to teleport Tanya into the chinook (simulates the
+    // helicopter landing and loading that the team script handles in C++).
+    if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length) {
+      if (chinook) {
+        // Instantly load Tanya into chinook. In the real game the chinook
+        // flies to Tanya, lands, and loads her. We use load_passenger to
+        // simulate this since the helicopter-landing-for-pickup AI isn't
+        // implemented yet.
+        commands.push({ cmd: 'load_passenger', ids: [tanya.id], target: chinook.id });
+        reasons.push('Tanya → board chinook');
+      } else {
+        // Shoot enemies while waiting for chinook
+        const INF_TYPES = new Set(['E1','E2','E3','E4','E6','SHOK','DOG']);
+        const nearbyEnemy = state.enemies.find((e) =>
+          INF_TYPES.has(e.t) && e.hp > 0 && this.distanceSq(tanya, e) <= 33,
+        );
+        if (nearbyEnemy) {
+          commands.push({ cmd: 'attack', ids: [tanya.id], target: nearbyEnemy.id });
+          reasons.push(`SHOOT ${nearbyEnemy.t} while waiting for chinook`);
+        } else {
+          reasons.push('waiting for chinook');
+        }
+      }
+      return { commands, reason: reasons.join('; ') };
+    }
 
     // (LST-south phase removed — tny3 triggered via set_global after spy infiltration)
 
@@ -3939,68 +3962,30 @@ export class OracleStrategy {
         reasons.push(`stage armor (${stageArmor.length})`);
       }
     }
-    // Phase 1 (CHARGE): 'move' all tanks to a rally point NEAR the base (45,60).
-    //   This groups them up before the attack — no scattered arrivals.
-    // Phase 2 (RAZE): once 8+ tanks are within 15 cells of the rally, attack_move
-    //   to the WEAP. Concentrated force, not scattered trickle.
+    // Once assault starts: focus-fire enemy tanks, then attack_move to buildings.
+    // NEVER use 'move' — tanks must always be shooting. No rally, no phases.
+    // Tanks fight whatever is between them and the building.
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
-      const rallyPoint: Point = { cx: 45, cy: 60 };
       const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
-      // Count how many tanks are near the rally point
-      const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 225); // 15 cells
-      const readyToRaze = atRally.length >= 8;
+      const groupCenter = this.centroid(assaultArmor);
+      // Enemy tanks/V2RL in the island base zone (x=35-58) within 20 cells.
+      // Ignores far-east BadGuy mammoths at x=93-103 and border mammoths at x=60+.
+      const nearbyTanks = state.enemies.filter(
+        (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
+          e.cx >= 35 && e.cx <= 62 &&
+          this.distanceSq(e, groupCenter) <= 400,
+      ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
 
-      if (readyToRaze) {
-        // RAZE: 'attack' the nearest enemy TANK or production BUILDING by ID.
-        // This makes tanks pathfind to a SPECIFIC target, ignoring dogs/infantry.
-        // Priority: enemy tanks near our group → production buildings.
-        const groupCenter = this.centroid(atRally);
-        const nearbyTanks = state.enemies.filter(
-          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            this.distanceSq(e, groupCenter) <= 225, // 15 cells — base defenders only
-        ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
-
-        let targetId: number | null = null;
-        let targetDesc = '';
-        let targetPos: Point = { cx: 0, cy: 0 };
-
-        // Kill enemy tanks/V2RL FIRST (we do this fast with focus-fire).
-        // Once no more tanks within 30 cells, path is clear → attack_move to building.
-        if (nearbyTanks.length > 0) {
-          // Focus-fire nearest enemy tank — all tanks on one target
-          targetId = nearbyTanks[0].id;
-          targetDesc = nearbyTanks[0].t;
-          targetPos = nearbyTanks[0];
-        } else if (structTarget) {
-          // ALL enemy tanks dead — path is clear, hit the building
-          targetId = structTarget.id;
-          targetDesc = structTarget.t;
-          targetPos = structTarget;
-        }
-
-        if (targetId != null) {
-          if (nearbyTanks.length > 0 && nearbyTanks[0].id === targetId) {
-            // Enemy unit — 'attack' by ID (pathfinds to unit, ignores infantry)
-            commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: targetId });
-          } else {
-            // Building — 'attack_move' to coords (path should be clear of tanks now)
-            commands.push({ cmd: 'attack_move', ids: atRally.map((u) => u.id), cx: targetPos.cx, cy: targetPos.cy });
-          }
-          for (const u of atRally) this.recordMove(u.id, targetPos.cx, targetPos.cy);
-          reasons.push(`assault KILL ${targetDesc} (${atRally.length} → ${targetPos.cx},${targetPos.cy})`);
-        }
-
-        // Stragglers move to rally
-        const stragglers = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 225);
-        if (stragglers.length > 0) {
-          commands.push({ cmd: 'move', ids: stragglers.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
-          for (const u of stragglers) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
-        }
-      } else {
-        // CHARGE: move all tanks to rally point — group up before attacking
-        commands.push({ cmd: 'move', ids: assaultArmor.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
-        for (const u of assaultArmor) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
-        reasons.push(`assault CHARGE rally (${assaultArmor.length}, ${atRally.length}/8 at rally)`);
+      if (nearbyTanks.length > 0) {
+        // Focus-fire nearest enemy tank — 'attack' by ID ignores dogs
+        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: nearbyTanks[0].id });
+        for (const u of assaultArmor) this.recordMove(u.id, nearbyTanks[0].cx, nearbyTanks[0].cy);
+        reasons.push(`assault KILL ${nearbyTanks[0].t} (${assaultArmor.length} → ${nearbyTanks[0].cx},${nearbyTanks[0].cy})`);
+      } else if (structTarget) {
+        // No enemy tanks — attack_move to building (only dogs in the way, die fast)
+        commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: structTarget.cx, cy: structTarget.cy });
+        for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
+        reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
       }
     }
 
