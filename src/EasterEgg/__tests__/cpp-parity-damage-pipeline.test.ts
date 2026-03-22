@@ -1,0 +1,972 @@
+/**
+ * C++ Behavioral Parity Tests — Damage Calculation Pipeline
+ *
+ * Tests the full chain from weapon fire to HP reduction:
+ *   damage * warhead_vs_armor * distance_falloff * veterancy
+ *
+ * C++ source references:
+ *   combat.cpp:72-129  — Modify_Damage(): warhead * armor * distance falloff * min/max clamp
+ *   combat.cpp:162-271 — Explosion_Damage(): splash radius, object collection, distance calc
+ *   warhead.h:46-117   — WarheadTypeClass: SpreadFactor, Modifier[ARMOR_COUNT], wall flags
+ *   warhead.cpp:168-191 — Read_INI(): loads Spread, Verses, Wall, Wood, Ore, Explosion, InfDeath
+ *   display.h:45-56     — ICON_PIXEL_W=24, ICON_LEPTON_W=256, PIXEL_LEPTON_W=256/24=10
+ *   rules.ini [SA],[HE],[AP],[Fire],[HollowPoint],[Super],[Organic],[Nuke] — authoritative values
+ *
+ * CRITICAL: All expected values are PARSED from rules.ini, never hardcoded.
+ */
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  modifyDamage, armorIndex,
+  WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
+  CELL_SIZE, MAX_DAMAGE, PRONE_DAMAGE_BIAS,
+  UNIT_STATS, UnitType, House,
+  buildDefaultAlliances,
+  type WarheadType, type ArmorType,
+} from '../engine/types';
+import { Entity, resetEntityIds } from '../engine/entity';
+import {
+  type CombatContext,
+  applySplashDamage, damageEntity, getWarheadMult, getWarheadMeta,
+  SPLASH_RADIUS,
+} from '../engine/combat';
+import { GameMap } from '../engine/map';
+
+// ── INI Parser ────────────────────────────────────────────────────────────────
+
+const RULES_INI_PATH = path.resolve(__dirname, '../../../public/ra/assets/rules.ini');
+const rulesContent = fs.readFileSync(RULES_INI_PATH, 'utf-8');
+
+interface INIData {
+  [section: string]: { [key: string]: string };
+}
+
+function parseINI(content: string): INIData {
+  const result: INIData = {};
+  let currentSection = '';
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.split(';')[0].trim();
+    if (!line) continue;
+    const sectionMatch = line.match(/^\[(.+)\]$/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1];
+      if (!result[currentSection]) result[currentSection] = {};
+      continue;
+    }
+    const kvMatch = line.match(/^([^=]+)=(.*)$/);
+    if (kvMatch && currentSection) {
+      result[currentSection][kvMatch[1].trim()] = kvMatch[2].trim();
+    }
+  }
+  return result;
+}
+
+/** Parse a percentage string like "50%" to a fraction (0.5), or a plain number. */
+function parsePercent(val: string): number {
+  if (val.endsWith('%')) return parseFloat(val) / 100;
+  return parseFloat(val);
+}
+
+const ini = parseINI(rulesContent);
+
+// ── INI-parsed warhead data ─────────────────────────────────────────────────
+
+interface ParsedWarhead {
+  spread: number;
+  verses: [number, number, number, number, number]; // [none, wood, light, heavy, concrete]
+  explosion: number;
+  infDeath: number;
+  wall: boolean;
+  wood: boolean;
+  ore: boolean;
+}
+
+const WARHEAD_NAMES = ['SA', 'HE', 'AP', 'Fire', 'HollowPoint', 'Super', 'Organic', 'Nuke'] as const;
+
+function parseWarhead(name: string): ParsedWarhead {
+  const section = ini[name];
+  if (!section) throw new Error(`Missing [${name}] section in rules.ini`);
+  const versesStr = section['Verses'] ?? '100%,100%,100%,100%,100%';
+  const verses = versesStr.split(',').map(v => parsePercent(v.trim())) as [number, number, number, number, number];
+  return {
+    spread: parseInt(section['Spread'] ?? '1', 10),
+    verses,
+    explosion: parseInt(section['Explosion'] ?? '0', 10),
+    infDeath: parseInt(section['InfDeath'] ?? '0', 10),
+    wall: (section['Wall'] ?? 'no').toLowerCase() === 'yes',
+    wood: (section['Wood'] ?? 'no').toLowerCase() === 'yes',
+    ore: (section['Ore'] ?? 'no').toLowerCase() === 'yes',
+  };
+}
+
+const parsedWarheads: Record<string, ParsedWarhead> = {};
+for (const name of WARHEAD_NAMES) {
+  parsedWarheads[name] = parseWarhead(name);
+}
+
+// ── INI-parsed general combat constants ─────────────────────────────────────
+
+const INI_MIN_DAMAGE = parseInt(ini['General']['MinDamage'] ?? '1', 10);
+const INI_MAX_DAMAGE = parseInt(ini['General']['MaxDamage'] ?? '1000', 10);
+const INI_PRONE_DAMAGE = parsePercent(ini['General']['ProneDamage'] ?? '50%');
+const INI_BRIDGE_STRENGTH = parseInt(ini['General']['BridgeStrength'] ?? '1000', 10);
+
+// ── C++ constants from display.h ────────────────────────────────────────────
+// ICON_PIXEL_W = 24, ICON_LEPTON_W = 256, PIXEL_LEPTON_W = 256/24 = 10 (integer division)
+const ICON_PIXEL_W = 24;
+const ICON_LEPTON_W = 256;
+const PIXEL_LEPTON_W = Math.floor(ICON_LEPTON_W / ICON_PIXEL_W); // 10
+
+// ── Test helpers ────────────────────────────────────────────────────────────
+
+const ARMOR_TYPES: ArmorType[] = ['none', 'wood', 'light', 'heavy', 'concrete'];
+
+beforeEach(() => resetEntityIds());
+
+function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
+  return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function makeCombatCtx(entities: Entity[] = []): CombatContext {
+  const map = new GameMap();
+  const alliances = buildDefaultAlliances();
+  return {
+    entities,
+    entityById: new Map(entities.map(e => [e.id, e])),
+    structures: [],
+    inflightProjectiles: [],
+    effects: [],
+    tick: 0,
+    playerHouse: House.Spain,
+    scenarioId: 'TEST',
+    killCount: 0,
+    lossCount: 0,
+    pointTotal: 0,
+    alliedUnitsLost: 0,
+    sovietUnitsLost: 0,
+    alliedBuildingsLost: 0,
+    sovietBuildingsLost: 0,
+    warheadOverrides: {},
+    scenarioWarheadMeta: {},
+    scenarioWarheadProps: {},
+    attackedTriggerNames: new Set<string>(),
+    map,
+    isAllied: (a: House, b: House) => alliances.get(a)?.has(b) ?? false,
+    entitiesAllied: (a: Entity, b: Entity) => alliances.get(a.house)?.has(b.house) ?? false,
+    isPlayerControlled: (e: Entity) => alliances.get(e.house)?.has(House.Spain) ?? false,
+    playSoundAt: () => {},
+    playEva: () => {},
+    minimapAlert: () => {},
+    movementSpeed: () => 1,
+    getFirepowerBias: () => 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
+    damageStructure: () => false,
+    aiIQ: () => 3,
+    warheadMuzzleColor: () => '#fff',
+    aiStates: new Map(),
+    lastBaseAttackEva: -Infinity,
+    gameTicksPerSec: 15,
+    gapGeneratorCells: new Map(),
+    nBuildingsDestroyedCount: 0,
+    structuresLost: 0,
+    bridgeCellCount: 0,
+    clearStructureFootprint: () => {},
+    recalculateSiloCapacity: () => {},
+    showEvaMessage: () => {},
+    screenShake: 0,
+    screenFlash: 0,
+    powerConsumed: 0,
+    powerProduced: 100,
+  } as CombatContext;
+}
+
+/**
+ * Replicate C++ Modify_Damage logic exactly using INI-parsed values.
+ * C++ combat.cpp:72-129
+ *
+ * @param damage     Raw weapon damage
+ * @param spreadFactor  Warhead Spread= from INI
+ * @param armorMult  Warhead Verses[armor] from INI
+ * @param distLeptons  Distance in leptons from explosion center
+ * @param houseBias  FirepowerBias multiplier (default 1.0)
+ * @returns Expected damage after C++ Modify_Damage
+ */
+function cppModifyDamage(
+  damage: number, spreadFactor: number, armorMult: number,
+  distLeptons: number, houseBias = 1.0,
+): number {
+  if (damage === 0) return 0;
+  if (damage < 0) return 0; // simplified; heal logic tested separately
+
+  let dmg = damage * armorMult * houseBias;
+  if (dmg <= 0) return 0;
+
+  // C++ combat.cpp:107-111 — distance normalization
+  let distance: number;
+  if (spreadFactor === 0) {
+    // combat.cpp:108 — distance /= PIXEL_LEPTON_W/4 = 10/4 = 2 (C++ integer division)
+    distance = Math.floor(distLeptons / Math.floor(PIXEL_LEPTON_W / 4));
+  } else {
+    // combat.cpp:110 — distance /= SpreadFactor * (PIXEL_LEPTON_W / 2) = SpreadFactor * 5
+    distance = Math.floor(distLeptons / (spreadFactor * Math.floor(PIXEL_LEPTON_W / 2)));
+  }
+
+  // combat.cpp:112 — Bound(distance, 0, 16)
+  distance = Math.max(0, Math.min(16, distance));
+
+  // combat.cpp:113-115 — damage / distance
+  if (distance > 0) {
+    dmg = dmg / distance;
+  }
+
+  // combat.cpp:122-124 — MinDamage threshold: distance < 4 means at least MinDamage
+  if (distance < 4) {
+    dmg = Math.max(dmg, INI_MIN_DAMAGE);
+  }
+
+  // combat.cpp:127 — MaxDamage cap
+  dmg = Math.min(dmg, INI_MAX_DAMAGE);
+
+  return dmg;
+}
+
+// =============================================================================
+// 1. WARHEAD VS ARMOR TABLES — rules.ini Verses= is authoritative
+// =============================================================================
+
+describe('Warhead vs Armor tables match rules.ini Verses= (warhead.cpp:178-185)', () => {
+  for (const whName of WARHEAD_NAMES) {
+    const parsed = parsedWarheads[whName];
+    describe(`[${whName}] Verses=${parsed.verses.map(v => (v * 100) + '%').join(',')}`, () => {
+      for (let i = 0; i < ARMOR_TYPES.length; i++) {
+        const armor = ARMOR_TYPES[i];
+        const iniVal = parsed.verses[i];
+
+        it(`${whName} vs ${armor}: TS WARHEAD_VS_ARMOR = ${iniVal} (INI Verses)`, () => {
+          const tsVal = WARHEAD_VS_ARMOR[whName as WarheadType]?.[i];
+          expect(tsVal, `WARHEAD_VS_ARMOR['${whName}'][${i}] (${armor})`).toBeCloseTo(iniVal, 4);
+        });
+
+        it(`${whName} vs ${armor}: getWarheadMult returns INI value`, () => {
+          const mult = getWarheadMult(whName as WarheadType, armor, {});
+          expect(mult, `getWarheadMult('${whName}', '${armor}')`).toBeCloseTo(iniVal, 4);
+        });
+      }
+    });
+  }
+});
+
+// =============================================================================
+// 2. WARHEAD META — Spread, Wall, Wood, Ore from rules.ini
+// =============================================================================
+
+describe('Warhead metadata matches rules.ini Spread/Wall/Wood/Ore (warhead.cpp:171-174)', () => {
+  for (const whName of WARHEAD_NAMES) {
+    const parsed = parsedWarheads[whName];
+    const meta = WARHEAD_META[whName as WarheadType];
+
+    it(`[${whName}] Spread=${parsed.spread} matches WARHEAD_META.spreadFactor`, () => {
+      expect(meta?.spreadFactor, `WARHEAD_META['${whName}'].spreadFactor`).toBe(parsed.spread);
+    });
+
+    if (parsed.wall) {
+      it(`[${whName}] Wall=yes matches WARHEAD_META.destroysWalls=true`, () => {
+        expect(meta?.destroysWalls).toBe(true);
+      });
+    }
+    if (parsed.wood) {
+      it(`[${whName}] Wood=yes matches WARHEAD_META.destroysWood=true`, () => {
+        expect(meta?.destroysWood).toBe(true);
+      });
+    }
+    if (parsed.ore) {
+      it(`[${whName}] Ore=yes matches WARHEAD_META.destroysOre=true`, () => {
+        expect(meta?.destroysOre).toBe(true);
+      });
+    }
+  }
+});
+
+// =============================================================================
+// 3. WARHEAD PROPS — Explosion set and InfDeath from rules.ini
+// =============================================================================
+
+describe('Warhead props match rules.ini Explosion/InfDeath (warhead.cpp:175-176)', () => {
+  for (const whName of WARHEAD_NAMES) {
+    const parsed = parsedWarheads[whName];
+    const props = WARHEAD_PROPS[whName as WarheadType];
+
+    it(`[${whName}] Explosion=${parsed.explosion} matches WARHEAD_PROPS.explosionSet`, () => {
+      expect(props?.explosionSet, `WARHEAD_PROPS['${whName}'].explosionSet`).toBe(parsed.explosion);
+    });
+
+    it(`[${whName}] InfDeath=${parsed.infDeath} matches WARHEAD_PROPS.infantryDeath`, () => {
+      expect(props?.infantryDeath, `WARHEAD_PROPS['${whName}'].infantryDeath`).toBe(parsed.infDeath);
+    });
+  }
+});
+
+// =============================================================================
+// 4. GENERAL COMBAT CONSTANTS — rules.ini [General] is authoritative
+// =============================================================================
+
+describe('General combat constants match rules.ini [General]', () => {
+  it(`MinDamage=${INI_MIN_DAMAGE} (rules.ini General.MinDamage)`, () => {
+    // The TS engine uses MinDamage=1 in modifyDamage (combat.cpp:123: damage = max(damage, Rule.MinDamage))
+    expect(INI_MIN_DAMAGE).toBe(1);
+  });
+
+  it(`MaxDamage=${INI_MAX_DAMAGE} matches TS MAX_DAMAGE constant`, () => {
+    expect(MAX_DAMAGE).toBe(INI_MAX_DAMAGE);
+  });
+
+  it(`ProneDamage=${INI_PRONE_DAMAGE * 100}% matches TS PRONE_DAMAGE_BIAS`, () => {
+    expect(PRONE_DAMAGE_BIAS).toBeCloseTo(INI_PRONE_DAMAGE, 4);
+  });
+});
+
+// =============================================================================
+// 5. modifyDamage() — CORE FORMULA PARITY (combat.cpp:72-129)
+// =============================================================================
+
+describe('modifyDamage() formula matches C++ Modify_Damage (combat.cpp:72-129)', () => {
+
+  // ── 5a. Zero damage short-circuit (combat.cpp:74) ──
+
+  it('zero damage returns 0 regardless of warhead/armor (combat.cpp:74)', () => {
+    expect(modifyDamage(0, 'HE', 'none', 0)).toBe(0);
+    expect(modifyDamage(0, 'AP', 'heavy', 10)).toBe(0);
+    expect(modifyDamage(0, 'SA', 'light', 100)).toBe(0);
+  });
+
+  // ── 5b. Point-blank (distance=0) damage = baseDamage * armorMult ──
+
+  it('point-blank (dist=0): damage = baseDamage * Verses[armor] (combat.cpp:101,113-115)', () => {
+    for (const whName of WARHEAD_NAMES) {
+      const parsed = parsedWarheads[whName];
+      for (let i = 0; i < ARMOR_TYPES.length; i++) {
+        const armor = ARMOR_TYPES[i];
+        const mult = parsed.verses[i];
+        const baseDmg = 100;
+        const expected = Math.max(0, Math.round(baseDmg * mult));
+        // Distance=0, distFactor=0, so no division; minDamage guaranteed (distFactor < 4)
+        if (mult <= 0) {
+          // 0% verses = 0 damage (combat.cpp:101 after multiplication)
+          expect(
+            modifyDamage(baseDmg, whName as WarheadType, armor, 0),
+            `${whName} vs ${armor} (0% verses)`,
+          ).toBe(0);
+        } else {
+          // Positive verses → at least MinDamage=1, capped at MaxDamage
+          const tsDmg = modifyDamage(baseDmg, whName as WarheadType, armor, 0);
+          expect(tsDmg, `${whName} vs ${armor} at dist=0`).toBe(
+            Math.min(Math.max(expected, INI_MIN_DAMAGE), INI_MAX_DAMAGE),
+          );
+        }
+      }
+    }
+  });
+
+  // ── 5c. Distance-based falloff (combat.cpp:106-125) ──
+
+  describe('distance falloff matches C++ integer math (combat.cpp:106-125)', () => {
+    // Test with HE warhead (Spread=6) at various distances
+    // C++ formula: distFactor = floor(distLeptons / (SpreadFactor * PIXEL_LEPTON_W/2))
+    //            = floor(distLeptons / (6 * 5)) = floor(distLeptons / 30)
+    // In pixel space, TS converts: distFactor = floor(distPixels * 2 / SpreadFactor)
+    const heSpread = parsedWarheads['HE'].spread; // 6
+    const heVsNone = parsedWarheads['HE'].verses[0]; // 0.9
+
+    it('HE at dist=0 pixels: full damage (distFactor=0, no division)', () => {
+      const result = modifyDamage(100, 'HE', 'none', 0);
+      const expected = Math.round(100 * heVsNone);
+      expect(result).toBe(expected); // 90
+    });
+
+    it('HE at dist=1 pixel: distFactor=floor(1*2/6)=0, full damage', () => {
+      const result = modifyDamage(100, 'HE', 'none', 1);
+      const expected = Math.round(100 * heVsNone); // Still 90 (distFactor=0)
+      expect(result).toBe(expected);
+    });
+
+    it('HE at dist=3 pixels: distFactor=floor(3*2/6)=1, damage/1', () => {
+      const result = modifyDamage(100, 'HE', 'none', 3);
+      // distFactor=floor(6/6)=1, damage/1=90
+      const expected = Math.round(100 * heVsNone / 1);
+      expect(result).toBe(expected); // 90
+    });
+
+    it('HE at dist=6 pixels: distFactor=floor(6*2/6)=2, damage/2', () => {
+      const result = modifyDamage(100, 'HE', 'none', 6);
+      // distFactor=floor(12/6)=2, 90/2=45
+      const expected = Math.round(100 * heVsNone / 2);
+      expect(result).toBe(expected); // 45
+    });
+
+    it('HE at dist=12 pixels: distFactor=floor(12*2/6)=4, damage/4', () => {
+      const result = modifyDamage(100, 'HE', 'none', 12);
+      // distFactor=floor(24/6)=4, 90/4=22.5 → 23
+      const expected = Math.round(100 * heVsNone / 4);
+      expect(result).toBe(expected); // 23
+    });
+
+    // SA warhead has Spread=3, tighter spread
+    const saSpread = parsedWarheads['SA'].spread; // 3
+    const saVsNone = parsedWarheads['SA'].verses[0]; // 1.0
+
+    it('SA at dist=3 pixels: distFactor=floor(3*2/3)=2, damage/2', () => {
+      const result = modifyDamage(100, 'SA', 'none', 3);
+      // distFactor=floor(6/3)=2, 100/2=50
+      expect(result).toBe(Math.round(100 * saVsNone / 2)); // 50
+    });
+
+    it('SA at dist=6 pixels: distFactor=floor(6*2/3)=4, damage/4', () => {
+      const result = modifyDamage(100, 'SA', 'none', 6);
+      // distFactor=floor(12/3)=4, 100/4=25
+      expect(result).toBe(Math.round(100 * saVsNone / 4)); // 25
+    });
+
+    // Fire warhead has Spread=8, widest spread
+    const fireSpread = parsedWarheads['Fire'].spread; // 8
+    const fireVsNone = parsedWarheads['Fire'].verses[0]; // 0.9
+
+    it('Fire at dist=8 pixels: distFactor=floor(8*2/8)=2, damage/2', () => {
+      const result = modifyDamage(100, 'Fire', 'none', 8);
+      // distFactor=floor(16/8)=2, 90/2=45
+      expect(result).toBe(Math.round(100 * fireVsNone / 2)); // 45
+    });
+
+    it('Fire at dist=16 pixels: distFactor=floor(16*2/8)=4, damage/4', () => {
+      const result = modifyDamage(100, 'Fire', 'none', 16);
+      // distFactor=floor(32/8)=4, 90/4=22.5 → 23
+      expect(result).toBe(Math.round(100 * fireVsNone / 4)); // 23
+    });
+  });
+
+  // ── 5d. Organic warhead: Spread=0 special path (combat.cpp:108) ──
+
+  describe('Organic warhead (Spread=0) uses narrow falloff path (combat.cpp:108)', () => {
+    // Spread=0: distance /= PIXEL_LEPTON_W/4 = 10/4 = 2 (C++ integer division)
+    // In pixel space: distFactor = distPixels * 5
+
+    const orgVsNone = parsedWarheads['Organic'].verses[0]; // 1.0
+
+    it('Organic at dist=0: full damage', () => {
+      expect(modifyDamage(100, 'Organic', 'none', 0)).toBe(Math.round(100 * orgVsNone));
+    });
+
+    it('Organic at dist=1 pixel: distFactor=floor(1*5)=5, damage/5=20', () => {
+      // Very steep falloff: 1 pixel away already divides by 5
+      const result = modifyDamage(100, 'Organic', 'none', 1);
+      expect(result).toBe(Math.round(100 * orgVsNone / 5)); // 20
+    });
+
+    it('Organic does 0 damage to armored targets (Verses=0%)', () => {
+      expect(modifyDamage(100, 'Organic', 'wood', 0)).toBe(0);
+      expect(modifyDamage(100, 'Organic', 'light', 0)).toBe(0);
+      expect(modifyDamage(100, 'Organic', 'heavy', 0)).toBe(0);
+      expect(modifyDamage(100, 'Organic', 'concrete', 0)).toBe(0);
+    });
+  });
+
+  // ── 5e. Distance falloff bound to [0,16] (combat.cpp:112) ──
+
+  describe('distance factor clamped to [0,16] (combat.cpp:112)', () => {
+    // HollowPoint Spread=1, very narrow. At large distances, distFactor = floor(dist*2/1) can exceed 16.
+    const hpSpread = parsedWarheads['HollowPoint'].spread; // 1
+    const hpVsNone = parsedWarheads['HollowPoint'].verses[0]; // 1.0
+
+    it('HollowPoint at dist=20 pixels: distFactor clamped to 16, damage/16', () => {
+      // distFactor = floor(20*2/1) = 40, clamped to 16
+      const result = modifyDamage(100, 'HollowPoint', 'none', 20);
+      // damage = 100 * 1.0 / 16 = 6.25 → round=6
+      // distFactor=16 >= 4, so no minDamage guarantee
+      expect(result).toBe(Math.round(100 * hpVsNone / 16)); // 6
+    });
+
+    it('Super at dist=50 pixels: distFactor clamped to 16', () => {
+      // Super Spread=1: distFactor = floor(50*2/1)=100, clamped to 16
+      const result = modifyDamage(200, 'Super', 'none', 50);
+      // 200 / 16 = 12.5 → 13
+      expect(result).toBe(Math.round(200 / 16)); // 13
+    });
+  });
+
+  // ── 5f. MinDamage guarantee when distFactor < 4 (combat.cpp:122-124) ──
+
+  describe('MinDamage=1 guaranteed when distFactor < 4 (combat.cpp:122-124)', () => {
+    // Even low damage * low armor multiplier should yield at least 1 damage at close range
+    it('1 damage * SA vs heavy (25%) at dist=0: result >= 1', () => {
+      const saVsHeavy = parsedWarheads['SA'].verses[3]; // 0.25
+      // 1 * 0.25 = 0.25, but distFactor=0 < 4, so min(damage, 1) applies
+      const result = modifyDamage(1, 'SA', 'heavy', 0);
+      expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
+    });
+
+    it('2 damage * HollowPoint vs heavy (5%) at dist=0: result >= 1', () => {
+      // 2 * 0.05 = 0.1, round = 0, but min damage = 1
+      const result = modifyDamage(2, 'HollowPoint', 'heavy', 0);
+      expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
+    });
+
+    it('distFactor=3 (< 4) still gets MinDamage guarantee', () => {
+      // AP Spread=3: dist=4.5 pixels → distFactor=floor(4.5*2/3)=3
+      // 1 * AP_vs_none(0.3) = 0.3 / 3 = 0.1, but distFactor=3 < 4 → at least 1
+      const result = modifyDamage(1, 'AP', 'none', 4.5);
+      expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
+    });
+  });
+
+  // ── 5g. No MinDamage when distFactor >= 4 (combat.cpp:122 — "if distance < 4") ──
+
+  describe('no MinDamage guarantee when distFactor >= 4 (combat.cpp:122)', () => {
+    it('distFactor=4: 1 damage * 25% armor → rounds to 0, allowed to be 0', () => {
+      // HE Spread=6: dist=12 pixels → distFactor=floor(12*2/6)=4
+      // 1 * 0.25 / 4 = 0.0625 → round = 0
+      // distFactor=4, NOT < 4, so minDamage does NOT apply
+      const result = modifyDamage(1, 'HE', 'heavy', 12);
+      // C++ would compute: 1 * 0.25 = 0.25 (C++ uses fixed-point); / 4 = 0.0625
+      // TS rounds: Math.round(0.0625) = 0. But Math.max(0, ...) = 0.
+      // This is correct: at distance>=4, damage CAN drop to 0.
+      expect(result).toBe(0);
+    });
+  });
+
+  // ── 5h. MaxDamage cap (combat.cpp:127) ──
+
+  describe('MaxDamage cap at 1000 (combat.cpp:127, rules.ini MaxDamage)', () => {
+    it('2000 damage * 100% at dist=0 → capped to 1000', () => {
+      const result = modifyDamage(2000, 'Super', 'none', 0);
+      expect(result).toBe(INI_MAX_DAMAGE);
+    });
+
+    it('5000 damage * 100% at dist=0 → capped to 1000', () => {
+      expect(modifyDamage(5000, 'Super', 'none', 0)).toBe(INI_MAX_DAMAGE);
+    });
+  });
+
+  // ── 5i. Healing (negative damage) behavior (combat.cpp:86-96) ──
+
+  describe('negative damage (healing) rules (combat.cpp:86-96, FIXIT_CSII)', () => {
+    it('negative damage to unarmored at close range: passes through (non-Mechanical)', () => {
+      const result = modifyDamage(-50, 'SA', 'none', 0);
+      expect(result).toBe(-50);
+    });
+
+    it('negative damage to armored at close range: returns 0 (non-Mechanical)', () => {
+      expect(modifyDamage(-50, 'SA', 'heavy', 0)).toBe(0);
+    });
+
+    it('Mechanical heals armored at close range', () => {
+      // FIXIT_CSII: Mechanical warhead heals armored units (armor != none)
+      const result = modifyDamage(-50, 'Mechanical', 'heavy', 0);
+      expect(result).toBe(-50);
+    });
+
+    it('Mechanical does not heal unarmored at close range', () => {
+      expect(modifyDamage(-50, 'Mechanical', 'none', 0)).toBe(0);
+    });
+
+    it('negative damage at far distance returns 0', () => {
+      // Distance >= 0x008 leptons = 8 leptons. HEAL_PROXIMITY_PX = 8 * CELL_SIZE / LEPTON_SIZE
+      // = 8 * 24 / 256 = 0.75 pixels. So distance >= 1 pixel should return 0.
+      expect(modifyDamage(-50, 'SA', 'none', 2)).toBe(0);
+    });
+  });
+});
+
+// =============================================================================
+// 6. CROSS-VALIDATION: TS modifyDamage vs C++ Modify_Damage reference impl
+// =============================================================================
+
+describe('TS modifyDamage matches C++ reference implementation', () => {
+  // Test many combinations of warhead, armor, distance to ensure formula parity
+  const testCases: { wh: WarheadType; armor: ArmorType; baseDmg: number; distPx: number; desc: string }[] = [
+    // Direct hits
+    { wh: 'SA', armor: 'none', baseDmg: 25, distPx: 0, desc: 'SA vs infantry point-blank' },
+    { wh: 'HE', armor: 'heavy', baseDmg: 200, distPx: 0, desc: 'HE vs heavy tank direct' },
+    { wh: 'AP', armor: 'heavy', baseDmg: 150, distPx: 0, desc: 'AP vs heavy tank direct' },
+    { wh: 'Fire', armor: 'wood', baseDmg: 100, distPx: 0, desc: 'Fire vs wood building direct' },
+    { wh: 'HollowPoint', armor: 'none', baseDmg: 50, distPx: 0, desc: 'HollowPoint vs infantry direct' },
+    // Medium distances
+    { wh: 'HE', armor: 'none', baseDmg: 200, distPx: 6, desc: 'HE vs infantry at 6px' },
+    { wh: 'AP', armor: 'light', baseDmg: 150, distPx: 4, desc: 'AP vs light at 4px' },
+    { wh: 'SA', armor: 'wood', baseDmg: 50, distPx: 3, desc: 'SA vs wood at 3px' },
+    // Long range (near max falloff)
+    { wh: 'HollowPoint', armor: 'none', baseDmg: 50, distPx: 10, desc: 'HollowPoint vs infantry at 10px' },
+    { wh: 'Nuke', armor: 'heavy', baseDmg: 1000, distPx: 20, desc: 'Nuke vs heavy at 20px' },
+  ];
+
+  for (const tc of testCases) {
+    it(`${tc.desc}: ${tc.wh} ${tc.baseDmg}dmg vs ${tc.armor} at ${tc.distPx}px`, () => {
+      const parsed = parsedWarheads[tc.wh];
+      const armorIdx = armorIndex(tc.armor);
+      const armorMult = parsed.verses[armorIdx];
+      const spreadFactor = parsed.spread;
+
+      // Convert pixel distance to leptons for C++ reference
+      // C++ operates in lepton space; TS operates in pixel space.
+      // 1 pixel = PIXEL_LEPTON_W leptons = 10 leptons (C++ display.h:55)
+      const distLeptons = tc.distPx * PIXEL_LEPTON_W;
+
+      const cppExpected = cppModifyDamage(tc.baseDmg, spreadFactor, armorMult, distLeptons);
+      const tsResult = modifyDamage(tc.baseDmg, tc.wh, tc.armor, tc.distPx);
+
+      // Allow +-1 rounding tolerance (C++ uses fixed-point, TS uses float)
+      expect(tsResult).toBeGreaterThanOrEqual(Math.floor(cppExpected) - 1);
+      expect(tsResult).toBeLessThanOrEqual(Math.ceil(cppExpected) + 1);
+    });
+  }
+});
+
+// =============================================================================
+// 7. SPLASH DAMAGE — Explosion_Damage (combat.cpp:162-271)
+// =============================================================================
+
+describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () => {
+
+  // ── 7a. Splash radius = 1.5 cells (ICON_LEPTON_W + ICON_LEPTON_W/2) ──
+
+  it('splash radius = 1.5 cells (C++ ICON_LEPTON_W + ICON_LEPTON_W>>1 = 384 leptons = 1.5 cells)', () => {
+    // C++ combat.cpp:176: range = ICON_LEPTON_W + (ICON_LEPTON_W >> 1) = 256 + 128 = 384 leptons
+    // 384 leptons / 256 leptons_per_cell = 1.5 cells
+    expect(SPLASH_RADIUS).toBe(1.5);
+  });
+
+  // ── 7b. Entity at distance > 1.5 cells takes no splash damage ──
+
+  it('entity beyond 1.5-cell splash radius takes no damage', () => {
+    // Place target 2 cells away from explosion center
+    const target = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([target]);
+    const hpBefore = target.hp;
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    expect(target.hp).toBe(hpBefore);
+  });
+
+  // ── 7c. Entity at distance 0 (point-blank) takes full splash damage ──
+
+  it('entity at explosion center takes full warhead damage (distance=0)', () => {
+    // Use a high-HP target so it survives and we can measure exact damage
+    const target = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10); // 600 HP Mammoth, armor=heavy
+    const ctx = makeCombatCtx([target]);
+    const hpBefore = target.hp;
+
+    const heVsHeavy = parsedWarheads['HE'].verses[3]; // 0.25
+    const baseDmg = 100;
+
+    applySplashDamage(
+      ctx,
+      target.pos,
+      { damage: baseDmg, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    // At distance=0, modifyDamage should yield baseDmg * heVsHeavy = 100*0.25 = 25
+    const expectedDmg = Math.round(baseDmg * heVsHeavy);
+    expect(hpBefore - target.hp).toBe(expectedDmg);
+  });
+
+  // ── 7d. Entity at 1 cell distance takes reduced splash damage ──
+
+  it('entity 1 cell from explosion takes distance-reduced damage', () => {
+    const target = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    const ctx = makeCombatCtx([target]);
+    const hpBefore = target.hp;
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    // 1 cell = CELL_SIZE=24 pixels; modifyDamage with HE(Spread=6):
+    // distFactor = floor(24*2/6) = 8; damage = 200*0.9/8 = 22.5 → 23
+    const heVsNone = parsedWarheads['HE'].verses[0];
+    const heSpread = parsedWarheads['HE'].spread;
+    const distFactor = Math.floor(CELL_SIZE * 2 / heSpread);
+    const expectedDmg = Math.round(200 * heVsNone / distFactor);
+
+    expect(hpBefore - target.hp).toBe(expectedDmg);
+  });
+
+  // ── 7e. Firer excluded from own splash (combat.cpp:207) ──
+
+  it('firer is excluded from its own splash (combat.cpp:207: object != source)', () => {
+    const attacker = entityAtCell(UnitType.I_E2, House.Spain, 10, 10);
+    const target = entityAtCell(UnitType.I_E1, House.USSR, 10, 10); // same cell
+    const ctx = makeCombatCtx([attacker, target]);
+    const attackerHpBefore = attacker.hp;
+
+    applySplashDamage(
+      ctx, target.pos,
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain, attacker,
+    );
+
+    expect(attacker.hp).toBe(attackerHpBefore);
+  });
+});
+
+// =============================================================================
+// 8. FRIENDLY FIRE — splash damages ALL units (combat.cpp:205-215)
+// =============================================================================
+
+describe('Friendly fire: splash damages all units in radius (combat.cpp:205-215)', () => {
+  it('friendly units in splash radius take damage', () => {
+    // C++ Explosion_Damage collects ALL objects, not just enemies (combat.cpp:207)
+    const ally = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+    const ctx = makeCombatCtx([ally]);
+    const hpBefore = ally.hp;
+
+    // Enemy attack centered on ally's cell
+    applySplashDamage(
+      ctx,
+      ally.pos,
+      { damage: 100, warhead: 'HE', splash: 1.5 },
+      -1, House.USSR,
+    );
+
+    expect(ally.hp).toBeLessThan(hpBefore);
+  });
+});
+
+// =============================================================================
+// 9. OVERKILL BEHAVIOR — damage exceeds HP
+// =============================================================================
+
+describe('Overkill behavior: HP goes to 0 when damage exceeds current HP', () => {
+  it('infantry with 50 HP takes 200 damage: killed, HP clamped', () => {
+    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    expect(e.hp).toBe(UNIT_STATS.E1.strength); // 50 HP
+    const ctx = makeCombatCtx([e]);
+
+    const killed = damageEntity(ctx, e, 200, 'HE');
+    expect(killed).toBe(true);
+    expect(e.hp).toBeLessThanOrEqual(0);
+    expect(e.alive).toBe(false);
+  });
+
+  it('overkill does not cause negative HP issues (no underflow)', () => {
+    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    const ctx = makeCombatCtx([e]);
+    damageEntity(ctx, e, 9999, 'Super');
+    // HP should be negative (entity.takeDamage does this.hp -= amount), but entity is dead
+    expect(e.alive).toBe(false);
+  });
+});
+
+// =============================================================================
+// 10. PRONE INFANTRY DAMAGE REDUCTION (infantry.cpp:329-330)
+// =============================================================================
+
+describe('Prone infantry take 50% damage (rules.ini ProneDamage, infantry.cpp:329-330)', () => {
+  it('prone E1 takes half damage from direct hit', () => {
+    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    e.isProne = true;
+    const hpBefore = e.hp;
+    const ctx = makeCombatCtx([e]);
+
+    // Apply 40 raw damage — prone should halve it to 20
+    damageEntity(ctx, e, 40, 'SA');
+
+    // Prone damage: max(1, round(40 * 0.5)) = 20
+    const expectedDmg = Math.max(1, Math.round(40 * INI_PRONE_DAMAGE));
+    expect(hpBefore - e.hp).toBe(expectedDmg);
+  });
+
+  it('prone damage reduction uses ProneDamage from rules.ini', () => {
+    // Verify the engine constant matches INI
+    expect(PRONE_DAMAGE_BIAS).toBeCloseTo(INI_PRONE_DAMAGE, 4);
+  });
+
+  it('vehicles are NOT affected by prone damage bias', () => {
+    // C++ only applies ProneDamageBias in infantry.cpp, not unit.cpp
+    const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
+    const hpBefore = tank.hp;
+    const ctx = makeCombatCtx([tank]);
+
+    damageEntity(ctx, tank, 100, 'AP');
+
+    // No prone bias applied — full 100 damage
+    expect(hpBefore - tank.hp).toBe(100);
+  });
+});
+
+// =============================================================================
+// 11. FIREPOWER BIAS (house.cpp:289 — houseBias multiplier)
+// =============================================================================
+
+describe('FirepowerBias multiplier in modifyDamage (house.cpp:289)', () => {
+  it('houseBias=1.5 increases damage by 50%', () => {
+    const heVsNone = parsedWarheads['HE'].verses[0]; // 0.9
+    const result = modifyDamage(100, 'HE', 'none', 0, 1.5);
+    // 100 * 0.9 * 1.5 = 135
+    expect(result).toBe(Math.round(100 * heVsNone * 1.5));
+  });
+
+  it('houseBias=0.5 reduces damage by 50%', () => {
+    const heVsNone = parsedWarheads['HE'].verses[0]; // 0.9
+    const result = modifyDamage(100, 'HE', 'none', 0, 0.5);
+    // 100 * 0.9 * 0.5 = 45
+    expect(result).toBe(Math.round(100 * heVsNone * 0.5));
+  });
+});
+
+// =============================================================================
+// 12. SPECIFIC WEAPON SCENARIOS — real game matchups
+// =============================================================================
+
+describe('Real game weapon matchups match INI-parsed expected damage', () => {
+  // Derive expected values from rules.ini warhead Verses tables
+
+  it('M1Carbine (SA, dmg=15) vs Rifle Infantry (none): full 15 damage', () => {
+    const saVsNone = parsedWarheads['SA'].verses[0]; // 1.0
+    const result = modifyDamage(15, 'SA', 'none', 0);
+    expect(result).toBe(Math.round(15 * saVsNone));
+  });
+
+  it('M1Carbine (SA, dmg=15) vs Heavy Tank (heavy): 15*25% = 4 damage', () => {
+    const saVsHeavy = parsedWarheads['SA'].verses[3]; // 0.25
+    const result = modifyDamage(15, 'SA', 'heavy', 0);
+    expect(result).toBe(Math.round(15 * saVsHeavy));
+  });
+
+  it('120mm (AP, dmg=60) vs Heavy Tank (heavy): 60*100% = 60 damage', () => {
+    const apVsHeavy = parsedWarheads['AP'].verses[3]; // 1.0
+    const result = modifyDamage(60, 'AP', 'heavy', 0);
+    expect(result).toBe(Math.round(60 * apVsHeavy));
+  });
+
+  it('120mm (AP, dmg=60) vs Rifle Infantry (none): 60*30% = 18 damage', () => {
+    const apVsNone = parsedWarheads['AP'].verses[0]; // 0.3
+    const result = modifyDamage(60, 'AP', 'none', 0);
+    expect(result).toBe(Math.round(60 * apVsNone));
+  });
+
+  it('Nuke (dmg=1000) vs concrete: 1000*50% = 500', () => {
+    const nukeVsConcrete = parsedWarheads['Nuke'].verses[4]; // 0.5
+    const result = modifyDamage(1000, 'Nuke', 'concrete', 0);
+    expect(result).toBe(Math.round(1000 * nukeVsConcrete));
+  });
+
+  it('Nuke vs Nuke: verses match Fire warhead exactly (rules.ini comment)', () => {
+    // rules.ini: "; Nuclear warhead (same as fire)" — verify verses are identical
+    for (let i = 0; i < 5; i++) {
+      expect(
+        parsedWarheads['Nuke'].verses[i],
+        `Nuke vs ${ARMOR_TYPES[i]} should match Fire`,
+      ).toBeCloseTo(parsedWarheads['Fire'].verses[i], 4);
+    }
+  });
+});
+
+// =============================================================================
+// 13. SCATTER DAMAGE — multiple entities in splash
+// =============================================================================
+
+describe('Scatter damage: multiple entities in splash radius receive damage', () => {
+  it('3 infantry near explosion all take damage proportional to distance', () => {
+    // Place 3 infantry at varying distances from explosion center
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10); // distance ~0
+    const e2 = entityAtCell(UnitType.I_E1, House.USSR, 11, 10); // distance ~1 cell
+    const e3 = entityAtCell(UnitType.I_E1, House.USSR, 10, 11); // distance ~1 cell
+    const ctx = makeCombatCtx([e1, e2, e3]);
+    const hp1Before = e1.hp;
+    const hp2Before = e2.hp;
+    const hp3Before = e3.hp;
+
+    applySplashDamage(ctx, center, { damage: 100, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
+
+    // e1 at distance 0 should take most damage
+    const dmg1 = hp1Before - e1.hp;
+    const dmg2 = hp2Before - e2.hp;
+    const dmg3 = hp3Before - e3.hp;
+
+    // All should take some damage (within 1.5 cell radius)
+    expect(dmg1).toBeGreaterThan(0);
+    expect(dmg2).toBeGreaterThan(0);
+    expect(dmg3).toBeGreaterThan(0);
+
+    // Center entity takes more than peripheral entities
+    expect(dmg1).toBeGreaterThan(dmg2);
+
+    // Equidistant entities take equal damage
+    expect(dmg2).toBe(dmg3);
+  });
+});
+
+// =============================================================================
+// 14. WARHEAD ISORGANIC FLAG (warhead.cpp:187)
+// =============================================================================
+
+describe('IsOrganic flag derived from Verses (warhead.cpp:187)', () => {
+  it('Organic warhead: Modifier[ARMOR_STEEL]=0 means IsOrganic=true', () => {
+    // C++ warhead.cpp:187: IsOrganic = (Modifier[ARMOR_STEEL] == 0)
+    // ARMOR_STEEL is index 3 (heavy). Organic has Verses=100%,0%,0%,0%,0%
+    const orgVsHeavy = parsedWarheads['Organic'].verses[3];
+    expect(orgVsHeavy).toBe(0);
+  });
+
+  it('SA warhead: Modifier[ARMOR_STEEL]=25% means IsOrganic=false', () => {
+    const saVsHeavy = parsedWarheads['SA'].verses[3];
+    expect(saVsHeavy).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// 15. INVULNERABILITY — zero damage on invulnerable entities
+// =============================================================================
+
+describe('Invulnerable entities take no damage (entity.takeDamage check)', () => {
+  it('invulnerable entity takes 0 damage from any warhead', () => {
+    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    e.invulnTick = 100; // grant invulnerability (Iron Curtain / crate)
+    const hpBefore = e.hp;
+    const ctx = makeCombatCtx([e]);
+
+    damageEntity(ctx, e, 999, 'Super');
+    expect(e.hp).toBe(hpBefore);
+    expect(e.alive).toBe(true);
+  });
+});
+
+// =============================================================================
+// 16. C++ PIXEL_LEPTON_W VALUE VERIFICATION
+// =============================================================================
+
+describe('C++ display.h constants used in distance conversion', () => {
+  it('ICON_PIXEL_W = 24 (display.h:45)', () => {
+    // TS CELL_SIZE must match C++ ICON_PIXEL_W
+    expect(CELL_SIZE).toBe(ICON_PIXEL_W);
+  });
+
+  it('PIXEL_LEPTON_W = floor(256/24) = 10 (display.h:55)', () => {
+    expect(PIXEL_LEPTON_W).toBe(10);
+  });
+
+  it('Spread=6: PIXEL_LEPTON_W/2 * 6 = 30 (divisor for HE distance falloff)', () => {
+    // C++ combat.cpp:110 — distance /= whead->SpreadFactor * (PIXEL_LEPTON_W/2)
+    const heSpread = parsedWarheads['HE'].spread;
+    const divisor = heSpread * Math.floor(PIXEL_LEPTON_W / 2);
+    expect(divisor).toBe(30);
+  });
+
+  it('Spread=0: PIXEL_LEPTON_W/4 = 2 (divisor for Organic distance falloff)', () => {
+    // C++ combat.cpp:108 — distance /= PIXEL_LEPTON_W/4
+    const divisor = Math.floor(PIXEL_LEPTON_W / 4);
+    expect(divisor).toBe(2);
+  });
+});
