@@ -111,8 +111,8 @@ describe('ANT2 unit stats (udata.cpp / rules.ini)', () => {
     expect(stats.armor).toBe('heavy');
   });
 
-  it('speed is 14 (MPH_MEDIUM_FAST)', () => {
-    expect(stats.speed).toBe(14);
+  it('speed is 8 (SCA01EA.ini Speed=8)', () => {
+    expect(stats.speed).toBe(8);
   });
 
   it('ROT is 6', () => {
@@ -650,10 +650,10 @@ describe('ant trio comparison -- ANT2 role as fire support', () => {
     expect(WEAPON_STATS.FireballLauncher.warhead).toBe('Fire');
   });
 
-  it('all ants share same speed (14) except ANT3 (12)', () => {
-    expect(UNIT_STATS.ANT1.speed).toBe(14);
-    expect(UNIT_STATS.ANT2.speed).toBe(14);
-    expect(UNIT_STATS.ANT3.speed).toBe(12);
+  it('all ants share same speed (8) except ANT3 (7) — SCA01EA.ini values', () => {
+    expect(UNIT_STATS.ANT1.speed).toBe(8);
+    expect(UNIT_STATS.ANT2.speed).toBe(8);
+    expect(UNIT_STATS.ANT3.speed).toBe(7);
   });
 
   it('ANT2 DPS is lowest vs heavy armor due to Fire warhead penalty', () => {

@@ -102,8 +102,8 @@ describe('ANT1 stats verification (udata.cpp / rules.ini)', () => {
     expect(stats.armor).toBe('heavy');
   });
 
-  it('Speed is 14 (Speed=14, MEDIUM_FAST)', () => {
-    expect(stats.speed).toBe(14);
+  it('Speed is 8 (SCA01EA.ini Speed=8)', () => {
+    expect(stats.speed).toBe(8);
   });
 
   it('isInfantry is false — ants are NOT infantry', () => {

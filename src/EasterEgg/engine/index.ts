@@ -419,6 +419,8 @@ export class Game {
   private waypoints = new Map<number, { cx: number; cy: number }>();
   private toCarryOver = false; // save surviving units for next mission
   private theatre = 'TEMPERATE'; // map theatre (TEMPERATE, INTERIOR)
+  /** C++ Scen.IsTanyaEvac — CivEvac=yes in [Basic]. Tanya (E7) counts as civ evac. */
+  private isTanyaEvac = false;
   /** Per-scenario stat overrides (from INI [TypeName] sections) */
   private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
   private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
@@ -866,6 +868,7 @@ export class Game {
       map: this.map,
       unitsLeftMap: this.unitsLeftMap,
       civiliansEvacuated: this.civiliansEvacuated,
+      isTanyaEvac: this.isTanyaEvac,
       isAllied: (a, b) => this.isAllied(a, b),
       movementSpeed: (e) => this.movementSpeed(e),
       idleMission: (e) => this.idleMission(e),
@@ -1074,6 +1077,7 @@ export class Game {
     this.lastSiloWarningTick = -450; // allow immediate silo warning if needed
     this.toCarryOver = scenario.toCarryOver;
     this.theatre = scenario.theatre;
+    this.isTanyaEvac = scenario.isTanyaEvac;
     this.scenarioUnitStats = scenario.scenarioUnitStats;
     this.scenarioWeaponStats = scenario.scenarioWeaponStats;
     this.scenarioProductionItems = scenario.scenarioProductionItems;
@@ -1653,7 +1657,7 @@ export class Game {
             entity.alive = false;
             entity.mission = Mission.DIE;
             this.unitsLeftMap++;
-            if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
+            if (CIVILIAN_UNIT_TYPES.has(entity.type) || (this.isTanyaEvac && entity.type === 'E7')) {
               this.civiliansEvacuated++;
             }
             // Transport passengers: civilians aboard count as evacuated (C++ transport evacuation)
@@ -1661,7 +1665,7 @@ export class Game {
               for (const p of entity.passengers) {
                 p.alive = false;
                 this.unitsLeftMap++;
-                if (CIVILIAN_UNIT_TYPES.has(p.type)) {
+                if (CIVILIAN_UNIT_TYPES.has(p.type) || (this.isTanyaEvac && p.type === 'E7')) {
                   this.civiliansEvacuated++;
                 }
               }

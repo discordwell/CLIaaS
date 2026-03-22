@@ -1044,13 +1044,13 @@ describe('updateFogOfWar — reveals around units with sight range', () => {
     expect(map.getVisibility(23, 21)).toBe(0);
   });
 
-  it('ROCK blocks line of sight — cell behind ROCK not revealed', () => {
+  it('ROCK does NOT block fog reveal — C++ Sight_From has no LOS check (map.cpp:286-344)', () => {
     map.setTerrain(17, 15, Terrain.ROCK);
     const unitX = 15 * CELL_SIZE + CELL_SIZE / 2;
     const unitY = 15 * CELL_SIZE + CELL_SIZE / 2;
     map.updateFogOfWar([{ x: unitX, y: unitY, sight: 5 }]);
-    // Cell right behind the rock along the line should not be visible
-    expect(map.getVisibility(18, 15)).toBe(0);
+    // C++ Sight_From reveals ALL cells in radius — no LOS terrain blocking
+    expect(map.getVisibility(18, 15)).toBe(2);
   });
 
   it('empty units array only downgrades — no reveals', () => {

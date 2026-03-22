@@ -595,6 +595,9 @@ interface ScenarioData {
   houseMaxInfantry: Map<string, number>;
   /** Per-house MaxBuilding= from scenario INI (max buildings, -1=unlimited) */
   houseMaxBuilding: Map<string, number>;
+  /** C++ Scen.IsTanyaEvac — scenario.cpp:2262: CivEvac=yes in [Basic]. When true,
+   *  Tanya (E7) counts as civilian for evacuation (aircraft.cpp:143). */
+  isTanyaEvac: boolean;
 }
 
 /** Parse an INI-format scenario file */
@@ -944,6 +947,7 @@ export function parseScenarioINI(text: string): ScenarioData {
     overlayPack,
     toCarryOver: get('Basic', 'ToCarryOver', 'no').toLowerCase() === 'yes',
     toInherit: get('Basic', 'ToInherit', 'no').toLowerCase() === 'yes',
+    isTanyaEvac: get('Basic', 'CivEvac', 'no').toLowerCase() === 'yes',
     baseStructures,
     smudges,
     theatre,
@@ -1369,6 +1373,8 @@ export interface ScenarioResult {
   houseMaxInfantry: Map<House, number>;
   /** Per-house MaxBuilding= from scenario INI (max buildings, -1=unlimited) */
   houseMaxBuilding: Map<House, number>;
+  /** C++ Scen.IsTanyaEvac — CivEvac=yes in [Basic]. Tanya counts as civilian evacuation. */
+  isTanyaEvac: boolean;
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
@@ -1728,6 +1734,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     houseMaxBuilding: new Map(
       Array.from(data.houseMaxBuilding.entries()).map(([k, v]) => [toHouse(k), v])
     ),
+    isTanyaEvac: data.isTanyaEvac,
   };
 }
 
@@ -2084,11 +2091,10 @@ export function checkTriggerEvent(
 ): boolean {
   switch (event.type) {
     case TEVENT_NONE:
-      // human-requested: C++ parity fix — TEVENT_NONE means "no event condition
-      // required" and returns true (C++ scenario.cpp TriggerEventClass::operator()).
-      // Triggers with TEVENT_NONE fire on the first processTriggers cycle.
-      // This enables frc1/frc2 reinforcement triggers in SCG05EA.
-      return true;
+      // C++ trigger.cpp: TEVENT_NONE always returns false — "no event" means
+      // the trigger never fires by event evaluation alone. It fires only when
+      // forced by TACTION_FORCE_TRIGGER or forceFirePending.
+      return false;
     case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {

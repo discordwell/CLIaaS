@@ -928,7 +928,9 @@ export function getStripSide(item: ProductionItem): StripType {
 export const CIVILIAN_UNIT_TYPES = new Set<string>([
   'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',
   'EINSTEIN', 'GNRL', 'CHAN', // VIPs always evacuate per C++ aircraft.cpp:116-159
-  'E7', // human-requested: Tanya counts as civilian for evacuation (SCG05EA win2 trigger)
+  // NOTE: Tanya (E7) is NOT in this set per C++ parity. In C++, Tanya evacuation
+  // is controlled by Scen.IsTanyaEvac flag (aircraft.cpp:143), set per-scenario
+  // via CivEvac=yes in the [Basic] INI section. See isTanyaEvac in AircraftContext.
 ]);
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)

@@ -302,20 +302,21 @@ describe('Sight range geometry', () => {
 // ========================================================================
 
 describe('Line of sight blocking', () => {
-  it('ROCK terrain blocks line of sight', () => {
+  it('ROCK terrain does NOT block fog reveal (C++ map.cpp:286-344 Sight_From has no LOS check)', () => {
     const map = createClearMap();
     // Place a wall of rock between unit and target cell
     map.setTerrain(65, 64, Terrain.ROCK);
     map.updateFogOfWar([unit(64, 64, 5)]);
-    // Cell behind the rock should not be visible
-    expect(map.getVisibility(66, 64)).toBe(0);
+    // C++ Sight_From reveals ALL cells in radius — no LOS terrain blocking
+    expect(map.getVisibility(66, 64)).toBe(2);
   });
 
-  it('WALL terrain blocks line of sight', () => {
+  it('WALL terrain does NOT block fog reveal (C++ Sight_From has no LOS check)', () => {
     const map = createClearMap();
     map.setTerrain(65, 64, Terrain.WALL);
     map.updateFogOfWar([unit(64, 64, 5)]);
-    expect(map.getVisibility(66, 64)).toBe(0);
+    // C++ Sight_From reveals ALL cells in radius — no LOS terrain blocking
+    expect(map.getVisibility(66, 64)).toBe(2);
   });
 
   it('WATER terrain does NOT block line of sight', () => {
@@ -351,17 +352,17 @@ describe('Line of sight blocking', () => {
     expect(map.hasLineOfSight(10, 10, 15, 15)).toBe(true);
   });
 
-  it('ROCK wall creates a shadow behind it within sight range', () => {
+  it('ROCK wall does NOT create a shadow — C++ Sight_From reveals all cells in radius', () => {
     const map = createClearMap();
     // Place rock at (66, 64) between unit at (64,64) and cells beyond
     map.setTerrain(66, 64, Terrain.ROCK);
     map.updateFogOfWar([unit(64, 64, 8)]);
 
-    // Cell at (66,64) itself should be visible (LOS skips destination)
+    // C++ Sight_From uses precomputed octagonal offset table — NO LOS blocking
     expect(map.getVisibility(66, 64)).toBe(2);
-    // Cells directly behind the rock should be in shadow
-    expect(map.getVisibility(67, 64)).toBe(0);
-    expect(map.getVisibility(68, 64)).toBe(0);
+    // Cells behind the rock are still visible (no shadow casting in C++)
+    expect(map.getVisibility(67, 64)).toBe(2);
+    expect(map.getVisibility(68, 64)).toBe(2);
   });
 });
 

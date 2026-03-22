@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-22T05:10Z — Fix 41 Failing Tests: TEVENT_NONE, Ant Speeds, CIVILIAN_UNIT_TYPES, Fog LOS
+- Reverted TEVENT_NONE from returning true back to false (C++ parity: trigger.cpp returns false, fires only via TACTION_FORCE_TRIGGER). Fixed 11 tevent-none + 7 trigger-linked + 4 trigger-pipeline + 1 triggers-ai tests.
+- Updated ant speed tests from 14/14/12 to 8/8/7 (SCA01EA.ini source of truth, per commit a908ba7). Fixed 9 ant tests across 4 files.
+- Removed E7 (Tanya) from CIVILIAN_UNIT_TYPES (C++ parity: aircraft.cpp:143 uses Scen.IsTanyaEvac flag). Added isTanyaEvac to AircraftContext/ScenarioData/ScenarioResult, parsed from CivEvac=yes in [Basic]. Fixed 5 civilian tests.
+- Updated 3 fog-of-war tests: C++ Sight_From (map.cpp:286-344) reveals ALL cells in radius with NO LOS blocking. hasLineOfSight stays for combat targeting. Fixed 4 fog tests.
+- **Result**: 40,184 tests pass, 0 failures.
+- **Files**: scenario.ts, types.ts, aircraft.ts, index.ts, 8 test files.
+
 ## 2026-03-22T03:55Z — Tree Parity: C++ TerrainClass HP + Occupancy + Rendering
 - Implemented C++ TerrainClass parity for trees: 600 HP (ARMOR_WOOD), deterministic damage via modifyDamage(), per-type occupancy blocking from RA tdata.cpp Occupy_List, clump immunity (IsImmune=true).
 - Replaced 40% probabilistic destruction with HP-based system. Added dedup to prevent multi-cell trees taking damage multiple times per explosion.

@@ -24,6 +24,11 @@ export interface AircraftContext {
   unitsLeftMap: number;
   civiliansEvacuated: number;
 
+  /** C++ Scen.IsTanyaEvac — scenario flag (CivEvac=yes in [Basic]). When true, Tanya (E7)
+   *  counts as civilian evacuation. Set per-scenario, NOT a global constant.
+   *  Source: aircraft.cpp:143 — if (Scen.IsTanyaEvac && *inf == INFANTRY_TANYA) return(true); */
+  isTanyaEvac?: boolean;
+
   // Callbacks
   isAllied(a: House, b: House): boolean;
   movementSpeed(entity: Entity): number;
@@ -83,19 +88,27 @@ export function getAircraftTargetPos(entity: Entity): WorldPos | null {
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
 
+/** C++ _Counts_As_Civ_Evac parity: checks CIVILIAN_UNIT_TYPES + IsTanyaEvac scenario flag.
+ *  Source: aircraft.cpp:116-159. Tanya only counts when Scen.IsTanyaEvac is set. */
+function countsAsCivEvac(ctx: AircraftContext, unitType: string): boolean {
+  if (CIVILIAN_UNIT_TYPES.has(unitType)) return true;
+  if (ctx.isTanyaEvac && unitType === 'E7') return true;
+  return false;
+}
+
 /** Handle aircraft (and passengers) leaving the map */
 function handleMapExit(ctx: AircraftContext, entity: Entity): void {
   entity.alive = false;
   entity.mission = Mission.DIE;
   ctx.unitsLeftMap++;
-  if (CIVILIAN_UNIT_TYPES.has(entity.type)) {
+  if (countsAsCivEvac(ctx, entity.type)) {
     ctx.civiliansEvacuated++;
   }
   if (entity.passengers && entity.passengers.length > 0) {
     for (const p of entity.passengers) {
       p.alive = false;
       ctx.unitsLeftMap++;
-      if (CIVILIAN_UNIT_TYPES.has(p.type)) {
+      if (countsAsCivEvac(ctx, p.type)) {
         ctx.civiliansEvacuated++;
       }
     }

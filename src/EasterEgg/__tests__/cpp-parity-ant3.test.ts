@@ -5,7 +5,7 @@
  * Each describe block documents the C++ source reference (file:line).
  *
  * ANT3 is unique among the three ant types: light armor (not heavy),
- * slowest speed (12 vs 14), TeslaZap weapon with Super warhead,
+ * slowest speed (7 vs 8), TeslaZap weapon with Super warhead,
  * and slightly longer melee range (1.75 vs ANT1's 1.5).
  */
 
@@ -100,10 +100,10 @@ describe('ANT3 stats verification (udata.cpp / rules.ini)', () => {
     expect(stats.armor).toBe('light');
   });
 
-  it('Speed is 12 (slowest ant: ANT1/ANT2 are 14)', () => {
-    expect(stats.speed).toBe(12);
-    expect(UNIT_STATS.ANT1.speed).toBe(14);
-    expect(UNIT_STATS.ANT2.speed).toBe(14);
+  it('Speed is 7 (slowest ant: ANT1/ANT2 are 8) — SCA01EA.ini values', () => {
+    expect(stats.speed).toBe(7);
+    expect(UNIT_STATS.ANT1.speed).toBe(8);
+    expect(UNIT_STATS.ANT2.speed).toBe(8);
     expect(stats.speed).toBeLessThan(UNIT_STATS.ANT1.speed);
   });
 
@@ -409,9 +409,9 @@ describe('ANT3 movement — non-infantry vehicle rules (drive.cpp)', () => {
     expect(distMoved).toBeGreaterThan(0);
   });
 
-  it('ANT3 speed is 12 (slowest ant)', () => {
+  it('ANT3 speed is 7 (slowest ant) — SCA01EA.ini Speed=7', () => {
     const ant3 = entityAtCell(UnitType.ANT3, House.USSR, 10, 10);
-    expect(ant3.stats.speed).toBe(12);
+    expect(ant3.stats.speed).toBe(7);
   });
 });
 
@@ -555,10 +555,10 @@ describe('ANT3 comparative stats (ANT1 vs ANT2 vs ANT3)', () => {
     expect(UNIT_STATS.ANT3.armor).toBe('light');
   });
 
-  it('ANT3 is the slowest ant (speed 12 vs 14)', () => {
-    expect(UNIT_STATS.ANT3.speed).toBe(12);
-    expect(UNIT_STATS.ANT1.speed).toBe(14);
-    expect(UNIT_STATS.ANT2.speed).toBe(14);
+  it('ANT3 is the slowest ant (speed 7 vs 8) — SCA01EA.ini values', () => {
+    expect(UNIT_STATS.ANT3.speed).toBe(7);
+    expect(UNIT_STATS.ANT1.speed).toBe(8);
+    expect(UNIT_STATS.ANT2.speed).toBe(8);
   });
 
   it('all three ants are crushable', () => {
