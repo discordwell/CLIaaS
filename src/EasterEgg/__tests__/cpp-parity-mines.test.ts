@@ -334,26 +334,26 @@ describe('Both mines have 1x1 footprint', () => {
 //  Destruction Blast -- Radial HE (building.cpp, non-barrel path)
 // =============================================================================
 //
-// Mines use the generic non-barrel destruction blast: 2-cell radial HE
-// with distance falloff. Even though mines are tiny (1 HP), they still
+// Mines produce a visual-only FBALL1 death animation on destruction (C++ parity).
+// No warhead damage is dealt to entities. Even though mines are tiny (1 HP), they still
 // produce the standard explosion on death.
 
-describe('Mine destruction blast -- radial HE (non-barrel)', () => {
+describe('Mine destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('MINP damages entities within 2-cell radius on destruction', () => {
+  it('MINP entities take NO damage on destruction (visual-only explosion)', () => {
     const mine = makeMine('MINP', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([mine], [victim]);
     structureDamage(ctx, mine, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('MINV damages entities within 2-cell radius on destruction', () => {
+  it('MINV entities take NO damage on destruction (visual-only explosion)', () => {
     const mine = makeMine('MINV', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([mine], [victim]);
     structureDamage(ctx, mine, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('mine destruction does NOT damage entities beyond 2-cell radius', () => {

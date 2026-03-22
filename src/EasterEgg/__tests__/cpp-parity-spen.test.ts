@@ -321,22 +321,22 @@ describe('SPEN 3x3 footprint', () => {
 
 // -- Destruction Blast — Radial HE (building.cpp) -----------------------------
 //
-// Non-barrel structures (including SPEN) use a generic 2-cell radial HE blast
-// with distance falloff on destruction. This is NOT the barrel cardinal
+// Non-barrel structures produce a visual-only FBALL1 death animation
+// on destruction (C++ parity). No warhead damage is dealt to entities. This is NOT the barrel cardinal
 // fire-bullet mechanic.
 
-describe('SPEN destruction blast — radial HE (non-barrel)', () => {
+describe('SPEN destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const spen = makeSPEN(10, 10, 50); // Low HP, will die
     spen.house = House.USSR;
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([spen], [victim]);
     structureDamage(ctx, spen, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+  it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
     const spen = makeSPEN(10, 10, 50);
     spen.house = House.USSR;
     // Blast center is at (cx+1, cy+1) = (11,11) in cell coords.
@@ -349,10 +349,10 @@ describe('SPEN destruction blast — radial HE (non-barrel)', () => {
     expect(dist).toBeLessThan(2);
     const ctx = makeCombatCtx([spen], [victim]);
     structureDamage(ctx, spen, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const spen = makeSPEN(10, 10, 50);
     spen.house = House.USSR;
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
@@ -361,7 +361,8 @@ describe('SPEN destruction blast — radial HE (non-barrel)', () => {
     structureDamage(ctx, spen, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -386,7 +387,7 @@ describe('SPEN destruction blast — radial HE (non-barrel)', () => {
     expect(nearby.hp).toBeLessThan(300);
   });
 
-  it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+  it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // Barrel explosions hit ONLY cardinal cells with flat 200 damage.
     // SPEN should use radial HE with falloff instead — diagonals should
     // take damage (unlike barrels where diagonals are immune).
@@ -395,8 +396,8 @@ describe('SPEN destruction blast — radial HE (non-barrel)', () => {
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([spen], [diagonal]);
     structureDamage(ctx, spen, 100);
-    // Radial HE hits diagonals — unlike barrel cardinal-only
-    expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+    // C++ parity: visual-only explosion, no entity damage
+    expect(diagonal.hp).toBe(diagonal.maxHp);
   });
 });
 

@@ -223,18 +223,18 @@ describe('GAP1 — unjam shroud on destruction (building.cpp)', () => {
 
 // ── GAP Destruction Behavior ────────────────────────────────────────────────
 
-describe('GAP destruction — non-barrel radial HE blast', () => {
+describe('GAP destruction — visual-only explosion (C++ parity: no entity damage)', () => {
 
-  it('GAP uses non-barrel radial HE blast on destruction (not barrel cardinal mechanic)', () => {
-    // GAP is NOT a barrel, so it should use the generic 2-cell radial HE blast
+  it('GAP does NOT damage entities on destruction (visual-only explosion)', () => {
+    // GAP is NOT a barrel — C++ parity: FBALL1 death anim is visual-only
     const gap = makeGAP(10, 10, 50);
-    // Place entity at diagonal — barrels don't damage diagonals, but radial HE does
+    // Place entity at diagonal — no entity damage from non-barrel destruction
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([gap], [victim]);
     structureDamage(ctx, gap, 100);
 
-    // Radial HE should damage the diagonal entity (distance ~1.4, within 2-cell radius)
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    // C++ parity: visual-only explosion, no entity damage
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('sets alive=false and rubble=true when destroyed', () => {

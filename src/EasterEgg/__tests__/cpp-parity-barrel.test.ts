@@ -338,11 +338,12 @@ describe('Barrel cardinal fire-bullets (building.cpp:1344-1369)', () => {
 
 // ── Non-Barrel Structure Blast (regression) ────────────────────────────────────
 //
-// Non-barrel structures use a generic 2-cell radial HE blast with distance
-// falloff on destruction. This should NOT change when barrel logic is modified.
+// Non-barrel structures produce a visual-only FBALL1 death animation on
+// destruction (C++ parity). No warhead damage is dealt to entities.
+// Structure-to-structure chain damage is preserved.
 
-describe('Non-barrel structure blast — radial HE (regression)', () => {
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+describe('Non-barrel structure blast — visual-only (C++ parity: no entity damage)', () => {
+  it('does NOT damage entities in diagonal cells (visual-only explosion)', () => {
     const building = makeBuilding('POWR', 10, 10, 50);
     // Entity at diagonal (11,11) — distance ~1.4 cells, within 2-cell radius
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
@@ -350,14 +351,14 @@ describe('Non-barrel structure blast — radial HE (regression)', () => {
     const bx = 10 * CELL_SIZE + CELL_SIZE;
     const by = 10 * CELL_SIZE + CELL_SIZE;
     const dist = worldDist({ x: bx, y: by }, victim.pos);
-    expect(dist).toBeLessThan(2); // confirm within blast radius
+    expect(dist).toBeLessThan(2); // confirm within geometric blast radius
     const ctx = makeCombatCtx([building], [victim]);
     structureDamage(ctx, building, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp); // C++ parity: visual-only, no entity damage
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
-    // Two entities at different distances from a dying building
+  it('no entity damage at any distance (visual-only explosion)', () => {
+    // Two entities at different distances from a dying building — neither takes damage
     const building = makeBuilding('POWR', 10, 10, 50);
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10); // ~0.5 cells
     const far = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 12);   // ~1.6 cells
@@ -365,7 +366,8 @@ describe('Non-barrel structure blast — radial HE (regression)', () => {
     structureDamage(ctx, building, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {

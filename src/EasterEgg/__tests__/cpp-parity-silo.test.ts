@@ -317,31 +317,31 @@ describe('SILO economic functions (rules.ini Cost=150)', () => {
 
 // -- Destruction Blast -- Radial HE (building.cpp) ----------------------------
 //
-// Non-barrel structures (including SILO) use a generic 2-cell radial HE blast
-// with distance falloff on destruction. 1x1 footprint means the blast center
+// Non-barrel structures produce a visual-only FBALL1 death animation
+// on destruction (C++ parity). No warhead damage is dealt to entities. 1x1 footprint means the blast center
 // is at (cx * CELL_SIZE + CELL_SIZE/2, cy * CELL_SIZE + CELL_SIZE/2) effectively.
 
-describe('SILO destruction blast -- radial HE (non-barrel)', () => {
+describe('SILO destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const silo = makeSILO(10, 10, 50);
     silo.house = House.USSR;
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([silo], [victim]);
     structureDamage(ctx, silo, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+  it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
     const silo = makeSILO(10, 10, 50);
     silo.house = House.USSR;
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([silo], [victim]);
     structureDamage(ctx, silo, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const silo = makeSILO(10, 10, 50);
     silo.house = House.USSR;
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
@@ -350,7 +350,8 @@ describe('SILO destruction blast -- radial HE (non-barrel)', () => {
     structureDamage(ctx, silo, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -362,14 +363,14 @@ describe('SILO destruction blast -- radial HE (non-barrel)', () => {
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+  it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // SILO should use radial HE with falloff -- diagonals should take damage
     const silo = makeSILO(10, 10, 50);
     silo.house = House.USSR;
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([silo], [diagonal]);
     structureDamage(ctx, silo, 100);
-    expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+    expect(diagonal.hp).toBe(diagonal.maxHp);
   });
 });
 

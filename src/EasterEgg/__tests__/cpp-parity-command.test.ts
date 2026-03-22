@@ -173,17 +173,17 @@ describe('FCOM 2x2 footprint', () => {
 // Non-barrel structures use a generic 2-cell radial HE blast with distance
 // falloff on destruction. FCOM has no barrel.
 
-describe('FCOM destruction blast — radial HE (non-barrel)', () => {
+describe('FCOM destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const fcom = makeFCOM(10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([fcom], [victim]);
     structureDamage(ctx, fcom, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+  it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
     const fcom = makeFCOM(10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const bx = 10 * CELL_SIZE + CELL_SIZE;
@@ -192,10 +192,10 @@ describe('FCOM destruction blast — radial HE (non-barrel)', () => {
     expect(dist).toBeLessThan(2);
     const ctx = makeCombatCtx([fcom], [victim]);
     structureDamage(ctx, fcom, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const fcom = makeFCOM(10, 10, 50, House.USSR);
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
     const far = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 12);
@@ -203,7 +203,8 @@ describe('FCOM destruction blast — radial HE (non-barrel)', () => {
     structureDamage(ctx, fcom, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -222,13 +223,13 @@ describe('FCOM destruction blast — radial HE (non-barrel)', () => {
     expect(nearby.hp).toBeLessThan(256);
   });
 
-  it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+  it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     const fcom = makeFCOM(10, 10, 50, House.USSR);
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([fcom], [diagonal]);
     structureDamage(ctx, fcom, 100);
-    // Radial HE hits diagonals — unlike barrel cardinal-only
-    expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+    // C++ parity: visual-only explosion, no entity damage
+    expect(diagonal.hp).toBe(diagonal.maxHp);
   });
 });
 
@@ -332,27 +333,27 @@ describe('MISS 3x2 footprint', () => {
 //
 // Same radial HE blast as FCOM and POWR. MISS has no barrel.
 
-describe('MISS destruction blast — radial HE (non-barrel)', () => {
+describe('MISS destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const miss = makeMISS(10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([miss], [victim]);
     structureDamage(ctx, miss, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+  it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
     const miss = makeMISS(10, 10, 50, House.USSR);
     // For 3x2 building, center is at (11.5, 11) in cell coords
     // Entity at (12,11) is within the footprint / adjacent
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([miss], [victim]);
     structureDamage(ctx, miss, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const miss = makeMISS(10, 10, 50, House.USSR);
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
     const far = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 12);
@@ -360,7 +361,8 @@ describe('MISS destruction blast — radial HE (non-barrel)', () => {
     structureDamage(ctx, miss, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -380,13 +382,13 @@ describe('MISS destruction blast — radial HE (non-barrel)', () => {
     expect(nearby.hp).toBeLessThan(256);
   });
 
-  it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+  it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     const miss = makeMISS(10, 10, 50, House.USSR);
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([miss], [diagonal]);
     structureDamage(ctx, miss, 100);
-    // Radial HE hits diagonals — unlike barrel cardinal-only
-    expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+    // C++ parity: visual-only explosion, no entity damage
+    expect(diagonal.hp).toBe(diagonal.maxHp);
   });
 });
 

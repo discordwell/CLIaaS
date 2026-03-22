@@ -497,10 +497,10 @@ describe('SAM 2x1 footprint (building.cpp)', () => {
 
 // ── Destruction Behavior (building.cpp — generic structure death) ───────────
 //
-// When destroyed, SAM uses the non-barrel generic 2-cell radial HE blast
-// with distance falloff. Tests verify this works with the 2x1 footprint.
+// When destroyed, SAM produces a visual-only FBALL1 death animation (C++ parity).
+// No warhead damage is dealt to entities. Tests verify this with the 2x1 footprint.
 
-describe('SAM destruction blast (building.cpp — non-barrel radial HE)', () => {
+describe('SAM destruction blast -- visual-only (C++ parity: no entity damage)', () => {
   it('leaves rubble when destroyed', () => {
     const sam = makeSAM(10, 10, House.USSR, 50);
     const ctx = makeCombatCtx([sam]);
@@ -511,7 +511,7 @@ describe('SAM destruction blast (building.cpp — non-barrel radial HE)', () => 
     expect(sam.rubble).toBe(true);
   });
 
-  it('damages nearby entities with radial HE blast on death', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const sam = makeSAM(10, 10, House.USSR, 50);
     // Infantry next to SAM
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
@@ -521,7 +521,7 @@ describe('SAM destruction blast (building.cpp — non-barrel radial HE)', () => 
     structureDamage(ctx, sam, 100);
 
     expect(sam.alive).toBe(false);
-    expect(victim.hp).toBeLessThan(hpBefore);
+    expect(victim.hp).toBe(hpBefore);
   });
 
   it('does NOT damage entities beyond 2-cell blast radius', () => {
@@ -535,7 +535,7 @@ describe('SAM destruction blast (building.cpp — non-barrel radial HE)', () => 
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('blast uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const sam = makeSAM(10, 10, House.USSR, 50);
     const close = entityAtCell(UnitType.V_2TNK, House.Spain, 11, 10);
     const far = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 12);
@@ -545,7 +545,8 @@ describe('SAM destruction blast (building.cpp — non-barrel radial HE)', () => 
 
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 });
 

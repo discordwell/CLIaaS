@@ -296,32 +296,32 @@ describe('PROC 3x3 footprint', () => {
 
 // -- Destruction Blast — Radial HE (building.cpp) -----------------------------
 //
-// Non-barrel structures (including PROC) use a generic 2-cell radial HE blast
-// with distance falloff on destruction. This is NOT the barrel cardinal
+// Non-barrel structures produce a visual-only FBALL1 death animation
+// on destruction (C++ parity). No warhead damage is dealt to entities. This is NOT the barrel cardinal
 // fire-bullet mechanic.
 
-describe('PROC destruction blast — radial HE (non-barrel)', () => {
+describe('PROC destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const proc = makePROC(10, 10, 50);
     proc.house = House.USSR;
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([proc], [victim]);
     structureDamage(ctx, proc, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+  it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
     const proc = makePROC(10, 10, 50);
     proc.house = House.USSR;
     // Entity at diagonal (11,11) — PROC center is at (11.5, 11) for 3x2
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([proc], [victim]);
     structureDamage(ctx, proc, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const proc = makePROC(10, 10, 50);
     proc.house = House.USSR;
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
@@ -330,7 +330,8 @@ describe('PROC destruction blast — radial HE (non-barrel)', () => {
     structureDamage(ctx, proc, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -353,7 +354,7 @@ describe('PROC destruction blast — radial HE (non-barrel)', () => {
     expect(nearby.hp).toBeLessThan(256);
   });
 
-  it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+  it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // Barrel explosions hit ONLY cardinal cells with flat 200 damage.
     // PROC should use radial HE with falloff instead — diagonals should
     // take damage (unlike barrels where diagonals are immune).
@@ -362,8 +363,8 @@ describe('PROC destruction blast — radial HE (non-barrel)', () => {
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([proc], [diagonal]);
     structureDamage(ctx, proc, 100);
-    // Radial HE hits diagonals — unlike barrel cardinal-only
-    expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+    // C++ parity: visual-only explosion, no entity damage
+    expect(diagonal.hp).toBe(diagonal.maxHp);
   });
 });
 

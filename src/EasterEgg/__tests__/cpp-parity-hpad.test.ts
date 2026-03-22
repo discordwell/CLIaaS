@@ -528,21 +528,21 @@ describe('HPAD docking lifecycle (aircraft.cpp)', () => {
 
 // -- Destruction Blast -- Radial HE (building.cpp) ----------------------------
 //
-// Non-barrel structures (including HPAD) use a generic 2-cell radial HE blast
-// with distance falloff on destruction. HPAD has no barrel, so it does NOT use
+// Non-barrel structures produce a visual-only FBALL1 death animation
+// on destruction (C++ parity). No warhead damage is dealt to entities. HPAD has no barrel, so it does NOT use
 // the cardinal fire-bullet mechanic.
 
-describe('HPAD destruction blast -- radial HE (non-barrel)', () => {
+describe('HPAD destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const hpad = makeHPAD(10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([hpad], [victim]);
     structureDamage(ctx, hpad, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages entities in diagonal cells (within 2-cell radius)', () => {
+  it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
     const hpad = makeHPAD(10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const bx = 10 * CELL_SIZE + CELL_SIZE;
@@ -551,10 +551,10 @@ describe('HPAD destruction blast -- radial HE (non-barrel)', () => {
     expect(dist).toBeLessThan(2);
     const ctx = makeCombatCtx([hpad], [victim]);
     structureDamage(ctx, hpad, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const hpad = makeHPAD(10, 10, 50, House.USSR);
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
     const far = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 12);
@@ -562,7 +562,8 @@ describe('HPAD destruction blast -- radial HE (non-barrel)', () => {
     structureDamage(ctx, hpad, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -581,7 +582,7 @@ describe('HPAD destruction blast -- radial HE (non-barrel)', () => {
     expect(nearby.hp).toBeLessThan(256);
   });
 
-  it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+  it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // HPAD has no weapon; barrel explosions hit ONLY cardinal cells
     // with flat 200 damage. HPAD should use radial HE with falloff instead --
     // diagonals should take damage (unlike barrels where diagonals are immune).
@@ -589,7 +590,7 @@ describe('HPAD destruction blast -- radial HE (non-barrel)', () => {
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([hpad], [diagonal]);
     structureDamage(ctx, hpad, 100);
-    expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+    expect(diagonal.hp).toBe(diagonal.maxHp);
   });
 });
 

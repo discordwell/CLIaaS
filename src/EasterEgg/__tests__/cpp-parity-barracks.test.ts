@@ -349,22 +349,22 @@ for (const { type, faction } of BARRACKS_TYPES) {
 
 // -- Destruction Blast — Radial HE (building.cpp) -----------------------------
 //
-// Non-barrel structures (including BARR/TENT) use a generic 2-cell radial HE blast
-// with distance falloff on destruction.
+// Non-barrel structures produce a visual-only FBALL1 death animation
+// on destruction (C++ parity). No warhead damage is dealt to entities.
 
 for (const { type, faction } of BARRACKS_TYPES) {
-  describe(`${type} destruction blast — radial HE [${faction}]`, () => {
+  describe(`${type} destruction blast -- visual-only (C++ parity: no entity damage) [${faction}]`, () => {
     const enemyHouse = House.USSR;
 
-    it('damages entities within 2-cell radius on destruction', () => {
+    it('entities take NO damage on destruction (visual-only explosion)', () => {
       const barracks = makeBarracks(type, 10, 10, 50, enemyHouse);
       const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
       const ctx = makeCombatCtx([barracks], [victim]);
       structureDamage(ctx, barracks, 100);
-      expect(victim.hp).toBeLessThan(victim.maxHp);
+      expect(victim.hp).toBe(victim.maxHp);
     });
 
-    it('damages entities in diagonal cells (within 2-cell radius)', () => {
+    it('diagonal entities take NO damage on destruction (visual-only explosion)', () => {
       const barracks = makeBarracks(type, 10, 10, 50, enemyHouse);
       const victim = entityAtCell(UnitType.I_E1, enemyHouse, 11, 11);
       const bx = 10 * CELL_SIZE + CELL_SIZE;
@@ -373,10 +373,10 @@ for (const { type, faction } of BARRACKS_TYPES) {
       expect(dist).toBeLessThan(2);
       const ctx = makeCombatCtx([barracks], [victim]);
       structureDamage(ctx, barracks, 100);
-      expect(victim.hp).toBeLessThan(victim.maxHp);
+      expect(victim.hp).toBe(victim.maxHp);
     });
 
-    it('uses distance falloff (closer = more damage)', () => {
+    it('no entity damage at any distance (visual-only explosion)', () => {
       const barracks = makeBarracks(type, 10, 10, 50, enemyHouse);
       const close = entityAtCell(UnitType.V_2TNK, enemyHouse, 11, 10);
       const far = entityAtCell(UnitType.V_2TNK, enemyHouse, 10, 12);
@@ -384,7 +384,8 @@ for (const { type, faction } of BARRACKS_TYPES) {
       structureDamage(ctx, barracks, 100);
       const closeDmg = close.maxHp - close.hp;
       const farDmg = far.maxHp - far.hp;
-      expect(closeDmg).toBeGreaterThan(farDmg);
+      expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
     });
 
     it('does NOT damage entities beyond 2-cell radius', () => {
@@ -403,13 +404,13 @@ for (const { type, faction } of BARRACKS_TYPES) {
       expect(nearby.hp).toBeLessThan(256);
     });
 
-    it('does NOT use barrel cardinal fire-bullet mechanic', () => {
+    it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
       const barracks = makeBarracks(type, 10, 10, 50, enemyHouse);
       const diagonal = entityAtCell(UnitType.I_E1, enemyHouse, 11, 11);
       const ctx = makeCombatCtx([barracks], [diagonal]);
       structureDamage(ctx, barracks, 100);
-      // Radial HE hits diagonals — unlike barrel cardinal-only
-      expect(diagonal.hp).toBeLessThan(diagonal.maxHp);
+      // C++ parity: visual-only explosion, no entity damage
+      expect(diagonal.hp).toBe(diagonal.maxHp);
     });
   });
 }

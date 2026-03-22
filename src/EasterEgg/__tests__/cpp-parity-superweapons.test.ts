@@ -279,14 +279,14 @@ describe('PDOX 2x2 footprint', () => {
 
 // -- PDOX Destruction Blast ---------------------------------------------------
 
-describe('PDOX destruction blast — radial HE (non-barrel)', () => {
+describe('PDOX destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const pdox = makeStructure('PDOX', 10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([pdox], [victim]);
     structureDamage(ctx, pdox, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -481,14 +481,14 @@ describe('IRON 2x2 footprint', () => {
 
 // -- IRON Destruction Blast ---------------------------------------------------
 
-describe('IRON destruction blast — radial HE (non-barrel)', () => {
+describe('IRON destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const iron = makeStructure('IRON', 10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([iron], [victim]);
     structureDamage(ctx, iron, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {
@@ -499,7 +499,7 @@ describe('IRON destruction blast — radial HE (non-barrel)', () => {
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('uses distance falloff (closer = more damage)', () => {
+  it('no entity damage at any distance (visual-only explosion)', () => {
     const iron = makeStructure('IRON', 10, 10, 50, House.USSR);
     const close = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
     const far = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 12);
@@ -507,7 +507,8 @@ describe('IRON destruction blast — radial HE (non-barrel)', () => {
     structureDamage(ctx, iron, 100);
     const closeDmg = close.maxHp - close.hp;
     const farDmg = far.maxHp - far.hp;
-    expect(closeDmg).toBeGreaterThan(farDmg);
+    expect(closeDmg).toBe(0);
+    expect(farDmg).toBe(0);
   });
 });
 
@@ -655,14 +656,14 @@ describe('MSLO 2x1 footprint', () => {
 
 // -- MSLO Destruction Blast ---------------------------------------------------
 
-describe('MSLO destruction blast — radial HE (non-barrel)', () => {
+describe('MSLO destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('damages entities within 2-cell radius on destruction', () => {
+  it('entities take NO damage on destruction (visual-only explosion)', () => {
     const mslo = makeStructure('MSLO', 10, 10, 50, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([mslo], [victim]);
     structureDamage(ctx, mslo, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('does NOT damage entities beyond 2-cell radius', () => {

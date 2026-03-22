@@ -3411,15 +3411,11 @@ export class OracleStrategy {
         s.t !== 'SAM' && this.distanceSq(tanya, s) <= 4,
       );
 
-      // Priority: flee dogs > shoot infantry > pop barrels > C4 adjacent buildings > SAMs
-      if (dogDist <= 36) {
-        const dx = tanya.cx - nearestDog!.cx;
-        const dy = tanya.cy - nearestDog!.cy;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        commands.push({ cmd: 'move', ids: [tanya.id],
-          cx: Math.round(tanya.cx + (dx / len) * 6),
-          cy: Math.round(tanya.cy + (dy / len) * 6) });
-        reasons.push(`FLEE dog(${nearestDog!.cx},${nearestDog!.cy})`);
+      // Priority: shoot dogs > shoot infantry > pop barrels > C4 buildings > SAMs
+      // Tanya one-shots dogs (50 HollowPoint vs 12 HP). Shoot, don't flee.
+      if (nearestDog && dogDist <= TANYA_RANGE_SQ) {
+        commands.push({ cmd: 'attack', ids: [tanya.id], target: nearestDog.id });
+        reasons.push(`SHOOT DOG(${nearestDog.cx},${nearestDog.cy})`);
       } else if (infantryInRange.length > 0) {
         commands.push({ cmd: 'attack', ids: [tanya.id], target: infantryInRange[0].id });
         reasons.push(`SHOOT ${infantryInRange[0].t}(${infantryInRange[0].cx},${infantryInRange[0].cy}) [${infantryInRange.length}]`);

@@ -552,34 +552,34 @@ describe('Fake footprint matches real counterpart', () => {
 //  Destruction Blast — Radial HE (building.cpp, non-barrel path)
 // =============================================================================
 //
-// Fakes use the generic non-barrel destruction blast: 2-cell radial HE
-// with distance falloff. Despite being cheap decoys, they produce the
+// Fakes produce a visual-only FBALL1 death animation on destruction (C++ parity).
+// No warhead damage is dealt to entities. Despite being cheap decoys, they produce the
 // standard explosion on death (maintaining the illusion).
 
-describe('Fake destruction blast — radial HE (non-barrel)', () => {
+describe('Fake destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('FACF damages entities within 2-cell radius on destruction', () => {
+  it('FACF entities take NO damage on destruction (visual-only explosion)', () => {
     const fake = makeFake('FACF', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 11);
     const ctx = makeCombatCtx([fake], [victim]);
     structureDamage(ctx, fake, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('DOMF damages entities within 2-cell radius on destruction', () => {
+  it('DOMF entities take NO damage on destruction (visual-only explosion)', () => {
     const fake = makeFake('DOMF', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([fake], [victim]);
     structureDamage(ctx, fake, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('WEAF damages entities within 2-cell radius on destruction', () => {
+  it('WEAF entities take NO damage on destruction (visual-only explosion)', () => {
     const fake = makeFake('WEAF', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 11);
     const ctx = makeCombatCtx([fake], [victim]);
     structureDamage(ctx, fake, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('fake destruction can chain-damage adjacent structures', () => {

@@ -251,9 +251,9 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(building.hp).toBeLessThan(256); // took 200 Fire damage: 256-200=56
   });
 
-  it('non-barrel structure uses radial HE blast (regression check)', () => {
+  it('non-barrel structure does NOT damage entities on destruction (visual-only explosion)', () => {
     const ctx = makeMockCombatContext();
-    // Non-barrel structure at (5,5) — should use 2-cell radial HE blast
+    // Non-barrel structure at (5,5) — visual-only FBALL1 death anim (C++ parity)
     const structure: MapStructure = {
       type: 'POWR', image: 'powr', house: House.USSR,
       cx: 5, cy: 5, hp: 50, maxHp: 256, alive: true, rubble: false,
@@ -261,7 +261,7 @@ describe('Barrel explosion bridge destruction fix', () => {
     };
     ctx.structures.push(structure);
 
-    // Entity diagonally adjacent (within 2-cell radius) — should be damaged by HE blast
+    // Entity diagonally adjacent — should NOT be damaged (visual-only explosion)
     const diagEntity = new Entity(UnitType.I_E1, House.Spain,
       6 * CELL_SIZE + CELL_SIZE, 6 * CELL_SIZE + CELL_SIZE);
     const hpBefore = diagEntity.hp;
@@ -270,7 +270,7 @@ describe('Barrel explosion bridge destruction fix', () => {
     structureDamage(ctx, structure, 100);
 
     expect(structure.alive).toBe(false);
-    expect(diagEntity.hp).toBeLessThan(hpBefore); // diagonal entity hit by radial HE
+    expect(diagEntity.hp).toBe(hpBefore); // C++ parity: visual-only, no entity damage
   });
 
   it('non-barrel structure destruction never triggers bridge logic', () => {

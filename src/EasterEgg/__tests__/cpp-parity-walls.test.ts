@@ -427,34 +427,34 @@ describe('All walls have 1x1 footprint', () => {
 //  Destruction Blast — Radial HE (building.cpp, non-barrel path)
 // =============================================================================
 //
-// Walls use the generic non-barrel destruction blast: 2-cell radial HE
-// with distance falloff. Even though walls are tiny (1 HP), they still
+// Walls produce a visual-only FBALL1 death animation on destruction (C++ parity).
+// No warhead damage is dealt to entities. Even though walls are tiny (1 HP), they still
 // produce the standard explosion on death.
 
-describe('Wall destruction blast — radial HE (non-barrel)', () => {
+describe('Wall destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('SBAG damages entities within 2-cell radius on destruction', () => {
+  it('SBAG entities take NO damage on destruction (visual-only explosion)', () => {
     const wall = makeWall('SBAG', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([wall], [victim]);
     structureDamage(ctx, wall, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('FENC damages entities within 2-cell radius on destruction', () => {
+  it('FENC entities take NO damage on destruction (visual-only explosion)', () => {
     const wall = makeWall('FENC', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([wall], [victim]);
     structureDamage(ctx, wall, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('BRIK damages entities within 2-cell radius on destruction', () => {
+  it('BRIK entities take NO damage on destruction (visual-only explosion)', () => {
     const wall = makeWall('BRIK', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([wall], [victim]);
     structureDamage(ctx, wall, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('wall destruction does NOT damage entities beyond 2-cell radius', () => {

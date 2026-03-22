@@ -354,14 +354,14 @@ describe('HBOX takes damage and destruction (structureDamage)', () => {
     expect(enemy.hp).toBe(hpBefore);
   });
 
-  it('destruction triggers radial HE blast (non-barrel mechanic)', () => {
+  it('destruction does NOT damage nearby entities (visual-only explosion)', () => {
     const hbox = makeHBOX(10, 10);
     // Place entity near the HBOX — should take blast damage on destruction
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
     const ctx = makeCombatCtx([hbox], [victim]);
     structureDamage(ctx, hbox, 600);
     expect(hbox.alive).toBe(false);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 });
 

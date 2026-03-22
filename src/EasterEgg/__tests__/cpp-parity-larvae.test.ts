@@ -407,26 +407,26 @@ describe('Larvae destruction increments nBuildingsDestroyedCount (not walls)', (
 //  Destruction Blast — Radial HE (building.cpp, non-barrel path)
 // =============================================================================
 //
-// Larvae use the generic non-barrel destruction blast: 2-cell radial HE
-// with distance falloff. Despite being tiny 1x1 structures, they still
+// Larvae produce a visual-only FBALL1 death animation on destruction (C++ parity).
+// No warhead damage is dealt to entities. Despite being tiny 1x1 structures, they still
 // produce the standard explosion on death.
 
-describe('Larvae destruction blast — radial HE (non-barrel)', () => {
+describe('Larvae destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('LAR1 damages entities within 2-cell radius on destruction', () => {
+  it('LAR1 entities take NO damage on destruction (visual-only explosion)', () => {
     const larva = makeLarva('LAR1', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([larva], [victim]);
     structureDamage(ctx, larva, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('LAR2 damages entities within 2-cell radius on destruction', () => {
+  it('LAR2 entities take NO damage on destruction (visual-only explosion)', () => {
     const larva = makeLarva('LAR2', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([larva], [victim]);
     structureDamage(ctx, larva, 100);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('larvae destruction does NOT damage entities beyond 2-cell radius', () => {

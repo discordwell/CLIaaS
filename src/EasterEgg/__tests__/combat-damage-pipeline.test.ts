@@ -275,7 +275,7 @@ describe('damageStructure behavior', () => {
     expect(aiState.underAttack).toBe(true);
   });
 
-  it('destroyed structure explosion damages nearby units in 2-cell radius', () => {
+  it('destroyed structure explosion does NOT damage nearby units (visual-only, C++ parity)', () => {
     const s = makeStructure({ hp: 10, cx: 5, cy: 5 });
     // Place a unit near the structure center (structure center = cx*24+24, cy*24+24 = 144, 144)
     // Unit at cell (6,5) center = 156, 132 — about 1 cell away
@@ -285,8 +285,8 @@ describe('damageStructure behavior', () => {
     registerEntities(ctx, nearby);
     const destroyed = structureDamage(ctx, s, 100);
     expect(destroyed).toBe(true);
-    // Unit within 2-cell blast radius should take damage
-    expect(nearby.hp).toBeLessThan(hpBefore);
+    // C++ parity: FBALL1 death anim is visual-only, no entity damage
+    expect(nearby.hp).toBe(hpBefore);
   });
 
   it('fireWeaponAtStructure uses per-building armor for warhead mult (POWR=wood)', () => {

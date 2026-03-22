@@ -325,26 +325,26 @@ describe('Both fences have 1x1 footprint', () => {
 //  Destruction Blast — Radial HE (building.cpp, non-barrel path)
 // =============================================================================
 //
-// Fences use the generic non-barrel destruction blast: 2-cell radial HE
-// with distance falloff. Even though fences are tiny (1 HP), they still
+// Fences produce a visual-only FBALL1 death animation on destruction (C++ parity).
+// No warhead damage is dealt to entities. Even though fences are tiny (1 HP), they still
 // produce the standard explosion on death.
 
-describe('Fence destruction blast — radial HE (non-barrel)', () => {
+describe('Fence destruction blast -- visual-only (C++ parity: no entity damage)', () => {
 
-  it('WOOD damages entities within 2-cell radius on destruction', () => {
+  it('WOOD entities take NO damage on destruction (visual-only explosion)', () => {
     const fence = makeFence('WOOD', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([fence], [victim]);
     structureDamage(ctx, fence, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('CYCL damages entities within 2-cell radius on destruction', () => {
+  it('CYCL entities take NO damage on destruction (visual-only explosion)', () => {
     const fence = makeFence('CYCL', 10, 10, undefined, House.USSR);
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     const ctx = makeCombatCtx([fence], [victim]);
     structureDamage(ctx, fence, 10);
-    expect(victim.hp).toBeLessThan(victim.maxHp);
+    expect(victim.hp).toBe(victim.maxHp);
   });
 
   it('fence destruction does NOT damage entities beyond 2-cell radius', () => {
