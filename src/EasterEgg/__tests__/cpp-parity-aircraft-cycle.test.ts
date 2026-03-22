@@ -76,6 +76,7 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
     getROFBias: () => 1.0,
+    getPowerFraction: () => 1.0,
     ...overrides,
   };
 }
@@ -342,14 +343,13 @@ describe('rearm time per ammo point — C++ building formula vs TS weapon ROF', 
    *   YAK ChainGun rof=3 → 3 ticks per ammo (20x faster)
    */
 
-  it('PARITY GAP: MIG rearm = 3 ticks/ammo in TS vs ~59 in C++ (aircraft.ts:252)', () => {
+  it('MIG rearm = 36 ticks/ammo (C++ ReloadRate=.04 at full power)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 0;
     mig.maxAmmo = 3;
     mig.aircraftState = 'rearming';
-    // TS sets initial rearmTimer from weapon.rof
-    const weaponRof = WEAPON_STATS['Maverick']?.rof ?? 3;
-    mig.rearmTimer = weaponRof; // 3
+    // TS now uses computeRearmDelay(powerFraction) = 36 at full power
+    mig.rearmTimer = 36;
 
     const ctx = makeAircraftCtx();
     let ticksToFullRearm = 0;
@@ -358,20 +358,16 @@ describe('rearm time per ammo point — C++ building formula vs TS weapon ROF', 
       ticksToFullRearm++;
     }
 
-    // TS: 3 ammo * 3 ticks = 9 ticks total
-    expect(ticksToFullRearm).toBe(9);
-    // C++ at full power: 3 ammo * 59 ticks ≈ 177 ticks
-    // PARITY GAP: TS rearms ~20x faster than C++ for rapid-fire weapons
-    const cppExpectedTicks = 3 * 59; // ~177
-    expect(ticksToFullRearm).toBeLessThan(cppExpectedTicks);
+    // 3 ammo * 36 ticks/ammo = 108 ticks total
+    expect(ticksToFullRearm).toBe(108);
   });
 
-  it('PARITY GAP: HIND rearm = 3 ticks/ammo in TS vs ~59 in C++ (ChainGun rof=3)', () => {
+  it('HIND rearm = 36 ticks/ammo (C++ ReloadRate=.04 at full power)', () => {
     const hind = makeEntity(UnitType.V_HIND, House.USSR);
     hind.ammo = 0;
     hind.maxAmmo = 12;
     hind.aircraftState = 'rearming';
-    hind.rearmTimer = WEAPON_STATS['ChainGun']?.rof ?? 3;
+    hind.rearmTimer = 36;
 
     const ctx = makeAircraftCtx();
     let ticks = 0;
@@ -380,19 +376,16 @@ describe('rearm time per ammo point — C++ building formula vs TS weapon ROF', 
       ticks++;
     }
 
-    // TS: 12 ammo * 3 ticks = 36 ticks
-    expect(ticks).toBe(36);
-    // C++ at full power: 12 * 59 = 708 ticks (~47 seconds)
-    // PARITY GAP: TS rearms ~20x faster for ChainGun aircraft
-    expect(ticks).toBeLessThan(12 * 59);
+    // 12 ammo * 36 ticks/ammo = 432 ticks
+    expect(ticks).toBe(432);
   });
 
-  it('HELI rearm = 60 ticks/ammo (Hellfire rof=60) — closer to C++ pace', () => {
+  it('HELI rearm = 36 ticks/ammo (C++ ReloadRate=.04 at full power)', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.ammo = 0;
     heli.maxAmmo = 6;
     heli.aircraftState = 'rearming';
-    heli.rearmTimer = WEAPON_STATS['Hellfire']?.rof ?? 60;
+    heli.rearmTimer = 36;
 
     const ctx = makeAircraftCtx();
     let ticks = 0;
@@ -401,10 +394,8 @@ describe('rearm time per ammo point — C++ building formula vs TS weapon ROF', 
       ticks++;
     }
 
-    // TS: 6 ammo * 60 ticks = 360 ticks
-    expect(ticks).toBe(360);
-    // C++ at full power: 6 * 59 = 354 ticks (very close!)
-    // Hellfire rof=60 happens to be near the C++ ReloadRate formula result
+    // 6 ammo * 36 ticks/ammo = 216 ticks
+    expect(ticks).toBe(216);
   });
 });
 

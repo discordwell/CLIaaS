@@ -214,6 +214,8 @@ function makeRepairSellContext(overrides?: Partial<RepairSellContext>): RepairSe
     credits: 5000,
     tick: 0,
     playerHouse: House.Spain,
+    powerProduced: 100,
+    powerConsumed: 100,
     repairingStructures: new Set(),
     scenarioProductionItems: PRODUCTION_ITEMS,
     effects: [],

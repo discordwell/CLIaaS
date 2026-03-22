@@ -76,6 +76,7 @@ function makeAircraftCtx(
     fireWeaponAt: () => {},
     fireWeaponAtStructure: () => {},
     getROFBias: () => 1.0,
+    getPowerFraction: () => 1.0,
   };
 }
 
@@ -725,7 +726,7 @@ describe('HELI rearming (aircraft.cpp)', () => {
     expect(heli.aircraftState).toBe('landed');
   });
 
-  it('rearm timer is based on weapon ROF', () => {
+  it('rearm timer is based on C++ ReloadRate formula (36 ticks at full power)', () => {
     const heli = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
     heli.aircraftState = 'landing';
     heli.flightAltitude = 1;
@@ -734,10 +735,8 @@ describe('HELI rearming (aircraft.cpp)', () => {
     const ctx = makeAircraftCtx([heli]);
     updateAircraft(ctx, heli);
 
-    // Should be rearming now; timer based on weapon ROF (60) * rofBias
-    const rofBias = COUNTRY_BONUSES[House.Spain]?.rofMult ?? 1.0;
-    const expectedTimer = Math.max(1, Math.round(60 * rofBias));
-    expect(heli.rearmTimer).toBe(expectedTimer);
+    // C++ building.cpp:4023-4025: computeRearmDelay(1.0) = round(1.0 * 0.04 * 900) = 36
+    expect(heli.rearmTimer).toBe(36);
   });
 });
 

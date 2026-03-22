@@ -216,6 +216,8 @@ function makeMockRepairSellContext(overrides: Partial<RepairSellContext> = {}): 
     credits: 5000,
     tick: 0,
     playerHouse: House.Spain,
+    powerProduced: 100,
+    powerConsumed: 100,
     repairingStructures: new Set<number>(),
     scenarioProductionItems: PRODUCTION_ITEMS as ProductionItem[],
     effects: [],

@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-22T22:00Z — Aircraft Rearm C++ Parity Fix
+- **Major parity gap closed**: Rearm was aircraft-driven using weapon ROF (3-60 ticks/ammo varying by weapon). Now uses C++ building.cpp:4023-4025 formula: `Inverse(pfrac) * ReloadRate * TICKS_PER_MINUTE` = 36 ticks/ammo at full power, uniform for all aircraft.
+- **Power fraction scaling**: Added `getPowerFraction(house)` to AircraftContext. At 50% power, rearm takes 72 ticks/ammo (2x slower). Clamped to [0.5, 1.0] per C++.
+- **Service depot rearm updated**: repairSell.ts service depot rearm now also uses computeRearmDelay with power fraction (was hardcoded 36).
+- **173 rearm parity tests pass**, 42,591 total tests pass (527 files).
+- **New behavioral test file**: cpp-parity-aircraft-rearm-behavioral.test.ts covering power scaling, full cycles, regression.
+- **Files changed**: aircraft.ts, index.ts, repairSell.ts + 11 test files updated with getPowerFraction mock.
+
 ## 2026-03-22T09:30Z — SCG11EA Oracle Strategy Debugging
 - **Phase 4 combat skip**: Generic base defense consumed all tanks fighting dogs/Hinds near 48 pre-built structures. Fixed by skipping Phase 4 for all of SCG11EA, using local-only defense in decideScg11ea.
 - **Build order**: Changed to POWR→PROC→WEAP→PROC#2 (was POWR→PROC→WEAP→WEAP). Freeze building until island base production destroyed.

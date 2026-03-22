@@ -372,10 +372,11 @@ describe('Infantry scatter and prone (infantry.cpp, rules.ini)', () => {
   });
 
   /**
-   * C++ rules.ini Thief has Fraidycat=yes (idata.cpp thief entry).
+   * THF (Thief) does NOT have Fraidycat=yes in rules.ini — rules.ini is God.
+   * The idata.cpp constructor default is false; no INI override exists.
    */
-  it('THF (Thief) has isFraidyCat=true (C++ idata.cpp)', () => {
-    expect(UNIT_STATS.THF?.isFraidyCat).toBe(true);
+  it('THF (Thief) does NOT have isFraidyCat (rules.ini has no Fraidycat= for THF)', () => {
+    expect(UNIT_STATS.THF?.isFraidyCat).toBeFalsy();
   });
 });
 

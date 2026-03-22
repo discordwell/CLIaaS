@@ -655,6 +655,8 @@ export class Game {
       credits: this.credits,
       tick: this.tick,
       playerHouse: this.playerHouse,
+      powerProduced: this.powerProduced,
+      powerConsumed: this.powerConsumed,
       repairingStructures: this.repairingStructures,
       scenarioProductionItems: this.scenarioProductionItems,
       effects: this.effects,

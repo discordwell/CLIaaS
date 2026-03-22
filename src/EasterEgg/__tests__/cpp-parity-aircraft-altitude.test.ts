@@ -99,6 +99,7 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
     getROFBias: () => 1.0,
+    getPowerFraction: () => 1.0,
     ...overrides,
   };
 }

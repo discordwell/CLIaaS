@@ -83,6 +83,8 @@ function makeCtx(overrides: Partial<RepairSellContext> = {}): RepairSellContext 
     credits: 10000,
     tick: 0,
     playerHouse: House.Spain,
+    powerProduced: 100,
+    powerConsumed: 100,
     repairingStructures: new Set(),
     scenarioProductionItems: [
       { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 4 },

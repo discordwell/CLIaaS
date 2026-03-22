@@ -13,6 +13,7 @@ import {
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type Entity } from './entity';
 import { type Effect, BUILDING_FRAME_TABLE } from './renderer';
+import { computeRearmDelay } from './aircraft';
 
 // ---------------------------------------------------------------------------
 // Context interface — minimal fields needed by mutating functions
@@ -24,6 +25,8 @@ export interface RepairSellContext {
   credits: number;
   tick: number;
   playerHouse: House;
+  powerProduced: number;
+  powerConsumed: number;
   repairingStructures: Set<number>;
   scenarioProductionItems: ProductionItem[];
   effects: Effect[];
@@ -251,12 +254,14 @@ export function tickServiceDepot(ctx: RepairSellContext): void {
           docked.moveTarget = { x: docked.pos.x + CELL_SIZE * 3, y: docked.pos.y + CELL_SIZE * 3 };
         }
       }
-      // Rearm alongside repair (free)
+      // Rearm alongside repair (free) — C++ building.cpp:4023-4025 formula
       if (docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
         docked.rearmTimer = (docked.rearmTimer ?? 0) - 1;
         if (docked.rearmTimer <= 0) {
           docked.ammo++;
-          docked.rearmTimer = 36;
+          const pfrac = ctx.powerConsumed <= 0 ? 1.0
+            : Math.min(1.0, ctx.powerProduced / ctx.powerConsumed);
+          docked.rearmTimer = computeRearmDelay(pfrac);
         }
       }
     }

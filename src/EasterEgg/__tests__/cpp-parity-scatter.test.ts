@@ -314,7 +314,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(UNIT_STATS.C3.isFraidyCat).toBe(true);
     expect(UNIT_STATS.C10.isFraidyCat).toBe(true);
     expect(UNIT_STATS.EINSTEIN.isFraidyCat).toBe(true);
-    expect(UNIT_STATS.THF.isFraidyCat).toBe(true);
+    // THF (Thief) does NOT have Fraidycat=yes in rules.ini — rules.ini is God
+    expect(UNIT_STATS.THF.isFraidyCat).toBeFalsy();
   });
 
   it('combat infantry do NOT have isFraidyCat (rules.ini default)', () => {

@@ -569,6 +569,8 @@ function makeMinimalCtx(
     credits: 10000,
     tick: 0,
     playerHouse: 'GoodGuy' as any,
+    powerProduced: 100,
+    powerConsumed: 100,
     repairingStructures: new Set(),
     scenarioProductionItems: prodItems ?? PRODUCTION_ITEMS,
     effects: [],

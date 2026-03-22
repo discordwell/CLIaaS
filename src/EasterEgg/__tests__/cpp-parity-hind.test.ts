@@ -76,6 +76,7 @@ function makeAircraftCtx(
     fireWeaponAt: () => {},
     fireWeaponAtStructure: () => {},
     getROFBias: () => 1.0,
+    getPowerFraction: () => 1.0,
   };
 }
 
@@ -718,7 +719,7 @@ describe('HIND rearming (aircraft.cpp)', () => {
     expect(hind.aircraftState).toBe('landed');
   });
 
-  it('rearm timer is based on weapon ROF', () => {
+  it('rearm timer is based on C++ ReloadRate formula (36 ticks at full power)', () => {
     const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
     hind.aircraftState = 'landing';
     hind.flightAltitude = 1;
@@ -727,10 +728,8 @@ describe('HIND rearming (aircraft.cpp)', () => {
     const ctx = makeAircraftCtx([hind]);
     updateAircraft(ctx, hind);
 
-    // Should be rearming now; timer based on weapon ROF (3) * rofBias
-    const rofBias = COUNTRY_BONUSES[House.USSR]?.rofMult ?? 1.0;
-    const expectedTimer = Math.max(1, Math.round(3 * rofBias));
-    expect(hind.rearmTimer).toBe(expectedTimer);
+    // C++ building.cpp:4023-4025: computeRearmDelay(1.0) = round(1.0 * 0.04 * 900) = 36
+    expect(hind.rearmTimer).toBe(36);
   });
 
   it('HIND rearms faster than HELI due to lower ROF (3 vs 60)', () => {

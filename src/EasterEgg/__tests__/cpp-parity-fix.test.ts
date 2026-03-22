@@ -128,6 +128,8 @@ function makeRepairSellCtx(
     credits,
     tick: 0,
     playerHouse: House.Spain,
+    powerProduced: 100,
+    powerConsumed: 100,
     repairingStructures: new Set(),
     scenarioProductionItems: PRODUCTION_ITEMS,
     effects: [] as Effect[],

@@ -16,6 +16,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { WEAPON_STATS } from '../engine/types';
+import { STRUCTURE_WEAPONS } from '../engine/scenario';
 
 // ---------------------------------------------------------------------------
 // INI parser — identical to warhead-data parity pattern
@@ -852,29 +853,43 @@ describe('C++ Parity: WEAPON_STATS vs rules.ini/aftrmath.ini weapon data', () =>
   });
 
   // -------------------------------------------------------------------------
-  // 5. Coverage gap: INI weapons missing from WEAPON_STATS
+  // 5. Coverage: INI weapons implemented as STRUCTURE_WEAPONS (not WEAPON_STATS)
   // -------------------------------------------------------------------------
-  describe('Coverage gaps: INI weapons NOT in WEAPON_STATS', () => {
-    // These are weapons defined in rules.ini or aftrmath.ini that the TS
-    // engine hasn't implemented yet.
-    const EXPECTED_GAPS = [
-      { name: 'ZSU-23', note: 'Anti-aircraft multiple cannon (used by AGUN structure)' },
-      { name: 'Vulcan', note: 'Rapid fire machine gun (used by structures/pillbox)' },
-      { name: 'Nike', note: 'Anti-aircraft SAM missile (used by SAM site structure)' },
-      { name: 'TurretGun', note: 'Turret cannon (used by turret structure, also in aftrmath.ini)' },
-      { name: 'AirAssault', note: 'Aftermath air assault placeholder weapon (Range=127, Damage=0)' },
+  describe('Structure weapons: INI weapons in STRUCTURE_WEAPONS, not WEAPON_STATS', () => {
+    // These 4 INI weapons are structure-only weapons. The TS engine implements
+    // them in STRUCTURE_WEAPONS (keyed by structure type), not in WEAPON_STATS
+    // (keyed by weapon name). This is by design: structure weapons are applied
+    // directly to their building, not shared across unit types.
+    const STRUCTURE_WEAPON_MAP = [
+      { name: 'ZSU-23', structure: 'AGUN', note: 'Anti-aircraft multiple cannon (used by AGUN structure)' },
+      { name: 'Vulcan', structure: 'PBOX', note: 'Rapid fire machine gun (used by structures/pillbox)' },
+      { name: 'Nike', structure: 'SAM', note: 'Anti-aircraft SAM missile (used by SAM site structure)' },
+      { name: 'TurretGun', structure: 'GUN', note: 'Turret cannon (used by turret structure, also in aftrmath.ini)' },
     ];
 
-    for (const gap of EXPECTED_GAPS) {
-      it(`MISSING: ${gap.name} — ${gap.note}`, () => {
-        const iniSection = getWeaponINI(gap.name);
-        expect(iniSection, `INI section [${gap.name}] should exist`).toBeDefined();
+    for (const entry of STRUCTURE_WEAPON_MAP) {
+      it(`${entry.name} — exists in INI and implemented via STRUCTURE_WEAPONS['${entry.structure}']`, () => {
+        const iniSection = getWeaponINI(entry.name);
+        expect(iniSection, `INI section [${entry.name}] should exist`).toBeDefined();
+        // Not in WEAPON_STATS (unit weapon table) — this is expected for structure-only weapons
+        expect(WEAPON_STATS[entry.name]).toBeUndefined();
+        // Instead, implemented in STRUCTURE_WEAPONS keyed by structure type
         expect(
-          WEAPON_STATS[gap.name],
-          `WEAPON_STATS['${gap.name}'] is missing — ${gap.note}`,
+          STRUCTURE_WEAPONS[entry.structure],
+          `STRUCTURE_WEAPONS['${entry.structure}'] should exist for ${entry.name}`,
         ).toBeDefined();
       });
     }
+
+    // AirAssault is a placeholder weapon — it IS in WEAPON_STATS
+    it('AirAssault — Aftermath air assault placeholder weapon (Range=127, Damage=0)', () => {
+      const iniSection = getWeaponINI('AirAssault');
+      expect(iniSection, `INI section [AirAssault] should exist`).toBeDefined();
+      expect(
+        WEAPON_STATS['AirAssault'],
+        `WEAPON_STATS['AirAssault'] should exist`,
+      ).toBeDefined();
+    });
   });
 
   // -------------------------------------------------------------------------

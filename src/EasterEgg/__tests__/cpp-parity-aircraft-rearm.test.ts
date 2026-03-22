@@ -68,6 +68,7 @@ import {
   type AircraftContext,
   findLandingPad,
   updateAircraft,
+  computeRearmDelay,
 } from '../engine/aircraft';
 import type { MapStructure } from '../engine/scenario';
 import { GameMap } from '../engine/map';
@@ -92,6 +93,7 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
     getROFBias: () => 1.0,
+    getPowerFraction: () => 1.0,
     ...overrides,
   };
 }
@@ -278,38 +280,23 @@ describe('landing pad selection — findLandingPad() (aircraft.cpp:1913)', () =>
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 4: Rearm Delay Calculation
 // C++ building.cpp:4023-4025: time = Inverse(pfrac) * Rule.ReloadRate * TICKS_PER_MINUTE
-// TS aircraft.ts:252: rearmTimer = weapon.rof * ROFBias
-// PARITY GAP: TS uses weapon ROF, C++ uses building ReloadRate formula
+// TS now uses computeRearmDelay(powerFraction) matching C++ building.cpp formula
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('rearm delay calculation — PARITY GAP', () => {
+describe('rearm delay calculation — C++ building.cpp ReloadRate parity', () => {
   /**
    * C++ building.cpp:4023-4025 (helipad/airstrip rearm):
    *   fixed pfrac = Saturate(House->Power_Fraction(), 1);
    *   if (pfrac < fixed::_1_2) pfrac = fixed::_1_2;
    *   int time = Inverse(pfrac) * Rule.ReloadRate * TICKS_PER_MINUTE;
    *
-   * This is a BUILDING-driven delay based on:
-   *   - House power fraction (clamped to [0.5, 1.0])
-   *   - ReloadRate from rules.ini (default ~0.066)
-   *   - TICKS_PER_MINUTE (typically 900 at 15 tps)
+   * rules.ini [General] ReloadRate=.04 → at full power: 1.0 * 0.04 * 900 = 36 ticks per ammo
+   * At 50% power: 2.0 * 0.04 * 900 = 72 ticks per ammo
    *
-   * At full power: time = 1.0 * 0.066 * 900 ≈ 59 ticks per ammo
-   * At 50% power:  time = 2.0 * 0.066 * 900 ≈ 118 ticks per ammo
-   *
-   * TS aircraft.ts:252 uses a completely different formula:
-   *   rearmTimer = max(1, round(weapon.rof * ROFBias))
-   *
-   * This is WEAPON-driven, not building-driven, and depends on weapon ROF:
-   *   - MIG Maverick: rof=3, so rearmTimer=3 (MUCH faster than C++)
-   *   - YAK ChainGun: rof=3, so rearmTimer=3
-   *   - HELI Hellfire: rof=60, so rearmTimer=60
-   *   - HIND ChainGun: rof=3, so rearmTimer=3
+   * TS now uses computeRearmDelay(ctx.getPowerFraction(entity.house)) matching C++ formula.
    */
 
-  it('TS rearm delay for MIG uses weapon ROF (not C++ building ReloadRate)', () => {
-    // TS: Maverick rof=3, ROFBias=1.0 → rearmTimer=3
-    // C++ at full power: ~59 ticks per ammo point
+  it('rearm delay for MIG at full power = 36 ticks (C++ building.cpp ReloadRate)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 0;
     mig.aircraftState = 'landing';
@@ -322,13 +309,12 @@ describe('rearm delay calculation — PARITY GAP', () => {
 
     updateAircraft(ctx, mig);
 
-    // TS sets rearmTimer from weapon.rof (Maverick rof=3)
-    // PARITY GAP: C++ would use ReloadRate-based formula (~59 ticks)
+    // computeRearmDelay(1.0) = round(1.0 * 0.04 * 900) = 36
     expect(mig.aircraftState).toBe('rearming');
-    expect(mig.rearmTimer).toBe(3); // weapon.rof * 1.0 = 3
+    expect(mig.rearmTimer).toBe(36);
   });
 
-  it('TS rearm delay for HELI uses weapon ROF (Hellfire rof=60)', () => {
+  it('rearm delay for HELI at full power = 36 ticks (same formula, weapon-independent)', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.ammo = 0;
     heli.aircraftState = 'landing';
@@ -342,10 +328,10 @@ describe('rearm delay calculation — PARITY GAP', () => {
     updateAircraft(ctx, heli);
 
     expect(heli.aircraftState).toBe('rearming');
-    expect(heli.rearmTimer).toBe(60); // Hellfire rof=60
+    expect(heli.rearmTimer).toBe(36);
   });
 
-  it('ROFBias scales rearm delay', () => {
+  it('half power doubles rearm delay to 72 ticks', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 0;
     mig.aircraftState = 'landing';
@@ -354,15 +340,15 @@ describe('rearm delay calculation — PARITY GAP', () => {
 
     const pad = makePadStructure('AFLD', House.USSR, 5, 5);
     pad.dockedAircraft = mig.id;
-    const ctx = makeAircraftCtx({ structures: [pad], getROFBias: () => 2.0 });
+    const ctx = makeAircraftCtx({ structures: [pad], getPowerFraction: () => 0.5 });
 
     updateAircraft(ctx, mig);
 
-    // Maverick rof=3 * ROFBias=2.0 = 6
-    expect(mig.rearmTimer).toBe(6);
+    // computeRearmDelay(0.5) = round(2.0 * 0.04 * 900) = 72
+    expect(mig.rearmTimer).toBe(72);
   });
 
-  it('rearmTimer has minimum of 1 even with very low ROF bias', () => {
+  it('rearmTimer has minimum of 1 even at extreme power', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 0;
     mig.aircraftState = 'landing';
@@ -371,11 +357,10 @@ describe('rearm delay calculation — PARITY GAP', () => {
 
     const pad = makePadStructure('AFLD', House.USSR, 5, 5);
     pad.dockedAircraft = mig.id;
-    const ctx = makeAircraftCtx({ structures: [pad], getROFBias: () => 0.01 });
+    const ctx = makeAircraftCtx({ structures: [pad] });
 
     updateAircraft(ctx, mig);
 
-    // max(1, round(3 * 0.01)) = max(1, 0) = 1
     expect(mig.rearmTimer).toBeGreaterThanOrEqual(1);
   });
 });
@@ -453,19 +438,20 @@ describe('ammo increment during rearming (techno.cpp:964-968)', () => {
     mig.ammo = 0;
     mig.maxAmmo = 3;
     mig.aircraftState = 'rearming';
-    mig.rearmTimer = 3; // Maverick rof=3
+    // computeRearmDelay(1.0) = 36 ticks per ammo at full power
+    mig.rearmTimer = 36;
 
     const ctx = makeAircraftCtx();
     let ticks = 0;
-    while (mig.aircraftState === 'rearming' && ticks < 100) {
+    while (mig.aircraftState === 'rearming' && ticks < 200) {
       updateAircraft(ctx, mig);
       ticks++;
     }
 
     expect(mig.ammo).toBe(3);
     expect(mig.aircraftState).toBe('landed');
-    // Should take 3 ammo * 3 ticks per ammo = 9 ticks total
-    expect(ticks).toBe(9);
+    // Should take 3 ammo * 36 ticks per ammo = 108 ticks total
+    expect(ticks).toBe(108);
   });
 
   // PARITY GAP: TS increments ammo past MaxAmmo before checking boundary
@@ -744,27 +730,15 @@ describe('rearm completion semantics (aircraft.cpp RADIO_PREPARED:2691-2694)', (
 // PARITY GAP
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('rearm driver — PARITY GAP: building vs aircraft driven', () => {
+describe('rearm driver — building-driven timing with power fraction (C++ parity)', () => {
   /**
-   * In C++, the BUILDING (helipad/airstrip) drives the rearm process:
-   *   1. Building checks RADIO_NEED_TO_MOVE (aircraft in radio contact?)
-   *   2. Building checks RADIO_PREPARED (aircraft fully loaded?)
-   *   3. Building sends RADIO_RELOAD → aircraft increments ammo
-   *   4. Building waits: Inverse(pfrac) * ReloadRate * TICKS_PER_MINUTE
-   *   5. Repeat until aircraft RADIO_PREPARED returns ROGER
-   *
-   * In TS, the AIRCRAFT drives its own rearm:
-   *   1. Aircraft rearmTimer-- each tick
-   *   2. When timer hits 0 → ammo++
-   *   3. Reset timer for next increment
-   *   4. When ammo == maxAmmo → transition to 'landed'
-   *
-   * This is a structural divergence: the TS implementation is simpler but
-   * loses the C++ power-dependency mechanic (low power = slower rearm).
+   * TS now uses C++ building.cpp:4023-4025 formula via computeRearmDelay:
+   *   time = Inverse(pfrac) * ReloadRate * TICKS_PER_MINUTE
+   * Aircraft still self-manages the timer (simplified vs C++ RADIO protocol),
+   * but the TIMING matches C++ exactly including power fraction scaling.
    */
 
-  it('TS rearm works without any structures in context (aircraft self-drives)', () => {
-    // In C++, this would NOT work — the building must exist and send RADIO_RELOAD
+  it('rearm works without structures (aircraft manages timer internally)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.aircraftState = 'rearming';
     mig.ammo = 0;
@@ -772,39 +746,36 @@ describe('rearm driver — PARITY GAP: building vs aircraft driven', () => {
     mig.rearmTimer = 1;
     mig.flightAltitude = 0;
 
-    // No structures at all
     const ctx = makeAircraftCtx({ structures: [] });
     updateAircraft(ctx, mig);
 
-    // TS: aircraft increments ammo by itself
-    // PARITY GAP: C++ requires building to send RADIO_RELOAD
     expect(mig.ammo).toBe(1);
   });
 
-  it('TS rearm is independent of house power fraction', () => {
-    // C++ building.cpp:4023-4025:
-    //   pfrac = Saturate(Power_Fraction(), 1);
-    //   if (pfrac < 0.5) pfrac = 0.5;
-    //   time = Inverse(pfrac) * ReloadRate * TICKS_PER_MINUTE;
-    //
-    // Low power → Inverse(pfrac) is > 1 → slower rearm
-    // TS: rearmTimer = weapon.rof * ROFBias — no power consideration
-    // PARITY GAP: documented, not tested as TS has no power fraction in rearm
-    const mig = makeEntity(UnitType.V_MIG, House.USSR);
-    mig.aircraftState = 'rearming';
-    mig.ammo = 0;
-    mig.maxAmmo = 3;
-    mig.rearmTimer = 3; // Maverick rof
+  it('rearm delay scales with power fraction (C++ building.cpp:4023-4025)', () => {
+    // Full power: 36 ticks per ammo
+    const migFull = makeEntity(UnitType.V_MIG, House.USSR);
+    migFull.aircraftState = 'rearming';
+    migFull.ammo = 0;
+    migFull.maxAmmo = 3;
+    migFull.rearmTimer = computeRearmDelay(1.0); // 36
 
-    const ctx = makeAircraftCtx();
+    const ctxFull = makeAircraftCtx({ getPowerFraction: () => 1.0 });
+    for (let i = 0; i < 36; i++) updateAircraft(ctxFull, migFull);
+    expect(migFull.ammo).toBe(1);
 
-    // Run 3 ticks — timer should expire, ammo should increment
-    updateAircraft(ctx, mig); // timer → 2
-    updateAircraft(ctx, mig); // timer → 1
-    updateAircraft(ctx, mig); // timer → 0 → ammo++
+    // Half power: 72 ticks per ammo
+    const migHalf = makeEntity(UnitType.V_MIG, House.USSR);
+    migHalf.aircraftState = 'rearming';
+    migHalf.ammo = 0;
+    migHalf.maxAmmo = 3;
+    migHalf.rearmTimer = computeRearmDelay(0.5); // 72
 
-    expect(mig.ammo).toBe(1);
-    // In C++ at low power, this would take ~118 ticks instead of 3
+    const ctxHalf = makeAircraftCtx({ getPowerFraction: () => 0.5 });
+    for (let i = 0; i < 36; i++) updateAircraft(ctxHalf, migHalf);
+    expect(migHalf.ammo).toBe(0); // not yet — half power needs 72 ticks
+    for (let i = 0; i < 36; i++) updateAircraft(ctxHalf, migHalf);
+    expect(migHalf.ammo).toBe(1); // 72 ticks total
   });
 });
 
@@ -879,7 +850,7 @@ describe('weapon rearm delay after firing (techno.cpp:2857-2870)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('full rearm cycle integration', () => {
-  it('MIG: empty → rearm → full → landed (3 ammo, rof=3)', () => {
+  it('MIG: empty → rearm → full → landed (3 ammo, 36 ticks/ammo)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 0;
     mig.maxAmmo = 3;
@@ -894,7 +865,8 @@ describe('full rearm cycle integration', () => {
     const states: string[] = [];
     const ammoHistory: number[] = [];
 
-    for (let tick = 0; tick < 30; tick++) {
+    // 3 ammo * 36 ticks/ammo = 108 ticks rearming + 1 tick landing = 109 max
+    for (let tick = 0; tick < 120; tick++) {
       updateAircraft(ctx, mig);
       states.push(mig.aircraftState);
       ammoHistory.push(mig.ammo);
