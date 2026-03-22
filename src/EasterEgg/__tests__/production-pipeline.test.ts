@@ -105,7 +105,8 @@ function getEffectiveCost(item: ProductionItem, playerHouse: House): number {
 }
 
 function calcPowerMult(powerProduced: number, powerConsumed: number): number {
-  if (powerConsumed > powerProduced && powerProduced > 0) {
+  if (powerConsumed > powerProduced) {
+    if (powerProduced === 0) return 0.5; // C++ Power_Fraction()=0 → clamp to 0.5
     const powerFraction = powerProduced / powerConsumed;
     return Math.max(0.5, powerFraction);
   }

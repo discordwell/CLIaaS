@@ -404,14 +404,19 @@ describe('SHOK AI scatter on damage (techno.cpp)', () => {
     expect(shok.moveTarget).toBeNull();
   });
 
-  it('AI SHOK on ATTACK mission does NOT scatter (only GUARD/AREA_GUARD scatter)', () => {
-    const shok = entityAtCell(UnitType.I_SHOK, House.USSR, 10, 10);
-    shok.mission = Mission.ATTACK;
-
-    const ctx = makeCombatCtx([shok]);
-    aiScatterOnDamage(ctx, shok);
-
-    expect(shok.mission).toBe(Mission.ATTACK);
+  it('AI SHOK on ATTACK mission CAN scatter (isScatter=true per C++ defaults)', () => {
+    let scattered = false;
+    for (let i = 0; i < 50; i++) {
+      const testShok = entityAtCell(UnitType.I_SHOK, House.USSR, 10, 10);
+      testShok.mission = Mission.ATTACK;
+      const testCtx = makeCombatCtx([testShok]);
+      aiScatterOnDamage(testCtx, testShok);
+      if (testShok.mission === Mission.MOVE && testShok.moveTarget !== null) {
+        scattered = true;
+        break;
+      }
+    }
+    expect(scattered).toBe(true);
   });
 });
 

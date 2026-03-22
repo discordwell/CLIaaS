@@ -282,15 +282,17 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     // SLEEP, HARVEST, RETREAT, REPAIR, RETURN, HARMLESS, MISSILE, CONSTRUCTION, DECONSTRUCTION
     // should have IsNoThreat = true
 
-    expect(MISSION_CONTROL[Mission.SLEEP].isNoThreat).toBe(true);
-    expect(MISSION_CONTROL[Mission.HARVEST].isNoThreat).toBe(true);
-    expect(MISSION_CONTROL[Mission.RETREAT].isNoThreat).toBe(true);
-    expect(MISSION_CONTROL[Mission.REPAIR].isNoThreat).toBe(true);
-    expect(MISSION_CONTROL[Mission.RETURN].isNoThreat).toBe(true);
+    // Only HARMLESS and DECONSTRUCTION (Selling) have NoThreat=yes in rules.ini
     expect(MISSION_CONTROL[Mission.HARMLESS].isNoThreat).toBe(true);
-    expect(MISSION_CONTROL[Mission.MISSILE].isNoThreat).toBe(true);
-    expect(MISSION_CONTROL[Mission.CONSTRUCTION].isNoThreat).toBe(true);
     expect(MISSION_CONTROL[Mission.DECONSTRUCTION].isNoThreat).toBe(true);
+    // All other missions use C++ default NoThreat=false
+    expect(MISSION_CONTROL[Mission.SLEEP].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.HARVEST].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.RETREAT].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.REPAIR].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.RETURN].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.MISSILE].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.CONSTRUCTION].isNoThreat).toBe(false);
 
     // Combat missions should NOT be no-threat
     expect(MISSION_CONTROL[Mission.GUARD].isNoThreat).toBe(false);
@@ -1114,16 +1116,17 @@ describe('Mission State Machine — C++ mission.cpp:213-321', () => {
    */
 
   it('RESCUE mission maps to Mission_Hunt (C++ mission.cpp:299-301)', () => {
-    // C++ mission.cpp:299-301:
-    //   case MISSION_HUNT:
-    //   case MISSION_RESCUE:
-    //     Timer = Mission_Hunt();
-    // Both missions call the same handler
+    // C++ mission.cpp:299-301: both use Mission_Hunt()
+    // But MissionControl flags differ: RESCUE has no INI overrides (uses defaults),
+    // HUNT has Recruitable=no, Retaliate=no in INI.
     expect(MISSION_CONTROL[Mission.RESCUE]).toBeDefined();
     expect(MISSION_CONTROL[Mission.HUNT]).toBeDefined();
-    // Both should have same combat properties
-    expect(MISSION_CONTROL[Mission.RESCUE].isNoThreat).toBe(MISSION_CONTROL[Mission.HUNT].isNoThreat);
-    expect(MISSION_CONTROL[Mission.RESCUE].isRetaliate).toBe(MISSION_CONTROL[Mission.HUNT].isRetaliate);
+    // Same NoThreat (both false by default)
+    expect(MISSION_CONTROL[Mission.RESCUE].isNoThreat).toBe(false);
+    expect(MISSION_CONTROL[Mission.HUNT].isNoThreat).toBe(false);
+    // Different retaliate: RESCUE=true (default), HUNT=false (INI override)
+    expect(MISSION_CONTROL[Mission.RESCUE].isRetaliate).toBe(true);
+    expect(MISSION_CONTROL[Mission.HUNT].isRetaliate).toBe(false);
   });
 
   it('STICKY mission maps to Mission_Guard (C++ mission.cpp:243-245)', () => {
@@ -1322,18 +1325,17 @@ describe('Cross-cutting: MissionControl flags vs C++ mission.cpp defaults', () =
    * These are then overridden per-mission by RULES.INI parsing (mission.cpp:556-573)
    */
 
-  it('AMBUSH: isNoThreat=true, isRetaliate=true (C++ RULES.INI defaults)', () => {
-    // C++ RULES.INI [Ambush] section sets these
+  it('AMBUSH: uses C++ defaults (no INI overrides — unused mission)', () => {
     const ctrl = MISSION_CONTROL[Mission.AMBUSH];
-    expect(ctrl.isNoThreat).toBe(true);    // hidden units are no-threat
-    expect(ctrl.isRetaliate).toBe(true);    // but they retaliate if found
-    expect(ctrl.isRecruitable).toBe(false); // can't recruit ambushers
+    expect(ctrl.isNoThreat).toBe(false);   // C++ default
+    expect(ctrl.isRetaliate).toBe(true);    // C++ default
+    expect(ctrl.isRecruitable).toBe(true);  // C++ default (no INI override)
   });
 
-  it('ATTACK: isScatter=false (C++ attacking units dont scatter)', () => {
-    // C++ RULES.INI [Attack] Scatter=no
+  it('ATTACK: uses C++ defaults (no INI overrides)', () => {
     const ctrl = MISSION_CONTROL[Mission.ATTACK];
-    expect(ctrl.isScatter).toBe(false);
+    expect(ctrl.isScatter).toBe(true);      // C++ default (no INI override)
+    expect(ctrl.isRetaliate).toBe(true);    // C++ default
   });
 
   it('GUARD: isRetaliate=true, isScatter=true (C++ default guard behavior)', () => {
@@ -1343,10 +1345,10 @@ describe('Cross-cutting: MissionControl flags vs C++ mission.cpp defaults', () =
     expect(ctrl.isRecruitable).toBe(true);
   });
 
-  it('MOVE: isRecruitable=false (C++ moving units cant be recruited into teams)', () => {
+  it('MOVE: uses C++ defaults (no INI overrides)', () => {
     const ctrl = MISSION_CONTROL[Mission.MOVE];
-    expect(ctrl.isRecruitable).toBe(false);
-    expect(ctrl.isRetaliate).toBe(true);  // moving units still retaliate
+    expect(ctrl.isRecruitable).toBe(true);   // C++ default (no INI override)
+    expect(ctrl.isRetaliate).toBe(true);     // C++ default
   });
 });
 

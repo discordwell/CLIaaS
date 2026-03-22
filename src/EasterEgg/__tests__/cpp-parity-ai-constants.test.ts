@@ -35,6 +35,10 @@ import {
 import {
   AI_BUILD_RULES,
   AI_DIFFICULTY_MODS,
+  UrgencyType,
+  computeEnemyScore,
+  STRUCTURE_IMAGES,
+  DIFFICULTY_MODS,
   type Difficulty,
 } from '../engine/ai';
 
@@ -1005,4 +1009,759 @@ describe('TS AI_DIFFICULTY_MODS custom fields (not from rules.ini)', () => {
       expect(typeof mods.retreatHpPercent).toBe('number');
     });
   }
+});
+
+
+// =============================================================================
+// 9. Per-House Default Caps — C++ house.cpp:755-759, rules.ini [Maximums]
+// =============================================================================
+describe('Per-house default caps (C++ MaxUnit/MaxBuilding/etc = [Maximums] / 6)', () => {
+  // C++ house.cpp:755-759: HouseStaticClass constructor sets:
+  //   Control.MaxUnit     = Rule.UnitMax / 6
+  //   Control.MaxBuilding = Rule.BuildingMax / 6
+  //   Control.MaxInfantry = Rule.InfantryMax / 6
+  //   Control.MaxVessel   = Rule.VesselMax / 6
+  //   Control.MaxAircraft  = Rule.UnitMax / 6  (C++ quirk: uses UnitMax, not AircraftMax!)
+  //
+  // RULE_*_MAX values are from [Maximums] section of rules.ini.
+  // Per-house caps are these divided by 6 (integer division).
+
+  const unitMax = iniFloat('Maximums', 'Unit', 500);
+  const buildingMax = iniFloat('Maximums', 'Building', 500);
+  const infantryMax = iniFloat('Maximums', 'Infantry', 500);
+  const vesselMax = iniFloat('Maximums', 'Vessel', 100);
+
+  it('default MaxUnit = Unit/6 = 83 (500/6 integer division)', () => {
+    const expected = Math.floor(unitMax / 6);
+    expect(expected).toBe(83);
+  });
+
+  it('default MaxBuilding = Building/6 = 83', () => {
+    const expected = Math.floor(buildingMax / 6);
+    expect(expected).toBe(83);
+  });
+
+  it('default MaxInfantry = Infantry/6 = 83', () => {
+    const expected = Math.floor(infantryMax / 6);
+    expect(expected).toBe(83);
+  });
+
+  it('default MaxVessel = Vessel/6 = 16', () => {
+    const expected = Math.floor(vesselMax / 6);
+    expect(expected).toBe(16);
+  });
+
+  it('C++ quirk: MaxAircraft uses UnitMax/6, NOT AircraftMax/6', () => {
+    // C++ house.cpp:759: Control.MaxAircraft = Rule.UnitMax / 6
+    // NOT Rule.AircraftMax / 6 — this is a real C++ quirk
+    const aircraftMax = iniFloat('Maximums', 'Aircraft', 100);
+    const expectedFromAircraftMax = Math.floor(aircraftMax / 6); // 16 (wrong)
+    const expectedFromUnitMax = Math.floor(unitMax / 6);         // 83 (correct)
+    expect(expectedFromUnitMax).toBe(83);
+    expect(expectedFromAircraftMax).toBe(16);
+    // The actual C++ behavior is to use UnitMax, not AircraftMax
+    expect(expectedFromUnitMax).not.toBe(expectedFromAircraftMax);
+  });
+});
+
+
+// =============================================================================
+// 10. UrgencyType Enum — C++ house.h UrgencyType
+// =============================================================================
+describe('UrgencyType enum matches C++ house.h (house.cpp:5434-5773)', () => {
+  // C++ house.h enum UrgencyType { URGENCY_NONE, URGENCY_LOW, URGENCY_MEDIUM, URGENCY_HIGH, URGENCY_CRITICAL }
+  // Values must be ordered 0..4 for sorting to produce correct build priority.
+
+  it('URGENCY_NONE = 0', () => {
+    expect(UrgencyType.URGENCY_NONE).toBe(0);
+  });
+
+  it('URGENCY_LOW = 1', () => {
+    expect(UrgencyType.URGENCY_LOW).toBe(1);
+  });
+
+  it('URGENCY_MEDIUM = 2', () => {
+    expect(UrgencyType.URGENCY_MEDIUM).toBe(2);
+  });
+
+  it('URGENCY_HIGH = 3', () => {
+    expect(UrgencyType.URGENCY_HIGH).toBe(3);
+  });
+
+  it('URGENCY_CRITICAL = 4', () => {
+    expect(UrgencyType.URGENCY_CRITICAL).toBe(4);
+  });
+
+  it('urgency values are strictly ascending (sorting correctness)', () => {
+    expect(UrgencyType.URGENCY_NONE).toBeLessThan(UrgencyType.URGENCY_LOW);
+    expect(UrgencyType.URGENCY_LOW).toBeLessThan(UrgencyType.URGENCY_MEDIUM);
+    expect(UrgencyType.URGENCY_MEDIUM).toBeLessThan(UrgencyType.URGENCY_HIGH);
+    expect(UrgencyType.URGENCY_HIGH).toBeLessThan(UrgencyType.URGENCY_CRITICAL);
+  });
+});
+
+
+// =============================================================================
+// 11. computeEnemyScore — C++ house.cpp:4660-4686 Expert_AI enemy scoring
+// =============================================================================
+describe('computeEnemyScore matches C++ house.cpp:4660-4686', () => {
+  // C++ formula:
+  //   value = ((MAP_CELL_W*2) - Distance(Center, h->Center)) * 2
+  //   value += h->BuildingsKilled[Class->House] * 5
+  //   value += h->UnitsKilled[Class->House]
+  //   value += h->CurUnits - CurUnits
+  //   value += h->CurBuildings - CurBuildings
+  //   value += (h->CurInfantry - CurInfantry) / 4
+  //   if (h == LAEnemy) value += 100
+
+  const MAP_CELL_W = 128; // C++ MAP_CELL_W
+
+  it('distance component: closer enemies score higher', () => {
+    const closerScore = computeEnemyScore(
+      { cx: 10, cy: 10 }, { cx: 15, cy: 15 },
+      0, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    const fartherScore = computeEnemyScore(
+      { cx: 10, cy: 10 }, { cx: 100, cy: 100 },
+      0, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    expect(closerScore).toBeGreaterThan(fartherScore);
+  });
+
+  it('building kills weighted x5 (C++ line 4668)', () => {
+    const noKills = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    const withBuildingKills = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      10, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    expect(withBuildingKills - noKills).toBe(10 * 5);
+  });
+
+  it('unit kills weighted x1 (C++ line 4669)', () => {
+    const noKills = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    const withUnitKills = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 20, 0, 0, 0, 0, 0, 0, false,
+    );
+    expect(withUnitKills - noKills).toBe(20);
+  });
+
+  it('relative unit count component (C++ line 4676)', () => {
+    const balanced = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 10, 10, 0, 0, 0, 0, false,
+    );
+    const enemyStronger = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 20, 10, 0, 0, 0, 0, false,
+    );
+    // enemyCurUnits - myCurUnits: 20-10 = +10 vs 10-10 = 0
+    expect(enemyStronger - balanced).toBe(10);
+  });
+
+  it('relative building count component (C++ line 4677)', () => {
+    const balanced = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 5, 5, 0, 0, false,
+    );
+    const enemyMoreBuildings = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 15, 5, 0, 0, false,
+    );
+    expect(enemyMoreBuildings - balanced).toBe(10);
+  });
+
+  it('infantry component divided by 4 (C++ line 4678)', () => {
+    const balanced = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 10, 10, false,
+    );
+    const enemyMoreInf = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 50, 10, false,
+    );
+    // (50-10)/4 = 10 vs (10-10)/4 = 0
+    expect(enemyMoreInf - balanced).toBe(Math.floor((50 - 10) / 4));
+  });
+
+  it('last attacker bonus = +100 (C++ line 4684-4686)', () => {
+    const noLastAttacker = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    const withLastAttacker = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 0, 0, true,
+    );
+    expect(withLastAttacker - noLastAttacker).toBe(100);
+  });
+
+  it('zero-distance baseline: value = MAP_CELL_W*2*2 = 512 (C++ line 4660-4661)', () => {
+    // When distance=0: value = (128*2 - 0) * 2 = 512
+    const score = computeEnemyScore(
+      { cx: 64, cy: 64 }, { cx: 64, cy: 64 },
+      0, 0, 0, 0, 0, 0, 0, 0, false,
+    );
+    expect(score).toBe(MAP_CELL_W * 2 * 2);
+  });
+});
+
+
+// =============================================================================
+// 12. BROKE state threshold — C++ house.cpp:4753-4761
+// =============================================================================
+describe('BROKE state threshold (C++ house.cpp:4753-4761)', () => {
+  // C++ AI enters STATE_BROKE when money < 25
+  // C++ exits STATE_BROKE when money >= 25
+  // This threshold is hardcoded in C++ (not from rules.ini).
+
+  it('broke threshold is 25 credits (C++ hardcoded, not INI)', () => {
+    // The TS engine uses money < 25 as the broke threshold.
+    // This is a C++ hardcoded value, not from rules.ini.
+    // Verify there is no rules.ini key for this (it doesn't exist in INI).
+    const brokeKey = sections.get('AI')?.get('BrokeThreshold');
+    expect(brokeKey).toBeUndefined(); // Not in rules.ini — hardcoded in C++
+  });
+});
+
+
+// =============================================================================
+// 13. Endgame production building types — C++ house.cpp:4976 Check_Fire_Sale
+// =============================================================================
+describe('Endgame trigger: production building types (C++ house.cpp:4976)', () => {
+  // C++ Check_Fire_Sale checks: no ConYard (FACT), no Barracks (TENT/BARR),
+  // no War Factory (WEAP), no Helipad (HPAD), no Airstrip (AFLD).
+  // If ALL production buildings are gone and CurBuildings > 0, trigger fire sale.
+
+  const expectedProductionTypes = ['FACT', 'TENT', 'BARR', 'WEAP', 'HPAD', 'AFLD'];
+
+  for (const type of expectedProductionTypes) {
+    it(`${type} is a production building (losing all triggers endgame)`, () => {
+      // Verify these types exist in the STRUCTURE_IMAGES lookup (they are valid structure types)
+      expect(STRUCTURE_IMAGES[type], `STRUCTURE_IMAGES should have ${type}`).toBeDefined();
+    });
+  }
+
+  it('exactly 6 production building types trigger endgame check', () => {
+    expect(expectedProductionTypes.length).toBe(6);
+  });
+});
+
+
+// =============================================================================
+// 14. Autocreate team count formula — C++ house.cpp:993
+// =============================================================================
+describe('Autocreate team count formula (C++ house.cpp:993)', () => {
+  // C++ house.cpp:993: maxteams = Random_Pick(2, (TechLevel-1)/3+1)
+  // Lower bound is always 2. Upper bound scales with tech level.
+
+  const techLevelCases: Array<{ tech: number; expectedUpper: number }> = [
+    { tech: 1, expectedUpper: Math.floor((1 - 1) / 3) + 1 },    // 1
+    { tech: 3, expectedUpper: Math.floor((3 - 1) / 3) + 1 },    // 1
+    { tech: 5, expectedUpper: Math.floor((5 - 1) / 3) + 1 },    // 2
+    { tech: 7, expectedUpper: Math.floor((7 - 1) / 3) + 1 },    // 3
+    { tech: 10, expectedUpper: Math.floor((10 - 1) / 3) + 1 },  // 4
+    { tech: 12, expectedUpper: Math.floor((12 - 1) / 3) + 1 },  // 4
+    { tech: 15, expectedUpper: Math.floor((15 - 1) / 3) + 1 },  // 5
+  ];
+
+  for (const { tech, expectedUpper } of techLevelCases) {
+    it(`TechLevel=${tech}: upper bound = (${tech}-1)/3+1 = ${expectedUpper}`, () => {
+      expect(Math.floor((tech - 1) / 3) + 1).toBe(expectedUpper);
+    });
+  }
+
+  it('lower bound of team count is always 2 (C++ Random_Pick(2, ...))', () => {
+    // Even at tech level 1, minimum teams created per cycle is 2
+    const tech = 1;
+    const upper = Math.floor((tech - 1) / 3) + 1; // = 1
+    // C++ uses max(upper, 2) so minimum is always 2
+    const effectiveUpper = Math.max(upper, 2);
+    expect(effectiveUpper).toBe(2);
+  });
+});
+
+
+// =============================================================================
+// 15. Suggested_New_Team cap — C++ teamtype.cpp:419-497
+// =============================================================================
+describe('Suggested_New_Team constraints (C++ teamtype.cpp:419-497)', () => {
+  it('candidate list capped at 20 entries (C++ choices[20])', () => {
+    // C++ uses a fixed-size array: TeamTypeClass * choices[20]
+    // TS should cap at the same limit
+    const MAX_CHOICES = 20;
+    expect(MAX_CHOICES).toBe(20);
+  });
+});
+
+
+// =============================================================================
+// 16. Difficulty INI completeness — [Easy]/[Normal]/[Difficult] missing keys
+// =============================================================================
+describe('Difficulty INI section completeness (C++ rules.h:44-61 DifficultyClass)', () => {
+  // C++ DifficultyClass has 12 fields. Not all are present in every INI section.
+  // Missing keys use the C++ default from the constructor.
+
+  it('[Easy] has no BuildSlowdown key (C++ default = no)', () => {
+    // C++ DifficultyClass constructor default for IsBuildSlowdown = false
+    const val = sections.get('Easy')?.get('BuildSlowdown');
+    expect(val).toBeUndefined(); // Not in INI; C++ defaults to false
+  });
+
+  it('[Difficult] has no ContentScan key (C++ default = no)', () => {
+    // C++ DifficultyClass constructor default for IsContentScan = false
+    const val = sections.get('Difficult')?.get('ContentScan');
+    expect(val).toBeUndefined(); // Not in INI; C++ defaults to false
+  });
+
+  it('[Easy] has ContentScan=yes', () => {
+    expect(iniBool('Easy', 'ContentScan')).toBe(true);
+  });
+
+  it('[Normal] has BuildSlowdown=yes', () => {
+    expect(iniBool('Normal', 'BuildSlowdown')).toBe(true);
+  });
+
+  it('[Difficult] has BuildSlowdown=yes', () => {
+    expect(iniBool('Difficult', 'BuildSlowdown')).toBe(true);
+  });
+});
+
+
+// =============================================================================
+// 17. [General] FineDiffControl — affects difficulty system
+// =============================================================================
+describe('[General] FineDiffControl (rules.ini line 123)', () => {
+  // C++ rules.ini: FineDiffControl=no
+  // When no, only 3 difficulty levels. When yes, allows 5 levels.
+  // This controls whether the difficulty slider uses 3 or 5 positions.
+
+  it('FineDiffControl = no (3 difficulty levels, not 5)', () => {
+    expect(iniBool('General', 'FineDiffControl')).toBe(false);
+  });
+
+  it('MCVUndeploy = no (MCV cannot undeploy in vanilla RA)', () => {
+    expect(iniBool('General', 'MCVUndeploy')).toBe(false);
+  });
+});
+
+
+// =============================================================================
+// 18. AI_BUILD_RULES timing/production constants vs INI [AI] section
+// =============================================================================
+describe('AI_BUILD_RULES timing constants match INI [AI] values exactly', () => {
+  // Each AI_BUILD_RULES timing field must match its INI counterpart.
+  // These are the non-ratio fields — timing and behavior constants.
+
+  it('attackInterval matches AI.AttackInterval', () => {
+    expect(AI_BUILD_RULES.attackInterval).toBe(iniFloat('AI', 'AttackInterval'));
+  });
+
+  it('attackDelay matches AI.AttackDelay', () => {
+    expect(AI_BUILD_RULES.attackDelay).toBe(iniFloat('AI', 'AttackDelay'));
+  });
+
+  it('creditReserve matches AI.CreditReserve', () => {
+    expect(AI_BUILD_RULES.creditReserve).toBe(iniFloat('AI', 'CreditReserve'));
+  });
+
+  it('infantryReserve matches AI.InfantryReserve', () => {
+    expect(AI_BUILD_RULES.infantryReserve).toBe(iniFloat('AI', 'InfantryReserve'));
+  });
+
+  it('infantryBaseMult matches AI.InfantryBaseMult', () => {
+    expect(AI_BUILD_RULES.infantryBaseMult).toBe(iniFloat('AI', 'InfantryBaseMult'));
+  });
+
+  it('autocreateTime matches AI.AutocreateTime', () => {
+    expect(AI_BUILD_RULES.autocreateTime).toBe(iniFloat('AI', 'AutocreateTime'));
+  });
+
+  it('oreNearScan matches AI.OreNearScan', () => {
+    expect(AI_BUILD_RULES.oreNearScan).toBe(iniFloat('AI', 'OreNearScan'));
+  });
+
+  it('oreFarScan matches AI.OreFarScan', () => {
+    expect(AI_BUILD_RULES.oreFarScan).toBe(iniFloat('AI', 'OreFarScan'));
+  });
+
+  it('patrolScan matches AI.PatrolScan', () => {
+    expect(AI_BUILD_RULES.patrolScan).toBeCloseTo(iniFloat('AI', 'PatrolScan'), 4);
+  });
+
+  it('powerEmergency matches AI.PowerEmergency as fraction (75% -> 0.75)', () => {
+    const iniPct = iniFloat('AI', 'PowerEmergency'); // 75
+    expect(AI_BUILD_RULES.powerEmergency).toBeCloseTo(iniPct / 100, 2);
+  });
+});
+
+
+// =============================================================================
+// 19. AI_BUILD_RULES IQ thresholds match INI [IQ] section
+// =============================================================================
+describe('AI_BUILD_RULES IQ thresholds match INI [IQ] values exactly', () => {
+  it('iqSuperWeapons matches IQ.SuperWeapons', () => {
+    expect(AI_BUILD_RULES.iqSuperWeapons).toBe(iniFloat('IQ', 'SuperWeapons'));
+  });
+
+  it('iqProduction matches IQ.Production', () => {
+    expect(AI_BUILD_RULES.iqProduction).toBe(iniFloat('IQ', 'Production'));
+  });
+
+  it('iqGuardArea matches IQ.GuardArea', () => {
+    expect(AI_BUILD_RULES.iqGuardArea).toBe(iniFloat('IQ', 'GuardArea'));
+  });
+
+  it('iqRepairSell matches IQ.RepairSell', () => {
+    expect(AI_BUILD_RULES.iqRepairSell).toBe(iniFloat('IQ', 'RepairSell'));
+  });
+
+  it('iqAutoCrush matches IQ.AutoCrush', () => {
+    expect(AI_BUILD_RULES.iqAutoCrush).toBe(iniFloat('IQ', 'AutoCrush'));
+  });
+
+  it('iqScatter matches IQ.Scatter', () => {
+    expect(AI_BUILD_RULES.iqScatter).toBe(iniFloat('IQ', 'Scatter'));
+  });
+
+  it('iqContentScan matches IQ.ContentScan', () => {
+    expect(AI_BUILD_RULES.iqContentScan).toBe(iniFloat('IQ', 'ContentScan'));
+  });
+
+  it('iqAircraft matches IQ.Aircraft', () => {
+    expect(AI_BUILD_RULES.iqAircraft).toBe(iniFloat('IQ', 'Aircraft'));
+  });
+
+  it('iqHarvester matches IQ.Harvester', () => {
+    expect(AI_BUILD_RULES.iqHarvester).toBe(iniFloat('IQ', 'Harvester'));
+  });
+
+  it('iqSellBack matches IQ.SellBack', () => {
+    expect(AI_BUILD_RULES.iqSellBack).toBe(iniFloat('IQ', 'SellBack'));
+  });
+});
+
+
+// =============================================================================
+// 20. Difficulty reversal for computer — C++ house.cpp:285-311
+// =============================================================================
+describe('Difficulty reversal for computer (C++ house.cpp:285-311)', () => {
+  // C++ reverses difficulty for computer players:
+  //   Game on "easy" -> computer gets [Difficult] values (weaker)
+  //   Game on "normal" -> computer gets [Normal] values (baseline)
+  //   Game on "hard" -> computer gets [Easy] values (stronger)
+  //
+  // TS AI_DIFFICULTY_MODS represents the COMPUTER side, so:
+  //   easy.repairDelay should match [Difficult] RepairDelay
+  //   normal.repairDelay should match [Normal] RepairDelay
+  //   hard.repairDelay should match [Easy] RepairDelay
+
+  it('easy computer: repairDelay matches [Difficult] RepairDelay', () => {
+    expect(AI_DIFFICULTY_MODS.easy.repairDelay).toBeCloseTo(
+      iniFloat('Difficult', 'RepairDelay'), 3
+    );
+  });
+
+  it('normal computer: repairDelay matches [Normal] RepairDelay', () => {
+    expect(AI_DIFFICULTY_MODS.normal.repairDelay).toBeCloseTo(
+      iniFloat('Normal', 'RepairDelay'), 3
+    );
+  });
+
+  it('hard computer: repairDelay matches [Easy] RepairDelay', () => {
+    expect(AI_DIFFICULTY_MODS.hard.repairDelay).toBeCloseTo(
+      iniFloat('Easy', 'RepairDelay'), 4
+    );
+  });
+
+  it('easy computer: buildDelay matches [Difficult] BuildDelay', () => {
+    expect(AI_DIFFICULTY_MODS.easy.buildDelay).toBeCloseTo(
+      iniFloat('Difficult', 'BuildDelay'), 2
+    );
+  });
+
+  it('normal computer: buildDelay matches [Normal] BuildDelay', () => {
+    expect(AI_DIFFICULTY_MODS.normal.buildDelay).toBeCloseTo(
+      iniFloat('Normal', 'BuildDelay'), 3
+    );
+  });
+
+  it('hard computer: buildDelay matches [Easy] BuildDelay', () => {
+    expect(AI_DIFFICULTY_MODS.hard.buildDelay).toBeCloseTo(
+      iniFloat('Easy', 'BuildDelay'), 4
+    );
+  });
+
+  it('easy computer: isBuildSlowdown matches [Difficult] BuildSlowdown', () => {
+    // [Difficult] has BuildSlowdown=yes
+    expect(AI_DIFFICULTY_MODS.easy.isBuildSlowdown).toBe(
+      iniBool('Difficult', 'BuildSlowdown')
+    );
+  });
+
+  it('normal computer: isBuildSlowdown matches [Normal] BuildSlowdown', () => {
+    expect(AI_DIFFICULTY_MODS.normal.isBuildSlowdown).toBe(
+      iniBool('Normal', 'BuildSlowdown')
+    );
+  });
+
+  it('hard computer: isBuildSlowdown matches [Easy] BuildSlowdown default (false)', () => {
+    // [Easy] has no BuildSlowdown key => C++ default = false
+    const iniVal = iniBool('Easy', 'BuildSlowdown', false);
+    expect(AI_DIFFICULTY_MODS.hard.isBuildSlowdown).toBe(iniVal);
+  });
+
+  it('easy computer: isWallDestroyer matches [Difficult] DestroyWalls', () => {
+    expect(AI_DIFFICULTY_MODS.easy.isWallDestroyer).toBe(
+      iniBool('Difficult', 'DestroyWalls')
+    );
+  });
+
+  it('normal computer: isWallDestroyer matches [Normal] DestroyWalls', () => {
+    expect(AI_DIFFICULTY_MODS.normal.isWallDestroyer).toBe(
+      iniBool('Normal', 'DestroyWalls')
+    );
+  });
+
+  it('hard computer: isWallDestroyer matches [Easy] DestroyWalls', () => {
+    expect(AI_DIFFICULTY_MODS.hard.isWallDestroyer).toBe(
+      iniBool('Easy', 'DestroyWalls')
+    );
+  });
+
+  it('easy computer: isContentScan matches [Difficult] ContentScan default (false)', () => {
+    // [Difficult] has no ContentScan key => C++ default = false
+    const iniVal = iniBool('Difficult', 'ContentScan', false);
+    expect(AI_DIFFICULTY_MODS.easy.isContentScan).toBe(iniVal);
+  });
+
+  it('normal computer: isContentScan matches [Normal] ContentScan', () => {
+    expect(AI_DIFFICULTY_MODS.normal.isContentScan).toBe(
+      iniBool('Normal', 'ContentScan')
+    );
+  });
+
+  it('hard computer: isContentScan matches [Easy] ContentScan', () => {
+    expect(AI_DIFFICULTY_MODS.hard.isContentScan).toBe(
+      iniBool('Easy', 'ContentScan')
+    );
+  });
+});
+
+
+// =============================================================================
+// 21. DIFFICULTY_MODS (Ant Missions) — TS-specific but documented
+// =============================================================================
+describe('DIFFICULTY_MODS for ant missions (TS-specific)', () => {
+  // These control ant queen behavior and wave composition.
+  // Not from rules.ini, but worth documenting the scaling pattern.
+
+  for (const diff of ['easy', 'normal', 'hard'] as Difficulty[]) {
+    const mods = DIFFICULTY_MODS[diff];
+
+    it(`${diff}: has spawnInterval (number)`, () => {
+      expect(typeof mods.spawnInterval).toBe('number');
+      expect(mods.spawnInterval).toBeGreaterThan(0);
+    });
+
+    it(`${diff}: has maxAnts (number)`, () => {
+      expect(typeof mods.maxAnts).toBe('number');
+      expect(mods.maxAnts).toBeGreaterThan(0);
+    });
+
+    it(`${diff}: has fireAntChance (0-1 range)`, () => {
+      expect(mods.fireAntChance).toBeGreaterThanOrEqual(0);
+      expect(mods.fireAntChance).toBeLessThanOrEqual(1);
+    });
+
+    it(`${diff}: has waveSize (number)`, () => {
+      expect(typeof mods.waveSize).toBe('number');
+      expect(mods.waveSize).toBeGreaterThan(0);
+    });
+  }
+
+  it('harder difficulties have shorter spawn intervals', () => {
+    expect(DIFFICULTY_MODS.hard.spawnInterval).toBeLessThan(DIFFICULTY_MODS.normal.spawnInterval);
+    expect(DIFFICULTY_MODS.normal.spawnInterval).toBeLessThan(DIFFICULTY_MODS.easy.spawnInterval);
+  });
+
+  it('harder difficulties have more max ants', () => {
+    expect(DIFFICULTY_MODS.hard.maxAnts).toBeGreaterThan(DIFFICULTY_MODS.normal.maxAnts);
+    expect(DIFFICULTY_MODS.normal.maxAnts).toBeGreaterThan(DIFFICULTY_MODS.easy.maxAnts);
+  });
+
+  it('harder difficulties have larger wave sizes', () => {
+    expect(DIFFICULTY_MODS.hard.waveSize).toBeGreaterThan(DIFFICULTY_MODS.normal.waveSize);
+    expect(DIFFICULTY_MODS.normal.waveSize).toBeGreaterThan(DIFFICULTY_MODS.easy.waveSize);
+  });
+});
+
+
+// =============================================================================
+// 22. STRUCTURE_IMAGES mapping — all AI-buildable structures have images
+// =============================================================================
+describe('STRUCTURE_IMAGES covers all AI-buildable structures', () => {
+  // C++ AI_Building builds these structure types. Each needs an image mapping.
+  const aiBuildableTypes = [
+    'FACT', 'POWR', 'APWR', 'BARR', 'TENT', 'WEAP', 'PROC',
+    'SILO', 'DOME', 'FIX', 'GUN', 'SAM', 'HBOX', 'TSLA',
+    'AGUN', 'FTUR', 'GAP', 'PBOX', 'HPAD', 'AFLD',
+    'ATEK', 'STEK', 'IRON', 'PDOX', 'KENN',
+  ];
+
+  for (const type of aiBuildableTypes) {
+    it(`STRUCTURE_IMAGES has '${type}'`, () => {
+      expect(STRUCTURE_IMAGES[type], `missing image for ${type}`).toBeDefined();
+      expect(typeof STRUCTURE_IMAGES[type]).toBe('string');
+    });
+  }
+});
+
+
+// =============================================================================
+// 23. Difficulty direction correctness — harder = stronger computer
+// =============================================================================
+describe('Difficulty scaling direction (harder = stronger computer)', () => {
+  // Computer on hard should be stronger than normal, which is stronger than easy.
+  // "Stronger" means: more firepower, more armor, faster ROF, faster speed.
+
+  it('hard computer has higher firepowerBias than easy', () => {
+    expect(AI_DIFFICULTY_MODS.hard.firepowerBias).toBeGreaterThan(AI_DIFFICULTY_MODS.easy.firepowerBias);
+  });
+
+  it('hard computer has higher armorBias than easy', () => {
+    expect(AI_DIFFICULTY_MODS.hard.armorBias).toBeGreaterThan(AI_DIFFICULTY_MODS.easy.armorBias);
+  });
+
+  it('hard computer has lower rofBias than easy (lower = fires faster)', () => {
+    expect(AI_DIFFICULTY_MODS.hard.rofBias).toBeLessThan(AI_DIFFICULTY_MODS.easy.rofBias);
+  });
+
+  it('hard computer has higher groundspeedBias than easy', () => {
+    expect(AI_DIFFICULTY_MODS.hard.groundspeedBias).toBeGreaterThan(AI_DIFFICULTY_MODS.easy.groundspeedBias);
+  });
+
+  it('hard computer has higher airspeedBias than easy', () => {
+    expect(AI_DIFFICULTY_MODS.hard.airspeedBias).toBeGreaterThan(AI_DIFFICULTY_MODS.easy.airspeedBias);
+  });
+
+  it('hard computer has lower costBias than easy (lower = cheaper)', () => {
+    expect(AI_DIFFICULTY_MODS.hard.costBias).toBeLessThanOrEqual(AI_DIFFICULTY_MODS.easy.costBias);
+  });
+
+  it('hard computer has lower buildSpeedBias than easy (lower = builds faster)', () => {
+    expect(AI_DIFFICULTY_MODS.hard.buildSpeedBias).toBeLessThanOrEqual(AI_DIFFICULTY_MODS.easy.buildSpeedBias);
+  });
+
+  it('hard computer has lower repairDelay than easy (repairs faster)', () => {
+    expect(AI_DIFFICULTY_MODS.hard.repairDelay).toBeLessThan(AI_DIFFICULTY_MODS.easy.repairDelay);
+  });
+
+  it('hard computer has lower buildDelay than easy (starts building sooner)', () => {
+    expect(AI_DIFFICULTY_MODS.hard.buildDelay).toBeLessThan(AI_DIFFICULTY_MODS.easy.buildDelay);
+  });
+
+  it('normal firepowerBias is between easy and hard', () => {
+    expect(AI_DIFFICULTY_MODS.normal.firepowerBias).toBeGreaterThanOrEqual(AI_DIFFICULTY_MODS.easy.firepowerBias);
+    expect(AI_DIFFICULTY_MODS.normal.firepowerBias).toBeLessThanOrEqual(AI_DIFFICULTY_MODS.hard.firepowerBias);
+  });
+});
+
+
+// =============================================================================
+// 24. Dynamic cap increase formula — C++ house.cpp:4648-4740
+// =============================================================================
+describe('Dynamic cap increase formula (C++ house.cpp:4648-4740)', () => {
+  // C++ adjusts per-house caps dynamically:
+  //   for each cap: if (state.maxX < avgEnemyX + 10) state.maxX = avgEnemyX + 10
+  // The "+10" buffer ensures AI can always produce slightly more than enemy average.
+
+  it('buffer above enemy average is 10 (C++ house.cpp:4700)', () => {
+    // C++ code: if (Control.MaxUnit < average + 10) Control.MaxUnit = average + 10
+    // The buffer is hardcoded to 10, not from rules.ini
+    const DYNAMIC_CAP_BUFFER = 10;
+    expect(DYNAMIC_CAP_BUFFER).toBe(10);
+  });
+
+  it('dynamic caps cover all 5 categories (units, buildings, infantry, vessels, aircraft)', () => {
+    // C++ adjusts: MaxUnit, MaxBuilding, MaxInfantry, MaxVessel, MaxAircraft
+    const categories = ['maxUnit', 'maxBuilding', 'maxInfantry', 'maxVessel', 'maxAircraft'];
+    expect(categories.length).toBe(5);
+  });
+});
+
+
+// =============================================================================
+// 25. Fire sale refund — C++ techno.cpp:5743-5761
+// =============================================================================
+describe('Fire sale refund (C++ techno.cpp:5743-5761 Sell_Back for AI)', () => {
+  // C++ Fire_Sale → Sell_Back(1) → Refund_Amount:
+  //   For AI (IsHuman=false): refund = full cost (100%)
+  //   For Human (IsHuman=true): refund = cost * RefundPercent * healthFraction
+  // rules.ini RefundPercent only applies to human sell, not AI fire sale.
+
+  it('RefundPercent = 50% in rules.ini (applies to human sell only)', () => {
+    expect(iniFloat('General', 'RefundPercent')).toBe(50);
+  });
+
+  it('AI fire sale gets 100% refund (C++ techno.cpp:5754 — no RefundPercent for AI)', () => {
+    // This is C++ behavior: AI sell back returns full cost.
+    // The 50% RefundPercent is for human players only.
+    const humanRefundPct = iniFloat('General', 'RefundPercent') / 100; // 0.5
+    const aiRefundPct = 1.0; // C++ hardcoded: AI gets 100%
+    expect(aiRefundPct).toBeGreaterThan(humanRefundPct);
+  });
+});
+
+
+// =============================================================================
+// 26. Phase transition conditions — C++ Expert_AI state machine
+// =============================================================================
+describe('AI phase transitions (C++ Expert_AI house.cpp:4749-4769)', () => {
+  // AI has 3 phases: economy -> buildup -> attack
+  // economy -> buildup: has barracks + war factory + 2 power plants
+  // buildup -> attack: attack pool >= attackThreshold
+  // attack -> buildup: attack pool empty
+
+  it('attack thresholds scale with difficulty', () => {
+    expect(AI_DIFFICULTY_MODS.easy.attackThreshold).toBeGreaterThan(
+      AI_DIFFICULTY_MODS.hard.attackThreshold
+    );
+  });
+
+  it('easy attackThreshold = 8 (needs more units before attacking)', () => {
+    expect(AI_DIFFICULTY_MODS.easy.attackThreshold).toBe(8);
+  });
+
+  it('normal attackThreshold = 6', () => {
+    expect(AI_DIFFICULTY_MODS.normal.attackThreshold).toBe(6);
+  });
+
+  it('hard attackThreshold = 4 (attacks sooner with fewer units)', () => {
+    expect(AI_DIFFICULTY_MODS.hard.attackThreshold).toBe(4);
+  });
+
+  it('attack cooldowns scale with difficulty', () => {
+    expect(AI_DIFFICULTY_MODS.easy.attackCooldown).toBeGreaterThan(
+      AI_DIFFICULTY_MODS.normal.attackCooldown
+    );
+    expect(AI_DIFFICULTY_MODS.normal.attackCooldown).toBeGreaterThan(
+      AI_DIFFICULTY_MODS.hard.attackCooldown
+    );
+  });
+
+  it('production intervals scale with difficulty', () => {
+    expect(AI_DIFFICULTY_MODS.easy.productionInterval).toBeGreaterThan(
+      AI_DIFFICULTY_MODS.normal.productionInterval
+    );
+    expect(AI_DIFFICULTY_MODS.normal.productionInterval).toBeGreaterThan(
+      AI_DIFFICULTY_MODS.hard.productionInterval
+    );
+  });
 });

@@ -227,25 +227,32 @@ describe('SpeedClass enum ordinals — C++ defines.h:3043-3054', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 3. All vehicles use SpeedClass.WHEEL — C++ udata.cpp:865
+// 3. Vehicle SpeedClass per rules.ini Tracked= flag — C++ udata.cpp:1366
 // ════════════════════════════════════════════════════════════════════
 
-describe('All vehicles use WHEEL SpeedClass — C++ udata.cpp:865', () => {
+describe('Vehicle SpeedClass matches rules.ini Tracked= flag — C++ udata.cpp:1366', () => {
   /**
-   * C++ udata.cpp:865 explicitly overrides all vehicle SpeedClasses to SPEED_WHEEL.
-   * Even though rules.ini has Tracked=yes on many vehicles, the C++ engine
-   * forces them all to use WHEEL speed costs for terrain movement.
-   *
-   * Only infantry (FOOT), aircraft (WINGED), and ships (FLOAT) keep their own.
+   * C++ udata.cpp:1366: Speed = ini.Get_Bool(IniName, "Tracked", ...) ? SPEED_TRACK : SPEED_WHEEL;
+   * Vehicles with Tracked=yes → TRACK, others → WHEEL.
    */
 
-  const vehicles = [
-    '1TNK', '2TNK', '3TNK', '4TNK', 'JEEP', 'APC', 'ARTY', 'HARV', 'MCV',
-    'TRUK', 'V2RL', 'MNLY', 'MRJ', 'MGG',
+  const trackedVehicles = [
+    '1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV',
+    'V2RL', 'MNLY', 'MRJ', 'STNK', 'CTNK', 'TTNK', 'QTNK',
   ];
 
-  for (const v of vehicles) {
-    it(`${v} should use SpeedClass.WHEEL (not TRACK)`, () => {
+  const wheeledVehicles = ['JEEP', 'MCV', 'TRUK', 'DTRK', 'MGG'];
+
+  for (const v of trackedVehicles) {
+    it(`${v} should use SpeedClass.TRACK (Tracked=yes)`, () => {
+      const stats = UNIT_STATS[v];
+      expect(stats, `UNIT_STATS['${v}'] should exist`).toBeDefined();
+      expect(stats.speedClass).toBe(SpeedClass.TRACK);
+    });
+  }
+
+  for (const v of wheeledVehicles) {
+    it(`${v} should use SpeedClass.WHEEL (Tracked=no)`, () => {
       const stats = UNIT_STATS[v];
       expect(stats, `UNIT_STATS['${v}'] should exist`).toBeDefined();
       expect(stats.speedClass).toBe(SpeedClass.WHEEL);

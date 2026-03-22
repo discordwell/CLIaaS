@@ -6412,8 +6412,9 @@ export class Game {
     // Power bar bounce animation (C++ PowerClass::AI — runs each tick)
     this.renderer.updatePowerAnimation();
     // Radar requires DOME and sufficient power
-    const lowPwr = this.powerConsumed > this.powerProduced && this.powerProduced > 0;
-    this.renderer.hasRadar = this.hasBuilding('DOME') && !lowPwr;
+    // C++ house.cpp:4160-4170: Power_Fraction() returns 0 when powerProduced=0 and drain>0
+    const hasPower = this.powerConsumed === 0 || this.powerProduced >= this.powerConsumed;
+    this.renderer.hasRadar = this.hasBuilding('DOME') && hasPower;
     // U6: Pass fullscreen radar state to renderer
     this.renderer.isRadarFullscreen = this.isRadarFullscreen;
     this.renderer.crates = this.crates;

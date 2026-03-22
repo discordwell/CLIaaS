@@ -21,7 +21,8 @@ const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 /** Calculate power multiplier for production (mirrors tickProduction) */
 function calcPowerMult(powerProduced: number, powerConsumed: number): number {
-  if (powerConsumed > powerProduced && powerProduced > 0) {
+  if (powerConsumed > powerProduced) {
+    if (powerProduced === 0) return 0.5; // C++ Power_Fraction()=0 → clamp to 0.5
     const powerFraction = powerProduced / powerConsumed;
     return Math.max(0.5, powerFraction);
   }
@@ -83,9 +84,9 @@ describe('PR1: Production power penalty — continuous sliding scale', () => {
     expect(calcPowerMult(10, 100)).toBe(0.5);
   });
 
-  it('zero power produced: no penalty (avoids division by zero)', () => {
-    // powerProduced = 0 means no power system active, not low power
-    expect(calcPowerMult(0, 100)).toBe(1.0);
+  it('zero power produced with drain: clamped to 0.5 (C++ Power_Fraction()=0)', () => {
+    // C++ house.cpp:4168: Power=0, Drain>0 → fraction=0 → low power, clamped to 0.5
+    expect(calcPowerMult(0, 100)).toBe(0.5);
   });
 
   it('zero power consumed: normal speed', () => {

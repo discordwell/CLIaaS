@@ -4,7 +4,7 @@ describe('Low Power Production Penalty (Gap #10)', () => {
   it('normal power: full production rate', () => {
     const powerProduced = 100;
     const powerConsumed = 50;
-    const lowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const lowPower = powerConsumed > powerProduced;
     const rate = lowPower ? 0.25 : 1.0;
     expect(rate).toBe(1.0);
   });
@@ -12,23 +12,23 @@ describe('Low Power Production Penalty (Gap #10)', () => {
   it('low power: 25% production rate', () => {
     const powerProduced = 50;
     const powerConsumed = 100;
-    const lowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const lowPower = powerConsumed > powerProduced;
     const rate = lowPower ? 0.25 : 1.0;
     expect(rate).toBe(0.25);
   });
 
-  it('zero power produced: no penalty (avoids edge case)', () => {
+  it('zero power produced with consumption: IS low power', () => {
     const powerProduced = 0;
     const powerConsumed = 100;
-    const lowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const lowPower = powerConsumed > powerProduced;
     const rate = lowPower ? 0.25 : 1.0;
-    expect(rate).toBe(1.0); // powerProduced = 0 means no power system, not low power
+    expect(rate).toBe(0.25); // C++ Power_Fraction()=0 < 1 → low power
   });
 
   it('equal power: no penalty', () => {
     const powerProduced = 100;
     const powerConsumed = 100;
-    const lowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const lowPower = powerConsumed > powerProduced;
     const rate = lowPower ? 0.25 : 1.0;
     expect(rate).toBe(1.0); // equal is not "low"
   });

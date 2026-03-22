@@ -132,7 +132,7 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
   //   return 0;
   //
   // TS combat.ts:1222:
-  //   const isLowPower = ctx.powerConsumed > ctx.powerProduced && ctx.powerProduced > 0;
+  //   const isLowPower = ctx.powerConsumed > ctx.powerProduced;
 
   it('full power (Power >= Drain): C++ returns 1, TS isLowPower=false', () => {
     // Power=200, Drain=100 → C++ fraction=1 → not low power
@@ -149,7 +149,7 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([s], [enemy], { powerProduced: 0, powerConsumed: 0 });
     updateStructureCombat(ctx);
-    // TS: powerConsumed(0) > powerProduced(0) is false, so isLowPower=false → fires
+    // TS: powerConsumed(0) > powerProduced(0) is false, so isLowPower=false → fires (correct)
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -165,16 +165,15 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
 
   it('zero power with drain (Power == 0, Drain > 0): C++ returns 0', () => {
     // Power=0, Drain=100 → C++ fraction=0 < 1 → low power
-    // TS: powerConsumed(100) > powerProduced(0) is true, but powerProduced > 0 is false
-    // So TS isLowPower=false — this diverges from C++ when Power=0 and Drain>0!
+    // TS: powerConsumed(100) > powerProduced(0) → isLowPower=true → no fire
+    // Now matches C++ parity.
     const s = makeStructure('TSLA', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([s], [enemy], { powerProduced: 0, powerConsumed: 100 });
     updateStructureCombat(ctx);
     // C++ says: Power_Fraction()=0 < 1 → FIRE_BUSY → no fire
-    // TS says: powerProduced(0) > 0 is false → isLowPower=false → fires
-    // PARITY GAP: TS lets powered structures fire when powerProduced=0 but powerConsumed>0
+    // TS says: powerConsumed(100) > powerProduced(0) → isLowPower=true → no fire
     expect(enemy.hp).toBe(hpBefore); // C++ behavior: should NOT fire
   });
 });

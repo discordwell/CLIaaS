@@ -339,10 +339,9 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
       expect(EXPLOSION_FRAMES['flak']).toBeGreaterThan(0);
     });
 
-    it('flak has 8 frames (C++ FLAK.SHP, dimension=8)', () => {
-      // C++ adata.cpp:1876: Maximum dimension = 8
-      // EXPLOSION_FRAMES['flak'] = 8 (types.ts:520)
-      expect(EXPLOSION_FRAMES['flak']).toBe(8);
+    it('flak has 7 frames (manifest.json: 7 frames)', () => {
+      // manifest.json: 7 frames
+      expect(EXPLOSION_FRAMES['flak']).toBe(7);
     });
 
     it.each(CPP_WATER_LIST)(
@@ -360,10 +359,10 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
       expect(new Set(counts).size, 'all water-exp sprites should have same frame count').toBe(1);
     });
 
-    it('water explosion frame count is 14', () => {
-      // types.ts:523: 'water-exp1': 14, 'water-exp2': 14, 'water-exp3': 14
+    it('water explosion frame count is 10', () => {
+      // manifest.json: 10 frames each
       for (const sprite of CPP_WATER_LIST) {
-        expect(EXPLOSION_FRAMES[sprite]).toBe(14);
+        expect(EXPLOSION_FRAMES[sprite]).toBe(10);
       }
     });
 

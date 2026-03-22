@@ -526,13 +526,13 @@ export const WARHEAD_PROPS: Record<WarheadType, WarheadProps> = {
 export const EXPLOSION_FRAMES: Record<string, number> = {
   piff: 4, piffpiff: 8, fball1: 18,
   'veh-hit1': 17, 'veh-hit2': 22, 'veh-hit3': 14,
-  frag1: 15,  // C++ FRAG1.SHP — medium fragment explosion (adata.cpp:594, Stages=-1)
+  frag1: 14,  // manifest.json: 14 frames
   napalm1: 14, napalm2: 14, napalm3: 14,
   atomsfx: 27, 'art-exp1': 22,
-  flak: 8,    // C++ FLAK.SHP — anti-air burst (adata.cpp:1873, Stages=-1)
-  'h2o_exp1': 14, 'h2o_exp2': 14, 'h2o_exp3': 14,
+  flak: 7,    // manifest.json: 7 frames
+  'h2o_exp1': 10, 'h2o_exp2': 10, 'h2o_exp3': 10,  // manifest.json: 10 frames each
   // Aliases: combatAnim() returns water-exp* names (matching C++ WATER_LIST naming)
-  'water-exp1': 14, 'water-exp2': 14, 'water-exp3': 14,
+  'water-exp1': 10, 'water-exp2': 10, 'water-exp3': 10,
 };
 
 export interface WeaponStats {
@@ -597,15 +597,15 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=8
   ANT2: { type: UnitType.ANT2, name: 'Fire Ant', image: 'ant2', strength: 75, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 6, isInfantry: false, primaryWeapon: 'FireballLauncher', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=8
   ANT3: { type: UnitType.ANT3, name: 'Scout Ant', image: 'ant3', strength: 85, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 3, rot: 9, isInfantry: false, primaryWeapon: 'TeslaZap', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=7
-  // Vehicles (C++ udata.cpp MPH values) — crusher=true for heavy tracked vehicles per C++ Crusher flag
-  '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: '75mm', scanDelay: 12, crusher: true, points: 30 },
-  '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '90mm', scanDelay: 12, crusher: true, points: 40 },
-  '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 400, armor: 'heavy', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '105mm', secondaryWeapon: '105mm', scanDelay: 12, crusher: true, points: 50 },
-  '4TNK': { type: UnitType.V_4TNK, name: 'Mammoth Tank', image: '4tnk', strength: 600, armor: 'heavy', speed: 4, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: '120mm', secondaryWeapon: 'MammothTusk', scanDelay: 12, crusher: true, points: 60 },
+  // Vehicles — speedClass from rules.ini Tracked=yes → TRACK, absent → WHEEL
+  '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 9, speedClass: SpeedClass.TRACK, sight: 4, rot: 5, isInfantry: false, primaryWeapon: '75mm', scanDelay: 12, crusher: true, points: 30 },
+  '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 8, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '90mm', scanDelay: 12, crusher: true, points: 40 },
+  '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 400, armor: 'heavy', speed: 7, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '105mm', secondaryWeapon: '105mm', scanDelay: 12, crusher: true, points: 50 },
+  '4TNK': { type: UnitType.V_4TNK, name: 'Mammoth Tank', image: '4tnk', strength: 600, armor: 'heavy', speed: 4, speedClass: SpeedClass.TRACK, sight: 6, rot: 5, isInfantry: false, primaryWeapon: '120mm', secondaryWeapon: 'MammothTusk', scanDelay: 12, crusher: true, points: 60 },
   JEEP:   { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 6, rot: 10, isInfantry: false, primaryWeapon: 'M60mg', scanDelay: 10, points: 20 },
-  APC:    { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'M60mg', passengers: 5, crusher: true, points: 25 },
-  ARTY:   { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 5, rot: 2, isInfantry: false, primaryWeapon: '155mm', noMovingFire: true, scanDelay: 20, crusher: true, points: 35 },
-  HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 55 },
+  APC:    { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'M60mg', passengers: 5, crusher: true, points: 25 },
+  ARTY:   { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 6, speedClass: SpeedClass.TRACK, sight: 5, rot: 2, isInfantry: false, primaryWeapon: '155mm', noMovingFire: true, scanDelay: 20, crusher: true, points: 35 },
+  HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, speedClass: SpeedClass.TRACK, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 55 },
   MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, points: 60 },
   TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 1, points: 5 },
   // Infantry (C++ idata.cpp MPH values) — all infantry are crushable
@@ -636,13 +636,13 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: false, noMovingFire: true, owner: 'soviet', cost: 900, points: 15 },
   MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true, owner: 'allied', cost: 950, points: 15 },
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
-  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true, points: 25 },
-  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true, points: 25 },
-  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true, noMovingFire: true, points: 30 },
-  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.WHEEL, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 60 },
-  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge', points: 5 },
-  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30 },
-  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, owner: 'allied', cost: 600, points: 40 },
+  STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true, points: 25 },  // aftrmath.ini Tracked=yes
+  CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true, points: 25 },  // aftrmath.ini Tracked=yes
+  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true, noMovingFire: true, points: 30 },  // aftrmath.ini Tracked=yes
+  QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.TRACK, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 60 },  // aftrmath.ini Tracked=yes
+  DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge', points: 5 },  // no Tracked= in aftrmath.ini
+  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30 },  // rules.ini Tracked=yes
+  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, owner: 'allied', cost: 600, points: 40 },  // no Tracked=
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', points: 35 },
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true, points: 25 },
@@ -664,8 +664,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25 },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 10 },  // NO Fraidycat=yes in rules.ini
   // Expansion vehicles (V2 Rocket, Minelayer)
-  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true, points: 40 },
-  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.WHEEL, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5, crusher: true, points: 50 },
+  V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true, points: 40 },  // rules.ini Tracked=yes
+  MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5, crusher: true, points: 50 },  // rules.ini Tracked=yes
 };
 
 // Weapon stats from RULES.INI — real RA values
@@ -1007,31 +1007,33 @@ export interface MissionControl {
   isScatter: boolean;      // unit scatters when attacked
 }
 
+// C++ mission.cpp:532-543 defaults: NoThreat=false, Zombie=false, Recruitable=true, Paralyzed=false, Retaliate=true, Scatter=true
+// rules.ini overrides only explicitly set keys. Read_INI (mission.cpp:556-573) uses simple Get_Bool with default.
 export const MISSION_CONTROL: Record<string, MissionControl> = {
-  [Mission.GUARD]:          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },
-  [Mission.AREA_GUARD]:     { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },
-  [Mission.MOVE]:           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
-  [Mission.ATTACK]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
-  [Mission.HUNT]:           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
-  [Mission.SLEEP]:          { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
-  [Mission.DIE]:            { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
-  [Mission.ENTER]:          { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.CAPTURE]:        { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.HARVEST]:        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.UNLOAD]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
-  [Mission.RETREAT]:        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.AMBUSH]:         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: true,  isScatter: false },
-  [Mission.STICKY]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
-  [Mission.REPAIR]:         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.STOP]:           { isNoThreat: false, isZombie: true,  isRecruitable: true,  isParalyzed: true,  isRetaliate: false, isScatter: false },
-  [Mission.HARMLESS]:       { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  },
-  [Mission.QMOVE]:          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },
-  [Mission.RETURN]:         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.RESCUE]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false },
-  [Mission.MISSILE]:        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
-  [Mission.SABOTAGE]:       { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },
-  [Mission.CONSTRUCTION]:   { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
-  [Mission.DECONSTRUCTION]: { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false },
+  [Mission.GUARD]:          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.AREA_GUARD]:     { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: Recruitable=no
+  [Mission.MOVE]:           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.ATTACK]:         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.HUNT]:           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  },  // INI: Recruitable=no, Retaliate=no
+  [Mission.SLEEP]:          { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },  // INI: Zombie=yes, Recruitable=no, Retaliate=no, Scatter=no
+  [Mission.DIE]:            { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // No INI section — all C++ defaults
+  [Mission.ENTER]:          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  },  // INI: Retaliate=no, Recruitable=no
+  [Mission.CAPTURE]:        { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },  // INI: Retaliate=no, Recruitable=no, Scatter=no
+  [Mission.HARVEST]:        { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },  // INI: Retaliate=no, Recruitable=no, Scatter=no
+  [Mission.UNLOAD]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },  // INI: Recruitable=no, Retaliate=no, Scatter=no
+  [Mission.RETREAT]:        { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  },  // INI: Recruitable=no, Retaliate=no
+  [Mission.AMBUSH]:         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags — unused mission)
+  [Mission.STICKY]:         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: true,  isRetaliate: true,  isScatter: false },  // INI: Recruitable=no, Paralyzed=yes, Scatter=no
+  [Mission.REPAIR]:         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.STOP]:           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.HARMLESS]:       { isNoThreat: true,  isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  },  // INI: NoThreat=yes, Recruitable=no, Retaliate=no
+  [Mission.QMOVE]:          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.RETURN]:         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.RESCUE]:         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.MISSILE]:        { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
+  [Mission.SABOTAGE]:       { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: Recruitable=no
+  [Mission.CONSTRUCTION]:   { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },  // INI: Recruitable=no, Retaliate=no, Scatter=no
+  [Mission.DECONSTRUCTION]: { isNoThreat: true,  isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false },  // INI [Selling]: NoThreat=yes, Recruitable=no, Retaliate=no, Scatter=no
 };
 
 // === Unit Stance (affects guard/pursuit behavior) ===

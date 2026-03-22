@@ -179,7 +179,7 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
     it('radar requires DOME building AND sufficient power', () => {
       // C++ house.cpp:1302: if (IsGPSActive || (ActiveBScan & STRUCTF_RADAR))
       // house.cpp:1303: if (IsGPSActive || Power_Fraction() >= 1)
-      // TS equivalent: hasRadar = hasBuilding('DOME') && !lowPwr
+      // TS equivalent: hasRadar = hasBuilding('DOME') && hasPower
 
       // No DOME → no radar
       expect(simulateRadar(false, 100, 50)).toBe(false);
@@ -187,21 +187,26 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       expect(simulateRadar(true, 100, 150)).toBe(false);
       // DOME with sufficient power → radar
       expect(simulateRadar(true, 100, 50)).toBe(true);
-      // DOME with equal power → radar active (consumed > produced is false when equal)
+      // DOME with equal power → radar active (produced >= consumed)
       expect(simulateRadar(true, 100, 100)).toBe(true);
     });
 
-    it('DOME with zero power production is not low power', () => {
-      // C++ edge case: lowPwr check requires powerProduced > 0
-      // If no power at all (no power plant), the lowPwr flag is false
-      // but DOME still won't show radar without power... unless GPS
-      expect(simulateRadar(true, 0, 0)).toBe(true); // no power plant = not "low power"
+    it('DOME with zero power production and zero consumption has power', () => {
+      // C++ house.cpp:4160-4170: Power_Fraction() returns 1 when Drain==0
+      // TS: powerConsumed === 0 → hasPower = true
+      expect(simulateRadar(true, 0, 0)).toBe(true); // no power system = has power
+    });
+
+    it('DOME with zero production but nonzero consumption has no power', () => {
+      // C++ house.cpp:4168: Power=0, Drain>0 → Power_Fraction()=0 → low power
+      // TS: powerConsumed(100) !== 0 && powerProduced(0) < powerConsumed(100) → no power
+      expect(simulateRadar(true, 0, 100)).toBe(false);
     });
   });
 });
 
-/** Simulate the TS radar activation logic from engine/index.ts:6376-6378 */
+/** Simulate the TS radar activation logic from engine/index.ts:6416-6417 */
 function simulateRadar(hasDome: boolean, powerProduced: number, powerConsumed: number): boolean {
-  const lowPwr = powerConsumed > powerProduced && powerProduced > 0;
-  return hasDome && !lowPwr;
+  const hasPower = powerConsumed === 0 || powerProduced >= powerConsumed;
+  return hasDome && hasPower;
 }

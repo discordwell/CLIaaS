@@ -203,9 +203,9 @@ describe('C++ Parity: Animation Frame Counts and Sprite Data', () => {
     // H2O_EXP1/2/3 = 14 each
 
     const EXPECTED_FRAME_COUNTS: Record<string, number> = {
-      // Source: RA SHP file frame counts (verified against original game assets)
+      // Source: manifest.json frame counts (verified against sprite data)
       fball1: 18,
-      frag1: 15,
+      frag1: 14,       // manifest.json: 14 frames
       'veh-hit1': 17,
       'veh-hit2': 22,
       'veh-hit3': 14,
@@ -216,10 +216,10 @@ describe('C++ Parity: Animation Frame Counts and Sprite Data', () => {
       napalm2: 14,
       napalm3: 14,
       atomsfx: 27,
-      flak: 8,
-      h2o_exp1: 14,
-      h2o_exp2: 14,
-      h2o_exp3: 14,
+      flak: 7,         // manifest.json: 7 frames
+      h2o_exp1: 10,    // manifest.json: 10 frames
+      h2o_exp2: 10,    // manifest.json: 10 frames
+      h2o_exp3: 10,    // manifest.json: 10 frames
     };
 
     it.each(Object.entries(EXPECTED_FRAME_COUNTS))(

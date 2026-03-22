@@ -570,14 +570,19 @@ describe('E3 AI scatter on damage (techno.cpp)', () => {
     expect(e3.moveTarget).toBeNull();
   });
 
-  it('AI E3 on ATTACK mission does NOT scatter (only GUARD/AREA_GUARD scatter)', () => {
-    const e3 = entityAtCell(UnitType.I_E3, House.USSR, 10, 10);
-    e3.mission = Mission.ATTACK;
-
-    const ctx = makeCombatCtx([e3]);
-    aiScatterOnDamage(ctx, e3);
-
-    expect(e3.mission).toBe(Mission.ATTACK);
+  it('AI E3 on ATTACK mission CAN scatter (isScatter=true per C++ defaults)', () => {
+    let scattered = false;
+    for (let i = 0; i < 50; i++) {
+      const testE3 = entityAtCell(UnitType.I_E3, House.USSR, 10, 10);
+      testE3.mission = Mission.ATTACK;
+      const testCtx = makeCombatCtx([testE3]);
+      aiScatterOnDamage(testCtx, testE3);
+      if (testE3.mission === Mission.MOVE && testE3.moveTarget !== null) {
+        scattered = true;
+        break;
+      }
+    }
+    expect(scattered).toBe(true);
   });
 });
 

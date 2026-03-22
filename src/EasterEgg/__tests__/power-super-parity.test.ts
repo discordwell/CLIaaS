@@ -153,7 +153,7 @@ describe('Tesla Coil power cutoff behavior', () => {
     // Simulate: 100 produced, 150 consumed (just Tesla alone causes deficit)
     const powerProduced = 100;
     const powerConsumed = 150;
-    const isLowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const isLowPower = powerConsumed > powerProduced;
 
     // C++ building.cpp: Tesla Coil disabled at ANY power deficit
     const teslaDisabled = isLowPower; // no 1.5x threshold check for Tesla
@@ -164,7 +164,7 @@ describe('Tesla Coil power cutoff behavior', () => {
     // Even 1% deficit should disable Tesla (Power_Fraction = 0.99)
     const powerProduced = 100;
     const powerConsumed = 101; // very mild deficit
-    const isLowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const isLowPower = powerConsumed > powerProduced;
     const teslaDisabled = isLowPower;
     expect(teslaDisabled).toBe(true);
   });
@@ -173,7 +173,7 @@ describe('Tesla Coil power cutoff behavior', () => {
     // 200 produced >= 150 consumed: Tesla should work
     const powerProduced = 200;
     const powerConsumed = 150;
-    const isLowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const isLowPower = powerConsumed > powerProduced;
     const teslaDisabled = isLowPower;
     expect(teslaDisabled).toBe(false);
   });
@@ -181,17 +181,17 @@ describe('Tesla Coil power cutoff behavior', () => {
   it('Tesla Coil operates at equal power (no deficit)', () => {
     const powerProduced = 150;
     const powerConsumed = 150;
-    const isLowPower = powerConsumed > powerProduced && powerProduced > 0;
+    const isLowPower = powerConsumed > powerProduced;
     const teslaDisabled = isLowPower;
     expect(teslaDisabled).toBe(false);
   });
 
-  it('Tesla Coil not affected when powerProduced is 0 (no power system)', () => {
-    // No power plants => no power system, isLowPower should be false
+  it('Tesla Coil IS disabled when powerProduced is 0 with consumption', () => {
+    // C++ Power_Fraction()=0 when produced=0 and consumed>0 → fraction < 1 → low power
     const powerProduced = 0;
     const powerConsumed = 150;
-    const isLowPower = powerConsumed > powerProduced && powerProduced > 0;
-    expect(isLowPower).toBe(false); // no power system = not "low power"
+    const isLowPower = powerConsumed > powerProduced;
+    expect(isLowPower).toBe(true); // C++ parity: 0 production with drain = low power
   });
 });
 

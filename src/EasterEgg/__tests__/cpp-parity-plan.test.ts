@@ -112,10 +112,11 @@ describe('22-mission system (Phase 7a)', () => {
     expect(ctrl.isNoThreat).toBe(false);
   });
 
-  it('SLEEP mission is no-threat and non-retaliatory', () => {
+  it('SLEEP mission is non-retaliatory and zombie (INI overrides)', () => {
     const ctrl = MISSION_CONTROL.SLEEP;
-    expect(ctrl.isNoThreat).toBe(true);
-    expect(ctrl.isRetaliate).toBe(false);
+    expect(ctrl.isNoThreat).toBe(false);  // C++ default (no INI override)
+    expect(ctrl.isZombie).toBe(true);     // INI: Zombie=yes
+    expect(ctrl.isRetaliate).toBe(false); // INI: Retaliate=no
   });
 
   it('HARMLESS mission is no-threat', () => {

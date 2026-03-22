@@ -363,15 +363,22 @@ describe('cpp-parity: speedClass assignments (udata.cpp:865, idata.cpp)', () => 
     }
   });
 
-  it('all ground vehicles use WHEEL speed class (udata.cpp:865 override)', () => {
-    // C++ udata.cpp:865 forces all vehicle types to SPEED_WHEEL regardless of
-    // whether they have Tracked=yes. TRACK exists in the enum but is unused.
-    for (const unitKey of ALL_VEHICLES) {
+  it('tracked vehicles use TRACK speed class (udata.cpp:1366 Tracked=yes)', () => {
+    // C++ udata.cpp:1366: Tracked=yes in rules.ini/aftrmath.ini → SPEED_TRACK
+    const TRACKED = ['1TNK', '2TNK', '3TNK', '4TNK', 'APC', 'ARTY', 'HARV', 'V2RL', 'MNLY', 'MRJ', 'STNK', 'CTNK', 'TTNK', 'QTNK'];
+    for (const unitKey of TRACKED) {
+      expect(UNIT_STATS[unitKey].speedClass, `${unitKey} should be TRACK`).toBe(SpeedClass.TRACK);
+    }
+  });
+
+  it('wheeled vehicles use WHEEL speed class (udata.cpp:1366 Tracked=no)', () => {
+    const WHEELED = ['JEEP', 'MCV', 'TRUK', 'DTRK', 'MGG'];
+    for (const unitKey of WHEELED) {
       expect(UNIT_STATS[unitKey].speedClass, `${unitKey} should be WHEEL`).toBe(SpeedClass.WHEEL);
     }
   });
 
-  it('ants use WHEEL speed class (same as vehicles)', () => {
+  it('ants use WHEEL speed class (same as wheeled vehicles)', () => {
     expect(UNIT_STATS.ANT1.speedClass).toBe(SpeedClass.WHEEL);
     expect(UNIT_STATS.ANT2.speedClass).toBe(SpeedClass.WHEEL);
     expect(UNIT_STATS.ANT3.speedClass).toBe(SpeedClass.WHEEL);
@@ -666,8 +673,8 @@ describe('cpp-parity: infantry vs vehicle speed ratios (rules.ini)', () => {
 
 describe('cpp-parity: terrain speed effect on cell crossing time', () => {
   for (const [unitKey, terrain, scKey] of [
-    ['1TNK', 'Clear', 'Wheel'],
-    ['1TNK', 'Rough', 'Wheel'],
+    ['1TNK', 'Clear', 'Track'],
+    ['1TNK', 'Rough', 'Track'],
     ['E1', 'Clear', 'Foot'],
     ['E1', 'Rough', 'Foot'],
   ] as [string, string, string][]) {
@@ -691,12 +698,12 @@ describe('cpp-parity: terrain speed effect on cell crossing time', () => {
   });
 
   it('road bonus: vehicles move faster on road vs clear (rules.ini)', () => {
-    const roadWheel = iniTerrainSpeed('Road', 'Wheel');
-    const clearWheel = iniTerrainSpeed('Clear', 'Wheel');
-    expect(roadWheel).toBeGreaterThan(clearWheel);
+    const roadTrack = iniTerrainSpeed('Road', 'Track');
+    const clearTrack = iniTerrainSpeed('Clear', 'Track');
+    expect(roadTrack).toBeGreaterThan(clearTrack);
     const road = tsMovementSpeed('1TNK', 'Road');
     const clear = tsMovementSpeed('1TNK', 'Clear');
-    expect(road / clear).toBeCloseTo(roadWheel / clearWheel, 3);
+    expect(road / clear).toBeCloseTo(roadTrack / clearTrack, 3);
   });
 });
 
@@ -946,19 +953,19 @@ describe('cpp-parity: all UNIT_STATS speed values produce correct movement rates
 
 describe('cpp-parity: specific terrain speed applications', () => {
   it('road bonus: 1TNK on road vs clear — ratio matches rules.ini', () => {
-    const roadWheel = iniTerrainSpeed('Road', 'Wheel');
-    const clearWheel = iniTerrainSpeed('Clear', 'Wheel');
+    const roadTrack = iniTerrainSpeed('Road', 'Track');
+    const clearTrack = iniTerrainSpeed('Clear', 'Track');
     const road = tsMovementSpeed('1TNK', 'Road');
     const clear = tsMovementSpeed('1TNK', 'Clear');
-    expect(road / clear).toBeCloseTo(roadWheel / clearWheel, 3);
+    expect(road / clear).toBeCloseTo(roadTrack / clearTrack, 3);
   });
 
   it('rough penalty: 1TNK on rough vs clear — ratio matches rules.ini', () => {
-    const roughWheel = iniTerrainSpeed('Rough', 'Wheel');
-    const clearWheel = iniTerrainSpeed('Clear', 'Wheel');
+    const roughTrack = iniTerrainSpeed('Rough', 'Track');
+    const clearTrack = iniTerrainSpeed('Clear', 'Track');
     const rough = tsMovementSpeed('1TNK', 'Rough');
     const clear = tsMovementSpeed('1TNK', 'Clear');
-    expect(rough / clear).toBeCloseTo(roughWheel / clearWheel, 3);
+    expect(rough / clear).toBeCloseTo(roughTrack / clearTrack, 3);
   });
 
   it('ore terrain: WHEEL speed matches rules.ini [Ore] Wheel=', () => {

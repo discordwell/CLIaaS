@@ -509,35 +509,34 @@ describe('Guard mode MissionControl — C++ mission.cpp:532-543', () => {
     expect(mc.isParalyzed).toBe(false);
   });
 
-  it('ATTACK mission: IsScatter=false (attacking units do not scatter)', () => {
-    // rules.ini: [Attack] Scatter=no
+  it('ATTACK mission: uses C++ defaults (no INI overrides)', () => {
     const mc = MISSION_CONTROL[Mission.ATTACK];
-    expect(mc.isScatter).toBe(false);
+    expect(mc.isScatter).toBe(true);
     expect(mc.isRetaliate).toBe(true);
+    expect(mc.isRecruitable).toBe(true);
   });
 
-  it('HUNT mission: IsScatter=false (hunting units focus target)', () => {
+  it('HUNT mission: IsScatter=true, IsRetaliate=false (INI: Recruitable=no, Retaliate=no)', () => {
     const mc = MISSION_CONTROL[Mission.HUNT];
-    expect(mc.isScatter).toBe(false);
-    expect(mc.isRetaliate).toBe(true);
+    expect(mc.isScatter).toBe(true);
+    expect(mc.isRetaliate).toBe(false);
+    expect(mc.isRecruitable).toBe(false);
   });
 
-  it('SLEEP mission: IsNoThreat=true, IsZombie=true, IsParalyzed=true', () => {
-    // C++ SLEEP: completely inert
+  it('SLEEP mission: IsZombie=true, no-retaliate, no-scatter (INI overrides)', () => {
     const mc = MISSION_CONTROL[Mission.SLEEP];
-    expect(mc.isNoThreat).toBe(true);
+    expect(mc.isNoThreat).toBe(false);
     expect(mc.isZombie).toBe(true);
-    expect(mc.isParalyzed).toBe(true);
+    expect(mc.isParalyzed).toBe(false);
     expect(mc.isRetaliate).toBe(false);
     expect(mc.isScatter).toBe(false);
   });
 
-  it('AMBUSH mission: IsRetaliate=true but IsScatter=false, IsParalyzed=true', () => {
-    // C++ AMBUSH: lies in wait, retaliates but doesn't scatter or move
+  it('AMBUSH mission: uses C++ defaults (no INI overrides — unused mission)', () => {
     const mc = MISSION_CONTROL[Mission.AMBUSH];
     expect(mc.isRetaliate).toBe(true);
-    expect(mc.isScatter).toBe(false);
-    expect(mc.isParalyzed).toBe(true);
+    expect(mc.isScatter).toBe(true);
+    expect(mc.isParalyzed).toBe(false);
   });
 
   it('STICKY mission: IsRecruitable=false (defines.h:988: never recruit)', () => {
@@ -546,30 +545,29 @@ describe('Guard mode MissionControl — C++ mission.cpp:532-543', () => {
     expect(mc.isRecruitable).toBe(false);
   });
 
-  it('MOVE mission: IsRecruitable=false, IsRetaliate=true, IsScatter=true', () => {
-    // Moving units aren't recruitable but do retaliate and scatter
+  it('MOVE mission: uses C++ defaults (no INI overrides)', () => {
     const mc = MISSION_CONTROL[Mission.MOVE];
-    expect(mc.isRecruitable).toBe(false);
+    expect(mc.isRecruitable).toBe(true);
     expect(mc.isRetaliate).toBe(true);
     expect(mc.isScatter).toBe(true);
   });
 
-  it('HARVEST mission: IsNoThreat=true, IsZombie=true (harvesters are passive)', () => {
+  it('HARVEST mission: INI overrides (Retaliate=no, Recruitable=no, Scatter=no)', () => {
     const mc = MISSION_CONTROL[Mission.HARVEST];
-    expect(mc.isNoThreat).toBe(true);
-    expect(mc.isZombie).toBe(true);
+    expect(mc.isNoThreat).toBe(false);
+    expect(mc.isZombie).toBe(false);
     expect(mc.isRetaliate).toBe(false);
     expect(mc.isScatter).toBe(false);
+    expect(mc.isRecruitable).toBe(false);
   });
 
-  it('STOP mission: IsParalyzed=true, IsRecruitable=true, IsZombie=true', () => {
-    // C++ STOP: sits still, can be recruited but does nothing proactive
+  it('STOP mission: uses C++ defaults (no INI overrides)', () => {
     const mc = MISSION_CONTROL[Mission.STOP];
-    expect(mc.isParalyzed).toBe(true);
+    expect(mc.isParalyzed).toBe(false);
     expect(mc.isRecruitable).toBe(true);
-    expect(mc.isZombie).toBe(true);
-    expect(mc.isRetaliate).toBe(false);
-    expect(mc.isScatter).toBe(false);
+    expect(mc.isZombie).toBe(false);
+    expect(mc.isRetaliate).toBe(true);
+    expect(mc.isScatter).toBe(true);
   });
 
   it('HARMLESS mission: IsNoThreat=true, IsScatter=true (defines.h:1004)', () => {
@@ -581,18 +579,20 @@ describe('Guard mode MissionControl — C++ mission.cpp:532-543', () => {
     expect(mc.isRetaliate).toBe(false);
   });
 
-  it('ENTER mission: IsZombie=true, IsRetaliate=false (entering transport is single-minded)', () => {
+  it('ENTER mission: IsRetaliate=false, IsScatter=true (INI: Retaliate=no, Recruitable=no)', () => {
     const mc = MISSION_CONTROL[Mission.ENTER];
-    expect(mc.isZombie).toBe(true);
+    expect(mc.isZombie).toBe(false);
     expect(mc.isRetaliate).toBe(false);
-    expect(mc.isScatter).toBe(false);
+    expect(mc.isScatter).toBe(true);
+    expect(mc.isRecruitable).toBe(false);
   });
 
-  it('CAPTURE mission: IsZombie=true, IsRetaliate=false (engineers focus on capture)', () => {
+  it('CAPTURE mission: IsRetaliate=false, IsScatter=false (INI: Retaliate=no, Recruitable=no, Scatter=no)', () => {
     const mc = MISSION_CONTROL[Mission.CAPTURE];
-    expect(mc.isZombie).toBe(true);
+    expect(mc.isZombie).toBe(false);
     expect(mc.isRetaliate).toBe(false);
     expect(mc.isScatter).toBe(false);
+    expect(mc.isRecruitable).toBe(false);
   });
 
   it('all 24 TS missions have MISSION_CONTROL entries', () => {
@@ -613,17 +613,17 @@ describe('Scatter behavior — C++ infantry.cpp:1852-1907, foot.cpp:1140-1153', 
 
   it('scatter is mission-gated by MissionControl.isScatter (C++ infantry.cpp:1866)', () => {
     // C++ infantry.cpp:1866: if (!MissionControl[Mission].IsScatter && !forced) return;
-    // ATTACK mission: IsScatter=false → scatter blocked unless forced
-    const mc = MISSION_CONTROL[Mission.ATTACK];
+    // CAPTURE mission: IsScatter=false → scatter blocked unless forced
+    const mc = MISSION_CONTROL[Mission.CAPTURE];
     expect(mc.isScatter).toBe(false);
     // GUARD mission: IsScatter=true → scatter allowed
     const mcGuard = MISSION_CONTROL[Mission.GUARD];
     expect(mcGuard.isScatter).toBe(true);
   });
 
-  it('HUNT mission blocks scatter (C++ infantry.cpp:1866)', () => {
-    // C++ HUNT: IsScatter=false — hunting units press the attack
-    expect(MISSION_CONTROL[Mission.HUNT].isScatter).toBe(false);
+  it('HUNT mission allows scatter (C++ defaults + INI: Recruitable=no, Retaliate=no only)', () => {
+    // HUNT INI overrides: Recruitable=no, Retaliate=no — but Scatter remains true (default)
+    expect(MISSION_CONTROL[Mission.HUNT].isScatter).toBe(true);
   });
 
   it('MOVE mission allows scatter (units dodge while moving)', () => {
@@ -871,27 +871,28 @@ describe('Assign_Mission QMOVE → MOVE translation — C++ mission.cpp:386', ()
 describe('Mission AI dispatch — C++ mission.cpp:233-318', () => {
 
   it('RESCUE mission dispatches to same handler as HUNT (mission.cpp:298-299)', () => {
-    // C++ mission.cpp:298-299:
-    //   case MISSION_HUNT:
-    //   case MISSION_RESCUE:
-    //     Timer = Mission_Hunt();
-    // TS Mission.RESCUE should have similar MissionControl to Mission.HUNT
+    // C++ mission.cpp:298-299: both use Mission_Hunt()
+    // But their MissionControl flags differ per rules.ini:
+    // HUNT: Recruitable=no, Retaliate=no; RESCUE: (no overrides, uses defaults)
     const mcRescue = MISSION_CONTROL[Mission.RESCUE];
     const mcHunt = MISSION_CONTROL[Mission.HUNT];
-    // Both should retaliate, neither should scatter
-    expect(mcRescue.isRetaliate).toBe(mcHunt.isRetaliate);
-    expect(mcRescue.isScatter).toBe(mcHunt.isScatter);
+    // Both share the same AI handler, but INI flags differ
+    expect(mcRescue).toBeDefined();
+    expect(mcHunt).toBeDefined();
+    // Same handler does not imply same flags — INI overrides differ
+    expect(mcRescue.isNoThreat).toBe(false);
+    expect(mcHunt.isNoThreat).toBe(false);
   });
 
   it('SABOTAGE mission dispatches to same handler as CAPTURE (mission.cpp:260-262)', () => {
-    // C++ mission.cpp:260-262:
-    //   case MISSION_CAPTURE:
-    //   case MISSION_SABOTAGE:
-    //     Timer = Mission_Capture();
+    // C++ mission.cpp:260-262: both use Mission_Capture()
+    // But their MissionControl flags differ per rules.ini:
+    // CAPTURE: Retaliate=no, Recruitable=no, Scatter=no; SABOTAGE: Recruitable=no only
     const mcSab = MISSION_CONTROL[Mission.SABOTAGE];
     const mcCap = MISSION_CONTROL[Mission.CAPTURE];
-    expect(mcSab.isZombie).toBe(mcCap.isZombie);
-    expect(mcSab.isRetaliate).toBe(mcCap.isRetaliate);
+    // Same handler does not imply same flags
+    expect(mcSab.isRecruitable).toBe(false);
+    expect(mcCap.isRecruitable).toBe(false);
   });
 
   it('STICKY mission dispatches to same handler as GUARD (mission.cpp:243-245)', () => {

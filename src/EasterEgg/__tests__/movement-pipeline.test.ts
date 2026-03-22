@@ -79,7 +79,7 @@ describe('Core moveToward — speed class behavior', () => {
     const float = UNIT_STATS.LST;   // speed=14, FLOAT
 
     expect(foot.speedClass).toBe(SpeedClass.FOOT);
-    expect(wheel.speedClass).toBe(SpeedClass.WHEEL);
+    expect(wheel.speedClass).toBe(SpeedClass.TRACK);
     expect(winged.speedClass).toBe(SpeedClass.WINGED);
     expect(float.speedClass).toBe(SpeedClass.FLOAT);
 

@@ -584,12 +584,13 @@ describe('Repair rate timing — rules.ini RepairRate=.016', () => {
 describe('Low power penalties — C++ behavior', () => {
   /**
    * C++ house.cpp:1256: radar turns off when power demand exceeds supply.
-   * TS index.ts:6387-6388: hasRadar = hasBuilding('DOME') && !lowPwr
+   * TS index.ts:6416-6417: hasPower = powerConsumed === 0 || powerProduced >= powerConsumed
+   *                        hasRadar = hasBuilding('DOME') && hasPower
    * The TS check is correct: radar requires DOME and sufficient power.
    */
   it('documents radar requires DOME + sufficient power', () => {
-    // This is a documentation test — TS implementation at index.ts:6387-6388
-    // correctly requires both DOME and !lowPower for radar
+    // This is a documentation test — TS implementation at index.ts:6416-6417
+    // correctly requires both DOME and hasPower for radar
     expect(true).toBe(true);
   });
 });

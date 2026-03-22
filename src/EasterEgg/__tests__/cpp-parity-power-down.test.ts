@@ -544,20 +544,20 @@ describe('zero drain = never low power (C++ house.cpp:4164)', () => {
       updateStructureCombat(ctx);
     }
     // Pillbox is unpowered so fires regardless, but importantly the low power
-    // check itself (powerConsumed > powerProduced && powerProduced > 0) returns false
+    // check itself (powerConsumed > powerProduced) returns false when both are 0
     expect(target.hp).toBeLessThan(hpBefore);
   });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// 12. TS low power check: isLowPower = powerConsumed > powerProduced && powerProduced > 0
+// 12. TS low power check: isLowPower = powerConsumed > powerProduced
 //     C++ house.cpp:4164-4169 and building.cpp:2853
 //     Verify the TS implementation matches C++ semantics
 // ═════════════════════════════════════════════════════════════════════════════
 
-describe('TS low power check matches C++ Power_Fraction() < 1 (combat.ts:1222)', () => {
+describe('TS low power check matches C++ Power_Fraction() < 1 (combat.ts:1362)', () => {
   function isLowPower(produced: number, consumed: number): boolean {
-    return consumed > produced && produced > 0;
+    return consumed > produced;
   }
 
   it('C++: Power >= Drain → fraction=1 → NOT low power', () => {
@@ -577,17 +577,9 @@ describe('TS low power check matches C++ Power_Fraction() < 1 (combat.ts:1222)',
 
   it('C++: Power == 0, Drain > 0 → fraction = 0 → IS low power', () => {
     // C++ house.cpp:4168: return(0);
-    // TS: powerProduced > 0 is false when produced=0, so isLowPower=false
-    // PARITY GAP: C++ treats 0 power with drain as low power (fraction=0).
-    // TS combat.ts:1222 requires powerProduced > 0, so 0 produced is NOT low.
-    // This means powered defenses fire even with zero power production!
-    const tsResult = isLowPower(0, 100);
-    const cppResult = true; // C++ Power_Fraction() returns 0, which IS < 1
-    if (tsResult !== cppResult) {
-      // PARITY GAP: TS does not gate powered defenses when produced=0, consumed>0
-      expect(tsResult).toBe(false); // TS behavior: NOT low power when produced=0
-      // C++ behavior would be: IS low power → defenses disabled
-    }
+    // TS: powerConsumed(100) > powerProduced(0) → isLowPower=true
+    // Now matches C++ parity: 0 production with drain = low power
+    expect(isLowPower(0, 100)).toBe(true);
   });
 });
 

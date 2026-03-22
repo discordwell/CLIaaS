@@ -219,31 +219,35 @@ describe('MISSION_CONTROL parity (C++ mission.cpp:532-543 defaults + rules.ini o
   // rules.ini sections override individual flags.
   //
   // From the original RA rules.ini (verified against OpenRA/Remastered data):
+  // Expected values per C++ mission.cpp:532-543 constructor defaults + rules.ini overrides.
+  // C++ constructor defaults: NoThreat=false, Zombie=false, Recruitable=true,
+  // Paralyzed=false, Retaliate=true, Scatter=true.
+  // rules.ini sections override individual flags per mission.
   const EXPECTED_CONTROLS: [Mission, string, ExpectedMissionControl][] = [
     // Mission,              C++ name,         { NoThreat, Zombie, Recruitable, Paralyzed, Retaliate, Scatter }
-    [Mission.SLEEP,          'Sleep',          { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false }],
-    [Mission.ATTACK,         'Attack',         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false }],
-    [Mission.MOVE,           'Move',           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],
-    [Mission.QMOVE,          'QMove',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],
-    [Mission.RETREAT,        'Retreat',         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.GUARD,          'Guard',           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],
-    [Mission.STICKY,         'Sticky',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false }],
-    [Mission.ENTER,          'Enter',           { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.CAPTURE,        'Capture',         { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.HARVEST,        'Harvest',         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.AREA_GUARD,     'Area Guard',      { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],
-    [Mission.RETURN,         'Return',          { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.STOP,           'Stop',            { isNoThreat: false, isZombie: true,  isRecruitable: true,  isParalyzed: true,  isRetaliate: false, isScatter: false }],
-    [Mission.AMBUSH,         'Ambush',          { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: true,  isScatter: false }],
-    [Mission.HUNT,           'Hunt',            { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false }],
-    [Mission.UNLOAD,         'Unload',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],
-    [Mission.SABOTAGE,       'Sabotage',        { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.CONSTRUCTION,   'Construction',    { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false }],
-    [Mission.DECONSTRUCTION, 'Selling',         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false }],
-    [Mission.REPAIR,         'Repair',          { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],
-    [Mission.RESCUE,         'Rescue',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: false }],
-    [Mission.MISSILE,        'Missile',         { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: true,  isRetaliate: false, isScatter: false }],
-    [Mission.HARMLESS,       'Harmless',        { isNoThreat: true,  isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  }],
+    [Mission.SLEEP,          'Sleep',          { isNoThreat: false, isZombie: true,  isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],  // INI: Zombie=yes, Recruitable=no, Retaliate=no, Scatter=no
+    [Mission.ATTACK,         'Attack',         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags — all defaults)
+    [Mission.MOVE,           'Move',           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.QMOVE,          'QMove',          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.RETREAT,        'Retreat',         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  }],  // INI: Recruitable=no, Retaliate=no
+    [Mission.GUARD,          'Guard',           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.STICKY,         'Sticky',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: true,  isRetaliate: true,  isScatter: false }],  // INI: Recruitable=no, Paralyzed=yes, Scatter=no
+    [Mission.ENTER,          'Enter',           { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  }],  // INI: Retaliate=no, Recruitable=no
+    [Mission.CAPTURE,        'Capture',         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],  // INI: Retaliate=no, Recruitable=no, Scatter=no
+    [Mission.HARVEST,        'Harvest',         { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],  // INI: Retaliate=no, Recruitable=no, Scatter=no
+    [Mission.AREA_GUARD,     'Area Guard',      { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: Recruitable=no
+    [Mission.RETURN,         'Return',          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.STOP,           'Stop',            { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.AMBUSH,         'Ambush',          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags — unused mission)
+    [Mission.HUNT,           'Hunt',            { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  }],  // INI: Recruitable=no, Retaliate=no
+    [Mission.UNLOAD,         'Unload',          { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],  // INI: Recruitable=no, Retaliate=no, Scatter=no
+    [Mission.SABOTAGE,       'Sabotage',        { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: Recruitable=no
+    [Mission.CONSTRUCTION,   'Construction',    { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],  // INI: Recruitable=no, Retaliate=no, Scatter=no
+    [Mission.DECONSTRUCTION, 'Selling',         { isNoThreat: true,  isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: false }],  // INI [Selling]: NoThreat=yes, Recruitable=no, Retaliate=no, Scatter=no
+    [Mission.REPAIR,         'Repair',          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.RESCUE,         'Rescue',          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.MISSILE,        'Missile',         { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  }],  // INI: (no flags)
+    [Mission.HARMLESS,       'Harmless',        { isNoThreat: true,  isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: false, isScatter: true  }],  // INI: NoThreat=yes, Recruitable=no, Retaliate=no
   ];
 
   it('MISSION_CONTROL has entries for all 23 C++ missions', () => {
@@ -290,17 +294,17 @@ describe('MISSION_CONTROL parity (C++ mission.cpp:532-543 defaults + rules.ini o
     });
   }
 
-  it('DIE mission control should match SLEEP (both inert states)', () => {
-    // DIE is TS-only. Its control flags should be inert like SLEEP.
+  it('DIE mission control uses C++ defaults (no INI section)', () => {
+    // DIE is TS-only. No INI section means all C++ constructor defaults apply.
     const die = MISSION_CONTROL[Mission.DIE];
     expect(die, 'MISSION_CONTROL should have DIE entry').toBeDefined();
     if (die) {
-      expect(die.isNoThreat, 'DIE.isNoThreat').toBe(true);
-      expect(die.isZombie, 'DIE.isZombie').toBe(true);
-      expect(die.isRecruitable, 'DIE.isRecruitable').toBe(false);
-      expect(die.isParalyzed, 'DIE.isParalyzed').toBe(true);
-      expect(die.isRetaliate, 'DIE.isRetaliate').toBe(false);
-      expect(die.isScatter, 'DIE.isScatter').toBe(false);
+      expect(die.isNoThreat, 'DIE.isNoThreat').toBe(false);
+      expect(die.isZombie, 'DIE.isZombie').toBe(false);
+      expect(die.isRecruitable, 'DIE.isRecruitable').toBe(true);
+      expect(die.isParalyzed, 'DIE.isParalyzed').toBe(false);
+      expect(die.isRetaliate, 'DIE.isRetaliate').toBe(true);
+      expect(die.isScatter, 'DIE.isScatter').toBe(true);
     }
   });
 });
@@ -461,25 +465,26 @@ describe('Is_Recruitable_Mission parity (C++ mission.cpp:522-528)', () => {
     expect(true).toBe(true); // TS has no NONE, so N/A
   });
 
-  it('GUARD and AREA_GUARD are recruitable', () => {
-    // These are the main recruitable missions in the C++ data
+  it('GUARD is recruitable; AREA_GUARD is not (INI: Recruitable=no)', () => {
     expect(MISSION_CONTROL[Mission.GUARD]?.isRecruitable).toBe(true);
-    expect(MISSION_CONTROL[Mission.AREA_GUARD]?.isRecruitable).toBe(true);
+    // AREA_GUARD has Recruitable=no in rules.ini
+    expect(MISSION_CONTROL[Mission.AREA_GUARD]?.isRecruitable).toBe(false);
   });
 
-  it('STOP is recruitable (unique — paralyzed but recruitable)', () => {
-    // STOP is an interesting case: it's paralyzed AND zombie, but still recruitable.
-    // This matches C++ rules.ini where [Stop] has Recruitable=yes.
+  it('STOP uses C++ defaults (recruitable, retaliatory, scatterable)', () => {
+    // STOP has no overrides in rules.ini — all C++ constructor defaults apply.
     const stop = MISSION_CONTROL[Mission.STOP];
     expect(stop?.isRecruitable, 'STOP.isRecruitable').toBe(true);
-    expect(stop?.isParalyzed, 'STOP.isParalyzed').toBe(true);
-    expect(stop?.isZombie, 'STOP.isZombie').toBe(true);
+    expect(stop?.isParalyzed, 'STOP.isParalyzed').toBe(false);
+    expect(stop?.isZombie, 'STOP.isZombie').toBe(false);
+    expect(stop?.isRetaliate, 'STOP.isRetaliate').toBe(true);
+    expect(stop?.isScatter, 'STOP.isScatter').toBe(true);
   });
 
-  it('combat missions are not recruitable', () => {
-    // ATTACK, HUNT, MOVE are not recruitable — units actively doing something
-    expect(MISSION_CONTROL[Mission.ATTACK]?.isRecruitable).toBe(false);
+  it('HUNT is not recruitable (INI override), ATTACK and MOVE use defaults (recruitable)', () => {
+    // HUNT has Recruitable=no in INI. ATTACK and MOVE have no INI overrides (defaults: Recruitable=true).
+    expect(MISSION_CONTROL[Mission.ATTACK]?.isRecruitable).toBe(true);
     expect(MISSION_CONTROL[Mission.HUNT]?.isRecruitable).toBe(false);
-    expect(MISSION_CONTROL[Mission.MOVE]?.isRecruitable).toBe(false);
+    expect(MISSION_CONTROL[Mission.MOVE]?.isRecruitable).toBe(true);
   });
 });

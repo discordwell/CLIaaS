@@ -7,7 +7,7 @@ describe('EXPLOSION_FRAMES parity', () => {
     'veh-hit1': 17, 'veh-hit2': 22, 'veh-hit3': 14,
     napalm1: 14, napalm2: 14, napalm3: 14,
     atomsfx: 27, 'art-exp1': 22,
-    'h2o_exp1': 14, 'h2o_exp2': 14, 'h2o_exp3': 14,
+    'h2o_exp1': 10, 'h2o_exp2': 10, 'h2o_exp3': 10,  // manifest.json: 10 frames each
   };
 
   it('contains all expected explosion sprites', () => {

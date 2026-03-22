@@ -200,30 +200,32 @@ describe('Mission enum — C++ mission.h parity', () => {
 describe('MissionControl metadata — C++ mission.cpp parity', () => {
 
   // Build expected C++ values for each mission
+  // Values now match C++ mission.cpp:532-543 constructor defaults + rules.ini overrides.
+  // C++ defaults: NoThreat=false, Zombie=false, Recruitable=true, Paralyzed=false, Retaliate=true, Scatter=true
   interface CppMC { noThreat: boolean; zombie: boolean; recruit: boolean; paralyze: boolean; retaliate: boolean; scatter: boolean }
   const CPP_MISSION_CONTROL: Record<string, CppMC> = {
-    SLEEP:          { noThreat: true,  zombie: true,  recruit: false, paralyze: true,  retaliate: false, scatter: false },
-    ATTACK:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: false },
-    MOVE:           { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },
-    QMOVE:          { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },
-    RETREAT:        { noThreat: true,  zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    GUARD:          { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },
-    STICKY:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: false }, // rules.ini [Sticky] Scatter=no
-    ENTER:          { noThreat: false, zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    CAPTURE:        { noThreat: false, zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    HARVEST:        { noThreat: true,  zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    AREA_GUARD:     { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },
-    RETURN:         { noThreat: true,  zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    STOP:           { noThreat: false, zombie: true,  recruit: true,  paralyze: true,  retaliate: false, scatter: false },
-    AMBUSH:         { noThreat: true,  zombie: true,  recruit: false, paralyze: true,  retaliate: true,  scatter: false },
-    HUNT:           { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: false },
-    UNLOAD:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },
-    SABOTAGE:       { noThreat: false, zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    CONSTRUCTION:   { noThreat: true,  zombie: true,  recruit: false, paralyze: true,  retaliate: false, scatter: false },
-    DECONSTRUCTION: { noThreat: true,  zombie: true,  recruit: false, paralyze: true,  retaliate: false, scatter: false },
-    REPAIR:         { noThreat: true,  zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },
-    RESCUE:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: false },
-    MISSILE:        { noThreat: true,  zombie: true,  recruit: false, paralyze: true,  retaliate: false, scatter: false },
+    SLEEP:          { noThreat: false, zombie: true,  recruit: false, paralyze: false, retaliate: false, scatter: false },  // INI: Zombie=yes, Recruitable=no, Retaliate=no, Scatter=no
+    ATTACK:         { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    MOVE:           { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    QMOVE:          { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    RETREAT:        { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: true  },  // INI: Recruitable=no, Retaliate=no
+    GUARD:          { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    STICKY:         { noThreat: false, zombie: false, recruit: false, paralyze: true,  retaliate: true,  scatter: false },  // INI: Recruitable=no, Paralyzed=yes, Scatter=no
+    ENTER:          { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: true  },  // INI: Retaliate=no, Recruitable=no
+    CAPTURE:        { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: false },  // INI: Retaliate=no, Recruitable=no, Scatter=no
+    HARVEST:        { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: false },  // INI: Retaliate=no, Recruitable=no, Scatter=no
+    AREA_GUARD:     { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },  // INI: Recruitable=no
+    RETURN:         { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    STOP:           { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    AMBUSH:         { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags — unused mission)
+    HUNT:           { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: true  },  // INI: Recruitable=no, Retaliate=no
+    UNLOAD:         { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: false },  // INI: Recruitable=no, Retaliate=no, Scatter=no
+    SABOTAGE:       { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: true,  scatter: true  },  // INI: Recruitable=no
+    CONSTRUCTION:   { noThreat: false, zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: false },  // INI: Recruitable=no, Retaliate=no, Scatter=no
+    DECONSTRUCTION: { noThreat: true,  zombie: false, recruit: false, paralyze: false, retaliate: false, scatter: false },  // INI [Selling]: NoThreat=yes, Recruitable=no, Retaliate=no, Scatter=no
+    REPAIR:         { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    RESCUE:         { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
+    MISSILE:        { noThreat: false, zombie: false, recruit: true,  paralyze: false, retaliate: true,  scatter: true  },  // INI: (no flags)
   };
 
   it('MISSION_CONTROL has entries for all 22 C++ missions', () => {
@@ -266,26 +268,27 @@ describe('MissionControl metadata — C++ mission.cpp parity', () => {
   }
 
   it('TS MISSION_CONTROL for DIE — not in C++ (TS extension)', () => {
-    // C++ has no MISSION_DIE — verify TS sets it to zombie/paralyzed (deathlike)
+    // C++ has no MISSION_DIE — no INI section, so all C++ constructor defaults apply.
     const dieMc = MISSION_CONTROL['DIE'];
     if (dieMc) {
-      // Document the TS extension flags
-      expect(dieMc.isNoThreat).toBe(true);
-      expect(dieMc.isZombie).toBe(true);
-      expect(dieMc.isParalyzed).toBe(true);
-      expect(dieMc.isRetaliate).toBe(false);
-      expect(dieMc.isScatter).toBe(false);
+      expect(dieMc.isNoThreat).toBe(false);
+      expect(dieMc.isZombie).toBe(false);
+      expect(dieMc.isRecruitable).toBe(true);
+      expect(dieMc.isParalyzed).toBe(false);
+      expect(dieMc.isRetaliate).toBe(true);
+      expect(dieMc.isScatter).toBe(true);
     }
   });
 
-  it('TS MISSION_CONTROL for HARMLESS — not in C++ (TS extension)', () => {
-    // C++ has no MISSION_HARMLESS. Verify TS makes it truly harmless.
+  it('TS MISSION_CONTROL for HARMLESS — matches rules.ini [Harmless] overrides', () => {
+    // rules.ini [Harmless]: NoThreat=yes, Recruitable=no, Retaliate=no
     const harmlessMc = MISSION_CONTROL['HARMLESS'];
     if (harmlessMc) {
-      // Expected: noThreat=true, zombie=true, retaliate=false
       expect(harmlessMc.isNoThreat).toBe(true);
-      expect(harmlessMc.isZombie).toBe(true);
+      expect(harmlessMc.isZombie).toBe(false);
       expect(harmlessMc.isRetaliate).toBe(false);
+      expect(harmlessMc.isRecruitable).toBe(false);
+      expect(harmlessMc.isScatter).toBe(true);
     }
   });
 });

@@ -350,8 +350,8 @@ describe('Mission.CAPTURE control flags (rules.ini [Capture])', () => {
     expect(MISSION_CONTROL[Mission.CAPTURE].isScatter).toBe(INI_CAPTURE_SCATTER);
   });
 
-  it('CAPTURE mission isZombie=true (C++ mission.cpp — engineer does not auto-acquire targets)', () => {
-    expect(MISSION_CONTROL[Mission.CAPTURE].isZombie).toBe(true);
+  it('CAPTURE mission isZombie=false (C++ default — no Zombie= override in rules.ini [Capture])', () => {
+    expect(MISSION_CONTROL[Mission.CAPTURE].isZombie).toBe(false);
   });
 });
 

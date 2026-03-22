@@ -263,18 +263,21 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(scattered).toBe(true);
   });
 
-  // C++ infantry.cpp:1866 — ATTACK has isScatter=false → scatter blocked
-  it('infantry on ATTACK mission does NOT scatter (isScatter=false)', () => {
-    const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    e1.mission = Mission.ATTACK;
-
-    const ctx = makeCombatCtx([e1]);
-    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
-    aiScatterOnDamage(ctx, e1, attacker);
-
-    // ATTACK mission has isScatter=false → no scatter
-    expect(e1.mission).toBe(Mission.ATTACK);
-    expect(e1.moveTarget).toBeNull();
+  // ATTACK has isScatter=true (C++ default, no INI override) — infantry CAN scatter
+  it('infantry on ATTACK mission CAN scatter (isScatter=true per C++ defaults)', () => {
+    let scattered = false;
+    for (let i = 0; i < 50; i++) {
+      const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      e1.mission = Mission.ATTACK;
+      const ctx = makeCombatCtx([e1]);
+      const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+      aiScatterOnDamage(ctx, e1, attacker);
+      if (e1.mission === Mission.MOVE && e1.moveTarget !== null) {
+        scattered = true;
+        break;
+      }
+    }
+    expect(scattered).toBe(true);
   });
 
   // C++ infantry.cpp:1883 — player-controlled units don't scatter

@@ -707,10 +707,9 @@ describe('Mission scatter control from rules.ini mission sections', () => {
   // C++ Attack mission: Scatter defaults to yes (not overridden in rules.ini)
   // But C++ source line 1866 shows Attack mission doesn't scatter
   // TS sets isScatter=false for ATTACK
-  it('MISSION_CONTROL[ATTACK].isScatter matches C++ (false despite INI not having Scatter=no)', () => {
-    // C++ ATTACK mission default isScatter is false (from C++ MasterMissions table)
-    // rules.ini [Attack] does NOT have Scatter=no, but C++ default is false
-    expect(MISSION_CONTROL[Mission.ATTACK].isScatter).toBe(false);
+  it('MISSION_CONTROL[ATTACK].isScatter matches C++ defaults (true — no INI override)', () => {
+    // C++ constructor default is isScatter=true; rules.ini [Attack] has no Scatter= override
+    expect(MISSION_CONTROL[Mission.ATTACK].isScatter).toBe(true);
   });
 
   // Verify missions with explicit Scatter=no in rules.ini have isScatter=false in TS
@@ -924,26 +923,38 @@ describe('Scatter condition interplay (infantry.cpp:1860-1885)', () => {
     expect(e.moveTarget).toBeNull();
   });
 
-  // C++ infantry.cpp:1866: ATTACK has isScatter=false → no scatter
-  it('infantry on ATTACK mission does NOT scatter', () => {
-    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    e.mission = Mission.ATTACK;
-    const ctx = makeCombatCtx([e]);
-    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
-    aiScatterOnDamage(ctx, e, attacker);
-    expect(e.mission).toBe(Mission.ATTACK);
-    expect(e.moveTarget).toBeNull();
+  // ATTACK has isScatter=true (C++ default, no INI override) — infantry CAN scatter
+  it('infantry on ATTACK mission CAN scatter (isScatter=true per C++ defaults)', () => {
+    let scattered = false;
+    for (let i = 0; i < 50; i++) {
+      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      e.mission = Mission.ATTACK;
+      const ctx = makeCombatCtx([e]);
+      const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+      aiScatterOnDamage(ctx, e, attacker);
+      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+        scattered = true;
+        break;
+      }
+    }
+    expect(scattered).toBe(true);
   });
 
-  // C++ infantry.cpp:1866: HUNT has isScatter=false → no scatter
-  it('infantry on HUNT mission does NOT scatter', () => {
-    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    e.mission = Mission.HUNT;
-    const ctx = makeCombatCtx([e]);
-    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
-    aiScatterOnDamage(ctx, e, attacker);
-    expect(e.mission).toBe(Mission.HUNT);
-    expect(e.moveTarget).toBeNull();
+  // HUNT has isScatter=true (C++ default, no INI Scatter= override) — infantry CAN scatter
+  it('infantry on HUNT mission CAN scatter (isScatter=true per C++ defaults)', () => {
+    let scattered = false;
+    for (let i = 0; i < 50; i++) {
+      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      e.mission = Mission.HUNT;
+      const ctx = makeCombatCtx([e]);
+      const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+      aiScatterOnDamage(ctx, e, attacker);
+      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+        scattered = true;
+        break;
+      }
+    }
+    expect(scattered).toBe(true);
   });
 
   // Non-infantry: only scatters on GUARD or AREA_GUARD
