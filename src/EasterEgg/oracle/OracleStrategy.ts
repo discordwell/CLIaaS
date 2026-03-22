@@ -971,12 +971,14 @@ export class OracleStrategy {
     // Priority: production first (stop enemy reinforcements), then defense, then power.
     // WEAP → FACT → BARR/TENT → AFLD/HPAD → SPEN → defense → power.
     // Island Soviet base first (x=35-60), then eastern/mainland bases.
+    // Priority: static defense → production → power.
+    // Static defense kills our tanks, production makes replacements.
     return pickPriorityTarget(
       { minCx: 35, maxCx: 60, minCy: 35, maxCy: 58 },
-      ['WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD', 'STEK', 'TSLA', 'FTUR', 'SAM', 'PROC', 'DOME', 'APWR', 'POWR'],
+      ['TSLA', 'FTUR', 'SAM', 'WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD', 'STEK', 'PROC', 'DOME', 'APWR', 'POWR'],
     ) ?? pickPriorityTarget(
       { minCx: 60, maxCx: 105, minCy: 35, maxCy: 60 },
-      ['WEAP', 'FACT', 'SPEN', 'AFLD', 'HPAD', 'TSLA', 'FTUR', 'SAM', 'FCOM', 'PROC', 'APWR', 'POWR'],
+      ['TSLA', 'FTUR', 'SAM', 'WEAP', 'FACT', 'SPEN', 'AFLD', 'HPAD', 'FCOM', 'PROC', 'APWR', 'POWR'],
     );
   }
 
@@ -4039,29 +4041,52 @@ export class OracleStrategy {
     // Once assault starts: focus-fire enemy tanks, then attack_move to buildings.
     // NEVER use 'move' — tanks must always be shooting. No rally, no phases.
     // Tanks fight whatever is between them and the building.
+    // Unified target priority — all 'attack' by ID:
+    // 1. Enemy tanks/V2RL within 15 cells (kill what can kill us)
+    // 2. Static defense (TSLA/FTUR/SAM) — attack by structure ID
+    // 3. Production (WEAP/FACT/BARR/AFLD) — attack by structure ID
+    // 4. Dogs/infantry within 10 cells (only if nothing better)
+    // 5. Everything else (POWR/PROC/etc)
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
-      const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
       const groupCenter = this.centroid(assaultArmor);
-      // Enemy tanks/V2RL in the island base zone (x=35-58) within 20 cells.
-      // Ignores far-east BadGuy mammoths at x=93-103 and border mammoths at x=60+.
-      const nearbyTanks = state.enemies.filter(
+      let target: { id: number; cx: number; cy: number; t?: string } | null = null;
+
+      // 1. Enemy tanks/V2RL within 15 cells
+      const nearbyArmor = state.enemies.filter(
         (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
           e.cx >= 35 && e.cx <= 62 &&
-          this.distanceSq(e, groupCenter) <= 100, // 10 cells — only fight tanks in our face
-      ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
+          this.distanceSq(e, groupCenter) <= 225,
+      ).sort((a, b) => {
+        // Prioritize by threat: mammoth > heavy > V2RL > medium
+        const p = (t: string) => t === '4TNK' ? 0 : t === '3TNK' ? 1 : t === 'V2RL' ? 2 : 3;
+        const pd = p(a.t) - p(b.t);
+        return pd !== 0 ? pd : this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter);
+      });
+      if (nearbyArmor.length > 0) {
+        target = nearbyArmor[0];
+      }
 
-      if (nearbyTanks.length > 0) {
-        // Focus-fire nearest enemy tank — 'attack' by ID ignores dogs
-        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: nearbyTanks[0].id });
-        for (const u of assaultArmor) this.recordMove(u.id, nearbyTanks[0].cx, nearbyTanks[0].cy);
-        reasons.push(`assault KILL ${nearbyTanks[0].t} (${assaultArmor.length} → ${nearbyTanks[0].cx},${nearbyTanks[0].cy})`);
-      } else if (structTarget) {
-        // 'attack' building by ID — tanks pathfind TO it (MISSION_ATTACK=1).
-        // They shoot enemies in weapon range while passing but don't stop to chase.
-        // Confirmed: tank moved 35 cells toward WEAP in harness test.
-        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: structTarget.id });
-        for (const u of assaultArmor) this.recordMove(u.id, structTarget.cx, structTarget.cy);
-        reasons.push(`assault RAZE ${structTarget.t} (${assaultArmor.length} → ${structTarget.cx},${structTarget.cy})`);
+      // 2-3. Static defense then production (from chooseScg11eaAssaultTarget)
+      if (!target) {
+        const structTarget = this.chooseScg11eaAssaultTarget(enemyStructures);
+        if (structTarget) target = structTarget;
+      }
+
+      // 4. Dogs/infantry within 10 cells (only if nothing better)
+      if (!target) {
+        const nearbyInf = state.enemies.filter(
+          (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
+            !e.t.includes('TNK') && e.t !== 'V2RL' &&
+            this.distanceSq(e, groupCenter) <= 100,
+        ).sort((a, b) => this.distanceSq(a, groupCenter) - this.distanceSq(b, groupCenter));
+        if (nearbyInf.length > 0) target = nearbyInf[0];
+      }
+
+      if (target) {
+        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
+        for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+        const tName = (target as any).t ?? '?';
+        reasons.push(`assault ${tName} (${assaultArmor.length} → ${target.cx},${target.cy})`);
       }
     }
 
