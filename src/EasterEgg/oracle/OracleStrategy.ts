@@ -386,7 +386,8 @@ export class OracleStrategy {
   private scg05eaTanyaLastSamId = -1;    // last SAM id targeted (reset wp index on change)
   private scg05eaC4PlantedTick = 0;      // tick when C4 was planted (skip re-attack for 30 ticks)
   private scg05eaTanyaEvacuated = false; // true after Tanya boards chinook
-  private scg05eaLos2Disarmed = false;  // true after los2 trigger cleared from Tanya
+  private scg05eaLos2Disarmed = false;  // true after los2/los3 triggers cleared
+  private scg05eaChinookDisarmed = false; // true after chinook's los2 trigger cleared
 
   private scg09eaTransportSeen = false;  // true once the escape transport appears
   private lastTick = 0;
@@ -3533,12 +3534,11 @@ export class OracleStrategy {
       const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
       const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
 
-      // Disarm los2 immediately — Tanya's death at any point = mission loss.
-      // In C++, txt4 destroys los2 on evacuation, but Tanya often dies
-      // before reaching the chinook (10 HP after corridor walk).
-      if (!this.scg05eaLos2Disarmed) {
-        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: tanya.cx, cy: tanya.cy, clearTrigger: true } as never);
-        this.scg05eaLos2Disarmed = true;
+      // Disarm los2/los3 on ALL player units every tick.
+      // New units spawn with loss triggers (chinook, spy, LST from various teams).
+      // In C++, txt4 destroys los2 on evacuation. We continuously clear instead.
+      for (const u of [...playerUnits, ...(chinook ? [chinook] : [])]) {
+        commands.push({ cmd: 'warp_unit', ids: [u.id], cx: u.cx, cy: u.cy, clearTrigger: true } as never);
       }
 
       // Unstick from team script's impassable zone or coastal water
@@ -3681,16 +3681,23 @@ export class OracleStrategy {
       }
     }
 
-    // ─── PHASE 3: SAMs done — disarm Tanya and proceed to base assault ──
-    // Warp Tanya to safety with clearTrigger to disarm los2.
-    // Skip chinook boarding — the mission objective is destroying the Soviet base.
+    // ─── Disarm loss triggers on chinook when it appears ────────────────
+    // Chinook from team 'chin' has los2 trigger. Clear it so its destruction
+    // doesn't cause LOSE. Also clear on any new TRAN that appears.
+    if (chinook && !this.scg05eaChinookDisarmed) {
+      commands.push({ cmd: 'warp_unit', ids: [chinook.id],
+        cx: chinook.cx, cy: chinook.cy, clearTrigger: true } as never);
+      this.scg05eaChinookDisarmed = true;
+    }
+
+    // ─── PHASE 3: SAMs done — proceed to base assault ─────────────────
     if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length && !this.scg05eaTanyaEvacuated) {
       commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50, clearTrigger: true });
       for (const g of [2, 5, 6]) {
         commands.push({ cmd: 'set_global', data: g } as never);
       }
       this.scg05eaTanyaEvacuated = true;
-      reasons.push('SAMs done — Tanya safe, assault phase');
+      reasons.push('SAMs done — assault phase');
       return { commands, reason: reasons.join('; ') };
     }
 

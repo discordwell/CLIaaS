@@ -105,7 +105,7 @@ describe('SCG05EA Tanya waypoint navigation', () => {
 
     // The move target should be wp1 (24,103), not back to wp0
     const d = strategy.decide(tanyaSamState(24, 104));
-    const move = d.commands[0] as { cx: number; cy: number };
+    const move = d.commands.find((c: Record<string, unknown>) => c.cmd === 'move') as { cy: number };
     expect(move.cy).toBeLessThan(104);
   });
 
