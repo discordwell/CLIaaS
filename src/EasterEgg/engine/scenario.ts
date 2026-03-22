@@ -12,7 +12,7 @@ import {
 } from './types';
 import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
-import { GameMap, Terrain } from './map';
+import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, type MapTree } from './map';
 
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
 
@@ -1417,28 +1417,48 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
       map.setTerrain(pos.cx, pos.cy, Terrain.ROCK);
     } else if (/^tc?\d/.test(type)) {
       // T01-T17 = single trees, TC01-TC05 = tree clumps.
-      // C++ parity: single trees (T01-T18) don't block infantry movement.
-      // They're TerrainClass objects on CLEAR ground — infantry walks through.
-      // Only tree clumps (TC) set TREE terrain for multi-cell blocking.
-      if (type.startsWith('tc')) {
+      // C++ parity: trees are TerrainClass objects with HP on CLEAR ground (RA terrain.cpp).
+      // Clumps set TREE terrain for rendering; single trees stay on CLEAR.
+      const isClump = type.startsWith('tc');
+      if (isClump) {
         map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
       }
       map.setTreeType(pos.cx, pos.cy, type);
-      // Tree clumps occupy multiple cells (from C++ tdata.cpp occupancy data)
-      if (type.startsWith('tc')) {
-        const CLUMP_OCCUPANCY: Record<string, [number, number][]> = {
+
+      // Build occupy cell index list from C++ tdata.cpp Occupy_List
+      const occupyOffsets = TREE_OCCUPY[type] ?? [];
+      const occupyCells: number[] = [];
+      for (const [dx, dy] of occupyOffsets) {
+        occupyCells.push((pos.cy + dy) * 128 + (pos.cx + dx));
+      }
+
+      // Create tree object with HP (C++ terrain.cpp constructor: Strength = Class->MaxStrength)
+      const tree: MapTree = {
+        type,
+        cx: pos.cx,
+        cy: pos.cy,
+        hp: TREE_MAX_HP,
+        maxHp: TREE_MAX_HP,
+        immune: isClump,  // C++ RA tdata.cpp: all clumps have IsImmune=true
+        occupyCells,
+      };
+      map.addTree(tree);
+
+      // Tree clumps occupy multiple cells — mark satellites for rendering
+      if (isClump) {
+        // Use the rendering occupancy (all cells the clump sprite covers)
+        // which may differ from the C++ Occupy_List used for movement blocking.
+        const CLUMP_RENDER: Record<string, [number, number][]> = {
           'tc01': [[1, 0], [0, 1], [1, 1]],
           'tc02': [[1, 0], [0, 1], [1, 1]],
           'tc03': [[1, 0], [0, 1], [1, 1]],
-          'tc04': [[0, 1], [1, 1]],
-          'tc05': [[0, 1], [1, 0], [1, 1]],
+          'tc04': [[0, 1], [1, 1], [2, 1], [0, 2]],
+          'tc05': [[2, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]],
         };
-        const extra = CLUMP_OCCUPANCY[type];
-        if (extra) {
-          for (const [dx, dy] of extra) {
-            map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.TREE);
-            map.setTreeType(pos.cx + dx, pos.cy + dy, '_clump');
-          }
+        const extra = CLUMP_RENDER[type] ?? [];
+        for (const [dx, dy] of extra) {
+          map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.TREE);
+          map.setTreeType(pos.cx + dx, pos.cy + dy, '_clump');
         }
       }
     }

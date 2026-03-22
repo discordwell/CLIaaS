@@ -56,6 +56,58 @@ const TERRAIN_NAME_MAP: Record<number, string> = {
   [Terrain.TREE]: 'Clear', // C++ parity — trees are TerrainClass on CLEAR cells, speed = CLEAR
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// C++ TerrainClass parity — trees as HP-bearing objects (RA terrain.cpp/tdata.cpp)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** C++ tdata.cpp line 50 — #define TREE_NORMAL 600 (all RA trees use this) */
+export const TREE_MAX_HP = 600;
+
+/** Tree object placed on the map. C++ TerrainClass (terrain.cpp).
+ *  Trees have HP, take weapon damage (ARMOR_WOOD), and are destroyed when HP reaches 0.
+ *  Clumps (TC01-TC05) are immune to combat damage (C++ IsImmune=true). */
+export interface MapTree {
+  type: string;         // 't01'-'t17', 'tc01'-'tc05'
+  cx: number;           // origin cell x
+  cy: number;           // origin cell y
+  hp: number;           // current HP
+  maxHp: number;        // max HP (600 for all trees)
+  immune: boolean;      // C++ IsImmune — true for clumps
+  occupyCells: number[]; // cell indices this tree occupies (blocks ground movement)
+}
+
+/** C++ RA tdata.cpp Occupy_List per tree type — cells blocked by each tree, as [dx,dy] offsets
+ *  from the origin cell. Decoded from C++ cell offset arrays (_List0010, _List10, etc.)
+ *  where MAP_CELL_W=128 encodes row offsets.
+ *
+ *  Key: _List0010={MAP_CELL_W}=(0,1), _List10={0}=(0,0), _List0011={MAP_CELL_W,MAP_CELL_W+1}=(0,1)(1,1)
+ *
+ *  C++ source: RA/tdata.cpp lines 57-77 (offset lists), lines 246-424 (tree type constructors) */
+export const TREE_OCCUPY: Record<string, [number, number][]> = {
+  // Single trees — occupy 1-2 cells, NOT immune
+  't01': [[0, 1]],             // _List0010
+  't02': [[0, 1]],             // _List0010
+  't03': [[0, 1]],             // _List0010
+  't05': [[0, 1]],             // _List0010
+  't06': [[0, 1]],             // _List0010
+  't07': [[0, 1]],             // _List0010
+  't08': [[0, 0]],             // _List10
+  't10': [[0, 1], [1, 1]],    // _List0011
+  't11': [[0, 1], [1, 1]],    // _List0011
+  't12': [[0, 1]],             // _List0010
+  't13': [[0, 1]],             // _List0010
+  't14': [[0, 1], [1, 1]],    // _List0011
+  't15': [[0, 1], [1, 1]],    // _List0011
+  't16': [[0, 1]],             // _List0010
+  't17': [[0, 1]],             // _List0010
+  // Tree clumps — immune to damage, multi-cell occupancy
+  'tc01': [[0, 1], [1, 1]],                                           // _List000110
+  'tc02': [[1, 0], [0, 1], [1, 1]],                                   // _List010110
+  'tc03': [[0, 0], [1, 0], [0, 1], [1, 1]],                           // _List110110
+  'tc04': [[0, 1], [1, 1], [2, 1], [0, 2]],                           // _List000011101000
+  'tc05': [[2, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]],          // _List001011100110
+};
+
 export class GameMap {
   /** 128×128 grid of terrain types */
   cells: Terrain[];
@@ -94,6 +146,17 @@ export class GameMap {
 
   /** Tree type at each cell ('' = none, 't01'-'t17'/'tc01'-'tc05' = tree sprite, '_clump' = covered by nearby clump origin) */
   treeType: string[];
+
+  /** C++ TerrainClass objects — trees with HP, keyed by origin cell index.
+   *  cpp-parity: RA terrain.cpp — trees are objects with HP and ARMOR_WOOD. */
+  trees = new Map<number, MapTree>();
+
+  /** Cell indices occupied by trees (blocks ground unit movement).
+   *  cpp-parity: RA tdata.cpp Occupy_List — each tree blocks specific cells. */
+  treeOccupied = new Set<number>();
+
+  /** Reverse lookup: cell index → MapTree that occupies it (for damage routing) */
+  private treeCellToTree = new Map<number, MapTree>();
 
   /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
   decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
@@ -198,6 +261,68 @@ export class GameMap {
     }
   }
 
+  /** Register a tree object on the map. Called during scenario loading.
+   *  cpp-parity: RA terrain.cpp TerrainClass::Unlimbo — places tree and marks occupancy. */
+  addTree(tree: MapTree): void {
+    const idx = tree.cy * MAP_CELLS + tree.cx;
+    this.trees.set(idx, tree);
+    for (const cellIdx of tree.occupyCells) {
+      this.treeOccupied.add(cellIdx);
+      this.treeCellToTree.set(cellIdx, tree);
+    }
+  }
+
+  /** Get the tree object that occupies a given cell (any of its occupy cells).
+   *  Returns undefined if no tree occupies this cell. */
+  getTreeAtCell(cx: number, cy: number): MapTree | undefined {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return undefined;
+    return this.treeCellToTree.get(cy * MAP_CELLS + cx);
+  }
+
+  /** Get tree by origin cell. */
+  getTreeAtOrigin(cx: number, cy: number): MapTree | undefined {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return undefined;
+    return this.trees.get(cy * MAP_CELLS + cx);
+  }
+
+  /** Destroy a tree — clear its occupancy, terrain, and tree type.
+   *  cpp-parity: RA terrain.cpp Start_To_Crumble + destructor — removes tree from map. */
+  destroyTree(tree: MapTree): void {
+    // Clear occupancy
+    for (const cellIdx of tree.occupyCells) {
+      this.treeOccupied.delete(cellIdx);
+      this.treeCellToTree.delete(cellIdx);
+    }
+    // Clear tree type and terrain on all cells this tree covers
+    const originIdx = tree.cy * MAP_CELLS + tree.cx;
+    this.trees.delete(originIdx);
+    // Clear origin cell
+    this.clearTreeType(tree.cx, tree.cy);
+    if (this.getTerrain(tree.cx, tree.cy) === Terrain.TREE) {
+      this.setTerrain(tree.cx, tree.cy, Terrain.CLEAR);
+    }
+    // Clear satellite cells (clump _clump markers and TREE terrain)
+    const occupy = TREE_OCCUPY[tree.type];
+    if (occupy) {
+      for (const [dx, dy] of occupy) {
+        const scx = tree.cx + dx, scy = tree.cy + dy;
+        if (this.getTreeType(scx, scy) === '_clump' || this.getTreeType(scx, scy) === tree.type) {
+          this.clearTreeType(scx, scy);
+        }
+        if (this.getTerrain(scx, scy) === Terrain.TREE) {
+          this.setTerrain(scx, scy, Terrain.CLEAR);
+        }
+      }
+    }
+  }
+
+  /** Check if a cell is occupied by a tree (blocks ground movement).
+   *  cpp-parity: RA terrain.cpp Occupy_List — occupied cells are impassable. */
+  isTreeOccupied(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    return this.treeOccupied.has(cy * MAP_CELLS + cx);
+  }
+
   /** Check if a cell is passable (terrain + occupancy).
    *  C++ parity: pathfinding extends 1 cell beyond map bounds.
    *  Map bounds define the visible area, not the pathfinding boundary. */
@@ -206,12 +331,18 @@ export class GameMap {
         cy < this.boundsY - 1 || cy >= this.boundsY + this.boundsH + 1) {
       return false;
     }
-    return PASSABLE.has(this.getTerrain(cx, cy));
+    if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
+    // C++ parity: tree-occupied cells block ground movement
+    if (this.isTreeOccupied(cx, cy)) return false;
+    return true;
   }
 
-  /** Check if a cell is passable ignoring occupancy */
+  /** Check if a cell is passable ignoring unit occupancy (but respects terrain + tree occupancy).
+   *  cpp-parity: tree-occupied cells are impassable even when ignoring unit occupancy. */
   isTerrainPassable(cx: number, cy: number): boolean {
-    return PASSABLE.has(this.getTerrain(cx, cy));
+    if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
+    if (this.isTreeOccupied(cx, cy)) return false;
+    return true;
   }
 
   /** C++ cell.cpp:498-503 Is_Clear_To_Build — check if a cell allows building placement.
@@ -764,6 +895,12 @@ export class GameMap {
     }
     const passable = naval ? this.getTerrain(cx, cy) === Terrain.WATER : PASSABLE.has(this.getTerrain(cx, cy));
     if (!passable) return MoveResult.IMPASSABLE;
+
+    // C++ parity: trees occupy cells and block ground movement (RA terrain.cpp Occupy_List).
+    // Both infantry and vehicles are blocked by tree-occupied cells.
+    if (!naval && this.treeOccupied.has(cy * MAP_CELLS + cx)) {
+      return MoveResult.IMPASSABLE;
+    }
 
     // Infantry sub-cell check: infantry can enter if sub-cells are available
     if (isInfantry) {

@@ -94,6 +94,7 @@ function makeMockMap() {
     getTerrain: () => 0 /* CLEAR */,
     setTerrain: (_cx: number, _cy: number, _t: number) => {},
     clearTreeType: (_cx: number, _cy: number) => {},
+    getTreeAtCell: (_cx: number, _cy: number) => undefined,
     clearWallType: (_cx: number, _cy: number) => {},
     getWallType: (_cx: number, _cy: number) => '',
     getOccupancy: (_cx: number, _cy: number) => 0,

@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-22T03:40Z — Tree Parity: C++ TerrainClass HP + Occupancy
+- Implemented C++ TerrainClass parity for trees. Trees now have 600 HP (ARMOR_WOOD), deterministic damage via modifyDamage(), per-type occupancy blocking from RA tdata.cpp Occupy_List, and clump immunity (IsImmune=true).
+- Replaced 40% probabilistic destruction with HP-based system. Added dedup to prevent multi-cell trees taking damage multiple times per explosion.
+- Added TREE_OCCUPY constant with decoded C++ occupy lists for all 15 RA tree types + 5 clumps.
+- Updated canEnterCell/isPassable/isTerrainPassable to block on tree-occupied cells.
+- 62 new cpp-parity tests. All 33,950 tests pass (2 pre-existing map-data failures).
+- **Files**: map.ts, scenario.ts, combat.ts, cpp-parity-trees.test.ts, 2 mock fixes.
+
 ## 2026-03-22T01:50Z — Fix 17 Failing Tests: AA Ground Targeting + UnitType Enum Fixes
 - **Engine fix (combat.ts:1389)**: Removed AA-only ground target filter. C++ SAM/AGUN CAN target ground units as fallback; the AA override prefers airborne targets. Removed `isAntiAirOnly` property from scenario.ts StructureWeapon interface and SAM/AGUN weapon definitions.
 - **Test fix (cpp-parity-power-down.test.ts)**: Fixed `UnitType.HELI` → `UnitType.V_HELI` and `UnitType.E1` → `UnitType.I_E1` (nonexistent enum members that silently resolved to undefined, falling back to E1 infantry stats).

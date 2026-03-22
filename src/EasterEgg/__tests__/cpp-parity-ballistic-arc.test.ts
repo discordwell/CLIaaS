@@ -44,7 +44,7 @@ function makeCombatCtx(overrides?: Partial<CombatContext>): CombatContext {
     scenarioWarheadMeta: {},
     scenarioWarheadProps: {},
     attackedTriggerNames: new Set(),
-    map: { isPassable: () => true, addDecal: () => {}, getTerrain: () => 0, setTerrain: () => {}, clearTreeType: () => {}, getWallType: () => '', clearWallType: () => {}, overlay: new Uint8Array(128 * 128).fill(0xFF), hasLineOfSight: () => true, unjamRadius: () => {}, destroyBridge: () => 0, countBridgeCells: () => 0 } as any,
+    map: { isPassable: () => true, addDecal: () => {}, getTerrain: () => 0, setTerrain: () => {}, clearTreeType: () => {}, getTreeAtCell: () => undefined, getWallType: () => '', clearWallType: () => {}, overlay: new Uint8Array(128 * 128).fill(0xFF), hasLineOfSight: () => true, unjamRadius: () => {}, destroyBridge: () => 0, countBridgeCells: () => 0 } as any,
     aiStates: new Map(),
     lastBaseAttackEva: 0,
     gameTicksPerSec: 20,

@@ -18,7 +18,7 @@ import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
-import { type GameMap, Terrain } from './map';
+import { type GameMap, type MapTree, Terrain } from './map';
 import { canTargetNaval } from './aircraft';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -1060,24 +1060,38 @@ export function applySplashDamage(
   if (splashRange >= 1.5 && weapon.damage >= 30) {
     const cc = worldToCell(center.x, center.y);
     const r = Math.ceil(splashRange);
+    const damagedTrees = new Set<MapTree>(); // dedup: same tree may span multiple cells in blast
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dy * dy > splashRange * splashRange) continue;
         const tx = cc.cx + dx;
         const ty = cc.cy + dy;
-        if (ctx.map.getTerrain(tx, ty) === Terrain.TREE) {
-          // 40% chance to destroy tree per explosion
-          if (Math.random() < 0.4) {
-            ctx.map.setTerrain(tx, ty, Terrain.CLEAR);
-            ctx.map.clearTreeType(tx, ty);
-            ctx.map.addDecal(tx, ty, 6, 0.4); // stump/scorch mark
-            ctx.effects.push({
-              type: 'explosion',
-              x: tx * CELL_SIZE + CELL_SIZE / 2,
-              y: ty * CELL_SIZE + CELL_SIZE / 2,
-              frame: 0, maxFrames: 10, size: 8,
-              sprite: 'piffpiff', spriteStart: 0,
-            } as Effect);
+        // C++ parity: tree damage — deterministic HP-based (RA terrain.cpp:108-151).
+        // Trees have 600 HP and ARMOR_WOOD. Immune trees (clumps) skip damage.
+        // SA warhead cannot destroy terrain (terrain.cpp:118).
+        const hitTree = ctx.map.getTreeAtCell(tx, ty);
+        if (hitTree && !hitTree.immune && hitTree.hp > 0 && weapon.warhead !== 'SA' && !damagedTrees.has(hitTree)) {
+          damagedTrees.add(hitTree);
+          // Distance from explosion center to tree origin (C++ uses center of tree object)
+          const treeDx = hitTree.cx - cc.cx;
+          const treeDy = hitTree.cy - cc.cy;
+          const distCells = Math.sqrt(treeDx * treeDx + treeDy * treeDy);
+          const distPixels = distCells * CELL_SIZE;
+          const treeDmg = modifyDamage(weapon.damage, weapon.warhead, 'wood', distPixels);
+          if (treeDmg > 0) {
+            hitTree.hp = Math.max(0, hitTree.hp - treeDmg);
+            if (hitTree.hp <= 0) {
+              // Tree destroyed — clear from map (C++ terrain.cpp Start_To_Crumble + destructor)
+              ctx.map.destroyTree(hitTree);
+              ctx.map.addDecal(hitTree.cx, hitTree.cy, 6, 0.4); // stump/scorch mark
+              ctx.effects.push({
+                type: 'explosion',
+                x: hitTree.cx * CELL_SIZE + CELL_SIZE / 2,
+                y: hitTree.cy * CELL_SIZE + CELL_SIZE / 2,
+                frame: 0, maxFrames: 10, size: 8,
+                sprite: 'piffpiff', spriteStart: 0,
+              } as Effect);
+            }
           }
         }
         // CF8: Wall destruction from splash — warheads with IsWallDestroyer flag (C++ combat.cpp:244-270)
