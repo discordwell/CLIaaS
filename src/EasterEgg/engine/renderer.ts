@@ -1393,7 +1393,7 @@ export class Renderer {
       if (sheet) {
         // Determine frame: damaged buildings use second half of frames
         const totalFrames = sheet.meta.frameCount;
-        const damaged = s.hp < s.maxHp * 0.5; // less than 50% health
+        const damaged = s.hp <= s.maxHp * 0.5; // at or below 50% health (C++ uses <=)
         let frame = 0;
         // GUN turret: 128 frames = [32 normal][32 firing][32 damaged][32 damaged firing]
         // turretDir is now 32-step (0-31) — use directly with BODY_SHAPE
@@ -2242,9 +2242,9 @@ export class Renderer {
     ctx.fillRect(bx, y, barW, barH);
 
     // Health fill with pip segments — palette-accurate green/yellow/red
-    // C++ techno.cpp:1089-1188 thresholds: green≥50%, yellow≥25%, red<25%
-    const color = ratio >= 0.50 ? this.palColor(PAL_GREEN_HP) :
-                  ratio >= 0.25 ? this.palColor(156) :  // palette yellow [255,255,158]
+    // C++ techno.cpp:1089-1188 thresholds: green>50%, yellow>25%, red<=25%
+    const color = ratio > 0.50 ? this.palColor(PAL_GREEN_HP) :
+                  ratio > 0.25 ? this.palColor(156) :  // palette yellow [255,255,158]
                                   this.palColor(PAL_RED_HP);
     const fillW = barW * ratio;
     ctx.fillStyle = color;

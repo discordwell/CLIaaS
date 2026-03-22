@@ -15,8 +15,8 @@
  *   building.cpp:502,632,639,651,669,679 — Building damaged frame: Health_Ratio() <= ConditionYellow
  *   infantry.cpp:455-456  — Fear scaling: Health_Ratio() > ConditionRed → fear/2, > ConditionYellow → fear/2
  *
- * Tests that FAIL are GOOD — they identify real C++ divergences.
- * DO NOT modify engine code to make these pass.
+ * Tests verify TS engine matches C++ boundary behavior after operator fixes.
+ * All 6 boundary bugs (DS4-DS7, DS10) have been fixed in the engine.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -152,17 +152,16 @@ describe('DS3: damageSpeedFactor — C++ drive.cpp:1157-1161 parity', () => {
 
 describe('DS4: health bar color thresholds — C++ techno.cpp:1146-1152', () => {
   // C++ uses `<=` comparisons, so at exactly the threshold, the color transitions.
-  // TS renderer.ts:2246-2248 uses `>=` with inverted logic:
-  //   ratio >= 0.50 → GREEN, ratio >= 0.25 → YELLOW, else → RED
-  // This means at exactly 0.50, C++ shows YELLOW but TS shows GREEN.
-  // At exactly 0.25, C++ shows RED but TS shows YELLOW.
+  // TS renderer.ts:2246-2248 now uses `>` (fixed from `>=`):
+  //   ratio > 0.50 → GREEN, ratio > 0.25 → YELLOW, else → RED
+  // This matches C++ behavior at boundaries.
 
   it('ratio > ConditionYellow → green (both C++ and TS agree)', () => {
     const ratio = 0.51;
     // C++: starts green, neither <= 0.50 nor <= 0.25 fires → GREEN
     const cppColor = 'GREEN';
-    // TS: ratio >= 0.50 → GREEN
-    const tsColor = ratio >= 0.50 ? 'GREEN' : ratio >= 0.25 ? 'YELLOW' : 'RED';
+    // TS: ratio > 0.50 → GREEN
+    const tsColor = ratio > 0.50 ? 'GREEN' : ratio > 0.25 ? 'YELLOW' : 'RED';
     expect(tsColor).toBe(cppColor);
   });
 
@@ -170,17 +169,17 @@ describe('DS4: health bar color thresholds — C++ techno.cpp:1146-1152', () => 
     const ratio = INI_CONDITION_YELLOW; // exactly 0.50
     // C++ techno.cpp:1147: ratio <= 0.50 → YELLOW
     const cppColor = 'YELLOW';
-    // TS renderer.ts:2246: ratio >= 0.50 → GREEN  (MISMATCH!)
-    const tsColor = ratio >= 0.50 ? 'GREEN' : ratio >= 0.25 ? 'YELLOW' : 'RED';
-    expect(tsColor).toBe(cppColor); // EXPECT FAIL: TS returns GREEN, C++ returns YELLOW
+    // TS renderer.ts:2246: ratio > 0.50 → not GREEN, ratio > 0.25 → YELLOW (MATCH)
+    const tsColor = ratio > 0.50 ? 'GREEN' : ratio > 0.25 ? 'YELLOW' : 'RED';
+    expect(tsColor).toBe(cppColor);
   });
 
   it('ratio just below ConditionYellow (0.49) → both show YELLOW', () => {
     const ratio = 0.49;
     // C++: <= 0.50 → YELLOW, not <= 0.25 → stays YELLOW
     const cppColor = 'YELLOW';
-    // TS: not >= 0.50, but >= 0.25 → YELLOW
-    const tsColor = ratio >= 0.50 ? 'GREEN' : ratio >= 0.25 ? 'YELLOW' : 'RED';
+    // TS: not > 0.50, but > 0.25 → YELLOW
+    const tsColor = ratio > 0.50 ? 'GREEN' : ratio > 0.25 ? 'YELLOW' : 'RED';
     expect(tsColor).toBe(cppColor);
   });
 
@@ -188,53 +187,53 @@ describe('DS4: health bar color thresholds — C++ techno.cpp:1146-1152', () => 
     const ratio = INI_CONDITION_RED; // exactly 0.25
     // C++ techno.cpp:1150: ratio <= 0.25 → RED
     const cppColor = 'RED';
-    // TS renderer.ts:2247: ratio >= 0.25 → YELLOW  (MISMATCH!)
-    const tsColor = ratio >= 0.50 ? 'GREEN' : ratio >= 0.25 ? 'YELLOW' : 'RED';
-    expect(tsColor).toBe(cppColor); // EXPECT FAIL: TS returns YELLOW, C++ returns RED
+    // TS renderer.ts:2247: ratio > 0.25 → not YELLOW, falls to RED (MATCH)
+    const tsColor = ratio > 0.50 ? 'GREEN' : ratio > 0.25 ? 'YELLOW' : 'RED';
+    expect(tsColor).toBe(cppColor);
   });
 
   it('ratio just below ConditionRed (0.24) → both show RED', () => {
     const ratio = 0.24;
     // C++: <= 0.50 → YELLOW, then <= 0.25 → RED
     const cppColor = 'RED';
-    // TS: not >= 0.50, not >= 0.25 → RED
-    const tsColor = ratio >= 0.50 ? 'GREEN' : ratio >= 0.25 ? 'YELLOW' : 'RED';
+    // TS: not > 0.50, not > 0.25 → RED
+    const tsColor = ratio > 0.50 ? 'GREEN' : ratio > 0.25 ? 'YELLOW' : 'RED';
     expect(tsColor).toBe(cppColor);
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DS5: Building damaged frame threshold — C++ building.cpp uses <= ConditionYellow
-// TS renderer.ts:1396 uses: s.hp < s.maxHp * 0.5 (strictly less)
+// TS renderer.ts:1396 now uses: s.hp <= s.maxHp * 0.5 (fixed from <)
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('DS5: building damaged frame threshold — C++ building.cpp parity', () => {
   // C++ building.cpp:502,632,639,651,669,679: Health_Ratio() <= Rule.ConditionYellow
-  // TS renderer.ts:1396: s.hp < s.maxHp * 0.5
+  // TS renderer.ts:1396: s.hp <= s.maxHp * 0.5 (fixed from <)
 
   it('above 50% → undamaged frame (both agree)', () => {
     const hp = 600;
     const maxHp = 1000;
     const cppDamaged = (hp / maxHp) <= INI_CONDITION_YELLOW; // false
-    const tsDamaged = hp < maxHp * 0.5; // false
+    const tsDamaged = hp <= maxHp * 0.5; // false
     expect(tsDamaged).toBe(cppDamaged);
   });
 
-  it('at exactly 50% → C++ shows damaged (<=), TS may not (<)', () => {
+  it('at exactly 50% → both show damaged (<=)', () => {
     const maxHp = 1000;
     const hp = maxHp * INI_CONDITION_YELLOW; // exactly 500
     // C++ building.cpp: Health_Ratio() <= 0.50 → true (damaged frame)
     const cppDamaged = (hp / maxHp) <= INI_CONDITION_YELLOW; // true
-    // TS renderer.ts:1396: hp < maxHp * 0.5 → 500 < 500 → false
-    const tsDamaged = hp < maxHp * 0.5; // false
-    expect(tsDamaged).toBe(cppDamaged); // EXPECT FAIL: TS false, C++ true
+    // TS renderer.ts:1396: hp <= maxHp * 0.5 → 500 <= 500 → true (MATCH)
+    const tsDamaged = hp <= maxHp * 0.5; // true
+    expect(tsDamaged).toBe(cppDamaged);
   });
 
   it('at 49% → both show damaged', () => {
     const maxHp = 1000;
     const hp = 490;
     const cppDamaged = (hp / maxHp) <= INI_CONDITION_YELLOW; // true
-    const tsDamaged = hp < maxHp * 0.5; // true
+    const tsDamaged = hp <= maxHp * 0.5; // true
     expect(tsDamaged).toBe(cppDamaged);
   });
 });
@@ -242,38 +241,37 @@ describe('DS5: building damaged frame threshold — C++ building.cpp parity', ()
 // ══════════════════════════════════════════════════════════════════════════════
 // DS6: Cloaking health gate — C++ techno.cpp:2444
 // C++ uses: Health_Ratio() > Rule.ConditionRed → always cloak
-// TS uses: entity.hp / entity.maxHp < CONDITION_RED → 96% block
+// TS uses: entity.hp / entity.maxHp <= CONDITION_RED → 96% block (fixed from <)
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('DS6: cloak health gate — C++ techno.cpp:2444 parity', () => {
   // C++ techno.cpp:2444: if (Health_Ratio() > Rule.ConditionRed) { Do_Cloak(); }
   //                       else { if (Percent_Chance(4)) { Do_Cloak(); } }
-  // TS index.ts:4573: if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
+  // TS index.ts:4573: if (entity.hp / entity.maxHp <= CONDITION_RED && Math.random() > 0.04) break;
 
   it('above ConditionRed (30%) → always allowed (both agree)', () => {
     const ratio = 0.30;
     const cppAllowCloak = ratio > INI_CONDITION_RED; // true
-    const tsBlockCloak = ratio < CONDITION_RED; // false → not blocked → allowed
+    const tsBlockCloak = ratio <= CONDITION_RED; // false → not blocked → allowed
     expect(!tsBlockCloak).toBe(cppAllowCloak);
   });
 
-  it('at exactly ConditionRed (25%) → C++ blocks (uses >), TS allows (uses <)', () => {
+  it('at exactly ConditionRed (25%) → both use 4% chance path', () => {
     const ratio = INI_CONDITION_RED; // exactly 0.25
     // C++ techno.cpp:2444: 0.25 > 0.25 → false → goes to 4% chance branch
     const cppAlwaysCloak = ratio > INI_CONDITION_RED; // false (4% chance path)
-    // TS index.ts:4573: 0.25 < 0.25 → false → skip break → always allowed
-    const tsBlocked = ratio < CONDITION_RED; // false → NOT blocked → always allowed
-    const tsAlwaysCloak = !tsBlocked; // true — always cloaks
-    // Mismatch: C++ has 4% chance, TS always allows
-    expect(tsAlwaysCloak).toBe(cppAlwaysCloak); // EXPECT FAIL: TS true, C++ false
+    // TS index.ts:4573: 0.25 <= 0.25 → true → enters 96% block path (MATCH)
+    const tsBlocked = ratio <= CONDITION_RED; // true → enters 4% chance path
+    const tsAlwaysCloak = !tsBlocked; // false
+    expect(tsAlwaysCloak).toBe(cppAlwaysCloak);
   });
 
   it('below ConditionRed (20%) → both use 4% chance path', () => {
     const ratio = 0.20;
     // C++ techno.cpp:2444: 0.20 > 0.25 → false → 4% chance
     const cppAlwaysCloak = ratio > INI_CONDITION_RED; // false
-    // TS index.ts:4573: 0.20 < 0.25 → true → 96% chance to break
-    const tsBlocked = ratio < CONDITION_RED; // true → enters 4% chance path
+    // TS index.ts:4573: 0.20 <= 0.25 → true → 96% chance to break
+    const tsBlocked = ratio <= CONDITION_RED; // true → enters 4% chance path
     const tsAlwaysCloak = !tsBlocked; // false
     expect(tsAlwaysCloak).toBe(cppAlwaysCloak);
   });
@@ -282,21 +280,21 @@ describe('DS6: cloak health gate — C++ techno.cpp:2444 parity', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 // DS7: Self-healing threshold — C++ techno.cpp:2354
 // C++ only heals when Health_Ratio() <= ConditionYellow (50%)
-// TS heals when s.hp < s.maxHp (100%) — heals to full
+// TS now heals when s.hp / s.maxHp <= CONDITION_YELLOW (fixed from s.hp < s.maxHp)
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('DS7: self-healing threshold — C++ techno.cpp:2354 parity', () => {
   // C++ techno.cpp:2354:
   //   if (IsSelfHealing && (Frame % RepairRate*TICKS_PER_MINUTE)==0 && Health_Ratio() <= ConditionYellow)
   //     Strength++;
-  // TS index.ts:1770: if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp)
+  // TS index.ts:1770: if (s.alive && s.type === 'QUEE' && s.hp / s.maxHp <= CONDITION_YELLOW)
 
   it('at 40% HP (below ConditionYellow) → both allow self-heal', () => {
     const maxHp = 800;
     const hp = 320; // 40%
     const ratio = hp / maxHp;
     const cppShouldHeal = ratio <= INI_CONDITION_YELLOW; // true
-    const tsShouldHeal = hp < maxHp; // true
+    const tsShouldHeal = ratio <= CONDITION_YELLOW; // true
     expect(tsShouldHeal).toBe(cppShouldHeal);
   });
 
@@ -305,28 +303,28 @@ describe('DS7: self-healing threshold — C++ techno.cpp:2354 parity', () => {
     const hp = 400; // 50%
     const ratio = hp / maxHp;
     const cppShouldHeal = ratio <= INI_CONDITION_YELLOW; // true (<=)
-    const tsShouldHeal = hp < maxHp; // true
+    const tsShouldHeal = ratio <= CONDITION_YELLOW; // true (<=)
     expect(tsShouldHeal).toBe(cppShouldHeal);
   });
 
-  it('at 51% HP (above ConditionYellow) → C++ stops, TS keeps healing', () => {
+  it('at 51% HP (above ConditionYellow) → both stop healing', () => {
     const maxHp = 1000;
     const hp = 510; // 51%
     const ratio = hp / maxHp;
     // C++ techno.cpp:2354: 0.51 <= 0.50 → false → no healing
     const cppShouldHeal = ratio <= INI_CONDITION_YELLOW; // false
-    // TS index.ts:1770: 510 < 1000 → true → still healing
-    const tsShouldHeal = hp < maxHp; // true
-    expect(tsShouldHeal).toBe(cppShouldHeal); // EXPECT FAIL: TS true, C++ false
+    // TS index.ts:1770: 0.51 <= 0.50 → false → no healing (MATCH)
+    const tsShouldHeal = ratio <= CONDITION_YELLOW; // false
+    expect(tsShouldHeal).toBe(cppShouldHeal);
   });
 
-  it('at 90% HP → C++ does not heal, TS still heals', () => {
+  it('at 90% HP → both do not heal', () => {
     const maxHp = 1000;
     const hp = 900;
     const ratio = hp / maxHp;
     const cppShouldHeal = ratio <= INI_CONDITION_YELLOW; // false
-    const tsShouldHeal = hp < maxHp; // true
-    expect(tsShouldHeal).toBe(cppShouldHeal); // EXPECT FAIL: TS true, C++ false
+    const tsShouldHeal = ratio <= CONDITION_YELLOW; // false
+    expect(tsShouldHeal).toBe(cppShouldHeal);
   });
 });
 
@@ -397,9 +395,8 @@ describe('DS9: engineer capture threshold uses ConditionRed', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('DS10: comparison operator parity audit', () => {
-  // This section documents the expected comparison operators.
-  // C++ uses `<=` for thresholds (transition AT the boundary).
-  // TS sometimes uses `<` (strictly less), missing the boundary.
+  // This section verifies all boundary operators now match C++.
+  // All 6 boundary bugs have been fixed.
 
   it('damageSpeedFactor uses <= (matches C++ drive.cpp:1159)', () => {
     // TS combat.ts:251: if (ratio <= CONDITION_YELLOW) return 0.75;
@@ -410,41 +407,40 @@ describe('DS10: comparison operator parity audit', () => {
     expect(damageSpeedFactor(e)).toBe(0.75);
   });
 
-  it('health bar: C++ uses <= at boundaries (TS uses >= which inverts boundary)', () => {
+  it('health bar: TS now uses > at boundaries (matches C++ <= logic)', () => {
     // C++ techno.cpp:1147: if (ratio <= ConditionYellow) color = YELLOW
-    // TS renderer.ts:2246: ratio >= 0.50 ? GREEN : ...
-    // At ratio=0.50: C++ → YELLOW, TS → GREEN
+    // TS renderer.ts:2246: ratio > 0.50 ? GREEN : ... (fixed from >=)
+    // At ratio=0.50: C++ → YELLOW, TS → YELLOW (both agree now)
     const ratio = INI_CONDITION_YELLOW;
     const cppIsYellow = ratio <= INI_CONDITION_YELLOW; // true
-    const tsIsGreen = ratio >= 0.50; // true (wrongly green)
-    // If TS uses >=, boundary belongs to wrong color
+    const tsIsYellow = !(ratio > 0.50); // true (not green, falls to yellow check)
     expect(cppIsYellow).toBe(true);
-    expect(tsIsGreen).toBe(true);
-    // They disagree at the boundary:
-    expect(tsIsGreen).not.toBe(!cppIsYellow); // both true but mean different colors
+    expect(tsIsYellow).toBe(true);
+    // They now agree at the boundary:
+    expect(tsIsYellow).toBe(cppIsYellow);
   });
 
-  it('building damaged frame: C++ uses <= (TS uses <, missing boundary)', () => {
+  it('building damaged frame: TS now uses <= (matches C++)', () => {
     // C++ building.cpp:651: if (Health_Ratio() <= Rule.ConditionYellow) shapenum = 1
-    // TS renderer.ts:1396: const damaged = s.hp < s.maxHp * 0.5
+    // TS renderer.ts:1396: const damaged = s.hp <= s.maxHp * 0.5 (fixed from <)
     const maxHp = 1000;
     const hp = 500; // exactly 50%
     const cppDamaged = (hp / maxHp) <= INI_CONDITION_YELLOW; // true
-    const tsDamaged = hp < maxHp * 0.5; // false
+    const tsDamaged = hp <= maxHp * 0.5; // true (fixed)
     expect(cppDamaged).toBe(true);
-    expect(tsDamaged).toBe(false);
-    // Mismatch at boundary
-    expect(tsDamaged).not.toBe(cppDamaged);
+    expect(tsDamaged).toBe(true);
+    // They now agree at the boundary:
+    expect(tsDamaged).toBe(cppDamaged);
   });
 
-  it('cloak gate: C++ uses > (TS uses <, boundary goes to wrong branch)', () => {
+  it('cloak gate: TS now uses <= (matches C++ > logic)', () => {
     // C++ techno.cpp:2444: if (Health_Ratio() > Rule.ConditionRed) Do_Cloak()
-    // TS index.ts:4573: if (entity.hp / entity.maxHp < CONDITION_RED ...) break
+    // TS index.ts:4573: if (entity.hp / entity.maxHp <= CONDITION_RED ...) break (fixed from <)
     const ratio = INI_CONDITION_RED; // exactly 0.25
     const cppAlwaysCloak = ratio > INI_CONDITION_RED; // false (4% path)
-    const tsBlocked = ratio < CONDITION_RED; // false (allowed path)
+    const tsBlocked = ratio <= CONDITION_RED; // true (4% path) — fixed
     expect(cppAlwaysCloak).toBe(false); // C++ sends to 4% chance
-    expect(tsBlocked).toBe(false); // TS sends to always-cloak
-    // Mismatch: C++ 4% chance, TS 100% chance at boundary
+    expect(tsBlocked).toBe(true); // TS now also sends to 4% chance path
+    // They now agree: both use 4% chance at boundary
   });
 });

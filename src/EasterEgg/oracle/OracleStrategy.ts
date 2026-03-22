@@ -4125,15 +4125,16 @@ export class OracleStrategy {
       const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 625);
       const enRoute = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 625);
 
-      /* human-requested: need 6+ tanks to push. If tanks drop below 4, re-gather. */
+      /* human-requested: need 6+ tanks for first push, 4+ for subsequent. Re-gather at 3. */
       if (!this.scg11eaStrikeActive) {
-        const readyToStrike = atRally.length >= Math.min(8, assaultArmor.length) && assaultArmor.length >= 6;
+        const firstPush = this.scg11eaStrikeTick === 0;
+        const minTanks = firstPush ? 6 : 4;
+        const readyToStrike = atRally.length >= Math.min(8, assaultArmor.length) && assaultArmor.length >= minTanks;
         if (readyToStrike) {
           this.scg11eaStrikeActive = true;
           this.scg11eaStrikeTick = state.tick;
         }
-      } else if (assaultArmor.length < 4) {
-        // Lost too many tanks — fall back to gather and wait for reinforcements
+      } else if (assaultArmor.length < 3) {
         this.scg11eaStrikeActive = false;
       }
 
@@ -4169,7 +4170,21 @@ export class OracleStrategy {
           return (aR >= 0 ? aR : 99) - (bR >= 0 ? bR : 99);
         });
 
-        if (nearArmor.length > 0) {
+        // Once close to enemy base (within 20 cells of WEAP), attack buildings directly.
+        // Tanks will auto-fire at enemies along the way via C++ targeting.
+        const distToBase = this.distanceSq(tankCentroid, pushTarget);
+        const nearBase = distToBase <= 400; // 20 cells
+        const prodBuilding = nearBase
+          ? enemyStructures.filter((s) => prodPriority.includes(s.t))
+              .sort((a, b) => (prodPriority.indexOf(a.t)) - (prodPriority.indexOf(b.t)))[0]
+          : null;
+
+        if (nearBase && prodBuilding) {
+          // ATTACK BUILDING: close enough — attack production, tanks auto-engage enemies on path
+          commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: prodBuilding.id });
+          for (const u of assaultArmor) this.recordMove(u.id, prodBuilding.cx, prodBuilding.cy);
+          reasons.push(`ATTACK ${prodBuilding.t} (${assaultArmor.length} tanks → ${prodBuilding.cx},${prodBuilding.cy})`);
+        } else if (nearArmor.length > 0) {
           // ENGAGE: focus-fire nearest dangerous enemy — all tanks on same target
           const target = nearArmor[0];
           commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });

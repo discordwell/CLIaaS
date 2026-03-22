@@ -579,13 +579,10 @@ describe('Civilian death panic (isFraidyCat scatter, infantry.cpp:442-457)', () 
     expect(UNIT_STATS.EINSTEIN.isFraidyCat).toBe(true);
   });
 
-  it('PARITY GAP: THF (Thief) — TS has isFraidyCat=true but rules.ini has no Fraidycat= entry', () => {
-    // rules.ini [THF] does NOT have Fraidycat=yes — thief is not officially a FraidyCat in C++
-    // TS types.ts:665 sets isFraidyCat: true, which is a divergence from rules.ini
+  it('THF (Thief) does NOT have isFraidyCat (rules.ini has no Fraidycat= for THF)', () => {
     const thfFraidyCat = iniBool('THF', 'Fraidycat', false);
-    expect(thfFraidyCat).toBe(false); // rules.ini says no Fraidycat
-    // DIVERGENCE: TS has isFraidyCat=true for THF, but rules.ini doesn't
-    expect(UNIT_STATS.THF.isFraidyCat).toBe(thfFraidyCat);
+    expect(thfFraidyCat).toBe(false);
+    expect(UNIT_STATS.THF.isFraidyCat).toBeFalsy();
   });
 
   it('E1 (Rifle Infantry) does NOT have isFraidyCat', () => {

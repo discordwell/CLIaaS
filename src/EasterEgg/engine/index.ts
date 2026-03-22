@@ -1767,7 +1767,7 @@ export class Game {
     // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 60 ticks (~4 seconds)
     if (this.tick % 60 === 0) {
       for (const s of this.structures) {
-        if (s.alive && s.type === 'QUEE' && s.hp < s.maxHp) {
+        if (s.alive && s.type === 'QUEE' && s.hp / s.maxHp <= CONDITION_YELLOW) {
           s.hp = Math.min(s.maxHp, s.hp + 1);
         }
       }
@@ -4570,7 +4570,7 @@ export class Game {
         // CL4: Don't cloak while weapon is on cooldown (C++ — firing prevents cloak)
         if (entity.weapon && entity.attackCooldown > 0) break;
         // CL3: Health-gated cloak — below ConditionRed (25%), 96% chance to stay uncloaked
-        if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
+        if (entity.hp / entity.maxHp <= CONDITION_RED && Math.random() > 0.04) break;
         entity.cloakState = CloakState.CLOAKING;
         entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
         break;

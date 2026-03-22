@@ -380,24 +380,23 @@ describe('Cloak Initiation vs Health (techno.cpp:2443-2449)', () => {
     // The 4% chance is the gate — 96% of the time, cloak is suppressed
   });
 
-  it('exactly at ConditionRed boundary (25%): C++ uses > (strict), so cloak is suppressed', () => {
+  it('exactly at ConditionRed boundary (25%): both suppress cloak (4% gate)', () => {
     // C++ techno.cpp:2444: if (Health_Ratio() > Rule.ConditionRed)
     // At exactly 25%, Health_Ratio() == Rule.ConditionRed, so > is FALSE → 4% branch
-    // PARITY GAP: TS uses < (strict): entity.hp / entity.maxHp < CONDITION_RED
-    // At exactly 25%: 0.25 < 0.25 is FALSE → TS always cloaks
-    // C++ at exactly 25%: 0.25 > 0.25 is FALSE → C++ falls to 4% chance
+    // TS now uses <= (fixed from <): entity.hp / entity.maxHp <= CONDITION_RED
+    // At exactly 25%: 0.25 <= 0.25 is TRUE → TS enters 4% branch (matches C++)
     const ratio = CONDITION_RED; // exactly 0.25
 
     // C++ behavior: ratio > ConditionRed is false → suppressed (4% gate)
     const cppWouldSuppressCloak = !(ratio > CONDITION_RED);
     expect(cppWouldSuppressCloak).toBe(true);
 
-    // TS behavior: ratio < CONDITION_RED is false → NOT suppressed (always cloaks)
-    const tsWouldSuppressCloak = ratio < CONDITION_RED;
-    expect(tsWouldSuppressCloak).toBe(false);
+    // TS behavior: ratio <= CONDITION_RED is true → suppressed (4% gate)
+    const tsWouldSuppressCloak = ratio <= CONDITION_RED;
+    expect(tsWouldSuppressCloak).toBe(true);
 
-    // The behaviors differ at the boundary
-    expect(cppWouldSuppressCloak).not.toBe(tsWouldSuppressCloak); // PARITY GAP: boundary disagreement
+    // Both now agree at the boundary
+    expect(cppWouldSuppressCloak).toBe(tsWouldSuppressCloak);
   });
 });
 

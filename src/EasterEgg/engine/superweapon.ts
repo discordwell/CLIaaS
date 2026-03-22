@@ -382,6 +382,7 @@ export function activateSuperweapon(
         && e.type !== UnitType.V_CTNK
         && !e.stats.isAircraft       // C++ house.cpp:2779-2785,2813: aircraft excluded
         && e.type !== UnitType.V_LST  // C++ house.cpp:2784: VESSEL_TRANSPORT excluded
+        && e.type !== UnitType.V_CARR // C++ house.cpp:2782 #ifdef FIXIT_CARRIER: VESSEL_CARRIER excluded
       );
       const unit = selected[0];
       if (unit) {

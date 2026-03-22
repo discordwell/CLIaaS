@@ -234,17 +234,17 @@ describe('health bar color thresholds match C++ (rules.cpp:234-235, techno.cpp:1
   //   if (ratio <= Rule.ConditionYellow) color = YELLOW;
   //   if (ratio <= Rule.ConditionRed) color = RED;
   //
-  // Note: C++ uses <= for thresholds; TS uses >= for the upper bounds.
+  // C++ uses <= for thresholds; TS now uses > (fixed from >=).
   // C++: ratio > 0.50 → green; ratio > 0.25 && ratio <= 0.50 → yellow; ratio <= 0.25 → red
-  // TS:  ratio >= 0.50 → green; ratio >= 0.25 → yellow; else → red
+  // TS:  ratio > 0.50 → green; ratio > 0.25 → yellow; else → red
 
   const cppConditionYellow = 0.50;  // fixed(1,2) = 1/2
   const cppConditionRed = 0.25;     // fixed(1,4) = 1/4
 
   function getBarColor(ratio: number): 'green' | 'yellow' | 'red' {
-    // TS renderer.ts:2247-2249
-    if (ratio >= 0.50) return 'green';
-    if (ratio >= 0.25) return 'yellow';
+    // TS renderer.ts:2246-2248 (fixed: > instead of >=)
+    if (ratio > 0.50) return 'green';
+    if (ratio > 0.25) return 'yellow';
     return 'red';
   }
 
@@ -271,13 +271,11 @@ describe('health bar color thresholds match C++ (rules.cpp:234-235, techno.cpp:1
     expect(getCppBarColor(0.51)).toBe('green');
   });
 
-  it('50% health threshold — TS=green, C++=yellow (boundary edge case)', () => {
+  it('50% health threshold — both show yellow (boundary now matches)', () => {
     // C++ uses <=, so ratio == 0.50 triggers yellow
-    // TS uses >=, so ratio == 0.50 stays green
-    // This is a minor boundary difference at exactly 50%
-    expect(getBarColor(0.50)).toBe('green');
+    // TS now uses >, so ratio == 0.50 falls through to yellow (fixed)
+    expect(getBarColor(0.50)).toBe('yellow');
     expect(getCppBarColor(0.50)).toBe('yellow');
-    // Documenting the known boundary mismatch — in practice this is a single HP tick
   });
 
   it('49% health → yellow in both', () => {
@@ -290,9 +288,9 @@ describe('health bar color thresholds match C++ (rules.cpp:234-235, techno.cpp:1
     expect(getCppBarColor(0.30)).toBe('yellow');
   });
 
-  it('25% health threshold — TS=yellow, C++=red (boundary edge case)', () => {
-    // Same boundary mismatch: C++ uses <=, TS uses >=
-    expect(getBarColor(0.25)).toBe('yellow');
+  it('25% health threshold — both show red (boundary now matches)', () => {
+    // C++ uses <=, TS now uses > (fixed from >=)
+    expect(getBarColor(0.25)).toBe('red');
     expect(getCppBarColor(0.25)).toBe('red');
   });
 

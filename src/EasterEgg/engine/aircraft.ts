@@ -13,6 +13,31 @@ import { Entity, CloakState } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
 
+// ── C++ Rearm Constants (rules.ini / defines.h) ─────────────────────────────
+
+/** C++ defines.h:3031 — 15 ticks per second */
+export const TICKS_PER_SECOND = 15;
+/** C++ defines.h:3032 — 900 ticks per minute */
+export const TICKS_PER_MINUTE = TICKS_PER_SECOND * 60;
+/** rules.ini [General] ReloadRate=.04 — minutes per ammo point (overrides rules.cpp:178 default of .05) */
+export const RELOAD_RATE = 0.04;
+
+/**
+ * C++ building.cpp:4023-4025 — compute ticks between each RADIO_RELOAD.
+ *   pfrac = Saturate(Power_Fraction(), 1), clamped to min 0.5
+ *   time = Inverse(pfrac) * Rule.ReloadRate * TICKS_PER_MINUTE
+ * At full power (1.0): 1.0 * 0.04 * 900 = 36 ticks per ammo point
+ * At half power (0.5): 2.0 * 0.04 * 900 = 72 ticks per ammo point
+ */
+export function computeRearmDelay(powerFraction: number): number {
+  // C++ building.cpp:4023: Saturate to [0, 1]
+  let pfrac = Math.min(Math.max(powerFraction, 0), 1);
+  // C++ building.cpp:4024: clamp to min 0.5
+  if (pfrac < 0.5) pfrac = 0.5;
+  const time = (1.0 / pfrac) * RELOAD_RATE * TICKS_PER_MINUTE;
+  return Math.max(1, Math.round(time));
+}
+
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
 /** Context object providing aircraft functions access to game state and callbacks */
@@ -37,6 +62,9 @@ export interface AircraftContext {
   fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
+  /** C++ house.cpp:4160: Power_Fraction() = Power/Drain, capped at 1.0.
+   *  Used by building.cpp:4023 for rearm delay scaling. */
+  getPowerFraction(house: House): number;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────

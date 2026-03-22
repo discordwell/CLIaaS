@@ -332,7 +332,7 @@ export function updateVehicleCloak(ctx: SpecialUnitsContext, entity: Entity): vo
       if (entity.sonarPulseTimer > 0) break;
       if (entity.mission === Mission.ATTACK) break;
       if (entity.weapon && entity.attackCooldown > 0) break;
-      if (entity.hp / entity.maxHp < CONDITION_RED && Math.random() > 0.04) break;
+      if (entity.hp / entity.maxHp <= CONDITION_RED && Math.random() > 0.04) break;
       entity.cloakState = CloakState.CLOAKING; entity.cloakTimer = CLOAK_TRANSITION_FRAMES; break;
     case CloakState.CLOAKED: break;
   }

@@ -60,9 +60,8 @@ describe('C++ damage threshold constants (rules.cpp:234-235)', () => {
 // ============================================================
 describe('building SHP frame: damage state (building.cpp:632-688)', () => {
   // C++ uses Health_Ratio() <= ConditionYellow (0.5) to switch to damage frames.
-  // TS uses: `const damaged = s.hp < s.maxHp * 0.5` (renderer.ts:1396)
-  // Note: C++ uses <= 0.5, TS uses < 0.5. At exactly 50%, C++ shows damaged, TS shows normal.
-  // This is a minor discrepancy but acceptable since HP is integer-based and rarely hits exactly 50%.
+  // TS uses: `const damaged = s.hp <= s.maxHp * 0.5` (renderer.ts:1396, fixed from <)
+  // Both now use <= 0.5, matching at the boundary.
 
   it('full health building uses idle frame (frame 0)', () => {
     // C++ building.cpp:679 — Health_Ratio() > ConditionYellow → normal frames
@@ -499,16 +498,16 @@ describe('tech center flicker bug: no damage state oscillation', () => {
   // comparisons that might round differently).
 
   it('damage threshold is deterministic across frames', () => {
-    // TS renderer.ts:1396 uses `s.hp < s.maxHp * 0.5`
+    // TS renderer.ts:1396 uses `s.hp <= s.maxHp * 0.5` (fixed from <)
     // The key is that this comparison uses the same formula every frame.
     const maxHp = 256;
     const threshold = maxHp * 0.5; // 128.0
 
     // At exactly the boundary, the result must be consistent
     for (let frame = 0; frame < 100; frame++) {
-      const damaged128 = 128 < threshold; // false — 128 is not < 128
-      const damaged127 = 127 < threshold; // true
-      expect(damaged128).toBe(false);
+      const damaged128 = 128 <= threshold; // true — 128 is <= 128 (matches C++)
+      const damaged127 = 127 <= threshold; // true
+      expect(damaged128).toBe(true);
       expect(damaged127).toBe(true);
     }
   });

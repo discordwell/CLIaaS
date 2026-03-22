@@ -104,15 +104,8 @@ const EXPECTED_ITEMS: {
   { type: 'SBAG', cost: 25, buildTime: cppBuildTime(25), prerequisite: 'FACT', faction: 'allied', techLevel: 2, isStructure: true },
   { type: 'FENC', cost: 25, buildTime: cppBuildTime(25), prerequisite: 'FACT', faction: 'soviet', techLevel: 2, isStructure: true },
   { type: 'BRIK', cost: 100, buildTime: cppBuildTime(100), prerequisite: 'FACT', faction: 'both', techLevel: 8, isStructure: true },
-  // Non-buildable walls/fences (tracked for completeness)
-  { type: 'CYCL', cost: 75, buildTime: cppBuildTime(75), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },
-  { type: 'BARB', cost: 25, buildTime: cppBuildTime(25), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },
-  { type: 'WOOD', cost: 0, buildTime: cppBuildTime(0), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },
-  // Non-buildable buildings (scenario-placed only)
-  { type: 'BIO', cost: 0, buildTime: cppBuildTime(0), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },
-  { type: 'HOSP', cost: 0, buildTime: cppBuildTime(0), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },
-  { type: 'FCOM', cost: 0, buildTime: cppBuildTime(0), prerequisite: '', faction: 'soviet', techLevel: -1, isStructure: true },
-  { type: 'MISS', cost: 0, buildTime: cppBuildTime(0), prerequisite: '', faction: 'both', techLevel: -1, isStructure: true },
+  // Non-buildable walls/fences (CYCL, BARB, WOOD) and scenario buildings (BIO, HOSP, FCOM, MISS)
+  // are NOT in PRODUCTION_ITEMS — they exist in STRUCTURE_POINTS instead (types.ts:919-929).
   // Fake buildings (Allied decoys)
   { type: 'FACF', cost: 50, buildTime: cppBuildTime(50), prerequisite: '', faction: 'allied', techLevel: 1, isStructure: true },
   { type: 'WEAF', cost: 50, buildTime: cppBuildTime(50), prerequisite: 'PROC', faction: 'allied', techLevel: 3, isStructure: true },
