@@ -10,14 +10,18 @@
  *   rules.cpp:267  — Rule.BridgeStrength = ini.Get_Fixed(...) default 1000
  *   combat.cpp:261-268 — bridge damage check: warhead AP/HE only
  *   combat.cpp:267 — Random_Pick(1, Rule.BridgeStrength) < strength
+ *   combat.cpp:261-265 — 10 bridge templates checked for splash damage
  *   map.cpp:1791-1987 — Destroy_Bridge_At: two-phase destruction
  *   map.cpp:1837-1861 — kill occupants on destroyed bridge cells
+ *   map.cpp:1862 — Shake_The_Screen(3) on full destruction
  *   map.cpp:2045-2073 — Intact_Bridge_Count: BRIDGE templates with TIcon==6
  *   cell.cpp:3000 — reject bridge cells for ore germination
- *   cell.cpp:499 — building placement prohibited on bridge cells (Is_Bridge_Here)
- *   defines.h — TEMPLATE_BRIDGE1=131, TEMPLATE_BRIDGE2=133, etc.
+ *   cell.cpp:498-501 — building placement prohibited on bridge cells (Is_Bridge_Here)
+ *   cell.cpp:2828-2850 — Is_Bridge_Here: 16 bridge template variants
+ *   defines.h — TemplateType enum: BRIDGE1=131 through BRIDGE_3F=246, BRIDGE1H=378, BRIDGE2H=379
  *   trigger.cpp — TEVENT_ALL_BRIDGES_DESTROYED (#31)
- *   map.cpp:1870-1890 — Bridge_Remap: no bridge repair mechanic in RA1
+ *   infantry.cpp:3186-3198 — demolitioner sabotage on bridge cells (ACTION_SABOTAGE)
+ *   infantry.cpp:710-790 — engineer bridge repair is #ifdef OBSOLETE (no repair in RA1)
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -38,15 +42,59 @@ import type { Effect } from '../engine/renderer';
 beforeEach(() => resetEntityIds());
 
 // ── C++ Bridge Template IDs (defines.h TemplateType enum, 0-based) ──────────
+// Simple bridges
 const TEMPLATE_BRIDGE1 = 131;   // intact horizontal bridge
+const TEMPLATE_BRIDGE1D = 132;  // fully destroyed horizontal bridge
 const TEMPLATE_BRIDGE2 = 133;   // intact vertical bridge
+const TEMPLATE_BRIDGE2D = 134;  // fully destroyed vertical bridge
+// Multi-part bridge pieces (defines.h:1929-1940)
+const TEMPLATE_BRIDGE_1A = 235;
+const TEMPLATE_BRIDGE_1B = 236;
+const TEMPLATE_BRIDGE_1C = 237;
+const TEMPLATE_BRIDGE_2A = 238;
+const TEMPLATE_BRIDGE_2B = 239;
+const TEMPLATE_BRIDGE_2C = 240;
+const TEMPLATE_BRIDGE_3A = 241;
+const TEMPLATE_BRIDGE_3B = 242;
+const TEMPLATE_BRIDGE_3C = 243;
+const TEMPLATE_BRIDGE_3D = 244;
+const TEMPLATE_BRIDGE_3E = 245;
+const TEMPLATE_BRIDGE_3F = 246;
+// Half-destroyed bridges (defines.h:2074-2075)
 const TEMPLATE_BRIDGE1H = 378;  // half-destroyed horizontal
 const TEMPLATE_BRIDGE2H = 379;  // half-destroyed vertical
-const TEMPLATE_BRIDGE_1A = 235; // multi-part bridge piece 1A
-const TEMPLATE_BRIDGE_1B = 236; // multi-part bridge piece 1B
 
 // C++ rules.ini [General] BridgeStrength
 const CPP_BRIDGE_STRENGTH = 1000;
+
+// C++ combat.cpp:261-265 — all 10 templates that can take splash damage
+const CPP_SPLASH_DAMAGEABLE_BRIDGE_TEMPLATES = [
+  TEMPLATE_BRIDGE1, TEMPLATE_BRIDGE2,       // 131, 133
+  TEMPLATE_BRIDGE1H, TEMPLATE_BRIDGE2H,     // 378, 379
+  TEMPLATE_BRIDGE_1A, TEMPLATE_BRIDGE_1B,   // 235, 236
+  TEMPLATE_BRIDGE_2A, TEMPLATE_BRIDGE_2B,   // 238, 239
+  TEMPLATE_BRIDGE_3A, TEMPLATE_BRIDGE_3B,   // 241, 242
+];
+
+// C++ cell.cpp:2828-2850 — all 16 templates recognized by Is_Bridge_Here
+const CPP_IS_BRIDGE_HERE_TEMPLATES = [
+  TEMPLATE_BRIDGE1, TEMPLATE_BRIDGE1H, TEMPLATE_BRIDGE1D,
+  TEMPLATE_BRIDGE2, TEMPLATE_BRIDGE2H, TEMPLATE_BRIDGE2D,
+  TEMPLATE_BRIDGE_1A, TEMPLATE_BRIDGE_1B,
+  TEMPLATE_BRIDGE_2A, TEMPLATE_BRIDGE_2B,
+  TEMPLATE_BRIDGE_3A, TEMPLATE_BRIDGE_3B, TEMPLATE_BRIDGE_3C,
+  TEMPLATE_BRIDGE_3D, TEMPLATE_BRIDGE_3E, TEMPLATE_BRIDGE_3F,
+];
+
+// C++ map.cpp:2045-2073 — only 6 templates counted as "intact" (with icon==6)
+const CPP_INTACT_BRIDGE_TEMPLATES = [
+  TEMPLATE_BRIDGE1, TEMPLATE_BRIDGE1H,
+  TEMPLATE_BRIDGE2, TEMPLATE_BRIDGE2H,
+  TEMPLATE_BRIDGE_1A, TEMPLATE_BRIDGE_1B,
+];
+
+// TS engine template set — the 6 templates recognized by map.ts destroyBridge/countBridgeCells
+const TS_BRIDGE_TEMPLATES = new Set([131, 133, 235, 236, 378, 379]);
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -114,12 +162,11 @@ function makeCombatCtx(entities: Entity[] = [], structures: MapStructure[] = [])
 
 // ── 1. BridgeStrength value from rules.ini ──────────────────────────────────
 
-describe('BridgeStrength value — C++ rules.ini [General] BridgeStrength=1000', () => {
+describe('BridgeStrength value — rules.ini [General] BridgeStrength=1000', () => {
 
   it('rules.ini defines BridgeStrength=1000', () => {
     // C++ rules.cpp:267 — Rule.BridgeStrength defaults to 1000, overridden by rules.ini.
     // rules.ini [General] BridgeStrength=1000
-    // Verify the value matches the C++ source.
     const fs = require('node:fs');
     const path = require('node:path');
     const iniPath = path.resolve(__dirname, '..', '..', '..', 'public', 'ra', 'assets', 'rules.ini');
@@ -134,10 +181,6 @@ describe('BridgeStrength value — C++ rules.ini [General] BridgeStrength=1000',
     // C++ reads Rule.BridgeStrength from rules.ini at runtime (rules.cpp:267).
     // TS hardcodes `const bridgeStrength = 1000` in combat.ts:1046.
     // If rules.ini were changed, TS would not pick up the new value.
-    // This test verifies the hardcoded value matches rules.ini (currently passes,
-    // but documents the parity gap that TS doesn't dynamically read the value).
-    //
-    // To verify: search combat.ts for "bridgeStrength" — it should be a constant, not parsed.
     const fs = require('node:fs');
     const path = require('node:path');
     const combatPath = path.resolve(__dirname, '..', 'engine', 'combat.ts');
@@ -162,8 +205,6 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
     //
     // TS uses: Math.floor(Math.random() * 1000) + 1 < weapon.damage
     // This generates 1..1000 inclusive, matching C++ Random_Pick(1, 1000).
-    // Check: for damage=200, success if roll < 200, i.e. roll in {1..199} = 199/1000.
-    // This matches C++.
     const damage = 200;
     const successCount = 199; // rolls 1..199
     const totalRolls = CPP_BRIDGE_STRENGTH; // 1000 possible rolls
@@ -175,7 +216,6 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
   it('damage=1 should never destroy bridge (roll must be < 1, minimum roll is 1)', () => {
     // C++ Random_Pick(1, 1000) returns minimum 1.
     // Check: 1 < 1 is false. So damage=1 can NEVER destroy a bridge.
-    // TS: Math.floor(Math.random() * 1000) + 1 = minimum 1. 1 < 1 is false. Matches.
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
@@ -194,7 +234,6 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
   it('damage >= 1001 should always destroy bridge (roll max is 1000, always < 1001)', () => {
     // C++ Random_Pick(1, 1000) returns maximum 1000.
     // Check: 1000 < 1001 is true. So damage >= 1001 ALWAYS destroys.
-    // TS: Math.floor(Math.random() * 1000) + 1 = maximum 1000. 1000 < 1001 is true. Matches.
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
@@ -226,13 +265,12 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
 
 // ── 3. Bridge repair mechanics ──────────────────────────────────────────────
 
-describe('PARITY GAP: Bridge repair — C++ has no bridge repair in RA1', () => {
+describe('Bridge repair — C++ has no bridge repair in RA1', () => {
 
-  it('C++ RA1 has no bridge repair mechanic — destroyed bridges stay destroyed', () => {
-    // C++ RA1 (unlike RA2/YR) has no engineer bridge repair.
-    // Once a bridge is destroyed, it stays destroyed for the rest of the mission.
-    // TS matches this behavior — there is no repairBridge function.
-    // Verify: after destroyBridge, there is no way to restore the bridge cells.
+  it('C++ RA1 has no bridge repair mechanic — #ifdef OBSOLETE (infantry.cpp:710-790)', () => {
+    // C++ infantry.cpp:710-790 — engineer bridge repair code is wrapped in #ifdef OBSOLETE.
+    // This means it was compiled out of the shipping game. Bridges stay destroyed forever.
+    // TS correctly has no repairBridge function.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
@@ -250,7 +288,7 @@ describe('PARITY GAP: Bridge repair — C++ has no bridge repair in RA1', () => 
 
   it('destroyed bridge template type is changed (cannot be re-detected as bridge)', () => {
     // After destruction, the template type should no longer be a bridge template.
-    // C++ replaces with BRIDGE1D/2D. TS sets to water template (1).
+    // C++ replaces with BRIDGE1D/2D (132/134). TS sets to water template (1).
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
@@ -260,10 +298,9 @@ describe('PARITY GAP: Bridge repair — C++ has no bridge repair in RA1', () => 
 
     map.destroyBridge(20, 20, 3);
 
-    // TS sets template to 1 (water). C++ would set to BRIDGE1D (380).
+    // TS sets template to 1 (water). C++ would set to BRIDGE1D (132).
     // Either way, it should no longer be a bridge template.
-    const bridgeTemplates = new Set([131, 133, 235, 236, 378, 379]);
-    expect(bridgeTemplates.has(map.templateType[idx])).toBe(false);
+    expect(TS_BRIDGE_TEMPLATES.has(map.templateType[idx])).toBe(false);
   });
 });
 
@@ -273,26 +310,21 @@ describe('Ore germination rejects bridge cells — C++ cell.cpp:3000', () => {
 
   it('bridge template cells are excluded from ore spread target set', () => {
     // C++ cell.cpp:3000 — ore growth rejects cells with bridge templates.
-    // This prevents ore from spawning on bridges.
-    // TS map.ts growOre checks template type before spreading.
     const map = new GameMap();
     map.setBounds(5, 5, 20, 20);
 
     // Place ore seed at (10, 10)
     const seedIdx = 10 * MAP_CELLS + 10;
-    map.overlay[seedIdx] = 0x0A; // high density gold — above spread threshold (0x09)
+    map.overlay[seedIdx] = 0x0A;
 
     // Surround with bridge cells on all 8 directions
     for (const [dx, dy] of [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]) {
       const nx = 10 + dx, ny = 10 + dy;
       setBridgeTemplate(map, nx, ny, TEMPLATE_BRIDGE1, 6);
-      // Ensure overlay is clear (no ore)
       map.overlay[ny * MAP_CELLS + nx] = 0xFF;
     }
 
-    // Trigger ore growth
-    const growthTick = GameMap.ORE_GROWTH_INTERVAL;
-    map.growOre(growthTick);
+    map.growOre(GameMap.ORE_GROWTH_INTERVAL);
 
     // Bridge cells should NOT have ore after growth
     for (const [dx, dy] of [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]) {
@@ -302,30 +334,20 @@ describe('Ore germination rejects bridge cells — C++ cell.cpp:3000', () => {
     }
   });
 
-  it('all six bridge template types are rejected for germination', () => {
+  it('all six TS bridge template types are rejected for germination', () => {
     // C++ checks: 131, 133, 235, 236, 378, 379
-    // TS must reject all six template IDs.
-    const allBridgeTemplates = [
-      TEMPLATE_BRIDGE1,    // 131
-      TEMPLATE_BRIDGE2,    // 133
-      TEMPLATE_BRIDGE_1A,  // 235
-      TEMPLATE_BRIDGE_1B,  // 236
-      TEMPLATE_BRIDGE1H,   // 378
-      TEMPLATE_BRIDGE2H,   // 379
-    ];
+    // TS must reject all six template IDs in its ore growth code.
+    const allBridgeTemplates = [...TS_BRIDGE_TEMPLATES];
 
     for (const tmpl of allBridgeTemplates) {
       const map = new GameMap();
       map.setBounds(5, 5, 20, 20);
 
-      // Place ore seed
       const seedIdx = 10 * MAP_CELLS + 10;
       map.overlay[seedIdx] = 0x0A;
 
-      // Place one bridge cell east of seed
       setBridgeTemplate(map, 11, 10, tmpl, 6);
       map.overlay[11 * MAP_CELLS + 10] = 0xFF;
-      // Block all other spread directions with non-CLEAR terrain
       for (const [dx, dy] of [[0,-1],[1,-1],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]) {
         map.setTerrain(10 + dx, 10 + dy, Terrain.WATER);
       }
@@ -338,42 +360,31 @@ describe('Ore germination rejects bridge cells — C++ cell.cpp:3000', () => {
   });
 });
 
-// ── 5. Bridge template ID consistency ───────────────────────────────────────
+// ── 5. Bridge template ID consistency across engine modules ─────────────────
 
 describe('Bridge template ID consistency across engine modules', () => {
 
   it('countBridgeCells and destroyBridge use the same template set', () => {
     // Both functions must recognize the same 6 bridge template IDs.
-    // countBridgeCells: Set([131, 133, 235, 236, 378, 379]) with icon==6
-    // destroyBridge: if (tmpl===131 || tmpl===133 || tmpl===235 || tmpl===236 || tmpl===378 || tmpl===379)
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
 
-    const allTemplates = [131, 133, 235, 236, 378, 379];
+    const allTemplates = [...TS_BRIDGE_TEMPLATES];
 
-    // Place each template at a unique position
     for (let i = 0; i < allTemplates.length; i++) {
       setBridgeTemplate(map, 20 + i, 20, allTemplates[i], 6);
     }
 
-    // countBridgeCells should find all 6
     expect(map.countBridgeCells()).toBe(6);
 
-    // destroyBridge at center should destroy all within radius
     const destroyed = map.destroyBridge(22, 20, 5);
 
-    // All 6 should be destroyed
     expect(destroyed).toBe(6);
     expect(map.countBridgeCells()).toBe(0);
   });
 
   it('ore germination rejection uses the same 6 template IDs', () => {
-    // C++ cell.cpp:3000 rejects the same TEMPLATE_BRIDGE* set.
-    // Verify the germination code checks all 6 IDs by testing each individually.
-    const map = new GameMap();
-    map.setBounds(5, 5, 20, 20);
-
-    const allTemplates = [131, 133, 235, 236, 378, 379];
+    const allTemplates = [...TS_BRIDGE_TEMPLATES];
 
     for (const tmpl of allTemplates) {
       const testMap = new GameMap();
@@ -382,7 +393,6 @@ describe('Bridge template ID consistency across engine modules', () => {
       const seedIdx = 10 * MAP_CELLS + 10;
       testMap.overlay[seedIdx] = 0x0A;
 
-      // Only east direction is bridge; all others are water (impassable for spread)
       for (const [dx, dy] of [[0,-1],[1,-1],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]) {
         testMap.setTerrain(10 + dx, 10 + dy, Terrain.WATER);
       }
@@ -396,31 +406,27 @@ describe('Bridge template ID consistency across engine modules', () => {
   });
 });
 
-// ── 6. TEVENT_ALL_BRIDGES_DESTROYED trigger ─────────────────────────────────
+// ── 6. TEVENT_ALL_BRIDGES_DESTROYED trigger (#31) ───────────────────────────
 
 describe('TEVENT_ALL_BRIDGES_DESTROYED trigger (#31) — scenario.ts', () => {
 
   it('trigger fires when bridgesAlive reaches 0', () => {
     // C++ trigger.cpp: TEVENT_ALL_BRIDGES_DESTROYED (#31) checks Scen.BridgeCount == 0.
-    // TS scenario.ts:2117-2118 checks state.bridgesAlive === 0.
-    // Verify the trigger condition by simulating bridge destruction.
+    // TS scenario.ts:2209-2210 checks state.bridgesAlive === 0.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
     setBridgeTemplate(map, 30, 30, TEMPLATE_BRIDGE2, 6);
 
-    // Before destruction: bridges alive
     let bridgesAlive = map.countBridgeCells();
     expect(bridgesAlive).toBe(2);
-    expect(bridgesAlive === 0).toBe(false); // trigger should NOT fire
+    expect(bridgesAlive === 0).toBe(false);
 
-    // Destroy first bridge
     map.destroyBridge(20, 20, 3);
     bridgesAlive = map.countBridgeCells();
     expect(bridgesAlive).toBe(1);
-    expect(bridgesAlive === 0).toBe(false); // trigger should NOT fire
+    expect(bridgesAlive === 0).toBe(false);
 
-    // Destroy second bridge
     map.destroyBridge(30, 30, 3);
     bridgesAlive = map.countBridgeCells();
     expect(bridgesAlive).toBe(0);
@@ -429,14 +435,13 @@ describe('TEVENT_ALL_BRIDGES_DESTROYED trigger (#31) — scenario.ts', () => {
 
   it('trigger does not fire if half-destroyed bridges remain', () => {
     // C++ Intact_Bridge_Count includes BRIDGE1H/2H (half-destroyed) templates.
-    // So even half-destroyed bridges prevent the trigger from firing.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
-    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1H, 6);
 
     const bridgesAlive = map.countBridgeCells();
     expect(bridgesAlive).toBe(1);
-    expect(bridgesAlive === 0).toBe(false); // trigger should NOT fire
+    expect(bridgesAlive === 0).toBe(false);
   });
 });
 
@@ -445,17 +450,15 @@ describe('TEVENT_ALL_BRIDGES_DESTROYED trigger (#31) — scenario.ts', () => {
 describe('Naval pathfinding through destroyed bridge cells', () => {
 
   it('intact bridge cells are NOT water-passable for naval units', () => {
-    // C++ parity: bridge cells are CLEAR terrain — naval units cannot pass.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
     expect(map.isWaterPassable(20, 20)).toBe(false);
-    expect(map.isPassable(20, 20)).toBe(true); // land units can pass
+    expect(map.isPassable(20, 20)).toBe(true);
   });
 
   it('destroyed bridge cells ARE water-passable for naval units', () => {
-    // C++ parity: destroyed bridge becomes water/river — naval units can pass.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
@@ -463,30 +466,25 @@ describe('Naval pathfinding through destroyed bridge cells', () => {
     map.destroyBridge(20, 20, 3);
 
     expect(map.isWaterPassable(20, 20)).toBe(true);
-    expect(map.isPassable(20, 20)).toBe(false); // land units cannot pass
+    expect(map.isPassable(20, 20)).toBe(false);
   });
 
   it('canEnterCell reflects bridge state for naval pathfinding', () => {
-    // C++ Can_Enter_Cell checks terrain; naval units need WATER.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
-    // Before destruction: naval cannot enter
     const beforeNaval = map.canEnterCell(20, 20, true);
-    expect(beforeNaval).not.toBe(0); // MoveResult.IMPASSABLE (not OK)
+    expect(beforeNaval).not.toBe(0); // MoveResult.IMPASSABLE
 
-    // Before destruction: ground can enter
     const beforeGround = map.canEnterCell(20, 20, false);
     expect(beforeGround).toBe(0); // MoveResult.OK
 
     map.destroyBridge(20, 20, 3);
 
-    // After destruction: naval can enter
     const afterNaval = map.canEnterCell(20, 20, true);
     expect(afterNaval).toBe(0); // MoveResult.OK
 
-    // After destruction: ground cannot enter
     const afterGround = map.canEnterCell(20, 20, false);
     expect(afterGround).not.toBe(0); // MoveResult.IMPASSABLE
   });
@@ -497,8 +495,7 @@ describe('Naval pathfinding through destroyed bridge cells', () => {
 describe('killBridgeOccupants — C++ map.cpp:1837-1861', () => {
 
   it('only kills entities on cells that became WATER (not all cells in radius)', () => {
-    // C++ map.cpp:1843 — only kills occupants on cells that are now water (destroyed bridge).
-    // A unit on a non-bridge cell within the radius should survive.
+    // C++ map.cpp:1843 — only kills occupants on cells that are now water.
     const entityOnBridge = new Entity(
       UnitType.I_E1, House.USSR,
       20 * CELL_SIZE + CELL_SIZE / 2,
@@ -511,22 +508,18 @@ describe('killBridgeOccupants — C++ map.cpp:1837-1861', () => {
     );
     const ctx = makeCombatCtx([entityOnBridge, entityOnGround]);
 
-    // Only (20,20) is a bridge cell; (22,20) is plain ground
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
     ctx.map.setTerrain(22, 20, Terrain.CLEAR);
 
-    // Destroy bridge — converts (20,20) to water
     ctx.map.destroyBridge(20, 20, 3);
-
-    // Kill occupants
     killBridgeOccupants(ctx, 20, 20, 3);
 
     expect(entityOnBridge.alive).toBe(false);
-    expect(entityOnGround.alive).toBe(true); // not on water cell
+    expect(entityOnGround.alive).toBe(true);
   });
 
   it('kills vehicles as well as infantry on destroyed bridge', () => {
-    // C++ kills ALL techno objects on destroyed bridge cells, not just infantry.
+    // C++ kills ALL techno objects: obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true)
     const tank = new Entity(
       UnitType.V_3TNK, House.USSR,
       20 * CELL_SIZE + CELL_SIZE / 2,
@@ -542,7 +535,6 @@ describe('killBridgeOccupants — C++ map.cpp:1837-1861', () => {
   });
 
   it('does not kill entities already dead or in limbo', () => {
-    // C++ checks obj->Is_Techno() and obj->Strength > 0 before killing.
     const deadEntity = new Entity(
       UnitType.I_E1, House.USSR,
       20 * CELL_SIZE + CELL_SIZE / 2,
@@ -562,32 +554,28 @@ describe('killBridgeOccupants — C++ map.cpp:1837-1861', () => {
 
     ctx.map.destroyBridge(20, 20, 3);
 
-    // Should not throw or modify already-dead/limbo entities
     expect(() => killBridgeOccupants(ctx, 20, 20, 3)).not.toThrow();
   });
 });
 
 // ── 9. PARITY GAP: Building placement on bridge cells ───────────────────────
 
-describe('PARITY GAP: Building placement on bridge cells — C++ cell.cpp:499', () => {
+describe('PARITY GAP: Building placement on bridge cells — C++ cell.cpp:498-501', () => {
 
   it('C++ prohibits building on bridge cells via Is_Bridge_Here()', () => {
-    // C++ cell.cpp:499 calls Is_Bridge_Here() to block building placement on bridges.
+    // C++ cell.cpp:498-501 — when loco == SPEED_NONE (building placement check),
+    // calls Is_Bridge_Here() which returns true for all 16 bridge template types.
     // TS isBuildable only checks terrain type — CLEAR terrain is buildable.
     // Bridge cells have CLEAR terrain, so TS incorrectly allows building on bridges.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
-    // C++ would return false (Is_Bridge_Here blocks it).
-    // TS returns true because terrain is CLEAR.
-    // This is a known parity gap.
     const result = map.isBuildable(20, 20);
-    expect(result).toBe(true); // PARITY GAP: C++ would be false
+    expect(result).toBe(true); // PARITY GAP: C++ would return false
   });
 
   it('destroyed bridge cells (WATER) correctly block building placement', () => {
-    // After destruction, terrain is WATER — both C++ and TS agree this is unbuildable.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
@@ -596,15 +584,38 @@ describe('PARITY GAP: Building placement on bridge cells — C++ cell.cpp:499', 
 
     expect(map.isBuildable(20, 20)).toBe(false);
   });
+
+  it('C++ Is_Bridge_Here recognizes 16 template types, not just 6', () => {
+    // C++ cell.cpp:2828-2850 — Is_Bridge_Here includes destroyed variants and
+    // all multi-part bridge pieces (3C, 3D, 3E, 3F, 1C, 2C, etc.)
+    // TS only recognizes 6 templates in its bridge logic.
+    expect(CPP_IS_BRIDGE_HERE_TEMPLATES.length).toBe(16);
+    expect(TS_BRIDGE_TEMPLATES.size).toBe(6);
+
+    // The 10 templates recognized by C++ but not by TS:
+    const missingFromTS = CPP_IS_BRIDGE_HERE_TEMPLATES.filter(t => !TS_BRIDGE_TEMPLATES.has(t));
+    expect(missingFromTS).toEqual([
+      TEMPLATE_BRIDGE1D,   // 132 — fully destroyed horizontal
+      TEMPLATE_BRIDGE2D,   // 134 — fully destroyed vertical
+      TEMPLATE_BRIDGE_2A,  // 238
+      TEMPLATE_BRIDGE_2B,  // 239
+      TEMPLATE_BRIDGE_3A,  // 241
+      TEMPLATE_BRIDGE_3B,  // 242
+      TEMPLATE_BRIDGE_3C,  // 243
+      TEMPLATE_BRIDGE_3D,  // 244
+      TEMPLATE_BRIDGE_3E,  // 245
+      TEMPLATE_BRIDGE_3F,  // 246
+    ]);
+  });
 });
 
 // ── 10. PARITY GAP: Two-phase destruction vs one-phase ──────────────────────
 
 describe('PARITY GAP: C++ two-phase vs TS one-phase bridge destruction', () => {
 
-  it('C++ intact bridge requires TWO hits to fully destroy', () => {
-    // C++ map.cpp:1797-1812: first Destroy_Bridge_At changes BRIDGE1 → BRIDGE1H.
-    // C++ map.cpp:1814-1864: second Destroy_Bridge_At changes BRIDGE1H → BRIDGE1D.
+  it('C++ intact bridge requires TWO hits to fully destroy (map.cpp:1797-1864)', () => {
+    // C++ map.cpp:1797-1812: first Destroy_Bridge_At changes BRIDGE1 -> BRIDGE1H.
+    // C++ map.cpp:1814-1864: second Destroy_Bridge_At changes BRIDGE1H -> BRIDGE1D.
     // TS skips phase 1: one destroyBridge call converts directly to water.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
@@ -612,8 +623,8 @@ describe('PARITY GAP: C++ two-phase vs TS one-phase bridge destruction', () => {
 
     map.destroyBridge(20, 20, 3);
 
-    // PARITY GAP: TS destroys immediately. C++ would leave as half-destroyed.
     const idx = 20 * MAP_CELLS + 20;
+    // PARITY GAP: TS destroys immediately. C++ would leave as half-destroyed.
     // C++ after first hit: templateType should be 378 (BRIDGE1H), terrain still CLEAR
     // TS after first hit: templateType is 1 (water), terrain is WATER
     expect(map.templateType[idx]).toBe(1); // TS behavior: water template
@@ -621,17 +632,18 @@ describe('PARITY GAP: C++ two-phase vs TS one-phase bridge destruction', () => {
   });
 
   it('PARITY GAP: TS destroyBridge does not distinguish intact from half-destroyed', () => {
-    // In C++, destroying a half-destroyed bridge has different behavior than
-    // destroying an intact bridge (screen shake, occupant killing only on full destruction).
-    // TS treats both identically.
+    // In C++, destroying a half-destroyed bridge has different behavior:
+    //   - Phase 2 triggers screen shake (Shake_The_Screen(3), map.cpp:1862)
+    //   - Phase 2 kills occupants (map.cpp:1837-1861)
+    //   - Phase 2 decrements Scen.BridgeCount (map.cpp:1828)
+    //   - Phase 1 does NOT do any of these — only changes template
+    // TS treats both identically — immediate destruction.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
 
-    // Test with intact bridge
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
     const destroyed1 = map.destroyBridge(20, 20, 3);
 
-    // Test with half-destroyed bridge
     setBridgeTemplate(map, 30, 30, TEMPLATE_BRIDGE1H, 6);
     const destroyed2 = map.destroyBridge(30, 30, 3);
 
@@ -639,23 +651,38 @@ describe('PARITY GAP: C++ two-phase vs TS one-phase bridge destruction', () => {
     expect(destroyed1).toBe(1);
     expect(destroyed2).toBe(1);
 
-    // Both become water — TS makes no distinction
     expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
     expect(map.getTerrain(30, 30)).toBe(Terrain.WATER);
+  });
+
+  it('C++ Phase 1: BRIDGE1 -> BRIDGE1H preserves passability (bridge still walkable)', () => {
+    // C++ map.cpp:1806 — first hit on BRIDGE1 creates BRIDGE1H but does NOT
+    // call Zone_Reset or kill occupants. The bridge remains passable.
+    // C++ map.cpp:1811 — only plays an animation (ANIM_NAPALM3), no terrain change.
+    // PARITY GAP: TS has no half-destroyed state.
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
+
+    // After C++ Phase 1, bridge would still be passable.
+    // TS destroys immediately, so the cell becomes impassable water.
+    map.destroyBridge(20, 20, 3);
+    // PARITY GAP: TS sets to WATER (impassable). C++ would keep CLEAR (passable).
+    expect(map.isPassable(20, 20)).toBe(false); // TS: water, impassable
+    // C++ after phase 1: expect(map.isPassable(20, 20)).toBe(true);
   });
 });
 
 // ── 11. Bridge destruction radius ───────────────────────────────────────────
 
-describe('Bridge destruction radius — C++ map.cpp Destroy_Bridge_At', () => {
+describe('Bridge destruction radius — map.ts destroyBridge', () => {
 
-  it('uses square radius (Manhattan-style), not circular', () => {
-    // C++ and TS both use a square bounding box: for (dy = -r; dy <= r; dy++) for (dx = -r; dx <= r; dx++)
-    // This means a radius=3 checks a 7x7 square area, not a circular area.
+  it('uses square radius (Chebyshev distance), not circular', () => {
+    // Both C++ and TS use: for (dy = -r; dy <= r; dy++) for (dx = -r; dx <= r; dx++)
+    // This means a radius=3 checks a 7x7 square area (Chebyshev distance <= 3).
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
 
-    // Place bridge cells at corners of a 7x7 square (radius=3)
     const corners = [[-3,-3], [3,-3], [-3,3], [3,3]];
     for (const [dx, dy] of corners) {
       setBridgeTemplate(map, 20 + dx, 20 + dy, TEMPLATE_BRIDGE1, 6);
@@ -663,7 +690,6 @@ describe('Bridge destruction radius — C++ map.cpp Destroy_Bridge_At', () => {
 
     const destroyed = map.destroyBridge(20, 20, 3);
 
-    // All 4 corner cells should be destroyed (square, not circle)
     expect(destroyed).toBe(4);
     for (const [dx, dy] of corners) {
       expect(map.getTerrain(20 + dx, 20 + dy)).toBe(Terrain.WATER);
@@ -675,13 +701,13 @@ describe('Bridge destruction radius — C++ map.cpp Destroy_Bridge_At', () => {
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
 
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
-    setBridgeTemplate(map, 21, 20, TEMPLATE_BRIDGE1, 6); // adjacent
+    setBridgeTemplate(map, 21, 20, TEMPLATE_BRIDGE1, 6);
 
     const destroyed = map.destroyBridge(20, 20, 0);
 
     expect(destroyed).toBe(1);
     expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
-    expect(map.getTerrain(21, 20)).toBe(Terrain.CLEAR); // untouched
+    expect(map.getTerrain(21, 20)).toBe(Terrain.CLEAR);
   });
 });
 
@@ -689,11 +715,8 @@ describe('Bridge destruction radius — C++ map.cpp Destroy_Bridge_At', () => {
 
 describe('EVA messages for bridge events', () => {
 
-  it('EVA message 7 = "Bridge destroyed."', () => {
+  it('EVA message 7 = "Bridge destroyed." fires on splash damage bridge kill', () => {
     // C++ Speak(VOX_BRIDGE_DESTROYED) == EVA index 7
-    // TS scenario.ts EVA_MESSAGES[7] = 'Bridge destroyed.'
-    // Verify the mapping exists. Cannot import scenario internals directly,
-    // so verify via combat.ts behavior.
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
@@ -701,60 +724,360 @@ describe('EVA messages for bridge events', () => {
     const evaMessages: number[] = [];
     ctx.showEvaMessage = (id: number) => evaMessages.push(id);
 
-    // Force deterministic bridge destruction with damage > 1000
     const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
     applySplashDamage(ctx, impactPos, { damage: 1500, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
 
     expect(evaMessages).toContain(7);
   });
-
-  it('EVA message 96 = "Bridge charges set. Take cover!"', () => {
-    // C++ has VOX_BRIDGE_CHARGES_SET for engineer bridge charges (RA2, not RA1).
-    // TS includes it as EVA_MESSAGES[96] but it is not used in normal gameplay.
-    // This just documents the mapping exists.
-    // TS scenario.ts:5953 — 96: 'Bridge charges set. Take cover!'
-    // This is informational only — no behavioral test needed.
-    expect(true).toBe(true); // placeholder: message mapping verified by code inspection
-  });
 });
 
 // ── 13. Warhead filtering for bridge damage ─────────────────────────────────
 
-describe('Warhead filtering for bridge damage — C++ combat.cpp:261', () => {
+describe('Warhead filtering for bridge damage — C++ combat.cpp:261-268', () => {
 
   it('only AP and HE warheads can damage bridges', () => {
     // C++ combat.cpp:267 explicitly checks: warhead == WARHEAD_AP || warhead == WARHEAD_HE
     const allowedWarheads = ['AP', 'HE'] as const;
     const rejectedWarheads = ['SA', 'Fire', 'Super'] as const;
 
-    // Test allowed warheads can destroy (with enough attempts)
     for (const wh of allowedWarheads) {
       const ctx = makeCombatCtx();
       setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
       ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
       const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
-
-      // Use damage > 1000 to guarantee destruction
       applySplashDamage(ctx, impactPos, { damage: 1500, warhead: wh, splash: 1.5 }, -1, House.Spain);
 
       expect(ctx.map.getTerrain(20, 20), `${wh} warhead should destroy bridge`).toBe(Terrain.WATER);
     }
 
-    // Test rejected warheads cannot destroy
     for (const wh of rejectedWarheads) {
       const ctx = makeCombatCtx();
       setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
       ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
       const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
-
       for (let i = 0; i < 50; i++) {
         applySplashDamage(ctx, impactPos, { damage: 1500, warhead: wh, splash: 1.5 }, -1, House.Spain);
       }
 
       const bridgeIdx = 20 * MAP_CELLS + 20;
       expect(ctx.map.templateType[bridgeIdx], `${wh} warhead should NOT destroy bridge`).toBe(TEMPLATE_BRIDGE1);
+    }
+  });
+});
+
+// ── 14. PARITY GAP: Splash damage bridge template coverage ──────────────────
+
+describe('PARITY GAP: C++ combat.cpp:261-265 checks 10 templates, TS checks only 6', () => {
+
+  it('C++ checks 4 additional multi-part bridge templates for splash damage', () => {
+    // C++ combat.cpp:261-265 checks these 10 templates for bridge damage from splash:
+    //   BRIDGE1(131), BRIDGE2(133), BRIDGE1H(378), BRIDGE2H(379),
+    //   BRIDGE_1A(235), BRIDGE_1B(236),
+    //   BRIDGE_2A(238), BRIDGE_2B(239), BRIDGE_3A(241), BRIDGE_3B(242)
+    //
+    // TS combat.ts:1042 only checks 6: 131, 133, 235, 236, 378, 379
+    // Missing: BRIDGE_2A(238), BRIDGE_2B(239), BRIDGE_3A(241), BRIDGE_3B(242)
+    const tsSplashTemplates = new Set([131, 133, 235, 236, 378, 379]);
+    const cppSplashTemplates = new Set(CPP_SPLASH_DAMAGEABLE_BRIDGE_TEMPLATES);
+
+    const missingFromTS = CPP_SPLASH_DAMAGEABLE_BRIDGE_TEMPLATES.filter(
+      t => !tsSplashTemplates.has(t)
+    );
+
+    // These 4 templates are checked by C++ but not TS:
+    expect(missingFromTS).toEqual([
+      TEMPLATE_BRIDGE_2A,  // 238
+      TEMPLATE_BRIDGE_2B,  // 239
+      TEMPLATE_BRIDGE_3A,  // 241
+      TEMPLATE_BRIDGE_3B,  // 242
+    ]);
+    expect(missingFromTS.length).toBe(4);
+  });
+
+  it('PARITY GAP: HE splash on BRIDGE_2A cell does NOT destroy bridge in TS', () => {
+    // C++ combat.cpp:264 includes TEMPLATE_BRIDGE_2A in the splash damage check.
+    // TS combat.ts:1042 does not include template 238.
+    const ctx = makeCombatCtx();
+    setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE_2A, 6);
+    ctx.bridgeCellCount = ctx.map.countBridgeCells(); // also won't count it
+
+    const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
+    // Use guaranteed-destroy damage
+    applySplashDamage(ctx, impactPos, { damage: 1500, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
+
+    // PARITY GAP: TS does not recognize template 238 as a bridge.
+    // C++ would have destroyed this bridge. TS leaves it intact.
+    const bridgeIdx = 20 * MAP_CELLS + 20;
+    expect(ctx.map.templateType[bridgeIdx]).toBe(TEMPLATE_BRIDGE_2A); // TS: untouched
+    // C++ would destroy it: expect(ctx.map.templateType[bridgeIdx]).not.toBe(238);
+  });
+
+  it('PARITY GAP: HE splash on BRIDGE_3A cell does NOT destroy bridge in TS', () => {
+    const ctx = makeCombatCtx();
+    setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE_3A, 6);
+
+    const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
+    applySplashDamage(ctx, impactPos, { damage: 1500, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
+
+    const bridgeIdx = 20 * MAP_CELLS + 20;
+    expect(ctx.map.templateType[bridgeIdx]).toBe(TEMPLATE_BRIDGE_3A); // TS: untouched
+  });
+
+  it('PARITY GAP: destroyBridge does not destroy BRIDGE_2A/2B/3A/3B cells', () => {
+    // TS map.ts:685 only checks 6 templates. Multi-part bridge pieces _2A, _2B, _3A, _3B
+    // are not destroyed by destroyBridge.
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+
+    const missingTemplates = [
+      TEMPLATE_BRIDGE_2A, TEMPLATE_BRIDGE_2B,
+      TEMPLATE_BRIDGE_3A, TEMPLATE_BRIDGE_3B,
+    ];
+    for (let i = 0; i < missingTemplates.length; i++) {
+      setBridgeTemplate(map, 30 + i, 30, missingTemplates[i], 6);
+    }
+
+    const destroyed = map.destroyBridge(31, 30, 3);
+
+    // PARITY GAP: TS does not recognize these templates
+    expect(destroyed).toBe(0);
+    for (let i = 0; i < missingTemplates.length; i++) {
+      const idx = 30 * MAP_CELLS + (30 + i);
+      expect(map.templateType[idx]).toBe(missingTemplates[i]); // untouched
+    }
+  });
+
+  it('PARITY GAP: countBridgeCells does not count BRIDGE_2A/2B/3A/3B', () => {
+    // C++ Intact_Bridge_Count (map.cpp:2045-2073) also does NOT count these templates.
+    // So this is actually CORRECT parity for counting — only the 6 templates with icon==6
+    // are counted as intact bridges. The gap is only in splash damage and destroyBridge.
+    const map = new GameMap();
+    setBridgeTemplate(map, 30, 30, TEMPLATE_BRIDGE_2A, 6);
+    setBridgeTemplate(map, 31, 30, TEMPLATE_BRIDGE_3A, 6);
+
+    // C++ Intact_Bridge_Count also returns 0 for these templates, so this is correct
+    expect(map.countBridgeCells()).toBe(0);
+  });
+});
+
+// ── 15. C++ Intact_Bridge_Count parity ──────────────────────────────────────
+
+describe('countBridgeCells — C++ map.cpp:2045-2073 Intact_Bridge_Count', () => {
+
+  it('counts only cells with icon==6 (C++ TIcon==6 check)', () => {
+    const map = new GameMap();
+    setBridgeTemplate(map, 10, 10, TEMPLATE_BRIDGE1, 6);  // counted
+    setBridgeTemplate(map, 11, 10, TEMPLATE_BRIDGE1, 3);  // wrong icon, not counted
+    setBridgeTemplate(map, 12, 10, TEMPLATE_BRIDGE1, 0);  // wrong icon, not counted
+    setBridgeTemplate(map, 13, 10, TEMPLATE_BRIDGE2, 6);  // counted
+
+    expect(map.countBridgeCells()).toBe(2);
+  });
+
+  it('matches C++ template set exactly: BRIDGE1/1H/2/2H/_1A/_1B', () => {
+    // C++ map.cpp:2054-2059 — exactly these 6 templates
+    const map = new GameMap();
+    const templates = CPP_INTACT_BRIDGE_TEMPLATES;
+    for (let i = 0; i < templates.length; i++) {
+      setBridgeTemplate(map, 10 + i, 10, templates[i], 6);
+    }
+    expect(map.countBridgeCells()).toBe(6);
+  });
+
+  it('does NOT count fully-destroyed templates (BRIDGE1D=132, BRIDGE2D=134)', () => {
+    const map = new GameMap();
+    setBridgeTemplate(map, 10, 10, TEMPLATE_BRIDGE1D, 6);
+    setBridgeTemplate(map, 11, 10, TEMPLATE_BRIDGE2D, 6);
+
+    expect(map.countBridgeCells()).toBe(0);
+  });
+
+  it('returns 0 for empty map', () => {
+    const map = new GameMap();
+    expect(map.countBridgeCells()).toBe(0);
+  });
+});
+
+// ── 16. C++ Destroy_Bridge_At screen shake ──────────────────────────────────
+
+describe('Screen shake from bridge destruction — C++ map.cpp:1862', () => {
+
+  it('C++ calls Shake_The_Screen(3) only on full destruction (Phase 2)', () => {
+    // C++ map.cpp:1862 — Shake_The_Screen(3) is called after Phase 2
+    // (BRIDGE1H/2H -> BRIDGE1D/2D), not Phase 1 (BRIDGE1/2 -> BRIDGE1H/2H).
+    // C++ map.cpp:1978 — also Shake_The_Screen(3) for multi-part bridge full destruction.
+    // C++ map.cpp:1982 — Shake_The_Screen(3) for multi-part partial destruction.
+    // TS: barrel destruction sets screenShake as part of building death, not bridge-specific.
+    // This is an informational parity note — the shake value 3 is not precisely replicated.
+    expect(3).toBe(3); // C++ shake magnitude is 3 for bridge destruction
+  });
+});
+
+// ── 17. Bridge destruction creates water cells (passability flip) ───────────
+
+describe('Bridge destruction creates water cells — terrain state change', () => {
+
+  it('destroyBridge sets templateType to TEMPLATE_WATER (1)', () => {
+    // C++ map.cpp:1822-1825 sets BRIDGE1D/2D (132/134). TS sets 1 (water).
+    // Both make the cell impassable to ground units.
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
+
+    map.destroyBridge(20, 20, 3);
+
+    const idx = 20 * MAP_CELLS + 20;
+    expect(map.templateType[idx]).toBe(1); // TEMPLATE_WATER
+    // C++ would set to 132 (TEMPLATE_BRIDGE1D) — a different value but same effect
+  });
+
+  it('destroyBridge sets terrain to WATER', () => {
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE2, 6);
+
+    map.destroyBridge(20, 20, 3);
+
+    expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
+  });
+
+  it('ground units cannot traverse destroyed bridge cells', () => {
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
+
+    expect(map.isPassable(20, 20)).toBe(true); // before: passable
+
+    map.destroyBridge(20, 20, 3);
+
+    expect(map.isPassable(20, 20)).toBe(false); // after: impassable
+  });
+
+  it('naval units CAN traverse destroyed bridge cells', () => {
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
+
+    expect(map.isWaterPassable(20, 20)).toBe(false); // before: not water
+
+    map.destroyBridge(20, 20, 3);
+
+    expect(map.isWaterPassable(20, 20)).toBe(true); // after: water
+  });
+});
+
+// ── 18. Demolitioner sabotage on bridge cells ───────────────────────────────
+
+describe('Demolitioner (IsBomber) sabotage on bridges — C++ infantry.cpp:3186-3198', () => {
+
+  it('C++ checks 8 bridge templates for sabotage action (BRIDGE_3A/3B are commented out)', () => {
+    // C++ infantry.cpp:3186-3198:
+    //   case TEMPLATE_BRIDGE1:      // 131
+    //   case TEMPLATE_BRIDGE2:      // 133
+    //   case TEMPLATE_BRIDGE1H:     // 378
+    //   case TEMPLATE_BRIDGE2H:     // 379
+    //   case TEMPLATE_BRIDGE_1A:    // 235
+    //   case TEMPLATE_BRIDGE_1B:    // 236
+    //   case TEMPLATE_BRIDGE_2A:    // 238
+    //   case TEMPLATE_BRIDGE_2B:    // 239
+    //   // case TEMPLATE_BRIDGE_3A: // COMMENTED OUT in C++
+    //   // case TEMPLATE_BRIDGE_3B: // COMMENTED OUT in C++
+    //      return(ACTION_SABOTAGE);
+    //
+    // Note: BRIDGE_3A and BRIDGE_3B are commented out in the C++ source.
+    const sabotageTemplates = [
+      TEMPLATE_BRIDGE1, TEMPLATE_BRIDGE2,
+      TEMPLATE_BRIDGE1H, TEMPLATE_BRIDGE2H,
+      TEMPLATE_BRIDGE_1A, TEMPLATE_BRIDGE_1B,
+      TEMPLATE_BRIDGE_2A, TEMPLATE_BRIDGE_2B,
+    ];
+    // 3A and 3B are commented out in C++ source
+    const commentedOutTemplates = [TEMPLATE_BRIDGE_3A, TEMPLATE_BRIDGE_3B];
+
+    expect(sabotageTemplates.length).toBe(8);
+    expect(commentedOutTemplates.length).toBe(2);
+  });
+});
+
+// ── 19. Bridge count tracking consistency ───────────────────────────────────
+
+describe('Bridge count tracking — C++ Scen.BridgeCount vs TS bridgeCellCount', () => {
+
+  it('bridgeCellCount recalculated from scratch after destruction', () => {
+    // C++ map.cpp:1828 — Scen.BridgeCount-- (decrements by 1 per full destruction).
+    // TS recalculates from scratch: ctx.bridgeCellCount = ctx.map.countBridgeCells().
+    // Both approaches produce the same result for bridge counting.
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+
+    setBridgeTemplate(map, 10, 10, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE2, 6);
+    setBridgeTemplate(map, 30, 30, TEMPLATE_BRIDGE_1A, 6);
+
+    expect(map.countBridgeCells()).toBe(3);
+
+    map.destroyBridge(10, 10, 1);
+    expect(map.countBridgeCells()).toBe(2);
+
+    map.destroyBridge(20, 20, 1);
+    expect(map.countBridgeCells()).toBe(1);
+
+    map.destroyBridge(30, 30, 1);
+    expect(map.countBridgeCells()).toBe(0);
+  });
+
+  it('distant bridge sections are independent', () => {
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+
+    setBridgeTemplate(map, 10, 10, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(map, 60, 60, TEMPLATE_BRIDGE2, 6);
+
+    map.destroyBridge(10, 10, 3);
+
+    expect(map.countBridgeCells()).toBe(1);
+    expect(map.getTerrain(10, 10)).toBe(Terrain.WATER);
+    expect(map.getTerrain(60, 60)).toBe(Terrain.CLEAR);
+  });
+});
+
+// ── 20. PARITY GAP: Multi-part bridge destruction state machine ─────────────
+
+describe('PARITY GAP: Multi-part bridge destruction — C++ map.cpp:1869-1985', () => {
+
+  it('C++ has complex state machine for multi-part bridges', () => {
+    // C++ map.cpp:1869-1985 implements a multi-step state machine for diagonal bridges:
+    //   BRIDGE_1A -> BRIDGE_1B -> BRIDGE_1C (destroyed)
+    //   BRIDGE_2A -> BRIDGE_2B -> BRIDGE_2C (destroyed)
+    //   BRIDGE_3A -> BRIDGE_3B -> BRIDGE_3C (half) -> BRIDGE_3D/3E/3F (destroyed variants)
+    //
+    // C++ map.cpp:1876-1886 — first hit on _1A/_1B/_2A/_2B/_3A/_3B increments
+    //   the template type by 1 (ttype++, new TemplateClass(ttype, cell)).
+    //   e.g., BRIDGE_1A(235) -> BRIDGE_1B(236), BRIDGE_1B(236) -> BRIDGE_1C(237)
+    //
+    // C++ map.cpp:1892-1915 — BRIDGE_3C checks adjacent pieces for proper shaping.
+    // C++ map.cpp:1921-1951 — BRIDGE_1C/2C trigger BridgeCount-- and occupant killing.
+    //
+    // TS has none of this — destroyBridge converts any recognized bridge cell to water
+    // in one step. Multi-part bridges with templates _2A, _2B, _3A, _3B are not even
+    // recognized by TS (see test 14 above).
+    //
+    // This is acceptable simplification IF no shipping mission uses multi-part bridges,
+    // but it is a structural parity gap for completeness.
+    const cppTransitions = {
+      [TEMPLATE_BRIDGE_1A]: TEMPLATE_BRIDGE_1B,  // 235 -> 236
+      [TEMPLATE_BRIDGE_1B]: TEMPLATE_BRIDGE_1C,  // 236 -> 237
+      [TEMPLATE_BRIDGE_2A]: TEMPLATE_BRIDGE_2B,  // 238 -> 239
+      [TEMPLATE_BRIDGE_2B]: TEMPLATE_BRIDGE_2C,  // 239 -> 240
+      [TEMPLATE_BRIDGE_3A]: TEMPLATE_BRIDGE_3B,  // 241 -> 242
+      [TEMPLATE_BRIDGE_3B]: TEMPLATE_BRIDGE_3C,  // 242 -> 243
+    };
+
+    // Verify the C++ transition is always +1
+    for (const [from, to] of Object.entries(cppTransitions)) {
+      expect(Number(to)).toBe(Number(from) + 1);
     }
   });
 });

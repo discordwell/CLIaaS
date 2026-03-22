@@ -1305,11 +1305,11 @@ describe('Edge Cases', () => {
     expect(chunk).toContain('unjamRadius');
   });
 
-  it('Queen Ant self-heals +1 HP every 60 ticks (SelfHealing=yes)', () => {
+  it('Queen Ant self-heals +1 HP every 14 ticks (SelfHealing=yes, C++ RepairRate)', () => {
     const queenSection = indexSource.indexOf('Queen Ant self-healing');
     expect(queenSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(queenSection, queenSection + 500);
-    expect(chunk).toContain('tick % 60 === 0');
+    expect(chunk).toContain('tick % 14 === 0');
     expect(chunk).toContain("s.type === 'QUEE'");
     expect(chunk).toContain('s.hp + 1');
   });
@@ -1652,11 +1652,11 @@ describe('Timing Constants', () => {
     expect(chunk).toContain('tick % 15 !== 0');
   });
 
-  it('Queen Ant self-heal interval is 60 ticks (4 seconds)', () => {
+  it('Queen Ant self-heal interval is 14 ticks (C++ RepairRate)', () => {
     const queenSection = indexSource.indexOf('Queen Ant self-healing');
     expect(queenSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(queenSection, queenSection + 500);
-    expect(chunk).toContain('tick % 60 === 0');
+    expect(chunk).toContain('tick % 14 === 0');
   });
 
   it('depot rearm rate is 36 ticks per ammo', () => {

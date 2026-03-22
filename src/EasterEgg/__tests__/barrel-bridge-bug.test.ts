@@ -229,9 +229,9 @@ describe('Barrel explosion bridge destruction fix', () => {
     structureDamage(ctx, barrel, 100);
 
     expect(barrel.alive).toBe(false);
-    // Building at cardinal cell should take exactly 200 damage from barrel fire-bullet
-    // (HP set to 500 so it survives, letting us verify the exact 200 damage hit)
-    expect(building.hp).toBeLessThanOrEqual(500 - 200);
+    // C++ applies Fire warhead vs armor modifier: BARL armor=none, Fire vs none=0.9
+    // 200 * 0.9 = 180 damage → 500 - 180 = 320
+    expect(building.hp).toBe(320);
   });
 
   it('barrel blast damages adjacent non-barrel structure but does not destroy it', () => {

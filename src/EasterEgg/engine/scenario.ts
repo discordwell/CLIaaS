@@ -1246,6 +1246,9 @@ export const STRUCTURE_ARMOR: Record<string, ArmorType> = {
   MSLO: 'heavy',  // rules.ini: Armor=heavy
   AFLD: 'heavy',  // rules.ini: Armor=heavy
   FTUR: 'heavy',  // rules.ini: Armor=heavy
+  // barrel armor types (C++ default ARMOR_NONE)
+  BARL: 'none',  // barrel — no Armor= in rules.ini, defaults to ARMOR_NONE
+  BRL3: 'none',  // barrel (3-cell variant) — same default
   // wall armor types from rules.ini
   SBAG: 'none', FENC: 'none', BRIK: 'none', CYCL: 'none', WOOD: 'none',
   BARB: 'wood',  // rules.ini: Armor=wood (barbed wire)

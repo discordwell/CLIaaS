@@ -239,26 +239,27 @@ describe('Barrel cardinal fire-bullets (building.cpp:1344-1369)', () => {
   // ── Warhead & Damage Amount ──
 
   describe('warhead and damage (WARHEAD_FIRE, 200 damage)', () => {
-    it('deals exactly 200 base damage to structures in cardinal cells', () => {
+    it('deals Fire-warhead-modified damage to structures in cardinal cells', () => {
       const barrel = makeBarrel(10, 10);
       // Use a 1x1 structure with high HP to measure exact damage
+      // BARL armor=none, Fire vs none=0.9 → round(200*0.9)=180
       const target = makeBarrel(11, 10, 500); // East, 500 HP
       const ctx = makeCombatCtx([barrel, target]);
       structureDamage(ctx, barrel, 100);
-      // Should take exactly 200 damage (no falloff)
-      expect(target.hp).toBe(300);
+      // C++ applies Fire warhead vs armor modifier: 200 * 0.9 (none) = 180
+      expect(target.hp).toBe(320);
     });
 
-    it('no distance falloff within cardinal cell (flat 200)', () => {
+    it('no distance falloff within cardinal cell (flat base 200, modified by armor)', () => {
       const barrel = makeBarrel(10, 10);
       // Both structures are exactly 1 cell away (cardinal)
       const eastTarget = makeBarrel(11, 10, 500);
       const northTarget = makeBarrel(10, 9, 500);
       const ctx = makeCombatCtx([barrel, eastTarget, northTarget]);
       structureDamage(ctx, barrel, 100);
-      // Both should take identical 200 damage (no falloff based on distance)
-      expect(eastTarget.hp).toBe(300);
-      expect(northTarget.hp).toBe(300);
+      // Both should take identical damage: 200 * Fire-vs-none(0.9) = 180
+      expect(eastTarget.hp).toBe(320);
+      expect(northTarget.hp).toBe(320);
     });
 
     it('BRL3 barrel type uses the same cardinal fire-bullet mechanic', () => {
@@ -266,7 +267,8 @@ describe('Barrel cardinal fire-bullets (building.cpp:1344-1369)', () => {
       const target = makeBarrel(11, 10, 500);
       const ctx = makeCombatCtx([barrel, target]);
       structureDamage(ctx, barrel, 100);
-      expect(target.hp).toBe(300);
+      // Fire vs none(0.9) → 200 * 0.9 = 180, so 500 - 180 = 320
+      expect(target.hp).toBe(320);
     });
   });
 

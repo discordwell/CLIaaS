@@ -1779,8 +1779,9 @@ export class Game {
       this._runRepairSell(ctx => _tickRepairs(ctx));
     }
 
-    // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 60 ticks (~4 seconds)
-    if (this.tick % 60 === 0) {
+    // Queen Ant self-healing (SelfHealing=yes in INI): +1 HP every 14 ticks
+    // C++ RepairRate timing = 14 ticks (same as structure repair interval)
+    if (this.tick % 14 === 0) {
       for (const s of this.structures) {
         if (s.alive && s.type === 'QUEE' && s.hp / s.maxHp <= CONDITION_YELLOW) {
           s.hp = Math.min(s.maxHp, s.hp + 1);

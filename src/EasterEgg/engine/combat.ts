@@ -1238,12 +1238,15 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
           }
         }
         // Damage structures whose footprint overlaps cardinal cell (chain explosions)
+        // C++ applies Fire warhead vs armor modifier before structure damage
         for (const s2 of ctx.structures) {
           if (!s2.alive || s2 === s) continue;
           const [s2w, s2h] = STRUCTURE_SIZE[s2.type] ?? [2, 2];
           if (targetCx >= s2.cx && targetCx < s2.cx + s2w &&
               targetCy >= s2.cy && targetCy < s2.cy + s2h) {
-            structureDamage(ctx, s2, 200);
+            const s2Armor: ArmorType = s2.armor ?? (STRUCTURE_ARMOR[s2.type] ?? 'wood');
+            const fireVs = WARHEAD_VS_ARMOR['Fire'][armorIndex(s2Armor)];
+            structureDamage(ctx, s2, Math.max(1, Math.round(200 * fireVs)));
           }
         }
       }
