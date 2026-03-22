@@ -111,15 +111,16 @@ const emptyTriggers: ScenarioTrigger[] = [];
 // ============================================================================
 
 describe('checkTriggerEvent — full event coverage', () => {
-  // TEVENT_NONE (0) — never fires
-  it('TEVENT_NONE (0) always returns false', () => {
+  // TEVENT_NONE (0) — always fires (C++ scenario.cpp: no event condition required)
+  it('TEVENT_NONE (0) always returns true', () => {
     const event: TriggerEvent = { type: 0, team: -1, data: 0 };
-    // Even with everything "true", NONE should never fire
+    // C++ TEVENT_NONE means "no event condition required" = always true.
+    // This enables frc1/frc2 reinforcement triggers in SCG05EA and other missions.
     expect(checkTriggerEvent(event, createState({
       playerEntered: true,
       enemyKillCount: 999,
       missionTimerExpired: true,
-    }))).toBe(false);
+    }))).toBe(true);
   });
 
   // TEVENT_ANY (8) — always fires
@@ -764,10 +765,11 @@ describe('Trigger persistence modes', () => {
 
 describe('Event control logic', () => {
   it('eventControl=0 (only): only event1 is evaluated', () => {
+    // Use TEVENT_GLOBAL_SET with unset global for a reliably-false event
     const trigger = createTrigger({
       eventControl: 0,
-      event1: { type: 8, team: -1, data: 0 },   // ANY -> true
-      event2: { type: 0, team: -1, data: 0 },    // NONE -> false
+      event1: { type: 8, team: -1, data: 0 },    // ANY -> true
+      event2: { type: 27, team: -1, data: 9999 }, // GLOBAL_SET(9999) -> false
     });
 
     const state = createState();
@@ -830,11 +832,12 @@ describe('Event control logic', () => {
     expect(e1 && e2).toBe(true);
   });
 
-  it('OR with both TEVENT_NONE events never fires', () => {
+  it('OR with both TEVENT_NONE events always fires (TEVENT_NONE = true)', () => {
     const state = createState();
     const e1 = checkTriggerEvent({ type: 0, team: -1, data: 0 }, state);
     const e2 = checkTriggerEvent({ type: 0, team: -1, data: 0 }, state);
-    expect(e1 || e2).toBe(false);
+    // C++ TEVENT_NONE returns true (no event condition required)
+    expect(e1 || e2).toBe(true);
   });
 
   it('unknown eventControl defaults to event1 only', () => {
@@ -901,12 +904,13 @@ describe('Action control logic', () => {
 
 describe('Force-fire mechanism (forceFirePending)', () => {
   it('forceFirePending bypasses event conditions', () => {
+    // Use TEVENT_GLOBAL_SET with unset global for a reliably-false event
     const trigger = createTrigger({
-      event1: { type: 0, team: -1, data: 0 },  // TEVENT_NONE — never fires
+      event1: { type: 27, team: -1, data: 9999 },  // GLOBAL_SET(9999) — false (global not set)
       forceFirePending: true,
     });
 
-    // Without force: event1 (NONE) is false, so shouldFire = false
+    // Without force: event1 (GLOBAL_SET 9999) is false, so shouldFire = false
     const state = createState();
     expect(checkTriggerEvent(trigger.event1, state)).toBe(false);
 

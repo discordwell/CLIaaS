@@ -565,8 +565,8 @@ describe('Thief vs Spy distinction (infantry.cpp:645-701)', () => {
 // Section 13: Sonar pulse recharge
 // ==========================================================================
 
-describe('Sonar pulse recharge (rules.ini Sonar=10, house.cpp:654)', () => {
-  it('sonar recharge time is 9000 ticks (10 minutes) -- rules.ini parity', () => {
+describe('Sonar pulse recharge (C++ rules.cpp:210 SonarTime(14), house.cpp:654)', () => {
+  it('sonar recharge time is 12600 ticks (14 min) -- C++ SonarTime(14)', () => {
     expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
   });
 

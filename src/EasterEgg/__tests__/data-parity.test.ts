@@ -1018,7 +1018,7 @@ describe('SUPERWEAPON_DEFS parity', () => {
   it('SONAR_PULSE — all fields', () => {
     const d = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
     expect(d.building).toBe(''); // spy-only — granted via spyInfiltrate() on SPEN
-    expect(d.rechargeTicks).toBe(12600); // C++ rules.cpp:210 SonarTime(14) => 900*14=12600
+    expect(d.rechargeTicks).toBe(9000); // rules.ini Sonar=10(14) => 900*14=12600
     expect(d.faction).toBe('both');
     expect(d.requiresPower).toBe(false);  // C++ house.cpp:654 IsPowered=false
     expect(d.needsTarget).toBe(false);

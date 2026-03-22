@@ -538,7 +538,7 @@ describe('Spy infiltration effects (infantry.cpp:645-676)', () => {
    * Sonar pulse recharge time from rules.ini [Recharge] Sonar=10
    * 10 minutes * 60 * 15 = 9000 ticks.
    */
-  it('Sonar Pulse recharge = 9000 ticks (rules.ini Sonar=10)', () => {
+  it('Sonar Pulse recharge = 9000 ticks (C++ SonarTime 14)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
     expect(def).toBeDefined();
     expect(def.rechargeTicks).toBe(9000);

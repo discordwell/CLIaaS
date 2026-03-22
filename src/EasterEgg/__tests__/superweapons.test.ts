@@ -75,7 +75,7 @@ describe('Superweapon definitions', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
     expect(def.name).toBe('Sonar Pulse');
     expect(def.building).toBe(''); // spy-only — granted via spyInfiltrate() on SPEN
-    expect(def.rechargeTicks).toBe(12600); // C++ rules.cpp:210 SonarTime(14) => 900*14=12600
+    expect(def.rechargeTicks).toBe(9000); // rules.ini [Recharge] Sonar=10 => 10*60*15=9000
     expect(def.faction).toBe('both');
     expect(def.needsTarget).toBe(false);
     expect(def.targetMode).toBe('none');
@@ -395,10 +395,10 @@ describe('Recharge system', () => {
     expect(def.rechargeTicks / 15).toBe(780);
   });
 
-  it('Sonar Pulse has 12600 tick recharge (840 seconds, C++ SonarTime(14))', () => {
+  it('Sonar Pulse has 9000 tick recharge (600s, rules.ini Sonar=10)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(def.rechargeTicks).toBe(12600);
-    expect(def.rechargeTicks / 15).toBe(840);
+    expect(def.rechargeTicks).toBe(9000);
+    expect(def.rechargeTicks / 15).toBe(600);
   });
 
   it('GPS Satellite recharges in 7200 ticks', () => {

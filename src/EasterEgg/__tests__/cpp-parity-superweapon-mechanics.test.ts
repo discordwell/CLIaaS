@@ -1126,7 +1126,7 @@ describe('Superweapon constant parity with C++ source values', () => {
     expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(7200);
   });
 
-  it('Sonar Pulse recharge is 9000 ticks (rules.ini Sonar=10 => 900*10)', () => {
+  it('Sonar Pulse recharge is 9000 ticks (rules.ini Sonar=10 => 900 x 10)', () => {
     expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(9000);
   });
 

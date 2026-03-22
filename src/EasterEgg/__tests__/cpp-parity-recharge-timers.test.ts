@@ -67,7 +67,7 @@ describe('[Recharge] section: rechargeTicks = minutes * 60 * 15', () => {
     [SuperweaponType.IRON_CURTAIN,  'IronCurtain', 11],
     [SuperweaponType.NUKE,          'Nuke',        13],
     [SuperweaponType.GPS_SATELLITE, 'GPS',          8],
-    [SuperweaponType.SONAR_PULSE,   'Sonar',       14], // C++ rules.cpp:210 SonarTime(14)
+    [SuperweaponType.SONAR_PULSE,   'Sonar',       10], // rules.ini [Recharge] Sonar=10
     [SuperweaponType.PARABOMB,      'ParaBomb',    14],
     [SuperweaponType.PARAINFANTRY,  'Paratrooper',  7],
     [SuperweaponType.SPY_PLANE,     'SpyPlane',     3],

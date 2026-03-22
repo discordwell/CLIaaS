@@ -174,9 +174,9 @@ describe('SPEN spy infiltration — sonar pulse grant (infantry.cpp:664-670)', (
 // ===========================================================================
 
 describe('SONAR_PULSE recharge time (rules.cpp:210, house.cpp:654)', () => {
-  it('sonar pulse recharge should be 12600 ticks (14 min)', () => {
+  it('sonar pulse recharge should be 9000 ticks (10 min per rules.ini)', () => {
     const def = SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE];
-    expect(def.rechargeTicks).toBe(12600);
+    expect(def.rechargeTicks).toBe(9000);  // rules.ini [Recharge] Sonar=10
   });
 });
 

@@ -253,9 +253,8 @@ describe('INI Parity: Superweapon Recharge', () => {
   const rechargeSection = ini['Recharge'];
   if (!rechargeSection) return;
 
-  // Known override: Sonar uses C++ constructor default SonarTime(14)=12600 ticks
-  // instead of INI Sonar=10 (9000 ticks). See rules.cpp:210.
-  const KNOWN_OVERRIDES: Record<string, number> = { Sonar: 12600 };
+  // No overrides needed. rules.ini is the source of truth.
+  const KNOWN_OVERRIDES: Record<string, number> = {};
 
   for (const [iniKey, swType] of Object.entries(RECHARGE_MAP)) {
     const iniMinutes = rechargeSection[iniKey];

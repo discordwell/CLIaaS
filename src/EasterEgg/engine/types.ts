@@ -763,7 +763,7 @@ export const SUPERWEAPON_DEFS: Record<SuperweaponType, SuperweaponDef> = {
   },
   [SuperweaponType.SONAR_PULSE]: {
     type: SuperweaponType.SONAR_PULSE, name: 'Sonar Pulse',
-    building: '', rechargeTicks: 12600, faction: 'both',    // spy-only — granted by spyInfiltrate() on SPEN; C++ rules.cpp:210 SonarTime(14) => 900*14=12600
+    building: '', rechargeTicks: 9000, faction: 'both',    // spy-only; rules.ini [Recharge] Sonar=10 => 10 min x 900 = 9000
     requiresPower: false, needsTarget: false, targetMode: 'none',  // C++ HOUSE.CPP:654 IsPowered=false
   },
   [SuperweaponType.PARABOMB]: {

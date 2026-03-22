@@ -1288,22 +1288,21 @@ describe('Superweapon cooldown and charging system', () => {
     }
   });
 
-  it('superweapon recharge rankings: SpyPlane < Chrono=ParaInf < GPS < IC < Nuke < Sonar=ParaBomb', () => {
+  it('superweapon recharge rankings: SpyPlane < Chrono=ParaInf < GPS < Sonar < IC < Nuke < ParaBomb', () => {
     const recharges = Object.values(SUPERWEAPON_DEFS).map(d => ({
       name: d.name,
       ticks: d.rechargeTicks,
     })).sort((a, b) => a.ticks - b.ticks);
 
-    expect(recharges[0].name).toBe('Spy Plane'); // 2700
+    expect(recharges[0].name).toBe('Spy Plane');      // 2700
     // Chrono and ParaInfantry tied at 6300
     expect(recharges[1].ticks).toBe(6300);
     expect(recharges[2].ticks).toBe(6300);
-    expect(recharges[3].name).toBe('GPS Satellite'); // 7200
-    expect(recharges[4].name).toBe('Iron Curtain'); // 9900
-    expect(recharges[5].name).toBe('Nuclear Strike'); // 11700
-    // Sonar Pulse and Parabomb tied at 12600
-    expect(recharges[6].ticks).toBe(12600);
-    expect(recharges[7].ticks).toBe(12600);
+    expect(recharges[3].name).toBe('GPS Satellite');    // 7200
+    expect(recharges[4].name).toBe('Sonar Pulse');     // 9000
+    expect(recharges[5].name).toBe('Iron Curtain');    // 9900
+    expect(recharges[6].name).toBe('Nuclear Strike');  // 11700
+    expect(recharges[7].name).toBe('Parabomb');        // 12600
   });
 });
 

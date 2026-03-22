@@ -129,8 +129,8 @@ describe('[Recharge] INI parity: parse rules.ini directly', () => {
 
 describe('[Recharge] INI parity: each superweapon rechargeTicks matches INI', () => {
 
-  // Sonar override: engine uses SonarTime(14)=12600 instead of rules.ini Sonar=10 (9000).
-  const KNOWN_OVERRIDES: Record<string, number> = { Sonar: 12600 };
+  // No overrides needed. rules.ini is the source of truth.
+  const KNOWN_OVERRIDES: Record<string, number> = {};
 
   for (const [iniKey, swType] of Object.entries(INI_KEY_TO_SUPERWEAPON)) {
     const iniMinutes = Number(rechargeSection[iniKey]);

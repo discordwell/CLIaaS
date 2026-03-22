@@ -56,7 +56,7 @@ const RULES_INI_RECHARGE = {
   Nuke: 13,
   ParaBomb: 14,
   Paratrooper: 7,
-  Sonar: 14, // C++ rules.cpp:210 SonarTime(14) overrides rules.ini Sonar=10
+  Sonar: 10, // rules.ini [Recharge] Sonar=10
   SpyPlane: 3,
 };
 
@@ -95,7 +95,7 @@ describe('superweapon recharge times match C++ (house.cpp:653-660, rules.ini [Re
     expect(SUPERWEAPON_DEFS[SuperweaponType.GPS_SATELLITE].rechargeTicks).toBe(expected);
   });
 
-  it('Sonar Pulse recharge = 10 min × 900 = 9000 ticks (rules.ini Sonar=10)', () => {
+  it('Sonar Pulse recharge = 10 min x 900 = 9000 ticks (rules.ini Sonar=10)', () => {
     const expected = RULES_INI_RECHARGE.Sonar * CPP_TICKS_PER_MINUTE; // 9000
     expect(SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks).toBe(expected);
   });
@@ -437,7 +437,7 @@ describe('superweapon recharge ordering matches rules.ini [Recharge]', () => {
     expect(spy).toBeLessThan(chrono);    // 2700 < 6300
     expect(chrono).toBe(para);           // 6300 = 6300
     expect(chrono).toBeLessThan(gps);    // 6300 < 7200
-    expect(gps).toBeLessThan(sonar);     // 7200 < 9000
+    expect(gps).toBeLessThan(sonar);      // 7200 < 9000 (rules.ini Sonar=10)
     expect(sonar).toBeLessThan(ic);      // 9000 < 9900
     expect(ic).toBeLessThan(nuke);       // 9900 < 11700
     expect(nuke).toBeLessThan(pbomb);    // 11700 < 12600
