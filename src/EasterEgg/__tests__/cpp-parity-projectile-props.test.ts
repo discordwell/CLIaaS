@@ -81,8 +81,6 @@ const BOOL_FLAG_MAP: [string, keyof typeof WEAPON_STATS[string]][] = [
  * These are TS-only additions (e.g. naval/scenario weapons not in standard INI).
  */
 const TS_ONLY_WEAPONS = new Set([
-  'Tomahawk',       // CA cruise missile — TS-created weapon, no INI section
-  'SeaSerpent',     // MSUB missiles — TS-created weapon, no INI section
   'Mandible',       // Ant weapon — only in scenario INI files (SCA*.ini), not rules/aftrmath
 ]);
 

@@ -158,22 +158,19 @@ describe('Naval weapon stats', () => {
     expect(w.isAntiSub).toBe(true);
   });
 
-  it('Tomahawk (CA cruise missile) has burst and splash', () => {
-    const w = WEAPON_STATS['Tomahawk'];
+  it('8Inch (CA main gun) has long range and HE warhead', () => {
+    const w = WEAPON_STATS['8Inch'];
     expect(w).toBeDefined();
-    expect(w.damage).toBe(50);
-    expect(w.range).toBe(10.0);
-    expect(w.splash).toBe(2.0);
-    expect(w.burst).toBe(2);
-    expect(w.projectileROT).toBe(5);
+    expect(w.damage).toBe(500);
+    expect(w.range).toBe(22.0);
+    expect(w.warhead).toBe('HE');
   });
 
-  it('SeaSerpent (MSUB missiles) has burst and splash', () => {
-    const w = WEAPON_STATS['SeaSerpent'];
+  it('SubSCUD (MSUB missiles) has burst and long range', () => {
+    const w = WEAPON_STATS['SubSCUD'];
     expect(w).toBeDefined();
-    expect(w.damage).toBe(35);
-    expect(w.range).toBe(8.0);
-    expect(w.splash).toBe(1.5);
+    expect(w.damage).toBe(400);
+    expect(w.range).toBe(14.0);
     expect(w.burst).toBe(2);
   });
 });

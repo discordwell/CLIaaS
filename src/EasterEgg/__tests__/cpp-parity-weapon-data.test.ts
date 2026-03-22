@@ -904,8 +904,6 @@ describe('C++ Parity: WEAPON_STATS vs rules.ini/aftrmath.ini weapon data', () =>
           ).toBeDefined();
         } else {
           // Unknown TS-only weapon — document as needing investigation
-          // Tomahawk and SeaSerpent appear to be TS-invented naval weapons
-          // not present in any official INI file
           expect.fail(
             `WEAPON_STATS['${name}'] has no INI source. ` +
             `If this is intentional, add it to KNOWN_MAPPINGS or document the source.`,

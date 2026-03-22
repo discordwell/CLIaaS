@@ -329,8 +329,6 @@ describe('Weapon isHigh flag matches C++ BulletTypeClass (bbdata.cpp)', () => {
     expect(WEAPON_STATS['RedEye'].isHigh).toBe(true);
     expect(WEAPON_STATS['MammothTusk'].isHigh).toBe(true);
     expect(WEAPON_STATS['SCUD'].isHigh).toBe(true);
-    expect(WEAPON_STATS['Tomahawk'].isHigh).toBe(true);
-    expect(WEAPON_STATS['SeaSerpent'].isHigh).toBe(true);
     expect(WEAPON_STATS['SubSCUD'].isHigh).toBe(true);
     expect(WEAPON_STATS['Maverick'].isHigh).toBe(true);
     expect(WEAPON_STATS['Hellfire'].isHigh).toBe(true);

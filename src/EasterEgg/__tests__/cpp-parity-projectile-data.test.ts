@@ -111,8 +111,6 @@ function resolveProjectileName(raw: string): string {
 // ── Known TS-only weapons (no INI section) ──────────────────────────────────
 
 const TS_ONLY_WEAPONS = new Set([
-  'Tomahawk',       // CA cruise missile — TS-created weapon, no INI section
-  'SeaSerpent',     // MSUB missiles — TS-created weapon, no INI section
   'Mandible',       // Ant weapon — only in scenario INI files (SCA*.ini)
   'TeslaCannon',    // Tesla Coil building weapon — no INI weapon section (TSLA building uses TeslaZap)
 ]);

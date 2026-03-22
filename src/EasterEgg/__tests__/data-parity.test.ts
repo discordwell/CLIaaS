@@ -713,25 +713,6 @@ describe('WEAPON_STATS parity', () => {
     expect(w.warhead).toBe('Super');
   });
 
-  // --- Naval weapons (missing) ---
-  it('Tomahawk — damage=50, rof=80, range=10.0, warhead=HE, burst=2', () => {
-    const w = WEAPON_STATS.Tomahawk;
-    expect(w.damage).toBe(50);
-    expect(w.rof).toBe(80);
-    expect(w.range).toBe(10.0);
-    expect(w.warhead).toBe('HE');
-    expect(w.burst).toBe(2);
-  });
-
-  it('SeaSerpent — damage=35, rof=50, range=8.0, warhead=HE, burst=2', () => {
-    const w = WEAPON_STATS.SeaSerpent;
-    expect(w.damage).toBe(35);
-    expect(w.rof).toBe(50);
-    expect(w.range).toBe(8.0);
-    expect(w.warhead).toBe('HE');
-    expect(w.burst).toBe(2);
-  });
-
   // --- Ant weapons (missing) ---
   it('Mandible — damage=50, rof=15, range=1.5, warhead=Super', () => {
     const w = WEAPON_STATS.Mandible;

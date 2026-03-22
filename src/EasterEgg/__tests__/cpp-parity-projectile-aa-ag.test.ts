@@ -124,9 +124,9 @@ const WEAPON_PROJECTILE_AA_AG: Record<string, ProjectileAaAg> = {
 };
 
 // ── TS-fabricated weapons that don't exist in any INI ──
-// Tomahawk, SeaSerpent, TeslaCannon are TS inventions — not in rules.ini or aftrmath.ini.
-// CA actually uses "8Inch", MSUB uses "SubSCUD", TSLA building uses "TeslaZap".
-const TS_FABRICATED_WEAPONS = ['Tomahawk', 'SeaSerpent', 'TeslaCannon'];
+// TeslaCannon is a TS invention — not in rules.ini or aftrmath.ini.
+// TSLA building uses "TeslaZap" in C++.
+const TS_FABRICATED_WEAPONS = ['TeslaCannon'];
 
 // ── STRUCTURE_WEAPONS AA/AG from INI ──
 // SAM building uses [Nike] → Projectile=AAMissile → AA=yes, AG=no
@@ -271,8 +271,6 @@ describe('C++ Parity: Projectile AA/AG flags (rules.ini)', () => {
   describe('TS-fabricated weapon names', () => {
     // These weapon names exist in WEAPON_STATS but NOT in any INI file.
     // They are TS inventions. The actual C++ weapons are:
-    //   Tomahawk -> CA uses "8Inch" (rules.ini line 736)
-    //   SeaSerpent -> not a real RA weapon (MSUB uses SubSCUD)
     //   TeslaCannon -> TSLA building uses "TeslaZap" (rules.ini line 1345)
     for (const name of TS_FABRICATED_WEAPONS) {
       it(`${name} does not exist in rules.ini or aftrmath.ini`, () => {

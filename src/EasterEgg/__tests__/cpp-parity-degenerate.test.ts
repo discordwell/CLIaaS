@@ -138,7 +138,7 @@ describe('IsDegenerate flag on weapon types — no projectile in rules.ini has D
   // C++ Non-degenerate bullet types: Lobbed, HeatSeeker, FROG, etc.
   it.each([
     'Grenade', 'Dragon', 'RedEye', 'Flamer', 'MammothTusk', '155mm',
-    'TeslaCannon', 'SCUD', 'Maverick', 'Hellfire', 'Tomahawk',
+    'TeslaCannon', 'SCUD', 'Maverick', 'Hellfire',
   ])('%s has isDegenerate falsy (non-degenerate bullet type)', (name) => {
     expect(WEAPON_STATS[name]?.isDegenerate).toBeFalsy();
   });

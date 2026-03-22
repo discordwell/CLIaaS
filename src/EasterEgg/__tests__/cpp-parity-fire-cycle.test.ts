@@ -130,9 +130,7 @@ describe('Burst fire stats from rules.ini (weapon.cpp:78,208)', () => {
     ['120mm',       2],  // Mammoth/Heavy Tank primary — double barrel
     ['MammothTusk', 2],  // Mammoth secondary — dual missile launchers
     ['Stinger',     2],  // Destroyer primary — paired naval guns
-    ['Tomahawk',    2],  // Cruiser secondary — dual cruise missiles
-    ['SeaSerpent',  2],  // Missile Sub primary — paired missiles
-    ['SubSCUD',     2],  // Aftermath Missile Sub alternate — dual SCUD
+    ['SubSCUD',     2],  // Aftermath Missile Sub — dual SCUD
     ['APTusk',      2],  // Chrono Tank missiles — paired
   ];
 
@@ -224,8 +222,6 @@ describe('ROF values match rules.ini (weapon.cpp:211)', () => {
     ['Stinger',      60],
     ['TorpTube',     60],
     ['DepthCharge',  60],
-    ['Tomahawk',     80],
-    ['SeaSerpent',   50],
     ['SubSCUD',     120],
     ['Democharge',   80],
     // Aircraft weapons
@@ -550,7 +546,7 @@ describe('All standard C++ weapons exist in WEAPON_STATS', () => {
     // Expansion
     'PortaTesla', 'GoodWrench', 'APTusk', 'TTankZap',
     // Naval
-    'Stinger', 'TorpTube', 'DepthCharge', 'Tomahawk', 'SeaSerpent', 'SubSCUD', 'Democharge',
+    'Stinger', 'TorpTube', 'DepthCharge', 'SubSCUD', 'Democharge',
     // Aircraft
     'Maverick', 'Hellfire', 'ChainGun',
     // Special

@@ -77,8 +77,6 @@ const STRUCTURE_ONLY_WEAPONS = [
 
 /** Engine-custom weapons: present in WEAPON_STATS but NOT in rules.ini/aftrmath.ini */
 const ENGINE_CUSTOM_WEAPONS = [
-  { name: 'Tomahawk',     note: 'CA cruise missile - engine custom' },
-  { name: 'SeaSerpent',   note: 'MSUB missile - engine custom' },
   { name: 'TeslaCannon',  note: 'TSLA building - separate from TeslaZap weapon' },
   { name: 'Mandible',     note: 'ant weapon - from scenario INI, not rules.ini' },
 ];

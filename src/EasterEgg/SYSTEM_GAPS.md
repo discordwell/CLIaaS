@@ -7,7 +7,7 @@ Every major system that needs to be built or expanded to play full Red Alert in 
 
 Missing units: DD (Destroyer), SS (Submarine), CA (Cruiser), PT (Gunboat), LST (Transport — stub exists), MSUB (Missile Sub)
 Missing mechanics: water-only pathfinding, shore bombardment, torpedo weapons, depth charges, submarine submerge/surface toggle, naval yard (SYRD) production, transport loading from shore cells, sub detection (destroyers reveal subs in range)
-Missing weapons: Stinger (destroyer depth charge), TorpTube (sub torpedo), Tomahawk (cruiser missiles), SeaSerpent (MSUB missiles)
+Missing weapons: Stinger (destroyer depth charge), TorpTube (sub torpedo), 8Inch (cruiser main gun), SubSCUD (MSUB missiles)
 
 ## 2. AIR COMBAT
 **Status: 0% — No aircraft, airfields, or flight mechanics**

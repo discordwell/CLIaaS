@@ -141,7 +141,6 @@ describe('INI Parity: Structure HP', () => {
 // Weapons not in C++ INI — exempt from comparison
 const EXEMPT_WEAPONS = new Set([
   'Mandible', 'TeslaZap', 'FireballLauncher', 'Napalm', // Ant weapons (custom)
-  'Tomahawk', 'SeaSerpent', // Custom naval weapons
 ]);
 
 // C++ compiled-in defaults that differ from INI file values (we follow the C++ source)

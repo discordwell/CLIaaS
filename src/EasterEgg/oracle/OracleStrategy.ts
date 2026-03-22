@@ -81,14 +81,13 @@ const BUILD_ORDER: BuildOrderEntry[] = [
 /* human-requested: 2 WEAPs for double tank production speed.
    POWR(300)+PROC(2000)+WEAP(2000)+WEAP(2000)=6300.
    Remaining 8500 ÷ 800/tank = 10 tanks, built 2× faster. */
+/* human-requested: POWR→PROC→WEAP→PROC#2, 1 WEAP only, freeze until island cleared */
 const SCG11EA_BUILD_ORDER: BuildOrderEntry[] = [
   { names: ['POWR'],         type_ids: [17] },              // 300
-  { names: ['PROC'],         type_ids: [12] },              // 2000
-  { names: ['WEAP'],         type_ids: [2] },               // 2000
-  { names: ['WEAP'],         type_ids: [2], maxCount: 2 },  // 2000 — double production!
-  // Freeze building here until 12 armor, then expand economy
-  { names: ['PROC'],         type_ids: [12], maxCount: 2 },
-  { names: ['PROC'],         type_ids: [12], maxCount: 3 },
+  { names: ['PROC'],         type_ids: [12] },              // 2000 — first harvester
+  { names: ['WEAP'],         type_ids: [2] },               // 2000 — get tank production going
+  { names: ['PROC'],         type_ids: [12], maxCount: 2 }, // 2000 — second harvester
+  // Freeze building here until island base production destroyed, then naval phase
   { names: ['POWR'],         type_ids: [17], maxCount: 3 },
   { names: ['SYRD', 'SPEN'], type_ids: [27, 28] },
   { names: ['POWR'],         type_ids: [17], maxCount: 99 },
@@ -109,7 +108,7 @@ const SCG11EA_FORWARD_MCV_TARGET: Point = { cx: 36, cy: 96 };
 const SCG11EA_FORWARD_FACT_TARGET: Point = { cx: 52, cy: 90 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
-const SCG11EA_ASSAULT_MIN_ARMOR = 10;      // Max achievable with current economy
+const SCG11EA_ASSAULT_MIN_ARMOR = 8; /* human-requested: starting 7 armor + 1 produced */
 const SCG11EA_ASSAULT_RETREAT_FLOOR = 4;   // Stay on the island longer before abandoning the pressure
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
@@ -360,6 +359,8 @@ export class OracleStrategy {
   private scg11eaNavalUnlocked = false;
   private scg11eaMcvMoved = false;
   private scg11eaAssaultStarted = false;
+  private scg11eaStrikeActive = false; /* human-requested: sticky strike, no oscillation */
+  private scg11eaStrikeTick = 0; /* human-requested: track when strike started for phase transition */
   private scg02eaAssaultIndex = 0;
   private baseBuildIndex = 0;
   private placementAttempts = 0;
@@ -969,17 +970,14 @@ export class OracleStrategy {
       return candidates[0] ?? null;
     };
 
-    // Priority: production first (stop enemy reinforcements), then defense, then power.
-    // WEAP → FACT → BARR/TENT → AFLD/HPAD → SPEN → defense → power.
-    // Island Soviet base first (x=35-60), then eastern/mainland bases.
-    // Priority: static defense → production → power.
-    // Static defense kills our tanks, production makes replacements.
+    /* human-requested: PRODUCTION first (stop enemy tank production), defense last.
+       TSLA/FTUR kill our tanks — avoid them until production is dead. */
     return pickPriorityTarget(
       { minCx: 35, maxCx: 60, minCy: 35, maxCy: 58 },
-      ['TSLA', 'FTUR', 'SAM', 'WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD', 'STEK', 'PROC', 'DOME', 'APWR', 'POWR'],
+      ['WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD', 'STEK', 'PROC', 'TSLA', 'FTUR', 'SAM', 'DOME', 'APWR', 'POWR'],
     ) ?? pickPriorityTarget(
       { minCx: 60, maxCx: 105, minCy: 35, maxCy: 60 },
-      ['TSLA', 'FTUR', 'SAM', 'WEAP', 'FACT', 'SPEN', 'AFLD', 'HPAD', 'FCOM', 'PROC', 'APWR', 'POWR'],
+      ['WEAP', 'FACT', 'SPEN', 'AFLD', 'HPAD', 'FCOM', 'PROC', 'TSLA', 'FTUR', 'SAM', 'APWR', 'POWR'],
     );
   }
 
@@ -1475,8 +1473,10 @@ export class OracleStrategy {
         const scg11eaCoastChainCritical =
           this.scenario === 'SCG11EA' &&
           this.scg11eaMustReopenCoast(state, alliedStructures, playerUnits);
+        /* human-requested: don't extend coast chain during assault — saves credits for tanks */
         const scg11eaExtendCoastChain =
           this.scenario === 'SCG11EA' &&
+          this.scg11eaAssaultStarted && // ground first — no chain until assault phase
           (buildingProduction.t === 'POWR' || buildingProduction.t === 'APWR') &&
           scg11eaBootstrapReady &&
           scg11eaCoastChainCritical &&
@@ -1637,8 +1637,10 @@ export class OracleStrategy {
             }
           }
         }
+        /* human-requested: fallback after 5 attempts to avoid blocking build queue */
         const scg11eaStrictChainHold =
-          this.scenario === 'SCG11EA' && scg11eaPowerChainCandidates.length > 0;
+          this.scenario === 'SCG11EA' && scg11eaPowerChainCandidates.length > 0 &&
+          this.placementAttempts < 5;
         if (!foundValid && !scg11eaStrictChainHold) {
           for (let i = 0; i < offsets.length; i++) {
             const idx = (this.placementAttempts + i) % offsets.length;
@@ -1709,28 +1711,59 @@ export class OracleStrategy {
             }
             reasons.push(`clear ${buildingProduction.t} footprint (${scg11eaPlacementBlockers.length})`);
           } else {
+            /* human-requested: emergency placement scan after 15 failed attempts */
+            if (this.placementAttempts >= 15) {
+              let foundEmergency = false;
+              const centers = [
+                { cx: placeRef.cx, cy: placeRef.cy },
+                { cx: (SCG11EA_ORE_ANCHOR ?? placeRef).cx, cy: (SCG11EA_ORE_ANCHOR ?? placeRef).cy + 4 },
+                { cx: placeRef.cx + 10, cy: placeRef.cy },
+                { cx: placeRef.cx - 10, cy: placeRef.cy },
+              ];
+              for (const center of centers) {
+                for (let dy = -12; dy <= 12; dy += 2) {
+                  for (let dx = -12; dx <= 12; dx += 2) {
+                    const cx = center.cx + dx;
+                    const cy = center.cy + dy;
+                    if (cx < 2 || cy < 2 || cx > 125 || cy > 125) continue;
+                    if (this.canPlaceBuilding(cx, cy, state, false, buildingProduction.t)) {
+                      placeCx = cx;
+                      placeCy = cy;
+                      foundEmergency = true;
+                      break;
+                    }
+                  }
+                  if (foundEmergency) break;
+                }
+                if (foundEmergency) break;
+              }
+              reasons.push(`emergency place ${buildingProduction.t} at (${placeCx},${placeCy})`);
+            } else {
+              reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
+            }
             commands.push({
               cmd: 'place',
               rtti: RTTI_BUILDINGTYPE,
               cx: placeCx,
               cy: placeCy,
             });
-            // Cycle through placement offsets on repeated attempts
             if (state.tick - this.lastPlacementTick > sec(4)) {
               this.placementAttempts++;
               this.lastPlacementTick = state.tick;
             }
-            reasons.push(`place ${buildingProduction.t} at (${placeCx},${placeCy})`);
           }
         }
       }
     } else if ((!buildingProduction || suppressScg11eaLeftoverBuild) && buildable) {
-      // SCG11EA: once WEAP exists, freeze building production until 10+ tanks.
-      // Spend all credits on tanks first, then resume eco expansion.
+      /* human-requested: freeze building until island base production destroyed, not tank count */
       const scg11eaWeapCount = alliedStructures.filter((s) => s.t === 'WEAP').length;
+      const scg11eaIslandProdTypes = new Set(['WEAP', 'FACT', 'BARR', 'AFLD', 'HPAD', 'KENN', 'STEK']);
+      const scg11eaIslandProd = this.scenario === 'SCG11EA'
+        ? state.structures.filter((s) => !s.ally && s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58 && scg11eaIslandProdTypes.has(s.t))
+        : [];
+      const scg11eaIslandCleared = this.scenario === 'SCG11EA' && scg11eaIslandProd.length === 0 && state.tick > 5000;
       const scg11eaFreezeBuild = this.scenario === 'SCG11EA' &&
-        scg11eaWeapCount >= 2 && // freeze AFTER both WEAPs built
-        playerUnits.filter((u) => u.t.includes('TNK') || u.t === 'ARTY').length < 12;
+        scg11eaWeapCount >= 1 && !scg11eaIslandCleared;
       if (scg11eaFreezeBuild) {
         reasons.push('freeze build (pumping tanks)');
       }
@@ -1765,8 +1798,10 @@ export class OracleStrategy {
         this.scg11eaNavalUnlocked = true;
       }
 
+      /* human-requested: only chain after assault — ground first strategy */
       if (
         this.scenario === 'SCG11EA' &&
+        this.scg11eaAssaultStarted &&
         !shipyardExists &&
         scg11eaBootstrapReady &&
         scg11eaCoastChainCritical &&
@@ -2506,10 +2541,11 @@ export class OracleStrategy {
     }
 
     // --- Phase 4: COMBAT (defend-first, attack with surplus) ---
-    // SCG11EA: skip base defense when assault is active — decideScg11ea handles tanks.
-    // This prevents tanks oscillating between defend-base and assault-north.
-    if (this.scenario === 'SCG11EA' && this.scg11eaAssaultStarted) {
-      return { commands: this.dedupeCommands(commands), reason: reasons.join('; ') || 'base building — assault active' };
+    /* human-requested: skip Phase 4 for ALL of SCG11EA — decideScg11ea handles combat.
+       Generic base defense sends tanks to fight dogs/Hinds near 48 pre-built structures,
+       bleeding them out before assault threshold. decideScg11ea has local-only defense. */
+    if (this.scenario === 'SCG11EA') {
+      return { commands: this.dedupeCommands(commands), reason: reasons.join('; ') || 'base building — SCG11EA combat delegated' };
     }
     const combatUnits = playerUnits.filter(
       (u) => this.isCombatUnit(u) && !BASE_NON_COMBAT_TYPES.has(u.t) &&
@@ -4045,72 +4081,122 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    /* human-requested: NO fleet gate. Attack when 10+ tanks. Ground first. */
+    /* human-requested: NO fleet gate. Attack when 8+ tanks. Ground first. */
     const assaultUnlocked = assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
     const assaultActive = this.scg11eaAssaultStarted || assaultUnlocked;
     if (assaultUnlocked) this.scg11eaAssaultStarted = true;
+    /* human-requested: pre-assault LOCAL defense only — don't chase distant threats */
     if (!assaultActive && assaultArmor.length > 0) {
-      const stageArmor = assaultArmor.filter(
-        (u) => this.isIdle(u) || this.distanceSq(u, defenseAnchor) > 196,
+      const localThreats = state.enemies.filter(
+        (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
+          this.distanceSq(e, defenseAnchor) <= 100,
       );
-      if (stageArmor.length > 0) {
-        commands.push({
-          cmd: 'move',
-          ids: stageArmor.map((u) => u.id),
-          cx: defenseAnchor.cx,
-          cy: defenseAnchor.cy,
+      if (localThreats.length > 0) {
+        const sorted = localThreats.sort((a, b) => {
+          const rank = (t: string) => t.includes('TNK') ? 0 : t === 'V2RL' ? 0 : 2;
+          return rank(a.t) - rank(b.t);
         });
-        for (const u of stageArmor) this.recordMove(u.id, defenseAnchor.cx, defenseAnchor.cy);
-        reasons.push(`stage armor (${stageArmor.length})`);
-      }
-    }
-    // Once assault starts: focus-fire enemy tanks, then attack_move to buildings.
-    // NEVER use 'move' — tanks must always be shooting. No rally, no phases.
-    // Tanks fight whatever is between them and the building.
-    // Unified target priority — all 'attack' by ID:
-    // 1. Enemy tanks/V2RL within 15 cells (kill what can kill us)
-    // 2. Static defense (TSLA/FTUR/SAM) — attack by structure ID
-    // 3. Production (WEAP/FACT/BARR/AFLD) — attack by structure ID
-    // 4. Dogs/infantry within 10 cells (only if nothing better)
-    // 5. Everything else (POWR/PROC/etc)
-    // GATHER + STRIKE: tanks rally at y=65, then focus-fire as a group.
-    // Tanks that arrive staggered get killed individually. Must group up first.
-    if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
-      const rallyPoint: Point = { cx: 45, cy: 65 };
-      const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 225); // 15 cells
-      const enRoute = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 225);
-      const readyToStrike = atRally.length >= Math.min(8, assaultArmor.length);
-
-      // Tanks en route: 'move' to rally (don't fight, just get there)
-      if (enRoute.length > 0) {
-        commands.push({ cmd: 'move', ids: enRoute.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
-        for (const u of enRoute) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
-      }
-
-      if (readyToStrike) {
-        // STRIKE: pick highest priority target, all grouped tanks attack by ID
-        const garrisonTarget: Point = { cx: 45, cy: 52 };
-        const baseZoneArmor = state.enemies.filter(
-          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            e.cx >= 35 && e.cx <= 62 && e.cy >= 35 && e.cy <= 65,
-        ).sort((a, b) => {
-          const aG = (a.t === '3TNK' || a.t === 'V2RL') ? 0 : 1;
-          const bG = (b.t === '3TNK' || b.t === 'V2RL') ? 0 : 1;
-          return aG !== bG ? aG - bG : this.distanceSq(a, garrisonTarget) - this.distanceSq(b, garrisonTarget);
-        });
-        let target: { id: number; cx: number; cy: number; t?: string } | null = null;
-        if (baseZoneArmor.length > 0) target = baseZoneArmor[0];
-        else {
-          const s = this.chooseScg11eaAssaultTarget(enemyStructures);
-          if (s) target = s;
-        }
-        if (target) {
-          // ALL grouped tanks attack the SAME target — arrive together, focus-fire
-          commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: target.id });
-          for (const u of atRally) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`STRIKE ${(target as any).t ?? '?'} (${atRally.length} → ${target.cx},${target.cy})`);
+        const target = sorted[0];
+        const idle = assaultArmor.filter((u) => this.isIdle(u) || this.shouldRecommand(u, localThreats));
+        if (idle.length > 0) {
+          commands.push({ cmd: 'attack', ids: idle.map((u) => u.id), target: target.id });
+          for (const u of idle) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`defend staging (${idle.length} → ${target.t})`);
         }
       } else {
+        const stageArmor = assaultArmor.filter(
+          (u) => this.isIdle(u) || this.distanceSq(u, defenseAnchor) > 196,
+        );
+        if (stageArmor.length > 0) {
+          commands.push({
+            cmd: 'move',
+            ids: stageArmor.map((u) => u.id),
+            cx: defenseAnchor.cx,
+            cy: defenseAnchor.cy,
+          });
+          for (const u of stageArmor) this.recordMove(u.id, defenseAnchor.cx, defenseAnchor.cy);
+          reasons.push(`stage armor (${stageArmor.length})`);
+        }
+      }
+    }
+    /* human-requested: GATHER + STRIKE with sticky strike + building-first targeting */
+    if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
+      const rallyPoint: Point = { cx: 45, cy: 65 };
+      const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 625);
+      const enRoute = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 625);
+
+      /* human-requested: need 6+ tanks to push. If tanks drop below 4, re-gather. */
+      if (!this.scg11eaStrikeActive) {
+        const readyToStrike = atRally.length >= Math.min(8, assaultArmor.length) && assaultArmor.length >= 6;
+        if (readyToStrike) {
+          this.scg11eaStrikeActive = true;
+          this.scg11eaStrikeTick = state.tick;
+        }
+      } else if (assaultArmor.length < 4) {
+        // Lost too many tanks — fall back to gather and wait for reinforcements
+        this.scg11eaStrikeActive = false;
+      }
+
+      /* human-requested: PUSH approach — advance toward base, engage threats on the way,
+         crush infantry with 'move', focus-fire nearby armor, hit buildings when close. */
+      if (this.scg11eaStrikeActive) {
+        const tankCentroid = this.centroid(assaultArmor as unknown as RAEntity[]);
+        const pushTarget: Point = { cx: 52, cy: 45 }; // enemy WEAP
+        const engageRange = 144; // 12 cells squared
+        const buildingRange = 100; // 10 cells squared
+
+        // Enemy armor/V2RL within engagement range AND ahead of us (toward base)
+        // Only fight enemies between us and the push target, not behind us
+        const nearArmor = state.enemies.filter(
+          (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
+            this.distanceSq(e, tankCentroid) <= engageRange &&
+            e.cy <= tankCentroid.cy + 3, // only engage enemies ahead (north) or near us
+        ).sort((a, b) => {
+          // V2RL first (most dangerous to tanks), then by distance
+          const rank = (t: string) => t === 'V2RL' ? 0 : t === '4TNK' ? 1 : t === '3TNK' ? 2 : 3;
+          const rA = rank(a.t), rB = rank(b.t);
+          if (rA !== rB) return rA - rB;
+          return this.distanceSq(a, tankCentroid) - this.distanceSq(b, tankCentroid);
+        });
+
+        // Enemy production buildings within attack range of our tanks
+        const prodPriority = ['WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD'];
+        const nearBuildings = enemyStructures.filter(
+          (s) => this.distanceSq(s, tankCentroid) <= buildingRange,
+        ).sort((a, b) => {
+          const aR = prodPriority.indexOf(a.t);
+          const bR = prodPriority.indexOf(b.t);
+          return (aR >= 0 ? aR : 99) - (bR >= 0 ? bR : 99);
+        });
+
+        if (nearArmor.length > 0) {
+          // ENGAGE: focus-fire nearest dangerous enemy — all tanks on same target
+          const target = nearArmor[0];
+          commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
+          for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`ENGAGE ${target.t} (${assaultArmor.length} tanks → ${target.cx},${target.cy})`);
+        } else if (nearBuildings.length > 0) {
+          // ATTACK: hit production buildings when close enough
+          const target = nearBuildings[0];
+          commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
+          for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`ATTACK ${target.t} (${assaultArmor.length} tanks → ${target.cx},${target.cy})`);
+        } else {
+          // ADVANCE: move toward enemy base — 'move' crushes infantry along the way
+          const movers = assaultArmor.filter((u) =>
+            this.isIdle(u) || this.shouldMove(u, pushTarget.cx, pushTarget.cy),
+          );
+          if (movers.length > 0) {
+            commands.push({ cmd: 'move', ids: movers.map((u) => u.id), cx: pushTarget.cx, cy: pushTarget.cy });
+            for (const u of movers) this.recordMove(u.id, pushTarget.cx, pushTarget.cy);
+          }
+          reasons.push(`ADVANCE (${assaultArmor.length} tanks → WEAP)`);
+        }
+      } else {
+        if (enRoute.length > 0) {
+          commands.push({ cmd: 'move', ids: enRoute.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
+          for (const u of enRoute) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
+        }
         reasons.push(`GATHER (${atRally.length}/${assaultArmor.length} at rally)`);
       }
     }

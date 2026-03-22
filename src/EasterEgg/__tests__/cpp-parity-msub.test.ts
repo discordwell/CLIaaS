@@ -324,8 +324,9 @@ describe('MSUB massive range -- 14.0 cells (rules.ini)', () => {
     expect(WEAPON_STATS.SubSCUD.range).toBeGreaterThan(WEAPON_STATS.TorpTube.range);
   });
 
-  it('MSUB outranges Cruiser Tomahawk (range 10.0)', () => {
-    expect(WEAPON_STATS.SubSCUD.range).toBeGreaterThan(WEAPON_STATS.Tomahawk.range);
+  it('MSUB outranges Cruiser 8Inch (range 22.0) — FALSE, 8Inch has 22.0 vs SubSCUD 14.0', () => {
+    // CA's 8Inch actually outranges MSUB's SubSCUD (22.0 vs 14.0)
+    expect(WEAPON_STATS['8Inch'].range).toBeGreaterThan(WEAPON_STATS.SubSCUD.range);
   });
 
   it('target at 13 cells is in range', () => {

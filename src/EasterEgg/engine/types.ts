@@ -698,8 +698,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Stinger:          { name: 'Stinger',          damage: 30,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 20, burst: 2, isAntiAir: true, isHigh: true, isFueled: true, projectileROT: 20 },  // DD primary — LaserGuided projectile, no Degenerates
   TorpTube:         { name: 'TorpTube',         damage: 90,  rof: 60, range: 9.0,  warhead: 'AP', projSpeed: 15, projectileSpeed: 1.0, isSubSurface: true, isAntiSub: true }, // SS torpedo — Torpedo: UnderWater=yes, ASW=yes
   DepthCharge:      { name: 'DepthCharge',       damage: 80,  rof: 60, range: 5.0,  warhead: 'AP', projSpeed: 5, isAntiSub: true, isAntiGround: false, isArcing: true, isHigh: true, isInaccurate: true },  // DD secondary, ASW-only (Catapult AG=no, rules.ini:2584)
-  Tomahawk:         { name: 'Tomahawk',          damage: 50,  rof: 80, range: 10.0, warhead: 'HE', splash: 2.0, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // CA cruise missile
-  SeaSerpent:       { name: 'SeaSerpent',        damage: 35,  rof: 50, range: 8.0,  warhead: 'HE', splash: 1.5, projSpeed: 15, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true }, // MSUB missiles
+  // Tomahawk and SeaSerpent REMOVED — fabricated, not in C++ rules.cpp or any INI. CA uses 8Inch, MSUB uses SubSCUD.
   SubSCUD:          { name: 'SubSCUD',          damage: 400, rof: 120, range: 14.0, warhead: 'HE', projSpeed: 20, projectileSpeed: 2.0, projectileROT: 5, burst: 2, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true }, // Aftermath missile sub missile
   Democharge:       { name: 'Democharge',       damage: 500, rof: 80, range: 1.75, warhead: 'Nuke', projSpeed: 100, isInvisible: true }, // Demo truck self-destruct charge
   // Aircraft weapons (C++ RULES.INI — aircraft.cpp)
@@ -907,14 +906,6 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'SBAG', name: 'Sandbag', cost: 25, buildTime: 15, prerequisite: 'FACT', faction: 'allied', isStructure: true, techLevel: 2, points: 1 },
   { type: 'FENC', name: 'Wire Fence', cost: 25, buildTime: 20, prerequisite: 'FACT', faction: 'soviet', isStructure: true, techLevel: 2, points: 1 },  // rules.ini: FENC is barbed wire fence (line 1695)
   { type: 'BRIK', name: 'Concrete', cost: 100, buildTime: 30, prerequisite: 'FACT', faction: 'both', isStructure: true, techLevel: 8, points: 5 },
-  { type: 'CYCL', name: 'Chain Link', cost: 75, buildTime: 20, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 1 },  // rules.ini: no Owner, not player-buildable
-  { type: 'BARB', name: 'Barbed Wire', cost: 25, buildTime: 15, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 1 },  // rules.ini: no Owner, not player-buildable
-  { type: 'WOOD', name: 'Wood Fence', cost: 0, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 1 },  // rules.ini: no Owner/Cost, map decoration
-  // Non-buildable buildings (scenario-placed only)
-  { type: 'BIO', name: 'Bio Lab', cost: 0, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 30 },  // rules.ini: Owner=none, Power=-40
-  { type: 'HOSP', name: 'Hospital', cost: 0, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 20 },  // rules.ini: Owner=none, Power=-20
-  { type: 'FCOM', name: 'Forward Command', cost: 0, buildTime: 0, prerequisite: '', faction: 'soviet', isStructure: true, techLevel: -1, points: 40 },  // rules.ini: Owner=soviet, Power=-200
-  { type: 'MISS', name: 'Tech Center', cost: 0, buildTime: 0, prerequisite: '', faction: 'both', isStructure: true, techLevel: -1, points: 5 },  // rules.ini: civilian tech center
   // Fake buildings (Allied decoys)
   { type: 'FACF', name: 'Fake CY', cost: 50, buildTime: 36, prerequisite: '', faction: 'allied', isStructure: true, techLevel: 1, points: 15 },  // rules.ini: Image=FACT, Owner=allies
   { type: 'WEAF', name: 'Fake WF', cost: 50, buildTime: 36, prerequisite: 'PROC', faction: 'allied', isStructure: true, techLevel: 3, points: 15 },  // rules.ini: Image=WEAP, Owner=allies
@@ -922,6 +913,20 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'SPEF', name: 'Fake SP', cost: 50, buildTime: 36, prerequisite: '', faction: 'soviet', isStructure: true, techLevel: -1, points: 15 },  // rules.ini: Image=SPEN, Owner=soviet
   { type: 'DOMF', name: 'Fake Radar', cost: 50, buildTime: 36, prerequisite: 'PROC', faction: 'allied', isStructure: true, techLevel: 3, points: 15 },  // rules.ini: Image=DOME, Owner=allies
 ];
+
+// Non-buildable structure/wall Points= values (C++ techno.cpp:6290)
+// These exist on maps but are never in the sidebar build menu.
+export const STRUCTURE_POINTS: Record<string, number> = {
+  // Walls — map-placed scenery (no Owner in rules.ini)
+  CYCL: 1,   // Chain-link fence
+  BARB: 1,   // Barbed wire
+  WOOD: 1,   // Wooden fence
+  // Scenario buildings — capturable/destroyable but not buildable
+  BIO:  30,  // Bio-Research Lab
+  HOSP: 20,  // Hospital
+  FCOM: 40,  // Forward Command
+  MISS:  5,  // Tech Center (civilian)
+};
 
 // C++ parity (techno.cpp:6077): Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
 // At 15 Hz: TICKS_PER_MINUTE = 900, BuildSpeedBias = 0.8 (rules.ini BuildSpeed=.8)

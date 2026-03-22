@@ -22,7 +22,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
-import { UNIT_STATS, PRODUCTION_ITEMS } from '../engine/types';
+import { UNIT_STATS, PRODUCTION_ITEMS, STRUCTURE_POINTS } from '../engine/types';
 
 // ---------------------------------------------------------------------------
 // INI Parser
@@ -101,6 +101,11 @@ function getTsProdItemPoints(type: string): number | undefined {
   const item = PRODUCTION_ITEMS.find(i => i.type === type);
   if (!item) return undefined;
   return item.points;
+}
+
+/** Get points from any TS source: UNIT_STATS, PRODUCTION_ITEMS, or STRUCTURE_POINTS */
+function getTsPoints(type: string): number | undefined {
+  return getTsUnitStatsPoints(type) ?? getTsProdItemPoints(type) ?? STRUCTURE_POINTS[type];
 }
 
 // ---------------------------------------------------------------------------
@@ -353,14 +358,10 @@ describe('Building Points= from INI (C++ bdata.cpp + rules.ini)', () => {
       expect(getIniPoints(type)).toBe(expectedPoints);
     });
 
-    it(`${type}: TS PRODUCTION_ITEMS.points matches INI`, () => {
-      const tsPoints = getTsProdItemPoints(type);
-      if (tsPoints === undefined) {
-        // Document: building exists in INI but not in PRODUCTION_ITEMS
-        expect(tsPoints, `${type} missing from PRODUCTION_ITEMS (INI Points=${expectedPoints})`).toBeDefined();
-      } else {
-        expect(tsPoints).toBe(expectedPoints);
-      }
+    it(`${type}: TS points matches INI`, () => {
+      const tsPoints = getTsPoints(type);
+      expect(tsPoints, `${type} missing from TS (INI Points=${expectedPoints})`).toBeDefined();
+      expect(tsPoints).toBe(expectedPoints);
     });
   }
 });
@@ -374,9 +375,9 @@ describe('Wall/Fence Points= from INI (rules.ini)', () => {
     ['SBAG',  1],   // Sandbag
     ['BRIK',  5],   // Concrete Wall
     ['FENC',  1],   // Wire Fence
-    ['CYCL',  1],   // Cyclone Fence (not in TS PRODUCTION_ITEMS)
-    ['BARB',  1],   // Barbed Wire (not in TS PRODUCTION_ITEMS)
-    ['WOOD',  1],   // Wooden Fence (not in TS PRODUCTION_ITEMS)
+    ['CYCL',  1],   // Cyclone Fence — map scenery, not buildable
+    ['BARB',  1],   // Barbed Wire — map scenery, not buildable
+    ['WOOD',  1],   // Wooden Fence — map scenery, not buildable
   ];
 
   for (const [type, expectedPoints] of WALL_POINTS) {
@@ -384,13 +385,10 @@ describe('Wall/Fence Points= from INI (rules.ini)', () => {
       expect(getIniPoints(type)).toBe(expectedPoints);
     });
 
-    it(`${type}: TS PRODUCTION_ITEMS.points matches INI`, () => {
-      const tsPoints = getTsProdItemPoints(type);
-      if (tsPoints === undefined) {
-        expect(tsPoints, `${type} missing from PRODUCTION_ITEMS (INI Points=${expectedPoints})`).toBeDefined();
-      } else {
-        expect(tsPoints).toBe(expectedPoints);
-      }
+    it(`${type}: TS points matches INI`, () => {
+      const tsPoints = getTsPoints(type);
+      expect(tsPoints, `${type} missing from TS (INI Points=${expectedPoints})`).toBeDefined();
+      expect(tsPoints).toBe(expectedPoints);
     });
   }
 });
@@ -415,11 +413,8 @@ describe('Fake building Points= from INI (rules.ini)', () => {
 
     it(`${type}: TS PRODUCTION_ITEMS.points matches INI`, () => {
       const tsPoints = getTsProdItemPoints(type);
-      if (tsPoints === undefined) {
-        expect(tsPoints, `${type} missing from PRODUCTION_ITEMS (INI Points=${expectedPoints})`).toBeDefined();
-      } else {
-        expect(tsPoints).toBe(expectedPoints);
-      }
+      expect(tsPoints, `${type} missing from PRODUCTION_ITEMS (INI Points=${expectedPoints})`).toBeDefined();
+      expect(tsPoints).toBe(expectedPoints);
     });
   }
 });
@@ -458,36 +453,30 @@ describe('Terrain object Points= from INI (V01-V37, all should be 5)', () => {
 // ---------------------------------------------------------------------------
 
 describe('Comprehensive: every INI Points= section has TS coverage', () => {
-  // Sections we know are in TS (UNIT_STATS or PRODUCTION_ITEMS)
+  // Sections we know are in TS (UNIT_STATS, PRODUCTION_ITEMS, or STRUCTURE_POINTS)
   const TS_COVERED = new Set([
-    // UNIT_STATS
     ...Object.keys(UNIT_STATS),
-    // PRODUCTION_ITEMS
     ...PRODUCTION_ITEMS.map(i => i.type),
+    ...Object.keys(STRUCTURE_POINTS),
   ]);
 
-  // Sections that are legitimately not in TS (terrain, non-combatant buildings, etc.)
+  // Sections that are legitimately not in TS (terrain objects are map decorations)
   const EXPECTED_MISSING = new Set([
-    // Terrain objects V01-V37 (map decorations)
     ...Array.from({ length: 37 }, (_, i) => `V${(i + 1).toString().padStart(2, '0')}`),
   ]);
 
   for (const [section, iniPoints] of ALL_INI_POINTS) {
     if (EXPECTED_MISSING.has(section)) continue;
 
-    it(`${section} (INI Points=${iniPoints}) exists in TS UNIT_STATS or PRODUCTION_ITEMS`, () => {
-      const inUnitStats = section in UNIT_STATS;
-      const inProdItems = PRODUCTION_ITEMS.some(i => i.type === section);
+    it(`${section} (INI Points=${iniPoints}) exists in TS`, () => {
       expect(
-        inUnitStats || inProdItems,
+        TS_COVERED.has(section),
         `${section} has Points=${iniPoints} in INI but is missing from TS`
       ).toBe(true);
     });
 
     it(`${section} (INI Points=${iniPoints}) TS value matches`, () => {
-      const tsUnitPoints = getTsUnitStatsPoints(section);
-      const tsProdPoints = getTsProdItemPoints(section);
-      const tsPoints = tsUnitPoints ?? tsProdPoints;
+      const tsPoints = getTsPoints(section);
       if (tsPoints !== undefined) {
         expect(tsPoints).toBe(iniPoints);
       }
@@ -501,7 +490,6 @@ describe('Comprehensive: every INI Points= section has TS coverage', () => {
         missing.push(`${section}(${pts})`);
       }
     }
-    // This documents the gap; the count should match what we expect
     // 37 sections: V01-V37 terrain objects (map decorations, not combat units)
     expect(missing.length).toBe(37);
   });
@@ -537,5 +525,17 @@ describe('Zero value mismatches between INI and TS', () => {
       }
     }
     expect(mismatches, `PRODUCTION_ITEMS point mismatches: ${mismatches.join(', ')}`).toEqual([]);
+  });
+
+  it('all STRUCTURE_POINTS values match their INI Points= values', () => {
+    const mismatches: string[] = [];
+    for (const [type, tsPoints] of Object.entries(STRUCTURE_POINTS)) {
+      const iniPoints = getIniPoints(type);
+      if (iniPoints === undefined) continue;
+      if (tsPoints !== iniPoints) {
+        mismatches.push(`${type}: INI=${iniPoints} TS=${tsPoints}`);
+      }
+    }
+    expect(mismatches, `STRUCTURE_POINTS mismatches: ${mismatches.join(', ')}`).toEqual([]);
   });
 });

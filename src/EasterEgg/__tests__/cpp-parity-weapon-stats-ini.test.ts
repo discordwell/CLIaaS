@@ -78,8 +78,6 @@ for (const [section, values] of Object.entries(aftrmath)) {
  * source or scenario INI files, not the global rules.ini).
  */
 const ENGINE_CUSTOM_WEAPONS = new Set([
-  'Tomahawk',      // CA cruise missile — no INI section, defined in C++ vessel.cpp
-  'SeaSerpent',    // MSUB missile — no INI section, defined in C++ vessel.cpp
   'TeslaCannon',   // TSLA building weapon — separate from TeslaZap; no own INI section
   'Mandible',      // Ant weapon — from scenario INI (SCA*.INI), not rules.ini
 ]);
