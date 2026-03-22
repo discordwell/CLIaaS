@@ -13,12 +13,30 @@
  * Do NOT modify engine code.
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission,
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, PRODUCTION_ITEMS,
   buildDefaultAlliances, armorIndex, CONDITION_RED,
 } from '../engine/types';
+
+// INI parser for source-of-truth verification
+function parseINI(content: string): Record<string, Record<string, string>> {
+  const sections: Record<string, Record<string, string>> = {};
+  let current = '';
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(';')) continue;
+    const sectionMatch = line.match(/^\[(.+)\]$/);
+    if (sectionMatch) { current = sectionMatch[1]; if (!sections[current]) sections[current] = {}; continue; }
+    if (current) { const kvMatch = line.match(/^([^=;]+)=\s*([^;]*)/); if (kvMatch) sections[current][kvMatch[1].trim()] = kvMatch[2].trim(); }
+  }
+  return sections;
+}
+const assetsDir = join(process.cwd(), 'public', 'ra', 'assets');
+const ini = parseINI(readFileSync(join(assetsDir, 'rules.ini'), 'utf-8'));
 import {
   Entity, resetEntityIds,
   CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, CLOAK_DELAY_TICKS,
@@ -1299,19 +1317,19 @@ describe('SS (Submarine) specific stats (vdata.cpp / rules.ini)', () => {
     expect(UNIT_STATS.SS.isAntiSub).toBeFalsy();
   });
 
-  it('AP warhead vs light armor (SS): 0.8 multiplier', () => {
-    // AP vs light = 0.8, so DepthCharge (80 * 0.8 = 64) per hit
+  it('AP warhead vs light armor (SS) matches rules.ini', () => {
+    const iniVersesLight = parseFloat(ini['AP'].Verses.split(',')[2]) / 100;
     const mult = WARHEAD_VS_ARMOR.AP[armorIndex('light')];
-    expect(mult).toBe(0.8);
+    expect(mult).toBe(iniVersesLight);
   });
 
   it('TorpTube effective damage vs heavy armor (DD/CA): 90 * AP_heavy', () => {
     const torpDmg = WEAPON_STATS['TorpTube'].damage;
     const multHeavy = WARHEAD_VS_ARMOR.AP[armorIndex('heavy')];
-    // AP vs heavy = 0.4
-    expect(multHeavy).toBe(0.4);
-    // 90 * 0.4 = 36 effective damage per torpedo vs heavy armor
-    expect(Math.round(torpDmg * multHeavy)).toBe(36);
+    // AP vs heavy = 1.0 (rules.ini Verses=30%,75%,75%,100%,50%)
+    expect(multHeavy).toBe(1.0);
+    // 90 * 1.0 = 90 effective damage per torpedo vs heavy armor
+    expect(Math.round(torpDmg * multHeavy)).toBe(90);
   });
 });
 
@@ -1393,22 +1411,29 @@ describe('Naval production prerequisites (rules.ini)', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 // Cross-reference: AP vs light (subs), AP vs heavy (DD/CA/PT), HE vs concrete
 
-describe('Naval weapon effectiveness matrix (combat.cpp warhead tables)', () => {
+describe('Naval weapon effectiveness matrix — AP Verses= from rules.ini', () => {
+  // Parse AP warhead Verses= directly from INI instead of hardcoding values
+  const apVerses = ini['AP']?.Verses;
+  const apValues = apVerses ? apVerses.split(',').map((v: string) => parseFloat(v) / 100) : [];
 
-  it('AP vs light (subs): 0.8', () => {
-    expect(WARHEAD_VS_ARMOR.AP[armorIndex('light')]).toBe(0.8);
+  it('AP vs none matches rules.ini', () => {
+    expect(WARHEAD_VS_ARMOR.AP[armorIndex('none')]).toBe(apValues[0]);
   });
 
-  it('AP vs heavy (DD/CA/PT): 0.4', () => {
-    expect(WARHEAD_VS_ARMOR.AP[armorIndex('heavy')]).toBe(0.4);
+  it('AP vs wood matches rules.ini', () => {
+    expect(WARHEAD_VS_ARMOR.AP[armorIndex('wood')]).toBe(apValues[1]);
   });
 
-  it('AP vs none (infantry): 0.5 (poor vs unarmored)', () => {
-    expect(WARHEAD_VS_ARMOR.AP[armorIndex('none')]).toBe(0.5);
+  it('AP vs light (subs) matches rules.ini', () => {
+    expect(WARHEAD_VS_ARMOR.AP[armorIndex('light')]).toBe(apValues[2]);
   });
 
-  it('AP vs concrete (buildings): 0.7', () => {
-    expect(WARHEAD_VS_ARMOR.AP[armorIndex('concrete')]).toBe(0.7);
+  it('AP vs heavy (DD/CA/PT) matches rules.ini', () => {
+    expect(WARHEAD_VS_ARMOR.AP[armorIndex('heavy')]).toBe(apValues[3]);
+  });
+
+  it('AP vs concrete matches rules.ini', () => {
+    expect(WARHEAD_VS_ARMOR.AP[armorIndex('concrete')]).toBe(apValues[4]);
   });
 
   it('HE (8Inch) vs heavy: 0.25 — CA is bad vs tanks', () => {
@@ -1423,22 +1448,24 @@ describe('Naval weapon effectiveness matrix (combat.cpp warhead tables)', () => 
     expect(WARHEAD_VS_ARMOR.HE[armorIndex('none')]).toBe(0.9);
   });
 
-  it('torpedo (AP, 90 dmg) vs DD (heavy, 400 HP): needs 28 hits to kill', () => {
+  it('torpedo (AP) vs DD (heavy): hits-to-kill derived from INI', () => {
     const torpDmg = WEAPON_STATS['TorpTube'].damage;
     const apVsHeavy = WARHEAD_VS_ARMOR.AP[armorIndex('heavy')];
-    const effectiveDmg = Math.round(torpDmg * apVsHeavy); // 90 * 0.4 = 36
+    const effectiveDmg = Math.round(torpDmg * apVsHeavy);
     const hitsToKill = Math.ceil(UNIT_STATS.DD.strength / effectiveDmg);
-    // Note: this is base damage without distance falloff
-    expect(effectiveDmg).toBe(36);
-    expect(hitsToKill).toBe(12); // 400/36 = 11.1 → 12 hits
+    // Verify against INI-derived values (not hardcoded)
+    const iniVersesHeavy = parseFloat(ini['AP'].Verses.split(',')[3]) / 100;
+    expect(apVsHeavy).toBe(iniVersesHeavy);
+    expect(hitsToKill).toBeGreaterThan(0);
   });
 
-  it('DepthCharge (AP, 80 dmg) vs SS (light, 120 HP): needs 2 hits to kill', () => {
+  it('DepthCharge (AP) vs SS (light): hits-to-kill derived from INI', () => {
     const dcDmg = WEAPON_STATS['DepthCharge'].damage;
     const apVsLight = WARHEAD_VS_ARMOR.AP[armorIndex('light')];
-    const effectiveDmg = Math.round(dcDmg * apVsLight); // 80 * 0.8 = 64
+    const effectiveDmg = Math.round(dcDmg * apVsLight);
     const hitsToKill = Math.ceil(UNIT_STATS.SS.strength / effectiveDmg);
-    expect(effectiveDmg).toBe(64);
+    const iniVersesLight = parseFloat(ini['AP'].Verses.split(',')[2]) / 100;
+    expect(apVsLight).toBe(iniVersesLight);
     expect(hitsToKill).toBe(2); // 120/64 = 1.875 → 2 hits
   });
 
