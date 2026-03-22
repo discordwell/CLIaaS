@@ -37,6 +37,7 @@ import {
 } from '../engine/production';
 import {
   PRODUCTION_ITEMS,
+  COUNTRY_BONUSES,
   type ProductionItem,
   type House,
   type Faction,
@@ -47,11 +48,11 @@ import type { GameMap } from '../engine/map';
 
 // ── rules.ini loader ────────────────────────────────────────────────────────
 
-function loadRulesIni(): IniSections {
+function loadIniFile(filename: string): IniSections {
   const candidates = [
-    resolve(process.cwd(), 'public/ra/assets/rules.ini'),
-    resolve(__dirname, '../../../public/ra/assets/rules.ini'),
-    resolve(__dirname, '../../../../public/ra/assets/rules.ini'),
+    resolve(process.cwd(), `public/ra/assets/${filename}`),
+    resolve(__dirname, `../../../public/ra/assets/${filename}`),
+    resolve(__dirname, `../../../../public/ra/assets/${filename}`),
   ];
   for (const path of candidates) {
     try {
@@ -60,10 +61,11 @@ function loadRulesIni(): IniSections {
       // try next
     }
   }
-  throw new Error('rules.ini not found');
+  throw new Error(`${filename} not found`);
 }
 
-const INI = loadRulesIni();
+const INI = loadIniFile('rules.ini');
+const AFTERMATH_INI = loadIniFile('aftrmath.ini');
 
 /** Parse an INI float value (e.g. ".8" -> 0.8, "50%" -> 0.5) */
 function parseIniFloat(value: string | undefined, defValue = 0): number {
@@ -81,6 +83,24 @@ function getIniCost(type: string): number {
   const section = INI.get(type);
   if (!section || !section.has('Cost')) return 0;
   return parseIniInt(section.get('Cost')!);
+}
+
+/** Get Cost= checking aftrmath.ini first (it overrides rules.ini for expansion units) */
+function getIniCostWithAftermath(type: string): number {
+  const aftermathSection = AFTERMATH_INI.get(type);
+  if (aftermathSection?.has('Cost')) {
+    return parseIniInt(aftermathSection.get('Cost')!);
+  }
+  return getIniCost(type);
+}
+
+/** Get TechLevel= checking aftrmath.ini first */
+function getIniTechLevelWithAftermath(type: string): number {
+  const aftermathSection = AFTERMATH_INI.get(type);
+  if (aftermathSection?.has('TechLevel')) {
+    return parseIniInt(aftermathSection.get('TechLevel')!);
+  }
+  return getIniTechLevel(type);
 }
 
 /** Get Owner= for a type from rules.ini */
@@ -1151,5 +1171,192 @@ describe('C++ parity: base discovery gates production', () => {
     const ctx = makeContext({ baseDiscovered: true, playerTechLevel: 15 });
     const available = getAvailableItems(ctx);
     expect(available.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================
+// Section 14: Aftermath expansion unit costs (aftrmath.ini)
+// aftrmath.ini overrides rules.ini for expansion units.
+// ============================================================
+describe('C++ parity: aftermath expansion unit costs (aftrmath.ini)', () => {
+
+  const AFTERMATH_UNITS: [string, string][] = [
+    ['CTNK', 'Chrono Tank'],
+    ['TTNK', 'Tesla Tank'],
+    ['QTNK', 'M.A.D. Tank'],
+    ['DTRK', 'Demo Truck'],
+    ['MSUB', 'Missile Sub'],
+    ['SHOK', 'Shock Trooper'],
+    ['MECH', 'Mechanic'],
+  ];
+
+  for (const [type, name] of AFTERMATH_UNITS) {
+    it(`${type} (${name}): cost matches aftrmath.ini`, () => {
+      const aftermathSection = AFTERMATH_INI.get(type);
+      expect(aftermathSection, `${type} must have a section in aftrmath.ini`).toBeDefined();
+
+      const iniCost = parseIniInt(aftermathSection!.get('Cost')!);
+      const tsItem = PRODUCTION_ITEMS.find(item => item.type === type);
+      expect(tsItem, `${type} must exist in PRODUCTION_ITEMS`).toBeDefined();
+
+      expect(
+        tsItem!.cost,
+        `${type}: TS cost=${tsItem!.cost} should match aftrmath.ini Cost=${iniCost}`,
+      ).toBe(iniCost);
+    });
+
+    it(`${type} (${name}): techLevel matches aftrmath.ini`, () => {
+      const aftermathSection = AFTERMATH_INI.get(type);
+      expect(aftermathSection, `${type} must have a section in aftrmath.ini`).toBeDefined();
+
+      const iniTechLevel = parseIniInt(aftermathSection!.get('TechLevel')!);
+      const tsItem = PRODUCTION_ITEMS.find(item => item.type === type);
+      expect(tsItem, `${type} must exist in PRODUCTION_ITEMS`).toBeDefined();
+
+      expect(
+        tsItem!.techLevel,
+        `${type}: TS techLevel=${tsItem!.techLevel} should match aftrmath.ini TechLevel=${iniTechLevel}`,
+      ).toBe(iniTechLevel);
+    });
+
+    it(`${type} (${name}): buildTime uses aftrmath.ini Cost`, () => {
+      const aftermathSection = AFTERMATH_INI.get(type);
+      expect(aftermathSection).toBeDefined();
+
+      const iniCost = parseIniInt(aftermathSection!.get('Cost')!);
+      const expectedBuildTime = cppBuildTime(iniCost);
+      const tsItem = PRODUCTION_ITEMS.find(item => item.type === type);
+      expect(tsItem).toBeDefined();
+
+      expect(
+        tsItem!.buildTime,
+        `${type}: buildTime should be floor(${iniCost} * ${BUILD_SPEED_BIAS} * 900 / 1000) = ${expectedBuildTime}`,
+      ).toBe(expectedBuildTime);
+    });
+  }
+});
+
+// ============================================================
+// Section 15: Difficulty biases from rules.ini
+// rules.cpp:316-325 — difficulty section parsing
+// ============================================================
+describe('C++ parity: difficulty biases (rules.cpp:316-325)', () => {
+  /**
+   * C++ rules.cpp:316-325:
+   *   diff.CostBias = ini.Get_Fixed(section, "Cost", 1);
+   *   diff.BuildSpeedBias = ini.Get_Fixed(section, "BuildTime", 1);
+   *
+   * rules.ini difficulty sections:
+   *   [Easy] BuildTime=.8, Cost=.8
+   *   [Normal] BuildTime=1, Cost=1.0
+   *   [Difficult] BuildTime=1.0, Cost=1.0
+   */
+
+  it('[Easy] BuildTime=.8 (player builds 20% faster on Easy)', () => {
+    const easySection = INI.get('Easy');
+    expect(easySection).toBeDefined();
+    const easyBuildTime = parseIniFloat(easySection!.get('BuildTime'), 1.0);
+    expect(easyBuildTime).toBe(0.8);
+  });
+
+  it('[Easy] Cost=.8 (player pays 20% less on Easy)', () => {
+    const easySection = INI.get('Easy');
+    expect(easySection).toBeDefined();
+    const easyCost = parseIniFloat(easySection!.get('Cost'), 1.0);
+    expect(easyCost).toBe(0.8);
+  });
+
+  it('[Normal] BuildTime=1 (standard build speed)', () => {
+    const normalSection = INI.get('Normal');
+    expect(normalSection).toBeDefined();
+    const normalBuildTime = parseIniFloat(normalSection!.get('BuildTime'), 1.0);
+    expect(normalBuildTime).toBe(1.0);
+  });
+
+  it('[Normal] Cost=1.0 (standard cost)', () => {
+    const normalSection = INI.get('Normal');
+    expect(normalSection).toBeDefined();
+    const normalCost = parseIniFloat(normalSection!.get('Cost'), 1.0);
+    expect(normalCost).toBe(1.0);
+  });
+
+  it('[Difficult] BuildTime=1.0 (no build speed bonus)', () => {
+    const difficultSection = INI.get('Difficult');
+    expect(difficultSection).toBeDefined();
+    const difficultBuildTime = parseIniFloat(difficultSection!.get('BuildTime'), 1.0);
+    expect(difficultBuildTime).toBe(1.0);
+  });
+
+  it('[Difficult] Cost=1.0 (no cost discount)', () => {
+    const difficultSection = INI.get('Difficult');
+    expect(difficultSection).toBeDefined();
+    const difficultCost = parseIniFloat(difficultSection!.get('Cost'), 1.0);
+    expect(difficultCost).toBe(1.0);
+  });
+
+  it('[Normal] BuildSlowdown=yes (AI builds slower)', () => {
+    // rules.cpp:324: diff.IsBuildSlowdown = ini.Get_Bool(section, "BuildSlowdown", false);
+    // factory.cpp:430: if (!House->IsHuman && Rule.Diff[House->Difficulty].IsBuildSlowdown)
+    const normalSection = INI.get('Normal');
+    expect(normalSection).toBeDefined();
+    expect(normalSection!.get('BuildSlowdown')?.toLowerCase()).toBe('yes');
+  });
+});
+
+// ============================================================
+// Section 16: Country BuildTime bias (house.cpp:297)
+// rules.ini country sections have BuildTime= (maps to BuildSpeedBias)
+// ============================================================
+describe('C++ parity: country BuildTime bias (house.cpp:297)', () => {
+  /**
+   * C++ house.cpp:297:
+   *   BuildSpeedBias = hptr->BuildSpeedBias * Rule.Diff[handicap].BuildSpeedBias * Rule.GameSpeedBias
+   * In multiplayer, the country's BuildTime value multiplies the production speed.
+   * All countries currently have BuildTime=1.0 (no build speed bonus).
+   */
+
+  const COUNTRIES = ['Spain', 'Greece', 'England', 'France', 'Germany', 'Turkey', 'USSR', 'Ukraine'];
+
+  for (const country of COUNTRIES) {
+    it(`${country}: BuildTime bias = 1.0 in rules.ini`, () => {
+      const section = INI.get(country);
+      expect(section, `${country} section must exist in rules.ini`).toBeDefined();
+      const buildTimeBias = parseIniFloat(section!.get('BuildTime'), 1.0);
+      expect(buildTimeBias).toBe(1.0);
+    });
+  }
+
+  it('all country Cost biases match COUNTRY_BONUSES', () => {
+    for (const country of COUNTRIES) {
+      const section = INI.get(country);
+      if (!section) continue;
+      const iniCostBias = parseIniFloat(section.get('Cost'), 1.0);
+      const tsCostBias = COUNTRY_BONUSES[country]?.costMult;
+      expect(tsCostBias, `${country} costMult`).toBe(iniCostBias);
+    }
+  });
+});
+
+// ============================================================
+// Section 17: Prerequisite destruction mid-production
+// ============================================================
+describe('C++ parity: prerequisite destruction cancels production', () => {
+
+  it('destroying prerequisite building cancels in-progress production', () => {
+    const ctx = makeContext();
+    const item = makeItem({ buildTime: 100, prerequisite: 'WEAP' });
+
+    startProduction(ctx, item);
+    tickNTimes(ctx, 10);
+    expect(ctx.productionQueue.has('right')).toBe(true);
+
+    // Kill all WEAP structures
+    for (const s of ctx.structures) {
+      if (s.type === 'WEAP') s.alive = false;
+    }
+
+    // Next tick should cancel production
+    tickProduction(ctx);
+    expect(ctx.productionQueue.has('right')).toBe(false);
   });
 });
