@@ -108,7 +108,7 @@ const SCG11EA_FORWARD_MCV_TARGET: Point = { cx: 36, cy: 96 };
 const SCG11EA_FORWARD_FACT_TARGET: Point = { cx: 52, cy: 90 };
 const SCG11EA_ASSAULT_MIN_SHIPS = 3;       // Don't peel armor west until the fleet is self-sustaining
 const SCG11EA_ASSAULT_MAX_SUBS = 4;        // Once the submarine screen is thinned, a small armor detachment can start removing island pressure
-const SCG11EA_ASSAULT_MIN_ARMOR = 8; /* human-requested: starting 7 armor + 1 produced */
+const SCG11EA_ASSAULT_MIN_ARMOR = 12; /* human-requested: need mass to overwhelm garrison */
 const SCG11EA_ASSAULT_RETREAT_FLOOR = 4;   // Stay on the island longer before abandoning the pressure
 const SCG11EA_EARLY_ASSAULT_CAP = 4;
 const SCG11EA_STATIC_DEFENSE_MIN_SHIPS = 2;
@@ -3361,8 +3361,27 @@ export class OracleStrategy {
       const factCapturable = enemyFact && (enemyFact.hp / enemyFact.mhp) < 0.25;
 
       if (!nearTarget) {
-        // Move to staging area — inland route avoiding coastal water and Teslas
-        commands.push({ cmd: 'move', ids: assaultUnits.map(u => u.id), cx: 20, cy: 75 });
+        // Target-fire nearest enemy while moving toward ConYard. If no enemies
+        // visible, just move. This gets the army advancing without attack_move
+        // sending them off-course, but they still fight what's in front of them.
+        const closestEnemy = state.enemies
+          .filter(e => e.hp > 0)
+          .sort((a, b) => {
+            // Prefer enemies near the ConYard path (between tanks and target)
+            const aDist = this.distanceSq(a, target);
+            const bDist = this.distanceSq(b, target);
+            return aDist - bDist;
+          })[0];
+        if (closestEnemy && assaultUnits.some(u => this.distanceSq(u, closestEnemy) <= 100)) {
+          // Enemy within 10 cells of a tank — target-fire it
+          for (const u of assaultUnits) {
+            commands.push({ cmd: 'attack', ids: [u.id], target: closestEnemy.id });
+          }
+        } else {
+          // No nearby enemies — move toward ConYard
+          commands.push({ cmd: 'move', ids: assaultUnits.map(u => u.id),
+            cx: target.cx, cy: target.cy });
+        }
       } else {
         // Near the ConYard — target-fire nearby enemies, don't attack_move.
         // Find enemy units near the ConYard and assign tanks to kill them.
@@ -3508,8 +3527,8 @@ export class OracleStrategy {
       const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
       const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
 
-      // Unstick from team script's impassable zone
-      if (tanya.cy > 108) {
+      // Unstick from team script's impassable zone or coastal water
+      if (tanya.cy > 108 || tanya.cx < 15) {
         commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
         reasons.push(`Tanya WARP → (22,105)`);
         return { commands, reason: reasons.join('; ') };
@@ -3599,8 +3618,8 @@ export class OracleStrategy {
         } else {
           // Walk toward SAM: pick best adjacent cell and move there
           // For north SAMs far from spawn, use corridor waypoints first
-          const adjX = tanya.cx <= sam.cx ? sam.cx - 1 : sam.cx + 2; // approach from nearest side
-          const adjTarget = { cx: adjX, cy: sam.cy };
+          // Approach from east side (sam.cx + 2) — west coast at x<15 is water
+          const adjTarget = { cx: sam.cx + 2, cy: sam.cy };
 
           if (samDist > 100) {
             // Very far — use corridor waypoints to navigate through buildings
@@ -4082,123 +4101,117 @@ export class OracleStrategy {
       reasons.push('island base DESTROYED');
     }
 
-    /* human-requested: NO fleet gate. Attack when 8+ tanks. Ground first. */
+    /* human-requested: AMBUSH strategy — stage at y=70, wait for patrolling Mammoths,
+       kill them when isolated, then push into weakened garrison.
+       2 USSR 4TNK patrol from y=58 → y=99 → y=58 on ~6000-tick cycle.
+       Garrison (stationary): 4×3TNK + 2×V2RL at y=50-55. Never moves south. */
     const assaultUnlocked = assaultArmor.length >= SCG11EA_ASSAULT_MIN_ARMOR;
     const assaultActive = this.scg11eaAssaultStarted || assaultUnlocked;
     if (assaultUnlocked) this.scg11eaAssaultStarted = true;
-    /* human-requested: pre-assault LOCAL defense only — don't chase distant threats */
+
+    // Detect patrolling Mammoths (USSR 4TNK south of garrison, y>60)
+    const patrolMammoths = state.enemies.filter(
+      (e) => e.t === '4TNK' && e.cy > 60 && e.cy < 100,
+    );
+    // Garrison Mammoths (still in base area, y<=60)
+    const garrisonMammoths = state.enemies.filter(
+      (e) => e.t === '4TNK' && e.cy >= 45 && e.cy <= 60 &&
+        e.cx >= 35 && e.cx <= 65,
+    );
+
     if (!assaultActive && assaultArmor.length > 0) {
-      const localThreats = state.enemies.filter(
+      // AMBUSH PHASE: stage at y=70, fight anything that comes south
+      const ambushPoint: Point = { cx: 40, cy: 70 };
+      // Only engage enemies that have come SOUTH to us (y>65), not garrison units
+      const nearThreats = state.enemies.filter(
         (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
-          this.distanceSq(e, defenseAnchor) <= 100,
-      );
-      if (localThreats.length > 0) {
-        const sorted = localThreats.sort((a, b) => {
-          const rank = (t: string) => t.includes('TNK') ? 0 : t === 'V2RL' ? 0 : 2;
-          return rank(a.t) - rank(b.t);
-        });
-        const target = sorted[0];
-        const idle = assaultArmor.filter((u) => this.isIdle(u) || this.shouldRecommand(u, localThreats));
-        if (idle.length > 0) {
-          commands.push({ cmd: 'attack', ids: idle.map((u) => u.id), target: target.id });
-          for (const u of idle) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`defend staging (${idle.length} → ${target.t})`);
-        }
+          (e.t.includes('TNK') || e.t === 'V2RL') &&
+          e.cy > 65 && // must be south of garrison — they came to US
+          this.distanceSq(e, ambushPoint) <= 400,
+      ).sort((a, b) => this.distanceSq(a, ambushPoint) - this.distanceSq(b, ambushPoint));
+
+      if (nearThreats.length > 0) {
+        // Patrolling enemies near us — gang up and kill!
+        const target = nearThreats[0];
+        commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
+        for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+        reasons.push(`AMBUSH ${target.t}@(${target.cx},${target.cy}) hp=${target.hp}/${target.mhp} [${assaultArmor.length}T]`);
       } else {
+        // No threats — stage at ambush point
         const stageArmor = assaultArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, defenseAnchor) > 196,
+          (u) => this.isIdle(u) || this.distanceSq(u, ambushPoint) > 196,
         );
         if (stageArmor.length > 0) {
           commands.push({
             cmd: 'move',
             ids: stageArmor.map((u) => u.id),
-            cx: defenseAnchor.cx,
-            cy: defenseAnchor.cy,
+            cx: ambushPoint.cx,
+            cy: ambushPoint.cy,
           });
-          for (const u of stageArmor) this.recordMove(u.id, defenseAnchor.cx, defenseAnchor.cy);
-          reasons.push(`stage armor (${stageArmor.length})`);
+          for (const u of stageArmor) this.recordMove(u.id, ambushPoint.cx, ambushPoint.cy);
         }
+        reasons.push(`stage ambush (${assaultArmor.length}T at y=70, patrols: ${patrolMammoths.length} south, ${garrisonMammoths.length} in base)`);
       }
     }
-    /* human-requested: GATHER + STRIKE with sticky strike + building-first targeting */
+
+    /* human-requested: PUSH phase — trigger when 12+ tanks AND patrol Mammoths dead/absent.
+       Push into garrison, focus-fire nearest enemy, then buildings. */
     if (!islandBaseDestroyed && assaultActive && assaultArmor.length > 0) {
-      const rallyPoint: Point = { cx: 45, cy: 65 };
+      const rallyPoint: Point = { cx: 40, cy: 70 }; // ambush/rally point
       const atRally = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) <= 625);
       const enRoute = assaultArmor.filter((u) => this.distanceSq(u, rallyPoint) > 625);
 
-      /* human-requested: need 6+ tanks for first push, 4+ for subsequent. Re-gather at 3. */
+      /* human-requested: push when massed AND patrol Mammoths not between us and garrison.
+         Re-gather at 4 tanks. */
       if (!this.scg11eaStrikeActive) {
-        const firstPush = this.scg11eaStrikeTick === 0;
-        const minTanks = firstPush ? 6 : 4;
-        const readyToStrike = atRally.length >= Math.min(8, assaultArmor.length) && assaultArmor.length >= minTanks;
+        const mammothsClear = patrolMammoths.length === 0; // no Mammoths south of garrison
+        const readyToStrike = atRally.length >= Math.min(10, assaultArmor.length)
+          && assaultArmor.length >= 10
+          && mammothsClear;
         if (readyToStrike) {
           this.scg11eaStrikeActive = true;
           this.scg11eaStrikeTick = state.tick;
         }
-      } else if (assaultArmor.length < 3) {
+      } else if (assaultArmor.length < 4) {
         this.scg11eaStrikeActive = false;
       }
 
-      /* human-requested: PUSH approach — advance toward base, engage threats on the way,
-         crush infantry with 'move', focus-fire nearby armor, hit buildings when close. */
+      /* human-requested: PUSH — focus-fire nearest enemy, then buildings when clear. */
       if (this.scg11eaStrikeActive) {
         const tankCentroid = this.centroid(assaultArmor as unknown as RAEntity[]);
-        const pushTarget: Point = { cx: 52, cy: 45 }; // enemy WEAP
-        const engageRange = 144; // 12 cells squared
-        const buildingRange = 100; // 10 cells squared
+        const pushTarget: Point = { cx: 48, cy: 50 }; // garrison center
 
-        // Enemy armor/V2RL within engagement range AND ahead of us (toward base)
-        // Only fight enemies between us and the push target, not behind us
-        const nearArmor = state.enemies.filter(
+        // All enemy armor/V2RL within 15 cells — focus-fire nearest
+        const nearEnemies = state.enemies.filter(
           (e) => (e.t.includes('TNK') || e.t === 'V2RL') &&
-            this.distanceSq(e, tankCentroid) <= engageRange &&
-            e.cy <= tankCentroid.cy + 3, // only engage enemies ahead (north) or near us
-        ).sort((a, b) => {
-          // V2RL first (most dangerous to tanks), then by distance
-          const rank = (t: string) => t === 'V2RL' ? 0 : t === '4TNK' ? 1 : t === '3TNK' ? 2 : 3;
-          const rA = rank(a.t), rB = rank(b.t);
-          if (rA !== rB) return rA - rB;
-          return this.distanceSq(a, tankCentroid) - this.distanceSq(b, tankCentroid);
-        });
+            this.distanceSq(e, tankCentroid) <= 225,
+        ).sort((a, b) => this.distanceSq(a, tankCentroid) - this.distanceSq(b, tankCentroid));
 
-        // Enemy production buildings within attack range of our tanks
+        // Enemy buildings within 8 cells
         const prodPriority = ['WEAP', 'FACT', 'BARR', 'KENN', 'AFLD', 'HPAD'];
         const nearBuildings = enemyStructures.filter(
-          (s) => this.distanceSq(s, tankCentroid) <= buildingRange,
+          (s) => this.distanceSq(s, tankCentroid) <= 64,
         ).sort((a, b) => {
           const aR = prodPriority.indexOf(a.t);
           const bR = prodPriority.indexOf(b.t);
           return (aR >= 0 ? aR : 99) - (bR >= 0 ? bR : 99);
         });
 
-        // Once close to enemy base (within 20 cells of WEAP), attack buildings directly.
-        // Tanks will auto-fire at enemies along the way via C++ targeting.
-        const distToBase = this.distanceSq(tankCentroid, pushTarget);
-        const nearBase = distToBase <= 400; // 20 cells
-        const prodBuilding = nearBase
-          ? enemyStructures.filter((s) => prodPriority.includes(s.t))
-              .sort((a, b) => (prodPriority.indexOf(a.t)) - (prodPriority.indexOf(b.t)))[0]
-          : null;
+        // Diagnostic
+        const avgHp = assaultArmor.reduce((s, u) => s + u.hp / u.mhp, 0) / assaultArmor.length;
+        const diag = `${assaultArmor.length}T@(${Math.round(tankCentroid.cx)},${Math.round(tankCentroid.cy)}) hp=${(avgHp * 100).toFixed(0)}%`;
 
-        if (nearBase && prodBuilding) {
-          // ATTACK BUILDING: close enough — attack production, tanks auto-engage enemies on path
-          commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: prodBuilding.id });
-          for (const u of assaultArmor) this.recordMove(u.id, prodBuilding.cx, prodBuilding.cy);
-          reasons.push(`ATTACK ${prodBuilding.t} (${assaultArmor.length} tanks → ${prodBuilding.cx},${prodBuilding.cy})`);
-        } else if (nearArmor.length > 0) {
-          // ENGAGE: focus-fire nearest dangerous enemy — all tanks on same target
-          const target = nearArmor[0];
+        if (nearEnemies.length > 0) {
+          const target = nearEnemies[0];
           commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
           for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`ENGAGE ${target.t} (${assaultArmor.length} tanks → ${target.cx},${target.cy})`);
+          reasons.push(`ENGAGE ${target.t}@(${target.cx},${target.cy}) hp=${target.hp}/${target.mhp} [${diag} vs ${nearEnemies.length}e]`);
         } else if (nearBuildings.length > 0) {
-          // ATTACK: hit production buildings when close enough
           const target = nearBuildings[0];
           commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
           for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`ATTACK ${target.t} (${assaultArmor.length} tanks → ${target.cx},${target.cy})`);
+          reasons.push(`ATTACK ${target.t}@(${target.cx},${target.cy}) [${diag}]`);
         } else {
-          // ADVANCE: move toward enemy base — 'move' crushes infantry along the way
           const movers = assaultArmor.filter((u) =>
             this.isIdle(u) || this.shouldMove(u, pushTarget.cx, pushTarget.cy),
           );
@@ -4206,14 +4219,28 @@ export class OracleStrategy {
             commands.push({ cmd: 'move', ids: movers.map((u) => u.id), cx: pushTarget.cx, cy: pushTarget.cy });
             for (const u of movers) this.recordMove(u.id, pushTarget.cx, pushTarget.cy);
           }
-          reasons.push(`ADVANCE (${assaultArmor.length} tanks → WEAP)`);
+          reasons.push(`ADVANCE [${diag} → garrison]`);
         }
       } else {
+        // GATHER at ambush point — waiting for mass or Mammoths to clear
         if (enRoute.length > 0) {
           commands.push({ cmd: 'move', ids: enRoute.map((u) => u.id), cx: rallyPoint.cx, cy: rallyPoint.cy });
           for (const u of enRoute) this.recordMove(u.id, rallyPoint.cx, rallyPoint.cy);
         }
-        reasons.push(`GATHER (${atRally.length}/${assaultArmor.length} at rally)`);
+        // If patrol Mammoths are near, engage them while gathering
+        if (patrolMammoths.length > 0) {
+          const nearMammoth = patrolMammoths.sort((a, b) =>
+            this.distanceSq(a, rallyPoint) - this.distanceSq(b, rallyPoint))[0];
+          if (this.distanceSq(nearMammoth, rallyPoint) <= 400) {
+            commands.push({ cmd: 'attack', ids: atRally.map((u) => u.id), target: nearMammoth.id });
+            for (const u of atRally) this.recordMove(u.id, nearMammoth.cx, nearMammoth.cy);
+            reasons.push(`AMBUSH patrol 4TNK@(${nearMammoth.cx},${nearMammoth.cy}) hp=${nearMammoth.hp}/${nearMammoth.mhp} [${atRally.length}T]`);
+          } else {
+            reasons.push(`GATHER (${atRally.length}/${assaultArmor.length} — patrol 4TNK@y=${nearMammoth.cy} incoming)`);
+          }
+        } else {
+          reasons.push(`GATHER (${atRally.length}/${assaultArmor.length} — patrols clear, need ${10 - assaultArmor.length} more)`);
+        }
       }
     }
 
