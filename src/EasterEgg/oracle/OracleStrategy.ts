@@ -4219,16 +4219,20 @@ export class OracleStrategy {
         const avgHp = assaultArmor.reduce((s, u) => s + u.hp / u.mhp, 0) / assaultArmor.length;
         const diag = `${assaultArmor.length}T@(${Math.round(tankCentroid.cx)},${Math.round(tankCentroid.cy)}) hp=${(avgHp * 100).toFixed(0)}%`;
 
-        if (nearEnemies.length > 0) {
+        /* human-requested: BUILDINGS FIRST when in range. Tanks auto-fire at enemies
+           in weapon range anyway — we don't need to manually ENGAGE when hitting buildings. */
+        /* human-requested: attack_move to building — tanks fight through garrison en route.
+           'attack' by ID makes tanks ignore enemies and beeline, getting killed without firing. */
+        if (nearBuildings.length > 0) {
+          const target = nearBuildings[0];
+          commands.push({ cmd: 'attack_move', ids: assaultArmor.map((u) => u.id), cx: target.cx, cy: target.cy });
+          for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
+          reasons.push(`ATTACK ${target.t}@(${target.cx},${target.cy}) [${diag}]`);
+        } else if (nearEnemies.length > 0) {
           const target = nearEnemies[0];
           commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
           for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
           reasons.push(`ENGAGE ${target.t}@(${target.cx},${target.cy}) hp=${target.hp}/${target.mhp} [${diag} vs ${nearEnemies.length}e]`);
-        } else if (nearBuildings.length > 0) {
-          const target = nearBuildings[0];
-          commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
-          for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
-          reasons.push(`ATTACK ${target.t}@(${target.cx},${target.cy}) [${diag}]`);
         } else {
           const movers = assaultArmor.filter((u) =>
             this.isIdle(u) || this.shouldMove(u, pushTarget.cx, pushTarget.cy),
