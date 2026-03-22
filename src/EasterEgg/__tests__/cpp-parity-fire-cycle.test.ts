@@ -467,7 +467,7 @@ describe('Weapon damage values match rules.ini (weapon.cpp:209)', () => {
     ['120mm',        40],
     ['MammothTusk',  75],
     ['155mm',       150],
-    ['TeslaCannon', 150],
+    ['TeslaCannon', 100],
     ['Colt45',       50],
     ['Stinger',      30],
     ['TorpTube',     90],
