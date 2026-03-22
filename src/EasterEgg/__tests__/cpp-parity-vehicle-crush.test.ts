@@ -527,8 +527,9 @@ describe('CRUSHABLE_WALLS matches C++ odata.cpp IsCrushable', () => {
     expect(CRUSHABLE_WALLS.has('BRIK')).toBe(false);
   });
 
-  it('has exactly 4 entries (SBAG, FENC, BARB, WOOD)', () => {
-    expect(CRUSHABLE_WALLS.size).toBe(4);
+  it('has exactly 5 entries (SBAG, FENC, BARB, WOOD, CYCL)', () => {
+    expect(CRUSHABLE_WALLS.size).toBe(5);
+    expect(CRUSHABLE_WALLS.has('CYCL')).toBe(true);
   });
 });
 

@@ -1762,8 +1762,12 @@ export class OracleStrategy {
         ? state.structures.filter((s) => !s.ally && s.cx >= 35 && s.cx <= 60 && s.cy >= 35 && s.cy <= 58 && scg11eaIslandProdTypes.has(s.t))
         : [];
       const scg11eaIslandCleared = this.scenario === 'SCG11EA' && scg11eaIslandProd.length === 0 && state.tick > 5000;
+      /* human-requested: freeze non-PROC buildings only — PROC pays for itself via income */
+      const scg11eaCurrentProcs = this.scenario === 'SCG11EA'
+        ? alliedStructures.filter((s) => s.t === 'PROC').length : 0;
+      const scg11eaNeedProc = this.scenario === 'SCG11EA' && scg11eaCurrentProcs < 2;
       const scg11eaFreezeBuild = this.scenario === 'SCG11EA' &&
-        scg11eaWeapCount >= 1 && !scg11eaIslandCleared;
+        scg11eaWeapCount >= 1 && !scg11eaIslandCleared && !scg11eaNeedProc;
       if (scg11eaFreezeBuild) {
         reasons.push('freeze build (pumping tanks)');
       }
@@ -4119,36 +4123,36 @@ export class OracleStrategy {
         e.cx >= 35 && e.cx <= 65,
     );
 
+    /* human-requested: ALL tanks stage at ambush point y=70. Gang up on patrol Mammoths. */
+    const ambushPoint: Point = { cx: 40, cy: 70 };
     if (!assaultActive && assaultArmor.length > 0) {
-      // AMBUSH PHASE: stage at y=70, fight anything that comes south
-      const ambushPoint: Point = { cx: 40, cy: 70 };
-      // Only engage enemies that have come SOUTH to us (y>65), not garrison units
+      // Enemies south of garrison line (y>65) — came to us
       const nearThreats = state.enemies.filter(
         (e) => !NAVAL_COMBAT_TYPES.has(e.t) && !AIRCRAFT_TYPES.has(e.t) &&
           (e.t.includes('TNK') || e.t === 'V2RL') &&
-          e.cy > 65 && // must be south of garrison — they came to US
-          this.distanceSq(e, ambushPoint) <= 400,
+          e.cy > 65 &&
+          this.distanceSq(e, ambushPoint) <= 625, // 25 cells
       ).sort((a, b) => this.distanceSq(a, ambushPoint) - this.distanceSq(b, ambushPoint));
 
       if (nearThreats.length > 0) {
-        // Patrolling enemies near us — gang up and kill!
+        // ALL tanks gang up on patrol enemies
         const target = nearThreats[0];
         commands.push({ cmd: 'attack', ids: assaultArmor.map((u) => u.id), target: target.id });
         for (const u of assaultArmor) this.recordMove(u.id, target.cx, target.cy);
         reasons.push(`AMBUSH ${target.t}@(${target.cx},${target.cy}) hp=${target.hp}/${target.mhp} [${assaultArmor.length}T]`);
       } else {
-        // No threats — stage at ambush point
-        const stageArmor = assaultArmor.filter(
-          (u) => this.isIdle(u) || this.distanceSq(u, ambushPoint) > 196,
+        // ALL tanks move to ambush point — no one stays home
+        const movers = assaultArmor.filter(
+          (u) => this.isIdle(u) || this.shouldMove(u, ambushPoint.cx, ambushPoint.cy),
         );
-        if (stageArmor.length > 0) {
+        if (movers.length > 0) {
           commands.push({
             cmd: 'move',
-            ids: stageArmor.map((u) => u.id),
+            ids: movers.map((u) => u.id),
             cx: ambushPoint.cx,
             cy: ambushPoint.cy,
           });
-          for (const u of stageArmor) this.recordMove(u.id, ambushPoint.cx, ambushPoint.cy);
+          for (const u of movers) this.recordMove(u.id, ambushPoint.cx, ambushPoint.cy);
         }
         reasons.push(`stage ambush (${assaultArmor.length}T at y=70, patrols: ${patrolMammoths.length} south, ${garrisonMammoths.length} in base)`);
       }
@@ -4165,8 +4169,10 @@ export class OracleStrategy {
          Re-gather at 4 tanks. */
       if (!this.scg11eaStrikeActive) {
         const mammothsClear = patrolMammoths.length === 0; // no Mammoths south of garrison
-        const readyToStrike = atRally.length >= Math.min(10, assaultArmor.length)
-          && assaultArmor.length >= 10
+        const firstPush = this.scg11eaStrikeTick === 0;
+        const minForPush = firstPush ? 10 : 7; /* human-requested: subsequent pushes need less */
+        const readyToStrike = atRally.length >= Math.min(minForPush, assaultArmor.length)
+          && assaultArmor.length >= minForPush
           && mammothsClear;
         if (readyToStrike) {
           this.scg11eaStrikeActive = true;

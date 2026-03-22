@@ -459,7 +459,7 @@ describe('Thief steal mechanics — C++ behavioral parity', () => {
   //  TS: rejects non-PROC/SILO, thief returns to GUARD, NOT consumed
   // -----------------------------------------------------------------------
 
-  it('[MISMATCH] C++ sets IsThieved on ANY building (line 676), TS only on PROC/SILO', () => {
+  it('C++ sets IsThieved on ANY building (line 676) — now matches', () => {
     const thief = makeThief(PLAYER_HOUSE);
     // WEAP has no Storage in rules.ini
     const weap = makeStructure('WEAP', ENEMY_HOUSE, 2, 2);
@@ -472,20 +472,16 @@ describe('Thief steal mechanics — C++ behavioral parity', () => {
 
     updateThief(ctx, thief);
 
-    // C++ expected: IsThieved = true (set on line 676 before Capacity check)
-    // C++ expected: thief consumed (delete this, line 706)
-    // C++ expected: no credits stolen (WEAP has Capacity=0)
-    //
-    // TS actual: thief redirected to GUARD, NOT consumed, IsThieved NOT set
-    // This is a known parity gap.
-    //
-    // Test documents the TS behavior:
-    expect(ctx.isThieved).toBe(false);  // TS: false (C++ would be true)
-    expect(thief.alive).toBe(true);      // TS: alive (C++ would be deleted)
-    expect(thief.mission).toBe(Mission.GUARD); // TS: redirected (C++ would be dead)
+    // C++ infantry.cpp:676 — IsThieved set on ANY building entry
+    expect(ctx.isThieved).toBe(true);
+    // C++ infantry.cpp:706 — thief consumed on ANY building
+    expect(thief.alive).toBe(false);
+    expect(thief.mission).toBe(Mission.DIE);
+    // No credits stolen (WEAP has no Storage/Capacity)
+    expect(ctx.houseCredits.get(ENEMY_HOUSE)).toBe(1000);
   });
 
-  it('[MISMATCH] C++ thief consumed on non-storage building, TS thief survives', () => {
+  it('C++ thief consumed on non-storage building — now matches', () => {
     const thief = makeThief(PLAYER_HOUSE);
     const powr = makeStructure('POWR', ENEMY_HOUSE, 2, 2);
     thief.targetStructure = powr;
@@ -498,8 +494,7 @@ describe('Thief steal mechanics — C++ behavioral parity', () => {
     updateThief(ctx, thief);
 
     // C++ deletes thief on ANY building entry (line 706)
-    // TS keeps thief alive on non-PROC/SILO
-    expect(thief.alive).toBe(true);  // TS: alive (C++ parity would be false)
+    expect(thief.alive).toBe(false);
     expect(ctx.houseCredits.get(ENEMY_HOUSE)).toBe(500); // no credits stolen (correct)
   });
 
@@ -706,8 +701,10 @@ describe('Building eligibility for thief — C++ Capacity vs TS type check', () 
     }
   });
 
-  it('[MISMATCH] TS rejects non-storage buildings early; C++ would enter and set IsThieved', () => {
-    // For each non-storage building, verify TS behavior
+  it('thief enters non-storage buildings: IsThieved set, thief consumed, no credits stolen (C++ parity)', () => {
+    // C++ infantry.cpp:676 — IsThieved on ANY building entry
+    // C++ infantry.cpp:706 — thief consumed on ANY building entry
+    // C++ infantry.cpp:680 — credits only stolen if Storage > 0
     for (const type of ['WEAP', 'TENT', 'BARR', 'POWR', 'DOME'] as const) {
       const thief = makeThief(PLAYER_HOUSE);
       const bldg = makeStructure(type, ENEMY_HOUSE, 2, 2);
@@ -720,11 +717,10 @@ describe('Building eligibility for thief — C++ Capacity vs TS type check', () 
 
       updateThief(ctx, thief);
 
-      // TS redirects thief to GUARD, keeps alive
-      expect(thief.alive, `thief entering ${type} should stay alive in TS`).toBe(true);
-      expect(thief.mission, `thief entering ${type} should be GUARD in TS`).toBe(Mission.GUARD);
-      // C++ would: set IsThieved=true, delete thief, steal nothing (Capacity=0)
-      expect(ctx.isThieved, `isThieved after entering ${type}`).toBe(false); // TS: false (C++: true)
+      // C++ parity: thief dies on any building, IsThieved set, no credits stolen
+      expect(thief.alive, `thief entering ${type} should die`).toBe(false);
+      expect(thief.mission, `thief entering ${type} should be DIE`).toBe(Mission.DIE);
+      expect(ctx.isThieved, `isThieved after entering ${type}`).toBe(true);
       expect(ctx.houseCredits.get(ENEMY_HOUSE), `credits unchanged after ${type}`).toBe(1000);
     }
   });

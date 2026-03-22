@@ -26,7 +26,7 @@ export const MAD_TANK_CHARGE_TICKS = 90;
 export const MAD_TANK_DAMAGE = 600;
 export const MAD_TANK_RADIUS = 8;
 export const MECHANIC_HEAL_RANGE = 6;
-export const MECHANIC_HEAL_AMOUNT = 5;
+export const MECHANIC_HEAL_AMOUNT = 100; // C++ GoodWrench weapon Damage=-100 (heals 100 HP per application)
 
 // === Context Interface ===
 export interface SpecialUnitsContext {
@@ -91,6 +91,13 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
     }
     return;
   }
+  // C++ infantry.cpp:841 — Iron Curtain blocks C4 placement
+  if (s.ironCurtainTicks && s.ironCurtainTicks > 0) {
+    entity.targetStructure = null;
+    entity.target = null;
+    entity.mission = Mission.GUARD;
+    return;
+  }
   entity.animState = AnimState.ATTACK;
   const sAny = s as MapStructure & { c4Timer?: number };
   if (sAny.c4Timer === undefined || sAny.c4Timer <= 0) {
@@ -119,26 +126,32 @@ export function tickC4Timers(ctx: SpecialUnitsContext): void {
 
 // === 3. Thief ===
 
-/** Thief steals 50% credits from enemy PROC/SILO, then dies. */
+/** Thief infiltrates enemy buildings. Steals 50% credits from PROC/SILO.
+ *  C++ infantry.cpp:676 — IsThieved set on ANY building entry.
+ *  C++ infantry.cpp:706 — Thief dies after entering ANY building, not just storage. */
 export function updateThief(ctx: SpecialUnitsContext, entity: Entity): void {
   if (entity.type !== UnitType.I_THF || !entity.alive) return;
   if (!entity.targetStructure || !(entity.targetStructure as MapStructure).alive) return;
   const s = entity.targetStructure as MapStructure;
-  if (s.type !== 'PROC' && s.type !== 'SILO') { entity.targetStructure = null; entity.mission = Mission.GUARD; return; }
   if (ctx.isAllied(entity.house, s.house)) { entity.targetStructure = null; entity.mission = Mission.GUARD; return; }
   const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
   const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
   const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
   const dist = worldDist(entity.pos, { x: scx, y: scy });
   if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity)); return; }
-  const enemyCredits = ctx.houseCredits.get(s.house) ?? 0;
-  const stolen = Math.floor(enemyCredits * 0.5);
-  if (stolen > 0) {
-    ctx.houseCredits.set(s.house, enemyCredits - stolen);
-    if (entity.isPlayerUnit) { ctx.credits += stolen; } else { ctx.houseCredits.set(entity.house, (ctx.houseCredits.get(entity.house) ?? 0) + stolen); }
-    ctx.evaMessages.push({ text: `CREDITS STOLEN: ${stolen}`, tick: ctx.tick });
+  // Credit theft only applies to PROC/SILO
+  if (s.type === 'PROC' || s.type === 'SILO') {
+    const enemyCredits = ctx.houseCredits.get(s.house) ?? 0;
+    const stolen = Math.floor(enemyCredits * 0.5);
+    if (stolen > 0) {
+      ctx.houseCredits.set(s.house, enemyCredits - stolen);
+      if (entity.isPlayerUnit) { ctx.credits += stolen; } else { ctx.houseCredits.set(entity.house, (ctx.houseCredits.get(entity.house) ?? 0) + stolen); }
+      ctx.evaMessages.push({ text: `CREDITS STOLEN: ${stolen}`, tick: ctx.tick });
+    }
   }
-  ctx.isThieved = true;  // C++ House.IsThieved — for TEVENT_THIEVED trigger
+  // C++ infantry.cpp:676 — IsThieved on ANY building entry
+  ctx.isThieved = true;
+  // C++ infantry.cpp:706 — Thief always dies after entering any building
   entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
 }
 

@@ -488,33 +488,25 @@ describe('Section 12: ConditionGreen heal gate (infantry.cpp:1631, rules.cpp:233
 });
 
 // =============================================================================
-// Section 13: MECH auto-heal uses hardcoded 5 HP, not weapon's -100
-// TS specialUnits.ts:29 — MECHANIC_HEAL_AMOUNT = 5
-// TS specialUnits.ts:406 — ht.hp = Math.min(ht.maxHp, ht.hp + MECHANIC_HEAL_AMOUNT)
+// Section 13: MECH heal amount — now matches C++ GoodWrench Damage=-100
+// TS specialUnits.ts:29 — MECHANIC_HEAL_AMOUNT = 100
 // C++ uses weapon damage (-100) per fire event at ROF=80
-// MISMATCH: TS heals 5 HP/tick (not weapon-gated), C++ heals 100 HP every 80 ticks
+// FIXED: TS now heals 100 HP per application, matching C++
 // =============================================================================
 
-describe('Section 13: MECH heal amount — TS hardcoded vs C++ weapon damage', () => {
-  it('MECHANIC_HEAL_AMOUNT is 5 (TS hardcoded constant)', () => {
-    expect(MECHANIC_HEAL_AMOUNT).toBe(5);
+describe('Section 13: MECH heal amount — TS matches C++ weapon damage', () => {
+  it('MECHANIC_HEAL_AMOUNT is 100 (C++ GoodWrench Damage=-100)', () => {
+    expect(MECHANIC_HEAL_AMOUNT).toBe(100);
   });
 
   it('GoodWrench weapon damage magnitude is 100 (rules.ini Damage=-100)', () => {
     expect(Math.abs(WEAPON_STATS.GoodWrench.damage)).toBe(100);
   });
 
-  it('MISMATCH: TS mechanic heals 5 HP/tick, C++ heals 100 HP per fire at ROF=80', () => {
-    // C++ mechanic fires GoodWrench at ROF=80 dealing -100 damage (heal 100 HP)
-    // TS mechanic heals 5 HP per tick using MECHANIC_HEAL_AMOUNT constant
-    // Over 80 ticks, TS heals 5*80=400 HP (if no cooldown) vs C++ 100 HP
-    // TS also uses weapon ROF for cooldown (line 406), so it heals 5 HP every 80 ticks
-    // Net: TS heals 5 HP per application, C++ heals 100 HP per application
-    // This is a 20x difference in per-application heal amount
-    const tsHealPerApplication = MECHANIC_HEAL_AMOUNT; // 5
+  it('TS mechanic heals 100 HP per application, matching C++ GoodWrench', () => {
+    const tsHealPerApplication = MECHANIC_HEAL_AMOUNT; // 100
     const cppHealPerApplication = Math.abs(WEAPON_STATS.GoodWrench.damage); // 100
-    // Document the mismatch — TS uses different heal-per-tick than weapon damage
-    expect(tsHealPerApplication).not.toBe(cppHealPerApplication);
+    expect(tsHealPerApplication).toBe(cppHealPerApplication);
   });
 });
 

@@ -587,10 +587,9 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
 }
 
 /** Crushable wall types — C++ odata.cpp IsCrushable flag.
- *  SBAG (sandbag), FENC (fence), BARB (barbwire), WOOD (wood wall) are crushable.
- *  BRIK (brick/concrete) is NOT crushable. CYCL (cyclone fence) is crushable in C++ but
- *  not present as a wall type in the TS engine. */
-export const CRUSHABLE_WALLS = new Set(['SBAG', 'FENC', 'BARB', 'WOOD']);
+ *  SBAG (sandbag), FENC (fence), BARB (barbwire), WOOD (wood wall), CYCL (cyclone fence)
+ *  are crushable. BRIK (brick/concrete) is NOT crushable. */
+export const CRUSHABLE_WALLS = new Set(['SBAG', 'FENC', 'BARB', 'WOOD', 'CYCL']);
 
 /** Wall crush — crusher vehicles destroy crushable walls on cell entry.
  *  C++ unit.cpp:1855-1871: Per_Cell_Process checks IsCrusher && overlay IsCrushable.

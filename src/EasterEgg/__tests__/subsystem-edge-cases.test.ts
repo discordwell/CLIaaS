@@ -1720,10 +1720,14 @@ describe('Retaliation edge cases', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Thief targeting edge cases', () => {
-  it('thief targeting WEAP (non-PROC/SILO) resets to GUARD', () => {
-    const thief = makeEntity(UnitType.I_THF, House.Spain, 100, 100);
-    thief.mission = Mission.ATTACK;
+  it('thief targeting WEAP (non-PROC/SILO) dies (C++ infantry.cpp:706)', () => {
+    // Place thief at the structure center so dist <= 1.5 (within enter range)
     const weap = makeStructure('WEAP', House.USSR, 4, 4);
+    const [sw, sh] = [3, 2]; // WEAP is 3x2
+    const scx = weap.cx * 24 + (sw * 24) / 2;
+    const scy = weap.cy * 24 + (sh * 24) / 2;
+    const thief = makeEntity(UnitType.I_THF, House.Spain, scx, scy);
+    thief.mission = Mission.ATTACK;
     thief.targetStructure = weap;
 
     const ctx = makeSpecialUnitsContext({
@@ -1733,10 +1737,10 @@ describe('Thief targeting edge cases', () => {
 
     updateThief(ctx, thief);
 
-    expect(thief.alive).toBe(true);
-    expect(thief.targetStructure).toBeNull();
-    expect(thief.mission).toBe(Mission.GUARD);
-    expect(ctx.isThieved).toBe(false);
+    // C++ parity: thief dies on any building entry, IsThieved set
+    expect(thief.alive).toBe(false);
+    expect(thief.mission).toBe(Mission.DIE);
+    expect(ctx.isThieved).toBe(true);
   });
 });
 

@@ -501,7 +501,7 @@ describe('Thief (THF) — cash theft state machine', () => {
     expect(thief.weapon2).toBeNull();
   });
 
-  it('updateThief only targets PROC and SILO structures', () => {
+  it('updateThief enters any enemy building (C++ infantry.cpp:706)', () => {
     const thief = makeEntity(UnitType.I_THF, House.Spain);
     const weap = makeMockStructure('WEAP', House.USSR);
     // Place thief adjacent
@@ -512,9 +512,10 @@ describe('Thief (THF) — cash theft state machine', () => {
       isAllied: (a, b) => a === b,
     });
     updateThief(ctx, thief);
-    // Should reject WEAP and return to GUARD
-    expect(thief.targetStructure).toBeNull();
-    expect(thief.mission).toBe(Mission.GUARD);
+    // C++ parity: thief dies on any building entry, IsThieved set, no credits stolen
+    expect(thief.alive).toBe(false);
+    expect(thief.mission).toBe(Mission.DIE);
+    expect(ctx.isThieved).toBe(true);
   });
 
   it('updateThief rejects allied structures', () => {
@@ -904,9 +905,9 @@ describe('Mechanic (MECH) — vehicle repair state machine', () => {
     expect(mech.weapon!.name).toBe('GoodWrench');
   });
 
-  it('static constants: MECHANIC_HEAL_RANGE = 6, MECHANIC_HEAL_AMOUNT = 5', () => {
+  it('static constants: MECHANIC_HEAL_RANGE = 6, MECHANIC_HEAL_AMOUNT = 100', () => {
     expect(MECHANIC_HEAL_RANGE).toBe(6);
-    expect(MECHANIC_HEAL_AMOUNT).toBe(5);
+    expect(MECHANIC_HEAL_AMOUNT).toBe(100);
   });
 
   it('updateMechanicUnit only runs for I_MECH type', () => {
@@ -973,10 +974,10 @@ describe('Mechanic (MECH) — vehicle repair state machine', () => {
     expect(mech.healTarget).toBeNull();
   });
 
-  it('updateMechanicUnit heals 5 HP per tick with heal effect text', () => {
+  it('updateMechanicUnit heals 100 HP per application with heal effect text', () => {
     const mech = makeEntity(UnitType.I_MECH, House.Spain);
     const tank = makeEntity(UnitType.V_2TNK, House.Spain);
-    tank.hp = tank.maxHp - 10;
+    tank.hp = tank.maxHp - 200; // enough room for 100 HP heal
     tank.pos.x = mech.pos.x;
     tank.pos.y = mech.pos.y;
     mech.healTarget = tank;
@@ -1867,7 +1868,7 @@ describe('Edge cases — dead targets, self-targeting, cooldowns', () => {
     expect(thief.mission).toBe(Mission.GUARD);
   });
 
-  it('Thief against non-PROC/SILO structure rejects', () => {
+  it('Thief against non-PROC/SILO structure dies (C++ infantry.cpp:706)', () => {
     const thief = makeEntity(UnitType.I_THF, House.Spain);
     const weap = makeMockStructure('WEAP', House.USSR);
     thief.pos.x = weap.cx * CELL_SIZE + CELL_SIZE;
@@ -1875,8 +1876,9 @@ describe('Edge cases — dead targets, self-targeting, cooldowns', () => {
     thief.targetStructure = weap;
     const ctx = makeMockSpecialUnitsContext();
     updateThief(ctx, thief);
-    expect(thief.targetStructure).toBeNull();
-    expect(thief.mission).toBe(Mission.GUARD);
+    expect(thief.alive).toBe(false);
+    expect(thief.mission).toBe(Mission.DIE);
+    expect(ctx.isThieved).toBe(true);
   });
 
   it('Chrono Tank teleport blocked by impassable terrain', () => {
