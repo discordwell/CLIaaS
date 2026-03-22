@@ -1,11 +1,13 @@
 # Session Summaries
 
-## 2026-03-22T03:40Z — Tree Parity: C++ TerrainClass HP + Occupancy
-- Implemented C++ TerrainClass parity for trees. Trees now have 600 HP (ARMOR_WOOD), deterministic damage via modifyDamage(), per-type occupancy blocking from RA tdata.cpp Occupy_List, and clump immunity (IsImmune=true).
+## 2026-03-22T03:55Z — Tree Parity: C++ TerrainClass HP + Occupancy + Rendering
+- Implemented C++ TerrainClass parity for trees: 600 HP (ARMOR_WOOD), deterministic damage via modifyDamage(), per-type occupancy blocking from RA tdata.cpp Occupy_List, clump immunity (IsImmune=true).
 - Replaced 40% probabilistic destruction with HP-based system. Added dedup to prevent multi-cell trees taking damage multiple times per explosion.
-- Added TREE_OCCUPY constant with decoded C++ occupy lists for all 15 RA tree types + 5 clumps.
+- Added TREE_OCCUPY (15 tree + 5 clump occupy lists) and TREE_CENTER_OFFSET (XYP_COORD pixel offsets) constants from C++ RA tdata.cpp.
+- Fixed splash distance to use tree center (XYP_COORD) instead of origin cell for damage falloff.
+- Fixed single tree rendering: set Terrain.TREE on single tree origin cells so renderer draws them (were invisible before).
 - Updated canEnterCell/isPassable/isTerrainPassable to block on tree-occupied cells.
-- 62 new cpp-parity tests. All 33,950 tests pass (2 pre-existing map-data failures).
+- 83 cpp-parity tests. Deployed to cliaas.com.
 - **Files**: map.ts, scenario.ts, combat.ts, cpp-parity-trees.test.ts, 2 mock fixes.
 
 ## 2026-03-22T01:50Z — Fix 17 Failing Tests: AA Ground Targeting + UnitType Enum Fixes

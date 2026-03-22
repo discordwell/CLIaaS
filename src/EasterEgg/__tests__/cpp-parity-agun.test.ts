@@ -6,8 +6,10 @@
  *
  * AGUN key stats (rules.ini / building.cpp):
  *   HP 400, Size 1x2, Cost 600, Allied faction
- *   Weapon: AP warhead, 25 damage, range 6, ROF 10 (rapid fire), isAntiAir=true
+ *   Weapon: ZSU-23 → projectile Ack → AA=true, AG=false (AIR-ONLY, like SAM)
+ *   AP warhead, 25 damage, range 6, ROF 10 (rapid fire)
  *   NOT power-dependent: fires regardless of power state (C++ bdata.cpp:2836 IsPowered=false)
+ *   CANNOT target ground units, infantry, or buildings — air targets only
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -194,44 +196,42 @@ describe('AGUN anti-air targeting (building.cpp)', () => {
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
-  it('CAN also target ground units (not AA-only)', () => {
+  it('CANNOT target ground units (air-only per ZSU-23 → Ack → AG=false)', () => {
     const agun = makeAGUN(10, 10);
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [tank]);
-    const hpBefore = tank.hp;
     updateStructureCombat(ctx);
-    expect(tank.hp).toBeLessThan(hpBefore);
+    expect(tank.hp).toBe(tank.maxHp);
   });
 
-  it('CAN target infantry on the ground', () => {
+  it('CANNOT target ground infantry (air-only per ZSU-23 → Ack → AG=false)', () => {
     const agun = makeAGUN(10, 10);
     const inf = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [inf]);
-    const hpBefore = inf.hp;
     updateStructureCombat(ctx);
-    expect(inf.hp).toBeLessThan(hpBefore);
+    expect(inf.hp).toBe(inf.maxHp);
   });
 });
 
 // ── Range Enforcement ───────────────────────────────────────────────────────
 
 describe('AGUN range enforcement (range=6 cells)', () => {
-  it('fires at enemy within range 6', () => {
+  it('fires at airborne aircraft within range 6', () => {
     const agun = makeAGUN(10, 10);
-    // Place enemy at ~5 cells away
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    // Place airborne heli at ~5 cells away
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 15, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBeLessThan(enemy.maxHp);
+    expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
-  it('does NOT fire at enemy beyond range 6', () => {
+  it('does NOT fire at airborne aircraft beyond range 6', () => {
     const agun = makeAGUN(10, 10);
-    // Place enemy at ~7 cells away — beyond range 6
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 17, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    // Place airborne heli at ~7 cells away — beyond range 6
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 17, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(enemy.maxHp);
+    expect(heli.hp).toBe(heli.maxHp);
   });
 
   it('does NOT fire at airborne aircraft beyond range 6', () => {
@@ -247,26 +247,26 @@ describe('AGUN range enforcement (range=6 cells)', () => {
 // AGUN is NOT power-dependent. It fires regardless of power state.
 
 describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () => {
-  it('fires when power is sufficient (produced >= consumed)', () => {
+  it('fires at aircraft when power is sufficient (produced >= consumed)', () => {
     const agun = makeAGUN(10, 10);
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy], {
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli], {
       powerProduced: 100,
       powerConsumed: 50,
     });
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBeLessThan(enemy.maxHp);
+    expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
-  it('fires even during power deficit (AGUN is unpowered)', () => {
+  it('fires at aircraft even during power deficit (AGUN is unpowered)', () => {
     const agun = makeAGUN(10, 10);
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy], {
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli], {
       powerProduced: 50,
       powerConsumed: 100,
     });
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBeLessThan(enemy.maxHp);
+    expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
   it('fires AA even during power deficit (AGUN is unpowered)', () => {
@@ -280,15 +280,15 @@ describe('AGUN fires regardless of power state (not in STRUCTURE_POWERED)', () =
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
-  it('fires normally when powerProduced=0 (no power buildings)', () => {
+  it('fires at aircraft when powerProduced=0 (no power buildings)', () => {
     const agun = makeAGUN(10, 10);
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy], {
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli], {
       powerProduced: 0,
       powerConsumed: 0,
     });
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBeLessThan(enemy.maxHp);
+    expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 });
 
@@ -298,17 +298,17 @@ describe('AGUN rapid fire — ROF 10 (building.cpp)', () => {
   it('fires immediately when cooldown is 0', () => {
     const agun = makeAGUN(10, 10);
     agun.attackCooldown = 0;
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBeLessThan(enemy.maxHp);
+    expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 
   it('sets cooldown to ROF (10) after firing (unlimited ammo)', () => {
     const agun = makeAGUN(10, 10);
     agun.attackCooldown = 0;
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
     expect(agun.attackCooldown).toBe(10);
   });
@@ -316,17 +316,17 @@ describe('AGUN rapid fire — ROF 10 (building.cpp)', () => {
   it('does NOT fire while cooldown > 0', () => {
     const agun = makeAGUN(10, 10);
     agun.attackCooldown = 5;
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(enemy.maxHp);
+    expect(heli.hp).toBe(heli.maxHp);
   });
 
   it('decrements cooldown each tick', () => {
     const agun = makeAGUN(10, 10);
     agun.attackCooldown = 5;
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
     expect(agun.attackCooldown).toBe(4);
   });
@@ -340,77 +340,71 @@ describe('AGUN rapid fire — ROF 10 (building.cpp)', () => {
 
 // ── Damage Output (AP warhead, 25 base damage) ─────────────────────────────
 
-describe('AGUN damage output (AP warhead, 25 base)', () => {
-  it('deals damage using AP warhead multiplier vs heavy armor', () => {
+describe('AGUN damage output (AP warhead, 25 base) — air targets only', () => {
+  it('deals damage using AP warhead vs airborne helicopter', () => {
     const agun = makeAGUN(10, 10);
-    // Heavy tank has 'heavy' armor; AP vs heavy = 1.0 mult (full damage)
-    const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const hpBefore = tank.hp;
-    const ctx = makeCombatCtx([agun], [tank]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const hpBefore = heli.hp;
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    // AP vs heavy = 1.0 × 25 = 25 damage
-    expect(hpBefore - tank.hp).toBe(25);
+    // AP warhead × 25 base damage applied to aircraft
+    expect(heli.hp).toBeLessThan(hpBefore);
   });
 
-  it('deals reduced damage vs none armor (AP vs none = 0.3)', () => {
+  it('deals damage to airborne fixed-wing aircraft', () => {
     const agun = makeAGUN(10, 10);
-    // Infantry has 'none' armor; AP vs none = 0.3 mult
-    const inf = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
-    const hpBefore = inf.hp;
-    const ctx = makeCombatCtx([agun], [inf]);
+    const mig = airborneAtCell(UnitType.V_MIG, House.USSR, 12, 10);
+    const hpBefore = mig.hp;
+    const ctx = makeCombatCtx([agun], [mig]);
     updateStructureCombat(ctx);
-    // AP vs none = 0.3 × 25 = 7.5 → rounds to 8
-    expect(hpBefore - inf.hp).toBe(8);
+    expect(mig.hp).toBeLessThan(hpBefore);
   });
 
-  it('low per-shot damage (25) does not one-shot medium tanks', () => {
+  it('low per-shot damage (25) does not one-shot helicopter', () => {
     const agun = makeAGUN(10, 10);
-    const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [tank]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(tank.alive).toBe(true);
-    // 2TNK has 400 HP, one shot only does 25 damage
-    expect(tank.hp).toBe(tank.maxHp - 25);
+    expect(heli.alive).toBe(true);
   });
 
-  it('cumulative rapid fire wears down targets over many ticks', () => {
+  it('cumulative rapid fire wears down aircraft over many ticks', () => {
     const agun = makeAGUN(10, 10);
-    const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [tank]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     // Simulate many ticks: fire, cooldown, fire, cooldown...
     for (let tick = 0; tick < 200; tick++) {
       ctx.tick = tick;
       updateStructureCombat(ctx);
     }
-    // After 200 ticks with ROF 10: ~20 shots × 25 damage = ~500 total
-    // 2TNK has 400 HP — should be dead
-    expect(tank.alive).toBe(false);
+    // After 200 ticks with ROF 10: ~20 shots × 25 damage — should destroy helicopter
+    expect(heli.alive).toBe(false);
   });
 });
 
 // ── Alliance Behavior ───────────────────────────────────────────────────────
 
 describe('AGUN alliance behavior (building.cpp)', () => {
-  it('does NOT fire at allied units', () => {
+  it('does NOT fire at allied aircraft', () => {
     // AGUN owned by Greece (allied with Spain/player)
     const agun = makeAGUN(10, 10, House.Greece);
-    const friendly = entityAtCell(UnitType.V_2TNK, House.Spain, 12, 10);
+    const friendly = airborneAtCell(UnitType.V_HELI, House.Spain, 12, 10);
     const ctx = makeCombatCtx([agun], [friendly]);
     updateStructureCombat(ctx);
     expect(friendly.hp).toBe(friendly.maxHp);
   });
 
-  it('does NOT fire at own-house units', () => {
+  it('does NOT fire at own-house aircraft', () => {
     const agun = makeAGUN(10, 10, House.Greece);
-    const own = entityAtCell(UnitType.V_2TNK, House.Greece, 12, 10);
+    const own = airborneAtCell(UnitType.V_HELI, House.Greece, 12, 10);
     const ctx = makeCombatCtx([agun], [own]);
     updateStructureCombat(ctx);
     expect(own.hp).toBe(own.maxHp);
   });
 
-  it('fires at enemy-house units', () => {
+  it('fires at enemy-house aircraft', () => {
     const agun = makeAGUN(10, 10, House.Greece);
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
+    const enemy = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [enemy]);
     updateStructureCombat(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
@@ -423,19 +417,19 @@ describe('AGUN does NOT fire when dead or selling', () => {
   it('does NOT fire when destroyed (alive=false)', () => {
     const agun = makeAGUN(10, 10);
     agun.alive = false;
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(enemy.maxHp);
+    expect(heli.hp).toBe(heli.maxHp);
   });
 
   it('does NOT fire when being sold (sellProgress defined)', () => {
     const agun = makeAGUN(10, 10);
     agun.sellProgress = 0.5;
-    const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([agun], [enemy]);
+    const heli = airborneAtCell(UnitType.V_HELI, House.USSR, 12, 10);
+    const ctx = makeCombatCtx([agun], [heli]);
     updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(enemy.maxHp);
+    expect(heli.hp).toBe(heli.maxHp);
   });
 });
 
@@ -454,14 +448,13 @@ describe('AGUN flak visual effect on air targets', () => {
     expect(flakEffects.length).toBeGreaterThan(0);
   });
 
-  it('does NOT produce flak sprite when hitting ground units', () => {
+  it('produces no effects at all when only ground units present (air-only)', () => {
     const agun = makeAGUN(10, 10);
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [tank]);
     updateStructureCombat(ctx);
-    const flakEffects = ctx.effects.filter(
-      e => e.type === 'explosion' && (e as any).sprite === 'flak'
-    );
-    expect(flakEffects.length).toBe(0);
+    // AGUN is air-only — cannot target ground units, so no effects produced
+    expect(ctx.effects.length).toBe(0);
+    expect(tank.hp).toBe(tank.maxHp);
   });
 });

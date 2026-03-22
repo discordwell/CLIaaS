@@ -255,17 +255,16 @@ describe('SAM AA override — prefers airborne over ground (building.cpp)', () =
     expect(tank.hp).toBe(tankHpBefore);
   });
 
-  it('falls back to ground target when no airborne aircraft in range', () => {
+  it('CANNOT fall back to ground target — air-only (Nike → AA=true, AG=false)', () => {
     const sam = makeSAM(10, 10);
-    // Only ground enemy available
+    // Only ground enemy available — SAM should ignore it
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [tank]);
-    const hpBefore = tank.hp;
 
     updateStructureCombat(ctx);
 
-    // Should fire at the ground target as fallback
-    expect(tank.hp).toBeLessThan(hpBefore);
+    // SAM is air-only — cannot target ground units
+    expect(tank.hp).toBe(tank.maxHp);
   });
 
   it('prefers closer airborne target when multiple aircraft in range', () => {
