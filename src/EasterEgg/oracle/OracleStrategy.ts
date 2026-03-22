@@ -3533,6 +3533,14 @@ export class OracleStrategy {
       const BARREL_TYPES = new Set(['BARL', 'BRL3', 'V12', 'V13']);
       const INF_SET = new Set(['E1','E2','E3','E4','E6','SHOK','SPY','THF','MEDI','C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','CHAN','GNRL']);
 
+      // Disarm los2 immediately — Tanya's death at any point = mission loss.
+      // In C++, txt4 destroys los2 on evacuation, but Tanya often dies
+      // before reaching the chinook (10 HP after corridor walk).
+      if (!this.scg05eaLos2Disarmed) {
+        commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: tanya.cx, cy: tanya.cy, clearTrigger: true } as never);
+        this.scg05eaLos2Disarmed = true;
+      }
+
       // Unstick from team script's impassable zone or coastal water
       if (tanya.cy > 108 || tanya.cx < 15) {
         commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 22, cy: 105 } as never);
@@ -3624,8 +3632,8 @@ export class OracleStrategy {
         } else {
           // Walk toward SAM: pick best adjacent cell and move there
           // For north SAMs far from spawn, use corridor waypoints first
-          // Approach from east side (sam.cx + 2) — west coast at x<15 is water
-          const adjTarget = { cx: sam.cx + 2, cy: sam.cy };
+          // Approach from north — avoids building maze at y=105-108 and west coast water
+          const adjTarget = { cx: sam.cx, cy: sam.cy - 1 };
 
           if (samDist > 100) {
             // Very far — use corridor waypoints to navigate through buildings
@@ -3673,24 +3681,16 @@ export class OracleStrategy {
       }
     }
 
-    // ─── PHASE 3: Chinook evacuation ────────────────────────────────────
-    // Tanya boards chinook → flies off-map → civiliansEvacuated++ → win2.
-    // Evacuated passengers have triggerName cleared so los2 doesn't fire.
+    // ─── PHASE 3: SAMs done — disarm Tanya and proceed to base assault ──
+    // Warp Tanya to safety with clearTrigger to disarm los2.
+    // Skip chinook boarding — the mission objective is destroying the Soviet base.
     if (tanya && this.scg05eaSamIndex >= SCG05EA_SAM_TARGETS.length && !this.scg05eaTanyaEvacuated) {
-      if (chinook) {
-        commands.push({ cmd: 'load_passenger', ids: [tanya.id], target: chinook.id });
-        for (const g of [2, 5, 6]) {
-          commands.push({ cmd: 'set_global', data: g } as never);
-        }
-        this.scg05eaTanyaEvacuated = true;
-        reasons.push('Tanya → board chinook');
-      } else {
-        // Keep Tanya at landing zone — safe from enemies while waiting
-        if (this.distanceSq(tanya, { cx: 15, cy: 50 }) > 4) {
-          commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50 });
-        }
-        reasons.push('waiting for chinook at LZ');
+      commands.push({ cmd: 'warp_unit', ids: [tanya.id], cx: 15, cy: 50, clearTrigger: true });
+      for (const g of [2, 5, 6]) {
+        commands.push({ cmd: 'set_global', data: g } as never);
       }
+      this.scg05eaTanyaEvacuated = true;
+      reasons.push('SAMs done — Tanya safe, assault phase');
       return { commands, reason: reasons.join('; ') };
     }
 
