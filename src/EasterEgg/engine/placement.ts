@@ -20,6 +20,33 @@ import { type Effect } from './renderer';
 // cpp-parity: WOOD (building.cpp:1082) and CYCL (building.cpp:1086) were missing
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 
+/**
+ * Per-building Adjacent= value from rules.ini (C++ bdata.cpp:3772).
+ * Default is 1 (C++ bdata.cpp:2839). Only SYRD/SPEN/SYRF/SPEF override to 8.
+ */
+const ADJACENT_RANGE: Record<string, number> = {
+  SYRD: 8, SPEN: 8, SYRF: 8, SPEF: 8,
+};
+
+/** Get Adjacent= for a building type, defaulting to 1 (C++ bdata.cpp:2839). */
+export function getAdjacentRange(type: string): number {
+  return ADJACENT_RANGE[type] ?? 1;
+}
+
+/**
+ * Buildings with BaseNormal=yes in rules.ini (C++ bdata.cpp:3777 -> IsBase).
+ * C++ display.cpp:744,771,798 — proximity check only counts buildings with IsBase=true.
+ * Buildings NOT in this set (SYRD, SPEN, BARL, BRL3, MINV, MINP, walls, fakes) cannot
+ * satisfy the proximity requirement for placing other buildings.
+ */
+export const BASE_NORMAL: Set<string> = new Set([
+  'FACT', 'POWR', 'APWR', 'PROC', 'WEAP', 'DOME',
+  'BARR', 'TENT', 'HPAD', 'AFLD', 'GUN', 'AGUN',
+  'TSLA', 'PBOX', 'HBOX', 'FTUR', 'SAM', 'MSLO',
+  'ATEK', 'STEK', 'PDOX', 'IRON', 'HOSP', 'BIO',
+  'SILO', 'FIX', 'GAP', 'KENN', 'FCOM', 'MISS',
+]);
+
 // ── Context interface ────────────────────────────────────────────────────────
 
 export interface PlacementContext {
@@ -65,18 +92,38 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     if (!ctx.map.isBuildable(bc.cx, bc.cy)) return false;
   }
   // C++ display.cpp:706-778 Passes_Proximity_Check: ALL placements (including walls)
-  // must be near a friendly structure. C++ uses a two-ring scan (8-dir + 4-dir cardinal)
-  // reaching buildings up to 2 cells away. We approximate with 2-cell AABB expansion.
-  // cpp-parity: display.cpp:749-775 second-level scan, display.cpp:734-741 walls
+  // must be near a friendly structure. C++ only counts buildings with BaseNormal=yes (IsBase).
+  // cpp-parity: display.cpp:744 checks Class->IsBase, display.cpp:792 Adjacent>1 center-distance
   {
     let adjacent = false;
-    for (const s of ctx.structures) {
-      if (!s.alive || !ctx.isAllied(s.house, ctx.playerHouse)) continue;
-      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      // C++ two-ring scan reaches 2 cells in cardinal directions from existing building edge
-      const exL = s.cx - 2, exT = s.cy - 2, exR = s.cx + sw + 2, exB = s.cy + sh + 2;
-      const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
-      if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
+    const adj = getAdjacentRange(item.type);
+    if (adj > 1) {
+      // C++ display.cpp:792-808: Adjacent>1 center-distance check (SYRD/SPEN)
+      // centdist = Distance(existing.Center, target.Cell) / CELL_LEPTON_W - (W+H)/2
+      // retval = (centdist <= building->Adjacent)
+      for (const s of ctx.structures) {
+        if (!s.alive || !ctx.isAllied(s.house, ctx.playerHouse)) continue;
+        if (!BASE_NORMAL.has(s.type)) continue; // C++ display.cpp:798: IsBase check
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        const sCenterX = s.cx + sw / 2;
+        const sCenterY = s.cy + sh / 2;
+        const dx = Math.abs(cx - sCenterX);
+        const dy = Math.abs(cy - sCenterY);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const centdist = dist - (sw + sh) / 2;
+        if (centdist <= adj) { adjacent = true; break; }
+      }
+    } else {
+      // C++ display.cpp:706-778: Adjacent==1 two-ring scan (max 2 cells in cardinal directions)
+      // Only counts buildings with BaseNormal=yes (C++ display.cpp:744 Class->IsBase)
+      for (const s of ctx.structures) {
+        if (!s.alive || !ctx.isAllied(s.house, ctx.playerHouse)) continue;
+        if (!BASE_NORMAL.has(s.type)) continue; // C++ display.cpp:744: IsBase filter
+        const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+        const exL = s.cx - 2, exT = s.cy - 2, exR = s.cx + sw + 2, exB = s.cy + sh + 2;
+        const nL = cx, nT = cy, nR = cx + fw, nB = cy + fh;
+        if (nL < exR && nR > exL && nT < exB && nB > exT) { adjacent = true; break; }
+      }
     }
     if (!adjacent) return false;
   }

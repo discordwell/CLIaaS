@@ -161,7 +161,7 @@ export function spawnCrate(ctx: CrateContext): void {
   // CR6: Crate lifetime = Random(CrateTime/2, CrateTime*2) in minutes, default CrateTime=10
   // So 5-20 minutes, converted to ticks (x 15 FPS x 60 seconds/min)
   const crateTimeMin = 3; // minutes (RULES.INI CrateRegen=3, overrides C++ default 10)
-  const minLifetime = Math.floor(crateTimeMin / 2); // 5 minutes
+  const minLifetime = crateTimeMin / 2; // C++ CrateTime * (TICKS_PER_MINUTE/2) = 1350 ticks — no truncation
   const maxLifetime = crateTimeMin * 2; // 20 minutes
   const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
   const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);

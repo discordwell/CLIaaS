@@ -631,8 +631,19 @@ export class Entity {
     // If primary weapon has AG=no (isAntiGround===false, e.g. RedEye/AAMissile), it cannot
     // fire at ground targets. Use secondary for ground targets.
     const targetIsAircraft = !!target.stats.isAircraft;
+    const targetIsAirborne = targetIsAircraft && target.flightAltitude > 0;
     if (w1.isAntiGround === false && !targetIsAircraft && w2) return w2;
     if (w2.isAntiGround === false && !targetIsAircraft && w1) return w1;
+
+    // C++ techno.cpp:2702-2707 — AA gate: weapons without isAntiAir cannot hit airborne aircraft
+    // (returns FIRE_CANT). This makes 4TNK use MammothTusk missiles vs helicopters instead of 120mm cannon.
+    if (targetIsAirborne) {
+      const w1AA = !!w1.isAntiAir;
+      const w2AA = !!w2.isAntiAir;
+      if (!w1AA && w2AA) return w2;
+      if (w1AA && !w2AA) return w1;
+      if (!w1AA && !w2AA) return null; // neither weapon can hit airborne targets
+    }
 
     const w1InRange = dist <= w1.range;
     const w2InRange = dist <= w2.range;

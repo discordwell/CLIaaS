@@ -1700,7 +1700,7 @@ describe('Full production cycle integration', () => {
     );
     const idx = src.indexOf('placeStructure(ctx: PlacementContext, cx: number, cy: number)');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = src.slice(idx, idx + 4000);
+    const chunk = src.slice(idx, idx + 5000);
     // Wall path: pendingPlacement is NOT set to null
     // Non-wall path: ctx.pendingPlacement = null
     expect(chunk).toContain('pendingPlacement = null');
