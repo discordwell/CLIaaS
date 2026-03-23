@@ -75,11 +75,14 @@ import {
   type AircraftContext,
   findLandingPad,
   updateAircraft,
+  HOVER_JITTER,
+  resetAircraftFrame,
+  advanceAircraftFrame,
 } from '../engine/aircraft';
 import type { MapStructure } from '../engine/scenario';
 import { GameMap } from '../engine/map';
 
-beforeEach(() => resetEntityIds());
+beforeEach(() => { resetEntityIds(); resetAircraftFrame(); });
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -286,7 +289,7 @@ describe('descent timing — landing tick count (aircraft.cpp:4044-4048)', () =>
 // TS: no staged speed control during takeoff — PARITY GAP
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928) — PARITY GAP', () => {
+describe('FIXED: helicopter takeoff speed staging (aircraft.cpp:2899-2928)', () => {
   /**
    * C++ Process_Take_Off for helicopters has a multi-stage speed ramp:
    *   Height 0: Close_Door, sync facings
@@ -295,38 +298,37 @@ describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928) — PARITY G
    *   Height 204 (FLIGHT_LEVEL-(FLIGHT_LEVEL/5)): Set_Speed(0x40)
    *   Height 256 (FLIGHT_LEVEL): Set_Speed(0xFF), IsTakingOff=false
    *
-   * TS has no equivalent speed staging. Aircraft simply ascend at 1px/tick
-   * and transition to 'flying' at FLIGHT_ALTITUDE.
+   * FIXED: TS now implements speed staging during helicopter takeoff.
+   * aircraftSpeedFraction ramps from 0.125 → 0.25 → 1.0 at altitude thresholds.
    */
 
-  it('C++ has 5 speed stages during helicopter takeoff; TS has none', () => {
+  it('FIXED: helicopter speed ramps through stages during takeoff', () => {
     // C++ speed stages (lepton heights mapped to pixel equivalents):
-    //   0 → 0px: door close, sync facing
-    //   128 → ~12px: face NavCom direction
-    //   170 → ~16px: speed 0x20 (12.5%), sync body
-    //   204 → ~19px: speed 0x40 (25%)
-    //   256 → 24px: speed 0xFF (100%)
-    const cppSpeedStages = [
-      { height: 0, action: 'close_door' },
-      { height: 128, action: 'face_navcom' },
-      { height: 170, action: 'speed_0x20' },
-      { height: 204, action: 'speed_0x40' },
-      { height: 256, action: 'speed_0xFF' },
-    ];
-    expect(cppSpeedStages.length).toBe(5);
-
-    // TS: the takeoff state does not set speed at intermediate altitudes
-    // PARITY GAP: TS takeoff is a simple linear ascent with no speed staging
+    //   170/256 → ~16px: speed 0x20 (12.5%)
+    //   204/256 → ~19px: speed 0x40 (25%)
+    //   256/256 → 24px: speed 0xFF (100%)
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'takeoff';
-    heli.flightAltitude = 12; // ~FLIGHT_LEVEL/2 equivalent
+    heli.flightAltitude = 12; // below ~16px threshold
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);
 
-    // TS just increments altitude, no speed changes
+    // At altitude 13 (below 16px threshold): speed should be ~0.125
     expect(heli.flightAltitude).toBe(13);
-    // C++ would have faced NavCom at this height — TS does not
+    expect(heli.aircraftSpeedFraction).toBeCloseTo(0x20 / 0xFF, 2);
+
+    // Advance to altitude 17 (between 16px and 19px threshold): speed ~0.25
+    while (heli.flightAltitude < 17 && heli.aircraftState === 'takeoff') {
+      updateAircraft(ctx, heli);
+    }
+    expect(heli.aircraftSpeedFraction).toBeCloseTo(0x40 / 0xFF, 2);
+
+    // At full altitude: speed = 1.0
+    while (heli.aircraftState === 'takeoff') {
+      updateAircraft(ctx, heli);
+    }
+    expect(heli.aircraftSpeedFraction).toBe(1.0);
   });
 });
 
@@ -381,37 +383,34 @@ describe('fixed-wing takeoff behavior (aircraft.cpp:2893-2897)', () => {
 // TS: no speed change during landing — PARITY GAP
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('helicopter landing speed staging (aircraft.cpp:2982-2998) — PARITY GAP', () => {
+describe('FIXED: helicopter landing speed staging (aircraft.cpp:2982-2998)', () => {
 
-  it('C++ helicopter stops moving at half flight level during landing', () => {
+  it('FIXED: helicopter stops horizontal movement at half flight level during landing', () => {
     // C++ aircraft.cpp:2988-2990:
     //   case FLIGHT_LEVEL/2:
     //     Set_Speed(0);
     // At 128 leptons (~12 pixels), helicopter stops horizontal movement during landing
     //
-    // TS: no speed change during landing — aircraft just descends
-    // PARITY GAP: TS does not stop horizontal movement during landing
+    // FIXED: TS now sets aircraftSpeedFraction=0 at half flight level during landing
     const cppHalfLevelLeptons = 256 / 2; // 128
     const cppHalfLevelPixels = Math.round((cppHalfLevelLeptons * 24) / 256); // 12
     expect(cppHalfLevelPixels).toBe(12);
-    // Document: at 12px altitude in C++, helicopter speed goes to 0
-    // TS does not implement this behavior
   });
 
-  it('TS helicopter does not change speed during landing descent', () => {
-    // TS landing state: just decrements flightAltitude, no speed logic
+  it('FIXED: helicopter speed goes to 0 at half altitude during landing', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'landing';
-    heli.flightAltitude = 12; // ~FLIGHT_LEVEL/2 equivalent
+    heli.flightAltitude = 12; // exactly at FLIGHT_LEVEL/2 equivalent
     heli.ammo = 0;
     heli.maxAmmo = 6;
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);
 
-    // Just decrements altitude, no speed change
+    // FIXED: at or below 12px altitude, helicopter speed fraction goes to 0
     expect(heli.flightAltitude).toBe(11);
     expect(heli.aircraftState).toBe('landing');
+    expect(heli.aircraftSpeedFraction).toBe(0); // stopped horizontal movement
   });
 });
 
@@ -434,7 +433,7 @@ describe('fixed-wing landing behavior (aircraft.cpp:2958-2980, 4062-4068)', () =
     // TS does not model per-type landing speeds
   });
 
-  it('C++ fixed-wing crash-lands on open ground (destroyed) — TS does not implement', () => {
+  it('FIXED: fixed-wing crash-lands on open ground (destroyed)', () => {
     // C++ aircraft.cpp:4062-4068:
     //   if (Class->IsFixedWing && Mission != MISSION_ENTER) {
     //     Strength = 1;
@@ -444,8 +443,7 @@ describe('fixed-wing landing behavior (aircraft.cpp:2958-2980, 4062-4068)', () =
     //   }
     // Fixed-wing aircraft that land on the ground (not on airstrip) are destroyed
     //
-    // TS: fixed-wing aircraft land normally like helicopters
-    // PARITY GAP: TS does not destroy fixed-wing aircraft that land on open ground
+    // FIXED: TS now destroys fixed-wing aircraft that land without an airstrip pad
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.aircraftState = 'landing';
     mig.flightAltitude = 1;
@@ -456,11 +454,10 @@ describe('fixed-wing landing behavior (aircraft.cpp:2958-2980, 4062-4068)', () =
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, mig);
 
-    // TS: MIG lands normally even without a pad
-    // C++ would destroy the MIG here
-    // PARITY GAP
+    // FIXED: MIG is destroyed when landing on open ground (matching C++)
     expect(mig.flightAltitude).toBe(0);
-    expect(mig.alive).toBe(true); // TS keeps it alive; C++ would destroy it
+    expect(mig.alive).toBe(false); // C++ behavior: destroyed on crash-land
+    expect(mig.hp).toBe(0);
   });
 });
 
@@ -581,32 +578,38 @@ describe('isHelicopter classification (entity.ts:362-363)', () => {
 // TS: no jitter implemented — PARITY GAP
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('helicopter hover jitter (aircraft.cpp:441-445) — PARITY GAP', () => {
+describe('FIXED: helicopter hover jitter (aircraft.cpp:441-445)', () => {
 
-  it('C++ jitter pattern has 16 entries with values {-1, 0, 1}', () => {
+  it('FIXED: HOVER_JITTER pattern matches C++ _jitter array', () => {
     // C++ aircraft.cpp:443-444:
     //   static int _jitter[] = {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0};
     //   jitter = _jitter[::Frame % 16];
-    const cppJitter = [0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0];
-    expect(cppJitter.length).toBe(16);
+    expect(HOVER_JITTER.length).toBe(16);
     // All values are -1, 0, or 1
-    for (const j of cppJitter) {
+    for (const j of HOVER_JITTER) {
       expect(j).toBeGreaterThanOrEqual(-1);
       expect(j).toBeLessThanOrEqual(1);
     }
     // Sum is 0 — no net vertical displacement
-    expect(cppJitter.reduce((a, b) => a + b, 0)).toBe(0);
+    expect(HOVER_JITTER.reduce((a, b) => a + b, 0)).toBe(0);
+    // Exact pattern match
+    expect([...HOVER_JITTER]).toEqual([0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0]);
   });
 
-  it('C++ jitter only applies when at FLIGHT_LEVEL and speed < 3 (hovering)', () => {
+  it('FIXED: hovering helicopter gets jitter offset applied per tick', () => {
     // C++ aircraft.cpp:442: if (Height == FLIGHT_LEVEL && Get_Speed() < 3)
-    // This means only hovering helicopters bob — not moving ones
-    // TS does not implement any visual jitter for hovering helicopters
-    // PARITY GAP: TS helicopters have perfectly steady hover
+    // FIXED: TS now applies hoverJitter field when helicopter is at FLIGHT_ALTITUDE
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
-    // TS has no jitter field or mechanism
-    // This is a visual-only concern; gameplay is unaffected
+    heli.mission = Mission.GUARD; // no target — will go to 'returning'
+
+    const ctx = makeAircraftCtx();
+    // Advance frame to index 4 (first +1 jitter)
+    for (let i = 0; i < 4; i++) advanceAircraftFrame();
+    updateAircraft(ctx, heli);
+    // At frame 4, HOVER_JITTER[4] = 1
+    expect(heli.hoverJitter).toBe(1);
   });
 });
 

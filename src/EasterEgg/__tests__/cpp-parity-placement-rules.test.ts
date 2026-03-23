@@ -183,14 +183,14 @@ describe('Section 1: Terrain passability for building placement (cell.cpp:453-51
     expect(result).toBe(false);
   });
 
-  // PARITY GAP: C++ Ground[LAND_ORE].Build=false, but TS PASSABLE includes Terrain.ORE
-  it('ORE terrain should block placement — C++ Ground[LAND_ORE].Build=false (rules.cpp:864)', () => {
+  // FIXED: C++ Ground[LAND_ORE].Build=false — TS BUILDABLE set excludes Terrain.ORE
+  it('FIXED: ORE terrain blocks placement — C++ Ground[LAND_ORE].Build=false (rules.cpp:864)', () => {
     // C++ rules.cpp:864: gptr->Build = ini.Get_Bool(_lands[land], "Buildable", false)
     // rules.ini [Ore] section: Buildable=no (default false in C++)
     // C++ cell.cpp:503: Ground[LAND_ORE].Build=false → blocks placement
     //
-    // TS map.ts:28: PASSABLE = {CLEAR, ORE, ROUGH, BEACH} — ORE is passable
-    // placement.ts:57: isPassable(cx, cy) → true for ORE → allows placement
+    // FIXED: TS map.ts:42: BUILDABLE = {CLEAR, ROAD} — ORE excluded from buildable set
+    // placement.ts:60: isBuildable(cx, cy) → false for ORE → blocks placement
     const existing = makeStructure('FACT', House.Greece, 10, 10);
     const ctx = makePlacementCtx({
       structures: [existing],
@@ -201,17 +201,17 @@ describe('Section 1: Terrain passability for building placement (cell.cpp:453-51
     ctx.map.setTerrain(13, 11, Terrain.ORE);
     ctx.map.setTerrain(14, 11, Terrain.ORE);
     const result = placeStructure(ctx, 13, 10);
-    // C++ expects false (ORE is not buildable)
-    expect(result).toBe(false); // PARITY GAP: TS returns true
+    // FIXED: ORE is not buildable — matches C++
+    expect(result).toBe(false);
   });
 
-  // PARITY GAP: C++ Ground[LAND_ROUGH].Build=false, but TS PASSABLE includes Terrain.ROUGH
-  it('ROUGH terrain should block placement — C++ Ground[LAND_ROUGH].Build=false', () => {
+  // FIXED: C++ Ground[LAND_ROUGH].Build=false — TS BUILDABLE set excludes Terrain.ROUGH
+  it('FIXED: ROUGH terrain blocks placement — C++ Ground[LAND_ROUGH].Build=false', () => {
     // C++ rules.cpp:844-864: _lands[] = {Clear,Road,Water,Rock,Wall,Ore,Beach,Rough,River}
     // rules.ini [Rough] Buildable=no (default false)
     // C++ cell.cpp:503: Ground[LAND_ROUGH].Build=false
     //
-    // TS map.ts:28: PASSABLE includes Terrain.ROUGH → isPassable true → allows placement
+    // FIXED: TS map.ts:42: BUILDABLE = {CLEAR, ROAD} — ROUGH excluded
     const existing = makeStructure('FACT', House.Greece, 10, 10);
     const ctx = makePlacementCtx({
       structures: [existing],
@@ -222,16 +222,16 @@ describe('Section 1: Terrain passability for building placement (cell.cpp:453-51
     ctx.map.setTerrain(13, 11, Terrain.ROUGH);
     ctx.map.setTerrain(14, 11, Terrain.ROUGH);
     const result = placeStructure(ctx, 13, 10);
-    // C++ expects false (ROUGH is not buildable)
-    expect(result).toBe(false); // PARITY GAP: TS returns true
+    // FIXED: ROUGH is not buildable — matches C++
+    expect(result).toBe(false);
   });
 
-  // PARITY GAP: C++ Ground[LAND_BEACH].Build=false, but TS PASSABLE includes Terrain.BEACH
-  it('BEACH terrain should block placement — C++ Ground[LAND_BEACH].Build=false', () => {
+  // FIXED: C++ Ground[LAND_BEACH].Build=false — TS BUILDABLE set excludes Terrain.BEACH
+  it('FIXED: BEACH terrain blocks placement — C++ Ground[LAND_BEACH].Build=false', () => {
     // C++ rules.cpp:844-864: Beach is index 6 in _lands[]
     // rules.ini [Beach] Buildable=no (default false)
     //
-    // TS map.ts:28: PASSABLE includes Terrain.BEACH
+    // FIXED: TS map.ts:42: BUILDABLE = {CLEAR, ROAD} — BEACH excluded
     const existing = makeStructure('FACT', House.Greece, 10, 10);
     const ctx = makePlacementCtx({
       structures: [existing],
@@ -242,8 +242,8 @@ describe('Section 1: Terrain passability for building placement (cell.cpp:453-51
     ctx.map.setTerrain(13, 11, Terrain.BEACH);
     ctx.map.setTerrain(14, 11, Terrain.BEACH);
     const result = placeStructure(ctx, 13, 10);
-    // C++ expects false (BEACH is not buildable)
-    expect(result).toBe(false); // PARITY GAP: TS returns true
+    // FIXED: BEACH is not buildable — matches C++
+    expect(result).toBe(false);
   });
 
   it('RIVER terrain blocks placement — matches C++ Ground[LAND_RIVER].Build=false', () => {
@@ -333,11 +333,11 @@ describe('Section 2: Adjacency / proximity check (display.cpp:668-811)', () => {
     expect(result).toBe(false);
   });
 
-  // PARITY GAP: C++ uses two-ring scan; TS uses 1-cell AABB expansion
+  // FIXED: C++ two-ring scan — TS uses 2-cell AABB expansion to match
   // C++ can place a building 2 cells away (cardinal) from a friendly building:
   //   Foundation cell → 8-dir adjacent → 4-dir adjacent = 2 cells reach
   // display.cpp:756-775: second level scan
-  it('placement 2 cells away (cardinal gap) should pass C++ proximity check', () => {
+  it('FIXED: placement 2 cells away (cardinal gap) passes proximity check', () => {
     // C++ display.cpp:749-775:
     //   "BG: modifications to allow buildings one cell away from other buildings.
     //    This is done by scanning each cell that fails the check (hence getting
@@ -347,18 +347,16 @@ describe('Section 2: Adjacency / proximity check (display.cpp:668-811)', () => {
     // FACT at (10,10) is 3x3 → rightmost column is 12
     // POWR at (14,10) is 2x2 → leftmost column is 14
     // Gap of 1 empty column (13) between them.
-    // C++ second ring: from cell (14,10), check W neighbor (13,10),
-    // then from (13,10) check its 4-dir neighbors including W (12,10) = FACT cell → pass
+    // FIXED: TS uses 2-cell AABB expansion: FACT expanded (8,8)-(15,15)
+    // POWR at (14,10)-(16,12): nL(14) < exR(15)=true → overlap → passes
     const existing = makeStructure('FACT', House.Greece, 10, 10);
     const ctx = makePlacementCtx({
       structures: [existing],
       pendingPlacement: structItem('POWR'),
     });
     const result = placeStructure(ctx, 14, 10);
-    // C++ expects true (2-ring scan reaches FACT)
-    // TS AABB: FACT expanded box is (9,9)-(14,14), POWR at (14,10)-(16,12)
-    // nL(14) < exR(14) is FALSE → no overlap → TS returns false
-    expect(result).toBe(true); // PARITY GAP: TS returns false
+    // FIXED: 2-cell expansion reaches FACT — matches C++ two-ring scan
+    expect(result).toBe(true);
   });
 
   it('placement diagonally adjacent (touching at corner) succeeds', () => {
@@ -420,22 +418,20 @@ describe('Section 3: Wall placement (display.cpp:734-741, building.cpp:1062)', (
     expect(result).toBe(true);
   });
 
-  // PARITY GAP: C++ requires walls to pass proximity check (adjacent friendly building/wall/bib)
-  it('wall placed far from any friendly structure should fail in C++', () => {
+  // FIXED: C++ requires walls to pass proximity check (adjacent friendly building/wall/bib)
+  it('FIXED: wall placed far from any friendly structure fails', () => {
     // C++ display.cpp:706-778: Adjacent==1 → scan for friendly structures
     // With no structures anywhere, wall at (50,50) has nothing adjacent → fails
     //
-    // TS: walls skip adjacency → placement succeeds
-    //
-    // NOTE: In practice, walls are produced from ConYard sidebar, so there's always
-    // a ConYard when placing the first wall. But the C++ rule is stricter.
+    // FIXED: TS now requires all placements (including walls) to pass proximity check.
+    // In practice, walls are produced from ConYard sidebar, so there's always
+    // a ConYard when placing the first wall.
     const ctx = makePlacementCtx({
       pendingPlacement: wallItem('BRIK'),
     });
     const result = placeStructure(ctx, 50, 50);
-    // C++ expects false (no adjacent friendly structure/wall/bib)
-    // TS returns true (walls exempt from adjacency)
-    expect(result).toBe(false); // PARITY GAP: TS returns true
+    // FIXED: wall fails when no adjacent friendly structure — matches C++
+    expect(result).toBe(false);
   });
 
   it('wall placed adjacent to friendly structure succeeds in both C++ and TS', () => {
@@ -479,27 +475,20 @@ describe('Section 3: Wall placement (display.cpp:734-741, building.cpp:1062)', (
     }
   });
 
-  // PARITY GAP: C++ has WOOD and CYCLONE walls (building.cpp:1082-1088)
-  // but TS WALL_TYPES only includes SBAG, FENC, BARB, BRIK
-  it('WOOD wall type should be recognized as wall — C++ building.cpp:1082-1084', () => {
+  // FIXED: C++ has WOOD and CYCLONE walls (building.cpp:1082-1088)
+  // TS WALL_TYPES now includes WOOD and CYCL
+  it('FIXED: WOOD wall type recognized as wall — C++ building.cpp:1082-1084', () => {
     // C++ building.cpp:1082: case STRUCT_WOOD_WALL: otype = OVERLAY_WOOD_WALL
-    // TS placement.ts:19: WALL_TYPES = Set(['SBAG', 'FENC', 'BARB', 'BRIK'])
-    // WOOD is NOT in TS WALL_TYPES
+    // FIXED: TS placement.ts:21: WALL_TYPES = Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL'])
+    const existing = makeStructure('FACT', House.Greece, 10, 10);
     const ctx = makePlacementCtx({
+      structures: [existing],
       pendingPlacement: wallItem('WOOD'),
     });
-    // Place needs adjacency since WOOD won't be treated as wall in TS
-    const existing = makeStructure('FACT', House.Greece, 10, 10);
-    ctx.structures.push(existing);
     const result = placeStructure(ctx, 13, 10);
-    // With adjacency met, it should succeed. But it won't be treated as wall
-    // (pendingPlacement will be cleared, no wall metadata set)
-    if (result) {
-      // If it placed, check if it behaves as wall (keeps pendingPlacement)
-      const keptPending = ctx.pendingPlacement !== null;
-      // C++ expects wall behavior: keep pending, convert to overlay
-      expect(keptPending).toBe(true); // PARITY GAP: TS clears pendingPlacement
-    }
+    expect(result).toBe(true);
+    // FIXED: WOOD is treated as wall — keeps pendingPlacement for continuous placement
+    expect(ctx.pendingPlacement).not.toBeNull();
   });
 });
 
@@ -585,13 +574,13 @@ describe('Section 4: MCV deployment (unit.cpp:1477-1589)', () => {
     }
   });
 
-  // PARITY GAP: C++ transfers MCV health ratio to FACT
-  it('FACT should inherit MCV health ratio — C++ unit.cpp:1555', () => {
+  // FIXED: C++ transfers MCV health ratio to FACT
+  it('FIXED: FACT inherits MCV health ratio — C++ unit.cpp:1555', () => {
     // C++ unit.cpp:1555:
     //   building->Strength = Health_Ratio() * building->Class->MaxStrength
     //
+    // FIXED: A damaged MCV creates a damaged Construction Yard.
     // If MCV has 50% HP, FACT starts at 50% HP.
-    // TS always creates FACT at full HP (line 160-166).
     const mcv = new Entity(UnitType.V_MCV, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
     mcv.hp = Math.floor(mcv.maxHp / 2); // 50% health
     const ctx = makePlacementCtx();
@@ -599,8 +588,8 @@ describe('Section 4: MCV deployment (unit.cpp:1477-1589)', () => {
 
     const fact = ctx.structures[0];
     const expectedHp = Math.floor(fact.maxHp * 0.5);
-    // C++ expects FACT at ~50% HP
-    expect(fact.hp).toBe(expectedHp); // PARITY GAP: TS sets full HP
+    // FIXED: FACT at ~50% HP — matches C++ health ratio transfer
+    expect(fact.hp).toBe(expectedHp);
   });
 
   // PARITY GAP: C++ requires MCV to face SW (DIR_SW) before deploying

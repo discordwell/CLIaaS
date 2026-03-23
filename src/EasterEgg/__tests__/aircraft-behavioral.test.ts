@@ -476,16 +476,17 @@ describe('updateAircraft — state machine', () => {
 
   it('landing aircraft with depleted ammo transitions to rearming', () => {
     const ctx = makeAircraftContext();
-    const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
-    mig.aircraftState = 'landing';
-    mig.flightAltitude = 1; // one tick to land
-    mig.ammo = 0; // depleted
-    mig.landedAtStructure = -1;
+    // Use helicopter (not fixed-wing) to test rearming — fixed-wing crashes without pad
+    const heli = makeEntity(UnitType.V_HIND, House.USSR, 200, 200);
+    heli.aircraftState = 'landing';
+    heli.flightAltitude = 1; // one tick to land
+    heli.ammo = 0; // depleted
+    heli.landedAtStructure = -1;
 
-    updateAircraft(ctx, mig);
+    updateAircraft(ctx, heli);
 
-    expect(mig.flightAltitude).toBe(0);
-    expect(mig.aircraftState).toBe('rearming');
+    expect(heli.flightAltitude).toBe(0);
+    expect(heli.aircraftState).toBe('rearming');
   });
 
   it('rearming aircraft restores ammo over time then transitions to landed', () => {

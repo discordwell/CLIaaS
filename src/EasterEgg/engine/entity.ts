@@ -309,6 +309,18 @@ export class Entity {
   rearmTimer = 0;
   attackRunPhase: 'flyToTarget' | 'dropBombs' | 'regroup' = 'flyToTarget';
   circleBreakTimer = 0;
+  /** C++ aircraft.cpp:2899-2928 — speed fraction (0.0-1.0) during takeoff/landing.
+   *  Modulates effective movement speed. 0xFF=1.0, 0x40=0.25, 0x20=0.125, 0x00=0.0.
+   *  cpp-parity: helicopters ramp speed during takeoff and stop at half-height during landing. */
+  aircraftSpeedFraction = 1.0;
+  /** C++ aircraft.cpp:441-445 — helicopter hover jitter offset (pixels).
+   *  Applied when at FLIGHT_ALTITUDE and speed < 3 (hovering). Pattern repeats every 16 ticks.
+   *  cpp-parity: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0} indexed by frame%16. */
+  hoverJitter = 0;
+  /** C++ building.cpp:1298 — IsTechnician flag on infantry survivors.
+   *  Set when infantry is spawned from building sell/destruction (E1 only).
+   *  cpp-parity: building.cpp:3473 — IsNominal infantry get IsTechnician=true. */
+  isTechnician = false;
 
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;

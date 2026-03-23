@@ -159,6 +159,7 @@ import {
   updateAircraft as _updateAircraft,
   updateFixedWingAttackRun as _updateFixedWingAttackRun,
   updateHelicopterAttack as _updateHelicopterAttack,
+  advanceAircraftFrame as _advanceAircraftFrame,
 } from './aircraft';
 import {
   type CrateContext,
@@ -1505,6 +1506,7 @@ export class Game {
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
+    _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
     // Periodically resume audio context if browser suspended it (e.g. tab blur)
     if (this.tick % 45 === 0) this.audio.resume();
@@ -2070,6 +2072,10 @@ export class Game {
               }
               const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
               inf.mission = Mission.GUARD;
+              // C++ building.cpp:3473 — IsTechnician: IsNominal infantry (E1) get technician star
+              if (crewType === UnitType.I_E1) {
+                inf.isTechnician = true;
+              }
               this.entities.push(inf);
               this.entityById.set(inf.id, inf);
             }

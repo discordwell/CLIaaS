@@ -517,7 +517,7 @@ describe('fixed-wing vs rotary flight behavior (aadata.cpp, aircraft.cpp)', () =
     expect(heli.attackRunPhase).not.toBe('dropBombs');
   });
 
-  it('PARITY GAP: C++ fixed-wing crashes on open ground, TS does not', () => {
+  it('FIXED: C++ fixed-wing crashes on open ground — TS now matches', () => {
     // C++ aircraft.cpp:4062-4068: fixed-wing on ground without MISSION_ENTER → destroyed
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.aircraftState = 'landing';
@@ -529,11 +529,9 @@ describe('fixed-wing vs rotary flight behavior (aadata.cpp, aircraft.cpp)', () =
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, mig);
 
-    // TS: MIG lands normally even without an airstrip
-    // C++ would destroy the MIG
-    expect(mig.alive).toBe(true);
-    expect(mig.flightAltitude).toBe(0);
-    // PARITY GAP: C++ would set Strength=1, Take_Damage → destroyed
+    // FIXED: MIG is destroyed when landing without an airstrip — matches C++
+    expect(mig.alive).toBe(false);
+    expect(mig.hp).toBe(0);
   });
 
   it('helicopter can land without pad (transport behavior)', () => {
