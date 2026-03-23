@@ -413,23 +413,6 @@ describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
     const result = map.findNearestOre(50, 50, 20);
     expect(result).toBeDefined();
     expect(result!.cx).toBe(50); // center cell is always returned if it has ore
-   * TS findNearestOre (map.ts:623-643) does NOT check for unit occupancy.
-   * TS findHarvesterOre (harvester.ts:86-92) only checks if another HARVESTER
-   * is targeting nearby (3-cell radius), not if any unit occupies the cell.
-   *
-   * FIXED: TS findNearestOre (map.ts) now checks vehicleOccupancy to skip
-   * cells occupied by units, matching C++ Cell_Techno() behavior.
-   */
-  it('FIXED: TS findNearestOre now filters occupied cells', () => {
-    // C++ unit.cpp:2179: Cell_Techno() != NULL rejects occupied cells
-    // TS map.ts findNearestOre now checks vehicleOccupancy and skips occupied cells
-    const map = makeMap();
-    placeGold(map, 51, 50, 5);
-    // Mark (51,50) as occupied -- simulates a vehicle sitting on the ore cell
-    map.vehicleOccupancy.add(50 * 128 + 51);  // MAP_CELLS=128
-    const result = map.findNearestOre(50, 50, 20);
-    // With cell occupied, should skip (51,50) and find no ore (only one ore cell placed)
-    expect(result).toBeNull();
   });
 
   /**

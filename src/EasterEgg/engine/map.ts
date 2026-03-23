@@ -869,8 +869,8 @@ export class GameMap {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       const cidx = cy * MAP_CELLS + cx;
       const ovl = this.overlay[cidx];
-      // C++ unit.cpp:2179: skip occupied cells (Cell_Techno() != NULL)
-      if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(cidx)) return { cx, cy };
+      // C++ unit.cpp:2209-2212: center cell returns immediately — no Cell_Techno check
+      if (ovl >= 0x03 && ovl <= 0x12) return { cx, cy };
     }
 
     // C++ unit.cpp:2218-2243: ring search — scan perimeter of each expanding ring.
