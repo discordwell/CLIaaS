@@ -2378,7 +2378,7 @@ export interface TriggerActionResult {
   fullSpecial?: boolean;          // charge all superweapons (FULL_SPECIAL)
   globalChanged?: number;         // C++ parity (#38): global index that was set/cleared (triggers immediate spring)
   baseBuilding?: { house: number; enabled: boolean }; // C++ parity (#39): set IsBaseBuilding on/off for a house
-  winLose?: boolean;              // C++ parity (#39): mark attached object — win if captured, lose if destroyed
+  blockageDecrement?: boolean;    // C++ parity: trigger.cpp:175-178 — decrement Blockage counter (ALLOWWIN)
 }
 
 /** Execute a trigger action — returns result with entities and side effects.
@@ -2616,14 +2616,16 @@ export function executeTriggerAction(
 
     case TACTION_ALLOWWIN:
       result.allowWin = true;
+      // C++ trigger.cpp:175-178 — Blockage-- on trigger destruction.
+      // Signal the caller to decrement their Blockage counter.
+      result.blockageDecrement = true;
       break;
 
     case TACTION_WINLOSE:
-      // C++ TD trigger.cpp: "Win if captured, lose if destroyed."
-      // Marks the attached object so the game loop checks capture → win, destroy → lose.
-      // In RA, defined in taction.h but falls through to default (noop) in taction.cpp.
-      // However, the enum and description exist — we implement it per the TD behavior.
-      result.winLose = true;
+      // C++ RA taction.cpp: TACTION_WINLOSE (ordinal 14) falls through to default — noop.
+      // The enum exists in taction.h:60 ("Win if captured, lose if destroyed") but
+      // RA's action handler has no case for it. Only functional in Tiberian Dawn.
+      // C++ parity: do nothing (previously set result.winLose=true per TD behavior).
       break;
 
     case TACTION_DESTROY_TEAM:

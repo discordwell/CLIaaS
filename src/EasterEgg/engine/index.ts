@@ -256,6 +256,12 @@ const MOVE_CLOAK = 1;         // default starting threshold (easiest)
 const MOVE_TEMP  = 4;         // maximum threshold (hardest — blocked by friendly)
 /** rules.ini PathDelay=.01 * TICKS_PER_MINUTE(900) = 9 ticks (rules.cpp default was .016→14) */
 const PATH_DELAY_TICKS = 9;
+/** C++ house.cpp:4071 — BorrowedTime = TICKS_PER_MINUTE * Rule.SavourDelay
+ *  rules.ini SavourDelay=.03 → 0.03 * 900 = 27 ticks (~1.8s at 15 Hz).
+ *  Delay between flagging win/lose and the actual game-end. */
+const SAVOUR_DELAY_TICKS = Math.round(0.03 * 900); // 27 ticks
+/** C++ trigger.cpp:177 — BorrowedTime = TICKS_PER_SECOND * 4 = 60 ticks (on ALLOWWIN trigger destruction) */
+const ALLOWWIN_BORROWED_TIME = GAME_TICKS_PER_SEC * 4; // 60 ticks
 
 /** Reset path threshold state when a new move order is given (C++ foot.cpp:1723-1735 Assign_Destination) */
 function resetPathThreshold(entity: Entity): void {
@@ -433,6 +439,10 @@ export class Game {
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
   private allowWin = 0; // C++ house.h:335 Blockage counter — each ALLOWWIN trigger increments; win requires <= 0
+  // C++ house.cpp:4066-4112 — deferred win/lose flags with savour delay
+  private isToWin = false;   // C++ HouseClass::IsToWin
+  private isToLose = false;  // C++ HouseClass::IsToLose
+  private borrowedTime = 0;  // C++ HouseClass::BorrowedTime — countdown before win/lose takes effect
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
   private builtStructureTypes = new Set<string>(); // types player has constructed (for TEVENT_BUILD)
@@ -1145,6 +1155,10 @@ export class Game {
         this.allowWin++;
       }
     }
+    // C++ house.cpp:4066-4112 — reset deferred win/lose flags
+    this.isToWin = false;
+    this.isToLose = false;
+    this.borrowedTime = 0;
     this.missionTimer = 0;
     this.missionTimerExpired = false;
     this.builtStructureTypes.clear();
@@ -5351,24 +5365,27 @@ export class Game {
   }
 
   private applyTriggerActionResult(result: TriggerActionResult, trigger: ScenarioTrigger): void {
+    // C++ house.cpp:4066-4083 — Flag_To_Win: only set if no flag already pending
     if (result.win && this.state === 'playing') {
-      if (this.toCarryOver) saveCarryover(this.entities);
-      this.state = 'won';
-      this.audio.music.stop();
-      this.audio.play('victory_fanfare');
-      this.audio.play('eva_mission_accomplished');
-      this.startScoreMusic();
-      this.onStateChange?.('won');
+      if (!this.isToWin && !this.isToLose) {
+        this.isToWin = true;
+        this.borrowedTime = SAVOUR_DELAY_TICKS;
+      }
     }
+    // C++ house.cpp:4102-4112 — Flag_To_Lose: unconditionally clears IsToWin first
     if (result.lose && this.state === 'playing') {
-      this.state = 'lost';
-      this.audio.music.stop();
-      this.audio.play('defeat_sting');
-      this.startScoreMusic();
-      this.onStateChange?.('lost');
+      this.isToWin = false; // C++ house.cpp:4103: IsToWin = false (always, even if Flag_To_Lose fails)
+      if (!this.isToLose) {
+        this.isToLose = true;
+        this.borrowedTime = SAVOUR_DELAY_TICKS;
+      }
     }
     // C++ trigger.cpp:175-178 — decrement Blockage counter when ALLOWWIN trigger fires
-    if (result.allowWin && this.allowWin > 0) this.allowWin--;
+    if (result.allowWin && this.allowWin > 0) {
+      this.allowWin--;
+      // C++ trigger.cpp:177: Houses.Ptr(Class->House)->BorrowedTime = TICKS_PER_SECOND*4
+      this.borrowedTime = ALLOWWIN_BORROWED_TIME;
+    }
     if (result.allHunt !== undefined) {
       const huntHouse = houseIdToHouse(result.allHunt);
       for (const e of this.entities) {
@@ -5494,30 +5511,9 @@ export class Game {
         this.aiStates.set(bbHouse, newState);
       }
     }
-    // C++ parity (#39): TACTION_WINLOSE — "Win if captured, lose if destroyed."
-    // C++ TD trigger.cpp: checks which event caused the spring:
-    //   EVENT_DESTROYED → player loses; EVENT_PLAYER_ENTERED (capture) → player wins.
-    if (result.winLose && this.state === 'playing') {
-      const TEVENT_DESTROYED_ID = 7;
-      const TEVENT_PLAYER_ENTERED_ID = 1;
-      const hasDestroyed = trigger.event1.type === TEVENT_DESTROYED_ID || trigger.event2.type === TEVENT_DESTROYED_ID;
-      const hasCaptured = trigger.event1.type === TEVENT_PLAYER_ENTERED_ID || trigger.event2.type === TEVENT_PLAYER_ENTERED_ID;
-      if (hasDestroyed) {
-        this.state = 'lost';
-        this.audio.music.stop();
-        this.audio.play('defeat_sting');
-        this.startScoreMusic();
-        this.onStateChange?.('lost');
-      } else if (hasCaptured) {
-        if (this.toCarryOver) saveCarryover(this.entities);
-        this.state = 'won';
-        this.audio.music.stop();
-        this.audio.play('victory_fanfare');
-        this.audio.play('eva_mission_accomplished');
-        this.startScoreMusic();
-        this.onStateChange?.('won');
-      }
-    }
+    // C++ parity: TACTION_WINLOSE (ordinal 14) is a noop in RA's taction.cpp.
+    // It was functional in Tiberian Dawn but falls through to default in RA.
+    // result.winLose is never set by executeTriggerAction for RA parity.
     if (result.airstrike) {
       const wp = this.waypoints.get(0);
       if (wp) {
@@ -6078,10 +6074,46 @@ export class Game {
     if (sound) this.audio.play(sound);
   }
 
+  /** Apply deferred win/lose — called by game tick. C++ house.cpp:945-960 HouseClass::AI() */
+  private applyDeferredWinLose(): void {
+    if (this.state !== 'playing') return;
+    // Decrement BorrowedTime each tick
+    if (this.borrowedTime > 0) {
+      this.borrowedTime--;
+      return; // still counting down
+    }
+    // C++ house.cpp:945-951 — IsToWin fires when BorrowedTime == 0 && Blockage <= 0
+    if (this.isToWin && this.allowWin <= 0) {
+      this.isToWin = false;
+      if (this.toCarryOver) saveCarryover(this.entities);
+      this.state = 'won';
+      this.audio.music.stop();
+      this.audio.play('victory_fanfare');
+      this.audio.play('eva_mission_accomplished');
+      this.startScoreMusic();
+      this.onStateChange?.('won');
+      return;
+    }
+    // C++ house.cpp:957-963 — IsToLose fires when BorrowedTime == 0
+    if (this.isToLose) {
+      this.isToLose = false;
+      this.state = 'lost';
+      this.audio.music.stop();
+      this.audio.play('defeat_sting');
+      this.startScoreMusic();
+      this.onStateChange?.('lost');
+      return;
+    }
+  }
+
   /** Check win/lose conditions */
   private checkVictoryConditions(): void {
     if (this.state !== 'playing') return;
     if (this.tick < GAME_TICKS_PER_SEC * 3) return;
+
+    // C++ house.cpp:945-972 — process deferred win/lose (BorrowedTime countdown)
+    this.applyDeferredWinLose();
+    if (this.state !== 'playing') return;
 
     // C++ parity: loss conditions come from triggers (TACTION_LOSE), not from
     // hardcoded "all units dead" checks. C++ has no equivalent auto-lose —
