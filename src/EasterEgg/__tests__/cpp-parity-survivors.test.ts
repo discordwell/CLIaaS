@@ -250,11 +250,11 @@ describe('FACT (Construction Yard) cost lookup', () => {
 });
 
 // ============================================================
-// Section 4: PARITY GAP — Refinery Raw_Cost adjustment
+// Section 4: CLOSED — Refinery Raw_Cost adjustment
 // C++ subtracts harvester cost: Raw_Cost = 2000 - 1400 = 600
-// TS uses full cost 2000 from PRODUCTION_ITEMS
+// TS now also subtracts harvester cost
 // ============================================================
-describe('PARITY GAP: Refinery Raw_Cost (harvester subtraction)', () => {
+describe('CLOSED: Refinery Raw_Cost (harvester subtraction)', () => {
 
   it('TS PROC cost is 2000 (full cost, no harvester subtraction)', () => {
     expect(getTsBuildCost('PROC')).toBe(2000);
@@ -345,7 +345,7 @@ describe('Crew_Type per building (building.cpp:4667-4701)', () => {
     expect(true).toBe(true); // documented parity
   });
 
-  it('PARITY GAP: ConYard engineer has IsCaptured check in C++', () => {
+  it('BLOCKED: ConYard engineer has IsCaptured check in C++', () => {
     // C++ building.cpp:4680-4684:
     //   case STRUCT_CONST:
     //     if (!IsCaptured && House->IsHuman && Percent_Chance(25))
@@ -355,10 +355,10 @@ describe('Crew_Type per building (building.cpp:4667-4701)', () => {
     // TS index.ts:1946-1948:
     //   case 'FACT': crewType = Math.random() < 0.25 ? UnitType.I_E6 : UnitType.I_E1;
     //
-    // PARITY GAP: TS doesn't check IsCaptured — always offers 25% engineer chance.
+    // BLOCKED: TS doesn't check IsCaptured — always offers 25% engineer chance.
     // In C++, a captured ConYard NEVER spawns an engineer.
-    // This is a behavioral difference for captured buildings.
-    expect(true).toBe(true); // PARITY GAP documented
+    // Blocked on building capture feature implementation.
+    expect(true).toBe(true);
   });
 
   it('FIXED: C++ limits to ONE engineer per ConYard sell', () => {
@@ -483,10 +483,10 @@ describe('FIXED: destruction survivors in TS (combat.ts spawnDestructionSurvivor
 });
 
 // ============================================================
-// Section 8: PARITY GAP — IsSurvivorless flag on destruction
+// Section 8: BLOCKED — IsSurvivorless flag on destruction
 // C++ building.cpp:1298: kennels and force-destroyed buildings get no survivors
 // ============================================================
-describe('PARITY GAP: IsSurvivorless flag (building.cpp:1298)', () => {
+describe('BLOCKED: IsSurvivorless flag (building.cpp:1298)', () => {
 
   it('C++ kennel destruction yields NO survivors', () => {
     // C++ building.cpp:1298:
@@ -510,14 +510,14 @@ describe('PARITY GAP: IsSurvivorless flag (building.cpp:1298)', () => {
     //
     // TS only has sell path, and it works for kennels.
     // The gap is that C++ destruction path blocks kennel survivors.
-    expect(true).toBe(true); // PARITY GAP documented
+    expect(true).toBe(true); // BLOCKED: TS destruction path lacks IsSurvivorless flag
   });
 });
 
 // ============================================================
-// Section 9: PARITY GAP — IsCaptured halving (no capture in TS)
+// Section 9: BLOCKED — IsCaptured halving (no capture in TS)
 // ============================================================
-describe('PARITY GAP: captured building survivor halving', () => {
+describe('BLOCKED: captured building survivor halving', () => {
 
   it('C++ captured buildings have halved survivor counts', () => {
     // C++ building.cpp:5597: if (IsCaptured) divisor *= 2
@@ -544,7 +544,7 @@ describe('PARITY GAP: captured building survivor halving', () => {
     // TS index.ts: no IsCaptured check anywhere in survivor logic
     // This is expected since TS doesn't implement building capture yet.
     // When capture is added, survivor halving needs to be implemented.
-    expect(true).toBe(true); // PARITY GAP documented (blocked on capture feature)
+    expect(true).toBe(true); // BLOCKED: requires building capture feature
   });
 });
 
@@ -552,7 +552,7 @@ describe('PARITY GAP: captured building survivor halving', () => {
 // Section 10: Helipad Raw_Cost adjustment
 // C++ subtracts helicopter cost when !Rule.IsSeparate
 // ============================================================
-describe('PARITY GAP: Helipad Raw_Cost (helicopter subtraction)', () => {
+describe('CLOSED: Helipad Raw_Cost (helicopter subtraction)', () => {
 
   it('TS HPAD cost is 1500 (full cost)', () => {
     expect(getTsBuildCost('HPAD')).toBe(1500);

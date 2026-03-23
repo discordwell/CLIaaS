@@ -133,7 +133,7 @@ describe('Naval reinforcement — C++ parity', () => {
     // accepts cells where Good_Reinforcement_Cell returns true, which
     // requires Is_Clear_To_Move(SPEED_FLOAT) — meaning the cell must be water.
     //
-    // PARITY GAP: TS calculateHouseEdgeSpawnCell does NOT check terrain type.
+    // BLOCKED: TS calculateHouseEdgeSpawnCell does NOT check terrain type.
     // It returns any edge cell based purely on coordinates.
 
     it('should return a water cell for naval reinforcements, not a land cell', () => {
@@ -148,7 +148,7 @@ describe('Naval reinforcement — C++ parity', () => {
 
       // The TS function returns an edge cell, but has no way to verify it's water.
       // In C++, Calculated_Cell would scan the entire edge looking for a water cell.
-      // PARITY GAP: TS does not accept terrain data, cannot filter for water cells.
+      // BLOCKED: TS does not accept terrain data, cannot filter for water cells.
       expect(edgeCell).toBeDefined();
       // This test passes structurally but documents a behavioral gap:
       // C++ would only return this cell if the terrain at (30, 10) is WATER.
@@ -189,7 +189,7 @@ describe('Naval reinforcement — C++ parity', () => {
 
     for (const [edge, expectedFacing] of SOURCE_TO_FACING) {
       it(`${edge} edge -> facing ${expectedFacing} (C++ source << 1)`, () => {
-        // PARITY GAP: TS Entity.facing is set to `Math.floor(Math.random() * 8)`
+        // BLOCKED: TS Entity.facing is set to `Math.floor(Math.random() * 8)`
         // in executeTriggerAction (scenario.ts:2236), NOT derived from the edge.
         // C++ derives it deterministically as (source << 1).
         //
@@ -326,7 +326,7 @@ describe('Naval reinforcement — C++ parity', () => {
       // C++ reinf.cpp:176-182: checks if team has TMISSION_UNLOAD
       // C++ reinf.cpp:251: sets IsALoaner on vessel transport
       //
-      // PARITY GAP: TS Entity has no IsALoaner concept.
+      // BLOCKED: TS Entity has no IsALoaner concept.
       // In C++, IsALoaner marks the transport as temporary — it exits the map
       // after unloading. This affects whether the player can select/control it.
       //
@@ -340,7 +340,7 @@ describe('Naval reinforcement — C++ parity', () => {
 
       // TS has no IsALoaner field on Entity
       const entity = new Entity('LST' as any, House.USSR, 100, 100);
-      // PARITY GAP: entity has no 'isALoaner' property
+      // BLOCKED: entity has no 'isALoaner' property
       expect('isALoaner' in entity).toBe(false);
     });
   });
@@ -360,7 +360,7 @@ describe('Naval reinforcement — C++ parity', () => {
       // For ground (SPEED_WHEEL): scans for land cells at edge
       // For naval (SPEED_FLOAT): scans for water cells at edge
       //
-      // PARITY GAP: TS uses the same calculateHouseEdgeSpawnCell for both.
+      // BLOCKED: TS uses the same calculateHouseEdgeSpawnCell for both.
       // No terrain check means naval units can spawn on land cells.
 
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
@@ -370,7 +370,7 @@ describe('Naval reinforcement — C++ parity', () => {
       const groundCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
       const navalCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
 
-      // PARITY GAP: C++ would return different cells — ground on land, naval on water.
+      // BLOCKED: C++ would return different cells — ground on land, naval on water.
       // TS returns the same cell for both.
       expect(groundCell).toEqual(navalCell);
       // This equality IS the gap — in C++ they would differ when the edge has

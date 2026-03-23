@@ -204,12 +204,11 @@ describe('Growth conditions from C++ Can_Tiberium_Grow (cell.cpp:2869-2884)', ()
   });
 
   /**
-   * PARITY GAP: C++ growth is deterministic for reservoir-sampled cells.
+   * CLOSED: C++ growth is deterministic for reservoir-sampled cells.
    *   cell.cpp:2939 -- Grow_Tiberium() simply does OverlayData++ (no random).
    *   map.cpp:1078-1084 -- ALL sampled cells grow unconditionally.
    *
-   * TS uses ORE_DENSITY_CHANCE=0.5 (50% per cell per cycle).
-   * C++ has no per-cell probability; the randomness is in reservoir sampling.
+   * TS now matches: reservoir sampling selects cells, growth is deterministic.
    */
   it('PARITY MATCH: TS now uses deterministic growth for sampled cells', () => {
     // C++ cell.cpp:2939: Grow_Tiberium() just does OverlayData++ -- no random check.
@@ -301,11 +300,10 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
   });
 
   /**
-   * PARITY GAP: C++ spread is deterministic for reservoir-sampled cells.
+   * CLOSED: C++ spread is deterministic for reservoir-sampled cells.
    *   map.cpp:1091-1094 -- ALL sampled cells spread unconditionally.
    *
-   * TS uses ORE_SPREAD_CHANCE=0.25 (25% per cell per cycle).
-   * C++ has no per-cell probability; randomness is in reservoir sampling.
+   * TS now matches: reservoir sampling selects cells, spread is deterministic.
    */
   it('PARITY MATCH: TS now uses deterministic spread for sampled cells', () => {
     // C++ cell.cpp:2963 -- Spread_Tiberium() always executes for sampled cells.
@@ -634,12 +632,8 @@ describe('PARITY MATCH: Two-phase processing (scan then apply)', () => {
   });
 
   /**
-   * PARITY GAP: In TS, newly spread ore can be processed in the same scan cycle
-   * because growth/spread happen inline. In C++, newly spread ore is not in the
-   * scan results and won't be processed until the next cycle.
-   *
-   * A cell at (45, 45) spreads south to (45, 46). When the scan reaches (45, 46),
-   * TS processes it (potential growth from 0x03 to 0x04). C++ would defer to next cycle.
+   * CLOSED: In C++, newly spread ore is not in the scan results and won't be
+   * processed until the next cycle. TS now matches this two-phase model.
    */
   it('PARITY MATCH: newly spread ore is deferred to next cycle', () => {
     setOverlay(map, 45, 45, 0x0C);
@@ -731,26 +725,15 @@ describe('Fully depleted area -- no spontaneous regrowth without seed', () => {
 });
 
 // ============================================================
-// Section 11: Summary of PARITY GAPS
+// Section 11: Summary of parity status
 // ============================================================
-describe('Documented parity gaps summary', () => {
+describe('Documented parity status summary', () => {
   /**
-   * PARITY GAP #1: Growth probability model
-   *   C++ uses reservoir sampling (max 64 cells) + deterministic growth.
-   *   TS uses 50% random chance per cell with no cap.
-   *   Impact: TS can grow more cells per cycle when ore fields are large.
+   * CLOSED #1: Growth probability model — TS now uses reservoir sampling + deterministic growth.
+   * CLOSED #2: Spread probability model — TS now uses reservoir sampling + deterministic spread.
+   * CLOSED #3: Two-phase processing — TS now defers newly spread ore to next cycle.
    *
-   * PARITY GAP #2: Spread probability model
-   *   C++ uses reservoir sampling (max 64 cells) + deterministic spread.
-   *   TS uses 25% random chance per cell with no cap.
-   *   Impact: Similar aggregate behavior but different distribution.
-   *
-   * PARITY GAP #3: Single-phase processing
-   *   C++ scans all cells first, then applies growth, then spread.
-   *   TS applies growth and spread inline during scan.
-   *   Impact: Newly spread ore can grow in same TS cycle (deferred in C++).
-   *
-   * PARITY GAP #4: Ore mine terrain (TERRAIN_MINE) forced spread
+   * BLOCKED: Ore mine terrain (TERRAIN_MINE) forced spread
    *   C++ terrain.cpp:497 -- ore mines force-spread bypassing density threshold.
    *   TS does not implement ore mine terrain objects.
    *   Impact: Missing feature; ore mines don't exist in TS maps.
@@ -765,7 +748,7 @@ describe('Documented parity gaps summary', () => {
    * PARITY MATCH #8: Germination on CLEAR and ROAD terrain only.
    * PARITY MATCH #9: Pre-growth density used for spread eligibility.
    */
-  it('documents 4 parity gaps and 9 parity matches', () => {
+  it('documents 1 blocked gap, 3 closed gaps, and 9 parity matches', () => {
     // This test exists to document findings. All specific assertions are above.
     expect(true).toBe(true);
   });

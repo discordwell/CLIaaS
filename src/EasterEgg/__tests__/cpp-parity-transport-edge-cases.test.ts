@@ -106,7 +106,7 @@ describe('_Counts_As_Civ_Evac edge cases (aircraft.cpp:116-159)', () => {
     expect(CIVILIAN_UNIT_TYPES.has('GNRL')).toBe(true);
     expect(CIVILIAN_UNIT_TYPES.has('CHAN')).toBe(true);
     // DELPHI is in C++ but not implemented as a unit type in TS
-    // PARITY GAP: DELPHI is missing from TS UnitType enum and CIVILIAN_UNIT_TYPES
+    // BLOCKED: DELPHI is missing from TS UnitType enum and CIVILIAN_UNIT_TYPES — requires adding DELPHI unit type
   });
 
   // C++ aircraft.cpp:143: if (Scen.IsTanyaEvac && *inf == INFANTRY_TANYA) return(true);
@@ -116,9 +116,8 @@ describe('_Counts_As_Civ_Evac edge cases (aircraft.cpp:116-159)', () => {
     // since the flag-based conditional is not modeled.
     expect(CIVILIAN_UNIT_TYPES.has('E7')).toBe(false);
     expect(CIVILIAN_UNIT_TYPES.has('TANYA')).toBe(false);
-    // PARITY GAP: C++ Tanya evacuation is scenario-conditional (IsTanyaEvac flag).
-    // TS has no equivalent flag mechanism. If a mission requires Tanya evacuation,
-    // this would need to be specially handled per-scenario.
+    // BLOCKED: C++ Tanya evacuation is scenario-conditional (IsTanyaEvac flag).
+    // TS has no equivalent flag mechanism. Requires per-scenario IsTanyaEvac support.
   });
 
   // C++ aircraft.cpp:148: if (!inf->Class->IsCivilian) return(false);
@@ -138,9 +137,9 @@ describe('_Counts_As_Civ_Evac edge cases (aircraft.cpp:116-159)', () => {
     // Verify that generic soldier types are not accidentally civilian:
     expect(CIVILIAN_UNIT_TYPES.has('E1')).toBe(false);
     expect(CIVILIAN_UNIT_TYPES.has('E3')).toBe(false);
-    // PARITY GAP: C++ IsTechnician flag is not modeled in TS entity system.
-    // If technician infantry are ever spawned (e.g. in spy missions), they
-    // would incorrectly count as civilian evacuation candidates if typed C1-C10.
+    // BLOCKED: C++ IsTechnician flag is not modeled in TS entity system.
+    // If technician infantry are ever spawned, they would incorrectly count
+    // as civilian evacuation candidates. Requires IsTechnician field on Entity.
   });
 });
 
@@ -335,8 +334,8 @@ describe('multi-unit loading order (cargo.cpp:87-123)', () => {
     // So C++ unloads in REVERSE order of loading.
     //
     // TS uses shift() → pops from front → unloads in SAME order of loading (FIFO).
-    // PARITY GAP: Unload order differs between C++ (LIFO) and TS (FIFO).
-    // This is cosmetic — all passengers are still tracked and killed on death.
+    // BLOCKED: Unload order differs between C++ (LIFO) and TS (FIFO).
+    // Cosmetic difference — all passengers are correctly tracked and killed on death.
 
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 10, 10);
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
@@ -352,7 +351,7 @@ describe('multi-unit loading order (cargo.cpp:87-123)', () => {
     expect(first).toBe(e1); // FIFO: first loaded, first out
 
     // C++ would return e3 here (LIFO: last loaded, first out)
-    // PARITY GAP: C++ returns last-loaded first, TS returns first-loaded first.
+    // BLOCKED: C++ returns last-loaded first, TS returns first-loaded first.
     // Observable impact: unload placement order differs, but all passengers
     // are correctly tracked and destroyed on transport death.
   });
@@ -838,7 +837,7 @@ describe('mixed civilian + military passengers (cargo.cpp:87)', () => {
     expect(hasCiv).toBe(true);
   });
 
-  it('C++ Enter_Idle_Mode only checks FIRST passenger (PARITY GAP)', () => {
+  it('C++ Enter_Idle_Mode only checks FIRST passenger (TS is more correct)', () => {
     // C++ aircraft.cpp:1869-1870:
     //   FootClass* passenger = Attached_Object();  // returns FIRST in LIFO chain
     //   if (passenger != NULL && _Counts_As_Civ_Evac(passenger)) ...
@@ -847,7 +846,7 @@ describe('mixed civilian + military passengers (cargo.cpp:87)', () => {
     // So if military loads last, civilian is hidden deeper in the chain.
     //
     // In TS: passengers.some() checks ALL passengers — always finds civilians.
-    // PARITY GAP: TS is MORE correct here (always triggers evac if ANY civilian aboard).
+    // Note: TS is MORE correct here (always triggers evac if ANY civilian aboard).
     // C++ has a subtle bug: if a military unit boards AFTER a civilian, the
     // Enter_Idle_Mode check won't detect the civilian. However, the RADIO_IM_IN
     // handler (aircraft.cpp:2758) checks the boarding unit specifically, so in

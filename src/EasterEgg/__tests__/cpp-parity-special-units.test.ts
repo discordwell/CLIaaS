@@ -388,7 +388,7 @@ describe('Engineer friendly repair — Renovate() (infantry.cpp:606-611)', () =>
     expect(eng.alive).toBe(false); // engineer consumed
   });
 
-  it('engineer on full-HP allied building — PARITY GAP: TS damages own building', () => {
+  it('engineer on full-HP allied building — C++ does nothing, TS matches', () => {
     /**
      * C++ infantry.cpp:606-611:
      *   if (House->Is_Ally(tech)) {
@@ -396,14 +396,8 @@ describe('Engineer friendly repair — Renovate() (infantry.cpp:606-611)', () =>
      *   }
      * Renovate() on a full-health building is a harmless no-op. Engineer is consumed.
      *
-     * TS missionAI.ts:1017:
-     *   if (ctx.isAllied(s.house, ctx.playerHouse) && s.hp < s.maxHp) {
-     * When hp >= maxHp, this check FAILS. Code falls through to the enemy
-     * capture/damage path (line 1032-1040). Since hp/maxHp = 1.0 > 0.25,
-     * it takes the damage branch: min(floor(200/3)=66, 200-1=199) = 66.
-     * The engineer DAMAGES its own allied building by 66 HP.
-     *
-     * PARITY GAP: C++ does nothing to a full-health ally. TS damages it.
+     * TS: engineer on full-HP allied building is consumed harmlessly.
+     * CLOSED: TS now matches C++ — Renovate() no-op on full-health ally.
      */
     const s = makeStructure({ hp: 200, maxHp: 200, house: House.Greece });
     const eng = makeEntity(UnitType.I_E6, House.Greece, s.cx * CELL_SIZE + CELL_SIZE, s.cy * CELL_SIZE + CELL_SIZE);
@@ -433,9 +427,10 @@ describe('Engineer capture HP behavior — C++ vs TS divergence', () => {
    *   s.house = ctx.playerHouse;
    *   s.hp = s.maxHp;  // <-- THIS IS NOT IN C++
    *
-   * PARITY GAP: TS restores building to full HP on capture. C++ does not.
+   * BLOCKED: TS restores building to full HP on capture. C++ does not.
+   * Requires separating capture from repair in the engineer path.
    */
-  it('TS restores captured building to full HP (C++ does NOT — PARITY GAP)', () => {
+  it('TS restores captured building to full HP (C++ does NOT — BLOCKED)', () => {
     const s = makeStructure({ hp: 50, maxHp: 200, house: House.USSR });
     const eng = makeEntity(UnitType.I_E6, House.Greece, s.cx * CELL_SIZE + CELL_SIZE, s.cy * CELL_SIZE + CELL_SIZE);
     const ctx = makeMissionAIContext({ playerHouse: House.Greece });
@@ -549,7 +544,7 @@ describe('Chronoshift infantry kill (house.cpp:2820-2826)', () => {
 // case in the FIXIT_CSII code path.
 // ============================================================
 describe('Chronoshift demo truck self-destruct (house.cpp:2828-2829 FIXIT_CSII)', () => {
-  it('demo truck should self-destruct when chronoshifted — PARITY GAP', () => {
+  it('demo truck should self-destruct when chronoshifted — BLOCKED', () => {
     const demoTruck = makeEntity(UnitType.V_DTRK, House.Greece, 200, 200);
     demoTruck.selected = true;
 
@@ -558,7 +553,8 @@ describe('Chronoshift demo truck self-destruct (house.cpp:2828-2829 FIXIT_CSII)'
 
     // C++: demo truck should target itself → kamikaze at destination
     // TS: treats demo truck like any other vehicle — just teleports it
-    // PARITY GAP: TS does not implement the FIXIT_CSII demo truck chronoshift behavior.
+    // BLOCKED: TS does not implement the FIXIT_CSII demo truck chronoshift behavior.
+    // Requires special-case handling in activateSuperweapon for UNIT_DEMOTRUCK.
     //
     // Current TS behavior: truck is teleported, not self-destructing
     expect(demoTruck.pos.x).toBe(500);
@@ -673,7 +669,8 @@ describe('Demo truck detonation mechanism (unit.cpp:4215-4221)', () => {
      * C++ uses the bullet/warhead system which has a different falloff curve
      * (distFactor-based as tested in cpp-parity-damage-formula.test.ts).
      *
-     * PARITY GAP: TS uses linear falloff; C++ uses warhead spread-based falloff.
+     * BLOCKED: TS uses linear falloff; C++ uses warhead spread-based falloff.
+     * Would require integrating demo truck into the warhead/bullet system.
      */
     const truck = makeEntity(UnitType.V_DTRK, House.Greece, 200, 200);
     truck.mission = Mission.ATTACK;

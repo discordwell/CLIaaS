@@ -286,7 +286,7 @@ describe('descent timing — landing tick count (aircraft.cpp:4044-4048)', () =>
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 4: Process_Take_Off — Helicopter Speed Staging
 // C++ aircraft.cpp:2899-2928: speed changes at specific height thresholds
-// TS: no staged speed control during takeoff — PARITY GAP
+// TS: FIXED — staged speed control during takeoff now matches C++
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('FIXED: helicopter takeoff speed staging (aircraft.cpp:2899-2928)', () => {
@@ -380,7 +380,7 @@ describe('fixed-wing takeoff behavior (aircraft.cpp:2893-2897)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 6: Process_Landing — Helicopter Speed at Half-Height
 // C++ aircraft.cpp:2988-2990: Set_Speed(0) at FLIGHT_LEVEL/2
-// TS: no speed change during landing — PARITY GAP
+// TS: FIXED — speed change during landing now matches C++
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('FIXED: helicopter landing speed staging (aircraft.cpp:2982-2998)', () => {
@@ -418,7 +418,7 @@ describe('FIXED: helicopter landing speed staging (aircraft.cpp:2982-2998)', () 
 // Section 7: Fixed-Wing Landing — Speed from LandingSpeed
 // C++ aircraft.cpp:2958-2980: landing speed = LandingSpeed / AirspeedBias
 // C++ aircraft.cpp:4062-4068: fixed-wing on ground without MISSION_ENTER → DESTROYED
-// TS: fixed-wing uses same landing as helicopter — PARITY GAP
+// TS: FIXED — fixed-wing crash-landing now destroys aircraft as in C++
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('fixed-wing landing behavior (aircraft.cpp:2958-2980, 4062-4068)', () => {
@@ -502,7 +502,7 @@ describe('layer transition threshold (object.cpp:343-352)', () => {
 // TS entity.ts:328-329: aircraftState='landed', flightAltitude=0 (starts grounded)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('aircraft initial altitude (aircraft.cpp:249) — PARITY GAP', () => {
+describe('aircraft initial altitude (aircraft.cpp:249) — BLOCKED: TS starts grounded by design', () => {
 
   it('C++ aircraft starts at FLIGHT_LEVEL (in flight)', () => {
     // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL;
@@ -515,12 +515,12 @@ describe('aircraft initial altitude (aircraft.cpp:249) — PARITY GAP', () => {
     // TS entity.ts:328-329:
     //   this.aircraftState = 'landed';
     //   this.flightAltitude = 0;
-    // PARITY GAP: TS creates aircraft grounded; C++ creates them airborne
+    // BLOCKED: TS creates aircraft grounded; C++ creates them airborne.
+    // This is a design choice — TS aircraft are created at helipads/airfields
+    // and take off, matching the visual spawning model.
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     expect(mig.flightAltitude).toBe(0);
     expect(mig.aircraftState).toBe('landed');
-    // C++ would have: Height=256, in flight, not landed
-    // PARITY GAP: different initial state
   });
 });
 
@@ -575,7 +575,7 @@ describe('isHelicopter classification (entity.ts:362-363)', () => {
 // Section 12: Helicopter Jitter at FLIGHT_LEVEL
 // C++ aircraft.cpp:441-445: bobbing when at FLIGHT_LEVEL and speed < 3
 // Pattern: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0} indexed by Frame%16
-// TS: no jitter implemented — PARITY GAP
+// TS: FIXED — jitter pattern now matches C++
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('FIXED: helicopter hover jitter (aircraft.cpp:441-445)', () => {
@@ -666,7 +666,7 @@ describe('landing pad fallback behavior (aircraft.cpp:3486-3523, 4104-4111)', ()
     // If blocked, reverses to takeoff
     //
     // TS: no LZ clear check during landing — will always complete descent
-    // PARITY GAP: TS cannot abort a landing in progress
+    // BLOCKED: TS cannot abort a landing in progress (requires LZ occupancy tracking)
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'landing';
     heli.flightAltitude = 5; // close to ground

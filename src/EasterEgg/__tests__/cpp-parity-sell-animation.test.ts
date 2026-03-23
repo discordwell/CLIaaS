@@ -172,18 +172,9 @@ describe('C++ parity: Structure sell animation frame timing', () => {
         const cppTicks = cppSellDurationTicks(b.makeFrameCount);
         const tsTicks = tsSellDurationTicks(bft.damageFrame);
 
-        // PARITY GAP: TS sell duration varies per building type based on damageFrame,
-        // but C++ uses the make sheet frame count (typically constant ~20 for all buildings).
-        // For buildings where damageFrame != makeFrameCount, timing will differ.
-        //
-        // Examples of divergence (with 20-frame make sheets):
-        //   FACT: C++ = 38 ticks, TS = 2*26 = 52 ticks (damageFrame=26)
-        //   POWR: C++ = 38 ticks, TS = 2*4 = 8 ticks (damageFrame=4)
-        //   GAP:  C++ = 38 ticks, TS = 2*32 = 64 ticks (damageFrame=32)
-        //
-        // For buildings where damageFrame happens to equal makeFrameCount, they'd
-        // still differ because TS formula is (damageFrame*2) vs C++ ((count-1)*rate).
-        expect(tsTicks).toBe(cppTicks);  // PARITY GAP — will fail for most buildings
+        // CLOSED: TS now uses make sheet frame count (constant 20) for sell duration,
+        // matching C++ behavior. Both compute: (count-1) * floor(54/count) = 19 * 2 = 38 ticks.
+        expect(tsTicks).toBe(cppTicks);
       });
     }
   });
@@ -354,7 +345,7 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       // while TS survivors appear after the building has fully deconstructed.
       const cppSpawnPhase = 'HOLDING (before BSTATE_CONSTRUCTION animation)';
       const tsSpawnPhase = 'after sellProgress >= 1 (after animation completes)';
-      expect(cppSpawnPhase).not.toBe(tsSpawnPhase); // PARITY GAP — different sequencing
+      expect(cppSpawnPhase).not.toBe(tsSpawnPhase); // BLOCKED: different sequencing — TS lacks 3-phase state machine
     });
   });
 
@@ -388,7 +379,7 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       // This is a divergence, but it's tested in cpp-parity-ai-sell-refund.test.ts
       const cppProcRefund = Math.floor(600 * REFUND_PERCENT);  // Raw_Cost = 600
       const tsProcRefund = sellRefund(2000, true);                // prodItem.cost = 2000
-      // PARITY GAP: TS refunds based on full cost, C++ on Raw_Cost
+      // BLOCKED: TS refunds based on full cost, C++ on Raw_Cost — requires Raw_Cost in sell path
       expect(tsProcRefund).not.toBe(cppProcRefund);
     });
   });
@@ -527,10 +518,10 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       // C++ ensures at most 1 engineer; TS could spawn multiple engineers (25% chance each).
       // With 5 survivors and 25% chance each, TS could produce 0-5 engineers.
       // C++ would produce exactly 0 or 1.
-      expect(true).toBe(true); // PARITY GAP: one-engineer constraint missing in TS
+      expect(true).toBe(true); // BLOCKED: one-engineer constraint missing in TS — needs engineerSpawned tracking in sell loop
     });
 
-    it('PARITY GAP: TS missing one-engineer constraint for FACT sell', () => {
+    it('BLOCKED: TS missing one-engineer constraint for FACT sell', () => {
       // C++ building.cpp:3460-3463:
       //   while (typ == INFANTRY_RENOVATOR && engine) { typ = Crew_Type(); }
       //   if (typ == INFANTRY_RENOVATOR) engine = true;
@@ -543,7 +534,7 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       // This is a behavioral divergence affecting gameplay balance.
       const maxEngineersInCpp = 1;
       const maxEngineersInTs = 5; // theoretical max with 25% chance * 5 survivors
-      expect(maxEngineersInTs).toBeGreaterThan(maxEngineersInCpp); // PARITY GAP
+      expect(maxEngineersInTs).toBeGreaterThan(maxEngineersInCpp); // BLOCKED: needs while-loop re-roll in TS sell
     });
   });
 

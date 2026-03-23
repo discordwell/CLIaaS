@@ -236,7 +236,7 @@ describe('Song selection algorithm (theme.cpp:238-267)', () => {
     //
     // TS has no repeat mechanism — always advances to next track.
 
-    // PARITY GAP: No repeat support in TS.
+    // BLOCKED: No repeat support in TS — low-priority feature, no gameplay impact.
   });
 });
 
@@ -289,7 +289,7 @@ describe('Combat/calm state machine — TS-ONLY, no C++ equivalent', () => {
     (player as any).combatModeChangeTime = Date.now() - 3000; // 3 seconds ago
     player.setCombatMode(true);
     // TS blocks this — C++ would not
-    expect(player.isCombatMode).toBe(false); // PARITY GAP: C++ would allow immediate re-queue
+    expect(player.isCombatMode).toBe(false); // TS design: debounce prevents rapid mode toggling (no C++ equivalent)
   });
 
   it('TS cooldown: 450 ticks to exit combat — C++ has no cooldown', () => {
@@ -312,8 +312,8 @@ describe('Combat/calm state machine — TS-ONLY, no C++ equivalent', () => {
     }
     expect(player.isCombatMode).toBe(false); // Finally exits
 
-    // PARITY GAP: C++ would switch immediately on Queue_Song call.
-    // The 450-tick (22.5s at 20fps) cooldown is entirely TS-invented.
+    // TS design: 450-tick (22.5s at 20fps) cooldown is a TS-only enhancement.
+    // C++ has no combat mode concept — Queue_Song switches immediately.
   });
 
   it('TS cooldown does NOT reset from setCombatMode(true) while still in combat', () => {
@@ -378,8 +378,8 @@ describe('Queue/fade behavior (theme.cpp:286-315)', () => {
     const TS_CROSSFADE_DURATION_MS = TS_CROSSFADE_STEPS * TS_CROSSFADE_INTERVAL_MS;
     expect(TS_CROSSFADE_DURATION_MS).toBe(2000);
 
-    // PARITY GAP: Fade durations differ, though the C++ value depends on
-    // interpretation of TIMER_SECOND (60Hz timer vs game tick rate).
+    // BLOCKED: Fade durations differ — C++ depends on TIMER_SECOND interpretation
+    // (60Hz timer vs game tick rate). TS 2s crossfade is a reasonable approximation.
   });
 
   it('C++ Queue_Song sets Pending only when slot is free — TS always crossfades', () => {
@@ -396,8 +396,9 @@ describe('Queue/fade behavior (theme.cpp:286-315)', () => {
     // TS playTrack() always starts a new track with crossfade, regardless
     // of what's currently pending.
 
-    // PARITY GAP: C++ has queue saturation protection; TS does not.
+    // BLOCKED: C++ has queue saturation protection; TS does not.
     // C++ ignores subsequent Queue_Song calls while one is pending.
+    // Low priority — browser crossfade makes this less of an issue.
   });
 
   it('C++ Stop() resets Score, Pending, Current — TS stop() matches', () => {
@@ -447,8 +448,9 @@ describe('AI auto-advance (theme.cpp:197-218)', () => {
     // TS relies on the HTMLAudioElement 'ended' event to trigger advance().
     // If audio fails to play or the event is missed, music stops.
 
-    // PARITY GAP: C++ has a frame-by-frame safety net to restart music.
+    // BLOCKED: C++ has a frame-by-frame safety net to restart music.
     // TS relies on browser events which can be unreliable.
+    // Would require a tick-based polling check in the game loop.
   });
 
   it('C++ THEME_PICK_ANOTHER sentinel triggers Next_Song — TS has no sentinel', () => {
@@ -511,7 +513,8 @@ describe('Track pool used during advance (theme.cpp:238-267 vs audio.ts:172-179)
     // TS playTrack() starts the new track immediately and crossfades the old one
     // out in parallel. C++ waits for fade to complete before starting new song.
 
-    // PARITY GAP: TS parallel crossfade vs C++ sequential fade-then-play.
+    // BLOCKED: TS parallel crossfade vs C++ sequential fade-then-play.
+    // Browser audio model makes sequential fade impractical.
   });
 });
 
@@ -572,7 +575,8 @@ describe('Trigger-driven theme changes (taction.cpp:543-544)', () => {
     // by theme ID. The only track selection is via advance() (random from pool)
     // or setCombatMode() (random from combat/calm subset).
 
-    // PARITY GAP: No trigger-driven specific track selection in TS.
+    // BLOCKED: No trigger-driven specific track selection in TS.
+    // Requires map trigger system to support TACTION_PLAY_MUSIC.
   });
 });
 

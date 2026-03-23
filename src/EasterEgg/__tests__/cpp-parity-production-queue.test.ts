@@ -374,7 +374,7 @@ describe('C++ parity: one queue per factory RTTI type (house.cpp:6957)', () => {
     expect(entry.progress).toBe(10);
   });
 
-  it('PARITY GAP: C++ has 5 separate factories; TS has only 2 strips (left/right)', () => {
+  it('BLOCKED: C++ has 5 separate factories; TS has only 2 strips (left/right)', () => {
     // C++ house.cpp:6961-6990 — Fetch_Factory() returns different factory for:
     //   RTTI_INFANTRY -> InfantryFactory
     //   RTTI_UNIT     -> UnitFactory
@@ -460,7 +460,7 @@ describe('C++ parity: placing a building pauses production (factory.cpp:230,382)
     // This is a behavioral divergence — test documents TS behavior:
     const entry = ctx.productionQueue.get('left');
     if (entry) {
-      // TS allows starting new production during placement — PARITY GAP
+      // TS allows starting new production during placement — BLOCKED: needs factory occupation check
       expect(entry.item.type).toBe('DOME');
     }
     // C++ expected: production NOT started because factory is occupied
@@ -612,7 +612,7 @@ describe('C++ parity: multiple factories and production speed (factory.cpp:206)'
     expect(p1).toBe(20); // 1 per tick regardless of factory count
   });
 
-  it('PARITY GAP: C++ multiple factories enable parallel queues; TS does not', () => {
+  it('BLOCKED: C++ multiple factories enable parallel queues; TS does not', () => {
     // C++ house.cpp:2398 — Begin_Production creates a new FactoryClass per item.
     // With 2 WEAPs, the player can use each factory for a different unit type.
     // Each factory runs independently at 1 step/tick.
@@ -1331,62 +1331,68 @@ describe('C++ parity: country BuildTime bias (house.cpp:297)', () => {
 });
 
 // ============================================================
-// Section 17: PARITY GAP — C++ stage regression on insufficient funds
+// Section 17: CLOSED — C++ stage regression on insufficient funds
 // factory.cpp:220-221: Set_Stage(Fetch_Stage()-1) when can't afford tick
 // ============================================================
-describe('C++ PARITY GAP: insufficient funds causes stage regression (factory.cpp:220-221)', () => {
+describe('CLOSED: insufficient funds causes stage regression (factory.cpp:220-221)', () => {
 
-  it('TS pauses on insufficient funds; C++ would regress one step', () => {
+  it('TS regresses progress on insufficient funds, matching C++', () => {
     // C++ factory.cpp:220-221:
     //   if (cost > House->Available_Money()) {
     //     Set_Stage(Fetch_Stage()-1);     // REGRESS one step
     //   }
-    // TS production.ts:233-235: just `continue` (skip the tick, no progress change).
-    //
-    // In C++, running out of money mid-build LOSES progress (goes backward).
-    // In TS, progress simply freezes. This makes TS more forgiving.
+    // CLOSED: TS production.ts:242-243 now matches C++:
+    //   entry.progress = Math.max(0, entry.progress - 1);
     const tankCost = getIniCost('2TNK') || 800;
     const buildTime = cppBuildTime(tankCost);
-    const costPerTick = tankCost / buildTime;
 
-    // Give enough for exactly 10 ticks of production
-    const ctx = makeContext({ credits: Math.ceil(costPerTick * 10) + 1 });
+    // Start with plenty of money, produce for 20 ticks, then remove all credits
+    const ctx = makeContext({ credits: 100000 });
+    const item = makeItem({ cost: tankCost, buildTime });
+
+    startProduction(ctx, item);
+    tickNTimes(ctx, 20);
+
+    const entry = ctx.productionQueue.get('right')!;
+    const progressBeforeBroke = entry.progress;
+    expect(progressBeforeBroke).toBe(20);
+
+    // Now set credits to 0 — subsequent ticks should regress progress
+    ctx.credits = 0;
+    tickNTimes(ctx, 5);
+
+    const progressAfterBroke = ctx.productionQueue.get('right')!.progress;
+    // CLOSED: TS now regresses like C++ — progress goes backward
+    expect(progressAfterBroke).toBe(progressBeforeBroke - 5); // regressed 5 steps
+  });
+
+  it('prolonged no-funds can UNDO significant progress (matches C++)', () => {
+    // C++: each tick without funds decrements: 30 -> 29 -> 28 -> ...
+    // CLOSED: TS now matches this behavior — progress regresses each tick.
+    // Progress clamps at 0 (Math.max(0, progress - 1)).
+    const tankCost = getIniCost('2TNK') || 800;
+    const buildTime = cppBuildTime(tankCost);
+    const ctx = makeContext({ credits: 100000 });
     const item = makeItem({ cost: tankCost, buildTime });
 
     startProduction(ctx, item);
     tickNTimes(ctx, 10);
+    expect(ctx.productionQueue.get('right')!.progress).toBe(10);
 
-    const entry = ctx.productionQueue.get('right')!;
-    const progressBeforeBroke = entry.progress;
-    expect(progressBeforeBroke).toBe(10);
+    // Remove all money and tick 15 times (more than progress)
+    ctx.credits = 0;
+    tickNTimes(ctx, 15);
 
-    // Now credits are nearly zero — next tick should fail to deduct
-    tickNTimes(ctx, 5);
-
-    const progressAfterBroke = ctx.productionQueue.get('right')!.progress;
-    // TS: progress stays the same (paused). C++ would regress.
-    // PARITY GAP: In C++ progressAfterBroke would be < progressBeforeBroke.
-    expect(progressAfterBroke).toBe(progressBeforeBroke);
-  });
-
-  it('C++ regression means prolonged no-funds can UNDO significant progress', () => {
-    // In C++, if you run out of money at step 30/54 (STEP_COUNT=54),
-    // each subsequent tick decrements: 30 -> 29 -> 28 -> ...
-    // You can lose ALL progress if you're broke long enough.
-    //
-    // In TS, you never lose progress — it just sits at 30 forever.
-    // This is a significant gameplay difference: in C++, going broke is punishing.
-    //
-    // Documents the divergence — no TS fix needed unless gameplay fidelity required.
-    expect(true).toBe(true);
+    // Progress clamps at 0 — cannot go negative
+    expect(ctx.productionQueue.get('right')!.progress).toBe(0);
   });
 });
 
 // ============================================================
-// Section 18: PARITY GAP — C++ Start() minimum funds check
+// Section 18: BLOCKED — C++ Start() minimum funds check
 // factory.cpp:416: if (Available_Money() >= Cost_Per_Tick()) ...
 // ============================================================
-describe('C++ PARITY GAP: Start() requires Cost_Per_Tick minimum (factory.cpp:416)', () => {
+describe('C++ BLOCKED: Start() requires Cost_Per_Tick minimum (factory.cpp:416)', () => {
 
   it('TS allows starting with 1 credit; C++ requires >= Cost_Per_Tick()', () => {
     // C++ factory.cpp:416:
@@ -1410,7 +1416,7 @@ describe('C++ PARITY GAP: Start() requires Cost_Per_Tick minimum (factory.cpp:41
 
     // TS: production starts (credits > 0)
     expect(ctx.productionQueue.has('right')).toBe(true);
-    // PARITY GAP: C++ would reject because 1 < Cost_Per_Tick (~15 for 800-cost tank)
+    // BLOCKED: C++ would reject because 1 < Cost_Per_Tick (~15 for 800-cost tank)
     expect(cppMinimumToStart).toBeGreaterThan(1);
   });
 
@@ -1432,10 +1438,10 @@ describe('C++ PARITY GAP: Start() requires Cost_Per_Tick minimum (factory.cpp:41
 });
 
 // ============================================================
-// Section 19: PARITY GAP — C++ 5 independent factory queues
+// Section 19: BLOCKED — C++ 5 independent factory queues
 // house.cpp:6961-6990 — Fetch_Factory returns per-RTTI factory
 // ============================================================
-describe('C++ PARITY GAP: concurrent infantry + vehicle production (house.cpp:6961-6990)', () => {
+describe('C++ BLOCKED: concurrent infantry + vehicle production (house.cpp:6961-6990)', () => {
 
   it('TS blocks concurrent infantry + vehicle (both map to "right" queue)', () => {
     // C++ InfantryFactory and UnitFactory are separate slots.
@@ -1462,7 +1468,7 @@ describe('C++ PARITY GAP: concurrent infantry + vehicle production (house.cpp:69
     // In TS: this is silently ignored (same 'right' category, different item type)
     startProduction(ctx, vehicle);
     expect(ctx.productionQueue.get('right')!.item.type).toBe('E1'); // Still infantry
-    // PARITY GAP: C++ would have both producing simultaneously
+    // BLOCKED: C++ would have both producing simultaneously — needs 5-queue system
   });
 
   it('TS cannot produce 5 items simultaneously (C++ can with 5 factory types)', () => {
