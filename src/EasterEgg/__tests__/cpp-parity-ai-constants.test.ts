@@ -275,76 +275,44 @@ describe('[AI] section constants (rules.ini lines 223-254)', () => {
     }
   });
 
-  it('PARITY GAP: TS should have AttackInterval (C++ Rule.AttackInterval = 3 min)', () => {
-    // C++ uses AttackInterval for average delay between attacks.
-    // TS has attackCooldown per difficulty, but not a single Rule.AttackInterval constant.
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['attackInterval'],
-      'TS AI_BUILD_RULES missing attackInterval — C++ has Rule.AttackInterval=3'
-    ).toBe(3);
+  it('TS AI_BUILD_RULES.attackInterval matches C++ Rule.AttackInterval = 3 min', () => {
+    expect(AI_BUILD_RULES.attackInterval).toBe(3);
   });
 
-  it('PARITY GAP: TS should have AttackDelay (C++ Rule.AttackDelay = 5 min)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['attackDelay'],
-      'TS AI_BUILD_RULES missing attackDelay — C++ has Rule.AttackDelay=5'
-    ).toBe(5);
+  it('TS AI_BUILD_RULES.attackDelay matches C++ Rule.AttackDelay = 5 min', () => {
+    expect(AI_BUILD_RULES.attackDelay).toBe(5);
   });
 
-  it('PARITY GAP: TS should have CreditReserve (C++ Rule.CreditReserve = 100)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['creditReserve'],
-      'TS AI_BUILD_RULES missing creditReserve — C++ has Rule.CreditReserve=100'
-    ).toBe(100);
+  it('TS AI_BUILD_RULES.creditReserve matches C++ Rule.CreditReserve = 100', () => {
+    expect(AI_BUILD_RULES.creditReserve).toBe(100);
   });
 
-  it('PARITY GAP: TS should have InfantryReserve (C++ Rule.InfantryReserve = 3000)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['infantryReserve'],
-      'TS AI_BUILD_RULES missing infantryReserve — C++ has Rule.InfantryReserve=3000'
-    ).toBe(3000);
+  it('TS AI_BUILD_RULES.infantryReserve matches C++ Rule.InfantryReserve = 3000', () => {
+    expect(AI_BUILD_RULES.infantryReserve).toBe(3000);
   });
 
-  it('PARITY GAP: TS should have InfantryBaseMult (C++ Rule.InfantryBaseMult = 1)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['infantryBaseMult'],
-      'TS AI_BUILD_RULES missing infantryBaseMult — C++ has Rule.InfantryBaseMult=1'
-    ).toBe(1);
+  it('TS AI_BUILD_RULES.infantryBaseMult matches C++ Rule.InfantryBaseMult = 1', () => {
+    expect(AI_BUILD_RULES.infantryBaseMult).toBe(1);
   });
 
-  it('PARITY GAP: TS should have AutocreateTime (C++ Rule.AutocreateTime = 5 min)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['autocreateTime'],
-      'TS AI_BUILD_RULES missing autocreateTime — C++ has Rule.AutocreateTime=5'
-    ).toBe(5);
+  it('TS AI_BUILD_RULES.autocreateTime matches C++ Rule.AutocreateTime = 5 min', () => {
+    expect(AI_BUILD_RULES.autocreateTime).toBe(5);
   });
 
-  it('PARITY GAP: TS should have OreNearScan (C++ Rule.OreNearScan = 6 cells)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['oreNearScan'],
-      'TS AI_BUILD_RULES missing oreNearScan — C++ has Rule.OreNearScan=6'
-    ).toBe(6);
+  it('TS AI_BUILD_RULES.oreNearScan matches C++ Rule.OreNearScan = 6 cells', () => {
+    expect(AI_BUILD_RULES.oreNearScan).toBe(6);
   });
 
-  it('PARITY GAP: TS should have OreFarScan (C++ Rule.OreFarScan = 48 cells)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['oreFarScan'],
-      'TS AI_BUILD_RULES missing oreFarScan — C++ has Rule.OreFarScan=48'
-    ).toBe(48);
+  it('TS AI_BUILD_RULES.oreFarScan matches C++ Rule.OreFarScan = 48 cells', () => {
+    expect(AI_BUILD_RULES.oreFarScan).toBe(48);
   });
 
-  it('PARITY GAP: TS should have PatrolScan (C++ Rule.PatrolScan = 0.016 min)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['patrolScan'],
-      'TS AI_BUILD_RULES missing patrolScan — C++ has Rule.PatrolScan=.016'
-    ).toBeCloseTo(0.016, 3);
+  it('TS AI_BUILD_RULES.patrolScan matches C++ Rule.PatrolScan = 0.016 min', () => {
+    expect(AI_BUILD_RULES.patrolScan).toBeCloseTo(0.016, 3);
   });
 
-  it('PARITY GAP: TS should have PowerEmergency (C++ Rule.PowerEmergencyFraction = 75%)', () => {
-    expect(
-      (AI_BUILD_RULES as Record<string, unknown>)['powerEmergency'],
-      'TS AI_BUILD_RULES missing powerEmergency — C++ has Rule.PowerEmergency=75%'
-    ).toBe(0.75);
+  it('TS AI_BUILD_RULES.powerEmergency matches C++ Rule.PowerEmergency = 75%', () => {
+    expect(AI_BUILD_RULES.powerEmergency).toBe(0.75);
   });
 });
 
@@ -401,10 +369,9 @@ describe('[IQ] section constants (rules.ini lines 269-280)', () => {
 
   // -- TS parity checks for IQ thresholds --
 
-  it('PARITY GAP: TS AI engine should expose IQ thresholds as constants', () => {
+  it('TS AI_BUILD_RULES exposes all IQ thresholds matching C++ [IQ] section', () => {
     // C++ uses Rule.IQSuperWeapons, Rule.IQProduction, etc. to gate AI abilities.
-    // TS AIHouseState has an `iq` field but the threshold constants are not exported.
-    // Verify AI_BUILD_RULES or a separate IQ_THRESHOLDS object has these.
+    // TS AI_BUILD_RULES now has all IQ threshold constants.
     const expectedIQFields: Record<string, number> = {
       maxIQLevels: 5,
       iqSuperWeapons: 4,
@@ -609,54 +576,38 @@ describe('Difficulty settings (rules.ini [Easy]/[Normal]/[Difficult])', () => {
     });
   });
 
-  describe('PARITY GAP: TS difficulty should include BuildDelay and RepairDelay', () => {
+  describe('TS difficulty includes BuildDelay and RepairDelay per level', () => {
     // C++ DifficultyClass has RepairDelay and BuildDelay (minutes).
-    // These control how quickly AI initiates repairs and construction.
-    // TS AI_DIFFICULTY_MODS may not have these fields.
+    // TS AI_DIFFICULTY_MODS now includes these fields.
 
     for (const diff of ['easy', 'normal', 'hard'] as Difficulty[]) {
       it(`${diff} should have repairDelay`, () => {
-        expect(
-          (AI_DIFFICULTY_MODS[diff] as Record<string, unknown>)['repairDelay'],
-          `${diff} missing repairDelay — C++ DifficultyClass has RepairDelay`
-        ).toBeDefined();
+        expect(AI_DIFFICULTY_MODS[diff].repairDelay).toBeDefined();
       });
 
       it(`${diff} should have buildDelay`, () => {
-        expect(
-          (AI_DIFFICULTY_MODS[diff] as Record<string, unknown>)['buildDelay'],
-          `${diff} missing buildDelay — C++ DifficultyClass has BuildDelay`
-        ).toBeDefined();
+        expect(AI_DIFFICULTY_MODS[diff].buildDelay).toBeDefined();
       });
     }
   });
 
-  describe('PARITY GAP: TS difficulty should include BuildSlowdown and DestroyWalls', () => {
+  describe('TS difficulty includes BuildSlowdown, DestroyWalls, ContentScan per level', () => {
     for (const diff of ['easy', 'normal', 'hard'] as Difficulty[]) {
       it(`${diff} should have isBuildSlowdown`, () => {
-        expect(
-          (AI_DIFFICULTY_MODS[diff] as Record<string, unknown>)['isBuildSlowdown'],
-          `${diff} missing isBuildSlowdown — C++ DifficultyClass has IsBuildSlowdown`
-        ).toBeDefined();
+        expect(AI_DIFFICULTY_MODS[diff].isBuildSlowdown).toBeDefined();
       });
 
       it(`${diff} should have isWallDestroyer`, () => {
-        expect(
-          (AI_DIFFICULTY_MODS[diff] as Record<string, unknown>)['isWallDestroyer'],
-          `${diff} missing isWallDestroyer — C++ DifficultyClass has IsWallDestroyer`
-        ).toBeDefined();
+        expect(AI_DIFFICULTY_MODS[diff].isWallDestroyer).toBeDefined();
       });
 
       it(`${diff} should have isContentScan`, () => {
-        expect(
-          (AI_DIFFICULTY_MODS[diff] as Record<string, unknown>)['isContentScan'],
-          `${diff} missing isContentScan — C++ DifficultyClass has IsContentScan`
-        ).toBeDefined();
+        expect(AI_DIFFICULTY_MODS[diff].isContentScan).toBeDefined();
       });
     }
   });
 
-  describe('PARITY GAP: TS difficulty BuildTime bias (C++ BuildSpeedBias) should differ per level', () => {
+  describe('TS difficulty BuildTime bias (C++ BuildSpeedBias) differs per level', () => {
     // C++ [Easy] BuildTime=0.8, [Normal] BuildTime=1.0, [Difficult] BuildTime=1.0
     // These affect build speed: lower = faster. C++ calls it BuildSpeedBias.
     // For computer on easy (gets [Difficult]): BuildTime=1.0
@@ -783,24 +734,18 @@ describe('Country bonuses (rules.ini country sections)', () => {
     });
   });
 
-  // -- Parity gap: missing fields in TS CountryBonus --
+  // TS CountryBonus now includes Airspeed and BuildTime multipliers.
 
-  describe('PARITY GAP: TS CountryBonus should include Airspeed and BuildTime', () => {
+  describe('TS CountryBonus includes Airspeed and BuildTime', () => {
     for (const { name, iniSection } of countries) {
-      it(`${name}: TS should have airspeedMult matching INI Airspeed`, () => {
+      it(`${name}: airspeedMult matches INI Airspeed`, () => {
         const iniVal = iniFloat(iniSection, 'Airspeed', 1.0);
-        expect(
-          (COUNTRY_BONUSES[name] as Record<string, unknown>)['airspeedMult'],
-          `COUNTRY_BONUSES.${name} missing airspeedMult — INI Airspeed=${iniVal}`
-        ).toBeCloseTo(iniVal, 2);
+        expect(COUNTRY_BONUSES[name].airspeedMult).toBeCloseTo(iniVal, 2);
       });
 
-      it(`${name}: TS should have buildTimeMult matching INI BuildTime`, () => {
+      it(`${name}: buildTimeMult matches INI BuildTime`, () => {
         const iniVal = iniFloat(iniSection, 'BuildTime', 1.0);
-        expect(
-          (COUNTRY_BONUSES[name] as Record<string, unknown>)['buildTimeMult'],
-          `COUNTRY_BONUSES.${name} missing buildTimeMult — INI BuildTime=${iniVal}`
-        ).toBeCloseTo(iniVal, 2);
+        expect(COUNTRY_BONUSES[name].buildTimeMult).toBeCloseTo(iniVal, 2);
       });
     }
   });

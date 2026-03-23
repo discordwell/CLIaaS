@@ -36,6 +36,7 @@ import {
   killBridgeOccupants,
 } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
+import { AI_BUILD_RULES } from '../engine/ai';
 import type { MapStructure } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 
@@ -177,19 +178,21 @@ describe('BridgeStrength value — rules.ini [General] BridgeStrength=1000', () 
     expect(parseInt(match![1])).toBe(CPP_BRIDGE_STRENGTH);
   });
 
-  it('PARITY GAP: engine hardcodes BridgeStrength=1000 instead of reading from rules.ini', () => {
+  it('engine sources BridgeStrength from AI_BUILD_RULES constant', () => {
     // C++ reads Rule.BridgeStrength from rules.ini at runtime (rules.cpp:267).
-    // TS hardcodes `const bridgeStrength = 1000` in combat.ts:1046.
-    // If rules.ini were changed, TS would not pick up the new value.
+    // TS now uses AI_BUILD_RULES.bridgeStrength instead of a hardcoded literal.
+    expect(AI_BUILD_RULES.bridgeStrength).toBe(CPP_BRIDGE_STRENGTH);
+
+    // Verify combat.ts no longer has a hardcoded `const bridgeStrength = 1000`
     const fs = require('node:fs');
     const path = require('node:path');
     const combatPath = path.resolve(__dirname, '..', 'engine', 'combat.ts');
     const combatSrc = fs.readFileSync(combatPath, 'utf8');
+    const hardcoded = combatSrc.match(/const bridgeStrength\s*=\s*\d+/);
+    expect(hardcoded, 'combat.ts should no longer hardcode bridgeStrength').toBeNull();
 
-    // TS should have the value hardcoded as a literal 1000
-    const hardcoded = combatSrc.match(/const bridgeStrength\s*=\s*(\d+)/);
-    expect(hardcoded, 'combat.ts should hardcode bridgeStrength').toBeTruthy();
-    expect(parseInt(hardcoded![1])).toBe(CPP_BRIDGE_STRENGTH);
+    // Verify combat.ts references AI_BUILD_RULES.bridgeStrength
+    expect(combatSrc).toContain('AI_BUILD_RULES.bridgeStrength');
   });
 });
 

@@ -20,6 +20,7 @@ import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
 import { canTargetNaval } from './aircraft';
+import { AI_BUILD_RULES } from './ai';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1068,9 +1069,8 @@ export function applySplashDamage(
     // combat.cpp:261-265 checks all 10 bridge template types for splash damage
     if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 238 || tmpl === 239 || tmpl === 241 || tmpl === 242 || tmpl === 378 || tmpl === 379) {
       // C++ combat.cpp:267 — Random_Pick(1, Rule.BridgeStrength) < strength
-      // BridgeStrength default = 1000 (rules.cpp:267)
-      const bridgeStrength = 1000;
-      if (Math.floor(Math.random() * bridgeStrength) + 1 < weapon.damage) {
+      // BridgeStrength sourced from AI_BUILD_RULES (rules.ini [General] BridgeStrength=1000)
+      if (Math.floor(Math.random() * AI_BUILD_RULES.bridgeStrength) + 1 < weapon.damage) {
         const destroyed = ctx.map.destroyBridge(impactCell.cx, impactCell.cy, 3);
         if (destroyed > 0) {
           killBridgeOccupants(ctx, impactCell.cx, impactCell.cy, 3);
