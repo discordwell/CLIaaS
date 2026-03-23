@@ -96,36 +96,31 @@ describe('DifficultyClass field completeness (C++ rules.h:44-61)', () => {
     }
   });
 
-  // PARITY GAP: C++ DifficultyClass has CostBias (rules.h:52) but TS AI_DIFFICULTY_MODS lacks it
+  // C++ DifficultyClass.CostBias (rules.h:52) — now implemented in TS AI_DIFFICULTY_MODS
   it('costBias exists on all difficulties (C++ rules.h:52 CostBias)', () => {
     for (const d of ALL_DIFFS) {
       // C++ house.cpp:294,304: CostBias = Rule.Diff[handicap].CostBias
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mods = AI_DIFFICULTY_MODS[d] as any;
-      expect(mods.costBias, `${d} missing costBias — PARITY GAP: C++ DifficultyClass.CostBias not in TS`).toBeDefined();
+      expect(AI_DIFFICULTY_MODS[d].costBias, `${d}`).toBeDefined();
+      expect(typeof AI_DIFFICULTY_MODS[d].costBias).toBe('number');
     }
   });
 
-  // PARITY GAP: C++ DifficultyClass has AirspeedBias (rules.h:49) but TS AI_DIFFICULTY_MODS lacks it
+  // C++ DifficultyClass.AirspeedBias (rules.h:49) — now implemented in TS AI_DIFFICULTY_MODS
   it('airspeedBias exists on all difficulties (C++ rules.h:49 AirspeedBias)', () => {
     for (const d of ALL_DIFFS) {
       // C++ house.cpp:291,301: AirspeedBias = Rule.Diff[handicap].AirspeedBias * Rule.GameSpeedBias
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mods = AI_DIFFICULTY_MODS[d] as any;
-      expect(mods.airspeedBias, `${d} missing airspeedBias — PARITY GAP: C++ DifficultyClass.AirspeedBias not in TS`).toBeDefined();
+      expect(AI_DIFFICULTY_MODS[d].airspeedBias, `${d}`).toBeDefined();
+      expect(typeof AI_DIFFICULTY_MODS[d].airspeedBias).toBe('number');
     }
   });
 
-  // PARITY GAP: C++ DifficultyClass has BuildSpeedBias (rules.h:53) — TS has buildSpeedMult but semantics differ
+  // C++ DifficultyClass.BuildSpeedBias (rules.h:53) — now implemented in TS AI_DIFFICULTY_MODS
+  // Note: TS also has buildSpeedMult which serves a different purpose (production interval scaling)
   it('buildSpeedBias exists on all difficulties (C++ rules.h:53)', () => {
     for (const d of ALL_DIFFS) {
       // C++ house.cpp:297,307: BuildSpeedBias = Rule.Diff[handicap].BuildSpeedBias * Rule.GameSpeedBias
-      // TS has buildSpeedMult but it is NOT a direct port of C++ BuildSpeedBias
-      // C++ BuildSpeedBias is a fixed-point multiplier on build time; TS buildSpeedMult is a
-      // direct multiplier on production interval
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mods = AI_DIFFICULTY_MODS[d] as any;
-      expect(mods.buildSpeedBias, `${d} missing buildSpeedBias — PARITY GAP: C++ uses BuildSpeedBias * GameSpeedBias`).toBeDefined();
+      expect(AI_DIFFICULTY_MODS[d].buildSpeedBias, `${d}`).toBeDefined();
+      expect(typeof AI_DIFFICULTY_MODS[d].buildSpeedBias).toBe('number');
     }
   });
 });
@@ -239,11 +234,11 @@ describe('ROFBias rearm delay calculation (C++ techno.cpp:2857-2870)', () => {
     // First shot always returns 3, unaffected by ROFBias
     const FIRST_SHOT_DELAY_CPP = 3;
     expect(FIRST_SHOT_DELAY_CPP).toBe(3);
-    // PARITY GAP: TS always applies ROFBias — does not distinguish first/second shot
+    // REMAINING GAP: TS always applies ROFBias — does not distinguish first/second shot.
     // In TS, attackCooldown is always set to Math.max(1, Math.round(rof * rofBias))
     // regardless of whether it's the first or second shot.
-    // A TS entity firing for the first time should get cooldown=3, but instead gets rof*bias.
-    // This test documents the expected C++ behavior for reference.
+    // C++ first shot gets a fixed 3-frame delay, second shot gets rof * ROFBias.
+    // Impact: first shot fires slightly too slow/fast depending on difficulty.
   });
 });
 
@@ -388,88 +383,93 @@ describe('GroundspeedBias per difficulty (C++ house.cpp:290,300)', () => {
     expect(combined).toBeCloseTo(1.32, 5);
   });
 
-  // PARITY GAP: C++ also multiplies GroundspeedBias by Rule.GameSpeedBias (house.cpp:290,300)
-  // TS getGroundspeedBias does NOT include GameSpeedBias
+  // C++ also multiplies GroundspeedBias by Rule.GameSpeedBias (house.cpp:290,300).
+  // TS omits GameSpeedBias since vanilla RA defaults it to 1.0.
+  // REMAINING GAP: If a mod sets GameSpeedBias != 1, TS would diverge.
   it('C++ multiplies by GameSpeedBias (default 1.0) — TS omits this factor', () => {
     // C++: GroundspeedBias = Rule.Diff[handicap].GroundspeedBias * Rule.GameSpeedBias
     // Rule.GameSpeedBias defaults to 1 (rules.cpp:132: GameSpeedBias(1))
-    // At default GameSpeedBias=1, the omission is invisible.
-    // PARITY GAP: If GameSpeedBias != 1, TS would diverge
+    // At default GameSpeedBias=1, the results match.
     const cppGameSpeedBias = 1; // default from rules.cpp:132
     const tsResult = AI_DIFFICULTY_MODS.hard.groundspeedBias; // 1.2
     const cppResult = AI_DIFFICULTY_MODS.hard.groundspeedBias * cppGameSpeedBias; // 1.2 * 1 = 1.2
-    expect(tsResult).toBe(cppResult); // passes only because GameSpeedBias=1
+    expect(tsResult).toBe(cppResult);
   });
 });
 
 // ============================================================
-// Section 8: CostBias — PARITY GAP
+// Section 8: CostBias per difficulty
 // C++ house.cpp:294,304: CostBias = Rule.Diff[handicap].CostBias
-// C++ applies CostBias to production cost
-// TS getEffectiveCost only uses COUNTRY_BONUSES[house].costMult — NOT difficulty CostBias
+// C++ applies CostBias to production cost; TS getEffectiveCost now supports optional costBias
 // ============================================================
 
-describe('CostBias per difficulty — PARITY GAP (C++ house.cpp:294,304)', () => {
-  // In vanilla RA RULES.INI, all difficulties have CostBias = 1.0,
-  // so this gap is invisible in practice. But the architecture is wrong.
-
-  it('TS getEffectiveCost uses country costMult only, not difficulty CostBias', () => {
+describe('CostBias per difficulty (C++ house.cpp:294,304)', () => {
+  it('getEffectiveCost applies country costMult with default costBias=1.0', () => {
     // USSR has costMult = 0.9 (10% cheaper)
     const item = { type: 'HTNK', name: 'Heavy Tank', cost: 1500, buildTime: 100, faction: 'soviet' as const, techLevel: 5 };
     const cost = getEffectiveCost(item, House.USSR);
-    // USSR: 1500 * 0.9 = 1350
+    // USSR: 1500 * 0.9 * 1.0 = 1350
     expect(cost).toBe(1350);
   });
 
-  it('getEffectiveCost does not accept difficulty parameter', () => {
-    // C++ would apply CostBias = Rule.Diff[handicap].CostBias to the cost
-    // TS getEffectiveCost(item, house) has no difficulty parameter
-    // PARITY GAP: difficulty-based cost scaling is not implemented
-    expect(getEffectiveCost.length).toBe(2); // (item, house) — no difficulty param
+  it('getEffectiveCost accepts optional costBias parameter', () => {
+    // C++ house.cpp:294,304: CostBias = Rule.Diff[handicap].CostBias
+    // getEffectiveCost(item, house, costBias) — 3rd param defaults to 1.0
+    const item = { type: 'HTNK', name: 'Heavy Tank', cost: 1500, buildTime: 100, faction: 'soviet' as const, techLevel: 5 };
+    // USSR (0.9) with hard costBias (0.8): 1500 * 0.9 * 0.8 = 1080
+    const hardCost = getEffectiveCost(item, House.USSR, AI_DIFFICULTY_MODS.hard.costBias);
+    expect(hardCost).toBe(1080);
+    // Without costBias (defaults to 1.0): 1500 * 0.9 = 1350
+    const normalCost = getEffectiveCost(item, House.USSR);
+    expect(normalCost).toBe(1350);
   });
 
-  // PARITY GAP: AI houses should have their CostBias applied to production costs
-  // In C++ the cost is: item.cost * HouseType.CostBias * Rule.Diff[difficulty].CostBias
-  // In TS the cost is: item.cost * COUNTRY_BONUSES[house].costMult
-  // When CostBias=1.0 (all vanilla difficulties), these are equivalent.
-  it('costBias field missing from AI_DIFFICULTY_MODS', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const easyMods = AI_DIFFICULTY_MODS.easy as any;
-    // PARITY GAP: This will fail because costBias is not defined
-    expect(easyMods.costBias).toBeDefined();
+  it('costBias field exists on all AI_DIFFICULTY_MODS', () => {
+    expect(AI_DIFFICULTY_MODS.easy.costBias).toBeDefined();
+    expect(AI_DIFFICULTY_MODS.normal.costBias).toBeDefined();
+    expect(AI_DIFFICULTY_MODS.hard.costBias).toBeDefined();
+  });
+
+  it('costBias values match rules.ini (C++ reversal: computer on hard gets [Easy] Cost=0.8)', () => {
+    // rules.ini [Easy] Cost=.8, [Normal] Cost=1.0, [Difficult] Cost=1.0
+    // C++ reversal: computer easy gets [Difficult], computer hard gets [Easy]
+    expect(AI_DIFFICULTY_MODS.easy.costBias).toBe(1.0);   // computer gets [Difficult] Cost=1.0
+    expect(AI_DIFFICULTY_MODS.normal.costBias).toBe(1.0);  // [Normal] Cost=1.0
+    expect(AI_DIFFICULTY_MODS.hard.costBias).toBe(0.8);    // computer gets [Easy] Cost=0.8
   });
 });
 
 // ============================================================
-// Section 9: AirspeedBias — PARITY GAP
+// Section 9: AirspeedBias per difficulty
 // C++ house.cpp:291,301: AirspeedBias = Rule.Diff[handicap].AirspeedBias * Rule.GameSpeedBias
-// C++ has a SEPARATE AirspeedBias from GroundspeedBias
-// TS uses groundspeedBias for all units (no separate airspeed)
+// C++ has a SEPARATE AirspeedBias from GroundspeedBias — now implemented in TS
 // ============================================================
 
-describe('AirspeedBias — PARITY GAP (C++ house.cpp:291,301)', () => {
+describe('AirspeedBias per difficulty (C++ house.cpp:291,301)', () => {
   // C++ DifficultyClass (rules.h:49) has AirspeedBias as a separate field
   // C++ Assign_Handicap applies it separately from GroundspeedBias
-  // TS AI_DIFFICULTY_MODS has NO airspeedBias field
+  // TS AI_DIFFICULTY_MODS now has airspeedBias as a separate field
 
-  it('AI_DIFFICULTY_MODS should have airspeedBias separate from groundspeedBias', () => {
-    // PARITY GAP: TS lacks airspeedBias
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const hardMods = AI_DIFFICULTY_MODS.hard as any;
-    expect(hardMods.airspeedBias).toBeDefined();
+  it('AI_DIFFICULTY_MODS has airspeedBias separate from groundspeedBias', () => {
+    expect(AI_DIFFICULTY_MODS.hard.airspeedBias).toBeDefined();
+    expect(typeof AI_DIFFICULTY_MODS.hard.airspeedBias).toBe('number');
   });
 
   // In vanilla RA RULES.INI, AirspeedBias and GroundspeedBias have the same values
-  // per difficulty level, so in practice the gap is invisible. But architecturally
-  // they should be separate to match C++.
+  // per difficulty level. A mod could set different values.
   it('in vanilla RA, airspeed and groundspeed biases are equal per difficulty', () => {
-    // C++ RULES.INI: [Easy] Groundspeed=0.8, Airspeed=0.8
-    //                [Normal] Groundspeed=1.0, Airspeed=1.0
-    //                [Difficult] Groundspeed=1.2, Airspeed=1.2
-    // So using groundspeedBias for aircraft is correct in vanilla RA.
-    // But a mod could set different values.
-    expect(AI_DIFFICULTY_MODS.easy.groundspeedBias).toBe(0.8);
-    expect(AI_DIFFICULTY_MODS.hard.groundspeedBias).toBe(1.2);
+    // rules.ini [Easy] Groundspeed=0.8, Airspeed=0.8 -> computer hard gets [Easy]
+    // rules.ini [Normal] Groundspeed=1.0, Airspeed=1.0
+    // rules.ini [Difficult] Groundspeed=1.2, Airspeed=1.2 -> computer easy gets [Difficult]
+    expect(AI_DIFFICULTY_MODS.easy.airspeedBias).toBe(AI_DIFFICULTY_MODS.easy.groundspeedBias);
+    expect(AI_DIFFICULTY_MODS.normal.airspeedBias).toBe(AI_DIFFICULTY_MODS.normal.groundspeedBias);
+    expect(AI_DIFFICULTY_MODS.hard.airspeedBias).toBe(AI_DIFFICULTY_MODS.hard.groundspeedBias);
+  });
+
+  it('airspeedBias values match rules.ini (C++ reversal)', () => {
+    expect(AI_DIFFICULTY_MODS.easy.airspeedBias).toBe(0.8);   // [Difficult] Airspeed=0.8
+    expect(AI_DIFFICULTY_MODS.normal.airspeedBias).toBe(1.0);  // [Normal] Airspeed=1.0
+    expect(AI_DIFFICULTY_MODS.hard.airspeedBias).toBe(1.2);    // [Easy] Airspeed=1.2
   });
 });
 
@@ -556,7 +556,7 @@ describe('Bias symmetry around normal=1.0 (C++ difficulty design)', () => {
 describe('CountryBonus completeness vs C++ HouseTypeClass biases', () => {
   // C++ HouseTypeClass has: FirepowerBias, GroundspeedBias, AirspeedBias, ArmorBias, ROFBias, CostBias
   // TS CountryBonus has:    firepowerMult, groundspeedMult, armorMult, rofMult, costMult
-  // PARITY GAP: No airspeedMult in CountryBonus (but no country has different airspeed anyway)
+  // Note: No airspeedMult in CountryBonus — no vanilla country has different airspeed anyway
 
   it('all countries have firepowerMult', () => {
     for (const [name, bonus] of Object.entries(COUNTRY_BONUSES)) {

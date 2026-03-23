@@ -478,66 +478,49 @@ describe('Building cap enforcement (C++ house.cpp AI_Building)', () => {
 // =============================================================================
 // 4. Aircraft Cap Enforcement
 // C++ house.cpp:6245: if (CurAircraft >= Control.MaxAircraft) return(TICKS_PER_SECOND);
-// PARITY GAP: TS does not enforce MaxAircraft — aircraft production is only
-// gated by pad/airstrip count, not by a house-level aircraft cap.
+// TS now enforces MaxAircraft — aircraft production gated by both pad count AND house cap.
 // =============================================================================
 
 describe('Aircraft cap enforcement (C++ house.cpp:6245 AI_Aircraft)', () => {
-  it('C++ blocks aircraft production when CurAircraft >= MaxAircraft', () => {
+  it('AIHouseState has maxAircraft and maxVessel fields', () => {
     // C++ house.cpp:6243-6245:
     //   if (!IsHuman && IQ >= Rule.IQAircraft) {
     //     if (BuildAircraft != AIRCRAFT_NONE) return(TICKS_PER_SECOND);
     //     if (CurAircraft >= Control.MaxAircraft) return(TICKS_PER_SECOND);
-    //
-    // TS has no MaxAircraft field on AIHouseState. Aircraft production is only
-    // limited by helipad/airstrip count vs current aircraft count.
-    // PARITY GAP: TS missing MaxAircraft cap enforcement.
 
     const state = createAIHouseState(
       makeMockAIContext(),
       House.USSR,
     );
 
-    // C++ AIHouseState should have a maxAircraft field
-    // In TS, the AIHouseState only has maxUnit, maxInfantry, maxBuilding
+    // All five cap fields present (matching C++ HouseStaticClass)
     expect('maxUnit' in state).toBe(true);
     expect('maxInfantry' in state).toBe(true);
     expect('maxBuilding' in state).toBe(true);
-
-    // PARITY GAP: TS has no maxAircraft or maxVessel fields
-    const hasMaxAircraft = 'maxAircraft' in state;
-    const hasMaxVessel = 'maxVessel' in state;
-    expect(hasMaxAircraft).toBe(true); // PARITY GAP — will fail until TS adds maxAircraft
-    expect(hasMaxVessel).toBe(true);   // PARITY GAP — will fail until TS adds maxVessel
+    expect('maxAircraft' in state).toBe(true);
+    expect('maxVessel' in state).toBe(true);
   });
 });
 
 // =============================================================================
 // 5. Vessel Cap Enforcement
 // C++ house.cpp:5926: if (CurVessels >= Control.MaxVessel) return(TICKS_PER_SECOND);
-// PARITY GAP: TS does not enforce MaxVessel — naval production is not
-// independently capped.
+// TS has maxVessel field with correct defaults and INI override support.
 // =============================================================================
 
 describe('Vessel cap enforcement (C++ house.cpp:5926 AI_Vessel)', () => {
-  it('C++ blocks vessel production when CurVessels >= MaxVessel', () => {
+  it('AIHouseState has maxVessel with correct default', () => {
     // C++ house.cpp:5924-5928:
     //   if (BuildVessel != VESSEL_NONE) return(TICKS_PER_SECOND);
-    //   if (CurVessels >= Control.MaxVessel) {
-    //       return(TICKS_PER_SECOND);
-    //   }
-    //
-    // PARITY GAP: TS has no maxVessel field or vessel cap check.
-    // This test documents the expected C++ behavior.
-
+    //   if (CurVessels >= Control.MaxVessel) return(TICKS_PER_SECOND);
     const state = createAIHouseState(
       makeMockAIContext(),
       House.USSR,
     );
 
-    // PARITY GAP: maxVessel should exist on AIHouseState
-    const hasMaxVessel = 'maxVessel' in state;
-    expect(hasMaxVessel).toBe(true); // PARITY GAP — will fail until TS adds maxVessel
+    expect('maxVessel' in state).toBe(true);
+    // C++ default: Rule.VesselMax/6 = 100/6 = 16
+    expect(state.maxVessel).toBe(Math.floor(100 / 6));
   });
 });
 
@@ -550,58 +533,40 @@ describe('Vessel cap enforcement (C++ house.cpp:5926 AI_Vessel)', () => {
 //   MaxVessel(Rule.VesselMax/6),     // 100/6 = 16
 //   MaxAircraft(Rule.UnitMax/6),     // 500/6 = 83 (uses UnitMax!)
 //
-// PARITY GAP: TS defaults to -1 (unlimited) when caps not specified in INI.
-// C++ always has positive default caps.
+// TS now defaults to C++ values when caps not specified in INI.
 // =============================================================================
 
 describe('Default cap values (C++ house.cpp:755-759)', () => {
-  it('C++ defaults MaxUnit to Rule.UnitMax/6 = 83, TS defaults to -1 (unlimited)', () => {
-    // C++ house.cpp:755: MaxUnit(Rule.UnitMax/6)
-    // rules.cpp:253: UnitMax(500)
-    // Therefore default MaxUnit = 500/6 = 83 (integer division)
-    //
-    // TS ai.ts:332: maxUnit: ctx.houseMaxUnits.get(house) ?? -1
-    // When not specified in scenario INI, TS defaults to -1 (unlimited)
-    //
-    // PARITY GAP: C++ has positive defaults; TS defaults to unlimited
-
-    const ctx = makeMockAIContext();
-    // Don't set any houseMaxUnits
-    const state = createAIHouseState(ctx, House.USSR);
-
-    // C++ would default to 83
-    const CPP_DEFAULT_MAX_UNIT = Math.floor(500 / 6); // = 83
-    // PARITY GAP: TS defaults to -1 (unlimited) instead of 83
-    expect(state.maxUnit).toBe(CPP_DEFAULT_MAX_UNIT); // PARITY GAP
-  });
-
-  it('C++ defaults MaxInfantry to Rule.InfantryMax/6 = 83, TS defaults to -1', () => {
+  it('MaxUnit defaults to Rule.UnitMax/6 = 83', () => {
     const ctx = makeMockAIContext();
     const state = createAIHouseState(ctx, House.USSR);
-
-    const CPP_DEFAULT_MAX_INFANTRY = Math.floor(500 / 6); // = 83
-    // PARITY GAP: TS defaults to -1 (unlimited) instead of 83
-    expect(state.maxInfantry).toBe(CPP_DEFAULT_MAX_INFANTRY); // PARITY GAP
+    expect(state.maxUnit).toBe(Math.floor(500 / 6)); // 83
   });
 
-  it('C++ defaults MaxBuilding to Rule.BuildingMax/6 = 83, TS defaults to -1', () => {
+  it('MaxInfantry defaults to Rule.InfantryMax/6 = 83', () => {
     const ctx = makeMockAIContext();
     const state = createAIHouseState(ctx, House.USSR);
-
-    const CPP_DEFAULT_MAX_BUILDING = Math.floor(500 / 6); // = 83
-    // PARITY GAP: TS defaults to -1 (unlimited) instead of 83
-    expect(state.maxBuilding).toBe(CPP_DEFAULT_MAX_BUILDING); // PARITY GAP
+    expect(state.maxInfantry).toBe(Math.floor(500 / 6)); // 83
   });
 
-  it('C++ MaxAircraft defaults to Rule.UnitMax/6, NOT Rule.AircraftMax/6', () => {
+  it('MaxBuilding defaults to Rule.BuildingMax/6 = 83', () => {
+    const ctx = makeMockAIContext();
+    const state = createAIHouseState(ctx, House.USSR);
+    expect(state.maxBuilding).toBe(Math.floor(500 / 6)); // 83
+  });
+
+  it('MaxAircraft defaults to Rule.UnitMax/6 = 83 (C++ quirk: uses UnitMax, NOT AircraftMax)', () => {
     // C++ house.cpp:759: MaxAircraft(Rule.UnitMax/6)
-    // This is a notable quirk: MaxAircraft uses UnitMax (500), not AircraftMax (100)
-    // So default MaxAircraft = 500/6 = 83, not 100/6 = 16
-    //
-    // PARITY GAP: TS has no MaxAircraft at all
-    const CPP_DEFAULT_MAX_AIRCRAFT = Math.floor(500 / 6); // = 83
-    // Document the C++ value for when TS implements this
-    expect(CPP_DEFAULT_MAX_AIRCRAFT).toBe(83);
+    // Uses UnitMax (500), not AircraftMax (100), so 500/6 = 83 not 16
+    const ctx = makeMockAIContext();
+    const state = createAIHouseState(ctx, House.USSR);
+    expect(state.maxAircraft).toBe(Math.floor(500 / 6)); // 83
+  });
+
+  it('MaxVessel defaults to Rule.VesselMax/6 = 16', () => {
+    const ctx = makeMockAIContext();
+    const state = createAIHouseState(ctx, House.USSR);
+    expect(state.maxVessel).toBe(Math.floor(100 / 6)); // 16
   });
 });
 
@@ -640,18 +605,16 @@ describe('INI override of caps (C++ house.cpp:7141-7145)', () => {
   it('C++ fallback: if MaxVessel==0, use MaxUnit value (house.cpp:7145)', () => {
     // C++ house.cpp:7145:
     //   if (p->Control.MaxVessel == 0) p->Control.MaxVessel = p->Control.MaxUnit;
-    //
     // When scenario INI specifies MaxVessel=0, C++ falls back to MaxUnit.
-    // PARITY GAP: TS has no MaxVessel field at all, let alone this fallback.
-
     const ctx = makeMockAIContext();
     ctx.houseMaxUnits.set(House.USSR, 50);
-    // Simulate MaxVessel=0 scenario
+    // Simulate MaxVessel=0 in scenario INI
+    if (!ctx.houseMaxVessels) ctx.houseMaxVessels = new Map();
+    ctx.houseMaxVessels.set(House.USSR, 0);
     const state = createAIHouseState(ctx, House.USSR);
 
-    // PARITY GAP: TS has no maxVessel field
-    const hasMaxVessel = 'maxVessel' in state;
-    expect(hasMaxVessel).toBe(true); // PARITY GAP
+    // MaxVessel=0 should fall back to MaxUnit=50
+    expect(state.maxVessel).toBe(50);
   });
 });
 
@@ -665,19 +628,18 @@ describe('INI override of caps (C++ house.cpp:7141-7145)', () => {
 //
 // Where maxunit = average CurUnits across all active non-ally houses.
 // This prevents the AI from being permanently capped below the human player.
-//
-// PARITY GAP: TS does not implement dynamic cap increases.
+// Now implemented in TS via updateAIStrategicPlanner.
 // =============================================================================
 
 describe('Dynamic cap increase (C++ house.cpp:4726-4740)', () => {
-  it('C++ raises caps when enemy average exceeds current cap minus 10', () => {
-    // In C++, during AI() processing:
+  it('raises caps when enemy average exceeds current cap minus 10', () => {
+    // During AI strategic planning:
     // 1. Sum all enemy CurUnits, divide by enemy count = enemyAvg
     // 2. If Control.MaxUnit < enemyAvg + 10, set Control.MaxUnit = enemyAvg + 10
     //
-    // Example: Soviet has MaxUnit=20, player has 50 units
-    //   enemyAvg = 50
-    //   Since 20 < 50+10=60, Soviet.MaxUnit becomes 60
+    // Example: Soviet has MaxUnit=5, player has 40 vehicles
+    //   enemyAvg = 40
+    //   Since 5 < 40+10=50, Soviet.MaxUnit becomes 50
 
     // Tick must be divisible by 150 for updateAIStrategicPlanner to run
     const ctx = makeMockAIContext({ tick: 150 });
@@ -691,16 +653,10 @@ describe('Dynamic cap increase (C++ house.cpp:4726-4740)', () => {
       ctx.entityById.set(veh.id, veh);
     }
 
-    // In C++, the AI's cap would be raised to 40+10=50 during AI()
-    // In TS, the cap stays at 5 forever.
-    // We can't directly test this without running the strategic planner,
-    // but we can verify the state was NOT modified (documenting the gap).
     updateAIStrategicPlanner(ctx);
 
-    // PARITY GAP: TS does not implement dynamic cap increase.
-    // C++ would set state.maxUnit to at least 50 (40 enemy units + 10).
-    // TS keeps it at 5.
-    expect(state.maxUnit).toBe(50); // PARITY GAP — TS keeps original value
+    // Dynamic cap increase: enemyAvg=40, so maxUnit raised to 40+10=50
+    expect(state.maxUnit).toBe(50);
   });
 });
 

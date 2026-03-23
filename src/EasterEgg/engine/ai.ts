@@ -1444,7 +1444,10 @@ export function updateAIConstruction(ctx: AIContext): void {
       continue;
     }
 
-    if (credits < prodItem.cost) continue;
+    // C++ house.cpp:294,304: CostBias scales production costs per difficulty
+    const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+    const biasedCost = Math.max(1, Math.round(prodItem.cost * mods.costBias));
+    if (credits < biasedCost) continue;
 
     const pos = aiPlaceStructure(ctx, house, buildType);
     if (!pos) {
@@ -1452,12 +1455,10 @@ export function updateAIConstruction(ctx: AIContext): void {
       continue;
     }
 
-    ctx.houseCredits.set(house, credits - prodItem.cost);
+    ctx.houseCredits.set(house, credits - biasedCost);
     state.buildQueue.shift();
 
     spawnAIStructure(ctx, buildType, house, pos.cx, pos.cy);
-
-    const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
     state.buildCooldown = Math.floor(6 * mods.buildSpeedMult);
     state.lastBuildTick = ctx.tick;
   }
@@ -1958,8 +1959,18 @@ export function updateAIProduction(ctx: AIContext): void {
     // C++ parity (house.cpp:6239-6277): AI_Aircraft — build aircraft when pads are available.
     // In C++, AI_Aircraft runs independently from AI_Unit/AI_Infantry, so aircraft get their own
     // credit allocation. We process aircraft FIRST to match this behavior.
+    // C++ house.cpp:6245: if (CurAircraft >= Control.MaxAircraft) return(TICKS_PER_SECOND);
+    let skipAircraft = false;
+    if (state && state.maxAircraft >= 0) {
+      let acCount = 0;
+      for (const e of ctx.entities) {
+        if (e.alive && e.house === house && e.stats.isAircraft) acCount++;
+      }
+      if (acCount >= state.maxAircraft) skipAircraft = true;
+    }
+
     const aircraftCredits = ctx.houseCredits.get(house) ?? 0;
-    if (aircraftCredits >= 800) {
+    if (aircraftCredits >= 800 && !skipAircraft) {
       const houseFaction = HOUSE_FACTION[house] ?? 'both';
       const isSoviet = houseFaction === 'soviet';
 
@@ -1973,12 +1984,13 @@ export function updateAIProduction(ctx: AIContext): void {
       if (hpadCount > heliCount) {
         const heliType = isSoviet ? UnitType.V_HIND : UnitType.V_HELI;
         const heliItem = ctx.scenarioProductionItems.find(p => p.type === heliType);
-        if (heliItem && aircraftCredits >= heliItem.cost) {
+        const heliCost = heliItem ? Math.max(1, Math.round(heliItem.cost * mods.costBias)) : 0;
+        if (heliItem && aircraftCredits >= heliCost) {
           const unit = spawnAIUnit(ctx, house, heliType, 'HPAD', Mission.AREA_GUARD);
           if (unit) {
             unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
             unit.aircraftState = 'landed';
-            ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - heliItem.cost);
+            ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - heliCost);
           }
         }
       }
@@ -1986,13 +1998,14 @@ export function updateAIProduction(ctx: AIContext): void {
       if (afldCount > fixedWingCount) {
         const jetType = isSoviet ? UnitType.V_MIG : UnitType.V_YAK;
         const jetItem = ctx.scenarioProductionItems.find(p => p.type === jetType);
+        const jetCost = jetItem ? Math.max(1, Math.round(jetItem.cost * mods.costBias)) : 0;
         const jetCredits = ctx.houseCredits.get(house) ?? 0;
-        if (jetItem && jetCredits >= jetItem.cost) {
+        if (jetItem && jetCredits >= jetCost) {
           const unit = spawnAIUnit(ctx, house, jetType, 'AFLD', Mission.AREA_GUARD);
           if (unit) {
             unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
             unit.aircraftState = 'landed';
-            ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - jetItem.cost);
+            ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - jetCost);
           }
         }
       }
@@ -2001,10 +2014,11 @@ export function updateAIProduction(ctx: AIContext): void {
     // Strategic AI: Harvester priority
     if (state && hasWeap && state.harvesterCount < state.refineryCount) {
       const harvItem = ctx.scenarioProductionItems.find(p => p.type === 'HARV');
-      if (harvItem && credits >= harvItem.cost) {
+      const harvCost = harvItem ? Math.max(1, Math.round(harvItem.cost * mods.costBias)) : 0;
+      if (harvItem && credits >= harvCost) {
         const unit = spawnAIUnit(ctx, house, UnitType.V_HARV, 'WEAP');
         if (unit) {
-          ctx.houseCredits.set(house, credits - harvItem.cost);
+          ctx.houseCredits.set(house, credits - harvCost);
           continue;
         }
       }
@@ -2035,7 +2049,8 @@ export function updateAIProduction(ctx: AIContext): void {
             );
             return infItems.length > 0 ? infItems[Math.floor(Math.random() * infItems.length)] : null;
           })();
-      if (pick && credits >= pick.cost) {
+      const infCost = pick ? Math.max(1, Math.round(pick.cost * mods.costBias)) : 0;
+      if (pick && credits >= infCost) {
         const unitType = pick.type as UnitType;
         const unit = spawnAIUnit(ctx, house, unitType, 'TENT', Mission.AREA_GUARD,
           staging ?? undefined);
@@ -2046,7 +2061,7 @@ export function updateAIProduction(ctx: AIContext): void {
             unit.moveTarget = staging;
             unit.mission = Mission.MOVE;
           }
-          ctx.houseCredits.set(house, credits - pick.cost);
+          ctx.houseCredits.set(house, credits - infCost);
         }
       }
     }
@@ -2075,7 +2090,8 @@ export function updateAIProduction(ctx: AIContext): void {
             );
             return vehItems.length > 0 ? vehItems[Math.floor(Math.random() * vehItems.length)] : null;
           })();
-      if (pick && currentCredits >= pick.cost) {
+      const vehCost = pick ? Math.max(1, Math.round(pick.cost * mods.costBias)) : 0;
+      if (pick && currentCredits >= vehCost) {
         const unitType = pick.type as UnitType;
         const unit = spawnAIUnit(ctx, house, unitType, 'WEAP', Mission.AREA_GUARD,
           staging ?? undefined);
@@ -2086,7 +2102,7 @@ export function updateAIProduction(ctx: AIContext): void {
             unit.moveTarget = staging;
             unit.mission = Mission.MOVE;
           }
-          ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - pick.cost);
+          ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - vehCost);
         }
       }
     }
