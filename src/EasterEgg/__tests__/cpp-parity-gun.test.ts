@@ -356,10 +356,11 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     expect(gun.desiredTurretDir).toBe(Dir.N);
   });
 
-  it('turretDir rotates one step per tick toward desiredTurretDir (shortest path)', () => {
+  it('turretDir rotates via ROT accumulator toward desiredTurretDir (shortest path)', () => {
     const gun = makeGUN(10, 10);
     gun.turretDir = 4; // South
     gun.desiredTurretDir = 4;
+    gun.turretRotAccum = 0;
     // Place enemy to the East — direction = 2
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 14, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
@@ -370,29 +371,35 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     expect(gun.desiredTurretDir).toBe(Dir.E);
     expect(gun.turretDir).toBe(4); // no rotation yet on first tick
 
-    // Second tick: turret rotation runs with turretDir=4, desired=2.
-    // diff = (2 - 4 + 8) % 8 = 6. Since 6 > 4, rotate CCW: (4 + 7) % 8 = 3 (SE)
-    gun.attackCooldown = 5; // still on cooldown, but turret rotation is independent
-    const ctx2 = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx2);
-    expect(gun.turretDir).toBe(3); // one step CCW from South toward East
+    // C++ ROT=5, 32 DirType units per 8-dir step → first step after 7 accumulation ticks.
+    // Tick 1 had turretDir===desiredTurretDir (no accumulation), targeting then set desired=2.
+    // So accumulation starts on tick 2. Need 7 more ticks (ticks 2-8) for accum=35 >= 32.
+    for (let i = 0; i < 7; i++) {
+      gun.attackCooldown = 5; // on cooldown, but turret rotation is independent
+      const ctx2 = makeCombatCtx([gun], [enemy]);
+      updateStructureCombat(ctx2);
+    }
+    // After 8 ticks total (1 initial + 7 here), accumulator = 7*5 = 35 >= 32 → one step
+    expect(gun.turretDir).toBe(3); // one step CCW from South toward East (SE)
   });
 
   it('turretDir reaches desiredTurretDir after enough ticks', () => {
     const gun = makeGUN(10, 10);
     gun.turretDir = 4; // South
     gun.desiredTurretDir = 2; // East (already pre-set)
+    gun.turretRotAccum = 0;
 
     // Enemy far away so range check works, but also within range
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 14, 10);
 
-    // Run enough ticks with cooldown reset to allow rotation
-    for (let i = 0; i < 10; i++) {
+    // C++ ROT=5: South(4) → East(2) = 2 steps CCW, each step ~7 ticks = ~14 ticks.
+    // Run enough ticks with cooldown reset to allow full rotation.
+    for (let i = 0; i < 20; i++) {
       const ctx = makeCombatCtx([gun], [enemy]);
       updateStructureCombat(ctx);
       gun.attackCooldown = 0; // reset cooldown to allow re-targeting
     }
-    // After several ticks, turret should have reached East (2)
+    // After enough ticks, turret should have reached East (2)
     expect(gun.turretDir).toBe(Dir.E);
   });
 

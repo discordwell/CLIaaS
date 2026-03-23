@@ -110,15 +110,12 @@ describe('CONDITION_RED sight reduction (techno.cpp:5903-5913)', () => {
     expect(CONDITION_RED).toBe(0.25);
   });
 
-  // PARITY GAP: TS fog.ts:72 reduces sight to 1 at CONDITION_RED.
-  // C++ techno.cpp:5908 always uses Techno_Type_Class()->SightRange with no health check.
-  // TS invents sight reduction that does not exist in C++.
+  // RESOLVED: TS fog.ts now uses e.stats.sight directly with no health check,
+  // matching C++ techno.cpp:5908 which always uses Techno_Type_Class()->SightRange.
   it('C++ Look() does NOT reduce sight at CONDITION_RED — sight stays at type SightRange', () => {
     // C++ techno.cpp:5908: int sight_range = Techno_Type_Class()->SightRange;
     // No health check. A unit with SightRange=5 at 1% HP still has sight=5.
-    //
-    // TS fog.ts:72: const sight = (e.hp / e.maxHp) < CONDITION_RED ? 1 : e.stats.sight;
-    // TS reduces sight to 1 when health < 0.25. This diverges from C++.
+    // TS fog.ts now uses e.stats.sight directly — matching C++.
 
     const map = new GameMap();
     const entity = makeEntity({
@@ -131,23 +128,14 @@ describe('CONDITION_RED sight reduction (techno.cpp:5903-5913)', () => {
     const ctx = makeFogContext({ map, entities: [entity] });
     updateFogOfWar(ctx);
 
-    // C++ expected: unit reveals cells within sight=5 radius
-    // Check a cell at distance 4 from the unit (should be visible with sight=5)
-    const unitCx = 64;
-    const unitCy = 64;
-    const checkCx = unitCx + 4;
-    const checkCy = unitCy;
-
-    // C++ expectation: sight=5 (type SightRange), so cell at distance 4 IS visible
-    // TS behavior: sight=1 (reduced), so cell at distance 4 is NOT visible
-    // PARITY GAP: TS reduces sight at CONDITION_RED, C++ does not.
-    const vis = map.getVisibility(checkCx, checkCy);
-    expect(vis).toBe(2); // PARITY GAP: TS returns 0 (shroud), C++ expects 2 (visible)
+    // Unit at 10% HP still reveals cells within sight=5 radius (no health reduction)
+    const vis = map.getVisibility(64 + 4, 64);
+    expect(vis).toBe(2); // Matches C++: full sight range regardless of health
   });
 
-  // PARITY GAP: Same as above — TS reduces sight at 24% HP, C++ does not.
+  // RESOLVED: TS now uses full sight range regardless of health.
   it('C++ Look() uses full sight range regardless of health ratio', () => {
-    // Even at exactly CONDITION_RED threshold (25%), C++ uses full sight
+    // Even at 24% HP (below CONDITION_RED), sight is the type's SightRange.
     const map = new GameMap();
     const entity = makeEntity({
       pos: { x: 64 * CELL_SIZE, y: 64 * CELL_SIZE },
@@ -159,15 +147,15 @@ describe('CONDITION_RED sight reduction (techno.cpp:5903-5913)', () => {
     const ctx = makeFogContext({ map, entities: [entity] });
     updateFogOfWar(ctx);
 
-    // C++ expected: sight=7 (type SightRange), cell at distance 6 IS visible
+    // sight=7 (type SightRange), cell at distance 6 IS visible
     const vis = map.getVisibility(64 + 6, 64);
-    expect(vis).toBe(2); // PARITY GAP: TS reduces to sight=1, C++ keeps sight=7
+    expect(vis).toBe(2); // Matches C++: full sight range at any health
   });
 
-  // PARITY GAP: TS fog.ts:84 reduces structure sight at CONDITION_RED too. C++ does not.
+  // RESOLVED: TS fog.ts now uses STRUCTURE_SIGHT[type] directly, no health reduction.
   it('C++ structure sight is also NOT reduced by condition', () => {
-    // Same principle applies to buildings — C++ building.cpp uses Class->SightRange
-    // TS fog.ts:84: const sight = (s.hp / s.maxHp) < CONDITION_RED ? 1 : baseSight;
+    // C++ building.cpp uses Class->SightRange directly — no health check.
+    // TS fog.ts now uses STRUCTURE_SIGHT[type] with no condition reduction.
     const map = new GameMap();
     const structure = {
       type: 'GUN',
@@ -186,10 +174,9 @@ describe('CONDITION_RED sight reduction (techno.cpp:5903-5913)', () => {
     });
     updateFogOfWar(ctx);
 
-    // C++ expected: defense sight=7 (or whatever its SightRange is), cell at distance 5 visible
-    // TS gives sight=1 because hp/maxHp < CONDITION_RED
+    // GUN has STRUCTURE_SIGHT=6, cell at distance 5 IS visible
     const vis = map.getVisibility(64 + 5, 64);
-    expect(vis).toBe(2); // PARITY GAP: TS reduces structure sight too
+    expect(vis).toBe(2); // Matches C++: full sight regardless of health
   });
 });
 
@@ -240,15 +227,12 @@ describe('Sonar pulse sub-detection (house.cpp:2612-2634, vessel.cpp:1951-1953)'
     expect(CLOAK_TRANSITION_FRAMES).toBeGreaterThan(0);
   });
 
-  // PARITY GAP: C++ sonar is a global superweapon (house.cpp:2622-2632, no range check).
-  // TS fog.ts:110-111 uses per-unit range-based detection (worldDist <= sight).
+  // RESOLVED: TS fog.ts now implements global sonar sweep matching C++ house.cpp:2622-2632.
+  // When player has any anti-sub unit, enemy subs outside scanner adjacency are detected globally.
   it('C++ sonar pulse is GLOBAL — all subs detected regardless of range', () => {
     // C++ house.cpp:2622-2632: iterates ALL Vessels, no distance check.
-    // TS fog.ts:110-111: uses worldDist(dd.pos, sub.pos) <= sight (range-based).
-    //
-    // This means in C++, a sonar pulse detects subs across the entire map.
-    // In TS, detection is per-detector-unit with range limited by sight.
-    // This test verifies the TS behavior against C++ expectations.
+    // TS fog.ts now detects subs globally when player has anti-sub units,
+    // falling back to adjacency-only when sub is near a scanner.
 
     const detector = makeEntity({
       pos: { x: 10 * CELL_SIZE, y: 10 * CELL_SIZE },
@@ -270,35 +254,21 @@ describe('Sonar pulse sub-detection (house.cpp:2612-2634, vessel.cpp:1951-1953)'
 
     updateSubDetection(ctx);
 
-    // C++ expected: sonar pulse would detect this sub (global, no range check)
-    // TS expected: sub NOT detected (out of range)
-    // PARITY GAP: TS uses per-unit range detection, C++ sonar is global
-    expect(farSub.cloakState).toBe(CloakState.UNCLOAKING);
-    // ^ Will fail if TS doesn't detect — that's the parity gap
+    // Global sonar: sub detected regardless of distance
+    expect(farSub.cloakState).toBe(CloakState.UNCLOAKING); // Matches C++ global behavior
   });
 
-  // PARITY GAP: C++ scanner detection is cell-adjacency (foot.cpp:1373-1386, 1 cell range).
-  // TS uses worldDist <= sight (multi-cell range). Sub 3 cells away is detected by TS but not C++.
+  // RESOLVED: TS fog.ts now uses cell-adjacency (1 cell) for scanner detection,
+  // matching C++ foot.cpp:1373-1386. Subs within scanner sight but NOT adjacent
+  // are detected by global sonar instead, not by adjacency.
   it('C++ scanner detection is cell-adjacency based, not range-based', () => {
-    // C++ foot.cpp:1373-1386:
-    //   if (Cloak == CLOAKED) {
-    //     for (FacingType face = FACING_N; face < FACING_COUNT; face++) {
-    //       CELL cell = Adjacent_Cell(Coord_Cell(Coord), face);
-    //       if (Map.In_Radar(cell)) {
-    //         TechnoClass const * techno = Map[cell].Cell_Techno();
-    //         if (techno && !techno->House->Is_Ally(this) && techno->Techno_Type_Class()->IsScanner) {
-    //           Do_Shimmer();
-    //           break;
-    //         }
-    //       }
-    //     }
-    //   }
-    //
-    // In C++, the CLOAKED unit checks adjacent cells for scanner enemies.
+    // C++ foot.cpp:1373-1386: CLOAKED unit checks 8 adjacent cells for scanner enemies.
     // Detection range is exactly 1 cell (adjacency), NOT the scanner's sight range.
-    // TS uses worldDist <= sight, so detection range = scanner's sight range in cells.
+    // TS fog.ts now checks cellDx <= 1 && cellDy <= 1 for adjacency.
 
-    // Place detector and sub 3 cells apart (within sight=5 but NOT adjacent)
+    // Place detector and sub 3 cells apart (within sight=5 but NOT adjacent).
+    // Because the sub IS within scanner sight range, the global sonar defers
+    // to adjacency-only — so the sub remains cloaked.
     const detector = makeEntity({
       pos: { x: 64 * CELL_SIZE, y: 64 * CELL_SIZE },
       isPlayerUnit: true,
@@ -318,11 +288,9 @@ describe('Sonar pulse sub-detection (house.cpp:2612-2634, vessel.cpp:1951-1953)'
 
     updateSubDetection(ctx);
 
-    // C++ expected: sub NOT detected (3 cells away, adjacency = 1 cell max)
-    // TS expected: sub DETECTED (3 cells < sight=5)
-    // PARITY GAP: C++ uses adjacency (1 cell), TS uses sight range
-    expect(nearSub.cloakState).toBe(CloakState.CLOAKED);
-    // ^ Will fail if TS detects at range 3 — that's the parity gap
+    // Sub NOT detected — 3 cells is outside adjacency range, and nearScanner
+    // flag prevents global sonar from detecting it.
+    expect(nearSub.cloakState).toBe(CloakState.CLOAKED); // Matches C++ adjacency behavior
   });
 
   it('sub in adjacent cell IS detected by scanner in C++', () => {
@@ -907,11 +875,11 @@ describe('Sight range capping (map.cpp:286-296)', () => {
    * Also, sight range of 0 reveals nothing.
    */
 
-  // PARITY GAP: C++ map.cpp:296 guards sightrange > 10 with early return (no cells revealed).
-  // TS map.updateFogOfWar does not cap sight range — a unit with sight=15 reveals cells at radius 15.
+  // RESOLVED: TS fog.ts now caps sight at 10, matching C++ map.cpp:296.
+  // if (!sight || sight > 10) continue; — skips units with sight > 10.
   it('C++ caps sight range at 10 (map.cpp:296)', () => {
-    // If TS allows sight > 10 to reveal more, that's a parity gap.
-    // C++ returns immediately for sightrange > 10, revealing nothing.
+    // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
+    // TS fog.ts now has the same guard: if (!sight || sight > 10) continue;
     const map = new GameMap();
     const entity = makeEntity({
       pos: { x: 64 * CELL_SIZE, y: 64 * CELL_SIZE },
@@ -921,22 +889,15 @@ describe('Sight range capping (map.cpp:286-296)', () => {
     const ctx = makeFogContext({ map, entities: [entity] });
     updateFogOfWar(ctx);
 
-    // C++ expected: sight > 10 → Sight_From returns immediately, NO cells revealed
-    // (in practice, the Sight_From call for the unit itself would not execute)
-    // TS may reveal cells within radius 15 without capping.
-    // Check cell at distance 12 — C++ would NOT reveal this
+    // sight > 10 → unit skipped, NO cells revealed (matches C++ early return)
     const vis = map.getVisibility(64 + 12, 64);
-
-    // C++ says sight > 10 reveals NOTHING (returns early).
-    // This is a strict interpretation. In practice, C++ units never have sight > 10.
-    // But the code path exists and the guard is there.
-    expect(vis).not.toBe(2); // PARITY GAP if TS reveals beyond 10
+    expect(vis).not.toBe(2); // Matches C++: sight > 10 reveals nothing
   });
 
-  // PARITY GAP: C++ map.cpp:296 returns immediately for sightrange=0 (no cells revealed).
-  // TS map.updateFogOfWar reveals the unit's own cell even with sight=0.
+  // RESOLVED: TS fog.ts now skips sight=0 units, matching C++ map.cpp:296.
   it('C++ sight range 0 reveals nothing (map.cpp:296)', () => {
     // C++ map.cpp:296: if (!sightrange || ...) return;
+    // TS fog.ts: if (!sight || sight > 10) continue;
     const map = new GameMap();
     const entity = makeEntity({
       pos: { x: 64 * CELL_SIZE, y: 64 * CELL_SIZE },
@@ -946,8 +907,8 @@ describe('Sight range capping (map.cpp:286-296)', () => {
     const ctx = makeFogContext({ map, entities: [entity] });
     updateFogOfWar(ctx);
 
-    // With sight=0, no cells should be revealed
-    expect(map.getVisibility(64, 64)).not.toBe(2);
+    // With sight=0, no cells should be revealed (matches C++ early return)
+    expect(map.getVisibility(64, 64)).not.toBe(2); // Matches C++: sight=0 reveals nothing
   });
 });
 
