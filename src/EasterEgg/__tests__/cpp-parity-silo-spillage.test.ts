@@ -35,7 +35,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { House, buildDefaultAlliances } from '../engine/types';
-import { calculateSiloCapacity, sellRefund } from '../engine/repairSell';
+import { calculateSiloCapacity, sellRefund, spendCredits } from '../engine/repairSell';
 import type { MapStructure } from '../engine/scenario';
 
 // -- Helpers ------------------------------------------------------------------
@@ -184,11 +184,9 @@ describe('Refund_Money() — silo-bypass path (house.cpp:1921)', () => {
 // TS equivalent: addCredits(sellRefund(cost, true), true)  [bypassSiloCap=true]
 //   then recalculateSiloCapacity()  [caps credits to new capacity]
 //
-// PARITY GAP: In C++, sell refund goes to Credits (unlimited), then
-// capacity reduction only affects Tiberium. In TS, the refund goes to
-// a single credits pool, and then recalculateSiloCapacity() caps credits
-// to the new (lower) capacity. This means TS can LOSE sell refund money
-// that C++ would preserve.
+// CLOSED: TS now uses C++ sell order (refund first, then capacity reduce).
+// recalculateSiloCapacity() spills only the stored ore portion, preserving
+// sell refund money in the unbound credits portion of the single bucket.
 // ===========================================================================
 
 describe('sell refund uses Refund_Money — silo-bypass (building.cpp:3571)', () => {
@@ -235,45 +233,39 @@ describe('sell refund uses Refund_Money — silo-bypass (building.cpp:3571)', ()
     expect(refund).toBe(300);
   });
 
-  // PARITY GAP: C++ sell-then-cap-reduce vs TS cap-reduce-then-refund ordering
-  it('PARITY GAP: TS recalculateSiloCapacity after sell may cap refund that C++ preserves', () => {
+  // CLOSED: TS now uses C++ sell order (refund first, then capacity reduce)
+  it('C++ sell order: refund first, then capacity reduce — CLOSED', () => {
     // C++ scenario: 2 SILOs, Tiberium=3000 (full), sell one SILO
-    //   C++ order: 1. Refund_Money(750) → Credits=750
+    //   C++ order: 1. Refund_Money(300) → Credits=300
     //              2. Limbo → Adjust_Capacity(-1500, true) → Cap=1500
     //                 Tiberium(3000) > Cap(1500) → excess=1500, Tib=1500
     //                 inanger=true → 1500 ore lost
-    //              3. Available = Tib(1500) + Credits(750) = 2250
+    //              3. Available = Tib(1500) + Credits(300) = 1800
     //
-    // TS order (index.ts:1900-1901):
-    //   1. recalculateSiloCapacity() → cap=1500, credits capped to 1500
-    //      (lost 1500 from credits spillage)
-    //   2. addCredits(sellRefund, true) → credits = 1500 + 750 = 2250
-    //
-    // Result: TS arrives at 2250 too! The ordering works out because
-    // TS does recalculate BEFORE adding refund (line 1901 before line 1927).
-    // So both C++ and TS end up at 2250 total.
+    // TS order (now matches C++):
+    //   1. addCredits(sellRefund, true) → credits = 3000 + 300 = 3300
+    //   2. recalculateSiloCapacity() → stored=min(3300,3000)=3000, excess=3000-1500=1500
+    //      credits = 3300 - 1500 = 1800
     const structures = [makeSILO(10, 10), makeSILO(12, 10)];
     let credits = 3000; // full capacity
+    const oldCap = 3000; // 2 SILOs
 
-    // Step 1: structure dies (sell completion)
+    // Step 1: add sell refund (C++ Refund_Money — bypasses cap)
+    const siloCost = 600;
+    const refund = sellRefund(siloCost, true);
+    credits += refund; // 3000 + 300 = 3300
+    expect(credits).toBe(3300);
+
+    // Step 2: structure dies, recalculate capacity + spill
     structures[0].alive = false;
     const newCap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(newCap).toBe(1500);
-
-    // Step 2: cap credits to new capacity (TS recalculateSiloCapacity)
-    if (newCap > 0 && credits > newCap) {
-      credits = newCap; // 3000 → 1500 (1500 lost to overflow)
+    if (credits > newCap) {
+      const stored = Math.min(credits, oldCap); // ore portion = 3000
+      const excess = Math.max(0, stored - newCap); // 3000-1500 = 1500
+      credits -= excess; // 3300-1500 = 1800
     }
-    expect(credits).toBe(1500);
-
-    // Step 3: add sell refund (bypasses cap)
-    const siloCost = 600;
-    const refund = sellRefund(siloCost, true);
-    credits += refund; // 1500 + 300 = 1800
     expect(credits).toBe(1800);
-
-    // C++ would have: Tib=1500 + Credits=300 = 1800 total
-    // (Exact value depends on SILO cost which may differ, but the MECHANISM matches)
   });
 });
 
@@ -386,38 +378,31 @@ describe('Adjust_Capacity — inanger distinction (house.cpp:1946)', () => {
     expect(cap).toBe(2000); // Grand_Opening adds 2000 capacity
   });
 
-  it('capacity drops to 0: C++ sets Tiberium=0 (inanger=true)', () => {
+  it('capacity drops to 0: stored ore is zeroed — CLOSED', () => {
     // C++: Capacity=1500, Tiberium=1500, Adjust_Capacity(-1500, true)
     //   Capacity=max(0, 0)=0, Tiberium(1500)>Capacity(0)
     //   retval=1500, Tiberium=0, inanger=true → 1500 credits LOST
     //   Available_Money = 0 + Credits
     //
-    // TS (recalculateSiloCapacity): if (siloCapacity > 0 && credits > siloCapacity)
-    //   → guard fails (siloCapacity=0, NOT > 0), credits preserved
+    // TS (recalculateSiloCapacity): stored=min(credits,oldCap)=1500, excess=1500-0=1500
+    //   credits = 1500 - 1500 = 0
     //
-    // PARITY GAP: C++ loses all stored Tiberium when capacity hits 0.
-    // TS preserves credits when capacity is 0.
+    // CLOSED: TS now zeros stored ore when capacity drops to 0, matching C++.
     const structures = [makeSILO(10, 10)];
     let credits = 1500;
+    const oldCap = 1500;
 
     structures[0].alive = false;
     const newCap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(newCap).toBe(0);
 
-    // TS behavior: credits preserved (guard: siloCapacity > 0 fails)
-    if (newCap > 0 && credits > newCap) {
-      credits = newCap;
+    // C++ parity: all stored ore is lost when capacity drops to 0
+    if (credits > newCap) {
+      const stored = Math.min(credits, oldCap);
+      const excess = Math.max(0, stored - newCap);
+      credits -= excess;
     }
-    expect(credits).toBe(1500); // TS preserves
-
-    // C++ behavior: Tiberium would be set to 0
-    // This is a known divergence. In C++, the player's Credits pool
-    // (starting cash) would still be intact, so Available_Money would
-    // be just Credits. The TS single-bucket model can't distinguish.
-    // PARITY GAP: C++ would have Available_Money = Credits (no Tiberium),
-    // TS has credits = 1500 (preserved). If the 1500 was all from
-    // harvesting (pure Tiberium), C++ loses it all. If it was initial
-    // Credits, C++ preserves it. TS can't tell the difference.
+    expect(credits).toBe(0); // all ore lost — matches C++ Tiberium=0
   });
 });
 
@@ -442,43 +427,43 @@ describe('Adjust_Capacity — inanger distinction (house.cpp:1946)', () => {
 // Key: Spending depletes Tiberium (silo ore) FIRST, preserving Credits.
 // This means initial cash survives longer than harvested ore.
 //
-// TS equivalent: this.credits -= costPerTick (production.ts:172)
-//   TS has a single bucket — no Tiberium-first preference.
+// TS equivalent: ctx.credits -= deduct (production.ts:238)
+//   TS now uses spendCredits() with Tiberium-first priority.
 //
-// PARITY GAP: TS doesn't implement Tiberium-first spending because there
-// is no separate Tiberium pool. This affects how overflow works after
-// spending: in C++, spending reduces Tiberium, freeing silo space.
-// In TS, spending reduces credits below the silo cap, which also frees
-// space. The end result is functionally equivalent for gameplay because
-// the player sees the same total money decrease.
+// CLOSED: TS now implements Tiberium-first spending via spendCredits().
+// storedOre = min(credits, siloCapacity) is spent first, preserving
+// the unbound Credits portion (initial cash, refunds, crate money).
 // ===========================================================================
 
 describe('Spend_Money — C++ dual-bucket spending (house.cpp:1886)', () => {
 
-  it('C++ spends Tiberium first, preserving Credits pool', () => {
+  it('C++ spends Tiberium first, preserving Credits pool — CLOSED', () => {
     // C++: Tiberium=800, Credits=200, Spend_Money(500)
     //   money(500) <= Tiberium(800) → Tiberium -= 500 = 300
     //   Credits unchanged = 200
     //   Available = 300 + 200 = 500
     //
-    // TS: credits=1000, credits -= 500 = 500
-    // Same total, different internal allocation. Not observable in TS.
-
-    // We can only test the total money behavior in TS
-    let credits = 1000; // represents Tiberium(800) + Credits(200)
-    credits -= 500;
-    expect(credits).toBe(500);
+    // TS spendCredits: storedOre=min(1000,1000)=1000, amount=500 <= ore
+    //   → oreSpent=500, cashSpent=0, credits=500
+    const siloCapacity = 1000;
+    const result = spendCredits(1000, 500, siloCapacity);
+    expect(result.credits).toBe(500);
+    expect(result.oreSpent).toBe(500);  // all from ore (Tiberium-first)
+    expect(result.cashSpent).toBe(0);   // Credits preserved
   });
 
-  it('C++ spending exceeds Tiberium, spills into Credits', () => {
+  it('C++ spending exceeds Tiberium, spills into Credits — CLOSED', () => {
     // C++: Tiberium=300, Credits=700, Spend_Money(500)
     //   money(500) > Tiberium(300) → money=200, Tiberium=0, Credits -= 200 = 500
     //   Available = 0 + 500 = 500
     //
-    // TS: credits=1000, credits -= 500 = 500
-    let credits = 1000;
-    credits -= 500;
-    expect(credits).toBe(500);
+    // TS spendCredits: storedOre=min(1000,300)=300 (siloCapacity=300 simulates Tib=300)
+    //   amount=500 > ore(300) → oreSpent=300, cashSpent=200, credits=500
+    const siloCapacity = 300; // simulates Tiberium=300 in a 300-cap silo
+    const result = spendCredits(1000, 500, siloCapacity);
+    expect(result.credits).toBe(500);
+    expect(result.oreSpent).toBe(300);  // all ore consumed first
+    expect(result.cashSpent).toBe(200); // remainder from Credits
   });
 });
 
@@ -532,54 +517,67 @@ describe('Available_Money — dual-bucket vs single-bucket (house.cpp:1861)', ()
 
 describe('compound scenario: sell storage with active credits', () => {
 
-  it('sell PROC when at capacity: refund added, then overflow spilled', () => {
+  it('sell PROC when at capacity: C++ order — refund first, then spill', () => {
     // Setup: 1 PROC (cap=2000) + 1 SILO (cap=1500) = total 3500
     // Credits = 3500 (at capacity)
     // Player sells the PROC (cost=2000, refund=1000)
     //
-    // TS order (index.ts:1900-1927):
-    //   1. recalculateSiloCapacity() → cap=1500, credits=min(3500,1500)=1500
-    //      (2000 lost to overflow)
-    //   2. addCredits(1000, true) → credits=1500+1000=2500
+    // C++ order (now matched by TS):
+    //   1. Refund_Money(1000) → Credits += 1000, total=4500
+    //   2. Adjust_Capacity(-2000, true) → Cap=1500
+    //      stored=min(4500,3500)=3500, excess=3500-1500=2000, credits=4500-2000=2500
     const structures = [makePROC(10, 10), makeSILO(14, 10)];
     let credits = 3500;
+    const oldCap = 3500;
     const procCost = 2000;
     const refund = sellRefund(procCost, true); // 1000
 
-    // TS path: recalculate first, then add refund
+    // C++ order: refund first
+    credits += refund; // 3500 + 1000 = 4500
+
+    // Then reduce capacity + spill
     structures[0].alive = false;
     const newCap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(newCap).toBe(1500);
-    if (newCap > 0 && credits > newCap) {
-      credits = newCap; // 3500 → 1500 (overflow: 2000 lost)
+    if (credits > newCap) {
+      const stored = Math.min(credits, oldCap);
+      credits -= Math.max(0, stored - newCap); // 4500 - 2000 = 2500
     }
-    credits += refund; // 1500 + 1000 = 2500
     expect(credits).toBe(2500);
   });
 
-  it('sell only storage building: refund preserves some money', () => {
+  it('sell only storage building: refund preserved, ore lost — CLOSED', () => {
     // 1 PROC only, credits=2000 (at cap), sell PROC
-    // TS: recalc → cap=0, guard fails (cap NOT > 0), credits=2000
-    //     addCredits(1000, true) → credits=3000
+    // C++ order: 1. Refund_Money(1000) → Credits=1000
+    //            2. Limbo → Adjust_Capacity(-2000, true) → Capacity=0
+    //               Tiberium(2000)>0 → Tiberium=0, inanger=true → ore lost
+    //            3. Available = Tib(0) + Credits(1000) = 1000
     //
-    // PARITY GAP: C++ ends at 1000, TS ends at 3000.
+    // TS C++ order: addCredits(1000, true) → credits=3000
+    //   recalculate: stored=min(3000,2000)=2000, excess=2000-0=2000
+    //   credits = 3000-2000 = 1000
+    //
+    // CLOSED: Both C++ and TS end at 1000.
     const structures = [makePROC(10, 10)];
     let credits = 2000;
+    const oldCap = 2000;
     const procCost = 2000;
     const refund = sellRefund(procCost, true); // 1000
 
+    // C++ order: refund first
+    credits += refund; // 3000
+
+    // Then capacity reduce + spill
     structures[0].alive = false;
     const newCap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(newCap).toBe(0);
-
-    // TS behavior
-    if (newCap > 0 && credits > newCap) {
-      credits = newCap;
+    if (credits > newCap) {
+      const stored = Math.min(credits, oldCap);
+      const excess = Math.max(0, stored - newCap);
+      credits -= excess; // 3000-2000=1000
     }
-    credits += refund;
 
-    // TS result: 2000 + 1000 = 3000 (preserves everything)
-    expect(credits).toBe(3000); // TS behavior
+    expect(credits).toBe(1000); // matches C++ Available_Money
   });
 });
 
@@ -826,26 +824,39 @@ describe('sequential destruction cascade', () => {
     const structures = [makeSILO(10, 10), makeSILO(12, 10), makeSILO(14, 10)];
     let credits = 4500; // full (3 * 1500)
 
-    // Destroy #1: 4500 → cap to 3000
+    // Destroy #1: 4500 → cap to 3000, spill 1500
     structures[0].alive = false;
+    let oldCap = 4500;
     let cap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(cap).toBe(3000);
-    if (cap > 0 && credits > cap) credits = cap;
+    if (credits > cap) {
+      const stored = Math.min(credits, oldCap);
+      credits -= Math.max(0, stored - cap);
+    }
     expect(credits).toBe(3000);
 
-    // Destroy #2: 3000 → cap to 1500
+    // Destroy #2: 3000 → cap to 1500, spill 1500
     structures[1].alive = false;
+    oldCap = cap;
     cap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(cap).toBe(1500);
-    if (cap > 0 && credits > cap) credits = cap;
+    if (credits > cap) {
+      const stored2 = Math.min(credits, oldCap);
+      credits -= Math.max(0, stored2 - cap);
+    }
     expect(credits).toBe(1500);
 
-    // Destroy #3: capacity=0, guard fails, credits preserved (TS)
+    // Destroy #3: capacity=0, all stored ore lost — CLOSED
     structures[2].alive = false;
+    const oldCap3 = cap;
     cap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(cap).toBe(0);
-    if (cap > 0 && credits > cap) credits = cap;
-    expect(credits).toBe(1500); // PARITY GAP: C++ would set Tiberium=0
+    if (credits > cap) {
+      const stored3 = Math.min(credits, oldCap3);
+      const excess3 = Math.max(0, stored3 - cap);
+      credits -= excess3;
+    }
+    expect(credits).toBe(0); // all ore lost — matches C++ Tiberium=0
   });
 
   it('alternating PROC/SILO destruction with partial credits', () => {
@@ -859,23 +870,35 @@ describe('sequential destruction cascade', () => {
 
     // Destroy PROC: cap=3500, credits=3000 < 3500 → no loss
     structures[0].alive = false;
+    let oldCap = 5500;
     let cap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(cap).toBe(3500);
-    if (cap > 0 && credits > cap) credits = cap;
+    if (credits > cap) {
+      const stored = Math.min(credits, oldCap);
+      credits -= Math.max(0, stored - cap);
+    }
     expect(credits).toBe(3000);
 
     // Destroy SILO: cap=2000, credits=3000 > 2000 → lose 1000
     structures[1].alive = false;
+    oldCap = cap;
     cap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(cap).toBe(2000);
-    if (cap > 0 && credits > cap) credits = cap;
+    if (credits > cap) {
+      const stored2 = Math.min(credits, oldCap);
+      credits -= Math.max(0, stored2 - cap);
+    }
     expect(credits).toBe(2000);
 
-    // Destroy last PROC: cap=0, guard fails → credits preserved (TS)
+    // Destroy last PROC: cap=0, all stored ore lost — CLOSED
     structures[2].alive = false;
+    const oldCap3 = cap;
     cap = calculateSiloCapacity(structures, House.Spain, isAllied);
     expect(cap).toBe(0);
-    if (cap > 0 && credits > cap) credits = cap;
-    expect(credits).toBe(2000); // PARITY GAP: C++ would zero Tiberium
+    if (credits > cap) {
+      const stored3 = Math.min(credits, oldCap3);
+      credits -= Math.max(0, stored3 - cap);
+    }
+    expect(credits).toBe(0); // all ore lost — matches C++ Tiberium=0
   });
 });

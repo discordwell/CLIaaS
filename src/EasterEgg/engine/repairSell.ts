@@ -89,6 +89,22 @@ export function sellRefund(buildCost: number, isHuman = true): number {
   return isHuman ? Math.trunc((128 * buildCost + 128) / 256) : buildCost;
 }
 
+/** Spend credits with Tiberium-first priority (C++ house.cpp:1886-1900).
+ *  C++ spends from the silo-stored Tiberium pool FIRST, preserving the uncapped Credits pool.
+ *  In the TS single-bucket model, storedOre = min(credits, siloCapacity) represents Tiberium.
+ *  Returns { credits, oreSpent, cashSpent } so callers can track internal allocation. */
+export function spendCredits(
+  credits: number, amount: number, siloCapacity: number,
+): { credits: number; oreSpent: number; cashSpent: number } {
+  const ore = Math.min(credits, Math.max(0, siloCapacity)); // Tiberium portion
+  if (amount <= ore) {
+    return { credits: credits - amount, oreSpent: amount, cashSpent: 0 };
+  }
+  const oreSpent = ore;
+  const cashSpent = amount - ore;
+  return { credits: credits - amount, oreSpent, cashSpent };
+}
+
 /** Emulate C++ 8.8 fixed-point power output: fixed(hp, maxHp) * ratedPower.
  *  C++ building.cpp:4613: return(Class->Power * fixed(LastStrength, Class->MaxStrength));
  *  C++ fixed.cpp:64: fixed(n,d) truncates to floor(n * 256 / d) (8.8 format). */
