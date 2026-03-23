@@ -1460,10 +1460,10 @@ describe('Aircraft flight altitude', () => {
     expect(Entity.FLIGHT_ALTITUDE).toBe(24);
   });
 
-  it('aircraft start with flightAltitude=0 (on ground)', () => {
+  it('aircraft start airborne at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const heli = new Entity(UnitType.V_TRAN, House.Spain, 100, 100);
-    expect(heli.flightAltitude).toBe(0);
-    expect(heli.aircraftState).toBe('landed');
+    expect(heli.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
+    expect(heli.aircraftState).toBe('flying');
   });
 
   it('air units fly directly — no pathfinding needed', () => {

@@ -316,30 +316,18 @@ describe('C++ Parity — 4TNK weapon selection: 120mm vs MammothTusk', () => {
     // This is a known scoring divergence (C++ ignores weapon damage in scoring)
   });
 
-  it('BUG: 4TNK vs aircraft selects 120mm — should be MammothTusk (missing AA gate)', () => {
-    // HELI has heavy armor. C++ Can_Fire(target, 0) for 120mm vs aircraft:
-    //   techno.cpp:2702-2707: target is RTTI_AIRCRAFT, Height>0,
-    //   weapon->Bullet->IsAntiAircraft is false (Cannon has no AA) → FIRE_CANT
-    //   → w1 = 0
-    // C++ Can_Fire(target, 1) for MammothTusk vs aircraft:
-    //   MammothTusk uses HeatSeeker (AA=yes) → Can_Fire returns OK
-    //   → w2 = warhead_mod * 1000 (non-zero)
+  it('FIXED: 4TNK vs airborne aircraft selects MammothTusk (AA gate active)', () => {
+    // HELI starts airborne (flightAltitude=FLIGHT_ALTITUDE), so the AA gate activates.
+    // C++ Can_Fire(target, 0) for 120mm vs aircraft: Cannon not AA → FIRE_CANT → w1=0
+    // C++ Can_Fire(target, 1) for MammothTusk vs aircraft: HeatSeeker AA=yes → OK
     // C++ returns secondary (MammothTusk) — the only weapon that can hit air targets.
     //
-    // TS selectWeapon: checks isAntiGround===false for AG constraint but does NOT
-    // check isAntiAir for the primary weapon. Both weapons have isAntiGround !== false,
-    // so both pass the AG gate. TS then picks by effective damage.
-    // HELI has HEAVY armor: AP vs heavy = 1.0, HE vs heavy = 0.25
-    // TS eff: 120mm = 40*1.0=40, MammothTusk = 75*0.25=18.75 → 120mm wins!
-    //
-    // THIS IS A BUG: 4TNK fires its cannon at aircraft (which should miss — Cannon is
-    // not anti-aircraft) instead of its tusk missiles (which ARE anti-aircraft).
+    // FIXED: With aircraft now spawning airborne (matching C++), the TS AA gate
+    // (entity.ts:645-651) correctly zeros non-AA weapons and selects MammothTusk.
     const [mammoth, heli] = pairAtDistance(UnitType.V_4TNK, UnitType.V_HELI, 3);
     const selected = mammoth.selectWeapon(heli, getWarheadMultiplier);
-    // TS ACTUAL behavior: selects 120mm (wrong — Cannon cannot hit aircraft in C++)
-    expect(selected!.name).toBe('120mm');
-    // C++ EXPECTED behavior: MammothTusk (120mm zeroed by Can_Fire AA gate)
-    // To fix: selectWeapon needs to check isAntiAir and zero non-AA weapons vs aircraft
+    // FIXED: TS now correctly selects MammothTusk (AA weapon) vs airborne aircraft
+    expect(selected!.name).toBe('MammothTusk');
   });
 
   it('4TNK 120mm should be flagged as NOT anti-air (Cannon projectile has no AA)', () => {
@@ -589,19 +577,15 @@ describe('C++ Parity — Anti-air constraint in weapon selection', () => {
     // C++ would ZERO 120mm score vs air. TS just scores both.
   });
 
-  it('BUG: selectWeapon picks 120mm vs aircraft — missing C++ Can_Fire AA gate', () => {
-    // Verify the TS code path: selectWeapon checks isAntiGround but not isAntiAir.
-    // HELI has heavy armor → AP vs heavy=1.0, HE vs heavy=0.25
-    // TS: 120mm eff=40*1.0=40 > MammothTusk eff=75*0.25=18.75 → selects 120mm
-    //
-    // C++: Can_Fire zeroes 120mm (Cannon not AA) → MammothTusk selected
-    // This is a confirmed behavioral divergence — 4TNK fires cannon at helicopters
-    // instead of tusk missiles.
+  it('FIXED: selectWeapon picks MammothTusk vs airborne aircraft (AA gate active)', () => {
+    // HELI starts airborne (flightAltitude=FLIGHT_ALTITUDE), so AA gate activates.
+    // 120mm uses Cannon (no AA) → zeroed by AA gate (entity.ts:645-651)
+    // MammothTusk uses HeatSeeker (AA=yes) → passes AA gate
+    // Result: MammothTusk selected — matches C++ behavior.
     const [mammoth, heli] = pairAtDistance(UnitType.V_4TNK, UnitType.V_HELI, 3);
     const selected = mammoth.selectWeapon(heli, getWarheadMultiplier);
-    // TS ACTUAL: 120mm (WRONG — Cannon can't hit aircraft in C++)
-    expect(selected!.name).toBe('120mm');
-    // C++ EXPECTED: MammothTusk
+    // FIXED: TS now correctly selects MammothTusk vs airborne aircraft
+    expect(selected!.name).toBe('MammothTusk');
   });
 
   it('PT 2Inch (Cannon, no AA) should not fire at aircraft in C++', () => {

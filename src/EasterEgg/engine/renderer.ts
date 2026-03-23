@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, HOUSE_FACTION } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, HOUSE_FACTION, CONDITION_YELLOW } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -1569,8 +1569,8 @@ export class Renderer {
         this.renderHealthBar(barX, barY, cppBarW, s.hp / s.maxHp, false);
       }
 
-      // Damage effects: light smoke (<75%), fire+smoke (<50%), intense fire (<25%)
-      if (s.alive && s.hp < s.maxHp * 0.75 && vis >= 1 && !isConstructing && !isSelling) {
+      // Damage effects: fire+smoke at ConditionYellow (<=50%), intense fire (<25%)
+      if (s.alive && s.hp <= s.maxHp * CONDITION_YELLOW && vis >= 1 && !isConstructing && !isSelling) {
         const hpRatio = s.hp / s.maxHp;
         const fireSeed = (s.cx * 31 + s.cy * 17) | 0;
         const [fw] = STRUCTURE_SIZE[s.type] ?? [2, 2];

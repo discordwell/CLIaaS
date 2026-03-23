@@ -326,14 +326,14 @@ describe('BADR transport capability — passengers=5 (udata.cpp)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('BADR aircraft state machine (aircraft.cpp)', () => {
-  it('starts in landed state', () => {
+  it('starts airborne (C++ aircraft.cpp:249 Height=FLIGHT_LEVEL)', () => {
     const badr = entityAtCell(UnitType.V_BADR, House.USSR, 10, 10);
-    expect(badr.aircraftState).toBe('landed');
+    expect(badr.aircraftState).toBe('flying');
   });
 
-  it('starts with flightAltitude = 0 (on the ground)', () => {
+  it('starts at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const badr = entityAtCell(UnitType.V_BADR, House.USSR, 10, 10);
-    expect(badr.flightAltitude).toBe(0);
+    expect(badr.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 
   it('attackRunPhase defaults to flyToTarget', () => {

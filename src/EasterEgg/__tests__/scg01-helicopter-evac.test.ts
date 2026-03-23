@@ -258,8 +258,8 @@ describe('Transport helicopter landing without helipad', () => {
     expect(tran.stats.isAircraft).toBe(true);
     expect(tran.isTransport).toBe(true);
     expect(tran.stats.landingBuilding).toBeUndefined(); // C++ aadata.cpp:168: STRUCT_NONE
-    expect(tran.aircraftState).toBe('landed');
-    expect(tran.flightAltitude).toBe(0);
+    expect(tran.aircraftState).toBe('flying'); // C++ aircraft.cpp:249: created airborne
+    expect(tran.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
     expect(tran.ammo).toBe(-1); // unlimited (no weapon)
   });
 

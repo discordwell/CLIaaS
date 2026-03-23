@@ -319,14 +319,14 @@ describe('U2 invulnerable scout -- 2000 HP with heavy armor (rules.ini balance)'
 // =============================================================================
 
 describe('U2 aircraft state machine (aircraft.cpp)', () => {
-  it('starts in landed state', () => {
+  it('starts airborne (C++ aircraft.cpp:249 Height=FLIGHT_LEVEL)', () => {
     const u2 = entityAtCell(UnitType.V_U2, House.USSR, 10, 10);
-    expect(u2.aircraftState).toBe('landed');
+    expect(u2.aircraftState).toBe('flying');
   });
 
-  it('starts with flightAltitude = 0 (on the ground)', () => {
+  it('starts at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const u2 = entityAtCell(UnitType.V_U2, House.USSR, 10, 10);
-    expect(u2.flightAltitude).toBe(0);
+    expect(u2.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 
   it('attackRunPhase defaults to flyToTarget', () => {

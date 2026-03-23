@@ -345,14 +345,16 @@ export class Entity {
     this.prevTurretFacing32 = this.turretFacing32;
     // Initialize prevPos to starting position (C5: moving-platform inaccuracy detection)
     this.prevPos = { x, y };
-    // Aircraft init: set ammo from stats, start landed
+    // Aircraft init: set ammo from stats
     if (this.stats.maxAmmo && this.stats.maxAmmo > 0) {
       this.ammo = this.stats.maxAmmo;
       this.maxAmmo = this.stats.maxAmmo;
     }
+    // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL — aircraft are created airborne.
+    // Callers that need aircraft on pads (production, scenario init) override afterwards.
     if (this.stats.isAircraft) {
-      this.aircraftState = 'landed';
-      this.flightAltitude = 0;
+      this.aircraftState = 'flying';
+      this.flightAltitude = Entity.FLIGHT_ALTITUDE;
     }
   }
 

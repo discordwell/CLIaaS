@@ -7,10 +7,14 @@
  * speed, ROF, or sight improvements from kills.
  *
  * What C++ RA1 DOES have:
- *   1. Kill tracking: techno.cpp Crew.Kills++ on each confirmed kill
+ *   1. Kill tracking: crew.h Made_A_Kill() increments Crew.Kills
+ *      NOTE: In C++, Record_The_Kill(source) at techno.cpp:3904 calls
+ *      this->Crew.Made_A_Kill() on the DYING unit (a no-op since it's destroyed).
+ *      The killer is NOT credited. The TS port credits the killer instead,
+ *      which makes the AI threat scoring at line 1652 actually meaningful.
  *   2. Kill-weighted target value: techno.cpp:1651 Value() + Crew.Kills for AI threat
- *   3. "Veterancy" crate: maps to CRATE_EXPERIENCE which just heals the unit
- *      (const.cpp CrateNames[], cell.cpp:2263 — treated identically to heal)
+ *   3. "Veterancy" crate: Not in Counterstrike/Aftermath crate enum (defines.h:759-781).
+ *      TS maps the name 'veterancy' -> 'heal' in CRATE_NAME_MAP.
  *
  * What C++ RA1 does NOT have:
  *   - Veteran/Elite promotion thresholds
@@ -22,14 +26,14 @@
  * Failing tests are EXPECTED — they document real C++ divergences.
  *
  * C++ source references:
- *   techno.cpp:3900-3920   — Record_Is_Favor: increments Crew.Kills on confirmed kill
- *   techno.cpp:1651-1652   — Best_Object threat: value = Value() + Crew.Kills
+ *   crew.h:53               — CrewClass: unsigned short Kills; no rank/level
+ *   crew.h:62-64            — Made_A_Kill(): Kills++ and return
+ *   techno.cpp:3886-3904   — Record_The_Kill(source): calls this->Crew.Made_A_Kill()
+ *                             on the DYING unit (effectively dead code)
+ *   techno.cpp:1651-1652   — Best_Object threat: value = rawval + object->Crew.Kills
  *   techno.cpp:4519         — Value() = Risk() + Reward (no veterancy modifier)
  *   techno.cpp:6290         — Risk = Reward = Points (from RULES.INI "Points=")
- *   const.cpp:444-463       — CrateNames[]: "Veterancy" is index 13 (CRATE_EXPERIENCE)
- *   cell.cpp:2263            — CRATE_EXPERIENCE: heal unit, no promotion
- *   defines.h:759-781       — CrateType enum: CRATE_EXPERIENCE = 13
- *   crew.h                  — CrewClass: Kills member, no rank/level
+ *   defines.h:759-781       — CrateType enum: NO CRATE_EXPERIENCE in CS/AM source
  *   rules.ini [General]     — No veteran-related keys exist in RA1
  *   rules.ini [IQ]          — AI intelligence levels, no veterancy
  */
@@ -67,8 +71,8 @@ describe('cpp-parity: veterancy — kill tracking', () => {
     expect(tank.kills).toBe(0);
   });
 
-  it('creditKill increments kill counter by 1 (C++ Crew.Kills++)', () => {
-    // C++ techno.cpp:3900-3920: Record_Is_Favor increments Kills
+  it('creditKill increments kill counter by 1 (C++ crew.h Made_A_Kill)', () => {
+    // C++ crew.h:62-64: Made_A_Kill() { Kills++; return(Kills); }
     const tank = makeEntity(UnitType.V_4TNK);
     tank.creditKill();
     expect(tank.kills).toBe(1);
@@ -182,16 +186,15 @@ describe('cpp-parity: veterancy — no rank/level/promotion properties', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('cpp-parity: veterancy — crate type mapping', () => {
-  it('"veterancy" crate name maps to heal effect (C++ CRATE_EXPERIENCE = heal)', () => {
-    // C++ const.cpp:457: CrateNames[CRATE_EXPERIENCE] = "Veterancy"
-    // C++ cell.cpp:2263: CRATE_EXPERIENCE case falls through to heal logic
-    // TS maps 'veterancy' -> 'heal' in CRATE_NAME_MAP
+  it('"veterancy" crate name maps to heal effect (no CRATE_EXPERIENCE in CS/AM)', () => {
+    // C++ defines.h:759-781: CrateType enum has no CRATE_EXPERIENCE in Counterstrike/Aftermath
+    // TS maps the legacy name 'veterancy' -> 'heal' in CRATE_NAME_MAP
     expect(CRATE_NAME_MAP['veterancy']).toBe('heal');
   });
 
   it('no dedicated "veterancy" or "experience" or "promotion" crate type exists', () => {
-    // In C++ RA1, the crate enum includes CRATE_EXPERIENCE but it just heals.
-    // The TS should not have a separate 'veterancy' crate type — it should map to 'heal'.
+    // C++ CS/AM crate enum has no CRATE_EXPERIENCE entry.
+    // TS should not have a separate 'veterancy' crate type — it maps to 'heal'.
     const crateTypes = new Set(Object.values(CRATE_NAME_MAP));
     expect(crateTypes.has('veterancy')).toBe(false);
     expect(crateTypes.has('experience')).toBe(false);
@@ -279,7 +282,7 @@ describe('cpp-parity: veterancy — all unit categories track kills identically'
   });
 
   it('creditKill does nothing beyond incrementing the counter', () => {
-    // C++ Record_Is_Favor literally just does Kills++
+    // C++ crew.h Made_A_Kill() literally just does Kills++
     // Verify no side effects: HP, biases, weapon stats remain unchanged
     const e1 = makeEntity(UnitType.I_E1);
     const hpBefore = e1.hp;

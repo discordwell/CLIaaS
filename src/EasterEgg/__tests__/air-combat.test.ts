@@ -266,13 +266,14 @@ describe('Flight altitude', () => {
     expect(Entity.FLIGHT_ALTITUDE).toBe(24);
   });
 
-  it('Aircraft start grounded (flightAltitude=0)', () => {
+  it('Aircraft start airborne at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.Spain);
-    expect(mig.flightAltitude).toBe(0);
+    expect(mig.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 
-  it('Ascend increases flightAltitude', () => {
+  it('Ascend increases flightAltitude from 0 to FLIGHT_ALTITUDE', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.flightAltitude = 0; // simulate starting from ground (e.g. after production)
     heli.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, heli.flightAltitude + 3);
     expect(heli.flightAltitude).toBe(3);
     // Continue ascending
@@ -298,9 +299,9 @@ describe('Flight altitude', () => {
 // === Part 6: Aircraft State Machine ===
 
 describe('Aircraft state machine', () => {
-  it('Aircraft start in landed state', () => {
+  it('Aircraft start in flying state (C++ aircraft.cpp:249)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.Spain);
-    expect(mig.aircraftState).toBe('landed');
+    expect(mig.aircraftState).toBe('flying');
   });
 
   it('All 8 states are valid', () => {
@@ -316,6 +317,8 @@ describe('Aircraft state machine', () => {
 
   it('Takeoff transitions from landed', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.aircraftState = 'landed'; // simulate pad-placed aircraft
+    heli.flightAltitude = 0;
     expect(heli.aircraftState).toBe('landed');
     heli.aircraftState = 'takeoff';
     expect(heli.aircraftState).toBe('takeoff');

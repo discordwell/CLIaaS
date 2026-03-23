@@ -551,6 +551,12 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
  *  In original RA, idle/moving units always counter-attack when hit. */
 export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker: Entity): void {
   if (!victim.alive || !attacker.alive) return;
+  // C++ rules.ini PlayerReturnFire=no (Rule.IsSmartDefense=false) — player units do NOT auto-retaliate
+  // C++ techno.cpp:4976 exception: Tanya retaliates against infantry even without SmartDefense
+  if (ctx.isPlayerControlled(victim)) {
+    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
+    if (!isTanyaVsInfantry) return;
+  }
   if (ctx.entitiesAllied(victim, attacker)) return; // no friendly retaliation
   if (!victim.weapon) return; // unarmed units can't retaliate
   // Only retarget if no current target or current target is dead
@@ -1482,7 +1488,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
       // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
       const points = e.stats.points ?? e.stats.strength ?? 5;
       const value = Math.trunc(points * 2) + (e.kills ?? 0);
-      const distCells = Math.floor(dist / CELL_SIZE); // dist is in world units, convert to cells
+      const distCells = Math.floor(dist); // dist from worldDist() is already in cell units
       const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
       if (score > bestScore) {
         bestTarget = e;

@@ -220,14 +220,14 @@ describe('MIG low ammo — 3 shots before RTB (aircraft.cpp)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('MIG aircraft state machine (aircraft.cpp)', () => {
-  it('starts in landed state', () => {
+  it('starts airborne (C++ aircraft.cpp:249 Height=FLIGHT_LEVEL)', () => {
     const mig = entityAtCell(UnitType.V_MIG, House.USSR, 10, 10);
-    expect(mig.aircraftState).toBe('landed');
+    expect(mig.aircraftState).toBe('flying');
   });
 
-  it('starts with flightAltitude = 0 (on the ground)', () => {
+  it('starts at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const mig = entityAtCell(UnitType.V_MIG, House.USSR, 10, 10);
-    expect(mig.flightAltitude).toBe(0);
+    expect(mig.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 
   it('FLIGHT_ALTITUDE constant is 24 pixels', () => {

@@ -439,10 +439,10 @@ describe('Aircraft crash animation (air unit death)', () => {
     expect(hind.stats.isAircraft).toBe(true);
   });
 
-  it('aircraft start landed (flightAltitude=0, aircraftState="landed")', () => {
+  it('aircraft start airborne (C++ aircraft.cpp:249 Height=FLIGHT_LEVEL)', () => {
     const hind = new Entity(UnitType.V_HIND, House.USSR, 100, 100);
-    expect(hind.flightAltitude).toBe(0);
-    expect(hind.aircraftState).toBe('landed');
+    expect(hind.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
+    expect(hind.aircraftState).toBe('flying');
   });
 
   it('FLIGHT_ALTITUDE constant is 24 pixels (C++ FLIGHT_LEVEL)', () => {

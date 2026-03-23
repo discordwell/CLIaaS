@@ -594,16 +594,18 @@ describe('landing pad assignment: findLandingPad() type preference', () => {
 
 describe('aircraft state machine lifecycle transitions', () => {
 
-  it('aircraft starts in landed state with flightAltitude=0', () => {
+  it('aircraft starts airborne at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     for (const [name, type] of ALL_AIRCRAFT) {
       const entity = makeEntity(type, House.USSR);
-      expect(entity.aircraftState, `${name}`).toBe('landed');
-      expect(entity.flightAltitude, `${name}`).toBe(0);
+      expect(entity.aircraftState, `${name}`).toBe('flying');
+      expect(entity.flightAltitude, `${name}`).toBe(Entity.FLIGHT_ALTITUDE);
     }
   });
 
   it('landed → takeoff when attack mission assigned with target', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.aircraftState = 'landed';
+    heli.flightAltitude = 0;
     heli.mission = Mission.ATTACK;
     heli.target = makeEntity(UnitType.V_2TNK, House.USSR, 300, 300);
     heli.ammo = parseInt(ini['HELI']?.Ammo ?? '6', 10);
@@ -616,6 +618,8 @@ describe('aircraft state machine lifecycle transitions', () => {
 
   it('landed → takeoff when move mission assigned with moveTarget', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.aircraftState = 'landed';
+    heli.flightAltitude = 0;
     heli.mission = Mission.MOVE;
     heli.moveTarget = { x: 300, y: 300 };
 
@@ -934,10 +938,10 @@ describe('full rearm cycle timing from rules.ini ReloadRate (building.cpp:4023-4
 // Section 13: Helicopter Hover Jitter Pattern — C++ aircraft.cpp:441-445
 // Pattern: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0} — 16 entries, net zero
 // Condition: Height == FLIGHT_LEVEL && Get_Speed() < 3
-// TS: no jitter implemented (PARITY GAP — visual only)
+// FIXED: TS implements hover jitter via HOVER_JITTER array + entity.hoverJitter field.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('helicopter hover jitter pattern (aircraft.cpp:441-445) — PARITY GAP', () => {
+describe('helicopter hover jitter pattern (aircraft.cpp:441-445)', () => {
 
   it('C++ jitter pattern is 16 entries with net-zero vertical displacement', () => {
     const cppJitter = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, -1, -1, -1, 0];
@@ -964,10 +968,10 @@ describe('helicopter hover jitter pattern (aircraft.cpp:441-445) — PARITY GAP'
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 14: Fixed-Wing Crash-Landing — C++ aircraft.cpp:4062-4068
 // C++ destroys fixed-wing aircraft that land on open ground (not on airstrip)
-// TS: fixed-wing lands normally even without airstrip — PARITY GAP
+// FIXED: TS now destroys fixed-wing aircraft that land without an airstrip.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('fixed-wing crash-landing on open ground (aircraft.cpp:4062-4068) — PARITY GAP', () => {
+describe('fixed-wing crash-landing on open ground (aircraft.cpp:4062-4068)', () => {
 
   it('C++ fixed-wing on ground without MISSION_ENTER is destroyed (Strength=1 → Take_Damage)', () => {
     // C++ aircraft.cpp:4062-4068:
@@ -1069,18 +1073,18 @@ describe('layer transition threshold (object.cpp:343-352)', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 17: Helicopter Takeoff Speed Staging — C++ aircraft.cpp:2899-2928
-// C++ has 5-stage speed ramp; TS has linear ascent — PARITY GAP
+// FIXED: TS implements 5-stage helicopter takeoff speed ramp matching C++.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928) — PARITY GAP', () => {
+describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928)', () => {
 
-  it('C++ helicopter Process_Take_Off has staged speed at specific heights', () => {
+  it('C++ helicopter Process_Take_Off has 5 staged speeds at specific heights', () => {
     // C++ aircraft.cpp:2901-2928: switch(Height)
-    //   0:                          Close_Door, sync facings
-    //   FLIGHT_LEVEL/2 (128):       face NavCom
-    //   FLIGHT_LEVEL-(FLIGHT_LEVEL/3) (170): Set_Speed(0x20), sync body
-    //   FLIGHT_LEVEL-(FLIGHT_LEVEL/5) (204): Set_Speed(0x40)
-    //   FLIGHT_LEVEL (256):         Set_Speed(0xFF), done
+    //   0:                          Close_Door, sync facings     → speed=0x00
+    //   FLIGHT_LEVEL/2 (128):       face NavCom                  → speed=0x00
+    //   FLIGHT_LEVEL-(FLIGHT_LEVEL/3) (170): Set_Speed(0x20)     → slow
+    //   FLIGHT_LEVEL-(FLIGHT_LEVEL/5) (204): Set_Speed(0x40)     → medium
+    //   FLIGHT_LEVEL (256):         Set_Speed(0xFF), done        → full
     const stages = [
       { height: 0,   speed: 0x00, action: 'close_door' },
       { height: 128, speed: 0x00, action: 'face_navcom' },
@@ -1089,18 +1093,71 @@ describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928) — PARITY G
       { height: 256, speed: 0xFF, action: 'full_speed' },
     ];
     expect(stages.length).toBe(5);
+  });
 
-    // TS does not implement staged speed during takeoff
-    // Aircraft simply ascend +1/tick with no speed changes
+  it('FIXED: TS helicopter speed is 0 below half flight level during takeoff', () => {
+    const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.aircraftState = 'takeoff';
+    heli.flightAltitude = 0;
+    heli.mission = Mission.ATTACK;
+    heli.target = makeEntity(UnitType.V_2TNK, House.USSR, 300, 300);
+
+    const ctx = makeAircraftCtx();
+    // Tick once — altitude goes to 1, still below halfLevel (12)
+    updateAircraft(ctx, heli);
+    expect(heli.aircraftSpeedFraction).toBe(0); // stage 1-2: speed=0
+    expect(heli.flightAltitude).toBe(1);
+  });
+
+  it('FIXED: TS helicopter speed ramps through all 5 stages during takeoff', () => {
+    const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.aircraftState = 'takeoff';
+    heli.flightAltitude = 0;
+    heli.mission = Mission.ATTACK;
+    heli.target = makeEntity(UnitType.V_2TNK, House.USSR, 300, 300);
+
+    const FA = Entity.FLIGHT_ALTITUDE; // 24
+    const halfLevel = Math.round(FA / 2);      // 12
+    const stage3 = Math.round(FA * 170 / 256); // 16
+    const stage4 = Math.round(FA * 204 / 256); // 19
+
+    const ctx = makeAircraftCtx();
+    const speedLog: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      updateAircraft(ctx, heli);
+      speedLog.push(heli.aircraftSpeedFraction);
+    }
+    // Stage 1-2: speed=0 for altitudes 1..11 (below halfLevel=12)
+    for (let i = 0; i < halfLevel - 1; i++) {
+      expect(speedLog[i], `alt=${i + 1}`).toBe(0);
+    }
+    // Stage 3: speed=0x20/0xFF for altitudes 16..18 (stage3 to stage4-1)
+    for (let i = stage3 - 1; i < stage4 - 1; i++) {
+      expect(speedLog[i], `alt=${i + 1}`).toBeCloseTo(0x20 / 0xFF, 3);
+    }
+    // Stage 4: speed=0x40/0xFF for altitudes 19..23 (stage4 to FA-1)
+    for (let i = stage4 - 1; i < FA - 1; i++) {
+      expect(speedLog[i], `alt=${i + 1}`).toBeCloseTo(0x40 / 0xFF, 3);
+    }
+    // Stage 5: at FLIGHT_ALTITUDE — full speed
+    expect(speedLog[FA - 1]).toBe(1.0);
+    expect(heli.aircraftState).toBe('flying');
   });
 
   it('C++ fixed-wing Process_Take_Off sets full speed immediately (0xFF)', () => {
     // C++ aircraft.cpp:2893-2897:
     //   if (Class->IsFixedWing) { Set_Speed(0xFF); }
-    // Fixed-wing goes to max speed right away, waits for height to reach FLIGHT_LEVEL
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
+    mig.aircraftState = 'takeoff';
+    mig.flightAltitude = 0;
+    mig.mission = Mission.ATTACK;
+    mig.target = makeEntity(UnitType.V_2TNK, House.Spain, 300, 300);
     expect(mig.isFixedWing).toBe(true);
-    // TS equivalent: no speed staging, just linear ascent
+
+    const ctx = makeAircraftCtx();
+    updateAircraft(ctx, mig);
+    // Fixed-wing: full speed immediately on takeoff
+    expect(mig.aircraftSpeedFraction).toBe(1.0);
   });
 });
 
@@ -1108,10 +1165,10 @@ describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928) — PARITY G
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 18: Helicopter Landing Speed — C++ aircraft.cpp:2982-2998
 // At FLIGHT_LEVEL/2 (128 leptons), helicopter Set_Speed(0)
-// TS has no speed change during landing — PARITY GAP
+// FIXED: TS helicopter stops horizontal movement at half flight level during landing.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('helicopter landing speed staging (aircraft.cpp:2982-2998) — PARITY GAP', () => {
+describe('helicopter landing speed staging (aircraft.cpp:2982-2998)', () => {
 
   it('C++ helicopter stops horizontal movement at half flight level during landing', () => {
     // C++ aircraft.cpp:2988-2990:
@@ -1122,7 +1179,7 @@ describe('helicopter landing speed staging (aircraft.cpp:2982-2998) — PARITY G
     expect(halfLevelPixels).toBe(12);
   });
 
-  it('TS helicopter does not change speed during landing descent', () => {
+  it('FIXED: TS helicopter sets speed=0 at or below half flight level during landing', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'landing';
     heli.flightAltitude = 12; // equivalent to FLIGHT_LEVEL/2
@@ -1131,20 +1188,21 @@ describe('helicopter landing speed staging (aircraft.cpp:2982-2998) — PARITY G
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);
-    // TS just decrements altitude
+    // TS decrements altitude AND sets speed=0 at half level
     expect(heli.flightAltitude).toBe(11);
+    expect(heli.aircraftSpeedFraction).toBe(0); // Set_Speed(0) at <= halfLevel
     expect(heli.aircraftState).toBe('landing');
   });
 });
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Section 19: Aircraft Initial State — C++ vs TS PARITY GAP
+// Section 19: Aircraft Initial State — FIXED: TS now matches C++
 // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL (created in air)
-// TS entity.ts:338-340: aircraftState='landed', flightAltitude=0 (created grounded)
+// TS entity.ts: aircraftState='flying', flightAltitude=FLIGHT_ALTITUDE (created airborne)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('aircraft initial state: C++ airborne vs TS grounded — PARITY GAP', () => {
+describe('aircraft initial state: C++ and TS both create airborne', () => {
 
   it('C++ aircraft constructor sets Height = FLIGHT_LEVEL (256 leptons, airborne)', () => {
     // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL;
@@ -1152,14 +1210,14 @@ describe('aircraft initial state: C++ airborne vs TS grounded — PARITY GAP', (
     expect(CPP_FLIGHT_LEVEL).toBe(256);
   });
 
-  it('TS aircraft constructor sets flightAltitude=0, aircraftState=landed', () => {
+  it('FIXED: TS aircraft constructor sets flightAltitude=FLIGHT_ALTITUDE, aircraftState=flying', () => {
     for (const [name, type] of ALL_AIRCRAFT) {
       const entity = makeEntity(type, House.USSR);
-      expect(entity.flightAltitude, `${name} initial altitude`).toBe(0);
-      expect(entity.aircraftState, `${name} initial state`).toBe('landed');
+      expect(entity.flightAltitude, `${name} initial altitude`).toBe(Entity.FLIGHT_ALTITUDE);
+      expect(entity.aircraftState, `${name} initial state`).toBe('flying');
     }
-    // PARITY GAP: C++ creates aircraft airborne; TS creates them grounded
-    // This is intentional in TS — aircraft are placed on their pads initially
+    // FIXED: TS now matches C++ — aircraft are created airborne.
+    // Callers that need aircraft on pads (production, scenario init) override afterwards.
   });
 });
 
@@ -1250,10 +1308,10 @@ describe('ammo depletion during fire (techno.cpp:3186-3188)', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 22: LZ Blocked Check — C++ aircraft.cpp:4104-4111
 // When descending to LAYER_GROUND and LZ is blocked → abort landing, take off
-// TS: no LZ check during descent — PARITY GAP
+// FIXED: TS now checks Is_LZ_Clear during descent and aborts if blocked.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('LZ blocked abort during landing (aircraft.cpp:4104-4111) — PARITY GAP', () => {
+describe('LZ blocked abort during landing (aircraft.cpp:4104-4111)', () => {
 
   it('C++ checks Is_LZ_Clear at layer transition and aborts if blocked', () => {
     // C++ aircraft.cpp:4104-4111:
@@ -1264,21 +1322,41 @@ describe('LZ blocked abort during landing (aircraft.cpp:4104-4111) — PARITY GA
     //     }
     //   }
     // This only applies to helicopters (not fixed-wing)
-    // TS does not check for blocked LZ during descent
     expect(true).toBe(true); // documenting C++ behavior
   });
 
-  it('TS helicopter descends through landing without LZ check', () => {
-    const heli = makeEntity(UnitType.V_HELI, House.Spain);
+  it('FIXED: TS helicopter aborts landing when LZ is blocked', () => {
+    const heli = makeEntity(UnitType.V_HELI, House.Spain, 5 * CELL_SIZE, 5 * CELL_SIZE);
     heli.aircraftState = 'landing';
-    heli.flightAltitude = 16; // at layer transition threshold
+    heli.flightAltitude = 15; // below LAYER_GROUND threshold (16px)
     heli.ammo = 0;
     heli.maxAmmo = parseInt(ini['HELI']?.Ammo ?? '6', 10);
 
-    const ctx = makeAircraftCtx();
+    const map = new GameMap();
+    // Block the landing cell with vehicle occupancy (map is 128×128)
+    const { cx, cy } = heli.cell;
+    map.vehicleOccupancy.add(cy * 128 + cx);
+
+    const ctx = makeAircraftCtx({ map });
     updateAircraft(ctx, heli);
-    // TS just keeps descending — no blocked LZ check
-    expect(heli.flightAltitude).toBe(15);
+    // LZ blocked — helicopter aborts landing and takes off
+    expect(heli.aircraftState).toBe('takeoff');
+  });
+
+  it('TS helicopter descends normally when LZ is clear', () => {
+    const heli = makeEntity(UnitType.V_HELI, House.Spain, 5 * CELL_SIZE, 5 * CELL_SIZE);
+    heli.aircraftState = 'landing';
+    heli.flightAltitude = 15; // below LAYER_GROUND threshold (16px)
+    heli.ammo = 0;
+    heli.maxAmmo = parseInt(ini['HELI']?.Ammo ?? '6', 10);
+
+    const map = new GameMap();
+    // LZ is clear (no vehicle occupancy)
+
+    const ctx = makeAircraftCtx({ map });
+    updateAircraft(ctx, heli);
+    // LZ clear — keep descending
+    expect(heli.flightAltitude).toBe(14);
     expect(heli.aircraftState).toBe('landing');
   });
 });
@@ -1321,9 +1399,11 @@ describe('end-to-end flight cycle: attack → deplete → RTB → land → rearm
     const iniReloadRate = parseFloat(ini['General']?.ReloadRate ?? '0.04');
     const rearmDelay = Math.max(1, Math.round(1.0 * iniReloadRate * CPP_TICKS_PER_MINUTE));
 
-    // Start: on pad, fully loaded
+    // Start: on pad, fully loaded (override constructor's airborne default)
     const pad = makePadStructure('HPAD', House.Spain, 4, 4);
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 4 * CELL_SIZE + CELL_SIZE, 4 * CELL_SIZE + CELL_SIZE);
+    heli.aircraftState = 'landed';
+    heli.flightAltitude = 0;
     heli.ammo = iniAmmo;
     heli.maxAmmo = iniAmmo;
     heli.landedAtStructure = 0;

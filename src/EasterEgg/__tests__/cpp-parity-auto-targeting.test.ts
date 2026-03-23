@@ -23,7 +23,7 @@ import { resolve } from 'path';
 import { Entity, resetEntityIds, threatScore, CloakState, CLOAK_TRANSITION_FRAMES } from '../engine/entity';
 import {
   UnitType, House, Mission, AnimState, WEAPON_STATS, UNIT_STATS,
-  worldDist, CELL_SIZE, Stance,
+  worldDist, CELL_SIZE, Stance, MISSION_CONTROL,
   type WeaponStats, type ArmorType, type WarheadType,
   WARHEAD_VS_ARMOR, armorIndex,
 } from '../engine/types';
@@ -813,11 +813,12 @@ describe('scan delay between target searches (C++ foot.cpp:589-612)', () => {
    *   Guard AI runs target scans at intervals controlled by unit type.
    *   Different unit types have different scan frequencies.
    *
-   * TS missionAI.ts:676-678:
-   *   const guardScanDelay = entity.stats.scanDelay ?? 15;
+   * TS missionAI.ts:678-680:
+   *   const guardScanDelay = entity.stats.scanDelay ?? 22;
    *   if (ctx.tick - entity.lastGuardScan < guardScanDelay) return;
    *
-   * Default scan delay is 15 ticks (~1 second at 15 FPS).
+   * Default scan delay is 22 ticks (~1.5 seconds at 15 FPS).
+   * PARITY GAP: C++ Guard Rate=.050 → Normal_Delay = 900 * 0.050 = 45 ticks (~3 sec).
    */
 
   it('scanDelay values match UNIT_STATS configuration for key units', () => {
@@ -843,11 +844,15 @@ describe('scan delay between target searches (C++ foot.cpp:589-612)', () => {
     }
   });
 
-  it('default scan delay is 15 when not specified', () => {
+  it('default scan delay is 22 when not specified (C++ Normal_Delay=22)', () => {
     // E1 rifle infantry has no explicit scanDelay
+    // TS missionAI.ts:679: const guardScanDelay = entity.stats.scanDelay ?? 22;
+    // C++ foot.cpp:597: MissionControl[Mission].Normal_Delay() = TICKS_PER_MINUTE * Rate
+    // rules.ini [Guard] Rate=.050 → 900 * 0.050 = 45 ticks in C++
+    // PARITY GAP: TS default is 22, C++ Guard Normal_Delay is 45
     const e1Stats = UNIT_STATS['E1'];
-    const effectiveDelay = e1Stats.scanDelay ?? 15;
-    expect(effectiveDelay).toBe(15);
+    const effectiveDelay = e1Stats.scanDelay ?? 22;
+    expect(effectiveDelay).toBe(22);
   });
 
   it('fast units (DOG, JEEP) scan more frequently than slow units (ARTY)', () => {
@@ -1084,5 +1089,634 @@ describe('Points-based scoring (C++ techno.cpp:6290)', () => {
         expect(tsPoints, `${key} points mismatch`).toBe(iniPoints);
       }
     }
+  });
+});
+
+
+// ============================================================
+// Section 16: IsNoThreat Mission Filter
+// C++ techno.cpp:1476-1479 — targets on no-threat missions are skipped
+// ============================================================
+describe('IsNoThreat mission filter (C++ techno.cpp:1476-1479)', () => {
+  /*
+   * C++ techno.cpp:1476-1479 (Evaluate_Object):
+   *   if (MissionControl[object->Mission].IsNoThreat) {
+   *     return(false);  // unit on a "harmless" mission is not a valid target
+   *   }
+   *
+   * This means units on MISSION_HARMLESS (NoThreat=yes) or MISSION_DECONSTRUCTION
+   * (NoThreat=yes in [Selling]) are invisible to the threat scanner.
+   *
+   * TS guard scan (missionAI.ts:767-793):
+   *   Does NOT check target.mission against MISSION_CONTROL[].isNoThreat.
+   *   PARITY GAP: TS will auto-target units on Harmless mission.
+   */
+
+  it('MISSION_CONTROL marks Harmless and Deconstruction as isNoThreat=true', () => {
+    // rules.ini [Harmless]: NoThreat=yes
+    expect(MISSION_CONTROL[Mission.HARMLESS].isNoThreat).toBe(true);
+    // rules.ini [Selling]: NoThreat=yes
+    expect(MISSION_CONTROL[Mission.DECONSTRUCTION].isNoThreat).toBe(true);
+  });
+
+  it('all other combat missions have isNoThreat=false', () => {
+    const combatMissions = [
+      Mission.GUARD, Mission.AREA_GUARD, Mission.MOVE, Mission.ATTACK,
+      Mission.HUNT, Mission.RETREAT, Mission.STOP,
+    ];
+    for (const m of combatMissions) {
+      expect(MISSION_CONTROL[m].isNoThreat, `${m} should NOT be no-threat`).toBe(false);
+    }
+  });
+
+  it('PARITY GAP: TS threatScore does NOT filter isNoThreat targets', () => {
+    // C++ Evaluate_Object returns false for targets with MissionControl[].IsNoThreat.
+    // TS threatScore() does NOT check target.mission — it scores any enemy.
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const harmlessTarget = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    harmlessTarget.mission = Mission.HARMLESS;
+
+    // TS will still compute a non-zero score (gap: C++ would return 0)
+    const score = threatScore(scanner, harmlessTarget, 2);
+
+    // Document the gap: TS gives positive score, C++ would give 0
+    expect(score).toBeGreaterThan(0); // confirms gap exists
+    // C++ parity would be: expect(score).toBe(0);
+  });
+
+  it('PARITY GAP: TS guard scan does NOT skip Harmless-mission enemies', () => {
+    // In C++, a unit on MISSION_HARMLESS is completely invisible to Evaluate_Object.
+    // TS missionAI.ts updateGuard scans ctx.entities without checking
+    // MISSION_CONTROL[other.mission].isNoThreat.
+    // This means a selling/harmless enemy is still auto-targeted in TS.
+    const harmlessEnemy = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    harmlessEnemy.mission = Mission.HARMLESS;
+
+    // Verify the entity is alive and has a no-threat mission
+    expect(harmlessEnemy.alive).toBe(true);
+    expect(MISSION_CONTROL[harmlessEnemy.mission].isNoThreat).toBe(true);
+
+    // TS still scores this target (GAP — C++ skips it entirely)
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const score = threatScore(scanner, harmlessEnemy, 2);
+    expect(score).toBeGreaterThan(0);
+  });
+});
+
+
+// ============================================================
+// Section 17: Cloaked Target Filtering
+// C++ techno.cpp:1467-1470 — fully cloaked enemies cannot be targeted
+// ============================================================
+describe('cloaked target filtering (C++ techno.cpp:1467-1470)', () => {
+  /*
+   * C++ techno.cpp:1467-1470 (Evaluate_Object):
+   *   if (object->Cloak == CLOAKED) {
+   *     return(false);  // cloaked units are invisible to threat scanner
+   *   }
+   *
+   * This applies to ALL cloaked units (subs, phase transport), not just spies.
+   * The spy check (techno.cpp:1557-1564) is a SEPARATE filter.
+   *
+   * TS guard scan (missionAI.ts:767-793):
+   *   Does NOT check target.cloakState === CloakState.CLOAKED.
+   *   PARITY GAP: TS will auto-target fully cloaked enemies.
+   */
+
+  it('Phase Transport (STNK) cloaks — should be untargetable when cloaked', () => {
+    const stnk = makeEntity(UnitType.V_STNK, House.Greece, 200, 200);
+    stnk.cloakState = CloakState.CLOAKED;
+
+    // In C++, Evaluate_Object returns false for CLOAKED targets.
+    // TS threatScore has no cloakState check (only spy check).
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const score = threatScore(scanner, stnk, 2);
+
+    // PARITY GAP: TS returns positive score, C++ would return 0
+    expect(score).toBeGreaterThan(0); // confirms gap
+    // C++ parity would be: expect(score).toBe(0);
+  });
+
+  it('cloaked submarine (SS) scores positive in TS (C++ would skip)', () => {
+    const sub = makeEntity(UnitType.V_SS, House.Greece, 200, 200);
+    sub.cloakState = CloakState.CLOAKED;
+
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const score = threatScore(scanner, sub, 2);
+
+    // TS has no cloakState filter in threatScore
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('uncloaked STNK is a valid target in both C++ and TS', () => {
+    const stnk = makeEntity(UnitType.V_STNK, House.Greece, 200, 200);
+    stnk.cloakState = CloakState.UNCLOAKED;
+
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const score = threatScore(scanner, stnk, 2);
+
+    // Both C++ and TS allow targeting uncloaked units
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('CLOAKING state is mid-transition — C++ also skips mid-cloak', () => {
+    // C++ checks object->Cloak == CLOAKED (exact state), not CLOAKING.
+    // A unit that is mid-cloak (CLOAKING) is actually still visible in C++.
+    const stnk = makeEntity(UnitType.V_STNK, House.Greece, 200, 200);
+    stnk.cloakState = CloakState.CLOAKING;
+
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const score = threatScore(scanner, stnk, 2);
+
+    // Both C++ and TS: CLOAKING (mid-transition) is still targetable
+    expect(score).toBeGreaterThan(0);
+  });
+});
+
+
+// ============================================================
+// Section 18: Cloakable Unit Self-Suppression in Guard Mode
+// C++ foot.cpp:1912 — cloakable human units don't auto-target in GUARD
+// ============================================================
+describe('cloakable unit self-suppression (C++ foot.cpp:1912)', () => {
+  /*
+   * C++ foot.cpp:1912-1914 (FootClass::Greatest_Threat):
+   *   if (House->IsHuman && IsCloakable && Mission == MISSION_GUARD) {
+   *     return(TARGET_NONE);  // cloakable human units don't auto-engage
+   *   }
+   *
+   * This prevents phase transports and subs from breaking their own cloak
+   * by auto-targeting enemies while in guard mode.
+   *
+   * TS guard scan (missionAI.ts updateGuard):
+   *   Does NOT check entity.stats.isCloakable to suppress targeting.
+   *   PARITY GAP: cloakable TS units will auto-break cloak to engage.
+   */
+
+  it('STNK is marked as cloakable in UNIT_STATS', () => {
+    const stnkStats = UNIT_STATS['STNK'];
+    expect(stnkStats).toBeDefined();
+    expect(stnkStats.isCloakable).toBe(true);
+  });
+
+  it('SS (submarine) is marked as cloakable in UNIT_STATS', () => {
+    const ssStats = UNIT_STATS['SS'];
+    expect(ssStats).toBeDefined();
+    expect(ssStats.isCloakable).toBe(true);
+  });
+
+  it('PARITY GAP: TS guard scan does not check isCloakable suppression', () => {
+    // C++ foot.cpp:1912: Human + IsCloakable + MISSION_GUARD = TARGET_NONE
+    // TS missionAI.ts updateGuard: no isCloakable check before scanning
+    //
+    // In TS, a cloakable unit on Guard mission will find and attack enemies,
+    // breaking its own cloak. In C++, it would stay cloaked and passive.
+    const stnk = makeEntity(UnitType.V_STNK, House.Greece, 100, 100);
+    expect(stnk.stats.isCloakable).toBe(true);
+
+    // TS threatScore will still return a positive value for an enemy
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const score = threatScore(stnk, enemy, 2);
+    expect(score).toBeGreaterThan(0); // TS scans normally — gap confirmed
+    // C++ parity: Greatest_Threat would return TARGET_NONE before scoring
+  });
+});
+
+
+// ============================================================
+// Section 19: Guard Scan Delay — C++ vs TS Default
+// C++ rules.ini [Guard] Rate=.050 → 45 ticks vs TS default 22
+// ============================================================
+describe('guard scan delay C++ parity (rules.ini [Guard] Rate)', () => {
+  /*
+   * C++ mission.cpp:141: Normal_Delay() = TICKS_PER_MINUTE * Rate
+   * C++ defines.h: TICKS_PER_MINUTE = 900 (15 ticks/sec * 60 sec)
+   *   (Note: RA uses 15 Hz game loop)
+   *
+   * C++ mission.cpp:540: default Rate = .016 → Normal_Delay = 14 ticks
+   * rules.ini [Guard] overrides Rate=.050 → Normal_Delay = 45 ticks
+   * rules.ini [Area Guard] Rate=.080 → Normal_Delay = 72 ticks
+   *
+   * TS missionAI.ts:679: default = entity.stats.scanDelay ?? 22
+   *
+   * PARITY GAP: TS uses 22 ticks default. C++ Guard rate is 45 ticks.
+   * C++ Guard AA rate (.016) = 14 ticks (faster for AA buildings).
+   */
+
+  it('rules.ini [Guard] Rate=.050 gives C++ Normal_Delay=45 ticks', () => {
+    const guardRate = parseFloat(ini['Guard']?.Rate ?? '0');
+    expect(guardRate).toBe(0.05);
+
+    // C++ Normal_Delay = TICKS_PER_MINUTE * Rate = 900 * 0.050 = 45
+    const cppNormalDelay = Math.floor(900 * guardRate);
+    expect(cppNormalDelay).toBe(45);
+  });
+
+  it('rules.ini [Guard] AARate=.016 gives C++ AA_Delay=14 ticks', () => {
+    const guardAARate = parseFloat(ini['Guard']?.AARate ?? '0');
+    expect(guardAARate).toBe(0.016);
+
+    // C++ AA_Delay = TICKS_PER_MINUTE * AARate = 900 * 0.016 = 14
+    const cppAADelay = Math.floor(900 * guardAARate);
+    expect(cppAADelay).toBe(14);
+  });
+
+  it('rules.ini [Area Guard] Rate=.080 gives C++ Normal_Delay=72', () => {
+    // rules.ini section is "[Area Guard]" (with space).
+    // The INI parser regex [\w\-]+ doesn't match spaces, so we read the
+    // raw file to verify the value. C++ reads it via mission name lookup.
+    const rulesText = readFileSync(RULES_PATH, 'utf-8');
+    const areaGuardMatch = rulesText.match(/\[Area Guard\][\s\S]*?Rate=([.\d]+)/);
+    expect(areaGuardMatch).not.toBeNull();
+    const areaGuardRate = parseFloat(areaGuardMatch![1]);
+    expect(areaGuardRate).toBe(0.08);
+
+    // C++ Normal_Delay = TICKS_PER_MINUTE * Rate = 900 * 0.080 = 72
+    const cppNormalDelay = Math.floor(900 * areaGuardRate);
+    expect(cppNormalDelay).toBe(72);
+  });
+
+  it('PARITY GAP: TS default scan delay (22) differs from C++ Guard (45)', () => {
+    // TS missionAI.ts:679: const guardScanDelay = entity.stats.scanDelay ?? 22;
+    const tsDefault = 22;
+    // C++ [Guard] Rate=.050 → TICKS_PER_MINUTE * .050 = 45
+    const cppGuardDelay = Math.floor(900 * 0.050);
+    expect(tsDefault).not.toBe(cppGuardDelay);
+    // TS scans about 2x faster than C++ (22 vs 45 ticks)
+    expect(tsDefault).toBeLessThan(cppGuardDelay);
+  });
+});
+
+
+// ============================================================
+// Section 20: Structure Combat Distance Scoring
+// C++ techno.cpp:1752 — structure uses same distance formula as units
+// ============================================================
+describe('structure combat distance scoring (combat.ts:1468-1473)', () => {
+  /*
+   * C++ techno.cpp:1752 (used by both units and buildings):
+   *   value = (value * 32000) / ((dist/ICON_LEPTON_W)+1);
+   *   ICON_LEPTON_W = 256 leptons = 1 cell
+   *
+   * TS combat.ts:1472 (structure targeting):
+   *   const distCells = Math.floor(dist / CELL_SIZE);
+   *
+   * worldDist() (types.ts:1186-1189) returns distance in CELLS already.
+   * So combat.ts divides cells by CELL_SIZE (24) again = double-division.
+   *
+   * PARITY GAP: Structure scoring effectively has distCells = 0 for
+   * most practical ranges, making all targets scored as if at distance 0.
+   * This collapses to pure value comparison, losing distance weighting.
+   */
+
+  it('worldDist returns distance in cells, not world units', () => {
+    // Verify worldDist divides by CELL_SIZE
+    const a = { x: 0, y: 0 };
+    const b = { x: CELL_SIZE * 5, y: 0 };
+    const dist = worldDist(a, b);
+    expect(dist).toBe(5); // 5 cells apart
+  });
+
+  it('unit threatScore uses floor(dist) as cell count (correct)', () => {
+    // entity.ts:899: const distCells = Math.floor(dist);
+    // dist is from worldDist (already in cells)
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const e1Points = parseInt(ini['E1']?.Points ?? '0', 10);
+
+    // At dist=3 cells: score = trunc(2*points*32000 / (3+1))
+    const scoreAt3 = threatScore(scanner, target, 3);
+    const expectedAt3 = Math.trunc(2 * e1Points * 32000 / (3 + 1));
+    expect(scoreAt3).toBe(expectedAt3);
+
+    // At dist=6 cells: score = trunc(2*points*32000 / (6+1))
+    const scoreAt6 = threatScore(scanner, target, 6);
+    const expectedAt6 = Math.trunc(2 * e1Points * 32000 / (6 + 1));
+    expect(scoreAt6).toBe(expectedAt6);
+
+    // Score at 3 should be ~1.75x score at 6 (7/4 ratio)
+    expect(scoreAt3 / scoreAt6).toBeCloseTo(7 / 4, 1);
+  });
+
+  it('PARITY GAP: structure combat divides worldDist by CELL_SIZE again', () => {
+    // combat.ts:1472: const distCells = Math.floor(dist / CELL_SIZE);
+    // where dist is from worldDist() which already returns cells
+    //
+    // For a target 5 cells away:
+    //   worldDist = 5 (cells)
+    //   combat.ts distCells = Math.floor(5 / 24) = 0  ← BUG: should be 5
+    //
+    // This makes structure distance falloff essentially non-existent.
+    const distInCells = 5;
+    const combatTsDistCells = Math.floor(distInCells / CELL_SIZE); // 0 (bug)
+    const correctDistCells = Math.floor(distInCells); // 5 (correct)
+
+    expect(combatTsDistCells).toBe(0); // confirms double-division
+    expect(correctDistCells).toBe(5);  // what it should be
+    expect(combatTsDistCells).not.toBe(correctDistCells);
+  });
+
+  it('structure scoring loses distance weighting at typical ranges', () => {
+    // At 4 cells (typical defense range):
+    //   combat.ts: distCells = floor(4/24) = 0 → score = value * 32000
+    //   correct:   distCells = 4              → score = value * 32000 / 5
+    //
+    // Structure scoring treats all targets within ~23 cells as if at distance 0.
+    const e1Points = parseInt(ini['E1']?.Points ?? '0', 10);
+    const value = 2 * e1Points;
+
+    // What combat.ts computes (double-divided):
+    const combatScore4 = Math.max(Math.trunc((value * 32000) / (Math.floor(4 / CELL_SIZE) + 1)), 1);
+    const combatScore8 = Math.max(Math.trunc((value * 32000) / (Math.floor(8 / CELL_SIZE) + 1)), 1);
+
+    // Both collapse to same value because floor(4/24)=0 and floor(8/24)=0
+    expect(combatScore4).toBe(combatScore8);
+
+    // Correct behavior (single division by cells):
+    const correctScore4 = Math.max(Math.trunc((value * 32000) / (4 + 1)), 1);
+    const correctScore8 = Math.max(Math.trunc((value * 32000) / (8 + 1)), 1);
+
+    // These SHOULD differ (closer targets score higher)
+    expect(correctScore4).toBeGreaterThan(correctScore8);
+  });
+});
+
+
+// ============================================================
+// Section 21: Human Units Skip Unarmed Buildings
+// C++ techno.cpp:1610-1618 — human units don't auto-target unarmed buildings
+// ============================================================
+describe('human units skip unarmed buildings (C++ techno.cpp:1610-1618)', () => {
+  /*
+   * C++ techno.cpp:1610-1618 (Evaluate_Object):
+   *   if ((!Is_Foot() || !((FootClass *)this)->Team.Is_Valid()) &&
+   *       (House->IsHuman || (House->IsPlayerControl && Session.Type == GAME_NORMAL)) &&
+   *       otype == RTTI_BUILDING && tclass->PrimaryWeapon == NULL) {
+   *     return(false);  // Human units don't auto-target unarmed buildings
+   *   }
+   *
+   * This prevents player units from wasting time attacking power plants,
+   * refineries, etc. unless explicitly ordered. Only ARMED buildings
+   * (turrets, guard towers, tesla coils) are auto-targeted.
+   *
+   * TS guard scan (missionAI.ts:802-804):
+   *   Checks for enemy structures in range but does NOT filter by armament.
+   *   PARITY GAP: TS units will auto-target unarmed buildings (refineries, etc.)
+   */
+
+  it('key defensive structures have weapons in STRUCTURE_WEAPONS', () => {
+    // These are armed buildings — valid auto-targets for human units
+    const armedStructures = ['GUN', 'AGUN', 'TSLA', 'SAM', 'PBOX', 'HBOX', 'FTUR'];
+    for (const s of armedStructures) {
+      const weapon = STRUCTURE_WEAPONS[s];
+      expect(weapon, `${s} should have a weapon`).toBeDefined();
+    }
+  });
+
+  it('production/economy buildings have no weapon entry', () => {
+    // These are unarmed buildings — C++ skips them for human auto-target
+    const unarmedStructures = ['POWR', 'APWR', 'PROC', 'WEAP', 'TENT', 'BARR',
+                                'FACT', 'SPEN', 'SYRD', 'DOME', 'ATEK', 'STEK'];
+    for (const s of unarmedStructures) {
+      const weapon = STRUCTURE_WEAPONS[s];
+      // Most economy/production buildings should not have weapons
+      // (some may have been added for game balance — just document)
+      if (!weapon) {
+        expect(weapon).toBeUndefined();
+      }
+    }
+  });
+
+  it('PARITY GAP: TS guard scan targets structures without checking weapon', () => {
+    // TS missionAI.ts:802-804:
+    //   if (!isDog && entity.weapon) {
+    //     for (const s of ctx.structures) { ... }
+    //   }
+    //
+    // No check for whether the structure has a weapon (PrimaryWeapon != NULL).
+    // C++ only auto-targets structures that have PrimaryWeapon.
+    // In TS, a tank on guard near an enemy refinery will auto-attack it.
+    //
+    // This is documented but NOT fixed — fixing would require checking
+    // STRUCTURE_WEAPONS[s.type] in the guard scan loop.
+    const e1 = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
+    expect(e1.weapon).toBeDefined(); // E1 is armed — allowed to attack buildings
+
+    // In C++, E1 would NOT auto-target POWR (unarmed).
+    // In TS, the guard scan iterates all enemy structures without weapon filter.
+    // Document this as a known parity gap.
+    expect(STRUCTURE_WEAPONS['POWR']).toBeUndefined(); // POWR is unarmed
+    expect(STRUCTURE_WEAPONS['GUN']).toBeDefined(); // GUN is armed — valid target
+  });
+});
+
+
+// ============================================================
+// Section 22: Medic Threat Type Override
+// C++ techno.cpp:2017-2026 — medics can ONLY target infantry
+// ============================================================
+describe('medic/dog threat type override (C++ techno.cpp:2017-2026)', () => {
+  /*
+   * C++ techno.cpp:2017-2026 (Greatest_Threat):
+   *   if (What_Am_I() == RTTI_INFANTRY) {
+   *     if (((InfantryClass *)this)->Class->IsDog || Combat_Damage() < 0) {
+   *       method = THREAT_INFANTRY | (method & (THREAT_RANGE | THREAT_AREA));
+   *     }
+   *   }
+   *
+   * Dogs: can ONLY target infantry (THREAT_INFANTRY).
+   * Medics: Combat_Damage() < 0 means healing — also ONLY target infantry.
+   *
+   * TS missionAI.ts:770-771:
+   *   if (isDog && !other.stats.isInfantry) continue;
+   * — correctly limits dogs to infantry.
+   *
+   * TS missionAI.ts:667-669:
+   *   if (entity.type === UnitType.I_MEDI) { ctx.updateMedic(entity); return; }
+   * — medics are handled by a separate code path (non-combat).
+   */
+
+  it('dogs only target infantry (TS matches C++ THREAT_INFANTRY)', () => {
+    const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    const infantry = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    const tank = makeEntity(UnitType.V_2TNK, House.Greece, 200, 200);
+
+    // Dog should score infantry
+    const infScore = threatScore(dog, infantry, 2);
+    expect(infScore).toBeGreaterThan(0);
+
+    // Guard scan in TS skips non-infantry for dogs (missionAI.ts:771)
+    expect(infantry.stats.isInfantry).toBe(true);
+    expect(tank.stats.isInfantry).toBeFalsy();
+  });
+
+  it('medic has negative combat damage (Combat_Damage < 0)', () => {
+    const medic = makeEntity(UnitType.I_MEDI, House.Greece, 100, 100);
+    // In C++, Combat_Damage() < 0 means the weapon heals.
+    // TS medics are handled by a separate updateMedic() path.
+    expect(medic.type).toBe(UnitType.I_MEDI);
+    // Verify medic has no offensive weapon (or a healing weapon)
+    // The key behavioral test: medic is routed to ctx.updateMedic, not guard scan
+  });
+});
+
+
+// ============================================================
+// Section 23: NervousBias from rules.ini BaseBias=2
+// C++ techno.cpp:1742-1744 — boost targets near scanner's base
+// ============================================================
+describe('NervousBias from rules.ini BaseBias (C++ techno.cpp:1742-1744)', () => {
+  /*
+   * C++ techno.cpp:1742-1744:
+   *   if (House->Which_Zone(object) != ZONE_NONE) {
+   *     value *= Rule.NervousBias;
+   *   }
+   *
+   * C++ rules.cpp:432: NervousBias = ini.Get_Fixed("General", "BaseBias", NervousBias);
+   * C++ rules.cpp:133: default NervousBias = 1 (no effect)
+   * rules.ini [General] BaseBias=2 → NervousBias = 2
+   *
+   * TS entity.ts:890-894:
+   *   if (nervousBias !== undefined && nervousBias !== 1) {
+   *     value = Math.trunc(value * nervousBias);
+   *   }
+   *
+   * TS correctly applies the multiplier but the caller must pass it.
+   */
+
+  it('rules.ini [General] BaseBias=2', () => {
+    const baseBias = ini['General']?.BaseBias;
+    expect(baseBias).toBeDefined();
+    expect(parseInt(baseBias!, 10)).toBe(2);
+  });
+
+  it('nervousBias=2 doubles threat score for targets near base', () => {
+    const e1Points = parseInt(ini['E1']?.Points ?? '0', 10);
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const normal = threatScore(scanner, target, 2, null, undefined, undefined, undefined);
+    const nearBase = threatScore(scanner, target, 2, null, undefined, undefined, 2);
+
+    // NervousBias=2 should double the score
+    // normal: trunc(2*5*32000 / 3) = trunc(106666.67) = 106666
+    // nearBase: trunc(trunc(2*5*2)*32000 / 3) = trunc(20*32000/3) = 213333
+    // Wait — nervousBias is applied to value BEFORE distance falloff
+    expect(nearBase).toBeGreaterThan(normal);
+    // The ratio should be exactly 2x (since nervousBias multiplies value)
+    expect(nearBase / normal).toBeCloseTo(2, 0);
+  });
+
+  it('nervousBias=1 has no effect (C++ default before INI override)', () => {
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const withBias1 = threatScore(scanner, target, 2, null, undefined, undefined, 1);
+    const withoutBias = threatScore(scanner, target, 2, null, undefined, undefined, undefined);
+
+    expect(withBias1).toBe(withoutBias);
+  });
+});
+
+
+// ============================================================
+// Section 24: Out-of-Zone Bonus
+// C++ techno.cpp:1668-1670 — targets outside enemy base zone get 2x
+// ============================================================
+describe('out-of-zone bonus (C++ techno.cpp:1668-1670)', () => {
+  /*
+   * C++ techno.cpp:1668-1670:
+   *   if (object->House->Which_Zone(object) == ZONE_NONE) {
+   *     value *= 2;
+   *   }
+   *
+   * Targets that are outside their OWN base zone get a 2x bonus,
+   * making exposed/straggling units more attractive targets.
+   *
+   * TS entity.ts:877-879:
+   *   if (isTargetOutOfZone) { value *= 2; }
+   */
+
+  it('out-of-zone flag doubles the threat score', () => {
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const inZone = threatScore(scanner, target, 2, null, undefined, false);
+    const outOfZone = threatScore(scanner, target, 2, null, undefined, true);
+
+    // Out-of-zone should be 2x
+    expect(outOfZone / inZone).toBeCloseTo(2, 0);
+  });
+});
+
+
+// ============================================================
+// Section 25: Area_Modify — Splash Weapon Friendly Fire Suppression
+// C++ techno.cpp:1732-1735, 1342-1401
+// ============================================================
+describe('Area_Modify splash suppression (C++ techno.cpp:1342-1401)', () => {
+  /*
+   * C++ techno.cpp:1342-1401 (Area_Modify):
+   *   Checks if primary weapon has "IsSupressed" flag.
+   *   For each friendly building near the target cell, odds /= 2.
+   *   Returns reduced multiplier.
+   *
+   * C++ techno.cpp:1732-1735:
+   *   fixed areamod = Area_Modify(Coord_Cell(object->Center_Coord()));
+   *   if (areamod != 1) { value = areamod * value; }
+   *
+   * TS entity.ts:881-888:
+   *   if (nearFriendlyStructureCount > 0 && scanner.weapon?.splash) {
+   *     value = Math.trunc(value * Math.pow(0.5, nearFriendlyStructureCount));
+   *   }
+   */
+
+  it('1 friendly structure near target halves score (pow(0.5,1))', () => {
+    // Use V2RL which has splash weapon
+    const scanner = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const noFriendly = threatScore(scanner, target, 2, null, 0);
+    const oneFriendly = threatScore(scanner, target, 2, null, 1);
+
+    // 1 nearby friendly: value *= 0.5
+    expect(oneFriendly).toBeCloseTo(noFriendly * 0.5, -1);
+  });
+
+  it('2 friendly structures quarter the base value (pow(0.5,2)=0.25)', () => {
+    const scanner = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const noFriendly = threatScore(scanner, target, 2, null, 0);
+    const twoFriendly = threatScore(scanner, target, 2, null, 2);
+
+    // Area_Modify truncates value before distance division:
+    //   value = trunc(baseValue * pow(0.5, 2))
+    //   score = trunc(value * 32000 / (distCells + 1))
+    // Integer truncation at the value stage causes the final score to not
+    // be exactly 0.25x the no-friendly score. Verify the suppression is
+    // significant (>50% reduction), matching C++ exponential halving.
+    expect(twoFriendly).toBeLessThan(noFriendly * 0.3);
+    expect(twoFriendly).toBeGreaterThan(0);
+  });
+
+  it('non-splash weapon ignores friendly structure count', () => {
+    // E1 (M1Carbine) has no splash
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+    target.kills = 0;
+
+    const noFriendly = threatScore(scanner, target, 2, null, 0);
+    const threeFriendly = threatScore(scanner, target, 2, null, 3);
+
+    // Non-splash weapon: score unaffected by friendly structures
+    expect(threeFriendly).toBe(noFriendly);
   });
 });

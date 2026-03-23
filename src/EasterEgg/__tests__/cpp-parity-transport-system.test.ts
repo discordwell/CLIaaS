@@ -427,11 +427,11 @@ describe('TRAN must land before unloading (aircraft.cpp:1068-1179)', () => {
     expect(tran.isRotorEquipped).toBe(true);
   });
 
-  it('TRAN aircraftState starts as landed on construction', () => {
-    // C++ aircraft: new aircraft at ground level have Height=0.
-    // TS: constructor sets aircraftState='landed' when isAircraft.
+  it('TRAN aircraftState starts as flying on construction (C++ aircraft.cpp:249)', () => {
+    // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL — aircraft created airborne.
+    // Callers that place aircraft on pads override to landed afterwards.
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 10, 10);
-    expect(tran.aircraftState).toBe('landed');
+    expect(tran.aircraftState).toBe('flying');
   });
 
   it('TS gate: unload blocked when aircraftState !== landed', () => {
