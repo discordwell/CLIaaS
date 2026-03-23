@@ -675,8 +675,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     return;
   }
 
-  // A3: Type-specific scan delays (C++ foot.cpp:589-612)
-  const guardScanDelay = entity.stats.scanDelay ?? 15;
+  // A3: Type-specific scan delays (C++ foot.cpp:589-612, Normal_Delay=22)
+  const guardScanDelay = entity.stats.scanDelay ?? 22;
   if (ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
 
@@ -823,8 +823,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
 /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
 export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   entity.animState = AnimState.IDLE;
-  // A3: Type-specific scan delays (C++ foot.cpp:589-612)
-  const areaGuardScanDelay = entity.stats.scanDelay ?? 15;
+  // A3: Type-specific scan delays (C++ foot.cpp:589-612, Normal_Delay=22)
+  const areaGuardScanDelay = entity.stats.scanDelay ?? 22;
   if (ctx.tick - entity.lastGuardScan < areaGuardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
 
@@ -971,7 +971,7 @@ export function orderTransportEvacuate(ctx: MissionAIContext, transport: Entity)
 export function updateAmbush(ctx: MissionAIContext, entity: Entity): void {
   entity.animState = AnimState.IDLE;
   // Scan for enemies within sight range
-  const scanDelay = entity.stats.scanDelay ?? 15;
+  const scanDelay = entity.stats.scanDelay ?? 22; // C++ Normal_Delay = 22 ticks
   if (ctx.tick - entity.lastGuardScan < scanDelay) return;
   entity.lastGuardScan = ctx.tick;
   const ec = entity.cell;

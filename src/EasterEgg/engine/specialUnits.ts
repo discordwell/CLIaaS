@@ -404,7 +404,7 @@ export function updateMechanicUnit(ctx: SpecialUnitsContext, entity: Entity): vo
     if (nep) { const dx = entity.pos.x - nep.x; const dy = entity.pos.y - nep.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; entity.animState = AnimState.WALK; entity.moveToward({ x: entity.pos.x + (dx / d) * CELL_SIZE * 3, y: entity.pos.y + (dy / d) * CELL_SIZE * 3 }, ctx.movementSpeed(entity)); entity.healTarget = null; return; }
   }
   if (entity.healTarget) { const ht = entity.healTarget; if (!ht.alive || ht.hp >= ht.maxHp || !ctx.isAllied(entity.house, ht.house) || ht.stats.isInfantry || ht.isAirUnit || ht.id === entity.id) entity.healTarget = null; }
-  const hsd = entity.stats.scanDelay ?? 15;
+  const hsd = entity.stats.scanDelay ?? 22; // C++ Normal_Delay = 22 ticks
   if (!entity.healTarget && ctx.tick - entity.lastGuardScan >= hsd) {
     entity.lastGuardScan = ctx.tick;
     let best: Entity | null = null; let lhr = 1.0; let bd = Infinity; const sr = MECHANIC_HEAL_RANGE;
@@ -475,7 +475,7 @@ export function updateMedic(ctx: SpecialUnitsContext, entity: Entity): void {
   }
 
   // Scan for heal target (rate-limited by scan delay)
-  const healScanDelay = entity.stats.scanDelay ?? 15;
+  const healScanDelay = entity.stats.scanDelay ?? 22; // C++ Normal_Delay = 22 ticks
   if (!entity.healTarget && ctx.tick - entity.lastGuardScan >= healScanDelay) {
     entity.lastGuardScan = ctx.tick;
 

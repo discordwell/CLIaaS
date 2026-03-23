@@ -448,7 +448,7 @@ export interface UnitStats {
   noMovingFire?: boolean; // must stop to fire (ants, artillery)
   passengers?: number;     // max passenger capacity (transports only)
   guardRange?: number;     // max chase distance in cells for guard behavior (default: sight)
-  scanDelay?: number;      // ticks between guard scans (C++ foot.cpp:589-612, default 15)
+  scanDelay?: number;      // ticks between guard scans (C++ Normal_Delay=22: foot.cpp:589-612)
   crusher?: boolean;       // C++ DriveClass::Ok_To_Move — heavy tracked vehicles crush infantry on cell entry
   crushable?: boolean;     // C++ infantry.cpp — infantry/ants are killed when a crusher drives over them
   isVessel?: boolean;      // true for all naval units (rendering + AI category)
@@ -1050,6 +1050,10 @@ export enum AnimState {
   WALK = 'WALK',
   ATTACK = 'ATTACK',
   DIE = 'DIE',
+  GUARD_IDLE = 'GUARD_IDLE',           // C++ guard mission idle anim (distinct from AREA_GUARD_IDLE)
+  AREA_GUARD_IDLE = 'AREA_GUARD_IDLE', // C++ area guard idle anim
+  PRONE = 'PRONE',                     // C++ infantry prone under fire (different sprite sequence)
+  HARVEST = 'HARVEST',                 // C++ harvester scoop/dump anim
 }
 
 // === World Position ===

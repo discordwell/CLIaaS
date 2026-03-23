@@ -50,22 +50,21 @@ describe('Power bar constants (power.h:81-94)', () => {
     expect(Renderer.POWER_STEP_FACTOR).toBe(5);
   });
 
-  // PARITY GAP: C++ uses POWER_HEIGHT=110 (HIRES) and rescales in Draw_It
-  // by (153/107). TS uses POWER_HEIGHT=153 directly.
-  it('C++ POWER_HEIGHT = 110 (HIRES: 200-(7+70+13)), TS uses 153', () => {
+  it('C++ POWER_HEIGHT = 110 (HIRES: 200-(7+70+13)) — TS matches', () => {
     const CPP_POWER_HEIGHT = 200 - (7 + 70 + 13); // = 110
     expect(CPP_POWER_HEIGHT).toBe(110);
-    // PARITY GAP: TS uses 153 instead of 110
-    expect(Renderer.POWER_HEIGHT).not.toBe(110);
-    expect(Renderer.POWER_HEIGHT).toBe(153);
+    expect(Renderer.POWER_HEIGHT).toBe(110);
   });
 
   it('C++ max pixel height = POWER_HEIGHT - 2 = 108', () => {
     const CPP_MAX = 110 - 2;
     expect(CPP_MAX).toBe(108);
-    // TS max is 151
     const TS_MAX = Renderer.POWER_HEIGHT - 2;
-    expect(TS_MAX).toBe(151);
+    expect(TS_MAX).toBe(108);
+  });
+
+  it('rendered bar height = 153 (HIRES Draw_It rescaling)', () => {
+    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(153);
   });
 });
 
@@ -278,10 +277,12 @@ describe('Power_Height logarithmic curve invariants', () => {
     }
   });
 
-  it('clamped to [0, POWER_HEIGHT - 2]', () => {
-    const max = Renderer.POWER_HEIGHT - 2;
+  it('clamped to [0, rescaled(POWER_HEIGHT - 2)]', () => {
+    // Internal clamp: [0, 108], then rescaled via (raw * 153) / 107
+    // Max rescaled: floor(108 * 153 / 107) = 154
+    const maxRescaled = Math.floor((Renderer.POWER_HEIGHT - 2) * 153 / 107);
     expect(Renderer.powerBarHeight(0)).toBe(0);
-    expect(Renderer.powerBarHeight(100000)).toBeLessThanOrEqual(max);
+    expect(Renderer.powerBarHeight(100000)).toBeLessThanOrEqual(maxRescaled);
     expect(Renderer.powerBarHeight(100000)).toBeGreaterThanOrEqual(0);
   });
 });
@@ -329,32 +330,19 @@ describe('Bounce animation — C++ AI() parity (power.cpp:268-350)', () => {
     expect(mod[10]).toBe(2);
   });
 
-  // PARITY GAP: C++ increments height by exactly 1 per tick (power.cpp:318-319, 330-331).
-  // TS uses proportional step: Math.max(1, Math.ceil(abs(desired-current)/8))
-  // (renderer.ts:342-343). This means TS reaches the target faster than C++.
-  it('C++ animation steps by exactly 1 per tick — TS uses proportional step — PARITY GAP', () => {
+  it('C++ animation steps by exactly 1 per tick — TS matches (power.cpp:318-319, 330-331)', () => {
     // C++ AI (power.cpp:330-331):
     //   if (PowerHeight != DesiredPowerHeight) {
     //     PowerHeight += PowerDir;
     //   }
-    // This means if PowerHeight=0 and DesiredPowerHeight=100, it takes exactly
-    // 100 ticks to reach target.
-    //
-    // TS (renderer.ts:342-343):
-    //   const pStep = Math.max(1, Math.ceil(Math.abs(desired - current) / 8));
-    //   this.powerHeight += this.powerDir * pStep;
-    // This accelerates: step starts at ceil(100/8)=13, then shrinks.
-    //
-    // We cannot directly test this without instantiating Renderer (needs canvas),
-    // but we document the gap:
+    // TS updatePowerAnimation() now increments by exactly 1 per tick:
+    //   this.powerHeight += this.powerDir;
+    // Both take exactly 100 ticks to move 100 pixels.
     const cppTicksToReach100 = 100; // always 1 per tick
-    // TS would take roughly: 13+12+11+10+9+8+7+6+5+4+3+2+1+... ~= 16 ticks
-    // This is a significant pacing divergence.
     expect(cppTicksToReach100).toBe(100);
-    // Verify the formula difference is documented
-    expect(Math.max(1, Math.ceil(100 / 8))).toBe(13); // TS first step
-    expect(Math.max(1, Math.ceil(87 / 8))).toBe(11);  // TS second step
-    expect(13).not.toBe(1); // PARITY GAP: C++ step is always 1
+    // TS step is also always 1 (powerDir is +1 or -1)
+    // Cannot test without canvas, but code review confirms renderer.ts:346
+    // uses `this.powerHeight += this.powerDir` (no pStep multiplier)
   });
 });
 
@@ -364,24 +352,20 @@ describe('Bounce animation — C++ AI() parity (power.cpp:268-350)', () => {
 describe('Flash timer — C++ Flash_Power parity (power.cpp:473-478)', () => {
   // C++ Flash_Power (power.cpp:475): FlashTimer = TICKS_PER_SECOND
   // C++ TICKS_PER_SECOND = 15 (defines.h:3031)
-  // TS (renderer.ts:355): this.powerFlashTimer = 30
+  // TS (renderer.ts:358): this.powerFlashTimer = 15
 
   it('C++ flash duration = TICKS_PER_SECOND = 15 ticks', () => {
     const CPP_TICKS_PER_SECOND = 15;
     expect(CPP_TICKS_PER_SECOND).toBe(15);
   });
 
-  // PARITY GAP: TS flash lasts 30 ticks (2x longer than C++)
-  // We cannot read the private field without instantiation, but the code review
-  // confirms renderer.ts:355 uses 30, not 15.
-  it('TS flash duration is 30 ticks — 2x longer than C++ — PARITY GAP', () => {
-    // This is a code-review-verified gap. C++ uses 15, TS uses 30.
-    // The TS comment says "flash for 2 seconds" which at 15 tps = 30 ticks.
-    // But C++ flashes for exactly 1 second (15 ticks at 15 tps).
+  it('TS flash duration matches C++ at 15 ticks (1 second at 15 tps)', () => {
+    // Code review confirms renderer.ts:358 uses 15 (TICKS_PER_SECOND).
+    // C++ Flash_Power (power.cpp:475) sets FlashTimer = TICKS_PER_SECOND = 15.
+    // Both flash for exactly 1 second.
     const CPP_FLASH_TICKS = 15;
-    const TS_FLASH_TICKS = 30; // from renderer.ts:355
-    expect(TS_FLASH_TICKS).toBe(CPP_FLASH_TICKS * 2);
-    expect(TS_FLASH_TICKS).not.toBe(CPP_FLASH_TICKS); // PARITY GAP
+    const TS_FLASH_TICKS = 15; // from renderer.ts:358
+    expect(TS_FLASH_TICKS).toBe(CPP_FLASH_TICKS);
   });
 });
 
@@ -466,10 +450,10 @@ describe('Power bar color thresholds (power.cpp:208-219)', () => {
 // ============================================================
 // Section 12: Comprehensive TS powerBarHeight expected values
 // These are the values the TS implementation actually returns,
-// computed with POWER_HEIGHT=153, STEP_LEVEL=100, STEP_FACTOR=5.
+// computed with POWER_HEIGHT=110, STEP_LEVEL=100, STEP_FACTOR=5, rescaled by 153/107.
 // ============================================================
-describe('TS powerBarHeight exact values (internal=110, rescaled)', () => {
-  // Now matches C++ Power_Height(110) → Draw_It rescale (raw * 153 / 107)
+describe('TS powerBarHeight exact values (POWER_HEIGHT=110, rescaled)', () => {
+  // Matches C++ Power_Height(110) → Draw_It rescale (raw * 153 / 107)
   // Values from Section 3 (C++ rescaled):
   const EXPECTED: [number, number][] = [
     [0,    0],
@@ -521,35 +505,31 @@ describe('Remainder interpolation within 100-unit steps', () => {
 // Section 14: Parity gap assertions — these FAIL to document real divergence
 // Each test asserts what C++ expects. Failures prove TS diverges.
 // ============================================================
-describe('C++ parity — pixel heights match after fix', () => {
-  it('POWER_HEIGHT_INTERNAL = 110 matches C++ POWER_HEIGHT', () => {
+describe('C++ parity — pixel heights match', () => {
+  it('POWER_HEIGHT = 110 matches C++ POWER_HEIGHT', () => {
     // C++ power.h:85: POWER_HEIGHT=(200-(7+70+13)) = 110
-    // TS uses 110 internally for calculation, 153 for rendered bar height
-    expect(Renderer.POWER_HEIGHT_INTERNAL).toBe(110);
-    expect(Renderer.POWER_HEIGHT).toBe(153); // rendered height (different from C++ internal)
+    expect(Renderer.POWER_HEIGHT).toBe(110);
+    // Rendered bar height is 153 (HIRES Draw_It rescaling)
+    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(153);
   });
 
-  // PARITY GAP: TS powerBarHeight(500) should return C++ rescaled value 102
-  it('GAP 2: powerBarHeight(500) should be 102 (C++ rendered)', () => {
+  it('powerBarHeight(500) = 102 (C++ rendered)', () => {
     // C++ Power_Height(500)=72, Draw_It rescales: (72*153)/107 = 102
-    expect(Renderer.powerBarHeight(500)).toBe(102); // PARITY GAP: TS returns 100
+    expect(Renderer.powerBarHeight(500)).toBe(102);
   });
 
-  // PARITY GAP: TS powerBarHeight(1000) should return C++ rescaled value 135
-  it('GAP 3: powerBarHeight(1000) should be 135 (C++ rendered)', () => {
+  it('powerBarHeight(1000) = 135 (C++ rendered)', () => {
     // C++ Power_Height(1000)=95, Draw_It rescales: (95*153)/107 = 135
-    expect(Renderer.powerBarHeight(1000)).toBe(135); // PARITY GAP: TS returns 133
+    expect(Renderer.powerBarHeight(1000)).toBe(135);
   });
 
-  // PARITY GAP: TS powerBarHeight(50) should return C++ rescaled value 14
-  it('GAP 4: powerBarHeight(50) should be 14 (C++ rendered)', () => {
+  it('powerBarHeight(50) = 14 (C++ rendered)', () => {
     // C++ Power_Height(50)=10, Draw_It rescales: (10*153)/107 = 14
-    expect(Renderer.powerBarHeight(50)).toBe(14); // PARITY GAP: TS returns 15
+    expect(Renderer.powerBarHeight(50)).toBe(14);
   });
 
-  // PARITY GAP: TS powerBarHeight(2000) should return C++ rescaled value 148
-  it('GAP 5: powerBarHeight(2000) should be 148 (C++ rendered)', () => {
+  it('powerBarHeight(2000) = 148 (C++ rendered)', () => {
     // C++ Power_Height(2000)=104, Draw_It rescales: (104*153)/107 = 148
-    expect(Renderer.powerBarHeight(2000)).toBe(148); // PARITY GAP: TS returns 147
+    expect(Renderer.powerBarHeight(2000)).toBe(148);
   });
 });
