@@ -120,10 +120,14 @@ export function computePowerMult(ctx: ProductionContext): number {
   return m1 * m2;
 }
 
-/** Get effective cost for an item, applying country bonus multiplier */
-export function getEffectiveCost(item: ProductionItem, playerHouse: House): number {
+/**
+ * Get effective cost for an item, applying country bonus and optional difficulty CostBias.
+ * C++ house.cpp:294,304: effective cost = item.cost * HouseType.CostBias * Diff[handicap].CostBias
+ * @param costBias — difficulty CostBias from AI_DIFFICULTY_MODS (default 1.0)
+ */
+export function getEffectiveCost(item: ProductionItem, playerHouse: House, costBias = 1.0): number {
   const bonus = COUNTRY_BONUSES[playerHouse] ?? COUNTRY_BONUSES.Neutral;
-  return Math.max(1, Math.round(item.cost * bonus.costMult));
+  return Math.max(1, Math.round(item.cost * bonus.costMult * costBias));
 }
 
 /** Count alive player buildings of a given type */
