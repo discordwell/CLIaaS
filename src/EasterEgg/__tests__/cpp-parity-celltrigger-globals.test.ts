@@ -541,7 +541,7 @@ describe('GlobalFlags array bounds (C++ scenario.h:197) — C++ parity', () => {
    * C++ scenario.cpp:265: if ((unsigned)global < ARRAY_SIZE(Scen.GlobalFlags))
    *
    * C++ supports 30 global flags (indices 0-29).
-   * TS uses Set<number> which has no upper bound — potential divergence for indices >= 30.
+   * TS validates indices to [0, 29] range — matches C++ bounds check.
    */
 
   it('global index 0 (lowest valid) works correctly', () => {
@@ -556,17 +556,28 @@ describe('GlobalFlags array bounds (C++ scenario.h:197) — C++ parity', () => {
     expect(checkTriggerEvent(event, createState({ globals: new Set() }))).toBe(false);
   });
 
-  it('TS allows global index >= 30 (C++ would bounds-check and reject)', () => {
+  it('global index >= 30 is rejected (C++ bounds-check: scenario.cpp:265)', () => {
     // C++ scenario.cpp:265: if ((unsigned)global < ARRAY_SIZE(Scen.GlobalFlags))
-    // If global >= 30, C++ returns false (no change). TS has no such limit.
-    // PARITY GAP: TS allows unbounded global indices; C++ limits to 0-29.
+    // If global >= 30, C++ returns false (out of bounds). TS now matches.
     const event: TriggerEvent = { type: TEVENT_GLOBAL_SET, team: -1, data: 30 };
     const state = createState({ globals: new Set([30]) });
-    // TS will happily check Set.has(30) → true
-    expect(checkTriggerEvent(event, state)).toBe(true);
-    // In C++, Set_Global_To(30, true) would be a no-op (out of bounds),
-    // so TEVENT_GLOBAL_SET for index 30 would never be satisfiable.
-    // This divergence is acceptable because no RA mission uses globals >= 30.
+    // TS rejects out-of-bounds global indices — matches C++ behavior
+    expect(checkTriggerEvent(event, state)).toBe(false);
+  });
+
+  it('negative global index is rejected', () => {
+    const event: TriggerEvent = { type: TEVENT_GLOBAL_SET, team: -1, data: -1 };
+    const state = createState({ globals: new Set([-1]) });
+    expect(checkTriggerEvent(event, state)).toBe(false);
+  });
+
+  it('SET_GLOBAL with index >= 30 is a no-op', () => {
+    // C++ scenario.cpp:265 — out-of-bounds SET_GLOBAL is silently ignored
+    const globals = new Set<number>();
+    const action: TriggerAction = { action: TACTION_SET_GLOBAL, team: -1, trigger: -1, data: 30 };
+    const result = executeAction(action, globals);
+    expect(globals.has(30)).toBe(false);
+    expect(result.globalChanged).toBeUndefined();
   });
 });
 
@@ -847,27 +858,21 @@ describe('PLAYER_ENTERED ownership check — C++ parity', () => {
    * In C++, a cell trigger with TEVENT_PLAYER_ENTERED and Data.House=HOUSE_GREECE
    * only fires for Greece units. Other house units are ignored.
    *
-   * TS checkTriggerEvent for TEVENT_PLAYER_ENTERED simply returns state.playerEntered
-   * without checking event.data against any house ownership.
-   * TS checkCellTriggers only checks entity.isPlayerUnit — no house comparison.
-   *
-   * PARITY GAP: TS does not check event.data (house) for PLAYER_ENTERED.
-   * In single-player RA missions this rarely matters because the trigger's Data.House
-   * matches the player's house. But it's technically incorrect.
+   * TS: checkTriggerEvent checks state.playerEnteredHouse === event.data,
+   * matching C++ ownership check behavior.
    */
-  it('PLAYER_ENTERED should check event.data house against entering unit owner', () => {
-    // PARITY GAP: TS checkTriggerEvent ignores event.data for PLAYER_ENTERED.
-    // In C++, the trigger event's Data.House must match the entering unit's owner.
-    // This test documents the gap — it would need checkTriggerEvent to receive
-    // the entering unit's house and compare against event.data.
+  it('PLAYER_ENTERED checks event.data house against entering unit owner', () => {
     const event: TriggerEvent = { type: TEVENT_PLAYER_ENTERED, team: -1, data: 2 }; // Data.House=2
-    // State says playerEntered=true, but the entering unit is house 5, not house 2
-    // C++ would return false because Owner()=5 != Data.House=2
-    // TS returns true because it only checks playerEntered boolean
+    // State says playerEntered=true, entering unit is house 0 (default), not house 2
     const state = createState({ playerEntered: true });
-    // C++ expected: false (house mismatch)
-    // TS actual: true (no house check)
-    expect(checkTriggerEvent(event, state)).toBe(false); // This FAILS in TS — PARITY GAP
+    // C++ and TS: false — house mismatch (0 !== 2)
+    expect(checkTriggerEvent(event, state)).toBe(false);
+  });
+
+  it('PLAYER_ENTERED passes when entering house matches event.data', () => {
+    const event: TriggerEvent = { type: TEVENT_PLAYER_ENTERED, team: -1, data: 2 };
+    const state = createState({ playerEntered: true, playerEnteredHouse: 2 });
+    expect(checkTriggerEvent(event, state)).toBe(true);
   });
 });
 
@@ -882,32 +887,22 @@ describe('Set_Global_To idempotency — C++ parity', () => {
    *
    * C++ only cascades (resets timers, marks changed) when the global value
    * actually changes. Setting an already-set global is a no-op.
-   *
-   * TS: executeTriggerAction with SET_GLOBAL always sets result.globalChanged
-   * regardless of whether the global was already set. This causes unnecessary
-   * cascade calls to springGlobalTriggers.
-   *
-   * PARITY GAP: TS always reports globalChanged even when the value didn't change.
-   * This is functionally benign (the cascade is idempotent) but differs from C++.
+   * TS matches: only reports globalChanged when the value actually changed.
    */
-  it('SET_GLOBAL should NOT report globalChanged when global was already set', () => {
-    // PARITY GAP: TS always returns globalChanged
+  it('SET_GLOBAL does NOT report globalChanged when global was already set', () => {
     const globals = new Set<number>([5]); // global 5 already set
     const action: TriggerAction = { action: TACTION_SET_GLOBAL, team: -1, trigger: -1, data: 5 };
     const result = executeAction(action, globals);
-    // C++ expected: no cascade (previous == value), globalChanged should be undefined
-    // TS actual: globalChanged = 5
-    expect(result.globalChanged).toBeUndefined(); // This FAILS in TS — PARITY GAP
+    // No cascade because previous == value
+    expect(result.globalChanged).toBeUndefined();
   });
 
-  it('CLEAR_GLOBAL should NOT report globalChanged when global was already clear', () => {
-    // PARITY GAP: TS always returns globalChanged
+  it('CLEAR_GLOBAL does NOT report globalChanged when global was already clear', () => {
     const globals = new Set<number>(); // global 5 already clear
     const action: TriggerAction = { action: TACTION_CLEAR_GLOBAL, team: -1, trigger: -1, data: 5 };
     const result = executeAction(action, globals);
-    // C++ expected: no cascade (previous == value), globalChanged should be undefined
-    // TS actual: globalChanged = 5
-    expect(result.globalChanged).toBeUndefined(); // This FAILS in TS — PARITY GAP
+    // No cascade because previous == value
+    expect(result.globalChanged).toBeUndefined();
   });
 });
 
