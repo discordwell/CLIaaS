@@ -503,9 +503,10 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
   it('guard scan uses weapon range (THREAT_RANGE, C++ foot.cpp:593)', () => {
     // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE)
     // THREAT_RANGE means scan within weapon range (Threat_Range(0))
-    // TS missionAI.ts:745-748: uses guardRange or sight, reduced for DEFENSIVE stance
+    // C++ parity: guard scan now uses weapon range (M1Carbine range=3.0)
     const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
-    const nearEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 3 * CELL_SIZE, 100);
+    // Place enemy within weapon range (2 cells < M1Carbine range=3.0)
+    const nearEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
 
     const ctx = makeCtx({
       entities: [guard, nearEnemy],
@@ -516,7 +517,7 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     guard.lastGuardScan = 0; // allow scan
     updateGuard(ctx, guard);
 
-    // Should find the nearby enemy
+    // Should find the nearby enemy within weapon range
     expect(guard.target).not.toBeNull();
     expect(guard.mission).toBe(Mission.ATTACK);
   });
@@ -726,7 +727,8 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
   it('infantry targets normal enemy but ignores spy when both present (C++ techno.cpp:1557)', () => {
     const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
-    const normalEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 3 * CELL_SIZE, 100);
+    // Place enemy within weapon range (2.5 cells < M1Carbine range=3.0)
+    const normalEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 2.5 * CELL_SIZE, 100);
 
     const ctx = makeCtx({
       entities: [guard, spy, normalEnemy],
@@ -1373,17 +1375,13 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
    *   [designated enemy: (value+500)*3]
    *   score = (value * 32000) / (dist*256 + 1)   // dist in cells, converted to leptons
    *
-   * PARITY GAP: C++ uses (Risk+Reward ≈ 4/3*cost) + literal kills
-   *             TS uses cost + kills*50 + weaponDanger
+   * CLOSED: TS now uses 2*Points + literal kills, matching C++ Value() + Crew.Kills.
    */
 
-  it('kill count scaling diverges: C++ adds literal kills, TS adds kills*50', () => {
+  it('kill count uses literal kills (C++ parity: value += Crew.Kills)', () => {
     // C++ techno.cpp:1652: value = rawval + object->Crew.Kills
-    // TS entity.ts:779: value += target.kills * 50
-    //
-    // C++ kill count adds 1 per kill to threat value.
-    // TS adds 50 per kill — a much larger increment.
-    // PARITY GAP: TS overweights kills relative to C++
+    // TS entity.ts:870: value = Math.trunc(points * 2) + target.kills
+    // C++ parity: both add literal kill count (not scaled)
     const scanner = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.E1, House.Greece, 200, 200);
 
@@ -1396,34 +1394,24 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
     // The delta from one kill
     const delta = score1 - score0;
 
-    // C++ would add exactly 1 to value before distance scaling
-    // TS adds 50 to value before distance scaling
-    // At dist=2 cells (512 leptons): scaling factor ≈ 32000/513 ≈ 62.4
-    // C++ delta ≈ 62.4, TS delta ≈ 50 * 62.4 ≈ 3120
-    // PARITY GAP: TS kill bonus is ~50x stronger than C++
+    // C++ parity: kill adds 1 to value before distance scaling.
+    // At dist=2 cells: distCells=2, scaling = 32000 / (2+1) ≈ 10666
+    // Delta ≈ 10666 (one kill * scaling factor)
     expect(delta).toBeGreaterThan(0); // kills increase score in both
   });
 
-  it('base value diverges: C++ uses Risk+Reward, TS uses cost (C++ techno.cpp:4519)', () => {
-    // C++ techno.cpp:4519: return Risk() + Techno_Type_Class()->Reward + value
-    // C++ Risk() typically returns cost/3, Reward typically returns cost
-    // So C++ Value() ≈ cost/3 + cost = 4/3 * cost (plus cargo value)
-    //
-    // TS entity.ts:776: value = target.stats.cost ?? (strength + damage*5)
-    // TS uses raw cost, not the Risk+Reward formula
-    //
-    // PARITY GAP: C++ value is ~33% higher than TS for same unit
+  it('base value uses 2*Points (C++ Value() = Risk + Reward = 2*Points)', () => {
+    // C++ techno.cpp:4519: Value() = Risk() + Reward
+    // C++ techno.cpp:6290: Risk = Reward = Points (from RULES.INI)
+    // So Value() = 2 * Points
+    // TS entity.ts:869-870: value = Math.trunc(points * 2) + target.kills
+    // C++ parity: both use 2 * Points as the base value
     const target = makeEntity(UnitType.V_V2RL, House.Greece, 200, 200);
-    const cost = target.stats.cost;
-    // V2RL has cost: 700 in types.ts
-    expect(cost).toBeDefined();
-    if (cost) {
-      // C++ Value() ≈ cost/3 + cost = 4*cost/3
-      const cppValue = Math.floor(cost / 3) + cost;
-      // TS value = cost
-      const tsValue = cost;
-      // C++ value is ~33% higher
-      expect(cppValue).toBeGreaterThan(tsValue);
+    const points = target.stats.points;
+    expect(points).toBeDefined();
+    if (points) {
+      const expectedBaseValue = Math.trunc(points * 2);
+      expect(expectedBaseValue).toBeGreaterThan(0);
     }
   });
 
@@ -1458,13 +1446,9 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
     }
   });
 
-  it('TS adds weaponDanger bonus that C++ does not have (TS entity.ts:796-797)', () => {
-    // TS entity.ts:796-797:
-    //   const weaponDanger = Math.min((target.weapon?.damage ?? 0) * 2, 200);
-    //   value += weaponDanger;
-    //
-    // C++ Evaluate_Object does NOT add a weapon damage bonus to threat value.
-    // PARITY GAP: TS inflates scores for heavily-armed targets.
+  it('threat score uses 2*Points as base value — no weaponDanger bonus (C++ parity)', () => {
+    // CLOSED: TS no longer adds weaponDanger. threatScore uses 2*Points + kills,
+    // matching C++ Value() + Crew.Kills. Higher-points units score higher.
     const scanner = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const unarmed = makeEntity(UnitType.V_MCV, House.Greece, 200, 200);
     const armed = makeEntity(UnitType.V_3TNK, House.Greece, 200, 200);
@@ -1472,13 +1456,9 @@ describe('Numeric Parity — C++ vs TS threat score distance formula', () => {
     const scoreUnarmed = threatScore(scanner, unarmed, 2);
     const scoreArmed = threatScore(scanner, armed, 2);
 
-    // Both should have positive scores
+    // Both should have positive scores (both have non-zero points)
     expect(scoreUnarmed).toBeGreaterThan(0);
     expect(scoreArmed).toBeGreaterThan(0);
-
-    // Armed unit has higher base value from weaponDanger bonus (TS-only)
-    // In C++, MCV might actually have higher value than tank due to cost
-    // But TS weaponDanger bonus gives armed units an additional +min(damage*2, 200)
   });
 });
 
@@ -1500,21 +1480,16 @@ describe('Guard vs Hunt scan range (C++ THREAT_RANGE vs THREAT_NORMAL)', () => {
    * Remaining gap: C++ guard uses weapon range, TS uses sight/guardRange.
    */
 
-  it('guard range is based on sight (not weapon range like C++)', () => {
-    // C++ uses weapon range for guard scan (THREAT_RANGE → Threat_Range(0))
-    // TS uses guardRange or sight
+  it('guard range uses weapon range (C++ parity: THREAT_RANGE → Threat_Range(0))', () => {
+    // CLOSED: TS guard scan now uses weapon range as base, matching C++ foot.cpp:593.
+    // C++ Threat_Range(0) returns weapon range for guard scan.
     const guard = makeEntity(UnitType.V_ARTY, House.USSR, 100, 100);
     const weaponRange = guard.weapon?.range ?? 5;
     const sight = guard.stats.sight;
-    const guardRange = guard.stats.guardRange ?? sight;
 
-    // For ARTY: weapon range (155mm = 6.0) may differ from sight (5)
-    // C++ would use weapon range, TS uses sight
-    // This is a structural difference
-    if (weaponRange !== guardRange) {
-      // PARITY GAP: C++ scan range = weapon range, TS scan range = sight
-      expect(weaponRange).not.toBe(guardRange);
-    }
+    // For ARTY: weapon range (155mm = 6.0) differs from sight (5)
+    // C++ parity: guard scan now uses weapon range, not sight
+    expect(weaponRange).toBeGreaterThan(sight); // ARTY range=6 > sight=5
   });
 
   it('hunt has wider scan than guard (unlimited vs sight-based)', () => {

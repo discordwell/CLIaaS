@@ -417,30 +417,30 @@ describe('canEnterCell — C++ Can_Enter_Cell() for pathfinding (findpath.cpp)',
 
   // -- Occupancy interaction --
 
-  it('occupied cell with stationary unit → MoveResult.OCCUPIED', () => {
+  it('occupied cell with stationary unit → MoveResult.TEMP_BLOCKED (C++ MOVE_TEMP=4)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
     map.setOccupancy(15, 15, 42); // entity ID 42
-    expect(map.canEnterCell(15, 15)).toBe(MoveResult.OCCUPIED);
+    expect(map.canEnterCell(15, 15)).toBe(MoveResult.TEMP_BLOCKED);
   });
 
-  it('occupied cell with moving unit → MoveResult.TEMP_BLOCKED', () => {
+  it('occupied cell with moving unit → MoveResult.OCCUPIED (C++ MOVE_MOVING_BLOCK=2)', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
     map.setOccupancy(15, 15, 42);
     const isMoving = (id: number) => id === 42;
-    expect(map.canEnterCell(15, 15, false, isMoving)).toBe(MoveResult.TEMP_BLOCKED);
-  });
-
-  it('occupied cell with stationary unit (isMoving returns false) → MoveResult.OCCUPIED', () => {
-    map.setTerrain(15, 15, Terrain.CLEAR);
-    map.setOccupancy(15, 15, 42);
-    const isMoving = (_id: number) => false;
     expect(map.canEnterCell(15, 15, false, isMoving)).toBe(MoveResult.OCCUPIED);
   });
 
-  it('no isMoving callback and occupied → MoveResult.OCCUPIED (default)', () => {
+  it('occupied cell with stationary unit (isMoving returns false) → MoveResult.TEMP_BLOCKED', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
     map.setOccupancy(15, 15, 42);
-    expect(map.canEnterCell(15, 15, false)).toBe(MoveResult.OCCUPIED);
+    const isMoving = (_id: number) => false;
+    expect(map.canEnterCell(15, 15, false, isMoving)).toBe(MoveResult.TEMP_BLOCKED);
+  });
+
+  it('no isMoving callback and occupied → MoveResult.TEMP_BLOCKED (default=stationary)', () => {
+    map.setTerrain(15, 15, Terrain.CLEAR);
+    map.setOccupancy(15, 15, 42);
+    expect(map.canEnterCell(15, 15, false)).toBe(MoveResult.TEMP_BLOCKED);
   });
 
   it('terrain check takes priority over occupancy (impassable terrain → IMPASSABLE even if occupied)', () => {
@@ -457,16 +457,16 @@ describe('canEnterCell — C++ Can_Enter_Cell() for pathfinding (findpath.cpp)',
 
   // -- Naval occupancy --
 
-  it('occupied water cell (naval) → MoveResult.OCCUPIED', () => {
+  it('occupied water cell (naval) → MoveResult.TEMP_BLOCKED (stationary=MOVE_TEMP)', () => {
     map.setTerrain(15, 15, Terrain.WATER);
     map.setOccupancy(15, 15, 99);
-    expect(map.canEnterCell(15, 15, true)).toBe(MoveResult.OCCUPIED);
+    expect(map.canEnterCell(15, 15, true)).toBe(MoveResult.TEMP_BLOCKED);
   });
 
-  it('occupied water cell with moving naval unit → MoveResult.TEMP_BLOCKED', () => {
+  it('occupied water cell with moving naval unit → MoveResult.OCCUPIED (MOVE_MOVING_BLOCK)', () => {
     map.setTerrain(15, 15, Terrain.WATER);
     map.setOccupancy(15, 15, 99);
-    expect(map.canEnterCell(15, 15, true, (id) => id === 99)).toBe(MoveResult.TEMP_BLOCKED);
+    expect(map.canEnterCell(15, 15, true, (id) => id === 99)).toBe(MoveResult.OCCUPIED);
   });
 });
 

@@ -756,9 +756,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
 
   const ec = entity.cell;
   const isDog = entity.type === 'DOG';
-  // Guard scan range: use guardRange if defined (from INI GuardRange=N), else sight
-  // Defensive stance: reduced to weapon range only
-  const baseRange = entity.stats.guardRange ?? entity.stats.sight;
+  // C++ foot.cpp:593 — guard scan uses THREAT_RANGE → Threat_Range(0) = weapon range.
+  // guardRange from INI overrides if set, otherwise use max weapon range (C++ parity).
+  const weaponScanRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || entity.stats.sight;
+  const baseRange = entity.stats.guardRange ?? weaponScanRange;
   const scanRange = entity.stance === Stance.DEFENSIVE
     ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
     : baseRange;

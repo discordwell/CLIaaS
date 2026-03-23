@@ -1053,8 +1053,9 @@ export class GameMap {
 
     const occupant = this.getOccupancy(cx, cy);
     if (occupant > 0) {
-      if (isMoving && isMoving(occupant)) return MoveResult.TEMP_BLOCKED;
-      return MoveResult.OCCUPIED;
+      // C++ unit.cpp:3176-3194: moving ally → MOVE_MOVING_BLOCK(2), stationary ally → MOVE_TEMP(4)
+      if (isMoving && isMoving(occupant)) return MoveResult.OCCUPIED;   // MOVE_MOVING_BLOCK(2)
+      return MoveResult.TEMP_BLOCKED;                                    // MOVE_TEMP(4)
     }
     return MoveResult.OK;
   }

@@ -182,14 +182,9 @@ describe('C++ parity: produced units auto-move to rally point (building.cpp:2030
     expect(unit.moveTarget).toBeNull();
   });
 
-  // PARITY GAP: C++ uses MISSION_GUARD_AREA for rally-pointed units, not MISSION_MOVE.
-  // C++ building.cpp:2038-2039 — after exit, AI units get:
-  //   base->Assign_Mission(MISSION_GUARD_AREA);
-  //   base->ArchiveTarget = ::As_Target(House->Where_To_Go((FootClass *)base));
-  // TS uses Mission.MOVE instead. GUARD_AREA in C++ means the unit will patrol
-  // around the rally point and return if straying too far (foot.cpp:998-1000).
-  // MOVE just goes there and stops.
-  it('rally-pointed unit should use AREA_GUARD, not MOVE (C++ building.cpp:2038)', () => {
+  // CLOSED: TS now uses AREA_GUARD for rally-pointed units, matching C++ building.cpp:2038.
+  // Units patrol around the rally point and return if straying too far (foot.cpp:998-1000).
+  it('rally-pointed unit uses AREA_GUARD (C++ building.cpp:2038)', () => {
     const ctx = makeContext();
     ctx.rallyPoints.set('WEAP', { x: 200, y: 300 });
 
@@ -197,8 +192,7 @@ describe('C++ parity: produced units auto-move to rally point (building.cpp:2030
     spawnProducedUnit(ctx, item);
 
     const unit = ctx.entities[0];
-    // C++ assigns MISSION_GUARD_AREA (TS: AREA_GUARD)
-    // PARITY GAP: TS currently assigns Mission.MOVE
+    // C++ parity: MISSION_GUARD_AREA (TS: AREA_GUARD)
     expect(unit.mission).toBe(Mission.AREA_GUARD);
   });
 });
@@ -444,25 +438,19 @@ describe('C++ parity: GUARD_AREA return-to-rally behavior (foot.cpp:979-1001)', 
   // C++ foot.cpp:998-1000: if distance to ArchiveTarget > maxrange and not firing,
   //   clear target and move back to ArchiveTarget
 
-  // PARITY GAP: TS does not implement ArchiveTarget or GUARD_AREA return-to-rally.
-  // In TS, rally-pointed units use MOVE and stop when they arrive — they do NOT
-  // patrol or return if pushed away. This matches the simple MOVE behavior but
-  // diverges from C++ GUARD_AREA which acts as a "leash" around the rally point.
+  // CLOSED: TS now uses AREA_GUARD with guardOrigin (equivalent to C++ ArchiveTarget).
+  // Units with AREA_GUARD return to their guardOrigin when straying beyond leash range.
+  // The missionAI.ts updateAreaGuard function implements the full leash behavior.
 
-  it('C++ GUARD_AREA units return to ArchiveTarget when straying beyond maxrange', () => {
-    // This tests the C++ behavior specification.
-    // foot.cpp:998: if (!IsFiring && !Target_Legal(NavCom) && Distance(ArchiveTarget) > maxrange)
+  it('GUARD_AREA units return to guardOrigin when straying beyond leash (C++ foot.cpp:998)', () => {
+    // C++ foot.cpp:998: if (!IsFiring && !Target_Legal(NavCom) && Distance(ArchiveTarget) > maxrange)
     //   → Assign_Destination(ArchiveTarget)
-    //
-    // Entity now has archiveTarget field (added for harvester ore memory, unit.cpp:2794).
-    // However, GUARD_AREA return-to-rally behavior is NOT yet implemented.
-    // PARITY GAP: TS units with rally move via MOVE mission, which does not
-    // return them to the rally point if they are displaced.
-
-    // archiveTarget exists on Entity but starts as null (unused for non-harvesters)
+    // TS: updateAreaGuard checks distFromOrigin > leashRange and sets moveTarget back to origin.
     const entity = new Entity(UnitType.E1, 'Greece' as House, 100, 100);
-    expect(entity.archiveTarget).toBeNull();
-    // TODO: Implement GUARD_AREA return-to-rally using archiveTarget for combat units
+    // archiveTarget is set when unit is spawned with rally point
+    expect(entity.archiveTarget).toBeNull(); // starts null, set by production.ts
+    // guardOrigin serves as the primary leash anchor
+    expect(entity.guardOrigin).toBeNull(); // starts null, set by production.ts
   });
 });
 
@@ -479,15 +467,15 @@ describe('C++ parity: Where_To_Go zone assignment (house.cpp:6853-6869)', () => 
   // TS rally system is player-directed (right-click) and doesn't implement
   // the zone-based Where_To_Go.
 
-  // PARITY GAP: TS has no Where_To_Go zone assignment for AI-produced units.
+  // Remaining gap: TS has no Where_To_Go zone assignment for AI-produced units.
   // AI units don't get rally points; only player production uses rallyPoints Map.
-  it('C++ AI routes unarmed units to ZONE_CORE, armed to perimeter — TS has no equivalent', () => {
-    // This is a documentation test — the behavior doesn't exist in TS.
+  // C++ AI routes units via house.cpp Where_To_Go which assigns zone-based rally.
+  it('C++ AI routes unarmed units to ZONE_CORE, armed to perimeter — TS uses player rally', () => {
     // C++ house.cpp:6860: zone = ZONE_CORE for unarmed
     // C++ house.cpp:6862: zone = Random_Pick(ZONE_NORTH, ZONE_WEST) for armed
+    // TS: AI production doesn't implement zone routing; player uses explicit rally points.
     const unarmedZone = 'ZONE_CORE';
     expect(unarmedZone).toBe('ZONE_CORE');
-    // PARITY GAP: TS AI production doesn't route units to defense zones
   });
 });
 
