@@ -87,7 +87,7 @@ const makeContext = (overrides: Partial<ProductionContext> = {}): ProductionCont
   };
 };
 
-function tickNTimes(ctx: ProductionContext, n: number, category = 'right'): number | undefined {
+function tickNTimes(ctx: ProductionContext, n: number, category = 'unit'): number | undefined {
   for (let i = 0; i < n; i++) {
     tickProduction(ctx);
     ctx.tick++;
@@ -107,12 +107,12 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     startProduction(ctx, item);
 
     // Verify the snapshotted powerMult is 1.0 (full power)
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.powerMult).toBe(1.0);
 
     // Tick 10 times at full power
     tickNTimes(ctx, 10);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(10);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(10);
   });
 
   it('changing power mid-production does NOT affect rate', () => {
@@ -123,7 +123,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
 
     // Tick 10 times at full power
     tickNTimes(ctx, 10);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(10);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(10);
 
     // Drop power to 50% — in old code this would slow production
     ctx.powerProduced = 50;
@@ -131,7 +131,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
 
     // Tick 10 more — rate should still be 1.0 per tick (locked at start)
     tickNTimes(ctx, 10);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(20);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(20);
   });
 
   it('rate uses power fraction at time of start (dual mechanism)', () => {
@@ -142,12 +142,12 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     startProduction(ctx, item);
 
     // Verify the snapshotted powerMult is 0.25 (dual mechanism)
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.powerMult).toBe(0.25);
 
     // Tick 20 times — each advances by 0.25
     tickNTimes(ctx, 20);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(5);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(5);
   });
 
   it('low power at start = slow rate for entire production', () => {
@@ -157,7 +157,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     const item = makeItem({ buildTime: 100 });
     startProduction(ctx, item);
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.powerMult).toBe(0.125);
 
     // Restore full power mid-production
@@ -166,7 +166,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
 
     // Tick 40 times — still at the slow 0.125 rate
     tickNTimes(ctx, 40);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(5); // 40 * 0.125
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(5); // 40 * 0.125
   });
 
   it('full power at start = fast rate even if power drops later', () => {
@@ -175,11 +175,11 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     const item = makeItem({ buildTime: 100 });
     startProduction(ctx, item);
 
-    expect(ctx.productionQueue.get('right')!.powerMult).toBe(1.0);
+    expect(ctx.productionQueue.get('unit')!.powerMult).toBe(1.0);
 
     // Tick 5 times at full speed
     tickNTimes(ctx, 5);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(5);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(5);
 
     // Now cut power to minimum (0 produced)
     ctx.powerProduced = 0;
@@ -187,7 +187,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
 
     // Tick 5 more — still at full speed because rate was locked
     tickNTimes(ctx, 5);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(10);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(10);
   });
 
   // ── Restart re-snapshots the rate ──────────────────────────────────────
@@ -199,24 +199,24 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     startProduction(ctx, item);
 
     // Dual mechanism: m1(0.5)=0.5, m2(0.5)=0.5, combined=0.25
-    expect(ctx.productionQueue.get('right')!.powerMult).toBe(0.25);
+    expect(ctx.productionQueue.get('unit')!.powerMult).toBe(0.25);
 
     // Tick 20 times at quarter speed
     tickNTimes(ctx, 20);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(5);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(5);
 
     // Cancel and restart with full power
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
     ctx.powerProduced = 200;
     ctx.powerConsumed = 100;
     startProduction(ctx, item);
 
     // New entry should snapshot 1.0
-    expect(ctx.productionQueue.get('right')!.powerMult).toBe(1.0);
+    expect(ctx.productionQueue.get('unit')!.powerMult).toBe(1.0);
 
     // Tick 10 times at full speed
     tickNTimes(ctx, 10);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(10);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(10);
   });
 
   // ── Queued unit restart re-snapshots the rate ──────────────────────────
@@ -233,7 +233,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     // Queue a second one
     startProduction(ctx, item);
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.powerMult).toBe(1.0);
     expect(entry.queueCount).toBe(2);
 
@@ -245,7 +245,7 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     tickNTimes(ctx, 20);
 
     // First unit should have completed, second should start with new rate
-    const newEntry = ctx.productionQueue.get('right');
+    const newEntry = ctx.productionQueue.get('unit');
     if (newEntry) {
       // The re-snapshot should have captured 25% power: dual mechanism m1(0.25)=0.5, m2(0.25)=0.25, combined=0.125
       expect(newEntry.powerMult).toBe(0.125);

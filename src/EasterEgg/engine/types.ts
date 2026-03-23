@@ -943,12 +943,44 @@ for (const item of PRODUCTION_ITEMS) {
   );
 }
 
-// === Sidebar Strip Categories (C++ parity: two production strips) ===
+// === Sidebar Strip Categories (C++ parity: two visual strips) ===
 export type StripType = 'left' | 'right';
 
-/** C++ parity: left strip = structures, right strip = all units (infantry + vehicles share queue) */
+/** UI strip side — left strip shows structures, right strip shows all units.
+ *  This is for DISPLAY only. Production routing uses getFactoryType(). */
 export function getStripSide(item: ProductionItem): StripType {
   return item.isStructure ? 'left' : 'right';
+}
+
+// === C++ 5-Factory Production System (house.cpp:6961-6990) ===
+// C++ has 5 independent factory slots, one per RTTI type:
+//   RTTI_BUILDING  → BuildingFactory
+//   RTTI_INFANTRY  → InfantryFactory
+//   RTTI_UNIT      → UnitFactory
+//   RTTI_AIRCRAFT  → AircraftFactory
+//   RTTI_VESSEL    → VesselFactory
+// Each factory can produce one item at a time, independently.
+
+export type FactoryType = 'building' | 'infantry' | 'unit' | 'aircraft' | 'vessel';
+
+export const ALL_FACTORY_TYPES: FactoryType[] = ['building', 'infantry', 'unit', 'aircraft', 'vessel'];
+
+/** Map a FactoryType to the UI strip it belongs to */
+export function factoryTypeToStrip(ft: FactoryType): StripType {
+  return ft === 'building' ? 'left' : 'right';
+}
+
+/** C++ house.cpp:6961-6990 — Fetch_Factory() returns per-RTTI factory.
+ *  Classifies a production item into its C++ factory type using UNIT_STATS. */
+export function getFactoryType(item: ProductionItem): FactoryType {
+  if (item.isStructure) return 'building';
+  const stats = UNIT_STATS[item.type];
+  if (stats) {
+    if (stats.isInfantry) return 'infantry';
+    if (stats.isAircraft) return 'aircraft';
+    if (stats.isVessel) return 'vessel';
+  }
+  return 'unit';
 }
 
 /** Unit types that count as civilian evacuation — C++ _Counts_As_Civ_Evac() VIPs + IsCivilian types */

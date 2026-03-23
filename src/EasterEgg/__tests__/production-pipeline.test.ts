@@ -1266,7 +1266,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     });
     startProduction(ctx, e1);
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right');
+    const entry = ctx.productionQueue.get('infantry');
     expect(entry).toBeDefined();
     expect(entry!.progress).toBeCloseTo(0.5625);
   });
@@ -1280,7 +1280,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     });
     startProduction(ctx, e1);
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right');
+    const entry = ctx.productionQueue.get('infantry');
     expect(entry).toBeDefined();
     expect(entry!.progress).toBeCloseTo(0.125);
   });
@@ -1291,7 +1291,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     startProduction(ctx, e1);
     const creditsBefore = ctx.credits;
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('infantry')!;
     // C++ parity: integer division — floor(remainingCost / remainingSteps), min 1
     const expectedPerTick = Math.max(1, Math.floor(e1.cost / e1.buildTime));
     expect(creditsBefore - ctx.credits).toBe(expectedPerTick);
@@ -1311,7 +1311,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     });
     startProduction(ctx, e1);
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('infantry')!;
     // C++ parity: multiple factories do NOT speed up a single item.
     // Each factory is an independent FactoryClass; progress advances by 1 per tick.
     expect(entry.progress).toBe(1);
@@ -1321,14 +1321,14 @@ describe('Behavioral verification — production.ts exported functions', () => {
     const e1 = findItem('E1');
     const ctx = makeMockProductionContext();
     startProduction(ctx, e1);
-    expect(ctx.productionQueue.has('right')).toBe(true);
+    expect(ctx.productionQueue.has('infantry')).toBe(true);
 
     // Destroy the barracks (TENT)
     const tent = ctx.structures.find(s => s.type === 'TENT');
     tent!.alive = false;
     tickProduction(ctx);
     // Production should be cancelled
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('infantry')).toBe(false);
   });
 
   it('unit completion spawns entity, structure completion sets pendingPlacement', () => {
@@ -1344,7 +1344,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(ctx.entities.length).toBeGreaterThan(0);
     expect(ctx.entities[0].type).toBe('E1');
     // Queue should be cleared
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('infantry')).toBe(false);
 
     // Structure completion: POWR completes and sets pendingPlacement
     const powr = findItem('POWR');
@@ -1363,7 +1363,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     // Start production and queue a second
     startProduction(ctx, e1);
     startProduction(ctx, e1); // queues second (queueCount=2)
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('infantry')!;
     expect(entry.queueCount).toBe(2);
 
     // Tick exactly buildTime ticks — first item completes on the last tick
@@ -1371,7 +1371,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
       tickProduction(ctx);
     }
     // After first completes: queueCount decremented, progress and costPaid reset for next
-    const entryAfter = ctx.productionQueue.get('right');
+    const entryAfter = ctx.productionQueue.get('infantry');
     expect(entryAfter).toBeDefined();
     expect(entryAfter!.queueCount).toBe(1);
     expect(entryAfter!.progress).toBe(0);
@@ -1385,7 +1385,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     const ctx = makeMockProductionContext({ credits: 1 }); // just 1 credit
     startProduction(ctx, e1);
     // Should have started production despite only 1 credit
-    expect(ctx.productionQueue.has('right')).toBe(true);
+    expect(ctx.productionQueue.has('infantry')).toBe(true);
   });
 
   it('startProduction blocks when credits are exactly 0', () => {
@@ -1393,7 +1393,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     const ctx = makeMockProductionContext({ credits: 0 });
     startProduction(ctx, e1);
     // Should NOT have started production
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('infantry')).toBe(false);
   });
 
   it('cancelProduction refunds costPaid for active build', () => {
@@ -1404,15 +1404,15 @@ describe('Behavioral verification — production.ts exported functions', () => {
     for (let i = 0; i < 20; i++) {
       tickProduction(ctx);
     }
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('infantry')!;
     const costPaid = entry.costPaid;
     expect(costPaid).toBeGreaterThan(0);
     expect(costPaid).toBeLessThan(100);
     const creditsBeforeCancel = ctx.credits;
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'infantry');
     // Refund should equal costPaid
     expect(ctx.credits).toBeCloseTo(creditsBeforeCancel + costPaid);
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('infantry')).toBe(false);
   });
 
   it('spawnProducedUnit finds factory and creates Entity at spawn point', () => {

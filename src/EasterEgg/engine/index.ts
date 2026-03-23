@@ -11,7 +11,7 @@ import {
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
 	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
-  type ProductionItem, CursorType, type StripType, getStripSide,
+  type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
@@ -2820,8 +2820,8 @@ export class Game {
         const itemIdx = this.sidebarItemAt(rightClick.x, rightClick.y);
         if (itemIdx >= 0 && itemIdx < items.length) {
           const item = items[itemIdx];
-          const strip = getStripSide(item);
-          this.cancelProduction(strip);
+          const factoryKey = getFactoryType(item);
+          this.cancelProduction(factoryKey);
         }
         return;
       }

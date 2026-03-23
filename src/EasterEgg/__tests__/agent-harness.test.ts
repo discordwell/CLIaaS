@@ -193,7 +193,7 @@ describe('serializeState', () => {
 
   it('includes production queue', () => {
     const game = makeGame();
-    (game as unknown as { productionQueue: Map<string, unknown> }).productionQueue.set('right', {
+    (game as unknown as { productionQueue: Map<string, unknown> }).productionQueue.set('unit', {
       item: { type: '2TNK', name: 'Medium Tank', buildTime: 100, cost: 800 },
       progress: 50,
       queueCount: 2,

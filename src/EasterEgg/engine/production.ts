@@ -7,7 +7,7 @@
 import {
   type WorldPos, CELL_SIZE,
   type House, type Faction, UnitType, Mission,
-  type ProductionItem, getStripSide,
+  type ProductionItem, getFactoryType,
   COUNTRY_BONUSES, UNIT_STATS,
   worldToCell,
 } from './types';
@@ -168,7 +168,7 @@ export function getAvailableItems(ctx: ProductionContext): ProductionItem[] {
  *  but is awaiting placement (Has_Completed() returns true), new production cannot
  *  start in that factory until Completed() is called (factory.cpp:647). */
 export function startProduction(ctx: ProductionContext, item: ProductionItem): void {
-  const category = getStripSide(item);
+  const category = getFactoryType(item);
   const existing = ctx.productionQueue.get(category);
   if (existing) {
     // Already building — queue another of the same item (max 5 total)

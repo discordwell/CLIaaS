@@ -151,7 +151,7 @@ describe('C++ parity: primary prerequisite loss mid-production (building.cpp:473
     startProduction(ctx, item);
     tickNTimes(ctx, 30);
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     const costPaid = entry.costPaid;
     expect(costPaid).toBeGreaterThan(0);
 
@@ -163,7 +163,7 @@ describe('C++ parity: primary prerequisite loss mid-production (building.cpp:473
     tickProduction(ctx);
 
     // Production should be cancelled
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
 
     // Money should be refunded
     // C++ factory.cpp:479-480: Refund_Money(totalCost - Balance) = refund what was spent
@@ -200,7 +200,7 @@ describe('C++ parity: primary prerequisite loss mid-production (building.cpp:473
 
     // Tick — should continue because second WEAP is alive
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right');
+    const entry = ctx.productionQueue.get('unit');
     expect(entry).toBeDefined();
     expect(entry!.progress).toBe(31);
   });
@@ -219,7 +219,7 @@ describe('C++ parity: primary prerequisite loss mid-production (building.cpp:473
     fact.alive = false;
 
     tickProduction(ctx);
-    expect(ctx.productionQueue.has('left')).toBe(false);
+    expect(ctx.productionQueue.has('building')).toBe(false);
   });
 
   it('rebuilding prerequisite allows new production to start', () => {
@@ -234,14 +234,14 @@ describe('C++ parity: primary prerequisite loss mid-production (building.cpp:473
     const weap = ctx.structures.find(s => s.type === 'WEAP')!;
     weap.alive = false;
     tickProduction(ctx);
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
 
     // Rebuild (set alive again)
     weap.alive = true;
 
     // Should be able to start new production
     startProduction(ctx, item);
-    const entry = ctx.productionQueue.get('right');
+    const entry = ctx.productionQueue.get('unit');
     expect(entry).toBeDefined();
     expect(entry!.progress).toBe(0);
   });
@@ -283,7 +283,7 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
     startProduction(ctx, v2rocket);
     tickNTimes(ctx, 50);
 
-    const costPaidBefore = ctx.productionQueue.get('right')!.costPaid;
+    const costPaidBefore = ctx.productionQueue.get('unit')!.costPaid;
 
     // Destroy Radar Dome (tech prerequisite)
     const dome = ctx.structures.find(s => s.type === 'DOME')!;
@@ -292,7 +292,7 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
     tickProduction(ctx);
 
     // C++ parity: production cancelled because DOME bit missing from ActiveBScan
-    const entry = ctx.productionQueue.get('right');
+    const entry = ctx.productionQueue.get('unit');
     expect(entry).toBeUndefined(); // production cancelled — matches C++
     // Cost should be refunded
     expect(ctx.credits).toBe(10000); // costPaid refunded on cancel
@@ -323,7 +323,7 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
     tickNTimes(ctx, 10);
     ctx.structures.find(s => s.type === 'DOME')!.alive = false;
     tickProduction(ctx);
-    const afterTechLoss = ctx.productionQueue.has('right');
+    const afterTechLoss = ctx.productionQueue.has('unit');
 
     // Reset
     ctx.structures.find(s => s.type === 'DOME')!.alive = true;
@@ -333,7 +333,7 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
     tickNTimes(ctx, 10);
     ctx.structures.find(s => s.type === 'WEAP')!.alive = false;
     tickProduction(ctx);
-    const afterPrimaryLoss = ctx.productionQueue.has('right');
+    const afterPrimaryLoss = ctx.productionQueue.has('unit');
 
     // C++ parity: BOTH prereq losses cancel production
     expect(afterTechLoss).toBe(false);   // tech loss: production cancelled (matches C++)
@@ -364,7 +364,7 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     startProduction(ctx, item);
 
     // Verify initial powerMult snapshot
-    const entry = ctx.productionQueue.get('left')!;
+    const entry = ctx.productionQueue.get('building')!;
     expect(entry.powerMult).toBe(1.0);
 
     // Simulate losing all power mid-production
@@ -392,7 +392,7 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     const item = makeItem({ cost: 100, buildTime: 100, isStructure: true });
     startProduction(ctx, item);
 
-    const entry = ctx.productionQueue.get('left')!;
+    const entry = ctx.productionQueue.get('building')!;
     expect(entry.powerMult).toBe(0.25);
 
     // Boost power to 200%
@@ -402,7 +402,7 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
 
     // After 100 ticks at 0.25 speed: progress = 25, NOT 100
     tickNTimes(ctx, 100);
-    const entryAfter = ctx.productionQueue.get('left');
+    const entryAfter = ctx.productionQueue.get('building');
     // Should NOT have completed — 100 ticks * 0.25 = 25 progress, need 100
     expect(ctx.pendingPlacement).toBeNull();
     expect(entryAfter).toBeDefined();
@@ -423,7 +423,7 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     startProduction(ctx, item); // first unit
     startProduction(ctx, item); // queue second
 
-    const entry1 = ctx.productionQueue.get('right')!;
+    const entry1 = ctx.productionQueue.get('unit')!;
     expect(entry1.powerMult).toBe(1.0);
 
     // Cut power before first unit completes
@@ -434,7 +434,7 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     tickNTimes(ctx, 20);
 
     // Second unit should have re-snapshotted power at 50%: dual mechanism = 0.25
-    const entry2 = ctx.productionQueue.get('right');
+    const entry2 = ctx.productionQueue.get('unit');
     expect(entry2).toBeDefined();
     expect(entry2!.powerMult).toBe(0.25);
   });
@@ -467,7 +467,7 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     const item = makeItem({ cost: 100, buildTime: 16, isStructure: true });
     startProduction(ctx, item);
 
-    const entry = ctx.productionQueue.get('left')!;
+    const entry = ctx.productionQueue.get('building')!;
     expect(entry.powerMult).toBe(1 / 32);
 
     // Need 16 * 32 = 512 ticks
@@ -576,7 +576,7 @@ describe('C++ parity: cancel refund on prerequisite loss (factory.cpp:469-506)',
 
     tickNTimes(ctx, 40);
     const creditsBeforeCancel = ctx.credits;
-    const costPaid = ctx.productionQueue.get('right')!.costPaid;
+    const costPaid = ctx.productionQueue.get('unit')!.costPaid;
     expect(costPaid).toBe(320); // 40 * 8
 
     ctx.structures.find(s => s.type === 'WEAP')!.alive = false;
@@ -610,7 +610,7 @@ describe('C++ parity: cancel refund on prerequisite loss (factory.cpp:469-506)',
     startProduction(ctx, item);
     tickNTimes(ctx, 99);
 
-    const costPaid = ctx.productionQueue.get('right')!.costPaid;
+    const costPaid = ctx.productionQueue.get('unit')!.costPaid;
     expect(costPaid).toBe(792); // 99 * 8
 
     ctx.structures.find(s => s.type === 'WEAP')!.alive = false;
@@ -644,8 +644,8 @@ describe('C++ parity: multiple prerequisite buildings (building.cpp:4746-4752)',
     ctx.structures[0].alive = false; // destroy first WEAP
     tickProduction(ctx);
 
-    expect(ctx.productionQueue.has('right')).toBe(true);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(31);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(31);
   });
 
   it('losing both WEAPs cancels unit production', () => {
@@ -666,7 +666,7 @@ describe('C++ parity: multiple prerequisite buildings (building.cpp:4746-4752)',
     ctx.structures[1].alive = false;
     tickProduction(ctx);
 
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
   });
 
   it('enemy-owned prerequisite building does not satisfy check', () => {
@@ -697,7 +697,7 @@ describe('C++ parity: multiple prerequisite buildings (building.cpp:4746-4752)',
     ctx.structures[0].alive = false;
     tickProduction(ctx);
 
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
   });
 });
 
@@ -727,7 +727,7 @@ describe('C++ parity: prerequisite loss with queued items', () => {
 
     tickNTimes(ctx, 20); // build for 20 ticks, costPaid = 20 * (500/50) = 200
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.queueCount).toBe(2);
     const activeCostPaid = entry.costPaid;
     expect(activeCostPaid).toBe(200);
@@ -751,14 +751,14 @@ describe('C++ parity: prerequisite loss with queued items', () => {
 
     // After first tick: one queued item dequeued
     // Let's check the state:
-    if (ctx.productionQueue.has('right')) {
+    if (ctx.productionQueue.has('unit')) {
       // Still has entry — first cancel only dequeued
-      const remainingEntry = ctx.productionQueue.get('right')!;
+      const remainingEntry = ctx.productionQueue.get('unit')!;
       expect(remainingEntry.queueCount).toBe(1);
 
       // Tick again to cancel the active build
       tickProduction(ctx);
-      expect(ctx.productionQueue.has('right')).toBe(false);
+      expect(ctx.productionQueue.has('unit')).toBe(false);
     }
     // All money should be eventually returned
   });
@@ -785,7 +785,7 @@ describe('C++ parity: prerequisite check timing within tick', () => {
     tickNTimes(ctx, 10);
 
     const creditsBeforeDestruction = ctx.credits;
-    const costPaidBeforeDestruction = ctx.productionQueue.get('right')!.costPaid;
+    const costPaidBeforeDestruction = ctx.productionQueue.get('unit')!.costPaid;
 
     // Destroy prerequisite
     ctx.structures.find(s => s.type === 'WEAP')!.alive = false;
@@ -814,7 +814,7 @@ describe('C++ parity: power fraction production rate edge cases', () => {
     const item = makeItem({ cost: 100, buildTime: 50, isStructure: true });
     startProduction(ctx, item);
 
-    const entry = ctx.productionQueue.get('left')!;
+    const entry = ctx.productionQueue.get('building')!;
     expect(entry.powerMult).toBe(1.0); // capped at 1.0
 
     tickNTimes(ctx, 50);
@@ -878,7 +878,7 @@ describe('C++ parity: prerequisite loss does not interact with power snapshot', 
     // as costPaid accumulates the per-tick cost varies slightly due to integer math.
     tickNTimes(ctx, 40);
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.progress).toBe(10); // 40 * 0.25
     // costPaid is the sum of 40 integer-division cost ticks — verify it's reasonable
     expect(entry.costPaid).toBeGreaterThan(0);
@@ -902,14 +902,14 @@ describe('C++ parity: prerequisite loss does not interact with power snapshot', 
     const item = makeItem({ cost: 800, buildTime: 100 });
     startProduction(ctx1, item);
     tickNTimes(ctx1, 40);
-    cancelProduction(ctx1, 'right');
+    cancelProduction(ctx1, 'unit');
     const creditsAfterFullPowerCancel = ctx1.credits;
 
     // Test at half power — same number of ticks
     const ctx2 = makeContext({ credits: initialCredits, powerProduced: 50, powerConsumed: 100 });
     startProduction(ctx2, item);
     tickNTimes(ctx2, 40);
-    cancelProduction(ctx2, 'right');
+    cancelProduction(ctx2, 'unit');
     const creditsAfterHalfPowerCancel = ctx2.credits;
 
     // Both should return to initialCredits (full refund regardless of power)

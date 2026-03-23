@@ -283,7 +283,7 @@ describe('C++ parity: right-click rally point setting (TS index.ts:2925-2937)', 
     const item = makeItem({ prerequisite: 'WEAP', isStructure: false });
 
     // Simulate: player has active production in queue
-    ctx.productionQueue.set('right', { item, progress: 5, queueCount: 1, costPaid: 100, powerMult: 1 });
+    ctx.productionQueue.set('unit', { item, progress: 5, queueCount: 1, costPaid: 100, powerMult: 1 });
 
     // Simulate right-click rally setting logic from index.ts:2926-2929
     // (extracted here since we can't call the full Game.handleRightClick)
@@ -301,7 +301,7 @@ describe('C++ parity: right-click rally point setting (TS index.ts:2925-2937)', 
     const ctx = makeContext();
     const structItem = makeItem({ prerequisite: 'FACT', isStructure: true });
 
-    ctx.productionQueue.set('left', { item: structItem, progress: 5, queueCount: 1, costPaid: 100, powerMult: 1 });
+    ctx.productionQueue.set('building', { item: structItem, progress: 5, queueCount: 1, costPaid: 100, powerMult: 1 });
 
     // Simulate right-click rally setting logic
     const world = { x: 400, y: 500 };
@@ -512,7 +512,7 @@ describe('C++ parity: production + rally integration test', () => {
 
     const item = makeItem({ type: '2TNK' as UnitType, prerequisite: 'WEAP', buildTime: 5, cost: 100 });
     // Manually set up queue with 2 items
-    ctx.productionQueue.set('right', { item, progress: 0, queueCount: 2, costPaid: 0, powerMult: 1 });
+    ctx.productionQueue.set('unit', { item, progress: 0, queueCount: 2, costPaid: 0, powerMult: 1 });
 
     // Complete first unit
     for (let i = 0; i < 5; i++) {
@@ -523,7 +523,7 @@ describe('C++ parity: production + rally integration test', () => {
     expect(ctx.entities[0].moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
 
     // Queue should still have 1 remaining
-    const entry = ctx.productionQueue.get('right');
+    const entry = ctx.productionQueue.get('unit');
     expect(entry).toBeDefined();
     expect(entry!.queueCount).toBe(1);
 

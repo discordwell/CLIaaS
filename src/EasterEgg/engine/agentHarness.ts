@@ -7,7 +7,7 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, SUPERWEAPON_DEFS, getStripSide } from './types';
+import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType } from './types';
 import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
@@ -61,6 +61,7 @@ export interface AgentQueueItem {
   q: number;       // queue count
   cost: number;    // effective cost (with country bonus)
   paid: number;    // cost paid so far (incremental deduction)
+  factory: string; // factory type key ('building'|'infantry'|'unit'|'aircraft'|'vessel')
 }
 
 /** Available production item summary */
@@ -69,7 +70,8 @@ export interface AgentAvailableItem {
   name: string;    // display name
   cost: number;    // effective cost (with country bonus)
   time: number;    // build time in ticks
-  side: string;    // 'left' (structures) or 'right' (units)
+  side: string;    // 'left' (structures) or 'right' (units) — UI strip
+  factory: string; // factory type key ('building'|'infantry'|'unit'|'aircraft'|'vessel')
   isStruct: boolean; // is structure
 }
 
@@ -120,7 +122,7 @@ export type AgentCommand =
   | { cmd: 'stop'; unitIds: number[] }
   | { cmd: 'enter'; unitId: number; transportId: number }
   | { cmd: 'build'; type: string }
-  | { cmd: 'cancel_build'; category: 'left' | 'right' }
+  | { cmd: 'cancel_build'; category: FactoryType | 'left' | 'right' }
   | { cmd: 'place'; cx: number; cy: number }
   | { cmd: 'sell'; structIdx: number }
   | { cmd: 'repair'; structIdx: number }
@@ -236,7 +238,7 @@ export function serializeState(game: Game): AgentState {
   }
 
   const production: AgentQueueItem[] = [];
-  for (const [, entry] of game.productionQueue) {
+  for (const [factoryKey, entry] of game.productionQueue) {
     production.push({
       t: entry.item.type,
       name: entry.item.name,
@@ -244,6 +246,7 @@ export function serializeState(game: Game): AgentState {
       q: entry.queueCount,
       cost: getEffectiveCost(entry.item, game.playerHouse),
       paid: entry.costPaid,
+      factory: factoryKey,
     });
   }
 
@@ -255,6 +258,7 @@ export function serializeState(game: Game): AgentState {
     cost: getEffectiveCost(i, game.playerHouse),
     time: i.buildTime,
     side: getStripSide(i),
+    factory: getFactoryType(i),
     isStruct: !!i.isStructure,
   }));
 

@@ -35,6 +35,8 @@ import {
   type ProductionItem,
   type StripType,
   getStripSide,
+  getFactoryType,
+  type FactoryType,
   PRODUCTION_ITEMS,
 } from '../engine/types';
 import {
@@ -213,9 +215,9 @@ describe('C++ parity: independent strip queues (sidebar.cpp:669)', () => {
     startProduction(ctx, structureItem);
     startProduction(ctx, unitItem);
 
-    // Both queues should exist simultaneously
-    expect(ctx.productionQueue.has('left')).toBe(true);
-    expect(ctx.productionQueue.has('right')).toBe(true);
+    // Both queues should exist simultaneously (using factory type keys)
+    expect(ctx.productionQueue.has('building')).toBe(true);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
   });
 
   it('cancelling one strip does not affect the other', () => {
@@ -229,9 +231,9 @@ describe('C++ parity: independent strip queues (sidebar.cpp:669)', () => {
     startProduction(ctx, unitItem);
 
     // Cancel the structure — unit should still be building
-    cancelProduction(ctx, 'left');
-    expect(ctx.productionQueue.has('left')).toBe(false);
-    expect(ctx.productionQueue.has('right')).toBe(true);
+    cancelProduction(ctx, 'building');
+    expect(ctx.productionQueue.has('building')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
   });
 
   it('production progress on one strip is independent of the other', () => {
@@ -249,8 +251,8 @@ describe('C++ parity: independent strip queues (sidebar.cpp:669)', () => {
       ctx.tick++;
     }
 
-    const leftProgress = ctx.productionQueue.get('left')?.progress;
-    const rightProgress = ctx.productionQueue.get('right')?.progress;
+    const leftProgress = ctx.productionQueue.get('building')?.progress;
+    const rightProgress = ctx.productionQueue.get('unit')?.progress;
 
     // Both should have advanced independently at 1 per tick (full power)
     expect(leftProgress).toBe(50);
@@ -275,8 +277,8 @@ describe('C++ parity: independent strip queues (sidebar.cpp:669)', () => {
     // Structure should be complete (pendingPlacement set)
     expect(ctx.pendingPlacement).not.toBeNull();
     // Unit should still be building
-    expect(ctx.productionQueue.has('right')).toBe(true);
-    expect(ctx.productionQueue.get('right')?.progress).toBe(30);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
+    expect(ctx.productionQueue.get('unit')?.progress).toBe(30);
   });
 });
 
@@ -346,38 +348,36 @@ describe('C++ parity: strip item routing for specific RTTI types', () => {
   });
 });
 
-describe('C++ parity: strip queue key matches getStripSide (production.ts:110)', () => {
+describe('C++ parity: production queue key matches getFactoryType (house.cpp:6961-6990)', () => {
 
-  it('starting a structure uses "left" as the queue key', () => {
-    // C++ sidebar.cpp:677: column = Which_Column(type) → Column[column].Add(type, id)
-    // TS production.ts:110: const category = getStripSide(item);
+  it('starting a structure uses "building" as the queue key', () => {
+    // C++ house.cpp:6961: Fetch_Factory(RTTI_BUILDING) → BuildingFactory
     const ctx = makeContext();
     const item = makeItem({ type: 'POWR', cost: 300, buildTime: 100, prerequisite: 'FACT', isStructure: true });
 
     startProduction(ctx, item);
-    expect(ctx.productionQueue.has('left')).toBe(true);
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('building')).toBe(true);
+    expect(ctx.productionQueue.size).toBe(1);
   });
 
-  it('starting a unit uses "right" as the queue key', () => {
+  it('starting a unit uses "unit" as the queue key', () => {
     const ctx = makeContext();
     const item = makeItem({ type: '2TNK', cost: 800, buildTime: 100, prerequisite: 'WEAP', isStructure: false });
 
     startProduction(ctx, item);
-    expect(ctx.productionQueue.has('right')).toBe(true);
-    expect(ctx.productionQueue.has('left')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
+    expect(ctx.productionQueue.size).toBe(1);
   });
 
-  it('starting infantry uses "right" as the queue key (same strip as vehicles)', () => {
-    // C++ sidebar.cpp:445-451: RTTI_INFANTRYTYPE → column 1 (same as RTTI_UNITTYPE)
-    // In C++, infantry and vehicles share column 1.
-    // TS: both have isStructure=false → 'right'
+  it('starting infantry uses "infantry" as the queue key (separate from vehicles)', () => {
+    // C++ house.cpp:6966: Fetch_Factory(RTTI_INFANTRY) → InfantryFactory
+    // Infantry and vehicles have SEPARATE factories in C++.
     const ctx = makeContext();
     const item = makeItem({ type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', isStructure: false });
 
     startProduction(ctx, item);
-    expect(ctx.productionQueue.has('right')).toBe(true);
-    expect(ctx.productionQueue.has('left')).toBe(false);
+    expect(ctx.productionQueue.has('infantry')).toBe(true);
+    expect(ctx.productionQueue.size).toBe(1);
   });
 });
 
@@ -402,70 +402,71 @@ describe('C++ parity: strip constants (sidebar.h)', () => {
   });
 });
 
-describe('C++ parity: duplicate rejection in StripClass::Add (sidebar.cpp:1373)', () => {
+describe('C++ parity: duplicate rejection — one item per factory (house.cpp:2413)', () => {
 
-  it('starting production of the same category item twice does not create duplicate queue entries', () => {
-    // C++ sidebar.cpp:1376-1379: StripClass::Add checks for existing BuildableType+BuildableID
-    // and returns false (no-op) if already present
-    // TS production.ts:111-124: checks existing entry and either increments queueCount or returns
+  it('starting production of the same factory type item twice increments queue count', () => {
+    // C++ house.cpp:2413: if factory Is_Building → queue (up to max)
+    // TS production.ts: checks existing entry and either increments queueCount or returns
     const ctx = makeContext();
     const item = makeItem({ type: '2TNK', cost: 800, buildTime: 100, prerequisite: 'WEAP' });
 
     startProduction(ctx, item);
     startProduction(ctx, item); // second call — should queue, not create separate entry
 
-    // Should still have exactly one entry in the 'right' category
+    // Should still have exactly one entry in the 'unit' factory
     expect(ctx.productionQueue.size).toBe(1);
-    expect(ctx.productionQueue.get('right')?.queueCount).toBe(2);
+    expect(ctx.productionQueue.get('unit')?.queueCount).toBe(2);
   });
 
-  it('different unit types on same strip replace rather than coexist', () => {
-    // C++ sidebar.cpp has one factory per RTTI group, so only one thing builds at a time per column
-    // TS uses category key 'right' → only one entry can exist per strip
+  it('infantry and vehicles produce simultaneously (different factory types)', () => {
+    // C++ house.cpp:6961-6990: InfantryFactory and UnitFactory are separate
     const ctx = makeContext();
     const tank = makeItem({ type: '2TNK', cost: 800, buildTime: 100, prerequisite: 'WEAP' });
     const infantry = makeItem({ type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT' });
 
     startProduction(ctx, tank);
-    startProduction(ctx, infantry); // same strip ('right'), but already occupied
+    startProduction(ctx, infantry); // different factory type → starts simultaneously
 
-    // TS behavior: second start is a no-op (different item type but same strip key)
-    expect(ctx.productionQueue.get('right')?.item.type).toBe('2TNK');
+    // Both should be building on separate factories
+    expect(ctx.productionQueue.get('unit')?.item.type).toBe('2TNK');
+    expect(ctx.productionQueue.get('infantry')?.item.type).toBe('E1');
+    expect(ctx.productionQueue.size).toBe(2);
   });
 });
 
-describe('C++ parity: one active production per strip (sidebar.h:253 IsBuilding)', () => {
+describe('C++ parity: one active production per factory type (house.cpp:6957)', () => {
 
-  it('only one structure can build at a time on left strip', () => {
-    // C++ sidebar.h:253: IsBuilding flag per strip — only one active factory per strip
+  it('only one structure can build at a time on building factory', () => {
+    // C++ house.cpp:6957: one BuildingFactory per house
     const ctx = makeContext();
     const powr = makeItem({ type: 'POWR', cost: 300, buildTime: 100, prerequisite: 'FACT', isStructure: true });
     const proc = makeItem({ type: 'PROC', cost: 2000, buildTime: 200, prerequisite: 'POWR', isStructure: true });
 
     startProduction(ctx, powr);
-    startProduction(ctx, proc); // should not start — left strip already occupied
+    startProduction(ctx, proc); // should not start — building factory already occupied
 
     // Only POWR should be building
-    expect(ctx.productionQueue.get('left')?.item.type).toBe('POWR');
+    expect(ctx.productionQueue.get('building')?.item.type).toBe('POWR');
     expect(ctx.productionQueue.size).toBe(1);
   });
 
-  it('only one unit can build at a time on right strip', () => {
-    // C++ sidebar.h:253: IsBuilding flag per strip
+  it('infantry and vehicles can build simultaneously (different factory types)', () => {
+    // C++ house.cpp:6961-6990: InfantryFactory and UnitFactory are separate
     const ctx = makeContext();
     const tank = makeItem({ type: '2TNK', cost: 800, buildTime: 100, prerequisite: 'WEAP' });
     const infantry = makeItem({ type: 'E1', cost: 100, buildTime: 45, prerequisite: 'TENT' });
 
     startProduction(ctx, tank);
-    startProduction(ctx, infantry); // should not start — right strip already occupied
+    startProduction(ctx, infantry); // different factory type — starts simultaneously
 
-    // Only tank should be building
-    expect(ctx.productionQueue.get('right')?.item.type).toBe('2TNK');
-    expect(ctx.productionQueue.size).toBe(1);
+    // Both building on separate factories
+    expect(ctx.productionQueue.get('unit')?.item.type).toBe('2TNK');
+    expect(ctx.productionQueue.get('infantry')?.item.type).toBe('E1');
+    expect(ctx.productionQueue.size).toBe(2);
   });
 
-  it('can build structure AND unit simultaneously (different strips)', () => {
-    // C++ sidebar.cpp:669: each strip is independent — IsBuilding is per-strip
+  it('can build structure AND unit simultaneously (different factory types)', () => {
+    // C++ house.cpp:6957: each factory type is independent
     const ctx = makeContext();
     const powr = makeItem({ type: 'POWR', cost: 300, buildTime: 100, prerequisite: 'FACT', isStructure: true });
     const tank = makeItem({ type: '2TNK', cost: 800, buildTime: 100, prerequisite: 'WEAP' });
@@ -473,10 +474,10 @@ describe('C++ parity: one active production per strip (sidebar.h:253 IsBuilding)
     startProduction(ctx, powr);
     startProduction(ctx, tank);
 
-    // Both should be building simultaneously — each on its own strip
-    expect(ctx.productionQueue.has('left')).toBe(true);
-    expect(ctx.productionQueue.has('right')).toBe(true);
-    expect(ctx.productionQueue.get('left')?.item.type).toBe('POWR');
-    expect(ctx.productionQueue.get('right')?.item.type).toBe('2TNK');
+    // Both should be building simultaneously — each on its own factory
+    expect(ctx.productionQueue.has('building')).toBe(true);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
+    expect(ctx.productionQueue.get('building')?.item.type).toBe('POWR');
+    expect(ctx.productionQueue.get('unit')?.item.type).toBe('2TNK');
   });
 });

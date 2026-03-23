@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, HOUSE_FACTION, CONDITION_YELLOW } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -3830,9 +3830,9 @@ export class Renderer {
         }
       }
 
-      // Check production state
-      const stripSide = getStripSide(item);
-      const qEntry = this.sidebarQueue.get(stripSide);
+      // Check production state — use factory type key (5-factory system)
+      const factoryKey = getFactoryType(item);
+      const qEntry = this.sidebarQueue.get(factoryKey);
       const isBuilding = qEntry && qEntry.item.type === item.type;
 
       if (isBuilding && qEntry) {

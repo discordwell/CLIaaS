@@ -618,8 +618,8 @@ describe('Production credit flow parity', () => {
 
     // Should NOT deduct full cost upfront — only checks credits > 0
     expect(ctx.credits).toBe(5000);
-    expect(ctx.productionQueue.has('right')).toBe(true);
-    const entry = ctx.productionQueue.get('right')!;
+    expect(ctx.productionQueue.has('unit')).toBe(true);
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.costPaid).toBe(0); // nothing deducted yet
   });
 
@@ -632,7 +632,7 @@ describe('Production credit flow parity', () => {
     const costPerTick = effectiveCost / item.buildTime;
 
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
 
     // TS deducts floor(effectiveCost / buildTime) per tick — documented float drift gap vs C++ STEP_COUNT=54
     expect(entry.costPaid).toBeGreaterThan(0);
@@ -648,13 +648,13 @@ describe('Production credit flow parity', () => {
     // Tick a few times to accumulate costPaid
     for (let i = 0; i < 10; i++) tickProduction(ctx);
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     const paid = entry.costPaid;
     const creditsBeforeCancel = ctx.credits;
 
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
     expect(ctx.credits).toBeCloseTo(creditsBeforeCancel + paid, 5);
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
   });
 
   it('production pauses when credits exhausted (C++ parity)', () => {
@@ -664,7 +664,7 @@ describe('Production credit flow parity', () => {
 
     // First tick may succeed (5 credits, cost/tick ~5)
     tickProduction(ctx);
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     const progressAfter1 = entry.progress;
 
     // Eventually runs out — progress should stall
@@ -687,7 +687,7 @@ describe('Production credit flow parity', () => {
     startProduction(ctx, item); // queue second — deducts full cost
     expect(ctx.credits).toBe(2000 - effectiveCost);
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.queueCount).toBe(2);
   });
 
@@ -698,7 +698,7 @@ describe('Production credit flow parity', () => {
     startProduction(ctx, item); // active — starts with any credits > 0
     startProduction(ctx, item); // queue — needs full cost (950) — should fail
 
-    const entry = ctx.productionQueue.get('right')!;
+    const entry = ctx.productionQueue.get('unit')!;
     expect(entry.queueCount).toBe(1); // queue failed
     expect(ctx.credits).toBe(100); // no deduction
   });

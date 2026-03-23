@@ -501,7 +501,7 @@ describe('Production queue max with prerequisite destroyed mid-build', () => {
     });
 
     // Simulate mid-build state: 50% progress, 400 of 800 paid
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 70,
       queueCount: 1,
@@ -512,7 +512,7 @@ describe('Production queue max with prerequisite destroyed mid-build', () => {
     tickProduction(ctx);
 
     // Production should be cancelled and costPaid refunded
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
     // Refund is the costPaid (400), not full cost
     expect(ctx.credits).toBe(3400);
   });
@@ -528,7 +528,7 @@ describe('Production queue max with prerequisite destroyed mid-build', () => {
     });
 
     // Active build with 3 queued (4 total): active has 200 costPaid, 3 queued paid 800 each upfront
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 50,
       queueCount: 4,
@@ -564,7 +564,7 @@ describe('tickProduction with zero credits', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     const ctx = makeProductionContext({ credits: 0 });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 50,
       queueCount: 1,
@@ -572,11 +572,11 @@ describe('tickProduction with zero credits', () => {
       powerMult: 1,
     });
 
-    const progressBefore = ctx.productionQueue.get('right')!.progress;
+    const progressBefore = ctx.productionQueue.get('unit')!.progress;
     tickProduction(ctx);
 
     // C++ parity (factory.cpp:220-221): insufficient funds regresses one stage
-    expect(ctx.productionQueue.get('right')!.progress).toBe(progressBefore - 1);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(progressBefore - 1);
     expect(ctx.credits).toBe(0); // no credits deducted
   });
 
@@ -588,7 +588,7 @@ describe('tickProduction with zero credits', () => {
       structures: [weap],
     });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 50,
       queueCount: 1,
@@ -598,12 +598,12 @@ describe('tickProduction with zero credits', () => {
 
     // Tick with 0 credits — regresses one stage (C++ factory.cpp:220-221)
     tickProduction(ctx);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(49);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(49);
 
     // Add credits and tick again
     ctx.credits = 500;
     tickProduction(ctx);
-    expect(ctx.productionQueue.get('right')!.progress).toBeGreaterThan(49);
+    expect(ctx.productionQueue.get('unit')!.progress).toBeGreaterThan(49);
   });
 });
 
@@ -629,7 +629,7 @@ describe('tickProduction — factory count does NOT speed up single item (C++ pa
       structures: factories,
     });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 0,
       queueCount: 1,
@@ -640,7 +640,7 @@ describe('tickProduction — factory count does NOT speed up single item (C++ pa
     tickProduction(ctx);
 
     // C++ parity: progress += 1 * powerMult(1.0) = 1, regardless of factory count
-    expect(ctx.productionQueue.get('right')!.progress).toBe(1);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(1);
   });
 
   it('5 factories: progress is still 1 per tick (not 5x)', () => {
@@ -653,7 +653,7 @@ describe('tickProduction — factory count does NOT speed up single item (C++ pa
       structures: factories,
     });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 0,
       queueCount: 1,
@@ -663,7 +663,7 @@ describe('tickProduction — factory count does NOT speed up single item (C++ pa
 
     tickProduction(ctx);
     // C++ parity: progress = 1, not 5
-    expect(ctx.productionQueue.get('right')!.progress).toBe(1);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(1);
   });
 
   it('low power slows production regardless of factory count', () => {
@@ -680,7 +680,7 @@ describe('tickProduction — factory count does NOT speed up single item (C++ pa
       powerConsumed: 100, // 50% power = powerMult = 0.5
     });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 0,
       queueCount: 1,
@@ -692,7 +692,7 @@ describe('tickProduction — factory count does NOT speed up single item (C++ pa
 
     // C++ parity: progress += 1 * 0.5 (power penalty) = 0.5
     // Factory count is irrelevant
-    expect(ctx.productionQueue.get('right')!.progress).toBe(0.5);
+    expect(ctx.productionQueue.get('unit')!.progress).toBe(0.5);
   });
 });
 
@@ -705,7 +705,7 @@ describe('cancelProduction refund math', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     const ctx = makeProductionContext({ credits: 1000 });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 50,
       queueCount: 1,
@@ -713,18 +713,18 @@ describe('cancelProduction refund math', () => {
       powerMult: 1,
     });
 
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
 
     // Refund is costPaid (285), not full cost (800)
     expect(ctx.credits).toBe(1285);
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
   });
 
   it('queued item (queueCount > 1) refunds full effectiveCost', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     const ctx = makeProductionContext({ credits: 1000 });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 50,
       queueCount: 3,
@@ -732,19 +732,19 @@ describe('cancelProduction refund math', () => {
       powerMult: 1,
     });
 
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
 
     // Queued cancel: refunds effectiveCost (800) and decrements queueCount
     expect(ctx.credits).toBe(1800);
-    expect(ctx.productionQueue.get('right')!.queueCount).toBe(2);
-    expect(ctx.productionQueue.get('right')!.costPaid).toBe(285); // active build unchanged
+    expect(ctx.productionQueue.get('unit')!.queueCount).toBe(2);
+    expect(ctx.productionQueue.get('unit')!.costPaid).toBe(285); // active build unchanged
   });
 
   it('cancelling all queued items one by one refunds correct total', () => {
     const item = makeProductionItem({ type: '2TNK', cost: 800, buildTime: 140, prerequisite: 'WEAP' });
     const ctx = makeProductionContext({ credits: 0 });
 
-    ctx.productionQueue.set('right', {
+    ctx.productionQueue.set('unit', {
       item,
       progress: 70,
       queueCount: 3,
@@ -753,19 +753,19 @@ describe('cancelProduction refund math', () => {
     });
 
     // Cancel 1st queued
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
     expect(ctx.credits).toBe(800);
-    expect(ctx.productionQueue.get('right')!.queueCount).toBe(2);
+    expect(ctx.productionQueue.get('unit')!.queueCount).toBe(2);
 
     // Cancel 2nd queued
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
     expect(ctx.credits).toBe(1600);
-    expect(ctx.productionQueue.get('right')!.queueCount).toBe(1);
+    expect(ctx.productionQueue.get('unit')!.queueCount).toBe(1);
 
     // Cancel active build
-    cancelProduction(ctx, 'right');
+    cancelProduction(ctx, 'unit');
     expect(ctx.credits).toBe(2100); // 1600 + 500 costPaid
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
   });
 });
 
@@ -1457,7 +1457,7 @@ describe('startProduction edge cases', () => {
 
     startProduction(ctx, item);
 
-    expect(ctx.productionQueue.has('right')).toBe(false);
+    expect(ctx.productionQueue.has('unit')).toBe(false);
     expect(evaPlayed).toBe('eva_insufficient_funds');
   });
 
@@ -1470,7 +1470,7 @@ describe('startProduction edge cases', () => {
 
     startProduction(ctx, item);
 
-    expect(ctx.productionQueue.has('right')).toBe(true);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
     expect(ctx.credits).toBe(minCostPerTick); // no upfront deduction
   });
 
@@ -1486,12 +1486,12 @@ describe('startProduction edge cases', () => {
       startProduction(ctx, item);
     }
 
-    expect(ctx.productionQueue.get('right')!.queueCount).toBe(5);
+    expect(ctx.productionQueue.get('unit')!.queueCount).toBe(5);
 
     // Try 6th — should not increase count
     const creditsBefore = ctx.credits;
     startProduction(ctx, item);
-    expect(ctx.productionQueue.get('right')!.queueCount).toBe(5);
+    expect(ctx.productionQueue.get('unit')!.queueCount).toBe(5);
     expect(ctx.credits).toBe(creditsBefore); // no deduction
   });
 
@@ -1515,10 +1515,10 @@ describe('startProduction edge cases', () => {
     });
 
     startProduction(ctx, item); // starts OK
-    expect(ctx.productionQueue.has('right')).toBe(true);
+    expect(ctx.productionQueue.has('unit')).toBe(true);
 
     startProduction(ctx, item); // queue fails — 500 < 800
-    expect(ctx.productionQueue.get('right')!.queueCount).toBe(1);
+    expect(ctx.productionQueue.get('unit')!.queueCount).toBe(1);
     expect(evaPlayed).toBe('eva_insufficient_funds');
   });
 });

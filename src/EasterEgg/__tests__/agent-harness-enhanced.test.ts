@@ -144,7 +144,7 @@ describe('power grid multiplier', () => {
 describe('production queue enhanced fields', () => {
   it('includes effective cost and costPaid for active build', () => {
     const game = makeGame();
-    game.productionQueue.set('right', {
+    game.productionQueue.set('unit', {
       item: { type: '2TNK', name: 'Medium Tank', buildTime: 100, cost: 800, prerequisite: 'WEAP', faction: 'both' } as ProductionItem,
       progress: 50,
       queueCount: 1,
@@ -156,12 +156,13 @@ describe('production queue enhanced fields', () => {
     expect(s.production).toHaveLength(1);
     expect(s.production[0].cost).toBe(800); // Spain has costMult=1.0
     expect(s.production[0].paid).toBe(400);
+    expect(s.production[0].factory).toBe('unit');
   });
 
   it('adjusts cost for country bonus (USSR = 0.9x)', () => {
     const game = makeGame({ playerHouse: House.USSR });
     setPlayerHouses(new Set([House.USSR]));
-    game.productionQueue.set('right', {
+    game.productionQueue.set('unit', {
       item: { type: '2TNK', name: 'Medium Tank', buildTime: 100, cost: 800, prerequisite: 'WEAP', faction: 'both' } as ProductionItem,
       progress: 0,
       queueCount: 1,
@@ -199,12 +200,14 @@ describe('availableItems with costs', () => {
     expect(tank.cost).toBe(800);
     expect(tank.time).toBe(100);
     expect(tank.side).toBe('right');
+    expect(tank.factory).toBe('unit');
     expect(tank.isStruct).toBe(false);
 
     const powr = s.availableItems.find(i => i.t === 'POWR')!;
     expect(powr.name).toBe('Power Plant');
     expect(powr.cost).toBe(300);
     expect(powr.side).toBe('left');
+    expect(powr.factory).toBe('building');
     expect(powr.isStruct).toBe(true);
   });
 
