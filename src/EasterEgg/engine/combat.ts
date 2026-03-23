@@ -1429,14 +1429,27 @@ export function updateStructureCombat(ctx: CombatContext): void {
     if (s.ammo === 0) continue; // out of ammo (shouldn't reach here after reload)
 
     // Turret rotation tick (every frame, independent of cooldown)
+    // C++ building.cpp:5347-5363 Rotation_AI + facing.cpp:142-183 Rotation_Adjust:
+    //   256-step DirType, ROT=5 per tick → 90° (64 units) takes 13 ticks.
+    // TS uses 8-dir facing with ROT accumulator: each tick adds ROT (5) to accumulator,
+    // one 8-dir step (= 32 DirType units) fires when accumulator >= 32.
     if (TURRETED_STRUCTURES.has(s.type)) {
       if (s.turretDir === undefined) s.turretDir = TURRET_DEFAULT_FACING[s.type] ?? 4; // C++ bdata.cpp per-building default
       if (s.desiredTurretDir === undefined) s.desiredTurretDir = s.turretDir;
+      if (s.turretRotAccum === undefined) s.turretRotAccum = 0;
       if (s.turretDir !== s.desiredTurretDir) {
-        const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
-        s.turretDir = diff <= 4
-          ? (s.turretDir + 1) % 8
-          : (s.turretDir + 7) % 8;
+        // Accumulate ROT units each tick (C++ FacingClass::Rotation_Adjust)
+        s.turretRotAccum += STRUCTURE_TURRET_ROT;
+        // One 8-dir step = 32 DirType units in C++ 256-step system
+        if (s.turretRotAccum >= 32) {
+          s.turretRotAccum -= 32;
+          const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
+          s.turretDir = diff <= 4
+            ? (s.turretDir + 1) % 8
+            : (s.turretDir + 7) % 8;
+        }
+      } else {
+        s.turretRotAccum = 0; // Reset accumulator when aligned
       }
       if (s.firingFlash !== undefined && s.firingFlash > 0) s.firingFlash--;
     }

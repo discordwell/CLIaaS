@@ -368,19 +368,23 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
     expect(sam.firingFlash).toBe(4);
   });
 
-  it('turret rotates one step per tick toward desiredTurretDir', () => {
+  it('turret rotates via ROT accumulator toward desiredTurretDir', () => {
     const sam = makeSAM(10, 10);
     sam.turretDir = 0; // North
     sam.desiredTurretDir = 4; // South (4 steps clockwise)
+    sam.turretRotAccum = 0;
     // Put in cooldown so it only rotates, doesn't fire
-    sam.attackCooldown = 10;
+    sam.attackCooldown = 50;
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
-    const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    // C++ ROT=5, 32 DirType units per 8-dir step → first step after 7 ticks (accum 35 >= 32).
+    for (let i = 0; i < 7; i++) {
+      const ctx = makeCombatCtx([sam], [hind]);
+      updateStructureCombat(ctx);
+    }
 
     // turretDir should have moved one step clockwise toward 4
-    expect(sam.turretDir).toBe(1); // 0 -> 1 (clockwise)
+    expect(sam.turretDir).toBe(1); // 0 -> 1 (clockwise) after 7 ticks
   });
 });
 
