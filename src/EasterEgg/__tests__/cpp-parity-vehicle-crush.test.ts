@@ -22,7 +22,7 @@ import {
   UNIT_STATS, buildDefaultAlliances,
 } from '../engine/types';
 import type { WarheadType } from '../engine/types';
-import { Entity, resetEntityIds } from '../engine/entity';
+import { Entity, resetEntityIds, CloakState } from '../engine/entity';
 import {
   type CombatContext,
   checkVehicleCrush,
@@ -692,24 +692,17 @@ describe('Wall crush clears corresponding structure', () => {
 });
 
 // =============================================================================
-// 16. PARITY GAP: C++ Overrun_Square distance check within cell
+// 16. PARITY FIXED: C++ Overrun_Square sub-cell distance check
 // =============================================================================
 
-describe('PARITY GAP: C++ sub-cell distance check (unit.cpp:4408)', () => {
+describe('PARITY FIXED: C++ sub-cell distance check (unit.cpp:4408)', () => {
 
   // C++ unit.cpp:4408: Distance(object->Center_Coord()) < CELL_LEPTON_W/2
-  // C++ checks the actual distance between the vehicle and infantry within the cell.
-  // If the infantry is in the far corner of a cell, it might not be within CELL_LEPTON_W/2.
-  // TS uses only cell equality (cx === cx && cy === cy), ignoring sub-cell position.
-  //
-  // This means TS will crush infantry at any position within the cell,
-  // while C++ requires the infantry to be within half a cell (128 leptons) of the vehicle.
-  // In practice, cell-centered units are always within range, but this is a behavioral gap
-  // for infantry using sub-cell positions at cell edges.
+  // TS now uses distance-based check within same cell, matching C++.
+  // Units at cell center are always within range. Units at cell edges may be outside range.
 
-  it('TS crushes based on cell equality, not sub-cell distance', () => {
-    // PARITY GAP: TS uses cell match; C++ uses Distance < CELL_LEPTON_W/2
-    // Both entities at cell (10,10) center — crush should work in both implementations
+  it('crushes units at cell center (within CELL_LEPTON_W/2 distance)', () => {
+    // Both entities at cell (10,10) center — distance is 0, well within range
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const ctx = makeCombatCtx([tank, infantry]);
@@ -718,68 +711,116 @@ describe('PARITY GAP: C++ sub-cell distance check (unit.cpp:4408)', () => {
 
     expect(infantry.alive).toBe(false);
   });
+
+  it('does NOT crush units at far edge of same cell (outside CELL_LEPTON_W/2)', () => {
+    // Place tank at cell center, infantry at far corner of same cell
+    // Distance = sqrt((CELL_SIZE/2 - 1)^2 + (CELL_SIZE/2 - 1)^2) > CELL_SIZE/2
+    const cx = 10, cy = 10;
+    const tank = new Entity(UnitType.V_2TNK, House.Spain,
+      cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+    const infantry = new Entity(UnitType.I_E1, House.USSR,
+      cx * CELL_SIZE + CELL_SIZE - 1, cy * CELL_SIZE + CELL_SIZE - 1);
+    const ctx = makeCombatCtx([tank, infantry]);
+
+    checkVehicleCrush(ctx, tank);
+
+    // Infantry at far corner is outside CELL_LEPTON_W/2 distance, not crushed
+    expect(infantry.alive).toBe(true);
+  });
 });
 
 // =============================================================================
-// 17. PARITY GAP: C++ crusher uncloaks after crush (unit.cpp:4447)
+// 17. PARITY FIXED: C++ crusher uncloaks after crush (unit.cpp:4447)
 // =============================================================================
 
-describe('PARITY GAP: crusher uncloak on crush (unit.cpp:4447)', () => {
+describe('PARITY FIXED: crusher uncloak on crush (unit.cpp:4447)', () => {
 
   // C++ unit.cpp:4447: if (crushed) Do_Uncloak();
   // After crushing at least one unit, the vehicle uncloaks.
-  // This matters for cloakable crushers like the Phase Transport (STNK).
-  // TS does NOT implement Do_Uncloak() after crush.
+  // TS now implements this for cloakable crushers like the Phase Transport (STNK).
 
-  it('C++ uncloaks vehicle after crush — TS does not implement this', () => {
-    // PARITY GAP
-    // If STNK (Phase Transport) crushes infantry, C++ calls Do_Uncloak().
-    // TS checkVehicleCrush does not modify any cloak state.
+  it('cloakable crusher uncloaks after crushing enemy', () => {
+    // STNK (Phase Transport) has both crusher=true and isCloakable=true
     const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
+    stnk.cloakState = CloakState.CLOAKED;
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const ctx = makeCombatCtx([stnk, enemy]);
 
     checkVehicleCrush(ctx, stnk);
 
-    // The enemy should be dead (crush works)
     expect(enemy.alive).toBe(false);
-    // PARITY GAP: C++ would set Cloak = UNCLOAKING; TS doesn't touch cloak state
+    // PARITY FIXED: cloaked vehicle transitions to UNCLOAKING after crush
+    expect(stnk.cloakState).toBe(CloakState.UNCLOAKING);
+  });
+
+  it('non-cloakable crusher does NOT change cloak state', () => {
+    // Regular tank is not cloakable — cloak state should not change
+    const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
+    const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    const ctx = makeCombatCtx([tank, enemy]);
+
+    checkVehicleCrush(ctx, tank);
+
+    expect(enemy.alive).toBe(false);
+    expect(tank.cloakState).toBe(CloakState.UNCLOAKED); // unchanged
   });
 });
 
 // =============================================================================
-// 18. PARITY GAP: C++ wall crush checks wall owner alliance (unit.cpp:3108-3109)
+// 18. PARITY FIXED: C++ wall crush checks wall owner alliance (unit.cpp:3108-3109)
 // =============================================================================
 
-describe('PARITY GAP: wall crush owner alliance check (unit.cpp:3108-3109)', () => {
+describe('PARITY FIXED: wall crush owner alliance check (unit.cpp:3108-3109)', () => {
 
   // C++ unit.cpp:3108-3109 (Can_Enter_Cell):
   //   if (optr->IsCrushable && Class->IsCrusher) {
   //     cancrush = !House->Is_Ally(cellptr->Owner);
   //   }
   //
-  // In C++, crushable walls owned by allies are NOT crushed — the vehicle treats them
-  // as impassable. Only ENEMY crushable walls get crushed.
-  //
-  // TS checkWallCrush does NOT check wall ownership — it crushes ALL crushable walls
-  // regardless of who owns them. This means a player's own sandbag walls will be
-  // destroyed by their own tanks, which doesn't happen in C++.
+  // TS now checks wall structure ownership — allied walls are NOT crushed.
 
-  it('TS crushes own walls — C++ does NOT crush allied walls', () => {
-    // PARITY GAP
+  it('crusher does NOT crush allied walls (wall owned by same house)', () => {
+    // Wall owned by Spain (same as tank) — should NOT be crushed
     const map = new GameMap();
     map.setWallType(10, 10, 'SBAG');
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     const ctx = makeCombatCtx([tank], map);
-    // The wall has no owner concept in TS — checkWallCrush crushes it regardless
-    // In C++, this wall would be allied and NOT crushed
+    const wallStruct = { type: 'SBAG', cx: 10, cy: 10, house: House.Spain, alive: true, rubble: false, hp: 1, maxHp: 1 };
+    ctx.structures = [wallStruct as any];
 
     checkWallCrush(ctx, tank);
 
-    // TS behavior: wall IS crushed (no owner check)
+    // PARITY FIXED: allied wall is NOT crushed
+    expect(map.getWallType(10, 10)).toBe('SBAG');
+  });
+
+  it('crusher DOES crush enemy walls', () => {
+    // Wall owned by USSR (enemy) — should be crushed
+    const map = new GameMap();
+    map.setWallType(10, 10, 'SBAG');
+    const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
+    const ctx = makeCombatCtx([tank], map);
+    const wallStruct = { type: 'SBAG', cx: 10, cy: 10, house: House.USSR, alive: true, rubble: false, hp: 1, maxHp: 1 };
+    ctx.structures = [wallStruct as any];
+
+    checkWallCrush(ctx, tank);
+
+    // Enemy wall IS crushed
     expect(map.getWallType(10, 10)).toBe('');
-    // C++ behavior would be: wall NOT crushed (allied owner)
-    // PARITY GAP: TS is missing wall ownership check
+  });
+
+  it('crusher crushes walls with no owner structure (neutral walls)', () => {
+    // Wall on map with no matching structure — no owner to check, crush proceeds
+    const map = new GameMap();
+    map.setWallType(10, 10, 'SBAG');
+    const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
+    const ctx = makeCombatCtx([tank], map);
+    // No structures — wall has no owner
+
+    checkWallCrush(ctx, tank);
+
+    // Neutral wall IS crushed
+    expect(map.getWallType(10, 10)).toBe('');
   });
 });
 

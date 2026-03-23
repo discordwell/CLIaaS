@@ -331,13 +331,13 @@ describe('Terrain template ranges -- C++ defines.h TemplateType enum', () => {
     expect(roadSpeed).toBe(1.0); // Road gives full speed
   });
 
-  it('Water template ID = 1 (C++ TEMPLATE_WATER1 = 1, used by destroyBridge)', () => {
+  it('Water template ID = 1 (C++ TEMPLATE_WATER1 = 1, used by destroyBridge Phase 2)', () => {
     // C++ defines.h: TEMPLATE_WATER1 = 1
-    // TS map.ts:539: destroyBridge sets templateType to 1 (water)
+    // Two-phase: Phase 2 (half-destroyed → water) sets templateType to 1.
     const map = new GameMap();
     map.setBounds(0, 0, 128, 128);
     map.setTerrain(20, 20, Terrain.CLEAR);
-    map.templateType[20 * MAP_CELLS + 20] = 131; // BRIDGE1
+    map.templateType[20 * MAP_CELLS + 20] = 378; // BRIDGE1H (half-destroyed)
     map.destroyBridge(20, 20, 0);
     expect(map.templateType[20 * MAP_CELLS + 20]).toBe(1); // set to water template
     expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);

@@ -364,13 +364,26 @@ export class GameMap {
   /** C++ cell.cpp:498-503 Is_Clear_To_Build — check if a cell allows building placement.
    *  Only CLEAR terrain is buildable (C++ Ground[land].Build).
    *  ORE, ROUGH, BEACH are passable for movement but NOT buildable.
-   *  cpp-parity: rules.cpp:864, cell.cpp:453-513 */
+   *  C++ cell.cpp:498-501 — Is_Bridge_Here() prohibits building on bridge cells.
+   *  cpp-parity: rules.cpp:864, cell.cpp:453-513, cell.cpp:498-501 */
   isBuildable(cx: number, cy: number): boolean {
     if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
         cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
       return false;
     }
-    return BUILDABLE.has(this.getTerrain(cx, cy));
+    if (!BUILDABLE.has(this.getTerrain(cx, cy))) return false;
+    // C++ cell.cpp:498-501 — Is_Bridge_Here(): bridge template cells block building placement
+    if (this.isBridgeCell(cx, cy)) return false;
+    return true;
+  }
+
+  /** C++ cell.cpp:2828-2850 Is_Bridge_Here — check if cell has a bridge template. */
+  isBridgeCell(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    const tmpl = this.templateType[cy * MAP_CELLS + cx];
+    return tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 ||
+           tmpl === 238 || tmpl === 239 || tmpl === 241 || tmpl === 242 ||
+           tmpl === 378 || tmpl === 379;
   }
 
   /** Check if a cell is water-passable (for naval units) */
@@ -672,6 +685,10 @@ export class GameMap {
   }
 
   /** Destroy bridge cells in a radius (set to WATER) — returns number destroyed */
+  /** Destroy bridge cells in a radius — implements C++ two-phase destruction.
+   *  C++ map.cpp:1797-1864: Phase 1 converts intact → half-destroyed (passable).
+   *  Phase 2 converts half-destroyed → fully destroyed (WATER, impassable).
+   *  Returns number of cells affected (phase transitions count). */
   destroyBridge(cx: number, cy: number, radius: number): number {
     let count = 0;
     for (let dy = -radius; dy <= radius; dy++) {
@@ -681,10 +698,23 @@ export class GameMap {
         if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
         const idx = ry * MAP_CELLS + rx;
         const tmpl = this.templateType[idx];
-        // C++ bridge template IDs: 131,133 (main), 235,236 (1A/1B), 238,239 (2A/2B), 241,242 (3A/3B), 378,379 (half-destroyed)
-        // map.cpp:1869 — Destroy_Bridge_At covers TEMPLATE_BRIDGE_1A through TEMPLATE_BRIDGE_3E
-        if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 238 || tmpl === 239 || tmpl === 241 || tmpl === 242 || tmpl === 378 || tmpl === 379) {
-          this.templateType[idx] = 1; // water template
+        // C++ map.cpp:1797-1812 Phase 1: intact → half-destroyed (BRIDGE1→BRIDGE1H, BRIDGE2→BRIDGE2H)
+        if (tmpl === 131) {
+          this.templateType[idx] = 378; // BRIDGE1 → BRIDGE1H
+          count++;
+        } else if (tmpl === 133) {
+          this.templateType[idx] = 379; // BRIDGE2 → BRIDGE2H
+          count++;
+        }
+        // C++ map.cpp:1814-1864 Phase 2: half-destroyed → fully destroyed (WATER)
+        else if (tmpl === 378 || tmpl === 379) {
+          this.templateType[idx] = 1;
+          this.setTerrain(rx, ry, Terrain.WATER);
+          count++;
+        }
+        // Multi-part bridge pieces: direct to water (simplified from C++ state machine)
+        else if (tmpl === 235 || tmpl === 236 || tmpl === 238 || tmpl === 239 || tmpl === 241 || tmpl === 242) {
+          this.templateType[idx] = 1;
           this.setTerrain(rx, ry, Terrain.WATER);
           count++;
         }

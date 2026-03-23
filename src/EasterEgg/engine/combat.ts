@@ -14,7 +14,7 @@ import {
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
   HOUSE_FACTION,
 } from './types';
-import { Entity } from './entity';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
@@ -578,14 +578,24 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
   // C++ drive.cpp:Ok_To_Move — only vehicles with Tracks=true (crusher flag) can crush infantry
   if (!vehicle.stats.crusher) return;
   const vc = vehicle.cell;
+  let crushed = false;
   for (const other of ctx.entities) {
     if (!other.alive || other.id === vehicle.id) continue;
     if (!other.stats.crushable) continue; // only crushable targets (infantry, ants)
     if (ctx.isAllied(vehicle.house, other.house)) continue; // C++ IsAFriend — don't crush allies
     const oc = other.cell;
-    if (oc.cx === vc.cx && oc.cy === vc.cy) {
+    if (oc.cx !== vc.cx || oc.cy !== vc.cy) continue;
+    // C++ unit.cpp:4408 — Distance(object->Center_Coord()) < CELL_LEPTON_W/2
+    // Sub-cell distance check: crush only if within half a cell (C++ CELL_LEPTON_W/2 = 128 leptons)
+    const dx = vehicle.pos.x - other.pos.x;
+    const dy = vehicle.pos.y - other.pos.y;
+    const distSq = dx * dx + dy * dy;
+    const halfCell = CELL_SIZE / 2;
+    if (distSq >= halfCell * halfCell) continue;
+    {
       damageEntity(ctx, other, other.hp + 10, 'Super'); // instant kill, always die2
       vehicle.creditKill();
+      crushed = true;
       ctx.effects.push({
         type: 'blood', x: other.pos.x, y: other.pos.y,
         frame: 0, maxFrames: 6, size: 4, sprite: 'piffpiff', spriteStart: 0,
@@ -611,6 +621,11 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
       else if (crushFaction !== 'both') ctx.alliedUnitsLost++;
     }
   }
+  // C++ unit.cpp:4447 — Do_Uncloak() after crushing at least one unit
+  if (crushed && vehicle.stats.isCloakable) {
+    vehicle.cloakState = CloakState.UNCLOAKING;
+    vehicle.cloakTimer = CLOAK_TRANSITION_FRAMES;
+  }
 }
 
 /** Crushable wall types — C++ odata.cpp IsCrushable flag.
@@ -628,18 +643,27 @@ export function checkWallCrush(ctx: CombatContext, vehicle: Entity): void {
   const wallType = ctx.map.getWallType(vc.cx, vc.cy);
   if (wallType === '' || !CRUSHABLE_WALLS.has(wallType)) return;
 
+  // C++ unit.cpp:3108-3109 — wall crush checks wall owner alliance.
+  // Only crush enemy/neutral walls, not allied walls.
+  let wallStruct: MapStructure | undefined;
+  for (const s of ctx.structures) {
+    if (s.alive && s.cx === vc.cx && s.cy === vc.cy && s.type === wallType) {
+      wallStruct = s;
+      break;
+    }
+  }
+  // If we found the wall structure, check alliance — don't crush allied walls
+  if (wallStruct && ctx.isAllied(vehicle.house, wallStruct.house)) return;
+
   // Destroy the wall overlay on the map
   ctx.map.clearWallType(vc.cx, vc.cy);
   ctx.map.addDecal(vc.cx, vc.cy, 4, 0.3);
 
   // Destroy the corresponding wall structure (mark dead, clear footprint)
-  for (const s of ctx.structures) {
-    if (s.alive && s.cx === vc.cx && s.cy === vc.cy && s.type === wallType) {
-      s.alive = false;
-      s.rubble = true;
-      ctx.clearStructureFootprint(s);
-      break;
-    }
+  if (wallStruct) {
+    wallStruct.alive = false;
+    wallStruct.rubble = true;
+    ctx.clearStructureFootprint(wallStruct);
   }
 
   // C++ unit.cpp:1864-1868: sandbag gets VOC_SANDBAG, others get VOC_WALLKILL2

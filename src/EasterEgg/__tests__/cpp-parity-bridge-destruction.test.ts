@@ -194,12 +194,12 @@ describe('countBridgeCells — C++ map.cpp:2045-2073 Intact_Bridge_Count', () =>
 
 describe('destroyBridge — bridge cell destruction within radius', () => {
 
-  it('converts bridge cells to water terrain', () => {
-    // C++ map.cpp:1822-1826 replaces bridge template with destroyed version.
-    // TS simplifies this by setting terrain to WATER directly.
+  it('converts half-destroyed bridge cells to water terrain (Phase 2)', () => {
+    // C++ map.cpp:1814-1864 Phase 2: half-destroyed → fully destroyed (WATER).
+    // Phase 1 converts intact → half-destroyed first.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
-    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
 
     const destroyed = map.destroyBridge(20, 20, 3);
 
@@ -207,12 +207,12 @@ describe('destroyBridge — bridge cell destruction within radius', () => {
     expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
   });
 
-  it('destroys all bridge cells within the specified radius', () => {
+  it('destroys all half-destroyed bridge cells within the specified radius', () => {
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
-    // Place a 5-cell bridge spanning horizontally
+    // Place a 5-cell bridge spanning horizontally (half-destroyed for Phase 2 test)
     for (let dx = -2; dx <= 2; dx++) {
-      setBridgeTemplate(map, 20 + dx, 20, TEMPLATE_BRIDGE2, 6);
+      setBridgeTemplate(map, 20 + dx, 20, TEMPLATE_BRIDGE2H, 6);
     }
 
     // Radius 3 should cover all 5 cells
@@ -310,20 +310,24 @@ describe('Bridge passability changes after destruction', () => {
     expect(map.isPassable(20, 20)).toBe(true);
   });
 
-  it('destroyed bridge cells become impassable water', () => {
+  it('fully destroyed bridge cells become impassable water (two-phase)', () => {
     // C++ map.cpp:1831 Zone_Reset(MZONEF_ALL) — recalculates passability zones
-    // after bridge destruction. The destroyed bridge cells become river/water.
+    // after bridge destruction. Two-phase: intact → half-destroyed → water.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
+    // Phase 1: half-destroyed, still passable
     map.destroyBridge(20, 20, 3);
+    expect(map.isPassable(20, 20)).toBe(true);
 
+    // Phase 2: water, impassable
+    map.destroyBridge(20, 20, 3);
     expect(map.isPassable(20, 20)).toBe(false);
     expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
   });
 
-  it('destroyed bridge cells become navigable by naval units', () => {
+  it('fully destroyed bridge cells become navigable by naval units (two-phase)', () => {
     // C++ parity: destroyed bridge becomes water — naval units can pass through
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
@@ -332,6 +336,8 @@ describe('Bridge passability changes after destruction', () => {
     // Before destruction: not water
     expect(map.isWaterPassable(20, 20)).toBe(false);
 
+    // Two-phase destruction
+    map.destroyBridge(20, 20, 3);
     map.destroyBridge(20, 20, 3);
 
     // After destruction: water
@@ -343,13 +349,14 @@ describe('Bridge passability changes after destruction', () => {
 
 describe('Barrel explosion bridge destruction (structureDamage → destroyBridge)', () => {
 
-  it('barrel (BARL) destruction destroys nearby bridge cells', () => {
+  it('barrel (BARL) destruction destroys nearby half-destroyed bridge cells', () => {
     // C++ building.cpp barrel explosion chain → map.cpp Destroy_Bridge_At
     // TS: structureDamage for BARL/BRL3 calls map.destroyBridge(cx, cy, 3)
+    // With two-phase, barrel on half-destroyed bridge → water (Phase 2).
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
-    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
-    setBridgeTemplate(ctx.map, 22, 20, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
+    setBridgeTemplate(ctx.map, 22, 20, TEMPLATE_BRIDGE1H, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
     // Destroy barrel with damage > HP
@@ -361,10 +368,10 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
     expect(ctx.bridgeCellCount).toBe(0);
   });
 
-  it('BRL3 barrel also triggers bridge destruction', () => {
+  it('BRL3 barrel also triggers bridge destruction on half-destroyed bridges', () => {
     const barrel = makeBarrel(20, 20, 'BRL3');
     const ctx = makeCombatCtx([], [barrel]);
-    setBridgeTemplate(ctx.map, 19, 20, TEMPLATE_BRIDGE2, 6);
+    setBridgeTemplate(ctx.map, 19, 20, TEMPLATE_BRIDGE2H, 6); // half-destroyed
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
     structureDamage(ctx, barrel, 100);
@@ -401,10 +408,10 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
     expect(evaMessages).not.toContain(7);
   });
 
-  it('bridgeCellCount is recalculated after barrel destroys bridge', () => {
+  it('bridgeCellCount is recalculated after barrel destroys half-destroyed bridge', () => {
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
-    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
     setBridgeTemplate(ctx.map, 60, 60, TEMPLATE_BRIDGE2, 6); // far bridge, untouched
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
@@ -412,7 +419,7 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
 
     structureDamage(ctx, barrel, 100);
 
-    // One bridge cell destroyed, one remains
+    // Near bridge fully destroyed (Phase 2), far one remains
     expect(ctx.bridgeCellCount).toBe(1);
   });
 });
@@ -490,29 +497,26 @@ describe('Splash damage bridge destruction (combat.cpp:261-268)', () => {
   });
 });
 
-// ── PARITY GAP: Two-phase bridge destruction ───────────────────────────────
+// ── PARITY FIXED: Two-phase bridge destruction ──────────────────────────────
 // C++ map.cpp:1797-1864 implements two-phase destruction:
 //   Phase 1: BRIDGE1 → BRIDGE1H (intact → half-destroyed, still passable)
 //   Phase 2: BRIDGE1H → BRIDGE1D (half-destroyed → fully destroyed, impassable)
-// TS has no concept of half-destroyed bridges — destroyBridge immediately
-// converts to water.
+// TS now implements two-phase destruction matching C++ behavior.
 
-describe('PARITY GAP: Two-phase bridge destruction (map.cpp:1797-1864)', () => {
+describe('PARITY FIXED: Two-phase bridge destruction (map.cpp:1797-1864)', () => {
 
-  it('C++ Phase 1: intact bridge should become half-destroyed, not fully destroyed', () => {
-    // PARITY GAP — C++ map.cpp:1797-1812: when Destroy_Bridge_At is called on an
-    // intact bridge (BRIDGE1/BRIDGE2), it transitions to half-destroyed (BRIDGE1H/BRIDGE2H).
-    // The bridge remains passable. A second hit is required for full destruction.
-    // TS immediately destroys and converts to water.
+  it('Phase 1: intact bridge becomes half-destroyed, not fully destroyed', () => {
+    // PARITY FIXED — C++ map.cpp:1797-1812: first hit on intact bridge transitions to
+    // half-destroyed (BRIDGE1H/BRIDGE2H). The bridge remains passable.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
     map.destroyBridge(20, 20, 3);
 
-    // PARITY GAP: TS sets terrain to WATER immediately.
-    // C++ would set template to BRIDGE1H, keeping it passable.
-    expect(map.getTerrain(20, 20)).toBe(Terrain.WATER); // PARITY GAP — C++ would be CLEAR (bridge still passable)
+    // PARITY FIXED: Phase 1 creates half-destroyed bridge, terrain stays CLEAR
+    expect(map.templateType[20 * MAP_CELLS + 20]).toBe(TEMPLATE_BRIDGE1H);
+    expect(map.getTerrain(20, 20)).toBe(Terrain.CLEAR); // still passable
   });
 
   it('C++ Phase 2: half-destroyed bridge should become fully destroyed', () => {
@@ -540,9 +544,10 @@ describe('PARITY GAP: Two-phase bridge destruction (map.cpp:1797-1864)', () => {
 
 describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
 
-  it('barrel explosion on bridge kills all units standing on destroyed bridge cells', () => {
+  it('barrel explosion on half-destroyed bridge kills all units standing on destroyed cells', () => {
     // C++ map.cpp:1843 — obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true)
-    // Units on the bridge when it's destroyed are killed instantly.
+    // Units on the bridge when it's fully destroyed are killed instantly.
+    // Occupant killing only happens on Phase 2 (half-destroyed → WATER).
     const infantryOnBridge = new Entity(
       UnitType.I_E1, House.USSR,
       21 * CELL_SIZE + CELL_SIZE / 2,
@@ -550,13 +555,13 @@ describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
     );
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([infantryOnBridge], [barrel]);
-    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
-    // Destroy barrel — triggers bridge destruction and occupant killing
+    // Destroy barrel — triggers Phase 2 bridge destruction and occupant killing
     structureDamage(ctx, barrel, 100);
 
-    // Infantry on the bridge cell should be dead
+    // Infantry on the bridge cell should be dead (fell into water)
     expect(infantryOnBridge.alive).toBe(false);
   });
 
@@ -568,7 +573,7 @@ describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
     );
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([infantryOffBridge], [barrel]);
-    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
     const hpBefore = infantryOffBridge.hp;
@@ -604,20 +609,17 @@ describe('Screen shake from bridge destruction', () => {
 
 // ── Building placement prohibition on bridges ──────────────────────────────
 
-describe('Building placement on bridges (cell.cpp:499)', () => {
+describe('PARITY FIXED: Building placement on bridges (cell.cpp:499)', () => {
 
-  it('bridge cells with CLEAR terrain are not flagged as unbuildable by terrain alone', () => {
+  it('bridge cells with CLEAR terrain block building placement via isBridgeCell()', () => {
     // C++ cell.cpp:499 explicitly prohibits building on bridge cells via Is_Bridge_Here().
-    // TS does not have an explicit bridge check in isBuildable — it only checks terrain type.
-    // Bridge cells have CLEAR terrain, so isBuildable returns true (PARITY GAP for
-    // explicit bridge check, though scenario placement prevents this in practice).
+    // TS isBuildable now checks isBridgeCell() — bridge cells are not buildable.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1, 6);
 
-    // TS isBuildable checks terrain type only — CLEAR is buildable
-    // C++ would return false because Is_Bridge_Here() returns true
-    expect(map.isBuildable(20, 20)).toBe(true); // PARITY GAP — C++ would return false
+    // PARITY FIXED: bridge cells block building placement
+    expect(map.isBuildable(20, 20)).toBe(false);
   });
 });
 
@@ -656,22 +658,23 @@ describe('Barrel chain explosions near bridges', () => {
 
 describe('Bridge count tracking (Scen.BridgeCount / ctx.bridgeCellCount)', () => {
 
-  it('bridgeCellCount updates after bridge destruction', () => {
+  it('bridgeCellCount updates after barrel destroys bridge', () => {
     // C++ map.cpp:1828 — Scen.BridgeCount-- on full bridge destruction
     // TS recalculates count from scratch after barrel explosion
+    // Use half-destroyed bridges near barrel for Phase 2 destruction.
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
 
-    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
-    setBridgeTemplate(ctx.map, 22, 20, TEMPLATE_BRIDGE1, 6);
-    setBridgeTemplate(ctx.map, 50, 50, TEMPLATE_BRIDGE2, 6); // far away
+    setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
+    setBridgeTemplate(ctx.map, 22, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
+    setBridgeTemplate(ctx.map, 50, 50, TEMPLATE_BRIDGE2, 6); // far away, intact
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
     expect(ctx.bridgeCellCount).toBe(3);
 
     structureDamage(ctx, barrel, 100);
 
-    // Near bridge cells destroyed, far one remains
+    // Near bridge cells fully destroyed (Phase 2), far one remains
     expect(ctx.bridgeCellCount).toBe(1);
   });
 
@@ -685,9 +688,11 @@ describe('Bridge count tracking (Scen.BridgeCount / ctx.bridgeCellCount)', () =>
 
     expect(map.countBridgeCells()).toBe(3);
 
-    // Destroy only one
-    map.destroyBridge(10, 10, 1);
+    // Destroy only one — two-phase for intact bridges
+    map.destroyBridge(10, 10, 1); // Phase 1: half-destroyed (still counted)
+    expect(map.countBridgeCells()).toBe(3); // half-destroyed still counted
 
+    map.destroyBridge(10, 10, 1); // Phase 2: water (no longer counted)
     expect(map.countBridgeCells()).toBe(2);
   });
 });

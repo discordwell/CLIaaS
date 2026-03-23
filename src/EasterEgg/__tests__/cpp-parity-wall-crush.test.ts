@@ -472,14 +472,16 @@ describe('Only the wall at the vehicle cell is destroyed', () => {
 });
 
 // =============================================================================
-//  Friendly/own walls are also crushed (C++ does not check alliance for walls)
+//  PARITY FIXED: Wall crush checks alliance (C++ unit.cpp:3108-3109)
 // =============================================================================
 //
-// C++ unit.cpp:1859 — no IsAFriend check for wall crushing (unlike infantry crush)
+// C++ unit.cpp:3108-3109 — cancrush = !House->Is_Ally(cellptr->Owner)
+// Allied walls are NOT crushed by friendly vehicles.
 
-describe('Wall crush ignores alliance (no IsAFriend check)', () => {
+describe('PARITY FIXED: Wall crush checks alliance (unit.cpp:3108-3109)', () => {
 
-  it('crusher vehicle destroys own allied wall', () => {
+  it('crusher vehicle does NOT crush own allied wall', () => {
+    // C++ unit.cpp:3108-3109: allied walls are not crushed
     const wall = makeWall('SBAG', 10, 10, House.Spain);
     const tank = entityAtCell(UnitType.V_3TNK, House.Spain, 10, 10);
     const ctx = makeCombatCtx([wall], [tank]);
@@ -487,8 +489,9 @@ describe('Wall crush ignores alliance (no IsAFriend check)', () => {
 
     checkWallCrush(ctx, tank);
 
-    expect(ctx.map.getWallType(10, 10)).toBe('');
-    expect(wall.alive).toBe(false);
+    // PARITY FIXED: allied wall is NOT crushed
+    expect(ctx.map.getWallType(10, 10)).toBe('SBAG');
+    expect(wall.alive).toBe(true);
   });
 
   it('crusher vehicle destroys enemy wall', () => {

@@ -514,14 +514,20 @@ describe('Bridge passability — C++ map.cpp bridge template handling', () => {
     expect(map.isWaterPassable(10, 10)).toBe(false); // bridge != water
   });
 
-  it('destroying a bridge converts cells to WATER (impassable to ground)', () => {
+  it('fully destroying a bridge converts cells to WATER (two-phase, impassable to ground)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 50, 50);
     map.setTerrain(10, 10, Terrain.CLEAR);
     map.templateType[10 * 128 + 10] = 131; // TEMPLATE_BRIDGE1
 
-    const destroyed = map.destroyBridge(10, 10, 3);
-    expect(destroyed).toBeGreaterThan(0);
+    // Phase 1: intact → half-destroyed (still passable)
+    const destroyed1 = map.destroyBridge(10, 10, 3);
+    expect(destroyed1).toBeGreaterThan(0);
+    expect(map.getTerrain(10, 10)).toBe(Terrain.CLEAR); // still passable
+
+    // Phase 2: half-destroyed → WATER (impassable)
+    const destroyed2 = map.destroyBridge(10, 10, 3);
+    expect(destroyed2).toBeGreaterThan(0);
     expect(map.getTerrain(10, 10)).toBe(Terrain.WATER);
     expect(map.isTerrainPassable(10, 10)).toBe(false);
   });
