@@ -1220,7 +1220,7 @@ describe('area guard scans from home position (C++ foot.cpp:967)', () => {
     expect(tsLeash).toBeLessThanOrEqual(5);
     expect(cppLeash).toBeLessThanOrEqual(5);
 
-    // BLOCKED: TS leash is intentionally smaller than C++ for tighter area control.
+    // DESIGN NOTE: TS leash is intentionally smaller than C++ for tighter area control.
     // C++: min(5.5, 5) = 5
     // TS: min(5.5/2, 5) = min(2.75, 5) = 2.75
     if (weaponRange > 2) {

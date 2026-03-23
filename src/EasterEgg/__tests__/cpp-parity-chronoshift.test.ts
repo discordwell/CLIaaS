@@ -606,7 +606,8 @@ describe('Blocked destination fallback (C++ drive.cpp:408-410)', () => {
     // The unit is always placed exactly at target coordinates.
     // (Note: teleportChronoTank in specialUnits.ts DOES check passability
     //  and rejects impassable cells — but the Chronosphere handler does not.)
-    // BLOCKED gap — requires Nearby_Location implementation for Chronosphere.
+    // BLOCKED: nearbyLocation() exists in pathfinding.ts:738 but is not wired into
+    // the Chronosphere handler (superweapon.ts). Requires adding passability check.
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
 

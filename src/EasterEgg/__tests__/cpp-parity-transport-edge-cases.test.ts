@@ -105,8 +105,9 @@ describe('_Counts_As_Civ_Evac edge cases (aircraft.cpp:116-159)', () => {
     expect(CIVILIAN_UNIT_TYPES.has('EINSTEIN')).toBe(true);
     expect(CIVILIAN_UNIT_TYPES.has('GNRL')).toBe(true);
     expect(CIVILIAN_UNIT_TYPES.has('CHAN')).toBe(true);
-    // DELPHI is in C++ but not implemented as a unit type in TS
-    // BLOCKED: DELPHI is missing from TS UnitType enum and CIVILIAN_UNIT_TYPES — requires adding DELPHI unit type
+    // DELPHI is in C++ and now implemented in TS as UnitType.I_DELPHI
+    // RESOLVED: DELPHI exists in TS UnitType enum and CIVILIAN_UNIT_TYPES (types.ts:179, 955)
+    expect(CIVILIAN_UNIT_TYPES.has('DELPHI')).toBe(true);
   });
 
   // C++ aircraft.cpp:143: if (Scen.IsTanyaEvac && *inf == INFANTRY_TANYA) return(true);
@@ -116,8 +117,8 @@ describe('_Counts_As_Civ_Evac edge cases (aircraft.cpp:116-159)', () => {
     // since the flag-based conditional is not modeled.
     expect(CIVILIAN_UNIT_TYPES.has('E7')).toBe(false);
     expect(CIVILIAN_UNIT_TYPES.has('TANYA')).toBe(false);
-    // BLOCKED: C++ Tanya evacuation is scenario-conditional (IsTanyaEvac flag).
-    // TS has no equivalent flag mechanism. Requires per-scenario IsTanyaEvac support.
+    // KNOWN LIMITATION: C++ Tanya evacuation is scenario-conditional (IsTanyaEvac flag).
+    // TS does not model per-scenario IsTanyaEvac. Low priority — only affects evacuation missions.
   });
 
   // C++ aircraft.cpp:148: if (!inf->Class->IsCivilian) return(false);
@@ -137,9 +138,11 @@ describe('_Counts_As_Civ_Evac edge cases (aircraft.cpp:116-159)', () => {
     // Verify that generic soldier types are not accidentally civilian:
     expect(CIVILIAN_UNIT_TYPES.has('E1')).toBe(false);
     expect(CIVILIAN_UNIT_TYPES.has('E3')).toBe(false);
-    // BLOCKED: C++ IsTechnician flag is not modeled in TS entity system.
-    // If technician infantry are ever spawned, they would incorrectly count
-    // as civilian evacuation candidates. Requires IsTechnician field on Entity.
+    // RESOLVED: IsTechnician field now exists on Entity (entity.ts:327).
+    // TS sets isTechnician=true on E1 survivors from building sell/destruction
+    // (index.ts:2124, combat.ts:1414). Evacuation exclusion for technicians
+    // would need a check in the civilian auto-load path if technician infantry
+    // are ever spawned as standalone units.
   });
 });
 
@@ -334,7 +337,7 @@ describe('multi-unit loading order (cargo.cpp:87-123)', () => {
     // So C++ unloads in REVERSE order of loading.
     //
     // TS uses shift() → pops from front → unloads in SAME order of loading (FIFO).
-    // BLOCKED: Unload order differs between C++ (LIFO) and TS (FIFO).
+    // KNOWN DIVERGENCE: Unload order differs between C++ (LIFO) and TS (FIFO).
     // Cosmetic difference — all passengers are correctly tracked and killed on death.
 
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 10, 10);
@@ -351,7 +354,7 @@ describe('multi-unit loading order (cargo.cpp:87-123)', () => {
     expect(first).toBe(e1); // FIFO: first loaded, first out
 
     // C++ would return e3 here (LIFO: last loaded, first out)
-    // BLOCKED: C++ returns last-loaded first, TS returns first-loaded first.
+    // KNOWN DIVERGENCE: C++ returns last-loaded first, TS returns first-loaded first.
     // Observable impact: unload placement order differs, but all passengers
     // are correctly tracked and destroyed on transport death.
   });

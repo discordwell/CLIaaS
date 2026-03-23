@@ -715,7 +715,7 @@ describe('TS fallback win for campaign missions — no C++ equivalent', () => {
    *     }
    *   }
    *
-   * BLOCKED: This fallback does not exist in C++ — intentional TS addition.
+   * DESIGN NOTE: This fallback does not exist in C++ — intentional TS addition.
    * Provides robustness for campaign missions to end even if triggers are
    * not perfectly implemented. Gated behind the trigger-win check
    * (if hasTriggerWin, return), so it only activates when no unfired
@@ -727,7 +727,7 @@ describe('TS fallback win for campaign missions — no C++ equivalent', () => {
     // C++ relies entirely on TACTION_WIN triggers for victory.
     // TS adds a "last resort" win when all enemies are destroyed
     // AND no pending TACTION_WIN triggers exist.
-    // BLOCKED: Intentional TS robustness feature — can't guarantee all triggers work.
+    // DESIGN NOTE: Intentional TS robustness feature — can't guarantee all triggers work.
     expect(true).toBe(true); // Document-only test
   });
 });
@@ -744,7 +744,7 @@ describe('TS early-game immunity — index.ts:5879', () => {
    * TS skips victory condition checks during the first 3 seconds of gameplay.
    * C++ has no such guard — win/lose can fire on any tick.
    *
-   * BLOCKED: Intentional TS guard to prevent premature win/lose from triggers
+   * DESIGN NOTE: Intentional TS guard to prevent premature win/lose from triggers
    * that fire before the game is fully set up. C++ BorrowedTime serves a
    * somewhat similar purpose but operates differently.
    */
@@ -752,7 +752,7 @@ describe('TS early-game immunity — index.ts:5879', () => {
   it('documenting: TS has 3-second immunity that C++ lacks', () => {
     // C++ can trigger Flag_To_Win on tick 1.
     // TS ignores checkVictoryConditions for first 3 seconds.
-    // BLOCKED: Intentional TS design for robustness.
+    // DESIGN NOTE: Intentional TS design for robustness.
     expect(true).toBe(true); // Document-only test
   });
 });
@@ -804,7 +804,7 @@ describe('loss fallback — all player units dead', () => {
    *   1. TACTION_LOSE trigger action
    *   2. Flag_To_Lose called by game events (flag captured, HQ destroyed)
    *
-   * BLOCKED: TS adds an automatic loss when all player units are destroyed.
+   * DESIGN NOTE: TS adds an automatic loss when all player units are destroyed.
    * C++ only loses through explicit trigger actions or specific game events.
    * Intentional TS addition for better gameplay experience.
    */

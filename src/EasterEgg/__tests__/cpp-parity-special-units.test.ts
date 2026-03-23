@@ -423,14 +423,11 @@ describe('Engineer capture HP behavior — C++ vs TS divergence', () => {
    * The Captured() method changes ownership but does NOT heal the building.
    * The building remains at its pre-capture HP.
    *
-   * TS missionAI.ts:1034-1035:
-   *   s.house = ctx.playerHouse;
-   *   s.hp = s.maxHp;  // <-- THIS IS NOT IN C++
-   *
-   * BLOCKED: TS restores building to full HP on capture. C++ does not.
-   * Requires separating capture from repair in the engineer path.
+   * RESOLVED: TS missionAI.ts:1091-1095 now changes ownership WITHOUT restoring HP,
+   * matching C++ building.cpp:2936 Captured() behavior exactly.
+   * The repair path (missionAI.ts:1073) is separate — only allied engineers repair.
    */
-  it('TS restores captured building to full HP (C++ does NOT — BLOCKED)', () => {
+  it('RESOLVED: TS capture does not restore HP (matches C++ Captured())', () => {
     const s = makeStructure({ hp: 50, maxHp: 200, house: House.USSR });
     const eng = makeEntity(UnitType.I_E6, House.Greece, s.cx * CELL_SIZE + CELL_SIZE, s.cy * CELL_SIZE + CELL_SIZE);
     const ctx = makeMissionAIContext({ playerHouse: House.Greece });

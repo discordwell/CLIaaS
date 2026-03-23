@@ -1031,7 +1031,7 @@ describe('area guard leash range (C++ foot.cpp:996-1001)', () => {
     // For a tank with weapon range 5.5:
     // C++ leash = min(5.5, 5) = 5
     // TS leash = min(5.5/2, 5) = min(2.75, 5) = 2.75
-    // BLOCKED: C++ leash = min(weaponRange, 5); TS uses min(weaponRange/2, 5).
+    // DESIGN NOTE: C++ leash = min(weaponRange, 5); TS uses min(weaponRange/2, 5).
     // Intentional — tighter TS leash keeps area-guard units closer to their post.
     const tank = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     const weaponRange = tank.weapon?.range ?? tank.stats.sight;
