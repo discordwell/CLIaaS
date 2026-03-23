@@ -437,9 +437,9 @@ describe('C++ parity: minelayer rearm at service depot (techno.cpp:978-980)', ()
   // rearm to full immediately and return RADIO_NEGATIVE (skip repair entirely).
   // This means: a damaged minelayer with low ammo gets rearmed but NOT repaired.
   //
-  // TS behavior: tickServiceDepot repairs AND rearms simultaneously.
-  // The rearm is done in a separate block after repair, with a timer.
-  // This is a PARITY GAP.
+  // RESOLVED: TS repairSell.ts:261-266 now matches C++ behavior —
+  // minelayer with low ammo rearms instantly and skips repair entirely
+  // (returns the equivalent of RADIO_NEGATIVE).
 
   it('minelayer with low ammo gets rearmed instantly at depot', () => {
     const depot = makeServiceDepot(5, 5);

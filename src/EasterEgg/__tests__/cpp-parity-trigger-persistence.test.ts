@@ -463,7 +463,7 @@ describe('Persistent trigger re-fire loop — C++ trigger.cpp Spring() per-entit
 
     expect(fires).toBe(9); // 1 initial + 8 extra
     expect(t.pendingDestroyedCount).toBe(11); // 20 - 9 = 11 remaining
-    // PARITY GAP: C++ would fire all 20 times. TS caps at 9 per tick.
+    // KNOWN DIVERGENCE: C++ would fire all 20 times. TS caps at 9 per tick.
     // However, remaining deaths would fire on subsequent ticks, so it's
     // eventually consistent. The gap only matters for same-tick behavior.
   });
@@ -721,7 +721,7 @@ describe('Persistent trigger event reset — C++ trigger.cpp:351-352', () => {
     expect(t.enteredZone).toBe(true);
     expect(t.crossedHorizontal).toBe(true);
     expect(t.crossedVertical).toBe(true);
-    // PARITY GAP: C++ resets all event state, TS preserves it.
+    // KNOWN DIVERGENCE: C++ resets all event state, TS preserves it.
     // For persistent triggers that rely on non-TIME events (like PLAYER_ENTERED),
     // the TS trigger would immediately re-fire on the next tick because the
     // event condition is still true. C++ would wait for the event to occur again.
@@ -959,7 +959,7 @@ describe('Force-fire bypasses semi-persistent gating — C++ trigger.cpp:270', (
    * index.ts:5704: `if (!forcedFire)` guards the detach logic
    * So TS skips the semi-persistent check for forced triggers.
    *
-   * This is a PARITY GAP: C++ would suppress forced semi-persistent triggers
+   * KNOWN DIVERGENCE: C++ would suppress forced semi-persistent triggers
    * if AttachCount > 0, but TS fires them immediately.
    */
   it('TS: force-fired semi-persistent skips detach gating', () => {
@@ -988,7 +988,7 @@ describe('Force-fire bypasses semi-persistent gating — C++ trigger.cpp:270', (
     // TS fires immediately; remainingAttachCount unchanged
     expect(t.remainingAttachCount).toBe(5);
 
-    // PARITY GAP: C++ would still enter the semi-persistent block and
+    // KNOWN DIVERGENCE: C++ would still enter the semi-persistent block and
     // decrement AttachCount. If AttachCount > 0, it would suppress.
     // C++ forces do NOT bypass the semi-persistent gate.
   });

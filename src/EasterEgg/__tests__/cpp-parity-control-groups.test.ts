@@ -371,7 +371,7 @@ describe('C++ Parity: Control Groups', () => {
   // -------------------------------------------------------------------------
   describe('Additive select — Shift+N (conquer.cpp:4081-4118)', () => {
     it('C++ supports additive select; TS does not implement it', () => {
-      // PARITY GAP: TS has no Shift+N additive select for control groups
+      // KNOWN OMISSION: TS has no Shift+N additive select for control groups
       //
       // C++ conquer.cpp:4081-4118 (action 1):
       //   Simply iterates all unit types and selects those with matching Group,
@@ -405,7 +405,7 @@ describe('C++ Parity: Control Groups', () => {
 
       // TS recall always deselects first — no additive behavior
       mgr.recallGroup(2);
-      expect(mgr.selectedIds.has(t1.id)).toBe(false); // PARITY GAP: C++ Shift+2 would keep t1 selected
+      expect(mgr.selectedIds.has(t1.id)).toBe(false); // KNOWN OMISSION: C++ Shift+2 would keep t1 selected
       expect(mgr.selectedIds.has(t2.id)).toBe(true);
     });
   });

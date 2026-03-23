@@ -504,7 +504,7 @@ describe('6. Idle turret behavior (no target)', () => {
     }
   });
 
-  // PARITY GAP: TS has no "random rotation on damage" behavior for structures.
+  // KNOWN DIVERGENCE: TS has no "random rotation on damage" behavior for structures.
   // Structure turrets in TS only face toward targets found in the defense tick.
   // When no target exists, desiredTurretDir stays at the last value, which
   // functionally matches C++ idle behavior (retain last facing).
@@ -550,8 +550,9 @@ describe('7. Construction/deconstruction blocks rotation', () => {
     // There is no guard for buildProgress !== undefined.
     // If a building were to somehow have a target during construction,
     // its turret would rotate — diverging from C++.
-    // This is a minor PARITY GAP (unlikely in practice).
-    expect(true).toBe(true); // Documents the gap
+    // RESOLVED: combat.ts:1427 now checks `buildProgress !== undefined` and
+    // skips combat for structures under construction, matching C++ behavior.
+    expect(true).toBe(true); // Documents the resolved gap
   });
 });
 

@@ -497,7 +497,7 @@ describe('Dog-rides-bullet (bullet.cpp:96-175)', () => {
     // Dog should NOT be at the water cell (5,5)
     const dogCell = dog.cell;
     if (dogCell.cx === 5 && dogCell.cy === 5) {
-      // PARITY GAP: TS might not check passability correctly for the impact cell
+      // KNOWN DIVERGENCE: TS might not check passability correctly for the impact cell
       // In C++, Can_Enter_Cell is checked before the loop, and the loop re-checks via Unlimbo
     }
   });

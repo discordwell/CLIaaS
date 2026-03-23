@@ -532,7 +532,7 @@ describe('Dead structures do not participate in combat', () => {
   });
 });
 
-// ── Summary of RESOLVED PARITY GAPS ──────────────────────────────────────────
+// ── Summary of RESOLVED GAPS ─────────────────────────────────────────────────
 // 1. GUN NOT in STRUCTURE_POWERED — RESOLVED. GUN correctly excluded (fires during deficit).
 // 2. AGUN IS in STRUCTURE_POWERED — RESOLVED. AGUN correctly included (silenced during deficit).
 // 3. Zero-power edge case — RESOLVED. TS isLowPower = powerConsumed > powerProduced.

@@ -477,7 +477,7 @@ describe('production speed penalty (C++ techno.cpp:677-682 vs factory.cpp:434)',
   it('0% power: TS multiplier = 1/16 (C++ techno.cpp clamps to 0.5)', () => {
     // C++ techno.cpp:680: if (power < fixed::_1_2) power = fixed::_1_2 → max 2x penalty
     // TS factory.cpp model: clamped to 1/16 = 0.0625 → 16x penalty
-    // PARITY GAP: C++ Time_To_Build uses max 2x penalty, TS uses max 16x
+    // KNOWN DIVERGENCE: C++ Time_To_Build uses max 2x penalty, TS uses max 16x
     // The TS model follows factory.cpp:434 Bound() which allows deeper penalties
     const mult = powerMultiplier(0, 100);
     expect(mult).toBe(1 / 16);

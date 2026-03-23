@@ -426,7 +426,7 @@ describe('Cloak Instability at Low HP (techno.cpp:2488-2491)', () => {
     //       entity.cloakState = CloakState.CLOAKED;  // always succeeds
     //     }
     //
-    // PARITY GAP: TS cloaking always succeeds regardless of health.
+    // KNOWN DIVERGENCE: TS cloaking always succeeds regardless of health.
     // C++ cloaking at low HP randomly fails 25% of the time per tick.
 
     // Verify TS cloaking always succeeds even at 1 HP
@@ -748,7 +748,7 @@ describe('RESULT_HALF Transition Detection (object.cpp:1622-1623)', () => {
     //
     // This triggers building smoke/fire animations in building.cpp:1372-1434.
     // TS takeDamage returns only boolean (killed), not a result enum.
-    // PARITY GAP: TS has no RESULT_HALF concept — no visual transition on
+    // KNOWN DIVERGENCE: TS has no RESULT_HALF concept — no visual transition on
     // crossing below 50% HP. Building fire animations are not state-driven.
 
     const maxHp = 400;

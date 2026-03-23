@@ -653,7 +653,7 @@ describe('7. Structure turrets: ROT from rules.ini', () => {
     // TS 90 degrees in 8-way = 2 steps
     const tsTicks = 2;
 
-    // PARITY GAP: TS is faster than C++ for structure turrets
+    // KNOWN DIVERGENCE: TS is faster than C++ for structure turrets
     expect(tsTicks).toBeLessThan(cppTicks);
   });
 });

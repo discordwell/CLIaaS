@@ -498,11 +498,10 @@ describe('E7DoControls parity — Tanya (idata.cpp:200-222)', () => {
     expect(e7.idle2).toEqual({ frame: 249, count: 13, jump: 0 });
   });
 
-  // PARITY GAP: TS comment says "Shock Trooper" but C++ E7 = INFANTRY_TANYA (idata.cpp:530-531).
-  // The animation data is correct; only the comment is wrong.
-  it('TS comment incorrectly labels E7 as "Shock Trooper" — C++ says INFANTRY_TANYA (idata.cpp:531)', () => {
-    // This is a documentation-only gap. The frame data matches Tanya's E7DoControls.
-    // In C++, ShockTrooper uses E4DoControls (idata.cpp:852), not E7DoControls.
+  // RESOLVED: E7 comment previously said "Shock Trooper" — now correctly says
+  // "Tanya (INFANTRY_TANYA, idata.cpp:530-531)" in types.ts:331.
+  it('E7 is INFANTRY_TANYA (idata.cpp:531), not Shock Trooper', () => {
+    // E7DoControls is Tanya's animation set. SHOK uses E4DoControls (idata.cpp:852).
     // Verify E7 data differs from E4 (proving it's not Shock Trooper):
     const e4 = INFANTRY_ANIMS.E4;
     expect(e7.fire.count).not.toBe(e4.fire.count); // E7: 7, E4: 16
@@ -601,24 +600,17 @@ describe('MedicDoControls parity (idata.cpp:273-295)', () => {
 });
 
 describe('SHOK alias parity (idata.cpp:852 — uses E4DoControls)', () => {
-  // C++ ShockTrooper (idata.cpp:839-856) uses E4DoControls.
-  // TS maps SHOK = E7.
-  // This is a PARITY GAP if E7DoControls differs from E4DoControls.
+  // RESOLVED: C++ ShockTrooper (idata.cpp:839-856) uses E4DoControls.
+  // TS types.ts:374 now correctly aliases SHOK = E4.
 
-  it('SHOK should use E4DoControls, not E7DoControls', () => {
+  it('SHOK correctly uses E4DoControls (types.ts:374)', () => {
     // C++ idata.cpp:852:  E4DoControls,  // ShockTrooper uses E4's animation
-    // TS types.ts:367:    INFANTRY_ANIMS.SHOK = INFANTRY_ANIMS.E7;
-    //
-    // Key differences between E4 and E7:
-    //   E4.fire: {64, 16, 16}  vs  E7.fire: {56, 7, 7}
-    //   E4.walk: {16, 6, 6}    vs  E7.walk: {8, 6, 6}
-    //   E4.crawl: {208, 4, 4}  vs  E7.crawl: {128, 4, 4}
+    // TS types.ts:374:    INFANTRY_ANIMS.SHOK = INFANTRY_ANIMS.E4;
 
     const shok = INFANTRY_ANIMS.SHOK;
     const e4 = INFANTRY_ANIMS.E4;
 
-    // PARITY GAP: TS incorrectly aliases SHOK to E7 instead of E4.
-    // These assertions document C++ expected values — they will FAIL against TS.
+    // RESOLVED: SHOK is now correctly aliased to E4 — all assertions pass.
     expect(shok.fire.frame, 'SHOK fire.frame: C++ expects 64 (E4DoControls)').toBe(e4.fire.frame);     // C++ expects 64
     expect(shok.fire.count, 'SHOK fire.count: C++ expects 16 (E4DoControls)').toBe(e4.fire.count);     // C++ expects 16
     expect(shok.fire.jump, 'SHOK fire.jump: C++ expects 16 (E4DoControls)').toBe(e4.fire.jump);       // C++ expects 16
