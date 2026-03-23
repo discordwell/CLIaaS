@@ -1454,14 +1454,14 @@ describe('SUB_CELL_OFFSETS parity', () => {
 });
 
 // ============================================================
-// CIVILIAN_UNIT_TYPES parity (13 types)
+// CIVILIAN_UNIT_TYPES parity (14 types)
 // ============================================================
 describe('CIVILIAN_UNIT_TYPES parity', () => {
-  it('has 13 entries', () => {
-    expect(CIVILIAN_UNIT_TYPES.size).toBe(13);
+  it('has 14 entries', () => {
+    expect(CIVILIAN_UNIT_TYPES.size).toBe(14);
   });
 
-  const expected = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'EINSTEIN', 'GNRL', 'CHAN'];
+  const expected = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'EINSTEIN', 'GNRL', 'CHAN', 'DELPHI'];
   for (const type of expected) {
     it(`includes ${type}`, () => {
       expect(CIVILIAN_UNIT_TYPES.has(type)).toBe(true);

@@ -231,8 +231,8 @@ describe('CIVILIAN_UNIT_TYPES set (types.ts)', () => {
     expect(CIVILIAN_UNIT_TYPES.has('E7')).toBe(false);
   });
 
-  it('has exactly 13 entries (C1-C10 + EINSTEIN + GNRL + CHAN)', () => {
-    expect(CIVILIAN_UNIT_TYPES.size).toBe(13);
+  it('has exactly 14 entries (C1-C10 + EINSTEIN + GNRL + CHAN + DELPHI)', () => {
+    expect(CIVILIAN_UNIT_TYPES.size).toBe(14);
   });
 });
 
