@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-03-22T08:00Z — Massive C++ Parity Audit (34k→53k tests, 80+ bugs)
+- **Parallel subagent blitz**: 5 agents at a time writing INI-parsed parity tests across every game system
+- **Tick rate**: Changed engine from 20Hz to 15Hz matching C++ GameSpeed=4. All constants were already 15Hz — only needed to change the master constant, build formula (0.96→0.72), and agent harness scaling.
+- **Audio**: 11 wrong .AUD mappings fixed (TANK01 "MAD Tank Deployed" was playing as explosion sound, rifle/bazooka/tesla/flamethrower/EVA all wrong)
+- **Building sizes**: 10 STRUCTURE_SIZE values corrected from bdata.cpp. BIBBED_BUILDINGS corrected from rules.ini.
+- **Superweapon power**: 4 weapons (sonar/parabomb/paratroopers/spy plane) don't require power per C++
+- **Circle rasterization**: Euclidean→octagonal distance matching C++ coord.cpp:124-136
+- **Spy system**: Stripped 13 fabricated sabotage effects. C++ spies are intelligence-only (SpiedBy flag + DOME radar + SPEN sonar).
+- **Mine system**: Added AP/AV type distinction (soviet AP 1000dmg vs allied AV 1200dmg), HE warhead, infantry-only triggers for AP, 10dmg vehicle cap
+- **Engineer capture**: Added CAPTURABLE_BUILDINGS check — defense structures no longer capturable
+- **Tesla damage**: 150→100 per rules.ini [TeslaZap] Damage=100
+- **Nuke blast**: 10→4 cells, screen shake 30→3 per C++ anim.cpp:1093
+- **MAD Tank**: charge 90→120 ticks, radius 8→20 cells per aftrmath.ini
+- **14 tracked vehicles**: WHEEL→TRACK speedClass. Tanks were 25-40% slower on non-road terrain.
+- **Crusher flags**: ARTY off (udata.cpp IsCrusher=false despite Tracked=yes), MCV/MGG on
+- **Self-heal**: 4TNK and HARV now heal +1 HP/14 ticks at ≤50% health
+- **Alliance expansion**: "soviet"→USSR+Ukraine+BadGuy, "allies"→7 allied houses. Fixed 8 campaign scenarios.
+- **Death explosions**: DTRK/E2/E4 now trigger area damage on death
+- **MSUB**: Must fully uncloak before firing
+- **Key principle established**: rules.ini is god. C++ comments and variable names lie. AGUN is air-only despite being named "Anti-Aircraft Gun" — its weapon fires the Ack projectile (AA=true, AG=false).
+- **53,417 tests passing, zero failures**
+
 ## 2026-03-22T22:00Z — Aircraft Rearm C++ Parity Fix
 - **Major parity gap closed**: Rearm was aircraft-driven using weapon ROF (3-60 ticks/ammo varying by weapon). Now uses C++ building.cpp:4023-4025 formula: `Inverse(pfrac) * ReloadRate * TICKS_PER_MINUTE` = 36 ticks/ammo at full power, uniform for all aircraft.
 - **Power fraction scaling**: Added `getPowerFraction(house)` to AircraftContext. At 50% power, rearm takes 72 ticks/ammo (2x slower). Clamped to [0.5, 1.0] per C++.
