@@ -26,17 +26,14 @@
  *   1. fixed_raw = floor(Strength * 256 / MaxStrength)   — truncation
  *   2. result = floor((fixed_raw * Power + 128) / 256)   — rounded int
  *
- * The TS implementation uses:
- *   Math.round(Power * (hp / maxHp))
+ * The TS implementation (repairSell.ts fixedPowerOutput) reproduces the
+ * exact C++ 8.8 fixed-point algorithm:
+ *   1. fixedRaw = Math.floor((hp * 256) / maxHp)   — truncating integer division
+ *   2. result = Math.floor((fixedRaw * ratedPower + 128) / 256)  — rounded int
  *
- * These differ because:
- *   - C++ truncates in step 1 (fixed-point construction loses fractional bits)
- *   - TS uses full IEEE 754 double precision throughout
- *   - The truncation in step 1 causes the C++ result to be systematically <=
- *     the TS result (the fixed fraction is always <= the true fraction)
- *
- * This test documents the EXACT C++ behavior. Where TS diverges, tests are
- * left FAILING with // PARITY GAP comments.
+ * This test verifies EXACT parity between the TS implementation and C++
+ * at all HP values, including edge cases where naive floating-point
+ * (e.g. Math.round(Power * hp / maxHp)) would diverge.
  *
  * C++ reference: CnC_and_Red_Alert/RA/building.cpp:4607-4616
  * C++ reference: CnC_and_Red_Alert/RA/fixed.h:59-66, 109
@@ -105,37 +102,31 @@ describe('C++ fixed-point algorithm verification (building.cpp:4613, fixed.h:109
 
   it('fixed(50, 400) * 100 = 13 — NOT 12 (truncation effect)', () => {
     // fixed_raw = floor(50 * 256 / 400) = floor(32) = 32
-    // result = floor((32 * 100 + 128) / 256) = floor(12.9998) = 12
-    // Wait — let me recalculate:
     // 32 * 100 = 3200, + 128 = 3328, / 256 = 13.0 exactly!
     expect(cppPowerOutput(100, 50, 400)).toBe(13);
   });
 
-  it('fixed(198, 400) * 100 = 49 — TS would give 50', () => {
+  it('fixed(198, 400) * 100 = 49 — naive float would give 50', () => {
     // fixed_raw = floor(198 * 256 / 400) = floor(126.72) = 126
     // result = floor((126 * 100 + 128) / 256) = floor(49.71875) = 49
-    // TS: Math.round(100 * 198/400) = Math.round(49.5) = 50
     expect(cppPowerOutput(100, 198, 400)).toBe(49);
   });
 
-  it('fixed(398, 400) * 100 = 99 — TS would give 100', () => {
+  it('fixed(398, 400) * 100 = 99 — naive float would give 100', () => {
     // fixed_raw = floor(398 * 256 / 400) = floor(254.72) = 254
     // result = floor((254 * 100 + 128) / 256) = floor(99.71875) = 99
-    // TS: Math.round(100 * 398/400) = Math.round(99.5) = 100
     expect(cppPowerOutput(100, 398, 400)).toBe(99);
   });
 
   it('fixed(349, 700) * 200 = 99 — APWR just under half', () => {
     // fixed_raw = floor(349 * 256 / 700) = floor(127.634...) = 127
     // result = floor((127 * 200 + 128) / 256) = floor(99.71875) = 99
-    // TS: Math.round(200 * 349/700) = Math.round(99.714...) = 100
     expect(cppPowerOutput(200, 349, 700)).toBe(99);
   });
 
   it('fixed(699, 700) * 200 = 199 — APWR near-full', () => {
     // fixed_raw = floor(699 * 256 / 700) = floor(255.634...) = 255
     // result = floor((255 * 200 + 128) / 256) = floor(199.71875) = 199
-    // TS: Math.round(200 * 699/700) = Math.round(199.714...) = 200
     expect(cppPowerOutput(200, 699, 700)).toBe(199);
   });
 });
@@ -144,7 +135,7 @@ describe('C++ fixed-point algorithm verification (building.cpp:4613, fixed.h:109
 // Section 2: POWR (100W rated) — TS powerOutput vs C++
 //
 // C++ POWR: Class->Power = 100, Class->MaxStrength = 400
-// Tests at HP values where C++ fixed-point and TS Math.round agree.
+// Tests at HP values where C++ fixed-point and TS agree.
 // ============================================================
 
 describe('POWR power output — agreeing values (building.cpp:4613)', () => {
@@ -186,72 +177,58 @@ describe('POWR power output — agreeing values (building.cpp:4613)', () => {
 });
 
 // ============================================================
-// Section 3: POWR — diverging values (C++ fixed-point truncation)
+// Section 3: POWR — fixed-point truncation edge cases (PARITY ACHIEVED)
 //
-// At these HP values, the C++ fixed(Strength, MaxStrength) truncation
-// causes the result to differ from TS Math.round(100 * hp/maxHp).
-//
-// These tests assert the C++ expected values. If TS diverges, the
-// test is marked // PARITY GAP and left FAILING.
+// At these HP values, naive floating-point (Math.round) would diverge
+// from C++ fixed-point. The TS 8.8 fixed-point implementation matches
+// C++ exactly at all these values.
 // ============================================================
 
-describe('POWR power output — C++ fixed-point divergence (building.cpp:4613)', () => {
+describe('POWR power output — fixed-point edge cases match C++ (building.cpp:4613)', () => {
 
-  // HP=198: C++=49, TS=50
-  // fixed_raw = floor(198*256/400) = 126
-  // C++: floor((126*100+128)/256) = floor(49.71875) = 49
-  // TS: Math.round(100*198/400) = Math.round(49.5) = 50
-  it('HP=198/400: C++ produces 49W, not 50W // PARITY GAP', () => {
+  // HP=198: fixed_raw = floor(198*256/400) = 126
+  // result = floor((126*100+128)/256) = 49
+  // (naive Math.round(100*198/400) would give 50)
+  it('HP=198/400: 49W — matches C++ fixed-point truncation', () => {
     const cppExpected = 49;
     expect(cppPowerOutput(100, 198, 400)).toBe(cppExpected);
-    expect(powerOutput('POWR', 198, 400)).toBe(cppExpected); // PARITY GAP — TS returns 50
+    expect(powerOutput('POWR', 198, 400)).toBe(cppExpected);
   });
 
-  // HP=398: C++=99, TS=100
-  // fixed_raw = floor(398*256/400) = 254
-  // C++: floor((254*100+128)/256) = floor(99.71875) = 99
-  // TS: Math.round(100*398/400) = Math.round(99.5) = 100
-  it('HP=398/400: C++ produces 99W, not 100W // PARITY GAP', () => {
+  // HP=398: fixed_raw = floor(398*256/400) = 254
+  // result = floor((254*100+128)/256) = 99
+  // (naive Math.round would give 100 — need full HP for full power)
+  it('HP=398/400: 99W — need full HP for full power', () => {
     const cppExpected = 99;
     expect(cppPowerOutput(100, 398, 400)).toBe(cppExpected);
-    expect(powerOutput('POWR', 398, 400)).toBe(cppExpected); // PARITY GAP — TS returns 100
+    expect(powerOutput('POWR', 398, 400)).toBe(cppExpected);
   });
 
-  // HP=50: C++=13, TS=12 (C++ higher due to rounding in fixed*int)
-  // fixed_raw = floor(50*256/400) = 32
-  // C++: floor((32*100+128)/256) = floor(13.0) = 13
-  // TS: Math.round(100*50/400) = Math.round(12.5) = 13 — actually this IS 13 with round-half-up
-  // Wait, let me recheck: Math.round(12.5) = 13 in JS. So they AGREE here.
-  // Let me pick a real divergence.
-
-  // HP=3: C++=0, TS=1
-  // fixed_raw = floor(3*256/400) = floor(1.92) = 1
-  // C++: floor((1*100+128)/256) = floor(0.890625) = 0
-  // TS: Math.round(100*3/400) = Math.round(0.75) = 1
-  it('HP=3/400: C++ produces 0W, not 1W // PARITY GAP', () => {
+  // HP=3: fixed_raw = floor(3*256/400) = 1
+  // result = floor((1*100+128)/256) = 0
+  // (naive Math.round(0.75) would give 1)
+  it('HP=3/400: 0W — near-zero HP truncates to zero power', () => {
     const cppExpected = 0;
     expect(cppPowerOutput(100, 3, 400)).toBe(cppExpected);
-    expect(powerOutput('POWR', 3, 400)).toBe(cppExpected); // PARITY GAP — TS returns 1
+    expect(powerOutput('POWR', 3, 400)).toBe(cppExpected);
   });
 
-  // HP=6: C++=1, TS=2
-  // fixed_raw = floor(6*256/400) = floor(3.84) = 3
-  // C++: floor((3*100+128)/256) = floor(1.6875) = 1
-  // TS: Math.round(100*6/400) = Math.round(1.5) = 2
-  it('HP=6/400: C++ produces 1W, not 2W // PARITY GAP', () => {
+  // HP=6: fixed_raw = floor(6*256/400) = 3
+  // result = floor((3*100+128)/256) = 1
+  // (naive Math.round(1.5) would give 2)
+  it('HP=6/400: 1W — matches C++ truncation', () => {
     const cppExpected = 1;
     expect(cppPowerOutput(100, 6, 400)).toBe(cppExpected);
-    expect(powerOutput('POWR', 6, 400)).toBe(cppExpected); // PARITY GAP — TS returns 2
+    expect(powerOutput('POWR', 6, 400)).toBe(cppExpected);
   });
 
-  // HP=22: C++=5, TS=6
-  // fixed_raw = floor(22*256/400) = floor(14.08) = 14
-  // C++: floor((14*100+128)/256) = floor(5.96875) = 5
-  // TS: Math.round(100*22/400) = Math.round(5.5) = 6
-  it('HP=22/400: C++ produces 5W, not 6W // PARITY GAP', () => {
+  // HP=22: fixed_raw = floor(22*256/400) = 14
+  // result = floor((14*100+128)/256) = 5
+  // (naive Math.round(5.5) would give 6)
+  it('HP=22/400: 5W — matches C++ truncation', () => {
     const cppExpected = 5;
     expect(cppPowerOutput(100, 22, 400)).toBe(cppExpected);
-    expect(powerOutput('POWR', 22, 400)).toBe(cppExpected); // PARITY GAP — TS returns 6
+    expect(powerOutput('POWR', 22, 400)).toBe(cppExpected);
   });
 });
 
@@ -289,69 +266,64 @@ describe('APWR power output — agreeing values (building.cpp:4613)', () => {
   });
 });
 
-describe('APWR power output — C++ fixed-point divergence (building.cpp:4613)', () => {
+describe('APWR power output — fixed-point edge cases match C++ (building.cpp:4613)', () => {
 
-  // HP=349: C++=99, TS=100
-  // fixed_raw = floor(349*256/700) = floor(127.634) = 127
-  // C++: floor((127*200+128)/256) = floor(99.71875) = 99
-  // TS: Math.round(200*349/700) = Math.round(99.714) = 100
-  it('HP=349/700: C++ produces 99W, not 100W // PARITY GAP', () => {
+  // HP=349: fixed_raw = floor(349*256/700) = 127
+  // result = floor((127*200+128)/256) = 99
+  // (naive Math.round(200*349/700) would give 100)
+  it('HP=349/700: 99W — matches C++ truncation', () => {
     const cppExpected = 99;
     expect(cppPowerOutput(200, 349, 700)).toBe(cppExpected);
-    expect(powerOutput('APWR', 349, 700)).toBe(cppExpected); // PARITY GAP — TS returns 100
+    expect(powerOutput('APWR', 349, 700)).toBe(cppExpected);
   });
 
-  // HP=699: C++=199, TS=200
-  // fixed_raw = floor(699*256/700) = floor(255.634) = 255
-  // C++: floor((255*200+128)/256) = floor(199.71875) = 199
-  // TS: Math.round(200*699/700) = Math.round(199.714) = 200
-  it('HP=699/700: C++ produces 199W, not 200W // PARITY GAP', () => {
+  // HP=699: fixed_raw = floor(699*256/700) = 255
+  // result = floor((255*200+128)/256) = 199
+  // (naive Math.round(200*699/700) would give 200)
+  it('HP=699/700: 199W — need full HP for full power', () => {
     const cppExpected = 199;
     expect(cppPowerOutput(200, 699, 700)).toBe(cppExpected);
-    expect(powerOutput('APWR', 699, 700)).toBe(cppExpected); // PARITY GAP — TS returns 200
+    expect(powerOutput('APWR', 699, 700)).toBe(cppExpected);
   });
 
-  // HP=696: C++=198, TS=199
-  // fixed_raw = floor(696*256/700) = floor(254.537) = 254
-  // C++: floor((254*200+128)/256) = floor(198.9375) = 198
-  // TS: Math.round(200*696/700) = Math.round(198.857) = 199
-  it('HP=696/700: C++ produces 198W, not 199W // PARITY GAP', () => {
+  // HP=696: fixed_raw = floor(696*256/700) = 254
+  // result = floor((254*200+128)/256) = 198
+  // (naive Math.round(200*696/700) would give 199)
+  it('HP=696/700: 198W — matches C++ truncation', () => {
     const cppExpected = 198;
     expect(cppPowerOutput(200, 696, 700)).toBe(cppExpected);
-    expect(powerOutput('APWR', 696, 700)).toBe(cppExpected); // PARITY GAP — TS returns 199
+    expect(powerOutput('APWR', 696, 700)).toBe(cppExpected);
   });
 
-  // HP=2: C++=0, TS=1
-  // fixed_raw = floor(2*256/700) = floor(0.731) = 0
-  // C++: floor((0*200+128)/256) = floor(0.5) = 0
-  // TS: Math.round(200*2/700) = Math.round(0.571) = 1
-  it('HP=2/700: C++ produces 0W, not 1W // PARITY GAP', () => {
+  // HP=2: fixed_raw = floor(2*256/700) = 0
+  // result = floor((0*200+128)/256) = 0
+  // (naive Math.round(200*2/700) would give 1)
+  it('HP=2/700: 0W — near-zero HP truncates to zero', () => {
     const cppExpected = 0;
     expect(cppPowerOutput(200, 2, 700)).toBe(cppExpected);
-    expect(powerOutput('APWR', 2, 700)).toBe(cppExpected); // PARITY GAP — TS returns 1
+    expect(powerOutput('APWR', 2, 700)).toBe(cppExpected);
   });
 
-  // HP=100: C++=28, TS=29
-  // fixed_raw = floor(100*256/700) = floor(36.571) = 36
-  // C++: floor((36*200+128)/256) = floor(28.625) = 28
-  // TS: Math.round(200*100/700) = Math.round(28.571) = 29
-  it('HP=100/700: C++ produces 28W, not 29W // PARITY GAP', () => {
+  // HP=100: fixed_raw = floor(100*256/700) = 36
+  // result = floor((36*200+128)/256) = 28
+  // (naive Math.round(200*100/700) would give 29)
+  it('HP=100/700: 28W — matches C++ truncation', () => {
     const cppExpected = 28;
     expect(cppPowerOutput(200, 100, 700)).toBe(cppExpected);
-    expect(powerOutput('APWR', 100, 700)).toBe(cppExpected); // PARITY GAP — TS returns 29
+    expect(powerOutput('APWR', 100, 700)).toBe(cppExpected);
   });
 });
 
 // ============================================================
 // Section 5: Systematic divergence count
 //
-// Quantifies the scale of the fixed-point truncation divergence.
-// This test always passes — it documents the magnitude.
+// Quantifies that the TS implementation matches C++ at every HP value.
+// Zero divergences confirms perfect fixed-point parity.
 // ============================================================
 
-describe('systematic divergence analysis', () => {
+describe('systematic parity verification', () => {
 
-  it('POWR: counts divergent HP values across full range', () => {
+  it('POWR: zero divergences across full HP range (0..400)', () => {
     let divergences = 0;
     const examples: string[] = [];
     for (let hp = 0; hp <= 400; hp++) {
@@ -364,12 +336,10 @@ describe('systematic divergence analysis', () => {
         }
       }
     }
-    // Document the divergence count — this always passes
-    // The exact count depends on the TS implementation
-    expect(divergences).toBe(0); // Fixed: TS now uses C++ 8.8 fixed-point
+    expect(divergences).toBe(0);
   });
 
-  it('APWR: counts divergent HP values across full range', () => {
+  it('APWR: zero divergences across full HP range (0..700)', () => {
     let divergences = 0;
     for (let hp = 0; hp <= 700; hp++) {
       const cpp = cppPowerOutput(200, hp, 700);
@@ -378,13 +348,10 @@ describe('systematic divergence analysis', () => {
         divergences++;
       }
     }
-    expect(divergences).toBe(0); // Fixed: TS now uses C++ 8.8 fixed-point
+    expect(divergences).toBe(0);
   });
 
-  it('C++ fixed-point systematically loses precision vs float', () => {
-    // The C++ fixed(n, d) constructor truncates: floor(n*256/d).
-    // This means the fixed ratio is always <= the true ratio.
-    // Therefore C++ power output is typically <= TS power output.
+  it('perfect parity: zero cases where C++ and TS differ', () => {
     let cppHigherCount = 0;
     let cppLowerCount = 0;
     let equalCount = 0;
@@ -397,11 +364,7 @@ describe('systematic divergence analysis', () => {
       else equalCount++;
     }
 
-    // The +128 rounding in fixed*int can occasionally push C++ higher,
-    // but the truncation in fixed() construction dominates.
-    // Most divergences have C++ < TS (truncation) or C++ > TS (rounding),
-    // but both directions exist.
-    expect(cppHigherCount + cppLowerCount).toBe(0); // Fixed: perfect parity
+    expect(cppHigherCount + cppLowerCount).toBe(0);
   });
 });
 
@@ -491,16 +454,13 @@ describe('calculatePowerGrid with damaged buildings', () => {
 //
 // These HP values are specifically chosen at the boundaries where
 // the fixed(Strength, MaxStrength) truncation changes the integer
-// portion of the fixed-point number. When fixed_raw crosses a
-// multiple of 256/Power, the output jumps.
-//
-// All tests assert C++ expected values. TS divergence = PARITY GAP.
+// portion of the fixed-point number. TS matches C++ at all boundaries.
 // ============================================================
 
 describe('POWR fixed-point boundary HP values', () => {
 
   // At exactly half: both agree
-  it('HP=200/400: clean half → 50W (agree)', () => {
+  it('HP=200/400: clean half — 50W', () => {
     const cpp = cppPowerOutput(100, 200, 400);
     const ts = powerOutput('POWR', 200, 400);
     expect(ts).toBe(cpp);
@@ -508,47 +468,47 @@ describe('POWR fixed-point boundary HP values', () => {
   });
 
   // One below half: both agree (199/400 = 0.4975)
-  it('HP=199/400: just below half → 50W (agree)', () => {
+  it('HP=199/400: just below half — 50W', () => {
     const cpp = cppPowerOutput(100, 199, 400);
     const ts = powerOutput('POWR', 199, 400);
     expect(ts).toBe(cpp);
     expect(ts).toBe(50);
   });
 
-  // Two below half: C++ = 49, TS = 50
-  it('HP=198/400: two below half → C++ 49W // PARITY GAP', () => {
+  // Two below half: C++ and TS both give 49
+  it('HP=198/400: two below half — 49W', () => {
     const cppExpected = cppPowerOutput(100, 198, 400);
     expect(cppExpected).toBe(49);
-    expect(powerOutput('POWR', 198, 400)).toBe(49); // PARITY GAP — TS returns 50
+    expect(powerOutput('POWR', 198, 400)).toBe(49);
   });
 
   // One below full: both agree (399/400 = 0.9975)
-  it('HP=399/400: one below full → 100W (agree)', () => {
+  it('HP=399/400: one below full — 100W', () => {
     const cpp = cppPowerOutput(100, 399, 400);
     const ts = powerOutput('POWR', 399, 400);
     expect(ts).toBe(cpp);
     expect(ts).toBe(100);
   });
 
-  // Two below full: DIVERGE
-  it('HP=398/400: two below full → C++ 99W // PARITY GAP', () => {
+  // Two below full: C++ and TS both give 99
+  it('HP=398/400: two below full — 99W', () => {
     const cppExpected = cppPowerOutput(100, 398, 400);
     expect(cppExpected).toBe(99);
-    expect(powerOutput('POWR', 398, 400)).toBe(99); // PARITY GAP — TS returns 100
+    expect(powerOutput('POWR', 398, 400)).toBe(99);
   });
 });
 
 describe('APWR fixed-point boundary HP values', () => {
 
   // One below half
-  it('HP=349/700: one below half → C++ 99W // PARITY GAP', () => {
+  it('HP=349/700: one below half — 99W', () => {
     const cppExpected = cppPowerOutput(200, 349, 700);
     expect(cppExpected).toBe(99);
-    expect(powerOutput('APWR', 349, 700)).toBe(99); // PARITY GAP — TS returns 100
+    expect(powerOutput('APWR', 349, 700)).toBe(99);
   });
 
   // Exactly half
-  it('HP=350/700: exact half → 100W (agree)', () => {
+  it('HP=350/700: exact half — 100W', () => {
     const cpp = cppPowerOutput(200, 350, 700);
     const ts = powerOutput('APWR', 350, 700);
     expect(ts).toBe(cpp);
@@ -556,7 +516,7 @@ describe('APWR fixed-point boundary HP values', () => {
   });
 
   // One above half
-  it('HP=351/700: one above half → C++ 100W (agree)', () => {
+  it('HP=351/700: one above half — 100W', () => {
     const cpp = cppPowerOutput(200, 351, 700);
     const ts = powerOutput('APWR', 351, 700);
     expect(ts).toBe(cpp);
@@ -564,10 +524,10 @@ describe('APWR fixed-point boundary HP values', () => {
   });
 
   // Near full
-  it('HP=699/700: one below full → C++ 199W // PARITY GAP', () => {
+  it('HP=699/700: one below full — 199W', () => {
     const cppExpected = cppPowerOutput(200, 699, 700);
     expect(cppExpected).toBe(199);
-    expect(powerOutput('APWR', 699, 700)).toBe(199); // PARITY GAP — TS returns 200
+    expect(powerOutput('APWR', 699, 700)).toBe(199);
   });
 });
 
@@ -655,34 +615,29 @@ describe('output range invariants', () => {
 // ============================================================
 // Section 11: Maximum divergence magnitude
 //
-// The largest possible divergence between C++ and TS should be
-// bounded. With 8-bit fractional precision, the fixed-point
-// construction error is at most 1/256, and the multiplication
-// by Power amplifies this by at most Power/256.
+// With perfect parity, maximum divergence should be exactly 0.
 // ============================================================
 
 describe('divergence magnitude bounds', () => {
 
-  it('POWR: maximum divergence is at most 1W', () => {
+  it('POWR: zero divergence across full HP range', () => {
     let maxDiv = 0;
     for (let hp = 0; hp <= 400; hp++) {
       const cpp = cppPowerOutput(100, hp, 400);
       const ts = powerOutput('POWR', hp, 400);
       maxDiv = Math.max(maxDiv, Math.abs(cpp - ts));
     }
-    // With Power=100 and 8-bit fixed point, max error < 100/256 + rounding ≈ 1
-    expect(maxDiv).toBeLessThanOrEqual(1);
+    expect(maxDiv).toBe(0);
   });
 
-  it('APWR: maximum divergence is at most 1W', () => {
+  it('APWR: zero divergence across full HP range', () => {
     let maxDiv = 0;
     for (let hp = 0; hp <= 700; hp++) {
       const cpp = cppPowerOutput(200, hp, 700);
       const ts = powerOutput('APWR', hp, 700);
       maxDiv = Math.max(maxDiv, Math.abs(cpp - ts));
     }
-    // With Power=200, max error could be up to 200/256 ≈ 0.78, rounds to 1
-    expect(maxDiv).toBeLessThanOrEqual(1);
+    expect(maxDiv).toBe(0);
   });
 });
 
@@ -702,7 +657,7 @@ describe('divergence magnitude bounds', () => {
 
 describe('incremental power delta (building.cpp:929-933)', () => {
 
-  it('POWR: 1 HP damage from full (400→399) has zero delta in C++', () => {
+  it('POWR: 1 HP damage from full (400->399) has zero delta in C++', () => {
     // fixed(400, 400) = 256, fixed(399, 400) = floor(255.36) = 255
     // Power_Output(400) = floor((256*100+128)/256) = 100
     // Power_Output(399) = floor((255*100+128)/256) = floor(100.21875) = 100
@@ -712,7 +667,7 @@ describe('incremental power delta (building.cpp:929-933)', () => {
     expect(old - now).toBe(0);
   });
 
-  it('POWR: 2 HP damage from full (400→398) has delta=1 in C++', () => {
+  it('POWR: 2 HP damage from full (400->398) has delta=1 in C++', () => {
     // Power_Output(400) = 100, Power_Output(398) = 99
     // delta = 100 - 99 = 1
     const old = cppPowerOutput(100, 400, 400);
@@ -720,7 +675,7 @@ describe('incremental power delta (building.cpp:929-933)', () => {
     expect(old - now).toBe(1);
   });
 
-  it('APWR: 1 HP damage from full (700→699) has delta=1 in C++', () => {
+  it('APWR: 1 HP damage from full (700->699) has delta=1 in C++', () => {
     // fixed(700, 700) = 256, fixed(699, 700) = floor(255.634) = 255
     // Power_Output(700) = floor((256*200+128)/256) = 200
     // Power_Output(699) = floor((255*200+128)/256) = floor(199.71875) = 199
