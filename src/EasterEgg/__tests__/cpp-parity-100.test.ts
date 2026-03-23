@@ -62,21 +62,21 @@ describe('Phase 6: MoveResult passability nuance', () => {
     expect(map.canEnterCell(50, 50)).toBe(MoveResult.OK);
   });
 
-  it('canEnterCell returns OCCUPIED for stationary unit', () => {
+  it('canEnterCell returns TEMP_BLOCKED for stationary unit (C++ MOVE_TEMP=4)', () => {
     const map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
     map.setOccupancy(50, 50, 42); // entity ID 42
-    expect(map.canEnterCell(50, 50)).toBe(MoveResult.OCCUPIED);
+    expect(map.canEnterCell(50, 50)).toBe(MoveResult.TEMP_BLOCKED);
   });
 
-  it('canEnterCell returns TEMP_BLOCKED when isMoving callback says true', () => {
+  it('canEnterCell returns OCCUPIED when isMoving callback says true (C++ MOVE_MOVING_BLOCK=2)', () => {
     const map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
     map.setOccupancy(50, 50, 42);
     const isMoving = (id: number) => id === 42;
-    expect(map.canEnterCell(50, 50, false, isMoving)).toBe(MoveResult.TEMP_BLOCKED);
+    expect(map.canEnterCell(50, 50, false, isMoving)).toBe(MoveResult.OCCUPIED);
   });
 });
 

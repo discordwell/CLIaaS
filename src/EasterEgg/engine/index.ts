@@ -255,6 +255,7 @@ type InflightProjectile = InflightProjectileType;
 const PATH_RETRY = 10;
 /** C++ defines.h:828-837 — MoveType enum: passability threshold levels */
 const MOVE_CLOAK = 1;         // default starting threshold (easiest)
+const MOVE_DESTROYABLE = 3;   // C++ foot.cpp:386-388: max threshold for human players near dest
 const MOVE_TEMP  = 4;         // maximum threshold (hardest — blocked by friendly)
 /** rules.ini PathDelay=.01 * TICKS_PER_MINUTE(900) = 9 ticks (rules.cpp default was .016→14) */
 const PATH_DELAY_TICKS = 9;
@@ -265,11 +266,25 @@ const SAVOUR_DELAY_TICKS = Math.round(0.03 * 900); // 27 ticks
 /** C++ trigger.cpp:177 — BorrowedTime = TICKS_PER_SECOND * 4 = 60 ticks (on ALLOWWIN trigger destruction) */
 const ALLOWWIN_BORROWED_TIME = GAME_TICKS_PER_SEC * 4; // 60 ticks
 
-/** Reset path threshold state when a new move order is given (C++ foot.cpp:1723-1735 Assign_Destination) */
+/** Reset path threshold state when a new move order is given (C++ foot.cpp:1723-1735 Assign_Destination).
+ *  C++ ONLY resets PathThreshhold — TryTryAgain and PathDelay are NOT touched. */
 function resetPathThreshold(entity: Entity): void {
   entity.pathThreshold = MOVE_CLOAK;
-  entity.tryCount = PATH_RETRY;
-  entity.pathDelay = 0;
+  // C++ foot.cpp:1723-1735: Assign_Destination only resets PathThreshhold.
+  // TryTryAgain stays at its current value; PathDelay (CDTimerClass) is not reset.
+}
+
+/** C++ foot.cpp:373-388 — determine max escalation threshold.
+ *  AI units always use MOVE_TEMP(4). Human players near their destination use
+ *  MOVE_DESTROYABLE(3), meaning they give up sooner on friendly-blocked cells. */
+function pathMaxType(entity: Entity, isPlayerUnit: boolean): number {
+  if (!isPlayerUnit) return MOVE_TEMP; // AI always escalates to max
+  if (!entity.moveTarget) return MOVE_TEMP;
+  // C++ foot.cpp:386-388: human near dest → maxtype = MOVE_DESTROYABLE
+  const dist = worldDist(entity.pos, entity.moveTarget);
+  const closeEnough = 2.5; // C++ rules.cpp:259 CloseEnoughDistance = 0x0280 = 2.5 cells
+  if (dist < closeEnough) return MOVE_DESTROYABLE;
+  return MOVE_TEMP;
 }
 
 export class Game {
@@ -4276,42 +4291,49 @@ export class Game {
           return;
         }
         entity.lastPathRecalc = this.tick;
-        const newPath = findPath(
-          this.map, entity.cell,
-          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-          entity.isNavalUnit, entity.stats.speedClass
-        );
-        // C++ foot.cpp:463 — set PathDelay after every path calculation
-        entity.pathDelay = PATH_DELAY_TICKS;
-        if (newPath.length === 0) {
-          // C++ foot.cpp:409-410 — escalate threshold on failure
-          entity.pathThreshold++;
-          if (entity.pathThreshold > MOVE_TEMP) {
-            // C++ drive.cpp:989-996 — decrement TryTryAgain; at 0, give up
-            if (entity.tryCount > 0) {
-              entity.tryCount--;
-              entity.pathThreshold = MOVE_CLOAK; // reset threshold for next retry cycle
-            } else {
-              // All retries exhausted — stop movement (C++ drive.cpp:992)
-              entity.moveTarget = null;
-              entity.path = [];
-              entity.pathIndex = 0;
-              entity.trackNumber = -1; entity.trackControlIndex = -1;
-              entity.trackCellSpan = 1;
-              entity.mission = this.idleMission(entity);
-              entity.animState = AnimState.IDLE;
-              resetPathThreshold(entity);
-            }
+        // C++ foot.cpp:396-411 — synchronous escalation: try ALL threshold levels in one call.
+        // C++ starts at current PathThreshhold and increments up to maxtype in a for(;;) loop.
+        const maxtype = pathMaxType(entity, this.isPlayerControlled(entity));
+        let pathFound = false;
+        for (;;) {
+          const newPath = findPath(
+            this.map, entity.cell,
+            worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+            entity.isNavalUnit, entity.stats.speedClass
+          );
+          if (newPath.length > 0) {
+            entity.path = newPath;
+            entity.pathIndex = 0;
+            entity.trackNumber = -1; entity.trackControlIndex = -1;
+            entity.trackCellSpan = 1;
+            // Successful path — reset threshold (C++ drive.cpp:1050)
+            entity.pathThreshold = MOVE_CLOAK;
+            entity.tryCount = PATH_RETRY;
+            pathFound = true;
+            break;
           }
-          return;
+          entity.pathThreshold++;
+          if (entity.pathThreshold > maxtype) break;
         }
-        entity.path = newPath;
-        entity.pathIndex = 0;
-        entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
-        entity.trackCellSpan = 1;
-        // Successful path — reset threshold but keep tryCount (C++ drive.cpp:1050)
-        entity.pathThreshold = MOVE_CLOAK;
-        entity.tryCount = PATH_RETRY;
+        // C++ foot.cpp:463 — set PathDelay after every Basic_Path call
+        entity.pathDelay = PATH_DELAY_TICKS;
+        if (!pathFound) {
+          // All thresholds exhausted — decrement TryTryAgain (C++ drive.cpp:989-996)
+          if (entity.tryCount > 0) {
+            entity.tryCount--;
+            entity.pathThreshold = MOVE_CLOAK; // reset threshold for next retry cycle
+          } else {
+            // All retries exhausted — stop movement (C++ drive.cpp:992)
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
+            entity.trackNumber = -1; entity.trackControlIndex = -1;
+            entity.trackCellSpan = 1;
+            entity.mission = this.idleMission(entity);
+            entity.animState = AnimState.IDLE;
+            resetPathThreshold(entity);
+          }
+        }
         return;
       }
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
@@ -4341,36 +4363,45 @@ export class Game {
           return;
         }
         entity.lastPathRecalc = this.tick;
-        const newPath = findPath(
-          this.map, entity.cell,
-          worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-          entity.isNavalUnit, entity.stats.speedClass
-        );
-        entity.pathDelay = PATH_DELAY_TICKS;
-        if (newPath.length === 0) {
-          // C++ foot.cpp:409-410 — escalate threshold on failure
-          entity.pathThreshold++;
-          if (entity.pathThreshold > MOVE_TEMP) {
-            if (entity.tryCount > 0) {
-              entity.tryCount--;
-              entity.pathThreshold = MOVE_CLOAK;
-            } else {
-              // All retries exhausted — give up (C++ drive.cpp:992)
-              entity.moveTarget = null;
-              entity.path = [];
-              entity.pathIndex = 0;
-              entity.trackNumber = -1; entity.trackControlIndex = -1;
-              entity.trackCellSpan = 1;
-              entity.mission = this.idleMission(entity);
-              entity.animState = AnimState.IDLE;
-              resetPathThreshold(entity);
-            }
+        // C++ foot.cpp:396-411 — synchronous escalation: try ALL thresholds in one call.
+        const maxtype2 = pathMaxType(entity, this.isPlayerControlled(entity));
+        let pathFound2 = false;
+        for (;;) {
+          const newPath = findPath(
+            this.map, entity.cell,
+            worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+            entity.isNavalUnit, entity.stats.speedClass
+          );
+          if (newPath.length > 0) {
+            entity.path = newPath;
+            entity.pathIndex = 0;
+            entity.trackNumber = -1; entity.trackControlIndex = -1;
+            entity.trackCellSpan = 1;
+            entity.pathThreshold = MOVE_CLOAK;
+            entity.tryCount = PATH_RETRY;
+            pathFound2 = true;
+            break;
           }
-          return;
+          entity.pathThreshold++;
+          if (entity.pathThreshold > maxtype2) break;
         }
-        entity.path = newPath;
-        entity.pathIndex = 0;
-        entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on repath
+        entity.pathDelay = PATH_DELAY_TICKS;
+        if (!pathFound2) {
+          if (entity.tryCount > 0) {
+            entity.tryCount--;
+            entity.pathThreshold = MOVE_CLOAK;
+          } else {
+            // All retries exhausted — give up (C++ drive.cpp:992)
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
+            entity.trackNumber = -1; entity.trackControlIndex = -1;
+            entity.trackCellSpan = 1;
+            entity.mission = this.idleMission(entity);
+            entity.animState = AnimState.IDLE;
+            resetPathThreshold(entity);
+          }
+        }
         entity.trackCellSpan = 1;
         entity.pathThreshold = MOVE_CLOAK;
         entity.tryCount = PATH_RETRY;
@@ -4543,36 +4574,42 @@ export class Game {
               return;
             }
             entity.lastPathRecalc = this.tick;
-            const newPath = findPath(
-              this.map, currentCell,
-              worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
-              entity.isNavalUnit, entity.stats.speedClass
-            );
-            entity.pathDelay = PATH_DELAY_TICKS;
-            if (newPath.length > 0) {
-              entity.path = newPath;
-              entity.pathIndex = 0;
-              entity.pathThreshold = MOVE_CLOAK;
-              entity.tryCount = PATH_RETRY;
-            } else {
-              // C++ foot.cpp:409-410 — escalate threshold on failure
+            // C++ foot.cpp:396-411 — synchronous escalation: try ALL thresholds.
+            const maxtype3 = pathMaxType(entity, this.isPlayerControlled(entity));
+            let pathFound3 = false;
+            for (;;) {
+              const newPath = findPath(
+                this.map, currentCell,
+                worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+                entity.isNavalUnit, entity.stats.speedClass
+              );
+              if (newPath.length > 0) {
+                entity.path = newPath;
+                entity.pathIndex = 0;
+                entity.pathThreshold = MOVE_CLOAK;
+                entity.tryCount = PATH_RETRY;
+                pathFound3 = true;
+                break;
+              }
               entity.pathThreshold++;
-              if (entity.pathThreshold > MOVE_TEMP) {
-                if (entity.tryCount > 0) {
-                  entity.tryCount--;
-                  entity.pathThreshold = MOVE_CLOAK;
-                } else if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
-                  finishMove();
-                  resetPathThreshold(entity);
-                } else {
-                  // All retries exhausted — give up (C++ drive.cpp:992)
-                  entity.moveTarget = null;
-                  entity.path = [];
-                  entity.pathIndex = 0;
-                  entity.mission = this.idleMission(entity);
-                  entity.animState = AnimState.IDLE;
-                  resetPathThreshold(entity);
-                }
+              if (entity.pathThreshold > maxtype3) break;
+            }
+            entity.pathDelay = PATH_DELAY_TICKS;
+            if (!pathFound3) {
+              if (entity.tryCount > 0) {
+                entity.tryCount--;
+                entity.pathThreshold = MOVE_CLOAK;
+              } else if (distToTarget <= closeEnough && entity.moveQueue.length === 0) {
+                finishMove();
+                resetPathThreshold(entity);
+              } else {
+                // All retries exhausted — give up (C++ drive.cpp:992)
+                entity.moveTarget = null;
+                entity.path = [];
+                entity.pathIndex = 0;
+                entity.mission = this.idleMission(entity);
+                entity.animState = AnimState.IDLE;
+                resetPathThreshold(entity);
               }
             }
             return;

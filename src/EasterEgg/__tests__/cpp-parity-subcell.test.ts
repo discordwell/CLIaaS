@@ -194,9 +194,9 @@ describe('canEnterCell with infantry sub-cell awareness', () => {
     map.occupySubCell(cx, cy, inf.id);
     map.setOccupancy(cx, cy, inf.id);
 
-    // Vehicle (isInfantry=false) should be blocked
+    // Vehicle (isInfantry=false) should see occupant — C++ MOVE_TEMP for stationary
     const result = map.canEnterCell(cx, cy, false, undefined, false);
-    expect(result).toBe(MoveResult.OCCUPIED);
+    expect(result).toBe(MoveResult.TEMP_BLOCKED);
   });
 
   it('empty cell is passable for both infantry and vehicles', () => {

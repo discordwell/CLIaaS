@@ -199,28 +199,23 @@ describe('C++ parity: canEnterCell (Can_Enter_Cell) (unit.cpp:3069-3286)', () =>
     expect(map.canEnterCell(20, 20, true)).toBe(MoveResult.OK);
   });
 
-  it('occupied cell with stationary unit returns OCCUPIED (C++ MOVE_MOVING_BLOCK/MOVE_TEMP)', () => {
+  it('occupied cell with stationary unit returns TEMP_BLOCKED (C++ MOVE_TEMP=4)', () => {
+    // C++ unit.cpp:3192-3193: stationary allied unit → MOVE_TEMP(4)
     const map = makeMap();
     map.setOccupancy(20, 20, 99);
-    // No isMoving callback → stationary → C++ returns MOVE_TEMP for friendly, MOVE_DESTROYABLE for enemy
-    // TS returns OCCUPIED (MoveResult.OCCUPIED = 2, which matches MOVE_MOVING_BLOCK)
-    expect(map.canEnterCell(20, 20)).toBe(MoveResult.OCCUPIED);
+    // No isMoving callback → stationary → C++ returns MOVE_TEMP=4
+    expect(map.canEnterCell(20, 20)).toBe(MoveResult.TEMP_BLOCKED);
   });
 
-  it('occupied cell with moving unit returns TEMP_BLOCKED (C++ MOVE_MOVING_BLOCK)', () => {
-    // C++ unit.cpp:3177-3183: allied moving unit → MOVE_MOVING_BLOCK (cost=3)
-    // TS pathfinding.ts:182: returns TEMP_BLOCKED (value=4)
-    // NOTE: C++ returns MOVING_BLOCK=2 for moving units, TEMP=4 for stationary allies.
-    // TS inverts this: moving → TEMP_BLOCKED=4, stationary → OCCUPIED=2.
+  it('occupied cell with moving unit returns OCCUPIED (C++ MOVE_MOVING_BLOCK=2)', () => {
+    // C++ unit.cpp:3177-3183: allied moving unit → MOVE_MOVING_BLOCK(2)
     const map = makeMap();
     map.setOccupancy(20, 20, 99);
     const isMoving = (id: number) => id === 99;
     const result = map.canEnterCell(20, 20, false, isMoving);
 
-    // C++ says MOVE_MOVING_BLOCK=2 for allied moving unit (unit.cpp:3183)
-    // TS says TEMP_BLOCKED=4
-    // PARITY GAP: TS returns 4 where C++ returns 2 for moving allies
-    expect(result).toBe(MoveResult.TEMP_BLOCKED); // TS value=4, C++ value=2
+    // C++ parity: moving ally → MOVE_MOVING_BLOCK=2 (OCCUPIED in TS enum)
+    expect(result).toBe(MoveResult.OCCUPIED);
   });
 
   it('vehicle occupancy blocks infantry (C++ infantry.cpp:1490)', () => {
@@ -362,13 +357,14 @@ describe('C++ parity: Passable_Cell distance-based threshold (findpath.cpp:1270)
     map.setOccupancy(12, 20, 88); // near cell
     map.setOccupancy(45, 20, 89); // far cell (33 cells away)
 
-    // Both cells should return OCCUPIED — TS has no distance-based relaxation
+    // Both cells should return TEMP_BLOCKED (stationary occupants, C++ MOVE_TEMP=4).
+    // TS has no distance-based relaxation.
     const nearResult = map.canEnterCell(12, 20, false);
     const farResult = map.canEnterCell(45, 20, false);
 
-    // TS treats both identically (OCCUPIED in both cases)
-    expect(nearResult).toBe(MoveResult.OCCUPIED);
-    expect(farResult).toBe(MoveResult.OCCUPIED);
+    // TS treats both identically (TEMP_BLOCKED=4 for stationary occupants)
+    expect(nearResult).toBe(MoveResult.TEMP_BLOCKED);
+    expect(farResult).toBe(MoveResult.TEMP_BLOCKED);
     // C++ Passable_Cell would potentially relax the threshold for the far cell
     // based on the caller's distance to it (findpath.cpp:1270), but TS has
     // no distance context in canEnterCell — this documents the divergence.
@@ -398,16 +394,20 @@ describe('C++ parity: Passable_Cell distance-based threshold (findpath.cpp:1270)
 
 describe('C++ parity: nearest-reachable fallback (foot.cpp:333-335)', () => {
 
-  it('A* returns empty path for impassable goal terrain', () => {
-    // C++ foot.cpp:333: redirects to Nearby_Location when goal is impassable
-    // TS findPathAStar returns [] when goal is impassable
+  it('A* redirects to nearest passable cell when goal is impassable (C++ Nearby_Location)', () => {
+    // C++ foot.cpp:333-335: redirects to Nearby_Location when goal is impassable.
+    // TS now implements nearbyLocation spiral scan — finds nearest passable cell and paths there.
     const map = makeMap();
     map.setTerrain(30, 30, Terrain.WATER);
 
     const path = findPathAStar(map, { cx: 20, cy: 20 }, { cx: 30, cy: 30 }, true);
-    // TS returns empty — C++ would redirect to nearest passable cell
-    expect(path).toEqual([]);
-    // PARITY GAP: C++ would find a partial path to nearest reachable cell via Nearby_Location
+    // C++ parity: path to nearest passable cell adjacent to the impassable goal
+    expect(path.length).toBeGreaterThan(0);
+    // Path should not include any impassable cells
+    for (const cell of path) {
+      expect(map.isTerrainPassable(cell.cx, cell.cy),
+        `cell (${cell.cx},${cell.cy}) should be passable`).toBe(true);
+    }
   });
 
   it('LOS findPath produces partial path toward enclosed goal (findpath.cpp:558)', () => {
@@ -479,15 +479,14 @@ describe('C++ parity: nearest-reachable fallback (foot.cpp:333-335)', () => {
 
 describe('C++ parity: path search limits (findpath.cpp:106,110)', () => {
 
-  it('LOS path does not exceed MAX_MLIST_SIZE=300 steps', () => {
-    // C++ findpath.cpp:106: MAX_MLIST_SIZE = 300
-    // C++ findpath.cpp:529: while (path.Length < maxlen)
+  it('LOS path does not exceed MAX_MLIST_SIZE=200 steps (foot.cpp:371)', () => {
+    // C++ foot.cpp:371: FacingType workpath1[200] — effective path limit
     const map = makeMap(0, 0, 128, 128);
     const start: CellPos = { cx: 1, cy: 1 };
     const goal: CellPos = { cx: 126, cy: 126 };
     const path = findPath(map, start, goal, true);
 
-    expect(path.length).toBeLessThanOrEqual(300);
+    expect(path.length).toBeLessThanOrEqual(200);
     if (path.length > 0) {
       assertContiguous(start, path);
     }
@@ -946,32 +945,17 @@ describe('C++ parity: edge-follow loop detection (findpath.cpp:990-992)', () => 
 
 describe('C++ parity: path staging area constraints (foot.cpp:371)', () => {
 
-  it('C++ workpath1 staging area is 200 entries, TS uses MAX_MLIST_SIZE=300', () => {
-    // C++ foot.cpp:371: FacingType workpath1[200]; — path staging buffer
-    // C++ findpath.cpp:106: MAX_MLIST_SIZE=300 — Find_Path internal limit
-    //
-    // The effective path length is min(200, 300) = 200 in C++ due to the
-    // staging buffer in Basic_Path. TS uses 300 directly.
-    //
-    // Test: create a path that would exceed 200 but not 300 steps
+  it('C++ parity: path truncated at 200 entries (foot.cpp:371 workpath1[200])', () => {
+    // C++ foot.cpp:371: FacingType workpath1[200]; — staging buffer limits path to 200.
+    // TS now matches: MAX_MLIST_SIZE = 200 (was 300).
     const map = makeMap(0, 0, 128, 128);
-    // Diagonal path of exactly ~180 steps (within both limits)
     const start: CellPos = { cx: 1, cy: 1 };
     const goal: CellPos = { cx: 120, cy: 120 };
     const path = findPath(map, start, goal, true);
 
-    // TS allows up to 300, C++ staging limits to 200
-    // Both should produce a path, but C++ path would be truncated at 200
-    expect(path.length).toBeLessThanOrEqual(300);
+    // C++ parity: path is truncated at 200 (workpath1 staging area size)
+    expect(path.length).toBeLessThanOrEqual(200);
     expect(path.length).toBeGreaterThan(0);
-
-    // PARITY GAP: C++ would truncate at 200 (workpath1 size), TS at 300
-    // For a 119-cell diagonal, path should be exactly 119 (within both limits)
-    if (path.length > 200) {
-      // This would be a divergence from C++ behavior
-      // C++ max effective path is 200 (foot.cpp:371 staging area)
-      // Intentionally left as a documentation test, not a hard failure
-    }
   });
 });
 
@@ -1130,40 +1114,27 @@ describe('C++ parity: CELL_FACING direction calculation (findpath.cpp:92)', () =
 
 describe('C++ parity: nudge logic (unit.cpp:3176-3194)', () => {
 
-  it('TS has no head-on collision detection (C++ returns MOVE_NO)', () => {
-    // C++ unit.cpp:3178-3182: head-on collision check
-    //   if (face == techface && Distance <= 0x1FF) return(MOVE_NO);
-    // This prevents two units facing each other head-on from deadlocking.
-    //
-    // TS has no facing/direction awareness in canEnterCell — it only checks
-    // whether the occupant is "moving" via callback. Two units heading
-    // toward each other through the same cell would both see TEMP_BLOCKED.
+  it('moving ally returns OCCUPIED=2 (C++ MOVE_MOVING_BLOCK), no head-on detection', () => {
+    // C++ unit.cpp:3178-3182: head-on collision check returns MOVE_NO
+    // TS has no facing/direction awareness — returns OCCUPIED(2) for all moving allies.
+    // This is a remaining parity gap: C++ can detect head-on and return MOVE_NO=5.
     const map = makeMap();
     map.setOccupancy(20, 20, 55);
     const isMoving = (id: number) => id === 55;
 
     const result = map.canEnterCell(20, 20, false, isMoving);
-    // C++ would return MOVE_NO for head-on collision (facing check)
-    // TS returns TEMP_BLOCKED (no facing awareness)
-    expect(result).toBe(MoveResult.TEMP_BLOCKED);
-    // PARITY GAP: C++ would return MOVE_NO=5 in head-on case, TS returns TEMP_BLOCKED=4
+    // C++ parity: moving ally → MOVE_MOVING_BLOCK=2 (OCCUPIED in TS)
+    expect(result).toBe(MoveResult.OCCUPIED);
   });
 
-  it('TS canEnterCell lacks movement zone check (C++ foot.cpp Map[].Zones)', () => {
+  it('stationary ally returns TEMP_BLOCKED=4 (C++ MOVE_TEMP), no zone check', () => {
     // C++ unit.cpp:3191: if different zone → MOVE_NO
-    //   Map[Coord].Zones[Class->MZone] != cellptr->Zones[Class->MZone]
-    //
-    // Zones are contiguous terrain regions. A stationary friendly unit in a
-    // different zone from the querying unit is a permanent block (can't be
-    // nudged aside because there's no path between zones).
-    //
-    // TS has no zone system — all passable terrain is one implicit zone.
+    // TS has no zone system — all stationary friendlies get TEMP_BLOCKED(4=MOVE_TEMP)
     const map = makeMap();
     map.setOccupancy(20, 20, 66);
 
-    // TS treats all stationary friendlies as OCCUPIED regardless of zone
+    // C++ parity: stationary ally → MOVE_TEMP=4 (TEMP_BLOCKED in TS)
     const result = map.canEnterCell(20, 20);
-    expect(result).toBe(MoveResult.OCCUPIED);
-    // C++ would check zones and potentially return MOVE_NO if different zone
+    expect(result).toBe(MoveResult.TEMP_BLOCKED);
   });
 });

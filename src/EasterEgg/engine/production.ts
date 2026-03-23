@@ -350,13 +350,15 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
     entity.harvesterState = 'idle';
   }
 
-  // C++ building.cpp:2038: rally-pointed units get MISSION_GUARD_AREA (patrol zone)
-  // not MISSION_MOVE (one-shot), so they return to rally area if displaced
+  // C++ building.cpp:2038-2039: rally-pointed units get MISSION_GUARD_AREA with
+  // ArchiveTarget = Where_To_Go(), so they patrol around rally and return if displaced.
   const rally = ctx.rallyPoints.get(factoryType);
   if (rally && unitType !== UnitType.V_HARV) {
     entity.mission = Mission.AREA_GUARD;
     entity.moveTarget = { x: rally.x, y: rally.y };
     entity.guardOrigin = { x: rally.x, y: rally.y };
+    // C++ building.cpp:2039: ArchiveTarget = rally position (used for return-to-rally leash)
+    entity.archiveTarget = { x: rally.x, y: rally.y };
     entity.path = findPath(ctx.map, entity.cell, worldToCell(rally.x, rally.y), true, entity.isNavalUnit, entity.stats.speedClass);
     entity.pathIndex = 0;
   }

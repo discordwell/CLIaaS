@@ -582,19 +582,18 @@ describe('Path following and pathIndex', () => {
     expect(through).toBe(true);
   });
 
-  it('findPath without ignoreOccupancy avoids occupied cells', () => {
+  it('findPath without ignoreOccupancy treats occupied cells as passable (C++ parity)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.initDefault();
 
-    // Occupy cell (5,5)
+    // Occupy cell (5,5) — C++ Passable_Cell returns non-zero cost for MOVE_TEMP
     map.setOccupancy(5, 5, 99);
 
-    // Without ignoreOccupancy, should route around
+    // C++ parity: occupied cells are passable (with cost penalty), not blocked.
+    // LOS pathfinder walks through temporarily-blocked cells just like C++.
     const path = findPath(map, { cx: 3, cy: 5 }, { cx: 7, cy: 5 }, false);
-    // Path should not go through occupied cell
-    const through = path.some(c => c.cx === 5 && c.cy === 5);
-    expect(through).toBe(false);
+    expect(path.length).toBeGreaterThan(0);
   });
 
   it('findPath with naval=true only allows water terrain', () => {
@@ -650,23 +649,23 @@ describe('canEnterCell — MoveResult classification', () => {
     expect(map.canEnterCell(7, 5)).toBe(MoveResult.IMPASSABLE);
   });
 
-  it('returns OCCUPIED for cell with stationary entity', () => {
+  it('returns TEMP_BLOCKED for cell with stationary entity (C++ MOVE_TEMP=4)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.initDefault();
     map.setOccupancy(5, 5, 42);
 
-    expect(map.canEnterCell(5, 5)).toBe(MoveResult.OCCUPIED);
+    expect(map.canEnterCell(5, 5)).toBe(MoveResult.TEMP_BLOCKED);
   });
 
-  it('returns TEMP_BLOCKED for cell with moving entity (isMoving callback)', () => {
+  it('returns OCCUPIED for cell with moving entity (C++ MOVE_MOVING_BLOCK=2)', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 20, 20);
     map.initDefault();
     map.setOccupancy(5, 5, 42);
 
     const isMoving = (id: number) => id === 42;
-    expect(map.canEnterCell(5, 5, false, isMoving)).toBe(MoveResult.TEMP_BLOCKED);
+    expect(map.canEnterCell(5, 5, false, isMoving)).toBe(MoveResult.OCCUPIED);
   });
 
   it('TEMP_BLOCKED adds cost penalty in pathfinding (50 extra)', () => {

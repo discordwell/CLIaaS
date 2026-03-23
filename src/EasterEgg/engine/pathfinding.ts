@@ -20,7 +20,10 @@ import { type GameMap, MoveResult } from './map';
 // ============================================================================
 // C++ constants (findpath.cpp:106-110)
 // ============================================================================
-const MAX_MLIST_SIZE = 300;       // Maximum path steps
+// C++ foot.cpp:371 FacingType workpath1[200] — staging buffer limits effective path to 200.
+// findpath.cpp:106 MAX_MLIST_SIZE=300 is the Find_Path internal limit, but Basic_Path's
+// staging area truncates to 200 before the path reaches the unit.
+const MAX_MLIST_SIZE = 200;       // Maximum path steps (C++ workpath1[200])
 const MAX_PATH_EDGE_FOLLOW = 400; // Maximum edge follow iterations
 
 // FacingType: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
@@ -179,7 +182,8 @@ function isPassable(
     return naval ? map.isWaterPassable(cx, cy) : map.isTerrainPassable(cx, cy);
   }
   const result = map.canEnterCell(cx, cy, naval);
-  return result === MoveResult.OK || result === MoveResult.TEMP_BLOCKED;
+  // C++ parity: both MOVE_MOVING_BLOCK(OCCUPIED=2) and MOVE_TEMP(TEMP_BLOCKED=4) are passable
+  return result === MoveResult.OK || result === MoveResult.OCCUPIED || result === MoveResult.TEMP_BLOCKED;
 }
 
 // ============================================================================
@@ -731,6 +735,28 @@ function heuristic(ax: number, ay: number, bx: number, by: number): number {
 
 const MAX_SEARCH = 500;
 
+/** C++ foot.cpp:333-335 Nearby_Location — spiral scan outward from an impassable cell
+ *  to find the nearest passable cell. Used when the destination is blocked terrain. */
+function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean): CellPos | null {
+  const passable = naval
+    ? (cx: number, cy: number) => map.isWaterPassable(cx, cy)
+    : (cx: number, cy: number) => map.isTerrainPassable(cx, cy);
+  // Spiral scan: ring 1, ring 2, ... up to ring 10
+  for (let ring = 1; ring <= 10; ring++) {
+    for (let dx = -ring; dx <= ring; dx++) {
+      for (let dy = -ring; dy <= ring; dy++) {
+        if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue; // only ring edges
+        const nx = cell.cx + dx;
+        const ny = cell.cy + dy;
+        if (nx >= 0 && nx < MAP_CELLS && ny >= 0 && ny < MAP_CELLS && passable(nx, ny)) {
+          return { cx: nx, cy: ny };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function findPathAStar(
   map: GameMap,
   start: CellPos,
@@ -742,8 +768,13 @@ export function findPathAStar(
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
+  // C++ foot.cpp:333-335 — Nearby_Location fallback: when the goal is impassable,
+  // spiral-scan outward to find the nearest passable cell and redirect there.
+  let effectiveGoal = goal;
   if (naval ? !map.isWaterPassable(goal.cx, goal.cy) : !map.isTerrainPassable(goal.cx, goal.cy)) {
-    return [];
+    const nearby = nearbyLocation(map, goal, naval);
+    if (!nearby) return [];
+    effectiveGoal = nearby;
   }
 
   const key = (cx: number, cy: number) => cy * MAP_CELLS + cx;
@@ -753,7 +784,7 @@ export function findPathAStar(
   const startNode: AStarNode = {
     cx: start.cx, cy: start.cy,
     g: 0,
-    h: heuristic(start.cx, start.cy, goal.cx, goal.cy),
+    h: heuristic(start.cx, start.cy, effectiveGoal.cx, effectiveGoal.cy),
     f: 0,
     parent: null,
   };
@@ -786,7 +817,7 @@ export function findPathAStar(
       closestNode = current;
     }
 
-    if (current.cx === goal.cx && current.cy === goal.cy) {
+    if (current.cx === effectiveGoal.cx && current.cy === effectiveGoal.cy) {
       return reconstructPath(current);
     }
 
@@ -801,7 +832,7 @@ export function findPathAStar(
         ? (naval ? (map.isWaterPassable(nx, ny) ? MoveResult.OK : MoveResult.IMPASSABLE) : (map.isTerrainPassable(nx, ny) ? MoveResult.OK : MoveResult.IMPASSABLE))
         : map.canEnterCell(nx, ny, naval, isMoving);
       if (moveResult === MoveResult.IMPASSABLE) continue;
-      if (moveResult === MoveResult.OCCUPIED) continue;
+      if (moveResult === MoveResult.DESTROYABLE) continue; // enemy blocking — skip
 
       if (dx !== 0 && dy !== 0) {
         const passCheck = naval
@@ -813,12 +844,15 @@ export function findPathAStar(
         }
       }
 
-      // C++ findpath.cpp Passable_Cell (line 1284-1292): flat costs by blockage type only.
+      // C++ findpath.cpp Passable_Cell (line 1284-1292): graduated costs by MoveType.
+      // MOVE_OK=1, MOVE_CLOAK=1, MOVE_MOVING_BLOCK=3, MOVE_DESTROYABLE=8, MOVE_TEMP=10
       // Speed multipliers are NOT used for path selection — only for actual movement
       // speed in drive.cpp. This ensures paths match C++ which picks shortest passable
       // route regardless of terrain speed.
       let moveCost = (dx !== 0 && dy !== 0) ? DIAG_COST : STRAIGHT_COST;
-      if (moveResult === MoveResult.TEMP_BLOCKED) moveCost += 50;
+      // C++ parity: MOVE_MOVING_BLOCK(OCCUPIED=2) costs 3x, MOVE_TEMP(TEMP_BLOCKED=4) costs 10x
+      if (moveResult === MoveResult.OCCUPIED) moveCost += 15;       // moving ally: cost=3 (C++)
+      if (moveResult === MoveResult.TEMP_BLOCKED) moveCost += 50;   // stationary ally: cost=10 (C++)
       const g = current.g + moveCost;
 
       const existing = openMap.get(nk);
@@ -834,7 +868,7 @@ export function findPathAStar(
       const node: AStarNode = {
         cx: nx, cy: ny,
         g,
-        h: heuristic(nx, ny, goal.cx, goal.cy),
+        h: heuristic(nx, ny, effectiveGoal.cx, effectiveGoal.cy),
         f: 0,
         parent: current,
       };

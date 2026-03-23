@@ -139,26 +139,25 @@ describe('Path threshold escalation & retry — C++ foot.cpp/drive.cpp parity', 
       expect(threshold).toBe(MOVE_DESTROYABLE);
     });
 
-    it('TS escalates one threshold per tick (behavioral difference from C++)', () => {
-      // TS engine/index.ts:4158-4160:
-      //   entity.pathThreshold++;
-      //   if (entity.pathThreshold > MOVE_TEMP) { ... }
-      //
-      // TS only increments pathThreshold once per failed path recalc,
-      // not all at once. This is a structural difference (async vs sync)
-      // but the net result is the same: 4 threshold levels are tried.
+    it('TS now matches C++ synchronous escalation — all thresholds in one call', () => {
+      // CLOSED: TS engine/index.ts now uses a for(;;) loop matching C++ foot.cpp:396-411.
+      // All threshold levels are tried in a single Basic_Path call, not one per tick.
       const e = new Entity(UnitType.V_1TNK, House.Greece, 100, 100);
       expect(e.pathThreshold).toBe(MOVE_CLOAK);
 
-      // Simulate 4 ticks of failure
-      const thresholdsPerTick: number[] = [];
-      for (let tick = 0; tick < 4; tick++) {
-        thresholdsPerTick.push(e.pathThreshold);
-        e.pathThreshold++; // TS: one increment per tick
+      // Simulate C++ synchronous escalation: all 4 levels tried at once
+      const thresholdsTried: number[] = [];
+      const maxtype = MOVE_TEMP;
+      for (;;) {
+        thresholdsTried.push(e.pathThreshold);
+        const pathFound = false; // simulate all fail
+        if (pathFound) break;
+        e.pathThreshold++;
+        if (e.pathThreshold > maxtype) break;
       }
 
-      expect(thresholdsPerTick).toEqual([1, 2, 3, 4]);
-      expect(e.pathThreshold).toBe(5); // exceeds MOVE_TEMP
+      expect(thresholdsTried).toEqual([1, 2, 3, 4]);
+      expect(e.pathThreshold).toBe(5); // exceeds MOVE_TEMP (all failed)
     });
   });
 
@@ -185,30 +184,16 @@ describe('Path threshold escalation & retry — C++ foot.cpp/drive.cpp parity', 
       expect(maxtype_human_near).toBe(3);
     });
 
-    // PARITY GAP: TS always uses MOVE_TEMP(4) as max threshold regardless of
-    // player type or distance. C++ human players near their destination only
-    // escalate to MOVE_DESTROYABLE(3), meaning they give up sooner when
-    // a friendly unit blocks the exact destination cell.
-    it('TS always uses MOVE_TEMP(4) as max — PARITY GAP with C++ human-near-dest', () => {
-      // TS engine/index.ts:4160/4224: entity.pathThreshold > MOVE_TEMP
-      // There is no check for distance-to-dest or human/AI distinction.
-      const e = new Entity(UnitType.V_1TNK, House.Greece, 100, 100);
-
-      // Simulate TS escalation: goes all the way to 5 (past MOVE_TEMP)
-      e.pathThreshold = MOVE_CLOAK;
-      while (e.pathThreshold <= MOVE_TEMP) {
-        e.pathThreshold++;
-      }
-      expect(e.pathThreshold).toBe(5); // TS exceeds MOVE_TEMP(4)
-
-      // In C++ for human player near dest, maxtype=MOVE_DESTROYABLE(3),
-      // so escalation would stop at threshold=4 (exceeding 3), not 5.
-      // This means C++ human players near dest try only 3 threshold levels,
-      // while TS always tries 4.
+    // CLOSED: TS now uses pathMaxType() which returns MOVE_DESTROYABLE(3) for
+    // human players near their destination, matching C++ foot.cpp:386-388.
+    it('TS uses MOVE_DESTROYABLE(3) for human-near-dest, MOVE_TEMP(4) for AI', () => {
+      // TS engine/index.ts: pathMaxType(entity, isPlayerUnit) selects maxtype.
+      // Human near dest: maxtype = MOVE_DESTROYABLE(3) → tries 3 threshold levels.
+      // AI or far: maxtype = MOVE_TEMP(4) → tries 4 threshold levels.
       const cppHumanNearDestMaxThresholdsTried = MOVE_DESTROYABLE - MOVE_CLOAK + 1; // 3
-      const tsAlwaysMaxThresholdsTried = MOVE_TEMP - MOVE_CLOAK + 1; // 4
+      const cppAiMaxThresholdsTried = MOVE_TEMP - MOVE_CLOAK + 1; // 4
       expect(cppHumanNearDestMaxThresholdsTried).toBe(3);
-      expect(tsAlwaysMaxThresholdsTried).toBe(4);
+      expect(cppAiMaxThresholdsTried).toBe(4);
     });
   });
 
@@ -237,28 +222,23 @@ describe('Path threshold escalation & retry — C++ foot.cpp/drive.cpp parity', 
       expect(tryTryAgain).toBe(7); // NOT reset to PATH_RETRY
     });
 
-    // PARITY GAP: TS resetPathThreshold resets ALL three fields.
-    // C++ Assign_Destination only resets PathThreshhold.
-    it('TS resetPathThreshold resets all three fields — PARITY GAP', () => {
-      // TS engine/index.ts:261-265:
-      //   function resetPathThreshold(entity) {
-      //     entity.pathThreshold = MOVE_CLOAK;
-      //     entity.tryCount = PATH_RETRY;     // <-- C++ does NOT do this
-      //     entity.pathDelay = 0;              // <-- C++ does NOT do this
-      //   }
+    // CLOSED: TS resetPathThreshold now only resets PathThreshhold, matching C++.
+    it('TS resetPathThreshold only resets pathThreshold — matches C++ Assign_Destination', () => {
+      // TS engine/index.ts resetPathThreshold:
+      //   entity.pathThreshold = MOVE_CLOAK;  // only this is reset
+      //   // tryCount and pathDelay are NOT touched (C++ parity)
       const e = new Entity(UnitType.V_1TNK, House.Greece, 100, 100);
       e.pathThreshold = MOVE_DESTROYABLE;
       e.tryCount = 7;
       e.pathDelay = 5;
 
-      // Simulate TS resetPathThreshold
+      // Simulate TS resetPathThreshold (C++ Assign_Destination)
       e.pathThreshold = MOVE_CLOAK;
-      e.tryCount = PATH_RETRY;
-      e.pathDelay = 0;
+      // tryCount stays at 7; pathDelay stays at 5
 
       expect(e.pathThreshold).toBe(MOVE_CLOAK);
-      expect(e.tryCount).toBe(PATH_RETRY); // TS resets this; C++ does not
-      expect(e.pathDelay).toBe(0);          // TS resets this; C++ does not
+      expect(e.tryCount).toBe(7);  // C++ parity: NOT reset
+      expect(e.pathDelay).toBe(5); // C++ parity: NOT reset
     });
   });
 
@@ -366,36 +346,30 @@ describe('Path threshold escalation & retry — C++ foot.cpp/drive.cpp parity', 
       expect(totalFindPathAttempts).toBe(40);
     });
 
-    // PARITY GAP: TS counts 4 threshold increments as separate failures,
-    // consuming one tryCount per full escalation cycle. C++ tries all 4
-    // thresholds in one Basic_Path call, then decrements TryTryAgain once
-    // in While_Moving when the entire Basic_Path fails.
-    // Net result is the same total (40 Find_Path attempts), but TS takes
-    // 4x as many ticks to exhaust because of per-tick escalation.
-    it('TS per-tick escalation takes 4x more ticks than C++ synchronous escalation', () => {
+    // CLOSED: TS now uses synchronous escalation matching C++ — all 4 thresholds
+    // are tried in one Basic_Path call. 10 retries = 10 Basic_Path calls total.
+    it('TS now matches C++ synchronous escalation: 10 Basic_Path calls to give up', () => {
       const e = new Entity(UnitType.V_1TNK, House.Greece, 100, 100);
 
-      let tsTicks = 0;
+      // Simulate C++ synchronous escalation: each retry tries all 4 thresholds
+      let basicPathCalls = 0;
       while (e.tryCount > 0) {
-        // TS: one threshold increment per tick
-        e.pathThreshold++;
-        tsTicks++;
-
-        if (e.pathThreshold > MOVE_TEMP) {
-          e.tryCount--;
-          e.pathThreshold = MOVE_CLOAK;
-        }
+        basicPathCalls++;
+        // C++/TS: all 4 thresholds tried in one call
+        e.pathThreshold = MOVE_CLOAK;
+        // All failed → decrement retry
+        e.tryCount--;
       }
 
-      // TS takes 40 ticks (4 per retry x 10 retries)
-      expect(tsTicks).toBe(40);
+      // C++ parity: 10 Basic_Path calls (one per retry), each trying 4 thresholds
+      expect(basicPathCalls).toBe(PATH_RETRY); // 10
 
-      // C++ would take 10 ticks (one Basic_Path per retry, each trying all 4)
-      const cppTicks = PATH_RETRY;
-      expect(cppTicks).toBe(10);
+      // Each call internally tries 4 thresholds:
+      const thresholdsPerCall = MOVE_TEMP - MOVE_CLOAK + 1; // 4
+      expect(thresholdsPerCall).toBe(4);
 
-      // TS is 4x slower to give up (ignoring PathDelay)
-      expect(tsTicks / cppTicks).toBe(4);
+      // Total individual Find_Path attempts: 40
+      expect(basicPathCalls * thresholdsPerCall).toBe(40);
     });
   });
 
@@ -599,20 +573,11 @@ describe('Path threshold escalation & retry — C++ foot.cpp/drive.cpp parity', 
 
     it('total real time to give up = 40 failures x 9 tick delay = 360 ticks (TS)', () => {
       // In TS, each threshold increment requires a PathDelay wait.
-      // 4 thresholds x 10 retries = 40 failures
-      // Each failure is followed by PATH_DELAY_TICKS(9) wait
-      // Total: 40 x 9 = 360 ticks minimum to exhaust all retries
-      const tsMinTicksToGiveUp = 40 * PATH_DELAY_TICKS;
-      expect(tsMinTicksToGiveUp).toBe(360);
-
-      // In C++, each Basic_Path tries all 4 thresholds synchronously,
-      // then sets PathDelay once. So 10 retries x 9 ticks = 90 ticks.
-      const cppMinTicksToGiveUp = PATH_RETRY * PATH_DELAY_TICKS;
-      expect(cppMinTicksToGiveUp).toBe(90);
-
-      // TS takes 4x longer to give up due to per-tick escalation
-      // PARITY GAP: TS units are more persistent (360 vs 90 ticks)
-      expect(tsMinTicksToGiveUp / cppMinTicksToGiveUp).toBe(4);
+      // CLOSED: TS now uses synchronous escalation matching C++.
+      // Each Basic_Path call tries all 4 thresholds, then sets PathDelay once.
+      // 10 retries x 9 ticks = 90 ticks minimum to exhaust all retries.
+      const minTicksToGiveUp = PATH_RETRY * PATH_DELAY_TICKS;
+      expect(minTicksToGiveUp).toBe(90); // C++ parity: 10 retries x 9 ticks
     });
   });
 

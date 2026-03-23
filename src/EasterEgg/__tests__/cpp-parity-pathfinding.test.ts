@@ -414,12 +414,16 @@ describe('C++ parity: LOS + edge-following pathfinding (findpath.cpp)', () => {
       expect(last.cy).toBe(goal.cy);
     });
 
-    it('A* returns empty for unreachable goal terrain', () => {
+    it('A* redirects to nearest passable cell for impassable goal (C++ Nearby_Location)', () => {
       const map = makeTestMap();
-      // Goal on water (impassable for land)
+      // Goal on water (impassable for land) — A* finds nearest passable cell
       map.setTerrain(60, 60, Terrain.WATER);
       const path = findPathAStar(map, { cx: 50, cy: 50 }, { cx: 60, cy: 60 }, true);
-      expect(path).toEqual([]);
+      // C++ parity: Nearby_Location redirects to adjacent passable cell
+      expect(path.length).toBeGreaterThan(0);
+      for (const cell of path) {
+        expect(map.isTerrainPassable(cell.cx, cell.cy)).toBe(true);
+      }
     });
   });
 
