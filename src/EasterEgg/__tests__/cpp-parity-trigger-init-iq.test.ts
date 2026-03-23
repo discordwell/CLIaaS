@@ -31,8 +31,9 @@
  * TS implementation:
  *   engine/scenario.ts   — initializeTriggerAttachmentCounts, consumeSemiPersistentAttachment,
  *                           noteTriggerAttachment, cellTriggers parsing, IQ parsing from INI
- *   engine/ai.ts         — AIHouseState.iq, IQ gates on production/repair/sell/attack/scatter
- *   engine/combat.ts     — aiScatterOnDamage IQ >= 2 gate
+ *   engine/ai.ts         — AIHouseState.iq/isAlerted, IQ gates on production/repair/sell/attack/scatter,
+ *                           updateAIIQGates (house.cpp:936-940 auto-enable)
+ *   engine/combat.ts     — aiScatterOnDamage IQ >= 3 gate (C++ IQScatter=3)
  *   engine/superweapon.ts — AI superweapon usage IQ >= 3 gate
  *   engine/index.ts      — aiIQ(house) method, houseIQs mapping
  */

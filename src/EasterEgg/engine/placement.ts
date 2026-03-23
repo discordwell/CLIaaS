@@ -62,6 +62,8 @@ export interface PlacementContext {
   evaMessages: { text: string; tick: number }[];
   effects: Effect[];
   map: GameMap;
+  /** AI house states — used by deployMCV to set IsStarted (C++ unit.cpp:1549) */
+  aiStates?: Map<House, { isStarted: boolean }>;
 
   // Callbacks
   isAllied(a: House, b: House): boolean;
@@ -242,6 +244,11 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
   // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below FACT)
   for (const bc of getBibCells('FACT', cx, cy)) {
     ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+  }
+  // C++ unit.cpp:1549: House->IsStarted = true — MCV deploy enables production
+  if (ctx.aiStates) {
+    const aiState = ctx.aiStates.get(entity.house);
+    if (aiState) aiState.isStarted = true;
   }
   ctx.playSound('eva_acknowledged');
   ctx.effects.push({

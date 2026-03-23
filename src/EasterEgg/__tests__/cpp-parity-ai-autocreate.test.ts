@@ -82,6 +82,10 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
 
 function addAIHouse(ctx: AIContext, house: House, overrides: Partial<AIHouseState> = {}): AIHouseState {
   const state = createAIHouseState(ctx, house);
+  // C++ house.cpp:988: autocreate requires IsAlerted — default to true when productionEnabled
+  if (overrides.productionEnabled && overrides.isAlerted === undefined) {
+    overrides.isAlerted = true;
+  }
   Object.assign(state, overrides);
   ctx.aiStates.set(house, state);
   return state;

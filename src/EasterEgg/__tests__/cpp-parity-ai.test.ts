@@ -125,6 +125,7 @@ function makeAIState(overrides: Partial<AIHouseState> & { house: House }): AIHou
     maxUnit: -1,
     maxInfantry: -1,
     maxBuilding: -1,
+    isAlerted: true,
     ...overrides,
   };
 }

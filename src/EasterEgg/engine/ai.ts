@@ -64,6 +64,8 @@ export interface AIHouseState {
   lastAttackerEnemy: House | null;
   /** C++ IsStarted — whether this house has placed its first building */
   isStarted: boolean;
+  /** C++ IsAlerted — enables autocreate team spawning (house.cpp:939, house.cpp:988) */
+  isAlerted: boolean;
   /** C++ IsBaseBuilding — controls AI base construction (taction.cpp TACTION_BASE_BUILDING) */
   isBaseBuilding: boolean;
 }
@@ -380,6 +382,7 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     unitsKilledBy: new Map(),
     lastAttackerEnemy: null,
     isStarted: true,
+    isAlerted: false,
     isBaseBuilding: false,
   };
 }
@@ -1280,6 +1283,31 @@ export function updateDesignatedEnemy(ctx: AIContext): void {
     }
 
     state.designatedEnemy = bestEnemy;
+  }
+}
+
+/**
+ * C++ house.cpp:936-940 — IQ-based auto-enable for base building.
+ * If IsBaseBuilding is already true OR the house IQ >= IQProduction (default 5),
+ * force-enable IsBaseBuilding, IsStarted, and IsAlerted.
+ *
+ * This runs every AI tick so high-IQ houses auto-enable without needing triggers.
+ * IQProduction default = 5 (rules.cpp:145).
+ */
+const IQ_PRODUCTION = 5;
+
+export function updateAIIQGates(ctx: AIContext): void {
+  for (const [, state] of ctx.aiStates) {
+    // C++ house.cpp:936-940:
+    //   if (IsBaseBuilding || IQ >= Rule.IQProduction) {
+    //     IsBaseBuilding = true; IsStarted = true; IsAlerted = true;
+    //   }
+    if (state.isBaseBuilding || state.iq >= IQ_PRODUCTION) {
+      state.isBaseBuilding = true;
+      state.isStarted = true;
+      state.isAlerted = true;
+      state.productionEnabled = true;
+    }
   }
 }
 
@@ -2234,6 +2262,8 @@ export function updateAIAutocreateTeams(ctx: AIContext): void {
   if (ctx.tick % 120 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
+    // C++ house.cpp:988: autocreate only fires when IsAlerted is true for this house
+    if (!state.isAlerted) continue;
     if (!state.productionEnabled) continue;
     if (state.iq < 2) continue;
 
