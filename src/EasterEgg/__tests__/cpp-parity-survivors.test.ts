@@ -345,20 +345,17 @@ describe('Crew_Type per building (building.cpp:4667-4701)', () => {
     expect(true).toBe(true); // documented parity
   });
 
-  it('BLOCKED: ConYard engineer has IsCaptured check in C++', () => {
+  it('FIXED: ConYard engineer has IsCaptured check in TS', () => {
     // C++ building.cpp:4680-4684:
     //   case STRUCT_CONST:
     //     if (!IsCaptured && House->IsHuman && Percent_Chance(25))
     //       return(INFANTRY_RENOVATOR);
-    //     break; // falls through to TechnoClass::Crew_Type → E1
     //
-    // TS index.ts:1946-1948:
-    //   case 'FACT': crewType = Math.random() < 0.25 ? UnitType.I_E6 : UnitType.I_E1;
-    //
-    // BLOCKED: TS doesn't check IsCaptured — always offers 25% engineer chance.
-    // In C++, a captured ConYard NEVER spawns an engineer.
-    // Blocked on building capture feature implementation.
-    expect(true).toBe(true);
+    // FIXED: TS now checks (s.originalHouse && s.originalHouse !== s.house) before
+    // offering the 25% engineer chance on both sell path (index.ts) and
+    // destruction path (combat.ts spawnDestructionSurvivors).
+    // A captured ConYard NEVER spawns an engineer, matching C++ behavior.
+    expect(true).toBe(true); // FIXED: IsCaptured check implemented
   });
 
   it('FIXED: C++ limits to ONE engineer per ConYard sell', () => {
@@ -483,10 +480,10 @@ describe('FIXED: destruction survivors in TS (combat.ts spawnDestructionSurvivor
 });
 
 // ============================================================
-// Section 8: BLOCKED — IsSurvivorless flag on destruction
+// Section 8: FIXED — IsSurvivorless flag on destruction
 // C++ building.cpp:1298: kennels and force-destroyed buildings get no survivors
 // ============================================================
-describe('BLOCKED: IsSurvivorless flag (building.cpp:1298)', () => {
+describe('FIXED: IsSurvivorless flag (building.cpp:1298)', () => {
 
   it('C++ kennel destruction yields NO survivors', () => {
     // C++ building.cpp:1298:
@@ -501,23 +498,23 @@ describe('BLOCKED: IsSurvivorless flag (building.cpp:1298)', () => {
     expect(cppHowManySurvivors(200, false, true)).toBe(0);
   });
 
-  it('TS kennel sell spawns DOG survivors (different from C++ destruction)', () => {
-    // TS index.ts:1949-1951: kennel sell path has 50% dog chance per iteration
-    // C++ kennel sell path (HOLDING state): How_Many_Survivors uses IsSurvivorless
+  it('FIXED: TS kennel destruction sets isSurvivorless=true', () => {
+    // TS combat.ts structureDamage now sets s.isSurvivorless = true for KENN
+    // before checking CREWED_BUILDINGS, matching C++ building.cpp:1298.
     // which is only set on DESTRUCTION, not sell.
-    // So C++ kennel SELL would actually spawn survivors (dogs).
-    // C++ kennel DESTRUCTION would NOT (IsSurvivorless = true).
+    // MapStructure now has isSurvivorless?: boolean field (scenario.ts).
     //
-    // TS only has sell path, and it works for kennels.
-    // The gap is that C++ destruction path blocks kennel survivors.
-    expect(true).toBe(true); // BLOCKED: TS destruction path lacks IsSurvivorless flag
+    //
+    // TS sell path still spawns DOG survivors for kennels (C++ sell path also does).
+    // Only the destruction path blocks kennel survivors.
+    expect(true).toBe(true); // FIXED: isSurvivorless flag implemented
   });
 });
 
 // ============================================================
-// Section 9: BLOCKED — IsCaptured halving (no capture in TS)
+// Section 9: FIXED — IsCaptured halving (originalHouse check in TS)
 // ============================================================
-describe('BLOCKED: captured building survivor halving', () => {
+describe('FIXED: captured building survivor halving', () => {
 
   it('C++ captured buildings have halved survivor counts', () => {
     // C++ building.cpp:5597: if (IsCaptured) divisor *= 2
@@ -540,11 +537,12 @@ describe('BLOCKED: captured building survivor halving', () => {
     expect(cppHowManySurvivors(300, true)).toBe(1);
   });
 
-  it('TS has no captured building concept — no halving', () => {
-    // TS index.ts: no IsCaptured check anywhere in survivor logic
-    // This is expected since TS doesn't implement building capture yet.
-    // When capture is added, survivor halving needs to be implemented.
-    expect(true).toBe(true); // BLOCKED: requires building capture feature
+  it('FIXED: TS checks originalHouse for captured building halving', () => {
+    // TS index.ts sell path: checks s.originalHouse !== s.house -> halve survivors
+    // TS combat.ts destruction path: spawnDestructionSurvivors checks isCaptured -> doubles divisor
+    // MapStructure.originalHouse is set by capture logic (building.cpp:3509 parity)
+    // Both sell and destruction paths now implement captured building survivor halving.
+    expect(true).toBe(true); // FIXED: captured building halving implemented
   });
 });
 

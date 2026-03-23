@@ -1214,6 +1214,7 @@ export interface MapStructure {
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
   originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
+  isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
 }
 
 /** Weapon stats for defensive structures */
