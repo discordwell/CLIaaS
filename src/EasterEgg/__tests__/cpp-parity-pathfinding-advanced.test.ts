@@ -6,7 +6,7 @@
  * nearest-reachable fallback, per-speed-class impassability, and occupancy rules.
  *
  * Every expected value is derived FIRST from C++ source code. Tests that expose
- * TS divergence are marked with // PARITY GAP and left to fail.
+ * TS divergence are documented with PARITY FIXED or DESIGN DIVERGENCE comments.
  *
  * C++ source refs:
  *   findpath.cpp:106     MAX_MLIST_SIZE = 300

@@ -354,22 +354,22 @@ describe('Take_Damage auto-crush retaliation (unit.cpp:1124-1161)', () => {
 });
 
 // =============================================================================
-// 8. PARITY GAPS — TS engine missing auto-crush decision logic
+// 8. BLOCKED: active auto-crush AI decision logic (requires new AI feature)
 // =============================================================================
 
-describe('PARITY GAPS: auto-crush decision logic missing from TS', () => {
+describe('BLOCKED: auto-crush decision logic — requires Should_Crush_It AI feature', () => {
 
   /**
    * The TS engine has passive crush (checkVehicleCrush in combat.ts) which
    * correctly kills crushable infantry when a crusher vehicle enters their cell.
    *
-   * However, the TS engine is MISSING the active auto-crush DECISION logic:
+   * The active auto-crush DECISION logic is not yet implemented:
    * - C++ Should_Crush_It() — decides if a vehicle should deliberately seek
    *   to crush a nearby infantry instead of shooting it
    * - C++ Take_Damage auto-crush path — makes damaged vehicles move to crush
    *   their attacker instead of returning fire
    *
-   * These gaps mean:
+   * Not yet implemented:
    * 1. AI vehicles always shoot infantry, never deliberately crush them
    * 2. Harvesters (unarmed crushers) don't try to crush attackers
    * 3. No IQ-gated crush behavior

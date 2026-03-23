@@ -269,7 +269,7 @@ describe('C++ parity: Power_Fraction threshold (house.cpp:4160-4170)', () => {
 
     updateGapGenerators(ctx);
     // C++ Power_Fraction: Drain==0 → return 1 → GAP should activate
-    // TS: pf = 0/1 = 0 < 1 → GAP does NOT activate  // PARITY GAP
+    // PARITY FIXED: TS fog.ts now checks powerConsumed===0 → pf=1 (matches C++)
     expect(countJammedCells(ctx.map)).toBeGreaterThan(0);
   });
 });
@@ -709,7 +709,7 @@ describe('C++ parity: periodic re-jam cycle', () => {
 describe('C++ parity: power fraction edge cases for GAP gating', () => {
   it('C++ Power=0, Drain=0 → fraction=1 (GAP activates); TS may diverge', () => {
     // C++ house.cpp:4164: Drain == 0 → return 1 → GAP activates
-    // TS fog.ts:242-244: powerProduced=0 → pf = 0 → GAP does NOT activate  // PARITY GAP
+    // PARITY FIXED: TS fog.ts now checks powerConsumed===0 → pf=1 (matches C++)
     const ctx = makeFogContext({
       structures: [makeGapStructure(40, 40)],
       powerProduced: 0,

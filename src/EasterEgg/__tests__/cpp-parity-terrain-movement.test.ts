@@ -477,8 +477,8 @@ describe('Crusher mechanics — C++ drive.cpp Ok_To_Move', () => {
 
   /**
    * C++ parity: MGG (Mobile Gap Generator) is NOT Tracked in rules.ini.
-   * It has no Tracked=yes line. So in C++ it should NOT be a crusher.
-   * But the TS engine marks MGG as crusher=true — this may be a PARITY GAP.
+   * It has no Tracked=yes line — but C++ udata.cpp:265 sets IsCrusher=true.
+   * TS correctly matches C++ behavior (PARITY FIXED).
    */
   it('PARITY FIXED: MGG has IsCrusher=true in C++ udata.cpp:265 despite no Tracked=yes', () => {
     // rules.ini [MGG] has no Tracked=yes line, but C++ udata.cpp:265 sets IsCrusher=true
@@ -781,9 +781,8 @@ describe('TREE terrain mapped to Rock speed — C++ TerrainClass parity', () => 
    */
 
   it('TREE speed for FOOT = 0.0 (Rock mapping)', () => {
-    // TS maps TREE to Rock speed, which is 0.0 for FOOT
-    // But C++ trees are on CLEAR cells: FOOT speed would be 0.9
-    // PARITY GAP: TS gives 0.0 but C++ gives 0.9 (trees don't slow infantry)
+    // PARITY FIXED: TS now maps TREE → Clear speed table, matching C++
+    // C++ trees are TerrainClass on CLEAR cells: FOOT speed = 0.9
     const map = new GameMap();
     map.setBounds(0, 0, 50, 50);
     map.setTerrain(10, 10, Terrain.TREE);

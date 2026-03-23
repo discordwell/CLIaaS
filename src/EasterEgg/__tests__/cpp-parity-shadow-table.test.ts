@@ -154,7 +154,7 @@ describe('full 256-entry table: C++ _shadow[] vs TS SHADOW_TABLE (display.cpp:13
         );
       }
     }
-    expect(mismatches, `PARITY GAPS:\n${mismatches.join('\n')}`).toHaveLength(0);
+    expect(mismatches, `MISMATCHES:\n${mismatches.join('\n')}`).toHaveLength(0);
   });
 
   // Break table into 4 quadrants of 64 entries each for finer diagnostics
