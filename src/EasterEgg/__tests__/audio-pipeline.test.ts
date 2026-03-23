@@ -1253,14 +1253,20 @@ describe('MusicPlayer — construction', () => {
     expect(player.getVolume()).toBe(0.4);
   });
 
-  it('initializes with shuffled playlist containing all 15 track indices', () => {
+  it('initializes with house-filtered playlist (C++ parity: Is_Allowed house filter)', () => {
+    // Default faction is 'allied' — gets 12 Normal Allied-owned tracks
+    // C++ theme.cpp:481-512: Is_Allowed() filters by Normal flag AND house ownership
     const player = new MusicPlayer();
     const playlist = (player as any).playlist as number[];
-    expect(playlist.length).toBe(15);
-    expect(new Set(playlist).size).toBe(15);
-    for (let i = 0; i < 15; i++) {
-      expect(playlist).toContain(i);
-    }
+    // Allied faction: 12 tracks (Soviet-owned tracks 2, 7, 11 are excluded)
+    expect(playlist.length).toBe(12);
+    expect(new Set(playlist).size).toBe(12);
+    // Soviet-only tracks should NOT be present
+    expect(playlist).not.toContain(2);  // crush (Soviet)
+    expect(playlist).not.toContain(7);  // run (Soviet)
+    expect(playlist).not.toContain(11); // militant_force (Soviet)
+    // Score track (index 15, Normal=false) should NOT be present
+    expect(playlist).not.toContain(15);
   });
 });
 

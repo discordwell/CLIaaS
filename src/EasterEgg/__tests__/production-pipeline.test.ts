@@ -1285,16 +1285,17 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(entry!.progress).toBeCloseTo(0.125);
   });
 
-  it('tickProduction deducts costPerTick incrementally (PR3)', () => {
-    const e1 = findItem('E1'); // cost=100, buildTime=45
+  it('tickProduction deducts costPerTick incrementally (C++ integer division)', () => {
+    const e1 = findItem('E1'); // cost=100, buildTime depends on INI
     const ctx = makeMockProductionContext({ credits: 5000 });
     startProduction(ctx, e1);
     const creditsBefore = ctx.credits;
     tickProduction(ctx);
     const entry = ctx.productionQueue.get('right')!;
-    const expectedPerTick = 100 / e1.buildTime;
-    expect(creditsBefore - ctx.credits).toBeCloseTo(expectedPerTick, 5);
-    expect(entry.costPaid).toBeCloseTo(expectedPerTick, 5);
+    // C++ parity: integer division — floor(remainingCost / remainingSteps), min 1
+    const expectedPerTick = Math.max(1, Math.floor(e1.cost / e1.buildTime));
+    expect(creditsBefore - ctx.credits).toBe(expectedPerTick);
+    expect(entry.costPaid).toBe(expectedPerTick);
   });
 
   it('tickProduction does not apply multi-factory speedup (C++ parity: each factory is independent)', () => {
