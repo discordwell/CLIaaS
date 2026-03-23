@@ -176,6 +176,7 @@ import {
   getAIBuildOrder as _getAIBuildOrder,
   aiPlaceStructure as _aiPlaceStructure,
   updateAIConstruction as _updateAIConstruction,
+  updateAIIQGates as _updateAIIQGates,
   updateAIStrategicPlanner as _updateAIStrategicPlanner,
   updateAIHarvesters as _updateAIHarvesters,
   updateAIAttackGroups as _updateAIAttackGroups,
@@ -858,6 +859,7 @@ export class Game {
       evaMessages: this.evaMessages,
       effects: this.effects,
       map: this.map,
+      aiStates: this.aiStates,
       isAllied: (a, b) => this.isAllied(a, b),
       playSound: (n) => this.audio.play(n as SoundName),
       getAvailableItems: () => this.getAvailableItems(),
@@ -1842,6 +1844,9 @@ export class Game {
     if (this.tick % (GAME_TICKS_PER_SEC * spawnSec) === 0) {
       this.updateQueenSpawning();
     }
+
+    // C++ house.cpp:936-940: IQ-based auto-enable runs at start of every AI tick
+    this.updateAIIQGates();
 
     // AI strategic planner — runs every 150 ticks (skip for ant missions)
     if (!this.scenarioId.startsWith('SCA')) {
@@ -5455,7 +5460,15 @@ export class Game {
       this.missionTimer += result.timerExtend * TIME_UNIT_TICKS;
       this.missionTimerExpired = false;
     }
-    if (result.autocreate !== undefined) this.autocreateEnabled = true;
+    if (result.autocreate !== undefined) {
+      this.autocreateEnabled = true;
+      // C++ taction.cpp:648-652: TACTION_AUTOCREATE sets house->IsAlerted = true
+      if (trigger.house !== undefined) {
+        const acHouse = houseIdToHouse(trigger.house);
+        const aiState = this.aiStates.get(acHouse);
+        if (aiState) aiState.isAlerted = true;
+      }
+    }
     if (result.destroyTeam !== undefined) this.destroyedTeams.add(result.destroyTeam);
     if (result.startTimer) this.missionTimerRunning = true;
     if (result.stopTimer) this.missionTimerRunning = false;
@@ -5523,14 +5536,17 @@ export class Game {
       const aiState = this.aiStates.get(bbHouse);
       if (aiState) {
         aiState.isBaseBuilding = result.baseBuilding.enabled;
+        // C++ house.cpp:936-940: IsBaseBuilding cascade → IsStarted + IsAlerted
         if (result.baseBuilding.enabled) {
           aiState.isStarted = true;
+          aiState.isAlerted = true;
           aiState.productionEnabled = true;
         }
       } else if (result.baseBuilding.enabled && !this.isAllied(bbHouse, this.playerHouse)) {
         const newState = this.createAIHouseState(bbHouse);
         newState.isBaseBuilding = true;
         newState.isStarted = true;
+        newState.isAlerted = true;
         newState.productionEnabled = true;
         this.aiStates.set(bbHouse, newState);
       }
@@ -5648,15 +5664,17 @@ export class Game {
       const aiState = this.aiStates.get(bbHouse);
       if (aiState) {
         aiState.isBaseBuilding = result.baseBuilding.enabled;
-        // C++ house.cpp:936-940: when IsBaseBuilding goes true, also set IsStarted + IsAlerted
+        // C++ house.cpp:936-940: IsBaseBuilding cascade → IsStarted + IsAlerted
         if (result.baseBuilding.enabled) {
           aiState.isStarted = true;
+          aiState.isAlerted = true;
           aiState.productionEnabled = true;
         }
       } else if (result.baseBuilding.enabled && !this.isAllied(bbHouse, this.playerHouse)) {
         const newState = this.createAIHouseState(bbHouse);
         newState.isBaseBuilding = true;
         newState.isStarted = true;
+        newState.isAlerted = true;
         newState.productionEnabled = true;
         this.aiStates.set(bbHouse, newState);
       }
@@ -6810,6 +6828,11 @@ export class Game {
   /** Create initial AIHouseState for a house, applying difficulty modifiers */
   private createAIHouseState(house: House): AIHouseState {
     return _createAIHouseState(this._aiCtx, house);
+  }
+
+  /** C++ house.cpp:936-940: IQ-based auto-enable for base building/production/autocreate */
+  private updateAIIQGates(): void {
+    this._runAI(ctx => _updateAIIQGates(ctx));
   }
 
   /** AI strategic planner — phase transitions every 150 ticks (~10s) */
