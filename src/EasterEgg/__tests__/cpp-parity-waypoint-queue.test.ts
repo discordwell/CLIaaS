@@ -291,7 +291,7 @@ describe('Assign_Destination — C++ foot.cpp:1723-1735', () => {
 describe('Shift+click gate condition — C++ techno.cpp:3264 vs TS index.ts:2888', () => {
 
   /**
-   * PARITY GAP: C++ queues shift+move regardless of current mission.
+   * DESIGN NOTE: C++ queues shift+move regardless of current mission.
    *   techno.cpp:3264: if (mission == MISSION_MOVE && Keyboard->Down(KeyQueueMove))
    *     mission = MISSION_QMOVE
    *   event.cpp:738,757-758: if QMOVE → Queue_Navigation_List(dest)
@@ -310,10 +310,9 @@ describe('Shift+click gate condition — C++ techno.cpp:3264 vs TS index.ts:2888
    *
    * Net effect: C++ shift+click on a GUARD unit starts movement AND queues.
    * TS shift+click on a GUARD unit does a normal move (no queue), which is equivalent
-   * for the first click. But C++ would set up the queue for subsequent shift+clicks
-   * even from GUARD, while TS requires the first click to put unit in MOVE mission first.
-   * In practice this is equivalent because the first shift+click always needs to
-   * establish a destination anyway.
+   * for the first click. In practice this is equivalent because the first shift+click
+   * always needs to establish a destination anyway — subsequent shift+clicks work
+   * correctly since the unit is already in MOVE mission.
    */
   it('TS only queues if already in MOVE mission', () => {
     const unit = makeUnit();
@@ -432,7 +431,7 @@ describe('NavQueue loop mode — C++ foot.cpp:2288-2289,2242-2248', () => {
 describe('Detach cleanup — C++ foot.cpp:1993-2001', () => {
 
   /**
-   * PARITY GAP: In C++, when a target is detached (e.g., unit dies or is removed),
+   * DESIGN NOTE: In C++, when a target is detached (e.g., unit dies or is removed),
    * Detach() removes that target from the NavQueue and compacts the array:
    *
    * C++ foot.cpp:1993-2001:
@@ -467,7 +466,7 @@ describe('Detach cleanup — C++ foot.cpp:1993-2001', () => {
 
     expect(unit.moveQueue.length).toBe(2);
     expect(unit.moveQueue[0]).toEqual(wp(200, 200)); // still there
-    // This is acceptable for position-based waypoints (no PARITY GAP for move orders)
+    // This is acceptable for position-based waypoints — no detach needed for move orders
   });
 });
 

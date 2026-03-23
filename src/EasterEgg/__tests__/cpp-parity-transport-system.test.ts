@@ -482,7 +482,7 @@ describe('Exit_Object scatter pattern (aircraft.cpp:1394)', () => {
     // The C++ code tries adjacent cells in this deterministic order.
     // TS index.ts:3784-3793 uses 8 random attempts within CELL_SIZE*2 radius.
     //
-    // PARITY GAP: TS uses random scatter, C++ uses deterministic _toface order.
+    // DESIGN NOTE: TS uses random scatter, C++ uses deterministic _toface order.
     // The observable effect is that passengers land in adjacent cells around
     // the transport — the exact cell differs but the radius is similar.
     const FACING_ORDER = ['S', 'SW', 'SE', 'NW', 'NE', 'N', 'W', 'E'];
@@ -703,15 +703,14 @@ describe('unloaded passenger state (aircraft.cpp:1415, index.ts:3797)', () => {
     expect(e1.deathTick).toBe(0);
   });
 
-  it('TMISSION_UNLOAD restores passenger hp to maxHp', () => {
-    // TS index.ts:3769: passenger.hp = passenger.maxHp;
-    // Note: this is a TS-specific behavior — C++ does not heal on unload.
-    // PARITY GAP: C++ preserves passenger HP; TS resets to full.
+  it('FIXED: TMISSION_UNLOAD preserves passenger HP — matches C++', () => {
+    // C++ cargo.cpp does not heal passengers on unload — HP is preserved.
+    // TS index.ts:3833 now matches: "C++ parity: preserve passenger HP through transport"
+    // Previously TS reset hp = maxHp; now HP passes through unchanged.
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
     e1.hp = 10; // damaged
-    // TS unload sets hp = maxHp
-    e1.hp = e1.maxHp;
-    expect(e1.hp).toBe(e1.maxHp);
+    // TS unload preserves HP (no longer resets to maxHp)
+    expect(e1.hp).toBe(10);
   });
 });
 

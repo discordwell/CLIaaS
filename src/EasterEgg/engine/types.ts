@@ -952,7 +952,7 @@ export function getStripSide(item: ProductionItem): StripType {
 /** Unit types that count as civilian evacuation — C++ _Counts_As_Civ_Evac() VIPs + IsCivilian types */
 export const CIVILIAN_UNIT_TYPES = new Set<string>([
   'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',
-  'EINSTEIN', 'GNRL', 'CHAN', // VIPs always evacuate per C++ aircraft.cpp:116-159
+  'EINSTEIN', 'GNRL', 'CHAN', 'DELPHI', // VIPs always evacuate per C++ aircraft.cpp:116-159
   // NOTE: Tanya (E7) is NOT in this set per C++ parity. In C++, Tanya evacuation
   // is controlled by Scen.IsTanyaEvac flag (aircraft.cpp:143), set per-scenario
   // via CivEvac=yes in the [Basic] INI section. See isTanyaEvac in AircraftContext.

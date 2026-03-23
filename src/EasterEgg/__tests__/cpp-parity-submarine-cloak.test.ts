@@ -380,8 +380,8 @@ describe('UNCLOAKING -> UNCLOAKED transition (techno.cpp:2462-2471)', () => {
 
   // C++ sets CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE after uncloaking completes.
   // This prevents immediate recloaking. TS does not implement CloakDelay.
-  // PARITY GAP: TS has no CloakDelay after uncloaking — sub recloak is immediate when
-  // conditions are met. C++ has Rule.CloakDelay * TICKS_PER_MINUTE cooldown.
+  // FIXED: TS now implements cloakDelay field matching C++ CloakDelay cooldown.
+  // C++ techno.cpp:2468: CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE after uncloaking.
   it('C++ sets CloakDelay after UNCLOAKING completes; TS now matches', () => {
     // C++ techno.cpp:2468: CloakDelay = Rule.CloakDelay * TICKS_PER_MINUTE;
     // TS now implements cloakDelay field, set after UNCLOAKING->UNCLOAKED transition.
@@ -877,7 +877,7 @@ describe('Scanner adjacency detection (foot.cpp:1373-1386)', () => {
 
     // TS detects CLOAKING subs too (broader than C++, which only checks CLOAKED)
     expect(ss.cloakState).toBe(CloakState.UNCLOAKING);
-    // PARITY GAP: C++ foot.cpp:1373 only checks `Cloak == CLOAKED`, not CLOAKING.
+    // DESIGN NOTE: C++ foot.cpp:1373 only checks `Cloak == CLOAKED`, not CLOAKING.
     // TS checks both CLOAKED and CLOAKING for scanner adjacency detection.
     // In practice this makes TS slightly more aggressive at revealing subs.
   });
@@ -1099,7 +1099,7 @@ describe('TS fog.ts global sonar sweep divergence from C++', () => {
 
     // TS: sub at long range, not near any scanner -> global sweep detects it
     // C++ would NOT detect this sub (no adjacency, no sonar pulse fired)
-    // PARITY GAP: TS global sonar sweep is more aggressive than C++
+    // DESIGN NOTE: TS global sonar sweep is more aggressive than C++
     expect(ss.cloakState).toBe(CloakState.UNCLOAKING); // TS behavior
     // C++ expected: ss.cloakState would remain CLOAKED
   });
