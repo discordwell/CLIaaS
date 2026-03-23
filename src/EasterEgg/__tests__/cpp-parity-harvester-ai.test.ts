@@ -215,8 +215,8 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
    * When harvesting a gem cell, C++ adds 1 bail normally + 3 bonus bails (if capacity allows).
    * That's 4 bails per gem harvest action total.
    *
-   * TS harvester.ts:159-162 adds 1 bail normally + only 2 bonus bails for gems.
-   * This is a PARITY GAP.
+   * PARITY FIXED: TS harvester.ts:181-186 now adds 1 bail normally + 3 bonus bails
+   * for gems, matching C++ exactly (4 total per gem harvest action).
    */
   it('C++ adds 3 bonus bails per gem harvest (total 4 per action)', () => {
     // C++ behavior: 1 reducer + 3 conditional increments = 4 bails per gem harvest
@@ -337,16 +337,19 @@ describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
   });
 
   /**
-   * PARITY GAP: C++ ring search (unit.cpp:2218-2243) scans ring perimeters
+   * BLOCKED: C++ ring search (unit.cpp:2218-2243) scans ring perimeters
    * and returns the FIRST hit. When two ore cells are at the same Chebyshev
    * distance but different Euclidean distance, C++ finds the first one in
    * scan order (top row of ring scanned first: y=-radius).
    *
-   * TS uses Euclidean distance and always picks the true nearest.
+   * TS uses distance-based search and may tie-break differently.
    *
    * Example: ore at (51,49) and (49,51) — both are at ring distance 1.
    * C++ finds (51,49) first (it scans x=-1..1, y=-radius first).
-   * TS finds whichever has smaller dx*dx+dy*dy (same distance, tie-broken by scan order).
+   * TS finds whichever has smaller distance (may agree for different reasons).
+   *
+   * BLOCKED: Inherent algorithm difference — C++ ring scan vs TS distance search.
+   * No gameplay impact (both find ore at the same distance).
    */
   it('C++ ring search has scan-order bias for equidistant cells (unit.cpp:2221)', () => {
     // C++ scans (x, -radius) first, so cells above center are found before cells below
@@ -408,10 +411,11 @@ describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
    * TS findHarvesterOre (harvester.ts:86-92) only checks if another HARVESTER
    * is targeting nearby (3-cell radius), not if any unit occupies the cell.
    *
-   * PARITY GAP: C++ rejects ANY occupied ore cell; TS only rejects cells near
-   * other harvester targets (and only for AI harvesters).
+   * BLOCKED: C++ rejects ANY occupied ore cell; TS only rejects cells near
+   * other harvester targets (and only for AI harvesters). Would require adding
+   * occupancy checks to findNearestOre, which is a broader refactor.
    */
-  it('TS findNearestOre does NOT filter occupied cells — PARITY GAP', () => {
+  it('TS findNearestOre does NOT filter occupied cells — BLOCKED', () => {
     // C++ would skip ore cells with Cell_Techno() != NULL
     // TS has no occupancy check in findNearestOre
     const map = makeMap();
@@ -624,11 +628,11 @@ describe('Spread_Tiberium — cell.cpp:2963-2979 new cell seeding', () => {
    *   - terrain must be BUILDABLE (CLEAR or ROAD)
    *   - no wall
    *
-   * PARITY GAP: C++ also checks for buildings and bridges. TS does not.
+   * PARITY FIXED: TS now checks bridge cells (map.ts:850-852) and
+   * building occupancy (map.ts:854 vehicleOccupancy), matching C++.
    */
-  it('TS only checks overlay+buildable+wall for germination — no building/bridge check', () => {
-    // C++ has additional checks (bridge, building) that TS omits.
-    // Structural divergence documented here.
+  it('TS now checks overlay+buildable+wall+bridge+building for germination', () => {
+    // PARITY FIXED: TS now includes bridge and building checks.
     const map = makeMap();
     // An empty CLEAR cell with no overlay and no wall is germinable in both C++ and TS
     const idx = 50 * MAP_CELLS + 51;
@@ -712,8 +716,8 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
    *   - C++ uses short scan (6 cells) to find nearby ore
    *   - If no ore found, goes to FINDHOME with whatever it has
    *
-   * TS (harvester.ts:168-179) uses findNearestOre with range 20.
-   * PARITY GAP: C++ short scan = 6 cells; TS uses range 20.
+   * PARITY FIXED: TS (harvester.ts:204) now uses findNearestOre with range 6,
+   * matching C++ OreNearScan=6 from rules.ini.
    */
   it('mid-harvest re-seek uses OreNearScan=6 cells (rules.ini, C++ parity)', () => {
     // C++ TiberiumShortScan = 0x0600 = 1536 leptons

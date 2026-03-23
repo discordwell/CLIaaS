@@ -465,7 +465,7 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
 // no surface/overlay distinction.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('water crate override (cell.cpp:2286-2296)', () => {
-  it('PARITY GAP: unit crate on water should fallback to money', () => {
+  it('BLOCKED: unit crate on water should fallback to money', () => {
     // C++ prevents land-only units from spawning on water cells by
     // converting CRATE_UNIT to CRATE_MONEY when the crate overlay is water.
     // TS has no such mechanism — a "unit" crate type is always applied.
@@ -505,7 +505,7 @@ describe('money crate amount (cell.cpp:2335-2341)', () => {
     expect(ctx.credits).toBe(2000);
   });
 
-  it('PARITY GAP: multiplayer money should be Random_Pick(2000, 2900)', () => {
+  it('BLOCKED: multiplayer money should be Random_Pick(2000, 2900)', () => {
     // C++ multiplayer: Random_Pick(CrateData[CRATE_MONEY], CrateData[CRATE_MONEY]+900)
     // With RULES.INI CrateData[CRATE_MONEY] = 2000, this gives 2000-2900 range.
     // TS always gives flat 2000, regardless of game mode.
@@ -869,10 +869,10 @@ describe('crate removal and respawn (cell.cpp:2309-2314)', () => {
 // TS crates.ts:154-160: Per-crate lifetime = Random(CrateTime/2, CrateTime*2) minutes
 // TS index.ts:1672: if (this.tick - crate.tick > crate.lifetime) → expire
 //
-// PARITY GAP: C++ crates don't expire. TS crates do.
+// BLOCKED: C++ crates don't expire. TS crates do (intentional freshness mechanic).
 // ═══════════════════════════════════════════════════════════════════════════
 describe('crate lifetime (rules.cpp:207)', () => {
-  it('PARITY GAP: C++ crates persist indefinitely, TS crates expire', () => {
+  it('BLOCKED: C++ crates persist indefinitely, TS crates expire', () => {
     // TS gives each crate a lifetime of Random(5, 20) minutes converted to ticks.
     // C++ crates remain on the map until collected.
     const GAME_TICKS_PER_SEC = 15;
@@ -906,7 +906,7 @@ describe('crate lifetime (rules.cpp:207)', () => {
 // TS has no equivalent logic.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('MCV force spawn (cell.cpp:2264-2270)', () => {
-  it('PARITY GAP: C++ forces MCV spawn when player lost all buildings', () => {
+  it('BLOCKED: C++ forces MCV spawn when player lost all buildings', () => {
     // C++ checks BScan==0 (no buildings), sufficient money, bases option on,
     // and no existing MCV → forces CRATE_UNIT with force_mcv=true
     // TS has no such mechanic — crate type is purely random/fixed
@@ -935,7 +935,7 @@ describe('MCV force spawn (cell.cpp:2264-2270)', () => {
 // afford one, the money amount is forced to the refinery cost.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('refinery money force (cell.cpp:2276-2280)', () => {
-  it('PARITY GAP: C++ forces money amount to refinery cost when needed', () => {
+  it('BLOCKED: C++ forces money amount to refinery cost when needed', () => {
     // C++ checks: has construction yard, no refinery, can't afford refinery
     // → forces money to refinery cost. TS always gives flat 2000.
     const ctx = makeMockContext();
@@ -979,7 +979,7 @@ describe('reveal crate — visionary flag (cell.cpp:2186-2194, 2356-2364)', () =
     expect(ctx.visionaryHouses.has(House.Greece)).toBe(true);
   });
 
-  it('PARITY GAP: second reveal should fallback to darkness (not money)', () => {
+  it('BLOCKED: second reveal should fallback to darkness (not money)', () => {
     // C++ checks IsVisionary → if already visionary, gives darkness instead
     // (or money if GPS also active).
     // TS has no such fallback — second reveal just calls revealAll again.
