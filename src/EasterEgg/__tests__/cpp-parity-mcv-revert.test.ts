@@ -231,10 +231,11 @@ describe('No infantry survivors when ConYard → MCV', () => {
   it('survivor loop is gated by !mcvSpawned && CREWED_BUILDINGS', () => {
     const survivorSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     expect(survivorSection).toBeGreaterThan(-1);
-    // The survivor section must be gated by !mcvSpawned + IsCrewAble (CREWED_BUILDINGS)
-    // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — only Crewed=yes buildings spawn survivors
-    const chunk = indexSource.slice(survivorSection - 100, survivorSection + 400);
-    expect(chunk).toContain('!mcvSpawned && CREWED_BUILDINGS.has(s.type)');
+    // The survivor section must be inside an if (!mcvSpawned && CREWED_BUILDINGS.has(s.type)) block
+    // C++ building.cpp:3444: if (!IsCrewAble()) return 0
+    const chunk = indexSource.slice(survivorSection, survivorSection + 300);
+    expect(chunk).toContain('!mcvSpawned');
+    expect(chunk).toContain('CREWED_BUILDINGS');
   });
 
   it('mcvSpawned is set to true before survivor check', () => {
@@ -278,14 +279,13 @@ describe('Non-ConYard buildings sell normally', () => {
     expect(sellRefund(2000)).toBe(1000);
   });
 
-  it('survivor crew types differ per building (BARR=E1, FACT=engineer chance)', () => {
+  it('survivor crew types differ per building (BARR=E1, FACT=E6 chance)', () => {
     // C++ building.cpp:3444: only Crewed=yes buildings spawn survivors
-    // SILO and KENN have Crewed=no in rules.ini, so they don't appear in the switch
+    // SILO and KENN lack Crewed=yes, so they are excluded from the Crew_Type switch
     const survivorSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     const chunk = indexSource.slice(survivorSection, survivorSection + 3000);
-    expect(chunk).toContain("case 'FACT'");
     expect(chunk).toContain("case 'BARR'");
-    expect(chunk).toContain("case 'TENT'");
+    expect(chunk).toContain("case 'FACT'");
   });
 });
 

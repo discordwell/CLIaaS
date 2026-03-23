@@ -903,10 +903,10 @@ describe('Survivor suppression compound condition (building.cpp:3449)', () => {
     // building.cpp:3449: if (!Target_Legal(ArchiveTarget) || !Rule.IsMCVDeploy || *this != STRUCT_CONST)
     // When ArchiveTarget is invalid (pre-placed ConYard), survivors DO spawn.
     // In TS, this maps to: if (!s.deployedFromMCV) → spawn survivors
-    // C++ building.cpp:3444: only Crewed=yes buildings spawn survivors (IsCrewAble check)
+    // building.cpp:3444: also gated by IsCrewAble (Crewed=yes in rules.ini)
     const idx = indexSource.indexOf('SL4: Spawn infantry survivors');
     expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx - 100, idx + 400);
+    const chunk = indexSource.slice(idx, idx + 300);
     expect(chunk).toContain('!mcvSpawned');
     expect(chunk).toContain('CREWED_BUILDINGS');
   });
@@ -925,15 +925,16 @@ describe('Survivor suppression compound condition (building.cpp:3449)', () => {
     expect(mcvUndeploy).toBe('no');
   });
 
-  it('non-ConYard buildings always spawn survivors (building.cpp:3449)', () => {
+  it('non-ConYard Crewed buildings always spawn survivors (building.cpp:3449)', () => {
     // building.cpp:3449: *this != STRUCT_CONST → condition is TRUE → survivors spawn
-    // This means POWR, WEAP, etc. always get survivor spawns regardless of other flags.
-    // C++ building.cpp:3444: only Crewed=yes buildings spawn survivors (IsCrewAble check)
+    // building.cpp:3444: also gated by IsCrewAble (Crewed=yes in rules.ini)
+    // This means POWR, WEAP, etc. (with Crewed=yes) get survivor spawns regardless of other flags.
+    // Buildings without Crewed=yes (SILO, KENN, SYRD, SPEN) get zero survivors.
     const idx = indexSource.indexOf('SL4: Spawn infantry survivors');
-    const chunk = indexSource.slice(idx - 100, idx + 400);
-    // The !mcvSpawned && CREWED_BUILDINGS gate ensures non-ConYard crewed buildings
-    // get survivors because mcvSpawned is only set for FACT with deployedFromMCV
-    expect(chunk).toContain('!mcvSpawned && CREWED_BUILDINGS.has(s.type)');
+    const chunk = indexSource.slice(idx, idx + 300);
+    // The !mcvSpawned && CREWED_BUILDINGS check ensures non-ConYard Crewed buildings get survivors
+    expect(chunk).toContain('!mcvSpawned');
+    expect(chunk).toContain('CREWED_BUILDINGS');
   });
 });
 

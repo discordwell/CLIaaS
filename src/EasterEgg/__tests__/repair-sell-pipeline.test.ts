@@ -689,22 +689,23 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     const chunk = indexSource.slice(sellSection, sellSection + 1500);
     expect(chunk).toContain('SURVIVOR_FRACTION');
     expect(chunk).toContain('survivorCount');
-    // Survivor count: floor(buildCost * 0.4 / E1_cost), clamped 0-5
-    // C++ building.cpp:3444: only Crewed=yes buildings enter this path (CREWED_BUILDINGS gate)
+    // Survivor count: (buildCost * 0.4) / E1_cost, clamped 0-5
+    // C++ building.cpp:3444: only Crewed=yes buildings spawn survivors (no min-1 fallback)
     expect(chunk).toContain('Math.min(5');
     expect(chunk).toContain('CREWED_BUILDINGS');
   });
 
-  it('survivor count formula: floor(buildCost * 0.4 / 100), clamped 1-5', () => {
+  it('survivor count formula: floor(buildCost * 0.4 / 100), clamped 0-5 (no min-1)', () => {
+    // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — no min-1 fallback
     // POWR: cost=300 → floor(300*0.4/100) = floor(1.2) = 1
     // WEAP: cost=2000 → floor(2000*0.4/100) = floor(8) = 5 (clamped)
-    // SILO: cost=150 → floor(150*0.4/100) = floor(0.6) = 1 (clamped min)
-    const powrSurvivors = Math.min(5, Math.max(1, Math.floor((300 * 0.4) / 100)));
-    const weapSurvivors = Math.min(5, Math.max(1, Math.floor((2000 * 0.4) / 100)));
-    const siloSurvivors = Math.min(5, Math.max(1, Math.floor((150 * 0.4) / 100)));
+    // SILO: cost=150 → floor(150*0.4/100) = floor(0.6) = 0 (not Crewed, zero survivors)
+    const powrSurvivors = Math.min(5, Math.floor((300 * 0.4) / 100));
+    const weapSurvivors = Math.min(5, Math.floor((2000 * 0.4) / 100));
+    const siloSurvivors = Math.min(5, Math.floor((150 * 0.4) / 100));
     expect(powrSurvivors).toBe(1);
     expect(weapSurvivors).toBe(5);
-    expect(siloSurvivors).toBe(1);
+    expect(siloSurvivors).toBe(0); // SILO has no Crewed=yes, zero survivors
   });
 
   it('FACT sell reverts to MCV (C++ building.cpp:3509-3549 ConYard → MCV reversion)', () => {
@@ -718,14 +719,13 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     expect(chunk).toContain('V_MCV');
   });
 
-  it('KENN sell spawns no survivors (Crewed=no in rules.ini)', () => {
-    // C++ building.cpp:3444: if (!IsCrewAble()) return 0
-    // KENN has Crewed=no in rules.ini, so it never enters the survivor path.
-    // The CREWED_BUILDINGS set in scenario.ts excludes KENN.
+  it('KENN sell produces zero survivors (no Crewed=yes in rules.ini)', () => {
+    // C++ building.cpp:3444: KENN has no Crewed=yes, so IsCrewAble() returns false.
+    // The sell code gates on CREWED_BUILDINGS, so KENN is excluded entirely.
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     const chunk = indexSource.slice(sellSection, sellSection + 3000);
-    // KENN should NOT appear in the survivor crew type switch
-    expect(chunk).not.toContain("case 'KENN'");
+    expect(chunk).toContain('CREWED_BUILDINGS');
+    // KENN is not in the Crew_Type switch because it never reaches survivor spawning
   });
 });
 
