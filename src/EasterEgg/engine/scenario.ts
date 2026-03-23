@@ -2197,8 +2197,12 @@ export function checkTriggerEvent(
       return (state.gameTick - state.triggerStartTick) >= requiredTicks;
     }
     case TEVENT_GLOBAL_SET:
+      // C++ scenario.h:197 — GlobalFlags[30]: indices must be in [0, 29]
+      if (event.data < 0 || event.data > 29) return false;
       return state.globals.has(event.data);
     case TEVENT_GLOBAL_CLEAR:
+      // C++ scenario.h:197 — GlobalFlags[30]: indices must be in [0, 29]
+      if (event.data < 0 || event.data > 29) return false;
       return !state.globals.has(event.data);
     case TEVENT_PLAYER_ENTERED:
       // C++ tevent.cpp:290-291 — object->Owner() must match Data.House
@@ -2538,16 +2542,18 @@ export function executeTriggerAction(
     }
 
     case TACTION_SET_GLOBAL:
+      // C++ scenario.cpp:265 — bounds check: (unsigned)global < ARRAY_SIZE(Scen.GlobalFlags)
       // C++ scenario.cpp:268 — only cascade when previous != value
-      if (!globals.has(action.data)) {
+      if (action.data >= 0 && action.data <= 29 && !globals.has(action.data)) {
         globals.add(action.data);
         result.globalChanged = action.data; // C++ parity (#38): immediate spring
       }
       break;
 
     case TACTION_CLEAR_GLOBAL:
+      // C++ scenario.cpp:265 — bounds check: (unsigned)global < ARRAY_SIZE(Scen.GlobalFlags)
       // C++ scenario.cpp:268 — only cascade when previous != value
-      if (globals.has(action.data)) {
+      if (action.data >= 0 && action.data <= 29 && globals.has(action.data)) {
         globals.delete(action.data);
         result.globalChanged = action.data; // C++ parity (#38): immediate spring
       }

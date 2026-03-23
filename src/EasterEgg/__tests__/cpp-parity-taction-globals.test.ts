@@ -187,22 +187,22 @@ describe('Different global indices are independent (trigger.cpp)', () => {
     executeWithGlobals(setGlobalAction(0), globals);
     executeWithGlobals(setGlobalAction(10), globals);
     executeWithGlobals(setGlobalAction(20), globals);
-    executeWithGlobals(setGlobalAction(30), globals);
+    executeWithGlobals(setGlobalAction(29), globals);
     expect(globals.size).toBe(4);
     expect(globals.has(0)).toBe(true);
     expect(globals.has(10)).toBe(true);
     expect(globals.has(20)).toBe(true);
-    expect(globals.has(30)).toBe(true);
+    expect(globals.has(29)).toBe(true);
   });
 
   it('clearing one global does not affect others', () => {
-    const globals = new Set<number>([0, 10, 20, 30]);
+    const globals = new Set<number>([0, 10, 20, 29]);
     executeWithGlobals(clearGlobalAction(20), globals);
     expect(globals.size).toBe(3);
     expect(globals.has(0)).toBe(true);
     expect(globals.has(10)).toBe(true);
     expect(globals.has(20)).toBe(false);
-    expect(globals.has(30)).toBe(true);
+    expect(globals.has(29)).toBe(true);
   });
 
   it('SET then CLEAR on same index restores original state', () => {
@@ -232,14 +232,14 @@ describe('Globals set spawned empty (trigger.cpp)', () => {
 
   it('SET_GLOBAL on a fresh empty globals set adds exactly one entry', () => {
     const globals = new Set<number>();
-    executeWithGlobals(setGlobalAction(42), globals);
+    executeWithGlobals(setGlobalAction(15), globals);
     expect(globals.size).toBe(1);
-    expect(globals.has(42)).toBe(true);
+    expect(globals.has(15)).toBe(true);
   });
 
   it('CLEAR_GLOBAL on a fresh empty globals set leaves it empty', () => {
     const globals = new Set<number>();
-    executeWithGlobals(clearGlobalAction(42), globals);
+    executeWithGlobals(clearGlobalAction(15), globals);
     expect(globals.size).toBe(0);
   });
 });

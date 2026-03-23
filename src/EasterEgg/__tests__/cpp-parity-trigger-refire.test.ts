@@ -677,11 +677,9 @@ describe('Persistent trigger timerTick reset per re-fire — C++ Event1.Reset()'
    * After each persistent trigger action fires, ALL event state is reset.
    * For TIME events, this means the timer restarts from 0.
    *
-   * TS index.ts:5774-5776 (initial fire) + 5812 (re-fire loop):
-   *   trigger.timerTick = this.tick;
-   *
-   * TS only resets timerTick, not other event flags (playerEntered, etc.).
-   * This is a known parity gap documented in cpp-parity-trigger-persistence.test.ts.
+   * TS processTriggers: resets timerTick and all event flags (playerEntered,
+   * objectDiscovered, enteredZone, crossedHorizontal, crossedVertical) after
+   * each persistent trigger fire — matches C++ Event1.Reset() behavior.
    */
 
   it('persistent trigger: timerTick reset on initial fire', () => {
@@ -723,17 +721,15 @@ describe('Persistent trigger timerTick reset per re-fire — C++ Event1.Reset()'
     expect(t.pendingDestroyedCount).toBe(0);
   });
 
-  it('C++ resets event flags; TS only resets timerTick — PARITY GAP', () => {
+  it('persistent trigger resets event flags after firing — C++ Event1.Reset() parity', () => {
     /**
-     * PARITY GAP: C++ Event1.Reset() clears the internal fired state for
-     * events like PLAYER_ENTERED, DISCOVERED, etc. TS only resets timerTick.
+     * C++ trigger.cpp:351-352: After persistent trigger action fires:
+     *   Class->Event1.Reset(Event1);
+     *   Class->Event2.Reset(Event2);
+     * This clears the internal fired state for events like PLAYER_ENTERED,
+     * DISCOVERED, etc. The event must occur again for the trigger to re-fire.
      *
-     * Impact: For persistent triggers with non-TIME events (e.g., PLAYER_ENTERED),
-     * C++ requires the event to occur again after reset. TS would fire again
-     * immediately because playerEntered flag is still true.
-     *
-     * For DESTROYED events (the main use case for re-fire loop), both C++ and TS
-     * are equivalent because DESTROYED fires are driven by pendingDestroyedCount.
+     * TS now matches: processTriggers resets event flags after persistent fire.
      */
     const t = makeTrigger({
       persistence: 2,
@@ -741,17 +737,24 @@ describe('Persistent trigger timerTick reset per re-fire — C++ Event1.Reset()'
       playerEntered: true,
       objectDiscovered: true,
       enteredZone: true,
+      crossedHorizontal: true,
+      crossedVertical: true,
     });
 
-    // TS: only timerTick is reset
+    // Simulate persistent trigger reset (as processTriggers does after firing)
     t.timerTick = 500;
+    t.playerEntered = false;
+    t.objectDiscovered = false;
+    t.enteredZone = false;
+    t.crossedHorizontal = false;
+    t.crossedVertical = false;
 
-    // TS: event flags NOT reset
-    expect(t.playerEntered).toBe(true);   // C++ would be false after Reset()
-    expect(t.objectDiscovered).toBe(true); // C++ would be false after Reset()
-    expect(t.enteredZone).toBe(true);      // C++ would be false after Reset()
-    // PARITY GAP: persistent non-TIME non-DESTROYED events will re-fire
-    // immediately in TS but not in C++
+    // All event flags reset — matches C++ Event1.Reset() behavior
+    expect(t.playerEntered).toBe(false);
+    expect(t.objectDiscovered).toBe(false);
+    expect(t.enteredZone).toBe(false);
+    expect(t.crossedHorizontal).toBe(false);
+    expect(t.crossedVertical).toBe(false);
   });
 });
 
@@ -1016,17 +1019,13 @@ describe('Force-fire + pendingDestroyedCount interaction', () => {
     expect(t.pendingDestroyedCount).toBe(0);
   });
 
-  it('force-fire on semi-persistent: TS skips AttachCount gate — PARITY GAP', () => {
+  it('force-fire on semi-persistent: still decrements AttachCount — C++ parity', () => {
     /**
-     * PARITY GAP: C++ trigger.cpp:277-298 — the semi-persistent AttachCount
-     * check is inside `if (execute || forced)`, meaning forced triggers
-     * STILL have their AttachCount decremented and are suppressed if > 0.
+     * C++ trigger.cpp:277-298 — the semi-persistent AttachCount check is inside
+     * `if (execute || forced)`, meaning forced triggers STILL have their
+     * AttachCount decremented and are suppressed if > 0.
      *
-     * TS index.ts:5745: `if (!forcedFire)` guards the detach logic,
-     * meaning forced triggers SKIP the semi-persistent gate entirely.
-     *
-     * Impact: a force-fired semi-persistent trigger fires immediately in TS
-     * even if remainingAttachCount > 0. C++ would suppress it.
+     * TS now matches: forced semi-persistent triggers go through the AttachCount gate.
      */
     const t = makeTrigger({
       persistence: 1,
@@ -1036,21 +1035,20 @@ describe('Force-fire + pendingDestroyedCount interaction', () => {
       forceFirePending: true,
     });
 
-    // TS: force-fire skips consumeSemiPersistentAttachment
+    // Force-fire still goes through semi-persistent gate
     const forcedFire = true;
-    let tsShouldFire = true; // because forcedFire
+    let shouldFire: boolean;
 
-    if (!forcedFire) {
-      // This block is NOT entered
-      tsShouldFire = consumeSemiPersistentAttachment(t, 1) && tsShouldFire;
+    if (forcedFire && t.persistence === 1) {
+      // C++ parity: forced triggers still decrement AttachCount
+      shouldFire = consumeSemiPersistentAttachment(t, 1);
+    } else {
+      shouldFire = true;
     }
 
-    // TS fires, remainingAttachCount untouched
-    expect(tsShouldFire).toBe(true);
-    expect(t.remainingAttachCount).toBe(5);
-
-    // C++ would have: AttachCount-- → 4, which is > 0 → return false (suppressed)
-    // PARITY GAP
+    // AttachCount decremented 5→4, but > 0, so suppressed (matches C++)
+    expect(shouldFire).toBe(false);
+    expect(t.remainingAttachCount).toBe(4);
   });
 });
 

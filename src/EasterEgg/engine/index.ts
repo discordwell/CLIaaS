@@ -5902,6 +5902,10 @@ export class Game {
       }
 
       if (!shouldFire) continue;
+
+      // C++ trigger.cpp:277-298 — semi-persistent AttachCount gate runs even for forced triggers.
+      // For non-forced fires, destroyed deaths are used as detach count.
+      // For forced fires, detach by 1 (C++ Spring() always decrements once).
       if (!forcedFire) {
         const destroyedDetachCount =
           trigger.event1.type === 7 || trigger.event2.type === 7
@@ -5912,6 +5916,11 @@ export class Game {
           !consumeSemiPersistentAttachment(trigger, destroyedDetachCount)
         ) {
           trigger.pendingDestroyedCount = 0;
+          continue;
+        }
+      } else if (trigger.persistence === 1) {
+        // C++ parity: forced triggers still go through semi-persistent AttachCount gate
+        if (!consumeSemiPersistentAttachment(trigger, 1)) {
           continue;
         }
       }
@@ -5930,9 +5939,15 @@ export class Game {
         }
       }
 
-      // Persistent triggers: reset timer so TIME events must elapse again
+      // Persistent triggers: reset timer and event flags so events must occur again
+      // C++ trigger.cpp:345-353 — Class->Event1.Reset(Event1); Class->Event2.Reset(Event2);
       if (trigger.persistence === 2) {
         trigger.timerTick = this.tick;
+        trigger.playerEntered = false;
+        trigger.objectDiscovered = false;
+        trigger.enteredZone = false;
+        trigger.crossedHorizontal = false;
+        trigger.crossedVertical = false;
       }
 
       // Execute actions — delegates to applyTriggerActionResult (C++ parity #38 refactor)
@@ -5971,6 +5986,12 @@ export class Game {
         }
         trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
         trigger.timerTick = this.tick;
+        // C++ trigger.cpp:351-352 — Event1.Reset + Event2.Reset on each re-fire
+        trigger.playerEntered = false;
+        trigger.objectDiscovered = false;
+        trigger.enteredZone = false;
+        trigger.crossedHorizontal = false;
+        trigger.crossedVertical = false;
         if (trigger.eventControl === 3) {
           if (reResult.e1) executeAction(trigger.action1);
           if (reResult.e2) executeAction(trigger.action2);
