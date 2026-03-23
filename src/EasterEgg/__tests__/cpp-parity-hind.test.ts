@@ -158,14 +158,14 @@ describe('HIND stats verification (udata.cpp / rules.ini)', () => {
     expect(hind.maxAmmo).toBe(12);
   });
 
-  it('Entity constructor sets aircraftState to landed', () => {
+  it('Entity constructor sets aircraftState to flying (C++ aircraft.cpp:249)', () => {
     const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
-    expect(hind.aircraftState).toBe('landed');
+    expect(hind.aircraftState).toBe('flying');
   });
 
-  it('Entity constructor sets flightAltitude to 0', () => {
+  it('Entity constructor sets flightAltitude to FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
-    expect(hind.flightAltitude).toBe(0);
+    expect(hind.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 });
 
@@ -502,6 +502,8 @@ describe('HIND helicopter hover attack (aircraft.cpp)', () => {
 describe('HIND aircraft state machine (aircraft.cpp)', () => {
   it('landed HIND transitions to takeoff when given attack order', () => {
     const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.aircraftState = 'landed';
+    hind.flightAltitude = 0;
     hind.mission = Mission.ATTACK;
     const target = entityAtCell(UnitType.I_E1, House.Spain, 15, 10);
     hind.target = target;

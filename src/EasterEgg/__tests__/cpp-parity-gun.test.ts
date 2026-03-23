@@ -238,7 +238,9 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
   it('CAN target landed aircraft (flightAltitude = 0)', () => {
     const gun = makeGUN(10, 10);
     const aircraft = entityAtCell(UnitType.V_HIND, House.USSR, 12, 10);
-    // flightAltitude defaults to 0 for new Entity
+    // Simulate a landed aircraft (constructor defaults to airborne)
+    aircraft.flightAltitude = 0;
+    aircraft.aircraftState = 'landed';
     expect(aircraft.flightAltitude).toBe(0);
     const hpBefore = aircraft.hp;
     const ctx = makeCombatCtx([gun], [aircraft]);

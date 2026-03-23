@@ -850,20 +850,17 @@ describe('multiple aircraft sharing limited pads (aircraft.cpp Find_Docking_Bay)
 // TS entity.ts:337-339: aircraftState='landed', flightAltitude=0
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('PARITY GAP: aircraft initial state (aircraft.cpp:249)', () => {
+describe('FIXED: aircraft initial state (aircraft.cpp:249)', () => {
 
-  it('C++ creates aircraft at FLIGHT_LEVEL (airborne), TS creates at altitude 0 (landed)', () => {
+  it('FIXED: TS creates aircraft at FLIGHT_ALTITUDE (airborne), matching C++', () => {
     // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL
-    // Aircraft are created already in flight in C++
+    // FIXED: TS now matches C++ — aircraft created airborne
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
-    // TS: starts grounded
-    expect(mig.flightAltitude).toBe(0);
-    expect(mig.aircraftState).toBe('landed');
-    // C++ would have: Height=256, in flight
-    // PARITY GAP: TS needs takeoff sequence; C++ aircraft are immediately airborne
+    expect(mig.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
+    expect(mig.aircraftState).toBe('flying');
   });
 
-  it('all aircraft types start landed in TS', () => {
+  it('all aircraft types start airborne in TS (matching C++)', () => {
     const types: [string, UnitType][] = [
       ['BADR', UnitType.V_BADR],
       ['U2',   UnitType.V_U2],
@@ -876,8 +873,8 @@ describe('PARITY GAP: aircraft initial state (aircraft.cpp:249)', () => {
 
     for (const [name, type] of types) {
       const entity = makeEntity(type, House.USSR);
-      expect(entity.aircraftState, `${name} should start landed`).toBe('landed');
-      expect(entity.flightAltitude, `${name} should start at altitude 0`).toBe(0);
+      expect(entity.aircraftState, `${name} should start flying`).toBe('flying');
+      expect(entity.flightAltitude, `${name} should start at FLIGHT_ALTITUDE`).toBe(Entity.FLIGHT_ALTITUDE);
     }
   });
 });

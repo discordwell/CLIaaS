@@ -198,14 +198,14 @@ describe('TRAN stats verification (udata.cpp / rules.ini)', () => {
     expect(tran.maxHp).toBe(90);
   });
 
-  it('Entity constructor sets aircraftState to landed', () => {
+  it('Entity constructor sets aircraftState to flying (C++ aircraft.cpp:249)', () => {
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 10, 10);
-    expect(tran.aircraftState).toBe('landed');
+    expect(tran.aircraftState).toBe('flying');
   });
 
-  it('Entity constructor sets flightAltitude to 0', () => {
+  it('Entity constructor sets flightAltitude to FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 10, 10);
-    expect(tran.flightAltitude).toBe(0);
+    expect(tran.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 });
 

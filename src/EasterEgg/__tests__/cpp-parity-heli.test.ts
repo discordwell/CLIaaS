@@ -158,14 +158,14 @@ describe('HELI stats verification (udata.cpp / rules.ini)', () => {
     expect(heli.maxAmmo).toBe(6);
   });
 
-  it('Entity constructor sets aircraftState to landed', () => {
+  it('Entity constructor sets aircraftState to flying (C++ aircraft.cpp:249)', () => {
     const heli = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
-    expect(heli.aircraftState).toBe('landed');
+    expect(heli.aircraftState).toBe('flying');
   });
 
-  it('Entity constructor sets flightAltitude to 0', () => {
+  it('Entity constructor sets flightAltitude to FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const heli = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
-    expect(heli.flightAltitude).toBe(0);
+    expect(heli.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 });
 
@@ -499,6 +499,8 @@ describe('HELI helicopter hover attack (aircraft.cpp)', () => {
 describe('HELI aircraft state machine (aircraft.cpp)', () => {
   it('landed HELI transitions to takeoff when given attack order', () => {
     const heli = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
+    heli.aircraftState = 'landed';
+    heli.flightAltitude = 0;
     heli.mission = Mission.ATTACK;
     const target = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 10);
     heli.target = target;

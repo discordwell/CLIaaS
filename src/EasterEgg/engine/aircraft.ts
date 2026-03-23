@@ -5,7 +5,7 @@
 
 import {
   type WorldPos, type WeaponStats,
-  CELL_SIZE, Mission, AnimState, House, UnitType,
+  CELL_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
   worldDist, directionTo, worldToCell,
   CIVILIAN_UNIT_TYPES,
 } from './types';
@@ -194,19 +194,34 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         ctx.structures[entity.landedAtStructure].dockedAircraft = undefined;
       }
       entity.landedAtStructure = -1;
-      // C++ aircraft.cpp:2899-2928 — helicopter takeoff speed staging
-      // Speed ramp at specific altitude thresholds (pixel equivalents of lepton thresholds)
+      // C++ aircraft.cpp:2899-2928 — helicopter takeoff 5-stage speed ramp.
+      // C++ uses switch(Height) with thresholds in leptons; TS converts to pixel equivalents.
+      //   Stage 1: Height=0             → speed=0x00 (close door)
+      //   Stage 2: Height=FLIGHT_LEVEL/2 (128 leptons=12px) → speed=0x00 (face navcom)
+      //   Stage 3: Height=FLIGHT_LEVEL-FLIGHT_LEVEL/3 (170 leptons=16px) → speed=0x20
+      //   Stage 4: Height=FLIGHT_LEVEL-FLIGHT_LEVEL/5 (204 leptons=19px) → speed=0x40
+      //   Stage 5: Height=FLIGHT_LEVEL (256 leptons=24px) → speed=0xFF (full)
       if (entity.isHelicopter) {
         const FA = Entity.FLIGHT_ALTITUDE; // 24
         const alt = entity.flightAltitude;
-        if (alt < Math.round(FA * 170 / 256)) {
-          // Below 170/256 (~16px): speed 0x20 = 12.5%
+        const halfLevel = Math.round(FA / 2);             // 12px (C++ FLIGHT_LEVEL/2 = 128 leptons)
+        const stage3 = Math.round(FA * 170 / 256);        // 16px (C++ FLIGHT_LEVEL - FLIGHT_LEVEL/3 = 170)
+        const stage4 = Math.round(FA * 204 / 256);        // 19px (C++ FLIGHT_LEVEL - FLIGHT_LEVEL/5 = 204)
+        if (alt < halfLevel) {
+          // Stages 1-2: speed 0 — helicopter lifting off, doors closing, facing navcom
+          entity.aircraftSpeedFraction = 0;
+        } else if (alt < stage3) {
+          // Below stage 3 threshold: still speed 0 (between half and 2/3 height)
+          entity.aircraftSpeedFraction = 0;
+        } else if (alt < stage4) {
+          // Stage 3: speed 0x20 = 12.5% — slow forward movement
           entity.aircraftSpeedFraction = 0x20 / 0xFF; // ~0.125
-        } else if (alt < Math.round(FA * 204 / 256)) {
-          // Below 204/256 (~19px): speed 0x40 = 25%
+        } else if (alt < FA) {
+          // Stage 4: speed 0x40 = 25% — medium speed
           entity.aircraftSpeedFraction = 0x40 / 0xFF; // ~0.25
         } else {
-          entity.aircraftSpeedFraction = 1.0; // full speed at FLIGHT_ALTITUDE
+          // Stage 5: at FLIGHT_ALTITUDE — full speed
+          entity.aircraftSpeedFraction = 1.0;
         }
       } else {
         // C++ aircraft.cpp:2893-2897 — fixed-wing: full speed immediately on takeoff
@@ -327,6 +342,21 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // Descend 1px/tick (C++ AIRCRAFT.CPP — matches takeoff rate)
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
       entity.animState = AnimState.IDLE;
+      // C++ aircraft.cpp:4104-4111 — LZ blocked check at LAYER_GROUND transition.
+      // When helicopter enters ground layer (altitude < 16px) and the LZ is occupied,
+      // abort landing and retake off. Does NOT apply to fixed-wing.
+      const LAYER_GROUND_THRESHOLD = Math.round(Entity.FLIGHT_ALTITUDE * 2 / 3); // 16px (C++ FLIGHT_LEVEL - FLIGHT_LEVEL/3 = 171 leptons)
+      if (entity.isHelicopter && entity.flightAltitude > 0 && entity.flightAltitude < LAYER_GROUND_THRESHOLD) {
+        const { cx, cy } = entity.cell;
+        const cellKey = cy * MAP_CELLS + cx;
+        if (ctx.map.vehicleOccupancy.has(cellKey)) {
+          // LZ blocked — abort landing, take back off
+          entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
+          entity.aircraftState = 'takeoff';
+          entity.aircraftSpeedFraction = 1.0;
+          return true;
+        }
+      }
       // C++ aircraft.cpp:2982-2998 — helicopter landing speed staging
       // At half flight level (12px), helicopter stops horizontal movement
       if (entity.isHelicopter) {

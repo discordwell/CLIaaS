@@ -288,14 +288,14 @@ describe('YAK cheaper than MIG (rules.ini Cost=)', () => {
 // =============================================================================
 
 describe('YAK aircraft state machine (aircraft.cpp)', () => {
-  it('starts in landed state', () => {
+  it('starts airborne (C++ aircraft.cpp:249 Height=FLIGHT_LEVEL)', () => {
     const yak = entityAtCell(UnitType.V_YAK, House.USSR, 10, 10);
-    expect(yak.aircraftState).toBe('landed');
+    expect(yak.aircraftState).toBe('flying');
   });
 
-  it('starts with flightAltitude 0 (on the ground)', () => {
+  it('starts at FLIGHT_ALTITUDE (C++ aircraft.cpp:249)', () => {
     const yak = entityAtCell(UnitType.V_YAK, House.USSR, 10, 10);
-    expect(yak.flightAltitude).toBe(0);
+    expect(yak.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 
   it('FLIGHT_ALTITUDE constant is 24 pixels', () => {

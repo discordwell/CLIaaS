@@ -157,46 +157,41 @@ describe('minimap blip colors per house (hdata.cpp → radar.cpp:740)', () => {
     expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.BadGuy]);
   });
 
-  // PARITY GAPS: TS diverges from C++ for the following houses
+  // FIXED: All 11 houses now use correct C++ PCOLOR mappings (renderer.ts parity)
 
-  it('Ukraine → PCOLOR_ORANGE (C++) but TS uses purple', () => {
+  it('Ukraine → PCOLOR_ORANGE → orange minimap color', () => {
     // C++ hdata.cpp:85 — HOUSE_UKRAINE → PCOLOR_ORANGE
-    // TS renderer.ts:48 — Ukraine → '#C060C0' (purple)
-    // PARITY GAP: TS should use orange, not purple
+    // FIXED: TS renderer.ts:48 — Ukraine → '#E07020' (orange)
     const category = classifyHex(TS_MINIMAP_COLOR[House.Ukraine]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Ukraine]); // PARITY GAP — expects 'orange', TS gives 'purple'
+    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Ukraine]);
   });
 
-  it('France → PCOLOR_BLUE (C++) but TS uses light blue', () => {
+  it('France → PCOLOR_BLUE → dark blue minimap color', () => {
     // C++ hdata.cpp:75 — HOUSE_FRANCE → PCOLOR_BLUE (dark blue, index 6)
-    // TS renderer.ts:47 — France → '#60B0FF' (light blue)
-    // PARITY GAP: TS should use dark blue, not light blue
+    // FIXED: TS renderer.ts:47 — France → '#2040C0' (dark blue)
     const category = classifyHex(TS_MINIMAP_COLOR[House.France]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.France]); // PARITY GAP — expects 'darkblue', TS gives 'lightblue'
+    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.France]);
   });
 
-  it('Turkey → PCOLOR_BROWN (C++) but TS uses olive', () => {
+  it('Turkey → PCOLOR_BROWN → brown minimap color', () => {
     // C++ hdata.cpp:115 — HOUSE_TURKEY → PCOLOR_BROWN
-    // TS renderer.ts:50 — Turkey → '#C8C864' (olive)
-    // PARITY GAP: TS should use brown, not olive
+    // FIXED: TS renderer.ts:50 — Turkey → '#A06830' (brown)
     const category = classifyHex(TS_MINIMAP_COLOR[House.Turkey]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Turkey]); // PARITY GAP — expects 'brown', TS gives 'olive'
+    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Turkey]);
   });
 
-  it('GoodGuy → PCOLOR_LTBLUE (C++) but TS uses yellow', () => {
+  it('GoodGuy → PCOLOR_LTBLUE → light blue minimap color', () => {
     // C++ hdata.cpp:135 — HOUSE_GOOD → PCOLOR_LTBLUE
-    // TS renderer.ts:51 — GoodGuy → '#FFFF40' (yellow)
-    // PARITY GAP: TS should use light blue, not yellow
+    // FIXED: TS renderer.ts:51 — GoodGuy → '#60B0FF' (light blue)
     const category = classifyHex(TS_MINIMAP_COLOR[House.GoodGuy]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.GoodGuy]); // PARITY GAP — expects 'lightblue', TS gives 'yellow'
+    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.GoodGuy]);
   });
 
-  it('Neutral → PCOLOR_GOLD (C++) but TS uses white', () => {
+  it('Neutral → PCOLOR_GOLD → gold minimap color', () => {
     // C++ hdata.cpp:155 — HOUSE_NEUTRAL → PCOLOR_GOLD
-    // TS renderer.ts:53 — Neutral → '#FFFFFF' (white)
-    // PARITY GAP: TS should use gold, not white
+    // FIXED: TS renderer.ts:53 — Neutral → '#FFD700' (gold)
     const category = classifyHex(TS_MINIMAP_COLOR[House.Neutral]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Neutral]); // PARITY GAP — expects 'gold', TS gives 'white'
+    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Neutral]);
   });
 });
 

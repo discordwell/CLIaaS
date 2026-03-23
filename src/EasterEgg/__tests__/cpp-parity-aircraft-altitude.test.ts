@@ -302,24 +302,38 @@ describe('FIXED: helicopter takeoff speed staging (aircraft.cpp:2899-2928)', () 
    * aircraftSpeedFraction ramps from 0.125 → 0.25 → 1.0 at altitude thresholds.
    */
 
-  it('FIXED: helicopter speed ramps through stages during takeoff', () => {
-    // C++ speed stages (lepton heights mapped to pixel equivalents):
-    //   170/256 → ~16px: speed 0x20 (12.5%)
-    //   204/256 → ~19px: speed 0x40 (25%)
+  it('FIXED: helicopter speed ramps through 5 stages during takeoff', () => {
+    // C++ 5-stage speed ramp (lepton heights mapped to pixel equivalents):
+    //   0: speed=0 (close door)
+    //   128/256 → 12px: speed=0 (face navcom)
+    //   170/256 → 16px: speed 0x20 (12.5%)
+    //   204/256 → 19px: speed 0x40 (25%)
     //   256/256 → 24px: speed 0xFF (100%)
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'takeoff';
-    heli.flightAltitude = 12; // below ~16px threshold
+    heli.flightAltitude = 0;
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);
 
-    // At altitude 13 (below 16px threshold): speed should be ~0.125
-    expect(heli.flightAltitude).toBe(13);
+    // At altitude 1 (below halfLevel=12): speed should be 0
+    expect(heli.flightAltitude).toBe(1);
+    expect(heli.aircraftSpeedFraction).toBe(0);
+
+    // Advance past halfLevel — still speed=0 until stage3 (16px)
+    while (heli.flightAltitude < 13 && heli.aircraftState === 'takeoff') {
+      updateAircraft(ctx, heli);
+    }
+    expect(heli.aircraftSpeedFraction).toBe(0); // still 0 between halfLevel and stage3
+
+    // Advance to altitude 17 (between 16px=stage3 and 19px=stage4): speed ~0.125
+    while (heli.flightAltitude < 17 && heli.aircraftState === 'takeoff') {
+      updateAircraft(ctx, heli);
+    }
     expect(heli.aircraftSpeedFraction).toBeCloseTo(0x20 / 0xFF, 2);
 
-    // Advance to altitude 17 (between 16px and 19px threshold): speed ~0.25
-    while (heli.flightAltitude < 17 && heli.aircraftState === 'takeoff') {
+    // Advance to altitude 20 (between 19px=stage4 and 24px=full): speed ~0.25
+    while (heli.flightAltitude < 20 && heli.aircraftState === 'takeoff') {
       updateAircraft(ctx, heli);
     }
     expect(heli.aircraftSpeedFraction).toBeCloseTo(0x40 / 0xFF, 2);
@@ -502,7 +516,7 @@ describe('layer transition threshold (object.cpp:343-352)', () => {
 // TS entity.ts:328-329: aircraftState='landed', flightAltitude=0 (starts grounded)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('aircraft initial altitude (aircraft.cpp:249) — PARITY GAP', () => {
+describe('aircraft initial altitude (aircraft.cpp:249)', () => {
 
   it('C++ aircraft starts at FLIGHT_LEVEL (in flight)', () => {
     // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL;
@@ -511,16 +525,12 @@ describe('aircraft initial altitude (aircraft.cpp:249) — PARITY GAP', () => {
     expect(cppInitialHeight).toBe(256);
   });
 
-  it('TS aircraft starts at flightAltitude=0 (landed)', () => {
-    // TS entity.ts:328-329:
-    //   this.aircraftState = 'landed';
-    //   this.flightAltitude = 0;
-    // PARITY GAP: TS creates aircraft grounded; C++ creates them airborne
+  it('FIXED: TS aircraft starts at FLIGHT_ALTITUDE, aircraftState=flying', () => {
+    // FIXED: TS now matches C++ — aircraft created airborne at FLIGHT_ALTITUDE.
+    // Callers that place aircraft on pads override afterwards.
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
-    expect(mig.flightAltitude).toBe(0);
-    expect(mig.aircraftState).toBe('landed');
-    // C++ would have: Height=256, in flight, not landed
-    // PARITY GAP: different initial state
+    expect(mig.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
+    expect(mig.aircraftState).toBe('flying');
   });
 });
 
