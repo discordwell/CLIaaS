@@ -56,14 +56,68 @@ export interface ProductionContext {
 // ── Pure functions ───────────────────────────────────────────────────────────
 
 /**
- * Compute the power fraction multiplier, clamped to [1/16, 1].
- * C++ factory.cpp:434: rate = time / Bound(Power_Fraction(), fixed(1,16), fixed(1))
- * At 100%+ power: 1.0 (normal speed). At 50% power: 0.5. At 0% power: 1/16.
+ * Compute the C++ Power_Fraction (house.cpp:4160-4170).
+ * Raw power ratio, NOT clamped.
+ */
+export function powerFraction(produced: number, consumed: number): number {
+  if (produced >= consumed || consumed === 0) return 1;
+  if (produced > 0) return produced / consumed;
+  return 0;
+}
+
+/**
+ * C++ Mechanism 1: TechnoClass::Time_To_Build power quantization (techno.cpp:677-682).
+ * Quantizes power into bands with specific thresholds:
+ *   - power >= 1.0:            speed factor = 1.0 (normal)
+ *   - 0.75 < power < 1.0:     snapped to 0.75 -> speed = 0.75
+ *   - 0.50 <= power <= 0.75:  actual fraction used
+ *   - power < 0.50:           clamped to 0.50 -> speed = 0.50
+ *
+ * Returns the SPEED FACTOR (0.5 to 1.0). Multiply by base build time to get
+ * effective speed. The C++ code applies 1/power to TIME, which is equivalent
+ * to multiplying SPEED by power.
+ */
+export function timeToBuildSpeedFactor(fraction: number): number {
+  let power = fraction;
+  if (power > 1) power = 1;
+  if (power < 1 && power > 0.75) power = 0.75;   // snap (0.75, 1.0) -> 0.75
+  if (power < 0.5) power = 0.5;                    // floor at 0.50
+  return power;
+}
+
+/**
+ * C++ Mechanism 2: FactoryClass::Start() rate penalty (factory.cpp:434).
+ * Clamps power fraction to [1/16, 1] and uses it as a speed factor.
+ */
+export function factoryStartSpeedFactor(fraction: number): number {
+  return Math.max(1 / 16, Math.min(1, fraction));
+}
+
+/**
+ * Compute the combined production speed multiplier using both C++ mechanisms.
+ *
+ * C++ has TWO separate power-penalty mechanisms that BOTH apply multiplicatively:
+ *
+ * Mechanism 1 (techno.cpp:677-682): Time_To_Build quantizes power into bands.
+ *   Speed factor: snap (0.75,1.0)->0.75, use actual for [0.50,0.75], floor at 0.50.
+ *
+ * Mechanism 2 (factory.cpp:434): FactoryClass::Start() clamps power to [1/16, 1].
+ *   Speed factor: linear fraction clamped to [1/16, 1].
+ *
+ * Combined: speed = mechanism1 * mechanism2
+ *
+ * Examples:
+ *   Full power:  1.0 * 1.0 = 1.0
+ *   90% power:   0.75 * 0.9 = 0.675  (was incorrectly 0.9 with single mechanism)
+ *   50% power:   0.5 * 0.5 = 0.25    (was incorrectly 0.5)
+ *   25% power:   0.5 * 0.25 = 0.125  (was incorrectly 0.25)
+ *   0% power:    0.5 * 1/16 = 1/32   (was incorrectly 1/16)
  */
 export function computePowerMult(ctx: ProductionContext): number {
-  if (ctx.powerConsumed <= ctx.powerProduced) return 1.0;
-  if (ctx.powerProduced <= 0) return 1 / 16;
-  return Math.max(1 / 16, ctx.powerProduced / ctx.powerConsumed);
+  const fraction = powerFraction(ctx.powerProduced, ctx.powerConsumed);
+  const m1 = timeToBuildSpeedFactor(fraction);
+  const m2 = factoryStartSpeedFactor(fraction);
+  return m1 * m2;
 }
 
 /** Get effective cost for an item, applying country bonus multiplier */

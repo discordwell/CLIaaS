@@ -41,7 +41,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { computePowerMult } from '../engine/production';
+import { computePowerMult, powerFraction, timeToBuildSpeedFactor, factoryStartSpeedFactor } from '../engine/production';
 import { powerMultiplier } from '../engine/repairSell';
 
 // ── C++ Reference Implementation ────────────────────────────────────────────
@@ -265,94 +265,79 @@ describe('C++ parity: combined production slowdown (Time_To_Build + Start)', () 
   });
 });
 
-// ── TS Comparison Tests ─────────────────────────────────────────────────────
+// ── TS Parity Tests — computePowerMult now implements dual mechanism ─────────
 
-describe('TS vs C++ mismatch: computePowerMult has no quantization bands', () => {
+describe('TS parity: computePowerMult matches C++ dual mechanism', () => {
   /**
-   * The TS computePowerMult() from production.ts uses a simple linear fraction
-   * clamped to [1/16, 1]. It does NOT implement the C++ quantization bands
-   * from TechnoClass::Time_To_Build() (techno.cpp:677-682).
-   *
-   * These tests document the known divergences.
+   * computePowerMult() now implements BOTH C++ mechanisms:
+   * - Mechanism 1: Time_To_Build quantization (techno.cpp:677-682)
+   * - Mechanism 2: FactoryClass::Start rate penalty (factory.cpp:434)
+   * Combined speed = m1 * m2
    */
 
-  it('MISMATCH: at 90% power, TS gives 0.9 but C++ gives (1/0.75)*(1/0.9) combined = ~0.675 effective speed', () => {
-    // TS: computePowerMult returns 0.9 (simple fraction)
+  it('at 90% power, TS matches C++ combined speed: 0.75 * 0.9 = 0.675', () => {
     const tsResult = computePowerMult({
       powerProduced: 90, powerConsumed: 100,
     } as any);
-    expect(tsResult).toBe(0.9);
 
-    // C++ combined effective speed (inverse of slowdown):
-    // 1 / cppCombinedSlowdown = 1 / 1.481 = 0.675
     const cppSlowdown = cppCombinedSlowdown(90, 100);
     const cppEffectiveSpeed = 1 / cppSlowdown;
-    expect(cppEffectiveSpeed).toBeCloseTo(1 / ((1 / 0.75) * (1 / 0.9)), 6);
 
-    // Document the divergence: TS is 33% faster than it should be at 90% power
-    expect(tsResult).not.toBeCloseTo(cppEffectiveSpeed, 1);
+    // C++: mechanism1 snaps 0.9 to 0.75, mechanism2 uses 0.9
+    // Combined speed = 0.75 * 0.9 = 0.675
+    expect(tsResult).toBeCloseTo(cppEffectiveSpeed, 6);
+    expect(tsResult).toBeCloseTo(0.675, 6);
   });
 
-  it('MISMATCH: at 80% power, TS gives 0.8 but C++ gives ~0.6 effective speed', () => {
+  it('at 80% power, TS matches C++ combined speed: 0.75 * 0.8 = 0.6', () => {
     const tsResult = computePowerMult({
       powerProduced: 80, powerConsumed: 100,
     } as any);
-    expect(tsResult).toBe(0.8);
 
     const cppSlowdown = cppCombinedSlowdown(80, 100);
     const cppEffectiveSpeed = 1 / cppSlowdown;
-    // C++: (1/0.75) * (1/0.8) = 1.333 * 1.25 = 1.667 → speed = 0.6
-    expect(cppEffectiveSpeed).toBeCloseTo(0.6, 6);
 
-    // TS is 33% faster than C++ at 80% power
-    expect(tsResult).not.toBeCloseTo(cppEffectiveSpeed, 1);
+    expect(tsResult).toBeCloseTo(cppEffectiveSpeed, 6);
+    expect(tsResult).toBeCloseTo(0.6, 6);
   });
 
-  it('MISMATCH: at 50% power, TS gives 0.5 but C++ gives 0.25 effective speed', () => {
+  it('at 50% power, TS matches C++ combined speed: 0.5 * 0.5 = 0.25', () => {
     const tsResult = computePowerMult({
       powerProduced: 50, powerConsumed: 100,
     } as any);
-    expect(tsResult).toBe(0.5);
 
-    // C++ combined: 2.0 * 2.0 = 4.0x slowdown → speed = 0.25
     const cppSlowdown = cppCombinedSlowdown(50, 100);
-    expect(cppSlowdown).toBe(4.0);
     const cppEffectiveSpeed = 1 / cppSlowdown;
-    expect(cppEffectiveSpeed).toBe(0.25);
 
-    // TS is 2x too fast at 50% power
-    expect(tsResult).not.toBe(cppEffectiveSpeed);
+    expect(tsResult).toBe(0.25);
+    expect(cppEffectiveSpeed).toBe(0.25);
   });
 
-  it('MISMATCH: at 25% power, TS gives 0.25 but C++ gives 0.125 effective speed', () => {
+  it('at 25% power, TS matches C++ combined speed: 0.5 * 0.25 = 0.125', () => {
     const tsResult = computePowerMult({
       powerProduced: 25, powerConsumed: 100,
     } as any);
-    expect(tsResult).toBe(0.25);
 
-    // C++ combined: 2.0 * 4.0 = 8.0x slowdown → speed = 0.125
     const cppSlowdown = cppCombinedSlowdown(25, 100);
-    expect(cppSlowdown).toBe(8.0);
-    expect(1 / cppSlowdown).toBe(0.125);
+    const cppEffectiveSpeed = 1 / cppSlowdown;
 
-    expect(tsResult).not.toBe(0.125);
+    expect(tsResult).toBe(0.125);
+    expect(cppEffectiveSpeed).toBe(0.125);
   });
 
-  it('MISMATCH: at 0% power, TS gives 1/16=0.0625 but C++ gives 1/32=0.03125 effective speed', () => {
+  it('at 0% power, TS matches C++ combined speed: 0.5 * 1/16 = 1/32', () => {
     const tsResult = computePowerMult({
       powerProduced: 0, powerConsumed: 100,
     } as any);
-    expect(tsResult).toBe(1 / 16);
 
-    // C++ combined: 2.0 * 16.0 = 32.0x slowdown → speed = 1/32
     const cppSlowdown = cppCombinedSlowdown(0, 100);
-    expect(cppSlowdown).toBe(32.0);
-    expect(1 / cppSlowdown).toBe(1 / 32);
+    const cppEffectiveSpeed = 1 / cppSlowdown;
 
-    expect(tsResult).not.toBe(1 / 32);
+    expect(tsResult).toBe(1 / 32);
+    expect(cppEffectiveSpeed).toBe(1 / 32);
   });
 
-  it('full power is correct in both (1.0)', () => {
+  it('full power: TS matches C++ (1.0)', () => {
     const tsResult = computePowerMult({
       powerProduced: 100, powerConsumed: 100,
     } as any);
@@ -362,7 +347,7 @@ describe('TS vs C++ mismatch: computePowerMult has no quantization bands', () =>
     expect(cppSlowdown).toBe(1.0);
   });
 
-  it('over-powered is correct in both (1.0)', () => {
+  it('over-powered: TS matches C++ (1.0)', () => {
     const tsResult = computePowerMult({
       powerProduced: 200, powerConsumed: 100,
     } as any);
@@ -373,27 +358,55 @@ describe('TS vs C++ mismatch: computePowerMult has no quantization bands', () =>
   });
 });
 
-describe('TS vs C++ mismatch: powerMultiplier (repairSell.ts) also lacks quantization', () => {
+describe('TS parity: exported sub-functions match C++ individually', () => {
+  it('powerFraction matches C++ Power_Fraction (house.cpp:4160)', () => {
+    expect(powerFraction(200, 100)).toBe(1);
+    expect(powerFraction(100, 100)).toBe(1);
+    expect(powerFraction(0, 0)).toBe(1);
+    expect(powerFraction(50, 100)).toBe(0.5);
+    expect(powerFraction(75, 100)).toBe(0.75);
+    expect(powerFraction(0, 100)).toBe(0);
+  });
+
+  it('timeToBuildSpeedFactor matches C++ quantization bands (techno.cpp:677-682)', () => {
+    expect(timeToBuildSpeedFactor(1.0)).toBe(1.0);
+    expect(timeToBuildSpeedFactor(0.9)).toBe(0.75);   // snap (0.75,1.0) -> 0.75
+    expect(timeToBuildSpeedFactor(0.8)).toBe(0.75);   // snap (0.75,1.0) -> 0.75
+    expect(timeToBuildSpeedFactor(0.76)).toBe(0.75);  // snap (0.75,1.0) -> 0.75
+    expect(timeToBuildSpeedFactor(0.75)).toBe(0.75);  // exactly 0.75 is NOT > 0.75, uses actual
+    expect(timeToBuildSpeedFactor(0.6)).toBe(0.6);    // in [0.5, 0.75] range, uses actual
+    expect(timeToBuildSpeedFactor(0.5)).toBe(0.5);    // exactly 0.5, not < 0.5
+    expect(timeToBuildSpeedFactor(0.3)).toBe(0.5);    // below 0.5, clamped
+    expect(timeToBuildSpeedFactor(0.0)).toBe(0.5);    // zero, clamped
+  });
+
+  it('factoryStartSpeedFactor matches C++ Bound(fraction, 1/16, 1) (factory.cpp:434)', () => {
+    expect(factoryStartSpeedFactor(1.0)).toBe(1.0);
+    expect(factoryStartSpeedFactor(0.5)).toBe(0.5);
+    expect(factoryStartSpeedFactor(0.25)).toBe(0.25);
+    expect(factoryStartSpeedFactor(0.0)).toBe(1 / 16);
+    expect(factoryStartSpeedFactor(1 / 32)).toBe(1 / 16);  // clamped to floor
+  });
+});
+
+describe('powerMultiplier (repairSell.ts) — mechanism-2 only for repair/sell', () => {
   /**
-   * The powerMultiplier() in repairSell.ts corresponds only to factory.cpp:434
-   * (Mechanism 2). It is missing the TechnoClass::Time_To_Build quantization
-   * (Mechanism 1). These tests document that.
+   * The powerMultiplier() in repairSell.ts implements ONLY factory.cpp:434
+   * (Mechanism 2). This is correct for repair/sell contexts which don't use
+   * the Time_To_Build quantization. It is NOT used for production speed.
    */
 
-  it('at 90% power: powerMultiplier gives 0.9, C++ mechanism-2 also gives 0.9', () => {
-    // Mechanism 2 alone is a match for the factory.cpp clamp
+  it('at 90% power: powerMultiplier gives 0.9 (mechanism-2 only)', () => {
     expect(powerMultiplier(90, 100)).toBe(0.9);
     expect(cppBound(0.9, 1 / 16, 1)).toBe(0.9);
   });
 
-  it('at 50% power: powerMultiplier gives 0.5, C++ mechanism-2 also gives 0.5', () => {
+  it('at 50% power: powerMultiplier gives 0.5 (mechanism-2 only)', () => {
     expect(powerMultiplier(50, 100)).toBe(0.5);
     expect(cppBound(0.5, 1 / 16, 1)).toBe(0.5);
   });
 
-  it('powerMultiplier matches C++ mechanism-2 alone but is missing mechanism-1', () => {
-    // powerMultiplier correctly implements factory.cpp:434 (Bound to [1/16, 1])
-    // but the TS does not have the ADDITIONAL penalty from TechnoClass::Time_To_Build
+  it('powerMultiplier matches C++ mechanism-2 Bound(fraction, 1/16, 1)', () => {
     const testCases = [
       { power: 100, drain: 100, expectedM2: 1.0 },
       { power: 90, drain: 100, expectedM2: 0.9 },
@@ -502,45 +515,38 @@ describe('C++ parity: power-locked at Start() time (factory.cpp:411-448)', () =>
   });
 });
 
-// ── Summary of All Mismatches ───────────────────────────────────────────────
+// ── Summary of Parity Status ─────────────────────────────────────────────────
 
-describe('Summary: production speed parity gap inventory', () => {
+describe('Summary: production speed parity status', () => {
   /**
-   * This test documents all known divergences between C++ and TS production
-   * speed calculations. Each entry notes the C++ source, TS behavior, and
-   * the impact magnitude.
+   * This test documents the current parity status between C++ and TS
+   * production speed calculations.
    */
 
-  it('GAP 1: Missing C++ Mechanism-1 quantization bands (techno.cpp:677-682)', () => {
-    // C++ quantizes power into discrete bands: snap (0.75,1.0) → 0.75, floor at 0.5
-    // TS uses continuous linear fraction.
-    // Impact: At 90% power, TS is ~33% faster than C++. At 76-99% power,
-    // C++ always treats it as 75% while TS uses the actual fraction.
-    const tsSpeed90 = 0.9;
-    const cppSpeed90 = 1 / cppTimeToBuildPowerMultiplier(0.9); // 0.75
-    expect(tsSpeed90).toBeGreaterThan(cppSpeed90);
-    expect(tsSpeed90 - cppSpeed90).toBeCloseTo(0.15, 6);
+  it('FIXED: C++ Mechanism-1 quantization bands now implemented (techno.cpp:677-682)', () => {
+    // computePowerMult now applies the Time_To_Build quantization bands.
+    // At 90% power: TS matches C++ at 0.75 * 0.9 = 0.675
+    const tsSpeed90 = computePowerMult({ powerProduced: 90, powerConsumed: 100 } as any);
+    const cppSpeed90 = 1 / cppCombinedSlowdown(90, 100);
+    expect(tsSpeed90).toBeCloseTo(cppSpeed90, 6);
   });
 
-  it('GAP 2: Missing C++ double power penalty (techno.cpp + factory.cpp)', () => {
-    // C++ applies power penalty TWICE (multiplicative). TS applies it once.
-    // Impact: At 50% power, C++ is 4x slower but TS is only 2x slower.
-    // At 25% power: C++ 8x vs TS 4x. At 0% power: C++ 32x vs TS 16x.
+  it('FIXED: C++ double power penalty now implemented (techno.cpp + factory.cpp)', () => {
+    // computePowerMult now applies BOTH mechanisms multiplicatively.
     const powerLevels = [
-      { pct: 50, tsSlowdown: 2, cppSlowdown: 4 },
-      { pct: 25, tsSlowdown: 4, cppSlowdown: 8 },
-      { pct: 10, tsSlowdown: 10, cppSlowdown: 20 },
+      { pct: 50, expectedSlowdown: 4 },
+      { pct: 25, expectedSlowdown: 8 },
     ];
-    for (const { pct, tsSlowdown, cppSlowdown } of powerLevels) {
+    for (const { pct, expectedSlowdown } of powerLevels) {
       const tsResult = 1 / computePowerMult({ powerProduced: pct, powerConsumed: 100 } as any);
       const cppResult = cppCombinedSlowdown(pct, 100);
-      expect(tsResult, `TS slowdown at ${pct}%`).toBeCloseTo(tsSlowdown, 1);
-      expect(cppResult, `C++ slowdown at ${pct}%`).toBeCloseTo(cppSlowdown, 1);
-      expect(tsResult).not.toBeCloseTo(cppResult, 0);
+      expect(tsResult, `TS slowdown at ${pct}%`).toBeCloseTo(expectedSlowdown, 1);
+      expect(cppResult, `C++ slowdown at ${pct}%`).toBeCloseTo(expectedSlowdown, 1);
+      expect(tsResult).toBeCloseTo(cppResult, 6);
     }
   });
 
-  it('GAP 3: C++ integer rate granularity (STEP_COUNT=54) vs TS fractional progress', () => {
+  it('REMAINING GAP: C++ integer rate granularity (STEP_COUNT=54) vs TS fractional progress', () => {
     // C++ divides build time into 54 steps with integer tick rates (1-255).
     // TS uses fractional progress incremented by powerMult each tick.
     // Impact: Small rounding differences in total build time. For full power,
@@ -551,16 +557,15 @@ describe('Summary: production speed parity gap inventory', () => {
     expect(tsBuildTime - cppTicks).toBe(36); // TS is 36 ticks slower at full power
   });
 
-  it('NO GAP: power-fraction floor of 1/16 matches factory.cpp:434', () => {
-    // Both C++ factory.cpp and TS production.ts clamp power to [1/16, 1].
-    // This part is correct.
-    expect(computePowerMult({ powerProduced: 0, powerConsumed: 100 } as any)).toBe(1 / 16);
+  it('NO GAP: power-fraction combined floor of 1/32 matches C++ at 0% power', () => {
+    // Combined: 0.5 (mechanism 1 floor) * 1/16 (mechanism 2 floor) = 1/32
+    expect(computePowerMult({ powerProduced: 0, powerConsumed: 100 } as any)).toBe(1 / 32);
+    // repairSell.ts powerMultiplier uses mechanism-2 only: 1/16
     expect(powerMultiplier(0, 100)).toBe(1 / 16);
   });
 
   it('NO GAP: power snapshot at start matches C++ FactoryClass::Start()', () => {
     // Both C++ and TS lock the power rate at production start time.
-    // C++: Set_Rate(rate) in Start(). TS: powerMult in startProduction().
     expect(true).toBe(true);
   });
 });

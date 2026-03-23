@@ -378,8 +378,8 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     ctx.powerProduced = 0;
     ctx.powerConsumed = 200;
 
-    // Power fraction is now 0 → would be 1/16 if recalculated
-    expect(computePowerMult(ctx)).toBe(1 / 16);
+    // Power fraction is now 0 → would be 1/32 if recalculated (dual mechanism: 0.5 * 1/16)
+    expect(computePowerMult(ctx)).toBe(1 / 32);
 
     // But production should still advance at full speed because powerMult was locked
     tickNTimes(ctx, 50);
@@ -390,29 +390,30 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
 
   it('gaining power mid-production does not speed it up', () => {
     // Start with low power, then gain power — production should remain slow.
+    // Dual mechanism at 50%: m1(0.5)=0.5, m2(0.5)=0.5, combined=0.25
     const ctx = makeContext({
       credits: 100000,
       powerProduced: 50,
-      powerConsumed: 100, // 50% power → mult = 0.5
+      powerConsumed: 100, // 50% power → mult = 0.25 (dual mechanism)
     });
     const item = makeItem({ cost: 100, buildTime: 100, isStructure: true });
     startProduction(ctx, item);
 
     const entry = ctx.productionQueue.get('left')!;
-    expect(entry.powerMult).toBe(0.5);
+    expect(entry.powerMult).toBe(0.25);
 
     // Boost power to 200%
     ctx.powerProduced = 400;
     ctx.powerConsumed = 100;
     expect(computePowerMult(ctx)).toBe(1.0);
 
-    // After 100 ticks at 0.5 speed: progress = 50, NOT 100
+    // After 100 ticks at 0.25 speed: progress = 25, NOT 100
     tickNTimes(ctx, 100);
     const entryAfter = ctx.productionQueue.get('left');
-    // Should NOT have completed — 100 ticks * 0.5 = 50 progress, need 100
+    // Should NOT have completed — 100 ticks * 0.25 = 25 progress, need 100
     expect(ctx.pendingPlacement).toBeNull();
     expect(entryAfter).toBeDefined();
-    expect(entryAfter!.progress).toBe(50);
+    expect(entryAfter!.progress).toBe(25);
   });
 
   it('power snapshot re-evaluated on queue restart (next queued item)', () => {
@@ -439,45 +440,45 @@ describe('C++ parity: power fraction snapshot (factory.cpp:411-448)', () => {
     // Complete first unit (20 ticks at full speed)
     tickNTimes(ctx, 20);
 
-    // Second unit should have re-snapshotted power at 50%
+    // Second unit should have re-snapshotted power at 50%: dual mechanism = 0.25
     const entry2 = ctx.productionQueue.get('right');
     expect(entry2).toBeDefined();
-    expect(entry2!.powerMult).toBe(0.5);
+    expect(entry2!.powerMult).toBe(0.25);
   });
 
-  it('at 50% power, production takes 2x as long', () => {
+  it('at 50% power, production takes 4x as long (dual mechanism)', () => {
+    // Dual mechanism: m1(0.5)=0.5, m2(0.5)=0.5, combined=0.25
     const ctx = makeContext({
       credits: 100000,
       powerProduced: 50,
-      powerConsumed: 100, // 50% power → mult = 0.5
+      powerConsumed: 100, // 50% power → mult = 0.25 (dual mechanism)
     });
     const item = makeItem({ cost: 100, buildTime: 20, isStructure: true });
     startProduction(ctx, item);
 
-    // At 0.5 speed, need 40 ticks to complete buildTime 20
-    tickNTimes(ctx, 39);
+    // At 0.25 speed, need 80 ticks to complete buildTime 20
+    tickNTimes(ctx, 79);
     expect(ctx.pendingPlacement).toBeNull();
 
     tickProduction(ctx);
     expect(ctx.pendingPlacement).not.toBeNull();
   });
 
-  it('at 0 power, production crawls at 1/16 speed', () => {
-    // C++ factory.cpp:434: Bound(Power_Fraction(), fixed(1,16), fixed(1))
-    // At 0 power → Power_Fraction() returns 0 → clamped to 1/16
+  it('at 0 power, production crawls at 1/32 speed (dual mechanism)', () => {
+    // C++ dual mechanism: m1(0)=0.5 (floor), m2(0)=1/16, combined=1/32
     const ctx = makeContext({
       credits: 100000,
       powerProduced: 0,
-      powerConsumed: 100, // 0% power → mult = 1/16
+      powerConsumed: 100, // 0% power → mult = 1/32 (dual mechanism)
     });
     const item = makeItem({ cost: 100, buildTime: 16, isStructure: true });
     startProduction(ctx, item);
 
     const entry = ctx.productionQueue.get('left')!;
-    expect(entry.powerMult).toBe(1 / 16);
+    expect(entry.powerMult).toBe(1 / 32);
 
-    // Need 16 * 16 = 256 ticks
-    tickNTimes(ctx, 255);
+    // Need 16 * 32 = 512 ticks
+    tickNTimes(ctx, 511);
     expect(ctx.pendingPlacement).toBeNull();
 
     tickProduction(ctx);
@@ -508,47 +509,37 @@ describe('C++ parity: Power_Fraction computation (house.cpp:4160-4170)', () => {
     expect(computePowerMult(ctx)).toBe(1.0);
   });
 
-  it('power > 0, power < drain → fraction = power/drain', () => {
-    // C++ house.cpp:4166-4167: return fixed(Power, Drain)
+  it('power > 0, power < drain → dual mechanism applied', () => {
+    // C++ house.cpp:4166-4167: Power_Fraction = fixed(Power, Drain)
+    // Dual mechanism at 75%: m1(0.75)=0.75, m2(0.75)=0.75, combined=0.5625
     const ctx = makeContext({ powerProduced: 75, powerConsumed: 100 });
-    expect(computePowerMult(ctx)).toBe(0.75);
+    expect(computePowerMult(ctx)).toBeCloseTo(0.5625, 6);
   });
 
-  it('power = 0, drain > 0 → fraction clamped to 1/16', () => {
-    // C++ house.cpp:4169: return(0)
-    // BUT factory.cpp:434: Bound(fraction, 1/16, 1) — 0 gets clamped to 1/16
-    // TS computePowerMult: powerProduced <= 0 → return 1/16 (pre-clamped)
+  it('power = 0, drain > 0 → combined floor = 1/32', () => {
+    // C++ dual mechanism: m1(0)=0.5 (floor), m2(0)=1/16 (floor), combined=1/32
     const ctx = makeContext({ powerProduced: 0, powerConsumed: 100 });
-    expect(computePowerMult(ctx)).toBe(1 / 16);
+    expect(computePowerMult(ctx)).toBe(1 / 32);
   });
 
-  it('very low power clamps to 1/16 floor', () => {
-    // C++ factory.cpp:434: Bound(Power_Fraction(), fixed(1,16), fixed(1))
-    // If Power_Fraction() < 1/16, it's clamped UP to 1/16.
-    // E.g. power=1, drain=100 → fraction=0.01 → clamped to 0.0625
+  it('very low power: dual mechanism floors apply', () => {
+    // C++ dual mechanism: m1(0.01)=0.5 (floor at 0.5), m2(0.01)=1/16 (floor at 1/16)
+    // combined = 0.5 * 1/16 = 1/32
     const ctx = makeContext({ powerProduced: 1, powerConsumed: 100 });
     const mult = computePowerMult(ctx);
-    // TS: Math.max(1/16, 1/100) = Math.max(0.0625, 0.01) = 0.0625
-    expect(mult).toBe(1 / 16);
+    expect(mult).toBe(1 / 32);
   });
 
-  it('PARITY GAP: C++ Power_Fraction returns 0 when power=0; clamping happens in Start()', () => {
+  it('C++ Power_Fraction separated from clamping — TS now uses powerFraction() + dual mechanism', () => {
     // C++ house.cpp:4169: Power_Fraction returns 0 when Power==0 and Drain > 0
-    // C++ factory.cpp:434: The clamping Bound(fraction, 1/16, 1) happens in Start()
+    // C++ dual mechanism: m1 floors at 0.5, m2 floors at 1/16
+    // Combined floor = 0.5 * 1/16 = 1/32
     //
-    // TS computePowerMult: returns 1/16 directly (pre-clamped)
-    //
-    // Behavioral difference: C++ separates Power_Fraction() from clamping.
-    // TS folds them together. The observable behavior is identical because
-    // Start() always clamps. But the separation matters if Power_Fraction()
-    // is used elsewhere (e.g. radar, super weapons use it without clamping).
-    //
-    // For production purposes, this is NOT a parity gap — the rate is the same.
+    // TS now separates: powerFraction() returns the raw fraction,
+    // then timeToBuildSpeedFactor() and factoryStartSpeedFactor() apply
+    // their respective floors/clamps, matching C++ behavior.
     const ctx = makeContext({ powerProduced: 0, powerConsumed: 100 });
-    // TS returns 1/16 (pre-clamped for production use)
-    expect(computePowerMult(ctx)).toBe(1 / 16);
-    // C++ Power_Fraction() would return 0, then Start() clamps to 1/16
-    // Net effect on production rate: identical
+    expect(computePowerMult(ctx)).toBe(1 / 32);
   });
 });
 
@@ -837,22 +828,23 @@ describe('C++ parity: power fraction production rate edge cases', () => {
     expect(ctx.pendingPlacement).not.toBeNull(); // completes in exactly buildTime ticks
   });
 
-  it('power fraction of exactly 1/16 results in 16x build time', () => {
-    // Edge case: fraction is exactly at the floor
-    // power/drain = 1/16 → no clamping needed
+  it('power fraction of exactly 1/16 with dual mechanism', () => {
+    // Edge case: fraction = 1/16 = 0.0625
+    // Dual mechanism: m1(0.0625)=0.5 (below 0.5, clamped), m2(0.0625)=1/16
+    // combined = 0.5 * 1/16 = 1/32
     const ctx = makeContext({
       credits: 100000,
       powerProduced: 1,
       powerConsumed: 16, // exactly 1/16 power
     });
     const mult = computePowerMult(ctx);
-    expect(mult).toBe(1 / 16);
+    expect(mult).toBe(1 / 32);
 
     const item = makeItem({ cost: 100, buildTime: 16, isStructure: true });
     startProduction(ctx, item);
 
-    // Need 16 * 16 = 256 ticks
-    tickNTimes(ctx, 255);
+    // Need 16 * 32 = 512 ticks
+    tickNTimes(ctx, 511);
     expect(ctx.pendingPlacement).toBeNull();
     tickProduction(ctx);
     expect(ctx.pendingPlacement).not.toBeNull();
@@ -887,11 +879,12 @@ describe('C++ parity: prerequisite loss does not interact with power snapshot', 
     const item = makeItem({ cost: 800, buildTime: 100 });
     startProduction(ctx, item);
 
-    // At 50% power, 40 ticks advances progress by 20 but costs 40 * (800/100) = 320
+    // At 50% power (dual mechanism = 0.25), 40 ticks advances progress by 10
+    // but costs 40 * (800/100) = 320 (cost deducted per tick, not per progress)
     tickNTimes(ctx, 40);
 
     const entry = ctx.productionQueue.get('right')!;
-    expect(entry.progress).toBe(20); // 40 * 0.5
+    expect(entry.progress).toBe(10); // 40 * 0.25
     expect(entry.costPaid).toBe(320); // cost deducted per tick, not per progress
 
     // Destroy prerequisite
