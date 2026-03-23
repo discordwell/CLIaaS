@@ -392,6 +392,12 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     case 'rearming': {
       entity.flightAltitude = 0;
       entity.animState = AnimState.IDLE;
+      // C++ techno.cpp:965: if (Ammo == MaxAmmo) return(RADIO_NEGATIVE);
+      // Check BEFORE increment — ammo must never exceed maxAmmo (C++ parity).
+      if (entity.ammo >= entity.maxAmmo) {
+        entity.aircraftState = 'landed';
+        return true;
+      }
       entity.rearmTimer--;
       if (entity.rearmTimer <= 0) {
         entity.ammo++;

@@ -526,19 +526,13 @@ describe('CIVILIAN_UNIT_TYPES — _Counts_As_Civ_Evac parity (aircraft.cpp:116-1
     }
   });
 
-  // PARITY GAP: C++ includes INFANTRY_DELPHI in _Counts_As_Civ_Evac (aircraft.cpp:137)
-  // but TS CIVILIAN_UNIT_TYPES does not include 'DELPHI'. However, DELPHI may not be a
-  // unit type defined in the TS engine at all (it may only appear in specific scenarios).
-  // If DELPHI is ever added as a unit type, it should be in CIVILIAN_UNIT_TYPES.
-  it('DELPHI is handled (C++ aircraft.cpp:137 includes INFANTRY_DELPHI)', () => {
+  // FIXED: C++ includes INFANTRY_DELPHI in _Counts_As_Civ_Evac (aircraft.cpp:137).
+  // TS CIVILIAN_UNIT_TYPES now includes 'DELPHI', matching C++ parity.
+  it('FIXED: DELPHI is in CIVILIAN_UNIT_TYPES (C++ aircraft.cpp:137)', () => {
     // C++ line 137: if (*inf == INFANTRY_EINSTEIN || *inf == INFANTRY_GENERAL ||
     //                   *inf == INFANTRY_DELPHI || *inf == INFANTRY_CHAN) return(true);
-    // TS types.ts:913-916 does NOT include DELPHI.
-    // This is acceptable if DELPHI is not implemented as a unit type in the TS engine.
-    // Just document the C++ reference:
-    const hasDelphi = CIVILIAN_UNIT_TYPES.has('DELPHI');
-    // Not asserting true/false — just documenting the state
-    expect(typeof hasDelphi).toBe('boolean');
+    // TS types.ts now includes DELPHI in CIVILIAN_UNIT_TYPES — matches C++.
+    expect(CIVILIAN_UNIT_TYPES.has('DELPHI')).toBe(true);
   });
 });
 

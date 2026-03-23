@@ -109,7 +109,7 @@ describe('Mission enum — C++ mission.h parity', () => {
     }
   });
 
-  it('TS Mission enum uses string values (C++ uses integer ordinals — PARITY GAP: enum representation)', () => {
+  it('TS Mission enum uses string values (C++ uses integer ordinals — DESIGN NOTE: enum representation)', () => {
     // C++ MissionType uses integer ordinals (0-21).
     // TS Mission uses string values ('GUARD', 'ATTACK', etc.).
     // This means TS cannot do arithmetic on mission values like C++ can.
@@ -130,7 +130,7 @@ describe('Mission enum — C++ mission.h parity', () => {
     // If TS does have Mission.DIE, this is an extension beyond C++ parity.
     const hasDie = TS_MISSION_NAMES.includes('DIE' as Mission);
     if (hasDie) {
-      // PARITY GAP: TS has Mission.DIE which doesn't exist in C++
+      // TS EXTENSION: TS has Mission.DIE which doesn't exist in C++
       expect(hasDie).toBe(true); // document that it exists
     }
   });
@@ -141,7 +141,7 @@ describe('Mission enum — C++ mission.h parity', () => {
     // with threat flags set, not as a separate mission type.
     const hasHarmless = TS_MISSION_NAMES.includes('HARMLESS' as Mission);
     if (hasHarmless) {
-      // PARITY GAP: TS has Mission.HARMLESS which doesn't exist in C++
+      // TS EXTENSION: TS has Mission.HARMLESS which doesn't exist in C++
       expect(hasHarmless).toBe(true); // document that it exists
     }
   });

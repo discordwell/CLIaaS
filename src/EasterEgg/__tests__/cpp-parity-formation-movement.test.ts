@@ -592,8 +592,8 @@ describe('Adjust_Dest — C++ foot.cpp:2185-2199', () => {
     expect(targetY).toBe(15 * CELL_SIZE + CELL_SIZE / 2 - 2 * CELL_SIZE);
   });
 
-  // PARITY GAP: TS does NOT clamp to map bounds like C++ Bound() does
-  it('TS does not clamp offset destinations to map bounds — parity gap with C++ Bound()', () => {
+  // KNOWN LIMITATION: TS does NOT clamp to map bounds like C++ Bound() does
+  it('TS does not clamp offset destinations to map bounds — known limitation vs C++ Bound()', () => {
     // C++ foot.cpp:2193-2194 uses Bound() to clamp to [MapCellX, MapCellX+MapCellWidth-1]
     // TS index.ts:6568-6573 simply adds offset without any clamping
     const wp = { cx: 1, cy: 1 };
@@ -603,8 +603,8 @@ describe('Adjust_Dest — C++ foot.cpp:2185-2199', () => {
     const targetY = wp.cy * CELL_SIZE + CELL_SIZE / 2 + formationOffset.y;
 
     // TS produces negative coordinates (no clamping)
-    expect(targetX).toBeLessThan(0); // PARITY GAP: C++ would clamp to MapCellX
-    expect(targetY).toBeLessThan(0); // PARITY GAP: C++ would clamp to MapCellY
+    expect(targetX).toBeLessThan(0); // KNOWN LIMITATION: C++ would clamp to MapCellX
+    expect(targetY).toBeLessThan(0); // KNOWN LIMITATION: C++ would clamp to MapCellY
   });
 });
 
@@ -1007,7 +1007,7 @@ describe('TS calculateTeamMissionFormationOffsets comprehensive parity', () => {
    * TS index.ts mapping:
    *   formation 0 → FORMATION_NONE  → null offsets
    *   formation 1 → FORMATION_TIGHT → all (0,0)
-   *   formation 2 → FORMATION_LOOSE → grid layout (PARITY GAP with C++)
+   *   formation 2 → FORMATION_LOOSE → no-op (FIXED — matches C++ empty break)
    *   formation 3 → FORMATION_WEDGE_N
    *   formation 4 → FORMATION_WEDGE_E
    *   formation 5 → FORMATION_WEDGE_S

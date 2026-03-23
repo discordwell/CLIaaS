@@ -845,9 +845,9 @@ describe('multiple aircraft sharing limited pads (aircraft.cpp Find_Docking_Bay)
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Section 10: C++ Initial Altitude vs TS — PARITY GAP
+// Section 10: C++ Initial Altitude vs TS — FIXED
 // C++ aircraft.cpp:249: Height = FLIGHT_LEVEL (created airborne)
-// TS entity.ts:337-339: aircraftState='landed', flightAltitude=0
+// TS entity.ts:337-339: now creates aircraft airborne matching C++
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('FIXED: aircraft initial state (aircraft.cpp:249)', () => {
@@ -964,31 +964,30 @@ describe('docking/undocking lifecycle (aircraft.cpp Mission_Enter)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Section 13: Ammo Overshoot PARITY GAP
+// Section 13: Ammo Overshoot — FIXED
 // C++ techno.cpp:965: if (Ammo == MaxAmmo) return RADIO_NEGATIVE (check BEFORE increment)
-// TS aircraft.ts:266-268: ammo++ first, THEN check if >= maxAmmo
+// TS aircraft.ts: now checks ammo >= maxAmmo BEFORE increment, matching C++
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('PARITY GAP: ammo overshoot during rearming (techno.cpp:965)', () => {
+describe('FIXED: ammo rearm cap matches C++ (techno.cpp:965)', () => {
 
-  it('TS allows ammo to momentarily exceed maxAmmo', () => {
+  it('TS rejects rearm when ammo already at maxAmmo — matches C++', () => {
     // C++ techno.cpp:965: if (Ammo == MaxAmmo) return(RADIO_NEGATIVE);
     //   → C++ checks BEFORE increment, Ammo never exceeds MaxAmmo
-    // TS aircraft.ts:266: entity.ammo++ — increments first, then checks
+    // TS aircraft.ts: now checks ammo >= maxAmmo BEFORE decrementing rearmTimer
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 3;      // already at max
     mig.maxAmmo = 3;
     mig.aircraftState = 'rearming';
-    mig.rearmTimer = 1; // will trigger increment this tick
+    mig.rearmTimer = 1; // would trigger increment this tick
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, mig);
 
-    // TS overshoots: ammo becomes 4 before state transition
-    // C++ would keep ammo at 3 (RADIO_RELOAD rejected)
-    // PARITY GAP
-    expect(mig.ammo).toBe(4); // TS behavior
-    // C++ expected: mig.ammo === 3
+    // FIXED: TS now checks before increment — ammo stays at maxAmmo
+    // C++ behavior: Ammo == MaxAmmo → RADIO_NEGATIVE, no increment
+    expect(mig.ammo).toBe(3); // matches C++
+    expect(mig.aircraftState).toBe('landed'); // transitioned to landed
   });
 });
 
