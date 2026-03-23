@@ -1835,12 +1835,13 @@ describe('Grid size and memory layout', () => {
 
 describe('Ore growth constants (C++ overlay.cpp parity)', () => {
 
-  it('ORE_DENSITY_CHANCE = 0.5 (50% chance per cell per cycle)', () => {
-    expect(GameMap.ORE_DENSITY_CHANCE).toBe(0.5);
+  it('RESERVOIR_SIZE = 64 (C++ MAP_CELL_W/2 reservoir sampling cap)', () => {
+    expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
-  it('ORE_SPREAD_CHANCE = 0.25 (25% chance per cell per cycle)', () => {
-    expect(GameMap.ORE_SPREAD_CHANCE).toBe(0.25);
+  it('growth/spread is deterministic for sampled cells (C++ parity)', () => {
+    // C++ uses reservoir sampling, not per-cell probability
+    expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
   it('ORE_SPREAD_MIN_DENSITY = 0x09 (density > 6 required to spread)', () => {

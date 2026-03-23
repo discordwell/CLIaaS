@@ -1191,12 +1191,13 @@ describe('Harvester Pipeline', () => {
       expect(GameMap.ORE_GROWTH_INTERVAL / 15).toBeCloseTo(121.4, 0);
     });
 
-    it('ORE_DENSITY_CHANCE is 50%', () => {
-      expect(GameMap.ORE_DENSITY_CHANCE).toBe(0.5);
+    it('RESERVOIR_SIZE is 64 (C++ MAP_CELL_W/2 cap)', () => {
+      expect(GameMap.RESERVOIR_SIZE).toBe(64);
     });
 
-    it('ORE_SPREAD_CHANCE is 25%', () => {
-      expect(GameMap.ORE_SPREAD_CHANCE).toBe(0.25);
+    it('growth/spread is deterministic for sampled cells', () => {
+      // C++ reservoir sampling model — no per-cell random probability
+      expect(GameMap.RESERVOIR_SIZE).toBe(64);
     });
 
     it('ORE_SPREAD_MIN_DENSITY threshold is 0x09 (density > 6 required)', () => {

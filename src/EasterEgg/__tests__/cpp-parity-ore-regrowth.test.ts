@@ -197,27 +197,20 @@ describe('Growth eligibility — Can_Tiberium_Grow (cell.cpp:2869-2884)', () => 
    * There is NO random check in Grow_Tiberium itself. The randomness is in
    * the reservoir sampling in map.cpp:1034. Once selected, growth is guaranteed.
    *
-   * TS map.ts:581 uses: if (Math.random() < ORE_DENSITY_CHANCE) { ... }
-   * This means growth is probabilistic (50% chance per cell per cycle).
+   * TS now matches C++: reservoir sampling selects cells, then growth is
+   * deterministic (OverlayData++ unconditionally for all sampled cells).
    *
-   * PARITY GAP: C++ growth is deterministic for sampled cells (100% chance
-   * once selected by reservoir sampling). TS uses 50% random chance per cell.
-   * The overall probability may be similar (reservoir limits selections), but
-   * the mechanism diverges.
+   * PARITY MATCH: Both C++ and TS grow all sampled cells deterministically.
    */
-  it('C++ grows all sampled cells deterministically — TS uses 50% random chance', () => {
+  it('C++ grows all sampled cells deterministically — TS now matches', () => {
     // In C++, if a cell is selected for growth, it ALWAYS grows (cell.cpp:2939: OverlayData++)
-    // In TS, each cell has a 50% chance (Math.random() < 0.5)
-    // This is a documented architectural difference.
-    //
-    // Test: when random returns exactly 0.5, C++ would grow but TS should NOT grow
-    // (because the check is < 0.5, not <= 0.5)
+    // TS now uses the same reservoir sampling model — no per-cell random chance.
+    // A single eligible cell always gets sampled (reservoir has 64 slots).
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0.5); // exactly at boundary
+    vi.spyOn(Math, 'random').mockReturnValue(0.5); // random value doesn't affect growth
     map.growOre(1821);
-    // TS: 0.5 < 0.5 is FALSE, so no growth
-    expect(getOverlay(map, 50, 50)).toBe(0x05);
-    // C++ would grow this cell if it was reservoir-sampled — PARITY GAP
+    // TS now deterministically grows sampled cells, matching C++
+    expect(getOverlay(map, 50, 50)).toBe(0x06);
   });
 });
 
@@ -255,10 +248,9 @@ describe('Spread eligibility — Can_Tiberium_Spread (cell.cpp:2904-2918)', () =
   it('overlay 0x0A (OverlayData=7) CAN spread — threshold match', () => {
     setOverlay(map, 50, 50, 0x0A);
     const mockRandom = vi.spyOn(Math, 'random');
-    mockRandom
-      .mockReturnValueOnce(0.6)  // density: skip (> 0.5)
-      .mockReturnValueOnce(0.1)  // spread: trigger (< 0.25)
-      .mockReturnValueOnce(0.0); // direction: north
+    // With reservoir sampling, single eligible cell goes directly into reservoir.
+    // Only random call needed is the direction offset for spread.
+    mockRandom.mockReturnValue(0.0); // direction: north (offset 0)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // spread to north
   });
@@ -368,18 +360,13 @@ describe('Spread mechanism — Spread_Tiberium (cell.cpp:2963-2979)', () => {
     // Surround center with clear terrain, put ore in center at high density
     setOverlay(map, 50, 50, 0x0C); // high density gold
     // Block all directions except SW (-1, +1) using non-ore overlays (0x01)
-    // to avoid them consuming random calls for density checks
     for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]] as [number, number][]) {
       if (dx === -1 && dy === 1) continue; // leave SW open
       setOverlay(map, 50 + dx, 50 + dy, 0x01); // non-gold overlay blocks germination
     }
-    // Use mockImplementation to control ALL random calls (including newly spread cells)
-    const calls = [0.6, 0.1, 0.0]; // density:skip, spread:trigger, direction:0
-    let callIdx = 0;
-    vi.spyOn(Math, 'random').mockImplementation(() => {
-      if (callIdx < calls.length) return calls[callIdx++];
-      return 0.9; // all subsequent calls: no action
-    });
+    // With reservoir sampling, single cell goes directly into both reservoirs.
+    // Growth is deterministic. Only random call is spread direction offset.
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset: 0 (start at N)
     map.growOre(1821);
     // SW cell (49, 51) should have new ore — N,NE,E,SE,S are blocked, SW is first valid
     expect(getOverlay(map, 49, 51)).toBe(0x03);
@@ -402,10 +389,9 @@ describe('Spread mechanism — Spread_Tiberium (cell.cpp:2963-2979)', () => {
    */
   it('spread creates new ore at minimum density (0x03)', () => {
     setOverlay(map, 50, 50, 0x0C);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0); // direction: north
+    // Reservoir sampling: single cell goes into both reservoirs directly.
+    // Only random call is spread direction offset.
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north (offset 0)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // minimum density
   });
@@ -419,11 +405,8 @@ describe('Spread mechanism — Spread_Tiberium (cell.cpp:2963-2979)', () => {
   it('spread only creates ore in ONE adjacent cell, not all valid cells', () => {
     setOverlay(map, 50, 50, 0x0C);
     // All 8 neighbors are clear — all valid for germination
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0)  // direction: start at 0 (N)
-      .mockReturnValue(0.9);     // rest: no more actions
+    // Only random call is spread direction offset
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: start at 0 (N)
     map.growOre(1821);
     // Count how many neighbors got ore
     let oreCount = 0;
@@ -458,14 +441,12 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to cell with existing overlay', () => {
     setOverlay(map, 50, 50, 0x0C);
     setOverlay(map, 50, 49, 0x05); // existing ore to the north
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip for first ore cell found
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0)  // direction: north (blocked)
-      .mockReturnValue(0.9);
+    // With reservoir sampling, both cells are eligible for growth/spread.
+    // Direction offset 0 = start at N for spread. North is blocked (existing overlay).
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north (blocked)
     map.growOre(1821);
-    // North cell should retain its original overlay, not be overwritten
-    expect(getOverlay(map, 50, 49)).toBe(0x05);
+    // North cell should retain its original overlay (grew from 0x05 to 0x06), not be overwritten
+    expect(getOverlay(map, 50, 49)).toBe(0x06);
   });
 
   /**
@@ -488,21 +469,16 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
    * This means TS only allows germination on CLEAR terrain, not ROAD.
    * Ore should be able to spread onto road cells in C++ but cannot in TS.
    */
-  it('C++ allows ore germination on ROAD terrain — TS rejects it', () => {
+  it('C++ allows ore germination on ROAD terrain — TS matches', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.ROAD); // road to the north
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0); // direction: north (road)
+    // With reservoir sampling, single cell goes directly into reservoir.
+    // Only random call is spread direction offset.
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north (road)
     map.growOre(1821);
-    // C++ would allow spread to ROAD (Build=true in rules.cpp:864)
-    // TS rejects it because it checks for Terrain.CLEAR only
-    // PARITY GAP: expect 0x03 for C++ parity, but TS gives 0xFF
-    // PARITY GAP: C++ would produce 0x03 here (ROAD is buildable/germinable).
-    // TS produces 0xFF because it only allows spread to Terrain.CLEAR.
-    // Failing expectation documents the real C++ behavior:
-    expect(getOverlay(map, 50, 49)).toBe(0x03); // PARITY GAP — TS rejects ROAD, C++ accepts
+    // C++ allows spread to ROAD (Build=true in rules.cpp:864)
+    // TS uses BUILDABLE set which includes ROAD — PARITY MATCH
+    expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
 
   /**
@@ -511,10 +487,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to WATER terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.WATER);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -522,10 +495,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to ROCK terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.ROCK);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -533,10 +503,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to WALL terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.WALL);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -544,10 +511,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to TREE terrain (TS extension)', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.TREE);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -561,10 +525,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to ROUGH terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.ROUGH);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -575,10 +536,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to BEACH terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.BEACH);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -592,10 +550,7 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   it('cannot spread to cell with wall structure', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setWallType(50, 49, 'BRIK');
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -603,17 +558,13 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
   /**
    * C++ cell.cpp:2998 — "if (!Map.In_Radar(Cell_Number())) return(false);"
    *
-   * Cannot germinate outside map bounds. TS implements this via bounds checking
-   * in map.ts:596: "if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;"
+   * Cannot germinate outside map bounds. TS implements this via bounds checking.
    */
   it('cannot spread outside map bounds', () => {
     const edgeX = map.boundsX;
     const edgeY = map.boundsY;
     setOverlay(map, edgeX, edgeY, 0x0C);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)
-      .mockReturnValueOnce(0.1)
-      .mockReturnValueOnce(0.0); // direction: north (out of bounds)
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north (out of bounds)
     map.growOre(1821);
     expect(getOverlay(map, edgeX, edgeY - 1)).toBe(0xFF);
   });
@@ -694,9 +645,9 @@ describe('Growth timing — map.cpp:1017-1072', () => {
 });
 
 // ============================================================
-// Section 6: Probability model — C++ reservoir sampling vs TS random
+// Section 6: Reservoir sampling model — C++ parity (map.cpp:1028-1060)
 // ============================================================
-describe('Probability model divergence — C++ reservoir vs TS random', () => {
+describe('Reservoir sampling model — C++ parity (map.cpp:1028-1060)', () => {
   let map: GameMap;
 
   beforeEach(() => {
@@ -710,47 +661,32 @@ describe('Probability model divergence — C++ reservoir vs TS random', () => {
   });
 
   /**
-   * C++ map.cpp:1034-1041 — Reservoir sampling for growth:
-   *   if (Random_Pick(0, TiberiumGrowthExcess) <= TiberiumGrowthCount) {
-   *     if (TiberiumGrowthCount < sizeof(TiberiumGrowth)/sizeof(TiberiumGrowth[0])) {
-   *       TiberiumGrowth[TiberiumGrowthCount++] = cell;
-   *     } else {
-   *       TiberiumGrowth[Random_Pick(0, TiberiumGrowthCount-1)] = cell;
-   *     }
-   *   }
-   *   TiberiumGrowthExcess++;
-   *
-   * TiberiumGrowth array has MAP_CELL_W/2 = 64 slots (map.h:160).
-   * This means at most 64 cells can grow per cycle.
-   *
-   * C++ map.cpp:1078-1084 — ALL 64 sampled cells grow deterministically:
-   *   for (int i = 0; i < TiberiumGrowthCount; i++) {
-   *     newcell->Grow_Tiberium();  // Always succeeds — no random check
-   *   }
-   *
-   * TS: EVERY gold ore cell gets a 50% growth chance each cycle (no cap).
-   * With many ore cells, TS can grow far more cells per cycle than C++ (which caps at 64).
-   *
-   * PARITY GAP: C++ caps growth to 64 cells per cycle with reservoir sampling.
-   * TS has no cap — every gold cell has an independent 50% chance.
+   * C++ map.h:160 — TiberiumGrowth[MAP_CELL_W/2] = 64 slots.
+   * TS now matches: RESERVOIR_SIZE = 64.
+   * PARITY MATCH: Both cap growth/spread to 64 cells per cycle.
    */
-  it('TS ORE_DENSITY_CHANCE is 0.5 (50% per cell)', () => {
-    expect(GameMap.ORE_DENSITY_CHANCE).toBe(0.5);
-    // C++ has no per-cell probability — it uses reservoir sampling
-    // with a cap of 64 cells per cycle. PARITY GAP (documented).
-  });
-
-  it('TS ORE_SPREAD_CHANCE is 0.25 (25% per cell)', () => {
-    expect(GameMap.ORE_SPREAD_CHANCE).toBe(0.25);
-    // C++ has no per-cell probability — it uses reservoir sampling
-    // with a cap of 64 cells per cycle (map.h:168). PARITY GAP (documented).
+  it('TS RESERVOIR_SIZE is 64 (C++ MAP_CELL_W/2)', () => {
+    expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
   /**
-   * Verify that with deterministic random (always 0), ALL eligible cells grow.
-   * This is a TS-specific behavior test — in C++ at most 64 would grow.
+   * C++ map.cpp:1078-1084 — ALL sampled cells grow deterministically.
+   * TS now matches: no per-cell random chance, all reservoir cells grow.
    */
-  it('with random=0, all eligible gold cells grow in TS (no cap)', () => {
+  it('growth is deterministic for sampled cells (no per-cell random)', () => {
+    setOverlay(map, 50, 50, 0x05);
+    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    map.growOre(1821);
+    // Even with high random value, growth is deterministic
+    expect(getOverlay(map, 50, 50)).toBe(0x06);
+  });
+
+  /**
+   * C++ map.cpp:1028-1060 — reservoir sampling caps at 64 cells.
+   * With 100 eligible cells, only 64 should grow per cycle.
+   * PARITY MATCH: Both C++ and TS now cap at 64.
+   */
+  it('with 100 eligible cells, at most 64 grow per cycle (reservoir cap)', () => {
     // Place 100 gold ore cells at density 0x05
     let count = 0;
     for (let y = 45; y < 55; y++) {
@@ -761,18 +697,45 @@ describe('Probability model divergence — C++ reservoir vs TS random', () => {
     }
     expect(count).toBe(100);
 
-    vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
+    vi.spyOn(Math, 'random').mockReturnValue(0); // reservoir sampling always replaces slot 0
     map.growOre(1821);
 
-    // ALL 100 cells should have grown to 0x06
+    // Count how many cells grew to 0x06
     let grownCount = 0;
     for (let y = 45; y < 55; y++) {
       for (let x = 45; x < 55; x++) {
         if (getOverlay(map, x, y) === 0x06) grownCount++;
       }
     }
-    expect(grownCount).toBe(100);
-    // C++ would cap at 64 cells — PARITY GAP (documented in reservoir sampling section)
+    // Reservoir sampling caps at 64 cells — PARITY MATCH with C++
+    expect(grownCount).toBeLessThanOrEqual(64);
+    expect(grownCount).toBeGreaterThan(0);
+  });
+
+  /**
+   * With fewer than 64 eligible cells, ALL grow (no sampling needed).
+   */
+  it('with fewer than 64 eligible cells, all grow', () => {
+    // Place 30 gold ore cells
+    let count = 0;
+    for (let y = 45; y < 50; y++) {
+      for (let x = 45; x < 51; x++) {
+        setOverlay(map, x, y, 0x05);
+        count++;
+      }
+    }
+    expect(count).toBe(30);
+
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    map.growOre(1821);
+
+    let grownCount = 0;
+    for (let y = 45; y < 50; y++) {
+      for (let x = 45; x < 51; x++) {
+        if (getOverlay(map, x, y) === 0x06) grownCount++;
+      }
+    }
+    expect(grownCount).toBe(30); // All 30 grow (< 64 cap)
   });
 });
 
@@ -823,10 +786,9 @@ describe('Fully depleted areas — seed cell requirement', () => {
    */
   it('single high-density seed cell can spread outward', () => {
     setOverlay(map, 50, 50, 0x0C); // density 9 (> 6 threshold)
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0); // direction: north
+    // With reservoir sampling, single cell always enters reservoir.
+    // Only random call is spread direction offset.
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
@@ -1019,27 +981,21 @@ describe('Direction iteration — cell.cpp:2968-2969', () => {
   it('direction order matches C++ FACING enum', () => {
     // Test that spread with offset=0 goes N first
     setOverlay(map, 50, 50, 0x0C);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0); // offset: 0 (start at N)
+    // With reservoir sampling, only random call is spread direction offset
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // offset: 0 (start at N)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // N is (50, 49)
   });
 
   it('direction offset=4 starts at S', () => {
     setOverlay(map, 50, 50, 0x0C);
-    // Block N, NE, E, SE using non-gold overlays to avoid random consumption
+    // Block N, NE, E, SE using non-gold overlays
     setOverlay(map, 50, 49, 0x01); // N blocked
     setOverlay(map, 51, 49, 0x01); // NE blocked
     setOverlay(map, 51, 50, 0x01); // E blocked
     setOverlay(map, 51, 51, 0x01); // SE blocked
-    const calls = [0.6, 0.1, 4.0 / 8]; // density:skip, spread:trigger, offset:4(S)
-    let callIdx = 0;
-    vi.spyOn(Math, 'random').mockImplementation(() => {
-      if (callIdx < calls.length) return calls[callIdx++];
-      return 0.9; // no further actions
-    });
+    // With reservoir sampling, only random call is spread direction offset
+    vi.spyOn(Math, 'random').mockReturnValue(4.0 / 8); // offset: 4 (S)
     map.growOre(1821);
     // S is (50, 51) — should be the first valid cell found with offset=4
     expect(getOverlay(map, 50, 51)).toBe(0x03);
@@ -1057,10 +1013,8 @@ describe('Direction iteration — cell.cpp:2968-2969', () => {
     // W (49, 50) left open
     setOverlay(map, 49, 49, 0x01);  // NW
 
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip (for 50,50)
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0); // offset: 0 (start at N)
+    // With reservoir sampling, only random call is spread direction offset
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // offset: 0 (start at N)
     map.growOre(1821);
     // Only W is valid, so ore should spread there regardless of start direction
     expect(getOverlay(map, 49, 50)).toBe(0x03);
@@ -1087,80 +1041,42 @@ describe('Multiple ore cells — processing order', () => {
    * C++ map.cpp:1020-1066 scans cells sequentially by CELL index (0 to MAP_CELL_TOTAL).
    * CELL index = y * MAP_CELL_W + x (row-major order).
    *
-   * TS map.ts:571-572 also scans in row-major order:
-   *   for (let cy = by; cy < by + bh; cy++)
-   *     for (let cx = bx; cx < bx + bw; cx++)
+   * TS now matches C++ two-phase model:
+   *   Phase 1: Scan all cells, collect eligible into growth/spread reservoirs
+   *   Phase 2: Apply growth to all sampled cells, then apply spread to all sampled cells
    *
-   * PARITY MATCH on scan order.
-   *
-   * However, in C++, growth and spread actions happen AFTER the full scan
-   * (map.cpp:1072-1098). In TS, they happen during the scan itself.
-   * This means in TS, early cells' growth can affect later cells' spread eligibility.
-   *
-   * PARITY GAP: In C++, a cell that grows from density 6 to 7 during the growth
-   * phase was assessed for spread BEFORE growth (during scanning). Its spread
-   * eligibility was based on its pre-growth density.
-   *
-   * In TS, the growth and spread checks use the pre-modification overlay value
-   * (captured at line 574 as `const ovl`), so this specific gap is mitigated.
-   * However, cells processed LATER in the scan CAN be affected by EARLIER cells'
-   * spread (new ore placed at 0x03 in a neighbor). This doesn't happen in C++
-   * because all spread happens after the scan completes.
+   * PARITY MATCH: Both C++ and TS apply growth/spread AFTER the full scan.
+   * Newly spread ore is NOT in the scan results and won't be processed.
    */
   it('newly spread ore does NOT get processed in the same cycle', () => {
-    // Place high-density ore at (45, 50) — it will be processed first (lower x)
-    // When it spreads north to (45, 49), that new cell should NOT
-    // itself grow or spread in the same cycle
+    // Place high-density ore at (45, 50) — during scan phase it is collected.
+    // After scan, spread creates ore at (45, 49). That new cell was NOT scanned.
     setOverlay(map, 45, 50, 0x0C);
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.6)  // density: skip for (45, 50)
-      .mockReturnValueOnce(0.1)  // spread: trigger
-      .mockReturnValueOnce(0.0)  // direction: north → (45, 49)
-      .mockReturnValue(0.9);     // all other cells: no action
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north → (45, 49)
     map.growOre(1821);
     // (45, 49) should have ore at minimum density (0x03), NOT grown
+    // C++ parity: newly spread ore is not in the reservoir, so it's deferred
     expect(getOverlay(map, 45, 49)).toBe(0x03);
   });
 
   /**
-   * IMPORTANT PARITY GAP SCENARIO:
-   * A cell at (45, 50) spreads south to (45, 51). Then when the scan reaches
-   * (45, 51) later, in TS it COULD process this newly-created ore. In C++, this
-   * new ore wasn't in the scan results so it wouldn't be processed.
+   * PARITY MATCH: With the two-phase model, newly spread ore is never
+   * processed in the same cycle. The scan collects candidates first,
+   * then growth/spread execute on the collected set.
    *
-   * However, at overlay 0x03 (minimum density), it won't spread (needs > 0x09),
-   * and it could grow. C++ wouldn't grow it until the NEXT scan cycle.
-   * This is a subtle timing difference but generally low-impact.
+   * C++ map.cpp:1072-1098: growth fires, then spread fires.
+   * Newly spread ore wasn't in the scan, so it's deferred to next cycle.
    */
-  it('newly spread ore CAN be grown in same TS cycle (C++ would defer to next cycle)', () => {
-    // Cell at (45, 45) spreads south to (45, 46)
-    // Then when scan reaches (45, 46), it has ore at 0x03 and could grow
+  it('newly spread ore is deferred to next cycle — PARITY MATCH with C++', () => {
+    // Cell at (45, 45) will be collected during scan, then spread south to (45, 46)
     setOverlay(map, 45, 45, 0x0C);
-
-    let callCount = 0;
-    vi.spyOn(Math, 'random').mockImplementation(() => {
-      callCount++;
-      // For source cell (45, 45): skip density, trigger spread south
-      if (callCount === 1) return 0.6;  // density: skip
-      if (callCount === 2) return 0.1;  // spread: trigger
-      if (callCount === 3) return 4.0 / 8; // direction: S (index 4)
-
-      // For the newly created cell at (45, 46):
-      // It will be processed later since cy=46 > cy=45
-      // Make it always grow
-      if (callCount === 4) return 0.0; // density: trigger growth for (45, 46)
-
-      return 0.9; // everything else: skip
-    });
-
+    vi.spyOn(Math, 'random').mockReturnValue(4.0 / 8); // direction: S (index 4)
     map.growOre(1821);
 
-    // The new ore at (45, 46) was created as 0x03, then later in the same scan
-    // cycle it was grown to 0x04. C++ would leave it at 0x03 until next cycle.
-    const newOreOverlay = getOverlay(map, 45, 46);
-    // TS: 0x04 (grew in same cycle) — C++ would be 0x03 (deferred)
-    // This test documents the gap but we expect TS behavior (0x04)
-    expect(newOreOverlay).toBe(0x04); // PARITY GAP: C++ would be 0x03
+    // The new ore at (45, 46) was created during the spread phase.
+    // Since it wasn't in the scan, it stays at 0x03 (not grown).
+    // PARITY MATCH: C++ would also leave it at 0x03 until next cycle.
+    expect(getOverlay(map, 45, 46)).toBe(0x03);
   });
 });
 

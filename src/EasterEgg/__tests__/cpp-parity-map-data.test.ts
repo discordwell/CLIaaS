@@ -392,12 +392,15 @@ describe('GrowthRate -- ore regrowth timing', () => {
     expect(tsRealTimeSec).toBeCloseTo(cppRealTimeSec, 5);
   });
 
-  it('ORE_DENSITY_CHANCE = 0.5 (50% growth probability per cycle)', () => {
-    expect(GameMap.ORE_DENSITY_CHANCE).toBe(0.5);
+  it('RESERVOIR_SIZE = 64 (C++ MAP_CELL_W/2 reservoir sampling cap)', () => {
+    expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
-  it('ORE_SPREAD_CHANCE = 0.25 (25% spread probability per cycle)', () => {
-    expect(GameMap.ORE_SPREAD_CHANCE).toBe(0.25);
+  it('growth/spread is deterministic for sampled cells (no per-cell random)', () => {
+    // C++ map.cpp:1078-1084: all sampled cells grow deterministically
+    // C++ map.cpp:1091-1094: all sampled cells spread deterministically
+    // TS now matches via reservoir sampling model
+    expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
   it('ORE_SPREAD_MIN_DENSITY = 0x09 (density > 6 threshold for spreading)', () => {

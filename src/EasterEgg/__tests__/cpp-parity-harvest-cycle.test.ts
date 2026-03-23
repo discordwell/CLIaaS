@@ -1336,13 +1336,13 @@ describe('ore spread rejection — C++ cell.cpp:3000-3008', () => {
 //     Document the spread threshold and growth probabilities
 // =============================================================================
 
-describe('ore growth probability constants', () => {
-  it('ORE_DENSITY_CHANCE is 0.5 (50% per cycle)', () => {
-    expect(GameMap.ORE_DENSITY_CHANCE).toBe(0.5);
+describe('ore growth reservoir sampling constants', () => {
+  it('RESERVOIR_SIZE is 64 (C++ MAP_CELL_W/2 cap per cycle)', () => {
+    expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
-  it('ORE_SPREAD_CHANCE is 0.25 (25% per cycle)', () => {
-    expect(GameMap.ORE_SPREAD_CHANCE).toBe(0.25);
+  it('ORE_SPREAD_MIN_DENSITY is 0x09 (density > 6 to spread)', () => {
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
   });
 });
 

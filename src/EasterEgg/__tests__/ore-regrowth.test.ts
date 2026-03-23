@@ -126,13 +126,13 @@ describe('Ore Regrowth (C++ parity)', () => {
       vi.restoreAllMocks();
     });
 
-    it('does NOT grow when random exceeds density chance', () => {
+    it('growth is deterministic for sampled cells (C++ parity)', () => {
       setOverlay(50, 50, 0x05);
-      // 0.8 > 0.5 (ORE_DENSITY_CHANCE), so no density growth
-      // Also > 0.25 (ORE_SPREAD_CHANCE), so no spread either
+      // With reservoir sampling, growth is deterministic — no per-cell random check.
+      // The cell always grows when sampled (< 64 eligible cells).
       vi.spyOn(Math, 'random').mockReturnValue(0.8);
       map.growOre(1821);
-      expect(getOverlay(50, 50)).toBe(0x05); // no change
+      expect(getOverlay(50, 50)).toBe(0x06); // always grows when sampled
       vi.restoreAllMocks();
     });
   });
@@ -140,19 +140,13 @@ describe('Ore Regrowth (C++ parity)', () => {
   describe('Ore spreading', () => {
     it('gold ore spreads to adjacent empty cell with overlay 0x03 (EC7: requires density > 6)', () => {
       setOverlay(50, 50, 0x0C); // gold ore at high density (> 0x09, above spread threshold)
-      // First random call: density check (0.6 > 0.5, no density growth)
-      // Second random call: spread check (0.1 < 0.25, spread triggers)
-      // Third random call: direction pick (0.0 → index 0 → N [0,-1] → cell (50, 49))
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)  // density: skip (0.6 >= 0.5)
-        .mockReturnValueOnce(0.1)  // spread: trigger (0.1 < 0.25)
-        .mockReturnValueOnce(0.0); // direction: north [0,-1] → cell (50, 49)
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
       map.growOre(1821);
       // Cell (50, 49) should now have minimum gold ore
       expect(getOverlay(50, 49)).toBe(0x03);
-      // Original cell should NOT have changed density (we skipped it)
-      expect(getOverlay(50, 50)).toBe(0x0C);
+      // Original cell grew deterministically from 0x0C to 0x0D
+      expect(getOverlay(50, 50)).toBe(0x0D);
       vi.restoreAllMocks();
     });
 
@@ -279,10 +273,8 @@ describe('Ore Regrowth (C++ parity)', () => {
       // Only one cell has ore — it serves as a seed.
       // EC7: Spread requires density > 6 (overlay > 0x09), so use high-density ore.
       setOverlay(50, 50, 0x0C); // high gold ore (above spread threshold)
-      vi.spyOn(Math, 'random')
-        .mockReturnValueOnce(0.6)  // density: skip
-        .mockReturnValueOnce(0.1)  // spread: trigger
-        .mockReturnValueOnce(0.0); // direction: north
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
       map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // spread to neighbor
       vi.restoreAllMocks();
@@ -341,12 +333,12 @@ describe('Ore Regrowth (C++ parity)', () => {
       expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
     });
 
-    it('ORE_DENSITY_CHANCE is 0.5', () => {
-      expect(GameMap.ORE_DENSITY_CHANCE).toBe(0.5);
+    it('RESERVOIR_SIZE is 64 (C++ MAP_CELL_W/2)', () => {
+      expect(GameMap.RESERVOIR_SIZE).toBe(64);
     });
 
-    it('ORE_SPREAD_CHANCE is 0.25', () => {
-      expect(GameMap.ORE_SPREAD_CHANCE).toBe(0.25);
+    it('ORE_SPREAD_MIN_DENSITY is 0x09', () => {
+      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
     });
   });
 });

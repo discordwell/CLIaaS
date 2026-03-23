@@ -239,11 +239,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('gold ore still spreads normally when gems are skipped', () => {
       setOverlay(50, 50, 0x0C); // gold at high density (> 0x09 so spread allowed)
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)  // density: skip (0.6 >= 0.5)
-        .mockReturnValueOnce(0.1)  // spread: trigger (0.1 < 0.25)
-        .mockReturnValueOnce(0.0); // direction: index 0 → N [0,-1] → (50, 49)
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
       map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // gold spread
       vi.restoreAllMocks();
@@ -284,11 +281,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('gold at density 0x0A (density 7, above threshold) CAN spread', () => {
       setOverlay(50, 50, 0x0A);
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)   // density: skip
-        .mockReturnValueOnce(0.1)   // spread: trigger
-        .mockReturnValueOnce(0.0);  // direction: index 0 → N → (50, 49)
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
       map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // spread occurred
       vi.restoreAllMocks();
@@ -296,11 +290,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('spread uses 8 directions including diagonals (NE)', () => {
       setOverlay(50, 50, 0x0C); // high density gold
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)   // density: skip
-        .mockReturnValueOnce(0.1)   // spread: trigger
-        .mockReturnValueOnce(0.125); // direction: index 1 → NE [1,-1] → (51, 49)
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.125); // direction: index 1 → NE
       map.growOre(1821);
       expect(getOverlay(51, 49)).toBe(0x03); // spread to NE diagonal
       vi.restoreAllMocks();
@@ -308,12 +299,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('spread uses 8 directions including diagonals (SE)', () => {
       setOverlay(50, 50, 0x0C);
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)   // density: skip for (50,50)
-        .mockReturnValueOnce(0.1)   // spread: trigger for (50,50)
-        .mockReturnValueOnce(0.375) // direction: index 3 → SE [1,1] → (51, 51)
-        .mockReturnValue(0.9);      // skip all subsequent density/spread for new cell
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.375); // direction: index 3 → SE
       map.growOre(1821);
       expect(getOverlay(51, 51)).toBe(0x03); // spread to SE diagonal
       vi.restoreAllMocks();
@@ -321,12 +308,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('spread uses 8 directions including diagonals (SW)', () => {
       setOverlay(50, 50, 0x0C);
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)   // density: skip for (50,50)
-        .mockReturnValueOnce(0.1)   // spread: trigger for (50,50)
-        .mockReturnValueOnce(0.625) // direction: index 5 → SW [-1,1] → (49, 51)
-        .mockReturnValue(0.9);      // skip all subsequent density/spread for new cell
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.625); // direction: index 5 → SW
       map.growOre(1821);
       expect(getOverlay(49, 51)).toBe(0x03); // spread to SW diagonal
       vi.restoreAllMocks();
@@ -334,11 +317,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('spread uses 8 directions including diagonals (NW)', () => {
       setOverlay(50, 50, 0x0C);
-      const mockRandom = vi.spyOn(Math, 'random');
-      mockRandom
-        .mockReturnValueOnce(0.6)   // density: skip
-        .mockReturnValueOnce(0.1)   // spread: trigger
-        .mockReturnValueOnce(0.875); // direction: index 7 → NW [-1,-1] → (49, 49)
+      // With reservoir sampling, only random call is spread direction offset
+      vi.spyOn(Math, 'random').mockReturnValue(0.875); // direction: index 7 → NW
       map.growOre(1821);
       expect(getOverlay(49, 49)).toBe(0x03); // spread to NW diagonal
       vi.restoreAllMocks();

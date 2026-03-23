@@ -754,11 +754,8 @@ describe('spread threshold — OverlayData > 6 (cell.cpp:2914)', () => {
   it('overlay 0x0A (C++ OverlayData=7) CAN spread', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x0A);
-    const mockRandom = vi.spyOn(Math, 'random');
-    mockRandom
-      .mockReturnValueOnce(0.6)  // density: skip (> ORE_DENSITY_CHANCE=0.5)
-      .mockReturnValueOnce(0.1)  // spread: trigger (< ORE_SPREAD_CHANCE=0.25)
-      .mockReturnValueOnce(0.0); // direction: start at 0 (north)
+    // With reservoir sampling, only random call is spread direction offset
+    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
     map.growOre(GameMap.ORE_GROWTH_INTERVAL);
     // North cell should have new ore at minimum density
     expect(getOverlay(map, 50, 49)).toBe(0x03);
