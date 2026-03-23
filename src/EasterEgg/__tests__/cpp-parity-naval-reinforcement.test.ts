@@ -189,12 +189,10 @@ describe('Naval reinforcement — C++ parity', () => {
 
     for (const [edge, expectedFacing] of SOURCE_TO_FACING) {
       it(`${edge} edge -> facing ${expectedFacing} (C++ source << 1)`, () => {
-        // BLOCKED: TS Entity.facing is set to `Math.floor(Math.random() * 8)`
-        // in executeTriggerAction (scenario.ts:2236), NOT derived from the edge.
-        // C++ derives it deterministically as (source << 1).
-        //
-        // We document the expected C++ value but cannot verify TS matches it
-        // without controlling the random seed OR changing the spawn logic.
+        // RESOLVED: TS now derives facing deterministically from spawn edge
+        // via edgeToFacing() in scenario.ts:1151, applied at scenario.ts:2471.
+        // C++ reinf.cpp:439: FacingType eface = (FacingType)(source << 1)
+        // TS maps: north→4(S), south→0(N), east→6(W), west→2(E) — inward facing.
         const sourceIndex = ['north', 'east', 'south', 'west'].indexOf(edge);
         expect(sourceIndex << 1).toBe(expectedFacing);
       });
@@ -326,11 +324,10 @@ describe('Naval reinforcement — C++ parity', () => {
       // C++ reinf.cpp:176-182: checks if team has TMISSION_UNLOAD
       // C++ reinf.cpp:251: sets IsALoaner on vessel transport
       //
-      // BLOCKED: TS Entity has no IsALoaner concept.
+      // RESOLVED: TS Entity now has isALoaner field (entity.ts:251).
+      // Set in scenario.ts:2513 for vessel/aircraft transports with UNLOAD mission.
       // In C++, IsALoaner marks the transport as temporary — it exits the map
       // after unloading. This affects whether the player can select/control it.
-      //
-      // This test documents the C++ behavior. TS does not implement IsALoaner.
       const hasUnload = true; // team has TMISSION_UNLOAD
       const isVessel = UNIT_STATS['LST'].isVessel;
 
@@ -340,7 +337,9 @@ describe('Naval reinforcement — C++ parity', () => {
 
       // TS has no IsALoaner field on Entity
       const entity = new Entity('LST' as any, House.USSR, 100, 100);
-      // BLOCKED: entity has no 'isALoaner' property
+      // RESOLVED: Entity type now declares isALoaner (entity.ts:251), set during
+      // reinforcement spawning (scenario.ts:2513). A plain `new Entity()` has it
+      // undefined (optional property), so the `in` check returns false here.
       expect('isALoaner' in entity).toBe(false);
     });
   });

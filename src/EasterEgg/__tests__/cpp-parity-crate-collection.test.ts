@@ -869,10 +869,10 @@ describe('crate removal and respawn (cell.cpp:2309-2314)', () => {
 // TS crates.ts:154-160: Per-crate lifetime = Random(CrateTime/2, CrateTime*2) minutes
 // TS index.ts:1672: if (this.tick - crate.tick > crate.lifetime) → expire
 //
-// BLOCKED: C++ crates don't expire. TS crates do (intentional freshness mechanic).
+// DESIGN NOTE: C++ crates don't expire. TS crates do (intentional freshness mechanic).
 // ═══════════════════════════════════════════════════════════════════════════
 describe('crate lifetime (rules.cpp:207)', () => {
-  it('BLOCKED: C++ crates persist indefinitely, TS crates expire', () => {
+  it('DESIGN NOTE: C++ crates persist indefinitely, TS crates expire', () => {
     // TS gives each crate a lifetime of Random(5, 20) minutes converted to ticks.
     // C++ crates remain on the map until collected.
     const GAME_TICKS_PER_SEC = 15;

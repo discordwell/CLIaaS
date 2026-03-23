@@ -782,12 +782,12 @@ describe('C++ IQ clamping (house.cpp:7149-7151) — C++ parity', () => {
     expect(cppClampIQ(99)).toBe(1); // Way over → still 1
   });
 
-  // BLOCKED: TS does not clamp IQ values — no real scenario uses IQ > 5.
+  // KNOWN LIMITATION: TS does not clamp IQ values — no real scenario uses IQ > 5.
   it('TS does not clamp IQ values exceeding MaxIQ', () => {
     // TS scenario.ts:917-918: const iq = parseInt(get(houseName, 'IQ', ''));
     // No MaxIQ check exists in TS — an IQ of 99 would be stored as-is.
     // C++ would clamp 99 → 1.
-    // BLOCKED: No real mission INI uses IQ > 5, so this divergence has zero gameplay impact.
+    // KNOWN LIMITATION: No real mission INI uses IQ > 5, so this divergence has zero gameplay impact.
     const tsIQ = parseInt('6');
     expect(tsIQ).toBe(6); // TS stores raw value, C++ would make this 1
   });
@@ -811,11 +811,11 @@ describe('C++ HouseStaticClass default IQ (house.cpp:752) — C++ parity', () =>
     expect(cppDefaultIQ).toBe(0);
   });
 
-  // BLOCKED: TS defaults to IQ 3 — intentional design to ensure AI is functional.
+  // DESIGN NOTE: TS defaults to IQ 3 — intentional design to ensure AI is functional.
   it('TS defaults to IQ 3 when not specified — diverges from C++ default of 0', () => {
     // TS ai.ts:354: iq: ctx.houseIQs.get(house) ?? 3
     // C++ house.cpp:752: IQ(0)
-    // BLOCKED: Intentional divergence — C++ default 0 disables all AI, which works in C++
+    // DESIGN NOTE: Intentional divergence — C++ default 0 disables all AI, which works in C++
     // because mission INIs always specify IQ. TS defaults to 3 for robustness.
     const tsDefaultIQ = 3;
     const cppDefaultIQ = 0;
@@ -886,7 +886,7 @@ describe('IQ-gated AI behaviors — TS implementation (ai.ts, combat.ts, superwe
     // superweapon.ts:264-266: IQ gate at 3
     // C++ IQSuperWeapons=4 (rules.cpp:144)
     expect(tsIQGates.find(g => g.behavior === 'superweapons')?.iq).toBe(3);
-    // BLOCKED: TS gates superweapons at IQ 3, C++ at IQ 4 — intentional for gameplay balance
+    // DESIGN NOTE: TS gates superweapons at IQ 3, C++ at IQ 4 — intentional for gameplay balance
   });
 
   it('C++ IQRepairSell requires IQ >= 3 for repair/sell decisions', () => {
@@ -897,7 +897,7 @@ describe('IQ-gated AI behaviors — TS implementation (ai.ts, combat.ts, superwe
     // ai.ts:1794: if (state.iq < 1) continue;
     // C++ IQRepairSell=3 (rules.cpp:147)
     expect(tsIQGates.find(g => g.behavior === 'auto-repair')?.iq).toBe(1);
-    // BLOCKED: TS gates repair at IQ 1, C++ at IQ 3 — intentional for gameplay balance
+    // DESIGN NOTE: TS gates repair at IQ 1, C++ at IQ 3 — intentional for gameplay balance
   });
 
   it('C++ IQProduction requires IQ >= 5 for autonomous base building', () => {
@@ -909,7 +909,7 @@ describe('IQ-gated AI behaviors — TS implementation (ai.ts, combat.ts, superwe
     // ai.ts:1346: if (state.iq < 1) continue;
     // C++ IQProduction=5 (rules.cpp:145), but note: IsBaseBuilding flag can bypass this
     expect(tsIQGates.find(g => g.behavior === 'construction')?.iq).toBe(1);
-    // BLOCKED: TS gates construction at IQ 1, C++ at IQ 5 — intentional (C++ uses IsBaseBuilding bypass)
+    // DESIGN NOTE: TS gates construction at IQ 1, C++ at IQ 5 — intentional (C++ uses IsBaseBuilding bypass)
   });
 });
 
