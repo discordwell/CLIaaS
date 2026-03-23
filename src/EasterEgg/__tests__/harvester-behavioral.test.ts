@@ -340,11 +340,12 @@ describe('updateHarvester — state transitions', () => {
     expect(harv.harvesterState).toBe('idle');
   });
 
-  it('unloading harvester adds credits via addCredits callback after 14 ticks', () => {
-    const addCredits = vi.fn();
+  it('unloading harvester drip-feeds credits (1 bail per tick)', () => {
+    let totalDeposited = 0;
+    const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const harv = makeEntity(UnitType.V_HARV, House.Spain, 50 * CELL_SIZE, 50 * CELL_SIZE);
     harv.harvesterState = 'unloading';
-    harv.harvestTick = 13; // next tick = 14 (dump completes)
+    harv.harvestTick = 0;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
 
@@ -354,9 +355,13 @@ describe('updateHarvester — state transitions', () => {
       entities: [harv],
     });
 
-    updateHarvester(ctx, harv);
+    // Drip-feed: 10 ticks to unload 10 bails
+    for (let i = 0; i < 10; i++) {
+      updateHarvester(ctx, harv);
+    }
 
-    expect(addCredits).toHaveBeenCalledWith(250);
+    expect(addCredits).toHaveBeenCalledTimes(10);
+    expect(totalDeposited).toBe(250);
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
     expect(harv.harvesterState).toBe('idle');
@@ -369,7 +374,7 @@ describe('updateHarvester — state transitions', () => {
 
     const harv = makeEntity(UnitType.V_HARV, House.USSR, 50 * CELL_SIZE, 50 * CELL_SIZE);
     harv.harvesterState = 'unloading';
-    harv.harvestTick = 13;
+    harv.harvestTick = 0;
     harv.oreLoad = 5;
     harv.oreCreditValue = 125;
 
@@ -380,7 +385,10 @@ describe('updateHarvester — state transitions', () => {
       entities: [harv],
     });
 
-    updateHarvester(ctx, harv);
+    // Drip-feed: 5 ticks to unload 5 bails
+    for (let i = 0; i < 5; i++) {
+      updateHarvester(ctx, harv);
+    }
 
     expect(addCredits).not.toHaveBeenCalled();
     expect(houseCredits.get(House.USSR)).toBe(225); // 100 + 125

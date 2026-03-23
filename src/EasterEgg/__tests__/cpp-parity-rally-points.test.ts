@@ -454,13 +454,15 @@ describe('C++ parity: GUARD_AREA return-to-rally behavior (foot.cpp:979-1001)', 
     // foot.cpp:998: if (!IsFiring && !Target_Legal(NavCom) && Distance(ArchiveTarget) > maxrange)
     //   → Assign_Destination(ArchiveTarget)
     //
-    // TS AREA_GUARD entities have no ArchiveTarget equivalent.
+    // Entity now has archiveTarget field (added for harvester ore memory, unit.cpp:2794).
+    // However, GUARD_AREA return-to-rally behavior is NOT yet implemented.
     // PARITY GAP: TS units with rally move via MOVE mission, which does not
     // return them to the rally point if they are displaced.
 
-    // We test that Entity has no archiveTarget field — confirming the gap
+    // archiveTarget exists on Entity but starts as null (unused for non-harvesters)
     const entity = new Entity(UnitType.E1, 'Greece' as House, 100, 100);
-    expect((entity as Record<string, unknown>).archiveTarget).toBeUndefined();
+    expect(entity.archiveTarget).toBeNull();
+    // TODO: Implement GUARD_AREA return-to-rally using archiveTarget for combat units
   });
 });
 

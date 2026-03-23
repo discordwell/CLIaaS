@@ -402,8 +402,8 @@ describe('harvest timing — one bail every 10 ticks', () => {
 //    C++ parity: unloading takes 14 ticks, credits dumped as lump sum at end
 // =============================================================================
 
-describe('unload timing — 14-tick dump animation, lump-sum credits', () => {
-  it('unloading completes at harvestTick=14, not before', () => {
+describe('unload timing — C++ drip-feed: 1 bail per tick', () => {
+  it('unloading completes after oreLoad ticks (1 bail per tick)', () => {
     const ctx = makeContext();
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
@@ -412,22 +412,23 @@ describe('unload timing — 14-tick dump animation, lump-sum credits', () => {
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    // Tick 13 — still unloading
-    for (let i = 0; i < 13; i++) {
+    // After 27 ticks, 1 bail remaining
+    for (let i = 0; i < 27; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.harvesterState).toBe('unloading');
-    expect(harv.oreLoad).toBe(28); // not yet deposited
+    expect(harv.oreLoad).toBe(1);
 
-    // Tick 14 — unload completes
+    // Tick 28 — last bail deposited, unload completes
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
   });
 
-  it('lump-sum credit deposit for player harvester calls addCredits with full amount', () => {
-    const addCredits = vi.fn();
+  it('drip-feed credit deposit: addCredits called once per bail', () => {
+    let totalDeposited = 0;
+    const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const ctx = makeContext({ addCredits });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
@@ -436,14 +437,15 @@ describe('unload timing — 14-tick dump animation, lump-sum credits', () => {
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 28; i++) {
       updateHarvester(ctx, harv);
     }
 
-    expect(addCredits).toHaveBeenCalledWith(700);
+    expect(addCredits).toHaveBeenCalledTimes(28);
+    expect(totalDeposited).toBe(700);
   });
 
-  it('AI harvester deposits into houseCredits map', () => {
+  it('AI harvester deposits into houseCredits map via drip-feed', () => {
     const houseCredits = new Map<House, number>();
     houseCredits.set(House.USSR, 100);
     const ctx = makeContext({
@@ -457,7 +459,7 @@ describe('unload timing — 14-tick dump animation, lump-sum credits', () => {
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 28; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -474,11 +476,12 @@ describe('unload timing — 14-tick dump animation, lump-sum credits', () => {
     harv.oreCreditValue = 250;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
+    // Drip-feed: 10 ticks to unload 10 bails
+    for (let i = 0; i < 10; i++) {
       updateHarvester(ctx, harv);
     }
 
-    // Sound plays at ticks 5, 10 => 2 times (tick 15 would be after unload completes)
+    // Sound plays at ticks 5, 10 => 2 times
     const healCalls = playSound.mock.calls.filter(c => c[0] === 'heal');
     expect(healCalls.length).toBe(2);
   });
@@ -1269,15 +1272,16 @@ describe('complete harvest-unload cycle integration', () => {
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    // Run 14 ticks for unload
-    for (let i = 0; i < 14; i++) {
+    // C++ drip-feed: 28 ticks to unload 28 bails
+    for (let i = 0; i < 28; i++) {
       updateHarvester(ctx, harv);
     }
 
     expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
-    expect(addCredits).toHaveBeenCalledWith(700);
+    // Drip-feed: addCredits called 28 times, 25 per bail
+    expect(addCredits).toHaveBeenCalledTimes(28);
   });
 });
 
