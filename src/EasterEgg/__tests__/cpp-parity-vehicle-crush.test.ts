@@ -825,10 +825,10 @@ describe('PARITY FIXED: wall crush owner alliance check (unit.cpp:3108-3109)', (
 });
 
 // =============================================================================
-// 19. PARITY GAP: C++ Spy crush immunity from AI (unit.cpp:4850-4852)
+// 19. Spy passive crush — Overrun_Square has no spy exception (unit.cpp:4384-4450)
 // =============================================================================
 
-describe('PARITY GAP: Spy AI crush immunity (unit.cpp:4850-4852)', () => {
+describe('Spy passive crush — Overrun_Square has no spy exception', () => {
 
   // C++ unit.cpp:4850-4852 (Should_Crush_It):
   //   if (it->What_Am_I() == RTTI_INFANTRY && *(InfantryClass *)it == INFANTRY_SPY) {

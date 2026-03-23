@@ -282,7 +282,7 @@ function pathMaxType(entity: Entity, isPlayerUnit: boolean): number {
   if (!entity.moveTarget) return MOVE_TEMP;
   // C++ foot.cpp:386-388: human near dest → maxtype = MOVE_DESTROYABLE
   const dist = worldDist(entity.pos, entity.moveTarget);
-  const closeEnough = 2.5; // C++ rules.cpp:259 CloseEnoughDistance = 0x0280 = 2.5 cells
+  const closeEnough = 2.75; // rules.ini [General] CloseEnough=2.75 (overrides C++ default 0x0280)
   if (dist < closeEnough) return MOVE_DESTROYABLE;
   return MOVE_TEMP;
 }
@@ -4520,7 +4520,7 @@ export class Game {
     } else if (entity.moveTarget) {
       // C++ drive.cpp only accepts "close enough" as a fallback when pathing is blocked.
       // A direct move order should otherwise continue to the exact commanded cell.
-      const closeEnough = 2.5; // C++ rules.cpp:259 CloseEnoughDistance(0x0280) = 640 leptons / 256 = 2.5 cells
+      const closeEnough = 2.75; // rules.ini [General] CloseEnough=2.75 (overrides C++ default 0x0280)
       const finishMove = () => {
         entity.moveTarget = null;
         // C++ foot.cpp:2242-2248: navQueueLoop re-populates queue when exhausted

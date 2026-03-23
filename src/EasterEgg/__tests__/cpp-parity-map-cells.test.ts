@@ -3,7 +3,7 @@
  *
  * Tests TS map/cell implementation against C++ Red Alert ground truth.
  * Every C++ reference is from actual source files with line numbers.
- * Tests that reveal divergences are left FAILING with // PARITY GAP comments.
+ * Tests that reveal divergences are documented with PARITY FIXED or DESIGN DIVERGENCE comments.
  *
  * C++ source files read:
  *   - defines.h:828-837  — MoveType enum (MOVE_OK..MOVE_NO, 6 values)

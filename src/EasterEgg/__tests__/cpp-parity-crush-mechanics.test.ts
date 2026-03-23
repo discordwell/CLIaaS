@@ -650,9 +650,9 @@ describe('Harvester — unarmed crusher (unit.cpp:1125-1139)', () => {
 // 15. Summary of known parity gaps (documentation tests)
 // =============================================================================
 
-describe('PARITY GAP SUMMARY — C++ IsCrusher vs TS crusher', () => {
+describe('PARITY STATUS SUMMARY — C++ IsCrusher vs TS crusher', () => {
 
-  // These document where TS diverges from C++ behavior.
+  // Summary of parity status for crush behavior.
   // The C++ source (udata.cpp constructor) is the ground truth.
   // rules.ini Tracked= only controls Speed, not IsCrusher.
 
@@ -671,14 +671,14 @@ describe('PARITY GAP SUMMARY — C++ IsCrusher vs TS crusher', () => {
     expect(UNIT_STATS.MGG.crusher).toBe(true); // matches C++
   });
 
-  it('GAP: Crush sound — C++ uses single VOC_SQUISH, TS uses die_infantry/die_ant', () => {
+  it('DESIGN DIVERGENCE: Crush sound — C++ uses single VOC_SQUISH, TS uses die_infantry/die_ant', () => {
     // C++ unit.cpp:4429: Sound_Effect(VOC_SQUISH, Coord) for ALL crushes
     // TS combat.ts:567: differentiates 'die_ant' vs 'die_infantry'
-    // Minor cosmetic gap — not a gameplay difference
+    // Minor cosmetic divergence — not a gameplay difference
     expect(true).toBe(true);
   });
 
-  it('GAP: Uncloak after crush — C++ calls Do_Uncloak(), TS does not', () => {
+  it('DESIGN DIVERGENCE: Uncloak after crush — C++ calls Do_Uncloak(), TS does not', () => {
     // C++ unit.cpp:4447: if (crushed) Do_Uncloak();
     // Affects Phase Transport (STNK) which is cloakable
     // TS does not modify cloak state after crush

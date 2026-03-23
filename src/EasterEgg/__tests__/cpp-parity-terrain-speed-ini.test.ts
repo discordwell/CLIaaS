@@ -107,18 +107,18 @@ describe('TERRAIN_SPEED table — exhaustive rules.ini parity (every terrain x s
 //    These tests assert the rules.ini values and will FAIL if TS diverges.
 // ============================================================================
 
-describe('PARITY GAPS: TS values that diverge from rules.ini', () => {
+describe('PARITY FIXED: TS values now match rules.ini', () => {
 
-  // GAP 1: Clear/Wheel — rules.ini=60%, TS has 70%
-  it('Clear/WHEEL — rules.ini=60% (0.60), TS has 0.70 → MISMATCH', () => {
+  // FIXED: Clear/Wheel — rules.ini=60%, TS now has 0.60
+  it('Clear/WHEEL — rules.ini=60% (0.60), TS matches', () => {
     // C++ rules.cpp:861: gptr->Cost[SPEED_WHEEL] = ini.Get_Fixed("Clear", "Wheel", 1)
     // rules.ini [Clear] Wheel=60%
     // TS types.ts:411: Clear Wheel=0.70 (should be 0.60)
     expect(TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]).toBe(0.60);
   });
 
-  // GAP 2: Ore/Wheel — rules.ini=50%, TS has 60%
-  it('Ore/WHEEL — rules.ini=50% (0.50), TS has 0.60 → MISMATCH', () => {
+  // FIXED: Ore/Wheel — rules.ini=50%, TS now has 0.50
+  it('Ore/WHEEL — rules.ini=50% (0.50), TS matches', () => {
     // C++ rules.cpp:861: gptr->Cost[SPEED_WHEEL] = ini.Get_Fixed("Ore", "Wheel", 1)
     // rules.ini [Ore] Wheel=50%
     // TS types.ts:417: Ore Wheel=0.60 (should be 0.50)

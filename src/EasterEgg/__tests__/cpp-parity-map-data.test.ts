@@ -171,8 +171,8 @@ describe('Overlay constants -- C++ OverlayType enum (defines.h:1487-1499)', () =
       expect(TS_GOLD_MAX - TS_GOLD_MIN + 1).toBe(12);
     });
 
-    it('PARITY GAP: C++ has 4 gold types x density-per-cell; TS has 12 linear density bytes', () => {
-      // C++ uses 4 OverlayType enums (GOLD1-4) × per-cell density counters.
+    it('REPRESENTATION DIVERGENCE: C++ 4 gold types x density-per-cell; TS 12 linear density bytes', () => {
+      // C++ uses 4 OverlayType enums (GOLD1-4) x per-cell density counters.
       // TS encodes the same range as 12 linear bytes (0x03-0x0E).
       // Different internal representation, identical gameplay behavior:
       // every bail yields GoldValue=25 regardless of density level.
@@ -425,10 +425,10 @@ describe('[General] spatial constants -- rules.ini', () => {
     expect(iniFloat('General', 'CloseEnough')).toBeCloseTo(2.75, 2);
   });
 
-  it('PARITY GAP: TS uses closeEnough = 2.5, rules.ini says 2.75', () => {
-    // TS index.ts:4415: const closeEnough = 2.75 — now matches RULES.INI
+  it('PARITY FIXED: TS closeEnough = 2.75, matching rules.ini', () => {
+    // TS index.ts: const closeEnough = 2.75 — matches RULES.INI
     // rules.ini [General]: CloseEnough=2.75
-    const TS_CLOSE_ENOUGH = 2.75; // from index.ts:4415 — fixed to match RULES.INI
+    const TS_CLOSE_ENOUGH = 2.75; // from index.ts — fixed to match RULES.INI
     const INI_CLOSE_ENOUGH = iniFloat('General', 'CloseEnough');
     expect(TS_CLOSE_ENOUGH).toBe(INI_CLOSE_ENOUGH);
   });

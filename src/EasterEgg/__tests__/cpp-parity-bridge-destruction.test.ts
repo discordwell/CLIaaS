@@ -519,9 +519,8 @@ describe('PARITY FIXED: Two-phase bridge destruction (map.cpp:1797-1864)', () =>
     expect(map.getTerrain(20, 20)).toBe(Terrain.CLEAR); // still passable
   });
 
-  it('C++ Phase 2: half-destroyed bridge should become fully destroyed', () => {
-    // PARITY GAP — C++ requires a SECOND hit on BRIDGE1H/2H to destroy fully.
-    // TS treats half-destroyed the same as intact — one destroyBridge call removes it.
+  it('C++ Phase 2: half-destroyed bridge becomes fully destroyed', () => {
+    // PARITY FIXED — TS correctly converts half-destroyed bridge to water on second hit.
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
     setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE1H, 6);
@@ -586,9 +585,10 @@ describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
   });
 });
 
-// ── PARITY GAP: Screen shake on bridge destruction ─────────────────────────
+// ── Screen shake on bridge destruction ──────────────────────────────────────
 // C++ map.cpp:1862 — Shake_The_Screen(3) when bridge is fully destroyed.
 // C++ map.cpp:1982 — Shake_The_Screen(3) for multi-part bridge destruction.
+// TS: screen shake comes from barrel building destruction, not bridge-specific call.
 
 describe('Screen shake from bridge destruction', () => {
 

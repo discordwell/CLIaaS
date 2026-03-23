@@ -592,7 +592,7 @@ describe('Section 4: MCV deployment (unit.cpp:1477-1589)', () => {
     expect(fact.hp).toBe(expectedHp);
   });
 
-  // PARITY GAP: C++ requires MCV to face SW (DIR_SW) before deploying
+  // DESIGN DIVERGENCE: C++ requires MCV to face SW (DIR_SW) before deploying
   it('C++ requires MCV to face DIR_SW before deployment — unit.cpp:1509', () => {
     // C++ unit.cpp:1509-1513:
     //   if (PrimaryFacing.Current() != DIR_SW) {
