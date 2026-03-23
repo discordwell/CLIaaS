@@ -2062,7 +2062,7 @@ export class Game {
           // C++ building.cpp:3509-3549: no refund when ConYard reverts to MCV
           if (!mcvSpawned && prodItem) {
             const isHuman = this.isAllied(s.house, this.playerHouse);
-            this.addCredits(sellRefund(prodItem.cost, isHuman), true);
+            this.addCredits(sellRefund(prodItem.cost, isHuman, prodItem.rawCost), true);
           }
           // Recalculate silo capacity AFTER adding refund (C++ order: Refund_Money then Limbo)
           this.recalculateSiloCapacity();
@@ -2669,7 +2669,7 @@ export class Game {
             this.clearStructureFootprint(s);
             const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
             if (prodItem) {
-              this.addCredits(sellRefund(prodItem.cost, true), true); // sell mode = human
+              this.addCredits(sellRefund(prodItem.cost, true, prodItem.rawCost), true); // sell mode = human, uses rawCost
             }
             this.audio.play('sell');
           } else {

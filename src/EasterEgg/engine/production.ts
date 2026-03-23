@@ -163,7 +163,10 @@ export function getAvailableItems(ctx: ProductionContext): ProductionItem[] {
 
 /** Start building an item (called from sidebar click).
  *  C++ parity: incremental cost deduction per tick using integer division (factory.cpp:615).
- *  factory.cpp:416: validates player has at minimum cost-per-tick before starting. */
+ *  factory.cpp:416: validates player has at minimum cost-per-tick before starting.
+ *  C++ parity: factory occupation check — if a structure has completed production
+ *  but is awaiting placement (Has_Completed() returns true), new production cannot
+ *  start in that factory until Completed() is called (factory.cpp:647). */
 export function startProduction(ctx: ProductionContext, item: ProductionItem): void {
   const category = getStripSide(item);
   const existing = ctx.productionQueue.get(category);
@@ -179,6 +182,12 @@ export function startProduction(ctx: ProductionContext, item: ProductionItem): v
       ctx.credits -= effectiveCost;
       existing.queueCount++;
     }
+    return;
+  }
+  // C++ parity: factory occupation check (factory.cpp:647).
+  // If a structure is awaiting placement in the same category, the factory is
+  // still "occupied" — block new production until placement is completed.
+  if (item.isStructure && ctx.pendingPlacement) {
     return;
   }
   // C++ parity (factory.cpp:416): validate player has at minimum cost-per-tick.

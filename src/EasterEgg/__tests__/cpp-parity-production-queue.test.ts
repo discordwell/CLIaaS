@@ -453,17 +453,13 @@ describe('C++ parity: placing a building pauses production (factory.cpp:230,382)
     // Try to start DOME while POWR is awaiting placement
     startProduction(ctx, dome);
 
-    // TS has no explicit block — pendingPlacement is a separate state.
-    // When the left queue is empty (deleted on completion), a new item CAN be started.
-    // C++ would block because the factory is still occupied (Has_Completed() returns true
-    // until Completed() is explicitly called to clear the factory).
-    // This is a behavioral divergence — test documents TS behavior:
+    // C++ parity: factory is occupied (Has_Completed() returns true until Completed()
+    // is called to clear the factory — factory.cpp:647).
+    // TS now blocks new structure production while pendingPlacement is active,
+    // matching C++ behavior.
     const entry = ctx.productionQueue.get('left');
-    if (entry) {
-      // TS allows starting new production during placement — BLOCKED: needs factory occupation check
-      expect(entry.item.type).toBe('DOME');
-    }
     // C++ expected: production NOT started because factory is occupied
+    expect(entry).toBeUndefined();
   });
 
   it('CLOSED: total cost after completion is exact — integer tracking + force-spend', () => {

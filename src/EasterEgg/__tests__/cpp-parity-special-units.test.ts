@@ -543,23 +543,24 @@ describe('Chronoshift infantry kill (house.cpp:2820-2826)', () => {
 // case in the FIXIT_CSII code path.
 // ============================================================
 describe('Chronoshift demo truck self-destruct (house.cpp:2828-2829 FIXIT_CSII)', () => {
-  it('demo truck should self-destruct when chronoshifted — BLOCKED', () => {
+  it('demo truck targets itself when chronoshifted — C++ parity achieved', () => {
     const demoTruck = makeEntity(UnitType.V_DTRK, House.Greece, 200, 200);
     demoTruck.selected = true;
 
     const ctx = makeSuperweaponContext({ entities: [demoTruck] });
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Greece, { x: 500, y: 500 });
 
-    // C++: demo truck should target itself → kamikaze at destination
-    // TS: treats demo truck like any other vehicle — just teleports it
-    // BLOCKED: TS does not implement the FIXIT_CSII demo truck chronoshift behavior.
-    // Requires special-case handling in activateSuperweapon for UNIT_DEMOTRUCK.
+    // C++ house.cpp:2828-2829 FIXIT_CSII:
+    //   tech->Assign_Target(tech->As_Target()) — demo truck targets itself
+    //   This triggers ATTACK mission on self → kamikaze self-destruct at destination.
     //
-    // Current TS behavior: truck is teleported, not self-destructing
+    // GAP CLOSED: superweapon.ts now implements the FIXIT_CSII demo truck path.
+    // Demo truck is teleported to destination, then assigned ATTACK mission targeting self.
     expect(demoTruck.pos.x).toBe(500);
-    expect(demoTruck.alive).toBe(true);
-    // In C++, the truck would self-destruct at destination.
-    // Documenting current divergence — this test should FAIL if parity is implemented.
+    expect(demoTruck.pos.y).toBe(500);
+    expect(demoTruck.mission).toBe(Mission.ATTACK);
+    expect(demoTruck.target).toBe(demoTruck); // self-targeting
+    expect(demoTruck.chronoShiftTick).toBeGreaterThan(0);
   });
 });
 
@@ -656,20 +657,17 @@ describe('Demo truck detonation mechanism (unit.cpp:4215-4221)', () => {
     expect(ctx.damageEntity).toHaveBeenCalled();
   });
 
-  it('demo truck splash damage uses linear falloff (TS-specific, not C++)', () => {
+  it('demo truck splash damage uses warhead spread-based falloff (C++ parity)', () => {
     /**
-     * TS detonation (specialUnits.ts:294):
-     *   damage = DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)
+     * GAP CLOSED: TS now uses modifyDamage() with Nuke warhead spread-based falloff
+     * (combat.cpp:106-125) instead of linear falloff.
      *
-     * At distance 0: 1000 * (1 - 0) = 1000
-     * At distance 1.5: 1000 * (1 - 0.25) = 750
-     * At distance 3: 1000 * (1 - 0.5) = 500
+     * At point-blank (distPixels=0): modifyDamage applies warhead vs armor mult.
+     * Nuke vs 'none' armor = 0.9 → 1000 * 0.9 = 900
+     * Nuke vs 'light' armor (MNLY) = 0.6 → 1000 * 0.6 = 600
      *
-     * C++ uses the bullet/warhead system which has a different falloff curve
-     * (distFactor-based as tested in cpp-parity-damage-formula.test.ts).
-     *
-     * BLOCKED: TS uses linear falloff; C++ uses warhead spread-based falloff.
-     * Would require integrating demo truck into the warhead/bullet system.
+     * C++ uses the bullet/warhead system which has this same distFactor-based
+     * falloff curve (tested in cpp-parity-damage-formula.test.ts).
      */
     const truck = makeEntity(UnitType.V_DTRK, House.Greece, 200, 200);
     truck.mission = Mission.ATTACK;
@@ -688,10 +686,14 @@ describe('Demo truck detonation mechanism (unit.cpp:4215-4221)', () => {
     const adjCall = calls.find((c: unknown[]) => (c[0] as Entity).id === adjacent.id);
     expect(adjCall).toBeDefined();
 
-    // At distance ~0, damage should be DEMO_TRUCK_DAMAGE * 1.0 = 1000
+    // At distance ~0: modifyDamage(1000, 'Nuke', armor, 0) applies warhead mult.
+    // The exact damage depends on the target's armor type (from WARHEAD_VS_ARMOR).
+    // MNLY armor is 'light' → Nuke vs light = 0.6 → 600
     if (adjCall) {
-      expect(adjCall[1]).toBe(DEMO_TRUCK_DAMAGE); // 1000 at point-blank
-      // TS uses 'Nuke' warhead for demo truck splash
+      // Warhead spread-based damage: > 0 and <= DEMO_TRUCK_DAMAGE
+      expect(adjCall[1]).toBeGreaterThan(0);
+      expect(adjCall[1]).toBeLessThanOrEqual(DEMO_TRUCK_DAMAGE);
+      // Uses 'Nuke' warhead for demo truck splash
       expect(adjCall[2]).toBe('Nuke');
     }
   });

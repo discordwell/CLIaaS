@@ -98,6 +98,7 @@ export class MusicPlayer {
   private available = false; // true once we confirm at least one track loads
   private pendingPlay = false; // play() called before probe completed
   private fadeTimer: ReturnType<typeof setInterval> | null = null;
+  private pendingTrack = -1; // C++ parity: queue saturation guard (theme.cpp:309-314)
   private trackName = ''; // current track display name
   private combatMode = false;
   private combatCooldown = 0; // ticks since combat ended (for cooldown)
@@ -197,16 +198,26 @@ export class MusicPlayer {
     this.playTrack(this.playlist[this.playlistIndex]);
   }
 
-  /** Play a specific track by index */
+  /** Play a specific track by index.
+   *  C++ parity (theme.cpp:309-314): Queue_Song ignores requests when a different
+   *  theme is already pending (not NONE or PICK_ANOTHER). This prevents rapid
+   *  queue flooding from combat mode transitions or triggers. */
   private playTrack(trackIdx: number): void {
+    // C++ queue saturation guard: if a track is already pending (crossfading in),
+    // ignore subsequent requests to prevent flooding.
+    if (this.pendingTrack >= 0 && this.pendingTrack !== trackIdx) {
+      return;
+    }
+
     const name = MUSIC_TRACKS[trackIdx];
     this.trackName = name.replace(/^\d+_/, '').replace(/_/g, ' ');
     this.lastPlayedTrack = trackIdx; // C++ parity: track last-played for no-repeat guard
+    this.pendingTrack = trackIdx; // Mark as pending during crossfade
 
     const audio = new Audio(`${this.basePath}/${name}.mp3`);
     audio.volume = this.muted ? 0 : this.volume;
-    audio.addEventListener('ended', () => this.advance());
-    audio.addEventListener('error', () => this.advance()); // skip broken tracks
+    audio.addEventListener('ended', () => { this.pendingTrack = -1; this.advance(); });
+    audio.addEventListener('error', () => { this.pendingTrack = -1; this.advance(); }); // skip broken tracks
 
     // Start crossfade if currently playing
     if (this.current) {
@@ -217,6 +228,7 @@ export class MusicPlayer {
     audio.play().catch(() => {
       // Autoplay blocked — will retry on next user interaction
       this.playing = false;
+      this.pendingTrack = -1;
     });
   }
 
@@ -259,6 +271,9 @@ export class MusicPlayer {
     if (!this.playing) return;
     const pool = this.playlist;
     if (pool.length === 0) return;
+    // Clear pending state — this is an internal track transition (current ended),
+    // not an external queue request. The saturation guard only blocks external calls.
+    this.pendingTrack = -1;
 
     // C++ theme.cpp:240: if per-track Repeat or global IsScoreRepeat, replay same track
     if (this.lastPlayedTrack >= 0) {
@@ -307,6 +322,20 @@ export class MusicPlayer {
     }
   }
 
+  /** Play a specific track by ID — callable from trigger actions.
+   *  C++ taction.cpp:543-544: case TACTION_PLAY_MUSIC: Theme.Queue_Song(Data.Theme);
+   *  Accepts a track ID string (partial match against MUSIC_TRACKS filenames).
+   *  Returns true if the track was found and queued. */
+  playTrackByName(trackId: string): boolean {
+    if (!this.available) return false;
+    const idx = MUSIC_TRACKS.findIndex(t => t.includes(trackId));
+    if (idx < 0) return false;
+    this.playing = true;
+    this.pendingTrack = -1; // C++ Queue_Song overrides pending with explicit theme
+    this.playTrack(idx);
+    return true;
+  }
+
   /** Pause music */
   pause(): void {
     if (this.current && this.playing) {
@@ -325,6 +354,7 @@ export class MusicPlayer {
   stop(): void {
     this.playing = false;
     this.pendingPlay = false;
+    this.pendingTrack = -1; // C++ parity: clear pending on stop (theme.cpp:419-427)
     if (this.fadeTimer) {
       clearInterval(this.fadeTimer);
       this.fadeTimer = null;
@@ -414,6 +444,31 @@ export class MusicPlayer {
 
   /** Whether combat mode is active */
   get isCombatMode(): boolean { return this.combatMode; }
+
+  /** Whether a track is currently pending (queue saturation guard). */
+  get hasPendingTrack(): boolean { return this.pendingTrack >= 0; }
+
+  /**
+   * Tick-based music restart safety net.
+   * C++ conquer.cpp:2357-2358: every frame, if no theme is playing, force-start one:
+   *   if (SampleType && Theme.What_Is_Playing() == THEME_NONE) {
+   *     Theme.Queue_Song(THEME_PICK_ANOTHER);
+   *   }
+   * TS relies on HTMLAudioElement 'ended' events which can be unreliable.
+   * Call this once per game tick to restart music if it stopped unexpectedly.
+   */
+  tickMusicCheck(): void {
+    if (!this.available || !this.playing) return;
+    // If current audio element exists, is not paused, and has not ended, all good
+    if (this.current) {
+      const audio = this.current;
+      if (!audio.paused || !audio.ended) return;
+    }
+    // No active audio but we should be playing — restart
+    // C++ equivalent: Theme.Queue_Song(THEME_PICK_ANOTHER) → Next_Song → play
+    this.pendingTrack = -1; // clear pending so advance can proceed
+    this.advance();
+  }
 
   /** Clean up */
   destroy(): void {

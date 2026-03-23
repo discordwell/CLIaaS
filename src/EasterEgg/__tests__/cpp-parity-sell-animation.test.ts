@@ -371,16 +371,23 @@ describe('C++ parity: Structure sell animation frame timing', () => {
       expect(sellRefund(300, false)).toBe(300);
     });
 
-    it('C++ uses Raw_Cost for refund (free units subtracted)', () => {
-      // C++ PROC refund (human): floor((2000 - 1400) * 0.5) = floor(300) = 300
-      // C++ HPAD refund (human): floor((1500 - 1200) * 0.5) = floor(150) = 150
+    it('C++ uses Raw_Cost for refund (free units subtracted) — now matches', () => {
+      // C++ bdata.cpp:3672-3683: Raw_Cost() subtracts cost of free units bundled with building.
+      // PROC (cost=2000) includes free HARV (cost=1400) → Raw_Cost = 600
+      // HPAD (cost=1500) includes free HELI/HIND (cost=1200) → Raw_Cost = 300
       //
-      // TS uses prodItem.cost (full cost) — so PROC refund = floor(2000 * 0.5) = 1000
-      // This is a divergence, but it's tested in cpp-parity-ai-sell-refund.test.ts
+      // C++ PROC refund (human): floor(600 * 0.5) = 300
+      // C++ HPAD refund (human): floor(300 * 0.5) = 150
+      //
+      // GAP CLOSED: sellRefund now accepts rawCost parameter.
+      // When rawCost is provided, refund is based on Raw_Cost, matching C++.
       const cppProcRefund = Math.floor(600 * REFUND_PERCENT);  // Raw_Cost = 600
-      const tsProcRefund = sellRefund(2000, true);                // prodItem.cost = 2000
-      // BLOCKED: TS refunds based on full cost, C++ on Raw_Cost — requires Raw_Cost in sell path
-      expect(tsProcRefund).not.toBe(cppProcRefund);
+      const tsProcRefund = sellRefund(2000, true, 600);         // with rawCost
+      expect(tsProcRefund).toBe(cppProcRefund);
+
+      const cppHpadRefund = Math.floor(300 * REFUND_PERCENT);  // Raw_Cost = 300
+      const tsHpadRefund = sellRefund(1500, true, 300);         // with rawCost
+      expect(tsHpadRefund).toBe(cppHpadRefund);
     });
   });
 

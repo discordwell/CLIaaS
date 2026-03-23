@@ -816,6 +816,7 @@ export interface ProductionItem {
   type: string;         // unit type or structure type code
   name: string;         // display name
   cost: number;         // credits cost
+  rawCost?: number;     // C++ Raw_Cost — cost minus free units (bdata.cpp:3672-3683). Used for sell refund.
   buildTime: number;    // ticks to build (C++ parity: computed from cost if 0)
   prerequisite: string; // required building type (TENT/BARR→infantry, WEAP→vehicles, FACT→structures)
   techPrereq?: string;  // additional building required (e.g. DOME for Artillery)
@@ -878,12 +879,12 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'APWR', name: 'Adv. Power Plant', cost: 500, buildTime: 150, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 8, points: 50 },
   { type: 'BARR', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'soviet', isStructure: true, techLevel: 1, points: 30 },  // rules.ini Owner=soviet
   { type: 'TENT', name: 'Barracks', cost: 300, buildTime: 120, prerequisite: 'POWR', faction: 'allied', isStructure: true, techLevel: 1, points: 30 },  // rules.ini Owner=allies
-  { type: 'PROC', name: 'Refinery', cost: 2000, buildTime: 200, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 1, points: 80 },
+  { type: 'PROC', name: 'Refinery', cost: 2000, rawCost: 600, buildTime: 200, prerequisite: 'POWR', faction: 'both', isStructure: true, techLevel: 1, points: 80 },
   { type: 'WEAP', name: 'War Factory', cost: 2000, buildTime: 200, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3, points: 80 },
   { type: 'SILO', name: 'Ore Silo', cost: 150, buildTime: 60, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 1, points: 25 },
   { type: 'DOME', name: 'Radar Dome', cost: 1000, buildTime: 150, prerequisite: 'PROC', faction: 'both', isStructure: true, techLevel: 3, points: 60 },
   { type: 'FIX', name: 'Service Depot', cost: 1200, buildTime: 150, prerequisite: 'WEAP', faction: 'both', isStructure: true, techLevel: 3, points: 80 },
-  { type: 'HPAD', name: 'Helipad', cost: 1500, buildTime: 180, prerequisite: 'DOME', faction: 'both', isStructure: true, techLevel: 9, points: 70 },
+  { type: 'HPAD', name: 'Helipad', cost: 1500, rawCost: 300, buildTime: 180, prerequisite: 'DOME', faction: 'both', isStructure: true, techLevel: 9, points: 70 },
   { type: 'AFLD', name: 'Airfield', cost: 600, buildTime: 200, prerequisite: 'DOME', faction: 'soviet', isStructure: true, techLevel: 5, points: 70 },
   // Defenses
   { type: 'PBOX', name: 'Pillbox', cost: 400, buildTime: 80, prerequisite: 'TENT', faction: 'allied', isStructure: true, techLevel: 2, points: 50 },  // rules.ini Prerequisite=tent

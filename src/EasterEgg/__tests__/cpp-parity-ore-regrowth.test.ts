@@ -916,7 +916,7 @@ describe('IsTGrowth / IsTSpread flags — rules.cpp:195-196', () => {
    *
    * TS hardcodes growth as always enabled. There are no flags to disable it.
    *
-   * BLOCKED (minor): C++ can disable growth/spread via IsTGrowth/IsTSpread rules.
+   * DESIGN NOTE: C++ can disable growth/spread via IsTGrowth/IsTSpread rules.
    * TS hardcodes growth as always enabled. Acceptable since all standard game
    * scenarios have these enabled — no shipping mission uses the disable flags.
    */

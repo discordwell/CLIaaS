@@ -452,13 +452,14 @@ describe('ammo increment during rearming (techno.cpp:964-968)', () => {
     expect(ticks).toBe(108);
   });
 
-  // BLOCKED: TS rearming handler increments ammo before checking boundary,
+  // DESIGN NOTE: TS rearming handler increments ammo before checking boundary,
   // but the landing→rearming guard (aircraft.ts:379) prevents entering 'rearming'
   // state when ammo is already at max. In normal gameplay, overshoot never occurs.
   // C++ techno.cpp:965: if (Ammo == MaxAmmo) return(RADIO_NEGATIVE) — rejects reload.
   // TS aircraft.ts:379: if (ammo < maxAmmo) → enter 'rearming' — prevents entry at max.
   // The handler itself (aircraft.ts:397) does ammo++ then checks >= maxAmmo, but
   // this path is only reachable when ammo < maxAmmo on entry.
+  // Functionally correct — already works correctly via the entry guard.
   it('rearm does not exceed MaxAmmo — early exit guard prevents overshoot', () => {
     // Even if artificially forced into rearming at max ammo, the early-exit
     // guard (aircraft.ts) checks ammo >= maxAmmo before incrementing.
@@ -726,8 +727,8 @@ describe('rearm completion semantics (aircraft.cpp RADIO_PREPARED:2691-2694)', (
 // Section 10: C++ vs TS Rearm Driver — WHO controls the rearm?
 // C++ building.cpp:3989-4037 — BUILDING drives rearm (sends RADIO_RELOAD)
 // TS aircraft.ts — AIRCRAFT drives its own rearm (simplified architecture)
-// BLOCKED: Different driver (building vs aircraft) but TIMING matches C++ exactly
-// via computeRearmDelay (building.cpp:4023-4025 formula).
+// DESIGN NOTE: Different driver (building vs aircraft) but TIMING matches C++ exactly
+// via computeRearmDelay (building.cpp:4023-4025 formula). Functionally correct.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('rearm driver — building-driven timing with power fraction (C++ parity)', () => {

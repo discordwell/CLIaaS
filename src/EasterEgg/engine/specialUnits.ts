@@ -10,6 +10,7 @@ import {
   type House, UnitType, Mission, AnimState,
   worldDist, worldToCell, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
   directionTo, HOUSE_FACTION,
+  WARHEAD_META, modifyDamage, type WarheadType,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -355,19 +356,33 @@ export function updateDemoTruck(ctx: SpecialUnitsContext, entity: Entity): void 
 
 // === 11. Demo Truck Detonation (NOT exported) ===
 
-/** Detonate Demo Truck — splash damage centered on truck position. */
+/** Detonate Demo Truck — splash damage centered on truck position.
+ *  C++ parity: uses warhead spread-based falloff from modifyDamage (combat.cpp:106-125)
+ *  instead of linear falloff. Nuke warhead has spreadFactor=6, giving wider splash. */
 function detonateDemoTruck(ctx: SpecialUnitsContext, entity: Entity): void {
   const blastRadius = DEMO_TRUCK_RADIUS;
+  const warhead: WarheadType = 'Nuke';
   for (const other of ctx.entities) {
     if (!other.alive || other.id === entity.id) continue;
     const d = worldDist(entity.pos, other.pos);
-    if (d <= blastRadius) { ctx.damageEntity(other, Math.round(DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)), 'Nuke'); }
+    if (d <= blastRadius) {
+      // C++ parity: use warhead spread-based falloff (combat.cpp:106-125)
+      // distPixels = distance in cells * CELL_SIZE (pixel distance for modifyDamage)
+      const distPixels = d * CELL_SIZE;
+      const dmg = modifyDamage(DEMO_TRUCK_DAMAGE, warhead, other.stats.armor ?? 'none', distPixels);
+      if (dmg > 0) ctx.damageEntity(other, dmg, 'Nuke');
+    }
   }
   for (const s of ctx.structures) {
     if (!s.alive) continue;
     const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
     const d = worldDist(entity.pos, { x: s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2, y: s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2 });
-    if (d <= blastRadius) ctx.damageStructure(s, Math.round(DEMO_TRUCK_DAMAGE * (1 - (d / blastRadius) * 0.5)));
+    if (d <= blastRadius) {
+      const distPixels = d * CELL_SIZE;
+      // Structures use 'heavy' armor in C++ (ARMOR_STEEL)
+      const dmg = modifyDamage(DEMO_TRUCK_DAMAGE, warhead, 'heavy', distPixels);
+      if (dmg > 0) ctx.damageStructure(s, dmg);
+    }
   }
   ctx.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
   ctx.playSoundAt('building_explode', entity.pos.x, entity.pos.y);

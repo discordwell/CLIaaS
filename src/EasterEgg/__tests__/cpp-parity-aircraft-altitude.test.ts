@@ -664,7 +664,7 @@ describe('landing pad fallback behavior (aircraft.cpp:3486-3523, 4104-4111)', ()
     expect(heli.aircraftState).toBe('returning');
   });
 
-  it('C++ aborts landing when LZ becomes blocked — TS does not check', () => {
+  it('C++ aborts landing when LZ becomes blocked — TS now matches', () => {
     // C++ aircraft.cpp:4104-4111:
     //   if (In_Which_Layer() == LAYER_GROUND && !IsTakingOff && !Class->IsFixedWing) {
     //     if (!Is_LZ_Clear(::As_Target(Coord_Cell(Coord)))) {
@@ -672,24 +672,42 @@ describe('landing pad fallback behavior (aircraft.cpp:3486-3523, 4104-4111)', ()
     //       Height += Pixel_To_Lepton(1);
     //     }
     //   }
-    // When descending below layer threshold, C++ checks if landing zone is blocked
-    // If blocked, reverses to takeoff
+    // When descending below layer threshold, C++ checks if landing zone is blocked.
+    // If blocked, reverses to takeoff.
     //
-    // TS: no LZ clear check during landing — will always complete descent
-    // BLOCKED: TS cannot abort a landing in progress (requires LZ occupancy tracking)
-    const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
-    heli.aircraftState = 'landing';
-    heli.flightAltitude = 5; // close to ground
-    heli.ammo = 0;
-    heli.maxAmmo = 6;
+    // GAP CLOSED: TS now checks vehicleOccupancy during landing descent. When the
+    // helicopter enters ground layer (altitude < 2/3 FLIGHT_ALTITUDE) and the LZ
+    // is occupied, it aborts landing and takes off again.
 
-    const ctx = makeAircraftCtx();
-    updateAircraft(ctx, heli);
+    // Case 1: LZ not blocked — normal descent
+    const heli1 = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
+    heli1.aircraftState = 'landing';
+    heli1.flightAltitude = 5; // below LAYER_GROUND threshold (16)
+    heli1.ammo = 0;
+    heli1.maxAmmo = 6;
 
-    // TS unconditionally descends — no abort check
-    expect(heli.flightAltitude).toBe(4);
-    expect(heli.aircraftState).toBe('landing');
-    // C++ might have reversed to takeoff if LZ was blocked
+    const ctx1 = makeAircraftCtx();
+    updateAircraft(ctx1, heli1);
+
+    expect(heli1.flightAltitude).toBe(4); // normal descent
+    expect(heli1.aircraftState).toBe('landing');
+
+    // Case 2: LZ blocked — abort landing, take off
+    const heli2 = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
+    heli2.aircraftState = 'landing';
+    heli2.flightAltitude = 5; // below LAYER_GROUND threshold
+    heli2.ammo = 0;
+    heli2.maxAmmo = 6;
+
+    const ctx2 = makeAircraftCtx();
+    // Block the LZ cell: pos (200,200) → cell (8,8) → key 8*128+8 = 1032
+    ctx2.map.vehicleOccupancy.add(8 * 128 + 8);
+    updateAircraft(ctx2, heli2);
+
+    // Altitude first decrements to 4, then the LZ check fires (4 < 16),
+    // sees occupancy, increments to 5, and switches to takeoff
+    expect(heli2.aircraftState).toBe('takeoff');
+    expect(heli2.flightAltitude).toBeGreaterThanOrEqual(5);
   });
 });
 

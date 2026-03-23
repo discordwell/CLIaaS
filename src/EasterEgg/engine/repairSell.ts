@@ -83,10 +83,17 @@ export function unitRepairCostPerStep(buildCost: number, maxHp: number): number 
 }
 
 /** Calculate sell refund for a structure — no health scaling.
- *  C++ techno.cpp:5743-5761 Refund_Amount: AI gets 100% refund, human gets Rule.RefundPercent (50%). */
-export function sellRefund(buildCost: number, isHuman = true): number {
+ *  C++ techno.cpp:5743-5761 Refund_Amount: AI gets 100% refund, human gets Rule.RefundPercent (50%).
+ *  C++ parity: uses Raw_Cost (bdata.cpp:3672-3683) which subtracts the cost of free units
+ *  included with the building (e.g. PROC subtracts HARV cost, HPAD subtracts helicopter cost).
+ *  @param buildCost - full build cost of the structure
+ *  @param isHuman - true for human player (50% refund), false for AI (100% refund)
+ *  @param rawCost - optional C++ Raw_Cost override (cost minus free units). Falls back to buildCost. */
+export function sellRefund(buildCost: number, isHuman = true, rawCost?: number): number {
+  // C++ techno.cpp:5747: cost = Techno_Type_Class()->Raw_Cost() * House->CostBias
+  const cost = rawCost ?? buildCost;
   // C++ fixed-point multiply: ((128 * cost) + 128) / 256 — rounds half-up
-  return isHuman ? Math.trunc((128 * buildCost + 128) / 256) : buildCost;
+  return isHuman ? Math.trunc((128 * cost + 128) / 256) : cost;
 }
 
 /** Spend credits with Tiberium-first priority (C++ house.cpp:1886-1900).
@@ -204,7 +211,7 @@ export function sellStructureByIndex(ctx: RepairSellContext, idx: number): boole
     s.alive = false;
     ctx.clearStructureFootprint(s);
     const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type);
-    if (prodItem) ctx.credits += sellRefund(prodItem.cost, true); // sell mode = human
+    if (prodItem) ctx.credits += sellRefund(prodItem.cost, true, prodItem.rawCost); // sell mode = human, uses rawCost
     return true;
   }
   s.sellProgress = 0;

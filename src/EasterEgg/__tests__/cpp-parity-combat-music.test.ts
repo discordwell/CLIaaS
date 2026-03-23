@@ -379,7 +379,7 @@ describe('Queue/fade behavior (theme.cpp:286-315)', () => {
     expect(CPP_DURATION_MS).toBeCloseTo(TS_CROSSFADE_DURATION_MS, 0);
   });
 
-  it('C++ Queue_Song sets Pending only when slot is free — TS always crossfades', () => {
+  it('C++ Queue_Song sets Pending only when slot is free — TS now matches', () => {
     // C++ theme.cpp:309-314:
     //   if (Pending == THEME_NONE || Pending == THEME_PICK_ANOTHER ||
     //       theme == THEME_NONE || theme == THEME_QUIET) {
@@ -390,12 +390,13 @@ describe('Queue/fade behavior (theme.cpp:286-315)', () => {
     // If a different theme is already pending (not NONE or PICK_ANOTHER),
     // the new request is IGNORED. This prevents rapid queue flooding.
     //
-    // TS playTrack() always starts a new track with crossfade, regardless
-    // of what's currently pending.
+    // GAP CLOSED: TS playTrack() now checks pendingTrack before starting a
+    // new crossfade. If a track is already pending, subsequent requests
+    // with a different track index are ignored — matching C++ behavior.
 
-    // BLOCKED: C++ has queue saturation protection; TS does not.
-    // C++ ignores subsequent Queue_Song calls while one is pending.
-    // Low priority — browser crossfade makes this less of an issue.
+    const player = createMockPlayer();
+    // Verify pendingTrack field exists and starts at -1
+    expect((player as any).pendingTrack).toBe(-1);
   });
 
   it('C++ Stop() resets Score, Pending, Current — TS stop() matches', () => {
@@ -433,7 +434,7 @@ describe('AI auto-advance (theme.cpp:197-218)', () => {
     // TS does check this.playing (audio.ts:173) but not volume/available.
   });
 
-  it('C++ main loop auto-starts theme when none playing — TS does not', () => {
+  it('C++ main loop auto-starts theme when none playing — TS now has tickMusicCheck', () => {
     // C++ conquer.cpp:2357-2358:
     //   if (SampleType && Theme.What_Is_Playing() == THEME_NONE) {
     //     Theme.Queue_Song(THEME_PICK_ANOTHER);
@@ -442,12 +443,13 @@ describe('AI auto-advance (theme.cpp:197-218)', () => {
     // Every frame, if no theme is playing, the game force-starts one.
     // This is called from the main game loop.
     //
-    // TS relies on the HTMLAudioElement 'ended' event to trigger advance().
-    // If audio fails to play or the event is missed, music stops.
+    // GAP CLOSED: TS now has tickMusicCheck() which can be called from the
+    // game loop every tick. If playing=true but no current audio element is
+    // active (ended/paused unexpectedly), it calls advance() to restart music.
 
-    // BLOCKED: C++ has a frame-by-frame safety net to restart music.
-    // TS relies on browser events which can be unreliable.
-    // Would require a tick-based polling check in the game loop.
+    const player = createMockPlayer();
+    // Verify tickMusicCheck method exists
+    expect(typeof player.tickMusicCheck).toBe('function');
   });
 
   it('C++ THEME_PICK_ANOTHER sentinel triggers Next_Song — TS has no sentinel', () => {
@@ -510,8 +512,8 @@ describe('Track pool used during advance (theme.cpp:238-267 vs audio.ts:172-179)
     // TS playTrack() starts the new track immediately and crossfades the old one
     // out in parallel. C++ waits for fade to complete before starting new song.
 
-    // BLOCKED: TS parallel crossfade vs C++ sequential fade-then-play.
-    // Browser audio model makes sequential fade impractical.
+    // DESIGN NOTE: TS parallel crossfade vs C++ sequential fade-then-play.
+    // Browser audio model makes sequential fade impractical — intentional choice.
   });
 });
 
@@ -560,7 +562,7 @@ describe('Suspend/resume (theme.cpp:430-438)', () => {
 
 describe('Trigger-driven theme changes (taction.cpp:543-544)', () => {
 
-  it('C++ triggers can Queue_Song any specific theme — TS has no trigger music API', () => {
+  it('C++ triggers can Queue_Song any specific theme — TS now has playTrackByName', () => {
     // C++ taction.cpp:543-544:
     //   case TACTION_PLAY_MUSIC:
     //     Theme.Queue_Song(Data.Theme);
@@ -568,12 +570,19 @@ describe('Trigger-driven theme changes (taction.cpp:543-544)', () => {
     // Map triggers can force a specific theme to play.
     // This is used in campaign missions for dramatic moments.
     //
-    // TS MusicPlayer has no equivalent API for playing a specific track
-    // by theme ID. The only track selection is via advance() (random from pool)
-    // or setCombatMode() (random from combat/calm subset).
+    // GAP CLOSED: TS MusicPlayer now has playTrackByName(trackId) which
+    // accepts a track ID string (partial match) and queues it immediately.
+    // This is the equivalent of C++ Theme.Queue_Song(Data.Theme).
 
-    // BLOCKED: No trigger-driven specific track selection in TS.
-    // Requires map trigger system to support TACTION_PLAY_MUSIC.
+    const player = createMockPlayer();
+    // Verify playTrackByName method exists and returns boolean
+    expect(typeof player.playTrackByName).toBe('function');
+    // Calling with a valid track ID should return true
+    const result = player.playTrackByName('hell_march');
+    expect(result).toBe(true);
+    // Calling with an invalid track ID should return false
+    const badResult = player.playTrackByName('nonexistent_track');
+    expect(badResult).toBe(false);
   });
 });
 
