@@ -251,39 +251,45 @@ export function tickServiceDepot(ctx: RepairSellContext): void {
       const needsRearm = e.maxAmmo > 0 && e.ammo < e.maxAmmo;
       if (!needsRepair && !needsRearm) continue;
       const dist = worldDist({ x: sx, y: sy }, e.pos);
-      // C++ building.cpp: docking distance is 0x10 leptons (~0.0625 cells).
-      // Use 0.7 cells to match tightened auto-load proximity while remaining practical.
-      if (dist < 0.7 && dist < bestDist) {
+      // C++ building.cpp:3860: docking distance is 0x10 leptons = 16/256 = 0.0625 cells.
+      if (dist < 0.0625 && dist < bestDist) {
         docked = e;
         bestDist = dist;
       }
     }
     if (docked) {
-      if (docked.hp < docked.maxHp) {
-        const unitCost = ctx.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
-        const cost = unitRepairCostPerStep(unitCost, docked.maxHp);
-        if (ctx.credits >= cost) {
-          ctx.credits -= cost;
-          docked.hp = Math.min(docked.maxHp, docked.hp + UREPAIR_STEP);
-          ctx.effects.push({
-            type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
-            frame: 0, maxFrames: 4, size: 3, sprite: 'piff', spriteStart: 0,
-          } as Effect);
-        } else {
-          // C++ parity: eject unit when insufficient funds
-          docked.mission = Mission.GUARD;
-          docked.moveTarget = { x: docked.pos.x + CELL_SIZE * 3, y: docked.pos.y + CELL_SIZE * 3 };
+      // C++ techno.cpp:978-980: minelayer with ammo < maxAmmo → rearm to full instantly,
+      // return RADIO_NEGATIVE (skip repair entirely).
+      const isMinelayer = docked.type === 'MNLY';
+      if (isMinelayer && docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
+        docked.ammo = docked.maxAmmo;
+        // Skip repair — C++ returns RADIO_NEGATIVE after rearm
+      } else {
+        // Repair if damaged
+        if (docked.hp < docked.maxHp) {
+          const unitCost = ctx.scenarioProductionItems.find(p => p.type === docked!.type)?.cost ?? 400;
+          const cost = unitRepairCostPerStep(unitCost, docked.maxHp);
+          if (ctx.credits >= cost) {
+            ctx.credits -= cost;
+            docked.hp = Math.min(docked.maxHp, docked.hp + UREPAIR_STEP);
+            ctx.effects.push({
+              type: 'muzzle', x: docked.pos.x, y: docked.pos.y - 4,
+              frame: 0, maxFrames: 4, size: 3, sprite: 'piff', spriteStart: 0,
+            } as Effect);
+          }
+          // C++ parity: insufficient funds → RADIO_CANT → depot goes IDLE, unit stays.
+          // No ejection — unit remains on depot until player adds funds or manually moves it.
         }
-      }
-      // Rearm alongside repair (free) — C++ building.cpp:4023-4025 formula
-      // tickServiceDepot runs every 14 game ticks, so decrement by 14 to match per-tick rate
-      if (docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
-        docked.rearmTimer = (docked.rearmTimer ?? 0) - 14;
-        if (docked.rearmTimer <= 0) {
-          docked.ammo++;
-          const pfrac = ctx.powerConsumed <= 0 ? 1.0
-            : Math.min(1.0, ctx.powerProduced / ctx.powerConsumed);
-          docked.rearmTimer = computeRearmDelay(pfrac);
+        // Rearm alongside repair (free) for non-minelayer units — C++ building.cpp:4023-4025
+        // tickServiceDepot runs every 14 game ticks, so decrement by 14 to match per-tick rate
+        if (docked.maxAmmo > 0 && docked.ammo < docked.maxAmmo) {
+          docked.rearmTimer = (docked.rearmTimer ?? 0) - 14;
+          if (docked.rearmTimer <= 0) {
+            docked.ammo++;
+            const pfrac = ctx.powerConsumed <= 0 ? 1.0
+              : Math.min(1.0, ctx.powerProduced / ctx.powerConsumed);
+            docked.rearmTimer = computeRearmDelay(pfrac);
+          }
         }
       }
     }

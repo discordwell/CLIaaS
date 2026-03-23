@@ -777,7 +777,7 @@ describe('Power grid after selling power plant', () => {
 describe('Service Depot — vehicle repair', () => {
   /** Create a depot + vehicle context for tickServiceDepot tests.
    *  FIX structure center is at (cx*CELL_SIZE + CELL_SIZE, cy*CELL_SIZE + CELL_SIZE).
-   *  Vehicle must be within 0.7 cells of that center (C++ 0x10 leptons parity). */
+   *  Vehicle must be within 0.0625 cells of that center (C++ 0x10 leptons = 16/256 cells). */
   function makeDepotContext(vehicleHp: number, vehicleMaxHp: number, credits = 5000) {
     const depot = makeStructure('FIX', House.Spain, 10, 10);
     // Depot center: (10*24+24, 10*24+24) = (264, 264)
@@ -857,16 +857,13 @@ describe('Service Depot — vehicle repair', () => {
     expect(costPerStep).toBe(5);
   });
 
-  it('insufficient funds ejects vehicle from depot pad', () => {
+  it('insufficient funds: unit stays on depot (C++ RADIO_CANT — no ejection)', () => {
     const { ctx, vehicle } = makeDepotContext(50, 110, 0); // 0 credits
     const originalHp = vehicle.hp;
     tickServiceDepot(ctx);
-    // Vehicle HP unchanged (no repair), ejected with GUARD mission and moveTarget set
+    // C++ parity: unit stays on depot, no repair, no ejection
     expect(vehicle.hp).toBe(originalHp);
-    expect(vehicle.mission).toBe(Mission.GUARD);
-    expect(vehicle.moveTarget).not.toBeNull();
-    expect(vehicle.moveTarget!.x).toBe(vehicle.pos.x + CELL_SIZE * 3);
-    expect(vehicle.moveTarget!.y).toBe(vehicle.pos.y + CELL_SIZE * 3);
+    expect(vehicle.moveTarget).toBeNull();
   });
 
   it('depot creates spark visual effect during repair', () => {
@@ -1100,21 +1097,22 @@ describe('AI Auto-Repair — updateAIRepair', () => {
     expect(chunk).toContain('state.iq < 1');
   });
 
-  it('AI repair runs every 15 ticks (once per second)', () => {
+  it('AI repair uses difficulty-scaled repairDelay interval (C++ house.cpp:295)', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
-    const chunk = aiSource.slice(idx, idx + 200);
-    expect(chunk).toContain('tick % 15 !== 0');
+    const chunk = aiSource.slice(idx, idx + 600);
+    expect(chunk).toContain('repairInterval');
+    expect(chunk).toContain('repairDelay');
   });
 
   it('AI only repairs structures below 80% HP', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
-    const chunk = aiSource.slice(idx, idx + 1200);
+    const chunk = aiSource.slice(idx, idx + 1500);
     expect(chunk).toContain('s.hp >= s.maxHp * 0.8');
   });
 
   it('AI deducts repair cost from houseCredits (not player credits)', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
-    const chunk = aiSource.slice(idx, idx + 1200);
+    const chunk = aiSource.slice(idx, idx + 1500);
     expect(chunk).toContain('houseCredits.set');
     expect(chunk).toContain('currentCredits - repairCostPerStep');
   });
@@ -1651,10 +1649,11 @@ describe('Timing Constants', () => {
     expect(chunk).toContain('tick % 75 !== 0');
   });
 
-  it('AI repair check interval is 15 ticks (1 second)', () => {
+  it('AI repair interval uses difficulty-scaled repairDelay (C++ house.cpp:295)', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
-    const chunk = aiSource.slice(idx, idx + 200);
-    expect(chunk).toContain('tick % 15 !== 0');
+    const chunk = aiSource.slice(idx, idx + 600);
+    expect(chunk).toContain('repairInterval');
+    expect(chunk).toContain('tick % repairInterval !== 0');
   });
 
   it('Queen Ant self-heal interval is 14 ticks (C++ RepairRate)', () => {

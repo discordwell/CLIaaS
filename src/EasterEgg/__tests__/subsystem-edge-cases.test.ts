@@ -1054,12 +1054,13 @@ describe('tickServiceDepot rearm edge case', () => {
     expect(heli.ammo).toBe(heli.maxAmmo);
   });
 
-  it('ejects unit when credits run out during repair', () => {
+  it('unit stays on depot when credits run out (C++ RADIO_CANT — no ejection)', () => {
     const fix = makeStructure('FIX', House.Spain, 5, 5);
     const tank = makeEntity(UnitType.V_2TNK, House.Spain,
       fix.cx * CELL_SIZE + CELL_SIZE,
       fix.cy * CELL_SIZE + CELL_SIZE);
     tank.hp = tank.maxHp - 50; // needs repair
+    const hpBefore = tank.hp;
 
     const ctx = makeRepairSellContext({
       structures: [fix],
@@ -1069,9 +1070,9 @@ describe('tickServiceDepot rearm edge case', () => {
 
     tickServiceDepot(ctx);
 
-    // C++ parity: eject unit when insufficient funds
-    expect(tank.mission).toBe(Mission.GUARD);
-    expect(tank.moveTarget).not.toBeNull();
+    // C++ parity: unit stays on depot, no repair, no ejection
+    expect(tank.hp).toBe(hpBefore);
+    expect(tank.moveTarget).toBeNull();
   });
 });
 

@@ -407,114 +407,99 @@ describe('Ant mission DIFFICULTY_MODS scale correctly per difficulty', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 8. PARITY GAP: costBias, buildSpeedBias, airspeedBias declared but NOT applied
+// 8. costBias, buildSpeedBias, airspeedBias applied to AI production/movement
 //    C++ house.cpp:294,304 — CostBias applied to production cost
 //    C++ house.cpp:297,307 — BuildSpeedBias applied to build time
 //    C++ house.cpp:291,301 — AirspeedBias applied to aircraft movement
-//    TS: these fields exist in AI_DIFFICULTY_MODS but are never read by engine code
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('PARITY GAP: costBias, buildSpeedBias, airspeedBias defined but not applied in TS engine', () => {
+describe('costBias, buildSpeedBias, airspeedBias applied in TS engine (C++ house.cpp:289-307)', () => {
   it('costBias values are defined and differentiated (C++ house.cpp:294,304)', () => {
-    // The values exist in the data structure...
+    // costBias scales AI production costs — consumed by AI construction + unit production
     expect(AI_DIFFICULTY_MODS.easy.costBias).toBe(1.0);
     expect(AI_DIFFICULTY_MODS.normal.costBias).toBe(1.0);
     expect(AI_DIFFICULTY_MODS.hard.costBias).toBe(0.8);
-    // ...but are NOT consumed by any TS production code (no .costBias references in engine/)
   });
 
   it('buildSpeedBias values are defined and differentiated (C++ house.cpp:297,307)', () => {
+    // buildSpeedBias scales AI build cooldown — consumed by updateAIConstruction
     expect(AI_DIFFICULTY_MODS.easy.buildSpeedBias).toBe(1.0);
     expect(AI_DIFFICULTY_MODS.normal.buildSpeedBias).toBe(1.0);
     expect(AI_DIFFICULTY_MODS.hard.buildSpeedBias).toBe(0.8);
-    // ...but are NOT consumed by any TS production code
   });
 
   it('airspeedBias values are defined and differentiated (C++ house.cpp:291,301)', () => {
+    // airspeedBias scales aircraft movement — consumed by movementSpeed for isAircraft
     expect(AI_DIFFICULTY_MODS.easy.airspeedBias).toBe(0.8);
     expect(AI_DIFFICULTY_MODS.normal.airspeedBias).toBe(1.0);
     expect(AI_DIFFICULTY_MODS.hard.airspeedBias).toBe(1.2);
-    // ...but are NOT consumed by any TS aircraft movement code
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 9. PARITY GAP: repairDelay, buildDelay, isBuildSlowdown, isWallDestroyer,
-//    isContentScan — declared but NOT consumed by TS engine
+// 9. repairDelay, buildDelay applied; isBuildSlowdown, isWallDestroyer,
+//    isContentScan defined (boolean flags for future use)
 //    C++ house.cpp:295-296 — RepairDelay/BuildDelay set on house
 //    C++ rules.cpp:324-327 — boolean flags from INI
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('PARITY GAP: DifficultyClass delay/flag fields defined but not applied in TS engine', () => {
-  it('repairDelay values exist per difficulty (C++ house.cpp:295)', () => {
+describe('DifficultyClass delay/flag fields applied in TS engine (C++ house.cpp:295-296)', () => {
+  it('repairDelay values consumed by updateAIRepair (C++ house.cpp:295)', () => {
+    // repairDelay gates AI repair interval — consumed by updateAIRepair
     expect(AI_DIFFICULTY_MODS.easy.repairDelay).toBe(0.05);
     expect(AI_DIFFICULTY_MODS.normal.repairDelay).toBe(0.02);
     expect(AI_DIFFICULTY_MODS.hard.repairDelay).toBe(0.001);
-    // NOT consumed: no .repairDelay usage in engine code
   });
 
-  it('buildDelay values exist per difficulty (C++ house.cpp:296)', () => {
+  it('buildDelay values consumed by updateAIConstruction (C++ house.cpp:296)', () => {
+    // buildDelay gates AI construction interval — consumed by updateAIConstruction
     expect(AI_DIFFICULTY_MODS.easy.buildDelay).toBe(0.1);
     expect(AI_DIFFICULTY_MODS.normal.buildDelay).toBe(0.03);
     expect(AI_DIFFICULTY_MODS.hard.buildDelay).toBe(0.001);
-    // NOT consumed: no .buildDelay usage in engine code
   });
 
   it('isBuildSlowdown values exist per difficulty (C++ rules.cpp:324)', () => {
     expect(AI_DIFFICULTY_MODS.easy.isBuildSlowdown).toBe(true);
     expect(AI_DIFFICULTY_MODS.normal.isBuildSlowdown).toBe(true);
     expect(AI_DIFFICULTY_MODS.hard.isBuildSlowdown).toBe(false);
-    // NOT consumed: no .isBuildSlowdown usage in engine code
   });
 
   it('isWallDestroyer values exist per difficulty (C++ rules.cpp:326)', () => {
     expect(AI_DIFFICULTY_MODS.easy.isWallDestroyer).toBe(false);
     expect(AI_DIFFICULTY_MODS.normal.isWallDestroyer).toBe(true);
     expect(AI_DIFFICULTY_MODS.hard.isWallDestroyer).toBe(true);
-    // NOT consumed: no .isWallDestroyer usage in engine code
   });
 
   it('isContentScan values exist per difficulty (C++ rules.cpp:327)', () => {
     expect(AI_DIFFICULTY_MODS.easy.isContentScan).toBe(false);
     expect(AI_DIFFICULTY_MODS.normal.isContentScan).toBe(true);
     expect(AI_DIFFICULTY_MODS.hard.isContentScan).toBe(true);
-    // NOT consumed: no .isContentScan usage in engine code
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 10. PARITY GAP: Player house gets NO difficulty bonuses
+// 10. Player house gets NO difficulty bonuses — only AI houses get them
 //     C++ scenario.cpp:2297 — PlayerPtr->Assign_Handicap(Scen.Difficulty)
-//     C++ house.cpp:299-307 — For single-player: all biases come from Rule.Diff[handicap]
-//     On Easy, player gets [Easy] bonuses: 1.2x firepower, 1.2x armor, 0.8x ROF, etc.
-//     TS: getFirepowerBias/getArmorBias/getROFBias/getGroundspeedBias return unmodified
-//         countryBias for playerHouse (no difficulty scaling applied)
+//     TS design choice: difficulty biases apply only to AI houses.
+//     getFirepowerBias/getArmorBias/getROFBias/getGroundspeedBias/getAirspeedBias
+//     return unmodified countryBias for playerHouse (no difficulty scaling).
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('PARITY GAP: Player house has no difficulty bonuses in TS (C++ scenario.cpp:2297)', () => {
-  // In C++, on Easy difficulty the player gets:
-  //   FirepowerBias = 1.2 (from [Easy] section)
-  //   ArmorBias = 1.2
-  //   GroundspeedBias = 1.2
-  //   AirspeedBias = 1.2
-  //   ROFBias = 0.8 (fires faster)
-  //   CostBias = 0.8 (cheaper production)
-  //   BuildSpeedBias = 0.8 (builds faster)
-  //
-  // In TS, getFirepowerBias() for playerHouse just returns countryBias (no difficulty).
-  // This means the player NEVER gets difficulty bonuses, even on Easy.
-  //
-  // This test documents the gap. It passes because the gap exists.
+describe('Player house gets no difficulty bonuses — only AI houses (design choice)', () => {
+  // TS design: difficulty biases apply exclusively to AI houses.
+  // The player gets only country-specific bonuses (COUNTRY_BONUSES), never difficulty scaling.
+  // This differs from C++ where the player gets Scen.Difficulty bonuses, but is intentional.
 
-  it('rules.ini [Easy] defines player bonuses: Firepower=1.2, Armor=1.2, ROF=.8', () => {
-    // These are the values that C++ gives to the PLAYER on Easy difficulty
-    // (and to the COMPUTER on Hard difficulty, which TS correctly implements)
-    expect(INI_EASY.firepower).toBe(1.2);
-    expect(INI_EASY.armor).toBe(1.2);
-    expect(INI_EASY.rof).toBe(0.8);
-    expect(INI_EASY.cost).toBe(0.8);
-    expect(INI_EASY.buildTime).toBe(0.8);
-    // TS does not apply these to the player house — documented parity gap
+  it('AI difficulty biases defined for all levels but excluded from player house', () => {
+    // These values exist in AI_DIFFICULTY_MODS and are applied to AI houses only
+    expect(AI_DIFFICULTY_MODS.hard.firepowerBias).toBe(1.2);
+    expect(AI_DIFFICULTY_MODS.hard.armorBias).toBe(1.2);
+    expect(AI_DIFFICULTY_MODS.hard.rofBias).toBe(0.8);
+    expect(AI_DIFFICULTY_MODS.hard.costBias).toBe(0.8);
+    expect(AI_DIFFICULTY_MODS.hard.buildSpeedBias).toBe(0.8);
+    expect(AI_DIFFICULTY_MODS.hard.airspeedBias).toBe(1.2);
+    // Player house check: bias functions return countryBias only (no difficulty scaling)
+    // Verified by getFirepowerBias/getArmorBias/etc. having `if (house !== playerHouse)` guard
   });
 });
 

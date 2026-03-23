@@ -227,7 +227,8 @@ describe('createAIHouseState', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateAIRepair', () => {
-  it('only runs on tick % 15 === 0', () => {
+  it('only runs on tick divisible by difficulty-scaled repairInterval', () => {
+    // Normal difficulty: repairDelay=0.02 → interval = max(15, floor(0.02*60*15)) = 18
     const ctx = makeMockAIContext({ tick: 7 });
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp: 400 });
     ctx.structures.push(s);
@@ -235,11 +236,12 @@ describe('updateAIRepair', () => {
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
     updateAIRepair(ctx);
-    expect(s.hp).toBe(100); // no repair on non-15-tick
+    expect(s.hp).toBe(100); // no repair on non-interval-tick
   });
 
-  it('repairs damaged structures below 80% HP at tick % 15', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+  it('repairs damaged structures below 80% HP at repairInterval tick', () => {
+    // Normal difficulty: repairDelay=0.02 → interval = 18
+    const ctx = makeMockAIContext({ tick: 18 });
     const maxHp = 400;
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp }); // 25%, well below 80%
     ctx.structures.push(s);
@@ -251,7 +253,7 @@ describe('updateAIRepair', () => {
   });
 
   it('skips houses with IQ < 1 (rules.ini [IQ] RepairSell=1)', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp: 400 });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 5000);
@@ -262,7 +264,7 @@ describe('updateAIRepair', () => {
   });
 
   it('deducts from houseCredits, not a global pool', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp: 400 });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 5000);
@@ -274,7 +276,7 @@ describe('updateAIRepair', () => {
   });
 
   it('skips repair when house credits < 10', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp: 400 });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 5);
@@ -285,7 +287,7 @@ describe('updateAIRepair', () => {
   });
 
   it('does not repair structures at or above 80% HP', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const maxHp = 400;
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: maxHp * 0.8, maxHp });
     ctx.structures.push(s);
@@ -297,7 +299,7 @@ describe('updateAIRepair', () => {
   });
 
   it('skips structures being sold (sellProgress !== undefined)', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const s = makeStructure('POWR', House.USSR, 50, 50, {
       hp: 100, maxHp: 400, sellProgress: 0.5,
     });
@@ -310,7 +312,7 @@ describe('updateAIRepair', () => {
   });
 
   it('does not repair dead structures', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 100, maxHp: 400, alive: false });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 5000);
@@ -321,7 +323,7 @@ describe('updateAIRepair', () => {
   });
 
   it('does not repair structures belonging to other houses', () => {
-    const ctx = makeMockAIContext({ tick: 15 });
+    const ctx = makeMockAIContext({ tick: 18 });
     const s = makeStructure('POWR', House.Spain, 50, 50, { hp: 100, maxHp: 400 });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 5000);

@@ -1437,7 +1437,11 @@ export function updateAIStrategicPlanner(ctx: AIContext): void {
 
 /** AI base construction -- build new structures from build queue */
 export function updateAIConstruction(ctx: AIContext): void {
-  if (ctx.tick % 90 !== 0) return;
+  // C++ house.cpp:296: BuildDelay from DifficultyClass gates construction frequency.
+  // buildDelay is in minutes — converted to ticks as construction interval floor.
+  const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+  const buildInterval = Math.max(90, Math.floor(mods.buildDelay * 60 * GAME_TICKS_PER_SEC));
+  if (ctx.tick % buildInterval !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (!state.productionEnabled) continue;
@@ -1491,7 +1495,8 @@ export function updateAIConstruction(ctx: AIContext): void {
     state.buildQueue.shift();
 
     spawnAIStructure(ctx, buildType, house, pos.cx, pos.cy);
-    state.buildCooldown = Math.floor(6 * mods.buildSpeedMult);
+    // C++ house.cpp:297,307: BuildSpeedBias from difficulty multiplies build time
+    state.buildCooldown = Math.floor(6 * mods.buildSpeedMult * mods.buildSpeedBias);
     state.lastBuildTick = ctx.tick;
   }
 }
@@ -1885,9 +1890,15 @@ export function updateAIRetreat(ctx: AIContext): void {
   }
 }
 
-/** AI auto-repair -- IQ >= 1 houses repair damaged structures (rules.ini [IQ] RepairSell=1) */
+/** AI auto-repair -- IQ >= 1 houses repair damaged structures (rules.ini [IQ] RepairSell=1)
+ *  C++ house.cpp:295: RepairDelay from DifficultyClass gates how often AI repairs.
+ *  repairDelay is in minutes — converted to ticks as repair interval floor. */
 export function updateAIRepair(ctx: AIContext): void {
-  if (ctx.tick % 15 !== 0) return;
+  const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+  // C++ RepairDelay is in minutes; convert to ticks (repairDelay * 60 * GAME_TICKS_PER_SEC)
+  // Minimum interval = 15 ticks (original rate), scaled up by repairDelay
+  const repairInterval = Math.max(15, Math.floor(mods.repairDelay * 60 * GAME_TICKS_PER_SEC));
+  if (ctx.tick % repairInterval !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (state.iq < 1) continue;

@@ -4906,12 +4906,16 @@ export class Game {
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
    *  Speed values in UNIT_STATS are C++ MPH (leptons/tick); MPH_TO_PX converts to pixels/tick.
-   *  C++ house.cpp:290,300: GroundspeedBias from difficulty applied per house. */
+   *  C++ house.cpp:290,300: GroundspeedBias from difficulty applied per house.
+   *  C++ house.cpp:291,301: AirspeedBias from difficulty applied to aircraft. */
   private movementSpeed(entity: Entity): number {
+    const speedBias = entity.stats.isAircraft
+      ? this.getAirspeedBias(entity.house)
+      : this.getGroundspeedBias(entity.house);
     return entity.stats.speed * MPH_TO_PX
       * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
       * this.damageSpeedFactor(entity)
-      * this.getGroundspeedBias(entity.house);
+      * speedBias;
   }
 
   /** MV1: Follow one tick of track-table movement (C++ drive.cpp While_Moving).
@@ -6404,6 +6408,18 @@ export class Game {
     if (house !== this.playerHouse) {
       const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
       return countryBias * diffMods.groundspeedBias;
+    }
+    return countryBias;
+  }
+
+  /** Get aircraft speed bias for a house — difficulty-scaled aircraft movement speed.
+   *  C++ house.cpp:291,301: AirspeedBias = Rule.Diff[handicap].AirspeedBias
+   *  Returns >1 for faster aircraft (hard AI). */
+  getAirspeedBias(house: House): number {
+    const countryBias = COUNTRY_BONUSES[house]?.airspeedMult ?? 1.0;
+    if (house !== this.playerHouse) {
+      const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+      return countryBias * diffMods.airspeedBias;
     }
     return countryBias;
   }

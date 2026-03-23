@@ -538,26 +538,28 @@ describe('updateAIConstruction — build cooldown per difficulty (C++ HOUSE.CPP:
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
-    expect(state.buildCooldown).toBe(Math.floor(6 * AI_DIFFICULTY_MODS.normal.buildSpeedMult));
-    expect(state.buildCooldown).toBe(6);
+    // C++ house.cpp:297,307: buildSpeedBias from difficulty also scales cooldown
+    expect(state.buildCooldown).toBe(Math.floor(6 * AI_DIFFICULTY_MODS.normal.buildSpeedMult * AI_DIFFICULTY_MODS.normal.buildSpeedBias));
+    expect(state.buildCooldown).toBe(6); // 6 * 1.0 * 1.0 = 6
   });
 
-  it('easy difficulty: cooldown = floor(6 * 1.5) = 9', () => {
+  it('easy difficulty: cooldown = floor(6 * 1.5 * 1.0) = 9', () => {
     const ctx = makeMockAIContext({ tick: 90, difficulty: 'easy' });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
-    expect(state.buildCooldown).toBe(Math.floor(6 * AI_DIFFICULTY_MODS.easy.buildSpeedMult));
-    expect(state.buildCooldown).toBe(9);
+    expect(state.buildCooldown).toBe(Math.floor(6 * AI_DIFFICULTY_MODS.easy.buildSpeedMult * AI_DIFFICULTY_MODS.easy.buildSpeedBias));
+    expect(state.buildCooldown).toBe(9); // 6 * 1.5 * 1.0 = 9
   });
 
-  it('hard difficulty: cooldown = floor(6 * 0.7) = 4', () => {
+  it('hard difficulty: cooldown = floor(6 * 0.7 * 0.8) = 3', () => {
     const ctx = makeMockAIContext({ tick: 90, difficulty: 'hard' });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
-    expect(state.buildCooldown).toBe(Math.floor(6 * AI_DIFFICULTY_MODS.hard.buildSpeedMult));
-    expect(state.buildCooldown).toBe(4);
+    // C++ BuildSpeedBias=0.8 on hard (from [Easy] section) multiplies the cooldown
+    expect(state.buildCooldown).toBe(Math.floor(6 * AI_DIFFICULTY_MODS.hard.buildSpeedMult * AI_DIFFICULTY_MODS.hard.buildSpeedBias));
+    expect(state.buildCooldown).toBe(3); // 6 * 0.7 * 0.8 = 3.36 → floor = 3
   });
 });
 
