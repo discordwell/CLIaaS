@@ -80,10 +80,30 @@ function rttiToName(rtti: number, typeId: number): string | undefined {
   }
 }
 
+/** C++ MissionType ordinals (defines.h:979-1008) — complete 22-mission mapping */
 const TS_MISSION_CODES: Record<string, number> = {
   SLEEP: 0,
+  ATTACK: 1,
+  MOVE: 2,
+  QMOVE: 3,
+  RETREAT: 4,
   GUARD: 5,
-  AREA_GUARD: 18,
+  STICKY: 6,
+  ENTER: 7,
+  CAPTURE: 8,
+  HARVEST: 9,
+  AREA_GUARD: 10,       // C++ MISSION_GUARD_AREA = 10 (NOT 18)
+  RETURN: 11,
+  STOP: 12,
+  AMBUSH: 13,
+  HUNT: 14,
+  UNLOAD: 15,
+  SABOTAGE: 16,
+  CONSTRUCTION: 17,
+  DECONSTRUCTION: 18,
+  REPAIR: 19,
+  RESCUE: 20,
+  MISSILE: 21,
 };
 
 export interface TsOracleDecision {

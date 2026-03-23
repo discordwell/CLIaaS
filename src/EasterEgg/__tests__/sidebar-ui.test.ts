@@ -340,9 +340,10 @@ describe('Power Bar — C++ Power_Height() Logarithmic Scale', () => {
     }
   });
 
-  it('Power_Height is clamped to POWER_HEIGHT - 2', () => {
-    const max = Renderer.POWER_HEIGHT - 2;
-    expect(Renderer.powerBarHeight(100000)).toBeLessThanOrEqual(max);
+  it('Power_Height is clamped to rescaled(POWER_HEIGHT - 2)', () => {
+    // Internal clamp at POWER_HEIGHT-2=108, then rescaled via (raw * 153/107)
+    const maxRescaled = Math.floor((Renderer.POWER_HEIGHT - 2) * 153 / 107);
+    expect(Renderer.powerBarHeight(100000)).toBeLessThanOrEqual(maxRescaled);
   });
 
   it('Power_Height shows diminishing returns (logarithmic)', () => {
@@ -382,9 +383,10 @@ describe('Power Bar — Bounce Animation (power.cpp)', () => {
     expect(Renderer.POWER_STEP_FACTOR).toBe(5);
   });
 
-  it('POWER_Y = 176 (88×2), POWER_HEIGHT = 153 (76×2+1)', () => {
+  it('POWER_Y = 176 (88×2), POWER_HEIGHT = 110 (C++ power.h), rendered = 153', () => {
     expect(Renderer.POWER_Y).toBe(176);
-    expect(Renderer.POWER_HEIGHT).toBe(153);
+    expect(Renderer.POWER_HEIGHT).toBe(110);
+    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(153);
   });
 });
 

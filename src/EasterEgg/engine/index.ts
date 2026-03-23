@@ -3530,20 +3530,28 @@ export class Game {
 
   /** Map C++ MissionType enum index to TS Mission enum (C++ defines.h:979-1008) */
   private static readonly CPP_MISSION_MAP: Record<number, Mission> = {
-    0: Mission.SLEEP,       // MISSION_SLEEP
-    1: Mission.ATTACK,      // MISSION_ATTACK
-    2: Mission.MOVE,        // MISSION_MOVE
-    3: Mission.MOVE,        // MISSION_QMOVE (queued move → treat as MOVE)
-    4: Mission.MOVE,        // MISSION_RETREAT → treat as MOVE
-    5: Mission.GUARD,       // MISSION_GUARD
-    7: Mission.MOVE,        // MISSION_ENTER → treat as MOVE
-    8: Mission.ATTACK,      // MISSION_CAPTURE → treat as ATTACK
-    9: Mission.GUARD,       // MISSION_HARVEST → treat as GUARD
-    10: Mission.AREA_GUARD, // MISSION_GUARD_AREA
-    11: Mission.MOVE,       // MISSION_RETURN → treat as MOVE
-    12: Mission.GUARD,      // MISSION_STOP → treat as GUARD
-    13: Mission.AREA_GUARD, // MISSION_AMBUSH → treat as AREA_GUARD
-    14: Mission.HUNT,       // MISSION_HUNT
+    0: Mission.SLEEP,           // MISSION_SLEEP
+    1: Mission.ATTACK,          // MISSION_ATTACK
+    2: Mission.MOVE,            // MISSION_MOVE
+    3: Mission.QMOVE,           // MISSION_QMOVE — distinct queued move (C++ foot.cpp:339)
+    4: Mission.RETREAT,         // MISSION_RETREAT
+    5: Mission.GUARD,           // MISSION_GUARD
+    6: Mission.STICKY,          // MISSION_STICKY — guard with IsRecruitable=false
+    7: Mission.ENTER,           // MISSION_ENTER
+    8: Mission.CAPTURE,         // MISSION_CAPTURE
+    9: Mission.HARVEST,         // MISSION_HARVEST — distinct harvester AI cycle
+    10: Mission.AREA_GUARD,     // MISSION_GUARD_AREA
+    11: Mission.RETURN,         // MISSION_RETURN
+    12: Mission.STOP,           // MISSION_STOP
+    13: Mission.AMBUSH,         // MISSION_AMBUSH
+    14: Mission.HUNT,           // MISSION_HUNT
+    15: Mission.UNLOAD,         // MISSION_UNLOAD
+    16: Mission.SABOTAGE,       // MISSION_SABOTAGE
+    17: Mission.CONSTRUCTION,   // MISSION_CONSTRUCTION
+    18: Mission.DECONSTRUCTION, // MISSION_DECONSTRUCTION
+    19: Mission.REPAIR,         // MISSION_REPAIR
+    20: Mission.RESCUE,         // MISSION_RESCUE
+    21: Mission.MISSILE,        // MISSION_MISSILE
   };
 
   /** Execute team mission scripts — units follow waypoint patrol routes */

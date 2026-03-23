@@ -283,7 +283,7 @@ export class Renderer {
 
   /** C++ Power_Height() → Draw_It rescaling (power.cpp:394-417, 229) */
   static powerBarHeight(value: number): number {
-    const POWER_HEIGHT = Renderer.POWER_HEIGHT_INTERNAL; // 110 (C++ internal)
+    const POWER_HEIGHT = Renderer.POWER_HEIGHT; // 110 (C++ power.h)
     const STEP_LEVEL = Renderer.POWER_STEP_LEVEL;
     const STEP_FACTOR = Renderer.POWER_STEP_FACTOR;
     const num = Math.trunc(value / STEP_LEVEL);
@@ -3513,8 +3513,8 @@ export class Renderer {
 
   // Power bar (C++ power.h)
   static readonly POWER_Y = 176;         // (88×2) absolute Y
-  static readonly POWER_HEIGHT = 153;    // (76×2+1) HIRES rendered bar height
-  static readonly POWER_HEIGHT_INTERNAL = 110; // C++ POWER_HEIGHT (200-(7+70+13)) for Power_Height()
+  static readonly POWER_HEIGHT = 110;    // C++ POWER_HEIGHT (200-(7+70+13)) power.h:81-94
+  static readonly POWER_BAR_RENDERED_HEIGHT = 153; // (76×2+1) HIRES rendered bar height after Draw_It rescaling
   static readonly POWER_BAR_W = 10;
   static readonly POWER_BAR_X_OFFSET = 2;
 
@@ -3691,7 +3691,7 @@ export class Renderer {
     const pwrX = sidebarX + Renderer.POWER_BAR_X_OFFSET;
     const pwrY = Renderer.POWER_Y;
     const pwrW = Renderer.POWER_BAR_W;
-    const pwrH = Renderer.POWER_HEIGHT;
+    const pwrH = Renderer.POWER_BAR_RENDERED_HEIGHT;
     const produced = this.sidebarPowerProduced;
     const consumed = this.sidebarPowerConsumed;
 
