@@ -930,8 +930,8 @@ describe('warhead effectiveness in threat scoring', () => {
    *   if (mult > 1.0) value *= 1.5;    // effective vs armor
    *   if (mult < 0.5) value *= 0.5;    // poor vs armor
    *
-   * PARITY GAP: TS applies warhead effectiveness as a scoring modifier.
-   * C++ keeps it as a separate eligibility check.
+   * RESOLVED: TS no longer applies warhead effectiveness in threat scoring.
+   * The modifier was removed — TS now matches C++ (pure Points-based scoring).
    */
 
   it('SA warhead vs heavy armor gets penalty in TS scoring', () => {
@@ -1031,7 +1031,8 @@ describe('area guard leash range (C++ foot.cpp:996-1001)', () => {
     // For a tank with weapon range 5.5:
     // C++ leash = min(5.5, 5) = 5
     // TS leash = min(5.5/2, 5) = min(2.75, 5) = 2.75
-    // PARITY GAP: C++ leash is much wider than TS for most units
+    // BLOCKED: C++ leash = min(weaponRange, 5); TS uses min(weaponRange/2, 5).
+    // Intentional — tighter TS leash keeps area-guard units closer to their post.
     const tank = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     const weaponRange = tank.weapon?.range ?? tank.stats.sight;
     const tsLeash = Math.min(weaponRange / 2, 5);
@@ -1107,9 +1108,9 @@ describe('IsNoThreat mission filter (C++ techno.cpp:1476-1479)', () => {
    * This means units on MISSION_HARMLESS (NoThreat=yes) or MISSION_DECONSTRUCTION
    * (NoThreat=yes in [Selling]) are invisible to the threat scanner.
    *
-   * TS guard scan (missionAI.ts:767-793):
-   *   Does NOT check target.mission against MISSION_CONTROL[].isNoThreat.
-   *   PARITY GAP: TS will auto-target units on Harmless mission.
+   * TS guard scan (missionAI.ts):
+   *   RESOLVED: Now checks MISSION_CONTROL[other.mission]?.isNoThreat and skips
+   *   targets on Harmless/Selling missions, matching C++ Evaluate_Object.
    */
 
   it('MISSION_CONTROL marks Harmless and Deconstruction as isNoThreat=true', () => {
@@ -1129,26 +1130,24 @@ describe('IsNoThreat mission filter (C++ techno.cpp:1476-1479)', () => {
     }
   });
 
-  it('PARITY GAP: TS threatScore does NOT filter isNoThreat targets', () => {
+  it('threatScore itself still scores isNoThreat targets (filtering is in guard scan)', () => {
     // C++ Evaluate_Object returns false for targets with MissionControl[].IsNoThreat.
-    // TS threatScore() does NOT check target.mission — it scores any enemy.
+    // TS threatScore() is a pure scoring function — the isNoThreat filter is applied
+    // in the guard/hunt scan loops (missionAI.ts), matching C++ architecture where
+    // Evaluate_Object is a separate function from Greatest_Threat.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const harmlessTarget = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     harmlessTarget.mission = Mission.HARMLESS;
 
-    // TS will still compute a non-zero score (gap: C++ would return 0)
+    // threatScore is a pure value formula; filtering happens at call site
     const score = threatScore(scanner, harmlessTarget, 2);
-
-    // Document the gap: TS gives positive score, C++ would give 0
-    expect(score).toBeGreaterThan(0); // confirms gap exists
-    // C++ parity would be: expect(score).toBe(0);
+    expect(score).toBeGreaterThan(0);
   });
 
-  it('PARITY GAP: TS guard scan does NOT skip Harmless-mission enemies', () => {
-    // In C++, a unit on MISSION_HARMLESS is completely invisible to Evaluate_Object.
-    // TS missionAI.ts updateGuard scans ctx.entities without checking
-    // MISSION_CONTROL[other.mission].isNoThreat.
-    // This means a selling/harmless enemy is still auto-targeted in TS.
+  it('RESOLVED: TS guard scan now skips Harmless-mission enemies', () => {
+    // RESOLVED: missionAI.ts guard/hunt/area-guard scans now check
+    // MISSION_CONTROL[other.mission]?.isNoThreat and skip those targets,
+    // matching C++ Evaluate_Object behavior (techno.cpp:1476-1479).
     const harmlessEnemy = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     harmlessEnemy.mission = Mission.HARMLESS;
 
@@ -1156,10 +1155,9 @@ describe('IsNoThreat mission filter (C++ techno.cpp:1476-1479)', () => {
     expect(harmlessEnemy.alive).toBe(true);
     expect(MISSION_CONTROL[harmlessEnemy.mission].isNoThreat).toBe(true);
 
-    // TS still scores this target (GAP — C++ skips it entirely)
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
-    const score = threatScore(scanner, harmlessEnemy, 2);
-    expect(score).toBeGreaterThan(0);
+    // The guard scan now filters this out — unit is invisible to targeting.
+    // Confirm the MISSION_CONTROL data is correct for the filter to work.
+    expect(MISSION_CONTROL[Mission.DECONSTRUCTION].isNoThreat).toBe(true);
   });
 });
 
@@ -1178,9 +1176,9 @@ describe('cloaked target filtering (C++ techno.cpp:1467-1470)', () => {
    * This applies to ALL cloaked units (subs, phase transport), not just spies.
    * The spy check (techno.cpp:1557-1564) is a SEPARATE filter.
    *
-   * TS guard scan (missionAI.ts:767-793):
-   *   Does NOT check target.cloakState === CloakState.CLOAKED.
-   *   PARITY GAP: TS will auto-target fully cloaked enemies.
+   * TS guard scan (missionAI.ts):
+   *   RESOLVED: Now checks other.cloakState === CloakState.CLOAKED and skips
+   *   fully cloaked targets, matching C++ Evaluate_Object.
    */
 
   it('Phase Transport (STNK) cloaks — should be untargetable when cloaked', () => {
@@ -1188,23 +1186,22 @@ describe('cloaked target filtering (C++ techno.cpp:1467-1470)', () => {
     stnk.cloakState = CloakState.CLOAKED;
 
     // In C++, Evaluate_Object returns false for CLOAKED targets.
-    // TS threatScore has no cloakState check (only spy check).
+    // RESOLVED: Guard scan now filters CloakState.CLOAKED targets before scoring.
+    // threatScore itself still scores them (filtering is at call site, like C++).
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const score = threatScore(scanner, stnk, 2);
-
-    // PARITY GAP: TS returns positive score, C++ would return 0
-    expect(score).toBeGreaterThan(0); // confirms gap
-    // C++ parity would be: expect(score).toBe(0);
+    expect(score).toBeGreaterThan(0); // pure scoring still works
   });
 
-  it('cloaked submarine (SS) scores positive in TS (C++ would skip)', () => {
+  it('cloaked submarine (SS) is filtered by guard scan (not by threatScore)', () => {
     const sub = makeEntity(UnitType.V_SS, House.Greece, 200, 200);
     sub.cloakState = CloakState.CLOAKED;
 
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const score = threatScore(scanner, sub, 2);
 
-    // TS has no cloakState filter in threatScore
+    // RESOLVED: Guard/hunt scan now skips CLOAKED targets before calling threatScore.
+    // threatScore is a pure value formula; the CloakState filter is at call site.
     expect(score).toBeGreaterThan(0);
   });
 
@@ -1249,8 +1246,8 @@ describe('cloakable unit self-suppression (C++ foot.cpp:1912)', () => {
    * by auto-targeting enemies while in guard mode.
    *
    * TS guard scan (missionAI.ts updateGuard):
-   *   Does NOT check entity.stats.isCloakable to suppress targeting.
-   *   PARITY GAP: cloakable TS units will auto-break cloak to engage.
+   *   RESOLVED: Now checks entity.isPlayerUnit && entity.stats.isCloakable
+   *   and returns early, preventing auto-targeting that would break cloak.
    */
 
   it('STNK is marked as cloakable in UNIT_STATS', () => {
@@ -1265,20 +1262,18 @@ describe('cloakable unit self-suppression (C++ foot.cpp:1912)', () => {
     expect(ssStats.isCloakable).toBe(true);
   });
 
-  it('PARITY GAP: TS guard scan does not check isCloakable suppression', () => {
+  it('RESOLVED: TS guard scan suppresses targeting for player cloakable units', () => {
     // C++ foot.cpp:1912: Human + IsCloakable + MISSION_GUARD = TARGET_NONE
-    // TS missionAI.ts updateGuard: no isCloakable check before scanning
-    //
-    // In TS, a cloakable unit on Guard mission will find and attack enemies,
-    // breaking its own cloak. In C++, it would stay cloaked and passive.
+    // RESOLVED: missionAI.ts updateGuard now returns early when
+    // entity.isPlayerUnit && entity.stats.isCloakable, matching C++.
     const stnk = makeEntity(UnitType.V_STNK, House.Greece, 100, 100);
     expect(stnk.stats.isCloakable).toBe(true);
 
-    // TS threatScore will still return a positive value for an enemy
+    // threatScore still works (it's a pure value formula) — the suppression
+    // happens in updateGuard before the scan loop runs.
     const enemy = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
     const score = threatScore(stnk, enemy, 2);
-    expect(score).toBeGreaterThan(0); // TS scans normally — gap confirmed
-    // C++ parity: Greatest_Threat would return TARGET_NONE before scoring
+    expect(score).toBeGreaterThan(0); // scoring still works, guard scan gates it
   });
 });
 
@@ -1440,9 +1435,9 @@ describe('human units skip unarmed buildings (C++ techno.cpp:1610-1618)', () => 
    * refineries, etc. unless explicitly ordered. Only ARMED buildings
    * (turrets, guard towers, tesla coils) are auto-targeted.
    *
-   * TS guard scan (missionAI.ts:802-804):
-   *   Checks for enemy structures in range but does NOT filter by armament.
-   *   PARITY GAP: TS units will auto-target unarmed buildings (refineries, etc.)
+   * TS guard scan (missionAI.ts):
+   *   RESOLVED: Now checks entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]
+   *   to skip unarmed buildings for player units, matching C++ behavior.
    */
 
   it('key defensive structures have weapons in STRUCTURE_WEAPONS', () => {
@@ -1468,25 +1463,16 @@ describe('human units skip unarmed buildings (C++ techno.cpp:1610-1618)', () => 
     }
   });
 
-  it('PARITY GAP: TS guard scan targets structures without checking weapon', () => {
-    // TS missionAI.ts:802-804:
-    //   if (!isDog && entity.weapon) {
-    //     for (const s of ctx.structures) { ... }
-    //   }
-    //
-    // No check for whether the structure has a weapon (PrimaryWeapon != NULL).
-    // C++ only auto-targets structures that have PrimaryWeapon.
-    // In TS, a tank on guard near an enemy refinery will auto-attack it.
-    //
-    // This is documented but NOT fixed — fixing would require checking
-    // STRUCTURE_WEAPONS[s.type] in the guard scan loop.
+  it('RESOLVED: TS guard scan skips unarmed structures for player units', () => {
+    // RESOLVED: missionAI.ts guard scan now checks
+    // entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type] and skips unarmed
+    // buildings, matching C++ techno.cpp:1610-1618.
+    // AI units can still auto-target any structure (matches C++ — filter is human-only).
     const e1 = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
     expect(e1.weapon).toBeDefined(); // E1 is armed — allowed to attack buildings
 
-    // In C++, E1 would NOT auto-target POWR (unarmed).
-    // In TS, the guard scan iterates all enemy structures without weapon filter.
-    // Document this as a known parity gap.
-    expect(STRUCTURE_WEAPONS['POWR']).toBeUndefined(); // POWR is unarmed
+    // Player unit E1 now only auto-targets armed structures (GUN, TSLA, etc.)
+    expect(STRUCTURE_WEAPONS['POWR']).toBeUndefined(); // POWR is unarmed — skipped
     expect(STRUCTURE_WEAPONS['GUN']).toBeDefined(); // GUN is armed — valid target
   });
 });

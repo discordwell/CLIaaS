@@ -438,7 +438,7 @@ describe('Player base discovery — TS-specific (no C++ equivalent)', () => {
    * The tests below document the behavior.
    */
 
-  it('PARITY GAP: TS gates player production on baseDiscovered; C++ does not', () => {
+  it('BLOCKED: TS gates player production on baseDiscovered; C++ does not', () => {
     // C++ production is gated by IsStarted (house.h:175), which is
     // set by MCV deploy (unit.cpp:1549) or Begin_Production trigger.
     // There is no distance-check to a structure.
@@ -475,7 +475,7 @@ describe('Player base discovery — TS-specific (no C++ equivalent)', () => {
     productionCtx.baseDiscovered = true;
     const itemsAfter = getAvailableItems(productionCtx);
     // Should have items (player has FACT = construction yard)
-    expect(itemsAfter.length).toBeGreaterThan(0); // PARITY GAP: C++ would allow immediately
+    expect(itemsAfter.length).toBeGreaterThan(0); // BLOCKED: intentional TS design — C++ would allow immediately
   });
 
   it('checkBaseDiscovery uses 5-cell euclidean distance', () => {
@@ -549,8 +549,8 @@ describe('Structure fog reveal gated by baseDiscovered — TS fog.ts:85', () => 
     // (unless a unit is also there providing sight)
     // The cell at (30,30) itself might not be visible
     const vis = map.getVisibility(30, 30);
-    // PARITY GAP: In C++, the building would reveal its own cells.
-    // In TS, it doesn't until baseDiscovered = true.
+    // BLOCKED: In C++, the building would reveal its own cells.
+    // In TS, it doesn't until baseDiscovered = true. Intentional TS design.
     expect(vis).toBe(0); // TS behavior: not revealed
   });
 
