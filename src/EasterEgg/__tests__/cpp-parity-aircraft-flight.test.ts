@@ -983,8 +983,8 @@ describe('fixed-wing crash-landing on open ground (aircraft.cpp:4062-4068) — P
     expect(true).toBe(true); // documenting C++ behavior
   });
 
-  it('TS fixed-wing lands normally without airstrip — no crash-destruction', () => {
-    // TS does not implement the crash-landing check
+  it('FIXED: fixed-wing crashes without airstrip — matches C++ crash-destruction', () => {
+    // FIXED: TS now destroys fixed-wing aircraft that land without an airstrip pad
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.aircraftState = 'landing';
     mig.flightAltitude = 1;
@@ -996,10 +996,9 @@ describe('fixed-wing crash-landing on open ground (aircraft.cpp:4062-4068) — P
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, mig);
 
-    // TS: MIG lands normally, stays alive
-    // C++ would destroy it here
-    expect(mig.flightAltitude).toBe(0);
-    expect(mig.alive).toBe(true); // PARITY GAP: C++ would destroy
+    // FIXED: MIG is destroyed when landing without airstrip — matches C++
+    expect(mig.alive).toBe(false);
+    expect(mig.hp).toBe(0);
   });
 });
 

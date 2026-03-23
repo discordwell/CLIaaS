@@ -367,16 +367,17 @@ describe('landing → rearming transition sets C++ correct timer', () => {
   });
 
   it('aircraft with full ammo skips rearming entirely', () => {
-    const mig = makeEntity(UnitType.V_MIG, House.USSR);
-    mig.ammo = 3;
-    mig.maxAmmo = 3;
-    mig.aircraftState = 'landing';
-    mig.flightAltitude = 0;
+    // Use helicopter to test skip-rearming — fixed-wing crashes without airstrip pad
+    const heli = makeEntity(UnitType.V_HELI, House.Spain);
+    heli.ammo = 6;
+    heli.maxAmmo = 6;
+    heli.aircraftState = 'landing';
+    heli.flightAltitude = 0;
 
     const ctx = makeAircraftCtx();
-    updateAircraft(ctx, mig);
+    updateAircraft(ctx, heli);
 
-    expect(mig.aircraftState).toBe('landed');
+    expect(heli.aircraftState).toBe('landed');
   });
 });
 

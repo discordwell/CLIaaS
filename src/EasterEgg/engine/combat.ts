@@ -1378,6 +1378,11 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
     inf.hp = Math.max(5, Math.floor(Math.random() * inf.maxHp) + 5);
     inf.hp = Math.min(inf.hp, inf.maxHp);
     inf.mission = Mission.GUARD;
+    // C++ building.cpp:1697 — IsTechnician: IsNominal infantry (E1) get technician star
+    // Only buildings with buildup data (most constructed buildings) set this flag
+    if (crewType === UnitType.I_E1) {
+      inf.isTechnician = true;
+    }
     ctx.entities.push(inf);
     ctx.entityById.set(inf.id, inf);
   }

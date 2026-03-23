@@ -13,6 +13,23 @@ import { Entity, CloakState } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
 
+// ── C++ Hover Jitter (aircraft.cpp:441-445) ──────────────────────────────────
+
+/** C++ aircraft.cpp:443-444 — helicopter hover jitter pattern.
+ *  Applied when at FLIGHT_LEVEL and speed < 3 (effectively hovering/stationary).
+ *  Values are pixel offsets: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0}
+ *  Indexed by global frame counter % 16. Sum is 0 — no net displacement. */
+export const HOVER_JITTER = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, -1, -1, -1, 0] as const;
+
+/** Module-level frame counter for hover jitter (C++ ::Frame). Incremented by updateAircraft callers. */
+let _aircraftFrame = 0;
+/** Advance the aircraft frame counter. Call once per game tick. */
+export function advanceAircraftFrame(): void { _aircraftFrame++; }
+/** Get current aircraft frame (for tests). */
+export function getAircraftFrame(): number { return _aircraftFrame; }
+/** Reset frame counter (for tests). */
+export function resetAircraftFrame(): void { _aircraftFrame = 0; }
+
 // ── C++ Rearm Constants (rules.ini / defines.h) ─────────────────────────────
 
 /** C++ defines.h:3031 — 15 ticks per second */
@@ -177,14 +194,40 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         ctx.structures[entity.landedAtStructure].dockedAircraft = undefined;
       }
       entity.landedAtStructure = -1;
+      // C++ aircraft.cpp:2899-2928 — helicopter takeoff speed staging
+      // Speed ramp at specific altitude thresholds (pixel equivalents of lepton thresholds)
+      if (entity.isHelicopter) {
+        const FA = Entity.FLIGHT_ALTITUDE; // 24
+        const alt = entity.flightAltitude;
+        if (alt < Math.round(FA * 170 / 256)) {
+          // Below 170/256 (~16px): speed 0x20 = 12.5%
+          entity.aircraftSpeedFraction = 0x20 / 0xFF; // ~0.125
+        } else if (alt < Math.round(FA * 204 / 256)) {
+          // Below 204/256 (~19px): speed 0x40 = 25%
+          entity.aircraftSpeedFraction = 0x40 / 0xFF; // ~0.25
+        } else {
+          entity.aircraftSpeedFraction = 1.0; // full speed at FLIGHT_ALTITUDE
+        }
+      } else {
+        // C++ aircraft.cpp:2893-2897 — fixed-wing: full speed immediately on takeoff
+        entity.aircraftSpeedFraction = 1.0;
+      }
       if (entity.flightAltitude >= Entity.FLIGHT_ALTITUDE) {
         entity.aircraftState = 'flying';
+        entity.aircraftSpeedFraction = 1.0;
       }
       return true;
     }
 
     case 'flying': {
       entity.animState = AnimState.WALK;
+      // C++ aircraft.cpp:441-445 — helicopter hover jitter when at FLIGHT_ALTITUDE and slow
+      // Apply small vertical bobbing to hovering (non-moving) helicopters
+      if (entity.isHelicopter && entity.flightAltitude === Entity.FLIGHT_ALTITUDE) {
+        entity.hoverJitter = HOVER_JITTER[_aircraftFrame % 16];
+      } else {
+        entity.hoverJitter = 0;
+      }
       // If we have an attack target, close to weapon range
       if (entity.mission === Mission.ATTACK) {
         const targetPos = getAircraftTargetPos(entity);
@@ -284,8 +327,25 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // Descend 1px/tick (C++ AIRCRAFT.CPP — matches takeoff rate)
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
       entity.animState = AnimState.IDLE;
+      // C++ aircraft.cpp:2982-2998 — helicopter landing speed staging
+      // At half flight level (12px), helicopter stops horizontal movement
+      if (entity.isHelicopter) {
+        const halfLevel = Math.round(Entity.FLIGHT_ALTITUDE / 2); // 12px
+        if (entity.flightAltitude <= halfLevel) {
+          entity.aircraftSpeedFraction = 0; // Set_Speed(0) — stop horizontal movement
+        }
+      }
       if (entity.flightAltitude <= 0) {
         entity.flightAltitude = 0;
+        // C++ aircraft.cpp:4062-4068 — fixed-wing crash on open ground
+        // Fixed-wing aircraft that touch down without an airstrip are destroyed
+        if (entity.isFixedWing && entity.landedAtStructure < 0) {
+          entity.hp = 0;
+          entity.alive = false;
+          entity.mission = Mission.DIE;
+          return true;
+        }
+        entity.aircraftSpeedFraction = 1.0; // reset speed for landed state
         if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
           entity.aircraftState = 'rearming';
           // C++ building.cpp:4023-4025: building-driven rearm delay
