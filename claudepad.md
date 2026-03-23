@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-22T23:30Z — Victory/Defeat Condition C++ Parity (4 gaps closed)
+- **TACTION_WIN/LOSE house identity**: Engine already had playerHouseId check; tests now pass it and verify enemy house inversion.
+- **BorrowedTime savour delay**: Win/lose is now deferred by 27 ticks (rules.ini SavourDelay=.03). Added isToWin/isToLose/borrowedTime + applyDeferredWinLose() in game tick.
+- **Flag_To_Lose clears IsToWin**: applyTriggerActionResult unconditionally clears isToWin when lose fires.
+- **TACTION_WINLOSE noop**: Removed TD-derived handler. RA has no case for ordinal 14.
+- **ALLOWWIN blockageDecrement**: executeTriggerAction returns blockageDecrement=true field. Integer counter already in index.ts.
+- All 4 it.fails converted to passing tests. 49,505 EasterEgg tests pass.
+- Files: scenario.ts (TACTION_WINLOSE noop + blockageDecrement field), index.ts (BorrowedTime + Flag_To_Lose clears IsToWin), 3 test files updated.
+
 ## 2026-03-22T08:00Z — Massive C++ Parity Audit (34k→53k tests, 80+ bugs)
 - **Parallel subagent blitz**: 5 agents at a time writing INI-parsed parity tests across every game system
 - **Tick rate**: Changed engine from 20Hz to 15Hz matching C++ GameSpeed=4. All constants were already 15Hz — only needed to change the master constant, build formula (0.96→0.72), and agent harness scaling.
