@@ -58,7 +58,7 @@ function makeCombatCtx(
     map,
     isAllied: (a: House, b: House) => alliances.get(a)?.has(b) ?? false,
     entitiesAllied: (a: Entity, b: Entity) => alliances.get(a.house)?.has(b.house) ?? false,
-    isPlayerControlled: (e: Entity) => alliances.get(e.house)?.has(House.Spain) ?? false,
+    isPlayerControlled: () => false, // These tests test AI retaliation; PlayerReturnFire tested in return-fire.test.ts,
     playSoundAt: () => {},
     playEva: () => {},
     minimapAlert: () => {},

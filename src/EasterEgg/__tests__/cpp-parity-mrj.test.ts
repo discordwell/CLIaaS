@@ -63,7 +63,7 @@ function makeCombatContext(entities: Entity[]): CombatContext {
     powerProduced: 0,
     isAllied: (a, b) => a === b,
     entitiesAllied: (a, b) => a.house === b.house,
-    isPlayerControlled: (e) => e.house === House.Spain,
+    isPlayerControlled: () => false, // These tests test AI retaliation; PlayerReturnFire tested in return-fire.test.ts
     playSoundAt: () => {},
     playEva: () => {},
     minimapAlert: () => {},

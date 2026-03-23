@@ -553,7 +553,7 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   if (!victim.alive || !attacker.alive) return;
   // C++ rules.ini PlayerReturnFire=no (Rule.IsSmartDefense=false) — player units do NOT auto-retaliate
   // C++ techno.cpp:4976 exception: Tanya retaliates against infantry even without SmartDefense
-  if (ctx.isPlayerControlled(victim)) {
+  if (ctx.isPlayerControlled?.(victim)) {
     const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
     if (!isTanyaVsInfantry) return;
   }
