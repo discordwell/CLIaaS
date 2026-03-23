@@ -225,7 +225,7 @@ export class Entity {
    *  When returning to refinery, saves current cell. On next idle seek, heads there first. */
   archiveTarget: { cx: number; cy: number } | null = null;
 
-  // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.5)
+  // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.7)
   speedBias = 1.0;
 
   // MV9: Ground speed bias — multiplies rotation rate (C++ GroundSpeed affects ROT accumulation)
@@ -244,6 +244,7 @@ export class Entity {
   // Crate effect timers
   cloakTick = 0;    // ticks remaining for cloak invisibility (from crate)
   invulnTick = 0;   // ticks remaining for invulnerability (from crate)
+  speedTick = 0;    // ticks remaining for speed boost (from crate, C++ TICKS_PER_MINUTE = 900)
 
   // Team behavior flags
   isSuicide = false; // IsSuicide team flag: don't retreat, fight to death

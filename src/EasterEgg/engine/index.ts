@@ -211,7 +211,7 @@ export type { InflightProjectileType as InflightProjectile };
 export { SPLASH_RADIUS } from './combat';
 export {
   repairCostPerStep, sellRefund, powerOutput, calculatePowerGrid,
-  powerMultiplier, calculateSiloCapacity,
+  powerMultiplier, calculateSiloCapacity, spendCredits,
 } from './repairSell';
 export {
   getWarheadMult, getWarheadMeta, getWarheadProps, damageSpeedFactor,
@@ -1755,7 +1755,7 @@ export class Game {
       }
     }
 
-    // Crate pickup — player units walking over crates
+    // Crate pickup — any unit walking over crates (C++ foot.cpp:765: ANY FootClass triggers)
     for (let i = this.crates.length - 1; i >= 0; i--) {
       const crate = this.crates[i];
       // CR6: Expire crates in campaign (no respawn) — C++ only regenerates in multiplayer
@@ -1764,7 +1764,7 @@ export class Game {
         continue;
       }
       for (const e of this.entities) {
-        if (!e.alive || !e.isPlayerUnit) continue;
+        if (!e.alive) continue;
         const dx = e.pos.x - crate.x;
         const dy = e.pos.y - crate.y;
         if (dx * dx + dy * dy < CELL_SIZE * CELL_SIZE) {
@@ -1885,6 +1885,7 @@ export class Game {
       if (e.cloakTick > 0) e.cloakTick--;
       if (e.invulnTick > 0) e.invulnTick--;
       if (e.ironCurtainTick > 0) e.ironCurtainTick--;
+      if (e.speedTick > 0) { e.speedTick--; if (e.speedTick <= 0) e.speedBias = 1.0; }
       if (e.chronoShiftTick > 0) e.chronoShiftTick--;
       // C++ drive.cpp:1297-1313: Moebius return countdown — when timer expires,
       // teleport unit back to its origin cell and clear moebius state.
@@ -2013,8 +2014,6 @@ export class Game {
             }
           }
           const prodItem = this.scenarioProductionItems.find(p => p.type === s.type);
-          // Recalculate silo capacity BEFORE adding refund (structure is now dead)
-          this.recalculateSiloCapacity();
           const healthRatioAtSell = (s.sellHpAtStart ?? s.maxHp) / s.maxHp;
           s.sellHpAtStart = undefined;
           const wx = s.cx * CELL_SIZE + CELL_SIZE;
@@ -2036,12 +2035,17 @@ export class Game {
             mcvSpawned = true;
           }
 
+          // C++ parity: sell refund FIRST, then reduce capacity (building.cpp:3571).
+          // C++ order: Refund_Money(Refund_Amount()) → Credits += refund (bypass silo cap),
+          // THEN Limbo() → Adjust_Capacity(-Class->Capacity, true) → spill excess Tiberium.
           // Refund: C++ techno.cpp:5743-5761 — AI gets 100%, human gets 50%
           // C++ building.cpp:3509-3549: no refund when ConYard reverts to MCV
           if (!mcvSpawned && prodItem) {
             const isHuman = this.isAllied(s.house, this.playerHouse);
             this.addCredits(sellRefund(prodItem.cost, isHuman), true);
           }
+          // Recalculate silo capacity AFTER adding refund (C++ order: Refund_Money then Limbo)
+          this.recalculateSiloCapacity();
 
           // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
           // C++ parity: no survivors when ConYard reverts to MCV
@@ -6255,11 +6259,16 @@ export class Game {
    *  pass inanger=true in C++, meaning excess tiberium is not refunded.
    *  This creates economic risk — losing storage buildings costs you credits. */
   recalculateSiloCapacity(): void {
+    const oldCap = this.siloCapacity;
     this.siloCapacity = this.calculateSiloCapacity();
-    // C++ parity: cap credits to new capacity — excess is lost (spilled)
-    // Matches C++ building.cpp:2986 Adjust_Capacity(-Class->Capacity, true)
-    if (this.siloCapacity > 0 && this.credits > this.siloCapacity) {
-      this.credits = this.siloCapacity;
+    // C++ parity: Adjust_Capacity(-delta, true) — excess ore (Tiberium) is LOST.
+    // In C++, only the Tiberium (silo-stored) portion is affected; Credits are untouched.
+    // TS single-bucket approximation: stored = min(credits, oldCap) is the ore portion.
+    // Excess ore beyond new capacity is lost (spilled).
+    if (this.credits > this.siloCapacity) {
+      const stored = Math.min(this.credits, oldCap); // Tiberium portion
+      const excess = Math.max(0, stored - this.siloCapacity);
+      this.credits -= excess;
     }
   }
 

@@ -136,14 +136,18 @@ export interface CrateContext {
 
 // ── Pure functions ──────────────────────────────────────────────────────────
 
-/** CR9: Select a crate type using weighted random distribution */
+/** CR9: Select a crate type using weighted random distribution.
+ *  C++ cell.cpp:2148-2154: uses 1-indexed Random_Pick(1, total_shares) (integer, inclusive).
+ *  We match the C++ algorithm: pick integer in [1, total], accumulate shares, break on pick <= sum. */
 export function weightedCrateType(): CrateType {
   const shares = CRATE_SHARES;
   const totalShares = shares.reduce((sum, s) => sum + s.shares, 0);
-  let roll = Math.random() * totalShares;
+  // C++ Random_Pick(1, total_shares) — uniform integer over [1, total]
+  const pick = Math.floor(Math.random() * totalShares) + 1;
+  let shareCount = 0;
   for (const entry of shares) {
-    roll -= entry.shares;
-    if (roll <= 0) return entry.type;
+    shareCount += entry.shares;
+    if (pick <= shareCount) return entry.type;
   }
   return shares[shares.length - 1].type; // fallback
 }
@@ -286,15 +290,20 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
     case 'speed': {
       // CR7: C++ cell.cpp:2565-2577 — apply speed upgrade to ALL friendly ground units
       // within CrateRadius (~2.5 cells). Excludes aircraft (cell.cpp:2569).
+      // C++ is multiplicative: SpeedBias *= fixed(CrateData[powerup], 256) ≈ 1.7
       // Always apply to the collector as well (may not be in ctx.entities).
-      unit.speedBias = 1.7;
+      // C++ duration: TICKS_PER_MINUTE * 1.0 = 900 ticks (same formula as invulnerability)
+      const speedDuration = 900;
+      unit.speedBias *= 1.7;
+      unit.speedTick = speedDuration;
       const speedPos = { x: crate.x, y: crate.y };
       for (const e of ctx.entities) {
         if (!e.alive || e.id === unit.id) continue;
         if (!ctx.isAllied(e.house, ctx.playerHouse)) continue;
         if (e.isAirUnit) continue; // C++ cell.cpp:2569: excludes RTTI_AIRCRAFT
         if (worldDist(speedPos, e.pos) >= CRATE_RADIUS) continue;
-        e.speedBias = 1.7;
+        e.speedBias *= 1.7;
+        e.speedTick = speedDuration;
       }
       ctx.evaMessages.push({ text: 'SPEED UPGRADE', tick: ctx.tick });
       break;

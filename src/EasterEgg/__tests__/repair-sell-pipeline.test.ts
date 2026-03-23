@@ -607,9 +607,9 @@ describe('Sell Refund — flat 50% of building cost (C++ parity)', () => {
 
   it('refund uses addCredits with bypassSiloCap=true', () => {
     // Source at sell finalization: this.addCredits(sellRefund(prodItem.cost, isHuman), true)
-    const sellSection = indexSource.indexOf('Refund: C++ techno.cpp:5743-5761');
+    const sellSection = indexSource.indexOf('C++ parity: sell refund FIRST');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection, sellSection + 500);
+    const chunk = indexSource.slice(sellSection, sellSection + 800);
     expect(chunk).toContain('sellRefund');
     expect(chunk).toContain('true'); // bypassSiloCap
   });
@@ -664,16 +664,17 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     expect(chunk).toContain('clearStructureFootprint');
   });
 
-  it('sell finalization recalculates silo capacity before adding refund', () => {
-    // Look for recalculateSiloCapacity near the sell finalization section
-    const sellSection = indexSource.indexOf('Recalculate silo capacity BEFORE adding refund');
+  it('sell finalization adds refund before recalculating silo capacity (C++ order)', () => {
+    // C++ building.cpp:3571: Refund_Money() FIRST, then Limbo() → Adjust_Capacity()
+    const sellSection = indexSource.indexOf('C++ parity: sell refund FIRST');
     expect(sellSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(sellSection, sellSection + 2500);
+    expect(chunk).toContain('addCredits');
     expect(chunk).toContain('recalculateSiloCapacity');
-    // Silo recalculation happens BEFORE addCredits
-    const siloIdx = chunk.indexOf('recalculateSiloCapacity');
+    // Refund happens BEFORE silo recalculation (C++ order)
     const addIdx = chunk.indexOf('addCredits');
-    expect(siloIdx).toBeLessThan(addIdx);
+    const siloIdx = chunk.indexOf('recalculateSiloCapacity');
+    expect(addIdx).toBeLessThan(siloIdx);
   });
 
   it('sell finalization creates explosion effect at structure center', () => {
@@ -1288,9 +1289,9 @@ describe('Edge Cases', () => {
   });
 
   it('sell refinery impacts economy (reduces silo capacity, excess spilled)', () => {
-    // PROC provides 1000 capacity. Selling triggers recalculateSiloCapacity.
-    // C++ parity: excess credits beyond new capacity are LOST (spilled)
-    const sellSection = indexSource.indexOf('Recalculate silo capacity BEFORE adding refund');
+    // PROC provides 2000 capacity. Selling triggers recalculateSiloCapacity.
+    // C++ parity: refund first, then excess ore beyond new capacity is LOST (spilled)
+    const sellSection = indexSource.indexOf('Recalculate silo capacity AFTER adding refund');
     expect(sellSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(sellSection - 400, sellSection + 400);
     expect(chunk).toContain('recalculateSiloCapacity');
@@ -1618,10 +1619,10 @@ describe('Repair + Sell Interaction', () => {
   });
 
   it('selling refinery gives refund AND reduces silo capacity', () => {
-    // Both effects happen on sell finalization
-    const sellSection = indexSource.indexOf('Recalculate silo capacity BEFORE adding refund');
+    // Both effects happen on sell finalization (C++ order: refund first, then cap reduce)
+    const sellSection = indexSource.indexOf('Recalculate silo capacity AFTER adding refund');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection, sellSection + 2500);
+    const chunk = indexSource.slice(sellSection - 500, sellSection + 500);
     expect(chunk).toContain('recalculateSiloCapacity');
     expect(chunk).toContain('addCredits');
   });
