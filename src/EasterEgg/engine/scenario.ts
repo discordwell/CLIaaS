@@ -1195,6 +1195,7 @@ export interface MapStructure {
   firingFlash?: number;      // ticks remaining for muzzle flash frame
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
+  originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
 }
 
 /** Weapon stats for defensive structures */
@@ -1385,6 +1386,18 @@ export const CAPTURABLE_BUILDINGS: Set<string> = new Set([
   'MISS',
   // Fake structures (aftrmath.ini Capturable=true)
   'FACF', 'WEAF', 'SYRF', 'SPEF', 'DOMF',
+]);
+
+/** Buildings with Crewed=yes in rules.ini (C++ bdata.cpp constructors parse Crewed= at startup).
+ *  Only Crewed buildings spawn infantry survivors on sell/destruction.
+ *  C++ building.cpp:3444 How_Many_Survivors: if (!IsCrewAble()) return 0;
+ *  Buildings WITHOUT Crewed=yes: SILO, KENN, SYRD, SPEN, MISS, V01-V37, FACF, WEAF, SYRF, SPEF, DOMF, walls. */
+export const CREWED_BUILDINGS: Set<string> = new Set([
+  'IRON', 'FCOM', 'ATEK', 'PDOX', 'WEAP',
+  'PBOX', 'HBOX', 'TSLA', 'GUN', 'AGUN', 'FTUR',
+  'FACT', 'PROC', 'HPAD', 'DOME', 'GAP',
+  'SAM', 'MSLO', 'AFLD', 'POWR', 'APWR',
+  'STEK', 'HOSP', 'BIO', 'BARR', 'TENT', 'FIX',
 ]);
 
 export interface ScenarioResult {
