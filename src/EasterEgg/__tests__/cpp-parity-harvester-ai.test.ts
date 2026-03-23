@@ -715,37 +715,57 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
    * TS (harvester.ts:168-179) uses findNearestOre with range 20.
    * PARITY GAP: C++ short scan = 6 cells; TS uses range 20.
    */
-  it('C++ uses short scan (6 cells) for mid-harvest re-seek; TS uses range 20 — PARITY GAP', () => {
+  it('mid-harvest re-seek uses OreNearScan=6 cells (rules.ini, C++ parity)', () => {
     // C++ TiberiumShortScan = 0x0600 = 1536 leptons
     // CELL_LEPTON_W = 256 leptons
     // Short scan radius = 1536 / 256 = 6 cells
+    // rules.ini OreNearScan=6 is authoritative
     const cppShortScanRadius = 0x0600 / 256;
     expect(cppShortScanRadius).toBe(6);
 
-    // TS hardcodes range 20 in harvester.ts:169
-    const tsReseekRange = 20;
-    expect(tsReseekRange).toBe(20);
-    expect(tsReseekRange).not.toBe(cppShortScanRadius); // PARITY GAP
+    // TS harvester.ts now uses findNearestOre(ec.cx, ec.cy, 6) matching rules.ini
+    // Verify via integration: harvester on depleted cell re-seeks within 6 cells
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'harvesting';
+    harv.harvestTick = 9;
+    harv.oreLoad = 5;
+    harv.oreCreditValue = 125;
+    ctx.entities.push(harv);
+    placeGold(ctx.map, 50, 50, 0); // will deplete on harvest
+    placeGold(ctx.map, 55, 50, 5); // 5 cells away — within OreNearScan=6
+    placeGold(ctx.map, 60, 50, 5); // 10 cells away — outside OreNearScan=6
+
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('seeking');
+    // Should find ore at (55,50) within the 6-cell scan range
+    expect(Math.floor(harv.moveTarget!.x / CELL_SIZE)).toBe(55);
   });
 
   /**
-   * C++ unit.cpp:2799 — Initial ore seek uses long scan (32 cells):
+   * C++ unit.cpp:2799 — Initial ore seek uses long scan:
    *   if (Goto_Tiberium(Rule.TiberiumLongScan / CELL_LEPTON_W)) {
    *
-   * TiberiumLongScan = 0x2000 = 8192, CELL_LEPTON_W = 256
-   * Long scan radius = 8192 / 256 = 32 cells
-   *
-   * TS (harvester.ts:114) uses findHarvesterOre with range 30.
-   * PARITY GAP: C++ = 32, TS = 30.
+   * C++ default TiberiumLongScan = 0x2000 = 8192, CELL_LEPTON_W = 256 → 32 cells.
+   * But rules.ini OreFarScan=48 overrides this (rules.ini is authoritative).
+   * TS now uses 48 matching rules.ini.
    */
-  it('C++ long scan = 32 cells; TS initial seek uses 30 — PARITY GAP', () => {
-    const cppLongScanRadius = 0x2000 / 256;
-    expect(cppLongScanRadius).toBe(32);
+  it('initial seek uses OreFarScan=48 cells (rules.ini, C++ parity)', () => {
+    // rules.ini OreFarScan=48 overrides C++ constructor default of 32
+    const rulesIniFarScan = 48;
 
-    // TS harvester.ts:114 hardcodes maxRange=30
-    // This means TS misses ore that's 31-32 cells away
-    const tsInitialRange = 30;
-    expect(tsInitialRange).not.toBe(cppLongScanRadius);
+    // TS harvester.ts uses findHarvesterOre with range 48 matching rules.ini
+    // Verify: idle harvester finds ore at 40 cells (within OreFarScan=48)
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'idle';
+    harv.mission = Mission.GUARD;
+    ctx.entities.push(harv);
+    placeGold(ctx.map, 50 + 40, 50, 5); // 40 cells east — within 48 range
+
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('seeking');
+    expect(Math.floor(harv.moveTarget!.x / CELL_SIZE)).toBe(90);
   });
 });
 
@@ -763,14 +783,12 @@ describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
    *
    * C++ harvesters remember where they last found ore (ArchiveTarget).
    * When starting a new LOOKING cycle, they head to the last known ore location first.
-   *
-   * TS has NO ArchiveTarget equivalent. Each seek cycle does a fresh findNearestOre.
-   * PARITY GAP: C++ harvesters return to known ore patches; TS always scans fresh.
+   * TS now implements archiveTarget matching C++ behavior.
    */
-  it('C++ harvesters remember last ore location (ArchiveTarget); TS does not — PARITY GAP', () => {
+  it('harvester has archiveTarget field for ore location memory (C++ parity)', () => {
     const harv = makeHarv();
-    // TS Entity has no archiveTarget or equivalent field
-    expect('archiveTarget' in harv).toBe(false);
+    expect('archiveTarget' in harv).toBe(true);
+    expect(harv.archiveTarget).toBeNull(); // starts null
   });
 
   /**
@@ -780,10 +798,41 @@ describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
    * When a full harvester heads to the refinery (FINDHOME), it saves the current
    * position as ArchiveTarget so it can return to the same ore patch later.
    */
-  it('C++ saves ore position on return to refinery; TS does not track this', () => {
-    // In TS, the harvester simply scans for nearest ore each time from 'idle'.
-    // This is functionally different from C++ — harvesters may pick different patches.
-    expect(true).toBe(true); // structural parity gap documented
+  it('harvester saves archiveTarget when transitioning to returning (C++ unit.cpp:2851)', () => {
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'harvesting';
+    harv.harvestTick = 9;
+    harv.oreLoad = Entity.BAIL_COUNT - 1; // one more bail fills it
+    harv.oreCreditValue = (Entity.BAIL_COUNT - 1) * 25;
+    ctx.entities.push(harv);
+    placeGold(ctx.map, 50, 50, 5);
+
+    updateHarvester(ctx, harv);
+    // Should save current cell as archiveTarget when transitioning to 'returning'
+    expect(harv.harvesterState).toBe('returning');
+    expect(harv.archiveTarget).toEqual({ cx: 50, cy: 50 });
+  });
+
+  it('idle harvester uses archiveTarget before scanning for new ore (C++ unit.cpp:2794-2796)', () => {
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'idle';
+    harv.mission = Mission.GUARD;
+    harv.archiveTarget = { cx: 60, cy: 60 }; // remembered ore location
+    ctx.entities.push(harv);
+    // Place ore at (52,50) nearby, but archiveTarget points to (60,60)
+    placeGold(ctx.map, 52, 50, 5);
+    placeGold(ctx.map, 60, 60, 5);
+
+    updateHarvester(ctx, harv);
+    // Should head to archiveTarget (60,60) first, not nearest ore (52,50)
+    expect(harv.harvesterState).toBe('seeking');
+    expect(harv.archiveTarget).toBeNull(); // cleared after use
+    // moveTarget should be at (60,60)
+    expect(harv.moveTarget).toBeDefined();
+    expect(Math.floor(harv.moveTarget!.x / CELL_SIZE)).toBe(60);
+    expect(Math.floor(harv.moveTarget!.y / CELL_SIZE)).toBe(60);
   });
 });
 
@@ -870,18 +919,20 @@ describe('findHarvesterOre — AI harvester anti-clustering (harvester.ts:48-104
     });
     const harv1 = makeHarv(House.USSR, 50, 50);
     harv1.harvesterState = 'harvesting';
-    const harv2 = makeHarv(House.USSR, 50, 55);
+    const harv2 = makeHarv(House.USSR, 50, 60);
     ctx.entities.push(harv1, harv2);
 
-    // Place ore at (51,50) near harv1, and at (55,55) far from harv1
+    // Place ore at (51,50) near harv1, and at (50,61) near harv2 but far from harv1
+    // Anti-clustering uses 5-cell Chebyshev distance from friendly harv targets
     placeGold(ctx.map, 51, 50, 5);
-    placeGold(ctx.map, 55, 55, 5);
+    placeGold(ctx.map, 50, 61, 5);
 
-    const result = findHarvesterOre(ctx, harv2, 50, 55, 20);
+    const result = findHarvesterOre(ctx, harv2, 50, 60, 20);
     expect(result).toBeDefined();
-    // harv2 should prefer (55,55) because harv1 is at (50,50) targeting nearby
-    expect(result!.cx).toBe(55);
-    expect(result!.cy).toBe(55);
+    // harv2 should prefer (50,61) — it's 1 cell away and NOT near harv1's target (50,50)
+    // (51,50) is near harv1's target and would be rejected by anti-clustering
+    expect(result!.cx).toBe(50);
+    expect(result!.cy).toBe(61);
   });
 
   it('AI harvester falls back to nearest ore when all ore is targeted', () => {
@@ -925,12 +976,9 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
    * Offload_Tiberium_Bail (unit.cpp:4299-4313) decrements Tiberium by 1 and returns
    * the credit value for that bail.
    *
-   * TS (harvester.ts:241-256) unloads ALL credits in one lump sum after a 14-tick
-   * animation timer. This is a simplification.
-   *
-   * PARITY GAP: C++ drip-feeds credits (1 bail/tick); TS dumps all at once after 14 ticks.
+   * TS now matches C++ drip-feed: 1 bail per tick, credits deposited per bail.
    */
-  it('TS unloads in lump sum after 14 ticks; C++ unloads 1 bail per tick — PARITY GAP', () => {
+  it('C++ drip-feed unload: 1 bail per tick (building.cpp:3758-3780)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
@@ -939,18 +987,20 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
     harv.oreCreditValue = 250; // 10 * 25
     ctx.entities.push(harv);
 
-    // Simulate 13 ticks — should NOT have unloaded yet
-    for (let i = 0; i < 13; i++) {
+    // After 1 tick, 1 bail should be unloaded
+    updateHarvester(ctx, harv);
+    expect(harv.oreLoad).toBe(9);
+    expect(ctx.addCredits).toHaveBeenCalledTimes(1);
+    expect(ctx.addCredits).toHaveBeenCalledWith(25); // 250/10 = 25 per bail
+
+    // After 9 more ticks (10 total), all bails should be unloaded
+    for (let i = 0; i < 9; i++) {
       updateHarvester(ctx, harv);
     }
-    expect(harv.oreLoad).toBe(10); // still loaded
-
-    // Tick 14 — unload all at once
-    updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
     expect(harv.harvesterState).toBe('idle');
-    expect(ctx.addCredits).toHaveBeenCalledWith(250);
+    expect(ctx.addCredits).toHaveBeenCalledTimes(10);
   });
 
   /**

@@ -710,11 +710,12 @@ describe('Ore growth rules (cell.cpp:2869-2884, map.cpp:1017)', () => {
 
 describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
   /**
-   * TS uses 14-tick dump animation, then lump-sum credit deposit.
-   * C++ uses Credit_Load() for lump-sum (unit.cpp:2383-2385).
+   * C++ building.cpp:3758-3780: drip-feed unload — 1 bail per tick.
+   * Offload_Tiberium_Bail() decrements Tiberium by 1 each tick.
    */
-  it('full gold load: unloads BailCount * GoldValue credits after 14 ticks', () => {
-    const addCredits = vi.fn();
+  it('full gold load: unloads BailCount * GoldValue credits via drip-feed', () => {
+    let totalDeposited = 0;
+    const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const ctx = makeCtx({ addCredits });
 
     const harv = makeHarv(House.Spain, 50, 50);
@@ -724,18 +725,21 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     harv.oreCreditValue = iniBailCount * iniGoldValue;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
+    // Drip-feed: BailCount ticks to unload all bails
+    for (let i = 0; i < iniBailCount; i++) {
       updateHarvester(ctx, harv);
     }
 
-    expect(addCredits).toHaveBeenCalledWith(iniBailCount * iniGoldValue);
+    expect(addCredits).toHaveBeenCalledTimes(iniBailCount);
+    expect(totalDeposited).toBe(iniBailCount * iniGoldValue);
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
     expect(harv.harvesterState).toBe('idle');
   });
 
-  it('full gem load: unloads BailCount * GemValue credits', () => {
-    const addCredits = vi.fn();
+  it('full gem load: unloads BailCount * GemValue credits via drip-feed', () => {
+    let totalDeposited = 0;
+    const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const ctx = makeCtx({ addCredits });
 
     const harv = makeHarv(House.Spain, 50, 50);
@@ -745,11 +749,11 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     harv.oreCreditValue = iniBailCount * iniGemValue;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < iniBailCount; i++) {
       updateHarvester(ctx, harv);
     }
 
-    expect(addCredits).toHaveBeenCalledWith(iniBailCount * iniGemValue);
+    expect(totalDeposited).toBe(iniBailCount * iniGemValue);
   });
 
   it('AI harvester deposits into houseCredits map', () => {
@@ -766,7 +770,7 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     harv.oreCreditValue = iniBailCount * iniGoldValue;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < iniBailCount; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -786,18 +790,17 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 14; i++) {
-      updateHarvester(ctx, harv);
-    }
+    // With 0 bails, first tick transitions immediately to idle
+    updateHarvester(ctx, harv);
 
     expect(addCredits).not.toHaveBeenCalled();
     expect(harv.harvesterState).toBe('idle');
   });
 
   /**
-   * Unload does NOT happen before 14 ticks.
+   * C++ drip-feed: credits deposited starting from first tick.
    */
-  it('no credits deposited before 14-tick dump animation completes', () => {
+  it('drip-feed deposits credits starting from tick 1', () => {
     const addCredits = vi.fn();
     const ctx = makeCtx({ addCredits });
 
@@ -808,14 +811,13 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     harv.oreCreditValue = iniBailCount * iniGoldValue;
     ctx.entities.push(harv);
 
-    // Run only 13 ticks — should NOT have unloaded yet
-    for (let i = 0; i < 13; i++) {
-      updateHarvester(ctx, harv);
-    }
+    // After 1 tick, 1 bail deposited
+    updateHarvester(ctx, harv);
 
-    expect(addCredits).not.toHaveBeenCalled();
+    expect(addCredits).toHaveBeenCalledTimes(1);
+    expect(addCredits).toHaveBeenCalledWith(iniGoldValue);
     expect(harv.harvesterState).toBe('unloading');
-    expect(harv.oreLoad).toBe(iniBailCount); // still carrying
+    expect(harv.oreLoad).toBe(iniBailCount - 1);
   });
 });
 

@@ -216,11 +216,14 @@ export class Entity {
 
   // Harvester economy (EC3: bail-based capacity — 28 bails max per harvester load)
   oreLoad = 0;                     // number of bails currently carried
-  oreCreditValue = 0;              // total credit value of carried bails (for lump-sum unload)
+  oreCreditValue = 0;              // total credit value of carried bails
   static readonly BAIL_COUNT = 28; // max bails per trip (C++ UnitTypeClass::Max_Pips)
   static readonly ORE_CAPACITY = 28; // alias for BAIL_COUNT (backward compat)
   harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'unloading' = 'idle';
   harvestTick = 0;                 // ticks spent harvesting current cell
+  /** C++ unit.cpp:2794-2797, 2851 — ArchiveTarget: remembers last known ore location.
+   *  When returning to refinery, saves current cell. On next idle seek, heads there first. */
+  archiveTarget: { cx: number; cy: number } | null = null;
 
   // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.5)
   speedBias = 1.0;

@@ -829,28 +829,67 @@ export class GameMap {
     }
   }
 
-  /** Find nearest ore/gem cell to a given position (returns null if none).
-   *  C++ parity: OreNearScan=6, OreFarScan=48 (unit.cpp:2230-2234). */
+  /** Find nearest ore/gem cell using C++ ring/diamond search pattern.
+   *  C++ parity: unit.cpp:2218-2243 searches expanding ring perimeters,
+   *  returns the FIRST valid cell found (not Euclidean closest).
+   *  OreNearScan=6, OreFarScan=48 (rules.ini). */
   findNearestOre(cx: number, cy: number, maxRange = 6): CellPos | null {
-    let bestDist = Infinity;
-    let best: CellPos | null = null;
+    // Check center cell first (C++ unit.cpp:2209-2212: already on ore → return immediately)
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      const ovl = this.overlay[cy * MAP_CELLS + cx];
+      if (ovl >= 0x03 && ovl <= 0x12) return { cx, cy };
+    }
+
+    // C++ unit.cpp:2218-2243: ring search — scan perimeter of each expanding ring.
+    // for (radius = 1; radius < rad; radius++)
+    //   for (x = -radius; x <= radius; x++)
+    //     check (x, -radius), (x, +radius), (-radius, x), (+radius, x)
+    // Returns FIRST valid cell found on any ring perimeter.
     const r = maxRange;
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const rx = cx + dx;
-        const ry = cy + dy;
-        if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
-        const ovl = this.overlay[ry * MAP_CELLS + rx];
-        if (ovl >= 0x03 && ovl <= 0x12) { // gold ore or gems
-          const dist = dx * dx + dy * dy;
-          if (dist < bestDist) {
-            bestDist = dist;
-            best = { cx: rx, cy: ry };
+    for (let radius = 1; radius <= r; radius++) {
+      for (let x = -radius; x <= radius; x++) {
+        // Top edge: (cx+x, cy-radius)
+        const ty = cy - radius;
+        if (ty >= 0 && ty < MAP_CELLS) {
+          const tx = cx + x;
+          if (tx >= 0 && tx < MAP_CELLS) {
+            const ovl = this.overlay[ty * MAP_CELLS + tx];
+            if (ovl >= 0x03 && ovl <= 0x12) return { cx: tx, cy: ty };
+          }
+        }
+        // Bottom edge: (cx+x, cy+radius)
+        const by = cy + radius;
+        if (by >= 0 && by < MAP_CELLS) {
+          const bx = cx + x;
+          if (bx >= 0 && bx < MAP_CELLS) {
+            const ovl = this.overlay[by * MAP_CELLS + bx];
+            if (ovl >= 0x03 && ovl <= 0x12) return { cx: bx, cy: by };
+          }
+        }
+      }
+      // Left and right edges (exclude corners already checked by top/bottom)
+      for (let y = -radius + 1; y <= radius - 1; y++) {
+        // Left edge: (cx-radius, cy+y)
+        const lx = cx - radius;
+        if (lx >= 0 && lx < MAP_CELLS) {
+          const ly = cy + y;
+          if (ly >= 0 && ly < MAP_CELLS) {
+            const ovl = this.overlay[ly * MAP_CELLS + lx];
+            if (ovl >= 0x03 && ovl <= 0x12) return { cx: lx, cy: ly };
+          }
+        }
+        // Right edge: (cx+radius, cy+y)
+        const rx = cx + radius;
+        if (rx >= 0 && rx < MAP_CELLS) {
+          const ry = cy + y;
+          if (ry >= 0 && ry < MAP_CELLS) {
+            const ovl = this.overlay[ry * MAP_CELLS + rx];
+            if (ovl >= 0x03 && ovl <= 0x12) return { cx: rx, cy: ry };
           }
         }
       }
     }
-    return best;
+    return null;
   }
 
   /** Deplete one bail of ore/gem at a cell. Returns credit value per bail (0 if empty).

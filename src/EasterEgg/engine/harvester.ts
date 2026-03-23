@@ -68,39 +68,42 @@ export function findHarvesterOre(
     }
   }
 
-  // Search for nearest ore that isn't within 3 cells of another harvester's target
-  let bestDist = Infinity;
-  let best: { cx: number; cy: number } | null = null;
+  // C++ ring search with anti-clustering: scan expanding ring perimeters,
+  // skip ore cells within 5 cells of another harvester's target.
+  // Returns first valid untargeted cell found on any ring perimeter.
   const r = maxRange;
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dx = -r; dx <= r; dx++) {
-      const rx = cx + dx;
-      const ry = cy + dy;
-      if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
-      const ovl = ctx.map.overlay[ry * MAP_CELLS + rx];
-      if (ovl < 0x03 || ovl > 0x12) continue; // not ore
-      const dist = dx * dx + dy * dy;
-      if (dist >= bestDist) continue;
 
-      // Check if another friendly harvester is already targeting nearby
-      let isTargeted = false;
-      for (const ft of friendlyTargets) {
-        const tdx = Math.abs(ft.cx - rx);
-        const tdy = Math.abs(ft.cy - ry);
-        if (tdx <= 5 && tdy <= 5) { isTargeted = true; break; }
-      }
-      if (isTargeted) continue;
+  // Helper to check ore and anti-clustering at a cell
+  const checkCell = (rx: number, ry: number): { cx: number; cy: number } | null => {
+    if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) return null;
+    const ovl = ctx.map.overlay[ry * MAP_CELLS + rx];
+    if (ovl < 0x03 || ovl > 0x12) return null; // not ore
+    for (const ft of friendlyTargets) {
+      const tdx = Math.abs(ft.cx - rx);
+      const tdy = Math.abs(ft.cy - ry);
+      if (tdx <= 5 && tdy <= 5) return null; // targeted by another harvester
+    }
+    return { cx: rx, cy: ry };
+  };
 
-      bestDist = dist;
-      best = { cx: rx, cy: ry };
+  // Check center cell first
+  const center = checkCell(cx, cy);
+  if (center) return center;
+
+  // Ring search — expanding perimeters
+  for (let radius = 1; radius <= r; radius++) {
+    for (let x = -radius; x <= radius; x++) {
+      const hit = checkCell(cx + x, cy - radius) ?? checkCell(cx + x, cy + radius);
+      if (hit) return hit;
+    }
+    for (let y = -radius + 1; y <= radius - 1; y++) {
+      const hit = checkCell(cx - radius, cy + y) ?? checkCell(cx + radius, cy + y);
+      if (hit) return hit;
     }
   }
 
   // Fallback: if all ore is targeted, just use nearest ore (better than doing nothing)
-  if (!best) {
-    return ctx.map.findNearestOre(cx, cy, maxRange);
-  }
-  return best;
+  return ctx.map.findNearestOre(cx, cy, maxRange);
 }
 
 /** Harvester AI — seek ore, harvest, return to refinery, unload */
@@ -109,8 +112,23 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
     case 'idle': {
       // Only start auto-harvest from idle mission (GUARD/AREA_GUARD), not during manual MOVE
       if (!isIdleMission(entity.mission)) break;
-      // Find nearest ore cell — AI harvesters spread to avoid clustering
       const ec = entity.cell;
+
+      // C++ unit.cpp:2794-2796: if (Target_Legal(ArchiveTarget)) → head to last known ore first
+      if (entity.archiveTarget) {
+        const at = entity.archiveTarget;
+        entity.archiveTarget = null; // C++ clears ArchiveTarget after using it
+        entity.harvesterState = 'seeking';
+        entity.mission = Mission.MOVE;
+        entity.moveTarget = { x: at.cx * CELL_SIZE + CELL_SIZE / 2, y: at.cy * CELL_SIZE + CELL_SIZE / 2 };
+        entity.path = findPath(ctx.map, ec, at, true);
+        entity.pathIndex = 0;
+        break;
+      }
+
+      // Find nearest ore cell — AI harvesters spread to avoid clustering
+      // C++ unit.cpp:2799: Goto_Tiberium(Rule.TiberiumLongScan / CELL_LEPTON_W)
+      // rules.ini OreFarScan=48
       const oreCell = findHarvesterOre(ctx, entity, ec.cx, ec.cy, 48);
       if (oreCell) {
         entity.harvesterState = 'seeking';
@@ -178,6 +196,8 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         const cellDepleted = bailCredits === 0 || (bailCredits > 0 && (cellOvl < 0x03 || cellOvl > 0x12));
         // Check if full or current cell depleted
         if (entity.oreLoad >= Entity.BAIL_COUNT) {
+          // C++ unit.cpp:2851: ArchiveTarget = ::As_Target(Coord_Cell(Coord));
+          entity.archiveTarget = { cx: ec.cx, cy: ec.cy };
           entity.harvesterState = 'returning';
         } else if (cellDepleted) {
           // No more ore at this cell — look for adjacent ore
@@ -190,7 +210,12 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
             entity.pathIndex = 0;
           } else {
             // No more ore nearby — return with whatever we have
-            entity.harvesterState = entity.oreLoad > 0 ? 'returning' : 'idle';
+            if (entity.oreLoad > 0) {
+              entity.archiveTarget = { cx: ec.cx, cy: ec.cy };
+              entity.harvesterState = 'returning';
+            } else {
+              entity.harvesterState = 'idle';
+            }
           }
         }
       }
@@ -247,24 +272,32 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
       break;
     }
     case 'unloading': {
-      // EC5: lump-sum unload after 14-tick dump animation (C++ parity)
+      // C++ building.cpp:3758-3780: drip-feed unload — 1 bail per tick.
+      // Offload_Tiberium_Bail() decrements Tiberium by 1 each tick.
+      // House->Harvested(bail) deposits credits for that bail.
       entity.harvestTick++;
-      // Credit sound every 5 ticks during dump animation
-      if (entity.harvestTick % 5 === 0 && ctx.isPlayerControlled(entity)) {
-        ctx.playSound('heal');
-      }
-      if (entity.harvestTick >= 14) {
-        // Dump all credits at once after animation completes
-        const totalCredits = entity.oreCreditValue;
-        if (totalCredits > 0) {
-          if (ctx.isPlayerControlled(entity)) {
-            ctx.addCredits(totalCredits);
-          } else {
-            // AI harvester — deposit into houseCredits
-            const cur = ctx.houseCredits.get(entity.house) ?? 0;
-            ctx.houseCredits.set(entity.house, cur + totalCredits);
-          }
+      if (entity.oreLoad > 0) {
+        // Calculate per-bail credit value (average across mixed gold/gem loads)
+        const bailValue = entity.oreCreditValue / entity.oreLoad;
+        entity.oreLoad -= 1;
+        entity.oreCreditValue -= bailValue;
+        // Clamp floating point rounding
+        if (entity.oreLoad <= 0) {
+          entity.oreLoad = 0;
+          entity.oreCreditValue = 0;
         }
+        if (ctx.isPlayerControlled(entity)) {
+          ctx.addCredits(bailValue);
+        } else {
+          const cur = ctx.houseCredits.get(entity.house) ?? 0;
+          ctx.houseCredits.set(entity.house, cur + bailValue);
+        }
+        // Credit sound every 5 ticks during dump animation
+        if (entity.harvestTick % 5 === 0 && ctx.isPlayerControlled(entity)) {
+          ctx.playSound('heal');
+        }
+      }
+      if (entity.oreLoad <= 0) {
         entity.oreLoad = 0;
         entity.oreCreditValue = 0;
         entity.harvesterState = 'idle';
