@@ -917,19 +917,20 @@ describe('fogDisabled bypasses all fog calculation', () => {
 // C++ map.cpp:286-344: Sight_From reveals all cells in radius, NO terrain blocking
 // =============================================================================
 
-describe('PARITY GAP: TS has LOS blocking, C++ does not (map.cpp:286-344)', () => {
+describe('PARITY FIXED: TS reveals through all terrain, matching C++ (map.cpp:286-344)', () => {
   /**
    * C++ map.cpp:286-344: Sight_From iterates through RadiusOffset table and reveals
    * every cell within the radius. There is NO line-of-sight check through terrain.
    * A unit can see through mountains, buildings, walls — everything.
    *
-   * TS map.ts:636-653: hasLineOfSight() does Bresenham line tracing and blocks
-   * visibility through ROCK and WALL terrain. This is a TS invention.
+   * TS map.ts:616-643 (updateFogForUnits): uses octagonal distance formula with
+   * NO line-of-sight blocking, matching C++ behavior exactly. The hasLineOfSight()
+   * method exists on GameMap but is NOT called in the fog reveal path.
    *
-   * This is a known parity gap — TS is MORE restrictive than C++.
+   * PARITY FIXED: TS no longer blocks sight through terrain.
    */
 
-  it('C++ reveals through ROCK terrain — TS blocks it (PARITY GAP)', () => {
+  it('C++ and TS both reveal through ROCK terrain (parity match)', () => {
     // Place ROCK terrain between unit and target cell
     const map = new GameMap();
 
@@ -946,11 +947,8 @@ describe('PARITY GAP: TS has LOS blocking, C++ does not (map.cpp:286-344)', () =
 
     updateFogOfWar(ctx);
 
-    // C++ expected: cell at (68,64) IS visible (no LOS blocking)
-    // TS expected: cell at (68,64) NOT visible (ROCK blocks LOS)
-    // PARITY GAP: TS blocks sight through ROCK, C++ does not
+    // Both C++ and TS: cell at (68,64) IS visible (no LOS blocking)
     const vis = map.getVisibility(68, 64);
-    // If TS blocks, this will be 0; C++ expects 2
     expect(vis).toBe(2);
   });
 });
@@ -960,12 +958,13 @@ describe('PARITY GAP: TS has LOS blocking, C++ does not (map.cpp:286-344)', () =
 // C++ Look() uses Techno_Type_Class()->SightRange — NO health check
 // =============================================================================
 
-describe('PARITY GAP: Sight range NOT reduced by damage (techno.cpp:5903-5913)', () => {
+describe('PARITY FIXED: Sight range NOT reduced by damage (techno.cpp:5903-5913)', () => {
   /**
    * C++ techno.cpp:5908: int sight_range = Techno_Type_Class()->SightRange;
    * No health check. A unit at 1% HP has the same sight as at 100% HP.
    *
-   * If TS reduces sight at low HP (CONDITION_RED), that is a parity gap.
+   * TS fog.ts:87: const sight = e.stats.sight — uses type's SightRange directly,
+   * no health-based reduction. Matches C++ exactly.
    */
 
   it('C++ unit at 10% HP still has full sight range (no health-based reduction)', () => {
@@ -980,8 +979,7 @@ describe('PARITY GAP: Sight range NOT reduced by damage (techno.cpp:5903-5913)',
 
     updateFogOfWar(ctx);
 
-    // C++ expected: sight=5, cell at distance 4 IS visible
-    // If TS reduces to sight=1 at CONDITION_RED, this fails (PARITY GAP)
+    // Both C++ and TS: sight=5, cell at distance 4 IS visible (no health reduction)
     const vis = map.getVisibility(64 + 4, 64);
     expect(vis).toBe(2);
   });

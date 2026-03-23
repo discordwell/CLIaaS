@@ -593,9 +593,9 @@ describe('killBridgeOccupants — C++ map.cpp:1837-1861', () => {
   });
 });
 
-// ── 9. PARITY GAP: Building placement on bridge cells ───────────────────────
+// ── 9. PARITY FIXED: Building placement on bridge cells ─────────────────────
 
-describe('PARITY GAP: Building placement on bridge cells — C++ cell.cpp:498-501', () => {
+describe('PARITY FIXED: Building placement on bridge cells — C++ cell.cpp:498-501', () => {
 
   it('PARITY FIXED: bridge cells block building placement via isBridgeCell()', () => {
     // C++ cell.cpp:498-501 — when loco == SPEED_NONE (building placement check),
@@ -799,7 +799,7 @@ describe('Warhead filtering for bridge damage — C++ combat.cpp:261-268', () =>
   });
 });
 
-// ── 14. PARITY GAP: Splash damage bridge template coverage ──────────────────
+// ── 14. PARITY FIXED: Splash damage bridge template coverage ────────────────
 
 describe('PARITY FIXED: C++ combat.cpp:261-265 checks 10 templates, TS now checks all 10', () => {
 
@@ -874,10 +874,10 @@ describe('PARITY FIXED: C++ combat.cpp:261-265 checks 10 templates, TS now check
     }
   });
 
-  it('PARITY GAP: countBridgeCells does not count BRIDGE_2A/2B/3A/3B', () => {
+  it('PARITY MATCH: countBridgeCells correctly excludes BRIDGE_2A/2B/3A/3B', () => {
     // C++ Intact_Bridge_Count (map.cpp:2045-2073) also does NOT count these templates.
-    // So this is actually CORRECT parity for counting — only the 6 templates with icon==6
-    // are counted as intact bridges. The gap is only in splash damage and destroyBridge.
+    // This is CORRECT parity — only the 6 templates with icon==6
+    // are counted as intact bridges, matching C++ exactly.
     const map = new GameMap();
     setBridgeTemplate(map, 30, 30, TEMPLATE_BRIDGE_2A, 6);
     setBridgeTemplate(map, 31, 30, TEMPLATE_BRIDGE_3A, 6);
@@ -1089,9 +1089,9 @@ describe('Bridge count tracking — C++ Scen.BridgeCount vs TS bridgeCellCount',
   });
 });
 
-// ── 20. PARITY GAP: Multi-part bridge destruction state machine ─────────────
+// ── 20. BLOCKED: Multi-part bridge destruction state machine ────────────────
 
-describe('PARITY GAP: Multi-part bridge destruction — C++ map.cpp:1869-1985', () => {
+describe('BLOCKED: Multi-part bridge destruction — C++ map.cpp:1869-1985', () => {
 
   it('C++ has complex state machine for multi-part bridges', () => {
     // C++ map.cpp:1869-1985 implements a multi-step state machine for diagonal bridges:

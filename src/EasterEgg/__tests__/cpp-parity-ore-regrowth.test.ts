@@ -274,21 +274,16 @@ describe('Spread eligibility — Can_Tiberium_Spread (cell.cpp:2904-2918)', () =
    * Boundary: OverlayData=6 (overlay 0x09) → cannot spread.
    *           OverlayData=7 (overlay 0x0A) → can spread.
    *
-   * IMPORTANT PARITY GAP ANALYSIS:
+   * PARITY MATCH on spread timing:
    * In C++, the spread check happens BEFORE growth (scanning phase collects
    * spread candidates, then growth acts, then spread acts). So a cell at
    * OverlayData=6 that grows to 7 during the growth phase could still NOT
    * spread because it was assessed during the scan phase when it was still 6.
    *
-   * In TS, both density growth AND spread are checked in the same loop iteration.
-   * Line 581-585: growth check
-   * Line 588: spread threshold check USING THE ORIGINAL ovl value (line 574)
-   *
-   * Wait — TS line 574 reads `const ovl = this.overlay[idx]` BEFORE the growth
-   * on line 583, but growth modifies `this.overlay[idx]` directly. The spread
-   * check on line 588 uses `ovl` (the OLD value), not the potentially-grown value.
-   * This matches C++ behavior where spread eligibility is checked during scan,
-   * before growth actions fire. PARITY MATCH on this timing aspect.
+   * TS reads `const ovl = this.overlay[idx]` BEFORE the growth modification,
+   * and the spread check uses `ovl` (the OLD value), not the potentially-grown
+   * value. This matches C++ behavior where spread eligibility is checked during
+   * scan, before growth actions fire.
    */
   it('density growth does NOT affect spread eligibility in same cycle — uses pre-growth value', () => {
     // Set density to 0x09 (OverlayData=6, just below spread threshold)
@@ -464,10 +459,9 @@ describe('Germination checks — Can_Tiberium_Germinate (cell.cpp:2996-3015)', (
    *   - LAND_ROUGH: Build=false
    *   - LAND_RIVER: Build=false
    *
-   * PARITY GAP: C++ allows germination on ROAD terrain (Build=true).
-   * TS map.ts:599 checks "if (this.cells[nidx] !== Terrain.CLEAR) continue;"
-   * This means TS only allows germination on CLEAR terrain, not ROAD.
-   * Ore should be able to spread onto road cells in C++ but cannot in TS.
+   * PARITY FIXED: TS map.ts:847 uses BUILDABLE set which includes both
+   * CLEAR and ROAD terrain, matching C++ rules.cpp:864 Ground[land].Build.
+   * Ore can spread onto road cells in both C++ and TS.
    */
   it('C++ allows ore germination on ROAD terrain — TS matches', () => {
     setOverlay(map, 50, 50, 0x0C);
@@ -922,8 +916,9 @@ describe('IsTGrowth / IsTSpread flags — rules.cpp:195-196', () => {
    *
    * TS hardcodes growth as always enabled. There are no flags to disable it.
    *
-   * PARITY GAP (minor): C++ can disable growth/spread via rules. TS cannot.
-   * This is acceptable since all standard game scenarios have these enabled.
+   * BLOCKED (minor): C++ can disable growth/spread via IsTGrowth/IsTSpread rules.
+   * TS hardcodes growth as always enabled. Acceptable since all standard game
+   * scenarios have these enabled — no shipping mission uses the disable flags.
    */
   it('TS always enables ore growth (no IsTGrowth flag)', () => {
     // The growOre function has no parameter to disable growth.
@@ -1177,11 +1172,8 @@ describe('Spread → germination integration', () => {
    * Bridge cells cannot receive spread ore. TS does not have a bridge check
    * in the spread logic — it only checks terrain type and wall type.
    *
-   * PARITY GAP (minor): TS does not check for bridge cells during germination.
-   * This would only matter if bridge cells have Terrain.CLEAR, which they
-   * typically don't (they usually have a bridge template).
-   *
-   * Test skipped as TS lacks bridge cell tracking in the germination path.
+   * PARITY FIXED: TS now checks templateType against bridge template IDs
+   * (131, 133, 235, 236, 378, 379) during germination (map.ts:850-852).
    */
   it('C++ rejects bridge cells for germination — TS lacks bridge check', () => {
     // C++ cell.cpp:3000 — bridge cells cannot receive spread ore
@@ -1207,8 +1199,8 @@ describe('Spread → germination integration', () => {
    * Cells with visible buildings cannot receive spread ore.
    * Invisible buildings (like the GPS satellite) DO allow germination.
    *
-   * PARITY GAP: TS does not check for buildings during germination.
-   * Ore can spread onto cells occupied by buildings in TS.
+   * PARITY FIXED: TS now checks vehicleOccupancy during germination (map.ts:854).
+   * Building footprint cells are marked as vehicle-occupied and rejected.
    */
   it('C++ rejects cells with visible buildings — TS lacks building check', () => {
     // C++ cell.cpp:3007-3008 — cells with visible buildings cannot receive spread ore

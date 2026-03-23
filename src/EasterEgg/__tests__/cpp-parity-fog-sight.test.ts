@@ -365,21 +365,18 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
     return count;
   }
 
-  // PARITY GAP: C++ uses a precomputed offset table (RadiusOffset[]) that uses a
-  // GENEROUS circle rasterization — it includes boundary cells that are slightly
-  // outside a strict mathematical circle. For example, at radius 1, C++ includes
-  // all 8 neighbors (the 3x3 grid) even though diagonals are at distance sqrt(2) > 1.
+  // BLOCKED: C++ uses a precomputed offset table (RadiusOffset[]) that includes
+  // boundary cells slightly outside a strict mathematical circle. For example,
+  // at radius 1, C++ includes all 8 neighbors (the 3x3 grid) even though
+  // diagonals are at distance sqrt(2) > 1.
   //
-  // TS uses strict circle (dx^2+dy^2 <= r^2) which produces fewer cells at every
-  // radius because it excludes boundary cells.
+  // TS uses octagonal distance (max*2 + min <= radius*2) which produces different
+  // cell counts than C++ at most radii. Both approaches are valid rasterizations
+  // but give different results at boundary cells.
   //
-  // The C++ approach is visually more appealing (avoids "diamond" artifacts at small radii)
-  // but reveals more cells than the mathematical radius would suggest.
-  //
-  // C++ also uses a secondary Distance() check (map.cpp:333) with lepton precision:
-  //   if (Distance(Cell_Coord(newcell), Cell_Coord(cell)) > (sightrange * CELL_LEPTON_W)) continue;
-  // This gives a cell-center-to-cell-center Euclidean distance check, which is slightly
-  // different from the integer dx^2+dy^2 check used by TS.
+  // BLOCKED: Replicating the exact C++ RadiusOffset precomputed table would require
+  // embedding the table from map.cpp:66-84 — a large structural change with minimal
+  // gameplay impact since fog reveal differences are cosmetic.
 
   // Expected TS circle counts (computed from dx^2+dy^2 <= r^2):
   const TS_CIRCLE_COUNTS: Record<number, number> = {
@@ -389,7 +386,7 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
 
   for (const [radius, cppCount] of CPP_RADIUS_COUNT) {
     const tsCount = countTSCircleCells(radius);
-    it(`radius ${radius}: C++ RadiusCount=${cppCount}, TS circle=${tsCount} — PARITY GAP: precomputed vs strict circle`, () => {
+    it(`radius ${radius}: C++ RadiusCount=${cppCount}, TS octagonal=${tsCount} — BLOCKED: precomputed vs octagonal`, () => {
       // Verify TS count matches our expected mathematical circle count
       expect(tsCount).toBe(TS_CIRCLE_COUNTS[radius]);
       // Document the C++ vs TS difference
@@ -416,7 +413,7 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
     // C++ RadiusCount[1] = 9 — includes diagonals (precomputed offset table includes them)
     // TS: dx^2+dy^2 <= 1 — diagonals have distance sqrt(2) > 1, so excluded
     //
-    // PARITY GAP: At radius 1, C++ reveals diagonals, TS does not.
+    // BLOCKED: At radius 1, C++ reveals diagonals, TS does not.
     // C++ map.cpp:70: radius 1 offsets include (-MCW-1), (-MCW+1), (MCW-1), (MCW+1) = diagonals
     const map = new GameMap();
     revealAroundCell(map, 64, 64, 1);
@@ -429,12 +426,12 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
     expect(map.getVisibility(64, 65)).toBe(2);
     expect(map.getVisibility(64, 63)).toBe(2);
 
-    // PARITY GAP: Diagonal neighbors — C++ reveals them at radius 1, TS does not
-    // dx^2+dy^2 = 1+1 = 2 > 1 = r^2
+    // BLOCKED: Diagonal neighbors — C++ reveals them at radius 1, TS does not
+    // TS octagonal: big*2+small = 1*2+1 = 3 > 2 = threshold → excluded
     // C++ includes diagonals via precomputed RadiusOffset table
     const diag = map.getVisibility(65, 65);
     // TS does NOT reveal diagonals at radius 1
-    expect(diag).toBe(0); // PARITY GAP: C++ would have this as visible (2)
+    expect(diag).toBe(0); // BLOCKED: C++ would have this as visible (2)
 
     const visCount = countVisibleInRadius(map, 64, 64, 1);
     expect(visCount).toBe(5); // TS: 5 cells; C++ RadiusCount[1] = 9

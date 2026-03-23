@@ -383,15 +383,14 @@ describe('C++ parity: Small team under-strength (team.cpp:518-519, desired<=2)',
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// Section 3: IsFullStrength — C++ uses exact equality (==), TS uses >=
+// Section 3: IsFullStrength — C++ uses exact equality (==), TS matches
 // C++ team.cpp:506:
 //   IsFullStrength = (Total == desired);
 //
-// TS team.ts:269:
-//   this.isFullStrength = (alive >= desired);
+// TS team.ts:276:
+//   this.isFullStrength = (alive === desired);
 //
-// PARITY GAP: if a team somehow has MORE members than desired (possible
-// via forced add), C++ would NOT consider it full strength, but TS would.
+// PARITY FIXED: TS now uses exact equality (===), matching C++ (==).
 // ══════════════════════════════════════════════════════════════════════════
 
 describe('C++ parity: IsFullStrength exact equality (team.cpp:506)', () => {
@@ -400,11 +399,11 @@ describe('C++ parity: IsFullStrength exact equality (team.cpp:506)', () => {
    * C++ team.cpp:506:
    *   IsFullStrength = (Total == desired);
    *
-   * TS team.ts:269:
-   *   this.isFullStrength = (alive >= desired);
+   * TS team.ts:276:
+   *   this.isFullStrength = (alive === desired);
    *
-   * When Total > desired, C++ sets IsFullStrength = false.
-   * TS sets isFullStrength = true.
+   * PARITY FIXED: TS now uses exact equality, matching C++.
+   * When Total > desired, both C++ and TS set IsFullStrength = false.
    */
 
   it('exact desired count: isFullStrength = true (both C++ and TS agree)', () => {
@@ -429,17 +428,15 @@ describe('C++ parity: IsFullStrength exact equality (team.cpp:506)', () => {
     expect(team.isFullStrength).toBe(false);
   });
 
-  it('PARITY GAP: above desired count — C++ says false, TS says true', () => {
+  it('PARITY FIXED: above desired count — both C++ and TS say false', () => {
     /**
      * C++ team.cpp:506:
      *   IsFullStrength = (Total == desired);  // 4 == 3 → false
      *
-     * TS team.ts:269:
-     *   this.isFullStrength = (alive >= desired);  // 4 >= 3 → true
+     * TS team.ts:276:
+     *   this.isFullStrength = (alive === desired);  // 4 === 3 → false
      *
-     * C++ only considers a team at "full strength" when EXACTLY at desired.
-     * Having extra members does NOT make it full strength in C++.
-     * This matters because IsFullStrength gates team activation (team.cpp:627).
+     * Both use exact equality — over-staffed teams are NOT full strength.
      */
     const team = makeTeam({
       memberDefs: [{ type: UnitType.V_3TNK, count: 3 }],
@@ -449,9 +446,7 @@ describe('C++ parity: IsFullStrength exact equality (team.cpp:506)', () => {
     addMembers(team, 4);
     team.ai();
 
-    // C++ expected: IsFullStrength = (4 == 3) = false
-    // TS actual: isFullStrength = (4 >= 3) = true
-    // PARITY GAP
+    // Both C++ and TS: IsFullStrength = (4 == 3) = false
     expect(team.isFullStrength).toBe(false);
   });
 });
@@ -465,14 +460,11 @@ describe('C++ parity: IsFullStrength exact equality (team.cpp:506)', () => {
 //     ...
 //   }
 //
-// TS team.ts:307:
-//   if (this.isMoving && this.isUnderStrength && !this.isSuicide) {
+// TS team.ts:314:
+//   if (this.isMoving && this.isUnderStrength) {
 //
-// PARITY GAP: TS adds !this.isSuicide which does NOT exist in C++.
-// In C++, a suicide team that becomes under-strength DOES trigger retreat.
-// In practice, suicide teams are typically non-reinforceable, so
-// IsUnderStrength = !IsHasBeen = false after activation, making the
-// difference moot. But the check itself is structurally different.
+// PARITY FIXED: TS now matches C++ — no IsSuicide check in the retreat guard.
+// Both C++ and TS retreat any team (including suicide) that is moving + under-strength.
 // ══════════════════════════════════════════════════════════════════════════
 
 describe('C++ parity: Retreat block trigger (team.cpp:577)', () => {
@@ -481,13 +473,10 @@ describe('C++ parity: Retreat block trigger (team.cpp:577)', () => {
    * C++ team.cpp:577:
    *   if (IsMoving && IsUnderStrength) {
    *
-   * No IsSuicide check. In C++, suicide teams CAN enter this block if
-   * they somehow become under-strength while moving.
+   * TS team.ts:314:
+   *   if (this.isMoving && this.isUnderStrength) {
    *
-   * TS team.ts:307:
-   *   if (this.isMoving && this.isUnderStrength && !this.isSuicide) {
-   *
-   * TS explicitly prevents suicide teams from retreating.
+   * PARITY FIXED: Both C++ and TS use the same guard — no IsSuicide check.
    */
 
   it('non-suicide team retreats when under strength (both agree)', () => {
@@ -518,17 +507,16 @@ describe('C++ parity: Retreat block trigger (team.cpp:577)', () => {
     expect(team.currentMission).toBe(-1);
   });
 
-  it('PARITY GAP: suicide+reinforceable team — C++ retreats, TS does not', () => {
+  it('PARITY FIXED: suicide+reinforceable team — both C++ and TS retreat', () => {
     /**
      * C++ team.cpp:577:
      *   if (IsMoving && IsUnderStrength) {  // no IsSuicide check
      *
-     * A suicide+reinforceable team that becomes under-strength:
-     * C++: enters retreat block (IsMoving=false, CurrentMission=-1)
-     * TS:  !this.isSuicide is false, skips retreat block entirely
+     * TS team.ts:314:
+     *   if (this.isMoving && this.isUnderStrength) {  // no IsSuicide check
      *
-     * This is an unusual flag combination (suicide teams are typically
-     * not reinforceable), but C++ does not prevent it.
+     * A suicide+reinforceable team that becomes under-strength:
+     * Both C++ and TS enter the retreat block (IsMoving=false, CurrentMission=-1).
      */
     const team = makeTeam({
       memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
@@ -553,9 +541,7 @@ describe('C++ parity: Retreat block trigger (team.cpp:577)', () => {
     team.isAltered = true;
     team.ai(waypoints);
 
-    // C++ expected: IsMoving = false (retreat triggered, no IsSuicide check)
-    // TS actual: isMoving stays true (!this.isSuicide is false, skips retreat)
-    // PARITY GAP
+    // Both C++ and TS: IsMoving = false (retreat triggered, no IsSuicide check)
     expect(team.isMoving).toBe(false);
   });
 });
