@@ -944,7 +944,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     const state = makeAIState({ house: House.USSR, iq: 0 });
     const damaged = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 100 });
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [damaged],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -958,7 +958,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const damaged = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [damaged],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1931,7 +1931,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1946,7 +1946,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1960,7 +1960,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.85) });
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1975,7 +1975,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5]]),
@@ -1991,7 +1991,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     (s as any).sellProgress = 0.5;
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -2010,14 +2010,14 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     // Let's use a lower HP
     s.hp = Math.floor(maxHp * 0.79);
     const ctx = makeAIContext({
-      tick: 15,
+      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
     });
-    // Repair multiple times
+    // Repair multiple times — use interval=18 for normal difficulty
     for (let i = 0; i < 200; i++) {
-      ctx.tick = i * 15;
+      ctx.tick = i * 18;
       updateAIRepair(ctx);
     }
     expect(s.hp).toBeLessThanOrEqual(maxHp);

@@ -254,7 +254,7 @@ describe('C++ parity: insufficient funds handling (techno.cpp:1012-1013)', () =>
     expect(tank.hp).toBe(hpBefore); // no repair
   });
 
-  it('unit is ejected when funds run out mid-repair', () => {
+  it('unit stays on depot when funds run out mid-repair (C++ RADIO_CANT)', () => {
     const depot = makeServiceDepot(5, 5);
     const tank = makeVehicleAtDepot(UnitType.V_1TNK, depot, 100, 300);
     const cost = unitRepairCostPerStep(700, 300); // = 5
@@ -269,16 +269,13 @@ describe('C++ parity: insufficient funds handling (techno.cpp:1012-1013)', () =>
     expect(tank.hp).toBe(110);
     expect(ctx.credits).toBe(0);
 
-    // Second tick: insufficient funds — unit should be ejected
+    // Second tick: insufficient funds — C++ depot goes IDLE, unit stays put
+    const missionBefore = tank.mission;
     tickServiceDepot(ctx);
     expect(tank.hp).toBe(110); // no further repair
-
-    // C++ parity gap: In C++, building goes to IDLE state (RADIO_CANT), unit stays on depot.
-    // TS ejects unit by setting mission=GUARD and moveTarget 3 cells away.
-    // This is a behavioral divergence — C++ does NOT forcibly eject.
-    // PARITY GAP: TS ejects on insufficient funds, C++ just stops repairing
-    expect(tank.mission).toBe(Mission.GUARD);
-    expect(tank.moveTarget).not.toBeNull();
+    // C++ parity: unit is NOT ejected — stays on depot waiting for funds
+    expect(tank.mission).toBe(missionBefore);
+    expect(tank.moveTarget).toBeNull();
   });
 
   it('exact credits: repair succeeds, credits go to zero', () => {
@@ -378,7 +375,6 @@ describe('C++ parity: multi-tick repair to full health', () => {
 describe('C++ parity: distance threshold (building.cpp:3860)', () => {
   // C++ uses 0x10 leptons for ground units. In RA, 256 leptons = 1 cell.
   // 0x10 = 16 leptons = 16/256 = 0.0625 cells
-  // TS uses dist < 1.5 cells — this is a significant PARITY GAP
 
   it('unit exactly on depot center (dist=0) is repaired', () => {
     const depot = makeServiceDepot(5, 5);
@@ -394,7 +390,7 @@ describe('C++ parity: distance threshold (building.cpp:3860)', () => {
 
   it('unit 1 cell away from depot center is NOT repaired (C++ parity)', () => {
     // C++ distance check is 0x10 leptons (~0.0625 cells).
-    // TS now uses 0.7 cells — a unit 1 cell away is NOT repaired, matching C++.
+    // TS uses 0.0625 cells matching C++.
     const depot = makeServiceDepot(5, 5);
     const sx = depot.cx * CELL_SIZE + CELL_SIZE;
     const sy = depot.cy * CELL_SIZE + CELL_SIZE + CELL_SIZE; // 1 cell below
@@ -408,7 +404,7 @@ describe('C++ parity: distance threshold (building.cpp:3860)', () => {
     });
 
     tickServiceDepot(ctx);
-    // dist = 1.0 > 0.7 threshold — NOT repaired (matches C++ behavior)
+    // dist = 1.0 > 0.0625 threshold — NOT repaired (matches C++ behavior)
     expect(tank.hp).toBe(100);
   });
 
@@ -445,7 +441,7 @@ describe('C++ parity: minelayer rearm at service depot (techno.cpp:978-980)', ()
   // The rearm is done in a separate block after repair, with a timer.
   // This is a PARITY GAP.
 
-  it('minelayer with low ammo gets rearmed at depot', () => {
+  it('minelayer with low ammo gets rearmed instantly at depot', () => {
     const depot = makeServiceDepot(5, 5);
     const mnly = makeVehicleAtDepot(UnitType.V_MNLY, depot, 50, 100);
     mnly.ammo = 0;
@@ -456,21 +452,15 @@ describe('C++ parity: minelayer rearm at service depot (techno.cpp:978-980)', ()
       entities: [mnly],
     });
 
-    // Run enough ticks for rearm timer to fire
-    for (let i = 0; i < 40; i++) {
-      tickServiceDepot(ctx);
-    }
-
-    expect(mnly.ammo).toBeGreaterThan(0);
+    // C++ parity: minelayer rearms to full in a single tick
+    tickServiceDepot(ctx);
+    expect(mnly.ammo).toBe(5);
   });
 
-  it('PARITY GAP: C++ minelayer rearms instantly and skips repair; TS does both', () => {
+  it('C++ minelayer rearms instantly and skips repair (techno.cpp:978-980)', () => {
     // C++ techno.cpp:978-980: minelayer with ammo < maxAmmo →
     //   Ammo = Class->MaxAmmo; return RADIO_NEGATIVE;
     //   Repair is SKIPPED because RADIO_NEGATIVE short-circuits RADIO_REPAIR
-    //
-    // TS does repair first, then rearm in a separate block.
-    // We expect this to be a parity gap.
     const depot = makeServiceDepot(5, 5);
     const mnly = makeVehicleAtDepot(UnitType.V_MNLY, depot, 50, 100);
     mnly.ammo = 0;
@@ -482,14 +472,13 @@ describe('C++ parity: minelayer rearm at service depot (techno.cpp:978-980)', ()
     });
 
     const hpBefore = mnly.hp;
+    const creditsBefore = ctx.credits;
     tickServiceDepot(ctx);
 
-    // TS repairs the minelayer even when it needs rearm — C++ would NOT repair
-    // PARITY GAP: In C++, hp would stay at 50 and ammo would jump to 5 instantly
-    if (mnly.hp > hpBefore) {
-      // TS repaired — this diverges from C++ which skips repair for minelayer needing rearm
-      expect(mnly.hp).toBe(hpBefore + UREPAIR_STEP); // PARITY GAP
-    }
+    // C++ parity: ammo jumps to full instantly, repair is SKIPPED
+    expect(mnly.ammo).toBe(5);
+    expect(mnly.hp).toBe(hpBefore); // no repair — RADIO_NEGATIVE short-circuits
+    expect(ctx.credits).toBe(creditsBefore); // no credits spent
   });
 });
 
@@ -599,7 +588,7 @@ describe('C++ parity: multi-vehicle priority at depot', () => {
     closeTank.hp = 100;
     closeTank.maxHp = 300;
 
-    // Far tank — 1 cell away (within TS threshold but farther)
+    // Far tank — 1 cell away (outside 0.0625 cell threshold)
     const farTank = new Entity(UnitType.V_2TNK, House.Spain, sx + CELL_SIZE, sy);
     farTank.hp = 100;
     farTank.maxHp = 400;
@@ -626,8 +615,8 @@ describe('C++ parity: multi-vehicle priority at depot', () => {
     closeTank.hp = 300;
     closeTank.maxHp = 300;
 
-    // Second tank 0.5 cells away, damaged
-    const secondTank = new Entity(UnitType.V_2TNK, House.Spain, sx + CELL_SIZE / 2, sy);
+    // Second tank 1 pixel away (~0.042 cells < 0.0625 threshold), damaged
+    const secondTank = new Entity(UnitType.V_2TNK, House.Spain, sx + 1, sy);
     secondTank.hp = 100;
     secondTank.maxHp = 400;
 

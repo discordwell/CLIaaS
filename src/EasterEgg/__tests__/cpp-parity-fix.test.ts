@@ -57,9 +57,10 @@ function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Ent
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
 }
 
-/** Place entity at the center of a 3x2 FIX structure (cx+1.5, cy+1) in world coords */
+/** Place entity at the depot center — matches tickServiceDepot's (cx*CELL_SIZE+CELL_SIZE, cy*CELL_SIZE+CELL_SIZE).
+ *  C++ building.cpp:3860: 0x10 leptons (~0.0625 cells) docking threshold, so placement must be exact. */
 function entityDockedAtFIX(type: UnitType, house: House, fixCx: number, fixCy: number): Entity {
-  const wx = fixCx * CELL_SIZE + CELL_SIZE * 1.5;
+  const wx = fixCx * CELL_SIZE + CELL_SIZE;
   const wy = fixCy * CELL_SIZE + CELL_SIZE;
   return new Entity(type, house, wx, wy);
 }
@@ -376,15 +377,17 @@ describe('FIX vehicle repair (tickServiceDepot)', () => {
     expect(ctx.credits).toBeLessThan(creditsBefore);
   });
 
-  it('ejects vehicle when credits run out (sets GUARD mission + moveTarget)', () => {
+  it('unit stays on depot when credits run out (C++ RADIO_CANT — no ejection)', () => {
     const fix = makeFIX(10, 10, 800, House.Spain);
     const tank = entityDockedAtFIX(UnitType.V_2TNK, House.Spain, 10, 10);
     tank.hp = tank.maxHp - 50;
+    const hpBefore = tank.hp;
 
     const ctx = makeRepairSellCtx([fix], [tank], 0);
     tickServiceDepot(ctx);
-    expect(tank.mission).toBe(Mission.GUARD);
-    expect(tank.moveTarget).toBeDefined();
+    // C++ parity: unit stays on depot, no repair, no ejection
+    expect(tank.hp).toBe(hpBefore);
+    expect(tank.moveTarget).toBeNull();
   });
 
   it('does not repair if FIX is dead', () => {
