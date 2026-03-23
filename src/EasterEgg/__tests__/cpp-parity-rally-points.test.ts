@@ -169,16 +169,16 @@ describe('C++ parity: produced units auto-move to rally point (building.cpp:2030
     expect(unit.moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
   });
 
-  it('spawned unit stays at GUARD when no rally point is set', () => {
+  it('spawned unit gets MOVE when no rally point is set (C++ building.cpp:4539)', () => {
     const ctx = makeContext();
-    // No rally point set for WEAP
+    // No rally point set for WEAP — human player (IQ=0) gets MISSION_MOVE
 
     const item = makeItem({ type: '2TNK' as UnitType, prerequisite: 'WEAP' });
     spawnProducedUnit(ctx, item);
 
     expect(ctx.entities.length).toBe(1);
     const unit = ctx.entities[0];
-    expect(unit.mission).toBe(Mission.GUARD);
+    expect(unit.mission).toBe(Mission.MOVE);
     expect(unit.moveTarget).toBeNull();
   });
 

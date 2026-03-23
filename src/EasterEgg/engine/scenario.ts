@@ -1188,15 +1188,17 @@ export function getSpawnEdge(
 }
 
 /** C++ reinf.cpp:439: FacingType eface = (FacingType)(source << 1);
- *  Maps spawn edge to the inward-facing direction (Dir enum, 0-7).
- *  north→4 (S), south→0 (N), east→6 (W), west→2 (E) */
+ *  Maps spawn edge to the OUTWARD-facing direction (Dir enum, 0-7).
+ *  Units face the same direction as their spawn edge (away from map center).
+ *  SOURCE_NORTH(0)→0<<1=0 (N), SOURCE_EAST(1)→1<<1=2 (E),
+ *  SOURCE_SOUTH(2)→2<<1=4 (S), SOURCE_WEST(3)→3<<1=6 (W) */
 function edgeToFacing(edge: string): number {
   switch (edge) {
-    case 'north': return 4; // face south (inward)
-    case 'south': return 0; // face north (inward)
-    case 'east':  return 6; // face west (inward)
-    case 'west':  return 2; // face east (inward)
-    default:      return 4;
+    case 'north': return 0; // face north (outward) — C++ SOURCE_NORTH=0, 0<<1=FACING_N
+    case 'east':  return 2; // face east (outward)  — C++ SOURCE_EAST=1,  1<<1=FACING_E
+    case 'south': return 4; // face south (outward) — C++ SOURCE_SOUTH=2, 2<<1=FACING_S
+    case 'west':  return 6; // face west (outward)  — C++ SOURCE_WEST=3,  3<<1=FACING_W
+    default:      return 0; // C++ fallback: SOURCE_NONE → SOURCE_NORTH → FACING_N
   }
 }
 
@@ -2508,10 +2510,17 @@ export function executeTriggerAction(
           }
 
           const entity = new Entity(unitType, house, spawnX, spawnY);
-          // C++ reinf.cpp:439: FacingType eface = (FacingType)(source << 1);
-          // All reinforcement units face inward from their spawn edge (deterministic)
-          entity.facing = spawnFacing as Dir;
-          entity.desiredFacing = spawnFacing as Dir;
+          // C++ reinf.cpp:465-468: ground units face outward (source<<1),
+          // aircraft get Random_Pick(DIR_N, DIR_MAX) — random facing.
+          if (stats.isAircraft) {
+            // C++ reinf.cpp:466-468: desiredfacing = (DirType)Random_Pick(DIR_N, DIR_MAX)
+            const randomFacing = Math.floor(Math.random() * 8) as Dir;
+            entity.facing = randomFacing;
+            entity.desiredFacing = randomFacing;
+          } else {
+            entity.facing = spawnFacing as Dir;
+            entity.desiredFacing = spawnFacing as Dir;
+          }
           entity.bodyFacing32 = entity.facing * 4;
           // Assign team mission script to each member
           if (teamMissionScript) {

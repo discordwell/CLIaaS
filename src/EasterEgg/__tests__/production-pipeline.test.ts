@@ -1423,7 +1423,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     const unit = ctx.entities[0];
     expect(unit.type).toBe('E1');
     expect(unit.alive).toBe(true);
-    expect(unit.mission).toBe(Mission.GUARD);
+    expect(unit.mission).toBe(Mission.MOVE);
   });
 
   it('spawnProducedUnit assigns AREA_GUARD to rally point (C++ building.cpp:2038)', () => {

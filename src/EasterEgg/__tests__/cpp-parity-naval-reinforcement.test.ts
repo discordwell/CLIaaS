@@ -229,14 +229,10 @@ describe('Naval reinforcement — C++ parity', () => {
 
     for (const [edge, expectedFacing] of SOURCE_TO_FACING) {
       it(`${edge} edge -> facing ${expectedFacing} (C++ source << 1)`, () => {
-        // TS scenario.ts:1148-1157: edgeToFacing() maps edges to inward-facing direction.
-        // scenario.ts:2427: spawnFacing = edgeToFacing(spawnEdge)
-        // scenario.ts:2471: entity.facing = spawnFacing — deterministic, matches C++.
-        //
-        // Note: edgeToFacing returns the INWARD-facing direction (not the raw source<<1):
-        //   north→4 (face south), south→0 (face north), east→6 (face west), west→2 (face east)
-        // This differs from raw source<<1 (which gives the SOURCE direction, not inward).
-        // C++ also makes units face inward after spawn (reinf.cpp:465 desiredfacing).
+        // TS scenario.ts edgeToFacing() maps edges to outward-facing direction per C++.
+        // C++ reinf.cpp:439: eface = (FacingType)(source << 1)
+        // Units face the same direction as their spawn edge (outward from map center).
+        //   north→0 (Dir.N), east→2 (Dir.E), south→4 (Dir.S), west→6 (Dir.W)
         const sourceIndex = ['north', 'east', 'south', 'west'].indexOf(edge);
         expect(sourceIndex << 1).toBe(expectedFacing);
 
@@ -269,9 +265,9 @@ describe('Naval reinforcement — C++ parity', () => {
           undefined, houseEdges, MAP_BOUNDS,
         );
         expect(result.spawned.length).toBe(1);
-        // edgeToFacing returns inward-facing: north→4, east→6, south→0, west→2
-        const inwardFacing: Record<string, number> = { north: 4, east: 6, south: 0, west: 2 };
-        expect(result.spawned[0].facing).toBe(inwardFacing[edge]);
+        // edgeToFacing returns outward-facing per C++ source<<1: north→0, east→2, south→4, west→6
+        const outwardFacing: Record<string, number> = { north: 0, east: 2, south: 4, west: 6 };
+        expect(result.spawned[0].facing).toBe(outwardFacing[edge]);
       });
     }
   });

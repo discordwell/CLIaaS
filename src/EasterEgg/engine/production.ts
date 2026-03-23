@@ -354,22 +354,33 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
     spawnY = spawn.cy * CELL_SIZE + CELL_SIZE / 2;
   }
   const entity = new Entity(unitType, ctx.playerHouse, spawnX, spawnY);
-  entity.mission = Mission.GUARD;
+
+  // C++ building.cpp:1949-1956: vessels always get MISSION_GUARD (no IQ gate, no AREA_GUARD)
+  if (unitStats?.isVessel) {
+    entity.mission = Mission.GUARD;
+  }
+  // C++ building.cpp:1972-1981: harvesters get MISSION_HARVEST from the refinery exit path
+  else if (unitType === UnitType.V_HARV) {
+    entity.mission = Mission.HARVEST;
+    entity.harvesterState = 'idle';
+  }
+  // C++ building.cpp:4539,2030: human player units (IQ < IQGuardArea) exit with MISSION_MOVE.
+  // AI units with rally (IQ >= IQGuardArea) get AREA_GUARD below.
+  else {
+    entity.mission = Mission.MOVE;
+  }
+
   ctx.entities.push(entity);
   ctx.entityById.set(entity.id, entity);
   // Track built unit types for TEVENT_BUILD_UNIT / TEVENT_BUILD_INFANTRY
   if (unitStats?.isInfantry) ctx.builtInfantryTypes.add(item.type);
   else ctx.builtUnitTypes.add(item.type);
 
-  // If harvester, set it to auto-harvest
-  if (unitType === UnitType.V_HARV) {
-    entity.harvesterState = 'idle';
-  }
-
   // C++ building.cpp:2038-2039: rally-pointed units get MISSION_GUARD_AREA with
   // ArchiveTarget = Where_To_Go(), so they patrol around rally and return if displaced.
+  // C++ building.cpp:1949-1966: vessels are excluded — no GUARD_AREA upgrade for vessels.
   const rally = ctx.rallyPoints.get(factoryType);
-  if (rally && unitType !== UnitType.V_HARV) {
+  if (rally && unitType !== UnitType.V_HARV && !unitStats?.isVessel) {
     entity.mission = Mission.AREA_GUARD;
     entity.moveTarget = { x: rally.x, y: rally.y };
     entity.guardOrigin = { x: rally.x, y: rally.y };

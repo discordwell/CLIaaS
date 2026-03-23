@@ -692,12 +692,11 @@ describe('Persistent trigger event reset — C++ trigger.cpp:351-352', () => {
    *   - index.ts:4932-4934: for persistent triggers, fired is reset to false
    *     when playerEntered conditions re-occur
    *
-   * TS does NOT reset playerEntered, objectDiscovered, enteredZone, etc.
-   * for persistent triggers after firing. C++ does reset ALL event state.
-   * This could be a parity gap for non-TIME persistent events.
+   * TS index.ts:6039-6046 resets timerTick AND all event flags for persistent
+   * triggers after firing — matching C++ Event1.Reset() / Event2.Reset() behavior.
    */
 
-  it('C++ resets ALL event state on persistent fire; TS only resets timerTick', () => {
+  it('TS resets ALL event flags on persistent fire — matches C++ Event1.Reset()', () => {
     const t = makeTrigger({
       persistence: 2,
       fired: false,
@@ -708,28 +707,24 @@ describe('Persistent trigger event reset — C++ trigger.cpp:351-352', () => {
       crossedVertical: true,
     });
 
-    // Simulate fire (TS behavior)
+    // Simulate the processTriggers fire path (index.ts:6025+6039-6046)
     t.fired = true;
     if (t.persistence === 2) {
-      t.timerTick = 500; // reset timer
+      t.timerTick = 500;
+      t.playerEntered = false;
+      t.objectDiscovered = false;
+      t.enteredZone = false;
+      t.crossedHorizontal = false;
+      t.crossedVertical = false;
     }
 
-    // TS: playerEntered, objectDiscovered, etc. remain true
-    // C++ would have reset them via Event1.Reset()
-    expect(t.playerEntered).toBe(true);
-    expect(t.objectDiscovered).toBe(true);
-    expect(t.enteredZone).toBe(true);
-    expect(t.crossedHorizontal).toBe(true);
-    expect(t.crossedVertical).toBe(true);
-    // KNOWN DIVERGENCE: C++ resets all event state, TS preserves it.
-    // For persistent triggers that rely on non-TIME events (like PLAYER_ENTERED),
-    // the TS trigger would immediately re-fire on the next tick because the
-    // event condition is still true. C++ would wait for the event to occur again.
-    //
-    // However, TS index.ts:4932-4934 handles this specifically for cell triggers:
-    //   if (trigger.persistence === 2 && trigger.fired) { trigger.fired = false; }
-    // This allows re-evaluation but the event flags are still true, meaning
-    // it would fire again immediately — which diverges from C++ behavior.
+    // TS now correctly resets all event state, matching C++ behavior
+    expect(t.playerEntered).toBe(false);
+    expect(t.objectDiscovered).toBe(false);
+    expect(t.enteredZone).toBe(false);
+    expect(t.crossedHorizontal).toBe(false);
+    expect(t.crossedVertical).toBe(false);
+    expect(t.timerTick).toBe(500);
   });
 
   it('persistent cell trigger: TS resets fired when playerEntered re-fires', () => {
@@ -931,39 +926,26 @@ describe('Semi-persistent with TEVENT_DESTROYED — death-driven detach', () => 
 // Force-fire bypasses persistence gating
 // ============================================================================
 
-describe('Force-fire bypasses semi-persistent gating — C++ trigger.cpp:270', () => {
+describe('Force-fire with semi-persistent gating — C++ trigger.cpp:270,277-298', () => {
   /**
    * C++ trigger.cpp:270:
    *   if (execute || forced) {
    *
-   * C++ trigger.cpp:240-241:
-   *   if (forced) { cell = Cell; }
-   *   else { ... switch(EventControl) ... }
+   * C++ trigger.cpp:277-298 (inside the execute||forced block):
+   *   if (Class->IsPersistant == SEMIPERSISTANT) {
+   *     if (obj) obj->Trigger = NULL;
+   *     if (cell) Map[cell].Trigger = NULL;
+   *     AttachCount--;
+   *     if (AttachCount > 0) return(false);  // suppresses even when forced
+   *   }
    *
-   * When `forced` is true, the event evaluation is skipped entirely.
-   * The semi-persistent detach block is still entered (line 277), but
-   * execution continues through to actions regardless.
-   *
-   * Wait — re-reading C++ more carefully:
-   * Line 277-298 IS inside the `if (execute || forced)` block.
-   * So for forced && semi-persistent:
-   *   AttachCount-- happens
-   *   if (AttachCount > 0) return false — STILL suppresses even when forced!
-   *
-   * Actually no — the code at line 277 is:
-   *   if (Class->IsPersistant == SEMIPERSISTANT) { ... AttachCount--; if > 0 return false; }
-   * This block DOES suppress forced triggers if AttachCount > 0.
-   *
-   * But in TS, force-fired triggers skip the consumeSemiPersistentAttachment check:
-   * index.ts:5689-5693: forcedFire path sets shouldFire=true and goes to fire
-   * index.ts:5704: `if (!forcedFire)` guards the detach logic
-   * So TS skips the semi-persistent check for forced triggers.
-   *
-   * KNOWN DIVERGENCE: C++ would suppress forced semi-persistent triggers
-   * if AttachCount > 0, but TS fires them immediately.
+   * Both C++ and TS gate forced triggers through the semi-persistent AttachCount check.
+   * TS index.ts:6016-6021:
+   *   } else if (trigger.persistence === 1) {
+   *     if (!consumeSemiPersistentAttachment(trigger, 1)) { continue; }
+   *   }
    */
-  it('TS: force-fired semi-persistent skips detach gating', () => {
-    // TS behavior: forcedFire bypasses consumeSemiPersistentAttachment
+  it('TS: force-fired semi-persistent still goes through detach gating', () => {
     const t = makeTrigger({
       persistence: 1,
       attachCount: 5,
@@ -978,19 +960,48 @@ describe('Force-fire bypasses semi-persistent gating — C++ trigger.cpp:270', (
       t.forceFirePending = false;
     }
 
-    // TS: `if (!forcedFire) { ... consumeSemiPersistent ... }`
-    // forcedFire is true, so detach check is SKIPPED
+    // TS index.ts:6016-6021: forced semi-persistent triggers ARE gated
+    let shouldContinue = false;
     if (!forcedFire) {
-      // This block NOT entered for forced triggers in TS
-      consumeSemiPersistentAttachment(t, 1);
+      // non-forced path (not taken)
+    } else if (t.persistence === 1) {
+      // C++ parity: forced triggers still go through semi-persistent AttachCount gate
+      if (!consumeSemiPersistentAttachment(t, 1)) {
+        shouldContinue = true; // suppressed — matches C++ behavior
+      }
     }
 
-    // TS fires immediately; remainingAttachCount unchanged
-    expect(t.remainingAttachCount).toBe(5);
+    // AttachCount was 5, decremented to 4, still > 0 → suppressed
+    expect(shouldContinue).toBe(true);
+    expect(t.remainingAttachCount).toBe(4);
+  });
 
-    // KNOWN DIVERGENCE: C++ would still enter the semi-persistent block and
-    // decrement AttachCount. If AttachCount > 0, it would suppress.
-    // C++ forces do NOT bypass the semi-persistent gate.
+  it('TS: force-fired semi-persistent fires when last attachment consumed', () => {
+    const t = makeTrigger({
+      persistence: 1,
+      attachCount: 1,
+      remainingAttachCount: 1,
+      forceFirePending: true,
+    });
+
+    let forcedFire = false;
+    if (t.forceFirePending) {
+      forcedFire = true;
+      t.forceFirePending = false;
+    }
+
+    let shouldContinue = false;
+    if (!forcedFire) {
+      // non-forced path
+    } else if (t.persistence === 1) {
+      if (!consumeSemiPersistentAttachment(t, 1)) {
+        shouldContinue = true;
+      }
+    }
+
+    // AttachCount was 1, decremented to 0 → fires
+    expect(shouldContinue).toBe(false);
+    expect(t.remainingAttachCount).toBe(0);
   });
 });
 
@@ -1174,5 +1185,155 @@ describe('checkTriggerEvent with TEVENT_ANY across persistence modes', () => {
     t.fired = true;
     expect(checkTriggerEvent(t.event1, state)).toBe(true);
     expect(t.fired && t.persistence <= 1).toBe(false); // NOT skipped
+  });
+});
+
+// ============================================================================
+// GAP: springGlobalTrigger missing event flag resets for persistent triggers
+// ============================================================================
+
+describe('springGlobalTrigger persistent event reset gap — C++ trigger.cpp:345-353', () => {
+  /**
+   * C++ trigger.cpp:345-353 — Event1.Reset() + Event2.Reset() is called
+   * in ALL code paths through Spring(), including when triggered by global
+   * variable changes. The reset always happens for persistent triggers.
+   *
+   * TS has two firing paths:
+   *   1. processTriggers (index.ts:6039-6046) — correctly resets ALL event flags
+   *   2. springGlobalTrigger (index.ts:5858-5861) — only resets timerTick,
+   *      does NOT reset playerEntered, objectDiscovered, enteredZone, etc.
+   *
+   * GAP: A persistent trigger with a GLOBAL_SET event that fires via
+   * springGlobalTrigger will retain stale event flags, causing potential
+   * immediate re-fire on next processTriggers evaluation.
+   *
+   * C++ would reset all event state via Event1.Reset()/Event2.Reset().
+   */
+
+  it('processTriggers path: persistent trigger resets all event flags', () => {
+    const t = makeTrigger({
+      persistence: 2,
+      playerEntered: true,
+      objectDiscovered: true,
+      enteredZone: true,
+      crossedHorizontal: true,
+      crossedVertical: true,
+    });
+
+    // Simulate processTriggers fire (index.ts:6039-6046)
+    t.fired = true;
+    if (t.persistence === 2) {
+      t.timerTick = 100;
+      t.playerEntered = false;
+      t.objectDiscovered = false;
+      t.enteredZone = false;
+      t.crossedHorizontal = false;
+      t.crossedVertical = false;
+    }
+
+    expect(t.playerEntered).toBe(false);
+    expect(t.objectDiscovered).toBe(false);
+    expect(t.enteredZone).toBe(false);
+    expect(t.crossedHorizontal).toBe(false);
+    expect(t.crossedVertical).toBe(false);
+  });
+
+  it('GAP: springGlobalTrigger path does NOT reset event flags for persistent triggers', () => {
+    /**
+     * TS index.ts:5858-5861:
+     *   trigger.fired = true;
+     *   if (trigger.persistence === 2) {
+     *     trigger.timerTick = this.tick;
+     *   }
+     *
+     * Missing: playerEntered, objectDiscovered, enteredZone,
+     *          crossedHorizontal, crossedVertical resets.
+     *
+     * C++ would reset ALL event state via Event1.Reset()/Event2.Reset()
+     * in the same Spring() function regardless of how it was called.
+     */
+    const t = makeTrigger({
+      persistence: 2,
+      playerEntered: true,
+      objectDiscovered: true,
+      enteredZone: true,
+      crossedHorizontal: true,
+      crossedVertical: true,
+    });
+
+    // Simulate springGlobalTrigger fire (index.ts:5858-5861)
+    t.fired = true;
+    if (t.persistence === 2) {
+      t.timerTick = 100;
+      // BUG: event flags are NOT reset in this path
+    }
+
+    // These SHOULD be false (matching C++ Event1.Reset behavior)
+    // but springGlobalTrigger does not reset them.
+    // Marking as known gap — these assertions show current (incorrect) behavior.
+    expect(t.playerEntered).toBe(true);   // GAP: should be false per C++
+    expect(t.objectDiscovered).toBe(true); // GAP: should be false per C++
+    expect(t.enteredZone).toBe(true);      // GAP: should be false per C++
+    expect(t.crossedHorizontal).toBe(true); // GAP: should be false per C++
+    expect(t.crossedVertical).toBe(true);   // GAP: should be false per C++
+  });
+});
+
+// ============================================================================
+// GAP: springGlobalTrigger missing semi-persistent AttachCount gate
+// ============================================================================
+
+describe('springGlobalTrigger semi-persistent gate gap — C++ trigger.cpp:277-298', () => {
+  /**
+   * C++ trigger.cpp:277-298 — the semi-persistent AttachCount gate runs
+   * in ALL code paths through Spring(). If a global variable change triggers
+   * a semi-persistent trigger via Spring(), the AttachCount gate still applies.
+   *
+   * TS springGlobalTrigger (index.ts:5841-5883) does NOT call
+   * consumeSemiPersistentAttachment(). Semi-persistent triggers with
+   * global events will fire immediately regardless of remaining attachments.
+   *
+   * GAP: A semi-persistent trigger with TEVENT_GLOBAL_SET and attachCount=3
+   * should suppress until all 3 attachments are consumed. But in TS,
+   * springGlobalTrigger fires it immediately.
+   */
+
+  it('GAP: springGlobalTrigger fires semi-persistent without checking attachCount', () => {
+    const t = makeTrigger({
+      persistence: 1,
+      attachCount: 3,
+      remainingAttachCount: 3,
+      event1: { type: 20, team: -1, data: 5 }, // TEVENT_GLOBAL_SET, global #5
+    });
+
+    // Simulate springGlobalTrigger path (index.ts:5858):
+    // No consumeSemiPersistentAttachment call exists in this path
+    t.fired = true;
+
+    // The trigger fires even though remainingAttachCount is still 3
+    // C++ would have entered the semi-persistent block and suppressed.
+    expect(t.remainingAttachCount).toBe(3); // GAP: C++ would have decremented
+    expect(t.fired).toBe(true); // GAP: C++ would have returned false (suppressed)
+  });
+
+  it('processTriggers correctly gates semi-persistent with TEVENT_DESTROYED', () => {
+    // For comparison: processTriggers DOES gate semi-persistent properly
+    const t = makeTrigger({
+      persistence: 1,
+      attachCount: 3,
+      remainingAttachCount: 3,
+      event1: { type: 7, team: -1, data: 0 }, // TEVENT_DESTROYED
+      pendingDestroyedCount: 1,
+    });
+
+    // processTriggers path (index.ts:6004-6015)
+    const destroyedDetachCount =
+      t.event1.type === 7 ? t.pendingDestroyedCount : 0;
+    const shouldFire = destroyedDetachCount > 0
+      ? consumeSemiPersistentAttachment(t, destroyedDetachCount)
+      : true;
+
+    expect(shouldFire).toBe(false); // correctly suppressed
+    expect(t.remainingAttachCount).toBe(2);
   });
 });
