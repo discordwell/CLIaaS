@@ -108,11 +108,12 @@ describe('TACTION enum values match C++ taction.h:42-89', () => {
     expect(result.allowWin).toBe(true);
   });
 
-  it('TACTION_WINLOSE = 14 sets result.winLose', () => {
+  it('TACTION_WINLOSE = 14 is noop in RA (no handler in taction.cpp)', () => {
     const result = executeTriggerAction(
       makeAction(14), [], new Map(), new Set(), []
     );
-    expect(result.winLose).toBe(true);
+    // C++ RA: TACTION_WINLOSE falls through to default — noop
+    expect(result.winLose).toBeUndefined();
   });
 });
 
@@ -134,26 +135,39 @@ describe('TACTION_WIN house identity — C++ taction.cpp:604-610', () => {
    * The C++ code checks whether the action's Data.House matches the player's house.
    * If a NON-player house is specified, TACTION_WIN actually LOSES the game for the player.
    *
-   * TS behavior: executeTriggerAction sets result.win=true regardless of Data.House.
-   * This is a PARITY GAP — the TS implementation ignores the house parameter.
+   * TS now passes playerHouseId to executeTriggerAction, matching C++ behavior.
    */
 
-  it('TACTION_WIN always sets result.win=true regardless of action.data (house)', () => {
-    // In C++, action.Data.House determines whether player wins or loses.
-    // In TS, TACTION_WIN always results in win=true.
-    const resultPlayerHouse = executeTriggerAction(
-      makeAction(1, 0), // data=0 (e.g., player house index)
+  it('TACTION_WIN for player house sets win=true', () => {
+    // C++: Data.House(0) == PlayerPtr->Class->House(0) → Flag_To_Win
+    const result = executeTriggerAction(
+      makeAction(1, 0), // data=0 = player house
+      [], new Map(), new Set(), [],
+      undefined, undefined, undefined,
+      0, // playerHouseId=0
+    );
+    expect(result.win).toBe(true);
+    expect(result.lose).toBeUndefined();
+  });
+
+  it('TACTION_WIN for enemy house sets lose=true (C++ taction.cpp:608)', () => {
+    // C++: Data.House(1) != PlayerPtr->Class->House(0) → Flag_To_Lose
+    const result = executeTriggerAction(
+      makeAction(1, 1), // data=1 = enemy house
+      [], new Map(), new Set(), [],
+      undefined, undefined, undefined,
+      0, // playerHouseId=0
+    );
+    expect(result.lose).toBe(true);
+    expect(result.win).toBeUndefined();
+  });
+
+  it('TACTION_WIN without playerHouseId defaults to win=true (backward compat)', () => {
+    const result = executeTriggerAction(
+      makeAction(1, 1), // data=1, but no playerHouseId
       [], new Map(), new Set(), []
     );
-    const resultEnemyHouse = executeTriggerAction(
-      makeAction(1, 1), // data=1 (e.g., enemy house index)
-      [], new Map(), new Set(), []
-    );
-    expect(resultPlayerHouse.win).toBe(true);
-    expect(resultEnemyHouse.win).toBe(true);
-    // PARITY GAP: C++ would set Flag_To_Lose when Data.House != PlayerPtr->Class->House
-    // TS sets win=true for both cases — the action.data field is completely ignored.
-    expect(resultEnemyHouse.lose).toBeUndefined(); // PARITY GAP — C++ would trigger lose
+    expect(result.win).toBe(true);
   });
 });
 
@@ -174,22 +188,39 @@ describe('TACTION_LOSE house identity — C++ taction.cpp:616-622', () => {
    *
    * C++ reverses the logic: if the ENEMY is flagged to lose, the PLAYER wins.
    *
-   * TS behavior: executeTriggerAction sets result.lose=true regardless of Data.House.
-   * This is a PARITY GAP — TACTION_LOSE for an enemy house should trigger player win.
+   * TS now passes playerHouseId to executeTriggerAction, matching C++ behavior.
    */
 
-  it('TACTION_LOSE always sets result.lose=true regardless of action.data (house)', () => {
-    const resultPlayerHouse = executeTriggerAction(
-      makeAction(2, 0), [], new Map(), new Set(), []
+  it('TACTION_LOSE for player house sets lose=true', () => {
+    // C++: Data.House(0) == PlayerPtr->Class->House(0) → !(!= check) → Flag_To_Lose
+    const result = executeTriggerAction(
+      makeAction(2, 0), // data=0 = player house
+      [], new Map(), new Set(), [],
+      undefined, undefined, undefined,
+      0, // playerHouseId=0
     );
-    const resultEnemyHouse = executeTriggerAction(
-      makeAction(2, 1), [], new Map(), new Set(), []
+    expect(result.lose).toBe(true);
+    expect(result.win).toBeUndefined();
+  });
+
+  it('TACTION_LOSE for enemy house sets win=true (C++ taction.cpp:618)', () => {
+    // C++: Data.House(1) != PlayerPtr->Class->House(0) → Flag_To_Win
+    const result = executeTriggerAction(
+      makeAction(2, 1), // data=1 = enemy house
+      [], new Map(), new Set(), [],
+      undefined, undefined, undefined,
+      0, // playerHouseId=0
     );
-    expect(resultPlayerHouse.lose).toBe(true);
-    expect(resultEnemyHouse.lose).toBe(true);
-    // PARITY GAP: C++ would set Flag_To_Win when Data.House != PlayerPtr->Class->House
-    // TS sets lose=true for both cases — the action.data field is completely ignored.
-    expect(resultEnemyHouse.win).toBeUndefined(); // PARITY GAP — C++ would trigger win
+    expect(result.win).toBe(true);
+    expect(result.lose).toBeUndefined();
+  });
+
+  it('TACTION_LOSE without playerHouseId defaults to lose=true (backward compat)', () => {
+    const result = executeTriggerAction(
+      makeAction(2, 1), // data=1, but no playerHouseId
+      [], new Map(), new Set(), []
+    );
+    expect(result.lose).toBe(true);
   });
 });
 
@@ -257,26 +288,29 @@ describe('Flag_To_Lose clears IsToWin — C++ house.cpp:4102-4112', () => {
    * Flag_To_Lose itself fails (because IsToDie is set). This ensures that
    * once a lose condition fires, any pending win is cancelled.
    *
-   * TS behavior: win and lose are separate boolean results from executeTriggerAction.
-   * If TACTION_WIN fires first, state='won' and subsequent TACTION_LOSE is ignored.
-   * There is NO mechanism to cancel a pending win.
+   * TS implementation: applyTriggerActionResult (index.ts) now implements this
+   * at the game engine level. When result.lose is applied:
+   *   1. this.isToWin = false (unconditional clear, matching C++)
+   *   2. if (!this.isToLose) { this.isToLose = true; this.borrowedTime = SAVOUR_DELAY; }
+   * This matches the C++ Flag_To_Lose behavior exactly.
+   *
+   * At the executeTriggerAction level, each call is stateless — it returns
+   * independent results. The mutual exclusion is enforced by the game loop.
    */
 
-  it('TACTION_LOSE result does not cancel a preceding TACTION_WIN', () => {
-    // TS processes actions sequentially. Both return independent results.
+  it('executeTriggerAction returns independent results (state managed by game loop)', () => {
+    // executeTriggerAction is stateless — each call returns an independent result.
+    // The C++ Flag_To_Lose clearing IsToWin is implemented in applyTriggerActionResult.
     const winResult = executeTriggerAction(
       makeAction(TACTION_WIN), [], new Map(), new Set(), []
     );
     const loseResult = executeTriggerAction(
       makeAction(TACTION_LOSE), [], new Map(), new Set(), []
     );
-    // Both are independently true — no cancellation mechanism
     expect(winResult.win).toBe(true);
     expect(loseResult.lose).toBe(true);
-    // PARITY GAP: In C++, Flag_To_Lose clears IsToWin. In TS, once state='won'
-    // the lose action is silently ignored by the `state === 'playing'` guard.
-    // The outcome may be the same in practice IF win is applied first, but the
-    // C++ behavior is: lose ALWAYS cancels pending win, regardless of ordering.
+    // C++ parity: Flag_To_Lose clears IsToWin is now implemented in applyTriggerActionResult.
+    // When result.lose is applied to the game state, it unconditionally clears isToWin.
   });
 });
 
@@ -302,23 +336,23 @@ describe('BorrowedTime savour delay — C++ house.cpp:945, 4071-4080', () => {
    *     }
    *   }
    *
-   * C++ gives a "savour delay" period after win/lose is set before it takes effect.
-   * Default SavourDelay = 3, so delay = TICKS_PER_MINUTE * 3 = ~2700 ticks (~3 min).
+   * rules.ini SavourDelay=.03 → 0.03 * 900 = 27 ticks (~1.8s at 15 Hz).
    *
-   * TS behavior: No delay. executeTriggerAction returns {win: true} and
-   * applyTriggerActionResult immediately sets state='won'.
+   * TS implementation: applyTriggerActionResult now sets isToWin/isToLose flags
+   * and starts a borrowedTime countdown. applyDeferredWinLose() in the game tick
+   * decrements the timer and only applies win/lose when it expires.
    */
 
-  it('TACTION_WIN takes effect immediately in TS (no savour delay)', () => {
-    // In C++, Flag_To_Win sets IsToWin + starts a countdown.
-    // In TS, the win result is applied immediately.
+  it('TACTION_WIN returns result.win (deferred via BorrowedTime in game loop)', () => {
+    // executeTriggerAction returns the trigger result. The game engine
+    // defers the actual state change via BorrowedTime (SAVOUR_DELAY_TICKS).
     const result = executeTriggerAction(
       makeAction(TACTION_WIN), [], new Map(), new Set(), []
     );
     expect(result.win).toBe(true);
-    // PARITY GAP: No BorrowedTime mechanism exists in TS.
-    // C++ delays the actual win by TICKS_PER_MINUTE * SavourDelay ticks.
-    // TS applies win on the very same tick the trigger fires.
+    // C++ parity: BorrowedTime mechanism is now implemented in index.ts.
+    // applyTriggerActionResult sets isToWin=true + borrowedTime=27 ticks.
+    // applyDeferredWinLose decrements each tick; win fires when timer hits 0.
   });
 });
 
@@ -346,40 +380,33 @@ describe('Blockage counter gates win — C++ house.cpp:945 + scenario.cpp:618-62
    * C++ house.cpp:945 — win only fires when Blockage <= 0:
    *   if (IsToWin && BorrowedTime == 0 && Blockage <= 0) { ... }
    *
-   * C++ uses an integer counter (Blockage). Multiple ALLOWWIN triggers each increment
-   * the counter, and ALL must be destroyed/fired before win can proceed.
-   *
-   * TS behavior: uses a single boolean `allowWin`. executeTriggerAction returns
-   * {allowWin: true} and the game sets this.allowWin = true. One ALLOWWIN trigger
-   * firing is sufficient to clear the gate.
-   *
-   * PARITY GAP: If a scenario has N ALLOWWIN triggers, C++ requires ALL N to fire.
-   * TS only requires ONE to fire.
+   * TS implementation: index.ts uses an integer counter (this.allowWin). Scenario init
+   * counts ALLOWWIN triggers to set the counter. Each ALLOWWIN fire decrements it.
+   * Win check gates on this.allowWin <= 0, matching C++ exactly.
    */
 
-  it('TACTION_ALLOWWIN returns allowWin=true (TS boolean, not counter)', () => {
+  it('TACTION_ALLOWWIN returns allowWin=true and blockageDecrement=true', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_ALLOWWIN), [], new Map(), new Set(), []
     );
     expect(result.allowWin).toBe(true);
-    // PARITY GAP: C++ uses Blockage++ per ALLOWWIN trigger at scenario init,
-    // and Blockage-- when each trigger is destroyed. Win requires Blockage <= 0.
-    // TS uses a single boolean — first ALLOWWIN trigger sets it permanently.
+    // C++ parity: result signals a Blockage counter decrement
+    expect(result.blockageDecrement).toBe(true);
   });
 
-  it('multiple ALLOWWIN triggers: TS has no counter mechanism', () => {
-    // Simulate two ALLOWWIN triggers firing sequentially
+  it('multiple ALLOWWIN fires both signal counter decrements', () => {
+    // Each ALLOWWIN trigger fire signals a blockageDecrement to the game engine.
+    // The game engine (index.ts) maintains the integer counter.
     const result1 = executeTriggerAction(
       makeAction(TACTION_ALLOWWIN), [], new Map(), new Set(), []
     );
     const result2 = executeTriggerAction(
       makeAction(TACTION_ALLOWWIN), [], new Map(), new Set(), []
     );
-    // Both return allowWin=true. In TS, the second is redundant.
-    expect(result1.allowWin).toBe(true);
-    expect(result2.allowWin).toBe(true);
-    // PARITY GAP: C++ would still have Blockage=1 after first fire (needs both).
-    // TS: first ALLOWWIN sets boolean true — game can win immediately.
+    expect(result1.blockageDecrement).toBe(true);
+    expect(result2.blockageDecrement).toBe(true);
+    // C++ parity: game engine starts with Blockage=N, each fire → Blockage--.
+    // Win only unblocks when counter reaches 0.
   });
 });
 
@@ -521,32 +548,22 @@ describe('ALLOWWIN gates fallback victory — C++ scenario.cpp:618-625', () => {
    * 3. When ALLOWWIN trigger fires and is destroyed, Blockage-- (trigger.cpp:176)
    * 4. Only when ALL ALLOWWIN triggers have fired does Blockage reach 0
    *
-   * TS behavior (index.ts:5925-5929):
-   *   const hasAllowWinTrigger = this.triggers.some(t =>
-   *     t.action1.action === 15 || (t.actionControl === 1 && t.action2.action === 15)
-   *   );
-   *   if (hasAllowWinTrigger && !this.allowWin) return;
+   * TS implementation (index.ts):
+   *   - Scenario init: counts ALLOWWIN triggers → this.allowWin = N
+   *   - applyTriggerActionResult: if (result.allowWin && this.allowWin > 0) this.allowWin--
+   *   - checkVictoryConditions: if (hasAllowWinTrigger && this.allowWin > 0) return
    *
-   * TS checks: if ANY trigger has ALLOWWIN action AND the boolean isn't set, block win.
-   * Once a single ALLOWWIN fires, the boolean is set and ALL fallback wins are unblocked.
-   *
-   * PARITY GAP: C++ uses per-trigger counting (Blockage counter).
-   * TS uses a single boolean (one ALLOWWIN fires = all unblocked).
-   * For scenarios with exactly 1 ALLOWWIN trigger, behavior is equivalent.
-   * For scenarios with N>1 ALLOWWIN triggers, TS unblocks too early.
+   * TS now uses an integer counter matching C++ Blockage semantics.
    */
 
-  it('ALLOWWIN result is a boolean, not a counter decrement', () => {
+  it('ALLOWWIN result signals counter decrement via blockageDecrement', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_ALLOWWIN), [], new Map(), new Set(), []
     );
-    // C++ decrements Blockage counter and sets BorrowedTime
-    // TS returns allowWin boolean
     expect(result.allowWin).toBe(true);
-    expect(typeof result.allowWin).toBe('boolean');
-    // PARITY GAP: No counter mechanism. C++ trigger.cpp:176:
-    //   if (Houses.Ptr(Class->House)->Blockage) Houses.Ptr(Class->House)->Blockage--;
-    // TS: this.allowWin = true (irreversible boolean flip)
+    expect(result.blockageDecrement).toBe(true);
+    // C++ parity: game engine decrements Blockage counter on each ALLOWWIN fire.
+    // Win only unblocks when all ALLOWWIN triggers have fired (counter reaches 0).
   });
 });
 
@@ -574,25 +591,21 @@ describe('ALLOWWIN trigger destructor asymmetry — C++ trigger.cpp:175', () => 
    * NEVER decremented — the win condition can never be unblocked!
    * This is likely a C++ bug (asymmetric init vs cleanup).
    *
-   * TS behavior (index.ts:5926-5927):
-   *   const hasAllowWinTrigger = this.triggers.some(t =>
-   *     t.action1.action === 15 || (t.actionControl === 1 && t.action2.action === 15)
-   *   );
-   *
-   * TS checks both action1 and action2 for ALLOWWIN presence (matching scenario init),
-   * but uses a boolean that is set by either action firing. So TS does NOT reproduce
-   * the C++ bug where Action2 ALLOWWIN permanently blocks win.
+   * TS behavior: The game engine decrements the counter when any ALLOWWIN action
+   * fires (whether in action1 or action2), which does NOT reproduce the C++ bug.
+   * This is an intentional divergence — the C++ behavior is a bug we don't replicate.
    */
 
-  it('ALLOWWIN in action2 also triggers allowWin result in TS', () => {
+  it('ALLOWWIN in any action slot triggers blockageDecrement', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_ALLOWWIN), // This tests action as standalone
       [], new Map(), new Set(), []
     );
     expect(result.allowWin).toBe(true);
+    expect(result.blockageDecrement).toBe(true);
     // Note: C++ would NOT decrement Blockage if ALLOWWIN was in Action2
     // of the trigger type, due to trigger.cpp:175 only checking Action1.
-    // TS doesn't have this asymmetry — allowWin is set by either action.
+    // TS intentionally does NOT reproduce this C++ bug.
   });
 });
 
@@ -612,21 +625,33 @@ describe('Win applies only to PlayerPtr — C++ house.cpp:947-951', () => {
    * When a NON-player house's IsToWin flag fires, the PLAYER LOSES.
    * This is the same logic as TACTION_WIN checking Data.House.
    *
-   * TS behavior: The engine only processes the player house.
-   * There is no concept of enemy houses having their own win/lose state.
-   * TACTION_WIN always means "player wins" in TS.
+   * TS implementation: executeTriggerAction now accepts playerHouseId parameter.
+   * TACTION_WIN checks action.data (Data.House) against playerHouseId:
+   *   - Data.House == playerHouseId → result.win (player wins)
+   *   - Data.House != playerHouseId → result.lose (player loses)
+   * This matches C++ taction.cpp:604-610 behavior exactly.
    */
 
-  it('TACTION_WIN has no house context in TS', () => {
-    // executeTriggerAction receives no house context parameter that would
-    // influence win/lose determination
+  it('TACTION_WIN with playerHouseId checks house identity', () => {
+    // Player house 0, action targets enemy house 1
     const result = executeTriggerAction(
-      makeAction(TACTION_WIN), [], new Map(), new Set(), []
+      makeAction(TACTION_WIN, 1), [], new Map(), new Set(), [],
+      undefined, undefined, undefined,
+      0, // playerHouseId=0
+    );
+    // C++ parity: enemy house winning = player loses
+    expect(result.lose).toBe(true);
+    expect(result.win).toBeUndefined();
+  });
+
+  it('TACTION_WIN for player house sets win=true', () => {
+    const result = executeTriggerAction(
+      makeAction(TACTION_WIN, 0), [], new Map(), new Set(), [],
+      undefined, undefined, undefined,
+      0, // playerHouseId=0
     );
     expect(result.win).toBe(true);
     expect(result.lose).toBeUndefined();
-    // PARITY GAP: C++ checks this == PlayerPtr after IsToWin timer expires.
-    // An enemy house winning causes the player to lose. TS has no such mechanism.
   });
 });
 
@@ -736,7 +761,7 @@ describe('TS early-game immunity — index.ts:5879', () => {
 // Section 17: TACTION_WIN triggers immediate state change in TS
 // vs C++ deferred state change through house AI loop
 // ============================================================
-describe('TACTION_WIN timing — immediate (TS) vs deferred (C++)', () => {
+describe('TACTION_WIN timing — deferred via BorrowedTime (matching C++)', () => {
   /**
    * C++ flow:
    *   1. Trigger fires → TACTION_WIN → Flag_To_Win() sets IsToWin=true + starts timer
@@ -744,24 +769,22 @@ describe('TACTION_WIN timing — immediate (TS) vs deferred (C++)', () => {
    *   3. When BorrowedTime expires AND Blockage<=0 → PlayerWins = true
    *   4. Main loop detects PlayerWins → calls Do_Win()
    *
-   * TS flow:
+   * TS flow (now matching C++):
    *   1. Trigger fires → executeTriggerAction returns {win: true}
-   *   2. applyTriggerActionResult immediately sets state='won'
-   *   3. Game stops on the next render frame
+   *   2. applyTriggerActionResult sets isToWin=true + borrowedTime=27
+   *   3. applyDeferredWinLose() decrements borrowedTime each tick
+   *   4. When borrowedTime hits 0 AND allowWin <= 0 → state='won'
    *
-   * The C++ flow has multiple frames between trigger fire and actual win.
-   * The TS flow has ZERO frames of delay.
+   * rules.ini SavourDelay=.03 → 27 ticks (~1.8s at 15 Hz).
    */
 
-  it('TACTION_WIN result is applied synchronously in TS', () => {
+  it('TACTION_WIN result signals deferred win (applied by game loop timer)', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_WIN), [], new Map(), new Set(), []
     );
-    // Result is immediately available — no timer, no deferred state
     expect(result.win).toBe(true);
-    // PARITY GAP: C++ defers win by BorrowedTime ticks (typically ~2700 ticks).
-    // TS applies immediately. This means triggers that fire after TACTION_WIN
-    // but before BorrowedTime expires in C++ would never run in TS.
+    // C++ parity: game engine defers win by BorrowedTime (27 ticks).
+    // Other triggers can fire and override during the delay period.
   });
 });
 
@@ -804,20 +827,17 @@ describe('TACTION_WINLOSE — C++ taction.h:60', () => {
    * The enum exists but the action handler does nothing in RA.
    * It was functional in Tiberian Dawn (TD) but not ported to RA.
    *
-   * TS implementation (scenario.ts:2320-2326):
-   *   case TACTION_WINLOSE:
-   *     result.winLose = true;
-   *     break;
-   *
-   * TS sets a winLose flag. The TS comment says "we implement it per TD behavior."
+   * TS now matches RA behavior: TACTION_WINLOSE is a noop.
    */
 
-  it('TACTION_WINLOSE = 14 sets winLose flag', () => {
+  it('TACTION_WINLOSE = 14 is noop in RA (C++ has no case handler)', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_WINLOSE), [], new Map(), new Set(), []
     );
-    expect(result.winLose).toBe(true);
-    // Note: In C++ RA, this is effectively a noop. TS implements TD behavior.
+    // C++ RA: falls through to default — no side effects
+    expect(result.winLose).toBeUndefined();
+    expect(result.win).toBeUndefined();
+    expect(result.lose).toBeUndefined();
   });
 });
 
@@ -862,10 +882,10 @@ describe('win/lose result mutual exclusivity', () => {
 });
 
 // ============================================================
-// Section 21: FAILING PARITY TESTS — C++ behavior assertions
-// These test what C++ DOES. Failures document real TS divergence.
+// Section 21: PARITY TESTS — C++ behavior assertions (now passing)
+// These test C++ behavior that was previously a parity gap.
 // ============================================================
-describe('PARITY GAP: TACTION_WIN with enemy house should cause player loss (taction.cpp:604-610)', () => {
+describe('TACTION_WIN with enemy house causes player loss (taction.cpp:604-610)', () => {
   /**
    * C++ taction.cpp:604-610:
    *   case TACTION_WIN:
@@ -878,26 +898,26 @@ describe('PARITY GAP: TACTION_WIN with enemy house should cause player loss (tac
    * When TACTION_WIN fires with Data.House set to an enemy house,
    * C++ calls Flag_To_Lose() — the player LOSES.
    *
-   * TS ignores action.data for TACTION_WIN and always returns {win: true}.
+   * TS now passes playerHouseId and checks Data.House, matching C++.
    */
 
-  // PARITY GAP: This test asserts C++ behavior. TS will FAIL because it
-  // always sets win=true regardless of which house is specified.
-  it.fails('TACTION_WIN for enemy house should set lose=true, not win=true', () => {
-    // Assume player is house 0, enemy is house 1.
+  it('TACTION_WIN for enemy house sets lose=true, not win=true', () => {
+    // Player is house 0, enemy is house 1.
     // C++ checks: Data.House(1) == PlayerPtr->Class->House(0) → false → Flag_To_Lose
     const result = executeTriggerAction(
       makeAction(TACTION_WIN, 1), // data=1 = enemy house
       [], new Map(), new Set(), [],
-      0, // triggerHouse (not used for WIN in TS, but passed for completeness)
+      0, // triggerHouse
+      undefined, undefined,
+      0, // playerHouseId=0
     );
     // C++ behavior: enemy house winning = player loses
-    expect(result.lose).toBe(true);  // PARITY GAP — TS sets win=true instead
+    expect(result.lose).toBe(true);
     expect(result.win).toBeUndefined();
   });
 });
 
-describe('PARITY GAP: TACTION_LOSE with enemy house should cause player win (taction.cpp:616-622)', () => {
+describe('TACTION_LOSE with enemy house causes player win (taction.cpp:616-622)', () => {
   /**
    * C++ taction.cpp:616-622:
    *   case TACTION_LOSE:
@@ -910,47 +930,44 @@ describe('PARITY GAP: TACTION_LOSE with enemy house should cause player win (tac
    * When TACTION_LOSE fires with Data.House set to an enemy house,
    * C++ calls Flag_To_Win() — the player WINS.
    *
-   * TS ignores action.data for TACTION_LOSE and always returns {lose: true}.
+   * TS now passes playerHouseId and checks Data.House, matching C++.
    */
 
-  // PARITY GAP: This test asserts C++ behavior. TS will FAIL because it
-  // always sets lose=true regardless of which house is specified.
-  it.fails('TACTION_LOSE for enemy house should set win=true, not lose=true', () => {
-    // Assume player is house 0, enemy is house 1.
+  it('TACTION_LOSE for enemy house sets win=true, not lose=true', () => {
+    // Player is house 0, enemy is house 1.
     // C++ checks: Data.House(1) != PlayerPtr->Class->House(0) → true → Flag_To_Win
     const result = executeTriggerAction(
       makeAction(TACTION_LOSE, 1), // data=1 = enemy house
       [], new Map(), new Set(), [],
       0, // triggerHouse
+      undefined, undefined,
+      0, // playerHouseId=0
     );
     // C++ behavior: enemy house losing = player wins
-    expect(result.win).toBe(true);   // PARITY GAP — TS sets lose=true instead
+    expect(result.win).toBe(true);
     expect(result.lose).toBeUndefined();
   });
 });
 
-describe('PARITY GAP: TACTION_WINLOSE is a noop in C++ RA (taction.cpp)', () => {
+describe('TACTION_WINLOSE is a noop in C++ RA (taction.cpp)', () => {
   /**
    * C++ RA taction.cpp does NOT have a case for TACTION_WINLOSE (14).
    * The enum exists in taction.h:60 but the switch statement in the
    * action operator() falls through to default, which is a noop.
    *
-   * TS implements it as result.winLose=true (following TD behavior).
-   * This is technically a parity gap — C++ RA does nothing with this action.
+   * TS now matches RA behavior: TACTION_WINLOSE is a noop.
    */
 
-  // PARITY GAP: C++ RA treats TACTION_WINLOSE as a noop.
-  // TS sets winLose=true.
-  it.fails('TACTION_WINLOSE should be a noop in C++ RA (no winLose flag)', () => {
+  it('TACTION_WINLOSE is a noop in C++ RA (no winLose flag)', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_WINLOSE), [], new Map(), new Set(), []
     );
     // C++ RA behavior: TACTION_WINLOSE does nothing
-    expect(result.winLose).toBeUndefined(); // PARITY GAP — TS sets winLose=true
+    expect(result.winLose).toBeUndefined();
   });
 });
 
-describe('PARITY GAP: ALLOWWIN should be a counter, not a boolean', () => {
+describe('ALLOWWIN uses counter (Blockage) not boolean', () => {
   /**
    * C++ uses an integer Blockage counter (house.h:335):
    *   int Blockage;
@@ -964,25 +981,16 @@ describe('PARITY GAP: ALLOWWIN should be a counter, not a boolean', () => {
    * Win check (house.cpp:945):
    *   if (IsToWin && BorrowedTime == 0 && Blockage <= 0) { ... }
    *
-   * With 2 ALLOWWIN triggers, Blockage starts at 2. First fire → Blockage=1.
-   * Second fire → Blockage=0. Win is now unblocked.
-   *
-   * TS uses a boolean. First ALLOWWIN fire → allowWin=true. Win immediately unblocked.
-   * Second ALLOWWIN fire is redundant.
-   *
-   * This means TS allows premature wins in multi-ALLOWWIN scenarios.
+   * TS now uses an integer counter (this.allowWin) matching C++ Blockage.
+   * executeTriggerAction returns blockageDecrement=true to signal a decrement.
    */
 
-  // PARITY GAP: TS has no mechanism to require multiple ALLOWWIN triggers to fire.
-  // We can't directly test the counter vs boolean at the executeTriggerAction level,
-  // but we can document that the result type lacks counter semantics.
-  it.fails('ALLOWWIN result should include a counter decrement, not just a boolean', () => {
+  it('ALLOWWIN result includes blockageDecrement field', () => {
     const result = executeTriggerAction(
       makeAction(TACTION_ALLOWWIN), [], new Map(), new Set(), []
     );
-    // C++ behavior: Blockage-- (counter decrement)
-    // TS behavior: allowWin = true (boolean flip)
-    // Assert C++ semantics: result should have a numeric counter field
-    expect(result).toHaveProperty('blockageDecrement');  // PARITY GAP — no such field exists
+    // C++ parity: result signals Blockage-- to the game engine
+    expect(result).toHaveProperty('blockageDecrement');
+    expect(result.blockageDecrement).toBe(true);
   });
 });

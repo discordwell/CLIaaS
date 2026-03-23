@@ -1163,10 +1163,11 @@ describe('executeTriggerAction — C++ taction.cpp operator() parity', () => {
   });
 
   // --- TACTION_WINLOSE (14) ---
-  // C++ taction.h: "Win if captured, lose if destroyed."
-  it('TACTION_WINLOSE sets winLose flag', () => {
+  // C++ RA taction.cpp: TACTION_WINLOSE falls through to default — noop.
+  // The enum exists in taction.h:60 but RA has no case handler for it.
+  it('TACTION_WINLOSE is noop in RA (no winLose flag)', () => {
     const result = executeTriggerAction(makeAction(CPP_TACTION.WINLOSE), [], new Map(), new Set(), []);
-    expect(result.winLose).toBe(true);
+    expect(result.winLose).toBeUndefined();
   });
 
   // --- TACTION_DESTROY_TEAM (5) ---

@@ -10,10 +10,8 @@
  * TACTION_WINLOSE:
  *   C++ taction.h:60 — "Win if captured, lose if destroyed." (enum value 14)
  *   In RA taction.cpp, TACTION_WINLOSE falls through to default (noop — no case handler).
- *   However, in TD trigger.cpp:427-443 (the original C&C), ACTION_WINLOSE checks the
- *   triggering event: EVENT_DESTROYED → player loses, EVENT_PLAYER_ENTERED → player wins.
- *   Our TS implementation follows the TD behavior since the RA enum explicitly defines it
- *   with the same "Win if captured, lose if destroyed" description.
+ *   In TD trigger.cpp:427-443 it was functional, but RA never implemented it.
+ *   Our TS implementation now matches RA parity: TACTION_WINLOSE is a noop.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -197,7 +195,13 @@ describe('TACTION_BASE_BUILDING (action=30) — C++ parity', () => {
 // TACTION_WINLOSE (14)
 // ============================================================
 
-describe('TACTION_WINLOSE (action=14) — C++ parity', () => {
+describe('TACTION_WINLOSE (action=14) — C++ RA parity (noop)', () => {
+  /**
+   * C++ RA taction.cpp: TACTION_WINLOSE (ordinal 14) falls through to default — noop.
+   * The enum exists in taction.h:60 ("Win if captured, lose if destroyed") but RA's
+   * action handler has no case for it. Only functional in Tiberian Dawn.
+   */
+
   // ------------------------------------------------------------------
   // Constant value check — C++ taction.h enum order puts WINLOSE at 14
   // ------------------------------------------------------------------
@@ -206,11 +210,12 @@ describe('TACTION_WINLOSE (action=14) — C++ parity', () => {
   });
 
   // ------------------------------------------------------------------
-  // Core: result.winLose is set to true
+  // Core: TACTION_WINLOSE is a noop in RA — does NOT set winLose flag
+  // (C++ RA taction.cpp has no case handler; falls through to default)
   // ------------------------------------------------------------------
-  it('sets result.winLose = true', () => {
+  it('does not set winLose (RA noop — no case handler in taction.cpp)', () => {
     const result = exec(winLoseAction());
-    expect(result.winLose).toBe(true);
+    expect(result.winLose).toBeUndefined();
   });
 
   // ------------------------------------------------------------------
@@ -222,15 +227,14 @@ describe('TACTION_WINLOSE (action=14) — C++ parity', () => {
   });
 
   // ------------------------------------------------------------------
-  // WINLOSE does NOT directly set win or lose — the game loop checks
-  // trigger event types to determine the outcome
+  // Noop means no side effects at all
   // ------------------------------------------------------------------
-  it('does not directly set win flag (deferred to game loop)', () => {
+  it('does not set win flag', () => {
     const result = exec(winLoseAction());
     expect(result.win).toBeUndefined();
   });
 
-  it('does not directly set lose flag (deferred to game loop)', () => {
+  it('does not set lose flag', () => {
     const result = exec(winLoseAction());
     expect(result.lose).toBeUndefined();
   });
@@ -297,20 +301,20 @@ describe('TACTION_WINLOSE (action=14) — C++ parity', () => {
   });
 
   // ------------------------------------------------------------------
-  // Result has only spawned + winLose keys
+  // Result has only spawned key (noop — no flags set)
   // ------------------------------------------------------------------
-  it('result has only spawned and winLose keys', () => {
+  it('result has only spawned key (noop — no flags set)', () => {
     const result = exec(winLoseAction());
     const keys = Object.keys(result).sort();
-    expect(keys).toEqual(['spawned', 'winLose']);
+    expect(keys).toEqual(['spawned']);
   });
 
   // ------------------------------------------------------------------
-  // WINLOSE is independent of action.data value
+  // Noop regardless of action.data value
   // ------------------------------------------------------------------
-  it('result.winLose is true regardless of action.data value', () => {
-    expect(exec(winLoseAction({ data: 0 })).winLose).toBe(true);
-    expect(exec(winLoseAction({ data: 5 })).winLose).toBe(true);
-    expect(exec(winLoseAction({ data: -1 })).winLose).toBe(true);
+  it('noop regardless of action.data value', () => {
+    expect(exec(winLoseAction({ data: 0 })).winLose).toBeUndefined();
+    expect(exec(winLoseAction({ data: 5 })).winLose).toBeUndefined();
+    expect(exec(winLoseAction({ data: -1 })).winLose).toBeUndefined();
   });
 });
