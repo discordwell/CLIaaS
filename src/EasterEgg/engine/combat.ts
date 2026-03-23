@@ -547,22 +547,85 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   }
 }
 
+/** C++ unit.cpp:4813-4855 — Should_Crush_It: AI auto-crush decision gate.
+ *  Returns true if a crusher vehicle should deliberately drive over (crush) a target
+ *  infantry instead of shooting it. Called from Take_Damage retaliation path.
+ *
+ *  Gate chain (all must pass):
+ *   1. vehicle.crusher — only crusher vehicles can auto-crush
+ *   2. target must be alive
+ *   3. target.crushable — only crushable targets (infantry/ants)
+ *   4. Distance <= CrushDistance (1.5 cells, rules.ini [General] Crush=1.5)
+ *   5. NOT human-controlled (unit.cpp:4832)
+ *   6. NOT DIFF_HARD (easy for player = AI doesn't crush) (unit.cpp:4832)
+ *   7. Primary weapon warhead NOT IsWoodDestroyer (unit.cpp:4839) — or no weapon
+ *   8. House IQ >= IQCrush (2) (unit.cpp:4845)
+ *   9. target is NOT a spy (unit.cpp:4850) */
+export function shouldCrushIt(
+  crusher: Entity,
+  target: Entity,
+  isPlayerControlled: boolean,
+  houseIQ: number,
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal',
+): boolean {
+  // Gate 1: only crusher vehicles
+  if (!crusher.stats.crusher) return false;
+  // Gate 2: target must be alive
+  if (!target.alive) return false;
+  // Gate 3: only crushable targets
+  if (!target.stats.crushable) return false;
+  // Gate 4: CrushDistance = 1.5 cells (384 leptons) — rules.ini [General] Crush=1.5
+  const dx = crusher.pos.x - target.pos.x;
+  const dy = crusher.pos.y - target.pos.y;
+  const distCells = Math.sqrt(dx * dx + dy * dy) / CELL_SIZE;
+  if (distCells > 1.5) return false;
+  // Gate 5: human-controlled vehicles never auto-crush
+  if (isPlayerControlled) return false;
+  // Gate 6: DIFF_HARD (easy for player) blocks AI auto-crush
+  if (difficulty === 'easy') return false;
+  // Gate 7: primary weapon IsWoodDestroyer blocks auto-crush (unless unarmed)
+  if (crusher.weapon) {
+    const meta = WARHEAD_META[crusher.weapon.warhead];
+    if (meta?.destroysWood) return false;
+  }
+  // Gate 8: IQ threshold — IQCrush = 2
+  if (houseIQ < AI_BUILD_RULES.iqAutoCrush) return false;
+  // Gate 9: spies are immune to AI auto-crush targeting
+  if (target.type === UnitType.I_SPY) return false;
+
+  return true;
+}
+
 /** Trigger retaliation: a damaged unit without a target attacks the shooter.
- *  In original RA, idle/moving units always counter-attack when hit. */
+ *  In original RA, idle/moving units always counter-attack when hit.
+ *  C++ unit.cpp:1124-1161: includes auto-crush path for crusher vehicles vs infantry. */
 export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker: Entity): void {
   if (!victim.alive || !attacker.alive) return;
   // C++ rules.ini PlayerReturnFire=no (Rule.IsSmartDefense=false) — player units do NOT auto-retaliate
   // C++ techno.cpp:4976 exception: Tanya retaliates against infantry even without SmartDefense
-  if (ctx.isPlayerControlled?.(victim)) {
+  const isVictimPlayerControlled = ctx.isPlayerControlled?.(victim) ?? false;
+  if (isVictimPlayerControlled) {
     const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
     if (!isTanyaVsInfantry) return;
   }
   if (ctx.entitiesAllied(victim, attacker)) return; // no friendly retaliation
-  if (!victim.weapon) return; // unarmed units can't retaliate
   // Only retarget if no current target or current target is dead
   if (victim.target && victim.target.alive) return;
   // Don't interrupt scripted team missions (except HUNT which already attacks)
   if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
+
+  // C++ unit.cpp:1124-1161: auto-crush retaliation path
+  // If victim is a crusher and target is crushable infantry within range,
+  // prefer moving to crush over shooting (especially for unarmed crushers like HARV)
+  const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
+  if (shouldCrushIt(victim, attacker, isVictimPlayerControlled, houseIQ)) {
+    victim.target = attacker;
+    victim.mission = Mission.MOVE; // C++ unit.cpp:1137-1139: MISSION_MOVE to crush target
+    victim.moveTarget = { x: attacker.pos.x, y: attacker.pos.y };
+    return;
+  }
+
+  if (!victim.weapon) return; // unarmed units can't retaliate (no crush path matched)
   // AA gate: ground units can't retaliate against airborne aircraft without AA weapons
   if (attacker.isAirUnit && attacker.flightAltitude > 0) {
     const hasAA = victim.weapon?.isAntiAir || victim.weapon2?.isAntiAir;

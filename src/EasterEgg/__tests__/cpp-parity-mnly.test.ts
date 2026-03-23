@@ -248,12 +248,13 @@ describe('MNLY no turret (udata.cpp)', () => {
   });
 });
 
-// -- 5. Cannot Retaliate (techno.cpp -- no weapon means no retaliation) -------
-// C++ techno.cpp: triggerRetaliation checks Can_Fire which requires a weapon.
-// MNLY has no weapon, so it never retaliates when attacked.
+// -- 5. Retaliation — MNLY uses auto-crush (unit.cpp:1124-1161) ---------------
+// C++ unit.cpp:1124-1161: Take_Damage checks Should_Crush_It BEFORE Can_Fire.
+// MNLY has no weapon but IS a crusher. When attacked by crushable infantry
+// within CrushDistance (1.5 cells), it retaliates by moving to crush them.
 
-describe('MNLY cannot retaliate (techno.cpp)', () => {
-  it('MNLY does not retaliate when hit by enemy (no weapon)', () => {
+describe('MNLY retaliation (techno.cpp)', () => {
+  it('MNLY retaliates against infantry by auto-crush (crusher, no weapon)', () => {
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
     mnly.mission = Mission.GUARD;
@@ -262,25 +263,28 @@ describe('MNLY cannot retaliate (techno.cpp)', () => {
     const ctx = makeCombatCtx([mnly, attacker]);
     triggerRetaliation(ctx, mnly, attacker);
 
-    // MNLY has no weapon, should not get a target or switch to ATTACK
-    expect(mnly.target).toBeNull();
-    expect(mnly.mission).toBe(Mission.GUARD);
+    // C++ unit.cpp:1137-1139: Should_Crush_It → MISSION_MOVE to crush target
+    // MNLY is a crusher with no weapon — auto-crush path fires
+    expect(mnly.target).toBe(attacker);
+    expect(mnly.mission).toBe(Mission.MOVE);
   });
 
-  it('MNLY on MOVE mission does not retaliate', () => {
+  it('MNLY does not auto-crush when on team mission', () => {
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
     mnly.mission = Mission.MOVE;
     mnly.target = null;
+    mnly.teamMissions = [{ mission: 3, data: 0 }]; // TMISSION_MOVE
 
     const ctx = makeCombatCtx([mnly, attacker]);
     triggerRetaliation(ctx, mnly, attacker);
 
+    // Team missions block retaliation (except HUNT)
     expect(mnly.target).toBeNull();
     expect(mnly.mission).toBe(Mission.MOVE);
   });
 
-  it('contrast: armed vehicle (2TNK) DOES retaliate', () => {
+  it('contrast: armed vehicle (2TNK) retaliates with ATTACK mission', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
     tank.mission = Mission.GUARD;

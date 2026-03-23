@@ -151,7 +151,9 @@ describe('QTNK has no weapon — deploys instead (udata.cpp)', () => {
     expect(qtnk.weapon2).toBeNull();
   });
 
-  it('cannot retaliate — triggerRetaliation does not assign target (no weapon)', () => {
+  it('retaliates against infantry by auto-crush (crusher, no weapon)', () => {
+    // C++ unit.cpp:1124-1161: Take_Damage checks Should_Crush_It before Can_Fire.
+    // QTNK is a crusher with no weapon — it retaliates by moving to crush infantry.
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     qtnk.mission = Mission.GUARD;
@@ -160,9 +162,9 @@ describe('QTNK has no weapon — deploys instead (udata.cpp)', () => {
     const ctx = makeCombatCtx([qtnk, attacker]);
     triggerRetaliation(ctx, qtnk, attacker);
 
-    // No weapon, should not get a target
-    expect(qtnk.target).toBeNull();
-    expect(qtnk.mission).toBe(Mission.GUARD);
+    // QTNK has crusher=true, no weapon — auto-crush path fires
+    expect(qtnk.target).toBe(attacker);
+    expect(qtnk.mission).toBe(Mission.MOVE);
   });
 
   it('inRange always returns false (no weapon range to check)', () => {

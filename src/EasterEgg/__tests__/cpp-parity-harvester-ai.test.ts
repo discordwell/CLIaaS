@@ -337,18 +337,15 @@ describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
   });
 
   /**
-   * BLOCKED: C++ ring search (unit.cpp:2218-2243) scans ring perimeters
+   * DESIGN NOTE: C++ ring search (unit.cpp:2218-2243) scans ring perimeters
    * and returns the FIRST hit. When two ore cells are at the same Chebyshev
    * distance but different Euclidean distance, C++ finds the first one in
    * scan order (top row of ring scanned first: y=-radius).
    *
-   * TS uses distance-based search and may tie-break differently.
+   * TS now also uses ring search with the same scan order, so equidistant
+   * tie-breaking matches C++ for the top-edge-first bias.
    *
-   * Example: ore at (51,49) and (49,51) — both are at ring distance 1.
-   * C++ finds (51,49) first (it scans x=-1..1, y=-radius first).
-   * TS finds whichever has smaller distance (may agree for different reasons).
-   *
-   * BLOCKED: Inherent algorithm difference — C++ ring scan vs TS distance search.
+   * DESIGN NOTE: Inherent algorithm parity — both use ring perimeter scan.
    * No gameplay impact (both find ore at the same distance).
    */
   it('C++ ring search has scan-order bias for equidistant cells (unit.cpp:2221)', () => {
@@ -407,23 +404,33 @@ describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
    * C++ Tiberium_Check rejects cells that have a unit/building (Cell_Techno).
    * This prevents harvesters from targeting ore cells occupied by other units.
    *
-   * TS findNearestOre (map.ts:623-643) does NOT check for unit occupancy.
-   * TS findHarvesterOre (harvester.ts:86-92) only checks if another HARVESTER
-   * is targeting nearby (3-cell radius), not if any unit occupies the cell.
-   *
-   * BLOCKED: C++ rejects ANY occupied ore cell; TS only rejects cells near
-   * other harvester targets (and only for AI harvesters). Would require adding
-   * occupancy checks to findNearestOre, which is a broader refactor.
+   * FIXED: findNearestOre now checks vehicleOccupancy (buildings/vehicles)
+   * and skips ore cells that have buildings on them, matching C++ Cell_Techno.
    */
-  it('TS findNearestOre does NOT filter occupied cells — BLOCKED', () => {
+  it('findNearestOre skips ore cells occupied by buildings (C++ Cell_Techno)', () => {
     // C++ would skip ore cells with Cell_Techno() != NULL
-    // TS has no occupancy check in findNearestOre
     const map = makeMap();
-    placeGold(map, 51, 50, 5);
-    // Even if a unit were at (51,50), TS would still return it
+    placeGold(map, 51, 50, 5); // ore at (51,50) — occupied by building
+    placeGold(map, 53, 50, 5); // ore at (53,50) — free
+    // Mark (51,50) as occupied by a building/vehicle
+    map.setVehicleOccupancy(51, 50, 999);
+
     const result = map.findNearestOre(50, 50, 20);
     expect(result).toBeDefined();
-    expect(result!.cx).toBe(51); // TS finds it (C++ would skip if occupied)
+    // Should skip the occupied cell and find the next nearest ore
+    expect(result!.cx).toBe(53);
+    expect(result!.cy).toBe(50);
+  });
+
+  it('findNearestOre returns occupied ore cell center (harvester standing on ore)', () => {
+    // The center cell check (dist=0) does NOT filter by occupancy — matches C++ unit.cpp:2209-2212
+    // which returns true immediately if already standing on ore without checking Cell_Techno.
+    const map = makeMap();
+    placeGold(map, 50, 50, 5);
+    map.setVehicleOccupancy(50, 50, 999);
+    const result = map.findNearestOre(50, 50, 20);
+    expect(result).toBeDefined();
+    expect(result!.cx).toBe(50); // center cell is always returned if it has ore
   });
 
   /**

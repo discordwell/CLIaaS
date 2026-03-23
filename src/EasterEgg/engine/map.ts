@@ -862,6 +862,7 @@ export class GameMap {
   /** Find nearest ore/gem cell using C++ ring/diamond search pattern.
    *  C++ parity: unit.cpp:2218-2243 searches expanding ring perimeters,
    *  returns the FIRST valid cell found (not Euclidean closest).
+   *  C++ unit.cpp:2179: rejects cells with Cell_Techno() (buildings/vehicles on ore).
    *  OreNearScan=6, OreFarScan=48 (rules.ini). */
   findNearestOre(cx: number, cy: number, maxRange = 6): CellPos | null {
     // Check center cell first (C++ unit.cpp:2209-2212: already on ore → return immediately)
@@ -875,6 +876,8 @@ export class GameMap {
     //   for (x = -radius; x <= radius; x++)
     //     check (x, -radius), (x, +radius), (-radius, x), (+radius, x)
     // Returns FIRST valid cell found on any ring perimeter.
+    // C++ unit.cpp:2179: `if (!Map[center].Cell_Techno() && ...)`
+    // Skip ore cells occupied by buildings/vehicles.
     const r = maxRange;
     for (let radius = 1; radius <= r; radius++) {
       for (let x = -radius; x <= radius; x++) {
@@ -883,8 +886,10 @@ export class GameMap {
         if (ty >= 0 && ty < MAP_CELLS) {
           const tx = cx + x;
           if (tx >= 0 && tx < MAP_CELLS) {
-            const ovl = this.overlay[ty * MAP_CELLS + tx];
-            if (ovl >= 0x03 && ovl <= 0x12) return { cx: tx, cy: ty };
+            const tidx = ty * MAP_CELLS + tx;
+            const ovl = this.overlay[tidx];
+            // C++ unit.cpp:2179: skip if building/vehicle on cell
+            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(tidx)) return { cx: tx, cy: ty };
           }
         }
         // Bottom edge: (cx+x, cy+radius)
@@ -892,8 +897,9 @@ export class GameMap {
         if (by >= 0 && by < MAP_CELLS) {
           const bx = cx + x;
           if (bx >= 0 && bx < MAP_CELLS) {
-            const ovl = this.overlay[by * MAP_CELLS + bx];
-            if (ovl >= 0x03 && ovl <= 0x12) return { cx: bx, cy: by };
+            const bidx = by * MAP_CELLS + bx;
+            const ovl = this.overlay[bidx];
+            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(bidx)) return { cx: bx, cy: by };
           }
         }
       }
@@ -904,8 +910,9 @@ export class GameMap {
         if (lx >= 0 && lx < MAP_CELLS) {
           const ly = cy + y;
           if (ly >= 0 && ly < MAP_CELLS) {
-            const ovl = this.overlay[ly * MAP_CELLS + lx];
-            if (ovl >= 0x03 && ovl <= 0x12) return { cx: lx, cy: ly };
+            const lidx = ly * MAP_CELLS + lx;
+            const ovl = this.overlay[lidx];
+            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(lidx)) return { cx: lx, cy: ly };
           }
         }
         // Right edge: (cx+radius, cy+y)
@@ -913,8 +920,9 @@ export class GameMap {
         if (rx >= 0 && rx < MAP_CELLS) {
           const ry = cy + y;
           if (ry >= 0 && ry < MAP_CELLS) {
-            const ovl = this.overlay[ry * MAP_CELLS + rx];
-            if (ovl >= 0x03 && ovl <= 0x12) return { cx: rx, cy: ry };
+            const ridx = ry * MAP_CELLS + rx;
+            const ovl = this.overlay[ridx];
+            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(ridx)) return { cx: rx, cy: ry };
           }
         }
       }

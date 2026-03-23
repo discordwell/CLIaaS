@@ -737,7 +737,7 @@ const MAX_SEARCH = 500;
 
 /** C++ foot.cpp:333-335 Nearby_Location — spiral scan outward from an impassable cell
  *  to find the nearest passable cell. Used when the destination is blocked terrain. */
-function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean): CellPos | null {
+export function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean): CellPos | null {
   const passable = naval
     ? (cx: number, cy: number) => map.isWaterPassable(cx, cy)
     : (cx: number, cy: number) => map.isTerrainPassable(cx, cy);

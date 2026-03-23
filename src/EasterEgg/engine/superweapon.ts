@@ -17,7 +17,8 @@ import {
 import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
-import { Terrain } from './map';
+import { Terrain, type GameMap } from './map';
+import { nearbyLocation } from './pathfinding';
 
 // ---------------------------------------------------------------------------
 // C++ parity constants — house.cpp / rules.cpp / defines.h
@@ -52,6 +53,8 @@ export interface SuperweaponContext {
     revealAll(): void;
     shroudAll(): void;
     isPassable(cx: number, cy: number): boolean;
+    isTerrainPassable(cx: number, cy: number): boolean;
+    isWaterPassable(cx: number, cy: number): boolean;
     setVisibility(cx: number, cy: number, v: number): void;
     inBounds(cx: number, cy: number): boolean;
     setTerrain(cx: number, cy: number, terrain: Terrain): void;
@@ -437,10 +440,26 @@ export function activateSuperweapon(
         } else {
           // C++ house.cpp:2835-2852: Warp vehicle to destination with Moebius return
           const origin = { x: unit.pos.x, y: unit.pos.y };
-          unit.pos.x = target.x;
-          unit.pos.y = target.y;
-          unit.prevPos.x = target.x;
-          unit.prevPos.y = target.y;
+          // C++ drive.cpp:382-414 Teleport_To — validates destination cell passability.
+          // If blocked, uses Nearby_Location spiral scan to find adjacent open cell.
+          let destX = target.x;
+          let destY = target.y;
+          const destCell = worldToCell(target.x, target.y);
+          const isNaval = unit.stats.isVessel === true;
+          const passable = isNaval
+            ? ctx.map.isWaterPassable(destCell.cx, destCell.cy)
+            : ctx.map.isTerrainPassable(destCell.cx, destCell.cy);
+          if (!passable) {
+            const nearby = nearbyLocation(ctx.map as GameMap, destCell, isNaval);
+            if (nearby) {
+              destX = nearby.cx * CELL_SIZE + CELL_SIZE / 2;
+              destY = nearby.cy * CELL_SIZE + CELL_SIZE / 2;
+            }
+          }
+          unit.pos.x = destX;
+          unit.pos.y = destY;
+          unit.prevPos.x = destX;
+          unit.prevPos.y = destY;
           unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
           // C++ drive.cpp:2836-2844: save origin cell, set Moebius return timer
           // MoebiusCell = origin, IsMoebius = true, MoebiusCountDown = ChronoDuration * TICKS_PER_MINUTE

@@ -237,12 +237,12 @@ describe('Re-fire loop cap — C++ unbounded vs TS extraFires=8', () => {
     expect(t.pendingDestroyedCount).toBe(0);
   });
 
-  it('persistent trigger with 20 pending deaths: TS caps at 9, leaves 11 — BLOCKED', () => {
+  it('persistent trigger with 20 pending deaths: TS caps at 9, leaves 11 — DESIGN NOTE', () => {
     /**
-     * BLOCKED: C++ would fire all 20 times in the same tick.
+     * DESIGN NOTE: C++ would fire all 20 times in the same tick.
      * TS fires 9 (1 initial + 8 extra) and leaves 11 pending for next tick.
      *
-     * This is documented as intentional: TS caps re-fires to prevent
+     * This is an intentional safety feature: TS caps re-fires to prevent
      * infinite loops from buggy trigger configurations. The remaining
      * deaths fire on subsequent ticks, so it's eventually consistent.
      */
@@ -263,7 +263,7 @@ describe('Re-fire loop cap — C++ unbounded vs TS extraFires=8', () => {
 
     // TS behavior: capped at 9
     expect(fires).toBe(9);
-    // BLOCKED: 20 - 9 = 11 remaining (intentional cap to prevent infinite loops)
+    // DESIGN NOTE: 20 - 9 = 11 remaining (intentional safety cap to prevent infinite loops)
     expect(t.pendingDestroyedCount).toBe(11);
     // C++ would have fires === 20 and pendingDestroyedCount === 0
   });
@@ -888,10 +888,11 @@ describe('C++ Record_The_Kill triple-Spring — techno.cpp:3897-3901', () => {
      * initial evaluation, plus once per pendingDestroyedCount. But it does NOT
      * fire the extra ATTACKED/DISCOVERED firings.
      *
-     * BLOCKED: For persistent TEVENT_ANY triggers, C++ fires 3 times per
+     * DESIGN NOTE: For persistent TEVENT_ANY triggers, C++ fires 3 times per
      * entity death (ATTACKED+DISCOVERED+DESTROYED). TS fires once per death
      * (only DESTROYED path through pendingDestroyedCount).
-     * TS does not model ATTACKED/DISCOVERED Spring calls from techno.cpp.
+     * TS intentionally does not model ATTACKED/DISCOVERED Spring calls from
+     * techno.cpp — single-fire per death is a simplification with no gameplay impact.
      */
     const t = makeTrigger({
       persistence: 2,
@@ -912,7 +913,7 @@ describe('C++ Record_The_Kill triple-Spring — techno.cpp:3897-3901', () => {
 
     // TS fires 1 time (initial fire drained the single pendingDestroyedCount)
     expect(tsFires).toBe(1);
-    // BLOCKED: C++ would fire 3 times (ATTACKED + DISCOVERED + DESTROYED)
+    // DESIGN NOTE: C++ would fire 3 times (ATTACKED + DISCOVERED + DESTROYED)
     // for a persistent TEVENT_ANY trigger on entity death with source.
     // TS fires only 1 time through pendingDestroyedCount path.
   });

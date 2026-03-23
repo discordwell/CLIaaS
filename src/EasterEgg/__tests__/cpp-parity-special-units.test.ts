@@ -171,6 +171,8 @@ function makeSuperweaponContext(overrides: Partial<SuperweaponContext> = {}): Su
       revealAll: vi.fn(),
       shroudAll: vi.fn(),
       isPassable: () => true,
+      isTerrainPassable: () => true,
+      isWaterPassable: () => false,
       setVisibility: vi.fn(),
       inBounds: () => true,
       setTerrain: vi.fn(),

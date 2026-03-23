@@ -112,6 +112,8 @@ function makeMockSuperweaponContext(
       revealAll() { revealedAll = true; },
       shroudAll() {},
       isPassable(_cx: number, _cy: number) { return true; },
+      isTerrainPassable(_cx: number, _cy: number) { return true; },
+      isWaterPassable(_cx: number, _cy: number) { return false; },
       setVisibility(cx: number, cy: number, v: number) { visibilityCells.push({ cx, cy, v }); },
       inBounds(_cx: number, _cy: number) { return true; },
       setTerrain(cx: number, cy: number, terrain: Terrain) { terrainCells.push({ cx, cy, terrain }); },

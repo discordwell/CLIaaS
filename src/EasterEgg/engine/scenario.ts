@@ -1092,6 +1092,10 @@ export function calculateHouseEdgeSpawnCell(
   mapBounds: { x: number; y: number; w: number; h: number } | undefined,
   alignedCell?: CellPos,
   random: () => number = Math.random,
+  /** Optional: when provided with naval=true, checks terrain for water cells.
+   *  C++ display.cpp:2505-2527: Calculated_Cell with SPEED_FLOAT only returns WATER cells. */
+  map?: GameMap,
+  naval = false,
 ): CellPos | null {
   if (!mapBounds) {
     return null;
@@ -1113,19 +1117,57 @@ export function calculateHouseEdgeSpawnCell(
   const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
   const alignedY = alignedCell ? Math.min(Math.max(alignedCell.cy, y), y + h - 1) : y + (randOffset % h);
 
+  let candidate: CellPos | null;
   switch (edge) {
     case 'north':
-      return { cx: alignedX, cy: y };
+      candidate = { cx: alignedX, cy: y };
+      break;
     case 'south':
-      return { cx: alignedX, cy: y + h - 1 };
+      candidate = { cx: alignedX, cy: y + h - 1 };
+      break;
     case 'east':
-      return { cx: x + w - 1, cy: alignedY };
+      candidate = { cx: x + w - 1, cy: alignedY };
+      break;
     case 'west':
-      return { cx: x, cy: alignedY };
+      candidate = { cx: x, cy: alignedY };
+      break;
     default:
       console.warn(`Unknown house edge: '${edge}' — expected north/south/east/west`);
       return null;
   }
+
+  // C++ display.cpp:2505-2527 + Good_Reinforcement_Cell: for naval (SPEED_FLOAT),
+  // only water cells are valid spawn locations. Scan along the edge if the
+  // aligned cell is not water.
+  if (naval && map && candidate) {
+    if (!map.isWaterPassable(candidate.cx, candidate.cy)) {
+      // Scan along the edge for the nearest water cell
+      const isHorizontalEdge = edge === 'north' || edge === 'south';
+      const edgeCoord = isHorizontalEdge ? candidate.cy : candidate.cx;
+      const scanStart = isHorizontalEdge ? x : y;
+      const scanLen = isHorizontalEdge ? w : h;
+      const alignCoord = isHorizontalEdge ? candidate.cx : candidate.cy;
+
+      let bestCell: CellPos | null = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < scanLen; i++) {
+        const sc = scanStart + i;
+        const cx = isHorizontalEdge ? sc : edgeCoord;
+        const cy = isHorizontalEdge ? edgeCoord : sc;
+        if (map.isWaterPassable(cx, cy)) {
+          const dist = Math.abs(sc - alignCoord);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestCell = { cx, cy };
+          }
+        }
+      }
+      if (bestCell) return bestCell;
+      // No water found on this edge — fall back to candidate (C++ would also fail)
+    }
+  }
+
+  return candidate;
 }
 
 /** Determine which map edge would be used for reinforcement spawn.

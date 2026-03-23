@@ -383,7 +383,7 @@ describe('Cargo destruction on chronoshift (C++ drive.cpp:387-389)', () => {
     // and calls Kill_Cargo(NULL) to destroy all passengers.
     //
     // TS: No cargo/passenger system modeled — individual loaded entities are not tracked.
-    // This is a BLOCKED gap (requires full passenger load/unload system).
+    // DESIGN NOTE: requires full passenger load/unload system — not modeled in TS.
     // rules.ini: ChronoKillCargo=yes confirms C++ default is true.
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 5, 5);
     apc.selected = true;
@@ -602,44 +602,35 @@ describe('Blocked destination fallback (C++ drive.cpp:408-410)', () => {
     // C++ behavior: If the target cell is blocked, Nearby_Location finds the
     // closest passable cell for the unit's speed type.
     //
-    // TS superweapon.ts: Does NOT check passability of destination.
-    // The unit is always placed exactly at target coordinates.
-    // (Note: teleportChronoTank in specialUnits.ts DOES check passability
-    //  and rejects impassable cells — but the Chronosphere handler does not.)
-    // BLOCKED: nearbyLocation() exists in pathfinding.ts:738 but is not wired into
-    // the Chronosphere handler (superweapon.ts). Requires adding passability check.
+    // FIXED: superweapon.ts now checks passability of destination and uses
+    // nearbyLocation() spiral scan fallback when the target cell is blocked.
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
 
-    // Create a context where the target cell is impassable
+    // Create a GameMap with an impassable target cell (WATER is impassable for ground)
     const map = new GameMap();
     const impassableCx = 20;
     const impassableCy = 20;
+    // Set map bounds so cells are within range
+    map.setBounds(0, 0, 64, 64);
+    // Make the target cell impassable by setting it to WATER (ground units can't go there)
+    map.setTerrain(impassableCx, impassableCy, 2); // 2 = WATER
 
-    const ctx = makeChronoCtx([tank], {
-      map: {
-        ...map,
-        isPassable: (cx: number, cy: number) => !(cx === impassableCx && cy === impassableCy),
-        setVisibility: () => {},
-        inBounds: () => true,
-        setTerrain: () => {},
-        revealAll: () => {},
-        shroudAll: () => {},
-        unjamRadius: () => {},
-      },
-    });
+    const ctx = makeChronoCtx([tank], { map });
 
     const target = { x: impassableCx * CELL_SIZE + CELL_SIZE / 2, y: impassableCy * CELL_SIZE + CELL_SIZE / 2 };
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
     // C++ would move the unit to a nearby passable cell, NOT to the impassable one.
-    // TS places the unit directly at the target regardless.
-    // This assertion documents the C++ expected behavior:
-    // The unit should NOT be at the exact impassable target.
-    // (TS will place it exactly there — this is fine for gameplay but diverges from C++.)
-    expect(tank.pos.x).toBe(target.x); // TS puts it exactly at target
-    // C++ would have found a nearby location instead
+    // TS now uses nearbyLocation() fallback — unit should NOT be at the impassable target.
+    const tankCx = Math.floor(tank.pos.x / CELL_SIZE);
+    const tankCy = Math.floor(tank.pos.y / CELL_SIZE);
+    const isAtBlockedCell = tankCx === impassableCx && tankCy === impassableCy;
+    expect(isAtBlockedCell).toBe(false);
+    // The unit should be alive and at a nearby passable cell
+    expect(tank.alive).toBe(true);
+    expect(tank.moebiusCell).toBeDefined();
   });
 });
 

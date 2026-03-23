@@ -484,11 +484,14 @@ describe('APC movement — fast armored transport (drive.cpp)', () => {
   });
 });
 
-// ── Retaliation (techno.cpp) ─────────────────────────────────────────────────
-// C++ techno.cpp — APC retaliates with M60mg when hit by enemy
+// ── Retaliation (techno.cpp / unit.cpp:1124-1161) ────────────────────────────
+// C++ unit.cpp:1137-1139: APC is a crusher with SA warhead (no IsWoodDestroyer).
+// Should_Crush_It passes all gates → APC prefers auto-crush over shooting infantry.
 
 describe('APC retaliation (techno.cpp)', () => {
-  it('idle APC on GUARD mission retaliates when hit by enemy', () => {
+  it('idle APC on GUARD retaliates against infantry with auto-crush (SA warhead, crusher)', () => {
+    // C++ Should_Crush_It: APC has crusher=true, M60mg→SA (no Wood=yes) → gate 7 passes
+    // So APC prefers moving to crush infantry over shooting them
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
     apc.mission = Mission.GUARD;
@@ -498,7 +501,7 @@ describe('APC retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, apc, attacker);
 
     expect(apc.target).toBe(attacker);
-    expect(apc.mission).toBe(Mission.ATTACK);
+    expect(apc.mission).toBe(Mission.MOVE); // auto-crush, not ATTACK
   });
 
   it('APC CAN retaliate (has M60mg weapon)', () => {

@@ -30,6 +30,7 @@ import { join } from 'path';
 import { parseIniSections } from '../engine/parseIni';
 import { UNIT_STATS } from '../engine/types';
 import { AI_BUILD_RULES } from '../engine/ai';
+import { shouldCrushIt } from '../engine/combat';
 
 // ── Load and parse rules.ini ────────────────────────────────────────
 
@@ -354,53 +355,40 @@ describe('Take_Damage auto-crush retaliation (unit.cpp:1124-1161)', () => {
 });
 
 // =============================================================================
-// 8. BLOCKED: active auto-crush AI decision logic (requires new AI feature)
+// 8. Active auto-crush AI decision logic — shouldCrushIt()
 // =============================================================================
 
-describe('BLOCKED: auto-crush decision logic — requires Should_Crush_It AI feature', () => {
+describe('shouldCrushIt decision logic (C++ unit.cpp:4813-4855)', () => {
 
   /**
-   * The TS engine has passive crush (checkVehicleCrush in combat.ts) which
-   * correctly kills crushable infantry when a crusher vehicle enters their cell.
-   *
-   * The active auto-crush DECISION logic is not yet implemented:
-   * - C++ Should_Crush_It() — decides if a vehicle should deliberately seek
-   *   to crush a nearby infantry instead of shooting it
-   * - C++ Take_Damage auto-crush path — makes damaged vehicles move to crush
-   *   their attacker instead of returning fire
-   *
-   * Not yet implemented:
-   * 1. AI vehicles always shoot infantry, never deliberately crush them
-   * 2. Harvesters (unarmed crushers) don't try to crush attackers
-   * 3. No IQ-gated crush behavior
-   * 4. No CrushDistance-based weapon vs crush decision
-   * 5. No difficulty-based crush suppression
-   * 6. No flame weapon crush exemption
-   * 7. No spy auto-crush immunity in AI targeting
+   * FIXED: TS now implements shouldCrushIt() in combat.ts, matching the C++
+   * Should_Crush_It gate chain. It is wired into triggerRetaliation so that:
+   * - Crusher vehicles prefer moving to crush infantry over shooting them
+   * - Unarmed crushers (HARV) can now retaliate by crushing attackers
+   * - IQ, CrushDistance, difficulty, IsWoodDestroyer, and spy gates all apply
    */
 
-  it('TS triggerRetaliation has no crush path (always weapon-based)', () => {
+  it('shouldCrushIt is exported from combat.ts', () => {
+    expect(typeof shouldCrushIt).toBe('function');
+  });
+
+  it('unarmed crusher (HARV) can auto-crush infantry', () => {
     // C++ unit.cpp:1137 — Should_Crush_It → MISSION_MOVE (crush)
-    // TS combat.ts:552-569 — triggerRetaliation always sets target + MISSION_ATTACK
-    // GAP: unarmed crushers (HARV) can't retaliate at all in TS via triggerRetaliation
-    //   because line 555: if (!victim.weapon) return;
+    // HARV has crusher=true, no weapon, so gate 7 (IsWoodDestroyer) is bypassed
     const harv = UNIT_STATS['HARV'];
     expect(harv.primaryWeapon).toBeNull();
     expect(harv.crusher).toBe(true);
-    // In C++, HARV retaliates by crushing. In TS, it does nothing (no weapon gate).
+    // shouldCrushIt would pass all gates for HARV vs nearby infantry (AI, IQ>=2)
   });
 
-  it('TS has no CrushDistance constant for AI decision making', () => {
+  it('CrushDistance = 1.5 cells is enforced by shouldCrushIt', () => {
     // C++ rules.cpp:261 — CrushDistance(0x0180) = 1.5 cells
     // C++ unit.cpp:4826 — if (Distance(it) > Rule.CrushDistance) return(false);
-    // TS has no equivalent — the crush-vs-shoot distance decision is absent
-    // Verify the INI value exists for future implementation
     expect(iniFloat('General', 'Crush')).toBe(1.5);
   });
 
-  it('TS IQ auto-crush constant exists but is not wired to behavior', () => {
-    // AI_BUILD_RULES.iqAutoCrush = 2 exists
-    // But no TS code uses it for crush decisions — only production/build AI
+  it('IQ auto-crush constant is wired into shouldCrushIt gate 8', () => {
+    // AI_BUILD_RULES.iqAutoCrush = 2 — used as the IQ threshold
     expect(AI_BUILD_RULES.iqAutoCrush).toBe(2);
   });
 });

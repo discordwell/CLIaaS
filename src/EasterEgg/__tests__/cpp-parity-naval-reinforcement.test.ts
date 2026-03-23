@@ -48,9 +48,11 @@ import {
   UNIT_STATS,
   TERRAIN_SPEED,
   SpeedClass,
+  MAP_CELLS,
   type CellPos,
 } from '../engine/types';
 import { Entity } from '../engine/entity';
+import { GameMap, Terrain } from '../engine/map';
 
 // ============================================================
 // C++ constants reproduced for reference
@@ -133,26 +135,64 @@ describe('Naval reinforcement — C++ parity', () => {
     // accepts cells where Good_Reinforcement_Cell returns true, which
     // requires Is_Clear_To_Move(SPEED_FLOAT) — meaning the cell must be water.
     //
-    // BLOCKED: TS calculateHouseEdgeSpawnCell does NOT check terrain type.
-    // It returns any edge cell based purely on coordinates.
+    // FIXED: TS calculateHouseEdgeSpawnCell now accepts optional map + naval params.
+    // When naval=true, it scans along the edge for water cells.
 
     it('should return a water cell for naval reinforcements, not a land cell', () => {
       // C++ display.cpp:2511: Good_Reinforcement_Cell(trycell, trycell+modifier, loco, zone, mzone)
       // For SPEED_FLOAT, only water cells pass this check.
       //
-      // TS currently returns an edge cell without checking terrain.
-      // This test documents the expected C++ behavior.
+      // TS now checks terrain when map and naval flag are provided.
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
       const originWp = { cx: 30, cy: 20 };
-      const edgeCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
+      const map = new GameMap();
+      map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
+      // Set aligned cell (30,10) as land, but put water at (25,10) on north edge
+      // All cells default to CLEAR (land), so the aligned cell is land.
+      map.setTerrain(25, 10, Terrain.WATER);
 
-      // The TS function returns an edge cell, but has no way to verify it's water.
-      // In C++, Calculated_Cell would scan the entire edge looking for a water cell.
-      // BLOCKED: TS does not accept terrain data, cannot filter for water cells.
+      const edgeCell = calculateHouseEdgeSpawnCell(
+        House.USSR, houseEdges, MAP_BOUNDS, originWp,
+        Math.random, map, true,
+      );
+
       expect(edgeCell).toBeDefined();
-      // This test passes structurally but documents a behavioral gap:
-      // C++ would only return this cell if the terrain at (30, 10) is WATER.
-      // TS returns it regardless of terrain.
+      // C++ would scan along the north edge and find the water cell at (25,10)
+      expect(edgeCell!.cx).toBe(25);
+      expect(edgeCell!.cy).toBe(10);
+    });
+
+    it('returns aligned cell when it is already water (no scan needed)', () => {
+      const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
+      const originWp = { cx: 30, cy: 20 };
+      const map = new GameMap();
+      map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
+      map.setTerrain(30, 10, Terrain.WATER);
+
+      const edgeCell = calculateHouseEdgeSpawnCell(
+        House.USSR, houseEdges, MAP_BOUNDS, originWp,
+        Math.random, map, true,
+      );
+
+      expect(edgeCell).toBeDefined();
+      expect(edgeCell!.cx).toBe(30);
+      expect(edgeCell!.cy).toBe(10);
+    });
+
+    it('without naval flag, returns edge cell regardless of terrain', () => {
+      const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
+      const originWp = { cx: 30, cy: 20 };
+      const map = new GameMap();
+      map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
+      // All CLEAR (land) — naval=false should not care
+      const edgeCell = calculateHouseEdgeSpawnCell(
+        House.USSR, houseEdges, MAP_BOUNDS, originWp,
+        Math.random, map, false,
+      );
+
+      expect(edgeCell).toBeDefined();
+      expect(edgeCell!.cx).toBe(30);
+      expect(edgeCell!.cy).toBe(10);
     });
 
     it('edge cell coordinates are within map bounds (structural check)', () => {
@@ -412,8 +452,8 @@ describe('Naval reinforcement — C++ parity', () => {
       // For ground (SPEED_WHEEL): scans for land cells at edge
       // For naval (SPEED_FLOAT): scans for water cells at edge
       //
-      // BLOCKED: TS uses the same calculateHouseEdgeSpawnCell for both.
-      // No terrain check means naval units can spawn on land cells.
+      // FIXED: TS calculateHouseEdgeSpawnCell now accepts map + naval params.
+      // When naval=true, it scans the edge for water cells.
 
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
       const originWp = { cx: 32, cy: 32 };
@@ -422,11 +462,9 @@ describe('Naval reinforcement — C++ parity', () => {
       const groundCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
       const navalCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
 
-      // BLOCKED: C++ would return different cells — ground on land, naval on water.
-      // TS returns the same cell for both.
+      // Without map/naval params, both return the same cell (backward compat).
+      // With map + naval=true, the naval call would find a water cell instead.
       expect(groundCell).toEqual(navalCell);
-      // This equality IS the gap — in C++ they would differ when the edge has
-      // mixed water/land terrain.
     });
 
     it('naval reinforcement team spawns members at edge cell', () => {

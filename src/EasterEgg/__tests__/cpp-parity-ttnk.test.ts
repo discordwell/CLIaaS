@@ -508,11 +508,13 @@ describe('TTNK stop-rotate-move (drive.cpp)', () => {
   });
 });
 
-// -- Retaliation (techno.cpp) ------------------------------------------------
-// C++ techno.cpp — idle/moving units counter-attack when hit by enemy
+// -- Retaliation (techno.cpp / unit.cpp:1124-1161) ----------------------------
+// C++ unit.cpp:1137-1139: TTNK is a crusher with TTankZap→Super (no IsWoodDestroyer).
+// Should_Crush_It passes all gates → TTNK prefers auto-crush vs infantry.
 
 describe('TTNK retaliation (techno.cpp)', () => {
-  it('idle TTNK on GUARD mission retaliates when hit by enemy', () => {
+  it('idle TTNK on GUARD retaliates against infantry with auto-crush', () => {
+    // C++ Should_Crush_It: TTNK has crusher=true, TTankZap→Super (no Wood=yes) → gate 7 passes
     const ttnk = entityAtCell(UnitType.V_TTNK, House.USSR, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
     ttnk.mission = Mission.GUARD;
@@ -522,7 +524,7 @@ describe('TTNK retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, ttnk, attacker);
 
     expect(ttnk.target).toBe(attacker);
-    expect(ttnk.mission).toBe(Mission.ATTACK);
+    expect(ttnk.mission).toBe(Mission.MOVE); // auto-crush, not ATTACK
   });
 
   it('TTNK CAN retaliate (has weapon)', () => {
@@ -558,7 +560,7 @@ describe('TTNK retaliation (techno.cpp)', () => {
     expect(ttnk.mission).toBe(Mission.GUARD);
   });
 
-  it('retaliates when current target is dead', () => {
+  it('retaliates when current target is dead (auto-crush infantry)', () => {
     const ttnk = entityAtCell(UnitType.V_TTNK, House.USSR, 10, 10);
     const deadTarget = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     deadTarget.alive = false;
@@ -569,9 +571,9 @@ describe('TTNK retaliation (techno.cpp)', () => {
     const ctx = makeCombatCtx([ttnk, deadTarget, newAttacker]);
     triggerRetaliation(ctx, ttnk, newAttacker);
 
-    // Should switch to new attacker since old target is dead
+    // Should switch to new attacker since old target is dead — auto-crush
     expect(ttnk.target).toBe(newAttacker);
-    expect(ttnk.mission).toBe(Mission.ATTACK);
+    expect(ttnk.mission).toBe(Mission.MOVE); // auto-crush
   });
 });
 
