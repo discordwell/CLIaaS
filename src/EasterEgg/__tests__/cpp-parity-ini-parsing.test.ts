@@ -97,15 +97,13 @@ describe('Section parsing (ini.cpp:200-298)', () => {
     expect(ini.get('S')!.get('Key')).toBe('A=B');
   });
 
-  // PARITY GAP: C++ ini.cpp:272-273 skips entries with empty values after trim.
-  // TS parseIniSections keeps them with value="".
-  // C++ behavior: "Key=" → key="Key", value="" → SKIPPED (empty value).
-  // TS behavior: "Key=" → key="Key", value="" → KEPT.
+  // C++ ini.cpp:272-273 skips entries with empty values after trim.
+  // TS now matches: "Key=" → key="Key", value="" → SKIPPED.
   it('C++ discards entries with empty value after trim — ini.cpp:273', () => {
     const ini = parseIniSections('[S]\nKey=\nOther=Val\n');
     const s = ini.get('S')!;
-    // C++ expected: "Key=" entry is discarded, only "Other" remains
-    expect(s.has('Key')).toBe(false); // PARITY GAP — TS returns true
+    // "Key=" entry is discarded, only "Other" remains
+    expect(s.has('Key')).toBe(false);
   });
 });
 
@@ -128,16 +126,14 @@ describe('Comment handling — Strip_Comments (ini.cpp:1278-1287)', () => {
     expect(ini.get('S')!.get('Key')).toBe('Val');
   });
 
-  // PARITY GAP: C++ Strip_Comments (ini.cpp:1278-1287) runs on each line BEFORE
+  // C++ Strip_Comments (ini.cpp:1278-1287) runs on each line BEFORE
   // the '=' split (ini.cpp:254). It finds first ';' via strchr and truncates.
   // So "Key=Value ; comment" → "Key=Value" → value="Value".
-  // TS parseIniSections does NOT strip inline ; comments.
-  // TS result: value="Value ; comment".
+  // TS now matches: strips inline ; comments before splitting on =.
   it('inline ; comments truncate the value — C++ strchr(buffer, \";\")', () => {
     const ini = parseIniSections('[S]\nKey=Value ; comment\n');
     const val = ini.get('S')!.get('Key');
-    // C++ expected: inline comment stripped, value is "Value"
-    expect(val).toBe('Value'); // PARITY GAP — TS returns "Value ; comment"
+    expect(val).toBe('Value');
   });
 
   it('# is NOT a comment character in C++ INI parsing', () => {
@@ -153,15 +149,8 @@ describe('Comment handling — Strip_Comments (ini.cpp:1278-1287)', () => {
     expect(s.get('Key')).toBe('Val');
 
     // C++ would parse "# NotAComment" as a key (with the # in it).
-    // If TS also treats '#' as normal text, there should be 2 entries.
-    // If TS strips '#' lines as comments, there would be 1 entry.
-    // Both TS and C++ should have this entry since '#' is not a comment character.
-    if (s.size === 1) {
-      // PARITY GAP: TS treats '#' as comment but C++ does not
-      expect(s.size).toBe(2);
-    } else {
-      expect(s.size).toBe(2);
-    }
+    // TS now matches C++: '#' is treated as normal text, so there are 2 entries.
+    expect(s.size).toBe(2);
   });
 });
 
@@ -293,9 +282,8 @@ describe('Integer parsing — Get_Int (ini.cpp:813-834)', () => {
     expect(getIntFromIni('1000')).toBe(1000);
   });
 
-  // PARITY GAP: C++ ini.cpp:823-824 handles "$FF" hex format via sscanf.
-  // TS uses parseInt(raw, 10) which returns NaN for "$FF".
-  // C++ result: 255. TS result: NaN.
+  // C++ ini.cpp:823-824 handles "$FF" hex format via sscanf.
+  // TS parseIniInt now matches: handles leading '$' hex format.
   it('C++ hex "$FF" format — parseIniInt handles this (ini.cpp:823-824)', () => {
     const ini = parseIniSections('[S]\nKey=$FF\n');
     const raw = ini.get('S')?.get('Key');
@@ -304,9 +292,8 @@ describe('Integer parsing — Get_Int (ini.cpp:813-834)', () => {
     expect(parseIniInt(raw)).toBe(255);
   });
 
-  // PARITY GAP: C++ ini.cpp:826-827 handles "FFh" trailing-h hex via sscanf.
-  // TS uses parseInt(raw, 10) which returns NaN for "FFh".
-  // C++ result: 255. TS result: NaN.
+  // C++ ini.cpp:826-827 handles "FFh" trailing-h hex via sscanf.
+  // TS parseIniInt now matches: handles trailing 'h' hex format.
   it('C++ hex "FFh" format — parseIniInt handles this (ini.cpp:826-827)', () => {
     const ini = parseIniSections('[S]\nKey=FFh\n');
     const raw = ini.get('S')?.get('Key');
@@ -362,15 +349,12 @@ describe('Case sensitivity — CRC-based lookup (ini.h:125,139)', () => {
     expect(ini.get('S')!.get('Player')).toBe('Greece');
   });
 
-  // PARITY GAP: C++ ini.cpp:228-231 replaces '[' with space, zeros ']', then
+  // C++ ini.cpp:228-231 replaces '[' with space, zeros ']', then
   // calls strtrim(). So "[ Basic ]" → " Basic " → "Basic".
-  // TS parseIniSections uses line.startsWith('[') && line.endsWith(']'),
-  // then line.slice(1, -1). "[ Basic ]" → " Basic " (not trimmed further).
-  // C++ result: section name "Basic". TS result: section name " Basic ".
+  // TS now matches: trims section name after extracting from brackets.
   it('section name with spaces is trimmed — C++ strtrim after ] removal', () => {
     const ini = parseIniSections('[ Basic ]\nKey=Val\n');
-    // C++ expected: section name is "Basic" (leading/trailing spaces trimmed)
-    expect(ini.has('Basic')).toBe(true); // PARITY GAP — TS stores " Basic "
+    expect(ini.has('Basic')).toBe(true);
   });
 });
 
@@ -634,26 +618,20 @@ describe('Waypoint cell-index parsing — display.cpp:4295-4303', () => {
 // =============================================================================
 
 describe('Section bracket edge cases — ini.cpp:220,228-231', () => {
-  // PARITY GAP: C++ ini.cpp:220 detects sections via strchr(buffer, ']'),
-  // which finds the FIRST ']' anywhere in the line. Text after ']' is ignored.
-  // C++ ini.cpp:229-230: ptr = strchr(buffer, ']'); *ptr = '\0';
-  // So "[Section] ; extra" → section name "Section".
-  // TS uses line.endsWith(']'), which requires ']' at end of trimmed line.
-  // "[Section] ; extra stuff" does NOT end with ']', so TS skips it entirely.
+  // C++ ini.cpp:220 detects sections via strchr(buffer, ']'), which finds the
+  // FIRST ']' anywhere in the line. Text after ']' is ignored.
+  // TS now matches: uses indexOf(']') to find first ']', ignoring trailing text.
+  // Note: inline ';' comment stripping runs first, so "[Section] ; extra" becomes
+  // "[Section] " before section detection. indexOf(']') still finds it.
   it('section with trailing text after ] — C++ ignores everything after ]', () => {
     const ini = parseIniSections('[Section] ; extra stuff\nKey=Val\n');
-    // C++ expected: section "Section" exists with Key=Val
-    expect(ini.has('Section')).toBe(true); // PARITY GAP — TS returns false
+    expect(ini.has('Section')).toBe(true);
   });
 
   it('section with spaces in name — "[My Section]" → "My Section"', () => {
     const ini = parseIniSections('[My Section]\nKey=Val\n');
-    if (ini.has('My Section')) {
-      expect(ini.get('My Section')!.get('Key')).toBe('Val');
-    } else {
-      // PARITY GAP
-      expect(ini.has('My Section')).toBe(true);
-    }
+    expect(ini.has('My Section')).toBe(true);
+    expect(ini.get('My Section')!.get('Key')).toBe('Val');
   });
 });
 
@@ -673,25 +651,20 @@ describe('Section bracket edge cases — ini.cpp:220,228-231', () => {
 // =============================================================================
 
 describe('Empty section handling — ini.cpp:290-295', () => {
-  // PARITY GAP: C++ ini.cpp:290-295 discards sections with no valid entries.
-  // TS parseIniSections creates an empty Map for the section and keeps it.
-  // C++ result: [Empty] not present. TS result: [Empty] present (empty Map).
+  // C++ ini.cpp:290-295 discards sections with no valid entries.
+  // TS now matches: empty sections are discarded after parsing.
   it('C++ discards sections with no entries', () => {
     const ini = parseIniSections('[Empty]\n[HasEntries]\nKey=Val\n');
-    // C++ expected: [Empty] is discarded (no entries)
-    expect(ini.has('Empty')).toBe(false); // PARITY GAP — TS returns true
-    // Non-empty section should exist either way
+    expect(ini.has('Empty')).toBe(false);
     expect(ini.has('HasEntries')).toBe(true);
     expect(ini.get('HasEntries')!.get('Key')).toBe('Val');
   });
 
-  // PARITY GAP: Same as above — a section containing only comment lines
-  // has no valid entries, so C++ discards it.
-  // TS keeps it as an empty Map.
+  // A section containing only comment lines has no valid entries,
+  // so C++ discards it. TS now matches.
   it('section with only comments has no entries — C++ discards it', () => {
     const ini = parseIniSections('[OnlyComments]\n; just a comment\n[Real]\nKey=Val\n');
-    // C++ expected: [OnlyComments] is discarded
-    expect(ini.has('OnlyComments')).toBe(false); // PARITY GAP — TS returns true
+    expect(ini.has('OnlyComments')).toBe(false);
   });
 });
 

@@ -457,6 +457,10 @@ export const AI_BUILD_RULES = {
   /** C++ Rule.IsComputerParanoid — computer players ally against humans when losing (rules.ini Paranoid=yes) */
   paranoid:       true,
 
+  // C++ [General] section constants (rules.ini lines 8-125)
+  /** C++ Rule.BridgeStrength — random roll ceiling for bridge damage chance (rules.ini [General] BridgeStrength=1000) */
+  bridgeStrength: 1000,
+
   // C++ [IQ] section thresholds — gate AI abilities by IQ level (rules.ini lines 269-280)
   /** C++ Rule.MaxIQ — maximum number of discrete IQ levels (rules.ini MaxIQLevels=5) */
   maxIQLevels:    5,
