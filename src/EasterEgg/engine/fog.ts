@@ -190,6 +190,19 @@ export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: n
   // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
   // Radius 0 reveals nothing — early return.
   if (radius === 0) return;
+  // C++ map.cpp:70: RadiusCount[1] = 9 — radius 1 includes all 8 neighbors (3x3 grid).
+  if (radius === 1) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const rx = cx + dx;
+        const ry = cy + dy;
+        if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+          map.setVisibility(rx, ry, 2);
+        }
+      }
+    }
+    return;
+  }
   // C++ coord.cpp:124-136 — Distance() uses octagonal approximation:
   //   max(|dy|,|dx|) + min(|dy|,|dx|)/2, compared in lepton units.
   // Simplified for cell coords: max*2 + min <= radius*2

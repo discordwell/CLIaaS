@@ -465,20 +465,17 @@ describe('crate type fallback to money (cell.cpp:2161-2296)', () => {
 // no surface/overlay distinction.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('water crate override (cell.cpp:2286-2296)', () => {
-  it('BLOCKED: unit crate on water should fallback to money', () => {
-    // C++ prevents land-only units from spawning on water cells by
-    // converting CRATE_UNIT to CRATE_MONEY when the crate overlay is water.
-    // TS has no such mechanism — a "unit" crate type is always applied.
+  it('CLOSED: unit crate on water falls back to money', () => {
+    // C++ cell.cpp:2286-2296: water crate + CRATE_UNIT -> CRATE_MONEY
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
 
-    // Even if we set the crate type to 'unit', TS will spawn a unit
-    // regardless of whether the crate was a water crate.
     const crate = makeCrate('unit');
+    crate.surface = 'water';
     pickupCrate(ctx, crate, unit);
 
-    // TS spawned a unit — C++ would have given money on a water crate
-    expect(ctx.entities.length).toBe(1); // spawned entity
+    expect(ctx.entities.length).toBe(0);
+    expect(ctx.credits).toBe(2000);
   });
 });
 
@@ -505,17 +502,20 @@ describe('money crate amount (cell.cpp:2335-2341)', () => {
     expect(ctx.credits).toBe(2000);
   });
 
-  it('BLOCKED: multiplayer money should be Random_Pick(2000, 2900)', () => {
+  it('CLOSED: multiplayer money is Random_Pick(2000, 2900)', () => {
     // C++ multiplayer: Random_Pick(CrateData[CRATE_MONEY], CrateData[CRATE_MONEY]+900)
-    // With RULES.INI CrateData[CRATE_MONEY] = 2000, this gives 2000-2900 range.
-    // TS always gives flat 2000, regardless of game mode.
-    const ctx = makeMockContext();
-    const unit = makeEntity(UnitType.V_JEEP);
-    pickupCrate(ctx, makeCrate('money'), unit);
-
-    // TS gives exactly 2000 — which matches solo but NOT multiplayer behavior
-    expect(ctx.credits).toBe(2000);
-    // In C++ MP, this should be in range [2000, 2900]
+    const ctx = makeMockContext({ isMultiplayer: true });
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < 200; i++) {
+      ctx.credits = 0;
+      const unit = makeEntity(UnitType.V_JEEP);
+      pickupCrate(ctx, makeCrate('money'), unit);
+      min = Math.min(min, ctx.credits);
+      max = Math.max(max, ctx.credits);
+    }
+    expect(min).toBeGreaterThanOrEqual(2000);
+    expect(max).toBeLessThanOrEqual(2900);
+    expect(max).toBeGreaterThan(2000);
   });
 });
 
@@ -906,18 +906,20 @@ describe('crate lifetime (rules.cpp:207)', () => {
 // TS has no equivalent logic.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('MCV force spawn (cell.cpp:2264-2270)', () => {
-  it('BLOCKED: C++ forces MCV spawn when player lost all buildings', () => {
-    // C++ checks BScan==0 (no buildings), sufficient money, bases option on,
-    // and no existing MCV → forces CRATE_UNIT with force_mcv=true
-    // TS has no such mechanic — crate type is purely random/fixed
+  it('CLOSED: C++ forces unit spawn when player lost all buildings', () => {
+    // C++ cell.cpp:2264-2270: BScan==0 -> forces CRATE_UNIT (MCV)
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
-    ctx.structures.length = 0; // no structures
+    // Player had buildings but they are all destroyed
+    ctx.structures.push({ alive: false, house: House.Greece, hp: 0, maxHp: 1000,
+      cx: 5, cy: 5, type: 'FACT', w: 3, h: 3 } as any);
 
-    // Even with no structures, TS won't force an MCV
     const crate = makeCrate('money');
     pickupCrate(ctx, crate, unit);
-    expect(ctx.credits).toBe(2000); // got money, not forced MCV
+
+    expect(ctx.credits).toBe(0);
+    expect(ctx.entities.length).toBe(1);
+    expect(ctx.evaMessages.some(m => m.text === 'REINFORCEMENTS')).toBe(true);
   });
 });
 
@@ -935,16 +937,17 @@ describe('MCV force spawn (cell.cpp:2264-2270)', () => {
 // afford one, the money amount is forced to the refinery cost.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('refinery money force (cell.cpp:2276-2280)', () => {
-  it('BLOCKED: C++ forces money amount to refinery cost when needed', () => {
-    // C++ checks: has construction yard, no refinery, can't afford refinery
-    // → forces money to refinery cost. TS always gives flat 2000.
+  it('CLOSED: low credits + ConYard + no refinery forces crate type to money', () => {
+    // C++ cell.cpp:2276-2280: has ConYard, no refinery, can't afford one -> force money
     const ctx = makeMockContext();
     const unit = makeEntity(UnitType.V_JEEP);
-    ctx.credits = 100; // can't afford refinery
+    ctx.credits = 100;
+    ctx.structures.push({ alive: true, house: House.Greece, hp: 1000, maxHp: 1000,
+      cx: 5, cy: 5, type: 'FACT', w: 3, h: 3 } as any);
 
-    pickupCrate(ctx, makeCrate('money'), unit);
-    // TS gives 2000 regardless. C++ might give more/less based on refinery cost.
+    pickupCrate(ctx, makeCrate('armor'), unit);
     expect(ctx.credits).toBe(2100);
+    expect(unit.armorBias).toBe(1.0);
   });
 });
 
@@ -979,18 +982,15 @@ describe('reveal crate — visionary flag (cell.cpp:2186-2194, 2356-2364)', () =
     expect(ctx.visionaryHouses.has(House.Greece)).toBe(true);
   });
 
-  it('BLOCKED: second reveal should fallback to darkness (not money)', () => {
-    // C++ checks IsVisionary → if already visionary, gives darkness instead
-    // (or money if GPS also active).
-    // TS has no such fallback — second reveal just calls revealAll again.
+  it('CLOSED: second reveal falls back to darkness', () => {
+    // C++ cell.cpp:2186-2194: if (IsVisionary) powerup = CRATE_DARKNESS
     const ctx = makeMockContext();
-    ctx.visionaryHouses.add(House.Greece); // already visionary
+    ctx.visionaryHouses.add(House.Greece);
     const unit = makeEntity(UnitType.V_JEEP, House.Greece);
 
     pickupCrate(ctx, makeCrate('reveal'), unit);
 
-    // TS gives reveal again. C++ would give darkness.
-    expect(ctx.visionaryHouses.has(House.Greece)).toBe(true);
-    // No darkness effect applied — TS doesn't check visionary status before applying
+    const darknessMsg = ctx.evaMessages.find(m => m.text === 'DARKNESS');
+    expect(darknessMsg, 'should trigger darkness effect, not reveal').toBeDefined();
   });
 });

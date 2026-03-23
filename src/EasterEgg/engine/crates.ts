@@ -35,6 +35,7 @@ export interface Crate {
   type: CrateType;
   tick: number;     // tick when spawned
   lifetime: number; // CR6: ticks until expiry
+  surface?: 'land' | 'water'; // C++ cell.cpp:2286: OVERLAY_WATER_CRATE vs OVERLAY_WOOD_CRATE
 }
 
 // ── Static data (moved from Game class) ─────────────────────────────────────
@@ -123,6 +124,7 @@ export interface CrateContext {
   screenShake: number;
   map: GameMap;
   crateOverrides: { silver?: string; wood?: string; water?: string };
+  isMultiplayer?: boolean; // C++ Session.Type != GAME_NORMAL — multiplayer money uses Random_Pick
 
   // Callbacks
   addCredits(amount: number, bypassSiloCap: boolean): void;
@@ -185,34 +187,49 @@ export function spawnCrate(ctx: CrateContext): void {
 /** C++ cell.cpp:2161-2296 — check if the selected crate type would be redundant/invalid.
  *  Returns 'money' if the crate should fall back, or the original type if it's valid.
  *  C++ falls back to CRATE_MONEY when the powerup would have no effect. */
-export function crateFallbackCheck(type: CrateType, unit: Entity, ctx: CrateContext): CrateType {
+export function crateFallbackCheck(type: CrateType, unit: Entity, ctx: CrateContext, crate?: Crate): CrateType {
+  // C++ cell.cpp:2264-2270: Force MCV when player lost all buildings
+  const allPlayerStructures = ctx.structures.filter(s => ctx.isAllied(s.house, ctx.playerHouse));
+  const alivePlayerStructures = allPlayerStructures.filter(s => s.alive);
+  const hasMCV = ctx.entities.some(e => e.alive && e.house === unit.house && e.type === UnitType.V_MCV);
+  if (alivePlayerStructures.length === 0 && allPlayerStructures.length > 0 && !hasMCV) {
+    return 'unit'; // force_mcv
+  }
+
+  // C++ cell.cpp:2276-2280: Force money when player has ConYard but no refinery
+  const hasConyard = alivePlayerStructures.some(s => s.type === 'FACT');
+  const hasRefinery = alivePlayerStructures.some(s => s.type === 'PROC');
+  if (hasConyard && !hasRefinery && ctx.credits < 2000 && type !== 'money') {
+    return 'money';
+  }
+
   switch (type) {
     case 'armor':
-      // C++ cell.cpp:2174-2176: if (object->ArmorBias != 1) powerup = CRATE_MONEY
       if (unit.armorBias !== 1.0) return 'money';
       break;
     case 'speed':
-      // C++ cell.cpp:2178-2180: if (object->SpeedBias != 1 || object->What_Am_I() == RTTI_AIRCRAFT)
       if (unit.speedBias !== 1.0 || unit.isAirUnit) return 'money';
       break;
     case 'firepower':
-      // C++ cell.cpp:2182-2184: if (object->FirepowerBias != 1 || !object->Is_Weapon_Equipped())
       if (unit.firepowerBias !== 1.0 || !unit.weapon) return 'money';
       break;
     case 'cloak':
-      // C++ cell.cpp:2196-2198: if (object->IsCloakable) powerup = CRATE_MONEY
       if (unit.isCloakable) return 'money';
       break;
+    case 'reveal':
+      // C++ cell.cpp:2186-2194: second reveal falls back to darkness
+      if (ctx.visionaryHouses.has(unit.house)) return 'darkness';
+      break;
     case 'unit': {
-      // C++ cell.cpp:2162-2164: if (object->House->CurUnits > 50) powerup = CRATE_MONEY
       const houseUnits = ctx.entities.filter(e => e.alive && e.house === unit.house && !e.stats.isInfantry).length;
       if (houseUnits > 50) return 'money';
+      if (crate?.surface === 'water') return 'money';
       break;
     }
     case 'squad': {
-      // C++ cell.cpp:2166-2168: if (object->House->CurInfantry > 100) powerup = CRATE_MONEY
       const houseInfantry = ctx.entities.filter(e => e.alive && e.house === unit.house && e.stats.isInfantry).length;
       if (houseInfantry > 100) return 'money';
+      if (crate?.surface === 'water') return 'money';
       break;
     }
   }
@@ -223,7 +240,7 @@ export function crateFallbackCheck(type: CrateType, unit: Entity, ctx: CrateCont
 export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void {
   ctx.playSoundAt('crate_pickup', crate.x, crate.y);
   // C++ cell.cpp:2161-2296: fallback to money when selected type would be redundant
-  const effectiveType = crateFallbackCheck(crate.type, unit, ctx);
+  const effectiveType = crateFallbackCheck(crate.type, unit, ctx, crate);
   // C++ cell.cpp:2319-2321: CrateAnims[powerup] — type-specific animation at pickup location
   // Falls back to generic piffpiff if no crate-specific animation defined (ANIM_NONE)
   const crateSprite = CRATE_ANIM_MAP[effectiveType];
@@ -232,11 +249,15 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
     frame: 0, maxFrames: 10, size: 8, sprite: crateSprite ?? 'piffpiff', spriteStart: 0,
   });
   switch (effectiveType) {
-    case 'money':
-      // CR1: C++ solo play gives 2000 credits from money crate
-      ctx.addCredits(2000, true);
+    case 'money': {
+      // C++ cell.cpp:2335-2341: solo = SoloCrateMoney=2000, MP = Random_Pick(2000, 2900)
+      const amount = ctx.isMultiplayer
+        ? 2000 + Math.floor(Math.random() * 901)
+        : 2000;
+      ctx.addCredits(amount, true);
       ctx.evaMessages.push({ text: 'MONEY CRATE', tick: ctx.tick });
       break;
+    }
     case 'heal':
       unit.hp = unit.maxHp;
       ctx.evaMessages.push({ text: 'UNIT HEALED', tick: ctx.tick });

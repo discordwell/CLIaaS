@@ -357,26 +357,43 @@ describe('Naval reinforcement — C++ parity', () => {
   //   }
   // ============================================================
   describe('IsALoaner flag on vessel transports with unload mission', () => {
-    it('C++ sets IsALoaner=true on LST when team has UNLOAD mission', () => {
-      // C++ reinf.cpp:176-182: checks if team has TMISSION_UNLOAD
-      // C++ reinf.cpp:251: sets IsALoaner on vessel transport
-      //
-      // BLOCKED: TS Entity has no IsALoaner concept.
-      // In C++, IsALoaner marks the transport as temporary — it exits the map
-      // after unloading. This affects whether the player can select/control it.
-      //
-      // This test documents the C++ behavior. TS does not implement IsALoaner.
-      const hasUnload = true; // team has TMISSION_UNLOAD
-      const isVessel = UNIT_STATS['LST'].isVessel;
-
-      // C++ logic:
-      const cppWouldSetLoaner = hasUnload && isVessel;
-      expect(cppWouldSetLoaner).toBe(true);
-
-      // TS has no IsALoaner field on Entity
-      const entity = new Entity('LST' as any, House.USSR, 100, 100);
-      // BLOCKED: entity has no 'isALoaner' property
-      expect('isALoaner' in entity).toBe(false);
+    it('CLOSED: LST with UNLOAD mission gets IsALoaner=true', () => {
+      // C++ reinf.cpp:251: sets IsALoaner on vessel transport with UNLOAD
+      const MAP_BOUNDS = { x: 0, y: 0, w: 64, h: 64 };
+      const team: TeamType = {
+        name: 'LoanerTest',
+        house: 2,
+        flags: 0,
+        maxAllowed: 1,
+        origin: 0,
+        trigger: -1,
+        members: [
+          { type: 'LST', count: 1 },
+          { type: 'E1', count: 2 },
+        ],
+        missions: [
+          { mission: TMISSION_MOVE, data: 1 },
+          { mission: TMISSION_UNLOAD, data: 0 },
+        ],
+      };
+      const teamTypes: TeamType[] = [team];
+      const waypoints = new Map<number, CellPos>([[0, { cx: 32, cy: 5 }]]);
+      const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
+      const globals = new Set<number>();
+      const triggers: ScenarioTrigger[] = [];
+      const action: TriggerAction = {
+        action: 7,
+        team: 0,
+        trigger: -1,
+        data: 0,
+      };
+      const result = executeTriggerAction(
+        action, teamTypes, waypoints, globals, triggers,
+        undefined, houseEdges, MAP_BOUNDS,
+      );
+      const lst = result.spawned.find(e => e.type === ('LST' as any));
+      expect(lst, 'LST should be spawned').toBeDefined();
+      expect(lst!.isALoaner).toBe(true);
     });
   });
 

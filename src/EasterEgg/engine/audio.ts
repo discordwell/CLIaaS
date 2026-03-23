@@ -43,23 +43,23 @@ const HOUSEF_ALLIES = 1;
 const HOUSEF_SOVIET = 2;
 
 /** Per-track metadata matching C++ ThemeControl table (theme.cpp:63-106) */
-const TRACK_META: { owner: number; normal: boolean }[] = [
-  /* 00 hell_march      BIGF226M  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 01 radio           RADIO2    */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 02 crush           CRUS226M  */ { owner: HOUSEF_SOVIET, normal: true },
-  /* 03 roll_out        ROLLOUT   */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 04 mud             MUD1A     */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 05 twin_cannon     TWIN      */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 06 face_the_enemy  FAC1226M  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 07 run             RUN1226M  */ { owner: HOUSEF_SOVIET, normal: true },
-  /* 08 terminate       TERMINAT  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 09 big_foot        BIGF226M  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 10 workmen         WORK226M  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 11 militant_force  FAC2226M  */ { owner: HOUSEF_SOVIET, normal: true },
-  /* 12 dense           DENSE_R   */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 13 vector          VECTOR1A  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 14 smash           SMSH226M  */ { owner: HOUSEF_ALLIES, normal: true },
-  /* 15 score           SCORE     */ { owner: HOUSEF_ALLIES | HOUSEF_SOVIET, normal: false },
+const TRACK_META: { owner: number; normal: boolean; repeat: boolean }[] = [
+  /* 00 hell_march      BIGF226M  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 01 radio           RADIO2    */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 02 crush           CRUS226M  */ { owner: HOUSEF_SOVIET, normal: true, repeat: false },
+  /* 03 roll_out        ROLLOUT   */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 04 mud             MUD1A     */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 05 twin_cannon     TWIN      */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 06 face_the_enemy  FAC1226M  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 07 run             RUN1226M  */ { owner: HOUSEF_SOVIET, normal: true, repeat: false },
+  /* 08 terminate       TERMINAT  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 09 big_foot        BIGF226M  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 10 workmen         WORK226M  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 11 militant_force  FAC2226M  */ { owner: HOUSEF_SOVIET, normal: true, repeat: false },
+  /* 12 dense           DENSE_R   */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 13 vector          VECTOR1A  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 14 smash           SMSH226M  */ { owner: HOUSEF_ALLIES, normal: true, repeat: false },
+  /* 15 score           SCORE     */ { owner: HOUSEF_ALLIES | HOUSEF_SOVIET, normal: false, repeat: true },
 ];
 
 /** Player faction type for house-based track filtering */
@@ -104,6 +104,7 @@ export class MusicPlayer {
   private combatModeChangeTime = 0; // timestamp of last mode change
   private lastPlayedTrack = -1; // C++ parity: no-repeat guard (theme.cpp:248-251)
   private shuffleEnabled = true; // C++ Options.IsScoreShuffle (options.h:95)
+  private scoreRepeat = false;   // C++ Options.IsScoreRepeat (options.h:94)
   private faction: MusicFaction = 'allied'; // C++ parity: house ownership filter
 
   constructor(basePath = '/ra/music') {
@@ -233,7 +234,7 @@ export class MusicPlayer {
     }
     this.fading = audio;
     const startVol = audio.volume;
-    const steps = 20;
+    const steps = 10;
     let step = 0;
     this.fadeTimer = setInterval(() => {
       step++;
@@ -245,7 +246,7 @@ export class MusicPlayer {
         audio.src = '';
         if (this.fading === audio) this.fading = null;
       }
-    }, 100); // 2 second crossfade (20 steps x 100ms)
+    }, 100); // C++ THEME_DELAY = TIMER_SECOND = 1 second (10 steps x 100ms)
   }
 
   /**
@@ -258,6 +259,15 @@ export class MusicPlayer {
     if (!this.playing) return;
     const pool = this.playlist;
     if (pool.length === 0) return;
+
+    // C++ theme.cpp:240: if per-track Repeat or global IsScoreRepeat, replay same track
+    if (this.lastPlayedTrack >= 0) {
+      const meta = TRACK_META[this.lastPlayedTrack];
+      if (meta && (meta.repeat || this.scoreRepeat)) {
+        this.playTrack(this.lastPlayedTrack);
+        return;
+      }
+    }
 
     if (this.shuffleEnabled) {
       // C++ shuffle mode (theme.cpp:244-252): random pick, reject same song

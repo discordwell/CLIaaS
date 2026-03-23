@@ -409,32 +409,27 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
     expect(map.getVisibility(64, 64)).toBe(0);
   });
 
-  it('sight radius 1: C++ reveals 9 cells (center+8), TS reveals 5 (center+4 cardinal)', () => {
-    // C++ RadiusCount[1] = 9 — includes diagonals (precomputed offset table includes them)
-    // TS: dx^2+dy^2 <= 1 — diagonals have distance sqrt(2) > 1, so excluded
-    //
-    // BLOCKED: At radius 1, C++ reveals diagonals, TS does not.
-    // C++ map.cpp:70: radius 1 offsets include (-MCW-1), (-MCW+1), (MCW-1), (MCW+1) = diagonals
+  it('CLOSED: sight radius 1 reveals 9 cells (center+8), matching C++ RadiusCount[1]', () => {
+    // C++ RadiusCount[1] = 9 — includes diagonals (precomputed offset table)
+    // CLOSED: TS now special-cases radius 1 to reveal all 8 neighbors (3x3 grid).
     const map = new GameMap();
     revealAroundCell(map, 64, 64, 1);
 
-    // Center — revealed by both C++ and TS
+    // Center
     expect(map.getVisibility(64, 64)).toBe(2);
-    // 4 cardinal neighbors — revealed by both C++ and TS
+    // 4 cardinal
     expect(map.getVisibility(65, 64)).toBe(2);
     expect(map.getVisibility(63, 64)).toBe(2);
     expect(map.getVisibility(64, 65)).toBe(2);
     expect(map.getVisibility(64, 63)).toBe(2);
-
-    // BLOCKED: Diagonal neighbors — C++ reveals them at radius 1, TS does not
-    // TS octagonal: big*2+small = 1*2+1 = 3 > 2 = threshold → excluded
-    // C++ includes diagonals via precomputed RadiusOffset table
-    const diag = map.getVisibility(65, 65);
-    // TS does NOT reveal diagonals at radius 1
-    expect(diag).toBe(0); // BLOCKED: C++ would have this as visible (2)
+    // 4 diagonal — now revealed
+    expect(map.getVisibility(65, 65)).toBe(2);
+    expect(map.getVisibility(63, 63)).toBe(2);
+    expect(map.getVisibility(65, 63)).toBe(2);
+    expect(map.getVisibility(63, 65)).toBe(2);
 
     const visCount = countVisibleInRadius(map, 64, 64, 1);
-    expect(visCount).toBe(5); // TS: 5 cells; C++ RadiusCount[1] = 9
+    expect(visCount).toBe(9); // matches C++ RadiusCount[1] = 9
   });
 
   it('sight reveal pattern is circular, not square', () => {
