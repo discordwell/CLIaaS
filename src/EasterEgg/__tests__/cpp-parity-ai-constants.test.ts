@@ -99,6 +99,7 @@ describe('[AI] section constants (rules.ini lines 223-254)', () => {
   it('PathDelay = 0.01 (minutes between path retries)', () => {
     const iniVal = iniFloat('AI', 'PathDelay', -1);
     expect(iniVal).toBeCloseTo(0.01, 3);
+    expect(AI_BUILD_RULES.pathDelay).toBeCloseTo(iniVal, 3);
   });
 
   it('OreNearScan = 6 (cells for single-patch ore scan)', () => {
@@ -232,11 +233,13 @@ describe('[AI] section constants (rules.ini lines 223-254)', () => {
   it('CompEasyBonus = yes (rules.ini line 252)', () => {
     const iniVal = iniBool('AI', 'CompEasyBonus', false);
     expect(iniVal).toBe(true);
+    expect(AI_BUILD_RULES.compEasyBonus).toBe(iniVal);
   });
 
   it('Paranoid = yes (computer players ally vs humans)', () => {
     const iniVal = iniBool('AI', 'Paranoid', false);
     expect(iniVal).toBe(true);
+    expect(AI_BUILD_RULES.paranoid).toBe(iniVal);
   });
 
   it('PowerEmergency = 75% (sell threshold for power)', () => {
@@ -262,6 +265,7 @@ describe('[AI] section constants (rules.ini lines 223-254)', () => {
       'helipadRatio', 'helipadLimit',
       'airstripRatio', 'airstripLimit',
       'powerSurplus', 'baseSizeAdd',
+      'pathDelay', 'compEasyBonus', 'paranoid',
     ];
     for (const field of expectedFields) {
       expect(
@@ -350,7 +354,9 @@ describe('[AI] section constants (rules.ini lines 223-254)', () => {
 // =============================================================================
 describe('[IQ] section constants (rules.ini lines 269-280)', () => {
   it('MaxIQLevels = 5', () => {
-    expect(iniFloat('IQ', 'MaxIQLevels')).toBe(5);
+    const iniVal = iniFloat('IQ', 'MaxIQLevels');
+    expect(iniVal).toBe(5);
+    expect(AI_BUILD_RULES.maxIQLevels).toBe(iniVal);
   });
 
   it('SuperWeapons = 4 (IQ level for auto-firing super weapons)', () => {
@@ -400,6 +406,7 @@ describe('[IQ] section constants (rules.ini lines 269-280)', () => {
     // TS AIHouseState has an `iq` field but the threshold constants are not exported.
     // Verify AI_BUILD_RULES or a separate IQ_THRESHOLDS object has these.
     const expectedIQFields: Record<string, number> = {
+      maxIQLevels: 5,
       iqSuperWeapons: 4,
       iqProduction: 5,
       iqGuardArea: 4,
@@ -1399,6 +1406,18 @@ describe('AI_BUILD_RULES timing constants match INI [AI] values exactly', () => 
     const iniPct = iniFloat('AI', 'PowerEmergency'); // 75
     expect(AI_BUILD_RULES.powerEmergency).toBeCloseTo(iniPct / 100, 2);
   });
+
+  it('pathDelay matches AI.PathDelay', () => {
+    expect(AI_BUILD_RULES.pathDelay).toBeCloseTo(iniFloat('AI', 'PathDelay'), 4);
+  });
+
+  it('compEasyBonus matches AI.CompEasyBonus', () => {
+    expect(AI_BUILD_RULES.compEasyBonus).toBe(iniBool('AI', 'CompEasyBonus'));
+  });
+
+  it('paranoid matches AI.Paranoid', () => {
+    expect(AI_BUILD_RULES.paranoid).toBe(iniBool('AI', 'Paranoid'));
+  });
 });
 
 
@@ -1406,6 +1425,10 @@ describe('AI_BUILD_RULES timing constants match INI [AI] values exactly', () => 
 // 19. AI_BUILD_RULES IQ thresholds match INI [IQ] section
 // =============================================================================
 describe('AI_BUILD_RULES IQ thresholds match INI [IQ] values exactly', () => {
+  it('maxIQLevels matches IQ.MaxIQLevels', () => {
+    expect(AI_BUILD_RULES.maxIQLevels).toBe(iniFloat('IQ', 'MaxIQLevels'));
+  });
+
   it('iqSuperWeapons matches IQ.SuperWeapons', () => {
     expect(AI_BUILD_RULES.iqSuperWeapons).toBe(iniFloat('IQ', 'SuperWeapons'));
   });

@@ -256,8 +256,10 @@ describe('[IQ] section -- rules.ini parse verification', () => {
 // 10. [IQ] Thresholds -- INI vs TS AI_BUILD_RULES.iq* fields
 // =============================================================================
 describe('[IQ] thresholds -- INI vs TS AI_BUILD_RULES', () => {
-  it('MaxIQLevels: INI=5', () => {
-    expect(iniFloat('IQ', 'MaxIQLevels')).toBe(5);
+  it('MaxIQLevels: INI=5 vs TS AI_BUILD_RULES.maxIQLevels', () => {
+    const ini = iniFloat('IQ', 'MaxIQLevels');
+    expect(ini).toBe(5);
+    expect(AI_BUILD_RULES.maxIQLevels).toBe(ini);
   });
 
   const iqThresholds: Array<{
@@ -382,8 +384,9 @@ describe('[AI] completeness -- every INI key maps to a TS constant', () => {
     AirstripRatio:    'airstripRatio',
     AirstripLimit:    'airstripLimit',
     PowerEmergency:   'powerEmergency',
-    // PathDelay is used in index.ts (PATH_DELAY_TICKS), not AI_BUILD_RULES
-    // CompEasyBonus and Paranoid are behavioral flags not yet in TS constants
+    PathDelay:        'pathDelay',
+    CompEasyBonus:    'compEasyBonus',
+    Paranoid:         'paranoid',
   };
 
   for (const [iniKey, tsField] of Object.entries(aiKeyToTsField)) {
@@ -395,20 +398,21 @@ describe('[AI] completeness -- every INI key maps to a TS constant', () => {
     });
   }
 
-  // Document keys NOT yet mapped to AI_BUILD_RULES
-  it('PathDelay is in [AI] but handled as PATH_DELAY_TICKS in index.ts (not AI_BUILD_RULES)', () => {
-    expect(iniFloat('AI', 'PathDelay')).toBeCloseTo(0.01, 3);
-    // PATH_DELAY_TICKS = 0.01 * 900 = 9 (defined in index.ts, not exported from ai.ts)
+  // All [AI] keys are now mapped to AI_BUILD_RULES fields
+  it('PathDelay: INI=0.01 vs TS AI_BUILD_RULES.pathDelay', () => {
+    const ini = iniFloat('AI', 'PathDelay');
+    expect(ini).toBeCloseTo(0.01, 3);
+    expect(AI_BUILD_RULES.pathDelay).toBeCloseTo(ini, 3);
   });
 
-  it('CompEasyBonus is in [AI] but not mapped to any TS constant', () => {
+  it('CompEasyBonus: INI=yes vs TS AI_BUILD_RULES.compEasyBonus', () => {
     expect(iniBool('AI', 'CompEasyBonus')).toBe(true);
-    // This flag controls multi-human-game AI behavior -- not yet in TS
+    expect(AI_BUILD_RULES.compEasyBonus).toBe(true);
   });
 
-  it('Paranoid is in [AI] but not mapped to any TS constant', () => {
+  it('Paranoid: INI=yes vs TS AI_BUILD_RULES.paranoid', () => {
     expect(iniBool('AI', 'Paranoid')).toBe(true);
-    // This flag controls AI-AI alliances vs humans -- not yet in TS
+    expect(AI_BUILD_RULES.paranoid).toBe(true);
   });
 });
 
@@ -451,6 +455,8 @@ describe('Exhaustive INI-vs-TS value comparison', () => {
     { section: 'AI', iniKey: 'AirstripRatio',    tsField: 'airstripRatio' },
     { section: 'AI', iniKey: 'AirstripLimit',    tsField: 'airstripLimit' },
     { section: 'AI', iniKey: 'PowerEmergency',   tsField: 'powerEmergency', isPercent: true },
+    { section: 'AI', iniKey: 'PathDelay',        tsField: 'pathDelay' },
+    { section: 'IQ', iniKey: 'MaxIQLevels',      tsField: 'maxIQLevels' },
     { section: 'IQ', iniKey: 'SuperWeapons',     tsField: 'iqSuperWeapons' },
     { section: 'IQ', iniKey: 'Production',       tsField: 'iqProduction' },
     { section: 'IQ', iniKey: 'GuardArea',        tsField: 'iqGuardArea' },
@@ -469,6 +475,23 @@ describe('Exhaustive INI-vs-TS value comparison', () => {
       const tsVal = AI_BUILD_RULES[tsField] as number;
       const expected = isPercent ? iniVal / 100 : iniVal;
       expect(tsVal).toBeCloseTo(expected, 3);
+    });
+  }
+
+  // Boolean [AI] fields
+  const booleanChecks: Array<{
+    section: string;
+    iniKey: string;
+    tsField: keyof typeof AI_BUILD_RULES;
+  }> = [
+    { section: 'AI', iniKey: 'CompEasyBonus', tsField: 'compEasyBonus' },
+    { section: 'AI', iniKey: 'Paranoid',      tsField: 'paranoid' },
+  ];
+
+  for (const { section, iniKey, tsField } of booleanChecks) {
+    it(`[${section}].${iniKey} == AI_BUILD_RULES.${tsField}`, () => {
+      const iniVal = iniBool(section, iniKey);
+      expect(AI_BUILD_RULES[tsField]).toBe(iniVal);
     });
   }
 });

@@ -450,8 +450,16 @@ export const AI_BUILD_RULES = {
   patrolScan:     0.016,
   /** C++ Rule.PowerEmergencyFraction — sell threshold for power as fraction (rules.ini PowerEmergency=75%) */
   powerEmergency: 0.75,
+  /** C++ Rule.PathDelay — minutes between retrying when path is blocked (rules.ini PathDelay=.01) */
+  pathDelay:      0.01,
+  /** C++ Rule.IsCompEasyBonus — computer gets easy-mode bonus in multi-human games (rules.ini CompEasyBonus=yes) */
+  compEasyBonus:  true,
+  /** C++ Rule.IsComputerParanoid — computer players ally against humans when losing (rules.ini Paranoid=yes) */
+  paranoid:       true,
 
   // C++ [IQ] section thresholds — gate AI abilities by IQ level (rules.ini lines 269-280)
+  /** C++ Rule.MaxIQ — maximum number of discrete IQ levels (rules.ini MaxIQLevels=5) */
+  maxIQLevels:    5,
   /** C++ Rule.IQSuperWeapons — IQ level for auto-firing super weapons (rules.ini SuperWeapons=4) */
   iqSuperWeapons: 4,
   /** C++ Rule.IQProduction — IQ level for auto production (rules.ini Production=5) */
