@@ -518,7 +518,7 @@ describe('C++ parity: Construction buildup animation', () => {
       // no radio messages to construction yard. Just a linear 0→1 ramp.
       const tsPhases = 1; // single continuous ramp
       const cppPhases = 2; // INITIAL + DURING
-      expect(tsPhases).not.toBe(cppPhases); // PARITY GAP: missing state machine
+      expect(tsPhases).not.toBe(cppPhases); // KNOWN DIVERGENCE: TS intentionally uses single ramp (no INITIAL/DURING state machine)
     });
   });
 

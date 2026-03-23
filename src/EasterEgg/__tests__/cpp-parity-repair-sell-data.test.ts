@@ -390,7 +390,7 @@ describe('Engineer capture threshold (infantry.cpp:618-621)', () => {
     expect(asFloat <= 0.25).toBe(true);
     // But TS compares s.hp / s.maxHp <= 0.25:
     expect(101 / 400 <= 0.25).toBe(false); // 0.2525 > 0.25
-    // PARITY GAP: C++ captures at 101/400 HP, TS does not
+    // PARITY ACHIEVED: TS now uses fixed-point comparison (see next test)
   });
 
   it('PARITY: C++ and TS both capture at hp=101/maxHp=400 (fixed-point comparison)', () => {

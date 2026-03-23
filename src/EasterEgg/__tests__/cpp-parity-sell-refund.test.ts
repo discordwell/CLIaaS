@@ -519,8 +519,8 @@ describe('survivor count formula (building.cpp:5591-5600)', () => {
   describe('IsCrew gate — C++ gives 0 for non-crewed (building.cpp:5593)', () => {
     it('SILO is NOT Crewed in rules.ini — C++ gives 0 survivors', () => {
       expect(iniCrewed('SILO')).toBe(false);
-      // C++ returns 0 when !IsCrew; TS has no IsCrew check and gives min 1
-      // PARITY GAP
+      // PARITY ACHIEVED: TS gates survivors behind CREWED_BUILDINGS.has(s.type),
+      // so non-crewed buildings like SILO correctly get 0 survivors.
     });
 
     it('KENN is NOT Crewed in rules.ini (IsSurvivorless in C++)', () => {
@@ -644,7 +644,7 @@ describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
     } as any;
   }
 
-  it('PARITY GAP: AI fire sale should give 100% refund (full cost)', () => {
+  it('AI fire sale gives 100% refund (full cost) — matches C++', () => {
     // C++ AI Refund_Amount: cost = Raw_Cost * CostBias (no RefundPercent)
     const powrCost = iniCost('POWR');
     const ctx = makeFireSaleContext([
@@ -658,7 +658,7 @@ describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
     expect(credits).toBe(powrCost);
   });
 
-  it('PARITY GAP: AI fire sale at half health — C++ still gives 100%', () => {
+  it('AI fire sale at half health — C++ still gives 100%', () => {
     // C++ Refund_Amount has NO health scaling
     const procCost = iniCost('PROC');
     const procHp = iniStrength('PROC');
@@ -673,7 +673,7 @@ describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
     expect(credits).toBe(procCost);
   });
 
-  it('PARITY GAP: AI fire sale multiple buildings — cumulative 100%', () => {
+  it('AI fire sale multiple buildings — cumulative 100%', () => {
     const powrCost = iniCost('POWR');
     const barrCost = iniCost('BARR');
     const weapCost = iniCost('WEAP');

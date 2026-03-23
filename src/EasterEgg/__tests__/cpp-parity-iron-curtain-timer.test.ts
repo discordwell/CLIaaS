@@ -475,8 +475,8 @@ describe('Infantry cannot receive Iron Curtain (C++ house.cpp:2746-2763)', () =>
     //     default: break;   ← infantry falls through here
     //   }
     //
-    // TS superweapon.ts:444 — searches ALL entities with no type filter.
-    // PARITY GAP: TS allows Iron Curtain on infantry, C++ does not.
+    // PARITY ACHIEVED: superweapon.ts now filters out infantry with
+    // `if (e.stats.isInfantry) continue;` matching C++ house.cpp:2746-2763.
 
     const infantry = new Entity(UnitType.I_E1, House.Spain, 6 * CELL_SIZE, 6 * CELL_SIZE);
     const swState = makeSwState(SuperweaponType.IRON_CURTAIN, House.Spain, { ready: true });
@@ -488,7 +488,7 @@ describe('Infantry cannot receive Iron Curtain (C++ house.cpp:2746-2763)', () =>
     activateSuperweapon(ctx, SuperweaponType.IRON_CURTAIN, House.Spain, infantry.pos);
 
     // C++ expected: infantry should NOT receive Iron Curtain (default:break in switch)
-    expect(infantry.ironCurtainTick).toBe(0); // PARITY GAP — TS sets it to IRON_CURTAIN_DURATION
+    expect(infantry.ironCurtainTick).toBe(0);
   });
 });
 
@@ -519,8 +519,8 @@ describe('Demo Truck shortened Iron Curtain (C++ house.cpp:2753-2755 FIXIT_CSII)
 
     activateSuperweapon(ctx, SuperweaponType.IRON_CURTAIN, House.Spain, demoTruck.pos);
 
-    // C++ expected: Demo Truck gets shortened duration (7 ticks, not full duration)
-    expect(demoTruck.ironCurtainTick).toBe(CPP_DEMO_TRUCK_IC_TICKS); // PARITY GAP
+    // PARITY ACHIEVED: superweapon.ts uses IRON_CURTAIN_DEMO_TRUCK_DURATION (11 ticks) for DTRK
+    expect(demoTruck.ironCurtainTick).toBe(CPP_DEMO_TRUCK_IC_TICKS);
   });
 });
 

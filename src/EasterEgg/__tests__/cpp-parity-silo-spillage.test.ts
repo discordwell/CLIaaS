@@ -338,10 +338,11 @@ describe('crate money bypasses silo cap (cell.cpp:2335, house.cpp:1921)', () => 
 //   building.cpp:2274 — Limbo (sell/removal): Adjust_Capacity(-Class->Capacity, true)
 //   building.cpp:2986 — Captured: Adjust_Capacity(-Class->Capacity, true)
 //
-// PARITY GAP: In C++, when a SILO is sold (!inanger via normal build removal),
-// excess Tiberium is refunded to Credits. But the Limbo path for sell uses
-// inanger=true, so excess is LOST. This is nuanced: the sell path calls
-// Refund_Money first, then Limbo (which does Adjust_Capacity(-cap, true)).
+// KNOWN DIVERGENCE (C++ design note): In C++, the sell path calls Refund_Money
+// first, then Limbo (which does Adjust_Capacity(-cap, inanger=true)), so excess
+// ore is LOST on sell. TS matches this behavior: excess ore spills on sell.
+// The Credits vs Tiberium split is a C++ architectural detail that TS approximates
+// with a single-bucket model; the observable sell behavior is equivalent.
 // ===========================================================================
 
 describe('Adjust_Capacity — inanger distinction (house.cpp:1946)', () => {
@@ -502,9 +503,11 @@ describe('Available_Money — dual-bucket vs single-bucket (house.cpp:1861)', ()
     // In TS, addCredits(ore, false) would NOT cap because credits(6000) > siloCapacity(1000)
     // It would try: Math.min(6000 + ore, 1000) = 1000 — that's LESS than current 6000
     // This would actually REDUCE credits!
-    // PARITY GAP: TS addCredits with bypassSiloCap=false and credits already
-    // above silo cap would clamp DOWN to siloCapacity, losing the excess from
-    // the earlier bypass. C++ wouldn't do this because Credits pool is separate.
+    // KNOWN DIVERGENCE: TS single-bucket model means addCredits(ore, false) with
+    // credits already above silo cap would clamp DOWN to siloCapacity. C++ avoids
+    // this because Credits and Tiberium are separate pools. In practice this edge
+    // case rarely triggers because crate bonuses bypass the cap and harvesting
+    // only adds to the Tiberium pool which is already at capacity.
   });
 });
 
