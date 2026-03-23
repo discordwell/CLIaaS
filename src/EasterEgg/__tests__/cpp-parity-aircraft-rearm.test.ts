@@ -459,9 +459,9 @@ describe('ammo increment during rearming (techno.cpp:964-968)', () => {
   // TS aircraft.ts:379: if (ammo < maxAmmo) → enter 'rearming' — prevents entry at max.
   // The handler itself (aircraft.ts:397) does ammo++ then checks >= maxAmmo, but
   // this path is only reachable when ammo < maxAmmo on entry.
-  it('rearm does not exceed MaxAmmo in normal gameplay — BLOCKED (artificial test)', () => {
-    // This test forces aircraftState='rearming' when ammo is already at maxAmmo,
-    // bypassing the landing→rearming guard. In normal gameplay, this cannot happen.
+  it('rearm does not exceed MaxAmmo — early exit guard prevents overshoot', () => {
+    // Even if artificially forced into rearming at max ammo, the early-exit
+    // guard (aircraft.ts) checks ammo >= maxAmmo before incrementing.
     const mig = makeEntity(UnitType.V_MIG, House.USSR);
     mig.ammo = 3;
     mig.maxAmmo = 3;
@@ -471,9 +471,8 @@ describe('ammo increment during rearming (techno.cpp:964-968)', () => {
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, mig);
 
-    // BLOCKED: Handler increments to 4, but this scenario is unreachable normally.
-    // The landing guard (aircraft.ts:379) prevents entering rearming at max ammo.
-    expect(mig.ammo).toBe(4); // artificial test — normal gameplay stays at 3
+    // Guard prevents overshoot — ammo stays at maxAmmo
+    expect(mig.ammo).toBe(3);
   });
 });
 
