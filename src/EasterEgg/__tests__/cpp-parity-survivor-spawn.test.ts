@@ -28,6 +28,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { PRODUCTION_ITEMS } from '../engine/types';
+import { CREWED_BUILDINGS } from '../engine/scenario';
 
 // ---------------------------------------------------------------------------
 // Parse rules.ini at test time (authoritative source of truth)
@@ -145,17 +146,17 @@ describe('IsCrew flag from rules.ini — buildings', () => {
     });
   }
 
-  it('BLOCKED: TS spawns survivors for SILO despite IsCrew=false in rules.ini', () => {
+  it('TS correctly excludes SILO from survivor spawning via CREWED_BUILDINGS gate', () => {
     // C++: SILO has IsCrew=false → How_Many_Survivors returns 0 → NO survivors
-    // TS: SILO is handled in the Crew_Type switch (spawns C1/C7 civilians)
-    // but C++ never reaches Crew_Type for SILO because How_Many_Survivors returns 0.
-    //
     // The C++ BuildingClass::Crew_Type case for STRUCT_STORAGE is DEAD CODE
     // because IsCrew=false blocks it in How_Many_Survivors first.
+    //
+    // TS: CREWED_BUILDINGS set (scenario.ts) excludes SILO, so both the sell path
+    // (index.ts:2073) and destruction path (combat.ts:1342) skip survivor spawning.
     expect(iniCrewed('SILO')).toBe(false);
-    // TS bug: SILO is in PRODUCTION_ITEMS and TS doesn't check IsCrew
-    const siloInProd = PRODUCTION_ITEMS.find(p => p.type === 'SILO');
-    expect(siloInProd).toBeDefined(); // TS will spawn survivors for it — wrong
+    // Verify SILO is NOT in CREWED_BUILDINGS — this is the gate that prevents survivors
+
+    expect(CREWED_BUILDINGS.has('SILO')).toBe(false);
   });
 
   it('KENN has NO Crewed=yes — C++ returns 0 survivors even before IsSurvivorless check', () => {
@@ -379,11 +380,11 @@ describe('C++ aircraft crew spawning (aircraft.cpp:1580-1598)', () => {
 });
 
 // ============================================================
-// Section 8: BLOCKED — SILO survivor spawning
+// Section 8: SILO survivor spawning — CREWED_BUILDINGS gate
 // C++ SILO has IsCrew=false, so it NEVER spawns survivors.
-// The BuildingClass::Crew_Type switch case for STRUCT_STORAGE is dead code.
+// TS now matches via CREWED_BUILDINGS exclusion.
 // ============================================================
-describe('BLOCKED: SILO (IsCrew=false → dead Crew_Type code)', () => {
+describe('SILO (IsCrew=false → no survivors, matched by CREWED_BUILDINGS gate)', () => {
 
   it('SILO has no Crewed=yes in rules.ini', () => {
     expect(iniCrewed('SILO')).toBe(false);
@@ -397,23 +398,19 @@ describe('BLOCKED: SILO (IsCrew=false → dead Crew_Type code)', () => {
     expect(surrCount).toBe(0);
   });
 
-  it('TS incorrectly spawns civilians for SILO sell/destruction', () => {
-    // TS index.ts:2037-2038: case 'SILO': crewType = ... C1 or C7
-    // TS combat.ts:1324-1325: case 'SILO': crewType = ... C1 or C7
-    //
-    // Both TS code paths spawn survivors for SILO, but C++ never does because IsCrew=false.
-    // The TS engine does not check IsCrew before spawning survivors.
-    //
-    // To fix: TS should check iniCrewed before entering the survivor spawning loop,
-    // or maintain a NON_CREWED_BUILDINGS set that skips SILO, KENN, SYRD, SPEN.
-    expect(true).toBe(true); // BLOCKED: TS needs IsCrew check before survivor spawning
+  it('TS correctly excludes SILO from survivor spawning via CREWED_BUILDINGS', () => {
+    // TS sell path (index.ts:2073): if (!mcvSpawned && CREWED_BUILDINGS.has(s.type))
+    // TS destruction path (combat.ts:1342): if (CREWED_BUILDINGS.has(s.type))
+    // SILO is NOT in CREWED_BUILDINGS → both paths skip survivor spawning. Matches C++.
+
+    expect(CREWED_BUILDINGS.has('SILO')).toBe(false);
   });
 });
 
 // ============================================================
-// Section 9: BLOCKED — SYRD and SPEN (naval yards) have no crew
+// Section 9: SYRD and SPEN — no crew, matched by CREWED_BUILDINGS gate
 // ============================================================
-describe('BLOCKED: SYRD and SPEN (no Crewed=yes)', () => {
+describe('SYRD and SPEN (no Crewed=yes, excluded by CREWED_BUILDINGS)', () => {
 
   it('SYRD (Allied naval yard) has IsCrew=false — no survivors', () => {
     expect(iniCrewed('SYRD')).toBe(false);
@@ -423,6 +420,14 @@ describe('BLOCKED: SYRD and SPEN (no Crewed=yes)', () => {
   it('SPEN (Soviet sub pen) has IsCrew=false — no survivors', () => {
     expect(iniCrewed('SPEN')).toBe(false);
     expect(iniCost('SPEN')).toBe(650);
+  });
+
+  it('TS correctly excludes SYRD and SPEN from survivor spawning via CREWED_BUILDINGS', () => {
+    // Both sell path and destruction path gate on CREWED_BUILDINGS.has(s.type).
+    // SYRD and SPEN are NOT in CREWED_BUILDINGS → no survivors. Matches C++.
+
+    expect(CREWED_BUILDINGS.has('SYRD')).toBe(false);
+    expect(CREWED_BUILDINGS.has('SPEN')).toBe(false);
   });
 });
 
@@ -568,42 +573,43 @@ describe('C++ building Crew_Type (building.cpp:4667-4701)', () => {
 });
 
 // ============================================================
-// Section 12: TS sell path — IsCrew check missing
-// The TS never checks IsCrew before spawning survivors.
+// Section 12: TS sell path — CREWED_BUILDINGS gate implemented
+// TS now gates survivor spawning on CREWED_BUILDINGS.has(), matching C++ IsCrew.
 // ============================================================
-describe('BLOCKED: TS sell path does not check IsCrew', () => {
+describe('TS sell path gates on CREWED_BUILDINGS (matches C++ IsCrew)', () => {
 
-  it('TS spawns survivors for ALL buildings in PRODUCTION_ITEMS regardless of IsCrew', () => {
+  it('TS sell path skips non-crewed buildings via CREWED_BUILDINGS gate', () => {
     // C++ building.cpp:5593: if (IsSurvivorless || !Class->IsCrew) return(0);
-    // TS index.ts:2015-2069: survivor spawning loop runs for ANY building that
-    // has been sold, with no IsCrew check.
+    // TS index.ts:2073: if (!mcvSpawned && CREWED_BUILDINGS.has(s.type))
     //
     // Buildings that should NOT spawn survivors (IsCrew=false):
-    // SILO, KENN, SYRD, SPEN
-    //
-    // Of these, SILO and KENN are in PRODUCTION_ITEMS and will incorrectly
-    // spawn survivors when sold in TS.
+    // SILO, KENN, SYRD, SPEN — all excluded from CREWED_BUILDINGS.
+
+    expect(CREWED_BUILDINGS.has('SILO')).toBe(false);
+    expect(CREWED_BUILDINGS.has('KENN')).toBe(false);
+    expect(CREWED_BUILDINGS.has('SYRD')).toBe(false);
+    expect(CREWED_BUILDINGS.has('SPEN')).toBe(false);
+
+    // These are in PRODUCTION_ITEMS but correctly excluded from survivor spawning
     const siloInProd = PRODUCTION_ITEMS.find(p => p.type === 'SILO');
     const kennInProd = PRODUCTION_ITEMS.find(p => p.type === 'KENN');
     expect(siloInProd).toBeDefined();
     expect(kennInProd).toBeDefined();
-
-    // These are in PRODUCTION_ITEMS but have IsCrew=false
     expect(iniCrewed('SILO')).toBe(false);
     expect(iniCrewed('KENN')).toBe(false);
   });
 });
 
 // ============================================================
-// Section 13: TS destruction path — IsCrew check missing
+// Section 13: TS destruction path — CREWED_BUILDINGS gate implemented
 // ============================================================
-describe('BLOCKED: TS destruction path does not check IsCrew', () => {
+describe('TS destruction path gates on CREWED_BUILDINGS (matches C++ IsCrew)', () => {
 
-  it('TS exclusion list covers walls, barrels, and KENN but NOT SILO', () => {
-    // TS combat.ts:1281: if (!WALL_TYPES.has(s.type) && s.type !== 'BARL' && s.type !== 'BRL3' && s.type !== 'KENN')
-    // KENN is excluded — correct for destruction (C++ sets IsSurvivorless for KENN on destruction)
-    // BUT: SILO is NOT excluded — TS will spawn destruction survivors for SILO
-    // C++: SILO IsCrew=false → Drop_Debris never spawns survivors
+  it('TS destruction path uses CREWED_BUILDINGS gate, correctly excluding SILO', () => {
+    // TS combat.ts:1342: if (CREWED_BUILDINGS.has(s.type)) — only crewed buildings get survivors
+    // SILO is NOT in CREWED_BUILDINGS → no survivors on destruction. Matches C++.
+
+    expect(CREWED_BUILDINGS.has('SILO')).toBe(false);
     expect(iniCrewed('SILO')).toBe(false);
   });
 });

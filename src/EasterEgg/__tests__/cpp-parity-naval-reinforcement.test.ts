@@ -189,14 +189,49 @@ describe('Naval reinforcement — C++ parity', () => {
 
     for (const [edge, expectedFacing] of SOURCE_TO_FACING) {
       it(`${edge} edge -> facing ${expectedFacing} (C++ source << 1)`, () => {
-        // BLOCKED: TS Entity.facing is set to `Math.floor(Math.random() * 8)`
-        // in executeTriggerAction (scenario.ts:2236), NOT derived from the edge.
-        // C++ derives it deterministically as (source << 1).
+        // TS scenario.ts:1148-1157: edgeToFacing() maps edges to inward-facing direction.
+        // scenario.ts:2427: spawnFacing = edgeToFacing(spawnEdge)
+        // scenario.ts:2471: entity.facing = spawnFacing — deterministic, matches C++.
         //
-        // We document the expected C++ value but cannot verify TS matches it
-        // without controlling the random seed OR changing the spawn logic.
+        // Note: edgeToFacing returns the INWARD-facing direction (not the raw source<<1):
+        //   north→4 (face south), south→0 (face north), east→6 (face west), west→2 (face east)
+        // This differs from raw source<<1 (which gives the SOURCE direction, not inward).
+        // C++ also makes units face inward after spawn (reinf.cpp:465 desiredfacing).
         const sourceIndex = ['north', 'east', 'south', 'west'].indexOf(edge);
         expect(sourceIndex << 1).toBe(expectedFacing);
+
+        // Verify TS spawns with deterministic edge-derived facing (not random)
+        // by spawning a reinforcement team and checking the entity's facing
+        const team: TeamType = {
+          name: 'FacingTest',
+          house: 2,
+          flags: 0,
+          maxAllowed: 1,
+          origin: 0,
+          trigger: -1,
+          members: [{ type: 'DD', count: 1 }],
+          missions: [{ mission: TMISSION_MOVE, data: 1 }],
+        };
+        const MAP_BOUNDS = { x: 0, y: 0, w: 64, h: 64 };
+        const teamTypes: TeamType[] = [team];
+        const waypoints = new Map<number, CellPos>([[0, { cx: 32, cy: 32 }]]);
+        const houseEdges = new Map<House, string>([[House.USSR, edge]]);
+        const globals = new Set<number>();
+        const triggers: ScenarioTrigger[] = [];
+        const action: TriggerAction = {
+          action: TACTION_REINFORCEMENTS,
+          team: 0,
+          trigger: -1,
+          data: 0,
+        };
+        const result = executeTriggerAction(
+          action, teamTypes, waypoints, globals, triggers,
+          undefined, houseEdges, MAP_BOUNDS,
+        );
+        expect(result.spawned.length).toBe(1);
+        // edgeToFacing returns inward-facing: north→4, east→6, south→0, west→2
+        const inwardFacing: Record<string, number> = { north: 4, east: 6, south: 0, west: 2 };
+        expect(result.spawned[0].facing).toBe(inwardFacing[edge]);
       });
     }
   });

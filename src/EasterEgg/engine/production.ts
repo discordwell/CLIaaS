@@ -224,6 +224,13 @@ export function tickProduction(ctx: ProductionContext): void {
       cancelProduction(ctx, category);
       continue;
     }
+    // C++ parity (house.cpp:855,880): check ALL prerequisite bits, including techPrereq.
+    // In C++, Prerequisite is a single bitmask combining primary + tech prereqs.
+    // If ANY prereq building is destroyed, (pre & flags) != pre → production abandoned.
+    if (entry.item.techPrereq && !ctx.hasBuilding(entry.item.techPrereq)) {
+      cancelProduction(ctx, category);
+      continue;
+    }
     // C++ parity (factory.cpp:615): Cost_Per_Tick = Balance / (STEP_COUNT - stage)
     // Uses integer division: remaining cost divided by remaining steps.
     // Balance = effectiveCost - costPaid (remaining cost to deduct).

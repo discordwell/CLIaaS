@@ -253,19 +253,15 @@ describe('C++ parity: primary prerequisite loss mid-production (building.cpp:473
 // ============================================================
 describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)', () => {
 
-  it('BLOCKED: C++ abandons production when tech prereq is lost; TS does not check techPrereq', () => {
+  it('C++ abandons production when tech prereq is lost; TS now checks techPrereq', () => {
     // C++ house.cpp:855: pre = type->Prerequisite (single bitmask with ALL prereqs)
     // C++ house.cpp:880: (pre & flags) == pre — all bits must match
     // For example, Mammoth Tank has Prerequisite = STRUCTF_WEAP | STRUCTF_SOVIET_TECH
     // If Soviet Tech is destroyed, the Prerequisite bitmask no longer matches ActiveBScan,
     // so Who_Can_Build_Me returns NULL and production is abandoned.
     //
-    // TS production.ts:161: only checks `entry.item.prerequisite` (primary building).
-    // The techPrereq is NOT checked during tickProduction.
-    // So destroying the tech building does NOT cancel ongoing production in TS.
-    //
-    // BLOCKED: C++ cancels production when ANY prerequisite building is lost.
-    //             TS only cancels when the PRIMARY prerequisite building is lost.
+    // TS production.ts tickProduction now checks BOTH prerequisite AND techPrereq,
+    // matching C++ behavior where ALL prerequisite bits must be present.
     const ctx = makeContext({
       credits: 10000,
       structures: [
@@ -287,24 +283,24 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
     startProduction(ctx, v2rocket);
     tickNTimes(ctx, 50);
 
+    const costPaidBefore = ctx.productionQueue.get('right')!.costPaid;
+
     // Destroy Radar Dome (tech prerequisite)
     const dome = ctx.structures.find(s => s.type === 'DOME')!;
     dome.alive = false;
 
     tickProduction(ctx);
 
-    // BLOCKED: TS does NOT cancel — production continues
-    // C++ WOULD cancel because DOME bit is missing from ActiveBScan
+    // C++ parity: production cancelled because DOME bit missing from ActiveBScan
     const entry = ctx.productionQueue.get('right');
-    expect(entry).toBeDefined(); // TS keeps building — BLOCKED
-    expect(entry!.progress).toBe(51); // Progress advanced
-    // C++ expected: production cancelled, queue empty
-    // BLOCKED — TS should cancel but doesn't check techPrereq
+    expect(entry).toBeUndefined(); // production cancelled — matches C++
+    // Cost should be refunded
+    expect(ctx.credits).toBe(10000); // costPaid refunded on cancel
   });
 
-  it('BLOCKED: losing primary prereq cancels, but losing tech prereq does not', () => {
-    // Verify the asymmetry: primary prereq loss cancels, tech prereq loss doesn't.
-    // This demonstrates the BLOCKED in TS.
+  it('both primary and tech prereq loss cancel production (C++ parity)', () => {
+    // Both primary and tech prereq loss should cancel production,
+    // matching C++ where ALL prerequisite bits must be present.
     const ctx = makeContext({
       credits: 10000,
       structures: [
@@ -322,7 +318,7 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
       techPrereq: 'DOME',
     });
 
-    // Test 1: Lose tech prereq — TS does NOT cancel
+    // Test 1: Lose tech prereq — TS now cancels (matches C++)
     startProduction(ctx, v2rocket);
     tickNTimes(ctx, 10);
     ctx.structures.find(s => s.type === 'DOME')!.alive = false;
@@ -331,20 +327,17 @@ describe('C++ parity: tech prerequisite loss mid-production (house.cpp:855,880)'
 
     // Reset
     ctx.structures.find(s => s.type === 'DOME')!.alive = true;
-    cancelProduction(ctx, 'right');
 
-    // Test 2: Lose primary prereq — TS DOES cancel
+    // Test 2: Lose primary prereq — TS cancels (always did)
     startProduction(ctx, v2rocket);
     tickNTimes(ctx, 10);
     ctx.structures.find(s => s.type === 'WEAP')!.alive = false;
     tickProduction(ctx);
     const afterPrimaryLoss = ctx.productionQueue.has('right');
 
-    // TS behavior: asymmetric — only primary prereq causes cancel
-    expect(afterTechLoss).toBe(true);   // tech loss: production continues (BLOCKED)
+    // C++ parity: BOTH prereq losses cancel production
+    expect(afterTechLoss).toBe(false);   // tech loss: production cancelled (matches C++)
     expect(afterPrimaryLoss).toBe(false); // primary loss: production cancelled (correct)
-    // C++ behavior: both would cancel production
-    // BLOCKED
   });
 });
 
