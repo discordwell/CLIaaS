@@ -295,7 +295,7 @@ export class Game {
   cursorType: CursorType = CursorType.DEFAULT;
   /** Set of structure indices currently being repaired */
   private repairingStructures = new Set<number>();
-  /** Tick when last EVA base attack warning played (throttle to once per 5s) */
+  /** Tick when last EVA base attack warning played (throttle to once per 60s) */
   private lastBaseAttackEva = 0;
   /** EVA announcement throttling — maps sound name to last tick played */
   private lastEvaTime = new Map<string, number>();
@@ -1093,14 +1093,10 @@ export class Game {
     this.playerHouse = scenario.playerHouse;
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     this.playerTechLevel = scenario.playerTechLevel ?? 10;
-    // Calculate initial silo capacity and cap starting credits (C++ parity)
+    // Calculate initial silo capacity (do NOT cap starting credits — C++ parity)
+    // C++ house.cpp:7146-7147: starting credits go into the uncapped Credits pool,
+    // not the Tiberium pool. Silo capacity only limits HARVESTED ore.
     this.siloCapacity = this.calculateSiloCapacity();
-    if (this.siloCapacity > 0 && this.credits > this.siloCapacity) {
-      this.credits = this.siloCapacity;
-    } else if (this.siloCapacity === 0 && this.credits > 0) {
-      // Edge case: scenario provides credits but no storage — keep them for gameplay
-      // (C++ starts with refineries providing capacity, so this shouldn't happen in practice)
-    }
     this.lastSiloWarningTick = -450; // allow immediate silo warning if needed
     this.toCarryOver = scenario.toCarryOver;
     this.theatre = scenario.theatre;
@@ -3192,11 +3188,8 @@ export class Game {
 
   /** Play EVA announcement with throttle (~45 ticks) */
   private playEva(sound: SoundName): void {
-    // AU4: EVA power gate — skip EVA playback when power fraction < 0.25 (critically low power)
-    if (this.powerConsumed > 0 && this.powerProduced > 0) {
-      const powerFraction = this.powerProduced / this.powerConsumed;
-      if (powerFraction < 0.25) return;
-    }
+    // C++ audio.cpp:643-648 — Speak() has NO power gate. EVA always plays
+    // regardless of power level. Removed AU4 power gate for C++ parity.
     const last = this.lastEvaTime.get(sound) ?? 0;
     if (this.tick - last < 45) return; // 3 second throttle
     this.lastEvaTime.set(sound, this.tick);

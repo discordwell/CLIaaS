@@ -1174,7 +1174,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
   }
   // EVA "base under attack" for player structures (throttled)
   if (ctx.isAllied(s.house, ctx.playerHouse) &&
-      ctx.tick - ctx.lastBaseAttackEva > ctx.gameTicksPerSec * 5) {
+      ctx.tick - ctx.lastBaseAttackEva > ctx.gameTicksPerSec * 60) {
     ctx.lastBaseAttackEva = ctx.tick;
     ctx.playEva('eva_base_attack');
     ctx.minimapAlert(s.cx, s.cy);
