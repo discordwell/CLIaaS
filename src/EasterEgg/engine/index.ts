@@ -2097,8 +2097,9 @@ export class Game {
               let crewType: UnitType;
               switch (s.type) {
                 case 'FACT': // STRUCT_CONST: 25% engineer if human-owned, max 1 engineer
+                  // C++ building.cpp:4680-4684: captured ConYard NEVER spawns an engineer
                   // C++ building.cpp:3456-3463 — re-roll if engineer already spawned
-                  if (!engineerSpawned && Math.random() < 0.25) {
+                  if (!(s.originalHouse && s.originalHouse !== s.house) && !engineerSpawned && Math.random() < 0.25) {
                     crewType = UnitType.I_E6;
                     engineerSpawned = true;
                   } else {
@@ -4890,8 +4891,23 @@ export class Game {
       isTargetOutOfZone = !nearOwnBase;
     }
     // C++ techno.cpp:1742-1744: NervousBias = BaseBias from rules.ini = 2
-    // Applied when target is in scanner's own base zone (not implemented: always pass 1 for now)
-    return computeThreatScore(scanner, target, dist, designatedEnemy, nearFriendlyCount, isTargetOutOfZone);
+    // Applied when target is in scanner's own base zone (C++ House::Which_Zone)
+    // Approximate zone check: target is within 10 cells of scanner's own structures
+    const NERVOUS_BIAS = 2; // rules.ini [General] BaseBias=2
+    let nervousBias: number | undefined;
+    let targetInScannerBaseZone = false;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== scanner.house) continue;
+      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      const scx = (s.cx + sw / 2) * CELL_SIZE;
+      const scy = (s.cy + sh / 2) * CELL_SIZE;
+      const d = Math.sqrt((scx - target.pos.x) ** 2 + (scy - target.pos.y) ** 2);
+      if (d <= 10 * CELL_SIZE) { targetInScannerBaseZone = true; break; }
+    }
+    if (targetInScannerBaseZone) {
+      nervousBias = NERVOUS_BIAS;
+    }
+    return computeThreatScore(scanner, target, dist, designatedEnemy, nearFriendlyCount, isTargetOutOfZone, nervousBias);
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {

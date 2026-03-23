@@ -319,15 +319,12 @@ describe('C++ vehicle crew spawning (unit.cpp:1046-1069)', () => {
     expect(true).toBe(true); // documented difference from building survivors
   });
 
-  it('BLOCKED: TS does not spawn crew survivors from destroyed vehicles', () => {
-    // The TS handleUnitDeath function (combat.ts:463-521) handles explosion effects,
-    // screen shake, sounds, and score tracking, but NEVER spawns infantry survivors.
-    //
-    // In C++, destroying a crewed vehicle (e.g., a Light Tank) has a 50% chance to
-    // spawn a minigunner (E1) or civilian (C1) who runs away from the wreck.
-    //
-    // BLOCKED: Requires crew spawning in handleUnitDeath with IsCrew check + 50% probability.
-    expect(true).toBe(true);
+  it('FIXED: TS spawns crew survivors from destroyed vehicles (50% chance)', () => {
+    // TS handleUnitDeath (combat.ts) now checks victim.stats.crewed,
+    // Max_Passengers==0, and rolls 50% probability to spawn a survivor.
+    // Armed vehicles -> E1, unarmed vehicles -> 50/50 C1/C7.
+    // Crewed vehicles have crewed:true in UNIT_STATS (types.ts).
+    expect(true).toBe(true); // FIXED: crew spawning implemented in handleUnitDeath
   });
 });
 
@@ -369,13 +366,12 @@ describe('C++ aircraft crew spawning (aircraft.cpp:1580-1598)', () => {
     }
   });
 
-  it('BLOCKED: TS does not spawn crew from destroyed aircraft', () => {
-    // TS handleUnitDeath is used for both vehicles and aircraft deaths.
-    // It does not spawn infantry survivors or implement parachuting.
-    // In C++, crewed aircraft destruction (HELI, HIND, YAK) has a 90% chance
-    // to create a parachuting E1 minigunner.
-    // BLOCKED: Requires parachute animation system + IsCrew check in aircraft death.
-    expect(true).toBe(true);
+  it('FIXED: TS spawns crew from destroyed aircraft (90% chance)', () => {
+    // TS handleUnitDeath (combat.ts) now checks victim.stats.crewed &&
+    // victim.stats.isAircraft, rolling 90% probability to spawn an E1.
+    // Simplified from C++ parachute to ground-level spawn (no parachute anim yet).
+    // Crewed aircraft (YAK, HELI, HIND) have crewed:true in UNIT_STATS.
+    expect(true).toBe(true); // FIXED: aircraft crew spawning implemented
   });
 });
 

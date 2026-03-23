@@ -545,6 +545,37 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       damageEntity(ctx, other, explosionDamage, explosionWarhead);
     }
   }
+
+  // C++ unit.cpp:1046-1069 — Vehicle crew spawning on destruction
+  // Conditions: IsCrew=true, Max_Passengers==0 (not a transport), 50% probability
+  if (victim.stats.crewed && !victim.stats.isAircraft && !victim.stats.isInfantry &&
+      (victim.stats.passengers ?? 0) === 0 && Math.random() < 0.5) {
+    // C++ unit.cpp:3965-3978: unarmed -> 50/50 C1/C7 civilian, armed -> E1 soldier
+    let crewType: UnitType;
+    if (!victim.stats.primaryWeapon) {
+      crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+    } else {
+      crewType = UnitType.I_E1;
+    }
+    const inf = new Entity(crewType, victim.house, kx, ky);
+    // C++ unit.cpp:1058: i->Strength = Random_Pick(5, (int)i->Class->MaxStrength/2)
+    inf.hp = Math.max(5, Math.floor(Math.random() * Math.floor(inf.maxHp / 2)) + 5);
+    inf.hp = Math.min(inf.hp, inf.maxHp);
+    inf.mission = Mission.GUARD;
+    ctx.entities.push(inf);
+    ctx.entityById.set(inf.id, inf);
+  }
+
+  // C++ aircraft.cpp:1588-1594 — Aircraft parachute survivors on destruction
+  // Conditions: IsCrew=true, 90% probability, spawns E1 (no civilian variant)
+  if (victim.stats.crewed && victim.stats.isAircraft &&
+      Math.random() < 0.9) {
+    const inf = new Entity(UnitType.I_E1, victim.house, kx, ky);
+    // C++ aircraft survivors get full health (no HP reduction like vehicles)
+    inf.mission = Mission.GUARD;
+    ctx.entities.push(inf);
+    ctx.entityById.set(inf.id, inf);
+  }
 }
 
 /** C++ unit.cpp:4813-4855 — Should_Crush_It: AI auto-crush decision gate.
@@ -1399,10 +1430,16 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
         ctx.showEvaMessage(7); // "Bridge destroyed."
       }
     }
+    // C++ building.cpp:1298 — IsSurvivorless: kennels and force-destroyed buildings get no survivors
+    // C++ sets IsSurvivorless = true when (forced || *this == STRUCT_KENNEL)
+    if (s.type === 'KENN') {
+      s.isSurvivorless = true;
+    }
     // C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors on destruction
     // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — only Crewed=yes buildings spawn survivors
+    // C++ building.cpp:5593: if (IsSurvivorless || !Class->IsCrew) return 0
     // Walls, barrels, kennels, silos, naval buildings etc. have no Crewed=yes in rules.ini.
-    if (CREWED_BUILDINGS.has(s.type)) {
+    if (CREWED_BUILDINGS.has(s.type) && !s.isSurvivorless) {
       spawnDestructionSurvivors(ctx, s, wx, wy);
     }
     return true;
@@ -1436,8 +1473,12 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
   let buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300);
   if (s.type === 'PROC') buildCost -= HARVESTER_COST;
   if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2;
-  const survivorCount = Math.min(5,
-    Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST));
+  // C++ building.cpp:5597: if (IsCaptured) divisor *= 2 — captured buildings halve survivor count
+  const isCaptured = s.originalHouse !== undefined && s.originalHouse !== s.house;
+  let divisor = E1_COST;
+  if (isCaptured) divisor *= 2;
+  const survivorCount = Math.max(1, Math.min(5,
+    Math.floor((buildCost * SURVIVOR_FRACTION) / divisor)));
 
   // C++ building.cpp:3456-3463 — one engineer limit (applies to both sell and destruction)
   let engineerSpawned = false;
@@ -1447,7 +1488,8 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
     let crewType: UnitType;
     switch (s.type) {
       case 'FACT':
-        if (!engineerSpawned && Math.random() < 0.25) {
+        // C++ building.cpp:4680-4684: captured ConYard NEVER spawns an engineer
+        if (!isCaptured && !engineerSpawned && Math.random() < 0.25) {
           crewType = UnitType.I_E6;
           engineerSpawned = true;
         } else {

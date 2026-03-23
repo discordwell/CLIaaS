@@ -73,9 +73,7 @@ function getOverlay(map: GameMap, cx: number, cy: number): number {
   return map.overlay[cy * MAP_CELLS + cx];
 }
 
-// =============================================================================
 // 1. Rules Constants Parity (rules.cpp defaults)
-// =============================================================================
 
 describe('Rules constants — rules.ini override values', () => {
   /**
@@ -109,9 +107,7 @@ describe('Rules constants — rules.ini override values', () => {
   });
 });
 
-// =============================================================================
 // 2. Reduce_Tiberium — Cell Ore Depletion (cell.cpp:1630)
-// =============================================================================
 
 describe('Reduce_Tiberium — cell.cpp:1630-1648 ore depletion', () => {
   /**
@@ -172,9 +168,7 @@ describe('Reduce_Tiberium — cell.cpp:1630-1648 ore depletion', () => {
   });
 });
 
-// =============================================================================
 // 3. Credit_Load Formula (unit.cpp:4790-4793)
-// =============================================================================
 
 describe('Credit_Load formula — unit.cpp:4790-4793', () => {
   /**
@@ -199,9 +193,7 @@ describe('Credit_Load formula — unit.cpp:4790-4793', () => {
   });
 });
 
-// =============================================================================
 // 4. Gem Bonus Bails (unit.cpp:2306-2308)
-// =============================================================================
 
 describe('Gem bonus bails — unit.cpp:2306-2308', () => {
   /**
@@ -264,9 +256,7 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
   });
 });
 
-// =============================================================================
 // 5. Tiberium_Load — Capacity Check (unit.cpp:4272-4280)
-// =============================================================================
 
 describe('Tiberium_Load — unit.cpp:4272-4280 capacity fraction', () => {
   /**
@@ -294,9 +284,7 @@ describe('Tiberium_Load — unit.cpp:4272-4280 capacity fraction', () => {
   });
 });
 
-// =============================================================================
 // 6. Goto_Tiberium Ring Search (unit.cpp:2204-2249)
-// =============================================================================
 
 describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
   /**
@@ -321,7 +309,6 @@ describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
     placeGold(map, 52, 50, 5); // 2 cells east
 
     const result = map.findNearestOre(50, 50, 20);
-    expect(result).toBeDefined();
     expect(result!.cx).toBe(52);
     expect(result!.cy).toBe(50);
   });
@@ -332,7 +319,6 @@ describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
     placeGold(map, 55, 50, 11); // 5 cells east (farther, higher density)
 
     const result = map.findNearestOre(50, 50, 20);
-    expect(result).toBeDefined();
     expect(result!.cx).toBe(51); // closer cell wins
   });
 
@@ -356,7 +342,6 @@ describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
     placeGold(map, 50, 51, 5); // 1 cell south (ring 1, scanned second in C++)
 
     const result = map.findNearestOre(50, 50, 20);
-    expect(result).toBeDefined();
     // Both are equidistant. TS scans dy=-r..r, dx=-r..r so dy=-1 is scanned first.
     // This happens to match C++ scan order for this case.
     expect(result!.cy).toBe(49);
@@ -384,15 +369,12 @@ describe('Goto_Tiberium ring search — unit.cpp:2204-2249', () => {
     placeGold(map, 50, 50, 5); // ore directly under harvester
 
     const result = map.findNearestOre(50, 50, 20);
-    expect(result).toBeDefined();
     expect(result!.cx).toBe(50);
     expect(result!.cy).toBe(50);
   });
 });
 
-// =============================================================================
 // 7. Tiberium_Check Cell Filtering (unit.cpp:2161-2184)
-// =============================================================================
 
 describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
   /**
@@ -431,6 +413,23 @@ describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
     const result = map.findNearestOre(50, 50, 20);
     expect(result).toBeDefined();
     expect(result!.cx).toBe(50); // center cell is always returned if it has ore
+   * TS findNearestOre (map.ts:623-643) does NOT check for unit occupancy.
+   * TS findHarvesterOre (harvester.ts:86-92) only checks if another HARVESTER
+   * is targeting nearby (3-cell radius), not if any unit occupies the cell.
+   *
+   * FIXED: TS findNearestOre (map.ts) now checks vehicleOccupancy to skip
+   * cells occupied by units, matching C++ Cell_Techno() behavior.
+   */
+  it('FIXED: TS findNearestOre now filters occupied cells', () => {
+    // C++ unit.cpp:2179: Cell_Techno() != NULL rejects occupied cells
+    // TS map.ts findNearestOre now checks vehicleOccupancy and skips occupied cells
+    const map = makeMap();
+    placeGold(map, 51, 50, 5);
+    // Mark (51,50) as occupied -- simulates a vehicle sitting on the ore cell
+    map.vehicleOccupancy.add(50 * 128 + 51);  // MAP_CELLS=128
+    const result = map.findNearestOre(50, 50, 20);
+    // With cell occupied, should skip (51,50) and find no ore (only one ore cell placed)
+    expect(result).toBeNull();
   });
 
   /**
@@ -450,7 +449,6 @@ describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
     const map = makeMap();
     placeGold(map, 60, 50, 5); // ore 10 cells east
     const result = map.findNearestOre(50, 50, 20);
-    expect(result).toBeDefined(); // TS finds it regardless of passability
   });
 
   /**
@@ -472,9 +470,7 @@ describe('Tiberium_Check cell filtering — unit.cpp:2161-2184', () => {
   });
 });
 
-// =============================================================================
 // 8. Can_Tiberium_Grow — Ore Growth Rules (cell.cpp:2869-2884)
-// =============================================================================
 
 describe('Can_Tiberium_Grow — cell.cpp:2869-2884', () => {
   /**
@@ -532,9 +528,7 @@ describe('Can_Tiberium_Grow — cell.cpp:2869-2884', () => {
   });
 });
 
-// =============================================================================
 // 9. Can_Tiberium_Spread — Ore Spreading Rules (cell.cpp:2904-2919)
-// =============================================================================
 
 describe('Can_Tiberium_Spread — cell.cpp:2904-2919', () => {
   /**
@@ -581,9 +575,7 @@ describe('Can_Tiberium_Spread — cell.cpp:2904-2919', () => {
   });
 });
 
-// =============================================================================
 // 10. Spread_Tiberium Mechanics (cell.cpp:2963-2979)
-// =============================================================================
 
 describe('Spread_Tiberium — cell.cpp:2963-2979 new cell seeding', () => {
   /**
@@ -648,9 +640,7 @@ describe('Spread_Tiberium — cell.cpp:2963-2979 new cell seeding', () => {
   });
 });
 
-// =============================================================================
 // 11. Mission_Harvest State Machine (unit.cpp:2749-2923)
-// =============================================================================
 
 describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
   /**
@@ -780,9 +770,7 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
   });
 });
 
-// =============================================================================
 // 12. ArchiveTarget — Ore Location Memory (unit.cpp:2794-2797, 2851)
-// =============================================================================
 
 describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
   /**
@@ -847,9 +835,7 @@ describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
   });
 });
 
-// =============================================================================
 // 13. Harvest Timing (unit.cpp:2841-2846, rules.cpp:181)
-// =============================================================================
 
 describe('Harvest timing — unit.cpp:2841-2846 OreDumpRate', () => {
   /**
@@ -901,9 +887,7 @@ describe('Harvest timing — unit.cpp:2841-2846 OreDumpRate', () => {
   });
 });
 
-// =============================================================================
 // 14. findHarvesterOre — AI Harvester Spreading (harvester.ts:48-104)
-// =============================================================================
 
 describe('findHarvesterOre — AI harvester anti-clustering (harvester.ts:48-104)', () => {
   /**
@@ -965,9 +949,7 @@ describe('findHarvesterOre — AI harvester anti-clustering (harvester.ts:48-104
   });
 });
 
-// =============================================================================
 // 15. Harvester Unload at Refinery (harvester.ts:234-259, building.cpp:3735-3796)
-// =============================================================================
 
 describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
   /**
@@ -1039,9 +1021,7 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
   });
 });
 
-// =============================================================================
 // 16. No Refinery — Guard Mode Fallback (unit.cpp:2771-2774)
-// =============================================================================
 
 describe('No refinery fallback — unit.cpp:2771-2774', () => {
   /**
@@ -1069,9 +1049,7 @@ describe('No refinery fallback — unit.cpp:2771-2774', () => {
   });
 });
 
-// =============================================================================
 // 17. Tiberium_Adjust — Initial Ore Placement (cell.cpp:2019-2082)
-// =============================================================================
 
 describe('Tiberium_Adjust — cell.cpp:2019-2082 initial density by adjacency', () => {
   /**
@@ -1101,9 +1079,7 @@ describe('Tiberium_Adjust — cell.cpp:2019-2082 initial density by adjacency', 
   });
 });
 
-// =============================================================================
 // 18. Ore Growth Timing (map.ts:549-551)
-// =============================================================================
 
 describe('Ore growth timing — map.ts ORE_GROWTH_INTERVAL', () => {
   /**
@@ -1133,9 +1109,7 @@ describe('Ore growth timing — map.ts ORE_GROWTH_INTERVAL', () => {
   });
 });
 
-// =============================================================================
 // 19. Harvester State: idle → seeking Transition (harvester.ts:109-122)
-// =============================================================================
 
 describe('idle → seeking transition — harvester.ts:109-122', () => {
   /**
@@ -1181,9 +1155,7 @@ describe('idle → seeking transition — harvester.ts:109-122', () => {
   });
 });
 
-// =============================================================================
 // 20. Harvester State: seeking → harvesting Transition (harvester.ts:124-146)
-// =============================================================================
 
 describe('seeking → harvesting transition — harvester.ts:124-146', () => {
   it('seeking harvester on ore cell transitions to harvesting', () => {
@@ -1212,9 +1184,7 @@ describe('seeking → harvesting transition — harvester.ts:124-146', () => {
   });
 });
 
-// =============================================================================
 // 21. Harvester State: harvesting — Bail Extraction (harvester.ts:148-182)
-// =============================================================================
 
 describe('harvesting bail extraction — harvester.ts:148-182', () => {
   it('extracts 1 bail of gold per harvest tick (25 credits)', () => {
@@ -1320,9 +1290,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
   });
 });
 
-// =============================================================================
 // 22. Non-Harvester Ignores Harvest Mission (unit.cpp:2766)
-// =============================================================================
 
 describe('Non-harvester with harvest mission — unit.cpp:2766', () => {
   /**
@@ -1340,9 +1308,7 @@ describe('Non-harvester with harvest mission — unit.cpp:2766', () => {
   });
 });
 
-// =============================================================================
 // 23. GOINGTOIDLE — Useless Harvester (unit.cpp:2910-2919)
-// =============================================================================
 
 describe('GOINGTOIDLE — useless harvester — unit.cpp:2910-2919', () => {
   /**
@@ -1385,9 +1351,7 @@ describe('GOINGTOIDLE — useless harvester — unit.cpp:2910-2919', () => {
   });
 });
 
-// =============================================================================
 // 24. Ore Overlay Value Ranges
-// =============================================================================
 
 describe('Ore overlay value ranges — overlay.cpp constants', () => {
   /**
@@ -1428,9 +1392,7 @@ describe('Ore overlay value ranges — overlay.cpp constants', () => {
   });
 });
 
-// =============================================================================
 // 25. Full Harvest Cycle Integration Test
-// =============================================================================
 
 describe('full harvest cycle: idle → seek → harvest → return → unload → idle', () => {
   it('completes a full cycle for a player harvester', () => {
