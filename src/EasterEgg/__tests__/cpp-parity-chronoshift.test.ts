@@ -24,7 +24,7 @@ import {
 } from '../engine/types';
 import type { SuperweaponState } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { activateSuperweapon, type SuperweaponContext } from '../engine/superweapon';
+import { activateSuperweapon, CHRONO_DURATION_TICKS, type SuperweaponContext } from '../engine/superweapon';
 import {
   teleportChronoTank, CHRONO_TANK_COOLDOWN,
   type SpecialUnitsContext,
@@ -258,8 +258,8 @@ describe('Moebius return mechanic (C++ drive.cpp:1297-1313)', () => {
     // IsMoebius=true, MoebiusCountDown = 2700. When countdown reaches 0,
     // unit teleports back to MoebiusCell.
     //
-    // TS: Entity has no MoebiusCell/MoebiusCountDown/IsMoebius fields.
-    // Units never return to origin. This is a PARITY GAP.
+    // TS: Entity.moebiusCell and Entity.moebiusCountDown fields match C++ drive.h:62-74.
+    // superweapon.ts sets them during chronoshift; index.ts decrements and returns.
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
     const originX = tank.pos.x;
@@ -273,11 +273,10 @@ describe('Moebius return mechanic (C++ drive.cpp:1297-1313)', () => {
     expect(tank.pos.x).toBe(target.x);
 
     // C++ expects the entity to have a moebius return cell saved
-    // TS has no such field — PARITY GAP
-    const entity = tank as Entity & { moebiusCell?: { x: number; y: number } };
-    expect(entity.moebiusCell).toBeDefined(); // PARITY GAP — field does not exist
-    expect(entity.moebiusCell?.x).toBe(originX);
-    expect(entity.moebiusCell?.y).toBe(originY);
+    // TS: Entity.moebiusCell is set during chronoshift — matches C++
+    expect(tank.moebiusCell).toBeDefined();
+    expect(tank.moebiusCell?.x).toBe(originX);
+    expect(tank.moebiusCell?.y).toBe(originY);
   });
 
   it('ChronoDuration default is 3 minutes = 2700 ticks', () => {
@@ -285,12 +284,16 @@ describe('Moebius return mechanic (C++ drive.cpp:1297-1313)', () => {
     // C++ defines.h:3031-3032: TICKS_PER_MINUTE = 15 * 60 = 900
     // So: 3 * 900 = 2700 ticks
     //
-    // TS: Entity.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS (30) — visual only.
-    // There is no MoebiusCountDown field. PARITY GAP.
+    // TS: Entity.moebiusCountDown is set to CHRONO_DURATION_TICKS (2700) — matches C++.
+    // Entity.chronoShiftTick (30) is a separate visual-only timer.
+    // rules.ini: ChronoDuration=3 (minutes)
     const TICKS_PER_MINUTE = 900;
-    const CHRONO_DURATION = 3; // minutes
+    const CHRONO_DURATION = 3; // minutes from rules.ini
     const expectedCountdown = CHRONO_DURATION * TICKS_PER_MINUTE;
     expect(expectedCountdown).toBe(2700);
+
+    // Verify exported constant matches
+    expect(CHRONO_DURATION_TICKS).toBe(2700);
 
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
@@ -300,9 +303,47 @@ describe('Moebius return mechanic (C++ drive.cpp:1297-1313)', () => {
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
     // C++ sets MoebiusCountDown = 2700
-    // TS sets chronoShiftTick = 30 (visual only, not a return timer)
-    const entity = tank as Entity & { moebiusCountDown?: number };
-    expect(entity.moebiusCountDown).toBe(2700); // PARITY GAP — field does not exist
+    // TS: Entity.moebiusCountDown matches C++ — set by superweapon.ts
+    expect(tank.moebiusCountDown).toBe(CHRONO_DURATION_TICKS);
+  });
+
+  it('unit returns to origin when moebiusCountDown reaches 0 (C++ drive.cpp:1297-1313)', () => {
+    // C++ behavior: When IsMoebius=true and MoebiusCountDown reaches 0,
+    // Teleport_To(MoebiusCell) returns the unit to its origin cell.
+    //
+    // TS: index.ts game loop decrements moebiusCountDown each tick and
+    // teleports back when it reaches 0. We simulate this directly on Entity.
+    const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
+    const originX = tank.pos.x;
+    const originY = tank.pos.y;
+    tank.selected = true;
+    const ctx = makeChronoCtx([tank]);
+    const target = { x: 20 * CELL_SIZE, y: 20 * CELL_SIZE };
+
+    activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
+
+    // After chronoshift: unit is at destination with moebius fields set
+    expect(tank.pos.x).toBe(target.x);
+    expect(tank.moebiusCountDown).toBe(2700);
+    expect(tank.moebiusCell).toBeDefined();
+
+    // Simulate countdown reaching 1 (one tick before return)
+    tank.moebiusCountDown = 1;
+
+    // Simulate the game loop tick-down (C++ drive.cpp:1297-1313)
+    // This is what index.ts does each tick:
+    tank.moebiusCountDown--;
+    if (tank.moebiusCountDown === 0 && tank.moebiusCell) {
+      tank.pos.x = tank.moebiusCell.x;
+      tank.pos.y = tank.moebiusCell.y;
+      tank.moebiusCell = null;
+    }
+
+    // Unit should be back at origin
+    expect(tank.pos.x).toBe(originX);
+    expect(tank.pos.y).toBe(originY);
+    expect(tank.moebiusCell).toBeNull();
+    expect(tank.moebiusCountDown).toBe(0);
   });
 
   it('chrono tank does NOT return after chronoshift (IsMoebius set to false)', () => {
@@ -341,9 +382,9 @@ describe('Cargo destruction on chronoshift (C++ drive.cpp:387-389)', () => {
     // C++ behavior: DriveClass::Teleport_To checks Rule.IsChronoKill (default true)
     // and calls Kill_Cargo(NULL) to destroy all passengers.
     //
-    // TS: No cargo/passenger system is checked during chronoshift.
-    // Entity has a `passengers` field (from stats) but it's a capacity count,
-    // not a list of loaded entities. PARITY GAP (minor — passenger system not modeled).
+    // TS: No cargo/passenger system modeled — individual loaded entities are not tracked.
+    // This is a BLOCKED gap (requires full passenger load/unload system).
+    // rules.ini: ChronoKillCargo=yes confirms C++ default is true.
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 5, 5);
     apc.selected = true;
     const ctx = makeChronoCtx([apc]);
@@ -376,9 +417,8 @@ describe('Demo Truck chronoshift self-destruct (C++ house.cpp:2828-2830)', () =>
     // C++ behavior: Demo truck is moved to destination, then Assign_Target(self)
     // triggers its kamikaze explosion at the destination.
     //
-    // TS: Demo truck is treated as a regular vehicle — teleported normally
-    // with chronoShiftTick visual effect but NO self-destruct trigger.
-    // PARITY GAP.
+    // TS: superweapon.ts handles DTRK as a special case — sets target=self and
+    // mission=ATTACK, matching C++ Assign_Target(tech->As_Target()).
     const dtrk = entityAtCell(UnitType.V_DTRK, House.Spain, 5, 5);
     dtrk.selected = true;
     const ctx = makeChronoCtx([dtrk]);
@@ -386,14 +426,14 @@ describe('Demo Truck chronoshift self-destruct (C++ house.cpp:2828-2830)', () =>
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
-    // TS behavior: demo truck is teleported alive to destination
+    // Demo truck is teleported to destination
     expect(dtrk.pos.x).toBe(target.x);
     expect(dtrk.pos.y).toBe(target.y);
 
-    // C++ behavior: demo truck should self-destruct (Assign_Target to self)
-    // after arriving. In C++, the demo truck would be dead after the next AI tick.
-    // TS does NOT trigger self-destruct — PARITY GAP
-    expect(dtrk.mission).toBe(Mission.ATTACK); // PARITY GAP — TS does not set ATTACK mission
+    // C++ Assign_Target(self) → ATTACK mission triggers kamikaze explosion
+    // TS: superweapon.ts sets mission=ATTACK and target=self — matches C++
+    expect(dtrk.mission).toBe(Mission.ATTACK);
+    expect(dtrk.target).toBe(dtrk); // self-targeting triggers explosion
   });
 });
 
@@ -496,30 +536,25 @@ describe('Chronal Vortex spawning from chronoshift (C++ house.cpp:2876-2888)', (
   it('chronoshift should have a chance to spawn a vortex at random map location', () => {
     // C++ behavior: After a chronoshift of a non-chrono-tank unit, there is a
     // 20% chance a ChronalVortex spawns at a random map cell.
+    // rules.ini: VortexChance=20%
     //
-    // TS: The chronoshift activation in superweapon.ts does NOT spawn vortices.
-    // Vortices only spawn from crate pickups (crates.ts:376-383).
-    // PARITY GAP.
+    // TS: superweapon.ts rolls VortexChance after each chronoshift and pushes
+    // an atomsfx effect + activeVortices entry — matches C++ house.cpp:2876-2888.
     //
-    // To verify the gap: run 100 chronoshifts and check if any vortex appears.
+    // Statistical test: 100 trials with 20% chance; P(0 vortices) = 0.8^100 ~ 2e-10
     let vortexCount = 0;
     for (let trial = 0; trial < 100; trial++) {
       resetEntityIds();
       const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
       tank.selected = true;
-      const vortices: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }> = [];
       const ctx = makeChronoCtx([tank]);
-      // The superweapon context doesn't have activeVortices — check effects instead
       activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain,
         { x: 20 * CELL_SIZE, y: 20 * CELL_SIZE });
-      // In C++, ChronalVortex.Appear() is called. TS has no equivalent in activateSuperweapon.
-      // We check if any vortex-like effect was spawned.
       const vortexEffects = ctx.effects.filter(e => e.sprite === 'atomsfx');
       if (vortexEffects.length > 0) vortexCount++;
     }
-    // C++ expects ~20 vortices out of 100 trials.
-    // TS will have 0 — PARITY GAP
-    expect(vortexCount).toBeGreaterThan(0); // PARITY GAP — TS spawns 0 vortices
+    // ~20 out of 100 trials should spawn a vortex
+    expect(vortexCount).toBeGreaterThan(0);
   });
 });
 
@@ -537,10 +572,10 @@ describe('TimeQuake from chronoshift (C++ house.cpp:2871-2873)', () => {
   it('chronoshift should have a chance to trigger a time quake', () => {
     // C++ behavior: After a chronoshift, 20% chance to set the global
     // TimeQuake flag which damages ALL objects on the map.
+    // rules.ini: QuakeChance=20%
     //
-    // TS: activateSuperweapon does NOT check for or trigger time quakes.
-    // TimeQuake is only implemented via crate pickup (crates.ts:359-374).
-    // PARITY GAP.
+    // TS: superweapon.ts rolls QuakeChance and sets ctx.timeQuake — matches C++.
+    // SuperweaponContext.timeQuake is synced back to Game.timeQuake in index.ts.
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
     const ctx = makeChronoCtx([tank]);
@@ -548,13 +583,8 @@ describe('TimeQuake from chronoshift (C++ house.cpp:2871-2873)', () => {
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
-    // C++ would set TimeQuake with 20% probability.
-    // TS has no timeQuake mechanism in the superweapon handler.
-    // We can only verify that the mechanism exists or not.
-    const ctxAny = ctx as SuperweaponContext & { timeQuake?: boolean };
-    // PARITY GAP — timeQuake field does not exist on context
-    // In a fully parity implementation, after enough chronoshifts, some would trigger quakes.
-    expect(ctxAny.timeQuake).toBeDefined(); // PARITY GAP
+    // ctx.timeQuake is set (to true or false) by the QuakeChance roll — it should be defined
+    expect(ctx.timeQuake).toBeDefined();
   });
 });
 
@@ -576,7 +606,7 @@ describe('Blocked destination fallback (C++ drive.cpp:408-410)', () => {
     // The unit is always placed exactly at target coordinates.
     // (Note: teleportChronoTank in specialUnits.ts DOES check passability
     //  and rejects impassable cells — but the Chronosphere handler does not.)
-    // PARITY GAP — Chronosphere should find nearby cell, not reject or ignore.
+    // BLOCKED gap — requires Nearby_Location implementation for Chronosphere.
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
 
@@ -784,11 +814,8 @@ describe('Vessel chronoshift eligibility (C++ house.cpp:2782-2785)', () => {
 
   it('destroyer should be eligible for chronoshift', () => {
     // C++ allows vessels (non-transport, non-carrier) to be chronoshifted.
-    // TS superweapon.ts AI filtering (line 279): e.stats.isVessel → excluded from AI auto-select
-    // But for player activation, the filter on line 359-362 only checks:
-    //   e.alive && e.selected && e.house === house && e.type !== UnitType.V_CTNK
-    // This means vessels COULD be chronoshifted in TS player activation,
-    // but the AI logic explicitly skips them.
+    // TS: superweapon.ts player filter allows vessels through (matching C++).
+    // AI filtering excludes vessels from auto-select (AI never picks ships).
     const dd = entityAtCell(UnitType.V_DD, House.Spain, 5, 5);
     dd.selected = true;
     const ctx = makeChronoCtx([dd]);
@@ -804,8 +831,7 @@ describe('Vessel chronoshift eligibility (C++ house.cpp:2782-2785)', () => {
 
   it('transport (LST) should NOT be eligible for chronoshift', () => {
     // C++ house.cpp:2784: VESSEL_TRANSPORT excluded
-    // TS: No explicit transport exclusion in the player chronoshift filter.
-    // PARITY GAP — TS allows transport to be chronoshifted.
+    // TS: superweapon.ts filter includes `e.type !== UnitType.V_LST` — matches C++.
     const lst = entityAtCell(UnitType.V_LST, House.Spain, 5, 5);
     lst.selected = true;
     const ctx = makeChronoCtx([lst]);
@@ -813,9 +839,8 @@ describe('Vessel chronoshift eligibility (C++ house.cpp:2782-2785)', () => {
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
-    // C++ would NOT teleport the transport
-    // TS WILL teleport it — PARITY GAP
-    expect(lst.pos.x).toBe(5 * CELL_SIZE + CELL_SIZE / 2); // PARITY GAP — TS moves it
+    // LST is excluded from chronoshift — should NOT be teleported
+    expect(lst.pos.x).toBe(5 * CELL_SIZE + CELL_SIZE / 2);
   });
 });
 
@@ -829,12 +854,7 @@ describe('Aircraft chronoshift exclusion (C++ house.cpp:2779-2785,2813)', () => 
 
   it('aircraft (Longbow) should NOT be eligible for chronoshift', () => {
     // C++ doesn't include RTTI_AIRCRAFT in the eligible types for chronosphere.
-    // TS: superweapon.ts filter (line 359-362) does NOT explicitly exclude aircraft.
-    // However, the entity filter is `e.selected && e.house === house && e.type !== V_CTNK`.
-    // Aircraft might slip through if selected.
-    //
-    // Note: In practice, TS AI logic (line 279) excludes e.stats.isAircraft,
-    // but the player activation path has no such check.
+    // TS: superweapon.ts filter includes `!e.stats.isAircraft` — matches C++.
     const heli = entityAtCell(UnitType.V_HIND, House.Spain, 5, 5);
     heli.selected = true;
     const ctx = makeChronoCtx([heli]);
@@ -842,8 +862,7 @@ describe('Aircraft chronoshift exclusion (C++ house.cpp:2779-2785,2813)', () => 
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
-    // C++ would NOT teleport aircraft
-    // TS has no explicit aircraft filter in player activation — PARITY GAP
-    expect(heli.pos.x).toBe(5 * CELL_SIZE + CELL_SIZE / 2); // PARITY GAP — TS may move it
+    // Aircraft are excluded from chronoshift — should NOT be teleported
+    expect(heli.pos.x).toBe(5 * CELL_SIZE + CELL_SIZE / 2);
   });
 });

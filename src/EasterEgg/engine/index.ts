@@ -1886,6 +1886,19 @@ export class Game {
       if (e.invulnTick > 0) e.invulnTick--;
       if (e.ironCurtainTick > 0) e.ironCurtainTick--;
       if (e.chronoShiftTick > 0) e.chronoShiftTick--;
+      // C++ drive.cpp:1297-1313: Moebius return countdown — when timer expires,
+      // teleport unit back to its origin cell and clear moebius state.
+      if (e.moebiusCountDown > 0) {
+        e.moebiusCountDown--;
+        if (e.moebiusCountDown === 0 && e.moebiusCell) {
+          e.pos.x = e.moebiusCell.x;
+          e.pos.y = e.moebiusCell.y;
+          e.prevPos.x = e.moebiusCell.x;
+          e.prevPos.y = e.moebiusCell.y;
+          e.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
+          e.moebiusCell = null;
+        }
+      }
     }
 
     // Tick Iron Curtain timers on structures (C++ house.cpp:2751 parity)
