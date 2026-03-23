@@ -162,8 +162,8 @@ export function getAvailableItems(ctx: ProductionContext): ProductionItem[] {
 }
 
 /** Start building an item (called from sidebar click).
- *  PR3: C++ incremental cost — don't deduct full cost upfront; deduct per-tick during tickProduction.
- *  Players can start building with partial funds; production pauses when broke. */
+ *  C++ parity: incremental cost deduction per tick using integer division (factory.cpp:615).
+ *  factory.cpp:416: validates player has at minimum cost-per-tick before starting. */
 export function startProduction(ctx: ProductionContext, item: ProductionItem): void {
   const category = getStripSide(item);
   const existing = ctx.productionQueue.get(category);
@@ -181,8 +181,12 @@ export function startProduction(ctx: ProductionContext, item: ProductionItem): v
     }
     return;
   }
-  // PR3: Only check if player has ANY credits (can start building with partial funds)
-  if (ctx.credits <= 0) {
+  // C++ parity (factory.cpp:416): validate player has at minimum cost-per-tick.
+  // Cost_Per_Tick at stage 0 = Balance / STEP_COUNT = effectiveCost / buildTime.
+  // C++ uses integer division, so the minimum is floor(cost / buildTime).
+  const effectiveCost = getEffectiveCost(item, ctx.playerHouse);
+  const minCostPerTick = Math.max(1, Math.floor(effectiveCost / item.buildTime));
+  if (ctx.credits < minCostPerTick) {
     ctx.playEva('eva_insufficient_funds');
     return;
   }
@@ -210,9 +214,9 @@ export function cancelProduction(ctx: ProductionContext, category: string): void
 }
 
 /** Advance production queues each tick.
- *  PR3: C++ incremental cost — deducts costPerTick each tick; pauses if insufficient funds.
- *  C++ parity (factory.cpp:434): power fraction is snapshotted at Start() time and locked
- *  for the duration of production. Changing power mid-production has no effect. */
+ *  C++ parity: integer cost tracking (factory.cpp:615), force-spend at completion
+ *  (factory.cpp:233), stage regression on insufficient funds (factory.cpp:220-221).
+ *  Power fraction is snapshotted at Start() time and locked (factory.cpp:434). */
 export function tickProduction(ctx: ProductionContext): void {
   for (const [category, entry] of ctx.productionQueue) {
     // Check prerequisite still exists
@@ -220,17 +224,23 @@ export function tickProduction(ctx: ProductionContext): void {
       cancelProduction(ctx, category);
       continue;
     }
-    // PR3: Incremental cost deduction — deduct costPerTick each tick
+    // C++ parity (factory.cpp:615): Cost_Per_Tick = Balance / (STEP_COUNT - stage)
+    // Uses integer division: remaining cost divided by remaining steps.
+    // Balance = effectiveCost - costPaid (remaining cost to deduct).
     const effectiveCost = getEffectiveCost(entry.item, ctx.playerHouse);
-    const costPerTick = effectiveCost / entry.item.buildTime;
-    const costThisTick = costPerTick; // deduct one tick's worth of cost
+    const remainingCost = effectiveCost - entry.costPaid;
+    const remainingSteps = Math.max(1, entry.item.buildTime - Math.floor(entry.progress));
+    // C++ integer division: floor(remainingCost / remainingSteps)
+    const costThisTick = Math.max(1, Math.floor(remainingCost / remainingSteps));
     if (entry.costPaid < effectiveCost) {
       if (ctx.credits >= costThisTick) {
-        const deduct = Math.min(costThisTick, effectiveCost - entry.costPaid);
+        const deduct = Math.min(costThisTick, remainingCost);
         ctx.credits -= deduct;
         entry.costPaid += deduct;
       } else {
-        // PR3: Insufficient funds — pause production (don't advance progress)
+        // C++ parity (factory.cpp:220-221): insufficient funds — regress one stage.
+        // C++: Set_Stage(Fetch_Stage() - 1) — rolls back progress by one step.
+        entry.progress = Math.max(0, entry.progress - 1);
         continue;
       }
     }
@@ -243,6 +253,13 @@ export function tickProduction(ctx: ProductionContext): void {
     // C++ parity: use the LOCKED power fraction from Start() time, not current power
     entry.progress += entry.powerMult;
     if (entry.progress >= entry.item.buildTime) {
+      // C++ parity (factory.cpp:233): force-spend remaining balance on completion.
+      // House->Spend_Money(Balance); Balance=0; — guarantees exact total cost.
+      const unspent = effectiveCost - entry.costPaid;
+      if (unspent > 0) {
+        ctx.credits -= unspent;
+        entry.costPaid = effectiveCost;
+      }
       // Build complete
       if (entry.item.isStructure) {
         // Structure: go into placement mode

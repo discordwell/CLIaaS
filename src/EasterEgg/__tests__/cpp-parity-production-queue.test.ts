@@ -466,11 +466,10 @@ describe('C++ parity: placing a building pauses production (factory.cpp:230,382)
     // C++ expected: production NOT started because factory is occupied
   });
 
-  it('PARITY GAP: total cost after completion has float drift — C++ uses integer division + force-spend', () => {
+  it('CLOSED: total cost after completion is exact — integer tracking + force-spend', () => {
     // C++ factory.cpp:233: on completion, House->Spend_Money(Balance); Balance=0;
-    // This force-spend step guarantees exact total cost in C++.
-    // TS uses float division (costPerTick = effectiveCost / buildTime) with no
-    // force-spend step, so rounding drift accumulates.
+    // GAP CLOSED: TS now uses integer cost-per-tick (Math.floor) and force-spends
+    // any remaining balance on completion, matching C++ behavior exactly.
     const initialCredits = 10000;
     const powrCost = getIniCost('POWR') || 300;
     const buildTime = cppBuildTime(powrCost);
@@ -485,10 +484,8 @@ describe('C++ parity: placing a building pauses production (factory.cpp:230,382)
     const effectiveCost = getEffectiveCost(item, ctx.playerHouse);
     const totalDeducted = initialCredits - creditsAfterBuild;
 
-    // C++ would have totalDeducted === effectiveCost (exactly)
-    // TS has floating-point drift:
-    expect(Math.abs(totalDeducted - effectiveCost)).toBeLessThan(0.01);
-    // PARITY GAP: C++ guarantees exact cost; TS has float drift
+    // C++ and TS now both have exact cost deduction
+    expect(totalDeducted).toBe(effectiveCost);
 
     // Verify that production queue is empty after completion:
     expect(ctx.productionQueue.has('left')).toBe(false);
@@ -513,7 +510,7 @@ describe('C++ parity: cancel refunds partial cost (factory.cpp:469-506)', () => 
     expect(ctx.credits).toBe(initialCredits);
   });
 
-  it('cancel at 50% progress refunds exactly costPaid (float drift from initial)', () => {
+  it('cancel at 50% progress refunds exactly costPaid — CLOSED: integer tracking', () => {
     const initialCredits = 10000;
     const tankCost = getIniCost('2TNK') || 800;
     const buildTime = cppBuildTime(tankCost);
@@ -534,20 +531,20 @@ describe('C++ parity: cancel refunds partial cost (factory.cpp:469-506)', () => 
     // Refund = costPaid (TS refunds exactly what was deducted)
     expect(ctx.credits).toBe(creditsBeforeCancel + costPaid);
 
-    // Net should restore to initialCredits, but float drift may cause tiny divergence.
-    // C++ uses integer division per tick so has no float drift.
-    // PARITY GAP: TS accumulates float rounding error in costPaid tracking.
-    expect(ctx.credits).toBeCloseTo(initialCredits, 5);
+    // GAP CLOSED: TS now uses integer division per tick — no float drift.
+    // credits + costPaid = initialCredits (exactly)
+    expect(ctx.credits).toBe(initialCredits);
   });
 
-  it('money is conserved: credits + costPaid = initialCredits at any point', () => {
+  it('money is conserved exactly: credits + costPaid = initialCredits at any point', () => {
+    // GAP CLOSED: integer cost tracking ensures exact conservation (no float drift)
     const initialCredits = 10000;
     const ctx = makeContext({ credits: initialCredits });
     const item = makeItem();
 
     startProduction(ctx, item);
 
-    // Check at various tick counts
+    // Check at various tick counts — exact conservation at every point
     for (const ticks of [1, 5, 10, 25]) {
       tickNTimes(ctx, ticks);
       const entry = ctx.productionQueue.get('right');
@@ -555,7 +552,7 @@ describe('C++ parity: cancel refunds partial cost (factory.cpp:469-506)', () => 
         expect(
           ctx.credits + entry.costPaid,
           `money conservation at tick ${ticks}`,
-        ).toBeCloseTo(initialCredits, 5);
+        ).toBe(initialCredits);
       }
     }
   });
@@ -929,11 +926,9 @@ describe('C++ parity: incremental cost deduction (factory.cpp:210-224)', () => {
     expect(ctx.credits).toBeGreaterThan(200);
   });
 
-  it('costPerTick ~ effectiveCost / buildTime (C++ uses integer division — TS uses float)', () => {
+  it('costPerTick uses C++ integer division: floor(remainingCost / remainingSteps)', () => {
     // C++ factory.cpp:615: Balance / (STEP_COUNT - stage) — integer division
-    // TS: effectiveCost / buildTime — floating point division
-    // Due to float precision, the actual deduction per tick may differ slightly
-    // from the theoretical value.
+    // TS now matches: Math.floor(remainingCost / remainingSteps), minimum 1
     const ctx = makeContext({ credits: 10000 });
     const item = makeItem();
     startProduction(ctx, item);
@@ -942,14 +937,16 @@ describe('C++ parity: incremental cost deduction (factory.cpp:210-224)', () => {
     tickProduction(ctx);
     const costFirstTick = creditsBeforeTick - ctx.credits;
 
-    const expectedCostPerTick = getEffectiveCost(item, ctx.playerHouse) / item.buildTime;
-    // Float precision: allow tiny deviation
-    expect(costFirstTick).toBeCloseTo(expectedCostPerTick, 10);
+    const effectiveCost = getEffectiveCost(item, ctx.playerHouse);
+    const expectedCostPerTick = Math.max(1, Math.floor(effectiveCost / item.buildTime));
+    // Integer division: exact match expected
+    expect(costFirstTick).toBe(expectedCostPerTick);
   });
 
-  it('production pauses when credits run out mid-build', () => {
-    // factory.cpp:220: if (cost > Available_Money()) Set_Stage(stage-1)
-    // TS: skips advancement when credits < costPerTick
+  it('production regresses when credits run out mid-build — CLOSED: stage regression', () => {
+    // factory.cpp:220-221: if (cost > Available_Money()) Set_Stage(stage-1)
+    // GAP CLOSED: TS now regresses progress by 1 step when funds insufficient,
+    // matching C++ stage regression behavior instead of just pausing.
     const tankCost = getIniCost('2TNK') || 800;
     const buildTime = cppBuildTime(tankCost);
     const ctx = makeContext({ credits: 50 }); // very few credits
@@ -962,6 +959,8 @@ describe('C++ parity: incremental cost deduction (factory.cpp:210-224)', () => {
     const entry = ctx.productionQueue.get('right');
     if (entry) {
       expect(entry.progress).toBeLessThan(buildTime);
+      // With stage regression, progress stays near 0 or oscillates
+      // (advances when credits allow, regresses when they don't)
     }
   });
 
@@ -1028,11 +1027,10 @@ describe('C++ parity: production completion (factory.cpp:647-669)', () => {
     expect(ctx.pendingPlacement).not.toBeNull();
   });
 
-  it('PARITY GAP: total cost deducted drifts from effective cost even on "even" costs', () => {
+  it('CLOSED: total cost deducted is exact — integer division + force-spend remainder', () => {
     // C++ factory.cpp:233: on completion, House->Spend_Money(Balance); Balance=0;
-    // C++ force-spends remainder to guarantee exact total. TS has no such step.
-    // Even costs that appear divisible in base-10 (800 / 576 ticks) produce
-    // irrational per-tick values in float arithmetic, causing drift.
+    // GAP CLOSED: TS now uses integer cost-per-tick and force-spends remainder
+    // on completion, guaranteeing exact total cost just like C++.
     const initialCredits = 10000;
     const cost = getIniCost('2TNK') || 800;
     const buildTime = cppBuildTime(cost);
@@ -1045,14 +1043,13 @@ describe('C++ parity: production completion (factory.cpp:647-669)', () => {
     const effectiveCost = getEffectiveCost(item, ctx.playerHouse);
     const totalDeducted = initialCredits - ctx.credits;
 
-    // C++ would have exact match. TS has float drift.
-    // PARITY GAP: TS does not have a force-spend remainder step.
-    expect(Math.abs(totalDeducted - effectiveCost)).toBeLessThan(0.01);
+    // Exact match: integer division + force-spend remainder = no drift
+    expect(totalDeducted).toBe(effectiveCost);
   });
 
-  it('PARITY GAP: non-divisible costs have floating-point rounding drift', () => {
+  it('CLOSED: non-divisible costs have no rounding drift — integer + force-spend', () => {
     // C++ factory.cpp:233: on completion, House->Spend_Money(Balance) forces exact total.
-    // TS: no force-spend step. Float division accumulates rounding error.
+    // GAP CLOSED: TS integer division + force-spend remainder = exact total.
     const initialCredits = 10000;
     const oddCost = 777;
     const buildTime = cppBuildTime(oddCost);
@@ -1065,12 +1062,8 @@ describe('C++ parity: production completion (factory.cpp:647-669)', () => {
     const effectiveCost = getEffectiveCost(item, ctx.playerHouse);
     const totalDeducted = initialCredits - ctx.credits;
 
-    // C++ would have totalDeducted === effectiveCost (exactly)
-    // TS may have floating-point drift:
-    if (totalDeducted !== effectiveCost) {
-      // PARITY GAP: drift exists
-      expect(Math.abs(totalDeducted - effectiveCost)).toBeLessThan(0.01);
-    }
+    // Exact match for any cost value
+    expect(totalDeducted).toBe(effectiveCost);
   });
 
   it('queued items auto-restart after first completes', () => {
@@ -1107,9 +1100,9 @@ describe('C++ parity: country cost bias (factory.cpp:322)', () => {
     expect(greeceCost).toBe(item.cost);
   });
 
-  it('PARITY GAP: cost bias total deduction has float drift (C++ uses integer division)', () => {
+  it('CLOSED: cost bias total deduction is exact (integer division + force-spend)', () => {
     // C++ factory.cpp:322: Balance = Cost_Of() * CostBias — integer math
-    // TS: float costPerTick accumulates rounding error over many ticks
+    // GAP CLOSED: TS integer cost-per-tick + force-spend remainder = exact total.
     const initialCredits = 10000;
     const ctx = makeContext({
       credits: initialCredits,
@@ -1123,9 +1116,8 @@ describe('C++ parity: country cost bias (factory.cpp:322)', () => {
     const effectiveCost = getEffectiveCost(item, 'USSR' as House);
     const totalDeducted = initialCredits - ctx.credits;
 
-    // C++ would have exact match via integer division + force-spend remainder.
-    // TS has float drift. PARITY GAP.
-    expect(Math.abs(totalDeducted - effectiveCost)).toBeLessThan(0.01);
+    // Exact match: integer division + force-spend remainder
+    expect(totalDeducted).toBe(effectiveCost);
   });
 });
 

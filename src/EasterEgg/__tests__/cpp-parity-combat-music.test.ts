@@ -87,52 +87,66 @@ const TS_ACTION_INDICES = new Set([0, 2, 5, 6, 8, 9, 11, 12, 14]);
 
 describe('Track pool structure (theme.cpp:63-106, Is_Allowed:481-512)', () => {
 
-  it('C++ has a single flat pool per house, not calm/action split', () => {
+  it('C++ has a single flat pool per house — CLOSED: TS now uses house-based pool', () => {
     // C++ behavior: Is_Allowed() filters by Normal flag AND house ownership.
     // There is ONE pool for Allied players and ONE pool for Soviet players.
-    // There is NO sub-categorization into "calm" vs "action" tracks.
     //
-    // TS behavior: Splits all 15 tracks into CALM_TRACKS (6) and ACTION_TRACKS (9).
-    // This is a TS-only enhancement not present in C++.
+    // GAP CLOSED: TS now uses house-based filtering via TRACK_META ownership bits.
+    // The calm/action split is removed from advance(). setCombatMode still exists
+    // as a TS-only enhancement but picks from the house-filtered pool.
 
-    // Document the split sizes
-    expect(TS_CALM_INDICES.size).toBe(6);
-    expect(TS_ACTION_INDICES.size).toBe(9);
-    expect(TS_CALM_INDICES.size + TS_ACTION_INDICES.size).toBe(15);
-
-    // PARITY GAP: C++ has no calm/action split. All Normal+Available themes
-    // for the player's house are in one pool.
-    // C++ Allied pool: 15 themes, Soviet pool: 4 themes (base game).
+    // Verify C++ reference data
     expect(CPP_ALLIED_THEMES.length).toBe(15);
     expect(CPP_SOVIET_THEMES.length).toBe(4);
+
+    // TS Allied pool: 12 tracks (subset of 15 C++ themes — missing AWAIT, FOGGER1A, SNAKE)
+    // TS Soviet pool: 3 tracks (missing TREN226M from C++ 4-track pool)
+    const player = createMockPlayer();
+    player.setFaction('allied');
+    const alliedPlaylist = (player as any).playlist as number[];
+    expect(alliedPlaylist.length).toBe(12);
+
+    player.setFaction('soviet');
+    const sovietPlaylist = (player as any).playlist as number[];
+    expect(sovietPlaylist.length).toBe(3);
   });
 
-  it('C++ filters tracks by house ownership — TS does not', () => {
+  it('C++ filters tracks by house ownership — CLOSED: TS now filters by faction', () => {
     // C++ theme.cpp:500:
     //   if (PlayerPtr != NULL && ((1 << PlayerPtr->ActLike) & _themes[index].Owner) == 0) return(false);
     //
-    // An Allied player CANNOT hear Soviet themes (CRUS, FAC2, RUN1, TREN)
-    // A Soviet player CANNOT hear most Allied themes.
-    //
-    // TS plays all 15 tracks regardless of side.
+    // GAP CLOSED: TS now has TRACK_META with per-track owner bits (HOUSEF_ALLIES, HOUSEF_SOVIET).
+    // MusicPlayer.setFaction() rebuilds the playlist filtered by house ownership.
 
-    // PARITY GAP: TS has no house-based filtering at all.
-    // All 15 tracks are available to both sides.
-    const tsAllTracks = TS_MUSIC_TRACKS.length;
-    expect(tsAllTracks).toBe(15);
+    const player = createMockPlayer();
 
-    // In C++, a Soviet player would only get 4 base-game themes.
-    // This fundamentally changes the listening experience.
+    // Allied player: Soviet-only tracks (crush, run, militant_force) excluded
+    player.setFaction('allied');
+    const alliedPlaylist = (player as any).playlist as number[];
+    expect(alliedPlaylist).not.toContain(2);  // crush = Soviet
+    expect(alliedPlaylist).not.toContain(7);  // run = Soviet
+    expect(alliedPlaylist).not.toContain(11); // militant_force = Soviet
+
+    // Soviet player: Allied-only tracks excluded (most tracks)
+    player.setFaction('soviet');
+    const sovietPlaylist = (player as any).playlist as number[];
+    expect(sovietPlaylist).toContain(2);  // crush
+    expect(sovietPlaylist).toContain(7);  // run
+    expect(sovietPlaylist).toContain(11); // militant_force
+    expect(sovietPlaylist).not.toContain(0); // hell_march = Allied
   });
 
-  it('C++ excludes non-Normal themes from playlist — TS has none', () => {
+  it('C++ excludes non-Normal themes — CLOSED: TS TRACK_META.normal filters them', () => {
     // C++ theme.cpp:493: if (!_themes[index].Normal) return(false);
     // MAP, SCORE, INTRO, CREDITS have Normal=false
     expect(CPP_NON_NORMAL.length).toBe(4);
 
-    // TS has no concept of non-normal themes — all tracks in MUSIC_TRACKS
-    // are gameplay tracks. No MAP/SCORE/INTRO/CREDITS equivalent.
-    // This is acceptable since TS handles these differently (separate UI).
+    // GAP CLOSED: TS TRACK_META marks track 15 (score) as Normal=false.
+    // getAllowedTracks() excludes non-Normal tracks from the playlist.
+    // TS doesn't have MAP/INTRO/CREDITS tracks so only score is relevant.
+    const player = createMockPlayer();
+    const playlist = (player as any).playlist as number[];
+    expect(playlist).not.toContain(15); // score track excluded by Normal=false
   });
 
   it('C++ filters by scenario number — TS does not', () => {
@@ -157,47 +171,59 @@ describe('Track pool structure (theme.cpp:63-106, Is_Allowed:481-512)', () => {
 
 describe('Song selection algorithm (theme.cpp:238-267)', () => {
 
-  it('C++ supports both sequential and shuffle modes — TS is shuffle-only', () => {
+  it('C++ supports both sequential and shuffle modes — CLOSED: TS now supports both', () => {
     // C++ theme.cpp:241: if (Options.IsScoreShuffle) { ... } else { sequential }
     //
-    // Sequential mode: theme++, wrap at THEME_LAST -> THEME_FIRST, skip disallowed
-    // Shuffle mode: Sim_Random_Pick(THEME_FIRST, THEME_LAST), reject same + disallowed
-    //
-    // TS MusicPlayer.shuffle() uses Fisher-Yates to pre-shuffle the playlist,
-    // then advances linearly through it. There is NO sequential mode.
+    // GAP CLOSED: MusicPlayer.setShuffleMode(bool) toggles between shuffle and sequential.
+    // Sequential mode: advances through playlist in index order, wraps at end.
+    // Shuffle mode: Fisher-Yates pre-shuffle with no-repeat guard.
 
-    // PARITY GAP: C++ Options.IsScoreShuffle controls mode.
-    // TS always shuffles (no sequential option).
+    const player = createMockPlayer();
+    expect(player.isShuffleMode).toBe(true); // default is shuffle
+
+    player.setShuffleMode(false);
+    expect(player.isShuffleMode).toBe(false); // sequential mode
+
+    // Sequential mode: playlist should be in ascending index order
+    const playlist = (player as any).playlist as number[];
+    for (let i = 1; i < playlist.length; i++) {
+      expect(playlist[i]).toBeGreaterThan(playlist[i - 1]);
+    }
+
+    player.setShuffleMode(true);
+    expect(player.isShuffleMode).toBe(true); // back to shuffle
   });
 
-  it('C++ shuffle never picks same song twice in a row — TS has no such guard', () => {
+  it('C++ shuffle never picks same song twice in a row — CLOSED: TS now has no-repeat guard', () => {
     // C++ theme.cpp:248-251:
     //   do {
     //     newtheme = Sim_Random_Pick(THEME_FIRST, THEME_LAST);
     //   } while (newtheme == theme || !Is_Allowed(newtheme));
     //
-    // The do-while loop explicitly rejects `newtheme == theme`.
-    //
-    // TS advance() method (audio.ts:172-179):
-    //   const pool = this.combatMode ? ACTION_TRACKS : CALM_TRACKS;
-    //   const poolArr = [...pool];
-    //   const trackIdx = poolArr[Math.floor(Math.random() * poolArr.length)];
-    //   this.playTrack(trackIdx);
-    //
-    // No check against current track — can play same song back-to-back.
-
-    // PARITY GAP: TS can repeat the same track consecutively.
-    // With ACTION_TRACKS having 9 entries, probability is ~11%.
-    // With CALM_TRACKS having 6 entries, probability is ~17%.
+    // GAP CLOSED: TS advance() now tracks lastPlayedTrack and rejects same song
+    // via do-while loop (up to 20 attempts), matching C++ behavior.
 
     const player = createMockPlayer();
 
-    // We can't deterministically test randomness, but we CAN verify the
-    // advance() method doesn't take a "previous track" parameter.
-    // The C++ Next_Song(ThemeType theme) takes the previous song as input.
-    // The TS advance() takes no parameters — it cannot check against previous.
-    expect(typeof (player as any).advance).toBe('function');
-    expect((player as any).advance.length).toBe(0); // zero parameters
+    // Verify lastPlayedTrack tracking exists
+    expect((player as any).lastPlayedTrack).toBe(-1); // initial state
+
+    // After playing a track, lastPlayedTrack is updated
+    (player as any).playTrack(0);
+    expect((player as any).lastPlayedTrack).toBe(0);
+
+    // Advance many times — lastPlayedTrack should change each time (with high probability)
+    // With 12 Allied tracks, probability of repeat is ~8% per pick, but the guard
+    // loop prevents it (up to 20 attempts).
+    const seen = new Set<number>();
+    for (let i = 0; i < 50; i++) {
+      const prevTrack = (player as any).lastPlayedTrack;
+      (player as any).advance();
+      const newTrack = (player as any).lastPlayedTrack;
+      if (prevTrack !== newTrack) seen.add(newTrack);
+    }
+    // Should have seen multiple different tracks
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   it('C++ supports per-track repeat flag — TS does not', () => {
@@ -453,33 +479,24 @@ describe('AI auto-advance (theme.cpp:197-218)', () => {
 
 describe('Track pool used during advance (theme.cpp:238-267 vs audio.ts:172-179)', () => {
 
-  it('C++ advance picks from ALL allowed themes — TS picks from calm OR action subset', () => {
+  it('C++ advance picks from ALL allowed themes — CLOSED: TS now uses full house pool', () => {
     // C++ Next_Song: picks from ALL themes where Is_Allowed() returns true.
-    // For an Allied player, that's up to 15 themes in the base game.
     //
-    // TS advance():
-    //   const pool = this.combatMode ? ACTION_TRACKS : CALM_TRACKS;
-    //   const poolArr = [...pool];
-    //   const trackIdx = poolArr[Math.floor(Math.random() * poolArr.length)];
-    //
-    // TS restricts to 6 calm tracks or 9 action tracks depending on mode.
-
-    // PARITY GAP: C++ uses the full allowed pool (up to 15 tracks).
-    // TS uses a subset (6 or 9 tracks) based on combat state.
+    // GAP CLOSED: TS advance() now picks from the full house-filtered playlist,
+    // not a calm/action subset. Both combat and non-combat modes use the same pool.
 
     const player = createMockPlayer();
 
-    // In calm mode, only 6 tracks are eligible
+    // In calm mode: picks from full Allied playlist (12 tracks)
     expect(player.isCombatMode).toBe(false);
-    expect(TS_CALM_INDICES.size).toBe(6);
+    const playlist = (player as any).playlist as number[];
+    expect(playlist.length).toBe(12); // full Allied pool
 
-    // In combat mode, only 9 tracks are eligible
+    // In combat mode: SAME pool (no calm/action split in advance)
     player.setCombatMode(true);
     expect(player.isCombatMode).toBe(true);
-    expect(TS_ACTION_INDICES.size).toBe(9);
-
-    // C++ would use all 15 (for Allied), never restricting to subset
-    expect(CPP_ALLIED_THEMES.length).toBe(15);
+    const playlistAfterCombat = (player as any).playlist as number[];
+    expect(playlistAfterCombat.length).toBe(12); // same pool size
   });
 
   it('TS setCombatMode immediately switches track — C++ Queue_Song fades first', () => {

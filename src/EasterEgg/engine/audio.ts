@@ -32,18 +32,59 @@ const MUSIC_TRACKS = [
   '16_score',  // C++ THEME_SCORE — score screen music (theme.cpp:84)
 ];
 
-/** Calm tracks: ambient/exploration music (indices into MUSIC_TRACKS) */
-const CALM_TRACKS = new Set([1, 3, 4, 7, 10, 13]); // radio, roll_out, mud, run, workmen, vector
+/**
+ * C++ parity: House ownership bitmask per track (theme.cpp:63-106).
+ * HOUSEF_ALLIES = 1, HOUSEF_SOVIET = 2, HOUSEF_ALLIES|HOUSEF_SOVIET = 3
+ * C++ Is_Allowed() (theme.cpp:500): filters by (1 << ActLike) & Owner.
+ * Allied player gets all tracks with bit 0 set (~15 tracks).
+ * Soviet player gets all tracks with bit 1 set (~4 tracks).
+ */
+const HOUSEF_ALLIES = 1;
+const HOUSEF_SOVIET = 2;
 
-/** Action tracks: combat music (indices into MUSIC_TRACKS) */
-const ACTION_TRACKS = new Set([0, 2, 5, 6, 8, 9, 11, 12, 14]); // hell_march, crush, twin_cannon, face_the_enemy, terminate, big_foot, militant_force, dense, smash
+/** Per-track metadata matching C++ ThemeControl table (theme.cpp:63-106) */
+const TRACK_META: { owner: number; normal: boolean }[] = [
+  /* 00 hell_march      BIGF226M  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 01 radio           RADIO2    */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 02 crush           CRUS226M  */ { owner: HOUSEF_SOVIET, normal: true },
+  /* 03 roll_out        ROLLOUT   */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 04 mud             MUD1A     */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 05 twin_cannon     TWIN      */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 06 face_the_enemy  FAC1226M  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 07 run             RUN1226M  */ { owner: HOUSEF_SOVIET, normal: true },
+  /* 08 terminate       TERMINAT  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 09 big_foot        BIGF226M  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 10 workmen         WORK226M  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 11 militant_force  FAC2226M  */ { owner: HOUSEF_SOVIET, normal: true },
+  /* 12 dense           DENSE_R   */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 13 vector          VECTOR1A  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 14 smash           SMSH226M  */ { owner: HOUSEF_ALLIES, normal: true },
+  /* 15 score           SCORE     */ { owner: HOUSEF_ALLIES | HOUSEF_SOVIET, normal: false },
+];
 
-/** Special tracks: excluded from gameplay shuffle (score, map select, etc.) */
-const SPECIAL_TRACKS = new Set([15]); // 16_score
+/** Player faction type for house-based track filtering */
+export type MusicFaction = 'allied' | 'soviet';
+
+/**
+ * Get the set of track indices allowed for a given house.
+ * C++ parity: Is_Allowed() (theme.cpp:481-512) filters by Normal flag AND house ownership.
+ */
+function getAllowedTracks(faction: MusicFaction): number[] {
+  const houseBit = faction === 'allied' ? HOUSEF_ALLIES : HOUSEF_SOVIET;
+  const allowed: number[] = [];
+  for (let i = 0; i < TRACK_META.length; i++) {
+    const meta = TRACK_META[i];
+    if (!meta.normal) continue; // C++ theme.cpp:493: if (!_themes[index].Normal) return(false)
+    if ((meta.owner & houseBit) === 0) continue; // C++ theme.cpp:500: house ownership filter
+    allowed.push(i);
+  }
+  return allowed;
+}
 
 /**
  * Music player — streams MP3 soundtrack files via HTML5 Audio.
- * Features: shuffled playlist, crossfade, volume/mute sync, pause/resume.
+ * C++ parity: house-based track filtering, no-repeat shuffle, sequential mode.
+ * Features: shuffled/sequential playlist, crossfade, volume/mute sync, pause/resume.
  */
 export class MusicPlayer {
   private basePath: string;
@@ -61,10 +102,13 @@ export class MusicPlayer {
   private combatMode = false;
   private combatCooldown = 0; // ticks since combat ended (for cooldown)
   private combatModeChangeTime = 0; // timestamp of last mode change
+  private lastPlayedTrack = -1; // C++ parity: no-repeat guard (theme.cpp:248-251)
+  private shuffleEnabled = true; // C++ Options.IsScoreShuffle (options.h:95)
+  private faction: MusicFaction = 'allied'; // C++ parity: house ownership filter
 
   constructor(basePath = '/ra/music') {
     this.basePath = basePath;
-    this.shuffle();
+    this.buildPlaylist();
     // Probe first track to see if music files are present
     this.probe();
   }
@@ -99,15 +143,46 @@ export class MusicPlayer {
   /** Whether music is actively playing */
   get isPlaying(): boolean { return this.playing; }
 
-  /** Shuffle playlist using Fisher-Yates — excludes special tracks (score, map) */
-  private shuffle(): void {
-    this.playlist = MUSIC_TRACKS.map((_, i) => i).filter(i => !SPECIAL_TRACKS.has(i));
-    for (let i = this.playlist.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.playlist[i], this.playlist[j]] = [this.playlist[j], this.playlist[i]];
+  /**
+   * Build the playlist from house-allowed tracks.
+   * C++ parity: Is_Allowed() (theme.cpp:481-512) filters by Normal + house ownership.
+   * Supports both shuffle (Fisher-Yates) and sequential (theme++, wrap) modes.
+   */
+  private buildPlaylist(): void {
+    this.playlist = getAllowedTracks(this.faction);
+    if (this.shuffleEnabled) {
+      // C++ theme.cpp:244-252: shuffle mode — Fisher-Yates
+      for (let i = this.playlist.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [this.playlist[i], this.playlist[j]] = [this.playlist[j], this.playlist[i]];
+      }
     }
+    // Sequential mode: playlist is already in index order from getAllowedTracks
     this.playlistIndex = 0;
   }
+
+  /** Set the player's faction for house-based track filtering (C++ theme.cpp:500) */
+  setFaction(faction: MusicFaction): void {
+    if (faction === this.faction) return;
+    this.faction = faction;
+    this.buildPlaylist();
+  }
+
+  /** Get current faction */
+  getFaction(): MusicFaction { return this.faction; }
+
+  /**
+   * Set shuffle mode (C++ Options.IsScoreShuffle, options.h:95).
+   * true = shuffle (random order), false = sequential (theme++, skip disallowed, wrap).
+   */
+  setShuffleMode(enabled: boolean): void {
+    if (enabled === this.shuffleEnabled) return;
+    this.shuffleEnabled = enabled;
+    this.buildPlaylist();
+  }
+
+  /** Whether shuffle mode is enabled */
+  get isShuffleMode(): boolean { return this.shuffleEnabled; }
 
   /** Start playing music */
   play(): void {
@@ -125,6 +200,7 @@ export class MusicPlayer {
   private playTrack(trackIdx: number): void {
     const name = MUSIC_TRACKS[trackIdx];
     this.trackName = name.replace(/^\d+_/, '').replace(/_/g, ' ');
+    this.lastPlayedTrack = trackIdx; // C++ parity: track last-played for no-repeat guard
 
     const audio = new Audio(`${this.basePath}/${name}.mp3`);
     audio.volume = this.muted ? 0 : this.volume;
@@ -172,14 +248,36 @@ export class MusicPlayer {
     }, 100); // 2 second crossfade (20 steps x 100ms)
   }
 
-  /** Advance to next track in playlist */
+  /**
+   * Advance to next track in playlist.
+   * C++ parity (theme.cpp:238-267): supports both sequential and shuffle modes.
+   * House-filtered pool replaces calm/action split (theme.cpp:481-512).
+   * No-repeat guard: C++ do-while rejects newtheme == theme (theme.cpp:248-251).
+   */
   private advance(): void {
     if (!this.playing) return;
-    // In combat mode, pick from ACTION pool; in calm mode, pick from CALM pool
-    const pool = this.combatMode ? ACTION_TRACKS : CALM_TRACKS;
-    const poolArr = [...pool];
-    const trackIdx = poolArr[Math.floor(Math.random() * poolArr.length)];
-    this.playTrack(trackIdx);
+    const pool = this.playlist;
+    if (pool.length === 0) return;
+
+    if (this.shuffleEnabled) {
+      // C++ shuffle mode (theme.cpp:244-252): random pick, reject same song
+      if (pool.length === 1) {
+        // Only one track available — must play it
+        this.playTrack(pool[0]);
+        return;
+      }
+      let trackIdx: number;
+      let attempts = 0;
+      do {
+        trackIdx = pool[Math.floor(Math.random() * pool.length)];
+        attempts++;
+      } while (trackIdx === this.lastPlayedTrack && attempts < 20);
+      this.playTrack(trackIdx);
+    } else {
+      // C++ sequential mode (theme.cpp:253-266): theme++, skip disallowed, wrap
+      this.playlistIndex = (this.playlistIndex + 1) % pool.length;
+      this.playTrack(pool[this.playlistIndex]);
+    }
   }
 
   /** Skip to next track */
@@ -253,31 +351,51 @@ export class MusicPlayer {
   /** Get current volume */
   getVolume(): number { return this.volume; }
 
-  /** Switch between calm and action music based on combat state */
+  /**
+   * Switch between calm and action music based on combat state.
+   * NOTE: The combat/calm mode split is a TS-only enhancement not present in C++.
+   * C++ has no combatMode concept (theme.cpp). However, we keep this mechanism
+   * as a gameplay enhancement while using house-filtered pools instead of
+   * hardcoded calm/action track lists.
+   */
   setCombatMode(inCombat: boolean): void {
     if (!this.available || !this.playing) return;
     const now = Date.now();
 
     if (inCombat && !this.combatMode) {
-      // Enter combat — crossfade to action track within 5 seconds
+      // Enter combat — crossfade to a different track from the house pool
       if (now - this.combatModeChangeTime < 5000) return; // debounce
       this.combatMode = true;
       this.combatModeChangeTime = now;
       this.combatCooldown = 0;
-      // Find a random action track and switch to it
-      const actionIndices = [...ACTION_TRACKS];
-      const trackIdx = actionIndices[Math.floor(Math.random() * actionIndices.length)];
-      this.playTrack(trackIdx);
+      // Pick a random allowed track (with no-repeat guard)
+      const pool = this.playlist;
+      if (pool.length > 0) {
+        let trackIdx: number;
+        let attempts = 0;
+        do {
+          trackIdx = pool[Math.floor(Math.random() * pool.length)];
+          attempts++;
+        } while (trackIdx === this.lastPlayedTrack && pool.length > 1 && attempts < 20);
+        this.playTrack(trackIdx);
+      }
     } else if (!inCombat && this.combatMode) {
       // Leave combat with cooldown (called once per tick)
       this.combatCooldown++;
       if (this.combatCooldown >= 450) { // 450 ticks = 30s at 15fps
         this.combatMode = false;
         this.combatModeChangeTime = now;
-        // Switch to calm track
-        const calmIndices = [...CALM_TRACKS];
-        const trackIdx = calmIndices[Math.floor(Math.random() * calmIndices.length)];
-        this.playTrack(trackIdx);
+        // Pick a random allowed track (with no-repeat guard)
+        const pool = this.playlist;
+        if (pool.length > 0) {
+          let trackIdx: number;
+          let attempts = 0;
+          do {
+            trackIdx = pool[Math.floor(Math.random() * pool.length)];
+            attempts++;
+          } while (trackIdx === this.lastPlayedTrack && pool.length > 1 && attempts < 20);
+          this.playTrack(trackIdx);
+        }
       }
     } else if (!inCombat) {
       this.combatCooldown = 0; // reset cooldown when not in combat mode

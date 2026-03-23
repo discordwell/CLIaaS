@@ -575,8 +575,8 @@ describe('tickProduction with zero credits', () => {
     const progressBefore = ctx.productionQueue.get('right')!.progress;
     tickProduction(ctx);
 
-    // Progress should NOT advance when costPaid < effectiveCost and credits < costPerTick
-    expect(ctx.productionQueue.get('right')!.progress).toBe(progressBefore);
+    // C++ parity (factory.cpp:220-221): insufficient funds regresses one stage
+    expect(ctx.productionQueue.get('right')!.progress).toBe(progressBefore - 1);
     expect(ctx.credits).toBe(0); // no credits deducted
   });
 
@@ -596,14 +596,14 @@ describe('tickProduction with zero credits', () => {
       powerMult: 1,
     });
 
-    // Tick with 0 credits — pauses
+    // Tick with 0 credits — regresses one stage (C++ factory.cpp:220-221)
     tickProduction(ctx);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(50);
+    expect(ctx.productionQueue.get('right')!.progress).toBe(49);
 
     // Add credits and tick again
     ctx.credits = 500;
     tickProduction(ctx);
-    expect(ctx.productionQueue.get('right')!.progress).toBeGreaterThan(50);
+    expect(ctx.productionQueue.get('right')!.progress).toBeGreaterThan(49);
   });
 });
 
@@ -1460,15 +1460,17 @@ describe('startProduction edge cases', () => {
     expect(evaPlayed).toBe('eva_insufficient_funds');
   });
 
-  it('can start production with exactly 1 credit (incremental deduction)', () => {
+  it('can start production with exactly cost-per-tick credits (C++ factory.cpp:416)', () => {
+    // C++ parity: requires at minimum cost-per-tick credits to start production.
+    // minCostPerTick = max(1, floor(cost / buildTime)) = max(1, floor(800/140)) = 5
     const item = makeProductionItem({ type: '2TNK', cost: 800 });
-    const ctx = makeProductionContext({ credits: 1 });
+    const minCostPerTick = Math.max(1, Math.floor(800 / 140));
+    const ctx = makeProductionContext({ credits: minCostPerTick });
 
     startProduction(ctx, item);
 
-    // PR3: only checks credits > 0 to start
     expect(ctx.productionQueue.has('right')).toBe(true);
-    expect(ctx.credits).toBe(1); // no upfront deduction
+    expect(ctx.credits).toBe(minCostPerTick); // no upfront deduction
   });
 
   it('cannot queue 6th item (max 5)', () => {
