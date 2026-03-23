@@ -23,6 +23,12 @@
 
 import { Entity, type TeamMissionEntry } from './entity';
 import { House, Mission, worldDist, type WorldPos, CELL_SIZE } from './types';
+import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
+
+/** Optional context for building-based retreat targeting (C++ team.cpp:590-616) */
+export interface TeamAIContext {
+  structures?: MapStructure[];
+}
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
 
@@ -237,7 +243,7 @@ export class Team {
    *
    * @param waypoints - map from waypoint index to cell position
    */
-  ai(waypoints?: Map<number, { cx: number; cy: number }>): void {
+  ai(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     if (this.dissolved) return;
 
     // C++ team.cpp:484-489 — check suspend timer
@@ -311,10 +317,17 @@ export class Team {
 
       if (this.total > 0) {
         this.calcCenter();
-        // C++ team.cpp:590-616 — retreat to repair facility or base
-        // Simplified: tell members to move toward zone center (team center)
-        if (this.zone) {
+        // C++ team.cpp:590-616 — retreat to nearest friendly unarmed building
+        // Prefer STRUCT_REPAIR (FIX) — distance halved for repair facility.
+        // Scans Buildings[] for b.House == House && b.PrimaryWeapon == NULL.
+        const retreatTarget = this.findRetreatBuilding(ctx?.structures);
+        if (retreatTarget) {
+          this.target = retreatTarget;
+        } else if (this.zone) {
+          // Fallback to zone center if no buildings available
           this.target = { ...this.zone };
+        }
+        if (this.target) {
           this.coordinateMove(waypoints);
         }
         return;
@@ -707,6 +720,46 @@ export class Team {
   // ── Internal helpers ──
 
   /**
+   * C++ team.cpp:590-616 — find nearest friendly unarmed building for retreat.
+   * Scans Buildings[] for: alive, same house, PrimaryWeapon == NULL (unarmed).
+   * STRUCT_REPAIR (FIX) gets halved distance (preferred retreat target).
+   * Distance weighted by: Distance(building, Zone) * (CellThreat + 1).
+   * We simplify CellThreat to 1 (no threat map), so distance = raw distance.
+   */
+  findRetreatBuilding(structures?: MapStructure[]): WorldPos | null {
+    if (!structures || !this.zone) return null;
+
+    let bestTarget: WorldPos | null = null;
+    let bestDist = Infinity;
+
+    for (const s of structures) {
+      if (!s.alive) continue;
+      if (s.house !== this.house) continue;
+
+      // C++ team.cpp:596: b->Class->PrimaryWeapon == NULL (only unarmed buildings)
+      const isArmed = s.type in STRUCTURE_WEAPONS;
+      if (isArmed) continue;
+
+      const [bw, bh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      const bx = (s.cx + bw / 2) * CELL_SIZE;
+      const by = (s.cy + bh / 2) * CELL_SIZE;
+      let dist = worldDist(this.zone, { x: bx, y: by });
+
+      // C++ team.cpp:612: if (*b == STRUCT_REPAIR) dist /= 2;
+      if (s.type === 'FIX') {
+        dist /= 2;
+      }
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestTarget = { x: bx, y: by };
+      }
+    }
+
+    return bestTarget;
+  }
+
+  /**
    * Calculate center position of team members (C++ Calc_Center, team.cpp:1390-1551).
    */
   calcCenter(): void {
@@ -806,10 +859,10 @@ export function clearAllTeams(): void {
  * Update all active teams — call once per game tick from the main loop.
  * This matches C++ Logic_AI() iterating through Teams[] and calling AI() on each.
  */
-export function updateAllTeams(waypoints?: Map<number, { cx: number; cy: number }>): void {
+export function updateAllTeams(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
   for (const team of _activeTeams) {
     if (!team.dissolved) {
-      team.ai(waypoints);
+      team.ai(waypoints, ctx);
     }
   }
   cleanupTeams();

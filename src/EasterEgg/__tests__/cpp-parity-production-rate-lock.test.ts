@@ -134,37 +134,39 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     expect(ctx.productionQueue.get('right')!.progress).toBe(20);
   });
 
-  it('rate uses power fraction at time of start', () => {
+  it('rate uses power fraction at time of start (dual mechanism)', () => {
     // Start with 50% power
+    // Dual mechanism: m1(0.5)=0.5, m2(0.5)=0.5, combined=0.25
     const ctx = makeContext({ powerProduced: 50, powerConsumed: 100 });
     const item = makeItem({ buildTime: 100 });
     startProduction(ctx, item);
 
-    // Verify the snapshotted powerMult is 0.5
+    // Verify the snapshotted powerMult is 0.25 (dual mechanism)
     const entry = ctx.productionQueue.get('right')!;
-    expect(entry.powerMult).toBe(0.5);
+    expect(entry.powerMult).toBe(0.25);
 
-    // Tick 10 times — each advances by 0.5
-    tickNTimes(ctx, 10);
+    // Tick 20 times — each advances by 0.25
+    tickNTimes(ctx, 20);
     expect(ctx.productionQueue.get('right')!.progress).toBe(5);
   });
 
   it('low power at start = slow rate for entire production', () => {
     // Start at 25% power
+    // Dual mechanism: m1(0.25)=0.5 (clamped), m2(0.25)=0.25, combined=0.125
     const ctx = makeContext({ powerProduced: 25, powerConsumed: 100 });
     const item = makeItem({ buildTime: 100 });
     startProduction(ctx, item);
 
     const entry = ctx.productionQueue.get('right')!;
-    expect(entry.powerMult).toBe(0.25);
+    expect(entry.powerMult).toBe(0.125);
 
     // Restore full power mid-production
     ctx.powerProduced = 200;
     ctx.powerConsumed = 100;
 
-    // Tick 20 times — still at the slow 0.25 rate
-    tickNTimes(ctx, 20);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(5); // 20 * 0.25
+    // Tick 40 times — still at the slow 0.125 rate
+    tickNTimes(ctx, 40);
+    expect(ctx.productionQueue.get('right')!.progress).toBe(5); // 40 * 0.125
   });
 
   it('full power at start = fast rate even if power drops later', () => {
@@ -196,10 +198,11 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     const item = makeItem({ buildTime: 100 });
     startProduction(ctx, item);
 
-    expect(ctx.productionQueue.get('right')!.powerMult).toBe(0.5);
+    // Dual mechanism: m1(0.5)=0.5, m2(0.5)=0.5, combined=0.25
+    expect(ctx.productionQueue.get('right')!.powerMult).toBe(0.25);
 
-    // Tick 10 times at half speed
-    tickNTimes(ctx, 10);
+    // Tick 20 times at quarter speed
+    tickNTimes(ctx, 20);
     expect(ctx.productionQueue.get('right')!.progress).toBe(5);
 
     // Cancel and restart with full power
@@ -244,8 +247,8 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     // First unit should have completed, second should start with new rate
     const newEntry = ctx.productionQueue.get('right');
     if (newEntry) {
-      // The re-snapshot should have captured 25% power = 0.25
-      expect(newEntry.powerMult).toBe(0.25);
+      // The re-snapshot should have captured 25% power: dual mechanism m1(0.25)=0.5, m2(0.25)=0.25, combined=0.125
+      expect(newEntry.powerMult).toBe(0.125);
       expect(newEntry.queueCount).toBe(1);
       expect(newEntry.progress).toBe(0);
     }
@@ -258,20 +261,20 @@ describe('C++ parity: production rate locked at start time (factory.cpp:434)', (
     expect(computePowerMult(ctx)).toBe(1.0);
   });
 
-  it('computePowerMult returns 0.5 at half power', () => {
+  it('computePowerMult returns 0.25 at half power (dual mechanism: 0.5 * 0.5)', () => {
     const ctx = makeContext({ powerProduced: 50, powerConsumed: 100 });
-    expect(computePowerMult(ctx)).toBe(0.5);
+    expect(computePowerMult(ctx)).toBe(0.25);
   });
 
-  it('computePowerMult clamps to 1/16 at zero power', () => {
+  it('computePowerMult returns 1/32 at zero power (dual mechanism: 0.5 * 1/16)', () => {
     const ctx = makeContext({ powerProduced: 0, powerConsumed: 100 });
-    expect(computePowerMult(ctx)).toBe(1 / 16);
+    expect(computePowerMult(ctx)).toBe(1 / 32);
   });
 
-  it('computePowerMult clamps to 1/16 for very low power fraction', () => {
-    // 1% power — below 1/16 (6.25%)
+  it('computePowerMult at 1% power: m1(0.01)=0.5 (floor), m2(0.01)=1/16 (floor), combined=1/32', () => {
+    // 1% power — m1 floors at 0.5, m2 floors at 1/16
     const ctx = makeContext({ powerProduced: 1, powerConsumed: 100 });
-    expect(computePowerMult(ctx)).toBe(1 / 16);
+    expect(computePowerMult(ctx)).toBe(1 / 32);
   });
 
   it('computePowerMult returns 1.0 when power exceeds consumption', () => {

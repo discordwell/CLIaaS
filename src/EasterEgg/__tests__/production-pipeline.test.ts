@@ -1257,7 +1257,8 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(src).toContain('this.tickProduction()');
   });
 
-  it('tickProduction applies power penalty: 75% power → 0.75 progress per tick', () => {
+  it('tickProduction applies dual power penalty: 75% power → 0.75*0.75=0.5625 progress per tick', () => {
+    // C++ dual mechanism: m1(0.75)=0.75, m2(0.75)=0.75, combined=0.5625
     const e1 = findItem('E1');
     const ctx = makeMockProductionContext({
       powerProduced: 75,
@@ -1267,10 +1268,11 @@ describe('Behavioral verification — production.ts exported functions', () => {
     tickProduction(ctx);
     const entry = ctx.productionQueue.get('right');
     expect(entry).toBeDefined();
-    expect(entry!.progress).toBeCloseTo(0.75);
+    expect(entry!.progress).toBeCloseTo(0.5625);
   });
 
-  it('tickProduction applies power penalty clamped at 1/16 (C++ fixed(1,16) floor)', () => {
+  it('tickProduction applies dual power penalty: 25% power → 0.5*0.25=0.125 progress per tick', () => {
+    // C++ dual mechanism: m1(0.25)=0.5 (floor), m2(0.25)=0.25, combined=0.125
     const e1 = findItem('E1');
     const ctx = makeMockProductionContext({
       powerProduced: 25,
@@ -1280,8 +1282,7 @@ describe('Behavioral verification — production.ts exported functions', () => {
     tickProduction(ctx);
     const entry = ctx.productionQueue.get('right');
     expect(entry).toBeDefined();
-    // powerFraction = 25/100 = 0.25, clamped to max(1/16, 0.25) = 0.25
-    expect(entry!.progress).toBeCloseTo(0.25);
+    expect(entry!.progress).toBeCloseTo(0.125);
   });
 
   it('tickProduction deducts costPerTick incrementally (PR3)', () => {

@@ -40,7 +40,9 @@ import { House, Mission, UnitType, CELL_SIZE } from '../engine/types';
 import {
   Team, resetTeamIds, clearAllTeams,
   TMISSION_MOVE, TMISSION_GUARD, TMISSION_ATTACK,
+  type TeamAIContext,
 } from '../engine/team';
+import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
 
 beforeEach(() => {
   resetEntityIds();
@@ -79,6 +81,15 @@ function makeTeam(opts: {
     origin: opts.origin ?? null,
     forcedActive: opts.forcedActive,
   });
+}
+
+/** Create a minimal MapStructure for testing retreat targeting */
+function makeStructure(type: string, house: House, cx: number, cy: number): MapStructure {
+  return {
+    type, image: type.toLowerCase(), house, cx, cy,
+    hp: 256, maxHp: 256, alive: true, rubble: false,
+    attackCooldown: 0, ammo: -1, maxAmmo: -1,
+  };
 }
 
 /** Add N entities to a team, returning them for manipulation */
@@ -638,52 +649,24 @@ describe('C++ parity: Retreat state reset (team.cpp:578-579)', () => {
 //   - Picks closest by weighted distance
 //   - Calls Safety_Point() for final cell
 //
-// TS team.ts:313-318:
-//   - Simply uses zone center (this.zone) as retreat target
-//   - No building scan, no repair facility preference
-//
-// PARITY GAP: TS lacks the building-based retreat targeting entirely.
+// TS team.ts now implements building-based retreat targeting matching C++.
 // ══════════════════════════════════════════════════════════════════════════
 
 describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
 
   /**
    * C++ team.cpp:590-616:
-   *   CELL dest = As_Cell(Zone);
-   *   int max = 0x7FFFFFFF;
-   *   for (int index = 0; index < Buildings.Count(); index++) {
-   *     BuildingClass * b = Buildings.Ptr(index);
-   *     if (b != NULL && !b->IsInLimbo && b->House == House && b->Class->PrimaryWeapon == NULL) {
-   *       ...
-   *       if (*b == STRUCT_REPAIR) {
-   *         dist /= 2;  // repair facility preferred
-   *       }
-   *       ...
-   *     }
-   *   }
-   *   Target = ::As_Target(dest);
-   *   Coordinate_Move();
+   *   Scans Buildings[] for friendly unarmed buildings.
+   *   STRUCT_REPAIR (FIX) gets halved distance (preferred retreat target).
+   *   Armed structures (GUN, TSLA, SAM, etc.) are skipped.
    *
-   * TS team.ts:315-317:
-   *   this.target = { ...this.zone };
-   *   this.coordinateMove(waypoints);
-   *
-   * PARITY GAP: TS does no building scan. It just moves toward zone center.
+   * TS team.ts now scans structures via findRetreatBuilding():
+   *   - Filters: alive, same house, no weapon in STRUCTURE_WEAPONS
+   *   - FIX distance halved (preferred)
+   *   - Falls back to zone center if no buildings available
    */
 
-  it('PARITY GAP: retreat target should be a friendly building, not zone center', () => {
-    /**
-     * In C++, when a team retreats, it scans Buildings[] to find the nearest
-     * friendly unarmed building, preferring STRUCT_REPAIR (repair facility).
-     *
-     * In TS, the retreat target is simply the team's zone center (average
-     * position of remaining members), which means damaged teams circle back
-     * to their current position rather than retreating to a repair facility
-     * or friendly base.
-     *
-     * We test that the retreat target is set to zone center (TS behavior).
-     * The C++ behavior would set it to a building location.
-     */
+  it('retreat targets nearest friendly unarmed building (not zone center)', () => {
     const team = makeTeam({
       memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
       missions: [{ mission: TMISSION_MOVE, data: 0 }],
@@ -693,25 +676,159 @@ describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
     const waypoints = new Map<number, { cx: number; cy: number }>();
     waypoints.set(0, { cx: 50, cy: 50 });
 
-    team.ai(waypoints); // activate
+    // Create friendly buildings — PROC at (10,10) is the nearest unarmed building
+    // Units are at pixel ~(200,200), PROC center at ~(276, 264)
+    const structures: MapStructure[] = [
+      makeStructure('PROC', House.USSR, 10, 10),
+      makeStructure('POWR', House.USSR, 30, 30),
+    ];
+    const ctx: TeamAIContext = { structures };
+
+    team.ai(waypoints, ctx); // activate
 
     // Trigger under-strength
     for (let i = 0; i < 5; i++) entities[i].alive = false;
     team.isAltered = true;
-    team.ai(waypoints);
+    team.ai(waypoints, ctx);
 
-    // TS sets target to zone center (just the surviving member's position)
-    // C++ would scan Buildings[] for a friendly building
-    // We verify TS behavior: target should be close to the surviving member
+    // Retreat target should be the nearest unarmed building (PROC at 10,10)
+    // not zone center (surviving member at ~210,200)
+    expect(team.target).not.toBeNull();
     if (team.target) {
-      // The surviving entity is entities[5], which is at (200 + 5*2, 200) = (210, 200)
-      // Zone center of 1 member = that member's position
+      const [pw, ph] = STRUCTURE_SIZE['PROC'] ?? [3, 2];
+      const expectedX = (10 + pw / 2) * CELL_SIZE;
+      const expectedY = (10 + ph / 2) * CELL_SIZE;
+      expect(team.target.x).toBeCloseTo(expectedX, 0);
+      expect(team.target.y).toBeCloseTo(expectedY, 0);
+    }
+  });
+
+  it('retreat prefers repair facility (FIX) — distance halved (team.cpp:612)', () => {
+    const team = makeTeam({
+      memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
+      missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+    // Place members at (200, 200)
+    const entities = addMembers(team, 6, { startX: 200, y: 200, spacing: 2 });
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 50, cy: 50 });
+
+    // PROC at (30,30) is closer in raw distance,
+    // but FIX at (40,40) has halved distance and should be preferred
+    // Raw distance to PROC: ~sqrt((200-30*24)^2+(200-30*24)^2)
+    // For this to work, FIX needs to be farther but < 2x farther than PROC
+    const structures: MapStructure[] = [
+      makeStructure('PROC', House.USSR, 5, 5),  // closer raw
+      makeStructure('FIX', House.USSR, 6, 6),   // slightly farther, but halved
+    ];
+    const ctx: TeamAIContext = { structures };
+
+    team.ai(waypoints, ctx); // activate
+
+    for (let i = 0; i < 5; i++) entities[i].alive = false;
+    team.isAltered = true;
+    team.ai(waypoints, ctx);
+
+    // FIX should be preferred (distance halved)
+    expect(team.target).not.toBeNull();
+    if (team.target) {
+      const [fw, fh] = STRUCTURE_SIZE['FIX'] ?? [1, 1];
+      const expectedX = (6 + fw / 2) * CELL_SIZE;
+      const expectedY = (6 + fh / 2) * CELL_SIZE;
+      expect(team.target.x).toBeCloseTo(expectedX, 0);
+      expect(team.target.y).toBeCloseTo(expectedY, 0);
+    }
+  });
+
+  it('retreat ignores armed structures (C++ PrimaryWeapon != NULL)', () => {
+    const team = makeTeam({
+      memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
+      missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+    const entities = addMembers(team, 6, { startX: 200, y: 200, spacing: 2 });
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 50, cy: 50 });
+
+    // Only armed structures (GUN, TSLA) — should be skipped
+    // POWR is further away but unarmed — should be the target
+    const structures: MapStructure[] = [
+      makeStructure('GUN', House.USSR, 5, 5),   // armed, closer
+      makeStructure('TSLA', House.USSR, 6, 6),  // armed, closer
+      makeStructure('POWR', House.USSR, 10, 10), // unarmed, further
+    ];
+    const ctx: TeamAIContext = { structures };
+
+    team.ai(waypoints, ctx);
+
+    for (let i = 0; i < 5; i++) entities[i].alive = false;
+    team.isAltered = true;
+    team.ai(waypoints, ctx);
+
+    // Should target POWR (only unarmed building), not GUN/TSLA
+    expect(team.target).not.toBeNull();
+    if (team.target) {
+      const [pw, ph] = STRUCTURE_SIZE['POWR'] ?? [1, 1];
+      const expectedX = (10 + pw / 2) * CELL_SIZE;
+      const expectedY = (10 + ph / 2) * CELL_SIZE;
+      expect(team.target.x).toBeCloseTo(expectedX, 0);
+      expect(team.target.y).toBeCloseTo(expectedY, 0);
+    }
+  });
+
+  it('retreat ignores enemy buildings (C++ b->House == House)', () => {
+    const team = makeTeam({
+      memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
+      missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+    const entities = addMembers(team, 6, { startX: 200, y: 200, spacing: 2 });
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 50, cy: 50 });
+
+    // Only enemy buildings — should fall back to zone center
+    const structures: MapStructure[] = [
+      makeStructure('PROC', House.Spain, 5, 5),  // enemy
+      makeStructure('POWR', House.Spain, 10, 10), // enemy
+    ];
+    const ctx: TeamAIContext = { structures };
+
+    team.ai(waypoints, ctx);
+
+    for (let i = 0; i < 5; i++) entities[i].alive = false;
+    team.isAltered = true;
+    team.ai(waypoints, ctx);
+
+    // Should fall back to zone center (surviving member's position)
+    if (team.target) {
       expect(team.target.x).toBeCloseTo(entities[5].pos.x, 0);
       expect(team.target.y).toBeCloseTo(entities[5].pos.y, 0);
     }
+  });
 
-    // PARITY GAP: C++ would NOT target zone center — it would find a building
-    // This means TS retreat is effectively "stay in place" rather than "fall back to base"
+  it('retreat falls back to zone center when no structures available', () => {
+    const team = makeTeam({
+      memberDefs: [{ type: UnitType.V_3TNK, count: 6 }],
+      missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+    const entities = addMembers(team, 6, { startX: 200, y: 200, spacing: 2 });
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 50, cy: 50 });
+
+    // No structures at all
+    team.ai(waypoints);
+
+    for (let i = 0; i < 5; i++) entities[i].alive = false;
+    team.isAltered = true;
+    team.ai(waypoints);
+
+    // Should fall back to zone center
+    if (team.target) {
+      expect(team.target.x).toBeCloseTo(entities[5].pos.x, 0);
+      expect(team.target.y).toBeCloseTo(entities[5].pos.y, 0);
+    }
   });
 });
 

@@ -282,28 +282,29 @@ describe('C++ parity: power fraction affects production speed (factory.cpp:434)'
     expect(entry!.progress).toBe(10);
   });
 
-  it('50% power: progress advances 0.5 per tick', () => {
+  it('50% power: progress advances 0.25 per tick (dual mechanism: 0.5 * 0.5)', () => {
+    // C++ dual mechanism: mechanism1(0.5)=0.5, mechanism2(0.5)=0.5, combined=0.25
     const ctx = makeContext({ powerProduced: 50, powerConsumed: 100 });
     const item = makeItem();
     startProduction(ctx, item);
 
     const entry = ctx.productionQueue.get('right')!;
-    expect(entry.powerMult).toBe(0.5);
+    expect(entry.powerMult).toBe(0.25);
 
-    tickNTimes(ctx, 20);
-    expect(ctx.productionQueue.get('right')!.progress).toBe(10); // 20 * 0.5
+    tickNTimes(ctx, 40);
+    expect(ctx.productionQueue.get('right')!.progress).toBe(10); // 40 * 0.25
   });
 
-  it('0% power: production crawls at 1/16 speed (clamped floor)', () => {
-    // factory.cpp:434: Bound(Power_Fraction(), fixed(1,16), fixed(1))
+  it('0% power: production crawls at 1/32 speed (dual mechanism floor: 0.5 * 1/16)', () => {
+    // C++ dual mechanism: mechanism1(0)=0.5 (floor), mechanism2(0)=1/16, combined=1/32
     const ctx = makeContext({ powerProduced: 0, powerConsumed: 100 });
-    expect(computePowerMult(ctx)).toBe(1 / 16);
+    expect(computePowerMult(ctx)).toBe(1 / 32);
 
     const item = makeItem({ buildTime: 16, isStructure: true, cost: 100 });
     startProduction(ctx, item);
 
-    // 16 buildTime at 1/16 speed = 256 ticks
-    tickNTimes(ctx, 255);
+    // 16 buildTime at 1/32 speed = 512 ticks
+    tickNTimes(ctx, 511);
     expect(ctx.pendingPlacement).toBeNull();
     tickProduction(ctx);
     expect(ctx.pendingPlacement).not.toBeNull();
