@@ -8,13 +8,13 @@ import {
   type WorldPos, type WeaponStats, type ArmorType,
   type WarheadType, type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE,
-  House, Mission, AnimState, UnitType, Stance,
+  House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
   worldDist, directionTo, worldToCell,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure, CAPTURABLE_BUILDINGS } from './scenario';
+import { type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 import { findPath } from './pathfinding';
@@ -565,6 +565,10 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       if (!canTargetNaval(entity, other)) continue;
       // C++ parity: spies are INVISIBLE to all non-dog units (techno.cpp:1554-1564)
       if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
+      // C++ techno.cpp:1476-1479: units on IsNoThreat missions are invisible to hunt scan
+      if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+      // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+      if (other.cloakState === CloakState.CLOAKED) continue;
       // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
       if (other.isAirUnit && other.flightAltitude > 0) {
         const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
@@ -754,6 +758,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
+  // C++ foot.cpp:1912-1914: cloakable human units on GUARD don't auto-target
+  // This prevents phase transports and subs from breaking their own cloak.
+  if (entity.isPlayerUnit && entity.stats.isCloakable) return;
+
   const ec = entity.cell;
   const isDog = entity.type === 'DOG';
   // C++ foot.cpp:593 — guard scan uses THREAT_RANGE → Threat_Range(0) = weapon range.
@@ -773,6 +781,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     // C++ parity: spies are INVISIBLE to all non-dog units (techno.cpp:1554-1564).
     // Only dogs can evaluate a spy as a valid target. All others return false.
     if (other.type === UnitType.I_SPY && !isDog) continue;
+    // C++ techno.cpp:1476-1479: units on IsNoThreat missions (Harmless, Selling) are invisible
+    if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+    // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+    if (other.cloakState === CloakState.CLOAKED) continue;
     // Naval combat target filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat target filtering: ground units without AA weapons skip aircraft
@@ -800,6 +812,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   }
 
   // M4: No mobile targets — check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
+  // C++ techno.cpp:1610-1618: human units only auto-target ARMED buildings (with PrimaryWeapon)
   if (!isDog && entity.weapon) {
     let bestStruct: MapStructure | null = null;
     let bestStructDist = scanRange;
@@ -807,6 +820,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
       if (!s.alive) continue;
       if (s.house === House.Neutral) continue;
       if (ctx.isAllied(entity.house, s.house)) continue;
+      // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings
+      if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
       const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
       const dist = worldDist(entity.pos, sPos);
       if (dist < bestStructDist) {
@@ -850,6 +865,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
       if (other.type === UnitType.I_SPY && !isDog) continue;
+      // C++ techno.cpp:1476-1479: units on IsNoThreat missions are invisible
+      if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+      // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+      if (other.cloakState === CloakState.CLOAKED) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist > entity.stats.sight) continue;
       const oc2 = other.cell;
@@ -889,6 +908,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
     if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
     // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
     if (other.type === UnitType.I_SPY && !isDog) continue;
+    // C++ techno.cpp:1476-1479: units on IsNoThreat missions are invisible
+    if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+    // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+    if (other.cloakState === CloakState.CLOAKED) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = worldDist(scanPos, other.pos);
     if (dist > scanRange) continue;
