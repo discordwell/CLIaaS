@@ -252,28 +252,22 @@ describe('Explicit Explodes=no units from INI', () => {
 // 7. handleUnitDeath should apply area damage for Explodes=yes units
 //    MISMATCH DETECTION: C++ does Wide_Area_Damage; TS handleUnitDeath does NOT
 // =============================================================================
-describe('handleUnitDeath area-damage for Explodes=yes units [MISMATCH]', () => {
-  it('handleUnitDeath function signature does not accept explodesOnDeath parameter', () => {
+describe('handleUnitDeath area-damage for Explodes=yes units [IMPLEMENTED]', () => {
+  it('handleUnitDeath checks explodesOnDeath and applies area damage', () => {
     // C++ techno.cpp:3820-3835 applies area damage when IsExploding is true.
-    // TS handleUnitDeath (combat.ts:463-521) has NO parameter for explodesOnDeath,
-    // NO check for stats.explodesOnDeath, and NO Wide_Area_Damage equivalent.
-    //
-    // This is a behavioral gap: when E2/E4/DTRK die, they should deal area damage
-    // equal to their MaxStrength with their primary weapon's warhead.
+    // TS handleUnitDeath now checks stats.explodesOnDeath and applies Wide_Area_Damage equivalent.
     const fnStr = handleUnitDeath.toString();
 
-    // Verify the function does NOT reference explodesOnDeath anywhere
+    // Verify the function DOES reference explodesOnDeath
     const hasExplodesCheck = fnStr.includes('explodesOnDeath') || fnStr.includes('IsExploding');
-    expect(hasExplodesCheck).toBe(false); // EXPECTED TO PASS — confirms the gap exists
+    expect(hasExplodesCheck).toBe(true);
   });
 
-  it('DTRK is missing explodesOnDeath=true in UNIT_STATS', () => {
-    // aftrmath.ini [DTRK] Explodes=yes, but UNIT_STATS.DTRK lacks explodesOnDeath
+  it('DTRK has explodesOnDeath=true in UNIT_STATS', () => {
+    // aftrmath.ini [DTRK] Explodes=yes
     const dtrkStats = UNIT_STATS['DTRK'];
     expect(dtrkStats).toBeDefined();
-    // This test documents the DTRK data gap.
-    // When fixed, explodesOnDeath should be true.
-    expect(dtrkStats.explodesOnDeath ?? false).toBe(true);
+    expect(dtrkStats.explodesOnDeath).toBe(true);
   });
 });
 

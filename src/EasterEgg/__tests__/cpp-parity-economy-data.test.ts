@@ -277,7 +277,7 @@ describe('Repair cost per step — C++ fixed-point formula (techno.cpp:6144)', (
    * Example: POWR cost=300, maxHp=400
    *   stepsToFull = floor(400/7) = 57
    *   costPerFullStep = floor(300/57) = 5
-   *   result = max(1, floor((51*5 + 128) / 256)) = max(1, floor(383/256)) = max(1, 1) = 1
+   *   result = floor((51*5 + 128) / 256) = floor(383/256) = 1
    */
   it('POWR (cost=300, maxHp=400): repair cost = 1', () => {
     expect(repairCostPerStep(300, 400)).toBe(1);
@@ -287,7 +287,7 @@ describe('Repair cost per step — C++ fixed-point formula (techno.cpp:6144)', (
    * WEAP cost=2000, maxHp=1000
    *   stepsToFull = floor(1000/7) = 142
    *   costPerFullStep = floor(2000/142) = 14
-   *   result = max(1, floor((51*14 + 128) / 256)) = max(1, floor(842/256)) = max(1, 3) = 3
+   *   result = floor((51*14 + 128) / 256) = floor(842/256) = 3
    */
   it('WEAP (cost=2000, maxHp=1000): repair cost = 3', () => {
     expect(repairCostPerStep(2000, 1000)).toBe(3);
@@ -304,8 +304,11 @@ describe('Repair cost per step — C++ fixed-point formula (techno.cpp:6144)', (
     expect(unitRepairCostPerStep(800, 400)).toBe(4);
   });
 
-  it('minimum repair cost is 1 (techno.cpp:989 clamping)', () => {
-    expect(repairCostPerStep(100, 400)).toBeGreaterThanOrEqual(1);
+  it('building repair can be free (0); unit repair clamps to min 1 (techno.cpp:989)', () => {
+    // Building repair: no min-1 clamp in building.cpp:5432 Repair_AI
+    // cost=100, maxHp=400: trunc(400/7)=57; trunc(100/57)=1; trunc((51*1+128)/256)=0
+    expect(repairCostPerStep(100, 400)).toBe(0);
+    // Unit repair: techno.cpp:989 clamps max(Repair_Cost(), 1) at Service Depot
     expect(unitRepairCostPerStep(100, 400)).toBeGreaterThanOrEqual(1);
   });
 });

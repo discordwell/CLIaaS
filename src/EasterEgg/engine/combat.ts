@@ -7,7 +7,7 @@ import {
   type WorldPos, type WeaponStats, type ArmorType, type WarheadType,
   type WarheadMeta, type WarheadProps,
   CELL_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
-  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META,
+  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, WEAPON_STATS,
   armorIndex, worldDist, worldToCell, modifyDamage,
   directionTo, calcProjectileTravelFrames,
   House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
@@ -15,7 +15,7 @@ import {
   HOUSE_FACTION,
 } from './types';
 import { Entity } from './entity';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
@@ -517,6 +517,32 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     ctx.sovietUnitsLost++;
   } else if (faction !== 'both') {
     ctx.alliedUnitsLost++;
+  }
+
+  // C++ techno.cpp:3820-3834 — Explodes=yes death explosion (Wide_Area_Damage)
+  // When a unit with Explodes=yes is destroyed, it deals area damage:
+  //   damage  = MaxStrength (victim's full HP)
+  //   warhead = primary weapon's warhead (default HE if no weapon)
+  //   radius  = damage * Rule.ExplosionSpread (ExpSpread=.3 from rules.ini)
+  //   radius is in leptons (1 cell = 256 leptons), so 110*0.3=33 leptons ≈ 0.13 cells
+  if (victim.stats.explodesOnDeath) {
+    const EXP_SPREAD = 0.3; // rules.ini [General] ExpSpread=.3
+    const LEPTONS_PER_CELL = 256; // C++ ICON_LEPTON_W = 256
+    const explosionDamage = victim.stats.strength; // C++ techno.cpp:3830: MaxStrength
+    const primaryWeaponName = victim.stats.primaryWeapon;
+    const explosionWarhead: WarheadType = primaryWeaponName
+      ? ((WEAPON_STATS as Record<string, { warhead?: string }>)[primaryWeaponName]?.warhead ?? 'HE')
+      : 'HE'; // C++ techno.cpp:3825: default WARHEAD_HE
+    const radiusLeptons = explosionDamage * EXP_SPREAD; // C++ techno.cpp:3832
+    const radiusCells = radiusLeptons / LEPTONS_PER_CELL;
+
+    for (const other of ctx.entities) {
+      if (!other.alive || other.inLimbo || other.id === victim.id) continue;
+      const dist = worldDist(victim.pos, other.pos);
+      if (dist > radiusCells) continue;
+      // C++ Wide_Area_Damage has no alliance check — damages everyone
+      damageEntity(ctx, other, explosionDamage, explosionWarhead);
+    }
   }
 }
 
@@ -1038,8 +1064,9 @@ export function applySplashDamage(
     const impactCell = worldToCell(center.x, center.y);
     const bridgeIdx = impactCell.cy * MAP_CELLS + impactCell.cx;
     const tmpl = ctx.map.templateType[bridgeIdx];
-    // C++ bridge template IDs: 131,133 (intact), 235,236 (extended), 378,379 (half-destroyed)
-    if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) {
+    // C++ bridge template IDs: 131,133 (intact), 235,236 (1A/1B), 238,239 (2A/2B), 241,242 (3A/3B), 378,379 (half-destroyed)
+    // combat.cpp:261-265 checks all 10 bridge template types for splash damage
+    if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 238 || tmpl === 239 || tmpl === 241 || tmpl === 242 || tmpl === 378 || tmpl === 379) {
       // C++ combat.cpp:267 — Random_Pick(1, Rule.BridgeStrength) < strength
       // BridgeStrength default = 1000 (rules.cpp:267)
       const bridgeStrength = 1000;
@@ -1280,8 +1307,9 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
       }
     }
     // C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors on destruction
-    // Walls and barrels don't spawn survivors (no crew). Kennels are IsSurvivorless on destruction.
-    if (!WALL_TYPES.has(s.type) && s.type !== 'BARL' && s.type !== 'BRL3' && s.type !== 'KENN') {
+    // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — only Crewed=yes buildings spawn survivors
+    // Walls, barrels, kennels, silos, naval buildings etc. have no Crewed=yes in rules.ini.
+    if (CREWED_BUILDINGS.has(s.type)) {
       spawnDestructionSurvivors(ctx, s, wx, wy);
     }
     return true;
@@ -1292,7 +1320,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
 // ── Destruction Survivors ────────────────────────────────────────────────────
 
 /** C++ building costs for survivor count calculation */
-const FACT_COST = 2000;
+const FACT_COST = 2500;  // rules.ini [FACT] Cost=2500
 const HARVESTER_COST = 1400;
 const HIND_COST = 1200;
 const SURVIVOR_FRACTION = 0.4;
@@ -1302,20 +1330,21 @@ const E1_COST = 100;
  * C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors when a building is destroyed.
  * Uses same survivor count formula as sell (How_Many_Survivors), but spawning is probabilistic
  * per occupy cell (1/3 chance normally, simplified here to guaranteed spawning like sell path).
+ * Only called for buildings with Crewed=yes (CREWED_BUILDINGS gate at call site).
  *
  * C++ Crew_Type per building (building.cpp:4667-4701):
- *   SILO → 50% C1, 50% C7 | FACT → 25% E6 (1 max), else E1
- *   KENN → excluded (IsSurvivorless) | TENT/BARR → E1
+ *   FACT → 25% E6 (1 max), else E1 | TENT/BARR → E1
  *   default → E1, with 15% civilian (C1/C7) if building has no weapon
  */
 function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: number, wy: number): void {
   // Calculate survivor count: C++ How_Many_Survivors (building.cpp:5591-5600)
+  // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — no min-1 fallback
   const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
   let buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300);
   if (s.type === 'PROC') buildCost -= HARVESTER_COST;
   if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2;
-  const survivorCount = Math.min(5, Math.max(1,
-    Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
+  const survivorCount = Math.min(5,
+    Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST));
 
   // C++ building.cpp:3456-3463 — one engineer limit (applies to both sell and destruction)
   let engineerSpawned = false;
@@ -1324,9 +1353,6 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
   for (let si = 0; si < survivorCount; si++) {
     let crewType: UnitType;
     switch (s.type) {
-      case 'SILO':
-        crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
-        break;
       case 'FACT':
         if (!engineerSpawned && Math.random() < 0.25) {
           crewType = UnitType.I_E6;

@@ -341,8 +341,10 @@ for (const { type, faction } of BARRACKS_TYPES) {
       expect(sellRefund(BARRACKS_COST)).toBe(150);
     });
 
-    it('repair cost per step: ceil(300 * 0.20 / (800 / 7)) = ceil(60 / 114.29) = 1', () => {
-      expect(repairCostPerStep(BARRACKS_COST, BARRACKS_MAX_HP)).toBe(1);
+    it('repair cost per step is FREE (0) — C++ techno.cpp:6144 integer truncation', () => {
+      // C++: trunc(800/7)=114; trunc(300/114)=2; trunc((51*2+128)/256)=trunc(230/256)=0
+      // building.cpp:5432 Repair_AI does NOT clamp to min 1 — free repair
+      expect(repairCostPerStep(BARRACKS_COST, BARRACKS_MAX_HP)).toBe(0);
     });
   });
 }

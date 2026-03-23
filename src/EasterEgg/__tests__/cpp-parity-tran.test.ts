@@ -173,8 +173,9 @@ describe('TRAN stats verification (udata.cpp / rules.ini)', () => {
     expect(stats.primaryWeapon).toBeNull();
   });
 
-  it('landingBuilding is HPAD', () => {
-    expect(stats.landingBuilding).toBe('HPAD');
+  it('landingBuilding is undefined — C++ aadata.cpp:168 STRUCT_NONE', () => {
+    // C++ Transport helicopter uses Good_LZ() to land on clear terrain, not HPAD
+    expect(stats.landingBuilding).toBeUndefined();
   });
 
   it('rotation rate is 5', () => {
@@ -473,44 +474,26 @@ describe('TRAN passengers killed on death (techno.cpp)', () => {
   });
 });
 
-// ── HPAD Landing (aircraft.cpp) ──────────────────────────────────────────────
-// C++ aircraft.cpp — TRAN uses HPAD (helipad), not AFLD (airfield)
+// ── TRAN Landing — C++ aadata.cpp:168 STRUCT_NONE (no helipad needed) ────────
+// C++ Transport helicopter has Building=STRUCT_NONE, lands anywhere via Good_LZ()
 
-describe('TRAN HPAD landing (aircraft.cpp)', () => {
-  it('finds HPAD for TRAN (not AFLD)', () => {
+describe('TRAN landing without HPAD (C++ aadata.cpp:168 STRUCT_NONE)', () => {
+  it('findLandingPad returns -1 for TRAN — no landingBuilding (C++ STRUCT_NONE)', () => {
     const tran = airborneTran(House.USSR, 10, 10);
     const hpad = makeHPAD(House.USSR, 12, 10);
-    const afld = {
-      type: 'AFLD', image: 'afld', house: House.USSR,
-      cx: 8, cy: 10, hp: 256, maxHp: 256, alive: true, rubble: false,
-      attackCooldown: 0, ammo: -1, maxAmmo: -1,
-    } as MapStructure;
 
-    const ctx = makeAircraftCtx([tran], [afld, hpad]);
+    const ctx = makeAircraftCtx([tran], [hpad]);
     const padIdx = findLandingPad(ctx, tran);
 
-    expect(padIdx).toBe(1); // hpad is index 1, afld is index 0
+    expect(padIdx).toBe(-1); // TRAN has no landingBuilding, so no pad is found
   });
 
-  it('does not land at enemy HPAD', () => {
+  it('TRAN lands on ground when no pad found (isTransport fallback)', () => {
     const tran = airborneTran(House.USSR, 10, 10);
-    const enemyPad = makeHPAD(House.Spain, 12, 10);
-
-    const ctx = makeAircraftCtx([tran], [enemyPad]);
-    const padIdx = findLandingPad(ctx, tran);
-
-    expect(padIdx).toBe(-1); // no friendly pad found
-  });
-
-  it('picks closest HPAD when multiple are available', () => {
-    const tran = airborneTran(House.USSR, 10, 10);
-    const farPad = makeHPAD(House.USSR, 20, 10);
-    const nearPad = makeHPAD(House.USSR, 12, 10);
-
-    const ctx = makeAircraftCtx([tran], [farPad, nearPad]);
-    const padIdx = findLandingPad(ctx, tran);
-
-    expect(padIdx).toBe(1); // nearPad is closer
+    // C++ Transport uses Good_LZ() to find clear terrain to land on
+    // TS fallback: isTransport → land on ground (aircraft.ts:260-263)
+    expect(tran.isTransport).toBe(true);
+    expect(tran.stats.landingBuilding).toBeUndefined();
   });
 });
 
@@ -641,8 +624,9 @@ describe('TRAN vs other helicopters (udata.cpp)', () => {
     }
   });
 
-  it('all three land at HPAD', () => {
-    expect(tran.landingBuilding).toBe('HPAD');
+  it('HELI and HIND land at HPAD; TRAN has no landing building (C++ STRUCT_NONE)', () => {
+    // C++ aadata.cpp:168: TRAN Building=STRUCT_NONE — lands on ground via Good_LZ()
+    expect(tran.landingBuilding).toBeUndefined();
     expect(heli.landingBuilding).toBe('HPAD');
     expect(hind.landingBuilding).toBe('HPAD');
   });

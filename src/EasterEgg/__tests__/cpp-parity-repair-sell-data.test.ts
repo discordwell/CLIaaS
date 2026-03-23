@@ -73,12 +73,14 @@ const CPP_REPAIR_PERCENT_RAW = fixedRaw(0.20);   // 51
 const CPP_UREPAIR_PERCENT_RAW = fixedRaw(0.20);  // 51
 const CPP_REFUND_PERCENT_RAW = fixedRaw(0.50);    // 128
 
-/** C++ Repair_Cost formula for buildings (techno.cpp:6144) */
+/** C++ Repair_Cost formula for buildings (techno.cpp:6144)
+ *  Building repair path (building.cpp:5465) does NOT clamp to min 1.
+ *  Free repair when integer truncation yields 0. */
 function cppBuildingRepairCost(rawCost: number, maxStrength: number): number {
   const stepsToFull = Math.trunc(maxStrength / 7); // RepairStep=7
-  if (stepsToFull <= 0) return 1;
+  if (stepsToFull <= 0) return 0;
   const costPerStep = Math.trunc(rawCost / stepsToFull);
-  return Math.max(1, cppIntTimesFixed(costPerStep, CPP_REPAIR_PERCENT_RAW));
+  return cppIntTimesFixed(costPerStep, CPP_REPAIR_PERCENT_RAW);
 }
 
 /** C++ Repair_Cost formula for units (techno.cpp:6142) */
@@ -192,15 +194,20 @@ describe('Building repair: total cost from 1 HP to full HP', () => {
   // C++ techno.cpp: repairs in RepairStep-sized increments, each costing Repair_Cost().
 
   for (const { type, cost, maxHp } of ALL_STRUCTURES) {
-    it(`${type}: total repair cost is within [10%, 45%] of build cost`, () => {
+    it(`${type}: total repair cost is within [10%, 45%] of build cost (or free)`, () => {
       const stepCost = repairCostPerStep(cost, maxHp);
       const stepsNeeded = Math.ceil((maxHp - 1) / REPAIR_STEP);
       const totalCost = stepCost * stepsNeeded;
-      const ratio = totalCost / cost;
-      // Integer truncation can inflate ratio for cheap buildings (e.g., BARR=38%)
-      // or deflate for expensive ones. C++ has the same truncation behavior.
-      expect(ratio).toBeGreaterThan(0.10);
-      expect(ratio).toBeLessThan(0.45);
+      if (stepCost === 0) {
+        // C++ parity: buildings with Repair_Cost()=0 repair for FREE (BARR, TENT)
+        expect(totalCost).toBe(0);
+      } else {
+        const ratio = totalCost / cost;
+        // Integer truncation can inflate ratio for cheap buildings
+        // or deflate for expensive ones. C++ has the same truncation behavior.
+        expect(ratio).toBeGreaterThan(0.10);
+        expect(ratio).toBeLessThan(0.45);
+      }
     });
   }
 });

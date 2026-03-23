@@ -304,18 +304,20 @@ describe('MIG AFLD landing (aircraft.cpp landing building)', () => {
     expect(UNIT_STATS.HIND.landingBuilding).toBe('HPAD');
   });
 
-  it('Chinook lands at HPAD (different from MIG)', () => {
-    expect(UNIT_STATS.TRAN.landingBuilding).toBe('HPAD');
+  it('Chinook has no landingBuilding — C++ STRUCT_NONE (different from MIG)', () => {
+    // C++ aadata.cpp:168: TRAN Building=STRUCT_NONE — lands via Good_LZ()
+    expect(UNIT_STATS.TRAN.landingBuilding).toBeUndefined();
   });
 
-  it('fixed-wing fighters (MIG, YAK) use AFLD; helicopters use HPAD', () => {
+  it('fixed-wing fighters (MIG, YAK) use AFLD; combat helicopters use HPAD; TRAN uses none', () => {
     // All fixed-wing fighters use AFLD
     expect(UNIT_STATS.MIG.landingBuilding).toBe('AFLD');
     expect(UNIT_STATS.YAK.landingBuilding).toBe('AFLD');
-    // All helicopters use HPAD
+    // Combat helicopters use HPAD
     expect(UNIT_STATS.HELI.landingBuilding).toBe('HPAD');
     expect(UNIT_STATS.HIND.landingBuilding).toBe('HPAD');
-    expect(UNIT_STATS.TRAN.landingBuilding).toBe('HPAD');
+    // TRAN: C++ aadata.cpp:168 STRUCT_NONE — lands on clear terrain via Good_LZ()
+    expect(UNIT_STATS.TRAN.landingBuilding).toBeUndefined();
   });
 });
 

@@ -1583,9 +1583,10 @@ describe('Fog disabled mode', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('repairCostPerStep formula edge cases', () => {
-  it('very cheap structure with high HP gives cost of 1', () => {
-    // cost=25 (SBAG), maxHp=256: ceil(25*0.25 / (256/5)) = ceil(6.25/51.2) = ceil(0.122) = 1
-    expect(repairCostPerStep(25, 256)).toBe(1);
+  it('very cheap structure with high HP gives cost of 0 (free repair)', () => {
+    // cost=25, maxHp=256: trunc(256/7)=36; trunc(25/36)=0; trunc((51*0+128)/256)=0
+    // C++ building repair does NOT clamp to min 1 — free repair
+    expect(repairCostPerStep(25, 256)).toBe(0);
   });
 
   it('expensive structure with low HP gives high per-step cost', () => {

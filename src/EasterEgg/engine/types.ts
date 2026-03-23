@@ -468,6 +468,7 @@ export interface UnitStats {
   isInfiltrate?: boolean;    // C++ infantry.h IsInfiltrate — can enter/infiltrate enemy buildings (rules.ini Infiltrate=yes)
   isCanine?: boolean;        // C++ infantry.h IsCanine — dog unit (rules.ini IsCanine=yes)
   explodesOnDeath?: boolean; // C++ infantry.h Explodes — explodes on death (rules.ini Explodes=yes)
+  selfHealing?: boolean;     // C++ techno.cpp:2354 IsSelfHealing — heals +1 HP every 14 ticks at ≤ConditionYellow (rules.ini SelfHealing=yes: 4TNK, HARV)
 }
 
 // Warhead types from RA RULES.INI
@@ -601,11 +602,11 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   '1TNK': { type: UnitType.V_1TNK, name: 'Light Tank', image: '1tnk', strength: 300, armor: 'heavy', speed: 9, speedClass: SpeedClass.TRACK, sight: 4, rot: 5, isInfantry: false, primaryWeapon: '75mm', scanDelay: 12, crusher: true, points: 30 },
   '2TNK': { type: UnitType.V_2TNK, name: 'Medium Tank', image: '2tnk', strength: 400, armor: 'heavy', speed: 8, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '90mm', scanDelay: 12, crusher: true, points: 40 },
   '3TNK': { type: UnitType.V_3TNK, name: 'Heavy Tank', image: '3tnk', strength: 400, armor: 'heavy', speed: 7, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: '105mm', secondaryWeapon: '105mm', scanDelay: 12, crusher: true, points: 50 },
-  '4TNK': { type: UnitType.V_4TNK, name: 'Mammoth Tank', image: '4tnk', strength: 600, armor: 'heavy', speed: 4, speedClass: SpeedClass.TRACK, sight: 6, rot: 5, isInfantry: false, primaryWeapon: '120mm', secondaryWeapon: 'MammothTusk', scanDelay: 12, crusher: true, points: 60 },
+  '4TNK': { type: UnitType.V_4TNK, name: 'Mammoth Tank', image: '4tnk', strength: 600, armor: 'heavy', speed: 4, speedClass: SpeedClass.TRACK, sight: 6, rot: 5, isInfantry: false, primaryWeapon: '120mm', secondaryWeapon: 'MammothTusk', scanDelay: 12, crusher: true, points: 60, selfHealing: true },  // C++ techno.cpp:2354 IsSelfHealing=yes
   JEEP:   { type: UnitType.V_JEEP, name: 'Ranger', image: 'jeep', strength: 150, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 6, rot: 10, isInfantry: false, primaryWeapon: 'M60mg', scanDelay: 10, points: 20 },
   APC:    { type: UnitType.V_APC, name: 'APC', image: 'apc', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'M60mg', passengers: 5, crusher: true, points: 25 },
   ARTY:   { type: UnitType.V_ARTY, name: 'Artillery', image: 'arty', strength: 75, armor: 'light', speed: 6, speedClass: SpeedClass.TRACK, sight: 5, rot: 2, isInfantry: false, primaryWeapon: '155mm', noMovingFire: true, scanDelay: 20, points: 35 },  // C++ udata.cpp:296 IsCrusher=false
-  HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, speedClass: SpeedClass.TRACK, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 55 },
+  HARV:   { type: UnitType.V_HARV, name: 'Harvester', image: 'harv', strength: 600, armor: 'heavy', speed: 6, speedClass: SpeedClass.TRACK, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 55, selfHealing: true },  // C++ techno.cpp:2354 IsSelfHealing=yes
   MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 60 },  // C++ udata.cpp:358 IsCrusher=true
   TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 1, points: 5 },
   // Infantry (C++ idata.cpp MPH values) — all infantry are crushable
@@ -644,7 +645,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30 },  // rules.ini Tracked=yes
   MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 40 },  // C++ udata.cpp:265 IsCrusher=true
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', points: 35 },
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, points: 35 },  // C++ aadata.cpp:168: STRUCT_NONE — lands anywhere via Good_LZ(), not at HPAD
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true, points: 25 },
   // Naval vessels (C++ vdata.cpp MPH values)
   SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true, points: 45 },

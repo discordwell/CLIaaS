@@ -43,8 +43,9 @@ import {
   STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
   saveCarryover, TIME_UNIT_TICKS,
   TEVENT_GLOBAL_SET, TEVENT_GLOBAL_CLEAR,
+  CREWED_BUILDINGS,
 } from './scenario';
-export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress } from './scenario';
+export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress, expandAllyToken } from './scenario';
 export { CAMPAIGNS, getCampaign, loadCampaignProgress, saveCampaignProgress, checkMissionExists, loadMissionBriefings, getMissionBriefing } from './scenario';
 export type { MissionInfo, CampaignId, CampaignDef, CampaignMission } from './scenario';
 export { AudioManager } from './audio';
@@ -499,7 +500,7 @@ export class Game {
   comparisonMode = false;
   /** When true, fog of war is disabled (all cells visible) */
   fogDisabled = false;
-  fogReEnableTick = 0; // deprecated — C++ RadarSpied is permanent, no re-enable timer
+  // fogReEnableTick removed — C++ RadarSpied is permanent, no re-enable timer (infantry.cpp:660-662)
   /** C++ house.h:268 IsGPSActive — GPS satellite launched, full map revealed.
    *  Cleared when ATEK is destroyed (house.cpp:1420-1425). */
   gpsActive = false;
@@ -1789,6 +1790,16 @@ export class Game {
       }
     }
 
+    // Entity self-healing: 4TNK (Mammoth Tank) and HARV (Harvester) — C++ techno.cpp:2354
+    // Units with IsSelfHealing=true heal +1 HP every 14 ticks when Health_Ratio() <= ConditionYellow (50%)
+    if (this.tick % 14 === 0) {
+      for (const e of this.entities) {
+        if (e.alive && e.stats.selfHealing && e.hp > 0 && e.hp / e.maxHp <= CONDITION_YELLOW) {
+          e.hp = Math.min(e.maxHp, e.hp + 1);
+        }
+      }
+    }
+
     // Service Depot — delegates to repairSell.ts (14 tick interval)
     if (this.tick % 14 === 0) {
       this._runRepairSell(ctx => _tickServiceDepot(ctx));
@@ -1871,11 +1882,7 @@ export class Game {
       if (s.ironCurtainTicks && s.ironCurtainTicks > 0) s.ironCurtainTicks--;
     }
 
-    // Fog re-enable timer (spy DOME infiltration)
-    if (this.fogDisabled && this.fogReEnableTick > 0) {
-      this.fogReEnableTick--;
-      if (this.fogReEnableTick <= 0) this.fogDisabled = false;
-    }
+    // fogReEnableTick timer removed — C++ RadarSpied is permanent (infantry.cpp:660-662)
 
     // Clean up dead entities after death animation — save corpse before removal
     const before = this.entities.length;
@@ -2013,8 +2020,9 @@ export class Game {
 
           // SL4: Spawn infantry survivors (C++ building.cpp How_Many_Survivors + Crew_Type)
           // C++ parity: no survivors when ConYard reverts to MCV
-          if (!mcvSpawned) {
-            // Count: (buildingRawCost * SurvivorFraction) / E1_cost, clamped 1-5
+          // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — only Crewed=yes buildings spawn survivors
+          if (!mcvSpawned && CREWED_BUILDINGS.has(s.type)) {
+            // Count: (buildingRawCost * SurvivorFraction) / E1_cost, clamped 0-5
             const E1_COST = 100;
             const SURVIVOR_FRACTION = 0.4; // rules.ini SurvivorRate=.4 (rules.cpp default was 0.5)
             // C++ bdata.cpp:3672-3683 Raw_Cost(): subtract free unit cost for buildings that come with one
@@ -2025,8 +2033,12 @@ export class Game {
             // C++ Raw_Cost subtracts free unit costs for survivor calculation
             if (s.type === 'PROC') buildCost -= HARVESTER_COST;           // bdata.cpp:3679-3681
             if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2; // bdata.cpp:3676-3677 (C++ bug: HIND twice)
-            const survivorCount = Math.min(5, Math.max(1,
-              Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST)));
+            let survivorCount = Math.min(5,
+              Math.floor((buildCost * SURVIVOR_FRACTION) / E1_COST));
+            // C++ building.cpp:3509: captured building halves survivor count
+            if (s.originalHouse && s.originalHouse !== s.house) {
+              survivorCount = Math.floor(survivorCount / 2);
+            }
             // C++ building.cpp:3456-3463 — one engineer limit per ConYard sell
             let engineerSpawned = false;
             // C++ techno.cpp:4454-4465 — check if building has no weapon (for 15% civilian chance)
@@ -2035,9 +2047,6 @@ export class Game {
               // C++ Crew_Type: per-building type with random variance
               let crewType: UnitType;
               switch (s.type) {
-                case 'SILO': // STRUCT_STORAGE: 50% C1 or C7 (civilians)
-                  crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
-                  break;
                 case 'FACT': // STRUCT_CONST: 25% engineer if human-owned, max 1 engineer
                   // C++ building.cpp:3456-3463 — re-roll if engineer already spawned
                   if (!engineerSpawned && Math.random() < 0.25) {
@@ -2046,10 +2055,6 @@ export class Game {
                   } else {
                     crewType = UnitType.I_E1;
                   }
-                  break;
-                case 'KENN': // STRUCT_KENNEL: 50% dog, 50% nothing
-                  if (Math.random() < 0.5) continue; // no survivor this iteration
-                  crewType = UnitType.I_DOG;
                   break;
                 case 'TENT': case 'BARR': // Barracks: always E1
                   crewType = UnitType.I_E1;

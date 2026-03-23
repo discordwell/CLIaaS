@@ -117,11 +117,12 @@ describe('C++ parity: repair cost formula (techno.cpp:6139-6145)', () => {
 
   for (const { type, cost, maxHp } of STRUCTURES) {
     const expected = cppRepairCost(cost, maxHp);
-    // C++ clamps minimum cost to 1 (techno.cpp:989)
-    const expectedClamped = Math.max(1, expected);
+    // Building repair (building.cpp:5432 Repair_AI) does NOT clamp to min 1.
+    // The max(Repair_Cost(),1) at techno.cpp:989 is Service Depot (unit) only.
+    // Buildings with low cost/high HP (BARR, TENT: 300/800) get cost=0 (FREE repair).
 
-    it(`${type} (cost=${cost}, maxHp=${maxHp}): repair cost per step = ${expectedClamped}`, () => {
-      expect(repairCostPerStep(cost, maxHp)).toBe(expectedClamped);
+    it(`${type} (cost=${cost}, maxHp=${maxHp}): repair cost per step = ${expected}`, () => {
+      expect(repairCostPerStep(cost, maxHp)).toBe(expected);
     });
   }
 
@@ -309,20 +310,24 @@ describe('C++ parity: RepairPercent constant matches rules.ini (rules.cpp:493)',
 
 describe('C++ parity: total repair cost to full HP', () => {
   // Verify that full repair from 1 HP costs approximately RepairPercent of build cost
+  // Exception: buildings with cost=0 per step (BARR, TENT) repair for FREE in C++
 
   for (const { type, cost, maxHp } of STRUCTURES) {
-    it(`${type}: total repair cost is roughly 20% of build cost`, () => {
+    it(`${type}: total repair cost is roughly 20% of build cost (or free)`, () => {
       const stepCost = repairCostPerStep(cost, maxHp);
       const stepsNeeded = Math.ceil((maxHp - 1) / CPP_REPAIR_STEP);
       const totalCost = stepCost * stepsNeeded;
-      // Should be approximately 20% of build cost (RepairPercent),
-      // but integer truncation at each division step causes variance.
-      // Low-cost buildings (e.g. BARR cost=300, maxHp=800) suffer most
-      // from truncation: costPerStep floors to 2 but true fraction is ~2.63,
-      // inflating the total repair cost ratio to ~38%.
-      const ratio = totalCost / cost;
-      expect(ratio).toBeGreaterThan(0.10);
-      expect(ratio).toBeLessThan(0.45);
+      if (stepCost === 0) {
+        // C++ parity: BARR/TENT (cost=300, maxHp=800) have Repair_Cost()=0.
+        // building.cpp:5432 Repair_AI does not clamp, so repair is FREE.
+        expect(totalCost).toBe(0);
+      } else {
+        // Should be approximately 20% of build cost (RepairPercent),
+        // but integer truncation at each division step causes variance.
+        const ratio = totalCost / cost;
+        expect(ratio).toBeGreaterThan(0.10);
+        expect(ratio).toBeLessThan(0.45);
+      }
     });
   }
 });

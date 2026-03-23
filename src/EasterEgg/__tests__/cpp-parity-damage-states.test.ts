@@ -469,21 +469,16 @@ describe('Self-Healing Cap (techno.cpp:2354)', () => {
     expect((halfHp - 1) / maxHp).toBeLessThan(CONDITION_YELLOW); // below = heal
   });
 
-  it('TS has no vehicle self-healing (Mammoth Tank IsSelfHealing)', () => {
+  it('4TNK and HARV have selfHealing matching C++ IsSelfHealing', () => {
     // C++ type.h:408: unsigned IsSelfHealing:1;
-    // C++ techno.cpp:2354: Mammoth Tank heals +1 HP per RepairRate when <= ConditionYellow
-    //
-    // PARITY GAP: TS engine has no self-healing for vehicle entities.
-    // The only self-healing in TS is for the Queen Ant structure (index.ts:1720-1725).
-    // Mammoth Tank (4TNK) has no self-healing in the TS implementation.
-
-    // Verify 4TNK stats exist but have no selfHealing flag
+    // C++ techno.cpp:2354: heals +1 HP per RepairRate when <= ConditionYellow
     const mammothStats = UNIT_STATS['4TNK'];
     expect(mammothStats).toBeDefined();
     expect(mammothStats.strength).toBe(600);
+    expect(mammothStats.selfHealing).toBe(true);
 
-    // There is no selfHealing property in UnitStats
-    expect('selfHealing' in mammothStats).toBe(false); // PARITY GAP: no IsSelfHealing in TS stats
+    const harvStats = UNIT_STATS['HARV'];
+    expect(harvStats.selfHealing).toBe(true);
   });
 });
 

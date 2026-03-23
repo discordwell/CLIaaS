@@ -342,8 +342,9 @@ describe('HPAD as landing pad for helicopters (aircraft.cpp findLandingPad)', ()
     expect(UNIT_STATS.HIND.landingBuilding).toBe('HPAD');
   });
 
-  it('TRAN (Chinook) landingBuilding is HPAD', () => {
-    expect(UNIT_STATS.TRAN.landingBuilding).toBe('HPAD');
+  it('TRAN (Chinook) has no landingBuilding — C++ aadata.cpp:168 STRUCT_NONE', () => {
+    // C++ Transport uses Good_LZ() to land on clear terrain, not at HPAD
+    expect(UNIT_STATS.TRAN.landingBuilding).toBeUndefined();
   });
 
   it('fixed-wing aircraft (MIG, YAK) do NOT use HPAD', () => {
@@ -373,14 +374,15 @@ describe('HPAD as landing pad for helicopters (aircraft.cpp findLandingPad)', ()
     expect(findLandingPad(ctx, hind)).toBe(0);
   });
 
-  it('findLandingPad returns HPAD index for TRAN', () => {
+  it('findLandingPad returns -1 for TRAN — no landingBuilding (C++ STRUCT_NONE)', () => {
+    // C++ aadata.cpp:168: TRAN Building=STRUCT_NONE — lands on ground, not at HPAD
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 10, 10);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const hpad = makeHPAD(12, 10, 800, House.USSR);
 
     const ctx = makeAircraftCtx([tran], [hpad]);
-    expect(findLandingPad(ctx, tran)).toBe(0);
+    expect(findLandingPad(ctx, tran)).toBe(-1);
   });
 
   it('findLandingPad skips AFLD for helicopter entities', () => {

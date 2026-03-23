@@ -45,6 +45,11 @@ const TEMPLATE_BRIDGE1H = 378;  // half-destroyed horizontal
 const TEMPLATE_BRIDGE2H = 379;  // half-destroyed vertical
 const TEMPLATE_BRIDGE_1A = 235; // multi-part bridge piece 1A
 const TEMPLATE_BRIDGE_1B = 236; // multi-part bridge piece 1B
+// Multi-part bridge variants (combat.cpp:261-265, map.cpp:1869)
+const TEMPLATE_BRIDGE_2A = 238; // multi-part bridge piece 2A
+const TEMPLATE_BRIDGE_2B = 239; // multi-part bridge piece 2B
+const TEMPLATE_BRIDGE_3A = 241; // multi-part bridge piece 3A
+const TEMPLATE_BRIDGE_3B = 242; // multi-part bridge piece 3B
 // Destroyed variants (not in countBridgeCells set)
 const TEMPLATE_BRIDGE1D = 380;  // fully destroyed horizontal
 const TEMPLATE_BRIDGE2D = 381;  // fully destroyed vertical
@@ -271,6 +276,26 @@ describe('destroyBridge — bridge cell destruction within radius', () => {
     expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
     expect(map.getTerrain(21, 20)).toBe(Terrain.WATER);
   });
+
+  it('destroys multi-part bridge variants 2A/2B/3A/3B (combat.cpp:263-264)', () => {
+    // C++ combat.cpp:261-265 checks 10 bridge template types including BRIDGE_2A/2B/3A/3B.
+    // C++ map.cpp:1869 — Destroy_Bridge_At covers TEMPLATE_BRIDGE_1A through TEMPLATE_BRIDGE_3E.
+    // These 4 templates were previously missing from the TS bridge check.
+    const map = new GameMap();
+    map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
+    setBridgeTemplate(map, 20, 20, TEMPLATE_BRIDGE_2A, 6);
+    setBridgeTemplate(map, 21, 20, TEMPLATE_BRIDGE_2B, 6);
+    setBridgeTemplate(map, 22, 20, TEMPLATE_BRIDGE_3A, 6);
+    setBridgeTemplate(map, 23, 20, TEMPLATE_BRIDGE_3B, 6);
+
+    const destroyed = map.destroyBridge(20, 20, 4);
+
+    expect(destroyed).toBe(4);
+    expect(map.getTerrain(20, 20)).toBe(Terrain.WATER);
+    expect(map.getTerrain(21, 20)).toBe(Terrain.WATER);
+    expect(map.getTerrain(22, 20)).toBe(Terrain.WATER);
+    expect(map.getTerrain(23, 20)).toBe(Terrain.WATER);
+  });
 });
 
 // ── Passability after bridge destruction ────────────────────────────────────
@@ -423,6 +448,25 @@ describe('Splash damage bridge destruction (combat.cpp:261-268)', () => {
 
     // Bridge should be destroyed after 50 hits with ~20% chance each
     expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.WATER);
+  });
+
+  it('AP/HE splash on multi-part bridge templates 2A/2B/3A/3B destroys bridge', () => {
+    // C++ combat.cpp:261-265 checks BRIDGE_2A (238), BRIDGE_2B (239),
+    // BRIDGE_3A (241), BRIDGE_3B (242) for splash damage bridge destruction.
+    for (const tmpl of [TEMPLATE_BRIDGE_2A, TEMPLATE_BRIDGE_2B, TEMPLATE_BRIDGE_3A, TEMPLATE_BRIDGE_3B]) {
+      const ctx = makeCombatCtx();
+      setBridgeTemplate(ctx.map, 20, 20, tmpl, 6);
+      ctx.bridgeCellCount = ctx.map.countBridgeCells();
+
+      const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
+
+      // Fire 50 HE explosions — probabilistic but nearly certain to succeed
+      for (let i = 0; i < 50; i++) {
+        applySplashDamage(ctx, impactPos, { damage: 200, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
+      }
+
+      expect(ctx.map.getTerrain(20, 20), `template ${tmpl} should be destroyed`).toBe(Terrain.WATER);
+    }
   });
 
   it('only AP and HE warheads can damage bridges, not SA/Fire/Super', () => {

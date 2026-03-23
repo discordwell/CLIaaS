@@ -56,14 +56,19 @@ const UREPAIR_PERCENT_RAW = Math.floor(UREPAIR_PERCENT * 256); // 51 for 20%
 /** Calculate repair cost per step for a structure type.
  *  C++ techno.cpp:6144: (Raw_Cost() / (MaxStrength / Rule.RepairStep)) * Rule.RepairPercent
  *  Uses integer division at each step, then 8.8 fixed-point multiply.
- *  RepairPercent raw = floor(0.20*256) = 51; int*fixed = ((51*val)+128)/256 */
+ *  RepairPercent raw = floor(0.20*256) = 51; int*fixed = ((51*val)+128)/256
+ *
+ *  NOTE: C++ building repair (building.cpp:5432 Repair_AI) does NOT clamp to min 1.
+ *  The max(Repair_Cost(),1) clamp at techno.cpp:989 is only in the Service Depot
+ *  (unit repair) loop. Buildings with low cost/high HP (BARR, TENT: 300/800) get
+ *  Repair_Cost()=0 and repair for FREE — matching C++ behavior. */
 export function repairCostPerStep(buildCost: number, maxHp: number): number {
   const stepsToFull = Math.trunc(maxHp / REPAIR_STEP);        // C++ int / int
-  if (stepsToFull <= 0) return 1;                              // guard: maxHp < step is C++ UB
+  if (stepsToFull <= 0) return 0;                              // guard: maxHp < step
   const costPerFullStep = Math.trunc(buildCost / stepsToFull); // C++ int / int
   // C++ int * fixed: result = ((raw * intVal) + 128) / 256
-  // C++ call site clamps: max(Repair_Cost(), 1) (techno.cpp:989)
-  return Math.max(1, Math.trunc((REPAIR_PERCENT_RAW * costPerFullStep + 128) / 256));
+  // No min-1 clamp — buildings can repair for free (C++ building.cpp:5432 Repair_AI)
+  return Math.trunc((REPAIR_PERCENT_RAW * costPerFullStep + 128) / 256);
 }
 
 /** Calculate repair cost per step for a unit (foot) at Service Depot.

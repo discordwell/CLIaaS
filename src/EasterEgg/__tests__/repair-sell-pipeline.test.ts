@@ -689,9 +689,10 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     const chunk = indexSource.slice(sellSection, sellSection + 1500);
     expect(chunk).toContain('SURVIVOR_FRACTION');
     expect(chunk).toContain('survivorCount');
-    // Survivor count: (buildCost * 0.4) / E1_cost, clamped 1-5
+    // Survivor count: floor(buildCost * 0.4 / E1_cost), clamped 0-5
+    // C++ building.cpp:3444: only Crewed=yes buildings enter this path (CREWED_BUILDINGS gate)
     expect(chunk).toContain('Math.min(5');
-    expect(chunk).toContain('Math.max(1');
+    expect(chunk).toContain('CREWED_BUILDINGS');
   });
 
   it('survivor count formula: floor(buildCost * 0.4 / 100), clamped 1-5', () => {
@@ -717,11 +718,14 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     expect(chunk).toContain('V_MCV');
   });
 
-  it('KENN sell spawns 50% dog (Crew_Type)', () => {
+  it('KENN sell spawns no survivors (Crewed=no in rules.ini)', () => {
+    // C++ building.cpp:3444: if (!IsCrewAble()) return 0
+    // KENN has Crewed=no in rules.ini, so it never enters the survivor path.
+    // The CREWED_BUILDINGS set in scenario.ts excludes KENN.
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     const chunk = indexSource.slice(sellSection, sellSection + 3000);
-    expect(chunk).toContain("'KENN'");
-    expect(chunk).toContain('I_DOG');
+    // KENN should NOT appear in the survivor crew type switch
+    expect(chunk).not.toContain("case 'KENN'");
   });
 });
 

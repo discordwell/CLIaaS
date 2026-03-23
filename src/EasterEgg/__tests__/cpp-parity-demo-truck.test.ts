@@ -168,16 +168,8 @@ describe('aftrmath.ini [DTRK] parity — authoritative DTRK stats', () => {
 
   it('Explodes=yes — DTRK explodes on death (C++ techno.cpp:3820)', () => {
     expect(ini.Explodes?.toLowerCase()).toBe('yes');
-    // MISMATCH: TS UNIT_STATS.DTRK lacks explodesOnDeath flag
-    // This tests what the INI says; the TS implementation should have this flag
-    const tsHasFlag = (UNIT_STATS.DTRK as Record<string, unknown>).explodesOnDeath;
-    // Documenting the mismatch: DTRK should have explodesOnDeath=true per INI
-    if (tsHasFlag === undefined) {
-      // KNOWN MISMATCH: explodesOnDeath flag missing from UNIT_STATS.DTRK
-      expect(tsHasFlag).toBeUndefined(); // passes, but documents the gap
-    } else {
-      expect(tsHasFlag).toBe(true);
-    }
+    // TS UNIT_STATS.DTRK now has explodesOnDeath=true matching INI
+    expect(UNIT_STATS.DTRK.explodesOnDeath).toBe(true);
   });
 });
 
@@ -346,21 +338,12 @@ describe('DTRK Explodes=yes death explosion (techno.cpp:3820-3834)', () => {
     // It means the death explosion barely damages adjacent objects.
   });
 
-  it('DTRK UNIT_STATS should have explodesOnDeath=true per aftrmath.ini Explodes=yes', () => {
+  it('DTRK UNIT_STATS has explodesOnDeath=true per aftrmath.ini Explodes=yes', () => {
     // aftrmath.ini [DTRK] Explodes=yes
     // C++ techno.cpp:6276: IsExploding = ini.Get_Bool("Explodes", IsExploding)
     const ini = parseIniSection(aftermathIni, 'DTRK');
     expect(ini.Explodes?.toLowerCase()).toBe('yes');
-
-    // MISMATCH CHECK: does TS track this?
-    const tsFlag = (UNIT_STATS.DTRK as Record<string, unknown>).explodesOnDeath;
-    // If undefined, it's a gap. Document either way.
-    if (tsFlag === undefined) {
-      // KNOWN GAP: explodesOnDeath missing from UNIT_STATS.DTRK
-      console.warn('[PARITY GAP] UNIT_STATS.DTRK missing explodesOnDeath=true (aftrmath.ini Explodes=yes)');
-    }
-    // We don't fail the test — we document the gap.
-    // When the flag is added, change this to: expect(tsFlag).toBe(true);
+    expect(UNIT_STATS.DTRK.explodesOnDeath).toBe(true);
   });
 });
 
@@ -595,18 +578,10 @@ describe('MISMATCH SUMMARY — TS vs C++ divergences for DTRK', () => {
     expect(DEMO_TRUCK_RADIUS).toBe(3);
   });
 
-  it('DIVERGENCE 4: DTRK missing explodesOnDeath flag (aftrmath.ini Explodes=yes)', () => {
+  it('NO DIVERGENCE: DTRK has explodesOnDeath=true (aftrmath.ini Explodes=yes)', () => {
     // aftrmath.ini: [DTRK] Explodes=yes
     // C++ techno.cpp:6276: IsExploding = ini.Get_Bool("Explodes")
-    // TS UNIT_STATS.DTRK does not have explodesOnDeath=true
-    const hasFlag = (UNIT_STATS.DTRK as Record<string, unknown>).explodesOnDeath;
-    // Document: this should be true per INI
-    if (hasFlag === true) {
-      expect(hasFlag).toBe(true); // Correct!
-    } else {
-      // MISMATCH: flag is missing
-      expect(hasFlag).toBeUndefined();
-    }
+    expect(UNIT_STATS.DTRK.explodesOnDeath).toBe(true);
   });
 
   it('NO DIVERGENCE: Iron Curtain shortened duration = 11 ticks (correct)', () => {

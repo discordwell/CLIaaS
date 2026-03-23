@@ -144,13 +144,11 @@ describe('aircraft type data — preferred landing building (aadata.cpp:60-219)'
   });
 
   // C++ aadata.cpp:168: Transport → STRUCT_NONE
-  it('Chinook (TRAN) prefers HPAD — note: C++ uses STRUCT_NONE, TS uses HPAD', () => {
+  it('Chinook (TRAN) has no landingBuilding — C++ aadata.cpp:168 STRUCT_NONE', () => {
     const tran = makeEntity(UnitType.V_TRAN, House.Spain);
     // C++ aadata.cpp:168: Transport helicopter has STRUCT_NONE as preferred landing building
-    // TS types.ts:633: TRAN has landingBuilding: 'HPAD'
-    // PARITY GAP: C++ Transport has STRUCT_NONE, TS has 'HPAD'
     // In C++, transports use Good_LZ() to land on clear terrain, not helipads
-    expect(tran.stats.landingBuilding).toBe('HPAD'); // TS behavior — C++ would be undefined/NONE
+    expect(tran.stats.landingBuilding).toBeUndefined();
   });
 });
 

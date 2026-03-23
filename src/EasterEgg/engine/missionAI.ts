@@ -1066,6 +1066,8 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       if (isCapturable && Math.floor(s.hp * 256 / s.maxHp) <= Math.floor(CONDITION_RED * 256)) {
         // Capture: building at red health — convert to engineer's house
         // C++ building.cpp:2936: Captured() changes ownership but does NOT restore HP
+        // C++ building.cpp:3509: track original house for survivor halving on sell
+        if (!s.originalHouse) s.originalHouse = s.house;
         s.house = entity.house;
         ctx.playEva('eva_building_captured');
       } else {

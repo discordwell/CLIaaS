@@ -237,61 +237,47 @@ describe('Section 3: Building repair heals RepairStep=7 HP per tick', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // Section 4: Repair cost per step — C++ formula parity
 // C++ building.cpp:5465: int cost = Class->Repair_Cost();
-// CRITICAL: C++ building path does NOT clamp to max(1). Only service depot does.
-// TS repairCostPerStep always clamps: Math.max(1, ...) — MISMATCH for building path
+// Building repair does NOT clamp to max(1). Only service depot does.
+// TS now matches C++ — no min-1 clamp for buildings.
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Section 4: Building repair cost per step (building.cpp:5465)', () => {
   const structures = [POWR, APWR, PROC, WEAP, FACT, BARR, TENT, HPAD];
 
-  // Buildings where C++ Repair_Cost() > 0 — TS matches exactly
-  const expensiveStructures = structures.filter(s => cppBuildingRepairCostRaw(s.cost, s.maxHp) > 0);
-  for (const { type, cost, maxHp } of expensiveStructures) {
+  // All buildings: TS matches C++ exactly (including free repair for cheap buildings)
+  for (const { type, cost, maxHp } of structures) {
     it(`${type} (cost=${cost}, hp=${maxHp}): TS repairCostPerStep matches C++`, () => {
       const cppRaw = cppBuildingRepairCostRaw(cost, maxHp);
-      expect(cppRaw).toBeGreaterThan(0);
       expect(repairCostPerStep(cost, maxHp)).toBe(cppRaw);
     });
   }
 
-  // Buildings where C++ Repair_Cost() = 0 — repair is FREE in C++ but costs 1 in TS
-  const cheapStructures = structures.filter(s => cppBuildingRepairCostRaw(s.cost, s.maxHp) === 0);
-  for (const { type, cost, maxHp } of cheapStructures) {
-    it(`MISMATCH: ${type} (cost=${cost}, hp=${maxHp}): C++ repair is FREE, TS charges 1`, () => {
+  // Buildings where C++ Repair_Cost() = 0 — repair is FREE in both C++ and TS
+  const freeRepairStructures = structures.filter(s => cppBuildingRepairCostRaw(s.cost, s.maxHp) === 0);
+  for (const { type, cost, maxHp } of freeRepairStructures) {
+    it(`${type} (cost=${cost}, hp=${maxHp}): repair is FREE — C++ parity`, () => {
       // C++ building.cpp:5465: int cost = Class->Repair_Cost(); — raw value, NO max(1) clamp
-      // C++ Repair_Cost for this building:
-      //   stepsToFull = trunc(maxHp / 7)
-      //   costPerStep = trunc(cost / stepsToFull)
-      //   result = trunc((51 * costPerStep + 128) / 256) = 0
-      //
-      // In C++, the building repair path does NOT clamp: cost stays 0.
-      // The player can repair this building for free!
       // C++ building.cpp:5471: if (House->Available_Money() >= cost) — 0 >= 0 is true
-      //
-      // In TS, repairCostPerStep clamps to max(1) — charges 1 credit per step.
-      // This is because TS borrowed the clamp from techno.cpp:989 (service depot path),
-      // but the building repair path at building.cpp:5465 does NOT clamp.
+      // The player can repair this building for free!
       const cppRaw = cppBuildingRepairCostRaw(cost, maxHp);
       expect(cppRaw).toBe(0);
-      expect(repairCostPerStep(cost, maxHp)).toBe(1); // TS clamps to 1
+      expect(repairCostPerStep(cost, maxHp)).toBe(0); // TS matches C++ — free repair
     });
   }
 
-  it('MISMATCH detail: C++ building repair has no max(1) clamp, only service depot does', () => {
+  it('BARR/TENT repair is FREE — C++ building repair has no max(1) clamp', () => {
     // C++ building.cpp:5465: int cost = Class->Repair_Cost(); — NO clamp
     // C++ techno.cpp:988-989 (service depot): cost = max(cost, 1); — HAS clamp
-    // TS repairSell.ts:66: return Math.max(1, ...) — always clamps (incorrect for building path)
+    // TS repairSell.ts now matches C++ — no min-1 clamp for buildings
     //
-    // Affected real buildings: BARR (Allied Barracks), TENT (Soviet Barracks)
-    // Both have cost=300, maxHp=800:
+    // BARR and TENT both have cost=300, maxHp=800:
     //   stepsToFull = trunc(800/7) = 114
     //   costPerStep = trunc(300/114) = 2
     //   Repair_Cost = trunc((51*2 + 128)/256) = trunc(230/256) = 0
     //
-    // In C++, repairing BARR/TENT is completely free.
-    // In TS, it costs 1 credit per step (114 steps * 1 credit = 114 credits total).
+    // In both C++ and TS, repairing BARR/TENT is completely free.
     expect(cppBuildingRepairCostRaw(300, 800)).toBe(0);
-    expect(repairCostPerStep(300, 800)).toBe(1);
+    expect(repairCostPerStep(300, 800)).toBe(0);
   });
 });
 

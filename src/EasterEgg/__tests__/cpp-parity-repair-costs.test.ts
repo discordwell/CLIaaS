@@ -35,7 +35,8 @@
  * TS formula (repairSell.ts) now matches C++ exactly:
  *   stepsToFull = Math.trunc(maxHp / step)
  *   costPerFullStep = Math.trunc(buildCost / stepsToFull)
- *   result = Math.max(1, Math.trunc((raw * costPerFullStep + 128) / 256))
+ *   result = Math.trunc((raw * costPerFullStep + 128) / 256)
+ *   (No min-1 clamp for buildings — free repair when result is 0)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -496,23 +497,53 @@ describe('systematic repair cost sweep — C++ vs TS', () => {
 });
 
 // ============================================================
-// Section 13: C++ Repair_Cost returns 0 for very cheap structures
-// techno.cpp:6144 — integer division can zero out
+// Section 12b: BARR and TENT free repair — critical parity case
+// C++ techno.cpp:6144 yields Repair_Cost()=0 for cost=300, maxHp=800.
+// building.cpp:5432 Repair_AI does NOT clamp to min 1.
+// techno.cpp:989 max(cost,1) is Service Depot (unit) only.
 // ============================================================
-describe('Repair_Cost returns 0 for very cheap structures', () => {
-  it('cost=1, maxHp=100: C++ rounds to 0, TS clamps to 1', () => {
-    // C++: trunc(100/7)=14; trunc(1/14)=0; trunc((51*0+128)/256)=0
-    expect(cppRepairCost(1, 100, REPAIR_STEP, BLDG_RAW)).toBe(0);
-    // TS: max(1, 0) = 1 — call site clamp
-    expect(repairCostPerStep(1, 100)).toBe(1);
+describe('BARR/TENT free repair — C++ parity (building.cpp:5465)', () => {
+  it('BARR (cost=300, maxHp=800): Repair_Cost()=0 — FREE repair', () => {
+    // C++ techno.cpp:6144:
+    //   stepsToFull = trunc(800/7) = 114
+    //   costPerFullStep = trunc(300/114) = 2
+    //   result = trunc((51*2 + 128)/256) = trunc(230/256) = 0
+    expect(cppRepairCost(300, 800, REPAIR_STEP, BLDG_RAW)).toBe(0);
+    expect(repairCostPerStep(300, 800)).toBe(0);
   });
 
-  it('cost=3, maxHp=200: C++ rounds to 0, TS clamps to 1', () => {
+  it('TENT (cost=300, maxHp=800): Repair_Cost()=0 — FREE repair (same stats as BARR)', () => {
+    expect(cppRepairCost(300, 800, REPAIR_STEP, BLDG_RAW)).toBe(0);
+    expect(repairCostPerStep(300, 800)).toBe(0);
+  });
+
+  it('unit repair at Service Depot still clamps to min 1 (techno.cpp:989)', () => {
+    // Same cost/hp as BARR but with unit repair step/percent
+    // stepsToFull = trunc(800/10) = 80
+    // costPerFullStep = trunc(300/80) = 3
+    // result = trunc((51*3 + 128)/256) = trunc(281/256) = 1
+    expect(unitRepairCostPerStep(300, 800)).toBe(1);
+  });
+});
+
+// ============================================================
+// Section 13: C++ Repair_Cost returns 0 for very cheap structures
+// techno.cpp:6144 — integer division can zero out
+// building.cpp:5432 Repair_AI does NOT clamp to min 1 (free repair)
+// ============================================================
+describe('Repair_Cost returns 0 for very cheap structures (free repair)', () => {
+  it('cost=1, maxHp=100: C++ rounds to 0 — FREE repair', () => {
+    // C++: trunc(100/7)=14; trunc(1/14)=0; trunc((51*0+128)/256)=0
+    expect(cppRepairCost(1, 100, REPAIR_STEP, BLDG_RAW)).toBe(0);
+    // TS now matches C++ — no min-1 clamp for buildings
+    expect(repairCostPerStep(1, 100)).toBe(0);
+  });
+
+  it('cost=3, maxHp=200: C++ rounds to 0 — FREE repair', () => {
     // C++: trunc(200/7)=28; trunc(3/28)=0; trunc((51*0+128)/256)=0
     expect(cppRepairCost(3, 200, REPAIR_STEP, BLDG_RAW)).toBe(0);
-    // TS: max(1, 0) = 1
-    expect(repairCostPerStep(3, 200)).toBe(1);
-    // Both C++ (after clamping) and TS produce 1, but through different paths
+    // TS now matches C++ — free repair for buildings
+    expect(repairCostPerStep(3, 200)).toBe(0);
   });
 });
 
@@ -520,16 +551,16 @@ describe('Repair_Cost returns 0 for very cheap structures', () => {
 // Section 14: Edge cases — maxHp < REPAIR_STEP
 // ============================================================
 describe('edge cases: maxHp < REPAIR_STEP', () => {
-  it('maxHp=3: C++ integer division 3/7=0 is UB — TS guards with fallback 1', () => {
+  it('maxHp=3: C++ integer division 3/7=0 is UB — TS guards with fallback 0', () => {
     // C++: trunc(3/7)=0 → divide by zero in next step (UB in C++)
     expect(cppRepairCost(100, 3, REPAIR_STEP, BLDG_RAW)).toBe(0);
-    // TS guards: stepsToFull <= 0 returns 1
-    expect(repairCostPerStep(100, 3)).toBe(1);
+    // TS guards: stepsToFull <= 0 returns 0 (free repair, safe fallback)
+    expect(repairCostPerStep(100, 3)).toBe(0);
   });
 
-  it('maxHp=1: C++ 1/7=0 is UB — TS guards with fallback 1', () => {
+  it('maxHp=1: C++ 1/7=0 is UB — TS guards with fallback 0', () => {
     expect(cppRepairCost(100, 1, REPAIR_STEP, BLDG_RAW)).toBe(0);
-    expect(repairCostPerStep(100, 1)).toBe(1);
+    expect(repairCostPerStep(100, 1)).toBe(0);
   });
 
   it('maxHp=7: exactly one step', () => {

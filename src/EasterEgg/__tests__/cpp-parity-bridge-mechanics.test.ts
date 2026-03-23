@@ -769,52 +769,46 @@ describe('Warhead filtering for bridge damage — C++ combat.cpp:261-268', () =>
 
 // ── 14. PARITY GAP: Splash damage bridge template coverage ──────────────────
 
-describe('PARITY GAP: C++ combat.cpp:261-265 checks 10 templates, TS checks only 6', () => {
+describe('PARITY FIXED: C++ combat.cpp:261-265 checks 10 templates, TS now checks all 10', () => {
 
-  it('C++ checks 4 additional multi-part bridge templates for splash damage', () => {
+  it('TS now checks all 10 multi-part bridge templates for splash damage', () => {
     // C++ combat.cpp:261-265 checks these 10 templates for bridge damage from splash:
     //   BRIDGE1(131), BRIDGE2(133), BRIDGE1H(378), BRIDGE2H(379),
     //   BRIDGE_1A(235), BRIDGE_1B(236),
     //   BRIDGE_2A(238), BRIDGE_2B(239), BRIDGE_3A(241), BRIDGE_3B(242)
     //
-    // TS combat.ts:1042 only checks 6: 131, 133, 235, 236, 378, 379
-    // Missing: BRIDGE_2A(238), BRIDGE_2B(239), BRIDGE_3A(241), BRIDGE_3B(242)
-    const tsSplashTemplates = new Set([131, 133, 235, 236, 378, 379]);
+    // TS combat.ts now checks all 10 — previously only checked 6.
+    const tsSplashTemplates = new Set([131, 133, 235, 236, 238, 239, 241, 242, 378, 379]);
     const cppSplashTemplates = new Set(CPP_SPLASH_DAMAGEABLE_BRIDGE_TEMPLATES);
 
     const missingFromTS = CPP_SPLASH_DAMAGEABLE_BRIDGE_TEMPLATES.filter(
       t => !tsSplashTemplates.has(t)
     );
 
-    // These 4 templates are checked by C++ but not TS:
-    expect(missingFromTS).toEqual([
-      TEMPLATE_BRIDGE_2A,  // 238
-      TEMPLATE_BRIDGE_2B,  // 239
-      TEMPLATE_BRIDGE_3A,  // 241
-      TEMPLATE_BRIDGE_3B,  // 242
-    ]);
-    expect(missingFromTS.length).toBe(4);
+    // PARITY FIXED: no templates missing from TS anymore
+    expect(missingFromTS).toEqual([]);
+    expect(missingFromTS.length).toBe(0);
   });
 
-  it('PARITY GAP: HE splash on BRIDGE_2A cell does NOT destroy bridge in TS', () => {
+  it('PARITY FIXED: HE splash on BRIDGE_2A cell destroys bridge in TS', () => {
     // C++ combat.cpp:264 includes TEMPLATE_BRIDGE_2A in the splash damage check.
-    // TS combat.ts:1042 does not include template 238.
+    // TS combat.ts now includes template 238 (was previously missing).
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE_2A, 6);
-    ctx.bridgeCellCount = ctx.map.countBridgeCells(); // also won't count it
+    ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
     const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
     // Use guaranteed-destroy damage
     applySplashDamage(ctx, impactPos, { damage: 1500, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
 
-    // PARITY GAP: TS does not recognize template 238 as a bridge.
-    // C++ would have destroyed this bridge. TS leaves it intact.
+    // PARITY FIXED: TS now recognizes template 238 as a bridge and destroys it.
     const bridgeIdx = 20 * MAP_CELLS + 20;
-    expect(ctx.map.templateType[bridgeIdx]).toBe(TEMPLATE_BRIDGE_2A); // TS: untouched
-    // C++ would destroy it: expect(ctx.map.templateType[bridgeIdx]).not.toBe(238);
+    expect(ctx.map.templateType[bridgeIdx]).not.toBe(TEMPLATE_BRIDGE_2A);
   });
 
-  it('PARITY GAP: HE splash on BRIDGE_3A cell does NOT destroy bridge in TS', () => {
+  it('PARITY FIXED: HE splash on BRIDGE_3A cell destroys bridge in TS', () => {
+    // C++ combat.cpp:265 includes TEMPLATE_BRIDGE_3A in the splash damage check.
+    // TS combat.ts now includes template 241 (was previously missing).
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE_3A, 6);
 
@@ -822,30 +816,29 @@ describe('PARITY GAP: C++ combat.cpp:261-265 checks 10 templates, TS checks only
     applySplashDamage(ctx, impactPos, { damage: 1500, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
 
     const bridgeIdx = 20 * MAP_CELLS + 20;
-    expect(ctx.map.templateType[bridgeIdx]).toBe(TEMPLATE_BRIDGE_3A); // TS: untouched
+    expect(ctx.map.templateType[bridgeIdx]).not.toBe(TEMPLATE_BRIDGE_3A);
   });
 
-  it('PARITY GAP: destroyBridge does not destroy BRIDGE_2A/2B/3A/3B cells', () => {
-    // TS map.ts:685 only checks 6 templates. Multi-part bridge pieces _2A, _2B, _3A, _3B
-    // are not destroyed by destroyBridge.
+  it('PARITY FIXED: destroyBridge destroys BRIDGE_2A/2B/3A/3B cells', () => {
+    // TS map.ts destroyBridge now checks all 10 bridge template types including
+    // multi-part bridge pieces _2A, _2B, _3A, _3B (was previously missing).
     const map = new GameMap();
     map.setBounds(0, 0, MAP_CELLS, MAP_CELLS);
 
-    const missingTemplates = [
+    const fixedTemplates = [
       TEMPLATE_BRIDGE_2A, TEMPLATE_BRIDGE_2B,
       TEMPLATE_BRIDGE_3A, TEMPLATE_BRIDGE_3B,
     ];
-    for (let i = 0; i < missingTemplates.length; i++) {
-      setBridgeTemplate(map, 30 + i, 30, missingTemplates[i], 6);
+    for (let i = 0; i < fixedTemplates.length; i++) {
+      setBridgeTemplate(map, 30 + i, 30, fixedTemplates[i], 6);
     }
 
     const destroyed = map.destroyBridge(31, 30, 3);
 
-    // PARITY GAP: TS does not recognize these templates
-    expect(destroyed).toBe(0);
-    for (let i = 0; i < missingTemplates.length; i++) {
-      const idx = 30 * MAP_CELLS + (30 + i);
-      expect(map.templateType[idx]).toBe(missingTemplates[i]); // untouched
+    // PARITY FIXED: TS now recognizes and destroys these templates
+    expect(destroyed).toBe(4);
+    for (let i = 0; i < fixedTemplates.length; i++) {
+      expect(map.getTerrain(30 + i, 30)).toBe(Terrain.WATER);
     }
   });
 

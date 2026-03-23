@@ -241,10 +241,10 @@ describe('Section 3: Building repair cost per step (techno.cpp:6144)', () => {
 
   for (const { type, cost, maxHp } of structures) {
     const cppRaw = cppBuildingRepairCost(cost, maxHp);
-    const expected = Math.max(1, cppRaw); // C++ techno.cpp:989 clamp
+    // Building repair: NO min-1 clamp (building.cpp:5465). Free repair when cost=0.
 
-    it(`${type} (cost=${cost}, maxHp=${maxHp}): cost per step = ${expected}`, () => {
-      expect(repairCostPerStep(cost, maxHp)).toBe(expected);
+    it(`${type} (cost=${cost}, maxHp=${maxHp}): cost per step = ${cppRaw}`, () => {
+      expect(repairCostPerStep(cost, maxHp)).toBe(cppRaw);
     });
   }
 
@@ -254,14 +254,14 @@ describe('Section 3: Building repair cost per step (techno.cpp:6144)', () => {
     // result = trunc((raw * costPerStep + 128) / 256)
     const steps = Math.trunc(POWR.maxHp / INI_REPAIR_STEP);
     const costPerFull = Math.trunc(POWR.cost / steps);
-    const expected = Math.max(1, Math.trunc((INI_REPAIR_PERCENT_RAW * costPerFull + 128) / 256));
+    const expected = Math.trunc((INI_REPAIR_PERCENT_RAW * costPerFull + 128) / 256);
     expect(repairCostPerStep(POWR.cost, POWR.maxHp)).toBe(expected);
   });
 
   it('worked example: WEAP from INI', () => {
     const steps = Math.trunc(WEAP.maxHp / INI_REPAIR_STEP);
     const costPerFull = Math.trunc(WEAP.cost / steps);
-    const expected = Math.max(1, Math.trunc((INI_REPAIR_PERCENT_RAW * costPerFull + 128) / 256));
+    const expected = Math.trunc((INI_REPAIR_PERCENT_RAW * costPerFull + 128) / 256);
     expect(repairCostPerStep(WEAP.cost, WEAP.maxHp)).toBe(expected);
   });
 });
@@ -549,17 +549,18 @@ describe('Section 14: Wrench icon alternates each repair tick (building.cpp:5463
 // C++ techno.cpp:991: step = max(step, 1);
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Section 15: Minimum cost/step clamp (techno.cpp:989,991)', () => {
-  it('very cheap building (cost=1) still costs at least 1 per repair step', () => {
+describe('Section 15: Minimum cost/step clamp — buildings vs units', () => {
+  it('very cheap building (cost=1) repair is FREE — no min-1 clamp for buildings', () => {
     const cppRaw = cppBuildingRepairCost(1, 400);
     expect(cppRaw).toBe(0); // integer truncation yields 0
-    // C++ clamps at call site: max(cost, 1)
-    expect(repairCostPerStep(1, 400)).toBe(Math.max(1, cppRaw));
+    // C++ building.cpp:5465 does NOT clamp — building repair is free when Repair_Cost()=0
+    expect(repairCostPerStep(1, 400)).toBe(0);
   });
 
-  it('free unit (cost=0) still costs 1 to repair', () => {
+  it('free unit (cost=0) still costs 1 to repair (service depot clamp)', () => {
     const cppRaw = cppUnitRepairCost(0, 400);
     expect(cppRaw).toBe(0);
+    // C++ techno.cpp:989: cost = max(cost, 1) — service depot clamps to min 1
     expect(unitRepairCostPerStep(0, 400)).toBe(Math.max(1, cppRaw));
   });
 
@@ -585,8 +586,8 @@ describe('Section 16: Systematic building repair cost sweep', () => {
       expect(stepsToFull).toBeGreaterThan(0);
       const costPerFull = Math.trunc(cost / stepsToFull);
       const cppResult = Math.trunc((INI_REPAIR_PERCENT_RAW * costPerFull + 128) / 256);
-      const expected = Math.max(1, cppResult);
-      expect(repairCostPerStep(cost, maxHp)).toBe(expected);
+      // Building repair: NO min-1 clamp (building.cpp:5465). Free repair when cost=0.
+      expect(repairCostPerStep(cost, maxHp)).toBe(cppResult);
     });
   }
 });

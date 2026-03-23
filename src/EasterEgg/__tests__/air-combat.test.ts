@@ -85,7 +85,7 @@ describe('Aircraft type definitions', () => {
     const s = UNIT_STATS.TRAN;
     expect(s.isAircraft).toBe(true);
     expect(s.isRotorEquipped).toBe(true);
-    expect(s.landingBuilding).toBe('HPAD');
+    expect(s.landingBuilding).toBeUndefined(); // C++ aadata.cpp:168: STRUCT_NONE
     expect(s.image).toBe('tran');
   });
 

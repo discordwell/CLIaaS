@@ -495,7 +495,7 @@ describe('IsFixedWing and IsHelicopter classification (aadata.cpp)', () => {
 // Section 8: Landing Pad Assignment — Per-Type Building Preference
 // C++ aadata.cpp:122,145 — MIG/YAK → STRUCT_AIRSTRIP
 // C++ aadata.cpp:191,215 — HELI/HIND → STRUCT_HELIPAD
-// C++ aadata.cpp:168 — TRAN → STRUCT_NONE (lands on terrain; TS uses HPAD)
+// C++ aadata.cpp:168 — TRAN → STRUCT_NONE (lands on terrain; TS matches: no landingBuilding)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('landing pad assignment: findLandingPad() type preference', () => {
@@ -846,7 +846,7 @@ describe('rotary vs fixed-wing attack branching', () => {
 // Section 11: Transport Helicopter — No Ammo, Land Without Pad
 // C++ aadata.cpp:168: TRAN Building=STRUCT_NONE, IsLandable=true
 // C++ TRAN PrimaryWeapon=NULL → no ammo
-// TS: TRAN has landingBuilding='HPAD' but can land without pad
+// TS: TRAN has no landingBuilding (matches C++ STRUCT_NONE), lands on ground
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('transport helicopter special behavior (TRAN)', () => {

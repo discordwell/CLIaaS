@@ -353,9 +353,9 @@ describe('full repair cost chain: C++ integer division + fixed-point (techno.cpp
 
     it(`${sType} (cost=${cost}, maxHp=${maxHp}): TS matches C++ exactly`, () => {
       const cppCost = cppBuildingRepairCost(cost, maxHp);
-      const cppClamped = Math.max(cppCost, 1); // techno.cpp:989
+      // Building repair: NO min-1 clamp (building.cpp:5465). Free repair when cost=0.
       const tsCost = repairCostPerStep(cost, maxHp);
-      expect(tsCost, `${sType}: TS=${tsCost}, C++ (clamped)=${cppClamped}`).toBe(cppClamped);
+      expect(tsCost, `${sType}: TS=${tsCost}, C++=${cppCost}`).toBe(cppCost);
     });
   }
 
@@ -567,10 +567,10 @@ describe('repair cost: exhaustive parity sweep', () => {
     for (let cost = 0; cost <= 3000; cost += 50) {
       for (let hp = 50; hp <= 1000; hp += 50) {
         const cppRaw = cppRepairCostRaw(cost, hp, iniRepairStep, iniRepairPctRaw);
-        const cppClamped = Math.max(cppRaw, 1);
+        // Building repair: NO min-1 clamp (building.cpp:5465). Free repair when cost=0.
         const ts = repairCostPerStep(cost, hp);
-        if (ts !== cppClamped) {
-          mismatches.push(`cost=${cost},hp=${hp}: TS=${ts}, C++=${cppClamped}`);
+        if (ts !== cppRaw) {
+          mismatches.push(`cost=${cost},hp=${hp}: TS=${ts}, C++=${cppRaw}`);
         }
       }
     }
@@ -609,10 +609,12 @@ describe('fixed-point rounding invariants', () => {
     }
   });
 
-  it('repair cost per step is always >= 1 (min clamp)', () => {
+  it('building repair cost can be 0 (free); unit repair cost always >= 1', () => {
+    // Building repair: no min-1 clamp (building.cpp:5465)
+    // Unit repair: techno.cpp:989 clamps max(cost, 1)
     for (let cost = 0; cost <= 100; cost++) {
       for (const hp of [50, 100, 200, 400, 800]) {
-        expect(repairCostPerStep(cost, hp), `cost=${cost},hp=${hp}`).toBeGreaterThanOrEqual(1);
+        expect(repairCostPerStep(cost, hp), `cost=${cost},hp=${hp}`).toBeGreaterThanOrEqual(0);
         expect(unitRepairCostPerStep(cost, hp), `unit cost=${cost},hp=${hp}`).toBeGreaterThanOrEqual(1);
       }
     }

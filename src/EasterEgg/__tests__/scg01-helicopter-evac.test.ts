@@ -257,7 +257,7 @@ describe('Transport helicopter landing without helipad', () => {
     const tran = new Entity(UnitType.V_TRAN, House.GoodGuy, 100, 100);
     expect(tran.stats.isAircraft).toBe(true);
     expect(tran.isTransport).toBe(true);
-    expect(tran.stats.landingBuilding).toBe('HPAD');
+    expect(tran.stats.landingBuilding).toBeUndefined(); // C++ aadata.cpp:168: STRUCT_NONE
     expect(tran.aircraftState).toBe('landed');
     expect(tran.flightAltitude).toBe(0);
     expect(tran.ammo).toBe(-1); // unlimited (no weapon)

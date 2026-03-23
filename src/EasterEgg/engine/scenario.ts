@@ -996,6 +996,24 @@ function toHouse(name: string): House {
   }
 }
 
+/** Expand an alliance group keyword into constituent houses.
+ *  C++ parity: conquer.cpp:5490-5506 — Get_Owners() expands group keywords:
+ *    "soviet"          → USSR, Ukraine, BadGuy
+ *    "allies"/"allied" → Spain, Greece, England, Germany, France, Turkey, GoodGuy
+ *  Individual house names pass through to toHouse() as a single-element array. */
+export function expandAllyToken(token: string): House[] {
+  switch (token.toLowerCase()) {
+    case 'soviet':
+      return [House.USSR, House.Ukraine, House.BadGuy];
+    case 'allies':
+    case 'allied':
+      return [House.Spain, House.Greece, House.England, House.Germany,
+              House.France, House.Turkey, House.GoodGuy];
+    default:
+      return [toHouse(token)];
+  }
+}
+
 /** Map INI unit type name to UnitType enum */
 function toUnitType(name: string): UnitType | null {
   // Derive from UNIT_STATS — any unit with stats defined can be spawned from INI
@@ -1195,6 +1213,7 @@ export interface MapStructure {
   firingFlash?: number;      // ticks remaining for muzzle flash frame
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
+  originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
 }
 
 /** Weapon stats for defensive structures */
@@ -1385,6 +1404,18 @@ export const CAPTURABLE_BUILDINGS: Set<string> = new Set([
   'MISS',
   // Fake structures (aftrmath.ini Capturable=true)
   'FACF', 'WEAF', 'SYRF', 'SPEF', 'DOMF',
+]);
+
+/** Buildings with Crewed=yes in rules.ini (C++ bdata.cpp constructors parse Crewed= at startup).
+ *  Only Crewed buildings spawn infantry survivors on sell/destruction.
+ *  C++ building.cpp:3444 How_Many_Survivors: if (!IsCrewAble()) return 0;
+ *  Buildings WITHOUT Crewed=yes: SILO, KENN, SYRD, SPEN, MISS, V01-V37, FACF, WEAF, SYRF, SPEF, DOMF, walls. */
+export const CREWED_BUILDINGS: Set<string> = new Set([
+  'IRON', 'FCOM', 'ATEK', 'PDOX', 'WEAP',
+  'PBOX', 'HBOX', 'TSLA', 'GUN', 'AGUN', 'FTUR',
+  'FACT', 'PROC', 'HPAD', 'DOME', 'GAP',
+  'SAM', 'MSLO', 'AFLD', 'POWR', 'APWR',
+  'STEK', 'HOSP', 'BIO', 'BARR', 'TENT', 'FIX',
 ]);
 
 export interface ScenarioResult {
@@ -1774,7 +1805,7 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
     playerTechLevel: data.playerTechLevel,
     houseAllies: new Map(
-      Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.map(toHouse)])
+      Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.flatMap(expandAllyToken)])
     ),
     houseCredits: new Map(
       Array.from(data.houseCredits.entries()).map(([k, v]) => [toHouse(k), v * 100])

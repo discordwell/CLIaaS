@@ -420,15 +420,11 @@ describe('landing building assignment — HELI→HPAD, fixed-wing→AFLD', () =>
     });
   }
 
-  it('PARITY GAP: TRAN landingBuilding — C++ is STRUCT_NONE, TS uses HPAD', () => {
+  it('TRAN landingBuilding is undefined — matches C++ STRUCT_NONE', () => {
     // C++ aadata.cpp:168: Transport helicopter has STRUCT_NONE as Building
     // C++ uses Good_LZ() to land on clear terrain — Transport never needs a helipad
-    // TS types.ts:643: TRAN has landingBuilding: 'HPAD'
     const tran = UNIT_STATS[UnitType.V_TRAN];
-    // TS behavior: TRAN has HPAD as landing building
-    expect(tran?.landingBuilding).toBe('HPAD');
-    // C++ expected: STRUCT_NONE (undefined/null) — Transport lands on clear ground
-    // PARITY GAP: TS TRAN seeks helipads; C++ TRAN lands anywhere
+    expect(tran?.landingBuilding).toBeUndefined();
   });
 
   it('BADR has no landingBuilding (bomber, never lands)', () => {
