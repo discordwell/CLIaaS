@@ -347,8 +347,8 @@ describe('reveal crate effect (cell.cpp:2356-2364)', () => {
 //     }
 //
 // ENTIRE map is shrouded in C++.
-// TS crates.ts:310-316: only shrouds 7x7 cells around crate.
-// PARITY GAP: C++ shrouds entire map; TS shrouds local area only.
+// PARITY ACHIEVED: TS crates.ts now calls ctx.map.shroudAll() to shroud entire map,
+// matching C++ Map.Shroud_The_Map(). Normal fog-of-war re-reveals around units next tick.
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('darkness crate effect (cell.cpp:2347-2351)', () => {
@@ -525,8 +525,8 @@ describe('napalm crate effect (cell.cpp:2502-2511)', () => {
 //     }
 //
 // C++ applies to ALL techno objects within CrateRadius (any house).
-// TS crates.ts:382: only applies to the collecting unit.
-// PARITY GAP: C++ is area-of-effect, TS is single-unit.
+// PARITY ACHIEVED: TS crates.ts now iterates all entities within CRATE_RADIUS
+// and sets isCloakable on each, matching C++ area-of-effect behavior.
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('cloak crate effect (cell.cpp:2516-2524)', () => {
@@ -794,8 +794,8 @@ describe('firepower crate area-of-effect (cell.cpp:2580-2592)', () => {
 // Duration = 900 * 1.0 = 900 C++ ticks = 60 seconds
 // TS: 900 ticks at 15 TPS = 60 seconds (exact C++ parity)
 //
-// PARITY GAP: C++ applies to ALL techno within radius (any house).
-// TS applies only to the collecting unit.
+// PARITY ACHIEVED: TS now applies invulnerability to ALL entities within CRATE_RADIUS,
+// matching C++ area-of-effect behavior (no house filter).
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('invulnerability crate effect (cell.cpp:2594-2603)', () => {

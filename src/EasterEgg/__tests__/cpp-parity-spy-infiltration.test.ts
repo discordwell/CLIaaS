@@ -1179,11 +1179,12 @@ describe('spyInfiltrate source code — no fabricated effects', () => {
 });
 
 // ==========================================================================
-// Section 28: PARITY GAP — AI spy infiltration restriction
-// C++ allows any house spy to infiltrate; TS restricts to player spies
+// Section 28: KNOWN DIVERGENCE — AI spy infiltration restriction
+// C++ allows any house spy to infiltrate; TS intentionally restricts to player
+// spies so the oracle/player can direct spy usage rather than auto-consuming.
 // ==========================================================================
 
-describe('PARITY GAP: AI spy infiltration (infantry.cpp:645 vs missionAI.ts:1056)', () => {
+describe('KNOWN DIVERGENCE: AI spy infiltration (infantry.cpp:645 vs missionAI.ts:1056)', () => {
   it('C++ allows any house spy to infiltrate — TS only allows player spies', () => {
     const aiSpy = makeSpy(House.USSR, 10, 10);
     expect(aiSpy.isPlayerUnit).toBe(false);

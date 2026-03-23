@@ -251,13 +251,9 @@ describe('CPP parity: crate regeneration context', () => {
     // This only excludes ant missions, not single-player campaign missions.
     // Single-player campaign missions (SCG*, SCU*) will get periodic crate spawns.
 
-    // PARITY GAP: TS spawns crates in single-player campaign missions,
-    // C++ does not regenerate crates in GAME_NORMAL (single-player) mode.
-    // C++ only has overlay crates in campaign maps (pre-placed in the map editor).
-
-    // PARITY FIXED: TS now checks /^SC[GUA]/i to exclude all single-player
-    // campaigns (SCG*, SCU*) and ant missions (SCA*) from crate regeneration.
-    // Only non-campaign maps (e.g., SCM* multiplayer) would get crate regen.
+    // PARITY ACHIEVED: TS now checks /^SC[GUA]/i to exclude all single-player
+    // campaigns (SCG*, SCU*) and ant missions (SCA*) from crate regeneration,
+    // matching C++ GAME_NORMAL exclusion. Only multiplayer maps get crate regen.
     const tsExcludesSinglePlayer = true;
     const cppExcludesSinglePlayer = true;
 
