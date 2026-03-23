@@ -211,12 +211,11 @@ describe('STRUCTURE_POWERED set membership (C++ rules.ini Powered= flag)', () =>
     expect(STRUCTURE_POWERED.has('MSLO')).toBe(false);
   });
 
-  // PARITY GAP: C++ does NOT have GUN (Turret) as Powered=yes
+  // RESOLVED: GUN (Turret) correctly NOT in STRUCTURE_POWERED.
   // bdata.cpp:2836 — IsPowered(false) is the constructor default.
   // RA's rules.ini does not override this for the Turret.
-  // The Turret fires regardless of power state in original C++.
+  // The Turret fires regardless of power state in both C++ and TS.
   it('GUN should NOT be powered (C++ rules.ini does not set Powered=yes for Turret)', () => {
-    // PARITY GAP — TS has GUN in STRUCTURE_POWERED but C++ does not
     expect(STRUCTURE_POWERED.has('GUN')).toBe(false);
   });
 
@@ -354,12 +353,12 @@ describe('FTUR fires during power deficit (not in STRUCTURE_POWERED)', () => {
   });
 });
 
-// ── GUN and AGUN power behavior (PARITY GAP) ────────────────────────────────
+// ── GUN and AGUN power behavior ──────────────────────────────────────────────
 
-describe('GUN (Turret) should fire during power deficit — C++ IsPowered=false', () => {
+describe('GUN (Turret) fires during power deficit — C++ IsPowered=false', () => {
+  // RESOLVED: GUN correctly NOT in STRUCTURE_POWERED.
   // C++ bdata.cpp:2836 — IsPowered defaults false. RA rules.ini does NOT set Powered=yes for GUN.
-  // Therefore in original C++, the Turret fires normally during power outages.
-  // PARITY GAP: TS has GUN in STRUCTURE_POWERED, causing it to be silenced during deficit.
+  // Therefore in both C++ and TS, the Turret fires normally during power outages.
 
   it('fires at ground enemy during power deficit', () => {
     const gun = makeStructure('GUN', 10, 10);
@@ -369,7 +368,7 @@ describe('GUN (Turret) should fire during power deficit — C++ IsPowered=false'
     const enemy = entityAtCell(UnitType.V_HTNK, House.USSR, 12, 10); // 2 cells east
     const ctx = makeCombatCtx([gun], [enemy], { powerProduced: 50, powerConsumed: 200 });
     updateStructureCombat(ctx);
-    // PARITY GAP — C++ expects fire (IsPowered=false), TS skips fire (GUN in STRUCTURE_POWERED)
+    // GUN is NOT in STRUCTURE_POWERED — fires normally during deficit (matches C++)
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
@@ -533,8 +532,8 @@ describe('Dead structures do not participate in combat', () => {
   });
 });
 
-// ── Summary of PARITY GAPS found ─────────────────────────────────────────────
-// 1. GUN NOT in STRUCTURE_POWERED — C++ Turret has IsPowered=false (bdata.cpp:2836 default)
-// 2. AGUN IS in STRUCTURE_POWERED — rules.ini has Powered=true for AGUN
-// 3. Zero-power edge case — C++ Power_Fraction() returns 0 when Power=0 && Drain>0,
-//    but TS isLowPower requires powerProduced > 0, so it treats zero power as "not low power"
+// ── Summary of RESOLVED PARITY GAPS ──────────────────────────────────────────
+// 1. GUN NOT in STRUCTURE_POWERED — RESOLVED. GUN correctly excluded (fires during deficit).
+// 2. AGUN IS in STRUCTURE_POWERED — RESOLVED. AGUN correctly included (silenced during deficit).
+// 3. Zero-power edge case — RESOLVED. TS isLowPower = powerConsumed > powerProduced.
+//    Power=0, Drain=0 → false (not low). Power=0, Drain>0 → true (low). Matches C++.
