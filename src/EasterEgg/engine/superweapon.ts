@@ -261,9 +261,9 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
     const def = SUPERWEAPON_DEFS[state.type];
     if (!def.needsTarget) continue; // GPS/Sonar auto-fire handled above
 
-    // IQ gate: AI must have IQ >= 3 to use superweapons
+    // IQ gate: AI must have IQ >= 4 (C++ house.cpp IQSuperWeapons default 4) to use superweapons
     const iq = ctx.aiIQ(state.house as House);
-    if (iq < 3) continue;
+    if (iq < 4) continue; // C++ IQSuperWeapons=4
 
     if (state.type === SuperweaponType.NUKE) {
       // AI nuke: target player's highest-value structure cluster

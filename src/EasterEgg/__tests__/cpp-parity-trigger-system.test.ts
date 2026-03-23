@@ -573,11 +573,10 @@ describe('checkTriggerEvent — C++ tevent.cpp operator() parity', () => {
 
   // --- TEVENT_NONE (0) ---
   // C++ tevent.cpp:260-262: if (Event == TEVENT_NONE) return(false);
-  // BUT TS intentionally returns true for TEVENT_NONE to enable reinforcement triggers.
-  // This is documented: scenario.ts:2153-2158 "human-requested" behavior.
-  it('TEVENT_NONE returns true (TS intentional override, enables reinforcement triggers)', () => {
+  // TS matches C++ — TEVENT_NONE returns false. Reinforcements use TACTION_FORCE_TRIGGER.
+  it('TEVENT_NONE returns false (C++ parity — no event = no trigger)', () => {
     const state = createState();
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NONE), state)).toBe(true);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NONE), state)).toBe(false);
   });
 
   // --- TEVENT_ANY (8) ---

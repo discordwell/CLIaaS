@@ -243,10 +243,10 @@ describe('TR4: New trigger action constants', () => {
 // === TR5: Event index mapping verification ===
 
 describe('TR5: Event index mapping matches C++ tevent.h', () => {
-  it('TEVENT_NONE (0) always fires (no event condition required)', () => {
-    // C++ TEVENT_NONE = "no event condition" = always true (enables reinforcement triggers)
+  it('TEVENT_NONE (0) returns false (no event = no trigger)', () => {
+    // C++ TEVENT_NONE returns false. Reinforcements use TACTION_FORCE_TRIGGER.
     const event: TriggerEvent = { type: 0, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState())).toBe(true);
+    expect(checkTriggerEvent(event, createState())).toBe(false);
   });
 
   it('TEVENT_PLAYER_ENTERED (1) fires on playerEntered', () => {

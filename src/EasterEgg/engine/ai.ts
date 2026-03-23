@@ -2012,6 +2012,10 @@ export function updateAIProduction(ctx: AIContext): void {
       if (acCount >= state.maxAircraft) skipAircraft = true;
     }
 
+    // C++ house.cpp:6239 — AI_Aircraft requires IQ >= IQGuardArea (default 4)
+    const iq = state ? state.iq : 0;
+    if (iq < 4) skipAircraft = true;
+
     const aircraftCredits = ctx.houseCredits.get(house) ?? 0;
     if (aircraftCredits >= 800 && !skipAircraft) {
       const houseFaction = HOUSE_FACTION[house] ?? 'both';
@@ -2029,7 +2033,7 @@ export function updateAIProduction(ctx: AIContext): void {
         const heliItem = ctx.scenarioProductionItems.find(p => p.type === heliType);
         const heliCost = heliItem ? Math.max(1, Math.round(heliItem.cost * mods.costBias)) : 0;
         if (heliItem && aircraftCredits >= heliCost) {
-          const unit = spawnAIUnit(ctx, house, heliType, 'HPAD', Mission.AREA_GUARD);
+          const unit = spawnAIUnit(ctx, house, heliType, 'HPAD', iq >= 4 ? Mission.AREA_GUARD : Mission.GUARD);
           if (unit) {
             unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
             unit.aircraftState = 'landed';
@@ -2044,7 +2048,7 @@ export function updateAIProduction(ctx: AIContext): void {
         const jetCost = jetItem ? Math.max(1, Math.round(jetItem.cost * mods.costBias)) : 0;
         const jetCredits = ctx.houseCredits.get(house) ?? 0;
         if (jetItem && jetCredits >= jetCost) {
-          const unit = spawnAIUnit(ctx, house, jetType, 'AFLD', Mission.AREA_GUARD);
+          const unit = spawnAIUnit(ctx, house, jetType, 'AFLD', iq >= 4 ? Mission.AREA_GUARD : Mission.GUARD);
           if (unit) {
             unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
             unit.aircraftState = 'landed';
@@ -2055,7 +2059,8 @@ export function updateAIProduction(ctx: AIContext): void {
     }
 
     // Strategic AI: Harvester priority
-    if (state && hasWeap && state.harvesterCount < state.refineryCount) {
+    // C++ house.cpp — AI harvester replacement requires IQ >= 2 (IQHarvester default 2)
+    if (state && hasWeap && iq >= 2 && state.harvesterCount < state.refineryCount) {
       const harvItem = ctx.scenarioProductionItems.find(p => p.type === 'HARV');
       const harvCost = harvItem ? Math.max(1, Math.round(harvItem.cost * mods.costBias)) : 0;
       if (harvItem && credits >= harvCost) {
@@ -2095,7 +2100,8 @@ export function updateAIProduction(ctx: AIContext): void {
       const infCost = pick ? Math.max(1, Math.round(pick.cost * mods.costBias)) : 0;
       if (pick && credits >= infCost) {
         const unitType = pick.type as UnitType;
-        const unit = spawnAIUnit(ctx, house, unitType, 'TENT', Mission.AREA_GUARD,
+        // C++ house.cpp — AREA_GUARD requires IQ >= 4 (IQGuardArea), else GUARD
+        const unit = spawnAIUnit(ctx, house, unitType, 'TENT', iq >= 4 ? Mission.AREA_GUARD : Mission.GUARD,
           staging ?? undefined);
         if (unit) {
           if (!staging) {
@@ -2136,7 +2142,8 @@ export function updateAIProduction(ctx: AIContext): void {
       const vehCost = pick ? Math.max(1, Math.round(pick.cost * mods.costBias)) : 0;
       if (pick && currentCredits >= vehCost) {
         const unitType = pick.type as UnitType;
-        const unit = spawnAIUnit(ctx, house, unitType, 'WEAP', Mission.AREA_GUARD,
+        // C++ house.cpp — AREA_GUARD requires IQ >= 4 (IQGuardArea), else GUARD
+        const unit = spawnAIUnit(ctx, house, unitType, 'WEAP', iq >= 4 ? Mission.AREA_GUARD : Mission.GUARD,
           staging ?? undefined);
         if (unit) {
           if (!staging) {

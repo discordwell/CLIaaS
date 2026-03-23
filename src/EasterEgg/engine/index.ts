@@ -2314,8 +2314,8 @@ export class Game {
     }
 
     // --- Keyboard shortcuts ---
-    // S = stop all selected units, G = guard position (same as stop)
-    if ((keys.has('s') && !keys.has('ArrowDown')) || keys.has('g')) {
+    // S = stop all selected units
+    if (keys.has('s') && !keys.has('ArrowDown')) {
       for (const id of this.selectedIds) {
         const unit = this.entityById.get(id);
         if (!unit || !unit.alive) continue;
@@ -2328,8 +2328,25 @@ export class Game {
         unit.path = [];
         unit.animState = AnimState.IDLE;
       }
-      keys.delete('g');
       keys.delete('s');
+    }
+
+    // G = area guard (C++ conquer.cpp:781 — G key sends MISSION_GUARD_AREA)
+    if (keys.has('g')) {
+      for (const id of this.selectedIds) {
+        const unit = this.entityById.get(id);
+        if (!unit || !unit.alive) continue;
+        unit.mission = Mission.AREA_GUARD;
+        unit.target = null;
+        unit.targetStructure = null;
+        unit.forceFirePos = null;
+        unit.moveTarget = null;
+        unit.moveQueue = [];
+        unit.path = [];
+        unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
+        unit.animState = AnimState.IDLE;
+      }
+      keys.delete('g');
     }
 
     // Z = cycle stance (Aggressive → Defensive → Hold Fire → Aggressive)
@@ -2851,13 +2868,12 @@ export class Game {
 
       const world = this.camera.screenToWorld(rightClick.x, rightClick.y);
 
-      // Force-fire on ground: Ctrl+right-click fires at a location (artillery/splash)
+      // Force-fire on ground: Ctrl+right-click fires at a location
+      // C++ techno.cpp:3446 — ANY armed unit can force-fire on ground with Ctrl+click
       if (ctrlHeld && this.selectedIds.size > 0) {
         for (const id of this.selectedIds) {
           const unit = this.entityById.get(id);
           if (!unit?.alive || !unit.weapon) continue;
-          // Only weapons with splash or inaccuracy benefit from ground attack
-          if (!unit.weapon.splash && !unit.weapon.inaccuracy) continue;
           unit.mission = Mission.ATTACK;
           unit.target = null;
           unit.targetStructure = null;

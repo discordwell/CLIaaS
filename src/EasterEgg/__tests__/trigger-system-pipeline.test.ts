@@ -111,16 +111,15 @@ const emptyTriggers: ScenarioTrigger[] = [];
 // ============================================================================
 
 describe('checkTriggerEvent — full event coverage', () => {
-  // TEVENT_NONE (0) — always fires (C++ scenario.cpp: no event condition required)
-  it('TEVENT_NONE (0) always returns true', () => {
+  // TEVENT_NONE (0) — returns false (C++ parity: no event = no trigger)
+  it('TEVENT_NONE (0) returns false', () => {
     const event: TriggerEvent = { type: 0, team: -1, data: 0 };
-    // C++ TEVENT_NONE means "no event condition required" = always true.
-    // This enables frc1/frc2 reinforcement triggers in SCG05EA and other missions.
+    // C++ TEVENT_NONE returns false. Reinforcements use TACTION_FORCE_TRIGGER.
     expect(checkTriggerEvent(event, createState({
       playerEntered: true,
       enemyKillCount: 999,
       missionTimerExpired: true,
-    }))).toBe(true);
+    }))).toBe(false);
   });
 
   // TEVENT_ANY (8) — always fires
@@ -832,12 +831,12 @@ describe('Event control logic', () => {
     expect(e1 && e2).toBe(true);
   });
 
-  it('OR with both TEVENT_NONE events always fires (TEVENT_NONE = true)', () => {
+  it('OR with both TEVENT_NONE events does NOT fire (TEVENT_NONE = false)', () => {
     const state = createState();
     const e1 = checkTriggerEvent({ type: 0, team: -1, data: 0 }, state);
     const e2 = checkTriggerEvent({ type: 0, team: -1, data: 0 }, state);
-    // C++ TEVENT_NONE returns true (no event condition required)
-    expect(e1 || e2).toBe(true);
+    // C++ TEVENT_NONE returns false — no event = no trigger
+    expect(e1 || e2).toBe(false);
   });
 
   it('unknown eventControl defaults to event1 only', () => {
