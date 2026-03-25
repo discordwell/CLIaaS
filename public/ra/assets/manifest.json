@@ -2905,5 +2905,23 @@
     "rows": 4,
     "sheetWidth": 768,
     "sheetHeight": 192
+  },
+  "natoradr": {
+    "frameWidth": 80,
+    "frameHeight": 80,
+    "frameCount": 43,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 1280,
+    "sheetHeight": 240
+  },
+  "ussrradr": {
+    "frameWidth": 80,
+    "frameHeight": 80,
+    "frameCount": 43,
+    "columns": 16,
+    "rows": 3,
+    "sheetWidth": 1280,
+    "sheetHeight": 240
   }
 }

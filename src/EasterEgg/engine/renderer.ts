@@ -464,12 +464,12 @@ export class Renderer {
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderOffscreenIndicators(camera, entities, selectedIds);
     this.renderSidebar(assets);
-    this.renderMinimap(map, entities, structures, camera);
+    this.renderMinimap(map, entities, structures, camera, assets);
     // U6: Fullscreen radar overlay
     if (this.isRadarFullscreen && this.hasRadar) {
       this.renderFullscreenRadar(map, entities, structures, camera);
     }
-    this.renderUnitInfo(entities, selectedIds);
+
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
     this.renderCursor();
@@ -2698,7 +2698,7 @@ export class Renderer {
 
   // ─── Minimap ─────────────────────────────────────────────
 
-  private renderMinimap(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera): void {
+  private renderMinimap(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera, assets?: AssetManager): void {
     const ctx = this.ctx;
     const { x: mmX, y: mmY, size: mmSize } = this.getMinimapBounds();
     const scale = mmSize / Math.max(map.boundsW, map.boundsH);
@@ -2737,7 +2737,7 @@ export class Renderer {
     // No radar: show faction logo (C++ radar.cpp Draw_It — natoradr.shp / ussrradr.shp
     // final frame is the faction emblem displayed when radar is inactive)
     if (!this.hasRadar) {
-      this.drawFactionRadarLogo(ctx, mmX, mmY, mmSize);
+      this.drawFactionRadarLogo(ctx, mmX, mmY, mmSize, assets);
       return;
     }
 
@@ -2863,17 +2863,28 @@ export class Renderer {
    * (Soviet star). The final frame of these SHP animations is the static emblem shown
    * when no radar building exists or power is insufficient.
    */
-  private drawFactionRadarLogo(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  private drawFactionRadarLogo(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, assets?: AssetManager): void {
     const isAllied = this.isPlayerAllied();
+    const sheetName = isAllied ? 'natoradr' : 'ussrradr';
+
+    // Try sprite-based rendering first (C++ parity: last frame = static emblem)
+    const sheet = assets?.getSheet(sheetName);
+    if (sheet) {
+      const lastFrame = sheet.meta.frameCount - 1;
+      // Scale sprite to fit the radar area
+      const scale = size / sheet.meta.frameWidth;
+      assets!.drawFrame(ctx, sheetName, lastFrame, x, y, { scale });
+      return;
+    }
+
+    // Procedural fallback (only if sprite assets are missing)
     const cx = x + size / 2;
     const cy = y + size / 2;
-    const r = size * 0.35; // emblem radius
+    const r = size * 0.35;
 
-    // Dark faction-tinted background
     ctx.fillStyle = isAllied ? '#0a1628' : '#1a0808';
     ctx.fillRect(x, y, size, size);
 
-    // Subtle radial gradient behind emblem
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.5);
     if (isAllied) {
       grad.addColorStop(0, 'rgba(40,80,140,0.35)');
@@ -2889,10 +2900,8 @@ export class Renderer {
     ctx.translate(cx, cy);
 
     if (isAllied) {
-      // Allied: 4-pointed compass rose / NATO star (natoradr.shp)
       this.drawAlliedEmblem(ctx, r);
     } else {
-      // Soviet: 5-pointed star (ussrradr.shp)
       this.drawSovietEmblem(ctx, r);
     }
 
@@ -4477,145 +4486,4 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
-  // ─── Unit Info Panel ─────────────────────────────────────
-
-  private renderUnitInfo(entities: Entity[], selectedIds: Set<number>): void {
-    // Show structure info if a building is selected (no units selected)
-    if (selectedIds.size === 0 && this.selectedStructure) {
-      this.renderStructureInfo();
-      return;
-    }
-    if (selectedIds.size === 0) return;
-    const ctx = this.ctx;
-
-    // Gather selected units
-    const selected = entities.filter(e => selectedIds.has(e.id) && e.alive);
-    if (selected.length === 0) return;
-
-    const panelW = 160;
-    // U5: Expand panel height for harvester or ammo-carrying units
-    const singleUnit = selected.length === 1 ? selected[0] : null;
-    const needsExtraRow = singleUnit && (singleUnit.type === UnitType.V_HARV || (singleUnit.maxAmmo > 0));
-    const panelH = selected.length === 1
-      ? (needsExtraRow ? 50 : 38)
-      : 38;
-    const px = 6;
-    const py = this.height - panelH - 6;
-
-    // Panel background — RA-style minimal dark panel
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px, py, panelW, panelH);
-
-    ctx.font = '10px monospace';
-
-    // Multi-unit selection: portrait grid
-    if (selected.length > 1) {
-      const count = selected.length;
-      const cols = count <= 4 ? 2 : count <= 9 ? 3 : 4;
-      const rows = Math.ceil(count / cols);
-      const portraitSize = Math.min(20, Math.floor((panelH - 20) / rows));
-      const startX = px + 4;
-      const startY = py + 4;
-
-      for (let i = 0; i < Math.min(count, 16); i++) {
-        const entity = selected[i];
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const portraitX = startX + col * (portraitSize + 2);
-        const portraitY = startY + row * (portraitSize + 2);
-
-        // Mini portrait background
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillRect(portraitX, portraitY, portraitSize, portraitSize);
-
-        // HP bar (bottom of portrait)
-        const hpRatio = entity.hp / entity.maxHp;
-        const hpColor = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
-        ctx.fillStyle = hpColor;
-        ctx.fillRect(portraitX, portraitY + portraitSize - 2, portraitSize * hpRatio, 2);
-
-        // Unit type icon (first letter as placeholder)
-        ctx.fillStyle = '#fff';
-        ctx.font = `${Math.max(8, portraitSize - 8)}px monospace`;
-        ctx.textAlign = 'center';
-        ctx.fillText(entity.type.charAt(0), portraitX + portraitSize / 2, portraitY + portraitSize - 5);
-      }
-
-      if (count > 16) {
-        ctx.fillStyle = '#aaa';
-        ctx.font = '8px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(`+${count - 16} more`, startX + 10, startY + rows * (portraitSize + 2) + 10);
-      }
-
-      // Reset text align for other rendering
-      ctx.textAlign = 'left';
-      return; // skip single-unit info
-    }
-
-    // Single unit selected
-    if (selected.length === 1) {
-      const unit = selected[0];
-      // Unit name
-      ctx.fillStyle = unit.isPlayerUnit ? this.palColor(PAL_GREEN_HP) : this.palColor(PAL_RED_HP);
-      ctx.fillText(unit.stats.name, px + 8, py + 14);
-      // Health bar
-      this.renderHealthBar(px + panelW / 2, py + 22, panelW - 20, unit.hp / unit.maxHp, true);
-      // Harvester: ore load bar + state
-      if (unit.type === UnitType.V_HARV) {
-        const oreRatio = unit.oreLoad / Entity.ORE_CAPACITY;
-        const stateLabel = unit.harvesterState === 'harvesting' ? 'Harvesting'
-          : unit.harvesterState === 'seeking' ? 'Seeking ore'
-          : unit.harvesterState === 'returning' ? 'Returning'
-          : unit.harvesterState === 'unloading' ? 'Unloading'
-          : 'Idle';
-        ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-        ctx.font = '9px monospace';
-        ctx.fillText(`${stateLabel}  ${unit.oreLoad}/${Entity.ORE_CAPACITY}`, px + 8, py + 34);
-        // Ore load bar
-        const barX = px + 8;
-        const barY = py + 38;
-        const barW = panelW - 20;
-        const barH = 3;
-        ctx.fillStyle = '#111';
-        ctx.fillRect(barX, barY, barW, barH);
-        ctx.fillStyle = oreRatio > 0.5 ? '#c8a030' : '#806020';
-        ctx.fillRect(barX, barY, barW * oreRatio, barH);
-      }
-      // U5: Ammo count for aircraft/units with limited ammo
-      if (unit.maxAmmo > 0 && unit.type !== UnitType.V_HARV) {
-        ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-        ctx.font = '9px monospace';
-        const ammoColor = unit.ammo > 0 ? '#8cf' : '#f66';
-        ctx.fillStyle = ammoColor;
-        ctx.fillText(`Ammo: ${unit.ammo}/${unit.maxAmmo}`, px + 8, py + 34);
-      }
-    }
-  }
-
-  private renderStructureInfo(): void {
-    const ss = this.selectedStructure;
-    if (!ss) return;
-    const ctx = this.ctx;
-    const panelW = 160;
-    const panelH = 48;
-    const px = 6;
-    const py = this.height - panelH - 6;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px, py, panelW, panelH);
-
-    ctx.font = '10px monospace';
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText(ss.name, px + 8, py + 15);
-    ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-    ctx.fillText(`HP: ${ss.hp}/${ss.maxHp}`, px + 8, py + 28);
-    this.renderHealthBar(px + panelW / 2, py + 36, panelW - 20, ss.hp / ss.maxHp, true);
-  }
 }

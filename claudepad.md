@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-23T20:00Z — Session 143: C++ Parity Mega-Sprint (10 Rounds, 35 Agents)
+- **614 PARITY GAP comments → 0** (100% eliminated across 10 rounds of parallel agent work)
+- **13 BLOCKED items remain** (all architectural: 5-factory [DONE], RadiusOffset table, sell state machine, multi-part bridges, ore mine terrain)
+- **Key engine fixes**: threat scoring rewrite, reservoir sampling ore growth, fixed-point power, deferred victory conditions, 5-factory production system, turret ROT accumulator, aircraft airborne-on-spawn, ring search harvester, two-phase bridges, auto-crush AI, cloaked target filtering, moebius return, vehicle/aircraft crew spawning, chronoshift destination fallback, warhead spread falloff
+- **Tests**: 49,500 → 50,312 passing (+812), 582 → 600 test files (+18)
+- **Wet test** (SCG01EA + SCG02EA via browser agent harness): Score screen, combat, reinforcements, AI production, defeat conditions all working. Found agent harness uses `unitIds` not `ids` (undocumented).
+- **Deployed** to cliaas.com after each round.
+
 ## 2026-03-11T04:00Z — Session 142: Game Class Refactoring Phase 2 (Waves 0-3)
 - **6 new subsystem modules extracted**: placement.ts (179L), harvester.ts (261L), aircraft.ts (394L), ai.ts (1,319L), crates.ts (345L), missionAI.ts (1,207L)
 - **index.ts reduced**: 8,917 → 5,761 lines (35% reduction). 12 total extracted modules (6,350 lines).
