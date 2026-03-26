@@ -3834,17 +3834,16 @@ export class Renderer {
         ctx.strokeRect(stripX, iy, camW, camH);
       }
 
-      // Draw cameo icon — prefer HIRES icons (64x48) over LORES (32x24).
-      // When only LORES icons are available, fall through to building sprite thumbnail
-      // which looks sharper than pixelated 32x24 DOS art scaled up to 64x48.
+      // Draw cameo icon — prefer HIRES (64x48), then LORES (32x24 scaled up),
+      // then sprite thumbnail as last visual fallback, then text.
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
-      const isHiRes = iconSheet && iconSheet.meta.frameWidth >= 64;
-      if (iconSheet && isHiRes) {
+      if (iconSheet) {
+        // HIRES or LORES — both use the actual cameo art (nearest-neighbor scale for LORES)
         ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
           stripX, iy, camW, camH);
       } else {
-        // Use building/unit sprite as thumbnail (higher fidelity than LORES icons)
+        // No icon at all — use building/unit sprite as thumbnail
         const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
         const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
         if (thumbSheet && spriteName) {
@@ -3852,10 +3851,6 @@ export class Renderer {
           assets.drawFrame(ctx, spriteName, 0, stripX + camW / 2, iy + camH / 2, {
             centerX: true, centerY: true, scale,
           });
-        } else if (iconSheet) {
-          // Last resort: use LORES icon anyway
-          ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
-            stripX, iy, camW, camH);
         } else {
           ctx.fillStyle = '#888';
           ctx.font = 'bold 6px monospace';
