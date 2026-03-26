@@ -33,6 +33,7 @@ import {
   createAIHouseState,
   updateAIAutocreateTeams,
 } from '../engine/ai';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -453,8 +454,9 @@ describe('Spawn position — edge-based spawning', () => {
     ctx.houseEdges.set(House.USSR, 'north');
     ctx.teamTypes.push(makeTeamType({ members: [{ type: '1TNK', count: 1 }] }));
 
-    // Seed random to get predictable results
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    // Seed random to get predictable results — implementation uses ScenarioRandom, not Math.random
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
     updateAIAutocreateTeams(ctx);
 
@@ -463,7 +465,7 @@ describe('Spawn position — edge-based spawning', () => {
     // cy = boundsY = 20, so world.y = 20 * CELL_SIZE + CELL_SIZE / 2
     const expectedWorldY = 20 * CELL_SIZE + CELL_SIZE / 2;
     // y has random offset but center should be at expectedWorldY
-    // With random=0.5 -> offsetY = (0.5 - 0.5) * 48 = 0
+    // With float()=0.5 -> offsetY = (0.5 - 0.5) * 48 = 0
     expect(e.pos.y).toBe(expectedWorldY);
 
     vi.restoreAllMocks();
@@ -480,7 +482,8 @@ describe('Spawn position — edge-based spawning', () => {
     ctx.houseEdges.set(House.USSR, 'south');
     ctx.teamTypes.push(makeTeamType({ members: [{ type: '1TNK', count: 1 }] }));
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
     updateAIAutocreateTeams(ctx);
 
@@ -504,7 +507,8 @@ describe('Spawn position — edge-based spawning', () => {
     ctx.houseEdges.set(House.USSR, 'east');
     ctx.teamTypes.push(makeTeamType({ members: [{ type: '1TNK', count: 1 }] }));
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
     updateAIAutocreateTeams(ctx);
 
@@ -528,7 +532,8 @@ describe('Spawn position — edge-based spawning', () => {
     ctx.houseEdges.set(House.USSR, 'west');
     ctx.teamTypes.push(makeTeamType({ members: [{ type: '1TNK', count: 1 }] }));
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
     updateAIAutocreateTeams(ctx);
 
@@ -553,7 +558,8 @@ describe('Spawn position — edge-based spawning', () => {
       ctx.houseEdges.set(House.USSR, edgeStr);
       ctx.teamTypes.push(makeTeamType({ members: [{ type: '1TNK', count: 1 }] }));
 
-      vi.spyOn(Math, 'random').mockReturnValue(0.5);
+      vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
       updateAIAutocreateTeams(ctx);
 
@@ -583,7 +589,8 @@ describe('Spawn position — waypoint fallback when no edge', () => {
     ctx.teamTypes.push(makeTeamType({ origin: 5 }));
     ctx.waypoints.set(5, { cx: 60, cy: 70 });
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
     updateAIAutocreateTeams(ctx);
 
@@ -777,7 +784,7 @@ describe('Unit spawning — entity creation from team members', () => {
     const centerY = 50 * CELL_SIZE + CELL_SIZE / 2;
 
     for (const e of ctx.entities) {
-      // offset = (Math.random() - 0.5) * 48 => range [-24, +24]
+      // offset = (ScenarioRandom.float() - 0.5) * 48 => range [-24, +24]
       expect(e.pos.x).toBeGreaterThanOrEqual(centerX - 24);
       expect(e.pos.x).toBeLessThanOrEqual(centerX + 24);
       expect(e.pos.y).toBeGreaterThanOrEqual(centerY - 24);
@@ -1030,7 +1037,8 @@ describe('Integration — scenario overrides and multi-house spawning', () => {
       members: [{ type: '1TNK', count: 1 }],
     }));
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((min, _max) => min);
 
     updateAIAutocreateTeams(ctx);
 

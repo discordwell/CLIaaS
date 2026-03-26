@@ -38,6 +38,7 @@ import { resolve } from 'path';
 import { parseIniSections } from '../engine/parseIni';
 import { GameMap, Terrain } from '../engine/map';
 import { MAP_CELLS } from '../engine/types';
+import { ScenarioRandom } from '../engine/random';
 
 // ============================================================
 // Parse rules.ini
@@ -144,10 +145,7 @@ describe('Growth conditions from C++ Can_Tiberium_Grow (cell.cpp:2869-2884)', ()
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   /**
@@ -161,10 +159,9 @@ describe('Growth conditions from C++ Can_Tiberium_Grow (cell.cpp:2869-2884)', ()
       testMap.setBounds(40, 40, 50, 50);
       testMap.initDefault();
       setOverlay(testMap, 50, 50, gem);
-      vi.spyOn(Math, 'random').mockReturnValue(0);
+      ScenarioRandom.seed = 8; // direction 0 (N) — gems don't grow regardless
       testMap.growOre(1821);
       expect(getOverlay(testMap, 50, 50), `gem 0x${gem.toString(16)} must not grow`).toBe(gem);
-      vi.restoreAllMocks();
     }
   });
 
@@ -175,14 +172,14 @@ describe('Growth conditions from C++ Can_Tiberium_Grow (cell.cpp:2869-2884)', ()
    */
   it('gold at max density 0x0E (OverlayData=11) cannot grow further', () => {
     setOverlay(map, 50, 50, 0x0E);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N) — max density won't grow regardless
     map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0E);
   });
 
   it('gold at density 0x0D (OverlayData=10) grows to 0x0E (11)', () => {
     setOverlay(map, 50, 50, 0x0D);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N)
     map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x0E);
   });
@@ -193,13 +190,12 @@ describe('Growth conditions from C++ Can_Tiberium_Grow (cell.cpp:2869-2884)', ()
       testMap.setBounds(40, 40, 50, 50);
       testMap.initDefault();
       setOverlay(testMap, 50, 50, ovl);
-      vi.spyOn(Math, 'random').mockReturnValue(0);
+      ScenarioRandom.seed = 8; // direction 0 (N)
       testMap.growOre(1821);
       expect(
         getOverlay(testMap, 50, 50),
         `0x${ovl.toString(16)} should grow to 0x${(ovl + 1).toString(16)}`,
       ).toBe(ovl + 1);
-      vi.restoreAllMocks();
     }
   });
 
@@ -217,7 +213,7 @@ describe('Growth conditions from C++ Can_Tiberium_Grow (cell.cpp:2869-2884)', ()
 
     // Growth is deterministic regardless of random value
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    ScenarioRandom.seed = 0; // direction 4 (S) — growth is deterministic, seed irrelevant
     map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x06); // always grows when sampled
   });
@@ -235,10 +231,7 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   /**
@@ -259,7 +252,7 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
 
   it('overlay 0x09 (OverlayData=6) canNOT spread', () => {
     setOverlay(map, 50, 50, 0x09);
-    vi.spyOn(Math, 'random').mockReturnValue(0); // trigger everything
+    ScenarioRandom.seed = 8; // direction 0 (N) — below spread threshold so no spread call
     map.growOre(1821);
     // Cell grows to 0x0A but spread uses pre-growth value (0x09)
     expect(getOverlay(map, 50, 50)).toBe(0x0A); // grew
@@ -274,7 +267,7 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
     setOverlay(map, 50, 50, 0x0A);
     // With reservoir sampling, single cell enters reservoir directly.
     // Only random call is spread direction offset.
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
+    ScenarioRandom.seed = 8; // direction 0 (N) — spread north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03); // spread to north
   });
@@ -289,13 +282,12 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
       testMap.setBounds(40, 40, 50, 50);
       testMap.initDefault();
       setOverlay(testMap, 50, 50, gem);
-      vi.spyOn(Math, 'random').mockReturnValue(0);
+      ScenarioRandom.seed = 8; // direction 0 (N) — gems are excluded, no random calls
       testMap.growOre(1821);
       const dirs = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
       for (const [dx, dy] of dirs) {
         expect(getOverlay(testMap, 50 + dx, 50 + dy), `gem 0x${gem.toString(16)} must not spread`).toBe(0xFF);
       }
-      vi.restoreAllMocks();
     }
   });
 
@@ -323,10 +315,7 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   /**
@@ -349,7 +338,7 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
       setOverlay(map, 50 + dx, 50 + dy, 0x01); // block with non-gold overlay
     }
     // With reservoir sampling, only random call is spread direction offset
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // offset: 0 (start at N)
+    ScenarioRandom.seed = 8; // direction 0 (N) — start scanning from north
     map.growOre(1821);
     // W is the only valid direction; wrapping finds it regardless of start
     expect(getOverlay(map, 49, 50)).toBe(0x03);
@@ -362,7 +351,7 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
   it('spread creates new ore at minimum density 0x03 (C++ OverlayData=0)', () => {
     setOverlay(map, 50, 50, 0x0C);
     // With reservoir sampling, only random call is spread direction offset
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
+    ScenarioRandom.seed = 8; // direction 0 (N) — spread north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
@@ -375,7 +364,7 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
   it('spread fills only ONE adjacent cell, not all valid cells', () => {
     setOverlay(map, 50, 50, 0x0C);
     // With reservoir sampling, only random call is spread direction offset
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
+    ScenarioRandom.seed = 8; // direction 0 (N) — spread north
     map.growOre(1821);
     let oreCount = 0;
     for (const [dx, dy] of [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]) {
@@ -395,6 +384,8 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
    * No gameplay impact since all GOLD subtypes behave identically.
    */
   it('TS always uses 0x03 for spread (C++ randomizes GOLD1-4 subtype)', () => {
+    // Seed-to-direction mapping: dir 0→seed 8, dir 1→seed 6, dir 2→seed 4, dir 3→seed 2, dir 4→seed 0
+    const directionSeeds = [8, 6, 4, 2, 0];
     // Run 5 spreads; TS should always produce 0x03
     for (let trial = 0; trial < 5; trial++) {
       const testMap = new GameMap();
@@ -402,7 +393,7 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
       testMap.initDefault();
       setOverlay(testMap, 50, 50, 0x0C);
       // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(trial / 8); // varying direction
+      ScenarioRandom.seed = directionSeeds[trial]; // varying direction per trial
       testMap.growOre(1821);
       // Find which adjacent cell got ore
       let foundOre = false;
@@ -414,7 +405,6 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
         }
       }
       expect(foundOre).toBe(true);
-      vi.restoreAllMocks();
     }
   });
 });
@@ -431,10 +421,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   /**
@@ -449,7 +436,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore can spread to CLEAR terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     // north cell is CLEAR by default from initDefault
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — spread north
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
@@ -457,7 +444,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore can spread to ROAD terrain (C++ rules.cpp:864 Build=true)', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.ROAD);
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — spread north
     map.growOre(1821);
     // C++ allows ROAD germination (Build=true). TS BUILDABLE includes ROAD.
     expect(getOverlay(map, 50, 49)).toBe(0x03);
@@ -466,7 +453,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore canNOT spread to WATER terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.WATER);
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by WATER)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -474,7 +461,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore canNOT spread to ROCK terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.ROCK);
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by ROCK)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -482,7 +469,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore canNOT spread to ROUGH terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setTerrain(50, 49, Terrain.ROUGH);
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by ROUGH)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -495,7 +482,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore canNOT spread to cell with existing overlay', () => {
     setOverlay(map, 50, 50, 0x0C);
     setOverlay(map, 50, 49, 0x05); // existing gold overlay
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by existing overlay)
     map.growOre(1821);
     // North cell grew deterministically (0x05 -> 0x06), but was NOT overwritten by spread
     expect(getOverlay(map, 50, 49)).toBe(0x06);
@@ -509,7 +496,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
     setOverlay(map, 50, 50, 0x0C);
     const nidx = 49 * MAP_CELLS + 50;
     map.templateType[nidx] = 131; // TEMPLATE_BRIDGE1
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by bridge)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -521,7 +508,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore canNOT spread to cells with building/vehicle occupancy', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setVehicleOccupancy(50, 49, 999);
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by occupancy)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -533,7 +520,7 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   it('ore canNOT spread to cells with wall structures', () => {
     setOverlay(map, 50, 50, 0x0C);
     map.setWallType(50, 49, 'BRIK');
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction offset for spread
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by wall)
     map.growOre(1821);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
   });
@@ -552,6 +539,7 @@ describe('PARITY MATCH: Reservoir sampling cap (64 cells max)', () => {
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
+    ScenarioRandom.seed = 0;
   });
 
   afterEach(() => {
@@ -576,7 +564,8 @@ describe('PARITY MATCH: Reservoir sampling cap (64 cells max)', () => {
         setOverlay(map, x, y, 0x05);
       }
     }
-    vi.spyOn(Math, 'random').mockReturnValue(0); // reservoir sampling replaces slot 0
+    // Multiple cells call nextInRange for reservoir sampling — mock to always replace slot 0
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(0);
     map.growOre(1821);
 
     let grownCount = 0;
@@ -603,10 +592,7 @@ describe('PARITY MATCH: Two-phase processing (scan then apply)', () => {
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   /**
@@ -620,7 +606,7 @@ describe('PARITY MATCH: Two-phase processing (scan then apply)', () => {
    */
   it('spread check uses pre-growth density (matches C++ scan-before-action)', () => {
     setOverlay(map, 50, 50, 0x09); // OverlayData=6, just below spread threshold
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N) — below spread threshold so no spread call
     map.growOre(1821);
     // Cell grew to 0x0A, but spread used pre-growth value (0x09)
     expect(getOverlay(map, 50, 50)).toBe(0x0A);
@@ -638,7 +624,7 @@ describe('PARITY MATCH: Two-phase processing (scan then apply)', () => {
   it('PARITY MATCH: newly spread ore is deferred to next cycle', () => {
     setOverlay(map, 45, 45, 0x0C);
     // With reservoir sampling, direction offset for spread
-    vi.spyOn(Math, 'random').mockReturnValue(4.0 / 8); // direction: S (index 4)
+    ScenarioRandom.seed = 0; // direction 4 (S) — spread south
     map.growOre(1821);
 
     // TS now matches C++ two-phase model: newly spread ore was not in the
@@ -657,43 +643,40 @@ describe('Tick boundary checks', () => {
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   it('tick 0 does NOT trigger growth', () => {
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N)
     map.growOre(0);
     expect(getOverlay(map, 50, 50)).toBe(0x05);
   });
 
   it('tick 1820 (just before interval) does NOT trigger growth', () => {
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N)
     map.growOre(1820);
     expect(getOverlay(map, 50, 50)).toBe(0x05);
   });
 
   it('tick 1821 (exact interval) DOES trigger growth', () => {
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N)
     map.growOre(1821);
     expect(getOverlay(map, 50, 50)).toBe(0x06);
   });
 
   it('tick 1822 (just after interval) does NOT trigger growth', () => {
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N)
     map.growOre(1822);
     expect(getOverlay(map, 50, 50)).toBe(0x05);
   });
 
   it('tick 3642 (2 * 1821) triggers growth', () => {
     setOverlay(map, 50, 50, 0x05);
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N)
     map.growOre(3642);
     expect(getOverlay(map, 50, 50)).toBe(0x06);
   });
@@ -713,14 +696,13 @@ describe('Fully depleted area -- no spontaneous regrowth without seed', () => {
         setOverlay(map, x, y, 0xFF);
       }
     }
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ScenarioRandom.seed = 8; // direction 0 (N) — no gold cells so no random calls
     map.growOre(1821);
     for (let y = 48; y <= 52; y++) {
       for (let x = 48; x <= 52; x++) {
         expect(getOverlay(map, x, y)).toBe(0xFF);
       }
     }
-    vi.restoreAllMocks();
   });
 });
 

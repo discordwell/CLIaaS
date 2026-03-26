@@ -26,6 +26,7 @@ import {
   createAIHouseState,
   getAIProductionPick,
 } from '../engine/ai';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -207,7 +208,7 @@ describe('getAIProductionPick — faction filtering (C++ house.cpp faction owner
 
     // Vary random values to cover both eligible items (E1 and E2)
     const picks = new Set<string>();
-    const randomMock = vi.spyOn(Math, 'random');
+    const randomMock = vi.spyOn(ScenarioRandom, 'float');
     for (let i = 0; i < 20; i++) {
       randomMock.mockReturnValue(i / 20);
       const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
@@ -231,7 +232,7 @@ describe('getAIProductionPick — faction filtering (C++ house.cpp faction owner
     addAIHouse(ctx, House.England, { techLevel: 10 });
 
     const picks = new Set<string>();
-    const randomMock = vi.spyOn(Math, 'random');
+    const randomMock = vi.spyOn(ScenarioRandom, 'float');
     for (let i = 0; i < 20; i++) {
       randomMock.mockReturnValue(i / 20);
       const pick = getAIProductionPick(ctx, House.England, 'infantry');
@@ -255,7 +256,7 @@ describe('getAIProductionPick — faction filtering (C++ house.cpp faction owner
     addAIHouse(ctx, House.Neutral, { techLevel: 10 });
 
     const picks = new Set<string>();
-    vi.spyOn(Math, 'random').mockImplementation(() => 0.99);
+    vi.spyOn(ScenarioRandom, 'float').mockImplementation(() => 0.99);
     for (let i = 0; i < 10; i++) {
       const pick = getAIProductionPick(ctx, House.Neutral, 'infantry');
       if (pick) picks.add(pick.type);
@@ -278,7 +279,7 @@ describe('getAIProductionPick — tech level gating (C++ rules.ini TechLevel)', 
     addAIHouse(ctx, House.USSR, { techLevel: 3 });
 
     // Only E1 (techLevel 1) should pass — E6 (techLevel 5) exceeds aiTechLevel 3
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -337,7 +338,7 @@ describe('getAIProductionPick — tech level gating (C++ rules.ini TechLevel)', 
     });
     addAIHouse(ctx, House.USSR, { techLevel: 0 });
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -448,7 +449,7 @@ describe('getAIProductionPick — entity counting and ratio exclusions (C++ hous
 
     // With 1 alive E1 and 0 alive anti-armor: antiArmorRatio=0, infantryRatio=1.0
     // E3 gets weight 3 (antiArmorRatio < 0.4), E1 gets weight 1 (infantryRatio >= 0.3)
-    vi.spyOn(Math, 'random').mockReturnValue(0);  // picks first weighted item
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);  // picks first weighted item
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -491,7 +492,7 @@ describe('getAIProductionPick — entity counting and ratio exclusions (C++ hous
     ctx.entities = [engE3, engE1];
 
     // total=0 for USSR → all ratios are 0 → anti-armor gets 3x, infantry gets 2x
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -512,7 +513,7 @@ describe('getAIProductionPick — entity counting and ratio exclusions (C++ hous
     // infantryRatio=0 < 0.3 → E1 gets weight 2
     // totalWeight = 3 + 2 = 5
     // With roll at 0, first item (E3) is picked
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -561,7 +562,7 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
 
     // Both items get weight=1, totalWeight=2
     // With roll close to 0, should pick first item (E3)
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -606,7 +607,7 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
     ctx.entities = [e1, e2, e4];
 
     // Both items weight=1, totalWeight=2
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -628,7 +629,7 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
     // E4: weight = 1 (not anti-armor, not infantry E1/E2)
     // totalWeight = 1.2
     // With random = 0, roll = 0 → first item E6 has weight 0.2, roll 0 - 0.2 = -0.2 <= 0 → picks E6
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -636,7 +637,7 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
     expect(pick!.type).toBe('E6');
 
     // Now with random high enough to skip E6 → picks E4
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
     const pick2 = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -657,14 +658,14 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
 
     // MEDI: weight = 0.3; E4: weight = 1
     // totalWeight = 1.3
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.England, 'infantry');
     vi.restoreAllMocks();
 
     expect(pick!.type).toBe('MEDI');
 
     // With higher random → skips MEDI, picks E4
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
     const pick2 = getAIProductionPick(ctx, House.England, 'infantry');
     vi.restoreAllMocks();
 
@@ -686,7 +687,7 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
 
     // HARV: weight = 0.1; 3TNK: weight = 3 (anti-armor, ratio < 0.4)
     // totalWeight = 3.1
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'vehicle');
     vi.restoreAllMocks();
 
@@ -694,7 +695,7 @@ describe('getAIProductionPick — weight system (C++ house.cpp composition weigh
     expect(pick!.type).toBe('HARV');
 
     // With random > 0.1/3.1 ≈ 0.032 → should skip HARV and pick 3TNK
-    vi.spyOn(Math, 'random').mockReturnValue(0.1);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.1);
     const pick2 = getAIProductionPick(ctx, House.USSR, 'vehicle');
     vi.restoreAllMocks();
 
@@ -778,7 +779,7 @@ describe('getAIProductionPick — statistical distribution (C++ weighted random 
     // E3 should be picked for random values in [0, 3/4) = [0, 0.75)
     // E4 should be picked for random values in [3/4, 1) = [0.75, 1)
     let e3Count = 0, e4Count = 0;
-    const randomMock = vi.spyOn(Math, 'random');
+    const randomMock = vi.spyOn(ScenarioRandom, 'float');
 
     for (let i = 0; i < 100; i++) {
       randomMock.mockReturnValue(i / 100);
@@ -811,7 +812,7 @@ describe('getAIProductionPick — statistical distribution (C++ weighted random 
     // E1 weight=2, E4 weight=1, total=3
     // E1 picked for random in [0, 2/3) ≈ [0, 0.667)
     let e1Count = 0, e4Count = 0;
-    const randomMock = vi.spyOn(Math, 'random');
+    const randomMock = vi.spyOn(ScenarioRandom, 'float');
 
     for (let i = 0; i < 100; i++) {
       randomMock.mockReturnValue(i / 100);
@@ -846,7 +847,7 @@ describe('getAIProductionPick — statistical distribution (C++ weighted random 
     // total = 1.2
     // E6 picked for random in [0, 0.2/1.2) ≈ [0, 0.167)
     let e6Count = 0;
-    const randomMock = vi.spyOn(Math, 'random');
+    const randomMock = vi.spyOn(ScenarioRandom, 'float');
 
     for (let i = 0; i < 100; i++) {
       randomMock.mockReturnValue(i / 100);
@@ -870,7 +871,7 @@ describe('getAIProductionPick — statistical distribution (C++ weighted random 
     addAIHouse(ctx, House.USSR, { techLevel: 10 });
     ctx.entities = [];
 
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -923,7 +924,7 @@ describe('getAIProductionPick — integration with full PRODUCTION_ITEMS list', 
     ctx.entities = [];
 
     // Should pick from WEAP-prerequisite, soviet+both, techLevel<=10, non-structure items
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.5);
     const pick = getAIProductionPick(ctx, House.USSR, 'vehicle');
     vi.restoreAllMocks();
 
@@ -941,7 +942,7 @@ describe('getAIProductionPick — integration with full PRODUCTION_ITEMS list', 
     ctx.entities = [];
 
     const picks = new Set<string>();
-    const randomMock = vi.spyOn(Math, 'random');
+    const randomMock = vi.spyOn(ScenarioRandom, 'float');
     for (let i = 0; i < 100; i++) {
       randomMock.mockReturnValue(i / 100);
       const pick = getAIProductionPick(ctx, House.England, 'infantry');
@@ -976,7 +977,7 @@ describe('getAIProductionPick — integration with full PRODUCTION_ITEMS list', 
     // totalWeight = 2
     // With roll = 0: first item is E3, 0 - 1 = -1 <= 0 → E3
     // With roll ≈ 0.75: roll = 0.75 * 2 = 1.5, 1.5 - 1 = 0.5 > 0, 0.5 - 1 = -0.5 <= 0 → E4
-    vi.spyOn(Math, 'random').mockReturnValue(0.75);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.75);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -1002,7 +1003,7 @@ describe('getAIProductionPick — integration with full PRODUCTION_ITEMS list', 
     ctx.entities = entities;
 
     // E1 weight=1, E4 weight=1, total=2
-    vi.spyOn(Math, 'random').mockReturnValue(0.75);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.75);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 
@@ -1031,7 +1032,7 @@ describe('getAIProductionPick — edge cases', () => {
   });
 
   it('roll exhausting all weights falls back to items[0]', () => {
-    // When Math.random returns 1.0 (or very close), roll might not be <= 0 after all items
+    // When ScenarioRandom.float returns 1.0 (or very close), roll might not be <= 0 after all items
     // In that case, the function returns items[0] as a fallback
     const ctx = makeMockAIContext({
       scenarioProductionItems: makeMinimalItems(
@@ -1044,7 +1045,7 @@ describe('getAIProductionPick — edge cases', () => {
 
     // E1 weight=2 (infantry boost), E4 weight=1, total=3
     // random=0.9999: roll = 0.9999 * 3 = 2.9997; 2.9997-2=0.9997 > 0; 0.9997-1=-0.0003 ≤ 0 → E4
-    vi.spyOn(Math, 'random').mockReturnValue(0.9999);
+    vi.spyOn(ScenarioRandom, 'float').mockReturnValue(0.9999);
     const pick = getAIProductionPick(ctx, House.USSR, 'infantry');
     vi.restoreAllMocks();
 

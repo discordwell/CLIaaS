@@ -42,7 +42,7 @@
  *   to ore growth rate only. There is no "Tiberium=" damage key in RA rules.ini.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { parseIniSections, parseIniInt } from '../engine/parseIni';
@@ -50,6 +50,7 @@ import { GameMap, Terrain } from '../engine/map';
 import { MAP_CELLS } from '../engine/types';
 import { WARHEAD_META } from '../engine/types';
 import { Entity } from '../engine/entity';
+import { ScenarioRandom } from '../engine/random';
 
 // ============================================================
 // Parse rules.ini -- authoritative source of truth
@@ -632,10 +633,10 @@ describe('density range invariants — C++ OverlayData bounds', () => {
   it('growth cannot exceed gold max (0x0E remains 0x0E after growOre)', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x0E);
-    vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
+    ScenarioRandom.seed = 8; // direction 0 (N) — irrelevant here, just deterministic
     map.growOre(GameMap.ORE_GROWTH_INTERVAL);
     expect(getOverlay(map, 50, 50)).toBe(0x0E); // unchanged
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   it('depletion cannot go below 0x03 — removes to 0xFF instead', () => {
@@ -673,20 +674,19 @@ describe('gems never grow or spread — C++ cell.cpp:2881, 2916', () => {
    */
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   it('gem at every density level is unchanged after growOre cycle', () => {
     for (const gemOvl of [0x0F, 0x10, 0x11, 0x12]) {
       const map = makeMap();
       setOverlay(map, 50, 50, gemOvl);
-      vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
+      ScenarioRandom.seed = 8; // direction 0 (N) — gems skip RNG entirely, just deterministic
       map.growOre(GameMap.ORE_GROWTH_INTERVAL);
       expect(
         getOverlay(map, 50, 50),
         `gem 0x${gemOvl.toString(16)} must not grow`,
       ).toBe(gemOvl);
-      vi.restoreAllMocks();
     }
   });
 
@@ -694,7 +694,7 @@ describe('gems never grow or spread — C++ cell.cpp:2881, 2916', () => {
     for (const gemOvl of [0x0F, 0x10, 0x11, 0x12]) {
       const map = makeMap();
       setOverlay(map, 50, 50, gemOvl);
-      vi.spyOn(Math, 'random').mockReturnValue(0);
+      ScenarioRandom.seed = 8; // direction 0 (N) — gems skip RNG entirely, just deterministic
       map.growOre(GameMap.ORE_GROWTH_INTERVAL);
       // Verify no adjacent cells received ore/gems
       for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
@@ -703,7 +703,6 @@ describe('gems never grow or spread — C++ cell.cpp:2881, 2916', () => {
           `gem 0x${gemOvl.toString(16)} must not spread to (${50 + dx},${50 + dy})`,
         ).toBe(0xFF);
       }
-      vi.restoreAllMocks();
     }
   });
 });
@@ -724,7 +723,7 @@ describe('spread threshold — OverlayData > 6 (cell.cpp:2914)', () => {
    */
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   it('TS ORE_SPREAD_MIN_DENSITY = 0x09 matches C++ OverlayData=6 boundary', () => {
@@ -739,7 +738,7 @@ describe('spread threshold — OverlayData > 6 (cell.cpp:2914)', () => {
   it('overlay 0x09 (C++ OverlayData=6) does NOT spread', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x09);
-    vi.spyOn(Math, 'random').mockReturnValue(0); // trigger everything
+    ScenarioRandom.seed = 8; // direction 0 (N) — but 0x09 is below spread threshold, no RNG consumed
     map.growOre(GameMap.ORE_GROWTH_INTERVAL);
     // Check all 8 adjacent cells — none should have ore
     // Note: density may grow (0x09 -> 0x0A) but spread uses pre-growth value
@@ -754,8 +753,8 @@ describe('spread threshold — OverlayData > 6 (cell.cpp:2914)', () => {
   it('overlay 0x0A (C++ OverlayData=7) CAN spread', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x0A);
-    // With reservoir sampling, only random call is spread direction offset
-    vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
+    // Seed 8 → ScenarioRandom.nextInRange(0, 7) = 0 → direction N (north)
+    ScenarioRandom.seed = 8;
     map.growOre(GameMap.ORE_GROWTH_INTERVAL);
     // North cell should have new ore at minimum density
     expect(getOverlay(map, 50, 49)).toBe(0x03);

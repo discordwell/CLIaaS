@@ -1,23 +1,5 @@
 # Session Summaries
 
-## 2026-03-24T03:30Z — Session 144: Wet Test SCG01EA + SCA01EA, 2 Bug Fixes
-- **Wet tested SCG01EA** ("In the Thick of It") via browser agent harness on cliaas.com
-- **Mission setup parity**: All unit positions, HP values, weapon assignments, structure positions match INI exactly.
-- **Combat parity**: SA warhead verses match rules.ini. Damage values consistent with C++ formulas.
-- **FOUND & FIXED killCount=0 bug** (`387c475`): `_runMissionAI` context snapshot overwrites `_runCombat` live sync. Fix: getter/setter on missionAI context. 7 parity tests added. 50,319 tests pass.
-- **Wet tested SCA01EA** ("It Came From RA! 1: Discovery"): Won at tick 30201. 28 kills, 24 losses. Trigger chains, ant wave spawning, reinforcements (2TNK tanks, Chinook infantry), score screen all working.
-- **FOUND & FIXED stuck-unit bug** (`76bf7ad`): `movementSpeed()` returns 0 on ROCK terrain. Fix: base speed safety net.
-- **Per-icon terrain classification** (`8e09efd`): Root cause fix. Extracted C++ TMP control map bytes (cdata.cpp `_land[16]`), baked per-icon land types into tileset JSON (1199/1532 non-Clear). Rewrote `classifyOutdoorTerrain` to use per-icon lt from tileset metadata. Cliff template 140 icon 0 = Clear (was Rock). 65 new parity tests, 50,384 total passing.
-- **Visual**: TEMPERATE + SNOW theaters rendering correctly. Ant sprites, building sprites, score screen working.
-
-## 2026-03-23T20:00Z — Session 143: C++ Parity Mega-Sprint (10 Rounds, 35 Agents)
-- **614 PARITY GAP comments → 0** (100% eliminated across 10 rounds of parallel agent work)
-- **13 BLOCKED items remain** (all architectural: 5-factory [DONE], RadiusOffset table, sell state machine, multi-part bridges, ore mine terrain)
-- **Key engine fixes**: threat scoring rewrite, reservoir sampling ore growth, fixed-point power, deferred victory conditions, 5-factory production system, turret ROT accumulator, aircraft airborne-on-spawn, ring search harvester, two-phase bridges, auto-crush AI, cloaked target filtering, moebius return, vehicle/aircraft crew spawning, chronoshift destination fallback, warhead spread falloff
-- **Tests**: 49,500 → 50,312 passing (+812), 582 → 600 test files (+18)
-- **Wet test** (SCG01EA + SCG02EA via browser agent harness): Score screen, combat, reinforcements, AI production, defeat conditions all working. Found agent harness uses `unitIds` not `ids` (undocumented).
-- **Deployed** to cliaas.com after each round.
-
 ## 2026-03-11T04:00Z — Session 142: Game Class Refactoring Phase 2 (Waves 0-3)
 - **6 new subsystem modules extracted**: placement.ts (179L), harvester.ts (261L), aircraft.ts (394L), ai.ts (1,319L), crates.ts (345L), missionAI.ts (1,207L)
 - **index.ts reduced**: 8,917 → 5,761 lines (35% reduction). 12 total extracted modules (6,350 lines).

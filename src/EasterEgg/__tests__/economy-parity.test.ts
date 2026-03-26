@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GameMap, Terrain } from '../engine/map';
 import { Entity } from '../engine/entity';
 import { MAP_CELLS, House, UnitType, SpeedClass } from '../engine/types';
+import { ScenarioRandom } from '../engine/random';
 
 /**
  * Economy & Ore Parity Tests — C++ Red Alert overlay.cpp / drive.cpp
@@ -22,6 +23,11 @@ describe('Economy Parity (C++ Red Alert)', () => {
     map = new GameMap();
     map.setBounds(40, 40, 50, 50);
     map.initDefault();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    ScenarioRandom.seed = 0;
   });
 
   /** Helper: get overlay at cell */
@@ -202,48 +208,43 @@ describe('Economy Parity (C++ Red Alert)', () => {
   describe('EC6: growOre only grows gold, not gems', () => {
     it('gold ore density increases on growth cycle', () => {
       setOverlay(50, 50, 0x05); // gold density 2
-      vi.spyOn(Math, 'random').mockReturnValue(0.1); // always trigger density growth
+      // Growth is deterministic for sampled cells (< 64 eligible) — no random mock needed
       map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x06); // increased by 1
-      vi.restoreAllMocks();
     });
 
     it('gem overlay does NOT increase density on growth cycle', () => {
       setOverlay(50, 50, 0x0F); // GEM01 min density
-      vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger everything
+      // No mock needed — growOre skips gems entirely (EC6)
       map.growOre(1821);
       // Gem should remain unchanged — growOre skips gems entirely
       expect(getOverlay(50, 50)).toBe(0x0F);
-      vi.restoreAllMocks();
     });
 
     it('gem at max density does NOT increase', () => {
       setOverlay(50, 50, 0x12); // GEM04 max density
-      vi.spyOn(Math, 'random').mockReturnValue(0);
+      // No mock needed — growOre skips gems entirely (EC6)
       map.growOre(1821);
       expect(getOverlay(50, 50)).toBe(0x12);
-      vi.restoreAllMocks();
     });
 
     it('gem overlay does NOT spread to adjacent empty cells', () => {
       setOverlay(50, 50, 0x12); // gem at max density
-      vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
+      // No mock needed — growOre skips gems entirely (EC6), so no spread occurs
       map.growOre(1821);
       // All adjacent cells should remain empty — gems don't spread
       expect(getOverlay(50, 49)).toBe(0xFF);
       expect(getOverlay(51, 50)).toBe(0xFF);
       expect(getOverlay(50, 51)).toBe(0xFF);
       expect(getOverlay(49, 50)).toBe(0xFF);
-      vi.restoreAllMocks();
     });
 
     it('gold ore still spreads normally when gems are skipped', () => {
       setOverlay(50, 50, 0x0C); // gold at high density (> 0x09 so spread allowed)
-      // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
+      // ScenarioRandom.nextInRange(0,7) controls spread direction; 0 = N
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(0);
       map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // gold spread
-      vi.restoreAllMocks();
     });
   });
 
@@ -253,75 +254,63 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold at low density (0x07 = density 4) does NOT spread', () => {
       // 0x03 = density 0, 0x09 = density 6. Spread requires > 6, so overlay must be > 0x09
       setOverlay(50, 50, 0x07); // density 4 — below threshold
-      vi.spyOn(Math, 'random').mockReturnValue(0); // always trigger
+      // No mock needed — density below spread threshold, spread never attempted
       map.growOre(1821);
       // Density may have increased (0x07 -> 0x08), but no spreading
       for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
         expect(getOverlay(50 + dx, 50 + dy)).toBe(0xFF);
       }
-      vi.restoreAllMocks();
     });
 
     it('gold at density 0x09 (density 6, exactly at threshold) does NOT spread', () => {
       setOverlay(50, 50, 0x09);
-      vi.spyOn(Math, 'random').mockReturnValue(0);
+      // No mock needed — at threshold (not above), spread never attempted
       map.growOre(1821);
-      // Overlay may have increased to 0x0A, but spread check uses original value
-      // Actually, the density check may bump it before spread check runs.
-      // Let's just check the adjacent cells are empty:
-      // Wait -- density growth modifies overlay[idx] in-place before spread check.
-      // After density growth: 0x09 -> 0x0A.
-      // But the spread check uses `ovl` (the value before density growth), which is 0x09.
-      // Since 0x09 <= ORE_SPREAD_MIN_DENSITY (0x09), spread is skipped.
+      // Spread eligibility uses original overlay (0x09) which is NOT > 0x09
+      // so this cell is never added to spreadCells
       for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
         expect(getOverlay(50 + dx, 50 + dy)).toBe(0xFF);
       }
-      vi.restoreAllMocks();
     });
 
     it('gold at density 0x0A (density 7, above threshold) CAN spread', () => {
       setOverlay(50, 50, 0x0A);
-      // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(0.0); // direction: north
+      // ScenarioRandom.nextInRange(0,7) controls spread direction; 0 = N
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(0);
       map.growOre(1821);
       expect(getOverlay(50, 49)).toBe(0x03); // spread occurred
-      vi.restoreAllMocks();
     });
 
     it('spread uses 8 directions including diagonals (NE)', () => {
       setOverlay(50, 50, 0x0C); // high density gold
-      // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(0.125); // direction: index 1 → NE
+      // ScenarioRandom.nextInRange(0,7) controls spread direction; 1 = NE
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(1);
       map.growOre(1821);
       expect(getOverlay(51, 49)).toBe(0x03); // spread to NE diagonal
-      vi.restoreAllMocks();
     });
 
     it('spread uses 8 directions including diagonals (SE)', () => {
       setOverlay(50, 50, 0x0C);
-      // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(0.375); // direction: index 3 → SE
+      // ScenarioRandom.nextInRange(0,7) controls spread direction; 3 = SE
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(3);
       map.growOre(1821);
       expect(getOverlay(51, 51)).toBe(0x03); // spread to SE diagonal
-      vi.restoreAllMocks();
     });
 
     it('spread uses 8 directions including diagonals (SW)', () => {
       setOverlay(50, 50, 0x0C);
-      // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(0.625); // direction: index 5 → SW
+      // ScenarioRandom.nextInRange(0,7) controls spread direction; 5 = SW
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(5);
       map.growOre(1821);
       expect(getOverlay(49, 51)).toBe(0x03); // spread to SW diagonal
-      vi.restoreAllMocks();
     });
 
     it('spread uses 8 directions including diagonals (NW)', () => {
       setOverlay(50, 50, 0x0C);
-      // With reservoir sampling, only random call is spread direction offset
-      vi.spyOn(Math, 'random').mockReturnValue(0.875); // direction: index 7 → NW
+      // ScenarioRandom.nextInRange(0,7) controls spread direction; 7 = NW
+      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(7);
       map.growOre(1821);
       expect(getOverlay(49, 49)).toBe(0x03); // spread to NW diagonal
-      vi.restoreAllMocks();
     });
 
     it('ORE_SPREAD_MIN_DENSITY is 0x09', () => {

@@ -12,6 +12,7 @@ import {
   type TeamType,
   type TriggerActionResult,
 } from '../engine/scenario';
+import { ScenarioRandom } from '../engine/random';
 import { House, Mission, UNIT_STATS, worldToCell } from '../engine/types';
 import { getCampaignMissionAgents } from './raMainCampaignMissionAgents';
 
@@ -84,11 +85,27 @@ function loadScenarioData(scenarioId: string): ScenarioData {
 
 function withFixedRandom<T>(fn: () => T): T {
   const originalRandom = Math.random;
+  const originalFloat = ScenarioRandom.float.bind(ScenarioRandom);
+  const originalNext = ScenarioRandom.next.bind(ScenarioRandom);
+  const originalNextInRange = ScenarioRandom.nextInRange.bind(ScenarioRandom);
+  const originalSeed = ScenarioRandom.seed;
+
   Math.random = () => 0.5;
+  // executeTriggerAction uses ScenarioRandom (not Math.random) for spawn
+  // positions and aircraft facing. Pin it to deterministic values so the
+  // audit's expected positions (computed with () => 0.5) match actual spawns.
+  ScenarioRandom.float = () => 0.5;
+  ScenarioRandom.next = () => 16384; // 0.5 * 32768 — midpoint of 15-bit range
+  ScenarioRandom.nextInRange = (min: number, max: number) => Math.floor((min + max) / 2);
+
   try {
     return fn();
   } finally {
     Math.random = originalRandom;
+    ScenarioRandom.float = originalFloat;
+    ScenarioRandom.next = originalNext;
+    ScenarioRandom.nextInRange = originalNextInRange;
+    ScenarioRandom.seed = originalSeed;
   }
 }
 
