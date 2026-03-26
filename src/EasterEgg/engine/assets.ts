@@ -23,10 +23,11 @@ export interface AssetManifest {
   [name: string]: SpriteSheetMeta;
 }
 
-/** Tileset lookup entry: atlas pixel position for a (templateType, icon) pair */
+/** Tileset lookup entry: atlas pixel position for a (templateType, icon) pair.
+ *  Synthetic entries (Aftermath templates without TMP files) may lack ax/ay. */
 export interface TilesetEntry {
-  ax: number; // x pixel offset in atlas
-  ay: number; // y pixel offset in atlas
+  ax?: number; // x pixel offset in atlas (absent for synthetic land-type-only entries)
+  ay?: number; // y pixel offset in atlas
   /** Per-icon land type from C++ TMP control map (cdata.cpp:3009 _land[16]).
    *  Only present for non-Clear tiles. Absent/undefined = 'Clear'. */
   lt?: string;

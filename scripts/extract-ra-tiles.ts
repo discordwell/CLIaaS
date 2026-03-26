@@ -341,21 +341,89 @@ function extractTheatre(
 
   log(`  Extracted ${templatesExtracted} templates (${tileEntries.length} tiles), skipped ${templatesSkipped}`);
 
+  // Aftermath expansion templates (400+) aren't in the base MIX files.
+  // Add synthetic land-type-only entries so classifyOutdoorTerrain gets correct
+  // per-icon data. Dimensions from OpenRA temperat.yaml; land types from C++
+  // cdata.cpp classification ranges and the original fallback buckets.
+  // No atlas positions (no tile images) — these are terrain-data-only entries.
+  if (config.name !== 'INTERIOR') {
+    const SYNTHETIC_TEMPLATES: Record<number, { w: number; h: number; lt: string }> = {
+      // Hill formation (3x4) — impassable
+      400: { w: 4, h: 3, lt: 'Rock' },
+      // Cliff slopes (2x3 each) — impassable
+      401: { w: 2, h: 3, lt: 'Rock' }, 402: { w: 2, h: 3, lt: 'Rock' },
+      403: { w: 3, h: 2, lt: 'Rock' }, 404: { w: 3, h: 2, lt: 'Rock' },
+      // Water cliff edges — water
+      405: { w: 2, h: 3, lt: 'Water' }, 406: { w: 2, h: 3, lt: 'Water' },
+      407: { w: 3, h: 2, lt: 'Water' }, 408: { w: 3, h: 2, lt: 'Water' },
+      // Shore debris — impassable
+      500: { w: 2, h: 2, lt: 'Rock' }, 501: { w: 2, h: 2, lt: 'Rock' },
+      502: { w: 2, h: 2, lt: 'Rock' }, 503: { w: 2, h: 2, lt: 'Rock' },
+      504: { w: 2, h: 2, lt: 'Rock' }, 505: { w: 2, h: 2, lt: 'Rock' },
+      506: { w: 2, h: 2, lt: 'Rock' }, 507: { w: 2, h: 2, lt: 'Rock' },
+      508: { w: 2, h: 2, lt: 'Rock' },
+      // Small bridges (3x2 or 2x3) — passable
+      519: { w: 3, h: 2, lt: 'Clear' }, 520: { w: 3, h: 2, lt: 'Clear' },
+      521: { w: 3, h: 2, lt: 'Clear' }, 522: { w: 3, h: 2, lt: 'Clear' },
+      523: { w: 3, h: 2, lt: 'Clear' }, 524: { w: 3, h: 2, lt: 'Clear' },
+      525: { w: 2, h: 3, lt: 'Clear' }, 526: { w: 2, h: 3, lt: 'Clear' },
+      527: { w: 2, h: 3, lt: 'Clear' }, 528: { w: 2, h: 3, lt: 'Clear' },
+      529: { w: 2, h: 3, lt: 'Clear' }, 530: { w: 2, h: 3, lt: 'Clear' },
+      531: { w: 2, h: 2, lt: 'Clear' }, 532: { w: 2, h: 2, lt: 'Clear' },
+      533: { w: 2, h: 2, lt: 'Clear' }, 534: { w: 2, h: 2, lt: 'Clear' },
+      // Cliff corners — impassable/water mix (conservative: Rock)
+      550: { w: 2, h: 2, lt: 'Rock' }, 551: { w: 2, h: 2, lt: 'Rock' },
+      552: { w: 2, h: 2, lt: 'Rock' }, 553: { w: 2, h: 2, lt: 'Rock' },
+      554: { w: 2, h: 2, lt: 'Water' }, 555: { w: 2, h: 2, lt: 'Water' },
+      556: { w: 2, h: 2, lt: 'Water' }, 557: { w: 2, h: 2, lt: 'Water' },
+      // Decay debris — passable rough
+      580: { w: 2, h: 2, lt: 'Rough' }, 581: { w: 2, h: 2, lt: 'Rough' },
+      582: { w: 2, h: 2, lt: 'Rough' }, 583: { w: 2, h: 2, lt: 'Rough' },
+      584: { w: 2, h: 2, lt: 'Rough' }, 585: { w: 2, h: 2, lt: 'Rough' },
+      586: { w: 2, h: 2, lt: 'Rough' }, 587: { w: 2, h: 2, lt: 'Rough' },
+      588: { w: 2, h: 2, lt: 'Rough' },
+      // Fjord crossings — passable
+      590: { w: 3, h: 3, lt: 'Clear' }, 591: { w: 3, h: 3, lt: 'Clear' },
+    };
+    let syntheticCount = 0;
+    for (const [idStr, info] of Object.entries(SYNTHETIC_TEMPLATES)) {
+      const id = parseInt(idStr);
+      // Skip if already extracted from MIX
+      if (tileEntries.some(e => e.templateType === id)) continue;
+      // Add land-type-only entries for each icon position
+      for (let icon = 0; icon < info.w * info.h; icon++) {
+        tileEntries.push({
+          templateType: id, icon,
+          pixels: new Uint8Array(0), // no image data
+          landType: info.lt,
+        });
+        syntheticCount++;
+      }
+    }
+    if (syntheticCount > 0) {
+      log(`  Added ${syntheticCount} synthetic land-type entries for Aftermath templates`);
+    }
+  }
+
   if (tileEntries.length === 0) {
     log(`  WARNING: No tiles extracted for ${config.name}`);
     return { tileCount: 0, templateCount: templatesExtracted };
   }
 
-  // Build atlas (32 tiles per row)
+  // Separate real tiles (with pixels) from synthetic (land-type-only)
+  const realTiles = tileEntries.filter(e => e.pixels.length > 0);
+  const syntheticTiles = tileEntries.filter(e => e.pixels.length === 0);
+
+  // Build atlas (32 tiles per row) — only real tiles get atlas positions
   const TILES_PER_ROW = 32;
   const atlasW = TILES_PER_ROW * TILE_W;
-  const atlasRows = Math.ceil(tileEntries.length / TILES_PER_ROW);
+  const atlasRows = Math.ceil(realTiles.length / TILES_PER_ROW);
   const atlasH = atlasRows * TILE_H;
   const rgba = new Uint8Array(atlasW * atlasH * 4);
-  const lookup: Record<string, { ax: number; ay: number; lt?: string }> = {};
+  const lookup: Record<string, { ax?: number; ay?: number; lt?: string }> = {};
 
-  for (let i = 0; i < tileEntries.length; i++) {
-    const entry = tileEntries[i];
+  for (let i = 0; i < realTiles.length; i++) {
+    const entry = realTiles[i];
     const col = i % TILES_PER_ROW;
     const row = Math.floor(i / TILES_PER_ROW);
 
@@ -375,12 +443,21 @@ function extractTheatre(
     }
 
     const key = `${entry.templateType},${entry.icon}`;
-    const tileData: { ax: number; ay: number; lt?: string } = { ax: col * TILE_W, ay: row * TILE_H };
-    // Only store non-Clear land types to minimize JSON size (Clear is the default)
+    const tileData: { ax?: number; ay?: number; lt?: string } = { ax: col * TILE_W, ay: row * TILE_H };
     if (entry.landType !== 'Clear') {
       tileData.lt = entry.landType;
     }
     lookup[key] = tileData;
+  }
+
+  // Add synthetic land-type-only entries (no atlas position — no tile image)
+  for (const entry of syntheticTiles) {
+    const key = `${entry.templateType},${entry.icon}`;
+    if (entry.landType !== 'Clear') {
+      lookup[key] = { lt: entry.landType };
+    } else {
+      lookup[key] = {};
+    }
   }
 
   // Write files
@@ -392,11 +469,11 @@ function extractTheatre(
     tileH: TILE_H,
     atlasW,
     atlasH,
-    tileCount: tileEntries.length,
+    tileCount: Object.keys(lookup).length,
     tiles: lookup,
   }));
 
-  log(`  Atlas: ${atlasW}x${atlasH}px (${tileEntries.length} tiles)`);
+  log(`  Atlas: ${atlasW}x${atlasH}px (${realTiles.length} tiles, ${syntheticTiles.length} synthetic land-type entries)`);
   log(`  Written: ${pngName} + ${jsonName}`);
 
   return { tileCount: tileEntries.length, templateCount: templatesExtracted };

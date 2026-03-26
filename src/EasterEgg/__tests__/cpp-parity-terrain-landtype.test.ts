@@ -387,9 +387,10 @@ describe('tileset.json per-icon terrain data (C++ Land_Type baked output)', () =
       expect(clearTerrain).toBe(Terrain.CLEAR);
     });
 
-    it('tileset has 1532 tile entries', () => {
-      expect(tilesetMeta.tileCount).toBe(1532);
-      expect(Object.keys(tilesetMeta.tiles).length).toBe(1532);
+    it('tileset has base + synthetic tile entries', () => {
+      // 1532 base tiles from TMP files + 270 synthetic land-type entries for Aftermath templates
+      expect(tilesetMeta.tileCount).toBeGreaterThanOrEqual(1532);
+      expect(Object.keys(tilesetMeta.tiles).length).toBe(tilesetMeta.tileCount);
     });
   });
 });

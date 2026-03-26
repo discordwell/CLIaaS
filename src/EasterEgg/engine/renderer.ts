@@ -887,7 +887,7 @@ export class Renderer {
     if (!this.tilesetImage || !this.tilesetMeta) return false;
     const key = `${tmpl},${icon}`;
     const entry = this.tilesetMeta.tiles[key];
-    if (!entry) return false;
+    if (!entry || entry.ax === undefined || entry.ay === undefined) return false;
     ctx.drawImage(
       this.tilesetImage,
       entry.ax, entry.ay, this.tilesetMeta.tileW, this.tilesetMeta.tileH,
