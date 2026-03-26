@@ -12,6 +12,7 @@ import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE, getBibCells } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex } from './shadow';
+import { NonCriticalRandom } from './random';
 
 /** Interpolate between two values on a 0-31 ring (shortest path).
  *  Used for smooth 60fps visual rotation between 15fps game ticks. */
@@ -420,8 +421,8 @@ export class Renderer {
     if (this.screenShake > 0) {
       shaking = true;
       const intensity = Math.min(this.screenShake, 6);
-      const sx = (Math.random() - 0.5) * intensity * 2;
-      const sy = (Math.random() - 0.5) * intensity * 2;
+      const sx = (NonCriticalRandom.float() - 0.5) * intensity * 2;
+      const sy = (NonCriticalRandom.float() - 0.5) * intensity * 2;
       ctx.save();
       ctx.translate(sx, sy);
       this.screenShake--;
@@ -2737,7 +2738,7 @@ export class Renderer {
         const cells = Math.ceil(mmSize / 3);
         this.radarStaticData = new Uint8Array(cells * cells);
         for (let i = 0; i < this.radarStaticData.length; i++) {
-          this.radarStaticData[i] = Math.floor(Math.random() * 40);
+          this.radarStaticData[i] = NonCriticalRandom.nextInRange(0, 39);
         }
       }
       const cells = Math.ceil(mmSize / 3);

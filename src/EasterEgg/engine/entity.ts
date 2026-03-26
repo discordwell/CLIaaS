@@ -12,6 +12,7 @@ import {
   CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
   armorIndex, PRODUCTION_ITEMS,
 } from './types';
+import { ScenarioRandom } from './random';
 
 // === C++ Points lookup (techno.cpp:6290: Risk = Reward = Points) ===
 // Used by threatScore() to compute C++ Value() = Risk + Reward = 2 * Points
@@ -266,8 +267,8 @@ export class Entity {
   moebiusCountDown = 0;                 // ticks remaining before return-to-origin
 
   // IA1: Infantry fidget randomization (C++ infantry.cpp:1748-1821)
-  fidgetDelay = Math.floor(Math.random() * 20) + 12; // random 12-31 frames
-  fidgetVariant = Math.random(); // selects idle1 vs idle2 animation
+  fidgetDelay = ScenarioRandom.nextInRange(12, 31); // random 12-31 frames
+  fidgetVariant = ScenarioRandom.float(); // selects idle1 vs idle2 animation
 
   // Fear/Prone system (C++ infantry.cpp — FearType 0-255)
   // Fear increases on damage, decrements 1/tick. IsProne when fear >= FEAR_ANXIOUS (10).
@@ -591,7 +592,7 @@ export class Entity {
       if (whProps !== undefined) {
         this.deathVariant = whProps.infantryDeath; // full 0-5 range from C++
       } else {
-        this.deathVariant = Math.random() < 0.4 ? 1 : 0; // fallback: random
+        this.deathVariant = ScenarioRandom.float() < 0.4 ? 1 : 0; // fallback: random
       }
       // Kill all passengers when transport is destroyed
       for (const p of this.passengers) {

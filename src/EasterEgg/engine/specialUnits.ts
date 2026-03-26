@@ -16,6 +16,7 @@ import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } fro
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap } from './map';
+import { ScenarioRandom } from './random';
 
 // === Constants ===
 export const MAX_MINES_PER_HOUSE = 50;
@@ -401,7 +402,7 @@ export function updateVehicleCloak(ctx: SpecialUnitsContext, entity: Entity): vo
       if (entity.sonarPulseTimer > 0) break;
       if (entity.mission === Mission.ATTACK) break;
       if (entity.weapon && entity.attackCooldown > 0) break;
-      if (entity.hp / entity.maxHp <= CONDITION_RED && Math.random() > 0.04) break;
+      if (entity.hp / entity.maxHp <= CONDITION_RED && ScenarioRandom.float() > 0.04) break;
       entity.cloakState = CloakState.CLOAKING; entity.cloakTimer = CLOAK_TRANSITION_FRAMES; break;
     case CloakState.CLOAKED: break;
   }
@@ -588,7 +589,7 @@ export function tickVortices(ctx: SpecialUnitsContext): void {
       continue;
     }
     // Random wandering — adjust angle slightly each tick
-    v.angle += (Math.random() - 0.5) * 0.4;
+    v.angle += (ScenarioRandom.float() - 0.5) * 0.4;
     v.x += Math.cos(v.angle) * CELL_SIZE * 0.15;
     v.y += Math.sin(v.angle) * CELL_SIZE * 0.15;
     // Clamp to map bounds

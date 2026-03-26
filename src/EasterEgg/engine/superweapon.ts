@@ -18,6 +18,7 @@ import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
 import { Terrain, type GameMap } from './map';
+import { ScenarioRandom } from './random';
 import { nearbyLocation } from './pathfinding';
 
 // ---------------------------------------------------------------------------
@@ -485,16 +486,16 @@ export function activateSuperweapon(
         // C++ house.cpp:2871-2873: 20% chance for time quake
         // if (!TimeQuake) { TimeQuake = Percent_Chance(Rule.QuakeChance * 100); }
         if (!ctx.timeQuake) {
-          ctx.timeQuake = Math.random() < CHRONO_QUAKE_CHANCE;
+          ctx.timeQuake = ScenarioRandom.float() < CHRONO_QUAKE_CHANCE;
         }
 
         // C++ house.cpp:2876-2888: 20% chance for chronal vortex at random map location
-        if (Math.random() < CHRONO_VORTEX_CHANCE) {
-          const vx = Math.floor(Math.random() * 60) * CELL_SIZE + CELL_SIZE / 2;
-          const vy = Math.floor(Math.random() * 60) * CELL_SIZE + CELL_SIZE / 2;
+        if (ScenarioRandom.float() < CHRONO_VORTEX_CHANCE) {
+          const vx = ScenarioRandom.nextInRange(0, 59) * CELL_SIZE + CELL_SIZE / 2;
+          const vy = ScenarioRandom.nextInRange(0, 59) * CELL_SIZE + CELL_SIZE / 2;
           if (ctx.activeVortices) {
             ctx.activeVortices.push({
-              x: vx, y: vy, angle: Math.random() * Math.PI * 2,
+              x: vx, y: vy, angle: ScenarioRandom.float() * Math.PI * 2,
               ticksLeft: 450, id: ctx.tick,
             });
           }
@@ -743,8 +744,8 @@ export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
 
   // Secondary ground explosions — ring of staggered blasts around impact (C++ large explosion radius)
   for (let i = 0; i < 6; i++) {
-    const angle = (i / 6) * Math.PI * 2 + Math.random() * 0.5;
-    const dist = CELL_SIZE * (1.5 + Math.random() * 2);
+    const angle = (i / 6) * Math.PI * 2 + ScenarioRandom.float() * 0.5;
+    const dist = CELL_SIZE * (1.5 + ScenarioRandom.float() * 2);
     const gx = target.x + Math.cos(angle) * dist;
     const gy = target.y + Math.sin(angle) * dist;
     ctx.effects.push({

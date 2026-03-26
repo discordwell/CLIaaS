@@ -14,6 +14,7 @@ import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
 import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, type MapTree } from './map';
 import { type TilesetMeta, type AssetManager } from './assets';
+import { ScenarioRandom } from './random';
 
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
 
@@ -1092,7 +1093,7 @@ export function calculateHouseEdgeSpawnCell(
   houseEdges: Map<House, string> | undefined,
   mapBounds: { x: number; y: number; w: number; h: number } | undefined,
   alignedCell?: CellPos,
-  random: () => number = Math.random,
+  random: () => number = () => ScenarioRandom.float(),
   /** Optional: when provided with naval=true, checks terrain for water cells.
    *  C++ display.cpp:2505-2527: Calculated_Cell with SPEED_FLOAT only returns WATER cells. */
   map?: GameMap,
@@ -1209,7 +1210,7 @@ export function resolveTeamOriginCell(
   waypoints: Map<number, CellPos>,
   houseEdges?: Map<House, string>,
   mapBounds?: { x: number; y: number; w: number; h: number },
-  random: () => number = Math.random,
+  random: () => number = () => ScenarioRandom.float(),
 ): CellPos | null {
   return waypoints.get(origin) ?? calculateHouseEdgeSpawnCell(house, houseEdges, mapBounds, undefined, random);
 }
@@ -2516,7 +2517,7 @@ export function executeTriggerAction(
           // aircraft get Random_Pick(DIR_N, DIR_MAX) — random facing.
           if (stats.isAircraft) {
             // C++ reinf.cpp:466-468: desiredfacing = (DirType)Random_Pick(DIR_N, DIR_MAX)
-            const randomFacing = Math.floor(Math.random() * 8) as Dir;
+            const randomFacing = ScenarioRandom.nextInRange(0, 7) as Dir;
             entity.facing = randomFacing;
             entity.desiredFacing = randomFacing;
           } else {

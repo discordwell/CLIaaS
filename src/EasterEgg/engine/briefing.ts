@@ -9,6 +9,8 @@
  * Audio is synthesized via Web Audio API.
  */
 
+import { NonCriticalRandom } from './random';
+
 // === Briefing Sequence Data ===
 
 interface BriefingStep {
@@ -348,7 +350,7 @@ class BriefingAudio {
     const buf = this.ctx.createBuffer(1, Math.ceil(this.ctx.sampleRate * len), this.ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.15));
+      data[i] = (NonCriticalRandom.float() * 2 - 1) * Math.exp(-i / (data.length * 0.15));
     }
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
@@ -396,7 +398,7 @@ class BriefingAudio {
     const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < len; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.3));
+      data[i] = (NonCriticalRandom.float() * 2 - 1) * Math.exp(-i / (len * 0.3));
     }
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
@@ -437,7 +439,7 @@ class BriefingAudio {
     const len = Math.ceil(this.ctx.sampleRate * dur);
     const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.2));
+    for (let i = 0; i < len; i++) d[i] = (NonCriticalRandom.float() * 2 - 1) * Math.exp(-i / (len * 0.2));
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
     const g2 = this.ctx.createGain();
@@ -583,7 +585,7 @@ export class BriefingRenderer {
     this.lastPingTime = 0;
     this.flashlightAngle = 0;
     this.queenRevealProgress = 0;
-    this.staticSeed = Math.floor(Math.random() * 10000);
+    this.staticSeed = NonCriticalRandom.nextInRange(0, 9999);
     this.state = 'playing';
 
     this.totalChars = this.countChars(this.steps[0]);
@@ -931,13 +933,13 @@ export class BriefingRenderer {
     // Blips — add new ones periodically
     if (this.totalTime - this.lastPingTime > 1.5) {
       this.lastPingTime = this.totalTime;
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 0.3 + Math.random() * 0.6;
+      const angle = NonCriticalRandom.float() * Math.PI * 2;
+      const dist = 0.3 + NonCriticalRandom.float() * 0.6;
       this.radarBlips.push({
         x: cx + Math.cos(angle) * r * dist,
         y: cy + Math.sin(angle) * r * dist,
         age: 0,
-        bright: 0.7 + Math.random() * 0.3,
+        bright: 0.7 + NonCriticalRandom.float() * 0.3,
       });
       this.audio.radarPing();
     }
@@ -1334,7 +1336,7 @@ export class BriefingRenderer {
     const h = this.height;
 
     // Dark with flickering
-    const flicker = Math.random() > 0.92 ? 0.08 : 0;
+    const flicker = NonCriticalRandom.float() > 0.92 ? 0.08 : 0;
     ctx.fillStyle = `rgb(${Math.floor(flicker * 30)},${Math.floor(flicker * 20)},${Math.floor(flicker * 10)})`;
     ctx.fillRect(0, 0, w, h);
 
@@ -1374,7 +1376,7 @@ export class BriefingRenderer {
     // Tiny flicker of power
     if (flicker > 0) {
       ctx.fillStyle = 'rgba(255,60,20,0.3)';
-      ctx.fillRect(barX + 2, barY + 2, Math.random() * 20, barH - 4);
+      ctx.fillRect(barX + 2, barY + 2, NonCriticalRandom.float() * 20, barH - 4);
     }
 
     ctx.font = '10px monospace';

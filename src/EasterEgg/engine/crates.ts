@@ -9,6 +9,7 @@ import {
   UnitType, Mission, worldDist,
   EXPLOSION_FRAMES, WEAPON_STATS,
 } from './types';
+import { ScenarioRandom } from './random';
 import { Entity, SONAR_PULSE_DURATION } from './entity';
 import { type GameMap } from './map';
 import { type Effect } from './renderer';
@@ -145,7 +146,7 @@ export function weightedCrateType(): CrateType {
   const shares = CRATE_SHARES;
   const totalShares = shares.reduce((sum, s) => sum + s.shares, 0);
   // C++ Random_Pick(1, total_shares) — uniform integer over [1, total]
-  const pick = Math.floor(Math.random() * totalShares) + 1;
+  const pick = ScenarioRandom.nextInRange(1, totalShares);
   let shareCount = 0;
   for (const entry of shares) {
     shareCount += entry.shares;
@@ -169,12 +170,12 @@ export function spawnCrate(ctx: CrateContext): void {
   const crateTimeMin = 3; // minutes (RULES.INI CrateRegen=3, overrides C++ default 10)
   const minLifetime = crateTimeMin / 2; // C++ CrateTime * (TICKS_PER_MINUTE/2) = 1350 ticks — no truncation
   const maxLifetime = crateTimeMin * 2; // 20 minutes
-  const lifetimeMinutes = minLifetime + Math.random() * (maxLifetime - minLifetime);
+  const lifetimeMinutes = minLifetime + ScenarioRandom.float() * (maxLifetime - minLifetime);
   const lifetimeTicks = Math.floor(lifetimeMinutes * 60 * GAME_TICKS_PER_SEC);
   // C++ map.cpp:1177 — try up to 1000 random cells to find a valid spawn
   for (let attempt = 0; attempt < 1000; attempt++) {
-    const cx = ctx.map.boundsX + Math.floor(Math.random() * ctx.map.boundsW);
-    const cy = ctx.map.boundsY + Math.floor(Math.random() * ctx.map.boundsH);
+    const cx = ctx.map.boundsX + ScenarioRandom.nextInRange(0, ctx.map.boundsW - 1);
+    const cy = ctx.map.boundsY + ScenarioRandom.nextInRange(0, ctx.map.boundsH - 1);
     if (!ctx.map.isPassable(cx, cy)) continue;
     if (ctx.map.getVisibility(cx, cy) === 0) continue; // must be explored
     const x = cx * CELL_SIZE + CELL_SIZE / 2;
@@ -252,7 +253,7 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
     case 'money': {
       // C++ cell.cpp:2335-2341: solo = SoloCrateMoney=2000, MP = Random_Pick(2000, 2900)
       const amount = ctx.isMultiplayer
-        ? 2000 + Math.floor(Math.random() * 901)
+        ? ScenarioRandom.nextInRange(2000, 2900)
         : 2000;
       ctx.addCredits(amount, true);
       ctx.evaMessages.push({ text: 'MONEY CRATE', tick: ctx.tick });
@@ -270,7 +271,7 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
         UnitType.V_JEEP, UnitType.V_1TNK,            // base vehicles
         UnitType.V_STNK, UnitType.V_CTNK,           // CS expansion vehicles
       ];
-      const uType = types[Math.floor(Math.random() * types.length)];
+      const uType = types[ScenarioRandom.nextInRange(0, types.length - 1)];
       const bonus = new Entity(uType, ctx.playerHouse, crate.x + CELL_SIZE, crate.y);
       bonus.mission = Mission.GUARD;
       ctx.entities.push(bonus);
@@ -366,9 +367,9 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
         UnitType.I_E6, // INFANTRY_RENOVATOR (engineer)
       ];
       for (let i = 0; i < 5; i++) {
-        const t = infTypes[Math.floor(Math.random() * infTypes.length)];
-        const ox = (Math.random() - 0.5) * CELL_SIZE * 2;
-        const oy = (Math.random() - 0.5) * CELL_SIZE * 2;
+        const t = infTypes[ScenarioRandom.nextInRange(0, infTypes.length - 1)];
+        const ox = (ScenarioRandom.float() - 0.5) * CELL_SIZE * 2;
+        const oy = (ScenarioRandom.float() - 0.5) * CELL_SIZE * 2;
         const inf = new Entity(t, ctx.playerHouse, crate.x + ox, crate.y + oy);
         inf.mission = Mission.GUARD;
         ctx.entities.push(inf);
@@ -476,7 +477,7 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
         s.alive && !ctx.isAllied(s.house, unit.house)
       );
       if (enemyStructs.length > 0) {
-        const target = enemyStructs[Math.floor(Math.random() * enemyStructs.length)];
+        const target = enemyStructs[ScenarioRandom.nextInRange(0, enemyStructs.length - 1)];
         const tx = target.cx * CELL_SIZE + CELL_SIZE;
         const ty = target.cy * CELL_SIZE + CELL_SIZE;
         ctx.detonateNuke({ x: tx, y: ty });
@@ -492,12 +493,12 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       // CR8: TimeQuake — damages ALL units AND structures on map (friend and foe) for 100-300 random damage
       for (const e of ctx.entities) {
         if (!e.alive) continue;
-        const dmg = 100 + Math.floor(Math.random() * 201); // 100-300
+        const dmg = ScenarioRandom.nextInRange(100, 300); // 100-300
         ctx.damageEntity(e, dmg, 'HE');
       }
       for (const s of ctx.structures) {
         if (!s.alive) continue;
-        const dmg = 100 + Math.floor(Math.random() * 201);
+        const dmg = ScenarioRandom.nextInRange(100, 300);
         ctx.damageStructure(s, dmg);
       }
       ctx.screenShake = Math.max(ctx.screenShake, 15);
@@ -510,7 +511,7 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
       // C++ ChronalVortex.Is_Active() check prevents multiple vortices.
       if (ctx.activeVortices.length === 0) {
         ctx.activeVortices.push({
-          x: crate.x, y: crate.y, angle: Math.random() * Math.PI * 2, ticksLeft: 450, id: ctx.tick,
+          x: crate.x, y: crate.y, angle: ScenarioRandom.float() * Math.PI * 2, ticksLeft: 450, id: ctx.tick,
         });
         ctx.playSound('teslazap');
         ctx.evaMessages.push({ text: 'VORTEX SPAWNED', tick: ctx.tick });

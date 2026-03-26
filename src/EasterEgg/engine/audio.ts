@@ -12,6 +12,8 @@
  * Music: Streams original Red Alert soundtrack MP3s from public/ra/music/.
  */
 
+import { NonCriticalRandom } from './random';
+
 /** Track list for the Red Alert soundtrack (Frank Klepacki, 1996) */
 const MUSIC_TRACKS = [
   '01_hell_march',
@@ -155,7 +157,7 @@ export class MusicPlayer {
     if (this.shuffleEnabled) {
       // C++ theme.cpp:244-252: shuffle mode — Fisher-Yates
       for (let i = this.playlist.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = NonCriticalRandom.nextInRange(0, i);
         [this.playlist[i], this.playlist[j]] = [this.playlist[j], this.playlist[i]];
       }
     }
@@ -294,7 +296,7 @@ export class MusicPlayer {
       let trackIdx: number;
       let attempts = 0;
       do {
-        trackIdx = pool[Math.floor(Math.random() * pool.length)];
+        trackIdx = pool[NonCriticalRandom.nextInRange(0, pool.length - 1)];
         attempts++;
       } while (trackIdx === this.lastPlayedTrack && attempts < 20);
       this.playTrack(trackIdx);
@@ -414,7 +416,7 @@ export class MusicPlayer {
         let trackIdx: number;
         let attempts = 0;
         do {
-          trackIdx = pool[Math.floor(Math.random() * pool.length)];
+          trackIdx = pool[NonCriticalRandom.nextInRange(0, pool.length - 1)];
           attempts++;
         } while (trackIdx === this.lastPlayedTrack && pool.length > 1 && attempts < 20);
         this.playTrack(trackIdx);
@@ -431,7 +433,7 @@ export class MusicPlayer {
           let trackIdx: number;
           let attempts = 0;
           do {
-            trackIdx = pool[Math.floor(Math.random() * pool.length)];
+            trackIdx = pool[NonCriticalRandom.nextInRange(0, pool.length - 1)];
             attempts++;
           } while (trackIdx === this.lastPlayedTrack && pool.length > 1 && attempts < 20);
           this.playTrack(trackIdx);
@@ -746,11 +748,11 @@ export class AudioManager {
       case 'die_infantry': this.synthDieInfantry(t, out); break;
       case 'die_vehicle': this.synthDieVehicle(t, out); break;
       case 'die_ant': this.synthDieAnt(t, out); break;
-      case 'move_ack': this.synthAck(t, out, 800 + (Math.random() - 0.5) * 200); break;
-      case 'move_ack_infantry': this.synthAck(t, out, 900 + (Math.random() - 0.5) * 150); break;
+      case 'move_ack': this.synthAck(t, out, 800 + (NonCriticalRandom.float() - 0.5) * 200); break;
+      case 'move_ack_infantry': this.synthAck(t, out, 900 + (NonCriticalRandom.float() - 0.5) * 150); break;
       case 'move_ack_vehicle': this.synthAckVehicle(t, out); break;
       case 'move_ack_dog': this.synthAckDog(t, out); break;
-      case 'attack_ack': this.synthAck(t, out, 600 + (Math.random() - 0.5) * 150); break;
+      case 'attack_ack': this.synthAck(t, out, 600 + (NonCriticalRandom.float() - 0.5) * 150); break;
       case 'select': this.synthSelect(t, out); break;
       case 'select_infantry': this.synthSelectInfantry(t, out); break;
       case 'select_vehicle': this.synthSelectVehicle(t, out); break;
@@ -825,7 +827,7 @@ export class AudioManager {
     // Simple 1/f approximation for wind-like noise
     let b0 = 0, b1 = 0, b2 = 0;
     for (let i = 0; i < len; i++) {
-      const white = Math.random() * 2 - 1;
+      const white = NonCriticalRandom.float() * 2 - 1;
       b0 = 0.99886 * b0 + white * 0.0555179;
       b1 = 0.99332 * b1 + white * 0.0750759;
       b2 = 0.96900 * b2 + white * 0.1538520;
@@ -882,7 +884,7 @@ export class AudioManager {
     const len = Math.ceil(ctx.sampleRate * duration);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    for (let i = 0; i < len; i++) data[i] = NonCriticalRandom.float() * 2 - 1;
     const src = ctx.createBufferSource();
     src.buffer = buf;
     return src;
@@ -1163,7 +1165,7 @@ export class AudioManager {
 
   private synthSelect(t: number, out: AudioNode): void {
     // Double blip with slight pitch variation
-    const pitchVar = 1 + (Math.random() - 0.5) * 0.15;
+    const pitchVar = 1 + (NonCriticalRandom.float() - 0.5) * 0.15;
     const o1 = this.osc('sine', 700 * pitchVar);
     const g1 = this.gain(0.1);
     g1.gain.setValueAtTime(0.1, t);
@@ -1181,7 +1183,7 @@ export class AudioManager {
 
   private synthSelectInfantry(t: number, out: AudioNode): void {
     // Crisp click-blip (infantry reports)
-    const pitchVar = 1 + (Math.random() - 0.5) * 0.1;
+    const pitchVar = 1 + (NonCriticalRandom.float() - 0.5) * 0.1;
     const o = this.osc('square', 600 * pitchVar);
     const g = this.gain(0.08);
     g.gain.setValueAtTime(0.08, t);
@@ -1192,7 +1194,7 @@ export class AudioManager {
 
   private synthSelectVehicle(t: number, out: AudioNode): void {
     // Low thunk (heavy machinery)
-    const pitchVar = 1 + (Math.random() - 0.5) * 0.1;
+    const pitchVar = 1 + (NonCriticalRandom.float() - 0.5) * 0.1;
     const o = this.osc('triangle', 350 * pitchVar);
     const g = this.gain(0.12);
     g.gain.setValueAtTime(0.12, t);
@@ -1203,7 +1205,7 @@ export class AudioManager {
 
   private synthAckVehicle(t: number, out: AudioNode): void {
     // Low engine rumble acknowledgment
-    const o = this.osc('sawtooth', 200 + Math.random() * 50);
+    const o = this.osc('sawtooth', 200 + NonCriticalRandom.float() * 50);
     const g = this.gain(0.06);
     g.gain.setValueAtTime(0.06, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);

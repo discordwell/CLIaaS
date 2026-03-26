@@ -21,6 +21,7 @@ import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
 import { canTargetNaval } from './aircraft';
 import { AI_BUILD_RULES } from './ai';
+import { ScenarioRandom } from './random';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -259,9 +260,9 @@ export function damageSpeedFactor(entity: Entity): number {
  *  In original RA, infantry move randomly when shot at. */
 function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldPos): void {
   if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
-  if (Math.random() > 0.4) return; // 40% chance to scatter per hit
+  if (ScenarioRandom.float() > 0.4) return; // 40% chance to scatter per hit
   const angle = Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x);
-  const jitter = (Math.random() - 0.5) * 1.2; // add randomness to scatter direction
+  const jitter = (ScenarioRandom.float() - 0.5) * 1.2; // add randomness to scatter direction
   const scatterX = victim.pos.x + Math.cos(angle + jitter) * CELL_SIZE * 0.5;
   const scatterY = victim.pos.y + Math.sin(angle + jitter) * CELL_SIZE * 0.5;
   const sc = worldToCell(scatterX, scatterY);
@@ -343,8 +344,8 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
   if (!entity.stats.isInfantry) {
     // Non-infantry: old random scatter for guard/area_guard missions only
     if (entity.mission !== Mission.GUARD && entity.mission !== Mission.AREA_GUARD) return;
-    const dx = Math.floor(Math.random() * 3) - 1;
-    const dy = Math.floor(Math.random() * 3) - 1;
+    const dx = ScenarioRandom.nextInRange(0, 2) - 1;
+    const dy = ScenarioRandom.nextInRange(0, 2) - 1;
     if (dx === 0 && dy === 0) return;
     const targetX = entity.pos.x + dx * CELL_SIZE;
     const targetY = entity.pos.y + dy * CELL_SIZE;
@@ -385,7 +386,7 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
   }
 
   // C++ infantry.cpp:1890 — Random_Pick(0,4)-2 → random +-2 facing offset
-  const offset = Math.floor(Math.random() * 5) - 2; // -2, -1, 0, 1, or 2
+  const offset = ScenarioRandom.nextInRange(0, 4) - 2; // -2, -1, 0, 1, or 2
   awayDir = ((awayDir + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
 
   // C++ infantry.cpp:1905-1915 — try 8 directions starting from away-direction
@@ -549,17 +550,17 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   // C++ unit.cpp:1046-1069 — Vehicle crew spawning on destruction
   // Conditions: IsCrew=true, Max_Passengers==0 (not a transport), 50% probability
   if (victim.stats.crewed && !victim.stats.isAircraft && !victim.stats.isInfantry &&
-      (victim.stats.passengers ?? 0) === 0 && Math.random() < 0.5) {
+      (victim.stats.passengers ?? 0) === 0 && ScenarioRandom.float() < 0.5) {
     // C++ unit.cpp:3965-3978: unarmed -> 50/50 C1/C7 civilian, armed -> E1 soldier
     let crewType: UnitType;
     if (!victim.stats.primaryWeapon) {
-      crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+      crewType = ScenarioRandom.float() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
     } else {
       crewType = UnitType.I_E1;
     }
     const inf = new Entity(crewType, victim.house, kx, ky);
     // C++ unit.cpp:1058: i->Strength = Random_Pick(5, (int)i->Class->MaxStrength/2)
-    inf.hp = Math.max(5, Math.floor(Math.random() * Math.floor(inf.maxHp / 2)) + 5);
+    inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, Math.floor(inf.maxHp / 2) + 4));
     inf.hp = Math.min(inf.hp, inf.maxHp);
     inf.mission = Mission.GUARD;
     ctx.entities.push(inf);
@@ -569,7 +570,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   // C++ aircraft.cpp:1588-1594 — Aircraft parachute survivors on destruction
   // Conditions: IsCrew=true, 90% probability, spawns E1 (no civilian variant)
   if (victim.stats.crewed && victim.stats.isAircraft &&
-      Math.random() < 0.9) {
+      ScenarioRandom.float() < 0.9) {
     const inf = new Entity(UnitType.I_E1, victim.house, kx, ky);
     // C++ aircraft survivors get full health (no HP reduction like vehicles)
     inf.mission = Mission.GUARD;
@@ -1194,7 +1195,7 @@ export function applySplashDamage(
     if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 238 || tmpl === 239 || tmpl === 241 || tmpl === 242 || tmpl === 378 || tmpl === 379) {
       // C++ combat.cpp:267 — Random_Pick(1, Rule.BridgeStrength) < strength
       // BridgeStrength sourced from AI_BUILD_RULES (rules.ini [General] BridgeStrength=1000)
-      if (Math.floor(Math.random() * AI_BUILD_RULES.bridgeStrength) + 1 < weapon.damage) {
+      if (ScenarioRandom.nextInRange(1, AI_BUILD_RULES.bridgeStrength) < weapon.damage) {
         const destroyed = ctx.map.destroyBridge(impactCell.cx, impactCell.cy, 3);
         if (destroyed > 0) {
           killBridgeOccupants(ctx, impactCell.cx, impactCell.cy, 3);
@@ -1328,8 +1329,8 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     // Small pre-explosions scattered across the building footprint (scale with building size)
     const numPreExplosions = Math.max(3, Math.min(6, fw * fh));
     for (let i = 0; i < numPreExplosions; i++) {
-      const ox = (Math.random() - 0.5) * fw * CELL_SIZE;
-      const oy = (Math.random() - 0.5) * fh * CELL_SIZE;
+      const ox = (ScenarioRandom.float() - 0.5) * fw * CELL_SIZE;
+      const oy = (ScenarioRandom.float() - 0.5) * fh * CELL_SIZE;
       ctx.effects.push({
         type: 'explosion', x: wx + ox, y: wy + oy,
         frame: -i * 3, maxFrames: 12, size: 8, // staggered start via negative frame
@@ -1489,7 +1490,7 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
     switch (s.type) {
       case 'FACT':
         // C++ building.cpp:4680-4684: captured ConYard NEVER spawns an engineer
-        if (!isCaptured && !engineerSpawned && Math.random() < 0.25) {
+        if (!isCaptured && !engineerSpawned && ScenarioRandom.float() < 0.25) {
           crewType = UnitType.I_E6;
           engineerSpawned = true;
         } else {
@@ -1501,8 +1502,8 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
         break;
       default:
         // C++ techno.cpp:4454-4465 — 15% civilian chance if building has no weapon
-        if (isUnarmed && Math.random() < 0.15) {
-          crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+        if (isUnarmed && ScenarioRandom.float() < 0.15) {
+          crewType = ScenarioRandom.float() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
         } else {
           crewType = UnitType.I_E1;
         }
@@ -1510,7 +1511,7 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
     }
     const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
     // C++ building.cpp:1701 — destruction survivors get random HP (5 to MaxStrength)
-    inf.hp = Math.max(5, Math.floor(Math.random() * inf.maxHp) + 5);
+    inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, inf.maxHp + 4));
     inf.hp = Math.min(inf.hp, inf.maxHp);
     inf.mission = Mission.GUARD;
     // C++ building.cpp:1697 — IsTechnician: IsNominal infantry (E1) get technician star

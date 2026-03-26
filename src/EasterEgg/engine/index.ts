@@ -28,6 +28,7 @@ import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, CLOAK_DELAY_TICKS } from './entity';
 import { GameMap, Terrain } from './map';
+import { ScenarioRandom } from './random';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath } from './pathfinding';
 import {
@@ -2103,7 +2104,7 @@ export class Game {
                 case 'FACT': // STRUCT_CONST: 25% engineer if human-owned, max 1 engineer
                   // C++ building.cpp:4680-4684: captured ConYard NEVER spawns an engineer
                   // C++ building.cpp:3456-3463 — re-roll if engineer already spawned
-                  if (!(s.originalHouse && s.originalHouse !== s.house) && !engineerSpawned && Math.random() < 0.25) {
+                  if (!(s.originalHouse && s.originalHouse !== s.house) && !engineerSpawned && ScenarioRandom.float() < 0.25) {
                     crewType = UnitType.I_E6;
                     engineerSpawned = true;
                   } else {
@@ -2115,8 +2116,8 @@ export class Game {
                   break;
                 default: // TechnoClass::Crew_Type: E1, with 15% civilian chance if no weapon
                   // C++ techno.cpp:4454-4465 — unarmed buildings have 15% chance for C1/C7
-                  if (isUnarmed && Math.random() < 0.15) {
-                    crewType = Math.random() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+                  if (isUnarmed && ScenarioRandom.float() < 0.15) {
+                    crewType = ScenarioRandom.float() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
                   } else {
                     crewType = UnitType.I_E1;
                   }
@@ -2567,8 +2568,8 @@ export class Game {
       for (const id of this.selectedIds) {
         const unit = this.entityById.get(id);
         if (!unit?.alive) continue;
-        const angle = Math.random() * Math.PI * 2;
-        const dist = CELL_SIZE * (2 + Math.random() * 2);
+        const angle = ScenarioRandom.float() * Math.PI * 2;
+        const dist = CELL_SIZE * (2 + ScenarioRandom.float() * 2);
         const goalX = unit.pos.x + Math.cos(angle) * dist;
         const goalY = unit.pos.y + Math.sin(angle) * dist;
         unit.mission = Mission.MOVE;
@@ -2953,8 +2954,8 @@ export class Game {
             // Find a passable position near the click point
             let px = world.x, py = world.y;
             for (let attempt = 0; attempt < 8; attempt++) {
-              const ox = world.x + (Math.random() - 0.5) * CELL_SIZE * 2;
-              const oy = world.y + (Math.random() - 0.5) * CELL_SIZE * 2;
+              const ox = world.x + (ScenarioRandom.float() - 0.5) * CELL_SIZE * 2;
+              const oy = world.y + (ScenarioRandom.float() - 0.5) * CELL_SIZE * 2;
               const tc = worldToCell(ox, oy);
               if (this.map.isPassable(tc.cx, tc.cy)) {
                 px = ox; py = oy;
@@ -3860,16 +3861,16 @@ export class Game {
             if (isNaval && shoreCells.length > 0) {
               // Place on shore cells, cycling through available ones
               const shore = shoreCells[shoreIdx % shoreCells.length];
-              px = shore.x + (Math.random() - 0.5) * CELL_SIZE * 0.5;
-              py = shore.y + (Math.random() - 0.5) * CELL_SIZE * 0.5;
+              px = shore.x + (ScenarioRandom.float() - 0.5) * CELL_SIZE * 0.5;
+              py = shore.y + (ScenarioRandom.float() - 0.5) * CELL_SIZE * 0.5;
               shoreIdx++;
             } else {
               // Non-naval: random placement near transport (existing behavior)
               px = entity.pos.x;
               py = entity.pos.y;
               for (let attempt = 0; attempt < 8; attempt++) {
-                const ox = entity.pos.x + (Math.random() - 0.5) * CELL_SIZE * 2;
-                const oy = entity.pos.y + (Math.random() - 0.5) * CELL_SIZE * 2;
+                const ox = entity.pos.x + (ScenarioRandom.float() - 0.5) * CELL_SIZE * 2;
+                const oy = entity.pos.y + (ScenarioRandom.float() - 0.5) * CELL_SIZE * 2;
                 const tc = worldToCell(ox, oy);
                 if (this.map.isPassable(tc.cx, tc.cy)) {
                   px = ox; py = oy;
@@ -4693,7 +4694,7 @@ export class Game {
         // CL4: Don't cloak while weapon is on cooldown (C++ — firing prevents cloak)
         if (entity.weapon && entity.attackCooldown > 0) break;
         // CL3: Health-gated cloak — below ConditionRed (25%), 96% chance to stay uncloaked
-        if (entity.hp / entity.maxHp <= CONDITION_RED && Math.random() > 0.04) break;
+        if (entity.hp / entity.maxHp <= CONDITION_RED && ScenarioRandom.float() > 0.04) break;
         entity.cloakState = CloakState.CLOAKING;
         entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
         break;
@@ -4766,12 +4767,12 @@ export class Game {
       ).length;
       if (nearbyAnts >= mods.maxAnts) continue;
       // Spawn 1-2 ants near the queen (scaled by difficulty waveSize)
-      const baseCount = 1 + (Math.random() < 0.4 ? 1 : 0);
+      const baseCount = 1 + (ScenarioRandom.float() < 0.4 ? 1 : 0);
       const count = Math.max(1, Math.round(baseCount * mods.waveSize));
       // Difficulty affects ant type composition: higher difficulty = more fire ants (ANT3)
       for (let i = 0; i < count; i++) {
         let aType: UnitType;
-        const roll = Math.random();
+        const roll = ScenarioRandom.float();
         const remaining = 1 - mods.fireAntChance;
         if (roll < mods.fireAntChance) {
           aType = UnitType.ANT3; // fire ant (strongest)
@@ -4780,8 +4781,8 @@ export class Game {
         } else {
           aType = UnitType.ANT1; // soldier ant (50% of remaining)
         }
-        const ox = (Math.random() - 0.5) * CELL_SIZE * 3;
-        const oy = (Math.random() - 0.5) * CELL_SIZE * 3;
+        const ox = (ScenarioRandom.float() - 0.5) * CELL_SIZE * 3;
+        const oy = (ScenarioRandom.float() - 0.5) * CELL_SIZE * 3;
         const spawnX = s.cx * CELL_SIZE + CELL_SIZE + ox;
         const spawnY = s.cy * CELL_SIZE + CELL_SIZE + oy;
         // Only spawn on passable terrain

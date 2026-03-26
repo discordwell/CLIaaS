@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-24T03:30Z — Session 144: Wet Test SCG01EA + SCA01EA, 2 Bug Fixes
+- **Wet tested SCG01EA** ("In the Thick of It") via browser agent harness on cliaas.com
+- **Mission setup parity**: All unit positions, HP values, weapon assignments, structure positions match INI exactly.
+- **Combat parity**: SA warhead verses match rules.ini. Damage values consistent with C++ formulas.
+- **FOUND & FIXED killCount=0 bug** (`387c475`): `_runMissionAI` context snapshot overwrites `_runCombat` live sync. Fix: getter/setter on missionAI context. 7 parity tests added. 50,319 tests pass.
+- **Wet tested SCA01EA** ("It Came From RA! 1: Discovery"): Won at tick 30201. 28 kills, 24 losses. Trigger chains, ant wave spawning, reinforcements (2TNK tanks, Chinook infantry), score screen all working.
+- **FOUND & FIXED stuck-unit bug** (`76bf7ad`): `movementSpeed()` returns 0 on ROCK terrain. Fix: base speed safety net.
+- **Per-icon terrain classification** (`8e09efd`): Root cause fix. Extracted C++ TMP control map bytes (cdata.cpp `_land[16]`), baked per-icon land types into tileset JSON (1199/1532 non-Clear). Rewrote `classifyOutdoorTerrain` to use per-icon lt from tileset metadata. Cliff template 140 icon 0 = Clear (was Rock). 65 new parity tests, 50,384 total passing.
+- **Visual**: TEMPERATE + SNOW theaters rendering correctly. Ant sprites, building sprites, score screen working.
+
 ## 2026-03-23T20:00Z — Session 143: C++ Parity Mega-Sprint (10 Rounds, 35 Agents)
 - **614 PARITY GAP comments → 0** (100% eliminated across 10 rounds of parallel agent work)
 - **13 BLOCKED items remain** (all architectural: 5-factory [DONE], RadiusOffset table, sell state machine, multi-part bridges, ore mine terrain)

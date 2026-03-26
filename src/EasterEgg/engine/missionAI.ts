@@ -20,6 +20,7 @@ import { type GameMap, Terrain } from './map';
 import { findPath } from './pathfinding';
 import { canTargetNaval } from './aircraft';
 import { combatAnim } from './combat';
+import { ScenarioRandom } from './random';
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -104,9 +105,9 @@ export interface MissionAIContext {
  *  In original RA, infantry move randomly when shot at. */
 function scatterInfantry(ctx: MissionAIContext, victim: Entity, attackerPos: WorldPos): void {
   if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
-  if (Math.random() > 0.4) return; // 40% chance to scatter per hit
+  if (ScenarioRandom.float() > 0.4) return; // 40% chance to scatter per hit
   const angle = Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x);
-  const jitter = (Math.random() - 0.5) * 1.2; // add randomness to scatter direction
+  const jitter = (ScenarioRandom.float() - 0.5) * 1.2; // add randomness to scatter direction
   const scatterX = victim.pos.x + Math.cos(angle + jitter) * CELL_SIZE * 0.5;
   const scatterY = victim.pos.y + Math.sin(angle + jitter) * CELL_SIZE * 0.5;
   const sc = worldToCell(scatterX, scatterY);
@@ -362,11 +363,11 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         scatterMax = Math.min(scatterMax, scatterCap);
         // Convert scatter from leptons back to pixels: leptons * CELL_SIZE / LEPTON_SIZE
         const scatterPx = scatterMax * CELL_SIZE / LEPTON_SIZE;
-        const dist = Math.random() * scatterPx;
+        const dist = ScenarioRandom.float() * scatterPx;
         if (activeWeapon.isArcing) {
           // SC5+SC2: Arcing projectiles — circular scatter with ±5° angular jitter (C++ bullet.cpp:722)
-          const baseAngle = Math.random() * Math.PI * 2;
-          const jitterDeg = (Math.random() * 10 - 5); // ±5 degrees (C++ Random_Pick(0,10)-5)
+          const baseAngle = ScenarioRandom.float() * Math.PI * 2;
+          const jitterDeg = ScenarioRandom.nextInRange(0, 10) - 5; // ±5 degrees (C++ Random_Pick(0,10)-5)
           const angle = baseAngle + (jitterDeg * Math.PI / 180);
           impactX += Math.cos(angle) * dist;
           impactY += Math.sin(angle) * dist;
@@ -1132,8 +1133,8 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       ctx.playSound('eva_acknowledged');
       // Green gas cloud effect — multiple expanding puffs
       for (let i = 0; i < 5; i++) {
-        const ox = (Math.random() - 0.5) * 20;
-        const oy = (Math.random() - 0.5) * 20;
+        const ox = (ScenarioRandom.float() - 0.5) * 20;
+        const oy = (ScenarioRandom.float() - 0.5) * 20;
         ctx.effects.push({
           type: 'explosion', x: structPos.x + ox, y: structPos.y + oy,
           frame: 0, maxFrames: 14, size: 10 + i * 2,
@@ -1248,8 +1249,8 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
       let impactY = target.y;
       if (entity.weapon.inaccuracy && entity.weapon.inaccuracy > 0) {
         const scatter = entity.weapon.inaccuracy * CELL_SIZE;
-        const angle = Math.random() * Math.PI * 2;
-        const d = Math.random() * scatter;
+        const angle = ScenarioRandom.float() * Math.PI * 2;
+        const d = ScenarioRandom.float() * scatter;
         impactX += Math.cos(angle) * d;
         impactY += Math.sin(angle) * d;
       }

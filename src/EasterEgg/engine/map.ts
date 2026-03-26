@@ -4,6 +4,7 @@
  */
 
 import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, TERRAIN_SPEED } from './types';
+import { ScenarioRandom } from './random';
 
 /** C++ MoveType enum (defines.h:828-837) — Can_Enter_Cell() return values for pathfinding.
  *  cpp-parity: values match C++ MOVE_OK..MOVE_NO exactly. */
@@ -787,7 +788,7 @@ export class GameMap {
             growthCells.push(idx);
           } else {
             // C++ map.cpp:1034: reservoir sampling — replace random slot with probability R/n
-            const j = Math.floor(Math.random() * growthSeen);
+            const j = ScenarioRandom.nextInRange(0, growthSeen - 1);
             if (j < R) {
               growthCells[j] = idx;
             }
@@ -802,7 +803,7 @@ export class GameMap {
             spreadCells.push(idx);
           } else {
             // C++ map.cpp:1055: reservoir sampling for spread candidates
-            const j = Math.floor(Math.random() * spreadSeen);
+            const j = ScenarioRandom.nextInRange(0, spreadSeen - 1);
             if (j < R) {
               spreadCells[j] = idx;
             }
@@ -835,7 +836,7 @@ export class GameMap {
       const cx = idx % MAP_CELLS;
       const cy = Math.floor(idx / MAP_CELLS);
       // C++ cell.cpp:2968: random starting direction
-      const offset = Math.floor(Math.random() * 8);
+      const offset = ScenarioRandom.nextInRange(0, 7);
       for (let i = 0; i < 8; i++) {
         const [dx, dy] = dirs[(i + offset) % 8];
         const nx = cx + dx, ny = cy + dy;

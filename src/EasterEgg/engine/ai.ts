@@ -19,6 +19,7 @@ import {
   applyScenarioOverrides,
 } from './scenario';
 import { type GameMap, Terrain } from './map';
+import { ScenarioRandom } from './random';
 
 // ── Re-export the types that index.ts already defines locally ──────────────
 
@@ -869,7 +870,7 @@ export function spawnAIUnit(
   let sx: number;
   let sy: number;
   if (isInfantry) {
-    sx = factory.cx * CELL_SIZE + CELL_SIZE + (Math.random() - 0.5) * 24;
+    sx = factory.cx * CELL_SIZE + CELL_SIZE + (ScenarioRandom.float() - 0.5) * 24;
     sy = factory.cy * CELL_SIZE + CELL_SIZE * 2;
   } else {
     sx = factory.cx * CELL_SIZE + CELL_SIZE * 2;
@@ -1551,7 +1552,7 @@ export function getAIProductionPick(ctx: AIContext, house: House, category: 'inf
 
   const totalWeight = weighted.reduce((sum, w) => sum + w.weight, 0);
   if (totalWeight <= 0) return items[0];
-  let roll = Math.random() * totalWeight;
+  let roll = ScenarioRandom.float() * totalWeight;
   for (const w of weighted) {
     roll -= w.weight;
     if (roll <= 0) return w.item;
@@ -2095,7 +2096,7 @@ export function updateAIProduction(ctx: AIContext): void {
               (p.faction === 'both' || p.faction === houseFaction) &&
               (p.techLevel === undefined || p.techLevel >= 0)
             );
-            return infItems.length > 0 ? infItems[Math.floor(Math.random() * infItems.length)] : null;
+            return infItems.length > 0 ? infItems[ScenarioRandom.nextInRange(0, infItems.length - 1)] : null;
           })();
       const infCost = pick ? Math.max(1, Math.round(pick.cost * mods.costBias)) : 0;
       if (pick && credits >= infCost) {
@@ -2137,7 +2138,7 @@ export function updateAIProduction(ctx: AIContext): void {
               (p.faction === 'both' || p.faction === houseFaction) &&
               (p.techLevel === undefined || p.techLevel >= 0)
             );
-            return vehItems.length > 0 ? vehItems[Math.floor(Math.random() * vehItems.length)] : null;
+            return vehItems.length > 0 ? vehItems[ScenarioRandom.nextInRange(0, vehItems.length - 1)] : null;
           })();
       const vehCost = pick ? Math.max(1, Math.round(pick.cost * mods.costBias)) : 0;
       if (pick && currentCredits >= vehCost) {
@@ -2199,7 +2200,7 @@ export function suggestedNewTeam(
 
   if (choices.length === 0) return null;
   // C++ teamtype.cpp:492 — Random_Pick(0, choicecount-1)
-  return choices[Math.floor(Math.random() * choices.length)];
+  return choices[ScenarioRandom.nextInRange(0, choices.length - 1)];
 }
 
 /** Spawn a single team instance into the game world.
@@ -2217,7 +2218,7 @@ function spawnTeam(ctx: AIContext, teamIdx: number, house: House): void {
   if (edge) {
     const bx = ctx.map.boundsX, by = ctx.map.boundsY;
     const bw = ctx.map.boundsW, bh = ctx.map.boundsH;
-    const randOffset = Math.floor(Math.random() * Math.max(bw, bh));
+    const randOffset = ScenarioRandom.nextInRange(0, Math.max(bw, bh) - 1);
     switch (edge) {
       case 'north': spawnPos = { cx: bx + (randOffset % bw), cy: by }; break;
       case 'south': spawnPos = { cx: bx + (randOffset % bw), cy: by + bh - 1 }; break;
@@ -2242,10 +2243,10 @@ function spawnTeam(ctx: AIContext, teamIdx: number, house: House): void {
     if (!UNIT_STATS[member.type]) continue;
     const unitType = member.type as UnitType;
     for (let i = 0; i < member.count; i++) {
-      const offsetX = (Math.random() - 0.5) * 48;
-      const offsetY = (Math.random() - 0.5) * 48;
+      const offsetX = (ScenarioRandom.float() - 0.5) * 48;
+      const offsetY = (ScenarioRandom.float() - 0.5) * 48;
       const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
-      entity.facing = Math.floor(Math.random() * 8);
+      entity.facing = ScenarioRandom.nextInRange(0, 7);
       entity.bodyFacing32 = entity.facing * 4;
 
       if (teamMissionScript) {
@@ -2291,7 +2292,7 @@ export function updateAIAutocreateTeams(ctx: AIContext): void {
     // C++ house.cpp:993 — maxteams = Random_Pick(2, (TechLevel-1)/3+1)
     const techLevel = state.techLevel;
     const maxTeamsUpper = Math.floor((techLevel - 1) / 3) + 1;
-    const maxTeams = Math.floor(Math.random() * (Math.max(maxTeamsUpper, 2) - 2 + 1)) + 2;
+    const maxTeams = ScenarioRandom.nextInRange(2, Math.max(maxTeamsUpper, 2));
 
     for (let t = 0; t < maxTeams; t++) {
       const teamIdx = suggestedNewTeam(ctx, house, true);
