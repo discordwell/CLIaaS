@@ -1014,6 +1014,10 @@ export class Game {
   }
 
   private get _missionAICtx(): MissionAIContext {
+    // Capture Game instance for getter/setter — avoids nested context sync bug
+    // where _runCombat updates this.killCount but the snapshot on ctx is stale.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const game = this;
     return {
       entities: this.entities,
       structures: this.structures,
@@ -1021,7 +1025,8 @@ export class Game {
       map: this.map,
       tick: this.tick,
       playerHouse: this.playerHouse,
-      killCount: this.killCount,
+      get killCount() { return game.killCount; },
+      set killCount(v: number) { game.killCount = v; },
       evaMessages: this.evaMessages,
       warheadOverrides: this.warheadOverrides,
       scenarioWarheadMeta: this.scenarioWarheadMeta,
@@ -1066,8 +1071,7 @@ export class Game {
   private _runMissionAI<T>(fn: (ctx: MissionAIContext) => T): T {
     const ctx = this._missionAICtx;
     const result = fn(ctx);
-    // Sync mutable scalars back
-    this.killCount = ctx.killCount;
+    // killCount syncs live via getter/setter on ctx (no snapshot overwrite)
     return result;
   }
 
