@@ -1974,8 +1974,8 @@ export class Renderer {
           recoilDx = ro.dx;
           recoilDy = ro.dy;
         }
-        // Use house-remapped sheet if available
-        const remapped = assets.getRemappedSheet(entity.stats.image, entity.house);
+        // Use house-remapped sheet if available (ants use native brown/olive sprites, no remap)
+        const remapped = entity.isAnt ? null : assets.getRemappedSheet(entity.stats.image, entity.house);
         if (remapped) {
           assets.drawFrameFrom(ctx, remapped, entity.stats.image, frame,
             screen.x, screen.y, { centerX: true, centerY: true });
