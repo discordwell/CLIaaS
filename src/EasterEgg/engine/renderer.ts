@@ -1502,15 +1502,19 @@ export class Renderer {
         }
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
-        // Construction: make sheet plays frames naturally; fallback uses clip+scanline reveal
+        // Construction: make sheet plays frames naturally. Missing make sheet = bug.
         if (isConstructing && !hasMakeSheet) {
-          const prog = s.buildProgress!;
-          const revealH = Math.floor(dfh * prog);
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(screenX - dfh / 2, screenY + dfh / 2 - revealH, dfw + dfh, revealH);
-          ctx.clip();
-          ctx.globalAlpha = 0.5 + prog * 0.5;
+          // MISSING MAKE SHEET — draw ugly pink/magenta box so it's obvious
+          ctx.fillStyle = '#FF00FF';
+          ctx.fillRect(screenX - dfw / 2, screenY - dfh / 2, dfw, dfh);
+          ctx.fillStyle = '#FF69B4';
+          ctx.fillRect(screenX - dfw / 2 + 4, screenY - dfh / 2 + 4, dfw - 8, dfh - 8);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('NO MAKE', screenX + dfw / 2 - dfw / 2, screenY);
+          ctx.fillText(s.type, screenX + dfw / 2 - dfw / 2, screenY + 10);
+          ctx.textAlign = 'left';
         }
         // Sell: shrink building top-to-bottom (reverse of construction) while fading
         if (isSelling) {
@@ -1526,13 +1530,7 @@ export class Renderer {
           centerX: true,
           centerY: true,
         });
-        if (isConstructing && !hasMakeSheet) {
-          // Green construction scanline at the build edge (fallback only — make sheets show naturally)
-          const revealY = screenY + dfh / 2 - Math.floor(dfh * s.buildProgress!);
-          ctx.restore();
-          ctx.fillStyle = `rgba(80,255,80,${0.4 + 0.2 * Math.sin(tick * 0.5)})`;
-          ctx.fillRect(screenX - 2, revealY - 1, dfw + 4, 2);
-        }
+        // (no construction fallback — pink/magenta box rendered above if make sheet missing)
         if (isSelling) {
           // Red sell scanline at the shrinking edge — drawn before restore to stay within clip
           const shrinkY = screenY + dfh / 2 - Math.floor(dfh * (1 - s.sellProgress!));
