@@ -948,8 +948,6 @@ export class Renderer {
         }
 
         // Clear template cells: draw tileset grass for CLEAR and TREE terrain.
-        // WALL cells (building footprints) use renderGrassCell instead of tileset tiles
-        // so they blend seamlessly with the surrounding procedural grass.
         // C++ cell.cpp:981-987: CLEAR1 uses Clear_Icon() = (cx&3)|((cy&3)<<2) for 16 variations
         if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE)) {
           const clearIcon = (cx & 3) | ((cy & 3) << 2);
@@ -1158,13 +1156,19 @@ export class Renderer {
             break;
           }
           case Terrain.WALL: {
-            // Render building footprints with procedural grass to match surrounding terrain.
+            // Building footprint bib cells — use tileset CLEAR1 tile to match surrounding terrain.
             // Structure sprites draw on top in the structure pass.
             if (map.getWallType(cx, cy)) break; // wall-type structures render in structure pass
             if (this.theatre === 'INTERIOR') {
               const bright = 40 + (h % 6);
               ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
               ctx.fillRect(screen.x, screen.y, CELL_SIZE, CELL_SIZE);
+            } else if (useTileset) {
+              // Use CLEAR1 tileset tile (template 255) — matches surrounding terrain
+              const clearIcon = (cx & 3) | ((cy & 3) << 2);
+              if (!this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y)) {
+                this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
+              }
             } else {
               this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
             }
