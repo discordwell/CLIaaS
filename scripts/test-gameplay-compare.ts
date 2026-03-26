@@ -1,22 +1,27 @@
 /**
- * Gameplay Comparison: TS engine vs C++ WASM original.
+ * Gameplay State Parity: TS engine vs C++ WASM original.
  *
- * Runs Allied Mission 1 (SCG01EA) on both engines with NO player input,
- * advancing by identical tick intervals via __agentStep(). Captures screenshots
- * and game state JSON at each checkpoint for side-by-side comparison.
+ * Both engines run SCG01EA with seed=0 (deterministic RNG).
+ * Steps both in lockstep at each checkpoint and diffs the full game state:
+ *   - Entity counts, types, positions, HP
+ *   - Credits, power, production
+ *   - Structure state
  *
  * Run: npx playwright test scripts/test-gameplay-compare.ts
  */
 
-import { test, type Page } from '@playwright/test';
+import { test, expect, type Page, type Browser } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const BASE_URL = 'http://localhost:3001';
+const BASE_URL = process.env.COMPARE_URL || 'https://cliaas.com';
 const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
+const SEED = 0;
 
 // Tick checkpoints — passive observation, no commands
-const CHECKPOINTS = [0, 75, 150, 300, 450, 750, 1500];
+const CHECKPOINTS = [0, 50, 100, 200, 300, 450, 750, 1500];
+
+// ── Helpers ──────────────────────────────────────────────────
 
 function ensureDir() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -26,70 +31,224 @@ function pad(n: number): string {
   return String(n).padStart(4, '0');
 }
 
-function saveDataUrl(dataUrl: string, filePath: string): boolean {
-  if (!dataUrl?.startsWith('data:image/png;base64,')) return false;
-  fs.writeFileSync(filePath, Buffer.from(dataUrl.replace('data:image/png;base64,', ''), 'base64'));
-  return true;
-}
-
 function saveJson(data: unknown, filePath: string): void {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-/** Capture canvas as PNG data URL */
-async function captureCanvas(page: Page): Promise<string | null> {
-  try {
-    return await page.evaluate(() => {
-      const c = document.querySelector('canvas');
-      return c?.toDataURL('image/png') ?? null;
-    });
-  } catch { return null; }
+// ── Normalized entity for cross-engine comparison ───────────
+
+interface NormEntity {
+  type: string;
+  cx: number;
+  cy: number;
+  hp: number;
+  maxHp: number;
+  ally: boolean;
+  house: string;
 }
 
-/** Extract a state summary for comparison (common fields between TS and WASM) */
-function summarizeState(state: Record<string, unknown>): Record<string, unknown> {
-  const units = (state.units ?? []) as Array<{ t: string; h: string; hp: number; m: string }>;
-  const enemies = (state.enemies ?? []) as Array<{ t: string; h: string; hp: number; m: string }>;
-  const structures = (state.structures ?? []) as Array<{ t: string; h: string; hp: number }>;
+interface NormStructure {
+  type: string;
+  cx: number;
+  cy: number;
+  hp: number;
+  maxHp: number;
+  ally: boolean;
+  house: string;
+}
 
-  // Count units by type
-  const unitCounts: Record<string, number> = {};
-  for (const u of units) unitCounts[u.t] = (unitCounts[u.t] ?? 0) + 1;
+interface NormState {
+  tick: number;
+  credits: number;
+  units: NormEntity[];
+  enemies: NormEntity[];
+  structures: NormStructure[];
+  power?: { produced: number; consumed: number };
+}
 
-  const enemyCounts: Record<string, number> = {};
-  for (const e of enemies) enemyCounts[e.t] = (enemyCounts[e.t] ?? 0) + 1;
-
-  const structCounts: Record<string, number> = {};
-  for (const s of structures) structCounts[s.t] = (structCounts[s.t] ?? 0) + 1;
-
+/** Normalize WASM state (house field, id-based) */
+function normalizeWasm(raw: Record<string, unknown>): NormState {
+  const mapEntity = (e: Record<string, unknown>): NormEntity => ({
+    type: String(e.t ?? ''),
+    cx: Number(e.cx ?? 0),
+    cy: Number(e.cy ?? 0),
+    hp: Number(e.hp ?? 0),
+    maxHp: Number(e.mhp ?? 0),
+    ally: Boolean(e.ally),
+    house: String(e.house ?? ''),
+  });
+  const mapStruct = (s: Record<string, unknown>): NormStructure => ({
+    type: String(s.t ?? ''),
+    cx: Number(s.cx ?? 0),
+    cy: Number(s.cy ?? 0),
+    hp: Number(s.hp ?? 0),
+    maxHp: Number(s.mhp ?? 0),
+    ally: Boolean(s.ally),
+    house: String(s.house ?? ''),
+  });
+  const power = raw.power as Record<string, number> | undefined;
   return {
-    tick: state.tick,
-    state: state.state,
-    credits: state.credits,
-    playerHouse: state.playerHouse,
-    unitCount: units.length,
-    enemyCount: enemies.length,
-    structureCount: structures.length,
-    unitsByType: unitCounts,
-    enemiesByType: enemyCounts,
-    structuresByType: structCounts,
-    power: state.power,
-    killCount: state.killCount,
-    lossCount: state.lossCount,
+    tick: Number(raw.tick ?? 0),
+    credits: Number(raw.credits ?? 0),
+    units: ((raw.units ?? []) as Record<string, unknown>[]).filter(u => u.ally).map(mapEntity),
+    enemies: ((raw.enemies ?? []) as Record<string, unknown>[]).map(mapEntity),
+    structures: ((raw.structures ?? []) as Record<string, unknown>[]).map(mapStruct),
+    power: power ? { produced: power.produced ?? 0, consumed: power.consumed ?? 0 } : undefined,
   };
 }
 
-/**
- * Step WASM engine N ticks using the proven WasmAdapter pattern.
- *
- * PREREQUISITE: Game loop must be running (emscripten_sleep yielding each frame).
- * Uses page.evaluate(async ...) which works once the game loop is active.
- * Chunks into 15-tick steps (matching WasmAdapter.MAX_AGENT_STEP_TICKS).
- */
-async function wasmStep(page: Page, n: number): Promise<{ state: Record<string, unknown> } | null> {
-  const MAX_PER_CALL = 15; // Match WasmAdapter — small chunks for Asyncify stability
+/** Normalize TS state (h field, idx-based structures) */
+function normalizeTs(raw: Record<string, unknown>): NormState {
+  const mapEntity = (e: Record<string, unknown>): NormEntity => ({
+    type: String(e.t ?? ''),
+    cx: Number(e.cx ?? 0),
+    cy: Number(e.cy ?? 0),
+    hp: Number(e.hp ?? 0),
+    maxHp: Number(e.mhp ?? 0),
+    ally: Boolean(e.ally),
+    house: String(e.h ?? ''),
+  });
+  const mapStruct = (s: Record<string, unknown>): NormStructure => ({
+    type: String(s.t ?? ''),
+    cx: Number(s.cx ?? 0),
+    cy: Number(s.cy ?? 0),
+    hp: Number(s.hp ?? 0),
+    maxHp: Number(s.mhp ?? 0),
+    ally: Boolean(s.ally),
+    house: String(s.h ?? ''),
+  });
+  const power = raw.power as Record<string, number> | undefined;
+  return {
+    tick: Number(raw.tick ?? 0),
+    credits: Number(raw.credits ?? 0),
+    units: ((raw.units ?? []) as Record<string, unknown>[]).map(mapEntity),
+    enemies: ((raw.enemies ?? []) as Record<string, unknown>[]).map(mapEntity),
+    structures: ((raw.structures ?? []) as Record<string, unknown>[]).map(mapStruct),
+    power: power ? { produced: power.produced ?? 0, consumed: power.consumed ?? 0 } : undefined,
+  };
+}
+
+// ── Entity diffing ──────────────────────────────────────────
+
+type EntityKey = string; // "TYPE:cx,cy"
+
+function entityKey(e: NormEntity | NormStructure): EntityKey {
+  return `${e.type}:${e.cx},${e.cy}`;
+}
+
+interface EntityDiff {
+  category: string;
+  onlyInWasm: EntityKey[];
+  onlyInTs: EntityKey[];
+  hpMismatches: { key: EntityKey; wasmHp: number; tsHp: number }[];
+  countWasm: number;
+  countTs: number;
+}
+
+function diffEntities(
+  wasmList: (NormEntity | NormStructure)[],
+  tsList: (NormEntity | NormStructure)[],
+  category: string,
+): EntityDiff {
+  // Build multisets (same type+position can have multiple entities)
+  const wasmBag = new Map<EntityKey, (NormEntity | NormStructure)[]>();
+  for (const e of wasmList) {
+    const k = entityKey(e);
+    (wasmBag.get(k) ?? (wasmBag.set(k, []), wasmBag.get(k)!)).push(e);
+  }
+  const tsBag = new Map<EntityKey, (NormEntity | NormStructure)[]>();
+  for (const e of tsList) {
+    const k = entityKey(e);
+    (tsBag.get(k) ?? (tsBag.set(k, []), tsBag.get(k)!)).push(e);
+  }
+
+  const allKeys = new Set([...wasmBag.keys(), ...tsBag.keys()]);
+  const onlyInWasm: EntityKey[] = [];
+  const onlyInTs: EntityKey[] = [];
+  const hpMismatches: { key: EntityKey; wasmHp: number; tsHp: number }[] = [];
+
+  for (const k of allKeys) {
+    const wList = wasmBag.get(k) ?? [];
+    const tList = tsBag.get(k) ?? [];
+    const shared = Math.min(wList.length, tList.length);
+
+    // Check HP for matched entities
+    for (let i = 0; i < shared; i++) {
+      if (wList[i].hp !== tList[i].hp) {
+        hpMismatches.push({ key: k, wasmHp: wList[i].hp, tsHp: tList[i].hp });
+      }
+    }
+
+    // Extras
+    for (let i = shared; i < wList.length; i++) onlyInWasm.push(k);
+    for (let i = shared; i < tList.length; i++) onlyInTs.push(k);
+  }
+
+  return { category, onlyInWasm, onlyInTs, hpMismatches, countWasm: wasmList.length, countTs: tsList.length };
+}
+
+interface CheckpointDiff {
+  tick: number;
+  credits: { wasm: number; ts: number; match: boolean };
+  units: EntityDiff;
+  enemies: EntityDiff;
+  structures: EntityDiff;
+  clean: boolean; // no divergences at all
+}
+
+function diffStates(wasm: NormState, ts: NormState, tick: number): CheckpointDiff {
+  const units = diffEntities(wasm.units, ts.units, 'units');
+  const enemies = diffEntities(wasm.enemies, ts.enemies, 'enemies');
+  const structures = diffEntities(wasm.structures, ts.structures, 'structures');
+  const creditsMatch = wasm.credits === ts.credits;
+
+  const clean =
+    creditsMatch &&
+    units.onlyInWasm.length === 0 && units.onlyInTs.length === 0 && units.hpMismatches.length === 0 &&
+    enemies.onlyInWasm.length === 0 && enemies.onlyInTs.length === 0 && enemies.hpMismatches.length === 0 &&
+    structures.onlyInWasm.length === 0 && structures.onlyInTs.length === 0 && structures.hpMismatches.length === 0;
+
+  return {
+    tick,
+    credits: { wasm: wasm.credits, ts: ts.credits, match: creditsMatch },
+    units,
+    enemies,
+    structures,
+    clean,
+  };
+}
+
+// ── Pretty print ────────────────────────────────────────────
+
+function printDiff(d: CheckpointDiff): string {
+  const lines: string[] = [];
+  const icon = d.clean ? 'MATCH' : 'DIFF';
+  lines.push(`[${icon}] tick ${d.tick}`);
+
+  if (!d.credits.match) {
+    lines.push(`  credits: WASM=${d.credits.wasm} TS=${d.credits.ts}`);
+  }
+
+  for (const cat of [d.units, d.enemies, d.structures]) {
+    const countMatch = cat.countWasm === cat.countTs;
+    const label = `  ${cat.category}: ${cat.countWasm}/${cat.countTs}${countMatch ? '' : ' MISMATCH'}`;
+    if (!countMatch || cat.onlyInWasm.length || cat.onlyInTs.length || cat.hpMismatches.length) {
+      lines.push(label);
+      for (const k of cat.onlyInWasm) lines.push(`    +WASM: ${k}`);
+      for (const k of cat.onlyInTs) lines.push(`    +TS:   ${k}`);
+      for (const m of cat.hpMismatches) lines.push(`    HP: ${m.key} WASM=${m.wasmHp} TS=${m.tsHp}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// ── WASM stepping (chunked for Asyncify) ────────────────────
+
+async function wasmStep(page: Page, n: number): Promise<Record<string, unknown> | null> {
+  const MAX_PER_CALL = 15;
   let remaining = n;
-  let lastResult: { state: Record<string, unknown> } | null = null;
+  let lastState: Record<string, unknown> | null = null;
 
   while (remaining > 0) {
     const chunk = Math.min(remaining, MAX_PER_CALL);
@@ -107,228 +266,195 @@ async function wasmStep(page: Page, n: number): Promise<{ state: Record<string, 
         return r;
       }, chunk);
 
-      if (raw && typeof raw === 'object' && 'state' in (raw as Record<string, unknown>)) {
-        lastResult = raw as { state: Record<string, unknown> };
+      if (raw && typeof raw === 'object') {
+        const obj = raw as Record<string, unknown>;
+        if (obj.state && typeof obj.state === 'object') {
+          lastState = obj.state as Record<string, unknown>;
+        }
       }
     } catch (e) {
-      console.log(`WASM: Step chunk failed: ${e}`);
-      return lastResult;
+      console.log(`WASM: Step chunk failed at remaining=${remaining}: ${e}`);
+      return lastState;
     }
   }
 
-  return lastResult;
+  return lastState;
 }
 
-// ──────────────────────────────────────────────────────────────
+// ── TS stepping ─────────────────────────────────────────────
 
-test.describe('Gameplay Comparison: SCG01EA (Allied M1)', () => {
-  test.setTimeout(10 * 60 * 1000); // 10 minutes
+async function tsStep(page: Page, n: number): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await page.evaluate((ticks: number) => {
+      const w = window as unknown as {
+        __agentStep: (n: number) => { state: Record<string, unknown> };
+      };
+      const r = w.__agentStep(ticks);
+      return r?.state ?? null;
+    }, n);
+    return raw as Record<string, unknown> | null;
+  } catch (e) {
+    console.log(`TS: Step failed: ${e}`);
+    return null;
+  }
+}
 
-  test('TS Engine — passive tick advancement', async ({ page }) => {
+// ── Main test ───────────────────────────────────────────────
+
+test.describe('State Parity: SCG01EA seed=0', () => {
+  test.setTimeout(10 * 60 * 1000);
+
+  test('Lockstep comparison', async ({ browser }) => {
     ensureDir();
-    const logs: string[] = [];
-    page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
 
-    console.log('TS: Loading SCG01EA in agent mode...');
-    await page.goto(`${BASE_URL}?anttest=agent&scenario=SCG01EA&difficulty=normal`, { waitUntil: 'load' });
-    await page.waitForSelector('canvas', { timeout: 30_000 });
+    // Launch both engines in separate pages
+    const wasmCtx = await browser.newContext();
+    const tsCtx = await browser.newContext();
+    const wasmPage = await wasmCtx.newPage();
+    const tsPage = await tsCtx.newPage();
 
-    // Wait for agent harness
-    await page.waitForFunction(
+    const wasmLogs: string[] = [];
+    const tsLogs: string[] = [];
+    wasmPage.on('console', msg => wasmLogs.push(`[${msg.type()}] ${msg.text()}`));
+    tsPage.on('console', msg => tsLogs.push(`[${msg.type()}] ${msg.text()}`));
+    wasmPage.on('dialog', async dialog => { await dialog.accept(); });
+
+    // ── Load both engines ──
+    console.log('Loading both engines with seed=0...');
+
+    const wasmUrl = `${BASE_URL}/ra/original.html?scenario=SCG01EA.INI&autoplay=1&agentharness=1&seed=${SEED}`;
+    const tsUrl = `${BASE_URL}?anttest=agent&scenario=SCG01EA&difficulty=normal`;
+
+    await Promise.all([
+      wasmPage.goto(wasmUrl, { waitUntil: 'load' }),
+      tsPage.goto(tsUrl, { waitUntil: 'load' }),
+    ]);
+
+    // ── Wait for both to be ready ──
+    console.log('Waiting for both engines to initialize...');
+
+    const wasmReady = wasmPage.waitForFunction(() => {
+      const t = document.title;
+      return t.includes('ENTERING_GAME_LOOP') || t.includes('SELECT_GAME_DONE');
+    }, { timeout: 180_000, polling: 1000 });
+
+    const tsReady = tsPage.waitForFunction(
       () => (window as unknown as { __agentReady?: boolean }).__agentReady === true,
       { timeout: 120_000, polling: 1000 },
     );
-    console.log('TS: Agent harness ready');
 
-    // Get initial state (tick 0)
-    const initialState = await page.evaluate(() => {
-      return (window as unknown as { __agentState: () => Record<string, unknown> }).__agentState();
+    await Promise.all([wasmReady, tsReady]);
+    console.log('Both engines ready');
+
+    // WASM needs gameplay state to be available
+    await wasmPage.waitForFunction(() => {
+      try {
+        const Asyncify = (window as unknown as { Asyncify?: { state: number } }).Asyncify;
+        if (Asyncify && Asyncify.state !== 0) return false;
+        const Module = (window as unknown as { Module?: { ccall: Function } }).Module;
+        if (!Module?.ccall) return false;
+        const json = Module.ccall('agent_get_state', 'string', [], []);
+        const state = JSON.parse(json as string);
+        return Array.isArray(state.units) && state.units.length > 0;
+      } catch { return false; }
+    }, { timeout: 60_000, polling: 500 });
+
+    // Get WASM start tick (may not be exactly 0)
+    const wasmStartTick = await wasmPage.evaluate(() => {
+      const Module = (window as unknown as { Module: { ccall: Function } }).Module;
+      const json = Module.ccall('agent_get_state', 'string', [], []);
+      return JSON.parse(json as string).tick as number;
     });
-    console.log(`TS: Initial tick=${initialState.tick}, state=${initialState.state}`);
+    console.log(`WASM start tick: ${wasmStartTick}`);
 
-    // Capture tick 0
-    const img0 = await captureCanvas(page);
-    if (img0) saveDataUrl(img0, path.join(OUT_DIR, `ts-tick-${pad(0)}.png`));
-    saveJson(summarizeState(initialState), path.join(OUT_DIR, `ts-state-${pad(0)}.json`));
-    saveJson(initialState, path.join(OUT_DIR, `ts-full-state-${pad(0)}.json`));
-
-    // Step through checkpoints
-    let currentTick = Number(initialState.tick) || 0;
+    // ── Lockstep comparison at each checkpoint ──
+    const results: CheckpointDiff[] = [];
+    let wasmTick = wasmStartTick;
+    let tsTick = 0;
 
     for (const target of CHECKPOINTS) {
-      if (target <= currentTick) continue;
+      const wasmDelta = (wasmStartTick + target) - wasmTick;
+      const tsDelta = target - tsTick;
 
-      const delta = target - currentTick;
-      console.log(`TS: Stepping ${delta} ticks → tick ${target}...`);
+      console.log(`\n── Checkpoint: tick ${target} ──`);
 
-      const result = await page.evaluate((n: number) => {
-        return (window as unknown as {
-          __agentStep: (n: number) => { state: Record<string, unknown> };
-        }).__agentStep(n);
-      }, delta);
+      // Step both engines (skip if delta is 0)
+      let wasmState: Record<string, unknown> | null = null;
+      let tsState: Record<string, unknown> | null = null;
 
-      const state = result.state;
-      currentTick = Number(state.tick) || target;
-
-      // Capture screenshot
-      const img = await captureCanvas(page);
-      if (img) saveDataUrl(img, path.join(OUT_DIR, `ts-tick-${pad(target)}.png`));
-      saveJson(summarizeState(state), path.join(OUT_DIR, `ts-state-${pad(target)}.json`));
-
-      const summary = summarizeState(state);
-      console.log(`TS: tick=${summary.tick} units=${summary.unitCount} enemies=${summary.enemyCount} structs=${summary.structureCount} credits=${summary.credits}`);
-    }
-
-    fs.writeFileSync(path.join(OUT_DIR, 'ts-console.log'), logs.join('\n'));
-    console.log('TS: Done');
-  });
-
-  test('WASM Original — passive tick advancement', async ({ page }) => {
-    ensureDir();
-    const logs: string[] = [];
-    page.on('console', msg => {
-      const text = msg.text();
-      logs.push(`[${msg.type()}] ${text}`);
-      if (text.includes('[AUTOPLAY]') || text.includes('[AGENT]')) console.log(`WASM: ${text}`);
-    });
-    page.on('dialog', async dialog => {
-      console.log(`WASM: Dialog dismissed: ${dialog.message()}`);
-      await dialog.accept();
-    });
-
-    console.log('WASM: Loading SCG01EA...');
-    await page.goto(`${BASE_URL}/ra/original.html?scenario=SCG01EA.INI&autoplay=1&agentharness=1`, { waitUntil: 'load' });
-    await page.waitForSelector('canvas', { timeout: 30_000 });
-
-    // Phase 1: Wait for WASM + autoplay to enter game loop
-    // Uses waitForFunction (in-page polling) — never call WASM functions via evaluate
-    // during Asyncify operations, it deadlocks.
-    console.log('WASM: Phase 1 — waiting for game loop entry (__autoplayReady)...');
-    try {
-      await page.waitForFunction(() => {
-        const w = window as unknown as { __autoplayReady?: boolean };
-        if (w.__autoplayReady === true) return true;
-        const t = document.title;
-        return t.includes('ENTERING_GAME_LOOP') || t.includes('SELECT_GAME_DONE');
-      }, { timeout: 180_000, polling: 1000 });
-      console.log('WASM: Game loop entered');
-    } catch {
-      console.log('WASM: Game loop entry timeout — attempting Phase 2 anyway');
-    }
-
-    // Phase 2: Wait for agent_get_state to return valid data (units present).
-    // Must use waitForFunction — page.evaluate can hang with Asyncify.
-    // Check Asyncify.state === 0 before calling ccall.
-    console.log('WASM: Phase 2 — waiting for valid agent_get_state...');
-    try {
-      await page.waitForFunction(() => {
-        try {
-          const Asyncify = (window as unknown as { Asyncify?: { state: number } }).Asyncify;
-          if (Asyncify && Asyncify.state !== 0) return false;
-          const Module = (window as unknown as { Module?: { ccall: Function } }).Module;
-          if (!Module?.ccall) return false;
-          const json = Module.ccall('agent_get_state', 'string', [], []);
-          const state = JSON.parse(json as string);
-          return Array.isArray(state.units) && state.units.length > 0;
-        } catch { return false; }
-      }, { timeout: 120_000, polling: 1000 });
-      console.log('WASM: Gameplay state available');
-    } catch {
-      console.log('WASM: Gameplay state not available — aborting');
-      await page.screenshot({ path: path.join(OUT_DIR, 'wasm-no-gameplay.png') });
-      fs.writeFileSync(path.join(OUT_DIR, 'wasm-console.log'), logs.join('\n'));
-      return;
-    }
-
-    // Now safe to use page.evaluate with async __agentStep
-    // (game loop is yielding via emscripten_sleep(1) every frame)
-    const initialState = await page.evaluate(async () => {
-      const w = window as unknown as { __agentState: () => Record<string, unknown> };
-      return w.__agentState();
-    });
-    const startTick = Number(initialState.tick) || 0;
-    console.log(`WASM: Initial tick=${startTick}, units=${(initialState.units as unknown[])?.length}`);
-
-    // Capture tick 0 (relative — WASM may already be a few ticks in from autoplay)
-    const img0 = await captureCanvas(page);
-    if (img0) saveDataUrl(img0, path.join(OUT_DIR, `wasm-tick-${pad(0)}.png`));
-    saveJson(summarizeState(initialState), path.join(OUT_DIR, `wasm-state-${pad(0)}.json`));
-    saveJson(initialState, path.join(OUT_DIR, `wasm-full-state-${pad(0)}.json`));
-
-    // Step through checkpoints
-    // WASM may have started a few ticks in — step relative to start
-    let currentTick = startTick;
-
-    for (const target of CHECKPOINTS) {
-      if (target <= 0) continue; // already captured tick 0
-
-      const absoluteTarget = startTick + target;
-      const delta = absoluteTarget - currentTick;
-      if (delta <= 0) continue;
-
-      console.log(`WASM: Stepping ${delta} ticks → relative tick ${target}...`);
-
-      const stepResult = await wasmStep(page, delta);
-
-      if (!stepResult?.state) {
-        console.log(`WASM: Step to tick ${target} timed out — skipping`);
-        continue;
+      if (wasmDelta > 0 && tsDelta > 0) {
+        [wasmState, tsState] = await Promise.all([
+          wasmStep(wasmPage, wasmDelta),
+          tsStep(tsPage, tsDelta),
+        ]);
+      } else if (wasmDelta > 0) {
+        wasmState = await wasmStep(wasmPage, wasmDelta);
+      } else if (tsDelta > 0) {
+        tsState = await tsStep(tsPage, tsDelta);
       }
 
-      const state = stepResult.state;
-      currentTick = Number(state.tick) || absoluteTarget;
+      // If no state returned from step (tick 0), read directly
+      if (!wasmState) {
+        wasmState = await wasmPage.evaluate(() => {
+          const Module = (window as unknown as { Module: { ccall: Function } }).Module;
+          return JSON.parse(Module.ccall('agent_get_state', 'string', [], []) as string);
+        });
+      }
+      if (!tsState) {
+        tsState = await tsPage.evaluate(() => {
+          return (window as unknown as { __agentState: () => Record<string, unknown> }).__agentState();
+        });
+      }
 
-      // Capture screenshot
-      // WASM renders via putImageData — need a brief moment for the render to land
-      await page.waitForTimeout(200);
-      const img = await captureCanvas(page);
-      if (img) saveDataUrl(img, path.join(OUT_DIR, `wasm-tick-${pad(target)}.png`));
-      saveJson(summarizeState(state), path.join(OUT_DIR, `wasm-state-${pad(target)}.json`));
+      wasmTick = Number(wasmState.tick ?? wasmTick);
+      tsTick = Number(tsState.tick ?? tsTick);
 
-      const summary = summarizeState(state);
-      console.log(`WASM: tick=${summary.tick} units=${summary.unitCount} enemies=${summary.enemyCount} structs=${summary.structureCount} credits=${summary.credits}`);
+      // Save raw states
+      saveJson(wasmState, path.join(OUT_DIR, `wasm-full-${pad(target)}.json`));
+      saveJson(tsState, path.join(OUT_DIR, `ts-full-${pad(target)}.json`));
+
+      // Normalize and diff
+      const normWasm = normalizeWasm(wasmState);
+      const normTs = normalizeTs(tsState);
+      const diff = diffStates(normWasm, normTs, target);
+      results.push(diff);
+
+      const report = printDiff(diff);
+      console.log(report);
     }
 
-    fs.writeFileSync(path.join(OUT_DIR, 'wasm-console.log'), logs.join('\n'));
-    console.log('WASM: Done');
-  });
+    // ── Summary report ──
+    const totalClean = results.filter(r => r.clean).length;
+    const totalCheckpoints = results.length;
 
-  test('Generate comparison summary', async ({}) => {
-    ensureDir();
-
-    const summary: Record<string, unknown> = { checkpoints: [] };
-    const checkpoints: Array<Record<string, unknown>> = [];
-
-    for (const tick of [0, ...CHECKPOINTS.filter(t => t > 0)]) {
-      const tsPath = path.join(OUT_DIR, `ts-state-${pad(tick)}.json`);
-      const wasmPath = path.join(OUT_DIR, `wasm-state-${pad(tick)}.json`);
-
-      if (!fs.existsSync(tsPath) || !fs.existsSync(wasmPath)) continue;
-
-      const ts = JSON.parse(fs.readFileSync(tsPath, 'utf-8'));
-      const wasm = JSON.parse(fs.readFileSync(wasmPath, 'utf-8'));
-
-      const diff: Record<string, unknown> = {
-        tick,
-        unitCount: { ts: ts.unitCount, wasm: wasm.unitCount, match: ts.unitCount === wasm.unitCount },
-        enemyCount: { ts: ts.enemyCount, wasm: wasm.enemyCount, match: ts.enemyCount === wasm.enemyCount },
-        structureCount: { ts: ts.structureCount, wasm: wasm.structureCount, match: ts.structureCount === wasm.structureCount },
-        credits: { ts: ts.credits, wasm: wasm.credits, match: ts.credits === wasm.credits },
-        unitsByType: { ts: ts.unitsByType, wasm: wasm.unitsByType },
-        enemiesByType: { ts: ts.enemiesByType, wasm: wasm.enemiesByType },
-      };
-
-      checkpoints.push(diff);
+    console.log('\n══════════════════════════════════════');
+    console.log(`PARITY RESULT: ${totalClean}/${totalCheckpoints} checkpoints match`);
+    if (totalClean < totalCheckpoints) {
+      console.log('Divergent checkpoints:');
+      for (const r of results.filter(r => !r.clean)) {
+        console.log(printDiff(r));
+      }
     }
+    console.log('══════════════════════════════════════\n');
 
-    summary.checkpoints = checkpoints;
-    saveJson(summary, path.join(OUT_DIR, 'summary.json'));
-    console.log(`Summary: ${checkpoints.length} checkpoints compared`);
-    for (const cp of checkpoints) {
-      const u = cp.unitCount as { ts: number; wasm: number; match: boolean };
-      const e = cp.enemyCount as { ts: number; wasm: number; match: boolean };
-      const s = cp.structureCount as { ts: number; wasm: number; match: boolean };
-      console.log(`  tick ${cp.tick}: units=${u.ts}/${u.wasm}${u.match ? '✓' : '✗'} enemies=${e.ts}/${e.wasm}${e.match ? '✓' : '✗'} structs=${s.ts}/${s.wasm}${s.match ? '✓' : '✗'}`);
-    }
+    // Save full report
+    saveJson({
+      seed: SEED,
+      scenario: 'SCG01EA',
+      baseUrl: BASE_URL,
+      wasmStartTick,
+      checkpoints: results,
+      summary: { clean: totalClean, total: totalCheckpoints },
+    }, path.join(OUT_DIR, 'parity-report.json'));
+
+    fs.writeFileSync(path.join(OUT_DIR, 'wasm-console.log'), wasmLogs.join('\n'));
+    fs.writeFileSync(path.join(OUT_DIR, 'ts-console.log'), tsLogs.join('\n'));
+
+    // Clean up
+    await wasmCtx.close();
+    await tsCtx.close();
+
+    // Fail test if any checkpoint diverged
+    expect(totalClean, `${totalCheckpoints - totalClean} checkpoints diverged`).toBe(totalCheckpoints);
   });
 });

@@ -18,6 +18,7 @@
 #include "function.h"
 
 extern void Update_Mouse_Pos(int x, int y);
+extern int CustomSeed;
 
 /*
 ** Global autoplay flag. When non-zero, BGMessageBox returns immediately
@@ -25,10 +26,27 @@ extern void Update_Mouse_Pos(int x, int y);
 */
 int g_autoplay_mode = 0;
 int g_agent_harness_mode = 0;
+int g_custom_seed_set = 0;
 char g_startup_scenario_name[_MAX_FNAME + _MAX_EXT] = "";
 int g_startup_scenario_ants = 0;
 
 extern "C" {
+
+/*
+** set_custom_seed: Force a deterministic RNG seed.
+** Must be called before main() (e.g. from onRuntimeInitialized).
+** Sets g_custom_seed_set flag so Init_Random() uses this seed even when seed=0.
+*/
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int set_custom_seed(int seed)
+{
+    CustomSeed = seed;
+    g_custom_seed_set = 1;
+    printf("[SEED] CustomSeed set to %d\n", seed);
+    return seed;
+}
 
 /*
 ** set_autoplay: Enable/disable autoplay mode.

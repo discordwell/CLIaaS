@@ -1104,16 +1104,14 @@ export function calculateHouseEdgeSpawnCell(
     return null;
   }
 
-  // C++ display.cpp:2467-2491: Calculated_Cell takes a SourceType parameter
-  // (SOURCE_NORTH=0, SOURCE_EAST=1, etc.) from HouseClass::Control.Edge.
-  // The house edge directly determines the spawn edge. The origin waypoint only
-  // determines the aligned coordinate on the perpendicular axis.
-  // Fall back to waypoint inference only when no house edge is configured.
-  const houseEdge = houseEdges?.get(house);
-  const edge = houseEdge
-    ? normalizeHouseEdge(houseEdge)
-    : alignedCell
-      ? inferClosestMapEdge(alignedCell, mapBounds)
+  // C++ display.cpp:2432-2466 (Calculated_Cell): When a waypoint is provided,
+  // C++ ALWAYS infers the spawn edge from the waypoint's closest map edge —
+  // the house Edge= parameter is only used as a fallback when no waypoint exists.
+  // Priority: waypoint inference → house edge → default (north).
+  const edge = alignedCell
+    ? inferClosestMapEdge(alignedCell, mapBounds)
+    : houseEdges?.get(house)
+      ? normalizeHouseEdge(houseEdges.get(house))
       : normalizeHouseEdge(undefined);
   const { x, y, w, h } = mapBounds;
   const randOffset = Math.floor(random() * Math.max(w, h));
@@ -1182,11 +1180,11 @@ export function getSpawnEdge(
   alignedCell?: CellPos,
 ): string {
   if (!mapBounds) return 'north';
-  const houseEdge = houseEdges?.get(house);
-  return houseEdge
-    ? normalizeHouseEdge(houseEdge)
-    : alignedCell
-      ? inferClosestMapEdge(alignedCell, mapBounds)
+  // C++ parity: waypoint inference takes priority over house edge
+  return alignedCell
+    ? inferClosestMapEdge(alignedCell, mapBounds)
+    : houseEdges?.get(house)
+      ? normalizeHouseEdge(houseEdges.get(house))
       : normalizeHouseEdge(undefined);
 }
 

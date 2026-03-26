@@ -70,6 +70,13 @@ function getStartupScenarioFromQuery() {
   return scenario.toUpperCase();
 }
 
+function getSeedFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  var seed = params.get('seed');
+  if (seed === null) return null;
+  return parseInt(seed, 10);
+}
+
 // === Self-capture + rendering hook system ===
 (function() {
   window.__wasmScreenshots = [];
@@ -717,28 +724,89 @@ var Module = {
     // The EM_ASM at address 204400 receives ($0=w, $1=h, $2=pixels) from C.
     // SDL2 internally stores 0x0 dimensions, so w=0 and h=0 are passed.
     // Wrap it to substitute the actual game resolution (320x200).
+    // Also: optionally capture raw frame from WASM heap (works in background tabs).
+    window.__captureFromHeap = false;
+    window.__heapCapture = null;
+    window.__wasmCaptureFrame = function() {
+      // Call the original SDL2 render EM_ASM with the last known pixel pointer.
+      // This function has HEAPU8 in its closure, so it reads WASM memory and calls putImageData.
+      // We arm __captureOnNextRender so the putImageData override captures the frame.
+      if (window.__lastPixelPtr > 0 && window.__renderASMFn) {
+        window.__captureOnNextRender = true;
+        window.__captureOnRenderKey = '__heap_capture';
+        try {
+          window.__renderASMFn(window.__lastPixelW || 320, window.__lastPixelH || 200, window.__lastPixelPtr);
+        } catch(e) { /* ignore */ }
+        return;
+      }
+      // Fallback: arm for next natural render
+      window.__captureOnNextRender = true;
+      window.__captureOnRenderKey = '__heap_capture';
+    };
+    window.__wasmGetFrameCapture = function() {
+      // Check __heapCapture first (direct heap read), then __wasmScreenshots (putImageData hook)
+      if (window.__heapCapture) return window.__heapCapture;
+      var screenshots = window.__wasmScreenshots || [];
+      for (var i = screenshots.length - 1; i >= 0; i--) {
+        if (screenshots[i].key === '__heap_capture') {
+          var dataUrl = screenshots[i].dataUrl;
+          screenshots.splice(i, 1); // consume it
+          return dataUrl;
+        }
+      }
+      return null;
+    };
+
+    // Track the last known pixel buffer pointer from the SDL render EM_ASM call.
+    // This lets us re-read the framebuffer at any time via __wasmCaptureFrame().
+    window.__lastPixelPtr = 0;
+    window.__lastPixelW = 320;
+    window.__lastPixelH = 200;
+
+    function heapCaptureHook(w, h, $2) {
+      // Always track the pointer (even when not capturing)
+      window.__lastPixelPtr = $2;
+      window.__lastPixelW = w;
+      window.__lastPixelH = h;
+
+      if (!window.__captureFromHeap) return;
+      window.__captureFromHeap = false;
+      // The EM_ASM render function creates an ImageData and calls putImageData.
+      // Our putImageData override (line ~170) will fire and detect content.
+      // But we also capture here by letting the render proceed and then
+      // grabbing the canvas content immediately after.
+      // Mark that we want putImageData to capture this frame.
+      window.__captureOnNextRender = true;
+      window.__captureOnRenderKey = '__heap_capture';
+    }
+
+    window.__renderASMFn = null; // will hold the original EM_ASM render function
+
     if (typeof ASM_CONSTS !== 'undefined' && ASM_CONSTS[204400]) {
       var origRenderASM = ASM_CONSTS[204400];
+      window.__renderASMFn = origRenderASM;
       ASM_CONSTS[204400] = function($0, $1, $2) {
         var w = $0 <= 0 ? 320 : $0;
         var h = $1 <= 0 ? 200 : $1;
+        heapCaptureHook(w, h, $2);
         return origRenderASM(w, h, $2);
       };
-      wlog('preRun: patched ASM_CONSTS[204400] (SDL2 render) to fix 0x0 dimensions');
+      wlog('preRun: patched ASM_CONSTS[204400] (SDL2 render + heap capture)');
     } else {
       wlog('preRun: ASM_CONSTS[204400] not found, scanning for SDL2 render EM_ASM...');
-      // Fallback: scan all ASM_CONSTS for the SDL2 rendering function
       if (typeof ASM_CONSTS !== 'undefined') {
         for (var addr in ASM_CONSTS) {
           var fn = ASM_CONSTS[addr];
           if (typeof fn === 'function' && fn.toString().indexOf('putImageData') !== -1) {
             var origFn = ASM_CONSTS[addr];
+            window.__renderASMFn = origFn;
             ASM_CONSTS[addr] = function($0, $1, $2) {
               var w = $0 <= 0 ? 320 : $0;
               var h = $1 <= 0 ? 200 : $1;
+              heapCaptureHook(w, h, $2);
               return origFn(w, h, $2);
             };
-            wlog('preRun: patched ASM_CONSTS[' + addr + '] (SDL2 render fallback)');
+            wlog('preRun: patched ASM_CONSTS[' + addr + '] (SDL2 render fallback + heap capture)');
             break;
           }
         }
@@ -831,6 +899,15 @@ var Module = {
     var autoplay = getAutoplayModeFromQuery();
     var agentHarness = getAgentHarnessModeFromQuery();
     var startupScenario = getStartupScenarioFromQuery();
+    var seed = getSeedFromQuery();
+    if (seed !== null && !isNaN(seed)) {
+      if (typeof Module._set_custom_seed === 'function') {
+        Module._set_custom_seed(seed);
+        console.log('[SEED] CustomSeed set to ' + seed + ' via onRuntimeInitialized');
+      } else {
+        console.error('[SEED] Module._set_custom_seed not available at onRuntimeInitialized');
+      }
+    }
     if (agentHarness) {
       if (typeof Module._set_agent_harness_mode === 'function') {
         Module._set_agent_harness_mode(1);
@@ -889,7 +966,7 @@ var Module = {
   // Cache bust WASM binary to avoid stale binaries after deploys
   locateFile: function(path, scriptDirectory) {
     if (path.endsWith('.wasm')) {
-      return scriptDirectory + path + '?v=20260316z8';
+      return scriptDirectory + path + '?v=20260326seed2';
     }
     return scriptDirectory + path;
   }
@@ -1449,6 +1526,6 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
 })();
 </script>
 <script src="gamedata.js"></script>
-<script async src="rasdl.js?v=20260316z8"></script>
+<script async src="rasdl.js?v=20260326seed2"></script>
 </body>
 </html>
