@@ -24,20 +24,8 @@ function lerpFacing32(prev: number, curr: number, alpha: number): number {
   return ((Math.round(result) % 32) + 32) % 32;
 }
 
-// House color tints (used for unit sprite remapping)
-const HOUSE_TINT: Record<string, string> = {
-  [House.Spain]:   'rgba(255,255,80,0.25)',   // yellow/gold — player allied
-  [House.Greece]:  'rgba(80,180,255,0.25)',    // blue — allied
-  [House.England]: 'rgba(80,200,80,0.25)',    // green — allied (campaign)
-  [House.France]:  'rgba(100,180,255,0.25)',  // light blue — allied (campaign)
-  [House.USSR]:    'rgba(255,60,60,0.30)',     // red — soviet
-  [House.Ukraine]: 'rgba(200,80,200,0.25)',    // purple — soviet ally
-  [House.Germany]: 'rgba(160,160,160,0.25)',   // gray — allied (ant missions: enemy)
-  [House.Turkey]:  'rgba(200,200,100,0.25)',   // olive — neutral/scenario
-  [House.GoodGuy]: 'rgba(255,255,80,0.25)',   // yellow — player side
-  [House.BadGuy]:  'rgba(255,60,60,0.30)',     // red — enemy side
-  [House.Neutral]: 'rgba(0,0,0,0)',            // no tint
-};
+// House colors are applied via palette index remapping (getRemappedSheet),
+// matching C++ SHAPE_FADING remap tables. No tint overlay fallback.
 
 // Minimap blip colors per faction (C++ parity — each house has a unique radar color)
 const HOUSE_MINIMAP_COLOR: Record<string, string> = {
@@ -2013,20 +2001,8 @@ export class Renderer {
           ctx.lineTo(screen.x + Math.cos(ang + Math.PI / 2) * rr, screen.y - spriteH * 0.3 + Math.sin(ang + Math.PI / 2) * rr * 0.4);
           ctx.stroke();
         }
-        // House-color tint fallback: only used when remap-colors.json is not available.
-        // Ant units use their own brown/olive sprite colors — no faction tint (C++ parity).
-        if (!remapped && !entity.isAnt) {
-          const tint = HOUSE_TINT[entity.house];
-          if (tint && tint !== 'rgba(0,0,0,0)') {
-            ctx.fillStyle = tint;
-            ctx.fillRect(
-              screen.x - spriteW / 2,
-              screen.y - spriteH / 2,
-              spriteW,
-              spriteH,
-            );
-          }
-        }
+        // C++ uses palette index remapping for house colors — handled by
+        // getRemappedSheet() above. No fallback tint overlay needed.
         // Predator shimmer during cloak/uncloak transitions (C++ SHAPE_PREDATOR pixel-offset sampling)
         if (entity.stats.isCloakable &&
             (entity.cloakState === CloakState.CLOAKING || entity.cloakState === CloakState.UNCLOAKING)) {
