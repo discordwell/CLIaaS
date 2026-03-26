@@ -1186,6 +1186,10 @@ export class Game {
     this.lossCount = 0;
     this.pointTotal = 0;
     this.destroyedTriggerNames.clear();
+    // Reset game loop accumulator — prevents turbo-speed carryover from previous
+    // mission causing a burst of 60+ ticks on the first frame of the new mission,
+    // which would blow past the tick<45 victory-check guard.
+    this.accumulator = 0;
     this.builtStructureTypes.clear();
     this.evaMessages = [];
     this.unitsLeftMap = 0;

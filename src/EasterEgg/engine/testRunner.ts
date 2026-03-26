@@ -111,7 +111,10 @@ export class TestRunner {
       };
 
       // Start mission
-      this.game.start(scenarioId).catch(() => finish('lost'));
+      this.game.start(scenarioId).catch((err) => {
+        console.error(`[TestRunner] ${scenarioId} start() failed:`, err);
+        finish('lost');
+      });
     });
   }
 
