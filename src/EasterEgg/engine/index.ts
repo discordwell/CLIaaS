@@ -1180,6 +1180,12 @@ export class Game {
     this.borrowedTime = 0;
     this.missionTimer = 0;
     this.missionTimerExpired = false;
+    // Reset kill/loss counters — prevents TEVENT_NUNITS_DESTROYED from carrying
+    // over between missions (e.g. SCA01EA kills → SCA02EA instant loss at tick 0).
+    this.killCount = 0;
+    this.lossCount = 0;
+    this.pointTotal = 0;
+    this.destroyedTriggerNames.clear();
     this.builtStructureTypes.clear();
     this.evaMessages = [];
     this.unitsLeftMap = 0;
@@ -4951,10 +4957,12 @@ export class Game {
       : this.getGroundspeedBias(entity.house);
     const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
     const baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
-    // Safety net: if per-icon terrain classification data is missing for a tile,
-    // the fallback range-based classifier may still over-classify as ROCK.
-    // Allow escape with base speed to prevent permanent stuck states.
-    if (terrainMult <= 0 && baseSpeed > 0) return baseSpeed;
+    if (terrainMult <= 0 && baseSpeed > 0) {
+      // C++ never has units on truly impassable cells — if this fires, terrain
+      // classification is wrong or a unit was placed on an invalid cell.
+      console.warn(`[movement] unit ${entity.type}(${entity.id}) at (${entity.cell.cx},${entity.cell.cy}) has 0 terrain speed — forcing base speed`);
+      return baseSpeed;
+    }
     return baseSpeed * terrainMult;
   }
 

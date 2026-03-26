@@ -106,4 +106,16 @@ describe('TEVENT_NUNITS_DESTROYED (type=16) — C++ parity', () => {
     expect(checkTriggerEvent(makeEvent(1), createState({ enemyKillCount: 1 }))).toBe(true);
     expect(checkTriggerEvent(makeEvent(1), createState({ enemyKillCount: 2 }))).toBe(true);
   });
+
+  it('SCA02EA los1 (threshold=8) should NOT fire at tick 0 with fresh killCount', () => {
+    // Bug: killCount from SCA01EA carried into SCA02EA, causing instant loss.
+    // After fix: killCount resets to 0 between missions.
+    const state = createState({ enemyKillCount: 0, gameTick: 0 });
+    expect(checkTriggerEvent(makeEvent(8), state)).toBe(false);
+  });
+
+  it('SCA02EA los1 fires only when 8+ kills achieved in current mission', () => {
+    expect(checkTriggerEvent(makeEvent(8), createState({ enemyKillCount: 7 }))).toBe(false);
+    expect(checkTriggerEvent(makeEvent(8), createState({ enemyKillCount: 8 }))).toBe(true);
+  });
 });
