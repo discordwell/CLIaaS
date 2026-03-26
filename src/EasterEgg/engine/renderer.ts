@@ -3835,30 +3835,12 @@ export class Renderer {
         ctx.strokeRect(stripX, iy, camW, camH);
       }
 
-      // Draw cameo icon — prefer HIRES (64x48), then LORES (32x24 scaled up),
-      // then sprite thumbnail as last visual fallback, then text.
+      // Draw cameo icon (HIRES 64x48 — all icons should be HIRES)
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
-        // HIRES or LORES — both use the actual cameo art (nearest-neighbor scale for LORES)
         ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
           stripX, iy, camW, camH);
-      } else {
-        // No icon at all — use building/unit sprite as thumbnail
-        const spriteName = item.isStructure ? item.type.toLowerCase() : (UNIT_STATS[item.type]?.image ?? null);
-        const thumbSheet = spriteName ? assets.getSheet(spriteName) : null;
-        if (thumbSheet && spriteName) {
-          const scale = Math.min(camW / thumbSheet.meta.frameWidth, camH / thumbSheet.meta.frameHeight) * 0.85;
-          assets.drawFrame(ctx, spriteName, 0, stripX + camW / 2, iy + camH / 2, {
-            centerX: true, centerY: true, scale,
-          });
-        } else {
-          ctx.fillStyle = '#888';
-          ctx.font = 'bold 6px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(item.type.slice(0, 4), stripX + camW / 2, iy + camH / 2 + 2);
-          ctx.textAlign = 'left';
-        }
       }
 
       // Check production state — use factory type key (5-factory system)

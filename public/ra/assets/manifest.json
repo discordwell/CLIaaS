@@ -2923,5 +2923,68 @@
     "rows": 3,
     "sheetWidth": 1280,
     "sheetHeight": 240
+  },
+  "shokicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "mechicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "ctnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "ttnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "qtnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "dtrkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "fturicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
   }
 }
