@@ -13,6 +13,7 @@ import {
 import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
 import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, type MapTree } from './map';
+import { type TilesetMeta, type AssetManager } from './assets';
 
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
 
@@ -1533,7 +1534,7 @@ function applyMission(entity: Entity, missionStr: string): void {
 }
 
 /** Load a scenario and create entities + map setup */
-export async function loadScenario(scenarioId: string): Promise<ScenarioResult> {
+export async function loadScenario(scenarioId: string, assets?: AssetManager): Promise<ScenarioResult> {
   const url = `/ra/assets/${scenarioId}.ini`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load scenario: ${url}`);
@@ -1545,9 +1546,10 @@ export async function loadScenario(scenarioId: string): Promise<ScenarioResult> 
   map.setBounds(data.mapBounds.x, data.mapBounds.y, data.mapBounds.w, data.mapBounds.h);
   map.initDefault();
 
-  // Decode MapPack for terrain data
+  // Decode MapPack for terrain data (pass tileset metadata for per-icon classification)
   if (data.mapPack) {
-    decodeMapPack(data.mapPack, map, data.theatre);
+    const tilesetMeta = assets?.getTilesetMeta(data.theatre) ?? null;
+    decodeMapPack(data.mapPack, map, data.theatre, tilesetMeta);
   }
 
   // Decode OverlayPack for ore/gem/wall overlays
@@ -1953,7 +1955,7 @@ function decodeOverlayPack(base64Data: string, map: GameMap): void {
 // The template type + icon determine the visual appearance of each map cell.
 
 /** Decode MapPack data and apply terrain types to the map */
-function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void {
+function decodeMapPack(base64Data: string, map: GameMap, theatre: string, tilesetMeta?: TilesetMeta | null): void {
   try {
     // Decode Base64
     const binary = atob(base64Data);
@@ -1988,84 +1990,87 @@ function decodeMapPack(base64Data: string, map: GameMap, theatre: string): void 
       classifyInteriorTerrain(map, templateType);
     } else {
       // TEMPERATE and SNOW share the same template ID ranges (but SNOW has frozen rivers)
-      classifyOutdoorTerrain(map, templateType, templateIcon, theatre);
+      classifyOutdoorTerrain(map, templateType, templateIcon, theatre, tilesetMeta);
     }
   } catch {
     // MapPack decode failed — terrain stays at default
   }
 }
 
+/** C++ LandType name → TS Terrain enum mapping for per-icon classification.
+ *  C++ cdata.cpp:3009-3026 _land[16] → defines.h LandType enum. */
+export const LAND_NAME_TO_TERRAIN: Record<string, Terrain> = {
+  'Clear': Terrain.CLEAR,
+  'Road':  Terrain.ROAD,
+  'Water': Terrain.WATER,
+  'Rock':  Terrain.ROCK,
+  'Beach': Terrain.BEACH,
+  'Rough': Terrain.ROUGH,
+  'River': Terrain.RIVER,
+};
+
 /** Classify TEMPERATE/SNOW terrain from MapPack template types.
- *  Both theatres share identical template ID ranges, but SNOW has frozen rivers. */
-function classifyOutdoorTerrain(
+ *  Both theatres share identical template ID ranges, but SNOW has frozen rivers.
+ *
+ *  Primary path: per-icon classification from tileset control map data (C++ cdata.cpp:3002-3032).
+ *  Fallback: template-range buckets when tileset metadata is unavailable. */
+export function classifyOutdoorTerrain(
   map: GameMap,
   templateType: Uint16Array,
   templateIcon: Uint8Array,
   theatre = 'TEMPERATE',
+  tilesetMeta?: TilesetMeta | null,
 ): void {
   const isSnow = theatre === 'SNOW';
-  // TEMPERATE/SNOW template type IDs (from RA TEMPERAT.INI / OpenRA temperat.yaml):
-  //   0, 0xFFFF: Clear/grass (default)
-  //   1-2: Pure water body tiles
-  //   3-56: Shore/beach transitions (mixed water+land — use icon to distinguish)
-  //   57-58, 97-110: Rock debris/formations
-  //   59-96: Water cliff edges
-  //   112-130: River segments and bridges
-  //   131-172: Land cliffs and rock formations
-  //   173-228: Road network tiles (passable)
-  //   229-234: River crossings
-  //   235-252: Bridge structures (passable)
-  //   --- Extended templates (>255, only reachable with uint16 decoding) ---
-  //   378-383: Bridge variants (passable)
-  //   400: Hill (impassable)
-  //   401-404: Land cliff edges (impassable)
-  //   405-408: Water cliff edges (water)
-  //   500-508: Shore debris (impassable)
-  //   519-534: Small bridges (passable)
-  //   550-557: Sea cliff corners (impassable/water)
-  //   580-588: Decay debris (passable)
-  //   590-591: Fjord crossings (passable)
+
   for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
     for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
       const idx = cy * 128 + cx;
       const tmpl = templateType[idx];
 
-      if (tmpl === 0xFFFF || tmpl === 0x00) {
-        // Clear (default)
-      } else if (tmpl >= 1 && tmpl <= 2) {
+      if (tmpl === 0xFFFF || tmpl === 0x00) continue; // Clear (default)
+
+      // ── Per-icon classification (C++ parity) ──────────────────────
+      // C++ cdata.cpp:3002-3032: Land_Type(icon) reads control map byte from TMP file,
+      // indexes _land[16] lookup table to get LandType per icon.
+      if (tilesetMeta) {
+        const icon = templateIcon[idx] ?? 0;
+        const key = `${tmpl},${icon}`;
+        const entry = tilesetMeta.tiles[key];
+        if (entry) {
+          const landName = entry.lt ?? 'Clear'; // absent lt = Clear
+          let terrain = LAND_NAME_TO_TERRAIN[landName] ?? Terrain.CLEAR;
+
+          // SNOW theatre override: frozen rivers are passable (C++ parity)
+          if (isSnow && (terrain === Terrain.WATER || terrain === Terrain.RIVER)) {
+            if ((tmpl >= 112 && tmpl <= 130) || (tmpl >= 229 && tmpl <= 234)) {
+              terrain = Terrain.CLEAR; // frozen river
+            }
+          }
+
+          if (terrain !== Terrain.CLEAR) {
+            map.setTerrain(cx, cy, terrain);
+          }
+          continue;
+        }
+      }
+
+      // ── Fallback: template-range buckets (for cells without tileset data) ──
+      if (tmpl >= 1 && tmpl <= 2) {
         map.setTerrain(cx, cy, Terrain.WATER);
       } else if (tmpl >= 3 && tmpl <= 56) {
-        // Shore/beach transitions — C++ treats ALL shore template cells as
-        // passable ground (BEACH). The template renders both water and land
-        // visually, but the cell passability is determined by the template
-        // type, not the icon. Shore templates (3-56) are always walkable.
-        // Previous bug: icon < 4 was treated as WATER, which trapped infantry
-        // on peninsulas where shore cells blocked all exits.
         map.setTerrain(cx, cy, Terrain.BEACH);
       } else if (tmpl >= 59 && tmpl <= 96) {
-        // Water cliff edges — blanket WATER for now.
-        // TODO: C++ classifies per-icon via TEMPERAT.INI. Some icons within
-        // cliff templates are passable land (cliff tops). Need per-template
-        // icon classification to match C++ exactly.
         map.setTerrain(cx, cy, Terrain.WATER);
       } else if ((tmpl >= 112 && tmpl <= 130) || (tmpl >= 229 && tmpl <= 234)) {
-        // River segments (112-130) and river crossings (229-234):
-        // In SNOW theatre, rivers are frozen (ice) — passable to ground units.
-        // In TEMPERATE, rivers are liquid water — impassable.
         if (!isSnow) {
           map.setTerrain(cx, cy, Terrain.WATER);
         }
-        // SNOW: stays CLEAR (default) — frozen river is passable
       } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 131 && tmpl <= 148)) {
-        // Cliff edges and vertical cliff faces — truly impassable
         map.setTerrain(cx, cy, Terrain.ROCK);
       } else if (tmpl >= 149 && tmpl <= 172) {
-        // Rough hills and rock formations — C++ treats most of these as
-        // passable ROUGH terrain, not impassable cliffs.
         map.setTerrain(cx, cy, Terrain.ROUGH);
       } else if (tmpl >= 97 && tmpl <= 110) {
-        // Small rock debris — C++ treats as ROUGH (passable, slower movement).
-        // Previously incorrectly classified as impassable ROCK.
         map.setTerrain(cx, cy, Terrain.ROUGH);
       } else if (tmpl === 400 || (tmpl >= 401 && tmpl <= 404) ||
                  (tmpl >= 500 && tmpl <= 508)) {
@@ -2074,9 +2079,6 @@ function classifyOutdoorTerrain(
                  (tmpl >= 550 && tmpl <= 557)) {
         map.setTerrain(cx, cy, Terrain.WATER);
       }
-      // 173-228: roads, 235-252: bridges → stay as CLEAR (passable)
-      // 378-383: bridge variants, 519-534: small bridges → CLEAR
-      // 580-588: decay debris, 590-591: fjord crossings → CLEAR
     }
   }
 }

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'url';
 import { MixFile } from './ra-assets/mix.js';
 import { extractAllMIX } from './ra-assets/gamedata.js';
 import { parsePalette, type Palette } from './ra-assets/palette.js';
-import { parseTmp } from './ra-assets/tmp.js';
+import { parseTmp, CONTROL_MAP_TO_LAND } from './ra-assets/tmp.js';
 import { encodePNG } from './ra-assets/png.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -328,7 +328,8 @@ function extractTheatre(
       for (let icon = 0; icon < tmp.tiles.length; icon++) {
         const tile = tmp.tiles[icon];
         if (tile) {
-          tileEntries.push({ templateType: typeId, icon, pixels: tile.pixels });
+          const landType = CONTROL_MAP_TO_LAND[tile.controlByte] ?? 'Clear';
+          tileEntries.push({ templateType: typeId, icon, pixels: tile.pixels, landType });
         }
       }
       templatesExtracted++;
@@ -351,7 +352,7 @@ function extractTheatre(
   const atlasRows = Math.ceil(tileEntries.length / TILES_PER_ROW);
   const atlasH = atlasRows * TILE_H;
   const rgba = new Uint8Array(atlasW * atlasH * 4);
-  const lookup: Record<string, { ax: number; ay: number }> = {};
+  const lookup: Record<string, { ax: number; ay: number; lt?: string }> = {};
 
   for (let i = 0; i < tileEntries.length; i++) {
     const entry = tileEntries[i];
@@ -374,7 +375,12 @@ function extractTheatre(
     }
 
     const key = `${entry.templateType},${entry.icon}`;
-    lookup[key] = { ax: col * TILE_W, ay: row * TILE_H };
+    const tileData: { ax: number; ay: number; lt?: string } = { ax: col * TILE_W, ay: row * TILE_H };
+    // Only store non-Clear land types to minimize JSON size (Clear is the default)
+    if (entry.landType !== 'Clear') {
+      tileData.lt = entry.landType;
+    }
+    lookup[key] = tileData;
   }
 
   // Write files

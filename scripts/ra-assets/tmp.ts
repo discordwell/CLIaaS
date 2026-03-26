@@ -4,29 +4,36 @@
  * TMP files store terrain tiles for a theatre (TEMPERATE, SNOW, INTERIOR).
  * Each template can contain one or more 24x24 pixel tiles arranged in a grid.
  *
- * Header (40 bytes) — verified against OpenRA TmpRALoader.cs:
+ * Header (40 bytes) — verified against OpenRA TmpRALoader.cs and C++ compat.h IControl_Type:
  *   +0   uint16 tileWidth   (always 24)
  *   +2   uint16 tileHeight  (always 24)
  *   +4   uint32 tileCount   (number of unique tile images)
- *   +8   uint16 blocksX     (tiles wide)
- *   +10  uint16 blocksY     (tiles tall)
- *   +12  uint32 fileSize
- *   +16  uint32 imgStart    (offset to image data, always 0x28 = 40)
- *   +20  uint32 (padding/validation — always 0)
- *   +24  uint32 (padding — uninitialized, garbage in practice)
- *   +28  int32  indexEnd    (end of tile index array = start of terrain types)
- *   +32  uint32 (padding)
- *   +36  int32  indexStart  (offset to tile index array)
+ *   +8   uint16 blocksX     (tiles wide — C++ MapWidth)
+ *   +10  uint16 blocksY     (tiles tall — C++ MapHeight)
+ *   +12  uint32 fileSize    (C++ Size)
+ *   +16  uint32 imgStart    (offset to image data, always 0x28 = 40 — C++ Icons)
+ *   +20  uint32 palettes    (C++ Palettes — unused, typically 0)
+ *   +24  uint32 remaps      (C++ Remaps — unused)
+ *   +28  int32  transFlag   (C++ TransFlag — transparency flag table offset)
+ *   +32  int32  colorMap    (C++ ColorMap — per-icon terrain control map offset)
+ *   +36  int32  indexStart  (C++ Map — tile index array offset)
  *
  * Image data: tileCount * (tileWidth * tileHeight) bytes of palette-indexed pixels.
- * Index array at indexStart: (indexEnd - indexStart) bytes, one per slot (blocksX * blocksY).
+ * Index array at indexStart: one byte per slot (blocksX * blocksY).
  *   Value 0xFF means that slot is empty/transparent.
  *   Otherwise, value is the image index (0-based) into the image data.
+ * Control map at colorMap: one byte per slot (blocksX * blocksY).
+ *   Each byte (0-15) indexes into the C++ _land[16] lookup table (cdata.cpp:3009-3026)
+ *   to determine the terrain type for that icon.
  */
 
 export interface TmpTile {
   /** Palette-indexed pixel data (24*24 = 576 bytes) */
   pixels: Uint8Array;
+  /** Control map byte (0-15) from TMP terrain type data.
+   *  Indexes into CONTROL_MAP_TO_LAND to get the LandType name.
+   *  C++ ref: cdata.cpp:3028 — map[icon % (width * height)] */
+  controlByte: number;
 }
 
 export interface TmpFile {
@@ -40,6 +47,34 @@ export interface TmpFile {
   /** Total number of non-empty tiles */
   tileCount: number;
 }
+
+/**
+ * C++ cdata.cpp:3009-3026 — _land[16] control-map-byte to LandType lookup.
+ * Index = control map byte (0-15), value = LandType name.
+ * Used during tileset extraction to bake per-icon terrain types.
+ *
+ * C++ LandType enum (defines.h:2841-2855):
+ *   LAND_CLEAR=0, LAND_ROAD=1, LAND_WATER=2, LAND_ROCK=3,
+ *   LAND_WALL=4, LAND_TIBERIUM=5, LAND_BEACH=6, LAND_ROUGH=7, LAND_RIVER=8
+ */
+export const CONTROL_MAP_TO_LAND: readonly string[] = [
+  'Clear',  // 0
+  'Clear',  // 1
+  'Clear',  // 2
+  'Clear',  // 3
+  'Clear',  // 4
+  'Clear',  // 5
+  'Beach',  // 6
+  'Clear',  // 7
+  'Rock',   // 8
+  'Road',   // 9
+  'Water',  // 10
+  'River',  // 11
+  'Clear',  // 12
+  'Clear',  // 13
+  'Rough',  // 14
+  'Clear',  // 15
+];
 
 export function parseTmp(data: Buffer): TmpFile {
   if (data.length < 40) {
@@ -64,9 +99,12 @@ export function parseTmp(data: Buffer): TmpFile {
   const tiles: (TmpTile | null)[] = new Array(effectiveSlots).fill(null);
   let tilesRead = 0;
 
-  // Image index array offset — at header byte +36 (verified against OpenRA TmpRALoader.cs)
+  // Tile index array offset — at header byte +36 (C++ Map field)
   const indexStart = data.readInt32LE(36);
-  const indexEnd = data.readInt32LE(28);
+  // Control map offset — at header byte +32 (C++ ColorMap field)
+  // Per-icon terrain classification bytes (one byte per grid slot, 0-15)
+  const colorMapOffset = data.readInt32LE(32);
+  const colorMapValid = colorMapOffset > 0 && colorMapOffset + slotCount <= data.length;
 
   if (indexStart > 0 && indexStart + effectiveSlots <= data.length) {
     // Use the index array to map slots to tile images
@@ -79,7 +117,13 @@ export function parseTmp(data: Buffer): TmpFile {
       if (pixelOffset + tileSize <= data.length) {
         const pixels = new Uint8Array(tileSize);
         pixels.set(new Uint8Array(data.buffer, data.byteOffset + pixelOffset, tileSize));
-        tiles[slot] = { pixels };
+        // C++ cdata.cpp:3028 — map[icon % (width * height)]
+        // For variation templates (slot >= slotCount), wrap to control map range
+        const cmSlot = slot % slotCount;
+        const controlByte = (colorMapValid && cmSlot < slotCount)
+          ? data[colorMapOffset + cmSlot] & 0x0F
+          : 0; // default: LAND_CLEAR
+        tiles[slot] = { pixels, controlByte };
         tilesRead++;
       }
     }
@@ -90,7 +134,11 @@ export function parseTmp(data: Buffer): TmpFile {
       if (pixelOffset + tileSize <= data.length) {
         const pixels = new Uint8Array(tileSize);
         pixels.set(new Uint8Array(data.buffer, data.byteOffset + pixelOffset, tileSize));
-        tiles[i] = { pixels };
+        const cmSlot = i % slotCount;
+        const controlByte = (colorMapValid && cmSlot < slotCount)
+          ? data[colorMapOffset + cmSlot] & 0x0F
+          : 0;
+        tiles[i] = { pixels, controlByte };
         tilesRead++;
       }
     }

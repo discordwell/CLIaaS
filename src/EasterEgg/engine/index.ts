@@ -1097,8 +1097,8 @@ export class Game {
       this.onLoadProgress?.(loaded, total);
     });
 
-    // Load scenario
-    const scenario = await loadScenario(scenarioId);
+    // Load scenario (pass assets for per-icon terrain classification from tileset metadata)
+    const scenario = await loadScenario(scenarioId, this.assets);
     this.map = scenario.map;
     this.entities = scenario.entities;
     this.structures = scenario.structures;
@@ -4950,10 +4950,9 @@ export class Game {
       : this.getGroundspeedBias(entity.house);
     const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
     const baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
-    // C++ parity: per-icon terrain classification allows movement on cliff-top cells
-    // that TS blanket-classifies as ROCK (templates 131-172). If terrain mult is 0 but
-    // the unit has nonzero base speed, use base speed so it can escape the cell.
-    // This prevents permanent stuck states from terrain misclassification.
+    // Safety net: if per-icon terrain classification data is missing for a tile,
+    // the fallback range-based classifier may still over-classify as ROCK.
+    // Allow escape with base speed to prevent permanent stuck states.
     if (terrainMult <= 0 && baseSpeed > 0) return baseSpeed;
     return baseSpeed * terrainMult;
   }

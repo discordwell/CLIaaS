@@ -27,6 +27,9 @@ export interface AssetManifest {
 export interface TilesetEntry {
   ax: number; // x pixel offset in atlas
   ay: number; // y pixel offset in atlas
+  /** Per-icon land type from C++ TMP control map (cdata.cpp:3009 _land[16]).
+   *  Only present for non-Clear tiles. Absent/undefined = 'Clear'. */
+  lt?: string;
 }
 
 /** Tileset metadata loaded from tileset.json */
