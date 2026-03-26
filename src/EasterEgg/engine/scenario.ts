@@ -14,6 +14,7 @@ import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
 import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, type MapTree } from './map';
 import { type TilesetMeta, type AssetManager } from './assets';
+import { nearbyLocation } from './pathfinding';
 import { ScenarioRandom } from './random';
 
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===

@@ -13,6 +13,7 @@ import {
   type Faction,
 } from './types';
 import { Entity } from './entity';
+import { nearbyLocation } from './pathfinding';
 import {
   type MapStructure, type TeamType,
   houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_ARMOR, getBibCells,
@@ -2231,6 +2232,13 @@ function spawnTeam(ctx: AIContext, teamIdx: number, house: House): void {
     const wp = ctx.waypoints.get(team.origin);
     if (wp) spawnPos = wp;
     else return;
+  }
+
+  // C++ parity: if spawn position is impassable (water, rock), find nearest passable cell.
+  // C++ uses Nearest_Free_Cell() (cell.cpp) to avoid spawning units in the ocean.
+  if (!ctx.map.isTerrainPassable(spawnPos.cx, spawnPos.cy)) {
+    const alt = nearbyLocation(ctx.map, spawnPos, false);
+    if (alt) spawnPos = alt;
   }
 
   const world = { x: spawnPos.cx * CELL_SIZE + CELL_SIZE / 2, y: spawnPos.cy * CELL_SIZE + CELL_SIZE / 2 };

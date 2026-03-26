@@ -30,7 +30,7 @@ import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatSc
 import { GameMap, Terrain } from './map';
 import { ScenarioRandom } from './random';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
-import { findPath } from './pathfinding';
+import { findPath, nearbyLocation } from './pathfinding';
 import {
   usesTrackMovement, lookupTrackControl, getEffectiveTrack, getTrackArray,
   smoothTurn, LP, PIXEL_LEPTON_W, F_D, RAW_TRACKS, TRACK_CONTROL,
@@ -5692,6 +5692,20 @@ export class Game {
     }
     if (result.spawned.length > 0) {
       applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
+      // C++ parity: if reinforcement units spawned on impassable terrain (water, rock),
+      // relocate to nearest passable cell. C++ uses Nearest_Free_Cell() in reinf.cpp.
+      for (const entity of result.spawned) {
+        const cell = worldToCell(entity.pos.x, entity.pos.y);
+        const naval = entity.stats.isVessel;
+        const passable = naval ? this.map.isWaterPassable(cell.cx, cell.cy) : this.map.isTerrainPassable(cell.cx, cell.cy);
+        if (!passable) {
+          const alt = nearbyLocation(this.map, cell, naval);
+          if (alt) {
+            entity.pos.x = alt.cx * CELL_SIZE + CELL_SIZE / 2;
+            entity.pos.y = alt.cy * CELL_SIZE + CELL_SIZE / 2;
+          }
+        }
+      }
     }
     const ants = result.spawned.filter(e => e.isAnt);
     if (ants.length > 1) {
