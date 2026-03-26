@@ -84,6 +84,7 @@ describe('minimap blip colors per house (hdata.cpp → radar.cpp:740)', () => {
     [House.GoodGuy]: '#60B0FF', // light blue (C++ hdata.cpp:135 PCOLOR_LTBLUE)
     [House.BadGuy]:  '#FF4040', // red
     [House.Neutral]: '#FFD700', // gold (C++ hdata.cpp:155 PCOLOR_GOLD)
+    [House.Special]: '#FFFFFF', // white (HOUSE_SPECIAL — reinforcements/scripted)
   };
 
   // Classify a hex color into a category for loose matching
@@ -120,7 +121,7 @@ describe('minimap blip colors per house (hdata.cpp → radar.cpp:740)', () => {
     return 'unknown';
   }
 
-  it('all 11 TS House enum values have a minimap color entry', () => {
+  it('all 12 TS House enum values have a minimap color entry', () => {
     const houses = Object.values(House);
     for (const h of houses) {
       expect(TS_MINIMAP_COLOR[h], `${h} should have a minimap color`).toBeDefined();

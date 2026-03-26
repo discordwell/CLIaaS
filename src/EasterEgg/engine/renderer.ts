@@ -52,6 +52,7 @@ const HOUSE_MINIMAP_COLOR: Record<string, string> = {
   [House.GoodGuy]: '#60B0FF', // light blue (C++ hdata.cpp:135 PCOLOR_LTBLUE)
   [House.BadGuy]:  '#FF4040', // red
   [House.Neutral]: '#FFD700', // gold (C++ hdata.cpp:155 PCOLOR_GOLD)
+  [House.Special]: '#FFFFFF', // white (C++ HOUSE_SPECIAL — reinforcements/scripted)
 };
 
 // TEMPERATE.PAL palette index ranges for terrain rendering

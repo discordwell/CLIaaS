@@ -1158,7 +1158,7 @@ export class Game {
     // Build player house set for Entity.isPlayerUnit — all houses allied with playerHouse
     const playerHouseSet = new Set<House>();
     for (const [house, allies] of this.alliances) {
-      if (allies.has(this.playerHouse)) playerHouseSet.add(house);
+      if (allies?.has(this.playerHouse)) playerHouseSet.add(house);
     }
     playerHouseSet.add(this.playerHouse);
     setPlayerHouses(playerHouseSet);

@@ -94,6 +94,7 @@ export enum House {
   GoodGuy = 'GoodGuy', // Meta-house: player side
   BadGuy = 'BadGuy',   // Meta-house: enemy side
   Neutral = 'Neutral',
+  Special = 'Special', // Meta-house: reinforcements and scripted spawns (C++ HOUSE_SPECIAL)
 }
 
 // Alliance groups (ant missions only — campaign uses dynamic alliances from scenario INI)
@@ -107,7 +108,7 @@ export const HOUSE_FACTION: Record<string, Faction> = {
   Spain: 'allied', Greece: 'allied', England: 'allied', France: 'allied',
   Germany: 'allied', Turkey: 'allied', GoodGuy: 'allied',
   USSR: 'soviet', Ukraine: 'soviet', BadGuy: 'soviet',
-  Neutral: 'both',
+  Neutral: 'both', Special: 'allied',
 };
 
 export interface CountryBonus {
@@ -1293,7 +1294,8 @@ export function buildAlliancesFromINI(
   // but Greece does NOT automatically consider Germany an ally.
   // C++ Make_Ally sets only the caller's bitfield: Allies |= (1L << h)
   for (const [house, allies] of alliesMap) {
-    const set = table.get(house)!;
+    const set = table.get(house);
+    if (!set) continue; // skip houses not in House enum
     for (const ally of allies) {
       set.add(ally);
     }
