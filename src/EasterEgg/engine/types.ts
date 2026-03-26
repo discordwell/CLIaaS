@@ -10,8 +10,11 @@
 
 export const CELL_SIZE = 24; // pixels per cell
 export const LEPTON_SIZE = 256; // leptons per cell
-/** Convert C++ MPH (leptons/tick) to pixels/tick: MPH * CELL_SIZE / LEPTON_SIZE */
-export const MPH_TO_PX = CELL_SIZE / LEPTON_SIZE; // 0.09375
+/** Convert rules.ini Speed (0-100 percentage) to pixels/tick.
+ *  C++ techno.cpp:6287 scales Speed via _Scale_To_256: MaxSpeed = (Speed * 256) / 100.
+ *  Then movement applies MaxSpeed leptons/tick, where 1 lepton = CELL_SIZE/LEPTON_SIZE px.
+ *  Combined: px/tick = Speed * (256/100) * (CELL_SIZE/LEPTON_SIZE) = Speed * CELL_SIZE/100. */
+export const MPH_TO_PX = CELL_SIZE / 100; // 0.24
 export const MAP_CELLS = 128; // cells per map side
 /** C++ default GameSpeed=4 → DesiredFrameRate = 60/4 = 15 (queue.cpp:1425, options.cpp:91) */
 export const GAME_TICKS_PER_SEC = 15;
@@ -593,8 +596,9 @@ export const WARHEAD_META: Record<WarheadType, WarheadMeta> = {
 // crusher: C++ DriveClass::Ok_To_Move — heavy tracked vehicles (Crusher=yes in RULES.INI)
 // crushable: C++ infantry.cpp — infantry and ants die when a crusher enters their cell
 export const UNIT_STATS: Record<string, UnitStats> = {
-  // Speed values are C++ MPH (leptons/tick from SPEED.H); converted to px/tick by MPH_TO_PX in game loop.
-  // MPH constants: VERY_SLOW=2, KINDA_SLOW=4, SLOW=6, SLOW_ISH=8, MEDIUM_SLOW=10,
+  // Speed values are rules.ini percentages (0-100); C++ scales via _Scale_To_256 to get MaxSpeed
+  // in leptons/tick. MPH_TO_PX converts these directly to pixels/tick.
+  // Speed constants: VERY_SLOW=2, KINDA_SLOW=4, SLOW=6, SLOW_ISH=8, MEDIUM_SLOW=10,
   //   MEDIUM=12, MEDIUM_FAST=14, MEDIUM_FASTER=18, FAST=24, ROCKET=60
   // Ants (from SCA scenario INI files) — crushable by heavy tanks (core ant mission tactic)
   ANT1: { type: UnitType.ANT1, name: 'Warrior Ant', image: 'ant1', strength: 125, armor: 'heavy', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 8, isInfantry: false, primaryWeapon: 'Mandible', noMovingFire: true, scanDelay: 10, crushable: true },  // SCA01EA.ini Speed=8

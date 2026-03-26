@@ -4952,7 +4952,8 @@ export class Game {
   }
 
   /** M1+M2: Compute movement speed with terrain and damage multipliers.
-   *  Speed values in UNIT_STATS are C++ MPH (leptons/tick); MPH_TO_PX converts to pixels/tick.
+   *  Speed values in UNIT_STATS are rules.ini percentages (0-100); MPH_TO_PX converts
+   *  to pixels/tick via C++ _Scale_To_256 scaling (techno.cpp:6287).
    *  C++ house.cpp:290,300: GroundspeedBias from difficulty applied per house.
    *  C++ house.cpp:291,301: AirspeedBias from difficulty applied to aircraft. */
   private movementSpeed(entity: Entity): number {
