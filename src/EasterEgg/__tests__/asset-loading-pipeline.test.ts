@@ -437,12 +437,12 @@ describe('Production sidebar icon sprites', () => {
   ];
 
   for (const icon of UNIT_ICONS) {
-    it(`${icon} exists in manifest as 32x24 single frame`, () => {
+    it(`${icon} exists in manifest as 64x48 HIRES single frame`, () => {
       const entry = manifest[icon];
       expect(entry, `${icon} missing from manifest`).toBeDefined();
       if (entry) {
-        expect(entry.frameWidth).toBe(32);
-        expect(entry.frameHeight).toBe(24);
+        expect(entry.frameWidth).toBe(64);
+        expect(entry.frameHeight).toBe(48);
         expect(entry.frameCount).toBe(1);
       }
     });
