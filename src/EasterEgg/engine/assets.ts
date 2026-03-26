@@ -419,6 +419,11 @@ export class AssetManager {
     return this.tilesetImage;
   }
 
+  /** Set tileset metadata for a theatre (used by headless test adapters). */
+  setTilesetMeta(theatre: string, meta: TilesetMeta): void {
+    this.tilesets.set(theatre, { image: null as unknown as HTMLImageElement, meta });
+  }
+
   /** Get tileset metadata (null if not loaded). Defaults to TEMPERATE. */
   getTilesetMeta(theatre?: string): TilesetMeta | null {
     if (theatre) {

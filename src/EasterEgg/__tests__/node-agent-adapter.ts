@@ -163,8 +163,17 @@ export class NodeAgentAdapter {
     const canvas = createCanvas();
     this.game = new Game(canvas);
 
-    // Stub asset loading — we don't need sprites for headless engine tests
+    // Stub asset loading — we don't need sprites for headless engine tests,
+    // but we DO need tileset metadata for per-icon terrain classification.
     this.game.assets.loadAll = async () => {};
+    const assetsDir = path.join(__dirname, '../../..', 'public/ra/assets');
+    for (const [theatre, prefix] of [['TEMPERATE', ''], ['SNOW', 'snow_'], ['INTERIOR', 'interior_']] as const) {
+      const jsonPath = path.join(assetsDir, `${prefix}tileset.json`);
+      if (fs.existsSync(jsonPath)) {
+        const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+        this.game.assets.setTilesetMeta(theatre, meta);
+      }
+    }
 
     // Stub audio methods that touch web APIs
     this.game.audio.init = () => {};

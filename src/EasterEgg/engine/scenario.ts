@@ -2013,8 +2013,9 @@ export const LAND_NAME_TO_TERRAIN: Record<string, Terrain> = {
 /** Classify TEMPERATE/SNOW terrain from MapPack template types.
  *  Both theatres share identical template ID ranges, but SNOW has frozen rivers.
  *
- *  Primary path: per-icon classification from tileset control map data (C++ cdata.cpp:3002-3032).
- *  Fallback: template-range buckets when tileset metadata is unavailable. */
+ *  Uses per-icon classification from tileset control map data (C++ cdata.cpp:3002-3032).
+ *  Warns loudly if tileset metadata is missing — C++ always has control map data. */
+let _missingTilesetWarned = false;
 export function classifyOutdoorTerrain(
   map: GameMap,
   templateType: Uint16Array,
@@ -2056,29 +2057,14 @@ export function classifyOutdoorTerrain(
         }
       }
 
-      // ── Fallback: template-range buckets (for cells without tileset data) ──
-      if (tmpl >= 1 && tmpl <= 2) {
-        map.setTerrain(cx, cy, Terrain.WATER);
-      } else if (tmpl >= 3 && tmpl <= 56) {
-        map.setTerrain(cx, cy, Terrain.BEACH);
-      } else if (tmpl >= 59 && tmpl <= 96) {
-        map.setTerrain(cx, cy, Terrain.WATER);
-      } else if ((tmpl >= 112 && tmpl <= 130) || (tmpl >= 229 && tmpl <= 234)) {
-        if (!isSnow) {
-          map.setTerrain(cx, cy, Terrain.WATER);
+      // No per-icon data — this is a bug. C++ always has control map data.
+      if (!tilesetMeta) {
+        if (!_missingTilesetWarned) {
+          console.warn('[terrain] classifyOutdoorTerrain called without tilesetMeta — terrain will be incomplete');
+          _missingTilesetWarned = true;
         }
-      } else if ((tmpl >= 57 && tmpl <= 58) || (tmpl >= 131 && tmpl <= 148)) {
-        map.setTerrain(cx, cy, Terrain.ROCK);
-      } else if (tmpl >= 149 && tmpl <= 172) {
-        map.setTerrain(cx, cy, Terrain.ROUGH);
-      } else if (tmpl >= 97 && tmpl <= 110) {
-        map.setTerrain(cx, cy, Terrain.ROUGH);
-      } else if (tmpl === 400 || (tmpl >= 401 && tmpl <= 404) ||
-                 (tmpl >= 500 && tmpl <= 508)) {
-        map.setTerrain(cx, cy, Terrain.ROCK);
-      } else if ((tmpl >= 405 && tmpl <= 408) ||
-                 (tmpl >= 550 && tmpl <= 557)) {
-        map.setTerrain(cx, cy, Terrain.WATER);
+      } else {
+        console.warn(`[terrain] missing tileset entry: template=${tmpl} icon=${templateIcon[idx]} at (${cx},${cy})`);
       }
     }
   }

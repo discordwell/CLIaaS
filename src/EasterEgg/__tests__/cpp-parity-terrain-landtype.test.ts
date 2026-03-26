@@ -27,13 +27,13 @@
  *  - tileset.json per-icon data matches C++ Land_Type() behavior
  *  - classifyOutdoorTerrain correctly uses per-icon data
  *  - SNOW frozen river override
- *  - Fallback range-based classification without tilesetMeta
+ *  - Missing tilesetMeta warns loudly (no silent fallback)
  *  - Speed multipliers on cliff-top cells with per-icon Clear
  */
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { GameMap, Terrain } from '../engine/map';
 import { classifyOutdoorTerrain, LAND_NAME_TO_TERRAIN } from '../engine/scenario';
 import type { TilesetMeta, TilesetEntry } from '../engine/assets';
@@ -584,92 +584,45 @@ describe('SNOW theatre frozen river override (C++ parity)', () => {
 });
 
 // =============================================================================
-// 5. Fallback without tilesetMeta — range-based classification
+// 5. Missing tilesetMeta warns loudly (no silent fallback — not in C++)
 // =============================================================================
 
-describe('fallback classification without tilesetMeta (range-based buckets)', () => {
-  it('water templates 1-2 classified as WATER', () => {
-    const { map } = setupMapWithTemplate(1, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.WATER);
-
-    const { map: map2 } = setupMapWithTemplate(2, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.WATER);
+describe('missing tilesetMeta warns instead of silent fallback', () => {
+  it('warns when tilesetMeta is null', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setupMapWithTemplate(131, 0, null, 'TEMPERATE');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('without tilesetMeta')
+    );
+    warnSpy.mockRestore();
   });
 
-  it('shore templates 3-56 classified as BEACH', () => {
-    const { map } = setupMapWithTemplate(3, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.BEACH);
-
-    const { map: map2 } = setupMapWithTemplate(56, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.BEACH);
-  });
-
-  it('water templates 59-96 classified as WATER', () => {
-    const { map } = setupMapWithTemplate(59, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.WATER);
-
-    const { map: map2 } = setupMapWithTemplate(96, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.WATER);
-  });
-
-  it('river templates 112-130 classified as WATER in TEMPERATE fallback', () => {
-    // Note: fallback classifies entire river templates as WATER (no per-icon distinction)
-    const { map } = setupMapWithTemplate(112, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.WATER);
-
-    const { map: map2 } = setupMapWithTemplate(130, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.WATER);
-  });
-
-  it('river templates 112-130 stay CLEAR in SNOW fallback (frozen)', () => {
-    const { map } = setupMapWithTemplate(112, 0, null, 'SNOW');
-    // Fallback: SNOW river templates skip the WATER assignment → remain CLEAR
+  it('terrain stays CLEAR (default) when tilesetMeta is null — no silent ROCK', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { map } = setupMapWithTemplate(131, 0, null, 'TEMPERATE');
+    // Without fallback, cliff template stays CLEAR (the default) — not silently ROCK
     expect(map.getTerrain(5, 5)).toBe(Terrain.CLEAR);
+    warnSpy.mockRestore();
   });
 
-  it('cliff templates 57-58, 131-148 classified as ROCK in fallback', () => {
-    // Fallback treats entire cliff templates as ROCK (no per-icon distinction)
-    const { map } = setupMapWithTemplate(57, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.ROCK);
-
-    const { map: map2 } = setupMapWithTemplate(131, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.ROCK);
-
-    const { map: map3 } = setupMapWithTemplate(148, 0, null, 'TEMPERATE');
-    expect(map3.getTerrain(5, 5)).toBe(Terrain.ROCK);
+  it('warns when tileset entry is missing for a specific template,icon', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Use a template that has no entry in our minimal tilesetMeta
+    const emptyMeta: TilesetMeta = {
+      tileW: 24, tileH: 24, atlasW: 768, atlasH: 1152, tileCount: 0,
+      tiles: {},
+    };
+    setupMapWithTemplate(999, 0, emptyMeta, 'TEMPERATE');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('missing tileset entry: template=999')
+    );
+    warnSpy.mockRestore();
   });
 
-  it('rough templates 149-172 classified as ROUGH in fallback', () => {
-    const { map } = setupMapWithTemplate(149, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.ROUGH);
-
-    const { map: map2 } = setupMapWithTemplate(172, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.ROUGH);
-  });
-
-  it('rough templates 97-110 classified as ROUGH in fallback', () => {
-    const { map } = setupMapWithTemplate(97, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.ROUGH);
-
-    const { map: map2 } = setupMapWithTemplate(110, 0, null, 'TEMPERATE');
-    expect(map2.getTerrain(5, 5)).toBe(Terrain.ROUGH);
-  });
-
-  it('fallback cliff template 140 icon 0 = ROCK (the bug: no per-icon distinction)', () => {
-    // Without tilesetMeta, fallback puts template 140 (range 131-148) → ROCK
-    // This demonstrates the problem that per-icon data fixes
-    const { map } = setupMapWithTemplate(140, 0, null, 'TEMPERATE');
-    expect(map.getTerrain(5, 5)).toBe(Terrain.ROCK);
-  });
-
-  it('per-icon vs fallback difference on cliff template 140 icon 0', () => {
-    // Per-icon: Clear (passable cliff-top)
-    const { map: perIcon } = setupMapWithTemplate(140, 0, tilesetMeta, 'TEMPERATE');
-    // Fallback: Rock (entire template treated as cliff)
-    const { map: fallback } = setupMapWithTemplate(140, 0, null, 'TEMPERATE');
-
-    expect(perIcon.getTerrain(5, 5)).toBe(Terrain.CLEAR);
-    expect(fallback.getTerrain(5, 5)).toBe(Terrain.ROCK);
+  it('per-icon correctly classifies cliff template 140 icon 0 as Clear', () => {
+    // With per-icon data: Clear (passable cliff-top) — the bug fix
+    const { map } = setupMapWithTemplate(140, 0, tilesetMeta, 'TEMPERATE');
+    expect(map.getTerrain(5, 5)).toBe(Terrain.CLEAR);
   });
 });
 
