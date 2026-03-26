@@ -4948,10 +4948,14 @@ export class Game {
     const speedBias = entity.stats.isAircraft
       ? this.getAirspeedBias(entity.house)
       : this.getGroundspeedBias(entity.house);
-    return entity.stats.speed * MPH_TO_PX
-      * this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass)
-      * this.damageSpeedFactor(entity)
-      * speedBias;
+    const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
+    const baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
+    // C++ parity: per-icon terrain classification allows movement on cliff-top cells
+    // that TS blanket-classifies as ROCK (templates 131-172). If terrain mult is 0 but
+    // the unit has nonzero base speed, use base speed so it can escape the cell.
+    // This prevents permanent stuck states from terrain misclassification.
+    if (terrainMult <= 0 && baseSpeed > 0) return baseSpeed;
+    return baseSpeed * terrainMult;
   }
 
   /** MV1: Follow one tick of track-table movement (C++ drive.cpp While_Moving).
