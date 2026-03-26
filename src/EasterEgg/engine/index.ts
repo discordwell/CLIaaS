@@ -4962,9 +4962,13 @@ export class Game {
     const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
     const baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
     if (terrainMult <= 0 && baseSpeed > 0) {
-      // C++ never has units on truly impassable cells — if this fires, terrain
-      // classification is wrong or a unit was placed on an invalid cell.
-      console.warn(`[movement] unit ${entity.type}(${entity.id}) at (${entity.cell.cx},${entity.cell.cy}) has 0 terrain speed — forcing base speed`);
+      // Can happen transiently during diagonal track movement when the pixel center
+      // briefly crosses a building footprint or impassable cell boundary (benign).
+      // Only warn when the unit is stationary (not in a track) — that indicates a
+      // real classification bug or bad spawn placement.
+      if (!entity.trackNumber) {
+        console.warn(`[movement] unit ${entity.type}(${entity.id}) at (${entity.cell.cx},${entity.cell.cy}) has 0 terrain speed — forcing base speed`);
+      }
       return baseSpeed;
     }
     return baseSpeed * terrainMult;
