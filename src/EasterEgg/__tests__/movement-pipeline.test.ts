@@ -43,7 +43,9 @@ beforeEach(() => resetEntityIds());
 // ============================================================================
 
 describe('Core moveToward — speed class behavior', () => {
-  it('infantry (FOOT) moves at speed * MPH_TO_PX per tick', () => {
+  it('infantry (FOOT) moves at lepton-quantized speed per tick', () => {
+    // C++ accumulator: speed is converted to leptons, quantized to PIXEL_LEPTON_W steps.
+    // E1 speed=4 → 4*0.24=0.96 px/tick → floor(0.96/LP)=10 leptons → 10/10=1 step → 0.9375px
     const inf = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     inf.facing = Dir.E;
     inf.desiredFacing = Dir.E;
@@ -54,10 +56,14 @@ describe('Core moveToward — speed class behavior', () => {
     inf.moveToward({ x: 300, y: 100 }, speed);
 
     const moved = inf.pos.x - startX;
-    expect(moved).toBeCloseTo(speed, 4);
+    // C++ lepton accumulator: floor(speed/LP) = 10 leptons → 1 pixel step = 10*LP = 0.9375
+    const expectedLeptons = Math.floor(speed / LP);
+    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expectedMove, 4);
   });
 
-  it('vehicle (WHEEL) moves at speed * MPH_TO_PX when facing is aligned', () => {
+  it('vehicle (TRACK) moves at lepton-quantized speed when facing is aligned', () => {
+    // C++ accumulator: 2TNK speed=8 → 8*0.24=1.92 px/tick → floor(1.92/LP)=20 leptons → 2 steps → 1.875px
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
     tank.desiredFacing = Dir.E;
@@ -69,7 +75,9 @@ describe('Core moveToward — speed class behavior', () => {
     tank.moveToward({ x: 300, y: 100 }, speed);
 
     const moved = tank.pos.x - startX;
-    expect(moved).toBeCloseTo(speed, 4);
+    const expectedLeptons = Math.floor(speed / LP);
+    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expectedMove, 4);
   });
 
   it('different speed classes have different MPH values', () => {
@@ -151,11 +159,11 @@ describe('Core moveToward — speed class behavior', () => {
 // ============================================================================
 
 describe('Diagonal movement', () => {
-  it('diagonal speed is same per-step as cardinal (clamped to remaining distance)', () => {
-    // moveToward normalizes direction, so step = speed regardless of angle
+  it('diagonal speed is same per-step as cardinal (lepton-quantized)', () => {
+    // C++ accumulator: speed=5 → floor(5/LP)=53 leptons → 53/10=5 steps → 50*LP=4.6875px
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     const speed = 5;
-    const target = { x: 200, y: 200 }; // diagonal NE-ish
+    const target = { x: 200, y: 200 }; // diagonal SE-ish
 
     unit.rotTickedThisFrame = false;
     unit.moveToward(target, speed);
@@ -163,7 +171,10 @@ describe('Diagonal movement', () => {
     const dx = unit.pos.x - 100;
     const dy = unit.pos.y - 100;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    expect(dist).toBeCloseTo(speed, 3);
+    // Lepton quantization: floor(5/LP)=53, 53/10=5 steps, 50*LP=4.6875
+    const expectedLeptons = Math.floor(speed / LP);
+    const expectedDist = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(dist).toBeCloseTo(expectedDist, 3);
   });
 
   it('directionTo returns correct 8-way direction', () => {
@@ -294,38 +305,38 @@ describe('followTrackStep — lepton budget mechanics', () => {
 
   it('speed budget = speedAccum + (biasedSpeed / LP) determines steps per tick', () => {
     // Simulate budget calculation for a medium-speed vehicle
-    const speed = 8 * MPH_TO_PX; // 8 MPH = 0.75 px/tick
-    const budget = 0 + (speed / LP); // = 0.75 / 0.09375 = 8 leptons
-    // At PIXEL_LEPTON_W=10 per step, budget of 8 allows 0 steps (8 < 10)
-    expect(budget).toBeCloseTo(8, 4);
-    expect(budget < PIXEL_LEPTON_W).toBe(true);
+    // Speed=8 → 8 * 0.24 = 1.92 px/tick → floor(1.92/0.09375) = floor(20.48) = 20 leptons
+    const speed = 8 * MPH_TO_PX;
+    const budget = 0 + Math.floor(speed / LP);
+    expect(budget).toBe(20);
+    // At PIXEL_LEPTON_W=10 per step, budget of 20 allows 2 steps
+    expect(budget >= PIXEL_LEPTON_W).toBe(true);
 
-    // Faster vehicle: speed=14 MPH
-    const fastSpeed = 14 * MPH_TO_PX;
-    const fastBudget = 0 + (fastSpeed / LP);
-    expect(fastBudget).toBeCloseTo(14, 4);
-    // At 14 leptons, allows 1 step (14 > 10, remainder = 4)
-    expect(fastBudget > PIXEL_LEPTON_W).toBe(true);
+    // Slower vehicle: speed=3 → 3 * 0.24 = 0.72 → floor(0.72/0.09375) = floor(7.68) = 7 leptons
+    const slowSpeed = 3 * MPH_TO_PX;
+    const slowBudget = 0 + Math.floor(slowSpeed / LP);
+    expect(slowBudget).toBe(7);
+    // At 7 leptons, allows 0 steps (7 < 10) — accumulates for next tick
+    expect(slowBudget < PIXEL_LEPTON_W).toBe(true);
   });
 
   it('speedAccum carries remainder to next tick', () => {
-    // C++ uses strict > comparison: while (actual > PIXEL_LEPTON_W)
-    // Speed of 14 leptons/tick. Per-step cost = 10.
-    // Tick 1: budget=14, step at 14>10: 14-10=4. Steps=1, accum=4.
-    // Tick 2: budget=4+14=18, step at 18>10: 18-10=8. Steps=1, accum=8.
-    // Tick 3: budget=8+14=22, step at 22>10: 22-10=12, step at 12>10: 12-10=2. Steps=2, accum=2.
-    // Tick 4: budget=2+14=16, step at 16>10: 16-10=6. Steps=1, accum=6.
-    // Tick 5: budget=6+14=20, step at 20>10: 20-10=10. Steps=1, accum=10.
-    // (10 is NOT > 10, so no second step)
-    // Total: 1+1+2+1+1 = 6 steps over 5 ticks
-    const speed = 14 * MPH_TO_PX;
+    // Speed=3 → 7 leptons/tick (after floor). Per-step cost = 10.
+    // Tick 1: budget=0+7=7, 7<10: no step. accum=7.
+    // Tick 2: budget=7+7=14, 14>=10: step, 14-10=4. accum=4.
+    // Tick 3: budget=4+7=11, 11>=10: step, 11-10=1. accum=1.
+    // Tick 4: budget=1+7=8, 8<10: no step. accum=8.
+    // Tick 5: budget=8+7=15, 15>=10: step, 15-10=5. accum=5.
+    // Total: 0+1+1+0+1 = 3 steps over 5 ticks
+    const speed = 3 * MPH_TO_PX;
     let accum = 0;
     const stepsPerTick: number[] = [];
+    const leptons = Math.floor(speed / LP);
 
     for (let tick = 0; tick < 5; tick++) {
-      let budget = accum + (speed / LP);
+      let budget = accum + leptons;
       let steps = 0;
-      while (budget > PIXEL_LEPTON_W) {
+      while (budget >= PIXEL_LEPTON_W) {
         budget -= PIXEL_LEPTON_W;
         steps++;
       }
@@ -335,11 +346,11 @@ describe('followTrackStep — lepton budget mechanics', () => {
 
     // Steps should vary due to accumulator — not all identical
     expect(stepsPerTick.some(s => s > 0)).toBe(true);
-    expect(stepsPerTick[0]).toBe(1);
-    expect(stepsPerTick[2]).toBe(2); // tick 3 gets 2 steps
-    // Total: 6 steps (strict > comparison means budget=10 does not yield a step)
+    expect(stepsPerTick[0]).toBe(0); // 7 < 10: no step on first tick
+    expect(stepsPerTick[1]).toBe(1); // 7+7=14: one step
+    // Total: 3 steps over 5 ticks
     const totalSteps = stepsPerTick.reduce((a, b) => a + b, 0);
-    expect(totalSteps).toBe(6);
+    expect(totalSteps).toBe(3);
   });
 
   it('entity.trackNumber is set to -1 when not on a track', () => {
@@ -928,16 +939,21 @@ describe('Edge cases — zero distance, death, speed=0', () => {
     }).not.toThrow();
   });
 
-  it('very small speed (0.01) still makes progress', () => {
+  it('very small speed (0.01) accumulates until threshold then moves', () => {
+    // C++ accumulator: 0.01 px/tick → floor(0.01/LP)=floor(0.1067)=0 leptons
+    // Zero leptons per tick → no movement until accumulated over many ticks.
+    // This matches C++ behavior where very slow units need multiple ticks to move 1 pixel.
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     unit.facing = Dir.E;
+    unit.desiredFacing = Dir.E;
 
     const startX = unit.pos.x;
     unit.rotTickedThisFrame = false;
     unit.moveToward({ x: 200, y: 100 }, 0.01);
 
-    expect(unit.pos.x).toBeGreaterThan(startX);
-    expect(unit.pos.x - startX).toBeCloseTo(0.01, 4);
+    // At 0 leptons/tick, unit does not move (correct C++ parity)
+    expect(unit.pos.x).toBe(startX);
+    expect(unit.speedAccum).toBe(0);
   });
 
   it('moveToward with very large speed reaches target in one step', () => {
@@ -1033,20 +1049,21 @@ describe('Track data integrity — full traversal simulation', () => {
 // ============================================================================
 
 describe('movementSpeed formula components', () => {
-  it('MPH_TO_PX converts leptons/tick to pixels/tick correctly', () => {
-    // MPH_TO_PX = CELL_SIZE / LEPTON_SIZE = 24 / 256 = 0.09375
-    expect(MPH_TO_PX).toBeCloseTo(0.09375, 10);
+  it('MPH_TO_PX converts rules.ini speed percentage to pixels/tick correctly', () => {
+    // MPH_TO_PX = CELL_SIZE / 100 = 24 / 100 = 0.24
+    // (C++ _Scale_To_256 scales Speed% to MaxSpeed leptons, then lepton→pixel conversion)
+    expect(MPH_TO_PX).toBeCloseTo(0.24, 10);
   });
 
   it('base speed formula: stats.speed * MPH_TO_PX', () => {
-    // E1: speed=4 → 4 * 0.09375 = 0.375 px/tick
-    expect(UNIT_STATS.E1.speed * MPH_TO_PX).toBeCloseTo(0.375, 6);
-    // 2TNK: speed=8 → 8 * 0.09375 = 0.75 px/tick
-    expect(UNIT_STATS['2TNK'].speed * MPH_TO_PX).toBeCloseTo(0.75, 6);
-    // JEEP: speed=10 → 10 * 0.09375 = 0.9375 px/tick
-    expect(UNIT_STATS.JEEP.speed * MPH_TO_PX).toBeCloseTo(0.9375, 6);
-    // MIG: speed=20 → 20 * 0.09375 = 1.875 px/tick
-    expect(UNIT_STATS.MIG.speed * MPH_TO_PX).toBeCloseTo(1.875, 6);
+    // E1: speed=4 → 4 * 0.24 = 0.96 px/tick
+    expect(UNIT_STATS.E1.speed * MPH_TO_PX).toBeCloseTo(0.96, 6);
+    // 2TNK: speed=8 → 8 * 0.24 = 1.92 px/tick
+    expect(UNIT_STATS['2TNK'].speed * MPH_TO_PX).toBeCloseTo(1.92, 6);
+    // JEEP: speed=10 → 10 * 0.24 = 2.4 px/tick
+    expect(UNIT_STATS.JEEP.speed * MPH_TO_PX).toBeCloseTo(2.4, 6);
+    // MIG: speed=20 → 20 * 0.24 = 4.8 px/tick
+    expect(UNIT_STATS.MIG.speed * MPH_TO_PX).toBeCloseTo(4.8, 6);
   });
 
   it('speedBias multiplies effective speed (M7 crate bonus)', () => {
@@ -1069,6 +1086,7 @@ describe('movementSpeed formula components', () => {
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     unit.groundspeedBias = 2.0;
     unit.facing = Dir.E;
+    unit.desiredFacing = Dir.E;
     const baseSpeed = 5;
     const startX = unit.pos.x;
 
@@ -1078,8 +1096,10 @@ describe('movementSpeed formula components', () => {
     unit.moveToward({ x: 300, y: 100 }, baseSpeed);
 
     const moved = unit.pos.x - startX;
-    // Should move at base speed (not doubled)
-    expect(moved).toBeCloseTo(baseSpeed, 3);
+    // C++ lepton quantization: floor(5/LP)=53, 53/10=5 steps, 50*LP=4.6875
+    const expectedLeptons = Math.floor(baseSpeed / LP);
+    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expectedMove, 3);
   });
 });
 

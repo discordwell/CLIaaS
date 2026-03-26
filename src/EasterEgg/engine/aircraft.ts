@@ -181,6 +181,10 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.aircraftState = 'takeoff';
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
         entity.aircraftState = 'takeoff';
+      } else if (entity.mission === Mission.RETREAT) {
+        // C++ aircraft.cpp:1309-1367 Mission_Retreat: TAKE_OFF stage
+        // Loaner transport has finished unloading — take off to fly off-map
+        entity.aircraftState = 'takeoff';
       }
       return true;
     }
@@ -261,6 +265,33 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         }
         // Fly toward target
         entity.moveToward(targetPos, ctx.movementSpeed(entity));
+      } else if (entity.mission === Mission.RETREAT) {
+        // C++ aircraft.cpp:1309-1367 Mission_Retreat — fly to nearest map edge and exit.
+        // FACE_MAP_EDGE: compute exit point if not already set, then KEEP_FLYING toward it.
+        if (!entity.moveTarget) {
+          // Compute nearest map edge exit point (one cell OUTSIDE bounds so exit triggers)
+          const ec = entity.cell;
+          const distLeft = ec.cx - ctx.map.boundsX;
+          const distRight = (ctx.map.boundsX + ctx.map.boundsW - 1) - ec.cx;
+          const distTop = ec.cy - ctx.map.boundsY;
+          const distBottom = (ctx.map.boundsY + ctx.map.boundsH - 1) - ec.cy;
+          const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+          let tx = ec.cx, ty = ec.cy;
+          if (minDist === distLeft) tx = ctx.map.boundsX - 1;
+          else if (minDist === distRight) tx = ctx.map.boundsX + ctx.map.boundsW;
+          else if (minDist === distTop) ty = ctx.map.boundsY - 1;
+          else ty = ctx.map.boundsY + ctx.map.boundsH;
+          entity.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
+        }
+        // Check if at map edge — exit
+        const ec = entity.cell;
+        if (ec.cx <= ctx.map.boundsX || ec.cx >= ctx.map.boundsX + ctx.map.boundsW - 1 ||
+            ec.cy <= ctx.map.boundsY || ec.cy >= ctx.map.boundsY + ctx.map.boundsH - 1) {
+          handleMapExit(ctx, entity);
+          return true;
+        }
+        // Fly toward the edge
+        entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
         // Check if aircraft is at map edge with out-of-bounds target — exit map
         const ec = entity.cell;
@@ -306,6 +337,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // Check for new orders — break out of return-to-base
       if ((entity.mission === Mission.MOVE && entity.moveTarget) ||
           (entity.mission === Mission.ATTACK && (entity.target?.alive || entity.targetStructure))) {
+        entity.aircraftState = 'flying';
+        return true;
+      }
+      // C++ aircraft.cpp:1309-1367: RETREAT overrides return-to-base — fly to map edge instead
+      if (entity.mission === Mission.RETREAT) {
         entity.aircraftState = 'flying';
         return true;
       }

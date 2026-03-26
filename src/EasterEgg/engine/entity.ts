@@ -12,6 +12,7 @@ import {
   CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
   armorIndex, PRODUCTION_ITEMS,
 } from './types';
+import { LP, PIXEL_LEPTON_W } from './tracks';
 import { ScenarioRandom } from './random';
 
 // === C++ Points lookup (techno.cpp:6290: Risk = Reward = Points) ===
@@ -782,7 +783,11 @@ export class Entity {
   /** Move toward a world position at the unit's speed.
    *  C++ RA drive.cpp: vehicles stop, rotate to face destination, THEN move.
    *  Infantry are nimble and move while rotating.
-   *  M7: speed is multiplied by speedBias (crate pickup bonus). */
+   *  M7: speed is multiplied by speedBias (crate pickup bonus).
+   *
+   *  Uses integer lepton accumulator matching C++ fly.cpp:62-106 / drive.cpp SpeedAccum:
+   *    SpeedAdd (leptons/tick) is accumulated; movement emits whole-pixel steps
+   *    of PIXEL_LEPTON_W leptons each. Sub-pixel remainder carries across ticks. */
   moveToward(target: WorldPos, speed: number): boolean {
     // M7: Apply crate speed bias multiplier
     const effectiveSpeed = speed * this.speedBias;
@@ -794,6 +799,7 @@ export class Entity {
     if (dist <= 0.5) { // sub-pixel snap — prevents oscillation without visible teleport
       this.pos.x = target.x;
       this.pos.y = target.y;
+      this.speedAccum = 0; // C++: reset accumulator on arrival
       return true; // arrived
     }
 
@@ -808,9 +814,27 @@ export class Entity {
       return false; // still rotating — don't move yet
     }
 
-    // Infantry move while rotating (nimble), vehicles move once facing is aligned
-    // Clamp movement to remaining distance to prevent overshoot-then-snap oscillation
-    const step = Math.min(effectiveSpeed, dist);
+    // C++ lepton accumulator (fly.cpp:62-106):
+    //   actual = (int)SpeedAdd + SpeedAccum;
+    //   result = div(actual, PIXEL_LEPTON_W);
+    //   SpeedAccum = result.rem;
+    //   actual -= result.rem;  // actual is now whole-pixel-aligned lepton count
+    // Convert pixel speed to leptons, accumulate, emit whole-pixel steps.
+    const speedLeptons = effectiveSpeed / LP; // px/tick → leptons/tick
+    const actual = Math.floor(speedLeptons) + this.speedAccum; // C++: (int)SpeedAdd + SpeedAccum
+    const remainder = actual % PIXEL_LEPTON_W; // C++: div(actual, PIXEL_LEPTON_W).rem
+    this.speedAccum = remainder;
+    const moveLeptons = actual - remainder; // whole-pixel-aligned lepton budget
+
+    if (moveLeptons <= 0) {
+      return false; // not enough accumulated for a pixel step this tick
+    }
+
+    // Convert back to pixels for position update
+    const movePixels = moveLeptons * LP;
+
+    // Clamp to remaining distance to prevent overshoot
+    const step = Math.min(movePixels, dist);
     this.pos.x += (dx / dist) * step;
     this.pos.y += (dy / dist) * step;
     return step >= dist; // arrived if we moved the full remaining distance

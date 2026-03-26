@@ -3371,7 +3371,8 @@ export class Game {
   private updateEntity(entity: Entity): void {
     // Team mission script execution (rate-limited to every 8 ticks)
     // Area Guard ants use their own patrol logic, not global hunt AI
-    if (entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD) {
+    if (entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD &&
+        entity.mission !== Mission.RETREAT) {
       if (this.tick - entity.lastAIScan >= 8) {
         entity.lastAIScan = this.tick;
         if (entity.teamMissions.length > 0) {
@@ -3900,6 +3901,16 @@ export class Game {
           }
           entity.passengers = [];
           this.audio.play('eva_reinforcements');
+
+          // C++ aircraft.cpp:1178-1179, Enter_Idle_Mode (1932-1948):
+          // After unloading all passengers, loaner transports get MISSION_RETREAT.
+          // This causes the aircraft to take off and fly off the nearest map edge.
+          if (entity.isALoaner) {
+            entity.mission = Mission.RETREAT;
+            entity.teamMissions = []; // clear team script so it doesn't override retreat
+            entity.teamMissionIndex = 0;
+            break;
+          }
         }
         entity.teamMissionIndex++;
         break;

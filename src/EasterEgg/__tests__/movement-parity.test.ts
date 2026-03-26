@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { Dir, UnitType, House, CELL_SIZE, worldDist } from '../engine/types';
+import { LP, PIXEL_LEPTON_W } from '../engine/tracks';
 
 beforeEach(() => resetEntityIds());
 
@@ -112,15 +113,18 @@ describe('MV2: damageSpeedFactor has single tier at 50% HP', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.hp = Math.floor(tank.maxHp * 0.75); // 75% HP
     tank.facing = Dir.E;
+    tank.desiredFacing = Dir.E;
 
     const startX = tank.pos.x;
     const speed = 8;
     tank.rotTickedThisFrame = false;
     tank.moveToward({ x: 300, y: 100 }, speed);
 
-    // Should move at full speed
+    // C++ lepton accumulator quantizes: floor(8/LP)=85 leptons, 85/10=8 steps, 80*LP=7.5
     const moved = tank.pos.x - startX;
-    expect(moved).toBeCloseTo(speed, 1);
+    const expectedLeptons = Math.floor(speed / LP);
+    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expectedMove, 1);
   });
 });
 
@@ -258,6 +262,7 @@ describe('MV8: speedFraction default is 1.0 (no arbitrary halving)', () => {
   it('moveToward uses the full speed value passed to it (no internal halving)', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
+    tank.desiredFacing = Dir.E;
     const target = { x: 300, y: 100 };
     const speed = 8;
 
@@ -265,14 +270,17 @@ describe('MV8: speedFraction default is 1.0 (no arbitrary halving)', () => {
     tank.rotTickedThisFrame = false;
     tank.moveToward(target, speed);
 
-    // Should move at the full speed passed in
+    // C++ lepton accumulator: floor(8/LP)=85 leptons, 85/10=8 steps, 80*LP=7.5
     const moved = tank.pos.x - startX;
-    expect(moved).toBeCloseTo(speed, 1);
+    const expectedLeptons = Math.floor(speed / LP);
+    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expectedMove, 1);
   });
 
   it('speedBias multiplier still works on top of full speed', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
+    tank.desiredFacing = Dir.E;
     tank.speedBias = 1.5; // crate bonus
     const target = { x: 300, y: 100 };
     const speed = 8;
@@ -281,8 +289,11 @@ describe('MV8: speedFraction default is 1.0 (no arbitrary halving)', () => {
     tank.rotTickedThisFrame = false;
     tank.moveToward(target, speed);
 
-    // Should move at speed * speedBias = 8 * 1.5 = 12
+    // C++ lepton accumulator: effectiveSpeed = 8*1.5=12, floor(12/LP)=128, 128/10=12 steps, 120*LP=11.25
     const moved = tank.pos.x - startX;
-    expect(moved).toBeCloseTo(speed * 1.5, 1);
+    const effectiveSpeed = speed * 1.5;
+    const expectedLeptons = Math.floor(effectiveSpeed / LP);
+    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expectedMove, 1);
   });
 });
