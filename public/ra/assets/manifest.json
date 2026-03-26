@@ -1476,22 +1476,22 @@
     "sheetHeight": 62
   },
   "stripna": {
-    "frameWidth": 32,
-    "frameHeight": 96,
+    "frameWidth": 64,
+    "frameHeight": 192,
     "frameCount": 2,
     "columns": 2,
     "rows": 1,
-    "sheetWidth": 64,
-    "sheetHeight": 96
+    "sheetWidth": 128,
+    "sheetHeight": 192
   },
   "stripus": {
-    "frameWidth": 32,
-    "frameHeight": 96,
+    "frameWidth": 64,
+    "frameHeight": 192,
     "frameCount": 2,
     "columns": 2,
     "rows": 1,
-    "sheetWidth": 64,
-    "sheetHeight": 96
+    "sheetWidth": 128,
+    "sheetHeight": 192
   },
   "pips": {
     "frameWidth": 34,
