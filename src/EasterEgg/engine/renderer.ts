@@ -3654,13 +3654,14 @@ export class Renderer {
     const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
     const rightItems = this.sidebarItems.filter(it => getStripSide(it) === 'right');
 
-    // Strip column backgrounds (C++ StripClass::Draw_It — draw when fewer items than MAX_VISIBLE)
+    // Strip column backgrounds — fill empty slots with strip.png (per-slot metallic texture)
+    // Note: stripna/stripus are garbled from bad extraction; use strip.png tiled instead
+    const stripSlotSheet = assets.getSheet('strip');
     for (const [items, xOff] of [[leftItems, Renderer.LEFT_STRIP_X_OFFSET], [rightItems, Renderer.RIGHT_STRIP_X_OFFSET]] as const) {
-      if (items.length < Renderer.CAMEO_VISIBLE) {
-        const stripBg = assets.getSheet(isAllied ? 'stripna' : 'stripus');
-        if (stripBg) {
-          const stripScale = Renderer.CAMEO_W / stripBg.meta.frameWidth;
-          assets.drawFrame(ctx, isAllied ? 'stripna' : 'stripus', 0, x + xOff, Renderer.STRIP_START_Y, { scale: stripScale });
+      if (items.length < Renderer.CAMEO_VISIBLE && stripSlotSheet) {
+        const slotScale = Renderer.CAMEO_W / stripSlotSheet.meta.frameWidth;
+        for (let s = items.length; s < Renderer.CAMEO_VISIBLE; s++) {
+          assets.drawFrame(ctx, 'strip', 0, x + xOff, Renderer.STRIP_START_Y + s * Renderer.CAMEO_H, { scale: slotScale });
         }
       }
     }
