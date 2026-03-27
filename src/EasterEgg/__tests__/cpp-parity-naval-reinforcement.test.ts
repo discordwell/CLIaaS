@@ -141,15 +141,15 @@ describe('Naval reinforcement — C++ parity', () => {
     it('should return a water cell for naval reinforcements, not a land cell', () => {
       // C++ display.cpp:2511: Good_Reinforcement_Cell(trycell, trycell+modifier, loco, zone, mzone)
       // For SPEED_FLOAT, only water cells pass this check.
-      //
-      // TS now checks terrain when map and naval flag are provided.
+      // C++ checks BOTH outcell (outside boundary, spawn position) and incell
+      // (just inside boundary). The scan checks the INSIDE cell for water passability.
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
-      const originWp = { cx: 30, cy: 20 };
+      const originWp = { cx: 30, cy: 11 }; // near north edge so inference picks north
       const map = new GameMap();
       map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
-      // Set aligned cell (30,10) as land, but put water at (25,10) on north edge
-      // All cells default to CLEAR (land), so the aligned cell is land.
-      map.setTerrain(25, 10, Terrain.WATER);
+      // Set water at (25, boundsY) — the inside cell adjacent to north edge spawn
+      // C++ Good_Reinforcement_Cell checks incell (inside boundary) for passability
+      map.setTerrain(25, MAP_BOUNDS.y, Terrain.WATER);
 
       const edgeCell = calculateHouseEdgeSpawnCell(
         House.USSR, houseEdges, MAP_BOUNDS, originWp,
@@ -157,17 +157,18 @@ describe('Naval reinforcement — C++ parity', () => {
       );
 
       expect(edgeCell).toBeDefined();
-      // C++ would scan along the north edge and find the water cell at (25,10)
+      // Scan finds water at inside cell (25, boundsY), returns outside spawn cell (25, boundsY-1)
       expect(edgeCell!.cx).toBe(25);
-      expect(edgeCell!.cy).toBe(10);
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1);
     });
 
-    it('returns aligned cell when it is already water (no scan needed)', () => {
+    it('returns aligned cell when inside cell is already water (no scan needed)', () => {
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
-      const originWp = { cx: 30, cy: 20 };
+      const originWp = { cx: 30, cy: 11 }; // near north edge so inference picks north
       const map = new GameMap();
       map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
-      map.setTerrain(30, 10, Terrain.WATER);
+      // Set water at (30, boundsY) — the inside cell aligned with spawn position
+      map.setTerrain(30, MAP_BOUNDS.y, Terrain.WATER);
 
       const edgeCell = calculateHouseEdgeSpawnCell(
         House.USSR, houseEdges, MAP_BOUNDS, originWp,
@@ -176,12 +177,13 @@ describe('Naval reinforcement — C++ parity', () => {
 
       expect(edgeCell).toBeDefined();
       expect(edgeCell!.cx).toBe(30);
-      expect(edgeCell!.cy).toBe(10);
+      // Spawn cell is at boundsY - 1 (1 outside)
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1);
     });
 
     it('without naval flag, returns edge cell regardless of terrain', () => {
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
-      const originWp = { cx: 30, cy: 20 };
+      const originWp = { cx: 30, cy: 11 }; // near north edge so inference picks north
       const map = new GameMap();
       map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
       // All CLEAR (land) — naval=false should not care
@@ -192,19 +194,22 @@ describe('Naval reinforcement — C++ parity', () => {
 
       expect(edgeCell).toBeDefined();
       expect(edgeCell!.cx).toBe(30);
-      expect(edgeCell!.cy).toBe(10);
+      // C++ display.cpp:2454: north edge cy = boundsY - 1
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1);
     });
 
-    it('edge cell coordinates are within map bounds (structural check)', () => {
+    it('edge cell is 1 cell outside map bounds (C++ Calculated_Cell)', () => {
+      // C++ display.cpp:2537-2586: outcell is "just outside the edge"
       const houseEdges = new Map<House, string>([[House.USSR, 'south']]);
-      const originWp = { cx: 35, cy: 25 };
+      const originWp = { cx: 35, cy: 48 }; // near south edge so inference picks south
       const edgeCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
 
       expect(edgeCell).toBeDefined();
+      // Aligned coordinate (cx) within bounds
       expect(edgeCell!.cx).toBeGreaterThanOrEqual(MAP_BOUNDS.x);
       expect(edgeCell!.cx).toBeLessThanOrEqual(MAP_BOUNDS.x + MAP_BOUNDS.w - 1);
-      expect(edgeCell!.cy).toBeGreaterThanOrEqual(MAP_BOUNDS.y);
-      expect(edgeCell!.cy).toBeLessThanOrEqual(MAP_BOUNDS.y + MAP_BOUNDS.h - 1);
+      // Edge coordinate (cy) is 1 outside south boundary
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y + MAP_BOUNDS.h);
     });
   });
 
@@ -226,6 +231,14 @@ describe('Naval reinforcement — C++ parity', () => {
       ['south', 4],  // FACING_S
       ['west', 6],   // FACING_W
     ];
+
+    // Waypoints near each edge so inferClosestMapEdge picks the intended edge
+    const edgeWaypoints: Record<string, CellPos> = {
+      north: { cx: 32, cy: 1 },
+      east:  { cx: 63, cy: 32 },
+      south: { cx: 32, cy: 63 },
+      west:  { cx: 1, cy: 32 },
+    };
 
     for (const [edge, expectedFacing] of SOURCE_TO_FACING) {
       it(`${edge} edge -> facing ${expectedFacing} (C++ source << 1)`, () => {
@@ -250,7 +263,7 @@ describe('Naval reinforcement — C++ parity', () => {
         };
         const MAP_BOUNDS = { x: 0, y: 0, w: 64, h: 64 };
         const teamTypes: TeamType[] = [team];
-        const waypoints = new Map<number, CellPos>([[0, { cx: 32, cy: 32 }]]);
+        const waypoints = new Map<number, CellPos>([[0, edgeWaypoints[edge]]]);
         const houseEdges = new Map<House, string>([[House.USSR, edge]]);
         const globals = new Set<number>();
         const triggers: ScenarioTrigger[] = [];
@@ -463,7 +476,7 @@ describe('Naval reinforcement — C++ parity', () => {
       expect(groundCell).toEqual(navalCell);
     });
 
-    it('naval reinforcement team spawns members at edge cell', () => {
+    it('naval reinforcement team spawns members at edge cell (1 cell outside bounds)', () => {
       // Test that a pure naval team (destroyer + submarine) spawns at edge
       const team: TeamType = {
         name: 'NavalPatrol',
@@ -482,7 +495,8 @@ describe('Naval reinforcement — C++ parity', () => {
       };
 
       const teamTypes: TeamType[] = [team];
-      const waypoints = new Map<number, CellPos>([[0, { cx: 32, cy: 32 }]]);
+      // Waypoint near north edge so inferClosestMapEdge picks north
+      const waypoints = new Map<number, CellPos>([[0, { cx: 32, cy: 1 }]]);
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
       const globals = new Set<number>();
       const triggers: ScenarioTrigger[] = [];
@@ -506,17 +520,16 @@ describe('Naval reinforcement — C++ parity', () => {
         expect(entity.isNavalUnit, `${entity.type} should be naval`).toBe(true);
       }
 
-      // C++ would spawn these at a WATER edge cell.
-      // TS spawns them at a generic edge cell (may be land).
-      // They should at least be at the edge.
+      // C++ Calculated_Cell places units 1 cell OUTSIDE the map boundary.
+      // C++ display.cpp:2454: north edge y = -1 → cy = boundsY - 1
       for (const entity of result.spawned) {
-        // Structural check: they should be at the edge of the map, not at the waypoint
         const cell = { cx: Math.floor(entity.pos.x / 24), cy: Math.floor(entity.pos.y / 24) };
-        const onEdge = cell.cx === MAP_BOUNDS.x ||
-          cell.cx === MAP_BOUNDS.x + MAP_BOUNDS.w - 1 ||
-          cell.cy === MAP_BOUNDS.y ||
-          cell.cy === MAP_BOUNDS.y + MAP_BOUNDS.h - 1;
-        expect(onEdge, `naval unit at (${cell.cx},${cell.cy}) should be on map edge`).toBe(true);
+        // North edge: cy should be boundsY - 1 (1 cell outside)
+        const onOutsideEdge = cell.cx === MAP_BOUNDS.x - 1 ||
+          cell.cx === MAP_BOUNDS.x + MAP_BOUNDS.w ||
+          cell.cy === MAP_BOUNDS.y - 1 ||
+          cell.cy === MAP_BOUNDS.y + MAP_BOUNDS.h;
+        expect(onOutsideEdge, `naval unit at (${cell.cx},${cell.cy}) should be 1 cell outside map edge`).toBe(true);
       }
     });
   });
@@ -637,8 +650,8 @@ describe('Naval reinforcement — C++ parity', () => {
 
       const edgeCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
       expect(edgeCell).toBeDefined();
-      // For north edge: cy = boundsY (north), cx aligned with waypoint
-      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y); // north edge
+      // C++ display.cpp:2454: north edge cy = boundsY - 1 (1 cell outside)
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1); // north edge, 1 outside
       expect(edgeCell!.cx).toBe(35); // aligned with waypoint X
     });
 
@@ -650,7 +663,8 @@ describe('Naval reinforcement — C++ parity', () => {
 
       const edgeCell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, MAP_BOUNDS, originWp);
       expect(edgeCell).toBeDefined();
-      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x); // west edge
+      // C++ display.cpp:2443: west edge cx = boundsX - 1 (1 cell outside)
+      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x - 1); // west edge, 1 outside
       expect(edgeCell!.cy).toBe(30); // aligned with waypoint Y
     });
   });

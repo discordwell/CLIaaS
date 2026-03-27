@@ -151,49 +151,56 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
   // C++ reinf.cpp:441 — Map.Calculated_Cell picks edge entry cell
   // ============================================================
   describe('Edge spawn location — C++ reinf.cpp:441', () => {
-    it('ground reinforcements spawn at the MAP EDGE, not at the origin waypoint', () => {
+    it('ground reinforcements spawn 1 cell OUTSIDE the map edge, not at the origin waypoint', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
-      const originWp = { cx: 50, cy: 80 }; // waypoint is deep inside the map
+      // Waypoint near west edge so inferClosestMapEdge picks 'west'
+      const originWp = { cx: 24, cy: 80 };
       const edgeCell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, MAP_BOUNDS, originWp);
 
       expect(edgeCell).toBeDefined();
-      // Must be ON the west edge
-      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x);
+      // C++ display.cpp:2443: x = -1 → cx = MapCellX - 1 (1 cell outside west edge)
+      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x - 1);
       // Aligned to waypoint Y
       expect(edgeCell!.cy).toBe(80);
     });
 
-    it('north edge: spawn cell is on the top row', () => {
+    it('north edge: spawn cell is 1 row above the top row', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'north']]);
-      const originWp = { cx: 50, cy: 80 };
+      // Waypoint near north edge so inferClosestMapEdge picks 'north'
+      const originWp = { cx: 50, cy: 58 };
       const edgeCell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, MAP_BOUNDS, originWp);
 
       expect(edgeCell).toBeDefined();
-      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y);
+      // C++ display.cpp:2454: y = -1 → cy = MapCellY - 1 (1 cell outside north edge)
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1);
       expect(edgeCell!.cx).toBe(50);
     });
 
-    it('east edge: spawn cell is on the rightmost column', () => {
+    it('east edge: spawn cell is 1 col right of the rightmost column', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'east']]);
-      const originWp = { cx: 50, cy: 80 };
+      // Waypoint near east edge so inferClosestMapEdge picks 'east'
+      const originWp = { cx: 109, cy: 80 };
       const edgeCell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, MAP_BOUNDS, originWp);
 
       expect(edgeCell).toBeDefined();
-      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x + MAP_BOUNDS.w - 1);
+      // C++ display.cpp:2445: x = MapCellWidth → cx = MapCellX + MapCellWidth (1 cell outside east edge)
+      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x + MAP_BOUNDS.w);
       expect(edgeCell!.cy).toBe(80);
     });
 
-    it('south edge: spawn cell is on the bottom row', () => {
+    it('south edge: spawn cell is 1 row below the bottom row', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'south']]);
-      const originWp = { cx: 50, cy: 80 };
+      // Waypoint near south edge so inferClosestMapEdge picks 'south'
+      const originWp = { cx: 50, cy: 110 };
       const edgeCell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, MAP_BOUNDS, originWp);
 
       expect(edgeCell).toBeDefined();
-      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y + MAP_BOUNDS.h - 1);
+      // C++ display.cpp:2456: y = MapCellHeight → cy = MapCellY + MapCellHeight (1 cell outside south edge)
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y + MAP_BOUNDS.h);
       expect(edgeCell!.cx).toBe(50);
     });
 
-    it('spawn cell is always within map bounds (C++ Clip_Scatter clamping)', () => {
+    it('spawn cell is 1 cell outside map bounds (C++ Calculated_Cell spawns outside edge)', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
       for (let i = 0; i < 100; i++) {
         const edgeCell = calculateHouseEdgeSpawnCell(
@@ -201,22 +208,28 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
           () => i / 100,
         );
         expect(edgeCell).toBeDefined();
-        expect(edgeCell!.cx).toBeGreaterThanOrEqual(MAP_BOUNDS.x);
-        expect(edgeCell!.cx).toBeLessThanOrEqual(MAP_BOUNDS.x + MAP_BOUNDS.w - 1);
+        // C++ display.cpp:2443: west edge x = -1, so cx = MapCellX - 1
+        expect(edgeCell!.cx).toBe(MAP_BOUNDS.x - 1);
+        // Aligned coordinate (cy) is clamped within map bounds
         expect(edgeCell!.cy).toBeGreaterThanOrEqual(MAP_BOUNDS.y);
         expect(edgeCell!.cy).toBeLessThanOrEqual(MAP_BOUNDS.y + MAP_BOUNDS.h - 1);
       }
     });
 
     it('clamps aligned coordinate to map bounds when waypoint is out of range', () => {
+      // Waypoint cx=10 is left of boundsX=23, cy=57 is at boundsY. inferClosestMapEdge
+      // picks 'west' (closest edge), so cx is the edge coord (x-1=22, 1 cell outside)
+      // and cy is the aligned coord (clamped to map bounds).
       const houseEdges = new Map<House, string>([[House.Greece, 'north']]);
-      // cx=10 is below boundsX=23
       const originWp = { cx: 10, cy: 57 };
       const edgeCell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, MAP_BOUNDS, originWp);
 
       expect(edgeCell).toBeDefined();
-      expect(edgeCell!.cx).toBeGreaterThanOrEqual(MAP_BOUNDS.x);
-      expect(edgeCell!.cx).toBeLessThanOrEqual(MAP_BOUNDS.x + MAP_BOUNDS.w - 1);
+      // C++ display.cpp:2443: west edge cx = boundsX - 1 (1 outside)
+      expect(edgeCell!.cx).toBe(MAP_BOUNDS.x - 1);
+      // Aligned coordinate (cy) is clamped within map bounds
+      expect(edgeCell!.cy).toBeGreaterThanOrEqual(MAP_BOUNDS.y);
+      expect(edgeCell!.cy).toBeLessThanOrEqual(MAP_BOUNDS.y + MAP_BOUNDS.h - 1);
     });
   });
 
@@ -236,8 +249,8 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
         House.Greece, undefined, MAP_BOUNDS, undefined, () => 0.5,
       );
       expect(edgeCell).toBeDefined();
-      // Should be on the north edge
-      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y);
+      // C++ display.cpp:2471: SOURCE_NORTH y = -1 → cy = MapCellY - 1 (1 cell outside north edge)
+      expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1);
     });
   });
 
@@ -259,7 +272,8 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
       const cell = resolveTeamOriginCell(99, House.Greece, waypoints, houseEdges, MAP_BOUNDS);
       expect(cell).toBeDefined();
-      expect(cell!.cx).toBe(MAP_BOUNDS.x);
+      // C++ display.cpp:2443: west edge x = -1 → cx = MapCellX - 1
+      expect(cell!.cx).toBe(MAP_BOUNDS.x - 1);
     });
   });
 
@@ -280,6 +294,15 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
   // map center (outward). The team script then turns them inward.
   // ============================================================
   describe('Ground unit facing — C++ reinf.cpp:439,465 (OUTWARD)', () => {
+    // Waypoints near each edge so inferClosestMapEdge picks the intended edge.
+    // MAP_BOUNDS = { x: 23, y: 57, w: 87, h: 54 } → x range [23,109], y range [57,110]
+    const edgeWaypoints: Record<string, CellPos> = {
+      north: { cx: 50, cy: 58 },   // near north (y=57)
+      east:  { cx: 109, cy: 80 },  // near east (x=109)
+      south: { cx: 50, cy: 110 },  // near south (y=110)
+      west:  { cx: 24, cy: 80 },   // near west (x=23)
+    };
+
     const edges: Array<{ edge: string; expectedFacing: Dir }> = [
       { edge: 'north', expectedFacing: Dir.N },
       { edge: 'east',  expectedFacing: Dir.E },
@@ -291,7 +314,7 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
       it(`units from ${edge} edge should face ${Dir[expectedFacing]} (outward) — C++ eface=(source<<1)`, () => {
         const houseEdges = new Map<House, string>([[House.Greece, edge]]);
         const team = makeTeam({ origin: 0 });
-        const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 80 }]]);
+        const waypoints = new Map<number, CellPos>([[0, edgeWaypoints[edge]]]);
         const triggers: ScenarioTrigger[] = [makeTrigger()];
 
         const result = executeTriggerAction(
@@ -435,9 +458,9 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
 
       for (const entity of aircraft) {
         // The entity's world position is derived from the edge cell, not the waypoint
-        // Edge is north, so the spawn cell should have cy = MAP_BOUNDS.y
+        // C++ display.cpp:2454: north edge y = -1 → cy = MAP_BOUNDS.y - 1 (1 cell outside)
         // World coordinates are cell * 24 + 12 (from cellToWorld)
-        const expectedEdgeCy = MAP_BOUNDS.y;
+        const expectedEdgeCy = MAP_BOUNDS.y - 1;
         const edgeWorldY = expectedEdgeCy * 24 + 12;
         expect(
           entity.pos.y,
@@ -562,7 +585,7 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
   // SECTION 11: SCG08EA regression — MCV spawn at edge
   // ============================================================
   describe('SCG08EA MCV reinforcement — regression test', () => {
-    it('edge spawn cell for SCG08EA MCV is within map bounds', () => {
+    it('edge spawn cell for SCG08EA MCV is 1 cell outside west map boundary', () => {
       const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
       const originWp = { cx: 23, cy: 64 }; // WP0 in SCG08EA
 
@@ -572,8 +595,11 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
           () => i / 50,
         );
         expect(edgeCell).toBeDefined();
-        expect(edgeCell!.cx, `iteration ${i}: cx out of bounds`).toBeGreaterThanOrEqual(MAP_BOUNDS.x);
+        // C++ display.cpp:2443: west edge cx = boundsX - 1 (1 cell outside)
+        expect(edgeCell!.cx, `iteration ${i}: cx should be 1 outside west edge`).toBe(MAP_BOUNDS.x - 1);
+        // Aligned coordinate (cy) is clamped within map bounds
         expect(edgeCell!.cy, `iteration ${i}: cy out of bounds`).toBeGreaterThanOrEqual(MAP_BOUNDS.y);
+        expect(edgeCell!.cy, `iteration ${i}: cy out of bounds`).toBeLessThanOrEqual(MAP_BOUNDS.y + MAP_BOUNDS.h - 1);
       }
     });
   });

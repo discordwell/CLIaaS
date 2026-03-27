@@ -1027,8 +1027,8 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
       const heli = result.spawned[0];
       // calculateHouseEdgeSpawnCell uses inferClosestMapEdge when alignedCell is provided.
       // Waypoint at (50,5) — closest edge is north (cy=5 < h/2=50).
-      // North edge spawn: cy=MAP_BOUNDS.y=0
-      const edgeY = MAP_BOUNDS.y * CELL_SIZE + CELL_SIZE / 2;
+      // C++ display.cpp:2454: north edge cy = boundsY - 1 (1 cell outside)
+      const edgeY = (MAP_BOUNDS.y - 1) * CELL_SIZE + CELL_SIZE / 2;
       expect(heli.pos.y).toBe(edgeY);
       // Position should NOT be at the origin waypoint y
       const originY = 5 * CELL_SIZE + CELL_SIZE / 2;
@@ -1095,8 +1095,8 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
       expect(result.spawned).toHaveLength(1);
       const tank = result.spawned[0];
       // C++ parity: ground units spawn at map edge (reinf.cpp:471 Calculated_Cell)
-      // House edge for USSR='North', so cy=0 (north edge of map bounds 0,0,100,100)
-      const edgeY = MAP_BOUNDS.y * CELL_SIZE + CELL_SIZE / 2;
+      // C++ display.cpp:2454: north edge cy = boundsY - 1 (1 cell outside bounds)
+      const edgeY = (MAP_BOUNDS.y - 1) * CELL_SIZE + CELL_SIZE / 2;
       expect(Math.abs(tank.pos.y - edgeY)).toBeLessThanOrEqual(24);
       // Should NOT have aircraftState='flying'
       expect(tank.aircraftState).not.toBe('flying');

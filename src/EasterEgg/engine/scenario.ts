@@ -1118,19 +1118,25 @@ export function calculateHouseEdgeSpawnCell(
   const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
   const alignedY = alignedCell ? Math.min(Math.max(alignedCell.cy, y), y + h - 1) : y + (randOffset % h);
 
+  // C++ display.cpp:2432-2498 (Calculated_Cell): spawn cells are 1 cell OUTSIDE
+  // the map boundary. North: y = -1 → cy = MapCellY - 1. South: y = MapCellHeight
+  // → cy = MapCellY + MapCellHeight. West: x = -1 → cx = MapCellX - 1. East:
+  // x = MapCellWidth → cx = MapCellX + MapCellWidth.
+  // Good_Reinforcement_Cell (display.cpp:2544-2546) confirms: outcell is "just
+  // outside the edge", incell is "just inside the edge".
   let candidate: CellPos | null;
   switch (edge) {
     case 'north':
-      candidate = { cx: alignedX, cy: y };
+      candidate = { cx: alignedX, cy: y - 1 };
       break;
     case 'south':
-      candidate = { cx: alignedX, cy: y + h - 1 };
+      candidate = { cx: alignedX, cy: y + h };
       break;
     case 'east':
-      candidate = { cx: x + w - 1, cy: alignedY };
+      candidate = { cx: x + w, cy: alignedY };
       break;
     case 'west':
-      candidate = { cx: x, cy: alignedY };
+      candidate = { cx: x - 1, cy: alignedY };
       break;
     default:
       console.warn(`Unknown house edge: '${edge}' — expected north/south/east/west`);
@@ -1140,10 +1146,18 @@ export function calculateHouseEdgeSpawnCell(
   // C++ display.cpp:2505-2527 + Good_Reinforcement_Cell: for naval (SPEED_FLOAT),
   // only water cells are valid spawn locations. Scan along the edge if the
   // aligned cell is not water.
+  // C++ Good_Reinforcement_Cell checks BOTH outcell (outside boundary) and incell
+  // (just inside boundary). Since the spawn cell is 1 cell outside the map boundary,
+  // we check the adjacent inside cell for water passability.
   if (naval && map && candidate) {
-    if (!map.isWaterPassable(candidate.cx, candidate.cy)) {
-      // Scan along the edge for the nearest water cell
-      const isHorizontalEdge = edge === 'north' || edge === 'south';
+    // C++ display.cpp:2518: modifier = (y > MapCellY) ? -MAP_CELL_W : MAP_CELL_W
+    // The "inside" cell is 1 cell towards map center from the edge.
+    const isHorizontalEdge = edge === 'north' || edge === 'south';
+    const inCx = isHorizontalEdge ? candidate.cx : (edge === 'west' ? candidate.cx + 1 : candidate.cx - 1);
+    const inCy = isHorizontalEdge ? (edge === 'north' ? candidate.cy + 1 : candidate.cy - 1) : candidate.cy;
+
+    if (!map.isWaterPassable(inCx, inCy)) {
+      // Scan along the edge for the nearest water cell (check inside cells)
       const edgeCoord = isHorizontalEdge ? candidate.cy : candidate.cx;
       const scanStart = isHorizontalEdge ? x : y;
       const scanLen = isHorizontalEdge ? w : h;
@@ -1153,12 +1167,16 @@ export function calculateHouseEdgeSpawnCell(
       let bestDist = Infinity;
       for (let i = 0; i < scanLen; i++) {
         const sc = scanStart + i;
-        const cx = isHorizontalEdge ? sc : edgeCoord;
-        const cy = isHorizontalEdge ? edgeCoord : sc;
-        if (map.isWaterPassable(cx, cy)) {
+        // Check the inside cell for water passability
+        const checkCx = isHorizontalEdge ? sc : (edge === 'west' ? edgeCoord + 1 : edgeCoord - 1);
+        const checkCy = isHorizontalEdge ? (edge === 'north' ? edgeCoord + 1 : edgeCoord - 1) : sc;
+        if (map.isWaterPassable(checkCx, checkCy)) {
           const dist = Math.abs(sc - alignCoord);
           if (dist < bestDist) {
             bestDist = dist;
+            // Return the outside-edge spawn cell (aligned with this water cell)
+            const cx = isHorizontalEdge ? sc : edgeCoord;
+            const cy = isHorizontalEdge ? edgeCoord : sc;
             bestCell = { cx, cy };
           }
         }

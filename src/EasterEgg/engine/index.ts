@@ -4972,7 +4972,17 @@ export class Game {
       ? this.getAirspeedBias(entity.house)
       : this.getGroundspeedBias(entity.house);
     const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
-    const baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
+    let baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
+
+    // C++ infantry.cpp:3996-3997: canine 2x sprint when navigating toward a target
+    //   if (IsCanine && Target_Legal(NavCom)) { movespeed *= 2; }
+    // NavCom (navigation computer) is set whenever the unit has a valid movement
+    // destination — explicit moveTarget, active path, or chasing an entity target.
+    if (entity.stats.isCanine &&
+        (entity.moveTarget || (entity.path.length > 0 && entity.pathIndex < entity.path.length) || entity.target?.alive)) {
+      baseSpeed *= 2;
+    }
+
     if (terrainMult <= 0 && baseSpeed > 0) {
       // Can happen transiently during diagonal track movement when the pixel center
       // briefly crosses a building footprint or impassable cell boundary (benign).
