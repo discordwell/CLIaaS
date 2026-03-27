@@ -367,14 +367,26 @@ test.describe('State Parity: SCG01EA seed=0', () => {
     });
     console.log(`WASM start tick: ${wasmStartTick}`);
 
+    // Get TS start tick (AntGame.tsx:684 does game.step(1) before harness install,
+    // so TS starts at tick 1 while WASM starts at tick 0).
+    const tsStartTick = await tsPage.evaluate(() => {
+      return (window as unknown as { __agentState: () => { tick: number } }).__agentState().tick;
+    });
+    console.log(`TS start tick: ${tsStartTick}`);
+
+    // Note: TS starts at tick 1 (AntGame.tsx:684 does game.step(1) before harness).
+    // WASM starts at tick 0. This 1-tick offset is a real engine difference, not a
+    // harness bug — the TS init step fires triggers and advances game state.
+    // We compare at matching checkpoint offsets from each engine's start.
+
     // ── Lockstep comparison at each checkpoint ──
     const results: CheckpointDiff[] = [];
     let wasmTick = wasmStartTick;
-    let tsTick = 0;
+    let tsTick = tsStartTick;
 
     for (const target of CHECKPOINTS) {
       const wasmDelta = (wasmStartTick + target) - wasmTick;
-      const tsDelta = target - tsTick;
+      const tsDelta = (tsStartTick + target) - tsTick;
 
       console.log(`\n── Checkpoint: tick ${target} ──`);
 

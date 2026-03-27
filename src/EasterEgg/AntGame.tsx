@@ -681,7 +681,7 @@ export default function AntGame({ onExit }: AntGameProps) {
         game.start(scenarioId, diff).then(() => {
           game.pause();
           game.disableFog();
-          game.step(1);
+          game.step(0); // render-only — don't advance game state (C++ parity: tick 0 at harness init)
           installHarness(game);
         }).catch((err) => {
           console.error('Agent harness: game start failed', err);
