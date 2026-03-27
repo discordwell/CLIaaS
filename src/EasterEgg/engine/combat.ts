@@ -1001,37 +1001,23 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     const impactDamage = proj.strength;
 
     // C++ bullet.cpp:991 — Bullet_Explodes calls Explosion_Damage as the SOLE damage path.
-    // There is NO separate direct-hit damage call in C++. All damage flows through Explosion_Damage,
-    // which iterates all objects in the cell and adjacent cells, applying distance-based damage.
-    // The direct-hit target is at distance ~0, so it gets full damage from the splash calculation.
-    if (proj.weapon.splash && proj.weapon.splash > 0) {
-      // Splash weapons: ALL damage through applySplashDamage (matches C++ Explosion_Damage)
+    // There is NO separate direct-hit damage call in C++. ALL weapons — including non-splash
+    // ones like M60mg — route through Explosion_Damage, which iterates all objects in the
+    // impact cell and 8 adjacent cells, applying distance-based damage (range = 1.5 cells).
+    // The direct-hit target at distance ~0 gets full damage; nearby entities get reduced damage.
+    {
       const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+      // C++ combat.cpp:176: range = ICON_LEPTON_W + (ICON_LEPTON_W >> 1) = 1.5 cells
+      // Use weapon splash if defined, otherwise default to SPLASH_RADIUS (1.5 cells)
+      const splashRadius = (proj.weapon.splash && proj.weapon.splash > 0)
+        ? proj.weapon.splash
+        : SPLASH_RADIUS;
       applySplashDamage(
         ctx, { x: proj.impactX, y: proj.impactY },
-        { damage: impactDamage, warhead: proj.weapon.warhead, splash: proj.weapon.splash },
+        { damage: impactDamage, warhead: proj.weapon.warhead, splash: splashRadius },
         -1,  // No entity excluded from splash (firer is already excluded inside applySplashDamage)
         attackerHouse, attacker ?? undefined,
       );
-    } else if (proj.directHit && target && target.alive) {
-      // Non-splash weapons (machine guns, etc.): direct hit only, no area effect
-      const killed = damageEntity(ctx, target, impactDamage, proj.weapon.warhead, attacker);
-
-      if (!killed && attacker) {
-        triggerRetaliation(ctx, target, attacker);
-        scatterInfantry(ctx, target, { x: proj.impactX, y: proj.impactY });
-      }
-
-      if (killed) {
-        if (attacker) attacker.creditKill();
-        handleUnitDeath(ctx, target, {
-          screenShake: 8, explosionSize: 16, debris: true,
-          decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
-          explodeLgSound: false,
-          attackerIsPlayer: proj.attackerIsPlayer,
-          trackLoss: true,
-        });
-      }
     }
 
     // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
