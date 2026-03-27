@@ -56,14 +56,16 @@ describe('Core moveToward — speed class behavior', () => {
     inf.moveToward({ x: 300, y: 100 }, speed);
 
     const moved = inf.pos.x - startX;
-    // C++ lepton accumulator: floor(speed/LP) = 10 leptons → 1 pixel step = 10*LP = 0.9375
-    const expectedLeptons = Math.floor(speed / LP);
-    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    // C++ lepton accumulator with 255/256 fraction:
+    // MaxSpeed leptons = floor(speed/LP), SpeedAdd = floor(MaxSpeed*255/256)
+    const maxLeptons = Math.floor(speed / LP);
+    const speedAdd = Math.floor((maxLeptons * 255) / 256);
+    const expectedMove = Math.floor(speedAdd / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
     expect(moved).toBeCloseTo(expectedMove, 4);
   });
 
   it('vehicle (TRACK) moves at lepton-quantized speed when facing is aligned', () => {
-    // C++ accumulator: 2TNK speed=8 → 8*0.24=1.92 px/tick → floor(1.92/LP)=20 leptons → 2 steps → 1.875px
+    // C++ accumulator: 2TNK speed=8 → MaxSpeed=20 → speedAdd=floor(20*255/256)=19 → 1 step → 0.9375px
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
     tank.desiredFacing = Dir.E;
@@ -75,8 +77,9 @@ describe('Core moveToward — speed class behavior', () => {
     tank.moveToward({ x: 300, y: 100 }, speed);
 
     const moved = tank.pos.x - startX;
-    const expectedLeptons = Math.floor(speed / LP);
-    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    const maxLeptons = Math.floor(speed / LP);
+    const speedAdd = Math.floor((maxLeptons * 255) / 256);
+    const expectedMove = Math.floor(speedAdd / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
     expect(moved).toBeCloseTo(expectedMove, 4);
   });
 
@@ -143,8 +146,13 @@ describe('Core moveToward — speed class behavior', () => {
     const startX = inf.pos.x;
     const startY = inf.pos.y;
 
+    // E1 Speed=4 → speedAdd=9 (after 255/256). First tick accumulates 9 < 10 (no move).
+    // Second tick: 9+9=18 → 1 step. Need 2 ticks to see movement.
+    const speed = inf.stats.speed * MPH_TO_PX;
     inf.rotTickedThisFrame = false;
-    inf.moveToward(target, inf.stats.speed * MPH_TO_PX);
+    inf.moveToward(target, speed);
+    inf.rotTickedThisFrame = false;
+    inf.moveToward(target, speed);
 
     // Infantry should have moved even while rotating
     const movedX = inf.pos.x - startX;
@@ -1072,14 +1080,20 @@ describe('movementSpeed formula components', () => {
 
     unit.speedBias = 1.5; // crate boost
     unit.facing = Dir.E;
-    const baseSpeed = 5;
+    const baseSpeed = 5; // px/tick
     const startX = unit.pos.x;
 
     unit.rotTickedThisFrame = false;
     unit.moveToward({ x: 300, y: 100 }, baseSpeed);
 
+    // C++ chain: maxLeptons = floor(5*1.5 / LP) = floor(80) = 80
+    // speedAdd = floor(80 * 255 / 256) = floor(79.6875) = 79
+    // 79 / 10 = 7 steps, remainder 9 → 7 * 10 * LP = 6.5625 px
     const moved = unit.pos.x - startX;
-    expect(moved).toBeCloseTo(baseSpeed * 1.5, 3);
+    const maxLep = Math.floor((baseSpeed * 1.5) / LP);
+    const sa = Math.floor((maxLep * 255) / 256);
+    const expected = Math.floor(sa / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    expect(moved).toBeCloseTo(expected, 3);
   });
 
   it('groundspeedBias affects rotation but not direct movement speed', () => {

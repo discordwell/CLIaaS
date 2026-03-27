@@ -42,7 +42,7 @@ beforeEach(() => resetEntityIds());
  *
  * C++ chain:
  *   MaxSpeed = _Scale_To_256(Speed) = (Speed * 256) / 100  (integer)
- *   SpeedAdd = MaxSpeed (leptons/tick)
+ *   Set_Speed(0xFF): SpeedAdd = floor(MaxSpeed * 255 / 256)  — 255/256 fraction
  *   Per tick:
  *     actual = (int)SpeedAdd + SpeedAccum
  *     wholePixelSteps = actual / PIXEL_LEPTON_W  (integer division)
@@ -59,7 +59,9 @@ function cppAccumulatorPosition(
   // C++ _Scale_To_256: MaxSpeed = (Speed * 256) / 100 — integer math
   const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100);
   // Effective speed in leptons with damage factor and bias
-  const effectiveSpeedLeptons = Math.floor(maxSpeedLeptons * damageSpeedMul * speedBias);
+  const effectiveLeptons = Math.floor(maxSpeedLeptons * damageSpeedMul * speedBias);
+  // C++ Set_Speed: SpeedAdd = MaxSpeed * fixed(0xFF, 256) — the 255/256 fraction
+  const effectiveSpeedLeptons = Math.floor((effectiveLeptons * 255) / 256);
 
   let x = startX;
   let accum = 0;
@@ -239,13 +241,16 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
 
   describe('accumulator remainder tracking', () => {
     it('accumulator cycles correctly through remainder pattern', () => {
-      // Speed=3 → MaxSpeed = floor(3*256/100) = 7 leptons/tick, PIXEL_LEPTON_W=10
-      // Expected accumulator sequence: 0→7→4→1→8→5→2→9→6→3→0 (repeats every 10 ticks)
+      // Speed=3 → MaxSpeed = floor(3*256/100) = 7 leptons/tick
+      // 255/256 fraction: speedAdd = floor(7*255/256) = 6 leptons/tick
+      // Expected accumulator sequence: 0→6→2→8→4→0 (repeats every 5 ticks)
       const rulesSpeed = 3;
       const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100); // 7
       expect(maxSpeedLeptons).toBe(7);
+      const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256); // 6
+      expect(speedAdd).toBe(6);
 
-      const expectedAccums = [7, 4, 1, 8, 5, 2, 9, 6, 3, 0];
+      const expectedAccums = [6, 2, 8, 4, 0, 6, 2, 8, 4, 0];
 
       const entity = makeEntity('E3', House.Spain, 100, 100);
       entity.facing = Dir.E;
@@ -363,8 +368,9 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
 
   describe('pixel-step quantization', () => {
     it('speed too slow for a pixel step accumulates until threshold', () => {
-      // Speed=1 → MaxSpeed = floor(1*256/100) = floor(2.56) = 2 leptons/tick
-      // PIXEL_LEPTON_W=10 → needs 5 ticks to emit 1 pixel step
+      // Speed=1 → MaxSpeed = floor(1*256/100) = 2 leptons/tick
+      // 255/256 fraction: speedAdd = floor(2*255/256) = 1 lepton/tick
+      // PIXEL_LEPTON_W=10 → needs 10 ticks to emit 1 pixel step
       const rulesSpeed = 1;
       const entity = makeEntity('E1', House.Spain, 100, 100);
       entity.facing = Dir.E;
@@ -373,14 +379,14 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const startX = entity.pos.x;
       const farTarget: WorldPos = { x: 10000, y: 100 };
 
-      // Ticks 1-4: accumulate 2 leptons each, not enough for a pixel step
-      for (let t = 0; t < 4; t++) {
+      // Ticks 1-9: accumulate 1 lepton each, not enough for a pixel step
+      for (let t = 0; t < 9; t++) {
         entity.moveToward(farTarget, speedPx);
         expect(entity.pos.x, `tick ${t + 1} should not move yet`).toBe(startX);
       }
-      expect(entity.speedAccum).toBe(8); // 4 * 2 = 8 < 10
+      expect(entity.speedAccum).toBe(9); // 9 * 1 = 9 < 10
 
-      // Tick 5: 8 + 2 = 10 → exactly 1 pixel step (10 leptons → 10 * 0.09375 = 0.9375 px)
+      // Tick 10: 9 + 1 = 10 → exactly 1 pixel step (10 leptons → 10 * 0.09375 = 0.9375 px)
       entity.moveToward(farTarget, speedPx);
       const onePixelStep = PIXEL_LEPTON_W * LP; // 10 * 0.09375 = 0.9375
       expect(entity.pos.x).toBeCloseTo(startX + onePixelStep, 10);
@@ -388,8 +394,9 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
     });
 
     it('movement is always in discrete pixel-step increments', () => {
-      // Speed=6 → MaxSpeed = floor(6*256/100) = floor(15.36) = 15 leptons/tick
-      // 15/10 = 1 remainder 5 → 1 pixel step, accum=5
+      // Speed=6 → MaxSpeed = floor(6*256/100) = 15 leptons/tick
+      // 255/256 fraction: speedAdd = floor(15*255/256) = 14 leptons/tick
+      // 14/10 = 1 remainder 4 → 1 pixel step, accum=4
       const rulesSpeed = 6;
       const entity = makeEntity('E1', House.Spain, 100, 100);
       entity.facing = Dir.E;
@@ -403,7 +410,7 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       // Should move exactly 1 pixel step: 1 * 10 * LP = 10 * 0.09375 = 0.9375 px
       const expectedMove = 1 * PIXEL_LEPTON_W * LP;
       expect(entity.pos.x - startX).toBeCloseTo(expectedMove, 10);
-      expect(entity.speedAccum).toBe(5);
+      expect(entity.speedAccum).toBe(4);
     });
   });
 });

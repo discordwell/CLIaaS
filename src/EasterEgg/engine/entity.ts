@@ -814,17 +814,28 @@ export class Entity {
       return false; // still rotating — don't move yet
     }
 
-    // C++ lepton accumulator (fly.cpp:62-106):
+    // C++ lepton accumulator (fly.cpp:62-106 / drive.cpp SpeedAccum):
+    //   SpeedAdd = MaxSpeed * fixed(0xFF, 256)  — 255/256 fraction, never truly 100%
     //   actual = (int)SpeedAdd + SpeedAccum;
     //   result = div(actual, PIXEL_LEPTON_W);
     //   SpeedAccum = result.rem;
-    //   actual -= result.rem;  // actual is now whole-pixel-aligned lepton count
-    // Convert pixel speed to leptons, accumulate, emit whole-pixel steps.
-    const speedLeptons = effectiveSpeed / LP; // px/tick → leptons/tick
-    const actual = Math.floor(speedLeptons) + this.speedAccum; // C++: (int)SpeedAdd + SpeedAccum
-    const remainder = actual % PIXEL_LEPTON_W; // C++: div(actual, PIXEL_LEPTON_W).rem
+    //   actual -= result.rem;
+    //
+    // Replicate the exact C++ integer truncation chain:
+    //   1. _Scale_To_256: MaxSpeed = floor(iniSpeed * 256 / 100)
+    //   2. Apply multipliers (damage, bias, terrain, canine) to MaxSpeed
+    //   3. Set_Speed: SpeedAdd = floor(MaxSpeed * 255 / 256)  — the 255/256 fraction
+    //   4. Accumulate SpeedAdd, emit in PIXEL_LEPTON_W (10) chunks
+    //
+    // effectiveSpeed arrives as pixels/tick (= iniSpeed * MPH_TO_PX * multipliers).
+    // Convert back to MaxSpeed leptons: effectiveSpeed / LP = iniSpeed * 256/100 * multipliers.
+    // Then apply the 255/256 fraction to match C++ Set_Speed.
+    const maxSpeedLeptons = Math.floor(effectiveSpeed / LP); // = _Scale_To_256(speed) * multipliers
+    const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256); // C++ fixed(0xFF, 256) fraction
+    const actual = speedAdd + this.speedAccum;
+    const remainder = actual % PIXEL_LEPTON_W;
     this.speedAccum = remainder;
-    const moveLeptons = actual - remainder; // whole-pixel-aligned lepton budget
+    const moveLeptons = actual - remainder;
 
     if (moveLeptons <= 0) {
       return false; // not enough accumulated for a pixel step this tick
