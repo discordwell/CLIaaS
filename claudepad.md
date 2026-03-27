@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-27T00:00Z — C++/TS Parity: 11 Fixes via Lockstep Harness
+- **Built**: Deterministic RNG (`?seed=0`), lockstep Playwright parity harness comparing both engines.
+- **11 fixes**: spawn edge priority, speed scaling 2.5x, lepton accumulator, 255/256 fraction, DOG 2x sprint (broadened to path+target), transport retreat, spawn-outside-boundary, agent tick alignment, harness tick sync. V19 damage confirmed as cascade (no fix needed).
+- **Results**: TRAN gap 14→0 cells. JEEP gap 1→0. DOG gap 6→0. All position diffs eliminated. Remaining: single E1 HP diff (35 vs 27) at tick 50 and barrel chain cascade (structures 25 vs 20).
+- **Next**: Combat damage formula parity — M60mg 15 dmg/hit but TS totals 23 (not a multiple), suggesting scatter/falloff/ROF difference.
+- **Key commits**: a89addf, 26f7bca, 72864c3, aced604, cd8d4fa, 4a6d466, 762c41b.
+
 ## 2026-03-11T04:00Z — Session 142: Game Class Refactoring Phase 2 (Waves 0-3)
 - **6 new subsystem modules extracted**: placement.ts (179L), harvester.ts (261L), aircraft.ts (394L), ai.ts (1,319L), crates.ts (345L), missionAI.ts (1,207L)
 - **index.ts reduced**: 8,917 → 5,761 lines (35% reduction). 12 total extracted modules (6,350 lines).
