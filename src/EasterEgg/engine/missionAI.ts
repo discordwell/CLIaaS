@@ -568,9 +568,11 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     }
     entity.lastHuntScan = ctx.tick;
 
-    // C++ foot.cpp:654-703 — Hunt actively scans for new targets
-    // C++ THREAT_NORMAL scans the entire map (no range limit).
-    const huntRange = Infinity; // C++ parity: THREAT_NORMAL has unlimited range
+    // C++ foot.cpp:501-502 — Hunt uses Target_Something_Nearby(THREAT_RANGE),
+    // which limits scan to weapon range (not unlimited). THREAT_RANGE flag
+    // causes Threat_Range(0) → weapon range as the scan radius.
+    const weaponRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || entity.stats.sight;
+    const huntRange = weaponRange; // C++ parity: THREAT_RANGE = weapon range limit
     const ec = entity.cell;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
