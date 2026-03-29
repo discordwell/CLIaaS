@@ -568,11 +568,10 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     }
     entity.lastHuntScan = ctx.tick;
 
-    // C++ foot.cpp:501-502 — Hunt uses Target_Something_Nearby(THREAT_RANGE).
-    // THREAT_RANGE = 1 → Threat_Range(1) = 2 * max(weapon_range) capped at 10 cells.
-    // (techno.cpp:4573-4579: range = max(Weapon_Range(0), Weapon_Range(1)) * 2, Bound(0, 0x0A00))
-    const baseRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || entity.stats.sight;
-    const huntRange = Math.min(baseRange * 2, 10); // C++ parity: 2× weapon range, cap 10 cells
+    // C++ foot.cpp:657 — Mission_Hunt uses Target_Something_Nearby(THREAT_NORMAL).
+    // THREAT_NORMAL = 0 → Threat_Range(-1) = unlimited range (entire map scan).
+    // Note: foot.cpp:501 (Mission_MOVE) uses THREAT_RANGE, but HUNT uses THREAT_NORMAL.
+    const huntRange = Infinity; // C++ parity: THREAT_NORMAL = no range limit
     const ec = entity.cell;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
@@ -623,17 +622,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         entity.targetStructure = bestStruct;
         return;
       }
-      // No targets found — resume move or return to idle
-      if (entity.moveTarget) {
-        entity.mission = Mission.MOVE;
-        // Only recalc path if we don't have a valid one already
-        if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
-          entity.path = findPath(ctx.map, entity.cell, worldToCell(entity.moveTarget.x, entity.moveTarget.y), true, entity.isNavalUnit, entity.stats.speedClass);
-          entity.pathIndex = 0;
-        }
-      } else {
-        entity.mission = ctx.idleMission(entity);
-      }
+      // C++ foot.cpp:688 — no target found: call Random_Animate() and stay on HUNT.
+      // Do NOT drop to GUARD — the unit remains on HUNT and rescans next interval.
       return;
     }
   }
