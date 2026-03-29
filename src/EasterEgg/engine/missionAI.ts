@@ -693,7 +693,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
   const GUARD_NORMAL_DELAY = 45; // C++ MissionControl[Guard].Normal_Delay = 900 * 0.050
   const GUARD_AA_DELAY = 14;     // C++ MissionControl[Guard].AA_Delay = 900 * 0.016
-  const guardScanDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
+  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
+  // Each entity gets its own Timer with +0/1/2 random jitter, preventing all units
+  // from scanning on the same tick. Use entity ID modulo to approximate this.
+  const baseDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
+  const guardScanDelay = baseDelay + (entity.id % 3); // C++ parity: +Random_Pick(0,2)
   if (ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
 
