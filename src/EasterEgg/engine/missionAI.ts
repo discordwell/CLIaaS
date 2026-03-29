@@ -631,7 +631,12 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         return;
       }
       // C++ foot.cpp:688 — no target found: call Random_Animate() and stay on HUNT.
-      // Do NOT drop to GUARD — the unit remains on HUNT and rescans next interval.
+      // Infantry Random_Animate consumes 2-3 RNG calls for parity.
+      if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
+        entity.idleAnimTimer = ScenarioRandom.nextInRange(1125, 9000);
+        const animPick = ScenarioRandom.nextInRange(0, 10);
+        if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
+      }
       return;
     }
   }
@@ -692,6 +697,9 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     ctx.updateMechanicUnit(entity);
     return;
   }
+
+  // C++ IdleTimer countdown — decrements every tick (techno.cpp:5326)
+  if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
 
   // C++ Arm countdown — weapon cooldown decrements every tick regardless of mission.
   // In updateAttack this only decrements while moving toward target (line 248),
@@ -894,6 +902,24 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     if (bestStruct) {
       entity.mission = Mission.ATTACK;
       entity.targetStructure = bestStruct;
+      return;
+    }
+  }
+
+  // C++ foot.cpp:594 — Random_Animate() when no target found.
+  // Infantry consume 2-3 RNG values (IdleTimer + animation selection + optional facing).
+  // This matches C++'s per-scan-cycle RNG consumption pattern.
+  if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
+    // C++ infantry.cpp:1748 — set next idle timer
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(
+      Math.floor(5 * 450 / 2), // Rule.RandomAnimateTime * TICKS_PER_MINUTE/2 (≈5 min default * 450/2)
+      5 * 900 * 2              // Rule.RandomAnimateTime * TICKS_PER_MINUTE*2
+    );
+    // C++ infantry.cpp:1759 — select animation type (0-10)
+    const animPick = ScenarioRandom.nextInRange(0, 10);
+    // C++ infantry.cpp:1788,1795,1807,1817 — cases 6,7,8,9,10 also pick a random facing
+    if (animPick >= 6) {
+      ScenarioRandom.nextInRange(0, 7); // Random_Pick(FACING_N, FACING_NW) — consume but don't apply
     }
   }
 }
