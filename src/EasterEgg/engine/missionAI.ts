@@ -824,16 +824,13 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     }
   }
   if (bestTarget) {
-    // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom. C++ stays on GUARD
-    // and Firing_AI fires based on TarCom. In C++, entities are processed
-    // sequentially: JEEP_A fires → infantry scatter moves E1 → JEEP_B scans
-    // and E1 is now out of range. TS processes guard scans for all entities
-    // before damage resolves, so both JEEPs target the same E1.
-    // Switch to ATTACK to trigger firing — this is the existing TS behavior.
-    // The minor timing difference (both JEEPs firing vs just one) is from
-    // sequential vs parallel entity processing.
+    // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
+    // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves
+    // before the next entity's guard scan runs (sequential processing).
+    // Match this by switching to ATTACK and firing immediately in the same tick.
     entity.mission = Mission.ATTACK;
     entity.target = bestTarget;
+    updateAttack(ctx, entity); // C++ parity: fire inline before next entity processes
     return;
   }
 
