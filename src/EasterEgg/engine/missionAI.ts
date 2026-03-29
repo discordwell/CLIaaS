@@ -568,11 +568,11 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     }
     entity.lastHuntScan = ctx.tick;
 
-    // C++ foot.cpp:501-502 — Hunt uses Target_Something_Nearby(THREAT_RANGE),
-    // which limits scan to weapon range (not unlimited). THREAT_RANGE flag
-    // causes Threat_Range(0) → weapon range as the scan radius.
-    const weaponRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || entity.stats.sight;
-    const huntRange = weaponRange; // C++ parity: THREAT_RANGE = weapon range limit
+    // C++ foot.cpp:501-502 — Hunt uses Target_Something_Nearby(THREAT_RANGE).
+    // THREAT_RANGE = 1 → Threat_Range(1) = 2 * max(weapon_range) capped at 10 cells.
+    // (techno.cpp:4573-4579: range = max(Weapon_Range(0), Weapon_Range(1)) * 2, Bound(0, 0x0A00))
+    const baseRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || entity.stats.sight;
+    const huntRange = Math.min(baseRange * 2, 10); // C++ parity: 2× weapon range, cap 10 cells
     const ec = entity.cell;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
