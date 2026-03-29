@@ -2501,15 +2501,10 @@ export function executeTriggerAction(
           let spawnY = world.y;
           const stats = UNIT_STATS[unitType] ?? UNIT_STATS.E1;
 
-          if (stats.isAircraft && houseEdges && mapBounds) {
-            // Aircraft: spawn at edge, fly in to origin waypoint
-            const edgeCell = calculateHouseEdgeSpawnCell(teamHouse, houseEdges, mapBounds, wp);
-            if (edgeCell) {
-              const edgeWorld = cellToWorld(edgeCell.cx, edgeCell.cy);
-              spawnX = edgeWorld.x;
-              spawnY = edgeWorld.y;
-            }
-          } else if (groundEdgeCell) {
+          // C++ reinf.cpp:441,471 — ALL team members (aircraft + ground) spawn at the
+          // SAME Calculated_Cell. The cell is computed once and reused for every object.
+          // Aircraft do NOT get a separate spawn location.
+          if (groundEdgeCell) {
             // Ground units: spawn at edge cell (C++ reinf.cpp:471 Unlimbo at Calculated_Cell)
             const edgeWorld = cellToWorld(groundEdgeCell.cx, groundEdgeCell.cy);
             spawnX = edgeWorld.x;
