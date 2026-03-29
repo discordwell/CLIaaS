@@ -827,10 +827,18 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
     // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves
     // before the next entity's guard scan runs (sequential processing).
-    // Match this by switching to ATTACK and firing immediately in the same tick.
-    entity.mission = Mission.ATTACK;
+    // C++ does NOT change mission — unit stays on GUARD, fires via Firing_AI,
+    // and does NOT pursue the target. Match by temporarily switching to ATTACK
+    // for the inline fire, then restoring GUARD so the unit doesn't chase.
     entity.target = bestTarget;
+    entity.mission = Mission.ATTACK;
     updateAttack(ctx, entity); // C++ parity: fire inline before next entity processes
+    // Restore GUARD — C++ never leaves guard mission for target engagement.
+    // The target stays set so Firing_AI equivalent can fire on subsequent ticks
+    // when weapon cooldown expires, but the unit doesn't pursue.
+    if (entity.mission === Mission.ATTACK) {
+      entity.mission = Mission.GUARD;
+    }
     return;
   }
 
