@@ -694,10 +694,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   const GUARD_NORMAL_DELAY = 45; // C++ MissionControl[Guard].Normal_Delay = 900 * 0.050
   const GUARD_AA_DELAY = 14;     // C++ MissionControl[Guard].AA_Delay = 900 * 0.016
   // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
-  // Each entity gets its own Timer with +0/1/2 random jitter, preventing all units
-  // from scanning on the same tick. Use entity ID modulo to approximate this.
+  // Each entity gets its own Timer with per-entity jitter to prevent synchronized scans.
+  // Can't use ScenarioRandom here — consuming RNG values in guard scan desynchronizes
+  // the shared random sequence. Use a deterministic per-entity offset instead.
   const baseDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
-  const guardScanDelay = baseDelay + (entity.id % 3); // C++ parity: +Random_Pick(0,2)
+  const guardScanDelay = baseDelay + (entity.id % 3);
   if (ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
 
@@ -823,6 +824,14 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     }
   }
   if (bestTarget) {
+    // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom. C++ stays on GUARD
+    // and Firing_AI fires based on TarCom. In C++, entities are processed
+    // sequentially: JEEP_A fires → infantry scatter moves E1 → JEEP_B scans
+    // and E1 is now out of range. TS processes guard scans for all entities
+    // before damage resolves, so both JEEPs target the same E1.
+    // Switch to ATTACK to trigger firing — this is the existing TS behavior.
+    // The minor timing difference (both JEEPs firing vs just one) is from
+    // sequential vs parallel entity processing.
     entity.mission = Mission.ATTACK;
     entity.target = bestTarget;
     return;
