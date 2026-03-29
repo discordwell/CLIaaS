@@ -256,15 +256,21 @@ export function damageSpeedFactor(entity: Entity): number {
 
 // ── Internal Helpers (not exported) ────────────────────────────────────────────
 
-/** Infantry scatter: push infantry slightly away from attacker on direct hit.
- *  In original RA, infantry move randomly when shot at. */
+/** Infantry scatter: push infantry toward a nearby cell when hit.
+ *  C++ infantry.cpp:1852-1907 InfantryClass::Scatter
+ *  C++ always scatters when forced (the 25% random check is commented out at line 1885).
+ *  Direction: facing away from threat + Random_Pick(0, 4) - 2 offset.
+ *  Uses exactly 1 ScenarioRandom call (matching C++ RNG consumption). */
 function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldPos): void {
   if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
-  if (ScenarioRandom.float() > 0.4) return; // 40% chance to scatter per hit
-  const angle = Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x);
-  const jitter = (ScenarioRandom.float() - 0.5) * 1.2; // add randomness to scatter direction
-  const scatterX = victim.pos.x + Math.cos(angle + jitter) * CELL_SIZE * 0.5;
-  const scatterY = victim.pos.y + Math.sin(angle + jitter) * CELL_SIZE * 0.5;
+  // C++ infantry.cpp:1888-1890: direction = away from threat + Random_Pick(0,4)-2
+  const baseFacing = Math.round(Math.atan2(victim.pos.y - attackerPos.y, victim.pos.x - attackerPos.x) / (Math.PI / 4)) & 7;
+  const offset = ScenarioRandom.nextInRange(0, 4) - 2; // C++ parity: exactly 1 RNG call
+  const scatterFacing = ((baseFacing + offset) + 8) % 8;
+  const dx = DIR_DX[scatterFacing];
+  const dy = DIR_DY[scatterFacing];
+  const scatterX = victim.pos.x + dx * CELL_SIZE * 0.5;
+  const scatterY = victim.pos.y + dy * CELL_SIZE * 0.5;
   const sc = worldToCell(scatterX, scatterY);
   if (ctx.map.isPassable(sc.cx, sc.cy)) {
     victim.pos.x = scatterX;
