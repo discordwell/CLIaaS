@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-29T01:00Z — C++/TS Parity: 25 Fixes, Guard Firing_AI + Sequential Processing
+- **Key breakthroughs**: HUNT mission persistence (E1s were dropping to GUARD), guard scan→ATTACK mission switch (C++ stays on GUARD), inline fire for sequential entity processing (first JEEP fires → E1 scatters → second JEEP misses), Firing_AI equivalent with cooldown ticking in GUARD.
+- **Results**: Barrel cascade eliminated. Structure 25/20 gap gone. V19 damage gone. JEEP HP gap 72→9. Enemy count matches. Tick 50 has zero HP diffs.
+- **Remaining**: 9 HP JEEP gap (1 extra hit), Tanya unload timing (tick 100 unit count), 1-cell position diffs on TRAN/DOG/E1 at tick 50.
+- **Root cause of remaining diffs**: TRAN arrival timing (movement speed residual) → Tanya unload timing → cascade. The 1-cell position diffs are from the lepton accumulator + 255/256 fraction compounding over 50 ticks of diagonal flight.
+
 ## 2026-03-27T04:00Z — C++/TS Parity: 13 Fixes, All Position Diffs Eliminated
 - **Built**: Deterministic RNG (`?seed=0`), lockstep Playwright parity harness.
 - **13 fixes**: spawn edge priority (×2, re-fix after revert), speed scaling 2.5x, lepton accumulator, 255/256 fraction, DOG 2x sprint (broadened to path+target), transport retreat, spawn-outside-boundary, agent tick alignment (step(0) render-only), all-weapons Explosion_Damage (C++ routes ALL bullets through area damage, not just splash weapons).
