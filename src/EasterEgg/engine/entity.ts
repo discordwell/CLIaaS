@@ -845,11 +845,27 @@ export class Entity {
     // Convert back to pixels for position update
     const movePixels = moveLeptons * LP;
 
+    // C++ parity: Coord_Move uses integer sin/cos lookup tables indexed by facing,
+    // not floating-point (dx/dist) unit vectors. The irrational float from (dx/dist)
+    // accumulates sub-lepton error over many ticks, causing cell boundary crossings
+    // 1-2 ticks before the C++ integer position.
+    // Use DIR_DX/DIR_DY lookup (matching the 8-direction facing) for the movement
+    // direction, with sqrt(2) correction for diagonals.
+    const face = this.desiredFacing;
+    const fdx = DIR_DX[face];
+    const fdy = DIR_DY[face];
+    const isDiagonal = fdx !== 0 && fdy !== 0;
+    // C++ calcx/calcy: integer sin/cos × distance >> 7. For 8-dir, diagonals
+    // move at cos(45°) = 0.707 in each axis. Scale movePixels accordingly.
+    const axisDist = isDiagonal ? movePixels * Math.SQRT1_2 : movePixels;
     // Clamp to remaining distance to prevent overshoot
-    const step = Math.min(movePixels, dist);
-    this.pos.x += (dx / dist) * step;
-    this.pos.y += (dy / dist) * step;
-    return step >= dist; // arrived if we moved the full remaining distance
+    const stepX = Math.min(Math.abs(fdx * axisDist), Math.abs(dx)) * Math.sign(dx || fdx);
+    const stepY = Math.min(Math.abs(fdy * axisDist), Math.abs(dy)) * Math.sign(dy || fdy);
+    this.pos.x += stepX;
+    this.pos.y += stepY;
+    const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+
+    return totalStep >= dist - 0.5; // arrived if we moved the full remaining distance
   }
 }
 
