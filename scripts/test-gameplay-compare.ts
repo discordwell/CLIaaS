@@ -19,8 +19,7 @@ const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
 const SEED = 0;
 
 // Tick checkpoints — passive observation, no commands
-// Fine-grained to find RNG divergence point
-const CHECKPOINTS = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+const CHECKPOINTS = [0, 50, 100, 200, 300, 450, 750, 1500];
 
 // ── Helpers ──────────────────────────────────────────────────
 
