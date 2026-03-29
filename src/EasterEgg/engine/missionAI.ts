@@ -736,9 +736,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   // Each entity gets its own Timer with per-entity jitter to prevent synchronized scans.
   // Can't use ScenarioRandom here — consuming RNG values in guard scan desynchronizes
   // the shared random sequence. Use a deterministic per-entity offset instead.
+  // C++ Timer starts at 0 → first Mission_Guard call is immediate.
+  // Subsequent calls delayed by Normal_Delay + Random(0,2).
   const baseDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
   const guardScanDelay = baseDelay + (entity.id % 3);
-  if (ctx.tick - entity.lastGuardScan < guardScanDelay) return;
+  if (entity.lastGuardScan > 0 && ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
 
   // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)

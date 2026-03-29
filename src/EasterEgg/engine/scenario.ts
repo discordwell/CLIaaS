@@ -1848,11 +1848,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   }
 
   // C++ parity: consume init-time RNG calls to match C++ consumption.
-  // C++ makes 95 calls during scenario init (house attack timers, unit facing
-  // randomization, etc.) while TS makes fewer. The exact count depends on
-  // which C++ call sites are replicated in TS. Re-measure after scatter fix.
-  // TODO: re-measure and adjust after scatter RNG call parity fix.
-  for (let i = 0; i < 27; i++) ScenarioRandom.next();
+  // Exact count needs re-measurement after each RNG call-site parity fix.
+  // DISABLED: re-measure needed after Random_Animate + scatter fixes.
+  // for (let i = 0; i < N; i++) ScenarioRandom.next();
 
   return {
     map,
