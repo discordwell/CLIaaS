@@ -555,6 +555,19 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
   if (!entity.target?.alive) {
     entity.target = null;
+    // C++ mission.cpp:232 — Mission_Hunt() Timer starts at 0, so first scan is immediate.
+    // Returns Normal_Delay() + Random(0,2) for subsequent scans.
+    // MissionControl[HUNT].Rate = 0.016 → Normal_Delay = TICKS_PER_MINUTE * 0.016 = 14 ticks.
+    const HUNT_SCAN_DELAY = 14; // C++ parity: floor(900 * 0.016) = 14
+    if (entity.lastHuntScan > 0 && ctx.tick - entity.lastHuntScan < HUNT_SCAN_DELAY) {
+      // Between scans: if we have a moveTarget, keep moving toward it
+      if (entity.moveTarget) {
+        entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
+      }
+      return;
+    }
+    entity.lastHuntScan = ctx.tick;
+
     // C++ foot.cpp:654-703 — Hunt actively scans for new targets
     // C++ THREAT_NORMAL scans the entire map (no range limit).
     const huntRange = Infinity; // C++ parity: THREAT_NORMAL has unlimited range

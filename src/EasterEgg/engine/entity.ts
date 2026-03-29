@@ -123,6 +123,7 @@ export class Entity {
 
   // AI rate-limiting
   lastGuardScan = 0;   // tick when guard last scanned
+  lastHuntScan = 0;    // tick when hunt last scanned (C++ MissionControl[HUNT].Rate = 0.016)
   lastAIScan = 0;      // tick when ant AI last scanned
   lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 
