@@ -695,8 +695,15 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     return;
   }
 
-  // A3: Type-specific scan delays (C++ foot.cpp:589-612, Normal_Delay=22)
-  const guardScanDelay = entity.stats.scanDelay ?? 22;
+  // C++ foot.cpp:597 + rules.ini [Guard] Rate=.050 → Normal_Delay = 900 * 0.050 = 45 ticks.
+  // C++ foot.cpp:624-627: infantry E1/E3 use AARate=.016 → 14 ticks.
+  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random(0,2))
+  // C++ does NOT have per-unit scanDelay for guard — it uses MissionControl rates.
+  const isInfantryAA = entity.stats.isInfantry &&
+    (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
+  const GUARD_NORMAL_DELAY = 45; // C++ MissionControl[Guard].Normal_Delay = 900 * 0.050
+  const GUARD_AA_DELAY = 14;     // C++ MissionControl[Guard].AA_Delay = 900 * 0.016
+  const guardScanDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
   if (ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
 
