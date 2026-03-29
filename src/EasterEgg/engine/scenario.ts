@@ -1847,10 +1847,12 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // via the runtime AI production system.
   }
 
-  // C++ parity: consume init-time RNG calls to match C++ consumption.
-  // Exact count needs re-measurement after each RNG call-site parity fix.
-  // DISABLED: re-measure needed after Random_Animate + scatter fixes.
-  // for (let i = 0; i < N; i++) ScenarioRandom.next();
+  // C++ parity: consume 27 init-time RNG calls to match C++ scenario init.
+  // C++ makes 95 calls during init, TS makes 68. The 27 extra C++ calls are
+  // from house attack timers, unit facing randomization, etc.
+  // This syncs seeds at tick 0. Per-tick divergence from Random_Animate
+  // differences is handled by the Random_Animate parity code in updateGuard.
+  for (let i = 0; i < 27; i++) ScenarioRandom.next();
 
   return {
     map,
