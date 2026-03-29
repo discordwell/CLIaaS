@@ -685,6 +685,29 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     return;
   }
 
+  // C++ Arm countdown — weapon cooldown decrements every tick regardless of mission.
+  // In updateAttack this only decrements while moving toward target (line 248),
+  // but Firing_AI in C++ uses the Arm timer which always ticks down.
+  if (entity.attackCooldown > 0) entity.attackCooldown--;
+  if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+
+  // C++ unit.cpp:425 Firing_AI — runs EVERY tick, independent of guard scan timer.
+  // If the entity has a target from a previous guard scan and weapon is ready, fire.
+  // This is how C++ units continue shooting between 45-tick guard scan intervals.
+  if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0) {
+    if (entity.inRange(entity.target)) {
+      // Temporarily switch to ATTACK for updateAttack's fire logic, then restore GUARD
+      entity.mission = Mission.ATTACK;
+      updateAttack(ctx, entity);
+      if (entity.mission === Mission.ATTACK) {
+        entity.mission = Mission.GUARD;
+      }
+      return; // fired this tick — skip scan
+    } else {
+      entity.target = null; // target moved out of range, clear for next scan
+    }
+  }
+
   // C++ foot.cpp:597 + rules.ini [Guard] Rate=.050 → Normal_Delay = 900 * 0.050 = 45 ticks.
   // C++ foot.cpp:624-627: infantry E1/E3 use AARate=.016 → 14 ticks.
   // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random(0,2))
