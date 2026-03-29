@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-29T06:00Z — RNG Sync + Guard Parity: 27 Fixes
+- **RNG state instrumented**: Exposed ScenarioRandom.seed + callCount in both harnesses. Found C++ makes 95 init RNG calls, TS makes 68 → 27 dummy calls sync seeds at tick 0.
+- **Guard firing parity**: C++ stays on GUARD + fires via Firing_AI every tick. TS was switching to ATTACK. Fixed: inline fire + restore GUARD + weapon cooldown ticking in guard mode.
+- **Guard scan delay**: 45 ticks from rules.ini [Guard] Rate=.050, not per-unit scanDelay. Per-entity id%3 stagger.
+- **Aircraft spawn**: All team members spawn at same Calculated_Cell (not separate edge calc for aircraft).
+- **HUNT fixes**: Unlimited range (THREAT_NORMAL), stays on HUNT when no target found (was dropping to GUARD).
+- **Current state**: RNG synced at tick 0. Diverges again by tick 50 (9 TS calls vs different C++ count). Next: audit per-tick RNG consumption sites.
+
 ## 2026-03-29T01:00Z — C++/TS Parity: 25 Fixes, Guard Firing_AI + Sequential Processing
 - **Key breakthroughs**: HUNT mission persistence (E1s were dropping to GUARD), guard scan→ATTACK mission switch (C++ stays on GUARD), inline fire for sequential entity processing (first JEEP fires → E1 scatters → second JEEP misses), Firing_AI equivalent with cooldown ticking in GUARD.
 - **Results**: Barrel cascade eliminated. Structure 25/20 gap gone. V19 damage gone. JEEP HP gap 72→9. Enemy count matches. Tick 50 has zero HP diffs.
