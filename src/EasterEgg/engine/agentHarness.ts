@@ -12,6 +12,7 @@ import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
 import { powerMultiplier } from './repairSell';
+import { ScenarioRandom } from './random';
 
 // === Serialized state types ===
 
@@ -313,6 +314,7 @@ export function serializeState(game: Game): AgentState {
     globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
     unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
     civiliansEvacuated: ((game as unknown as Record<string, unknown>).civiliansEvacuated as number) ?? 0,
+    rngState: ScenarioRandom.seed, // RNG seed for parity comparison
     triggers: (((game as unknown as Record<string, unknown>).triggers as Array<{ name: string; fired: boolean; house: number; event1: { type: number; data: number }; action1: { action: number; data: number } }>) ?? []).map(t => ({
       name: t.name, fired: t.fired, house: t.house,
       e1: t.event1.type, e1d: t.event1.data,

@@ -421,6 +421,17 @@ test.describe('State Parity: SCG01EA seed=0', () => {
       wasmTick = Number(wasmState.tick ?? wasmTick);
       tsTick = Number(tsState.tick ?? tsTick);
 
+      // Compare RNG state
+      const wasmRng = wasmState.rngState as number | undefined;
+      const tsRng = tsState.rngState as number | undefined;
+      if (wasmRng !== undefined && tsRng !== undefined) {
+        if (wasmRng !== tsRng) {
+          console.log(`  RNG DIVERGED: WASM=${wasmRng} TS=${tsRng}`);
+        } else {
+          console.log(`  RNG: ${wasmRng} (match)`);
+        }
+      }
+
       // Save raw states
       saveJson(wasmState, path.join(OUT_DIR, `wasm-full-${pad(target)}.json`));
       saveJson(tsState, path.join(OUT_DIR, `ts-full-${pad(target)}.json`));
