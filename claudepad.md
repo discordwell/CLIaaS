@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-29T11:00Z — RNG Parity: 30 Fixes, Tick 50 Clean
+- **RNG init sync**: 27 dummy calls match C++ init consumption. Seeds match at tick 0.
+- **Random_Animate parity**: Infantry idle animation consumes 2-3 RNG calls per cycle. Corrected timer range (37-149 ticks, was 1125-9000). First guard scan now immediate (C++ Timer=0).
+- **Infantry scatter parity**: C++ uses 1 RNG call (Random_Pick(0,4)-2), TS was using 2 calls (40% check + jitter). Fixed both combat.ts and missionAI.ts scatter functions.
+- **Aircraft spawn**: All team members share same Calculated_Cell (no separate edge calc for aircraft).
+- **Current state**: Tick 0+50 clean. RNG diverges by tick 100 from per-tick Random_Animate call count mismatch (TS 162 calls vs WASM fewer at tick 50). Next: match exact per-entity Random_Animate execution.
+
 ## 2026-03-29T06:00Z — RNG Sync + Guard Parity: 27 Fixes
 - **RNG state instrumented**: Exposed ScenarioRandom.seed + callCount in both harnesses. Found C++ makes 95 init RNG calls, TS makes 68 → 27 dummy calls sync seeds at tick 0.
 - **Guard firing parity**: C++ stays on GUARD + fires via Firing_AI every tick. TS was switching to ATTACK. Fixed: inline fire + restore GUARD + weapon cooldown ticking in guard mode.
