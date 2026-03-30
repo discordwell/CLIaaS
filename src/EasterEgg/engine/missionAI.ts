@@ -744,13 +744,19 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   // Subsequent calls delayed by Normal_Delay + Random(0,2).
   // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
   // The Random_Pick is consumed ONCE per scan cycle and stored as the jitter.
+  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
+  // When weapon is on cooldown (Arm > 0), use Arm as delay WITHOUT consuming RNG.
+  // Only consume Random_Pick when weapon is ready (Arm == 0).
   const baseDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
-  const guardScanDelay = baseDelay + entity.guardScanJitter;
+  const guardScanDelay = entity.attackCooldown > 0
+    ? entity.attackCooldown    // C++: return (int)Arm — no RNG consumed
+    : baseDelay + entity.guardScanJitter;  // C++: return dtime + Random_Pick(0,2)
   if (entity.lastGuardScan > 0 && ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
-  // C++ parity: consume Random_Pick(0,2) for the NEXT cycle's delay jitter.
-  // This must use ScenarioRandom to match C++'s RNG consumption per mission cycle.
-  entity.guardScanJitter = ScenarioRandom.nextInRange(0, 2);
+  // C++ parity: only consume Random_Pick(0,2) when weapon was ready (Arm == 0).
+  if (entity.attackCooldown <= 0) {
+    entity.guardScanJitter = ScenarioRandom.nextInRange(0, 2);
+  }
 
   // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)
   if (entity.isCivilian && entity.isPlayerUnit) {
