@@ -19,7 +19,7 @@ const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
 const SEED = 0;
 
 // Tick checkpoints — passive observation, no commands
-const CHECKPOINTS = [0, 50, 100, 200, 300, 450, 750, 1500];
+const CHECKPOINTS = [0, 1, 5, 10, 20, 30, 40, 50, 100];
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -424,13 +424,14 @@ test.describe('State Parity: SCG01EA seed=0', () => {
       // Compare RNG state
       const wasmRng = wasmState.rngState as number | undefined;
       const tsRng = tsState.rngState as number | undefined;
+      const wasmCalls = (wasmState as Record<string, unknown>).rngCalls as number | undefined;
       const tsCalls = (tsState as Record<string, unknown>).rngCalls as number | undefined;
       if (wasmRng !== undefined && tsRng !== undefined) {
-        const callInfo = tsCalls !== undefined ? ` (TS calls: ${tsCalls})` : '';
+        const callInfo = `WASM:${wasmCalls ?? '?'} TS:${tsCalls ?? '?'}`;
         if (wasmRng !== tsRng) {
-          console.log(`  RNG DIVERGED: WASM=${wasmRng} TS=${tsRng}${callInfo}`);
+          console.log(`  RNG DIVERGED: seeds WASM=${wasmRng} TS=${tsRng} calls ${callInfo}`);
         } else {
-          console.log(`  RNG: ${wasmRng} (match)${callInfo}`);
+          console.log(`  RNG MATCH: seed=${wasmRng} calls ${callInfo}`);
         }
       }
 

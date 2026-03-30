@@ -537,11 +537,16 @@ char* agent_get_state(void)
 	int power_produced = agent_power_produced();
 	int power_consumed = agent_power_consumed();
 
-	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,",
+	extern unsigned long g_rng_call_count;
+	extern RandomClass * g_rng_tracked_instance;
+	// Lazily set tracked instance on first state read
+	if (!g_rng_tracked_instance) g_rng_tracked_instance = &Scen.RandomNumber;
+	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,\"rngCalls\":%lu,",
 		Frame,
 		(long)(PlayerPtr->Credits + PlayerPtr->Tiberium),
 		agent_house_name(player_house),
-		Scen.RandomNumber.Seed);
+		Scen.RandomNumber.Seed,
+		g_rng_call_count);
 
 	buf_cat("\"alliedHouses\":[");
 	bool first = true;
