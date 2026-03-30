@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-30T01:00Z — RNG Call Auditing: 32 Fixes, C++ Counter Instrumented
+- **C++ RNG counter**: Added g_rng_call_count in random.cpp tracking Scen.RandomNumber calls. Both engines now report call counts per checkpoint.
+- **Call count comparison at tick 50**: WASM=222, TS=237. Gap=15 (was 80 before mission jitter fix). At tick 100: WASM=341, TS=239, gap reverses (WASM consuming more).
+- **Guard Arm short-circuit**: C++ returns Arm (no RNG) when weapon is cooling down, only consumes Random_Pick(0,2) when weapon is ready.
+- **RandomAnimateTime corrected**: 37-149 ticks (C++ default 0.083 * 450-1800), was incorrectly 1125-9000.
+- **Next**: The tick-1 gap (WASM=67, TS=83 gameplay calls) has 16 extra TS calls. Need to audit which C++ entities DON'T fire Mission_Guard at tick 0 (maybe their Timer starts > 0 from scenario init, or Sticky mission entities skip the scan).
+
 ## 2026-03-29T11:00Z — RNG Parity: 30 Fixes, Tick 50 Clean
 - **RNG init sync**: 27 dummy calls match C++ init consumption. Seeds match at tick 0.
 - **Random_Animate parity**: Infantry idle animation consumes 2-3 RNG calls per cycle. Corrected timer range (37-149 ticks, was 1125-9000). First guard scan now immediate (C++ Timer=0).
