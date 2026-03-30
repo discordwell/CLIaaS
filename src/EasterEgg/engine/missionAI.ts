@@ -566,8 +566,10 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     // C++ mission.cpp:232 — Mission_Hunt() Timer starts at 0, so first scan is immediate.
     // Returns Normal_Delay() + Random(0,2) for subsequent scans.
     // MissionControl[HUNT].Rate = 0.016 → Normal_Delay = TICKS_PER_MINUTE * 0.016 = 14 ticks.
+    // C++ foot.cpp:702: return Normal_Delay() + Random_Pick(0, 2)
     const HUNT_SCAN_DELAY = 14; // C++ parity: floor(900 * 0.016) = 14
-    if (entity.lastHuntScan > 0 && ctx.tick - entity.lastHuntScan < HUNT_SCAN_DELAY) {
+    const huntDelay = HUNT_SCAN_DELAY + entity.guardScanJitter; // reuse jitter field
+    if (entity.lastHuntScan > 0 && ctx.tick - entity.lastHuntScan < huntDelay) {
       // Between scans: if we have a moveTarget, keep moving toward it
       if (entity.moveTarget) {
         entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
@@ -575,6 +577,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       return;
     }
     entity.lastHuntScan = ctx.tick;
+    // C++ parity: consume Random_Pick(0,2) for next cycle's jitter
+    entity.guardScanJitter = ScenarioRandom.nextInRange(0, 2);
 
     // C++ foot.cpp:657 — Mission_Hunt uses Target_Something_Nearby(THREAT_NORMAL).
     // THREAT_NORMAL = 0 → Threat_Range(-1) = unlimited range (entire map scan).
@@ -738,10 +742,15 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
   // the shared random sequence. Use a deterministic per-entity offset instead.
   // C++ Timer starts at 0 → first Mission_Guard call is immediate.
   // Subsequent calls delayed by Normal_Delay + Random(0,2).
+  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
+  // The Random_Pick is consumed ONCE per scan cycle and stored as the jitter.
   const baseDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
-  const guardScanDelay = baseDelay + (entity.id % 3);
+  const guardScanDelay = baseDelay + entity.guardScanJitter;
   if (entity.lastGuardScan > 0 && ctx.tick - entity.lastGuardScan < guardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
+  // C++ parity: consume Random_Pick(0,2) for the NEXT cycle's delay jitter.
+  // This must use ScenarioRandom to match C++'s RNG consumption per mission cycle.
+  entity.guardScanJitter = ScenarioRandom.nextInRange(0, 2);
 
   // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)
   if (entity.isCivilian && entity.isPlayerUnit) {
