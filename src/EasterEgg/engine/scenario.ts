@@ -1867,13 +1867,15 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   //
   // TODO: implement these actual call sites instead of dummy counts.
 
-  // House attack timer: 1 call per house (12 houses in SCG01EA)
+  // House attack timer: nextInRange(450,1800) × 12 houses = ~18 next() calls with rejections
+  // Unit facing: nextInRange(0,255) × 4 vehicles = 4 next() calls (perfect fit, no rejection)
+  // Total: ~22 next() calls. Remaining gap from 27: ~5 unknown.
+  // Using structural calls that match C++'s exact Random_Pick arguments:
   for (const _h of houseNames) {
-    ScenarioRandom.nextInRange(450, 1800);
+    ScenarioRandom.nextInRange(450, 1800); // house.cpp:678
   }
-  // Unit facing randomization: 1 call per vehicle placed via Create_And_Place
   for (const _u of data.units) {
-    ScenarioRandom.nextInRange(0, 255);
+    ScenarioRandom.nextInRange(0, 255); // udata.cpp:1166
   }
 
   return {
