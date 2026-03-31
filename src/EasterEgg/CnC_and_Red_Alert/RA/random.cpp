@@ -87,14 +87,12 @@ RandomClass::RandomClass(unsigned seed) :
  *   02/27/1996 JLB : Created.                                                                 *
  *=============================================================================================*/
 // Global RNG call counter for parity debugging.
-// Set g_rng_tracked_instance to &Scen.RandomNumber after scenario init
-// to count only gameplay-critical RNG calls.
 unsigned long g_rng_call_count = 0;
-RandomClass * g_rng_tracked_instance = 0;
+bool g_rng_tracking = false;
 
 int RandomClass::operator ()(void)
 {
-	if (this == g_rng_tracked_instance) {
+	if (g_rng_tracking) {
 		g_rng_call_count++;
 	}
 #ifdef RANDOM_COUNT

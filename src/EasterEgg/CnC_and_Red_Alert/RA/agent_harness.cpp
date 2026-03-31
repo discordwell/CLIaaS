@@ -538,9 +538,9 @@ char* agent_get_state(void)
 	int power_consumed = agent_power_consumed();
 
 	extern unsigned long g_rng_call_count;
-	extern RandomClass * g_rng_tracked_instance;
-	// Lazily set tracked instance on first state read
-	if (!g_rng_tracked_instance) g_rng_tracked_instance = &Scen.RandomNumber;
+	extern bool g_rng_tracking;
+	// Enable tracking on first state read
+	if (!g_rng_tracking) g_rng_tracking = true;
 	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,\"rngCalls\":%lu,",
 		Frame,
 		(long)(PlayerPtr->Credits + PlayerPtr->Tiberium),
