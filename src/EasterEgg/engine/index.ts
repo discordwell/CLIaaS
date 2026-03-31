@@ -1637,13 +1637,9 @@ export class Game {
       }
     }
 
-    // Update all entities — sorted by C++ Logic layer type order for RNG parity.
-    // C++ processes: Units (RTTI_UNIT) → Infantry (RTTI_INFANTRY) → Aircraft (RTTI_AIRCRAFT).
-    // Without sorting, entity array order causes different Random_Pick(0,2) rejection
-    // sampling patterns, desynchronizing RNG from tick 2 onward.
-    const _typeOrder = (e: Entity) => e.isAirUnit ? 2 : e.stats.isInfantry ? 1 : 0;
-    const sortedEntities = [...this.entities].sort((a, b) => _typeOrder(a) - _typeOrder(b));
-    for (const entity of sortedEntities) {
+    // Update all entities in array order (matches C++ Logic layer house-grouped order:
+    // entities sorted by house enum at load, reinforcements appended at end).
+    for (const entity of this.entities) {
       // Reset per-tick rotation guards (prevents double-accumulation)
       entity.rotTickedThisFrame = false;
       entity.turretRotTickedThisFrame = false;
@@ -3520,8 +3516,13 @@ export class Game {
         this.updateAttack(entity);
         break;
       case Mission.HARVEST:
-        // Jitter handled by centralized mission jitter above
+        // C++ unit.cpp:2922 — Mission_Harvest returns Normal_Delay+Random_Pick(0,2)
+        // after falling through the switch/break in most code paths (LOOKING state
+        // when ore is nearby with NavCom set, or any state that doesn't early-return).
         entity.animState = AnimState.IDLE;
+        if (missionTimerFired) {
+          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        }
         break;
       case Mission.UNLOAD:
         // Transport unload / MAD deploy — handled by existing deploy/unload code

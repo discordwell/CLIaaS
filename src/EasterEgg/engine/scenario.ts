@@ -1648,10 +1648,26 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     }
   }
 
-  // Create entities from INI unit/infantry placements
+  // Create entities from INI unit/infantry placements.
+  // C++ loads entities per-house (HouseClass::Read_INI iterates HOUSE_FIRST→HOUSE_COUNT,
+  // scanning all INI entries for matching house). This groups entities by house in enum
+  // order: Spain(0), Greece(1), USSR(2), England(3), etc. Within each house, entities
+  // appear in INI index order. We replicate this to match C++ Logic layer insertion order,
+  // which determines RNG rejection sampling patterns.
   const entities: Entity[] = [];
 
-  for (const u of data.units) {
+  // C++ house enum order for entity loading (house.h HousesType)
+  const HOUSE_ENUM_ORDER: Record<string, number> = {
+    Spain: 0, Greece: 1, USSR: 2, England: 3, Ukraine: 4, Germany: 5,
+    France: 6, Turkey: 7, GoodGuy: 8, BadGuy: 9, Neutral: 10, Special: 11,
+    Multi1: 12, Multi2: 13, Multi3: 14, Multi4: 15,
+    Multi5: 16, Multi6: 17, Multi7: 18, Multi8: 19,
+  };
+
+  // Build unit entities in INI order, then sort by house
+  const rawUnits: Array<{ entity: Entity; houseOrder: number; iniIdx: number }> = [];
+  for (let i = 0; i < data.units.length; i++) {
+    const u = data.units[i];
     const unitType = toUnitType(u.type);
     if (!unitType) continue;
     const pos = cellIndexToPos(u.cell);
@@ -1660,16 +1676,21 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.facing = Math.floor(u.facing / 32) % 8;
     entity.desiredFacing = entity.facing;
     entity.turretFacing = entity.facing;
-    // Sync 32-step visual facing from 8-dir facing
     entity.bodyFacing32 = entity.facing * 4;
     entity.turretFacing32 = entity.turretFacing * 4;
     entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
     if (u.trigger && u.trigger !== 'None') entity.triggerName = u.trigger;
     applyMission(entity, u.mission);
-    entities.push(entity);
+    rawUnits.push({ entity, houseOrder: HOUSE_ENUM_ORDER[toHouse(u.house)] ?? 10, iniIdx: i });
   }
+  // Sort by C++ house enum order, stable within same house (INI index preserved)
+  rawUnits.sort((a, b) => a.houseOrder - b.houseOrder || a.iniIdx - b.iniIdx);
+  for (const { entity } of rawUnits) entities.push(entity);
 
-  for (const inf of data.infantry) {
+  // Infantry: also house-grouped like units. C++ Read_INI iterates houses in enum order.
+  const rawInf: Array<{ entity: Entity; houseOrder: number; iniIdx: number }> = [];
+  for (let i = 0; i < data.infantry.length; i++) {
+    const inf = data.infantry[i];
     const unitType = toUnitType(inf.type);
     if (!unitType) continue;
     const pos = cellIndexToPos(inf.cell);
@@ -1682,8 +1703,10 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.subCell = inf.subCell;
     if (inf.trigger && inf.trigger !== 'None') entity.triggerName = inf.trigger;
     applyMission(entity, inf.mission);
-    entities.push(entity);
+    rawInf.push({ entity, houseOrder: HOUSE_ENUM_ORDER[toHouse(inf.house)] ?? 10, iniIdx: i });
   }
+  rawInf.sort((a, b) => a.houseOrder - b.houseOrder || a.iniIdx - b.iniIdx);
+  for (const { entity } of rawInf) entities.push(entity);
 
   // Create structures from INI and mark their cells as impassable
   const structures: MapStructure[] = [];
