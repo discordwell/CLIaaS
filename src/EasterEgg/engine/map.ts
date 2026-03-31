@@ -756,108 +756,106 @@ export class GameMap {
    *  EC6: Only gold overlays grow/spread — gems (0x0F-0x12) never grow or spread.
    *  EC7: Spread requires density > 6 and uses all 8 directions.
    *  @param tick Current game tick */
-  growOre(tick: number): void {
-    if (tick % GameMap.ORE_GROWTH_INTERVAL !== 0 || tick === 0) return;
+  // Incremental ore scan state (C++ map.cpp TiberiumScan/Growth/Spread)
+  private _oreScan = 0;
+  private _oreGrowth: number[] = [];
+  private _oreSpread: number[] = [];
+  private _oreGrowthExcess = 0;
+  private _oreSpreadExcess = 0;
 
-    const bx = this.boundsX, by = this.boundsY;
-    const bw = this.boundsW, bh = this.boundsH;
+  growOre(tick: number): void {
+    if (tick === 0) return;
+
+    const MAP_TOTAL = MAP_CELLS * MAP_CELLS;
+    // C++ map.cpp:1017: subcount = MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
+    const CELLS_PER_TICK = Math.max(1, Math.floor(MAP_TOTAL / (2 * 900))); // =9
     const R = GameMap.RESERVOIR_SIZE;
 
-    // ── Phase 1: Scan & collect eligible cells via reservoir sampling ──
-    // C++ map.cpp:1028-1060: reservoir sampling into TiberiumGrowth[64] / TiberiumSpread[64]
-    const growthCells: number[] = [];  // cell indices eligible for density growth
-    const spreadCells: number[] = [];  // cell indices eligible for spread
-    let growthSeen = 0;   // total eligible growth cells seen (for reservoir math)
-    let spreadSeen = 0;   // total eligible spread cells seen (for reservoir math)
-
-    for (let cy = by; cy < by + bh; cy++) {
-      for (let cx = bx; cx < bx + bw; cx++) {
-        const idx = cy * MAP_CELLS + cx;
-        const ovl = this.overlay[idx];
-
-        // EC6: Only gold ore grows/spreads — skip gems entirely
-        // C++ cell.cpp:2881: Overlay must be OVERLAY_GOLD1..GOLD4
-        const isGold = ovl >= 0x03 && ovl <= 0x0E;
-        if (!isGold) continue;
-
-        // Can_Tiberium_Grow (cell.cpp:2869-2884): gold AND OverlayData < 11
-        // TS: ovl < 0x0E means density < 11 (0x0E = density 11 = max)
-        if (ovl < 0x0E) {
-          // C++ map.cpp:1034: Random_Pick(0, TiberiumGrowthExcess) called for EVERY growable cell.
-          // Always consume RNG to match C++ call pattern, even when reservoir isn't full.
-          const pick = ScenarioRandom.nextInRange(0, growthSeen);
-          if (pick <= growthCells.length) {
-            if (growthCells.length < R) {
-              growthCells.push(idx);
-            } else {
-              growthCells[ScenarioRandom.nextInRange(0, growthCells.length - 1)] = idx;
-            }
-          }
-          growthSeen++;
-        }
-
-        // Can_Tiberium_Spread (cell.cpp:2904-2918): gold AND OverlayData > 6
-        // TS: ovl > 0x09 means density > 6 (0x09 = 0x03 + 6)
-        if (ovl > GameMap.ORE_SPREAD_MIN_DENSITY) {
-          // C++ map.cpp:1052: Random_Pick(0, TiberiumSpreadExcess) called for EVERY spreadable cell.
-          const pick = ScenarioRandom.nextInRange(0, spreadSeen);
-          if (pick <= spreadCells.length) {
-            if (spreadCells.length < R) {
-              spreadCells.push(idx);
-            } else {
-              spreadCells[ScenarioRandom.nextInRange(0, spreadCells.length - 1)] = idx;
-            }
-          }
-          spreadSeen++;
-        }
-      }
-    }
-
-    // ── Phase 2: Apply growth & spread to sampled cells ──
-
-    // C++ map.cpp:1078-1084: Grow_Tiberium() on ALL sampled cells — deterministic (no random)
-    // C++ cell.cpp:2939: OverlayData++ (unconditional increment)
-    for (const idx of growthCells) {
-      const ovl = this.overlay[idx];
-      // Re-check: cell may have been modified by a prior spread in the same cycle (defensive)
-      if (ovl >= 0x03 && ovl < 0x0E) {
-        this.overlay[idx] = ovl + 1;
-      }
-    }
-
-    // C++ map.cpp:1091-1094: Spread_Tiberium() on ALL sampled cells — deterministic selection
-    // C++ cell.cpp:2963-2979: random start direction, iterate 8 dirs, first valid cell gets ore
-    // EC7: All 8 directions (N, NE, E, SE, S, SW, W, NW) for ore spread
-    const dirs: [number, number][] = [
-      [0, -1], [1, -1], [1, 0], [1, 1],
-      [0, 1], [-1, 1], [-1, 0], [-1, -1],
-    ];
-
-    for (const idx of spreadCells) {
+    // ── Phase 1: Incremental scan — CELLS_PER_TICK cells this tick ──
+    // C++ map.cpp:1020-1064: scan from TiberiumScan, advance by subcount per tick
+    // C++ map.cpp:1063: subcount-- runs for EVERY cell, including out-of-bounds.
+    // The scan advances by CELLS_PER_TICK total cells, not CELLS_PER_TICK in-bounds cells.
+    const endIdx = Math.min(this._oreScan + CELLS_PER_TICK, MAP_TOTAL);
+    for (let idx = this._oreScan; idx < endIdx; idx++) {
       const cx = idx % MAP_CELLS;
       const cy = Math.floor(idx / MAP_CELLS);
-      // C++ cell.cpp:2968: random starting direction
-      const offset = ScenarioRandom.nextInRange(0, 7);
-      for (let i = 0; i < 8; i++) {
-        const [dx, dy] = dirs[(i + offset) % 8];
-        const nx = cx + dx, ny = cy + dy;
-        if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
-        const nidx = ny * MAP_CELLS + nx;
-        // C++ cell.cpp:3012: Overlay must be OVERLAY_NONE
-        if (this.overlay[nidx] !== 0xFF) continue;
-        // C++ cell.cpp:3010: Ground[Land_Type()].Build must be true (CLEAR and ROAD)
-        if (!BUILDABLE.has(this.cells[nidx])) continue;
-        // C++ cell.cpp (wall check implied by overlay/buildable)
-        if (this.wallType[nidx] !== '') continue;
-        // C++ cell.cpp:3000 — reject bridge cells for germination
-        const tmpl = this.templateType[nidx];
-        if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) continue;
-        // C++ cell.cpp:3007-3008 — reject cells with visible buildings (vehicle/building occupancy)
-        if (this.vehicleOccupancy.has(nidx)) continue;
-        // C++ cell.cpp:2974: OverlayData = 0 (minimum density)
-        this.overlay[nidx] = 0x03;
-        break; // C++ cell.cpp:2975: spread to first valid cell only
+
+      // C++ map.cpp:1022: if (In_Radar(cell)) — only process in-bounds cells
+      if (cx >= this.boundsX && cx < this.boundsX + this.boundsW &&
+          cy >= this.boundsY && cy < this.boundsY + this.boundsH) {
+        const ovl = this.overlay[idx];
+        const isGold = ovl >= 0x03 && ovl <= 0x0E;
+
+        if (isGold) {
+          if (ovl < 0x0E) { // Can_Tiberium_Grow
+            if (ScenarioRandom.nextInRange(0, this._oreGrowthExcess) <= this._oreGrowth.length) {
+              if (this._oreGrowth.length < R) {
+                this._oreGrowth.push(idx);
+              } else {
+                this._oreGrowth[ScenarioRandom.nextInRange(0, this._oreGrowth.length - 1)] = idx;
+              }
+            }
+            this._oreGrowthExcess++;
+          }
+          if (ovl > GameMap.ORE_SPREAD_MIN_DENSITY) { // Can_Tiberium_Spread
+            if (ScenarioRandom.nextInRange(0, this._oreSpreadExcess) <= this._oreSpread.length) {
+              if (this._oreSpread.length < R) {
+                this._oreSpread.push(idx);
+              } else {
+                this._oreSpread[ScenarioRandom.nextInRange(0, this._oreSpread.length - 1)] = idx;
+              }
+            }
+            this._oreSpreadExcess++;
+          }
+        }
       }
+    }
+    this._oreScan = endIdx; // C++ map.cpp:1066: TiberiumScan = index
+
+    // ── Phase 2: When full scan completes, apply growth + spread ──
+    // C++ map.cpp:1072: if (TiberiumScan >= MAP_CELL_TOTAL)
+    if (this._oreScan >= MAP_TOTAL) {
+      this._oreScan = 0;
+
+      // C++ map.cpp:1078-1084: Grow_Tiberium() — OverlayData++ (no random)
+      for (const idx of this._oreGrowth) {
+        const ovl = this.overlay[idx];
+        if (ovl >= 0x03 && ovl < 0x0E) {
+          this.overlay[idx] = ovl + 1;
+        }
+      }
+
+      // C++ map.cpp:1091-1094: Spread_Tiberium() — random start dir
+      const dirs: [number, number][] = [
+        [0, -1], [1, -1], [1, 0], [1, 1],
+        [0, 1], [-1, 1], [-1, 0], [-1, -1],
+      ];
+      const bx = this.boundsX, by = this.boundsY;
+      const bw = this.boundsW, bh = this.boundsH;
+      for (const idx of this._oreSpread) {
+        const sx = idx % MAP_CELLS, sy = Math.floor(idx / MAP_CELLS);
+        const offset = ScenarioRandom.nextInRange(0, 7);
+        for (let i = 0; i < 8; i++) {
+          const [dx, dy] = dirs[(i + offset) % 8];
+          const nx = sx + dx, ny = sy + dy;
+          if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
+          const nidx = ny * MAP_CELLS + nx;
+          if (this.overlay[nidx] !== 0xFF) continue;
+          if (!BUILDABLE.has(this.cells[nidx])) continue;
+          if (this.wallType[nidx] !== '') continue;
+          const tmpl = this.templateType[nidx];
+          if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) continue;
+          if (this.vehicleOccupancy.has(nidx)) continue;
+          this.overlay[nidx] = 0x03;
+          break;
+        }
+      }
+
+      // Reset for next cycle
+      this._oreGrowth = [];
+      this._oreSpread = [];
+      this._oreGrowthExcess = 0;
+      this._oreSpreadExcess = 0;
     }
   }
 
