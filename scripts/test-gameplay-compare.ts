@@ -19,6 +19,7 @@ const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
 const SEED = 0;
 
 // Tick checkpoints — passive observation, no commands
+const SCENARIO = process.env.PARITY_SCENARIO || 'SCG01EA';
 const CHECKPOINTS = [0, 1, 50, 100];
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -301,7 +302,7 @@ async function tsStep(page: Page, n: number): Promise<Record<string, unknown> | 
 
 // ── Main test ───────────────────────────────────────────────
 
-test.describe('State Parity: SCG01EA seed=0', () => {
+test.describe(`State Parity: ${SCENARIO} seed=0`, () => {
   test.setTimeout(10 * 60 * 1000);
 
   test('Lockstep comparison', async ({ browser }) => {
@@ -322,8 +323,8 @@ test.describe('State Parity: SCG01EA seed=0', () => {
     // ── Load both engines ──
     console.log('Loading both engines with seed=0...');
 
-    const wasmUrl = `${BASE_URL}/ra/original.html?scenario=SCG01EA.INI&autoplay=1&agentharness=1&seed=${SEED}`;
-    const tsUrl = `${BASE_URL}?anttest=agent&scenario=SCG01EA&difficulty=normal`;
+    const wasmUrl = `${BASE_URL}/ra/original.html?scenario=${SCENARIO}.INI&autoplay=1&agentharness=1&seed=${SEED}`;
+    const tsUrl = `${BASE_URL}?anttest=agent&scenario=${SCENARIO}&difficulty=normal`;
 
     await Promise.all([
       wasmPage.goto(wasmUrl, { waitUntil: 'load' }),
@@ -466,7 +467,7 @@ test.describe('State Parity: SCG01EA seed=0', () => {
     // Save full report
     saveJson({
       seed: SEED,
-      scenario: 'SCG01EA',
+      scenario: SCENARIO,
       baseUrl: BASE_URL,
       wasmStartTick,
       checkpoints: results,

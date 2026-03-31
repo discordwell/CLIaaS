@@ -1483,18 +1483,26 @@ export class Game {
    *  counts due to different seed positions), we advance to the EXACT C++ seed.
    *  The target seed is computed from seed=0 advanced 95 times. */
   consumeInitRNG(): void {
-    // C++ init seed position = 95 calls from seed 0 = seed 3520260643
-    // Advance TS ScenarioRandom until it reaches the same seed.
-    // This is deterministic and works for any scenario with seed=0.
-    const TARGET_SEED = 3520260643; // advance(seed=0, 95 calls)
+    // C++ init consumes a scenario-dependent number of Scen.RandomNumber calls during
+    // Read_Scenario_INI (entity facings, scatter positions, etc.). The total varies by
+    // scenario. We advance TS ScenarioRandom to match the exact C++ post-init seed.
+    // Target seeds determined empirically from WASM agent_get_state at tick 0.
+    const INIT_SEEDS: Record<string, number> = {
+      SCG01EA: 3520260643,  // 95 calls from seed=0
+      SCG02EA: 3499445261,
+      // Add more scenarios as tested
+    };
+    const TARGET_SEED = INIT_SEEDS[this.scenarioId] ?? INIT_SEEDS.SCG01EA;
     let safety = 0;
-    while (ScenarioRandom.seed !== TARGET_SEED && safety < 200) {
+    while (ScenarioRandom.seed !== TARGET_SEED && safety < 500) {
       ScenarioRandom.next();
       safety++;
     }
-    if (safety >= 200) {
-      console.warn('[RNG] Failed to reach target seed — init parity may be off');
+    if (safety >= 500) {
+      console.warn(`[RNG] Failed to reach target seed for ${this.scenarioId} — init parity may be off`);
     }
+    // Set debug log start so gameplay calls are captured (not init calls)
+    ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
   }
 
   /** Disable fog of war (reveal entire map) */

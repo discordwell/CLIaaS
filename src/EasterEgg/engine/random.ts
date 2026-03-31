@@ -26,16 +26,14 @@ export class RandomClass {
    * C++ ref: random.cpp:89-106
    */
   callCount = 0; // Debug: count total RNG calls for parity comparison
-  debugLog: string[] = []; // First N calls for divergence debugging
+  debugLog: string[] = []; // First N gameplay calls for divergence debugging
+  debugLogStart = 0; // callCount at which gameplay logging begins (set after init sync)
 
   next(): number {
     this.callCount++;
-    // Seed = (Seed * MULT_CONSTANT) + ADD_CONSTANT
-    // JavaScript doesn't have native u32 multiply, so we use Math.imul
-    // and coerce back to unsigned with >>> 0.
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
-    // Log first 30 gameplay calls (after init) — seed AFTER update
-    if (this.callCount > 95 && this.callCount <= 170) {
+    // Log first 75 gameplay calls after init sync
+    if (this.debugLogStart > 0 && this.callCount > this.debugLogStart && this.callCount <= this.debugLogStart + 75) {
       this.debugLog.push(`#${this.callCount}:${this.seed}`);
     }
 
