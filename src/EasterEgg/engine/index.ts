@@ -3403,19 +3403,11 @@ export class Game {
     // In TS, individual handlers have their own rate-limiting (lastGuardScan, etc.)
     // but missions without internal gating (ATTACK, MOVE) need centralized jitter.
     // Consume the jitter RNG here for missions that DON'T have their own scan delay.
-    if (entity.mission === Mission.ATTACK || entity.mission === Mission.MOVE ||
-        entity.mission === Mission.ENTER || entity.mission === Mission.CAPTURE ||
-        entity.mission === Mission.RETREAT || entity.mission === Mission.REPAIR) {
-      // These missions don't have internal scan delay — their C++ handlers
-      // return Normal_Delay + Random_Pick(0,2) every cycle (14-45 ticks).
-      // We can't gate the TS handler (it runs every tick), but we consume
-      // the jitter RNG at the C++ mission cycle rate.
-      if (entity.missionCycleTimer <= 0) {
-        ScenarioRandom.nextInRange(0, 2); // C++ Mission_X return jitter
-        entity.missionCycleTimer = 14; // Attack/Move/Enter rate ≈ 14 ticks
-      }
-      entity.missionCycleTimer--;
-    }
+    // DISABLED: centralized mission jitter was consuming 6 extra RNG calls at tick 0
+    // because entities briefly switch to ATTACK during guard inline fire.
+    // TODO: only consume jitter for entities that STAY on ATTACK/MOVE across ticks,
+    // not for the brief ATTACK→GUARD transition during guard inline fire.
+    // if (entity.mission === Mission.ATTACK || ...) { ... }
 
     switch (entity.mission) {
       case Mission.MOVE:
