@@ -1554,6 +1554,13 @@ function applyMission(entity: Entity, missionStr: string): void {
     // C++ Mission_From_Name("None") → MISSION_NONE → default case in AI dispatch
     // → Mission_Sleep() returns 450 ticks, no RNG consumed. Don't map to GUARD.
     entity.mission = Mission.SLEEP;
+  } else if (m === 'Harvest') {
+    // C++ MISSION_HARVEST: harvester state machine (look/harvest/go home).
+    // Mission_Harvest returns fixed values (1 or 450), no Random_Pick consumed.
+    entity.mission = Mission.HARVEST;
+  } else if (m === 'Sticky') {
+    // C++ MISSION_STICKY: same as GUARD (cases fall through in mission.cpp:243-245)
+    entity.mission = Mission.STICKY;
   } else {
     // Default: Guard
     entity.mission = Mission.GUARD;

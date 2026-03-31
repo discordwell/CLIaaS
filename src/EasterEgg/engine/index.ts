@@ -1637,8 +1637,13 @@ export class Game {
       }
     }
 
-    // Update all entities
-    for (const entity of this.entities) {
+    // Update all entities — sorted by C++ Logic layer type order for RNG parity.
+    // C++ processes: Units (RTTI_UNIT) → Infantry (RTTI_INFANTRY) → Aircraft (RTTI_AIRCRAFT).
+    // Without sorting, entity array order causes different Random_Pick(0,2) rejection
+    // sampling patterns, desynchronizing RNG from tick 2 onward.
+    const _typeOrder = (e: Entity) => e.isAirUnit ? 2 : e.stats.isInfantry ? 1 : 0;
+    const sortedEntities = [...this.entities].sort((a, b) => _typeOrder(a) - _typeOrder(b));
+    for (const entity of sortedEntities) {
       // Reset per-tick rotation guards (prevents double-accumulation)
       entity.rotTickedThisFrame = false;
       entity.turretRotTickedThisFrame = false;
