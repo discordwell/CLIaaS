@@ -783,31 +783,32 @@ export class GameMap {
         // Can_Tiberium_Grow (cell.cpp:2869-2884): gold AND OverlayData < 11
         // TS: ovl < 0x0E means density < 11 (0x0E = density 11 = max)
         if (ovl < 0x0E) {
-          growthSeen++;
-          if (growthCells.length < R) {
-            growthCells.push(idx);
-          } else {
-            // C++ map.cpp:1034: reservoir sampling — replace random slot with probability R/n
-            const j = ScenarioRandom.nextInRange(0, growthSeen - 1);
-            if (j < R) {
-              growthCells[j] = idx;
+          // C++ map.cpp:1034: Random_Pick(0, TiberiumGrowthExcess) called for EVERY growable cell.
+          // Always consume RNG to match C++ call pattern, even when reservoir isn't full.
+          const pick = ScenarioRandom.nextInRange(0, growthSeen);
+          if (pick <= growthCells.length) {
+            if (growthCells.length < R) {
+              growthCells.push(idx);
+            } else {
+              growthCells[ScenarioRandom.nextInRange(0, growthCells.length - 1)] = idx;
             }
           }
+          growthSeen++;
         }
 
         // Can_Tiberium_Spread (cell.cpp:2904-2918): gold AND OverlayData > 6
         // TS: ovl > 0x09 means density > 6 (0x09 = 0x03 + 6)
         if (ovl > GameMap.ORE_SPREAD_MIN_DENSITY) {
-          spreadSeen++;
-          if (spreadCells.length < R) {
-            spreadCells.push(idx);
-          } else {
-            // C++ map.cpp:1055: reservoir sampling for spread candidates
-            const j = ScenarioRandom.nextInRange(0, spreadSeen - 1);
-            if (j < R) {
-              spreadCells[j] = idx;
+          // C++ map.cpp:1052: Random_Pick(0, TiberiumSpreadExcess) called for EVERY spreadable cell.
+          const pick = ScenarioRandom.nextInRange(0, spreadSeen);
+          if (pick <= spreadCells.length) {
+            if (spreadCells.length < R) {
+              spreadCells.push(idx);
+            } else {
+              spreadCells[ScenarioRandom.nextInRange(0, spreadCells.length - 1)] = idx;
             }
           }
+          spreadSeen++;
         }
       }
     }
