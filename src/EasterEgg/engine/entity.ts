@@ -126,6 +126,7 @@ export class Entity {
   guardScanJitter = 0; // C++ Random_Pick(0,2) jitter for next guard scan delay
   lastHuntScan = 0;    // tick when hunt last scanned (C++ MissionControl[HUNT].Rate = 0.016)
   idleAnimTimer = 0;   // C++ IdleTimer — countdown to next Random_Animate invocation
+  missionCycleTimer = 0; // C++ Timer — mission handler rate limiter for RNG jitter parity
   lastAIScan = 0;      // tick when ant AI last scanned
   lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 

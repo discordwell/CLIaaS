@@ -3396,6 +3396,27 @@ export class Game {
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
     }
 
+    // C++ mission.cpp:232 — MissionClass::AI gates the mission handler via Timer.
+    // Timer counts down each tick. Handler only runs when Timer == 0.
+    // Handler returns Normal_Delay() + Random_Pick(0,2) which becomes the new Timer.
+    // This consumes 1 ScenarioRandom call per entity per mission cycle.
+    // In TS, individual handlers have their own rate-limiting (lastGuardScan, etc.)
+    // but missions without internal gating (ATTACK, MOVE) need centralized jitter.
+    // Consume the jitter RNG here for missions that DON'T have their own scan delay.
+    if (entity.mission === Mission.ATTACK || entity.mission === Mission.MOVE ||
+        entity.mission === Mission.ENTER || entity.mission === Mission.CAPTURE ||
+        entity.mission === Mission.RETREAT || entity.mission === Mission.REPAIR) {
+      // These missions don't have internal scan delay — their C++ handlers
+      // return Normal_Delay + Random_Pick(0,2) every cycle (14-45 ticks).
+      // We can't gate the TS handler (it runs every tick), but we consume
+      // the jitter RNG at the C++ mission cycle rate.
+      if (entity.missionCycleTimer <= 0) {
+        ScenarioRandom.nextInRange(0, 2); // C++ Mission_X return jitter
+        entity.missionCycleTimer = 14; // Attack/Move/Enter rate ≈ 14 ticks
+      }
+      entity.missionCycleTimer--;
+    }
+
     switch (entity.mission) {
       case Mission.MOVE:
         this.updateMove(entity);
