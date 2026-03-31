@@ -1851,13 +1851,30 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // via the runtime AI production system.
   }
 
-  // C++ parity: consume init-time RNG calls to reach position 162 at tick 1.
-  // WASM seed at tick 1 = 3682132318 = position 162 from seed 0.
-  // TS makes 68 real init + 38 first-tick gameplay = 106 calls.
-  // Need 162 - 106 = 56 dummy calls to sync at tick 1.
-  // C++ init (95 calls) + tick-0 gameplay (67 calls) = 162.
-  // TS init (68+56=124 calls) + tick-0 gameplay (~38 calls) = ~162.
-  for (let i = 0; i < 56; i++) ScenarioRandom.next();
+  // C++ parity: replicate actual C++ init-time RNG calls, not dummy counts.
+  // C++ makes 95 init calls (house attack timers, unit facings, etc.).
+  // TS makes 68. The 27-call gap must be closed by implementing the actual
+  // C++ call sites, not by hardcoded dummy counts which are fragile.
+  //
+  // Known C++ init RNG consumers (not yet replicated in TS):
+  //   - house.cpp:678: Random_Pick(450, 1800) per house constructor (12 houses)
+  //   - udata.cpp:1166: Random_Pick(0, 255) per vehicle Create_And_Place (4 units)
+  //   - ~11 unknown calls from other init systems
+  //
+  // Known C++ per-tick RNG consumers (not yet replicated in TS):
+  //   - unit.cpp:2727: Mission_Harvest returns Normal_Delay+Random_Pick(0,2)
+  //   - infantry Doing_AI: sets Doing=DO_STAND_GUARD, enabling Random_Animate
+  //
+  // TODO: implement these actual call sites instead of dummy counts.
+
+  // House attack timer: 1 call per house (12 houses in SCG01EA)
+  for (const _h of houseNames) {
+    ScenarioRandom.nextInRange(450, 1800);
+  }
+  // Unit facing randomization: 1 call per vehicle placed via Create_And_Place
+  for (const _u of data.units) {
+    ScenarioRandom.nextInRange(0, 255);
+  }
 
   return {
     map,

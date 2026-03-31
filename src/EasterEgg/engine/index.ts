@@ -3442,7 +3442,13 @@ export class Game {
         this.updateAttack(entity);
         break;
       case Mission.HARVEST:
-        // Harvester cycle — handled by updateHarvester() called from the harvester update path
+        // C++ unit.cpp:2727: Mission_Harvest returns Normal_Delay+Random_Pick(0,2)
+        // Consumes 1 RNG jitter call per harvest cycle (~45 ticks)
+        if (entity.missionCycleTimer <= 0) {
+          ScenarioRandom.nextInRange(0, 2);
+          entity.missionCycleTimer = 14; // MissionControl default Rate=.016 → 900*0.016=14
+        }
+        entity.missionCycleTimer--;
         entity.animState = AnimState.IDLE;
         break;
       case Mission.UNLOAD:
