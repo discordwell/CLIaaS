@@ -556,8 +556,8 @@ char* agent_get_state(void)
 		buf_cat("%lu", g_rng_seed_log[li]);
 	}
 	buf_cat("],");
-	// Disable logging after first dump to avoid buffer overflow
-	g_rng_log_enabled = false;
+	// Reset log for next step (keep logging enabled)
+	g_rng_log_count = 0;
 
 	buf_cat("\"alliedHouses\":[");
 	bool first = true;
