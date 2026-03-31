@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-03-30T06:00Z — RNG Deep Audit: 36 Fixes, Seeds Verified Matching
+- **RNG seeds verified matching**: First 67 gameplay calls produce identical seeds in both engines (confirmed by per-call seed logging). Sequences are perfectly synchronized through call 162.
+- **6-call first-tick gap identified**: TS makes 73 gameplay calls at tick 0, WASM makes 67. The 6 extra are from guard/hunt jitter + Random_Animate for entities that C++ skips (likely Timer > 0 from init).
+- **Ore scan converted**: Batch (every 1821 ticks) → incremental (9 cells/tick) matching C++ map.cpp pattern. Reservoir sampling consumes RNG per ore cell.
+- **Centralized mission jitter**: Added for ATTACK/MOVE/etc but disabled — didn't fix the 6-call gap and added long-term divergence.
+- **Mission 'None' → SLEEP**: C++ MISSION_NONE hits default case (Mission_Sleep, no RNG). TS was mapping to GUARD.
+- **Next**: Find which 6 entities have C++ Timer > 0 at tick 0 start (skipping first Mission_Guard) but TS processes immediately. Likely: entities that call `Commence()` during Read_INI which sets Timer=1.
+
 ## 2026-03-30T01:00Z — RNG Call Auditing: 32 Fixes, C++ Counter Instrumented
 - **C++ RNG counter**: Added g_rng_call_count in random.cpp tracking Scen.RandomNumber calls. Both engines now report call counts per checkpoint.
 - **Call count comparison at tick 50**: WASM=222, TS=237. Gap=15 (was 80 before mission jitter fix). At tick 100: WASM=341, TS=239, gap reverses (WASM consuming more).
