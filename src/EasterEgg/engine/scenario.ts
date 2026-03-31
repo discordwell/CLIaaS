@@ -1279,6 +1279,8 @@ export interface MapStructure {
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
   originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
+  /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
+  missionTimer: number;
 }
 
 /** Weapon stats for defensive structures */
@@ -1697,6 +1699,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       ammo: -1,
       maxAmmo: -1,
       triggerName: trigName,
+      missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick
     });
     // Mark structure footprint cells as impassable (WALL terrain)
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];

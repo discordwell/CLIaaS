@@ -147,6 +147,7 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     attackCooldown: 0,
     ammo: -1,
     maxAmmo: -1,
+    missionTimer: 0,
     buildProgress: isWall ? undefined : 0, // walls appear instantly
   };
   ctx.structures.push(newStruct);
@@ -232,6 +233,7 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     attackCooldown: 0,
     ammo: -1,
     maxAmmo: -1,
+    missionTimer: 0,
     deployedFromMCV: true, // C++ ArchiveTarget parity: tracks MCV origin for sell reversion
   };
   ctx.structures.push(newStruct);

@@ -9,7 +9,7 @@ import {
   type WarheadType, type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
-  worldDist, directionTo, worldToCell,
+  worldDist, directionTo, worldToCell, DIR_DX, DIR_DY,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage,
 } from './types';

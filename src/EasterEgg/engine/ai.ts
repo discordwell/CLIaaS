@@ -838,6 +838,7 @@ export function spawnAIStructure(ctx: AIContext, type: string, house: House, cx:
     attackCooldown: 0,
     ammo: -1,
     maxAmmo: -1,
+    missionTimer: 0,
     buildProgress: 0,
   });
 

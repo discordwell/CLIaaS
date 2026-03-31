@@ -1874,6 +1874,10 @@ export class Game {
     // Without this, the step loop exits on state=lost before C4 can detonate.
     this.tickC4Timers();
 
+    // C++ building.cpp:3228-3306 — building Mission_Guard fires mission timer with Random_Pick(0,2)
+    // jitter. Each building consumes 1+ RNG call per timer fire for parity with C++ MissionClass::Timer.
+    this.tickStructureMissionTimers();
+
     // Defensive structure auto-fire
     this._runCombat(ctx => _updateStructureCombat(ctx));
 
@@ -7203,6 +7207,39 @@ export class Game {
   /** Agent 9: Tanya C4 placement — delegates to specialUnits.ts */
   updateTanyaC4(entity: Entity): void {
     this._runSpecialUnits(ctx => _updateTanyaC4(ctx, entity));
+  }
+
+  /** C++ building.cpp:3228-3306 — tick structure mission timers for RNG parity.
+   *  Each alive building has a MissionClass::Timer that counts down. When it reaches 0,
+   *  the mission handler fires (Mission_Guard for GUARD) and returns a new delay value
+   *  that includes Random_Pick(0,2) jitter. This consumes ScenarioRandom per-building. */
+  private tickStructureMissionTimers(): void {
+    // C++ rules.ini: [Guard] Rate=.050, AARate=.016
+    // Normal_Delay = TICKS_PER_MINUTE * Rate = 900 * 0.050 = 45
+    // AA_Delay = TICKS_PER_MINUTE * AARate = 900 * 0.016 = 14
+    const GUARD_NORMAL_DELAY = 45;
+    const GUARD_AA_DELAY = 14;
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      if (s.buildProgress !== undefined) continue; // still under construction
+      if (s.sellProgress !== undefined) continue;  // being sold
+      if (s.missionTimer > 0) {
+        s.missionTimer--;
+        continue;
+      }
+      // Timer fired — consume RNG for jitter (C++ Random_Pick(0, 2))
+      const jitter = ScenarioRandom.nextInRange(0, 2);
+      if (s.weapon) {
+        // Weapon-equipped: AA_Delay + jitter (building.cpp:3305)
+        s.missionTimer = GUARD_AA_DELAY + jitter;
+      } else if (s.type === 'FIX') {
+        // Repair facility: Normal_Delay + jitter (building.cpp:3300)
+        s.missionTimer = GUARD_NORMAL_DELAY + jitter;
+      } else {
+        // All other non-weapon buildings: Normal_Delay * 3 + jitter (building.cpp:3302)
+        s.missionTimer = GUARD_NORMAL_DELAY * 3 + jitter;
+      }
+    }
   }
 
   /** Agent 9: Tick C4 timers on structures — delegates to specialUnits.ts */
