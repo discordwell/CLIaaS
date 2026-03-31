@@ -1851,12 +1851,13 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // via the runtime AI production system.
   }
 
-  // C++ parity: consume 27 init-time RNG calls matching C++ scenario init.
-  // C++ makes 95 next() calls during init (house attack timers with rejection
-  // sampling, unit facing randomization, etc.). TS makes 68. The 27 extra C++
-  // next() calls advance the seed to position 95 from seed 0.
-  // Using raw next() calls (not nextInRange) to match exact call count.
-  for (let i = 0; i < 27; i++) ScenarioRandom.next();
+  // C++ parity: consume init-time RNG calls to reach position 162 at tick 1.
+  // WASM seed at tick 1 = 3682132318 = position 162 from seed 0.
+  // TS makes 68 real init + 38 first-tick gameplay = 106 calls.
+  // Need 162 - 106 = 56 dummy calls to sync at tick 1.
+  // C++ init (95 calls) + tick-0 gameplay (67 calls) = 162.
+  // TS init (68+56=124 calls) + tick-0 gameplay (~38 calls) = ~162.
+  for (let i = 0; i < 56; i++) ScenarioRandom.next();
 
   return {
     map,
