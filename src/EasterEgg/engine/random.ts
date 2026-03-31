@@ -30,16 +30,14 @@ export class RandomClass {
 
   next(): number {
     this.callCount++;
-    // Log first 20 gameplay calls (after init) for parity debugging
-    if (this.callCount > 95 && this.callCount <= 115) {
-      const err = new Error();
-      const caller = err.stack?.split('\n')[2]?.trim()?.slice(0, 80) ?? '?';
-      this.debugLog.push(`#${this.callCount}: ${caller}`);
-    }
     // Seed = (Seed * MULT_CONSTANT) + ADD_CONSTANT
     // JavaScript doesn't have native u32 multiply, so we use Math.imul
     // and coerce back to unsigned with >>> 0.
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
+    // Log first 30 gameplay calls (after init) — seed AFTER update
+    if (this.callCount > 95 && this.callCount <= 170) {
+      this.debugLog.push(`#${this.callCount}:${this.seed}`);
+    }
 
     // Extract 15 significant bits, throwing away the low 10
     return (this.seed >>> THROW_AWAY_BITS) & ((1 << SIGNIFICANT_BITS) - 1);
