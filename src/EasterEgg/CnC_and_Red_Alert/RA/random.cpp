@@ -90,6 +90,12 @@ RandomClass::RandomClass(unsigned seed) :
 unsigned long g_rng_call_count = 0;
 bool g_rng_tracking = false;
 
+// Per-tick RNG call log for parity debugging
+#define RNG_LOG_SIZE 100
+unsigned long g_rng_seed_log[RNG_LOG_SIZE];
+int g_rng_log_count = 0;
+bool g_rng_log_enabled = false;
+
 int RandomClass::operator ()(void)
 {
 	if (g_rng_tracking) {
@@ -104,6 +110,11 @@ int RandomClass::operator ()(void)
 	**	Transform the seed value into the next number in the sequence.
 	*/
 	Seed = (Seed * MULT_CONSTANT) + ADD_CONSTANT;
+
+	// Log seed for parity debugging
+	if (g_rng_log_enabled && g_rng_log_count < RNG_LOG_SIZE) {
+		g_rng_seed_log[g_rng_log_count++] = Seed;
+	}
 
 	/*
 	**	Extract the 'random' bits from the seed and return that value as the

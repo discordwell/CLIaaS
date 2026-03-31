@@ -539,14 +539,25 @@ char* agent_get_state(void)
 
 	extern unsigned long g_rng_call_count;
 	extern bool g_rng_tracking;
-	// Enable tracking on first state read
-	if (!g_rng_tracking) g_rng_tracking = true;
-	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,\"rngCalls\":%lu,",
+	extern bool g_rng_log_enabled;
+	extern unsigned long g_rng_seed_log[];
+	extern int g_rng_log_count;
+	// Enable tracking + logging on first state read
+	if (!g_rng_tracking) { g_rng_tracking = true; g_rng_log_enabled = true; }
+	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,\"rngCalls\":%lu,\"rngLog\":[",
 		Frame,
 		(long)(PlayerPtr->Credits + PlayerPtr->Tiberium),
 		agent_house_name(player_house),
 		Scen.RandomNumber.Seed,
 		g_rng_call_count);
+	// Dump first 70 seed values from the per-tick log
+	for (int li = 0; li < g_rng_log_count && li < 70; li++) {
+		if (li > 0) buf_cat(",");
+		buf_cat("%lu", g_rng_seed_log[li]);
+	}
+	buf_cat("],");
+	// Disable logging after first dump to avoid buffer overflow
+	g_rng_log_enabled = false;
 
 	buf_cat("\"alliedHouses\":[");
 	bool first = true;
