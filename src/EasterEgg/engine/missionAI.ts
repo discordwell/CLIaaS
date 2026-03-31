@@ -703,6 +703,12 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     return;
   }
 
+  // C++ unit.cpp:3643-3645: Harvesters on GUARD immediately switch to HARVEST
+  // and return(1) — no jitter, no Random_Animate, no RNG consumed.
+  if (entity.type === UnitType.V_HARV && !entity.isPlayerUnit) {
+    return; // C++ parity: harvester skips Mission_Guard entirely
+  }
+
   // C++ IdleTimer countdown — decrements every tick (techno.cpp:5326)
   if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
 
