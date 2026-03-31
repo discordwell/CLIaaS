@@ -1546,6 +1546,10 @@ function applyMission(entity: Entity, missionStr: string): void {
     entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
   } else if (m === 'Sleep') {
     entity.mission = Mission.SLEEP;
+  } else if (m === 'None' || m === '') {
+    // C++ Mission_From_Name("None") → MISSION_NONE → default case in AI dispatch
+    // → Mission_Sleep() returns 450 ticks, no RNG consumed. Don't map to GUARD.
+    entity.mission = Mission.SLEEP;
   } else {
     // Default: Guard
     entity.mission = Mission.GUARD;
