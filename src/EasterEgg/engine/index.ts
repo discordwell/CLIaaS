@@ -3419,37 +3419,57 @@ export class Game {
     // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
     if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
 
-    // C++ mission.cpp:232 — MissionClass::AI gates the mission handler via Timer.
-    // Timer counts down each tick. Handler only runs when Timer == 0.
-    // Handler returns Normal_Delay() + Random_Pick(0,2) which becomes the new Timer.
-    // This consumes 1 ScenarioRandom call per entity per mission cycle.
-    // In TS, individual handlers have their own rate-limiting (lastGuardScan, etc.)
-    // but missions without internal gating (ATTACK, MOVE) need centralized jitter.
-    // Consume the jitter RNG here for missions that DON'T have their own scan delay.
-    // C++ mission.cpp:232 — all mission handlers return Normal_Delay+Random_Pick(0,2).
-    // Guard, Hunt, and Area Guard already consume jitter in their own scan code.
-    // Other missions (ATTACK, MOVE, HARVEST, etc.) need centralized jitter.
-    if (entity.mission !== Mission.GUARD && entity.mission !== Mission.HUNT &&
-        entity.mission !== Mission.AREA_GUARD && entity.mission !== Mission.SLEEP &&
-        entity.mission !== Mission.DIE) {
-      if (entity.missionCycleTimer <= 0) {
-        ScenarioRandom.nextInRange(0, 2); // C++ mission handler return jitter
-        entity.missionCycleTimer = 14;    // default MissionControl Rate → 14 ticks
-      }
-      entity.missionCycleTimer--;
+    // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
+    // Timer counts down each tick. When Timer reaches 0, the mission handler fires
+    // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
+    // Between timer fires, per-tick systems (Firing_AI, movement) still run.
+    if (entity.missionTimer > 0) {
+      entity.missionTimer--;
     }
+    const missionTimerFired = entity.missionTimer <= 0;
 
     switch (entity.mission) {
       case Mission.MOVE:
         this.updateMove(entity);
+        // C++ foot.cpp:504: Mission_Move returns Normal_Delay+Random_Pick(0,2)
+        if (missionTimerFired) {
+          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        }
         break;
       case Mission.ATTACK:
         this.updateAttack(entity);
+        // C++ foot.cpp:570: Mission_Attack returns Normal_Delay+Random_Pick(0,2)
+        if (missionTimerFired) {
+          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        }
         break;
       case Mission.HUNT:
-        this.updateHunt(entity);
+        // C++ foot.cpp:654-702: Mission_Hunt — target scan only when timer fires
+        if (missionTimerFired) {
+          this.updateHunt(entity);
+          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        } else {
+          // Between scans: continue moving toward target (C++ Approach_Target runs independently)
+          this._runMissionAI(ctx => {
+            if (entity.target?.alive && !entity.inRange(entity.target)) {
+              const targetCell = { cx: Math.floor(entity.target.pos.x / CELL_SIZE), cy: Math.floor(entity.target.pos.y / CELL_SIZE) };
+              if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
+                entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
+                entity.pathIndex = 0;
+              }
+              if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+                const wp = { x: entity.path[entity.pathIndex].cx * CELL_SIZE + CELL_SIZE / 2, y: entity.path[entity.pathIndex].cy * CELL_SIZE + CELL_SIZE / 2 };
+                if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
+              } else {
+                entity.moveToward(entity.target.pos, this.movementSpeed(entity));
+              }
+            }
+          });
+        }
         break;
       case Mission.GUARD:
+        // C++ foot.cpp:589-634: Mission_Guard — scan + Random_Animate when timer fires
+        // Firing_AI runs every tick (handled inside updateGuard's Firing_AI block)
         this.updateGuard(entity);
         break;
       case Mission.AREA_GUARD:

@@ -121,13 +121,17 @@ export class Entity {
   deathVariant = 0;    // C++ InfantryDeath: 0=instant, 1=twirl, 2=explode, 3=flying, 4=burn, 5=electro
   damageFlash = 0;     // ticks remaining for damage flash effect
 
-  // AI rate-limiting
-  lastGuardScan = 0;   // tick when guard last scanned
-  guardScanJitter = 0; // C++ Random_Pick(0,2) jitter for next guard scan delay
-  lastHuntScan = 0;    // tick when hunt last scanned (C++ MissionControl[HUNT].Rate = 0.016)
+  // C++ MissionClass::Timer — gates when mission handler fires.
+  // Counts down each tick. Handler runs when timer reaches 0.
+  // Handler returns Normal_Delay+Random_Pick(0,2) which becomes new timer.
+  missionTimer = 0; // C++ Timer starts at 0 → first handler fires immediately
   idleAnimTimer = 2;   // C++ parity: Doing=DO_NOTHING at init prevents first-tick Random_Animate
-  // Set to 2 because updateGuard decrements BEFORE checking (2→1, then 1>0 → skip)
-  missionCycleTimer = 0; // C++ Timer — mission handler rate limiter for RNG jitter parity
+
+  // Legacy fields (kept for compatibility but no longer used for timing)
+  lastGuardScan = 0;
+  guardScanJitter = 0;
+  lastHuntScan = 0;
+  missionCycleTimer = 0;
   lastAIScan = 0;      // tick when ant AI last scanned
   lastPathRecalc = 0;  // tick when path was last recalculated (for blocked paths)
 
