@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-03-30T24:00Z — RNG Deep Audit Complete: 37 Fixes, 6-Call Entity Order Gap
+- **Seeds verified identical**: Calls 96-168 from seed 0 produce identical seeds in both engines (per-call comparison). The RNG algorithm and init sync are perfect.
+- **6-call gap root cause**: Entity processing ORDER differs — C++ iterates via heap pointers (memory order), TS via array index (creation order). Different iteration orders cause `nextInRange` rejection sampling to consume different total `next()` calls.
+- **HARV confirmed NOT on Guard**: SCG01EA HARV starts on Harvest mission. The 6 extra calls are purely from entity order affecting rejection patterns.
+- **IdleTimer range corrected**: C++ fixed-point (36,147), was (37,149). Area Guard now has immediate first-scan + jitter Random_Pick(1,5) + Random_Animate.
+- **Ore scan now incremental**: 9 cells/tick matching C++ map.cpp. Full cycle ~1820 ticks.
+- **Centralized mission jitter**: Disabled — was consuming RNG for entities briefly switching to ATTACK during guard inline fire.
+- **Next**: Match C++ entity iteration order (sort entities by deterministic key), OR accept 6-call gap as structural and focus on gameplay impact. The gap causes downstream divergence via rejection sampling compounding.
+- **Total: 37 parity fixes across 5 days. Tick 50 has zero HP diffs. First 67 RNG calls identical.**
+
 ## 2026-03-30T06:00Z — RNG Deep Audit: 36 Fixes, Seeds Verified Matching
 - **RNG seeds verified matching**: First 67 gameplay calls produce identical seeds in both engines (confirmed by per-call seed logging). Sequences are perfectly synchronized through call 162.
 - **6-call first-tick gap identified**: TS makes 73 gameplay calls at tick 0, WASM makes 67. The 6 extra are from guard/hunt jitter + Random_Animate for entities that C++ skips (likely Timer > 0 from init).
