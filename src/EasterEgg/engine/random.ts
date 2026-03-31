@@ -26,9 +26,16 @@ export class RandomClass {
    * C++ ref: random.cpp:89-106
    */
   callCount = 0; // Debug: count total RNG calls for parity comparison
+  debugLog: string[] = []; // First N calls for divergence debugging
 
   next(): number {
     this.callCount++;
+    // Log first 20 gameplay calls (after init) for parity debugging
+    if (this.callCount > 95 && this.callCount <= 115) {
+      const err = new Error();
+      const caller = err.stack?.split('\n')[2]?.trim()?.slice(0, 80) ?? '?';
+      this.debugLog.push(`#${this.callCount}: ${caller}`);
+    }
     // Seed = (Seed * MULT_CONSTANT) + ADD_CONSTANT
     // JavaScript doesn't have native u32 multiply, so we use Math.imul
     // and coerce back to unsigned with >>> 0.
