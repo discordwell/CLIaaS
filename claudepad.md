@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-31T00:30Z — 38 Fixes: Doing=DO_NOTHING Root Cause Found
+- **Root cause of first-tick gap**: C++ infantry.cpp:178 initializes `Doing=DO_NOTHING`. `Is_Ready_To_Random_Animate` (line 4112) requires `Doing==DO_STAND_GUARD|READY`. At tick 0, no infantry has entered idle animation → Random_Animate NEVER fires. TS was firing it for all infantry (idleAnimTimer=0). Fixed with idleAnimTimer=2 (skips first tick, matches C++ Doing gate).
+- **IdleTimer moved to updateEntity**: Now decrements every tick for all missions (matching C++ TechnoClass::AI), not just inside updateGuard.
+- **HARV confirmed on Harvest mission**: Not Guard. C++ Mission_Harvest consumes Random_Pick(0,2) jitter; TS Harvest is a no-op. This is part of the remaining gap.
+- **Current state**: TS makes 38 first-tick calls, WASM makes 67. Gap=29. The 29 are from C++ jitter in mission handlers (Harvest, reinforcement processing) and Random_Animate firing on tick 1+ for entities that entered DO_STAND_GUARD during tick 0 processing.
+- **Next**: Add Harvest mission jitter, match reinforcement trigger RNG consumption, and ensure Random_Animate fires at the correct tick (after Doing transitions to DO_STAND_GUARD).
+
 ## 2026-03-30T24:00Z — RNG Deep Audit Complete: 37 Fixes, 6-Call Entity Order Gap
 - **Seeds verified identical**: Calls 96-168 from seed 0 produce identical seeds in both engines (per-call comparison). The RNG algorithm and init sync are perfect.
 - **6-call gap root cause**: Entity processing ORDER differs — C++ iterates via heap pointers (memory order), TS via array index (creation order). Different iteration orders cause `nextInRange` rejection sampling to consume different total `next()` calls.
