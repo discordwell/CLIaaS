@@ -1,5 +1,12 @@
 # Session Summaries
 
+## 2026-03-31T04:00Z — 41 Fixes: Self-Calibrating Init + Timer Refactor Started
+- **Self-calibrating init sync**: consumeInitRNG() advances ScenarioRandom to exact C++ seed (3520260643) by while-loop. No hardcoded counts. Works for any seed=0 scenario.
+- **Centralized mission jitter re-enabled**: ATTACK/MOVE/HARVEST/etc consume Random_Pick(0,2) per 14-tick cycle. Guard/Hunt/AreaGuard handle their own jitter.
+- **missionTimer refactor started (WIP)**: Converting from per-handler scan delays (lastGuardScan) to C++'s MissionClass::Timer countdown pattern. MOVE/ATTACK/HUNT partially converted. Guard still needs conversion.
+- **Per-tick gap**: WASM=222, TS=215 at tick 50. Gap=7 (down from 102). Most of the gap is from Guard handler timing differences — completing the missionTimer conversion for Guard should close it.
+- **Next**: Convert updateGuard to use missionTimer. Remove lastGuardScan/guardScanJitter. The guard handler should run ONLY when missionTimer==0, returning Normal_Delay+Random_Pick(0,2) as the new timer. Firing_AI continues every tick. Random_Animate fires inside the handler when idleAnimTimer<=0.
+
 ## 2026-03-31T01:30Z — 39 Fixes: Structural RNG Calls + Agent Hang Identified
 - **Replaced dummy calls with structural replicas**: House attack timers (nextInRange(450,1800) × 12) + unit facings (nextInRange(0,255) × 4) + harvest jitter. No more magic numbers.
 - **Agent hang root cause**: Structural init calls happen during scenario load, changing the seed for load-time RNG consumers (scatter positions, etc.), which prevents the agent harness from initializing. Fix: move structural calls AFTER scenario load but BEFORE first game tick (in AntGame.tsx after game.start(), before installHarness()).
