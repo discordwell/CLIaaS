@@ -637,7 +637,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       // C++ foot.cpp:688 — no target found: call Random_Animate() and stay on HUNT.
       // Infantry Random_Animate consumes 2-3 RNG calls for parity.
       if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
-        entity.idleAnimTimer = ScenarioRandom.nextInRange(37, 149);
+        // C++ fixed-point: raw=floor(0.083*256)=21. min=21*450/256=36, max=21*1800/256=147
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
         const animPick = ScenarioRandom.nextInRange(0, 10);
         if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
       }
@@ -930,7 +931,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     // C++ infantry.cpp:1748 — IdleTimer = Random_Pick(RAT * TPM/2, RAT * TPM*2)
     // Rule.RandomAnimateTime = 0.083 (fixed). TICKS_PER_MINUTE = 900.
     // Range: floor(0.083 * 450) = 37  to  floor(0.083 * 1800) = 149
-    entity.idleAnimTimer = ScenarioRandom.nextInRange(37, 149);
+    // C++ fixed-point: raw=floor(0.083*256)=21. min=21*450/256=36, max=21*1800/256=147
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
     // C++ infantry.cpp:1759 — select animation type (0-10)
     const animPick = ScenarioRandom.nextInRange(0, 10);
     // C++ infantry.cpp:1788,1795,1807,1817 — cases 6,7,8,9,10 also pick a random facing
@@ -943,10 +945,19 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
 /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
 export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   entity.animState = AnimState.IDLE;
-  // A3: Type-specific scan delays (C++ foot.cpp:589-612, Normal_Delay=22)
-  const areaGuardScanDelay = entity.stats.scanDelay ?? 22;
-  if (ctx.tick - entity.lastGuardScan < areaGuardScanDelay) return;
+
+  // C++ IdleTimer countdown (same as guard)
+  if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
+
+  // C++ foot.cpp:1016-1020: Mission_Guard_Area Normal_Delay + Random_Pick(1, 5)
+  // MissionControl[Guard Area] uses same Rate as Guard (0.050) → 45 ticks base
+  const AREA_GUARD_DELAY = 45;
+  const areaGuardScanDelay = AREA_GUARD_DELAY + entity.guardScanJitter;
+  // C++ Timer=0 at init → first scan immediate
+  if (entity.lastGuardScan > 0 && ctx.tick - entity.lastGuardScan < areaGuardScanDelay) return;
   entity.lastGuardScan = ctx.tick;
+  // C++ foot.cpp:1020: return dtime + Random_Pick(1, 5) — note (1,5) not (0,2)
+  entity.guardScanJitter = ScenarioRandom.nextInRange(1, 5);
 
   const origin = entity.guardOrigin ?? entity.pos;
   const isDog = entity.type === UnitType.I_DOG;
@@ -1028,6 +1039,14 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
   if (bestTarget) {
     entity.mission = Mission.ATTACK;
     entity.target = bestTarget;
+    return;
+  }
+
+  // C++ foot.cpp:1011 — Random_Animate() when no target found (same as guard)
+  if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
+    const animPick = ScenarioRandom.nextInRange(0, 10);
+    if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
   }
 }
 
