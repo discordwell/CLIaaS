@@ -3468,12 +3468,26 @@ export class Game {
         }
         break;
       case Mission.GUARD:
-        // C++ foot.cpp:589-634: Mission_Guard — scan + Random_Animate when timer fires
-        // Firing_AI runs every tick (handled inside updateGuard's Firing_AI block)
-        this.updateGuard(entity);
+      case Mission.STICKY:
+        // C++ foot.cpp:589-634: Mission_Guard runs when Timer==0.
+        // Firing_AI and cooldown run every tick (inside updateGuard).
+        // Pass missionTimerFired so updateGuard only scans when timer fires.
+        this.updateGuard(entity, missionTimerFired);
+        if (missionTimerFired) {
+          // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2))
+          const isInfAA = entity.stats.isInfantry &&
+            (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
+          const guardDelay = isInfAA ? 14 : 45;
+          entity.missionTimer = entity.attackCooldown > 0
+            ? entity.attackCooldown
+            : guardDelay + ScenarioRandom.nextInRange(0, 2);
+        }
         break;
       case Mission.AREA_GUARD:
-        this.updateAreaGuard(entity);
+        this.updateAreaGuard(entity, missionTimerFired);
+        if (missionTimerFired) {
+          entity.missionTimer = 45 + ScenarioRandom.nextInRange(1, 5);
+        }
         break;
       case Mission.SLEEP:
         // Dormant — do nothing until explicitly given a new mission

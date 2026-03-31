@@ -561,24 +561,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 /** Hunt mode — move toward target and attack (C++ foot.cpp:654-703)
  *  Actively calls Target_Something_Nearby when target is null or dead. */
 export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
+  // Called only when missionTimer fires (gated by caller in index.ts).
+  // C++ foot.cpp:654-702: Mission_Hunt scans for targets.
   if (!entity.target?.alive) {
     entity.target = null;
-    // C++ mission.cpp:232 — Mission_Hunt() Timer starts at 0, so first scan is immediate.
-    // Returns Normal_Delay() + Random(0,2) for subsequent scans.
-    // MissionControl[HUNT].Rate = 0.016 → Normal_Delay = TICKS_PER_MINUTE * 0.016 = 14 ticks.
-    // C++ foot.cpp:702: return Normal_Delay() + Random_Pick(0, 2)
-    const HUNT_SCAN_DELAY = 14; // C++ parity: floor(900 * 0.016) = 14
-    const huntDelay = HUNT_SCAN_DELAY + entity.guardScanJitter; // reuse jitter field
-    if (entity.lastHuntScan > 0 && ctx.tick - entity.lastHuntScan < huntDelay) {
-      // Between scans: if we have a moveTarget, keep moving toward it
-      if (entity.moveTarget) {
-        entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
-      }
-      return;
-    }
-    entity.lastHuntScan = ctx.tick;
-    // C++ parity: consume Random_Pick(0,2) for next cycle's jitter
-    entity.guardScanJitter = ScenarioRandom.nextInRange(0, 2);
 
     // C++ foot.cpp:657 — Mission_Hunt uses Target_Something_Nearby(THREAT_NORMAL).
     // THREAT_NORMAL = 0 → Threat_Range(-1) = unlimited range (entire map scan).
@@ -683,7 +669,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
 }
 
 /** Guard mode — attack nearby enemies or auto-heal (rate-limited to every 15 ticks) */
-export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
+export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = true): void {
   entity.animState = AnimState.IDLE;
 
   // Save guard origin when first entering guard stance (for return-after-chase)
@@ -728,35 +714,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
-  // C++ foot.cpp:597 + rules.ini [Guard] Rate=.050 → Normal_Delay = 900 * 0.050 = 45 ticks.
-  // C++ foot.cpp:624-627: infantry E1/E3 use AARate=.016 → 14 ticks.
-  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random(0,2))
-  // C++ does NOT have per-unit scanDelay for guard — it uses MissionControl rates.
-  const isInfantryAA = entity.stats.isInfantry &&
-    (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
-  const GUARD_NORMAL_DELAY = 45; // C++ MissionControl[Guard].Normal_Delay = 900 * 0.050
-  const GUARD_AA_DELAY = 14;     // C++ MissionControl[Guard].AA_Delay = 900 * 0.016
-  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
-  // Each entity gets its own Timer with per-entity jitter to prevent synchronized scans.
-  // Can't use ScenarioRandom here — consuming RNG values in guard scan desynchronizes
-  // the shared random sequence. Use a deterministic per-entity offset instead.
-  // C++ Timer starts at 0 → first Mission_Guard call is immediate.
-  // Subsequent calls delayed by Normal_Delay + Random(0,2).
-  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
-  // The Random_Pick is consumed ONCE per scan cycle and stored as the jitter.
-  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2));
-  // When weapon is on cooldown (Arm > 0), use Arm as delay WITHOUT consuming RNG.
-  // Only consume Random_Pick when weapon is ready (Arm == 0).
-  const baseDelay = isInfantryAA ? GUARD_AA_DELAY : GUARD_NORMAL_DELAY;
-  const guardScanDelay = entity.attackCooldown > 0
-    ? entity.attackCooldown    // C++: return (int)Arm — no RNG consumed
-    : baseDelay + entity.guardScanJitter;  // C++: return dtime + Random_Pick(0,2)
-  if (entity.lastGuardScan > 0 && ctx.tick - entity.lastGuardScan < guardScanDelay) return;
-  entity.lastGuardScan = ctx.tick;
-  // C++ parity: only consume Random_Pick(0,2) when weapon was ready (Arm == 0).
-  if (entity.attackCooldown <= 0) {
-    entity.guardScanJitter = ScenarioRandom.nextInRange(0, 2);
-  }
+  // C++ MissionClass::Timer gates when Mission_Guard fires.
+  // Timer and jitter are now handled by the caller (index.ts) via entity.missionTimer.
+  // Only run the scan portion when the timer fires.
+  if (!timerFired) return;
 
   // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)
   if (entity.isCivilian && entity.isPlayerUnit) {
@@ -942,21 +903,12 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
 }
 
 /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
-export function updateAreaGuard(ctx: MissionAIContext, entity: Entity): void {
+export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFired = true): void {
   entity.animState = AnimState.IDLE;
 
-  // C++ IdleTimer countdown (same as guard)
-  if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
-
-  // C++ foot.cpp:1016-1020: Mission_Guard_Area Normal_Delay + Random_Pick(1, 5)
-  // MissionControl[Guard Area] uses same Rate as Guard (0.050) → 45 ticks base
-  const AREA_GUARD_DELAY = 45;
-  const areaGuardScanDelay = AREA_GUARD_DELAY + entity.guardScanJitter;
-  // C++ Timer=0 at init → first scan immediate
-  if (entity.lastGuardScan > 0 && ctx.tick - entity.lastGuardScan < areaGuardScanDelay) return;
-  entity.lastGuardScan = ctx.tick;
-  // C++ foot.cpp:1020: return dtime + Random_Pick(1, 5) — note (1,5) not (0,2)
-  entity.guardScanJitter = ScenarioRandom.nextInRange(1, 5);
+  // C++ MissionClass::Timer gates when Mission_Guard_Area fires.
+  // Timer and jitter handled by caller (index.ts) via entity.missionTimer.
+  if (!timerFired) return;
 
   const origin = entity.guardOrigin ?? entity.pos;
   const isDog = entity.type === UnitType.I_DOG;
