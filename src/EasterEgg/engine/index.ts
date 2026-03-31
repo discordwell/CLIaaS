@@ -1477,6 +1477,27 @@ export class Game {
     if (wasPaused && this.state === 'playing') this.state = 'paused';
   }
 
+  /** C++ parity: consume init-time RNG calls that C++ makes but TS doesn't.
+   *  Must be called AFTER scenario load (so entities aren't affected) but
+   *  BEFORE the first game tick (so the seed is synced at tick 0).
+   *  Replicates: house.cpp:678 Random_Pick(450,1800) per house,
+   *              udata.cpp:1166 Random_Pick(0,255) per vehicle. */
+  consumeInitRNG(): void {
+    // house.cpp:678: Attack = Rule.AttackDelay * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2)
+    // C++ fixed-point: Rule.AttackDelay = 1.0, so range = Random_Pick(450, 1800)
+    // 12 houses in a typical RA scenario (all houses get constructors during Read_INI)
+    const houseCount = 12;
+    for (let i = 0; i < houseCount; i++) {
+      ScenarioRandom.nextInRange(450, 1800);
+    }
+    // udata.cpp:1166: Random_Pick(DIR_N, DIR_MAX) per vehicle placed via Create_And_Place
+    // DIR_N=0, DIR_MAX=255 (full 256-direction range)
+    const vehicleCount = this.entities.filter(e => !e.stats.isInfantry && !e.stats.isAircraft).length;
+    for (let i = 0; i < vehicleCount; i++) {
+      ScenarioRandom.nextInRange(0, 255);
+    }
+  }
+
   /** Disable fog of war (reveal entire map) */
   disableFog(): void {
     this.fogDisabled = true;

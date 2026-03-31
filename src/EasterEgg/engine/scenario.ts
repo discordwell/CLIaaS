@@ -1851,32 +1851,10 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // via the runtime AI production system.
   }
 
-  // C++ parity: replicate actual C++ init-time RNG calls, not dummy counts.
-  // C++ makes 95 init calls (house attack timers, unit facings, etc.).
-  // TS makes 68. The 27-call gap must be closed by implementing the actual
-  // C++ call sites, not by hardcoded dummy counts which are fragile.
-  //
-  // Known C++ init RNG consumers (not yet replicated in TS):
-  //   - house.cpp:678: Random_Pick(450, 1800) per house constructor (12 houses)
-  //   - udata.cpp:1166: Random_Pick(0, 255) per vehicle Create_And_Place (4 units)
-  //   - ~11 unknown calls from other init systems
-  //
-  // Known C++ per-tick RNG consumers (not yet replicated in TS):
-  //   - unit.cpp:2727: Mission_Harvest returns Normal_Delay+Random_Pick(0,2)
-  //   - infantry Doing_AI: sets Doing=DO_STAND_GUARD, enabling Random_Animate
-  //
-  // TODO: implement these actual call sites instead of dummy counts.
-
-  // House attack timer: nextInRange(450,1800) × 12 houses = ~18 next() calls with rejections
-  // Unit facing: nextInRange(0,255) × 4 vehicles = 4 next() calls (perfect fit, no rejection)
-  // Total: ~22 next() calls. Remaining gap from 27: ~5 unknown.
-  // Using structural calls that match C++'s exact Random_Pick arguments:
-  for (const _h of houseNames) {
-    ScenarioRandom.nextInRange(450, 1800); // house.cpp:678
-  }
-  for (const _u of data.units) {
-    ScenarioRandom.nextInRange(0, 255); // udata.cpp:1166
-  }
+  // C++ parity: init-time RNG calls are consumed AFTER scenario load
+  // in AntGame.tsx (after game.start(), before installHarness()).
+  // This avoids changing the seed during load, which would alter
+  // scatter positions and entity placement.
 
   return {
     map,
