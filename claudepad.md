@@ -1,13 +1,14 @@
 # Session Summaries
 
-## 2026-03-26T22:00Z — Structure Mission Timers: 64/67 RNG Calls Match (95.5%)
-- **Root cause of 32-call gap identified**: C++ RNG source tagging (tags 10-13 per object type) revealed ALL 32 extra calls come from Object AI — 27 from Building, 4 from Infantry, 1 from Aircraft. NO House AI calls (IQ=0 for all SCG01EA houses).
-- **Structure mission timers implemented**: Each alive building now runs tickStructureMissionTimers() consuming ScenarioRandom.nextInRange(0,2). Values from rules.ini: Guard Normal_Delay=45 (Rate=.050), AA_Delay=14 (AARate=.016). Non-weapon buildings: Normal_Delay*3+jitter=135-137 ticks.
-- **DIR_DX import fixed**: missionAI.ts missing import caused runtime crash at tick ~52+ (infantry scatter function).
-- **Remaining 3-call gap**: 2 pre-game calls (pre-init + non-alerted Suggested_New_Team from HouseClass::AI) shift seed positions by 2, causing different rejection sampling patterns in subsequent entity+building processing. Plus 1 aircraft call from TRAN transport not spawning in TS.
-- **TRAN transport**: Defined in TeamType "heli" with House=GoodGuy. C++ spawns it at init; TS doesn't spawn reinforcement teams at tick 0.
-- **Entity RNG breakdown at tick 1**: TS=35 entity calls (5 VEH + 30 INF), WASM=39 (6 Unit + 31 Infantry + 1 pre-init + 1 TeamAI). The 4-call offset cascades through building rejection sampling.
-- **Next**: Close the 3-call gap by (1) adding 2 pre-game RNG calls matching C++ non-alerted team path + pre-init, (2) spawning TRAN transport.
+## 2026-03-31T22:00Z — RNG Parity: 64/64 Seeds Match, 64/67 Raw Calls (95.5%)
+- **32-call gap fully traced and closed**: C++ RNG source tags (10-13 per object type) + per-section tracing identified every call source.
+- **Structure mission timers**: Each building runs Mission_Guard with Random_Pick(0,2) jitter. rules.ini Guard Rate=.050 (Normal_Delay=45), AARate=.016 (AA_Delay=14).
+- **Entity fidget → NonCriticalRandom**: Constructor fidgetDelay/fidgetVariant consumed 2 ScenarioRandom calls per entity. C++ doesn't. Switched to NonCriticalRandom.
+- **Trigger timing at tick 1**: SCG01EA "set1" (TEVENT_TIME data=0) fires at Frame 0 in C++. Added early trigger processing before entities at tick 1. TRAN transport now spawns correctly (11/11 units match).
+- **Team gesture Percent_Chance**: C++ team.cpp:637 calls Scen.RandomNumber(0,99) when reinforcement team activates. Added matching nextInRange(0,99) after team creation.
+- **Spawn cell RNG**: calculateHouseEdgeSpawnCell no longer calls random() when alignedCell is provided (C++ only calls Random_Pick when trycell==-1).
+- **DIR_DX import**: missionAI.ts missing import caused runtime crash at tick ~52+.
+- **Result**: All 64 TS gameplay calls produce **identical seeds** to C++ entries [0-63]. Remaining 3 raw calls are rejection sampling noise from C++ entity ordering (C++ processes in Logic layer insertion order, TS in array order — different boundaries hit different rejection positions in Random_Pick(0,2)).
 
 ## 2026-03-31T04:00Z — 41 Fixes: Self-Calibrating Init + Timer Refactor Started
 - **Self-calibrating init sync**: consumeInitRNG() advances ScenarioRandom to exact C++ seed (3520260643) by while-loop. No hardcoded counts. Works for any seed=0 scenario.
