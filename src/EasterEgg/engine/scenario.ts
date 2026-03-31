@@ -1114,7 +1114,9 @@ export function calculateHouseEdgeSpawnCell(
       ? normalizeHouseEdge(houseEdges.get(house))
       : normalizeHouseEdge(undefined);
   const { x, y, w, h } = mapBounds;
-  const randOffset = Math.floor(random() * Math.max(w, h));
+  // C++ Calculated_Cell: Random_Pick only called when trycell == -1 (no waypoint).
+  // When alignedCell is provided, the spawn position is deterministic — don't consume RNG.
+  const randOffset = alignedCell ? 0 : Math.floor(random() * Math.max(w, h));
   const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
   const alignedY = alignedCell ? Math.min(Math.max(alignedCell.cy, y), y + h - 1) : y + (randOffset % h);
 

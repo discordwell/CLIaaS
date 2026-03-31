@@ -13,7 +13,7 @@ import {
   armorIndex, PRODUCTION_ITEMS,
 } from './types';
 import { LP, PIXEL_LEPTON_W } from './tracks';
-import { ScenarioRandom } from './random';
+import { ScenarioRandom, NonCriticalRandom } from './random';
 
 // === C++ Points lookup (techno.cpp:6290: Risk = Reward = Points) ===
 // Used by threatScore() to compute C++ Value() = Risk + Reward = 2 * Points
@@ -277,8 +277,10 @@ export class Entity {
   moebiusCountDown = 0;                 // ticks remaining before return-to-origin
 
   // IA1: Infantry fidget randomization (C++ infantry.cpp:1748-1821)
-  fidgetDelay = ScenarioRandom.nextInRange(12, 31); // random 12-31 frames
-  fidgetVariant = ScenarioRandom.float(); // selects idle1 vs idle2 animation
+  // Use NonCriticalRandom — fidget is cosmetic, doesn't consume Scen.RandomNumber in C++.
+  // C++ IdleTimer is initialized by MissionClass::Timer, not at construction.
+  fidgetDelay = NonCriticalRandom.nextInRange(12, 31); // random 12-31 frames
+  fidgetVariant = NonCriticalRandom.float(); // selects idle1 vs idle2 animation
 
   // Fear/Prone system (C++ infantry.cpp — FearType 0-255)
   // Fear increases on damage, decrements 1/tick. IsProne when fear >= FEAR_ANXIOUS (10).
