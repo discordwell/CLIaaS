@@ -1,5 +1,14 @@
 # Session Summaries
 
+## 2026-03-26T22:00Z — Structure Mission Timers: 64/67 RNG Calls Match (95.5%)
+- **Root cause of 32-call gap identified**: C++ RNG source tagging (tags 10-13 per object type) revealed ALL 32 extra calls come from Object AI — 27 from Building, 4 from Infantry, 1 from Aircraft. NO House AI calls (IQ=0 for all SCG01EA houses).
+- **Structure mission timers implemented**: Each alive building now runs tickStructureMissionTimers() consuming ScenarioRandom.nextInRange(0,2). Values from rules.ini: Guard Normal_Delay=45 (Rate=.050), AA_Delay=14 (AARate=.016). Non-weapon buildings: Normal_Delay*3+jitter=135-137 ticks.
+- **DIR_DX import fixed**: missionAI.ts missing import caused runtime crash at tick ~52+ (infantry scatter function).
+- **Remaining 3-call gap**: 2 pre-game calls (pre-init + non-alerted Suggested_New_Team from HouseClass::AI) shift seed positions by 2, causing different rejection sampling patterns in subsequent entity+building processing. Plus 1 aircraft call from TRAN transport not spawning in TS.
+- **TRAN transport**: Defined in TeamType "heli" with House=GoodGuy. C++ spawns it at init; TS doesn't spawn reinforcement teams at tick 0.
+- **Entity RNG breakdown at tick 1**: TS=35 entity calls (5 VEH + 30 INF), WASM=39 (6 Unit + 31 Infantry + 1 pre-init + 1 TeamAI). The 4-call offset cascades through building rejection sampling.
+- **Next**: Close the 3-call gap by (1) adding 2 pre-game RNG calls matching C++ non-alerted team path + pre-init, (2) spawning TRAN transport.
+
 ## 2026-03-31T04:00Z — 41 Fixes: Self-Calibrating Init + Timer Refactor Started
 - **Self-calibrating init sync**: consumeInitRNG() advances ScenarioRandom to exact C++ seed (3520260643) by while-loop. No hardcoded counts. Works for any seed=0 scenario.
 - **Centralized mission jitter re-enabled**: ATTACK/MOVE/HARVEST/etc consume Random_Pick(0,2) per 14-tick cycle. Guard/Hunt/AreaGuard handle their own jitter.

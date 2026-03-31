@@ -1605,6 +1605,14 @@ export class Game {
     // Update fog of war
     this.updateFogOfWar();
 
+    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI. At tick 1 (Frame 0 equivalent),
+    // fire immediate triggers (TEVENT_TIME data=0) to spawn reinforcements and create teams
+    // before entity processing. This ensures spawned entities (e.g., TRAN transport) are
+    // processed in the same tick and RNG calls are in the correct sequence.
+    if (this.tick === 1) {
+      this.processTriggers();
+    }
+
     // Update occupancy grid and assign infantry sub-cell positions
     // C++ cell.h: each cell has 5 sub-positions (CENTER + 4 corners) for infantry,
     // plus Vehicle/Building/Monolith flags that block entire cell.
