@@ -901,7 +901,7 @@ export function updateBaseRebuild(ctx: AIContext): void {
     return;
   }
 
-  if (ctx.tick % 75 !== 0) return;
+  if ((ctx.tick - 1) % 75 !== 0) return; // C++ parity: Frame starts at 0, TS tick starts at 1
 
   const aiHousesWithFact = new Set<House>();
   for (const s of ctx.structures) {
@@ -1163,7 +1163,7 @@ export function aiCountForce(ctx: AIContext, house: House): { units: number; inf
  * entirely — ensures accurate distance-based scoring (C++ house.cpp:4639-4642).
  */
 export function updateDesignatedEnemy(ctx: AIContext): void {
-  if (ctx.tick % 60 !== 0) return;
+  if ((ctx.tick - 1) % 60 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     // Need a base to compute distances from
@@ -1315,7 +1315,7 @@ export function updateAIIQGates(ctx: AIContext): void {
 
 /** AI strategic planner -- phase transitions every 150 ticks (~10s) */
 export function updateAIStrategicPlanner(ctx: AIContext): void {
-  if (ctx.tick % 150 !== 0) return;
+  if ((ctx.tick - 1) % 150 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (state.iq === 0) continue;
@@ -1443,7 +1443,7 @@ export function updateAIConstruction(ctx: AIContext): void {
   // buildDelay is in minutes — converted to ticks as construction interval floor.
   const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
   const buildInterval = Math.max(90, Math.floor(mods.buildDelay * 60 * GAME_TICKS_PER_SEC));
-  if (ctx.tick % buildInterval !== 0) return;
+  if ((ctx.tick - 1) % buildInterval !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (!state.productionEnabled) continue;
@@ -1563,7 +1563,7 @@ export function getAIProductionPick(ctx: AIContext, house: House, category: 'inf
 
 /** Update AI harvester counts and force-produce if needed */
 export function updateAIHarvesters(ctx: AIContext): void {
-  if (ctx.tick % 60 !== 0) return;
+  if ((ctx.tick - 1) % 60 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     state.harvesterCount = 0;
@@ -1592,7 +1592,7 @@ export function updateAIHarvesters(ctx: AIContext): void {
 
 /** AI attack group management -- accumulate pool and launch coordinated attacks */
 export function updateAIAttackGroups(ctx: AIContext): void {
-  if (ctx.tick % 120 !== 0) return;
+  if ((ctx.tick - 1) % 120 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (!state.productionEnabled) continue;
@@ -1776,7 +1776,7 @@ export function aiRecallDefenders(ctx: AIContext, house: House, state: AIHouseSt
 
 /** AI defense -- detect base attacks and rally defenders */
 export function updateAIDefense(ctx: AIContext): void {
-  if (ctx.tick % 45 !== 0) return;
+  if ((ctx.tick - 1) % 45 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (!state.underAttack) continue;
@@ -1817,7 +1817,7 @@ export function updateAIDefense(ctx: AIContext): void {
 
 /** AI retreat -- damaged units fall back to repair depot or base */
 export function updateAIRetreat(ctx: AIContext): void {
-  if (ctx.tick % 30 !== 0) return;
+  if ((ctx.tick - 1) % 30 !== 0) return;
 
   const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
   const retreatPercent = mods.retreatHpPercent;
@@ -1900,7 +1900,7 @@ export function updateAIRepair(ctx: AIContext): void {
   // C++ RepairDelay is in minutes; convert to ticks (repairDelay * 60 * GAME_TICKS_PER_SEC)
   // Minimum interval = 15 ticks (original rate), scaled up by repairDelay
   const repairInterval = Math.max(15, Math.floor(mods.repairDelay * 60 * GAME_TICKS_PER_SEC));
-  if (ctx.tick % repairInterval !== 0) return;
+  if ((ctx.tick - 1) % repairInterval !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     if (state.iq < 1) continue;
@@ -1931,7 +1931,7 @@ export function updateAIRepair(ctx: AIContext): void {
  *  C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty)
  *  rules.ini [IQ] RepairSell=1 (rules.cpp default was 3) */
 export function updateAISellDamaged(ctx: AIContext): void {
-  if (ctx.tick % 75 !== 0) return;
+  if ((ctx.tick - 1) % 75 !== 0) return; // C++ parity: Frame starts at 0, TS tick starts at 1
 
   for (const [house, state] of ctx.aiStates) {
     if (state.iq < 1) continue;
@@ -1969,7 +1969,7 @@ export function updateAISellDamaged(ctx: AIContext): void {
 
 /** AI passive income -- AI houses earn credits from refineries */
 export function updateAIIncome(ctx: AIContext): void {
-  if (ctx.tick % 450 !== 0) return;
+  if ((ctx.tick - 1) % 450 !== 0) return;
   for (const s of ctx.structures) {
     if (!s.alive || s.type !== 'PROC') continue;
     if (ctx.isAllied(s.house, ctx.playerHouse)) continue;
@@ -1983,7 +1983,7 @@ export function updateAIIncome(ctx: AIContext): void {
 /** AI army building -- AI houses produce units when they have credits and barracks/factory */
 export function updateAIProduction(ctx: AIContext): void {
   const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-  if (ctx.tick % mods.productionInterval !== 0) return;
+  if ((ctx.tick - 1) % mods.productionInterval !== 0) return;
 
   // For ant missions, respect ant cap using old random production
   if (ctx.scenarioId.startsWith('SCA')) {
@@ -2286,7 +2286,7 @@ function spawnTeam(ctx: AIContext, teamIdx: number, house: House): void {
  */
 export function updateAIAutocreateTeams(ctx: AIContext): void {
   if (!ctx.autocreateEnabled) return;
-  if (ctx.tick % 120 !== 0) return;
+  if ((ctx.tick - 1) % 120 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
     // C++ house.cpp:988: autocreate only fires when IsAlerted is true for this house
