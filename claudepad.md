@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-03-31T01:30Z — 39 Fixes: Structural RNG Calls + Agent Hang Identified
+- **Replaced dummy calls with structural replicas**: House attack timers (nextInRange(450,1800) × 12) + unit facings (nextInRange(0,255) × 4) + harvest jitter. No more magic numbers.
+- **Agent hang root cause**: Structural init calls happen during scenario load, changing the seed for load-time RNG consumers (scatter positions, etc.), which prevents the agent harness from initializing. Fix: move structural calls AFTER scenario load but BEFORE first game tick (in AntGame.tsx after game.start(), before installHarness()).
+- **idleAnimTimer=2**: Matches C++ Doing=DO_NOTHING gate — infantry don't Random_Animate on first tick. Timer decrements in updateEntity (all missions), not just updateGuard.
+- **Harvest mission jitter added**: C++ Mission_Harvest returns Normal_Delay+Random_Pick(0,2). TS was consuming zero. Added missionCycleTimer with 14-tick rate.
+
 ## 2026-03-31T00:30Z — 38 Fixes: Doing=DO_NOTHING Root Cause Found
 - **Root cause of first-tick gap**: C++ infantry.cpp:178 initializes `Doing=DO_NOTHING`. `Is_Ready_To_Random_Animate` (line 4112) requires `Doing==DO_STAND_GUARD|READY`. At tick 0, no infantry has entered idle animation → Random_Animate NEVER fires. TS was firing it for all infantry (idleAnimTimer=0). Fixed with idleAnimTimer=2 (skips first tick, matches C++ Doing gate).
 - **IdleTimer moved to updateEntity**: Now decrements every tick for all missions (matching C++ TechnoClass::AI), not just inside updateGuard.
