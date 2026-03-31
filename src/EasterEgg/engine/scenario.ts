@@ -2591,6 +2591,11 @@ export function executeTriggerAction(
           result.spawned.push(entity);
         }
       }
+      // C++ team.cpp:627-652: When a reinforcement team activates (IsForcedActive),
+      // TeamClass::AI picks a gesture via Percent_Chance(50) → Scen.RandomNumber(0, 99).
+      // This consumes 1 RNG call per team activation for infantry gesture selection.
+      ScenarioRandom.nextInRange(0, 99); // C++ Percent_Chance(50)
+
       // Auto-load cargo into transport when team has both (C++ reinf.cpp:217-254)
       // In C++, ALL non-transport team members are loaded — infantry, tanks, MCVs, etc.
       if (transport && cargo.length > 0) {
