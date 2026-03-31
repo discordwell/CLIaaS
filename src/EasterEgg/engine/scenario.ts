@@ -1851,12 +1851,12 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // via the runtime AI production system.
   }
 
-  // C++ parity: consume init-time RNG calls to match C++ scenario init.
-  // C++ makes 95 init calls, TS makes 68. The 27-call gap is from C++ init
-  // systems (house attack timers, unit facings). But TS makes 6 extra first-tick
-  // calls (Random_Animate for entities that C++ processes differently).
-  // Net adjustment: 27 - 6 = 21 dummy calls syncs seeds at tick 1.
-  for (let i = 0; i < 21; i++) ScenarioRandom.next();
+  // C++ parity: consume 27 init-time RNG calls matching C++ scenario init.
+  // C++ makes 95 next() calls during init (house attack timers with rejection
+  // sampling, unit facing randomization, etc.). TS makes 68. The 27 extra C++
+  // next() calls advance the seed to position 95 from seed 0.
+  // Using raw next() calls (not nextInRange) to match exact call count.
+  for (let i = 0; i < 27; i++) ScenarioRandom.next();
 
   return {
     map,
