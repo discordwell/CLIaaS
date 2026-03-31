@@ -3426,11 +3426,18 @@ export class Game {
     // In TS, individual handlers have their own rate-limiting (lastGuardScan, etc.)
     // but missions without internal gating (ATTACK, MOVE) need centralized jitter.
     // Consume the jitter RNG here for missions that DON'T have their own scan delay.
-    // DISABLED: centralized mission jitter was consuming 6 extra RNG calls at tick 0
-    // because entities briefly switch to ATTACK during guard inline fire.
-    // TODO: only consume jitter for entities that STAY on ATTACK/MOVE across ticks,
-    // not for the brief ATTACK→GUARD transition during guard inline fire.
-    // if (entity.mission === Mission.ATTACK || ...) { ... }
+    // C++ mission.cpp:232 — all mission handlers return Normal_Delay+Random_Pick(0,2).
+    // Guard, Hunt, and Area Guard already consume jitter in their own scan code.
+    // Other missions (ATTACK, MOVE, HARVEST, etc.) need centralized jitter.
+    if (entity.mission !== Mission.GUARD && entity.mission !== Mission.HUNT &&
+        entity.mission !== Mission.AREA_GUARD && entity.mission !== Mission.SLEEP &&
+        entity.mission !== Mission.DIE) {
+      if (entity.missionCycleTimer <= 0) {
+        ScenarioRandom.nextInRange(0, 2); // C++ mission handler return jitter
+        entity.missionCycleTimer = 14;    // default MissionControl Rate → 14 ticks
+      }
+      entity.missionCycleTimer--;
+    }
 
     switch (entity.mission) {
       case Mission.MOVE:
@@ -3462,13 +3469,7 @@ export class Game {
         this.updateAttack(entity);
         break;
       case Mission.HARVEST:
-        // C++ unit.cpp:2727: Mission_Harvest returns Normal_Delay+Random_Pick(0,2)
-        // Consumes 1 RNG jitter call per harvest cycle (~45 ticks)
-        if (entity.missionCycleTimer <= 0) {
-          ScenarioRandom.nextInRange(0, 2);
-          entity.missionCycleTimer = 14; // MissionControl default Rate=.016 → 900*0.016=14
-        }
-        entity.missionCycleTimer--;
+        // Jitter handled by centralized mission jitter above
         entity.animState = AnimState.IDLE;
         break;
       case Mission.UNLOAD:
