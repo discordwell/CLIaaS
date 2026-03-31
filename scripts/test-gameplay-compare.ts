@@ -19,7 +19,7 @@ const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
 const SEED = 0;
 
 // Tick checkpoints — passive observation, no commands
-const CHECKPOINTS = [0, 1, 50, 100, 200, 300, 750, 1500];
+const CHECKPOINTS = [0, 50, 100, 200, 300, 450, 750, 1500];
 
 // ── Helpers ──────────────────────────────────────────────────
 
