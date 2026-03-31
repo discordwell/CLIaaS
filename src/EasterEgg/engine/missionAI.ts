@@ -703,8 +703,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity): void {
     return;
   }
 
-  // C++ IdleTimer countdown — decrements every tick (techno.cpp:5326)
-  if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
+  // IdleTimer decremented in index.ts updateEntity (runs every tick for all missions)
 
   // C++ Arm countdown — weapon cooldown decrements every tick regardless of mission.
   // In updateAttack this only decrements while moving toward target (line 248),

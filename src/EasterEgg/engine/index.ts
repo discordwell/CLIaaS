@@ -3396,6 +3396,9 @@ export class Game {
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
     }
 
+    // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
+    if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
+
     // C++ mission.cpp:232 — MissionClass::AI gates the mission handler via Timer.
     // Timer counts down each tick. Handler only runs when Timer == 0.
     // Handler returns Normal_Delay() + Random_Pick(0,2) which becomes the new Timer.
