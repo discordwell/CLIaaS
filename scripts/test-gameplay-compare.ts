@@ -368,8 +368,24 @@ test.describe(`State Parity: ${SCENARIO} seed=0`, () => {
     });
     console.log(`WASM start tick: ${wasmStartTick}`);
 
-    // Get TS start tick (AntGame.tsx:684 does game.step(1) before harness install,
-    // so TS starts at tick 1 while WASM starts at tick 0).
+    // Read WASM init seed and sync TS to match (auto-discovery, no hardcoded table needed)
+    const wasmInitSeed = await wasmPage.evaluate(() => {
+      const Module = (window as unknown as { Module: { ccall: Function } }).Module;
+      const state = JSON.parse(Module.ccall('agent_get_state', 'string', [], []) as string);
+      return state.rngState as number;
+    });
+    console.log(`WASM init seed: ${wasmInitSeed}`);
+
+    // Force TS ScenarioRandom to the same seed (bypasses consumeInitRNG lookup table)
+    await tsPage.evaluate((targetSeed: number) => {
+      const w = window as unknown as { __agentState: () => Record<string, unknown> };
+      // Access ScenarioRandom via the game's exposed state
+      const state = w.__agentState();
+      // Set seed directly through the agent harness
+      (window as unknown as Record<string, unknown>).__syncRngSeed?.(targetSeed);
+    }, wasmInitSeed);
+
+    // Get TS start tick
     const tsStartTick = await tsPage.evaluate(() => {
       return (window as unknown as { __agentState: () => { tick: number } }).__agentState().tick;
     });

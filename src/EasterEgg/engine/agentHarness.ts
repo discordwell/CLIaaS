@@ -745,6 +745,14 @@ export function installHarness(game: Game): void {
     return { results, state: serializeState(game) } satisfies StepResult;
   };
 
+  // Sync ScenarioRandom seed to match C++ WASM (used by parity test harness).
+  // Directly sets the seed and resets debug log — no need to advance through the LCG.
+  w.__syncRngSeed = (targetSeed: number) => {
+    ScenarioRandom.seed = targetSeed >>> 0;
+    ScenarioRandom.debugLog = [];
+    ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
+  };
+
   w.__agentDebug = () => {
     game.debugTriggers = true;
     // Access private triggers via cast
