@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-04-01T06:00Z — Full Campaign Parity: 100% RNG Match Across 12 Scenarios
+- **14 Soviet missions tested**, 12 loaded successfully (SCG05EA/SCG14EA WASM timeout).
+- **RNG seeds: 100% match on all 12** — every WASM gameplay call produces identical seed in TS.
+- **Entity counts: perfect on 9/12** — SCG01-04, SCG06, SCG08, SCG11-13 all match units+enemies exactly.
+- **Near-perfect on 2/12** — SCG07EA (84/85 enemies), SCG10EA (82/83 enemies): 1-entity diff from trigger timing.
+- **1 outlier** — SCG09EA (3/13 units, 40/30 enemies): complex trigger chain creates reinforcements differently.
+- **TACTION_CREATE_TEAM fix**: C++ Create_One_Of() recruits EXISTING units, doesn't spawn new ones. TS was spawning entities for both CREATE_TEAM and REINFORCEMENTS. Separated them — CREATE_TEAM is now a no-op (no team AI system). Fixed +10 enemy excess on SCG06EA, +2 on SCG04EA, etc.
+- **Auto seed sync**: __syncRngSeed directly sets ScenarioRandom.seed from WASM init state. No per-scenario lookup table needed for testing.
+- **House-grouped entity order**: entities sorted by C++ house enum at load (Spain=0→Greece=1→USSR=2→England=3). Matched C++ Logic layer insertion order — closed the 3-call rejection sampling gap to just 1 extra call.
+
 ## 2026-03-31T22:00Z — RNG Parity: 64/64 Seeds Match, 64/67 Raw Calls (95.5%)
 - **32-call gap fully traced and closed**: C++ RNG source tags (10-13 per object type) + per-section tracing identified every call source.
 - **Structure mission timers**: Each building runs Mission_Guard with Random_Pick(0,2) jitter. rules.ini Guard Rate=.050 (Normal_Delay=45), AARate=.016 (AA_Delay=14).
