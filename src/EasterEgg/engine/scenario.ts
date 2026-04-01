@@ -2500,8 +2500,14 @@ export function executeTriggerAction(
     case TACTION_NONE:
       break;
 
-    case TACTION_REINFORCEMENTS:
-    case TACTION_CREATE_TEAM: {
+    case TACTION_CREATE_TEAM:
+      // C++ TeamTypeClass::Create_One_Of() — creates a team OBJECT that recruits
+      // EXISTING units from the map. Does NOT spawn new entities. The team AI then
+      // manages the recruited units (move to waypoint, attack, etc.).
+      // Without a full team AI system, this is a no-op for now.
+      break;
+
+    case TACTION_REINFORCEMENTS: {
       const team = teamTypes[action.team];
       if (!team) break;
 
