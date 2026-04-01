@@ -5827,7 +5827,11 @@ export class Game {
       applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
       // C++ parity: if reinforcement units spawned on impassable terrain (water, rock),
       // relocate to nearest passable cell. C++ uses Nearest_Free_Cell() in reinf.cpp.
+      // Aircraft skip this check — they spawn OUTSIDE the map boundary intentionally
+      // and fly into the map (C++ reinf.cpp:467 unlimbo at Calculated_Cell which is
+      // 1 cell outside the boundary).
       for (const entity of result.spawned) {
+        if (entity.isAirUnit) continue; // aircraft spawn outside map boundary
         const cell = worldToCell(entity.pos.x, entity.pos.y);
         const naval = entity.stats.isVessel;
         const passable = naval ? this.map.isWaterPassable(cell.cx, cell.cy) : this.map.isTerrainPassable(cell.cx, cell.cy);
