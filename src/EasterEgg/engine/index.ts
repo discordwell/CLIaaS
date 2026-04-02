@@ -896,6 +896,8 @@ export class Game {
 
   private get _aircraftCtx(): AircraftContext {
     return {
+      entities: this.entities,
+      entityById: this.entityById,
       structures: this.structures,
       map: this.map,
       unitsLeftMap: this.unitsLeftMap,
@@ -3541,8 +3543,11 @@ export class Game {
         }
         break;
       case Mission.UNLOAD:
-        // Transport unload / MAD deploy — handled by existing deploy/unload code
+        // C++ aircraft.cpp:1215 — Mission_Unload falls through to Normal_Delay+Random_Pick(0,2)
         entity.animState = AnimState.IDLE;
+        if (missionTimerFired) {
+          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        }
         break;
       case Mission.RETREAT:
         // Move to nearest map edge and exit the map

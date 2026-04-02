@@ -2582,13 +2582,23 @@ export function executeTriggerAction(
           if (CIVILIAN_UNIT_TYPES.has(member.type)) {
             entity.invulnTick = 120;
           }
-          // Aircraft-specific: start airborne, fly toward team origin
+          // Aircraft-specific: start airborne
           if (stats.isAircraft) {
-            entity.aircraftState = 'flying';
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
             entity.animState = AnimState.WALK;
-            entity.mission = Mission.MOVE;
-            entity.moveTarget = { x: world.x, y: world.y };
+            // C++ parity: transports with UNLOAD mission use Mission_Unload state machine
+            // (SEARCH_FOR_LZ → FLY_TO_LZ → LAND → UNLOAD → TAKE_OFF). The SEARCH_FOR_LZ
+            // state delays 14-16 ticks before starting controlled approach, during which
+            // the TRAN flies at full speed in its initial facing (creating the curved path).
+            if (entity.isTransport && hasUnloadMission) {
+              entity.aircraftState = 'unload_search';
+              entity.mission = Mission.UNLOAD;
+              entity.moveTarget = { x: world.x, y: world.y }; // LZ = team origin
+            } else {
+              entity.aircraftState = 'flying';
+              entity.mission = Mission.MOVE;
+              entity.moveTarget = { x: world.x, y: world.y };
+            }
           } else {
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.

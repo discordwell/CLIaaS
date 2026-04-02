@@ -328,7 +328,8 @@ export class Entity {
   ammo = -1;                    // -1 = unlimited
   maxAmmo = -1;
   landedAtStructure = -1;       // structure index, -1 = airborne
-  aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' = 'idle';
+  aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' | 'unload_search' | 'unload_fly' | 'unload_land' | 'unload_eject' = 'idle';
+  _unloadSearchTicks = 0; // C++ SEARCH_FOR_LZ delay counter
   rearmTimer = 0;
   attackRunPhase: 'flyToTarget' | 'dropBombs' | 'regroup' = 'flyToTarget';
   circleBreakTimer = 0;

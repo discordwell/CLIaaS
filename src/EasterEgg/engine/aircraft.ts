@@ -151,6 +151,8 @@ export function computeRearmDelay(powerFraction: number): number {
 
 /** Context object providing aircraft functions access to game state and callbacks */
 export interface AircraftContext {
+  entities: Entity[];
+  entityById: Map<number, Entity>;
   structures: MapStructure[];
   map: GameMap;
 
@@ -525,6 +527,102 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       } else {
         // No mission — return to base
         entity.aircraftState = 'returning';
+      }
+      return true;
+    }
+
+    // ── C++ AircraftClass::Mission_Unload state machine (aircraft.cpp:1068-1216) ──
+    // Helicopters with cargo: SEARCH_FOR_LZ → FLY_TO_LZ → LAND → UNLOAD → TAKE_OFF
+
+    case 'unload_search': {
+      // C++ SEARCH_FOR_LZ (lines 1092-1115): validate landing zone.
+      // Returns Normal_Delay + Random_Pick(0,2) = 14-16 ticks via fallthrough at line 1215.
+      // During this delay, the TRAN flies at full speed in its initial facing WITHOUT
+      // any course correction (Process_Fly_To hasn't been called yet). This is what creates
+      // the characteristic curved approach — the TRAN drifts in its spawn facing before
+      // the controlled FLY_TO_LZ phase adjusts its course.
+      //
+      // We use a simple counter: drift for ~14 ticks (matching Normal_Delay) then switch
+      // to unload_fly. The missionTimer in the entity loop handles the RNG consumption.
+      if (!entity._unloadSearchTicks) entity._unloadSearchTicks = 0;
+      entity._unloadSearchTicks++;
+
+      // Apply movement in current facing (C++ Physics runs every tick even during SEARCH_FOR_LZ)
+      if (entity.facing256 >= 0) {
+        const speed = ctx.movementSpeed(entity);
+        const maxSpeedLeptons = Math.floor(speed * entity.speedBias / LP);
+        const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+        const actual = speedAdd + entity.speedAccum;
+        const remainder = actual % PIXEL_LEPTON_W;
+        entity.speedAccum = remainder;
+        const moveLeptons = actual - remainder;
+        if (moveLeptons > 0) {
+          const f = entity.facing256;
+          const dxL = (moveLeptons * COS_TABLE_256[f]) >> 7;
+          const dyL = -((moveLeptons * SIN_TABLE_256[f]) >> 7);
+          entity.pos.x += dxL * LP;
+          entity.pos.y += dyL * LP;
+        }
+      }
+
+      // Transition after ~14 ticks (C++ Normal_Delay for UNLOAD mission)
+      if (entity._unloadSearchTicks >= 14) {
+        entity._unloadSearchTicks = 0;
+        entity.aircraftState = 'unload_fly';
+      }
+      return true;
+    }
+
+    case 'unload_fly': {
+      // C++ FLY_TO_LZ (lines 1120-1138): fly toward LZ with slowdown.
+      if (!entity.moveTarget) { entity.aircraftState = 'returning'; return true; }
+      const arrived = aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+      if (arrived) {
+        entity.pos.x = entity.moveTarget.x;
+        entity.pos.y = entity.moveTarget.y;
+        entity.aircraftState = 'unload_land';
+      }
+      return true;
+    }
+
+    case 'unload_land': {
+      // C++ LAND_ON_LZ (lines 1144-1152): descend. Height decrements each tick.
+      if (entity.flightAltitude > 0) {
+        entity.flightAltitude--;
+      }
+      if (entity.flightAltitude <= 0) {
+        entity.flightAltitude = 0;
+        entity.aircraftState = 'unload_eject';
+      }
+      return true;
+    }
+
+    case 'unload_eject': {
+      // C++ UNLOAD_PASSENGERS (lines 1158-1187): eject one passenger per tick.
+      if (entity.passengers.length > 0) {
+        const passenger = entity.passengers.shift()!;
+        // Place passenger at helicopter's position
+        passenger.alive = true;
+        passenger.pos.x = entity.pos.x;
+        passenger.pos.y = entity.pos.y;
+        passenger.mission = Mission.GUARD;
+        passenger.transportRef = null;
+        passenger.inLimbo = false;
+        ctx.entities.push(passenger);
+        ctx.entityById.set(passenger.id, passenger);
+      }
+      if (entity.passengers.length === 0) {
+        // All passengers unloaded — enter idle or retreat
+        entity.moveTarget = null;
+        if (entity.isALoaner) {
+          entity.mission = Mission.RETREAT;
+          entity.aircraftState = 'flying';
+        } else {
+          entity.mission = ctx.idleMission(entity);
+          entity.aircraftState = 'returning';
+        }
+        // Take off
+        entity.flightAltitude = 1; // start climbing
       }
       return true;
     }
