@@ -5087,7 +5087,9 @@ export class Game {
     const speedBias = entity.stats.isAircraft
       ? this.getAirspeedBias(entity.house)
       : this.getGroundspeedBias(entity.house);
-    const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
+    // C++ infantry.cpp:4019 — infantry moves at full speed regardless of terrain type.
+    // Only vehicles (DriveClass) apply terrain speed modifiers via Speed_Boost.
+    const terrainMult = entity.stats.isInfantry ? 1.0 : this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
     let baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
 
     // C++ infantry.cpp:3996-3997: canine 2x sprint when navigating toward a target

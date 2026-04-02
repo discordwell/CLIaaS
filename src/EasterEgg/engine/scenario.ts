@@ -9,6 +9,7 @@ import {
   House, Mission, UnitType, AnimState, Dir,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
+  SUB_CELL_OFFSETS,
 } from './types';
 import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
@@ -1678,7 +1679,10 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     if (!unitType) continue;
     const pos = cellIndexToPos(inf.cell);
     const world = cellToWorld(pos.cx, pos.cy);
-    const entity = new Entity(unitType, toHouse(inf.house), world.x, world.y);
+    // C++ infantry spawn at sub-cell position within the cell, not cell center.
+    // Sub-cell offsets: 0=center, 1=top-left(-7,-7), 2=top-right(+7,-7), 3=bottom-left(-7,+7), 4=bottom-right(+7,+7)
+    const subOff = SUB_CELL_OFFSETS[inf.subCell] ?? SUB_CELL_OFFSETS[0];
+    const entity = new Entity(unitType, toHouse(inf.house), world.x + subOff.x, world.y + subOff.y);
     entity.facing = Math.floor(inf.facing / 32) % 8;
     entity.desiredFacing = entity.facing;
     entity.bodyFacing32 = entity.facing * 4;
