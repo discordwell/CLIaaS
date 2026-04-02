@@ -557,9 +557,10 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // in its initial facing before the FLY_TO_LZ controlled approach starts.
       entity._unloadSearchTicks++;
 
-      // No movement for first 7 ticks (C++ SpeedAdd=0 from constructor)
-      // Then drift at base speed in current facing for remaining search ticks
-      if (entity._unloadSearchTicks > 7 && entity.facing256 >= 0) {
+      // C++ AircraftClass::AI sets speed when at FLIGHT_LEVEL — drift begins
+      // immediately in initial facing. Process_Fly_To hasn't been called yet,
+      // so no course correction. Drift at full speed from tick 1.
+      if (entity.facing256 >= 0) {
         const speed = ctx.movementSpeed(entity);
         const maxSpeedLeptons = Math.floor(speed * entity.speedBias / LP);
         const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);

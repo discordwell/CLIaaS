@@ -20,7 +20,7 @@ const SEED = 0;
 
 // Tick checkpoints — passive observation, no commands
 const SCENARIO = process.env.PARITY_SCENARIO || 'SCG01EA';
-const CHECKPOINTS = [0, 1, 5, 10, 20, 50, 100];
+const CHECKPOINTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 50];
 
 // ── Helpers ──────────────────────────────────────────────────
 
