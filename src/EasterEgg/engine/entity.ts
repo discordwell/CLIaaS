@@ -925,7 +925,7 @@ export class Entity {
       // actual = maxspeed * min(movespeed, 256) / 256
       const sinFactor = isDiagonal ? 90 : 127;
       const baseMaxspeed = Math.floor(this.stats.speed * MPH_TO_PX * this.speedBias / LP);
-      // C++ movespeed = Distance(Head_To_Coord()) — distance to path waypoint in leptons
+      // C++ movespeed = Distance(Head_To_Coord()) in leptons
       const movespeedRaw = distLeptonsTotal;
       // Canine sprint doubles movespeed (already in effectiveSpeed, extract it)
       const isCanineSprinting = this.stats.isCanine && (this.target?.alive || this.moveTarget || this.path.length > 0);
