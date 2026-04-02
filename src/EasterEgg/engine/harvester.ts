@@ -35,7 +35,7 @@ export interface HarvesterContext {
 
 /** Check if a mission is an idle/arrival mission (GUARD or AREA_GUARD) */
 function isIdleMission(mission: Mission): boolean {
-  return mission === Mission.GUARD || mission === Mission.AREA_GUARD;
+  return mission === Mission.GUARD || mission === Mission.AREA_GUARD || mission === Mission.HARVEST;
 }
 
 // ---------------------------------------------------------------------------
