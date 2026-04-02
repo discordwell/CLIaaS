@@ -6,7 +6,7 @@ import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
   type WarheadProps, type WarheadType, type ArmorType,
   Dir, Mission, AnimState, House, UnitType, Stance,
-  UNIT_STATS, WEAPON_STATS, CELL_SIZE,
+  UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
@@ -912,11 +912,29 @@ export class Entity {
       const fdy = DIR_DY[face];
       const isDiagonal = fdx !== 0 && fdy !== 0;
 
-      // maxspeed = _Scale_To_256(Speed), integer leptons
+      // C++ infantry.cpp:3990-4019:
+      //   movespeed = Distance(Head_To_Coord());  // leptons to waypoint
+      //   if (IsDog && TarCom) movespeed *= 2;     // canine sprint already in effectiveSpeed
+      //   Coord_Move(dir, maxspeed * fixed(movespeed, 256));
+      //
+      // effectiveSpeed already includes canine sprint (2x). To match C++, we need
+      // to separate maxspeed (base _Scale_To_256) from the proportional factor.
+      // effectiveSpeed = stats.speed * MPH_TO_PX * speedBias * (2 if canine)
+      // maxspeed = floor(stats.speed * MPH_TO_PX * speedBias / LP)  [without sprint]
+      // movespeed = dist_to_waypoint_leptons * (2 if canine)
+      // actual = maxspeed * min(movespeed, 256) / 256
       const sinFactor = isDiagonal ? 90 : 127;
-      const maxspeed = Math.floor(effectiveSpeed / LP);
-      // C++ Coord_Move: per-axis = (maxspeed * sin/cos_table) >> 7
-      const axisLeptons = (maxspeed * sinFactor) >> 7;
+      const baseMaxspeed = Math.floor(this.stats.speed * MPH_TO_PX * this.speedBias / LP);
+      // C++ movespeed = Distance(Head_To_Coord()) — distance to path waypoint in leptons
+      const movespeedRaw = distLeptonsTotal;
+      // Canine sprint doubles movespeed (already in effectiveSpeed, extract it)
+      const isCanineSprinting = this.stats.isCanine && (this.target?.alive || this.moveTarget || this.path.length > 0);
+      // C++ fixed(movespeed, 256) = movespeed/256 — no cap, can exceed 1.0 with sprint.
+      // Head_To_Coord() is the next cell center, so movespeed ≤ ~362 (diagonal cell).
+      // C++ has no cap — fixed(movespeed, 256) can exceed 1.0
+      const movespeed = movespeedRaw * (isCanineSprinting ? 2 : 1);
+      const actualSpeed = Math.floor(baseMaxspeed * movespeed / 256);
+      const axisLeptons = (actualSpeed * sinFactor) >> 7;
 
       // Integer lepton movement — write to leptonX/Y, derive pos
       const targetLeptonX = Math.round(target.x / LP);

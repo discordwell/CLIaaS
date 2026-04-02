@@ -3494,28 +3494,28 @@ export class Game {
         }
         break;
       case Mission.HUNT:
-        // C++ foot.cpp:654-702: Mission_Hunt — target scan only when timer fires
+        // C++ foot.cpp:654-702: Mission_Hunt — target scan when timer fires
         if (missionTimerFired) {
           this.updateHunt(entity);
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-        } else {
-          // Between scans: continue moving toward target (C++ Approach_Target runs independently)
-          this._runMissionAI(ctx => {
-            if (entity.target?.alive && !entity.inRange(entity.target)) {
-              const targetCell = { cx: Math.floor(entity.target.pos.x / CELL_SIZE), cy: Math.floor(entity.target.pos.y / CELL_SIZE) };
-              if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
-                entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
-                entity.pathIndex = 0;
-              }
-              if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-                const wp = { x: entity.path[entity.pathIndex].cx * CELL_SIZE + CELL_SIZE / 2, y: entity.path[entity.pathIndex].cy * CELL_SIZE + CELL_SIZE / 2 };
-                if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
-              } else {
-                entity.moveToward(entity.target.pos, this.movementSpeed(entity));
-              }
-            }
-          });
         }
+        // C++ Approach_Target runs EVERY tick (not gated by mission timer).
+        // Movement toward target is independent of the hunt scan interval.
+        this._runMissionAI(ctx => {
+          if (entity.target?.alive && !entity.inRange(entity.target)) {
+            const targetCell = { cx: Math.floor(entity.target.pos.x / CELL_SIZE), cy: Math.floor(entity.target.pos.y / CELL_SIZE) };
+            if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
+              entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
+              entity.pathIndex = 0;
+            }
+            if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+              const wp = { x: entity.path[entity.pathIndex].cx * CELL_SIZE + CELL_SIZE / 2, y: entity.path[entity.pathIndex].cy * CELL_SIZE + CELL_SIZE / 2 };
+              if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
+            } else {
+              entity.moveToward(entity.target.pos, this.movementSpeed(entity));
+            }
+          }
+        });
         break;
       case Mission.GUARD:
       case Mission.STICKY:
