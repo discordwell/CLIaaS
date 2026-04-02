@@ -287,21 +287,24 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   }
 
   // Step 2: C++ Process_Fly_To(true, NavCom) approach slowdown within 3 cells.
-  //   int speed = min(distance, 0x0300);        // cap at 768 leptons (~3 cells)
-  //   speed = Bound(speed/3, 0x0020, 0x00FF);   // clamp to [32, 255] out of 255 max
-  // Convert to a fraction: at 3+ cells → 1.0, at ~0.375 cells → 0x20/0xFF ≈ 0.125
-  const distInCells = dist / CELL_SIZE;
-  let speedFraction = 1.0;
-  if (distInCells < 3.0) {
-    // Distance in leptons equivalent: distInCells * 256
-    const distLeptons = distInCells * 256;
-    const cappedLeptons = Math.min(distLeptons, 0x0300); // cap at 768 (3 cells)
-    const rawSpeed = Math.floor(cappedLeptons / 3);
-    const clampedSpeed = Math.max(0x20, Math.min(0xFF, rawSpeed));
-    speedFraction = clampedSpeed / 0xFF;
+  // Speed is only updated when Process_Fly_To runs (every 5 ticks far, 1 tick close).
+  // Between calls, the aircraft moves at the LAST SET speed.
+  if (updateDesired) {
+    const distInCells = dist / CELL_SIZE;
+    let speedFraction = 1.0;
+    if (distInCells < 3.0) {
+      const distLeptonsVal = distInCells * 256;
+      const cappedLeptons = Math.min(distLeptonsVal, 0x0300);
+      const rawSpeed = Math.floor(cappedLeptons / 3);
+      const clampedSpeed = Math.max(0x20, Math.min(0xFF, rawSpeed));
+      speedFraction = clampedSpeed / 0xFF;
+    }
+    // C++ Process_Fly_To: Set_Speed(0) when distance < 16 leptons
+    if (dist / LP < 16) speedFraction = 0;
+    entity.aircraftSpeedFraction = speedFraction;
   }
 
-  const effectiveSpeed = baseSpeed * entity.speedBias * speedFraction;
+  const effectiveSpeed = baseSpeed * entity.speedBias * (entity.aircraftSpeedFraction ?? 1.0);
 
   // Lepton accumulator (C++ fly.cpp:62-106) — same math as entity.moveToward
   const maxSpeedLeptons = Math.floor(effectiveSpeed / LP);

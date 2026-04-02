@@ -999,12 +999,15 @@ export const CIVILIAN_UNIT_TYPES = new Set<string>([
 
 // Infantry sub-cell positions within a cell (0=center, 1-4=corners)
 // Pixel offsets from cell center for each sub-position
+// C++ cell.h sub-cell positions in lepton space (256×256 per cell):
+// CENTER=(128,128), NW=(64,64), NE=(192,64), SW=(64,192), SE=(192,192)
+// Pixel offset from center: (pos-128)/256 * CELL_SIZE = ±(64/256*24) = ±6
 export const SUB_CELL_OFFSETS: { x: number; y: number }[] = [
-  { x: 0, y: 0 },     // 0: center
-  { x: -7, y: -7 },   // 1: top-left
-  { x: 7, y: -7 },    // 2: top-right
-  { x: -7, y: 7 },    // 3: bottom-left
-  { x: 7, y: 7 },     // 4: bottom-right
+  { x: 0, y: 0 },     // 0: center (128,128)
+  { x: -6, y: -6 },   // 1: NW / top-left (64,64)
+  { x: 6, y: -6 },    // 2: NE / top-right (192,64)
+  { x: -6, y: 6 },    // 3: SW / bottom-left (64,192)
+  { x: 6, y: 6 },     // 4: SE / bottom-right (192,192)
 ];
 
 // === Entity Mission States (AI1: full C++ 22-mission system from mission.h) ===
