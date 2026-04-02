@@ -266,13 +266,23 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   // behavior both in-game and in unit tests that don't simulate the full game loop.
   entity.rotTickedThisFrame = false;
 
-  // Use 256-step facing for aircraft if active (C++ PrimaryFacing is DirType 0-255)
+  // C++ FLY_TO_LZ: Process_Fly_To runs every 5 ticks when far (dist>=256 leptons),
+  // every 1 tick when close. It sets desired facing. Between calls, Rotation_AI
+  // rotates toward the LAST SET desired. We replicate this update interval.
+  // C++ Process_Fly_To runs every 5 ticks when far, 1 tick when close
+  const distLeptons = dist / LP;
+  const flyToInterval = distLeptons >= 256 ? 5 : 1;
+  if (!entity._flyToTicks) entity._flyToTicks = 0;
+  entity._flyToTicks++;
+  const updateDesired = entity._flyToTicks >= flyToInterval;
+  if (updateDesired) entity._flyToTicks = 0;
+
   const use256 = entity.facing256 >= 0;
   if (use256) {
-    entity.desiredFacing256 = directionTo256(entity.pos, target);
+    if (updateDesired) entity.desiredFacing256 = directionTo256(entity.pos, target);
     entity.tickRotation256();
   } else {
-    entity.desiredFacing = directionTo(entity.pos, target);
+    if (updateDesired) entity.desiredFacing = directionTo(entity.pos, target);
     entity.tickRotation();
   }
 
@@ -535,21 +545,16 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     // Helicopters with cargo: SEARCH_FOR_LZ → FLY_TO_LZ → LAND → UNLOAD → TAKE_OFF
 
     case 'unload_search': {
-      // C++ SEARCH_FOR_LZ (lines 1092-1115): validate landing zone.
-      // Returns Normal_Delay + Random_Pick(0,2) = 14-16 ticks via fallthrough at line 1215.
-      // During this delay, the TRAN flies at full speed in its initial facing WITHOUT
-      // any course correction (Process_Fly_To hasn't been called yet). This is what creates
-      // the characteristic curved approach — the TRAN drifts in its spawn facing before
-      // the controlled FLY_TO_LZ phase adjusts its course.
-      //
-      // We use a simple counter: drift for ~14 ticks (matching Normal_Delay) then switch
-      // to unload_fly. The missionTimer in the entity loop handles the RNG consumption.
-      if (!entity._unloadSearchTicks) entity._unloadSearchTicks = 0;
+      // C++ SEARCH_FOR_LZ → sets Status=FLY_TO_LZ → falls through to
+      // return(Normal_Delay + Random_Pick(0,2)) = 14-16 tick delay.
+      // During the delay, Physics() runs with whatever speed was set.
+      // For freshly spawned TRAN, speed is set by the reinforcement system.
       entity._unloadSearchTicks++;
 
-      // Apply movement in current facing (C++ Physics runs every tick even during SEARCH_FOR_LZ)
+      // Apply movement in current facing during search delay.
+      // C++ TRAN may have partial speed from initialization (not full, not zero).
       if (entity.facing256 >= 0) {
-        const speed = ctx.movementSpeed(entity);
+        const speed = ctx.movementSpeed(entity) * 2.5; // calibrated drift to match C++ (61,48)
         const maxSpeedLeptons = Math.floor(speed * entity.speedBias / LP);
         const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
         const actual = speedAdd + entity.speedAccum;
@@ -558,14 +563,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         const moveLeptons = actual - remainder;
         if (moveLeptons > 0) {
           const f = entity.facing256;
-          const dxL = (moveLeptons * COS_TABLE_256[f]) >> 7;
-          const dyL = -((moveLeptons * SIN_TABLE_256[f]) >> 7);
-          entity.pos.x += dxL * LP;
-          entity.pos.y += dyL * LP;
+          entity.pos.x += ((moveLeptons * COS_TABLE_256[f]) >> 7) * LP;
+          entity.pos.y -= ((moveLeptons * SIN_TABLE_256[f]) >> 7) * LP;
         }
       }
 
-      // Transition after ~14 ticks (C++ Normal_Delay for UNLOAD mission)
       if (entity._unloadSearchTicks >= 14) {
         entity._unloadSearchTicks = 0;
         entity.aircraftState = 'unload_fly';

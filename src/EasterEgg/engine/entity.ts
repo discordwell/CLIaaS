@@ -330,6 +330,7 @@ export class Entity {
   landedAtStructure = -1;       // structure index, -1 = airborne
   aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' | 'unload_search' | 'unload_fly' | 'unload_land' | 'unload_eject' = 'idle';
   _unloadSearchTicks = 0; // C++ SEARCH_FOR_LZ delay counter
+  _flyToTicks = 0; // C++ FLY_TO_LZ Process_Fly_To call interval counter
   rearmTimer = 0;
   attackRunPhase: 'flyToTarget' | 'dropBombs' | 'regroup' = 'flyToTarget';
   circleBreakTimer = 0;
