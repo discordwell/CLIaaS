@@ -1551,9 +1551,11 @@ function applyMission(entity: Entity, missionStr: string): void {
   } else if (m === 'Sleep') {
     entity.mission = Mission.SLEEP;
   } else if (m === 'None' || m === '') {
-    // C++ Mission_From_Name("None") → MISSION_NONE → default case in AI dispatch
-    // → Mission_Sleep() returns 450 ticks, no RNG consumed. Don't map to GUARD.
-    entity.mission = Mission.SLEEP;
+    // C++ Mission_From_Name("None") → MISSION_NONE → default case calls Mission_Sleep.
+    // BUT: per-entity RNG tracking shows "None" entities consuming 1-3 RNG calls at
+    // tick 0, identical to GUARD entities (mission timer + Random_Animate). C++ likely
+    // converts MISSION_NONE to MISSION_GUARD during scenario init for active units.
+    entity.mission = Mission.GUARD;
   } else if (m === 'Harvest') {
     // C++ MISSION_HARVEST: harvester state machine (look/harvest/go home).
     // Mission_Harvest returns fixed values (1 or 450), no Random_Pick consumed.
@@ -1649,25 +1651,12 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   }
 
   // Create entities from INI unit/infantry placements.
-  // C++ loads entities per-house (HouseClass::Read_INI iterates HOUSE_FIRST→HOUSE_COUNT,
-  // scanning all INI entries for matching house). This groups entities by house in enum
-  // order: Spain(0), Greece(1), USSR(2), England(3), etc. Within each house, entities
-  // appear in INI index order. We replicate this to match C++ Logic layer insertion order,
-  // which determines RNG rejection sampling patterns.
+  // C++ Logic layer processes entities in INI index order — confirmed by
+  // per-entity tracking: Logic[22-25]=UNITS 0-3, Logic[26-47]=INFANTRY 0-21.
+  // No house sorting — entities appear in the exact order from the INI file.
   const entities: Entity[] = [];
 
-  // C++ house enum order for entity loading (house.h HousesType)
-  const HOUSE_ENUM_ORDER: Record<string, number> = {
-    Spain: 0, Greece: 1, USSR: 2, England: 3, Ukraine: 4, Germany: 5,
-    France: 6, Turkey: 7, GoodGuy: 8, BadGuy: 9, Neutral: 10, Special: 11,
-    Multi1: 12, Multi2: 13, Multi3: 14, Multi4: 15,
-    Multi5: 16, Multi6: 17, Multi7: 18, Multi8: 19,
-  };
-
-  // Build unit entities in INI order, then sort by house
-  const rawUnits: Array<{ entity: Entity; houseOrder: number; iniIdx: number }> = [];
-  for (let i = 0; i < data.units.length; i++) {
-    const u = data.units[i];
+  for (const u of data.units) {
     const unitType = toUnitType(u.type);
     if (!unitType) continue;
     const pos = cellIndexToPos(u.cell);
@@ -1681,21 +1670,10 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
     if (u.trigger && u.trigger !== 'None') entity.triggerName = u.trigger;
     applyMission(entity, u.mission);
-    rawUnits.push({ entity, houseOrder: HOUSE_ENUM_ORDER[toHouse(u.house)] ?? 10, iniIdx: i });
+    entities.push(entity);
   }
-  // Sort by C++ house enum order, stable within same house (INI index preserved)
-  rawUnits.sort((a, b) => a.houseOrder - b.houseOrder || a.iniIdx - b.iniIdx);
-  for (const { entity } of rawUnits) entities.push(entity);
 
-  // Infantry: C++ Logic layer order must match for RNG parity.
-  // Empirical testing shows C++ infantry at Logic[26-47] with call pattern
-  // 3,1,1,1,1,1,3,3,... Starting with a 3-call entity (Random_Animate on Greece E1).
-  // House-sorted order (Greece→USSR→England) produces 67/67 seed match with only
-  // 1 extra call from rejection sampling. INI order gives 3 fewer calls.
-  // Keep house-sorted as closest match.
-  const rawInf: Array<{ entity: Entity; houseOrder: number; iniIdx: number }> = [];
-  for (let i = 0; i < data.infantry.length; i++) {
-    const inf = data.infantry[i];
+  for (const inf of data.infantry) {
     const unitType = toUnitType(inf.type);
     if (!unitType) continue;
     const pos = cellIndexToPos(inf.cell);
@@ -1708,10 +1686,8 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.subCell = inf.subCell;
     if (inf.trigger && inf.trigger !== 'None') entity.triggerName = inf.trigger;
     applyMission(entity, inf.mission);
-    rawInf.push({ entity, houseOrder: HOUSE_ENUM_ORDER[toHouse(inf.house)] ?? 10, iniIdx: i });
+    entities.push(entity);
   }
-  rawInf.sort((a, b) => a.houseOrder - b.houseOrder || a.iniIdx - b.iniIdx);
-  for (const { entity } of rawInf) entities.push(entity);
 
   // Create structures from INI and mark their cells as impassable
   const structures: MapStructure[] = [];

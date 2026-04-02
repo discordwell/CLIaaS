@@ -1895,6 +1895,14 @@ export class Game {
     // jitter. Each building consumes 1+ RNG call per timer fire for parity with C++ MissionClass::Timer.
     this.tickStructureMissionTimers();
 
+    // C++ Logic layer processes aircraft AFTER buildings (Logic[73] after Logic[48-72]).
+    // Aircraft mission timers consume Normal_Delay+Random_Pick(0,2) via MissionClass::AI.
+    for (const entity of this.entities) {
+      if (!entity.alive || !entity.isAirUnit) continue;
+      if (entity.missionTimer > 0) { entity.missionTimer--; continue; }
+      entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+    }
+
     // Defensive structure auto-fire
     this._runCombat(ctx => _updateStructureCombat(ctx));
 

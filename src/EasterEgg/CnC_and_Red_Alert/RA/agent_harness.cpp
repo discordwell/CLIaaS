@@ -560,6 +560,37 @@ char* agent_get_state(void)
 	// Reset log for next step (keep logging enabled)
 	g_rng_log_count = 0;
 
+	// Dump Logic layer entity order (units/infantry/aircraft only) for parity debugging
+	buf_cat("\"logicLayer\":[");
+	{
+		bool lfirst = true;
+		for (int li = 0; li < Logic.Count(); li++) {
+			ObjectClass * lobj = Logic[li];
+			if (!lobj || !lobj->IsActive) continue;
+			RTTIType rtti = lobj->What_Am_I();
+			if (rtti != RTTI_UNIT && rtti != RTTI_INFANTRY && rtti != RTTI_AIRCRAFT) continue;
+			const char * tname = "?";
+			const char * hname = "?";
+			if (rtti == RTTI_UNIT) {
+				UnitClass * u = (UnitClass *)lobj;
+				tname = u->Class->IniName;
+				hname = agent_house_name(u->House->Class->House);
+			} else if (rtti == RTTI_INFANTRY) {
+				InfantryClass * inf = (InfantryClass *)lobj;
+				tname = inf->Class->IniName;
+				hname = agent_house_name(inf->House->Class->House);
+			} else if (rtti == RTTI_AIRCRAFT) {
+				AircraftClass * a = (AircraftClass *)lobj;
+				tname = a->Class->IniName;
+				hname = agent_house_name(a->House->Class->House);
+			}
+			if (!lfirst) buf_cat(",");
+			lfirst = false;
+			buf_cat("[%d,\"%s\",\"%s\"]", li, tname, hname);
+		}
+	}
+	buf_cat("],");
+
 	buf_cat("\"alliedHouses\":[");
 	bool first = true;
 	for (HousesType house = HOUSE_FIRST; house < HOUSE_COUNT; house++) {
