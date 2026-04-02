@@ -6,10 +6,11 @@
 import {
   type WorldPos, type WeaponStats,
   CELL_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
-  worldDist, directionTo, worldToCell,
+  worldDist, directionTo, worldToCell, DIR_DX, DIR_DY,
   CIVILIAN_UNIT_TYPES,
 } from './types';
 import { Entity, CloakState } from './entity';
+import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
 
@@ -141,6 +142,84 @@ function countsAsCivEvac(ctx: AircraftContext, unitType: string): boolean {
   return false;
 }
 
+/** C++ aircraft movement: rotate toward target, then move in CURRENT facing.
+ *  Unlike entity.moveToward() which moves in desiredFacing, this replicates C++
+ *  Rotation_AI() + Physics(Coord, PrimaryFacing) — the aircraft follows a curved
+ *  path as it gradually rotates toward the target heading.
+ *
+ *  Also applies C++ Process_Fly_To approach slowdown within 3 cells:
+ *    speed = min(distance, 0x0300); speed = Bound(speed/3, 0x0020, 0x00FF)
+ *
+ *  @param entity  The aircraft entity
+ *  @param target  World position to fly toward
+ *  @param baseSpeed  Base movement speed in px/tick (from ctx.movementSpeed)
+ *  @returns true if arrived at target */
+function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number): boolean {
+  const dx = target.x - entity.pos.x;
+  const dy = target.y - entity.pos.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist <= 0.5) {
+    entity.pos.x = target.x;
+    entity.pos.y = target.y;
+    entity.speedAccum = 0;
+    return true; // arrived
+  }
+
+  // Step 1: Set desired facing toward target and let rotation system handle gradual turning
+  entity.desiredFacing = directionTo(entity.pos, target);
+  entity.tickRotation();
+
+  // Step 2: C++ Process_Fly_To(true, NavCom) approach slowdown within 3 cells.
+  //   int speed = min(distance, 0x0300);        // cap at 768 leptons (~3 cells)
+  //   speed = Bound(speed/3, 0x0020, 0x00FF);   // clamp to [32, 255] out of 255 max
+  // Convert to a fraction: at 3+ cells → 1.0, at ~0.375 cells → 0x20/0xFF ≈ 0.125
+  const distInCells = dist / CELL_SIZE;
+  let speedFraction = 1.0;
+  if (distInCells < 3.0) {
+    // Distance in leptons equivalent: distInCells * 256
+    const distLeptons = distInCells * 256;
+    const cappedLeptons = Math.min(distLeptons, 0x0300); // cap at 768 (3 cells)
+    const rawSpeed = Math.floor(cappedLeptons / 3);
+    const clampedSpeed = Math.max(0x20, Math.min(0xFF, rawSpeed));
+    speedFraction = clampedSpeed / 0xFF;
+  }
+
+  const effectiveSpeed = baseSpeed * entity.speedBias * speedFraction;
+
+  // Step 3: Move in entity.facing (current facing), NOT desiredFacing.
+  // This replicates C++ Physics(Coord, PrimaryFacing) — the aircraft follows
+  // a curved path as facing gradually catches up to desired heading.
+  const face = entity.facing;
+  const fdx = DIR_DX[face];
+  const fdy = DIR_DY[face];
+
+  // Lepton accumulator (C++ fly.cpp:62-106) — same math as entity.moveToward
+  const maxSpeedLeptons = Math.floor(effectiveSpeed / LP);
+  const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+  const actual = speedAdd + entity.speedAccum;
+  const remainder = actual % PIXEL_LEPTON_W;
+  entity.speedAccum = remainder;
+  const moveLeptons = actual - remainder;
+
+  if (moveLeptons <= 0) {
+    return false; // not enough accumulated for a pixel step this tick
+  }
+
+  const movePixels = moveLeptons * LP;
+  const isDiagonal = fdx !== 0 && fdy !== 0;
+  const axisDist = isDiagonal ? movePixels * Math.SQRT1_2 : movePixels;
+
+  // Clamp to remaining distance to prevent overshoot
+  const stepX = Math.min(Math.abs(fdx * axisDist), Math.abs(dx)) * Math.sign(dx || fdx);
+  const stepY = Math.min(Math.abs(fdy * axisDist), Math.abs(dy)) * Math.sign(dy || fdy);
+  entity.pos.x += stepX;
+  entity.pos.y += stepY;
+
+  const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+  return totalStep >= dist - 0.5;
+}
+
 /** Handle aircraft (and passengers) leaving the map */
 function handleMapExit(ctx: AircraftContext, entity: Entity): void {
   entity.alive = false;
@@ -263,8 +342,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           entity.circleBreakTimer = 0;
           return true;
         }
-        // Fly toward target
-        entity.moveToward(targetPos, ctx.movementSpeed(entity));
+        // Fly toward target — C++ curved path via Rotation_AI + Physics(PrimaryFacing)
+        aircraftFlyInFacing(entity, targetPos, ctx.movementSpeed(entity));
       } else if (entity.mission === Mission.RETREAT) {
         // C++ aircraft.cpp:1309-1367 Mission_Retreat — fly to nearest map edge and exit.
         // FACE_MAP_EDGE: compute exit point if not already set, then KEEP_FLYING toward it.
@@ -290,8 +369,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           handleMapExit(ctx, entity);
           return true;
         }
-        // Fly toward the edge
-        entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
+        // Fly toward the edge — C++ curved path
+        aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
         // Check if aircraft is at map edge with out-of-bounds target — exit map
         const ec = entity.cell;
@@ -302,8 +381,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           handleMapExit(ctx, entity);
           return true;
         }
-        // Simple move — fly to destination
-        if (entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity))) {
+        // Simple move — fly to destination (C++ curved path)
+        if (aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity))) {
           // Arrived — check if destination was out of bounds (aircraft map exit)
           const arrCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
           if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
@@ -369,7 +448,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.landedAtStructure = padIdx;
         pad.dockedAircraft = entity.id;
       } else {
-        entity.moveToward(padPos, ctx.movementSpeed(entity));
+        aircraftFlyInFacing(entity, padPos, ctx.movementSpeed(entity));
       }
       return true;
     }
@@ -473,7 +552,7 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
     case 'flyToTarget': {
       // C++ FLY_TO_TARGET: fly toward target, check Can_Fire() result
       entity.animState = AnimState.WALK;
-      entity.moveToward(targetPos, speed);
+      aircraftFlyInFacing(entity, targetPos, speed);
 
       if (dist <= weaponRange) {
         // Check facing alignment (C++ FIRE_FACING return — must face target within ~45°)
@@ -505,7 +584,7 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
       // Continuous fire — fire every tick cooldown allows (multi-shot per pass)
       entity.animState = AnimState.ATTACK;
       // Keep moving forward (fixed-wing can't stop)
-      entity.moveToward(targetPos, speed);
+      aircraftFlyInFacing(entity, targetPos, speed);
 
       // Check facing alignment for continued firing
       const targetDir = directionTo(entity.pos, targetPos);
@@ -544,7 +623,7 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
         x: targetPos.x + (dx / len) * overshootDist,
         y: targetPos.y + (dy / len) * overshootDist,
       };
-      entity.moveToward(overshootPos, speed);
+      aircraftFlyInFacing(entity, overshootPos, speed);
       // worldDist returns cells; compare in cells (3 cells overshoot * 0.8 threshold)
       if (worldDist(entity.pos, targetPos) > 3 * 0.8) {
         const targetAlive = (entity.target?.alive) ||
@@ -581,9 +660,9 @@ export function updateHelicopterAttack(ctx: AircraftContext, entity: Entity): bo
   const weaponRange = entity.weapon?.range ?? 5;
 
   if (dist > weaponRange) {
-    // Close to weapon range
+    // Close to weapon range — C++ curved path
     entity.animState = AnimState.WALK;
-    entity.moveToward(targetPos, ctx.movementSpeed(entity));
+    aircraftFlyInFacing(entity, targetPos, ctx.movementSpeed(entity));
     return true;
   }
 

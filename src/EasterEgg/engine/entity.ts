@@ -807,7 +807,10 @@ export class Entity {
     const dy = target.y - this.pos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist <= 0.5) { // sub-pixel snap — prevents oscillation without visible teleport
+    // C++ infantry snaps to cell center at < 16 leptons (0x0010) = ~1.5 pixels.
+    // Vehicles/aircraft snap at sub-pixel (0.5) to prevent oscillation.
+    const snapThreshold = this.stats.isInfantry ? 1.5 : 0.5;
+    if (dist <= snapThreshold) {
       this.pos.x = target.x;
       this.pos.y = target.y;
       this.speedAccum = 0; // C++: reset accumulator on arrival
@@ -825,6 +828,34 @@ export class Entity {
       return false; // still rotating — don't move yet
     }
 
+    // --- Infantry path: C++ infantry.cpp:4019 moves full distance every tick ---
+    // Infantry does NOT use SpeedAccum (that's DriveClass only). C++ Coord_Move
+    // uses integer sin/cos tables with >> 7 truncation.
+    if (this.stats.isInfantry) {
+      const face = this.desiredFacing;
+      const fdx = DIR_DX[face];
+      const fdy = DIR_DY[face];
+      const isDiagonal = fdx !== 0 && fdy !== 0;
+
+      // C++ infantry.cpp:4019: maxspeed * fixed(movespeed, 256)
+      // effectiveSpeed is already in pixels/tick. Convert to leptons, apply
+      // C++ Coord_Move integer sin/cos truncation, then back to pixels.
+      // SinTable[0]=127 (cardinal), SinTable[32]=90 (diagonal 45deg).
+      // calcx = (distance * sin) >> 7  — integer truncation.
+      const sinFactor = isDiagonal ? 90 : 127;
+      const axisMove = Math.floor(effectiveSpeed / LP * sinFactor / 128) * LP;
+
+      // Clamp to remaining distance to prevent overshoot
+      const stepX = Math.min(Math.abs(fdx * axisMove), Math.abs(dx)) * Math.sign(dx || fdx);
+      const stepY = Math.min(Math.abs(fdy * axisMove), Math.abs(dy)) * Math.sign(dy || fdy);
+      this.pos.x += stepX;
+      this.pos.y += stepY;
+      const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+
+      return totalStep >= dist - 1.5; // match infantry snap threshold
+    }
+
+    // --- Vehicle / aircraft path: SpeedAccum lepton accumulator ---
     // C++ lepton accumulator (fly.cpp:62-106 / drive.cpp SpeedAccum):
     //   SpeedAdd = MaxSpeed * fixed(0xFF, 256)  — 255/256 fraction, never truly 100%
     //   actual = (int)SpeedAdd + SpeedAccum;
