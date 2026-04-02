@@ -308,25 +308,24 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   // Step 3: Move in current facing direction, NOT desired.
   // C++ Physics(Coord, PrimaryFacing) — aircraft follows curved path as facing catches up.
   if (use256) {
-    // C++ Coord_Move: x += (CosTable[dir] * distance) >> 7, y -= (SinTable[dir] * distance) >> 7
-    // CosTable gives X component, calcy negates SinTable for Y (screen Y increases downward).
+    // C++ Coord_Move (coord.cpp:440):
+    //   x += calcy(CosTable[dir], distance)  — COS gives X component
+    //   y -= calcy(CosTable[dir], distance)  — SIN gives Y component (negated)
+    // where calcy = (distance * table_value) >> 7  — INTEGER truncation in lepton space.
+    //
+    // The integer >>7 truncation is critical: small lateral components floor to 0,
+    // preventing sub-lepton drift that would cause aircraft to spiral away from targets.
+    // No per-axis clamping — C++ Coord_Move applies unconditionally.
     const f256 = entity.facing256;
-    const cosVal = COS_TABLE_256[f256]; // X component [-126..127]
-    const sinVal = SIN_TABLE_256[f256]; // Y component [-126..127]
-    // C++ uses integer >> 7 on (table_value * distance_in_leptons).
-    // Our movePixels is in pixel space. The table values are scaled to 127 = unit vector.
-    // So movement per axis = movePixels * tableVal / 127.
-    const stepX = (movePixels * cosVal) / 127;
-    const stepY = -(movePixels * sinVal) / 127;
+    const cosVal = COS_TABLE_256[f256]; // X component
+    const sinVal = SIN_TABLE_256[f256]; // Y component
+    // Integer math in lepton space matching C++ calcy = (dist * table) >> 7
+    const dxLeptons = (moveLeptons * cosVal) >> 7;
+    const dyLeptons = -((moveLeptons * sinVal) >> 7);
+    entity.pos.x += dxLeptons * LP;
+    entity.pos.y += dyLeptons * LP;
 
-    // Clamp to remaining distance to prevent overshoot
-    const clampedX = Math.abs(stepX) > Math.abs(dx) ? dx : stepX;
-    const clampedY = Math.abs(stepY) > Math.abs(dy) ? dy : stepY;
-    entity.pos.x += clampedX;
-    entity.pos.y += clampedY;
-
-    const totalStep = Math.sqrt(clampedX * clampedX + clampedY * clampedY);
-    return totalStep >= dist - 0.5;
+    return dist <= 1.5;
   } else {
     // Legacy 8-dir path for non-256 aircraft (fallback)
     const face = entity.facing;

@@ -2582,7 +2582,7 @@ export function executeTriggerAction(
           if (CIVILIAN_UNIT_TYPES.has(member.type)) {
             entity.invulnTick = 120;
           }
-          // Aircraft-specific: start airborne, fly toward origin waypoint
+          // Aircraft-specific: start airborne, fly toward team origin
           if (stats.isAircraft) {
             entity.aircraftState = 'flying';
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
