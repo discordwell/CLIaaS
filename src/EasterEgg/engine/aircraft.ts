@@ -166,8 +166,13 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     return true; // arrived
   }
 
-  // Step 1: Set desired facing toward target and let rotation system handle gradual turning
+  // Step 1: Set desired facing toward target and let rotation system handle gradual turning.
+  // Reset rotation guard — in the real game loop, rotTickedThisFrame is cleared once per tick
+  // before entity processing (index.ts:1652). Aircraft return early from updateAircraft(),
+  // so tickRotation() is only called once per tick here. The guard reset ensures correct
+  // behavior both in-game and in unit tests that don't simulate the full game loop.
   entity.desiredFacing = directionTo(entity.pos, target);
+  entity.rotTickedThisFrame = false;
   entity.tickRotation();
 
   // Step 2: C++ Process_Fly_To(true, NavCom) approach slowdown within 3 cells.
