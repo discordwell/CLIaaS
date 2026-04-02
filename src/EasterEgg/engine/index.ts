@@ -4790,8 +4790,8 @@ export class Game {
   }
 
   /** Guard mode — delegates to missionAI.ts */
-  private updateGuard(entity: Entity): void {
-    this._runMissionAI(ctx => _updateGuard(ctx, entity));
+  private updateGuard(entity: Entity, timerFired = true): void {
+    this._runMissionAI(ctx => _updateGuard(ctx, entity, timerFired));
   }
 
   /** Submarine cloaking state machine — manages cloak transitions for SS/MSUB.
@@ -4845,8 +4845,8 @@ export class Game {
   }
 
   /** Area Guard — delegates to missionAI.ts */
-  private updateAreaGuard(entity: Entity): void {
-    this._runMissionAI(ctx => _updateAreaGuard(ctx, entity));
+  private updateAreaGuard(entity: Entity, timerFired = true): void {
+    this._runMissionAI(ctx => _updateAreaGuard(ctx, entity, timerFired));
   }
 
   /** Retreat — delegates to missionAI.ts */
