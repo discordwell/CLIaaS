@@ -1687,7 +1687,8 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   rawUnits.sort((a, b) => a.houseOrder - b.houseOrder || a.iniIdx - b.iniIdx);
   for (const { entity } of rawUnits) entities.push(entity);
 
-  // Infantry: also house-grouped like units. C++ Read_INI iterates houses in enum order.
+  // Infantry: house-grouped like units. C++ Read_INI iterates houses in enum order,
+  // scanning all INI entries for matching house per pass.
   const rawInf: Array<{ entity: Entity; houseOrder: number; iniIdx: number }> = [];
   for (let i = 0; i < data.infantry.length; i++) {
     const inf = data.infantry[i];
