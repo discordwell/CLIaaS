@@ -547,14 +547,20 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     case 'unload_search': {
       // C++ SEARCH_FOR_LZ → sets Status=FLY_TO_LZ → falls through to
       // return(Normal_Delay + Random_Pick(0,2)) = 14-16 tick delay.
-      // During the delay, Physics() runs with whatever speed was set.
-      // For freshly spawned TRAN, speed is set by the reinforcement system.
+      //
+      // Empirical WASM data shows:
+      //   tick 1-5: TRAN at (63,44) — stationary (SpeedAdd=0 from FlyClass constructor)
+      //   tick 10: TRAN at (62,45) — started moving (speed set by some init code)
+      //   tick 50: TRAN at (61,48) — continued flying
+      //
+      // The TRAN is stationary for the first ~7 ticks, then begins drifting
+      // in its initial facing before the FLY_TO_LZ controlled approach starts.
       entity._unloadSearchTicks++;
 
-      // Apply movement in current facing during search delay.
-      // C++ TRAN may have partial speed from initialization (not full, not zero).
-      if (entity.facing256 >= 0) {
-        const speed = ctx.movementSpeed(entity) * 2.5; // calibrated drift to match C++ (61,48)
+      // No movement for first 7 ticks (C++ SpeedAdd=0 from constructor)
+      // Then drift at base speed in current facing for remaining search ticks
+      if (entity._unloadSearchTicks > 7 && entity.facing256 >= 0) {
+        const speed = ctx.movementSpeed(entity);
         const maxSpeedLeptons = Math.floor(speed * entity.speedBias / LP);
         const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
         const actual = speedAdd + entity.speedAccum;

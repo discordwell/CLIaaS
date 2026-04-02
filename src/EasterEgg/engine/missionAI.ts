@@ -590,10 +590,9 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       const dist = worldDist(entity.pos, other.pos);
       if (dist > huntRange) continue;
       // C++ Evaluate_Object has no LOS check — aircraft bypass discovery check entirely.
-      // Skip LOS for airborne aircraft (matching guard scan behavior and C++ parity).
-      if (!(other.isAirUnit && other.flightAltitude > 0)) {
-        if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
-      }
+      // C++ HUNT uses THREAT_NORMAL → Target_Something_Nearby skips LOS check.
+      // Units on HUNT can see all enemies regardless of terrain obstacles.
+      // (Guard scan uses THREAT_RANGE which does check LOS.)
       const score = ctx.threatScore(entity, other, dist);
       if (score > bestScore) { bestScore = score; bestTarget = other; }
     }
