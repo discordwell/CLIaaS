@@ -90,6 +90,12 @@ export class Entity {
   turretFacing: Dir = Dir.N;  // turret direction (for turreted vehicles)
   desiredTurretFacing: Dir = Dir.N; // target turret facing for gradual rotation
 
+  // C++ 256-step facing for aircraft (coord.cpp DirType 0-255).
+  // 0=N, 64=E, 128=S, 192=W. Used for precise curved flight paths.
+  // Ground units continue to use the 8-dir `facing` field.
+  facing256 = -1;          // -1 = not using 256-step (ground units); 0-255 for aircraft
+  desiredFacing256 = -1;   // -1 = not active
+
   // Health
   hp: number;
   maxHp: number;
@@ -759,6 +765,50 @@ export class Entity {
     return this.facing === this.desiredFacing;
   }
 
+  /** C++ facing.cpp:142 Rotation_Adjust for aircraft 256-step facing.
+   *  Adjusts facing256 toward desiredFacing256 by up to ROT per tick.
+   *  Difference is computed as (signed byte)(desired - current), matching
+   *  C++ (signed char) cast for shortest-path direction.
+   *  Syncs 8-dir `facing` and 32-step `bodyFacing32` from facing256.
+   *  Returns true if facing256 === desiredFacing256. */
+  tickRotation256(): boolean {
+    if (this.facing256 < 0) return this.tickRotation(); // not using 256-step
+
+    if (this.facing256 === this.desiredFacing256) {
+      // Already aligned — sync derived facings
+      this.facing = Math.floor(this.facing256 / 32) as Dir;
+      this.bodyFacing32 = Math.floor(this.facing256 / 8) % 32;
+      return true;
+    }
+
+    // Guard against double-rotation per tick
+    if (this.rotTickedThisFrame) return this.facing256 === this.desiredFacing256;
+    this.rotTickedThisFrame = true;
+
+    const rate = this.stats.rot;
+    // C++ facing.cpp:152: diff = (signed char)(DesiredFacing - CurrentFacing)
+    // signed char range: -128 to 127. Positive = CW, negative = CCW.
+    let diff = (this.desiredFacing256 - this.facing256) & 0xFF;
+    if (diff > 127) diff -= 256; // convert to signed: 128..255 → -128..-1
+
+    if (Math.abs(diff) <= rate) {
+      // Snap to desired (C++ facing.cpp:159-160)
+      this.facing256 = this.desiredFacing256;
+    } else if (diff < 0) {
+      // CCW (C++ facing.cpp:168-169)
+      this.facing256 = (this.facing256 - rate + 256) & 0xFF;
+    } else {
+      // CW (C++ facing.cpp:171)
+      this.facing256 = (this.facing256 + rate) & 0xFF;
+    }
+
+    // Sync derived facings for rendering and game logic
+    this.facing = (Math.floor(this.facing256 / 32) % 8) as Dir;
+    this.bodyFacing32 = Math.floor(this.facing256 / 8) % 32;
+    this.desiredFacing = (Math.floor(this.desiredFacing256 / 32) % 8) as Dir;
+    return this.facing256 === this.desiredFacing256;
+  }
+
   /** Gradually rotate turret toward desiredTurretFacing.
    *  C++ RA unit.cpp:542: SecondaryFacing.Rotation_Adjust(Class->ROT+1).
    *  Turret rotates at ROT+1 (not ROT*2); one visual step when accumulator >= 8. */
@@ -842,8 +892,15 @@ export class Entity {
       // C++ Coord_Move integer sin/cos truncation, then back to pixels.
       // SinTable[0]=127 (cardinal), SinTable[32]=90 (diagonal 45deg).
       // calcx = (distance * sin) >> 7  — integer truncation.
+      //
+      // C++ _Scale_To_256 truncates to integer leptons BEFORE Coord_Move applies
+      // the sin/cos factor. Without this floor, fractional leptons (e.g. 10.24
+      // for E1 Speed=4) leak through and inflate the per-tick distance:
+      //   broken:  floor(10.24 * 127 / 128) = 10 leptons/tick
+      //   correct: floor(floor(10.24) * 127 / 128) = floor(10 * 127 / 128) = 9
       const sinFactor = isDiagonal ? 90 : 127;
-      const axisMove = Math.floor(effectiveSpeed / LP * sinFactor / 128) * LP;
+      const distLeptons = Math.floor(effectiveSpeed / LP); // C++ integer MaxSpeed
+      const axisMove = Math.floor(distLeptons * sinFactor / 128) * LP;
 
       // Clamp to remaining distance to prevent overshoot
       const stepX = Math.min(Math.abs(fdx * axisMove), Math.abs(dx)) * Math.sign(dx || fdx);

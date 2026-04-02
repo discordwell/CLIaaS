@@ -14,6 +14,97 @@ import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
 
+// ── C++ 256-step sin/cos tables (coord.cpp:442-516) ─────────────────────────
+// CosTable gives X component, SinTable gives Y component (negated for screen coords).
+// Direction 0 = North: CosTable[0]=0 (no X), SinTable[0]=127 (Y upward after negation).
+// Values are signed bytes [-126..127], movement: x += (Cos*dist)>>7, y -= (Sin*dist)>>7.
+
+/** C++ coord.cpp:442 — X component lookup for 256-step DirType facing */
+export const COS_TABLE_256: readonly number[] = [
+     0,    3,    6,    9,   12,   15,   18,   21,
+    24,   27,   30,   33,   36,   39,   42,   45,
+    48,   51,   54,   57,   59,   62,   65,   67,
+    70,   73,   75,   78,   80,   82,   85,   87,
+    89,   91,   94,   96,   98,  100,  101,  103,
+   105,  107,  108,  110,  111,  113,  114,  116,
+   117,  118,  119,  120,  121,  122,  123,  123,
+   124,  125,  125,  126,  126,  126,  126,  126,
+   127,  126,  126,  126,  126,  126,  125,  125,
+   124,  123,  123,  122,  121,  120,  119,  118,
+   117,  116,  114,  113,  112,  110,  108,  107,
+   105,  103,  102,  100,   98,   96,   94,   91,
+    89,   87,   85,   82,   80,   78,   75,   73,
+    70,   67,   65,   62,   59,   57,   54,   51,
+    48,   45,   42,   39,   36,   33,   30,   27,
+    24,   21,   18,   15,   12,    9,    6,    3,
+     0,   -3,   -6,   -9,  -12,  -15,  -18,  -21,
+   -24,  -27,  -30,  -33,  -36,  -39,  -42,  -45,
+   -48,  -51,  -54,  -57,  -59,  -62,  -65,  -67,
+   -70,  -73,  -75,  -78,  -80,  -82,  -85,  -87,
+   -89,  -91,  -94,  -96,  -98, -100, -102, -103,
+  -105, -107, -108, -110, -111, -113, -114, -116,
+  -117, -118, -119, -120, -121, -122, -123, -123,
+  -124, -125, -125, -126, -126, -126, -126, -126,
+  -126, -126, -126, -126, -126, -126, -125, -125,
+  -124, -123, -123, -122, -121, -120, -119, -118,
+  -117, -116, -114, -113, -112, -110, -108, -107,
+  -105, -103, -102, -100,  -98,  -96,  -94,  -91,
+   -89,  -87,  -85,  -82,  -80,  -78,  -75,  -73,
+   -70,  -67,  -65,  -62,  -59,  -57,  -54,  -51,
+   -48,  -45,  -42,  -39,  -36,  -33,  -30,  -27,
+   -24,  -21,  -18,  -15,  -12,   -9,   -6,   -3,
+];
+
+/** C++ coord.cpp:480 — Y component lookup for 256-step DirType facing */
+export const SIN_TABLE_256: readonly number[] = [
+   127,  126,  126,  126,  126,  126,  125,  125,
+   124,  123,  123,  122,  121,  120,  119,  118,
+   117,  116,  114,  113,  112,  110,  108,  107,
+   105,  103,  102,  100,   98,   96,   94,   91,
+    89,   87,   85,   82,   80,   78,   75,   73,
+    70,   67,   65,   62,   59,   57,   54,   51,
+    48,   45,   42,   39,   36,   33,   30,   27,
+    24,   21,   18,   15,   12,    9,    6,    3,
+     0,   -3,   -6,   -9,  -12,  -15,  -18,  -21,
+   -24,  -27,  -30,  -33,  -36,  -39,  -42,  -45,
+   -48,  -51,  -54,  -57,  -59,  -62,  -65,  -67,
+   -70,  -73,  -75,  -78,  -80,  -82,  -85,  -87,
+   -89,  -91,  -94,  -96,  -98, -100, -102, -103,
+  -105, -107, -108, -110, -111, -113, -114, -116,
+  -117, -118, -119, -120, -121, -122, -123, -123,
+  -124, -125, -125, -126, -126, -126, -126, -126,
+  -126, -126, -126, -126, -126, -126, -125, -125,
+  -124, -123, -123, -122, -121, -120, -119, -118,
+  -117, -116, -114, -113, -112, -110, -108, -107,
+  -105, -103, -102, -100,  -98,  -96,  -94,  -91,
+   -89,  -87,  -85,  -82,  -80,  -78,  -75,  -73,
+   -70,  -67,  -65,  -62,  -59,  -57,  -54,  -51,
+   -48,  -45,  -42,  -39,  -36,  -33,  -30,  -27,
+   -24,  -21,  -18,  -15,  -12,   -9,   -6,   -3,
+     0,    3,    6,    9,   12,   15,   18,   21,
+    24,   27,   30,   33,   36,   39,   42,   45,
+    48,   51,   54,   57,   59,   62,   65,   67,
+    70,   73,   75,   78,   80,   82,   85,   87,
+    89,   91,   94,   96,   98,  100,  101,  103,
+   105,  107,  108,  110,  111,  113,  114,  116,
+   117,  118,  119,  120,  121,  122,  123,  123,
+   124,  125,  125,  126,  126,  126,  126,  126,
+];
+
+/** Convert world positions to a C++ 256-step DirType facing (0=N, 64=E, 128=S, 192=W).
+ *  C++ Direction() in facing.h: atan2-based conversion to 256-step byte. */
+export function directionTo256(from: WorldPos, to: WorldPos): number {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (dx === 0 && dy === 0) return 0;
+  // atan2(dx, -dy): dx as "east" component, -dy as "north" component
+  // gives 0 for north, PI/2 for east, etc. — matching C++ DirType convention
+  const angle = Math.atan2(dx, -dy); // radians, 0=north, positive=clockwise
+  // Convert to 0-255: full circle = 2*PI maps to 256
+  const dir256 = Math.round(((angle + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI) * 256) & 0xFF;
+  return dir256;
+}
+
 // ── C++ Hover Jitter (aircraft.cpp:441-445) ──────────────────────────────────
 
 /** C++ aircraft.cpp:443-444 — helicopter hover jitter pattern.
@@ -166,14 +257,22 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     return true; // arrived
   }
 
-  // Step 1: Set desired facing toward target and let rotation system handle gradual turning.
+  // Step 1: Set desired facing toward target and rotate.
   // Reset rotation guard — in the real game loop, rotTickedThisFrame is cleared once per tick
   // before entity processing (index.ts:1652). Aircraft return early from updateAircraft(),
   // so tickRotation() is only called once per tick here. The guard reset ensures correct
   // behavior both in-game and in unit tests that don't simulate the full game loop.
-  entity.desiredFacing = directionTo(entity.pos, target);
   entity.rotTickedThisFrame = false;
-  entity.tickRotation();
+
+  // Use 256-step facing for aircraft if active (C++ PrimaryFacing is DirType 0-255)
+  const use256 = entity.facing256 >= 0;
+  if (use256) {
+    entity.desiredFacing256 = directionTo256(entity.pos, target);
+    entity.tickRotation256();
+  } else {
+    entity.desiredFacing = directionTo(entity.pos, target);
+    entity.tickRotation();
+  }
 
   // Step 2: C++ Process_Fly_To(true, NavCom) approach slowdown within 3 cells.
   //   int speed = min(distance, 0x0300);        // cap at 768 leptons (~3 cells)
@@ -192,13 +291,6 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
 
   const effectiveSpeed = baseSpeed * entity.speedBias * speedFraction;
 
-  // Step 3: Move in entity.facing (current facing), NOT desiredFacing.
-  // This replicates C++ Physics(Coord, PrimaryFacing) — the aircraft follows
-  // a curved path as facing gradually catches up to desired heading.
-  const face = entity.facing;
-  const fdx = DIR_DX[face];
-  const fdy = DIR_DY[face];
-
   // Lepton accumulator (C++ fly.cpp:62-106) — same math as entity.moveToward
   const maxSpeedLeptons = Math.floor(effectiveSpeed / LP);
   const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
@@ -212,17 +304,46 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   }
 
   const movePixels = moveLeptons * LP;
-  const isDiagonal = fdx !== 0 && fdy !== 0;
-  const axisDist = isDiagonal ? movePixels * Math.SQRT1_2 : movePixels;
 
-  // Clamp to remaining distance to prevent overshoot
-  const stepX = Math.min(Math.abs(fdx * axisDist), Math.abs(dx)) * Math.sign(dx || fdx);
-  const stepY = Math.min(Math.abs(fdy * axisDist), Math.abs(dy)) * Math.sign(dy || fdy);
-  entity.pos.x += stepX;
-  entity.pos.y += stepY;
+  // Step 3: Move in current facing direction, NOT desired.
+  // C++ Physics(Coord, PrimaryFacing) — aircraft follows curved path as facing catches up.
+  if (use256) {
+    // C++ Coord_Move: x += (CosTable[dir] * distance) >> 7, y -= (SinTable[dir] * distance) >> 7
+    // CosTable gives X component, calcy negates SinTable for Y (screen Y increases downward).
+    const f256 = entity.facing256;
+    const cosVal = COS_TABLE_256[f256]; // X component [-126..127]
+    const sinVal = SIN_TABLE_256[f256]; // Y component [-126..127]
+    // C++ uses integer >> 7 on (table_value * distance_in_leptons).
+    // Our movePixels is in pixel space. The table values are scaled to 127 = unit vector.
+    // So movement per axis = movePixels * tableVal / 127.
+    const stepX = (movePixels * cosVal) / 127;
+    const stepY = -(movePixels * sinVal) / 127;
 
-  const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
-  return totalStep >= dist - 0.5;
+    // Clamp to remaining distance to prevent overshoot
+    const clampedX = Math.abs(stepX) > Math.abs(dx) ? dx : stepX;
+    const clampedY = Math.abs(stepY) > Math.abs(dy) ? dy : stepY;
+    entity.pos.x += clampedX;
+    entity.pos.y += clampedY;
+
+    const totalStep = Math.sqrt(clampedX * clampedX + clampedY * clampedY);
+    return totalStep >= dist - 0.5;
+  } else {
+    // Legacy 8-dir path for non-256 aircraft (fallback)
+    const face = entity.facing;
+    const fdx = DIR_DX[face];
+    const fdy = DIR_DY[face];
+    const isDiagonal = fdx !== 0 && fdy !== 0;
+    const axisDist = isDiagonal ? movePixels * Math.SQRT1_2 : movePixels;
+
+    // Clamp to remaining distance to prevent overshoot
+    const stepX = Math.min(Math.abs(fdx * axisDist), Math.abs(dx)) * Math.sign(dx || fdx);
+    const stepY = Math.min(Math.abs(fdy * axisDist), Math.abs(dy)) * Math.sign(dy || fdy);
+    entity.pos.x += stepX;
+    entity.pos.y += stepY;
+
+    const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+    return totalStep >= dist - 0.5;
+  }
 }
 
 /** Handle aircraft (and passengers) leaving the map */
@@ -673,8 +794,14 @@ export function updateHelicopterAttack(ctx: AircraftContext, entity: Entity): bo
 
   // In range — hover and fire
   entity.animState = AnimState.ATTACK;
-  entity.desiredFacing = directionTo(entity.pos, targetPos);
-  entity.tickRotation();
+  entity.rotTickedThisFrame = false;
+  if (entity.facing256 >= 0) {
+    entity.desiredFacing256 = directionTo256(entity.pos, targetPos);
+    entity.tickRotation256();
+  } else {
+    entity.desiredFacing = directionTo(entity.pos, targetPos);
+    entity.tickRotation();
+  }
 
   // Fire on cooldown
   if (entity.attackCooldown <= 0 && entity.weapon) {

@@ -2547,9 +2547,13 @@ export function executeTriggerAction(
           // aircraft get Random_Pick(DIR_N, DIR_MAX) — random facing.
           if (stats.isAircraft) {
             // C++ reinf.cpp:466-468: desiredfacing = (DirType)Random_Pick(DIR_N, DIR_MAX)
-            const randomFacing = ScenarioRandom.nextInRange(0, 7) as Dir;
-            entity.facing = randomFacing;
-            entity.desiredFacing = randomFacing;
+            // DIR_N=0, DIR_MAX=255 — full 256-step DirType range for precise curved flight paths.
+            const randomFacing256 = ScenarioRandom.nextInRange(0, 255);
+            entity.facing256 = randomFacing256;
+            entity.desiredFacing256 = randomFacing256;
+            // Derive 8-dir facing for rendering/game-logic compatibility
+            entity.facing = (Math.floor(randomFacing256 / 32) % 8) as Dir;
+            entity.desiredFacing = entity.facing;
           } else {
             entity.facing = spawnFacing as Dir;
             entity.desiredFacing = spawnFacing as Dir;
