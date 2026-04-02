@@ -1647,9 +1647,15 @@ export class Game {
       }
     }
 
-    // Update all entities in array order (matches C++ Logic layer house-grouped order:
-    // entities sorted by house enum at load, reinforcements appended at end).
+    // C++ Logic.AI() processes ALL objects in a single interleaved loop:
+    //   Logic[22-47]: units + infantry (entity AI)
+    //   Logic[48-72]: buildings (structure mission timers)
+    //   Logic[73]:    aircraft (entity AI)
+    // We replicate this by processing non-aircraft entities, then buildings,
+    // then aircraft — all using RNG in the correct interleaved order.
+    // First pass: non-aircraft entities (units + infantry)
     for (const entity of this.entities) {
+      if (entity.isAirUnit) continue; // aircraft processed after buildings
       // Reset per-tick rotation guards (prevents double-accumulation)
       entity.rotTickedThisFrame = false;
       entity.turretRotTickedThisFrame = false;
@@ -1741,6 +1747,29 @@ export class Game {
         this.nukePendingTarget = null;
         this.nukePendingSource = null;
       }
+    }
+
+    // C++ Logic.AI() processes objects in order: entities → buildings → aircraft.
+    // Building timer RNG must be interleaved BETWEEN entity and aircraft processing
+    // to match C++ rejection sampling patterns at timer fire ticks.
+    this.tickStructureMissionTimers();
+
+    // Aircraft entities: second pass (processed AFTER buildings in C++ Logic layer)
+    for (const entity of this.entities) {
+      if (!entity.alive || !entity.isAirUnit) continue;
+      entity.rotTickedThisFrame = false;
+      entity.turretRotTickedThisFrame = false;
+      if (entity.isInRecoilState) entity.isInRecoilState = false;
+      if (entity.inLimbo) continue;
+      this.updateEntity(entity);
+      entity.tickAnimation();
+    }
+
+    // Aircraft mission timers (after buildings, matching Logic[73])
+    for (const entity of this.entities) {
+      if (!entity.alive || !entity.isAirUnit) continue;
+      if (entity.missionTimer > 0) { entity.missionTimer--; continue; }
+      entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
     }
 
     // Check for units leaving the map edge (civilian evacuation)
@@ -1893,17 +1922,8 @@ export class Game {
     // Without this, the step loop exits on state=lost before C4 can detonate.
     this.tickC4Timers();
 
-    // C++ building.cpp:3228-3306 — building Mission_Guard fires mission timer with Random_Pick(0,2)
-    // jitter. Each building consumes 1+ RNG call per timer fire for parity with C++ MissionClass::Timer.
-    this.tickStructureMissionTimers();
-
-    // C++ Logic layer processes aircraft AFTER buildings (Logic[73] after Logic[48-72]).
-    // Aircraft mission timers consume Normal_Delay+Random_Pick(0,2) via MissionClass::AI.
-    for (const entity of this.entities) {
-      if (!entity.alive || !entity.isAirUnit) continue;
-      if (entity.missionTimer > 0) { entity.missionTimer--; continue; }
-      entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-    }
+    // Building + aircraft timers now run inside the entity loop section above
+    // (interleaved with entity processing to match C++ Logic layer order).
 
     // Defensive structure auto-fire
     this._runCombat(ctx => _updateStructureCombat(ctx));
