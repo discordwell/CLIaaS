@@ -880,38 +880,29 @@ export class Entity {
       return false; // still rotating — don't move yet
     }
 
-    // --- Infantry path: C++ infantry.cpp:4019 moves full distance every tick ---
-    // Infantry does NOT use SpeedAccum (that's DriveClass only). C++ Coord_Move
-    // uses integer sin/cos tables with >> 7 truncation.
+    // --- Infantry path: C++ infantry.cpp:4019 moves at constant speed per tick ---
+    // C++ uses maxspeed * fixed(movespeed, 256) where movespeed is distance to
+    // the next sub-cell position (~128-256 leptons). At that scale, the proportional
+    // factor is ~1.0, making movement effectively constant at maxspeed.
+    // We use constant speed matching _Scale_To_256 with integer Coord_Move truncation.
     if (this.stats.isInfantry) {
       const face = this.desiredFacing;
       const fdx = DIR_DX[face];
       const fdy = DIR_DY[face];
       const isDiagonal = fdx !== 0 && fdy !== 0;
 
-      // C++ infantry.cpp:4019: maxspeed * fixed(movespeed, 256)
-      // effectiveSpeed is already in pixels/tick. Convert to leptons, apply
-      // C++ Coord_Move integer sin/cos truncation, then back to pixels.
-      // SinTable[0]=127 (cardinal), SinTable[32]=90 (diagonal 45deg).
-      // calcx = (distance * sin) >> 7  — integer truncation.
-      //
-      // C++ _Scale_To_256 truncates to integer leptons BEFORE Coord_Move applies
-      // the sin/cos factor. Without this floor, fractional leptons (e.g. 10.24
-      // for E1 Speed=4) leak through and inflate the per-tick distance:
-      //   broken:  floor(10.24 * 127 / 128) = 10 leptons/tick
-      //   correct: floor(floor(10.24) * 127 / 128) = floor(10 * 127 / 128) = 9
+      // maxspeed = _Scale_To_256(Speed), integer truncated before sin/cos
       const sinFactor = isDiagonal ? 90 : 127;
-      const distLeptons = Math.floor(effectiveSpeed / LP); // C++ integer MaxSpeed
+      const distLeptons = Math.floor(effectiveSpeed / LP);
       const axisMove = Math.floor(distLeptons * sinFactor / 128) * LP;
 
-      // Clamp to remaining distance to prevent overshoot
       const stepX = Math.min(Math.abs(fdx * axisMove), Math.abs(dx)) * Math.sign(dx || fdx);
       const stepY = Math.min(Math.abs(fdy * axisMove), Math.abs(dy)) * Math.sign(dy || fdy);
       this.pos.x += stepX;
       this.pos.y += stepY;
       const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
 
-      return totalStep >= dist - 1.5; // match infantry snap threshold
+      return totalStep >= dist - 1.5;
     }
 
     // --- Vehicle / aircraft path: SpeedAccum lepton accumulator ---
