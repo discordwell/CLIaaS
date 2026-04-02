@@ -1687,8 +1687,12 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   rawUnits.sort((a, b) => a.houseOrder - b.houseOrder || a.iniIdx - b.iniIdx);
   for (const { entity } of rawUnits) entities.push(entity);
 
-  // Infantry: house-grouped like units. C++ Read_INI iterates houses in enum order,
-  // scanning all INI entries for matching house per pass.
+  // Infantry: C++ Logic layer order must match for RNG parity.
+  // Empirical testing shows C++ infantry at Logic[26-47] with call pattern
+  // 3,1,1,1,1,1,3,3,... Starting with a 3-call entity (Random_Animate on Greece E1).
+  // House-sorted order (Greece→USSR→England) produces 67/67 seed match with only
+  // 1 extra call from rejection sampling. INI order gives 3 fewer calls.
+  // Keep house-sorted as closest match.
   const rawInf: Array<{ entity: Entity; houseOrder: number; iniIdx: number }> = [];
   for (let i = 0; i < data.infantry.length; i++) {
     const inf = data.infantry[i];
