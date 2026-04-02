@@ -395,8 +395,7 @@ export function activateSuperweapon(
         if (unit.stats.isInfantry) {
           const origin = { x: unit.pos.x, y: unit.pos.y };
           // C++ moves infantry to destination cell then kills with Take_Damage(Strength, WARHEAD_FIRE)
-          unit.pos.x = target.x;
-          unit.pos.y = target.y;
+          unit.setPosition(target.x, target.y);
           unit.prevPos.x = target.x;
           unit.prevPos.y = target.y;
           const damage = unit.hp;
@@ -415,8 +414,7 @@ export function activateSuperweapon(
           // C++ house.cpp:2828-2830: Demo Truck self-destruct after chronoshift
           // tech->Assign_Target(tech->As_Target()) causes self-targeting → explosion
           const origin = { x: unit.pos.x, y: unit.pos.y };
-          unit.pos.x = target.x;
-          unit.pos.y = target.y;
+          unit.setPosition(target.x, target.y);
           unit.prevPos.x = target.x;
           unit.prevPos.y = target.y;
           unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
@@ -457,8 +455,7 @@ export function activateSuperweapon(
               destY = nearby.cy * CELL_SIZE + CELL_SIZE / 2;
             }
           }
-          unit.pos.x = destX;
-          unit.pos.y = destY;
+          unit.setPosition(destX, destY);
           unit.prevPos.x = destX;
           unit.prevPos.y = destY;
           unit.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;

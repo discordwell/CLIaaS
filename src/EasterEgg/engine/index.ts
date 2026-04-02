@@ -1998,8 +1998,7 @@ export class Game {
       if (e.moebiusCountDown > 0) {
         e.moebiusCountDown--;
         if (e.moebiusCountDown === 0 && e.moebiusCell) {
-          e.pos.x = e.moebiusCell.x;
-          e.pos.y = e.moebiusCell.y;
+          e.setPosition(e.moebiusCell.x, e.moebiusCell.y);
           e.prevPos.x = e.moebiusCell.x;
           e.prevPos.y = e.moebiusCell.y;
           e.chronoShiftTick = CHRONO_SHIFT_VISUAL_TICKS;
@@ -5188,8 +5187,7 @@ export class Game {
       actual -= PIXEL_LEPTON_W;
 
       if (entity.trackIndex >= track!.length) {
-        entity.pos.x = targetX;
-        entity.pos.y = targetY;
+        entity.setPosition(targetX, targetY);
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
@@ -5200,8 +5198,7 @@ export class Game {
 
       // End marker: offset (0,0) and trackIndex > 0 (C++ drive.cpp:712)
       if (step.x === 0 && step.y === 0 && entity.trackIndex > 0) {
-        entity.pos.x = targetX;
-        entity.pos.y = targetY;
+        entity.setPosition(targetX, targetY);
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
@@ -5211,9 +5208,10 @@ export class Game {
       // Apply Smooth_Turn: transform offset with F_T/F_X/F_Y flags
       const result = smoothTurn(step.x, step.y, step.facing, flags);
 
-      // Position = target cell center + transformed lepton offset (converted to pixels)
-      entity.pos.x = targetX + result.x * LP;
-      entity.pos.y = targetY + result.y * LP;
+      // Position = target cell center + transformed lepton offset (integer lepton space)
+      entity.leptonX = Math.round(targetX / LP) + result.x;
+      entity.leptonY = Math.round(targetY / LP) + result.y;
+      entity.syncPosFromLeptons();
 
       // Update facing from transformed DirType → 32-step → 8-dir
       const dir32 = Math.floor(result.facing / 8);
@@ -5873,8 +5871,7 @@ export class Game {
         if (!passable) {
           const alt = nearbyLocation(this.map, cell, naval);
           if (alt) {
-            entity.pos.x = alt.cx * CELL_SIZE + CELL_SIZE / 2;
-            entity.pos.y = alt.cy * CELL_SIZE + CELL_SIZE / 2;
+            entity.setPosition(alt.cx * CELL_SIZE + CELL_SIZE / 2, alt.cy * CELL_SIZE + CELL_SIZE / 2);
           }
         }
       }

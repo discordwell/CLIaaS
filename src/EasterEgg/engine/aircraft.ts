@@ -253,8 +253,7 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   const dist = Math.sqrt(dx * dx + dy * dy);
 
   if (dist <= 0.5) {
-    entity.pos.x = target.x;
-    entity.pos.y = target.y;
+    entity.setPosition(target.x, target.y);
     entity.speedAccum = 0;
     return true; // arrived
   }
@@ -337,8 +336,9 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     // Integer math in lepton space matching C++ calcy = (dist * table) >> 7
     const dxLeptons = (moveLeptons * cosVal) >> 7;
     const dyLeptons = -((moveLeptons * sinVal) >> 7);
-    entity.pos.x += dxLeptons * LP;
-    entity.pos.y += dyLeptons * LP;
+    entity.leptonX += dxLeptons;
+    entity.leptonY += dyLeptons;
+    entity.syncPosFromLeptons();
 
     return dist <= 1.5;
   } else {
@@ -349,13 +349,20 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     const isDiagonal = fdx !== 0 && fdy !== 0;
     const axisDist = isDiagonal ? movePixels * Math.SQRT1_2 : movePixels;
 
-    // Clamp to remaining distance to prevent overshoot
-    const stepX = Math.min(Math.abs(fdx * axisDist), Math.abs(dx)) * Math.sign(dx || fdx);
-    const stepY = Math.min(Math.abs(fdy * axisDist), Math.abs(dy)) * Math.sign(dy || fdy);
-    entity.pos.x += stepX;
-    entity.pos.y += stepY;
+    // Integer lepton movement for 8-dir aircraft
+    const sinFactor8 = isDiagonal ? 90 : 127;
+    const axisLeptons8 = (moveLeptons * sinFactor8) >> 7;
+    const tLX = Math.round(target.x / LP);
+    const tLY = Math.round(target.y / LP);
+    const dxL = tLX - entity.leptonX;
+    const dyL = tLY - entity.leptonY;
+    const stepLX = Math.min(Math.abs(fdx * axisLeptons8), Math.abs(dxL)) * Math.sign(dxL || fdx);
+    const stepLY = Math.min(Math.abs(fdy * axisLeptons8), Math.abs(dyL)) * Math.sign(dyL || fdy);
+    entity.leptonX += stepLX;
+    entity.leptonY += stepLY;
+    entity.syncPosFromLeptons();
 
-    const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+    const totalStep = Math.abs(stepLX) + Math.abs(stepLY);
     return totalStep >= dist - 0.5;
   }
 }
@@ -573,8 +580,9 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         const moveLeptons = actual - remainder;
         if (moveLeptons > 0) {
           const f = entity.facing256;
-          entity.pos.x += ((moveLeptons * COS_TABLE_256[f]) >> 7) * LP;
-          entity.pos.y -= ((moveLeptons * SIN_TABLE_256[f]) >> 7) * LP;
+          entity.leptonX += (moveLeptons * COS_TABLE_256[f]) >> 7;
+          entity.leptonY -= (moveLeptons * SIN_TABLE_256[f]) >> 7;
+          entity.syncPosFromLeptons();
         }
       }
 
@@ -590,8 +598,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       if (!entity.moveTarget) { entity.aircraftState = 'returning'; return true; }
       const arrived = aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
       if (arrived) {
-        entity.pos.x = entity.moveTarget.x;
-        entity.pos.y = entity.moveTarget.y;
+        entity.setPosition(entity.moveTarget.x, entity.moveTarget.y);
         entity.aircraftState = 'unload_land';
       }
       return true;
@@ -615,8 +622,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         const passenger = entity.passengers.shift()!;
         // Place passenger at helicopter's position
         passenger.alive = true;
-        passenger.pos.x = entity.pos.x;
-        passenger.pos.y = entity.pos.y;
+        passenger.setPosition(entity.pos.x, entity.pos.y);
         passenger.mission = Mission.GUARD;
         passenger.transportRef = null;
         passenger.inLimbo = false;
@@ -677,8 +683,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       const padPos = { x: (pad.cx + pw / 2) * CELL_SIZE, y: (pad.cy + ph / 2) * CELL_SIZE };
       const dist = worldDist(entity.pos, padPos);
       if (dist <= CELL_SIZE) {
-        entity.pos.x = padPos.x;
-        entity.pos.y = padPos.y;
+        entity.setPosition(padPos.x, padPos.y);
         entity.aircraftState = 'landing';
         entity.landedAtStructure = padIdx;
         pad.dockedAircraft = entity.id;

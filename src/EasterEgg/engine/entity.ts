@@ -83,8 +83,13 @@ export class Entity {
   stats: UnitStats;
   house: House;
 
-  // Position
+  // Position — pixel coordinates derived from integer leptons each tick.
   pos: WorldPos;
+  // Integer lepton coordinates — C++ COORDINATE parity.
+  // 1 cell = 256 leptons. All movement math operates on these.
+  // pos.x/pos.y are derived via pos.x = leptonX * LP each tick.
+  leptonX = 0;
+  leptonY = 0;
   facing: Dir = Dir.N;
   desiredFacing: Dir = Dir.N; // target facing for gradual rotation
   turretFacing: Dir = Dir.N;  // turret direction (for turreted vehicles)
@@ -188,6 +193,21 @@ export class Entity {
 
   // Moving-platform tracking (C++ techno.cpp:3106-3108 — units firing while moving get extra inaccuracy)
   prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
+
+  /** Set pixel position and sync integer lepton coordinates. Use for teleports, spawns,
+   *  and any direct position assignment (NOT movement — movement writes leptons directly). */
+  setPosition(x: number, y: number): void {
+    this.pos.x = x;
+    this.pos.y = y;
+    this.leptonX = Math.round(x / LP);
+    this.leptonY = Math.round(y / LP);
+  }
+
+  /** Sync pixel pos from lepton coordinates. Called after lepton-space movement. */
+  syncPosFromLeptons(): void {
+    this.pos.x = this.leptonX * LP;
+    this.pos.y = this.leptonY * LP;
+  }
 
   /** Credit a kill (RA1: no promotion system, just tracks kill count) */
   creditKill(): void {
@@ -352,6 +372,8 @@ export class Entity {
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;
     this.house = house;
     this.pos = { x, y };
+    this.leptonX = Math.round(x / LP);
+    this.leptonY = Math.round(y / LP);
     this.hp = this.stats.strength;
     this.maxHp = this.stats.strength;
     this.weapon = this.stats.primaryWeapon
@@ -859,14 +881,13 @@ export class Entity {
     const dy = target.y - this.pos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // C++ infantry snaps to cell center at < 16 leptons (0x0010) = ~1.5 pixels.
-    // Vehicles/aircraft snap at sub-pixel (0.5) to prevent oscillation.
-    const snapThreshold = this.stats.isInfantry ? 1.5 : 0.5;
-    if (dist <= snapThreshold) {
-      this.pos.x = target.x;
-      this.pos.y = target.y;
-      this.speedAccum = 0; // C++: reset accumulator on arrival
-      return true; // arrived
+    // C++ infantry snaps at Distance < 0x0010 (16 leptons). Vehicles at sub-pixel.
+    const snapLeptons = this.stats.isInfantry ? 16 : 5;
+    const distLeptonsTotal = Math.round(dist / LP);
+    if (distLeptonsTotal < snapLeptons) {
+      this.setPosition(target.x, target.y);
+      this.speedAccum = 0;
+      return true;
     }
 
     const oldFacing = this.facing;
@@ -891,18 +912,25 @@ export class Entity {
       const fdy = DIR_DY[face];
       const isDiagonal = fdx !== 0 && fdy !== 0;
 
-      // maxspeed = _Scale_To_256(Speed), integer truncated before sin/cos
+      // maxspeed = _Scale_To_256(Speed), integer leptons
       const sinFactor = isDiagonal ? 90 : 127;
-      const distLeptons = Math.floor(effectiveSpeed / LP);
-      const axisMove = Math.floor(distLeptons * sinFactor / 128) * LP;
+      const maxspeed = Math.floor(effectiveSpeed / LP);
+      // C++ Coord_Move: per-axis = (maxspeed * sin/cos_table) >> 7
+      const axisLeptons = (maxspeed * sinFactor) >> 7;
 
-      const stepX = Math.min(Math.abs(fdx * axisMove), Math.abs(dx)) * Math.sign(dx || fdx);
-      const stepY = Math.min(Math.abs(fdy * axisMove), Math.abs(dy)) * Math.sign(dy || fdy);
-      this.pos.x += stepX;
-      this.pos.y += stepY;
-      const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+      // Integer lepton movement — write to leptonX/Y, derive pos
+      const targetLeptonX = Math.round(target.x / LP);
+      const targetLeptonY = Math.round(target.y / LP);
+      const dxL = targetLeptonX - this.leptonX;
+      const dyL = targetLeptonY - this.leptonY;
+      const stepLX = Math.min(Math.abs(fdx * axisLeptons), Math.abs(dxL)) * Math.sign(dxL || fdx);
+      const stepLY = Math.min(Math.abs(fdy * axisLeptons), Math.abs(dyL)) * Math.sign(dyL || fdy);
+      this.leptonX += stepLX;
+      this.leptonY += stepLY;
+      this.syncPosFromLeptons();
 
-      return totalStep >= dist - 1.5;
+      const steppedL = Math.abs(stepLX) + Math.abs(stepLY);
+      return steppedL >= distLeptonsTotal - 16;
     }
 
     // --- Vehicle / aircraft path: SpeedAccum lepton accumulator ---
@@ -942,21 +970,27 @@ export class Entity {
     // 1-2 ticks before the C++ integer position.
     // Use DIR_DX/DIR_DY lookup (matching the 8-direction facing) for the movement
     // direction, with sqrt(2) correction for diagonals.
+    // Integer lepton movement for vehicles/aircraft (C++ drive.cpp / fly.cpp)
     const face = this.desiredFacing;
     const fdx = DIR_DX[face];
     const fdy = DIR_DY[face];
     const isDiagonal = fdx !== 0 && fdy !== 0;
-    // C++ calcx/calcy: integer sin/cos × distance >> 7. For 8-dir, diagonals
-    // move at cos(45°) = 0.707 in each axis. Scale movePixels accordingly.
-    const axisDist = isDiagonal ? movePixels * Math.SQRT1_2 : movePixels;
-    // Clamp to remaining distance to prevent overshoot
-    const stepX = Math.min(Math.abs(fdx * axisDist), Math.abs(dx)) * Math.sign(dx || fdx);
-    const stepY = Math.min(Math.abs(fdy * axisDist), Math.abs(dy)) * Math.sign(dy || fdy);
-    this.pos.x += stepX;
-    this.pos.y += stepY;
-    const totalStep = Math.sqrt(stepX * stepX + stepY * stepY);
+    // C++ Coord_Move: per-axis (moveLeptons * sin/cos_table) >> 7
+    // Cardinal: sinFactor=127, Diagonal: sinFactor=90
+    const sinFactor = isDiagonal ? 90 : 127;
+    const axisLeptons = (moveLeptons * sinFactor) >> 7;
 
-    return totalStep >= dist - 0.5; // arrived if we moved the full remaining distance
+    const targetLeptonX = Math.round(target.x / LP);
+    const targetLeptonY = Math.round(target.y / LP);
+    const dxL = targetLeptonX - this.leptonX;
+    const dyL = targetLeptonY - this.leptonY;
+    const stepLX = Math.min(Math.abs(fdx * axisLeptons), Math.abs(dxL)) * Math.sign(dxL || fdx);
+    const stepLY = Math.min(Math.abs(fdy * axisLeptons), Math.abs(dyL)) * Math.sign(dyL || fdy);
+    this.leptonX += stepLX;
+    this.leptonY += stepLY;
+    this.syncPosFromLeptons();
+
+    return Math.abs(dxL) + Math.abs(dyL) <= axisLeptons + 5;
   }
 }
 

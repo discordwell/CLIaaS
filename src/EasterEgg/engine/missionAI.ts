@@ -120,8 +120,7 @@ function scatterInfantry(ctx: MissionAIContext, victim: Entity, attackerPos: Wor
   const scatterY = victim.pos.y + dy * CELL_SIZE * 0.5;
   const sc = worldToCell(scatterX, scatterY);
   if (ctx.map.isPassable(sc.cx, sc.cy)) {
-    victim.pos.x = scatterX;
-    victim.pos.y = scatterY;
+    victim.setPosition(scatterX, scatterY);
   }
 }
 

@@ -260,8 +260,7 @@ export function teleportChronoTank(ctx: SpecialUnitsContext, entity: Entity, tar
     sprite: 'litning', spriteStart: 0,
   });
   // Teleport — also snap prevPos to prevent interpolation swoosh
-  entity.pos.x = target.x;
-  entity.pos.y = target.y;
+  entity.setPosition(target.x, target.y);
   entity.prevPos.x = target.x;
   entity.prevPos.y = target.y;
   // Blue flash at destination

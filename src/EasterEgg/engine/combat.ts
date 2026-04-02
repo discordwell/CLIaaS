@@ -273,8 +273,7 @@ function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldP
   const scatterY = victim.pos.y + dy * CELL_SIZE * 0.5;
   const sc = worldToCell(scatterX, scatterY);
   if (ctx.map.isPassable(sc.cx, sc.cy)) {
-    victim.pos.x = scatterX;
-    victim.pos.y = scatterY;
+    victim.setPosition(scatterX, scatterY);
   }
 }
 
@@ -1061,8 +1060,7 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
           const cy = impactCell.cy + dy;
           if (ctx.map.inBounds(cx, cy) && ctx.map.isPassable(cx, cy)) {
             dog.inLimbo = false;
-            dog.pos.x = cx * CELL_SIZE + CELL_SIZE / 2;
-            dog.pos.y = cy * CELL_SIZE + CELL_SIZE / 2;
+            dog.setPosition(cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
             // C++ bullet.cpp:152 — Do_Action(DO_DOG_MAUL, true): dog performs maul animation after landing
             dog.animState = AnimState.ATTACK;
             dog.animFrame = 0;
@@ -1127,8 +1125,7 @@ export function applySplashDamage(
       // Only scatter to passable terrain
       const sc = worldToCell(scatterX, scatterY);
       if (ctx.map.isPassable(sc.cx, sc.cy)) {
-        other.pos.x = scatterX;
-        other.pos.y = scatterY;
+        other.setPosition(scatterX, scatterY);
       }
     }
 
