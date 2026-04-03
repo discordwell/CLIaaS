@@ -1157,10 +1157,14 @@ export class Game {
     } else {
       this.alliances = buildDefaultAlliances();
     }
-    // Build player house set for Entity.isPlayerUnit — all houses allied with playerHouse
+    // Build player house set for Entity.isPlayerUnit — houses that the PLAYER considers allies.
+    // C++ parity: isAllied checks the CALLER's alliance bitfield. Greece must declare
+    // Allies=Turkey for Turkey to be player-controlled. Turkey declaring Allies=Greece
+    // only makes Turkey consider Greece friendly, not vice versa.
     const playerHouseSet = new Set<House>();
-    for (const [house, allies] of this.alliances) {
-      if (allies?.has(this.playerHouse)) playerHouseSet.add(house);
+    const playerAllies = this.alliances.get(this.playerHouse);
+    if (playerAllies) {
+      for (const ally of playerAllies) playerHouseSet.add(ally);
     }
     playerHouseSet.add(this.playerHouse);
     setPlayerHouses(playerHouseSet);
