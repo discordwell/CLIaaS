@@ -1768,7 +1768,9 @@ export class Game {
     // Aircraft mission timers (after buildings, matching Logic[73])
     for (const entity of this.entities) {
       if (!entity.alive || !entity.isAirUnit) continue;
-      if (entity.missionTimer > 0) { entity.missionTimer--; continue; }
+      // C++ CDTimerClass: decrement then check
+      if (entity.missionTimer > 0) entity.missionTimer--;
+      if (entity.missionTimer > 0) continue;
       entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
     }
 
@@ -3473,6 +3475,7 @@ export class Game {
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
     // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
     // Between timer fires, per-tick systems (Firing_AI, movement) still run.
+    // C++ CDTimerClass: decrement then check. Timer=14 fires after 14 ticks.
     if (entity.missionTimer > 0) {
       entity.missionTimer--;
     }
@@ -7279,11 +7282,12 @@ export class Game {
       if (!s.alive) continue;
       if (s.buildProgress !== undefined) continue; // still under construction
       if (s.sellProgress !== undefined) continue;  // being sold
+      // C++ CDTimerClass: decrement then check. Timer fires when it reaches 0.
       if (s.missionTimer > 0) {
         s.missionTimer--;
-        continue;
       }
-      // Timer fired — consume RNG for jitter (C++ Random_Pick(0, 2))
+      if (s.missionTimer > 0) continue; // still counting down
+      // Timer fired (reached 0 this tick or was already 0)
       const jitter = ScenarioRandom.nextInRange(0, 2);
       if (s.weapon) {
         // Weapon-equipped: AA_Delay + jitter (building.cpp:3305)
