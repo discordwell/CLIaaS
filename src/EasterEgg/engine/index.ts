@@ -3494,14 +3494,16 @@ export class Game {
         }
         break;
       case Mission.HUNT:
-        // C++ foot.cpp:654-702: Mission_Hunt — target scan when timer fires
+        // C++ foot.cpp:654-702: Mission_Hunt — target scan when timer fires.
+        // C++ AI chain: InfantryClass::AI (movement) → MissionClass::AI (mission timer).
+        // Movement runs BEFORE Mission_Hunt sets TarCom. So on the fire tick,
+        // the infantry has no target and doesn't effectively move with sprint.
+        // Match this by only moving between scans (after target is set).
         if (missionTimerFired) {
           this.updateHunt(entity);
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-        }
-        // C++ Approach_Target runs EVERY tick (not gated by mission timer).
-        // Movement toward target is independent of the hunt scan interval.
-        this._runMissionAI(ctx => {
+        } else {
+          this._runMissionAI(ctx => {
           if (entity.target?.alive && !entity.inRange(entity.target)) {
             const targetCell = { cx: Math.floor(entity.target.pos.x / CELL_SIZE), cy: Math.floor(entity.target.pos.y / CELL_SIZE) };
             if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
@@ -3516,6 +3518,7 @@ export class Game {
             }
           }
         });
+        }
         break;
       case Mission.GUARD:
       case Mission.STICKY:

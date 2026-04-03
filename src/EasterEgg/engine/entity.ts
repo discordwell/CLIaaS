@@ -913,28 +913,19 @@ export class Entity {
       const isDiagonal = fdx !== 0 && fdy !== 0;
 
       // C++ infantry.cpp:3990-4019:
-      //   movespeed = Distance(Head_To_Coord());  // leptons to waypoint
-      //   if (IsDog && TarCom) movespeed *= 2;     // canine sprint already in effectiveSpeed
+      //   movespeed = Speed;  // TechnoClass::Speed = current speed fraction (0-255)
+      //   if (IsDog && TarCom) movespeed *= 2;
       //   Coord_Move(dir, maxspeed * fixed(movespeed, 256));
       //
-      // effectiveSpeed already includes canine sprint (2x). To match C++, we need
-      // to separate maxspeed (base _Scale_To_256) from the proportional factor.
-      // effectiveSpeed = stats.speed * MPH_TO_PX * speedBias * (2 if canine)
-      // maxspeed = floor(stats.speed * MPH_TO_PX * speedBias / LP)  [without sprint]
-      // movespeed = dist_to_waypoint_leptons * (2 if canine)
-      // actual = maxspeed * min(movespeed, 256) / 256
+      // Speed=255 for full speed. maxspeed = _Scale_To_256(MaxSpeed).
+      // maxspeed * fixed(255, 256) = maxspeed * 255/256 ≈ maxspeed.
+      // With canine sprint: movespeed=510 → maxspeed * 510/256 ≈ 2*maxspeed.
+      //
+      // effectiveSpeed already includes canine sprint: Speed * MPH_TO_PX * 2.
+      // maxspeed = floor(effectiveSpeed / LP) directly matches the C++ result.
       const sinFactor = isDiagonal ? 90 : 127;
-      const baseMaxspeed = Math.floor(this.stats.speed * MPH_TO_PX * this.speedBias / LP);
-      // C++ movespeed = Distance(Head_To_Coord()) in leptons
-      const movespeedRaw = distLeptonsTotal;
-      // Canine sprint doubles movespeed (already in effectiveSpeed, extract it)
-      const isCanineSprinting = this.stats.isCanine && (this.target?.alive || this.moveTarget || this.path.length > 0);
-      // C++ fixed(movespeed, 256) = movespeed/256 — no cap, can exceed 1.0 with sprint.
-      // Head_To_Coord() is the next cell center, so movespeed ≤ ~362 (diagonal cell).
-      // C++ has no cap — fixed(movespeed, 256) can exceed 1.0
-      const movespeed = movespeedRaw * (isCanineSprinting ? 2 : 1);
-      const actualSpeed = Math.floor(baseMaxspeed * movespeed / 256);
-      const axisLeptons = (actualSpeed * sinFactor) >> 7;
+      const maxspeed = Math.floor(effectiveSpeed / LP);
+      const axisLeptons = (maxspeed * sinFactor) >> 7;
 
       // Integer lepton movement — write to leptonX/Y, derive pos
       const targetLeptonX = Math.round(target.x / LP);
