@@ -1159,8 +1159,12 @@ export function calculateHouseEdgeSpawnCell(
     const inCx = isHorizontalEdge ? candidate.cx : (edge === 'west' ? candidate.cx + 1 : candidate.cx - 1);
     const inCy = isHorizontalEdge ? (edge === 'north' ? candidate.cy + 1 : candidate.cy - 1) : candidate.cy;
 
-    if (!map.isWaterPassable(inCx, inCy)) {
-      // Scan along the edge for the nearest water cell (check inside cells)
+    // C++ Good_Reinforcement_Cell checks BOTH outcell AND incell for passability.
+    // The outcell is outside the map boundary — cells there may have different terrain
+    // (e.g., CLEAR land behind a water edge). Both must be water-passable.
+    const outWater = map.isWaterPassableRelaxed(candidate.cx, candidate.cy);
+    if (!outWater || !map.isWaterPassable(inCx, inCy)) {
+      // Scan along the edge for the nearest water cell (check both inside AND outside)
       const edgeCoord = isHorizontalEdge ? candidate.cy : candidate.cx;
       const scanStart = isHorizontalEdge ? x : y;
       const scanLen = isHorizontalEdge ? w : h;
@@ -1170,10 +1174,12 @@ export function calculateHouseEdgeSpawnCell(
       let bestDist = Infinity;
       for (let i = 0; i < scanLen; i++) {
         const sc = scanStart + i;
-        // Check the inside cell for water passability
+        // C++ Good_Reinforcement_Cell: check BOTH outside AND inside cells
         const checkCx = isHorizontalEdge ? sc : (edge === 'west' ? edgeCoord + 1 : edgeCoord - 1);
         const checkCy = isHorizontalEdge ? (edge === 'north' ? edgeCoord + 1 : edgeCoord - 1) : sc;
-        if (map.isWaterPassable(checkCx, checkCy)) {
+        const outCx = isHorizontalEdge ? sc : edgeCoord;
+        const outCy = isHorizontalEdge ? edgeCoord : sc;
+        if (map.isWaterPassable(checkCx, checkCy) && map.isWaterPassableRelaxed(outCx, outCy)) {
           const dist = Math.abs(sc - alignCoord);
           if (dist < bestDist) {
             bestDist = dist;
@@ -2074,8 +2080,16 @@ export function classifyOutdoorTerrain(
 ): void {
   const isSnow = theatre === 'SNOW';
 
-  for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
-    for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
+  // C++ parity: classify terrain 1 cell beyond visible bounds on each side.
+  // C++ MapPack covers the full 128x128 grid — cells just outside bounds need
+  // terrain data for Good_Reinforcement_Cell (checks both outcell and incell).
+  const startY = Math.max(0, map.boundsY - 1);
+  const endY = Math.min(128, map.boundsY + map.boundsH + 1);
+  const startX = Math.max(0, map.boundsX - 1);
+  const endX = Math.min(128, map.boundsX + map.boundsW + 1);
+
+  for (let cy = startY; cy < endY; cy++) {
+    for (let cx = startX; cx < endX; cx++) {
       const idx = cy * 128 + cx;
       const tmpl = templateType[idx];
 

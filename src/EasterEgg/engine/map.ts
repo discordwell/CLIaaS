@@ -396,6 +396,13 @@ export class GameMap {
     return this.getTerrain(cx, cy) === Terrain.WATER;
   }
 
+  /** Check water passability without bounds restriction — for cells outside map boundary.
+   *  C++ MapPack covers the full 128x128 grid; cells outside visible bounds still have terrain. */
+  isWaterPassableRelaxed(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= 128 || cy < 0 || cy >= 128) return false;
+    return this.getTerrain(cx, cy) === Terrain.WATER;
+  }
+
   /** Check if a cell is a shore cell (land cell adjacent to water) */
   isShoreCell(cx: number, cy: number): boolean {
     if (!this.isPassable(cx, cy)) return false;
