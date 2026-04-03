@@ -403,7 +403,13 @@ export class Entity {
   }
 
   get cell(): CellPos {
-    return worldToCell(this.pos.x, this.pos.y);
+    // C++ Coord_Cell: extract cell index from upper byte of 16-bit lepton coordinate.
+    // Uses integer lepton division (>>8) instead of pixel-based Math.floor(px/24)
+    // to avoid floating-point boundary rounding differences.
+    return {
+      cx: (this.leptonX >> 8) & 0x7F,
+      cy: (this.leptonY >> 8) & 0x7F,
+    };
   }
 
   /** C++ foot.cpp:2275-2307 Queue_Navigation_List — append waypoint, cap at 10.

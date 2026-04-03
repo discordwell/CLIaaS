@@ -3494,11 +3494,6 @@ export class Game {
         }
         break;
       case Mission.HUNT:
-        // C++ foot.cpp:654-702: Mission_Hunt — target scan when timer fires.
-        // C++ AI chain: InfantryClass::AI (movement) → MissionClass::AI (mission timer).
-        // Movement runs BEFORE Mission_Hunt sets TarCom. So on the fire tick,
-        // the infantry has no target and doesn't effectively move with sprint.
-        // Match this by only moving between scans (after target is set).
         if (missionTimerFired) {
           this.updateHunt(entity);
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
