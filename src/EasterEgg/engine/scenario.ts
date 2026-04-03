@@ -1853,7 +1853,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
 
     if (s.type === 'HPAD') {
       // Check if any aircraft already parked here
-      const padWorld = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
+      // C++ parity: HPAD is 2x2, aircraft spawns at (cx+1, cy) — the top-right cell center.
+      // C++ helipad Unlimbo docks aircraft at this position.
+      const padWorld = cellToWorld(s.cx + 1, s.cy);
       const alreadyParked = entities.some(e =>
         e.stats.isAircraft && Math.abs(e.pos.x - padWorld.x) < CELL_SIZE * 2 && Math.abs(e.pos.y - padWorld.y) < CELL_SIZE * 2
       );
@@ -2478,6 +2480,7 @@ export function executeTriggerAction(
   houseEdges?: Map<House, string>,
   mapBounds?: { x: number; y: number; w: number; h: number },
   playerHouseId?: number,
+  map?: GameMap,
 ): TriggerActionResult {
   const result: TriggerActionResult = { spawned: [] };
 
@@ -2517,11 +2520,21 @@ export function executeTriggerAction(
       // and walk in. The team's origin waypoint determines which edge to use.
       // Only aircraft spawn at the edge cell AND fly — ground units get MISSION_GUARD
       // and the team mission script moves them to the waypoint.
+      // C++ reinf.cpp:441 — Calculated_Cell uses the first member's speed class.
+      // Naval teams (first member is vessel) use MZONE_WATER for water-cell scanning.
+      const firstMemberType = toUnitType(team.members[0]?.type ?? '');
+      const firstMemberStats = firstMemberType ? UNIT_STATS[firstMemberType] : null;
+      const isNavalTeam = firstMemberStats?.isVessel ?? false;
       const groundEdgeCell = (!team.members.every(m => {
         const ut = toUnitType(m.type);
         return ut && UNIT_STATS[ut]?.isAircraft;
       }) && houseEdges && mapBounds)
-        ? calculateHouseEdgeSpawnCell(teamHouse, houseEdges, mapBounds, wp)
+        ? calculateHouseEdgeSpawnCell(
+            teamHouse, houseEdges, mapBounds, wp,
+            () => ScenarioRandom.float(),
+            isNavalTeam ? map : undefined,
+            isNavalTeam,
+          )
         : null;
 
       for (const member of team.members) {
@@ -2545,7 +2558,6 @@ export function executeTriggerAction(
             spawnX = edgeWorld.x;
             spawnY = edgeWorld.y;
           }
-
           const entity = new Entity(unitType, house, spawnX, spawnY);
           // C++ reinf.cpp:465-468: ground units face outward (source<<1),
           // aircraft get Random_Pick(DIR_N, DIR_MAX) — random facing.

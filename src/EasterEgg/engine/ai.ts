@@ -902,6 +902,8 @@ export function updateBaseRebuild(ctx: AIContext): void {
     return;
   }
 
+  // C++ parity: rebuild has build time — nothing is ready at tick 1.
+  if (ctx.tick <= 75) return;
   if ((ctx.tick - 1) % 75 !== 0) return; // C++ parity: Frame starts at 0, TS tick starts at 1
 
   const aiHousesWithFact = new Set<House>();
@@ -1984,6 +1986,9 @@ export function updateAIIncome(ctx: AIContext): void {
 /** AI army building -- AI houses produce units when they have credits and barracks/factory */
 export function updateAIProduction(ctx: AIContext): void {
   const mods = AI_DIFFICULTY_MODS[ctx.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+  // C++ parity: AI_Infantry/AI_Unit queue units with build times — nothing is ready at tick 1.
+  // Skip production on the first firing to avoid instant-spawning units that C++ would still be building.
+  if (ctx.tick <= mods.productionInterval) return;
   if ((ctx.tick - 1) % mods.productionInterval !== 0) return;
 
   // For ant missions, respect ant cap using old random production

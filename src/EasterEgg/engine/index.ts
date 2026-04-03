@@ -5870,7 +5870,10 @@ export class Game {
       // 1 cell outside the boundary).
       for (const entity of result.spawned) {
         if (entity.isAirUnit) continue; // aircraft spawn outside map boundary
+        // C++ parity: edge-spawned reinforcements are 1 cell OUTSIDE the map boundary.
+        // Don't relocate them — they move in via team mission scripts (TMISSION_MOVE).
         const cell = worldToCell(entity.pos.x, entity.pos.y);
+        if (!this.map.inBounds(cell.cx, cell.cy)) continue;
         const naval = entity.stats.isVessel;
         const passable = naval ? this.map.isWaterPassable(cell.cx, cell.cy) : this.map.isTerrainPassable(cell.cx, cell.cy);
         if (!passable) {
@@ -6070,7 +6073,7 @@ export class Game {
         const actionResult = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
           this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
-          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1,
+          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map,
         );
         this.applyTriggerActionResult(actionResult, trigger);
       };
@@ -6255,7 +6258,7 @@ export class Game {
         const result = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
           this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
-          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1,
+          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map,
         );
         this.applyTriggerActionResult(result, trigger);
       };

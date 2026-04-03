@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-04-03T14:00Z — Parity Fix: AI Production, HPAD Position, Edge Reinforcements
+- **12/12 tick 1 perfect** (was 10/12). Fixed SCG07EA +1 E7 and SCG10EA +1 E1 from instant AI production.
+- **AI production delay**: `updateAIProduction` skips first firing interval (C++ has build time queue — nothing ready at tick 1).
+- **Base rebuild delay**: `updateBaseRebuild` skips first interval (C++ rebuild has build time). Fixed SCG10EA +1 PROC structure.
+- **HPAD aircraft spawn**: Corrected from 2x2 center to `cellToWorld(cx+1, cy)` matching C++ helipad docking position. Fixed SCG10EA HIND cell offset.
+- **Edge reinforcement relocation**: Ground units spawned at map edge (1 cell outside boundary) were incorrectly relocated by passability check. Added `inBounds` skip — C++ `Unlimbo()` succeeds outside boundary since terrain defaults to CLEAR.
+- **Naval edge cell scanning**: `calculateHouseEdgeSpawnCell` now receives `map` and `naval=true` for vessel teams. Scans along edge for water cells matching C++ `Good_Reinforcement_Cell` with `MZONE_WATER`.
+- **Remaining**: PT position 1-cell Y diff (terrain classification mismatch at cell (10,53) — TS=WATER, C++=not water). Late-tick RNG cascade from guard scan/Firing_AI at tick ~15.
+- **Test env note**: PARITY_CHECKPOINTS env var now supported for fine-grained tick comparison.
+
 ## 2026-04-01T06:00Z — Full Campaign Parity: 100% RNG Match Across 12 Scenarios
 - **14 Soviet missions tested**, 12 loaded successfully (SCG05EA/SCG14EA WASM timeout).
 - **RNG seeds: 100% match on all 12** — every WASM gameplay call produces identical seed in TS.
