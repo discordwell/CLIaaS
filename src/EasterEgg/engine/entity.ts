@@ -9,7 +9,7 @@ import {
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
-  CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, DIR_DX, DIR_DY,
+  CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, directionToLeptons, DIR_DX, DIR_DY,
   armorIndex, PRODUCTION_ITEMS,
 } from './types';
 import { LP, PIXEL_LEPTON_W } from './tracks';
@@ -897,7 +897,16 @@ export class Entity {
     }
 
     const oldFacing = this.facing;
-    this.desiredFacing = directionTo(this.pos, target);
+    // C++ uses integer lepton coordinates for direction computation (Desired_Facing8).
+    // Using pixel coords causes different diagonal boundary decisions due to float rounding.
+    // For entities with lepton coordinates, compute direction in lepton space.
+    if (this.leptonX !== 0 || this.leptonY !== 0) {
+      const targetLX = Math.round(target.x / LP);
+      const targetLY = Math.round(target.y / LP);
+      this.desiredFacing = directionToLeptons(this.leptonX, this.leptonY, targetLX, targetLY);
+    } else {
+      this.desiredFacing = directionTo(this.pos, target);
+    }
     const facingAligned = this.tickRotation();
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)

@@ -630,39 +630,16 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
+  // C++ Mission_Hunt: only scans for targets and switches to ATTACK if in range.
+  // Does NOT move the infantry — movement happens in the per-tick AI loop (Approach_Target).
+  // Moving here would give an extra movement tick on the scan tick.
   if (entity.inRange(entity.target)) {
     entity.mission = Mission.ATTACK;
     entity.animState = AnimState.ATTACK;
   } else {
     entity.animState = AnimState.WALK;
-    // Use pathfinding to reach target (recalc only when path is exhausted or target moved significantly)
-    const targetCell = worldToCell(entity.target.pos.x, entity.target.pos.y);
-    const pathExhausted = entity.path.length === 0 || entity.pathIndex >= entity.path.length;
-    // Only recalc on timer if target has moved >3 cells from path endpoint
-    let targetMovedFar = false;
-    if (!pathExhausted && ((ctx.tick + entity.id) % 15 === 0) && entity.path.length > 0) {
-      const lastWp = entity.path[entity.path.length - 1];
-      const dtx = lastWp.cx - targetCell.cx;
-      const dty = lastWp.cy - targetCell.cy;
-      targetMovedFar = (dtx * dtx + dty * dty) > 9; // >3 cells
-    }
-    if (pathExhausted || targetMovedFar) {
-      entity.path = findPath(ctx.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
-      entity.pathIndex = 0;
-    }
-    if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-      const nextCell = entity.path[entity.pathIndex];
-      const wp: WorldPos = {
-        x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
-        y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
-      };
-      if (entity.moveToward(wp, ctx.movementSpeed(entity))) {
-        entity.pathIndex++;
-      }
-    } else {
-      // No path found — move directly
-      entity.moveToward(entity.target.pos, ctx.movementSpeed(entity));
-    }
+    // Movement happens in the between-scans code (index.ts HUNT else branch),
+    // NOT here. C++ Mission_Hunt only sets target; Approach_Target moves.
   }
 }
 

@@ -1232,14 +1232,74 @@ export function worldDist(a: WorldPos, b: WorldPos): number {
 }
 
 // Direction from a to b (8-way)
+/** C++ face.cpp:65-123 Desired_Facing8 — integer direction computation (lepton space).
+ *  Uses INTEGER coordinates for exact C++ boundary decisions. */
+export function directionToLeptons(fromX: number, fromY: number, toX: number, toY: number): Dir {
+  let index = 0;
+  let xdiff = toX - fromX;
+  if (xdiff < 0) { index |= 0xC0; xdiff = -xdiff; }
+  let ydiff = fromY - toY; // C++ y1-y2 (inverted screen coords)
+  if (ydiff < 0) { index ^= 0x40; ydiff = -ydiff; }
+  const bigger = Math.max(xdiff, ydiff);
+  const smaller = Math.min(xdiff, ydiff);
+  // C++ integer: ((bigger+1)/2) with integer division
+  if (((bigger + 1) >> 1) <= smaller) {
+    index += 0x20;
+    return ((index >> 5) & 7) as Dir;
+  }
+  let adder = index & 0x40;
+  if (xdiff >= ydiff) adder ^= 0x40;
+  index += adder;
+  return ((index >> 5) & 7) as Dir;
+}
+
+/** C++ face.cpp:65-123 Desired_Facing8 — pixel-based direction (legacy fallback).
+ *  Uses exact C++ algorithm: bigger/smaller axis comparison with
+ *  ((bigger+1)/2) <= smaller diagonal threshold. No atan2 or floats. */
 export function directionTo(from: WorldPos, to: WorldPos): Dir {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const angle = Math.atan2(dy, dx); // radians, 0=east, positive=clockwise
-  // Convert to 8-way: N=0, NE=1, E=2, ...
-  const octant = Math.round(((angle + Math.PI) / (Math.PI * 2)) * 8) % 8;
-  // atan2 gives E=0 but we want N=0, so rotate
-  return ((octant + 6) % 8) as Dir;
+  // C++ uses lepton coordinates. We use pixel coords (same ratios).
+  let index = 0;
+
+  // X difference (positive = east)
+  let xdiff = to.x - from.x;
+  if (xdiff < 0) {
+    index |= 0xC0;
+    xdiff = -xdiff;
+  }
+
+  // Y difference (C++ inverts: y1-y2 because screen Y increases downward)
+  let ydiff = from.y - to.y;
+  if (ydiff < 0) {
+    index ^= 0x40;
+    ydiff = -ydiff;
+  }
+
+  // Determine bigger/smaller axis
+  let bigger: number, smaller: number;
+  if (xdiff < ydiff) {
+    smaller = xdiff;
+    bigger = ydiff;
+  } else {
+    smaller = ydiff;
+    bigger = xdiff;
+  }
+
+  // Diagonal check: C++ ((bigger+1)/2) <= smaller
+  // This uses integer division — replicate with Math.floor
+  if (Math.floor((bigger + 1) / 2) <= smaller) {
+    index += 0x20;
+    // Convert 256-step DirType to 8-dir: divide by 32
+    return (Math.floor(index / 32) % 8) as Dir;
+  }
+
+  // Cardinal: determine if closer to X or Y axis
+  let adder = index & 0x40;
+  if (xdiff >= ydiff) {
+    adder ^= 0x40;
+  }
+  index += adder;
+
+  return (Math.floor(index / 32) % 8) as Dir;
 }
 
 // === Cursor Types (canvas-rendered) ===
