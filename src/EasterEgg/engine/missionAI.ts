@@ -618,11 +618,9 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         entity.targetStructure = bestStruct;
         return;
       }
-      // C++ foot.cpp:688 — no target found: call Random_Animate() and stay on HUNT.
-      // Infantry Random_Animate consumes 2-3 RNG calls for parity.
+      // C++ foot.cpp:688 — Random_Animate when no target found (on scan tick)
       if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
-        // C++ fixed-point: raw=floor(0.083*256)=21. min=21*450/256=36, max=21*1800/256=147
-    entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
+        entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
         const animPick = ScenarioRandom.nextInRange(0, 10);
         if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
       }
@@ -855,20 +853,13 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     }
   }
 
-  // C++ foot.cpp:594 — Random_Animate() when no target found.
+  // C++ foot.cpp:594 — Random_Animate() when no target found (on scan tick).
   // Infantry consume 2-3 RNG values (IdleTimer + animation selection + optional facing).
-  // This matches C++'s per-scan-cycle RNG consumption pattern.
   if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
-    // C++ infantry.cpp:1748 — IdleTimer = Random_Pick(RAT * TPM/2, RAT * TPM*2)
-    // Rule.RandomAnimateTime = 0.083 (fixed). TICKS_PER_MINUTE = 900.
-    // Range: floor(0.083 * 450) = 37  to  floor(0.083 * 1800) = 149
-    // C++ fixed-point: raw=floor(0.083*256)=21. min=21*450/256=36, max=21*1800/256=147
     entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
-    // C++ infantry.cpp:1759 — select animation type (0-10)
     const animPick = ScenarioRandom.nextInRange(0, 10);
-    // C++ infantry.cpp:1788,1795,1807,1817 — cases 6,7,8,9,10 also pick a random facing
     if (animPick >= 6) {
-      ScenarioRandom.nextInRange(0, 7); // Random_Pick(FACING_N, FACING_NW)
+      ScenarioRandom.nextInRange(0, 7);
     }
   }
 }
@@ -964,7 +955,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     return;
   }
 
-  // C++ foot.cpp:1011 — Random_Animate() when no target found (same as guard)
+  // C++ foot.cpp:1011 — Random_Animate when no target found (on scan tick)
   if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
     entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
     const animPick = ScenarioRandom.nextInRange(0, 10);

@@ -3479,6 +3479,20 @@ export class Game {
     // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
     if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
 
+    // C++ InfantryClass::AI: Random_Animate runs EVERY TICK when idle.
+    // Gated by: IdleTimer expired AND infantry is idle (no target, on guard-like mission).
+    // C++ checks Is_Ready_To_Random_Animate: Doing==DO_STAND_GUARD + Is_Idle + IdleTimer==0.
+    // idleAnimTimer starts at 14 (matching ~14-frame initial guard animation).
+    if (entity.stats.isInfantry && entity.idleAnimTimer <= 0 && !entity.target?.alive &&
+        (entity.mission === Mission.GUARD || entity.mission === Mission.STICKY ||
+         entity.mission === Mission.AREA_GUARD)) {
+      entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
+      const animPick = ScenarioRandom.nextInRange(0, 10);
+      if (animPick >= 6) {
+        ScenarioRandom.nextInRange(0, 7);
+      }
+    }
+
     // C++ TechnoClass::AI: Arm (attack cooldown) ticks every tick for ALL missions.
     // This is independent of mission timers — units can fire between guard scans.
     if (entity.attackCooldown > 0) entity.attackCooldown--;
