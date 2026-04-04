@@ -2665,7 +2665,8 @@ export class Renderer {
 
         if (vis === 0) {
           // Unmapped cell: solid black (C++ !IsMapped → Fill_Rect BLACK)
-          ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+          // +1 overlap eliminates sub-pixel grid lines between adjacent cells
+          ctx.fillRect(sx, sy, CELL_SIZE + 1, CELL_SIZE + 1);
         } else {
           // vis === 1: IsMapped && !IsVisible — compute shadow frame from neighbor bitmask
           const idx = cellShadowIndex(cx, cy, getVis);
@@ -3190,7 +3191,9 @@ export class Renderer {
         const age = tick - msg.tick;
         const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15; // fade out last 1s
         ctx.fillStyle = `rgba(0,255,0,${alpha.toFixed(2)})`;
-        ctx.fillText(msg.text, centerX, 36 + i * 14);
+        // Offset below mission title banner when it's still visible (fades at tick 30-60)
+        const titleOffset = (this.missionName && tick < 60) ? 20 : 0;
+        ctx.fillText(msg.text, centerX, 36 + titleOffset + i * 14);
       }
     }
     ctx.textAlign = 'left';
