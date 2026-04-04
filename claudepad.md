@@ -1,14 +1,17 @@
 # Session Summaries
 
-## 2026-04-03T14:00Z — Parity Fix: AI Production, HPAD Position, Edge Reinforcements
-- **12/12 tick 1 perfect** (was 10/12). Fixed SCG07EA +1 E7 and SCG10EA +1 E1 from instant AI production.
-- **AI production delay**: `updateAIProduction` skips first firing interval (C++ has build time queue — nothing ready at tick 1).
-- **Base rebuild delay**: `updateBaseRebuild` skips first interval (C++ rebuild has build time). Fixed SCG10EA +1 PROC structure.
-- **HPAD aircraft spawn**: Corrected from 2x2 center to `cellToWorld(cx+1, cy)` matching C++ helipad docking position. Fixed SCG10EA HIND cell offset.
-- **Edge reinforcement relocation**: Ground units spawned at map edge (1 cell outside boundary) were incorrectly relocated by passability check. Added `inBounds` skip — C++ `Unlimbo()` succeeds outside boundary since terrain defaults to CLEAR.
-- **Naval edge cell scanning**: `calculateHouseEdgeSpawnCell` now receives `map` and `naval=true` for vessel teams. Scans along edge for water cells matching C++ `Good_Reinforcement_Cell` with `MZONE_WATER`.
-- **Remaining**: PT position 1-cell Y diff (terrain classification mismatch at cell (10,53) — TS=WATER, C++=not water). Late-tick RNG cascade from guard scan/Firing_AI at tick ~15.
-- **Test env note**: PARITY_CHECKPOINTS env var now supported for fine-grained tick comparison.
+## 2026-04-03T14:00Z — Parity Fix: AI Production, HPAD, Firing_AI, Terrain
+- **12/12 tick 1 count-perfect** (was 10/12). 8/12 tick-100. 7/12 tick-500.
+- **AI production/rebuild delay**: Skip first interval (C++ has build time queue). Fixed SCG07EA +1 E7, SCG10EA +1 E1, SCG10EA +1 PROC.
+- **HPAD aircraft spawn**: `cellToWorld(cx+1, cy)` matching C++ helipad dock. Fixed SCG10EA HIND offset.
+- **Edge reinforcement relocation**: `inBounds` skip for out-of-bounds spawn cells.
+- **Naval edge scanning**: Pass `map`+`naval=true` for vessel teams. Checks both outcell AND incell matching C++ `Good_Reinforcement_Cell`.
+- **Extended terrain classification**: 1 cell beyond visible bounds for edge spawn water checks.
+- **E1 guard scan delay**: 45 ticks (normal rate), not 14 (AA rate). Only E3 rocket uses AARate.
+- **Global Firing_AI**: Cooldowns tick every tick for ALL missions (was GUARD-only). HUNT entities fire weapons when target in range.
+- **Structure combat ordering**: Moved to building processing section (between entity and aircraft loops) matching C++ Logic layer order.
+- **Remaining RNG gap**: 24 WASM calls vs 4 TS calls at tick 15 (SCG01EA). Not from entities (guard timers at 45+jitter), not from structure combat (no targets in range), not from building timers (only 3 fire). Possibly C++ house-level AI or LogicTrigger callbacks not replicated in TS.
+- **Test env**: PARITY_CHECKPOINTS env var for fine-grained tick comparison.
 
 ## 2026-04-01T06:00Z — Full Campaign Parity: 100% RNG Match Across 12 Scenarios
 - **14 Soviet missions tested**, 12 loaded successfully (SCG05EA/SCG14EA WASM timeout).
