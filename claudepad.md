@@ -20,7 +20,11 @@
 - **DO_STAND_GUARD is dead**: Never assigned in production code. All idle infantry use DO_STAND_READY. Doing starts at DO_NOTHING, transitions via Doing_AI() and Stop_Driver().
 - **Infantry Doing state machine ported**: `doing` field (nothing→stand_ready→walk/fire/idle_anim), `isDriving` (set during moveToward, cleared each tick), `isFiringAnim` (set on weapon fire). `isReadyToRandomAnimate()` gates on all: doing=stand_ready + idleTimer + !isDriving + !isFiring. Matches C++ infantry.cpp:4068-4121.
 - **Final scorecard**: 12/12 t1✓, 9/12 t100✓ (was 8/12), 7/12 t500✓. Remaining: 2-call RNG gap at tick 15 from single entity Firing_AI combat difference (weapon fire frame timing).
-- **Test env**: PARITY_CHECKPOINTS env var for fine-grained tick comparison.
+- **Visual parity**: 13/13 scenarios side-by-side compared (all 3 theatres). Terrain, units, shadows all match.
+- **Shadows restored**: palette.ts index 4 → rgba(0,0,0,130) matching C++ UShadowCols 130/255. Re-extracted 213 sprite PNGs. Removed separate shadow overlays.
+- **agent_render**: new C++ WASM export reads HidPage back buffer, converts palette→RGBA via HEAPU8. Enables programmatic visual comparison.
+- **Visual fixes**: EVA messages, mission names, FMV timeout 30→5s, fog grid lines, title/EVA overlap, building frame table.
+- **Test env**: PARITY_CHECKPOINTS env var, test-visual-compare.ts for side-by-side screenshots.
 
 ## 2026-04-01T06:00Z — Full Campaign Parity: 100% RNG Match Across 12 Scenarios
 - **14 Soviet missions tested**, 12 loaded successfully (SCG05EA/SCG14EA WASM timeout).
