@@ -3530,8 +3530,9 @@ export class Game {
         this.updateGuard(entity, missionTimerFired);
         if (missionTimerFired) {
           // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2))
-          const isInfAA = entity.stats.isInfantry &&
-            (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
+          // C++ rules.ini: [Guard] Rate=.050 (45 ticks), AARate=.016 (14 ticks).
+          // AARate applies to infantry with anti-air weapons (E3 rocket, not E1 rifle).
+          const isInfAA = entity.stats.isInfantry && entity.weapon?.isAntiAir;
           const guardDelay = isInfAA ? 14 : 45;
           entity.missionTimer = entity.attackCooldown > 0
             ? entity.attackCooldown
