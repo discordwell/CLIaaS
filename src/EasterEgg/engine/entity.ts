@@ -136,7 +136,7 @@ export class Entity {
   // Counts down each tick. Handler runs when timer reaches 0.
   // Handler returns Normal_Delay+Random_Pick(0,2) which becomes new timer.
   missionTimer = 0; // C++ Timer starts at 0 → first handler fires immediately
-  idleAnimTimer = 15;  // C++ parity: Doing=DO_NOTHING + initial idle animation delay before Random_Animate
+  idleAnimTimer = 2;   // C++ parity: Doing=DO_NOTHING at init prevents Random_Animate on first guard scan
 
   // Legacy fields (kept for compatibility but no longer used for timing)
   lastGuardScan = 0;
