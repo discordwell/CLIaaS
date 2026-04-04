@@ -98,6 +98,21 @@ export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFra
   v19:  { idleFrame: 0, damageFrame: 14, idleAnimCount: 14 },   // Oil pump (animated)
   // Naval production structures
   syrd: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Allied Shipyard
+  spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet sub pen
+  minp: { idleFrame: 0, damageFrame: 4, idleAnimCount: 0 },    // Allied mine/ore processor
+  minv: { idleFrame: 0, damageFrame: 4, idleAnimCount: 0 },    // Soviet mine/ore processor
+  // Civilian buildings (most have 2 frames: normal + damaged)
+  v01: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v02: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v03: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v04: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v05: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v06: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v07: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v08: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v09: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v10: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
+  v11: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
   spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet Sub Pen
 };
 
