@@ -21,9 +21,20 @@ export function parsePalette(data: Buffer): Palette {
     colors[i * 4] = (r6 << 2) | (r6 >> 4);
     colors[i * 4 + 1] = (g6 << 2) | (g6 >> 4);
     colors[i * 4 + 2] = (b6 << 2) | (b6 >> 4);
-    // Index 0 = transparent background, Index 4 = shadow/remap marker in C++ RA
-    // (palette entry 4 is bright green 89,255,85 but used as shadow color, not displayed)
-    colors[i * 4 + 3] = (i === 0 || i === 4) ? 0 : 255;
+    if (i === 0) {
+      // Index 0 = transparent background
+      colors[i * 4 + 3] = 0;
+    } else if (i === 4) {
+      // Index 4 = shadow pixel (C++ SHAPE_GHOST / UnitShadow).
+      // C++ blends background toward BLACK at ~50% (UShadowCols: LTGREEN→BLACK,130/255).
+      // Render as semi-transparent black so shadows show through terrain underneath.
+      colors[i * 4] = 0;      // R
+      colors[i * 4 + 1] = 0;  // G
+      colors[i * 4 + 2] = 0;  // B
+      colors[i * 4 + 3] = 130; // A — matches C++ translucency factor 130/255
+    } else {
+      colors[i * 4 + 3] = 255;
+    }
   }
 
   return { colors };

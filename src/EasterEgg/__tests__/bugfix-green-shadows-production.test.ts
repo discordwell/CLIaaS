@@ -22,8 +22,15 @@ describe('Palette index 4 transparency', () => {
       colors[i * 4] = (r6 << 2) | (r6 >> 4);
       colors[i * 4 + 1] = (g6 << 2) | (g6 >> 4);
       colors[i * 4 + 2] = (b6 << 2) | (b6 >> 4);
-      // Index 0 = transparent background, Index 4 = shadow/remap marker
-      colors[i * 4 + 3] = (i === 0 || i === 4) ? 0 : 255;
+      if (i === 0) {
+        colors[i * 4 + 3] = 0; // transparent background
+      } else if (i === 4) {
+        // Shadow pixel: semi-transparent black (C++ SHAPE_GHOST, UShadowCols 130/255)
+        colors[i * 4] = 0; colors[i * 4 + 1] = 0; colors[i * 4 + 2] = 0;
+        colors[i * 4 + 3] = 130;
+      } else {
+        colors[i * 4 + 3] = 255;
+      }
     }
     return { colors };
   }
@@ -41,9 +48,12 @@ describe('Palette index 4 transparency', () => {
     expect(pal.colors[0 * 4 + 3]).toBe(0);
   });
 
-  it('index 4 is transparent (shadow/remap marker)', () => {
+  it('index 4 is semi-transparent black (C++ SHAPE_GHOST shadow)', () => {
     const pal = parsePalette(makePalette());
-    expect(pal.colors[4 * 4 + 3]).toBe(0);
+    expect(pal.colors[4 * 4 + 0]).toBe(0);   // R = black
+    expect(pal.colors[4 * 4 + 1]).toBe(0);   // G = black
+    expect(pal.colors[4 * 4 + 2]).toBe(0);   // B = black
+    expect(pal.colors[4 * 4 + 3]).toBe(130); // A = 130/255 (C++ UShadowCols factor)
   });
 
   it('index 5 (regular color) is opaque', () => {

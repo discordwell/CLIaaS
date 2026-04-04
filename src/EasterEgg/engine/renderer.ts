@@ -1859,34 +1859,9 @@ export class Renderer {
       // (renderFogOfWar, drawn after entities) handles the visual darkening for fogged cells.
       // No entity-level alpha reduction needed — avoids double-dimming.
 
-      // Unit shadow — sprite-shaped silhouette (C++ SHAPE_GHOST + UnitShadow)
-      // Uses 'multiply' blend: dark gray shadow darkens terrain proportionally
-      // (grass stays dark green, sand stays dark tan — not green-tinted black)
+      // C++ SHAPE_GHOST: shadows are now baked into sprite PNGs as semi-transparent
+      // black pixels (palette index 4 → rgba(0,0,0,130)). No separate shadow overlay needed.
       const preShadowAlpha = ctx.globalAlpha;
-      if (entity.alive && sheet) {
-        const shadowSheet = assets.getShadowSheet(entity.stats.image);
-        if (shadowSheet) {
-          let frame: number;
-          if (!entity.stats.isInfantry && !entity.isAnt) {
-            const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
-            frame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
-          } else {
-            frame = entity.spriteFrame % sheet.meta.frameCount;
-          }
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.globalAlpha = Math.min(1.0, preShadowAlpha);
-          if (entity.isAirUnit && altY > 0) {
-            // Air unit shadow at ground level, offset by altitude for parallax
-            assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
-              screen.x + altY * 0.3 + 2, screen.y + 3, { centerX: true, centerY: true });
-          } else if (!entity.stats.isInfantry) {
-            // Ground vehicle/ant sprite-shaped shadow
-            assets.drawFrameFrom(ctx, shadowSheet, entity.stats.image, frame,
-              screen.x + 2, screen.y + 3, { centerX: true, centerY: true });
-          }
-          ctx.globalCompositeOperation = 'source-over';
-        }
-      }
       // Restore cloak alpha for sprite rendering
       ctx.globalAlpha = preShadowAlpha;
 
