@@ -606,8 +606,27 @@ interface ScenarioData {
   isTanyaEvac: boolean;
 }
 
+/** Resolve mission name — RA scenarios often use Name=<none> in the INI.
+ *  The actual mission names come from the game's string table. */
+const MISSION_NAMES: Record<string, string> = {
+  SCG01EA: 'In the Thick of It', SCG02EA: 'Evacuation', SCG03EA: 'Spy Hunter',
+  SCG04EA: 'Behind the Lines', SCG05EA: 'South Guard', SCG06EA: 'Mousetrap',
+  SCG07EA: 'Sunken Treasure', SCG08EA: 'Paradox Equation',
+  SCG09EA: 'No Remorse', SCG10EA: 'Wasteland',
+  SCG11EA: 'Takedown', SCG12EA: 'Takedown', SCG13EA: 'Negotiations',
+  SCG14EA: 'Monster Tank Madness',
+  SCA01EA: 'Ant Mission 1', SCA02EA: 'Ant Mission 2',
+  SCA03EA: 'Ant Mission 3', SCA04EA: 'Ant Mission 4',
+};
+function resolveMissionName(iniName: string, scenarioId: string): string {
+  if (iniName && iniName.toLowerCase() !== '<none>' && iniName.toLowerCase() !== 'none') {
+    return iniName;
+  }
+  return MISSION_NAMES[scenarioId.toUpperCase()] ?? 'Unknown Mission';
+}
+
 /** Parse an INI-format scenario file */
-export function parseScenarioINI(text: string): ScenarioData {
+export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
   const sections = new Map<string, Map<string, string>>();
   let currentSection = '';
 
@@ -938,7 +957,7 @@ export function parseScenarioINI(text: string): ScenarioData {
   }
 
   return {
-    name: get('Basic', 'Name', 'Unknown Mission'),
+    name: resolveMissionName(get('Basic', 'Name', ''), scenarioId),
     briefing,
     mapBounds: { x: mapX, y: mapY, w: mapW, h: mapH },
     waypoints,
@@ -1358,8 +1377,21 @@ export const STRUCTURE_IMAGES: Record<string, string> = {
   ATEK: 'atek', STEK: 'stek', IRON: 'iron', PDOX: 'pdox', MSLO: 'mslo', KENN: 'kenn',
   FENC: 'fenc', BRIK: 'brik', SBAG: 'sbag', BARB: 'barb', WOOD: 'wood',
   QUEE: 'quee', LAR1: 'lar1', LAR2: 'lar2',
-  FCOM: 'fcom', MISS: 'miss', V19: 'v19',
+  FCOM: 'fcom', MISS: 'miss',
   BARL: 'barl', BRL3: 'brl3',
+  // Soviet/Allied structures missing from original mapping
+  SPEN: 'spen', BIO: 'bio', HOSP: 'hosp', SYRD: 'syrd',
+  MINP: 'minp', MINV: 'minv',
+  // Civilian structures
+  V01: 'v01', V02: 'v02', V03: 'v03', V04: 'v04', V05: 'v05', V06: 'v06',
+  V07: 'v07', V08: 'v08', V09: 'v09', V10: 'v10', V11: 'v11', V12: 'v12',
+  V13: 'v13', V14: 'v14', V15: 'v15', V16: 'v16', V17: 'v17', V18: 'v18',
+  V19: 'v19', V20: 'v20', V21: 'v21', V22: 'v22', V23: 'v23', V24: 'v24',
+  V25: 'v25', V26: 'v26', V27: 'v27', V28: 'v28', V29: 'v29', V30: 'v30',
+  V31: 'v31', V32: 'v32', V33: 'v33', V34: 'v34', V35: 'v35', V36: 'v36',
+  V37: 'v37',
+  // Fake buildings (use real building sprites as fallback)
+  FACF: 'fact', DOMF: 'dome', WEAF: 'weap',
 };
 
 const CIVILIAN_STRUCTURE_2X2 = ['V01', 'V02', 'V03', 'V04', 'V20', 'V21', 'V24', 'V25'];
@@ -1582,7 +1614,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load scenario: ${url}`);
   const text = await res.text();
-  const data = parseScenarioINI(text);
+  const data = parseScenarioINI(text, scenarioId);
 
   // Set up map
   const map = new GameMap();
