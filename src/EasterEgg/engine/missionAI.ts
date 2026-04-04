@@ -666,11 +666,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   // IdleTimer decremented in index.ts updateEntity (runs every tick for all missions)
 
-  // C++ Arm countdown — weapon cooldown decrements every tick regardless of mission.
-  // In updateAttack this only decrements while moving toward target (line 248),
-  // but Firing_AI in C++ uses the Arm timer which always ticks down.
-  if (entity.attackCooldown > 0) entity.attackCooldown--;
-  if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+  // Cooldowns are now ticked globally in index.ts (C++ TechnoClass::AI ticks Arm for ALL missions).
 
   // C++ unit.cpp:425 Firing_AI — runs EVERY tick, independent of guard scan timer.
   // If the entity has a target from a previous guard scan and weapon is ready, fire.

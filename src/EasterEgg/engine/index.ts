@@ -1757,6 +1757,10 @@ export class Game {
     // Building timer RNG must be interleaved BETWEEN entity and aircraft processing
     // to match C++ rejection sampling patterns at timer fire ticks.
     this.tickStructureMissionTimers();
+    // C++ parity: building Firing_AI (weapon fire) runs as part of building processing,
+    // BETWEEN entity and aircraft loops. This ensures combat RNG is consumed in the
+    // correct order relative to entity and aircraft RNG.
+    this._runCombat(ctx => _updateStructureCombat(ctx));
 
     // Aircraft entities: second pass (processed AFTER buildings in C++ Logic layer)
     for (const entity of this.entities) {
@@ -1931,8 +1935,8 @@ export class Game {
     // Building + aircraft timers now run inside the entity loop section above
     // (interleaved with entity processing to match C++ Logic layer order).
 
-    // Defensive structure auto-fire
-    this._runCombat(ctx => _updateStructureCombat(ctx));
+    // Defensive structure auto-fire — moved to building processing section above
+    // (between entity and aircraft loops, matching C++ Logic layer order)
 
     // Tick mine triggers (Minelayer AP mines)
     this.tickMines();
@@ -3475,6 +3479,11 @@ export class Game {
     // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
     if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
 
+    // C++ TechnoClass::AI: Arm (attack cooldown) ticks every tick for ALL missions.
+    // This is independent of mission timers — units can fire between guard scans.
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
     // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
@@ -3501,7 +3510,12 @@ export class Game {
         }
         break;
       case Mission.HUNT:
-        if (missionTimerFired) {
+        // C++ TechnoClass::AI Firing_AI — runs every tick for ALL missions.
+        // If entity has a target in range and weapon ready, fire weapon.
+        if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
+          this.updateAttack(entity);
+          if (entity.mission === Mission.ATTACK) entity.mission = Mission.HUNT;
+        } else if (missionTimerFired) {
           this.updateHunt(entity);
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
         } else {
