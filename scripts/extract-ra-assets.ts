@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 import { MixFile } from './ra-assets/mix.js';
 import { extractAllMIX } from './ra-assets/gamedata.js';
 import { parseShp, type ShpFile } from './ra-assets/shp.js';
+import { parseTdShp } from './ra-assets/shp-td.js';
 import { parsePalette, indexedToRGBA, type Palette } from './ra-assets/palette.js';
 import { encodePNG } from './ra-assets/png.js';
 import { parseCps } from './ra-assets/cps.js';
@@ -279,7 +280,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   // Fog of war shroud overlays (47 frames, one per edge pattern)
   ['CONQUER.MIX', 'SHADOW.SHP', 'shadow'],
   // UI elements
-  // ['CONQUER.MIX', 'MOUSE.SHP', 'mouse'],  // TD-style SHP format (not RA KeyFrame) — needs separate parser
+  ['LORES.MIX', 'MOUSE.SHP', 'mouse'],       // Game cursor sprites (TD-style SHP, 222 frames)
   ['LORES.MIX', 'SELECT.SHP', 'select'],     // Selection box
   ['LORES.MIX', 'POWERBAR.SHP', 'powerbar'], // Power bar
   ['LORES.MIX', 'SIDEBAR.SHP', 'sidebar'],   // Sidebar background
@@ -546,7 +547,34 @@ async function main(): Promise<void> {
     }
 
     try {
-      const shp = parseShp(shpData);
+      let shp: ShpFile;
+
+      // MOUSE.SHP uses TD-style format (ShapeBlock), not RA KeyFrame
+      if (shpName === 'MOUSE.SHP') {
+        const tdShp = parseTdShp(shpData);
+        // Convert to ShpFile interface with uniform frame size
+        const fw = tdShp.maxWidth;
+        const fh = tdShp.maxHeight;
+        shp = {
+          width: fw, height: fh,
+          frameCount: tdShp.frameCount,
+          frames: tdShp.frames.map(f => {
+            // Center smaller frames within the uniform frame size
+            const pixels = new Uint8Array(fw * fh);
+            const ox = Math.floor((fw - f.width) / 2);
+            const oy = Math.floor((fh - f.height) / 2);
+            for (let y = 0; y < f.height; y++) {
+              for (let x = 0; x < f.width; x++) {
+                pixels[(y + oy) * fw + (x + ox)] = f.pixels[y * f.width + x];
+              }
+            }
+            return { width: fw, height: fh, pixels };
+          }),
+        };
+      } else {
+        shp = parseShp(shpData);
+      }
+
       const { png, meta } = createSpriteSheet(shp, palette);
 
       writeFileSync(join(OUTPUT_DIR, `${outputName}.png`), png);

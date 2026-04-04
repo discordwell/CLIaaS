@@ -1,21 +1,24 @@
 /**
  * TD-style SHP parser (Tiberian Dawn / shared format used by MOUSE.SHP in Red Alert)
  *
- * File layout:
+ * File layout (ShapeBlock from SDLLIB/include/shape.h):
  *   uint16  NumShapes
  *   uint32  Offsets[NumShapes+1]  (last = end-of-file sentinel)
  *
- * Per-frame Shape_Type header (SDLLIB/include/shape.h):
- *   uint16  ShapeType     (0=LCW compressed, 2=uncompressed)
- *   uint8   Height
- *   uint16  Width
- *   uint8   OriginalHeight
- *   uint16  ShapeSize     (total frame size including header)
- *   uint16  DataLength    (uncompressed pixel data size)
- *   uint8   Colortable[16] (optional compact color table)
+ * Per-frame layout (Shape_Type with #pragma pack(1)):
+ *   bytes 0-1:  uint16 ShapeType  (0=LCW compressed)
+ *   bytes 2-3:  padding/unused
+ *   byte  4:    uint8  Width
+ *   byte  5:    uint8  Height (OriginalHeight in struct)
+ *   bytes 6-7:  unused
+ *   bytes 8-9:  uint16 DataLength (uncompressed intermediate size)
+ *   bytes 10+:  LCW compressed data
  *
- * Pixel data follows the header. For ShapeType=0 (LCW), data is LCW-compressed.
- * For ShapeType=2 (uncompressed), data is raw palette indices.
+ * After LCW decompression, pixel data uses RLE encoding:
+ *   nonzero byte = literal pixel (palette index)
+ *   zero byte + count byte = run of 'count' transparent pixels
+ *
+ * Reference: SDLLIB/mouse.cpp lines 32-75 (Set_Cursor decoding)
  */
 
 import { lcwDecompress } from './lcw.js';
@@ -28,7 +31,6 @@ export interface TdShpFrame {
 
 export interface TdShpFile {
   frameCount: number;
-  /** Maximum frame dimensions across all frames */
   maxWidth: number;
   maxHeight: number;
   frames: TdShpFrame[];
@@ -37,7 +39,7 @@ export interface TdShpFile {
 export function parseTdShp(data: Buffer): TdShpFile {
   const numShapes = data.readUInt16LE(0);
 
-  // Read offset table: numShapes + 1 entries (last = EOF sentinel)
+  // Offset table: numShapes + 1 entries starting at byte 2
   const offsets: number[] = [];
   for (let i = 0; i <= numShapes; i++) {
     offsets.push(data.readUInt32LE(2 + i * 4));
@@ -52,21 +54,17 @@ export function parseTdShp(data: Buffer): TdShpFile {
     const nextOff = offsets[i + 1] ?? data.length;
     const frameSize = nextOff - off;
 
-    if (frameSize < 8 || off >= data.length) {
-      // Empty/invalid frame
+    if (frameSize < 10 || off >= data.length) {
       frames.push({ width: 1, height: 1, pixels: new Uint8Array(1) });
       continue;
     }
 
-    // Parse Shape_Type header
-    const shapeType = data.readUInt16LE(off);
-    const height = data[off + 2];
-    const width = data.readUInt16LE(off + 3);
-    const _originalHeight = data[off + 5];
-    const _shapeSize = data.readUInt16LE(off + 6);
+    // Per-frame header — width/height as uint8 at bytes 4,5
+    const width = data[off + 4];
+    const height = data[off + 5];
     const dataLength = data.readUInt16LE(off + 8);
 
-    if (width === 0 || height === 0) {
+    if (width === 0 || height === 0 || dataLength === 0) {
       frames.push({ width: 1, height: 1, pixels: new Uint8Array(1) });
       continue;
     }
@@ -74,39 +72,34 @@ export function parseTdShp(data: Buffer): TdShpFile {
     maxWidth = Math.max(maxWidth, width);
     maxHeight = Math.max(maxHeight, height);
 
-    const pixelCount = width * height;
-    let pixels: Uint8Array;
-
-    // Header is 10 bytes (without color table). ShapeType bit 0 = has color table (16 bytes).
-    const hasColorTable = (shapeType & 1) !== 0;
-    const headerSize = 10 + (hasColorTable ? 16 : 0);
-    const pixelDataStart = off + headerSize;
-
-    if ((shapeType & 2) !== 0) {
-      // Uncompressed — raw pixel data
-      pixels = new Uint8Array(pixelCount);
-      const available = Math.min(pixelCount, data.length - pixelDataStart);
-      for (let j = 0; j < available; j++) {
-        pixels[j] = data[pixelDataStart + j];
-      }
-    } else {
-      // LCW compressed
-      try {
-        const compressed = data.subarray(pixelDataStart, pixelDataStart + frameSize - headerSize);
-        const decompressed = new Uint8Array(dataLength || pixelCount);
-        lcwDecompress(compressed, decompressed);
-        pixels = decompressed.subarray(0, pixelCount);
-      } catch {
-        pixels = new Uint8Array(pixelCount);
-      }
+    // Step 1: LCW decompress (data starts at byte 10)
+    const compData = data.subarray(off + 10, off + frameSize);
+    const lcwOut = new Uint8Array(dataLength);
+    try {
+      lcwDecompress(compData, lcwOut, dataLength);
+    } catch {
+      frames.push({ width, height, pixels: new Uint8Array(width * height) });
+      continue;
     }
 
-    // Apply color table remapping if present
-    if (hasColorTable) {
-      const colorTable = data.subarray(off + 10, off + 26);
-      for (let j = 0; j < pixels.length; j++) {
-        if (pixels[j] < 16) {
-          pixels[j] = colorTable[pixels[j]];
+    // Step 2: RLE decode (mouse.cpp:56-75)
+    // nonzero = literal pixel, zero + count = run of transparent
+    const pixelCount = width * height;
+    const pixels = new Uint8Array(pixelCount);
+    let remaining = pixelCount;
+    let inIdx = 0;
+    let outIdx = 0;
+    while (remaining > 0 && inIdx < lcwOut.length) {
+      const pixel = lcwOut[inIdx++];
+      if (pixel !== 0) {
+        pixels[outIdx++] = pixel;
+        remaining--;
+      } else {
+        if (inIdx >= lcwOut.length) break;
+        const count = lcwOut[inIdx++];
+        for (let c = 0; c < count && remaining > 0; c++) {
+          pixels[outIdx++] = 0;
+          remaining--;
         }
       }
     }

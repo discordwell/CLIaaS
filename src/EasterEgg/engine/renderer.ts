@@ -477,7 +477,7 @@ export class Renderer {
 
     if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
-    this.renderCursor();
+    this.renderCursor(assets);
   }
 
   // ─── Layer Isolation (comparison mode) ───────────────────
@@ -556,19 +556,107 @@ export class Renderer {
     }
   }
 
-  // ─── Custom Cursor ────────────────────────────────────────
+  // ─── Custom Cursor (C++ MOUSE.SHP sprite-based) ──────────
 
-  private renderCursor(): void {
+  /** C++ mouse.cpp:345-391 MouseControl table: [startFrame, frameCount, frameRate, smallFrame, hotX, hotY]
+   *  Hotspots are HIRES values (WD=29, HT=23). LORES cursor is 24x30. */
+  private static readonly MOUSE_CONTROL: Record<string, [number, number, number, number, number]> = {
+    // [startFrame, frameCount, frameRate, hotX, hotY] — hotspot in LORES pixels (24x30)
+    default:      [0,   1,  0,  0,  0],
+    n:            [1,   1,  0,  12, 0],
+    ne:           [2,   1,  0,  24, 0],
+    e:            [3,   1,  0,  24, 15],
+    se:           [4,   1,  0,  24, 30],
+    s:            [5,   1,  0,  12, 30],
+    sw:           [6,   1,  0,  0,  30],
+    w:            [7,   1,  0,  0,  15],
+    nw:           [8,   1,  0,  0,  0],
+    nomove:       [14,  1,  0,  12, 15],
+    move:         [10,  4,  4,  12, 15],
+    attack:       [21,  8,  4,  12, 15],
+    select:       [15,  6,  4,  12, 15],
+    sell:         [68,  12, 2,  12, 15],
+    repair:       [35,  24, 2,  12, 15],
+    enter:        [113, 3,  4,  12, 15],
+    deploy:       [59,  9,  4,  12, 15],
+    nuke:         [90,  7,  4,  12, 15],
+    airstrike:    [82,  8,  2,  12, 15],
+    chrono:       [97,  8,  3,  12, 15],
+    chronodest:   [105, 8,  2,  12, 15],
+    heal:         [160, 4,  4,  12, 15],
+    nosell:       [119, 1,  0,  12, 15],
+    norepair:     [120, 1,  0,  12, 15],
+    guard:        [147, 1,  0,  12, 15],
+    no_n:         [124, 1,  0,  12, 0],
+    no_ne:        [125, 1,  0,  24, 0],
+    no_e:         [126, 1,  0,  24, 15],
+    no_se:        [127, 1,  0,  24, 30],
+    no_s:         [128, 1,  0,  12, 30],
+    no_sw:        [129, 1,  0,  0,  30],
+    no_w:         [130, 1,  0,  0,  15],
+    no_nw:        [131, 1,  0,  0,  0],
+  };
+
+  private cursorAnimTick = 0;
+
+  private renderCursor(assets?: AssetManager): void {
     const ctx = this.ctx;
     const x = this.cursorX;
     const y = this.cursorY;
 
+    // Map CursorType to MOUSE_CONTROL key
+    const cursorMap: Record<number, string> = {
+      [CursorType.DEFAULT]: 'default',
+      [CursorType.MOVE]: 'move',
+      [CursorType.NOMOVE]: 'nomove',
+      [CursorType.ATTACK]: 'attack',
+      [CursorType.SELECT]: 'select',
+      [CursorType.SELL]: 'sell',
+      [CursorType.REPAIR]: 'repair',
+      [CursorType.SCROLL_N]: 'n',
+      [CursorType.SCROLL_NE]: 'ne',
+      [CursorType.SCROLL_E]: 'e',
+      [CursorType.SCROLL_SE]: 'se',
+      [CursorType.SCROLL_S]: 's',
+      [CursorType.SCROLL_SW]: 'sw',
+      [CursorType.SCROLL_W]: 'w',
+      [CursorType.SCROLL_NW]: 'nw',
+      [CursorType.NOSCROLL_N]: 'no_n',
+      [CursorType.NOSCROLL_NE]: 'no_ne',
+      [CursorType.NOSCROLL_E]: 'no_e',
+      [CursorType.NOSCROLL_SE]: 'no_se',
+      [CursorType.NOSCROLL_S]: 'no_s',
+      [CursorType.NOSCROLL_SW]: 'no_sw',
+      [CursorType.NOSCROLL_W]: 'no_w',
+      [CursorType.NOSCROLL_NW]: 'no_nw',
+    };
+
+    const mouseSheet = assets?.getSheet('mouse');
+    const controlKey = cursorMap[this.cursorType] ?? 'default';
+    const control = Renderer.MOUSE_CONTROL[controlKey];
+
+    if (mouseSheet && control && assets) {
+      // Sprite-based cursor rendering (C++ MOUSE.SHP parity)
+      const [startFrame, frameCount, frameRate, hotX, hotY] = control;
+      let frame = startFrame;
+      if (frameCount > 1 && frameRate > 0) {
+        this.cursorAnimTick++;
+        const animFrame = Math.floor(this.cursorAnimTick / frameRate) % frameCount;
+        frame = startFrame + animFrame;
+      }
+      const prevSmooth = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false;
+      assets.drawFrame(ctx, 'mouse', frame % mouseSheet.meta.frameCount, x - hotX, y - hotY);
+      ctx.imageSmoothingEnabled = prevSmooth;
+      return;
+    }
+
+    // Fallback: procedural vector cursors (when MOUSE.SHP not loaded)
     ctx.save();
     ctx.lineWidth = 1.5;
 
     switch (this.cursorType) {
       case CursorType.DEFAULT: {
-        // Green arrow pointer
         ctx.fillStyle = '#44ff44';
         ctx.strokeStyle = '#003300';
         ctx.beginPath();

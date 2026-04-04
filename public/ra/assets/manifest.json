@@ -1313,6 +1313,15 @@
     "sheetWidth": 384,
     "sheetHeight": 72
   },
+  "mouse": {
+    "frameWidth": 24,
+    "frameHeight": 30,
+    "frameCount": 222,
+    "columns": 16,
+    "rows": 14,
+    "sheetWidth": 384,
+    "sheetHeight": 420
+  },
   "select": {
     "frameWidth": 24,
     "frameHeight": 21,

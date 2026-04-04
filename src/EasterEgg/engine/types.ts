@@ -1308,6 +1308,7 @@ export enum CursorType {
   MOVE = 'MOVE',
   NOMOVE = 'NOMOVE',
   ATTACK = 'ATTACK',
+  SELECT = 'SELECT',
   SELL = 'SELL',
   REPAIR = 'REPAIR',
   SCROLL_N = 'SCROLL_N',
@@ -1318,6 +1319,14 @@ export enum CursorType {
   SCROLL_SW = 'SCROLL_SW',
   SCROLL_W = 'SCROLL_W',
   SCROLL_NW = 'SCROLL_NW',
+  NOSCROLL_N = 'NOSCROLL_N',
+  NOSCROLL_NE = 'NOSCROLL_NE',
+  NOSCROLL_E = 'NOSCROLL_E',
+  NOSCROLL_SE = 'NOSCROLL_SE',
+  NOSCROLL_S = 'NOSCROLL_S',
+  NOSCROLL_SW = 'NOSCROLL_SW',
+  NOSCROLL_W = 'NOSCROLL_W',
+  NOSCROLL_NW = 'NOSCROLL_NW',
 }
 
 // Alliance system — per-house alliance table
