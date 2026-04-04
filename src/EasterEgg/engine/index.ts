@@ -1269,17 +1269,26 @@ export class Game {
     // H5: Clamp camera to playable bounds, not full 128x128 map
     this.camera.setPlayableBounds(this.map.boundsX, this.map.boundsY, this.map.boundsW, this.map.boundsH);
 
-    // Center camera on player start
-    const playerUnits = this.entities.filter(e => e.isPlayerUnit);
-    if (playerUnits.length > 0) {
-      const avg = playerUnits.reduce(
-        (acc, e) => ({ x: acc.x + e.pos.x, y: acc.y + e.pos.y }),
-        { x: 0, y: 0 }
-      );
-      this.camera.centerOn(
-        avg.x / playerUnits.length,
-        avg.y / playerUnits.length
-      );
+    // C++ scenario.cpp:552-553: camera centers on waypoint 98 (WAYPT_HOME),
+    // offset by -4 cells vertically and -5 cells horizontally.
+    const homeWp = this.waypoints.get(98);
+    if (homeWp) {
+      const homeX = (homeWp.cx - 5) * CELL_SIZE;
+      const homeY = (homeWp.cy - 4) * CELL_SIZE;
+      this.camera.centerOn(homeX + this.camera.viewWidth / 2, homeY + this.camera.viewHeight / 2);
+    } else {
+      // Fallback: center on average player unit position
+      const playerUnits = this.entities.filter(e => e.isPlayerUnit);
+      if (playerUnits.length > 0) {
+        const avg = playerUnits.reduce(
+          (acc, e) => ({ x: acc.x + e.pos.x, y: acc.y + e.pos.y }),
+          { x: 0, y: 0 }
+        );
+        this.camera.centerOn(
+          avg.x / playerUnits.length,
+          avg.y / playerUnits.length
+        );
+      }
     }
 
     // If stop() was called during async loading, don't start the loop

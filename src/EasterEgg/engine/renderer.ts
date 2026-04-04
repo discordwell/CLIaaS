@@ -1496,18 +1496,33 @@ export class Renderer {
         const drawMeta = (useSheet !== s.image ? assets.getSheet(useSheet)?.meta : null) ?? sheet.meta;
         const dfw = drawMeta.frameWidth;
         const dfh = drawMeta.frameHeight;
-        // Building foundation bib: concrete pad under buildings (C++ bib.cpp)
-        // Fills transparent areas of building sprites that expect a foundation underneath.
-        // BIB1=4x2 cells, BIB2=3x2 cells, BIB3=2x2 cells — bottom 2 rows of building footprint.
-        // C++ draws building bibs using BIB1/BIB2/BIB3 sprites (concrete pads).
-        // Without bib sprite extraction, skip the flat color fill — let the
-        // CLEAR1 tileset tile show through instead (matches C++ ground appearance).
-        // The bib terrain cells are still marked WALL for pathfinding.
-        // C++ SHAPE_GHOST: shadow pixels (palette index 4) are rendered semi-transparent
-        // via UnitShadow translucency table in a SINGLE draw call — not a separate overlay.
-        // Our sprite extraction makes index 4 fully transparent, so shadows are absent.
-        // A separate shadow overlay caused gray squares on bib cells (especially on snow).
-        // TODO: re-extract sprites with index 4 as semi-transparent dark pixels.
+        // Building foundation bib: concrete pad under buildings (C++ bib.cpp).
+        // BIB1=4x2, BIB2=3x2, BIB3=2x2. Bib type determined by building width.
+        // Bib starts at the building's bottom row and extends 1 row below.
+        if (!isConstructing && !isSelling && !WALL_SPRITE_TYPES.has(s.type)) {
+          const [bw] = STRUCTURE_SIZE[s.type] ?? [0, 0];
+          const bh = STRUCTURE_SIZE[s.type]?.[1] ?? 0;
+          let bibName = '';
+          if (bw === 4) bibName = 'bib1';
+          else if (bw === 3) bibName = 'bib2';
+          else if (bw === 2) bibName = 'bib3';
+          // Theatre-specific bib sprites
+          if (bibName && BIB_SIZES[s.type]) {
+            const theatreBib = this.theatre === 'SNOW' ? bibName + '_snow' : bibName;
+            const bibSheetName = assets.getSheet(theatreBib) ? theatreBib : bibName;
+            if (assets.getSheet(bibSheetName)) {
+              // Bib starts at bottom row of building (Height-1), 2 rows tall
+              const bibStartY = screenY + (bh - 1) * CELL_SIZE;
+              for (let by = 0; by < 2; by++) {
+                for (let bx = 0; bx < bw; bx++) {
+                  const frame = by * bw + bx;
+                  assets.drawFrame(ctx, bibSheetName, frame,
+                    screenX + bx * CELL_SIZE, bibStartY + by * CELL_SIZE);
+                }
+              }
+            }
+          }
+        }
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
         // Construction: make sheet plays frames naturally. Missing make sheet = bug.

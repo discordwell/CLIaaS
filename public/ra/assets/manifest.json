@@ -2762,6 +2762,60 @@
     "sheetWidth": 120,
     "sheetHeight": 24
   },
+  "bib1": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 192,
+    "sheetHeight": 24
+  },
+  "bib2": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 24
+  },
+  "bib3": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 4,
+    "columns": 4,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 24
+  },
+  "bib1_snow": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 192,
+    "sheetHeight": 24
+  },
+  "bib2_snow": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 144,
+    "sheetHeight": 24
+  },
+  "bib3_snow": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 4,
+    "columns": 4,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 24
+  },
   "ant1": {
     "frameWidth": 24,
     "frameHeight": 24,

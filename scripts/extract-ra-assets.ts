@@ -87,6 +87,14 @@ function generateSmudgeAssets(): [string, string, string][] {
     entries.push(['TEMPERAT.MIX', `SC${i}.TEM`, `sc${i}`]);   // Scorch marks
     entries.push(['TEMPERAT.MIX', `CR${i}.TEM`, `cr${i}`]);   // Craters
   }
+  // Building foundation bibs (C++ bib.cpp: BIB1=4x2, BIB2=3x2, BIB3=2x2)
+  // Theatre-specific: .TEM for TEMPERATE, .SNO for SNOW
+  entries.push(['TEMPERAT.MIX', 'BIB1.TEM', 'bib1']);
+  entries.push(['TEMPERAT.MIX', 'BIB2.TEM', 'bib2']);
+  entries.push(['TEMPERAT.MIX', 'BIB3.TEM', 'bib3']);
+  entries.push(['SNOW.MIX', 'BIB1.SNO', 'bib1_snow']);
+  entries.push(['SNOW.MIX', 'BIB2.SNO', 'bib2_snow']);
+  entries.push(['SNOW.MIX', 'BIB3.SNO', 'bib3_snow']);
   return entries;
 }
 
