@@ -1085,4 +1085,43 @@ char* agent_step(int n, char* commands)
 	return s_step_buf;
 }
 
+/* ======================================================================
+ * EXPORT 4: agent_render — force a visual frame render for screenshots.
+ * Temporarily disables the autoplay rendering skip so that Map.Render()
+ * + SDL blit actually pushes pixels to the canvas. After rendering,
+ * copies the canvas to window.__agentFrame as a data URL.
+ * ====================================================================== */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void agent_render(void)
+{
+	/* Read the HidPage back buffer which Main_Loop already renders to.
+	 * In agent mode, Map.Render() runs inside do_tick→Main_Loop every tick.
+	 * We just need to read the 8-bit paletted pixels and convert to RGBA. */
+	int w = HidPage.Get_Width();
+	int h = HidPage.Get_Height();
+	if (w <= 0 || h <= 0) { w = 320; h = 200; }
+	uint8_t *src = (uint8_t*)HidPage.Get_Offset();
+	if (!src) return;
+
+	static uint8_t rgba[320 * 200 * 4];
+	int total = (w > 320 ? 320 : w) * (h > 200 ? 200 : h);
+	for (int i = 0; i < total; i++) {
+		uint8_t idx = src[i];
+		const RGBClass &c = GamePalette[idx];
+		rgba[i*4+0] = c.Red_Component();
+		rgba[i*4+1] = c.Green_Component();
+		rgba[i*4+2] = c.Blue_Component();
+		rgba[i*4+3] = 255;
+	}
+	/* Count non-zero pixels for diagnostics */
+	int nonZero = 0;
+	for (int i = 0; i < total; i++) { if (src[i] != 0) nonZero++; }
+
+	int ptr = (int)(uintptr_t)rgba;
+	EM_ASM_INT({ window.__agentFramePtr = $0; return 0; }, ptr);
+	EM_ASM_INT({ window.__agentFrameNonZero = $0; return 0; }, nonZero);
+}
+
 } /* extern "C" */

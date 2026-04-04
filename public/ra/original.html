@@ -1433,6 +1433,60 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
       return JSON.parse(str);
     } catch(e) { return {error: e.message}; }
   };
+
+  // Capture frame callback — called from C++ agent_render via EM_ASM
+  window.__captureAgentFrame = function() {
+    try {
+      var canvas = document.querySelector('canvas');
+      if (!canvas) return;
+      // SDL2 uses WebGL renderer — read pixels via GL context
+      var gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      if (gl) {
+        var w = canvas.width, h = canvas.height;
+        var pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        // WebGL readPixels gives bottom-up; flip vertically
+        var flipped = new Uint8Array(w * h * 4);
+        var rowSize = w * 4;
+        for (var y = 0; y < h; y++) {
+          flipped.set(pixels.subarray((h - 1 - y) * rowSize, (h - y) * rowSize), y * rowSize);
+        }
+        var c2 = document.createElement('canvas');
+        c2.width = w; c2.height = h;
+        var ctx2 = c2.getContext('2d');
+        var imgData = ctx2.createImageData(w, h);
+        imgData.data.set(flipped);
+        ctx2.putImageData(imgData, 0, 0);
+        window.__agentFrame = c2.toDataURL('image/png');
+      } else {
+        window.__agentFrame = canvas.toDataURL('image/png');
+      }
+    } catch(e) {
+      console.warn('[captureAgentFrame] error:', e.message);
+    }
+  };
+
+  // JS wrapper for agent_render — forces a frame render and returns data URL
+  window.__agentRender = function() {
+    if (!Module || !Module.ccall) return null;
+    try {
+      window.__agentFramePtr = 0;
+      Module.ccall('agent_render', null, [], []);
+      var ptr = window.__agentFramePtr;
+      if (!ptr) return null;
+      // Read RGBA from WASM heap at the static buffer pointer
+      var w = 320, h = 200, sz = w * h * 4;
+      // Use exported HEAPU8 runtime method
+      var heap = Module.HEAPU8;
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      var ctx = c.getContext('2d');
+      var img = ctx.createImageData(w, h);
+      img.data.set(heap.subarray(ptr, ptr + sz));
+      ctx.putImageData(img, 0, 0);
+      return c.toDataURL('image/png');
+    } catch(e) { console.warn('agentRender error:', e.message, e.stack); return null; }
+  };
 })();
 
 // === Agent parity bootstrap ===
