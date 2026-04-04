@@ -1503,22 +1503,11 @@ export class Renderer {
         // Without bib sprite extraction, skip the flat color fill — let the
         // CLEAR1 tileset tile show through instead (matches C++ ground appearance).
         // The bib terrain cells are still marked WALL for pathfinding.
-        // Structure shadow — sprite-shaped silhouette (C++ SHAPE_GHOST parity).
-        // In C++, palette index 4 pixels are rendered as semi-transparent shadows via
-        // the translucent table. Our extraction makes index 4 transparent, so we render
-        // a shadow silhouette BEFORE the building sprite using multiply blend.
-        if (!isConstructing && !isSelling && !WALL_SPRITE_TYPES.has(s.type)) {
-          const shadowSheet = assets.getShadowSheet(useSheet);
-          if (shadowSheet) {
-            const prevAlpha = ctx.globalAlpha;
-            ctx.globalCompositeOperation = 'multiply';
-            ctx.globalAlpha = vis === 1 ? 0.15 : 0.25;
-            assets.drawFrameFrom(ctx, shadowSheet, useSheet, useFrame % useTotalFrames,
-              screenX + dfw / 2 + 2, screenY + dfh / 2 + 2, { centerX: true, centerY: true });
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = prevAlpha;
-          }
-        }
+        // C++ SHAPE_GHOST: shadow pixels (palette index 4) are rendered semi-transparent
+        // via UnitShadow translucency table in a SINGLE draw call — not a separate overlay.
+        // Our sprite extraction makes index 4 fully transparent, so shadows are absent.
+        // A separate shadow overlay caused gray squares on bib cells (especially on snow).
+        // TODO: re-extract sprites with index 4 as semi-transparent dark pixels.
         if (vis === 1) ctx.globalAlpha = 0.6; // dim in fog
         const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
         // Construction: make sheet plays frames naturally. Missing make sheet = bug.
