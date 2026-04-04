@@ -3483,6 +3483,9 @@ export class Game {
     // This is independent of mission timers — units can fire between guard scans.
     if (entity.attackCooldown > 0) entity.attackCooldown--;
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    // C++ parity: isDriving is set per-tick by moveToward(). Clear it before mission
+    // dispatch so entities that don't call moveToward this tick are not marked as driving.
+    entity.isDriving = false;
 
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
@@ -3596,10 +3599,7 @@ export class Game {
         // Sleep until enemy enters sight range, then switch to HUNT
         this.updateAmbush(entity);
         break;
-      case Mission.STICKY:
-        // Guard mode with isRecruitable=false (won't join AI teams)
-        this.updateGuard(entity);
-        break;
+      // Mission.STICKY handled above with Mission.GUARD (line 3540)
       case Mission.REPAIR:
         // Seek nearest FIX structure and move to it
         this.updateRepairMission(entity);
@@ -3632,6 +3632,13 @@ export class Game {
         entity.animState = AnimState.IDLE;
         break;
     }
+
+    // C++ InfantryClass::Doing_AI — transition Doing state after mission processing.
+    // Called once per tick. Transitions DO_NOTHING → DO_STAND_READY when idle.
+    entity.doingAI();
+    // C++ infantry.cpp:3657-3661: IsFiring cleared when fire animation completes.
+    // Simplified: clear after 1 tick (fire animation consumed this tick's RNG).
+    if (entity.isFiringAnim) entity.isFiringAnim = false;
 
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)
     if (entity.alive && entity.isCivilian && entity.mission === Mission.GUARD &&

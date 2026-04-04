@@ -619,10 +619,11 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         return;
       }
       // C++ foot.cpp:688 — Random_Animate when no target found (on scan tick)
-      if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
+      if (entity.isReadyToRandomAnimate()) {
         entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
         const animPick = ScenarioRandom.nextInRange(0, 10);
         if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
+        entity.doing = 'idle_anim';
       }
       return;
     }
@@ -855,12 +856,13 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   // C++ foot.cpp:594 — Random_Animate() when no target found (on scan tick).
   // Infantry consume 2-3 RNG values (IdleTimer + animation selection + optional facing).
-  if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
+  if (entity.isReadyToRandomAnimate()) {
     entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {
       ScenarioRandom.nextInRange(0, 7);
     }
+    entity.doing = 'idle_anim'; // C++ Do_Action(DO_IDLE1/2) starts idle animation
   }
 }
 
@@ -1208,6 +1210,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       // C++ house.cpp:293,303: ROFBias scales rearm delay
       entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
+      if (entity.stats.isInfantry) entity.isFiringAnim = true;
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
       ctx.playSoundAt(ctx.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
@@ -1276,6 +1279,8 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
       // C++ house.cpp:293,303: ROFBias scales rearm delay
       entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
+      // C++ infantry.cpp:3609: IsFiring = true during weapon fire animation
+      if (entity.stats.isInfantry) entity.isFiringAnim = true;
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
 

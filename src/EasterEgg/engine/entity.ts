@@ -138,6 +138,16 @@ export class Entity {
   missionTimer = 0; // C++ Timer starts at 0 → first handler fires immediately
   idleAnimTimer = 2;   // C++ parity: Doing=DO_NOTHING at init prevents Random_Animate on first guard scan
 
+  // C++ infantry.h Doing state — gates Is_Ready_To_Random_Animate.
+  // DO_NOTHING = initial state. Transitions to DO_STAND_READY via Doing_AI when animation completes.
+  // DO_STAND_READY = idle standing pose. Random_Animate allowed.
+  // DO_WALK/DO_FIRE = active states. Random_Animate blocked.
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
+  // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
+  isDriving = false;
+  // C++ infantry.cpp IsFiring — true during weapon fire animation
+  isFiringAnim = false;
+
   // Legacy fields (kept for compatibility but no longer used for timing)
   lastGuardScan = 0;
   guardScanJitter = 0;
@@ -207,6 +217,33 @@ export class Entity {
   syncPosFromLeptons(): void {
     this.pos.x = this.leptonX * LP;
     this.pos.y = this.leptonY * LP;
+  }
+
+  /** C++ InfantryClass::Doing_AI — transition Doing state when animation completes.
+   *  Called once per tick after mission processing. Doing=DO_NOTHING transitions
+   *  to DO_STAND_READY (idle pose) if not driving. */
+  doingAI(): void {
+    if (!this.stats.isInfantry) return;
+    // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed
+    if (this.doing === 'nothing' || this.doing === 'idle_anim' || this.doing === 'fire') {
+      if (this.isDriving) {
+        this.doing = 'walk';
+      } else {
+        this.doing = 'stand_ready';
+      }
+    }
+  }
+
+  /** C++ InfantryClass::Is_Ready_To_Random_Animate — checks all gates.
+   *  Returns true only when infantry is truly idle: standing, not moving,
+   *  not firing, idle timer expired. */
+  isReadyToRandomAnimate(): boolean {
+    if (!this.stats.isInfantry) return false;
+    if (this.idleAnimTimer > 0) return false;   // IdleTimer not expired
+    if (this.doing !== 'stand_ready') return false; // Must be in idle stance
+    if (this.isDriving) return false;            // Not while moving
+    if (this.isFiringAnim) return false;         // Not while firing
+    return true;
   }
 
   /** Credit a kill (RA1: no promotion system, just tracks kill count) */
@@ -893,8 +930,12 @@ export class Entity {
     if (distLeptonsTotal < snapLeptons) {
       this.setPosition(target.x, target.y);
       this.speedAccum = 0;
+      this.isDriving = false; // C++ Stop_Driver
       return true;
     }
+
+    // C++ Start_Driver: entity is now in motion
+    if (this.stats.isInfantry) this.isDriving = true;
 
     const oldFacing = this.facing;
     // C++ uses integer lepton coordinates for direction computation (Desired_Facing8).
