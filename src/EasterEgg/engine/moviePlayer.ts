@@ -14,7 +14,7 @@ import { getMovieUrl } from './movies';
 
 export type MoviePlayerState = 'idle' | 'loading' | 'playing' | 'ended' | 'error';
 
-const LOAD_TIMEOUT_MS = 30000;
+const LOAD_TIMEOUT_MS = 5000; // 5s timeout — fail fast on missing FMV assets
 const VIDEO_Z = 100020;
 const SCANLINE_Z = 100021;
 const CLICK_OVERLAY_Z = 100022;
