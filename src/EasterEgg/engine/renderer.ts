@@ -1512,7 +1512,7 @@ export class Renderer {
           if (shadowSheet) {
             const prevAlpha = ctx.globalAlpha;
             ctx.globalCompositeOperation = 'multiply';
-            ctx.globalAlpha = vis === 1 ? 0.4 : 0.7;
+            ctx.globalAlpha = vis === 1 ? 0.15 : 0.25;
             assets.drawFrameFrom(ctx, shadowSheet, useSheet, useFrame % useTotalFrames,
               screenX + dfw / 2 + 2, screenY + dfh / 2 + 2, { centerX: true, centerY: true });
             ctx.globalCompositeOperation = 'source-over';
