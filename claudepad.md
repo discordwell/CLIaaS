@@ -10,7 +10,14 @@
 - **E1 guard scan delay**: 45 ticks (normal rate), not 14 (AA rate). Only E3 rocket uses AARate.
 - **Global Firing_AI**: Cooldowns tick every tick for ALL missions (was GUARD-only). HUNT entities fire weapons when target in range.
 - **Structure combat ordering**: Moved to building processing section (between entity and aircraft loops) matching C++ Logic layer order.
-- **Remaining RNG gap**: 24 WASM calls vs 4 TS calls at tick 15 (SCG01EA). Not from entities (guard timers at 45+jitter), not from structure combat (no targets in range), not from building timers (only 3 fire). Possibly C++ house-level AI or LogicTrigger callbacks not replicated in TS.
+- **Tick 15 RNG gap traced**: 24 WASM calls decoded via per-entity source tags:
+  - 21 from infantry Random_Animate (5 specific entities: L31,L32,L35,L39,L40)
+  - 2 from TSLA building timer jitter (14+0 delay expires at tick 15)
+  - 1 from aircraft (TRAN)
+  - TS produces 22 of 24 — 2-call gap from Firing_AI combat difference (1 entity)
+- **C++ foot.cpp:624 confirms**: E1 AND E3 both use AA_Delay (14 ticks), not Normal_Delay (45). This is a hardcoded type check, NOT based on weapon isAntiAir.
+- **Random_Animate call sites**: Only Mission_Guard, Mission_Hunt, Mission_Guard_Area (foot.cpp:594,688,1011). NO per-tick call in InfantryClass::AI. Doing state gates it via Is_Ready_To_Random_Animate.
+- **DO_STAND_GUARD is dead**: Never assigned in production code. All idle infantry use DO_STAND_READY. Doing starts at DO_NOTHING, transitions via Doing_AI() and Stop_Driver().
 - **Test env**: PARITY_CHECKPOINTS env var for fine-grained tick comparison.
 
 ## 2026-04-01T06:00Z — Full Campaign Parity: 100% RNG Match Across 12 Scenarios
