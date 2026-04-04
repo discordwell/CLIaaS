@@ -1883,17 +1883,9 @@ export class Renderer {
       // Apply altitude offset for rendering (sprite drawn higher)
       screen.y -= altY;
 
-      // Selection circle (drawn under unit) — palette bright green
+      // Selection brackets — 4 white corner L-shapes (C++ techno.cpp:1159-1187)
+      // C++ draws only corner brackets, no ellipse underneath.
       if (selectedIds.has(entity.id) && entity.alive) {
-        const rx = spriteW * 0.45;
-        const ry = spriteW * 0.2;
-        ctx.strokeStyle = this.palColor(PAL_GREEN_HP);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.ellipse(screen.x, screen.y + spriteH * 0.3 + altY, rx, ry, 0, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Selection brackets — 4 white corner L-shapes (C++ techno.cpp:1159-1187)
         const bx0 = screen.x - spriteW / 2;
         const by0 = screen.y - spriteH / 2;
         const bx1 = screen.x + spriteW / 2;
@@ -3597,11 +3589,15 @@ export class Renderer {
     const bgMid = assets.getSheet(isAllied ? 'side2na' : 'side2us');
     const bgBot = assets.getSheet(isAllied ? 'side3na' : 'side3us');
     if (bgTop && bgMid && bgBot) {
-      // LORES shapes drawn at 2× scale to fill HIRES sidebar
+      // LORES shapes drawn at 2× scale to fill HIRES sidebar.
+      // Nearest-neighbor sampling preserves pixel art (no bilinear blur).
+      const prevSmoothing = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false;
       const scale = w / bgTop.meta.frameWidth;
       assets.drawFrame(ctx, isAllied ? 'side1na' : 'side1us', 0, x, Renderer.SIDEBAR_BG_TOP_Y, { scale });
       assets.drawFrame(ctx, isAllied ? 'side2na' : 'side2us', 0, x, Renderer.SIDEBAR_BG_MID_Y, { scale });
       assets.drawFrame(ctx, isAllied ? 'side3na' : 'side3us', 0, x, Renderer.SIDEBAR_BG_BOT_Y, { scale });
+      ctx.imageSmoothingEnabled = prevSmoothing;
     } else {
       // Fallback: tile sidebar.png or dark fill
       const sidebarSheet = assets.getSheet('sidebar');

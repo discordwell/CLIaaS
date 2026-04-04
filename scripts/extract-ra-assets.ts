@@ -279,7 +279,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   // Fog of war shroud overlays (47 frames, one per edge pattern)
   ['CONQUER.MIX', 'SHADOW.SHP', 'shadow'],
   // UI elements
-  // ['LORES.MIX', 'MOUSE.SHP', 'mouse'],    // Skipped: variable-size frames produce 0-height sheet
+  // ['CONQUER.MIX', 'MOUSE.SHP', 'mouse'],  // TD-style SHP format (not RA KeyFrame) — needs separate parser
   ['LORES.MIX', 'SELECT.SHP', 'select'],     // Selection box
   ['LORES.MIX', 'POWERBAR.SHP', 'powerbar'], // Power bar
   ['LORES.MIX', 'SIDEBAR.SHP', 'sidebar'],   // Sidebar background
