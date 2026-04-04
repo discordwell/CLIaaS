@@ -1,6 +1,6 @@
 # Session Summaries
 
-## 2026-04-03T14:00Z — Parity Fix: AI Production, HPAD, Firing_AI, Terrain
+## 2026-04-03T22:00Z — Parity: Infantry Doing State Machine + 11 Fixes
 - **12/12 tick 1 count-perfect** (was 10/12). 8/12 tick-100. 7/12 tick-500.
 - **AI production/rebuild delay**: Skip first interval (C++ has build time queue). Fixed SCG07EA +1 E7, SCG10EA +1 E1, SCG10EA +1 PROC.
 - **HPAD aircraft spawn**: `cellToWorld(cx+1, cy)` matching C++ helipad dock. Fixed SCG10EA HIND offset.
@@ -18,6 +18,8 @@
 - **C++ foot.cpp:624 confirms**: E1 AND E3 both use AA_Delay (14 ticks), not Normal_Delay (45). This is a hardcoded type check, NOT based on weapon isAntiAir.
 - **Random_Animate call sites**: Only Mission_Guard, Mission_Hunt, Mission_Guard_Area (foot.cpp:594,688,1011). NO per-tick call in InfantryClass::AI. Doing state gates it via Is_Ready_To_Random_Animate.
 - **DO_STAND_GUARD is dead**: Never assigned in production code. All idle infantry use DO_STAND_READY. Doing starts at DO_NOTHING, transitions via Doing_AI() and Stop_Driver().
+- **Infantry Doing state machine ported**: `doing` field (nothing→stand_ready→walk/fire/idle_anim), `isDriving` (set during moveToward, cleared each tick), `isFiringAnim` (set on weapon fire). `isReadyToRandomAnimate()` gates on all: doing=stand_ready + idleTimer + !isDriving + !isFiring. Matches C++ infantry.cpp:4068-4121.
+- **Final scorecard**: 12/12 t1✓, 9/12 t100✓ (was 8/12), 7/12 t500✓. Remaining: 2-call RNG gap at tick 15 from single entity Firing_AI combat difference (weapon fire frame timing).
 - **Test env**: PARITY_CHECKPOINTS env var for fine-grained tick comparison.
 
 ## 2026-04-01T06:00Z — Full Campaign Parity: 100% RNG Match Across 12 Scenarios
