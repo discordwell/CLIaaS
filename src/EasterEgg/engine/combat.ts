@@ -9,7 +9,7 @@ import {
   CELL_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, WEAPON_STATS,
   armorIndex, worldDist, worldToCell, modifyDamage,
-  directionTo, calcProjectileTravelFrames,
+  directionTo, calcProjectileTravelFrames, projectileVisualConfig,
   House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
   HOUSE_FACTION,
@@ -1776,10 +1776,30 @@ export function updateStructureCombat(ctx: CombatContext): void {
         // Projectile from structure to target — per-weapon projectile speed
         const structDistPx = Math.sqrt((bestTarget.pos.x - sx) ** 2 + (bestTarget.pos.y - sy) ** 2);
         const structTravelFrames = calcProjectileTravelFrames(structDistPx, s.weapon.projSpeed);
+        // Map structure type → weapon name (STRUCTURE_WEAPONS doesn't carry weapon name).
+        // Traces rules.ini: HBOX/PBOX→Vulcan, GUN→TurretGun, SAM→Nike, AGUN→Ack(→AAMissile),
+        // FTUR→FireballLauncher, TSLA/QUEE→TeslaZap.
+        let structWeaponName = '';
+        switch (s.type) {
+          case 'GUN':  structWeaponName = 'TurretGun'; break;
+          case 'SAM':  structWeaponName = 'Nike'; break;
+          case 'AGUN': structWeaponName = 'TurretGun'; break;
+          case 'FTUR': structWeaponName = 'FireballLauncher'; break;
+          case 'HBOX': case 'PBOX': structWeaponName = 'Vulcan'; break;
+        }
+        const structProjCfg = projectileVisualConfig(structWeaponName);
+        // Pick projStyle by weapon family so procedural fallback still looks right.
+        let structProjStyle: 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade' = 'bullet';
+        switch (structWeaponName) {
+          case 'FireballLauncher': structProjStyle = 'fireball'; break;
+          case 'TurretGun': structProjStyle = 'shell'; break;
+          case 'Nike': structProjStyle = 'rocket'; break;
+        }
         ctx.effects.push({
           type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: structTravelFrames, size: 3,
           startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
-          projStyle: 'bullet',
+          projStyle: structProjStyle,
+          ...structProjCfg,
         } as Effect);
         // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
         // Non-AA: use C++ Combat_Anim damage-scaled selection

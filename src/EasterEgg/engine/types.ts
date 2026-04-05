@@ -1275,6 +1275,80 @@ export function calcProjectileTravelFrames(distPixels: number, projSpeed?: numbe
   return Math.min(travelTicks, MAX_PROJECTILE_FRAMES);
 }
 
+/** Projectile visual config — maps weapon name to SHP sprite + render flags.
+ *  Sourced from rules.ini BulletTypeClass entries (public/ra/assets/rules.ini:2505-2640).
+ *
+ *  C++ refs:
+ *    bbdata.cpp:207-232 — Image= field per bullet type
+ *    bullet.cpp:506-592 — Draw_It, Shape_Number using PrimaryFacing (Rotates=yes)
+ *    bullet.cpp:377-386 — IsFlameEquipped flame trail
+ *    bullet.cpp:570-578 — IsShadow ground shadow
+ *
+ *  Each bullet type maps to a sprite sheet present in public/ra/assets/manifest.json.
+ *  Sprites with 32 frames (dragon, missile) support rotation; bomb/bomblet use tumble frames. */
+export interface ProjectileVisualConfig {
+  projImage?: string;
+  projRotates?: boolean;
+  projTumble?: boolean;
+  projTumbleFrames?: number;
+  projTranslucent?: boolean;
+  projShadow?: boolean;
+  projFlameTrail?: boolean;
+}
+
+/** Map weapon name → projectile visual config (sprite sheet + flags).
+ *  Traces rules.ini weapon → Projectile= → BulletTypeClass Image/Rotates/Frames/Translucent fields. */
+export function projectileVisualConfig(weaponName: string): ProjectileVisualConfig {
+  switch (weaponName) {
+    // HeatSeeker projectile (Image=DRAGON, Rotates=yes, Translucent=yes, Animates=yes, Shadow=no)
+    // rules.ini:2525-2537
+    case 'Dragon': case 'RedEye': case 'Maverick': case 'Hellfire': case 'SubSCUD': case 'MammothTusk': case 'APTusk':
+      return { projImage: 'dragon', projRotates: true, projTranslucent: true, projFlameTrail: true };
+    // Stinger: LaserGuided projectile (Image=DRAGON, Rotates=yes, Translucent=yes, Animates=yes)
+    // rules.ini:2540-2551
+    case 'Stinger':
+      return { projImage: 'dragon', projRotates: true, projTranslucent: true, projFlameTrail: true };
+    // AAMissile: Image=MISSILE, Rotates=yes, Translucent=yes, Animates=yes, AA=yes, AG=no
+    // rules.ini:2554-2566 (used by AGUN, SAM)
+    case 'Nike': case 'TurretGun':
+      return { projImage: 'missile', projRotates: true, projTranslucent: true, projFlameTrail: true };
+    // Cannon projectile (Image=120MM, no rotation/tumble — single frame shell)
+    // rules.ini:2494-2496
+    case '75mm': case '90mm': case '105mm': case '120mm': case '2Inch':
+      return { projImage: '120mm', projShadow: true };
+    // Ballistic projectile (Image=120MM, Arcing=yes, High=yes, Inaccurate=yes)
+    // rules.ini:2599-2603 — used by 155mm, 8Inch
+    case '155mm': case '8Inch':
+      return { projImage: '120mm', projShadow: true };
+    // FROG projectile (Image=V2, Rotates=yes, Animates=yes, High=yes)
+    // rules.ini:2513-2522 — SCUD weapon (V2 Rocket)
+    case 'SCUD':
+      return { projImage: 'v2rl', projRotates: true, projFlameTrail: true };
+    // Lobbed projectile (Image=BOMB, Frames=8, Arcing=yes, High=yes, Translucent=yes)
+    // rules.ini:2569-2575 — Grenade weapon
+    case 'Grenade':
+      return { projImage: 'bomb', projTumble: true, projTumbleFrames: 8, projTranslucent: true, projShadow: true };
+    // Bomblet projectile (Image=BOMBLET, Frames=6, Dropping=yes, High=yes, Translucent=yes)
+    // rules.ini:2589-2596
+    case 'ParaBomb':
+      return { projImage: 'bomblet', projTumble: true, projTumbleFrames: 6, projTranslucent: true };
+    // Fireball projectile (Image=FB1, Frames=8, Animates=yes)
+    // rules.ini:2636-2639 — Flamer, FireballLauncher, Napalm
+    case 'FireballLauncher': case 'Flamer': case 'Napalm':
+      return { projImage: 'fball1', projTumble: true, projTumbleFrames: 8 };
+    // Torpedo (Image=MISSILE, Rotates=yes, UnderWater=yes, ASW=yes)
+    // rules.ini:2506-2510 — TorpTube weapon (submarine)
+    case 'TorpTube':
+      return { projImage: 'missile', projRotates: true, projTranslucent: true };
+    // LeapDog projectile (Image=DOGBULLT, Rotates=yes, Translucent=yes, Proximity=yes)
+    // rules.ini:2487-2492 — DogJaw weapon. No dogbullt sprite extracted; fall through to procedural.
+    case 'DogJaw':
+      return { projTranslucent: true };
+    default:
+      return {};
+  }
+}
+
 /** C++ Modify_Damage (combat.cpp:72-129) — compute damage with warhead, armor, and distance falloff.
  *  Distance is from explosion center to target (0 = point-blank direct hit).
  *  @param baseDamage - weapon's raw damage value

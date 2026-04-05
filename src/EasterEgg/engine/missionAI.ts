@@ -11,7 +11,7 @@ import {
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
   worldDist, directionTo, worldToCell, DIR_DX, DIR_DY,
   EXPLOSION_FRAMES, CONDITION_RED,
-  calcProjectileTravelFrames, modifyDamage,
+  calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS } from './scenario';
@@ -505,6 +505,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 
         // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
         const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);
+        const projCfg = projectileVisualConfig(activeWeapon.name);
         if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
           // Per-weapon projectile speed: compute travel frames from distance and projSpeed
           const projDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
@@ -512,6 +513,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           ctx.effects.push({
             type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
             startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
+            ...projCfg,
           } as Effect);
         }
 
@@ -1313,12 +1315,14 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
         muzzleColor: ctx.warheadMuzzleColor(entity.weapon.warhead),
       } as Effect);
       const projStyle = ctx.weaponProjectileStyle(entity.weapon.name);
+      const ffProjCfg = projectileVisualConfig(entity.weapon.name);
       // Per-weapon projectile speed: compute travel frames from distance and projSpeed
       const ffDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
       const travelFrames = calcProjectileTravelFrames(ffDistPx, entity.weapon.projSpeed);
       ctx.effects.push({
         type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
         startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
+        ...ffProjCfg,
       } as Effect);
       // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
       const ffExpSet = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 0;

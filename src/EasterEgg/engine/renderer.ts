@@ -171,6 +171,16 @@ export interface Effect {
   endY?: number;
   projStyle?: 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade';
   isArcing?: boolean;  // C4: ballistic arc trajectory — arc height scales with travel distance
+  // Sprite-based projectile rendering (Cluster C: wires SHP sprites into effect path)
+  // These are *separate* from `sprite` because projectiles need custom interpolation + arc logic.
+  projImage?: string;         // sprite sheet name (e.g. 'dragon', 'missile', '120mm', 'bomb', 'v2rl', 'fball1')
+  projRotates?: boolean;      // C++ Rotates=yes: select frame from 32-dir facing (velocity vector)
+  projTumble?: boolean;       // C++ Frames>0 without Rotates: cycle through tumble frames per-tick
+  projTumbleFrames?: number;  // number of tumble frames (C++ BulletTypeClass::Frames)
+  projTranslucent?: boolean;  // C++ Translucent=yes: SHAPE_GHOST approximation (alpha 0.5)
+  projShadow?: boolean;       // C++ IsShadow (Shadow=yes default): draw ground shadow below airborne bullet
+  projFlameTrail?: boolean;   // C++ IsFlameEquipped: smoke puffs along flight path (Cluster C3)
+  projArcPx?: number;         // distance-derived arc height in pixels (Cluster C6, replaces hardcoded 30)
   // Marker color (for move/attack command feedback)
   markerColor?: string;
   // Floating text (e.g. "+100" credits)
@@ -2547,18 +2557,99 @@ export class Renderer {
         // Fall through to procedural if sprite not loaded
       }
 
-      // Projectile rendering
+      // Projectile rendering (Cluster C: sprite-based + procedural fallback)
       if (fx.type === 'projectile' && fx.startX != null && fx.startY != null &&
           fx.endX != null && fx.endY != null) {
         const t = fx.frame / fx.maxFrames;
         const px = fx.startX + (fx.endX - fx.startX) * t;
         const py = fx.startY + (fx.endY - fx.startY) * t;
-        // Arc for shells/rockets/grenades (grenades arc higher)
-        const arcY = fx.projStyle === 'grenade' ? -Math.sin(t * Math.PI) * 45
-          : (fx.projStyle === 'shell' || fx.projStyle === 'rocket')
-            ? -Math.sin(t * Math.PI) * 30 : 0;
+        // Distance-derived arc (C6): C++ computes Riser ~= distance/(speed+1)*gravity.
+        // We approximate with sin(t*PI) * (distance/K) so short shots arc low, long shots arc high.
+        // Grenades arc higher than shells/rockets (C++ Lobbed.Arcing=yes uses taller arc).
+        const dx = fx.endX - fx.startX;
+        const dy = fx.endY - fx.startY;
+        const travelDist = Math.sqrt(dx * dx + dy * dy);
+        let arcPx = 0;
+        if (fx.projArcPx != null) {
+          arcPx = fx.projArcPx;
+        } else if (fx.projStyle === 'grenade') {
+          arcPx = Math.min(80, travelDist / 2);          // tall parabola
+        } else if (fx.projStyle === 'shell' || fx.projStyle === 'rocket') {
+          arcPx = Math.min(50, travelDist / 3);
+        }
+        const arcY = -Math.sin(t * Math.PI) * arcPx;
         const screenP = camera.worldToScreen(px, py + arcY);
 
+        // Ground shadow (C5): for airborne projectiles with shadow flag or arcing trajectory.
+        // C++ bullet.cpp:570-578 offsets shadow by lepton_to_pixel(height).
+        if ((fx.projShadow || arcPx > 0) && fx.projImage) {
+          const gs = camera.worldToScreen(px, py);
+          const prevAlpha = ctx.globalAlpha;
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = '#000';
+          ctx.beginPath();
+          ctx.ellipse(gs.x, gs.y + 1, 3, 1.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = prevAlpha;
+        }
+
+        // Flame trail (C3): spawn smoke puffs along the actual flight path including arc.
+        if (fx.projFlameTrail) {
+          for (let si = 1; si <= 4; si++) {
+            const trailT = Math.max(0, t - si * 0.06);
+            if (trailT <= 0) break;
+            const stx = fx.startX + dx * trailT;
+            const sty = fx.startY + dy * trailT - Math.sin(trailT * Math.PI) * arcPx;
+            const sScreen = camera.worldToScreen(stx, sty);
+            const sAlpha = 0.4 - si * 0.08;
+            const sSize = 1 + si * 0.5;
+            ctx.fillStyle = `rgba(180,180,180,${sAlpha})`;
+            ctx.beginPath();
+            ctx.arc(sScreen.x, sScreen.y, sSize, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        // Sprite-based projectile rendering (C1/C2/C7): use SHP image when available.
+        if (fx.projImage) {
+          const sheet = assets.getSheet(fx.projImage);
+          if (sheet) {
+            // Compute frame index
+            let frameIdx = 0;
+            const total = sheet.meta.frameCount;
+            if (fx.projRotates && total >= 32) {
+              // C++ Rotates=yes: 32-direction facing from velocity vector.
+              // BODY_SHAPE[32] maps facing index → SHP frame slot (mirror of INFANTRY_SHAPE).
+              // Convert atan2 angle to 0-31 (N=0, clockwise).
+              const angle = Math.atan2(-dy, dx); // screen up = -dy
+              // atan2 returns angle from +x axis, CCW. Rotate so N(up)=0, going CW.
+              // angle for +x (E)=0, for -y (N)=PI/2. facing=(PI/2 - angle) / (2*PI) * 32
+              let facing = Math.round(((Math.PI / 2 - angle) / (2 * Math.PI)) * 32);
+              facing = ((facing % 32) + 32) % 32;
+              // BULLET_SHAPE mirrors BODY_SHAPE — projectile SHPs store 32 rotation frames
+              // in the same order as vehicle body sprites (N=0, CCW through frame layout).
+              frameIdx = BODY_SHAPE[facing] ?? 0;
+            } else if (fx.projTumble && fx.projTumbleFrames && fx.projTumbleFrames > 1) {
+              // C++ Frames>0 without Rotates: tumble animation (BOMB=8, BOMBLET=6).
+              frameIdx = fx.frame % fx.projTumbleFrames;
+            } else {
+              frameIdx = 0;
+            }
+            frameIdx = frameIdx % total;
+
+            // C++ Translucent=yes: SHAPE_GHOST approximation.
+            const prevAlpha = ctx.globalAlpha;
+            if (fx.projTranslucent) ctx.globalAlpha = prevAlpha * 0.55;
+            assets.drawFrame(ctx, fx.projImage, frameIdx, screenP.x, screenP.y, {
+              centerX: true, centerY: true,
+            });
+            if (fx.projTranslucent) ctx.globalAlpha = prevAlpha;
+            continue;
+          }
+          // Sheet not loaded — fall through to procedural style
+        }
+
+        // Procedural fallback for projectiles without a loaded sprite.
         switch (fx.projStyle) {
           case 'bullet': {
             ctx.fillStyle = '#ff0';
@@ -2575,39 +2666,40 @@ export class Renderer {
           case 'shell': {
             ctx.fillStyle = '#ccc';
             ctx.fillRect(screenP.x - 1, screenP.y - 1, 3, 3);
-            // Shadow on ground
-            const groundScreen = camera.worldToScreen(px, py);
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.fillRect(groundScreen.x - 1, groundScreen.y, 2, 1);
+            if (!fx.projFlameTrail) {
+              const groundScreen = camera.worldToScreen(px, py);
+              ctx.fillStyle = 'rgba(0,0,0,0.3)';
+              ctx.fillRect(groundScreen.x - 1, groundScreen.y, 2, 1);
+            }
             break;
           }
           case 'rocket': {
             ctx.fillStyle = '#fa0';
             ctx.fillRect(screenP.x - 1, screenP.y - 1, 3, 3);
-            // Multi-puff smoke trail
-            for (let si = 1; si <= 4; si++) {
-              const trailT = Math.max(0, t - si * 0.06);
-              if (trailT <= 0) break;
-              const stx = fx.startX! + (fx.endX! - fx.startX!) * trailT;
-              const sty = fx.startY! + (fx.endY! - fx.startY!) * trailT - Math.sin(trailT * Math.PI) * 30;
-              const sScreen = camera.worldToScreen(stx, sty);
-              const sAlpha = 0.4 - si * 0.08;
-              const sSize = 1 + si * 0.5;
-              ctx.fillStyle = `rgba(180,180,180,${sAlpha})`;
-              ctx.beginPath();
-              ctx.arc(sScreen.x, sScreen.y, sSize, 0, Math.PI * 2);
-              ctx.fill();
+            if (!fx.projFlameTrail) {
+              // Multi-puff smoke trail (already drawn above if projFlameTrail set)
+              for (let si = 1; si <= 4; si++) {
+                const trailT = Math.max(0, t - si * 0.06);
+                if (trailT <= 0) break;
+                const stx = fx.startX + dx * trailT;
+                const sty = fx.startY + dy * trailT - Math.sin(trailT * Math.PI) * arcPx;
+                const sScreen = camera.worldToScreen(stx, sty);
+                const sAlpha = 0.4 - si * 0.08;
+                const sSize = 1 + si * 0.5;
+                ctx.fillStyle = `rgba(180,180,180,${sAlpha})`;
+                ctx.beginPath();
+                ctx.arc(sScreen.x, sScreen.y, sSize, 0, Math.PI * 2);
+                ctx.fill();
+              }
             }
             break;
           }
           case 'grenade': {
-            // Tumbling grenade with shadow
             ctx.fillStyle = '#555';
             const gSize = 2 + Math.sin(t * Math.PI * 4) * 0.5;
             ctx.beginPath();
             ctx.arc(screenP.x, screenP.y, gSize, 0, Math.PI * 2);
             ctx.fill();
-            // Shadow on ground
             const gGround = camera.worldToScreen(px, py);
             ctx.fillStyle = 'rgba(0,0,0,0.25)';
             ctx.fillRect(gGround.x - 1, gGround.y, 3, 1);
