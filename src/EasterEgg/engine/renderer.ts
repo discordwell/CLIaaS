@@ -27,6 +27,14 @@ function lerpFacing32(prev: number, curr: number, alpha: number): number {
 // House colors are applied via palette index remapping (getRemappedSheet),
 // matching C++ SHAPE_FADING remap tables. No tint overlay fallback.
 
+// C++ udata.cpp:60-61 — Harvester sprite animation lists.
+// Dump: 22-stage ping-pong conveyor sweep (0→14→0) played during refinery unload.
+// Load: 9-stage scoop cycle played while stationary at ore cell.
+const HARVESTER_DUMP_LIST: readonly number[] = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 6, 5, 4, 3, 2, 1, 0,
+];
+const HARVESTER_LOAD_LIST: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 0];
+
 // Minimap blip colors per faction (C++ parity — each house has a unique radar color)
 const HOUSE_MINIMAP_COLOR: Record<string, string> = {
   [House.Spain]:   '#FFD700', // gold
@@ -2057,6 +2065,14 @@ export class Renderer {
       // Apply altitude offset for rendering (sprite drawn higher)
       screen.y -= altY;
 
+      // Harvester dock-slide: while dumping ore, slide the HARV sprite slightly north into
+      // the PROC footprint (visual overlap with refinery bay — C++ docks the harvester at
+      // south-center of the 3x3 refinery and the sprite origin is shifted upward ~8px
+      // during the 22-tick dump animation for visual integration with the bay doors).
+      if (entity.type === UnitType.V_HARV && entity.harvesterState === 'unloading' && entity.isHarvesterDumping) {
+        screen.y -= 8;
+      }
+
       // Selection brackets — 4 white corner L-shapes (C++ techno.cpp:1159-1187)
       // C++ draws only corner brackets, no ellipse underneath.
       if (selectedIds.has(entity.id) && entity.alive) {
@@ -2113,6 +2129,21 @@ export class Renderer {
         if (!entity.stats.isInfantry && !entity.isAnt) {
           const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
           frame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
+          // Harvester dump/load animation overlay (C++ unit.cpp:1902-1975 Shape_Number)
+          // HARV sheet layout: 0-31 body rotation, 32-95 scoop anim, 96-110 dump anim.
+          if (entity.type === UnitType.V_HARV && sheet.meta.frameCount >= 96) {
+            if (entity.isHarvesterDumping) {
+              // C++: shapenum = Harvester_Dump_List[stage] + 96
+              const stage = Math.min(entity.harvesterAnimStage, HARVESTER_DUMP_LIST.length - 1);
+              frame = (96 + HARVESTER_DUMP_LIST[stage]) % sheet.meta.frameCount;
+            } else if (entity.isHarvesterMining) {
+              // C++: shapenum = 32 + ((BodyShape[facing]+2)/4)*8 + Harvester_Load_List[stage]
+              const quadrant = ((BODY_SHAPE[entity.bodyFacing32] ?? 0) + 2) >> 2; // /4
+              const q = quadrant & 7;
+              const stage = Math.min(entity.harvesterAnimStage, HARVESTER_LOAD_LIST.length - 1);
+              frame = (32 + q * 8 + HARVESTER_LOAD_LIST[stage]) % sheet.meta.frameCount;
+            }
+          }
         } else {
           frame = entity.spriteFrame % sheet.meta.frameCount;
         }

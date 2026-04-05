@@ -299,6 +299,16 @@ export class Entity {
   /** C++ unit.cpp:2794-2797, 2851 — ArchiveTarget: remembers last known ore location.
    *  When returning to refinery, saves current cell. On next idle seek, heads there first. */
   archiveTarget: { cx: number; cy: number } | null = null;
+  /** Harvester animation stage — C++ Fetch_Stage() while IsDumping/IsHarvesting.
+   *  During 'unloading': advances 0..21 over 22 ticks (Harvester_Dump_List).
+   *  During 'harvesting' (stationary at ore): advances 0..8 (Harvester_Load_List). */
+  harvesterAnimStage = 0;
+  /** True while harvester is stopped at ore cell mining (C++ IsHarvesting).
+   *  Renderer uses this to draw scoop animation frames 32-95. */
+  isHarvesterMining = false;
+  /** True while harvester is docked at refinery dumping ore (C++ IsDumping).
+   *  Renderer uses this to draw dump animation frames 96-110. */
+  isHarvesterDumping = false;
 
   // M7: Crate speed bias — multiplier from speed crate pickups (default 1.0, boosted to 1.7)
   speedBias = 1.0;
