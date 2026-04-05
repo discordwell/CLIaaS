@@ -538,7 +538,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     const explosionDamage = victim.stats.strength; // C++ techno.cpp:3830: MaxStrength
     const primaryWeaponName = victim.stats.primaryWeapon;
     const explosionWarhead: WarheadType = primaryWeaponName
-      ? ((WEAPON_STATS as Record<string, { warhead?: string }>)[primaryWeaponName]?.warhead ?? 'HE')
+      ? ((WEAPON_STATS as Record<string, { warhead?: string }>)[primaryWeaponName]?.warhead as WarheadType ?? 'HE')
       : 'HE'; // C++ techno.cpp:3825: default WARHEAD_HE
     const radiusLeptons = explosionDamage * EXP_SPREAD; // C++ techno.cpp:3832
     const radiusCells = radiusLeptons / LEPTONS_PER_CELL;

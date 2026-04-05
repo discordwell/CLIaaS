@@ -98,6 +98,15 @@ export enum House {
   BadGuy = 'BadGuy',   // Meta-house: enemy side
   Neutral = 'Neutral',
   Special = 'Special', // Meta-house: reinforcements and scripted spawns (C++ HOUSE_SPECIAL)
+  // Multi-player slots (C++ HOUSE_MULTI1..MULTI8) — used for skirmish/multiplayer maps
+  Multi1 = 'Multi1',
+  Multi2 = 'Multi2',
+  Multi3 = 'Multi3',
+  Multi4 = 'Multi4',
+  Multi5 = 'Multi5',
+  Multi6 = 'Multi6',
+  Multi7 = 'Multi7',
+  Multi8 = 'Multi8',
 }
 
 // Alliance groups (ant missions only — campaign uses dynamic alliances from scenario INI)
@@ -690,6 +699,7 @@ export interface WeaponStats {
   isGigundo?: boolean;      // large explosion sprite on impact (V2RL, nukes)
   isDegenerate?: boolean;   // C++ bullet.cpp:478-480 — projectile loses 1 strength/tick during flight (min 5)
   isHigh?: boolean;         // C++ type.h:1365 — flies over walls (missiles, rockets); non-high explode on wall contact (bullet.cpp:903-913)
+  isFlameEquipped?: boolean; // C++ bullet.cpp:377-386 — alternates fireball/smoke puff behind bullet each tick
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72

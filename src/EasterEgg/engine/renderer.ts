@@ -121,7 +121,6 @@ export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFra
   v09: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
   v10: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
   v11: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
-  spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet Sub Pen
 };
 
 // Building foundation bibs (C++ bib.cpp): [width, height] in cells.
