@@ -781,6 +781,7 @@ export class Game {
       cameraViewWidth: this.camera.viewWidth,
       screenShake: this.renderer.screenShake,
       screenFlash: this.renderer.screenFlash,
+      whitePaletteFade: this.renderer.whitePaletteFade,
       activeVortices: this.activeVortices,
       timeQuake: this.timeQuake,
     };
@@ -798,6 +799,9 @@ export class Game {
     this.nukePendingSource = ctx.nukePendingSource;
     this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
     this.renderer.screenFlash = Math.max(this.renderer.screenFlash, ctx.screenFlash);
+    if (ctx.whitePaletteFade !== undefined) {
+      this.renderer.whitePaletteFade = Math.max(this.renderer.whitePaletteFade, ctx.whitePaletteFade);
+    }
     if (ctx.timeQuake !== undefined) this.timeQuake = ctx.timeQuake;
     return result;
   }

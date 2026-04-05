@@ -471,12 +471,13 @@ describe('PROC destruction side effects', () => {
     expect(evaPlayed).toBe('eva_unit_lost');
   });
 
-  it('produces screen shake on destruction (3x2 -> shakeIntensity=12)', () => {
+  it('produces screen shake on destruction (PROC cost=2000 -> shakes=5)', () => {
     const proc = makePROC(10, 10, 50, House.USSR);
     const ctx = makeCombatCtx([proc]);
     structureDamage(ctx, proc, 100);
-    // shakeIntensity = min(20, 4 + max(3, 2) * 4) = min(20, 4 + 12) = 16
-    expect(ctx.screenShake).toBe(16);
+    // C++ building.cpp:1460 — shakes = Class->Cost_Of() / 400
+    // PROC cost is 2000 in rules.ini → floor(2000/400) = 5
+    expect(ctx.screenShake).toBe(5);
   });
 
   it('spawns explosion and debris effects on destruction', () => {

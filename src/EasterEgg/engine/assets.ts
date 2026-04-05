@@ -45,6 +45,17 @@ export interface TilesetMeta {
 
 const BASE_URL = '/ra/assets';
 
+/** Sprite name aliases — historical C++ SHP names that map to different extracted filenames.
+ *  The C++ source uses names like WATER_EXP1 / H2O_EXP1 interchangeably; the extractor
+ *  writes h2o_exp1.png, but combatAnim() returns 'water-exp1' to match C++ combat.cpp:325.
+ *  Keeping the alias here (instead of renaming in combatAnim) preserves all existing
+ *  cpp-parity tests that assert water-exp* return values. */
+const SPRITE_ALIASES: Record<string, string> = {
+  'water-exp1': 'h2o_exp1',
+  'water-exp2': 'h2o_exp2',
+  'water-exp3': 'h2o_exp3',
+};
+
 /** Load an image and return a promise that resolves when loaded */
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -204,9 +215,21 @@ export class AssetManager {
     this.loaded = true;
   }
 
-  /** Get a loaded sprite sheet by name */
+  /** Resolve a sprite name through the alias table. Returns the direct name if no alias. */
+  private resolveName(name: string): string {
+    if (this.sheets.has(name)) return name;
+    const alias = SPRITE_ALIASES[name];
+    return alias ?? name;
+  }
+
+  /** Get a loaded sprite sheet by name. Supports aliases for historical C++ sprite names
+   *  that differ from the extracted asset filenames (e.g. water-exp1 → h2o_exp1). */
   getSheet(name: string): SpriteSheet | undefined {
-    return this.sheets.get(name);
+    const direct = this.sheets.get(name);
+    if (direct) return direct;
+    const alias = SPRITE_ALIASES[name];
+    if (alias) return this.sheets.get(alias);
+    return undefined;
   }
 
   /** Get the palette */
@@ -259,7 +282,7 @@ export class AssetManager {
     y: number,
     options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
-    const sheet = this.sheets.get(sheetName);
+    const sheet = this.sheets.get(this.resolveName(sheetName));
     if (!sheet) {
       this.drawMissingAsset(ctx, sheetName, x, y, options);
       return;
@@ -278,7 +301,7 @@ export class AssetManager {
     y: number,
     options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
-    const sheet = this.sheets.get(sheetName);
+    const sheet = this.sheets.get(this.resolveName(sheetName));
     if (!sheet) {
       this.drawMissingAsset(ctx, sheetName, x, y, options);
       return;
@@ -326,9 +349,11 @@ export class AssetManager {
     }
   }
 
-  /** Check if a sprite sheet exists */
+  /** Check if a sprite sheet exists (alias-aware) */
   hasSheet(name: string): boolean {
-    return this.sheets.has(name);
+    if (this.sheets.has(name)) return true;
+    const alias = SPRITE_ALIASES[name];
+    return alias ? this.sheets.has(alias) : false;
   }
 
   // === Shadow sheet cache (sprite-shaped silhouettes for C++ SHAPE_GHOST shadow) ===

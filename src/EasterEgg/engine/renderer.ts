@@ -193,7 +193,13 @@ export class Renderer {
   private pal: number[][] | null = null;
   private palTheatre = ''; // which theatre the current palette is for
   screenShake = 0;      // remaining shake ticks
-  screenFlash = 0;      // remaining flash ticks (white flash on big explosions)
+  screenFlash = 0;      // remaining flash ticks (yellowish flash on big explosions)
+  /** Palette whiteout countdown for nuke detonation.
+   *  C++ anim.cpp:955,983 — Fade_Palette_To(WhitePalette, 30) then Fade_Palette_To(GamePalette, 15).
+   *  We emulate with a full-screen white overlay that ramps in over 30 ticks, holds briefly,
+   *  then fades out. Counter starts at whitePaletteFadeMax and decrements each frame. */
+  whitePaletteFade = 0;
+  whitePaletteFadeMax = 45;
   attackMoveMode = false; // show attack-move cursor indicator
   sellMode = false;      // show sell cursor indicator
   repairMode = false;    // show repair cursor indicator
@@ -456,6 +462,27 @@ export class Renderer {
       ctx.fillStyle = `rgba(255,255,220,${flashAlpha})`;
       ctx.fillRect(0, 0, this.width, this.height);
       this.screenFlash--;
+    }
+
+    // Nuke palette whiteout overlay — C++ Fade_Palette_To(WhitePalette, 30) → GamePalette(15).
+    // Ramp-in phase (first 30 ticks of the countdown, elapsed 0..29):
+    //   whiteAlpha ramps from 0 → 1 linearly.
+    // Ramp-out phase (elapsed 30..44): whiteAlpha ramps 1 → 0 over 15 ticks.
+    // Produces a bloom-and-fade whiteout distinct from the yellow screenFlash.
+    if (this.whitePaletteFade > 0) {
+      const fadeIn = 30;
+      const holdOut = 15;
+      const elapsed = this.whitePaletteFadeMax - this.whitePaletteFade;
+      let whiteAlpha: number;
+      if (elapsed < fadeIn) {
+        whiteAlpha = elapsed / fadeIn; // 0 → 1 over first 30 ticks
+      } else {
+        const outElapsed = elapsed - fadeIn;
+        whiteAlpha = Math.max(0, 1 - outElapsed / holdOut); // 1 → 0 over final 15 ticks
+      }
+      ctx.fillStyle = `rgba(255,255,255,${whiteAlpha})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+      this.whitePaletteFade--;
     }
 
     // Placement ghost preview

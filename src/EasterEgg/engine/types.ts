@@ -539,6 +539,12 @@ export const EXPLOSION_FRAMES: Record<string, number> = {
   'h2o_exp1': 10, 'h2o_exp2': 10, 'h2o_exp3': 10,  // manifest.json: 10 frames each
   // Aliases: combatAnim() returns water-exp* names (matching C++ WATER_LIST naming)
   'water-exp1': 10, 'water-exp2': 10, 'water-exp3': 10,
+  // Building death fire scatter (C++ ANIM_FIRE_SMALL / ANIM_FIRE_MED — fire1/2/3.shp)
+  fire1: 15, fire2: 15, fire3: 15, fire4: 15,
+  // Persistent ground smoke column (C++ ANIM_SMOKE_M) — 91-frame looped smoke
+  smoke_m: 91,
+  // Chronosphere warp box (C++ ANIM_CHRONO_BOX — CHRONBOX.SHP)
+  chronbox: 25,
 };
 
 export interface WeaponStats {

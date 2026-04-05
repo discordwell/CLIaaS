@@ -92,6 +92,8 @@ export interface SuperweaponContext {
   // Renderer
   screenShake: number;
   screenFlash: number;
+  /** Palette whiteout ticks for nuke detonation (C++ anim.cpp:955 Fade_Palette_To(WhitePalette, 30)) */
+  whitePaletteFade?: number;
 
   // C++ house.cpp:2876-2888 — chronal vortex spawning after chronoshift
   activeVortices?: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }>;
@@ -697,9 +699,13 @@ export function activateSuperweapon(
 export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
   // AU5: Nuke detonation SFX
   ctx.playSound('nuke_explode');
-  // C++ anim.cpp:1102 — Shake_The_Screen(3)
+  // C++ anim.cpp:955,981-983 — Shake_The_Screen(3) + Fade_Palette_To(WhitePalette, 30)
+  //   followed by Fade_Palette_To(GamePalette, 15).
+  // We retain screenFlash for backwards compat (existing tests assert 30),
+  // and additionally trigger whitePaletteFade for the full 45-tick whiteout bloom.
   ctx.screenFlash = 30;
   ctx.screenShake = 3;
+  ctx.whitePaletteFade = 45; // 30 fade-in + 15 fade-out
 
   // Apply nuke damage in blast radius using Nuke warhead (C++ building.cpp:4191: WARHEAD_NUKE)
   const blastRadius = CELL_SIZE * NUKE_BLAST_CELLS;
