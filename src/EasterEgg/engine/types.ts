@@ -229,12 +229,16 @@ export interface InfantryAnim {
   fireProne?: DoInfo; // DO_FIRE_PRONE — firing while prone
   lieDown?: DoInfo;   // DO_LIE_DOWN — transition to prone
   getUp?: DoInfo;     // DO_GET_UP — transition from prone
-  die1: DoInfo;       // DO_GUN_DEATH
-  die2?: DoInfo;      // DO_EXPLOSION_DEATH
+  die1: DoInfo;       // DO_GUN_DEATH (InfDeath=0)
+  die2?: DoInfo;      // DO_EXPLOSION_DEATH (InfDeath=1)
+  die3?: DoInfo;      // DO_EXPLOSION2_DEATH (InfDeath=2)
+  die4?: DoInfo;      // DO_GRENADE_DEATH (InfDeath=3)
+  die5?: DoInfo;      // DO_FIRE_DEATH (InfDeath=4 — burn; InfDeath=5 electro also maps here)
   idle?: DoInfo;      // DO_IDLE1
   idle2?: DoInfo;     // DO_IDLE2
   // Per-type animation rate overrides (C++ MasterDoControls variable timing)
-  walkRate?: number;   // ticks per frame for walk (default 3)
+  // C++ MasterDoControls: WALK=2, CRAWL=2, IDLE1/2=2, FIRE_WEAPON=1, death=2
+  walkRate?: number;   // ticks per frame for walk (default 2 per C++ MasterDoControls)
   attackRate?: number;  // ticks per frame for attack (default 5)
   idleRate?: number;   // ticks per frame for idle (default 4)
 }
@@ -246,6 +250,8 @@ export const INFANTRY_SHAPE: number[] = [0, 7, 6, 5, 4, 3, 2, 1];
 
 // Infantry animation layouts per type — exact C++ idata.cpp DoControls values.
 // Frame formula: frame + INFANTRY_SHAPE[dir] * jump + animFrame % count
+// die1..die5 map to InfDeath 0..4 (C++ DO_GUN_DEATH, DO_EXPLOSION_DEATH, DO_EXPLOSION2_DEATH,
+// DO_GRENADE_DEATH, DO_FIRE_DEATH). InfDeath=5 (electro) also maps to die5 in warhead.cpp.
 export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
   E1: { // E1DoControls (idata.cpp:80)
     ready:     { frame: 0,   count: 1,  jump: 1 },
@@ -259,6 +265,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 176, count: 2,  jump: 2 },
     die1:      { frame: 288, count: 8,  jump: 0 },  // 382-94
     die2:      { frame: 304, count: 8,  jump: 0 },  // 398-94
+    die3:      { frame: 304, count: 8,  jump: 0 },  // 398-94 (E1 reuses die2 for EXPLOSION2)
+    die4:      { frame: 312, count: 12, jump: 0 },  // 406-94
+    die5:      { frame: 324, count: 18, jump: 0 },  // 418-94
     idle:      { frame: 256, count: 16, jump: 0 },
     idle2:     { frame: 272, count: 16, jump: 0 },
   },
@@ -274,6 +283,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 272, count: 2,  jump: 2 },
     die1:      { frame: 416, count: 8,  jump: 0 },  // 510-94
     die2:      { frame: 432, count: 8,  jump: 0 },  // 526-94
+    die3:      { frame: 432, count: 8,  jump: 0 },  // 526-94
+    die4:      { frame: 440, count: 12, jump: 0 },  // 534-94
+    die5:      { frame: 452, count: 18, jump: 0 },  // 546-94
     idle:      { frame: 384, count: 16, jump: 0 },
     idle2:     { frame: 400, count: 16, jump: 0 },
     attackRate: 6,
@@ -290,6 +302,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 176, count: 2,  jump: 2 },
     die1:      { frame: 304, count: 8,  jump: 0 },  // 398-94
     die2:      { frame: 320, count: 8,  jump: 0 },  // 414-94
+    die3:      { frame: 320, count: 8,  jump: 0 },  // 414-94
+    die4:      { frame: 328, count: 12, jump: 0 },  // 422-94
+    die5:      { frame: 340, count: 18, jump: 0 },  // 434-94
     idle:      { frame: 272, count: 16, jump: 0 },
     idle2:     { frame: 288, count: 16, jump: 0 },
   },
@@ -305,6 +320,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 240, count: 2,  jump: 2 },
     die1:      { frame: 416, count: 8,  jump: 0 },  // 510-94
     die2:      { frame: 432, count: 8,  jump: 0 },  // 526-94
+    die3:      { frame: 432, count: 8,  jump: 0 },  // 526-94
+    die4:      { frame: 440, count: 12, jump: 0 },  // 534-94
+    die5:      { frame: 452, count: 18, jump: 0 },  // 546-94
     idle:      { frame: 384, count: 16, jump: 0 },
     idle2:     { frame: 400, count: 16, jump: 0 },
     attackRate: 4,
@@ -320,6 +338,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 114, count: 2,  jump: 2 },
     die1:      { frame: 146, count: 8,  jump: 0 },
     die2:      { frame: 154, count: 8,  jump: 0 },
+    die3:      { frame: 162, count: 8,  jump: 0 },
+    die4:      { frame: 162, count: 12, jump: 0 },
+    die5:      { frame: 182, count: 18, jump: 0 },
     idle:      { frame: 130, count: 16, jump: 0 },
   },
   DOG: { // DogDoControls (idata.cpp:56) — Attack dog
@@ -329,6 +350,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     crawl:     { frame: 56,  count: 6,  jump: 6 },
     die1:      { frame: 235, count: 7,  jump: 0 },
     die2:      { frame: 242, count: 9,  jump: 0 },
+    die3:      { frame: 242, count: 9,  jump: 0 },
+    die4:      { frame: 242, count: 9,  jump: 0 },
+    die5:      { frame: 251, count: 14, jump: 0 },
     idle:      { frame: 216, count: 18, jump: 0 },
     walkRate: 2,
   },
@@ -343,6 +367,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 161, count: 2,  jump: 2 },
     die1:      { frame: 262, count: 8,  jump: 0 },
     die2:      { frame: 270, count: 8,  jump: 0 },
+    die3:      { frame: 278, count: 8,  jump: 0 },
+    die4:      { frame: 286, count: 12, jump: 0 },
+    die5:      { frame: 298, count: 18, jump: 0 },
     idle:      { frame: 232, count: 17, jump: 0 },
     idle2:     { frame: 249, count: 13, jump: 0 },
   },
@@ -358,6 +385,9 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     getUp:     { frame: 176, count: 2,  jump: 2 },
     die1:      { frame: 288, count: 8,  jump: 0 },
     die2:      { frame: 296, count: 8,  jump: 0 },
+    die3:      { frame: 304, count: 8,  jump: 0 },
+    die4:      { frame: 312, count: 12, jump: 0 },
+    die5:      { frame: 324, count: 18, jump: 0 },
     idle:      { frame: 256, count: 14, jump: 0 },
     idle2:     { frame: 270, count: 18, jump: 0 },
   },
@@ -367,17 +397,103 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     fire:      { frame: 56,  count: 28, jump: 0 },  // heal (non-directional)
     prone:     { frame: 130, count: 1,  jump: 4 },
     crawl:     { frame: 130, count: 4,  jump: 4 },
+    fireProne: { frame: 56,  count: 28, jump: 0 },  // same as fire (non-directional)
     lieDown:   { frame: 114, count: 2,  jump: 2 },
     getUp:     { frame: 162, count: 2,  jump: 2 },
     die1:      { frame: 193, count: 8,  jump: 0 },
     die2:      { frame: 210, count: 8,  jump: 0 },
+    die3:      { frame: 202, count: 8,  jump: 0 },
+    die4:      { frame: 217, count: 12, jump: 0 },
+    die5:      { frame: 229, count: 18, jump: 0 },
     idle:      { frame: 178, count: 15, jump: 0 },
+  },
+  // E9DoControls (idata.cpp:249) — Thief. No fire weapon.
+  THF: {
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 8,   count: 1,  jump: 1 },
+    walk:      { frame: 8,   count: 6,  jump: 6 },
+    fire:      { frame: 0,   count: 0,  jump: 0 },  // thieves don't fire
+    prone:     { frame: 72,  count: 1,  jump: 4 },
+    crawl:     { frame: 72,  count: 4,  jump: 4 },
+    lieDown:   { frame: 56,  count: 2,  jump: 2 },
+    getUp:     { frame: 108, count: 2,  jump: 2 },
+    die1:      { frame: 139, count: 8,  jump: 0 },
+    die2:      { frame: 147, count: 8,  jump: 0 },
+    die3:      { frame: 155, count: 8,  jump: 0 },
+    die4:      { frame: 163, count: 12, jump: 0 },
+    die5:      { frame: 175, count: 18, jump: 0 },
+    idle:      { frame: 120, count: 19, jump: 0 },
+  },
+  // GeneralDoControls (idata.cpp:297) — General Stavros (GNRL)
+  GNRL: {
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 0,   count: 1,  jump: 1 },
+    walk:      { frame: 8,   count: 6,  jump: 6 },
+    fire:      { frame: 56,  count: 4,  jump: 4 },
+    prone:     { frame: 104, count: 1,  jump: 4 },
+    crawl:     { frame: 104, count: 4,  jump: 4 },
+    fireProne: { frame: 152, count: 4,  jump: 4 },
+    lieDown:   { frame: 88,  count: 2,  jump: 2 },
+    getUp:     { frame: 136, count: 2,  jump: 2 },
+    die1:      { frame: 210, count: 8,  jump: 0 },
+    die2:      { frame: 226, count: 8,  jump: 0 },
+    die3:      { frame: 218, count: 8,  jump: 0 },
+    die4:      { frame: 234, count: 12, jump: 0 },
+    die5:      { frame: 246, count: 18, jump: 0 },
+    idle:      { frame: 184, count: 26, jump: 0 },
+  },
+  // CivilianDoControls (idata.cpp:321) — C1-C10, CHAN
+  // Note: walk frame is 56 (not 8), crawl frame is 8. Civilians have no lieDown/getUp/prone.
+  C1: {
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 0,   count: 1,  jump: 1 },
+    walk:      { frame: 56,  count: 6,  jump: 6 },
+    fire:      { frame: 120, count: 4,  jump: 4 },  // 205-85
+    crawl:     { frame: 8,   count: 6,  jump: 6 },
+    fireProne: { frame: 120, count: 4,  jump: 4 },  // 205-85
+    die1:      { frame: 152, count: 8,  jump: 0 },
+    die2:      { frame: 160, count: 8,  jump: 0 },
+    die3:      { frame: 160, count: 8,  jump: 0 },
+    die4:      { frame: 168, count: 12, jump: 0 },
+    die5:      { frame: 180, count: 18, jump: 0 },
+    idle:      { frame: 104, count: 10, jump: 0 },  // 189-85
+    idle2:     { frame: 114, count: 6,  jump: 0 },  // 199-85
+  },
+  // EinsteinDoControls (idata.cpp:345) — EINSTEIN, DELPHI. No crawl/prone/lieDown/getUp.
+  EINSTEIN: {
+    ready:     { frame: 0,   count: 1,  jump: 1 },
+    guard:     { frame: 0,   count: 1,  jump: 1 },
+    walk:      { frame: 56,  count: 6,  jump: 6 },
+    fire:      { frame: 113, count: 4,  jump: 4 },  // 205-92
+    crawl:     { frame: 8,   count: 6,  jump: 6 },
+    die1:      { frame: 120, count: 8,  jump: 0 },  // 212-92
+    die2:      { frame: 128, count: 8,  jump: 0 },  // 220-92
+    die3:      { frame: 136, count: 12, jump: 0 },  // 228-92
+    die4:      { frame: 136, count: 12, jump: 0 },  // 228-92
+    die5:      { frame: 148, count: 17, jump: 0 },  // 240-92
+    idle:      { frame: 104, count: 16, jump: 0 },
+    idle2:     { frame: 104, count: 16, jump: 0 },
   },
 };
 // SHOK uses E4DoControls (Flamethrower animations) — idata.cpp:852
 INFANTRY_ANIMS.SHOK = INFANTRY_ANIMS.E4;
 // MEDI uses same animation layout as MECH (MedicDoControls in idata.cpp:273)
 INFANTRY_ANIMS.MEDI = INFANTRY_ANIMS.MECH;
+// TANYA (I_TANYA = 'E7') already uses E7DoControls via the E7 key.
+// C2-C10 share CivilianDoControls with C1 — alias to the C1 entry.
+INFANTRY_ANIMS.C2 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C3 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C4 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C5 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C6 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C7 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C8 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C9 = INFANTRY_ANIMS.C1;
+INFANTRY_ANIMS.C10 = INFANTRY_ANIMS.C1;
+// CHAN uses EinsteinDoControls (idata.cpp:830) — not CivilianDoControls like the other civilians.
+INFANTRY_ANIMS.CHAN = INFANTRY_ANIMS.EINSTEIN;
+// DELPHI uses CivilianDoControls (idata.cpp:811).
+INFANTRY_ANIMS.DELPHI = INFANTRY_ANIMS.C1;
 
 // Vehicle body rotation lookup table (BodyShape[32] from RA source)
 // Maps 32-step facing index to sprite frame index
@@ -539,6 +655,12 @@ export const EXPLOSION_FRAMES: Record<string, number> = {
   'h2o_exp1': 10, 'h2o_exp2': 10, 'h2o_exp3': 10,  // manifest.json: 10 frames each
   // Aliases: combatAnim() returns water-exp* names (matching C++ WATER_LIST naming)
   'water-exp1': 10, 'water-exp2': 10, 'water-exp3': 10,
+  // Building death fire scatter (C++ ANIM_FIRE_SMALL / ANIM_FIRE_MED — fire1/2/3.shp)
+  fire1: 15, fire2: 15, fire3: 15, fire4: 15,
+  // Persistent ground smoke column (C++ ANIM_SMOKE_M) — 91-frame looped smoke
+  smoke_m: 91,
+  // Chronosphere warp box (C++ ANIM_CHRONO_BOX — CHRONBOX.SHP)
+  chronbox: 25,
 };
 
 export interface WeaponStats {

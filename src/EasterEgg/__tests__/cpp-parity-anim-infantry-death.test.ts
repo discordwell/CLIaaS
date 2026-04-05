@@ -321,14 +321,14 @@ describe('spriteFrame uses correct death animation based on deathVariant', () =>
     expect(unit.spriteFrame).toBe(304 + 3);
   });
 
-  it('deathVariant=5 → die2 frame for E1 (Super warhead electro)', () => {
+  it('deathVariant=5 → die5 (FIRE_DEATH) frame for E1 (Super warhead electro)', () => {
     const unit = new Entity(UnitType.I_E1, House.England, 100, 100);
     unit.alive = false;
     unit.animState = AnimState.DIE;
     unit.deathVariant = 5;
     unit.animFrame = 0;
-    // die2.frame = 304 (deathVariant > 0 → die2)
-    expect(unit.spriteFrame).toBe(304);
+    // G2: deathVariant=5 → die5 (FIRE_DEATH). C++ E1DoControls die5 = 418-94 = 324.
+    expect(unit.spriteFrame).toBe(324);
   });
 
   it('DOG deathVariant=0 → die1 frame (235, count=7)', () => {
@@ -487,11 +487,11 @@ describe('Corpse uses last frame of correct death animation based on deathVarian
   }
 });
 
-// ─── 13. Civilians fall back to E1 animation (no dedicated INFANTRY_ANIMS) ──
+// ─── 13. Civilians use CivilianDoControls/EinsteinDoControls (C++ idata.cpp:321,345) ──
 
-describe('Civilians and special infantry fall back to E1 animation', () => {
-  // C++ uses CivilianDoControls for C1-C10, but TS has no INFANTRY_ANIMS entries
-  // for civilians. The fallback logic: INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1
+describe('Civilians have dedicated CivilianDoControls animations', () => {
+  // C++ idata.cpp assigns CivilianDoControls to C1-C10 and DELPHI,
+  // and EinsteinDoControls to EINSTEIN and CHAN.
 
   const civilianTypes = [
     UnitType.I_C1, UnitType.I_C2, UnitType.I_C3, UnitType.I_C4, UnitType.I_C5,
@@ -499,9 +499,9 @@ describe('Civilians and special infantry fall back to E1 animation', () => {
   ];
 
   for (const civ of civilianTypes) {
-    it(`${civ} has no dedicated INFANTRY_ANIMS entry, falls back to E1`, () => {
-      const anim = INFANTRY_ANIMS[civ] ?? INFANTRY_ANIMS.E1;
-      expect(anim).toBe(INFANTRY_ANIMS.E1);
+    it(`${civ} shares CivilianDoControls via C1 alias`, () => {
+      const anim = INFANTRY_ANIMS[civ];
+      expect(anim).toBe(INFANTRY_ANIMS.C1);
     });
   }
 
@@ -512,10 +512,33 @@ describe('Civilians and special infantry fall back to E1 animation', () => {
     expect(civ.deathVariant).toBe(1);
   });
 
-  it('Einstein has no dedicated INFANTRY_ANIMS entry', () => {
-    // Einstein uses 'einstein' image but INFANTRY_ANIMS key is the UnitType
-    const anim = INFANTRY_ANIMS[UnitType.I_EINSTEIN] ?? INFANTRY_ANIMS.E1;
-    expect(anim).toBe(INFANTRY_ANIMS.E1);
+  it('Einstein uses EinsteinDoControls (idata.cpp:345)', () => {
+    const anim = INFANTRY_ANIMS[UnitType.I_EINSTEIN];
+    expect(anim).toBe(INFANTRY_ANIMS.EINSTEIN);
+    expect(anim).not.toBe(INFANTRY_ANIMS.E1);
+  });
+
+  it('DELPHI uses CivilianDoControls (idata.cpp:811)', () => {
+    const anim = INFANTRY_ANIMS[UnitType.I_DELPHI];
+    expect(anim).toBe(INFANTRY_ANIMS.C1);
+  });
+
+  it('CHAN uses EinsteinDoControls (idata.cpp:830)', () => {
+    const anim = INFANTRY_ANIMS[UnitType.I_CHAN];
+    expect(anim).toBe(INFANTRY_ANIMS.EINSTEIN);
+  });
+
+  it('GNRL uses GeneralDoControls (idata.cpp:581)', () => {
+    const anim = INFANTRY_ANIMS[UnitType.I_GNRL];
+    expect(anim).toBe(INFANTRY_ANIMS.GNRL);
+    expect(anim).not.toBe(INFANTRY_ANIMS.E1);
+  });
+
+  it('THF uses E9DoControls (idata.cpp:523)', () => {
+    const anim = INFANTRY_ANIMS[UnitType.I_THF];
+    expect(anim).toBe(INFANTRY_ANIMS.THF);
+    // Thieves have no fire weapon
+    expect(anim.fire.count).toBe(0);
   });
 });
 
@@ -700,12 +723,12 @@ describe('E6 (Engineer) has death animations despite no fire animation', () => {
     expect(INFANTRY_ANIMS.E6.die2!.count).toBe(8);
   });
 
-  it('engineer killed by HE gets deathVariant=2 and plays die2', () => {
+  it('engineer killed by HE gets deathVariant=2 and plays die3 (EXPLOSION2_DEATH)', () => {
     const eng = new Entity(UnitType.I_E6, House.England, 100, 100);
     eng.takeDamage(9999, 'HE');
     expect(eng.deathVariant).toBe(2);
     eng.animFrame = 0;
-    // deathVariant=2 > 0 → die2.frame = 154
-    expect(eng.spriteFrame).toBe(154);
+    // G2: deathVariant=2 → die3 (EXPLOSION2_DEATH). C++ E6DoControls die3 = 162.
+    expect(eng.spriteFrame).toBe(162);
   });
 });
