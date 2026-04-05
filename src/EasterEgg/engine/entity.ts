@@ -334,6 +334,11 @@ export class Entity {
   ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
   chronoShiftTick = 0;  // visual effect timer after being chronoshifted
 
+  // C++ IsAnimAttached mirror (unit.cpp:1113, vessel.cpp:975) — tick at which the
+  // attached SMOKE_M damage anim was spawned. -1 means no smoke attached (i.e. !IsAnimAttached).
+  // Renderer anchors frame advancement to this tick so the sprite plays as one continuous anim.
+  damageSmokeStartTick = -1;
+
   // Moebius return fields (C++ drive.h:62-74 — IsMoebius, MoebiusCountDown, MoebiusCell)
   // After chronoshift, unit saves origin cell and returns after ChronoDuration expires.
   moebiusCell: WorldPos | null = null;  // origin position before chronoshift

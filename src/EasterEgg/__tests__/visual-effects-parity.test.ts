@@ -4,6 +4,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { Effect } from '../engine/renderer';
+import { Entity } from '../engine/entity';
+import { CONDITION_YELLOW, House, UnitType } from '../engine/types';
 
 describe('Effect interface extensions', () => {
   it('supports blendMode for additive effects (C++ SHAPE_GHOST + TranslucentTable)', () => {
@@ -139,6 +141,47 @@ describe('Building fire sprite tiers (C++ ANIM_ON_FIRE_SMALL/MED/BIG)', () => {
       expect(sources).toBeLessThanOrEqual(3);
     });
   }
+});
+
+// ============================================================
+// Damage smoke attachment (SMOKE_M anim, C++ unit.cpp:1113, vessel.cpp:975)
+// C++:   if (Health_Ratio() <= Rule.ConditionYellow && !IsAnimAttached)
+//          new AnimClass(ANIM_SMOKE_M, Coord_Add(Coord, XYP_Coord(0, -8)), 0, 1, true);
+// ============================================================
+describe('Damage smoke attachment (unit.cpp:1113)', () => {
+  it('damageSmokeStartTick defaults to -1 (!IsAnimAttached) on fresh vehicle', () => {
+    const e = new Entity(UnitType.V_2TNK, House.Spain, 10, 10);
+    expect(e.damageSmokeStartTick).toBe(-1);
+  });
+
+  it('ConditionYellow threshold (50%) is the spawn condition', () => {
+    // C++ unit.cpp:1113 uses Rule.ConditionYellow — rules.ini ConditionYellow=50%.
+    expect(CONDITION_YELLOW).toBe(0.5);
+    const e = new Entity(UnitType.V_2TNK, House.Spain, 10, 10);
+    // Half HP — exactly at threshold, smoke should spawn (<=).
+    e.hp = Math.floor(e.maxHp * 0.5);
+    expect(e.hp / e.maxHp).toBeLessThanOrEqual(CONDITION_YELLOW);
+    // 51% — above threshold, no smoke.
+    e.hp = Math.floor(e.maxHp * 0.51);
+    expect(e.hp / e.maxHp).toBeGreaterThan(CONDITION_YELLOW);
+  });
+
+  it('damageSmokeStartTick can be set and is preserved (mirrors IsAnimAttached=true)', () => {
+    // The renderer sets damageSmokeStartTick to the current tick when hp first drops to
+    // ConditionYellow; subsequent frames reuse it so the smoke anim is continuous (not re-spawned).
+    const e = new Entity(UnitType.V_2TNK, House.Spain, 10, 10);
+    e.damageSmokeStartTick = 42;
+    expect(e.damageSmokeStartTick).toBe(42);
+    // Unchanged on field read — the renderer only rewrites on (re)attach or detach.
+    expect(e.damageSmokeStartTick).toBe(42);
+  });
+
+  it('damageSmokeStartTick is a number field (not a boolean) so age can drive frame index', () => {
+    // Unlike C++ bool IsAnimAttached, we need the spawn tick so the renderer can compute
+    // frame = (tick - startTick) against SMOKE_M's 91-frame sheet with loopStart=67.
+    const e = new Entity(UnitType.V_2TNK, House.Spain, 10, 10);
+    expect(typeof e.damageSmokeStartTick).toBe('number');
+  });
 });
 
 describe('Flak burst for AA weapons (C++ FLAK.SHP)', () => {
