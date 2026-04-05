@@ -24,9 +24,10 @@ describe('INFANTRY_SHAPE parity', () => {
 // INFANTRY_ANIMS parity — all unit types
 // ============================================================
 describe('INFANTRY_ANIMS parity', () => {
-  it('has 11 keys (9 base + 2 aliases)', () => {
-    // E1, E2, E3, E4, E6, DOG, E7, SPY, MECH + SHOK(=E4), MEDI(=MECH)
-    expect(Object.keys(INFANTRY_ANIMS)).toHaveLength(11);
+  it('has 26 keys (12 base + 14 aliases)', () => {
+    // Base: E1, E2, E3, E4, E6, DOG, E7, SPY, MECH, THF, GNRL, C1, EINSTEIN
+    // Aliases: SHOK(=E4), MEDI(=MECH), C2-C10(=C1), CHAN(=EINSTEIN), DELPHI(=C1)
+    expect(Object.keys(INFANTRY_ANIMS)).toHaveLength(26);
   });
 
   // --- E1 (Rifle Infantry) ---
@@ -196,7 +197,8 @@ describe('INFANTRY_ANIMS parity', () => {
     it('fire (heal)', () => expect(a.fire).toEqual({ frame: 56, count: 28, jump: 0 }));
     it('prone', () => expect(a.prone).toEqual({ frame: 130, count: 1, jump: 4 }));
     it('crawl', () => expect(a.crawl).toEqual({ frame: 130, count: 4, jump: 4 }));
-    it('no fireProne', () => expect(a.fireProne).toBeUndefined());
+    // C++ MedicDoControls (idata.cpp:282) has DO_FIRE_PRONE = {56, 28, 0} — same as DO_FIRE_WEAPON
+    it('fireProne (same as fire)', () => expect(a.fireProne).toEqual({ frame: 56, count: 28, jump: 0 }));
     it('lieDown', () => expect(a.lieDown).toEqual({ frame: 114, count: 2, jump: 2 }));
     it('getUp', () => expect(a.getUp).toEqual({ frame: 162, count: 2, jump: 2 }));
     it('die1', () => expect(a.die1).toEqual({ frame: 193, count: 8, jump: 0 }));
@@ -218,7 +220,11 @@ describe('INFANTRY_ANIMS parity', () => {
 
   // --- Completeness ---
   it('every key in INFANTRY_ANIMS is tested', () => {
-    const expected = ['E1', 'E2', 'E3', 'E4', 'E6', 'DOG', 'E7', 'SPY', 'MECH', 'SHOK', 'MEDI'];
+    const expected = [
+      'E1', 'E2', 'E3', 'E4', 'E6', 'DOG', 'E7', 'SPY', 'MECH', 'SHOK', 'MEDI',
+      'THF', 'GNRL', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',
+      'CHAN', 'DELPHI', 'EINSTEIN',
+    ];
     expect(Object.keys(INFANTRY_ANIMS).sort()).toEqual(expected.sort());
   });
 });

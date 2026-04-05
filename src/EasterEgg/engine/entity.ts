@@ -126,6 +126,7 @@ export class Entity {
   animState: AnimState = AnimState.IDLE;
   animFrame = 0;
   animTick = 0;
+  prevAnimState: AnimState = AnimState.IDLE;  // G6: detect state transitions for Random_Animate start frame
 
   // Death / visual
   deathTick = 0;       // ticks since death (for corpse fade + cleanup)
@@ -577,9 +578,21 @@ export class Entity {
           return d.frame + sdir * d.jump + (this.animFrame % d.count);
         }
         case AnimState.DIE: {
-          // C++ InfantryDeath 0=die1 (instant), 1-5=die2 (twirl/explode/flying/burn/electro)
-          const d = (this.deathVariant > 0 && anim.die2) ? anim.die2 : anim.die1;
-          return d.frame + Math.min(this.animFrame, d.count - 1);
+          // C++ InfantryDeath 0-5 → die1..die5 (warhead.cpp InfDeath mapping):
+          //   0=GUN_DEATH (die1), 1=EXPLOSION_DEATH (die2), 2=EXPLOSION2_DEATH (die3),
+          //   3=GRENADE_DEATH (die4), 4=FIRE_DEATH (die5), 5=electro → reuses die5.
+          // Falls back through die2→die1 if a specific variant is missing.
+          let d: { frame: number; count: number; jump: number } | undefined;
+          switch (this.deathVariant) {
+            case 0: d = anim.die1; break;
+            case 1: d = anim.die2 ?? anim.die1; break;
+            case 2: d = anim.die3 ?? anim.die2 ?? anim.die1; break;
+            case 3: d = anim.die4 ?? anim.die2 ?? anim.die1; break;
+            case 4: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
+            case 5: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
+            default: d = anim.die1;
+          }
+          return d.frame + Math.min(this.animFrame, Math.max(d.count - 1, 0));
         }
         default: {
           // Prone idle
@@ -593,6 +606,13 @@ export class Entity {
             const useIdle2 = anim.idle2 && this.fidgetVariant >= 0.5;
             const d = useIdle2 ? anim.idle2! : anim.idle;
             return d.frame + (this.animFrame % d.count);
+          }
+          // G5: DO_STAND_GUARD uses anim.guard when unit is in guard/area-guard mission.
+          // C++ infantry.cpp Shape_Number reads DoControls[DO_STAND_GUARD] when Doing==DO_STAND_GUARD.
+          // Falls back to ready for types without a separate guard pose.
+          if ((this.mission === Mission.GUARD || this.mission === Mission.AREA_GUARD) && anim.guard) {
+            const d = anim.guard;
+            return d.frame + sdir * d.jump;
           }
           const d = anim.ready;
           return d.frame + sdir * d.jump;
@@ -761,10 +781,34 @@ export class Entity {
 
   /** Update animation frame — uses per-type rate overrides from C++ MasterDoControls */
   tickAnimation(): void {
+    // G6: Random_Animate frame-start for WALK/CRAWL (C++ MasterDoControls RandomStart=true).
+    // When infantry enters WALK state, start at a random offset into the walk cycle so groups
+    // of infantry don't all animate in lockstep. Same applies to crawl (same count as walk).
+    // C++ infantry.cpp:1964 Do_Action: start stage is randomized when IsRandom flag set.
+    // Also re-randomize the idle fidget variant on every fresh idle transition (G7).
+    if (this.animState !== this.prevAnimState) {
+      if (this.stats.isInfantry) {
+        if (this.animState === AnimState.WALK) {
+          const ta = INFANTRY_ANIMS[this.type];
+          const walkD = (this.isProne && ta?.crawl) ? ta.crawl : ta?.walk;
+          const cnt = walkD ? Math.max(walkD.count, 1) : 1;
+          this.animFrame = NonCriticalRandom.nextInRange(0, cnt - 1);
+          this.animTick = 0;
+        } else if (this.animState === AnimState.IDLE || this.animState === AnimState.GUARD_IDLE) {
+          // G7: re-randomize idle fidget selection each time unit returns to idle.
+          this.fidgetDelay = NonCriticalRandom.nextInRange(12, 31);
+          this.fidgetVariant = NonCriticalRandom.float();
+        }
+      }
+      this.prevAnimState = this.animState;
+    }
     this.animTick++;
     // Per-type animation rate overrides (R3: C++ MasterDoControls variable timing)
     const typeAnim = this.stats.isInfantry ? INFANTRY_ANIMS[this.type] : undefined;
-    const defaultWalk = 3;
+    // C++ infantry.cpp:98 MasterDoControls defaults:
+    //   DO_WALK rate=2, DO_CRAWL rate=2, DO_FIRE_WEAPON rate=1, DO_IDLE1/2 rate=2.
+    // Default walk=2 per MasterDoControls (G4).
+    const defaultWalk = 2;
     const defaultAttack = 5;
     const defaultIdle = 4;
     // Ants: faster walk animation (1 frame/tick) — C++ ties body frames to track steps,
