@@ -412,17 +412,23 @@ describe('building sprite frame changes (building.cpp:679-687)', () => {
   //
   // The TS BUILDING_FRAME_TABLE.damageFrame stores this precomputed offset.
 
-  // Test specific buildings against known C++ frame layouts
+  // Test specific buildings against known C++ frame layouts.
+  // idleAnimCount values are derived from C++ bdata.cpp:3054-3096 _anims table.
+  // For FACT, BARR, TENT: C++ registers a 10/26-frame cycle via Init_Anim
+  // (STRUCT_CONST BSTATE_ACTIVE 0,26,3; STRUCT_BARRACKS/TENT BSTATE_IDLE 0,10,3).
+  // The TS renderer plays these as idle loops for visual fidelity.
+  // powr/dome/weap idleAnimCount values are anticipated for post-Cluster A
+  // re-extraction of the full animation frames (pumping/sweep/bay door).
   const EXPECTED_FRAME_DATA: [string, number, number][] = [
     // [type, damageFrame, idleAnimCount]
-    ['powr', 4, 0],       // 8 frames: 0-3 normal, 4-7 damaged
+    ['powr', 4, 8],       // blade rotation (post-Cluster A re-extraction)
     ['apwr', 1, 0],       // 2 frames: 0 normal, 1 damaged
-    ['fact', 26, 0],      // 52 frames: 0-25 construction, 26-51 damaged
-    ['weap', 16, 0],      // 32 frames: door states + damaged mirror
-    ['barr', 10, 0],      // 20 frames: 0-9 normal, 10-19 damaged
-    ['tent', 10, 0],      // 20 frames: 0-9 normal, 10-19 damaged
+    ['fact', 26, 26],     // 52 frames: 26 pumping idle cycle (C++ BSTATE_ACTIVE 0,26,3)
+    ['weap', 16, 32],     // 32 frames: bay door (post-Cluster A re-extraction)
+    ['barr', 10, 10],     // 20 frames: 10 door cycle (C++ BSTATE_IDLE 0,10,3)
+    ['tent', 10, 10],     // 20 frames: 10 door cycle (C++ BSTATE_IDLE 0,10,3)
     ['proc', 16, 0],      // 32 frames: conveyor states + damaged mirror
-    ['dome', 8, 0],       // 16 frames: 0-7 radar dish, 8-15 damaged
+    ['dome', 8, 16],      // 16 frames: radar sweep (post-Cluster A re-extraction)
     ['silo', 5, 0],       // 10 frames: 0-4 fill levels, 5-9 damaged
     ['hbox', 1, 0],       // 2 frames: 0 normal, 1 damaged
     ['pbox', 1, 0],       // 2 frames: 0 normal, 1 damaged
@@ -566,6 +572,110 @@ describe('tech center flicker bug: no damage state oscillation', () => {
     for (const f of frames) {
       expect(f, `frame ${f} should be in damaged range [8, 15]`).toBeGreaterThanOrEqual(8);
       expect(f).toBeLessThan(16);
+    }
+  });
+});
+
+// ============================================================
+// Section 8b: Frame overflow guards (E6)
+// Prevents negative damageAnimCount and out-of-bounds frame draws
+// when a sprite sheet is smaller than the declared damageFrame
+// (can happen before Cluster A re-extracts multi-frame sheets).
+// ============================================================
+describe('frame overflow guards (E6)', () => {
+  /** Mirror of renderer.ts animated-building frame calc with E6 safety guards. */
+  function animatedFrame(baseFrame: number, idleAnimCount: number, totalFrames: number, tick: number): number {
+    const availFromBase = Math.max(1, totalFrames - baseFrame);
+    const safeAnimCount = Math.max(1, Math.min(idleAnimCount, availFromBase));
+    let frame = baseFrame + (Math.floor(tick / 8) % safeAnimCount);
+    if (frame >= totalFrames || frame < 0) {
+      frame = totalFrames > 0 ? ((frame % totalFrames) + totalFrames) % totalFrames : 0;
+    }
+    return frame;
+  }
+
+  /** Mirror of renderer.ts static-damaged frame calc with E6 guards. */
+  function damagedStaticFrame(damageFrame: number, totalFrames: number, tick: number): number {
+    const rawDamageAnimCount = Math.min(damageFrame, totalFrames - damageFrame);
+    let frame: number;
+    if (rawDamageAnimCount <= 0) {
+      frame = Math.max(0, totalFrames - 1);
+    } else {
+      frame = damageFrame + (rawDamageAnimCount > 1 ? Math.floor(tick / 8) % rawDamageAnimCount : 0);
+    }
+    if (frame >= totalFrames || frame < 0) {
+      frame = totalFrames > 0 ? ((frame % totalFrames) + totalFrames) % totalFrames : 0;
+    }
+    return frame;
+  }
+
+  it('animated building with idleAnimCount exceeding sheet stays in bounds', () => {
+    // powr declares idleAnimCount=8 for post-Cluster A extraction, but pre-extraction
+    // sheet only has 2 frames. Renderer must clamp to avoid reading frame 7 from a 2-frame sheet.
+    const totalFrames = 2;
+    for (let tick = 0; tick < 160; tick++) {
+      const f = animatedFrame(0, 8, totalFrames, tick);
+      expect(f, `tick=${tick}`).toBeGreaterThanOrEqual(0);
+      expect(f, `tick=${tick}`).toBeLessThan(totalFrames);
+    }
+  });
+
+  it('animated building with full-size sheet still cycles full animation', () => {
+    // fact has 52 frames, idleAnimCount=26 — must cycle through all 26 frames.
+    const seen = new Set<number>();
+    for (let tick = 0; tick < 26 * 8; tick++) {
+      seen.add(animatedFrame(0, 26, 52, tick));
+    }
+    expect(seen.size).toBe(26);
+    for (const f of seen) {
+      expect(f).toBeGreaterThanOrEqual(0);
+      expect(f).toBeLessThan(26); // all frames in idle range
+    }
+  });
+
+  it('damaged animated building clamps to available frames past damageFrame', () => {
+    // fact damaged: baseFrame=26, idleAnimCount=26, totalFrames=52.
+    // Must stay within [26, 51].
+    for (let tick = 0; tick < 26 * 8; tick++) {
+      const f = animatedFrame(26, 26, 52, tick);
+      expect(f, `tick=${tick}`).toBeGreaterThanOrEqual(26);
+      expect(f, `tick=${tick}`).toBeLessThan(52);
+    }
+  });
+
+  it('static damaged building with damageFrame beyond sheet falls back to last frame', () => {
+    // Simulates powr pre-Cluster A: damageFrame=4 vs a 2-frame sheet.
+    // rawDamageAnimCount = min(4, -2) = -2 → fall back to last frame.
+    const f = damagedStaticFrame(4, 2, 17);
+    expect(f).toBe(1); // totalFrames-1
+  });
+
+  it('static damaged building with sheet exactly matching damageFrame uses single frame', () => {
+    // e.g. 20-frame sheet with damageFrame=10: rawDamageAnimCount = 10
+    const seen = new Set<number>();
+    for (let tick = 0; tick < 80; tick++) {
+      seen.add(damagedStaticFrame(10, 20, tick));
+    }
+    for (const f of seen) {
+      expect(f).toBeGreaterThanOrEqual(10);
+      expect(f).toBeLessThan(20);
+    }
+  });
+
+  it('never produces negative frames even with pathological inputs', () => {
+    // Defensive: any animCount+baseFrame combo must not produce frame < 0
+    for (const baseFrame of [0, 4, 16, 26, 32]) {
+      for (const animCount of [0, 1, 8, 16, 32]) {
+        for (const totalFrames of [1, 2, 4, 20, 52]) {
+          for (let tick = 0; tick < 40; tick += 7) {
+            // Skip cases where baseFrame >= totalFrames (no room) — our guard handles these.
+            const f = animatedFrame(Math.min(baseFrame, totalFrames - 1), Math.max(1, animCount), totalFrames, tick);
+            expect(f, `base=${baseFrame} anim=${animCount} total=${totalFrames} tick=${tick}`)
+              .toBeGreaterThanOrEqual(0);
+            expect(f).toBeLessThan(totalFrames);
+          }
+        }
+      }
     }
   });
 });

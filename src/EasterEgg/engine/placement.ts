@@ -235,6 +235,9 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     maxAmmo: -1,
     missionTimer: 0,
     deployedFromMCV: true, // C++ ArchiveTarget parity: tracks MCV origin for sell reversion
+    // C++ bdata.cpp:3131 Init_Anim(BSTATE_CONSTRUCTION): MCV deploy plays the MAKE buildup anim.
+    // The renderer (renderer.ts:1555) watches buildProgress < 1 and draws factmake frames.
+    buildProgress: 0,
   };
   ctx.structures.push(newStruct);
   // Mark 3x3 footprint

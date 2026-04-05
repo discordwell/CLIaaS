@@ -21,7 +21,7 @@ import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
 import { canTargetNaval } from './aircraft';
 import { AI_BUILD_RULES } from './ai';
-import { ScenarioRandom } from './random';
+import { ScenarioRandom, NonCriticalRandom } from './random';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1334,6 +1334,56 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
       frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: deathExplosionRadius,
       sprite: 'fball1', spriteStart: 0,
     } as Effect);
+    // C++ building.cpp:1257-1273 — per-footprint-cell destruction scatter:
+    // always a crater smudge + FBALL1 scattered 0x0040 leptons; 50% FIRE-SMALL
+    // scattered 0x0080, and within that 50% a FIRE-MED at 0x0040.
+    // 0x0040 leptons = 64/256 cell = 6px; 0x0080 leptons = 128/256 cell = 12px at CELL_SIZE=24.
+    // NOTE: scatter and fire chance use NonCriticalRandom to avoid disturbing the
+    // deterministic game RNG (ScenarioRandom) — C++ drives these via Scen.Random, but
+    // matching the full per-cell Random_Pick sequence is fragile and visual-only here.
+    const LEPTON_40_PX = (0x40 / 256) * CELL_SIZE; // 6px
+    const LEPTON_80_PX = (0x80 / 256) * CELL_SIZE; // 12px
+    for (let fy = 0; fy < fh; fy++) {
+      for (let fx = 0; fx < fw; fx++) {
+        const cellCx = s.cx + fx;
+        const cellCy = s.cy + fy;
+        const cellWx = cellCx * CELL_SIZE + CELL_SIZE / 2;
+        const cellWy = cellCy * CELL_SIZE + CELL_SIZE / 2;
+        // Always: crater smudge (C++ SmudgeClass SMUDGE_CRATER1..6)
+        ctx.map.addDecal(cellCx, cellCy, 10, 0.5);
+        // Always: scattered FBALL1 at this cell (C++ ANIM_FBALL1 scatter 0x0040)
+        const fbDx = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
+        const fbDy = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
+        ctx.effects.push({
+          type: 'explosion', x: cellWx + fbDx, y: cellWy + fbDy,
+          frame: -NonCriticalRandom.nextInRange(0, 3), // C++ Random_Pick(0,3) stagger
+          maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: 10,
+          sprite: 'fball1', spriteStart: 0,
+        } as Effect);
+        // 50% chance: FIRE-SMALL scattered 0x0080 (we reuse 'smokey' as the fire/smoke sprite)
+        if (NonCriticalRandom.float() < 0.5) {
+          const fsDx = (NonCriticalRandom.float() - 0.5) * LEPTON_80_PX * 2;
+          const fsDy = (NonCriticalRandom.float() - 0.5) * LEPTON_80_PX * 2;
+          ctx.effects.push({
+            type: 'explosion', x: cellWx + fsDx, y: cellWy + fsDy,
+            frame: -NonCriticalRandom.nextInRange(0, 7), // C++ Random_Pick(0,7) stagger
+            maxFrames: 14, size: 6,
+            sprite: 'smokey', spriteStart: 0,
+          } as Effect);
+          // Within that 50%: a second FIRE-MED at 0x0040 scatter
+          if (NonCriticalRandom.float() < 0.5) {
+            const fmDx = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
+            const fmDy = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
+            ctx.effects.push({
+              type: 'explosion', x: cellWx + fmDx, y: cellWy + fmDy,
+              frame: -NonCriticalRandom.nextInRange(0, 7),
+              maxFrames: 14, size: 9,
+              sprite: 'smokey', spriteStart: 0,
+            } as Effect);
+          }
+        }
+      }
+    }
     // Flying debris
     ctx.effects.push({
       type: 'debris', x: wx, y: wy,
