@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   CELL_SIZE, MAP_CELLS,
-  House, Mission, UnitType, AnimState,
+  House, Mission, UnitType, AnimState, Dir,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -936,47 +936,90 @@ describe('findHarvesterOre — AI harvester anti-clustering (harvester.ts:48-104
 
 describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
   /**
-   * C++ building.cpp:3758-3780 — Refinery MIDDLE state:
-   *   FootClass * techno = Attached_Object();
-   *   if (techno) {
-   *     int bail = techno->Offload_Tiberium_Bail();
-   *     if (bail) {
-   *       House->Harvested(bail);
-   *       if (techno->Tiberium_Load() > 0) {
-   *         return(1);  // keep unloading
-   *       }
-   *     }
-   *   }
+   * C++ unit.cpp:2348-2390 — Mission_Unload for UNIT_HARVESTER:
+   *   1. If PrimaryFacing != DIR_W, call Do_Turn(DIR_W) and return 5
+   *   2. Set IsDumping=true, Set_Stage(0), Set_Rate(OreDumpRate=1)
+   *   3. While Fetch_Stage() < ARRAY_SIZE(Harvester_Dump_List)-1, keep animating
+   *   4. At final stage: House->Harvested(Credit_Load()); Tiberium = 0
    *
-   * C++ unloads ONE bail per tick. Each bail's credit value is calculated individually.
-   * Offload_Tiberium_Bail (unit.cpp:4299-4313) decrements Tiberium by 1 and returns
-   * the credit value for that bail.
-   *
-   * TS now matches C++ drip-feed: 1 bail per tick, credits deposited per bail.
+   * C++ deposits credits as LUMP SUM at end of 22-frame dump animation (unit.cpp:2383),
+   * NOT drip-fed per bail. The refinery's Mission_Harvest calls Offload_Tiberium_Bail
+   * which is #ifdef TOFIX'd and returns 0 credits (see next test) — so the harvester's
+   * own lump-sum deposit is the actual credit source.
    */
-  it('C++ drip-feed unload: 1 bail per tick (building.cpp:3758-3780)', () => {
+  it('C++ lump-sum unload: full credit deposit after 22-tick dump (unit.cpp:2383)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250; // 10 * 25
+    // Simulate harvester already rotated to DIR_W (C++ Do_Turn(DIR_W) completed).
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     ctx.entities.push(harv);
 
-    // After 1 tick, 1 bail should be unloaded
-    updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(9);
-    expect(ctx.addCredits).toHaveBeenCalledTimes(1);
-    expect(ctx.addCredits).toHaveBeenCalledWith(25); // 250/10 = 25 per bail
-
-    // After 9 more ticks (10 total), all bails should be unloaded
-    for (let i = 0; i < 9; i++) {
+    // Ticks 1-21: dump animation in progress, no credits deposited yet.
+    for (let i = 1; i <= 21; i++) {
       updateHarvester(ctx, harv);
+      expect(harv.harvesterState, `tick ${i}`).toBe('unloading');
+      expect(harv.oreLoad, `tick ${i}`).toBe(10);
+      expect(ctx.addCredits, `tick ${i}`).not.toHaveBeenCalled();
     }
+
+    // Tick 22: dump completes, lump-sum deposit.
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
+    expect(harv.harvestTick).toBe(0);
+    expect(ctx.addCredits).toHaveBeenCalledTimes(1);
+    expect(ctx.addCredits).toHaveBeenCalledWith(250);
+  });
+
+  /**
+   * C++ unit.cpp:2365-2369 — Do_Turn(DIR_W) rotate delay before dump:
+   *   case UNIT_HARVESTER:
+   *     if (PrimaryFacing != DIR_W) {
+   *       if (!IsRotating) {
+   *         Do_Turn(DIR_W);
+   *       }
+   *       return(5);
+   *     }
+   * TS: while facing != Dir.W, harvester sets desiredFacing=W and waits in 'unloading'
+   * without advancing the dump stage. Credits deposited only after rotation completes.
+   */
+  it('C++ rotate to DIR_W before dump animation (unit.cpp:2365-2369)', () => {
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'unloading';
+    harv.harvestTick = 0;
+    harv.oreLoad = 5;
+    harv.oreCreditValue = 125;
+    harv.facing = Dir.N; // not yet facing W
+    harv.desiredFacing = Dir.N;
+    ctx.entities.push(harv);
+
+    // First 3 ticks: waiting for rotation — no stage advance, no deposit.
+    for (let i = 0; i < 3; i++) {
+      updateHarvester(ctx, harv);
+      expect(harv.harvesterState).toBe('unloading');
+      expect(harv.desiredFacing).toBe(Dir.W);
+      expect(harv.harvestTick).toBe(0);
+      expect(harv.isHarvesterDumping).toBe(false);
+      expect(ctx.addCredits).not.toHaveBeenCalled();
+    }
+
+    // Simulate rotation completion.
+    harv.facing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
+
+    // Now dump advances 22 ticks and deposits lump sum.
+    for (let i = 0; i < 22; i++) updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
-    expect(ctx.addCredits).toHaveBeenCalledTimes(10);
+    expect(ctx.addCredits).toHaveBeenCalledTimes(1);
+    expect(ctx.addCredits).toHaveBeenCalledWith(125);
   });
 
   /**
@@ -988,19 +1031,50 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
    *   return(0);
    *
    * CRITICAL OBSERVATION: The credit return in Offload_Tiberium_Bail is #ifdef TOFIX'd out!
-   * The actual credit deposit is done by Building::Mission_Harvest via House->Harvested(bail).
-   * But `bail` is the return value of Offload_Tiberium_Bail, which returns 0 (due to #ifdef).
-   *
-   * This means in unmodified C++, the refinery deposits 0 credits per bail!
-   * The TOFIX block suggests this was a known bug that was never fixed.
-   *
-   * TS works around this by using the tracked oreCreditValue instead.
+   * The actual credit deposit is done by Mission_Unload via House->Harvested(Credit_Load())
+   * at the END of the 22-frame dump animation — see the lump-sum test above.
    */
   it('C++ Offload_Tiberium_Bail returns 0 due to #ifdef TOFIX — structural note', () => {
     // The C++ code has a bug where Offload_Tiberium_Bail always returns 0
     // because the credit calculation is inside an #ifdef TOFIX block.
     // This is an intentional documentation of the C++ source state.
     expect(true).toBe(true);
+  });
+
+  /**
+   * C++ building.cpp:306 — Adjacent_Cell(Center_Coord(), DIR_S):
+   *   case STRUCT_REFINERY:
+   *     param = ::As_Target(Coord_Cell(Adjacent_Cell(Center_Coord(), DIR_S)));
+   *
+   * For a 3x3 PROC at (cx, cy), Center_Coord() corresponds to cell (cx+1, cy+1).
+   * Adjacent_Cell(center, DIR_S) = (cx+1, cy+2) — the south-center cell of the footprint.
+   * This is where the harvester docks (inside the PROC footprint, at its southern edge).
+   *
+   * Previous TS bug: used (cx+1, cy+procH) = (cx+1, cy+3), which is one cell SOUTH of the
+   * footprint — off by one from C++.
+   */
+  it('C++ dock cell targets south-center of PROC footprint (building.cpp:306)', () => {
+    const ctx = makeCtx({
+      structures: [{
+        type: 'PROC', image: 'proc', house: House.Spain,
+        cx: 60, cy: 60, hp: 500, maxHp: 500,
+        alive: true, rubble: false,
+        attackCooldown: 0, ammo: -1, maxAmmo: -1,
+      } as any],
+    });
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'returning';
+    harv.oreLoad = 28;
+    harv.mission = Mission.GUARD;
+    ctx.entities.push(harv);
+
+    updateHarvester(ctx, harv);
+
+    // Harvester should now be pathing to the dock cell at (61, 62) — south-center of PROC
+    // at (60..62, 60..62). Adjacent south of center (61, 61) = (61, 62).
+    expect(harv.moveTarget).toBeDefined();
+    expect(harv.moveTarget!.x).toBe(61 * CELL_SIZE + CELL_SIZE / 2);
+    expect(harv.moveTarget!.y).toBe(62 * CELL_SIZE + CELL_SIZE / 2);
   });
 });
 

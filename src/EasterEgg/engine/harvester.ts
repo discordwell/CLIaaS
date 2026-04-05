@@ -5,7 +5,7 @@
 
 import {
   CELL_SIZE, MAP_CELLS,
-  type House, Mission, AnimState, UnitType,
+  type House, Mission, AnimState, UnitType, Dir,
 } from './types';
 import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -148,6 +148,9 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         entity.harvestTick = 0;
         entity.mission = Mission.GUARD;
         entity.animState = AnimState.IDLE;
+        // C++ unit.cpp:2800 — IsHarvesting = true when scoop anim begins
+        entity.isHarvesterMining = true;
+        entity.harvesterAnimStage = 0;
       } else if (isIdleMission(entity.mission)) {
         // Arrived (move completed → GUARD/AREA_GUARD) but no ore here — re-seek
         entity.harvesterState = 'idle';
@@ -165,8 +168,13 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
     }
     case 'harvesting': {
       entity.harvestTick++;
+      // C++ unit.cpp Shape_Number — Harvester_Load_List[9] scoop cycle (0..8)
+      // Set_Rate(OreDumpRate=1) → advance 1 stage per tick; wrap via modulo.
+      entity.harvesterAnimStage = (entity.harvesterAnimStage + 1) % 9;
+      entity.isHarvesterMining = true;
       // C++ unit.cpp:2280: if (Tiberium_Load() < 1) — return when already full
       if (entity.oreLoad >= Entity.BAIL_COUNT) {
+        entity.isHarvesterMining = false;
         entity.harvesterState = 'returning';
         break;
       }
@@ -198,11 +206,13 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         if (entity.oreLoad >= Entity.BAIL_COUNT) {
           // C++ unit.cpp:2851: ArchiveTarget = ::As_Target(Coord_Cell(Coord));
           entity.archiveTarget = { cx: ec.cx, cy: ec.cy };
+          entity.isHarvesterMining = false;
           entity.harvesterState = 'returning';
         } else if (cellDepleted) {
           // No more ore at this cell — look for adjacent ore
           const newOre = ctx.map.findNearestOre(ec.cx, ec.cy, 6);
           if (newOre && entity.oreLoad < Entity.BAIL_COUNT) {
+            entity.isHarvesterMining = false;
             entity.harvesterState = 'seeking';
             entity.mission = Mission.MOVE;
             entity.moveTarget = { x: newOre.cx * CELL_SIZE + CELL_SIZE / 2, y: newOre.cy * CELL_SIZE + CELL_SIZE / 2 };
@@ -210,6 +220,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
             entity.pathIndex = 0;
           } else {
             // No more ore nearby — return with whatever we have
+            entity.isHarvesterMining = false;
             if (entity.oreLoad > 0) {
               entity.archiveTarget = { cx: ec.cx, cy: ec.cy };
               entity.harvesterState = 'returning';
@@ -260,9 +271,16 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         // Arrived at refinery — start unloading
         entity.harvesterState = 'unloading';
         entity.harvestTick = 0;
+        entity.harvesterAnimStage = 0;
+        entity.isHarvesterDumping = false; // set true once rotated to DIR_W
+        // C++ unit.cpp:2365-2369 — rotate to DIR_W before dump animation begins
+        entity.desiredFacing = Dir.W;
       } else {
-        // Not there yet — move to dock cell below refinery entrance (C++ behavior)
-        const target = { cx: bestProc.cx + 1, cy: bestProc.cy + procH };
+        // Not there yet — move to dock cell (C++ building.cpp:306 Adjacent_Cell(Center, DIR_S)).
+        // PROC is 3x3 at (cx..cx+2, cy..cy+2). Center cell = (cx+1, cy+1).
+        // DIR_S of center = (cx+1, cy+2) — the south-center cell of the footprint.
+        // Harvester drives into this cell from below to dock.
+        const target = { cx: bestProc.cx + 1, cy: bestProc.cy + procH - 1 };
         entity.mission = Mission.MOVE;
         entity.moveTarget = { x: target.cx * CELL_SIZE + CELL_SIZE / 2, y: target.cy * CELL_SIZE + CELL_SIZE / 2 };
         entity.path = findPath(ctx.map, ec, target, true);
@@ -272,34 +290,52 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
       break;
     }
     case 'unloading': {
-      // C++ building.cpp:3758-3780: drip-feed unload — 1 bail per tick.
-      // Offload_Tiberium_Bail() decrements Tiberium by 1 each tick.
-      // House->Harvested(bail) deposits credits for that bail.
-      entity.harvestTick++;
-      if (entity.oreLoad > 0) {
-        // Calculate per-bail credit value (average across mixed gold/gem loads)
-        const bailValue = entity.oreCreditValue / entity.oreLoad;
-        entity.oreLoad -= 1;
-        entity.oreCreditValue -= bailValue;
-        // Clamp floating point rounding
-        if (entity.oreLoad <= 0) {
-          entity.oreLoad = 0;
-          entity.oreCreditValue = 0;
-        }
-        if (ctx.isPlayerControlled(entity)) {
-          ctx.addCredits(bailValue);
-        } else {
-          const cur = ctx.houseCredits.get(entity.house) ?? 0;
-          ctx.houseCredits.set(entity.house, cur + bailValue);
-        }
-        // Credit sound every 5 ticks during dump animation
-        if (entity.harvestTick % 5 === 0 && ctx.isPlayerControlled(entity)) {
-          ctx.playSound('heal');
-        }
+      // C++ unit.cpp:2348-2390 Mission_Unload for UNIT_HARVESTER:
+      //   1. If PrimaryFacing != DIR_W, call Do_Turn(DIR_W) and return 5 (5-tick rotate delay)
+      //   2. Once facing W, IsDumping=true, Set_Stage(0), Set_Rate(OreDumpRate=1)
+      //   3. Play 22-stage Harvester_Dump_List animation (1 stage per tick)
+      //   4. At stage 22: lump-sum deposit House->Harvested(Credit_Load()), Tiberium=0
+      //
+      // C++ unit.cpp:2383 — lump-sum credit deposit at END of dump animation, NOT drip-feed.
+      // (The refinery's Mission_Harvest drip-feeds via Offload_Tiberium_Bail, but that is
+      //  #ifdef TOFIX'd out and returns 0 credits — so lump-sum is the real credit source.)
+
+      // Phase 1: rotate to DIR_W — wait until facing matches.
+      // tickRotation() is called here because harvesters in GUARD mission without a target
+      // don't rotate via the missionAI scanning loop. C++ Mission_Unload drives rotation
+      // directly via Do_Turn(DIR_W) in unit.cpp:2367.
+      if (entity.facing !== Dir.W) {
+        entity.desiredFacing = Dir.W;
+        entity.isHarvesterDumping = false;
+        entity.tickRotation();
+        break;
       }
-      if (entity.oreLoad <= 0) {
+
+      // Phase 2: play 22-stage dump animation.
+      entity.isHarvesterDumping = true;
+      entity.harvestTick++;
+      entity.harvesterAnimStage = entity.harvestTick - 1; // 0..21
+
+      // Per-tick chime during dump (first 22 ticks)
+      if (entity.harvestTick % 5 === 0 && entity.harvestTick <= 22 && ctx.isPlayerControlled(entity)) {
+        ctx.playSound('heal');
+      }
+
+      // Phase 3: at tick 22, lump-sum deposit + state reset.
+      if (entity.harvestTick >= 22) {
+        const credits = entity.oreCreditValue;
+        if (credits > 0) {
+          if (ctx.isPlayerControlled(entity)) {
+            ctx.addCredits(credits);
+          } else {
+            const cur = ctx.houseCredits.get(entity.house) ?? 0;
+            ctx.houseCredits.set(entity.house, cur + credits);
+          }
+        }
         entity.oreLoad = 0;
         entity.oreCreditValue = 0;
+        entity.isHarvesterDumping = false;
+        entity.harvesterAnimStage = 0;
         entity.harvesterState = 'idle';
         entity.harvestTick = 0;
       }
