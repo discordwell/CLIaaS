@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, AnimState, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -2274,41 +2274,29 @@ export class Renderer {
         ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
       }
 
-      // Movement dust trail for vehicles/ants when walking
-      if (entity.alive && !entity.stats.isInfantry && entity.animState === AnimState.WALK) {
-        const dustPhase = (tick + entity.id * 5) % 8;
-        // Dust puffs behind the unit (opposite to facing direction)
-        const facingRad = entity.facing * (Math.PI / 4);
-        const behindX = screen.x + Math.sin(facingRad) * 4;
-        const behindY = screen.y + Math.cos(facingRad) * 4;
-        for (let d = 0; d < 2; d++) {
-          const age = (dustPhase + d * 4) % 8;
-          const da = (0.25 - age * 0.03) * (entity.isAnt ? 0.5 : 1);
-          if (da > 0) {
-            const dx = behindX + Math.sin(tick * 0.4 + d * 2) * (1 + age * 0.3);
-            const dy = behindY + age * 0.3;
-            ctx.fillStyle = `rgba(140,120,90,${da.toFixed(2)})`;
-            ctx.beginPath();
-            ctx.arc(dx, dy, 1 + age * 0.2, 0, Math.PI * 2);
-            ctx.fill();
-          }
+      // Damage smoke — attached SMOKE_M anim at <=ConditionYellow (C++ unit.cpp:1113-1118, vessel.cpp:975-980).
+      // C++ anchors at Coord_Add(Coord, XYP_Coord(0, -8)) and guards with !IsAnimAttached so exactly
+      // one smoke anim is spawned per unit. We mirror IsAnimAttached via entity.damageSmokeStartTick:
+      // set on first entry into the threshold, cleared if the unit recovers above ConditionYellow.
+      if (entity.alive && !entity.stats.isInfantry && entity.hp <= entity.maxHp * CONDITION_YELLOW) {
+        if (entity.damageSmokeStartTick < 0) {
+          entity.damageSmokeStartTick = tick; // attach smoke anim (C++ IsAnimAttached = true)
         }
-      }
-
-      // Smoke trail from heavily damaged vehicles (below 50% HP)
-      if (entity.alive && !entity.stats.isInfantry && entity.hp < entity.maxHp * 0.5) {
-        const smokePhase = (tick + entity.id * 7) % 12;
-        for (let s = 0; s < 3; s++) {
-          const py = screen.y - spriteH * 0.3 - s * 4 - smokePhase * 0.5;
-          const px = screen.x + Math.sin((tick + s * 4) * 0.3) * 2;
-          const sa = (0.5 - s * 0.12) * (1 - smokePhase / 12);
-          if (sa > 0) {
-            ctx.fillStyle = `rgba(40,40,40,${sa})`;
-            ctx.beginPath();
-            ctx.arc(px, py, 2 + s * 0.5, 0, Math.PI * 2);
-            ctx.fill();
-          }
+        const smokeSheet = assets.getSheet('smoke_m');
+        if (smokeSheet) {
+          // C++ adata.cpp:1045-1046 — SMOKE_M: 91 frames, loopStart=67, loops=6, delay=1.
+          // Play frames 0..66 once, then loop 67..90. After 6 loops the attached anim would end in
+          // C++; here the unit keeps taking damage (smoke stays on) so we wrap the loop segment.
+          const age = tick - entity.damageSmokeStartTick;
+          const loopStart = 67;
+          const frameCount = smokeSheet.meta.frameCount; // 91
+          const loopLen = frameCount - loopStart;        // 24
+          const frame = age < loopStart ? age : loopStart + ((age - loopStart) % loopLen);
+          assets.drawFrame(ctx, 'smoke_m', frame, screen.x, screen.y - 8, { centerX: true, centerY: true });
         }
+      } else if (entity.damageSmokeStartTick >= 0) {
+        // Unit recovered above ConditionYellow — detach so next threshold-cross restarts the anim.
+        entity.damageSmokeStartTick = -1;
       }
 
       ctx.globalAlpha = 1;
