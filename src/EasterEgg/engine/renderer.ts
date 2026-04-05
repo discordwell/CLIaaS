@@ -193,7 +193,13 @@ export class Renderer {
   private pal: number[][] | null = null;
   private palTheatre = ''; // which theatre the current palette is for
   screenShake = 0;      // remaining shake ticks
-  screenFlash = 0;      // remaining flash ticks (white flash on big explosions)
+  screenFlash = 0;      // remaining flash ticks (yellowish flash on big explosions)
+  /** Palette whiteout countdown for nuke detonation.
+   *  C++ anim.cpp:955,983 — Fade_Palette_To(WhitePalette, 30) then Fade_Palette_To(GamePalette, 15).
+   *  We emulate with a full-screen white overlay that ramps in over 30 ticks, holds briefly,
+   *  then fades out. Counter starts at whitePaletteFadeMax and decrements each frame. */
+  whitePaletteFade = 0;
+  whitePaletteFadeMax = 45;
   attackMoveMode = false; // show attack-move cursor indicator
   sellMode = false;      // show sell cursor indicator
   repairMode = false;    // show repair cursor indicator
@@ -432,6 +438,7 @@ export class Renderer {
       this.screenShake--;
     }
 
+    this._cachedAssets = assets; // cache for helpers that lack the param
     this.renderTerrain(camera, map, tick, assets);
     this.renderDecals(camera, map);
     this.renderOverlays(camera, map, tick, assets);
@@ -456,6 +463,30 @@ export class Renderer {
       ctx.fillStyle = `rgba(255,255,220,${flashAlpha})`;
       ctx.fillRect(0, 0, this.width, this.height);
       this.screenFlash--;
+    }
+
+    // Nuke palette whiteout overlay — C++ Fade_Palette_To(WhitePalette, 30) → WhitePalette(15).
+    // Ramp-in phase (first 30 ticks of the countdown, i.e. whitePaletteFade goes 45 → 15):
+    //   alpha ramps from ~0.0 → 1.0 as fade counts down (inverted so peak is in middle).
+    // Ramp-out phase (last 15 ticks, whitePaletteFade goes 15 → 0):
+    //   alpha ramps from 1.0 → 0.0.
+    // Produces a bloom-and-fade whiteout distinct from the yellow screenFlash.
+    if (this.whitePaletteFade > 0) {
+      const fadeIn = 30;
+      const holdOut = 15;
+      const elapsed = this.whitePaletteFadeMax - this.whitePaletteFade;
+      let whiteAlpha: number;
+      if (elapsed < fadeIn) {
+        // Fading to white: 0 → 1 over first 30 ticks
+        whiteAlpha = elapsed / fadeIn;
+      } else {
+        // Fading back to game: 1 → 0 over final 15 ticks
+        const outElapsed = elapsed - fadeIn;
+        whiteAlpha = Math.max(0, 1 - outElapsed / holdOut);
+      }
+      ctx.fillStyle = `rgba(255,255,255,${whiteAlpha})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+      this.whitePaletteFade--;
     }
 
     // Placement ghost preview
@@ -598,6 +629,8 @@ export class Renderer {
   };
 
   private cursorAnimTick = 0;
+  /** Cached AssetManager reference — set each render frame for helpers that lack the param */
+  private _cachedAssets: AssetManager | undefined;
 
   private renderCursor(assets?: AssetManager): void {
     const ctx = this.ctx;
@@ -894,6 +927,36 @@ export class Renderer {
     }
 
     ctx.restore();
+  }
+
+  // ─── Bitmap Text (C++ 6POINT/8POINT.FNT parity) ──────────
+
+  /** Draw text using C++ bitmap font if available, falling back to canvas fillText.
+   *  size: '6pt' → 6POINT.FNT, '8pt' → 8POINT.FNT */
+  private drawBitmapText(
+    assets: AssetManager | undefined,
+    text: string, x: number, y: number,
+    color: string,
+    size: '6pt' | '8pt' = '8pt',
+    options?: { align?: 'left' | 'center' | 'right'; shadow?: string; scale?: number },
+  ): void {
+    const fontName = size === '6pt' ? '6point' : '8point';
+    const font = assets?.getFont(fontName);
+    if (font) {
+      font.drawText(this.ctx, text, x, y, color, options);
+      return;
+    }
+    // Fallback: canvas text
+    const ctx = this.ctx;
+    const fontSize = size === '6pt' ? 7 : 10;
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = options?.align ?? 'left';
+    if (options?.shadow) {
+      ctx.fillStyle = options.shadow;
+      ctx.fillText(text, x + 1, y + fontSize + 1);
+    }
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y + fontSize);
   }
 
   // ─── Terrain ─────────────────────────────────────────────
@@ -1637,10 +1700,33 @@ export class Renderer {
           ctx.clip();
           ctx.globalAlpha = Math.max(0.15, 1 - prog);
         }
-        assets.drawFrame(ctx, useSheet, useFrame % useTotalFrames, screenX + dfw / 2, screenY + dfh / 2, {
-          centerX: true,
-          centerY: true,
-        });
+        // House color remap: C++ building.cpp:543,4449 (BuildingClass::Remap_Table).
+        // Buildings, like units, draw through House->Remap_Table() so ownership colors
+        // are applied to the gold gradient pixels in the SHP. Walls and mines are
+        // excluded because they have Remap=REMAP_NONE in bdata.cpp (house.cpp:2310
+        // returns 0 for REMAP_NONE — no remap). Skip when remap data missing too.
+        const bldgRemapped = WALL_SPRITE_TYPES.has(s.type)
+          ? null
+          : assets.getRemappedSheet(useSheet, s.house);
+        if (bldgRemapped) {
+          assets.drawFrameFrom(ctx, bldgRemapped, useSheet, useFrame % useTotalFrames,
+            screenX + dfw / 2, screenY + dfh / 2, { centerX: true, centerY: true });
+        } else {
+          assets.drawFrame(ctx, useSheet, useFrame % useTotalFrames, screenX + dfw / 2, screenY + dfh / 2, {
+            centerX: true,
+            centerY: true,
+          });
+        }
+        // Blushing damage flash — C++ flasher.cpp:83-95 + house.cpp:2308 (blush → Map.FadingLight).
+        // When a building takes damage, IsBlushing toggles on odd FlashCount ticks,
+        // producing a brief white tint. We mimic with a screen-blend white overlay.
+        if (s.flashCount && s.flashCount > 0 && (s.flashCount & 0x01) !== 0) {
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = 'rgba(200,200,200,0.5)';
+          const [bw, bh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+          ctx.fillRect(screenX, screenY, bw * CELL_SIZE, bh * CELL_SIZE);
+          ctx.globalCompositeOperation = 'source-over';
+        }
         // (no construction fallback — pink/magenta box rendered above if make sheet missing)
         if (isSelling) {
           // Red sell scanline at the shrinking edge — drawn before restore to stay within clip
@@ -2132,16 +2218,20 @@ export class Renderer {
         this.renderMissingSpriteStub(ctx, screen.x - size / 2, screen.y - size / 2, size, size, entity.type);
       }
 
-      // Damage flash overlay
+      // Damage flash overlay — C++ flasher.cpp:83-95 + house.cpp:2308 (Blushing → FadingLight).
+      // Original uses the palette "lightening" table for a brief white tint on odd ticks.
+      // We render on all ticks with a soft white screen-blend that fades out.
       if (entity.damageFlash > 0 && entity.alive) {
         const flashAlpha = entity.damageFlash / 4;
-        ctx.fillStyle = `rgba(255,50,50,${flashAlpha * 0.5})`;
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = `rgba(220,220,220,${flashAlpha * 0.55})`;
         ctx.fillRect(
           screen.x - spriteW / 2,
           screen.y - spriteH / 2,
           spriteW,
           spriteH,
         );
+        ctx.globalCompositeOperation = 'source-over';
       }
 
       // Iron Curtain red overlay — invulnerable unit (C++ FadingRed palette remap)
@@ -3220,42 +3310,77 @@ export class Renderer {
     }
   }
 
+  // ─── Top Status Bar (C++ TabClass::Draw_It parity) ──────
+
+  /** Tab bar height: C++ TAB_HEIGHT=8 * RESFACTOR=2 = 16px in HIRES. */
+  static readonly TAB_HEIGHT = 16;
+
+  /** Draw the top status bar: black strip with OPTIONS | TIME | CREDITS.
+   *  Matches C++ RA/tab.cpp:91 TabClass::Draw_It and credits.cpp:89 CreditClass::Graphic_Logic.
+   *  Layout in HIRES (RESFACTOR=2):
+   *    OPTIONS text centered at x=80 (EVA_WIDTH/2 * RESFACTOR)
+   *    TIME text centered at x=400 (200 * RESFACTOR)
+   *    Credits centered at x=560 (640 - 120*RESFACTOR + 80*RESFACTOR) */
+  renderTopBar(tick: number): void {
+    const ctx = this.ctx;
+    const w = this.width;
+    const h = Renderer.TAB_HEIGHT;
+
+    // Black fill (C++ LogicPage->Fill_Rect BLACK)
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+
+    // Bottom border line (1px, C++ tab.cpp:121 Draw_Line)
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, h - 1, w, 1);
+
+    // OPTIONS button (left, centered at x=80 in HIRES)
+    this.drawBitmapText(this._cachedAssets, 'Options', 80, 4, '#ccc', '6pt', { align: 'center' });
+
+    // Mission timer (center, x=400 in HIRES). Only show if active.
+    if (this.missionTimer > 0) {
+      const totalSecs = Math.ceil(this.missionTimer / GAME_TICKS_PER_SEC);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      const hours = Math.floor(mins / 60);
+      const displayMins = mins % 60;
+      // C++ CONQUER.TXT: "Time:%02d:%02d" / "Time:%02d:%02d:%02d"
+      const timerText = hours > 0
+        ? `Time:${hours.toString().padStart(2, '0')}:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+        : `Time:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      this.drawBitmapText(this._cachedAssets, timerText, 400, 4, '#ccc', '6pt', { align: 'center' });
+      void tick;
+    }
+
+    // Credits (right, x=560 in HIRES)
+    const creditsText = `${this.sidebarCredits}`;
+    this.drawBitmapText(this._cachedAssets, creditsText, 560, 4, '#ccc', '6pt', { align: 'center' });
+  }
+
   // ─── EVA Messages & Mission Timer ──────────────────────
 
   renderEvaMessages(tick: number): void {
     const ctx = this.ctx;
     // Show messages that are less than 4 seconds old (60 ticks)
     const active = this.evaMessages.filter(m => tick - m.tick < 60);
-    if (active.length === 0 && this.missionTimer <= 0) return;
-
-    // Mission timer display (top center)
-    if (this.missionTimer > 0) {
-      const totalSecs = Math.ceil(this.missionTimer / GAME_TICKS_PER_SEC);
-      const mins = Math.floor(totalSecs / 60);
-      const secs = totalSecs % 60;
-      const timerText = `${mins}:${secs.toString().padStart(2, '0')}`;
-      ctx.font = 'bold 14px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = totalSecs < 30 ? '#f44' : '#ff0';
-      ctx.fillText(timerText, (this.width - this.sidebarW) / 2, 20);
-    }
+    if (active.length === 0) return;
+    // Mission timer now rendered in top status bar (renderTopBar)
 
     // EVA text messages (top-center, stacked)
     if (active.length > 0) {
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'center';
       const centerX = (this.width - this.sidebarW) / 2;
       for (let i = 0; i < active.length; i++) {
         const msg = active[i];
         const age = tick - msg.tick;
-        const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15; // fade out last 1s
-        ctx.fillStyle = `rgba(0,255,0,${alpha.toFixed(2)})`;
-        // Offset below mission title banner when it's still visible (fades at tick 30-60)
+        const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15;
+        ctx.globalAlpha = alpha;
         const titleOffset = (this.missionName && tick < 60) ? 20 : 0;
-        ctx.fillText(msg.text, centerX, 36 + titleOffset + i * 14);
+        // Shifted down to clear the top status bar (TAB_HEIGHT=16)
+        this.drawBitmapText(this._cachedAssets, msg.text,
+          centerX, Renderer.TAB_HEIGHT + 4 + titleOffset + i * 12, '#00FF00', '8pt', { align: 'center' });
       }
+      ctx.globalAlpha = 1;
     }
-    ctx.textAlign = 'left';
   }
 
   // ─── Music Track Display ─────────────────────────────────
@@ -3305,14 +3430,10 @@ export class Renderer {
       const ctx = this.ctx;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(0, 0, this.width, this.height);
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 20px monospace';
-      ctx.fillStyle = this.palColor(PAL_ROCK_START + 2);
-      ctx.fillText('PAUSED', this.width / 2, this.height / 2 - 20);
-      ctx.font = '12px monospace';
-      ctx.fillStyle = this.palColor(PAL_ROCK_START + 4);
-      ctx.fillText('Press P or Esc to resume', this.width / 2, this.height / 2 + 5);
-      ctx.textAlign = 'left';
+      const pausedCol = this.palColor(PAL_ROCK_START + 2);
+      const resumeCol = this.palColor(PAL_ROCK_START + 4);
+      this.drawBitmapText(this._cachedAssets, 'PAUSED', this.width / 2, this.height / 2 - 20, pausedCol, '8pt', { align: 'center', scale: 2 });
+      this.drawBitmapText(this._cachedAssets, 'Press P or Esc to resume', this.width / 2, this.height / 2 + 5, resumeCol, '6pt', { align: 'center' });
       return;
     }
 
@@ -3454,14 +3575,11 @@ export class Renderer {
   private renderIdleCount(): void {
     const ctx = this.ctx;
     const text = `Idle: ${this.idleCount}`;
-    // Show below minimap at top of sidebar
     const { y: mmY, size: mmSize } = this.getMinimapBounds();
-    const x = this.width - this.sidebarW;
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = this.idleCount > 0 ? '#ff8' : '#888';
-    ctx.fillText(text, x + this.sidebarW / 2, mmY + mmSize + 12);
-    ctx.textAlign = 'left';
+    const ix = this.width - this.sidebarW;
+    this.drawBitmapText(this._cachedAssets, text,
+      ix + this.sidebarW / 2, mmY + mmSize + 4,
+      this.idleCount > 0 ? '#ff8' : '#888', '6pt', { align: 'center' });
   }
 
   private renderHelpOverlay(): void {
@@ -3710,17 +3828,12 @@ export class Renderer {
     const credY = Renderer.CREDITS_Y;
     ctx.fillStyle = 'rgba(10,10,15,0.6)';
     ctx.fillRect(x + 1, credY, w - 1, Renderer.CREDITS_H);
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
     const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
-    ctx.fillStyle = '#000';
-    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2 + 1, credY + 11);
-    ctx.fillStyle = atCapacity ? '#FF4444' : '#FFD700';
-    ctx.fillText(`$${this.sidebarCredits}`, x + w / 2, credY + 10);
+    const credColor = atCapacity ? '#FF4444' : '#FFD700';
+    this.drawBitmapText(assets, `$${this.sidebarCredits}`, x + w / 2, credY + 1, credColor, '8pt',
+      { align: 'center', shadow: '#000' });
     if (this.sidebarSiloCapacity > 0) {
-      ctx.font = '7px monospace';
-      ctx.fillStyle = '#888';
-      ctx.fillText(`/${this.sidebarSiloCapacity}`, x + w / 2 + 24, credY + 10);
+      this.drawBitmapText(assets, `/${this.sidebarSiloCapacity}`, x + w / 2 + 24, credY + 1, '#888', '6pt');
     }
 
     // Button row: repair / sell / map (C++ English layout)
@@ -3768,7 +3881,7 @@ export class Renderer {
     this.renderStripScrollArrows(ctx, assets, x + Renderer.RIGHT_STRIP_X_OFFSET, rightItems, this.rightStripScroll);
 
     // Superweapon buttons at bottom
-    this.renderSuperweaponButtons(x, w);
+    this.renderSuperweaponButtons(x, w, assets);
 
     ctx.textAlign = 'left';
   }
@@ -3854,12 +3967,8 @@ export class Renderer {
     }
 
     // Numeric labels
-    ctx.font = '6px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = lowPower ? '#f88' : '#8f8';
-    ctx.fillText(`${produced}`, pwrX + pwrW / 2, pwrY + pwrH + 8);
-    ctx.fillStyle = lowPower ? '#f88' : '#cc0';
-    ctx.fillText(`${consumed}`, pwrX + pwrW / 2, pwrY + pwrH + 16);
+    this.drawBitmapText(assets, `${produced}`, pwrX + pwrW / 2, pwrY + pwrH + 2, lowPower ? '#f88' : '#8f8', '6pt', { align: 'center' });
+    this.drawBitmapText(assets, `${consumed}`, pwrX + pwrW / 2, pwrY + pwrH + 10, lowPower ? '#f88' : '#cc0', '6pt', { align: 'center' });
   }
 
   /** Render a single production strip (C++ StripClass::Draw_It) */
@@ -3920,11 +4029,7 @@ export class Renderer {
             const pipScale = camW / pipsSheet.meta.frameWidth;
             assets.drawFrame(ctx, 'pips', 3, stripX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
           } else {
-            ctx.font = 'bold 8px monospace';
-            ctx.fillStyle = '#0f0';
-            ctx.textAlign = 'center';
-            ctx.fillText('READY', stripX + camW / 2, iy + camH / 2 + 3);
-            ctx.textAlign = 'left';
+            this.drawBitmapText(assets, 'READY', stripX + camW / 2, iy + camH / 2 - 4, '#0f0', '6pt', { align: 'center' });
           }
         } else {
           // Clock overlay (C++ ClockShapes with SHAPE_GHOST)
@@ -3944,10 +4049,8 @@ export class Renderer {
             ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
             ctx.fillRect(stripX, iy, camW, uncoverH);
             ctx.font = 'bold 7px monospace';
-            ctx.fillStyle = lowPower ? '#f88' : '#8f8';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${Math.floor(progress * 100)}%`, stripX + camW / 2, iy + camH / 2 + 2);
-            ctx.textAlign = 'left';
+            this.drawBitmapText(assets, `${Math.floor(progress * 100)}%`,
+              stripX + camW / 2, iy + camH / 2 - 4, lowPower ? '#f88' : '#8f8', '6pt', { align: 'center' });
           }
 
           // Paused: draw "HOLDING" pip (frame 4)
@@ -3961,11 +4064,7 @@ export class Renderer {
         }
         // Queue count badge
         if (qEntry.queueCount > 1) {
-          ctx.font = 'bold 6px monospace';
-          ctx.fillStyle = '#ff0';
-          ctx.textAlign = 'center';
-          ctx.fillText(`x${qEntry.queueCount}`, stripX + camW - 6, iy + 7);
-          ctx.textAlign = 'left';
+          this.drawBitmapText(assets, `x${qEntry.queueCount}`, stripX + camW - 6, iy + 1, '#ff0', '6pt', { align: 'center' });
         }
       } else {
         // Not building: darken if can't afford (C++ SHAPE_GHOST on unavailable)
@@ -3986,11 +4085,8 @@ export class Renderer {
         }
 
         // Cost label at bottom of cameo
-        ctx.font = '6px monospace';
-        ctx.fillStyle = this.sidebarCredits >= item.cost ? '#FFD700' : '#664';
-        ctx.textAlign = 'center';
-        ctx.fillText(`$${item.cost}`, stripX + camW / 2, iy + camH - 1);
-        ctx.textAlign = 'left';
+        const costColor = this.sidebarCredits >= item.cost ? '#FFD700' : '#664';
+        this.drawBitmapText(assets, `$${item.cost}`, stripX + camW / 2, iy + camH - 7, costColor, '6pt', { align: 'center' });
       }
     }
   }
@@ -4069,11 +4165,8 @@ export class Renderer {
         ctx.strokeStyle = btn.active ? '#FFD700' : '#555';
         ctx.lineWidth = 1;
         ctx.strokeRect(bx, btnY, btn.w, btnH);
-        ctx.font = 'bold 7px monospace';
-        ctx.fillStyle = btn.active ? '#000' : '#ccc';
-        ctx.textAlign = 'center';
-        ctx.fillText(btn.label, bx + btn.w / 2, btnY + btnH / 2 + 3);
-        ctx.textAlign = 'left';
+        const btnColor = btn.active ? '#000' : '#ccc';
+        this.drawBitmapText(assets, btn.label, bx + btn.w / 2, btnY + btnH / 2 - 3, btnColor, '6pt', { align: 'center' });
       }
     }
   }
@@ -4085,7 +4178,7 @@ export class Renderer {
 
   // ─── Superweapon Buttons ──────────────────────────────────
 
-  private renderSuperweaponButtons(sidebarX: number, sidebarW: number): void {
+  private renderSuperweaponButtons(sidebarX: number, sidebarW: number, assets?: AssetManager): void {
     const ctx = this.ctx;
     const playerSws: Array<{ type: SuperweaponType; def: SuperweaponDef; chargeTick: number; ready: boolean; fired: boolean }> = [];
 
@@ -4161,20 +4254,14 @@ export class Renderer {
       ctx.fill();
 
       // Label text
-      ctx.font = '7px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillStyle = sw.ready ? '#4f4' : '#aaa';
       const label = sw.def.name.length > 10 ? sw.def.name.slice(0, 9) + '.' : sw.def.name;
-      ctx.fillText(label, sidebarX + 22, btnY + 8);
+      this.drawBitmapText(assets, label, sidebarX + 22, btnY + 2, sw.ready ? '#4f4' : '#aaa', '6pt');
 
       // Charge percentage or READY
-      ctx.font = 'bold 6px monospace';
       if (sw.ready) {
-        ctx.fillStyle = '#4f4';
-        ctx.fillText('READY', sidebarX + 22, btnY + 16);
+        this.drawBitmapText(assets, 'READY', sidebarX + 22, btnY + 11, '#4f4', '6pt');
       } else {
-        ctx.fillStyle = '#888';
-        ctx.fillText(`${Math.floor(progress * 100)}%`, sidebarX + 22, btnY + 16);
+        this.drawBitmapText(assets, `${Math.floor(progress * 100)}%`, sidebarX + 22, btnY + 11, '#888', '6pt');
       }
     }
   }
@@ -4239,14 +4326,11 @@ export class Renderer {
     }
 
     // Label
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(this.placementItem.name, screen.x + fw * CELL_SIZE / 2, screen.y - 3);
+    this.drawBitmapText(assets, this.placementItem.name, screen.x + fw * CELL_SIZE / 2, screen.y - 11, '#fff', '8pt', { align: 'center' });
     // Cost label
-    ctx.fillStyle = this.placementValid ? '#8f8' : '#f88';
-    ctx.fillText(this.placementValid ? 'Click to place' : 'Cannot place here', screen.x + fw * CELL_SIZE / 2, screen.y + fh * CELL_SIZE + 10);
-    ctx.textAlign = 'left';
+    const placeColor = this.placementValid ? '#8f8' : '#f88';
+    const placeText = this.placementValid ? 'Click to place' : 'Cannot place here';
+    this.drawBitmapText(assets, placeText, screen.x + fw * CELL_SIZE / 2, screen.y + fh * CELL_SIZE + 2, placeColor, '6pt', { align: 'center' });
   }
 
   // ─── End Screen (C++ score.cpp:365-884 parity) ─────────

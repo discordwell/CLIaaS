@@ -1278,6 +1278,10 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
   // C++ house.cpp:2751 — Iron Curtain makes structures invulnerable (no damage taken)
   if (s.ironCurtainTicks && s.ironCurtainTicks > 0) return false;
   s.hp = Math.max(0, s.hp - damage);
+  // C++ flasher.cpp:83-95 + house.cpp:2308 — Blushing damage flash.
+  // Set FlashCount to 6 so 3 odd ticks (5, 3, 1) render the white "lightening" tint.
+  // Keeps existing countdown if larger so repeated hits stack gracefully.
+  s.flashCount = Math.max(s.flashCount ?? 0, 6);
   // Track attacked trigger names for TEVENT_ATTACKED
   if (s.triggerName) ctx.attackedTriggerNames.add(s.triggerName);
   // Record base attack for AI defense system
@@ -1326,6 +1330,54 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
         sprite: 'veh-hit1', spriteStart: 0,
       } as Effect);
     }
+    // C++ building.cpp:1442-1458 — per-cell fire scatter across the building footprint.
+    // For every occupied cell: 50% chance ANIM_FIRE_SMALL (fire1/fire2/fire3), then within
+    // that, 50% chance ANIM_FIRE_MED on top — yielding 50%/25% per cell.
+    // C++ Random_Pick(0, 7) chooses the start frame; Random_Pick(1, 3) sets delay.
+    const FIRE_SMALL_SPRITES = ['fire1', 'fire2', 'fire3']; // ANIM_FIRE_SMALL*
+    const FIRE_MED_SPRITES   = ['fire1', 'fire2'];          // ANIM_FIRE_MED variants
+    for (let cy = 0; cy < fh; cy++) {
+      for (let cx = 0; cx < fw; cx++) {
+        // C++ Coord_Scatter(0x0080) — half-cell random offset (0x0080 = 128 leptons = 0.5 cell)
+        const cellWx = (s.cx + cx) * CELL_SIZE + CELL_SIZE / 2;
+        const cellWy = (s.cy + cy) * CELL_SIZE + CELL_SIZE / 2;
+        if (ScenarioRandom.float() < 0.5) {
+          const sx = cellWx + (ScenarioRandom.float() - 0.5) * CELL_SIZE;
+          const sy = cellWy + (ScenarioRandom.float() - 0.5) * CELL_SIZE;
+          const sprite = FIRE_SMALL_SPRITES[ScenarioRandom.nextInRange(0, FIRE_SMALL_SPRITES.length - 1)];
+          ctx.effects.push({
+            type: 'explosion', x: sx, y: sy,
+            frame: -ScenarioRandom.nextInRange(1, 3), // staggered start (C++ delay)
+            maxFrames: EXPLOSION_FRAMES[sprite] ?? 14, size: 8,
+            sprite, spriteStart: 0,
+          } as Effect);
+          if (ScenarioRandom.float() < 0.5) {
+            const mx = cellWx + (ScenarioRandom.float() - 0.5) * (CELL_SIZE / 2);
+            const my = cellWy + (ScenarioRandom.float() - 0.5) * (CELL_SIZE / 2);
+            const msprite = FIRE_MED_SPRITES[ScenarioRandom.nextInRange(0, FIRE_MED_SPRITES.length - 1)];
+            ctx.effects.push({
+              type: 'explosion', x: mx, y: my,
+              frame: -ScenarioRandom.nextInRange(1, 3),
+              maxFrames: EXPLOSION_FRAMES[msprite] ?? 14, size: 12,
+              sprite: msprite, spriteStart: 0,
+            } as Effect);
+          }
+        }
+      }
+    }
+    // D4: SMOKE_M trailing smoke — 2-3 persistent ground-smoke puffs near the debris
+    // (C++ anim.cpp ANIM_SMOKE_M is a looping smoke column left on the ground).
+    const numSmoke = 2 + Math.floor(ScenarioRandom.float() * 2); // 2-3
+    for (let si = 0; si < numSmoke; si++) {
+      const sx = wx + (ScenarioRandom.float() - 0.5) * fw * CELL_SIZE;
+      const sy = wy + (ScenarioRandom.float() - 0.5) * fh * CELL_SIZE;
+      ctx.effects.push({
+        type: 'explosion', x: sx, y: sy,
+        frame: 0, maxFrames: 80, size: 10,
+        sprite: 'smoke_m', spriteStart: 0,
+        loopStart: 0, loopEnd: 20, loops: 4, // loop 4× so it persists ~80 ticks
+      } as Effect);
+    }
     // Final large explosion — size-matched to building footprint (C++ parity)
     const maxDimPx = Math.max(fw, fh) * CELL_SIZE;
     const deathExplosionRadius = Math.round(maxDimPx * 0.6);
@@ -1339,9 +1391,14 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
       type: 'debris', x: wx, y: wy,
       frame: 0, maxFrames: 20, size: fw * CELL_SIZE * 0.8,
     } as Effect);
-    // Screen shake proportional to building size (1x1=8, 2x2=12, 3x3=16)
-    const shakeIntensity = Math.min(20, 4 + Math.max(fw, fh) * 4);
-    ctx.screenShake = Math.max(ctx.screenShake, shakeIntensity);
+    // C++ building.cpp:1460 — shakes = Class->Cost_Of() / 400
+    // Only shakes if result > 0 (cheap buildings like walls/silos don't shake).
+    const prodItemForShake = PRODUCTION_ITEMS.find(p => p.type === s.type);
+    const buildingCost = prodItemForShake?.cost ?? 0;
+    const shakeIntensity = Math.floor(buildingCost / 400);
+    if (shakeIntensity > 0) {
+      ctx.screenShake = Math.max(ctx.screenShake, shakeIntensity);
+    }
     ctx.screenFlash = Math.max(ctx.screenFlash, Math.min(8, fw * 2));
     ctx.playSoundAt('building_explode', wx, wy);
     // Per-side building casualty tracking (C++ score.cpp:548-560)

@@ -781,6 +781,7 @@ export class Game {
       cameraViewWidth: this.camera.viewWidth,
       screenShake: this.renderer.screenShake,
       screenFlash: this.renderer.screenFlash,
+      whitePaletteFade: this.renderer.whitePaletteFade,
       activeVortices: this.activeVortices,
       timeQuake: this.timeQuake,
     };
@@ -798,6 +799,9 @@ export class Game {
     this.nukePendingSource = ctx.nukePendingSource;
     this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
     this.renderer.screenFlash = Math.max(this.renderer.screenFlash, ctx.screenFlash);
+    if (ctx.whitePaletteFade !== undefined) {
+      this.renderer.whitePaletteFade = Math.max(this.renderer.whitePaletteFade, ctx.whitePaletteFade);
+    }
     if (ctx.timeQuake !== undefined) this.timeQuake = ctx.timeQuake;
     return result;
   }
@@ -1269,13 +1273,28 @@ export class Game {
     // H5: Clamp camera to playable bounds, not full 128x128 map
     this.camera.setPlayableBounds(this.map.boundsX, this.map.boundsY, this.map.boundsW, this.map.boundsH);
 
-    // C++ scenario.cpp:552-553: camera centers on waypoint 98 (WAYPT_HOME),
-    // offset by -4 cells vertically and -5 cells horizontally.
+    // C++ display.cpp:3854 + 3743:
+    //   tacticalCell = HOME - (5 cols, 4 rows)  // top-left of C++ LORES 10x8 viewport
+    //   tacticalCell clamped to map bounds via Confine_Rect
+    //   viewport_center_cell = tacticalCell + (5 cols, 4 rows)
+    // This matches what WASM renders, including edge clamping when HOME is near map edge.
     const homeWp = this.waypoints.get(98);
     if (homeWp) {
-      const homeX = (homeWp.cx - 5) * CELL_SIZE;
-      const homeY = (homeWp.cy - 4) * CELL_SIZE;
-      this.camera.centerOn(homeX + this.camera.viewWidth / 2, homeY + this.camera.viewHeight / 2);
+      const offX = 5, offY = 4;
+      const vpCols = 10, vpRows = 8;
+      // Compute C++ tactical top-left and clamp to map bounds
+      let topLeftCx = homeWp.cx - offX;
+      let topLeftCy = homeWp.cy - offY;
+      const mapMinCx = this.map.boundsX;
+      const mapMinCy = this.map.boundsY;
+      const mapMaxCx = this.map.boundsX + this.map.boundsW - vpCols;
+      const mapMaxCy = this.map.boundsY + this.map.boundsH - vpRows;
+      topLeftCx = Math.max(mapMinCx, Math.min(mapMaxCx, topLeftCx));
+      topLeftCy = Math.max(mapMinCy, Math.min(mapMaxCy, topLeftCy));
+      // Viewport center in world pixels
+      const centerCx = topLeftCx + offX + 0.5;
+      const centerCy = topLeftCy + offY + 0.5;
+      this.camera.centerOn(centerCx * CELL_SIZE, centerCy * CELL_SIZE);
     } else {
       // Fallback: center on average player unit position
       const playerUnits = this.entities.filter(e => e.isPlayerUnit);
@@ -1634,6 +1653,13 @@ export class Game {
     // processed in the same tick and RNG calls are in the correct sequence.
     if (this.tick === 1) {
       this.processTriggers();
+    }
+
+    // C++ CDTimerClass<FrameTimerClass>: MissionTimer decrements every game frame.
+    // Must happen AFTER processTriggers so that newly-set timers match WASM values.
+    if (this.missionTimer > 0 && this.missionTimerRunning) {
+      this.missionTimer--;
+      if (this.missionTimer <= 0) this.missionTimerExpired = true;
     }
 
     // Update occupancy grid and assign infantry sub-cell positions
@@ -2030,6 +2056,8 @@ export class Game {
     for (const s of this.structures) {
       if (!s.alive) continue;
       if (s.ironCurtainTicks && s.ironCurtainTicks > 0) s.ironCurtainTicks--;
+      // C++ flasher.cpp:83-95 — Blushing damage-flash countdown (Process per tick).
+      if (s.flashCount && s.flashCount > 0) s.flashCount--;
     }
 
     // fogReEnableTick timer removed — C++ RadarSpied is permanent (infantry.cpp:660-662)
@@ -6123,13 +6151,7 @@ export class Game {
 
   /** Process trigger system — check conditions and fire actions */
   private processTriggers(): void {
-    // Tick mission timer (processTriggers runs every 15 ticks, so decrement by 15)
-    if (this.missionTimer > 0 && this.missionTimerRunning) {
-      this.missionTimer -= 15;
-      if (this.missionTimer <= 0) {
-        this.missionTimerExpired = true;
-      }
-    }
+    // Mission timer now decrements per-tick in update() for C++ FrameTimerClass parity.
 
     // Precompute shared state once for all triggers (avoids O(N*M) recomputation)
     const structureTypes = new Set<string>();
@@ -7017,6 +7039,8 @@ export class Game {
     // Render EVA messages, mission timer, music track, and mission name overlay
     this.renderer.musicTrack = this.audio.music.currentTrack;
     this.renderer.gameSpeed = this.gameSpeed;
+    // C++ parity: top status bar (OPTIONS | TIME | CREDITS) — TabClass::Draw_It
+    this.renderer.renderTopBar(this.tick);
     this.renderer.renderEvaMessages(this.tick);
     this.renderer.renderMusicTrack(this.tick);
     this.renderer.renderGameSpeed();

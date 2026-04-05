@@ -1303,6 +1303,7 @@ export interface MapStructure {
   desiredTurretDir?: number; // target turret facing in 8-dir (rotates toward this * 4 in 32-step)
   turretRotAccum?: number;   // C++ FacingClass ROT accumulator for smooth rotation (building.cpp:5347)
   firingFlash?: number;      // ticks remaining for muzzle flash frame
+  flashCount?: number;        // C++ flasher.cpp:83 — Blushing damage-flash countdown (ticks). Odd values = white tint visible.
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
   originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)

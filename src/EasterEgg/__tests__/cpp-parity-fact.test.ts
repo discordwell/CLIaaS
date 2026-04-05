@@ -418,13 +418,14 @@ describe('FACT destruction blast -- visual-only (C++ parity: no entity damage)',
 
 describe('FACT 3x3 destruction effects scaling', () => {
 
-  it('produces screen shake of 16 (4 + max(3,3) * 4)', () => {
+  it('produces screen shake of 6 (FACT cost=2500 / 400)', () => {
     const fact = makeFACT(10, 10, 50);
     fact.house = House.USSR;
     const ctx = makeCombatCtx([fact]);
     structureDamage(ctx, fact, 100);
-    // shakeIntensity = min(20, 4 + max(fw, fh) * 4) = min(20, 4 + 3*4) = 16
-    expect(ctx.screenShake).toBe(16);
+    // C++ building.cpp:1460 — shakes = Class->Cost_Of() / 400
+    // FACT cost is 2500 in rules.ini → floor(2500/400) = 6
+    expect(ctx.screenShake).toBe(6);
   });
 
   it('produces screen flash of 6 (fw * 2 = 3*2, clamped to min(8, 6))', () => {
@@ -456,9 +457,38 @@ describe('FACT 3x3 destruction effects scaling', () => {
     expect(debris.length).toBe(1);
   });
 
-  it('3x3 screen shake is stronger than 2x2 (POWR)', () => {
-    // FACT 3x3: shake = min(20, 4 + 3*4) = 16
-    // POWR 2x2: shake = min(20, 4 + 2*4) = 12
+  it('scatters FIRE_SMALL/FIRE_MED across footprint (C++ building.cpp:1442-1458)', () => {
+    // 3x3 footprint has 9 cells, each with 50% chance of FIRE_SMALL (fire1/2/3).
+    // Over 9 cells, probability of 0 fires = 0.5^9 ≈ 0.2%, so this test is reliable.
+    const fact = makeFACT(10, 10, 50);
+    fact.house = House.USSR;
+    const ctx = makeCombatCtx([fact]);
+    structureDamage(ctx, fact, 100);
+    const fires = ctx.effects.filter(e =>
+      e.sprite === 'fire1' || e.sprite === 'fire2' || e.sprite === 'fire3'
+    );
+    expect(fires.length).toBeGreaterThan(0);
+  });
+
+  it('spawns persistent SMOKE_M ground smoke after destruction (C++ ANIM_SMOKE_M)', () => {
+    const fact = makeFACT(10, 10, 50);
+    fact.house = House.USSR;
+    const ctx = makeCombatCtx([fact]);
+    structureDamage(ctx, fact, 100);
+    const smoke = ctx.effects.filter(e => e.sprite === 'smoke_m');
+    // 2-3 SMOKE_M effects scattered across debris
+    expect(smoke.length).toBeGreaterThanOrEqual(2);
+    expect(smoke.length).toBeLessThanOrEqual(3);
+    // Each should be a looping effect
+    for (const s of smoke) {
+      expect(s.loopEnd).toBeDefined();
+    }
+  });
+
+  it('FACT screen shake is stronger than POWR (C++ Cost_Of()/400 scaling)', () => {
+    // C++ building.cpp:1460 — shakes = Cost_Of() / 400 (integer div, no shake at 0)
+    // FACT cost=2500 → floor(2500/400) = 6
+    // POWR cost=300 → floor(300/400) = 0 (no shake at all)
     const fact = makeFACT(10, 10, 50);
     fact.house = House.USSR;
     const ctxFact = makeCombatCtx([fact]);

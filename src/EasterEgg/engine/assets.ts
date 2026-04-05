@@ -4,6 +4,8 @@
  * Also loads the TEMPERATE tileset atlas for terrain rendering.
  */
 
+import { BitmapFont, type BitmapFontMeta } from './bitmapFont';
+
 export interface SpriteSheetMeta {
   frameWidth: number;
   frameHeight: number;
@@ -45,6 +47,17 @@ export interface TilesetMeta {
 
 const BASE_URL = '/ra/assets';
 
+/** Sprite name aliases — historical C++ SHP names that map to different extracted filenames.
+ *  The C++ source uses names like WATER_EXP1 / H2O_EXP1 interchangeably; the extractor
+ *  writes h2o_exp1.png, but combatAnim() returns 'water-exp1' to match C++ combat.cpp:325.
+ *  Keeping the alias here (instead of renaming in combatAnim) preserves all existing
+ *  cpp-parity tests that assert water-exp* return values. */
+const SPRITE_ALIASES: Record<string, string> = {
+  'water-exp1': 'h2o_exp1',
+  'water-exp2': 'h2o_exp2',
+  'water-exp3': 'h2o_exp3',
+};
+
 /** Load an image and return a promise that resolves when loaded */
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -70,6 +83,9 @@ export class AssetManager {
   /** Legacy single-tileset references (TEMPERATE, for backwards compat) */
   private tilesetImage: HTMLImageElement | null = null;
   private tilesetMeta: TilesetMeta | null = null;
+
+  /** Bitmap fonts (C++ 6POINT.FNT / 8POINT.FNT) */
+  private fonts = new Map<string, BitmapFont>();
 
   /** Mutable progress callback — can be replaced by later callers */
   private _onProgress?: (loaded: number, total: number) => void;
@@ -176,6 +192,17 @@ export class AssetManager {
       ),
       // House color remap data (optional — falls back to tint overlay)
       this.loadRemapColors(cacheBust),
+      // Bitmap fonts (C++ 6POINT.FNT / 8POINT.FNT — optional, falls back to ctx.fillText)
+      ...['6point-font', '8point-font'].map(name =>
+        Promise.all([
+          fetch(`${BASE_URL}/${name}.json${cacheBust}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          loadImage(`${BASE_URL}/${name}.png${cacheBust}`).catch(() => null),
+        ]).then(([meta, img]) => {
+          if (meta && img) {
+            this.fonts.set(name.replace('-font', ''), new BitmapFont(img, meta as BitmapFontMeta));
+          }
+        })
+      ),
       // Tileset atlases (optional — renderer falls back to procedural colors)
       // Load TEMPERATE (backwards compat filenames) + SNOW + INTERIOR
       ...[
@@ -204,9 +231,21 @@ export class AssetManager {
     this.loaded = true;
   }
 
-  /** Get a loaded sprite sheet by name */
+  /** Resolve a sprite name through the alias table. Returns the direct name if no alias. */
+  private resolveName(name: string): string {
+    if (this.sheets.has(name)) return name;
+    const alias = SPRITE_ALIASES[name];
+    return alias ?? name;
+  }
+
+  /** Get a loaded sprite sheet by name. Supports aliases for historical C++ sprite names
+   *  that differ from the extracted asset filenames (e.g. water-exp1 → h2o_exp1). */
   getSheet(name: string): SpriteSheet | undefined {
-    return this.sheets.get(name);
+    const direct = this.sheets.get(name);
+    if (direct) return direct;
+    const alias = SPRITE_ALIASES[name];
+    if (alias) return this.sheets.get(alias);
+    return undefined;
   }
 
   /** Get the palette */
@@ -259,7 +298,8 @@ export class AssetManager {
     y: number,
     options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
-    const sheet = this.sheets.get(sheetName);
+    const resolved = this.resolveName(sheetName);
+    const sheet = this.sheets.get(resolved);
     if (!sheet) {
       this.drawMissingAsset(ctx, sheetName, x, y, options);
       return;
@@ -278,7 +318,7 @@ export class AssetManager {
     y: number,
     options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
   ): void {
-    const sheet = this.sheets.get(sheetName);
+    const sheet = this.sheets.get(this.resolveName(sheetName));
     if (!sheet) {
       this.drawMissingAsset(ctx, sheetName, x, y, options);
       return;
@@ -326,9 +366,11 @@ export class AssetManager {
     }
   }
 
-  /** Check if a sprite sheet exists */
+  /** Check if a sprite sheet exists (alias-aware) */
   hasSheet(name: string): boolean {
-    return this.sheets.has(name);
+    if (this.sheets.has(name)) return true;
+    const alias = SPRITE_ALIASES[name];
+    return alias ? this.sheets.has(alias) : false;
   }
 
   // === Shadow sheet cache (sprite-shaped silhouettes for C++ SHAPE_GHOST shadow) ===
@@ -355,6 +397,11 @@ export class AssetManager {
     sctx.globalCompositeOperation = 'source-over'; // Reset to default
     this.shadowSheets.set(sheetName, canvas);
     return canvas;
+  }
+
+  /** Get a bitmap font by name ('6point' or '8point'). Returns null if not loaded. */
+  getFont(name: string): BitmapFont | null {
+    return this.fonts.get(name) ?? null;
   }
 
   // === House color remap cache ===
@@ -392,19 +439,25 @@ export class AssetManager {
     const imgData = rctx.getImageData(0, 0, canvas.width, canvas.height);
     const pixels = imgData.data;
     const srcColors = this.remapData.source;
-    // Scan pixels and remap matching source colors → house colors
+    // Scan pixels and remap matching source colors → house colors.
+    // C++ house.cpp:2312 does palette-index remapping — we match RGB exactly because
+    // our source colors come from the same palette.json that generated the PNGs.
+    // Exact match avoids swapping adjacent gradient shades (old ±2 tolerance risked
+    // e.g. source[7]=(146,117,65) ↔ source[8]=(134,113,56), which differ by 12 in R).
+    // O(1) lookup via packed RGB→house color map.
+    const lut = new Map<number, [number, number, number]>();
+    for (let c = 0; c < srcColors.length; c++) {
+      const key = (srcColors[c][0] << 16) | (srcColors[c][1] << 8) | srcColors[c][2];
+      lut.set(key, [houseColors[c][0], houseColors[c][1], houseColors[c][2]]);
+    }
     for (let i = 0; i < pixels.length; i += 4) {
       if (pixels[i + 3] === 0) continue; // skip transparent
-      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-      for (let c = 0; c < srcColors.length; c++) {
-        const sr = srcColors[c][0], sg = srcColors[c][1], sb = srcColors[c][2];
-        // Tolerance ±2 per channel for palette quantization differences
-        if (Math.abs(r - sr) <= 2 && Math.abs(g - sg) <= 2 && Math.abs(b - sb) <= 2) {
-          pixels[i] = houseColors[c][0];
-          pixels[i + 1] = houseColors[c][1];
-          pixels[i + 2] = houseColors[c][2];
-          break;
-        }
+      const key = (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2];
+      const hc = lut.get(key);
+      if (hc !== undefined) {
+        pixels[i] = hc[0];
+        pixels[i + 1] = hc[1];
+        pixels[i + 2] = hc[2];
       }
     }
     rctx.putImageData(imgData, 0, 0);

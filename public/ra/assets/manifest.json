@@ -530,6 +530,51 @@
     "sheetWidth": 192,
     "sheetHeight": 24
   },
+  "dogbullt": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 800,
+    "sheetHeight": 78
+  },
+  "sputnik": {
+    "frameWidth": 24,
+    "frameHeight": 72,
+    "frameCount": 4,
+    "columns": 4,
+    "rows": 1,
+    "sheetWidth": 96,
+    "sheetHeight": 72
+  },
+  "parabomb": {
+    "frameWidth": 15,
+    "frameHeight": 15,
+    "frameCount": 13,
+    "columns": 13,
+    "rows": 1,
+    "sheetWidth": 195,
+    "sheetHeight": 15
+  },
+  "chronbox": {
+    "frameWidth": 24,
+    "frameHeight": 22,
+    "frameCount": 25,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 44
+  },
+  "weap2": {
+    "frameWidth": 72,
+    "frameHeight": 48,
+    "frameCount": 8,
+    "columns": 8,
+    "rows": 1,
+    "sheetWidth": 576,
+    "sheetHeight": 48
+  },
   "fire1": {
     "frameWidth": 23,
     "frameHeight": 23,

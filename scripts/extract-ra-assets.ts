@@ -19,6 +19,7 @@ import { parseTdShp } from './ra-assets/shp-td.js';
 import { parsePalette, indexedToRGBA, type Palette } from './ra-assets/palette.js';
 import { encodePNG } from './ra-assets/png.js';
 import { parseCps } from './ra-assets/cps.js';
+import { parseFnt, generateGlyphAtlas } from './ra-assets/fnt.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -183,7 +184,12 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'NAPALM3.SHP', 'napalm3'],
   ['CONQUER.MIX', 'ATOMSFX.SHP', 'atomsfx'],      // Nuclear explosion
   ['CONQUER.MIX', 'SMOKEY.SHP', 'smokey'],         // Smoke effect
-  ['CONQUER.MIX', 'LITNING.SHP', 'litning'],       // Lightning effect
+  ['CONQUER.MIX', 'LITNING.SHP', 'litning'],       // Lightning effect (Tesla)
+  ['CONQUER.MIX', 'DOGBULLT.SHP', 'dogbullt'],     // Dog leap attack (C++ anim.cpp ANIM_DOGBITE, 32 frames)
+  ['CONQUER.MIX', 'SPUTNIK.SHP', 'sputnik'],       // GPS satellite launch (C++ ANIM_SPUTNIK)
+  ['CONQUER.MIX', 'PARABOMB.SHP', 'parabomb'],     // Parachute bomb (C++ ANIM_PARA_BOMB)
+  ['CONQUER.MIX', 'CHRONBOX.SHP', 'chronbox'],     // Chronosphere warp box effect (C++ ANIM_CHRONO_BOX)
+  ['CONQUER.MIX', 'WEAP2.SHP', 'weap2'],           // War Factory door overlay (C++ bdata.cpp WarFactoryOverlay, 8 frames)
   ['CONQUER.MIX', 'FIRE1.SHP', 'fire1'],           // Structure fire 1
   ['CONQUER.MIX', 'FIRE2.SHP', 'fire2'],           // Structure fire 2
   ['CONQUER.MIX', 'FIRE3.SHP', 'fire3'],           // Small fire
@@ -591,6 +597,37 @@ async function main(): Promise<void> {
 
   // --- Non-sprite asset extraction ---
 
+  // Extract bitmap fonts (6POINT.FNT, 8POINT.FNT from CONQUER.MIX)
+  log('Extracting bitmap fonts...');
+  for (const [fntName, outPrefix] of [['6POINT.FNT', '6point-font'], ['8POINT.FNT', '8point-font']] as const) {
+    let fntData: Buffer | null = null;
+    for (const searchMix of ['CONQUER.MIX', 'GENERAL.MIX', 'LOCAL.MIX', 'LORES.MIX', 'TEMPERAT.MIX']) {
+      const mix = mixParsed.get(searchMix);
+      if (mix) {
+        fntData = mix.readFile(fntName);
+        if (fntData) { log(`  Found ${fntName} in ${searchMix} (${fntData.length} bytes)`); break; }
+      }
+    }
+    if (fntData) {
+      try {
+        const font = parseFnt(fntData);
+        const { rgba, atlasWidth, atlasHeight, glyphMeta } = generateGlyphAtlas(font);
+        const png = encodePNG(rgba, atlasWidth, atlasHeight);
+        writeFileSync(join(OUTPUT_DIR, `${outPrefix}.png`), png);
+        writeFileSync(join(OUTPUT_DIR, `${outPrefix}.json`), JSON.stringify({
+          maxWidth: font.maxWidth, maxHeight: font.maxHeight,
+          atlasWidth, atlasHeight, cellWidth: font.maxWidth, cellHeight: font.maxHeight,
+          glyphs: glyphMeta,
+        }));
+        log(`  ${outPrefix}: ${font.glyphs.size} glyphs, maxSize=${font.maxWidth}x${font.maxHeight}, atlas=${atlasWidth}x${atlasHeight}`);
+      } catch (e) {
+        log(`  ERROR ${fntName}: ${e}`);
+      }
+    } else {
+      log(`  SKIP ${fntName}: not found`);
+    }
+  }
+
   // Extract additional palettes (SNOW.PAL, INTERIOR.PAL) from LOCAL.MIX
   log('Extracting additional palettes...');
   for (const [palName, outName] of [['SNOW.PAL', 'snow-palette.json'], ['INTERIOR.PAL', 'interior-palette.json']] as const) {
@@ -780,13 +817,15 @@ async function main(): Promise<void> {
       //   Row 0 (y=0): 16 source palette indices (the default unit gold gradient)
       //   Rows 1-11 (y=1..11): per-PCOLOR target palette indices
       // House→PCOLOR mapping from hdata.cpp: Spain=0(GOLD), Greece=1(LTBLUE), USSR=2(RED),
-      //   row3=GREEN, Ukraine=4(ORANGE), Germany=5(GREY), row6=BLUE, row7=BROWN, etc.
+      //   England=3(GREEN), Ukraine=4(ORANGE), Germany=5(GREY), France=6(BLUE), Turkey=7(BROWN)
       const HOUSE_PCOLOR: Record<string, number> = {
         Spain: 0,    // PCOLOR_GOLD
         Greece: 1,   // PCOLOR_LTBLUE
         USSR: 2,     // PCOLOR_RED
+        England: 3,  // PCOLOR_GREEN
         Ukraine: 4,  // PCOLOR_ORANGE
         Germany: 5,  // PCOLOR_GREY
+        France: 6,   // PCOLOR_BLUE
         Turkey: 7,   // PCOLOR_BROWN
       };
       const sourceIndices: number[] = [];

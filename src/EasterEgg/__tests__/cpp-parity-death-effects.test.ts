@@ -704,12 +704,23 @@ describe('Building death explosion chain (combat.ts structureDamage)', () => {
     expect(deathExplosionSprite).toBe('fball1');
   });
 
-  it('screen shake scales with building size (1x1=8, 2x2=12, 3x3=16)', () => {
-    // combat.ts:1203 — shakeIntensity = Math.min(20, 4 + Math.max(fw, fh) * 4)
-    expect(Math.min(20, 4 + 1 * 4)).toBe(8);   // 1x1
-    expect(Math.min(20, 4 + 2 * 4)).toBe(12);  // 2x2
-    expect(Math.min(20, 4 + 3 * 4)).toBe(16);  // 3x3
-    expect(Math.min(20, 4 + 5 * 4)).toBe(20);  // capped at 20
+  it('screen shake scales with building cost (C++ building.cpp:1460: Cost_Of() / 400)', () => {
+    // C++ building.cpp:1460 — shakes = Class->Cost_Of() / 400 (integer division)
+    // Only shakes if result > 0, so cheap structures (walls, silos) don't shake.
+    // Derive expected shake directly from PRODUCTION_ITEMS costs to avoid hardcoding.
+    const costOf = (type: string): number =>
+      PRODUCTION_ITEMS.find(p => p.type === type)?.cost ?? 0;
+    const shakeFor = (type: string): number => Math.floor(costOf(type) / 400);
+
+    expect(shakeFor('SILO')).toBe(0);   // cost=150 → 0 (below threshold)
+    expect(shakeFor('POWR')).toBe(0);   // cost=300 → 0 (below threshold)
+    expect(shakeFor('APWR')).toBe(1);   // cost=500 → 1
+    expect(shakeFor('PROC')).toBe(5);   // cost=2000 → 5
+    expect(shakeFor('WEAP')).toBe(5);   // cost=2000 → 5
+    expect(shakeFor('FACT')).toBe(6);   // cost=2500 → 6
+    expect(shakeFor('MSLO')).toBe(6);   // cost=2500 → 6
+    expect(shakeFor('PDOX')).toBe(7);   // cost=2800 → 7
+    expect(shakeFor('IRON')).toBe(7);   // cost=2800 → 7
   });
 
   it('building death plays building_explode sound', () => {

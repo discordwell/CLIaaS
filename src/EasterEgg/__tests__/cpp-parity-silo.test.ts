@@ -523,12 +523,13 @@ describe('SILO destruction effects (1x1 building)', () => {
     expect(debris.length).toBe(1);
   });
 
-  it('sets screen shake on destruction (1x1 shake = 8)', () => {
+  it('does not set screen shake on destruction (SILO cost=150 < 400)', () => {
     const silo = makeSILO(10, 10, 50, House.USSR);
     const ctx = makeCombatCtx([silo]);
     structureDamage(ctx, silo, 100);
-    // Screen shake for 1x1: min(20, 4 + max(1,1) * 4) = min(20, 8) = 8
-    expect(ctx.screenShake).toBe(8);
+    // C++ building.cpp:1460 — shakes = Class->Cost_Of() / 400, only shakes if > 0
+    // SILO cost is 150 in rules.ini → floor(150/400) = 0 → no shake added.
+    expect(ctx.screenShake).toBe(0);
   });
 
   it('turns into rubble on destruction', () => {

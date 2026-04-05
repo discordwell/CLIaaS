@@ -592,9 +592,10 @@ describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
 
 describe('Screen shake from bridge destruction', () => {
 
-  it('barrel explosion causes screen shake (indirect bridge effect)', () => {
-    // structureDamage sets screenShake for barrel explosions as part of the
-    // building destruction effect chain — not specifically for bridge destruction.
+  it('barrel explosion does NOT cause screen shake (BARL cost=0 < 400)', () => {
+    // C++ building.cpp:1460 — shakes = Cost_Of() / 400, only shakes if > 0.
+    // Barrels are scenery with cost=0 in rules.ini (no [BARL] Cost= field), so
+    // destroying one produces 0 shake per C++ parity.
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
     setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
@@ -602,8 +603,8 @@ describe('Screen shake from bridge destruction', () => {
 
     structureDamage(ctx, barrel, 100);
 
-    // Screen shake comes from barrel building destruction, not bridge specifically
-    expect(ctx.screenShake).toBeGreaterThan(0);
+    // Barrels have no cost — no shake (C++ parity)
+    expect(ctx.screenShake).toBe(0);
   });
 });
 
