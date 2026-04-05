@@ -67,16 +67,16 @@ const PAL_RED_HP = 104;       // red [190,0,0]
 // Building frame layout table — maps structure type to idle/damage frame info.
 // Prevents generic halfFrames cycling from treating construction/fill-level frames as animation.
 export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: number; idleAnimCount: number }> = {
-  // Static buildings (construction frames, NOT animation)
-  fact: { idleFrame: 0, damageFrame: 26, idleAnimCount: 0 },   // 52 frames: construction sequence
-  weap: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: bay door frames
-  barr: { idleFrame: 0, damageFrame: 10, idleAnimCount: 0 },   // 20 frames: door opening
-  tent: { idleFrame: 0, damageFrame: 10, idleAnimCount: 0 },   // 20 frames: door opening
-  silo: { idleFrame: 0, damageFrame: 5, idleAnimCount: 0 },    // 10 frames: fill level
+  // Animated idle buildings (C++ bdata.cpp:3054-3096 _anims table)
+  fact: { idleFrame: 0, damageFrame: 26, idleAnimCount: 26 },  // 52 frames: pumping idle cycle (C++ BSTATE_ACTIVE 0,26,3)
+  weap: { idleFrame: 0, damageFrame: 16, idleAnimCount: 32 },  // 32 frames: bay door (post-Cluster A extraction)
+  barr: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: door animation (C++ BSTATE_IDLE 0,10,3)
+  tent: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: door animation (C++ BSTATE_IDLE 0,10,3)
+  silo: { idleFrame: 0, damageFrame: 5, idleAnimCount: 0 },    // 10 frames: fill level (static, NOT animation)
   proc: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: conveyor states
   fix:  { idleFrame: 0, damageFrame: 12, idleAnimCount: 0 },   // 24 frames: repair bay states
-  dome: { idleFrame: 0, damageFrame: 8, idleAnimCount: 0 },    // 16 frames: radar dish
-  powr: { idleFrame: 0, damageFrame: 4, idleAnimCount: 0 },    // 8 frames: power plant
+  dome: { idleFrame: 0, damageFrame: 8, idleAnimCount: 16 },   // 16 frames: radar sweep (post-Cluster A extraction)
+  powr: { idleFrame: 0, damageFrame: 4, idleAnimCount: 8 },    // 8 frames: blade rotation (post-Cluster A extraction)
   hbox: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: pillbox
   bio:  { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
   miss: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
@@ -1598,14 +1598,24 @@ export class Renderer {
           const tableEntry = BUILDING_FRAME_TABLE[s.image];
           if (tableEntry) {
             if (tableEntry.idleAnimCount > 0) {
-              // Animated building — cycle through animation frames
+              // Animated building — cycle through animation frames.
+              // E6: clamp animCount to what the sheet actually contains — the idleAnimCount
+              // we declare may outrun totalFrames when a sheet hasn't been re-extracted yet.
               const baseFrame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
-              frame = baseFrame + (Math.floor(tick / 8) % tableEntry.idleAnimCount);
+              const availFromBase = Math.max(1, totalFrames - baseFrame);
+              const safeAnimCount = Math.max(1, Math.min(tableEntry.idleAnimCount, availFromBase));
+              frame = baseFrame + (Math.floor(tick / 8) % safeAnimCount);
             } else if (damaged && tableEntry.damageFrame > 1) {
               // R13: Static building damage — cycle through damage frame sequence (C++ parity).
               // Damage frames run from damageFrame to (damageFrame * 2 - 1), same count as idle range.
-              const damageAnimCount = Math.min(tableEntry.damageFrame, totalFrames - tableEntry.damageFrame);
-              frame = tableEntry.damageFrame + (damageAnimCount > 1 ? Math.floor(tick / 8) % damageAnimCount : 0);
+              // E6: guard against negative/zero damageAnimCount when damageFrame >= totalFrames.
+              const rawDamageAnimCount = Math.min(tableEntry.damageFrame, totalFrames - tableEntry.damageFrame);
+              if (rawDamageAnimCount <= 0) {
+                // Sheet is too small for the declared damageFrame — fall back to last frame.
+                frame = Math.max(0, totalFrames - 1);
+              } else {
+                frame = tableEntry.damageFrame + (rawDamageAnimCount > 1 ? Math.floor(tick / 8) % rawDamageAnimCount : 0);
+              }
             } else {
               // Static building — single frame, no cycling
               frame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
@@ -1615,6 +1625,11 @@ export class Renderer {
           } else {
             // Unknown building type — safe fallback: frame 0 or half (no cycling)
             frame = damaged ? Math.floor(totalFrames / 2) : 0;
+          }
+          // E6: final safety guard — if frame somehow overflows, wrap or clamp to avoid
+          // garbled/out-of-bounds sprite draws while Cluster A re-extraction is pending.
+          if (frame >= totalFrames || frame < 0) {
+            frame = totalFrames > 0 ? ((frame % totalFrames) + totalFrames) % totalFrames : 0;
           }
         }
         // Construction/Sell: use dedicated *make buildup sheet if available (C++ RA parity).
