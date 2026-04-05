@@ -483,11 +483,10 @@ export class Renderer {
       this.screenFlash--;
     }
 
-    // Nuke palette whiteout overlay — C++ Fade_Palette_To(WhitePalette, 30) → WhitePalette(15).
-    // Ramp-in phase (first 30 ticks of the countdown, i.e. whitePaletteFade goes 45 → 15):
-    //   alpha ramps from ~0.0 → 1.0 as fade counts down (inverted so peak is in middle).
-    // Ramp-out phase (last 15 ticks, whitePaletteFade goes 15 → 0):
-    //   alpha ramps from 1.0 → 0.0.
+    // Nuke palette whiteout overlay — C++ Fade_Palette_To(WhitePalette, 30) → GamePalette(15).
+    // Ramp-in phase (first 30 ticks of the countdown, elapsed 0..29):
+    //   whiteAlpha ramps from 0 → 1 linearly.
+    // Ramp-out phase (elapsed 30..44): whiteAlpha ramps 1 → 0 over 15 ticks.
     // Produces a bloom-and-fade whiteout distinct from the yellow screenFlash.
     if (this.whitePaletteFade > 0) {
       const fadeIn = 30;
@@ -495,12 +494,10 @@ export class Renderer {
       const elapsed = this.whitePaletteFadeMax - this.whitePaletteFade;
       let whiteAlpha: number;
       if (elapsed < fadeIn) {
-        // Fading to white: 0 → 1 over first 30 ticks
-        whiteAlpha = elapsed / fadeIn;
+        whiteAlpha = elapsed / fadeIn; // 0 → 1 over first 30 ticks
       } else {
-        // Fading back to game: 1 → 0 over final 15 ticks
         const outElapsed = elapsed - fadeIn;
-        whiteAlpha = Math.max(0, 1 - outElapsed / holdOut);
+        whiteAlpha = Math.max(0, 1 - outElapsed / holdOut); // 1 → 0 over final 15 ticks
       }
       ctx.fillStyle = `rgba(255,255,255,${whiteAlpha})`;
       ctx.fillRect(0, 0, this.width, this.height);
