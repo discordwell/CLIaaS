@@ -121,32 +121,32 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'MLRS.SHP', 'mlrs'],    // Mobile Launcher Rocket System
   ['CONQUER.MIX', 'FTNK.SHP', 'ftnk'],    // Flame tank
   // Infantry (LORES.MIX — not CONQUER.MIX!)
-  ['LORES.MIX', 'E1.SHP', 'e1'],          // Rifle infantry
-  ['LORES.MIX', 'E2.SHP', 'e2'],          // Grenadier
-  ['LORES.MIX', 'E3.SHP', 'e3'],          // Rocket soldier
-  ['LORES.MIX', 'E4.SHP', 'e4'],          // Flamethrower
-  ['LORES.MIX', 'E5.SHP', 'e5'],          // Tanya
-  ['LORES.MIX', 'E6.SHP', 'e6'],          // Engineer
-  ['LORES.MIX', 'DOG.SHP', 'dog'],        // Attack dog
-  ['LORES.MIX', 'SPY.SHP', 'spy'],        // Spy
-  ['LORES.MIX', 'MEDI.SHP', 'medi'],      // Medic
-  ['LORES.MIX', 'THF.SHP', 'thf'],        // Thief
-  ['LORES.MIX', 'E7.SHP', 'shok'],        // Shock trooper (E7 in LORES)
-  ['LORES.MIX', 'C1.SHP', 'c1'],          // Civilian 1
-  ['LORES.MIX', 'C2.SHP', 'c2'],          // Civilian 2
-  ['LORES.MIX', 'C3.SHP', 'c3'],          // Civilian 3
-  ['LORES.MIX', 'C4.SHP', 'c4'],          // Civilian 4
-  ['LORES.MIX', 'C5.SHP', 'c5'],          // Civilian 5
-  ['LORES.MIX', 'C6.SHP', 'c6'],          // Civilian 6
-  ['LORES.MIX', 'C7.SHP', 'c7'],          // Civilian 7
-  ['LORES.MIX', 'C8.SHP', 'c8'],          // Civilian 8
-  ['LORES.MIX', 'C9.SHP', 'c9'],          // Civilian 9
-  ['LORES.MIX', 'C10.SHP', 'c10'],        // Civilian 10
-  ['LORES.MIX', 'CHAN.SHP', 'chan'],       // Civilian Chan
-  ['LORES.MIX', 'DELPHI.SHP', 'delphi'],  // Civilian Delphi
-  ['LORES.MIX', 'EINSTEIN.SHP', 'einstein'], // Einstein
-  ['LORES.MIX', 'GNRL.SHP', 'gnrl'],      // General
-  ['LORES.MIX', 'MECH.SHP', 'mech'],      // Mechanic
+  ['HIRES.MIX', 'E1.SHP', 'e1'],          // Rifle infantry
+  ['HIRES.MIX', 'E2.SHP', 'e2'],          // Grenadier
+  ['HIRES.MIX', 'E3.SHP', 'e3'],          // Rocket soldier
+  ['HIRES.MIX', 'E4.SHP', 'e4'],          // Flamethrower
+  ['HIRES.MIX', 'E5.SHP', 'e5'],          // Tanya
+  ['HIRES.MIX', 'E6.SHP', 'e6'],          // Engineer
+  ['HIRES.MIX', 'DOG.SHP', 'dog'],        // Attack dog
+  ['HIRES.MIX', 'SPY.SHP', 'spy'],        // Spy
+  ['HIRES.MIX', 'MEDI.SHP', 'medi'],      // Medic
+  ['HIRES.MIX', 'THF.SHP', 'thf'],        // Thief
+  ['HIRES.MIX', 'E7.SHP', 'shok'],        // Shock trooper (E7 in LORES)
+  ['HIRES.MIX', 'C1.SHP', 'c1'],          // Civilian 1
+  ['HIRES.MIX', 'C2.SHP', 'c2'],          // Civilian 2
+  ['HIRES.MIX', 'C3.SHP', 'c3'],          // Civilian 3
+  ['HIRES.MIX', 'C4.SHP', 'c4'],          // Civilian 4
+  ['HIRES.MIX', 'C5.SHP', 'c5'],          // Civilian 5
+  ['HIRES.MIX', 'C6.SHP', 'c6'],          // Civilian 6
+  ['HIRES.MIX', 'C7.SHP', 'c7'],          // Civilian 7
+  ['HIRES.MIX', 'C8.SHP', 'c8'],          // Civilian 8
+  ['HIRES.MIX', 'C9.SHP', 'c9'],          // Civilian 9
+  ['HIRES.MIX', 'C10.SHP', 'c10'],        // Civilian 10
+  ['HIRES.MIX', 'CHAN.SHP', 'chan'],       // Civilian Chan
+  ['HIRES.MIX', 'DELPHI.SHP', 'delphi'],  // Civilian Delphi
+  ['HIRES.MIX', 'EINSTEIN.SHP', 'einstein'], // Einstein
+  ['HIRES.MIX', 'GNRL.SHP', 'gnrl'],      // General
+  ['HIRES.MIX', 'MECH.SHP', 'mech'],      // Mechanic
   // Naval vessels (CONQUER.MIX — confirmed via BFILE.MAK)
   ['CONQUER.MIX', 'SS.SHP', 'ss'],          // Submarine
   ['CONQUER.MIX', 'DD.SHP', 'dd'],          // Destroyer
@@ -286,20 +286,20 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   // Fog of war shroud overlays (47 frames, one per edge pattern)
   ['CONQUER.MIX', 'SHADOW.SHP', 'shadow'],
   // UI elements
-  ['LORES.MIX', 'MOUSE.SHP', 'mouse'],       // Game cursor sprites (TD-style SHP, 222 frames)
-  ['LORES.MIX', 'SELECT.SHP', 'select'],     // Selection box
-  ['LORES.MIX', 'POWERBAR.SHP', 'powerbar'], // Power bar
-  ['LORES.MIX', 'SIDEBAR.SHP', 'sidebar'],   // Sidebar background
-  ['LORES.MIX', 'STRIP.SHP', 'strip'],       // Sidebar strip
-  ['LORES.MIX', 'TABS.SHP', 'tabs'],         // Sidebar tabs
-  ['LORES.MIX', 'REPAIR.SHP', 'repair'],     // Repair button icon
-  ['LORES.MIX', 'SELL.SHP', 'sell'],         // Sell button icon
-  ['LORES.MIX', 'MAP.SHP', 'map_btn'],       // Map button icon
-  ['LORES.MIX', 'CLOCK.SHP', 'clock'],       // Clock overlay for build progress
+  ['HIRES.MIX', 'MOUSE.SHP', 'mouse'],       // Game cursor sprites (TD-style SHP, 222 frames)
+  ['HIRES.MIX', 'SELECT.SHP', 'select'],     // Selection box
+  ['HIRES.MIX', 'POWERBAR.SHP', 'powerbar'], // Power bar
+  ['HIRES.MIX', 'SIDEBAR.SHP', 'sidebar'],   // Sidebar background
+  ['HIRES.MIX', 'STRIP.SHP', 'strip'],       // Sidebar strip
+  ['HIRES.MIX', 'TABS.SHP', 'tabs'],         // Sidebar tabs
+  ['HIRES.MIX', 'REPAIR.SHP', 'repair'],     // Repair button icon
+  ['HIRES.MIX', 'SELL.SHP', 'sell'],         // Sell button icon
+  ['HIRES.MIX', 'MAP.SHP', 'map_btn'],       // Map button icon
+  ['HIRES.MIX', 'CLOCK.SHP', 'clock'],       // Clock overlay for build progress
   // Sidebar chrome — scroll arrows, house-specific backgrounds, pip indicators
-  ['LORES.MIX', 'STRIPUP.SHP', 'stripup'],   // Scroll up arrow (3 frames: up/down/disabled)
-  ['LORES.MIX', 'STRIPDN.SHP', 'stripdn'],   // Scroll down arrow (3 frames)
-  ['LORES.MIX', 'POWER.SHP', 'power_marker'], // Power bar drain level marker
+  ['HIRES.MIX', 'STRIPUP.SHP', 'stripup'],   // Scroll up arrow (3 frames: up/down/disabled)
+  ['HIRES.MIX', 'STRIPDN.SHP', 'stripdn'],   // Scroll down arrow (3 frames)
+  ['HIRES.MIX', 'POWER.SHP', 'power_marker'], // Power bar drain level marker
   ['HIRES.MIX', 'SIDE1NA.SHP', 'side1na'],   // Allied sidebar top section
   ['HIRES.MIX', 'SIDE2NA.SHP', 'side2na'],   // Allied sidebar middle section
   ['HIRES.MIX', 'SIDE3NA.SHP', 'side3na'],   // Allied sidebar bottom section
@@ -308,7 +308,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['HIRES.MIX', 'SIDE3US.SHP', 'side3us'],   // Soviet sidebar bottom section
   ['HIRES.MIX', 'STRIPNA.SHP', 'stripna'],   // Allied strip column background
   ['HIRES.MIX', 'STRIPUS.SHP', 'stripus'],   // Soviet strip column background
-  ['LORES.MIX', 'PIPS.SHP', 'pips'],         // Pip indicators (frame 3=Ready, frame 4=Holding)
+  ['HIRES.MIX', 'PIPS.SHP', 'pips'],         // Pip indicators (frame 3=Ready, frame 4=Holding)
   // Ore/gem overlays (theater-specific .TEM files, SHP format)
   // Gold: 12 frames each (density 0-11), Gems: 3 frames each (density 0-2)
   ['TEMPERAT.MIX', 'GOLD01.TEM', 'gold01'],
@@ -463,7 +463,7 @@ async function main(): Promise<void> {
   // Also try to parse nested MIX files inside LORES.MIX, EXPAND.MIX etc.
   // LORES.MIX contains infantry sprites directly, not as a nested MIX
   // But some files might be inside nested archives
-  for (const parentName of ['LORES.MIX', 'EXPAND.MIX']) {
+  for (const parentName of ['HIRES.MIX', 'EXPAND.MIX']) {
     const parent = mixParsed.get(parentName);
     if (!parent) continue;
     // Check for nested MIX files
@@ -601,7 +601,7 @@ async function main(): Promise<void> {
   log('Extracting bitmap fonts...');
   for (const [fntName, outPrefix] of [['6POINT.FNT', '6point-font'], ['8POINT.FNT', '8point-font']] as const) {
     let fntData: Buffer | null = null;
-    for (const searchMix of ['CONQUER.MIX', 'GENERAL.MIX', 'LOCAL.MIX', 'LORES.MIX', 'TEMPERAT.MIX']) {
+    for (const searchMix of ['CONQUER.MIX', 'GENERAL.MIX', 'LOCAL.MIX', 'HIRES.MIX', 'TEMPERAT.MIX']) {
       const mix = mixParsed.get(searchMix);
       if (mix) {
         fntData = mix.readFile(fntName);
@@ -800,7 +800,7 @@ async function main(): Promise<void> {
   // Extract PALETTE.CPS for house-color remap data (C++ Init_Color_Remaps)
   log('Extracting house color remap data...');
   let cpsData: Buffer | null = null;
-  for (const searchMix of ['LORES.MIX', 'CONQUER.MIX', 'LOCAL.MIX']) {
+  for (const searchMix of ['HIRES.MIX', 'CONQUER.MIX', 'LOCAL.MIX']) {
     const mix = mixParsed.get(searchMix);
     if (mix) {
       cpsData = mix.readFile('PALETTE.CPS');

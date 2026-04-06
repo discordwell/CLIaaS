@@ -5166,11 +5166,14 @@ export class Game {
    *  Speed values in UNIT_STATS are rules.ini percentages (0-100); MPH_TO_PX converts
    *  to pixels/tick via C++ _Scale_To_256 scaling (techno.cpp:6287).
    *  C++ house.cpp:290,300: GroundspeedBias from difficulty applied per house.
-   *  C++ house.cpp:291,301: AirspeedBias from difficulty applied to aircraft. */
+   *  C++ house.cpp:291,301: AirspeedBias from difficulty applied to aircraft.
+   *  C++ infantry.cpp:3996-3997: Dogs get 2x movement speed when they have a
+   *  valid navigation target (hunting/attacking). */
   private movementSpeed(entity: Entity): number {
     const speedBias = entity.stats.isAircraft
       ? this.getAirspeedBias(entity.house)
       : this.getGroundspeedBias(entity.house);
+<<<<<<< Updated upstream
     // C++ infantry.cpp:4019 — infantry moves at full speed regardless of terrain type.
     // Only vehicles (DriveClass) apply terrain speed modifiers via Speed_Boost.
     const terrainMult = entity.stats.isInfantry ? 1.0 : this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
@@ -5185,6 +5188,15 @@ export class Game {
       baseSpeed *= 2;
     }
 
+=======
+    const terrainMult = this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
+    let baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
+    // C++ infantry.cpp:3996-3997: IsCanine && Target_Legal(NavCom) → movespeed *= 2
+    // Dogs sprint at double speed when chasing a navigation target.
+    if (entity.stats.isCanine && entity.moveTarget) {
+      baseSpeed *= 2;
+    }
+>>>>>>> Stashed changes
     if (terrainMult <= 0 && baseSpeed > 0) {
       // Can happen transiently during diagonal track movement when the pixel center
       // briefly crosses a building footprint or impassable cell boundary (benign).

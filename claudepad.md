@@ -1,5 +1,6 @@
 # Session Summaries
 
+<<<<<<< Updated upstream
 ## 2026-04-03T22:00Z — Parity: Infantry Doing State Machine + 11 Fixes
 - **12/12 tick 1 count-perfect** (was 10/12). 8/12 tick-100. 7/12 tick-500.
 - **AI production/rebuild delay**: Skip first interval (C++ has build time queue). Fixed SCG07EA +1 E7, SCG10EA +1 E1, SCG10EA +1 PROC.
@@ -119,6 +120,16 @@
 - **Remaining**: E1 HP diff (35 vs 27) at tick 50 = AI engagement timing (~2 ticks earlier in TS). Barrel cascade (structures 25 vs 20, V19 HP) downstream of this. Root cause: TS enemy E1 enters JEEP weapon range ~2 ticks before WASM, getting 1 extra M60mg hit.
 - **Next frontier**: AI target acquisition timing — HUNT enemy movement rate or guard scan frequency causes TS to engage 2 ticks earlier. This is the last systemic parity gap.
 - **Key commits**: a89addf through bc05056 (13 commits on main).
+=======
+## 2026-03-26T13:00Z — Deterministic RNG + Lockstep Parity Harness + 3 Parity Fixes
+- **Deterministic RNG**: Added `set_custom_seed()` C++ export to WASM. `?seed=0` forces both engines to use identical RNG sequences. Verified bit-identical state across reloads.
+- **Lockstep parity harness**: Rewrote `test-gameplay-compare.ts` — runs TS + WASM simultaneously via Playwright, normalizes state formats, diffs entity positions/HP/counts at each checkpoint.
+- **Fix 1 — Spawn edge priority**: C++ `Calculated_Cell` (display.cpp:2432-2460) infers spawn edge from waypoint position, only falling back to house Edge= when no waypoint exists. TS had this inverted. Fixed, then re-fixed after another agent reverted it (ecfdfd8).
+- **Fix 2 — Movement speed 2.5x**: rules.ini Speed values are percentages (0-100), not raw leptons/tick. C++ scales via `_Scale_To_256`: `MaxSpeed = (Speed * 256) / 100`. TS was using raw values. Fixed `MPH_TO_PX = CELL_SIZE / 100` (was `CELL_SIZE / LEPTON_SIZE`).
+- **Results**: TRAN gap 14→2 cells, DOG gap 6→3 cells, enemy counts match at tick 100.
+- **Remaining**: 1-2 cell drift (lepton accumulator vs float), structures 25 vs 20 (combat timing cascade), TS TRAN lingers (doesn't leave map after unload).
+- **Commits**: a89addf, 26f7bca, 72864c3. All pushed + deployed.
+>>>>>>> Stashed changes
 
 ## 2026-03-11T04:00Z — Session 142: Game Class Refactoring Phase 2 (Waves 0-3)
 - **6 new subsystem modules extracted**: placement.ts (179L), harvester.ts (261L), aircraft.ts (394L), ai.ts (1,319L), crates.ts (345L), missionAI.ts (1,207L)
