@@ -1101,12 +1101,12 @@ void agent_render(void)
 	 * We just need to read the 8-bit paletted pixels and convert to RGBA. */
 	int w = HidPage.Get_Width();
 	int h = HidPage.Get_Height();
-	if (w <= 0 || h <= 0) { w = 320; h = 200; }
+	if (w <= 0 || h <= 0) { w = 320 * RESFACTOR; h = 200 * RESFACTOR; }
 	uint8_t *src = (uint8_t*)HidPage.Get_Offset();
 	if (!src) return;
 
-	static uint8_t rgba[320 * 200 * 4];
-	int total = (w > 320 ? 320 : w) * (h > 200 ? 200 : h);
+	static uint8_t rgba[640 * 400 * 4]; // big enough for HIRES
+	int total = w * h;
 	for (int i = 0; i < total; i++) {
 		uint8_t idx = src[i];
 		const RGBClass &c = GamePalette[idx];
