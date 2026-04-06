@@ -3,8 +3,16 @@
  * Based on SCA01EA-04EA.INI scenario data from the original game.
  */
 
+// === Resolution Factor ===
+// C++ Red Alert supports LORES (320×200, RESFACTOR=1) and HIRES (640×400, RESFACTOR=2).
+// LORES matches the WASM 320×200 reference output: 10 cells × 8 cells visible game area.
+// Set to 2 to revert to the previous HIRES layout (640×400, 20×16 cells visible).
+export const RESFACTOR = 1;
+
 // === Coordinate System ===
-// Map is 128×128 cells, visible area is ~50×50 cells
+// Map is 128×128 cells, visible area depends on RESFACTOR:
+//   LORES (1): 10×8 cells visible (240×192 game area)
+//   HIRES (2): 20×16 cells visible (480×384 game area)
 // Each cell is 24×24 pixels at game resolution
 // Lepton: sub-cell precision (256 leptons = 1 cell)
 

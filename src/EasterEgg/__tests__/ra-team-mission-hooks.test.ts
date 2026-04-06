@@ -6,7 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { House, Mission, UnitType, CELL_SIZE } from '../engine/types';
+import { House, Mission, UnitType, CELL_SIZE, RESFACTOR } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
 
 class FakeAudio {
@@ -26,8 +26,8 @@ class FakeAudio {
 
 function createCanvas(): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 400;
+  canvas.width = 320 * RESFACTOR;
+  canvas.height = 200 * RESFACTOR;
   return canvas;
 }
 

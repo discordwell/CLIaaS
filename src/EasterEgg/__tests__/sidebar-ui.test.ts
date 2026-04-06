@@ -799,3 +799,48 @@ describe('RA1 Parity — Ore Values (EC1/EC2/EC3)', () => {
     expect(Entity.ORE_CAPACITY).toBe(28);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// Sidebar Chrome — Metallic Tab and Beveled Edge Parity
+// ═══════════════════════════════════════════════════════════
+
+describe('Sidebar Chrome — C++ TabShape Metallic Tabs', () => {
+  /**
+   * C++ tab.cpp:91 TabClass::Draw_It draws metallic TABS.SHP gradient strips
+   * across the top status bar. The TS renderer must use tabs.png frames for
+   * the same ornate beveled metallic look instead of a plain black fill.
+   *
+   * C++ sidebar.cpp:770 SidebarClass::Draw_It draws beveled sidebar shapes
+   * (side1na/us, side2na/us, side3na/us) that have metallic borders built in.
+   * The TS renderer should NOT draw a flat edge line over these sprites.
+   */
+
+  it('TAB_HEIGHT matches C++ TAB_HEIGHT (8 LORES)', () => {
+    // C++ tab.cpp:89 TAB_HEIGHT=8, scaled by RESFACTOR
+    expect(Renderer.TAB_HEIGHT).toBe(8);
+  });
+
+  it('sidebar background covers full sidebar height below tab bar', () => {
+    // C++ sidebar.cpp:770-772: three shapes tile from y=8 to y=200 (LORES)
+    // side1na: y=8, h=80 (to y=88)
+    // side2na: y=88, h=50 (to y=138)
+    // side3na: y=138, h=62 (to y=200)
+    const top = Renderer.SIDEBAR_BG_TOP_Y;     // 8
+    const mid = Renderer.SIDEBAR_BG_MID_Y;     // 88
+    const bot = Renderer.SIDEBAR_BG_BOT_Y;     // 138
+    // Shapes tile seamlessly: top ends where mid starts, mid ends where bot starts
+    expect(mid).toBe(top + 80);  // side1 is 80px tall
+    expect(bot).toBe(mid + 50);  // side2 is 50px tall
+    // side3 is 62px tall, extending to 138+62=200 (full LORES height)
+    expect(bot + 62).toBe(200);
+  });
+
+  it('credits strip Y is between radar and button row', () => {
+    // Credits strip must sit below the radar area and above the button row
+    const credY = Renderer.CREDITS_Y;
+    const btnY = Renderer.BUTTON_ROW_Y;
+    expect(credY).toBeGreaterThan(0);
+    expect(credY).toBeLessThan(btnY);
+    expect(credY + Renderer.CREDITS_H).toBeLessThanOrEqual(btnY);
+  });
+});

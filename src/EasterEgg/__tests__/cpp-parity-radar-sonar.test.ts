@@ -25,7 +25,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  House, UnitType, CELL_SIZE, MAP_CELLS,
+  House, UnitType, CELL_SIZE, MAP_CELLS, RESFACTOR,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponState,
   SONAR_REVEAL_TICKS, POWER_DRAIN, HOUSE_FACTION,
   getWarheadMultiplier, type WarheadType, type ArmorType,
@@ -986,8 +986,9 @@ describe('Minimap fog-gating (renderer.ts:2747-2788)', () => {
 // =============================================================================
 
 describe('Minimap size constant (renderer.ts)', () => {
-  it('RADAR_SIZE is 140px square', () => {
-    expect(Renderer.RADAR_SIZE).toBe(140);
+  it('RADAR_SIZE is 70*RESFACTOR px square', () => {
+    // LORES: 70px, HIRES: 140px
+    expect(Renderer.RADAR_SIZE).toBe(70 * RESFACTOR);
   });
 });
 

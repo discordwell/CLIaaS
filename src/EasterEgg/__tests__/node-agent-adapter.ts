@@ -21,6 +21,7 @@ import {
   type StepResult,
 } from '../engine/agentHarness';
 import { resetEntityIds } from '../engine/entity';
+import { RESFACTOR } from '../engine/types';
 
 // ── DOM stubs for Node.js ────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ function installDomStubs(): void {
       closePath() {},
       strokeRect() {},
       strokeText() {},
-      canvas: { width: 640, height: 400 },
+      canvas: { width: 320 * RESFACTOR, height: 200 * RESFACTOR },
       font: '',
       fillStyle: '',
       strokeStyle: '',
@@ -113,8 +114,8 @@ function installDomStubs(): void {
 
 function createCanvas(): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 400;
+  canvas.width = 320 * RESFACTOR;
+  canvas.height = 200 * RESFACTOR;
   return canvas;
 }
 

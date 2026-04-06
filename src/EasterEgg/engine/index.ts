@@ -7,7 +7,7 @@ import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
   type WarheadMeta, type WarheadProps,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
-  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE,
+  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
 	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
@@ -230,6 +230,7 @@ export {
 export { getEffectiveCost, countPlayerBuildings } from './production';
 
 export type { SuperweaponState } from './types';
+export { RESFACTOR } from './types';
 
 export type GameState = 'loading' | 'playing' | 'won' | 'lost' | 'paused';
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -365,7 +366,7 @@ export class Game {
   powerProduced = 0;
   powerConsumed = 0;
   // Sidebar dimensions
-  static readonly SIDEBAR_W = 160;
+  static readonly SIDEBAR_W = 80 * RESFACTOR;
   /** CF3: Fixed splash damage radius in cells (C++ SPREAD_FACTOR constant) */
   static readonly SPLASH_RADIUS = 1.5;
   sidebarScroll = 0; // scroll offset for sidebar items
@@ -3306,7 +3307,7 @@ export class Game {
   /** Check if a sidebar click hit a superweapon button. Returns true if handled. */
   private handleSuperweaponButtonClick(sy: number): boolean {
     // Superweapon buttons are at the very bottom of sidebar
-    const btnH = 20;
+    const btnH = 10 * RESFACTOR;
     const playerSws = this.getPlayerSuperweapons();
     if (playerSws.length === 0) return false;
 
@@ -6911,13 +6912,13 @@ export class Game {
 
     // Semi-transparent banner background
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(0, 14, w, 28);
+    ctx.fillRect(0, 7 * RESFACTOR, w, 14 * RESFACTOR);
 
     // Mission name
     ctx.textAlign = 'center';
-    ctx.font = 'bold 14px monospace';
+    ctx.font = `bold ${7 * RESFACTOR}px monospace`;
     ctx.fillStyle = '#FFD700';
-    ctx.fillText(this.missionName.toUpperCase(), w / 2, 34);
+    ctx.fillText(this.missionName.toUpperCase(), w / 2, 17 * RESFACTOR);
     ctx.textAlign = 'left';
 
     ctx.restore();
@@ -6945,7 +6946,8 @@ export class Game {
     // Radar requires DOME and sufficient power
     // C++ house.cpp:4160-4170: Power_Fraction() returns 0 when powerProduced=0 and drain>0
     const hasPower = this.powerConsumed === 0 || this.powerProduced >= this.powerConsumed;
-    this.renderer.hasRadar = this.hasBuilding('DOME') && hasPower;
+    this.renderer.doesRadarExist = this.hasBuilding('DOME');
+    this.renderer.hasRadar = this.renderer.doesRadarExist && hasPower;
     // U6: Pass fullscreen radar state to renderer
     this.renderer.isRadarFullscreen = this.isRadarFullscreen;
     this.renderer.crates = this.crates;

@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { Dir, UnitType, House, CELL_SIZE, UNIT_STATS, getStripSide } from '../engine/types';
+import { Dir, UnitType, House, CELL_SIZE, UNIT_STATS, getStripSide, RESFACTOR } from '../engine/types';
 import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
 const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
@@ -165,12 +165,12 @@ describe('generic briefing generation', () => {
 // ── Sidebar layout constants ──────────────────────────────
 
 describe('sidebar layout', () => {
-  it('sidebar layout constants match C++ parity', async () => {
+  it('sidebar layout constants match C++ parity (LORES base × RESFACTOR)', async () => {
     const mod = await import('../engine/renderer');
-    expect(mod.Renderer.RADAR_SIZE).toBe(140);
-    expect(mod.Renderer.RADAR_Y).toBe(4);
-    expect(mod.Renderer.STRIP_START_Y).toBe(180);
-    expect(mod.Renderer.CAMEO_W).toBe(64);
-    expect(mod.Renderer.CAMEO_H).toBe(48);
+    expect(mod.Renderer.RADAR_SIZE).toBe(70 * RESFACTOR);
+    expect(mod.Renderer.RADAR_Y).toBe(2 * RESFACTOR);
+    expect(mod.Renderer.STRIP_START_Y).toBe(90 * RESFACTOR);
+    expect(mod.Renderer.CAMEO_W).toBe(32 * RESFACTOR);
+    expect(mod.Renderer.CAMEO_H).toBe(24 * RESFACTOR);
   });
 });

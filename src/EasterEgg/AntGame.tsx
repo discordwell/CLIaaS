@@ -8,6 +8,7 @@ import {
   loadMissionBriefings, getMissionBriefing,
   type CampaignId, type CampaignDef, type CampaignMission,
   getMissionMovies, hasFMV, MoviePlayer, CAMPAIGN_END_MOVIES,
+  RESFACTOR,
 } from './engine';
 import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { QATestRunner, type QALogEntry, type QAReport } from './engine/qaTestRunner';
@@ -2759,8 +2760,8 @@ export default function AntGame({ onExit }: AntGameProps) {
       }}>
         <canvas
           ref={canvasRef}
-          width={640}
-          height={400}
+          width={320 * RESFACTOR}
+          height={200 * RESFACTOR}
           onContextMenu={(e) => e.preventDefault()}
           tabIndex={0}
           style={{

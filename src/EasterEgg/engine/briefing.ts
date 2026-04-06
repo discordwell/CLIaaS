@@ -507,8 +507,8 @@ export type BriefingState = 'playing' | 'done';
 
 export class BriefingRenderer {
   private ctx: CanvasRenderingContext2D;
-  private width = 640;
-  private height = 400;
+  private width: number;
+  private height: number;
   private audio: BriefingAudio;
 
   // Sequence state
@@ -551,6 +551,8 @@ export class BriefingRenderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    this.width = canvas.width;
+    this.height = canvas.height;
     this.audio = new BriefingAudio();
   }
 

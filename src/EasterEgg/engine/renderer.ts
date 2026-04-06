@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -241,10 +241,11 @@ export class Renderer {
   sidebarItems: ProductionItem[] = [];
   sidebarQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
   sidebarScroll = 0;
-  sidebarW = 160;
+  sidebarW = 80 * RESFACTOR;
   leftStripScroll = 0;
   rightStripScroll = 0;
-  hasRadar = false; // requires DOME building for minimap
+  hasRadar = false; // requires DOME building for minimap AND sufficient power
+  doesRadarExist = false; // DOME building exists (regardless of power) — C++ DoesRadarExist
   /** U6: Fullscreen radar toggle — enlarged minimap overlay */
   isRadarFullscreen = false;
   isRadarJammed = false; // GAP generator radar jamming (C++ IsRadarJammed)
@@ -343,7 +344,8 @@ export class Renderer {
     }
     retval = Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
     // C++ Draw_It HIRES rescaling (power.cpp:229): (raw * 153) / 107
-    return Math.floor(retval * 153 / 107);
+    // At LORES (RESFACTOR=1), raw pixel height is used directly (no rescaling).
+    return RESFACTOR === 1 ? retval : Math.floor(retval * 153 / 107);
   }
 
   /** Update power bar bounce animation — call once per game tick (C++ PowerClass::AI) */
@@ -3144,16 +3146,14 @@ export class Renderer {
     const ox = map.boundsX;
     const oy = map.boundsY;
 
-    // Background with border
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(mmX - 2, mmY - 2, mmSize + 4, mmSize + 4);
+    // C++ radar.cpp Draw_It: radar panel uses natoradr.shp/ussrradr.shp for the cover plate
+    // and the sidebar background (side1na/side1us) provides the metallic frame border.
+    // IsRadarJammed is checked BEFORE IsRadarActive — jamming takes priority (radar.cpp:469).
 
-    // Radar jammed (GAP generator): show static/snow noise (C++ radar.cpp:469 Radar_Anim,
-    // IsRadarJammed is checked BEFORE IsRadarActive — jamming takes priority regardless)
+    // Radar jammed (GAP generator): show static/snow noise over the cover plate
     if (this.isRadarJammed) {
+      // Draw cover plate background first (C++ Radar_Anim draws RadarAnim frame)
+      this.drawRadarCoverPlate(ctx, mmX, mmY, mmSize, assets);
       this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
       if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
         const cells = Math.ceil(mmSize / 3);
@@ -3173,12 +3173,19 @@ export class Renderer {
       return;
     }
 
-    // No radar: show faction logo (C++ radar.cpp Draw_It — natoradr.shp / ussrradr.shp
-    // final frame is the faction emblem displayed when radar is inactive)
+    // No radar: show cover plate (C++ radar.cpp Draw_It lines 598-616)
+    // C++: val = DoesRadarExist ? MAX_RADAR_FRAMES : 0
+    //   - !DoesRadarExist (no DOME): frame 0 — ornate radar panel with faction emblem
+    //   - DoesRadarExist but inactive (no power): frame 41 (MAX_RADAR_FRAMES) — dark cover plate
     if (!this.hasRadar) {
-      this.drawFactionRadarLogo(ctx, mmX, mmY, mmSize, assets);
+      this.drawRadarCoverPlate(ctx, mmX, mmY, mmSize, assets);
       return;
     }
+
+    // Active radar: dark interior background (C++ radar.cpp:542 draws RadarFrame then
+    // fills interior with BLACK before rendering terrain pixels on top)
+    ctx.fillStyle = '#000';
+    ctx.fillRect(mmX, mmY, mmSize, mmSize);
 
     // Terrain (with fog awareness)
     for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
@@ -3297,138 +3304,34 @@ export class Renderer {
   }
 
   /**
-   * Draw faction emblem when radar is inactive (C++ radar.cpp Draw_It lines 370-381).
-   * Allied houses use natoradr.shp (NATO compass rose), Soviet houses use ussrradr.shp
-   * (Soviet star). The final frame of these SHP animations is the static emblem shown
-   * when no radar building exists or power is insufficient.
+   * Draw radar cover plate (C++ radar.cpp Draw_It lines 598-616).
+   * Uses natoradr.shp (Allied) or ussrradr.shp (Soviet) sprite frames:
+   *   - Frame 0: ornate radar panel with faction emblem (no DOME built)
+   *   - Frame 41 (MAX_RADAR_FRAMES): dark cover plate (DOME exists, no power)
+   * C++ logic: val = DoesRadarExist ? MAX_RADAR_FRAMES : 0
+   * Nearest-neighbor scaling preserves pixel art (no bilinear blur).
    */
-  private drawFactionRadarLogo(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, assets?: AssetManager): void {
+  private drawRadarCoverPlate(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, assets?: AssetManager): void {
     const isAllied = this.isPlayerAllied();
     const sheetName = isAllied ? 'natoradr' : 'ussrradr';
 
-    // Try sprite-based rendering first (C++ parity: last frame = static emblem)
     const sheet = assets?.getSheet(sheetName);
     if (sheet) {
-      const lastFrame = sheet.meta.frameCount - 1;
-      // Scale sprite to fit the radar area
-      const scale = size / sheet.meta.frameWidth;
-      assets!.drawFrame(ctx, sheetName, lastFrame, x, y, { scale });
+      // C++ radar.h: RADAR_ACTIVATED_FRAME=22, MAX_RADAR_FRAMES=41
+      // DoesRadarExist -> frame 41 (closed cover plate), !DoesRadarExist -> frame 0 (ornate panel)
+      const frame = this.doesRadarExist ? 41 : 0;
+      const spriteScale = size / sheet.meta.frameWidth;
+      // Preserve pixel art with nearest-neighbor scaling
+      const prevSmoothing = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false;
+      assets!.drawFrame(ctx, sheetName, frame, x, y, { scale: spriteScale });
+      ctx.imageSmoothingEnabled = prevSmoothing;
       return;
     }
 
-    // Procedural fallback (only if sprite assets are missing)
-    const cx = x + size / 2;
-    const cy = y + size / 2;
-    const r = size * 0.35;
-
-    ctx.fillStyle = isAllied ? '#0a1628' : '#1a0808';
+    // Procedural fallback (only if natoradr/ussrradr sprite assets are missing)
+    ctx.fillStyle = '#000';
     ctx.fillRect(x, y, size, size);
-
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.5);
-    if (isAllied) {
-      grad.addColorStop(0, 'rgba(40,80,140,0.35)');
-      grad.addColorStop(1, 'rgba(10,22,40,0)');
-    } else {
-      grad.addColorStop(0, 'rgba(140,30,30,0.35)');
-      grad.addColorStop(1, 'rgba(26,8,8,0)');
-    }
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, y, size, size);
-
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    if (isAllied) {
-      this.drawAlliedEmblem(ctx, r);
-    } else {
-      this.drawSovietEmblem(ctx, r);
-    }
-
-    ctx.restore();
-  }
-
-  /** Allied compass rose — 4-pointed star with inner detail */
-  private drawAlliedEmblem(ctx: CanvasRenderingContext2D, r: number): void {
-    // Outer 4-pointed star
-    ctx.beginPath();
-    const points = 4;
-    const outerR = r;
-    const innerR = r * 0.3;
-    for (let i = 0; i < points * 2; i++) {
-      const angle = (i * Math.PI) / points - Math.PI / 2;
-      const rad = i % 2 === 0 ? outerR : innerR;
-      const px = Math.cos(angle) * rad;
-      const py = Math.sin(angle) * rad;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = '#c8a832'; // Gold
-    ctx.fill();
-    ctx.strokeStyle = '#8a7420';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Inner circle
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.22, 0, Math.PI * 2);
-    ctx.fillStyle = '#2850a0';
-    ctx.fill();
-    ctx.strokeStyle = '#c8a832';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Small center dot
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.06, 0, Math.PI * 2);
-    ctx.fillStyle = '#c8a832';
-    ctx.fill();
-  }
-
-  /** Soviet 5-pointed star with hammer & sickle center */
-  private drawSovietEmblem(ctx: CanvasRenderingContext2D, r: number): void {
-    // 5-pointed star
-    ctx.beginPath();
-    const points = 5;
-    const outerR = r;
-    const innerR = r * 0.4;
-    for (let i = 0; i < points * 2; i++) {
-      const angle = (i * Math.PI) / points - Math.PI / 2;
-      const rad = i % 2 === 0 ? outerR : innerR;
-      const px = Math.cos(angle) * rad;
-      const py = Math.sin(angle) * rad;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = '#c03030'; // Soviet red
-    ctx.fill();
-    ctx.strokeStyle = '#801818';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Hammer & sickle simplified — sickle arc + hammer
-    const s = r * 0.25;
-    ctx.strokeStyle = '#ffd700';
-    ctx.lineWidth = Math.max(1.5, r * 0.05);
-    ctx.lineCap = 'round';
-
-    // Sickle (arc curving right)
-    ctx.beginPath();
-    ctx.arc(s * 0.3, -s * 0.2, s * 0.7, -Math.PI * 0.8, Math.PI * 0.3);
-    ctx.stroke();
-
-    // Hammer handle (diagonal line)
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.1, s * 0.5);
-    ctx.lineTo(-s * 0.6, -s * 0.5);
-    ctx.stroke();
-
-    // Hammer head (short perpendicular line at top of handle)
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.9, -s * 0.3);
-    ctx.lineTo(-s * 0.3, -s * 0.7);
-    ctx.stroke();
   }
 
   // ─── Fullscreen Radar (U6) ──────────────────────────────
@@ -3436,7 +3339,7 @@ export class Renderer {
   /** U6: Render enlarged radar overlay centered on screen (300x300) */
   private renderFullscreenRadar(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera): void {
     const ctx = this.ctx;
-    const radarSize = 300;
+    const radarSize = 150 * RESFACTOR;
     const viewW = this.width - this.sidebarW;
     const centerX = viewW / 2 - radarSize / 2;
     const centerY = this.height / 2 - radarSize / 2;
@@ -3589,32 +3492,58 @@ export class Renderer {
 
   // ─── Top Status Bar (C++ TabClass::Draw_It parity) ──────
 
-  /** Tab bar height: C++ TAB_HEIGHT=8 * RESFACTOR=2 = 16px in HIRES. */
-  static readonly TAB_HEIGHT = 16;
+  /** Tab bar height: C++ TAB_HEIGHT=8 * RESFACTOR. LORES=8px, HIRES=16px. */
+  static readonly TAB_HEIGHT = 8 * RESFACTOR;
 
-  /** Draw the top status bar: black strip with OPTIONS | TIME | CREDITS.
-   *  Matches C++ RA/tab.cpp:91 TabClass::Draw_It and credits.cpp:89 CreditClass::Graphic_Logic.
-   *  Layout in HIRES (RESFACTOR=2):
-   *    OPTIONS text centered at x=80 (EVA_WIDTH/2 * RESFACTOR)
-   *    TIME text centered at x=400 (200 * RESFACTOR)
-   *    Credits centered at x=560 (640 - 120*RESFACTOR + 80*RESFACTOR) */
+  /** Draw the top status bar with metallic TabShape chrome.
+   *  C++ RA/tab.cpp:91 TabClass::Draw_It draws TABS.SHP metallic gradient strips
+   *  across the top bar instead of a plain black fill.
+   *  Extracted tabs.png frames (7 frames, 80x7 each):
+   *    0 = normal metallic tab (C++ frame 0)
+   *    1 = highlighted metallic tab (C++ frame 1)
+   *    2 = timer dark (C++ frame 2)
+   *    5 = credits tab metallic (C++ frame 6)
+   *    6 = credits tab red flash (C++ frame 8)
+   *  Layout (LORES, EVA_WIDTH=80):
+   *    Frame 0 at x=0: left tab ("Options")
+   *    Frame 5 at x=width-80: credits tab (metallic) */
   renderTopBar(tick: number): void {
     const ctx = this.ctx;
     const w = this.width;
     const h = Renderer.TAB_HEIGHT;
+    const RF = RESFACTOR;
 
-    // Black fill (C++ LogicPage->Fill_Rect BLACK)
+    // Black fill base (C++ LogicPage->Fill_Rect BLACK)
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
 
-    // Bottom border line (1px, C++ tab.cpp:121 Draw_Line)
+    // Draw metallic tab shapes (C++ tab.cpp:116 CC_Draw_Shape TabShape)
+    // Tab sprites are 80x7 LORES -- drawn at native size (CC_Draw_Shape at 1x).
+    // The 7px sprite in the 8px bar leaves 1px for the bottom border line.
+    const tabSheet = this._cachedAssets?.getSheet('tabs');
+    if (tabSheet) {
+      const prevSmoothing = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false;
+
+      // Left tab -- frame 0 at x=0 (C++ tab.cpp:116)
+      this._cachedAssets!.drawFrame(ctx, 'tabs', 0, 0, 0);
+
+      // Credits tab -- frame 5 (C++ frame 6: metallic) at sidebar X
+      // C++ tab.cpp:150: CC_Draw_Shape(TabShape, 6, (320-EVA_WIDTH)*RF, 0)
+      const credTabX = w - 80 * RF;
+      this._cachedAssets!.drawFrame(ctx, 'tabs', 5, credTabX, 0);
+
+      ctx.imageSmoothingEnabled = prevSmoothing;
+    }
+
+    // Bottom border line (1px, C++ tab.cpp:121 Draw_Line BLACK)
     ctx.fillStyle = '#000';
     ctx.fillRect(0, h - 1, w, 1);
 
-    // OPTIONS button (left, centered at x=80 in HIRES)
-    this.drawBitmapText(this._cachedAssets, 'Options', 80, 4, '#ccc', '6pt', { align: 'center' });
+    // OPTIONS button (left, centered at x=40*RF -- EVA_WIDTH/2)
+    this.drawBitmapText(this._cachedAssets, 'Options', 40 * RF, 2 * RF, '#ccc', '6pt', { align: 'center' });
 
-    // Mission timer (center, x=400 in HIRES). Only show if active.
+    // Mission timer (center, x=200*RF). Only show if active.
     if (this.missionTimer > 0) {
       const totalSecs = Math.ceil(this.missionTimer / GAME_TICKS_PER_SEC);
       const mins = Math.floor(totalSecs / 60);
@@ -3625,13 +3554,13 @@ export class Renderer {
       const timerText = hours > 0
         ? `Time:${hours.toString().padStart(2, '0')}:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
         : `Time:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-      this.drawBitmapText(this._cachedAssets, timerText, 400, 4, '#ccc', '6pt', { align: 'center' });
+      this.drawBitmapText(this._cachedAssets, timerText, 200 * RF, 2 * RF, '#ccc', '6pt', { align: 'center' });
       void tick;
     }
 
-    // Credits (right, x=560 in HIRES)
+    // Credits amount (right, over the credits tab at x=280*RF)
     const creditsText = `${this.sidebarCredits}`;
-    this.drawBitmapText(this._cachedAssets, creditsText, 560, 4, '#ccc', '6pt', { align: 'center' });
+    this.drawBitmapText(this._cachedAssets, creditsText, 280 * RF, 2 * RF, '#ccc', '6pt', { align: 'center' });
   }
 
   // ─── EVA Messages & Mission Timer ──────────────────────
@@ -3641,23 +3570,18 @@ export class Renderer {
     // Show messages that are less than 4 seconds old (60 ticks)
     const active = this.evaMessages.filter(m => tick - m.tick < 60);
     if (active.length === 0) return;
-    // Mission timer now rendered in top status bar (renderTopBar)
 
-    // EVA text messages (top-center, stacked)
-    if (active.length > 0) {
-      const centerX = (this.width - this.sidebarW) / 2;
-      for (let i = 0; i < active.length; i++) {
-        const msg = active[i];
-        const age = tick - msg.tick;
-        const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15;
-        ctx.globalAlpha = alpha;
-        const titleOffset = (this.missionName && tick < 60) ? 20 : 0;
-        // Shifted down to clear the top status bar (TAB_HEIGHT=16)
-        this.drawBitmapText(this._cachedAssets, msg.text,
-          centerX, Renderer.TAB_HEIGHT + 4 + titleOffset + i * 12, '#00FF00', '8pt', { align: 'center' });
-      }
-      ctx.globalAlpha = 1;
-    }
+    // C++ parity: EVA messages render INSIDE the top status bar (TabClass::Draw_It),
+    // left-aligned after the OPTIONS button area, using TPF_6PT_GRAD font.
+    // Position: x=65*RF (after OPTIONS at x=40*RF), y=2*RF (same baseline).
+    // Show only the most recent message to fit within the TAB_HEIGHT bar.
+    const msg = active[active.length - 1];
+    const age = tick - msg.tick;
+    const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15;
+    ctx.globalAlpha = alpha;
+    this.drawBitmapText(this._cachedAssets, msg.text,
+      65 * RESFACTOR, 2 * RESFACTOR, '#00FF00', '6pt', { align: 'left' });
+    ctx.globalAlpha = 1;
   }
 
   // ─── Music Track Display ─────────────────────────────────
@@ -3956,50 +3880,50 @@ export class Renderer {
 
   // ─── Sidebar ──────────────────────────────────────────────
 
-  // ─── Sidebar Layout Constants (C++ sidebar.h / power.h, RESFACTOR=2 HIRES) ────
-  static readonly RADAR_SIZE = 140;    // square radar minimap (custom)
-  static readonly RADAR_Y = 4;        // top margin (custom)
-  static readonly CREDITS_Y = 148;    // credits strip below radar (custom)
-  static readonly CREDITS_H = 14;
+  // ─── Sidebar Layout Constants (C++ sidebar.h / power.h, LORES base × RESFACTOR) ────
+  static readonly RADAR_SIZE = 70 * RESFACTOR;    // square radar minimap (custom, 70 LORES / 140 HIRES)
+  static readonly RADAR_Y = 2 * RESFACTOR;        // top margin (custom)
+  static readonly CREDITS_Y = 74 * RESFACTOR;     // credits strip below radar (custom)
+  static readonly CREDITS_H = 7 * RESFACTOR;
 
   // Button row — C++ English layout (sidebar.h BUTTON_ONE/TWO/THREE)
-  static readonly BUTTON_ROW_Y = 162;  // right after credits strip
-  static readonly BUTTON_H = 18;       // (9×2) C++ BUTTON_HEIGHT
-  static readonly BUTTON_ONE_X = 4;    // (242-240)×2 — repair (wide)
-  static readonly BUTTON_ONE_W = 64;   // (32×2)
-  static readonly BUTTON_TWO_X = 72;   // (276-240)×2 — sell (narrow)
-  static readonly BUTTON_TWO_W = 40;   // (20×2)
-  static readonly BUTTON_THREE_X = 116; // (298-240)×2 — map (narrow)
-  static readonly BUTTON_THREE_W = 40;  // (20×2)
+  static readonly BUTTON_ROW_Y = 81 * RESFACTOR;  // right after credits strip
+  static readonly BUTTON_H = 9 * RESFACTOR;        // C++ BUTTON_HEIGHT
+  static readonly BUTTON_ONE_X = 2 * RESFACTOR;    // (242-240)×RF — repair (wide)
+  static readonly BUTTON_ONE_W = 32 * RESFACTOR;   // 32×RF
+  static readonly BUTTON_TWO_X = 36 * RESFACTOR;   // (276-240)×RF — sell (narrow)
+  static readonly BUTTON_TWO_W = 20 * RESFACTOR;   // 20×RF
+  static readonly BUTTON_THREE_X = 58 * RESFACTOR;  // (298-240)×RF — map (narrow)
+  static readonly BUTTON_THREE_W = 20 * RESFACTOR;  // 20×RF
 
   // Strip columns (C++ StripClass, sidebar.h)
-  static readonly STRIP_START_Y = 180;  // (90×2) COLUMN_ONE_Y
-  static readonly CAMEO_W = 64;         // (32×2) OBJECT_WIDTH
-  static readonly CAMEO_H = 48;         // (24×2) OBJECT_HEIGHT
-  static readonly CAMEO_VISIBLE = 4;    // MAX_VISIBLE (C++ = 4!)
-  static readonly CAMEO_GAP = 0;        // C++ has no gap between cameos
-  static readonly LEFT_STRIP_X_OFFSET = 16;  // (248-240)×2 = COLUMN_ONE relative
-  static readonly RIGHT_STRIP_X_OFFSET = 86; // (283-240)×2 = COLUMN_TWO relative
+  static readonly STRIP_START_Y = 90 * RESFACTOR;   // COLUMN_ONE_Y
+  static readonly CAMEO_W = 32 * RESFACTOR;          // OBJECT_WIDTH
+  static readonly CAMEO_H = 24 * RESFACTOR;          // OBJECT_HEIGHT
+  static readonly CAMEO_VISIBLE = 4;                  // MAX_VISIBLE (C++ = 4!)
+  static readonly CAMEO_GAP = 0;                      // C++ has no gap between cameos
+  static readonly LEFT_STRIP_X_OFFSET = 8 * RESFACTOR;   // (248-240)×RF = COLUMN_ONE relative
+  static readonly RIGHT_STRIP_X_OFFSET = 43 * RESFACTOR; // (283-240)×RF = COLUMN_TWO relative
 
   // Scroll buttons — both below strip, side-by-side (C++ sidebar.h)
-  static readonly SCROLL_RATE = 12;     // px/step (WIN32)
-  static readonly UP_X_OFFSET = 4;      // (2×2) from column X — left scroll btn
-  static readonly DOWN_X_OFFSET = 36;   // (18×2) from column X — right scroll btn
-  static readonly SBUTTON_W = 32;       // (16×2) scroll button width
-  static readonly SBUTTON_H = 24;       // (12×2) scroll button height
-  static readonly SCROLL_BTN_Y_OFFSET = 194; // (97×2) from column Y
+  static readonly SCROLL_RATE = 6 * RESFACTOR;      // px/step (WIN32)
+  static readonly UP_X_OFFSET = 2 * RESFACTOR;      // from column X — left scroll btn
+  static readonly DOWN_X_OFFSET = 18 * RESFACTOR;   // from column X — right scroll btn
+  static readonly SBUTTON_W = 16 * RESFACTOR;       // scroll button width
+  static readonly SBUTTON_H = 12 * RESFACTOR;       // scroll button height
+  static readonly SCROLL_BTN_Y_OFFSET = 97 * RESFACTOR; // from column Y
 
   // Power bar (C++ power.h)
-  static readonly POWER_Y = 176;         // (88×2) absolute Y
-  static readonly POWER_HEIGHT = 110;    // C++ POWER_HEIGHT (200-(7+70+13)) power.h:81-94
-  static readonly POWER_BAR_RENDERED_HEIGHT = 153; // (76×2+1) HIRES rendered bar height after Draw_It rescaling
-  static readonly POWER_BAR_W = 10;
-  static readonly POWER_BAR_X_OFFSET = 2;
+  static readonly POWER_Y = 88 * RESFACTOR;          // absolute Y
+  static readonly POWER_HEIGHT = 110;                  // C++ POWER_HEIGHT (200-(7+70+13)) power.h:81-94 — resolution independent
+  static readonly POWER_BAR_RENDERED_HEIGHT = RESFACTOR === 1 ? 76 : 153; // LORES: raw 76px, HIRES: (76×2+1) rescaled
+  static readonly POWER_BAR_W = 5 * RESFACTOR;
+  static readonly POWER_BAR_X_OFFSET = 1 * RESFACTOR;
 
   // Sidebar background shape Y positions (absolute, for house-specific art)
-  static readonly SIDEBAR_BG_TOP_Y = 16;   // (8×2) side1na/us
-  static readonly SIDEBAR_BG_MID_Y = 176;  // (88×2) side2na/us
-  static readonly SIDEBAR_BG_BOT_Y = 276;  // (138×2) side3na/us
+  static readonly SIDEBAR_BG_TOP_Y = 8 * RESFACTOR;    // side1na/us
+  static readonly SIDEBAR_BG_MID_Y = 88 * RESFACTOR;   // side2na/us
+  static readonly SIDEBAR_BG_BOT_Y = 138 * RESFACTOR;  // side3na/us
 
   // Power bar color palette indices (C++ power.cpp)
   static readonly POWER_COLOR_NORMAL: [string, string] = ['#004400', '#008800'];  // pal[3]/[4] green
@@ -4072,7 +3996,7 @@ export class Renderer {
     const bgMid = assets.getSheet(isAllied ? 'side2na' : 'side2us');
     const bgBot = assets.getSheet(isAllied ? 'side3na' : 'side3us');
     if (bgTop && bgMid && bgBot) {
-      // LORES shapes drawn at 2× scale to fill HIRES sidebar.
+      // LORES shapes drawn at RESFACTOR× scale to fill sidebar.
       // Nearest-neighbor sampling preserves pixel art (no bilinear blur).
       const prevSmoothing = ctx.imageSmoothingEnabled;
       ctx.imageSmoothingEnabled = false;
@@ -4087,30 +4011,42 @@ export class Renderer {
       if (sidebarSheet) {
         for (let ty = 0; ty < this.height; ty += 123) {
           assets.drawFrame(ctx, 'sidebar', 0, x, ty);
-          assets.drawFrame(ctx, 'sidebar', 1, x + 80, ty);
+          assets.drawFrame(ctx, 'sidebar', 1, x + this.sidebarW / 2, ty);
         }
       } else {
         ctx.fillStyle = 'rgba(20,20,25,0.95)';
         ctx.fillRect(x, 0, w, this.height);
       }
     }
-    ctx.strokeStyle = '#333';
+
+    // Beveled left edge — C++ sidebar shapes have a metallic beveled border.
+    // Draw a subtle highlight/shadow pair instead of a flat line to match
+    // the ornate C++ look. The sidebar sprites provide the main metallic
+    // texture; this adds the beveled separation from the game area.
+    ctx.strokeStyle = 'rgba(100,100,110,0.6)'; // highlight (light metallic edge)
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, this.height);
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, this.height);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(20,20,25,0.8)'; // shadow (dark inner edge)
+    ctx.beginPath();
+    ctx.moveTo(x + 1.5, 0);
+    ctx.lineTo(x + 1.5, this.height);
     ctx.stroke();
 
-    // Credits strip below radar
+    // Credits strip below radar — use a subtle darkening over the sidebar's
+    // metallic texture rather than an opaque fill that hides it.
+    // C++ draws the credits text directly on the sidebar background shapes.
     const credY = Renderer.CREDITS_Y;
-    ctx.fillStyle = 'rgba(10,10,15,0.6)';
-    ctx.fillRect(x + 1, credY, w - 1, Renderer.CREDITS_H);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(x + 2, credY, w - 2, Renderer.CREDITS_H);
     const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
     const credColor = atCapacity ? '#FF4444' : '#FFD700';
     this.drawBitmapText(assets, `$${this.sidebarCredits}`, x + w / 2, credY + 1, credColor, '8pt',
       { align: 'center', shadow: '#000' });
     if (this.sidebarSiloCapacity > 0) {
-      this.drawBitmapText(assets, `/${this.sidebarSiloCapacity}`, x + w / 2 + 24, credY + 1, '#888', '6pt');
+      this.drawBitmapText(assets, `/${this.sidebarSiloCapacity}`, x + w / 2 + 12 * RESFACTOR, credY + 1, '#888', '6pt');
     }
 
     // Button row: repair / sell / map (C++ English layout)
@@ -4173,14 +4109,14 @@ export class Renderer {
     const produced = this.sidebarPowerProduced;
     const consumed = this.sidebarPowerConsumed;
 
-    // Draw powerbar shape (C++: 2 frames stacked vertically for HIRES)
+    // Draw powerbar shape (C++: 2 frames stacked vertically, scaled by RESFACTOR)
     const pwrSheet = assets.getSheet('powerbar');
     if (pwrSheet) {
       const frameH = pwrSheet.meta.frameHeight;
       // Frame 0 = top half, frame 1 = bottom half
-      assets.drawFrame(ctx, 'powerbar', 0, pwrX, pwrY, { scale: 2 });
+      assets.drawFrame(ctx, 'powerbar', 0, pwrX, pwrY, { scale: RESFACTOR });
       if (pwrSheet.meta.frameCount > 1) {
-        assets.drawFrame(ctx, 'powerbar', 1, pwrX, pwrY + frameH * 2, { scale: 2 });
+        assets.drawFrame(ctx, 'powerbar', 1, pwrX, pwrY + frameH * RESFACTOR, { scale: RESFACTOR });
       }
     } else {
       ctx.fillStyle = '#111';
@@ -4231,8 +4167,8 @@ export class Renderer {
     // Draw drain marker shape at drain height
     const markerSheet = assets.getSheet('power_marker');
     if (markerSheet && dh > 0) {
-      const markerY = bottom - dh - markerSheet.meta.frameHeight * 2;
-      assets.drawFrame(ctx, 'power_marker', 0, pwrX, markerY, { scale: 2 });
+      const markerY = bottom - dh - markerSheet.meta.frameHeight * RESFACTOR;
+      assets.drawFrame(ctx, 'power_marker', 0, pwrX, markerY, { scale: RESFACTOR });
     } else if (dh > 0) {
       // Fallback: white divider line at drain level
       ctx.strokeStyle = '#fff';
@@ -4385,7 +4321,7 @@ export class Renderer {
     if (upDisabled) ctx.globalAlpha = 0.3;
     if (upSheet) {
       const frame = upDisabled ? 1 : 0; // frame 0=enabled, 1=disabled
-      assets.drawFrame(ctx, 'stripup', frame, stripX + Renderer.UP_X_OFFSET, btnY, { scale: 2 });
+      assets.drawFrame(ctx, 'stripup', frame, stripX + Renderer.UP_X_OFFSET, btnY, { scale: RESFACTOR });
     } else {
       ctx.fillStyle = upDisabled ? '#444' : '#aaa';
       ctx.font = '10px monospace';
@@ -4400,7 +4336,7 @@ export class Renderer {
     if (downDisabled) ctx.globalAlpha = 0.3;
     if (dnSheet) {
       const frame = downDisabled ? 1 : 0;
-      assets.drawFrame(ctx, 'stripdn', frame, stripX + Renderer.DOWN_X_OFFSET, btnY, { scale: 2 });
+      assets.drawFrame(ctx, 'stripdn', frame, stripX + Renderer.DOWN_X_OFFSET, btnY, { scale: RESFACTOR });
     } else {
       ctx.fillStyle = downDisabled ? '#444' : '#aaa';
       ctx.font = '10px monospace';
@@ -4468,7 +4404,7 @@ export class Renderer {
     }
     if (playerSws.length === 0) return;
 
-    const btnH = 20;
+    const btnH = 10 * RESFACTOR;
     // Position at very bottom of sidebar
     const buttonsStartY = this.height - playerSws.length * btnH;
 
@@ -4500,9 +4436,9 @@ export class Renderer {
       }
 
       // Circular charge arc indicator (left side)
-      const arcX = sidebarX + 12;
+      const arcX = sidebarX + 6 * RESFACTOR;
       const arcY = btnY + btnH / 2 - 1;
-      const arcR = 5;
+      const arcR = 3 * RESFACTOR;
       ctx.strokeStyle = '#333';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -4531,14 +4467,15 @@ export class Renderer {
       ctx.fill();
 
       // Label text
-      const label = sw.def.name.length > 10 ? sw.def.name.slice(0, 9) + '.' : sw.def.name;
-      this.drawBitmapText(assets, label, sidebarX + 22, btnY + 2, sw.ready ? '#4f4' : '#aaa', '6pt');
+      const maxChars = RESFACTOR === 1 ? 6 : 10;
+      const label = sw.def.name.length > maxChars ? sw.def.name.slice(0, maxChars - 1) + '.' : sw.def.name;
+      this.drawBitmapText(assets, label, sidebarX + 11 * RESFACTOR, btnY + 1 * RESFACTOR, sw.ready ? '#4f4' : '#aaa', '6pt');
 
       // Charge percentage or READY
       if (sw.ready) {
-        this.drawBitmapText(assets, 'READY', sidebarX + 22, btnY + 11, '#4f4', '6pt');
+        this.drawBitmapText(assets, 'READY', sidebarX + 11 * RESFACTOR, btnY + 6 * RESFACTOR, '#4f4', '6pt');
       } else {
-        this.drawBitmapText(assets, `${Math.floor(progress * 100)}%`, sidebarX + 22, btnY + 11, '#888', '6pt');
+        this.drawBitmapText(assets, `${Math.floor(progress * 100)}%`, sidebarX + 11 * RESFACTOR, btnY + 6 * RESFACTOR, '#888', '6pt');
       }
     }
   }
