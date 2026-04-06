@@ -27,6 +27,12 @@ import {
 import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
 import { type Effect } from '../engine/renderer';
 import { Terrain } from '../engine/map';
+import { LP } from '../engine/tracks';
+
+/** Round a world coordinate to lepton precision (matching Entity.setPosition behavior) */
+function leptonAlign(v: number): number {
+  return Math.round(v / LP) * LP;
+}
 
 beforeEach(() => resetEntityIds());
 
@@ -527,8 +533,9 @@ describe('Chronosphere — teleportation mechanics', () => {
     const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
-    expect(tank.pos.x).toBe(300);
-    expect(tank.pos.y).toBe(400);
+    // Position rounds through lepton precision in setPosition
+    expect(tank.pos.x).toBe(leptonAlign(300));
+    expect(tank.pos.y).toBe(leptonAlign(400));
   });
 
   it('excludes Chrono Tank (CTNK) — has its own teleport', () => {
@@ -542,9 +549,9 @@ describe('Chronosphere — teleportation mechanics', () => {
     const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
-    // CTNK should NOT be teleported
-    expect(ctnk.pos.x).toBe(100);
-    expect(ctnk.pos.y).toBe(100);
+    // CTNK should NOT be teleported — position stays at construction coords (lepton-aligned)
+    expect(ctnk.pos.x).toBe(leptonAlign(100));
+    expect(ctnk.pos.y).toBe(leptonAlign(100));
   });
 
   it('sets chronoShiftTick for visual flash', () => {
@@ -588,8 +595,9 @@ describe('Chronosphere — teleportation mechanics', () => {
     const state = makeSwState(SuperweaponType.CHRONOSPHERE, House.Spain, { ready: true });
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.CHRONOSPHERE}`, state);
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 300, y: 400 });
-    const litningEffects = ctx.effects.filter(e => e.sprite === 'litning');
-    expect(litningEffects).toHaveLength(2); // origin and destination
+    // C++ adata.cpp:1555-1578: Chronosphere uses ANIM_CHRONO_BOX ("CHRONBOX"), not litning
+    const chronoEffects = ctx.effects.filter(e => e.sprite === 'chronbox');
+    expect(chronoEffects).toHaveLength(2); // origin and destination
   });
 
   it('plays chrono sound effect', () => {

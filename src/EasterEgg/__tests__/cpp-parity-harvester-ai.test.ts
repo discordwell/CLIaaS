@@ -1486,7 +1486,7 @@ describe('full harvest cycle: idle → seek → harvest → return → unload �
 
     // Step 2: harvest until full — pump harvest ticks and handle re-seeking
     // When the current cell depletes, harvester transitions to 'seeking' a new cell.
-    // We simulate arrival by moving the harvester's position to the target ore cell.
+    // We simulate arrival by teleporting the harvester to the target ore cell.
     let safetyCounter = 0;
     while (harv.oreLoad < Entity.BAIL_COUNT && safetyCounter < 200) {
       safetyCounter++;
@@ -1494,9 +1494,9 @@ describe('full harvest cycle: idle → seek → harvest → return → unload �
         harv.harvestTick = 9; // trigger harvest on next update
         updateHarvester(ctx, harv);
       } else if (harv.harvesterState === 'seeking') {
-        // Move harvester to the target ore cell and simulate arrival
+        // Teleport harvester to the target ore cell and simulate arrival
         if (harv.moveTarget) {
-          harv.pos = { x: harv.moveTarget.x, y: harv.moveTarget.y };
+          harv.setPosition(harv.moveTarget.x, harv.moveTarget.y);
         }
         harv.mission = Mission.GUARD;
         updateHarvester(ctx, harv);
@@ -1514,20 +1514,24 @@ describe('full harvest cycle: idle → seek → harvest → return → unload �
     // Step 3: return to refinery — simulate arrival at refinery dock cell
     harv.mission = Mission.GUARD;
     // Position harvester adjacent to refinery (edgeDist <= 1)
-    harv.pos = { x: 53 * CELL_SIZE + CELL_SIZE / 2, y: 50 * CELL_SIZE + CELL_SIZE / 2 };
+    harv.setPosition(53 * CELL_SIZE + CELL_SIZE / 2, 50 * CELL_SIZE + CELL_SIZE / 2);
     updateHarvester(ctx, harv);
     // May need to navigate to dock cell first
     if (harv.harvesterState === 'returning') {
       // Move to the dock cell below refinery entrance
-      harv.pos = { x: 53 * CELL_SIZE + CELL_SIZE / 2, y: 52 * CELL_SIZE + CELL_SIZE / 2 };
+      harv.setPosition(53 * CELL_SIZE + CELL_SIZE / 2, 52 * CELL_SIZE + CELL_SIZE / 2);
       harv.mission = Mission.GUARD;
       updateHarvester(ctx, harv);
     }
 
-    // Step 4: fast-forward through unload animation
+    // Step 4: fast-forward through unload animation (22-tick dump + rotation)
     if (harv.harvesterState === 'unloading') {
-      while (harv.harvesterState === 'unloading') {
+      let unloadTicks = 0;
+      while (harv.harvesterState === 'unloading' && unloadTicks < 100) {
+        // Reset rotation guard so tickRotation() advances each iteration
+        harv.rotTickedThisFrame = false;
         updateHarvester(ctx, harv);
+        unloadTicks++;
       }
       expect(harv.harvesterState).toBe('idle');
       expect(harv.oreLoad).toBe(0);

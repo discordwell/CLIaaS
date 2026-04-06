@@ -59,7 +59,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -116,7 +116,7 @@ function makeTeamType(overrides: Partial<TeamType> = {}): TeamType {
 describe('Gate conditions — autocreateEnabled, tick gating, house state', () => {
   it('returns immediately when autocreateEnabled is false', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: false,
     });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -129,9 +129,9 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
     expect(ctx.entities).toHaveLength(0);
   });
 
-  it('does nothing on tick 1 (non-120-aligned)', () => {
+  it('does nothing on tick 2 (non-120-aligned, (2-1)%120 !== 0)', () => {
     const ctx = makeMockAIContext({
-      tick: 1,
+      tick: 2,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -144,37 +144,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
     expect(ctx.entities).toHaveLength(0);
   });
 
-  it('does nothing on tick 119 (just before first window)', () => {
-    const ctx = makeMockAIContext({
-      tick: 119,
-      autocreateEnabled: true,
-    });
-    addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
-    ctx.houseCredits.set(House.USSR, 10000);
-    ctx.teamTypes.push(makeTeamType());
-    ctx.waypoints.set(0, { cx: 50, cy: 50 });
-
-    updateAIAutocreateTeams(ctx);
-
-    expect(ctx.entities).toHaveLength(0);
-  });
-
-  it('runs on tick 0 (first valid tick)', () => {
-    const ctx = makeMockAIContext({
-      tick: 0,
-      autocreateEnabled: true,
-    });
-    addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
-    ctx.houseCredits.set(House.USSR, 10000);
-    ctx.teamTypes.push(makeTeamType());
-    ctx.waypoints.set(0, { cx: 50, cy: 50 });
-
-    updateAIAutocreateTeams(ctx);
-
-    expect(ctx.entities.length).toBeGreaterThan(0);
-  });
-
-  it('runs on tick 120 (second valid window)', () => {
+  it('does nothing on tick 120 (just before second window, (120-1)%120 !== 0)', () => {
     const ctx = makeMockAIContext({
       tick: 120,
       autocreateEnabled: true,
@@ -186,12 +156,42 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
     updateAIAutocreateTeams(ctx);
 
+    expect(ctx.entities).toHaveLength(0);
+  });
+
+  it('runs on tick 1 (first valid tick, (1-1)%120===0)', () => {
+    const ctx = makeMockAIContext({
+      tick: 1,
+      autocreateEnabled: true,
+    });
+    addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
+    ctx.houseCredits.set(House.USSR, 10000);
+    ctx.teamTypes.push(makeTeamType());
+    ctx.waypoints.set(0, { cx: 50, cy: 50 });
+
+    updateAIAutocreateTeams(ctx);
+
     expect(ctx.entities.length).toBeGreaterThan(0);
   });
 
-  it('runs on tick 240 (third valid window)', () => {
+  it('runs on tick 121 (second valid window, (121-1)%120===0)', () => {
     const ctx = makeMockAIContext({
-      tick: 240,
+      tick: 121,
+      autocreateEnabled: true,
+    });
+    addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
+    ctx.houseCredits.set(House.USSR, 10000);
+    ctx.teamTypes.push(makeTeamType());
+    ctx.waypoints.set(0, { cx: 50, cy: 50 });
+
+    updateAIAutocreateTeams(ctx);
+
+    expect(ctx.entities.length).toBeGreaterThan(0);
+  });
+
+  it('runs on tick 241 (third valid window, (241-1)%120===0)', () => {
+    const ctx = makeMockAIContext({
+      tick: 241,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -206,7 +206,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('skips house when productionEnabled is false', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: false, iq: 3 });
@@ -221,7 +221,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('skips house when IQ < 2 (iq=0)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 0 });
@@ -236,7 +236,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('skips house when IQ < 2 (iq=1)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 1 });
@@ -251,7 +251,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('allows house when IQ is exactly 2 (boundary)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 2 });
@@ -266,7 +266,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('skips house when credits < 500', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -281,7 +281,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('allows house when credits are exactly 500 (boundary)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -296,7 +296,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 
   it('skips house when credits are not set (defaults to 0)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -317,7 +317,7 @@ describe('Gate conditions — autocreateEnabled, tick gating, house state', () =
 describe('Team selection — autocreate flag, house match, destroyed teams', () => {
   it('only considers teams with autocreate flag (flags & 4)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -333,7 +333,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
   it('accepts teams with autocreate flag plus other flags (flags=6 = suicide+autocreate)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -349,7 +349,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
   it('skips teams whose house does not match the AI house', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -365,7 +365,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
   it('matches team house via houseIdToHouse correctly (house=2 -> USSR)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -380,7 +380,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
   it('skips destroyed teams (in destroyedTeams set)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -396,7 +396,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
   it('can spawn multiple teams per house per cycle (C++ house.cpp:993)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -417,7 +417,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 
   it('skips destroyed team and spawns remaining eligible team', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -445,7 +445,7 @@ describe('Team selection — autocreate flag, house match, destroyed teams', () 
 describe('Spawn position — edge-based spawning', () => {
   it('north edge spawns at cy = boundsY (top of map bounds)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     ctx.map.setBounds(10, 20, 30, 40);
@@ -473,7 +473,7 @@ describe('Spawn position — edge-based spawning', () => {
 
   it('south edge spawns at cy = boundsY + boundsH - 1 (bottom of map bounds)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     ctx.map.setBounds(10, 20, 30, 40);
@@ -498,7 +498,7 @@ describe('Spawn position — edge-based spawning', () => {
 
   it('east edge spawns at cx = boundsX + boundsW - 1 (right of map bounds)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     ctx.map.setBounds(10, 20, 30, 40);
@@ -523,7 +523,7 @@ describe('Spawn position — edge-based spawning', () => {
 
   it('west edge spawns at cx = boundsX (left of map bounds)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     ctx.map.setBounds(10, 20, 30, 40);
@@ -549,7 +549,7 @@ describe('Spawn position — edge-based spawning', () => {
   it('edge string is case-insensitive (NORTH, North, NoRtH all work)', () => {
     for (const edgeStr of ['NORTH', 'North', 'NoRtH']) {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 1,
         autocreateEnabled: true,
       });
       ctx.map.setBounds(10, 20, 30, 40);
@@ -581,7 +581,7 @@ describe('Spawn position — edge-based spawning', () => {
 describe('Spawn position — waypoint fallback when no edge', () => {
   it('falls back to waypoint at team.origin when no edge is set', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -606,7 +606,7 @@ describe('Spawn position — waypoint fallback when no edge', () => {
 
   it('skips team when no edge and no waypoint at team.origin (continues to next team)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -628,7 +628,7 @@ describe('Spawn position — waypoint fallback when no edge', () => {
 
   it('produces no entities when no edge, no waypoint, and only one team', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -649,7 +649,7 @@ describe('Spawn position — waypoint fallback when no edge', () => {
 describe('Unit spawning — entity creation from team members', () => {
   it('creates correct number of entities per member (member.count)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -666,7 +666,7 @@ describe('Unit spawning — entity creation from team members', () => {
 
   it('spawns all members of a multi-member team', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -690,7 +690,7 @@ describe('Unit spawning — entity creation from team members', () => {
 
   it('skips invalid unit types (not in UNIT_STATS)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -712,7 +712,7 @@ describe('Unit spawning — entity creation from team members', () => {
 
   it('entities are added to both ctx.entities and ctx.entityById', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -733,7 +733,7 @@ describe('Unit spawning — entity creation from team members', () => {
 
   it('entity house matches the AI house, not the team house ID', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -750,7 +750,7 @@ describe('Unit spawning — entity creation from team members', () => {
 
   it('entity type matches member type', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -768,7 +768,7 @@ describe('Unit spawning — entity creation from team members', () => {
 
   it('entities spawn near world position with random offsets within [-24, +24]', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -800,7 +800,7 @@ describe('Unit spawning — entity creation from team members', () => {
 describe('Mission assignment — team missions, HUNT fallback, suicide override', () => {
   it('entities get teamMissions and teamMissionIndex=0 when team has missions', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -827,7 +827,7 @@ describe('Mission assignment — team missions, HUNT fallback, suicide override'
 
   it('entities get Mission.HUNT when team has no missions (empty array)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -846,7 +846,7 @@ describe('Mission assignment — team missions, HUNT fallback, suicide override'
 
   it('suicide flag (flags & 2) overrides mission to HUNT regardless of team missions', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -872,7 +872,7 @@ describe('Mission assignment — team missions, HUNT fallback, suicide override'
 
   it('non-suicide team with missions does not override mission to HUNT', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -897,7 +897,7 @@ describe('Mission assignment — team missions, HUNT fallback, suicide override'
 
   it('bodyFacing32 is set to facing * 4 for spawned entities', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -916,7 +916,7 @@ describe('Mission assignment — team missions, HUNT fallback, suicide override'
 
   it('facing is random integer 0-7 for spawned entities', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -943,7 +943,7 @@ describe('Mission assignment — team missions, HUNT fallback, suicide override'
 describe('Integration — scenario overrides and multi-house spawning', () => {
   it('applyScenarioOverrides is called for spawned entities (via spy)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -969,7 +969,7 @@ describe('Integration — scenario overrides and multi-house spawning', () => {
 
   it('multiple houses can each spawn one team per cycle', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
 
@@ -1002,7 +1002,7 @@ describe('Integration — scenario overrides and multi-house spawning', () => {
 
   it('handles no AI houses gracefully', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
 
@@ -1012,7 +1012,7 @@ describe('Integration — scenario overrides and multi-house spawning', () => {
 
   it('handles empty teamTypes array gracefully', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
@@ -1024,7 +1024,7 @@ describe('Integration — scenario overrides and multi-house spawning', () => {
 
   it('edge takes priority over waypoint when both are available', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     ctx.map.setBounds(10, 20, 30, 40);
@@ -1056,7 +1056,7 @@ describe('Integration — scenario overrides and multi-house spawning', () => {
 
   it('all team missions are deep-copied (not shared references)', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       autocreateEnabled: true,
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });

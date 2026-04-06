@@ -121,9 +121,15 @@ describe('minimap blip colors per house (hdata.cpp → radar.cpp:740)', () => {
     return 'unknown';
   }
 
-  it('all 12 TS House enum values have a minimap color entry', () => {
-    const houses = Object.values(House);
-    for (const h of houses) {
+  it('all original 12 TS House enum values have a minimap color entry', () => {
+    // C++ defines 12 house types with radar PCOLOR mappings (hdata.cpp:49-157).
+    // Multi1-8 are multiplayer slots that inherit color at runtime — not stored here.
+    const cppHouses = [
+      House.Spain, House.Greece, House.USSR, House.England, House.France,
+      House.Ukraine, House.Germany, House.Turkey, House.GoodGuy, House.BadGuy,
+      House.Neutral, House.Special,
+    ];
+    for (const h of cppHouses) {
       expect(TS_MINIMAP_COLOR[h], `${h} should have a minimap color`).toBeDefined();
     }
   });

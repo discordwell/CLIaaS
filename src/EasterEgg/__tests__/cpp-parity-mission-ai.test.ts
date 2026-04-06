@@ -414,7 +414,7 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
 
   it('hunt reverts to idle when no targets exist (C++ Random_Animate fallthrough)', () => {
     // C++ foot.cpp:657-688: if (!Target_Something_Nearby(THREAT_NORMAL)) Random_Animate()
-    // TS missionAI.ts:607: entity.mission = ctx.idleMission(entity)
+    // TS stays in HUNT and does Random_Animate — no explicit mission change.
     const hunter = makeEntity(UnitType.E1, House.USSR, 100, 100);
 
     const ctx = makeCtx({
@@ -425,8 +425,9 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     hunter.target = null;
     updateHunt(ctx, hunter);
 
-    // Should fall back to idle mission when no targets found
-    expect(hunter.mission).toBe(Mission.GUARD); // idleMission returns GUARD
+    // C++ Random_Animate fallthrough: unit stays in HUNT, no target acquired
+    expect(hunter.mission).toBe(Mission.HUNT);
+    expect(hunter.target).toBeNull();
   });
 
   it('hunt skips cloaked submarines (C++ techno.cpp:1467-1470)', () => {
@@ -462,7 +463,8 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
 
     // Infantry on hunt MUST NOT target spies
     expect(hunter.target).toBeNull();
-    expect(hunter.mission).toBe(Mission.GUARD); // falls to idle
+    // Hunt stays in HUNT (Random_Animate fallthrough), no idle transition
+    expect(hunter.mission).toBe(Mission.HUNT);
   });
 
   it('hunt dog CAN target enemy spy (C++ techno.cpp:1558)', () => {
@@ -517,14 +519,16 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     guard.lastGuardScan = 0; // allow scan
     updateGuard(ctx, guard);
 
-    // Should find the nearby enemy within weapon range
+    // C++ parity: guard fires inline via Firing_AI then restores GUARD.
+    // Target stays set for subsequent Firing_AI ticks.
     expect(guard.target).not.toBeNull();
-    expect(guard.mission).toBe(Mission.ATTACK);
+    expect(guard.mission).toBe(Mission.GUARD);
   });
 
   it('guard scan is rate-limited (C++ MissionControl Normal_Delay)', () => {
     // C++ foot.cpp:597: dtime = MissionControl[Mission].Normal_Delay()
-    // TS missionAI.ts:671-672: guardScanDelay = entity.stats.scanDelay ?? 15
+    // TS: rate limiting is done by the caller (index.ts) via timerFired parameter.
+    // When timerFired=false, the scan portion is skipped.
     const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const enemy = makeEntity(UnitType.E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
 
@@ -534,10 +538,10 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     });
 
     guard.mission = Mission.GUARD;
-    guard.lastGuardScan = 1; // scanned at tick 1, delay is 15
-    updateGuard(ctx, guard);
+    // Call with timerFired=false to simulate scan not yet due
+    updateGuard(ctx, guard, false);
 
-    // Should NOT scan yet (tick 5 - lastScan 1 = 4 < 15)
+    // Should NOT scan when timerFired is false
     expect(guard.target).toBeNull();
   });
 
@@ -703,8 +707,9 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
 
     // Dog can still target spy via normal Evaluate_Object path (sight=5 > 4 cells)
     // C++ techno.cpp:1558: dogs pass the spy check, so they proceed to normal evaluation
+    // C++ parity: guard fires inline then restores GUARD
     expect(dog.target).toBe(spy);
-    expect(dog.mission).toBe(Mission.ATTACK);
+    expect(dog.mission).toBe(Mission.GUARD);
   });
 
   it('dog ignores spy beyond guard range (C++ parity: dog guardRange=7)', () => {
@@ -740,8 +745,9 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
     updateGuard(ctx, guard);
 
     // Should target the normal enemy, NOT the spy
+    // C++ parity: guard fires inline then restores GUARD
     expect(guard.target).toBe(normalEnemy);
-    expect(guard.mission).toBe(Mission.ATTACK);
+    expect(guard.mission).toBe(Mission.GUARD);
   });
 
   it('V2 rocket launcher ignores spy (C++ techno.cpp:1557-1563)', () => {

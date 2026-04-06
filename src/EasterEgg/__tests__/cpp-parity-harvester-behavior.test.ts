@@ -78,6 +78,7 @@ import {
   House,
   Mission,
   UnitType,
+  Dir,
 } from '../engine/types';
 import { type MapStructure, STRUCTURE_MAX_HP } from '../engine/scenario';
 
@@ -435,25 +436,33 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
 // ============================================================================
 
 describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
-  it('unload is drip-feed: 1 bail per tick (C++ building.cpp:3758-3780)', () => {
-    // C++ building.cpp:3758-3780: Offload_Tiberium_Bail() decrements 1 bail per tick.
-    // TS now matches: 1 bail removed per tick with proportional credits deposited.
+  // Helper: pre-rotate harvester to DIR_W so dump starts immediately
+  function preRotateW(harv: Entity): void {
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
+  }
+
+  it('unload is lump-sum at end of 22-tick dump (C++ unit.cpp:2383)', () => {
+    // C++ unit.cpp:2348-2390: rotate to DIR_W, 22-stage dump, lump-sum Credit_Load() at end.
+    // Offload_Tiberium_Bail is #ifdef TOFIX'd out — returns 0 always.
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = 28;
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    // After 1 tick: 1 bail deposited
+    // After 1 tick: still 28 bails (lump-sum, not drip-feed)
     updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(27);
+    expect(harv.oreLoad).toBe(28);
     expect(harv.harvesterState).toBe('unloading');
 
-    // After 27 more ticks (28 total): all bails deposited
-    for (let i = 0; i < 27; i++) {
+    // After 21 more ticks (22 total): lump-sum deposit, all bails cleared
+    for (let i = 0; i < 21; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(0);
@@ -462,8 +471,7 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
   });
 
   it('unload deposits correct credit amount for all-gold load', () => {
-    // C++ drip-feed: 1 bail/tick, each bail deposits 25 credits (gold)
-    //   28 gold bails: 28 * 25 = 700 credits total
+    // C++ lump-sum: Credit_Load() = Gold * GoldValue = 28 * 25 = 700
     let deposited = 0;
     const map = makeMap();
     const ctx = makeContext({
@@ -474,12 +482,13 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = 28;
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    // Drip-feed: 28 ticks to unload all 28 bails
-    for (let i = 0; i < 28; i++) {
+    // 22-tick dump animation
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -487,8 +496,7 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
   });
 
   it('unload deposits correct credit amount for mixed gold/gem load', () => {
-    // C++ drip-feed: 1 bail/tick with proportional credit per bail
-    //   Example: 28 bails worth 900 credits → ~32.14 credits/bail
+    // C++ lump-sum: Credit_Load() = (Gold * GoldValue) + (Gems * GemValue) = 900
     let deposited = 0;
     const map = makeMap();
     const ctx = makeContext({
@@ -499,12 +507,13 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = 28;
     harv.oreCreditValue = 900;
     ctx.entities.push(harv);
 
-    // Drip-feed: 28 ticks to unload all bails
-    for (let i = 0; i < 28; i++) {
+    // 22-tick dump animation
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -513,17 +522,21 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
 
   it('after unload, harvester returns to idle (C++ assigns MISSION_HARVEST)', () => {
     // C++ unit.cpp:2389: Assign_Mission(MISSION_HARVEST) after unload
-    // TS: drip-feed completes when oreLoad reaches 0, then sets harvesterState = 'idle'
+    // TS: 22-tick dump completes → harvesterState = 'idle'
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
-    harv.oreLoad = 1; // only 1 bail left — completes in 1 tick
+    preRotateW(harv);
+    harv.oreLoad = 1;
     harv.oreCreditValue = 25;
     ctx.entities.push(harv);
 
-    updateHarvester(ctx, harv);
+    // Full 22-tick dump animation (even with 1 bail — animation length is fixed)
+    for (let i = 0; i < 22; i++) {
+      updateHarvester(ctx, harv);
+    }
 
     expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);
@@ -531,7 +544,7 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
   });
 
   it('AI harvester deposits into houseCredits (not addCredits)', () => {
-    // C++ drip-feed: AI harvester deposits per-bail into houseCredits map
+    // C++ lump-sum: AI harvester deposits full credit value at end of dump
     const houseCredits = new Map<House, number>();
     const map = makeMap();
     const ctx = makeContext({
@@ -542,12 +555,13 @@ describe('Unload mechanics — C++ Mission_Unload UNIT_HARVESTER', () => {
     const harv = makeHarvester(House.USSR, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
     ctx.entities.push(harv);
 
-    // Drip-feed: 10 ticks to unload 10 bails
-    for (let i = 0; i < 10; i++) {
+    // 22-tick dump animation
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -571,24 +585,27 @@ describe('OreDumpRate / OreTruckRate — rules.ini overrides C++ default', () =>
     expect(iniOverride).toBe(1);
   });
 
-  it('unload takes exactly oreLoad ticks (1 bail per tick, C++ drip-feed)', () => {
-    // C++ building.cpp:3758-3780: 1 bail per tick via Offload_Tiberium_Bail
-    // TS now matches: unload completes in exactly oreLoad ticks
+  it('unload takes exactly 22 ticks (fixed dump animation, C++ unit.cpp:2348-2390)', () => {
+    // C++ unit.cpp: 22-stage Harvester_Dump_List animation, lump-sum at end.
+    // Offload_Tiberium_Bail is #ifdef TOFIX'd — returns 0. Real credit is lump-sum.
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
     ctx.entities.push(harv);
 
-    // After 9 ticks, still unloading (1 bail left)
-    for (let i = 0; i < 9; i++) updateHarvester(ctx, harv);
+    // After 21 ticks, still unloading (dump animation not finished)
+    for (let i = 0; i < 21; i++) updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('unloading');
-    expect(harv.oreLoad).toBe(1);
+    expect(harv.oreLoad).toBe(10); // lump-sum, not decremented per tick
 
-    // Tick 10 completes unload
+    // Tick 22 completes unload
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);

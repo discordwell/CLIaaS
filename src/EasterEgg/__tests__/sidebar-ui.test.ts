@@ -3,7 +3,7 @@ import {
   PRODUCTION_ITEMS, type ProductionItem, type StripType,
   getStripSide, House, REPAIR_PERCENT, REPAIR_STEP,
   CONDITION_RED, CONDITION_YELLOW, CELL_SIZE,
-  WARHEAD_META, type WarheadType,
+  WARHEAD_META, type WarheadType, RESFACTOR,
 } from '../engine/types';
 import { STRUCTURE_SIZE, type MapStructure } from '../engine/scenario';
 import { Camera } from '../engine/camera';
@@ -815,24 +815,26 @@ describe('Sidebar Chrome — C++ TabShape Metallic Tabs', () => {
    * The TS renderer should NOT draw a flat edge line over these sprites.
    */
 
-  it('TAB_HEIGHT matches C++ TAB_HEIGHT (8 LORES)', () => {
-    // C++ tab.cpp:89 TAB_HEIGHT=8, scaled by RESFACTOR
-    expect(Renderer.TAB_HEIGHT).toBe(8);
+  it('TAB_HEIGHT matches C++ TAB_HEIGHT (8 LORES × RESFACTOR)', () => {
+    // C++ tab.cpp:89 TAB_HEIGHT=8, scaled by RESFACTOR (HIRES=2 → 16px)
+    expect(Renderer.TAB_HEIGHT).toBe(8 * RESFACTOR);
   });
 
   it('sidebar background covers full sidebar height below tab bar', () => {
-    // C++ sidebar.cpp:770-772: three shapes tile from y=8 to y=200 (LORES)
-    // side1na: y=8, h=80 (to y=88)
-    // side2na: y=88, h=50 (to y=138)
-    // side3na: y=138, h=62 (to y=200)
-    const top = Renderer.SIDEBAR_BG_TOP_Y;     // 8
-    const mid = Renderer.SIDEBAR_BG_MID_Y;     // 88
-    const bot = Renderer.SIDEBAR_BG_BOT_Y;     // 138
+    // C++ sidebar.cpp:770-772: three shapes tile from y=8 to y=200 (LORES),
+    // scaled by RESFACTOR for HIRES (×2).
+    // side1na: y=8*RF, h=80*RF (to y=88*RF)
+    // side2na: y=88*RF, h=50*RF (to y=138*RF)
+    // side3na: y=138*RF, h=62*RF (to y=200*RF)
+    const RF = RESFACTOR;
+    const top = Renderer.SIDEBAR_BG_TOP_Y;     // 8*RF
+    const mid = Renderer.SIDEBAR_BG_MID_Y;     // 88*RF
+    const bot = Renderer.SIDEBAR_BG_BOT_Y;     // 138*RF
     // Shapes tile seamlessly: top ends where mid starts, mid ends where bot starts
-    expect(mid).toBe(top + 80);  // side1 is 80px tall
-    expect(bot).toBe(mid + 50);  // side2 is 50px tall
-    // side3 is 62px tall, extending to 138+62=200 (full LORES height)
-    expect(bot + 62).toBe(200);
+    expect(mid).toBe(top + 80 * RF);  // side1 is 80*RF px tall
+    expect(bot).toBe(mid + 50 * RF);  // side2 is 50*RF px tall
+    // side3 is 62*RF px tall, extending to (138+62)*RF = 200*RF (full HIRES height)
+    expect(bot + 62 * RF).toBe(200 * RF);
   });
 
   it('credits strip Y is between radar and button row', () => {

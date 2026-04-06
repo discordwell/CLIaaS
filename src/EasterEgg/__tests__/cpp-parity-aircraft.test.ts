@@ -299,9 +299,14 @@ describe('Fixed-wing anti-circle breaker (aircraft.cpp 2s delay)', () => {
     yak.attackRunPhase = 'flyToTarget';
     yak.circleBreakTimer = 0;
 
-    // Simulate 31 ticks — hold facing fixed at N while target is S
+    // Simulate 31 ticks — hold facing fixed at N while target is S.
+    // Must reset bodyFacing32 and rotAccumulator too, since the 32-step
+    // rotation system accumulates through tickRotation() calls inside
+    // aircraftFlyInFacing and would eventually align facing with target.
     for (let i = 0; i < 31; i++) {
       yak.facing = Dir.N; // force-lock facing so alignment never happens
+      yak.bodyFacing32 = Dir.N * 4;
+      yak.rotAccumulator = 0;
       // Keep enemy in range by repositioning
       const dist = worldDist(yak.pos, enemy.pos);
       if (dist > (yak.weapon?.range ?? 5)) {

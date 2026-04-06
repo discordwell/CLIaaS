@@ -1119,7 +1119,7 @@ describe('AI Auto-Repair — updateAIRepair', () => {
 
   it('AI skips repair if house credits < 10', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
-    const chunk = aiSource.slice(idx, idx + 600);
+    const chunk = aiSource.slice(idx, idx + 800);
     expect(chunk).toContain('credits < 10');
   });
 
@@ -1151,7 +1151,8 @@ describe('AI Auto-Sell — updateAISellDamaged', () => {
   it('AI sell runs every 75 ticks (5 seconds)', () => {
     const idx = aiSource.indexOf('export function updateAISellDamaged');
     const chunk = aiSource.slice(idx, idx + 200);
-    expect(chunk).toContain('tick % 75 !== 0');
+    // C++ parity: uses (ctx.tick - 1) % 75 for frame-0 alignment
+    expect(chunk).toContain('% 75 !== 0');
   });
 
   it('AI sells structures at CONDITION_RED HP threshold', () => {
@@ -1646,14 +1647,16 @@ describe('Timing Constants', () => {
   it('AI sell check interval is 75 ticks (5 seconds)', () => {
     const idx = aiSource.indexOf('export function updateAISellDamaged');
     const chunk = aiSource.slice(idx, idx + 200);
-    expect(chunk).toContain('tick % 75 !== 0');
+    // C++ parity: TS tick starts at 1 (Frame starts at 0), so uses (ctx.tick - 1) % 75
+    expect(chunk).toContain('% 75 !== 0');
   });
 
   it('AI repair interval uses difficulty-scaled repairDelay (C++ house.cpp:295)', () => {
     const idx = aiSource.indexOf('export function updateAIRepair');
     const chunk = aiSource.slice(idx, idx + 600);
     expect(chunk).toContain('repairInterval');
-    expect(chunk).toContain('tick % repairInterval !== 0');
+    // C++ parity: uses (ctx.tick - 1) % repairInterval for frame-0 alignment
+    expect(chunk).toContain('% repairInterval !== 0');
   });
 
   it('Queen Ant self-heal interval is 14 ticks (C++ RepairRate)', () => {

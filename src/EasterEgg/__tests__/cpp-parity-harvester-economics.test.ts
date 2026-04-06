@@ -35,7 +35,7 @@ import * as path from 'path';
 
 import {
   CELL_SIZE, MAP_CELLS,
-  House, Mission, UnitType, AnimState,
+  House, Mission, UnitType, AnimState, Dir,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -708,12 +708,19 @@ describe('Ore growth rules (cell.cpp:2869-2884, map.cpp:1017)', () => {
 // 8. Refinery Unloading — building.cpp:3735-3778
 // =============================================================================
 
-describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
+describe('Refinery unloading matches C++ unit.cpp:2348-2390 (lump-sum)', () => {
+  // Helper: pre-rotate harvester to DIR_W so dump starts immediately
+  function preRotateW(harv: Entity): void {
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
+  }
+
   /**
-   * C++ building.cpp:3758-3780: drip-feed unload — 1 bail per tick.
-   * Offload_Tiberium_Bail() decrements Tiberium by 1 each tick.
+   * C++ unit.cpp:2348-2390: 22-stage dump animation, lump-sum Credit_Load() at end.
+   * Offload_Tiberium_Bail() is #ifdef TOFIX'd out — returns 0 always.
    */
-  it('full gold load: unloads BailCount * GoldValue credits via drip-feed', () => {
+  it('full gold load: unloads BailCount * GoldValue credits via lump-sum', () => {
     let totalDeposited = 0;
     const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const ctx = makeCtx({ addCredits });
@@ -721,23 +728,24 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = iniBailCount;
     harv.oreCreditValue = iniBailCount * iniGoldValue;
     ctx.entities.push(harv);
 
-    // Drip-feed: BailCount ticks to unload all bails
-    for (let i = 0; i < iniBailCount; i++) {
+    // 22-tick dump animation
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
-    expect(addCredits).toHaveBeenCalledTimes(iniBailCount);
+    expect(addCredits).toHaveBeenCalledTimes(1); // lump-sum, not per-bail
     expect(totalDeposited).toBe(iniBailCount * iniGoldValue);
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
     expect(harv.harvesterState).toBe('idle');
   });
 
-  it('full gem load: unloads BailCount * GemValue credits via drip-feed', () => {
+  it('full gem load: unloads BailCount * GemValue credits via lump-sum', () => {
     let totalDeposited = 0;
     const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const ctx = makeCtx({ addCredits });
@@ -745,11 +753,12 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = iniBailCount;
     harv.oreCreditValue = iniBailCount * iniGemValue;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < iniBailCount; i++) {
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -766,11 +775,12 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = iniBailCount;
     harv.oreCreditValue = iniBailCount * iniGoldValue;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < iniBailCount; i++) {
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -786,38 +796,42 @@ describe('Refinery unloading matches C++ building.cpp:3735-3778', () => {
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
 
-    // With 0 bails, first tick transitions immediately to idle
-    updateHarvester(ctx, harv);
+    // 22-tick dump animation even with 0 bails — no credits deposited
+    for (let i = 0; i < 22; i++) {
+      updateHarvester(ctx, harv);
+    }
 
     expect(addCredits).not.toHaveBeenCalled();
     expect(harv.harvesterState).toBe('idle');
   });
 
   /**
-   * C++ drip-feed: credits deposited starting from first tick.
+   * C++ lump-sum: no credits deposited until tick 22.
+   * First tick just starts the dump animation.
    */
-  it('drip-feed deposits credits starting from tick 1', () => {
+  it('no credits deposited during first tick (lump-sum at tick 22)', () => {
     const addCredits = vi.fn();
     const ctx = makeCtx({ addCredits });
 
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    preRotateW(harv);
     harv.oreLoad = iniBailCount;
     harv.oreCreditValue = iniBailCount * iniGoldValue;
     ctx.entities.push(harv);
 
-    // After 1 tick, 1 bail deposited
+    // After 1 tick: dump animation started, no credits yet
     updateHarvester(ctx, harv);
 
-    expect(addCredits).toHaveBeenCalledTimes(1);
-    expect(addCredits).toHaveBeenCalledWith(iniGoldValue);
+    expect(addCredits).not.toHaveBeenCalled();
     expect(harv.harvesterState).toBe('unloading');
-    expect(harv.oreLoad).toBe(iniBailCount - 1);
+    expect(harv.oreLoad).toBe(iniBailCount); // unchanged until lump-sum
   });
 });
 

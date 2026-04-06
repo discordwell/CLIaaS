@@ -36,7 +36,7 @@ import {
 } from '../engine/production';
 import {
   type ProductionItem, type House, type Faction, type WorldPos,
-  Mission, UnitType, CELL_SIZE,
+  Mission, UnitType, CELL_SIZE, worldToCell,
 } from '../engine/types';
 import { Entity } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
@@ -423,10 +423,11 @@ describe('C++ parity: AREA_GUARD sets archiveTarget for leash (building.cpp:2039
     expect(ctx.entities.length).toBe(1);
     const unit = ctx.entities[0];
     // C++: ArchiveTarget = Where_To_Go() — the leash return point
-    // TS: archiveTarget = rally position
+    // TS: archiveTarget = worldToCell(rally position) — stored as CellPos
     expect(unit.archiveTarget).toBeDefined();
-    expect(unit.archiveTarget!.x).toBe(rallyPos.x);
-    expect(unit.archiveTarget!.y).toBe(rallyPos.y);
+    const expectedCell = worldToCell(rallyPos.x, rallyPos.y);
+    expect(unit.archiveTarget!.cx).toBe(expectedCell.cx);
+    expect(unit.archiveTarget!.cy).toBe(expectedCell.cy);
   });
 
   it('rally-pointed unit has guardOrigin at rally position', () => {

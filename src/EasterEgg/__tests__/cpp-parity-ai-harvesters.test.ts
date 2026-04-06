@@ -55,7 +55,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -102,8 +102,8 @@ const HARV_COST = PRODUCTION_ITEMS.find(p => p.type === 'HARV')!.cost;
 // =============================================================================
 
 describe('tick gating — C++ HouseClass::AI() runs harvester check every 60 ticks', () => {
-  it('does nothing on tick 1 (not divisible by 60)', () => {
-    const ctx = makeMockAIContext({ tick: 1 });
+  it('does nothing on tick 2 (not aligned: (2-1)%60 !== 0)', () => {
+    const ctx = makeMockAIContext({ tick: 2 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
     state.harvesterCount = 99; // sentinel value
     updateAIHarvesters(ctx);
@@ -118,32 +118,32 @@ describe('tick gating — C++ HouseClass::AI() runs harvester check every 60 tic
     expect(state.harvesterCount).toBe(99);
   });
 
-  it('runs on tick 0 (0 % 60 === 0)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('runs on tick 1 ((1-1) % 60 === 0, TS 1-based ticks)', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
     state.harvesterCount = 99;
     updateAIHarvesters(ctx);
     expect(state.harvesterCount).toBe(0); // reset to 0, no harvesters in entities
   });
 
-  it('runs on tick 60', () => {
-    const ctx = makeMockAIContext({ tick: 60 });
-    const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
-    state.harvesterCount = 99;
-    updateAIHarvesters(ctx);
-    expect(state.harvesterCount).toBe(0);
-  });
-
-  it('runs on tick 120', () => {
-    const ctx = makeMockAIContext({ tick: 120 });
-    const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
-    state.harvesterCount = 99;
-    updateAIHarvesters(ctx);
-    expect(state.harvesterCount).toBe(0);
-  });
-
-  it('does nothing on tick 61', () => {
+  it('runs on tick 61', () => {
     const ctx = makeMockAIContext({ tick: 61 });
+    const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
+    state.harvesterCount = 99;
+    updateAIHarvesters(ctx);
+    expect(state.harvesterCount).toBe(0);
+  });
+
+  it('runs on tick 121', () => {
+    const ctx = makeMockAIContext({ tick: 121 });
+    const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
+    state.harvesterCount = 99;
+    updateAIHarvesters(ctx);
+    expect(state.harvesterCount).toBe(0);
+  });
+
+  it('does nothing on tick 62', () => {
+    const ctx = makeMockAIContext({ tick: 62 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
     state.harvesterCount = 99;
     updateAIHarvesters(ctx);
@@ -157,7 +157,7 @@ describe('tick gating — C++ HouseClass::AI() runs harvester check every 60 tic
 
 describe('harvester count resets to 0 each call — C++ HouseClass::AI_Harvester()', () => {
   it('resets harvesterCount from a previous nonzero value', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
     state.harvesterCount = 5;
     updateAIHarvesters(ctx);
@@ -165,7 +165,7 @@ describe('harvester count resets to 0 each call — C++ HouseClass::AI_Harvester
   });
 
   it('harvesterCount stays 0 when already 0 and no harvesters exist', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: true });
     state.harvesterCount = 0;
     updateAIHarvesters(ctx);
@@ -179,7 +179,7 @@ describe('harvester count resets to 0 each call — C++ HouseClass::AI_Harvester
 
 describe('counts alive V_HARV entities matching house — C++ house.cpp unit scan', () => {
   it('counts 1 alive harvester for USSR', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     const harv = makeHarvester(House.USSR);
     ctx.entities.push(harv);
@@ -188,7 +188,7 @@ describe('counts alive V_HARV entities matching house — C++ house.cpp unit sca
   });
 
   it('counts 3 alive harvesters for USSR', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeHarvester(House.USSR));
     ctx.entities.push(makeHarvester(House.USSR));
@@ -204,7 +204,7 @@ describe('counts alive V_HARV entities matching house — C++ house.cpp unit sca
 
 describe('dead harvesters excluded from count — C++ checks IsActive/Strength', () => {
   it('dead V_HARV is not counted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     const dead = makeHarvester(House.USSR, false);
     ctx.entities.push(dead);
@@ -213,7 +213,7 @@ describe('dead harvesters excluded from count — C++ checks IsActive/Strength',
   });
 
   it('mix of alive and dead: only alive counted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeHarvester(House.USSR, true));
     ctx.entities.push(makeHarvester(House.USSR, false));
@@ -229,7 +229,7 @@ describe('dead harvesters excluded from count — C++ checks IsActive/Strength',
 
 describe('harvesters from other houses excluded — C++ checks Owner==this', () => {
   it('Spain harvesters not counted for USSR AI', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeHarvester(House.Spain));
     updateAIHarvesters(ctx);
@@ -237,7 +237,7 @@ describe('harvesters from other houses excluded — C++ checks Owner==this', () 
   });
 
   it('Ukraine harvesters not counted for USSR AI', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeHarvester(House.Ukraine));
     updateAIHarvesters(ctx);
@@ -251,7 +251,7 @@ describe('harvesters from other houses excluded — C++ checks Owner==this', () 
 
 describe('non-V_HARV unit types excluded — C++ checks UNIT_HARVESTER type', () => {
   it('V_1TNK not counted as harvester', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeVehicle(UnitType.V_1TNK, House.USSR));
     updateAIHarvesters(ctx);
@@ -259,7 +259,7 @@ describe('non-V_HARV unit types excluded — C++ checks UNIT_HARVESTER type', ()
   });
 
   it('I_E1 infantry not counted as harvester', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeVehicle(UnitType.I_E1, House.USSR));
     updateAIHarvesters(ctx);
@@ -273,7 +273,7 @@ describe('non-V_HARV unit types excluded — C++ checks UNIT_HARVESTER type', ()
 
 describe('refineryCount updated via aiCountStructure(PROC) — C++ house.cpp', () => {
   it('refineryCount = 1 with one alive PROC', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR));
     updateAIHarvesters(ctx);
@@ -281,7 +281,7 @@ describe('refineryCount updated via aiCountStructure(PROC) — C++ house.cpp', (
   });
 
   it('refineryCount = 2 with two alive PROCs', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('PROC', House.USSR, 55, 55));
@@ -290,7 +290,7 @@ describe('refineryCount updated via aiCountStructure(PROC) — C++ house.cpp', (
   });
 
   it('refineryCount = 0 with no PROCs', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     updateAIHarvesters(ctx);
     expect(ctx.aiStates.get(House.USSR)!.refineryCount).toBe(0);
@@ -303,7 +303,7 @@ describe('refineryCount updated via aiCountStructure(PROC) — C++ house.cpp', (
 
 describe('dead PROC structures excluded — C++ checks IsActive', () => {
   it('dead PROC not counted in refineryCount', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50, { alive: false }));
     updateAIHarvesters(ctx);
@@ -311,7 +311,7 @@ describe('dead PROC structures excluded — C++ checks IsActive', () => {
   });
 
   it('mix of alive and dead PROCs: only alive counted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50, { alive: true }));
     ctx.structures.push(makeStructure('PROC', House.USSR, 55, 55, { alive: false }));
@@ -326,7 +326,7 @@ describe('dead PROC structures excluded — C++ checks IsActive', () => {
 
 describe('productionEnabled gate — C++ HouseClass::AI_Harvester() skips force-produce', () => {
   it('does not force-produce when productionEnabled=false even with all conditions met', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: false });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -343,7 +343,7 @@ describe('productionEnabled gate — C++ HouseClass::AI_Harvester() skips force-
 
 describe('force-produce requires harvesterCount=0 AND refineryCount>0 AND WEAP>0 — C++ house.cpp', () => {
   it('force-produces when all conditions met', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -361,7 +361,7 @@ describe('force-produce requires harvesterCount=0 AND refineryCount>0 AND WEAP>0
 
 describe('no force-produce with existing harvester — C++ only when CurHarvesters==0', () => {
   it('does not force-produce when 1 alive harvester exists', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.entities.push(makeHarvester(House.USSR));
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
@@ -379,7 +379,7 @@ describe('no force-produce with existing harvester — C++ only when CurHarveste
 
 describe('no force-produce without refinery — C++ checks CurRefinery > 0', () => {
   it('does not force-produce when no PROC exists', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     // WEAP exists, credits exist, no harvesters, but no PROC
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -395,7 +395,7 @@ describe('no force-produce without refinery — C++ checks CurRefinery > 0', () 
 
 describe('no force-produce without WEAP — C++ checks war factory exists', () => {
   it('does not force-produce when no WEAP exists', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     // PROC exists, credits exist, no harvesters, but no WEAP
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
@@ -415,7 +415,7 @@ describe('credits check — C++ checks Available_Money() >= cost', () => {
   });
 
   it('force-produces when credits exactly equal HARV cost', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -426,7 +426,7 @@ describe('credits check — C++ checks Available_Money() >= cost', () => {
   });
 
   it('force-produces when credits exceed HARV cost', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -443,7 +443,7 @@ describe('credits check — C++ checks Available_Money() >= cost', () => {
 
 describe('insufficient credits prevent force-produce — C++ cost gate', () => {
   it('does not force-produce when credits < HARV cost', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -453,7 +453,7 @@ describe('insufficient credits prevent force-produce — C++ cost gate', () => {
   });
 
   it('does not force-produce with 0 credits', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -463,7 +463,7 @@ describe('insufficient credits prevent force-produce — C++ cost gate', () => {
   });
 
   it('does not force-produce when credits map has no entry for house (defaults to 0)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -479,7 +479,7 @@ describe('insufficient credits prevent force-produce — C++ cost gate', () => {
 
 describe('successful force-produce creates V_HARV entity — C++ HouseClass::AI_Harvester()', () => {
   it('spawned entity is V_HARV type', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -490,7 +490,7 @@ describe('successful force-produce creates V_HARV entity — C++ HouseClass::AI_
   });
 
   it('spawned entity belongs to the correct house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -500,7 +500,7 @@ describe('successful force-produce creates V_HARV entity — C++ HouseClass::AI_
   });
 
   it('spawned entity is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -516,7 +516,7 @@ describe('successful force-produce creates V_HARV entity — C++ HouseClass::AI_
 
 describe('credit deduction — C++ deducts exactly harvItem.cost', () => {
   it('deducts exactly 1400 credits after force-produce', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -526,7 +526,7 @@ describe('credit deduction — C++ deducts exactly harvItem.cost', () => {
   });
 
   it('credits reach 0 when starting with exactly HARV cost', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -536,7 +536,7 @@ describe('credit deduction — C++ deducts exactly harvItem.cost', () => {
   });
 
   it('credits unchanged when force-produce does not happen', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     // Has harvester -> no force-produce
     ctx.entities.push(makeHarvester(House.USSR));
@@ -554,7 +554,7 @@ describe('credit deduction — C++ deducts exactly harvItem.cost', () => {
 
 describe('force-produced harvester added to ctx.entities — C++ ObjectClass::Limbo()', () => {
   it('entities array grows by 1 after force-produce', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -565,7 +565,7 @@ describe('force-produced harvester added to ctx.entities — C++ ObjectClass::Li
   });
 
   it('force-produced harvester is also in entityById map', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));
@@ -582,7 +582,7 @@ describe('force-produced harvester added to ctx.entities — C++ ObjectClass::Li
 
 describe('multiple AI houses tracked independently — C++ per-house iteration', () => {
   it('USSR and Ukraine get independent harvester counts', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     addAIHouse(ctx, House.Ukraine, { productionEnabled: true });
     // 2 USSR harvesters, 1 Ukraine harvester
@@ -595,7 +595,7 @@ describe('multiple AI houses tracked independently — C++ per-house iteration',
   });
 
   it('USSR and Ukraine get independent refinery counts', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     addAIHouse(ctx, House.Ukraine, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
@@ -607,7 +607,7 @@ describe('multiple AI houses tracked independently — C++ per-house iteration',
   });
 
   it('force-produce only for house that lost all harvesters', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     addAIHouse(ctx, House.Ukraine, { productionEnabled: true });
     // USSR has a harvester, Ukraine does not
@@ -634,7 +634,7 @@ describe('multiple AI houses tracked independently — C++ per-house iteration',
 
 describe('counting always occurs even when productionEnabled=false — C++ house.cpp', () => {
   it('harvesterCount updated when productionEnabled=false', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: false });
     ctx.entities.push(makeHarvester(House.USSR));
     ctx.entities.push(makeHarvester(House.USSR));
@@ -643,7 +643,7 @@ describe('counting always occurs even when productionEnabled=false — C++ house
   });
 
   it('refineryCount updated when productionEnabled=false', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { productionEnabled: false });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     updateAIHarvesters(ctx);
@@ -658,7 +658,7 @@ describe('counting always occurs even when productionEnabled=false — C++ house
 describe('edge cases — missing HARV in production items, WEAP dead, etc.', () => {
   it('no force-produce when scenarioProductionItems has no HARV entry', () => {
     const ctx = makeMockAIContext({
-      tick: 0,
+      tick: 1,
       scenarioProductionItems: PRODUCTION_ITEMS.filter(p => p.type !== 'HARV'),
     });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
@@ -671,7 +671,7 @@ describe('edge cases — missing HARV in production items, WEAP dead, etc.', () 
   });
 
   it('dead WEAP does not count — no force-produce', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55, { alive: false }));
@@ -681,7 +681,7 @@ describe('edge cases — missing HARV in production items, WEAP dead, etc.', () 
   });
 
   it('other-house WEAP does not satisfy own force-produce condition', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('WEAP', House.Ukraine, 55, 55)); // wrong house
@@ -691,7 +691,7 @@ describe('edge cases — missing HARV in production items, WEAP dead, etc.', () 
   });
 
   it('other-house PROC does not satisfy own refinery count', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { productionEnabled: true });
     ctx.structures.push(makeStructure('PROC', House.Ukraine, 50, 50)); // wrong house
     ctx.structures.push(makeStructure('WEAP', House.USSR, 55, 55));

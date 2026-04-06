@@ -419,9 +419,9 @@ describe('AnimState enum — audit', () => {
     expect(AnimState.HARVEST).toBe('HARVEST');
   });
 
-  it('TS AnimState count = 8 (4 core + 4 C++ parity)', () => {
+  it('TS AnimState count = 11 (4 core + 7 C++ parity: GUARD_IDLE, AREA_GUARD_IDLE, PRONE, HARVEST, LIE_DOWN, GET_UP, GESTURE)', () => {
     const stateCount = Object.values(AnimState).length;
-    expect(stateCount).toBe(8);
+    expect(stateCount).toBe(11);
   });
 });
 

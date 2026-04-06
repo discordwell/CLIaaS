@@ -459,11 +459,14 @@ function auditSpawnCheck(
             message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of (${origin.entryCell.cx},${origin.entryCell.cy})`,
           });
         }
-        if (entity.mission !== Mission.MOVE || !entity.moveTarget || !cellsEqual(worldToCell(entity.moveTarget.x, entity.moveTarget.y), origin.cell)) {
+        // C++ parity: aircraft transports with TMISSION_UNLOAD get Mission.UNLOAD
+        // (not Mission.MOVE). Both should have moveTarget pointing at the origin cell.
+        const validMission = entity.mission === Mission.MOVE || entity.mission === Mission.UNLOAD;
+        if (!validMission || !entity.moveTarget || !cellsEqual(worldToCell(entity.moveTarget.x, entity.moveTarget.y), origin.cell)) {
           issues.push({
             severity: 'error',
             code: 'aircraft-spawn-target-mismatch',
-            message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" did not start with MOVE toward (${origin.cell.cx},${origin.cell.cy})`,
+            message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" did not start with MOVE/UNLOAD toward (${origin.cell.cx},${origin.cell.cy})`,
           });
         }
       } else if (!cellsEqual(cell, origin.cell)) {

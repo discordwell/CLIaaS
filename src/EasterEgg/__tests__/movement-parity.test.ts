@@ -120,10 +120,14 @@ describe('MV2: damageSpeedFactor has single tier at 50% HP', () => {
     tank.rotTickedThisFrame = false;
     tank.moveToward({ x: 300, y: 100 }, speed);
 
-    // C++ lepton accumulator quantizes: floor(8/LP)=85 leptons, 85/10=8 steps, 80*LP=7.5
+    // C++ vehicle SpeedAccum + Coord_Move: floor(8/LP)=85, speedAdd=floor(85*255/256)=84
+    // actual=84, 84%10=4, moveLeptons=80. Cardinal: (80*127)>>7=79 → 79*LP=7.40625
     const moved = tank.pos.x - startX;
-    const expectedLeptons = Math.floor(speed / LP);
-    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    const maxSpeedLeptons = Math.floor(speed / LP);
+    const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+    const moveLeptons = speedAdd - (speedAdd % PIXEL_LEPTON_W);
+    const axisLeptons = (moveLeptons * 127) >> 7;
+    const expectedMove = axisLeptons * LP;
     expect(moved).toBeCloseTo(expectedMove, 1);
   });
 });
@@ -270,10 +274,14 @@ describe('MV8: speedFraction default is 1.0 (no arbitrary halving)', () => {
     tank.rotTickedThisFrame = false;
     tank.moveToward(target, speed);
 
-    // C++ lepton accumulator: floor(8/LP)=85 leptons, 85/10=8 steps, 80*LP=7.5
+    // C++ vehicle SpeedAccum + Coord_Move: floor(8/LP)=85, speedAdd=floor(85*255/256)=84
+    // actual=84, 84%10=4, moveLeptons=80. Cardinal: (80*127)>>7=79 → 79*LP=7.40625
     const moved = tank.pos.x - startX;
-    const expectedLeptons = Math.floor(speed / LP);
-    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    const maxSpeedLeptons = Math.floor(speed / LP);
+    const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+    const moveLeptons = speedAdd - (speedAdd % PIXEL_LEPTON_W);
+    const axisLeptons = (moveLeptons * 127) >> 7;
+    const expectedMove = axisLeptons * LP;
     expect(moved).toBeCloseTo(expectedMove, 1);
   });
 
@@ -289,11 +297,16 @@ describe('MV8: speedFraction default is 1.0 (no arbitrary halving)', () => {
     tank.rotTickedThisFrame = false;
     tank.moveToward(target, speed);
 
-    // C++ lepton accumulator: effectiveSpeed = 8*1.5=12, floor(12/LP)=128, 128/10=12 steps, 120*LP=11.25
+    // C++ vehicle SpeedAccum + Coord_Move: effectiveSpeed=8*1.5=12
+    // floor(12/LP)=128, speedAdd=floor(128*255/256)=127
+    // actual=127, 127%10=7, moveLeptons=120. Cardinal: (120*127)>>7=119 → 119*LP=11.15625
     const moved = tank.pos.x - startX;
     const effectiveSpeed = speed * 1.5;
-    const expectedLeptons = Math.floor(effectiveSpeed / LP);
-    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    const maxSpeedLeptons = Math.floor(effectiveSpeed / LP);
+    const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+    const moveLeptons = speedAdd - (speedAdd % PIXEL_LEPTON_W);
+    const axisLeptons = (moveLeptons * 127) >> 7;
+    const expectedMove = axisLeptons * LP;
     expect(moved).toBeCloseTo(expectedMove, 1);
   });
 });

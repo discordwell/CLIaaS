@@ -26,14 +26,16 @@ describe('moveToward — overshoot prevention', () => {
   });
 
   it('snaps to target when within 0.5px threshold', () => {
-    const inf = new Entity(UnitType.I_E1, House.Spain, 100.3, 100.2);
-    const target = { x: 100, y: 100 };
+    // Use lepton-aligned coordinates: 96/LP=1024 (exact), so pos matches exactly.
+    // Entity at 96.3, target at 96. Distance 0.3 < 1.5 (infantry snap=16 leptons).
+    const inf = new Entity(UnitType.I_E1, House.Spain, 96.3, 96.2);
+    const target = { x: 96, y: 96 }; // lepton-aligned: 96/LP = 1024
 
     inf.rotTickedThisFrame = false;
     const arrived = inf.moveToward(target, 1);
 
-    expect(inf.pos.x).toBe(100);
-    expect(inf.pos.y).toBe(100);
+    expect(inf.pos.x).toBe(96);
+    expect(inf.pos.y).toBe(96);
     expect(arrived).toBe(true);
   });
 

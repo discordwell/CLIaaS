@@ -73,9 +73,10 @@ describe('C++ parity: aircraft curved flight path', () => {
     // facing — NOT the direction to the target. When facing EAST but target is
     // SOUTH, the aircraft moves EAST on the first tick.
     it('TRAN facing EAST with target SOUTH moves EAST on first tick', () => {
-      const startX = 500;
-      const startY = 500;
-      const entity = makeAircraft('TRAN', House.USSR, startX, startY);
+      const entity = makeAircraft('TRAN', House.USSR, 500, 500);
+      // Read lepton-aligned position after construction
+      const startX = entity.pos.x;
+      const startY = entity.pos.y;
 
       // Set current facing to EAST
       setFacing(entity, Dir.E);
@@ -103,9 +104,10 @@ describe('C++ parity: aircraft curved flight path', () => {
     });
 
     it('HIND facing NORTH with target WEST moves NORTH on first tick', () => {
-      const startX = 500;
-      const startY = 500;
-      const entity = makeAircraft('HIND', House.USSR, startX, startY);
+      const entity = makeAircraft('HIND', House.USSR, 500, 500);
+      // Read lepton-aligned position after construction
+      const startX = entity.pos.x;
+      const startY = entity.pos.y;
 
       setFacing(entity, Dir.N);
       entity.desiredFacing = Dir.W;
@@ -284,6 +286,9 @@ describe('C++ parity: aircraft curved flight path', () => {
     // and exact 45-degree movement for diagonals.
     it('aircraft facing SE moves at 45 degrees (equal X and Y delta)', () => {
       const entity = makeAircraft('TRAN', House.USSR, 500, 500);
+      // Read lepton-aligned position after construction
+      const startX = entity.pos.x;
+      const startY = entity.pos.y;
       setFacing(entity, Dir.SE);
 
       // Target far to the southeast (aligned with facing)
@@ -293,8 +298,8 @@ describe('C++ parity: aircraft curved flight path', () => {
       entity.rotTickedThisFrame = false;
       entity.moveToward(target, speedPx);
 
-      const dx = entity.pos.x - 500;
-      const dy = entity.pos.y - 500;
+      const dx = entity.pos.x - startX;
+      const dy = entity.pos.y - startY;
 
       // SE movement: dx and dy should be equal (45-degree diagonal)
       // C++ uses integer sin/cos lookup giving cos(45°) = 0.707 factor
@@ -305,16 +310,19 @@ describe('C++ parity: aircraft curved flight path', () => {
 
     it('aircraft facing N moves only in Y axis', () => {
       const entity = makeAircraft('TRAN', House.USSR, 500, 500);
+      // Read lepton-aligned position after construction
+      const startX = entity.pos.x;
+      const startY = entity.pos.y;
       setFacing(entity, Dir.N);
 
-      const target: WorldPos = { x: 500, y: 0 };
+      const target: WorldPos = { x: startX, y: 0 };
       const speedPx = UNIT_STATS['TRAN'].speed * MPH_TO_PX;
 
       entity.rotTickedThisFrame = false;
       entity.moveToward(target, speedPx);
 
-      const dx = entity.pos.x - 500;
-      const dy = entity.pos.y - 500;
+      const dx = entity.pos.x - startX;
+      const dy = entity.pos.y - startY;
 
       // Pure north: X should be unchanged, Y should decrease
       expect(Math.abs(dx)).toBeLessThan(0.001);

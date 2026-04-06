@@ -30,35 +30,35 @@ describe('Game tick rate matches C++ TICKS_PER_SECOND=15', () => {
     expect(GAME_TICKS_PER_SEC).toBe(15);
   });
 
-  it('MPH_TO_PX conversion matches C++ PIXEL_LEPTON_W inverse', () => {
-    // C++ display.h: PIXEL_LEPTON_W = ICON_LEPTON_W / ICON_PIXEL_W = 256/24 ≈ 10.67
-    // Our conversion: MPH_TO_PX = CELL_SIZE / LEPTON_SIZE = 24/256 = 1/PIXEL_LEPTON_W
-    const CPP_PIXEL_LEPTON_W = LEPTON_SIZE / CELL_SIZE; // 256/24 ≈ 10.67
-    expect(MPH_TO_PX).toBeCloseTo(1 / CPP_PIXEL_LEPTON_W, 6);
-    expect(MPH_TO_PX).toBeCloseTo(0.09375, 6);
+  it('MPH_TO_PX conversion matches C++ Speed percentage scaling', () => {
+    // C++ techno.cpp:6287: MaxSpeed = (Speed * 256) / 100  (_Scale_To_256)
+    // Then movement: Coord_Move uses MaxSpeed leptons/tick → MaxSpeed * (CELL_SIZE/256) px/tick
+    // Combined: px/tick = Speed * (256/100) * (CELL_SIZE/256) = Speed * CELL_SIZE/100
+    // MPH_TO_PX = CELL_SIZE / 100 = 0.24
+    expect(MPH_TO_PX).toBeCloseTo(CELL_SIZE / 100, 6);
+    expect(MPH_TO_PX).toBeCloseTo(0.24, 6);
   });
 
   it('1TNK movement: pixels/sec matches C++ at 15fps', () => {
     const stats = UNIT_STATS[UnitType.V_1TNK];
-    // C++ drive.cpp:671: actual = SpeedAccum + maxspeed * fixed(Speed, 256)
-    // At full speed (Speed=255): maxspeed * 255/256 ≈ maxspeed
-    // Distance per tick ≈ maxspeed leptons → maxspeed * MPH_TO_PX pixels
+    // C++ Speed is a percentage (0-100): Speed=9 → MaxSpeed = floor(9*256/100) = 23 leptons/tick
+    // px/tick = Speed * MPH_TO_PX = 9 * 0.24 = 2.16
     const pxPerTick = stats.speed * MPH_TO_PX;
     const pxPerSec = pxPerTick * GAME_TICKS_PER_SEC;
     const cellsPerSec = pxPerSec / CELL_SIZE;
 
-    // 1TNK Speed=9: 9 * 0.09375 * 15 = 12.656 px/sec = 0.527 cells/sec
-    expect(pxPerTick).toBeCloseTo(0.844, 2);
-    expect(pxPerSec).toBeCloseTo(12.656, 1);
-    expect(cellsPerSec).toBeCloseTo(0.527, 2);
+    // 1TNK Speed=9: 9 * 0.24 = 2.16 px/tick, 32.4 px/sec, 1.35 cells/sec
+    expect(pxPerTick).toBeCloseTo(2.16, 2);
+    expect(pxPerSec).toBeCloseTo(32.4, 1);
+    expect(cellsPerSec).toBeCloseTo(1.35, 2);
   });
 
   it('E1 infantry movement: cells/sec at default speed', () => {
     const stats = UNIT_STATS[UnitType.I_E1];
     const pxPerTick = stats.speed * MPH_TO_PX;
     const cellsPerSec = (pxPerTick * GAME_TICKS_PER_SEC) / CELL_SIZE;
-    // E1 Speed=4: 4 * 0.09375 * 15 / 24 = 0.234375 cells/sec
-    expect(cellsPerSec).toBeCloseTo(0.234375, 3);
+    // E1 Speed=4: 4 * 0.24 * 15 / 24 = 0.6 cells/sec
+    expect(cellsPerSec).toBeCloseTo(0.6, 3);
   });
 
   it('tickInterval is ~66.67ms (1000/15)', () => {

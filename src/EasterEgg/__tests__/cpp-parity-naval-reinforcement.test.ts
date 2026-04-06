@@ -148,8 +148,9 @@ describe('Naval reinforcement — C++ parity', () => {
       const map = new GameMap();
       map.setBounds(MAP_BOUNDS.x, MAP_BOUNDS.y, MAP_BOUNDS.w, MAP_BOUNDS.h);
       // Set water at (25, boundsY) — the inside cell adjacent to north edge spawn
-      // C++ Good_Reinforcement_Cell checks incell (inside boundary) for passability
+      // C++ Good_Reinforcement_Cell checks BOTH incell (inside boundary) AND outcell (outside boundary)
       map.setTerrain(25, MAP_BOUNDS.y, Terrain.WATER);
+      map.setTerrain(25, MAP_BOUNDS.y - 1, Terrain.WATER); // outside cell must also be water
 
       const edgeCell = calculateHouseEdgeSpawnCell(
         House.USSR, houseEdges, MAP_BOUNDS, originWp,

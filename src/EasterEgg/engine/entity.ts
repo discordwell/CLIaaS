@@ -206,12 +206,13 @@ export class Entity {
   prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
 
   /** Set pixel position and sync integer lepton coordinates. Use for teleports, spawns,
-   *  and any direct position assignment (NOT movement — movement writes leptons directly). */
+   *  and any direct position assignment (NOT movement — movement writes leptons directly).
+   *  C++ parity: all positions are lepton-quantized. Pixel pos is derived from leptons. */
   setPosition(x: number, y: number): void {
-    this.pos.x = x;
-    this.pos.y = y;
     this.leptonX = Math.round(x / LP);
     this.leptonY = Math.round(y / LP);
+    this.pos.x = this.leptonX * LP;
+    this.pos.y = this.leptonY * LP;
   }
 
   /** Sync pixel pos from lepton coordinates. Called after lepton-space movement. */
@@ -426,9 +427,11 @@ export class Entity {
     this.type = type;
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;
     this.house = house;
-    this.pos = { x, y };
+    // C++ parity: all positions are stored as integer lepton coordinates.
+    // Pixel position is always derived from leptons to avoid sub-lepton drift.
     this.leptonX = Math.round(x / LP);
     this.leptonY = Math.round(y / LP);
+    this.pos = { x: this.leptonX * LP, y: this.leptonY * LP };
     this.hp = this.stats.strength;
     this.maxHp = this.stats.strength;
     this.weapon = this.stats.primaryWeapon
@@ -1163,7 +1166,14 @@ export class Entity {
       this.syncPosFromLeptons();
 
       const steppedL = Math.abs(stepLX) + Math.abs(stepLY);
-      return steppedL >= distLeptonsTotal - 16;
+      if (steppedL >= distLeptonsTotal - 16) {
+        // Close enough to arrive — snap to target (C++ Per_Cell_Process handles this)
+        this.setPosition(target.x, target.y);
+        this.speedAccum = 0;
+        this.isDriving = false;
+        return true;
+      }
+      return false;
     }
 
     // --- Vehicle / aircraft path: SpeedAccum lepton accumulator ---
@@ -1204,7 +1214,11 @@ export class Entity {
     // Use DIR_DX/DIR_DY lookup (matching the 8-direction facing) for the movement
     // direction, with sqrt(2) correction for diagonals.
     // Integer lepton movement for vehicles/aircraft (C++ drive.cpp / fly.cpp)
-    const face = this.desiredFacing;
+    // C++ fly.cpp:88: Coord_Move uses PrimaryFacing.Current() — the aircraft's
+    // current facing, not the desired facing toward the target. This creates the
+    // characteristic curved flight paths. For vehicles, facing === desiredFacing
+    // here because they stop-rotate-move (line 1127).
+    const face = this.facing;
     const fdx = DIR_DX[face];
     const fdy = DIR_DY[face];
     const isDiagonal = fdx !== 0 && fdy !== 0;
@@ -1217,8 +1231,20 @@ export class Entity {
     const targetLeptonY = Math.round(target.y / LP);
     const dxL = targetLeptonX - this.leptonX;
     const dyL = targetLeptonY - this.leptonY;
-    const stepLX = Math.min(Math.abs(fdx * axisLeptons), Math.abs(dxL)) * Math.sign(dxL || fdx);
-    const stepLY = Math.min(Math.abs(fdy * axisLeptons), Math.abs(dyL)) * Math.sign(dyL || fdy);
+
+    // C++ fly.cpp:88: aircraft Coord_Move moves in the FACING direction without
+    // clamping to the target position. This allows aircraft to fly past/away from
+    // their target when facing perpendicular, creating curved flight paths.
+    // Ground vehicles clamp to avoid overshooting the waypoint.
+    let stepLX: number;
+    let stepLY: number;
+    if (this.stats.isAircraft) {
+      stepLX = fdx * axisLeptons;
+      stepLY = fdy * axisLeptons;
+    } else {
+      stepLX = Math.min(Math.abs(fdx * axisLeptons), Math.abs(dxL)) * Math.sign(dxL || fdx);
+      stepLY = Math.min(Math.abs(fdy * axisLeptons), Math.abs(dyL)) * Math.sign(dyL || fdy);
+    }
     this.leptonX += stepLX;
     this.leptonY += stepLY;
     this.syncPosFromLeptons();

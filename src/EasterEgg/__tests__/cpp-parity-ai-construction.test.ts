@@ -82,7 +82,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
     entityById: new Map(),
     structures: [],
     map,
-    tick: 0,
+    tick: 1,
     playerHouse: House.Spain,
     scenarioId: 'SCG01EA',
     difficulty: 'normal' as Difficulty,
@@ -167,52 +167,52 @@ function setupBuildableHouse(
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateAIConstruction — tick gating (C++ HOUSE.CPP:AI_Building)', () => {
-  it('does nothing on tick 0 because tick%90===0 but no AI houses set up', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('does nothing on tick 1 when no AI houses set up (but tick passes gate)', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
     const initialStructureCount = ctx.structures.length;
     updateAIConstruction(ctx);
     expect(ctx.structures.length).toBe(initialStructureCount);
   });
 
-  it('skips entirely when tick % 90 !== 0', () => {
-    const ctx = makeMockAIContext({ tick: 1 });
+  it('skips entirely when (tick-1) % 90 !== 0', () => {
+    const ctx = makeMockAIContext({ tick: 2 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
     updateAIConstruction(ctx);
-    // No building should happen on tick 1
+    // No building should happen on tick 2
     expect(ctx.structures.length).toBe(initialCount);
   });
 
-  it('runs on tick 90 (90 % 90 === 0)', () => {
+  it('runs on tick 91 ((91-1) % 90 === 0)', () => {
+    const ctx = makeMockAIContext({ tick: 91 });
+    const state = setupBuildableHouse(ctx);
+    state.buildQueue = ['SILO'];
+    const initialCount = ctx.structures.length;
+    updateAIConstruction(ctx);
+    expect(ctx.structures.length).toBeGreaterThan(initialCount);
+  });
+
+  it('runs on tick 181 ((181-1) % 90 === 0)', () => {
+    const ctx = makeMockAIContext({ tick: 181 });
+    const state = setupBuildableHouse(ctx);
+    state.buildQueue = ['SILO'];
+    const initialCount = ctx.structures.length;
+    updateAIConstruction(ctx);
+    expect(ctx.structures.length).toBeGreaterThan(initialCount);
+  });
+
+  it('skips on tick 90 ((90-1) % 90 !== 0)', () => {
     const ctx = makeMockAIContext({ tick: 90 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
     updateAIConstruction(ctx);
-    expect(ctx.structures.length).toBeGreaterThan(initialCount);
-  });
-
-  it('runs on tick 180 (180 % 90 === 0)', () => {
-    const ctx = makeMockAIContext({ tick: 180 });
-    const state = setupBuildableHouse(ctx);
-    state.buildQueue = ['SILO'];
-    const initialCount = ctx.structures.length;
-    updateAIConstruction(ctx);
-    expect(ctx.structures.length).toBeGreaterThan(initialCount);
-  });
-
-  it('skips on tick 89 (89 % 90 !== 0)', () => {
-    const ctx = makeMockAIContext({ tick: 89 });
-    const state = setupBuildableHouse(ctx);
-    state.buildQueue = ['SILO'];
-    const initialCount = ctx.structures.length;
-    updateAIConstruction(ctx);
     expect(ctx.structures.length).toBe(initialCount);
   });
 
-  it('skips on tick 91 (91 % 90 !== 0)', () => {
-    const ctx = makeMockAIContext({ tick: 91 });
+  it('skips on tick 92 ((92-1) % 90 !== 0)', () => {
+    const ctx = makeMockAIContext({ tick: 92 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
@@ -227,7 +227,7 @@ describe('updateAIConstruction — tick gating (C++ HOUSE.CPP:AI_Building)', () 
 
 describe('updateAIConstruction — prerequisite gates (C++ HOUSE.CPP:AI_Building)', () => {
   it('skips house with productionEnabled=false', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.productionEnabled = false;
     state.buildQueue = ['SILO'];
@@ -237,7 +237,7 @@ describe('updateAIConstruction — prerequisite gates (C++ HOUSE.CPP:AI_Building
   });
 
   it('skips house with IQ < 1 (iq=0)', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.iq = 0;
     state.buildQueue = ['SILO'];
@@ -247,7 +247,7 @@ describe('updateAIConstruction — prerequisite gates (C++ HOUSE.CPP:AI_Building
   });
 
   it('skips house with no alive FACT (construction yard)', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     // Set up house but don't add a FACT
     ctx.houseCredits.set(House.USSR, 10000);
     addAIHouse(ctx, House.USSR, {
@@ -262,7 +262,7 @@ describe('updateAIConstruction — prerequisite gates (C++ HOUSE.CPP:AI_Building
   });
 
   it('skips house when FACT exists but is dead', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const deadFact = makeStructure('FACT', House.USSR, 50, 50, { alive: false });
     ctx.structures.push(deadFact);
     ctx.houseCredits.set(House.USSR, 10000);
@@ -278,7 +278,7 @@ describe('updateAIConstruction — prerequisite gates (C++ HOUSE.CPP:AI_Building
   });
 
   it('skips house when credits <= 0', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx, House.USSR, 0);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
@@ -293,7 +293,7 @@ describe('updateAIConstruction — prerequisite gates (C++ HOUSE.CPP:AI_Building
 
 describe('updateAIConstruction — maxBuilding cap (C++ HOUSE.CPP:AI_Building)', () => {
   it('skips when alive building count >= maxBuilding', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     // FACT is 1 alive building, add another to reach 2
     ctx.structures.push(makeStructure('SILO', House.USSR, 53, 50));
@@ -305,7 +305,7 @@ describe('updateAIConstruction — maxBuilding cap (C++ HOUSE.CPP:AI_Building)',
   });
 
   it('allows building when alive count < maxBuilding', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     // Only FACT exists (1 building), cap is 5
     state.maxBuilding = 5;
@@ -316,7 +316,7 @@ describe('updateAIConstruction — maxBuilding cap (C++ HOUSE.CPP:AI_Building)',
   });
 
   it('maxBuilding=-1 means no cap (unlimited buildings)', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.maxBuilding = -1;
     state.buildQueue = ['SILO'];
@@ -330,7 +330,7 @@ describe('updateAIConstruction — maxBuilding cap (C++ HOUSE.CPP:AI_Building)',
   });
 
   it('dead buildings do not count toward maxBuilding cap', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.maxBuilding = 2;
     // Add a dead building -- shouldn't count toward the cap
@@ -349,7 +349,7 @@ describe('updateAIConstruction — maxBuilding cap (C++ HOUSE.CPP:AI_Building)',
 
 describe('updateAIConstruction — build cooldown (C++ HOUSE.CPP:AI_Building)', () => {
   it('decrements buildCooldown and skips building when cooldown > 0', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildCooldown = 3;
     state.buildQueue = ['SILO'];
@@ -360,7 +360,7 @@ describe('updateAIConstruction — build cooldown (C++ HOUSE.CPP:AI_Building)', 
   });
 
   it('decrements cooldown from 1 to 0 and still skips on that tick', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildCooldown = 1;
     state.buildQueue = ['SILO'];
@@ -372,7 +372,7 @@ describe('updateAIConstruction — build cooldown (C++ HOUSE.CPP:AI_Building)', 
   });
 
   it('builds when buildCooldown is 0', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildCooldown = 0;
     state.buildQueue = ['SILO'];
@@ -388,7 +388,7 @@ describe('updateAIConstruction — build cooldown (C++ HOUSE.CPP:AI_Building)', 
 
 describe('updateAIConstruction — build queue (C++ HOUSE.CPP:AI_Building)', () => {
   it('auto-fills empty buildQueue via getAIBuildOrder', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = [];
     // getAIBuildOrder should generate a queue since we have no other structures
@@ -401,7 +401,7 @@ describe('updateAIConstruction — build queue (C++ HOUSE.CPP:AI_Building)', () 
   });
 
   it('takes the first item from buildQueue as the build type', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO', 'TENT', 'PROC'];
     updateAIConstruction(ctx);
@@ -412,7 +412,7 @@ describe('updateAIConstruction — build queue (C++ HOUSE.CPP:AI_Building)', () 
   });
 
   it('removes invalid production item from queue and continues', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     // 'BOGUS' is not in PRODUCTION_ITEMS -- should be shifted off
     state.buildQueue = ['BOGUS', 'SILO'];
@@ -423,7 +423,7 @@ describe('updateAIConstruction — build queue (C++ HOUSE.CPP:AI_Building)', () 
   });
 
   it('does nothing when buildQueue is empty and getAIBuildOrder returns empty', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = [];
     // Override scenarioProductionItems to empty so getAIBuildOrder can't find items
@@ -440,7 +440,7 @@ describe('updateAIConstruction — build queue (C++ HOUSE.CPP:AI_Building)', () 
 
 describe('updateAIConstruction — credit and placement checks (C++ HOUSE.CPP:AI_Building)', () => {
   it('does not build when credits < production item cost', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     // PROC costs 2000 credits, but we only have 100
     const state = setupBuildableHouse(ctx, House.USSR, 100);
     state.buildQueue = ['PROC'];
@@ -453,7 +453,7 @@ describe('updateAIConstruction — credit and placement checks (C++ HOUSE.CPP:AI
   });
 
   it('shifts queue when aiPlaceStructure returns null (no valid placement)', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO', 'TENT'];
 
@@ -478,7 +478,7 @@ describe('updateAIConstruction — credit and placement checks (C++ HOUSE.CPP:AI
 
 describe('updateAIConstruction — successful build (C++ HOUSE.CPP:AI_Building)', () => {
   it('deducts credits equal to production item cost', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx, House.USSR, 5000);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
@@ -486,7 +486,7 @@ describe('updateAIConstruction — successful build (C++ HOUSE.CPP:AI_Building)'
   });
 
   it('shifts the built type off the queue', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO', 'TENT'];
     updateAIConstruction(ctx);
@@ -496,7 +496,7 @@ describe('updateAIConstruction — successful build (C++ HOUSE.CPP:AI_Building)'
   });
 
   it('spawns a new structure in ctx.structures', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
@@ -509,7 +509,7 @@ describe('updateAIConstruction — successful build (C++ HOUSE.CPP:AI_Building)'
   });
 
   it('spawned structure has full HP (maxHp from STRUCTURE_MAX_HP)', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
@@ -520,11 +520,11 @@ describe('updateAIConstruction — successful build (C++ HOUSE.CPP:AI_Building)'
   });
 
   it('sets lastBuildTick to the current tick', () => {
-    const ctx = makeMockAIContext({ tick: 270 });
+    const ctx = makeMockAIContext({ tick: 271 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
-    expect(state.lastBuildTick).toBe(270);
+    expect(state.lastBuildTick).toBe(271);
   });
 });
 
@@ -534,7 +534,7 @@ describe('updateAIConstruction — successful build (C++ HOUSE.CPP:AI_Building)'
 
 describe('updateAIConstruction — build cooldown per difficulty (C++ HOUSE.CPP:AI_Building)', () => {
   it('normal difficulty: cooldown = floor(6 * 1.0) = 6', () => {
-    const ctx = makeMockAIContext({ tick: 90, difficulty: 'normal' });
+    const ctx = makeMockAIContext({ tick: 91, difficulty: 'normal' });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
@@ -544,7 +544,7 @@ describe('updateAIConstruction — build cooldown per difficulty (C++ HOUSE.CPP:
   });
 
   it('easy difficulty: cooldown = floor(6 * 1.5 * 1.0) = 9', () => {
-    const ctx = makeMockAIContext({ tick: 90, difficulty: 'easy' });
+    const ctx = makeMockAIContext({ tick: 91, difficulty: 'easy' });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
@@ -553,7 +553,7 @@ describe('updateAIConstruction — build cooldown per difficulty (C++ HOUSE.CPP:
   });
 
   it('hard difficulty: cooldown = floor(6 * 0.7 * 0.8) = 3', () => {
-    const ctx = makeMockAIContext({ tick: 90, difficulty: 'hard' });
+    const ctx = makeMockAIContext({ tick: 91, difficulty: 'hard' });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
@@ -569,7 +569,7 @@ describe('updateAIConstruction — build cooldown per difficulty (C++ HOUSE.CPP:
 
 describe('updateAIConstruction — multi-house iteration (C++ HOUSE.CPP:AI_Building)', () => {
   it('processes multiple AI houses independently on the same tick', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
 
     // Set up USSR at (50,50)
     const factUSSR = makeStructure('FACT', House.USSR, 50, 50);
@@ -617,7 +617,7 @@ describe('updateAIConstruction — multi-house iteration (C++ HOUSE.CPP:AI_Build
   });
 
   it('one house blocked does not prevent another from building', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
 
     // USSR: disabled production
     const factUSSR = makeStructure('FACT', House.USSR, 50, 50);
@@ -667,7 +667,7 @@ describe('updateAIConstruction — multi-house iteration (C++ HOUSE.CPP:AI_Build
 
 describe('updateAIConstruction — edge cases (C++ HOUSE.CPP:AI_Building)', () => {
   it('only builds one structure per house per invocation', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO', 'SILO', 'SILO'];
     const initialCount = ctx.structures.length;
@@ -677,7 +677,7 @@ describe('updateAIConstruction — edge cases (C++ HOUSE.CPP:AI_Building)', () =
   });
 
   it('map terrain is marked as WALL at the new structure footprint', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx);
     state.buildQueue = ['SILO'];
     updateAIConstruction(ctx);
@@ -696,7 +696,7 @@ describe('updateAIConstruction — edge cases (C++ HOUSE.CPP:AI_Building)', () =
   });
 
   it('negative credits prevent building', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx, House.USSR, -100);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
@@ -705,7 +705,7 @@ describe('updateAIConstruction — edge cases (C++ HOUSE.CPP:AI_Building)', () =
   });
 
   it('credits exactly equal to cost allows building', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx, House.USSR, SILO_COST);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;
@@ -716,7 +716,7 @@ describe('updateAIConstruction — edge cases (C++ HOUSE.CPP:AI_Building)', () =
   });
 
   it('credits just below cost prevents building', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupBuildableHouse(ctx, House.USSR, SILO_COST - 1);
     state.buildQueue = ['SILO'];
     const initialCount = ctx.structures.length;

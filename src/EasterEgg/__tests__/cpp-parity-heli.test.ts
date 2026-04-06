@@ -368,6 +368,11 @@ describe('HELI helicopter hover attack (aircraft.cpp)', () => {
     const heli = airborneHeli(House.Spain, 5, 5);
     heli.aircraftState = 'attacking';
     heli.mission = Mission.ATTACK;
+    // Pre-face toward target — aircraft move in current facing direction (curved path),
+    // so the first tick only advances east if already facing east.
+    heli.facing = Dir.E;
+    heli.desiredFacing = Dir.E;
+    heli.bodyFacing32 = Dir.E * 4;
     const target = entityAtCell(UnitType.V_2TNK, House.USSR, 20, 5); // far away
     heli.target = target;
 
@@ -887,12 +892,15 @@ describe('HELI movement — aircraft rotation (entity.ts)', () => {
     heli.bodyFacing32 = Dir.N * 4;
 
     const startX = heli.pos.x;
-    const targetPos = { x: startX + CELL_SIZE * 3, y: heli.pos.y }; // due East
+    const startY = heli.pos.y;
+    // Target NE — has both Y component (matching N facing) and X component (misaligned)
+    const targetPos = { x: startX + CELL_SIZE * 3, y: startY - CELL_SIZE * 3 };
 
     const arrived = heli.moveToward(targetPos, heli.stats.speed);
 
-    // Aircraft should move even while facing is misaligned
-    const distMoved = Math.sqrt((heli.pos.x - startX) ** 2 + (heli.pos.y - heli.pos.y) ** 2);
+    // Aircraft should move even while facing is not fully aligned with target.
+    // Movement is in current facing (N), so Y decreases.
+    const distMoved = Math.sqrt((heli.pos.x - startX) ** 2 + (heli.pos.y - startY) ** 2);
     expect(distMoved).toBeGreaterThan(0);
   });
 

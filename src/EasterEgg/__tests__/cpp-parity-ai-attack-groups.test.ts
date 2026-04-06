@@ -59,7 +59,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -118,10 +118,10 @@ function setupBaseWithStaging(ctx: AIContext, house: House): void {
 //  1. updateAIAttackGroups — Tick Gating
 // =============================================================================
 
-describe('updateAIAttackGroups — tick gating (only tick % 120 === 0)', () => {
+describe('updateAIAttackGroups — tick gating (only (tick-1) % 120 === 0)', () => {
 
-  it('runs on tick 0', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('runs on tick 1 (first fire)', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -134,8 +134,8 @@ describe('updateAIAttackGroups — tick gating (only tick % 120 === 0)', () => {
     expect(state.attackPool.size).toBe(1);
   });
 
-  it('runs on tick 120', () => {
-    const ctx = makeMockAIContext({ tick: 120 });
+  it('runs on tick 121', () => {
+    const ctx = makeMockAIContext({ tick: 121 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -147,8 +147,8 @@ describe('updateAIAttackGroups — tick gating (only tick % 120 === 0)', () => {
     expect(state.attackPool.size).toBe(1);
   });
 
-  it('does nothing on tick 1 (non-120-aligned)', () => {
-    const ctx = makeMockAIContext({ tick: 1 });
+  it('does nothing on tick 0 (before first tick)', () => {
+    const ctx = makeMockAIContext({ tick: 0 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -173,8 +173,8 @@ describe('updateAIAttackGroups — tick gating (only tick % 120 === 0)', () => {
     expect(state.attackPool.size).toBe(0);
   });
 
-  it('runs on tick 240 (second multiple)', () => {
-    const ctx = makeMockAIContext({ tick: 240 });
+  it('runs on tick 241 (second multiple)', () => {
+    const ctx = makeMockAIContext({ tick: 241 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -194,7 +194,7 @@ describe('updateAIAttackGroups — tick gating (only tick % 120 === 0)', () => {
 describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => {
 
   it('skips house when productionEnabled is false', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: false, phase: 'buildup',
     });
@@ -207,7 +207,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
   });
 
   it('skips house when IQ < 2 (IQ=0)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 0, productionEnabled: true, phase: 'buildup',
     });
@@ -220,7 +220,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
   });
 
   it('skips house when IQ < 2 (IQ=1)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 1, productionEnabled: true, phase: 'buildup',
     });
@@ -233,7 +233,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
   });
 
   it('runs for IQ=2 (boundary)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 2, productionEnabled: true, phase: 'buildup',
     });
@@ -246,7 +246,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
   });
 
   it('skips house in economy phase', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'economy',
     });
@@ -259,7 +259,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
   });
 
   it('runs in buildup phase', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -272,7 +272,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
   });
 
   it('runs in attack phase', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'attack',
     });
@@ -292,7 +292,7 @@ describe('updateAIAttackGroups — gating: productionEnabled, IQ, phase', () => 
 describe('updateAIAttackGroups — no staging area skips house', () => {
 
   it('skips pool accumulation when house has no structures (no base center)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -311,7 +311,7 @@ describe('updateAIAttackGroups — no staging area skips house', () => {
 describe('updateAIAttackGroups — pool accumulation', () => {
 
   it('adds idle GUARD units near staging area to pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -324,7 +324,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('adds idle AREA_GUARD units near staging area to pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -337,7 +337,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('excludes harvesters (V_HARV) from pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -350,7 +350,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('does not add units with HUNT mission (not idle)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -363,7 +363,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('does not add units with MOVE mission', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -376,7 +376,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('does not re-add units already in pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -394,7 +394,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('does not add units too far from staging area (dist >= 8 cells)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -408,7 +408,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('does not add dead units to pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -421,7 +421,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
   });
 
   it('does not add units from other houses', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -442,7 +442,7 @@ describe('updateAIAttackGroups — pool accumulation', () => {
 describe('updateAIAttackGroups — dead entity pruning from pool', () => {
 
   it('removes dead entities from attack pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -456,7 +456,7 @@ describe('updateAIAttackGroups — dead entity pruning from pool', () => {
   });
 
   it('removes IDs for entities no longer in entityById', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
     });
@@ -477,7 +477,7 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
 
   it('effectiveThreshold = max(2, floor(attackThreshold / aggressionMult))', () => {
     // With normal difficulty: threshold=6, aggressionMult=1.0 -> effective=6
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 6, aggressionMult: 1.0,
@@ -498,7 +498,7 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
 
   it('hard difficulty aggressionMult=1.4 lowers effective threshold', () => {
     // threshold=4, aggressionMult=1.4 -> floor(4/1.4)=2, max(2,2)=2
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 4, aggressionMult: 1.4,
@@ -515,12 +515,12 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
     updateAIAttackGroups(ctx);
     // Pool >= 2 and cooldown elapsed -> attack launched -> pool cleared
     expect(state.attackPool.size).toBe(0);
-    expect(state.lastAttackTick).toBe(0);
+    expect(state.lastAttackTick).toBe(1);
   });
 
   it('effective threshold never goes below 2 (min clamp)', () => {
     // threshold=2, aggressionMult=10.0 -> floor(2/10)=0, max(2,0)=2
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 2, aggressionMult: 10.0,
@@ -538,7 +538,7 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
   });
 
   it('attack launched when pool >= effectiveThreshold AND cooldown elapsed', () => {
-    const ctx = makeMockAIContext({ tick: 1200 });
+    const ctx = makeMockAIContext({ tick: 1201 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 6, aggressionMult: 1.0,
@@ -553,14 +553,14 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
     }
 
     updateAIAttackGroups(ctx);
-    // tick(1200) - lastAttack(0) = 1200 > 600 cooldown, pool(6) >= threshold(6)
+    // tick(1201) - lastAttack(0) = 1201 > 600 cooldown, pool(6) >= threshold(6)
     // Attack launched -> pool cleared
     expect(state.attackPool.size).toBe(0);
-    expect(state.lastAttackTick).toBe(1200);
+    expect(state.lastAttackTick).toBe(1201);
   });
 
   it('attack NOT launched when pool < threshold', () => {
-    const ctx = makeMockAIContext({ tick: 1200 });
+    const ctx = makeMockAIContext({ tick: 1201 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 6, aggressionMult: 1.0,
@@ -580,7 +580,7 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
   });
 
   it('attack NOT launched when cooldown not elapsed', () => {
-    const ctx = makeMockAIContext({ tick: 120 });
+    const ctx = makeMockAIContext({ tick: 121 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 6, aggressionMult: 1.0,
@@ -595,14 +595,14 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
     }
 
     updateAIAttackGroups(ctx);
-    // tick(120) - lastAttack(0) = 120 <= 600 cooldown -> no attack even though pool is full
+    // tick(121) - lastAttack(0) = 121 <= 600 cooldown -> no attack even though pool is full
     expect(state.attackPool.size).toBe(6);
   });
 
   it('effective cooldown is floor(attackCooldownTicks / aggressionMult)', () => {
     // cooldown=600, aggressionMult=1.4 -> floor(600/1.4) = 428
-    // tick=480, lastAttack=0 -> elapsed=480 > 428 -> attack should fire
-    const ctx = makeMockAIContext({ tick: 480 });
+    // tick=481, lastAttack=0 -> elapsed=481 > 428 -> attack should fire
+    const ctx = makeMockAIContext({ tick: 481 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 4, aggressionMult: 1.4,
@@ -618,9 +618,9 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
     }
 
     updateAIAttackGroups(ctx);
-    // 480 > floor(600/1.4)=428 -> cooldown elapsed, pool(3)>=threshold(2)
+    // 481 > floor(600/1.4)=428 -> cooldown elapsed, pool(3)>=threshold(2)
     expect(state.attackPool.size).toBe(0);
-    expect(state.lastAttackTick).toBe(480);
+    expect(state.lastAttackTick).toBe(481);
   });
 });
 
@@ -631,7 +631,7 @@ describe('updateAIAttackGroups — effective threshold and cooldown', () => {
 describe('aiPickAttackTarget — preferred target', () => {
 
   it('targets preferred structure type when set and enemy has it', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3, preferredTarget: 2 }); // 2 = WEAP
     ctx.structures.push(
       makeStructure('FACT', House.Spain, 60, 60),
@@ -649,7 +649,7 @@ describe('aiPickAttackTarget — preferred target', () => {
   });
 
   it('falls through to priority list when preferred target type not found among enemies', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3, preferredTarget: 3 }); // 3 = PDOX
     // No PDOX among enemies, but FACT exists
     ctx.structures.push(
@@ -665,7 +665,7 @@ describe('aiPickAttackTarget — preferred target', () => {
   });
 
   it('ignores allied structures for preferred target', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3, preferredTarget: 2 }); // 2 = WEAP
     // Greece is allied with Spain by default, but USSR is not allied with Spain
     // Place a WEAP for USSR's own house (allied) and one for Spain (enemy)
@@ -689,7 +689,7 @@ describe('aiPickAttackTarget — preferred target', () => {
 describe('aiPickAttackTarget — priority list (FACT, WEAP, PROC)', () => {
 
   it('prioritizes FACT over WEAP and PROC', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('PROC', House.Spain, 60, 60),
@@ -704,7 +704,7 @@ describe('aiPickAttackTarget — priority list (FACT, WEAP, PROC)', () => {
   });
 
   it('prioritizes WEAP when no FACT exists', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('PROC', House.Spain, 60, 60),
@@ -718,7 +718,7 @@ describe('aiPickAttackTarget — priority list (FACT, WEAP, PROC)', () => {
   });
 
   it('prioritizes PROC when no FACT or WEAP', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('POWR', House.Spain, 60, 60),
@@ -732,7 +732,7 @@ describe('aiPickAttackTarget — priority list (FACT, WEAP, PROC)', () => {
   });
 
   it('ignores dead structures in priority list', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('FACT', House.Spain, 60, 60, { alive: false }),
@@ -746,7 +746,7 @@ describe('aiPickAttackTarget — priority list (FACT, WEAP, PROC)', () => {
   });
 
   it('ignores allied structures in priority list', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // FACT belongs to USSR (own house), so it's allied
     ctx.structures.push(
@@ -768,7 +768,7 @@ describe('aiPickAttackTarget — priority list (FACT, WEAP, PROC)', () => {
 describe('aiPickAttackTarget — nearest fallback (structure then entity)', () => {
 
   it('falls back to nearest enemy structure when no priority targets', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // Own base center structures
     ctx.structures.push(
@@ -789,7 +789,7 @@ describe('aiPickAttackTarget — nearest fallback (structure then entity)', () =
   });
 
   it('falls back to nearest enemy entity when no enemy structures', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // Own structures (for base center calculation)
     ctx.structures.push(
@@ -806,7 +806,7 @@ describe('aiPickAttackTarget — nearest fallback (structure then entity)', () =
   });
 
   it('returns null when no enemies at all', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // Own structures only
     ctx.structures.push(
@@ -818,7 +818,7 @@ describe('aiPickAttackTarget — nearest fallback (structure then entity)', () =
   });
 
   it('returns null when house has no base center (no structures)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // No structures for USSR, no priorities
     ctx.structures.push(
@@ -831,7 +831,7 @@ describe('aiPickAttackTarget — nearest fallback (structure then entity)', () =
   });
 
   it('returns world coordinates centered on structure', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // FACT is 3x3 at (60,60)
     ctx.structures.push(
@@ -1039,7 +1039,7 @@ describe('launchAIAttack — mission and target assignment', () => {
 describe('Integration — updateAIAttackGroups triggers full attack cycle', () => {
 
   it('accumulates pool then launches attack when threshold+cooldown met', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, productionEnabled: true, phase: 'buildup',
       attackThreshold: 3, aggressionMult: 1.0,
@@ -1061,6 +1061,6 @@ describe('Integration — updateAIAttackGroups triggers full attack cycle', () =
       expect(u.mission).toBe(Mission.HUNT);
     }
     expect(state.attackPool.size).toBe(0);
-    expect(state.lastAttackTick).toBe(0);
+    expect(state.lastAttackTick).toBe(1);
   });
 });

@@ -64,7 +64,10 @@ describe('Manifest JSON structure', () => {
   });
 
   it('every manifest entry has positive frame dimensions', () => {
+    // sidebar is a full-size background, not a sprite sheet — dimensions are the full image
+    const EXEMPT_ENTRIES = new Set(['sidebar']);
     for (const [name, meta] of Object.entries(manifest)) {
+      if (EXEMPT_ENTRIES.has(name)) continue;
       expect(meta.frameWidth, `${name}.frameWidth`).toBeGreaterThan(0);
       expect(meta.frameHeight, `${name}.frameHeight`).toBeGreaterThan(0);
       expect(meta.frameCount, `${name}.frameCount`).toBeGreaterThan(0);
@@ -1164,19 +1167,19 @@ describe('UI overlay and HUD sprites', () => {
     expect(manifest['pips']?.frameCount).toBe(22);
   });
 
-  it('powerbar exists with 1 frame', () => {
-    expect(manifest['powerbar']?.frameCount).toBe(1);
+  it('powerbar exists with 2 frames (empty + full)', () => {
+    expect(manifest['powerbar']?.frameCount).toBe(2);
   });
 
   it('clock (build timer) has 55 frames', () => {
     expect(manifest['clock']?.frameCount).toBe(55);
   });
 
-  it('repair/sell/map sidebar buttons each have 3 frames', () => {
+  it('repair/sell/map sidebar buttons each have 3 frames at 2x resolution', () => {
     for (const btn of ['repair', 'sell', 'map_btn']) {
       expect(manifest[btn]?.frameCount, `${btn}`).toBe(3);
-      expect(manifest[btn]?.frameWidth, `${btn}`).toBe(17);
-      expect(manifest[btn]?.frameHeight, `${btn}`).toBe(14);
+      expect(manifest[btn]?.frameWidth, `${btn}`).toBe(34);   // 17 * 2 (2x res)
+      expect(manifest[btn]?.frameHeight, `${btn}`).toBe(28);  // 14 * 2 (2x res)
     }
   });
 });

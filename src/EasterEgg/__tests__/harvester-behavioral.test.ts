@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, Mission, AnimState, CELL_SIZE, MAP_CELLS,
-  UNIT_STATS, WEAPON_STATS,
+  UNIT_STATS, WEAPON_STATS, Dir,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap } from '../engine/map';
@@ -340,12 +340,16 @@ describe('updateHarvester — state transitions', () => {
     expect(harv.harvesterState).toBe('idle');
   });
 
-  it('unloading harvester drip-feeds credits (1 bail per tick)', () => {
+  it('unloading harvester deposits credits via lump-sum at tick 22', () => {
+    // C++ unit.cpp:2383: lump-sum Credit_Load() at end of 22-tick dump animation
     let totalDeposited = 0;
     const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const harv = makeEntity(UnitType.V_HARV, House.Spain, 50 * CELL_SIZE, 50 * CELL_SIZE);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W; // pre-rotated to skip rotation phase
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
 
@@ -355,12 +359,12 @@ describe('updateHarvester — state transitions', () => {
       entities: [harv],
     });
 
-    // Drip-feed: 10 ticks to unload 10 bails
-    for (let i = 0; i < 10; i++) {
+    // 22-tick dump animation — lump-sum at end
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
-    expect(addCredits).toHaveBeenCalledTimes(10);
+    expect(addCredits).toHaveBeenCalledTimes(1);
     expect(totalDeposited).toBe(250);
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
@@ -368,6 +372,7 @@ describe('updateHarvester — state transitions', () => {
   });
 
   it('AI unloading harvester deposits into houseCredits (not addCredits)', () => {
+    // C++ lump-sum: AI harvester deposits full credit value at end of dump
     const addCredits = vi.fn();
     const houseCredits = new Map<House, number>();
     houseCredits.set(House.USSR, 100);
@@ -375,6 +380,9 @@ describe('updateHarvester — state transitions', () => {
     const harv = makeEntity(UnitType.V_HARV, House.USSR, 50 * CELL_SIZE, 50 * CELL_SIZE);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 5;
     harv.oreCreditValue = 125;
 
@@ -385,8 +393,8 @@ describe('updateHarvester — state transitions', () => {
       entities: [harv],
     });
 
-    // Drip-feed: 5 ticks to unload 5 bails
-    for (let i = 0; i < 5; i++) {
+    // 22-tick dump animation — lump-sum at end
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -397,10 +405,14 @@ describe('updateHarvester — state transitions', () => {
   });
 
   it('unloading harvester plays credit sound every 5 ticks for player', () => {
+    // C++ unit.cpp: chime during dump animation at tick multiples of 5
     const playSound = vi.fn();
     const harv = makeEntity(UnitType.V_HARV, House.Spain, 50 * CELL_SIZE, 50 * CELL_SIZE);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 4; // next tick = 5 (sound trigger)
+    harv.facing = Dir.W; // pre-rotated to skip rotation phase
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
 

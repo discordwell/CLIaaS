@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { Dir, UnitType, House, CELL_SIZE } from '../engine/types';
+import { LP } from '../engine/tracks';
 
 beforeEach(() => resetEntityIds());
 
@@ -84,7 +85,11 @@ describe('moveToward — stop-rotate-move', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
     // Target very close — within one speed step
-    const target = { x: 103, y: 100 };
+    // Use lepton-quantized target to avoid quantization mismatch
+    const targetRaw = { x: 103, y: 100 };
+    const targetLX = Math.round(targetRaw.x / LP) * LP;
+    const targetLY = Math.round(targetRaw.y / LP) * LP;
+    const target = { x: targetLX, y: targetLY };
     tank.rotTickedThisFrame = false;
     const arrived = tank.moveToward(target, 5);
     expect(arrived).toBe(true);

@@ -438,11 +438,16 @@ describe('Dog-rides-bullet (bullet.cpp:96-175)', () => {
     expect(dog.inLimbo).toBe(false);
     expect(dog.alive).toBe(true);
 
-    // Dog should be at the impact cell
+    // Dog should be at or adjacent to the impact cell (victim's original position).
+    // C++ bullet.cpp:134-161 tries impact cell first, then 8 adjacent cells.
+    // Splash damage may scatter the victim (infantry scatter), so compare against
+    // the original impact position rather than the victim's post-damage position.
+    const impactCell = worldToCell(5 * CELL_SIZE + CELL_SIZE / 2, 5 * CELL_SIZE + CELL_SIZE / 2);
     const dogCell = dog.cell;
-    const victimCell = worldToCell(victim.pos.x, victim.pos.y);
-    expect(dogCell.cx).toBe(victimCell.cx);
-    expect(dogCell.cy).toBe(victimCell.cy);
+    const dx = Math.abs(dogCell.cx - impactCell.cx);
+    const dy = Math.abs(dogCell.cy - impactCell.cy);
+    expect(dx).toBeLessThanOrEqual(1);
+    expect(dy).toBeLessThanOrEqual(1);
   });
 
   it('dog performs DO_DOG_MAUL animation after unlimbo', () => {

@@ -57,7 +57,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -98,9 +98,9 @@ function makeUnit(
 // 1. Tick Gating (C++ HOUSE.CPP: retreat runs every 30 ticks)
 // =============================================================================
 
-describe('Tick gating — only runs on tick % 30 === 0', () => {
-  it('does nothing on tick 1 (non-30-aligned)', () => {
-    const ctx = makeMockAIContext({ tick: 1 });
+describe('Tick gating — only runs on (tick-1) % 30 === 0', () => {
+  it('does nothing on tick 0 (before first tick)', () => {
+    const ctx = makeMockAIContext({ tick: 0 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     // Add a structure so base center exists
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
@@ -112,8 +112,8 @@ describe('Tick gating — only runs on tick % 30 === 0', () => {
     expect(unit.mission).toBe(Mission.GUARD); // not changed to MOVE
   });
 
-  it('processes on tick 0', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('processes on tick 1 (first fire)', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -124,8 +124,8 @@ describe('Tick gating — only runs on tick % 30 === 0', () => {
     expect(unit.mission).toBe(Mission.MOVE);
   });
 
-  it('processes on tick 30', () => {
-    const ctx = makeMockAIContext({ tick: 30 });
+  it('processes on tick 31', () => {
+    const ctx = makeMockAIContext({ tick: 31 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -136,7 +136,7 @@ describe('Tick gating — only runs on tick % 30 === 0', () => {
     expect(unit.mission).toBe(Mission.MOVE);
   });
 
-  it('does nothing on tick 15 (not a multiple of 30)', () => {
+  it('does nothing on tick 15 (not aligned)', () => {
     const ctx = makeMockAIContext({ tick: 15 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
@@ -155,7 +155,7 @@ describe('Tick gating — only runs on tick % 30 === 0', () => {
 
 describe('Entity filters — skip ineligible units', () => {
   it('skips dead entities', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -168,7 +168,7 @@ describe('Entity filters — skip ineligible units', () => {
   });
 
   it('skips player-controlled entities', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     // Spain is player-controlled by default
     addAIHouse(ctx, House.Spain, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.Spain, 50, 50));
@@ -181,7 +181,7 @@ describe('Entity filters — skip ineligible units', () => {
   });
 
   it('skips ant entities (isAnt === true)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const ant = makeUnit(UnitType.ANT1, House.USSR, 0.10);
@@ -194,7 +194,7 @@ describe('Entity filters — skip ineligible units', () => {
   });
 
   it('skips suicide entities (isSuicide === true)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -207,7 +207,7 @@ describe('Entity filters — skip ineligible units', () => {
   });
 
   it('skips entities without an AI state for their house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     // No AI state added for USSR
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -219,7 +219,7 @@ describe('Entity filters — skip ineligible units', () => {
   });
 
   it('skips entities when house IQ < 3', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 2 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -231,7 +231,7 @@ describe('Entity filters — skip ineligible units', () => {
   });
 
   it('processes entities when house IQ === 3', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.I_E1, House.USSR, 0.10);
@@ -249,7 +249,7 @@ describe('Entity filters — skip ineligible units', () => {
 
 describe('Harvester emergency return — damaged harvesters flee to nearest PROC', () => {
   it('damaged harvester (hp < 30% maxHp) returns to nearest PROC', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     const proc = makeStructure('PROC', House.USSR, 50, 50);
     ctx.structures.push(proc);
@@ -263,7 +263,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('harvester at exactly 30% HP does NOT trigger emergency return', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.30); // exactly 30%
@@ -277,7 +277,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('harvester above 30% HP does not trigger emergency return', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.50);
@@ -289,7 +289,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('already-returning harvester (harvesterState="returning") is not interrupted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -303,7 +303,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('already-unloading harvester (harvesterState="unloading") is not interrupted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -317,7 +317,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('harvester already on MOVE mission with moveTarget is not interrupted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -332,7 +332,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('sets harvesterState to "returning"', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -344,7 +344,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('sets mission to MOVE', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -356,7 +356,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('sets moveTarget to nearest PROC center', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     const procCx = 50, procCy = 50;
     ctx.structures.push(makeStructure('PROC', House.USSR, procCx, procCy));
@@ -373,7 +373,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('sets harvestTick to 0', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -386,7 +386,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('finds nearest PROC among multiple (distance check)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // Far PROC
     const farProc = makeStructure('PROC', House.USSR, 80, 80);
@@ -407,7 +407,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('no PROC available → harvester not re-tasked', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // No PROC structures at all
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
@@ -422,7 +422,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('only own-house PROCs considered (not enemy)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // Enemy PROC
     ctx.structures.push(makeStructure('PROC', House.Spain, 44, 44));
@@ -436,7 +436,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   });
 
   it('dead PROCs are excluded', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50, { alive: false }));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
@@ -451,7 +451,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
   it('harvester does not fall through to non-harvester retreat logic', () => {
     // Even if below retreatPercent, a harvester with a PROC should get
     // harvester-specific behavior (returning state) not general retreat
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('FIX', House.USSR, 55, 55));
@@ -475,7 +475,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
 
 describe('Non-harvester retreat — damaged combat units fall back', () => {
   it('unit below retreatPercent (normal=0.25) retreats', () => {
-    const ctx = makeMockAIContext({ tick: 0, difficulty: 'normal' as Difficulty });
+    const ctx = makeMockAIContext({ tick: 1, difficulty: 'normal' as Difficulty });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.20); // 20% < 25%
@@ -487,7 +487,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('unit at exactly retreatPercent (normal=0.25) does NOT retreat', () => {
-    const ctx = makeMockAIContext({ tick: 0, difficulty: 'normal' as Difficulty });
+    const ctx = makeMockAIContext({ tick: 1, difficulty: 'normal' as Difficulty });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     // Create a unit at exactly 25% HP
@@ -506,7 +506,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('unit above retreatPercent does not retreat', () => {
-    const ctx = makeMockAIContext({ tick: 0, difficulty: 'normal' as Difficulty });
+    const ctx = makeMockAIContext({ tick: 1, difficulty: 'normal' as Difficulty });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.80);
@@ -520,7 +520,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   it('easy difficulty uses 0.30 retreat threshold', () => {
     expect(AI_DIFFICULTY_MODS.easy.retreatHpPercent).toBe(0.30);
 
-    const ctx = makeMockAIContext({ tick: 0, difficulty: 'easy' as Difficulty });
+    const ctx = makeMockAIContext({ tick: 1, difficulty: 'easy' as Difficulty });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     // 28% < 30% → should retreat on easy
@@ -535,7 +535,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   it('hard difficulty uses 0.15 retreat threshold', () => {
     expect(AI_DIFFICULTY_MODS.hard.retreatHpPercent).toBe(0.15);
 
-    const ctx = makeMockAIContext({ tick: 0, difficulty: 'hard' as Difficulty });
+    const ctx = makeMockAIContext({ tick: 1, difficulty: 'hard' as Difficulty });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     // 10% < 15% → should retreat on hard
@@ -548,7 +548,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('hard difficulty: unit at 20% does NOT retreat (20% >= 15%)', () => {
-    const ctx = makeMockAIContext({ tick: 0, difficulty: 'hard' as Difficulty });
+    const ctx = makeMockAIContext({ tick: 1, difficulty: 'hard' as Difficulty });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.20);
@@ -561,7 +561,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('already moving (MOVE + moveTarget) not re-tasked', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.10);
@@ -576,7 +576,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('retreats to FIX (service depot) when available', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     const fixCx = 55, fixCy = 55;
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50)); // for base center
@@ -593,7 +593,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('falls back to base center when no FIX available', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // Add structures but no FIX
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
@@ -611,7 +611,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('sets mission to MOVE on retreat', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.10);
@@ -623,7 +623,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('removes unit from attackPool on retreat', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.10);
@@ -638,7 +638,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('no base center → does not retreat', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     // No structures at all → no base center
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.10);
@@ -653,7 +653,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('dead FIX not used as retreat target — falls back to base center', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('FIX', House.USSR, 55, 55, { alive: false }));
@@ -672,7 +672,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
   });
 
   it('only own-house FIX used — enemy FIX ignored', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50)); // for base center
     ctx.structures.push(makeStructure('FIX', House.Spain, 55, 55)); // enemy FIX
@@ -696,7 +696,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
 
 describe('Edge cases and multi-unit interactions', () => {
   it('multiple damaged units all retreat independently', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('FIX', House.USSR, 55, 55));
@@ -715,7 +715,7 @@ describe('Edge cases and multi-unit interactions', () => {
   });
 
   it('healthy unit and damaged unit — only damaged one retreats', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const healthy = makeUnit(UnitType.V_2TNK, House.USSR, 0.80);
@@ -733,7 +733,7 @@ describe('Edge cases and multi-unit interactions', () => {
   });
 
   it('FIX from first matching structure is used (breaks after first)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     // Two FIX structures — code uses first matching one (break after first)
@@ -754,7 +754,7 @@ describe('Edge cases and multi-unit interactions', () => {
   it('harvester with no PROC does NOT get general retreat (continue skips)', () => {
     // A damaged harvester with no PROC hits `continue` and never reaches
     // the non-harvester retreat code below
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('FIX', House.USSR, 55, 55));

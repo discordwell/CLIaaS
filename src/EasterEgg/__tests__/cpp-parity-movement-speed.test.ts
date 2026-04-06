@@ -266,9 +266,11 @@ describe('cpp-parity: engine constants match C++ (defines.h, tracks.ts)', () => 
     expect(LEPTON_SIZE).toBe(256);
   });
 
-  it('MPH_TO_PX = CELL_SIZE / LEPTON_SIZE = 24/256 = 0.09375', () => {
-    expect(MPH_TO_PX).toBe(CELL_SIZE / LEPTON_SIZE);
-    expect(MPH_TO_PX).toBeCloseTo(0.09375, 10);
+  it('MPH_TO_PX = CELL_SIZE / 100 = 24/100 = 0.24 (combined Speed%→px/tick conversion)', () => {
+    // C++ chain: Speed% → _Scale_To_256 → MaxSpeed (leptons) → * LP → px/tick
+    // Combined: px/tick = Speed * (256/100) * (CELL_SIZE/256) = Speed * CELL_SIZE/100
+    expect(MPH_TO_PX).toBe(CELL_SIZE / 100);
+    expect(MPH_TO_PX).toBeCloseTo(0.24, 10);
   });
 
   it('PIXEL_LEPTON_W = floor(256/24) = 10 (C++ CELL_LEPTON_W / ICON_PIXEL_W)', () => {
@@ -517,13 +519,15 @@ describe('cpp-parity: TS speed conversion formula (index.ts:4787-4792)', () => {
 // ============================================================================
 
 describe('cpp-parity: TS lepton budget recovery (index.ts:4839)', () => {
-  // followTrackStep converts speedPixels back to leptons: speedPixels / LP
-  // This should recover the original INI Speed= value as the lepton budget.
+  // tsLeptonBudget = stats.speed * MPH_TO_PX / LP = stats.speed * (CELL_SIZE/100) / (CELL_SIZE/256)
+  //                = stats.speed * 256/100 = _Scale_To_256 (before floor)
+  // The non-floored value is close to but not exactly cppScaleTo256.
 
   for (const unitKey of ['1TNK', '4TNK', 'E1', 'JEEP', 'HARV', 'ARTY']) {
     const speed = iniSpeed(unitKey);
-    it(`${unitKey} lepton budget on road = ${speed}.0 (matches INI Speed=${speed})`, () => {
-      expect(tsLeptonBudget(unitKey, 'Road')).toBeCloseTo(speed, 10);
+    const expectedLeptons = speed * 256 / 100; // _Scale_To_256 before floor
+    it(`${unitKey} lepton budget on road ≈ ${expectedLeptons.toFixed(2)} (Speed=${speed} * 256/100)`, () => {
+      expect(tsLeptonBudget(unitKey, 'Road')).toBeCloseTo(expectedLeptons, 10);
     });
   }
 });
@@ -681,8 +685,9 @@ describe('cpp-parity: terrain speed effect on cell crossing time', () => {
     const speed = iniSpeed(unitKey);
     const terrainMult = iniTerrainSpeed(terrain, scKey);
 
-    it(`${unitKey} on ${terrain} (${scKey}=${(terrainMult * 100).toFixed(0)}%): lepton budget = ${speed} * ${terrainMult}`, () => {
-      const expected = speed * terrainMult;
+    it(`${unitKey} on ${terrain} (${scKey}=${(terrainMult * 100).toFixed(0)}%): lepton budget = ${speed} * 2.56 * ${terrainMult}`, () => {
+      // tsLeptonBudget = speed * 256/100 * terrainMult (the combined _Scale_To_256 chain)
+      const expected = speed * 256 / 100 * terrainMult;
       expect(tsLeptonBudget(unitKey, terrain)).toBeCloseTo(expected, 5);
     });
   }

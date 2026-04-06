@@ -480,12 +480,13 @@ describe('Chronoshift effects (C++ house.cpp:2851-2852)', () => {
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
     // Should have effects at both origin and destination
-    const litEffects = ctx.effects.filter(e => e.sprite === 'litning');
-    expect(litEffects.length).toBe(2);
+    // Chronosphere superweapon uses 'chronbox' sprites (CTNK self-teleport uses 'litning')
+    const chronoEffects = ctx.effects.filter(e => e.sprite === 'chronbox');
+    expect(chronoEffects.length).toBe(2);
 
-    const origins = litEffects.filter(e => e.x === originX && e.y === originY);
+    const origins = chronoEffects.filter(e => e.x === originX && e.y === originY);
     expect(origins.length).toBe(1);
-    const dests = litEffects.filter(e => e.x === target.x && e.y === target.y);
+    const dests = chronoEffects.filter(e => e.x === target.x && e.y === target.y);
     expect(dests.length).toBe(1);
   });
 });

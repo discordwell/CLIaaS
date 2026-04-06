@@ -168,7 +168,9 @@ describe('updateGuard', () => {
 
     updateGuard(ctx, player);
 
-    expect(player.mission).toBe(Mission.ATTACK);
+    // C++ parity: guard fires inline via Firing_AI then restores GUARD — unit never
+    // leaves GUARD mission. Target stays set for subsequent Firing_AI ticks.
+    expect(player.mission).toBe(Mission.GUARD);
     expect(player.target).toBe(enemy);
   });
 
@@ -364,7 +366,7 @@ describe('updateHunt', () => {
     expect(hunter.mission).toBe(Mission.ATTACK);
   });
 
-  it('no enemies left: returns to idle mission', () => {
+  it('no enemies left: stays in HUNT with idle animation (C++ Random_Animate fallthrough)', () => {
     const hunter = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     hunter.mission = Mission.HUNT;
     hunter.target = null;
@@ -373,7 +375,10 @@ describe('updateHunt', () => {
     const ctx = makeMockContext({ entities: [hunter] });
     updateHunt(ctx, hunter);
 
-    expect(hunter.mission).toBe(Mission.GUARD); // idleMission returns GUARD
+    // C++ foot.cpp:688: hunt with no targets falls through to Random_Animate.
+    // The unit stays in HUNT mission — no explicit transition to GUARD.
+    expect(hunter.mission).toBe(Mission.HUNT);
+    expect(hunter.target).toBeNull();
   });
 
   it('chases target out of weapon range', () => {
@@ -385,13 +390,14 @@ describe('updateHunt', () => {
     hunter.target = enemy;
 
     const ctx = makeMockContext({ entities: [hunter, enemy] });
-    const startX = hunter.pos.x;
     updateHunt(ctx, hunter);
 
-    // Should stay in HUNT and move toward target
+    // C++ Mission_Hunt only sets target; movement is via Approach_Target in the
+    // per-tick AI loop (index.ts). updateHunt sets animState to WALK but does
+    // NOT move the position — that happens between scan ticks.
     expect(hunter.mission).toBe(Mission.HUNT);
     expect(hunter.animState).toBe(AnimState.WALK);
-    expect(hunter.pos.x).toBeGreaterThan(startX);
+    // Position unchanged — movement is external to updateHunt
   });
 
   it('hunts enemy structures when no mobile enemies', () => {

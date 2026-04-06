@@ -37,7 +37,8 @@ describe('remap-colors.json — all House enum members present', () => {
   }
 
   // C++ hdata.cpp:149-247 — meta houses without their own PCOLOR are aliased.
-  const aliasSet = ['GoodGuy', 'BadGuy', 'Neutral', 'Special', 'Multi6', 'Multi7', 'Multi8'];
+  const aliasSet = ['GoodGuy', 'BadGuy', 'Neutral', 'Special',
+    'Multi1', 'Multi2', 'Multi3', 'Multi4', 'Multi5', 'Multi6', 'Multi7', 'Multi8'];
   for (const alias of aliasSet) {
     it(`covers alias ${alias}`, () => {
       expect(remap.houses[alias], `${alias} alias missing`).toBeDefined();

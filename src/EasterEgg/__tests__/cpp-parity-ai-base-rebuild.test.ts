@@ -57,7 +57,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 76, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -97,10 +97,11 @@ function makeBP(type: string, house: House, cx: number, cy: number) {
   return { type, cell: encodeCell(cx, cy), house };
 }
 
-/** Set up a minimal context that will pass all early-exit checks */
+/** Set up a minimal context that will pass all early-exit checks.
+ *  TS uses 1-based ticks: first valid rebuild tick is 76 (tick>75 AND (76-1)%75===0). */
 function makeReadyContext(overrides: Partial<AIContext> = {}): AIContext {
   const ctx = makeMockAIContext({
-    tick: 0, // 0 % 75 === 0
+    tick: 76, // (76-1) % 75 === 0, tick > 75
     baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
     ...overrides,
   });
@@ -123,7 +124,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
   describe('early exit: empty blueprint', () => {
     it('returns immediately when baseBlueprint is empty', () => {
-      const ctx = makeMockAIContext({ tick: 0, baseBlueprint: [] });
+      const ctx = makeMockAIContext({ tick: 76, baseBlueprint: [] });
       addAIHouse(ctx, House.USSR, { iq: 3 });
       ctx.structures.push(makeStructure('FACT', House.USSR, 40, 40));
       const structCountBefore = ctx.structures.length;
@@ -136,7 +137,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
   describe('early exit: no AI house with IQ >= 2', () => {
     it('returns when all AI houses have IQ < 2', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       addAIHouse(ctx, House.USSR, { iq: 1 });
@@ -148,7 +149,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('returns when no AI states exist at all', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       ctx.structures.push(makeStructure('FACT', House.USSR, 40, 40));
@@ -159,7 +160,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('IQ exactly 2 passes the check', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       addAIHouse(ctx, House.USSR, { iq: 2 });
@@ -174,7 +175,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
   describe('early exit: rebuild cooldown', () => {
     it('decrements cooldown and returns when cooldown > 0', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
         baseRebuildCooldown: 5,
       });
@@ -188,7 +189,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('does not decrement below zero — reaches zero then proceeds on next call', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
         baseRebuildCooldown: 1,
       });
@@ -201,43 +202,43 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
       expect(ctx.baseRebuildCooldown).toBe(0);
       expect(ctx.structures.length).toBe(1);
 
-      // Second call: cooldown is 0, proceeds
+      // Second call: cooldown is 0, proceeds (tick 76 is valid)
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(GAME_TICKS_PER_SEC * 30);
     });
   });
 
   describe('early exit: tick gating', () => {
-    it('only proceeds when tick % 75 === 0', () => {
-      const ctx = makeReadyContext({ tick: 1 });
+    it('tick <= 75 is blocked (TS 1-based: rebuild needs tick > 75)', () => {
+      const ctx = makeReadyContext({ tick: 75 });
       const structCountBefore = ctx.structures.length;
       updateBaseRebuild(ctx);
       expect(ctx.structures.length).toBe(structCountBefore);
       expect(ctx.baseRebuildQueue.length).toBe(0);
     });
 
-    it('tick 75 is valid (75 % 75 === 0)', () => {
-      const ctx = makeReadyContext({ tick: 75 });
+    it('tick 76 is valid ((76-1) % 75 === 0 and tick > 75)', () => {
+      const ctx = makeReadyContext({ tick: 76 });
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(GAME_TICKS_PER_SEC * 30);
     });
 
-    it('tick 150 is valid', () => {
-      const ctx = makeReadyContext({ tick: 150 });
+    it('tick 151 is valid ((151-1) % 75 === 0)', () => {
+      const ctx = makeReadyContext({ tick: 151 });
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(GAME_TICKS_PER_SEC * 30);
     });
 
-    it('tick 74 fails the gate', () => {
-      const ctx = makeReadyContext({ tick: 74 });
+    it('tick 77 fails the gate ((77-1) % 75 !== 0)', () => {
+      const ctx = makeReadyContext({ tick: 77 });
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(0);
       expect(ctx.baseRebuildQueue.length).toBe(0);
     });
 
-    it('cooldown check happens before tick gate (cooldown decrements on non-75 ticks)', () => {
+    it('cooldown check happens before tick gate (cooldown decrements on any tick)', () => {
       const ctx = makeMockAIContext({
-        tick: 37, // not divisible by 75
+        tick: 37,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
         baseRebuildCooldown: 3,
       });
@@ -252,7 +253,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
   describe('early exit: no FACT for AI houses', () => {
     it('returns when no alive FACT exists for any AI house', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       addAIHouse(ctx, House.USSR, { iq: 3 });
@@ -263,7 +264,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('allied house FACT does not count (isAllied check)', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       addAIHouse(ctx, House.USSR, { iq: 3 });
@@ -275,7 +276,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('dead FACT does not count', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       addAIHouse(ctx, House.USSR, { iq: 3 });
@@ -290,7 +291,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
   describe('queue population', () => {
     it('missing structures added to rebuild queue', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
           makeBP('PROC', House.USSR, 60, 60),
@@ -309,7 +310,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('already-alive structures NOT added to queue', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
         ],
@@ -325,7 +326,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     it('blocked position (another alive structure in footprint) excluded', () => {
       // POWR is 2x2, so position (50,50) footprint covers (50,50) (51,50) (50,51) (51,51)
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       // Place a different structure at (51, 51) — within POWR's footprint
@@ -338,7 +339,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('blueprint entries for houses without FACT excluded from queue', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
           makeBP('PROC', House.Ukraine, 60, 60),
@@ -365,7 +366,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('queue sorted by REBUILD_PRIORITY: POWR(0) before PROC(1) before WEAP(2) before GUN(3) before DOME(4) before ATEK(5)', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           // Intentionally out of order
           makeBP('ATEK', House.USSR, 80, 80),
@@ -384,7 +385,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('unknown types get priority 6 (sorted last)', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('XYZZ', House.USSR, 90, 90), // unknown type
           makeBP('POWR', House.USSR, 50, 50),
@@ -398,7 +399,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('APWR shares priority 0 with POWR', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('PROC', House.USSR, 60, 60),
           makeBP('APWR', House.USSR, 50, 50),
@@ -418,7 +419,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
       const bps = defenseTypes.map((t, i) => makeBP(t, House.USSR, 50 + i * 3, 50));
       // Add a POWR to be built first
       bps.push(makeBP('POWR', House.USSR, 30, 30));
-      const ctx = makeReadyContext({ tick: 0, baseBlueprint: bps });
+      const ctx = makeReadyContext({ tick: 76, baseBlueprint: bps });
       updateBaseRebuild(ctx);
       // POWR built first; all defense types remain with same priority
       const remaining = ctx.baseRebuildQueue.map(bp => bp.type);
@@ -432,7 +433,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
   describe('rebuild execution', () => {
     it('shifts first item from rebuild queue', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       // Pre-populate the queue (simulates previous population pass)
       ctx.baseRebuildQueue = [
         makeBP('POWR', House.USSR, 50, 50),
@@ -446,7 +447,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     });
 
     it('verifies house still has FACT before building from queue', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       // Pre-populate queue with Ukraine entry (no FACT for Ukraine)
       ctx.baseRebuildQueue = [makeBP('POWR', House.Ukraine, 50, 50)];
       addAIHouse(ctx, House.Ukraine, { iq: 3 });
@@ -457,7 +458,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     });
 
     it('IQ < 2 for specific house blocks rebuild', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       // USSR has FACT but low IQ for this specific house
       addAIHouse(ctx, House.Ukraine, { iq: 1 });
       ctx.structures.push(makeStructure('FACT', House.Ukraine, 45, 45));
@@ -470,7 +471,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     });
 
     it('deducts cost from houseCredits', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       ctx.houseCredits.set(House.USSR, 5000);
       // POWR costs 300
       updateBaseRebuild(ctx);
@@ -478,7 +479,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     });
 
     it('insufficient credits blocks rebuild (does not build)', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       ctx.houseCredits.set(House.USSR, 100); // Less than POWR cost (300)
       const structCountBefore = ctx.structures.length;
       updateBaseRebuild(ctx);
@@ -492,7 +493,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     it('spawns structure at decoded position (cell % 128, floor(cell / 128))', () => {
       // Position (60, 45) => cell = 45 * 128 + 60 = 5820
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 60, 45)],
       });
       updateBaseRebuild(ctx);
@@ -505,7 +506,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     });
 
     it('sets baseRebuildCooldown to GAME_TICKS_PER_SEC * 30 (= 450 ticks)', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(GAME_TICKS_PER_SEC * 30);
       expect(ctx.baseRebuildCooldown).toBe(450);
@@ -513,7 +514,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('structure without production item builds without cost deduction', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('XYZZ', House.USSR, 50, 50)],
         // Use empty production items so XYZZ is not found
         scenarioProductionItems: [],
@@ -534,7 +535,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
   describe('integration: full rebuild lifecycle', () => {
     it('full cycle: blueprint -> queue -> build -> cooldown -> next build', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
           makeBP('PROC', House.USSR, 60, 60),
@@ -556,8 +557,8 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
       }
       expect(ctx.baseRebuildCooldown).toBe(0);
 
-      // Cycle 2: tick must be % 75 === 0
-      ctx.tick = 750; // 750 % 75 === 0
+      // Cycle 2: tick must satisfy (tick-1) % 75 === 0 and tick > 75
+      ctx.tick = 751; // (751-1) % 75 === 0
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(450);
       const proc = ctx.structures.find(s => s.type === 'PROC' && s.cx === 60);
@@ -567,7 +568,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('multiple blueprint entries processed one per cycle', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
           makeBP('PROC', House.USSR, 60, 60),
@@ -586,7 +587,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('priority ordering verified end-to-end: POWR built before TSLA', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('TSLA', House.USSR, 70, 70), // priority 3
           makeBP('POWR', House.USSR, 50, 50), // priority 0
@@ -603,7 +604,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     });
 
     it('cooldown countdown across ticks', () => {
-      const ctx = makeReadyContext({ tick: 0 });
+      const ctx = makeReadyContext({ tick: 76 });
       updateBaseRebuild(ctx);
       expect(ctx.baseRebuildCooldown).toBe(450); // 15 * 30
 
@@ -634,7 +635,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('queue persists between calls (not repopulated when non-empty)', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
           makeBP('PROC', House.USSR, 60, 60),
@@ -654,7 +655,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
       // Add a new blueprint entry — but queue is non-empty, so it should NOT be added
       ctx.baseBlueprint.push(makeBP('WEAP', House.USSR, 80, 80));
-      ctx.tick = 750; // % 75 === 0
+      ctx.tick = 751; // % 75 === 0
       updateBaseRebuild(ctx);
       // PROC built from existing queue
       const proc = ctx.structures.find(s => s.type === 'PROC' && s.cx === 60);
@@ -665,7 +666,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('after queue is drained, next call repopulates from blueprint', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
         ],
@@ -685,7 +686,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
       }
 
       // Queue is empty, so next call at tick % 75 === 0 repopulates
-      ctx.tick = 750;
+      ctx.tick = 751;
       updateBaseRebuild(ctx);
       // PROC should be built (queue repopulated and shifted)
       const proc = ctx.structures.find(s => s.type === 'PROC' && s.cx === 60);
@@ -694,7 +695,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('multi-house: each house needs its own FACT', () => {
       const ctx = makeMockAIContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [
           makeBP('POWR', House.USSR, 50, 50),
           makeBP('POWR', House.Ukraine, 70, 70),
@@ -721,7 +722,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('dead structure at blueprint position triggers rebuild', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       // Dead POWR at position — alive: false, so not in aliveSet
@@ -734,7 +735,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
 
     it('structure at different position does not satisfy blueprint', () => {
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       // Alive POWR at different position
@@ -751,7 +752,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     it('blocking check uses structure footprint size from STRUCTURE_SIZE', () => {
       // WEAP is 3x2 at position (50, 50), footprint: (50-52, 50-51)
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('WEAP', House.USSR, 50, 50)],
       });
       // Place a GUN at (52, 51) — corner of WEAP footprint
@@ -765,7 +766,7 @@ describe('C++ parity: AI Base Rebuild — updateBaseRebuild', () => {
     it('blocking check: structure just outside footprint does NOT block', () => {
       // POWR is 2x2 at (50,50): footprint (50,50) (51,50) (50,51) (51,51)
       const ctx = makeReadyContext({
-        tick: 0,
+        tick: 76,
         baseBlueprint: [makeBP('POWR', House.USSR, 50, 50)],
       });
       // Place a GUN at (52, 50) — just outside the 2x2 footprint

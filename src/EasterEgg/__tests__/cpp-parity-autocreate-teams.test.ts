@@ -107,7 +107,7 @@ function makeTeamType(overrides: Partial<TeamType> = {}): TeamType {
 
 describe('Multiple teams per cycle — C++ house.cpp:993', () => {
   it('spawns at least 2 teams per cycle (min from Random_Pick(2, ...))', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 10 });
     ctx.houseCredits.set(House.USSR, 10000);
     // Single team with high maxAllowed — can be spawned multiple times
@@ -123,7 +123,7 @@ describe('Multiple teams per cycle — C++ house.cpp:993', () => {
   it('spawns at most (TechLevel-1)/3+1 teams when that exceeds 2', () => {
     // Run many times to check the upper bound statistically
     for (let trial = 0; trial < 20; trial++) {
-      const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+      const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
       addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 10 });
       ctx.houseCredits.set(House.USSR, 10000);
       ctx.teamTypes.push(makeTeamType({ maxAllowed: 20, members: [{ type: '1TNK', count: 1 }] }));
@@ -141,7 +141,7 @@ describe('Multiple teams per cycle — C++ house.cpp:993', () => {
     // C++ Random_Pick(2, (1-1)/3+1) = Random_Pick(2, 1)
     // When min > max, Random_Pick returns min, so always 2
     for (let trial = 0; trial < 10; trial++) {
-      const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+      const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
       addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 1 });
       ctx.houseCredits.set(House.USSR, 10000);
       ctx.teamTypes.push(makeTeamType({ maxAllowed: 10, members: [{ type: '1TNK', count: 1 }] }));
@@ -156,7 +156,7 @@ describe('Multiple teams per cycle — C++ house.cpp:993', () => {
   it('with techLevel=4, maxTeams = Random_Pick(2, 2) = always 2', () => {
     // (4-1)/3+1 = 1+1 = 2, so Random_Pick(2, 2) = 2
     for (let trial = 0; trial < 10; trial++) {
-      const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+      const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
       addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 4 });
       ctx.houseCredits.set(House.USSR, 10000);
       ctx.teamTypes.push(makeTeamType({ maxAllowed: 10, members: [{ type: '1TNK', count: 1 }] }));
@@ -172,7 +172,7 @@ describe('Multiple teams per cycle — C++ house.cpp:993', () => {
     // (7-1)/3+1 = 2+1 = 3, so Random_Pick(2, 3) = 2..3
     const counts = new Set<number>();
     for (let trial = 0; trial < 50; trial++) {
-      const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+      const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
       addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 7 });
       ctx.houseCredits.set(House.USSR, 10000);
       ctx.teamTypes.push(makeTeamType({ maxAllowed: 10, members: [{ type: '1TNK', count: 1 }] }));
@@ -195,7 +195,7 @@ describe('Multiple teams per cycle — C++ house.cpp:993', () => {
 
 describe('MaxAllowed — C++ teamtype.cpp:440', () => {
   it('does not spawn team when activeCount >= maxAllowed', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
     ctx.houseCredits.set(House.USSR, 10000);
     ctx.teamTypes.push(makeTeamType({ maxAllowed: 2, members: [{ type: '1TNK', count: 1 }] }));
@@ -210,7 +210,7 @@ describe('MaxAllowed — C++ teamtype.cpp:440', () => {
   });
 
   it('spawns team when activeCount < maxAllowed', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
     ctx.houseCredits.set(House.USSR, 10000);
     ctx.teamTypes.push(makeTeamType({ maxAllowed: 3, members: [{ type: '1TNK', count: 1 }] }));
@@ -224,7 +224,7 @@ describe('MaxAllowed — C++ teamtype.cpp:440', () => {
   });
 
   it('maxAllowed=0 prevents all spawning', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3 });
     ctx.houseCredits.set(House.USSR, 10000);
     ctx.teamTypes.push(makeTeamType({ maxAllowed: 0, members: [{ type: '1TNK', count: 1 }] }));
@@ -236,7 +236,7 @@ describe('MaxAllowed — C++ teamtype.cpp:440', () => {
   });
 
   it('maxAllowed caps total instances spawned per cycle', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 10 });
     ctx.houseCredits.set(House.USSR, 10000);
     // maxAllowed=1: only 1 instance can exist, even though maxTeams > 1
@@ -250,7 +250,7 @@ describe('MaxAllowed — C++ teamtype.cpp:440', () => {
   });
 
   it('increments autocreateTeamCounts for each spawn', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 1 });
     ctx.houseCredits.set(House.USSR, 10000);
     ctx.teamTypes.push(makeTeamType({ maxAllowed: 5, members: [{ type: '1TNK', count: 1 }] }));
@@ -389,7 +389,7 @@ describe('suggestedNewTeam — C++ teamtype.cpp:419-497', () => {
 
 describe('autocreateTeamCounts — C++ TeamTypeClass::Number', () => {
   it('count increments even when spawn position is missing (C++ Create_One_Of behavior)', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 1 });
     ctx.houseCredits.set(House.USSR, 10000);
     // Team with origin=99, no waypoint, no edge — spawn will fail
@@ -438,7 +438,7 @@ describe('TeamType.maxAllowed — parsed from scenario INI', () => {
 
 describe('Integration — multi-team multi-house behavior', () => {
   it('each house spawns its own maxTeams independently', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
 
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 1 });
     ctx.houseCredits.set(House.USSR, 10000);
@@ -462,7 +462,7 @@ describe('Integration — multi-team multi-house behavior', () => {
   });
 
   it('different maxAllowed per team type limits spawns independently', () => {
-    const ctx = makeMockAIContext({ tick: 0, autocreateEnabled: true });
+    const ctx = makeMockAIContext({ tick: 1, autocreateEnabled: true });
     addAIHouse(ctx, House.USSR, { productionEnabled: true, iq: 3, techLevel: 10 });
     ctx.houseCredits.set(House.USSR, 10000);
 

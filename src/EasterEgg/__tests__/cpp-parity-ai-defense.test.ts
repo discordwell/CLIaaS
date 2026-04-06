@@ -59,7 +59,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(), houseIQs: new Map(), houseTechLevels: new Map(),
     houseMaxUnits: new Map(), houseMaxInfantry: new Map(), houseMaxBuildings: new Map(),
@@ -264,8 +264,8 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
   // -- Tick gating --
 
-  it('tick gating: only runs on tick % 45 === 0', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('tick gating: runs on tick 1 ((1-1) % 45 === 0, TS 1-based)', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     const state = addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -280,8 +280,8 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
     expect(defender.mission).toBe(Mission.HUNT);
   });
 
-  it('tick gating: does NOT run on tick % 45 !== 0', () => {
-    const ctx = makeMockAIContext({ tick: 1 });
+  it('tick gating: does NOT run on tick 2 ((2-1) % 45 !== 0)', () => {
+    const ctx = makeMockAIContext({ tick: 2 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     const state = addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -295,8 +295,8 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
     expect(defender.mission).toBe(Mission.GUARD); // not changed
   });
 
-  it('tick gating: runs on tick 45', () => {
-    const ctx = makeMockAIContext({ tick: 45 });
+  it('tick gating: runs on tick 46', () => {
+    const ctx = makeMockAIContext({ tick: 46 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -310,8 +310,8 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
     expect(defender.mission).toBe(Mission.HUNT);
   });
 
-  it('tick gating: runs on tick 90', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+  it('tick gating: runs on tick 91', () => {
+    const ctx = makeMockAIContext({ tick: 91 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -328,7 +328,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   // -- IQ / underAttack gating --
 
   it('skips houses not under attack (underAttack=false)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: false, iq: 3 });
 
@@ -343,7 +343,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('skips houses with IQ < 2 (iq=1)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 1 });
 
@@ -358,7 +358,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('skips houses with IQ < 2 (iq=0)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 0 });
 
@@ -373,7 +373,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('proceeds when IQ === 2 (boundary)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 2 });
 
@@ -390,7 +390,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   // -- Recall from attack pool --
 
   it('calls aiRecallDefenders when attackPool has units', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     const state = addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -407,7 +407,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('does not recall when attackPool is empty', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     const state = addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -426,7 +426,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   // -- Defense rally: unit/enemy distance/status filters --
 
   it('rallies idle GUARD units near base (dist < 10) to hunt nearby enemies', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -445,7 +445,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('rallies AREA_GUARD units near base to hunt nearby enemies', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -462,7 +462,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('harvesters excluded from rally', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -478,7 +478,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('units too far from base center (dist >= 10) not rallied', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -495,7 +495,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('units at dist < 10 (boundary: 9.9 cells) are rallied', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -512,7 +512,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('enemies too far from base center (dist >= 12) not targeted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -529,7 +529,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('enemies at dist < 12 (boundary: 11 cells) are targeted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -547,7 +547,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('dead enemies not targeted', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -564,7 +564,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('allied entities not targeted as enemies', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -581,7 +581,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('sets defender mission to HUNT with enemy position as moveTarget', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -600,7 +600,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('units with HUNT mission not rallied', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -618,7 +618,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('units with MOVE mission not rallied', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -634,7 +634,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('no base center → skips defense rally', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     // No structures for USSR at all
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -650,7 +650,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('multiple idle units each find nearest enemy independently', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -678,7 +678,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('dead AI units not considered for rallying', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -697,7 +697,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   // -- Edge cases and integration scenarios --
 
   it('units belonging to a different house are not rallied for this house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -714,7 +714,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('multiple AI houses process independently', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     // Two separate bases
     ctx.structures.push(makeStructure('GUN', House.USSR, 50, 50));
     ctx.structures.push(makeStructure('GUN', House.Ukraine, 70, 70));
@@ -745,7 +745,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('defense rally picks closest enemy to base center, not closest to defender', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -768,7 +768,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('no enemy nearby → defender stays on GUARD', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -783,7 +783,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('both recall and rally happen in same tick when pool has units and defenders exist', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     const state = addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -813,7 +813,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('SLEEP mission unit is not rallied', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 
@@ -829,7 +829,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
   });
 
   it('ATTACK mission unit is not rallied', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     ctx.structures.push(makeStructure('GUN', House.USSR, BASE_CX, BASE_CY));
     addAIHouse(ctx, House.USSR, { underAttack: true, iq: 3 });
 

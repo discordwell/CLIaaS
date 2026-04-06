@@ -237,8 +237,9 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(tran!.pos.x).toBe(spawnWorld.x);
     expect(tran!.pos.y).toBe(spawnWorld.y);
 
-    // Should be airborne in flying state
-    expect(tran!.aircraftState).toBe('flying');
+    // Should be airborne — transports with UNLOAD mission start in 'unload_search'
+    // (C++ Mission_Unload SEARCH_FOR_LZ state: 14-16 tick delay before controlled approach)
+    expect(tran!.aircraftState).toBe('unload_search');
     expect(tran!.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
 
     // Move target should be the origin waypoint (WP0)
@@ -281,12 +282,13 @@ describe('findEntityAt with flight altitude', () => {
     const entity = new Entity(UnitType.V_TRAN, House.GoodGuy, 200, 200);
     entity.flightAltitude = Entity.FLIGHT_ALTITUDE; // airborne
 
-    // Simulate findEntityAt logic
+    // Simulate findEntityAt logic — entity.pos is lepton-quantized so may differ
+    // slightly from the requested (200, 200) by up to ~0.05px
     const clickPos = { x: 200, y: 200 }; // ground level click
     const dx = entity.pos.x - clickPos.x;
     const dy = entity.pos.y - clickPos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    expect(dist).toBe(0); // exact match at ground position
+    expect(dist).toBeLessThan(0.1); // close to 0 within lepton quantization
     expect(dist).toBeLessThan(20);
   });
 
@@ -298,16 +300,16 @@ describe('findEntityAt with flight altitude', () => {
     const clickPos = { x: 200, y: 200 - Entity.FLIGHT_ALTITUDE };
     const dx = entity.pos.x - clickPos.x;
 
-    // Ground distance check fails (24px > 20px threshold)
+    // Ground distance check fails (~24px > 20px threshold)
     const dyGround = entity.pos.y - clickPos.y;
     const distGround = Math.sqrt(dx * dx + dyGround * dyGround);
-    expect(distGround).toBe(Entity.FLIGHT_ALTITUDE); // 24
+    expect(distGround).toBeCloseTo(Entity.FLIGHT_ALTITUDE, 0); // ~24
     expect(distGround).toBeGreaterThan(20); // would MISS without altitude check
 
     // Altitude-adjusted check succeeds
     const dyAlt = (entity.pos.y - entity.flightAltitude) - clickPos.y;
     const distAlt = Math.sqrt(dx * dx + dyAlt * dyAlt);
-    expect(distAlt).toBe(0); // exact match at visual position
+    expect(distAlt).toBeLessThan(0.1); // close to 0 within lepton quantization
     expect(distAlt).toBeLessThan(20); // HITS with altitude check
   });
 });

@@ -654,7 +654,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
       makeStructure({ type: 'POWR', house: House.USSR, cx: 20, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures,
     });
@@ -714,7 +714,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
     const pool = new Set([1, 2, 3, 4, 5, 6]);
     const state = makeAIState({ house: House.USSR, phase: 'buildup', attackPool: pool, attackThreshold: 6 });
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -726,7 +726,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
     const pool = new Set([1, 2, 3]);
     const state = makeAIState({ house: House.USSR, phase: 'buildup', attackPool: pool, attackThreshold: 6 });
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -737,7 +737,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
   it('transitions attack → buildup when attack pool is empty', () => {
     const state = makeAIState({ house: House.USSR, phase: 'attack', attackPool: new Set() });
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -748,7 +748,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
   it('stays in attack when pool still has units', () => {
     const state = makeAIState({ house: House.USSR, phase: 'attack', attackPool: new Set([1, 2]) });
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -764,7 +764,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
       makeStructure({ type: 'PROC', house: House.USSR, cx: 16, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       entities: [harv],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -777,7 +777,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
   it('clears underAttack if 150 ticks have passed since last base attack', () => {
     const state = makeAIState({ house: House.USSR, underAttack: true, lastBaseAttackTick: 0 });
     const ctx = makeAIContext({
-      tick: 300, // 300 - 0 = 300 > 150
+      tick: 301, // (tick-1) % 150 === 0; 301 - 0 = 301 > 150
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -788,7 +788,7 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
   it('keeps underAttack if less than 150 ticks since last base attack', () => {
     const state = makeAIState({ house: House.USSR, underAttack: true, lastBaseAttackTick: 200 });
     const ctx = makeAIContext({
-      tick: 300, // 300 - 200 = 100 < 150
+      tick: 301, // (tick-1) % 150 === 0; 301 - 200 = 101 < 150
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -809,7 +809,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
       makeStructure({ type: 'POWR', house: House.USSR, cx: 20, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures,
     });
@@ -838,7 +838,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
       makeStructure({ type: 'POWR', house: House.USSR, cx: 63, cy: 60 }),
     ];
     const ctx = makeAIContext({
-      tick: 90,
+      tick: 91, // (tick-1) % 90 === 0
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
       structures,
@@ -876,7 +876,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     const unit = new Entity(UnitType.V_2TNK, House.USSR, staging!.x, staging!.y);
     unit.mission = Mission.GUARD;
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -931,7 +931,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     unit.hp = 1; // well below 25% retreat threshold
     unit.mission = Mission.GUARD;
     const ctx = makeAIContext({
-      tick: 30,
+      tick: 31, // (tick-1) % 30 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures: [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })],
@@ -945,7 +945,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     const state = makeAIState({ house: House.USSR, iq: 0 });
     const damaged = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 100 });
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [damaged],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -959,7 +959,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const damaged = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [damaged],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -988,7 +988,7 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const dying = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1 });
     const ctx = makeAIContext({
-      tick: 75,
+      tick: 76, // (tick-1) % 75 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [dying],
       houseCredits: new Map([[House.USSR, 0]]),
@@ -1376,7 +1376,7 @@ describe('updateAIAttackGroups — pool accumulation and launch (HOUSE.CPP)', ()
     const unit = new Entity(UnitType.V_2TNK, House.USSR, staging!.x, staging!.y);
     unit.mission = Mission.GUARD;
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1415,7 +1415,7 @@ describe('updateAIAttackGroups — pool accumulation and launch (HOUSE.CPP)', ()
       makeStructure({ type: 'FACT', house: House.Spain, cx: 80, cy: 60 }),
     ];
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1442,7 +1442,7 @@ describe('updateAIAttackGroups — pool accumulation and launch (HOUSE.CPP)', ()
       makeStructure({ type: 'FACT', house: House.Spain, cx: 80, cy: 60 }),
     ];
     const ctx = makeAIContext({
-      tick: 720, // > 600 cooldown
+      tick: 721, // (tick-1) % 120 === 0; > 600 cooldown
       entities: units,
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1475,7 +1475,7 @@ describe('updateAIAttackGroups — pool accumulation and launch (HOUSE.CPP)', ()
       makeStructure({ type: 'FACT', house: House.Spain, cx: 80, cy: 60 }),
     ];
     const ctx = makeAIContext({
-      tick: 720,
+      tick: 721, // (tick-1) % 120 === 0
       entities: units,
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1717,7 +1717,7 @@ describe('updateAIDefense (HOUSE.CPP defense rally)', () => {
       baseCenter.cy * CELL_SIZE + CELL_SIZE / 2);
     const state = makeAIState({ house: House.USSR, iq: 3, underAttack: true });
     const ctx = makeAIContext({
-      tick: 45,
+      tick: 46, // (tick-1) % 45 === 0
       entities: [defender, enemy],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1756,7 +1756,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
       makeStructure({ type: 'FIX', house: House.USSR, cx: 20, cy: 20 }),
     ];
     const ctx = makeAIContext({
-      tick: 30,
+      tick: 31, // (tick-1) % 30 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1779,7 +1779,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     unit.mission = Mission.GUARD;
     const structures = [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })];
     const ctx = makeAIContext({
-      tick: 30,
+      tick: 31, // (tick-1) % 30 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1798,7 +1798,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, attackPool: new Set([unit.id]) });
     const structures = [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })];
     const ctx = makeAIContext({
-      tick: 30,
+      tick: 31, // (tick-1) % 30 === 0
       entities: [unit],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1874,7 +1874,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
       makeStructure({ type: 'PROC', house: House.USSR, cx: 20, cy: 20 }),
     ];
     const ctx = makeAIContext({
-      tick: 30,
+      tick: 31, // (tick-1) % 30 === 0
       entities: [harv],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -1932,7 +1932,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1947,7 +1947,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1961,7 +1961,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.85) });
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -1976,7 +1976,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5]]),
@@ -1992,7 +1992,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.5) });
     (s as any).sellProgress = 0.5;
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -2011,7 +2011,7 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
     // Let's use a lower HP
     s.hp = Math.floor(maxHp * 0.79);
     const ctx = makeAIContext({
-      tick: 18, // normal difficulty: repairDelay=0.02 → interval=18
+      tick: 19, // (tick-1) % 18 === 0; normal difficulty: repairDelay=0.02 → interval=18
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 5000]]),
@@ -2032,7 +2032,7 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.10) });
     let footprintCleared = false;
     const ctx = makeAIContext({
-      tick: 75,
+      tick: 76, // (tick-1) % 75 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 0]]),
@@ -2050,7 +2050,7 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
     const hp = Math.floor(maxHp * 0.20); // just below 25%
     const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp });
     const ctx = makeAIContext({
-      tick: 75,
+      tick: 76, // (tick-1) % 75 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [s],
       houseCredits: new Map([[House.USSR, 0]]),
@@ -2096,7 +2096,7 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
     const damaged = makeStructure({ type: 'POWR', house: House.USSR, cx: 10, cy: 10, hp: 1 });
     const healthy = makeStructure({ type: 'POWR', house: House.USSR, cx: 14, cy: 10 });
     const ctx = makeAIContext({
-      tick: 75,
+      tick: 76, // (tick-1) % 75 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures: [damaged, healthy],
       houseCredits: new Map([[House.USSR, 0]]),
@@ -2138,7 +2138,7 @@ describe('updateAIIncome (HOUSE.CPP passive refinery income)', () => {
   it('AI house earns 100 * incomeMult per refinery', () => {
     const state = makeAIState({ house: House.USSR, incomeMult: 1.0 });
     const ctx = makeAIContext({
-      tick: 450,
+      tick: 451, // (tick-1) % 450 === 0
       structures: [
         makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 }),
         makeStructure({ type: 'PROC', house: House.USSR, cx: 16, cy: 10 }),
@@ -2154,7 +2154,7 @@ describe('updateAIIncome (HOUSE.CPP passive refinery income)', () => {
   it('incomeMult scales income (easy=0.7 → 70 per refinery)', () => {
     const state = makeAIState({ house: House.USSR, incomeMult: 0.7 });
     const ctx = makeAIContext({
-      tick: 450,
+      tick: 451, // (tick-1) % 450 === 0
       structures: [makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 })],
       houseCredits: new Map([[House.USSR, 0]]),
       aiStates: new Map([[House.USSR, state]]),
@@ -2198,7 +2198,7 @@ describe('updateAIHarvesters (HOUSE.CPP harvester management)', () => {
     const harv2 = entityAtCell(UnitType.V_HARV, House.USSR, 22, 20);
     const state = makeAIState({ house: House.USSR });
     const ctx = makeAIContext({
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       entities: [harv1, harv2],
       aiStates: new Map([[House.USSR, state]]),
       structures: [makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 })],
@@ -2215,7 +2215,7 @@ describe('updateAIHarvesters (HOUSE.CPP harvester management)', () => {
       makeStructure({ type: 'WEAP', house: House.USSR, cx: 14, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       entities: [],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -2233,7 +2233,7 @@ describe('updateAIHarvesters (HOUSE.CPP harvester management)', () => {
       makeStructure({ type: 'WEAP', house: House.USSR, cx: 14, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       entities: [],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -2488,7 +2488,7 @@ describe('updateAIConstruction (HOUSE.CPP construction system)', () => {
     const state = makeAIState({ house: House.USSR, iq: 3, productionEnabled: true, buildCooldown: 5 });
     const structures = [makeStructure({ type: 'FACT', house: House.USSR, cx: 60, cy: 60 })];
     const ctx = makeAIContext({
-      tick: 90,
+      tick: 91, // (tick-1) % 90 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures,
       houseCredits: new Map([[House.USSR, 50000]]),
@@ -2664,27 +2664,9 @@ describe('updateBaseRebuild (HOUSE.CPP base rebuild)', () => {
 
   it('queues destroyed blueprint structures for rebuild', () => {
     const state = makeAIState({ house: House.USSR, iq: 3 });
-    // Blueprint has a POWR at (14,10) but it's not alive
-    // Give 0 credits so the queue populates but can't afford to process the first item
-    const ctx = makeAIContext({
-      tick: 75,
-      aiStates: new Map([[House.USSR, state]]),
-      structures: [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })],
-      baseBlueprint: [{ type: 'POWR', cell: 14 + 10 * MAP_CELLS, house: House.USSR }],
-      houseCredits: new Map([[House.USSR, 0]]), // can't afford to build
-      isAllied: (a, b) => a === b,
-    });
-    updateBaseRebuild(ctx);
-    // Queue was populated but first item couldn't be built (insufficient credits)
-    // The shift still happens but the function returns before spawning — queue is emptied
-    // Instead verify the structure was NOT spawned (only original FACT)
-    // With 0 credits, the function returns before spawning, BUT it already shifted the item
-    // So let's verify the blueprint detection worked by giving enough credits and checking spawn
-    // Actually: The function shifts the item then checks credits. If not enough, it returns without spawning.
-    // So the queue item is consumed but structure not built.
-    // Let's test differently: provide credits and verify structure spawned
+    // (tick-1) % 75 === 0 AND tick > 75 → tick=76
     const ctx2 = makeAIContext({
-      tick: 75,
+      tick: 76,
       aiStates: new Map([[House.USSR, makeAIState({ house: House.USSR, iq: 3 })]]),
       structures: [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })],
       baseBlueprint: [{ type: 'POWR', cell: 14 + 10 * MAP_CELLS, house: House.USSR }],
@@ -2700,13 +2682,9 @@ describe('updateBaseRebuild (HOUSE.CPP base rebuild)', () => {
 
   it('sorts rebuild queue by priority (POWR=0, PROC=1, WEAP=2, etc.)', () => {
     const state = makeAIState({ house: House.USSR, iq: 3 });
-    // Give 0 credits: queue will populate and sort, then shift first item but return
-    // before spawning because credits < cost. We can check remaining 2 items are sorted.
-    // But actually the shift consumes item 0 regardless. So we check items at indices 0,1 after shift.
-    // Provide credits so the first item (POWR) actually spawns.
-    // Then remaining queue should have WEAP (priority 2), DOME (priority 4).
+    // (tick-1) % 75 === 0 AND tick > 75 → tick=76
     const ctx = makeAIContext({
-      tick: 75,
+      tick: 76,
       aiStates: new Map([[House.USSR, state]]),
       structures: [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })],
       baseBlueprint: [
@@ -2728,8 +2706,9 @@ describe('updateBaseRebuild (HOUSE.CPP base rebuild)', () => {
 
   it('sets 30-second rebuild cooldown after spawning', () => {
     const state = makeAIState({ house: House.USSR, iq: 3 });
+    // (tick-1) % 75 === 0 AND tick > 75 → tick=76
     const ctx = makeAIContext({
-      tick: 75,
+      tick: 76,
       aiStates: new Map([[House.USSR, state]]),
       structures: [makeStructure({ type: 'FACT', house: House.USSR, cx: 10, cy: 10 })],
       baseBlueprint: [{ type: 'POWR', cell: 14 + 10 * MAP_CELLS, house: House.USSR }],
@@ -2805,7 +2784,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
       missions: [],
     };
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
       autocreateEnabled: true,
@@ -2828,7 +2807,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
       missions: [],
     };
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
       autocreateEnabled: true,
@@ -2847,7 +2826,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
       missions: [{ mission: 'MOVE', data: 5 }, { mission: 'ATTACK', data: 0 }],
     };
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
       autocreateEnabled: true,
@@ -2930,7 +2909,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
     map.boundsW = 128;
     map.boundsH = 128;
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       map,
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
@@ -2954,7 +2933,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
       missions: [{ mission: 'MOVE', data: 5 }],
     };
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
       autocreateEnabled: true,
@@ -2979,7 +2958,7 @@ describe('updateAIAutocreateTeams (TEAM.CPP autocreate)', () => {
       missions: [],
     };
     const ctx = makeAIContext({
-      tick: 120,
+      tick: 121, // (tick-1) % 120 === 0
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 10000]]),
       autocreateEnabled: true,
@@ -3026,7 +3005,7 @@ describe('updateAIProduction — full production cycle (HOUSE.CPP)', () => {
       makeStructure({ type: 'WEAP', house: House.USSR, cx: 14, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 60,
+      tick: 121, // (tick-1) % 60 === 0; tick > 60 passes first-fire guard
       entities: [],
       aiStates: new Map([[House.USSR, state]]),
       structures,
@@ -3138,7 +3117,7 @@ describe('AI edge cases', () => {
       makeStructure({ type: 'POWR', house: House.USSR, cx: 20, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([
         [House.USSR, ussrState],
         [House.Ukraine, ukrState],
@@ -3157,7 +3136,7 @@ describe('AI edge cases', () => {
     harv.alive = false;
     const state = makeAIState({ house: House.USSR });
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       entities: [harv],
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
@@ -3175,7 +3154,7 @@ describe('AI edge cases', () => {
       makeStructure({ type: 'POWR', house: House.USSR, cx: 20, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures,
     });
@@ -3305,7 +3284,7 @@ describe('AI edge cases', () => {
       makeStructure({ type: 'APWR', house: House.USSR, cx: 20, cy: 10 }),
     ];
     const ctx = makeAIContext({
-      tick: 150,
+      tick: 151, // (tick-1) % 150 === 0
       aiStates: new Map([[House.USSR, state]]),
       structures,
     });

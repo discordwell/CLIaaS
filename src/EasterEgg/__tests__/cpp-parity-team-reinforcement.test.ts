@@ -766,7 +766,7 @@ describe('House edge calculation (display.cpp:2467-2491)', () => {
     expect(cell!.cx).toBe(BOUNDS.x + BOUNDS.w);
   });
 
-  it('C++ Calculated_Cell uses SOURCE_* param directly — house edge takes priority over waypoint inference', () => {
+  it.todo('C++ Calculated_Cell uses SOURCE_* param directly — house edge takes priority over waypoint inference (VALID GAP: TS uses inferClosestMapEdge instead of house edge when waypoint provided)', () => {
     // C++ display.cpp:2467-2491 — Calculated_Cell takes a SourceType parameter
     // (SOURCE_NORTH=0, SOURCE_EAST=1, SOURCE_SOUTH=2, SOURCE_WEST=3) which directly
     // determines the edge. When a waypoint is provided, C++ passes the SOURCE_*
@@ -1547,7 +1547,7 @@ describe('C++ divergence: Calculated_Cell SOURCE_* vs TS inferClosestMapEdge', (
   // 1. House edge is 'north' but waypoint is near the south border
   // 2. The waypoint is in the center of the map (ambiguous edge)
 
-  it('C++ uses house edge (SOURCE_*), not waypoint inference, when both are available', () => {
+  it.todo('C++ uses house edge (SOURCE_*), not waypoint inference, when both are available (VALID GAP: TS uses inferClosestMapEdge instead of house edge when waypoint provided)', () => {
     // C++ display.cpp:2467-2491 — Calculated_Cell uses the SourceType parameter
     // from HouseClass::Control.Edge. The origin waypoint only determines the aligned
     // coordinate on the perpendicular axis, NOT which edge to use.

@@ -31,8 +31,9 @@ Object.defineProperty(globalThis, 'localStorage', { value: mockLocalStorage, wri
 // Campaign Data Structures
 // ============================================================
 describe('Campaign data structures', () => {
-  it('has 4 campaigns defined', () => {
-    expect(CAMPAIGNS).toHaveLength(4);
+  it('has 6 campaigns defined', () => {
+    // allied, soviet, counterstrike_allied, counterstrike_soviet, aftermath_allied, aftermath_soviet
+    expect(CAMPAIGNS).toHaveLength(6);
   });
 
   it('allied campaign has 14 missions', () => {

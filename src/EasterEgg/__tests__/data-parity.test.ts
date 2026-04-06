@@ -1436,20 +1436,21 @@ describe('SUB_CELL_OFFSETS parity', () => {
     expect(SUB_CELL_OFFSETS[0]).toEqual({ x: 0, y: 0 });
   });
 
-  it('1: top-left (-7, -7)', () => {
-    expect(SUB_CELL_OFFSETS[1]).toEqual({ x: -7, y: -7 });
+  it('1: top-left (-6, -6)', () => {
+    // C++ lepton offset 64 from center (128): 64/256 * 24 = 6.0 pixels
+    expect(SUB_CELL_OFFSETS[1]).toEqual({ x: -6, y: -6 });
   });
 
-  it('2: top-right (7, -7)', () => {
-    expect(SUB_CELL_OFFSETS[2]).toEqual({ x: 7, y: -7 });
+  it('2: top-right (6, -6)', () => {
+    expect(SUB_CELL_OFFSETS[2]).toEqual({ x: 6, y: -6 });
   });
 
-  it('3: bottom-left (-7, 7)', () => {
-    expect(SUB_CELL_OFFSETS[3]).toEqual({ x: -7, y: 7 });
+  it('3: bottom-left (-6, 6)', () => {
+    expect(SUB_CELL_OFFSETS[3]).toEqual({ x: -6, y: 6 });
   });
 
-  it('4: bottom-right (7, 7)', () => {
-    expect(SUB_CELL_OFFSETS[4]).toEqual({ x: 7, y: 7 });
+  it('4: bottom-right (6, 6)', () => {
+    expect(SUB_CELL_OFFSETS[4]).toEqual({ x: 6, y: 6 });
   });
 });
 

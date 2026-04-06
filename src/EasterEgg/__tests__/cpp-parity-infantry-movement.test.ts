@@ -133,19 +133,22 @@ describe('C++ parity: infantry movement without SpeedAccum gating', () => {
       // With accumulator, we expect at least 2 different delta values
       expect(uniqueDeltas.size).toBeGreaterThanOrEqual(2);
 
-      // Total distance should match C++ accumulator math
+      // Total distance should match C++ accumulator + Coord_Move math
       const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100);
       const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
       let expectedAccum = 0;
-      let totalLeptons = 0;
+      let totalAxisLeptons = 0;
       for (let t = 0; t < 20; t++) {
         const actual = speedAdd + expectedAccum;
         const remainder = actual % PIXEL_LEPTON_W;
-        totalLeptons += actual - remainder;
+        const moveLeptons = actual - remainder;
         expectedAccum = remainder;
+        // Coord_Move applies sin/cos: cardinal sinFactor=127
+        totalAxisLeptons += (moveLeptons * 127) >> 7;
       }
-      const expectedDistance = totalLeptons * LP;
-      const actualDistance = finalX - 100;
+      const expectedDistance = totalAxisLeptons * LP;
+      const startLeptonX = Math.round(100 / LP);
+      const actualDistance = finalX - startLeptonX * LP;
       expect(actualDistance).toBeCloseTo(expectedDistance, 4);
     });
   });
@@ -229,9 +232,9 @@ describe('C++ parity: infantry movement without SpeedAccum gating', () => {
     // This test verifies the snap distance is correct.
     it('infantry snaps to cell center when within ~1.5 pixels', () => {
       // Place E1 very close to the target (within snap threshold)
-      const targetX = 120;
-      const targetY = 100;
-      const snapThreshold = 1.5; // C++ 16 leptons = 1.5 pixels
+      // Use lepton-aligned coordinates to avoid quantization mismatch
+      const targetX = 120; // 120/LP = 1280 (exact)
+      const targetY = 96;  // 96/LP = 1024 (exact)
 
       // Place entity just inside snap threshold
       const entity = makeEntity('E1', House.Spain, targetX - 1.0, targetY);
@@ -270,8 +273,9 @@ describe('C++ parity: infantry movement without SpeedAccum gating', () => {
     });
 
     it('vehicle snaps at 0.5 pixels (tighter threshold)', () => {
-      const targetX = 120;
-      const targetY = 100;
+      // Use lepton-aligned coordinates to avoid quantization mismatch
+      const targetX = 120; // 120/LP = 1280 (exact)
+      const targetY = 96;  // 96/LP = 1024 (exact)
 
       // Place JEEP at 0.4px from target — within vehicle snap threshold of 0.5
       const entity = makeEntity('JEEP', House.Spain, targetX - 0.4, targetY);

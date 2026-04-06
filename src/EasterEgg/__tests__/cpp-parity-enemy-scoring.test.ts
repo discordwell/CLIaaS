@@ -291,7 +291,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -326,7 +326,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -361,7 +361,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -408,7 +408,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
       structures,
       entities: greeceEntities,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -457,7 +457,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -468,7 +468,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     // Now Greece kills lots of USSR buildings → score shifts
     greeceState.buildingsKilledBy.set(House.USSR, 30); // 30 * 5 = 150 bonus
 
-    ctx.tick = 120;
+    ctx.tick = 121; // (tick-1) % 60 === 0
     updateDesignatedEnemy(ctx);
 
     // Greece now has massive kill bonus overcoming distance
@@ -510,7 +510,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -544,7 +544,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 
@@ -574,7 +574,7 @@ describe('updateDesignatedEnemy — C++ house.cpp:4619-4741', () => {
     const ctx = makeAIContext({
       structures,
       aiStates,
-      tick: 60,
+      tick: 61, // (tick-1) % 60 === 0
       isAllied: (a, b) => a === b,
     });
 

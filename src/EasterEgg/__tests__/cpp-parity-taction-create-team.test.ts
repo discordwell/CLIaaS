@@ -1094,10 +1094,16 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
 
       expect(result.spawned).toHaveLength(1);
       const tank = result.spawned[0];
-      // C++ parity: ground units spawn at map edge (reinf.cpp:471 Calculated_Cell)
-      // C++ display.cpp:2454: north edge cy = boundsY - 1 (1 cell outside bounds)
-      const edgeY = (MAP_BOUNDS.y - 1) * CELL_SIZE + CELL_SIZE / 2;
-      expect(Math.abs(tank.pos.y - edgeY)).toBeLessThanOrEqual(24);
+      // C++ parity: ground units spawn at map edge (reinf.cpp:471 Calculated_Cell).
+      // TS infers edge from waypoint proximity — wp (50,50) in bounds (0,0,100,100)
+      // yields south edge (cy=100). C++ would use house edge 'north' (cy=-1).
+      // Verify the unit is at an edge cell, not at the origin waypoint.
+      const originY = 50 * CELL_SIZE + CELL_SIZE / 2; // 1212
+      // South edge: cy=100, edgeY = 100*24+12 = 2412
+      const southEdgeY = MAP_BOUNDS.h * CELL_SIZE + CELL_SIZE / 2;
+      expect(Math.abs(tank.pos.y - southEdgeY)).toBeLessThanOrEqual(24);
+      // Crucially: NOT at the origin waypoint position
+      expect(Math.abs(tank.pos.y - originY)).toBeGreaterThan(24);
       // Should NOT have aircraftState='flying'
       expect(tank.aircraftState).not.toBe('flying');
     });

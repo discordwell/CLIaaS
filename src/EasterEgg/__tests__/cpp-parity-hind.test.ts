@@ -371,6 +371,11 @@ describe('HIND helicopter hover attack (aircraft.cpp)', () => {
     const hind = airborneHind(House.USSR, 5, 5);
     hind.aircraftState = 'attacking';
     hind.mission = Mission.ATTACK;
+    // Pre-face toward target — aircraft move in current facing direction (curved path),
+    // so the first tick only advances east if already facing east.
+    hind.facing = Dir.E;
+    hind.desiredFacing = Dir.E;
+    hind.bodyFacing32 = Dir.E * 4;
     const target = entityAtCell(UnitType.I_E1, House.Spain, 20, 5); // far away
     hind.target = target;
 
@@ -945,21 +950,26 @@ describe('HIND movement -- aircraft rotation (entity.ts)', () => {
     hind.bodyFacing32 = Dir.N * 4;
 
     const startX = hind.pos.x;
-    const targetPos = { x: startX + CELL_SIZE * 3, y: hind.pos.y }; // due East
+    const startY = hind.pos.y;
+    // Target NE — has both Y component (matching N facing) and X component (misaligned)
+    const targetPos = { x: startX + CELL_SIZE * 3, y: startY - CELL_SIZE * 3 };
 
     const arrived = hind.moveToward(targetPos, hind.stats.speed);
 
-    // Aircraft should move even while facing is misaligned
-    const distMoved = Math.sqrt((hind.pos.x - startX) ** 2 + (hind.pos.y - hind.pos.y) ** 2);
+    // Aircraft should move even while facing is not fully aligned with target.
+    // Movement is in current facing (N), so Y decreases.
+    const distMoved = Math.sqrt((hind.pos.x - startX) ** 2 + (hind.pos.y - startY) ** 2);
     expect(distMoved).toBeGreaterThan(0);
   });
 
   it('HIND is slower than HELI (speed 12 vs 16)', () => {
     const hind = airborneHind(House.USSR, 10, 10);
-    const heli = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
+    // Pre-face both toward target so movement goes in the right direction
+    hind.facing = Dir.E;
+    hind.desiredFacing = Dir.E;
+    hind.bodyFacing32 = Dir.E * 4;
 
     expect(hind.stats.speed).toBe(12);
-    expect(heli.stats.speed).toBe(16);
 
     // Move both toward same target -- HELI moves farther
     const target = { x: hind.pos.x + CELL_SIZE * 5, y: hind.pos.y };
@@ -970,6 +980,10 @@ describe('HIND movement -- aircraft rotation (entity.ts)', () => {
     const heliEntity = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
     heliEntity.aircraftState = 'flying';
     heliEntity.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    heliEntity.facing = Dir.E;
+    heliEntity.desiredFacing = Dir.E;
+    heliEntity.bodyFacing32 = Dir.E * 4;
+    expect(heliEntity.stats.speed).toBe(16);
     const heliStart = heliEntity.pos.x;
     heliEntity.moveToward(target, heliEntity.stats.speed);
     const heliDist = heliEntity.pos.x - heliStart;

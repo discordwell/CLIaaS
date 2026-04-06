@@ -8,7 +8,7 @@
 
 import { type Game } from './index';
 import { Entity } from './entity';
-import { Mission, UnitType, MAP_CELLS } from './types';
+import { Mission, UnitType, MAP_CELLS, CELL_SIZE } from './types';
 
 // === Anomaly types ===
 
@@ -71,10 +71,13 @@ export class GameInspector {
       }
 
       // P2: Out of bounds
-      const cell = e.cell;
-      if (cell.cx < 0 || cell.cy < 0 || cell.cx >= MAP_CELLS || cell.cy >= MAP_CELLS) {
+      // Note: e.cell uses (leptonX >> 8) & 0x7F which wraps, so we check pixel position
+      // directly against map bounds to correctly detect negative and beyond-map positions.
+      const oobCx = Math.floor(e.pos.x / CELL_SIZE);
+      const oobCy = Math.floor(e.pos.y / CELL_SIZE);
+      if (oobCx < 0 || oobCy < 0 || oobCx >= MAP_CELLS || oobCy >= MAP_CELLS) {
         this.emit(anomalies, tick, 'P2', 'critical', 'physics',
-          `Entity ${e.stats.name} (${e.id}) out of bounds at (${cell.cx},${cell.cy})`,
+          `Entity ${e.stats.name} (${e.id}) out of bounds at (${oobCx},${oobCy})`,
           e, 'pathfinding edge case');
       }
 

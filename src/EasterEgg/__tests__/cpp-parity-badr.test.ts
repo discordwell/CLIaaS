@@ -465,12 +465,15 @@ describe('BADR movement — aircraft moveToward (drive.cpp/aircraft.cpp)', () =>
     badr.bodyFacing32 = Dir.N * 4;
 
     const startX = badr.pos.x;
-    const targetPos = { x: startX + CELL_SIZE * 3, y: badr.pos.y }; // due East
+    const startY = badr.pos.y;
+    const targetPos = { x: startX + CELL_SIZE * 3, y: startY }; // due East
 
-    // Aircraft should move toward target even when facing is not aligned
+    // C++ parity: aircraft always moves in CURRENT facing direction (north),
+    // not toward the target. It will gradually rotate east and curve toward it.
     badr.moveToward(targetPos, badr.stats.speed);
 
-    const distMoved = Math.sqrt((badr.pos.x - startX) ** 2 + (badr.pos.y - badr.pos.y) ** 2);
+    // Facing NORTH means Y movement (negative), not X movement
+    const distMoved = Math.sqrt((badr.pos.x - startX) ** 2 + (badr.pos.y - startY) ** 2);
     expect(distMoved).toBeGreaterThan(0);
   });
 
@@ -488,14 +491,17 @@ describe('BADR movement — aircraft moveToward (drive.cpp/aircraft.cpp)', () =>
     const targetPos = { x: 10 * CELL_SIZE + CELL_SIZE / 2 + CELL_SIZE * 3, y: 10 * CELL_SIZE + CELL_SIZE / 2 }; // due East
 
     const tankStartX = tank.pos.x;
-    const badrStartX = badr.pos.x;
+    const tankStartY = tank.pos.y;
+    const badrStartY = badr.pos.y;
 
     tank.moveToward(targetPos, tank.stats.speed);
     badr.moveToward(targetPos, badr.stats.speed);
 
     // Tank should NOT have moved (still rotating)
     expect(tank.pos.x).toBe(tankStartX);
-    // BADR SHOULD have moved (aircraft never stop to rotate)
-    expect(badr.pos.x).not.toBe(badrStartX);
+    expect(tank.pos.y).toBe(tankStartY);
+    // BADR SHOULD have moved — facing NORTH, so Y changes (not X)
+    // C++ parity: aircraft moves in current facing direction, not toward target
+    expect(badr.pos.y).not.toBe(badrStartY);
   });
 });

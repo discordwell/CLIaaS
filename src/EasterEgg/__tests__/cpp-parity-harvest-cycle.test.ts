@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   CELL_SIZE, MAP_CELLS,
-  House, Mission, AnimState, UnitType,
+  House, Mission, AnimState, UnitType, Dir,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -402,50 +402,59 @@ describe('harvest timing — one bail every 10 ticks', () => {
 //    C++ parity: unloading takes 14 ticks, credits dumped as lump sum at end
 // =============================================================================
 
-describe('unload timing — C++ drip-feed: 1 bail per tick', () => {
-  it('unloading completes after oreLoad ticks (1 bail per tick)', () => {
+describe('unload timing — C++ lump-sum at end of 22-tick dump', () => {
+  it('unloading completes after 22 ticks (rotation + dump animation)', () => {
+    // C++ unit.cpp:2348-2390: rotate to DIR_W, then 22-stage dump, lump-sum at end.
     const ctx = makeContext();
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W; // pre-rotated so dump starts immediately
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 28;
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    // After 27 ticks, 1 bail remaining
-    for (let i = 0; i < 27; i++) {
+    // After 21 ticks, still unloading (dump animation in progress)
+    for (let i = 0; i < 21; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.harvesterState).toBe('unloading');
-    expect(harv.oreLoad).toBe(1);
+    expect(harv.oreLoad).toBe(28); // not deposited yet
 
-    // Tick 28 — last bail deposited, unload completes
+    // Tick 22 — lump-sum deposit, unload completes
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
   });
 
-  it('drip-feed credit deposit: addCredits called once per bail', () => {
+  it('lump-sum credit deposit: addCredits called once at tick 22', () => {
+    // C++ unit.cpp:2383: House->Harvested(Credit_Load()) — single lump-sum deposit
     let totalDeposited = 0;
     const addCredits = vi.fn((n: number) => { totalDeposited += n; });
     const ctx = makeContext({ addCredits });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 28;
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
-    expect(addCredits).toHaveBeenCalledTimes(28);
+    expect(addCredits).toHaveBeenCalledTimes(1);
     expect(totalDeposited).toBe(700);
   });
 
-  it('AI harvester deposits into houseCredits map via drip-feed', () => {
+  it('AI harvester deposits into houseCredits map via lump-sum', () => {
+    // C++ lump-sum: AI harvester deposits full credit value at end of dump
     const houseCredits = new Map<House, number>();
     houseCredits.set(House.USSR, 100);
     const ctx = makeContext({
@@ -455,11 +464,14 @@ describe('unload timing — C++ drip-feed: 1 bail per tick', () => {
     const harv = makeHarvester(House.USSR, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 28;
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -467,23 +479,27 @@ describe('unload timing — C++ drip-feed: 1 bail per tick', () => {
   });
 
   it('unload plays sound every 5 ticks for player harvester', () => {
+    // C++ unit.cpp: chime during dump animation at tick multiples of 5
     const playSound = vi.fn();
     const ctx = makeContext({ playSound });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W;
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
     ctx.entities.push(harv);
 
-    // Drip-feed: 10 ticks to unload 10 bails
-    for (let i = 0; i < 10; i++) {
+    // Run 22 ticks (full dump animation)
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
-    // Sound plays at ticks 5, 10 => 2 times
+    // Sound plays at harvestTick 5, 10, 15, 20 => 4 times (within first 22 ticks)
     const healCalls = playSound.mock.calls.filter(c => c[0] === 'heal');
-    expect(healCalls.length).toBe(2);
+    expect(healCalls.length).toBe(4);
   });
 });
 
@@ -1051,10 +1067,11 @@ describe('dock cell calculation — C++ refinery entrance', () => {
 
     updateHarvester(ctx, harv);
 
-    // PROC is 3x3, so dock cell should be at (55+1, 55+3) = (56, 58)
+    // PROC is 3x3, so dock cell should be at (55+1, 55+2) = (56, 57)
+    // C++ building.cpp:306 Adjacent_Cell(Center, DIR_S) → south-center of footprint
     const [procW, procH] = STRUCTURE_SIZE['PROC'] ?? [3, 3];
     const expectedDockCx = 55 + 1;
-    const expectedDockCy = 55 + procH;
+    const expectedDockCy = 55 + procH - 1;
     expect(harv.moveTarget).not.toBeNull();
     const targetCx = Math.floor((harv.moveTarget!.x - CELL_SIZE / 2) / CELL_SIZE);
     const targetCy = Math.floor((harv.moveTarget!.y - CELL_SIZE / 2) / CELL_SIZE);
@@ -1262,26 +1279,29 @@ describe('complete harvest-unload cycle integration', () => {
     // Place harvester directly at refinery dock cell for simplicity
     const [, procH] = STRUCTURE_SIZE['PROC'] ?? [3, 3];
     const dockCx = 55 + 1;
-    const dockCy = 55 + procH;
+    const dockCy = 55 + procH - 1;
     const harv = makeHarvester(House.Spain, dockCx, dockCy);
 
     // Pre-load harvester with full gold load
     harv.harvesterState = 'unloading';
     harv.harvestTick = 0;
+    harv.facing = Dir.W; // pre-rotated to skip rotation phase
+    harv.desiredFacing = Dir.W;
+    harv.bodyFacing32 = Dir.W * 4;
     harv.oreLoad = 28;
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
-    // C++ drip-feed: 28 ticks to unload 28 bails
-    for (let i = 0; i < 28; i++) {
+    // C++ lump-sum: 22-tick dump animation, credit deposit at end
+    for (let i = 0; i < 22; i++) {
       updateHarvester(ctx, harv);
     }
 
     expect(harv.harvesterState).toBe('idle');
     expect(harv.oreLoad).toBe(0);
     expect(harv.oreCreditValue).toBe(0);
-    // Drip-feed: addCredits called 28 times, 25 per bail
-    expect(addCredits).toHaveBeenCalledTimes(28);
+    // Lump-sum: addCredits called once with full amount
+    expect(addCredits).toHaveBeenCalledTimes(1);
   });
 });
 

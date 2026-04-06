@@ -26,7 +26,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  UnitType, House, CELL_SIZE, Mission, AnimState,
+  UnitType, House, CELL_SIZE, Mission, AnimState, Dir,
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
   SuperweaponType, SUPERWEAPON_DEFS,
   armorIndex, worldToCell, buildDefaultAlliances,
@@ -1159,6 +1159,10 @@ describe('Aircraft state machine for paradrop delivery (aircraft.cpp)', () => {
     badr.aircraftState = 'flying';
     badr.flightAltitude = Entity.FLIGHT_ALTITUDE;
     badr.mission = Mission.ATTACK;
+    // Pre-face toward target — aircraft move in current facing direction (curved path)
+    badr.facing = Dir.E;
+    badr.desiredFacing = Dir.E;
+    badr.bodyFacing32 = Dir.E * 4;
 
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 30, 10);
     badr.target = victim;

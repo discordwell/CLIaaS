@@ -44,8 +44,9 @@ beforeEach(() => resetEntityIds());
 
 describe('Core moveToward — speed class behavior', () => {
   it('infantry (FOOT) moves at lepton-quantized speed per tick', () => {
-    // C++ accumulator: speed is converted to leptons, quantized to PIXEL_LEPTON_W steps.
-    // E1 speed=4 → 4*0.24=0.96 px/tick → floor(0.96/LP)=10 leptons → 10/10=1 step → 0.9375px
+    // C++ infantry uses Coord_Move (not SpeedAccum): maxspeed * sin/cos >> 7
+    // E1 speed=4 → 4*0.24=0.96 px/tick → floor(0.96/LP)=10 leptons
+    // Cardinal: (10 * 127) >> 7 = 9 leptons/tick → 9 * LP = 0.84375 px
     const inf = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     inf.facing = Dir.E;
     inf.desiredFacing = Dir.E;
@@ -56,16 +57,16 @@ describe('Core moveToward — speed class behavior', () => {
     inf.moveToward({ x: 300, y: 100 }, speed);
 
     const moved = inf.pos.x - startX;
-    // C++ lepton accumulator with 255/256 fraction:
-    // MaxSpeed leptons = floor(speed/LP), SpeedAdd = floor(MaxSpeed*255/256)
-    const maxLeptons = Math.floor(speed / LP);
-    const speedAdd = Math.floor((maxLeptons * 255) / 256);
-    const expectedMove = Math.floor(speedAdd / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    // C++ infantry Coord_Move: maxspeed = floor(speed/LP), axisLeptons = (maxspeed * 127) >> 7
+    const maxspeed = Math.floor(speed / LP);
+    const axisLeptons = (maxspeed * 127) >> 7; // cardinal sinFactor=127
+    const expectedMove = axisLeptons * LP;
     expect(moved).toBeCloseTo(expectedMove, 4);
   });
 
   it('vehicle (TRACK) moves at lepton-quantized speed when facing is aligned', () => {
-    // C++ accumulator: 2TNK speed=8 → MaxSpeed=20 → speedAdd=floor(20*255/256)=19 → 1 step → 0.9375px
+    // C++ vehicle SpeedAccum + Coord_Move: 2TNK speed=8 → MaxSpeed=20 → speedAdd=19
+    // actual=19, 19%10=9, moveLeptons=10. Coord_Move cardinal: (10*127)>>7=9 → 9*LP=0.84375px
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
     tank.desiredFacing = Dir.E;
@@ -77,9 +78,13 @@ describe('Core moveToward — speed class behavior', () => {
     tank.moveToward({ x: 300, y: 100 }, speed);
 
     const moved = tank.pos.x - startX;
+    // Vehicle: SpeedAccum accumulator then Coord_Move sin/cos
     const maxLeptons = Math.floor(speed / LP);
     const speedAdd = Math.floor((maxLeptons * 255) / 256);
-    const expectedMove = Math.floor(speedAdd / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    const actual = speedAdd; // first tick, speedAccum=0
+    const moveLeptons = actual - (actual % PIXEL_LEPTON_W);
+    const axisLeptons = (moveLeptons * 127) >> 7; // cardinal sinFactor=127
+    const expectedMove = axisLeptons * LP;
     expect(moved).toBeCloseTo(expectedMove, 4);
   });
 
@@ -168,20 +173,24 @@ describe('Core moveToward — speed class behavior', () => {
 
 describe('Diagonal movement', () => {
   it('diagonal speed is same per-step as cardinal (lepton-quantized)', () => {
-    // C++ accumulator: speed=5 → floor(5/LP)=53 leptons → 53/10=5 steps → 50*LP=4.6875px
+    // C++ infantry Coord_Move diagonal: maxspeed=53, (53*90)>>7=37 leptons/axis
+    // dist = 37*LP * sqrt(2) = 3.46875 * 1.414 ≈ 4.905 px
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     const speed = 5;
     const target = { x: 200, y: 200 }; // diagonal SE-ish
+    const startX = unit.pos.x;
+    const startY = unit.pos.y;
 
     unit.rotTickedThisFrame = false;
     unit.moveToward(target, speed);
 
-    const dx = unit.pos.x - 100;
-    const dy = unit.pos.y - 100;
+    const dx = unit.pos.x - startX;
+    const dy = unit.pos.y - startY;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    // Lepton quantization: floor(5/LP)=53, 53/10=5 steps, 50*LP=4.6875
-    const expectedLeptons = Math.floor(speed / LP);
-    const expectedDist = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    // Infantry Coord_Move: maxspeed=floor(speed/LP), axisLeptons=(maxspeed*90)>>7
+    const maxspeed = Math.floor(speed / LP);
+    const axisLeptons = (maxspeed * 90) >> 7; // diagonal sinFactor=90
+    const expectedDist = axisLeptons * LP * Math.sqrt(2);
     expect(dist).toBeCloseTo(expectedDist, 3);
   });
 
@@ -920,12 +929,13 @@ describe('Terrain speed multipliers', () => {
 describe('Edge cases — zero distance, death, speed=0', () => {
   it('moveToward with zero distance returns true (already arrived)', () => {
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
-    const target = { x: 100, y: 100 }; // same position
+    // Target at same lepton-quantized position as entity
+    const target = { x: unit.pos.x, y: unit.pos.y };
 
     const arrived = unit.moveToward(target, 5);
     expect(arrived).toBe(true);
-    expect(unit.pos.x).toBe(100);
-    expect(unit.pos.y).toBe(100);
+    expect(unit.pos.x).toBe(target.x);
+    expect(unit.pos.y).toBe(target.y);
   });
 
   it('dead entity has alive=false and mission=DIE', () => {
@@ -1086,13 +1096,12 @@ describe('movementSpeed formula components', () => {
     unit.rotTickedThisFrame = false;
     unit.moveToward({ x: 300, y: 100 }, baseSpeed);
 
-    // C++ chain: maxLeptons = floor(5*1.5 / LP) = floor(80) = 80
-    // speedAdd = floor(80 * 255 / 256) = floor(79.6875) = 79
-    // 79 / 10 = 7 steps, remainder 9 → 7 * 10 * LP = 6.5625 px
+    // Infantry Coord_Move: maxspeed = floor(5*1.5 / LP) = 80
+    // Cardinal: (80 * 127) >> 7 = 79 leptons → 79 * LP = 7.40625 px
     const moved = unit.pos.x - startX;
-    const maxLep = Math.floor((baseSpeed * 1.5) / LP);
-    const sa = Math.floor((maxLep * 255) / 256);
-    const expected = Math.floor(sa / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    const maxspeed = Math.floor((baseSpeed * 1.5) / LP);
+    const axisLeptons = (maxspeed * 127) >> 7; // cardinal sinFactor=127
+    const expected = axisLeptons * LP;
     expect(moved).toBeCloseTo(expected, 3);
   });
 
@@ -1110,9 +1119,10 @@ describe('movementSpeed formula components', () => {
     unit.moveToward({ x: 300, y: 100 }, baseSpeed);
 
     const moved = unit.pos.x - startX;
-    // C++ lepton quantization: floor(5/LP)=53, 53/10=5 steps, 50*LP=4.6875
-    const expectedLeptons = Math.floor(baseSpeed / LP);
-    const expectedMove = Math.floor(expectedLeptons / PIXEL_LEPTON_W) * PIXEL_LEPTON_W * LP;
+    // Infantry Coord_Move: maxspeed=floor(5/LP)=53, cardinal: (53*127)>>7=52 → 52*LP=4.875
+    const maxspeed = Math.floor(baseSpeed / LP);
+    const axisLeptons = (maxspeed * 127) >> 7;
+    const expectedMove = axisLeptons * LP;
     expect(moved).toBeCloseTo(expectedMove, 3);
   });
 });
@@ -1286,7 +1296,8 @@ describe('Multi-step movement — tick-by-tick position tracking', () => {
     }
 
     // Vehicle should have stayed put initially while rotating, then moved
-    expect(positions[1].x).toBe(100); // didn't move X on first tick
+    // Note: lepton quantization means start x may not be exactly 100
+    expect(positions[1].x).toBe(positions[0].x); // didn't move X on first tick
     expect(movedOnce).toBe(true);
   });
 

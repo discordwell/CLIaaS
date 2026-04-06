@@ -468,14 +468,17 @@ describe('MIG movement — aircraft moveToward (drive.cpp/aircraft.cpp)', () => 
     const targetPos = { x: 10 * CELL_SIZE + CELL_SIZE / 2 + CELL_SIZE * 3, y: 10 * CELL_SIZE + CELL_SIZE / 2 }; // due East
 
     const tankStartX = tank.pos.x;
-    const migStartX = mig.pos.x;
+    const tankStartY = tank.pos.y;
+    const migStartY = mig.pos.y;
 
     tank.moveToward(targetPos, tank.stats.speed);
     mig.moveToward(targetPos, mig.stats.speed);
 
     // Tank should NOT have moved (still rotating)
     expect(tank.pos.x).toBe(tankStartX);
-    // MIG SHOULD have moved (aircraft never stop to rotate)
-    expect(mig.pos.x).not.toBe(migStartX);
+    expect(tank.pos.y).toBe(tankStartY);
+    // MIG SHOULD have moved — facing NORTH, so Y changes (not X)
+    // C++ parity: aircraft moves in current facing direction, not toward target
+    expect(mig.pos.y).not.toBe(migStartY);
   });
 });

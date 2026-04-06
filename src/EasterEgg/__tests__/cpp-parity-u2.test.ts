@@ -475,12 +475,15 @@ describe('U2 movement -- aircraft moveToward (drive.cpp/aircraft.cpp)', () => {
     u2.bodyFacing32 = Dir.N * 4;
 
     const startX = u2.pos.x;
-    const targetPos = { x: startX + CELL_SIZE * 3, y: u2.pos.y }; // due East
+    const startY = u2.pos.y;
+    const targetPos = { x: startX + CELL_SIZE * 3, y: startY }; // due East
 
-    // Aircraft should move toward target even when facing is not aligned
+    // C++ parity: aircraft always moves in CURRENT facing direction (north),
+    // not toward the target. It will gradually rotate east and curve toward it.
     u2.moveToward(targetPos, u2.stats.speed);
 
-    const distMoved = Math.sqrt((u2.pos.x - startX) ** 2 + (u2.pos.y - u2.pos.y) ** 2);
+    // Facing NORTH means Y movement (negative), not X movement
+    const distMoved = Math.sqrt((u2.pos.x - startX) ** 2 + (u2.pos.y - startY) ** 2);
     expect(distMoved).toBeGreaterThan(0);
   });
 
@@ -524,14 +527,17 @@ describe('U2 movement -- aircraft moveToward (drive.cpp/aircraft.cpp)', () => {
     const targetPos = { x: 10 * CELL_SIZE + CELL_SIZE / 2 + CELL_SIZE * 3, y: 10 * CELL_SIZE + CELL_SIZE / 2 }; // due East
 
     const tankStartX = tank.pos.x;
-    const u2StartX = u2.pos.x;
+    const tankStartY = tank.pos.y;
+    const u2StartY = u2.pos.y;
 
     tank.moveToward(targetPos, tank.stats.speed);
     u2.moveToward(targetPos, u2.stats.speed);
 
     // Tank should NOT have moved (still rotating)
     expect(tank.pos.x).toBe(tankStartX);
-    // U2 SHOULD have moved (aircraft never stop to rotate)
-    expect(u2.pos.x).not.toBe(u2StartX);
+    expect(tank.pos.y).toBe(tankStartY);
+    // U2 SHOULD have moved — facing NORTH, so Y changes (not X)
+    // C++ parity: aircraft moves in current facing direction, not toward target
+    expect(u2.pos.y).not.toBe(u2StartY);
   });
 });

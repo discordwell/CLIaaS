@@ -577,10 +577,23 @@ describe('BUILDING_FRAME_TABLE completeness and sanity', () => {
   });
 
   it('static buildings have idleAnimCount === 0', () => {
-    const staticBuildings = ['fact', 'weap', 'barr', 'tent', 'silo', 'proc', 'fix', 'dome', 'powr', 'hbox', 'pbox'];
+    // Buildings that have genuine idle animation loops (fact, weap, barr, tent, dome, powr)
+    // are now correctly marked as animated per C++ bdata.cpp _anims table.
+    // Only truly static buildings remain here.
+    const staticBuildings = ['silo', 'proc', 'fix', 'hbox', 'pbox'];
     for (const bldg of staticBuildings) {
       const entry = BUILDING_FRAME_TABLE[bldg];
       expect(entry?.idleAnimCount, `${bldg} should NOT have animation frames`).toBe(0);
+    }
+  });
+
+  it('animated production buildings have idleAnimCount > 0', () => {
+    // C++ bdata.cpp: FACT=26 frames (pump), WEAP=32 (bay door), BARR/TENT=10 (door),
+    // DOME=16 (radar sweep), POWR=8 (blade rotation)
+    const animatedProduction = ['fact', 'weap', 'barr', 'tent', 'dome', 'powr'];
+    for (const bldg of animatedProduction) {
+      const entry = BUILDING_FRAME_TABLE[bldg];
+      expect(entry?.idleAnimCount, `${bldg} should have animation frames`).toBeGreaterThan(0);
     }
   });
 });

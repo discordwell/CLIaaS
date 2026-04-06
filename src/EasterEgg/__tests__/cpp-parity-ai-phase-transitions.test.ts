@@ -56,7 +56,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -95,12 +95,14 @@ function addEconomyPrereqs(ctx: AIContext, house: House): void {
 }
 
 // =============================================================================
-// 1. Tick Gating (C++ HOUSE.CPP: AI() runs on frame % TICKS_PER_SECOND == 0)
+// 1. Tick Gating
+// TS AI tick starts at 1 (C++ Frame starts at 0). TS uses (tick-1) % 150 === 0,
+// so the planner fires at tick 1, 151, 301, etc.
 // =============================================================================
 
-describe('Tick gating — only runs on tick % 150 === 0', () => {
-  it('does nothing on tick 1 (non-150-aligned)', () => {
-    const ctx = makeMockAIContext({ tick: 1 });
+describe('Tick gating — only runs on (tick-1) % 150 === 0', () => {
+  it('does nothing on tick 0 (before first tick)', () => {
+    const ctx = makeMockAIContext({ tick: 0 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     addEconomyPrereqs(ctx, House.USSR);
 
@@ -110,8 +112,8 @@ describe('Tick gating — only runs on tick % 150 === 0', () => {
     expect(state.phase).toBe('economy');
   });
 
-  it('does nothing on tick 149', () => {
-    const ctx = makeMockAIContext({ tick: 149 });
+  it('does nothing on tick 150 (one before window)', () => {
+    const ctx = makeMockAIContext({ tick: 150 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     addEconomyPrereqs(ctx, House.USSR);
 
@@ -119,8 +121,8 @@ describe('Tick gating — only runs on tick % 150 === 0', () => {
     expect(state.phase).toBe('economy');
   });
 
-  it('runs on tick 0', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('runs on tick 1 (first fire)', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     addEconomyPrereqs(ctx, House.USSR);
 
@@ -128,26 +130,26 @@ describe('Tick gating — only runs on tick % 150 === 0', () => {
     expect(state.phase).toBe('buildup');
   });
 
-  it('runs on tick 150', () => {
-    const ctx = makeMockAIContext({ tick: 150 });
-    const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
-    addEconomyPrereqs(ctx, House.USSR);
-
-    updateAIStrategicPlanner(ctx);
-    expect(state.phase).toBe('buildup');
-  });
-
-  it('runs on tick 300 (second multiple)', () => {
-    const ctx = makeMockAIContext({ tick: 300 });
-    const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
-    addEconomyPrereqs(ctx, House.USSR);
-
-    updateAIStrategicPlanner(ctx);
-    expect(state.phase).toBe('buildup');
-  });
-
-  it('does nothing on tick 151 (just past window)', () => {
+  it('runs on tick 151', () => {
     const ctx = makeMockAIContext({ tick: 151 });
+    const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
+    addEconomyPrereqs(ctx, House.USSR);
+
+    updateAIStrategicPlanner(ctx);
+    expect(state.phase).toBe('buildup');
+  });
+
+  it('runs on tick 301 (second multiple)', () => {
+    const ctx = makeMockAIContext({ tick: 301 });
+    const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
+    addEconomyPrereqs(ctx, House.USSR);
+
+    updateAIStrategicPlanner(ctx);
+    expect(state.phase).toBe('buildup');
+  });
+
+  it('does nothing on tick 152 (just past window)', () => {
+    const ctx = makeMockAIContext({ tick: 152 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     addEconomyPrereqs(ctx, House.USSR);
 
@@ -162,7 +164,7 @@ describe('Tick gating — only runs on tick % 150 === 0', () => {
 
 describe('IQ=0 houses are skipped entirely', () => {
   it('does not transition phase when IQ is 0', () => {
-    const ctx = makeMockAIContext({ tick: 150 });
+    const ctx = makeMockAIContext({ tick: 151 });
     const state = addAIHouse(ctx, House.USSR, { iq: 0, phase: 'economy' });
     addEconomyPrereqs(ctx, House.USSR);
 
@@ -171,7 +173,7 @@ describe('IQ=0 houses are skipped entirely', () => {
   });
 
   it('does not update harvesterCount when IQ is 0', () => {
-    const ctx = makeMockAIContext({ tick: 150 });
+    const ctx = makeMockAIContext({ tick: 151 });
     const state = addAIHouse(ctx, House.USSR, { iq: 0, harvesterCount: 5 });
     ctx.entities.push(new Entity(UnitType.V_HARV, House.USSR, 200, 200));
 
@@ -181,7 +183,7 @@ describe('IQ=0 houses are skipped entirely', () => {
   });
 
   it('does not update refineryCount when IQ is 0', () => {
-    const ctx = makeMockAIContext({ tick: 150 });
+    const ctx = makeMockAIContext({ tick: 151 });
     const state = addAIHouse(ctx, House.USSR, { iq: 0, refineryCount: 3 });
     ctx.structures.push(makeStructure('PROC', House.USSR));
 
@@ -190,7 +192,7 @@ describe('IQ=0 houses are skipped entirely', () => {
   });
 
   it('does not clear underAttack when IQ is 0', () => {
-    const ctx = makeMockAIContext({ tick: 450 });
+    const ctx = makeMockAIContext({ tick: 451 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 0, underAttack: true, lastBaseAttackTick: 100,
     });
@@ -207,7 +209,7 @@ describe('IQ=0 houses are skipped entirely', () => {
 
 describe('Harvester counting — alive V_HARV for house', () => {
   it('counts alive harvesters for the AI house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.entities.push(
       new Entity(UnitType.V_HARV, House.USSR, 200, 200),
@@ -219,7 +221,7 @@ describe('Harvester counting — alive V_HARV for house', () => {
   });
 
   it('resets harvesterCount to 0 before counting', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, harvesterCount: 99 });
     // No harvesters in the entity list
 
@@ -228,7 +230,7 @@ describe('Harvester counting — alive V_HARV for house', () => {
   });
 
   it('excludes dead harvesters from count', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     const alive = new Entity(UnitType.V_HARV, House.USSR, 200, 200);
     const dead = new Entity(UnitType.V_HARV, House.USSR, 250, 250);
@@ -240,7 +242,7 @@ describe('Harvester counting — alive V_HARV for house', () => {
   });
 
   it('excludes harvesters belonging to other houses', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.entities.push(
       new Entity(UnitType.V_HARV, House.USSR, 200, 200),
@@ -253,7 +255,7 @@ describe('Harvester counting — alive V_HARV for house', () => {
   });
 
   it('does not count non-harvester vehicles', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.entities.push(
       new Entity(UnitType.V_HARV, House.USSR, 200, 200),
@@ -273,7 +275,7 @@ describe('Harvester counting — alive V_HARV for house', () => {
 
 describe('Refinery counting — alive PROC structures for house', () => {
   it('counts alive refineries for the AI house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('PROC', House.USSR, 45, 45),
@@ -285,7 +287,7 @@ describe('Refinery counting — alive PROC structures for house', () => {
   });
 
   it('resets refineryCount to 0 before counting', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, refineryCount: 77 });
 
     updateAIStrategicPlanner(ctx);
@@ -293,7 +295,7 @@ describe('Refinery counting — alive PROC structures for house', () => {
   });
 
   it('excludes dead refineries from count', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('PROC', House.USSR, 45, 45),
@@ -305,7 +307,7 @@ describe('Refinery counting — alive PROC structures for house', () => {
   });
 
   it('excludes refineries from other houses', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('PROC', House.USSR, 45, 45),
@@ -317,7 +319,7 @@ describe('Refinery counting — alive PROC structures for house', () => {
   });
 
   it('does not count non-PROC structures as refineries', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3 });
     ctx.structures.push(
       makeStructure('PROC', House.USSR, 45, 45),
@@ -336,40 +338,40 @@ describe('Refinery counting — alive PROC structures for house', () => {
 
 describe('UnderAttack timeout — clears after 150 ticks since last base attack', () => {
   it('clears underAttack when tick - lastBaseAttackTick > 150', () => {
-    const ctx = makeMockAIContext({ tick: 450 });
+    const ctx = makeMockAIContext({ tick: 451 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, underAttack: true, lastBaseAttackTick: 200,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 450 - 200 = 250 > 150 => clear
+    // 451 - 200 = 251 > 150 => clear
     expect(state.underAttack).toBe(false);
   });
 
   it('keeps underAttack true when tick - lastBaseAttackTick === 150 (not > 150)', () => {
-    const ctx = makeMockAIContext({ tick: 450 });
+    const ctx = makeMockAIContext({ tick: 451 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 3, underAttack: true, lastBaseAttackTick: 300,
+      iq: 3, underAttack: true, lastBaseAttackTick: 301,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 450 - 300 = 150, condition is > 150, so stays true
+    // 451 - 301 = 150, condition is > 150, so stays true
     expect(state.underAttack).toBe(true);
   });
 
   it('keeps underAttack true when within 150 ticks of last attack', () => {
-    const ctx = makeMockAIContext({ tick: 300 });
+    const ctx = makeMockAIContext({ tick: 301 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, underAttack: true, lastBaseAttackTick: 200,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 300 - 200 = 100 < 150 => stays true
+    // 301 - 200 = 101 < 150 => stays true
     expect(state.underAttack).toBe(true);
   });
 
   it('does not set underAttack to true when already false', () => {
-    const ctx = makeMockAIContext({ tick: 450 });
+    const ctx = makeMockAIContext({ tick: 451 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, underAttack: false, lastBaseAttackTick: 200,
     });
@@ -386,7 +388,7 @@ describe('UnderAttack timeout — clears after 150 ticks since last base attack'
 
 describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power', () => {
   it('transitions when TENT, WEAP, and 2 POWR are present', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     addEconomyPrereqs(ctx, House.USSR);
 
@@ -395,7 +397,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('stays in economy without TENT (no barracks)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('WEAP', House.USSR, 47, 45),
@@ -408,7 +410,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('stays in economy without WEAP', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.USSR, 45, 45),
@@ -421,7 +423,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('stays in economy with only 1 power plant (needs >= 2)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.USSR, 45, 45),
@@ -434,7 +436,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('transitions with BARR instead of TENT (aiHasPrereq treats BARR as TENT)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('BARR', House.USSR, 45, 45),
@@ -448,7 +450,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('transitions with mixed POWR + APWR (1 POWR + 1 APWR >= 2)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.USSR, 45, 45),
@@ -462,7 +464,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('transitions with 2 APWR (no POWR needed)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.USSR, 45, 45),
@@ -476,7 +478,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('stays in economy with 0 power plants', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.USSR, 45, 45),
@@ -488,7 +490,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('ignores dead prerequisite structures', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.USSR, 45, 45, { alive: false }),
@@ -503,7 +505,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
   });
 
   it('ignores other house structures for prereqs', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.structures.push(
       makeStructure('TENT', House.Spain, 45, 45),  // wrong house
@@ -523,7 +525,7 @@ describe('Economy -> Buildup transition — requires TENT/BARR + WEAP + 2 power'
 
 describe('Buildup -> Attack transition — attackPool.size >= attackThreshold', () => {
   it('transitions when pool reaches threshold', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const pool = new Set([1, 2, 3, 4, 5, 6]);
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 6,
@@ -535,7 +537,7 @@ describe('Buildup -> Attack transition — attackPool.size >= attackThreshold', 
   });
 
   it('transitions when pool exceeds threshold', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const pool = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 6,
@@ -547,7 +549,7 @@ describe('Buildup -> Attack transition — attackPool.size >= attackThreshold', 
   });
 
   it('stays in buildup when pool is below threshold', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const pool = new Set([1, 2, 3]);
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 6,
@@ -559,7 +561,7 @@ describe('Buildup -> Attack transition — attackPool.size >= attackThreshold', 
   });
 
   it('stays in buildup with empty pool', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 6,
     });
@@ -575,7 +577,7 @@ describe('Buildup -> Attack transition — attackPool.size >= attackThreshold', 
 
 describe('Attack -> Buildup transition — attackPool.size === 0', () => {
   it('transitions back to buildup when attack pool is empty', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'attack',
     });
@@ -586,7 +588,7 @@ describe('Attack -> Buildup transition — attackPool.size === 0', () => {
   });
 
   it('stays in attack phase when pool has units', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const pool = new Set([1, 2, 3]);
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'attack',
@@ -598,7 +600,7 @@ describe('Attack -> Buildup transition — attackPool.size === 0', () => {
   });
 
   it('stays in attack phase with exactly 1 unit remaining', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const pool = new Set([42]);
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'attack',
@@ -616,7 +618,7 @@ describe('Attack -> Buildup transition — attackPool.size === 0', () => {
 
 describe('Multiple houses transition independently', () => {
   it('one house transitions while another stays (different phases)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
 
     // USSR: economy with prereqs met -> should transition to buildup
     const ussrState = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
@@ -637,7 +639,7 @@ describe('Multiple houses transition independently', () => {
   });
 
   it('both houses transition independently in same tick', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
 
     // USSR: buildup with full pool -> attack
     const ussrPool = new Set([1, 2, 3, 4, 5, 6]);
@@ -658,7 +660,7 @@ describe('Multiple houses transition independently', () => {
   });
 
   it('harvester counts are per-house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const ussrState = addAIHouse(ctx, House.USSR, { iq: 3 });
     const greeceState = addAIHouse(ctx, House.Greece, { iq: 3 });
 
@@ -675,7 +677,7 @@ describe('Multiple houses transition independently', () => {
   });
 
   it('refinery counts are per-house', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const ussrState = addAIHouse(ctx, House.USSR, { iq: 3 });
     const greeceState = addAIHouse(ctx, House.Greece, { iq: 3 });
 
@@ -699,10 +701,10 @@ describe('Multiple houses transition independently', () => {
 
 describe('Full phase cycle — economy -> buildup -> attack -> buildup', () => {
   it('completes full economy -> buildup -> attack -> buildup cycle', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
 
-    // Phase 1: economy, no prereqs yet
+    // Phase 1: economy, no prereqs yet — fires at tick 1 but no prereqs
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('economy');
 
@@ -710,12 +712,12 @@ describe('Full phase cycle — economy -> buildup -> attack -> buildup', () => {
     addEconomyPrereqs(ctx, House.USSR);
 
     // Phase 2: economy -> buildup
-    ctx.tick = 150;
+    ctx.tick = 151;
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('buildup');
 
     // Phase 3: buildup, pool not ready
-    ctx.tick = 300;
+    ctx.tick = 301;
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('buildup');
 
@@ -725,12 +727,12 @@ describe('Full phase cycle — economy -> buildup -> attack -> buildup', () => {
     }
 
     // Phase 4: buildup -> attack
-    ctx.tick = 450;
+    ctx.tick = 451;
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('attack');
 
     // Phase 5: attack, still has units
-    ctx.tick = 600;
+    ctx.tick = 601;
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('attack');
 
@@ -738,7 +740,7 @@ describe('Full phase cycle — economy -> buildup -> attack -> buildup', () => {
     state.attackPool.clear();
 
     // Phase 6: attack -> buildup (cycle restarts)
-    ctx.tick = 750;
+    ctx.tick = 751;
     updateAIStrategicPlanner(ctx);
     expect(state.phase).toBe('buildup');
   });
@@ -750,19 +752,18 @@ describe('Full phase cycle — economy -> buildup -> attack -> buildup', () => {
 
 describe('Edge cases and boundary conditions', () => {
   it('handles no AI houses gracefully', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     // No houses added
     expect(() => updateAIStrategicPlanner(ctx)).not.toThrow();
   });
 
   it('economy phase does not jump directly to attack', () => {
     // Even with a full attack pool, economy goes to buildup first (not attack)
-    const ctx = makeMockAIContext({ tick: 0 });
-    const pool = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'economy', attackThreshold: 4,
     });
-    state.attackPool = pool;
+    state.attackPool = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
     addEconomyPrereqs(ctx, House.USSR);
 
     updateAIStrategicPlanner(ctx);
@@ -771,12 +772,11 @@ describe('Edge cases and boundary conditions', () => {
   });
 
   it('buildup -> attack uses >= comparison (exact threshold triggers)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
-    const pool = new Set([1, 2, 3, 4]);
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 4,
     });
-    state.attackPool = pool;
+    state.attackPool = new Set([1, 2, 3, 4]);
 
     updateAIStrategicPlanner(ctx);
     // 4 >= 4 should trigger
@@ -784,12 +784,11 @@ describe('Edge cases and boundary conditions', () => {
   });
 
   it('buildup stays when pool is one below threshold', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
-    const pool = new Set([1, 2, 3]);
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 4,
     });
-    state.attackPool = pool;
+    state.attackPool = new Set([1, 2, 3]);
 
     updateAIStrategicPlanner(ctx);
     // 3 < 4 should not trigger
@@ -797,13 +796,13 @@ describe('Edge cases and boundary conditions', () => {
   });
 
   it('underAttack boundary: clears at exactly 151 ticks elapsed', () => {
-    const ctx = makeMockAIContext({ tick: 300 });
+    const ctx = makeMockAIContext({ tick: 301 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, underAttack: true, lastBaseAttackTick: 149,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 300 - 149 = 151 > 150 => clear
+    // 301 - 149 = 152 > 150 => clear
     expect(state.underAttack).toBe(false);
   });
 });

@@ -871,8 +871,9 @@ describe('Harvester Pipeline', () => {
       simulateHarvesterTick(harv, map, [refinery], House.Spain, true, 0);
       expect(harv.harvesterState).toBe('seeking');
 
-      // Step 2: seeking → harvesting (simulate arrival by placing harvester at ore cell)
-      harv.pos = { x: 54 * CELL_SIZE + CELL_SIZE / 2, y: 52 * CELL_SIZE + CELL_SIZE / 2 };
+      // Step 2: seeking → harvesting (simulate arrival by teleporting harvester to ore cell)
+      // Must use setPosition to update leptonX/leptonY so harv.cell returns correct coords
+      harv.setPosition(54 * CELL_SIZE + CELL_SIZE / 2, 52 * CELL_SIZE + CELL_SIZE / 2);
       // Also need ore overlay at harvester's cell
       simulateHarvesterTick(harv, map, [refinery], House.Spain, true, 1);
       expect(harv.harvesterState).toBe('harvesting');
@@ -889,7 +890,7 @@ describe('Harvester Pipeline', () => {
       // Step 4: returning → simulate arrival at refinery
       harv.mission = Mission.GUARD; // simulate move completion
       // Move harvester next to refinery footprint (edge distance <= 1)
-      harv.pos = { x: 53 * CELL_SIZE + CELL_SIZE / 2, y: 50 * CELL_SIZE + CELL_SIZE / 2 };
+      harv.setPosition(53 * CELL_SIZE + CELL_SIZE / 2, 50 * CELL_SIZE + CELL_SIZE / 2);
       simulateHarvesterTick(harv, map, [refinery], House.Spain, true, 21);
       expect(harv.harvesterState).toBe('unloading');
 

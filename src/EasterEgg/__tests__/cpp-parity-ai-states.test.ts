@@ -64,7 +64,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
   const alliances = buildDefaultAlliances();
   return {
     entities: [], entityById: new Map(), structures: [],
-    map, tick: 0, playerHouse: House.Spain,
+    map, tick: 1, playerHouse: House.Spain,
     scenarioId: 'SCG01EA', difficulty: 'normal' as Difficulty,
     aiStates: new Map(), houseCredits: new Map(),
     houseIQs: new Map(), houseTechLevels: new Map(),
@@ -98,7 +98,7 @@ function addAIHouse(ctx: AIContext, house: House, overrides: Partial<AIHouseStat
 
 describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () => {
   it('AI enters BROKE state when money < 25', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 10);
 
@@ -108,7 +108,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI enters BROKE at boundary: money = 24', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 24);
 
@@ -118,7 +118,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI enters BROKE at money = 0', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 0);
 
@@ -128,7 +128,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI does NOT enter BROKE when money = 25 (boundary: >= 25 is not broke)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 25);
 
@@ -138,7 +138,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI does NOT enter BROKE when money = 100', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 100);
 
@@ -148,7 +148,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI exits BROKE state when money >= 25', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup', broke: true });
     ctx.houseCredits.set(House.USSR, 25);
 
@@ -158,7 +158,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI exits BROKE state when money rises to 1000', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup', broke: true });
     ctx.houseCredits.set(House.USSR, 1000);
 
@@ -168,7 +168,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('AI stays BROKE when money is still < 25', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup', broke: true });
     ctx.houseCredits.set(House.USSR, 10);
 
@@ -178,7 +178,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('BROKE state prevents new construction', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', broke: true,
       productionEnabled: true,
@@ -195,7 +195,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('construction is not blocked when BROKE is false (build queue is consumed)', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', broke: false,
       productionEnabled: true,
@@ -215,7 +215,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
   });
 
   it('BROKE with no credits entry (undefined) triggers broke', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     // Don't set any credits — houseCredits.get returns undefined → ?? 0 → < 25
 
@@ -231,7 +231,7 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
 
 describe('ENDGAME state — no production buildings triggers fire-sale + all-hunt', () => {
   it('AI enters ENDGAME when no ConYard, no Barracks, no War Factory remain', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     // Only non-production buildings remain
@@ -246,7 +246,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when FACT is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -260,7 +260,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when TENT is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -274,7 +274,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when BARR is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -288,7 +288,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when WEAP is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -302,7 +302,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when HPAD is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -316,7 +316,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when AFLD is alive', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -330,7 +330,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when no buildings at all (nothing to sell)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     // No structures at all — C++ requires CurBuildings > 0
@@ -341,7 +341,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('AI does NOT enter ENDGAME when underAttack is true (C++ State != STATE_ATTACKED)', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', underAttack: true, lastBaseAttackTick: 0,
     });
@@ -355,7 +355,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('dead production buildings do not prevent ENDGAME', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -369,7 +369,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
   });
 
   it('production buildings belonging to other house do not prevent ENDGAME', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -547,7 +547,7 @@ describe('Do All To Hunt — send all units to HUNT (house.cpp:7354-7393)', () =
 
 describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () => {
   it('entering ENDGAME sells all buildings', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(
@@ -570,7 +570,7 @@ describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () =
   });
 
   it('entering ENDGAME sends all units to HUNT', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
     ctx.structures.push(makeStructure('POWR', House.USSR, 50, 50));
@@ -590,7 +590,7 @@ describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () =
 
   it('already-endgame state re-triggers fire-sale and all-hunt each tick', () => {
     const clearFn = vi.fn();
-    const ctx = makeMockAIContext({ tick: 0, clearStructureFootprint: clearFn });
+    const ctx = makeMockAIContext({ tick: 1, clearStructureFootprint: clearFn });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup', endgame: true });
     ctx.houseCredits.set(House.USSR, 1000);
     // Even with buildings added after endgame set (edge case)
@@ -609,7 +609,7 @@ describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () =
   });
 
   it('ENDGAME prevents construction', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', endgame: true,
       productionEnabled: true,
@@ -684,7 +684,7 @@ describe('aiCheckEndgame — detection of lost production buildings', () => {
 
 describe('Normal state transitions unaffected by new BROKE/ENDGAME states', () => {
   it('economy -> buildup still works when not broke and not endgame', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.houseCredits.set(House.USSR, 5000);
     ctx.structures.push(
@@ -702,7 +702,7 @@ describe('Normal state transitions unaffected by new BROKE/ENDGAME states', () =
   });
 
   it('buildup -> attack still works normally', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, {
       iq: 3, phase: 'buildup', attackThreshold: 4,
     });
@@ -718,7 +718,7 @@ describe('Normal state transitions unaffected by new BROKE/ENDGAME states', () =
   });
 
   it('attack -> buildup still works normally', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'attack' });
     ctx.houseCredits.set(House.USSR, 5000);
     // Empty attack pool
@@ -731,7 +731,7 @@ describe('Normal state transitions unaffected by new BROKE/ENDGAME states', () =
   });
 
   it('BROKE and phase transitions are independent', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'economy' });
     ctx.houseCredits.set(House.USSR, 5); // Will trigger broke
     ctx.structures.push(
@@ -750,7 +750,7 @@ describe('Normal state transitions unaffected by new BROKE/ENDGAME states', () =
   });
 
   it('multi-house: one enters ENDGAME while other continues normally', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+    const ctx = makeMockAIContext({ tick: 1 });
 
     // USSR: no production buildings → ENDGAME
     const ussrState = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });

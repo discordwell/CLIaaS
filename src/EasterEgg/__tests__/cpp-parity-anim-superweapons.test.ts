@@ -317,8 +317,8 @@ describe('Chronosphere (CHRONO_BOX) animation — C++ adata.cpp:1555-1578, house
       e.x === origin.x && e.y === origin.y
     );
     expect(originEffect, 'should have lightning effect at origin').toBeDefined();
-    // C++ uses 'litning' sprite for chronoshift visual
-    expect(originEffect!.sprite).toBe('litning');
+    // C++ adata.cpp:1555-1578 — ANIM_CHRONO_BOX "CHRONBOX" (was incorrectly 'litning')
+    expect(originEffect!.sprite).toBe('chronbox');
   });
 
   it('chronoshift creates lightning effect at destination', () => {
@@ -335,7 +335,7 @@ describe('Chronosphere (CHRONO_BOX) animation — C++ adata.cpp:1555-1578, house
       e.x === target.x && e.y === target.y
     );
     expect(destEffect, 'should have lightning effect at destination').toBeDefined();
-    expect(destEffect!.sprite).toBe('litning');
+    expect(destEffect!.sprite).toBe('chronbox');
   });
 
   it('chronoshift creates exactly 2 effects for vehicle (origin + destination)', () => {
@@ -347,7 +347,7 @@ describe('Chronosphere (CHRONO_BOX) animation — C++ adata.cpp:1555-1578, house
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
-    const lightningEffects = ctx.effects.filter(e => e.sprite === 'litning');
+    const lightningEffects = ctx.effects.filter(e => e.sprite === 'chronbox');
     expect(lightningEffects.length).toBe(2);
   });
 
@@ -361,7 +361,7 @@ describe('Chronosphere (CHRONO_BOX) animation — C++ adata.cpp:1555-1578, house
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
     for (const eff of ctx.effects) {
-      if (eff.sprite === 'litning') {
+      if (eff.sprite === 'chronbox') {
         expect(eff.frame).toBe(0);
         expect(eff.maxFrames).toBe(20);
         expect(eff.size).toBe(24);
@@ -411,7 +411,7 @@ describe('Chronosphere (CHRONO_BOX) animation — C++ adata.cpp:1555-1578, house
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
     // Infantry killed, but lightning still shows at origin
-    const lightningEffects = ctx.effects.filter(e => e.sprite === 'litning');
+    const lightningEffects = ctx.effects.filter(e => e.sprite === 'chronbox');
     expect(lightningEffects.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -871,7 +871,7 @@ describe('Superweapon animation type constants match C++ adata.cpp', () => {
     }
   });
 
-  it('Chronoshift uses litning sprite (C++ visual from BW fade + lightning)', () => {
+  it('Chronoshift uses chronbox sprite (C++ adata.cpp:1555 ANIM_CHRONO_BOX)', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 5);
     tank.selected = true;
     const ctx = makeCtx({ entities: [tank], entityById: new Map([[tank.id, tank]]) });
@@ -879,7 +879,7 @@ describe('Superweapon animation type constants match C++ adata.cpp', () => {
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, { x: 200, y: 200 });
 
-    const litning = ctx.effects.filter(e => e.sprite === 'litning');
+    const litning = ctx.effects.filter(e => e.sprite === 'chronbox');
     expect(litning.length).toBe(2); // origin + destination
   });
 });
@@ -915,7 +915,7 @@ describe('Each superweapon produces effects at correct position', () => {
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Spain, target);
 
     const originEffect = ctx.effects.find(e =>
-      e.sprite === 'litning' && e.x === originalX && e.y === originalY
+      e.sprite === 'chronbox' && e.x === originalX && e.y === originalY
     );
     expect(originEffect, 'lightning should appear at unit original position').toBeDefined();
   });

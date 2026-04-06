@@ -98,7 +98,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
     entityById: new Map(),
     structures: [],
     map,
-    tick: 0,
+    tick: 1,
     playerHouse: House.Spain,
     scenarioId: 'SCG01EA',
     difficulty: 'normal' as Difficulty,
@@ -207,10 +207,12 @@ function setupProductionBase(
   return state;
 }
 
-/** Get the production interval for normal difficulty */
+/** Get the first tick at which production fires for normal difficulty.
+ *  TS uses (tick-1) % interval === 0 AND tick > interval,
+ *  so the first valid tick is interval + 1. */
 function getProductionTick(): number {
   const mods = AI_DIFFICULTY_MODS['normal'];
-  return mods.productionInterval;
+  return mods.productionInterval + 1;
 }
 
 // =============================================================================
@@ -420,7 +422,7 @@ describe('Vehicle cap enforcement (C++ house.cpp:5795 AI_Unit)', () => {
 
 describe('Building cap enforcement (C++ house.cpp AI_Building)', () => {
   it('blocks construction when building count >= maxBuilding', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
     state.maxBuilding = 3; // We already have FACT + TENT + WEAP = 3
     state.buildQueue = ['SILO'];
@@ -439,7 +441,7 @@ describe('Building cap enforcement (C++ house.cpp AI_Building)', () => {
   });
 
   it('allows construction when building count < maxBuilding', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
     state.maxBuilding = 10; // Well above current 3
     state.buildQueue = ['SILO'];
@@ -457,7 +459,7 @@ describe('Building cap enforcement (C++ house.cpp AI_Building)', () => {
   });
 
   it('unlimited building when maxBuilding is -1', () => {
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
     state.maxBuilding = -1; // unlimited
     state.buildQueue = ['SILO'];
@@ -642,7 +644,7 @@ describe('Dynamic cap increase (C++ house.cpp:4726-4740)', () => {
     //   Since 5 < 40+10=50, Soviet.MaxUnit becomes 50
 
     // Tick must be divisible by 150 for updateAIStrategicPlanner to run
-    const ctx = makeMockAIContext({ tick: 150 });
+    const ctx = makeMockAIContext({ tick: 151 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
     state.maxUnit = 5;
 
@@ -832,7 +834,7 @@ describe('Cap=0 blocks all production (C++ >= comparison)', () => {
     //   1. CurBuildings >= maxBuilding
     //   2. Has FACT
     // With maxBuilding=0, gate 1 blocks even if FACT exists.
-    const ctx = makeMockAIContext({ tick: 90 });
+    const ctx = makeMockAIContext({ tick: 91 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
     state.maxBuilding = 0;
     state.buildQueue = ['SILO'];

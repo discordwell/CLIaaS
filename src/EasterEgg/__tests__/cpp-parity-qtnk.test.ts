@@ -426,9 +426,10 @@ describe('QTNK stop-rotate-move (drive.cpp)', () => {
     const targetPos = { x: startX + 2, y: qtnk.pos.y }; // very close target
 
     const arrived = qtnk.moveToward(targetPos, qtnk.stats.speed);
-    // speed 3 >= distance 2, should arrive
+    // speed 3 >= distance 2, should arrive (within lepton quantization tolerance)
     expect(arrived).toBe(true);
-    expect(qtnk.pos.x).toBe(targetPos.x);
+    // Lepton quantization: pos.x = leptonX * LP, may not exactly equal targetPos.x
+    expect(qtnk.pos.x).toBeCloseTo(targetPos.x, 1);
   });
 });
 

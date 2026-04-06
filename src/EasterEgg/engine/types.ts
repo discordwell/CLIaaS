@@ -129,6 +129,10 @@ export const HOUSE_FACTION: Record<string, Faction> = {
   Germany: 'allied', Turkey: 'allied', GoodGuy: 'allied',
   USSR: 'soviet', Ukraine: 'soviet', BadGuy: 'soviet',
   Neutral: 'both', Special: 'allied',
+  // Multi-player slots (C++ HouseTypeClass::ActLike maps to random side at game start).
+  // Default to 'both' since they are assigned dynamically at runtime.
+  Multi1: 'both', Multi2: 'both', Multi3: 'both', Multi4: 'both',
+  Multi5: 'both', Multi6: 'both', Multi7: 'both', Multi8: 'both',
 };
 
 export interface CountryBonus {

@@ -49,7 +49,11 @@ beforeEach(() => resetEntityIds());
  *     SpeedAccum = actual % PIXEL_LEPTON_W
  *     move wholePixelSteps pixels
  */
-function cppAccumulatorPosition(
+/**
+ * C++ vehicle accumulator position: SpeedAccum + Coord_Move.
+ * Vehicles use the SpeedAccum accumulator, then apply Coord_Move sin/cos per-axis.
+ */
+function cppVehicleAccumulatorPosition(
   startX: number,
   rulesSpeed: number,
   ticks: number,
@@ -63,7 +67,7 @@ function cppAccumulatorPosition(
   // C++ Set_Speed: SpeedAdd = MaxSpeed * fixed(0xFF, 256) — the 255/256 fraction
   const effectiveSpeedLeptons = Math.floor((effectiveLeptons * 255) / 256);
 
-  let x = startX;
+  let leptonX = Math.round(startX / LP);
   let accum = 0;
 
   for (let t = 0; t < ticks; t++) {
@@ -72,12 +76,36 @@ function cppAccumulatorPosition(
     const moveLeptons = actual - remainder;
     accum = remainder;
 
-    // Convert leptons to pixels: leptons * (CELL_SIZE / LEPTON_SIZE) = leptons * LP
-    const movePixels = moveLeptons * LP;
-    x += movePixels;
+    // Coord_Move: per-axis (moveLeptons * sinFactor) >> 7, cardinal sinFactor=127
+    const axisLeptons = (moveLeptons * 127) >> 7;
+    leptonX += axisLeptons;
   }
 
-  return { x, accum };
+  return { x: leptonX * LP, accum };
+}
+
+/**
+ * C++ infantry position: direct Coord_Move (no SpeedAccum).
+ * Infantry applies maxspeed through Coord_Move sin/cos per tick, no accumulator gating.
+ */
+function cppInfantryPosition(
+  startX: number,
+  rulesSpeed: number,
+  ticks: number,
+  speedBias: number = 1.0,
+): { x: number; accum: number } {
+  const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100);
+  const effectiveLeptons = Math.floor(maxSpeedLeptons * speedBias);
+  // Infantry Coord_Move: cardinal sinFactor=127
+  const axisLeptons = (effectiveLeptons * 127) >> 7;
+
+  let leptonX = Math.round(startX / LP);
+
+  for (let t = 0; t < ticks; t++) {
+    leptonX += axisLeptons;
+  }
+
+  return { x: leptonX * LP, accum: 0 };
 }
 
 // -- Helpers ------------------------------------------------------------------
@@ -128,68 +156,63 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
     });
   });
 
-  describe('infantry straight-line movement matches C++ accumulator', () => {
-    // E1 Rifle Infantry: Speed=4 in rules.ini (UNIT_STATS['E1'].speed)
-    // MaxSpeed = floor(4 * 256 / 100) = floor(10.24) = 10 leptons/tick
-    // At PIXEL_LEPTON_W=10: exactly 1 pixel step/tick, no remainder
-    it('E1 (Speed=4) — exact pixel alignment, no accumulator drift', () => {
+  describe('infantry straight-line movement matches C++ Coord_Move', () => {
+    // Infantry does NOT use SpeedAccum — it uses direct Coord_Move per tick.
+    // E1 Speed=4: MaxSpeed=10 leptons, cardinal: (10*127)>>7=9 leptons/tick
+    it('E1 (Speed=4) — infantry Coord_Move over 200 ticks', () => {
       const rulesSpeed = UNIT_STATS['E1'].speed; // 4
       expect(rulesSpeed).toBe(4);
 
       const startX = 100;
       const ticks = 200;
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
+      const cpp = cppInfantryPosition(startX, rulesSpeed, ticks);
 
       const entity = makeEntity('E1', House.Spain, startX, 100);
-      const speedPx = rulesSpeed * MPH_TO_PX; // 4 * 0.24 = 0.96 px/tick
+      const speedPx = rulesSpeed * MPH_TO_PX;
       const ts = simulateMoveToward(entity, ticks, speedPx);
 
-      // Both should produce identical positions
       expect(ts.x).toBeCloseTo(cpp.x, 6);
-      expect(ts.accum).toBe(cpp.accum);
+      // Infantry doesn't use speedAccum
+      expect(ts.accum).toBe(0);
     });
 
     // E3 Rocket Soldier: Speed=3
-    // MaxSpeed = floor(3 * 256 / 100) = floor(7.68) = 7 leptons/tick
-    // 7 / 10 = 0 remainder 7 → first tick: 0 pixels, accum=7
-    // tick 2: 7+7=14, 14/10=1 remainder 4 → 1 pixel step, accum=4
-    // This produces a non-trivial accumulation pattern
-    it('E3 (Speed=3) — sub-pixel accumulation over 150 ticks', () => {
+    // MaxSpeed=7, cardinal: (7*127)>>7=6 leptons/tick
+    it('E3 (Speed=3) — infantry Coord_Move over 150 ticks', () => {
       const rulesSpeed = UNIT_STATS['E3'].speed; // 3
       expect(rulesSpeed).toBe(3);
 
       const startX = 200;
       const ticks = 150;
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
+      const cpp = cppInfantryPosition(startX, rulesSpeed, ticks);
 
       const entity = makeEntity('E3', House.Spain, startX, 200);
       const speedPx = rulesSpeed * MPH_TO_PX;
       const ts = simulateMoveToward(entity, ticks, speedPx);
 
       expect(ts.x).toBeCloseTo(cpp.x, 6);
-      expect(ts.accum).toBe(cpp.accum);
+      expect(ts.accum).toBe(0);
     });
 
     // E2 Grenadier: Speed=5
-    // MaxSpeed = floor(5 * 256 / 100) = floor(12.8) = 12 leptons/tick
-    // 12 / 10 = 1 remainder 2 → 1 pixel step, accum=2
-    it('E2 (Speed=5) — confirms accumulation pattern over 300 ticks', () => {
+    // MaxSpeed=12, cardinal: (12*127)>>7=11 leptons/tick
+    it('E2 (Speed=5) — infantry Coord_Move over 300 ticks', () => {
       const rulesSpeed = UNIT_STATS['E2'].speed;
       expect(rulesSpeed).toBe(5);
 
       const startX = 50;
       const ticks = 300;
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
+      const cpp = cppInfantryPosition(startX, rulesSpeed, ticks);
 
       const entity = makeEntity('E2', House.Spain, startX, 50);
       const speedPx = rulesSpeed * MPH_TO_PX;
       const ts = simulateMoveToward(entity, ticks, speedPx);
 
       expect(ts.x).toBeCloseTo(cpp.x, 6);
-      expect(ts.accum).toBe(cpp.accum);
+      expect(ts.accum).toBe(0);
     });
   });
 
@@ -204,7 +227,7 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const startX = 100;
       const ticks = 100;
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
+      const cpp = cppVehicleAccumulatorPosition(startX, rulesSpeed, ticks);
 
       const entity = makeEntity('2TNK', House.Spain, startX, 100);
       entity.facing = Dir.E;
@@ -226,7 +249,7 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const startX = 50;
       const ticks = 200;
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
+      const cpp = cppVehicleAccumulatorPosition(startX, rulesSpeed, ticks);
 
       const entity = makeEntity('1TNK', House.Spain, startX, 50);
       entity.facing = Dir.E;
@@ -241,22 +264,24 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
 
   describe('accumulator remainder tracking', () => {
     it('accumulator cycles correctly through remainder pattern', () => {
-      // Speed=3 → MaxSpeed = floor(3*256/100) = 7 leptons/tick
-      // 255/256 fraction: speedAdd = floor(7*255/256) = 6 leptons/tick
-      // Expected accumulator sequence: 0→6→2→8→4→0 (repeats every 5 ticks)
-      const rulesSpeed = 3;
-      const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100); // 7
-      expect(maxSpeedLeptons).toBe(7);
-      const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256); // 6
-      expect(speedAdd).toBe(6);
+      // Use a vehicle (ARTY, Speed=6) — infantry doesn't use SpeedAccum.
+      // Speed=6 → MaxSpeed = floor(6*256/100) = 15 leptons/tick
+      // 255/256 fraction: speedAdd = floor(15*255/256) = 14 leptons/tick
+      // Expected accumulator sequence: 4, 8, 2, 6, 0, 4, 8, 2, 6, 0 (repeats every 5 ticks)
+      const rulesSpeed = 6;
+      const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100); // 15
+      expect(maxSpeedLeptons).toBe(15);
+      const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256); // 14
+      expect(speedAdd).toBe(14);
 
-      const expectedAccums = [6, 2, 8, 4, 0, 6, 2, 8, 4, 0];
+      const expectedAccums = [4, 8, 2, 6, 0, 4, 8, 2, 6, 0];
 
-      const entity = makeEntity('E3', House.Spain, 100, 100);
+      const entity = makeEntity('ARTY', House.Spain, 100, 100);
       entity.facing = Dir.E;
       entity.desiredFacing = Dir.E;
+      entity.bodyFacing32 = Dir.E * 4;
       const speedPx = rulesSpeed * MPH_TO_PX;
-      const farTarget: WorldPos = { x: 10000, y: 100 };
+      const farTarget: WorldPos = { x: 10000, y: entity.pos.y };
 
       for (let t = 0; t < 10; t++) {
         entity.moveToward(farTarget, speedPx);
@@ -268,58 +293,80 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
     });
 
     it('accumulator resets on arrival', () => {
-      const entity = makeEntity('E3', House.Spain, 100, 100);
+      // Use a vehicle — infantry doesn't use SpeedAccum
+      const entity = makeEntity('ARTY', House.Spain, 100, 100);
       entity.facing = Dir.E;
       entity.desiredFacing = Dir.E;
+      entity.bodyFacing32 = Dir.E * 4;
 
       // Move partway to build up accumulator
-      const farTarget: WorldPos = { x: 10000, y: 100 };
-      entity.moveToward(farTarget, 3 * MPH_TO_PX);
+      const farTarget: WorldPos = { x: 10000, y: entity.pos.y };
+      entity.moveToward(farTarget, 6 * MPH_TO_PX);
       expect(entity.speedAccum).toBeGreaterThan(0);
 
       // Now move to a very close target that triggers snap arrival
-      const closeTarget: WorldPos = { x: entity.pos.x + 0.3, y: 100 };
-      const arrived = entity.moveToward(closeTarget, 3 * MPH_TO_PX);
+      const closeTarget: WorldPos = { x: entity.pos.x + 0.3, y: entity.pos.y };
+      const arrived = entity.moveToward(closeTarget, 6 * MPH_TO_PX);
       expect(arrived).toBe(true);
       expect(entity.speedAccum).toBe(0);
     });
   });
 
   describe('drift prevention over long distances', () => {
-    it('no drift between C++ and TS after 500 ticks at Speed=7', () => {
+    it('no drift between C++ and TS after 500 ticks at Speed=7 (vehicle)', () => {
+      // Use 3TNK (Speed=7) — a vehicle that uses SpeedAccum
       // Speed=7 → MaxSpeed = floor(7*256/100) = floor(17.92) = 17 leptons/tick
       // 17 % 10 = 7 → non-trivial remainder pattern
-      // Over 500 ticks, floating-point would accumulate measurable drift
       const rulesSpeed = 7;
       const startX = 100;
       const ticks = 500;
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
+      const cpp = cppVehicleAccumulatorPosition(startX, rulesSpeed, ticks);
+
+      const entity = makeEntity('3TNK', House.Spain, startX, 100);
+      entity.facing = Dir.E;
+      entity.desiredFacing = Dir.E;
+      entity.bodyFacing32 = Dir.E * 4;
+      const speedPx = rulesSpeed * MPH_TO_PX;
+      const ts = simulateMoveToward(entity, ticks, speedPx);
+
+      expect(ts.x).toBeCloseTo(cpp.x, 6);
+      expect(ts.accum).toBe(cpp.accum);
+    });
+
+    it('no drift after 1000 ticks at Speed=3 (worst-case, vehicle)', () => {
+      // Use QTNK (Speed=3) — Aftermath vehicle with low speed
+      const rulesSpeed = 3;
+      const startX = 50;
+      const ticks = 1000;
+
+      const cpp = cppVehicleAccumulatorPosition(startX, rulesSpeed, ticks);
+
+      const entity = makeEntity('QTNK', House.Spain, startX, 50);
+      entity.facing = Dir.E;
+      entity.desiredFacing = Dir.E;
+      entity.bodyFacing32 = Dir.E * 4;
+      const speedPx = rulesSpeed * MPH_TO_PX;
+      const ts = simulateMoveToward(entity, ticks, speedPx);
+
+      expect(ts.x).toBeCloseTo(cpp.x, 6);
+      expect(ts.accum).toBe(cpp.accum);
+    });
+
+    it('no drift for infantry after 500 ticks at Speed=4', () => {
+      // Infantry uses Coord_Move, no SpeedAccum
+      const rulesSpeed = 4;
+      const startX = 100;
+      const ticks = 500;
+
+      const cpp = cppInfantryPosition(startX, rulesSpeed, ticks);
 
       const entity = makeEntity('E1', House.Spain, startX, 100);
       const speedPx = rulesSpeed * MPH_TO_PX;
       const ts = simulateMoveToward(entity, ticks, speedPx);
 
-      // Position must match exactly (within floating-point representability of the pixel math)
       expect(ts.x).toBeCloseTo(cpp.x, 6);
-      expect(ts.accum).toBe(cpp.accum);
-    });
-
-    it('no drift after 1000 ticks at Speed=3 (worst-case remainder pattern)', () => {
-      // Speed=3 → MaxSpeed = 7 leptons/tick
-      // 7 % 10 = 7 → needs multiple ticks to emit first step
-      const rulesSpeed = 3;
-      const startX = 50;
-      const ticks = 1000;
-
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks);
-
-      const entity = makeEntity('E3', House.Spain, startX, 50);
-      const speedPx = rulesSpeed * MPH_TO_PX;
-      const ts = simulateMoveToward(entity, ticks, speedPx);
-
-      expect(ts.x).toBeCloseTo(cpp.x, 6);
-      expect(ts.accum).toBe(cpp.accum);
+      expect(ts.accum).toBe(0);
     });
   });
 
@@ -330,7 +377,7 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const ticks = 150;
       const damageFactor = 0.75; // C++ ConditionYellow
 
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks, damageFactor);
+      const cpp = cppVehicleAccumulatorPosition(startX, rulesSpeed, ticks, damageFactor);
 
       const entity = makeEntity('2TNK', House.Spain, startX, 100);
       entity.facing = Dir.E;
@@ -352,7 +399,7 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const speedBias = 1.7; // M7 crate speed bonus
 
       // C++ applies speedBias to the lepton speed
-      const cpp = cppAccumulatorPosition(startX, rulesSpeed, ticks, 1.0, speedBias);
+      const cpp = cppVehicleAccumulatorPosition(startX, rulesSpeed, ticks, 1.0, speedBias);
 
       const entity = makeEntity('1TNK', House.Spain, startX, 100);
       entity.facing = Dir.E;
@@ -366,49 +413,52 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
     });
   });
 
-  describe('pixel-step quantization', () => {
+  describe('pixel-step quantization (vehicles)', () => {
     it('speed too slow for a pixel step accumulates until threshold', () => {
-      // Speed=1 → MaxSpeed = floor(1*256/100) = 2 leptons/tick
-      // 255/256 fraction: speedAdd = floor(2*255/256) = 1 lepton/tick
-      // PIXEL_LEPTON_W=10 → needs 10 ticks to emit 1 pixel step
-      const rulesSpeed = 1;
-      const entity = makeEntity('E1', House.Spain, 100, 100);
+      // Use a vehicle with low speed to test SpeedAccum sub-pixel accumulation.
+      // Speed=1 px passed directly → MaxSpeed = floor(1/LP) = 10 leptons
+      // speedAdd = floor(10*255/256) = 9 leptons/tick. 9 < 10 → no move first tick.
+      // Needs 2 ticks: tick1 accum=9, tick2 actual=9+9=18 → 10 leptons moved, accum=8
+      // Use a vehicle (ARTY) with explicit speed override
+      const entity = makeEntity('ARTY', House.Spain, 100, 100);
       entity.facing = Dir.E;
       entity.desiredFacing = Dir.E;
-      const speedPx = rulesSpeed * MPH_TO_PX;
+      entity.bodyFacing32 = Dir.E * 4;
+      const speedPx = 1; // very slow: 1 px/tick
       const startX = entity.pos.x;
-      const farTarget: WorldPos = { x: 10000, y: 100 };
+      const farTarget: WorldPos = { x: 10000, y: entity.pos.y };
 
-      // Ticks 1-9: accumulate 1 lepton each, not enough for a pixel step
-      for (let t = 0; t < 9; t++) {
-        entity.moveToward(farTarget, speedPx);
-        expect(entity.pos.x, `tick ${t + 1} should not move yet`).toBe(startX);
-      }
-      expect(entity.speedAccum).toBe(9); // 9 * 1 = 9 < 10
-
-      // Tick 10: 9 + 1 = 10 → exactly 1 pixel step (10 leptons → 10 * 0.09375 = 0.9375 px)
+      // First tick: maxSpeedLeptons=10, speedAdd=9, actual=9 < 10 → no pixel move
       entity.moveToward(farTarget, speedPx);
-      const onePixelStep = PIXEL_LEPTON_W * LP; // 10 * 0.09375 = 0.9375
-      expect(entity.pos.x).toBeCloseTo(startX + onePixelStep, 10);
-      expect(entity.speedAccum).toBe(0);
+      expect(entity.pos.x, 'tick 1 should not move').toBe(startX);
+      expect(entity.speedAccum).toBe(9);
+
+      // Second tick: actual=9+9=18, 18%10=8 → moveLeptons=10
+      // Coord_Move cardinal: (10*127)>>7=9 axis leptons
+      entity.moveToward(farTarget, speedPx);
+      const expectedMove = 9 * LP; // 9 * 0.09375 = 0.84375
+      expect(entity.pos.x - startX).toBeCloseTo(expectedMove, 10);
+      expect(entity.speedAccum).toBe(8);
     });
 
-    it('movement is always in discrete pixel-step increments', () => {
-      // Speed=6 → MaxSpeed = floor(6*256/100) = 15 leptons/tick
-      // 255/256 fraction: speedAdd = floor(15*255/256) = 14 leptons/tick
-      // 14/10 = 1 remainder 4 → 1 pixel step, accum=4
+    it('movement is always in discrete pixel-step increments (vehicle)', () => {
+      // ARTY Speed=6 → 6*0.24=1.44 px/tick → floor(1.44/LP)=15 leptons
+      // speedAdd = floor(15*255/256) = 14 leptons/tick
+      // 14/10 = 1 remainder 4 → moveLeptons=10, accum=4
+      // Coord_Move cardinal: (10*127)>>7=9 axis leptons → 9*LP=0.84375
       const rulesSpeed = 6;
-      const entity = makeEntity('E1', House.Spain, 100, 100);
+      const entity = makeEntity('ARTY', House.Spain, 100, 100);
       entity.facing = Dir.E;
       entity.desiredFacing = Dir.E;
+      entity.bodyFacing32 = Dir.E * 4;
       const speedPx = rulesSpeed * MPH_TO_PX;
-      const farTarget: WorldPos = { x: 10000, y: 100 };
+      const farTarget: WorldPos = { x: 10000, y: entity.pos.y };
       const startX = entity.pos.x;
 
       entity.moveToward(farTarget, speedPx);
 
-      // Should move exactly 1 pixel step: 1 * 10 * LP = 10 * 0.09375 = 0.9375 px
-      const expectedMove = 1 * PIXEL_LEPTON_W * LP;
+      // Coord_Move: (10*127)>>7=9 leptons → 9*LP=0.84375 px
+      const expectedMove = ((10 * 127) >> 7) * LP;
       expect(entity.pos.x - startX).toBeCloseTo(expectedMove, 10);
       expect(entity.speedAccum).toBe(4);
     });

@@ -38,24 +38,25 @@ describe('moveToward — sub-pixel snap threshold', () => {
     }
   });
 
-  it('snaps when within 0.5px (prevents oscillation)', () => {
+  it('snaps when within lepton snap threshold (prevents oscillation)', () => {
     const unit = new Entity(UnitType.I_E1, House.Spain, 100.3, 100.0);
     unit.facing = Dir.E;
-    const target = { x: 100.5, y: 100.0 }; // 0.2px away — within 0.5 threshold
+    const target = { x: 100.5, y: 100.0 }; // 0.2px away — within infantry snap range (16 leptons = 1px)
 
     unit.rotTickedThisFrame = false;
     const arrived = unit.moveToward(target, 2.0);
 
     expect(arrived).toBe(true);
-    expect(unit.pos.x).toBe(target.x);
-    expect(unit.pos.y).toBe(target.y);
+    // Lepton quantization means snapped position may differ from target by sub-pixel amount
+    expect(Math.abs(unit.pos.x - target.x)).toBeLessThan(0.5);
+    expect(Math.abs(unit.pos.y - target.y)).toBeLessThan(0.5);
   });
 
   it('unit moves smoothly when target is within old snap range', () => {
     const tanya = new Entity(UnitType.I_TANYA, House.Spain, 100, 100);
     tanya.facing = Dir.E;
     // Place target 2.5px away — old threshold (effectiveSpeed=3) would snap instantly
-    // With new 0.5px threshold, unit should move via normal movement logic
+    // With new lepton-based snapping, unit should move via normal movement logic
     const target = { x: 102.5, y: 100 };
 
     tanya.rotTickedThisFrame = false;
@@ -63,9 +64,10 @@ describe('moveToward — sub-pixel snap threshold', () => {
 
     // Unit should have moved toward target (not stayed at start)
     expect(tanya.pos.x).toBeGreaterThan(100);
-    // Speed=3 can cover 2.5px in one tick, so may arrive
+    // Speed=3 can cover 2.5px in one tick, so may arrive.
+    // Lepton quantization means arrival position may differ from target by sub-pixel amount.
     if (arrived) {
-      expect(tanya.pos.x).toBe(target.x);
+      expect(Math.abs(tanya.pos.x - target.x)).toBeLessThan(0.5);
     }
   });
 });
