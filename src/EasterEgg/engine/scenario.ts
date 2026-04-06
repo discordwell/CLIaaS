@@ -2577,10 +2577,9 @@ export function executeTriggerAction(
       const firstMemberType = toUnitType(team.members[0]?.type ?? '');
       const firstMemberStats = firstMemberType ? UNIT_STATS[firstMemberType] : null;
       const isNavalTeam = firstMemberStats?.isVessel ?? false;
-      const groundEdgeCell = (!team.members.every(m => {
-        const ut = toUnitType(m.type);
-        return ut && UNIT_STATS[ut]?.isAircraft;
-      }) && houseEdges && mapBounds)
+      // C++ reinf.cpp:441 — Calculated_Cell is computed for ALL team members
+      // (aircraft + ground). Every object in the team spawns at the same edge cell.
+      const groundEdgeCell = (houseEdges && mapBounds)
         ? calculateHouseEdgeSpawnCell(
             teamHouse, houseEdges, mapBounds, wp,
             () => ScenarioRandom.float(),
