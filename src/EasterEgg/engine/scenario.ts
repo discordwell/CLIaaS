@@ -1310,6 +1310,9 @@ export interface MapStructure {
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
   /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
   missionTimer: number;
+  /** C++ building.cpp Door_Stage() — war factory door animation frame (0=closed, 7=fully open).
+   *  Animates 0→7 during production, stays open while unit exits, then closes 7→0. */
+  doorFrame?: number;
 }
 
 /** Weapon stats for defensive structures */

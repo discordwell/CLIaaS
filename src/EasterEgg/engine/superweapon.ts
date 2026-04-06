@@ -604,6 +604,16 @@ export function activateSuperweapon(
         const bx = target.x + i * spacing;
         const by = target.y;
         const delay = (i + Math.floor(bombCount / 2)) * 5; // staggered detonation
+        // C++ bullet.cpp:573,796 — IsParachuted: parabomb.png sprite during descent.
+        // Falling bomb visual — starts from above, descends to target over delay ticks.
+        const fallDuration = Math.max(12, delay + 8);
+        ctx.effects.push({
+          type: 'projectile', x: bx, y: by - CELL_SIZE * 4,
+          startX: bx, startY: by - CELL_SIZE * 4,
+          endX: bx, endY: by,
+          frame: -Math.max(0, delay - 8), maxFrames: fallDuration, size: 4,
+          isParachuted: true,
+        });
         // Deferred bomb explosion — uses timed effects
         ctx.effects.push({
           type: 'explosion', x: bx, y: by,

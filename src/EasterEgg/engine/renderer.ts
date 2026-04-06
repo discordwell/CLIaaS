@@ -187,6 +187,8 @@ export interface Effect {
   textColor?: string;
   // Blend mode for additive/screen effects (C++ SHAPE_GHOST + TranslucentTable)
   blendMode?: 'screen' | 'lighter';
+  // Parachuted projectile visual (C++ bullet.cpp:573,796: ANIM_PARA_BOMB sprite during descent)
+  isParachuted?: boolean;
   // Looping support for persistent effects (fire, smoke)
   loopStart?: number;
   loopEnd?: number;
@@ -1748,9 +1750,19 @@ export class Renderer {
         }
         // WEAP2 door overlay — C++ building.cpp:500-503 Techno_Draw_Object(WarFactoryOverlay, Door_Stage())
         // WEAP2.SHP = 8 frames (0=closed..7=open), drawn on top of WEAP base sprite.
+        // Door opens (0→7) when the 'unit' production queue is active, closes (7→0) when idle.
         if (s.image === 'weap' && assets.hasSheet('weap2') && !isConstructing && !isSelling) {
-          const doorFrame = 0; // TODO: track door state per-structure for open/close during production
-          assets.drawFrame(ctx, 'weap2', doorFrame, screenX + dfw / 2, screenY + dfh / 2, {
+          // Drive door state from production queue: open while producing vehicles
+          const isProducingUnit = this.sidebarQueue.has('unit');
+          if (s.doorFrame === undefined) s.doorFrame = 0;
+          if (isProducingUnit) {
+            // Animate door opening: increment by 1 per tick up to 7
+            if (s.doorFrame < 7) s.doorFrame = Math.min(7, s.doorFrame + 1);
+          } else {
+            // Animate door closing: decrement by 1 per tick down to 0
+            if (s.doorFrame > 0) s.doorFrame = Math.max(0, s.doorFrame - 1);
+          }
+          assets.drawFrame(ctx, 'weap2', s.doorFrame, screenX + dfw / 2, screenY + dfh / 2, {
             centerX: true, centerY: true,
           });
         }
@@ -2294,16 +2306,45 @@ export class Renderer {
         ctx.globalCompositeOperation = 'source-over';
       }
 
-      // Iron Curtain red overlay — invulnerable unit (C++ FadingRed palette remap)
+      // Iron Curtain red overlay — invulnerable unit (C++ techno.cpp:4276 FadingRed palette remap)
+      // C++ replaces normal house remap with DisplayClass::FadingRed — a red-shifted palette
+      // remap table that makes the entire unit/building glow red. We use the 'IronCurtain'
+      // house key in remap-colors.json for pixel-accurate red-shift matching C++.
       if (entity.alive && entity.ironCurtainTick > 0) {
-        const pulse = 0.25 + 0.15 * Math.sin(tick * 0.3);
-        // Multiply blend darkens toward red without bleeding to adjacent pixels
-        ctx.globalCompositeOperation = 'multiply';
-        const redShade = Math.floor(255 * (1 - pulse * 0.5));
-        ctx.fillStyle = `rgb(255,${redShade * 0.3},${redShade * 0.3})`;
-        ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
-        ctx.globalCompositeOperation = 'source-over';
-        // Red glow ring
+        const icRemapped = sheet ? assets.getRemappedSheet(entity.stats.image, 'IronCurtain') : null;
+        if (icRemapped && sheet) {
+          // Recompute the current body frame (mirrors logic from the sprite draw block above)
+          let icFrame: number;
+          if (!entity.stats.isInfantry && !entity.isAnt) {
+            const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
+            icFrame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
+          } else {
+            // Infantry/Ants: use entity.spriteFrame which handles all animation states
+            icFrame = entity.spriteFrame % sheet.meta.frameCount;
+          }
+          // Redraw the unit body with FadingRed remap over the normal house-colored sprite.
+          // C++ draws ONE pass with the red remap — we overdraw since the normal sprite
+          // is already rendered above. Use source-over compositing (opaque redraw).
+          assets.drawFrameFrom(ctx, icRemapped, entity.stats.image, icFrame,
+            screen.x, screen.y, { centerX: true, centerY: true });
+          // If turreted, also redraw turret with red remap
+          if (entity.hasTurret && sheet.meta.frameCount >= 64) {
+            const interpTurret = lerpFacing32(entity.prevTurretFacing32, entity.turretFacing32, alpha);
+            const turretFrame = (32 + (BODY_SHAPE[interpTurret] ?? 0)) % sheet.meta.frameCount;
+            const turretOffY = entity.type === UnitType.V_JEEP ? -4 : 0;
+            assets.drawFrameFrom(ctx, icRemapped, entity.stats.image, turretFrame,
+              screen.x, screen.y + turretOffY, { centerX: true, centerY: true });
+          }
+        } else {
+          // Fallback: multiply blend overlay if IronCurtain remap not available
+          const pulse = 0.25 + 0.15 * Math.sin(tick * 0.3);
+          ctx.globalCompositeOperation = 'multiply';
+          const redShade = Math.floor(255 * (1 - pulse * 0.5));
+          ctx.fillStyle = `rgb(255,${redShade * 0.3},${redShade * 0.3})`;
+          ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        // Red glow ring (C++ doesn't have this but it aids visibility at game scale)
         ctx.strokeStyle = `rgba(255,40,40,${0.4 + 0.2 * Math.sin(tick * 0.2)})`;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -2614,6 +2655,21 @@ export class Renderer {
           }
         }
 
+        // C++ bullet.cpp:573,796 — Parachuted projectile: draw parabomb.png sprite during descent.
+        // PARABOMB.SHP has 13 frames (parachute opening/closing animation).
+        if (fx.isParachuted) {
+          const pbSheet = assets.getSheet('parabomb');
+          if (pbSheet) {
+            const pbFrameCount = pbSheet.meta.frameCount; // 13
+            const pbFrame = Math.min(fx.frame, pbFrameCount - 1);
+            assets.drawFrame(ctx, 'parabomb', pbFrame, screenP.x, screenP.y, {
+              centerX: true, centerY: true,
+            });
+            continue;
+          }
+          // Fall through to procedural if parabomb sprite not loaded
+        }
+
         // Sprite-based projectile rendering (C1/C2/C7): use SHP image when available.
         if (fx.projImage) {
           const sheet = assets.getSheet(fx.projImage);
@@ -2785,62 +2841,92 @@ export class Renderer {
         }
         case 'tesla': {
           const alpha = 1 - progress * 0.6;
-          const seed = (fx.x * 11 + fx.y * 17 + fx.frame * 31) | 0;
-          // Lightning bolt from source to target (or local effect if no source)
           const hasTravel = fx.startX !== undefined && fx.startY !== undefined;
           const sStart = hasTravel
             ? camera.worldToScreen(fx.startX!, fx.startY!)
             : { x: screen.x - fx.size, y: screen.y };
           const sEnd = screen;
-          const dx = sEnd.x - sStart.x;
-          const dy = sEnd.y - sStart.y;
-          const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          const jitter = Math.max(Math.min(len * 0.15, 12), 2);
-          const segments = 8;
-          // Build jagged bolt path with perpendicular offsets
-          const pts: Array<{ x: number; y: number }> = [sStart];
-          const nx = -dy / len, ny = dx / len;
-          for (let i = 1; i < segments; i++) {
-            const t = i / segments;
-            const perp = ((seed + i * 47 + fx.frame * 13) % (Math.floor(jitter * 2) + 1)) - jitter;
-            pts.push({ x: sStart.x + dx * t + nx * perp, y: sStart.y + dy * t + ny * perp });
-          }
-          pts.push(sEnd);
-          // Helper to draw the bolt path
-          const drawBolt = () => {
-            ctx.beginPath();
-            ctx.moveTo(pts[0].x, pts[0].y);
-            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-            ctx.stroke();
-          };
-          // Outer glow
-          ctx.strokeStyle = `rgba(80,150,255,${alpha * 0.3})`;
-          ctx.lineWidth = 6;
-          drawBolt();
-          // Main bright bolt
-          ctx.strokeStyle = `rgba(130,210,255,${alpha})`;
-          ctx.lineWidth = 2;
-          drawBolt();
-          // Inner white core (brief)
-          if (progress < 0.3) {
-            ctx.strokeStyle = `rgba(220,240,255,${(0.3 - progress) * 2})`;
-            ctx.lineWidth = 1;
+
+          // C++ LITNING.SHP — 8 frames of tesla bolt sprite, drawn at the impact point.
+          // Use sprite-based rendering when litning.png is available; fall back to procedural.
+          const litSheet = assets.getSheet('litning');
+          if (litSheet) {
+            const litFrameCount = litSheet.meta.frameCount; // 8
+            const litFrame = fx.frame % litFrameCount;
+            // Draw the lightning sprite at target with additive blend (C++ SHAPE_GHOST)
+            ctx.globalAlpha = alpha;
+            ctx.globalCompositeOperation = 'lighter';
+            assets.drawFrame(ctx, 'litning', litFrame, sEnd.x, sEnd.y, {
+              centerX: true, centerY: true,
+            });
+            // If beam has travel distance, draw additional sprites along the path
+            if (hasTravel) {
+              const dx = sEnd.x - sStart.x;
+              const dy = sEnd.y - sStart.y;
+              const len = Math.sqrt(dx * dx + dy * dy);
+              // Space sprites every ~20px along the bolt path
+              const spacing = 20;
+              const steps = Math.max(1, Math.floor(len / spacing));
+              for (let i = 1; i < steps; i++) {
+                const t = i / steps;
+                const midX = sStart.x + dx * t;
+                const midY = sStart.y + dy * t;
+                // Offset frame per-segment for variation
+                const segFrame = (litFrame + i * 3) % litFrameCount;
+                assets.drawFrame(ctx, 'litning', segFrame, midX, midY, {
+                  centerX: true, centerY: true,
+                });
+              }
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
+          } else {
+            // Procedural fallback — jagged polyline lightning bolt
+            const seed = (fx.x * 11 + fx.y * 17 + fx.frame * 31) | 0;
+            const dx = sEnd.x - sStart.x;
+            const dy = sEnd.y - sStart.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const jitter = Math.max(Math.min(len * 0.15, 12), 2);
+            const segments = 8;
+            const pts: Array<{ x: number; y: number }> = [sStart];
+            const nx = -dy / len, ny = dx / len;
+            for (let i = 1; i < segments; i++) {
+              const t = i / segments;
+              const perp = ((seed + i * 47 + fx.frame * 13) % (Math.floor(jitter * 2) + 1)) - jitter;
+              pts.push({ x: sStart.x + dx * t + nx * perp, y: sStart.y + dy * t + ny * perp });
+            }
+            pts.push(sEnd);
+            const drawBolt = () => {
+              ctx.beginPath();
+              ctx.moveTo(pts[0].x, pts[0].y);
+              for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+              ctx.stroke();
+            };
+            ctx.strokeStyle = `rgba(80,150,255,${alpha * 0.3})`;
+            ctx.lineWidth = 6;
             drawBolt();
+            ctx.strokeStyle = `rgba(130,210,255,${alpha})`;
+            ctx.lineWidth = 2;
+            drawBolt();
+            if (progress < 0.3) {
+              ctx.strokeStyle = `rgba(220,240,255,${(0.3 - progress) * 2})`;
+              ctx.lineWidth = 1;
+              drawBolt();
+            }
+            ctx.lineWidth = 1;
+            for (let b = 0; b < 2; b++) {
+              const bi = 1 + ((seed + b * 3 + fx.frame) % (segments - 1));
+              const bp = pts[bi];
+              const bAngle = ((seed + b * 43 + fx.frame * 17) % 360) * Math.PI / 180;
+              const bLen = jitter * 1.5 + 4;
+              ctx.strokeStyle = `rgba(100,180,255,${alpha * 0.5})`;
+              ctx.beginPath();
+              ctx.moveTo(bp.x, bp.y);
+              ctx.lineTo(bp.x + Math.cos(bAngle) * bLen, bp.y + Math.sin(bAngle) * bLen);
+              ctx.stroke();
+            }
           }
-          // Branch sparks from 2 random segments
-          ctx.lineWidth = 1;
-          for (let b = 0; b < 2; b++) {
-            const bi = 1 + ((seed + b * 3 + fx.frame) % (segments - 1));
-            const bp = pts[bi];
-            const bAngle = ((seed + b * 43 + fx.frame * 17) % 360) * Math.PI / 180;
-            const bLen = jitter * 1.5 + 4;
-            ctx.strokeStyle = `rgba(100,180,255,${alpha * 0.5})`;
-            ctx.beginPath();
-            ctx.moveTo(bp.x, bp.y);
-            ctx.lineTo(bp.x + Math.cos(bAngle) * bLen, bp.y + Math.sin(bAngle) * bLen);
-            ctx.stroke();
-          }
-          // Impact spark at target
+          // Impact spark at target (used by both sprite and procedural paths)
           ctx.fillStyle = `rgba(200,230,255,${alpha * (1 - progress * 0.5)})`;
           ctx.beginPath();
           ctx.arc(sEnd.x, sEnd.y, 3 + (1 - progress) * 3, 0, Math.PI * 2);
