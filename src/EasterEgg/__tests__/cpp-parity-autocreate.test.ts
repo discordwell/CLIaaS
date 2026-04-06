@@ -914,9 +914,10 @@ describe('Harvester replacement priority — house.cpp:5800-5806', () => {
   // C++ builds harvester FIRST when refineries > harvesters, BEFORE checking teams.
   // This short-circuits all other unit production.
 
-  it.todo('C++ harvester replacement preempts team-based production — MISSING FEATURE: TS updateAIProduction does not yet prioritize harvester replacement when refineries > harvesters', () => {
+  it('C++ harvester replacement preempts team-based production when refineries > harvesters', () => {
     // If there is a refinery but no harvester, C++ builds harvester regardless
     // of what team templates need. Team production is secondary.
+    // tick must be > productionInterval (60 for normal) and (tick-1) % 60 === 0 → tick=61.
 
     const state = makeAIState({
       house: House.USSR,
@@ -932,7 +933,7 @@ describe('Harvester replacement priority — house.cpp:5800-5806', () => {
     ];
 
     const ctx = makeAIContext({
-      tick: 60,
+      tick: 61,
       aiStates: new Map([[House.USSR, state]]),
       houseCredits: new Map([[House.USSR, 5000]]),
       structures,

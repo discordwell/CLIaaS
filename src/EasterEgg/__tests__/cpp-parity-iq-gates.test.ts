@@ -135,8 +135,10 @@ describe('Aircraft production IQ gate (house.cpp:6239 AI_Aircraft)', () => {
     expect(aircraft.length).toBe(0);
   });
 
-  it.todo('IQ 4 AI CAN produce aircraft — requires multi-tick AI production loop', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('IQ 4 AI CAN produce aircraft', () => {
+    // C++ AI_Aircraft fires on its own interval; TS gates production behind
+    // tick > productionInterval (60 for normal). Use tick=61 so the guard passes.
+    const ctx = makeMockAIContext({ tick: 61 });
     const house = House.USSR;
     ctx.houseIQs.set(house, 4);
     ctx.houseCredits.set(house, 5000);
@@ -189,8 +191,10 @@ describe('Harvester replacement IQ gate (house.cpp IQHarvester=2)', () => {
     expect(harvesters.length).toBe(0);
   });
 
-  it.todo('IQ 2 AI CAN auto-replace harvesters — requires multi-tick AI production loop', () => {
-    const ctx = makeMockAIContext({ tick: 0 });
+  it('IQ 2 AI CAN auto-replace harvesters', () => {
+    // C++ AI_Harvester requires IQ >= 2. TS gates production behind
+    // tick > productionInterval (60 for normal). Use tick=61 so the guard passes.
+    const ctx = makeMockAIContext({ tick: 61 });
     const house = House.USSR;
     ctx.houseIQs.set(house, 2);
     ctx.houseCredits.set(house, 5000);

@@ -506,7 +506,7 @@ describe('Chronoshift eligibility filter (house.cpp:2779-2803)', () => {
     expect(ctnk.pos.x).not.toBe(target.x);
   });
 
-  it.todo('excludes VESSEL_CARRIER / V_CARR (C++ house.cpp:2782 FIXIT_CARRIER) — known parity gap: TS does not exclude carriers from chronoshift', () => {
+  it('excludes VESSEL_CARRIER / V_CARR (C++ house.cpp:2782 FIXIT_CARRIER)', () => {
     // C++ #ifdef FIXIT_CARRIER: *((VesselClass *)tech) != VESSEL_CARRIER
     // TS superweapon.ts:380-385 — MISMATCH: V_CARR is NOT excluded from chrono filter
     // Known parity gap: TS allows chronoshift of carriers, C++ excludes them via FIXIT_CARRIER

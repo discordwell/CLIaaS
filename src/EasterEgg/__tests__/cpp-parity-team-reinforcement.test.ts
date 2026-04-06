@@ -766,24 +766,22 @@ describe('House edge calculation (display.cpp:2467-2491)', () => {
     expect(cell!.cx).toBe(BOUNDS.x + BOUNDS.w);
   });
 
-  it.todo('C++ Calculated_Cell uses SOURCE_* param directly — house edge takes priority over waypoint inference (VALID GAP: TS uses inferClosestMapEdge instead of house edge when waypoint provided)', () => {
-    // C++ display.cpp:2467-2491 — Calculated_Cell takes a SourceType parameter
-    // (SOURCE_NORTH=0, SOURCE_EAST=1, SOURCE_SOUTH=2, SOURCE_WEST=3) which directly
-    // determines the edge. When a waypoint is provided, C++ passes the SOURCE_*
-    // from HouseClass::Control.Edge.
+  it('C++ Calculated_Cell: waypoint inference takes priority over house edge (display.cpp:2432-2460)', () => {
+    // C++ display.cpp:2432-2460 — when trycell != -1 (waypoint valid), C++ infers
+    // edge from waypoint proximity to map bounds. Lines 2466-2492 (house Edge=)
+    // only execute when trycell == -1 (no waypoint). Priority: waypoint → house edge.
     //
-    // NOTE: TS still uses inferClosestMapEdge when a waypoint is provided.
-    // This test documents the known divergence — C++ would use house edge 'north'
-    // but TS infers from the waypoint position.
+    // Waypoint near WEST edge (cx=12, closest to x=10), but house edge is 'north'.
+    // C++ infers west from waypoint, ignoring the 'north' house edge.
     const houseEdges = new Map<House, string>([[House.Greece, 'north']]);
-    const wp = { cx: 50, cy: 50 }; // center of map — TS infers north (since y=50 is closer to top y=10)
+    const wp = { cx: 12, cy: 50 }; // cx=12 is 2 from west (x=10), far from east (x+w=110)
     const cell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, BOUNDS, wp);
-    // C++ uses north (from house edge), TS also infers north here (waypoint closer to top)
-    // C++ display.cpp:2454: y = -1 → cy = boundsY - 1
+    // C++ display.cpp:2442-2444: x < y → vert=true, Cell_X < MapCellWidth/2 → x = -1 (west)
+    // West edge: cx = BOUNDS.x - 1 = 9
     expect(
-      cell!.cy,
-      'House edge "north" should be used even when waypoint is at map center',
-    ).toBe(BOUNDS.y - 1);
+      cell!.cx,
+      'Waypoint near west edge overrides house edge "north" — C++ uses waypoint inference',
+    ).toBe(BOUNDS.x - 1);
   });
 
   it('aligned coordinate is preserved on perpendicular axis (waypoint near north edge)', () => {
@@ -1547,25 +1545,25 @@ describe('C++ divergence: Calculated_Cell SOURCE_* vs TS inferClosestMapEdge', (
   // 1. House edge is 'north' but waypoint is near the south border
   // 2. The waypoint is in the center of the map (ambiguous edge)
 
-  it.todo('C++ uses house edge (SOURCE_*), not waypoint inference, when both are available (VALID GAP: TS uses inferClosestMapEdge instead of house edge when waypoint provided)', () => {
-    // C++ display.cpp:2467-2491 — Calculated_Cell uses the SourceType parameter
-    // from HouseClass::Control.Edge. The origin waypoint only determines the aligned
-    // coordinate on the perpendicular axis, NOT which edge to use.
-    //
-    // TS divergence: ignores houseEdges and infers edge from waypoint position.
+  it('C++ waypoint inference overrides house edge when waypoint is valid (display.cpp:2432-2460)', () => {
+    // C++ display.cpp:2432-2460 — when trycell != -1, edge is inferred from
+    // waypoint proximity. The SourceType (house edge) in lines 2466-2492 is
+    // ONLY used when trycell == -1. So a waypoint near south overrides 'north'.
     const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
     const mapBounds = { x: 10, y: 10, w: 100, h: 80 };
-    // Waypoint near south edge — C++ still uses north (from house edge)
+    // Waypoint near south edge — C++ infers south despite house edge being 'north'
     const wp = { cx: 60, cy: 85 }; // near bottom (y+h-1=89)
 
     const cell = calculateHouseEdgeSpawnCell(House.USSR, houseEdges, mapBounds, wp);
     expect(cell).toBeDefined();
 
-    // C++ expected: north edge (cy = mapBounds.y - 1 = 9, 1 cell outside)
-    // TS actual: south edge (cy = mapBounds.y + mapBounds.h = 90, 1 cell outside) due to inference
+    // C++ display.cpp:2449-2456: y_from_top=75, y_from_bottom=5, y=min(75,5)=5;
+    // x_from_left=50, x_from_right=50, x=min(50,50)=50; x < y → false (50 > 5);
+    // horz=true, (85-10) < 80/2 → false → y=MapCellHeight → south edge.
+    // cy = MapCellY + MapCellHeight = 10 + 80 = 90
     expect(
       cell!.cy,
-      'C++ uses house edge direction (north → cy=9), TS infers from waypoint proximity (south → cy=90)',
-    ).toBe(mapBounds.y - 1); // C++ expectation — will FAIL in TS (TS returns 90)
+      'C++ infers south from waypoint (cy=85 near bottom), house edge "north" is fallback only',
+    ).toBe(mapBounds.y + mapBounds.h);
   });
 });
