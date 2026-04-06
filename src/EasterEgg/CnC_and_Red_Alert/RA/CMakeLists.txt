@@ -279,7 +279,8 @@ endif()
 target_compile_definitions(rasdl PRIVATE
 	ENGLISH=1  # TODO: also french/german
 	PORTABLE=1 # to indicate not windows or dos sometimes
-	LORES=1    # use 320x200 assets from LORES.MIX (we don't have HIRES.MIX)
+	# HIRES mode: RESFACTOR=2, loads HIRES.MIX for 640x400 sidebar sprites
+	# (LORES=1 removed — HIRES.MIX now extracted from REDALERT.MIX)
 )
 target_link_libraries(rasdl PRIVATE tech jshell port sdllib vqa32) # mpgdll wwipx32
 

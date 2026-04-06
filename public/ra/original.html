@@ -32,7 +32,7 @@
 <body>
 <div id="status">Loading Red Alert WASM...</div>
 <progress id="progress" max="100" value="0"></progress>
-<canvas id="canvas" width="320" height="200" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<canvas id="canvas" width="640" height="400" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <div id="game-end-overlay">
   <h1 id="game-end-title">MISSION COMPLETE</h1>
   <button id="retry-btn" onclick="location.reload()">RETRY MISSION</button>
@@ -344,7 +344,7 @@ function getSeedFromQuery() {
 // 2. _emscripten_get_element_css_size: getBoundingClientRect returns 0x0 in headless,
 //    causing SDL2 to allocate a 0-byte pixel buffer (SDL_WINDOW_RESIZABLE reads CSS dims)
 (function() {
-  var GAME_W = 320, GAME_H = 200;
+  var GAME_W = 640, GAME_H = 400;
   var origInstantiate = WebAssembly.instantiate;
   var origInstantiateStreaming = WebAssembly.instantiateStreaming;
 
@@ -689,7 +689,7 @@ var Module = {
     var _widthDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
     var _heightDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
     // Match the LORES=1 game resolution (320x200 internal, CSS scales to window)
-    var GAME_W = 320, GAME_H = 200;
+    var GAME_W = 640, GAME_H = 400;
     var _dimSetCount = 0;
     Object.defineProperty(canvas, 'width', {
       get: function() { return _widthDesc.get.call(this); },

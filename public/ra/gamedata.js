@@ -8,6 +8,7 @@
     var isPthread = typeof ENVIRONMENT_IS_PTHREAD != 'undefined' && ENVIRONMENT_IS_PTHREAD;
     var isWasmWorker = typeof ENVIRONMENT_IS_WASM_WORKER != 'undefined' && ENVIRONMENT_IS_WASM_WORKER;
     if (isPthread || isWasmWorker) return;
+    var isNode = globalThis.process && globalThis.process.versions && globalThis.process.versions.node && globalThis.process.type != 'renderer';
     async function loadPackage(metadata) {
 
       var PACKAGE_PATH = '';
@@ -17,13 +18,16 @@
         // web worker
         PACKAGE_PATH = encodeURIComponent(location.pathname.substring(0, location.pathname.lastIndexOf('/')) + '/');
       }
-      var PACKAGE_NAME = '/Users/discordwell/Projects/Zachathon/public/ra/gamedata.data';
+      var PACKAGE_NAME = '/Users/discordwell/Projects/CLIaaS/public/ra/gamedata.data';
       var REMOTE_PACKAGE_BASE = 'gamedata.data';
       var REMOTE_PACKAGE_NAME = Module['locateFile'] ? Module['locateFile'](REMOTE_PACKAGE_BASE, '') : REMOTE_PACKAGE_BASE;
       var REMOTE_PACKAGE_SIZE = metadata['remote_package_size'];
 
       async function fetchRemotePackage(packageName, packageSize) {
-        
+        if (isNode) {
+          var contents = require('fs').readFileSync(packageName);
+          return new Uint8Array(contents).buffer;
+        }
         if (!Module['dataFileDownloads']) Module['dataFileDownloads'] = {};
         try {
           var response = await fetch(packageName);
@@ -102,9 +106,9 @@
         Module['FS_createDataFile'](name, null, data, true, true, true);
         Module['removeRunDependency'](`fp ${name}`);
           }
-          Module['removeRunDependency']('datafile_/Users/discordwell/Projects/Zachathon/public/ra/gamedata.data');
+          Module['removeRunDependency']('datafile_/Users/discordwell/Projects/CLIaaS/public/ra/gamedata.data');
       }
-      Module['addRunDependency']('datafile_/Users/discordwell/Projects/Zachathon/public/ra/gamedata.data');
+      Module['addRunDependency']('datafile_/Users/discordwell/Projects/CLIaaS/public/ra/gamedata.data');
 
       if (!Module['preloadResults']) Module['preloadResults'] = {};
 
@@ -123,6 +127,6 @@
     }
 
     }
-    loadPackage({"files": [{"filename": "/ALLIES.MIX", "start": 0, "end": 309406}, {"filename": "/CONQUER.MIX", "start": 309406, "end": 2486453}, {"filename": "/EXPAND.MIX", "start": 2486453, "end": 18136837}, {"filename": "/GENERAL.MIX", "start": 18136837, "end": 33069181}, {"filename": "/INTERIOR.MIX", "start": 33069181, "end": 33316606}, {"filename": "/LOCAL.MIX", "start": 33316606, "end": 37146443}, {"filename": "/LORES.MIX", "start": 37146443, "end": 37901243}, {"filename": "/REDALERT.INI", "start": 37901243, "end": 37901336}, {"filename": "/RUSSIAN.MIX", "start": 37901336, "end": 38167413}, {"filename": "/SNOW.MIX", "start": 38167413, "end": 39198274}, {"filename": "/SOUNDS.MIX", "start": 39198274, "end": 40205052}, {"filename": "/SPEECH.MIX", "start": 40205052, "end": 42208516}, {"filename": "/TEMPERAT.MIX", "start": 42208516, "end": 43247375}], "remote_package_size": 43247375});
+    loadPackage({"files": [{"filename": "/ALLIES.MIX", "start": 0, "end": 309406}, {"filename": "/CONQUER.MIX", "start": 309406, "end": 2486453}, {"filename": "/GENERAL.MIX", "start": 2486453, "end": 17418797}, {"filename": "/HIRES.MIX", "start": 17418797, "end": 23236214}, {"filename": "/INTERIOR.MIX", "start": 23236214, "end": 23483639}, {"filename": "/LOCAL.MIX", "start": 23483639, "end": 27313476}, {"filename": "/REDALERT.INI", "start": 27313476, "end": 27313502}, {"filename": "/RUSSIAN.MIX", "start": 27313502, "end": 27579579}, {"filename": "/SNOW.MIX", "start": 27579579, "end": 28610440}, {"filename": "/SOUNDS.MIX", "start": 28610440, "end": 29617218}, {"filename": "/SPEECH.MIX", "start": 29617218, "end": 31620682}, {"filename": "/TEMPERAT.MIX", "start": 31620682, "end": 32659541}], "remote_package_size": 32659541});
 
   })();
