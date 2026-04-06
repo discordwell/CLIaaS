@@ -7,7 +7,7 @@
 // C++ Red Alert supports LORES (320×200, RESFACTOR=1) and HIRES (640×400, RESFACTOR=2).
 // LORES matches the WASM 320×200 reference output: 10 cells × 8 cells visible game area.
 // Set to 2 to revert to the previous HIRES layout (640×400, 20×16 cells visible).
-export const RESFACTOR = 1;
+export const RESFACTOR = 2;
 
 // === Coordinate System ===
 // Map is 128×128 cells, visible area depends on RESFACTOR:
