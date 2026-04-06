@@ -160,7 +160,7 @@ function getSeedFromQuery() {
   // game resolution (320x200 for LORES=1) so SDL2.image has the right size
   // and the pixel copy from WASM heap reads the correct frame buffer.
   var origCreateImageData = CanvasRenderingContext2D.prototype.createImageData;
-  var GAME_RES_W = 320, GAME_RES_H = 200;
+  var GAME_RES_W = 640, GAME_RES_H = 400;
   CanvasRenderingContext2D.prototype.createImageData = function(w, h) {
     if (w <= 0 || h <= 0) {
       wlog('createImageData(' + w + ', ' + h + ') → substituted ' + GAME_RES_W + 'x' + GAME_RES_H);
@@ -574,9 +574,9 @@ window.addEventListener('load', function() {
   // that call into WASM during Asyncify yield, corrupting the stack.
   if (!isAutoplayLoad) {
     setTimeout(function() {
-      canvasElement.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:320, clientY:200}));
-      canvasElement.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, clientX:320, clientY:200}));
-      canvasElement.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:320, clientY:200}));
+      canvasElement.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:640, clientY:400}));
+      canvasElement.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, clientX:640, clientY:400}));
+      canvasElement.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:640, clientY:400}));
       canvasElement.focus();
       if (window.__preAudioCtx) window.__preAudioCtx.resume().catch(function(){});
     }, 500);

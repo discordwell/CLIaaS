@@ -71,7 +71,7 @@ test.describe('Visual Compare', () => {
       M.ccall('agent_render', null, [], []);
       const ptr = (window as any).__agentFramePtr;
       if (!ptr || !M.HEAPU8) return null;
-      const w = 320, h = 200;
+      const w = 640, h = 400;
       const c = document.createElement('canvas');
       c.width = w; c.height = h;
       const ctx = c.getContext('2d')!;
