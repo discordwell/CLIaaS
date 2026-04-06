@@ -652,7 +652,7 @@ export class Renderer {
     const y = this.cursorY;
 
     // Map CursorType to MOUSE_CONTROL key
-    const cursorMap: Record<number, string> = {
+    const cursorMap: Record<string, string> = {
       [CursorType.DEFAULT]: 'default',
       [CursorType.MOVE]: 'move',
       [CursorType.NOMOVE]: 'nomove',

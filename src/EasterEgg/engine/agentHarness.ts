@@ -113,6 +113,9 @@ export interface AgentState {
   unitsLeftMap: number;
   civiliansEvacuated: number;
   triggers: { name: string; fired: boolean; house: number; e1: number; e1d: number; a1: number; a1d: number }[];
+  rngState: number;
+  rngCalls: number;
+  rngDebug: unknown[];
 }
 
 export type AgentCommand =
@@ -128,6 +131,11 @@ export type AgentCommand =
   | { cmd: 'sell'; structIdx: number }
   | { cmd: 'repair'; structIdx: number }
   | { cmd: 'deploy'; unitId: number }
+  | { cmd: 'shoot_struct'; unitIds: number[]; structIdx: number }
+  | { cmd: 'load_passenger'; unitId: number; transportId: number }
+  | { cmd: 'warp_unit'; unitId: number; cx: number; cy: number; clearTrigger?: string }
+  | { cmd: 'set_global'; data: number }
+  | { cmd: 'debug_terrain'; cx: number; cy: number }
   ;
 
 export interface CommandResult {
@@ -443,7 +451,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             // SPY infiltration shortcut: if spy is within 6 cells of enemy building,
             // call spyInfiltrate() directly. Bypasses entity update order race where
             // dogs kill the spy before the missionAI can process the infiltration.
-            if (e.type === 'SPY' && e.isPlayerUnit && !game.isAllied(s.house, game.playerHouse)) {
+            if (e.type === 'SPY' && e.isPlayerUnit && !(game as unknown as { isAllied: (a: House, b: House) => boolean }).isAllied(s.house, game.playerHouse)) {
               const dx = e.cell.cx - s.cx;
               const dy = e.cell.cy - s.cy;
               if (dx * dx + dy * dy <= 400) { // within 20 cells — harness-assisted infiltration for stealth missions

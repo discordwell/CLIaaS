@@ -368,7 +368,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       // Brief-only missions (no intro): start video immediately, fade around it.
       // Can't use playFMV here because we need custom error handling (fallback
       // to procedural briefing rather than just skipping).
-      let player = moviePlayerRef.current;
+      let player: MoviePlayer | null = moviePlayerRef.current;
       if (!player && containerRef.current) {
         player = new MoviePlayer(containerRef.current);
         moviePlayerRef.current = player;

@@ -2661,7 +2661,7 @@ export class OracleStrategy {
 
       // Attack or turtle decision — all fighters commit together
       if (!significantBaseThreat) {
-        const isTimedSurvival = defenseOnlyMission && state.missionTimerActive && state.missionTimer > 0;
+        const isTimedSurvival = defenseOnlyMission && state.missionTimerActive && (state.missionTimer ?? 0) > 0;
         const tankCount = fighters.filter((u) => u.t.includes('TNK')).length;
         const friendlyStr = combatStrength(fighters);
         const enemyStr = combatStrength(state.enemies);
@@ -3430,7 +3430,7 @@ export class OracleStrategy {
           // ConYard below 25% — send engineer to capture NOW
           commands.push({ cmd: 'attack', ids: [engineers[0].id], target: enemyFact.id });
           reasons.push(`CAPTURE! FACT ${Math.round(enemyFact.hp / enemyFact.mhp * 100)}%`);
-        } else if (nearTarget && nearbyEnemies.length <= 2) {
+        } else if (nearTarget && state.enemies.filter(e => e.hp > 0 && this.distanceSq(e, target) <= 225).length <= 2) {
           // Tanks near ConYard AND area mostly clear — move engineers up
           commands.push({ cmd: 'move', ids: engineers.map(u => u.id),
             cx: target.cx - 3, cy: target.cy + 2 });
@@ -3518,7 +3518,7 @@ export class OracleStrategy {
 
     // Set global 18 after spy infiltrates — simulates tny3 cell trigger.
     // In C++, the spy walks to (24,107) first, but our harness shortcut skips this.
-    if (this.scg05eaSpyInfiltrated && !state.globals.includes(18)) {
+    if (this.scg05eaSpyInfiltrated && !(state.globals ?? []).includes(18)) {
       commands.push({ cmd: 'set_global', data: 18 } as never);
       reasons.push('set global 18 (tny3 substitute)');
       return { commands, reason: reasons.join('; ') };

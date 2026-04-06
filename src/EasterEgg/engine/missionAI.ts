@@ -73,6 +73,8 @@ export interface MissionAIContext {
 
   // Warhead helpers
   getFirepowerBias(house: House): number;
+  /** C++ house.cpp:293: ArmorBias — difficulty-scaled armor bonus */
+  getArmorBias(house: House): number;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
   getWarheadMult(warhead: WarheadType, armor: ArmorType): number;

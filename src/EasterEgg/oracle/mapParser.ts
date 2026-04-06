@@ -386,7 +386,7 @@ export function getCoastalCellsFromINI(
     // Dynamic require hidden from bundler static analysis.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const _r = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__ : require;
+      const _r = typeof (globalThis as Record<string, unknown>).__non_webpack_require__ !== 'undefined' ? (globalThis as Record<string, unknown>).__non_webpack_require__ as NodeRequire : require;
       const fs = _r('f' + 's');
       const iniText = fs.readFileSync(iniPath, 'utf-8');
       mapData = parseMapPack(iniText);

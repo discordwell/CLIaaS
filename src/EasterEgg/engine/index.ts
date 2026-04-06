@@ -3554,7 +3554,7 @@ export class Game {
         // If entity has a target in range and weapon ready, fire weapon.
         if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
           this.updateAttack(entity);
-          if (entity.mission === Mission.ATTACK) entity.mission = Mission.HUNT;
+          if ((entity.mission as Mission) === Mission.ATTACK) entity.mission = Mission.HUNT;
         } else if (missionTimerFired) {
           this.updateHunt(entity);
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
@@ -5936,7 +5936,7 @@ export class Game {
         const naval = entity.stats.isVessel;
         const passable = naval ? this.map.isWaterPassable(cell.cx, cell.cy) : this.map.isTerrainPassable(cell.cx, cell.cy);
         if (!passable) {
-          const alt = nearbyLocation(this.map, cell, naval);
+          const alt = nearbyLocation(this.map, cell, naval ?? false);
           if (alt) {
             entity.setPosition(alt.cx * CELL_SIZE + CELL_SIZE / 2, alt.cy * CELL_SIZE + CELL_SIZE / 2);
           }
