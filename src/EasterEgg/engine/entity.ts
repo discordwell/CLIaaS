@@ -366,6 +366,8 @@ export class Entity {
   // Prone infantry take 50% damage (C++ rules.cpp:202 ProneDamageBias=1/2).
   fear = 0;
   isProne = false;
+  prevIsProne = false; // G3: track prone transitions for LIE_DOWN/GET_UP animations
+  gestureDoInfo: { frame: number; count: number; jump: number } | null = null; // G8: active gesture/salute DoInfo
   static readonly FEAR_ANXIOUS = 10;
   static readonly FEAR_SCARED = 100;
   static readonly FEAR_PANIC = 200;
@@ -609,6 +611,30 @@ export class Entity {
           }
           return d.frame + Math.min(this.animFrame, Math.max(d.count - 1, 0));
         }
+        // G3: LIE_DOWN transition animation — plays while going from standing to prone
+        case AnimState.LIE_DOWN: {
+          const d = anim.lieDown ?? anim.ready;
+          return d.frame + sdir * d.jump + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+        }
+        // G3: GET_UP transition animation — plays while going from prone to standing
+        case AnimState.GET_UP: {
+          const d = anim.getUp ?? anim.ready;
+          return d.frame + sdir * d.jump + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+        }
+        // G8: Gesture/Salute animation — triggered during idle fidget
+        case AnimState.GESTURE: {
+          if (this.gestureDoInfo) {
+            const d = this.gestureDoInfo;
+            // Directional gestures (jump > 0) use facing, non-directional (jump == 0) don't
+            if (d.jump > 0) {
+              return d.frame + sdir * d.jump + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+            }
+            return d.frame + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+          }
+          // Fallback to ready if gestureDoInfo somehow null
+          const d = anim.ready;
+          return d.frame + sdir * d.jump;
+        }
         default: {
           // Prone idle
           if (this.isProne && anim.prone) {
@@ -796,6 +822,62 @@ export class Entity {
 
   /** Update animation frame — uses per-type rate overrides from C++ MasterDoControls */
   tickAnimation(): void {
+    // G3: Detect prone transitions for LIE_DOWN/GET_UP animations.
+    // C++ infantry.cpp: Do_Action(DO_LIE_DOWN) before entering prone, DO_GET_UP before standing.
+    // Only trigger on actual transitions, not every tick while prone.
+    // Only play transition when idle-ish — if unit is actively walking/attacking/dying,
+    // the prone visual switches immediately (C++ also interrupts transitions on move orders).
+    if (this.stats.isInfantry && this.isProne !== this.prevIsProne) {
+      const anim = INFANTRY_ANIMS[this.type];
+      const isIdleLike = this.animState === AnimState.IDLE || this.animState === AnimState.GUARD_IDLE
+        || this.animState === AnimState.AREA_GUARD_IDLE || this.animState === AnimState.PRONE
+        || this.animState === AnimState.GESTURE;
+      if (isIdleLike) {
+        if (this.isProne && !this.prevIsProne && anim?.lieDown) {
+          // Standing → Prone: play LIE_DOWN first
+          this.animState = AnimState.LIE_DOWN;
+          this.animFrame = 0;
+          this.animTick = 0;
+        } else if (!this.isProne && this.prevIsProne && anim?.getUp) {
+          // Prone → Standing: play GET_UP first
+          this.animState = AnimState.GET_UP;
+          this.animFrame = 0;
+          this.animTick = 0;
+        }
+      }
+      this.prevIsProne = this.isProne;
+    }
+
+    // G3: Handle LIE_DOWN/GET_UP animation completion.
+    // When transition animation finishes, advance to the target state.
+    if (this.stats.isInfantry) {
+      const anim = INFANTRY_ANIMS[this.type];
+      if (this.animState === AnimState.LIE_DOWN && anim?.lieDown) {
+        // LIE_DOWN uses directional frames (jump > 0), count is frames per facing
+        if (this.animFrame >= anim.lieDown.count) {
+          this.animState = AnimState.IDLE; // prone idle is handled by IDLE+isProne in spriteFrame
+          this.animFrame = 0;
+          this.animTick = 0;
+        }
+      } else if (this.animState === AnimState.GET_UP && anim?.getUp) {
+        if (this.animFrame >= anim.getUp.count) {
+          this.animState = AnimState.IDLE;
+          this.animFrame = 0;
+          this.animTick = 0;
+        }
+      }
+
+      // G8: Handle GESTURE animation completion — return to IDLE when done.
+      if (this.animState === AnimState.GESTURE && this.gestureDoInfo) {
+        if (this.animFrame >= this.gestureDoInfo.count) {
+          this.animState = AnimState.IDLE;
+          this.animFrame = 0;
+          this.animTick = 0;
+          this.gestureDoInfo = null;
+        }
+      }
+    }
+
     // G6: Random_Animate frame-start for WALK/CRAWL (C++ MasterDoControls RandomStart=true).
     // When infantry enters WALK state, start at a random offset into the walk cycle so groups
     // of infantry don't all animate in lockstep. Same applies to crawl (same count as walk).
@@ -826,6 +908,8 @@ export class Entity {
     const defaultWalk = 2;
     const defaultAttack = 5;
     const defaultIdle = 4;
+    // G3: LIE_DOWN/GET_UP use rate=2 per C++ MasterDoControls (same as walk/crawl).
+    const defaultTransition = 2;
     // Ants: faster walk animation (1 frame/tick) — C++ ties body frames to track steps,
     // but our animation is decoupled. Rate 1 matches their fast movement speed.
     const antWalk = 1;
@@ -834,11 +918,36 @@ export class Entity {
       ? (this.animState === AnimState.WALK ? antWalk : this.animState === AnimState.ATTACK ? antAttack : defaultIdle)
       : this.animState === AnimState.WALK ? (typeAnim?.walkRate ?? defaultWalk) :
                  this.animState === AnimState.ATTACK ? (typeAnim?.attackRate ?? defaultAttack) :
+                 this.animState === AnimState.LIE_DOWN || this.animState === AnimState.GET_UP ? defaultTransition :
+                 this.animState === AnimState.GESTURE ? defaultIdle :
                  (typeAnim?.idleRate ?? defaultIdle);
     if (this.animTick >= rate) {
       this.animTick = 0;
       this.animFrame++;
     }
+
+    // G8: Gesture/salute trigger during idle fidget (~5% chance, C++ infantry.cpp:886-888).
+    // When idle fidget delay expires and fidgetVariant lands in the gesture range,
+    // transition to GESTURE state instead of playing idle1/idle2.
+    if (this.stats.isInfantry && !this.isProne
+        && (this.animState === AnimState.IDLE || this.animState === AnimState.GUARD_IDLE)
+        && this.animFrame > this.fidgetDelay && this.fidgetVariant < 0.05) {
+      const ta = INFANTRY_ANIMS[this.type];
+      if (ta && (ta.gesture1 || ta.gesture2 || ta.salute1 || ta.salute2)) {
+        const candidates: { frame: number; count: number; jump: number }[] = [];
+        if (ta.gesture1) candidates.push(ta.gesture1);
+        if (ta.gesture2) candidates.push(ta.gesture2);
+        if (ta.salute1) candidates.push(ta.salute1);
+        if (ta.salute2) candidates.push(ta.salute2);
+        // Use fidgetVariant to deterministically select which gesture
+        const idx = Math.floor((this.fidgetVariant / 0.05) * candidates.length) % candidates.length;
+        this.gestureDoInfo = candidates[idx];
+        this.animState = AnimState.GESTURE;
+        this.animFrame = 0;
+        this.animTick = 0;
+      }
+    }
+
     if (!this.alive) this.deathTick++;
     if (this.damageFlash > 0) this.damageFlash--;
   }

@@ -1043,6 +1043,13 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       ctx.playSoundAt('building_explode', proj.impactX, proj.impactY);
     }
 
+    // D5: C++ anim.cpp — IsScorcher=true animations (napalm, fire) plant SMUDGE_SCORCH on ground.
+    // Fire warhead (ExplosionSet=3) leaves scorch marks at impact cell.
+    // Nuke warhead also scorches (InfDeath=4 = burn). Only on ground, not water/air.
+    if (projLand === 'ground' && (proj.weapon.warhead === 'Fire' || proj.weapon.warhead === 'Nuke')) {
+      ctx.map.addDecal(projImpactCell.cx, projImpactCell.cy, 7, 0.3);
+    }
+
     // C++ bullet.cpp:112-175 — dog-rides-bullet unlimbo: when bullet arrives, dog exits limbo at impact point
     if (proj.dogRiderId >= 0) {
       const dog = ctx.entityById.get(proj.dogRiderId);
@@ -1814,6 +1821,11 @@ export function updateStructureCombat(ctx: CombatContext): void {
           frame: 0, maxFrames: 10, size: 6,
           sprite: aaImpactSprite, spriteStart: 0,
         } as Effect);
+        // D5: Structure fire weapons (FTUR FireballLauncher) plant scorch marks at impact
+        if (structLand === 'ground' && wh === 'Fire') {
+          const impCell = worldToCell(bestTarget.pos.x, bestTarget.pos.y);
+          ctx.map.addDecal(impCell.cx, impCell.cy, 7, 0.3);
+        }
         ctx.playSoundAt('machinegun', sx, sy);
       }
 

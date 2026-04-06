@@ -245,6 +245,12 @@ export interface InfantryAnim {
   die5?: DoInfo;      // DO_FIRE_DEATH (InfDeath=4 — burn; InfDeath=5 electro also maps here)
   idle?: DoInfo;      // DO_IDLE1
   idle2?: DoInfo;     // DO_IDLE2
+  // G8: Gesture/Salute animations (C++ idata.cpp DO_GESTURE1/2, DO_SALUTE1/2)
+  // Triggered during idle fidget with small probability (C++ infantry.cpp:886-888 Random_Animate)
+  gesture1?: DoInfo;   // DO_GESTURE1 — Soviet-side gesture on unload
+  gesture2?: DoInfo;   // DO_GESTURE2 — Allied-side gesture on unload
+  salute1?: DoInfo;    // DO_SALUTE1
+  salute2?: DoInfo;    // DO_SALUTE2
   // Per-type animation rate overrides (C++ MasterDoControls variable timing)
   // C++ MasterDoControls: WALK=2, CRAWL=2, IDLE1/2=2, FIRE_WEAPON=1, death=2
   walkRate?: number;   // ticks per frame for walk (default 2 per C++ MasterDoControls)
@@ -279,6 +285,10 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     die5:      { frame: 324, count: 18, jump: 0 },  // 418-94
     idle:      { frame: 256, count: 16, jump: 0 },
     idle2:     { frame: 272, count: 16, jump: 0 },
+    gesture1:  { frame: 342, count: 3,  jump: 3 },  // 436-94, DO_GESTURE1
+    salute1:   { frame: 366, count: 3,  jump: 3 },  // 460-94, DO_SALUTE1
+    gesture2:  { frame: 390, count: 3,  jump: 3 },  // 484-94, DO_GESTURE2
+    salute2:   { frame: 414, count: 3,  jump: 3 },  // 508-94, DO_SALUTE2
   },
   E2: { // E2DoControls (idata.cpp:104) — Grenadier
     ready:     { frame: 0,   count: 1,  jump: 1 },
@@ -297,6 +307,10 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     die5:      { frame: 452, count: 18, jump: 0 },  // 546-94
     idle:      { frame: 384, count: 16, jump: 0 },
     idle2:     { frame: 400, count: 16, jump: 0 },
+    gesture1:  { frame: 470, count: 3,  jump: 3 },  // 564-94, DO_GESTURE1
+    salute1:   { frame: 494, count: 3,  jump: 3 },  // 588-94, DO_SALUTE1
+    gesture2:  { frame: 518, count: 3,  jump: 3 },  // 612-94, DO_GESTURE2
+    salute2:   { frame: 542, count: 3,  jump: 3 },  // 636-94, DO_SALUTE2
     attackRate: 6,
   },
   E3: { // E3DoControls (idata.cpp:128) — Rocket Soldier
@@ -316,6 +330,10 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     die5:      { frame: 340, count: 18, jump: 0 },  // 434-94
     idle:      { frame: 272, count: 16, jump: 0 },
     idle2:     { frame: 288, count: 16, jump: 0 },
+    gesture1:  { frame: 358, count: 3,  jump: 3 },  // 452-94, DO_GESTURE1
+    salute1:   { frame: 382, count: 3,  jump: 3 },  // 476-94, DO_SALUTE1
+    gesture2:  { frame: 406, count: 3,  jump: 3 },  // 500-94, DO_GESTURE2
+    salute2:   { frame: 430, count: 3,  jump: 3 },  // 524-94, DO_SALUTE2
   },
   E4: { // E4DoControls (idata.cpp:152) — Flamethrower
     ready:     { frame: 0,   count: 1,  jump: 1 },
@@ -334,6 +352,10 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     die5:      { frame: 452, count: 18, jump: 0 },  // 546-94
     idle:      { frame: 384, count: 16, jump: 0 },
     idle2:     { frame: 400, count: 16, jump: 0 },
+    gesture1:  { frame: 470, count: 3,  jump: 3 },  // 564-94, DO_GESTURE1
+    salute1:   { frame: 494, count: 3,  jump: 3 },  // 588-94, DO_SALUTE1
+    gesture2:  { frame: 518, count: 3,  jump: 3 },  // 612-94, DO_GESTURE2
+    salute2:   { frame: 542, count: 3,  jump: 3 },  // 636-94, DO_SALUTE2
     attackRate: 4,
   },
   E6: { // E6DoControls (idata.cpp:176) — Engineer
@@ -351,6 +373,10 @@ export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
     die4:      { frame: 162, count: 12, jump: 0 },
     die5:      { frame: 182, count: 18, jump: 0 },
     idle:      { frame: 130, count: 16, jump: 0 },
+    gesture1:  { frame: 200, count: 3,  jump: 3 },  // DO_GESTURE1
+    salute1:   { frame: 224, count: 3,  jump: 3 },  // DO_SALUTE1
+    gesture2:  { frame: 200, count: 3,  jump: 3 },  // DO_GESTURE2 (same as gesture1 in C++)
+    salute2:   { frame: 224, count: 3,  jump: 3 },  // DO_SALUTE2 (same as salute1 in C++)
   },
   DOG: { // DogDoControls (idata.cpp:56) — Attack dog
     ready:     { frame: 0,   count: 1,  jump: 1 },
@@ -1228,6 +1254,9 @@ export enum AnimState {
   AREA_GUARD_IDLE = 'AREA_GUARD_IDLE', // C++ area guard idle anim
   PRONE = 'PRONE',                     // C++ infantry prone under fire (different sprite sequence)
   HARVEST = 'HARVEST',                 // C++ harvester scoop/dump anim
+  LIE_DOWN = 'LIE_DOWN',              // G3: C++ DO_LIE_DOWN — transition from standing to prone
+  GET_UP = 'GET_UP',                   // G3: C++ DO_GET_UP — transition from prone to standing
+  GESTURE = 'GESTURE',                 // G8: C++ DO_GESTURE1/2 DO_SALUTE1/2 — idle gesture/salute
 }
 
 // === World Position ===

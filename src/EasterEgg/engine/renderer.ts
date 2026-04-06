@@ -282,6 +282,19 @@ export class Renderer {
   superweaponCursorMode: SuperweaponType | null = null;
   chronoTankTargeting = false;
 
+  // E7: Per-structure attached fire effects (C++ building.cpp:1372-1435 parity).
+  // Each structure can have 1-3 one-shot fire animations that expire and randomly respawn,
+  // creating organic, varied fire instead of uniform always-on burning.
+  private structFireEffects = new Map<number, Array<{
+    offsetX: number;  // random pixel offset within footprint
+    offsetY: number;
+    sprite: string;   // 'burn-s', 'burn-m', or 'burn-l'
+    startTick: number; // game tick when this fire was spawned
+    maxFrames: number; // total frames in this sprite's animation
+  }>>();
+  // Track which structures have been initialized for fire effects (to detect HP threshold crossings)
+  private structFireInitialized = new Set<number>();
+
   // Pause menu state (set by Game each frame)
   pauseMenuOpen = false;
   pauseMenuHighlight = 0; // keyboard nav index (0-5)
@@ -1807,62 +1820,110 @@ export class Renderer {
         this.renderHealthBar(barX, barY, cppBarW, s.hp / s.maxHp, false);
       }
 
-      // Damage effects: fire+smoke at ConditionYellow (<=50%), intense fire (<25%)
+      // E7: Damage fire one-shot lifecycle (C++ building.cpp:1372-1435 parity).
+      // When buildings take damage (RESULT_HALF), C++ spawns attached AnimClass instances
+      // (ANIM_FIRE_SMALL, ANIM_ON_FIRE_SMALL/MED/BIG) that play once and expire.
+      // New ones spawn randomly, creating organic, varied fire.
       if (s.alive && s.hp <= s.maxHp * CONDITION_YELLOW && vis >= 1 && !isConstructing && !isSelling) {
         const hpRatio = s.hp / s.maxHp;
-        const fireSeed = (s.cx * 31 + s.cy * 17) | 0;
-        const [fw] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-        const numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
+        const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
 
-        for (let f = 0; f < numFires; f++) {
-          const fx = screenX + CELL_SIZE * 0.3 * fw + ((fireSeed + f * 13) % (fw * 10)) - fw * 3;
-          const fy = screenY + CELL_SIZE * 0.3 + f * 4;
+        // Determine desired fire count and sprite based on damage tier
+        const desiredFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
+        const tierSprite = hpRatio < 0.25 ? 'burn-l' : hpRatio < 0.5 ? 'burn-m' : 'burn-s';
 
-          if (hpRatio < 0.5) {
-            // Sprite-based fire (C++ BURN-S/M/L.SHP with SHAPE_GHOST blitting)
-            const burnSprite = hpRatio < 0.25 ? 'burn-l' : 'burn-m';
-            const burnSheet = assets.getSheet(burnSprite);
-            if (burnSheet) {
-              const burnFrameCount = burnSheet.meta.frameCount;
-              const burnFrame = (tick + f * 7) % burnFrameCount;
-              ctx.globalCompositeOperation = 'screen';
-              assets.drawFrame(ctx, burnSprite, burnFrame, fx, fy - 4, { centerX: true, centerY: true });
-              ctx.globalCompositeOperation = 'source-over';
-            } else {
-              // Procedural fallback if sprite not loaded
-              const flicker = Math.sin(tick * 0.5 + f * 2.1) * 0.3;
-              const intensity = hpRatio < 0.25 ? 1.4 : 1.0;
-              const fh = (6 + Math.sin(tick * 0.7 + f * 1.5) * 3) * intensity;
-              ctx.fillStyle = `rgba(255,${100 + flicker * 60},${hpRatio < 0.25 ? 10 : 30},${(0.5 + flicker * 0.2) * intensity})`;
-              ctx.beginPath();
-              ctx.ellipse(fx, fy - fh * 0.5, 3 * intensity, fh * 0.5, 0, 0, Math.PI * 2);
-              ctx.fill();
+        // Get or initialize fire effects for this structure
+        let fires = this.structFireEffects.get(structIdx);
+        if (!this.structFireInitialized.has(structIdx)) {
+          // First time crossing damage threshold — spawn initial fire effects
+          fires = [];
+          for (let f = 0; f < desiredFires; f++) {
+            fires.push({
+              offsetX: (NonCriticalRandom.float() - 0.3) * fw * CELL_SIZE * 0.7,
+              offsetY: (NonCriticalRandom.float() - 0.2) * fh * CELL_SIZE * 0.5,
+              sprite: tierSprite,
+              startTick: tick - Math.floor(NonCriticalRandom.float() * 10), // stagger start frames
+              maxFrames: assets.getSheet(tierSprite)?.meta.frameCount ?? 17,
+            });
+          }
+          this.structFireEffects.set(structIdx, fires);
+          this.structFireInitialized.add(structIdx);
+        }
+        if (!fires) fires = [];
+
+        // Process each fire effect: draw if alive, expire and maybe respawn
+        const survivingFires: typeof fires = [];
+        for (const fire of fires) {
+          const elapsed = tick - fire.startTick;
+          const frame = elapsed % fire.maxFrames;
+          const playCount = Math.floor(elapsed / fire.maxFrames);
+
+          // Each fire plays through once, then has a ~30% chance to respawn at a new offset
+          if (playCount >= 1) {
+            // C++ building.cpp:1435 — expired fire has random chance to respawn at different offset
+            if (NonCriticalRandom.float() < 0.30) {
+              survivingFires.push({
+                offsetX: (NonCriticalRandom.float() - 0.3) * fw * CELL_SIZE * 0.7,
+                offsetY: (NonCriticalRandom.float() - 0.2) * fh * CELL_SIZE * 0.5,
+                sprite: tierSprite,
+                startTick: tick,
+                maxFrames: assets.getSheet(tierSprite)?.meta.frameCount ?? 17,
+              });
             }
+            continue; // this fire has expired
           }
 
-          if (hpRatio >= 0.5) {
-            // Light damage: small smoldering fire (C++ BURN-S.SHP)
-            const burnSheet = assets.getSheet('burn-s');
-            if (burnSheet) {
-              const burnFrame = (tick + f * 7) % burnSheet.meta.frameCount;
-              ctx.globalCompositeOperation = 'screen';
-              assets.drawFrame(ctx, 'burn-s', burnFrame, fx, fy - 2, { centerX: true, centerY: true });
-              ctx.globalCompositeOperation = 'source-over';
-            }
+          // Draw the fire sprite
+          const fx = screenX + fw * CELL_SIZE * 0.4 + fire.offsetX;
+          const fy = screenY + fh * CELL_SIZE * 0.3 + fire.offsetY;
+          const burnSheet = assets.getSheet(fire.sprite);
+          if (burnSheet) {
+            ctx.globalCompositeOperation = 'screen';
+            assets.drawFrame(ctx, fire.sprite, frame, fx, fy - 4, { centerX: true, centerY: true });
+            ctx.globalCompositeOperation = 'source-over';
+          } else {
+            // Procedural fallback if sprite not loaded
+            const flicker = Math.sin(tick * 0.5 + fire.offsetX * 0.3) * 0.3;
+            const intensity = hpRatio < 0.25 ? 1.4 : 1.0;
+            const fireH = (6 + Math.sin(tick * 0.7 + fire.offsetY * 0.2) * 3) * intensity;
+            ctx.fillStyle = `rgba(255,${100 + flicker * 60},${hpRatio < 0.25 ? 10 : 30},${(0.5 + flicker * 0.2) * intensity})`;
+            ctx.beginPath();
+            ctx.ellipse(fx, fy - fireH * 0.5, 3 * intensity, fireH * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
           }
+          survivingFires.push(fire);
 
-          // Smoke rising (all damage tiers, heavier when more damaged)
+          // Smoke rising from each fire point (all damage tiers, heavier when more damaged)
           const smokeSpeed = hpRatio < 0.25 ? 0.6 : hpRatio < 0.5 ? 0.4 : 0.25;
           const smokeSize = hpRatio < 0.25 ? 4 : hpRatio < 0.5 ? 3 : 2;
           const smokeBase = hpRatio < 0.5 ? 0.35 : 0.2;
-          const smokeY = fy - 8 - (tick * smokeSpeed + f * 3) % 12;
-          const smokeAlpha = smokeBase - ((tick * smokeSpeed + f * 3) % 12) / 30;
+          const smokePhase = (tick * smokeSpeed + fire.offsetX * 0.1) % 12;
+          const smokeY = fy - 8 - smokePhase;
+          const smokeAlpha = smokeBase - smokePhase / 30;
           if (smokeAlpha > 0) {
             ctx.fillStyle = `rgba(40,40,40,${smokeAlpha.toFixed(2)})`;
             ctx.beginPath();
-            ctx.arc(fx + Math.sin(tick * 0.15 + f) * 2, smokeY, smokeSize, 0, Math.PI * 2);
+            ctx.arc(fx + Math.sin(tick * 0.15 + fire.offsetX * 0.05) * 2, smokeY, smokeSize, 0, Math.PI * 2);
             ctx.fill();
           }
+        }
+
+        // Ensure we maintain at least the desired fire count (C++ spawns replacements)
+        while (survivingFires.length < desiredFires) {
+          survivingFires.push({
+            offsetX: (NonCriticalRandom.float() - 0.3) * fw * CELL_SIZE * 0.7,
+            offsetY: (NonCriticalRandom.float() - 0.2) * fh * CELL_SIZE * 0.5,
+            sprite: tierSprite,
+            startTick: tick,
+            maxFrames: assets.getSheet(tierSprite)?.meta.frameCount ?? 17,
+          });
+        }
+        this.structFireEffects.set(structIdx, survivingFires);
+      } else {
+        // Structure healed above threshold or dead — clean up fire effects
+        if (this.structFireInitialized.has(structIdx)) {
+          this.structFireEffects.delete(structIdx);
+          this.structFireInitialized.delete(structIdx);
         }
       }
 
