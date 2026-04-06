@@ -406,7 +406,7 @@ export function activateSuperweapon(
           ctx.effects.push({
             type: 'explosion', x: origin.x, y: origin.y,
             frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
+            sprite: 'chronbox', spriteStart: 0,
           });
           ctx.playSound('chrono');
           if (ctx.isAllied(house, ctx.playerHouse)) {
@@ -427,12 +427,12 @@ export function activateSuperweapon(
           ctx.effects.push({
             type: 'explosion', x: origin.x, y: origin.y,
             frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
+            sprite: 'chronbox', spriteStart: 0,
           });
           ctx.effects.push({
             type: 'explosion', x: target.x, y: target.y,
             frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
+            sprite: 'chronbox', spriteStart: 0,
           });
           ctx.playSound('chrono');
           if (ctx.isAllied(house, ctx.playerHouse)) {
@@ -469,12 +469,12 @@ export function activateSuperweapon(
           ctx.effects.push({
             type: 'explosion', x: origin.x, y: origin.y,
             frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
+            sprite: 'chronbox', spriteStart: 0,
           });
           ctx.effects.push({
             type: 'explosion', x: target.x, y: target.y,
             frame: 0, maxFrames: 20, size: 24,
-            sprite: 'litning', spriteStart: 0,
+            sprite: 'chronbox', spriteStart: 0,
           });
           ctx.playSound('chrono');
           if (ctx.isAllied(house, ctx.playerHouse)) {

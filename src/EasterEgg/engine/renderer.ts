@@ -1746,6 +1746,14 @@ export class Renderer {
             centerY: true,
           });
         }
+        // WEAP2 door overlay — C++ building.cpp:500-503 Techno_Draw_Object(WarFactoryOverlay, Door_Stage())
+        // WEAP2.SHP = 8 frames (0=closed..7=open), drawn on top of WEAP base sprite.
+        if (s.image === 'weap' && assets.hasSheet('weap2') && !isConstructing && !isSelling) {
+          const doorFrame = 0; // TODO: track door state per-structure for open/close during production
+          assets.drawFrame(ctx, 'weap2', doorFrame, screenX + dfw / 2, screenY + dfh / 2, {
+            centerX: true, centerY: true,
+          });
+        }
         // Blushing damage flash — C++ flasher.cpp:83-95 + house.cpp:2308 (blush → Map.FadingLight).
         // When a building takes damage, IsBlushing toggles on odd FlashCount ticks,
         // producing a brief white tint. We mimic with a screen-blend white overlay.
