@@ -17,7 +17,7 @@ ally5 ally6 ally8 ally9 allyend allymorf antbrf antend antintro apcescpe
 assess averted battle beachead binoc bmap bombrun brdgtilt countdwn cronfail
 crontest destroyr double dpthchrg dud elevator execute flare frozen grvestne
 landing masasslt mcv mcv_land mcvbrdge mig montpass movingin mtnkfact nukestok
-oildrum onthprwl overrun periscop radrraid search sfrozen shipsink shorbom1
+oildrum onthprwl overrun periscop prolog radrraid search sfrozen shipsink shorbom1
 shorbom2 shorbomb sitduck slntsrvc snowbomb snstrafe sovbatl sovcemet sovfinal
 soviet1 soviet10 soviet11 soviet12 soviet13 soviet14 soviet2 soviet3 soviet4
 soviet5 soviet6 soviet7 soviet8 soviet9 sovmcv sovtstar spotter spy strafe

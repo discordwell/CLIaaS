@@ -314,7 +314,7 @@ export function saveProgress(completedMission: number): void {
 
 // === Campaign System ===
 
-export type CampaignId = 'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet';
+export type CampaignId = 'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | 'aftermath_allied' | 'aftermath_soviet';
 
 export interface CampaignMission {
   id: string;        // scenario file ID (e.g. 'SCG01EA')
@@ -396,6 +396,8 @@ export const CAMPAIGNS: CampaignDef[] = [
   { id: 'soviet', title: 'Soviet Campaign', faction: 'soviet', missions: SOVIET_MISSIONS, progressKey: 'campaign_soviet_progress' },
   { id: 'counterstrike_allied', title: 'Counterstrike (Allied)', faction: 'allied', missions: CS_ALLIED_MISSIONS, progressKey: 'campaign_cs_allied_progress' },
   { id: 'counterstrike_soviet', title: 'Counterstrike (Soviet)', faction: 'soviet', missions: CS_SOVIET_MISSIONS, progressKey: 'campaign_cs_soviet_progress' },
+  { id: 'aftermath_allied', title: 'Aftermath (Allied)', faction: 'allied', missions: [], progressKey: 'campaign_am_allied_progress' },
+  { id: 'aftermath_soviet', title: 'Aftermath (Soviet)', faction: 'soviet', missions: [], progressKey: 'campaign_am_soviet_progress' },
 ];
 
 /** Get a campaign definition by ID */

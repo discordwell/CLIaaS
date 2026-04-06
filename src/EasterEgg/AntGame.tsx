@@ -19,7 +19,25 @@ interface AntGameProps {
   onExit: () => void;
 }
 
-type Screen = 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing'
+// ── Aftermath Main Menu Button Layout (from C++ menus.cpp FIXIT_VERSION_3) ──
+// Button geometry at RESFACTOR=1, native 320x200 resolution
+const MENU_BTN_X = 102;       // d_start_x in C++
+const MENU_BTN_W = 118;       // d_start_w
+const MENU_BTN_H = 9;         // d_start_h
+const MENU_BTN_Y_START = 87;  // d_dialog_y(75) + 12*RESFACTOR
+const MENU_BTN_YSTEP = 12;    // ystep with both expansions
+
+const MENU_BUTTONS = [
+  { label: 'Counterstrike Missions', enabled: true, id: 'cs' },
+  { label: 'Aftermath Missions',     enabled: true, id: 'am' },
+  { label: 'Start New Game',         enabled: true, id: 'new' },
+  { label: 'Load Mission',           enabled: false, id: 'load' },
+  { label: 'Multiplayer Game',       enabled: false, id: 'multi' },
+  { label: 'Intro & Sneak Peek',     enabled: true, id: 'intro' },
+  { label: 'Exit Game',              enabled: true, id: 'exit' },
+] as const;
+
+type Screen = 'intro_cutscene' | 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'playing'
   | 'faction_select' | 'campaign_select' | 'map_select'
   | 'fmv_intro' | 'fmv_briefing' | 'fmv_action' | 'objectives_interstitial'
   | 'fmv_win' | 'fmv_lose' | 'fmv_campaign_end';
@@ -27,7 +45,7 @@ type Screen = 'main_menu' | 'select' | 'briefing' | 'cutscene' | 'loading' | 'pl
 export default function AntGame({ onExit }: AntGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<Game | null>(null);
-  const [screen, setScreen] = useState<Screen>('main_menu');
+  const [screen, setScreen] = useState<Screen>('intro_cutscene');
   const [loadProgress_, setLoadProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -37,10 +55,10 @@ export default function AntGame({ onExit }: AntGameProps) {
   const [missionIndex, setMissionIndex] = useState(0);
   // Campaign state
   const [activeCampaign, setActiveCampaign] = useState<CampaignDef | null>(null);
-  const [campaignType, setCampaignType] = useState<'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | null>(null);
+  const [campaignType, setCampaignType] = useState<'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | 'aftermath_allied' | 'aftermath_soviet' | null>(null);
   const [campaignMissionIndex, setCampaignMissionIndex] = useState(0);
   const [campaignUnlocked, setCampaignUnlocked] = useState(0);
-  const [pendingFaction, setPendingFaction] = useState<'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | null>(null);
+  const [pendingFaction, setPendingFaction] = useState<'allied' | 'soviet' | 'counterstrike_allied' | 'counterstrike_soviet' | 'aftermath_allied' | 'aftermath_soviet' | null>(null);
   const [availableMissions, setAvailableMissions] = useState<boolean[]>([]);
   const [briefingsLoaded, setBriefingsLoaded] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>(() => {
@@ -65,6 +83,12 @@ export default function AntGame({ onExit }: AntGameProps) {
   const briefingRef = useRef<BriefingRenderer | null>(null);
   const moviePlayerRef = useRef<MoviePlayer | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Menu system refs
+  const menuCanvasRef = useRef<HTMLCanvasElement>(null);
+  const titleImageRef = useRef<HTMLImageElement | null>(null);
+  const menuMusicRef = useRef<HTMLAudioElement | null>(null);
+  const [menuHoveredButton, setMenuHoveredButton] = useState(-1);
+  const [menuSelectedButton, setMenuSelectedButton] = useState(0);
 
   const transitionTo = useCallback((callback: () => void) => {
     setFadeActive(true);
@@ -899,8 +923,59 @@ export default function AntGame({ onExit }: AntGameProps) {
         gameRef.current.stop();
         gameRef.current = null;
       }
+      if (menuMusicRef.current) {
+        menuMusicRef.current.pause();
+        menuMusicRef.current.src = '';
+        menuMusicRef.current = null;
+      }
     };
   }, []);
+
+  // Preload title.png for menu background
+  useEffect(() => {
+    const img = new Image();
+    img.src = '/ra/assets/title.png';
+    img.onload = () => { titleImageRef.current = img; };
+  }, []);
+
+  // Intro cutscene: play prolog.mp4 via MoviePlayer
+  useEffect(() => {
+    if (screen !== 'intro_cutscene' || !containerRef.current) return;
+    const player = new MoviePlayer(containerRef.current);
+    moviePlayerRef.current = player;
+    player.onComplete = () => {
+      player.destroy();
+      moviePlayerRef.current = null;
+      transitionTo(() => setScreen('main_menu'));
+    };
+    player.onError = () => {
+      player.destroy();
+      moviePlayerRef.current = null;
+      // Gracefully skip to menu if video not available
+      transitionTo(() => setScreen('main_menu'));
+    };
+    player.play('prolog');
+    return () => {
+      player.destroy();
+      if (moviePlayerRef.current === player) moviePlayerRef.current = null;
+    };
+  }, [screen, transitionTo]);
+
+  // Menu music: play Hell March while on main_menu
+  useEffect(() => {
+    if (screen === 'main_menu') {
+      const audio = new Audio('/ra/music/01_hell_march.mp3');
+      audio.volume = 0.3;
+      audio.loop = true;
+      menuMusicRef.current = audio;
+      audio.play().catch(() => {});
+      return () => {
+        audio.pause();
+        audio.src = '';
+        menuMusicRef.current = null;
+      };
+    }
+  }, [screen]);
 
   // Save settings to localStorage when difficulty changes
   useEffect(() => {
@@ -924,12 +999,47 @@ export default function AntGame({ onExit }: AntGameProps) {
     } catch { /* ignore */ }
   }, [difficulty]);
 
+  // ── Menu button activation (must be before keyboard handler) ──
+  const handleMenuButtonActivate = useCallback((btnIdx: number) => {
+    if (btnIdx < 0 || btnIdx >= MENU_BUTTONS.length) return;
+    const btn = MENU_BUTTONS[btnIdx];
+    if (!btn.enabled) return;
+
+    switch (btn.id) {
+      case 'cs':
+        setPendingFaction(null);
+        setCampaignType('counterstrike_allied');
+        transitionTo(() => setScreen('faction_select'));
+        break;
+      case 'am':
+        setPendingFaction(null);
+        setCampaignType('aftermath_allied');
+        transitionTo(() => setScreen('faction_select'));
+        break;
+      case 'new':
+        setPendingFaction(null);
+        setCampaignType(null);
+        transitionTo(() => setScreen('faction_select'));
+        break;
+      case 'intro':
+        transitionTo(() => setScreen('intro_cutscene'));
+        break;
+      case 'exit':
+        onExit();
+        break;
+    }
+  }, [transitionTo, onExit]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'F10') {
         e.preventDefault();
-        if (screen === 'fmv_intro' || screen === 'fmv_briefing' || screen === 'fmv_action') {
+        if (screen === 'intro_cutscene') {
+          if (moviePlayerRef.current) {
+            moviePlayerRef.current.skip();
+          }
+        } else if (screen === 'fmv_intro' || screen === 'fmv_briefing' || screen === 'fmv_action') {
           if (moviePlayerRef.current) {
             moviePlayerRef.current.skip();
           }
@@ -963,6 +1073,13 @@ export default function AntGame({ onExit }: AntGameProps) {
           setScreen('main_menu');
         } else if (screen === 'main_menu') {
           onExit();
+        }
+      }
+      // Intro cutscene: Space/Enter to skip
+      if (screen === 'intro_cutscene' && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        if (moviePlayerRef.current) {
+          moviePlayerRef.current.skip();
         }
       }
       // FMV screens: Space/Enter to skip
@@ -999,10 +1116,40 @@ export default function AntGame({ onExit }: AntGameProps) {
           startCutscene(selectedMission);
         }
       }
+      // Main menu keyboard navigation
+      if (screen === 'main_menu') {
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setMenuSelectedButton(prev => {
+            let next = prev - 1;
+            if (next < 0) next = MENU_BUTTONS.length - 1;
+            // Skip disabled buttons
+            while (!MENU_BUTTONS[next].enabled) {
+              next--;
+              if (next < 0) next = MENU_BUTTONS.length - 1;
+            }
+            return next;
+          });
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setMenuSelectedButton(prev => {
+            let next = prev + 1;
+            if (next >= MENU_BUTTONS.length) next = 0;
+            while (!MENU_BUTTONS[next].enabled) {
+              next++;
+              if (next >= MENU_BUTTONS.length) next = 0;
+            }
+            return next;
+          });
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleMenuButtonActivate(menuSelectedButton);
+        }
+      }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, continueFromObjectives, advanceFromMapSelect, onExit, activeCampaign, campaignMissionIndex]);
+  }, [screen, unlockedMissions, selectedMission, selectMission, launchMission, startCutscene, continueFromObjectives, advanceFromMapSelect, onExit, activeCampaign, campaignMissionIndex, menuSelectedButton, handleMenuButtonActivate]);
 
   // Handle canvas resize
   useEffect(() => {
@@ -1016,6 +1163,118 @@ export default function AntGame({ onExit }: AntGameProps) {
   }, []);
 
   const allComplete = unlockedMissions >= MISSIONS.length;
+
+  // ── Aftermath Main Menu System ──
+
+  // Convert mouse coords from CSS space to 320x200 canvas space
+  const menuCanvasCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const scaleX = 320 / rect.width;
+    const scaleY = 200 / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }, []);
+
+  const getMenuButtonAtPoint = useCallback((cx: number, cy: number): number => {
+    for (let i = 0; i < MENU_BUTTONS.length; i++) {
+      const by = MENU_BTN_Y_START + i * MENU_BTN_YSTEP;
+      if (cx >= MENU_BTN_X && cx <= MENU_BTN_X + MENU_BTN_W &&
+          cy >= by && cy <= by + MENU_BTN_H) {
+        return i;
+      }
+    }
+    return -1;
+  }, []);
+
+  const handleMenuMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = menuCanvasCoords(e);
+    const btn = getMenuButtonAtPoint(x, y);
+    setMenuHoveredButton(btn);
+    if (btn >= 0 && MENU_BUTTONS[btn].enabled) {
+      setMenuSelectedButton(btn);
+    }
+  }, [menuCanvasCoords, getMenuButtonAtPoint]);
+
+  const handleMenuClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = menuCanvasCoords(e);
+
+    // Hidden ant missions: Shift+click top-right (260-320, 0-50) — matches C++ FIXIT_ANTS
+    if (e.shiftKey && x >= 260 && x <= 320 && y >= 0 && y <= 50) {
+      transitionTo(() => setScreen('select'));
+      return;
+    }
+
+    const btnIdx = getMenuButtonAtPoint(x, y);
+    if (btnIdx >= 0) {
+      handleMenuButtonActivate(btnIdx);
+    }
+  }, [menuCanvasCoords, getMenuButtonAtPoint, handleMenuButtonActivate, transitionTo]);
+
+  // Render the Aftermath menu canvas
+  useEffect(() => {
+    if (screen !== 'main_menu' || !menuCanvasRef.current) return;
+    const canvas = menuCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+
+    // Draw title.png background
+    if (titleImageRef.current) {
+      ctx.drawImage(titleImageRef.current, 0, 0, 320, 200);
+    } else {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, 320, 200);
+    }
+
+    // Draw 7 menu buttons with C++ TextButtonClass 3D bevel style
+    for (let i = 0; i < MENU_BUTTONS.length; i++) {
+      const btn = MENU_BUTTONS[i];
+      const bx = MENU_BTN_X;
+      const by = MENU_BTN_Y_START + i * MENU_BTN_YSTEP;
+      const isHovered = menuHoveredButton === i;
+      const isSelected = menuSelectedButton === i;
+      const highlight = isHovered || isSelected;
+
+      // Button background
+      const bg = !btn.enabled ? '#282828' : highlight ? '#505050' : '#3a3a3a';
+      ctx.fillStyle = bg;
+      ctx.fillRect(bx, by, MENU_BTN_W, MENU_BTN_H);
+
+      // Top-left highlight bevel (1px)
+      ctx.fillStyle = btn.enabled ? (highlight ? '#909090' : '#606060') : '#333';
+      ctx.fillRect(bx, by, MENU_BTN_W, 1);
+      ctx.fillRect(bx, by, 1, MENU_BTN_H);
+
+      // Bottom-right shadow bevel (1px)
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(bx, by + MENU_BTN_H - 1, MENU_BTN_W, 1);
+      ctx.fillRect(bx + MENU_BTN_W - 1, by, 1, MENU_BTN_H);
+
+      // Button text (centered)
+      const textColor = !btn.enabled ? '#555' : highlight ? '#FFD700' : '#C0C0C0';
+      ctx.fillStyle = textColor;
+      ctx.font = '7px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // Drop shadow for text
+      if (btn.enabled) {
+        ctx.fillStyle = '#000';
+        ctx.fillText(btn.label, bx + MENU_BTN_W / 2 + 1, by + MENU_BTN_H / 2 + 1);
+        ctx.fillStyle = textColor;
+      }
+      ctx.fillText(btn.label, bx + MENU_BTN_W / 2, by + MENU_BTN_H / 2);
+    }
+
+    // Version text (matching C++ Fancy_Text_Print at bottom-right of dialog)
+    ctx.fillStyle = '#666';
+    ctx.font = '6px monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('V3.09', 230, 175);
+
+  }, [screen, menuHoveredButton, menuSelectedButton]);
 
   return (
     <div ref={containerRef} style={{
@@ -1144,141 +1403,28 @@ export default function AntGame({ onExit }: AntGameProps) {
         </div>
       )}
 
-      {/* ── Main Menu Screen ── */}
+      {/* ── Aftermath Main Menu (canvas-rendered, C++ parity) ── */}
       {!testMode && !qaMode && screen === 'main_menu' && (
         <div style={{
           position: 'absolute',
           top: 0, left: 0, width: '100%', height: '100%',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'radial-gradient(ellipse at center, #0a0808 0%, #000000 70%)',
-          zIndex: 100000, fontFamily: 'monospace',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: '#000',
+          zIndex: 100000,
         }}>
-          <h1 style={{
-            color: '#cc0000',
-            fontSize: '42px',
-            fontWeight: 'bold',
-            textShadow: '0 0 20px #cc0000, 0 0 40px #880000',
-            letterSpacing: '4px',
-            marginBottom: '6px',
-            textAlign: 'center',
-          }}>
-            RED ALERT
-          </h1>
-          <h2 style={{
-            color: '#882200',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            letterSpacing: '6px',
-            textTransform: 'uppercase',
-            marginBottom: '40px',
-          }}>
-            Mission Select
-          </h2>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '340px' }}>
-            {/* Ant Missions */}
-            <button
-              onClick={() => transitionTo(() => setScreen('select'))}
-              style={{
-                background: 'rgba(255,68,0,0.08)',
-                border: '1px solid #553300',
-                color: '#ff6633',
-                padding: '14px 20px',
-                fontFamily: 'monospace',
-                fontSize: '15px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                letterSpacing: '2px',
-                textAlign: 'left',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,68,0,0.18)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,68,0,0.08)'; }}
-            >
-              ANT MISSIONS
-              <div style={{ fontSize: '10px', color: '#886633', fontWeight: 'normal', marginTop: '2px', letterSpacing: '1px' }}>
-                It Came From Red Alert!
-              </div>
-            </button>
-
-            {/* Original Campaign */}
-            <button
-              onClick={() => {
-                setPendingFaction(null);
-                setCampaignType(null);
-                transitionTo(() => setScreen('faction_select'));
-              }}
-              style={{
-                background: 'rgba(100,0,0,0.08)',
-                border: '1px solid #442222',
-                color: '#cc4444',
-                padding: '14px 20px',
-                fontFamily: 'monospace',
-                fontSize: '15px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                letterSpacing: '2px',
-                textAlign: 'left',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(100,0,0,0.18)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(100,0,0,0.08)'; }}
-            >
-              ORIGINAL CAMPAIGN
-              <div style={{ fontSize: '10px', color: '#664444', fontWeight: 'normal', marginTop: '2px', letterSpacing: '1px' }}>
-                14 missions per faction
-              </div>
-            </button>
-
-            {/* Counterstrike */}
-            <button
-              onClick={() => {
-                setPendingFaction(null);
-                setCampaignType('counterstrike_allied');
-                transitionTo(() => setScreen('faction_select'));
-              }}
-              style={{
-                background: 'rgba(0,50,100,0.08)',
-                border: '1px solid #223344',
-                color: '#6688aa',
-                padding: '14px 20px',
-                fontFamily: 'monospace',
-                fontSize: '15px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                letterSpacing: '2px',
-                textAlign: 'left',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,50,100,0.18)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,50,100,0.08)'; }}
-            >
-              COUNTERSTRIKE
-              <div style={{ fontSize: '10px', color: '#445566', fontWeight: 'normal', marginTop: '2px', letterSpacing: '1px' }}>
-                Expansion pack missions
-              </div>
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', gap: '20px', marginTop: '30px', alignItems: 'center' }}>
-            <button
-              onClick={onExit}
-              style={{
-                background: '#222', color: '#888', border: '1px solid #444',
-                padding: '8px 24px', fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer',
-              }}
-            >
-              Return to CLIaaS
-            </button>
-            <span style={{ color: '#444', fontSize: '11px' }}>F10 to exit</span>
-          </div>
-
-          <div style={{
-            position: 'absolute', bottom: '16px',
-            color: '#333', fontSize: '10px', textAlign: 'center',
-          }}>
-            A CLIaaS Easter Egg | C&amp;C Red Alert Engine
-          </div>
+          <canvas
+            ref={menuCanvasRef}
+            width={320}
+            height={200}
+            style={{
+              width: 'min(100vw, calc(100vh * 320 / 200))',
+              height: 'min(100vh, calc(100vw * 200 / 320))',
+              imageRendering: 'pixelated',
+              cursor: 'default',
+            }}
+            onClick={handleMenuClick}
+            onMouseMove={handleMenuMouseMove}
+          />
         </div>
       )}
 
@@ -1305,7 +1451,9 @@ export default function AntGame({ onExit }: AntGameProps) {
             {/* Allied */}
             <button
               onClick={() => {
-                const id: CampaignId = campaignType === 'counterstrike_allied' ? 'counterstrike_allied' : 'allied';
+                const id: CampaignId = campaignType === 'counterstrike_allied' ? 'counterstrike_allied'
+                  : campaignType === 'aftermath_allied' ? 'aftermath_allied'
+                  : 'allied';
                 const campaign = getCampaign(id);
                 if (campaign) {
                   setActiveCampaign(campaign);
@@ -1350,7 +1498,9 @@ export default function AntGame({ onExit }: AntGameProps) {
             {/* Soviet */}
             <button
               onClick={() => {
-                const id: CampaignId = campaignType === 'counterstrike_allied' ? 'counterstrike_soviet' : 'soviet';
+                const id: CampaignId = campaignType === 'counterstrike_allied' ? 'counterstrike_soviet'
+                  : campaignType === 'aftermath_allied' ? 'aftermath_soviet'
+                  : 'soviet';
                 const campaign = getCampaign(id);
                 if (campaign) {
                   setActiveCampaign(campaign);

@@ -37,6 +37,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Renderer } from '../engine/renderer';
+import { RESFACTOR } from '../engine/types';
 
 // ============================================================
 // Section 1: Constants — C++ power.h vs TS Renderer
@@ -63,8 +64,9 @@ describe('Power bar constants (power.h:81-94)', () => {
     expect(TS_MAX).toBe(108);
   });
 
-  it('rendered bar height = 153 (HIRES Draw_It rescaling)', () => {
-    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(153);
+  it('rendered bar height scales with RESFACTOR', () => {
+    const expected = RESFACTOR === 1 ? 76 : 153;
+    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(expected);
   });
 });
 
@@ -113,8 +115,9 @@ function cppPowerHeight(value: number): number {
   return Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
 }
 
-/** C++ Draw_It HIRES rescaling (power.cpp:229) */
+/** C++ Draw_It HIRES rescaling (power.cpp:229) — only applied in HIRES */
 function cppRescaledHeight(rawHeight: number): number {
+  if (RESFACTOR === 1) return rawHeight; // LORES: no rescaling
   return Math.trunc((rawHeight * 153) / 107);
 }
 
@@ -157,16 +160,15 @@ describe('C++ Power_Height raw values (POWER_HEIGHT=110, power.cpp:394-417)', ()
 // ============================================================
 // Section 3: C++ rescaled pixel heights (Draw_It applies 153/107 scaling)
 // ============================================================
-describe('C++ rescaled pixel heights (power.cpp:229, 153/107 scaling)', () => {
-  const RESCALED_EXPECTED: [number, number][] = [
-    [0,    0],
-    [50,   14],
-    [100,  30],
-    [200,  54],
-    [500,  102],
-    [1000, 135],
-    [2000, 148],
+describe('C++ rescaled pixel heights (power.cpp:229, RESFACTOR-dependent)', () => {
+  // LORES: raw values (no rescaling). HIRES: (raw * 153) / 107.
+  const LORES_EXPECTED: [number, number][] = [
+    [0, 0], [50, 10], [100, 21], [200, 38], [500, 72], [1000, 95], [2000, 104],
   ];
+  const HIRES_EXPECTED: [number, number][] = [
+    [0, 0], [50, 14], [100, 30], [200, 54], [500, 102], [1000, 135], [2000, 148],
+  ];
+  const RESCALED_EXPECTED = RESFACTOR === 1 ? LORES_EXPECTED : HIRES_EXPECTED;
 
   for (const [value, expected] of RESCALED_EXPECTED) {
     it(`value=${value} → rescaled=${expected}px`, () => {
@@ -199,25 +201,11 @@ describe('TS powerBarHeight must match C++ rendered pixel height', () => {
   });
 
   // Fixed: TS now matches C++ rendered values via internal 110 + rescale
-  it('value=50: both C++ and TS render 14px', () => {
-    expect(cppFinalPixelHeight(50)).toBe(14);
-    expect(Renderer.powerBarHeight(50)).toBe(14);
-  });
-
-  it('value=500: both C++ and TS render 102px', () => {
-    expect(cppFinalPixelHeight(500)).toBe(102);
-    expect(Renderer.powerBarHeight(500)).toBe(102);
-  });
-
-  it('value=1000: both C++ and TS render 135px', () => {
-    expect(cppFinalPixelHeight(1000)).toBe(135);
-    expect(Renderer.powerBarHeight(1000)).toBe(135);
-  });
-
-  it('value=2000: both C++ and TS render 148px', () => {
-    expect(cppFinalPixelHeight(2000)).toBe(148);
-    expect(Renderer.powerBarHeight(2000)).toBe(148);
-  });
+  for (const v of [50, 500, 1000, 2000]) {
+    it(`value=${v}: TS matches C++ rendered`, () => {
+      expect(Renderer.powerBarHeight(v)).toBe(cppFinalPixelHeight(v));
+    });
+  }
 });
 
 // ============================================================
@@ -278,9 +266,8 @@ describe('Power_Height logarithmic curve invariants', () => {
   });
 
   it('clamped to [0, rescaled(POWER_HEIGHT - 2)]', () => {
-    // Internal clamp: [0, 108], then rescaled via (raw * 153) / 107
-    // Max rescaled: floor(108 * 153 / 107) = 154
-    const maxRescaled = Math.floor((Renderer.POWER_HEIGHT - 2) * 153 / 107);
+    // Internal clamp: [0, 108], then rescaled for HIRES or raw for LORES
+    const maxRescaled = RESFACTOR === 1 ? Renderer.POWER_HEIGHT - 2 : Math.floor((Renderer.POWER_HEIGHT - 2) * 153 / 107);
     expect(Renderer.powerBarHeight(0)).toBe(0);
     expect(Renderer.powerBarHeight(100000)).toBeLessThanOrEqual(maxRescaled);
     expect(Renderer.powerBarHeight(100000)).toBeGreaterThanOrEqual(0);
@@ -299,12 +286,10 @@ describe('Integer division parity (C++ truncation toward zero)', () => {
 
   it('remainder path uses nested integer division (power.cpp:412)', () => {
     // value=75: C++ raw: retval = ((108/5)*75)/100 = (21*75)/100 = 15
-    // TS now matches: internal 110, rescaled
     const cppRaw = cppPowerHeight(75);
     const tsResult = Renderer.powerBarHeight(75);
     expect(cppRaw).toBe(15);
-    // TS rescaled: floor(15 * 153 / 107) = floor(21.4) = 21
-    expect(tsResult).toBe(Math.floor(cppRaw * 153 / 107));
+    expect(tsResult).toBe(cppFinalPixelHeight(75));
   });
 });
 
@@ -452,24 +437,12 @@ describe('Power bar color thresholds (power.cpp:208-219)', () => {
 // These are the values the TS implementation actually returns,
 // computed with POWER_HEIGHT=110, STEP_LEVEL=100, STEP_FACTOR=5, rescaled by 153/107.
 // ============================================================
-describe('TS powerBarHeight exact values (POWER_HEIGHT=110, rescaled)', () => {
-  // Matches C++ Power_Height(110) → Draw_It rescale (raw * 153 / 107)
-  // Values from Section 3 (C++ rescaled):
-  const EXPECTED: [number, number][] = [
-    [0,    0],
-    [50,   14],
-    [100,  30],
-    [150,  41],
-    [200,  54],
-    [300,  74],
-    [500,  102],
-    [1000, 135],
-    [2000, 148],
-  ];
+describe('TS powerBarHeight exact values (RESFACTOR-aware)', () => {
+  const VALUES = [0, 50, 100, 150, 200, 300, 500, 1000, 2000];
 
-  for (const [value, expected] of EXPECTED) {
-    it(`powerBarHeight(${value}) = ${expected}`, () => {
-      expect(Renderer.powerBarHeight(value)).toBe(expected);
+  for (const value of VALUES) {
+    it(`powerBarHeight(${value}) matches C++ pipeline`, () => {
+      expect(Renderer.powerBarHeight(value)).toBe(cppFinalPixelHeight(value));
     });
   }
 });
@@ -489,15 +462,15 @@ describe('Remainder interpolation within 100-unit steps', () => {
 
   it('value=100 equals one full step, rescaled to match C++', () => {
     // C++ raw: trunc(108/5) = 21 internal pixels → rescale: floor(21*153/107) = 30
-    expect(Renderer.powerBarHeight(100)).toBe(30);
+    expect(Renderer.powerBarHeight(100)).toBe(cppFinalPixelHeight(100));
   });
 
   it('second step increment is smaller than first (logarithmic)', () => {
     const firstStep = Renderer.powerBarHeight(100) - Renderer.powerBarHeight(0);
     const secondStep = Renderer.powerBarHeight(200) - Renderer.powerBarHeight(100);
     expect(secondStep).toBeLessThan(firstStep);
-    expect(firstStep).toBe(30);
-    expect(secondStep).toBe(24); // C++ rescaled: 54 - 30 = 24
+    expect(firstStep).toBe(cppFinalPixelHeight(100));
+    expect(secondStep).toBe(cppFinalPixelHeight(200) - cppFinalPixelHeight(100));
   });
 });
 
@@ -505,31 +478,16 @@ describe('Remainder interpolation within 100-unit steps', () => {
 // Section 14: Parity gap assertions — these FAIL to document real divergence
 // Each test asserts what C++ expects. Failures prove TS diverges.
 // ============================================================
-describe('C++ parity — pixel heights match', () => {
+describe('C++ parity — pixel heights match (RESFACTOR-aware)', () => {
   it('POWER_HEIGHT = 110 matches C++ POWER_HEIGHT', () => {
-    // C++ power.h:85: POWER_HEIGHT=(200-(7+70+13)) = 110
     expect(Renderer.POWER_HEIGHT).toBe(110);
-    // Rendered bar height is 153 (HIRES Draw_It rescaling)
-    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(153);
+    const expectedRendered = RESFACTOR === 1 ? 76 : 153;
+    expect(Renderer.POWER_BAR_RENDERED_HEIGHT).toBe(expectedRendered);
   });
 
-  it('powerBarHeight(500) = 102 (C++ rendered)', () => {
-    // C++ Power_Height(500)=72, Draw_It rescales: (72*153)/107 = 102
-    expect(Renderer.powerBarHeight(500)).toBe(102);
-  });
-
-  it('powerBarHeight(1000) = 135 (C++ rendered)', () => {
-    // C++ Power_Height(1000)=95, Draw_It rescales: (95*153)/107 = 135
-    expect(Renderer.powerBarHeight(1000)).toBe(135);
-  });
-
-  it('powerBarHeight(50) = 14 (C++ rendered)', () => {
-    // C++ Power_Height(50)=10, Draw_It rescales: (10*153)/107 = 14
-    expect(Renderer.powerBarHeight(50)).toBe(14);
-  });
-
-  it('powerBarHeight(2000) = 148 (C++ rendered)', () => {
-    // C++ Power_Height(2000)=104, Draw_It rescales: (104*153)/107 = 148
-    expect(Renderer.powerBarHeight(2000)).toBe(148);
-  });
+  for (const [value, label] of [[500, '500'], [1000, '1000'], [50, '50'], [2000, '2000']] as const) {
+    it(`powerBarHeight(${label}) matches C++ rendered`, () => {
+      expect(Renderer.powerBarHeight(value)).toBe(cppFinalPixelHeight(value));
+    });
+  }
 });
