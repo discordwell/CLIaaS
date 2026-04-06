@@ -475,8 +475,9 @@ describe('Chronoshift infantry kill (house.cpp:2820-2826)', () => {
     // TS: damage = unit.hp
     expect(ctx.damageEntity).toHaveBeenCalledWith(infantry, 50, 'Fire');
     // Infantry should be moved to destination before being killed
-    expect(infantry.pos.x).toBe(500);
-    expect(infantry.pos.y).toBe(500);
+    // Positions are lepton-quantized: 500 → round(500/LP)*LP ≈ 499.97
+    expect(infantry.pos.x).toBeCloseTo(500, 0);
+    expect(infantry.pos.y).toBeCloseTo(500, 0);
   });
 
   it('chronoshift uses WARHEAD_FIRE specifically (C++ house.cpp:2826)', () => {
@@ -505,9 +506,9 @@ describe('Chronoshift infantry kill (house.cpp:2820-2826)', () => {
 
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Greece, { x: 500, y: 500 });
 
-    // Tank should be teleported, not damaged
-    expect(tank.pos.x).toBe(500);
-    expect(tank.pos.y).toBe(500);
+    // Tank should be teleported, not damaged (positions lepton-quantized)
+    expect(tank.pos.x).toBeCloseTo(500, 0);
+    expect(tank.pos.y).toBeCloseTo(500, 0);
     expect(tank.alive).toBe(true);
     // Should NOT have called damageEntity for a vehicle
     expect(ctx.damageEntity).not.toHaveBeenCalled();
@@ -556,8 +557,9 @@ describe('Chronoshift demo truck self-destruct (house.cpp:2828-2829 FIXIT_CSII)'
     //
     // GAP CLOSED: superweapon.ts now implements the FIXIT_CSII demo truck path.
     // Demo truck is teleported to destination, then assigned ATTACK mission targeting self.
-    expect(demoTruck.pos.x).toBe(500);
-    expect(demoTruck.pos.y).toBe(500);
+    // Positions are lepton-quantized
+    expect(demoTruck.pos.x).toBeCloseTo(500, 0);
+    expect(demoTruck.pos.y).toBeCloseTo(500, 0);
     expect(demoTruck.mission).toBe(Mission.ATTACK);
     expect(demoTruck.target).toBe(demoTruck); // self-targeting
     expect(demoTruck.chronoShiftTick).toBeGreaterThan(0);
@@ -780,12 +782,15 @@ describe('Chronoshift visual/audio effects (house.cpp:2851-2852)', () => {
   it('produces lightning effect at origin position', () => {
     const tank = makeEntity(UnitType.V_MNLY, House.Greece, 200, 200);
     tank.selected = true;
+    const originX = tank.pos.x; // lepton-quantized (~199.97)
+    const originY = tank.pos.y;
 
     const ctx = makeSuperweaponContext({ entities: [tank] });
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Greece, { x: 500, y: 500 });
 
-    // Should have at least one effect at origin (200, 200) and one at destination (500, 500)
-    const originEffects = ctx.effects.filter(e => e.x === 200 && e.y === 200);
+    // Origin effect uses entity's lepton-quantized position; dest effect uses raw target
+    const originEffects = ctx.effects.filter(e =>
+      Math.abs(e.x - originX) < 0.1 && Math.abs(e.y - originY) < 0.1);
     const destEffects = ctx.effects.filter(e => e.x === 500 && e.y === 500);
     expect(originEffects.length).toBeGreaterThanOrEqual(1);
     expect(destEffects.length).toBeGreaterThanOrEqual(1);
@@ -821,8 +826,8 @@ describe('Chronoshift excludes Chrono Tank (house.cpp:2790-2792)', () => {
     activateSuperweapon(ctx, SuperweaponType.CHRONOSPHERE, House.Greece, { x: 500, y: 500 });
 
     // C++: Chrono tank excluded from chronosphere, stays at origin
-    // TS superweapon.ts:361: filters out V_CTNK
-    expect(chronoTank.pos.x).toBe(200);
-    expect(chronoTank.pos.y).toBe(200);
+    // TS superweapon.ts:361: filters out V_CTNK (positions lepton-quantized)
+    expect(chronoTank.pos.x).toBeCloseTo(200, 0);
+    expect(chronoTank.pos.y).toBeCloseTo(200, 0);
   });
 });

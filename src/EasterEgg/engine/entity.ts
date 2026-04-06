@@ -445,8 +445,8 @@ export class Entity {
     this.prevBodyFacing32 = this.bodyFacing32;
     this.turretFacing32 = this.turretFacing * 4;
     this.prevTurretFacing32 = this.turretFacing32;
-    // Initialize prevPos to starting position (C5: moving-platform inaccuracy detection)
-    this.prevPos = { x, y };
+    // Initialize prevPos to lepton-rounded starting position (matches pos so no interpolation jump)
+    this.prevPos = { x: this.pos.x, y: this.pos.y };
     // Aircraft init: set ammo from stats
     if (this.stats.maxAmmo && this.stats.maxAmmo > 0) {
       this.ammo = this.stats.maxAmmo;

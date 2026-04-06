@@ -442,10 +442,14 @@ describe('E4 standard infantry behaviors', () => {
       expect(e4.maxHp).toBe(40);
     });
 
-    it('constructs at given position', () => {
+    it('constructs at given position (lepton-quantized)', () => {
       const e4 = new Entity(UnitType.I_E4, House.USSR, 150, 250);
-      expect(e4.pos.x).toBe(150);
-      expect(e4.pos.y).toBe(250);
+      // Positions are lepton-quantized: round(px/LP)*LP
+      expect(e4.pos.x).toBeCloseTo(150, 0);
+      expect(e4.pos.y).toBeCloseTo(250, 0);
+      // prevPos matches pos (no interpolation jump)
+      expect(e4.prevPos.x).toBe(e4.pos.x);
+      expect(e4.prevPos.y).toBe(e4.pos.y);
     });
 
     it('starts alive', () => {

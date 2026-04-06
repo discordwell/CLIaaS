@@ -171,8 +171,9 @@ describe('handleUnitDeath — direct behavioral tests', () => {
     expect(ctx.effects.length).toBeGreaterThanOrEqual(1);
     const explosion = ctx.effects.find(e => e.type === 'explosion');
     expect(explosion).toBeDefined();
-    expect(explosion!.x).toBe(200);
-    expect(explosion!.y).toBe(300);
+    // Positions are lepton-quantized by Entity constructor
+    expect(explosion!.x).toBe(victim.pos.x);
+    expect(explosion!.y).toBe(victim.pos.y);
   });
 
   it('creates debris effect for vehicles (not infantry)', () => {
@@ -269,7 +270,8 @@ describe('handleUnitDeath — direct behavioral tests', () => {
       attackerIsPlayer: true, trackLoss: false,
     });
 
-    expect(ctx.playSoundAt).toHaveBeenCalledWith('die_ant', 100, 100);
+    // Positions are lepton-quantized by Entity constructor
+    expect(ctx.playSoundAt).toHaveBeenCalledWith('die_ant', ant.pos.x, ant.pos.y);
   });
 
   it('plays die_infantry sound for infantry victims', () => {
@@ -282,7 +284,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    expect(ctx.playSoundAt).toHaveBeenCalledWith('die_infantry', 100, 100);
+    expect(ctx.playSoundAt).toHaveBeenCalledWith('die_infantry', inf.pos.x, inf.pos.y);
   });
 
   it('plays die_vehicle sound for vehicle victims', () => {
@@ -295,7 +297,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    expect(ctx.playSoundAt).toHaveBeenCalledWith('die_vehicle', 100, 100);
+    expect(ctx.playSoundAt).toHaveBeenCalledWith('die_vehicle', tank.pos.x, tank.pos.y);
   });
 
   it('plays explode_lg sound when explodeLgSound=true', () => {
@@ -308,7 +310,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    expect(ctx.playSoundAt).toHaveBeenCalledWith('explode_lg', 150, 200);
+    expect(ctx.playSoundAt).toHaveBeenCalledWith('explode_lg', victim.pos.x, victim.pos.y);
   });
 
   it('sets screenShake to max of current and opts value', () => {
@@ -475,7 +477,8 @@ describe('fireWeaponAtStructure — behavioral verification', () => {
 
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    expect(muzzle!.x).toBe(200);
+    // Position is lepton-quantized by Entity constructor
+    expect(muzzle!.x).toBe(attacker.pos.x);
   });
 
   it('credits kill to attacker when structure is destroyed', () => {

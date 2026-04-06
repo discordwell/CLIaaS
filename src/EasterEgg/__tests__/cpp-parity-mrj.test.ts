@@ -536,10 +536,11 @@ describe('MRJ entity construction', () => {
     expect(mrj.isAnt).toBe(false);
   });
 
-  it('position matches constructor arguments', () => {
+  it('position matches constructor arguments (lepton-quantized)', () => {
     const mrj = makeEntity(UnitType.V_MRJ, House.Spain, 200, 300);
-    expect(mrj.pos.x).toBe(200);
-    expect(mrj.pos.y).toBe(300);
+    // Positions are lepton-quantized: round(px/LP)*LP
+    expect(mrj.pos.x).toBeCloseTo(200, 0);
+    expect(mrj.pos.y).toBeCloseTo(300, 0);
   });
 });
 

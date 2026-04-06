@@ -24,11 +24,14 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 export function isDevServerAvailable(): boolean {
   const port = Number.parseInt(new URL(RA_PARITY_BASE_URL).port || '80', 10);
   try {
-    execFileSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '2', `http://127.0.0.1:${port}/`], {
+    // Check for the game-specific /ra/original.html path, not just any HTTP server.
+    // Port 3001 may be occupied by another project (e.g. Catena), which would
+    // pass a bare "/" probe but cannot serve the RA game canvas.
+    const body = execFileSync('curl', ['-s', '--max-time', '2', `http://127.0.0.1:${port}/ra/original.html`], {
       encoding: 'utf8',
       timeout: 5_000,
     });
-    return true;
+    return body.includes('canvas') || body.includes('redalert') || body.includes('ra-game');
   } catch {
     return false;
   }

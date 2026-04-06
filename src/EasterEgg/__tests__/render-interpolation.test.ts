@@ -5,27 +5,36 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { UnitType, House, CELL_SIZE, GAME_TICKS_PER_SEC } from '../engine/types';
+import { LP } from '../engine/tracks';
 
 beforeEach(() => resetEntityIds());
+
+/** Round-trip a pixel value through lepton quantization (same as Entity constructor) */
+function leptonRound(px: number): number {
+  return Math.round(px / LP) * LP;
+}
 
 describe('Render interpolation: prevPos → pos smooth visual', () => {
   it('newly created entity has prevPos === pos (no interpolation jump)', () => {
     const unit = new Entity(UnitType.V_JEEP, House.Spain, 100, 200);
-    expect(unit.prevPos.x).toBe(100);
-    expect(unit.prevPos.y).toBe(200);
-    expect(unit.pos.x).toBe(100);
-    expect(unit.pos.y).toBe(200);
+    // pos is lepton-quantized; prevPos is set to pos in constructor
+    // Both should match (no interpolation jump), but values are lepton-rounded.
+    expect(unit.prevPos.x).toBe(unit.pos.x);
+    expect(unit.prevPos.y).toBe(unit.pos.y);
+    expect(unit.pos.x).toBe(leptonRound(100));
+    expect(unit.pos.y).toBe(leptonRound(200));
   });
 
   it('after movement, prevPos reflects pre-move position', () => {
     const unit = new Entity(UnitType.V_JEEP, House.Spain, 100, 100);
+    const startX = unit.pos.x; // lepton-rounded
     // Simulate what the game loop does: save prevPos, then move
     unit.prevPos.x = unit.pos.x;
     unit.prevPos.y = unit.pos.y;
     // Simulate movement
     unit.pos.x = 101;
-    unit.pos.y = 100;
-    expect(unit.prevPos.x).toBe(100);
+    unit.pos.y = unit.pos.y;
+    expect(unit.prevPos.x).toBe(startX);
     expect(unit.pos.x).toBe(101);
   });
 
@@ -73,16 +82,18 @@ describe('Render interpolation: prevPos → pos smooth visual', () => {
 
   it('stationary entity has no interpolation drift', () => {
     const unit = new Entity(UnitType.V_JEEP, House.Spain, 200, 200);
+    const expectedX = unit.pos.x; // lepton-rounded
+    const expectedY = unit.pos.y;
     // Simulate a tick with no movement
     unit.prevPos.x = unit.pos.x;
     unit.prevPos.y = unit.pos.y;
 
-    // Any alpha should return the same position
+    // Any alpha should return the same position (no drift)
     for (const alpha of [0, 0.25, 0.5, 0.75, 1]) {
       const renderX = unit.prevPos.x + (unit.pos.x - unit.prevPos.x) * alpha;
       const renderY = unit.prevPos.y + (unit.pos.y - unit.prevPos.y) * alpha;
-      expect(renderX).toBe(200);
-      expect(renderY).toBe(200);
+      expect(renderX).toBe(expectedX);
+      expect(renderY).toBe(expectedY);
     }
   });
 

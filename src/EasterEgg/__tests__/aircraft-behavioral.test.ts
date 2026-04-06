@@ -161,8 +161,9 @@ describe('getAircraftTargetPos', () => {
     const pos = getAircraftTargetPos(heli);
 
     expect(pos).not.toBeNull();
-    expect(pos!.x).toBe(400);
-    expect(pos!.y).toBe(300);
+    // Positions are lepton-quantized by Entity constructor
+    expect(pos!.x).toBe(enemy.pos.x);
+    expect(pos!.y).toBe(enemy.pos.y);
   });
 
   it('returns structure position when target is an alive structure', () => {
@@ -211,8 +212,9 @@ describe('getAircraftTargetPos', () => {
     heli.targetStructure = struct;
 
     const pos = getAircraftTargetPos(heli);
-    expect(pos!.x).toBe(400);
-    expect(pos!.y).toBe(300);
+    // Positions are lepton-quantized by Entity constructor
+    expect(pos!.x).toBe(enemy.pos.x);
+    expect(pos!.y).toBe(enemy.pos.y);
   });
 });
 

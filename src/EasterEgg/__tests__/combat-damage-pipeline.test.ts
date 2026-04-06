@@ -492,8 +492,11 @@ describe('Projectile lifecycle', () => {
     launchProjectile(ctx, attacker, target, weapon, 30, 220, 100, true);
     expect(ctx.inflightProjectiles).toHaveLength(1);
     const proj = ctx.inflightProjectiles[0];
-    // dist = worldDist({100,100}, {220,100}) = 120/24 = 5.0 cells, travelFrames = round(5.0/2.0) = 3
-    expect(proj.travelFrames).toBe(3);
+    // attacker pos is lepton-quantized (~100.03125), impact at raw (220,100)
+    // dist ≈ 119.97/24 ≈ 4.999 cells, travelFrames = round(4.999/2.0) = round(2.499) = 2
+    const expectedDist = worldDist(attacker.pos, { x: 220, y: 100 });
+    const expectedFrames = Math.max(1, Math.round(expectedDist / 2.0));
+    expect(proj.travelFrames).toBe(expectedFrames);
     expect(proj.currentFrame).toBe(0);
   });
 

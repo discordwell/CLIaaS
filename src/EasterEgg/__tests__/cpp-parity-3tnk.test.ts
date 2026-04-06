@@ -492,6 +492,7 @@ describe('3TNK damage speed reduction (standard vehicle)', () => {
 describe('3TNK stop-rotate-move (C++ drive.cpp)', () => {
   it('moveToward does not advance position while body is rotating', () => {
     const tank = make3TNK(100, 100);
+    const startX = tank.pos.x; // lepton-quantized starting position
     tank.facing = Dir.N;
     tank.desiredFacing = Dir.N;
     tank.bodyFacing32 = Dir.N * 4;
@@ -503,7 +504,7 @@ describe('3TNK stop-rotate-move (C++ drive.cpp)', () => {
     // On the first tick, rotation accumulates but facing may not yet be aligned.
     // If facing hasn't reached E yet, position should not have moved (stop-rotate-move).
     if (tank.facing !== Dir.E) {
-      expect(tank.pos.x).toBe(100); // no lateral movement while rotating
+      expect(tank.pos.x).toBe(startX); // no lateral movement while rotating
       expect(arrived).toBe(false);
     }
   });

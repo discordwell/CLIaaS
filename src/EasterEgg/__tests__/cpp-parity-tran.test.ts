@@ -556,12 +556,16 @@ describe('TRAN movement — aircraft rotation (entity.ts)', () => {
     tran.bodyFacing32 = Dir.N * 4;
 
     const startX = tran.pos.x;
+    const startY = tran.pos.y;
     const targetPos = { x: startX + CELL_SIZE * 3, y: tran.pos.y }; // due East
 
     const arrived = tran.moveToward(targetPos, tran.stats.speed);
 
-    // Aircraft should move even while facing is misaligned
-    expect(tran.pos.x).toBeGreaterThan(startX);
+    // C++ fly.cpp:88 — aircraft Coord_Move uses PrimaryFacing.Current(), not desired.
+    // Facing is N, so the TRAN moves north (negative y), not east.
+    // The key behavior: aircraft do NOT stop to rotate like vehicles — they always move.
+    // Check that *some* position changed (the Y axis, since facing is north).
+    expect(tran.pos.y).toBeLessThan(startY); // moved north
   });
 
   it('TRAN rot=5 does NOT snap facing instantly (unlike infantry rot>=8)', () => {
