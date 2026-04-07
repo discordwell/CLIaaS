@@ -1502,9 +1502,9 @@ export class Game {
     const wasPaused = this.state === 'paused';
     if (wasPaused) this.state = 'playing';
     for (let i = 0; i < n; i++) {
-      // Don't skip ticks after win/loss — delayed effects (C4 timers, barrel
-      // chains) must resolve before the agent reads state.
-      if (this.state !== 'playing' && this.state !== 'won' && this.state !== 'lost') break;
+      // C++ agent_step breaks on do_tick() returning true (game over).
+      // Match this: stop stepping when game enters won/lost state.
+      if (this.state !== 'playing') break;
       this.update();
     }
     this.renderer.interpolationAlpha = 1; // agent step: show latest state, no interpolation

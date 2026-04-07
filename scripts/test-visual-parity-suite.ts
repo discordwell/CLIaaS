@@ -71,17 +71,20 @@ test.describe('Visual Parity Suite', () => {
       for (const targetTick of ticks) {
         const step = targetTick - prevTick;
         if (step > 0) {
+          // Step BOTH engines in a single call — no async yields between ticks.
+          // C++ agent_step(N) runs N do_tick() calls in a tight for-loop.
+          // Capped at 300 per call (agent_harness.cpp:1073), so batch if needed.
           await Promise.all([
             (async () => {
               let rem = step;
               while (rem > 0) {
-                const chunk = Math.min(rem, 10);
-                rem -= chunk;
+                const batch = Math.min(rem, 300);
+                rem -= batch;
                 try {
                   await wasmPage.evaluate(async (n: number) => {
                     const r = (window as any).__agentStep(n);
                     if (r?.then) await r;
-                  }, chunk);
+                  }, batch);
                 } catch { break; }
               }
             })(),
