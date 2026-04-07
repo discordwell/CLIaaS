@@ -147,7 +147,7 @@ describe('C++ parity: infantry movement without SpeedAccum gating', () => {
         totalAxisLeptons += (moveLeptons * 127) >> 7;
       }
       const expectedDistance = totalAxisLeptons * LP;
-      const startLeptonX = Math.round(100 / LP);
+      const startLeptonX = Math.trunc(100 / LP);
       const actualDistance = finalX - startLeptonX * LP;
       expect(actualDistance).toBeCloseTo(expectedDistance, 4);
     });

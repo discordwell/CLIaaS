@@ -1471,11 +1471,31 @@ export function modifyDamage(
   return Math.max(0, Math.round(damage));
 }
 
-// Distance in cells between two world positions
+/** C++ coord.cpp:124-136 Distance() — octagonal approximation in integer leptons.
+ *  Returns distance in CELLS (leptons / 256) for backward compatibility with all callers.
+ *  C++ formula: max(|dx|,|dy|) + min(|dx|,|dy|)/2 (integer division, truncates).
+ *  Pixel coords are converted to integer leptons via Math.trunc(px * 256 / CELL_SIZE). */
 export function worldDist(a: WorldPos, b: WorldPos): number {
-  const dx = (a.x - b.x) / CELL_SIZE;
-  const dy = (a.y - b.y) / CELL_SIZE;
-  return Math.sqrt(dx * dx + dy * dy);
+  // Convert pixel positions to integer leptons (C++ COORDINATE space)
+  const aLX = Math.trunc((a.x * LEPTON_SIZE) / CELL_SIZE);
+  const aLY = Math.trunc((a.y * LEPTON_SIZE) / CELL_SIZE);
+  const bLX = Math.trunc((b.x * LEPTON_SIZE) / CELL_SIZE);
+  const bLY = Math.trunc((b.y * LEPTON_SIZE) / CELL_SIZE);
+  return leptonDist(aLX, aLY, bLX, bLY) / LEPTON_SIZE;
+}
+
+/** C++ coord.cpp:124-136 Distance() — integer lepton distance with octagonal approximation.
+ *  max(|dx|,|dy|) + (unsigned)min(|dx|,|dy|) / 2.
+ *  All arithmetic is integer — truncation toward zero. */
+export function leptonDist(ax: number, ay: number, bx: number, by: number): number {
+  let diff1 = ay - by;
+  if (diff1 < 0) diff1 = -diff1;
+  let diff2 = ax - bx;
+  if (diff2 < 0) diff2 = -diff2;
+  if (diff1 > diff2) {
+    return (diff1 + ((diff2 >>> 0) >> 1)) | 0;
+  }
+  return (diff2 + ((diff1 >>> 0) >> 1)) | 0;
 }
 
 // Direction from a to b (8-way)

@@ -1271,8 +1271,8 @@ describe('Multi-step movement — tick-by-tick position tracking', () => {
     for (let i = 1; i < positions.length; i++) {
       expect(positions[i]).toBeGreaterThanOrEqual(positions[i - 1]);
     }
-    // Should eventually arrive
-    expect(inf.pos.x).toBeCloseTo(100, 1);
+    // Should eventually arrive (within lepton quantization tolerance)
+    expect(inf.pos.x).toBeCloseTo(100, 0);
   });
 
   it('vehicle with 180-degree turn rotates before moving', () => {
@@ -1380,16 +1380,18 @@ describe('worldDist — distance calculation in cells', () => {
     expect(worldDist(a, b)).toBeCloseTo(1.0, 6);
   });
 
-  it('diagonal distance: sqrt(2) cells for 1-cell diagonal', () => {
+  it('diagonal distance: C++ octagonal approximation (1.5) for 1-cell diagonal', () => {
+    // C++ Distance(): max(256,256) + min(256,256)/2 = 256 + 128 = 384 leptons = 1.5 cells
     const a = { x: 0, y: 0 };
     const b = { x: CELL_SIZE, y: CELL_SIZE };
-    expect(worldDist(a, b)).toBeCloseTo(Math.SQRT2, 6);
+    expect(worldDist(a, b)).toBe(1.5);
   });
 
-  it('pythagorean example: 3-4-5 triangle in cells', () => {
+  it('3-4 distance: C++ octagonal approximation for 3-4 cell offset', () => {
+    // C++ Distance(): max(4*256, 3*256) + min(4*256, 3*256)/2 = 1024 + 384 = 1408 leptons = 5.5 cells
     const a = { x: 0, y: 0 };
     const b = { x: CELL_SIZE * 3, y: CELL_SIZE * 4 };
-    expect(worldDist(a, b)).toBeCloseTo(5.0, 6);
+    expect(worldDist(a, b)).toBe(5.5);
   });
 });
 

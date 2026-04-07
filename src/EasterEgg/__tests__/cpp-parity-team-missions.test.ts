@@ -1738,8 +1738,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(); // activate → triggers zone calc
 
       expect(team.zone).toBeTruthy();
-      expect(team.zone!.x).toBe(150);
-      expect(team.zone!.y).toBe(300);
+      // Lepton quantization: positions truncate to lepton grid, so averages shift slightly
+      expect(team.zone!.x).toBeCloseTo(150, 0);
+      expect(team.zone!.y).toBeCloseTo(300, 0);
     });
   });
 

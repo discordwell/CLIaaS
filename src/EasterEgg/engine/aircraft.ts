@@ -352,8 +352,8 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     // Integer lepton movement for 8-dir aircraft
     const sinFactor8 = isDiagonal ? 90 : 127;
     const axisLeptons8 = (moveLeptons * sinFactor8) >> 7;
-    const tLX = Math.round(target.x / LP);
-    const tLY = Math.round(target.y / LP);
+    const tLX = Math.trunc(target.x / LP);
+    const tLY = Math.trunc(target.y / LP);
     const dxL = tLX - entity.leptonX;
     const dyL = tLY - entity.leptonY;
     const stepLX = Math.min(Math.abs(fdx * axisLeptons8), Math.abs(dxL)) * Math.sign(dxL || fdx);

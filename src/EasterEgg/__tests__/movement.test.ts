@@ -87,8 +87,8 @@ describe('moveToward — stop-rotate-move', () => {
     // Target very close — within one speed step
     // Use lepton-quantized target to avoid quantization mismatch
     const targetRaw = { x: 103, y: 100 };
-    const targetLX = Math.round(targetRaw.x / LP) * LP;
-    const targetLY = Math.round(targetRaw.y / LP) * LP;
+    const targetLX = Math.trunc(targetRaw.x / LP) * LP;
+    const targetLY = Math.trunc(targetRaw.y / LP) * LP;
     const target = { x: targetLX, y: targetLY };
     tank.rotTickedThisFrame = false;
     const arrived = tank.moveToward(target, 5);

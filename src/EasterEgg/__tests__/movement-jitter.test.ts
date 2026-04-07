@@ -19,9 +19,10 @@ describe('moveToward — overshoot prevention', () => {
     tank.rotTickedThisFrame = false;
     const arrived = tank.moveToward(target, 10);
 
-    // Should arrive exactly at target, not overshoot
-    expect(tank.pos.x).toBeCloseTo(102, 1);
-    expect(tank.pos.y).toBeCloseTo(100, 1);
+    // Should arrive at lepton-quantized target, not overshoot
+    // Lepton quantization: Math.trunc(102/LP)*LP = 101.8125, Math.trunc(100/LP)*LP = 99.9375
+    expect(tank.pos.x).toBeCloseTo(102, 0);
+    expect(tank.pos.y).toBeCloseTo(100, 0);
     expect(arrived).toBe(true);
   });
 
@@ -62,7 +63,8 @@ describe('moveToward — overshoot prevention', () => {
     const arrived = inf.moveToward(target, 5);
 
     expect(arrived).toBe(true);
-    expect(inf.pos.x).toBeCloseTo(103, 1);
+    // Lepton quantization: Math.trunc(103/LP)*LP ≈ 102.9375
+    expect(inf.pos.x).toBeCloseTo(103, 0);
   });
 });
 

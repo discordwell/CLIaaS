@@ -67,7 +67,7 @@ function cppVehicleAccumulatorPosition(
   // C++ Set_Speed: SpeedAdd = MaxSpeed * fixed(0xFF, 256) — the 255/256 fraction
   const effectiveSpeedLeptons = Math.floor((effectiveLeptons * 255) / 256);
 
-  let leptonX = Math.round(startX / LP);
+  let leptonX = Math.trunc(startX / LP);
   let accum = 0;
 
   for (let t = 0; t < ticks; t++) {
@@ -99,7 +99,7 @@ function cppInfantryPosition(
   // Infantry Coord_Move: cardinal sinFactor=127
   const axisLeptons = (effectiveLeptons * 127) >> 7;
 
-  let leptonX = Math.round(startX / LP);
+  let leptonX = Math.trunc(startX / LP);
 
   for (let t = 0; t < ticks; t++) {
     leptonX += axisLeptons;

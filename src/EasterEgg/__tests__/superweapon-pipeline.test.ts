@@ -29,9 +29,9 @@ import { type Effect } from '../engine/renderer';
 import { Terrain } from '../engine/map';
 import { LP } from '../engine/tracks';
 
-/** Round a world coordinate to lepton precision (matching Entity.setPosition behavior) */
+/** Truncate a world coordinate to lepton precision (matching Entity.setPosition behavior) */
 function leptonAlign(v: number): number {
-  return Math.round(v / LP) * LP;
+  return Math.trunc(v / LP) * LP;
 }
 
 beforeEach(() => resetEntityIds());
@@ -1620,12 +1620,13 @@ describe('Superweapon edge cases and interactions', () => {
     expect(d).toBe(2);
   });
 
-  it('worldDist diagonal: sqrt(2) for 1 cell diagonal', () => {
+  it('worldDist diagonal: C++ Distance() octagonal approximation (1.5) for 1 cell diagonal', () => {
+    // C++ coord.cpp:124-136 Distance(): max(dx,dy) + min(dx,dy)/2 = 256 + 128 = 384 leptons = 1.5 cells
     const d = worldDist(
       { x: 0, y: 0 },
       { x: CELL_SIZE, y: CELL_SIZE },
     );
-    expect(d).toBeCloseTo(Math.SQRT2, 10);
+    expect(d).toBe(1.5);
   });
 
   it('nuke blast radius (10 cells) vs worldDist scale — blast check is in cells', () => {

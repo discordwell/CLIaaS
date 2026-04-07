@@ -9,8 +9,8 @@ import {
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
-  CIVILIAN_UNIT_TYPES, worldToCell, worldDist, directionTo, directionToLeptons, DIR_DX, DIR_DY,
-  armorIndex, PRODUCTION_ITEMS,
+  CIVILIAN_UNIT_TYPES, worldToCell, worldDist, leptonDist, directionTo, directionToLeptons, DIR_DX, DIR_DY,
+  armorIndex, PRODUCTION_ITEMS, LEPTON_SIZE,
 } from './types';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { ScenarioRandom, NonCriticalRandom } from './random';
@@ -209,8 +209,10 @@ export class Entity {
    *  and any direct position assignment (NOT movement — movement writes leptons directly).
    *  C++ parity: all positions are lepton-quantized. Pixel pos is derived from leptons. */
   setPosition(x: number, y: number): void {
-    this.leptonX = Math.round(x / LP);
-    this.leptonY = Math.round(y / LP);
+    // C++ parity: integer truncation (toward zero), not rounding.
+    // C++ positions are integer leptons; pixel = lepton * CELL_SIZE / LEPTON_SIZE.
+    this.leptonX = Math.trunc(x / LP);
+    this.leptonY = Math.trunc(y / LP);
     this.pos.x = this.leptonX * LP;
     this.pos.y = this.leptonY * LP;
   }
@@ -429,8 +431,8 @@ export class Entity {
     this.house = house;
     // C++ parity: all positions are stored as integer lepton coordinates.
     // Pixel position is always derived from leptons to avoid sub-lepton drift.
-    this.leptonX = Math.round(x / LP);
-    this.leptonY = Math.round(y / LP);
+    this.leptonX = Math.trunc(x / LP);
+    this.leptonY = Math.trunc(y / LP);
     this.pos = { x: this.leptonX * LP, y: this.leptonY * LP };
     this.hp = this.stats.strength;
     this.maxHp = this.stats.strength;
@@ -756,6 +758,10 @@ export class Entity {
   }
 
   /** Check if target is in range of any weapon (primary or secondary) */
+  /** C++ techno.cpp:1313-1318 In_Range — integer lepton distance vs weapon range.
+   *  Uses C++ Distance() octagonal approximation (max+min/2) via worldDist().
+   *  worldDist() converts pixel coords to integer leptons internally, so this
+   *  works correctly whether positions were set via setPosition() or directly. */
   inRange(other: Entity): boolean {
     const dist = worldDist(this.pos, other.pos);
     if (this.weapon && dist <= this.weapon.range) return true;
@@ -1091,13 +1097,17 @@ export class Entity {
     // M7: Apply crate speed bias multiplier
     const effectiveSpeed = speed * this.speedBias;
 
-    const dx = target.x - this.pos.x;
-    const dy = target.y - this.pos.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    // ALL distance computation in integer lepton space (C++ parity).
+    // Convert target pixel position to integer leptons (truncate, not round).
+    const targetLeptonX = Math.trunc(target.x / LP);
+    const targetLeptonY = Math.trunc(target.y / LP);
+    const dxL = targetLeptonX - this.leptonX;
+    const dyL = targetLeptonY - this.leptonY;
+    // C++ Distance() octagonal approximation for snap distance
+    const distLeptonsTotal = leptonDist(this.leptonX, this.leptonY, targetLeptonX, targetLeptonY);
 
     // C++ infantry snaps at Distance < 0x0010 (16 leptons). Vehicles at sub-pixel.
     const snapLeptons = this.stats.isInfantry ? 16 : 5;
-    const distLeptonsTotal = Math.round(dist / LP);
     if (distLeptonsTotal < snapLeptons) {
       this.setPosition(target.x, target.y);
       this.speedAccum = 0;
@@ -1108,17 +1118,8 @@ export class Entity {
     // C++ Start_Driver: entity is now in motion
     if (this.stats.isInfantry) this.isDriving = true;
 
-    const oldFacing = this.facing;
     // C++ uses integer lepton coordinates for direction computation (Desired_Facing8).
-    // Using pixel coords causes different diagonal boundary decisions due to float rounding.
-    // For entities with lepton coordinates, compute direction in lepton space.
-    if (this.leptonX !== 0 || this.leptonY !== 0) {
-      const targetLX = Math.round(target.x / LP);
-      const targetLY = Math.round(target.y / LP);
-      this.desiredFacing = directionToLeptons(this.leptonX, this.leptonY, targetLX, targetLY);
-    } else {
-      this.desiredFacing = directionTo(this.pos, target);
-    }
+    this.desiredFacing = directionToLeptons(this.leptonX, this.leptonY, targetLeptonX, targetLeptonY);
     const facingAligned = this.tickRotation();
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)
@@ -1155,10 +1156,6 @@ export class Entity {
       const axisLeptons = (maxspeed * sinFactor) >> 7;
 
       // Integer lepton movement — write to leptonX/Y, derive pos
-      const targetLeptonX = Math.round(target.x / LP);
-      const targetLeptonY = Math.round(target.y / LP);
-      const dxL = targetLeptonX - this.leptonX;
-      const dyL = targetLeptonY - this.leptonY;
       const stepLX = Math.min(Math.abs(fdx * axisLeptons), Math.abs(dxL)) * Math.sign(dxL || fdx);
       const stepLY = Math.min(Math.abs(fdy * axisLeptons), Math.abs(dyL)) * Math.sign(dyL || fdy);
       this.leptonX += stepLX;
@@ -1204,20 +1201,11 @@ export class Entity {
       return false; // not enough accumulated for a pixel step this tick
     }
 
-    // Convert back to pixels for position update
-    const movePixels = moveLeptons * LP;
-
-    // C++ parity: Coord_Move uses integer sin/cos lookup tables indexed by facing,
-    // not floating-point (dx/dist) unit vectors. The irrational float from (dx/dist)
-    // accumulates sub-lepton error over many ticks, causing cell boundary crossings
-    // 1-2 ticks before the C++ integer position.
-    // Use DIR_DX/DIR_DY lookup (matching the 8-direction facing) for the movement
-    // direction, with sqrt(2) correction for diagonals.
-    // Integer lepton movement for vehicles/aircraft (C++ drive.cpp / fly.cpp)
+    // C++ parity: Coord_Move uses integer sin/cos lookup tables indexed by facing.
     // C++ fly.cpp:88: Coord_Move uses PrimaryFacing.Current() — the aircraft's
     // current facing, not the desired facing toward the target. This creates the
     // characteristic curved flight paths. For vehicles, facing === desiredFacing
-    // here because they stop-rotate-move (line 1127).
+    // here because they stop-rotate-move.
     const face = this.facing;
     const fdx = DIR_DX[face];
     const fdy = DIR_DY[face];
@@ -1227,15 +1215,11 @@ export class Entity {
     const sinFactor = isDiagonal ? 90 : 127;
     const axisLeptons = (moveLeptons * sinFactor) >> 7;
 
-    const targetLeptonX = Math.round(target.x / LP);
-    const targetLeptonY = Math.round(target.y / LP);
-    const dxL = targetLeptonX - this.leptonX;
-    const dyL = targetLeptonY - this.leptonY;
-
     // C++ fly.cpp:88: aircraft Coord_Move moves in the FACING direction without
     // clamping to the target position. This allows aircraft to fly past/away from
     // their target when facing perpendicular, creating curved flight paths.
     // Ground vehicles clamp to avoid overshooting the waypoint.
+    // dxL/dyL already computed at top of function in integer lepton space.
     let stepLX: number;
     let stepLY: number;
     if (this.stats.isAircraft) {

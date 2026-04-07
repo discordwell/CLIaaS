@@ -5383,8 +5383,8 @@ export class Game {
       const result = smoothTurn(step.x, step.y, step.facing, flags);
 
       // Position = target cell center + transformed lepton offset (integer lepton space)
-      entity.leptonX = Math.round(targetX / LP) + result.x;
-      entity.leptonY = Math.round(targetY / LP) + result.y;
+      entity.leptonX = Math.trunc(targetX / LP) + result.x;
+      entity.leptonY = Math.trunc(targetY / LP) + result.y;
       entity.syncPosFromLeptons();
 
       // Update facing from transformed DirType → 32-step → 8-dir

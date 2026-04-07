@@ -9,9 +9,9 @@ import { LP } from '../engine/tracks';
 
 beforeEach(() => resetEntityIds());
 
-/** Round-trip a pixel value through lepton quantization (same as Entity constructor) */
+/** Truncate a pixel value to lepton precision (same as Entity constructor) */
 function leptonRound(px: number): number {
-  return Math.round(px / LP) * LP;
+  return Math.trunc(px / LP) * LP;
 }
 
 describe('Render interpolation: prevPos → pos smooth visual', () => {
