@@ -622,7 +622,9 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       }
       // C++ foot.cpp:688 — Random_Animate when no target found (on scan tick)
       if (entity.isReadyToRandomAnimate()) {
-        entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
+        // C++ infantry.cpp:1748: IdleTimer = Random_Pick(RandomAnimateTime * TICKS_PER_MINUTE/2, RandomAnimateTime * TICKS_PER_MINUTE*2)
+        // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
+        entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
         const animPick = ScenarioRandom.nextInRange(0, 10);
         if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
         entity.doing = 'idle_anim';
@@ -865,7 +867,9 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // C++ foot.cpp:594 — Random_Animate() when no target found (on scan tick).
   // Infantry consume 2-3 RNG values (IdleTimer + animation selection + optional facing).
   if (entity.isReadyToRandomAnimate()) {
-    entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
+    // C++ infantry.cpp:1748: IdleTimer = Random_Pick(RandomAnimateTime * TICKS_PER_MINUTE/2, RandomAnimateTime * TICKS_PER_MINUTE*2)
+    // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {
       ScenarioRandom.nextInRange(0, 7);
@@ -967,8 +971,11 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   }
 
   // C++ foot.cpp:1011 — Random_Animate when no target found (on scan tick)
-  if (entity.stats.isInfantry && entity.idleAnimTimer <= 0) {
-    entity.idleAnimTimer = ScenarioRandom.nextInRange(36, 147);
+  // C++ calls Random_Animate() which checks Is_Ready_To_Random_Animate() — full gate check
+  if (entity.isReadyToRandomAnimate()) {
+    // C++ infantry.cpp:1748: IdleTimer = Random_Pick(RandomAnimateTime * TICKS_PER_MINUTE/2, RandomAnimateTime * TICKS_PER_MINUTE*2)
+    // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
   }

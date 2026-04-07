@@ -3695,7 +3695,11 @@ export class Game {
           // C++ uses AA_Delay for E1 and E3 infantry (foot.cpp:624-626), Normal_Delay for all others.
           const isInfAA = entity.stats.isInfantry &&
             (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
-          const guardDelay = isInfAA ? 14 : 45;
+          // C++ mission.h:141-142: Normal_Delay=TICKS_PER_MINUTE*Rate, AA_Delay=TICKS_PER_MINUTE*AARate
+          // rules.ini [Guard] Rate=.050 AARate=.016
+          // fixed(".050")→Raw=12. Normal_Delay=((12*900)+128)/256=42
+          // fixed(".016")→Raw=4.  AA_Delay=((4*900)+128)/256=14
+          const guardDelay = isInfAA ? 14 : 42;
           entity.missionTimer = entity.attackCooldown > 0
             ? entity.attackCooldown
             : guardDelay + ScenarioRandom.nextInRange(0, 2);
@@ -3704,7 +3708,9 @@ export class Game {
       case Mission.AREA_GUARD:
         this.updateAreaGuard(entity, missionTimerFired);
         if (missionTimerFired) {
-          entity.missionTimer = 45 + ScenarioRandom.nextInRange(1, 5);
+          // C++ foot.cpp:1016-1020: dtime = MissionControl[Mission].Normal_Delay() + Random_Pick(1, 5)
+          // rules.ini [Area Guard] Rate=.080. fixed(".080")→Raw=20. Normal_Delay=((20*900)+128)/256=70
+          entity.missionTimer = 70 + ScenarioRandom.nextInRange(1, 5);
         }
         break;
       case Mission.SLEEP:

@@ -137,7 +137,7 @@ export class Entity {
   // Counts down each tick. Handler runs when timer reaches 0.
   // Handler returns Normal_Delay+Random_Pick(0,2) which becomes new timer.
   missionTimer = 0; // C++ Timer starts at 0 → first handler fires immediately
-  idleAnimTimer = 2;   // C++ parity: Doing=DO_NOTHING at init prevents Random_Animate on first guard scan
+  idleAnimTimer = 0;   // C++ techno.cpp:611: IdleTimer(0) — initialized to 0. Doing=DO_NOTHING blocks Random_Animate on tick 1 anyway.
 
   // C++ infantry.h Doing state — gates Is_Ready_To_Random_Animate.
   // DO_NOTHING = initial state. Transitions to DO_STAND_READY via Doing_AI when animation completes.
