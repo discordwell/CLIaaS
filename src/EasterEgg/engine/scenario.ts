@@ -2327,10 +2327,8 @@ export function checkTriggerEvent(
     case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {
-      // C++ tevent.cpp:224 compares elapsed frames (0-based) against data * TICKS_PER_MINUTE/10.
-      // TS ticks are 1-based (tick 1 = frame 0). Subtract 1 to align with C++ frame counting.
       const requiredTicks = event.data * TIME_UNIT_TICKS;
-      return (state.gameTick - 1 - state.triggerStartTick) >= requiredTicks;
+      return (state.gameTick - state.triggerStartTick) >= requiredTicks;
     }
     case TEVENT_GLOBAL_SET:
       // C++ scenario.h:197 — GlobalFlags[30]: indices must be in [0, 29]
