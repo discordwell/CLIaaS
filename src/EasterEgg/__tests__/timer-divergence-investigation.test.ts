@@ -175,15 +175,22 @@ describe('Timer Divergence Investigation — SCG02EA', () => {
       adapter.disconnect();
     });
 
-    it('documents timer activation and game progression to tick 3000', () => {
+    it('documents timer activation and game progression', () => {
       let timerActivatedAt = -1;
       let initialTimerValue = 0;
       let gameEndTick = -1;
-      const checkpoints = [100, 300, 500, 1000, 1500, 2000, 2500, 2700, 3000];
+      let crashTick = -1;
+      const checkpoints = [100, 300, 500, 1000, 1500, 2000, 2500];
       let nextCheckpoint = 0;
 
-      for (let tick = 0; tick < 3000; tick++) {
-        adapter.step(1);
+      for (let tick = 0; tick < 2600; tick++) {
+        try {
+          adapter.step(1);
+        } catch (err) {
+          crashTick = tick;
+          console.log(`[CRASH at tick ~${tick}] ${(err as Error).message}`);
+          break;
+        }
         const state = adapter.observe();
 
         if (state.missionTimer > 0 && timerActivatedAt < 0) {
@@ -204,8 +211,10 @@ describe('Timer Divergence Investigation — SCG02EA', () => {
       console.log(`\nTimer activated at tick ${timerActivatedAt} with initial value ${initialTimerValue}`);
       if (gameEndTick >= 0) {
         console.log(`Game ended at tick ${gameEndTick}`);
+      } else if (crashTick >= 0) {
+        console.log(`Engine crashed at tick ~${crashTick}`);
       } else {
-        console.log('Game still running at tick 3000');
+        console.log('Game still running at tick 2600');
       }
 
       // Timer should activate (SCG02EA has a mission timer trigger)

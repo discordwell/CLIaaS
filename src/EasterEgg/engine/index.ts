@@ -1525,7 +1525,16 @@ export class Game {
     const INIT_SEEDS: Record<string, number> = {
       SCG01EA: 3520260643,  // 95 calls from seed=0
       SCG02EA: 3499445261,
-      // Add more scenarios as tested
+      SCG03EA: 3520260643,  // same init path as SCG01EA
+      SCG04EA: 3520260643,
+      SCG06EA: 3520260643,
+      SCG07EA: 3520260643,
+      SCG08EA: 279480590,   // empirically observed WASM seed at tick 0
+      SCG09EA: 3520260643,
+      SCG10EA: 3520260643,
+      SCG11EA: 3520260643,
+      SCG12EA: 3520260643,
+      SCG13EA: 3520260643,
     };
     const TARGET_SEED = INIT_SEEDS[this.scenarioId] ?? INIT_SEEDS.SCG01EA;
     let safety = 0;
