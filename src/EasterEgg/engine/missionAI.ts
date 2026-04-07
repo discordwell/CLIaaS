@@ -592,10 +592,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       }
       const dist = worldDist(entity.pos, other.pos);
       if (dist > huntRange) continue;
-      // C++ Evaluate_Object has no LOS check — aircraft bypass discovery check entirely.
-      // C++ HUNT uses THREAT_NORMAL → Target_Something_Nearby skips LOS check.
-      // Units on HUNT can see all enemies regardless of terrain obstacles.
-      // (Guard scan uses THREAT_RANGE which does check LOS.)
+      // C++ Evaluate_Object has no terrain LOS check for ANY scan mode.
+      // The only visibility filter is IsDiscoveredByPlayer (fog of war).
       const score = ctx.threatScore(entity, other, dist);
       if (score > bestScore) { bestScore = score; bestTarget = other; }
     }
@@ -771,7 +769,6 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // This prevents phase transports and subs from breaking their own cloak.
   if (entity.isPlayerUnit && entity.stats.isCloakable) return;
 
-  const ec = entity.cell;
   const isDog = entity.type === 'DOG';
   // C++ foot.cpp:593 — guard scan uses THREAT_RANGE → Threat_Range(0) = weapon range.
   // guardRange from INI overrides if set, otherwise use max weapon range (C++ parity).
@@ -802,12 +799,17 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       if (!hasAA) continue;
     }
     const dist = worldDist(entity.pos, other.pos);
-    if (dist >= scanRange) continue;
-    // Check line of sight — can't target through walls (aircraft skip LOS check)
-    if (!(other.isAirUnit && other.flightAltitude > 0)) {
-      const oc = other.cell;
-      if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
-    }
+    // C++ techno.cpp:1511-1523: Evaluate_Object range check.
+    // When range==0 (THREAT_RANGE), C++ uses In_Range() which checks:
+    //   Distance(Fire_Coord(which), target->Center_Coord()) <= Weapon_Range(which)
+    // The <= means targets at EXACTLY weapon range are included.
+    // Use > (not >=) to match C++ inclusive boundary.
+    if (dist > scanRange) continue;
+    // C++ Evaluate_Object does NOT check line-of-sight through terrain.
+    // The only "visibility" filter (techno.cpp:1529) checks IsDiscoveredByPlayer
+    // (fog-of-war discovery), which is a separate system from terrain LOS.
+    // Removed hasLineOfSight check here for C++ parity — guard scan targets
+    // anything within weapon range regardless of terrain obstacles.
 
     const score = ctx.threatScore(entity, other, dist);
     if (score > bestScore) {
@@ -837,7 +839,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // C++ techno.cpp:1610-1618: human units only auto-target ARMED buildings (with PrimaryWeapon)
   if (!isDog && entity.weapon) {
     let bestStruct: MapStructure | null = null;
-    let bestStructDist = scanRange;
+    let bestStructDist = Infinity;
     for (const s of ctx.structures) {
       if (!s.alive) continue;
       if (s.house === House.Neutral) continue;
@@ -846,6 +848,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
       const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
       const dist = worldDist(entity.pos, sPos);
+      // C++ techno.cpp:1517-1523: In_Range uses <= (inclusive boundary)
+      if (dist > scanRange) continue;
       if (dist < bestStructDist) {
         bestStructDist = dist;
         bestStruct = s;
@@ -883,12 +887,15 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   // A5: Scan from home position (C++ foot.cpp:967 — temporarily swaps coords)
   // Use origin position for distance checks so guards defend their post, not where they wandered
   const scanPos = origin;
-  const scanCell = worldToCell(scanPos.x, scanPos.y);
   // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2
-  // C++ Threat_Range(1) = min(2*weaponRange, 0x0A00=10cells), so leash = min(weaponRange, 5)
+  // C++ techno.cpp:4573-4581: Threat_Range(1) = min(2*weaponRange, 0x0A00=10 cells)
+  // C++ foot.cpp:996: leash = Threat_Range(1)/2 = min(weaponRange, 5)
   const weaponRange = entity.weapon?.range ?? entity.stats.sight;
-  const leashRange = Math.min(weaponRange / 2, 5);
-  const scanRange = Math.max(leashRange, entity.stats.sight);
+  const threatRange1 = Math.min(2 * weaponRange, 10); // C++ Threat_Range(1) in cells
+  const leashRange = threatRange1 / 2; // min(weaponRange, 5) — C++ foot.cpp:996
+  // C++ Greatest_Threat with THREAT_AREA uses Threat_Range(1) as the scan radius
+  // (passed as 'range' to Evaluate_Object, which checks dist > range).
+  const scanRange = threatRange1;
 
   // If too far from origin (> leash range), return home — but still attack enemies en route
   const distFromOrigin = worldDist(entity.pos, origin);
@@ -905,8 +912,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       if (other.cloakState === CloakState.CLOAKED) continue;
       const dist = worldDist(entity.pos, other.pos);
       if (dist > entity.stats.sight) continue;
-      const oc2 = other.cell;
-      if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, oc2.cx, oc2.cy)) continue;
+      // C++ Evaluate_Object has no terrain LOS check — removed for parity.
       // Found an enemy — attack it
       entity.mission = Mission.ATTACK;
       entity.target = other;
@@ -949,8 +955,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = worldDist(scanPos, other.pos);
     if (dist > scanRange) continue;
-    const oc = other.cell;
-    if (!ctx.map.hasLineOfSight(scanCell.cx, scanCell.cy, oc.cx, oc.cy)) continue;
+    // C++ Evaluate_Object has no terrain LOS check — removed for parity.
     const score = ctx.threatScore(entity, other, dist);
     if (score > bestScore) { bestScore = score; bestTarget = other; }
   }

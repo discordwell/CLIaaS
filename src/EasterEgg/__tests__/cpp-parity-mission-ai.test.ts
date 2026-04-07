@@ -792,21 +792,16 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
    * In cells: min(weaponRange, 5)
    */
 
-  it('leash is computed as min(weapon_range/2, 5) (C++ Threat_Range(1)/2, foot.cpp:996)', () => {
+  it('leash is computed as min(weaponRange, 5) (C++ Threat_Range(1)/2, foot.cpp:996)', () => {
     // C++ foot.cpp:996: int maxrange = Threat_Range(1)/2
     // C++ Threat_Range(1): range = 2 * max(Weapon_Range(0), Weapon_Range(1)), clamped to 0x0A00
-    // TS missionAI.ts:
-    //   const weaponRange = entity.weapon?.range ?? entity.stats.sight;
-    //   const leashRange = Math.min(weaponRange / 2, 5);
-    //
-    // C++ leash = min(2*weaponRange, 0x0A00)/2 = min(weaponRange, 5 cells)
-    // TS now matches: Math.min(weaponRange/2, 5)
+    // C++ leash = Threat_Range(1)/2 = min(2*weaponRange, 10)/2 = min(weaponRange, 5)
     const guard = makeEntity(UnitType.V_3TNK, House.USSR, 200, 200);
     guard.guardOrigin = { x: 200, y: 200 };
     const weaponRange = guard.weapon?.range ?? 5;
 
-    // Both C++ and TS: leash = min(weaponRange/2, 5)
-    const leash = Math.min(weaponRange / 2, 5);
+    // C++ leash = min(2*weaponRange, 10)/2 = min(weaponRange, 5)
+    const leash = Math.min(weaponRange, 5);
 
     // The key behavioral test: units beyond leash should return home
 
