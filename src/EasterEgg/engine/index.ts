@@ -1634,25 +1634,28 @@ export class Game {
     this.tick++;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
-    // RNG audit: enable tagged logging for ticks 1-15
-    if (this.tick === 1) {
-      console.log('[RNG] tick 1 START: seed=' + (ScenarioRandom.seed >>> 0) + ' callCount=' + ScenarioRandom.callCount);
-      ScenarioRandom._tagLogging = true;
-      ScenarioRandom._taggedLog = [];
-      ScenarioRandom._seedLog = [];
-    }
-    if (this.tick === 2) {
-      console.log('[RNG] tick 2 START: seed=' + (ScenarioRandom.seed >>> 0) + ' callCount=' + ScenarioRandom.callCount + ' seedLogLen=' + ScenarioRandom._seedLog.length);
-    }
-    // Per-tick summary during audit window
-    if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging) {
-      // Record start-of-tick call count for per-tick delta
-      (this as any)._rngAuditTickStart = ScenarioRandom.callCount;
-      (this as any)._rngAuditSeedLogStart = ScenarioRandom._seedLog.length;
-    }
-    if (this.tick > 15 && ScenarioRandom._tagLogging) {
-      ScenarioRandom._tagLogging = false;
-      console.log('[RNG AUDIT] Logging disabled after tick 15. Total seedLog entries: ' + ScenarioRandom._seedLog.length);
+    // RNG audit: enable tagged logging for ticks 1-15.
+    // When _tagLoggingExternal is set, an external test controls logging — skip built-in toggle.
+    if (!ScenarioRandom._tagLoggingExternal) {
+      if (this.tick === 1) {
+        console.log('[RNG] tick 1 START: seed=' + (ScenarioRandom.seed >>> 0) + ' callCount=' + ScenarioRandom.callCount);
+        ScenarioRandom._tagLogging = true;
+        ScenarioRandom._taggedLog = [];
+        ScenarioRandom._seedLog = [];
+      }
+      if (this.tick === 2) {
+        console.log('[RNG] tick 2 START: seed=' + (ScenarioRandom.seed >>> 0) + ' callCount=' + ScenarioRandom.callCount + ' seedLogLen=' + ScenarioRandom._seedLog.length);
+      }
+      // Per-tick summary during audit window
+      if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging) {
+        // Record start-of-tick call count for per-tick delta
+        (this as any)._rngAuditTickStart = ScenarioRandom.callCount;
+        (this as any)._rngAuditSeedLogStart = ScenarioRandom._seedLog.length;
+      }
+      if (this.tick > 15 && ScenarioRandom._tagLogging) {
+        ScenarioRandom._tagLogging = false;
+        console.log('[RNG AUDIT] Logging disabled after tick 15. Total seedLog entries: ' + ScenarioRandom._seedLog.length);
+      }
     }
 
     // Periodically resume audio context if browser suspended it (e.g. tab blur)
@@ -1825,7 +1828,7 @@ export class Game {
     // that caused aircraft to consume double RNG calls vs C++.
 
     // RNG audit: per-tick summary (after all entity/structure/aircraft processing)
-    if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging) {
+    if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging && !ScenarioRandom._tagLoggingExternal) {
       const tickStart = (this as any)._rngAuditTickStart as number;
       const seedStart = (this as any)._rngAuditSeedLogStart as number;
       const tickCalls = ScenarioRandom.callCount - tickStart;
@@ -3691,15 +3694,24 @@ export class Game {
         // Pass missionTimerFired so updateGuard only scans when timer fires.
         this.updateGuard(entity, missionTimerFired);
         if (missionTimerFired) {
-          // C++ foot.cpp:623-631,634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0, 2))
-          // C++ uses AA_Delay for E1 and E3 infantry (foot.cpp:624-626), Normal_Delay for all others.
-          const isInfAA = entity.stats.isInfantry &&
-            (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
-          // C++ mission.h:141-142: Normal_Delay=TICKS_PER_MINUTE*Rate, AA_Delay=TICKS_PER_MINUTE*AARate
-          // rules.ini [Guard] Rate=.050 AARate=.016
-          // fixed(".050")→Raw=12. Normal_Delay=((12*900)+128)/256=42
-          // fixed(".016")→Raw=4.  AA_Delay=((4*900)+128)/256=14
-          const guardDelay = isInfAA ? 14 : 42;
+          // C++ foot.cpp:597-634: dtime = MissionControl[Mission].Normal_Delay()
+          // C++ uses the MISSION-SPECIFIC rate, not entity-type rate.
+          // E1/E3 infantry override to AA_Delay only for GUARD (foot.cpp:624-626).
+          // STICKY mission (rules.ini [Sticky] Rate=.016) has Normal_Delay=14 for ALL infantry.
+          // rules.ini [Guard] Rate=.050, AARate=.016
+          //   Guard Normal_Delay: fixed(".050")→Raw=12. ((12*900)+128)/256=42
+          //   Guard AA_Delay:     fixed(".016")→Raw=4.  ((4*900)+128)/256=14
+          // rules.ini [Sticky] Rate=.016 → Normal_Delay=14 for all entities
+          let guardDelay: number;
+          if (entity.mission === Mission.STICKY) {
+            // Sticky mission: Rate=.016 → Normal_Delay=14 for all entity types
+            guardDelay = 14;
+          } else {
+            // Guard mission: E1/E3 use AA_Delay=14, others use Normal_Delay=42
+            const isInfAA = entity.stats.isInfantry &&
+              (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
+            guardDelay = isInfAA ? 14 : 42;
+          }
           entity.missionTimer = entity.attackCooldown > 0
             ? entity.attackCooldown
             : guardDelay + ScenarioRandom.nextInRange(0, 2);

@@ -762,6 +762,33 @@ export function installHarness(game: Game): void {
     ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
   };
 
+  // RNG tag-logging control for per-tick divergence tracing.
+  // Enables source-tag logging, resets the per-tick log, then returns the log after stepping.
+  // Sets _tagLoggingExternal to prevent the engine's built-in audit from interfering.
+  w.__rngTagControl = (action: 'enable' | 'disable' | 'reset' | 'read') => {
+    switch (action) {
+      case 'enable':
+        ScenarioRandom._tagLogging = true;
+        ScenarioRandom._tagLoggingExternal = true;
+        return { enabled: true };
+      case 'disable':
+        ScenarioRandom._tagLogging = false;
+        ScenarioRandom._tagLoggingExternal = false;
+        return { enabled: false };
+      case 'reset':
+        ScenarioRandom._seedLog = [];
+        ScenarioRandom._taggedLog = [];
+        return { reset: true };
+      case 'read':
+        return {
+          seedLog: ScenarioRandom._seedLog.map(e => [e[0], e[1]]),
+          taggedLog: ScenarioRandom._taggedLog.slice(),
+          callCount: ScenarioRandom.callCount,
+          seed: ScenarioRandom.seed >>> 0,
+        };
+    }
+  };
+
   w.__agentDebug = () => {
     game.debugTriggers = true;
     // Access private triggers via cast

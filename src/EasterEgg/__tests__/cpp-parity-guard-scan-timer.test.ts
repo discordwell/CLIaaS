@@ -97,4 +97,26 @@ describe('Guard/AreaGuard scan timer parity', () => {
 
     expect(source).toContain('this.updateAreaGuard(entity, missionTimerFired)');
   });
+
+  it('STICKY mission uses its own Normal_Delay (14), not GUARD Normal_Delay (42)', async () => {
+    // C++ foot.cpp:597: dtime = MissionControl[Mission].Normal_Delay()
+    // For STICKY mission, rules.ini [Sticky] Rate=.016 → Normal_Delay=14
+    // For GUARD mission, rules.ini [Guard] Rate=.050 → Normal_Delay=42
+    // The GUARD/STICKY case in the mission switch must differentiate:
+    //   STICKY: guardDelay = 14 (all entity types)
+    //   GUARD:  guardDelay = isE1/E3 ? 14 (AA_Delay) : 42 (Normal_Delay)
+    const fs = await import('fs');
+    const path = await import('path');
+    const indexPath = path.resolve(__dirname, '../engine/index.ts');
+    const source = fs.readFileSync(indexPath, 'utf-8');
+
+    // The code must check entity.mission === Mission.STICKY for the delay override
+    expect(source).toContain('entity.mission === Mission.STICKY');
+
+    // Sticky delay must be 14 (Rate=.016 → fixed raw=4 → ((4*900)+128)/256=14)
+    // Verify the guardDelay for STICKY is 14
+    const stickyBlock = source.match(/Mission\.STICKY[\s\S]*?guardDelay\s*=\s*(\d+)/);
+    expect(stickyBlock, 'Sticky guardDelay assignment should exist').toBeTruthy();
+    expect(stickyBlock![1]).toBe('14');
+  });
 });

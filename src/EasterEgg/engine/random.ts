@@ -33,6 +33,7 @@ export class RandomClass {
   _logTag = '';
   _taggedLog: string[] = [];
   _tagLogging = false;
+  _tagLoggingExternal = false; // when true, engine's built-in audit won't toggle _tagLogging
   /** Source-tag based logging (mirrors C++ g_rng_source_tag).
    *  Set _sourceTag before each RNG call site. When _tagLogging is true,
    *  each call records [seed_after, sourceTag] for comparison with WASM rngLog. */
