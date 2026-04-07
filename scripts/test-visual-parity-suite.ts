@@ -71,15 +71,18 @@ test.describe('Visual Parity Suite', () => {
       for (const targetTick of ticks) {
         const step = targetTick - prevTick;
         if (step > 0) {
-          // Step BOTH engines tick-by-tick in a single evaluate call.
-          // This avoids async yields between ticks that cause C++ CDTimerClass
-          // to count extra frames during JavaScript event loop processing.
-          // Both engines step N ticks with zero JS yields between ticks.
+          // Step BOTH engines in matched batches inside single evaluate calls.
+          // C++ agent_step(N) runs a tight for-loop of do_tick() — no JS yields
+          // within a single call. Cap at 300 (C++ limit) and batch if needed.
+          // Key: both engines step the SAME batch sizes to avoid tick count mismatch.
           await Promise.all([
-            wasmPage.evaluate(async (n: number) => {
-              // Step 1 tick at a time inside a single evaluate — no async yields
-              for (let i = 0; i < n; i++) {
-                (window as any).__agentStep(1);
+            wasmPage.evaluate((n: number) => {
+              // Single synchronous evaluate — no async yields between batches
+              let rem = n;
+              while (rem > 0) {
+                const batch = Math.min(rem, 300);
+                rem -= batch;
+                (window as any).__agentStep(batch);
               }
             }, step),
             tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, step),
