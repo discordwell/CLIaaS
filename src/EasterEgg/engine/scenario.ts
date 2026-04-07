@@ -2540,11 +2540,39 @@ export function executeTriggerAction(
     case TACTION_NONE:
       break;
 
-    case TACTION_CREATE_TEAM:
-      // C++ taction.cpp:658-662 — TACTION_CREATE_TEAM falls through to the same
-      // ScenarioClass::Create_Army() code path as TACTION_REINFORCEMENTS.
-      // Both actions spawn the referenced team's members as reinforcements.
-      // (Fall through to TACTION_REINFORCEMENTS)
+    case TACTION_CREATE_TEAM: {
+      // C++ taction.cpp:658 — Create_Army() RECRUITS existing idle units into the team.
+      // Unlike TACTION_REINFORCEMENTS which always spawns new units, CREATE_TEAM
+      // searches for idle units of the matching house and type already on the map.
+      // Only spawns new units if no matching idle unit exists.
+      const createTeam = teamTypes[action.team];
+      if (!createTeam) break;
+      const createHouse = houseIdToHouse(createTeam.house);
+      for (const member of createTeam.members) {
+        for (let i = 0; i < member.count; i++) {
+          const unitType = toUnitType(member.type);
+          if (!unitType) continue;
+          // Find an existing idle unit of the right type and house
+          const recruit = entities.find(e =>
+            e.alive && !e.inLimbo && e.type === unitType &&
+            e.house === createHouse && e.mission === Mission.GUARD &&
+            !e.target && !e.moveTarget
+          );
+          if (recruit) {
+            // Recruit into team — assign team mission script
+            const script = createTeam.missions.length > 0 ? createTeam.missions.map(m => ({
+              mission: m.mission, data: m.data,
+            })) : null;
+            if (script) {
+              recruit.teamMissionScript = script;
+              recruit.teamMissionIndex = 0;
+            }
+          }
+          // If no idle unit found, C++ Create_Army silently skips (doesn't spawn new)
+        }
+      }
+      break;
+    }
     case TACTION_REINFORCEMENTS: {
       const team = teamTypes[action.team];
       if (!team) break;
