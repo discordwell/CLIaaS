@@ -1523,18 +1523,19 @@ export class Game {
     // scenario. We advance TS ScenarioRandom to match the exact C++ post-init seed.
     // Target seeds determined empirically from WASM agent_get_state at tick 0.
     const INIT_SEEDS: Record<string, number> = {
-      SCG01EA: 3520260643,  // 95 calls from seed=0
+      // Empirically captured from WASM agent_get_state at tick 0 (seed=0 init)
+      SCG01EA: 3520260643,
       SCG02EA: 3499445261,
-      SCG03EA: 3520260643,  // same init path as SCG01EA
-      SCG04EA: 3520260643,
-      SCG06EA: 3520260643,
-      SCG07EA: 3520260643,
-      SCG08EA: 279480590,   // empirically observed WASM seed at tick 0
-      SCG09EA: 3520260643,
-      SCG10EA: 3520260643,
-      SCG11EA: 3520260643,
-      SCG12EA: 3520260643,
-      SCG13EA: 3520260643,
+      SCG03EA: 527630783,
+      SCG04EA: 2054541445,
+      SCG06EA: 4168801279,
+      SCG07EA: 2393386280,
+      SCG08EA: 279480590,
+      SCG09EA: 1739690317,
+      SCG10EA: 129816531,
+      SCG11EA: 676953911,
+      SCG12EA: 2400239140,
+      SCG13EA: 527630783,
     };
     const TARGET_SEED = INIT_SEEDS[this.scenarioId] ?? INIT_SEEDS.SCG01EA;
     let safety = 0;
