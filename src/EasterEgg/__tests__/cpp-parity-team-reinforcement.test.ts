@@ -858,8 +858,9 @@ describe('Reinforcement trigger timing (reinf.cpp:372-531, scenario triggers)', 
     }
   });
 
-  it('TACTION_REINFORCEMENTS (7) and TACTION_CREATE_TEAM (4) produce same spawn behavior', () => {
-    // C++ taction.cpp: REINFORCEMENTS falls through to CREATE_TEAM case
+  it('TACTION_REINFORCEMENTS (7) spawns; TACTION_CREATE_TEAM (4) returns createTeam descriptor with matching count', () => {
+    // C++ taction.cpp: REINFORCEMENTS spawns new entities; CREATE_TEAM now returns
+    // a descriptor for the Game class to recruit existing idle units.
     const team = makeTeamType({ members: [{ type: 'E1', count: 2 }] });
     const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 50 }]]);
 
@@ -870,8 +871,13 @@ describe('Reinforcement trigger timing (reinf.cpp:372-531, scenario triggers)', 
     resetEntityIds();
     const createResult = executeTriggerAction(createAction, [team], waypoints, emptyGlobals, emptyTriggers);
 
-    expect(reinfResult.spawned.length).toBe(createResult.spawned.length);
+    // action=7 spawns entities
     expect(reinfResult.spawned.length).toBe(2);
+    // action=4 returns createTeam descriptor
+    expect(createResult.createTeam).toBeDefined();
+    expect(createResult.spawned).toHaveLength(0);
+    const descriptorTotal = createResult.createTeam!.members.reduce((sum, m) => sum + m.count, 0);
+    expect(descriptorTotal).toBe(reinfResult.spawned.length);
   });
 });
 

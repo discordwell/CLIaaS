@@ -1693,11 +1693,14 @@ export class Game {
     // Update fog of war
     this.updateFogOfWar();
 
-    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI. At tick 1 (Frame 0 equivalent),
-    // fire immediate triggers (TEVENT_TIME data=0) to spawn reinforcements and create teams
-    // before entity processing. This ensures spawned entities (e.g., TRAN transport) are
-    // processed in the same tick and RNG calls are in the correct sequence.
-    if (this.tick === 1) {
+    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI every tick.
+    // This ensures entities spawned by triggers (reinforcements, created teams) are
+    // present in the entity array before processing, so they get their AI() called
+    // in the same tick — matching C++ where newly added Logic objects are picked up
+    // by the for(index=0; index<Count(); index++) loop.
+    // Tick 1: immediate triggers (TEVENT_TIME data=0).
+    // Tick 15,30,...: periodic trigger checks (time/global/destruction events).
+    if (this.tick === 1 || this.tick % 15 === 0) {
       this.processTriggers();
     }
 
@@ -1963,10 +1966,8 @@ export class Game {
     this.checkDiscoveryTriggers();
     this.checkZoneAndCrossTriggers();
 
-    // Process triggers (every 15 ticks = once per second for performance)
-    if (this.tick % 15 === 0) {
-      this.processTriggers();
-    }
+    // Periodic processTriggers moved to before entity processing (C++ parity:
+    // LogicTriggers run before entity AI so spawned entities are processed same tick).
 
     // RP3: Repair structures — delegates to repairSell.ts (14 tick interval)
     if (this.tick % 14 === 0) {

@@ -606,16 +606,18 @@ describe('TACTION handler completeness — C++ parity audit', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 8. CREATE_TEAM (4) and REINFORCEMENTS (7) share the same code path
-  //    C++ taction.cpp:658-662 and 674-675 — both spawn team entities
+  // 8. CREATE_TEAM (4) returns a createTeam descriptor; REINFORCEMENTS (7) spawns entities.
+  //    C++ taction.cpp:658-662 — Create_Army recruits existing idle units (descriptor).
+  //    C++ taction.cpp:674-675 — REINFORCEMENTS spawns new entities into result.spawned.
   // -------------------------------------------------------------------------
-  describe('CREATE_TEAM and REINFORCEMENTS share spawn path', () => {
+  describe('CREATE_TEAM and REINFORCEMENTS spawn/recruit path', () => {
     const teams = [makeTeamType()];
     const waypoints = new Map([[0, { cx: 10, cy: 10 }]]);
 
-    it('TACTION_CREATE_TEAM spawns entities', () => {
+    it('TACTION_CREATE_TEAM returns createTeam descriptor', () => {
       const r = exec(4, { team: 0, teamTypes: teams, waypoints });
-      expect(r.spawned.length).toBeGreaterThan(0);
+      expect(r.createTeam).toBeDefined();
+      expect(r.createTeam!.members.length).toBeGreaterThan(0);
     });
 
     it('TACTION_REINFORCEMENTS spawns entities', () => {
@@ -623,10 +625,11 @@ describe('TACTION handler completeness — C++ parity audit', () => {
       expect(r.spawned.length).toBeGreaterThan(0);
     });
 
-    it('both produce same entity count for identical team', () => {
+    it('createTeam members total matches REINFORCEMENTS spawned count for identical team', () => {
       const r4 = exec(4, { team: 0, teamTypes: teams, waypoints });
       const r7 = exec(7, { team: 0, teamTypes: teams, waypoints });
-      expect(r4.spawned.length).toBe(r7.spawned.length);
+      const createTeamTotal = r4.createTeam!.members.reduce((sum, m) => sum + m.count, 0);
+      expect(createTeamTotal).toBe(r7.spawned.length);
     });
   });
 

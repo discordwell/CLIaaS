@@ -209,7 +209,7 @@ describe('TACTION_DESTROY_TEAM — no other side effects (scenario.cpp)', () => 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('TACTION_DESTROY_TEAM vs TACTION_CREATE_TEAM — inverse operations (scenario.cpp)', () => {
-  it('CREATE_TEAM (action=4) spawns units; DESTROY_TEAM (action=5) does not', () => {
+  it('CREATE_TEAM (action=4) returns createTeam descriptor; DESTROY_TEAM (action=5) does not', () => {
     const teamTypes: TeamType[] = [{
       name: 'guards',
       house: 5,
@@ -226,7 +226,8 @@ describe('TACTION_DESTROY_TEAM vs TACTION_CREATE_TEAM — inverse operations (sc
       { action: 4, team: 0, trigger: -1, data: -1 }, // CREATE_TEAM
       teamTypes, waypoints, NO_GLOBALS, NO_TRIGGERS, 0,
     );
-    expect(createResult.spawned.length).toBeGreaterThan(0);
+    expect(createResult.createTeam).toBeDefined();
+    expect(createResult.createTeam!.members.length).toBeGreaterThan(0);
     expect(createResult.destroyTeam).toBeUndefined();
 
     const destroyResult = executeTriggerAction(
@@ -234,6 +235,7 @@ describe('TACTION_DESTROY_TEAM vs TACTION_CREATE_TEAM — inverse operations (sc
       teamTypes, waypoints, NO_GLOBALS, NO_TRIGGERS,
     );
     expect(destroyResult.spawned).toHaveLength(0);
+    expect(destroyResult.createTeam).toBeUndefined();
     expect(destroyResult.destroyTeam).toBe(0);
   });
 });

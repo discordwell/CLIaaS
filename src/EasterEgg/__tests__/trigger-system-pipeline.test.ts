@@ -373,8 +373,8 @@ describe('executeTriggerAction — complete action coverage', () => {
     expect(result.beginProduction).toBe(3);
   });
 
-  // TACTION_CREATE_TEAM (4) — needs team and waypoint
-  it('TACTION_CREATE_TEAM (4) spawns team members at waypoint', () => {
+  // TACTION_CREATE_TEAM (4) — returns createTeam descriptor
+  it('TACTION_CREATE_TEAM (4) returns createTeam descriptor with team members', () => {
     const teamTypes: TeamType[] = [{
       name: 'team1',
       house: 2,  // USSR
@@ -386,17 +386,19 @@ describe('executeTriggerAction — complete action coverage', () => {
     const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 50 }]]);
     const action: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, teamTypes, waypoints, emptyGlobals, emptyTriggers);
-    expect(result.spawned.length).toBe(2);
-    expect(result.spawned[0].house).toBe(House.USSR);
+    expect(result.createTeam).toBeDefined();
+    expect(result.createTeam!.house).toBe(House.USSR);
+    expect(result.createTeam!.members[0]).toEqual({ type: 'E1', count: 2 });
   });
 
-  it('TACTION_CREATE_TEAM (4) with invalid team index spawns nothing', () => {
+  it('TACTION_CREATE_TEAM (4) with invalid team index returns no descriptor', () => {
     const action: TriggerAction = { action: 4, team: 99, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, emptyTeamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
+    expect(result.createTeam).toBeUndefined();
     expect(result.spawned).toEqual([]);
   });
 
-  it('TACTION_CREATE_TEAM (4) with no waypoint spawns nothing', () => {
+  it('TACTION_CREATE_TEAM (4) with no waypoint still returns descriptor (Game resolves position)', () => {
     const teamTypes: TeamType[] = [{
       name: 'noWP',
       house: 2,
@@ -407,7 +409,8 @@ describe('executeTriggerAction — complete action coverage', () => {
     }];
     const action: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, teamTypes, emptyWaypoints, emptyGlobals, emptyTriggers);
-    expect(result.spawned).toEqual([]);
+    expect(result.createTeam).toBeDefined();
+    expect(result.createTeam!.members[0]).toEqual({ type: 'E1', count: 1 });
   });
 
   // TACTION_DESTROY_TEAM (5)
@@ -1125,7 +1128,7 @@ describe('Team spawning via REINFORCEMENTS/CREATE_TEAM', () => {
     expect(result.spawned.length).toBeLessThan(4);
   });
 
-  it('team with no members spawns nothing', () => {
+  it('team with no members returns createTeam with empty members', () => {
     const teamTypes: TeamType[] = [{
       name: 'empty',
       house: 2,
@@ -1137,10 +1140,11 @@ describe('Team spawning via REINFORCEMENTS/CREATE_TEAM', () => {
     const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 50 }]]);
     const action: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, teamTypes, waypoints, emptyGlobals, emptyTriggers);
-    expect(result.spawned.length).toBe(0);
+    expect(result.createTeam).toBeDefined();
+    expect(result.createTeam!.members).toHaveLength(0);
   });
 
-  it('TACTION_CREATE_TEAM (4) with missing waypoint falls back to house edge when map context is available', () => {
+  it('TACTION_CREATE_TEAM (4) with missing waypoint returns createTeam descriptor (Game resolves position)', () => {
     const teamTypes: TeamType[] = [{
       name: 'fallback',
       house: 2,  // USSR
@@ -1157,10 +1161,11 @@ describe('Team spawning via REINFORCEMENTS/CREATE_TEAM', () => {
       2, houseEdges, mapBounds,
     );
 
-    expect(result.spawned.length).toBe(1);
+    expect(result.createTeam).toBeDefined();
+    expect(result.createTeam!.members[0]).toEqual({ type: 'E1', count: 1 });
   });
 
-  it('team with invalid unit type name skips that member', () => {
+  it('team with invalid unit type name — createTeam descriptor contains all members (Game filters)', () => {
     const teamTypes: TeamType[] = [{
       name: 'badType',
       house: 2,
@@ -1175,8 +1180,10 @@ describe('Team spawning via REINFORCEMENTS/CREATE_TEAM', () => {
     const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 50 }]]);
     const action: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(action, teamTypes, waypoints, emptyGlobals, emptyTriggers);
-    // Only the valid E1 should spawn
-    expect(result.spawned.length).toBe(1);
+    // createTeam descriptor contains all members; Game class handles filtering
+    expect(result.createTeam).toBeDefined();
+    expect(result.createTeam!.members).toHaveLength(2);
+    expect(result.createTeam!.members[1]).toEqual({ type: 'E1', count: 1 });
   });
 
   it('team with edge-based spawn uses houseEdges when origin=-1', () => {

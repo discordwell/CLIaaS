@@ -341,6 +341,71 @@ function auditSpawnCheck(
     houseEdges,
     data.mapBounds,
   ));
+
+  // TACTION_CREATE_TEAM (action=4) returns a createTeam descriptor instead of
+  // spawning entities. Validate the descriptor composition against the team definition.
+  // Entity-level checks (position, house, trigger attachment, etc.) are handled by the
+  // Game class during recruitment and are not testable at the executeTriggerAction level.
+  if (action.action === 4) {
+    const descriptor = result.createTeam;
+    if (!descriptor && supportedMembers > 0) {
+      issues.push({
+        severity: 'error',
+        code: 'create-team-no-descriptor',
+        message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> team "${team.name}" should return createTeam descriptor but returned undefined`,
+      });
+    }
+
+    // Validate descriptor member composition matches team definition
+    if (descriptor) {
+      const descriptorTotal = descriptor.members.reduce((sum, m) => sum + m.count, 0);
+      // Compare against declared members (not just supported) since the descriptor
+      // passes through all member types for the Game class to resolve
+      if (descriptorTotal !== declaredMembers) {
+        issues.push({
+          severity: 'error',
+          code: 'create-team-member-count-mismatch',
+          message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> team "${team.name}" descriptor has ${descriptorTotal} members, expected ${declaredMembers}`,
+        });
+      }
+
+      // Validate descriptor house matches team house
+      const expectedHouse = houseIdToHouse(team.house);
+      if (descriptor.house !== expectedHouse) {
+        issues.push({
+          severity: 'error',
+          code: 'create-team-house-mismatch',
+          message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> team "${team.name}" descriptor house mismatch`,
+        });
+      }
+
+      // Validate missions match
+      if (descriptor.missions.length !== team.missions.length) {
+        issues.push({
+          severity: 'error',
+          code: 'create-team-mission-count-mismatch',
+          message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> team "${team.name}" descriptor has ${descriptor.missions.length} missions, expected ${team.missions.length}`,
+        });
+      }
+    }
+
+    return {
+      triggerName: trigger.name,
+      slot,
+      actionType: action.action,
+      teamName: team.name,
+      teamIndex: action.team,
+      counts: {
+        declaredMembers,
+        supportedMembers,
+        visibleEntities: 0,
+        loadedPassengers: 0,
+      },
+      issues,
+    };
+  }
+
+  // TACTION_REINFORCEMENTS (action=7) — entity-level validation
   const visibleEntities = result.spawned;
   const createdEntities = collectCreatedEntities(visibleEntities);
   const loadedPassengers = createdEntities.length - visibleEntities.length;

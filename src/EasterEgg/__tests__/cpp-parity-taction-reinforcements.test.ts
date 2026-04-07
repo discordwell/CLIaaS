@@ -140,29 +140,34 @@ describe('TACTION_REINFORCEMENTS basic spawn', () => {
 // Section 3: Code path equivalence with CREATE_TEAM (action=4)
 // ============================================================================
 
-describe('TACTION_REINFORCEMENTS shares code path with CREATE_TEAM', () => {
+describe('TACTION_REINFORCEMENTS vs CREATE_TEAM code paths', () => {
   const teamTypes = [makeTeam({
     house: 9,  // BadGuy
     members: [{ type: 'E1', count: 2 }],
   })];
   const waypoints = new Map<number, CellPos>([[0, { cx: 45, cy: 45 }]]);
 
-  it('action=7 and action=4 both spawn same number of entities', () => {
+  it('action=7 spawns entities; action=4 returns createTeam descriptor with matching member count', () => {
     const action4: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
     const action7: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
     const result4 = executeTriggerAction(action4, teamTypes, waypoints, emptyGlobals, emptyTriggers);
     const result7 = executeTriggerAction(action7, teamTypes, waypoints, emptyGlobals, emptyTriggers);
-    expect(result4.spawned.length).toBe(result7.spawned.length);
-    expect(result4.spawned.length).toBe(2);
+    // action=4 returns descriptor, action=7 spawns entities
+    expect(result4.createTeam).toBeDefined();
+    expect(result4.spawned).toHaveLength(0);
+    expect(result7.spawned.length).toBe(2);
+    // Descriptor member total matches spawned count
+    const descriptorTotal = result4.createTeam!.members.reduce((sum, m) => sum + m.count, 0);
+    expect(descriptorTotal).toBe(result7.spawned.length);
   });
 
-  it('action=7 and action=4 assign the same house', () => {
+  it('action=7 and action=4 reference the same house', () => {
     const action4: TriggerAction = { action: 4, team: 0, trigger: -1, data: 0 };
     const action7: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
     const result4 = executeTriggerAction(action4, teamTypes, waypoints, emptyGlobals, emptyTriggers);
     const result7 = executeTriggerAction(action7, teamTypes, waypoints, emptyGlobals, emptyTriggers);
-    expect(result4.spawned[0].house).toBe(result7.spawned[0].house);
-    expect(result4.spawned[0].house).toBe(House.BadGuy);
+    expect(result4.createTeam!.house).toBe(result7.spawned[0].house);
+    expect(result4.createTeam!.house).toBe(House.BadGuy);
   });
 
   it('action=7 and action=4 both set no result flags (win/lose/etc)', () => {
