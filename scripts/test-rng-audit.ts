@@ -1,69 +1,78 @@
 import { test } from '@playwright/test';
 const BASE_URL = 'https://cliaas.com';
 
-test('SCG02EA tick-15 entity state', async ({ browser }) => {
+test('SCG02EA: full tick-1 call sequence', async ({ browser }) => {
   test.setTimeout(3 * 60 * 1000);
-  const wasmCtx = await browser.newContext();
-  const tsCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
-  const wasmPage = await wasmCtx.newPage();
-  const tsPage = await tsCtx.newPage();
-  wasmPage.on('dialog', async d => d.accept());
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  const page = await ctx.newPage();
+  const logs: string[] = [];
+  page.on('console', msg => { if (msg.text().includes('RNG') || msg.text().includes('tag=')) logs.push(msg.text()); });
 
-  await Promise.all([
-    wasmPage.goto(BASE_URL + '/ra/original.html?scenario=SCG02EA.INI&autoplay=1&agentharness=1&seed=0', { waitUntil: 'load' }),
-    tsPage.goto(BASE_URL + '?anttest=agent&scenario=SCG02EA&difficulty=normal', { waitUntil: 'load' }),
-  ]);
-  await Promise.all([
-    wasmPage.waitForFunction(() => { try { const M = (window as any).Module; return M?.ccall && JSON.parse(M.ccall('agent_get_state','string',[],[])).units?.length > 0; } catch { return false; } }, { timeout: 120000, polling: 2000 }),
-    tsPage.waitForFunction(() => (window as any).__agentReady === true, { timeout: 120000 }),
-  ]);
-  const seed = await wasmPage.evaluate(() => { const M = (window as any).Module; return JSON.parse(M.ccall('agent_get_state','string',[],[])).rngState; });
-  await tsPage.evaluate((s: number) => { (window as any).__syncRngSeed?.(s); }, seed);
+  await page.goto(BASE_URL + '?anttest=agent&scenario=SCG02EA&difficulty=normal', { waitUntil: 'load' });
+  await page.waitForFunction(() => (window as any).__agentReady === true, { timeout: 120000 });
+  const seed = await page.evaluate(() => (window as any).__agentState().rngState);
+  console.log('Init seed: ' + seed);
+  
+  // Step 1 tick
+  await page.evaluate(() => { (window as any).__agentStep?.(1); });
+  
+  const state = await page.evaluate(() => {
+    const s = (window as any).__agentState();
+    return { seedLog: s.rngSeedLog || [], calls: s.rngCalls };
+  });
 
-  // Step to tick 14
-  await Promise.all([
-    (async () => { for (let i = 0; i < 14; i++) { try { await wasmPage.evaluate(async () => { const r = (window as any).__agentStep(1); if (r?.then) await r; }); } catch {} } })(),
-    tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, 14),
-  ]);
-
-  // Get detailed state at tick 14 (before the divergence tick)
-  const [w, ts] = await Promise.all([
-    wasmPage.evaluate(() => {
-      const M = (window as any).Module;
-      const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
-      return {
-        rng: s.rngState, calls: s.rngCalls,
-        units: (s.units || []).map((u: any) => u.type || u.t),
-        enemies: (s.enemies || []).map((u: any) => ({ t: u.type || u.t, x: u.cx, y: u.cy, hp: u.hp, m: u.mission })),
-      };
-    }),
-    tsPage.evaluate(() => {
-      const s = (window as any).__agentState();
-      return {
-        rng: s.rngState, calls: s.rngCalls,
-        units: (s.units || []).map((u: any) => u.type || u.t),
-        enemies: (s.enemies || []).map((u: any) => ({ t: u.type || u.t, x: u.cx, y: u.cy, hp: u.hp, m: u.mission })),
-      };
-    }),
-  ]);
-
-  console.log('=== STATE AT TICK 14 ===');
-  console.log('Seeds match:', w.rng === ts.rng, '(W=' + w.rng + ' T=' + ts.rng + ')');
-  console.log('RNG calls: W=' + w.calls + ' T=' + ts.calls);
-
-  // Compare enemy missions
-  let missionDiffs = 0;
-  for (let i = 0; i < Math.min(w.enemies.length, ts.enemies.length); i++) {
-    const we = w.enemies[i];
-    const te = ts.enemies[i];
-    if (we.m !== te.m || we.x !== te.x || we.y !== te.y) {
-      console.log('Enemy ' + i + ': W=' + we.t + '@(' + we.x + ',' + we.y + ') m=' + we.m + 
-        ' | T=' + te.t + '@(' + te.x + ',' + te.y + ') m=' + te.m);
-      missionDiffs++;
-    }
+  // Group calls by tag category
+  const tagCounts: Record<string, number> = {};
+  for (const entry of state.seedLog) {
+    const tag = Array.isArray(entry) ? entry[1] : 0;
+    let category: string;
+    if (tag === 0) category = 'untagged';
+    else if (tag >= 10000 && tag < 11000) category = 'infantry-' + (tag - 10000);
+    else if (tag >= 11000 && tag < 12000) category = 'vehicle-' + (tag - 11000);
+    else if (tag >= 12000 && tag < 13000) category = 'struct-' + (tag - 12000);
+    else if (tag >= 13000) category = 'aircraft-' + (tag - 13000);
+    else category = 'tag-' + tag;
+    tagCounts[category] = (tagCounts[category] || 0) + 1;
   }
-  console.log('Enemy mission/position diffs: ' + missionDiffs + '/' + w.enemies.length);
 
-  await wasmCtx.close();
-  await tsCtx.close();
+  console.log('\n=== TICK 1 CALL BREAKDOWN (' + state.seedLog.length + ' total) ===');
+  
+  // Count by type
+  let infantry = 0, vehicle = 0, struct = 0, aircraft = 0, other = 0;
+  for (const [cat, count] of Object.entries(tagCounts)) {
+    if (cat.startsWith('infantry')) infantry += count;
+    else if (cat.startsWith('vehicle')) vehicle += count;
+    else if (cat.startsWith('struct')) struct += count;
+    else if (cat.startsWith('aircraft')) aircraft += count;
+    else other += count;
+  }
+  console.log('Infantry calls: ' + infantry);
+  console.log('Vehicle calls: ' + vehicle);
+  console.log('Structure calls: ' + struct);
+  console.log('Aircraft calls: ' + aircraft);
+  console.log('Other/untagged: ' + other);
+
+  // Show the SEQUENCE of tag transitions (where structures fall relative to entities)
+  console.log('\n=== PROCESSING ORDER (tag sequence) ===');
+  let prevType = '';
+  let runStart = 0;
+  for (let i = 0; i <= state.seedLog.length; i++) {
+    const entry = state.seedLog[i];
+    const tag = entry ? (Array.isArray(entry) ? entry[1] : 0) : -1;
+    let type: string;
+    if (tag === -1) type = 'END';
+    else if (tag === 0) type = 'UNTAGGED';
+    else if (tag >= 10000 && tag < 11000) type = 'INFANTRY';
+    else if (tag >= 11000 && tag < 12000) type = 'VEHICLE';
+    else if (tag >= 12000 && tag < 13000) type = 'STRUCT';
+    else type = 'AIRCRAFT';
+
+    if (type !== prevType && prevType !== '') {
+      console.log('  [' + runStart + '-' + (i-1) + '] ' + prevType + ' (' + (i - runStart) + ' calls)');
+      runStart = i;
+    }
+    prevType = type;
+  }
+
+  await ctx.close();
 });

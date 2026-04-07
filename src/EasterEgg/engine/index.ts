@@ -1636,9 +1636,13 @@ export class Game {
 
     // RNG audit: enable tagged logging for ticks 1-15
     if (this.tick === 1) {
+      console.log('[RNG] tick 1 START: seed=' + (ScenarioRandom.seed >>> 0) + ' callCount=' + ScenarioRandom.callCount);
       ScenarioRandom._tagLogging = true;
       ScenarioRandom._taggedLog = [];
       ScenarioRandom._seedLog = [];
+    }
+    if (this.tick === 2) {
+      console.log('[RNG] tick 2 START: seed=' + (ScenarioRandom.seed >>> 0) + ' callCount=' + ScenarioRandom.callCount + ' seedLogLen=' + ScenarioRandom._seedLog.length);
     }
     // Per-tick summary during audit window
     if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging) {
