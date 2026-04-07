@@ -2517,6 +2517,12 @@ export interface TriggerActionResult {
   globalChanged?: number;         // C++ parity (#38): global index that was set/cleared (triggers immediate spring)
   baseBuilding?: { house: number; enabled: boolean }; // C++ parity (#39): set IsBaseBuilding on/off for a house
   blockageDecrement?: boolean;    // C++ parity: trigger.cpp:175-178 — decrement Blockage counter (ALLOWWIN)
+  createTeam?: {                  // C++ Create_Army — recruit existing idle units into team
+    teamIdx: number;
+    house: House;
+    members: { type: string; count: number }[];
+    missions: { mission: number; data: number }[];
+  };
 }
 
 /** Execute a trigger action — returns result with entities and side effects.
@@ -2544,33 +2550,15 @@ export function executeTriggerAction(
       // C++ taction.cpp:658 — Create_Army() RECRUITS existing idle units into the team.
       // Unlike TACTION_REINFORCEMENTS which always spawns new units, CREATE_TEAM
       // searches for idle units of the matching house and type already on the map.
-      // Only spawns new units if no matching idle unit exists.
+      // Return createTeam info so the caller (Game) can recruit from its entity list.
       const createTeam = teamTypes[action.team];
       if (!createTeam) break;
-      const createHouse = houseIdToHouse(createTeam.house);
-      for (const member of createTeam.members) {
-        for (let i = 0; i < member.count; i++) {
-          const unitType = toUnitType(member.type);
-          if (!unitType) continue;
-          // Find an existing idle unit of the right type and house
-          const recruit = entities.find(e =>
-            e.alive && !e.inLimbo && e.type === unitType &&
-            e.house === createHouse && e.mission === Mission.GUARD &&
-            !e.target && !e.moveTarget
-          );
-          if (recruit) {
-            // Recruit into team — assign team mission script
-            const script = createTeam.missions.length > 0 ? createTeam.missions.map(m => ({
-              mission: m.mission, data: m.data,
-            })) : null;
-            if (script) {
-              recruit.teamMissionScript = script;
-              recruit.teamMissionIndex = 0;
-            }
-          }
-          // If no idle unit found, C++ Create_Army silently skips (doesn't spawn new)
-        }
-      }
+      result.createTeam = {
+        teamIdx: action.team,
+        house: houseIdToHouse(createTeam.house),
+        members: createTeam.members.map(m => ({ type: m.type, count: m.count })),
+        missions: createTeam.missions.map(m => ({ mission: m.mission, data: m.data })),
+      };
       break;
     }
     case TACTION_REINFORCEMENTS: {

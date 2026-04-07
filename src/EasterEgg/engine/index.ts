@@ -5939,6 +5939,24 @@ export class Game {
     if (result.playSound !== undefined) {
       this.handleTriggerSound(result.playSound);
     }
+    // C++ Create_Army — recruit existing idle units into team (TACTION_CREATE_TEAM)
+    if (result.createTeam) {
+      const ct = result.createTeam;
+      for (const member of ct.members) {
+        const memberType = member.type.toUpperCase();
+        for (let i = 0; i < member.count; i++) {
+          const recruit = this.entities.find(e =>
+            e.alive && !e.inLimbo && e.type === memberType &&
+            e.house === ct.house && e.mission === Mission.GUARD &&
+            !e.target && !e.moveTarget
+          );
+          if (recruit && ct.missions.length > 0) {
+            recruit.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
+            recruit.teamMissionIndex = 0;
+          }
+        }
+      }
+    }
     if (result.spawned.length > 0) {
       applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
       // C++ parity: if reinforcement units spawned on impassable terrain (water, rock),
