@@ -75,16 +75,20 @@ test.describe('Visual Parity Suite', () => {
           // C++ agent_step(N) runs a tight for-loop of do_tick() — no JS yields
           // within a single call. Cap at 300 (C++ limit) and batch if needed.
           // Key: both engines step the SAME batch sizes to avoid tick count mismatch.
+          // Step both engines. WASM uses async agent_step (Asyncify-compatible).
+          // Both use matched 300-tick batches to avoid tick count mismatch.
           await Promise.all([
-            wasmPage.evaluate((n: number) => {
-              // Single synchronous evaluate — no async yields between batches
-              let rem = n;
+            (async () => {
+              let rem = step;
               while (rem > 0) {
                 const batch = Math.min(rem, 300);
                 rem -= batch;
-                (window as any).__agentStep(batch);
+                await wasmPage.evaluate(async (n: number) => {
+                  const r = (window as any).__agentStep(n);
+                  if (r?.then) await r;
+                }, batch);
               }
-            }, step),
+            })(),
             tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, step),
           ]);
         }
