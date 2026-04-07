@@ -302,6 +302,13 @@ export class Game {
   entities: Entity[] = [];
   entityById = new Map<number, Entity>();
   structures: MapStructure[] = [];
+  /** C++ Logic layer parity: index into entities[] marking the boundary between
+   *  "pre-building" entities (units/infantry from scenario INI) and "post-building"
+   *  entities (reinforcements, created teams). In C++, the Logic array has:
+   *  units → infantry → buildings → aircraft → reinforcements. Entities with index
+   *  < _preBuildingEntityCount are processed BEFORE structure timers; entities with
+   *  index >= _preBuildingEntityCount are processed AFTER structure timers. */
+  _preBuildingEntityCount = 0;
   selectedIds = new Set<number>();
   selectedStructureIdx = -1; // index into structures[] for selected building (-1 = none)
   controlGroups: Map<number, Set<number>> = new Map(); // 0-9 → entity IDs (C++ parity: keys 1-0)
@@ -1110,6 +1117,10 @@ export class Game {
     this.map = scenario.map;
     this.entities = scenario.entities;
     this.structures = scenario.structures;
+    // C++ Logic layer parity: all entities from scenario INI are "pre-building" entities.
+    // They were added to the C++ Logic array before buildings during Read_Scenario_INI.
+    // Entities added later (reinforcements, created teams) go after buildings.
+    this._preBuildingEntityCount = scenario.entities.length;
     this.entityById.clear();
     for (const e of scenario.entities) this.entityById.set(e.id, e);
     this.missionName = scenario.name;
@@ -1623,20 +1634,21 @@ export class Game {
     this.tick++;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
-    // RNG audit: enable tagged logging for tick 1 only
+    // RNG audit: enable tagged logging for ticks 1-15
     if (this.tick === 1) {
       ScenarioRandom._tagLogging = true;
       ScenarioRandom._taggedLog = [];
-    } else if (this.tick === 2 && ScenarioRandom._tagLogging) {
+      ScenarioRandom._seedLog = [];
+    }
+    // Per-tick summary during audit window
+    if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging) {
+      // Record start-of-tick call count for per-tick delta
+      (this as any)._rngAuditTickStart = ScenarioRandom.callCount;
+      (this as any)._rngAuditSeedLogStart = ScenarioRandom._seedLog.length;
+    }
+    if (this.tick > 15 && ScenarioRandom._tagLogging) {
       ScenarioRandom._tagLogging = false;
-      // Summarize: count calls by source
-      const counts: Record<string, number> = {};
-      for (const tag of ScenarioRandom._taggedLog) counts[tag] = (counts[tag] || 0) + 1;
-      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-      console.log('[RNG AUDIT tick 1] Total calls: ' + ScenarioRandom._taggedLog.length);
-      for (const [source, count] of sorted.slice(0, 20)) {
-        console.log('  ' + count + 'x ' + source);
-      }
+      console.log('[RNG AUDIT] Logging disabled after tick 15. Total seedLog entries: ' + ScenarioRandom._seedLog.length);
     }
 
     // Periodically resume audio context if browser suspended it (e.g. tab blur)
@@ -1718,82 +1730,27 @@ export class Game {
     }
 
     // C++ Logic.AI() processes ALL objects in a single interleaved loop:
-    //   Logic[22-47]: units + infantry (entity AI)
-    //   Logic[48-72]: buildings (structure mission timers)
-    //   Logic[73]:    aircraft (entity AI)
-    // We replicate this by processing non-aircraft entities, then buildings,
-    // then aircraft — all using RNG in the correct interleaved order.
-    // First pass: non-aircraft entities (units + infantry)
-    for (const entity of this.entities) {
-      if (entity.isAirUnit) continue; // aircraft processed after buildings
-      // Reset per-tick rotation guards (prevents double-accumulation)
-      entity.rotTickedThisFrame = false;
-      entity.turretRotTickedThisFrame = false;
-      // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
-      if (entity.isInRecoilState) entity.isInRecoilState = false;
-
-      // C++ bullet.cpp:96-175 — dog in limbo rides bullet; skip all processing
-      if (entity.inLimbo) continue;
-
-      // Submarine cloaking state machine (SS, MSUB)
-      if (entity.alive && entity.stats.isCloakable) {
-        this.updateSubCloak(entity);
+    //   Logic[0..N-1]:  units + infantry (entity AI) — from scenario INI
+    //   Logic[N..N+B-1]: buildings (structure mission timers)
+    //   Logic[N+B..]:    reinforcement entities + aircraft
+    // In C++, entities spawned after scenario load (reinforcements, created teams)
+    // are added to Logic AFTER buildings, so they're processed after building timers.
+    // We replicate this with three entity passes:
+    //   Pass 1: pre-building entities (original scenario entities, non-aircraft)
+    //   Pass 2: structure timers + combat (tickStructureMissionTimers + _updateStructureCombat)
+    //   Pass 3: post-building entities (reinforcements, non-aircraft) + aircraft
+    //
+    // Pass 1: pre-building non-aircraft entities (scenario INI units + infantry)
+    let _entityIdx = 0;
+    for (let i = 0; i < this._preBuildingEntityCount; i++) {
+      const entity = this.entities[i];
+      if (!entity || entity.isAirUnit) continue;
+      // RNG audit: set source tag matching C++ g_rng_source_tag convention
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = entity.stats.isInfantry ? 10000 + _entityIdx : 11000 + _entityIdx;
       }
-      // LST door auto-close timer
-      if (entity.alive && entity.doorOpen && entity.doorTimer > 0) {
-        entity.doorTimer--;
-        if (entity.doorTimer <= 0) entity.doorOpen = false;
-      }
-      // Sonar pulse timer decrement
-      if (entity.sonarPulseTimer > 0) entity.sonarPulseTimer--;
-
-      // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
-      if (entity.stats.isInfantry && entity.fear > 0) {
-        entity.fear--;
-        // Go prone when fear >= FEAR_ANXIOUS (crawl animation handles prone+moving)
-        // C++ infantry.cpp:3496: !Class->IsDog — dogs never go prone
-        if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS && entity.type !== UnitType.I_DOG) {
-          entity.isProne = true;
-        }
-        // Stand up when fear drops below FEAR_ANXIOUS
-        if (entity.isProne && entity.fear < Entity.FEAR_ANXIOUS) {
-          entity.isProne = false;
-        }
-      }
-
-      // C5: Track previous position for moving-platform inaccuracy detection
-      // S5: Track wasMoving for NoMovingFire setup time
-      const wasMovingBefore = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
-      entity.prevPos.x = entity.pos.x;
-      entity.prevPos.y = entity.pos.y;
-      // Save previous facing for visual interpolation (smooth 60fps rotation rendering)
-      entity.prevBodyFacing32 = entity.bodyFacing32;
-      entity.prevTurretFacing32 = entity.turretFacing32;
-
-      if (!entity.alive) {
-        entity.tickAnimation();
-        continue;
-      }
-      this.updateEntity(entity);
-
-      // Special unit updates — run after standard entity update
-      if (entity.alive && entity.type === UnitType.V_QTNK && entity.isDeployed) {
-        this.updateMADTank(entity);
-      }
-      if (entity.alive && entity.type === UnitType.V_CTNK) {
-        this.updateChronoTank(entity);
-      }
-      if (entity.alive && entity.stats.isCloakable && !entity.stats.isVessel) {
-        this.updateVehicleCloak(entity);
-      }
-      // Minelayer: place mines when reaching move destination
-      if (entity.alive && entity.type === UnitType.V_MNLY && entity.moveTarget) {
-        this.updateMinelayer(entity);
-      }
-
-      // S5: Update wasMoving — entity moved this tick if position changed from prevPos
-      const movedThisTick = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
-      entity.wasMoving = wasMovingBefore || movedThisTick;
+      _entityIdx++;
+      this._processGroundEntity(entity);
     }
 
     // Process deferred transport loads (remove loaded passengers from world)
@@ -1819,7 +1776,7 @@ export class Game {
       }
     }
 
-    // C++ Logic.AI() processes objects in order: entities → buildings → aircraft.
+    // C++ Logic.AI() processes objects in order: pre-building entities → buildings → post-building entities → aircraft.
     // Building timer RNG must be interleaved BETWEEN entity and aircraft processing
     // to match C++ rejection sampling patterns at timer fire ticks.
     this.tickStructureMissionTimers();
@@ -1828,9 +1785,29 @@ export class Game {
     // correct order relative to entity and aircraft RNG.
     this._runCombat(ctx => _updateStructureCombat(ctx));
 
-    // Aircraft entities: second pass (processed AFTER buildings in C++ Logic layer)
+    // Pass 3: post-building non-aircraft entities (reinforcements, created teams).
+    // In C++, these entities were added to the Logic array AFTER buildings, so they
+    // are processed after building timers but before aircraft.
+    for (let i = this._preBuildingEntityCount; i < this.entities.length; i++) {
+      const entity = this.entities[i];
+      if (!entity || entity.isAirUnit) continue;
+      // RNG audit: set source tag (post-building entities use 11000+idx to match C++ unit/infantry tags)
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = entity.stats.isInfantry ? 10000 + _entityIdx : 11000 + _entityIdx;
+      }
+      _entityIdx++;
+      this._processGroundEntity(entity);
+    }
+
+    // Pass 4: Aircraft entities (processed AFTER all ground entities and buildings in C++ Logic layer)
+    let _aircraftIdx = 0;
     for (const entity of this.entities) {
       if (!entity.alive || !entity.isAirUnit) continue;
+      // RNG audit: set source tag for aircraft (C++ 13000 + Logic index)
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = 13000 + _aircraftIdx;
+      }
+      _aircraftIdx++;
       entity.rotTickedThisFrame = false;
       entity.turretRotTickedThisFrame = false;
       if (entity.isInRecoilState) entity.isInRecoilState = false;
@@ -1842,6 +1819,30 @@ export class Game {
     // Aircraft mission timers are already handled by updateEntity() in the aircraft
     // processing pass above (line 1822). Removed duplicate timer decrement + RNG reset
     // that caused aircraft to consume double RNG calls vs C++.
+
+    // RNG audit: per-tick summary (after all entity/structure/aircraft processing)
+    if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging) {
+      const tickStart = (this as any)._rngAuditTickStart as number;
+      const seedStart = (this as any)._rngAuditSeedLogStart as number;
+      const tickCalls = ScenarioRandom.callCount - tickStart;
+      const tickSeedEntries = ScenarioRandom._seedLog.slice(seedStart);
+      // Count by source tag category
+      const tagCounts: Record<string, number> = {};
+      for (const [, tag] of tickSeedEntries) {
+        let cat: string;
+        if (tag >= 10000 && tag < 11000) cat = 'infantry[' + (tag - 10000) + ']';
+        else if (tag >= 11000 && tag < 12000) cat = 'unit[' + (tag - 11000) + ']';
+        else if (tag >= 12000 && tag < 13000) cat = 'building[' + (tag - 12000) + ']';
+        else if (tag >= 13000 && tag < 14000) cat = 'aircraft[' + (tag - 13000) + ']';
+        else cat = 'other[' + tag + ']';
+        tagCounts[cat] = (tagCounts[cat] || 0) + 1;
+      }
+      console.log(`[RNG AUDIT tick ${this.tick}] ${tickCalls} calls, seed=${ScenarioRandom.seed >>> 0}`);
+      const sorted = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
+      for (const [cat, count] of sorted.slice(0, 30)) {
+        console.log(`  ${count}x ${cat}`);
+      }
+    }
 
     // Check for units leaving the map edge (civilian evacuation)
     // C++ parity: aircraft are exempt — they spawn outside map bounds and fly in.
@@ -3510,6 +3511,81 @@ export class Game {
   /** Damage a structure, return true if destroyed */
   private damageStructure(s: MapStructure, damage: number): boolean {
     return this._runCombat(ctx => _structureDamage(ctx, s, damage));
+  }
+
+  /** Process a single non-aircraft entity for one tick.
+   *  Handles per-tick state (rotation guards, recoil, cloak, fear),
+   *  then delegates to updateEntity() for mission/movement AI.
+   *  Extracted from the entity loop to support the split pre/post-building passes. */
+  private _processGroundEntity(entity: Entity): void {
+    // Reset per-tick rotation guards (prevents double-accumulation)
+    entity.rotTickedThisFrame = false;
+    entity.turretRotTickedThisFrame = false;
+    // Clear recoil from previous tick (C++ techno.cpp:2339 — recoil lasts 1 tick)
+    if (entity.isInRecoilState) entity.isInRecoilState = false;
+
+    // C++ bullet.cpp:96-175 — dog in limbo rides bullet; skip all processing
+    if (entity.inLimbo) return;
+
+    // Submarine cloaking state machine (SS, MSUB)
+    if (entity.alive && entity.stats.isCloakable) {
+      this.updateSubCloak(entity);
+    }
+    // LST door auto-close timer
+    if (entity.alive && entity.doorOpen && entity.doorTimer > 0) {
+      entity.doorTimer--;
+      if (entity.doorTimer <= 0) entity.doorOpen = false;
+    }
+    // Sonar pulse timer decrement
+    if (entity.sonarPulseTimer > 0) entity.sonarPulseTimer--;
+
+    // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
+    if (entity.stats.isInfantry && entity.fear > 0) {
+      entity.fear--;
+      // Go prone when fear >= FEAR_ANXIOUS (crawl animation handles prone+moving)
+      // C++ infantry.cpp:3496: !Class->IsDog — dogs never go prone
+      if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS && entity.type !== UnitType.I_DOG) {
+        entity.isProne = true;
+      }
+      // Stand up when fear drops below FEAR_ANXIOUS
+      if (entity.isProne && entity.fear < Entity.FEAR_ANXIOUS) {
+        entity.isProne = false;
+      }
+    }
+
+    // C5: Track previous position for moving-platform inaccuracy detection
+    // S5: Track wasMoving for NoMovingFire setup time
+    const wasMovingBefore = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
+    entity.prevPos.x = entity.pos.x;
+    entity.prevPos.y = entity.pos.y;
+    // Save previous facing for visual interpolation (smooth 60fps rotation rendering)
+    entity.prevBodyFacing32 = entity.bodyFacing32;
+    entity.prevTurretFacing32 = entity.turretFacing32;
+
+    if (!entity.alive) {
+      entity.tickAnimation();
+      return;
+    }
+    this.updateEntity(entity);
+
+    // Special unit updates — run after standard entity update
+    if (entity.alive && entity.type === UnitType.V_QTNK && entity.isDeployed) {
+      this.updateMADTank(entity);
+    }
+    if (entity.alive && entity.type === UnitType.V_CTNK) {
+      this.updateChronoTank(entity);
+    }
+    if (entity.alive && entity.stats.isCloakable && !entity.stats.isVessel) {
+      this.updateVehicleCloak(entity);
+    }
+    // Minelayer: place mines when reaching move destination
+    if (entity.alive && entity.type === UnitType.V_MNLY && entity.moveTarget) {
+      this.updateMinelayer(entity);
+    }
+
+    // S5: Update wasMoving — entity moved this tick if position changed from prevPos
+    const movedThisTick = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
+    entity.wasMoving = wasMovingBefore || movedThisTick;
   }
 
   /** Update a single entity's AI and movement */
@@ -7454,7 +7530,13 @@ export class Game {
     // AA_Delay = TICKS_PER_MINUTE * AARate = 900 * 0.016 = 14
     const GUARD_NORMAL_DELAY = 45;
     const GUARD_AA_DELAY = 14;
+    let _structIdx = 0;
     for (const s of this.structures) {
+      // RNG audit: set source tag for building (C++ 12000 + Logic index)
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = 12000 + _structIdx;
+      }
+      _structIdx++;
       if (!s.alive) continue;
       if (s.buildProgress !== undefined) continue; // still under construction
       if (s.sellProgress !== undefined) continue;  // being sold

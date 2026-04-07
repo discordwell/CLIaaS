@@ -325,6 +325,7 @@ export function serializeState(game: Game): AgentState {
     rngState: ScenarioRandom.seed, // RNG seed for parity comparison
     rngCalls: ScenarioRandom.callCount, // Total RNG calls for divergence debugging
     rngDebug: ScenarioRandom.debugLog, // First 20 gameplay calls with callers
+    rngSeedLog: ScenarioRandom._seedLog, // [seed, sourceTag] pairs for per-call comparison with WASM
     triggers: (((game as unknown as Record<string, unknown>).triggers as Array<{ name: string; fired: boolean; house: number; event1: { type: number; data: number }; action1: { action: number; data: number } }>) ?? []).map(t => ({
       name: t.name, fired: t.fired, house: t.house,
       e1: t.event1.type, e1d: t.event1.data,

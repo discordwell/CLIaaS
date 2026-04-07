@@ -33,18 +33,24 @@ export class RandomClass {
   _logTag = '';
   _taggedLog: string[] = [];
   _tagLogging = false;
+  /** Source-tag based logging (mirrors C++ g_rng_source_tag).
+   *  Set _sourceTag before each RNG call site. When _tagLogging is true,
+   *  each call records [seed_after, sourceTag] for comparison with WASM rngLog. */
+  _sourceTag = 0;
+  _seedLog: Array<[number, number]> = []; // [seed_after, sourceTag]
 
   next(): number {
     this.callCount++;
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
-    // Tagged logging for RNG audit — captures caller via stack trace
+    // Source-tag logging: records [seed, tag] pairs matching C++ rngLog format
     if (this._tagLogging) {
+      this._seedLog.push([this.seed >>> 0, this._sourceTag]);
+      // Also capture caller info via stack trace for human-readable log
       const e = new Error();
       const frame = e.stack?.split('\n')[2]?.trim() || 'unknown';
-      // Extract just function/file:line
       const match = frame.match(/at (?:(\S+) \()?([^)]+)/);
       const caller = match ? (match[1] || '') + ' ' + (match[2]?.split('/').pop() || '') : frame;
-      this._taggedLog.push(caller.trim());
+      this._taggedLog.push(`[${this._sourceTag}] ${caller.trim()}`);
     }
     // Log first 75 gameplay calls after init sync
     if (this.debugLogStart > 0 && this.callCount > this.debugLogStart && this.callCount <= this.debugLogStart + 75) {
