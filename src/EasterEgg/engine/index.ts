@@ -1823,8 +1823,10 @@ export class Game {
     }
 
     // Check for units leaving the map edge (civilian evacuation)
+    // C++ parity: aircraft are exempt — they spawn outside map bounds and fly in.
+    // Aircraft handle their own map-exit logic in aircraft.ts handleMapExit().
     for (const entity of this.entities) {
-      if (!entity.alive || entity.inLimbo) continue;
+      if (!entity.alive || entity.inLimbo || entity.isAirUnit) continue;
       const c = entity.cell;
       if (c.cx <= this.map.boundsX || c.cx >= this.map.boundsX + this.map.boundsW - 1 ||
           c.cy <= this.map.boundsY || c.cy >= this.map.boundsY + this.map.boundsH - 1) {
