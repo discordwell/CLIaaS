@@ -1658,6 +1658,10 @@ export class Game {
 
     // C++ CDTimerClass<FrameTimerClass>: MissionTimer decrements every game frame.
     // Must happen AFTER processTriggers so that newly-set timers match WASM values.
+    // C++ stops the timer when the game enters won/lost state (CDTimerClass stops on game over).
+    if (this.state === 'won' || this.state === 'lost') {
+      this.missionTimerRunning = false;
+    }
     if (this.missionTimer > 0 && this.missionTimerRunning) {
       this.missionTimer--;
       if (this.missionTimer <= 0) this.missionTimerExpired = true;

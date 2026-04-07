@@ -1,5 +1,5 @@
 #!/bin/bash
-# Extract original Red Alert ant sprites from freeware Aftermath patch payload.
+# Extract original Red Alert ant sprites from the freeware Red Alert 3.03 patch.
 # Produces:
 #   - public/ra/assets/original/* (SHP + PNG sheets)
 #   - public/ra/assets/ant1.png, ant2.png, ant3.png + manifest updates
@@ -12,28 +12,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK_DIR="${RA_ANT_WORK_DIR:-/tmp/ra_ant_extract}"
-AFTERMATH_ZIP="$WORK_DIR/RA_Aftermath.zip"
+PATCH303_EXE="$WORK_DIR/manual_patch303_english.exe"
 CCMIXAR="${GOPATH:-$HOME/go}/bin/ccmixar"
-DOSBOX_BIN="${DOSBOX_BIN:-/Applications/dosbox.app/Contents/MacOS/DOSBox}"
 
 echo "=== Red Alert Original Ant Asset Extractor ==="
 echo "Working dir: $WORK_DIR"
 
-for cmd in 7z bchunk pnpm go; do
+for cmd in 7z curl pnpm go; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: Missing required command: $cmd"
     exit 1
   fi
 done
-
-if [ ! -x "$DOSBOX_BIN" ]; then
-  if command -v dosbox >/dev/null 2>&1; then
-    DOSBOX_BIN="$(command -v dosbox)"
-  else
-    echo "ERROR: DOSBox not found. Install DOSBox or set DOSBOX_BIN."
-    exit 1
-  fi
-fi
 
 if [ ! -x "$CCMIXAR" ]; then
   echo "Installing ccmixar..."
@@ -42,51 +32,30 @@ fi
 
 mkdir -p "$WORK_DIR"
 
-if [ ! -f "$AFTERMATH_ZIP" ]; then
-  echo "Downloading freeware Aftermath archive (~521MB)..."
-  curl -L -o "$AFTERMATH_ZIP" "https://bigdownloads.cnc-comm.com/ra/RA_Aftermath.zip" --progress-bar
+if [ ! -f "$PATCH303_EXE" ]; then
+  echo "Downloading Red Alert 3.03 patch (~2.3MB)..."
+  curl -L -o "$PATCH303_EXE" \
+    "https://downloads.cnc-comm.com/red-alert/patches/manual_patch303_english.exe" \
+    --progress-bar
 else
-  echo "Using cached archive: $AFTERMATH_ZIP"
+  echo "Using cached patch: $PATCH303_EXE"
 fi
 
-if [ ! -f "$WORK_DIR/am_iso01.iso" ]; then
-  echo "Extracting CD4 bin/cue from ZIP..."
-  rm -rf "$WORK_DIR/am_zip_extract"
-  7z x "$AFTERMATH_ZIP" -o"$WORK_DIR/am_zip_extract" >/dev/null
-
-  echo "Converting bin/cue to ISO..."
-  bchunk \
-    "$WORK_DIR/am_zip_extract/CD4_Aftermath.bin" \
-    "$WORK_DIR/am_zip_extract/CD4_Aftermath.cue" \
-    "$WORK_DIR/am_iso" >/dev/null
-else
-  echo "Using cached ISO: $WORK_DIR/am_iso01.iso"
-fi
-
-echo "Extracting Aftermath patch payload..."
-rm -rf "$WORK_DIR/am_iso_patch"
-7z x "$WORK_DIR/am_iso01.iso" \
-  -o"$WORK_DIR/am_iso_patch" \
-  "SETUP/INSTALL/PATCH.EXE" \
-  "SETUP/INSTALL/PATCH.RTP" \
-  "SETUP/INSTALL/PATCH.RTD" >/dev/null
-
-echo "Applying RTP patch in DOSBox to materialize EXPAND2.MIX..."
+echo "Extracting EXPAND2.MIX and HIRES1.MIX from the 3.03 patch..."
 rm -rf "$WORK_DIR/am_patch_work"
 mkdir -p "$WORK_DIR/am_patch_work"
-"$DOSBOX_BIN" \
-  -c "mount c $WORK_DIR/am_iso_patch/SETUP/INSTALL" \
-  -c "mount d $WORK_DIR/am_patch_work" \
-  -c "c:" \
-  -c "patch -ignoremissing -noconfirm -nomessage d:\\ patch.rtp" \
-  -c "exit" >/dev/null 2>&1
+7z x -y "$PATCH303_EXE" \
+  -o"$WORK_DIR/am_patch_work" \
+  "EXPAND2.MIX" \
+  "HIRES1.MIX" >/dev/null
 
 if [ ! -f "$WORK_DIR/am_patch_work/EXPAND2.MIX" ]; then
-  echo "ERROR: Failed to produce EXPAND2.MIX via PATCH.RTP."
-  if [ -f "$WORK_DIR/am_patch_work/PATCH.ERR" ]; then
-    echo "--- PATCH.ERR ---"
-    cat "$WORK_DIR/am_patch_work/PATCH.ERR"
-  fi
+  echo "ERROR: Failed to extract EXPAND2.MIX from the 3.03 patch."
+  exit 1
+fi
+
+if [ ! -f "$WORK_DIR/am_patch_work/HIRES1.MIX" ]; then
+  echo "ERROR: Failed to extract HIRES1.MIX from the 3.03 patch."
   exit 1
 fi
 
@@ -106,3 +75,4 @@ echo ""
 echo "Done."
 echo "Original SHPs/PNGs: $PROJECT_ROOT/public/ra/assets/original"
 echo "Active ANT sheets:  $PROJECT_ROOT/public/ra/assets/ant1.png, ant2.png, ant3.png"
+echo "Expansion MIXes:    $WORK_DIR/am_patch_work/EXPAND2.MIX, HIRES1.MIX"

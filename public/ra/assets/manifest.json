@@ -2978,6 +2978,51 @@
     "sheetWidth": 64,
     "sheetHeight": 48
   },
+  "carricon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "ctnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "dtrkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "fturicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "mechicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
   "qtnk": {
     "frameWidth": 48,
     "frameHeight": 48,
@@ -2987,6 +3032,15 @@
     "sheetWidth": 768,
     "sheetHeight": 288
   },
+  "qtnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
   "quee": {
     "frameWidth": 48,
     "frameHeight": 24,
@@ -2994,6 +3048,15 @@
     "columns": 16,
     "rows": 2,
     "sheetWidth": 768,
+    "sheetHeight": 48
+  },
+  "shokicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
     "sheetHeight": 48
   },
   "stnkicon": {
@@ -3013,5 +3076,14 @@
     "rows": 4,
     "sheetWidth": 768,
     "sheetHeight": 192
+  },
+  "ttnkicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
   }
 }

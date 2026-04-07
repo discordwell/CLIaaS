@@ -60,16 +60,18 @@ function generateIconAssets(): [string, string, string][] {
     // Vehicles
     '1TNK', '2TNK', '3TNK', '4TNK', 'JEEP', 'APC', 'HARV', 'MCV',
     'ARTY', 'TRUK', 'MNLY', 'MRJ', 'MGG', 'V2RL', 'MLRS', 'FTNK', 'STNK',
+    'CTNK', 'QTNK', 'DTRK', 'TTNK',
     // Infantry
     'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'DOG', 'SPY', 'MEDI', 'THF',
+    'SHOK', 'MECH',
     // Naval
-    'SS', 'DD', 'CA', 'PT', 'LST', 'MSUB',
+    'SS', 'DD', 'CA', 'PT', 'LST', 'MSUB', 'CARR',
     // Aircraft
     'HIND', 'HELI', 'TRAN', 'MIG', 'YAK', 'BADR', 'U2',
     // Buildings
     'FACT', 'POWR', 'APWR', 'BARR', 'TENT', 'WEAP', 'PROC', 'SILO',
     'DOME', 'FIX', 'GUN', 'SAM', 'HBOX', 'TSLA', 'AGUN', 'GAP', 'PBOX',
-    'HPAD', 'AFLD', 'MSLO', 'ATEK', 'STEK', 'IRON', 'PDOX', 'KENN',
+    'HPAD', 'AFLD', 'MSLO', 'ATEK', 'STEK', 'IRON', 'PDOX', 'KENN', 'FTUR',
     'SYRD', 'SPEN', 'BIO', 'MISS', 'FCOM', 'HOSP',
     // Walls
     'FENC', 'BRIK', 'SBAG', 'BARB', 'WOOD', 'CYCL',
@@ -924,17 +926,25 @@ async function main(): Promise<void> {
 const SUPPLEMENTAL_MANIFEST: Record<string, object> = {
   antdie:   { frameWidth: 48, frameHeight: 48, frameCount: 8, columns: 8, rows: 1, sheetWidth: 384, sheetHeight: 48 },
   carr:     { frameWidth: 30, frameHeight: 30, frameCount: 10, columns: 10, rows: 1, sheetWidth: 300, sheetHeight: 30 },
+  carricon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   ctnk:     { frameWidth: 48, frameHeight: 48, frameCount: 32, columns: 16, rows: 2, sheetWidth: 768, sheetHeight: 96 },
+  ctnkicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   dtrk:     { frameWidth: 24, frameHeight: 24, frameCount: 32, columns: 16, rows: 2, sheetWidth: 384, sheetHeight: 48 },
+  dtrkicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
+  fturicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   lar1:     { frameWidth: 24, frameHeight: 24, frameCount: 3, columns: 3, rows: 1, sheetWidth: 72, sheetHeight: 24 },
   lar2:     { frameWidth: 24, frameHeight: 24, frameCount: 3, columns: 3, rows: 1, sheetWidth: 72, sheetHeight: 24 },
   mech:     { frameWidth: 50, frameHeight: 39, frameCount: 256, columns: 16, rows: 16, sheetWidth: 800, sheetHeight: 624 },
+  mechicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   msub:     { frameWidth: 56, frameHeight: 56, frameCount: 16, columns: 16, rows: 1, sheetWidth: 896, sheetHeight: 56 },
   msubicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   qtnk:     { frameWidth: 48, frameHeight: 48, frameCount: 96, columns: 16, rows: 6, sheetWidth: 768, sheetHeight: 288 },
+  qtnkicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   quee:     { frameWidth: 48, frameHeight: 24, frameCount: 20, columns: 16, rows: 2, sheetWidth: 768, sheetHeight: 48 },
+  shokicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   stnkicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
   ttnk:     { frameWidth: 48, frameHeight: 48, frameCount: 64, columns: 16, rows: 4, sheetWidth: 768, sheetHeight: 192 },
+  ttnkicon: { frameWidth: 64, frameHeight: 48, frameCount: 1, columns: 1, rows: 1, sheetWidth: 64, sheetHeight: 48 },
 };
 
 // PNGs that are NOT sprite sheets and should never get manifest entries
