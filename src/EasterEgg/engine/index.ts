@@ -1823,14 +1823,9 @@ export class Game {
       entity.tickAnimation();
     }
 
-    // Aircraft mission timers (after buildings, matching Logic[73])
-    for (const entity of this.entities) {
-      if (!entity.alive || !entity.isAirUnit) continue;
-      // C++ CDTimerClass: decrement then check
-      if (entity.missionTimer > 0) entity.missionTimer--;
-      if (entity.missionTimer > 0) continue;
-      entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-    }
+    // Aircraft mission timers are already handled by updateEntity() in the aircraft
+    // processing pass above (line 1822). Removed duplicate timer decrement + RNG reset
+    // that caused aircraft to consume double RNG calls vs C++.
 
     // Check for units leaving the map edge (civilian evacuation)
     // C++ parity: aircraft are exempt — they spawn outside map bounds and fly in.
