@@ -1623,6 +1623,22 @@ export class Game {
     this.tick++;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
+    // RNG audit: enable tagged logging for tick 1 only
+    if (this.tick === 1) {
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._taggedLog = [];
+    } else if (this.tick === 2 && ScenarioRandom._tagLogging) {
+      ScenarioRandom._tagLogging = false;
+      // Summarize: count calls by source
+      const counts: Record<string, number> = {};
+      for (const tag of ScenarioRandom._taggedLog) counts[tag] = (counts[tag] || 0) + 1;
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      console.log('[RNG AUDIT tick 1] Total calls: ' + ScenarioRandom._taggedLog.length);
+      for (const [source, count] of sorted.slice(0, 20)) {
+        console.log('  ' + count + 'x ' + source);
+      }
+    }
+
     // Periodically resume audio context if browser suspended it (e.g. tab blur)
     if (this.tick % 45 === 0) this.audio.resume();
 

@@ -37,9 +37,8 @@ test(`${SCENARIO}: RNG + state divergence trace`, async ({ browser }) => {
       tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, 1),
     ]);
 
-    // Check every 15 ticks (processTriggers boundary) or every tick near divergence
-    const nearDiv = firstDivergeTick > 0 && t >= firstDivergeTick - 5 && t <= firstDivergeTick + 30;
-    if (t % 15 !== 0 && !nearDiv && t > 5) continue;
+    // Check EVERY tick for first 50, then every 15
+    if (t > 50 && t % 15 !== 0) continue;
 
     const [w, ts] = await Promise.all([
       wasmPage.evaluate(() => {
@@ -82,7 +81,10 @@ test(`${SCENARIO}: RNG + state divergence trace`, async ({ browser }) => {
       console.log('  Call diff: ' + rngCallDiff);
     }
 
-    if (t <= 5 || unitsChanged || (nearDiv && t % 1 === 0) || t % 150 === 0) {
+    if (t <= 20 || !rngMatch || unitsChanged || t % 150 === 0) {
+      if (t <= 20) {
+        console.log('  calls: W=' + (w.rngCalls ?? '?') + ' T=' + (ts.rngCalls ?? '?') + ' diff=' + ((ts.rngCalls ?? 0) - (w.rngCalls ?? 0)));
+      }
       let line = 't' + t + ': rng ' + (rngMatch ? 'MATCH' : 'DIFF(' + rngCallDiff + ')');
       line += ' | units W=' + w.units + ' T=' + ts.units;
       line += ' | enemies W=' + w.enemies + ' T=' + ts.enemies;

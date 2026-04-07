@@ -29,9 +29,23 @@ export class RandomClass {
   debugLog: string[] = []; // First N gameplay calls for divergence debugging
   debugLogStart = 0; // callCount at which gameplay logging begins (set after init sync)
 
+  /** Temporary: tagged call log for tick-1 RNG audit. Set _logTag before calling. */
+  _logTag = '';
+  _taggedLog: string[] = [];
+  _tagLogging = false;
+
   next(): number {
     this.callCount++;
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
+    // Tagged logging for RNG audit — captures caller via stack trace
+    if (this._tagLogging) {
+      const e = new Error();
+      const frame = e.stack?.split('\n')[2]?.trim() || 'unknown';
+      // Extract just function/file:line
+      const match = frame.match(/at (?:(\S+) \()?([^)]+)/);
+      const caller = match ? (match[1] || '') + ' ' + (match[2]?.split('/').pop() || '') : frame;
+      this._taggedLog.push(caller.trim());
+    }
     // Log first 75 gameplay calls after init sync
     if (this.debugLogStart > 0 && this.callCount > this.debugLogStart && this.callCount <= this.debugLogStart + 75) {
       this.debugLog.push(`#${this.callCount}:${this.seed}`);
