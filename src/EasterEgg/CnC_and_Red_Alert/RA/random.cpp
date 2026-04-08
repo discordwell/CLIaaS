@@ -91,7 +91,7 @@ unsigned long g_rng_call_count = 0;
 bool g_rng_tracking = false;
 
 // Per-tick RNG call log for parity debugging
-#define RNG_LOG_SIZE 100
+#define RNG_LOG_SIZE 300
 unsigned long g_rng_seed_log[RNG_LOG_SIZE];
 int g_rng_source_log[RNG_LOG_SIZE]; // source tag for each call
 int g_rng_log_count = 0;

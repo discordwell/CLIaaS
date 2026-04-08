@@ -551,8 +551,8 @@ char* agent_get_state(void)
 		agent_house_name(player_house),
 		Scen.RandomNumber.Seed,
 		g_rng_call_count);
-	// Dump first 70 seed+source pairs from the per-tick log
-	for (int li = 0; li < g_rng_log_count && li < 70; li++) {
+	// Dump first 250 seed+source pairs from the per-tick log
+	for (int li = 0; li < g_rng_log_count && li < 250; li++) {
 		if (li > 0) buf_cat(",");
 		buf_cat("[%lu,%d]", g_rng_seed_log[li], g_rng_source_log[li]);
 	}
