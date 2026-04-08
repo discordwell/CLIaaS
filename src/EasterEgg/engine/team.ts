@@ -24,6 +24,7 @@
 import { Entity, type TeamMissionEntry } from './entity';
 import { House, Mission, worldDist, type WorldPos, CELL_SIZE } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
+import { ScenarioRandom } from './random';
 
 /** Optional context for building-based retreat targeting (C++ team.cpp:590-616) */
 export interface TeamAIContext {
@@ -342,6 +343,10 @@ export class Team {
       this.isHasBeen = true;
       this.isUnderStrength = false;
 
+      // C++ team.cpp:637: Random gesture for infantry — Percent_Chance(50)
+      // THIS RNG CALL IS CRITICAL FOR PARITY — consumes 1 ScenarioRandom call
+      const _gesture = ScenarioRandom.percentChance(50);
+
       if (this.isReforming || this.isForcedActive) {
         // All members become initiated
       }
@@ -544,6 +549,9 @@ export class Team {
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
           unit.moveTarget = { ...this.target };
+          // C++ Commence() resets Timer=0 when mission changes (team.cpp:354).
+          // This triggers Mission_Move() → Random_Pick(0,2) on next entity AI tick.
+          unit.missionTimer = 0;
         }
         finished = false;
       } else {
@@ -583,6 +591,7 @@ export class Team {
       if (unit.mission !== Mission.ATTACK) {
         unit.mission = Mission.ATTACK;
         unit.moveTarget = null;
+        unit.missionTimer = 0; // C++ Commence() Timer reset
       }
       // Set move target toward attack position if no entity target
       if (!unit.target && this.target) {

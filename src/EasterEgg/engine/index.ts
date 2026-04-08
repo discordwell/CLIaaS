@@ -196,6 +196,10 @@ import {
   aiPerTick as _aiPerTick,
 } from './ai';
 import {
+  Team as TeamInstance, registerTeam, updateAllTeams as _updateAllTeams,
+  clearAllTeams as _clearAllTeams,
+} from './team';
+import {
   type MissionAIContext,
   updateAttack as _updateAttack,
   updateAttackStructure as _updateAttackStructure,
@@ -1100,6 +1104,7 @@ export class Game {
     this.difficulty = difficulty;
     this.onStateChange?.('loading');
     resetEntityIds();
+    _clearAllTeams();
 
     // Initialize audio (needs user gesture context — start() is called from click)
     this.audio.init();
@@ -1739,6 +1744,11 @@ export class Game {
         }
       }
     }
+
+    // C++ logic.cpp:268-270: Team AI processes BEFORE entity AI every tick.
+    // Teams coordinate member movement/attack and consume RNG (Percent_Chance(50)
+    // at activation, Mission_Move → Random_Pick(0,2) via Commence Timer reset).
+    _updateAllTeams(this.waypoints, { structures: this.structures });
 
     // C++ Logic.AI() processes ALL objects in a single interleaved loop:
     //   Logic[0..N-1]:  units + infantry (entity AI) — from scenario INI
@@ -6104,6 +6114,8 @@ export class Game {
         ant.waveRallyTick = rallyDelay;
       }
     }
+    // Track spawned entities with team missions for Team creation
+    const teamEntities: Entity[] = [];
     for (const entity of result.spawned) {
       this.entities.push(entity);
       this.entityById.set(entity.id, entity);
@@ -6113,6 +6125,31 @@ export class Game {
           frame: 0, maxFrames: 15, size: 14, markerColor: 'rgba(100,200,255,1)',
         });
       }
+      if (entity.teamMissions.length > 0) teamEntities.push(entity);
+    }
+    // C++ parity: create a Team instance for reinforcement entities with team missions.
+    // TeamClass::AI() runs every tick before entity AI, coordinating member movement
+    // and consuming RNG (Percent_Chance at activation, Mission_Move → Random_Pick).
+    if (teamEntities.length > 0) {
+      const teamHouse = teamEntities[0].house;
+      // Build desired members from actual spawned types
+      const memberCounts = new Map<string, number>();
+      for (const e of teamEntities) {
+        memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
+      }
+      const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
+      const team = new TeamInstance({
+        house: teamHouse,
+        desiredMembers,
+        missionList: teamEntities[0].teamMissions,
+        isReinforcable: false,
+        isSuicide: false,
+        forcedActive: false,
+      });
+      for (const e of teamEntities) {
+        team.add(e);
+      }
+      registerTeam(team);
     }
     if (result.destroyTriggeringUnit) {
       let destroyed = false;
