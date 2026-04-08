@@ -2483,6 +2483,7 @@ export function checkTriggerEvent(
 /** Result from executing a trigger action */
 export interface TriggerActionResult {
   spawned: Entity[];
+  spawnedTeamIdx?: number;  // team type index for spawned entities (for Team creation)
   win?: boolean;
   lose?: boolean;
   allowWin?: boolean;
@@ -2564,6 +2565,7 @@ export function executeTriggerAction(
     case TACTION_REINFORCEMENTS: {
       const team = teamTypes[action.team];
       if (!team) break;
+      result.spawnedTeamIdx = action.team; // pass team type index for Team creation
 
       const teamHouse = houseIdToHouse(team.house);
       const wp = resolveTeamOriginCell(team.origin, teamHouse, waypoints, houseEdges, mapBounds);

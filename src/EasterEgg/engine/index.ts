@@ -6128,28 +6128,31 @@ export class Game {
       if (entity.teamMissions.length > 0) teamEntities.push(entity);
     }
     // C++ parity: create a Team instance for reinforcement entities with team missions.
-    // TeamClass::AI() runs every tick before entity AI, coordinating member movement
-    // and consuming RNG (Percent_Chance at activation, Mission_Move → Random_Pick).
-    if (teamEntities.length > 0) {
-      const teamHouse = teamEntities[0].house;
-      // Build desired members from actual spawned types
-      const memberCounts = new Map<string, number>();
-      for (const e of teamEntities) {
-        memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
+    // C++ Create_One_Of() only creates a TeamClass when Number < MaxAllowed (teamtype.cpp:362).
+    // MaxAllowed=0 means no team instance — entities just get their mission scripts.
+    if (teamEntities.length > 0 && result.spawnedTeamIdx !== undefined) {
+      const teamType = this.teamTypes[result.spawnedTeamIdx];
+      const maxAllowed = teamType?.maxAllowed ?? 0;
+      if (maxAllowed > 0) {
+        const teamHouse = teamEntities[0].house;
+        const memberCounts = new Map<string, number>();
+        for (const e of teamEntities) {
+          memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
+        }
+        const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
+        const team = new TeamInstance({
+          house: teamHouse,
+          desiredMembers,
+          missionList: teamEntities[0].teamMissions,
+          isReinforcable: !!(teamType.flags & 16),
+          isSuicide: !!(teamType.flags & 2),
+          forcedActive: false,
+        });
+        for (const e of teamEntities) {
+          team.add(e);
+        }
+        registerTeam(team);
       }
-      const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
-      const team = new TeamInstance({
-        house: teamHouse,
-        desiredMembers,
-        missionList: teamEntities[0].teamMissions,
-        isReinforcable: false,
-        isSuicide: false,
-        forcedActive: false,
-      });
-      for (const e of teamEntities) {
-        team.add(e);
-      }
-      registerTeam(team);
     }
     if (result.destroyTriggeringUnit) {
       let destroyed = false;
