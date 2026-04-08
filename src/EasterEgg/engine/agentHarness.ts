@@ -756,10 +756,22 @@ export function installHarness(game: Game): void {
 
   // Sync ScenarioRandom seed to match C++ WASM (used by parity test harness).
   // Directly sets the seed and resets debug log — no need to advance through the LCG.
+  // Also resets all entity missionTimers to 0 so they fire on the next tick,
+  // matching WASM's state where entities haven't been processed yet at sync time.
   w.__syncRngSeed = (targetSeed: number) => {
     ScenarioRandom.seed = targetSeed >>> 0;
     ScenarioRandom.debugLog = [];
     ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
+    // Reset entity timers to match WASM's unprocessed state.
+    // In C++, entities haven't had their AI() called yet at the sync point,
+    // so their CDTimers are still at their initial value (0 = expired).
+    // TS may have already processed tick 1, setting timers to 42+ ticks.
+    for (const e of (game as any).entities as Entity[]) {
+      e.missionTimer = 0;
+      e.idleAnimTimer = 0;
+      e.attackCooldown = 0;
+      e.attackCooldown2 = 0;
+    }
   };
 
   // RNG tag-logging control for per-tick divergence tracing.

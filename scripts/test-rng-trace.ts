@@ -60,8 +60,18 @@ test(`${scenario} RNG trace ticks ${startTick}-${endTick}`, async ({ browser }) 
       };
     });
 
-    // Step TS 1 tick
+    // Step TS 1 tick — capture before/after callCount to detect actual RNG consumption
+    const tsBefore = await tsPage.evaluate(() => ({
+      tick: ((window as any).__agentGame as any)?.tick ?? -1,
+      seed: (window as any).__agentGame ? 0 : -1, // placeholder
+      calls: (window as any).__agentState?.()?.rngCalls ?? -1,
+    }));
     await tsPage.evaluate(() => { (window as any).__agentStep?.(1); });
+    const tsAfter = await tsPage.evaluate(() => ({
+      tick: ((window as any).__agentGame as any)?.tick ?? -1,
+      calls: (window as any).__agentState?.()?.rngCalls ?? -1,
+    }));
+    console.log(`  TS step: tick ${tsBefore.tick}→${tsAfter.tick}, calls ${tsBefore.calls}→${tsAfter.calls} (delta=${tsAfter.calls - tsBefore.calls})`);
 
     // Read TS tag log
     const tsLog = await tsPage.evaluate(() => (window as any).__rngTagControl?.('read'));
