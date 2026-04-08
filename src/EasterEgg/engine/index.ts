@@ -3664,9 +3664,17 @@ export class Game {
     switch (entity.mission) {
       case Mission.MOVE:
         this.updateMove(entity);
-        // C++ foot.cpp:504: Mission_Move returns Normal_Delay+Random_Pick(0,2)
+        // C++ foot.cpp:492-505: Mission_Move timer return
         if (missionTimerFired) {
-          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+          // C++ foot.cpp:496-498: if no NavCom, not driving, no queued mission →
+          // Enter_Idle_Mode() and return 1 (no RNG consumed).
+          // The idle transition is already handled by updateMove() when moveTarget is null.
+          if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
+            entity.missionTimer = 1;
+          } else {
+            // C++ foot.cpp:504: Normal path — Normal_Delay + Random_Pick(0,2)
+            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+          }
         }
         break;
       case Mission.ATTACK:
