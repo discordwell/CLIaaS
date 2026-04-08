@@ -1,5 +1,34 @@
 # Session Summaries
 
+## 2026-04-08T02:00Z — TeamClass Wired + maxAllowed Fix: 8/12 Perfect at t2000
+
+### Results
+| Scenario | t2000 | Notes |
+|----------|-------|-------|
+| SCG01EA | **±0** | Fixed: maxAllowed=0 check prevents spurious Team creation |
+| SCG02EA | **±0** | |
+| SCG03EA | ±2 | 4 extra TS calls at tick 1 — entity processing order |
+| SCG04EA | ±2 | Same root cause |
+| SCG06EA | **±0** | |
+| SCG07EA | ±9 | 7 vessel calls at tick 2 from Mission_Move(no NavCom)→return 1 |
+| SCG08EA | ±12 | WASM game-over at t1883 |
+| SCG09EA | **±0** | Fixed: maxAllowed=0 |
+| SCG10EA | **±0** | |
+| SCG11EA | **±0** | |
+| SCG12EA | ±8 | Complex trigger chains |
+| SCG13EA | ±2 | Same entity processing order issue |
+
+### Fixes Applied
+- **maxAllowed=0 check**: C++ Create_One_Of only creates TeamClass when Number < MaxAllowed; TS now matches
+- **spawnedTeamIdx**: Pass team type index through TriggerActionResult for proper Team creation
+- **isReinforcable flag**: Read from team type flags (bit 4)
+
+### Remaining Divergence Sources
+1. **C++ Mission_Move no-NavCom path**: Returns 1 (not 14), causing re-fire next tick. Complex to match.
+2. **C++ Ground Layer Sort**: `DisplayClass::Layer[LAYER_GROUND].Sort()` reorders entity processing every frame. TS doesn't sort.
+3. **Entity processing order**: C++ interleaves ALL objects (units+infantry+buildings+vessels+aircraft) in single Logic array. TS uses separate passes.
+4. **Building timer interleaving**: C++ building timers fire between entity passes at different positions.
+
 ## 2026-04-07T23:30Z — RNG Divergence Root Cause: C++ TeamClass::AI Per-Tick Processing
 
 ### Root Cause Identified
