@@ -70,6 +70,15 @@ export interface AIHouseState {
   isAlerted: boolean;
   /** C++ IsBaseBuilding — controls AI base construction (taction.cpp TACTION_BASE_BUILDING) */
   isBaseBuilding: boolean;
+  // C++ Build* production slots — set by per-tick AI_*, cleared when spawned
+  buildUnit: string | null;
+  buildInfantry: string | null;
+  buildVessel: string | null;
+  buildStructure: string | null;
+  buildAircraft: string | null;
+  // C++ CDTimer equivalents for House::AI timer-gated sections
+  alertTimer: number;   // C++ AlertTime (init=0, fires immediately if IsAlerted)
+  teamTimer: number;    // C++ TeamTime (init=TeamDelay*TICKS_PER_MINUTE)
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -386,6 +395,14 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     isStarted: true,
     isAlerted: false,
     isBaseBuilding: false,
+    buildUnit: null,
+    buildInfantry: null,
+    buildVessel: null,
+    buildStructure: null,
+    buildAircraft: null,
+    alertTimer: 0,
+    // C++ TeamTime init = Rule.TeamDelay * TICKS_PER_MINUTE. TeamDelay=5 → 5*60*15=4500
+    teamTimer: 5 * 60 * GAME_TICKS_PER_SEC,
   };
 }
 
@@ -2314,5 +2331,316 @@ export function updateAIAutocreateTeams(ctx: AIContext): void {
         spawnTeam(ctx, teamIdx, house);
       }
     }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Per-tick AI_* functions — C++ House::AI() parity for RNG consumption.
+// These run EVERY tick for every AI house, consuming the same RNG calls
+// at the same ticks as C++ AI_Building/AI_Unit/AI_Vessel/AI_Infantry/AI_Aircraft.
+// ══════════════════════════════════════════════════════════════════════════
+
+/** C++ house enum order for deterministic iteration (logic.cpp:360-386) */
+const HOUSE_ORDER: House[] = [
+  House.Spain, House.Greece, House.USSR, House.England,
+  House.Ukraine, House.Germany, House.France, House.Turkey,
+  House.GoodGuy, House.BadGuy, House.Neutral,
+];
+
+/**
+ * Classify a unit type string as unit (vehicle), infantry, vessel, or aircraft.
+ * Matches C++ RTTI_UNITTYPE / RTTI_INFANTRYTYPE / RTTI_VESSELTYPE / RTTI_AIRCRAFTTYPE.
+ */
+function classifyUnitType(type: string): 'unit' | 'infantry' | 'vessel' | 'aircraft' | null {
+  const stats = UNIT_STATS[type];
+  if (!stats) return null;
+  if (stats.isInfantry) return 'infantry';
+  if (stats.isVessel) return 'vessel';
+  if (stats.isAircraft) return 'aircraft';
+  return 'unit'; // vehicles/tanks
+}
+
+/**
+ * C++ AI_Unit (house.cpp:5802-5897) — per-tick unit production decision.
+ * Scans team types for needed vehicle types, picks one with Random_Pick.
+ * Only runs in GAME_NORMAL (single-player campaign).
+ */
+function aiPerTickUnit(ctx: AIContext, house: House, state: AIHouseState): void {
+  // C++ house.cpp:5806: early return if already building
+  if (state.buildUnit !== null) return;
+  // C++ house.cpp:5807: early return at unit cap
+  let curUnits = 0;
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) curUnits++;
+  }
+  if (curUnits >= state.maxUnit) return;
+
+  // C++ house.cpp:5813: harvester replacement (IQ >= IQHarvester=2, not hard difficulty)
+  // This sets BuildUnit WITHOUT RNG and returns early.
+  if (state.iq >= 2) {
+    const refineries = aiCountStructure(ctx, house, 'PROC');
+    let harvesterCount = 0;
+    for (const e of ctx.entities) {
+      if (e.alive && e.house === house && e.type === 'HARV') harvesterCount++;
+    }
+    if (refineries > harvesterCount) {
+      state.buildUnit = 'HARV';
+      return;
+    }
+  }
+
+  // C++ house.cpp:5820-5896: GAME_NORMAL team-based unit scanning
+  // Build counter: for each unit type, how many more we need
+  const counter: Record<string, number> = {};
+
+  // C++ 5849-5861: scan TeamTypes for prebuilt teams
+  // (In single-player, this is the primary path — active Teams rarely exist early)
+  for (const ttype of ctx.teamTypes) {
+    if (houseIdToHouse(ttype.house) !== house) continue;
+    // C++ 5851: team->IsPrebuilt && (!team->IsAutocreate || IsAlerted)
+    const isPrebuilt = !!(ttype.flags & 2); // bit1 = IsPrebuilt (from team flags)
+    const isAutocreate = !!(ttype.flags & 4); // bit2 = IsAutocreate
+    if (!isPrebuilt) continue;
+    if (isAutocreate && !state.isAlerted) continue;
+
+    for (const member of ttype.members) {
+      if (classifyUnitType(member.type) !== 'unit') continue;
+      counter[member.type] = Math.max(counter[member.type] ?? 0, member.count);
+    }
+  }
+
+  // C++ 5867-5872: subtract existing recruitable units
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) {
+      if ((counter[e.type] ?? 0) > 0) {
+        counter[e.type]--;
+      }
+    }
+  }
+
+  // C++ 5878-5896: pick from candidates with highest need
+  let bestval = -1;
+  const bestlist: string[] = [];
+  for (const [utype, count] of Object.entries(counter)) {
+    if (count <= 0) continue;
+    // C++ checks Can_Build and Cost_Of <= Available_Money — simplified for RNG parity
+    if (bestval === -1 || bestval < count) {
+      bestval = count;
+      bestlist.length = 0;
+    }
+    if (count === bestval) {
+      bestlist.push(utype);
+    }
+  }
+
+  if (bestlist.length > 0) {
+    // C++ house.cpp:5895: Random_Pick(0, bestcount-1) — THE RNG CALL
+    state.buildUnit = bestlist[ScenarioRandom.nextInRange(0, bestlist.length - 1)];
+  }
+}
+
+/**
+ * C++ AI_Infantry (house.cpp:6055-6146) — per-tick infantry production decision.
+ */
+function aiPerTickInfantry(ctx: AIContext, house: House, state: AIHouseState): void {
+  if (state.buildInfantry !== null) return;
+  let curInfantry = 0;
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && e.stats.isInfantry) curInfantry++;
+  }
+  if (curInfantry >= state.maxInfantry) return;
+
+  // C++ house.cpp:6062-6146: GAME_NORMAL team-based infantry scanning
+  const counter: Record<string, number> = {};
+
+  for (const ttype of ctx.teamTypes) {
+    if (houseIdToHouse(ttype.house) !== house) continue;
+    const isPrebuilt = !!(ttype.flags & 2);
+    const isAutocreate = !!(ttype.flags & 4);
+    if (!isPrebuilt) continue;
+    if (isAutocreate && !state.isAlerted) continue;
+
+    for (const member of ttype.members) {
+      if (classifyUnitType(member.type) !== 'infantry') continue;
+      counter[member.type] = Math.max(counter[member.type] ?? 0, member.count);
+    }
+  }
+
+  // Subtract existing
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && e.stats.isInfantry) {
+      if ((counter[e.type] ?? 0) > 0) counter[e.type]--;
+    }
+  }
+
+  // Pick with highest need
+  let bestval = -1;
+  const bestlist: string[] = [];
+  for (const [itype, count] of Object.entries(counter)) {
+    if (count <= 0) continue;
+    if (bestval === -1 || bestval < count) {
+      bestval = count;
+      bestlist.length = 0;
+    }
+    if (count === bestval) bestlist.push(itype);
+  }
+
+  if (bestlist.length > 0) {
+    state.buildInfantry = bestlist[ScenarioRandom.nextInRange(0, bestlist.length - 1)];
+  }
+}
+
+/**
+ * C++ AI_Vessel (house.cpp:5933-6029) — per-tick vessel production decision.
+ */
+function aiPerTickVessel(ctx: AIContext, house: House, state: AIHouseState): void {
+  if (state.buildVessel !== null) return;
+  let curVessels = 0;
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && e.stats.isVessel) curVessels++;
+  }
+  if (curVessels >= state.maxVessel) return;
+
+  const counter: Record<string, number> = {};
+
+  for (const ttype of ctx.teamTypes) {
+    if (houseIdToHouse(ttype.house) !== house) continue;
+    const isPrebuilt = !!(ttype.flags & 2);
+    const isAutocreate = !!(ttype.flags & 4);
+    if (!isPrebuilt) continue;
+    if (isAutocreate && !state.isAlerted) continue;
+
+    for (const member of ttype.members) {
+      if (classifyUnitType(member.type) !== 'vessel') continue;
+      counter[member.type] = Math.max(counter[member.type] ?? 0, member.count);
+    }
+  }
+
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && e.stats.isVessel) {
+      if ((counter[e.type] ?? 0) > 0) counter[e.type]--;
+    }
+  }
+
+  let bestval = -1;
+  const bestlist: string[] = [];
+  for (const [vtype, count] of Object.entries(counter)) {
+    if (count <= 0) continue;
+    if (bestval === -1 || bestval < count) {
+      bestval = count;
+      bestlist.length = 0;
+    }
+    if (count === bestval) bestlist.push(vtype);
+  }
+
+  if (bestlist.length > 0) {
+    state.buildVessel = bestlist[ScenarioRandom.nextInRange(0, bestlist.length - 1)];
+  }
+}
+
+/**
+ * C++ AI_Building (house.cpp:5446-5785) — per-tick structure production decision.
+ * Only active when IsBaseBuilding is true.
+ */
+function aiPerTickBuilding(_ctx: AIContext, _house: House, state: AIHouseState): void {
+  if (state.buildStructure !== null) return;
+  // C++ AI_Building only does meaningful work when IsBaseBuilding=true
+  // In GAME_NORMAL without IsBaseBuilding, it just returns TICKS_PER_SECOND
+  if (!state.isBaseBuilding) return;
+  // Building selection logic delegated to existing getAIBuildOrder when isBaseBuilding
+  // For now, this is a placeholder — IsBaseBuilding is rarely true in early campaign
+}
+
+/**
+ * C++ AI_Aircraft (house.cpp:6251-6289) — per-tick aircraft production decision.
+ * NO RNG — deterministic choices (prefer LONGBOW over HIND, MIG over YAK).
+ */
+function aiPerTickAircraft(ctx: AIContext, house: House, state: AIHouseState): void {
+  if (state.buildAircraft !== null) return;
+  // C++ house.cpp:6255: IQ >= Rule.IQAircraft (IQAircraft=4 in rules.ini)
+  if (state.iq < 4) return;
+  let curAircraft = 0;
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && e.stats.isAircraft) curAircraft++;
+  }
+  if (curAircraft >= state.maxAircraft) return;
+
+  // C++ deterministic: no RNG
+  const hasHpad = ctx.structures.some(s => s.alive && s.house === house && s.type === 'HPAD');
+  const hasAfld = ctx.structures.some(s => s.alive && s.house === house && s.type === 'AFLD');
+  const faction = HOUSE_FACTION[house] ?? 'both';
+
+  if (hasHpad) {
+    state.buildAircraft = faction === 'allied' ? 'HELI' : 'HIND';
+  } else if (hasAfld) {
+    state.buildAircraft = faction === 'allied' ? 'YAK' : 'MIG'; // C++ prefers MIG for soviet
+  }
+}
+
+/**
+ * C++ House::AI() timer-gated sections — AlertTime and TeamTime.
+ * Decrements timers each tick and fires RNG-consuming logic when they expire.
+ */
+function aiPerTickTimers(ctx: AIContext, house: House, state: AIHouseState): void {
+  // Decrement timers (C++ CDTimerClass auto-decrement per frame)
+  if (state.alertTimer > 0) state.alertTimer--;
+  if (state.teamTimer > 0) state.teamTimer--;
+
+  // C++ house.cpp:990-1011: AlertTime handler
+  if (state.isAlerted && state.alertTimer <= 0) {
+    // C++ line 996: Random_Pick(2, ((TechLevel-1)/3)+1)
+    const maxTeamsUpper = Math.max(Math.floor((state.techLevel - 1) / 3) + 1, 2);
+    const maxTeams = ScenarioRandom.nextInRange(2, maxTeamsUpper);
+
+    for (let t = 0; t < maxTeams; t++) {
+      // C++ line 999: Suggested_New_Team(true) — 1 RNG call each
+      suggestedNewTeam(ctx, house, true);
+      // Note: actual team spawning is separate; this just consumes RNG for parity
+    }
+
+    // C++ line 1007: AlertTime = Rule.AutocreateTime * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2)
+    const halfMin = Math.floor(GAME_TICKS_PER_SEC * 30); // TICKS_PER_MINUTE/2 = 450
+    const doubleMin = GAME_TICKS_PER_SEC * 120; // TICKS_PER_MINUTE*2 = 1800
+    state.alertTimer = 5 * ScenarioRandom.nextInRange(halfMin, doubleMin); // AutocreateTime=5
+  }
+
+  // C++ house.cpp:1061-1070: TeamTime handler
+  if (!state.isAlerted && state.teamTimer <= 0) {
+    // C++ line 1064: Suggested_New_Team(false) — 1 RNG call
+    suggestedNewTeam(ctx, house, false);
+    // C++ line 1069: TeamTime = Rule.TeamDelay * TICKS_PER_MINUTE
+    state.teamTimer = 5 * 60 * GAME_TICKS_PER_SEC; // TeamDelay=5
+  }
+}
+
+/**
+ * Per-tick AI orchestrator — runs every tick for every active AI house.
+ * Matches C++ House::AI() execution order exactly for RNG parity.
+ * C++ processes houses in enum order (logic.cpp:360-386).
+ */
+export function aiPerTick(ctx: AIContext): void {
+  // Iterate in C++ house enum order for deterministic RNG consumption
+  for (const house of HOUSE_ORDER) {
+    const state = ctx.aiStates.get(house);
+    if (!state) continue;
+
+    // Set RNG source tag for debugging (matches C++ g_rng_source_tag convention)
+    if (ScenarioRandom._tagLogging) {
+      ScenarioRandom._sourceTag = 5; // C++ House AI preamble tag
+    }
+
+    // C++ execution order within House::AI():
+    // 1. AI_Building (tag 110)
+    aiPerTickBuilding(ctx, house, state);
+    // 2. AI_Unit (tag 120)
+    aiPerTickUnit(ctx, house, state);
+    // 3. AI_Vessel (tag 130)
+    aiPerTickVessel(ctx, house, state);
+    // 4. AI_Infantry (tag 140)
+    aiPerTickInfantry(ctx, house, state);
+    // 5. AI_Aircraft (tag 150) — no RNG
+    aiPerTickAircraft(ctx, house, state);
+    // 6. Timer-gated sections (tags 100-103)
+    aiPerTickTimers(ctx, house, state);
   }
 }

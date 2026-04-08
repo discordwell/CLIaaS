@@ -105,6 +105,15 @@ export class RandomClass {
   float(): number {
     return this.next() / (1 << SIGNIFICANT_BITS);
   }
+
+  /**
+   * C++ Percent_Chance(int) — random.cpp:200-210.
+   * Consumes 1 RNG call. Returns true with `percent`% probability.
+   * Threshold = percent * 32768 / 100 (integer math matching C++ overflow).
+   */
+  percentChance(percent: number): boolean {
+    return this.next() < Math.floor((percent * (1 << SIGNIFICANT_BITS)) / 100);
+  }
 }
 
 /**

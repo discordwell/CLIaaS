@@ -193,6 +193,7 @@ import {
   updateBaseRebuild as _updateBaseRebuild,
   spawnAIStructure as _spawnAIStructure,
   spawnAIUnit as _spawnAIUnit,
+  aiPerTick as _aiPerTick,
 } from './ai';
 import {
   type MissionAIContext,
@@ -2030,6 +2031,10 @@ export class Game {
 
     // C++ house.cpp:936-940: IQ-based auto-enable runs at start of every AI tick
     this.updateAIIQGates();
+
+    // C++ House::AI() per-tick RNG parity — AI_Building/AI_Unit/AI_Vessel/AI_Infantry/AI_Aircraft
+    // plus timer-gated sections (AlertTime, TeamTime). Must run EVERY tick in C++ house enum order.
+    this._runAI(ctx => _aiPerTick(ctx));
 
     // AI strategic planner — runs every 150 ticks (skip for ant missions)
     if (!this.scenarioId.startsWith('SCA')) {
