@@ -7602,9 +7602,9 @@ export class Game {
    *  that includes Random_Pick(0,2) jitter. This consumes ScenarioRandom per-building. */
   private tickStructureMissionTimers(): void {
     // C++ rules.ini: [Guard] Rate=.050, AARate=.016
-    // Normal_Delay = TICKS_PER_MINUTE * Rate = 900 * 0.050 = 45
-    // AA_Delay = TICKS_PER_MINUTE * AARate = 900 * 0.016 = 14
-    const GUARD_NORMAL_DELAY = 45;
+    // C++ fixed-point: fixed(".050")→Raw=12. Normal_Delay=((12*900)+128)/256=42
+    // C++ fixed-point: fixed(".016")→Raw=4.  AA_Delay=((4*900)+128)/256=14
+    const GUARD_NORMAL_DELAY = 42;
     const GUARD_AA_DELAY = 14;
     let _structIdx = 0;
     for (const s of this.structures) {
