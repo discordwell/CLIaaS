@@ -6073,8 +6073,11 @@ export class Game {
       this.handleTriggerSound(result.playSound);
     }
     // C++ Create_Army — recruit existing idle units into team (TACTION_CREATE_TEAM)
+    // C++ taction.cpp:659-661: ScenarioInit++ → Create_One_Of() → ScenarioInit--
+    // ScenarioInit bypasses MaxAllowed check, so TeamClass is ALWAYS created.
     if (result.createTeam) {
       const ct = result.createTeam;
+      const recruited: Entity[] = [];
       for (const member of ct.members) {
         const memberType = member.type.toUpperCase();
         for (let i = 0; i < member.count; i++) {
@@ -6083,10 +6086,38 @@ export class Game {
             e.house === ct.house && e.mission === Mission.GUARD &&
             !e.target && !e.moveTarget
           );
-          if (recruit && ct.missions.length > 0) {
-            recruit.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
-            recruit.teamMissionIndex = 0;
+          if (recruit) {
+            if (ct.missions.length > 0) {
+              recruit.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
+              recruit.teamMissionIndex = 0;
+            }
+            recruited.push(recruit);
           }
+        }
+      }
+      // C++ parity: Create_One_Of with ScenarioInit++ always creates a TeamClass.
+      // This Team.AI() runs every tick, consuming RNG (Percent_Chance at activation,
+      // Coordinate_Move/Attack re-assigning missions with timer reset).
+      if (recruited.length > 0 && ct.teamIdx !== undefined) {
+        const teamType = this.teamTypes[ct.teamIdx];
+        if (teamType) {
+          const memberCounts = new Map<string, number>();
+          for (const e of recruited) {
+            memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
+          }
+          const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
+          const team = new TeamInstance({
+            house: ct.house,
+            desiredMembers,
+            missionList: ct.missions.length > 0 ? ct.missions.map(m => ({ mission: m.mission, data: m.data })) : [],
+            isReinforcable: !!(teamType.flags & 16),
+            isSuicide: !!(teamType.flags & 2),
+            forcedActive: false,
+          });
+          for (const e of recruited) {
+            team.add(e);
+          }
+          registerTeam(team);
         }
       }
     }
