@@ -425,6 +425,12 @@ export class Entity {
    *  cpp-parity: building.cpp:3473 — IsNominal infantry get IsTechnician=true. */
   isTechnician = false;
 
+  /** C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter RNG parity.
+   *  In C++, HPAD helicopters enter the Logic array right after their HPAD building
+   *  and are processed interleaved with buildings, NOT in the aircraft pass.
+   *  Set to true during tickStructuresInterleaved(); checked+reset in Pass 4. */
+  _processedInBuildingPass = false;
+
   constructor(type: UnitType, house: House, x: number, y: number) {
     this.type = type;
     this.stats = UNIT_STATS[type] ?? UNIT_STATS.E1;

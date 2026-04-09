@@ -1819,9 +1819,16 @@ export class Game {
     }
 
     // Pass 4: Aircraft entities (processed AFTER all ground entities and buildings in C++ Logic layer)
+    // Skip HPAD helicopters already processed in the building pass (tickStructuresInterleaved).
     let _aircraftIdx = 0;
     for (const entity of this.entities) {
       if (!entity.alive || !entity.isAirUnit) continue;
+      // C++ building.cpp:2438-2455 — HPAD helicopters were processed interleaved with buildings.
+      // Skip them here to avoid double-processing and RNG stream corruption.
+      if (entity._processedInBuildingPass) {
+        entity._processedInBuildingPass = false; // reset for next tick
+        continue;
+      }
       // RNG audit: set source tag for aircraft (C++ 13000 + Logic index)
       if (ScenarioRandom._tagLogging) {
         ScenarioRandom._sourceTag = 13000 + _aircraftIdx;
@@ -7683,6 +7690,24 @@ export class Game {
       // C++ runs this immediately after timer tick for the SAME building,
       // so combat RNG is consumed at the correct stream position.
       _updateSingleStructureCombat(combatCtx, s, isLowPower);
+
+      // ── C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter interleaving ──
+      // In C++, the helicopter sits in the Logic array right after its HPAD building.
+      // Its AI() (guard timer RNG) fires between this building and the next one.
+      // Process it here so its RNG calls land at the correct stream position.
+      if (s.hpadHelicopterId !== undefined) {
+        const heli = this.entityById.get(s.hpadHelicopterId);
+        if (heli && heli.alive && heli.isAirUnit) {
+          heli.rotTickedThisFrame = false;
+          heli.turretRotTickedThisFrame = false;
+          if (heli.isInRecoilState) heli.isInRecoilState = false;
+          if (!heli.inLimbo) {
+            this.updateEntity(heli);
+            heli.tickAnimation();
+          }
+          heli._processedInBuildingPass = true;
+        }
+      }
     }
   }
 

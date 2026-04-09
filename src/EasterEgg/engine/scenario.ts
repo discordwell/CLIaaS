@@ -1312,6 +1312,10 @@ export interface MapStructure {
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
   /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
   missionTimer: number;
+  /** C++ building.cpp:2438-2455 — entity ID of the auto-spawned helicopter parked on this HPAD.
+   *  Used by tickStructuresInterleaved() to process the helicopter interleaved with buildings
+   *  (matching C++ Logic array order) instead of in the aircraft pass. */
+  hpadHelicopterId?: number;
   /** C++ building.cpp Door_Stage() — war factory door animation frame (0=closed, 7=fully open).
    *  Animates 0→7 during production, stays open while unit exits, then closes 7→0. */
   doorFrame?: number;
@@ -1891,7 +1895,8 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // C++ parity (house.cpp:6239-6277): auto-populate empty helipads with aircraft
   // at scenario start. C++ AI_Aircraft runs on the first game tick and spawns
   // aircraft for every empty pad, for ALL houses (including player).
-  for (const s of structures) {
+  for (let si = 0; si < structures.length; si++) {
+    const s = structures[si];
     if (!s.alive) continue;
     const isSoviet = s.house === House.USSR || s.house === House.Ukraine || s.house === House.BadGuy;
 
@@ -1909,7 +1914,13 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
         heli.mission = Mission.GUARD;
         heli.aircraftState = 'landed';
         heli.flightAltitude = 0;
+        heli.landedAtStructure = si; // dock helicopter at this HPAD index
         entities.push(heli);
+        // C++ building.cpp:2438-2455 — record helicopter ID on HPAD for interleaved processing.
+        // In C++, this helicopter enters the Logic array right after the HPAD building,
+        // so its guard timer RNG calls happen between buildings, not in the aircraft pass.
+        s.hpadHelicopterId = heli.id;
+        s.dockedAircraft = heli.id;
       }
     }
     // Note: AFLD (airfields) are NOT auto-populated at init time — C++ AI_Aircraft
