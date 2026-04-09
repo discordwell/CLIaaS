@@ -1,5 +1,35 @@
 # Session Summaries
 
+## 2026-04-09T03:00Z — HPAD Helicopter AI + Final Parity Analysis
+
+### HPAD Helicopter: Full Guard AI Implemented
+- Helicopters now scan for enemies (guardRange=30), acquire targets, take off, attack, RTB
+- Guard timer: Normal_Delay(42) + Random_Pick(0,2) matching C++ FootClass::Mission_Guard
+- Two-timer-fire attack cycle matching aircraft.cpp:3773
+- _heliGuardScan() mirrors C++ Target_Something_Nearby(THREAT_RANGE)
+- Fixed MISSION_CONTROL runtime error (doesn't exist in TS → Mission.SLEEP check)
+
+### Final Parity Status
+| Scenario | t2000 | Cause |
+|----------|-------|-------|
+| SCG01EA | **±0** | perfect |
+| SCG02EA | **±0** | perfect |
+| SCG03EA | ±2 | entity/building interleave order |
+| SCG04EA | ±2 | entity/building interleave order |
+| SCG06EA | **±0** | perfect |
+| SCG07EA | ±5 | vessel Mission_Move + reinforcement interleave |
+| SCG08EA | ±15 | game-over split at different ticks |
+| SCG09EA | ±1 | reinforcement vessel interleave |
+| SCG10EA | **±0** | perfect |
+| SCG11EA | **±0** | perfect |
+| SCG12EA | ±5 | 4 HPAD helicopter combat divergence |
+| SCG13EA | ±2 | entity/building interleave order |
+
+### Confirmed Architectural Limit
+All remaining ±1-5 divergence traces to: C++ Logic::AI() single loop with Count() re-evaluation picks up mid-tick spawns at their insertion position. TS processes triggers before entities, so spawns always land after buildings. Barrel hypothesis disproved: ALL buildings (including BARL/BRL3) are sentient and consume RNG.
+
+### Test Count: 54,938 tests, 925 files, 0 failures
+
 ## 2026-04-08T02:33Z — IsSentient Investigation: Barrel Hypothesis Disproved
 
 ### Investigation: BARL/BRL3 IsSentient Flag
