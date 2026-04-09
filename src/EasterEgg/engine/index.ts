@@ -5130,9 +5130,11 @@ export class Game {
   private _heliGuardScan(heli: Entity): void {
     this._runMissionAI(ctx => {
       // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE)
-      // THREAT_RANGE → uses weapon range as scan radius
-      const weaponScanRange = Math.max(heli.weapon?.range ?? 0, heli.weapon2?.range ?? 0) || heli.stats.sight;
-      const scanRange = heli.stats.guardRange ?? weaponScanRange;
+      // C++ techno.cpp:2048-2053: THREAT_RANGE → Threat_Range(0) uses weapon range, NOT guardRange.
+      //   crange = max(Weapon_Range(0), Weapon_Range(1)) / ICON_LEPTON_W; crange++;
+      // For HIND: ChainGun range=4 cells → scanRange = 4+1 = 5 cells.
+      const weaponRange = Math.max(heli.weapon?.range ?? 0, heli.weapon2?.range ?? 0);
+      const scanRange = weaponRange > 0 ? weaponRange + 1 : heli.stats.sight;
       let bestTarget: Entity | null = null;
       let bestScore = -Infinity;
       for (const other of ctx.entities) {

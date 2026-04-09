@@ -101,8 +101,8 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
     expect(scanStart).toBeGreaterThan(-1);
     const scanBody = indexSource.slice(scanStart, scanStart + 3000);
 
-    // Uses weapon range as scan radius (THREAT_RANGE)
-    expect(scanBody).toContain('weaponScanRange');
+    // Uses weapon range as scan radius (C++ THREAT_RANGE → Threat_Range(0) = weaponRange + 1)
+    expect(scanBody).toContain('weaponRange');
     expect(scanBody).toContain('scanRange');
 
     // Filters out allies, dead, cloaked, no-threat
@@ -112,6 +112,19 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
 
     // Sets target as side effect (C++ Target_Something_Nearby behavior)
     expect(scanBody).toContain('heli.target = bestTarget');
+  });
+
+  it('_heliGuardScan uses weapon range + 1, NOT guardRange (C++ techno.cpp:2048-2053)', () => {
+    const scanStart = indexSource.indexOf('private _heliGuardScan(');
+    expect(scanStart).toBeGreaterThan(-1);
+    const scanBody = indexSource.slice(scanStart, scanStart + 3000);
+
+    // C++ Threat_Range(0) for THREAT_RANGE: crange = max(Weapon_Range(0), Weapon_Range(1)) / ICON_LEPTON_W; crange++;
+    // Must use weaponRange + 1, NOT guardRange (which is 30 cells — way too large)
+    expect(scanBody).toContain('weaponRange + 1');
+    // Ensure guardRange is NOT used as the scan radius variable
+    // (comment mentioning "NOT guardRange" is OK, but it must not appear as an actual variable reference)
+    expect(scanBody).not.toMatch(/\bheli\.stats\.guardRange\b/);
   });
 
   it('_heliGuardScan also checks enemy structures', () => {
