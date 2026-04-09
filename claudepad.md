@@ -1,5 +1,34 @@
 # Session Summaries
 
+## 2026-04-08T02:33Z — IsSentient Investigation: Barrel Hypothesis Disproved
+
+### Investigation: BARL/BRL3 IsSentient Flag
+Investigated whether BARL/BRL3 barrels are non-sentient in C++ (which would mean they don't enter the Logic array and don't consume RNG). **Result: hypothesis is wrong.**
+
+- `TechnoTypeClass` constructor (techno.cpp:5962) hardcodes `is_sentient=true` for ALL building types
+- This flows through `ObjectTypeClass(is_sentient=true)` to `ObjectClass::Unlimbo` which calls `Logic.Submit(this)` for sentient objects
+- ALL 141 buildings (including barrels, V19 civilians, etc.) ARE in the Logic array
+- ALL fire `Mission_Guard` on tick 1, ALL consume `Random_Pick(0,2)` for timer jitter
+- During `ScenarioInit`, `Is_Clear_To_Build` returns true unconditionally (cell.cpp:460), so no placement failures
+
+### Root Cause Confirmation
+The ±2 divergence is NOT from barrels/civilians being skipped. It is confirmed as the architectural difference documented below (entity interleave ordering). No code change can fix this without restructuring the entity/building processing into a single unified loop matching C++ Logic::AI().
+
+### C++ Logic Array Order (scenario.cpp Read_Scenario_INI)
+1. TerrainClass::Read_INI (line 2337) - terrain objects (sentient but no RNG)
+2. UnitClass::Read_INI (line 2342) - units
+3. VesselClass::Read_INI (line 2345) - vessels
+4. InfantryClass::Read_INI (line 2351) - infantry
+5. BuildingClass::Read_INI (line 2359) - buildings LAST
+
+### New Test
+Added `cpp-parity-barrel-sentient.test.ts` (4 tests) documenting:
+- All 141 buildings consume RNG on tick 1
+- Barrels/V19 use Normal_Delay*3 (126-128 tick timer)
+- Weapon buildings use AA_Delay (14-16 tick timer)
+
+### Test Count: 54,938 tests, 925 files, 0 failures
+
 ## 2026-04-08T05:00Z — Final Parity: 6/12 Perfect, Architectural Limit Reached
 
 ### Results (t2000)
