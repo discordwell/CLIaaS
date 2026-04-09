@@ -51,6 +51,7 @@ import {
   TMISSION_UNLOAD, TMISSION_LOOP, TMISSION_DO,
   registerTeam,
 } from '../engine/team';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => {
   resetEntityIds();
@@ -1649,5 +1650,203 @@ describe('Force_Active parity: IsUnderStrength=false (team.h:215)', () => {
     expect(team.currentMission).toBe(0);
     // GUARD with data=3: timeOut = 3*90 = 270, then decremented once = 269
     expect(team.timeOut).toBe(3 * 90 - 1);
+  });
+});
+
+// =============================================================================
+// Section: Vessel GUARD→MOVE mission transition timing (C++ reinf.cpp + team.cpp)
+//
+// C++ source refs:
+//   - reinf.cpp:479-481 — ground/naval entities spawn with Assign_Mission(MISSION_GUARD) + Commence()
+//   - team.h:215 — Force_Active() sets IsForcedActive=true, IsUnderStrength=false
+//   - team.cpp:627-652 — activation: IsMoving=true, Percent_Chance(50) gesture, IsNextMission=true
+//   - team.cpp:704-753 — mission advance: CurrentMission=0, TMISSION_MOVE target set
+//   - team.cpp:1874-2008 — Coordinate_Move: Assign_Mission(MISSION_MOVE) → MissionQueue
+//   - vessel.cpp:592-593 — VesselClass::AI: Commence() picks up MOVE from queue before MissionClass::AI
+//   - vessel.cpp:620 — DriveClass::AI → MissionClass::AI → Timer=0 → Mission_Move fires
+//   - foot.cpp:504 — Mission_Move returns Normal_Delay(14) + Random_Pick(0,2)
+//
+// Key parity point: at tick 1 (the tick entities spawn + team activates), vessels should
+// process MOVE (not GUARD). GUARD never fires its mission handler because:
+//   1. Team::AI runs BEFORE VesselClass::AI
+//   2. Coordinate_Move puts MISSION_MOVE into MissionQueue
+//   3. VesselClass::AI's Commence() picks up MOVE before MissionClass::AI runs
+//
+// RNG consumed at tick 1 for a forcedActive team with N vessels:
+//   - 1 call: Percent_Chance(50) gesture (team activation)
+//   - N calls: Random_Pick(0,2) per vessel (Mission_Move timer return)
+// =============================================================================
+
+describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.cpp)', () => {
+  it('vessels are in MOVE (not GUARD) after first team ai() tick', () => {
+    // C++ reinf.cpp:479-481: entities spawn in GUARD
+    // C++ team.cpp:1938: Coordinate_Move assigns MISSION_MOVE
+    // C++ vessel.cpp:592: Commence() picks up MOVE before mission handler fires
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(5, { cx: 50, cy: 50 }); // target waypoint far from spawn
+
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.V_DD, count: 3 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 5 }],
+      forcedActive: true,
+    });
+
+    // Spawn vessels at map edge (far from waypoint 5)
+    const vessels = [
+      makeEntity(UnitType.V_DD, House.USSR, 24, 24),
+      makeEntity(UnitType.V_DD, House.USSR, 48, 24),
+      makeEntity(UnitType.V_DD, House.USSR, 72, 24),
+    ];
+    // C++ reinf.cpp:480 — ground/naval entities start in GUARD
+    for (const v of vessels) {
+      v.mission = Mission.GUARD;
+      v.missionTimer = 0; // C++ Commence() sets Timer=0
+    }
+    for (const v of vessels) team.add(v);
+
+    // First ai() tick: activation + mission advance + coordinateMove
+    team.ai(waypoints);
+
+    // All vessels should now be in MOVE (not GUARD)
+    // C++ parity: Coordinate_Move → Assign_Mission(MISSION_MOVE) → MissionQueue
+    // Then VesselClass::AI → Commence() picks up MOVE → Mission_Move fires
+    for (const v of vessels) {
+      expect(v.mission, `Vessel should be in MOVE, not GUARD`).toBe(Mission.MOVE);
+    }
+    // Timer should be reset to 0 by coordinateMove (matching C++ Commence() Timer=0)
+    for (const v of vessels) {
+      expect(v.missionTimer, 'missionTimer should be 0 (C++ Commence Timer reset)').toBe(0);
+    }
+  });
+
+  it('team activation consumes exactly 1 RNG call for Percent_Chance(50) gesture', () => {
+    // C++ team.cpp:637: DoType doaction = Percent_Chance(50) ? DO_GESTURE1 : DO_GESTURE2
+    // This consumes 1 ScenarioRandom call regardless of member count/type.
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 50, cy: 50 });
+
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.V_DD, count: 2 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+
+    const v1 = makeEntity(UnitType.V_DD, House.USSR, 24, 24);
+    const v2 = makeEntity(UnitType.V_DD, House.USSR, 48, 24);
+    v1.mission = Mission.GUARD;
+    v2.mission = Mission.GUARD;
+    team.add(v1);
+    team.add(v2);
+
+    // Record RNG state before team.ai()
+    const callsBefore = ScenarioRandom.callCount;
+
+    team.ai(waypoints);
+
+    const callsAfter = ScenarioRandom.callCount;
+    // C++ parity: exactly 1 RNG call for Percent_Chance(50) gesture
+    // coordinateMove does NOT consume RNG — it only sets mission and timer.
+    // The actual Random_Pick(0,2) for Mission_Move timer happens in entity AI,
+    // which is a separate processing step (not part of Team::AI).
+    expect(
+      callsAfter - callsBefore,
+      'Team activation should consume exactly 1 RNG call (Percent_Chance(50))'
+    ).toBe(1);
+  });
+
+  it('non-forced team has 1-tick reforming delay before mission advance (C++ parity)', () => {
+    // C++ team.cpp: when IsUnderStrength transitions from true→false (line 569-571),
+    // IsReforming=true. This delays mission advance by 1 tick.
+    // At the end of the first AI() call, Coordinate_Regroup resolves IsReforming
+    // if members are close, but mission advance was already blocked for this tick.
+    //
+    // C++ flow (tick 1):
+    //   1. IsAltered check: old_under=true → IsUnderStrength=false → IsReforming=true
+    //   2. Activation: IsMoving=true, IsNextMission=true, Percent_Chance(50)
+    //   3. Mission advance blocked: isMoving && !IsReforming(TRUE) → skip
+    //   4. Else block: IsReforming = !Coordinate_Regroup() → false (members close)
+    //
+    // C++ flow (tick 2):
+    //   1. IsReforming=false
+    //   2. Mission advance: IsMoving && !IsReforming(false) && IsNextMission → runs
+    //   3. Coordinate_Move → MISSION_MOVE assigned
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 50, cy: 50 });
+
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.V_DD, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 0 }],
+      // NOT forcedActive — simulates TACTION_CREATE_TEAM
+    });
+
+    const v = makeEntity(UnitType.V_DD, House.USSR, 24, 24);
+    v.mission = Mission.GUARD;
+    team.add(v);
+
+    // Tick 1: activation + reforming. Mission advance blocked by IsReforming.
+    // Coordinate_Regroup resolves IsReforming at the end, but mission stays at -1.
+    team.ai(waypoints);
+    expect(team.isMoving, 'Team should activate on first tick').toBe(true);
+    // After full ai(), reforming was set then cleared by coordinateRegroup
+    expect(team.isReforming, 'Reforming resolved by coordinateRegroup').toBe(false);
+    // But mission advance was blocked WHILE isReforming was true:
+    expect(team.currentMission, 'Mission NOT advanced on tick 1 (reforming blocked it)').toBe(-1);
+    // Entity stays in GUARD (coordinateMove never ran, coordinateRegroup set GUARD)
+    expect(v.mission, 'Vessel should be in GUARD after reforming tick').toBe(Mission.GUARD);
+
+    // Tick 2: isReforming=false → mission advance + coordinateMove
+    team.ai(waypoints);
+    expect(team.currentMission, 'Mission should advance to 0 on tick 2').toBe(0);
+    expect(v.mission, 'Vessel should now be in MOVE').toBe(Mission.MOVE);
+  });
+
+  it('forcedActive team matches SCG07EA "cover" team: 3 patrol boats process MOVE at tick 1', () => {
+    // SCG07EA cover=1,0,7,0,0,0,-1,1,PT:3,2,3:0,3:1
+    //   House=1(Greece), flags=0, 3 PT patrol boats
+    //   Missions: MOVE to wp0, MOVE to wp1
+    // This team is spawned via TACTION_REINFORCEMENTS → Force_Active()
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    // SCG07EA wp0=cell 6794, wp1=cell 6798
+    // (exact cells don't matter for mission transition test)
+    waypoints.set(0, { cx: 58, cy: 52 });
+    waypoints.set(1, { cx: 62, cy: 52 });
+
+    const team = new Team({
+      house: House.GREECE,
+      desiredMembers: [{ type: UnitType.V_PT, count: 3 }],
+      missionList: [
+        { mission: TMISSION_MOVE, data: 0 },
+        { mission: TMISSION_MOVE, data: 1 },
+      ],
+      forcedActive: true,
+    });
+
+    // Spawn at west edge (Greece edge=West in SCG07EA)
+    const pts = [
+      makeEntity(UnitType.V_PT, House.GREECE, 12, 600),
+      makeEntity(UnitType.V_PT, House.GREECE, 12, 624),
+      makeEntity(UnitType.V_PT, House.GREECE, 12, 648),
+    ];
+    for (const pt of pts) {
+      pt.mission = Mission.GUARD; // C++ reinf.cpp:480
+      pt.missionTimer = 0;
+    }
+    for (const pt of pts) team.add(pt);
+
+    // Single ai() tick: activation + advance to MOVE(wp0) + coordinateMove
+    team.ai(waypoints);
+
+    expect(team.isMoving, 'Team should be active').toBe(true);
+    expect(team.currentMission, 'Should be on mission 0 (MOVE to wp0)').toBe(0);
+    expect(team.isReforming, 'No reforming for forcedActive teams').toBe(false);
+
+    // All patrol boats should be in MOVE with timer=0
+    for (let i = 0; i < pts.length; i++) {
+      expect(pts[i].mission, `PT[${i}] should be MOVE`).toBe(Mission.MOVE);
+      expect(pts[i].missionTimer, `PT[${i}] missionTimer should be 0`).toBe(0);
+    }
   });
 });
