@@ -1312,6 +1312,10 @@ export interface MapStructure {
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
   /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
   missionTimer: number;
+  /** C++ building.cpp:990-993 — Gap Generator Arm timer (CDTimerClass).
+   *  When Arm==0, consumes Random_Pick(1, TICKS_PER_SECOND) and resets to
+   *  TICKS_PER_MINUTE * GapRegenInterval + jitter. Only used for GAP buildings. */
+  gapArmTimer?: number;
   /** C++ building.cpp:2438-2455 — entity ID of the auto-spawned helicopter parked on this HPAD.
    *  Used by tickStructuresInterleaved() to process the helicopter interleaved with buildings
    *  (matching C++ Logic array order) instead of in the aircraft pass. */
@@ -1765,6 +1769,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       maxAmmo: -1,
       triggerName: trigName,
       missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick
+      ...(s.type === 'GAP' ? { gapArmTimer: 0 } : {}), // C++ TechnoClass::Arm initialized to 0
     });
     // Mark structure footprint cells as impassable (WALL terrain)
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];

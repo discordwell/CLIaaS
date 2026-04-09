@@ -7843,6 +7843,25 @@ export class Game {
       // so combat RNG is consumed at the correct stream position.
       _updateSingleStructureCombat(combatCtx, s, isLowPower);
 
+      // ── Phase 3: Gap Generator Arm timer (building.cpp:990-993) ──
+      // C++ BuildingClass::AI() checks STRUCT_GAP after Rotation_AI().
+      // Arm is a CDTimerClass (auto-decrements each tick). When Arm==0:
+      //   IsJamming = false;
+      //   Arm = TICKS_PER_MINUTE * Rule.GapRegenInterval + Random_Pick(1, TICKS_PER_SECOND);
+      // TICKS_PER_MINUTE=900, GapRegenInterval=0.1 → base=90. TICKS_PER_SECOND=15.
+      // This consumes 1 RNG call per GAP building per Arm cycle.
+      if (s.type === 'GAP' && s.gapArmTimer !== undefined) {
+        if (s.gapArmTimer > 0) {
+          s.gapArmTimer--;
+        }
+        if (s.gapArmTimer === 0) {
+          // C++ building.cpp:993: Arm = TICKS_PER_MINUTE * Rule.GapRegenInterval + Random_Pick(1, TICKS_PER_SECOND)
+          // 900 * 0.1 = 90 base + Random_Pick(1, 15)
+          const gapJitter = ScenarioRandom.nextInRange(1, 15);
+          s.gapArmTimer = 90 + gapJitter;
+        }
+      }
+
       // ── C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter interleaving ──
       // In C++, the helicopter sits in the Logic array right after its HPAD building.
       // Its AI() (guard timer RNG) fires between this building and the next one.
