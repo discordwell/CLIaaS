@@ -6265,6 +6265,9 @@ export class Game {
             isReinforcable: !!(teamType.flags & 16),
             isSuicide: !!(teamType.flags & 2),
             forcedActive: false,
+            // C++ CREATE_TEAM: team recruits via Team::Recruit() on the next tick,
+            // so activation (Percent_Chance) happens 1 tick later than if pre-filled.
+            delayActivation: true,
           });
           for (const e of recruited) {
             team.add(e);

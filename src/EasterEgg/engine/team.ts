@@ -131,6 +131,12 @@ export class Team {
 
   /** Has any member left the map? (C++ IsLeaveMap) */
   isLeaveMap = false;
+  /** C++ CREATE_TEAM parity: delay activation by 1 tick.
+   *  C++ Create_One_Of creates an empty team; members are recruited via Recruit()
+   *  on the NEXT tick's Team::AI(). The team doesn't activate (Percent_Chance)
+   *  until the tick AFTER members are added. This flag suppresses activation
+   *  for one ai() call, matching C++ timing. */
+  private _skipActivationOnce = false;
 
   /** Is team dissolved? */
   dissolved = false;
@@ -144,6 +150,8 @@ export class Team {
     isSuicide?: boolean;
     origin?: WorldPos | null;
     forcedActive?: boolean;
+    /** Delay activation by 1 tick (for CREATE_TEAM teams that C++ creates empty) */
+    delayActivation?: boolean;
   }) {
     this.id = nextTeamId++;
     this.house = opts.house;
@@ -153,6 +161,9 @@ export class Team {
     this.isReinforcable = opts.isReinforcable ?? true;
     this.isSuicide = opts.isSuicide ?? false;
     this.origin = opts.origin ?? null;
+    if (opts.delayActivation) {
+      this._skipActivationOnce = true;
+    }
     if (opts.forcedActive) {
       // C++ team.h:215 — Force_Active() sets BOTH flags:
       //   IsForcedActive = true; IsUnderStrength = false;
@@ -345,7 +356,11 @@ export class Team {
     }
 
     // ── Activate at full strength (C++ team.cpp:627-652) ──
-    if (!this.isMoving && (this.isFullStrength || this.isForcedActive)) {
+    // C++ CREATE_TEAM: team is empty at creation, recruits on next tick, activates on tick after.
+    // _skipActivationOnce delays activation by 1 ai() call to match this timing.
+    if (this._skipActivationOnce) {
+      this._skipActivationOnce = false;
+    } else if (!this.isMoving && (this.isFullStrength || this.isForcedActive)) {
       this.isMoving = true;
       this.isHasBeen = true;
       this.isUnderStrength = false;
