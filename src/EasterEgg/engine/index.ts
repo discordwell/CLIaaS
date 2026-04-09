@@ -1751,31 +1751,154 @@ export class Game {
     // at activation, Mission_Move → Random_Pick(0,2) via Commence Timer reset).
     _updateAllTeams(this.waypoints, { structures: this.structures });
 
-    // C++ Logic.AI() processes ALL objects in a single interleaved loop:
-    //   Logic[0..N-1]:  units + infantry (entity AI) — from scenario INI
-    //   Logic[N..N+B-1]: buildings (structure mission timers)
-    //   Logic[N+B..]:    reinforcement entities + aircraft
-    // In C++, entities spawned after scenario load (reinforcements, created teams)
-    // are added to Logic AFTER buildings, so they're processed after building timers.
-    // We replicate this with three entity passes:
-    //   Pass 1: pre-building entities (original scenario entities, non-aircraft)
-    //   Pass 2: structure timers + combat (tickStructuresInterleaved — timer + firing per building)
-    //   Pass 3: post-building entities (reinforcements, non-aircraft) + aircraft
+    // C++ Logic.AI() (logic.cpp:284) processes ALL objects in a single loop from
+    // Logic[0] to Logic[Count()-1]. Read_Scenario_INI loads: Units → Vessels →
+    // Infantry → Buildings, so the Logic array order is:
+    //   [0..N-1]    units + vessels + infantry (scenario INI entities)
+    //   [N..N+B-1]  buildings (structure timer + Firing_AI per building)
+    //   [N+B..]     reinforcements/teams (appended at runtime)
+    // Aircraft from HPAD buildings sit in the Logic array adjacent to their HPAD
+    // and are processed interleaved with buildings.
     //
-    // Pass 1: pre-building non-aircraft entities (scenario INI units + infantry)
-    let _entityIdx = 0;
-    for (let i = 0; i < this._preBuildingEntityCount; i++) {
-      const entity = this.entities[i];
-      if (!entity || entity.isAirUnit) continue;
-      // RNG audit: set source tag matching C++ g_rng_source_tag convention
-      if (ScenarioRandom._tagLogging) {
-        ScenarioRandom._sourceTag = entity.stats.isInfantry ? 10000 + _entityIdx : 11000 + _entityIdx;
-      }
-      _entityIdx++;
-      this._processGroundEntity(entity);
-    }
+    // We use a unified logicIdx counter across all phases to match C++ Logic array
+    // indices for RNG source tags:
+    //   10000 + logicIdx  infantry
+    //   11000 + logicIdx  units (vehicles)
+    //   12000 + logicIdx  buildings
+    //   13000 + logicIdx  aircraft
+    //   14000 + logicIdx  vessels
+    this._runCombat(ctx => {
+      let logicIdx = 0;
 
-    // Process deferred transport loads (remove loaded passengers from world)
+      // ── Phase 1: pre-building entities (scenario INI units + infantry, skip aircraft) ──
+      for (let i = 0; i < this._preBuildingEntityCount; i++) {
+        const entity = this.entities[i];
+        if (!entity || entity.isAirUnit) continue;
+        if (ScenarioRandom._tagLogging) {
+          ScenarioRandom._sourceTag = entity.stats.isInfantry
+            ? 10000 + logicIdx
+            : entity.isNavalUnit
+              ? 14000 + logicIdx
+              : 11000 + logicIdx;
+        }
+        logicIdx++;
+        this._processGroundEntity(entity);
+      }
+
+      // ── Phase 2: ALL structures (timer tick + combat + HPAD helicopter) ──
+      // C++ BuildingClass::AI() processes timer tick + Firing_AI sequentially PER
+      // BUILDING. HPAD helicopters sit in the Logic array right after their HPAD
+      // building and are processed between buildings.
+      const GUARD_NORMAL_DELAY = 42;
+      const GUARD_AA_DELAY = 14;
+      const isLowPower = ctx.powerConsumed > ctx.powerProduced;
+
+      for (const s of this.structures) {
+        if (ScenarioRandom._tagLogging) {
+          ScenarioRandom._sourceTag = 12000 + logicIdx;
+        }
+        logicIdx++;
+        if (!s.alive) continue;
+        if (s.buildProgress !== undefined) continue;
+        if (s.sellProgress !== undefined) continue;
+
+        // Timer tick + jitter RNG (MissionClass::AI)
+        if (s.missionTimer > 0) {
+          s.missionTimer--;
+        }
+        if (s.missionTimer <= 0) {
+          const jitter = ScenarioRandom.nextInRange(0, 2);
+          if (s.weapon) {
+            s.missionTimer = GUARD_AA_DELAY + jitter;
+          } else if (s.type === 'FIX') {
+            s.missionTimer = GUARD_NORMAL_DELAY + jitter;
+          } else {
+            s.missionTimer = GUARD_NORMAL_DELAY * 3 + jitter;
+          }
+        }
+
+        // Firing_AI — weapon targeting and fire
+        _updateSingleStructureCombat(ctx, s, isLowPower);
+
+        // HPAD helicopter interleaving (building.cpp:2438-2455)
+        if (s.hpadHelicopterId !== undefined) {
+          const heli = this.entityById.get(s.hpadHelicopterId);
+          if (heli && heli.alive && heli.isAirUnit) {
+            if (ScenarioRandom._tagLogging) {
+              ScenarioRandom._sourceTag = 13000 + logicIdx;
+            }
+            logicIdx++;
+            heli.rotTickedThisFrame = false;
+            heli.turretRotTickedThisFrame = false;
+            if (heli.isInRecoilState) heli.isInRecoilState = false;
+            if (!heli.inLimbo) {
+              if (heli.mission === Mission.GUARD && heli.aircraftState === 'landed') {
+                if (heli.missionTimer > 0) {
+                  heli.missionTimer--;
+                }
+                if (heli.missionTimer <= 0) {
+                  const hasTarget = (heli.target?.alive) ||
+                    (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                  if (hasTarget) {
+                    heli.mission = Mission.ATTACK;
+                    heli.missionTimer = 1;
+                  } else {
+                    heli.target = null;
+                    heli.targetStructure = null;
+                    this._heliGuardScan(heli);
+                    if (heli.attackCooldown > 0) {
+                      heli.missionTimer = heli.attackCooldown;
+                    } else {
+                      heli.missionTimer = GUARD_NORMAL_DELAY + ScenarioRandom.nextInRange(0, 2);
+                    }
+                  }
+                }
+              }
+              this.updateEntity(heli);
+              heli.tickAnimation();
+            }
+            heli._processedInBuildingPass = true;
+          }
+        }
+      }
+
+      // ── Phase 3: post-building entities (reinforcements/teams, skip aircraft) ──
+      for (let i = this._preBuildingEntityCount; i < this.entities.length; i++) {
+        const entity = this.entities[i];
+        if (!entity || entity.isAirUnit) continue;
+        if (ScenarioRandom._tagLogging) {
+          ScenarioRandom._sourceTag = entity.stats.isInfantry
+            ? 10000 + logicIdx
+            : entity.isNavalUnit
+              ? 14000 + logicIdx
+              : 11000 + logicIdx;
+        }
+        logicIdx++;
+        this._processGroundEntity(entity);
+      }
+
+      // ── Phase 4: aircraft (skip HPAD helicopters already processed in Phase 2) ──
+      for (const entity of this.entities) {
+        if (!entity.alive || !entity.isAirUnit) continue;
+        if (entity._processedInBuildingPass) {
+          entity._processedInBuildingPass = false; // reset for next tick
+          continue;
+        }
+        if (ScenarioRandom._tagLogging) {
+          ScenarioRandom._sourceTag = 13000 + logicIdx;
+        }
+        logicIdx++;
+        entity.rotTickedThisFrame = false;
+        entity.turretRotTickedThisFrame = false;
+        if (entity.isInRecoilState) entity.isInRecoilState = false;
+        if (entity.inLimbo) continue;
+        this.updateEntity(entity);
+        entity.tickAnimation();
+      }
+    });
+
+    // Deferred transport loads (remove loaded passengers from world) — after the
+    // unified loop since these don't consume RNG.
     if (this._pendingTransportLoads.length > 0) {
       const loadSet = new Set(this._pendingTransportLoads);
       for (const id of loadSet) {
@@ -1798,54 +1921,6 @@ export class Game {
       }
     }
 
-    // C++ BuildingClass::AI() processes timer tick + Firing_AI sequentially PER BUILDING.
-    // This interleaved method replaces the old separate tickStructureMissionTimers() +
-    // _updateStructureCombat() bulk passes, which caused ±2 RNG divergence on SCG03EA/SCG13EA
-    // because building combat RNG was consumed at a shifted stream position.
-    this._runCombat(ctx => this.tickStructuresInterleaved(ctx));
-
-    // Pass 3: post-building non-aircraft entities (reinforcements, created teams).
-    // In C++, these entities were added to the Logic array AFTER buildings, so they
-    // are processed after building timers but before aircraft.
-    for (let i = this._preBuildingEntityCount; i < this.entities.length; i++) {
-      const entity = this.entities[i];
-      if (!entity || entity.isAirUnit) continue;
-      // RNG audit: set source tag (post-building entities use 11000+idx to match C++ unit/infantry tags)
-      if (ScenarioRandom._tagLogging) {
-        ScenarioRandom._sourceTag = entity.stats.isInfantry ? 10000 + _entityIdx : 11000 + _entityIdx;
-      }
-      _entityIdx++;
-      this._processGroundEntity(entity);
-    }
-
-    // Pass 4: Aircraft entities (processed AFTER all ground entities and buildings in C++ Logic layer)
-    // Skip HPAD helicopters already processed in the building pass (tickStructuresInterleaved).
-    let _aircraftIdx = 0;
-    for (const entity of this.entities) {
-      if (!entity.alive || !entity.isAirUnit) continue;
-      // C++ building.cpp:2438-2455 — HPAD helicopters were processed interleaved with buildings.
-      // Skip them here to avoid double-processing and RNG stream corruption.
-      if (entity._processedInBuildingPass) {
-        entity._processedInBuildingPass = false; // reset for next tick
-        continue;
-      }
-      // RNG audit: set source tag for aircraft (C++ 13000 + Logic index)
-      if (ScenarioRandom._tagLogging) {
-        ScenarioRandom._sourceTag = 13000 + _aircraftIdx;
-      }
-      _aircraftIdx++;
-      entity.rotTickedThisFrame = false;
-      entity.turretRotTickedThisFrame = false;
-      if (entity.isInRecoilState) entity.isInRecoilState = false;
-      if (entity.inLimbo) continue;
-      this.updateEntity(entity);
-      entity.tickAnimation();
-    }
-
-    // Aircraft mission timers are already handled by updateEntity() in the aircraft
-    // processing pass above (line 1822). Removed duplicate timer decrement + RNG reset
-    // that caused aircraft to consume double RNG calls vs C++.
-
     // RNG audit: per-tick summary (after all entity/structure/aircraft processing)
     if (this.tick >= 1 && this.tick <= 15 && ScenarioRandom._tagLogging && !ScenarioRandom._tagLoggingExternal) {
       const tickStart = (this as any)._rngAuditTickStart as number;
@@ -1860,6 +1935,7 @@ export class Game {
         else if (tag >= 11000 && tag < 12000) cat = 'unit[' + (tag - 11000) + ']';
         else if (tag >= 12000 && tag < 13000) cat = 'building[' + (tag - 12000) + ']';
         else if (tag >= 13000 && tag < 14000) cat = 'aircraft[' + (tag - 13000) + ']';
+        else if (tag >= 14000 && tag < 15000) cat = 'vessel[' + (tag - 14000) + ']';
         else cat = 'other[' + tag + ']';
         tagCounts[cat] = (tagCounts[cat] || 0) + 1;
       }

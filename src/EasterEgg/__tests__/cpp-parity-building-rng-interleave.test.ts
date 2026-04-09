@@ -41,15 +41,18 @@ describe('Building RNG Interleaving — C++ parity', () => {
     expect(indexSource).toContain('_updateSingleStructureCombat(combatCtx, s, isLowPower)');
   });
 
-  it('game loop uses interleaved method instead of separate bulk passes', () => {
-    // The game loop (around line 1800) should call tickStructuresInterleaved,
-    // NOT the old separate tickStructureMissionTimers + _updateStructureCombat pattern
+  it('game loop uses unified loop with interleaved building processing', () => {
+    // The unified loop inlines building timer+combat processing inside _runCombat,
+    // matching C++ Logic.AI() single-loop ordering. The old separate
+    // tickStructureMissionTimers + _updateStructureCombat pattern must NOT appear.
     const gameLoopSection = indexSource.slice(
-      indexSource.indexOf('// Pass 1: pre-building'),
-      indexSource.indexOf('// Pass 3:'),
+      indexSource.indexOf('Phase 1: pre-building'),
+      indexSource.indexOf('Phase 4: aircraft'),
     );
-    expect(gameLoopSection).toContain('tickStructuresInterleaved');
-    // The old separate bulk combat call should NOT appear in this section
+    // Building timer+combat is inlined in Phase 2 (no longer delegated to tickStructuresInterleaved)
+    expect(gameLoopSection).toContain('_updateSingleStructureCombat(ctx, s, isLowPower)');
+    expect(gameLoopSection).toContain('ScenarioRandom.nextInRange(0, 2)');
+    // The old separate bulk passes must NOT appear
     expect(gameLoopSection).not.toContain('this.tickStructureMissionTimers()');
     expect(gameLoopSection).not.toMatch(
       /this\._runCombat\(ctx => _updateStructureCombat\(ctx\)\)/,

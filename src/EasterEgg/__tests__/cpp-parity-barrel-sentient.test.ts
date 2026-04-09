@@ -68,20 +68,21 @@ describe('BARL/BRL3 barrel buildings — C++ parity', () => {
     adapter.step(1);
     ScenarioRandom._tagLogging = false;
 
-    // Count building RNG calls — each building should have consumed at least 1 call
-    const buildingsWithRNG = new Set<number>();
+    // Count building RNG calls — each building should have consumed at least 1 call.
+    // Tags are 12000 + logicIdx where logicIdx is a unified counter across all phases
+    // (matching C++ Logic array indices), so building indices start after pre-building
+    // entities rather than at 0.
+    const buildingTags = new Set<number>();
     for (const [, tag] of ScenarioRandom._seedLog) {
       if (tag >= 12000 && tag < 13000) {
-        buildingsWithRNG.add(tag - 12000);
+        buildingTags.add(tag);
       }
     }
 
     // C++ parity: ALL 141 buildings are sentient and consume guard timer RNG.
-    // Every building index 0-140 should appear in the RNG log.
-    expect(buildingsWithRNG.size).toBe(141);
-    for (let i = 0; i < 141; i++) {
-      expect(buildingsWithRNG.has(i), `building ${i} should consume RNG`).toBe(true);
-    }
+    // The unified logicIdx means building tags are offset by pre-building entity count,
+    // but there must be exactly 141 distinct building tags (one per structure).
+    expect(buildingTags.size).toBe(141);
   });
 
   it('barrel buildings use non-weapon guard delay (Normal_Delay*3 = 126 ticks)', async () => {

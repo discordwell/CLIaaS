@@ -86,8 +86,8 @@ describe('HPAD Auto-Helicopter Interleaving — C++ parity', () => {
     expect(heliIdx).toBeGreaterThan(combatIdx);
   });
 
-  it('Pass 4 skips entities with _processedInBuildingPass and resets flag', () => {
-    const pass4Start = indexSource.indexOf('// Pass 4: Aircraft entities');
+  it('Phase 4 skips entities with _processedInBuildingPass and resets flag', () => {
+    const pass4Start = indexSource.indexOf('Phase 4: aircraft');
     expect(pass4Start).toBeGreaterThan(-1);
     const pass4Section = indexSource.slice(pass4Start, pass4Start + 1000);
     // Must check _processedInBuildingPass
