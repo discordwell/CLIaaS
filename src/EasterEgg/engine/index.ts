@@ -5037,6 +5037,73 @@ export class Game {
     this._runMissionAI(ctx => _updateGuard(ctx, entity, timerFired));
   }
 
+  /** C++ Target_Something_Nearby(THREAT_RANGE) for landed HPAD helicopters.
+   *  Mirrors the enemy scan in FootClass::Mission_Guard (foot.cpp:593) but
+   *  only SETS entity.target — does NOT fire inline or change mission.
+   *  In C++, Target_Something_Nearby is a side-effect function that sets TarCom;
+   *  the actual mission transition happens on the NEXT Mission_Guard call when
+   *  AircraftClass::Mission_Guard sees Target_Legal(TarCom) at line 3773.
+   *
+   *  Also handles C++ foot.cpp:594 Random_Animate() RNG consumption when no
+   *  target is found (infantry idle animation timer + pick). Aircraft are not
+   *  infantry so Random_Animate is a no-op for them — no RNG consumed. */
+  private _heliGuardScan(heli: Entity): void {
+    this._runMissionAI(ctx => {
+      // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE)
+      // THREAT_RANGE → uses weapon range as scan radius
+      const weaponScanRange = Math.max(heli.weapon?.range ?? 0, heli.weapon2?.range ?? 0) || heli.stats.sight;
+      const scanRange = heli.stats.guardRange ?? weaponScanRange;
+      let bestTarget: Entity | null = null;
+      let bestScore = -Infinity;
+      for (const other of ctx.entities) {
+        if (!other.alive || other.inLimbo) continue;
+        if (ctx.entitiesAllied(heli, other)) continue;
+        // C++ techno.cpp:1476-1479: units on sleep/harmless missions are invisible
+        if (other.mission === Mission.SLEEP) continue;
+        // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+        if (other.cloakState === CloakState.CLOAKED) continue;
+        // C++ techno.cpp:1511-1523: range check using <= (inclusive)
+        const dist = worldDist(heli.pos, other.pos);
+        if (dist > scanRange) continue;
+        const score = ctx.threatScore(heli, other, dist);
+        if (score > bestScore) {
+          bestTarget = other; bestScore = score;
+        }
+      }
+      if (bestTarget) {
+        // C++ foot.cpp:593: Target_Something_Nearby sets TarCom as side effect.
+        // The actual ATTACK transition happens on the next timer fire.
+        heli.target = bestTarget;
+        return;
+      }
+
+      // C++ foot.cpp:593-594: if !Target_Something_Nearby → Random_Animate()
+      // C++ infantry.cpp:1748: Random_Animate only runs for infantry (isReadyToRandomAnimate).
+      // Aircraft are NOT infantry, so Random_Animate() is a no-op → no RNG consumed.
+
+      // Also check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
+      if (heli.weapon) {
+        let bestStruct: MapStructure | null = null;
+        let bestStructDist = Infinity;
+        for (const str of ctx.structures) {
+          if (!str.alive) continue;
+          if (str.house === House.Neutral) continue;
+          if (ctx.isAllied(heli.house, str.house)) continue;
+          const sPos = { x: str.cx * CELL_SIZE + CELL_SIZE, y: str.cy * CELL_SIZE + CELL_SIZE };
+          const dist = worldDist(heli.pos, sPos);
+          if (dist > scanRange) continue;
+          if (dist < bestStructDist) {
+            bestStructDist = dist;
+            bestStruct = str;
+          }
+        }
+        if (bestStruct) {
+          heli.targetStructure = bestStruct;
+        }
+      }
+    });
+  }
+
   /** Submarine cloaking state machine — manages cloak transitions for SS/MSUB.
    *  Auto-cloaks when idle + no enemies within 3 cells + sonarPulseTimer === 0.
    *  Auto-uncloaks when firing or taking damage (handled in entity.takeDamage). */
@@ -7695,6 +7762,15 @@ export class Game {
       // In C++, the helicopter sits in the Logic array right after its HPAD building.
       // Its AI() (guard timer RNG) fires between this building and the next one.
       // Process it here so its RNG calls land at the correct stream position.
+      //
+      // C++ aircraft.cpp:3678 Mission_Guard for landed AI helicopters:
+      //   Height==0, !IsHuman → aircraft-specific checks, then FootClass::Mission_Guard:
+      //   1. If TarCom valid → Assign_Mission(MISSION_ATTACK), return 1 (line 3773)
+      //   2. If no target → FootClass::Mission_Guard (foot.cpp:589):
+      //      a. Target_Something_Nearby(THREAT_RANGE) sets TarCom (side effect)
+      //      b. If no target → Random_Animate() consumes idle RNG
+      //      c. Returns Normal_Delay(42) + Random_Pick(0,2)
+      //   3. Next timer fire: TarCom valid → ATTACK → takeoff → fly → attack → RTB → rearm → land
       if (s.hpadHelicopterId !== undefined) {
         const heli = this.entityById.get(s.hpadHelicopterId);
         if (heli && heli.alive && heli.isAirUnit) {
@@ -7702,6 +7778,51 @@ export class Game {
           heli.turretRotTickedThisFrame = false;
           if (heli.isInRecoilState) heli.isInRecoilState = false;
           if (!heli.inLimbo) {
+            // C++ MissionClass::AI — mission timer + guard scan for landed helicopter.
+            // Aircraft in 'landed' state return true from updateAircraft() immediately,
+            // which means updateEntity() never runs the mission timer or guard logic.
+            // We run it here to match C++ where the helicopter's AI() fires in the
+            // building pass (Logic array ordering).
+            if (heli.mission === Mission.GUARD && heli.aircraftState === 'landed') {
+              // Note: attack cooldowns are ticked by updateAircraft() (aircraft.ts:398-399)
+              // which runs for ALL aircraft states including 'landed'. No need to tick here.
+
+              // C++ MissionClass::AI: decrement timer, fire handler when 0
+              if (heli.missionTimer > 0) {
+                heli.missionTimer--;
+              }
+              if (heli.missionTimer <= 0) {
+                // C++ aircraft.cpp:3773: if (Target_Legal(TarCom)) → ATTACK, return 1
+                // Previous scan set entity.target/targetStructure — helicopter takes off.
+                const hasTarget = (heli.target?.alive) ||
+                  (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                if (hasTarget) {
+                  heli.mission = Mission.ATTACK;
+                  // Timer=1: C++ returns 1 so next AI() tick processes the new ATTACK mission
+                  heli.missionTimer = 1;
+                } else {
+                  heli.target = null; // clear stale target
+                  heli.targetStructure = null;
+                  // C++ aircraft.cpp:3781-3807 checks:
+                  //   - !Is_Weapon_Equipped → sit (HIND/HELI have weapons, skip)
+                  //   - Height==0 && !In_Radio_Contact → scatter (helicopter is docked, skip)
+                  //   - House->State != STATE_ATTACKED → Find_Juicy_Target (harvester hunt)
+                  // Then falls through to FootClass::Mission_Guard (foot.cpp:589):
+                  //   Target_Something_Nearby(THREAT_RANGE) — sets TarCom as side effect
+                  this._heliGuardScan(heli);
+
+                  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0,2))
+                  // dtime = Normal_Delay = 42 for aircraft (rules.ini [Guard] Rate=.050)
+                  if (heli.attackCooldown > 0) {
+                    heli.missionTimer = heli.attackCooldown;
+                  } else {
+                    heli.missionTimer = GUARD_NORMAL_DELAY + ScenarioRandom.nextInRange(0, 2);
+                  }
+                }
+              }
+            }
+            // updateEntity runs the aircraft state machine (takeoff on ATTACK,
+            // flight, combat, RTB, landing, rearming) and idle timer decrements.
             this.updateEntity(heli);
             heli.tickAnimation();
           }
