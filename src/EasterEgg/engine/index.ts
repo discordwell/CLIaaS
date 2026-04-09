@@ -1820,6 +1820,16 @@ export class Game {
         // Firing_AI — weapon targeting and fire
         _updateSingleStructureCombat(ctx, s, isLowPower);
 
+        // C++ building.cpp:990-993: Gap Generator Arm timer
+        // When Arm==0, consume Random_Pick(1, TICKS_PER_SECOND) and reset Arm.
+        if (s.type === 'GAP' && s.gapArmTimer !== undefined) {
+          if (s.gapArmTimer > 0) s.gapArmTimer--;
+          if (s.gapArmTimer === 0) {
+            const gapJitter = ScenarioRandom.nextInRange(1, 15); // TICKS_PER_SECOND = 15
+            s.gapArmTimer = 90 + gapJitter; // ~90 ticks between gap updates
+          }
+        }
+
         // HPAD helicopter interleaving (building.cpp:2438-2455)
         if (s.hpadHelicopterId !== undefined) {
           const heli = this.entityById.get(s.hpadHelicopterId);
