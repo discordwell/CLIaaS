@@ -6166,13 +6166,13 @@ export class Game {
       }
       if (entity.teamMissions.length > 0) teamEntities.push(entity);
     }
-    // C++ parity: create a Team instance for reinforcement entities with team missions.
-    // C++ Create_One_Of() only creates a TeamClass when Number < MaxAllowed (teamtype.cpp:362).
-    // MaxAllowed=0 means no team instance — entities just get their mission scripts.
+    // C++ parity: ALWAYS create a Team for reinforcements (TACTION_REINFORCEMENTS).
+    // C++ reinf.cpp:171-173: _Create_Group() does `new TeamClass(teamtype)` directly
+    // (NOT Create_One_Of which checks MaxAllowed). Then Force_Active() is called.
+    // This is different from TACTION_CREATE_TEAM which uses Create_One_Of + ScenarioInit.
     if (teamEntities.length > 0 && result.spawnedTeamIdx !== undefined) {
       const teamType = this.teamTypes[result.spawnedTeamIdx];
-      const maxAllowed = teamType?.maxAllowed ?? 0;
-      if (maxAllowed > 0) {
+      if (teamType) {
         const teamHouse = teamEntities[0].house;
         const memberCounts = new Map<string, number>();
         for (const e of teamEntities) {
@@ -6185,7 +6185,8 @@ export class Game {
           missionList: teamEntities[0].teamMissions,
           isReinforcable: !!(teamType.flags & 16),
           isSuicide: !!(teamType.flags & 2),
-          forcedActive: false,
+          // C++ reinf.cpp:173: team->Force_Active() — team activates immediately
+          forcedActive: true,
         });
         for (const e of teamEntities) {
           team.add(e);
