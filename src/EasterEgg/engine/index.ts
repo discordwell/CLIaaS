@@ -3797,6 +3797,9 @@ export class Game {
         // C++ foot.cpp:589-634: Mission_Guard runs when Timer==0.
         // Firing_AI and cooldown run every tick (inside updateGuard).
         // Pass missionTimerFired so updateGuard only scans when timer fires.
+        // C++ foot.cpp:634: return value uses Arm from BEFORE Firing_AI runs.
+        // Capture attackCooldown before updateGuard (which may fire weapon + set cooldown).
+        { const armBeforeScan = entity.attackCooldown;
         this.updateGuard(entity, missionTimerFired);
         if (missionTimerFired) {
           // C++ foot.cpp:597-634: dtime = MissionControl[Mission].Normal_Delay()
@@ -3817,10 +3820,11 @@ export class Game {
               (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
             guardDelay = isInfAA ? 14 : 42;
           }
-          entity.missionTimer = entity.attackCooldown > 0
-            ? entity.attackCooldown
+          entity.missionTimer = armBeforeScan > 0
+            ? armBeforeScan
             : guardDelay + ScenarioRandom.nextInRange(0, 2);
         }
+        } // close armBeforeScan block
         break;
       case Mission.AREA_GUARD:
         this.updateAreaGuard(entity, missionTimerFired);
