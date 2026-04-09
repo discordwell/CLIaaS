@@ -1076,17 +1076,15 @@ describe('Team object AI behavior after spawn (team.cpp)', () => {
     const e = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     team.add(e);
 
-    // First ai() tick: composition check + activation (isMoving=true, isNextMission=true)
+    // C++ Force_Active() sets IsUnderStrength=false (team.h:215), preventing
+    // spurious isReforming. Activation + advance + execute all happen on one tick.
     team.ai();
     expect(team.isMoving, 'Team should activate on first tick').toBe(true);
 
-    // Second ai() tick: advance mission (set timeOut=450), then execute GUARD (timeOut--)
-    // C++ team.cpp processes both advance and execute in the same AI() call,
-    // so timeOut is set to data*90 then immediately decremented by 1.
-    team.ai();
-
     // timeOut should be (5 * 90) - 1 = 449 after one tick of execution
     // The initial value is data * 90 = 450 (C++ team.cpp:710: TICKS_PER_MINUTE/10 = 90)
+    // C++ team.cpp processes advance and execute in the same AI() call,
+    // so timeOut is set to data*90 then immediately decremented by 1.
     expect(
       team.timeOut,
       'Guard timeout = data*90 - 1 after advance+execute in same tick',
@@ -1571,5 +1569,85 @@ describe('C++ divergence: Calculated_Cell SOURCE_* vs TS inferClosestMapEdge', (
       cell!.cy,
       'C++ infers south from waypoint (cy=85 near bottom), house edge "north" is fallback only',
     ).toBe(mapBounds.y + mapBounds.h);
+  });
+});
+
+// =============================================================================
+// Section 14: Force_Active sets IsUnderStrength=false (team.h:215)
+// C++ team.h:215: void Force_Active(void) {IsForcedActive=true;IsUnderStrength=false;};
+// Without this, the composition check in AI() sees old_under(true) != IsUnderStrength(false)
+// after members are added, spuriously setting IsReforming=true and delaying mission advance
+// by 1 tick. This shifts RNG position, causing ±1 regression on SCG01EA/SCG09EA at t2000.
+// =============================================================================
+
+describe('Force_Active parity: IsUnderStrength=false (team.h:215)', () => {
+  it('forcedActive team constructor sets isUnderStrength=false matching C++ Force_Active()', () => {
+    // C++ team.h:215: Force_Active() sets IsForcedActive=true AND IsUnderStrength=false
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.I_E1, count: 2 }],
+      missionList: [{ mission: TMISSION_GUARD, data: 5 }],
+      forcedActive: true,
+    });
+
+    expect(team.isForcedActive, 'IsForcedActive should be true').toBe(true);
+    expect(team.isUnderStrength, 'IsUnderStrength should be false (C++ Force_Active sets it)').toBe(false);
+  });
+
+  it('non-forced team constructor leaves isUnderStrength=true (default)', () => {
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.I_E1, count: 2 }],
+      missionList: [{ mission: TMISSION_GUARD, data: 5 }],
+    });
+
+    expect(team.isForcedActive).toBe(false);
+    expect(team.isUnderStrength, 'Default isUnderStrength should be true').toBe(true);
+  });
+
+  it('forcedActive team does NOT set isReforming on first ai() tick', () => {
+    // The bug: without IsUnderStrength=false, old_under(true) != IsUnderStrength(false)
+    // after composition check → IsReforming=true → mission advance delayed 1 tick
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.I_E1, count: 2 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+
+    const e1 = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    const e2 = makeEntity(UnitType.I_E1, House.USSR, 120, 100);
+    team.add(e1);
+    team.add(e2);
+
+    team.ai();
+
+    // C++ parity: isReforming should be false (no under-strength transition)
+    expect(team.isReforming, 'isReforming should be false — no spurious transition').toBe(false);
+    // Team should have activated and advanced to first mission in one tick
+    expect(team.isMoving, 'Team should be moving after activation').toBe(true);
+    expect(team.currentMission, 'Should advance to mission 0 on first tick').toBe(0);
+  });
+
+  it('forcedActive team advances mission on same tick as activation (C++ team.cpp:627-753)', () => {
+    // C++ sequence: activation gate fires → isNextMission=true → advance block runs
+    // All in the same AI() call, no reforming delay
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.I_E1, count: 1 }],
+      missionList: [{ mission: TMISSION_GUARD, data: 3 }],
+      forcedActive: true,
+    });
+
+    const e = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    team.add(e);
+
+    team.ai();
+
+    // Should have activated + advanced + executed GUARD in one tick
+    expect(team.isMoving).toBe(true);
+    expect(team.currentMission).toBe(0);
+    // GUARD with data=3: timeOut = 3*90 = 270, then decremented once = 269
+    expect(team.timeOut).toBe(3 * 90 - 1);
   });
 });

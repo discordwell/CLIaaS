@@ -1627,21 +1627,20 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
   }
 }
 
-/** Structure auto-fire — pillboxes, guard towers, tesla coils, SAM/AGUN fire at nearby enemies.
- *  Extracted from Game.updateStructureCombat (index.ts). */
-export function updateStructureCombat(ctx: CombatContext): void {
-  // C++ house.cpp:4164: low power when Power < Drain (including Power=0 with Drain>0)
-  const isLowPower = ctx.powerConsumed > ctx.powerProduced;
-  for (const s of ctx.structures) {
-    if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) continue;
+/** Per-building combat tick — extracted so it can be called per-building right after its
+ *  mission timer tick, matching C++ BuildingClass::AI() which runs timer + Firing_AI
+ *  sequentially for each building before advancing to the next.
+ *  C++ building.cpp:Firing_AI + building.cpp:5347 Rotation_AI */
+export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure, isLowPower: boolean): void {
+    if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) return;
     // C++ parity PW1/PW3: powered defenses (TSLA, AGUN, GAP, PDOX, IRON, DOME) cannot fire during any power deficit.
     // Unpowered defenses (GUN, PBOX, HBOX, FTUR) always fire regardless of power.
     if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
-      continue;
+      return;
     }
     // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
     if (s.ammo === 0 && s.maxAmmo > 0) { s.ammo = s.maxAmmo; }
-    if (s.ammo === 0) continue; // out of ammo (shouldn't reach here after reload)
+    if (s.ammo === 0) return; // out of ammo (shouldn't reach here after reload)
 
     // Turret rotation tick (every frame, independent of cooldown)
     // C++ building.cpp:5347-5363 Rotation_AI + facing.cpp:142-183 Rotation_Adjust:
@@ -1671,7 +1670,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
 
     if (s.attackCooldown > 0) {
       if (!isLowPower || ctx.tick % 2 === 0) s.attackCooldown--;
-      continue;
+      return;
     }
 
     const sx = s.cx * CELL_SIZE + CELL_SIZE;
@@ -1730,7 +1729,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
         // C++ Mission_Attack returns FIRE_FACING when turret is not aligned with target,
         // delaying fire until turret finishes rotating (building.cpp:2312-2318).
         // Both turretDir and desiredTurretDir are in 8-dir (0-7); compare directly.
-        if (s.turretDir !== undefined && s.turretDir !== s.desiredTurretDir) continue; // turret not aligned — wait
+        if (s.turretDir !== undefined && s.turretDir !== s.desiredTurretDir) return; // turret not aligned — wait
       }
       // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
       // C++ house.cpp:293,303: ROFBias scales rearm delay
@@ -1841,5 +1840,15 @@ export function updateStructureCombat(ctx: CombatContext): void {
         });
       }
     }
+}
+
+/** Structure auto-fire — pillboxes, guard towers, tesla coils, SAM/AGUN fire at nearby enemies.
+ *  Bulk wrapper that calls updateSingleStructureCombat for each structure.
+ *  NOTE: For C++ parity, prefer calling updateSingleStructureCombat per-building
+ *  interleaved with timer ticks (see tickStructuresInterleaved in index.ts). */
+export function updateStructureCombat(ctx: CombatContext): void {
+  const isLowPower = ctx.powerConsumed > ctx.powerProduced;
+  for (const s of ctx.structures) {
+    updateSingleStructureCombat(ctx, s, isLowPower);
   }
 }

@@ -154,7 +154,14 @@ export class Team {
     this.isSuicide = opts.isSuicide ?? false;
     this.origin = opts.origin ?? null;
     if (opts.forcedActive) {
+      // C++ team.h:215 — Force_Active() sets BOTH flags:
+      //   IsForcedActive = true; IsUnderStrength = false;
+      // Without IsUnderStrength=false, the composition check in AI() sees
+      // old_under(true) != IsUnderStrength(false) after members are added,
+      // which spuriously sets IsReforming=true, delaying mission advance by
+      // 1 tick and shifting RNG position.
       this.isForcedActive = true;
+      this.isUnderStrength = false;
     }
   }
 

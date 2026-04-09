@@ -1524,8 +1524,9 @@ describe('Sidebar Repair/Sell Buttons', () => {
 // =========================================================================
 describe('Structure Defense During Sell', () => {
   it('defensive structures skip combat while being sold', () => {
-    // In updateStructureCombat (combat.ts), structures with sellProgress are skipped
-    const idx = combatSource.indexOf('export function updateStructureCombat');
+    // In updateSingleStructureCombat (combat.ts), structures with sellProgress are skipped.
+    // (Refactored from updateStructureCombat bulk loop to per-building function for C++ RNG parity.)
+    const idx = combatSource.indexOf('export function updateSingleStructureCombat');
     expect(idx).toBeGreaterThan(-1);
     const chunk = combatSource.slice(idx, idx + 3000);
     expect(chunk).toContain('sellProgress');

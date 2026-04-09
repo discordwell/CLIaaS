@@ -177,15 +177,12 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
       team.add(e);
 
-      // Tick 1: composition check → activation → reforming (isReforming=true
-      //   because isUnderStrength transitioned from true to false).
-      //   Advance/execute blocks skipped while reforming.
-      //   Regroup runs, sets isReforming=false.
-      team.ai();
-
-      // Tick 2: advance block runs (isMoving, !isReforming, isNextMission)
-      //   → currentMission=0 (GUARD), timeOut = data * 90 = 90
-      //   Execute block runs GUARD: coordinateRegroup, timeOut-- → 89
+      // C++ Force_Active() sets IsUnderStrength=false (team.h:215), so there is
+      // no spurious IsReforming. Activation + mission advance + execute all happen
+      // on the FIRST ai() tick:
+      //   activate → currentMission=-1, isNextMission=true
+      //   advance  → currentMission=0 (GUARD), timeOut = 1*90 = 90
+      //   execute  → GUARD: coordinateRegroup, timeOut-- → 89
       team.ai();
 
       // C++ sets TimeOut = 1 * 90 = 90, after first GUARD tick: 89
@@ -206,8 +203,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
       team.add(e);
 
-      team.ai(); // tick 1: activate + regroup (reforming)
-      team.ai(); // tick 2: advance to GUARD + execute GUARD (decrements once)
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // Single ai() tick: activate → advance to GUARD → execute GUARD (timeOut--)
+      team.ai();
 
       // Initial: 5 * 90 = 450, after first GUARD tick: 450 - 1 = 449
       // Matches C++ parity: 5 * 90 = 450

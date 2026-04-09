@@ -75,6 +75,7 @@ import {
   applySplashDamage as _applySplashDamage,
   structureDamage as _structureDamage,
   updateStructureCombat as _updateStructureCombat,
+  updateSingleStructureCombat as _updateSingleStructureCombat,
   SPLASH_RADIUS,
 } from './combat';
 import {
@@ -1758,7 +1759,7 @@ export class Game {
     // are added to Logic AFTER buildings, so they're processed after building timers.
     // We replicate this with three entity passes:
     //   Pass 1: pre-building entities (original scenario entities, non-aircraft)
-    //   Pass 2: structure timers + combat (tickStructureMissionTimers + _updateStructureCombat)
+    //   Pass 2: structure timers + combat (tickStructuresInterleaved — timer + firing per building)
     //   Pass 3: post-building entities (reinforcements, non-aircraft) + aircraft
     //
     // Pass 1: pre-building non-aircraft entities (scenario INI units + infantry)
@@ -1797,14 +1798,11 @@ export class Game {
       }
     }
 
-    // C++ Logic.AI() processes objects in order: pre-building entities → buildings → post-building entities → aircraft.
-    // Building timer RNG must be interleaved BETWEEN entity and aircraft processing
-    // to match C++ rejection sampling patterns at timer fire ticks.
-    this.tickStructureMissionTimers();
-    // C++ parity: building Firing_AI (weapon fire) runs as part of building processing,
-    // BETWEEN entity and aircraft loops. This ensures combat RNG is consumed in the
-    // correct order relative to entity and aircraft RNG.
-    this._runCombat(ctx => _updateStructureCombat(ctx));
+    // C++ BuildingClass::AI() processes timer tick + Firing_AI sequentially PER BUILDING.
+    // This interleaved method replaces the old separate tickStructureMissionTimers() +
+    // _updateStructureCombat() bulk passes, which caused ±2 RNG divergence on SCG03EA/SCG13EA
+    // because building combat RNG was consumed at a shifted stream position.
+    this._runCombat(ctx => this.tickStructuresInterleaved(ctx));
 
     // Pass 3: post-building non-aircraft entities (reinforcements, created teams).
     // In C++, these entities were added to the Logic array AFTER buildings, so they
@@ -7628,16 +7626,28 @@ export class Game {
     this._runSpecialUnits(ctx => _updateTanyaC4(ctx, entity));
   }
 
-  /** C++ building.cpp:3228-3306 — tick structure mission timers for RNG parity.
-   *  Each alive building has a MissionClass::Timer that counts down. When it reaches 0,
-   *  the mission handler fires (Mission_Guard for GUARD) and returns a new delay value
-   *  that includes Random_Pick(0,2) jitter. This consumes ScenarioRandom per-building. */
-  private tickStructureMissionTimers(): void {
+  /** C++ BuildingClass::AI() — interleaved timer tick + combat per building.
+   *  In C++, each building's AI() runs MissionClass::AI() (timer tick with RNG jitter)
+   *  then Firing_AI() (weapon targeting/fire with potential RNG for damage/scatter)
+   *  sequentially before advancing to the next building. This method replicates that
+   *  interleaving to maintain RNG stream parity.
+   *
+   *  Previously timer ticks and combat were separate bulk passes:
+   *    tickStructureMissionTimers() → all buildings → then _updateStructureCombat() → all buildings
+   *  That caused RNG divergence (±2 calls on SCG03EA/SCG13EA) because building combat RNG
+   *  was consumed at a different stream position than in C++.
+   *
+   *  C++ building.cpp:3228-3306 (timer), building.cpp:Firing_AI (combat).
+   *  @param combatCtx  CombatContext for structure combat (weapon fire, damage, etc.)
+   */
+  private tickStructuresInterleaved(combatCtx: CombatContext): void {
     // C++ rules.ini: [Guard] Rate=.050, AARate=.016
     // C++ fixed-point: fixed(".050")→Raw=12. Normal_Delay=((12*900)+128)/256=42
     // C++ fixed-point: fixed(".016")→Raw=4.  AA_Delay=((4*900)+128)/256=14
     const GUARD_NORMAL_DELAY = 42;
     const GUARD_AA_DELAY = 14;
+    // C++ house.cpp:4164: low power when Power < Drain (including Power=0 with Drain>0)
+    const isLowPower = combatCtx.powerConsumed > combatCtx.powerProduced;
     let _structIdx = 0;
     for (const s of this.structures) {
       // RNG audit: set source tag for building (C++ 12000 + Logic index)
@@ -7648,23 +7658,31 @@ export class Game {
       if (!s.alive) continue;
       if (s.buildProgress !== undefined) continue; // still under construction
       if (s.sellProgress !== undefined) continue;  // being sold
+
+      // ── Phase 1: MissionClass::AI() — timer tick + jitter RNG ──
       // C++ CDTimerClass: decrement then check. Timer fires when it reaches 0.
       if (s.missionTimer > 0) {
         s.missionTimer--;
       }
-      if (s.missionTimer > 0) continue; // still counting down
-      // Timer fired (reached 0 this tick or was already 0)
-      const jitter = ScenarioRandom.nextInRange(0, 2);
-      if (s.weapon) {
-        // Weapon-equipped: AA_Delay + jitter (building.cpp:3305)
-        s.missionTimer = GUARD_AA_DELAY + jitter;
-      } else if (s.type === 'FIX') {
-        // Repair facility: Normal_Delay + jitter (building.cpp:3300)
-        s.missionTimer = GUARD_NORMAL_DELAY + jitter;
-      } else {
-        // All other non-weapon buildings: Normal_Delay * 3 + jitter (building.cpp:3302)
-        s.missionTimer = GUARD_NORMAL_DELAY * 3 + jitter;
+      if (s.missionTimer <= 0) {
+        // Timer fired (reached 0 this tick or was already 0)
+        const jitter = ScenarioRandom.nextInRange(0, 2);
+        if (s.weapon) {
+          // Weapon-equipped: AA_Delay + jitter (building.cpp:3305)
+          s.missionTimer = GUARD_AA_DELAY + jitter;
+        } else if (s.type === 'FIX') {
+          // Repair facility: Normal_Delay + jitter (building.cpp:3300)
+          s.missionTimer = GUARD_NORMAL_DELAY + jitter;
+        } else {
+          // All other non-weapon buildings: Normal_Delay * 3 + jitter (building.cpp:3302)
+          s.missionTimer = GUARD_NORMAL_DELAY * 3 + jitter;
+        }
       }
+
+      // ── Phase 2: Firing_AI() — weapon targeting and fire ──
+      // C++ runs this immediately after timer tick for the SAME building,
+      // so combat RNG is consumed at the correct stream position.
+      _updateSingleStructureCombat(combatCtx, s, isLowPower);
     }
   }
 

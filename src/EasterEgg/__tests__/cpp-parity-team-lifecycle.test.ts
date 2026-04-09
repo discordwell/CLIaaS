@@ -227,10 +227,9 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const waypoints = new Map<number, { cx: number; cy: number }>();
       waypoints.set(0, { cx: 5, cy: 5 });
 
-      // C++ parity: first AI tick activates + regroups (IsReforming transition).
-      // Second tick advances to mission 0 (team.cpp:704-753).
-      team.ai(waypoints); // activate + regroup
-      team.ai(waypoints); // advance to mission 0
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // First AI tick: activate + advance to mission 0 (team.cpp:704-753).
+      team.ai(waypoints);
 
       expect(team.currentMission).toBe(0);
       expect(team.missionList[team.currentMission].mission).toBe(TMISSION_MOVE);
@@ -256,13 +255,12 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const e = makeEntity(UnitType.V_3TNK, House.USSR, targetX, targetY);
       team.add(e);
 
-      // Tick 1: activate + regroup
-      team.ai(waypoints);
-      // Tick 2: advance to mission 0 (MOVE) — entity already at target
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // Tick 1: activate → advance to mission 0 (MOVE) → entity at target → isNextMission
       team.ai(waypoints);
       expect(team.currentMission).toBe(0);
 
-      // Tick 3: MOVE completed (at target) → isNextMission → advance to mission 1
+      // Tick 2: MOVE completed → advance to mission 1 (GUARD)
       team.ai(waypoints);
       expect(team.currentMission).toBe(1);
     });
@@ -392,9 +390,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const waypoints = new Map<number, { cx: number; cy: number }>();
       waypoints.set(0, { cx: 20, cy: 20 });
 
-      // Tick 1: activate + regroup
-      team.ai(waypoints);
-      // Tick 2: advance to MOVE mission 0 + execute
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // Tick 1: activate → advance to MOVE mission 0 → execute
       team.ai(waypoints);
 
       // Members should be ordered to move
@@ -427,13 +424,12 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const waypoints = new Map<number, { cx: number; cy: number }>();
       waypoints.set(0, wp);
 
-      // Tick 1: activate + regroup
-      team.ai(waypoints);
-      // Tick 2: advance to MOVE mission 0 — entities at target
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // Tick 1: activate → advance to MOVE mission 0 → entities at target → isNextMission
       team.ai(waypoints);
       expect(team.currentMission).toBe(0);
 
-      // Tick 3: MOVE completed → advance to mission 1
+      // Tick 2: MOVE completed → advance to mission 1
       team.ai(waypoints);
       expect(team.currentMission).toBe(1);
     });
@@ -456,9 +452,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const waypoints = new Map<number, { cx: number; cy: number }>();
       waypoints.set(0, { cx: 30, cy: 30 });
 
-      // Tick 1: activate + regroup
-      team.ai(waypoints);
-      // Tick 2: advance to ATT_WAYPT mission 0 + execute
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // Tick 1: activate → advance to ATT_WAYPT mission 0 → execute
       team.ai(waypoints);
 
       expect(e1.mission).toBe(Mission.ATTACK);
@@ -656,9 +651,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const waypoints = new Map<number, { cx: number; cy: number }>();
       waypoints.set(0, { cx: 30, cy: 30 });
 
-      // Tick 1: activate + regroup
-      team.ai(waypoints);
-      // Tick 2: advance to PATROL mission 0 + execute
+      // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
+      // Tick 1: activate → advance to PATROL mission 0 → execute
       team.ai(waypoints);
 
       // Members should be moving toward the patrol waypoint
@@ -819,11 +813,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       team.add(e1);
       team.add(e2);
 
-      // Activate + process DO mission
-      team.ai();
-
-      // DO mission should advance immediately (isNextMission = true)
-      // After DO, members should have HUNT mission
+      // C++ Force_Active() sets IsUnderStrength=false, so no spurious reforming.
+      // First ai(): activate → advance to DO → execute DO (sets HUNT) in one tick.
       team.ai();
 
       expect(e1.mission).toBe(Mission.HUNT);
