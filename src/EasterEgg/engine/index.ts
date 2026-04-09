@@ -5127,46 +5127,125 @@ export class Game {
     this._runMissionAI(ctx => _updateGuard(ctx, entity, timerFired));
   }
 
-  /** C++ Target_Something_Nearby(THREAT_RANGE) for landed HPAD helicopters.
-   *  Mirrors the enemy scan in FootClass::Mission_Guard (foot.cpp:593) but
-   *  only SETS entity.target — does NOT fire inline or change mission.
-   *  In C++, Target_Something_Nearby is a side-effect function that sets TarCom;
-   *  the actual mission transition happens on the NEXT Mission_Guard call when
-   *  AircraftClass::Mission_Guard sees Target_Legal(TarCom) at line 3773.
+  /** C++ AircraftClass::Mission_Guard guard scan for landed HPAD helicopters.
    *
-   *  Also handles C++ foot.cpp:594 Random_Animate() RNG consumption when no
-   *  target is found (infantry idle animation timer + pick). Aircraft are not
-   *  infantry so Random_Animate is a no-op for them — no RNG consumed. */
+   *  C++ execution order (aircraft.cpp:3678-3807):
+   *    1. If House->IsHuman → return Normal_Delay (no scan)
+   *    2. If damaged + money → seek repair (skip for healthy helicopters)
+   *    3. If Ammo==0 && !In_Radio_Contact → seek helipad (docked = in contact, skip)
+   *    4. If Target_Legal(TarCom) → ATTACK, return 1
+   *    5. If !Is_Weapon_Equipped → return TICKS_PER_SECOND*3 (HIND has weapon, skip)
+   *    6. If Height==0 && !In_Radio_Contact → Scatter (docked = in contact, skip)
+   *    7. If House->State != STATE_ATTACKED → Find_Juicy_Target (harvester hunt)
+   *    8. FootClass::Mission_Guard → Target_Something_Nearby + Random_Animate (no-op for aircraft)
+   *
+   *  This method implements steps 7-8. Steps 1-6 are handled by the caller or are
+   *  no-ops for docked HPAD helicopters. The caller handles step 4 (target check
+   *  before calling this method).
+   *
+   *  Find_Juicy_Target (house.cpp:6900) searches for enemy units outside their
+   *  base defense zone (Which_Zone == ZONE_NONE), preferring harvesters.
+   *  Target_Something_Nearby (techno.cpp:5251) then validates/overrides within
+   *  weapon range. */
   private _heliGuardScan(heli: Entity): void {
     this._runMissionAI(ctx => {
-      // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE)
-      // C++ techno.cpp:2048-2053: THREAT_RANGE → Threat_Range(0) uses weapon range, NOT guardRange.
-      //   crange = max(Weapon_Range(0), Weapon_Range(1)) / ICON_LEPTON_W; crange++;
-      // For HIND: ChainGun range=4 cells → scanRange = 4+1 = 5 cells.
-      const weaponRange = Math.max(heli.weapon?.range ?? 0, heli.weapon2?.range ?? 0);
-      const scanRange = weaponRange > 0 ? weaponRange + 1 : heli.stats.sight;
-      let bestTarget: Entity | null = null;
-      let bestScore = -Infinity;
-      for (const other of ctx.entities) {
-        if (!other.alive || other.inLimbo) continue;
-        if (ctx.entitiesAllied(heli, other)) continue;
-        // C++ techno.cpp:1476-1479: units on sleep/harmless missions are invisible
-        if (other.mission === Mission.SLEEP) continue;
-        // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
-        if (other.cloakState === CloakState.CLOAKED) continue;
-        // C++ techno.cpp:1511-1523: range check using <= (inclusive)
-        const dist = worldDist(heli.pos, other.pos);
-        if (dist > scanRange) continue;
-        const score = ctx.threatScore(heli, other, dist);
-        if (score > bestScore) {
-          bestTarget = other; bestScore = score;
+      // ── Step 7: C++ aircraft.cpp:3798-3805 — Find_Juicy_Target ──
+      // Only when House->State != STATE_ATTACKED (not recently under attack).
+      // C++ house.cpp:4775-4779: STATE_ATTACKED when LATime + TICKS_PER_MINUTE > Frame.
+      const aiState = this.aiStates.get(heli.house);
+      const isUnderAttack = aiState?.underAttack ?? false;
+
+      if (!isUnderAttack) {
+        // C++ house.cpp:6900: Find_Juicy_Target — search for exposed enemy units.
+        // Iterates all units. Filters: alive, not in limbo, not allied,
+        // AND Which_Zone(unit) == ZONE_NONE (outside own base defense zone).
+        // Scoring: lower distance wins; harvester distance halved (priority);
+        // AA units distance doubled (avoid).
+        let juicyTarget: Entity | null = null;
+        let juicyValue = 0; // 0 = not set; lower is better once set
+        for (const other of ctx.entities) {
+          if (!other.alive || other.inLimbo) continue;
+          if (ctx.entitiesAllied(heli, other)) continue;
+
+          // C++ house.cpp:6910: Which_Zone(unit) == ZONE_NONE — unit outside its own base
+          // Approximate: unit is far from all of its own house's structures
+          let nearOwnBase = false;
+          for (const s of ctx.structures) {
+            if (!s.alive || s.house !== other.house) continue;
+            const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+            const scx = (s.cx + sw / 2) * CELL_SIZE;
+            const scy = (s.cy + sh / 2) * CELL_SIZE;
+            const d = Math.sqrt((scx - other.pos.x) ** 2 + (scy - other.pos.y) ** 2);
+            // C++ house.cpp:6650: Radius * 4 — approximate base zone outer boundary
+            // ~10 cells radius is a reasonable approximation for typical bases
+            if (d <= 10 * CELL_SIZE) { nearOwnBase = true; break; }
+          }
+          if (nearOwnBase) continue; // inside own base zone, skip
+
+          // C++ house.cpp:6911: val = Distance(coord, unit->Center_Coord())
+          let val = worldDist(heli.pos, other.pos);
+          // C++ house.cpp:6913: if (unit->Anti_Air()) val *= 2 — penalize AA
+          if (other.weapon?.isAA || other.weapon2?.isAA) val *= 2;
+          // C++ house.cpp:6915: if (*unit == UNIT_HARVESTER) val /= 2 — prioritize harvesters
+          if (other.type === UnitType.V_HARV) val /= 2;
+
+          if (juicyValue === 0 || val < juicyValue) {
+            juicyValue = val;
+            juicyTarget = other;
+          }
+        }
+
+        if (juicyTarget) {
+          // C++ aircraft.cpp:3801-3804: Assign_Target(target); Assign_Mission(MISSION_ATTACK);
+          // Sets TarCom. Does NOT return — falls through to FootClass::Mission_Guard
+          // where Target_Something_Nearby will validate (clear if out of weapon range).
+          heli.target = juicyTarget;
+          // Note: mission change to ATTACK happens in the caller when it checks hasTarget
+          // on the next timer fire (matching C++ line 3773 on next Mission_Guard call).
         }
       }
-      if (bestTarget) {
-        // C++ foot.cpp:593: Target_Something_Nearby sets TarCom as side effect.
-        // The actual ATTACK transition happens on the next timer fire.
-        heli.target = bestTarget;
-        return;
+
+      // ── Step 8: C++ FootClass::Mission_Guard (foot.cpp:589-635) ──
+      // Target_Something_Nearby(THREAT_RANGE) — scan within weapon range.
+      // C++ techno.cpp:5260-5266: if TarCom already valid, check range. Clear if out of range.
+      // C++ techno.cpp:5273-5274: if no TarCom, Greatest_Threat(THREAT_RANGE) scans nearby.
+      const weaponRange = Math.max(heli.weapon?.range ?? 0, heli.weapon2?.range ?? 0);
+      // C++ techno.cpp:1317: In_Range uses Weapon_Range (no +1) for TarCom validation
+      // C++ techno.cpp:2048-2053: THREAT_RANGE scan uses Weapon_Range/ICON_LEPTON_W + 1 for search
+      const scanRange = weaponRange > 0 ? weaponRange + 1 : heli.stats.sight;
+
+      // C++ techno.cpp:5260-5266: validate existing TarCom — clear if out of weapon range
+      // Uses actual weapon range (In_Range), not scanRange
+      if (heli.target?.alive) {
+        const existingDist = worldDist(heli.pos, heli.target.pos);
+        if (existingDist > weaponRange) {
+          // C++ techno.cpp:5264: Assign_Target(TARGET_NONE) — out of range
+          heli.target = null;
+        }
+      }
+
+      // C++ techno.cpp:5273: if (!Target_Legal(TarCom)) → Greatest_Threat
+      if (!heli.target?.alive) {
+        let bestTarget: Entity | null = null;
+        let bestScore = -Infinity;
+        for (const other of ctx.entities) {
+          if (!other.alive || other.inLimbo) continue;
+          if (ctx.entitiesAllied(heli, other)) continue;
+          // C++ techno.cpp:1476-1479: units on sleep/harmless missions are invisible
+          if (other.mission === Mission.SLEEP) continue;
+          // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+          if (other.cloakState === CloakState.CLOAKED) continue;
+          // C++ techno.cpp:1511-1523: range check using <= (inclusive)
+          const dist = worldDist(heli.pos, other.pos);
+          if (dist > scanRange) continue;
+          const score = ctx.threatScore(heli, other, dist);
+          if (score > bestScore) {
+            bestTarget = other; bestScore = score;
+          }
+        }
+        if (bestTarget) {
+          heli.target = bestTarget;
+        }
       }
 
       // C++ foot.cpp:593-594: if !Target_Something_Nearby → Random_Animate()
@@ -5174,7 +5253,7 @@ export class Game {
       // Aircraft are NOT infantry, so Random_Animate() is a no-op → no RNG consumed.
 
       // Also check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
-      if (heli.weapon) {
+      if (!heli.target?.alive && heli.weapon) {
         let bestStruct: MapStructure | null = null;
         let bestStructDist = Infinity;
         for (const str of ctx.structures) {
@@ -7917,12 +7996,11 @@ export class Game {
                 } else {
                   heli.target = null; // clear stale target
                   heli.targetStructure = null;
-                  // C++ aircraft.cpp:3781-3807 checks:
+                  // C++ aircraft.cpp:3781-3807 + foot.cpp:589:
                   //   - !Is_Weapon_Equipped → sit (HIND/HELI have weapons, skip)
-                  //   - Height==0 && !In_Radio_Contact → scatter (helicopter is docked, skip)
-                  //   - House->State != STATE_ATTACKED → Find_Juicy_Target (harvester hunt)
-                  // Then falls through to FootClass::Mission_Guard (foot.cpp:589):
-                  //   Target_Something_Nearby(THREAT_RANGE) — sets TarCom as side effect
+                  //   - Height==0 && !In_Radio_Contact → scatter (docked, skip)
+                  //   - House->State != STATE_ATTACKED → Find_Juicy_Target (house.cpp:6900)
+                  //   - FootClass::Mission_Guard → Target_Something_Nearby validates/overrides
                   this._heliGuardScan(heli);
 
                   // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0,2))

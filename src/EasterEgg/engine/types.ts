@@ -1484,6 +1484,22 @@ export function worldDist(a: WorldPos, b: WorldPos): number {
   return leptonDist(aLX, aLY, bLX, bLY) / LEPTON_SIZE;
 }
 
+/** C++ coord.cpp:124-136 Distance() in lepton units (no cell conversion).
+ *  Identical to worldDist but returns integer leptons instead of fractional cells.
+ *  Use this when comparing against lepton-space thresholds (e.g. Rule.StrayDistance). */
+export function worldDistLeptons(a: WorldPos, b: WorldPos): number {
+  const aLX = Math.trunc((a.x * LEPTON_SIZE) / CELL_SIZE);
+  const aLY = Math.trunc((a.y * LEPTON_SIZE) / CELL_SIZE);
+  const bLX = Math.trunc((b.x * LEPTON_SIZE) / CELL_SIZE);
+  const bLY = Math.trunc((b.y * LEPTON_SIZE) / CELL_SIZE);
+  return leptonDist(aLX, aLY, bLX, bLY);
+}
+
+/** C++ rules.cpp:260 — Rule.StrayDistance = 0x0200 = 512 leptons.
+ *  Used in Team::Coordinate_Move, Coordinate_Regroup, Lagging_Units to decide
+ *  whether a unit is close enough to its destination. */
+export const STRAY_DISTANCE = 0x0200; // 512 leptons = 2 cells
+
 /** C++ coord.cpp:124-136 Distance() — integer lepton distance with octagonal approximation.
  *  max(|dx|,|dy|) + (unsigned)min(|dx|,|dy|) / 2.
  *  All arithmetic is integer — truncation toward zero. */

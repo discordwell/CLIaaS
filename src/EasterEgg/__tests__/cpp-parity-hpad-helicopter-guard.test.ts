@@ -99,7 +99,7 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
     // Must scan entities for valid targets
     const scanStart = indexSource.indexOf('private _heliGuardScan(');
     expect(scanStart).toBeGreaterThan(-1);
-    const scanBody = indexSource.slice(scanStart, scanStart + 3000);
+    const scanBody = indexSource.slice(scanStart, scanStart + 7000);
 
     // Uses weapon range as scan radius (C++ THREAT_RANGE → Threat_Range(0) = weaponRange + 1)
     expect(scanBody).toContain('weaponRange');
@@ -117,7 +117,7 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
   it('_heliGuardScan uses weapon range + 1, NOT guardRange (C++ techno.cpp:2048-2053)', () => {
     const scanStart = indexSource.indexOf('private _heliGuardScan(');
     expect(scanStart).toBeGreaterThan(-1);
-    const scanBody = indexSource.slice(scanStart, scanStart + 3000);
+    const scanBody = indexSource.slice(scanStart, scanStart + 7000);
 
     // C++ Threat_Range(0) for THREAT_RANGE: crange = max(Weapon_Range(0), Weapon_Range(1)) / ICON_LEPTON_W; crange++;
     // Must use weaponRange + 1, NOT guardRange (which is 30 cells — way too large)
@@ -129,7 +129,7 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
 
   it('_heliGuardScan also checks enemy structures', () => {
     const scanStart = indexSource.indexOf('private _heliGuardScan(');
-    const scanBody = indexSource.slice(scanStart, scanStart + 3000);
+    const scanBody = indexSource.slice(scanStart, scanStart + 7000);
 
     expect(scanBody).toContain('heli.targetStructure = bestStruct');
   });

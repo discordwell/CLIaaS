@@ -646,6 +646,161 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
   }
 }
 
+/**
+ * C++ parity: cell-based guard scan matching techno.cpp Greatest_Threat with THREAT_RANGE.
+ *
+ * C++ scans cells in a radial outward pattern from the scanner's Fire_Coord cell:
+ *   - For each ring radius 0..crange-1: top row, bottom row, left col, right col
+ *   - For each cell: finds the FIRST non-allied techno in the cell occupier chain
+ *   - Calls Evaluate_Object to check range/validity and get threat value
+ *   - BUG IN C++: bestval is never updated during cell scan (initialized to -1),
+ *     so every valid target overwrites the previous one → last valid target wins
+ *   - Early bailout at crange/4 and crange/2 if any target has been found
+ *
+ * This differs from a naive "scan all entities, pick highest score" approach because:
+ *   1. Only one occupant per cell is evaluated (first enemy in chain)
+ *   2. Scan order determines tiebreaking (last in order wins, not highest score)
+ *   3. Early bailout means inner-ring targets are strongly preferred
+ */
+function cellBasedGuardScan(
+  ctx: MissionAIContext, entity: Entity, scanRange: number, isDog: boolean,
+): Entity | null {
+  // C++ techno.cpp:2048-2053: crange = weapon range in cells + 1
+  // scanRange is already in cells; convert to cell scan radius
+  const crange = Math.floor(scanRange) + 1;
+  if (crange <= 0) return null;
+
+  // C++ techno.cpp:2055: CELL cell = Coord_Cell(Fire_Coord(0))
+  // Fire_Coord has weapon offsets from Center_Coord, but for infantry/units the offset
+  // is typically small. Use entity.cell (derived from lepton coords) as approximation.
+  const cellX = entity.cell.cx;
+  const cellY = entity.cell.cy;
+
+  // Map bounds for clipping
+  const mapX = ctx.map.boundsX;
+  const mapY = ctx.map.boundsY;
+  const mapW = ctx.map.boundsW;
+  const mapH = ctx.map.boundsH;
+
+  // Build cell→entity lookup: for each cell, store the FIRST non-allied enemy techno
+  // C++ Evaluate_Cell traverses Cell_Occupier linked list, takes first enemy.
+  // We approximate by iterating entities and keeping the first per cell.
+  const cellMap = new Map<number, Entity>();
+  const cellKey = (cx: number, cy: number) => cy * 128 + cx;
+  for (const other of ctx.entities) {
+    if (!other.alive || other.inLimbo) continue;
+    if (ctx.entitiesAllied(entity, other)) continue;
+    // C++ Greatest_Threat mask for THREAT_RANGE:
+    // Dogs: THREAT_INFANTRY → only infantry
+    if (isDog && !other.stats.isInfantry) continue;
+    // C++ techno.cpp:1554-1564: spies invisible to non-dogs
+    if (other.type === UnitType.I_SPY && !isDog) continue;
+    // C++ techno.cpp:1476-1479: units on IsNoThreat missions
+    if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+    // C++ techno.cpp:1467-1470: fully cloaked units
+    if (other.cloakState === CloakState.CLOAKED) continue;
+    // Naval combat filtering
+    if (!canTargetNaval(entity, other)) continue;
+    // Air combat filtering: skip airborne without AA
+    if (other.isAirUnit && other.flightAltitude > 0) {
+      const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
+      if (!hasAA) continue;
+    }
+    const oc = other.cell;
+    const key = cellKey(oc.cx, oc.cy);
+    // C++ Evaluate_Cell: first enemy in occupier chain wins — only store first per cell
+    if (!cellMap.has(key)) {
+      cellMap.set(key, other);
+    }
+  }
+
+  let bestObject: Entity | null = null;
+  // C++ BUG: bestval is initialized to -1 and NEVER updated in the cell scan loop
+  // (techno.cpp:2122-2124 sets bestobject but not bestval). This means every valid
+  // target overwrites the previous one — effectively "last valid target in scan order wins".
+
+  // C++ techno.cpp:2108-2209: radiate outward ring by ring
+  for (let radius = 0; radius < crange; radius++) {
+    // Top and bottom rows of the "box" (C++ techno.cpp:2113-2150)
+    for (let x = -radius; x <= radius; x++) {
+      const cx = cellX + x;
+      if (cx < mapX || cx >= mapX + mapW) continue;
+
+      // Top row: y = cellY - radius
+      const topY = cellY - radius;
+      if (topY >= mapY && topY < mapY + mapH) {
+        const ent = cellMap.get(cellKey(cx, topY));
+        if (ent) {
+          // C++ Evaluate_Object range check: when range==0 (THREAT_RANGE), use In_Range
+          // In_Range: Distance(Fire_Coord(which), target->Center_Coord()) <= Weapon_Range(which)
+          const dist = worldDist(entity.pos, ent.pos);
+          if (dist <= scanRange) {
+            // C++ bestval < value is always true (bestval stays -1) → always overwrite
+            bestObject = ent;
+          }
+        }
+      }
+
+      // Bottom row: y = cellY + radius
+      const botY = cellY + radius;
+      if (botY >= mapY && botY < mapY + mapH) {
+        // Avoid double-scanning center cell (radius==0: top==bottom)
+        if (radius > 0 || x !== -radius) {
+          const ent = cellMap.get(cellKey(cx, botY));
+          if (ent) {
+            const dist = worldDist(entity.pos, ent.pos);
+            if (dist <= scanRange) {
+              bestObject = ent;
+            }
+          }
+        }
+      }
+    }
+
+    // Left and right columns of the "box" (C++ techno.cpp:2155-2192)
+    // C++ range: y from -(radius-1) to radius-1 (exclusive of corners already scanned)
+    for (let y = -(radius - 1); y < radius; y++) {
+      const cy = cellY + y;
+      if (cy < mapY || cy >= mapY + mapH) continue;
+
+      // Left column: x = cellX - radius
+      const leftX = cellX - radius;
+      if (leftX >= mapX && leftX < mapX + mapW) {
+        const ent = cellMap.get(cellKey(leftX, cy));
+        if (ent) {
+          const dist = worldDist(entity.pos, ent.pos);
+          if (dist <= scanRange) {
+            bestObject = ent;
+          }
+        }
+      }
+
+      // Right column: x = cellX + radius
+      const rightX = cellX + radius;
+      if (rightX >= mapX && rightX < mapX + mapW) {
+        const ent = cellMap.get(cellKey(rightX, cy));
+        if (ent) {
+          const dist = worldDist(entity.pos, ent.pos);
+          if (dist <= scanRange) {
+            bestObject = ent;
+          }
+        }
+      }
+    }
+
+    // C++ techno.cpp:2198-2205: Early bailout at crange/4 and crange/2
+    if (bestObject !== null) {
+      const q = Math.floor(crange / 4);
+      const h = Math.floor(crange / 2);
+      if (radius === q || radius === h) {
+        return bestObject;
+      }
+    }
+  }
+
+  return bestObject;
+}
+
 /** Guard mode — attack nearby enemies or auto-heal (rate-limited to every 15 ticks) */
 export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = true): void {
   entity.animState = AnimState.IDLE;
@@ -779,45 +934,34 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   const scanRange = entity.stance === Stance.DEFENSIVE
     ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
     : baseRange;
-  let bestTarget: Entity | null = null;
-  let bestScore = -Infinity;
-  for (const other of ctx.entities) {
-    if (!other.alive || other.inLimbo) continue;
-    if (ctx.entitiesAllied(entity, other)) continue;
-    // M8: Dogs ONLY target infantry (C++ techno.cpp:2017-2026 — THREAT_INFANTRY)
-    if (isDog && !other.stats.isInfantry) continue;
-    // C++ parity: spies are INVISIBLE to all non-dog units (techno.cpp:1554-1564).
-    // Only dogs can evaluate a spy as a valid target. All others return false.
-    if (other.type === UnitType.I_SPY && !isDog) continue;
-    // C++ techno.cpp:1476-1479: units on IsNoThreat missions (Harmless, Selling) are invisible
-    if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
-    // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
-    if (other.cloakState === CloakState.CLOAKED) continue;
-    // Naval combat target filtering
-    if (!canTargetNaval(entity, other)) continue;
-    // Air combat target filtering: ground units without AA weapons skip aircraft
-    if (other.isAirUnit && other.flightAltitude > 0) {
-      const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
-      if (!hasAA) continue;
-    }
-    const dist = worldDist(entity.pos, other.pos);
-    // C++ techno.cpp:1511-1523: Evaluate_Object range check.
-    // When range==0 (THREAT_RANGE), C++ uses In_Range() which checks:
-    //   Distance(Fire_Coord(which), target->Center_Coord()) <= Weapon_Range(which)
-    // The <= means targets at EXACTLY weapon range are included.
-    // Use > (not >=) to match C++ inclusive boundary.
-    if (dist > scanRange) continue;
-    // C++ Evaluate_Object does NOT check line-of-sight through terrain.
-    // The only "visibility" filter (techno.cpp:1529) checks IsDiscoveredByPlayer
-    // (fog-of-war discovery), which is a separate system from terrain LOS.
-    // Removed hasLineOfSight check here for C++ parity — guard scan targets
-    // anything within weapon range regardless of terrain obstacles.
 
-    const score = ctx.threatScore(entity, other, dist);
-    if (score > bestScore) {
-      bestTarget = other; bestScore = score;
+  // ── C++ Target_Something_Nearby (techno.cpp:5251-5281) ──
+  // Step 1: If existing target is still legal AND in range, KEEP IT — don't rescan.
+  // C++ checks Target_Legal(TarCom) then In_Range(TarCom, primary).
+  // Only if the existing target is invalid or out of range do we call Greatest_Threat.
+  if (entity.target?.alive && !entity.target.inLimbo) {
+    // C++ techno.cpp:5260-5266: check if existing target still in range (THREAT_RANGE mode)
+    if (entity.inRange(entity.target)) {
+      // Target still valid and in range — C++ keeps TarCom, skips Greatest_Threat.
+      // Fire via Firing_AI equivalent:
+      if (entity.weapon && entity.attackCooldown <= 0) {
+        entity.mission = Mission.ATTACK;
+        updateAttack(ctx, entity);
+        if (entity.mission === Mission.ATTACK) {
+          entity.mission = Mission.GUARD;
+        }
+      }
+      return;
     }
+    // C++ techno.cpp:5263-5264: target out of range → Assign_Target(TARGET_NONE)
+    entity.target = null;
+  } else {
+    entity.target = null;
   }
+
+  // Step 2: No valid target — call Greatest_Threat (C++ techno.cpp:5273-5274)
+  // C++ Greatest_Threat with THREAT_RANGE scans cells in radial outward pattern.
+  const bestTarget = cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
     // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
     // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves

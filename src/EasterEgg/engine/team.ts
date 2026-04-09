@@ -22,7 +22,7 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, worldDist, type WorldPos, CELL_SIZE } from './types';
+import { House, Mission, worldDist, worldDistLeptons, STRAY_DISTANCE, type WorldPos, CELL_SIZE } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 
@@ -528,10 +528,10 @@ export class Team {
     for (const unit of this._members) {
       if (!unit.alive) continue;
 
-      // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons = 2 cells
-      // C++ team.cpp:1909-1910: aircraft get 3x stray distance
-      const strayThreshold = unit.isAirUnit ? 2 * 3 : 2;
-      if (this.zone && worldDist(unit.pos, this.zone) > strayThreshold) {
+      // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons
+      // C++ team.cpp:2054-2056: aircraft get 3x stray distance
+      const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
+      if (this.zone && worldDistLeptons(unit.pos, this.zone) > stray) {
         // Member too far — order to move to zone
         unit.mission = Mission.MOVE;
         unit.moveTarget = { ...this.zone };
@@ -565,8 +565,10 @@ export class Team {
       if (!unit.alive) continue;
       found = true;
 
-      const dist = worldDist(unit.pos, this.target);
-      if (dist > 2) {
+      // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
+      const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
+      const dist = worldDistLeptons(unit.pos, this.target);
+      if (dist > stray) {
         // Not yet arrived — order move
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
@@ -664,8 +666,10 @@ export class Team {
         continue; // let it fight
       }
 
-      const dist = worldDist(unit.pos, this.target);
-      if (dist > 2) {
+      // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
+      const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
+      const dist = worldDistLeptons(unit.pos, this.target);
+      if (dist > stray) {
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
           unit.moveTarget = { ...this.target };

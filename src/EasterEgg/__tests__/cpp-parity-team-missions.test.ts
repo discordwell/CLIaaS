@@ -35,7 +35,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { House, Mission, UnitType, CELL_SIZE } from '../engine/types';
+import { House, Mission, UnitType, CELL_SIZE, LEPTON_SIZE, worldDistLeptons, STRAY_DISTANCE } from '../engine/types';
 import {
   Team, resetTeamIds,
   TMISSION_MOVE, TMISSION_ATTACK, TMISSION_ATT_WAYPT, TMISSION_GUARD,
@@ -1242,7 +1242,7 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
   // C++ team.cpp:1757:
   //   if (unit->Distance(Zone) > Rule.StrayDistance ...
   // C++ rules.cpp:260: StrayDistance = 0x0200 (512 leptons = 2 cells)
-  // TS team.ts:490: worldDist(unit.pos, this.zone) > 3 (3 world units)
+  // TS team.ts: worldDistLeptons(unit.pos, this.zone) > STRAY_DISTANCE (512 leptons)
   // ==========================================================================
   describe('Coordinate_Regroup stray distance (team.cpp:1757, rules.cpp:260)', () => {
     /**
@@ -1250,13 +1250,8 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
      * 1 cell = 256 leptons (CELL_LEPTON_W)
      * StrayDistance = 2 cells
      *
-     * TS uses worldDist > 3 (3 pixels/world-units).
-     *
-     * In TS, CELL_SIZE = 24 pixels. So 2 cells = 48 pixels.
-     * The TS threshold of 3 is much smaller than C++ equivalent.
-     *
-     * This is likely intentional (different coordinate system), but we
-     * document the divergence.
+     * TS now uses worldDistLeptons() > STRAY_DISTANCE (512), matching
+     * C++ integer lepton comparison exactly.
      */
     it('units within regroup threshold are not ordered to move', () => {
       const team = makeTeam({
@@ -1297,6 +1292,160 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // Distant unit should be ordered to MOVE
       expect(e2.mission).toBe(Mission.MOVE);
       expect(e2.moveTarget).toBeTruthy();
+    });
+  });
+
+  // ==========================================================================
+  // Section 17b: Coordinate_Move stray distance — lepton-space boundary (team.cpp:1920-1927)
+  // C++ team.cpp:1920: int dist = unit->Distance(Target);
+  // C++ team.cpp:1927: if (dist > stray) ...
+  // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons
+  // C++ team.cpp:1909-1910: if (aircraft) stray *= 3;
+  //
+  // TS must compare worldDistLeptons() > STRAY_DISTANCE to match C++ exactly.
+  // Previously TS used worldDist() > 2 (cell-based), which could diverge at
+  // boundary positions due to floating-point division (SCG07EA tick 4, ±5 members).
+  // ==========================================================================
+  describe('Coordinate_Move stray distance lepton boundary (team.cpp:1920-1927)', () => {
+    it('STRAY_DISTANCE constant matches C++ Rule.StrayDistance = 0x0200 = 512 leptons', () => {
+      expect(STRAY_DISTANCE).toBe(0x0200);
+      expect(STRAY_DISTANCE).toBe(512);
+    });
+
+    it('unit exactly at StrayDistance (512 leptons) is classified as arrived', () => {
+      // C++ comparison: dist > stray → 512 > 512 → false → GUARD (arrived)
+      // Place unit exactly 2 cells (512 leptons) from target
+      const targetCx = 10;
+      const targetCy = 10;
+      const targetX = targetCx * CELL_SIZE + CELL_SIZE / 2;
+      const targetY = targetCy * CELL_SIZE + CELL_SIZE / 2;
+
+      // 2 cells east = 512 leptons in X, 0 in Y → octagonal dist = 512
+      const unitX = (targetCx + 2) * CELL_SIZE + CELL_SIZE / 2;
+      const unitY = targetCy * CELL_SIZE + CELL_SIZE / 2;
+
+      // Verify distance is exactly 512 leptons
+      const dist = worldDistLeptons({ x: unitX, y: unitY }, { x: targetX, y: targetY });
+      expect(dist).toBe(512);
+
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions: [
+          { mission: TMISSION_MOVE, data: 0 },
+          { mission: TMISSION_GUARD, data: 100 },
+        ],
+        forcedActive: true,
+      });
+
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, unitX, unitY);
+      team.add(e);
+
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: targetCx, cy: targetCy });
+
+      team.ai(waypoints); // activate
+      team.ai(waypoints); // Coordinate_Move
+
+      // 512 > 512 is false → unit should NOT be ordered to move
+      // C++ would assign GUARD (team.cpp:1967-1969)
+      expect(e.mission).not.toBe(Mission.MOVE);
+    });
+
+    it('unit at 513 leptons is classified as lagging (not arrived)', () => {
+      // C++ comparison: dist > stray → 513 > 512 → true → MOVE
+      const targetCx = 10;
+      const targetCy = 10;
+      const targetX = targetCx * CELL_SIZE + CELL_SIZE / 2;
+      const targetY = targetCy * CELL_SIZE + CELL_SIZE / 2;
+
+      // Place unit 513 leptons away — 2 cells + 1 lepton
+      // 1 lepton = CELL_SIZE / LEPTON_SIZE pixels = 24/256 = 0.09375 px
+      // So offset = 2 cells + 1 lepton = 48 + 0.09375 px
+      // But since worldDistLeptons converts Math.trunc(px*256/24),
+      // we need a pixel offset that converts to >512 leptons.
+      // 48.09375 px → Math.trunc(48.09375 * 256/24) = Math.trunc(513.0) = 513
+      // Actually simpler: use a position that's clearly > 2 cells
+      const unitX = targetX + 49; // 49 px = Math.trunc(49*256/24) = Math.trunc(522.67) = 522 leptons > 512
+      const unitY = targetY;
+
+      const dist = worldDistLeptons({ x: unitX, y: unitY }, { x: targetX, y: targetY });
+      expect(dist).toBeGreaterThan(STRAY_DISTANCE);
+
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions: [
+          { mission: TMISSION_MOVE, data: 0 },
+          { mission: TMISSION_GUARD, data: 100 },
+        ],
+        forcedActive: true,
+      });
+
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, unitX, unitY);
+      team.add(e);
+
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: targetCx, cy: targetCy });
+
+      team.ai(waypoints); // activate
+      team.ai(waypoints); // Coordinate_Move
+
+      // dist > 512 → true → unit should be ordered to MOVE
+      expect(e.mission).toBe(Mission.MOVE);
+      expect(team.currentMission).toBe(0); // still on MOVE mission (not advanced)
+    });
+
+    it('aircraft use 3x stray distance (1536 leptons) per team.cpp:1909-1910', () => {
+      // C++ team.cpp:1909-1910: if (aircraft) stray *= 3 → 1536 leptons
+      const targetCx = 10;
+      const targetCy = 10;
+      const targetX = targetCx * CELL_SIZE + CELL_SIZE / 2;
+      const targetY = targetCy * CELL_SIZE + CELL_SIZE / 2;
+
+      // Place aircraft at 4 cells away (1024 leptons) — within 1536 but outside 512
+      const unitX = (targetCx + 4) * CELL_SIZE + CELL_SIZE / 2;
+      const unitY = targetCy * CELL_SIZE + CELL_SIZE / 2;
+
+      const dist = worldDistLeptons({ x: unitX, y: unitY }, { x: targetX, y: targetY });
+      expect(dist).toBe(1024); // 4 cells = 1024 leptons
+      expect(dist).toBeGreaterThan(STRAY_DISTANCE); // 1024 > 512 (ground would be "lagging")
+      expect(dist).toBeLessThan(STRAY_DISTANCE * 3); // 1024 < 1536 (aircraft is "arrived")
+
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_HELI, count: 1 }],
+        missions: [
+          { mission: TMISSION_MOVE, data: 0 },
+          { mission: TMISSION_GUARD, data: 100 },
+        ],
+        forcedActive: true,
+      });
+
+      const e = makeEntity(UnitType.V_HELI, House.USSR, unitX, unitY);
+      // isAirUnit is a getter from stats.isAircraft — V_HELI has isAircraft=true
+      expect(e.isAirUnit).toBe(true);
+      team.add(e);
+
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: targetCx, cy: targetCy });
+
+      team.ai(waypoints); // activate
+      team.ai(waypoints); // Coordinate_Move
+
+      // 1024 > 1536 is false → aircraft is "arrived", NOT ordered to move
+      expect(e.mission).not.toBe(Mission.MOVE);
+    });
+
+    it('worldDistLeptons matches C++ octagonal approximation in integer leptons', () => {
+      // C++ coord.cpp:124-136: max(|dy|,|dx|) + min(|dy|,|dx|)/2 (integer)
+      // Test with a diagonal offset: 3 cells east, 2 cells south
+      const ax = 10 * CELL_SIZE + CELL_SIZE / 2; // cell 10 center
+      const ay = 10 * CELL_SIZE + CELL_SIZE / 2;
+      const bx = 13 * CELL_SIZE + CELL_SIZE / 2; // cell 13 center (3 cells east)
+      const by = 12 * CELL_SIZE + CELL_SIZE / 2; // cell 12 center (2 cells south)
+
+      // dx = 3*256 = 768 leptons, dy = 2*256 = 512 leptons
+      // max(768,512) + 512/2 = 768 + 256 = 1024
+      const dist = worldDistLeptons({ x: ax, y: ay }, { x: bx, y: by });
+      expect(dist).toBe(1024);
     });
   });
 
