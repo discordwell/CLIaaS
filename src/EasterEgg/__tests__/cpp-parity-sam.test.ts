@@ -588,18 +588,20 @@ describe('SAM flak burst effect on AA hit (C++ FLAK.SHP)', () => {
   });
 });
 
-// ── LOS Check (building.cpp — line of sight) ───────────────────────────────
+// ── No LOS Check for buildings (C++ Evaluate_Object) ──────────────────────
 //
-// Structure combat requires line of sight to target. SAM cannot fire through
-// walls/rock terrain blocking the LOS path.
+// C++ techno.cpp:1449-1763 Evaluate_Object does NOT check line-of-sight.
+// Building::Greatest_Threat → TechnoClass::Greatest_Threat → Evaluate_Object
+// only checks: limbo, cloak, mission, zone, alliance, range, mask, value.
+// Buildings CAN fire through rock/walls — no LOS gate in the C++ targeting path.
 
-describe('SAM line-of-sight requirement (building.cpp)', () => {
-  it('cannot fire at target behind rock wall', () => {
+describe('SAM targets through terrain (C++ parity — no LOS in Evaluate_Object)', () => {
+  it('fires at target behind rock wall (C++ buildings skip LOS)', () => {
     const sam = makeSAM(10, 10);
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    // Block LOS with rock terrain
+    // Block LOS with rock terrain — C++ ignores this for building targeting
     for (let y = 8; y <= 12; y++) {
       ctx.map.setTerrain(12, y, Terrain.ROCK);
     }
@@ -607,7 +609,8 @@ describe('SAM line-of-sight requirement (building.cpp)', () => {
     const hpBefore = hind.hp;
     updateStructureCombat(ctx);
 
-    expect(hind.hp).toBe(hpBefore);
+    // C++ parity: building DOES fire — LOS not checked in Evaluate_Object
+    expect(hind.hp).toBeLessThan(hpBefore);
   });
 });
 

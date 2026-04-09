@@ -1678,6 +1678,13 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
     const structPos: WorldPos = { x: sx, y: sy };
     const range = s.weapon.range;
 
+    // C++ BuildingClass::Greatest_Threat (building.cpp:2338-2364) adds weapon Allowed_Threats()
+    // + THREAT_RANGE, and for human-owned buildings removes THREAT_BUILDINGS.
+    // TechnoClass::Greatest_Threat (techno.cpp:2047-2210) does a cell-by-cell range scan
+    // calling Evaluate_Object per cell occupant.  Evaluate_Object does NOT check line-of-sight.
+    // Note: ctx.entities contains only mobile units (infantry/vehicles/aircraft), not buildings,
+    // so THREAT_BUILDINGS removal for human buildings is implicit (no buildings in entity list).
+
     // Find highest-threat enemy in range (C++ building.cpp — prioritize dangerous targets, not just closest)
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
@@ -1688,10 +1695,11 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       if (s.weapon!.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
       const dist = worldDist(structPos, e.pos);
-      if (dist >= range) continue;
-      // LOS check
-      const ec = e.cell;
-      if (!ctx.map.hasLineOfSight(s.cx, s.cy, ec.cx, ec.cy)) continue;
+      // C++ techno.cpp:1519 In_Range uses <= (lepton distance <= weapon range in leptons).
+      // worldDist returns cells; range is cells. Use > to match C++ <= (reject only strictly out of range).
+      if (dist > range) continue;
+      // C++ Evaluate_Object (techno.cpp:1470-1763) does NOT check line-of-sight for buildings.
+      // Removed LOS check here for C++ parity (same fix as missionAI.ts:813 guard scan).
       // C++ techno.cpp:1651-1752 Evaluate_Object threat scoring formula
       // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
       const points = e.stats.points ?? e.stats.strength ?? 5;
