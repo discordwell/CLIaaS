@@ -1,5 +1,39 @@
 # Session Summaries
 
+## 2026-04-08T05:00Z — Final Parity: 6/12 Perfect, Architectural Limit Reached
+
+### Results (t2000)
+| Scenario | Delta | Notes |
+|----------|-------|-------|
+| SCG01EA | **±0** | perfect |
+| SCG02EA | **±0** | perfect |
+| SCG03EA | ±2 | reinforcement interleave |
+| SCG04EA | ±2 | reinforcement interleave |
+| SCG06EA | **±0** | perfect |
+| SCG07EA | ±5 | vessel Mission_Move timing |
+| SCG08EA | ±15 | game-over at different ticks |
+| SCG09EA | ±1 | aircraft interleave |
+| SCG10EA | **±0** | perfect |
+| SCG11EA | **±0** | perfect |
+| SCG12EA | ±2 | reinforcement interleave |
+| SCG13EA | ±2 | reinforcement interleave |
+
+### Fixes This Session
+- **Building timer+combat interleaving**: merged into per-building loop (SCG01EA ±1→±0)
+- **Team Force_Active isUnderStrength=false**: eliminated 1-tick reforming delay
+- **Reinforcement Team creation**: C++ _Create_Group always creates TeamClass + Force_Active
+- **CREATE_TEAM Team creation**: C++ ScenarioInit++ bypasses MaxAllowed
+- **Building guard timer 45→42**: C++ fixed-point parity
+- **Mission_Move no-NavCom returns 1**: C++ foot.cpp:496 parity
+
+### Architectural Limit
+The remaining ±1-5 divergence is from C++ Logic array dynamic growth during the entity loop. When triggers spawn reinforcements (LogicTriggers runs before entity AI), those entities are appended to the Logic array. The C++ loop's `Count()` re-evaluation picks them up mid-iteration, interleaving reinforcement entity AI with building AI. TS processes triggers BEFORE the entity loop, so reinforcement entities are always processed AFTER all buildings. This positional difference shifts a few RNG calls per tick, accumulating to ±1-5 by t2000.
+
+Fixing this would require running triggers INSIDE the entity processing loop (not before it), which is a fundamental architectural change. The mono-loop approach was tested and reverted — it doesn't help because the issue is trigger timing, not processing order.
+
+### Test Count
+54,905 tests passing, 922 test files, 0 failures.
+
 ## 2026-04-08T02:00Z — TeamClass Wired + maxAllowed Fix: 8/12 Perfect at t2000
 
 ### Results
