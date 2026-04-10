@@ -223,16 +223,16 @@ describe('E7 long range — one of the longest infantry weapons (rules.ini)', ()
   it('Tanya can hit a target at 5.5 cells away', () => {
     const tanya = entityAtCell(UnitType.I_TANYA, House.Spain, 10, 10);
     const target = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    // Place target 5.5 cells away
-    target.pos.x = tanya.pos.x + 5.5 * CELL_SIZE;
+    // Place target 5.5 cells away (use setPosition to sync lepton coords)
+    target.setPosition(tanya.pos.x + 5.5 * CELL_SIZE, tanya.pos.y);
     expect(tanya.inRange(target)).toBe(true);
   });
 
   it('Tanya cannot hit a target at 6.0 cells away (exceeds 5.75 range)', () => {
     const tanya = entityAtCell(UnitType.I_TANYA, House.Spain, 10, 10);
     const target = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
-    // Place target 6.0 cells away
-    target.pos.x = tanya.pos.x + 6.0 * CELL_SIZE;
+    // Place target 6.0 cells away (use setPosition to sync lepton coords)
+    target.setPosition(tanya.pos.x + 6.0 * CELL_SIZE, tanya.pos.y);
     expect(tanya.inRange(target)).toBe(false);
   });
 });

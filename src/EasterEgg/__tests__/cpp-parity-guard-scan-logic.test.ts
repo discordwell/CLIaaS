@@ -45,6 +45,10 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; t
       setTerrain: () => {},
       hasLineOfSight: () => true,
       isPassable: () => true,
+      isTerrainPassable: () => true,
+      isWaterPassable: () => false,
+      canEnterCell: () => true,
+      inBounds: () => true,
       getWallType: () => undefined,
       setWallType: () => {},
       getOreCell: () => null,
@@ -166,7 +170,7 @@ describe('Area guard leash and scan range — C++ Threat_Range(1)/2', () => {
     guard.mission = Mission.AREA_GUARD;
 
     // Place 3.5 cells from origin — within correct leash (3.0 < 3.5 — triggers retreat)
-    guard.pos = { x: 200 + 3.5 * CELL_SIZE, y: 200 };
+    guard.setPosition(200 + 3.5 * CELL_SIZE, 200);
 
     const ctx = makeCtx({ entities: [guard] });
     updateAreaGuard(ctx, guard);

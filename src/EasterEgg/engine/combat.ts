@@ -6,9 +6,9 @@
 import {
   type WorldPos, type WeaponStats, type ArmorType, type WarheadType,
   type WarheadMeta, type WarheadProps,
-  CELL_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
+  CELL_SIZE, LEPTON_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, WEAPON_STATS,
-  armorIndex, worldDist, worldToCell, modifyDamage,
+  armorIndex, leptonDist, pixelToLepton, worldToCell, modifyDamage,
   directionTo, calcProjectileTravelFrames, projectileVisualConfig,
   House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
@@ -545,8 +545,8 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
 
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || other.id === victim.id) continue;
-      const dist = worldDist(victim.pos, other.pos);
-      if (dist > radiusCells) continue;
+      const dist = leptonDist(victim.leptonX, victim.leptonY, other.leptonX, other.leptonY);
+      if (dist > radiusLeptons) continue;
       // C++ Wide_Area_Damage has no alliance check — damages everyone
       damageEntity(ctx, other, explosionDamage, explosionWarhead);
     }
@@ -782,8 +782,8 @@ export function launchProjectile(
   ctx: CombatContext, attacker: Entity, target: Entity | null, weapon: WeaponStats,
   damage: number, impactX: number, impactY: number, directHit: boolean,
 ): void {
-  const dist = worldDist(attacker.pos, { x: impactX, y: impactY });
-  const speed = weapon.projectileSpeed!;
+  const dist = leptonDist(attacker.leptonX, attacker.leptonY, pixelToLepton(impactX), pixelToLepton(impactY));
+  const speed = weapon.projectileSpeed! * LEPTON_SIZE; // convert cells/tick to leptons/tick
   const travelFrames = Math.max(1, Math.round(dist / speed));
 
   // C++ bullet.cpp:783-789 — ballistic arc initialization for isArcing weapons
@@ -1108,7 +1108,8 @@ export function applySplashDamage(
     if (!other.alive || other.inLimbo || other.id === sourceId) continue;
     // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
     const isFriendly = ctx.isAllied(other.house, attackerHouse);
-    const distCells = worldDist(center, other.pos);
+    const distLeptons = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), other.leptonX, other.leptonY);
+    const distCells = distLeptons / LEPTON_SIZE;
     if (distCells > splashRange) continue;
 
     // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
@@ -1167,7 +1168,7 @@ export function applySplashDamage(
     if (occupiesImpactCell) {
       distCells = 0;
     } else {
-      distCells = worldDist(center, { x: swx, y: swy });
+      distCells = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), pixelToLepton(swx), pixelToLepton(swy)) / LEPTON_SIZE;
     }
     if (distCells > splashRange) continue;
     // Apply damage using per-building armor from rules.ini (C++ bdata.cpp)
@@ -1514,9 +1515,13 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
       const structBlastRadius = 2;
       for (const s2 of ctx.structures) {
         if (!s2.alive || s2 === s) continue;
-        const s2wx = s2.cx * CELL_SIZE + CELL_SIZE;
-        const s2wy = s2.cy * CELL_SIZE + CELL_SIZE;
-        const dist = worldDist({ x: wx, y: wy }, { x: s2wx, y: s2wy });
+        // Structure centers in leptons for distance check
+        const s2lx = s2.cx * LEPTON_SIZE + LEPTON_SIZE;
+        const s2ly = s2.cy * LEPTON_SIZE + LEPTON_SIZE;
+        const wlx = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+        const wly = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+        const distLeptons = leptonDist(wlx, wly, s2lx, s2ly);
+        const dist = distLeptons / LEPTON_SIZE;
         if (dist > structBlastRadius) continue;
         const falloff = 1 - (dist / structBlastRadius) * 0.6;
         const blastDmg = Math.max(1, Math.round(100 * falloff));
@@ -1694,9 +1699,12 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       // human-requested: SAMs are air-only. Do NOT revert this line.
       if (s.weapon!.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
-      const dist = worldDist(structPos, e.pos);
+      const structLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+      const structLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+      const distLeptons = leptonDist(structLX, structLY, e.leptonX, e.leptonY);
+      const dist = distLeptons / LEPTON_SIZE;
       // C++ techno.cpp:1519 In_Range uses <= (lepton distance <= weapon range in leptons).
-      // worldDist returns cells; range is cells. Use > to match C++ <= (reject only strictly out of range).
+      // dist is in cells; range is cells. Use > to match C++ <= (reject only strictly out of range).
       if (dist > range) continue;
       // C++ Evaluate_Object (techno.cpp:1470-1763) does NOT check line-of-sight for buildings.
       // Removed LOS check here for C++ parity (same fix as missionAI.ts:813 guard scan).
@@ -1704,7 +1712,7 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
       const points = e.stats.points ?? e.stats.strength ?? 5;
       const value = Math.trunc(points * 2) + (e.kills ?? 0);
-      const distCells = Math.floor(dist); // dist from worldDist() is already in cell units
+      const distCells = Math.floor(dist);
       const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
       if (score > bestScore) {
         bestTarget = e;
@@ -1719,10 +1727,10 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       for (const e of ctx.entities) {
         if (!e.alive || e.inLimbo || !e.isAirUnit || e.flightAltitude <= 0) continue;
         if (ctx.isAllied(s.house, e.house)) continue;
-        const dist = worldDist(structPos, e.pos);
-        if (dist < range && dist < bestAirDist) {
+        const distAA = leptonDist(s.cx * LEPTON_SIZE + LEPTON_SIZE, s.cy * LEPTON_SIZE + LEPTON_SIZE, e.leptonX, e.leptonY) / LEPTON_SIZE;
+        if (distAA < range && distAA < bestAirDist) {
           bestAirTarget = e;
-          bestAirDist = dist;
+          bestAirDist = distAA;
         }
       }
       if (bestAirTarget) {

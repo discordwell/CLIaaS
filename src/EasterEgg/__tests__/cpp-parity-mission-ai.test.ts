@@ -806,7 +806,7 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
     // The key behavioral test: units beyond leash should return home
 
     // Place unit far from origin — beyond leash
-    guard.pos = { x: 200 + (leash + 2) * CELL_SIZE, y: 200 };
+    guard.setPosition(200 + (leash + 2) * CELL_SIZE, 200);
 
     const ctx = makeCtx({
       entities: [guard],
@@ -847,7 +847,7 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
     // Move guard away from home but within leash
     const weaponRange = guard.weapon?.range ?? 4;
     const leash = Math.min(weaponRange / 2, 5);
-    guard.pos = { x: 200 + (leash - 0.5) * CELL_SIZE, y: 200 };
+    guard.setPosition(200 + (leash - 0.5) * CELL_SIZE, 200);
 
     const ctx = makeCtx({
       entities: [guard, enemy],
@@ -873,7 +873,7 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
     guard.lastGuardScan = 0;
 
     // Place way beyond leash
-    guard.pos = { x: 200 + 20 * CELL_SIZE, y: 200 };
+    guard.setPosition(200 + 20 * CELL_SIZE, 200);
 
     const ctx = makeCtx({
       entities: [guard],
@@ -897,7 +897,7 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
 
     // Place beyond leash
     const farPos = 200 + 20 * CELL_SIZE;
-    guard.pos = { x: farPos, y: 200 };
+    guard.setPosition(farPos, 200);
 
     // Enemy near the guard's current position (not home)
     const enemy = makeEntity(UnitType.E1, House.Greece,

@@ -81,6 +81,8 @@ function makeEntity(id: number, x: number, y: number, house = 'Spain' as any) {
   return {
     id,
     pos: { x, y },
+    leptonX: Math.trunc(x * 256 / 24),
+    leptonY: Math.trunc(y * 256 / 24),
     house,
     alive: true,
     hp: 100,
