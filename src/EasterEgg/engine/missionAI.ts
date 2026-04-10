@@ -651,14 +651,15 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
  *
  * C++ scans cells in a radial outward pattern from the scanner's Fire_Coord cell:
  *   - For each ring radius 0..crange-1: top row, bottom row, left col, right col
- *   - For each cell: finds the FIRST non-allied techno in the cell occupier chain
+ *   - For each cell: Evaluate_Cell picks the FIRST non-allied techno in the LIFO
+ *     occupier chain — which is the MOST RECENTLY unlimboed entity in that cell
  *   - Calls Evaluate_Object to check range/validity and get threat value
  *   - BUG IN C++: bestval is never updated during cell scan (initialized to -1),
  *     so every valid target overwrites the previous one → last valid target wins
  *   - Early bailout at crange/4 and crange/2 if any target has been found
  *
  * This differs from a naive "scan all entities, pick highest score" approach because:
- *   1. Only one occupant per cell is evaluated (first enemy in chain)
+ *   1. Only one occupant per cell is evaluated (most recently unlimboed enemy)
  *   2. Scan order determines tiebreaking (last in order wins, not highest score)
  *   3. Early bailout means inner-ring targets are strongly preferred
  */
@@ -682,9 +683,16 @@ function cellBasedGuardScan(
   const mapW = ctx.map.boundsW;
   const mapH = ctx.map.boundsH;
 
-  // Build cell→entity lookup: for each cell, store the FIRST non-allied enemy techno
-  // C++ Evaluate_Cell traverses Cell_Occupier linked list, takes first enemy.
-  // We approximate by iterating entities and keeping the first per cell.
+  // Build cell→entity lookup: for each cell, store the LAST non-allied enemy techno.
+  //
+  // C++ Evaluate_Cell (techno.cpp:1831-1843) traverses the Cell_Occupier() linked list
+  // and picks the FIRST non-allied techno (break on first match). The occupier list is
+  // LIFO — Occupy_Up (cell.cpp:1189) prepends: object->Next = OccupierPtr; OccupierPtr = object.
+  // So the FIRST in the LIFO chain is the MOST RECENTLY unlimboed entity in that cell.
+  //
+  // ctx.entities is in INI/unlimbo order (oldest first). To match C++'s "most recently
+  // unlimboed" selection, we always overwrite — the LAST entity per cell in our forward
+  // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
   const cellMap = new Map<number, Entity>();
   const cellKey = (cx: number, cy: number) => cy * 128 + cx;
   for (const other of ctx.entities) {
@@ -708,10 +716,9 @@ function cellBasedGuardScan(
     }
     const oc = other.cell;
     const key = cellKey(oc.cx, oc.cy);
-    // C++ Evaluate_Cell: first enemy in occupier chain wins — only store first per cell
-    if (!cellMap.has(key)) {
-      cellMap.set(key, other);
-    }
+    // C++ LIFO: last unlimboed = head of chain = picked by Evaluate_Cell.
+    // TS forward iteration: always overwrite so last (= most recently unlimboed) wins.
+    cellMap.set(key, other);
   }
 
   let bestObject: Entity | null = null;
