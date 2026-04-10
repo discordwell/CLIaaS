@@ -1757,9 +1757,13 @@ export class Game {
       }
     }
 
-    // C++ logic.cpp:268-270: Team AI processes BEFORE entity AI every tick.
+    // C++ logic.cpp:267-270: Team AI processes BEFORE entity AI every tick.
+    // C++ sets g_rng_source_tag = 1 for Team AI processing.
     // Teams coordinate member movement/attack and consume RNG (Percent_Chance(50)
     // at activation, Mission_Move → Random_Pick(0,2) via Commence Timer reset).
+    if (ScenarioRandom._tagLogging) {
+      ScenarioRandom._sourceTag = 1; // C++ Team AI tag
+    }
     _updateAllTeams(this.waypoints, { structures: this.structures, entities: this.entities });
 
     // C++ Logic.AI() (logic.cpp:284) processes ALL objects in a single loop from
