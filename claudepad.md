@@ -1,5 +1,45 @@
 # Session Summaries
 
+## 2026-04-10T16:15Z — Team.recruit() C++ Multi-Add Fix + Team AI Tagging
+
+### Discovery: C++ TeamClass::Recruit Has Type-Specific Multi-Add
+C++ team.cpp:1180 has DIFFERENT semantics for INFANTRY/AIRCRAFT vs UNIT/VESSEL:
+- **INFANTRY/AIRCRAFT** (team.cpp:1208-1247): `if (best)` Add call OUTSIDE for loop. Only 1 add per call.
+- **UNIT/VESSEL** (team.cpp:1250-1322): `if (best)` Add call INSIDE for loop. Each iteration where `best` is updated to a new closer unit triggers another Add. Multiple units can be recruited in a single call.
+
+This is a quirk of the C++ source: closer units found later in iteration trigger additional Adds. TS recruit() previously had 1-add-per-call across all types, causing CREATE_TEAM teams to fill 1 unit/tick slower than C++.
+
+### Recruit Center Fix
+Also fixed: TS recruit() now uses team type's `Origin` waypoint as the distance reference (matching C++ team.cpp:1186-1188), not the team's calculated zone center. Empty teams previously had `zone=null`, causing all distances to be 0 and breaking the multi-add iteration.
+
+### Team AI Tagging Fix
+Set `g_rng_source_tag = 1` before `_updateAllTeams` to match C++ Logic.AI line 267. Team activation `Percent_Chance(50)` calls now tag as `other[1]` in trace, making divergences easier to identify.
+
+### Parity Results (t2000)
+| Scenario | Before | After | Δ |
+|----------|--------|-------|---|
+| SCG01EA  | ±0     | ±0    | — |
+| SCG02EA  | ±0     | ±0    | — |
+| SCG03EA  | ±2     | ±3    | +1 (regression) |
+| SCG04EA  | ±3     | ±2    | -1 (improved) |
+| SCG06EA  | ±0     | ±0    | — |
+| SCG07EA  | ±5     | ±5    | — |
+| SCG08EA  | ±15    | ±14   | -1 (improved) |
+| SCG09EA  | ±1     | ±1    | — |
+| SCG10EA  | ±0     | ±0    | — |
+| SCG11EA  | ±0     | ±0    | — |
+| SCG12EA  | ±2     | **±0**| **-2 (now perfect)** |
+| SCG13EA  | ±2     | ±2    | — |
+
+**5/12 → 6/12 perfect.** Net positive: 3 improvements, 1 small regression.
+
+### Test Count
+51,033 vitest tests passing, 0 failures.
+
+### Commits
+- c38f00b — chore: tag Team AI RNG calls with C++ tag=1
+- acb4e26 — fix: Team.recruit() matches C++ UNIT/VESSEL multi-add semantics
+
 ## 2026-04-09T03:00Z — HPAD Helicopter AI + Final Parity Analysis
 
 ### HPAD Helicopter: Full Guard AI Implemented
