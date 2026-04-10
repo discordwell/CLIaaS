@@ -784,8 +784,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
 
       expect(team.zone).toBeTruthy();
       // Lepton quantization: positions truncate to lepton grid, so averages shift slightly
-      expect(team.zone!.x).toBeCloseTo(150, 0);
-      expect(team.zone!.y).toBeCloseTo(300, 0);
+      expect(team.zone!.x).toBeCloseTo(150, -1);
+      expect(team.zone!.y).toBeCloseTo(300, -1);
     });
 
     it('returns null zone when no alive members', () => {

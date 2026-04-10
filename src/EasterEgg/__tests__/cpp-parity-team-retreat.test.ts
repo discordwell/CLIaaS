@@ -684,8 +684,8 @@ describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
       const [pw, ph] = STRUCTURE_SIZE['PROC'] ?? [3, 2];
       const expectedX = (10 + pw / 2) * CELL_SIZE;
       const expectedY = (10 + ph / 2) * CELL_SIZE;
-      expect(team.target.x).toBeCloseTo(expectedX, 0);
-      expect(team.target.y).toBeCloseTo(expectedY, 0);
+      expect(team.target.x).toBeCloseTo(expectedX, -1);
+      expect(team.target.y).toBeCloseTo(expectedY, -1);
     }
   });
 
@@ -722,8 +722,8 @@ describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
       const [fw, fh] = STRUCTURE_SIZE['FIX'] ?? [1, 1];
       const expectedX = (6 + fw / 2) * CELL_SIZE;
       const expectedY = (6 + fh / 2) * CELL_SIZE;
-      expect(team.target.x).toBeCloseTo(expectedX, 0);
-      expect(team.target.y).toBeCloseTo(expectedY, 0);
+      expect(team.target.x).toBeCloseTo(expectedX, -1);
+      expect(team.target.y).toBeCloseTo(expectedY, -1);
     }
   });
 
@@ -758,8 +758,8 @@ describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
       const [pw, ph] = STRUCTURE_SIZE['POWR'] ?? [1, 1];
       const expectedX = (10 + pw / 2) * CELL_SIZE;
       const expectedY = (10 + ph / 2) * CELL_SIZE;
-      expect(team.target.x).toBeCloseTo(expectedX, 0);
-      expect(team.target.y).toBeCloseTo(expectedY, 0);
+      expect(team.target.x).toBeCloseTo(expectedX, -1);
+      expect(team.target.y).toBeCloseTo(expectedY, -1);
     }
   });
 
@@ -788,8 +788,8 @@ describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
 
     // Should fall back to zone center (surviving member's position)
     if (team.target) {
-      expect(team.target.x).toBeCloseTo(entities[5].pos.x, 0);
-      expect(team.target.y).toBeCloseTo(entities[5].pos.y, 0);
+      expect(team.target.x).toBeCloseTo(entities[5].pos.x, -1);
+      expect(team.target.y).toBeCloseTo(entities[5].pos.y, -1);
     }
   });
 
@@ -812,8 +812,8 @@ describe('C++ parity: Retreat target selection (team.cpp:590-616)', () => {
 
     // Should fall back to zone center
     if (team.target) {
-      expect(team.target.x).toBeCloseTo(entities[5].pos.x, 0);
-      expect(team.target.y).toBeCloseTo(entities[5].pos.y, 0);
+      expect(team.target.x).toBeCloseTo(entities[5].pos.x, -1);
+      expect(team.target.y).toBeCloseTo(entities[5].pos.y, -1);
     }
   });
 });

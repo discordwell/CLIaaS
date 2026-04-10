@@ -22,7 +22,7 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, worldDist, worldDistLeptons, STRAY_DISTANCE, type WorldPos, CELL_SIZE } from './types';
+import { House, Mission, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 
@@ -128,6 +128,9 @@ export class Team {
 
   /** Team center/zone (C++ Zone) — average position of members */
   zone: WorldPos | null = null;
+  /** Zone in lepton space for C++ parity distance comparisons */
+  zoneLeptonX = 0;
+  zoneLeptonY = 0;
 
   /** Has any member left the map? (C++ IsLeaveMap) */
   isLeaveMap = false;
@@ -531,7 +534,7 @@ export class Team {
       // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons
       // C++ team.cpp:2054-2056: aircraft get 3x stray distance
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
-      if (this.zone && worldDistLeptons(unit.pos, this.zone) > stray) {
+      if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > stray) {
         // Member too far — order to move to zone
         unit.mission = Mission.MOVE;
         unit.moveTarget = { ...this.zone };
@@ -566,8 +569,11 @@ export class Team {
       found = true;
 
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
+      // Use leptonDist for C++ parity (coord.cpp Distance in lepton space)
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
-      const dist = worldDistLeptons(unit.pos, this.target);
+      const targetLX = Math.trunc(this.target.x * LEPTON_SIZE / CELL_SIZE);
+      const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
+      const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
         // Not yet arrived — order move
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
@@ -667,8 +673,11 @@ export class Team {
       }
 
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
+      // Use leptonDist for C++ parity (coord.cpp Distance in lepton space)
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
-      const dist = worldDistLeptons(unit.pos, this.target);
+      const targetLX = Math.trunc(this.target.x * LEPTON_SIZE / CELL_SIZE);
+      const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
+      const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
@@ -804,12 +813,18 @@ export class Team {
       return;
     }
 
-    let x = 0, y = 0;
+    // C++ team.cpp:1390 Calc_Center uses lepton coordinates.
+    // Compute average in lepton space, then convert to pixel WorldPos.
+    let lx = 0, ly = 0;
     for (const m of alive) {
-      x += m.pos.x;
-      y += m.pos.y;
+      lx += m.leptonX;
+      ly += m.leptonY;
     }
-    this.zone = { x: x / alive.length, y: y / alive.length };
+    lx = Math.trunc(lx / alive.length);
+    ly = Math.trunc(ly / alive.length);
+    this.zoneLeptonX = lx;
+    this.zoneLeptonY = ly;
+    this.zone = { x: Math.trunc(lx * 24 / 256), y: Math.trunc(ly * 24 / 256) };
   }
 
   /**
