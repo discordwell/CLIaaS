@@ -6392,12 +6392,22 @@ export class Game {
       if (ct.teamIdx !== undefined) {
         const teamType = this.teamTypes[ct.teamIdx];
         if (teamType) {
+          // C++ team.cpp:1186-1188: recruit center is the team type's origin
+          // waypoint when set (Class->Origin != -1).
+          let originPos: WorldPos | null = null;
+          if (teamType.origin >= 0) {
+            const wp = this.waypoints.get(teamType.origin);
+            if (wp) {
+              originPos = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+            }
+          }
           const team = new TeamInstance({
             house: ct.house,
             desiredMembers: teamType.members.map(m => ({ type: m.type.toUpperCase(), count: m.count })),
             missionList: ct.missions.length > 0 ? ct.missions.map(m => ({ mission: m.mission, data: m.data })) : [],
             isReinforcable: !!(teamType.flags & 16),
             isSuicide: !!(teamType.flags & 2),
+            origin: originPos,
             forcedActive: false,
           });
           // Empty team — Team.recruit() in Team.ai() adds members 1/tick
@@ -6463,12 +6473,21 @@ export class Game {
           memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
         }
         const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
+        // C++ team.cpp:1186-1188: recruit center is team type origin waypoint
+        let originPos: WorldPos | null = null;
+        if (teamType.origin >= 0) {
+          const wp = this.waypoints.get(teamType.origin);
+          if (wp) {
+            originPos = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
+          }
+        }
         const team = new TeamInstance({
           house: teamHouse,
           desiredMembers,
           missionList: teamEntities[0].teamMissions,
           isReinforcable: !!(teamType.flags & 16),
           isSuicide: !!(teamType.flags & 2),
+          origin: originPos,
           // C++ reinf.cpp:173: team->Force_Active() — team activates immediately
           forcedActive: true,
         });

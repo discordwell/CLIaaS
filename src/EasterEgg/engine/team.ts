@@ -22,7 +22,7 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE } from './types';
+import { House, Mission, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 
@@ -239,12 +239,37 @@ export class Team {
   }
 
   /**
-   * C++ TeamClass::Recruit (team.cpp:1180) — find and add ONE idle unit per tick.
-   * Called from ai() when team is not at full strength.
-   * Searches entities for matching type+house, closest to team zone.
-   * Only ONE unit recruited per call (C++ recruits one per Recruit() invocation).
+   * C++ TeamClass::Recruit (team.cpp:1180) — find and add idle units to team.
+   *
+   * C++ team.cpp:668 calls Recruit(typeindex) once per class type that needs
+   * more members (not just one Recruit call per tick). Each Recruit() call has
+   * different semantics depending on the type:
+   *
+   *   INFANTRY/AIRCRAFT (team.cpp:1208-1247): the `if (best)` Add call is
+   *   OUTSIDE the for loop, so only the FINAL closest match is added (1 per
+   *   call).
+   *
+   *   UNIT/VESSEL (team.cpp:1250-1322): the `if (best)` Add call is INSIDE
+   *   the for loop. Each iteration where `best` is updated to a new closer
+   *   unit triggers another Add — so MULTIPLE units can be recruited in a
+   *   single call. Each "improvement" of best produces an Add of the new unit
+   *   (previous bests are already members and Add() is a no-op for them).
+   *
+   *   This quirk/bug in the C++ source means a team can recruit multiple
+   *   units per tick if the iteration order has matching units in
+   *   non-monotonic distance order (a closer unit found AFTER a farther one).
+   *
+   * The iteration center for distance comparison is C++ Class->Origin (team
+   * type origin waypoint) when set, else the team's geometric Zone.
+   *
+   * For TS parity we must match this distance reference and iteration
+   * order exactly. The TS recruit caller passes a `center` argument so the
+   * caller can resolve the team type's origin waypoint to a position.
    */
-  recruit(entities: Entity[]): void {
+  recruit(entities: Entity[], center?: WorldPos): void {
+    // C++ Recruit uses team origin waypoint as center if set, else team Zone
+    const recruitCenter = center ?? this.origin ?? this.zone;
+
     for (const dm of this.desiredMembers) {
       let current = 0;
       for (const m of this._members) {
@@ -253,8 +278,46 @@ export class Team {
       if (current >= dm.count) continue;
 
       const targetType = dm.type.toUpperCase();
+      const stats = UNIT_STATS[targetType as UnitType];
+      const isUnitOrVessel = stats && !stats.isInfantry && !stats.isAircraft;
+
+      if (isUnitOrVessel) {
+        // C++ UNIT/VESSEL case (team.cpp:1250-1322): iteration-based add.
+        // Each iteration where a closer match is found triggers Add.
+        let bestEntity: Entity | null = null;
+        let bestDist = -1;
+        for (const e of entities) {
+          if (!e.alive || e.inLimbo) continue;
+          if (e.type !== targetType) continue;
+          if (e.house !== this.house) continue;
+          if (e.teamRef === this) continue; // already a member of THIS team
+          if (e.teamRef) continue; // C++ Can_Add: priority check (simplified)
+          if (e.mission !== Mission.GUARD && e.mission !== Mission.AREA_GUARD) continue;
+          if (e.target || e.moveTarget) continue;
+          // C++ Can_Add: team must not be full of this type
+          if (current >= dm.count) break;
+
+          const d = recruitCenter
+            ? worldDist(e.pos, recruitCenter)
+            : 0;
+          // C++ team.cpp:1262: (d < bestdist || bestdist == -1)
+          if (bestDist === -1 || d < bestDist) {
+            bestDist = d;
+            bestEntity = e;
+            // C++ team.cpp:1269-1283: Add(best) inside the for loop, each
+            // time best is updated. The previous best stays in the team
+            // (Add() is a no-op for existing members).
+            this.add(bestEntity);
+            current++;
+          }
+        }
+        continue;
+      }
+
+      // C++ INFANTRY/AIRCRAFT case (team.cpp:1208-1247): loop-then-add. Find
+      // the single closest match across all entities, then Add once.
       let bestEntity: Entity | null = null;
-      let bestDist = Infinity;
+      let bestDist = -1;
       for (const e of entities) {
         if (!e.alive || e.inLimbo) continue;
         if (e.type !== targetType) continue;
@@ -262,18 +325,17 @@ export class Team {
         if (e.teamRef) continue;
         if (e.mission !== Mission.GUARD && e.mission !== Mission.AREA_GUARD) continue;
         if (e.target || e.moveTarget) continue;
-        if (this.zone) {
-          const d = worldDist(e.pos, this.zone);
-          if (d < bestDist) { bestDist = d; bestEntity = e; }
-        } else {
+        const d = recruitCenter
+          ? worldDist(e.pos, recruitCenter)
+          : 0;
+        if (bestDist === -1 || d < bestDist) {
+          bestDist = d;
           bestEntity = e;
-          break;
         }
       }
 
       if (bestEntity) {
         this.add(bestEntity);
-        return; // C++ recruits ONE per tick
       }
     }
   }
