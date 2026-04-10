@@ -239,6 +239,46 @@ export class Team {
   }
 
   /**
+   * C++ TeamClass::Recruit (team.cpp:1180) — find and add ONE idle unit per tick.
+   * Called from ai() when team is not at full strength.
+   * Searches entities for matching type+house, closest to team zone.
+   * Only ONE unit recruited per call (C++ recruits one per Recruit() invocation).
+   */
+  recruit(entities: Entity[]): void {
+    for (const dm of this.desiredMembers) {
+      let current = 0;
+      for (const m of this._members) {
+        if (m.alive && (m.type === dm.type || m.type === dm.type.toUpperCase())) current++;
+      }
+      if (current >= dm.count) continue;
+
+      const targetType = dm.type.toUpperCase();
+      let bestEntity: Entity | null = null;
+      let bestDist = Infinity;
+      for (const e of entities) {
+        if (!e.alive || e.inLimbo) continue;
+        if (e.type !== targetType) continue;
+        if (e.house !== this.house) continue;
+        if (e.teamRef) continue;
+        if (e.mission !== Mission.GUARD && e.mission !== Mission.AREA_GUARD) continue;
+        if (e.target || e.moveTarget) continue;
+        if (this.zone) {
+          const d = worldDist(e.pos, this.zone);
+          if (d < bestDist) { bestDist = d; bestEntity = e; }
+        } else {
+          bestEntity = e;
+          break;
+        }
+      }
+
+      if (bestEntity) {
+        this.add(bestEntity);
+        return; // C++ recruits ONE per tick
+      }
+    }
+  }
+
+  /**
    * Remove entity from team (C++ TeamClass::Remove, team.cpp:1053-1158).
    * - Clears entity.teamRef
    * - Sets entity to idle mode (team.cpp:1139)
@@ -383,6 +423,11 @@ export class Team {
     // ── Recalc center (C++ team.cpp:658-660) ──
     if (this.isReforming || this.isMoving || this.zone === null) {
       this.calcCenter();
+    }
+
+    // ── Recruit when under strength (C++ team.cpp:666-673) ──
+    if (!this.isFullStrength && ctx?.entities) {
+      this.recruit(ctx.entities);
     }
 
     // ── Dissolve if empty and has been active (C++ team.cpp:679-697) ──

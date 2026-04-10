@@ -1760,7 +1760,7 @@ export class Game {
     // C++ logic.cpp:268-270: Team AI processes BEFORE entity AI every tick.
     // Teams coordinate member movement/attack and consume RNG (Percent_Chance(50)
     // at activation, Mission_Move → Random_Pick(0,2) via Commence Timer reset).
-    _updateAllTeams(this.waypoints, { structures: this.structures });
+    _updateAllTeams(this.waypoints, { structures: this.structures, entities: this.entities });
 
     // C++ Logic.AI() (logic.cpp:284) processes ALL objects in a single loop from
     // Logic[0] to Logic[Count()-1]. Read_Scenario_INI loads: Units → Vessels →
@@ -6357,15 +6357,18 @@ export class Game {
     if (result.createTeam) {
       const ct = result.createTeam;
       const recruited: Entity[] = [];
+      const recruitedSet = new Set<Entity>(); // prevent same entity recruited twice
       for (const member of ct.members) {
         const memberType = member.type.toUpperCase();
         for (let i = 0; i < member.count; i++) {
           const recruit = this.entities.find(e =>
             e.alive && !e.inLimbo && e.type === memberType &&
             e.house === ct.house && e.mission === Mission.GUARD &&
-            !e.target && !e.moveTarget
+            !e.target && !e.moveTarget &&
+            !recruitedSet.has(e) // C++ Recruit finds DISTINCT units
           );
           if (recruit) {
+            recruitedSet.add(recruit);
             if (ct.missions.length > 0) {
               recruit.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
               recruit.teamMissionIndex = 0;
@@ -6377,28 +6380,23 @@ export class Game {
       // C++ parity: Create_One_Of with ScenarioInit++ always creates a TeamClass.
       // This Team.AI() runs every tick, consuming RNG (Percent_Chance at activation,
       // Coordinate_Move/Attack re-assigning missions with timer reset).
-      if (recruited.length > 0 && ct.teamIdx !== undefined) {
+      // C++ taction.cpp:658-661: Create_One_Of creates an EMPTY team.
+      // Members are recruited 1-per-tick via Team::Recruit() in Team::AI().
+      // The team activates (Percent_Chance) only when full strength is reached.
+      // For subz team (SS:3), this means: tick 1→1 sub, tick 2→2, tick 3→3,
+      // tick 4→full→activate. We do NOT pre-add members.
+      if (ct.teamIdx !== undefined) {
         const teamType = this.teamTypes[ct.teamIdx];
         if (teamType) {
-          const memberCounts = new Map<string, number>();
-          for (const e of recruited) {
-            memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
-          }
-          const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
           const team = new TeamInstance({
             house: ct.house,
-            desiredMembers,
+            desiredMembers: teamType.members.map(m => ({ type: m.type.toUpperCase(), count: m.count })),
             missionList: ct.missions.length > 0 ? ct.missions.map(m => ({ mission: m.mission, data: m.data })) : [],
             isReinforcable: !!(teamType.flags & 16),
             isSuicide: !!(teamType.flags & 2),
             forcedActive: false,
-            // C++ CREATE_TEAM: team recruits via Team::Recruit() on the next tick,
-            // so activation (Percent_Chance) happens 1 tick later than if pre-filled.
-            delayActivation: true,
           });
-          for (const e of recruited) {
-            team.add(e);
-          }
+          // Empty team — Team.recruit() in Team.ai() adds members 1/tick
           registerTeam(team);
         }
       }
