@@ -19,6 +19,7 @@ import {
   NUKE_MIN_FALLOFF, CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
   CIVILIAN_UNIT_TYPES,
   PRODUCTION_ITEMS,
+  SUBCELL_LEPTON_OFFSETS,
 } from './types';
 // NOTE: For server-side code that needs rules.ini-derived faction data,
 // import from './rulesIniPipeline' instead of using PRODUCTION_ITEMS directly.
@@ -1736,6 +1737,16 @@ export class Game {
             const subCell = this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id);
             if (subCell >= 0) {
               entity.subCell = subCell;
+              // C++ const.cpp StoppingCoordAbs: idle infantry snap to exact sub-cell
+              // lepton position. Only snap when not actively moving (isDriving=false)
+              // to avoid interfering with movement interpolation.
+              if (!entity.isDriving) {
+                const sc = SUBCELL_LEPTON_OFFSETS[subCell];
+                const { cx, cy } = entity.cell;
+                entity.leptonX = (cx << 8) + sc.lx;
+                entity.leptonY = (cy << 8) + sc.ly;
+                entity.syncPosFromLeptons();
+              }
             }
             // else: all sub-cells full — entity keeps its previous subCell
           } else {

@@ -9,7 +9,7 @@ import {
   type WarheadType, type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
-  worldDist, directionTo, worldToCell, DIR_DX, DIR_DY,
+  leptonDist, pixelToLepton, directionTo, worldToCell, DIR_DX, DIR_DY,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
 } from './types';
@@ -170,8 +170,8 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
     // Return to guard origin if player unit was auto-engaging (not given explicit attack order)
     if (entity.isPlayerUnit && entity.guardOrigin) {
-      const d = worldDist(entity.pos, entity.guardOrigin);
-      if (d > 1.5) { // worldDist returns cells
+      const d = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(entity.guardOrigin.x), pixelToLepton(entity.guardOrigin.y));
+      if (d > 384) { // 1.5 cells * 256 leptons/cell
         entity.mission = Mission.MOVE;
         entity.moveTarget = { x: entity.guardOrigin.x, y: entity.guardOrigin.y };
         entity.path = findPath(ctx.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true, entity.isNavalUnit, entity.stats.speedClass);
@@ -239,8 +239,8 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 
   // Minimum range check: artillery can't fire at point-blank
   if (entity.weapon?.minRange && entity.target) {
-    const dist = worldDist(entity.pos, entity.target.pos);
-    if (dist < entity.weapon.minRange) {
+    const dist = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
+    if (dist < entity.weapon.minRange * LEPTON_SIZE) {
       ctx.retreatFromTarget(entity, entity.target.pos);
       return;
     }
@@ -361,9 +361,8 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       }
       if (effectiveInaccuracy > 0) {
         // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
-        // distance in leptons (1 cell = 256 leptons), convert from cells
-        const targetDist = worldDist(entity.pos, entity.target.pos);
-        const distLeptons = targetDist * LEPTON_SIZE;
+        // distance in leptons (1 cell = 256 leptons)
+        const distLeptons = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
         // C++ formula: scatterMax = max(0, (distance / 16) - 64)
         let scatterMax = Math.max(0, (distLeptons / 16) - 64);
         // Cap at HomingScatter(512) for homing, BallisticScatter(256) for ballistic
@@ -397,13 +396,14 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 
       // CF7: Heal guard — negative damage weapons must pass proximity and armor checks (C++ combat.cpp:86-96)
       if (activeWeapon.damage < 0) {
-        const healDist = worldDist(entity.pos, entity.target.pos);
+        const healDist = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
+        const HEAL_PROXIMITY = 192; // 0.75 cells * 256 leptons/cell
         if (activeWeapon.warhead === 'Mechanical') {
           // GoodWrench/Mechanic: only heals armored targets (armor !== 'none') within 0.75 cells
-          if (healDist >= 0.75 || entity.target.stats.armor === 'none') return;
+          if (healDist >= HEAL_PROXIMITY || entity.target.stats.armor === 'none') return;
         } else {
           // Heal warhead (Organic): only heals unarmored targets (armor === 'none') within 0.75 cells
-          if (healDist >= 0.75 || entity.target.stats.armor !== 'none') return;
+          if (healDist >= HEAL_PROXIMITY || entity.target.stats.armor !== 'none') return;
         }
         // Apply healing directly — modifyDamage clamps negative values to 0
         const healAmount = Math.abs(activeWeapon.damage);
@@ -508,7 +508,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
         const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);
         const projCfg = projectileVisualConfig(activeWeapon.name);
-        if (projStyle !== 'bullet' || worldDist(entity.pos, entity.target.pos) > 2) {
+        if (projStyle !== 'bullet' || leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY) > 512) { // 2 cells in leptons
           // Per-weapon projectile speed: compute travel frames from distance and projSpeed
           const projDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
           const travelFrames = calcProjectileTravelFrames(projDistPx, activeWeapon.projSpeed);
@@ -538,8 +538,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     if (entity.stance === Stance.DEFENSIVE) {
       const weaponRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || 2;
       const origin = entity.guardOrigin ?? entity.pos;
-      const distFromHome = worldDist(origin, entity.target.pos);
-      if (distFromHome > weaponRange + 1) {
+      const originLX = pixelToLepton(origin.x);
+      const originLY = pixelToLepton(origin.y);
+      const distFromHome = leptonDist(originLX, originLY, entity.target.leptonX, entity.target.leptonY);
+      if (distFromHome > (weaponRange + 1) * LEPTON_SIZE) {
         // Target fled beyond guard perimeter — disengage
         entity.target = null;
         entity.forceFirePos = null;
@@ -590,11 +592,11 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
         if (!hasAA) continue;
       }
-      const dist = worldDist(entity.pos, other.pos);
+      const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
       if (dist > huntRange) continue;
       // C++ Evaluate_Object has no terrain LOS check for ANY scan mode.
       // The only visibility filter is IsDiscoveredByPlayer (fog of war).
-      const score = ctx.threatScore(entity, other, dist);
+      const score = ctx.threatScore(entity, other, dist / LEPTON_SIZE);
       if (score > bestScore) { bestScore = score; bestTarget = other; }
     }
     if (bestTarget) {
@@ -608,8 +610,10 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         if (!s.alive) continue;
         if (s.house === House.Neutral) continue;
         if (ctx.isAllied(entity.house, s.house)) continue;
-        const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-        const dist = worldDist(entity.pos, sPos);
+        // Structure center in leptons: cell * 256 + 256 (for 2x2 buildings, center offset by 1 cell)
+        const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+        const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+        const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
         if (dist < bestStructDist) {
           bestStructDist = dist;
           bestStruct = s;
@@ -667,8 +671,9 @@ function cellBasedGuardScan(
   ctx: MissionAIContext, entity: Entity, scanRange: number, isDog: boolean,
 ): Entity | null {
   // C++ techno.cpp:2048-2053: crange = weapon range in cells + 1
-  // scanRange is already in cells; convert to cell scan radius
+  // scanRange is in cells; convert to cell scan radius and lepton threshold
   const crange = Math.floor(scanRange) + 1;
+  const scanRangeLeptons = scanRange * LEPTON_SIZE;
   if (crange <= 0) return null;
 
   // C++ techno.cpp:2055: CELL cell = Coord_Cell(Fire_Coord(0))
@@ -740,8 +745,8 @@ function cellBasedGuardScan(
         if (ent) {
           // C++ Evaluate_Object range check: when range==0 (THREAT_RANGE), use In_Range
           // In_Range: Distance(Fire_Coord(which), target->Center_Coord()) <= Weapon_Range(which)
-          const dist = worldDist(entity.pos, ent.pos);
-          if (dist <= scanRange) {
+          const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+          if (dist <= scanRangeLeptons) {
             // C++ bestval < value is always true (bestval stays -1) → always overwrite
             bestObject = ent;
           }
@@ -755,8 +760,8 @@ function cellBasedGuardScan(
         if (radius > 0 || x !== -radius) {
           const ent = cellMap.get(cellKey(cx, botY));
           if (ent) {
-            const dist = worldDist(entity.pos, ent.pos);
-            if (dist <= scanRange) {
+            const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+            if (dist <= scanRangeLeptons) {
               bestObject = ent;
             }
           }
@@ -775,8 +780,8 @@ function cellBasedGuardScan(
       if (leftX >= mapX && leftX < mapX + mapW) {
         const ent = cellMap.get(cellKey(leftX, cy));
         if (ent) {
-          const dist = worldDist(entity.pos, ent.pos);
-          if (dist <= scanRange) {
+          const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+          if (dist <= scanRangeLeptons) {
             bestObject = ent;
           }
         }
@@ -787,8 +792,8 @@ function cellBasedGuardScan(
       if (rightX >= mapX && rightX < mapX + mapW) {
         const ent = cellMap.get(cellKey(rightX, cy));
         if (ent) {
-          const dist = worldDist(entity.pos, ent.pos);
-          if (dist <= scanRange) {
+          const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+          if (dist <= scanRangeLeptons) {
             bestObject = ent;
           }
         }
@@ -861,8 +866,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     let nearestAntPos: WorldPos | null = null;
     for (const other of ctx.entities) {
       if (!other.alive || !other.isAnt) continue;
-      const dist = worldDist(entity.pos, other.pos);
-      if (dist < 5 && dist < nearestAntDist) {
+      const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
+      if (dist < 1280 && dist < nearestAntDist) { // 5 cells * 256 leptons/cell
         nearestAntDist = dist;
         nearestAntPos = other.pos;
       }
@@ -907,7 +912,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   if (entity.type === UnitType.I_SPY && entity.alive && !entity.disguisedAs && entity.isPlayerUnit) {
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
-      if (worldDist(entity.pos, other.pos) <= 4) { // worldDist returns cells
+      if (leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY) <= 1024) { // 4 cells * 256 leptons/cell
         ctx.spyDisguise(entity, other);
         break;
       }
@@ -921,7 +926,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     for (const other of ctx.entities) {
       if (!other.alive || other.type !== UnitType.I_SPY) continue;
       if (ctx.entitiesAllied(entity, other)) continue;
-      if (worldDist(entity.pos, other.pos) <= 3) {
+      if (leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY) <= 768) { // 3 cells * 256 leptons/cell
         entity.target = other;
         entity.mission = Mission.ATTACK;
         return;
@@ -999,10 +1004,12 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       if (ctx.isAllied(entity.house, s.house)) continue;
       // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings
       if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
-      const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-      const dist = worldDist(entity.pos, sPos);
+      // Structure center in leptons
+      const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+      const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+      const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
       // C++ techno.cpp:1517-1523: In_Range uses <= (inclusive boundary)
-      if (dist > scanRange) continue;
+      if (dist > scanRange * LEPTON_SIZE) continue;
       if (dist < bestStructDist) {
         bestStructDist = dist;
         bestStruct = s;
@@ -1053,9 +1060,11 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   const scanRange = threatRange1;
 
   // If too far from origin (> leash range), return home — but still attack enemies en route
-  const distFromOrigin = worldDist(entity.pos, origin);
+  const originLX = pixelToLepton(origin.x);
+  const originLY = pixelToLepton(origin.y);
+  const distFromOrigin = leptonDist(entity.leptonX, entity.leptonY, originLX, originLY);
   const ec = entity.cell;
-  if (distFromOrigin > leashRange) {
+  if (distFromOrigin > leashRange * LEPTON_SIZE) {
     // Check for enemies while returning
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
@@ -1065,8 +1074,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
-      const dist = worldDist(entity.pos, other.pos);
-      if (dist > entity.stats.sight) continue;
+      const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
+      if (dist > entity.stats.sight * LEPTON_SIZE) continue;
       // C++ Evaluate_Object has no terrain LOS check — removed for parity.
       // Found an enemy — attack it
       entity.mission = Mission.ATTACK;
@@ -1086,8 +1095,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
 
   // If moving back toward origin, continue moving
   if (entity.moveTarget) {
-    const distToMove = worldDist(entity.pos, entity.moveTarget);
-    if (distToMove > 1.0) {
+    const distToMove = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(entity.moveTarget.x), pixelToLepton(entity.moveTarget.y));
+    if (distToMove > 256) { // 1.0 cell in leptons
       entity.animState = AnimState.WALK;
       entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
       return;
@@ -1108,10 +1117,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
     if (other.cloakState === CloakState.CLOAKED) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
-    const dist = worldDist(scanPos, other.pos);
-    if (dist > scanRange) continue;
+    const dist = leptonDist(originLX, originLY, other.leptonX, other.leptonY);
+    if (dist > scanRange * LEPTON_SIZE) continue;
     // C++ Evaluate_Object has no terrain LOS check — removed for parity.
-    const score = ctx.threatScore(entity, other, dist);
+    const score = ctx.threatScore(entity, other, dist / LEPTON_SIZE);
     if (score > bestScore) { bestScore = score; bestTarget = other; }
   }
 
@@ -1208,7 +1217,7 @@ export function updateAmbush(ctx: MissionAIContext, entity: Entity): void {
     if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
     // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
     if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
-    if (worldDist(entity.pos, other.pos) > entity.stats.sight) continue;
+    if (leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY) > entity.stats.sight * LEPTON_SIZE) continue;
     const oc = other.cell;
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
     // Enemy spotted — switch to HUNT
@@ -1238,7 +1247,9 @@ export function updateRepairMission(ctx: MissionAIContext, entity: Entity): void
     if (!s.alive || s.type !== 'FIX') continue;
     if (!ctx.isAllied(s.house, entity.house)) continue;
     const sp: WorldPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-    const d = worldDist(entity.pos, sp);
+    const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+    const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+    const d = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
     if (d < bestDist) { bestDist = d; bestPos = sp; }
   }
   if (bestPos) {
@@ -1257,19 +1268,23 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
     x: s.cx * CELL_SIZE + CELL_SIZE,
     y: s.cy * CELL_SIZE + CELL_SIZE,
   };
-  const dist = worldDist(entity.pos, structPos);
+  // Structure center in leptons
+  const structLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+  const structLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+  const dist = leptonDist(entity.leptonX, entity.leptonY, structLX, structLY);
   // C++ parity: spies infiltrate from adjacent cells (building edge), not center.
   // Buildings are 2x2 or 3x2 cells, so the edge can be 2-3 cells from center.
   // Unarmed units (spies, engineers) need range 4 to reach from adjacent cells.
   const range = entity.weapon?.range ?? 2;
+  const rangeLeptons = range * LEPTON_SIZE;
 
   // Minimum range check: artillery can't fire at point-blank structures
-  if (entity.weapon?.minRange && dist < entity.weapon.minRange) {
+  if (entity.weapon?.minRange && dist < entity.weapon.minRange * LEPTON_SIZE) {
     ctx.retreatFromTarget(entity, structPos);
     return;
   }
 
-  if (dist <= range) {
+  if (dist <= rangeLeptons) {
     // Engineer capture/damage (C++ infantry.cpp:598-637 — any house's engineer, not just player)
     if (entity.type === UnitType.I_E6) {
       // EN1: Friendly repair — C++ always takes Renovate() branch for allies (infantry.cpp:606-611)
@@ -1430,10 +1445,10 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
 /** Force-fire on ground — fire at a location with no target entity */
 export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): void {
   const target = entity.forceFirePos!;
-  const dist = worldDist(entity.pos, target);
+  const dist = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(target.x), pixelToLepton(target.y));
   const range = entity.weapon?.range ?? 2;
 
-  if (dist <= range) {
+  if (dist <= range * LEPTON_SIZE) {
     entity.desiredFacing = directionTo(entity.pos, target);
     const facingReady = entity.tickRotation();
     if (entity.stats.noMovingFire && !facingReady) {

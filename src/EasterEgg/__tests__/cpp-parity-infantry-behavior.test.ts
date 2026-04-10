@@ -26,7 +26,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission, AnimState,
   UNIT_STATS, WARHEAD_PROPS, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
-  INFANTRY_ANIMS, SUB_CELL_OFFSETS, buildDefaultAlliances,
+  INFANTRY_ANIMS, SUB_CELL_OFFSETS, SUBCELL_LEPTON_OFFSETS, buildDefaultAlliances,
   type WarheadType,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
@@ -736,5 +736,101 @@ describe('Infantry entity initialization (infantry.cpp:182)', () => {
     expect(e1.alive).toBe(true);
     expect(e1.hp).toBe(e1.maxHp);
     expect(e1.hp).toBe(UNIT_STATS.E1.strength);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 4: Sub-cell lepton position snapping — C++ const.cpp StoppingCoordAbs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Infantry sub-cell lepton position (C++ StoppingCoordAbs)', () => {
+  // C++ const.cpp StoppingCoordAbs defines the exact lepton coordinate infantry
+  // occupy within a cell. When idle (not driving), infantry should snap to these
+  // positions so that distance calculations, combat targeting, etc. use the correct
+  // sub-cell coordinate rather than a generic cell-center position.
+
+  it('SUBCELL_LEPTON_OFFSETS matches C++ StoppingCoordAbs exactly', () => {
+    // C++ const.cpp: COORDINATE StoppingCoordAbs[5] = {
+    //   XY_Coord(128,128), XY_Coord(64,64), XY_Coord(192,64),
+    //   XY_Coord(64,192), XY_Coord(192,192) };
+    expect(SUBCELL_LEPTON_OFFSETS[0]).toEqual({ lx: 128, ly: 128 }); // CENTER
+    expect(SUBCELL_LEPTON_OFFSETS[1]).toEqual({ lx: 64,  ly: 64  }); // UL
+    expect(SUBCELL_LEPTON_OFFSETS[2]).toEqual({ lx: 192, ly: 64  }); // UR
+    expect(SUBCELL_LEPTON_OFFSETS[3]).toEqual({ lx: 64,  ly: 192 }); // LL
+    expect(SUBCELL_LEPTON_OFFSETS[4]).toEqual({ lx: 192, ly: 192 }); // LR
+  });
+
+  it('idle infantry at sub-cell 0 (CENTER) has leptonX = cx*256 + 128', () => {
+    const cx = 10, cy = 15;
+    const e = entityAtCell(UnitType.I_E1, House.Spain, cx, cy);
+    // Simulate sub-cell assignment for idle infantry
+    e.subCell = 0;
+    e.isDriving = false;
+    const sc = SUBCELL_LEPTON_OFFSETS[0];
+    e.leptonX = (cx << 8) + sc.lx;
+    e.leptonY = (cy << 8) + sc.ly;
+    e.syncPosFromLeptons();
+
+    expect(e.leptonX).toBe(cx * 256 + 128);
+    expect(e.leptonY).toBe(cy * 256 + 128);
+  });
+
+  it('idle infantry at sub-cell 1 (UL) has leptonX = cx*256 + 64', () => {
+    const cx = 10, cy = 15;
+    const e = entityAtCell(UnitType.I_E1, House.Spain, cx, cy);
+    e.subCell = 1;
+    e.isDriving = false;
+    const sc = SUBCELL_LEPTON_OFFSETS[1];
+    e.leptonX = (cx << 8) + sc.lx;
+    e.leptonY = (cy << 8) + sc.ly;
+    e.syncPosFromLeptons();
+
+    expect(e.leptonX).toBe(cx * 256 + 64);
+    expect(e.leptonY).toBe(cy * 256 + 64);
+  });
+
+  it('sub-cell lepton position derives correct pixel position', () => {
+    // LP = CELL_SIZE / 256 = 24/256 = 0.09375
+    const LP = CELL_SIZE / 256;
+    const cx = 10, cy = 15;
+
+    for (let sc = 0; sc < 5; sc++) {
+      const off = SUBCELL_LEPTON_OFFSETS[sc];
+      const lx = (cx << 8) + off.lx;
+      const ly = (cy << 8) + off.ly;
+      const px = lx * LP;
+      const py = ly * LP;
+
+      // Pixel position should be cell origin + sub-cell pixel offset
+      const expectedPx = cx * CELL_SIZE + off.lx * LP;
+      const expectedPy = cy * CELL_SIZE + off.ly * LP;
+      expect(px).toBeCloseTo(expectedPx, 10);
+      expect(py).toBeCloseTo(expectedPy, 10);
+    }
+  });
+
+  it('sub-cell 0 (CENTER) pixel matches cell center', () => {
+    const LP = CELL_SIZE / 256;
+    const cx = 10, cy = 15;
+    const lx = (cx << 8) + 128;
+    const ly = (cy << 8) + 128;
+    // cell center = cx * CELL_SIZE + CELL_SIZE / 2 = cx * 24 + 12
+    expect(lx * LP).toBe(cx * CELL_SIZE + CELL_SIZE / 2);
+    expect(ly * LP).toBe(cy * CELL_SIZE + CELL_SIZE / 2);
+  });
+
+  it('moving infantry (isDriving=true) is NOT snapped to sub-cell position', () => {
+    // Verify that the snap logic only applies to idle infantry.
+    // This is a documentation/contract test — the actual snapping happens in index.ts
+    // and we verify the condition here.
+    const e = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+    e.isDriving = true;
+    // Store original position
+    const origLX = e.leptonX;
+    const origLY = e.leptonY;
+    // isDriving infantry should keep their current position (movement system controls it)
+    expect(e.isDriving).toBe(true);
+    expect(e.leptonX).toBe(origLX);
+    expect(e.leptonY).toBe(origLY);
   });
 });

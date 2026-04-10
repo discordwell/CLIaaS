@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, SUB_CELL_OFFSETS, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -2109,11 +2109,11 @@ export class Renderer {
       const renderX = entity.prevPos.x + (entity.pos.x - entity.prevPos.x) * alpha;
       const renderY = entity.prevPos.y + (entity.pos.y - entity.prevPos.y) * alpha;
 
-      // Apply infantry sub-cell offset
-      const subOff = entity.stats.isInfantry ? (SUB_CELL_OFFSETS[entity.subCell] ?? SUB_CELL_OFFSETS[0]) : SUB_CELL_OFFSETS[0];
+      // Sub-cell offset is now baked into entity.leptonX/Y (Phase 4 lepton parity),
+      // so pos.x/pos.y already reflect the sub-cell position. No extra offset needed.
       // Air units: apply flight altitude offset (renders higher, shadow at ground level)
       const altY = entity.isAirUnit ? entity.flightAltitude : 0;
-      const screen = camera.worldToScreen(renderX + subOff.x, renderY + subOff.y);
+      const screen = camera.worldToScreen(renderX, renderY);
       const sheet = assets.getSheet(entity.stats.image);
       const spriteW = sheet ? sheet.meta.frameWidth : (entity.stats.isInfantry ? 50 : 24);
       const spriteH = sheet ? sheet.meta.frameHeight : (entity.stats.isInfantry ? 39 : 24);

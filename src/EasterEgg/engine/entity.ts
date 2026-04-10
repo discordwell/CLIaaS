@@ -9,7 +9,7 @@ import {
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
-  CIVILIAN_UNIT_TYPES, worldToCell, worldDist, leptonDist, directionTo, directionToLeptons, DIR_DX, DIR_DY,
+  CIVILIAN_UNIT_TYPES, worldToCell, leptonDist, directionTo, directionToLeptons, DIR_DX, DIR_DY,
   armorIndex, PRODUCTION_ITEMS, LEPTON_SIZE,
 } from './types';
 import { LP, PIXEL_LEPTON_W } from './tracks';
@@ -478,6 +478,11 @@ export class Entity {
     };
   }
 
+  /** Lepton position — direct access to integer lepton coordinates (no pixel conversion) */
+  get lpos(): { lx: number; ly: number } {
+    return { lx: this.leptonX, ly: this.leptonY };
+  }
+
   /** C++ foot.cpp:2275-2307 Queue_Navigation_List — append waypoint, cap at 10.
    *  Returns true if appended, false if queue is full (C++ silently drops). */
   queueWaypoint(pos: WorldPos): boolean {
@@ -765,19 +770,18 @@ export class Entity {
 
   /** Check if target is in range of any weapon (primary or secondary) */
   /** C++ techno.cpp:1313-1318 In_Range — integer lepton distance vs weapon range.
-   *  Uses C++ Distance() octagonal approximation (max+min/2) via worldDist().
-   *  worldDist() converts pixel coords to integer leptons internally, so this
-   *  works correctly whether positions were set via setPosition() or directly. */
+   *  Uses C++ Distance() octagonal approximation (max+min/2) via leptonDist().
+   *  Compares directly in lepton space — no pixel conversion needed. */
   inRange(other: Entity): boolean {
-    const dist = worldDist(this.pos, other.pos);
-    if (this.weapon && dist <= this.weapon.range) return true;
-    if (this.weapon2 && dist <= this.weapon2.range) return true;
+    const dist = leptonDist(this.leptonX, this.leptonY, other.leptonX, other.leptonY);
+    if (this.weapon && dist <= this.weapon.range * LEPTON_SIZE) return true;
+    if (this.weapon2 && dist <= this.weapon2.range * LEPTON_SIZE) return true;
     return false;
   }
 
   /** Check if target is in range of a specific weapon */
   inRangeWith(other: Entity, weapon: WeaponStats): boolean {
-    return worldDist(this.pos, other.pos) <= weapon.range;
+    return leptonDist(this.leptonX, this.leptonY, other.leptonX, other.leptonY) <= weapon.range * LEPTON_SIZE;
   }
 
   /**
@@ -787,7 +791,7 @@ export class Entity {
    * Never returns both — only one weapon fires per tick (C++ alternating behavior).
    */
   selectWeapon(target: Entity, getWarheadMult: (warhead: WarheadType, armor: ArmorType) => number): WeaponStats | null {
-    const dist = worldDist(this.pos, target.pos);
+    const dist = leptonDist(this.leptonX, this.leptonY, target.leptonX, target.leptonY);
     const w1 = this.weapon;
     const w2 = this.weapon2;
 
@@ -813,8 +817,8 @@ export class Entity {
       if (!w1AA && !w2AA) return null; // neither weapon can hit airborne targets
     }
 
-    const w1InRange = dist <= w1.range;
-    const w2InRange = dist <= w2.range;
+    const w1InRange = dist <= w1.range * LEPTON_SIZE;
+    const w2InRange = dist <= w2.range * LEPTON_SIZE;
     const w1Ready = this.attackCooldown <= 0 && w1InRange;
     const w2Ready = this.attackCooldown2 <= 0 && w2InRange;
 

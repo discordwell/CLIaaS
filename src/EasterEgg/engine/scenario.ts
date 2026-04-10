@@ -9,7 +9,7 @@ import {
   House, Mission, UnitType, AnimState, Dir,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
-  SUB_CELL_OFFSETS,
+  SUBCELL_LEPTON_OFFSETS,
 } from './types';
 import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
@@ -1730,11 +1730,19 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     const unitType = toUnitType(inf.type);
     if (!unitType) continue;
     const pos = cellIndexToPos(inf.cell);
+    // C++ infantry spawn at exact sub-cell lepton position (const.cpp StoppingCoordAbs).
+    // Compute lepton coordinates directly: cell origin + sub-cell lepton offset.
+    const sc = SUBCELL_LEPTON_OFFSETS[inf.subCell] ?? SUBCELL_LEPTON_OFFSETS[0];
+    const spawnLX = (pos.cx << 8) + sc.lx;
+    const spawnLY = (pos.cy << 8) + sc.ly;
+    // Entity constructor takes pixels; pass cell center then override with exact leptons.
     const world = cellToWorld(pos.cx, pos.cy);
-    // C++ infantry spawn at sub-cell position within the cell, not cell center.
-    // Sub-cell offsets: 0=center, 1=top-left(-7,-7), 2=top-right(+7,-7), 3=bottom-left(-7,+7), 4=bottom-right(+7,+7)
-    const subOff = SUB_CELL_OFFSETS[inf.subCell] ?? SUB_CELL_OFFSETS[0];
-    const entity = new Entity(unitType, toHouse(inf.house), world.x + subOff.x, world.y + subOff.y);
+    const entity = new Entity(unitType, toHouse(inf.house), world.x, world.y);
+    // Override with exact sub-cell lepton position (avoids pixel->lepton truncation errors)
+    entity.leptonX = spawnLX;
+    entity.leptonY = spawnLY;
+    entity.syncPosFromLeptons();
+    entity.prevPos = { x: entity.pos.x, y: entity.pos.y };
     entity.facing = Math.floor(inf.facing / 32) % 8;
     entity.desiredFacing = entity.facing;
     entity.bodyFacing32 = entity.facing * 4;

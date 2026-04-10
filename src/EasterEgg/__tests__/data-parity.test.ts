@@ -10,7 +10,7 @@ import {
   NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS, NUKE_MIN_FALLOFF,
   CHRONO_SHIFT_VISUAL_TICKS, SONAR_REVEAL_TICKS, IC_TARGET_RANGE,
   BODY_SHAPE, DIR_DX, DIR_DY, ANT_ANIM, HOUSE_FACTION,
-  SUB_CELL_OFFSETS, CIVILIAN_UNIT_TYPES,
+  SUB_CELL_OFFSETS, SUBCELL_LEPTON_OFFSETS, CIVILIAN_UNIT_TYPES,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW,
   PRONE_DAMAGE_BIAS, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX,
@@ -1451,6 +1451,54 @@ describe('SUB_CELL_OFFSETS parity', () => {
 
   it('4: bottom-right (6, 6)', () => {
     expect(SUB_CELL_OFFSETS[4]).toEqual({ x: 6, y: 6 });
+  });
+});
+
+// ============================================================
+// SUBCELL_LEPTON_OFFSETS parity — C++ const.cpp StoppingCoordAbs
+// ============================================================
+describe('SUBCELL_LEPTON_OFFSETS parity (C++ StoppingCoordAbs)', () => {
+  it('has 5 entries', () => {
+    expect(SUBCELL_LEPTON_OFFSETS).toHaveLength(5);
+  });
+
+  it('0: CENTER = (128, 128)', () => {
+    expect(SUBCELL_LEPTON_OFFSETS[0]).toEqual({ lx: 128, ly: 128 });
+  });
+
+  it('1: UL = (64, 64)', () => {
+    expect(SUBCELL_LEPTON_OFFSETS[1]).toEqual({ lx: 64, ly: 64 });
+  });
+
+  it('2: UR = (192, 64)', () => {
+    expect(SUBCELL_LEPTON_OFFSETS[2]).toEqual({ lx: 192, ly: 64 });
+  });
+
+  it('3: LL = (64, 192)', () => {
+    expect(SUBCELL_LEPTON_OFFSETS[3]).toEqual({ lx: 64, ly: 192 });
+  });
+
+  it('4: LR = (192, 192)', () => {
+    expect(SUBCELL_LEPTON_OFFSETS[4]).toEqual({ lx: 192, ly: 192 });
+  });
+
+  it('SUB_CELL_OFFSETS are derived from SUBCELL_LEPTON_OFFSETS', () => {
+    // Verify pixel offsets match: pixel = (lepton - 128) * CELL_SIZE / LEPTON_SIZE
+    for (let i = 0; i < 5; i++) {
+      const lep = SUBCELL_LEPTON_OFFSETS[i];
+      const pix = SUB_CELL_OFFSETS[i];
+      expect(pix.x).toBe(Math.round((lep.lx - 128) * CELL_SIZE / LEPTON_SIZE));
+      expect(pix.y).toBe(Math.round((lep.ly - 128) * CELL_SIZE / LEPTON_SIZE));
+    }
+  });
+
+  it('all offsets are within cell bounds (0-255 leptons)', () => {
+    for (const o of SUBCELL_LEPTON_OFFSETS) {
+      expect(o.lx).toBeGreaterThanOrEqual(0);
+      expect(o.lx).toBeLessThan(256);
+      expect(o.ly).toBeGreaterThanOrEqual(0);
+      expect(o.ly).toBeLessThan(256);
+    }
   });
 });
 

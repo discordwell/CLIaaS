@@ -18,6 +18,28 @@ export const RESFACTOR = 2;
 
 export const CELL_SIZE = 24; // pixels per cell
 export const LEPTON_SIZE = 256; // leptons per cell
+export const LEPTON_PER_CELL = 256; // alias for LEPTON_SIZE
+
+/** Convert cell coordinates to lepton center position */
+export function cellToLepton(cx: number, cy: number): { lx: number; ly: number } {
+  return { lx: cx * 256 + 128, ly: cy * 256 + 128 };
+}
+
+/** Convert lepton position to cell coordinates */
+export function leptonToCell(lx: number, ly: number): { cx: number; cy: number } {
+  return { cx: Math.floor(lx / 256), cy: Math.floor(ly / 256) };
+}
+
+/** Convert pixel position to lepton */
+export function pixelToLepton(px: number): number {
+  return Math.trunc(px * 256 / 24);  // LEPTON_SIZE / CELL_SIZE
+}
+
+/** Convert lepton to pixel for rendering */
+export function leptonToPixel(lx: number): number {
+  return Math.trunc(lx * 24 / 256);
+}
+
 /** Convert rules.ini Speed (0-100 percentage) to pixels/tick.
  *  C++ techno.cpp:6287 scales Speed via _Scale_To_256: MaxSpeed = (Speed * 256) / 100.
  *  Then movement applies MaxSpeed leptons/tick, where 1 lepton = CELL_SIZE/LEPTON_SIZE px.
@@ -1167,18 +1189,28 @@ export const CIVILIAN_UNIT_TYPES = new Set<string>([
   // via CivEvac=yes in the [Basic] INI section. See isTanyaEvac in AircraftContext.
 ]);
 
-// Infantry sub-cell positions within a cell (0=center, 1-4=corners)
-// Pixel offsets from cell center for each sub-position
-// C++ cell.h sub-cell positions in lepton space (256×256 per cell):
-// CENTER=(128,128), NW=(64,64), NE=(192,64), SW=(64,192), SE=(192,192)
-// Pixel offset from center: (pos-128)/256 * CELL_SIZE = ±(64/256*24) = ±6
-export const SUB_CELL_OFFSETS: { x: number; y: number }[] = [
-  { x: 0, y: 0 },     // 0: center (128,128)
-  { x: -6, y: -6 },   // 1: NW / top-left (64,64)
-  { x: 6, y: -6 },    // 2: NE / top-right (192,64)
-  { x: -6, y: 6 },    // 3: SW / bottom-left (64,192)
-  { x: 6, y: 6 },     // 4: SE / bottom-right (192,192)
+// C++ const.cpp StoppingCoordAbs — sub-cell lepton offsets within cell (256x256 per cell).
+// These are the authoritative positions infantry occupy within a cell.
+// CENTER (0): (128, 128) — cell center
+// UL (1):    (64, 64)   — upper-left quarter
+// UR (2):    (192, 64)  — upper-right quarter
+// LL (3):    (64, 192)  — lower-left quarter
+// LR (4):    (192, 192) — lower-right quarter
+export const SUBCELL_LEPTON_OFFSETS: { lx: number; ly: number }[] = [
+  { lx: 128, ly: 128 }, // CENTER (0)
+  { lx: 64,  ly: 64  }, // UL (1)
+  { lx: 192, ly: 64  }, // UR (2)
+  { lx: 64,  ly: 192 }, // LL (3)
+  { lx: 192, ly: 192 }, // LR (4)
 ];
+
+// Infantry sub-cell positions within a cell (0=center, 1-4=corners)
+// Pixel offsets from cell center, derived from SUBCELL_LEPTON_OFFSETS.
+// Pixel = (lepton - 128) * CELL_SIZE / LEPTON_SIZE = (lepton - 128) * 24 / 256
+export const SUB_CELL_OFFSETS: { x: number; y: number }[] = SUBCELL_LEPTON_OFFSETS.map(o => ({
+  x: Math.round((o.lx - 128) * CELL_SIZE / LEPTON_SIZE),
+  y: Math.round((o.ly - 128) * CELL_SIZE / LEPTON_SIZE),
+}));
 
 // === Entity Mission States (AI1: full C++ 22-mission system from mission.h) ===
 export enum Mission {
