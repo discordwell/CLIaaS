@@ -4912,6 +4912,25 @@ export class Game {
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
       // Uses C++ TrackControl table to select pre-computed curved paths.
       // Track offsets are relative to target cell center, transformed via Smooth_Turn flags.
+      // C++ DriveClass::Per_Cell_Process (drive.cpp:844-865):
+      // When a vehicle/vessel finishes moving into a cell (PCP_END), check if the
+      // entity's current cell matches As_Cell(NavCom). If so, clear NavCom and the
+      // path. This causes Team::Coordinate_Move to re-assign MOVE (resetting the
+      // mission timer and consuming Random_Pick(0,2) RNG).
+      const perCellNavComCheck = (): boolean => {
+        if (entity.moveTarget) {
+          const navCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+          const curCell = entity.cell;
+          if (navCell.cx === curCell.cx && navCell.cy === curCell.cy) {
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
+            return true; // NavCom cleared — stop further movement this tick
+          }
+        }
+        return false;
+      };
+
       if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
         // C++ drive.cpp AI() pattern: seamless track chaining on the same tick.
         // When a track completes, immediately initiate the next track and continue
@@ -4937,6 +4956,8 @@ export class Game {
               // Track complete — vehicle is at target cell center
               entity.pathIndex += entity.trackCellSpan;
               entity.trackCellSpan = 1; // reset for next track
+              // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
+              if (perCellNavComCheck()) break;
               // Continue loop to chain next track on same tick (Fix 1)
               continue;
             }
@@ -4993,6 +5014,8 @@ export class Game {
             if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
               entity.pathIndex += entity.trackCellSpan;
               entity.trackCellSpan = 1;
+              // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
+              if (perCellNavComCheck()) break;
               continue; // Chain next track
             }
             break; // Track not yet complete
@@ -5004,6 +5027,8 @@ export class Game {
               // Facing correct, now move
               if (entity.moveToward(chainTarget, speed)) {
                 entity.pathIndex++;
+                // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
+                perCellNavComCheck();
               }
             }
             break; // Free-form doesn't chain
