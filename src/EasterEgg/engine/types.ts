@@ -40,6 +40,83 @@ export function leptonToPixel(lx: number): number {
   return Math.trunc(lx * 24 / 256);
 }
 
+// ── C++ 256-step sin/cos tables (coord.cpp:442-516) ─────────────────────────
+// CosTable gives X component, SinTable gives Y component (negated for screen coords).
+// Direction 0 = North: CosTable[0]=0 (no X), SinTable[0]=127 (Y upward after negation).
+// Values are signed bytes [-126..127], movement: x += (Cos*dist)>>7, y -= (Sin*dist)>>7.
+
+/** C++ coord.cpp:442 — X component lookup for 256-step DirType facing */
+export const COS_TABLE_256: readonly number[] = [
+     0,    3,    6,    9,   12,   15,   18,   21,
+    24,   27,   30,   33,   36,   39,   42,   45,
+    48,   51,   54,   57,   59,   62,   65,   67,
+    70,   73,   75,   78,   80,   82,   85,   87,
+    89,   91,   94,   96,   98,  100,  101,  103,
+   105,  107,  108,  110,  111,  113,  114,  116,
+   117,  118,  119,  120,  121,  122,  123,  123,
+   124,  125,  125,  126,  126,  126,  126,  126,
+   127,  126,  126,  126,  126,  126,  125,  125,
+   124,  123,  123,  122,  121,  120,  119,  118,
+   117,  116,  114,  113,  112,  110,  108,  107,
+   105,  103,  102,  100,   98,   96,   94,   91,
+    89,   87,   85,   82,   80,   78,   75,   73,
+    70,   67,   65,   62,   59,   57,   54,   51,
+    48,   45,   42,   39,   36,   33,   30,   27,
+    24,   21,   18,   15,   12,    9,    6,    3,
+     0,   -3,   -6,   -9,  -12,  -15,  -18,  -21,
+   -24,  -27,  -30,  -33,  -36,  -39,  -42,  -45,
+   -48,  -51,  -54,  -57,  -59,  -62,  -65,  -67,
+   -70,  -73,  -75,  -78,  -80,  -82,  -85,  -87,
+   -89,  -91,  -94,  -96,  -98, -100, -102, -103,
+  -105, -107, -108, -110, -111, -113, -114, -116,
+  -117, -118, -119, -120, -121, -122, -123, -123,
+  -124, -125, -125, -126, -126, -126, -126, -126,
+  -126, -126, -126, -126, -126, -126, -125, -125,
+  -124, -123, -123, -122, -121, -120, -119, -118,
+  -117, -116, -114, -113, -112, -110, -108, -107,
+  -105, -103, -102, -100,  -98,  -96,  -94,  -91,
+   -89,  -87,  -85,  -82,  -80,  -78,  -75,  -73,
+   -70,  -67,  -65,  -62,  -59,  -57,  -54,  -51,
+   -48,  -45,  -42,  -39,  -36,  -33,  -30,  -27,
+   -24,  -21,  -18,  -15,  -12,   -9,   -6,   -3,
+];
+
+/** C++ coord.cpp:480 — Y component lookup for 256-step DirType facing */
+export const SIN_TABLE_256: readonly number[] = [
+   127,  126,  126,  126,  126,  126,  125,  125,
+   124,  123,  123,  122,  121,  120,  119,  118,
+   117,  116,  114,  113,  112,  110,  108,  107,
+   105,  103,  102,  100,   98,   96,   94,   91,
+    89,   87,   85,   82,   80,   78,   75,   73,
+    70,   67,   65,   62,   59,   57,   54,   51,
+    48,   45,   42,   39,   36,   33,   30,   27,
+    24,   21,   18,   15,   12,    9,    6,    3,
+     0,   -3,   -6,   -9,  -12,  -15,  -18,  -21,
+   -24,  -27,  -30,  -33,  -36,  -39,  -42,  -45,
+   -48,  -51,  -54,  -57,  -59,  -62,  -65,  -67,
+   -70,  -73,  -75,  -78,  -80,  -82,  -85,  -87,
+   -89,  -91,  -94,  -96,  -98, -100, -102, -103,
+  -105, -107, -108, -110, -111, -113, -114, -116,
+  -117, -118, -119, -120, -121, -122, -123, -123,
+  -124, -125, -125, -126, -126, -126, -126, -126,
+  -126, -126, -126, -126, -126, -126, -125, -125,
+  -124, -123, -123, -122, -121, -120, -119, -118,
+  -117, -116, -114, -113, -112, -110, -108, -107,
+  -105, -103, -102, -100,  -98,  -96,  -94,  -91,
+   -89,  -87,  -85,  -82,  -80,  -78,  -75,  -73,
+   -70,  -67,  -65,  -62,  -59,  -57,  -54,  -51,
+   -48,  -45,  -42,  -39,  -36,  -33,  -30,  -27,
+   -24,  -21,  -18,  -15,  -12,   -9,   -6,   -3,
+     0,    3,    6,    9,   12,   15,   18,   21,
+    24,   27,   30,   33,   36,   39,   42,   45,
+    48,   51,   54,   57,   59,   62,   65,   67,
+    70,   73,   75,   78,   80,   82,   85,   87,
+    89,   91,   94,   96,   98,  100,  101,  103,
+   105,  107,  108,  110,  111,  113,  114,  116,
+   117,  118,  119,  120,  121,  122,  123,  123,
+   124,  125,  125,  126,  126,  126,  126,  126,
+];
+
 /** Convert rules.ini Speed (0-100 percentage) to pixels/tick.
  *  C++ techno.cpp:6287 scales Speed via _Scale_To_256: MaxSpeed = (Speed * 256) / 100.
  *  Then movement applies MaxSpeed leptons/tick, where 1 lepton = CELL_SIZE/LEPTON_SIZE px.
@@ -1566,6 +1643,58 @@ export function directionToLeptons(fromX: number, fromY: number, toX: number, to
   if (xdiff >= ydiff) adder ^= 0x40;
   index += adder;
   return ((index >> 5) & 7) as Dir;
+}
+
+/** C++ face.cpp:150-227 Desired_Facing256 — 256-step integer direction from lepton coords.
+ *  Returns a DirType (0-255): 0=N, 64=E, 128=S, 192=W.
+ *  Pure integer arithmetic matching the C++ implementation exactly.
+ *  Used by Coord_Move for precise per-axis movement deltas. */
+export function directionToLeptons256(fromX: number, fromY: number, toX: number, toY: number): number {
+  let composite = 0;
+
+  // X difference (positive = east)
+  let xdiff = toX - fromX;
+  if (xdiff < 0) {
+    composite |= 0x00C0;
+    xdiff = -xdiff;
+  }
+
+  // Y difference (C++ srcy - dsty: inverted because screen Y increases downward)
+  let ydiff = fromY - toY;
+  if (ydiff < 0) {
+    composite ^= 0x0040;
+    ydiff = -ydiff;
+  }
+
+  // Same direction — C++ returns 0xFF, but callers treat it as "no change needed"
+  if (xdiff === 0 && ydiff === 0) return 0;
+
+  // Determine bigger/smaller axis
+  let bigger: number, smaller: number;
+  if (xdiff < ydiff) {
+    smaller = xdiff;
+    bigger = ydiff;
+  } else {
+    smaller = ydiff;
+    bigger = xdiff;
+  }
+
+  // Fraction: how far from orthogonal toward diagonal (0-31)
+  // C++ uses unsigned integer division: (smaller * 32U) / bigger
+  const frac = Math.trunc((smaller * 32) / bigger);
+
+  // Adjust toward subsequent quadrant if necessary
+  let adder = composite & 0x0040;
+  if (xdiff > ydiff) {
+    adder ^= 0x0040;
+  }
+  if (adder) {
+    composite += (adder - frac) - 1;
+  } else {
+    composite += frac;
+  }
+
+  return composite & 0x00FF;
 }
 
 /** C++ face.cpp:65-123 Desired_Facing8 — pixel-based direction (legacy fallback).

@@ -1096,12 +1096,13 @@ describe('movementSpeed formula components', () => {
     unit.rotTickedThisFrame = false;
     unit.moveToward({ x: 300, y: 100 }, baseSpeed);
 
-    // Infantry Coord_Move: maxspeed = floor(5*1.5 / LP) = 80
-    // Cardinal: (80 * 127) >> 7 = 79 leptons → 79 * LP = 7.40625 px
+    // Infantry Coord_Move uses 256-step direction via Desired_Facing256.
+    // Pure east gives DirType 63 (not 64) due to integer arithmetic in the
+    // C++ direction function. COS_TABLE_256[63] = 126 (not 127).
+    // maxspeed = floor(5*1.5 / LP) = 80, distance = floor((80*255+128)/256) = 80
+    // calcx(COS[63], 80) = (126 * 80) >> 7 = 78 leptons → 78 * LP = 7.3125 px
     const moved = unit.pos.x - startX;
-    const maxspeed = Math.floor((baseSpeed * 1.5) / LP);
-    const axisLeptons = (maxspeed * 127) >> 7; // cardinal sinFactor=127
-    const expected = axisLeptons * LP;
+    const expected = 78 * LP; // 78 leptons from COS_TABLE_256[63]=126
     expect(moved).toBeCloseTo(expected, 3);
   });
 

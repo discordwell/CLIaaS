@@ -10,7 +10,7 @@
  *   infantry.cpp:4019 — Coord_Move(Coord, dir, maxspeed * fixed(movespeed, 256))
  *   coord.cpp:419     — calcx(v, distance) = (v * distance) >> 7
  *   coord.cpp:437     — calcy(v, distance) = -((v * distance) >> 7)
- *   coord.cpp:480-516 — SinTable[0]=127 (cardinal north), SinTable[32]=90 (45deg diagonal)
+ *   coord.cpp:480-516 — SinTable[0]=127 (cardinal north), SinTable[32]=89 (45deg diagonal)
  *
  * The bug: Without flooring effectiveSpeed/LP to integer leptons before
  * applying the sin/cos factor, fractional leptons (e.g. 10.24 for E1 Speed=4)
@@ -41,6 +41,9 @@ function makeEntity(type: string, house: House, x: number, y: number): Entity {
 }
 
 // C++ reference: _Scale_To_256 + Coord_Move integer pipeline
+// Note: only accurate for cardinal directions (isDiagonal=false) where the 256-step
+// table value is exactly 127. For diagonals (dir256=32), the actual table value is 89
+// (not 90), so use the 256-step tables directly for diagonal calculations.
 function cppInfantryLeptonsPerTick(iniSpeed: number, isDiagonal: boolean): number {
   const maxSpeed = Math.floor(iniSpeed * 256 / 100); // _Scale_To_256
   // fixed(255, 256) ≈ 0.996 → maxspeed * fixed(255,256) ≈ maxspeed for most values
@@ -50,7 +53,8 @@ function cppInfantryLeptonsPerTick(iniSpeed: number, isDiagonal: boolean): numbe
   const distance = Math.floor((fixedRaw + 128) / 256);        // fixed to unsigned
 
   // Coord_Move: calcx/calcy use (table_value * distance) >> 7
-  const sinFactor = isDiagonal ? 90 : 127;
+  // C++ tables: COS/SIN_TABLE_256[0]=0/127 (cardinal), [32]=89/89 (diagonal, NOT 90)
+  const sinFactor = isDiagonal ? 89 : 127;
   return (distance * sinFactor) >> 7;
 }
 
@@ -115,10 +119,13 @@ describe('C++ infantry Coord_Move lepton truncation parity', () => {
     expect(movedPx).toBeCloseTo(expectedPx, 10);
   });
 
-  it('E1 Speed=4 diagonal: 7 leptons/axis/tick (same in C++ and TS)', () => {
-    // Diagonal case happens to be correct even without the fix because
-    // floor(10.24*90/128) = floor(7.2) = 7, same as (10*90)>>7 = 7
-    // But verify it stays correct with the fix applied.
+  it('E1 Speed=4 diagonal: 6 leptons/axis/tick (C++ Coord_Move with 256-step tables)', () => {
+    // C++ infantry.cpp:4019: Coord_Move(Coord, Direction(Head_To_Coord()), distance)
+    // Direction() returns Desired_Facing256 = 32 for NE.
+    // COS_TABLE_256[32] = 89, SIN_TABLE_256[32] = 89 (NOT 90 — integer approximation of 127*sin(45°)).
+    // distance = maxspeed * fixed(255,256) = 10 (rounds back for small values).
+    // calcx(89, 10) = (89*10)>>7 = 890>>7 = 6 leptons/axis
+    // The old sinFactor=90 approximation gave 7 — off by 1 lepton per tick.
     const entity = makeEntity('E1', House.USSR, 500, 500);
     entity.facing = Dir.NE;
     entity.desiredFacing = Dir.NE;
@@ -131,7 +138,7 @@ describe('C++ infantry Coord_Move lepton truncation parity', () => {
 
     const movedX = entity.pos.x - startX;
     const movedY = startY - entity.pos.y;
-    const expectedAxisPx = 7 * LP; // 7 leptons * 0.09375 = 0.65625 px
+    const expectedAxisPx = 6 * LP; // 6 leptons * 0.09375 = 0.5625 px
     expect(movedX).toBeCloseTo(expectedAxisPx, 10);
     expect(movedY).toBeCloseTo(expectedAxisPx, 10);
   });

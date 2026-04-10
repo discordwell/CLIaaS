@@ -284,7 +284,7 @@ describe('C++ parity: aircraft curved flight path', () => {
     // Uses DIR_DX/DIR_DY lookup tables, not floating-point atan2.
     // This produces perfectly axis-aligned movement for cardinal directions
     // and exact 45-degree movement for diagonals.
-    it('aircraft facing SE moves at 45 degrees (equal X and Y delta)', () => {
+    it('aircraft facing SE moves southeast with C++ calcy asymmetry', () => {
       const entity = makeAircraft('TRAN', House.USSR, 500, 500);
       // Read lepton-aligned position after construction
       const startX = entity.pos.x;
@@ -301,11 +301,16 @@ describe('C++ parity: aircraft curved flight path', () => {
       const dx = entity.pos.x - startX;
       const dy = entity.pos.y - startY;
 
-      // SE movement: dx and dy should be equal (45-degree diagonal)
-      // C++ uses integer sin/cos lookup giving cos(45°) = 0.707 factor
+      // SE movement: both positive (moving right and down).
+      // C++ Coord_Move has a 1-lepton asymmetry for diagonals:
+      //   calcx(COS[96], dist) = (89*20)>>7 = 13 leptons (X)
+      //   calcy(SIN[96], dist) = -((-89*20)>>7) = -(-14) = 14 leptons (Y)
+      // The difference comes from arithmetic right shift of negative values
+      // rounding toward -infinity, then negation.
       expect(dx).toBeGreaterThan(0);
       expect(dy).toBeGreaterThan(0);
-      expect(dx).toBeCloseTo(dy, 4); // equal X and Y displacement
+      // Y is 1 lepton larger than X due to calcy negation asymmetry
+      expect(Math.abs(dy - dx)).toBeLessThanOrEqual(1 * 0.09375 + 0.001);
     });
 
     it('aircraft facing N moves only in Y axis', () => {
