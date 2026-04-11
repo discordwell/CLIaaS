@@ -617,6 +617,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         if (!s.alive) continue;
         if (s.house === House.Neutral) continue;
         if (ctx.isAllied(entity.house, s.house)) continue;
+        // C++ parity: BARL/BRL3 are OverlayClass, not BuildingClass — never auto-targeted.
+        if (s.type === 'BARL' || s.type === 'BRL3') continue;
         // Structure center in leptons: cell * 256 + 256 (for 2x2 buildings, center offset by 1 cell)
         const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
         const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
@@ -1009,6 +1011,13 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       if (!s.alive) continue;
       if (s.house === House.Neutral) continue;
       if (ctx.isAllied(entity.house, s.house)) continue;
+      // C++ parity: BARL/BRL3 are OverlayClass (overlay), not BuildingClass.
+      // They never appear in the C++ TechnoClass target scan. TS represents
+      // them as MapStructure for damage tracking, but they must be excluded
+      // from auto-target. Reproduced via SCG03EA: V2RL at (76,66) was firing
+      // a SCUD at the BRL3 at (84,65), exploding the barrel and breaking
+      // RNG sync from tick 1 onward.
+      if (s.type === 'BARL' || s.type === 'BRL3') continue;
       // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings
       if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
       // Structure center in leptons
