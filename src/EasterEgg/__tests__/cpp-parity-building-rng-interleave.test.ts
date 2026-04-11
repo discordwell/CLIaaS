@@ -63,6 +63,23 @@ describe('Building RNG Interleaving — C++ parity', () => {
     expect(combatSource).toContain('export function updateSingleStructureCombat(');
   });
 
+  // C++ Logic.AI ordering: structures process BEFORE pre-building entities
+  // each tick. Empirically determined via SCG08EA tick-93 RNG seed trace —
+  // the GUN at structure idx 15 fires 1 tick earlier in WASM than TS, fixed
+  // by letting structures consume their jitter RNG before entity jitter.
+  // Reverting this to the old order will regress SCG08EA by ~7 player units.
+  it('structures process BEFORE pre-building entities (SCG08EA RNG ordering)', () => {
+    const phase1Idx = indexSource.indexOf('Phase 1: pre-building');
+    const phase2Idx = indexSource.indexOf('Phase 2: ALL structures');
+    const phase1bIdx = indexSource.indexOf('Phase 1: pre-building entities (now after structures)');
+    expect(phase1Idx).toBeGreaterThan(0);
+    expect(phase2Idx).toBeGreaterThan(0);
+    // The Phase 1 marker exists as a deferred-comment marker BEFORE Phase 2.
+    // The actual entity processing happens in Phase 1b AFTER Phase 2.
+    expect(phase2Idx).toBeGreaterThan(phase1Idx);
+    expect(phase1bIdx).toBeGreaterThan(phase2Idx);
+  });
+
   it('updateSingleStructureCombat checks sellProgress and buildProgress', () => {
     const idx = combatSource.indexOf('export function updateSingleStructureCombat');
     expect(idx).toBeGreaterThan(-1);
