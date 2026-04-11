@@ -411,7 +411,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         return;
       }
 
-      // CF1: Apply C++ Modify_Damage formula — direct hit at distance 0 gets full damage
+      // C++ Modify_Damage (combat.cpp:72-129) — single-application sanity check:
+      // "can this weapon damage this target at distance 0?" Used solely as a gate
+      // for the dual-weapon fallback and the target-clear branch. The actual damage
+      // applied at impact is computed inside applySplashDamage / damageEntity.
       const houseBias = ctx.getFirepowerBias(entity.house);
       const whMult = ctx.getWarheadMult(activeWeapon.warhead, entity.target.stats.armor);
       const damage = modifyDamage(activeWeapon.damage, activeWeapon.warhead, entity.target.stats.armor, 0, houseBias, whMult, ctx.getWarheadMeta(activeWeapon.warhead).spreadFactor);
@@ -429,8 +432,12 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       }
 
       if (activeWeapon.projectileSpeed) {
-        // Deferred damage: projectile must travel to target
-        ctx.launchProjectile(entity, entity.target, activeWeapon, damage, impactX, impactY, directHit);
+        // C++ bullet.cpp:478 — bullet strength at firing time = weapon.damage * FirepowerBias.
+        // Warhead-vs-armor and distance falloff are applied ONCE on arrival via
+        // applySplashDamage → modifyDamage (combat.cpp:106-125, 207). Passing already-modified
+        // damage here would double-apply the warhead-vs-armor multiplier.
+        const projStrength = Math.max(1, Math.round(activeWeapon.damage * houseBias));
+        ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit);
       } else {
         // Instant damage (melee, hitscan weapons)
         const killed = directHit ? ctx.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;

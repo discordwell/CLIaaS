@@ -15,6 +15,7 @@ import {
   UNIT_STATS, WEAPON_STATS, CONDITION_RED,
   type WarheadType, type ArmorType,
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
+  COUNTRY_BONUSES,
   worldDist, worldToCell, buildDefaultAlliances,
 } from '../engine/types';
 import { Entity, resetEntityIds, CloakState, setPlayerHouses } from '../engine/entity';
@@ -107,8 +108,8 @@ function makeMockContext(overrides: Partial<MissionAIContext> = {}): MissionAICo
     applySplashDamage: vi.fn(),
 
     // Warhead helpers
-    getFirepowerBias: () => 1.0,
-    getArmorBias: () => 1.0,
+    getFirepowerBias: (house: House) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
+    getArmorBias: (house: House) => COUNTRY_BONUSES[house]?.armorMult ?? 1.0,
     getROFBias: () => 1.0,
     getWarheadMult: (wh: WarheadType, ar: ArmorType) => {
       const idx = { none: 0, wood: 1, light: 2, heavy: 3, concrete: 4 }[ar] ?? 0;
@@ -318,6 +319,135 @@ describe('updateAttack', () => {
 
     expect(entity.mission).toBe(Mission.GUARD);
     expect(entity.targetStructure).toBeNull();
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // C++ Parity: projectile launches with RAW bullet strength (no warhead
+  // multiplier baked in). applySplashDamage applies warhead-vs-armor and
+  // distance falloff ONCE on arrival.
+  //
+  // C++ sources:
+  //   bullet.cpp:478     — BulletClass::Read_INI / constructor: Strength = weapon.damage
+  //                        (modulated only by FirepowerBias at firing time; Modify_Damage
+  //                        runs later inside Explosion_Damage on impact).
+  //   bullet.cpp:991     — Bullet_Explodes → Explosion_Damage is the SOLE damage path.
+  //   combat.cpp:72-129  — Modify_Damage: warhead * armor * houseBias * distance falloff.
+  //                        Applied EXACTLY ONCE per target inside Explosion_Damage.
+  //   combat.cpp:207     — Explosion_Damage iterates entities in splash radius, calls
+  //                        Modify_Damage for each — including the direct-hit target.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('projectile launch strength — single warhead-vs-armor application', () => {
+    it('Flamer (projectile+splash) launches with RAW damage, not pre-multiplied by warhead mult', () => {
+      // E4 (Flamethrower) firing Flamer at a Jeep (light armor).
+      // C++ bullet.cpp:478: bullet.strength = weapon.damage * FirepowerBias (USSR = 1.0).
+      //   Expected strength passed to launchProjectile = 70 (raw Flamer damage).
+      //
+      // Previous (buggy) behavior: missionAI would pre-multiply by warhead-vs-armor
+      //   (Fire vs light = 0.6), passing 42. Then applySplashDamage would multiply again
+      //   by 0.6, giving ~25 on impact — a double application.
+      const e4 = makeEntity(UnitType.I_E4, House.USSR, 300, 300);
+      e4.mission = Mission.ATTACK;
+      e4.attackCooldown = 0;
+      e4.facing = 2; // East, matches target direction
+      e4.desiredFacing = 2;
+
+      // Place Jeep within Flamer range (3.5 cells) — 2 cells away
+      const jeep = makeEntity(UnitType.V_JEEP, House.England, 300 + CELL_SIZE * 2, 300);
+      e4.target = jeep;
+
+      const ctx = makeMockContext({ entities: [e4, jeep] });
+      updateAttack(ctx, e4);
+
+      // launchProjectile must have been called (Flamer has projectileSpeed)
+      expect(ctx.launchProjectile).toHaveBeenCalled();
+      const callArgs = (ctx.launchProjectile as any).mock.calls[0];
+      const [attacker, target, weapon, damage] = callArgs;
+      expect(attacker).toBe(e4);
+      expect(target).toBe(jeep);
+      expect(weapon.name).toBe('Flamer');
+      // C++ parity: bullet strength = weapon.damage * USSR FirepowerBias (1.0) = 70.
+      // NOT 70 * 0.6 (Fire vs light) = 42, which is the old double-application bug.
+      expect(damage).toBe(70);
+    });
+
+    it('Flamer from a Germany (firepower 1.10) unit scales strength by firepower bias', () => {
+      // C++ bullet.cpp:478: weapon.damage * FirepowerBias is applied exactly once
+      // at firing time. Warhead-vs-armor is applied later in Explosion_Damage.
+      const e4 = makeEntity(UnitType.I_E4, House.Germany, 300, 300);
+      e4.mission = Mission.ATTACK;
+      e4.attackCooldown = 0;
+      e4.facing = 2;
+      e4.desiredFacing = 2;
+
+      const jeep = makeEntity(UnitType.V_JEEP, House.USSR, 300 + CELL_SIZE * 2, 300);
+      e4.target = jeep;
+
+      const ctx = makeMockContext({ entities: [e4, jeep] });
+      updateAttack(ctx, e4);
+
+      expect(ctx.launchProjectile).toHaveBeenCalled();
+      const [, , , damage] = (ctx.launchProjectile as any).mock.calls[0];
+      // 70 * 1.10 = 77 (rounded)
+      expect(damage).toBe(Math.round(70 * COUNTRY_BONUSES.Germany.firepowerMult));
+    });
+
+    it('AP cannon (90mm) fired at light-armor jeep launches with raw damage', () => {
+      // Medium Tank firing 90mm (AP, 30 dmg) at a Jeep (light armor).
+      // AP vs light = 0.75, so the old buggy code would pre-multiply to 23 (round(30*0.75)).
+      // The fix passes raw 30, letting applySplashDamage apply the 0.75 once on arrival.
+      const tank = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
+      tank.mission = Mission.ATTACK;
+      tank.attackCooldown = 0;
+      tank.facing = 2;
+      tank.desiredFacing = 2;
+      tank.turretFacing = 2;
+      tank.desiredTurretFacing = 2;
+      tank.turretDir = 2;
+
+      // 90mm range is 4 cells; place Jeep 2 cells away
+      const jeep = makeEntity(UnitType.V_JEEP, House.USSR, 200 + CELL_SIZE * 2, 200);
+      tank.target = jeep;
+
+      const ctx = makeMockContext({ entities: [tank, jeep] });
+      updateAttack(ctx, tank);
+
+      expect(ctx.launchProjectile).toHaveBeenCalled();
+      const [, , weapon, damage] = (ctx.launchProjectile as any).mock.calls[0];
+      expect(weapon.name).toBe('90mm');
+      // C++ parity: raw 30 (Spain FirepowerBias = 1.0), not 23 (30*0.75 pre-multiplied).
+      expect(damage).toBe(30);
+    });
+
+    it('instant-hit weapon (M1Carbine) still passes modified damage to damageEntity', () => {
+      // Rifleman firing M1Carbine (SA, 15 dmg, NO projectileSpeed — instant-hit path).
+      // Instant-hit path is intentionally UNCHANGED by the projectile fix:
+      //   damageEntity receives the already-modified damage (single application),
+      //   matching the pre-existing behavior that currently-passing parity scenarios
+      //   depend on.
+      // SA vs none = 1.0, so raw and modified are the same (15). This test locks in
+      // behavior so a future regression would be immediately visible.
+      const e1 = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
+      e1.mission = Mission.ATTACK;
+      e1.attackCooldown = 0;
+      e1.facing = 2;
+      e1.desiredFacing = 2;
+
+      const enemy = makeEntity(UnitType.I_E1, House.USSR, 300 + CELL_SIZE * 2, 300);
+      e1.target = enemy;
+
+      const ctx = makeMockContext({ entities: [e1, enemy] });
+      updateAttack(ctx, e1);
+
+      // M1Carbine has no projectileSpeed → instant-hit path → damageEntity is called,
+      // launchProjectile is NOT called.
+      expect(ctx.launchProjectile).not.toHaveBeenCalled();
+      expect(ctx.damageEntity).toHaveBeenCalled();
+      const dmgCallArgs = (ctx.damageEntity as any).mock.calls[0];
+      const [dmgTarget, dmgAmount] = dmgCallArgs;
+      expect(dmgTarget).toBe(enemy);
+      // SA vs none = 1.0, Spain FirepowerBias = 1.0 → damage unchanged by warhead mult
+      expect(dmgAmount).toBe(15);
+    });
   });
 
   it('demo truck delegates to updateDemoTruck', () => {
