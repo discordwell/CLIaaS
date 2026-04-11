@@ -1,5 +1,58 @@
 # Session Summaries
 
+## 2026-04-10T18:30Z — SCG09EA Fixed + Harmless Mission + HP Rounding
+
+### 7/12 Scenarios Perfect (was 6/12)
+
+**Fixes this session:**
+1. **LST loaner retreat (team.ts)** — `dissolve()`, `coordinateRegroup()`, and
+   `coordinateMove()` now skip members in Mission.RETREAT so team cleanup
+   doesn't override the loaner auto-retreat. TMISSION_UNLOAD also clears the
+   stale moveTarget so `updateRetreat()` picks a fresh map-edge target.
+2. **LST door close delay (scenario.ts + index.ts)** — REINFORCEMENT LSTs with
+   cargo spawn with `doorOpen=true, doorTimer=25` matching C++ vessel.cpp
+   `Close_Door(5, 6)`. updateMove early-returns for vessel transports until
+   the door closes, mirroring C++ `!IsDriving && Is_Door_Closed()` Commence gate.
+3. **Harmless mission parsing (scenario.ts)** — `applyMission()` now recognises
+   "Harmless" (and "Move") INI mission strings. SCG03EA's Greece MEDI/E6 spawn
+   with Harmless so they don't auto-engage enemies; TS was loading them as
+   GUARD and losing them.
+4. **Scenario INI HP rounding (scenario.ts)** — `scenarioStrengthToHP()` now
+   matches C++ `MaxStrength * fixed(strength, 256)` round-to-nearest with
+   snap-to-full when within 3 of max. TS was using `Math.floor()` producing
+   HP values 1 short of WASM for many units (e.g. SCG07EA JEEP hp 11 vs 12).
+
+### Parity Results (t2000)
+| Scenario | Before | After | Δ |
+|----------|--------|-------|---|
+| SCG01EA  | ±0     | ±0    | — |
+| SCG02EA  | ±0     | ±0    | — |
+| SCG03EA  | ±3     | ±1    | -2 (improved) |
+| SCG04EA  | ±2     | ±2    | — |
+| SCG06EA  | ±0     | ±0    | — |
+| SCG07EA  | ±5     | ±5    | — (initial HP fixed but combat still drifts) |
+| SCG08EA  | ±14    | ±14   | — |
+| SCG09EA  | ±1     | **±0**| **-1 (now perfect)** |
+| SCG10EA  | ±0     | ±0    | — |
+| SCG11EA  | ±0     | ±0    | — |
+| SCG12EA  | ±0     | ±0    | — |
+| SCG13EA  | ±2     | ±2    | — |
+
+**6/12 → 7/12 perfect** (SCG09EA newly perfect, SCG03EA much closer)
+
+### Remaining Divergences
+- SCG03EA ±1 — second MEDI at (58,60) dies in TS but survives in WASM
+- SCG04EA ±2 — production timing (WASM produces MCV at tick ~95, TS doesn't)
+- SCG07EA ±5 — England JEEP dies at tick 4 in TS despite correct initial HP
+- SCG08EA ±14 — combat cascade between tick 620-780 loses 13 player units
+- SCG13EA ±2 — 2 player E1s die at tick ~1040 (non-RNG combat divergence)
+
+### Commits
+- bd6c787 fix: LST transport waits for door close before moving
+- 256fd5c fix: loaner LST retreat — team dissolve doesn't override RETREAT
+- 89a9bd3 fix: applyMission handles 'Harmless' and 'Move' strings
+- b507955 fix: scenario INI strength → HP uses C++ fixed-point rounding
+
 ## 2026-04-10T16:15Z — Team.recruit() C++ Multi-Add Fix + Team AI Tagging
 
 ### Discovery: C++ TeamClass::Recruit Has Type-Specific Multi-Add
