@@ -4102,7 +4102,9 @@ export class Game {
       // Script complete — ants fall back to hunt AI, allied units idle
       if (entity.isAnt) {
         this.updateAntAI(entity);
-      } else {
+      } else if (entity.mission !== Mission.RETREAT && entity.mission !== Mission.MOVE) {
+        // Don't override active RETREAT (loaner transports auto-retreat after unload)
+        // or MOVE missions — these were intentionally set elsewhere and have a target.
         entity.mission = this.idleMission(entity);
         entity.animState = AnimState.IDLE;
       }
@@ -4368,6 +4370,11 @@ export class Game {
             entity.mission = Mission.RETREAT;
             entity.teamMissions = []; // clear team script so it doesn't override retreat
             entity.teamMissionIndex = 0;
+            // Clear old moveTarget (was the unload waypoint) so updateRetreat
+            // computes a fresh map edge target instead of "retreating" 1 cell.
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
             break;
           }
         }

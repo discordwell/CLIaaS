@@ -637,6 +637,10 @@ export class Team {
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
+      // C++ vessel.cpp:586 / aircraft.cpp:1178 — IsALoaner transports auto-retreat
+      // after unloading and must NOT be re-grouped back to GUARD by the team they
+      // were spawned with. The team should leave them alone to retreat off-map.
+      if (unit.mission === Mission.RETREAT) continue;
 
       // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons
       // C++ team.cpp:2054-2056: aircraft get 3x stray distance
@@ -673,6 +677,9 @@ export class Team {
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
+      // C++ vessel/aircraft loaner transports auto-retreat after unloading and
+      // must NOT be re-grouped by the team they were spawned with.
+      if (unit.mission === Mission.RETREAT) continue;
       found = true;
 
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
@@ -955,8 +962,10 @@ export class Team {
   dissolve(): void {
     for (const m of this._members) {
       m.teamRef = null;
-      // C++ team.cpp:1139 — Enter_Idle_Mode on remove
-      if (m.alive) {
+      // C++ team.cpp:1139 — Enter_Idle_Mode on remove. Loaner transports (LST/Chinook)
+      // that auto-retreat after unload must NOT be reset to GUARD: their RETREAT
+      // mission will fly them off the map and remove them.
+      if (m.alive && m.mission !== Mission.RETREAT) {
         m.mission = Mission.GUARD;
       }
     }
