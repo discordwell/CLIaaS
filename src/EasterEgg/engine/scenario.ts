@@ -1594,6 +1594,19 @@ export interface ScenarioResult {
 }
 
 /** Convert INI mission string to Mission enum and apply to entity */
+/**
+ * C++ unit.cpp:4705 — `unit->Strength = MaxStrength * fixed(strength, 256);`
+ * C++ fixed(N,D) * int = (int * N + D/2) / D (rounds to nearest, not floor).
+ * Then line 4706 snaps to MaxStrength if within 3 of it (handles strength=256).
+ */
+function scenarioStrengthToHP(strength: number, maxHp: number): number {
+  // C++ fixed-point: (MaxStrength * strength + 128) / 256 — round to nearest
+  let hp = Math.floor((maxHp * strength + 128) / 256);
+  // C++ unit.cpp:4706 — snap to full HP when within 3 of max
+  if (hp > maxHp - 3) hp = maxHp;
+  return hp;
+}
+
 function applyMission(entity: Entity, missionStr: string): void {
   const m = missionStr.trim();
   if (m === 'Hunt') {
@@ -1729,7 +1742,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.turretFacing = entity.facing;
     entity.bodyFacing32 = entity.facing * 4;
     entity.turretFacing32 = entity.turretFacing * 4;
-    entity.hp = Math.floor((u.hp / 256) * entity.maxHp);
+    entity.hp = scenarioStrengthToHP(u.hp, entity.maxHp);
     if (u.trigger && u.trigger !== 'None') entity.triggerName = u.trigger;
     applyMission(entity, u.mission);
     entities.push(entity);
@@ -1755,7 +1768,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.facing = Math.floor(inf.facing / 32) % 8;
     entity.desiredFacing = entity.facing;
     entity.bodyFacing32 = entity.facing * 4;
-    entity.hp = Math.floor((inf.hp / 256) * entity.maxHp);
+    entity.hp = scenarioStrengthToHP(inf.hp, entity.maxHp);
     entity.subCell = inf.subCell;
     if (inf.trigger && inf.trigger !== 'None') entity.triggerName = inf.trigger;
     applyMission(entity, inf.mission);
@@ -1775,7 +1788,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       house: toHouse(s.house),
       cx: pos.cx,
       cy: pos.cy,
-      hp: Math.round((s.hp / 256) * maxHp),
+      // C++ building.cpp uses the same MaxStrength * fixed(strength, 256) math
+      // with a snap-to-full when within 3 of max (techno.cpp:4848).
+      hp: scenarioStrengthToHP(s.hp, maxHp),
       maxHp,
       armor: STRUCTURE_ARMOR[s.type] ?? 'wood',
       alive: s.hp > 0,
