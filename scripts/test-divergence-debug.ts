@@ -62,11 +62,13 @@ test(`${scenario} divergence debug at tick ${targetTick}`, async ({ browser }) =
       // Count by type
       const unitsByType: Record<string, number> = {};
       for (const u of (s.units ?? [])) {
-        unitsByType[u.type] = (unitsByType[u.type] || 0) + 1;
+        const t = u.t ?? u.type ?? '?';
+        unitsByType[t] = (unitsByType[t] || 0) + 1;
       }
       const enemiesByType: Record<string, number> = {};
       for (const e of (s.enemies ?? [])) {
-        enemiesByType[e.type] = (enemiesByType[e.type] || 0) + 1;
+        const t = e.t ?? e.type ?? '?';
+        enemiesByType[t] = (enemiesByType[t] || 0) + 1;
       }
       return {
         tick: s.tick,
@@ -80,19 +82,21 @@ test(`${scenario} divergence debug at tick ${targetTick}`, async ({ browser }) =
         unitsByType,
         enemiesByType,
         // First 10 units with positions
-        unitList: (s.units ?? []).slice(0, 30).map((u: any) => `${u.type}@${u.x},${u.y} hp=${u.hp} m=${u.mission}`),
-        enemyList: (s.enemies ?? []).slice(0, 30).map((e: any) => `${e.type}@${e.x},${e.y} hp=${e.hp} m=${e.mission}`),
+        unitList: (s.units ?? []).slice(0, 30).map((u: any) => `${u.t ?? u.type}@${u.cx ?? u.x},${u.cy ?? u.y} hp=${u.hp} m=${u.m ?? u.mission} h=${u.h ?? u.house}`),
+        enemyList: (s.enemies ?? []).slice(0, 30).map((e: any) => `${e.t ?? e.type}@${e.cx ?? e.x},${e.cy ?? e.y} hp=${e.hp} m=${e.m ?? e.mission} h=${e.h ?? e.house}`),
       };
     }),
     tsPage.evaluate(() => {
       const s = (window as any).__agentState();
       const unitsByType: Record<string, number> = {};
       for (const u of (s.units ?? [])) {
-        unitsByType[u.type] = (unitsByType[u.type] || 0) + 1;
+        const t = u.t ?? u.type ?? '?';
+        unitsByType[t] = (unitsByType[t] || 0) + 1;
       }
       const enemiesByType: Record<string, number> = {};
       for (const e of (s.enemies ?? [])) {
-        enemiesByType[e.type] = (enemiesByType[e.type] || 0) + 1;
+        const t = e.t ?? e.type ?? '?';
+        enemiesByType[t] = (enemiesByType[t] || 0) + 1;
       }
       return {
         tick: s.tick,
@@ -105,8 +109,8 @@ test(`${scenario} divergence debug at tick ${targetTick}`, async ({ browser }) =
         missionTimer: s.missionTimer ?? 0,
         unitsByType,
         enemiesByType,
-        unitList: (s.units ?? []).slice(0, 30).map((u: any) => `${u.type}@${u.x},${u.y} hp=${u.hp} m=${u.mission}`),
-        enemyList: (s.enemies ?? []).slice(0, 30).map((e: any) => `${e.type}@${e.x},${e.y} hp=${e.hp} m=${e.mission}`),
+        unitList: (s.units ?? []).slice(0, 30).map((u: any) => `${u.t ?? u.type}@${u.cx ?? u.x},${u.cy ?? u.y} hp=${u.hp} m=${u.m ?? u.mission} h=${u.h ?? u.house}`),
+        enemyList: (s.enemies ?? []).slice(0, 30).map((e: any) => `${e.t ?? e.type}@${e.cx ?? e.x},${e.cy ?? e.y} hp=${e.hp} m=${e.m ?? e.mission} h=${e.h ?? e.house}`),
       };
     }),
   ]);

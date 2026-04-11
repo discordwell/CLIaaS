@@ -2746,6 +2746,15 @@ export function executeTriggerAction(
           const idx = result.spawned.indexOf(unit);
           if (idx >= 0) result.spawned.splice(idx, 1);
         }
+        // C++ vessel.cpp:649-651 — LST with cargo spawns with door OPEN. The vessel
+        // can't Commence its mission (start moving) until Is_Door_Closed() returns
+        // true. Close_Door(5, 6) ticks at 5 frames/stage × 5 stages = 25 ticks.
+        // Without this delay, TS LST starts moving immediately, reaching the unload
+        // waypoint ~25 ticks earlier than WASM and unloading too soon.
+        if (transport.stats.isVessel && transport.type === 'LST') {
+          transport.doorOpen = true;
+          transport.doorTimer = 25; // C++ Close_Door(5, 6) → 5 stages × 5 ticks
+        }
       }
       break;
     }

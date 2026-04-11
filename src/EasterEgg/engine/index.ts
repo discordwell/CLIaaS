@@ -4713,6 +4713,15 @@ export class Game {
     // C++ PathDelay countdown (foot.cpp:463 — CDTimerClass decrements each frame)
     if (entity.pathDelay > 0) entity.pathDelay--;
 
+    // C++ vessel.cpp:592, 658 — vessel transports can't Commence (start moving)
+    // until Is_Door_Closed() returns true. LST spawned with cargo has door open
+    // and must wait for it to close (~25 ticks). Without this delay, LST reaches
+    // unload point ~25 ticks early in TS, breaking SCG09EA et al.
+    if (entity.stats.isVessel && entity.isTransport && entity.doorOpen) {
+      entity.animState = AnimState.IDLE;
+      return;
+    }
+
     if (!entity.moveTarget && entity.path.length === 0) {
       entity.mission = this.idleMission(entity);
       entity.animState = AnimState.IDLE;
