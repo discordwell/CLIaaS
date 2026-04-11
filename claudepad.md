@@ -1,5 +1,75 @@
 # Session Summaries
 
+## 2026-04-11T03:30Z — SCG08 YAK cascade: TMISSION_ATT_WAYPT fix + RNG desync ID
+
+### Landed
+- **`db7e78b` fix: TMISSION_ATT_WAYPT pre-scan limited to weapon range
+  (C++ parity)** — `updateTeamMission` was scanning for player units within
+  sight*2 OR 15 cells of the waypoint, causing reinforcement teams to deviate
+  ~30 cells off-path to chase units they could see but couldn't yet hit. C++
+  team.cpp:1689-1721 Coordinate_Attack assigns the waypoint cell as a TarCom
+  and lets the unit's natural Mission_Attack handle in-range engagement. The
+  fix limits the pre-scan to weapon range. +3 regression tests.
+
+### Parity Impact
+- SCG08EA: ±14 → ±12 (-2)
+- All 7 ±0 scenarios remain ±0
+- 51,024 tests passing
+
+### Deeper SCG08 Issue Identified (Not Fixed)
+The remaining ±12 in SCG08EA comes from an **RNG desync at tick 93**, well
+before the air3 trigger spawns YAKs at tick 360.
+
+Trace data (RNG seed per tick, post-sync):
+```
+t=80-92:  W=...   T=...   ✓ (synced for ~80 ticks after sync)
+t=93:     W=793e62f9 T=1ae045c0 ✗ (WASM made an extra RNG call)
+t=94:     W=a67935b5 T=698e789f ✗ (TS now consumes; different starting state)
+t=95:     W=4ef7344a T=4ef7344a ✓ (re-synced — same total calls!)
+t=96:     W=17890cd8 T=4ef7344a ✗ (WASM extra call again)
+t=98:     W=17890cd8 T=17890cd8 ✓ (re-synced)
+```
+
+**Pattern:** WASM and TS make the **same total number of RNG calls** between
+checkpoints, but **distribute them across different ticks**. This is a 1-2
+tick AI scan offset — some periodic AI process is happening 1 tick earlier
+in WASM than in TS.
+
+By tick 360 (air3 spawn), the RNG state has accumulated enough drift that
+the spawn-position random offsets are completely different:
+- WASM yak2/yak teams spawn at offsets 39 and 13 → rows 96 and 70
+- TS yak2/yak teams spawn at offsets 12 and 15 → rows 69 and 72
+
+WASM's row-96 pair is south of the player base (no engagement); TS has
+both pairs north of the base, both fly through it. That accounts for the
+remaining ±12.
+
+**Fix would require:** identifying which AI scan in TS happens 1 tick later
+than WASM. Suspected: building/structure AI scan jitter, ai-house preamble,
+or team activation gesture timing. The existing RNG audit infrastructure
+(`__rngTagControl`, `_sourceTag`, `_seedLog`) plus a comparable WASM-side
+trace would let us pinpoint the exact divergent call. Multi-day effort.
+
+### Parity Status (t=2000)
+| Scenario | Status |
+|----------|--------|
+| SCG01EA  | ±0 ✓ |
+| SCG02EA  | ±0 ✓ |
+| SCG03EA  | ±1   |
+| SCG04EA  | ±3   |
+| SCG06EA  | ±0 ✓ |
+| SCG07EA  | ±5   |
+| SCG08EA  | ±12 (was ±14) |
+| SCG09EA  | ±0 ✓ |
+| SCG10EA  | ±0 ✓ |
+| SCG11EA  | ±0 ✓ |
+| SCG12EA  | ±0 ✓ |
+| SCG13EA  | ±2   |
+
+7/12 ±0, total |Δ| = 23 (was 25).
+
+---
+
 ## 2026-04-11T02:30Z — Six-agent batch: 4 fixes landed, 2 deep investigations
 
 Spawned six parallel Opus subagents in worktrees to fix the bugs identified
