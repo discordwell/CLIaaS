@@ -11,6 +11,7 @@ import {
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
 	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
+  MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
@@ -4780,6 +4781,12 @@ export class Game {
         if (!other.alive || other.inLimbo || this.entitiesAllied(entity, other)) continue;
         // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
         if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
+        // C++ techno.cpp:1476-1479: units on IsNoThreat missions (e.g. HARMLESS) are
+        // invisible to auto-target. SCG03EA: this scan was picking up a Greece MEDI
+        // in HARMLESS mission as a target for nearby USSR E1s, killing it.
+        if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+        // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
+        if (other.cloakState === CloakState.CLOAKED) continue;
         const dist = worldDist(entity.pos, other.pos);
         if (dist > scanRange) continue;
         if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
