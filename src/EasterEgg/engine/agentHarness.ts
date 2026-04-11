@@ -756,22 +756,24 @@ export function installHarness(game: Game): void {
 
   // Sync ScenarioRandom seed to match C++ WASM (used by parity test harness).
   // Directly sets the seed and resets debug log — no need to advance through the LCG.
-  // Also resets all entity missionTimers to 0 so they fire on the next tick,
-  // matching WASM's state where entities haven't been processed yet at sync time.
+  //
+  // C++ parity note: entity timers (missionTimer/CDTimer, attackCooldown/Arm,
+  // idleAnimTimer/IdleTimer) are initialized by the Entity/TechnoClass constructors
+  // to their natural starting values — typically 0 for newly spawned units
+  // (C++ techno.cpp:611 IdleTimer(0), :620 Arm(0); mission.cpp:76 Timer(0)).
+  // Previously this sync function force-reset them to 0 on the assumption
+  // that TS may have advanced past tick 0 before sync, but in the current
+  // agent-harness flow (AntGame.tsx: start → pause → consumeInitRNG → step(0)
+  // → installHarness) the game is still at tick 0 with constructor defaults.
+  // Force-resetting overrode any legitimate values set by scenario triggers or
+  // init logic (e.g. Hold delays on newly parachuted infantry in C++).
+  // Preserving the natural values matches C++ behavior more faithfully.
   w.__syncRngSeed = (targetSeed: number) => {
     ScenarioRandom.seed = targetSeed >>> 0;
     ScenarioRandom.debugLog = [];
     ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
-    // Reset entity timers to match WASM's unprocessed state.
-    // In C++, entities haven't had their AI() called yet at the sync point,
-    // so their CDTimers are still at their initial value (0 = expired).
-    // TS may have already processed tick 1, setting timers to 42+ ticks.
-    for (const e of (game as any).entities as Entity[]) {
-      e.missionTimer = 0;
-      e.idleAnimTimer = 0;
-      e.attackCooldown = 0;
-      e.attackCooldown2 = 0;
-    }
+    // NOTE: do NOT touch entity timers here — they must reflect the
+    // engine's natural state at sync time so parity with WASM holds.
   };
 
   // RNG tag-logging control for per-tick divergence tracing.
