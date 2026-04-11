@@ -1,5 +1,46 @@
 # Session Summaries
 
+## 2026-04-10T19:00Z — TEVENT_BUILDING_EXISTS per-trigger-house
+
+### SCG04EA cons trigger now fires
+
+**Root cause:** TS `TEVENT_BUILDING_EXISTS` checked a global `structureTypes`
+set, so `off` trigger (house=1, event=BUILDING_EXISTS(FACT)) was firing at
+tick 1 whenever *any* house had a FACT — including enemy bases. It set
+global 11, which gated SCG04EA's `cons` MCV-reinforcement trigger, so TS
+never spawned the player's MCV at tick 90.
+
+**C++ parity:** `tevent.cpp` checks `HouseClass::As_Pointer(trigger.house)
+->BQuantity[Data.Structure] > 0` — scoped to the trigger's own House.
+
+**Fix:** added `structureTypesByHouse: Map<number, Set<string>>` and
+`triggerHouse` to the TriggerGameState snapshot. The BUILDING_EXISTS
+handler now only checks the trigger's house. Test helpers patched across
+40+ files with regression guards verifying other houses' structures do
+NOT satisfy the check.
+
+### Remaining Divergences Investigated (not yet fixed)
+- **SCG04EA ±3**: TS now spawns MCV. Late-game diverges because para1/para2
+  BADR teams don't drop paratroopers in TS (E1 cargo stays in BADR). C++
+  parachutes passengers from BADR en route.
+- **SCG07EA ±5**: England JEEP at (27,58) HP=12 dies at tick 4 from E4
+  Flamer at (30,59). E4 fires immediately in TS (attackCooldown reset to 0
+  during __syncRngSeed). Suspected: C++ has initial fire delay that TS
+  resets away during parity sync.
+- **SCG13EA ±2**: Single MRJ (Mobile Radar Jammer) on the `mrj1` team moves
+  at same speed but starts ~22 ticks earlier in WASM than TS, crushing 2
+  more player E1s at (11,55) and (12,55) via its crusher=true flag.
+
+### Combat Path Bug Noted (not yet fixed)
+`applySplashDamage` re-applies `modifyDamage` using `weapon.damage` = the
+pre-modified projectile strength (already warhead*armor multiplied by
+missionAI.ts:417). Double-application halves flamer damage to 23 vs the
+"true" 42. Projectile launch should use raw `weapon.damage * houseBias` so
+`applySplashDamage` applies warhead*armor once. Risk: changing this may
+perturb all scenarios currently at ±0.
+
+---
+
 ## 2026-04-10T18:30Z — SCG09EA Fixed + Harmless Mission + HP Rounding
 
 ### 7/12 Scenarios Perfect (was 6/12)
