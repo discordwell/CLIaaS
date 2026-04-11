@@ -42,6 +42,7 @@ describe('TEVENT_LEAVES_MAP (type=23) — C++ behavioral parity', () => {
 
     triggerHouse: 1,
     builtStructureTypes: new Set(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
     houseAlive: new Map(),

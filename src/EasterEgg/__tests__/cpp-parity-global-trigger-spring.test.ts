@@ -111,6 +111,7 @@ function makeGameState(globals: Set<number>, overrides: Partial<TriggerGameState
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
     builtStructureTypes: new Set(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),

@@ -2340,6 +2340,9 @@ export interface TriggerGameState {
   triggerHouse: number;
   // Structure types player has built during this game (for TEVENT_BUILD)
   builtStructureTypes: Set<string>;
+  // Per-house built structure types (C++ tevent.cpp: TEVENT_BUILD uses
+  // HouseClass::JustBuiltStructure scoped to the trigger's own house, not global)
+  builtStructureTypesByHouse: Map<number, Set<string>>;
   // Trigger attachment: names of triggers whose attached object was destroyed
   destroyedTriggerNames: Set<string>;
   // Trigger attachment: names of triggers whose attached object was attacked (damaged)
@@ -2449,8 +2452,11 @@ export function checkTriggerEvent(
       // Attached object was attacked (damaged) — per-entity tracking via triggerName
       return state.attackedTriggerNames.has(state.triggerName);
     case TEVENT_BUILD: {
-      // Player has built a structure of the specified type (event.data = StructType index)
-      // Uses the same STRUCT_TYPES mapping as BUILDING_EXISTS
+      // Player has built a structure of the specified type (event.data = StructType index).
+      // C++ tevent.cpp TEVENT_BUILD uses HouseClass::JustBuiltStructure, scoped to the
+      // trigger's own House — NOT a global "any house built this" check. Mirrors the
+      // BUILDING_EXISTS fix (commit 80f6ab5).
+      // Uses the same STRUCT_TYPES mapping as BUILDING_EXISTS.
       const BUILD_STRUCT_TYPES: Record<number, string> = {
         0: 'ATEK', 1: 'IRON', 2: 'WEAP', 3: 'PDOX', 4: 'PBOX', 5: 'HBOX',
         6: 'DOME', 7: 'GAP',  8: 'GUN',  9: 'AGUN', 10: 'FTUR', 11: 'FACT',
@@ -2459,9 +2465,10 @@ export function checkTriggerEvent(
         24: 'FIX',  25: 'BIO',  26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
         30: 'FCOM', 31: 'TSLA', 32: 'QUEE', 33: 'LAR1', 34: 'LAR2',
       };
+      const houseBuilt = state.builtStructureTypesByHouse.get(state.triggerHouse);
       const buildType = BUILD_STRUCT_TYPES[event.data];
-      if (buildType) return state.builtStructureTypes.has(buildType);
-      return state.builtStructureTypes.size > 0; // fallback: any structure built
+      if (buildType) return houseBuilt?.has(buildType) ?? false;
+      return (houseBuilt?.size ?? 0) > 0; // fallback: any structure built by this house
     }
     case TEVENT_LEAVES_MAP:
       // Units have left the map edge (civilian evacuation)

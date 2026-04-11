@@ -40,6 +40,7 @@ function makeState(overrides: Partial<TriggerGameState> = {}): TriggerGameState 
     unitsLeftMap: 0,
     structureTypes: new Set<string>(),
     builtStructureTypes: new Set<string>(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     destroyedTriggerNames: new Set<string>(),
     attackedTriggerNames: new Set<string>(),
     houseAlive: new Map<number, boolean>(),

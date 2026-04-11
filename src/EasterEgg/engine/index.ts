@@ -479,6 +479,9 @@ export class Game {
   private missionTimer = 0; // mission countdown timer (in game ticks), 0 = inactive
   private missionTimerExpired = false;
   private builtStructureTypes = new Set<string>(); // types player has constructed (for TEVENT_BUILD)
+  // C++ tevent.cpp TEVENT_BUILD parity: HouseClass::JustBuiltStructure is per-house.
+  // houseIdx (HOUSE_TO_INDEX) → set of structure types that house has built.
+  private builtStructureTypesByHouse = new Map<number, Set<string>>();
   /** EVA text message queue — displayed briefly on screen */
   private evaMessages: { text: string; tick: number }[] = [];
   /** Count of units that have left the map (for TEVENT_LEAVES_MAP) */
@@ -1221,6 +1224,7 @@ export class Game {
     // which would blow past the tick<45 victory-check guard.
     this.accumulator = 0;
     this.builtStructureTypes.clear();
+    this.builtStructureTypesByHouse.clear();
     this.evaMessages = [];
     this.unitsLeftMap = 0;
     this.civiliansEvacuated = 0;
@@ -2289,6 +2293,13 @@ export class Game {
         // Track completed construction for TEVENT_BUILD
         if (wasBuilding && s.buildProgress >= 1) {
           this.builtStructureTypes.add(s.type);
+          // C++ HouseClass::JustBuiltStructure: per-house bitmap, not global.
+          const hi = Game.HOUSE_TO_INDEX[s.house];
+          if (hi !== undefined) {
+            let hset = this.builtStructureTypesByHouse.get(hi);
+            if (!hset) { hset = new Set<string>(); this.builtStructureTypesByHouse.set(hi, hset); }
+            hset.add(s.type);
+          }
           if (s.house === 'Spain' || s.house === 'Greece') {
             this.structuresBuilt++;
             // C++ parity: recalculate silo capacity when storage structure completed
@@ -6093,6 +6104,7 @@ export class Game {
     houseBuildingsAlive: Map<number, boolean>; builtStructureTypes: Set<string>;
     buildingsDestroyedByHouse: Map<number, boolean>; fakesExist: boolean;
     structureTypesByHouse: Map<number, Set<string>>;
+    builtStructureTypesByHouse: Map<number, Set<string>>;
   }): TriggerGameState {
     return {
       gameTick: this.tick,
@@ -6122,6 +6134,7 @@ export class Game {
       houseUnitsAlive: shared.houseUnitsAlive,
       houseBuildingsAlive: shared.houseBuildingsAlive,
       builtStructureTypes: shared.builtStructureTypes,
+      builtStructureTypesByHouse: shared.builtStructureTypesByHouse,
       isLowPower: this.powerConsumed > this.powerProduced && this.powerProduced > 0,
       playerCredits: this.credits,
       buildingsDestroyedByHouse: shared.buildingsDestroyedByHouse,
@@ -6660,6 +6673,7 @@ export class Game {
       houseAlive, houseUnitsAlive, houseBuildingsAlive,
       builtStructureTypes: this.builtStructureTypes,
       buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
+      builtStructureTypesByHouse: this.builtStructureTypesByHouse,
     };
 
     for (const trigger of this.triggers) {
@@ -6774,6 +6788,7 @@ export class Game {
       houseAlive, houseUnitsAlive, houseBuildingsAlive,
       builtStructureTypes: this.builtStructureTypes,
       buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
+      builtStructureTypesByHouse: this.builtStructureTypesByHouse,
     };
 
     // C++ Spring() parity: count NEW deaths per trigger name.

@@ -39,6 +39,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
 
     triggerHouse: 1,
     builtStructureTypes: new Set(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
     houseAlive: new Map(),

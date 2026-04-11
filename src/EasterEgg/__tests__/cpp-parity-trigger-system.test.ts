@@ -212,7 +212,7 @@ function makeTrigger(overrides: Partial<ScenarioTrigger> = {}): ScenarioTrigger 
 }
 
 function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameState {
-  return {
+  const merged: TriggerGameState = {
     gameTick: 0,
     globals: new Set(),
     triggerStartTick: 0,
@@ -233,6 +233,7 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     structureTypesByHouse: new Map([[1, new Set<string>()]]),
     triggerHouse: 1,
     builtStructureTypes: new Set(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
     houseAlive: new Map(),
@@ -253,6 +254,12 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     pendingDestroyedCount: 0,
     ...overrides,
   };
+  // Legacy compat: mirror builtStructureTypes onto the trigger's own house
+  // so TEVENT_BUILD per-house checks (C++ JustBuiltStructure) see the value.
+  if (overrides.builtStructureTypes && !overrides.builtStructureTypesByHouse) {
+    merged.builtStructureTypesByHouse = new Map([[merged.triggerHouse, overrides.builtStructureTypes]]);
+  }
+  return merged;
 }
 
 function makeEvent(type: number, data = 0): TriggerEvent {

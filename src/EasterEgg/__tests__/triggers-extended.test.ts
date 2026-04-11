@@ -41,6 +41,7 @@ describe('Extended Trigger Events', () => {
 
     triggerHouse: 1,
     builtStructureTypes: new Set(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
     houseAlive: new Map(),
@@ -212,6 +213,7 @@ describe('TriggerGameState Interface', () => {
 
       triggerHouse: 1,
       builtStructureTypes: new Set(),
+      builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
       destroyedTriggerNames: new Set(),
       attackedTriggerNames: new Set(['trig1']),
       houseAlive: new Map(),
@@ -258,6 +260,7 @@ describe('Trigger Audit Fixes', () => {
 
     triggerHouse: 1,
     builtStructureTypes: new Set(),
+    builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
     houseAlive: new Map(),

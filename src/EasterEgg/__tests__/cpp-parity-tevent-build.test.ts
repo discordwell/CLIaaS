@@ -19,44 +19,54 @@ import {
 
 describe('TEVENT_BUILD (type=19) — C++ behavioral parity', () => {
   /** Build a minimal TriggerGameState with all required fields. */
-  const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameState => ({
-    gameTick: 0,
-    globals: new Set(),
-    triggerStartTick: 0,
-    triggerName: 'test',
-    playerEntered: false,
-    enemyUnitsAlive: 0,
-    enemyKillCount: 0,
-    playerFactories: 0,
-    missionTimerExpired: false,
-    bridgesAlive: 0,
-    unitsLeftMap: 0,
-    structureTypes: new Set(),
+  const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameState => {
+    const merged: TriggerGameState = {
+      gameTick: 0,
+      globals: new Set(),
+      triggerStartTick: 0,
+      triggerName: 'test',
+      playerEntered: false,
+      enemyUnitsAlive: 0,
+      enemyKillCount: 0,
+      playerFactories: 0,
+      missionTimerExpired: false,
+      bridgesAlive: 0,
+      unitsLeftMap: 0,
+      structureTypes: new Set(),
 
-    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+      structureTypesByHouse: new Map([[1, new Set<string>()]]),
 
-    triggerHouse: 1,
-    builtStructureTypes: new Set(),
-    destroyedTriggerNames: new Set(),
-    attackedTriggerNames: new Set(),
-    houseAlive: new Map(),
-    houseUnitsAlive: new Map(),
-    houseBuildingsAlive: new Map(),
-    isLowPower: false,
-    playerCredits: 0,
-    buildingsDestroyedByHouse: new Map(),
-    nBuildingsDestroyed: 0,
-    playerFactoriesExist: true,
-    civiliansEvacuated: 0,
-    builtUnitTypes: new Set(),
-    builtInfantryTypes: new Set(),
-    builtAircraftTypes: new Set(),
-    fakesExist: true,
-    spiedBuildings: new Set(),
-    isThieved: false,
-    pendingDestroyedCount: 0,
-    ...overrides,
-  });
+      triggerHouse: 1,
+      builtStructureTypes: new Set(),
+      builtStructureTypesByHouse: new Map([[1, new Set<string>()]]),
+      destroyedTriggerNames: new Set(),
+      attackedTriggerNames: new Set(),
+      houseAlive: new Map(),
+      houseUnitsAlive: new Map(),
+      houseBuildingsAlive: new Map(),
+      isLowPower: false,
+      playerCredits: 0,
+      buildingsDestroyedByHouse: new Map(),
+      nBuildingsDestroyed: 0,
+      playerFactoriesExist: true,
+      civiliansEvacuated: 0,
+      builtUnitTypes: new Set(),
+      builtInfantryTypes: new Set(),
+      builtAircraftTypes: new Set(),
+      fakesExist: true,
+      spiedBuildings: new Set(),
+      isThieved: false,
+      pendingDestroyedCount: 0,
+      ...overrides,
+    };
+    // Legacy test compat: when a test overrides builtStructureTypes but does not
+    // supply the per-house map, mirror it onto the trigger's own house so the
+    // per-house TEVENT_BUILD check (C++ JustBuiltStructure) sees the value.
+    if (overrides.builtStructureTypes && !overrides.builtStructureTypesByHouse) {
+      merged.builtStructureTypesByHouse = new Map([[merged.triggerHouse, overrides.builtStructureTypes]]);
+    }
+    return merged;
+  };
 
   const TEVENT_BUILD = 19;
 
@@ -199,5 +209,72 @@ describe('TEVENT_BUILD (type=19) — C++ behavioral parity', () => {
       builtStructureTypes: new Set(),           // but player hasn't built it
     });
     expect(checkTriggerEvent(buildEvent(11), state)).toBe(false);
+  });
+
+  describe('per-trigger-house scoping (C++ JustBuiltStructure)', () => {
+    // C++ parity: TEVENT_BUILD uses HouseClass::JustBuiltStructure, a per-house
+    // bitmap. The trigger fires only when its OWN house built the structure.
+    // A build completed by a different house must NOT satisfy the trigger.
+
+    it('house A build does not satisfy a house B trigger', () => {
+      // Trigger belongs to house B (index 2). House A (index 1) built FACT.
+      // House B has built nothing → trigger must NOT fire.
+      const state = createState({
+        triggerHouse: 2,
+        builtStructureTypesByHouse: new Map([
+          [1, new Set(['FACT'])],    // house A built FACT
+          [2, new Set<string>()],    // house B built nothing
+        ]),
+      });
+      expect(checkTriggerEvent(buildEvent(11), state)).toBe(false); // FACT
+    });
+
+    it('trigger fires only for the trigger house that built the structure', () => {
+      // Same layout but swap: house B built FACT, trigger is house B → fires.
+      const state = createState({
+        triggerHouse: 2,
+        builtStructureTypesByHouse: new Map([
+          [1, new Set<string>()],
+          [2, new Set(['FACT'])],
+        ]),
+      });
+      expect(checkTriggerEvent(buildEvent(11), state)).toBe(true);
+    });
+
+    it('unknown StructType fallback is also scoped per-house', () => {
+      // Fallback (unknown StructType index) must honor per-house scoping too:
+      // "any build by trigger.house" NOT "any build by any house".
+      const stateHouseBEmpty = createState({
+        triggerHouse: 2,
+        builtStructureTypesByHouse: new Map([
+          [1, new Set(['POWR', 'FACT'])],  // house A has builds
+          [2, new Set<string>()],           // house B is empty
+        ]),
+      });
+      // Index 999 (unknown) → fallback. House B built nothing → false.
+      expect(checkTriggerEvent({ type: TEVENT_BUILD, team: -1, data: 999 }, stateHouseBEmpty))
+        .toBe(false);
+
+      const stateHouseBHasBuild = createState({
+        triggerHouse: 2,
+        builtStructureTypesByHouse: new Map([
+          [1, new Set<string>()],
+          [2, new Set(['POWR'])],
+        ]),
+      });
+      expect(checkTriggerEvent({ type: TEVENT_BUILD, team: -1, data: 999 }, stateHouseBHasBuild))
+        .toBe(true);
+    });
+
+    it('returns false when trigger house has no entry in the map at all', () => {
+      // House 5 has no map entry whatsoever → return false, not a throw.
+      const state = createState({
+        triggerHouse: 5,
+        builtStructureTypesByHouse: new Map([
+          [1, new Set(['FACT'])],
+        ]),
+      });
+      expect(checkTriggerEvent(buildEvent(11), state)).toBe(false);
+    });
   });
 });
