@@ -4197,27 +4197,36 @@ export class Game {
 
       case Game.TMISSION_ATTACK:
       case Game.TMISSION_ATT_WAYPT: {
-        // Attack: hunt nearest visible player unit near waypoint
+        // C++ team.cpp Coordinate_Attack: assigns the waypoint cell as a
+        // coordinate target to each member, then MISSION_ATTACK. The unit's
+        // Mission_Attack handles target acquisition naturally — it engages
+        // enemies WITHIN WEAPON RANGE while moving toward the cell, not via
+        // an aggressive sight-range pre-scan. Previously TS picked the nearest
+        // player unit within sight*2 OR 15 cells of waypoint, causing teams
+        // (e.g. SCG08EA YAK reinforcements) to deviate ~30 cells off-path to
+        // chase player units they could see but couldn't yet hit, instead of
+        // flying past them to the waypoint as in WASM.
         if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
 
         const wp = this.waypoints.get(tm.data);
+        // Pre-scan only for units already in weapon range (the units that
+        // would be auto-engaged during the move anyway). Use the larger of
+        // the two weapon ranges for dual-weapon units.
+        const weapon1Range = entity.weapon?.range ?? 0;
+        const weapon2Range = entity.weapon2?.range ?? 0;
+        const scanRange = Math.max(weapon1Range, weapon2Range);
+
         let nearest: Entity | null = null;
         let nearestDist = Infinity;
-
-        for (const other of this.entities) {
-          if (!other.alive || !other.isPlayerUnit) continue;
-          const dist = worldDist(entity.pos, other.pos);
-          // Fog-aware: only target units within sight range or near waypoint
-          if (wp) {
-            const wpWorld = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
-            const distToWp = worldDist(other.pos, wpWorld);
-            if (distToWp > 15 && dist > entity.stats.sight * 2) continue;
-          } else {
-            if (dist > entity.stats.sight * 1.5) continue;
-          }
-          if (dist < nearestDist) {
-            nearestDist = dist;
-            nearest = other;
+        if (scanRange > 0) {
+          for (const other of this.entities) {
+            if (!other.alive || !other.isPlayerUnit) continue;
+            const dist = worldDist(entity.pos, other.pos);
+            if (dist > scanRange) continue;
+            if (dist < nearestDist) {
+              nearestDist = dist;
+              nearest = other;
+            }
           }
         }
 
