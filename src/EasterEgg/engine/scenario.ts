@@ -1616,6 +1616,15 @@ function applyMission(entity: Entity, missionStr: string): void {
   } else if (m === 'Sticky') {
     // C++ MISSION_STICKY: same as GUARD (cases fall through in mission.cpp:243-245)
     entity.mission = Mission.STICKY;
+  } else if (m === 'Harmless') {
+    // C++ MISSION_HARMLESS: doesn't auto-attack, low-priority target.
+    // SCG03EA spawns Greece MEDI/E6 with Harmless mission so they don't auto-engage
+    // enemies and aren't easily picked off by enemy guard scans.
+    entity.mission = Mission.HARMLESS;
+  } else if (m === 'Move') {
+    // C++ MISSION_MOVE: idle but flagged as moving (used for transports queued up).
+    // No NavCom is set, so the unit just sits like GUARD until something assigns one.
+    entity.mission = Mission.MOVE;
   } else {
     // Default: Guard
     entity.mission = Mission.GUARD;
