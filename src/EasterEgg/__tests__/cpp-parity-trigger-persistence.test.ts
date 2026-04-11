@@ -97,6 +97,10 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     enemyKillCount: 0,
     enemyUnitsAlive: 0,
     structureTypes: new Set(),
+
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+
+    triggerHouse: 1,
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),

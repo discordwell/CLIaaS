@@ -41,6 +41,10 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     bridgesAlive: 0,
     unitsLeftMap: 0,
     structureTypes: new Set(),
+
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+
+    triggerHouse: 1,
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
@@ -323,8 +327,9 @@ describe('TR5: Event index mapping matches C++ tevent.h', () => {
 
   it('TEVENT_BUILDING_EXISTS at index 32 (unchanged)', () => {
     const event: TriggerEvent = { type: 32, team: -1, data: 11 }; // 11 = FACT
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set(['FACT']) }))).toBe(true);
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set() }))).toBe(false);
+    // C++ tevent.cpp: checks BQuantity for trigger.house (default=1 in createState)
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>(['FACT'])]]) }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) }))).toBe(false);
   });
 });
 

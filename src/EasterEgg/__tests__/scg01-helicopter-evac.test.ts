@@ -49,6 +49,10 @@ const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameStat
   bridgesAlive: 0,
   unitsLeftMap: 0,
   structureTypes: new Set(),
+
+  structureTypesByHouse: new Map([[1, new Set<string>()]]),
+
+  triggerHouse: 1,
   builtStructureTypes: new Set(),
   destroyedTriggerNames: new Set(),
   houseAlive: new Map(),

@@ -101,6 +101,10 @@ function makeGameState(globals: Set<number>, overrides: Partial<TriggerGameState
     bridgesAlive: 0,
     unitsLeftMap: 0,
     structureTypes: new Set(),
+
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+
+    triggerHouse: 1,
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
     houseAlive: new Map(),

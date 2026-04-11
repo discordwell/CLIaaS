@@ -32,6 +32,10 @@ describe('TEVENT_BUILD (type=19) — C++ behavioral parity', () => {
     bridgesAlive: 0,
     unitsLeftMap: 0,
     structureTypes: new Set(),
+
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+
+    triggerHouse: 1,
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),

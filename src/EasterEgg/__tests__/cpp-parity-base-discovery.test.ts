@@ -110,6 +110,10 @@ function makeTriggerState(overrides: Partial<TriggerGameState> = {}): TriggerGam
     bridgesAlive: 0,
     unitsLeftMap: 0,
     structureTypes: new Set(),
+
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+
+    triggerHouse: 1,
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),

@@ -57,6 +57,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     bridgesAlive: 0,
     unitsLeftMap: 0,
     structureTypes: new Set(),
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+    triggerHouse: 1,
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
@@ -249,20 +251,22 @@ describe('checkTriggerEvent — full event coverage', () => {
     expect(checkTriggerEvent(event, createState({ missionTimerExpired: true }))).toBe(true);
   });
 
-  // TEVENT_BUILDING_EXISTS (32)
-  it('TEVENT_BUILDING_EXISTS (32) checks specific structure type by RA enum index', () => {
-    // data=11 maps to FACT in the RA StructType enum
+  // TEVENT_BUILDING_EXISTS (32) — C++ tevent.cpp: checks trigger.house's BQuantity[StructType] > 0
+  it('TEVENT_BUILDING_EXISTS (32) checks specific structure type by RA enum index for trigger.house', () => {
+    // data=11 maps to FACT in the RA StructType enum; trigger.house=1 (Greece)
     const event: TriggerEvent = { type: 32, team: -1, data: 11 };
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set() }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set(['WEAP']) }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set(['FACT']) }))).toBe(true);
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set(['FACT', 'WEAP']) }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>(['WEAP'])]]) }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>(['FACT'])]]) }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>(['FACT', 'WEAP'])]]) }))).toBe(true);
+    // C++ parity: other houses' FACTs do NOT count — only trigger.house
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[2, new Set<string>(['FACT'])]]) }))).toBe(false);
   });
 
-  it('TEVENT_BUILDING_EXISTS (32) with unknown index falls back to any-building check', () => {
+  it('TEVENT_BUILDING_EXISTS (32) with unknown index falls back to any-building check for trigger.house', () => {
     const event: TriggerEvent = { type: 32, team: -1, data: 999 };
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set() }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ structureTypes: new Set(['POWR']) }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ structureTypesByHouse: new Map([[1, new Set<string>(['POWR'])]]) }))).toBe(true);
   });
 
   // TEVENT_ALL_BRIDGES_DESTROYED (31)
@@ -1345,6 +1349,7 @@ describe('Edge cases', () => {
 
   it('TEVENT_BUILDING_EXISTS with all known StructType indices maps correctly', () => {
     // Verify key mappings from the STRUCT_TYPES constant
+    // C++ parity: checks trigger.house's BQuantity (default trigger.house=1 in createState)
     const knownMappings: [number, string][] = [
       [0, 'ATEK'], [1, 'IRON'], [2, 'WEAP'], [3, 'PDOX'], [11, 'FACT'],
       [12, 'PROC'], [17, 'POWR'], [18, 'APWR'], [21, 'BARR'], [22, 'TENT'],
@@ -1352,8 +1357,8 @@ describe('Edge cases', () => {
     ];
     for (const [idx, typeName] of knownMappings) {
       const event: TriggerEvent = { type: 32, team: -1, data: idx };
-      const stateWith = createState({ structureTypes: new Set([typeName]) });
-      const stateWithout = createState({ structureTypes: new Set() });
+      const stateWith = createState({ structureTypesByHouse: new Map([[1, new Set<string>([typeName])]]) });
+      const stateWithout = createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) });
       expect(checkTriggerEvent(event, stateWith)).toBe(true);
       expect(checkTriggerEvent(event, stateWithout)).toBe(false);
     }

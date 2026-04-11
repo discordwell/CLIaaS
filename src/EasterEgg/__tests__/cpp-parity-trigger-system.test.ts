@@ -230,6 +230,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     bridgesAlive: 0,
     unitsLeftMap: 0,
     structureTypes: new Set(),
+    structureTypesByHouse: new Map([[1, new Set<string>()]]),
+    triggerHouse: 1,
     builtStructureTypes: new Set(),
     destroyedTriggerNames: new Set(),
     attackedTriggerNames: new Set(),
@@ -879,10 +881,13 @@ describe('checkTriggerEvent — C++ tevent.cpp operator() parity', () => {
 
   // --- TEVENT_BUILDING_EXISTS (32) ---
   // C++ tevent.cpp:361-363: if ((hptr->ActiveBScan & (1 << Data.Structure)) == 0) return(false);
-  it('TEVENT_BUILDING_EXISTS fires when specified structure type exists', () => {
-    // Data=2 => WEAP (StructType index from btype.h)
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.BUILDING_EXISTS, 2), createState({ structureTypes: new Set() }))).toBe(false);
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.BUILDING_EXISTS, 2), createState({ structureTypes: new Set(['WEAP']) }))).toBe(true);
+  // hptr is the trigger's House (Class->House), so the check is per-trigger.house.
+  it('TEVENT_BUILDING_EXISTS fires when specified structure type exists for trigger.house', () => {
+    // Data=2 => WEAP (StructType index from btype.h); default createState triggerHouse=1
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.BUILDING_EXISTS, 2), createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) }))).toBe(false);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.BUILDING_EXISTS, 2), createState({ structureTypesByHouse: new Map([[1, new Set<string>(['WEAP'])]]) }))).toBe(true);
+    // Other houses' WEAP does not count
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.BUILDING_EXISTS, 2), createState({ structureTypesByHouse: new Map([[2, new Set<string>(['WEAP'])]]) }))).toBe(false);
   });
 
   // --- Unknown event type ---

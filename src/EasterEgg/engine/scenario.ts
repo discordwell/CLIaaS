@@ -2334,6 +2334,10 @@ export interface TriggerGameState {
   unitsLeftMap: number;        // count of units that have left the map
   // Building existence check (for BUILDING_EXISTS)
   structureTypes: Set<string>; // set of alive structure type names
+  // Per-house structure types alive (C++ tevent.cpp: BQuantity check uses trigger.house)
+  structureTypesByHouse: Map<number, Set<string>>; // houseIdx → set of alive structure types
+  // House index of the trigger being evaluated (C++ trigger.cpp: Class->House)
+  triggerHouse: number;
   // Structure types player has built during this game (for TEVENT_BUILD)
   builtStructureTypes: Set<string>;
   // Trigger attachment: names of triggers whose attached object was destroyed
@@ -2412,8 +2416,10 @@ export function checkTriggerEvent(
     case TEVENT_MISSION_TIMER_EXPIRED:
       return state.missionTimerExpired;
     case TEVENT_BUILDING_EXISTS: {
-      // Check if a specific building type exists (event.data is RA StructType enum index)
-      // RA StructType enum order from BTYPE.H:
+      // Check if a specific building type exists for the trigger's house
+      // (C++ tevent.cpp: HouseClass::As_Pointer(house)->BQuantity[Data.Structure] > 0)
+      // The house is the trigger's own House field — NOT global structure count.
+      // event.data is RA StructType enum index (from BTYPE.H).
       const STRUCT_TYPES: Record<number, string> = {
         0: 'ATEK', 1: 'IRON', 2: 'WEAP', 3: 'PDOX', 4: 'PBOX', 5: 'HBOX',
         6: 'DOME', 7: 'GAP',  8: 'GUN',  9: 'AGUN', 10: 'FTUR', 11: 'FACT',
@@ -2422,9 +2428,10 @@ export function checkTriggerEvent(
         24: 'FIX',  25: 'BIO',  26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
         30: 'FCOM', 31: 'TSLA', 32: 'QUEE', 33: 'LAR1', 34: 'LAR2',
       };
+      const houseStructs = state.structureTypesByHouse.get(state.triggerHouse);
       const btype = STRUCT_TYPES[event.data];
-      if (btype) return state.structureTypes.has(btype);
-      return state.structureTypes.size > 0; // fallback: any building
+      if (btype) return houseStructs?.has(btype) ?? false;
+      return (houseStructs?.size ?? 0) > 0; // fallback: any building
     }
     case TEVENT_ALL_BRIDGES_DESTROYED:
       return state.bridgesAlive === 0;

@@ -6092,6 +6092,7 @@ export class Game {
     houseAlive: Map<number, boolean>; houseUnitsAlive: Map<number, boolean>;
     houseBuildingsAlive: Map<number, boolean>; builtStructureTypes: Set<string>;
     buildingsDestroyedByHouse: Map<number, boolean>; fakesExist: boolean;
+    structureTypesByHouse: Map<number, Set<string>>;
   }): TriggerGameState {
     return {
       gameTick: this.tick,
@@ -6113,6 +6114,8 @@ export class Game {
       bridgesAlive: this.bridgeCellCount,
       unitsLeftMap: this.unitsLeftMap,
       structureTypes: shared.structureTypes,
+      structureTypesByHouse: shared.structureTypesByHouse,
+      triggerHouse: trigger.house,
       destroyedTriggerNames: shared.destroyedTriggerNames,
       attackedTriggerNames: this.attackedTriggerNames,
       houseAlive: shared.houseAlive,
@@ -6602,6 +6605,7 @@ export class Game {
     // C++ logic.cpp:218-221: immediately spring triggers that depend on global state.
     // Build minimal shared state for trigger evaluation.
     const structureTypes = new Set<string>();
+    const structureTypesByHouse = new Map<number, Set<string>>();
     const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
     const houseAlive = new Map<number, boolean>();
     const houseUnitsAlive = new Map<number, boolean>();
@@ -6624,6 +6628,9 @@ export class Game {
             houseBuildingsAlive.set(hi, true);
             housesWithBuildings.add(hi);
           }
+          let hset = structureTypesByHouse.get(hi);
+          if (!hset) { hset = new Set<string>(); structureTypesByHouse.set(hi, hset); }
+          hset.add(s.type);
         }
         if (FAKE_TYPES.has(s.type)) fakesExist = true;
       } else if (s.triggerName) {
@@ -6652,7 +6659,7 @@ export class Game {
       structureTypes, destroyedTriggerNames, enemyUnitsAlive: 0, playerFactories,
       houseAlive, houseUnitsAlive, houseBuildingsAlive,
       builtStructureTypes: this.builtStructureTypes,
-      buildingsDestroyedByHouse, fakesExist,
+      buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
     };
 
     for (const trigger of this.triggers) {
@@ -6706,6 +6713,8 @@ export class Game {
 
     // Precompute shared state once for all triggers (avoids O(N*M) recomputation)
     const structureTypes = new Set<string>();
+    // C++ tevent.cpp: BUILDING_EXISTS checks HouseClass::BQuantity[type] > 0 for trigger.house.
+    const structureTypesByHouse = new Map<number, Set<string>>();
     // Start with persistent destroyed trigger names, then add currently-dead entities/structures
     const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
     const houseAlive = new Map<number, boolean>();
@@ -6729,6 +6738,9 @@ export class Game {
             houseBuildingsAlive.set(hi, true);
             housesWithBuildings.add(hi);
           }
+          let hset = structureTypesByHouse.get(hi);
+          if (!hset) { hset = new Set<string>(); structureTypesByHouse.set(hi, hset); }
+          hset.add(s.type);
         }
         if (FAKE_TYPES.has(s.type)) fakesExist = true;
       } else if (s.triggerName) {
@@ -6761,7 +6773,7 @@ export class Game {
       structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories,
       houseAlive, houseUnitsAlive, houseBuildingsAlive,
       builtStructureTypes: this.builtStructureTypes,
-      buildingsDestroyedByHouse, fakesExist,
+      buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
     };
 
     // C++ Spring() parity: count NEW deaths per trigger name.
