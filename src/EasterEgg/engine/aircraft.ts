@@ -752,6 +752,20 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
  *  Key C++ behaviors: facing check before firing, anti-circle delay,
  *  continuous fire during dropBombs, explicit regroup phase. */
 export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): boolean {
+  // C++ aircraft.cpp: paratrooper transports (BADRs with passengers) do not
+  // execute attack runs — they fly to the drop cell and Paradrop_Cargo. The
+  // Mission_Attack path is for empty BADRs/MIGs/YAKs strafing real targets.
+  // Without this check, a BADR carrying SCG04EA's para1 E1s was firing its
+  // ParaBomb weapon (300 HE damage) at the player MCV en route, killing it.
+  if (entity.passengers.length > 0) {
+    // Switch back to flying state — let the 'flying' case in updateAircraft
+    // handle the paradrop check (within 2 cells of moveTarget → eject one).
+    entity.aircraftState = 'flying';
+    entity.target = null;
+    entity.targetStructure = null;
+    return true;
+  }
+
   const targetPos = getAircraftTargetPos(entity);
 
   if (!targetPos) {

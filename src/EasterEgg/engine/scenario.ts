@@ -2755,6 +2755,15 @@ export function executeTriggerAction(
               (stats.isAircraft || stats.isVessel)) {
             entity.isALoaner = true;
           }
+          // C++ aircraft.cpp:293: BADR (and other fixed-wing transports) are
+          // ALWAYS IsALoaner — they fly off the map after delivering their cargo,
+          // even on team missions like ATT_WAYPT (which doesn't have hasUnloadMission).
+          // Without this, SCG04EA's para1/para2 BADRs stay in the team after dropping
+          // and the team coordinator forces them back to ATTACK mode → killing the
+          // player MCV with 180 HE damage per ParaBomb shot.
+          if (stats.isAircraft && stats.isFixedWing && entity.isTransport) {
+            entity.isALoaner = true;
+          }
           // Track transports and cargo for auto-loading (C++ reinf.cpp:217-254)
           // LSTs carry ALL unit types (infantry, tanks, MCVs), not just infantry.
           if (entity.isTransport && !transport) {

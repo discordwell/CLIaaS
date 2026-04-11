@@ -730,6 +730,13 @@ export class Team {
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
+      // C++ team.cpp parity: loaner units in RETREAT don't get re-assigned by
+      // the team coordinator. Empty BADR transports (paratrooper carriers that
+      // already dropped their cargo) are in IsALoaner+RETREAT state and are
+      // flying off-map. Forcing them back to ATTACK lets them keep firing
+      // their ParaBomb at player units (SCG04EA: BADR killing the player MCV
+      // after its E2 paratroopers were dropped).
+      if (unit.isALoaner && unit.mission === Mission.RETREAT) continue;
 
       // C++ team.cpp:1703-1708 — assign ATTACK mission
       if (unit.mission !== Mission.ATTACK) {
