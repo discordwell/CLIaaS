@@ -1,5 +1,82 @@
 # Session Summaries
 
+## 2026-04-11T02:30Z — Six-agent batch: 4 fixes landed, 2 deep investigations
+
+Spawned six parallel Opus subagents in worktrees to fix the bugs identified
+in the prior session's investigation. Two completed cleanly on their own
+(TEVENT_BUILD, BADR paradrop). The other four hit the daily token limit
+mid-task; the user asked me to finish their work manually.
+
+### Landed (commits, tests, parity checked)
+- **`1394f58` fix: TEVENT_BUILD per-trigger-house** — sibling fix to the
+  TEVENT_BUILDING_EXISTS commit. Per-house `builtStructureTypesByHouse` map.
+  +4 regression tests. (Background agent.)
+- **`29ce635` feat: BADR paratrooper drop on team ATT_WAYPT** — fixed-wing
+  transports with passengers eject one passenger per tick when within 2 cells
+  of moveTarget, then RETREAT. SCG04EA tick 220/250 now ±0 enemies (was -2),
+  tick 300 Δe improved -3 → -1. +12 regression tests. (Background agent.)
+- **`3c53d34` fix: agent harness sync preserves natural entity timers** —
+  removed the force-reset of missionTimer/attackCooldown/idleAnimTimer in
+  __syncRngSeed, matching C++ constructor defaults. +6 regression tests.
+  Note: this is a C++ correctness fix; it does NOT actually fix SCG07's
+  JEEP-dies-at-tick-4 because Entity constructor already initialised
+  attackCooldown=0 (the reset was a no-op for fresh entities).
+- **`3bf6fb1` fix: combat damage path — single warhead-vs-armor application** —
+  projectile launches no longer pre-multiply by warhead*armor; modifyDamage
+  is applied exactly once on impact via applySplashDamage. +4 regression tests.
+  Removes a real C++ correctness bug. Doesn't directly fix any divergent
+  scenario (their root causes lie elsewhere) but is a prerequisite for
+  future combat-precision work.
+
+### Investigated only (no fix landed)
+- **SCG13EA MRJ — pathfinding divergence**, NOT team activation timing.
+  The agent confirmed both WASM and TS start the MRJ moving at tick 910.
+  WASM picks NW first then W moves to (9,54); TS picks W first and gets
+  effectively stuck (1 cell in 30 ticks vs WASM's 3 cells). Root cause is
+  in pathfinding tie-breaking or movement obstacle handling. Requires
+  deeper pathfinder investigation.
+- **SCG08EA cascade — YAK target acquisition**. At tick 595, WASM YAKs are
+  at row 100/101 (heading to waypoints 11/12 at row 101); TS YAKs are at
+  row 87-89, in ChainGun range of player E1s, killing them. Two contributing
+  factors: (1) yak/yak2 teams have origin=-1, so spawn position is house-edge
+  + RNG which diverges; (2) TS TMISSION_ATT_WAYPT (index.ts:4198-4240) scans
+  for ANY player unit within sight*2 OR 15 cells of waypoint and aggressively
+  attacks, while C++ Coordinate_Attack only auto-engages within weapon range.
+  Fix would change semantics for all teams using ATT_WAYPT — risky and
+  deferred.
+
+### Parity Status (t=2000, after all four landed commits)
+| Scenario | Before session | After session | Δ |
+|----------|---------------|---------------|---|
+| SCG01EA  | ±0  | ±0  | — |
+| SCG02EA  | ±0  | ±0  | — |
+| SCG03EA  | ±1  | ±1  | — |
+| SCG04EA  | ±2  | ±3  | (BADR helped early ticks; late game cascade still drifts) |
+| SCG06EA  | ±0  | ±0  | — |
+| SCG07EA  | ±5  | ±5  | (sync fix was no-op for SCG07; root cause elsewhere) |
+| SCG08EA  | ±14 | ±14 | (YAK cascade investigated, fix deferred) |
+| SCG09EA  | ±0  | ±0  | — |
+| SCG10EA  | ±0  | ±0  | — |
+| SCG11EA  | ±0  | ±0  | — |
+| SCG12EA  | ±0  | ±0  | — |
+| SCG13EA  | ±2  | ±2  | (MRJ pathfinding investigated, fix deferred) |
+
+**7/12 still ±0**, 51,021 tests passing. No regressions despite 4 risky
+correctness fixes touching agent harness, combat path, and trigger system.
+
+### Notes for next session
+1. SCG07 ±5 root cause is NOT attackCooldown — needs fresh investigation
+   (combat path timing? projectile travel? something else)
+2. SCG13 MRJ needs pathfinder tie-breaking work — `cellFacing` in pathfinding.ts
+   uses atan2 rounding; C++ Direction() uses integer octant arithmetic. Compare.
+3. SCG08 needs careful TMISSION_ATT_WAYPT redesign — must not regress other
+   scenarios. Plus the underlying YAK spawn-position divergence (origin=-1 RNG).
+4. Six agent worktrees created during this batch were prunable / cleaned up.
+   The agents wrote to main directly rather than honouring isolation:worktree;
+   investigate why for future batches.
+
+---
+
 ## 2026-04-10T19:00Z — TEVENT_BUILDING_EXISTS per-trigger-house
 
 ### SCG04EA cons trigger now fires
