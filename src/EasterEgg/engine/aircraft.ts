@@ -399,10 +399,60 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       } else {
         entity.hoverJitter = 0;
       }
+
+      // ── C++ Paradrop_Cargo (aircraft.cpp:1442-1468, 1489-1501) ────────────────
+      // Fixed-wing passenger transports (BADR) paradrop passengers onto the
+      // target cell instead of bombing. C++ Fire_At detects Is_Something_Attached()
+      // and dispatches to Paradrop_Cargo, ejecting ONE passenger per firing call
+      // with Arm=0 (no rearm delay). Can_Fire (aircraft.cpp:3985-3992) returns
+      // FIRE_OK when Distance(target) < 0x0200 leptons (2 cells).
+      //
+      // Trigger: fixed-wing with passengers + a moveTarget (set by the team
+      // script's TMISSION_ATT_WAYPT in team.ts:coordinateAttack). When within
+      // 2 cells of the drop cell, eject one passenger per tick. After the last
+      // passenger is dropped, switch to RETREAT so the BADR (IsALoaner) flies
+      // off-map instead of trying to land at a non-existent airfield.
+      if (entity.isFixedWing && entity.passengers.length > 0 && entity.moveTarget) {
+        const dropDist = worldDist(entity.pos, entity.moveTarget);
+        if (dropDist <= 2) { // worldDist returns cells; 2 cells ≈ 0x0200 leptons
+          const passenger = entity.passengers.shift()!;
+          passenger.alive = true;
+          passenger.setPosition(entity.pos.x, entity.pos.y);
+          passenger.mission = Mission.GUARD;
+          passenger.transportRef = null;
+          passenger.inLimbo = false;
+          // C++ aircraft.cpp:1458-1461 — human player → MISSION_GUARD,
+          // AI (team owner) → MISSION_HUNT. We use GUARD; team AI will
+          // pick up the dropped infantry on its next recruit scan.
+          ctx.entities.push(passenger);
+          ctx.entityById.set(passenger.id, passenger);
+
+          if (entity.passengers.length === 0) {
+            // C++ aircraft.cpp:293 — BADR always has IsALoaner=true.
+            // After the last drop, retreat to the nearest map edge
+            // (Mission_Retreat FACE_MAP_EDGE → KEEP_FLYING).
+            entity.mission = Mission.RETREAT;
+            entity.moveTarget = null;
+          }
+          // Continue flight this tick (do not return early so the BADR keeps
+          // moving forward — fixed-wings can't stop in midair).
+        }
+      }
+
       // If we have an attack target, close to weapon range
       if (entity.mission === Mission.ATTACK) {
         const targetPos = getAircraftTargetPos(entity);
         if (!targetPos) {
+          // C++ team.cpp:1705 — Coordinate_Attack assigns MISSION_ATTACK but
+          // leaves TarCom as the mission target (waypoint cell) for TMISSION_ATT_WAYPT.
+          // For fixed-wing passenger transports (BADR), that's a paradrop run:
+          // keep flying toward the drop cell via moveTarget. The paradrop check
+          // above ejects passengers when within 2 cells; returning to base here
+          // would crash-land the BADR (no airfield for fixed-wings).
+          if (entity.isFixedWing && entity.moveTarget && entity.passengers.length > 0) {
+            aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+            return true;
+          }
           // Target lost — RTB
           entity.aircraftState = 'returning';
           return true;
