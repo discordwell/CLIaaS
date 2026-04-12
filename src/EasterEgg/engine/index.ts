@@ -4790,6 +4790,7 @@ export class Game {
         (this.tick + entity.id) % 15 === 0) {
       const ec = entity.cell;
       const scanRange = entity.stats.sight;
+      // A2 scan only runs for !entity.isPlayerUnit (line above), so this is always AI.
       const moveHouseIdx = Game.HOUSE_TO_INDEX[entity.house] ?? -1;
       let bestTarget: Entity | null = null;
       let bestScore = -Infinity;

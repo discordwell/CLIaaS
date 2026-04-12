@@ -595,7 +595,9 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     // Note: foot.cpp:501 (Mission_MOVE) uses THREAT_RANGE, but HUNT uses THREAT_NORMAL.
     const huntRange = Infinity; // C++ parity: THREAT_NORMAL = no range limit
     const ec = entity.cell;
-    const huntHouseIdx = _HOUSE_IDX[entity.house] ?? -1;
+    // C++ parity: player units use the player's fog (effectively everything visible
+    // when fogDisabled=true in agent harness). Only AI houses use per-house fog.
+    const huntHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     for (const other of ctx.entities) {
@@ -724,7 +726,7 @@ function cellBasedGuardScan(
   // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
   const cellMap = new Map<number, Entity>();
   const cellKey = (cx: number, cy: number) => cy * 128 + cx;
-  const guardHouseIdx = _HOUSE_IDX[entity.house] ?? -1;
+  const guardHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
   for (const other of ctx.entities) {
     if (!other.alive || other.inLimbo) continue;
     if (ctx.entitiesAllied(entity, other)) continue;
@@ -1098,7 +1100,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   const originLY = pixelToLepton(origin.y);
   const distFromOrigin = leptonDist(entity.leptonX, entity.leptonY, originLX, originLY);
   const ec = entity.cell;
-  const areaGuardHouseIdx = _HOUSE_IDX[entity.house] ?? -1;
+  const areaGuardHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
   if (distFromOrigin > leashRange * LEPTON_SIZE) {
     // Check for enemies while returning
     for (const other of ctx.entities) {
