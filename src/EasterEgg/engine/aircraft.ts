@@ -439,21 +439,6 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         }
       }
 
-      // C++ parity: helicopter transports transition to unload state machine
-      // when the team coordinator assigns MISSION_UNLOAD. The TRAN now starts
-      // in MOVE at spawn (not UNLOAD), flies to origin, and when the team
-      // advances to TMISSION_UNLOAD the mission becomes UNLOAD.
-      if (entity.mission === Mission.UNLOAD && entity.isHelicopter &&
-          entity.passengers.length > 0) {
-        // Set moveTarget to current position (unload here)
-        if (!entity.moveTarget) {
-          entity.moveTarget = { x: entity.pos.x, y: entity.pos.y };
-        }
-        entity.aircraftState = 'unload_search';
-        entity._unloadSearchTicks = 0;
-        return true;
-      }
-
       // If we have an attack target, close to weapon range
       if (entity.mission === Mission.ATTACK) {
         const targetPos = getAircraftTargetPos(entity);
