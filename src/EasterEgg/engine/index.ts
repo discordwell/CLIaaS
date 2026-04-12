@@ -6168,6 +6168,26 @@ export class Game {
       if (!sight || sight > 10) continue;
       this._addOctagonalCells(set, s.cx, s.cy, sight);
     }
+    // C++ parity: allied houses share vision (house.cpp:1265 — IsAllied checks).
+    // If house A is allied with house B, A's units reveal cells for B and vice versa.
+    // Merge each house's revealed cells into its allies' sets.
+    const houseIndices = [...this._houseRevealed.keys()];
+    for (const hiA of houseIndices) {
+      const houseA = Object.keys(Game.HOUSE_TO_INDEX).find(k => Game.HOUSE_TO_INDEX[k] === hiA) as House | undefined;
+      if (!houseA) continue;
+      const setA = this._houseRevealed.get(hiA)!;
+      for (const hiB of houseIndices) {
+        if (hiA === hiB) continue;
+        const houseB = Object.keys(Game.HOUSE_TO_INDEX).find(k => Game.HOUSE_TO_INDEX[k] === hiB) as House | undefined;
+        if (!houseB) continue;
+        if (!this.isAllied(houseA, houseB)) continue;
+        // Merge A's cells into B's set
+        const setB = this._houseRevealed.get(hiB)!;
+        for (const cell of setA) {
+          setB.add(cell);
+        }
+      }
+    }
   }
 
   /** Add cells within octagonal sight radius to a set.
