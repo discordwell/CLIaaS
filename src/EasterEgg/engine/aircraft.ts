@@ -570,8 +570,21 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     }
 
     case 'unload_fly': {
-      // C++ FLY_TO_LZ (lines 1120-1138): fly toward LZ with slowdown.
+      // C++ FLY_TO_LZ (lines 1120-1138): fly toward LZ with approach slowdown.
+      // The slowdown approximates WASM's ~139 tick total deployment time (search
+      // 14 + approach 104 + land 24 + eject 1 = 143 ≈ WASM's 139). Snap to LZ
+      // when within 2px to close the approach-slowdown dead zone where speed=0
+      // below 16 leptons but arrival requires ≤0.5px.
       if (!entity.moveTarget) { entity.aircraftState = 'returning'; return true; }
+      {
+        const dxSnap = entity.moveTarget.x - entity.pos.x;
+        const dySnap = entity.moveTarget.y - entity.pos.y;
+        if (dxSnap * dxSnap + dySnap * dySnap < 4) { // < 2px
+          entity.setPosition(entity.moveTarget.x, entity.moveTarget.y);
+          entity.aircraftState = 'unload_land';
+          return true;
+        }
+      }
       const arrived = aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
       if (arrived) {
         entity.setPosition(entity.moveTarget.x, entity.moveTarget.y);
