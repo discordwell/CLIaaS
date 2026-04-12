@@ -86,6 +86,7 @@ function makeCombatCtx(
     playSoundAt: () => {},
     playEva: () => {},
     minimapAlert: () => {},
+    isRevealedToHouse: () => true,
     movementSpeed: () => 1,
     getFirepowerBias: () => 1.0,
     getArmorBias: () => 1.0,

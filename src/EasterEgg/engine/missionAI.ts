@@ -99,7 +99,19 @@ export interface MissionAIContext {
 
   // Minimap alert
   minimapAlert(cx: number, cy: number): void;
+
+  // Per-house fog-of-war — C++ techno.cpp:1467+ Evaluate_Object checks Is_Discovered_By_House
+  isRevealedToHouse(cx: number, cy: number, houseIdx: number): boolean;
 }
+
+/** Per-house index mapping — mirrors Game.HOUSE_TO_INDEX for fog-of-war checks.
+ *  C++ techno.cpp:1467+ Evaluate_Object checks Is_Discovered_By_House. */
+const _HOUSE_IDX: Record<string, number> = {
+  [House.Spain]: 0, [House.Greece]: 1, [House.USSR]: 2,
+  [House.England]: 3, [House.Ukraine]: 4, [House.Germany]: 5,
+  [House.France]: 6, [House.Turkey]: 7,
+  [House.GoodGuy]: 8, [House.BadGuy]: 9, [House.Neutral]: 10,
+};
 
 // ── Local helpers ───────────────────────────────────────────────────────────
 
@@ -583,6 +595,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     // Note: foot.cpp:501 (Mission_MOVE) uses THREAT_RANGE, but HUNT uses THREAT_NORMAL.
     const huntRange = Infinity; // C++ parity: THREAT_NORMAL = no range limit
     const ec = entity.cell;
+    const huntHouseIdx = _HOUSE_IDX[entity.house] ?? -1;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     for (const other of ctx.entities) {
@@ -594,6 +607,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
+      // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
+      if (huntHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, huntHouseIdx)) continue;
       // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
       if (other.isAirUnit && other.flightAltitude > 0) {
         const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
@@ -709,6 +724,7 @@ function cellBasedGuardScan(
   // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
   const cellMap = new Map<number, Entity>();
   const cellKey = (cx: number, cy: number) => cy * 128 + cx;
+  const guardHouseIdx = _HOUSE_IDX[entity.house] ?? -1;
   for (const other of ctx.entities) {
     if (!other.alive || other.inLimbo) continue;
     if (ctx.entitiesAllied(entity, other)) continue;
@@ -721,6 +737,8 @@ function cellBasedGuardScan(
     if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
     // C++ techno.cpp:1467-1470: fully cloaked units
     if (other.cloakState === CloakState.CLOAKED) continue;
+    // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
+    if (guardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
     // Naval combat filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat filtering: skip airborne without AA
@@ -1080,6 +1098,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   const originLY = pixelToLepton(origin.y);
   const distFromOrigin = leptonDist(entity.leptonX, entity.leptonY, originLX, originLY);
   const ec = entity.cell;
+  const areaGuardHouseIdx = _HOUSE_IDX[entity.house] ?? -1;
   if (distFromOrigin > leashRange * LEPTON_SIZE) {
     // Check for enemies while returning
     for (const other of ctx.entities) {
@@ -1090,6 +1109,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
+      // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
+      if (areaGuardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
       const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
       if (dist > entity.stats.sight * LEPTON_SIZE) continue;
       // C++ Evaluate_Object has no terrain LOS check — removed for parity.
@@ -1132,6 +1153,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
     // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
     if (other.cloakState === CloakState.CLOAKED) continue;
+    // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
+    if (areaGuardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = leptonDist(originLX, originLY, other.leptonX, other.leptonY);
     if (dist > scanRange * LEPTON_SIZE) continue;

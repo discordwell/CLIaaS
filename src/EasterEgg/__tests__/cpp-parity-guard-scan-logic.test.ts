@@ -93,6 +93,7 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; t
     spyDisguise: () => {},
     spyInfiltrate: () => {},
     minimapAlert: () => {},
+    isRevealedToHouse: () => true,
     ...overrides,
   };
 }

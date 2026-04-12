@@ -131,6 +131,7 @@ function makeCombatContext(overrides?: Partial<CombatContext>): CombatContext {
     playSoundAt: () => {},
     playEva: () => {},
     minimapAlert: () => {},
+    isRevealedToHouse: () => true,
     movementSpeed: () => 0.5,
     getFirepowerBias: () => 1.0,
     getArmorBias: () => 1.0,

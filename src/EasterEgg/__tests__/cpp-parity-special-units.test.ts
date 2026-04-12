@@ -111,6 +111,7 @@ function makeMissionAIContext(overrides: Partial<MissionAIContext> = {}): Missio
     spyDisguise: vi.fn(),
     spyInfiltrate: vi.fn(),
     minimapAlert: vi.fn(),
+    isRevealedToHouse: () => true,
     ...overrides,
   } as MissionAIContext;
 }

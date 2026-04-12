@@ -88,6 +88,7 @@ import {
   revealZoneFloodFill as _revealZoneFloodFill,
   updateGapGenerators as _updateGapGenerators,
   GAP_RADIUS, GAP_UPDATE_INTERVAL, DEFENSE_TYPES as FOG_DEFENSE_TYPES,
+  STRUCTURE_SIGHT,
 } from './fog';
 import {
   type RepairSellContext,
@@ -551,6 +552,10 @@ export class Game {
   /** C++ house.h:268 IsGPSActive — GPS satellite launched, full map revealed.
    *  Cleared when ATEK is destroyed (house.cpp:1420-1425). */
   gpsActive = false;
+
+  // Per-house fog-of-war — C++ techno.cpp:1467+ Evaluate_Object checks Is_Discovered_By_House.
+  // Each house has its own revealed cell set, computed from entity/structure sight radii.
+  private _houseRevealed = new Map<number, Set<number>>();
 
   // Pause menu state
   pauseMenuOpen = false;
@@ -1090,6 +1095,7 @@ export class Game {
       spyDisguise: (s, t) => this.spyDisguise(s, t),
       spyInfiltrate: (s, st) => this.spyInfiltrate(s, st),
       minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
+      isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
     };
   }
 
@@ -1937,6 +1943,10 @@ export class Game {
         entity.tickAnimation();
       }
     });
+
+    // C++ logic.cpp:267+ Logic.AI runs BEFORE Map.Sight_From — fog is computed AFTER AI.
+    // Rebuild per-house revealed sets so AI scans can filter by house fog.
+    this._updateHouseRevealed();
 
     // Deferred transport loads (remove loaded passengers from world) — after the
     // unified loop since these don't consume RNG.
@@ -4775,6 +4785,7 @@ export class Game {
         (this.tick + entity.id) % 15 === 0) {
       const ec = entity.cell;
       const scanRange = entity.stats.sight;
+      const moveHouseIdx = Game.HOUSE_TO_INDEX[entity.house] ?? -1;
       let bestTarget: Entity | null = null;
       let bestScore = -Infinity;
       for (const other of this.entities) {
@@ -4787,6 +4798,8 @@ export class Game {
         if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
         // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
         if (other.cloakState === CloakState.CLOAKED) continue;
+        // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
+        if (moveHouseIdx >= 0 && !this.isRevealedToHouse(other.cell.cx, other.cell.cy, moveHouseIdx)) continue;
         const dist = worldDist(entity.pos, other.pos);
         if (dist > scanRange) continue;
         if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
@@ -6122,6 +6135,79 @@ export class Game {
     [House.France]: 6, [House.Turkey]: 7,
     [House.GoodGuy]: 8, [House.BadGuy]: 9, [House.Neutral]: 10,
   };
+
+  /**
+   * Rebuild per-house fog-of-war sets from all alive entities and structures.
+   * C++ map.cpp:295-337 Sight_From uses octagonal reveal with capped sight.
+   * Called at END of the entity AI loop (after Phase 4 aircraft, before deferred
+   * transport loads) — matching C++ where Logic.AI runs BEFORE Map.Sight_From.
+   */
+  private _updateHouseRevealed(): void {
+    this._houseRevealed.clear();
+    // Reveal cells for each alive, non-limbo entity
+    for (const e of this.entities) {
+      if (!e.alive || e.inLimbo) continue;
+      const hi = Game.HOUSE_TO_INDEX[e.house];
+      if (hi === undefined) continue;
+      let set = this._houseRevealed.get(hi);
+      if (!set) { set = new Set(); this._houseRevealed.set(hi, set); }
+      const sight = e.stats.sight;
+      if (!sight || sight > 10) continue; // C++ map.cpp:296 cap
+      const ecx = e.cell.cx;
+      const ecy = e.cell.cy;
+      this._addOctagonalCells(set, ecx, ecy, sight);
+    }
+    // Reveal cells for each alive structure
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi === undefined) continue;
+      let set = this._houseRevealed.get(hi);
+      if (!set) { set = new Set(); this._houseRevealed.set(hi, set); }
+      const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+      if (!sight || sight > 10) continue;
+      this._addOctagonalCells(set, s.cx, s.cy, sight);
+    }
+  }
+
+  /** Add cells within octagonal sight radius to a set.
+   *  C++ coord.cpp:124-136 — Distance() uses max(|dy|,|dx|) + min(|dy|,|dx|)/2. */
+  private _addOctagonalCells(set: Set<number>, cx: number, cy: number, radius: number): void {
+    if (radius === 1) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const rx = cx + dx, ry = cy + dy;
+          if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+            set.add(ry * MAP_CELLS + rx);
+          }
+        }
+      }
+      return;
+    }
+    const threshold = radius * 2;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        const big = adx > ady ? adx : ady;
+        const small = adx > ady ? ady : adx;
+        if (big * 2 + small <= threshold) {
+          const rx = cx + dx, ry = cy + dy;
+          if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+            set.add(ry * MAP_CELLS + rx);
+          }
+        }
+      }
+    }
+  }
+
+  /** Check if a cell is revealed to a specific house.
+   *  C++ techno.cpp:1467+ Evaluate_Object checks Is_Discovered_By_House. */
+  isRevealedToHouse(cx: number, cy: number, houseIdx: number): boolean {
+    const set = this._houseRevealed.get(houseIdx);
+    if (!set) return false;
+    return set.has(cy * MAP_CELLS + cx);
+  }
 
   /** Build trigger game state snapshot for event checks (uses precomputed shared state) */
   private buildTriggerState(trigger: ScenarioTrigger, shared: {

@@ -62,6 +62,7 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     playSoundAt: () => {},
     playEva: () => {},
     minimapAlert: () => {},
+    isRevealedToHouse: () => true,
     movementSpeed: () => 1,
     getFirepowerBias: (house: House) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
     getArmorBias: () => 1.0,

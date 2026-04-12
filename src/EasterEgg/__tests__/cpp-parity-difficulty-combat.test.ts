@@ -154,6 +154,7 @@ describe('ArmorBias applied in damageEntity (C++ house.cpp:292)', () => {
       playSoundAt: () => {},
       playEva: () => {},
       minimapAlert: () => {},
+    isRevealedToHouse: () => true,
       movementSpeed: () => 1,
       getFirepowerBias: () => 1.0,
       getArmorBias: () => armorBiasValue,

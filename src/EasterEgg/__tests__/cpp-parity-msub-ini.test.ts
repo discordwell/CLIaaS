@@ -654,6 +654,7 @@ describe('BEHAVIORAL: updateAttack blocks firing while cloaked/uncloaking (vesse
       spyDisguise: () => {},
       spyInfiltrate: () => {},
       minimapAlert: () => {},
+    isRevealedToHouse: () => true,
     } as MissionAIContext;
   }
 

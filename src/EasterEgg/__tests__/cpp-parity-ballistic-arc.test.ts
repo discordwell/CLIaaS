@@ -60,6 +60,7 @@ function makeCombatCtx(overrides?: Partial<CombatContext>): CombatContext {
     playSoundAt: () => {},
     playEva: () => {},
     minimapAlert: () => {},
+    isRevealedToHouse: () => true,
     movementSpeed: () => 1,
     getFirepowerBias: () => 1,
     getArmorBias: () => 1.0,

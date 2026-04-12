@@ -136,6 +136,7 @@ function makeMockContext(overrides: Partial<MissionAIContext> = {}): MissionAICo
 
     // Minimap alert
     minimapAlert: vi.fn(),
+    isRevealedToHouse: () => true,
 
     ...overrides,
   };

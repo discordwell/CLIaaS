@@ -139,6 +139,7 @@ function makeCombatContext(overrides: Partial<CombatContext> = {}): CombatContex
     playSoundAt: vi.fn(),
     playEva: vi.fn(),
     minimapAlert: vi.fn(),
+    isRevealedToHouse: () => true,
     movementSpeed: () => 1,
     getFirepowerBias: (house) => COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0,
     getArmorBias: () => 1.0,
