@@ -6665,12 +6665,13 @@ export class Game {
         for (const e of teamEntities) {
           team.add(e);
         }
-        // C++ parity: passengers loaded into transports are still team members.
-        // Without this, transport teams (SCG01EA tanya: E7+TRAN) are permanently
-        // "under strength" because E7 was removed from result.spawned when loaded
-        // into TRAN. The team coordinator can't advance missions without full count.
+        // C++ parity: passengers in HELICOPTER transports are still team members.
+        // Without this, helicopter transport teams (SCG01EA tanya: E7+TRAN) are
+        // permanently "under strength" because E7 was removed from result.spawned
+        // when loaded into TRAN. Fixed-wing transports (BADR) are NOT included —
+        // their cargo (paratroopers) is handled separately by the paradrop system.
         for (const e of teamEntities) {
-          if (e.passengers) {
+          if (e.passengers && e.isHelicopter) {
             for (const p of e.passengers) {
               team.add(p);
             }
