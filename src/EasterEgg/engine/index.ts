@@ -6665,6 +6665,17 @@ export class Game {
         for (const e of teamEntities) {
           team.add(e);
         }
+        // C++ parity: passengers loaded into transports are still team members.
+        // Without this, transport teams (SCG01EA tanya: E7+TRAN) are permanently
+        // "under strength" because E7 was removed from result.spawned when loaded
+        // into TRAN. The team coordinator can't advance missions without full count.
+        for (const e of teamEntities) {
+          if (e.passengers) {
+            for (const p of e.passengers) {
+              team.add(p);
+            }
+          }
+        }
         registerTeam(team);
       }
     }

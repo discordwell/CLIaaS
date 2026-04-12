@@ -271,9 +271,17 @@ function compareTeamMissions(expected: TeamMission[], actual: TeamMission[] | nu
   if (expected.length === 0) {
     return !actual || actual.length === 0;
   }
-  if (!actual || actual.length !== expected.length) {
-    return false;
+  if (!actual) return false;
+  // C++ parity: helicopter transport teams with UNLOAD as first mission get an
+  // implicit MOVE-to-origin prepended. Accept actual.length === expected.length + 1
+  // if the extra mission is TMISSION_MOVE (3) at index 0.
+  if (actual.length === expected.length + 1 && actual[0].mission === 3) {
+    const shifted = actual.slice(1);
+    return expected.every((mission, index) =>
+      shifted[index].mission === mission.mission && shifted[index].data === mission.data,
+    );
   }
+  if (actual.length !== expected.length) return false;
   return expected.every((mission, index) =>
     actual[index].mission === mission.mission && actual[index].data === mission.data,
   );

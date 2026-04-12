@@ -2635,10 +2635,23 @@ export function executeTriggerAction(
       const world = cellToWorld(wp.cx, wp.cy);
 
       const house = teamHouse;
-      const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
-        mission: m.mission,
-        data: m.data,
-      })) : null;
+      // C++ reinf.cpp parity: helicopter transport teams whose first mission is
+      // TMISSION_UNLOAD need an implicit MOVE-to-origin prepended. In C++, the
+      // helicopter spawns at the edge, flies to the origin waypoint (implicit from
+      // reinf.cpp), then the team coordinator starts its first mission (UNLOAD).
+      // Without this prepend, the team coordinator immediately assigns UNLOAD at
+      // the edge cell before the helicopter reaches origin (SCG01EA: Tanya's TRAN
+      // dropped her at the map edge instead of at origin waypoint 10).
+      const hasHelicopterTransport = team.members.some(m => {
+        const s = UNIT_STATS[toUnitType(m.type) ?? ''];
+        return s?.isAircraft && !s.isFixedWing && (s.passengers ?? 0) > 0;
+      });
+      const missionList = team.missions.map(m => ({ mission: m.mission, data: m.data }));
+      if (hasHelicopterTransport && team.origin >= 0 &&
+          missionList.length > 0 && missionList[0].mission === 8) { // 8 = TMISSION_UNLOAD
+        missionList.unshift({ mission: 3, data: team.origin }); // 3 = TMISSION_MOVE
+      }
+      const teamMissionScript = missionList.length > 0 ? missionList : null;
       let transport: Entity | null = null;
       const cargo: Entity[] = [];
       // C++ reinf.cpp:439: Determine spawn edge for deterministic facing
@@ -2731,19 +2744,16 @@ export function executeTriggerAction(
           if (stats.isAircraft) {
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
             entity.animState = AnimState.WALK;
-            // C++ parity: transports with UNLOAD mission use Mission_Unload state machine
-            // (SEARCH_FOR_LZ → FLY_TO_LZ → LAND → UNLOAD → TAKE_OFF). The SEARCH_FOR_LZ
-            // state delays 14-16 ticks before starting controlled approach, during which
-            // the TRAN flies at full speed in its initial facing (creating the curved path).
-            if (entity.isTransport && hasUnloadMission) {
-              entity.aircraftState = 'unload_search';
-              entity.mission = Mission.UNLOAD;
-              entity.moveTarget = { x: world.x, y: world.y }; // LZ = team origin
-            } else {
-              entity.aircraftState = 'flying';
-              entity.mission = Mission.MOVE;
-              entity.moveTarget = { x: world.x, y: world.y };
-            }
+            // C++ reinf.cpp: ALL aircraft start in MOVE toward the team origin.
+            // Helicopter transports with UNLOAD team missions will transition to
+            // the unload state machine later when the team coordinator assigns
+            // MISSION_UNLOAD (via the 'flying' state helicopter check in aircraft.ts).
+            // Previously TS entered unload_search at spawn, which was ~110 ticks too
+            // early compared to WASM where the team coordinator assigns UNLOAD after
+            // the TRAN reaches origin and the team processes its mission list.
+            entity.aircraftState = 'flying';
+            entity.mission = Mission.MOVE;
+            entity.moveTarget = { x: world.x, y: world.y };
           } else {
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.

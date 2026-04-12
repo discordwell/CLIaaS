@@ -242,9 +242,10 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(tran!.pos.x).toBe(spawnWorld.x);
     expect(tran!.pos.y).toBe(spawnWorld.y);
 
-    // Should be airborne — transports with UNLOAD mission start in 'unload_search'
-    // (C++ Mission_Unload SEARCH_FOR_LZ state: 14-16 tick delay before controlled approach)
-    expect(tran!.aircraftState).toBe('unload_search');
+    // C++ reinf.cpp: ALL aircraft start in MOVE ('flying') toward origin.
+    // The team coordinator assigns UNLOAD later when the team processes its mission.
+    expect(tran!.aircraftState).toBe('flying');
+    expect(tran!.mission).toBe(Mission.MOVE);
     expect(tran!.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
 
     // Move target should be the origin waypoint (WP0)
