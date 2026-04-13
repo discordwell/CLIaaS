@@ -5,8 +5,8 @@
 
 import {
   type WorldPos, type WeaponStats,
-  CELL_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
-  worldDist, directionTo, worldToCell, DIR_DX, DIR_DY,
+  CELL_SIZE, LEPTON_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
+  worldDist, directionTo, worldToCell, leptonDist, DIR_DX, DIR_DY,
   CIVILIAN_UNIT_TYPES,
   COS_TABLE_256, SIN_TABLE_256,
 } from './types';
@@ -184,18 +184,18 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     return true; // arrived
   }
 
+  // C++ Process_Fly_To uses Distance(coord, target) — octagonal lepton distance.
+  // All distance checks (flyToInterval, approach slowdown, stop threshold) must
+  // use this metric. Euclidean pixel distance is ~15% shorter at diagonal angles,
+  // causing approach slowdown to trigger too early and flight times to diverge.
+  const targetLX = Math.trunc(target.x * LEPTON_SIZE / CELL_SIZE);
+  const targetLY = Math.trunc(target.y * LEPTON_SIZE / CELL_SIZE);
+  const distLeptons = leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY);
+
   // Step 1: Set desired facing toward target and rotate.
-  // Reset rotation guard — in the real game loop, rotTickedThisFrame is cleared once per tick
-  // before entity processing (index.ts:1652). Aircraft return early from updateAircraft(),
-  // so tickRotation() is only called once per tick here. The guard reset ensures correct
-  // behavior both in-game and in unit tests that don't simulate the full game loop.
   entity.rotTickedThisFrame = false;
 
-  // C++ FLY_TO_LZ: Process_Fly_To runs every 5 ticks when far (dist>=256 leptons),
-  // every 1 tick when close. It sets desired facing. Between calls, Rotation_AI
-  // rotates toward the LAST SET desired. We replicate this update interval.
-  // C++ Process_Fly_To runs every 5 ticks when far, 1 tick when close
-  const distLeptons = dist / LP;
+  // C++ Process_Fly_To runs every 5 ticks when far (dist>=256 leptons), 1 tick when close
   const flyToInterval = distLeptons >= 256 ? 5 : 1;
   if (!entity._flyToTicks) entity._flyToTicks = 0;
   entity._flyToTicks++;
@@ -212,20 +212,16 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   }
 
   // Step 2: C++ Process_Fly_To(true, NavCom) approach slowdown within 3 cells.
-  // Speed is only updated when Process_Fly_To runs (every 5 ticks far, 1 tick close).
-  // Between calls, the aircraft moves at the LAST SET speed.
+  // Uses octagonal lepton distance. Speed updated only on flyToInterval ticks.
   if (updateDesired) {
-    const distInCells = dist / CELL_SIZE;
     let speedFraction = 1.0;
-    if (distInCells < 3.0) {
-      const distLeptonsVal = distInCells * 256;
-      const cappedLeptons = Math.min(distLeptonsVal, 0x0300);
-      const rawSpeed = Math.floor(cappedLeptons / 3);
+    if (distLeptons < 0x0300) { // < 3 cells in leptons (768)
+      const rawSpeed = Math.floor(distLeptons / 3);
       const clampedSpeed = Math.max(0x20, Math.min(0xFF, rawSpeed));
       speedFraction = clampedSpeed / 0xFF;
     }
     // C++ Process_Fly_To: Set_Speed(0) when distance < 16 leptons
-    if (dist / LP < 16) speedFraction = 0;
+    if (distLeptons < 16) speedFraction = 0;
     entity.aircraftSpeedFraction = speedFraction;
   }
 
