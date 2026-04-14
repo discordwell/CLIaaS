@@ -45,7 +45,7 @@ import {
   checkTriggerEvent, executeTriggerAction, houseIdToHouse, houseToId, consumeSemiPersistentAttachment,
   STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
   saveCarryover, TIME_UNIT_TICKS,
-  TEVENT_GLOBAL_SET, TEVENT_GLOBAL_CLEAR,
+  TEVENT_GLOBAL_SET, TEVENT_GLOBAL_CLEAR, TEVENT_TIME, TEVENT_MISSION_TIMER_EXPIRED,
   CREWED_BUILDINGS,
 } from './scenario';
 export { MISSIONS, getMission, getMissionIndex, loadProgress, saveProgress, expandAllyToken } from './scenario';
@@ -1718,16 +1718,13 @@ export class Game {
     // Update fog of war
     this.updateFogOfWar();
 
-    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI every tick.
-    // This ensures entities spawned by triggers (reinforcements, created teams) are
-    // present in the entity array before processing, so they get their AI() called
-    // in the same tick — matching C++ where newly added Logic objects are picked up
-    // by the for(index=0; index<Count(); index++) loop.
-    // Tick 1: immediate triggers (TEVENT_TIME data=0).
-    // Tick 15,30,...: periodic trigger checks (time/global/destruction events).
-    if (this.tick === 1 || this.tick % 15 === 0) {
-      this.processTriggers();
-    }
+    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI EVERY tick
+    // (logic.cpp:214-244). The loop checks TEVENT_TIME, TEVENT_GLOBAL_SET/CLEAR,
+    // TEVENT_MISSION_TIMER_EXPIRED each tick. Previously TS only ran triggers
+    // at tick 1 and every 15 ticks, which caused 1-14 tick delays for
+    // time-based triggers (e.g., SCG08EA reinforcements fired at tick 180
+    // instead of C++'s tick 181).
+    this.processTriggers();
 
     // C++ CDTimerClass<FrameTimerClass>: MissionTimer decrements every game frame.
     // Must happen AFTER processTriggers so that newly-set timers match WASM values.

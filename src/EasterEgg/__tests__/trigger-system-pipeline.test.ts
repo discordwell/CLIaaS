@@ -137,7 +137,7 @@ describe('checkTriggerEvent — full event coverage', () => {
     expect(checkTriggerEvent(event, createState())).toBe(true);
   });
 
-  // TEVENT_TIME (13) — elapsed time check
+  // TEVENT_TIME (13) — elapsed time check (> not >=)
   it('TEVENT_TIME (13) fires when enough ticks have elapsed', () => {
     const event: TriggerEvent = { type: 13, team: -1, data: 2 }; // 2 time units = 2 * 90 = 180 ticks
     const requiredTicks = 2 * TIME_UNIT_TICKS;
@@ -148,9 +148,15 @@ describe('checkTriggerEvent — full event coverage', () => {
       triggerStartTick: 0,
     }))).toBe(false);
 
-    // Exactly enough time
+    // Exactly requiredTicks — still false (> not >=)
     expect(checkTriggerEvent(event, createState({
       gameTick: requiredTicks,
+      triggerStartTick: 0,
+    }))).toBe(false);
+
+    // One tick past — fires
+    expect(checkTriggerEvent(event, createState({
+      gameTick: requiredTicks + 1,
       triggerStartTick: 0,
     }))).toBe(true);
 
@@ -165,16 +171,16 @@ describe('checkTriggerEvent — full event coverage', () => {
     const event: TriggerEvent = { type: 13, team: -1, data: 1 }; // 1 time unit = 90 ticks
     const requiredTicks = TIME_UNIT_TICKS;
 
-    // If trigger started at tick 100, need gameTick >= 190
-    expect(checkTriggerEvent(event, createState({
-      gameTick: 100 + requiredTicks - 1,
-      triggerStartTick: 100,
-    }))).toBe(false);
-
+    // If trigger started at tick 100, need gameTick > 190
     expect(checkTriggerEvent(event, createState({
       gameTick: 100 + requiredTicks,
       triggerStartTick: 100,
-    }))).toBe(true);
+    }))).toBe(false); // 90 > 90 is false
+
+    expect(checkTriggerEvent(event, createState({
+      gameTick: 100 + requiredTicks + 1,
+      triggerStartTick: 100,
+    }))).toBe(true); // 91 > 90 is true
   });
 
   // TEVENT_GLOBAL_SET (27) and TEVENT_GLOBAL_CLEAR (28)
@@ -763,12 +769,12 @@ describe('Trigger persistence modes', () => {
     trigger.fired = true;
     trigger.timerTick = currentTick;  // reset timer to current tick
 
-    // Now the TIME event needs to re-elapse from the new start
-    const state = createState({ gameTick: currentTick + TIME_UNIT_TICKS - 1, triggerStartTick: trigger.timerTick });
-    expect(checkTriggerEvent(trigger.event1, state)).toBe(false);
+    // Now the TIME event needs to re-elapse from the new start (> not >=)
+    const state = createState({ gameTick: currentTick + TIME_UNIT_TICKS, triggerStartTick: trigger.timerTick });
+    expect(checkTriggerEvent(trigger.event1, state)).toBe(false); // 90 > 90 is false
 
-    const state2 = createState({ gameTick: currentTick + TIME_UNIT_TICKS, triggerStartTick: trigger.timerTick });
-    expect(checkTriggerEvent(trigger.event1, state2)).toBe(true);
+    const state2 = createState({ gameTick: currentTick + TIME_UNIT_TICKS + 1, triggerStartTick: trigger.timerTick });
+    expect(checkTriggerEvent(trigger.event1, state2)).toBe(true); // 91 > 90 is true
   });
 });
 
@@ -1307,10 +1313,10 @@ describe('Timer actions and events', () => {
     // Kept at 90 so triggers stay proportional to movement/combat (also tick-based).
     expect(TIME_UNIT_TICKS).toBe(90);
 
-    // data=10 means 10 * 90 = 900 ticks
+    // data=10 means 10 * 90 = 900 ticks (> not >=)
     const event: TriggerEvent = { type: 13, team: -1, data: 10 };
-    expect(checkTriggerEvent(event, createState({ gameTick: 899, triggerStartTick: 0 }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ gameTick: 900, triggerStartTick: 0 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ gameTick: 900, triggerStartTick: 0 }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ gameTick: 901, triggerStartTick: 0 }))).toBe(true);
   });
 });
 
@@ -1371,9 +1377,10 @@ describe('Edge cases', () => {
     }
   });
 
-  it('TEVENT_TIME with data=0 fires immediately (0 ticks required)', () => {
+  it('TEVENT_TIME with data=0 fires at tick 1 (> not >=, so 0 > 0 is false)', () => {
     const event: TriggerEvent = { type: 13, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ gameTick: 0, triggerStartTick: 0 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ gameTick: 0, triggerStartTick: 0 }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ gameTick: 1, triggerStartTick: 0 }))).toBe(true);
   });
 
   it('TEVENT_NUNITS_DESTROYED with data=0 fires immediately (0 kills required)', () => {
@@ -1620,27 +1627,27 @@ describe('Complex multi-trigger scenarios', () => {
       timerTick: 0,
     });
 
-    // Tick 89: not enough time
-    expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 89, triggerStartTick: 0,
-    }))).toBe(false);
-
-    // Tick 90: fires
+    // Tick 90: not yet (> not >=)
     expect(checkTriggerEvent(trigger.event1, createState({
       gameTick: 90, triggerStartTick: 0,
+    }))).toBe(false);
+
+    // Tick 91: fires
+    expect(checkTriggerEvent(trigger.event1, createState({
+      gameTick: 91, triggerStartTick: 0,
     }))).toBe(true);
 
     // After firing, persistent trigger resets timerTick to current tick
-    trigger.timerTick = 90;
+    trigger.timerTick = 91;
 
-    // Tick 179: not enough time since reset
+    // Tick 181: not enough time since reset (90 > 90 is false)
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 179, triggerStartTick: 90,
+      gameTick: 181, triggerStartTick: 91,
     }))).toBe(false);
 
-    // Tick 180: fires again
+    // Tick 182: fires again (91 > 90 is true)
     expect(checkTriggerEvent(trigger.event1, createState({
-      gameTick: 180, triggerStartTick: 90,
+      gameTick: 182, triggerStartTick: 91,
     }))).toBe(true);
   });
 

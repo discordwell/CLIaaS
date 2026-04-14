@@ -606,7 +606,7 @@ describe('GLOBAL_SET/CLEAR as paired event with TIME — timer reset on change �
    */
 
   it('trigger with event1=GLOBAL_SET + event2=TIME: TIME event uses timerTick for elapsed calculation', () => {
-    // The TIME event uses (gameTick - triggerStartTick) >= requiredTicks
+    // The TIME event uses (gameTick - triggerStartTick) > requiredTicks
     // After a global change, triggerStartTick (timerTick) is reset to current tick
     const timeEvent: TriggerEvent = { type: TEVENT_TIME, team: -1, data: 1 }; // 1 unit = 90 ticks
     const TIME_UNIT_TICKS = 90;
@@ -618,9 +618,16 @@ describe('GLOBAL_SET/CLEAR as paired event with TIME — timer reset on change �
     });
     expect(checkTriggerEvent(timeEvent, stateBefore)).toBe(false);
 
-    // After enough time
-    const stateAfter = createState({
+    // Exactly at threshold — still false (> not >=)
+    const stateExact = createState({
       gameTick: 90,
+      triggerStartTick: 0,
+    });
+    expect(checkTriggerEvent(timeEvent, stateExact)).toBe(false);
+
+    // One tick past threshold — fires
+    const stateAfter = createState({
+      gameTick: 91,
       triggerStartTick: 0,
     });
     expect(checkTriggerEvent(timeEvent, stateAfter)).toBe(true);
@@ -638,7 +645,7 @@ describe('GLOBAL_SET/CLEAR as paired event with TIME — timer reset on change �
       gameTick: 200,
       triggerStartTick: 100,
     });
-    // 200 - 100 = 100 >= 90 → fires
+    // 200 - 100 = 100 > 90 → fires
     expect(checkTriggerEvent(timeEvent, stateResetElapsed)).toBe(true);
   });
 });

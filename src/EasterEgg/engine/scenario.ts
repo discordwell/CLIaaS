@@ -34,8 +34,8 @@ const TEVENT_UNITS_DESTROYED = 9;         // TR5: fixed index (was 26, C++ = 9) 
 const TEVENT_BUILDINGS_DESTROYED = 10;    // TR3: all house's buildings destroyed (C++ = 10)
 const TEVENT_ALL_DESTROYED = 11;
 const TEVENT_CREDITS = 12;               // TR5: fixed index (was 30, C++ = 12)
-const TEVENT_TIME = 13;
-const TEVENT_MISSION_TIMER_EXPIRED = 14;
+export const TEVENT_TIME = 13;
+export const TEVENT_MISSION_TIMER_EXPIRED = 14;
 const TEVENT_NBUILDINGS_DESTROYED = 15;   // TR3/TR5: N buildings destroyed (C++ = 15)
 const TEVENT_NUNITS_DESTROYED = 16;
 const TEVENT_NOFACTORIES = 17;            // TR3/TR5: no factories remaining (C++ = 17)
@@ -2382,8 +2382,13 @@ export function checkTriggerEvent(
     case TEVENT_ANY:
       return true;
     case TEVENT_TIME: {
+      // C++ tevent.cpp:251-253: CDTimerClass fires when Value()==0.
+      // Timer = Data * (TICKS_PER_MINUTE/10) = Data * 90, started at Frame=0.
+      // Fires when Frame = Data*90 (Logic.AI sees Frame before Frame++).
+      // TS tick is incremented BEFORE processing (tick++ at start of update),
+      // so TS tick is Frame+1 at the same processing point. Use > to compensate.
       const requiredTicks = event.data * TIME_UNIT_TICKS;
-      return (state.gameTick - state.triggerStartTick) >= requiredTicks;
+      return (state.gameTick - state.triggerStartTick) > requiredTicks;
     }
     case TEVENT_GLOBAL_SET:
       // C++ scenario.h:197 — GlobalFlags[30]: indices must be in [0, 29]

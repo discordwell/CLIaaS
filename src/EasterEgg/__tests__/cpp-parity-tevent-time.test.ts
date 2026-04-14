@@ -4,7 +4,7 @@
  * Tests verify that the TEVENT_TIME trigger event matches C++ RA source code.
  *
  * C++ behavior (TRIGGER.CPP):
- *   Returns true when (state.gameTick - state.triggerStartTick) >= event.data * TIME_UNIT_TICKS
+ *   Returns true when (state.gameTick - state.triggerStartTick) > event.data * TIME_UNIT_TICKS
  *   event.data is time in "time units" (1/10th of a minute in C++).
  *   TIME_UNIT_TICKS converts time units to game ticks.
  *
@@ -88,10 +88,20 @@ describe('TEVENT_TIME (type=13) — C++ parity', () => {
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
-  it('returns true when exactly enough time has elapsed', () => {
+  it('returns false when exactly requiredTicks have elapsed (> not >=)', () => {
     const event = timeEvent(5);
     const requiredTicks = 5 * TIME_UNIT_TICKS;
     const state = createState({ gameTick: requiredTicks, triggerStartTick: 0 });
+
+    // C++ CDTimerClass: Frame increments AFTER Logic.AI, TS tick increments BEFORE,
+    // so TS tick is always Frame+1 at the same processing point. Use > not >=.
+    expect(checkTriggerEvent(event, state)).toBe(false);
+  });
+
+  it('returns true when one tick past requiredTicks has elapsed', () => {
+    const event = timeEvent(5);
+    const requiredTicks = 5 * TIME_UNIT_TICKS;
+    const state = createState({ gameTick: requiredTicks + 1, triggerStartTick: 0 });
 
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
@@ -104,10 +114,17 @@ describe('TEVENT_TIME (type=13) — C++ parity', () => {
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
-  it('event.data=0 returns true immediately (0 ticks required)', () => {
+  it('event.data=0 returns false at tick 0 (0 > 0 is false)', () => {
     const event = timeEvent(0);
-    // gameTick == triggerStartTick, so elapsed = 0, required = 0 => 0 >= 0 => true
+    // gameTick == triggerStartTick, so elapsed = 0, required = 0 => 0 > 0 => false
     const state = createState({ gameTick: 0, triggerStartTick: 0 });
+
+    expect(checkTriggerEvent(event, state)).toBe(false);
+  });
+
+  it('event.data=0 returns true at tick 1 (1 > 0 is true)', () => {
+    const event = timeEvent(0);
+    const state = createState({ gameTick: 1, triggerStartTick: 0 });
 
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
@@ -119,16 +136,16 @@ describe('TEVENT_TIME (type=13) — C++ parity', () => {
     // Trigger started at tick 500. Need 500 + requiredTicks to satisfy.
     const triggerStartTick = 500;
 
-    // One tick short — should be false
+    // Exactly at threshold — should be false (> not >=)
     const stateBefore = createState({
-      gameTick: triggerStartTick + requiredTicks - 1,
+      gameTick: triggerStartTick + requiredTicks,
       triggerStartTick,
     });
     expect(checkTriggerEvent(event, stateBefore)).toBe(false);
 
-    // Exactly at threshold — should be true
+    // One tick past threshold — should be true
     const stateExact = createState({
-      gameTick: triggerStartTick + requiredTicks,
+      gameTick: triggerStartTick + requiredTicks + 1,
       triggerStartTick,
     });
     expect(checkTriggerEvent(event, stateExact)).toBe(true);
@@ -153,8 +170,10 @@ describe('TEVENT_TIME (type=13) — C++ parity', () => {
     // Verify a type=13 event actually hits the TIME code path
     const event: TriggerEvent = { type: 13, team: -1, data: 1 };
     const stateFalse = createState({ gameTick: 0, triggerStartTick: 0 });
-    const stateTrue = createState({ gameTick: TIME_UNIT_TICKS, triggerStartTick: 0 });
+    const stateExact = createState({ gameTick: TIME_UNIT_TICKS, triggerStartTick: 0 });
+    const stateTrue = createState({ gameTick: TIME_UNIT_TICKS + 1, triggerStartTick: 0 });
     expect(checkTriggerEvent(event, stateFalse)).toBe(false);
+    expect(checkTriggerEvent(event, stateExact)).toBe(false); // > not >=
     expect(checkTriggerEvent(event, stateTrue)).toBe(true);
   });
 });
