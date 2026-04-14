@@ -1341,10 +1341,11 @@ export class Game {
       }
     }
 
-    // C++ parity: populate per-house fog from initial unit positions so AI scans
-    // at tick 1 can see enemies. C++ Read_Scenario_INI calls Sight_From for each
-    // placed unit, populating the house fog before the first Logic.AI frame.
-    this._updateHouseRevealed();
+    // C++ parity: per-house fog starts EMPTY. Map.Sight_From runs AFTER Logic.AI
+    // each frame, so at tick 1 the fog is empty and AI can't see anything through
+    // it. The fog gets populated after tick 1's entity AI processes.
+    // Do NOT call _updateHouseRevealed() here — that would let enemies see player
+    // units at tick 1 (SCG07EA E4 targeting JEEP, SCG01EA enemy positioning).
 
     // If stop() was called during async loading, don't start the loop
     if (this.stopped) return;
