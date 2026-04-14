@@ -1802,16 +1802,24 @@ export class Game {
     this._runCombat(ctx => {
       let logicIdx = 0;
 
-      // C++ parity: structures process BEFORE pre-building entities each tick.
-      // Empirically determined via SCG08EA RNG seed trace at tick 93 (the GUN
-      // at structure idx 15 fires 1 tick earlier in WASM than TS — fixed by
-      // letting structures consume their jitter RNG before entities). The old
-      // order (entities first, then structures) caused per-entity jitter
-      // assignments to drift from WASM, accumulating into a 13-unit player
-      // loss in SCG08EA between tick 600-800. Phase comment markers retained
-      // for the cpp-parity-building-rng-interleave grep test.
+      // C++ Logic.AI (logic.cpp:284) processes objects in Logic array order:
+      // Units → Vessels → Infantry → Buildings → reinforcements.
+      // Entities (pre-building) process FIRST, then structures.
 
-      // ── Phase 1: pre-building entities (DEFERRED — see Phase 1b after structures) ──
+      // ── Phase 1: pre-building entities (scenario INI units + infantry, skip aircraft) ──
+      for (let i = 0; i < this._preBuildingEntityCount; i++) {
+        const entity = this.entities[i];
+        if (!entity || entity.isAirUnit) continue;
+        if (ScenarioRandom._tagLogging) {
+          ScenarioRandom._sourceTag = entity.stats.isInfantry
+            ? 10000 + logicIdx
+            : entity.isNavalUnit
+              ? 14000 + logicIdx
+              : 11000 + logicIdx;
+        }
+        logicIdx++;
+        this._processGroundEntity(entity);
+      }
 
       // ── Phase 2: ALL structures (timer tick + combat + HPAD helicopter) ──
       // C++ BuildingClass::AI() processes timer tick + Firing_AI sequentially PER
@@ -1898,21 +1906,6 @@ export class Game {
             heli._processedInBuildingPass = true;
           }
         }
-      }
-
-      // ── Phase 1: pre-building entities (now after structures) ──
-      for (let i = 0; i < this._preBuildingEntityCount; i++) {
-        const entity = this.entities[i];
-        if (!entity || entity.isAirUnit) continue;
-        if (ScenarioRandom._tagLogging) {
-          ScenarioRandom._sourceTag = entity.stats.isInfantry
-            ? 10000 + logicIdx
-            : entity.isNavalUnit
-              ? 14000 + logicIdx
-              : 11000 + logicIdx;
-        }
-        logicIdx++;
-        this._processGroundEntity(entity);
       }
 
       // ── Phase 3: post-building entities (reinforcements/teams, skip aircraft) ──
