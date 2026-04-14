@@ -1858,11 +1858,14 @@ export class Game {
 
         // C++ building.cpp:990-993: Gap Generator Arm timer
         // When Arm==0, consume Random_Pick(1, TICKS_PER_SECOND) and reset Arm.
+        // C++ base: TICKS_PER_MINUTE * Rule.GapRegenInterval
+        //   = 900 * fixed(".1")  [fixed 8.8: frac=(256*1)/10=25, raw=25]
+        //   = (25 * 900 + 128) / 256 = 88
         if (s.type === 'GAP' && s.gapArmTimer !== undefined) {
           if (s.gapArmTimer > 0) s.gapArmTimer--;
           if (s.gapArmTimer === 0) {
             const gapJitter = ScenarioRandom.nextInRange(1, 15); // TICKS_PER_SECOND = 15
-            s.gapArmTimer = 90 + gapJitter; // ~90 ticks between gap updates
+            s.gapArmTimer = 88 + gapJitter;
           }
         }
 

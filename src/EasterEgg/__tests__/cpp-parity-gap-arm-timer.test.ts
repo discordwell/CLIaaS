@@ -14,7 +14,7 @@
  *   building.cpp:990-993    — STRUCT_GAP Arm==0 check + Random_Pick(1, TICKS_PER_SECOND)
  *   techno.cpp:620          — Arm(0) in TechnoClass constructor
  *   defines.h:3031-3032     — TICKS_PER_SECOND=15, TICKS_PER_MINUTE=900
- *   rules.ini:28            — GapRegenInterval=.1 (0.1 minutes = 90 ticks base)
+ *   rules.ini:28            — GapRegenInterval=.1 → fixed 8.8 Raw=25 → 900*25/256=88 ticks base
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -48,7 +48,7 @@ function tickGapArm(s: MapStructure): void {
     }
     if (s.gapArmTimer === 0) {
       const gapJitter = ScenarioRandom.nextInRange(1, 15);
-      s.gapArmTimer = 90 + gapJitter;
+      s.gapArmTimer = 88 + gapJitter;
     }
   }
 }
@@ -72,10 +72,11 @@ describe('GAP Arm timer (building.cpp:990-993)', () => {
     const gap = makeGAP(10, 10);
     tickGapArm(gap);
 
-    // C++ Arm = TICKS_PER_MINUTE * GapRegenInterval + Random_Pick(1, 15)
-    // = 900 * 0.1 + [1..15] = 90 + [1..15] = [91..105]
-    expect(gap.gapArmTimer).toBeGreaterThanOrEqual(91);
-    expect(gap.gapArmTimer).toBeLessThanOrEqual(105);
+    // C++ Arm = TICKS_PER_MINUTE * Rule.GapRegenInterval + Random_Pick(1, 15)
+    // fixed(".1") → Raw=25. 900 * fixed(25) = (25*900+128)/256 = 88.
+    // So Arm = 88 + [1..15] = [89..103]
+    expect(gap.gapArmTimer).toBeGreaterThanOrEqual(89);
+    expect(gap.gapArmTimer).toBeLessThanOrEqual(103);
   });
 
   it('does NOT consume RNG when gapArmTimer > 0 (countdown in progress)', () => {
@@ -107,8 +108,8 @@ describe('GAP Arm timer (building.cpp:990-993)', () => {
     // Tick 3: 1 → 0 → fires → sets to 90+jitter
     tickGapArm(gap);
     expect(ScenarioRandom.callCount).toBe(1);
-    expect(gap.gapArmTimer).toBeGreaterThanOrEqual(91);
-    expect(gap.gapArmTimer).toBeLessThanOrEqual(105);
+    expect(gap.gapArmTimer).toBeGreaterThanOrEqual(89);
+    expect(gap.gapArmTimer).toBeLessThanOrEqual(103);
   });
 
   it('4 GAP buildings at tick 1 produce exactly 4 RNG calls (SCG08EA parity)', () => {
@@ -161,12 +162,14 @@ describe('GAP Arm timer constants (rules.ini + defines.h)', () => {
     expect(15).toBe(15); // documenting the constant
   });
 
-  it('GapRegenInterval = 0.1 from rules.ini yields base of 90 ticks', () => {
+  it('GapRegenInterval = .1 from rules.ini yields base of 88 ticks (fixed 8.8)', () => {
     // rules.ini:28: GapRegenInterval=.1
+    // C++ fixed(".1"): frac=atoi("1")=1, base=10. Fraction=(256*1)/10=25. Raw=25.
     // C++ building.cpp:993: TICKS_PER_MINUTE * Rule.GapRegenInterval
-    // = 900 * 0.1 = 90
+    //   = int * fixed = (Raw * int + 128) / 256 = (25 * 900 + 128) / 256 = 88
     const TICKS_PER_MINUTE = 900;
-    const GapRegenInterval = 0.1;
-    expect(TICKS_PER_MINUTE * GapRegenInterval).toBe(90);
+    const fixedRaw = Math.floor((256 * 1) / 10); // 25
+    const gapBase = Math.floor((fixedRaw * TICKS_PER_MINUTE + 128) / 256); // 88
+    expect(gapBase).toBe(88);
   });
 });
