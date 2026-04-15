@@ -341,9 +341,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
         team.ai();
       }
 
-      // C++ team.cpp destructor calls Remove() on each member
-      // Remove() calls Enter_Idle_Mode() (team.cpp:1139) which sets MISSION_GUARD
-      expect(e.mission).toBe(Mission.GUARD);
+      // C++ team.cpp destructor calls Remove() → Enter_Idle_Mode() → Assign_Mission(GUARD).
+      // Queued via missionQueue; Commence processes when !IsFiring.
+      expect(e.missionQueue).toBe(Mission.GUARD);
     });
   });
 
@@ -2442,10 +2442,11 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       expect(e1.teamRef).toBeNull();
       expect(e2.teamRef).toBeNull();
       expect(e3.teamRef).toBeNull();
-      // C++ team.cpp:1139 — Enter_Idle_Mode() → MISSION_GUARD
-      expect(e1.mission).toBe(Mission.GUARD);
-      expect(e2.mission).toBe(Mission.GUARD);
-      expect(e3.mission).toBe(Mission.GUARD);
+      // C++ team.cpp:1139 — Enter_Idle_Mode queues GUARD via Assign_Mission.
+      // Commence processes when !IsFiring. Check missionQueue.
+      expect(e1.missionQueue).toBe(Mission.GUARD);
+      expect(e2.missionQueue).toBe(Mission.GUARD);
+      expect(e3.missionQueue).toBe(Mission.GUARD);
     });
 
     it('ai() is no-op after dissolve', () => {

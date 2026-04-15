@@ -973,11 +973,13 @@ export class Team {
   dissolve(): void {
     for (const m of this._members) {
       m.teamRef = null;
-      // C++ team.cpp:1139 — Enter_Idle_Mode on remove. Loaner transports (LST/Chinook)
-      // that auto-retreat after unload must NOT be reset to GUARD: their RETREAT
-      // mission will fly them off the map and remove them.
+      // C++ team.cpp:1139 — Enter_Idle_Mode queues GUARD via Assign_Mission.
+      // Commence() processes it when !IsFiring && animation is interruptible.
+      // Must use missionQueue (not direct assignment) so the Commence gate
+      // blocks until the firing animation completes — matching C++ behavior
+      // where Enter_Idle_Mode → Assign_Mission → queued Commence.
       if (m.alive && m.mission !== Mission.RETREAT) {
-        m.mission = Mission.GUARD;
+        m.missionQueue = Mission.GUARD;
       }
     }
     this._members = [];
