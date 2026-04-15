@@ -480,7 +480,7 @@ export class GameMap {
   /** Occupy a sub-cell for an infantry unit. Returns the assigned sub-cell index (0-4),
    *  or -1 if all sub-cells are full or a vehicle is present.
    *  C++ cell.cpp Closest_Free_Spot: prefers CENTER (0), then corners in order. */
-  occupySubCell(cx: number, cy: number, entityId: number): number {
+  occupySubCell(cx: number, cy: number, entityId: number, preferred = -1): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return -1;
     const idx = cy * MAP_CELLS + cx;
     // Vehicle/building blocks all sub-cells
@@ -490,15 +490,20 @@ export class GameMap {
       slots = [0, 0, 0, 0, 0];
       this.subCellOccupancy.set(idx, slots);
     }
+    // C++ parity: try the entity's preferred sub-cell first (from INI placement
+    // or previous tick). This preserves lepton positions across ticks, matching
+    // C++ where infantry keep their sub-cell from Unlimbo unless displaced.
+    if (preferred >= 0 && preferred < 5 && slots[preferred] === 0) {
+      slots[preferred] = entityId;
+      if (this.occupancy[idx] === 0) this.occupancy[idx] = entityId;
+      return preferred;
+    }
     // C++ Closest_Free_Spot preference order: CENTER (0) first, then NW(1), NE(2), SW(3), SE(4)
     const order = [0, 1, 2, 3, 4];
     for (const s of order) {
       if (slots[s] === 0) {
         slots[s] = entityId;
-        // Set legacy occupancy to first infantry's ID for backward compat
-        if (this.occupancy[idx] === 0) {
-          this.occupancy[idx] = entityId;
-        }
+        if (this.occupancy[idx] === 0) this.occupancy[idx] = entityId;
         return s;
       }
     }

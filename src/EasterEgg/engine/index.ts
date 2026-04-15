@@ -1763,7 +1763,10 @@ export class Game {
         if (!entity.isAirUnit || entity.flightAltitude === 0) {
           if (entity.stats.isInfantry) {
             // Infantry: occupy a sub-cell (up to 5 per cell)
-            const subCell = this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id);
+            // C++ parity: try to keep the entity's current sub-cell (from INI placement
+            // or previous tick) to preserve lepton positions. Only reassign if the
+            // preferred sub-cell is already taken.
+            const subCell = this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id, entity.subCell);
             if (subCell >= 0) {
               entity.subCell = subCell;
               // C++ const.cpp StoppingCoordAbs: idle infantry snap to exact sub-cell
