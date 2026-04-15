@@ -145,7 +145,9 @@ export class Entity {
   // DO_NOTHING = initial state. Transitions to DO_STAND_READY via Doing_AI when animation completes.
   // DO_STAND_READY = idle standing pose. Random_Animate allowed.
   // DO_WALK/DO_FIRE = active states. Random_Animate blocked.
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
+  // C++ infantry.cpp:2045-2047: Unlimbo sets DO_STAND_READY (or DO_PRONE if prone).
+  // Start as 'stand_ready' so isReadyToRandomAnimate passes on tick 1.
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'stand_ready';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
   // C++ infantry.cpp IsFiring — true during weapon fire animation.
@@ -250,12 +252,11 @@ export class Entity {
    *  Returns true only when infantry is truly idle: standing, not moving,
    *  not firing, idle timer expired. */
   isReadyToRandomAnimate(): boolean {
-    // C++ InfantryClass::Is_Ready_To_Random_Animate (infantry.cpp:4068-4092)
-    // + FootClass::Is_Ready_To_Random_Animate (techno.cpp:5323-5326)
-    // Checks: IdleTimer==0, Height==0, !IsDriving. Does NOT check Doing state.
     if (!this.stats.isInfantry) return false;
-    if (this.idleAnimTimer > 0) return false;   // C++ TechnoClass: IdleTimer == 0
-    if (this.isDriving) return false;            // C++ infantry.cpp:4089: IsDriving
+    if (this.idleAnimTimer > 0) return false;   // IdleTimer not expired
+    if (this.doing !== 'stand_ready') return false; // Must be in idle stance
+    if (this.isDriving) return false;            // Not while moving
+    if (this.isFiringAnim) return false;         // Not while firing
     return true;
   }
 
