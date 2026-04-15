@@ -478,7 +478,9 @@ export class Team {
       if (doGesture) {
         for (const m of this._members) {
           if (m.alive && m.stats.isInfantry) {
-            m.nonInterruptAnimTicks = 6; // DO_GESTURE1: 3 frames × rate 2
+            // DO_GESTURE1: 3 frames × rate 2 = 6 ticks + 1 tick for Doing_AI
+            // transition back to DO_STAND_READY (Rate=0 → interruptible).
+            m.nonInterruptAnimTicks = 7;
           }
         }
       }
