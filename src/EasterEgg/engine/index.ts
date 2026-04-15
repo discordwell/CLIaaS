@@ -3817,10 +3817,10 @@ export class Game {
     // C++ infantry.cpp:1208-1211 — Commence gate:
     // Process queued mission when not in a non-interruptible animation.
     // C++ Commence runs every tick, gated on !IsFiring && !IsFalling && !IsDriving
-    // && (Doing interruptible). When the gate opens, it immediately switches the
-    // mission and resets Timer=0 — it does NOT wait for the current timer to fire.
-    // TS proxy: gate on !isFiringAnim (fire animation done, weapon rearmed).
-    if (entity.missionQueue !== null && !entity.isFiringAnim) {
+    // && (Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt).
+    // TS proxy: isFiringAnim = IsFiring, nonInterruptAnimTicks = !Interrupt Doing.
+    if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
+    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
       entity.missionTimer = 0; // C++ Commence: Timer = 0 → handler fires this tick

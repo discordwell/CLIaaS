@@ -152,6 +152,10 @@ export class Entity {
   // Stays true for firingAnimTicks after weapon fire; cleared when counter reaches 0.
   isFiringAnim = false;
   firingAnimTicks = 0; // countdown for fire animation duration
+  // C++ Doing state: non-interruptible animation timer.
+  // When > 0, Commence() is blocked (gesture, salute, lie down, get up animations).
+  // Set by Random_Animate (guard scan idle animations) and Fear_AI.
+  nonInterruptAnimTicks = 0;
 
   // Legacy fields (kept for compatibility but no longer used for timing)
   lastGuardScan = 0;

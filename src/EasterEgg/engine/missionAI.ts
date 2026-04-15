@@ -1066,9 +1066,15 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {
-      ScenarioRandom.nextInRange(0, 7);
+      ScenarioRandom.nextInRange(0, 7); // C++ facing change: Random_Pick(FACING_N, FACING_NW)
     }
-    entity.doing = 'idle_anim'; // C++ Do_Action(DO_IDLE1/2) starts idle animation
+    // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
+    // idata.cpp: DO_SALUTE1/2, DO_GESTURE1/2 = {Count:3, Rate:2} = 3*2=6 ticks.
+    // This blocks Commence() until the animation completes.
+    if (animPick >= 1 && animPick <= 4) {
+      entity.nonInterruptAnimTicks = 6; // 3 frames × rate 2
+    }
+    entity.doing = 'idle_anim';
   }
 }
 
