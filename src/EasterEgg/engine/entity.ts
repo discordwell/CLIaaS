@@ -145,11 +145,11 @@ export class Entity {
   // DO_NOTHING = initial state. Transitions to DO_STAND_READY via Doing_AI when animation completes.
   // DO_STAND_READY = idle standing pose. Random_Animate allowed.
   // DO_WALK/DO_FIRE = active states. Random_Animate blocked.
-  // C++ Is_Ready_To_Random_Animate returns false for ALL infantry at tick 1
-  // (IdleTimer CDTimerClass is non-zero at Frame 0 in the WASM build).
-  // Setting 'nothing' blocks RA via isReadyToRandomAnimate's doing check,
-  // matching C++ where 0 infantry run Random_Animate at tick 1.
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
+  // C++ Unlimbo sets DO_STAND_READY. Is_Ready_To_Random_Animate returns true
+  // at tick 1 (IdleTimer==0). Random_Animate runs for AREA_GUARD infantry
+  // (no targets found) but is skipped for GUARD infantry (Target_Something_Nearby
+  // finds Neutral structures → RA skipped).
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'stand_ready';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
   // C++ infantry.cpp IsFiring — true during weapon fire animation.

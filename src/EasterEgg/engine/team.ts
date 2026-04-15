@@ -470,9 +470,18 @@ export class Team {
       this.isHasBeen = true;
       this.isUnderStrength = false;
 
-      // C++ team.cpp:637: Random gesture for infantry — Percent_Chance(50)
-      // THIS RNG CALL IS CRITICAL FOR PARITY — consumes 1 ScenarioRandom call
-      const _gesture = ScenarioRandom.percentChance(50);
+      // C++ team.cpp:637: Percent_Chance(50) → if true, all initiated members
+      // Do_Action(DO_GESTURE1). DO_GESTURE1 is non-interruptible (MasterDoControls
+      // Interrupt=false), blocking Commence for 3 frames × rate 2 = 6 ticks.
+      // This prevents team members from accepting queued missions during the gesture.
+      const doGesture = ScenarioRandom.percentChance(50);
+      if (doGesture) {
+        for (const m of this._members) {
+          if (m.alive && m.stats.isInfantry) {
+            m.nonInterruptAnimTicks = 6; // DO_GESTURE1: 3 frames × rate 2
+          }
+        }
+      }
 
       if (this.isReforming || this.isForcedActive) {
         // All members become initiated
