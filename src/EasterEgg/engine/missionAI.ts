@@ -1437,7 +1437,10 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       // Use 8 ticks as a conservative estimate matching most infantry fire animations.
       if (entity.stats.isInfantry) {
         entity.isFiringAnim = true;
-        entity.firingAnimTicks = 8;
+        // E1 DO_FIRE_WEAPON: 8 frames at Rate=1 = 8 ticks, +1 tick for Doing_AI
+        // transition to DO_STAND_READY (Rate=0) which clears IsFiring.
+        // idata.cpp E1DoControls: DO_FIRE_WEAPON = {64, 8, 8} (Count=8).
+        entity.firingAnimTicks = 9;
       }
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
@@ -1510,7 +1513,10 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
       // C++ infantry.cpp:3609: IsFiring = true during weapon fire animation
       if (entity.stats.isInfantry) {
         entity.isFiringAnim = true;
-        entity.firingAnimTicks = 8;
+        // E1 DO_FIRE_WEAPON: 8 frames at Rate=1 = 8 ticks, +1 tick for Doing_AI
+        // transition to DO_STAND_READY (Rate=0) which clears IsFiring.
+        // idata.cpp E1DoControls: DO_FIRE_WEAPON = {64, 8, 8} (Count=8).
+        entity.firingAnimTicks = 9;
       }
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
