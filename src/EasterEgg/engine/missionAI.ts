@@ -1181,6 +1181,32 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     return;
   }
 
+  // C++ Greatest_Threat also scans buildings at each cell (via Evaluate_Cell).
+  // Add structure scan matching the GUARD handler's M4 scan.
+  if (entity.weapon) {
+    let bestStruct: MapStructure | null = null;
+    let bestStructDist = Infinity;
+    for (const s of ctx.structures) {
+      if (!s.alive) continue;
+      if (ctx.isAllied(entity.house, s.house)) continue;
+      if (s.type === 'BARL' || s.type === 'BRL3') continue; // C++ OverlayClass, not BuildingClass
+      if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
+      const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+      const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+      const dist = leptonDist(originLX, originLY, sLX, sLY);
+      if (dist > scanRange * LEPTON_SIZE) continue;
+      if (dist < bestStructDist) {
+        bestStructDist = dist;
+        bestStruct = s;
+      }
+    }
+    if (bestStruct) {
+      entity.mission = Mission.ATTACK;
+      entity.targetStructure = bestStruct;
+      return;
+    }
+  }
+
   // C++ foot.cpp:1011 — Random_Animate when no target found (on scan tick)
   // C++ calls Random_Animate() which checks Is_Ready_To_Random_Animate() — full gate check
   if (entity.isReadyToRandomAnimate()) {
