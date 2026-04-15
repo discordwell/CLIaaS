@@ -148,8 +148,10 @@ export class Entity {
   doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
-  // C++ infantry.cpp IsFiring — true during weapon fire animation
+  // C++ infantry.cpp IsFiring — true during weapon fire animation.
+  // Stays true for firingAnimTicks after weapon fire; cleared when counter reaches 0.
   isFiringAnim = false;
+  firingAnimTicks = 0; // countdown for fire animation duration
 
   // Legacy fields (kept for compatibility but no longer used for timing)
   lastGuardScan = 0;

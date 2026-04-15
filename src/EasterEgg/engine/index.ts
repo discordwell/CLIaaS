@@ -3816,12 +3816,11 @@ export class Game {
 
     // C++ infantry.cpp:1208-1211 — Commence gate:
     // Process queued mission when not in a non-interruptible animation.
-    // C++ checks !IsFiring && !IsFalling && !IsDriving && (Doing interruptible).
-    // TS proxy: process when isFiringAnim is false (weapon fire animation done).
-    // Additionally, only process at timer boundaries (missionTimerFired) to prevent
-    // the new mission handler from consuming RNG prematurely when the current
-    // mission's timer hasn't expired yet.
-    if (entity.missionQueue !== null && !entity.isFiringAnim && missionTimerFired) {
+    // C++ Commence runs every tick, gated on !IsFiring && !IsFalling && !IsDriving
+    // && (Doing interruptible). When the gate opens, it immediately switches the
+    // mission and resets Timer=0 — it does NOT wait for the current timer to fire.
+    // TS proxy: gate on !isFiringAnim (fire animation done, weapon rearmed).
+    if (entity.missionQueue !== null && !entity.isFiringAnim) {
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
       entity.missionTimer = 0; // C++ Commence: Timer = 0 → handler fires this tick
@@ -3995,11 +3994,11 @@ export class Game {
     // Called once per tick. Transitions DO_NOTHING → DO_STAND_READY when idle.
     entity.doingAI();
     // C++ infantry.cpp:1190-1195 + 3657-3661: IsFiring is cleared when fire animation
-    // frame sequence completes (Fetch_Rate()==0). TS doesn't track animation frames;
-    // use attackCooldown as proxy — fire animation runs during the rearm period.
-    // Clear isFiringAnim when attackCooldown reaches 0 (weapon ready again).
-    if (entity.isFiringAnim && entity.attackCooldown <= 0) {
-      entity.isFiringAnim = false;
+    // frame sequence completes. firingAnimTicks counts down the animation duration
+    // (~8 ticks for most infantry fire animations).
+    if (entity.isFiringAnim) {
+      if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
+      if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
     }
 
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)

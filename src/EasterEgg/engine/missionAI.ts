@@ -1432,7 +1432,13 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       // C++ house.cpp:293,303: ROFBias scales rearm delay
       entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
-      if (entity.stats.isInfantry) entity.isFiringAnim = true;
+      // C++ infantry.cpp:1190-1195: IsFiring stays true for the fire animation duration.
+      // Infantry DO_FIRE_WEAPON animation: typically 4-8 frames at rate ~2.
+      // Use 8 ticks as a conservative estimate matching most infantry fire animations.
+      if (entity.stats.isInfantry) {
+        entity.isFiringAnim = true;
+        entity.firingAnimTicks = 8;
+      }
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
       ctx.playSoundAt(ctx.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
@@ -1502,7 +1508,10 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
       entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
       // C++ infantry.cpp:3609: IsFiring = true during weapon fire animation
-      if (entity.stats.isInfantry) entity.isFiringAnim = true;
+      if (entity.stats.isInfantry) {
+        entity.isFiringAnim = true;
+        entity.firingAnimTicks = 8;
+      }
       // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
       if (entity.ammo > 0) entity.ammo--;
 
