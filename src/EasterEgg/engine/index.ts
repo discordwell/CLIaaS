@@ -1718,13 +1718,18 @@ export class Game {
     // Update fog of war
     this.updateFogOfWar();
 
-    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI EVERY tick
-    // (logic.cpp:214-244). The loop checks TEVENT_TIME, TEVENT_GLOBAL_SET/CLEAR,
-    // TEVENT_MISSION_TIMER_EXPIRED each tick. Previously TS only ran triggers
-    // at tick 1 and every 15 ticks, which caused 1-14 tick delays for
-    // time-based triggers (e.g., SCG08EA reinforcements fired at tick 180
-    // instead of C++'s tick 181).
-    this.processTriggers();
+    // C++ Logic.AI() processes LogicTriggers BEFORE entity AI every tick,
+    // but only checks: TEVENT_TIME, TEVENT_GLOBAL_SET/CLEAR,
+    // TEVENT_ALL_BRIDGES_DESTROYED, TEVENT_MISSION_TIMER_EXPIRED.
+    // Other event types (BUILDINGS_DESTROYED, UNITS_DESTROYED, etc.) fire
+    // through object-level triggers, not the per-tick LogicTrigger loop.
+    // Full processTriggers (all event types) at tick 1 and every 15 ticks.
+    // Per-tick: only check time-based triggers to avoid early-firing non-time events.
+    if (this.tick === 1 || this.tick % 15 === 0) {
+      this.processTriggers();
+    } else {
+      this._checkTimeTriggers();
+    }
 
     // C++ CDTimerClass<FrameTimerClass>: MissionTimer decrements every game frame.
     // Must happen AFTER processTriggers so that newly-set timers match WASM values.
@@ -6851,6 +6856,43 @@ export class Game {
         if (trigger.actionControl === 1) {
           executeAction(trigger.action2);
         }
+      }
+    }
+  }
+
+  /**
+   * Per-tick check for TEVENT_TIME triggers only.
+   * C++ logic.cpp:214-244 runs the LogicTrigger loop every tick checking
+   * TEVENT_TIME. When a time trigger's condition is newly met, run the full
+   * processTriggers to handle it (including action execution with full context).
+   */
+  private _checkTimeTriggers(): void {
+    for (const trigger of this.triggers) {
+      if (trigger.fired && trigger.persistence <= 1) continue;
+      if (trigger.forceFirePending) continue;
+
+      // Only check triggers that have TEVENT_TIME as their primary event
+      const hasTimeEvent =
+        trigger.event1.type === TEVENT_TIME ||
+        trigger.event2.type === TEVENT_TIME ||
+        trigger.event1.type === TEVENT_MISSION_TIMER_EXPIRED ||
+        trigger.event2.type === TEVENT_MISSION_TIMER_EXPIRED;
+      if (!hasTimeEvent) continue;
+
+      // Quick check: is the time condition met?
+      const timeState = {
+        gameTick: this.tick, triggerStartTick: trigger.timerTick,
+        missionTimerExpired: this.missionTimerExpired,
+      } as TriggerGameState;
+      const e1Met = trigger.event1.type === TEVENT_TIME || trigger.event1.type === TEVENT_MISSION_TIMER_EXPIRED
+        ? checkTriggerEvent(trigger.event1, timeState) : false;
+      const e2Met = trigger.event2.type === TEVENT_TIME || trigger.event2.type === TEVENT_MISSION_TIMER_EXPIRED
+        ? checkTriggerEvent(trigger.event2, timeState) : false;
+
+      if (e1Met || e2Met) {
+        // Time condition met — run full processTriggers for proper action execution
+        this.processTriggers();
+        return; // processTriggers handles all triggers, so we're done
       }
     }
   }

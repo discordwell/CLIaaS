@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-04-14T17:30Z — Per-entity RNG tracing: 4 root causes found
+
+### Landed
+- **`b97e3e6` fix: GAP Arm timer base 90→88 (C++ fixed-point parity)** — `fixed(".1")` in 8.8 format = Raw 25, so `900*25/256=88`, not 90. Fixed tick-93 GAP desync in SCG08EA.
+- **`b06f36f` fix: trigger processing every tick + TEVENT_TIME > comparison** — C++ LogicTrigger loop runs EVERY tick (logic.cpp:214). TS only ran every 15 ticks. Also changed TEVENT_TIME from `>=` to `>` because TS tick increments before processing while C++ Frame increments after. Fixed SCG08EA tick-180 reinforcement timing.
+- **`270e579` fix: vehicle speed rounding + MOVE→GUARD idle transition** — SpeedAdd missing +128 rounding (C++ `fixed::operator*(int)` rounds to nearest). MCV Speed=6: C++=15, TS was 14 (~7% slower). Also: units completing MOVE stayed in MOVE-loop instead of transitioning to GUARD via Enter_Idle_Mode. Fixed SCG08EA tick-256 divergence.
+- **New tool: `scripts/test-rng-entity-diff.ts`** — Playwright script for per-entity RNG diff between WASM and TS at any tick range. Uses C++ `g_rng_source_tag` (logic.cpp) and TS `ScenarioRandom._sourceTag`.
+
+### Key Findings
+- `fixed` class is 8.8 format: `fixed(str)` uses `(256*frac)/base`, `int*fixed` uses `(Raw*int+128)/256`
+- C++ Logic.AI entity order: Terrain → Units → Vessels → Infantry → Buildings (Read_Scenario_INI load order)
+- WASM Logic array offset = ~100 (terrain objects) before entities at index 100+
+- C++ processes LogicTriggers every tick, not periodically
+- `Enter_Idle_Mode()` transitions units from MOVE to GUARD after arrival
+
+### Next Divergence
+SCG08EA next divergence after tick 256 not yet identified. Speed fix and idle transition may have pushed it further. Lepton conversion plan (distance comparisons) remains the systematic approach for remaining divergence.
+
 ## 2026-04-11T03:30Z — SCG08 YAK cascade: TMISSION_ATT_WAYPT fix + RNG desync ID
 
 ### Landed
