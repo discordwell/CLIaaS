@@ -135,7 +135,7 @@ describe('C++ parity: infantry movement without SpeedAccum gating', () => {
 
       // Total distance should match C++ accumulator + Coord_Move math
       const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100);
-      const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+      const speedAdd = Math.floor((maxSpeedLeptons * 255 + 128) / 256);
       let expectedAccum = 0;
       let totalAxisLeptons = 0;
       for (let t = 0; t < 20; t++) {

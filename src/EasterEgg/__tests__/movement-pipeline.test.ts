@@ -65,8 +65,9 @@ describe('Core moveToward — speed class behavior', () => {
   });
 
   it('vehicle (TRACK) moves at lepton-quantized speed when facing is aligned', () => {
-    // C++ vehicle SpeedAccum + Coord_Move: 2TNK speed=8 → MaxSpeed=20 → speedAdd=19
-    // actual=19, 19%10=9, moveLeptons=10. Coord_Move cardinal: (10*127)>>7=9 → 9*LP=0.84375px
+    // C++ vehicle SpeedAccum + Coord_Move: 2TNK speed=8 → MaxSpeed=20 → speedAdd=20
+    // (C++ fixed rounding: (20*255+128)/256=20). actual=20, 20%10=0, moveLeptons=20.
+    // Coord_Move cardinal: (20*127)>>7=19 → 19*LP=1.78125px
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
     tank.desiredFacing = Dir.E;
@@ -80,7 +81,7 @@ describe('Core moveToward — speed class behavior', () => {
     const moved = tank.pos.x - startX;
     // Vehicle: SpeedAccum accumulator then Coord_Move sin/cos
     const maxLeptons = Math.floor(speed / LP);
-    const speedAdd = Math.floor((maxLeptons * 255) / 256);
+    const speedAdd = Math.floor((maxLeptons * 255 + 128) / 256);
     const actual = speedAdd; // first tick, speedAccum=0
     const moveLeptons = actual - (actual % PIXEL_LEPTON_W);
     const axisLeptons = (moveLeptons * 127) >> 7; // cardinal sinFactor=127

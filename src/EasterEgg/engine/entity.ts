@@ -1210,7 +1210,11 @@ export class Entity {
     // Convert back to MaxSpeed leptons: effectiveSpeed / LP = iniSpeed * 256/100 * multipliers.
     // Then apply the 255/256 fraction to match C++ Set_Speed.
     const maxSpeedLeptons = Math.floor(effectiveSpeed / LP); // = _Scale_To_256(speed) * multipliers
-    const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256); // C++ fixed(0xFF, 256) fraction
+    // C++ drive.cpp:671: actual = SpeedAccum + maxspeed * fixed(Speed, 256)
+    // fixed(0xFF, 256).Raw = 255. int * fixed = ((255 * maxspeed) + 128) / 256
+    // The +128 is C++ fixed::operator*(int) rounding — without it, slow units
+    // (MCV Speed=6 → maxspeed=15) get speedAdd=14 instead of 15 (7% slower).
+    const speedAdd = Math.floor((maxSpeedLeptons * 255 + 128) / 256);
     const actual = speedAdd + this.speedAccum;
     const remainder = actual % PIXEL_LEPTON_W;
     this.speedAccum = remainder;

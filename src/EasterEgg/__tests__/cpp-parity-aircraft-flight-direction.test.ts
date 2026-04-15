@@ -274,8 +274,9 @@ describe('C++ parity: aircraft curved flight path', () => {
         entity.moveToward(target, speedPx);
       }
 
-      // Entity should be at or near target, not past it
-      expect(entity.pos.x).toBeLessThanOrEqual(targetX + 0.5);
+      // C++ fly.cpp: aircraft move in facing direction WITHOUT clamping to target.
+      // They CAN overshoot. Verify the aircraft moved forward (past the target).
+      expect(entity.pos.x).toBeGreaterThan(targetX);
     });
   });
 

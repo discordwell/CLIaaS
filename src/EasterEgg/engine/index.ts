@@ -3805,10 +3805,11 @@ export class Game {
         // C++ foot.cpp:492-505: Mission_Move timer return
         if (missionTimerFired) {
           // C++ foot.cpp:496-498: if no NavCom, not driving, no queued mission →
-          // Enter_Idle_Mode() and return 1 (no RNG consumed).
-          // The idle transition is already handled by updateMove() when moveTarget is null.
+          // Enter_Idle_Mode() transitions to GUARD (unit.cpp:1291-1358).
+          // Returns 1 (no RNG consumed) — the GUARD timer fires on the next tick.
           if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
-            entity.missionTimer = 1;
+            entity.mission = Mission.GUARD;
+            entity.missionTimer = 0; // fires immediately in GUARD handler
           } else {
             // C++ foot.cpp:504: Normal path — Normal_Delay + Random_Pick(0,2)
             entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);

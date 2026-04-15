@@ -64,8 +64,9 @@ function cppVehicleAccumulatorPosition(
   const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100);
   // Effective speed in leptons with damage factor and bias
   const effectiveLeptons = Math.floor(maxSpeedLeptons * damageSpeedMul * speedBias);
-  // C++ Set_Speed: SpeedAdd = MaxSpeed * fixed(0xFF, 256) — the 255/256 fraction
-  const effectiveSpeedLeptons = Math.floor((effectiveLeptons * 255) / 256);
+  // C++ Set_Speed: SpeedAdd = MaxSpeed * fixed(0xFF, 256)
+  // fixed::operator*(int): ((Raw * int) + 128) / 256  — rounds to nearest
+  const effectiveSpeedLeptons = Math.floor((effectiveLeptons * 255 + 128) / 256);
 
   let leptonX = Math.trunc(startX / LP);
   let accum = 0;
@@ -271,10 +272,12 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const rulesSpeed = 6;
       const maxSpeedLeptons = Math.floor((rulesSpeed * LEPTON_SIZE) / 100); // 15
       expect(maxSpeedLeptons).toBe(15);
-      const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256); // 14
-      expect(speedAdd).toBe(14);
+      // C++ fixed::operator*(int): ((255 * maxspeed) + 128) / 256
+      const speedAdd = Math.floor((maxSpeedLeptons * 255 + 128) / 256); // 15
+      expect(speedAdd).toBe(15);
 
-      const expectedAccums = [4, 8, 2, 6, 0, 4, 8, 2, 6, 0];
+      // speedAdd=15, PIXEL_LEPTON_W=10: 15%10=5, cycle: [5, 0, 5, 0, ...]
+      const expectedAccums = [5, 0, 5, 0, 5, 0, 5, 0, 5, 0];
 
       const entity = makeEntity('ARTY', House.Spain, 100, 100);
       entity.facing = Dir.E;
@@ -417,9 +420,9 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
     it('speed too slow for a pixel step accumulates until threshold', () => {
       // Use a vehicle with low speed to test SpeedAccum sub-pixel accumulation.
       // Speed=1 px passed directly → MaxSpeed = floor(1/LP) = 10 leptons
-      // speedAdd = floor(10*255/256) = 9 leptons/tick. 9 < 10 → no move first tick.
-      // Needs 2 ticks: tick1 accum=9, tick2 actual=9+9=18 → 10 leptons moved, accum=8
-      // Use a vehicle (ARTY) with explicit speed override
+      // speedAdd = floor((10*255+128)/256) = floor(2678/256) = 10 leptons/tick
+      // 10 >= 10 → moves on first tick!
+      // C++ fixed rounding (+128) means speed 10 → speedAdd 10 (no loss).
       const entity = makeEntity('ARTY', House.Spain, 100, 100);
       entity.facing = Dir.E;
       entity.desiredFacing = Dir.E;
@@ -428,23 +431,17 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       const startX = entity.pos.x;
       const farTarget: WorldPos = { x: 10000, y: entity.pos.y };
 
-      // First tick: maxSpeedLeptons=10, speedAdd=9, actual=9 < 10 → no pixel move
+      // First tick: maxSpeedLeptons=10, speedAdd=10, actual=10 → 10%10=0, move 10 leptons
       entity.moveToward(farTarget, speedPx);
-      expect(entity.pos.x, 'tick 1 should not move').toBe(startX);
-      expect(entity.speedAccum).toBe(9);
-
-      // Second tick: actual=9+9=18, 18%10=8 → moveLeptons=10
-      // Coord_Move cardinal: (10*127)>>7=9 axis leptons
-      entity.moveToward(farTarget, speedPx);
-      const expectedMove = 9 * LP; // 9 * 0.09375 = 0.84375
+      const expectedMove = ((10 * 127) >> 7) * LP; // 9 * 0.09375 = 0.84375
       expect(entity.pos.x - startX).toBeCloseTo(expectedMove, 10);
-      expect(entity.speedAccum).toBe(8);
+      expect(entity.speedAccum).toBe(0);
     });
 
     it('movement is always in discrete pixel-step increments (vehicle)', () => {
       // ARTY Speed=6 → 6*0.24=1.44 px/tick → floor(1.44/LP)=15 leptons
-      // speedAdd = floor(15*255/256) = 14 leptons/tick
-      // 14/10 = 1 remainder 4 → moveLeptons=10, accum=4
+      // speedAdd = floor((15*255+128)/256) = floor(3953/256) = 15 leptons/tick
+      // 15/10 = 1 remainder 5 → moveLeptons=10, accum=5
       // Coord_Move cardinal: (10*127)>>7=9 axis leptons → 9*LP=0.84375
       const rulesSpeed = 6;
       const entity = makeEntity('ARTY', House.Spain, 100, 100);
@@ -460,7 +457,7 @@ describe('C++ lepton speed accumulator parity (fly.cpp:62-106)', () => {
       // Coord_Move: (10*127)>>7=9 leptons → 9*LP=0.84375 px
       const expectedMove = ((10 * 127) >> 7) * LP;
       expect(entity.pos.x - startX).toBeCloseTo(expectedMove, 10);
-      expect(entity.speedAccum).toBe(4);
+      expect(entity.speedAccum).toBe(5);
     });
   });
 });
