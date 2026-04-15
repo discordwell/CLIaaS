@@ -617,12 +617,13 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.add(e1);
       team.add(e2);
 
-      // Call coordinateDo directly to verify mission assignment without
-      // interference from subsequent team missions
+      // Call coordinateDo directly to verify mission QUEUING without
+      // interference from subsequent team missions.
+      // C++ Assign_Mission queues; Commence processes when !IsFiring.
       team.coordinateDo({ mission: TMISSION_DO, data: 14 });
 
-      expect(e1.mission).toBe(Mission.HUNT);
-      expect(e2.mission).toBe(Mission.HUNT);
+      expect(e1.missionQueue).toBe(Mission.HUNT);
+      expect(e2.missionQueue).toBe(Mission.HUNT);
     });
 
     it('DO with data=5 (GUARD) assigns Mission.GUARD to all members', () => {
@@ -661,7 +662,7 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       team.coordinateDo({ mission: TMISSION_DO, data: 1 });
 
-      expect(e.mission).toBe(Mission.ATTACK);
+      expect(e.missionQueue).toBe(Mission.ATTACK);
     });
 
     it('DO with data=10 (GUARD_AREA) assigns Mission.AREA_GUARD to all members', () => {
@@ -681,7 +682,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
         team.ai();
       }
 
-      expect(e.mission).toBe(Mission.AREA_GUARD);
+      // C++ Assign_Mission queues; Commence dequeues when !IsFiring.
+      // team.ai() queues but doesn't process Commence — check missionQueue.
+      expect(e.missionQueue).toBe(Mission.AREA_GUARD);
     });
 
     it('DO advances immediately (isNextMission=true, team.cpp:1856 equivalent)', () => {

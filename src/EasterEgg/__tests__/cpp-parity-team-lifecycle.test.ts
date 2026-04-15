@@ -817,8 +817,10 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       // First ai(): activate → advance to DO → execute DO (sets HUNT) in one tick.
       team.ai();
 
-      expect(e1.mission).toBe(Mission.HUNT);
-      expect(e2.mission).toBe(Mission.HUNT);
+      // C++ Coordinate_Do calls Assign_Mission (queues), Commence processes
+      // when !IsFiring. Check missionQueue since Commence hasn't run.
+      expect(e1.missionQueue).toBe(Mission.HUNT);
+      expect(e2.missionQueue).toBe(Mission.HUNT);
     });
   });
 });

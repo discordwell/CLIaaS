@@ -3804,6 +3804,16 @@ export class Game {
     // dispatch so entities that don't call moveToward this tick are not marked as driving.
     entity.isDriving = false;
 
+    // C++ infantry.cpp:1208-1211 — Commence gate:
+    // Act on queued mission ONLY when not firing, falling, or driving.
+    // This delays mission transitions (e.g., GUARD→HUNT from team coordinator)
+    // until the infantry's firing animation completes.
+    if (entity.missionQueue !== null && !entity.isFiringAnim && !entity.isDriving) {
+      entity.mission = entity.missionQueue;
+      entity.missionQueue = null;
+      entity.missionTimer = 0; // C++ Commence: Timer = 0
+    }
+
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
     // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
@@ -3981,9 +3991,13 @@ export class Game {
     // C++ InfantryClass::Doing_AI — transition Doing state after mission processing.
     // Called once per tick. Transitions DO_NOTHING → DO_STAND_READY when idle.
     entity.doingAI();
-    // C++ infantry.cpp:3657-3661: IsFiring cleared when fire animation completes.
-    // Simplified: clear after 1 tick (fire animation consumed this tick's RNG).
-    if (entity.isFiringAnim) entity.isFiringAnim = false;
+    // C++ infantry.cpp:1190-1195 + 3657-3661: IsFiring is cleared when fire animation
+    // frame sequence completes (Fetch_Rate()==0). TS doesn't track animation frames;
+    // use attackCooldown as proxy — fire animation runs during the rearm period.
+    // Clear isFiringAnim when attackCooldown reaches 0 (weapon ready again).
+    if (entity.isFiringAnim && entity.attackCooldown <= 0) {
+      entity.isFiringAnim = false;
+    }
 
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)
     if (entity.alive && entity.isCivilian && entity.mission === Mission.GUARD &&
