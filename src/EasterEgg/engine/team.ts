@@ -757,15 +757,18 @@ export class Team {
    */
   coordinateDo(mission: TeamMissionEntry): void {
     // C++ team.cpp:1844-1849 — Coordinate_Do calls Assign_Mission(do_mission)
-    // which queues the mission. Commence() in InfantryClass::AI then switches
-    // the mission and resets Timer=0, causing the new mission handler to fire
-    // on the next entity AI tick.
+    // which QUEUES the mission. Commence() in InfantryClass::AI then switches
+    // it and resets Timer=0, but ONLY when !IsFiring && !IsFalling && !IsDriving.
+    // If the infantry is mid-firing-animation, Commence is delayed until the
+    // animation clears. TS doesn't have animation-state gating, so we set the
+    // mission directly WITHOUT resetting the timer — the timer continues from
+    // whatever the previous mission set. This doesn't perfectly match C++ timing
+    // but avoids the worse bug of early-firing the new mission handler.
     const doMission = this.mapCppMission(mission.data);
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
       unit.mission = doMission;
-      unit.missionTimer = 0; // C++ Commence() resets Timer=0
       unit.target = null;
       unit.moveTarget = null;
     }
