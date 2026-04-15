@@ -3804,16 +3804,6 @@ export class Game {
     // dispatch so entities that don't call moveToward this tick are not marked as driving.
     entity.isDriving = false;
 
-    // C++ infantry.cpp:1208-1211 — Commence gate:
-    // Act on queued mission ONLY when not firing, falling, or driving.
-    // This delays mission transitions (e.g., GUARD→HUNT from team coordinator)
-    // until the infantry's firing animation completes.
-    if (entity.missionQueue !== null && !entity.isFiringAnim && !entity.isDriving) {
-      entity.mission = entity.missionQueue;
-      entity.missionQueue = null;
-      entity.missionTimer = 0; // C++ Commence: Timer = 0
-    }
-
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
     // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
@@ -3823,6 +3813,19 @@ export class Game {
       entity.missionTimer--;
     }
     const missionTimerFired = entity.missionTimer <= 0;
+
+    // C++ infantry.cpp:1208-1211 — Commence gate:
+    // Process queued mission when not in a non-interruptible animation.
+    // C++ checks !IsFiring && !IsFalling && !IsDriving && (Doing interruptible).
+    // TS proxy: process when isFiringAnim is false (weapon fire animation done).
+    // Additionally, only process at timer boundaries (missionTimerFired) to prevent
+    // the new mission handler from consuming RNG prematurely when the current
+    // mission's timer hasn't expired yet.
+    if (entity.missionQueue !== null && !entity.isFiringAnim && missionTimerFired) {
+      entity.mission = entity.missionQueue;
+      entity.missionQueue = null;
+      entity.missionTimer = 0; // C++ Commence: Timer = 0 → handler fires this tick
+    }
 
     switch (entity.mission) {
       case Mission.MOVE:
