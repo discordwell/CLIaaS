@@ -478,9 +478,10 @@ export class Team {
       if (doGesture) {
         for (const m of this._members) {
           if (m.alive && m.stats.isInfantry) {
-            // DO_GESTURE1: 3 frames × rate 2 = 6 ticks + 1 tick for Doing_AI
-            // transition back to DO_STAND_READY (Rate=0 → interruptible).
-            m.nonInterruptAnimTicks = 7;
+            // C++ WASM data: Doing=16 (DO_GESTURE1) blocks ticks 4-8 (5 ticks),
+            // gesture set at tick 2. Gate opens tick 9, Commence fires, handler
+            // fires tick 10. Total blocking: 8 ticks from gesture set.
+            m.nonInterruptAnimTicks = 8;
           }
         }
       }
