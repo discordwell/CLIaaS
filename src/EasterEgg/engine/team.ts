@@ -756,12 +756,16 @@ export class Team {
    * Assign a specific mission to all members.
    */
   coordinateDo(mission: TeamMissionEntry): void {
-    // mission.data maps to a C++ MissionType index — simplified mapping
+    // C++ team.cpp:1844-1849 — Coordinate_Do calls Assign_Mission(do_mission)
+    // which queues the mission. Commence() in InfantryClass::AI then switches
+    // the mission and resets Timer=0, causing the new mission handler to fire
+    // on the next entity AI tick.
     const doMission = this.mapCppMission(mission.data);
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
       unit.mission = doMission;
+      unit.missionTimer = 0; // C++ Commence() resets Timer=0
       unit.target = null;
       unit.moveTarget = null;
     }
