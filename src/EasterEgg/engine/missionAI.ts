@@ -14,7 +14,7 @@ import {
   calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS } from './scenario';
+import { type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
 import { findPath } from './pathfinding';
@@ -1044,8 +1044,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings
       if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
       // Structure center in leptons
-      const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
-      const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+      // C++ Center_Coord: cell origin + half footprint. 1x1 buildings = +128, 2x2 = +256.
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      const sLX = s.cx * LEPTON_SIZE + (fw * LEPTON_SIZE) / 2;
+      const sLY = s.cy * LEPTON_SIZE + (fh * LEPTON_SIZE) / 2;
       const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
       // C++ techno.cpp:1517-1523: In_Range uses <= (inclusive boundary)
       if (dist > scanRange * LEPTON_SIZE) continue;
@@ -1191,8 +1193,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       if (ctx.isAllied(entity.house, s.house)) continue;
       if (s.type === 'BARL' || s.type === 'BRL3') continue; // C++ OverlayClass, not BuildingClass
       if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
-      const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
-      const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+      // C++ Center_Coord: cell origin + half footprint. 1x1 buildings = +128, 2x2 = +256.
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      const sLX = s.cx * LEPTON_SIZE + (fw * LEPTON_SIZE) / 2;
+      const sLY = s.cy * LEPTON_SIZE + (fh * LEPTON_SIZE) / 2;
       const dist = leptonDist(originLX, originLY, sLX, sLY);
       if (dist > scanRange * LEPTON_SIZE) continue;
       if (dist < bestStructDist) {
