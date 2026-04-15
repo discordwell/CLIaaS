@@ -9,7 +9,7 @@ import {
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
-	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel,
+	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
@@ -6548,22 +6548,36 @@ export class Game {
       const ct = result.createTeam;
       const recruited: Entity[] = [];
       const recruitedSet = new Set<Entity>(); // prevent same entity recruited twice
+      // C++ team.cpp:1184-1188: recruit center is team origin waypoint
+      let recruitCenterLX = 0, recruitCenterLY = 0;
+      const teamType = ct.teamIdx !== undefined ? this.teamTypes[ct.teamIdx] : undefined;
+      if (teamType && teamType.origin >= 0) {
+        const wp = this.waypoints.get(teamType.origin);
+        if (wp) { recruitCenterLX = wp.cx * 256 + 128; recruitCenterLY = wp.cy * 256 + 128; }
+      }
       for (const member of ct.members) {
         const memberType = member.type.toUpperCase();
         for (let i = 0; i < member.count; i++) {
-          const recruit = this.entities.find(e =>
-            e.alive && !e.inLimbo && e.type === memberType &&
-            e.house === ct.house && e.mission === Mission.GUARD &&
-            !e.target && !e.moveTarget &&
-            !recruitedSet.has(e) // C++ Recruit finds DISTINCT units
-          );
-          if (recruit) {
-            recruitedSet.add(recruit);
-            if (ct.missions.length > 0) {
-              recruit.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
-              recruit.teamMissionIndex = 0;
+          // C++ team.cpp:1205-1216: finds NEAREST matching unit to recruit center
+          let best: Entity | null = null;
+          let bestDist = -1;
+          for (const e of this.entities) {
+            if (!e.alive || e.inLimbo || e.type !== memberType ||
+                e.house !== ct.house || e.mission !== Mission.GUARD ||
+                e.target || e.moveTarget || recruitedSet.has(e)) continue;
+            const d = leptonDist(e.leptonX, e.leptonY, recruitCenterLX, recruitCenterLY);
+            if (bestDist === -1 || d < bestDist) {
+              best = e;
+              bestDist = d;
             }
-            recruited.push(recruit);
+          }
+          if (best) {
+            recruitedSet.add(best);
+            if (ct.missions.length > 0) {
+              best.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
+              best.teamMissionIndex = 0;
+            }
+            recruited.push(best);
           }
         }
       }
