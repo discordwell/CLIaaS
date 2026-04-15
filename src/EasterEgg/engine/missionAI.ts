@@ -610,7 +610,8 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
       // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-      if (huntHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, huntHouseIdx)) continue;
+      // C++ techno.cpp:1529: player-owned entities always visible (bypass fog check)
+      if (huntHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, huntHouseIdx)) continue;
       // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
       if (other.isAirUnit && other.flightAltitude > 0) {
         const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
@@ -739,8 +740,9 @@ function cellBasedGuardScan(
     if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
     // C++ techno.cpp:1467-1470: fully cloaked units
     if (other.cloakState === CloakState.CLOAKED) continue;
-    // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-    if (guardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
+    // C++ techno.cpp:1529: player-owned entities are ALWAYS visible (IsOwnedByPlayer
+    // bypasses the IsDiscoveredByPlayer check). Only non-player entities use fog.
+    if (guardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
     // Naval combat filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat filtering: skip airborne without AA
@@ -1118,7 +1120,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
       // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-      if (areaGuardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
+      // C++ techno.cpp:1529: player-owned entities always visible (bypass fog check)
+      if (areaGuardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
       const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
       if (dist > entity.stats.sight * LEPTON_SIZE) continue;
       // C++ Evaluate_Object has no terrain LOS check — removed for parity.

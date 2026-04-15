@@ -117,25 +117,23 @@ function cellKey(cx: number, cy: number): number {
 describe('Per-house fog-of-war in AI target scans (techno.cpp:1467+)', () => {
 
   describe('updateHunt — fog-gated target acquisition', () => {
-    it('USSR E4 does NOT target player JEEP in unrevealed fog', () => {
-      // SCG07EA scenario: E4 flamethrower at (50,50), player JEEP at (60,60)
-      // USSR house has NOT revealed (60,60) — target should be invisible
+    it('USSR E4 DOES target player JEEP even in unrevealed fog (C++ techno.cpp:1529)', () => {
+      // C++ Evaluate_Object: !object->IsOwnedByPlayer bypasses the visibility check.
+      // Player-owned entities are ALWAYS visible to AI, even in unrevealed fog.
       const e4 = makeEntity(UnitType.I_E4, House.USSR, 50, 50);
       e4.mission = Mission.HUNT;
       e4.target = null;
 
-
       const jeep = makeEntity(UnitType.V_JEEP, House.Greece, 60, 60);
 
-
-      // No cells revealed for USSR (index 2) — empty map
+      // No cells revealed for USSR — but player entities bypass fog
       const revealedCells = new Map<number, Set<number>>();
       const ctx = makeCtx({ entities: [e4, jeep], revealedCells, tick: 1 });
 
       updateHunt(ctx, e4);
 
-      // E4 should NOT have acquired the JEEP as a target
-      expect(e4.target).toBeNull();
+      // E4 SHOULD acquire the JEEP — player entities always visible
+      expect(e4.target).toBe(jeep);
     });
 
     it('USSR E4 DOES target player JEEP in revealed cell', () => {
