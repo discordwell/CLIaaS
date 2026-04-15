@@ -6608,10 +6608,10 @@ export class Game {
             isReinforcable: !!(teamType.flags & 16),
             isSuicide: !!(teamType.flags & 2),
             origin: originPos,
-            // C++ teamtype.cpp:Create_One_Of calls Force_Active() + team->AI()
-            // immediately — the team recruits and starts its mission within the
-            // same tick as creation, not on a subsequent tick.
-            forcedActive: true,
+            // C++ taction.cpp:658-661: ScenarioInit++ wraps Create_One_Of but does
+            // NOT call Force_Active. Team activates via normal Percent_Chance(50)
+            // in Team::AI on subsequent ticks.
+            forcedActive: false,
           });
           // Empty team — Team.recruit() in Team.ai() adds members 1/tick
           registerTeam(team);
