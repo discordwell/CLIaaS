@@ -7,7 +7,7 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { House, Mission, CELL_SIZE, worldToCell, worldDist, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType } from './types';
+import { House, Mission, CELL_SIZE, worldToCell, worldDist, pixelToLepton, leptonToPixel, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType } from './types';
 import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
@@ -166,9 +166,8 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   };
   if (e.target?.alive) u.tid = e.target.id;
   if (e.moveTarget) {
-    const mc = worldToCell(e.moveTarget.x, e.moveTarget.y);
-    u.mtx = mc.cx;
-    u.mty = mc.cy;
+    u.mtx = Math.floor(e.moveTarget.lx / 256);
+    u.mty = Math.floor(e.moveTarget.ly / 256);
   }
   if (e.isTransport) {
     u.cargo = e.passengers.length;
@@ -355,13 +354,13 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
 
-            const destX = c.cx * CELL_SIZE + CELL_SIZE / 2;
-            const destY = c.cy * CELL_SIZE + CELL_SIZE / 2;
+            const destLX = c.cx * 256 + 128;
+            const destLY = c.cy * 256 + 128;
 
             // Skip path reset if already moving to the same destination —
             // resending a move to the same cell restarts pathfinding from
             // waypoint 0 which causes visible stutter-stepping.
-            if (e.moveTarget && e.moveTarget.x === destX && e.moveTarget.y === destY
+            if (e.moveTarget && e.moveTarget.lx === destLX && e.moveTarget.ly === destLY
                 && e.mission === Mission.MOVE && e.path && e.path.length > 0) {
               continue;
             }
@@ -369,7 +368,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             clearTeamScripts(e);
             e.mission = Mission.MOVE;
             e.target = null;
-            e.moveTarget = { x: destX, y: destY };
+            e.moveTarget = { lx: destLX, ly: destLY };
             if (e.stats.isAircraft) {
               // Aircraft fly directly — no ground pathfinding needed
               e.path = [{ cx: c.cx, cy: c.cy }];
@@ -419,17 +418,17 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
-            const destX = c.cx * CELL_SIZE + CELL_SIZE / 2;
-            const destY = c.cy * CELL_SIZE + CELL_SIZE / 2;
+            const destLX = c.cx * 256 + 128;
+            const destLY = c.cy * 256 + 128;
             // Skip if already attack-moving to the same destination
-            if (e.moveTarget && e.moveTarget.x === destX && e.moveTarget.y === destY
+            if (e.moveTarget && e.moveTarget.lx === destLX && e.moveTarget.ly === destLY
                 && e.mission === Mission.HUNT && e.path && e.path.length > 0) {
               continue;
             }
             clearTeamScripts(e);
             e.mission = Mission.HUNT;
             e.target = null;
-            e.moveTarget = { x: destX, y: destY };
+            e.moveTarget = { lx: destLX, ly: destLY };
             e.path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
             e.pathIndex = 0;
           }
@@ -482,7 +481,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
             const centerX = s.cx + Math.floor(sw / 2);
             const centerY = s.cy + Math.floor(sh / 2);
-            e.moveTarget = { x: centerX * CELL_SIZE + CELL_SIZE / 2, y: centerY * CELL_SIZE + CELL_SIZE / 2 };
+            e.moveTarget = { lx: centerX * 256 + 128, ly: centerY * 256 + 128 };
             let bestPath: ReturnType<typeof findPath> = [];
             // Try all cells around the footprint perimeter
             for (let dy = -1; dy <= sh; dy++) {
@@ -492,7 +491,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
                 const p = findPath(game.map, e.cell, { cx: ax, cy: ay }, true, e.isNavalUnit, e.stats.speedClass);
                 if (p.length > 0 && (bestPath.length === 0 || p.length < bestPath.length)) {
                   bestPath = p;
-                  e.moveTarget = { x: ax * CELL_SIZE + CELL_SIZE / 2, y: ay * CELL_SIZE + CELL_SIZE / 2 };
+                  e.moveTarget = { lx: ax * 256 + 128, ly: ay * 256 + 128 };
                 }
               }
             }
@@ -567,7 +566,7 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           // if we decide to deliberately mirror that behavior in C++ too.
           inf.mission = Mission.ENTER;
           inf.target = null;
-          inf.moveTarget = { ...transport.pos };
+          inf.moveTarget = { lx: transport.leptonX, ly: transport.leptonY };
           const tc = { cx: Math.floor(transport.pos.x / CELL_SIZE), cy: Math.floor(transport.pos.y / CELL_SIZE) };
           inf.path = findPath(game.map, inf.cell, tc, true, inf.isNavalUnit, inf.stats.speedClass);
           inf.pathIndex = 0;

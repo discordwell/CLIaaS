@@ -34,7 +34,7 @@ import {
   UnitType, House, CELL_SIZE, Mission, AnimState,
   UNIT_STATS, CIVILIAN_UNIT_TYPES,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 
 beforeEach(() => resetEntityIds());
@@ -474,7 +474,7 @@ describe('RADIO_DOCKING rejection while driving (unit.cpp:777)', () => {
     // not while transport is actively moving.
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 10, 10);
     apc.mission = Mission.MOVE;
-    apc.moveTarget = { x: 20 * CELL_SIZE, y: 10 * CELL_SIZE };
+    apc.moveTarget = { lx: pixelToLepton(20 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
 
     // Transport has a valid move target — it's "driving"
     expect(apc.moveTarget).not.toBeNull();
@@ -897,7 +897,7 @@ describe('orderTransportEvacuate clears team missions (missionAI.ts:938-940)', (
     tran.teamMissions = [];
     tran.teamMissionIndex = 0;
     tran.mission = Mission.MOVE;
-    tran.moveTarget = { x: 0, y: 10 * CELL_SIZE }; // nearest edge
+    tran.moveTarget = { lx: pixelToLepton(0), ly: pixelToLepton(10 * CELL_SIZE) }; // nearest edge
 
     expect(tran.teamMissions.length).toBe(0);
     expect(tran.teamMissionIndex).toBe(0);

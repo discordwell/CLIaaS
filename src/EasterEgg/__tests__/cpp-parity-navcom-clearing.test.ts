@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission,
   worldToCell,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 
 beforeEach(() => resetEntityIds());
@@ -46,7 +46,7 @@ describe('C++ DriveClass::Per_Cell_Process NavCom clearing (drive.cpp:844-865)',
     // This matches C++ DriveClass::Per_Cell_Process clearing NavCom at PCP_END.
     const pt = entityAtCell(UnitType.V_PT, House.USSR, 4, 5);
     pt.mission = Mission.MOVE;
-    pt.moveTarget = { x: 5 * CELL_SIZE + CELL_SIZE / 2, y: 5 * CELL_SIZE + CELL_SIZE / 2 };
+    pt.moveTarget = { lx: pixelToLepton(5 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(5 * CELL_SIZE + CELL_SIZE / 2) };
 
     // Before entering the cell — entity is at (4, 5), moveTarget cell is (5, 5)
     expect(pt.cell.cx).toBe(4);
@@ -62,7 +62,7 @@ describe('C++ DriveClass::Per_Cell_Process NavCom clearing (drive.cpp:844-865)',
     expect(pt.cell.cy).toBe(5);
 
     // Apply the Per_Cell_Process NavCom check (same logic as in updateMove)
-    const navCell = worldToCell(pt.moveTarget!.x, pt.moveTarget!.y);
+    const navCell = { cx: Math.floor(pt.moveTarget!.lx / 256), cy: Math.floor(pt.moveTarget!.ly / 256) };
     const curCell = pt.cell;
     if (navCell.cx === curCell.cx && navCell.cy === curCell.cy) {
       pt.moveTarget = null;
@@ -83,10 +83,10 @@ describe('C++ DriveClass::Per_Cell_Process NavCom clearing (drive.cpp:844-865)',
     // Per_Cell_Process should NOT clear NavCom.
     const tank = entityAtCell(UnitType.U_2TNK, House.USSR, 3, 5);
     tank.mission = Mission.MOVE;
-    tank.moveTarget = { x: 6 * CELL_SIZE + CELL_SIZE / 2, y: 5 * CELL_SIZE + CELL_SIZE / 2 };
+    tank.moveTarget = { lx: pixelToLepton(6 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(5 * CELL_SIZE + CELL_SIZE / 2) };
 
     // Entity is at (3, 5), moveTarget is at (6, 5) — different cells
-    const navCell = worldToCell(tank.moveTarget!.x, tank.moveTarget!.y);
+    const navCell = { cx: Math.floor(tank.moveTarget!.lx / 256), cy: Math.floor(tank.moveTarget!.ly / 256) };
     const curCell = tank.cell;
     const shouldClear = navCell.cx === curCell.cx && navCell.cy === curCell.cy;
 
@@ -148,7 +148,7 @@ describe('C++ DriveClass::Per_Cell_Process NavCom clearing (drive.cpp:844-865)',
     // When NavCom is valid (re-assigned by team), Mission_Move consumes RNG.
     const pt = entityAtCell(UnitType.V_PT, House.USSR, 5, 5);
     pt.mission = Mission.MOVE;
-    pt.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 5 * CELL_SIZE + CELL_SIZE / 2 };
+    pt.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(5 * CELL_SIZE + CELL_SIZE / 2) };
     pt.isDriving = false;
     pt.missionQueue = null;
 

@@ -13,7 +13,7 @@ import {
   type TriggerActionResult,
 } from '../engine/scenario';
 import { ScenarioRandom } from '../engine/random';
-import { House, Mission, UNIT_STATS, worldToCell } from '../engine/types';
+import { House, Mission, UNIT_STATS, worldToCell, leptonToCell } from '../engine/types';
 import { getCampaignMissionAgents } from './raMainCampaignMissionAgents';
 
 type ScenarioData = ReturnType<typeof parseScenarioINI>;
@@ -527,7 +527,7 @@ function auditSpawnCheck(
         // C++ parity: aircraft transports with TMISSION_UNLOAD get Mission.UNLOAD
         // (not Mission.MOVE). Both should have moveTarget pointing at the origin cell.
         const validMission = entity.mission === Mission.MOVE || entity.mission === Mission.UNLOAD;
-        if (!validMission || !entity.moveTarget || !cellsEqual(worldToCell(entity.moveTarget.x, entity.moveTarget.y), origin.cell)) {
+        if (!validMission || !entity.moveTarget || !cellsEqual(leptonToCell(entity.moveTarget.lx, entity.moveTarget.ly), origin.cell)) {
           issues.push({
             severity: 'error',
             code: 'aircraft-spawn-target-mismatch',

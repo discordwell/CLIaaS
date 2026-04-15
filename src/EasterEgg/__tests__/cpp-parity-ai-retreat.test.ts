@@ -21,7 +21,7 @@ import {
   UNIT_STATS, HOUSE_FACTION, PRODUCTION_ITEMS,
   type ProductionItem, type WorldPos,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP, type MapStructure } from '../engine/scenario';
@@ -322,13 +322,13 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     const harv = makeUnit(UnitType.V_HARV, House.USSR, 0.10);
     harv.mission = Mission.MOVE;
-    harv.moveTarget = { x: 100, y: 100 };
+    harv.moveTarget = { lx: pixelToLepton(100), ly: pixelToLepton(100) };
     ctx.entities.push(harv);
 
     updateAIRetreat(ctx);
 
     // moveTarget should NOT be overwritten
-    expect(harv.moveTarget).toEqual({ x: 100, y: 100 });
+    expect(harv.moveTarget).toEqual({ lx: pixelToLepton(100), ly: pixelToLepton(100) });
   });
 
   it('sets harvesterState to "returning"', () => {
@@ -369,7 +369,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
     const [w, h] = STRUCTURE_SIZE['PROC']!;
     const expectedX = (procCx + w / 2) * CELL_SIZE;
     const expectedY = (procCy + h / 2) * CELL_SIZE;
-    expect(harv.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(harv.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 
   it('sets harvestTick to 0', () => {
@@ -403,7 +403,7 @@ describe('Harvester emergency return — damaged harvesters flee to nearest PROC
     const [w, h] = STRUCTURE_SIZE['PROC']!;
     const expectedX = (nearProc.cx + w / 2) * CELL_SIZE;
     const expectedY = (nearProc.cy + h / 2) * CELL_SIZE;
-    expect(harv.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(harv.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 
   it('no PROC available → harvester not re-tasked', () => {
@@ -566,13 +566,13 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
     ctx.structures.push(makeStructure('FACT', House.USSR, 50, 50));
     const unit = makeUnit(UnitType.V_2TNK, House.USSR, 0.10);
     unit.mission = Mission.MOVE;
-    unit.moveTarget = { x: 200, y: 200 };
+    unit.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     ctx.entities.push(unit);
 
     updateAIRetreat(ctx);
 
     // Should not overwrite existing move order
-    expect(unit.moveTarget).toEqual({ x: 200, y: 200 });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(200), ly: pixelToLepton(200) });
   });
 
   it('retreats to FIX (service depot) when available', () => {
@@ -589,7 +589,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
     const [w, h] = STRUCTURE_SIZE['FIX']!;
     const expectedX = (fixCx + w / 2) * CELL_SIZE;
     const expectedY = (fixCy + h / 2) * CELL_SIZE;
-    expect(unit.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 
   it('falls back to base center when no FIX available', () => {
@@ -607,7 +607,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
 
     const expectedX = center!.cx * CELL_SIZE + CELL_SIZE / 2;
     const expectedY = center!.cy * CELL_SIZE + CELL_SIZE / 2;
-    expect(unit.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 
   it('sets mission to MOVE on retreat', () => {
@@ -668,7 +668,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
     // Should fall back to base center since FIX is dead
     const expectedX = center!.cx * CELL_SIZE + CELL_SIZE / 2;
     const expectedY = center!.cy * CELL_SIZE + CELL_SIZE / 2;
-    expect(unit.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 
   it('only own-house FIX used — enemy FIX ignored', () => {
@@ -686,7 +686,7 @@ describe('Non-harvester retreat — damaged combat units fall back', () => {
     // Should fall back to base center, not enemy FIX
     const expectedX = center!.cx * CELL_SIZE + CELL_SIZE / 2;
     const expectedY = center!.cy * CELL_SIZE + CELL_SIZE / 2;
-    expect(unit.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 });
 
@@ -748,7 +748,7 @@ describe('Edge cases and multi-unit interactions', () => {
     const [w, h] = STRUCTURE_SIZE['FIX']!;
     const expectedX = (fix1.cx + w / 2) * CELL_SIZE;
     const expectedY = (fix1.cy + h / 2) * CELL_SIZE;
-    expect(unit.moveTarget).toEqual({ x: expectedX, y: expectedY });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(expectedX), ly: pixelToLepton(expectedY) });
   });
 
   it('harvester with no PROC does NOT get general retreat (continue skips)', () => {

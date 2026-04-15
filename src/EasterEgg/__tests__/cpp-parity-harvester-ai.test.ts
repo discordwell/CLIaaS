@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   CELL_SIZE, MAP_CELLS,
   House, Mission, UnitType, AnimState, Dir,
+  pixelToLepton, cellToLepton, leptonToPixel,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -723,7 +724,7 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('seeking');
     // Should find ore at (55,50) within the 6-cell scan range
-    expect(Math.floor(harv.moveTarget!.x / CELL_SIZE)).toBe(55);
+    expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(55);
   });
 
   /**
@@ -749,7 +750,7 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
 
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('seeking');
-    expect(Math.floor(harv.moveTarget!.x / CELL_SIZE)).toBe(90);
+    expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(90);
   });
 });
 
@@ -813,8 +814,8 @@ describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
     expect(harv.archiveTarget).toBeNull(); // cleared after use
     // moveTarget should be at (60,60)
     expect(harv.moveTarget).toBeDefined();
-    expect(Math.floor(harv.moveTarget!.x / CELL_SIZE)).toBe(60);
-    expect(Math.floor(harv.moveTarget!.y / CELL_SIZE)).toBe(60);
+    expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(60);
+    expect(Math.floor(harv.moveTarget!.ly / 256)).toBe(60);
   });
 });
 
@@ -1073,8 +1074,8 @@ describe('Harvester unload — building.cpp:3735-3796 refinery unload', () => {
     // Harvester should now be pathing to the dock cell at (61, 62) — south-center of PROC
     // at (60..62, 60..62). Adjacent south of center (61, 61) = (61, 62).
     expect(harv.moveTarget).toBeDefined();
-    expect(harv.moveTarget!.x).toBe(61 * CELL_SIZE + CELL_SIZE / 2);
-    expect(harv.moveTarget!.y).toBe(62 * CELL_SIZE + CELL_SIZE / 2);
+    expect(harv.moveTarget!.lx).toBe(pixelToLepton(61 * CELL_SIZE + CELL_SIZE / 2));
+    expect(harv.moveTarget!.ly).toBe(pixelToLepton(62 * CELL_SIZE + CELL_SIZE / 2));
   });
 });
 
@@ -1496,7 +1497,7 @@ describe('full harvest cycle: idle → seek → harvest → return → unload �
       } else if (harv.harvesterState === 'seeking') {
         // Teleport harvester to the target ore cell and simulate arrival
         if (harv.moveTarget) {
-          harv.setPosition(harv.moveTarget.x, harv.moveTarget.y);
+          harv.setPosition(leptonToPixel(harv.moveTarget.lx), leptonToPixel(harv.moveTarget.ly));
         }
         harv.mission = Mission.GUARD;
         updateHarvester(ctx, harv);

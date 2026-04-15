@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UNIT_STATS, CELL_SIZE, MPH_TO_PX,
   UnitType, House, Mission, Dir,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 
 beforeEach(() => {
@@ -67,7 +67,7 @@ describe('cpp-parity: DOG isCanine flag', () => {
 describe('cpp-parity: DOG sprint with moveTarget (C++ Target_Legal(NavCom))', () => {
   it('dog with moveTarget should have sprint active', () => {
     const dog = createDog(100, 100);
-    dog.moveTarget = { x: 200, y: 200 };
+    dog.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     // The sprint is applied inside movementSpeed() in the Game class.
     // Here we verify the condition fields are correctly set.
     expect(dog.stats.isCanine).toBe(true);
@@ -138,7 +138,7 @@ describe('cpp-parity: DOG sprint with entity target (chase)', () => {
 describe('cpp-parity: non-canine units never get sprint bonus', () => {
   it('E1 with moveTarget does NOT have isCanine', () => {
     const e1 = new Entity(UnitType.I_E1, House.USSR, 100, 100);
-    e1.moveTarget = { x: 200, y: 200 };
+    e1.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     expect(e1.stats.isCanine).toBeFalsy();
   });
 });

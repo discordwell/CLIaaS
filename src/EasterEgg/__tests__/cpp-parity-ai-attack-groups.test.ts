@@ -19,7 +19,7 @@ import {
   House, Mission, UnitType, CELL_SIZE,
   UNIT_STATS, HOUSE_FACTION, PRODUCTION_ITEMS,
   type ProductionItem, type WorldPos,
-  buildDefaultAlliances, worldDist,
+  buildDefaultAlliances, worldDist, pixelToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -881,8 +881,8 @@ describe('launchAIAttack — mission and target assignment', () => {
 
     const [w, h] = STRUCTURE_SIZE['FACT']!;
     const expectedTarget = {
-      x: (60 + w / 2) * CELL_SIZE,
-      y: (60 + h / 2) * CELL_SIZE,
+      lx: pixelToLepton((60 + w / 2) * CELL_SIZE),
+      ly: pixelToLepton((60 + h / 2) * CELL_SIZE),
     };
     expect(e1.moveTarget).toEqual(expectedTarget);
   });

@@ -5,7 +5,7 @@
 
 import {
   type CellPos, type UnitStats, type WeaponStats, type ArmorType,
-  CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell,
+  CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell, pixelToLepton,
   House, Mission, UnitType, AnimState, Dir,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
@@ -2742,11 +2742,11 @@ export function executeTriggerAction(
             if (entity.isTransport && hasUnloadMission) {
               entity.aircraftState = 'unload_search';
               entity.mission = Mission.UNLOAD;
-              entity.moveTarget = { x: world.x, y: world.y }; // LZ = team origin
+              entity.moveTarget = { lx: pixelToLepton(world.x), ly: pixelToLepton(world.y) }; // LZ = team origin
             } else {
               entity.aircraftState = 'flying';
               entity.mission = Mission.MOVE;
-              entity.moveTarget = { x: world.x, y: world.y };
+              entity.moveTarget = { lx: pixelToLepton(world.x), ly: pixelToLepton(world.y) };
             }
           } else {
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.

@@ -4,9 +4,9 @@
  */
 
 import {
-  type WorldPos, type WeaponStats,
+  type WorldPos, type WeaponStats, type LeptonPos,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
-  worldDist, directionTo, worldToCell, leptonDist, DIR_DX, DIR_DY,
+  worldDist, directionTo, worldToCell, leptonDist, leptonToPixel, pixelToLepton, DIR_DX, DIR_DY,
   CIVILIAN_UNIT_TYPES,
   COS_TABLE_256, SIN_TABLE_256,
 } from './types';
@@ -16,6 +16,11 @@ import { Entity, CloakState } from './entity';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
+
+/** Helper: convert LeptonPos to WorldPos (pixel space) for rendering/distance APIs */
+function leptonPosToWorld(lp: LeptonPos): WorldPos {
+  return { x: leptonToPixel(lp.lx), y: leptonToPixel(lp.ly) };
+}
 
 /** Convert world positions to a C++ 256-step DirType facing (0=N, 64=E, 128=S, 192=W).
  *  C++ Direction() in facing.h: atan2-based conversion to 256-step byte. */
@@ -409,7 +414,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // passenger is dropped, switch to RETREAT so the BADR (IsALoaner) flies
       // off-map instead of trying to land at a non-existent airfield.
       if (entity.isFixedWing && entity.passengers.length > 0 && entity.moveTarget) {
-        const dropDist = worldDist(entity.pos, entity.moveTarget);
+        const dropDist = worldDist(entity.pos, leptonPosToWorld(entity.moveTarget));
         if (dropDist <= 2) { // worldDist returns cells; 2 cells ≈ 0x0200 leptons
           const passenger = entity.passengers.shift()!;
           passenger.alive = true;
@@ -446,7 +451,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           // above ejects passengers when within 2 cells; returning to base here
           // would crash-land the BADR (no airfield for fixed-wings).
           if (entity.isFixedWing && entity.moveTarget && entity.passengers.length > 0) {
-            aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+            aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity));
             return true;
           }
           // Target lost — RTB
@@ -479,7 +484,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           else if (minDist === distRight) tx = ctx.map.boundsX + ctx.map.boundsW;
           else if (minDist === distTop) ty = ctx.map.boundsY - 1;
           else ty = ctx.map.boundsY + ctx.map.boundsH;
-          entity.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
+          entity.moveTarget = { lx: tx * 256 + 128, ly: ty * 256 + 128 };
         }
         // Check if at map edge — exit
         const ec = entity.cell;
@@ -489,11 +494,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           return true;
         }
         // Fly toward the edge — C++ curved path
-        aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+        aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity));
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
         // Check if aircraft is at map edge with out-of-bounds target — exit map
         const ec = entity.cell;
-        const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+        const tc = worldToCell(leptonToPixel(entity.moveTarget.lx), leptonToPixel(entity.moveTarget.ly));
         if (!ctx.map.inBounds(tc.cx, tc.cy) &&
             (ec.cx <= ctx.map.boundsX || ec.cx >= ctx.map.boundsX + ctx.map.boundsW - 1 ||
              ec.cy <= ctx.map.boundsY || ec.cy >= ctx.map.boundsY + ctx.map.boundsH - 1)) {
@@ -501,9 +506,9 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           return true;
         }
         // Simple move — fly to destination (C++ curved path)
-        if (aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity))) {
+        if (aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity))) {
           // Arrived — check if destination was out of bounds (aircraft map exit)
-          const arrCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+          const arrCell = worldToCell(leptonToPixel(entity.moveTarget.lx), leptonToPixel(entity.moveTarget.ly));
           if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
             handleMapExit(ctx, entity);
             return true;
@@ -573,17 +578,22 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // below 16 leptons but arrival requires ≤0.5px.
       if (!entity.moveTarget) { entity.aircraftState = 'returning'; return true; }
       {
-        const dxSnap = entity.moveTarget.x - entity.pos.x;
-        const dySnap = entity.moveTarget.y - entity.pos.y;
+        const mtWorld = leptonPosToWorld(entity.moveTarget);
+        const dxSnap = mtWorld.x - entity.pos.x;
+        const dySnap = mtWorld.y - entity.pos.y;
         if (dxSnap * dxSnap + dySnap * dySnap < 4) { // < 2px
-          entity.setPosition(entity.moveTarget.x, entity.moveTarget.y);
+          entity.leptonX = entity.moveTarget.lx;
+          entity.leptonY = entity.moveTarget.ly;
+          entity.syncPosFromLeptons();
           entity.aircraftState = 'unload_land';
           return true;
         }
       }
-      const arrived = aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+      const arrived = aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity));
       if (arrived) {
-        entity.setPosition(entity.moveTarget.x, entity.moveTarget.y);
+        entity.leptonX = entity.moveTarget.lx;
+        entity.leptonY = entity.moveTarget.ly;
+        entity.syncPosFromLeptons();
         entity.aircraftState = 'unload_land';
       }
       return true;

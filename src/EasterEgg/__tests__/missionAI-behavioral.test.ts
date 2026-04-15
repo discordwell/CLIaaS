@@ -17,7 +17,7 @@ import {
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
   COUNTRY_BONUSES,
   worldDist, worldToCell, buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, leptonToCell, } from '../engine/types';
 import { Entity, resetEntityIds, CloakState, setPlayerHouses } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -192,7 +192,7 @@ describe('updateGuard', () => {
     expect(civ.mission).toBe(Mission.MOVE);
     expect(civ.moveTarget).not.toBeNull();
     // Flee direction should be away from the ant (positive x direction)
-    expect(civ.moveTarget!.x).toBeGreaterThan(civ.pos.x);
+    expect(civ.moveTarget!.lx).toBeGreaterThan(civ.leptonX);
   });
 
   it('entity does not engage allies', () => {
@@ -564,7 +564,7 @@ describe('updateRetreat', () => {
     // Should have set a move target toward the nearest map edge
     expect(entity.moveTarget).not.toBeNull();
     // Nearest edge should be left (boundsX=10) since entity is at cx=12
-    const targetCell = worldToCell(entity.moveTarget!.x, entity.moveTarget!.y);
+    const targetCell = leptonToCell(entity.moveTarget!.lx, entity.moveTarget!.ly);
     expect(targetCell.cx).toBe(10); // left edge
   });
 
@@ -572,7 +572,7 @@ describe('updateRetreat', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.RETREAT;
     // Set moveTarget to current position (simulating arrival)
-    entity.moveTarget = { x: 300, y: 300 };
+    entity.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
 
     const ctx = makeMockContext({ entities: [entity] });
     updateRetreat(ctx, entity);
@@ -617,8 +617,8 @@ describe('updateAreaGuard', () => {
 
     // Should set moveTarget back toward origin and stay in AREA_GUARD
     expect(guard.moveTarget).not.toBeNull();
-    expect(guard.moveTarget!.x).toBe(300);
-    expect(guard.moveTarget!.y).toBe(300);
+    expect(guard.moveTarget!.lx).toBe(pixelToLepton(300));
+    expect(guard.moveTarget!.ly).toBe(pixelToLepton(300));
     expect(guard.animState).toBe(AnimState.WALK);
   });
 
@@ -734,15 +734,15 @@ describe('updateRepairMission', () => {
 
     expect(tank.moveTarget).not.toBeNull();
     // Should target the depot position
-    expect(tank.moveTarget!.x).toBe(20 * CELL_SIZE + CELL_SIZE);
-    expect(tank.moveTarget!.y).toBe(20 * CELL_SIZE + CELL_SIZE);
+    expect(tank.moveTarget!.lx).toBe(pixelToLepton(20 * CELL_SIZE + CELL_SIZE));
+    expect(tank.moveTarget!.ly).toBe(pixelToLepton(20 * CELL_SIZE + CELL_SIZE));
   });
 
   it('switches to GUARD on arrival', () => {
     const tank = makeEntity(UnitType.V_2TNK, House.Spain, 504, 504);
     tank.mission = Mission.REPAIR;
     // Set moveTarget to current position to simulate arrival
-    tank.moveTarget = { x: 504, y: 504 };
+    tank.moveTarget = { lx: pixelToLepton(504), ly: pixelToLepton(504) };
 
     const ctx = makeMockContext({ entities: [tank] });
     updateRepairMission(ctx, tank);
@@ -803,7 +803,7 @@ describe('orderTransportEvacuate', () => {
   it('clears existing target and move queue', () => {
     const transport = makeEntity(UnitType.V_TRAN, House.Spain, 35 * CELL_SIZE, 35 * CELL_SIZE);
     transport.target = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
-    transport.moveQueue = [{ x: 100, y: 100 }];
+    transport.moveQueue = [{ lx: pixelToLepton(100), ly: pixelToLepton(100) }];
     transport.aircraftState = 'flying';
 
     const ctx = makeMockContext({ entities: [transport] });
@@ -825,7 +825,7 @@ describe('orderTransportEvacuate', () => {
 
     // Bounds are (10,10)-(60,60). From (35,35): all edges are 25 cells away.
     // minDist picks distLeft first (tie-breaking). tx = boundsX - 1 = 9
-    const targetCell = worldToCell(transport.moveTarget!.x, transport.moveTarget!.y);
+    const targetCell = leptonToCell(transport.moveTarget!.lx, transport.moveTarget!.ly);
     // One cell outside bounds
     expect(
       targetCell.cx < 10 || targetCell.cx >= 60 ||

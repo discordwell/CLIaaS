@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, Mission, AnimState, CELL_SIZE, MAP_CELLS,
   UNIT_STATS, WEAPON_STATS, Dir,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -136,7 +136,7 @@ describe('findHarvesterOre', () => {
 
     // Other friendly harvester targeting the nearby ore cell
     const otherHarv = makeEntity(UnitType.V_HARV, House.USSR, 48 * CELL_SIZE, 50 * CELL_SIZE);
-    otherHarv.moveTarget = { x: 52 * CELL_SIZE + CELL_SIZE / 2, y: 50 * CELL_SIZE + CELL_SIZE / 2 };
+    otherHarv.moveTarget = { lx: pixelToLepton(52 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(50 * CELL_SIZE + CELL_SIZE / 2) };
 
     const testHarv = makeEntity(UnitType.V_HARV, House.USSR, 50 * CELL_SIZE, 50 * CELL_SIZE);
 
@@ -163,7 +163,7 @@ describe('findHarvesterOre', () => {
     const map = makeMapWithOre(oreCells);
 
     const otherHarv = makeEntity(UnitType.V_HARV, House.Spain, 48 * CELL_SIZE, 50 * CELL_SIZE);
-    otherHarv.moveTarget = { x: 52 * CELL_SIZE + CELL_SIZE / 2, y: 50 * CELL_SIZE + CELL_SIZE / 2 };
+    otherHarv.moveTarget = { lx: pixelToLepton(52 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(50 * CELL_SIZE + CELL_SIZE / 2) };
 
     const testHarv = makeEntity(UnitType.V_HARV, House.Spain, 50 * CELL_SIZE, 50 * CELL_SIZE);
 

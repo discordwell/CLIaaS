@@ -19,7 +19,7 @@ import {
   type UnitStats,
   type WeaponStats,
   type WorldPos,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type MapStructure, type TeamType,
@@ -1664,7 +1664,7 @@ describe('aiRecallDefenders (HOUSE.CPP)', () => {
     expect(unit.moveTarget).not.toBeNull();
     // Should be near base center
     const center = aiGetBaseCenter(ctx, House.USSR)!;
-    expect(unit.moveTarget!.x).toBe(center.cx * CELL_SIZE + CELL_SIZE / 2);
+    expect(unit.moveTarget!.lx).toBe(pixelToLepton(center.cx * CELL_SIZE + CELL_SIZE / 2));
   });
 
   it('does nothing when no base center', () => {
@@ -1768,8 +1768,8 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     // Should be heading toward FIX center
     const [fw, fh] = STRUCTURE_SIZE['FIX'] ?? [3, 3];
     const fixCenter = { x: (20 + fw / 2) * CELL_SIZE, y: (20 + fh / 2) * CELL_SIZE };
-    expect(unit.moveTarget!.x).toBe(fixCenter.x);
-    expect(unit.moveTarget!.y).toBe(fixCenter.y);
+    expect(unit.moveTarget!.lx).toBe(pixelToLepton(fixCenter.x));
+    expect(unit.moveTarget!.ly).toBe(pixelToLepton(fixCenter.y));
   });
 
   it('retreats to base center when no FIX exists', () => {
@@ -1788,7 +1788,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     updateAIRetreat(ctx);
     expect(unit.mission).toBe(Mission.MOVE);
     const center = aiGetBaseCenter(ctx, House.USSR)!;
-    expect(unit.moveTarget!.x).toBe(center.cx * CELL_SIZE + CELL_SIZE / 2);
+    expect(unit.moveTarget!.lx).toBe(pixelToLepton(center.cx * CELL_SIZE + CELL_SIZE / 2));
   });
 
   it('removes retreating unit from attack pool', () => {
@@ -1829,7 +1829,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     const unit = entityAtCell(UnitType.V_2TNK, House.USSR, 50, 50);
     unit.hp = 1;
     unit.mission = Mission.MOVE;
-    unit.moveTarget = { x: 100, y: 100 };
+    unit.moveTarget = { lx: pixelToLepton(100), ly: pixelToLepton(100) };
     const ctx = makeAIContext({
       tick: 30,
       entities: [unit],
@@ -1839,7 +1839,7 @@ describe('updateAIRetreat (HOUSE.CPP retreat system)', () => {
     });
     updateAIRetreat(ctx);
     // Should not override existing move target
-    expect(unit.moveTarget!.x).toBe(100);
+    expect(unit.moveTarget!.lx).toBe(pixelToLepton(100));
   });
 
   it('skips ants and suicide units', () => {

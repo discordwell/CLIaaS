@@ -11,7 +11,7 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { Mission, worldDist, worldToCell } from './types';
+import { Mission, worldDist, worldToCell, pixelToLepton } from './types';
 import { findPath } from './pathfinding';
 
 const AGGRO_RANGE = 12;        // cells — reactive engagement range
@@ -100,7 +100,7 @@ export class AutoPlayer {
       } else if (pathsComputed < MAX_PATHS_PER_TICK) {
         unit.mission = Mission.MOVE;
         unit.target = null;
-        unit.moveTarget = { x: target.pos.x, y: target.pos.y };
+        unit.moveTarget = { lx: target.leptonX, ly: target.leptonY };
         unit.path = findPath(
           game.map,
           unit.cell,

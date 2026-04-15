@@ -5,11 +5,11 @@
 
 import {
   type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
-  type WarheadMeta, type WarheadProps,
+  type WarheadMeta, type WarheadProps, type LeptonPos,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
-	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell,
+	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
@@ -285,6 +285,16 @@ function resetPathThreshold(entity: Entity): void {
   // TryTryAgain stays at its current value; PathDelay (CDTimerClass) is not reset.
 }
 
+/** Helper: convert WorldPos (pixels) to LeptonPos */
+function worldToLeptonPos(wp: WorldPos): LeptonPos {
+  return { lx: pixelToLepton(wp.x), ly: pixelToLepton(wp.y) };
+}
+
+/** Helper: convert LeptonPos to WorldPos (pixels) */
+function leptonPosToWorld(lp: LeptonPos): WorldPos {
+  return { x: leptonToPixel(lp.lx), y: leptonToPixel(lp.ly) };
+}
+
 /** C++ foot.cpp:373-388 — determine max escalation threshold.
  *  AI units always use MOVE_TEMP(4). Human players near their destination use
  *  MOVE_DESTROYABLE(3), meaning they give up sooner on friendly-blocked cells. */
@@ -292,7 +302,7 @@ function pathMaxType(entity: Entity, isPlayerUnit: boolean): number {
   if (!isPlayerUnit) return MOVE_TEMP; // AI always escalates to max
   if (!entity.moveTarget) return MOVE_TEMP;
   // C++ foot.cpp:386-388: human near dest → maxtype = MOVE_DESTROYABLE
-  const dist = worldDist(entity.pos, entity.moveTarget);
+  const dist = worldDist(entity.pos, leptonPosToWorld(entity.moveTarget));
   const closeEnough = 2.75; // rules.ini [General] CloseEnough=2.75 (overrides C++ default 0x0280)
   if (dist < closeEnough) return MOVE_DESTROYABLE;
   return MOVE_TEMP;
@@ -2011,7 +2021,7 @@ export class Game {
           c.cy <= this.map.boundsY || c.cy >= this.map.boundsY + this.map.boundsH - 1) {
         // Check if unit has a move target outside the map (intentionally leaving)
         if (entity.moveTarget) {
-          const tc = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+          const tc = { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) };
           if (!this.map.inBounds(tc.cx, tc.cy)) {
             entity.alive = false;
             entity.mission = Mission.DIE;
@@ -2895,7 +2905,7 @@ export class Game {
         const goalX = unit.pos.x + Math.cos(angle) * dist;
         const goalY = unit.pos.y + Math.sin(angle) * dist;
         unit.mission = Mission.MOVE;
-        unit.moveTarget = { x: goalX, y: goalY };
+        unit.moveTarget = { lx: pixelToLepton(goalX), ly: pixelToLepton(goalY) };
         unit.target = null;
         unit.moveQueue = [];
         unit.path = findPath(this.map, unit.cell, worldToCell(goalX, goalY), true, unit.isNavalUnit, unit.stats.speedClass);
@@ -3039,7 +3049,7 @@ export class Game {
           const unit = units[i];
           const pos = positions[i];
           unit.mission = Mission.HUNT;
-          unit.moveTarget = pos;
+          unit.moveTarget = worldToLeptonPos(pos);
           unit.target = null;
           unit.path = findPath(this.map, unit.cell, worldToCell(pos.x, pos.y), true, unit.isNavalUnit, unit.stats.speedClass);
           unit.pathIndex = 0;
@@ -3174,7 +3184,7 @@ export class Game {
             const u = units[i];
             const pos = positions[i];
             u.mission = Mission.MOVE;
-            u.moveTarget = pos;
+            u.moveTarget = worldToLeptonPos(pos);
             u.moveQueue = [];
             u.target = null;
             u.targetStructure = null;
@@ -3244,7 +3254,7 @@ export class Game {
           } else {
             // Move toward transport (they'll be loaded by proximity check)
             unit.mission = Mission.MOVE;
-            unit.moveTarget = { ...target.pos };
+            unit.moveTarget = { lx: target.leptonX, ly: target.leptonY };
             unit.path = findPath(this.map, unit.cell, target.cell, true);
             unit.pathIndex = 0;
           }
@@ -3346,10 +3356,10 @@ export class Game {
           if (shiftHeld && unit.mission === Mission.MOVE) {
             // Shift+click: queue waypoint (don't change current path)
             // C++ foot.cpp:2294: cap at NAV_QUEUE_MAX (10) — silently drops overflow
-            unit.queueWaypoint(pos);
+            unit.queueWaypoint(worldToLeptonPos(pos));
           } else {
             unit.mission = Mission.MOVE;
-            unit.moveTarget = pos;
+            unit.moveTarget = worldToLeptonPos(pos);
             unit.moveQueue = [];
             unit.target = null;
             unit.targetStructure = null;
@@ -3846,10 +3856,10 @@ export class Game {
               entity.pathIndex = 0;
             }
             if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-              const wp = { x: entity.path[entity.pathIndex].cx * CELL_SIZE + CELL_SIZE / 2, y: entity.path[entity.pathIndex].cy * CELL_SIZE + CELL_SIZE / 2 };
+              const wp = { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
               if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
             } else {
-              entity.moveToward(entity.target.pos, this.movementSpeed(entity));
+              entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, this.movementSpeed(entity));
             }
           }
         });
@@ -4004,7 +4014,7 @@ export class Game {
         fleeX = Math.max(minX, Math.min(maxX, fleeX));
         fleeY = Math.max(minY, Math.min(maxY, fleeY));
         entity.mission = Mission.MOVE;
-        entity.moveTarget = { x: fleeX, y: fleeY };
+        entity.moveTarget = { lx: pixelToLepton(fleeX), ly: pixelToLepton(fleeY) };
         const tc = worldToCell(fleeX, fleeY);
         if (this.map.isPassable(tc.cx, tc.cy)) {
           entity.path = findPath(this.map, entity.cell, tc, true);
@@ -4060,7 +4070,7 @@ export class Game {
         const dist = worldDist(entity.pos, other.pos);
         if (dist < 0.7) {
           // Same cell — check if move target was the transport
-          const tgtDist = worldDist(entity.moveTarget, other.pos);
+          const tgtDist = worldDist(leptonPosToWorld(entity.moveTarget), other.pos);
           if (tgtDist < 2) {
             other.passengers.push(entity);
             entity.transportRef = other;
@@ -4172,7 +4182,7 @@ export class Game {
 
         // Check arrival first — aircraft may have already completed the move
         // (aircraftState machine clears moveTarget on arrival before team mission scans)
-        if (worldDist(entity.pos, target) < 2) {
+        if (worldDist(entity.pos, leptonPosToWorld(target)) < 2) {
           // C++ parity: transport auto-loads nearby civilians on arrival (AircraftClass::Mission_Move)
           // SCG01EA: Chinook arrives at wp24 near Einstein at wp0, auto-picks him up
           if (entity.isTransport && entity.passengers.length < (entity.maxPassengers ?? 5)) {
@@ -4263,7 +4273,7 @@ export class Game {
         } else if (wp) {
           // No targets — move toward the waypoint
           const target = this.teamMissionWaypointTarget(entity, wp);
-          if (worldDist(entity.pos, target) > 3) {
+          if (worldDist(entity.pos, leptonPosToWorld(target)) > 3) {
             entity.mission = Mission.MOVE;
             entity.moveTarget = target;
             entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
@@ -4451,8 +4461,8 @@ export class Game {
             entity.target = null;
             entity.targetStructure = null;
             entity.moveTarget = {
-              x: entity.cell.cx * CELL_SIZE + CELL_SIZE / 2,
-              y: entity.cell.cy * CELL_SIZE + CELL_SIZE / 2,
+              lx: entity.cell.cx * 256 + 128,
+              ly: entity.cell.cy * 256 + 128,
             };
             this.updateMinelayer(entity);
           }
@@ -4530,7 +4540,7 @@ export class Game {
             return;
           }
         }
-        if (worldDist(entity.pos, target) < 2) {
+        if (worldDist(entity.pos, leptonPosToWorld(target)) < 2) {
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
           entity.mission = Mission.MOVE;
@@ -4561,8 +4571,8 @@ export class Game {
           entity.target = null;
           entity.targetStructure = structure;
           entity.moveTarget = {
-            x: structure.cx * CELL_SIZE + (sw * CELL_SIZE) / 2,
-            y: structure.cy * CELL_SIZE + (sh * CELL_SIZE) / 2,
+            lx: structure.cx * 256 + (sw * 256) / 2,
+            ly: structure.cy * 256 + (sh * 256) / 2,
           };
           entity.path = findPath(
             this.map,
@@ -4577,7 +4587,7 @@ export class Game {
         }
 
         const target = this.teamMissionWaypointTarget(entity, wp);
-        if (worldDist(entity.pos, target) < 2) {
+        if (worldDist(entity.pos, leptonPosToWorld(target)) < 2) {
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
           entity.mission = Mission.MOVE;
@@ -4597,7 +4607,7 @@ export class Game {
         if (!wp) { entity.teamMissionIndex++; return; }
         const target = this.teamMissionWaypointTarget(entity, wp);
 
-        if (worldDist(entity.pos, target) < 2) {
+        if (worldDist(entity.pos, leptonPosToWorld(target)) < 2) {
           // Arrived — switch to guard mode and complete mission
           entity.mission = Mission.GUARD;
           entity.moveTarget = null;
@@ -4688,7 +4698,7 @@ export class Game {
         const dist = worldDist(entity.pos, { x: waveCX, y: waveCY });
         if (dist > 2) {
           entity.animState = AnimState.WALK;
-          entity.moveToward({ x: waveCX, y: waveCY }, this.movementSpeed(entity));
+          entity.moveToward({ lx: pixelToLepton(waveCX), ly: pixelToLepton(waveCY) }, this.movementSpeed(entity));
           return;
         }
       }
@@ -4814,7 +4824,7 @@ export class Game {
       }
       if (bestTarget) {
         // Save current move destination so unit can resume after killing
-        entity.savedMoveTarget = entity.moveTarget ? { x: entity.moveTarget.x, y: entity.moveTarget.y } : null;
+        entity.savedMoveTarget = entity.moveTarget ? { lx: entity.moveTarget.lx, ly: entity.moveTarget.ly } : null;
         entity.target = bestTarget;
         entity.mission = Mission.ATTACK;
         entity.animState = AnimState.ATTACK;
@@ -4835,14 +4845,14 @@ export class Game {
         // C++ foot.cpp:2242-2248: navQueueLoop re-populates queue when exhausted
         if (entity.moveQueue.length === 0 && entity.navQueueLoop && entity.navQueueOriginal.length > 0) {
           for (const wp of entity.navQueueOriginal) {
-            entity.queueWaypoint({ x: wp.x, y: wp.y });
+            entity.queueWaypoint({ lx: wp.lx, ly: wp.ly });
           }
         }
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
           // C++ foot.cpp:2242-2248: re-append consumed waypoint when looping
           if (entity.navQueueLoop) {
-            entity.queueWaypoint({ x: next.x, y: next.y });
+            entity.queueWaypoint({ lx: next.lx, ly: next.ly });
           }
           entity.moveTarget = next;
         } else {
@@ -4873,7 +4883,7 @@ export class Game {
         for (;;) {
           const newPath = findPath(
             this.map, entity.cell,
-            worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+            { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) }, true,
             entity.isNavalUnit, entity.stats.speedClass
           );
           if (newPath.length > 0) {
@@ -4926,7 +4936,7 @@ export class Game {
             const adjX = blocker.cell.cx + ndx;
             const adjY = blocker.cell.cy + ndy;
             if (this.map.isPassable(adjX, adjY) && this.map.getOccupancy(adjX, adjY) === 0) {
-              blocker.moveTarget = { x: adjX * CELL_SIZE + CELL_SIZE / 2, y: adjY * CELL_SIZE + CELL_SIZE / 2 };
+              blocker.moveTarget = { lx: adjX * 256 + 128, ly: adjY * 256 + 128 };
               blocker.mission = Mission.MOVE;
               blocker.animState = AnimState.WALK;
               break;
@@ -4944,7 +4954,7 @@ export class Game {
         for (;;) {
           const newPath = findPath(
             this.map, entity.cell,
-            worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+            { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) }, true,
             entity.isNavalUnit, entity.stats.speedClass
           );
           if (newPath.length > 0) {
@@ -4981,9 +4991,9 @@ export class Game {
         entity.pathThreshold = MOVE_CLOAK;
         entity.tryCount = PATH_RETRY;
       }
-      const target: WorldPos = {
-        x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
-        y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      const target: LeptonPos = {
+        lx: nextCell.cx * 256 + 128,
+        ly: nextCell.cy * 256 + 128,
       };
       const speed = this.movementSpeed(entity);
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
@@ -4996,7 +5006,7 @@ export class Game {
       // mission timer and consuming Random_Pick(0,2) RNG).
       const perCellNavComCheck = (): boolean => {
         if (entity.moveTarget) {
-          const navCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
+          const navCell = { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) };
           const curCell = entity.cell;
           if (navCell.cx === curCell.cx && navCell.cy === curCell.cy) {
             entity.moveTarget = null;
@@ -5020,6 +5030,10 @@ export class Game {
           const chainTarget: WorldPos = {
             x: chainCell.cx * CELL_SIZE + CELL_SIZE / 2,
             y: chainCell.cy * CELL_SIZE + CELL_SIZE / 2,
+          };
+          const chainTargetLP: LeptonPos = {
+            lx: chainCell.cx * 256 + 128,
+            ly: chainCell.cy * 256 + 128,
           };
 
           if (entity.trackNumber > 0) {
@@ -5102,7 +5116,7 @@ export class Game {
             entity.tickRotation();
             if (entity.facing === nextFacing8) {
               // Facing correct, now move
-              if (entity.moveToward(chainTarget, speed)) {
+              if (entity.moveToward(chainTargetLP, speed)) {
                 entity.pathIndex++;
                 // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
                 perCellNavComCheck();
@@ -5126,17 +5140,17 @@ export class Game {
         // C++ foot.cpp:2242-2248: navQueueLoop re-populates queue when exhausted
         if (entity.moveQueue.length === 0 && entity.navQueueLoop && entity.navQueueOriginal.length > 0) {
           for (const wp of entity.navQueueOriginal) {
-            entity.queueWaypoint({ x: wp.x, y: wp.y });
+            entity.queueWaypoint({ lx: wp.lx, ly: wp.ly });
           }
         }
         if (entity.moveQueue.length > 0) {
           const next = entity.moveQueue.shift()!;
           // C++ foot.cpp:2242-2248: re-append consumed waypoint when looping
           if (entity.navQueueLoop) {
-            entity.queueWaypoint({ x: next.x, y: next.y });
+            entity.queueWaypoint({ lx: next.lx, ly: next.ly });
           }
           entity.moveTarget = next;
-          entity.path = findPath(this.map, entity.cell, worldToCell(next.x, next.y), true, entity.isNavalUnit, entity.stats.speedClass);
+          entity.path = findPath(this.map, entity.cell, { cx: Math.floor(next.lx / 256), cy: Math.floor(next.ly / 256) }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         } else {
           entity.mission = this.idleMission(entity);
@@ -5147,10 +5161,11 @@ export class Game {
       // Bug 3 fix: Before moving directly, check if the unit would enter an impassable cell.
       // Calculate which cell the unit would move into based on movement direction and speed.
       const speed = this.movementSpeed(entity);
-      const dx = entity.moveTarget.x - entity.pos.x;
-      const dy = entity.moveTarget.y - entity.pos.y;
+      const mtWorld = leptonPosToWorld(entity.moveTarget);
+      const dx = mtWorld.x - entity.pos.x;
+      const dy = mtWorld.y - entity.pos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const distToTarget = worldDist(entity.pos, entity.moveTarget);
+      const distToTarget = worldDist(entity.pos, mtWorld);
       if (dist > 0) {
         const step = Math.min(speed * entity.speedBias, dist);
         const nextX = entity.pos.x + (dx / dist) * step;
@@ -5180,7 +5195,7 @@ export class Game {
             for (;;) {
               const newPath = findPath(
                 this.map, currentCell,
-                worldToCell(entity.moveTarget.x, entity.moveTarget.y), true,
+                { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) }, true,
                 entity.isNavalUnit, entity.stats.speedClass
               );
               if (newPath.length > 0) {
@@ -5886,7 +5901,7 @@ export class Game {
     const maxY = (this.map.boundsY + this.map.boundsH) * CELL_SIZE;
     const retreatX = Math.max(minX, Math.min(maxX, entity.pos.x + (dx / len) * CELL_SIZE * 2));
     const retreatY = Math.max(minY, Math.min(maxY, entity.pos.y + (dy / len) * CELL_SIZE * 2));
-    entity.moveToward({ x: retreatX, y: retreatY }, this.movementSpeed(entity));
+    entity.moveToward({ lx: pixelToLepton(retreatX), ly: pixelToLepton(retreatY) }, this.movementSpeed(entity));
   }
 
   /** Check if two houses are allied */
@@ -7981,11 +7996,11 @@ export class Game {
     return offsets;
   }
 
-  private teamMissionWaypointTarget(entity: Entity, wp: { cx: number; cy: number }): WorldPos {
+  private teamMissionWaypointTarget(entity: Entity, wp: { cx: number; cy: number }): LeptonPos {
     const offset = entity.formationOffset ?? { x: 0, y: 0 };
     return {
-      x: wp.cx * CELL_SIZE + CELL_SIZE / 2 + offset.x,
-      y: wp.cy * CELL_SIZE + CELL_SIZE / 2 + offset.y,
+      lx: wp.cx * 256 + 128 + pixelToLepton(offset.x),
+      ly: wp.cy * 256 + 128 + pixelToLepton(offset.y),
     };
   }
 

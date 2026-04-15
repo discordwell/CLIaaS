@@ -30,7 +30,7 @@ import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
   SuperweaponType, SUPERWEAPON_DEFS,
   armorIndex, worldToCell, buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { parseIniSections, parseIniInt } from '../engine/parseIni';
 import {
@@ -1046,7 +1046,7 @@ describe('Aircraft reinforcement arrival mechanics (scenario.ts)', () => {
     // TS scenario.ts:2464-2465: mission = Mission.MOVE, moveTarget = world
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 1, 1);
     tran.mission = Mission.MOVE;
-    tran.moveTarget = { x: 15 * CELL_SIZE, y: 15 * CELL_SIZE };
+    tran.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(15 * CELL_SIZE) };
     expect(tran.mission).toBe(Mission.MOVE);
     expect(tran.moveTarget).not.toBeNull();
   });

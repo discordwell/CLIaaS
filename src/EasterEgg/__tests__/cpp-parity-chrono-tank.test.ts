@@ -30,7 +30,7 @@ import {
   SuperweaponType, SUPERWEAPON_DEFS,
   CHRONO_SHIFT_VISUAL_TICKS,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import type { SuperweaponState } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { activateSuperweapon, CHRONO_DURATION_TICKS, type SuperweaponContext } from '../engine/superweapon';
@@ -547,7 +547,7 @@ describe('Post-teleport state (unit.cpp:2721)', () => {
 
   it('moveTarget cleared after teleport', () => {
     const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 5, 5);
-    ctnk.moveTarget = { x: 10 * CELL_SIZE, y: 10 * CELL_SIZE };
+    ctnk.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
     const ctx = makeSpecialCtx([ctnk]);
     const target = { x: 20 * CELL_SIZE, y: 20 * CELL_SIZE };
 

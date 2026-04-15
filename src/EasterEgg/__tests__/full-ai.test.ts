@@ -10,7 +10,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, Mission, CELL_SIZE, HOUSE_FACTION,
   PRODUCTION_ITEMS, type ProductionItem, type Faction,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS } from '../engine/scenario';
 import type { Difficulty } from '../engine/index';
 
@@ -496,16 +496,16 @@ describe('AI retreat and defense', () => {
     defender.mission = Mission.AREA_GUARD;
     // When base is under attack, switch to HUNT
     defender.mission = Mission.HUNT;
-    defender.moveTarget = { x: 200, y: 200 };
+    defender.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     expect(defender.mission).toBe(Mission.HUNT);
-    expect(defender.moveTarget).toEqual({ x: 200, y: 200 });
+    expect(defender.moveTarget).toEqual({ lx: pixelToLepton(200), ly: pixelToLepton(200) });
   });
 
   it('damaged units retreat via MOVE mission', () => {
     const unit = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     unit.hp = 10; // very low
     unit.mission = Mission.MOVE;
-    unit.moveTarget = { x: 300, y: 300 }; // retreat to base
+    unit.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) }; // retreat to base
     expect(unit.mission).toBe(Mission.MOVE);
     expect(unit.moveTarget).toBeDefined();
   });
@@ -514,7 +514,7 @@ describe('AI retreat and defense', () => {
     const unit = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     unit.hp = 10;
     unit.mission = Mission.MOVE;
-    unit.moveTarget = { x: 300, y: 300 };
+    unit.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
     // Retreat logic should skip this unit since it's already moving to target
     const alreadyRetreating = unit.mission === Mission.MOVE && unit.moveTarget !== null;
     expect(alreadyRetreating).toBe(true);

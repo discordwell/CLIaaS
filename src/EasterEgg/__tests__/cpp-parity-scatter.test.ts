@@ -18,7 +18,7 @@ import {
   UnitType, House, CELL_SIZE, Dir, Mission,
   UNIT_STATS, MISSION_CONTROL, DIR_DX, DIR_DY, DIR_COUNT,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
@@ -121,8 +121,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       const ctx = makeCombatCtx([e]);
       aiScatterOnDamage(ctx, e, attacker);
       if (e.moveTarget) {
-        const targetCX = Math.floor(e.moveTarget.x / CELL_SIZE);
-        const targetCY = Math.floor(e.moveTarget.y / CELL_SIZE);
+        const targetCX = Math.floor(e.moveTarget.lx / 256);
+        const targetCY = Math.floor(e.moveTarget.ly / 256);
         const dir = cellDir(10, 10, targetCX, targetCY);
         scatterDirs.add(dir);
       }
@@ -154,8 +154,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       const ctx = makeCombatCtx([e]);
       aiScatterOnDamage(ctx, e, attacker);
       if (e.moveTarget) {
-        const targetCX = Math.floor(e.moveTarget.x / CELL_SIZE);
-        const targetCY = Math.floor(e.moveTarget.y / CELL_SIZE);
+        const targetCX = Math.floor(e.moveTarget.lx / 256);
+        const targetCY = Math.floor(e.moveTarget.ly / 256);
         scatterDirs.add(cellDir(10, 10, targetCX, targetCY));
       }
     }
@@ -190,8 +190,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       if (te.moveTarget) {
         scattered = true;
         // The target should NOT be cell (0,1) since it's blocked
-        const tcx = Math.floor(te.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(te.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(te.moveTarget.lx / 256);
+        const tcy = Math.floor(te.moveTarget.ly / 256);
         expect(tcx !== 0 || tcy !== 1).toBe(true);
       }
     }
@@ -214,8 +214,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       aiScatterOnDamage(ctx, t, attacker);
       if (t.moveTarget) {
         scatterCount++;
-        const tcx = Math.floor(t.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(t.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(t.moveTarget.lx / 256);
+        const tcy = Math.floor(t.moveTarget.ly / 256);
         scatterDirs.add(cellDir(10, 10, tcx, tcy));
       }
     }
@@ -230,7 +230,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     // E1 is not FraidyCat — should NOT scatter when already driving
     const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     e1.mission = Mission.MOVE;
-    e1.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE }; // already moving east
+    e1.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) }; // already moving east
 
     const origTarget = { ...e1.moveTarget };
     const ctx = makeCombatCtx([e1]);
@@ -238,8 +238,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     aiScatterOnDamage(ctx, e1, attacker);
 
     // Should keep original move target (not scattered)
-    expect(e1.moveTarget!.x).toBe(origTarget.x);
-    expect(e1.moveTarget!.y).toBe(origTarget.y);
+    expect(e1.moveTarget!.lx).toBe(origTarget.lx);
+    expect(e1.moveTarget!.ly).toBe(origTarget.ly);
   });
 
   // C++ infantry.cpp:1860,1885 — IsDriving=true, forced=false, but IsFraidyCat=true → still scatters
@@ -249,14 +249,14 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     for (let i = 0; i < 100; i++) {
       const c1 = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       c1.mission = Mission.MOVE;
-      c1.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE };
+      c1.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
       const ctx = makeCombatCtx([c1]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, c1, attacker);
       // FraidyCat with moveTarget: forced=false, but isFraidyCat check at line 1885 passes
       // MISSION_CONTROL[MOVE].isScatter is true, so line 1866 passes
       // c1.target is null, so line 1872 passes
-      if (c1.moveTarget!.x !== 15 * CELL_SIZE || c1.moveTarget!.y !== 10 * CELL_SIZE) {
+      if (c1.moveTarget!.lx !== 15 * 256 + 128 || c1.moveTarget!.ly !== 10 * 256 + 128) {
         scattered = true;
         break;
       }
@@ -298,7 +298,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
   it('non-FraidyCat infantry with combat target and IsDriving does not scatter', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     e1.mission = Mission.MOVE;
-    e1.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE };
+    e1.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
     e1.target = entityAtCell(UnitType.I_E1, House.Spain, 12, 10); // has a combat target
 
     const origTarget = { ...e1.moveTarget };
@@ -307,8 +307,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     aiScatterOnDamage(ctx, e1, attacker);
 
     // IsDriving → forced=false; !FraidyCat && target!=null && !forced → return
-    expect(e1.moveTarget!.x).toBe(origTarget.x);
-    expect(e1.moveTarget!.y).toBe(origTarget.y);
+    expect(e1.moveTarget!.lx).toBe(origTarget.lx);
+    expect(e1.moveTarget!.ly).toBe(origTarget.ly);
   });
 
   // Verify IsFraidyCat is set correctly on civilians
@@ -362,8 +362,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       const ctx = makeCombatCtx([te]);
       aiScatterOnDamage(ctx, te); // no attacker
       if (te.moveTarget) {
-        const tcx = Math.floor(te.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(te.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(te.moveTarget.lx / 256);
+        const tcy = Math.floor(te.moveTarget.ly / 256);
         scatterDirs.add(cellDir(10, 10, tcx, tcy));
       }
     }

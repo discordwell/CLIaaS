@@ -21,7 +21,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { Dir, UnitType, House, UNIT_STATS, BODY_SHAPE } from '../engine/types';
+import { Dir, UnitType, House, UNIT_STATS, BODY_SHAPE, pixelToLepton, } from '../engine/types';
 import { smoothTurn, F_, F_T, F_X, F_Y, TRACK_DATA, TRACK_CONTROL, lookupTrackControl, getEffectiveTrack } from '../engine/tracks';
 
 beforeEach(() => resetEntityIds());
@@ -674,7 +674,7 @@ describe('9. Stop-rotate-move for vehicles (drive.cpp:1064-1071, entity.ts:moveT
 
     // Target is to the East — tank faces N, must rotate first
     tank.rotTickedThisFrame = false;
-    const arrived = tank.moveToward({ x: 200, y: 100 }, 8);
+    const arrived = tank.moveToward({ lx: pixelToLepton(200), ly: pixelToLepton(100) }, 8);
 
     // Should not have moved yet (still rotating)
     expect(arrived).toBe(false);
@@ -693,7 +693,7 @@ describe('9. Stop-rotate-move for vehicles (drive.cpp:1064-1071, entity.ts:moveT
 
     // Target is to the East — facing is already aligned
     tank.rotTickedThisFrame = false;
-    tank.moveToward({ x: 200, y: 100 }, 8);
+    tank.moveToward({ lx: pixelToLepton(200), ly: pixelToLepton(100) }, 8);
 
     expect(tank.pos.x).toBeGreaterThan(startX); // moved
   });
@@ -705,7 +705,7 @@ describe('9. Stop-rotate-move for vehicles (drive.cpp:1064-1071, entity.ts:moveT
 
     // Target to the East — infantry moves immediately while rotating
     inf.rotTickedThisFrame = false;
-    inf.moveToward({ x: 200, y: 100 }, 4);
+    inf.moveToward({ lx: pixelToLepton(200), ly: pixelToLepton(100) }, 4);
 
     // Infantry should have moved even though it started facing N
     // (rot=8 snaps instantly, so they'll be aligned anyway)

@@ -27,7 +27,7 @@ import {
   UnitType, House, CELL_SIZE, Dir, Mission,
   UNIT_STATS, MPH_TO_PX,
   type WorldPos,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { LP } from '../engine/tracks';
 
@@ -180,7 +180,7 @@ describe('C++ infantry Coord_Move lepton truncation parity', () => {
       entity.desiredFacing = Dir.N;
 
       const startY = entity.pos.y;
-      entity.moveToward({ x: 500, y: 0 }, dogSpeed);
+      entity.moveToward({ lx: pixelToLepton(500), ly: pixelToLepton(0) }, dogSpeed);
 
       const movedPx = startY - entity.pos.y;
       // C++ reference: floor(floor(8*256/100)*127/128) = floor(20*127/128) = floor(19.84) = 19

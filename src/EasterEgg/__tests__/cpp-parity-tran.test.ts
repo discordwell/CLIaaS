@@ -15,7 +15,7 @@ import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, PRODUCTION_ITEMS,
   COUNTRY_BONUSES,
   buildDefaultAlliances, armorIndex,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
@@ -506,7 +506,7 @@ describe('TRAN aircraft state machine (aircraft.cpp)', () => {
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 10, 10);
     tran.aircraftState = 'takeoff';
     tran.mission = Mission.MOVE;
-    tran.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE };
+    tran.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
     tran.flightAltitude = 0;
 
     const ctx = makeAircraftCtx([tran]);
@@ -520,7 +520,7 @@ describe('TRAN aircraft state machine (aircraft.cpp)', () => {
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 10, 10);
     tran.aircraftState = 'takeoff';
     tran.mission = Mission.MOVE;
-    tran.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE };
+    tran.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE - 1;
 
     const ctx = makeAircraftCtx([tran]);

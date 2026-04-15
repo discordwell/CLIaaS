@@ -21,7 +21,7 @@ import {
   SuperweaponType, SUPERWEAPON_DEFS,
   CHRONO_SHIFT_VISUAL_TICKS,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import type { SuperweaponState } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { activateSuperweapon, CHRONO_DURATION_TICKS, type SuperweaponContext } from '../engine/superweapon';
@@ -726,7 +726,7 @@ describe('Chrono Tank self-teleport (C++ unit.cpp:2714-2722, house.cpp:2841-2846
 
   it('chrono tank clears target and moveTarget after teleport', () => {
     const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 5, 5);
-    ctnk.moveTarget = { x: 10 * CELL_SIZE, y: 10 * CELL_SIZE };
+    ctnk.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
     const anotherUnit = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 15);
     ctnk.target = anotherUnit;
     const ctx = makeSpecialCtx([ctnk, anotherUnit]);

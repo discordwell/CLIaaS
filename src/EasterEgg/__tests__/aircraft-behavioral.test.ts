@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, Mission, AnimState, CELL_SIZE, MAP_CELLS,
   UNIT_STATS, WEAPON_STATS, worldDist,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds, CloakState } from '../engine/entity';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -332,7 +332,7 @@ describe('updateAircraft — state machine', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'landed';
     heli.mission = Mission.MOVE;
-    heli.moveTarget = { x: 500, y: 500 };
+    heli.moveTarget = { lx: pixelToLepton(500), ly: pixelToLepton(500) };
 
     const result = updateAircraft(ctx, heli);
 
@@ -421,7 +421,7 @@ describe('updateAircraft — state machine', () => {
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
     heli.mission = Mission.MOVE;
     // Target out of bounds
-    heli.moveTarget = { x: 0, y: edgeCy * CELL_SIZE };
+    heli.moveTarget = { lx: pixelToLepton(0), ly: pixelToLepton(edgeCy * CELL_SIZE) };
 
     const initialUnitsLeft = ctx.unitsLeftMap;
     updateAircraft(ctx, heli);

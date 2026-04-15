@@ -4,7 +4,7 @@
  */
 
 import {
-  CELL_SIZE, MAP_CELLS,
+  CELL_SIZE, MAP_CELLS, LEPTON_SIZE,
   type House, Mission, AnimState, UnitType, Dir,
 } from './types';
 import { Entity } from './entity';
@@ -60,8 +60,8 @@ export function findHarvesterOre(
     if (other.type !== UnitType.V_HARV) continue;
     if (other.moveTarget) {
       friendlyTargets.push({
-        cx: Math.floor(other.moveTarget.x / CELL_SIZE),
-        cy: Math.floor(other.moveTarget.y / CELL_SIZE),
+        cx: Math.floor(other.moveTarget.lx / 256),
+        cy: Math.floor(other.moveTarget.ly / 256),
       });
     } else if (other.harvesterState === 'harvesting') {
       friendlyTargets.push(other.cell);
@@ -120,7 +120,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         entity.archiveTarget = null; // C++ clears ArchiveTarget after using it
         entity.harvesterState = 'seeking';
         entity.mission = Mission.MOVE;
-        entity.moveTarget = { x: at.cx * CELL_SIZE + CELL_SIZE / 2, y: at.cy * CELL_SIZE + CELL_SIZE / 2 };
+        entity.moveTarget = { lx: at.cx * 256 + 128, ly: at.cy * 256 + 128 };
         entity.path = findPath(ctx.map, ec, at, true);
         entity.pathIndex = 0;
         break;
@@ -133,7 +133,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
       if (oreCell) {
         entity.harvesterState = 'seeking';
         entity.mission = Mission.MOVE;
-        entity.moveTarget = { x: oreCell.cx * CELL_SIZE + CELL_SIZE / 2, y: oreCell.cy * CELL_SIZE + CELL_SIZE / 2 };
+        entity.moveTarget = { lx: oreCell.cx * 256 + 128, ly: oreCell.cy * 256 + 128 };
         entity.path = findPath(ctx.map, ec, oreCell, true);
         entity.pathIndex = 0;
       }
@@ -215,7 +215,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
             entity.isHarvesterMining = false;
             entity.harvesterState = 'seeking';
             entity.mission = Mission.MOVE;
-            entity.moveTarget = { x: newOre.cx * CELL_SIZE + CELL_SIZE / 2, y: newOre.cy * CELL_SIZE + CELL_SIZE / 2 };
+            entity.moveTarget = { lx: newOre.cx * 256 + 128, ly: newOre.cy * 256 + 128 };
             entity.path = findPath(ctx.map, ec, newOre, true);
             entity.pathIndex = 0;
           } else {
@@ -282,7 +282,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         // Harvester drives into this cell from below to dock.
         const target = { cx: bestProc.cx + 1, cy: bestProc.cy + procH - 1 };
         entity.mission = Mission.MOVE;
-        entity.moveTarget = { x: target.cx * CELL_SIZE + CELL_SIZE / 2, y: target.cy * CELL_SIZE + CELL_SIZE / 2 };
+        entity.moveTarget = { lx: target.cx * 256 + 128, ly: target.cy * 256 + 128 };
         entity.path = findPath(ctx.map, ec, target, true);
         entity.pathIndex = 0;
         entity.harvestTick = 0;

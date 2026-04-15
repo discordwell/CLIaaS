@@ -12,7 +12,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, UNIT_STATS, CELL_SIZE, MAP_CELLS, Mission,
   SuperweaponType, SUPERWEAPON_DEFS,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
 
 beforeEach(() => resetEntityIds());
@@ -32,8 +32,8 @@ describe('Harvester spreading prerequisites', () => {
   it('Entity has moveTarget field for tracking destination', () => {
     const harv = makeEntity(UnitType.V_HARV, House.Spain);
     expect(harv.moveTarget).toBeNull();
-    harv.moveTarget = { x: 500, y: 500 };
-    expect(harv.moveTarget).toEqual({ x: 500, y: 500 });
+    harv.moveTarget = { lx: pixelToLepton(500), ly: pixelToLepton(500) };
+    expect(harv.moveTarget).toEqual({ lx: pixelToLepton(500), ly: pixelToLepton(500) });
   });
 
   it('Entity.cell returns cell coordinates from world position', () => {
@@ -58,8 +58,8 @@ describe('Harvester spreading prerequisites', () => {
   it('two harvesters can have different moveTargets', () => {
     const h1 = makeEntity(UnitType.V_HARV, House.Spain, 100, 100);
     const h2 = makeEntity(UnitType.V_HARV, House.Spain, 200, 200);
-    h1.moveTarget = { x: 300, y: 300 };
-    h2.moveTarget = { x: 500, y: 500 };
+    h1.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
+    h2.moveTarget = { lx: pixelToLepton(500), ly: pixelToLepton(500) };
     expect(h1.moveTarget).not.toEqual(h2.moveTarget);
   });
 
@@ -105,7 +105,7 @@ describe('Emergency harvester return', () => {
     // Simulate emergency return
     harv.mission = Mission.MOVE;
     harv.harvesterState = 'returning';
-    harv.moveTarget = { x: 500, y: 500 };
+    harv.moveTarget = { lx: pixelToLepton(500), ly: pixelToLepton(500) };
     expect(harv.mission).toBe(Mission.MOVE);
     expect(harv.harvesterState).toBe('returning');
   });

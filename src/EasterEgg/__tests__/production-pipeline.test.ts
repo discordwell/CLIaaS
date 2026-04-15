@@ -30,7 +30,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   type ProductionItem, getStripSide,
   House, UnitType, CELL_SIZE, COUNTRY_BONUSES, POWER_DRAIN,
-  Mission, type WorldPos,
+  Mission, type WorldPos, pixelToLepton,
 } from '../engine/types';
 import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
 const PRODUCTION_ITEMS = getCanonicalProductionItems();
@@ -1444,8 +1444,8 @@ describe('Behavioral verification — production.ts exported functions', () => {
     // C++ uses MISSION_GUARD_AREA (not MISSION_MOVE) so units patrol rally zone
     expect(unit.mission).toBe(Mission.AREA_GUARD);
     expect(unit.moveTarget).toBeDefined();
-    expect(unit.moveTarget!.x).toBe(500);
-    expect(unit.moveTarget!.y).toBe(500);
+    expect(unit.moveTarget!.lx).toBe(pixelToLepton(500));
+    expect(unit.moveTarget!.ly).toBe(pixelToLepton(500));
   });
 
   it('spawnProducedUnit sets harvester to auto-harvest', () => {

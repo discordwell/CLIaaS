@@ -4,7 +4,7 @@
 
 import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
-  type WarheadProps, type WarheadType, type ArmorType,
+  type WarheadProps, type WarheadType, type ArmorType, type LeptonPos,
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
@@ -116,11 +116,11 @@ export class Entity {
   healTarget: Entity | null = null;  // medic auto-heal target (C++ infantry.cpp AI)
   targetStructure: StructureRef | null = null; // for attacking buildings
   forceFirePos: WorldPos | null = null; // force-fire ground position (Ctrl+right-click)
-  moveTarget: WorldPos | null = null;
-  moveQueue: WorldPos[] = []; // shift+click waypoint queue (C++ NavQueue[10] — capped at 10)
+  moveTarget: LeptonPos | null = null;
+  moveQueue: LeptonPos[] = []; // shift+click waypoint queue (C++ NavQueue[10] — capped at 10)
   static readonly NAV_QUEUE_MAX = 10; // C++ foot.h:189: TARGET NavQueue[10]
   navQueueLoop = false;               // C++ foot.h:146: IsNavQueueLoop — patrol loop mode
-  navQueueOriginal: WorldPos[] = [];  // saved waypoints for loop re-population
+  navQueueOriginal: LeptonPos[] = [];  // saved waypoints for loop re-population
   path: CellPos[] = [];
   pathIndex = 0;
 
@@ -284,7 +284,7 @@ export class Entity {
 
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
-  savedMoveTarget: WorldPos | null = null;
+  savedMoveTarget: LeptonPos | null = null;
 
   // Wave coordination: ants from the same trigger share a waveId
   waveId = 0;              // 0 = no wave group
@@ -486,10 +486,12 @@ export class Entity {
   }
 
   /** C++ foot.cpp:2275-2307 Queue_Navigation_List — append waypoint, cap at 10.
-   *  Returns true if appended, false if queue is full (C++ silently drops). */
-  queueWaypoint(pos: WorldPos): boolean {
+   *  Returns true if appended, false if queue is full (C++ silently drops).
+   *  Accepts both LeptonPos {lx,ly} and legacy WorldPos {x,y}. */
+  queueWaypoint(pos: LeptonPos | WorldPos): boolean {
     if (this.moveQueue.length >= Entity.NAV_QUEUE_MAX) return false;
-    this.moveQueue.push(pos);
+    const lp: LeptonPos = 'lx' in pos ? pos : { lx: Math.trunc(pos.x * LEPTON_SIZE / CELL_SIZE), ly: Math.trunc(pos.y * LEPTON_SIZE / CELL_SIZE) };
+    this.moveQueue.push(lp);
     return true;
   }
 
@@ -1108,14 +1110,14 @@ export class Entity {
    *    - x += (CosTable[dir] * distance) >> 7
    *    - y -= (SinTable[dir] * distance) >> 7
    *  All arithmetic is integer; no floating point in the movement path. */
-  moveToward(target: WorldPos, speed: number): boolean {
+  moveToward(target: LeptonPos | WorldPos, speed: number): boolean {
     // M7: Apply crate speed bias multiplier
     const effectiveSpeed = speed * this.speedBias;
 
     // ALL distance computation in integer lepton space (C++ parity).
-    // Convert target pixel position to integer leptons (truncate, not round).
-    const targetLeptonX = Math.trunc(target.x / LP);
-    const targetLeptonY = Math.trunc(target.y / LP);
+    // Accept both LeptonPos {lx,ly} and legacy WorldPos {x,y} for backward compat.
+    const targetLeptonX = 'lx' in target ? target.lx : Math.trunc(target.x / LP);
+    const targetLeptonY = 'ly' in target ? target.ly : Math.trunc(target.y / LP);
     const dxL = targetLeptonX - this.leptonX;
     const dyL = targetLeptonY - this.leptonY;
     // C++ Distance() octagonal approximation for snap distance
@@ -1124,7 +1126,9 @@ export class Entity {
     // C++ infantry snaps at Distance < 0x0010 (16 leptons). Vehicles at sub-pixel.
     const snapLeptons = this.stats.isInfantry ? 16 : 5;
     if (distLeptonsTotal < snapLeptons) {
-      this.setPosition(target.x, target.y);
+      this.leptonX = targetLeptonX;
+      this.leptonY = targetLeptonY;
+      this.syncPosFromLeptons();
       this.speedAccum = 0;
       this.isDriving = false; // C++ Stop_Driver
       return true;
@@ -1184,7 +1188,9 @@ export class Entity {
       const steppedL = Math.abs(clampedLX) + Math.abs(clampedLY);
       if (steppedL >= distLeptonsTotal - 16) {
         // Close enough to arrive — snap to target (C++ Per_Cell_Process handles this)
-        this.setPosition(target.x, target.y);
+        this.leptonX = targetLeptonX;
+        this.leptonY = targetLeptonY;
+        this.syncPosFromLeptons();
         this.speedAccum = 0;
         this.isDriving = false;
         return true;

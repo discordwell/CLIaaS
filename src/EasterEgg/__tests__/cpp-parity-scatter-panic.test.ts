@@ -39,7 +39,7 @@ import {
   UNIT_STATS, MISSION_CONTROL, DIR_DX, DIR_DY, DIR_COUNT,
   PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
@@ -194,11 +194,11 @@ describe('IsFraidyCat scatter: civilians scatter more readily (infantry.cpp:1885
     for (let i = 0; i < 100; i++) {
       const civ = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       civ.mission = Mission.MOVE;
-      civ.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE };
+      civ.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
       const ctx = makeCombatCtx([civ]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, civ, attacker);
-      if (civ.moveTarget!.x !== 15 * CELL_SIZE || civ.moveTarget!.y !== 10 * CELL_SIZE) {
+      if (civ.moveTarget!.lx !== 15 * 256 + 128 || civ.moveTarget!.ly !== 10 * 256 + 128) {
         scattered = true;
         break;
       }
@@ -209,13 +209,13 @@ describe('IsFraidyCat scatter: civilians scatter more readily (infantry.cpp:1885
   it('non-FraidyCat infantry does NOT scatter when already moving', () => {
     const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     e1.mission = Mission.MOVE;
-    e1.moveTarget = { x: 15 * CELL_SIZE, y: 10 * CELL_SIZE };
+    e1.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
     const origTarget = { ...e1.moveTarget };
     const ctx = makeCombatCtx([e1]);
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
     aiScatterOnDamage(ctx, e1, attacker);
-    expect(e1.moveTarget!.x).toBe(origTarget.x);
-    expect(e1.moveTarget!.y).toBe(origTarget.y);
+    expect(e1.moveTarget!.lx).toBe(origTarget.lx);
+    expect(e1.moveTarget!.ly).toBe(origTarget.ly);
   });
 
   // C++ infantry.cpp:3506: IsFraidyCat && Fear > FEAR_ANXIOUS → auto-scatter
@@ -272,8 +272,8 @@ describe('Scatter distance: rules.ini [General] Stray=', () => {
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, e, attacker);
       if (e.moveTarget) {
-        const tcx = Math.floor(e.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(e.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(e.moveTarget.lx / 256);
+        const tcy = Math.floor(e.moveTarget.ly / 256);
         const dist = Math.max(Math.abs(tcx - 10), Math.abs(tcy - 10)); // Chebyshev distance
         scatterDistances.add(dist);
       }
@@ -862,8 +862,8 @@ describe('Scatter direction: away from threat (infantry.cpp:1888-1900)', () => {
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 13);
       aiScatterOnDamage(ctx, e, attacker);
       if (e.moveTarget) {
-        const tcx = Math.floor(e.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(e.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(e.moveTarget.lx / 256);
+        const tcy = Math.floor(e.moveTarget.ly / 256);
         scatterDirs.add(cellDir(10, 10, tcx, tcy));
       }
     }
@@ -881,8 +881,8 @@ describe('Scatter direction: away from threat (infantry.cpp:1888-1900)', () => {
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 15, 10);
       aiScatterOnDamage(ctx, e, attacker);
       if (e.moveTarget) {
-        const tcx = Math.floor(e.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(e.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(e.moveTarget.lx / 256);
+        const tcy = Math.floor(e.moveTarget.ly / 256);
         scatterDirs.add(cellDir(10, 10, tcx, tcy));
       }
     }
@@ -902,8 +902,8 @@ describe('Scatter direction: away from threat (infantry.cpp:1888-1900)', () => {
       aiScatterOnDamage(ctx, e, attacker);
       if (e.moveTarget) {
         scattered = true;
-        const tcx = Math.floor(e.moveTarget.x / CELL_SIZE);
-        const tcy = Math.floor(e.moveTarget.y / CELL_SIZE);
+        const tcx = Math.floor(e.moveTarget.lx / 256);
+        const tcy = Math.floor(e.moveTarget.ly / 256);
         expect(tcx !== 0 || tcy !== 1).toBe(true); // NOT the blocked cell
       }
     }

@@ -69,7 +69,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission,
   UNIT_STATS,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type AircraftContext,

@@ -17,7 +17,7 @@ import { AutoPlayer } from '../engine/autoPlayer';
 import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import {
   UnitType, House, Mission, CELL_SIZE, worldDist, worldToCell,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { GameMap, Terrain } from '../engine/map';
 import type { Game } from '../engine/index';
 
@@ -297,7 +297,7 @@ describe('strategicLayer', () => {
 
     expect(player.mission).toBe(Mission.MOVE);
     expect(player.target).toBeNull();
-    expect(player.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+    expect(player.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
     expect(player.path.length).toBeGreaterThan(0);
     expect(player.pathIndex).toBe(0);
   });
@@ -337,7 +337,7 @@ describe('strategicLayer', () => {
     // Strategic should re-assign to the live ant
     // Since live ant is beyond aggro range, strategic moves toward it
     expect(player.mission).toBe(Mission.MOVE);
-    expect(player.moveTarget).toEqual({ x: liveAnt.pos.x, y: liveAnt.pos.y });
+    expect(player.moveTarget).toEqual({ lx: pixelToLepton(liveAnt.pos.x), ly: pixelToLepton(liveAnt.pos.y) });
   });
 
   it('skips strategic if no armed player units exist', () => {
@@ -397,7 +397,7 @@ describe('strategicLayer', () => {
 
     // With single player unit, centroid is at the player's position.
     // antNear is closer to centroid, so it should be the target.
-    expect(player.moveTarget).toEqual({ x: antNear.pos.x, y: antNear.pos.y });
+    expect(player.moveTarget).toEqual({ lx: pixelToLepton(antNear.pos.x), ly: pixelToLepton(antNear.pos.y) });
   });
 
   it('computes army centroid correctly for multiple units', () => {
@@ -496,7 +496,7 @@ describe('focus-fire coordination', () => {
     // All 3 should be MOVE toward the same ant
     for (const p of players) {
       expect(p.mission).toBe(Mission.MOVE);
-      expect(p.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+      expect(p.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
     }
   });
 
@@ -607,7 +607,7 @@ describe('edge cases', () => {
 
     // Too far for reactive (>12 cells), strategic should MOVE toward it
     expect(player.mission).toBe(Mission.MOVE);
-    expect(player.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+    expect(player.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
   });
 
   it('enemy at exact aggro boundary (12 cells) is NOT engaged by reactive', () => {
@@ -727,7 +727,7 @@ describe('unit type interactions', () => {
     // Only the alive unit should be considered.
     // It should move toward the ant.
     expect(alive.mission).toBe(Mission.MOVE);
-    expect(alive.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+    expect(alive.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
     // Dead unit unchanged
     expect(dead.mission).toBe(Mission.GUARD);
   });
@@ -765,7 +765,7 @@ describe('strategic target selection (isAnt filter)', () => {
       ap.update(game);
 
       expect(player.mission).toBe(Mission.MOVE);
-      expect(player.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+      expect(player.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
     }
   });
 
@@ -925,7 +925,7 @@ describe('pathfinding integration', () => {
     const game = makeGame([player, ant], 15);
     ap.update(game);
 
-    expect(player.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+    expect(player.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
   });
 
   it('target is set to null when moving (not attacking)', () => {
@@ -966,7 +966,7 @@ describe('sustained multi-tick simulation', () => {
 
       // Each strategic tick re-assigns MOVE toward ant
       expect(player.mission).toBe(Mission.MOVE);
-      expect(player.moveTarget).toEqual({ x: ant.pos.x, y: ant.pos.y });
+      expect(player.moveTarget).toEqual({ lx: pixelToLepton(ant.pos.x), ly: pixelToLepton(ant.pos.y) });
     }
   });
 

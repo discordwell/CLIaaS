@@ -6,7 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { House, Mission, UnitType, CELL_SIZE, RESFACTOR } from '../engine/types';
+import { House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton, } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
 
 class FakeAudio {
@@ -178,8 +178,8 @@ describe('Team mission parity hooks', () => {
 
     const baseX = 12 * CELL_SIZE + CELL_SIZE / 2;
     const baseY = 12 * CELL_SIZE + CELL_SIZE / 2;
-    expect(lead.moveTarget).toEqual({ x: baseX, y: baseY - CELL_SIZE });
-    expect(wing.moveTarget).toEqual({ x: baseX, y: baseY + CELL_SIZE });
+    expect(lead.moveTarget).toEqual({ lx: pixelToLepton(baseX), ly: pixelToLepton(baseY - CELL_SIZE) });
+    expect(wing.moveTarget).toEqual({ lx: pixelToLepton(baseX), ly: pixelToLepton(baseY + CELL_SIZE) });
   });
 
   // C++ team.cpp:1689-1721 — Coordinate_Attack assigns the team's

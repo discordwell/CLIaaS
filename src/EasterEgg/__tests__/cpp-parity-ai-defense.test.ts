@@ -22,7 +22,7 @@ import {
   UNIT_STATS, HOUSE_FACTION, PRODUCTION_ITEMS,
   type ProductionItem, type WorldPos,
   buildDefaultAlliances, worldDist,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP, type MapStructure } from '../engine/scenario';
@@ -138,7 +138,7 @@ describe('aiRecallDefenders — C++ AI_Attack recall (HOUSE.CPP)', () => {
     state.attackPool.add(e.id);
 
     aiRecallDefenders(ctx, House.USSR, state);
-    expect(e.moveTarget).toEqual({ x: BASE_CENTER_WORLD, y: BASE_CENTER_WORLD });
+    expect(e.moveTarget).toEqual({ lx: pixelToLepton(BASE_CENTER_WORLD), ly: pixelToLepton(BASE_CENTER_WORLD) });
   });
 
   it('removes recalled units from attackPool', () => {
@@ -402,7 +402,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
     // Recall should set poolUnit to HUNT with base center target
     expect(poolUnit.mission).toBe(Mission.HUNT);
-    expect(poolUnit.moveTarget).toEqual({ x: BASE_CENTER_WORLD, y: BASE_CENTER_WORLD });
+    expect(poolUnit.moveTarget).toEqual({ lx: pixelToLepton(BASE_CENTER_WORLD), ly: pixelToLepton(BASE_CENTER_WORLD) });
     expect(state.attackPool.has(poolUnit.id)).toBe(false);
   });
 
@@ -441,7 +441,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
     updateAIDefense(ctx);
     expect(defender.mission).toBe(Mission.HUNT);
-    expect(defender.moveTarget).toEqual({ x: enemy.pos.x, y: enemy.pos.y });
+    expect(defender.moveTarget).toEqual({ lx: pixelToLepton(enemy.pos.x), ly: pixelToLepton(enemy.pos.y) });
   });
 
   it('rallies AREA_GUARD units near base to hunt nearby enemies', () => {
@@ -458,7 +458,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
     updateAIDefense(ctx);
     expect(defender.mission).toBe(Mission.HUNT);
-    expect(defender.moveTarget).toEqual({ x: enemy.pos.x, y: enemy.pos.y });
+    expect(defender.moveTarget).toEqual({ lx: pixelToLepton(enemy.pos.x), ly: pixelToLepton(enemy.pos.y) });
   });
 
   it('harvesters excluded from rally', () => {
@@ -543,7 +543,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
     updateAIDefense(ctx);
     expect(defender.mission).toBe(Mission.HUNT);
-    expect(defender.moveTarget).toEqual({ x: enemy.pos.x, y: enemy.pos.y });
+    expect(defender.moveTarget).toEqual({ lx: pixelToLepton(enemy.pos.x), ly: pixelToLepton(enemy.pos.y) });
   });
 
   it('dead enemies not targeted', () => {
@@ -595,8 +595,8 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
     updateAIDefense(ctx);
     expect(defender.mission).toBe(Mission.HUNT);
-    expect(defender.moveTarget!.x).toBe(enemyX);
-    expect(defender.moveTarget!.y).toBe(enemyY);
+    expect(defender.moveTarget!.lx).toBe(pixelToLepton(enemyX));
+    expect(defender.moveTarget!.ly).toBe(pixelToLepton(enemyY));
   });
 
   it('units with HUNT mission not rallied', () => {
@@ -607,14 +607,14 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
     const hunter = spawnEntity(ctx, UnitType.E1, House.USSR,
       BASE_CENTER_WORLD, BASE_CENTER_WORLD);
     hunter.mission = Mission.HUNT;
-    hunter.moveTarget = { x: 999, y: 999 };
+    hunter.moveTarget = { lx: pixelToLepton(999), ly: pixelToLepton(999) };
 
     const enemy = spawnEntity(ctx, UnitType.E1, House.Spain,
       BASE_CENTER_WORLD + 5 * CELL_SIZE, BASE_CENTER_WORLD);
 
     updateAIDefense(ctx);
     // HUNT is not GUARD or AREA_GUARD, so should not be re-targeted
-    expect(hunter.moveTarget).toEqual({ x: 999, y: 999 });
+    expect(hunter.moveTarget).toEqual({ lx: pixelToLepton(999), ly: pixelToLepton(999) });
   });
 
   it('units with MOVE mission not rallied', () => {
@@ -673,8 +673,8 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
     // Both defenders should target enemy1 (nearest to base center)
     expect(def1.mission).toBe(Mission.HUNT);
     expect(def2.mission).toBe(Mission.HUNT);
-    expect(def1.moveTarget).toEqual({ x: enemy1.pos.x, y: enemy1.pos.y });
-    expect(def2.moveTarget).toEqual({ x: enemy1.pos.x, y: enemy1.pos.y });
+    expect(def1.moveTarget).toEqual({ lx: pixelToLepton(enemy1.pos.x), ly: pixelToLepton(enemy1.pos.y) });
+    expect(def2.moveTarget).toEqual({ lx: pixelToLepton(enemy1.pos.x), ly: pixelToLepton(enemy1.pos.y) });
   });
 
   it('dead AI units not considered for rallying', () => {
@@ -764,7 +764,7 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
     updateAIDefense(ctx);
 
     // Should target enemyA (closer to base center)
-    expect(defender.moveTarget).toEqual({ x: enemyA.pos.x, y: enemyA.pos.y });
+    expect(defender.moveTarget).toEqual({ lx: pixelToLepton(enemyA.pos.x), ly: pixelToLepton(enemyA.pos.y) });
   });
 
   it('no enemy nearby → defender stays on GUARD', () => {
@@ -805,11 +805,11 @@ describe('updateAIDefense — C++ AI_Base_Defense (HOUSE.CPP)', () => {
 
     // Pool unit was recalled
     expect(poolUnit.mission).toBe(Mission.HUNT);
-    expect(poolUnit.moveTarget).toEqual({ x: BASE_CENTER_WORLD, y: BASE_CENTER_WORLD });
+    expect(poolUnit.moveTarget).toEqual({ lx: pixelToLepton(BASE_CENTER_WORLD), ly: pixelToLepton(BASE_CENTER_WORLD) });
 
     // Local defender was rallied to enemy
     expect(defender.mission).toBe(Mission.HUNT);
-    expect(defender.moveTarget).toEqual({ x: enemy.pos.x, y: enemy.pos.y });
+    expect(defender.moveTarget).toEqual({ lx: pixelToLepton(enemy.pos.x), ly: pixelToLepton(enemy.pos.y) });
   });
 
   it('SLEEP mission unit is not rallied', () => {

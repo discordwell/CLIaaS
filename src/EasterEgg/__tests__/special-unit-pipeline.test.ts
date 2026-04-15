@@ -15,7 +15,7 @@ import {
   UnitType, House, Mission, AnimState, UNIT_STATS, WEAPON_STATS,
   CELL_SIZE, worldDist, worldToCell, CONDITION_RED,
   CHRONO_SHIFT_VISUAL_TICKS,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
 import {
   type SpecialUnitsContext,
@@ -341,7 +341,7 @@ describe('Chrono Tank (CTNK) — teleport state machine', () => {
 
   it('teleportChronoTank sets cooldown and clears move/attack targets', () => {
     const ctnk = makeEntity(UnitType.V_CTNK, House.Spain);
-    ctnk.moveTarget = { x: 200, y: 200 };
+    ctnk.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     ctnk.target = makeEntity(UnitType.I_E1, House.USSR);
     ctnk.mission = Mission.ATTACK;
     const ctx = makeMockSpecialUnitsContext();
@@ -1048,7 +1048,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
   it('updateMinelayer only runs for V_MNLY with moveTarget', () => {
     // Non-MNLY entity: should be a no-op
     const tank = makeEntity(UnitType.V_2TNK, House.Spain);
-    tank.moveTarget = { x: 200, y: 200 };
+    tank.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, tank);
     expect(ctx.mines.length).toBe(0);
@@ -1063,7 +1063,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
   it('updateMinelayer respects ammo limit', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
     mnly.ammo = 0;
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
     expect(ctx.mines.length).toBe(0);
@@ -1072,7 +1072,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer respects per-house mine limit', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     // Fill up mines to MAX_MINES_PER_HOUSE
     const existingMines = Array.from({ length: MAX_MINES_PER_HOUSE }, (_, i) => ({
       cx: i, cy: 0, house: House.Spain, damage: 1000,
@@ -1085,7 +1085,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
   it('updateMinelayer prevents duplicate mines at same cell', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
     const targetCell = worldToCell(mnly.pos.x, mnly.pos.y);
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext({
       mines: [{ cx: targetCell.cx, cy: targetCell.cy, house: House.USSR, damage: 1000, type: 'AP' as const }],
     });
@@ -1096,7 +1096,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer places AV mine with 1200 damage for allied house', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
     expect(ctx.mines.length).toBe(1);
@@ -1107,7 +1107,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer decrements ammo on mine placement', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     const prevAmmo = mnly.ammo;
     updateMinelayer(ctx, mnly);
@@ -1116,7 +1116,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer increments entity mineCount', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
     expect(mnly.mineCount).toBe(1);
@@ -1331,7 +1331,7 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
 
   it('deployMADTank clears move and attack targets', () => {
     const qtnk = makeEntity(UnitType.V_QTNK, House.Spain);
-    qtnk.moveTarget = { x: 200, y: 200 };
+    qtnk.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     qtnk.target = makeEntity(UnitType.I_E1, House.USSR);
     const ctx = makeMockSpecialUnitsContext({
       map: {
@@ -1759,7 +1759,7 @@ describe('Game tick loop — special unit update integration', () => {
 
   it('updateMinelayer runs when MNLY has moveTarget', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
-    mnly.moveTarget = { x: mnly.pos.x, y: mnly.pos.y };
+    mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
     expect(ctx.mines.length).toBe(1);

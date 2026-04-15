@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, Mission, AnimState, UNIT_STATS, CELL_SIZE,
-  cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES,
+  cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES, cellToLepton,
 } from '../engine/types';
 import {
   calculateHouseEdgeSpawnCell,
@@ -202,9 +202,9 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(heli.mission).toBe(Mission.MOVE);
 
     // Move target should be the origin waypoint (WP23)
-    const wp23World = cellToWorld(WP23.cx, WP23.cy);
-    expect(heli.moveTarget!.x).toBe(wp23World.x);
-    expect(heli.moveTarget!.y).toBe(wp23World.y);
+    const wp23Lepton = cellToLepton(WP23.cx, WP23.cy);
+    expect(heli.moveTarget!.lx).toBe(wp23Lepton.lx);
+    expect(heli.moveTarget!.ly).toBe(wp23Lepton.ly);
   });
 
   it('team with infantry spawns aircraft at edge (tanya team flies in)', () => {
@@ -248,9 +248,9 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(tran!.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
 
     // Move target should be the origin waypoint (WP0)
-    const wp0World = cellToWorld(WP0.cx, WP0.cy);
-    expect(tran!.moveTarget!.x).toBe(wp0World.x);
-    expect(tran!.moveTarget!.y).toBe(wp0World.y);
+    const wp0Lepton = cellToLepton(WP0.cx, WP0.cy);
+    expect(tran!.moveTarget!.lx).toBe(wp0Lepton.lx);
+    expect(tran!.moveTarget!.ly).toBe(wp0Lepton.ly);
 
     // E7 (Tanya) should be loaded into TRAN (not in spawned list)
     expect(tran!.passengers.length).toBe(1);

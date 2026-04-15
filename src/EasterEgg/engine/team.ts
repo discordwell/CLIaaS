@@ -22,7 +22,7 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType } from './types';
+import { House, Mission, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 
@@ -648,7 +648,7 @@ export class Team {
       if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > stray) {
         // Member too far — order to move to zone
         unit.mission = Mission.MOVE;
-        unit.moveTarget = { ...this.zone };
+        unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
         regrouped = false;
       } else {
         // Close enough — guard
@@ -692,7 +692,7 @@ export class Team {
         // Not yet arrived — order move
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
-          unit.moveTarget = { ...this.target };
+          unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
           // C++ Commence() resets Timer=0 when mission changes (team.cpp:354).
           // This triggers Mission_Move() → Random_Pick(0,2) on next entity AI tick.
           unit.missionTimer = 0;
@@ -746,7 +746,7 @@ export class Team {
       }
       // Set move target toward attack position if no entity target
       if (!unit.target && this.target) {
-        unit.moveTarget = { ...this.target };
+        unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
       }
     }
   }
@@ -802,7 +802,7 @@ export class Team {
       if (dist > stray) {
         if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
-          unit.moveTarget = { ...this.target };
+          unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
         }
         allArrived = false;
       }

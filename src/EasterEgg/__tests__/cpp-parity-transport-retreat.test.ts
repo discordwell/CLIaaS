@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, Mission, AnimState, CELL_SIZE,
   UNIT_STATS,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap } from '../engine/map';
 import type { AircraftContext } from '../engine/aircraft';
@@ -188,7 +188,7 @@ describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
     updateAircraft(ctx, tran);
     expect(tran.moveTarget).not.toBeNull();
     // Target should be at x=0 (boundsX - 1 = 0), which is outside bounds
-    const targetCellX = Math.floor(tran.moveTarget!.x / CELL_SIZE);
+    const targetCellX = Math.floor(tran.moveTarget!.lx / 256);
     expect(targetCellX).toBe(0); // one cell outside left edge
   });
 
@@ -204,7 +204,7 @@ describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
 
     updateAircraft(ctx, tran);
     expect(tran.moveTarget).not.toBeNull();
-    const targetCellY = Math.floor(tran.moveTarget!.y / CELL_SIZE);
+    const targetCellY = Math.floor(tran.moveTarget!.ly / 256);
     expect(targetCellY).toBe(0); // one cell outside top edge
   });
 });
@@ -225,7 +225,7 @@ describe('Map exit on retreat (aircraft.cpp:1356-1361)', () => {
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
     // Pre-set moveTarget so it doesn't get computed fresh
-    tran.moveTarget = { x: 0 * CELL_SIZE + CELL_SIZE / 2, y: 30 * CELL_SIZE + CELL_SIZE / 2 };
+    tran.moveTarget = { lx: pixelToLepton(0 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(30 * CELL_SIZE + CELL_SIZE / 2) };
 
     updateAircraft(ctx, tran);
     expect(tran.alive).toBe(false);
@@ -240,7 +240,7 @@ describe('Map exit on retreat (aircraft.cpp:1356-1361)', () => {
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
-    tran.moveTarget = { x: 63 * CELL_SIZE + CELL_SIZE / 2, y: 30 * CELL_SIZE + CELL_SIZE / 2 };
+    tran.moveTarget = { lx: pixelToLepton(63 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(30 * CELL_SIZE + CELL_SIZE / 2) };
 
     updateAircraft(ctx, tran);
     expect(tran.alive).toBe(false);
@@ -254,7 +254,7 @@ describe('Map exit on retreat (aircraft.cpp:1356-1361)', () => {
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
-    tran.moveTarget = { x: 0 * CELL_SIZE + CELL_SIZE / 2, y: 30 * CELL_SIZE + CELL_SIZE / 2 };
+    tran.moveTarget = { lx: pixelToLepton(0 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(30 * CELL_SIZE + CELL_SIZE / 2) };
 
     expect(ctx.unitsLeftMap).toBe(0);
     updateAircraft(ctx, tran);

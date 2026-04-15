@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { Dir, UnitType, House, CELL_SIZE, worldDist } from '../engine/types';
+import { Dir, UnitType, House, CELL_SIZE, worldDist, pixelToLepton, } from '../engine/types';
 import { LP, PIXEL_LEPTON_W } from '../engine/tracks';
 
 beforeEach(() => resetEntityIds());
@@ -118,7 +118,7 @@ describe('MV2: damageSpeedFactor has single tier at 50% HP', () => {
     const startX = tank.pos.x;
     const speed = 8;
     tank.rotTickedThisFrame = false;
-    tank.moveToward({ x: 300, y: 100 }, speed);
+    tank.moveToward({ lx: pixelToLepton(300), ly: pixelToLepton(100) }, speed);
 
     // C++ vehicle SpeedAccum + Coord_Move: floor(8/LP)=85, speedAdd=floor(85*255/256)=84
     // actual=84, 84%10=4, moveLeptons=80. Cardinal: (80*127)>>7=79 → 79*LP=7.40625

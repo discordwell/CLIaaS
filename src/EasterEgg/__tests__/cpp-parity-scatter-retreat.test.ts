@@ -27,7 +27,7 @@ import {
   Mission, AnimState, DIR_COUNT, DIR_DX, DIR_DY,
   UNIT_STATS, buildDefaultAlliances, MISSION_CONTROL,
   CONDITION_RED, CONDITION_YELLOW,
-} from '../engine/types';
+pixelToLepton, leptonToPixel, } from '../engine/types';
 import type { WarheadType } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -381,7 +381,7 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
       const testInf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
       testInf.mission = Mission.GUARD;
       aiScatterOnDamage(ctx, testInf, attacker);
-      if (testInf.moveTarget && testInf.moveTarget.x < testInf.pos.x) {
+      if (testInf.moveTarget && testInf.moveTarget.lx < testInf.leptonX) {
         westwardCount++;
       }
     }
@@ -400,8 +400,8 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
     expect(inf.moveTarget).not.toBeNull();
 
     // Target should be 1 cell away (adjacent cell center)
-    const dx = Math.abs(inf.moveTarget!.x - inf.pos.x);
-    const dy = Math.abs(inf.moveTarget!.y - inf.pos.y);
+    const dx = Math.abs(leptonToPixel(inf.moveTarget!.lx) - inf.pos.x);
+    const dy = Math.abs(leptonToPixel(inf.moveTarget!.ly) - inf.pos.y);
     // Max 1 cell diagonal = sqrt(2) * CELL_SIZE ≈ 1.414 * CELL_SIZE
     const dist = Math.sqrt(dx * dx + dy * dy);
     expect(dist).toBeLessThanOrEqual(CELL_SIZE * 1.5);
@@ -429,7 +429,7 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
     // Should have found the south cell as the only passable option
     expect(inf.mission).toBe(Mission.MOVE);
     expect(inf.moveTarget).not.toBeNull();
-    const targetCY = Math.floor(inf.moveTarget!.y / CELL_SIZE);
+    const targetCY = Math.floor(inf.moveTarget!.ly / 256);
     expect(targetCY).toBe(31); // south cell
   });
 });
@@ -479,15 +479,15 @@ describe('IsDriving prevents scatter (infantry.cpp:1860)', () => {
     // C++ infantry.cpp:1885: without forced, only FraidyCat scatters
     const inf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
     inf.mission = Mission.MOVE;
-    inf.moveTarget = { x: 35 * CELL_SIZE, y: 30 * CELL_SIZE }; // already moving
+    inf.moveTarget = { lx: pixelToLepton(35 * CELL_SIZE), ly: pixelToLepton(30 * CELL_SIZE) }; // already moving
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 32, 30);
     const ctx = makeCombatCtx([inf, attacker]);
 
     const originalTarget = { ...inf.moveTarget };
     aiScatterOnDamage(ctx, inf, attacker);
     // Should keep its original move target (didn't scatter)
-    expect(inf.moveTarget!.x).toBe(originalTarget.x);
-    expect(inf.moveTarget!.y).toBe(originalTarget.y);
+    expect(inf.moveTarget!.lx).toBe(originalTarget.lx);
+    expect(inf.moveTarget!.ly).toBe(originalTarget.ly);
   });
 });
 

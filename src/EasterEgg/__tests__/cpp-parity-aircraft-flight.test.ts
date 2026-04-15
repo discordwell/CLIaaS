@@ -44,7 +44,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission, AnimState,
   UNIT_STATS, WEAPON_STATS,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type AircraftContext,
@@ -621,7 +621,7 @@ describe('aircraft state machine lifecycle transitions', () => {
     heli.aircraftState = 'landed';
     heli.flightAltitude = 0;
     heli.mission = Mission.MOVE;
-    heli.moveTarget = { x: 300, y: 300 };
+    heli.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);

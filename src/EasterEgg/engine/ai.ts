@@ -11,6 +11,7 @@ import {
   House, Mission, UnitType,
   UNIT_STATS, HOUSE_FACTION,
   type Faction,
+  pixelToLepton, worldDist,
 } from './types';
 import { Entity } from './entity';
 import { nearbyLocation } from './pathfinding';
@@ -169,9 +170,6 @@ const CPP_DEFAULT_MAX_AIRCRAFT = Math.floor(RULE_UNIT_MAX / 6);      // 83 (C++ 
 const REPAIR_STEP = 7;
 const REPAIR_PERCENT = 0.20;
 const CONDITION_RED = 0.25;
-
-// worldDist import from types is cells-based; we need the same helper
-import { worldDist } from './types';
 
 // ── Context interface ─────────────────────────────────────────────────────
 
@@ -1761,11 +1759,12 @@ export function launchAIAttack(ctx: AIContext, house: House, state: AIHouseState
   const waveId = ctx.nextWaveId++;
   const rallyTick = ctx.tick + 30;
 
+  const targetLP = { lx: pixelToLepton(target.x), ly: pixelToLepton(target.y) };
   for (const id of state.attackPool) {
     const e = ctx.entityById.get(id);
     if (!e || !e.alive) continue;
     e.mission = Mission.HUNT;
-    e.moveTarget = target;
+    e.moveTarget = targetLP;
     e.waveId = waveId;
     e.waveRallyTick = rallyTick;
   }
@@ -1788,7 +1787,7 @@ export function aiRecallDefenders(ctx: AIContext, house: House, state: AIHouseSt
     const e = ctx.entityById.get(id);
     if (!e || !e.alive) continue;
     e.mission = Mission.HUNT;
-    e.moveTarget = centerPos;
+    e.moveTarget = { lx: pixelToLepton(centerPos.x), ly: pixelToLepton(centerPos.y) };
     state.attackPool.delete(id);
     recalled++;
   }
@@ -1828,7 +1827,7 @@ export function updateAIDefense(ctx: AIContext): void {
         }
         if (nearestEnemy) {
           e.mission = Mission.HUNT;
-          e.moveTarget = { x: nearestEnemy.pos.x, y: nearestEnemy.pos.y };
+          e.moveTarget = { lx: nearestEnemy.leptonX, ly: nearestEnemy.leptonY };
         }
       }
     }
@@ -1872,8 +1871,8 @@ export function updateAIRetreat(ctx: AIContext): void {
         e.harvesterState = 'returning';
         e.mission = Mission.MOVE;
         e.moveTarget = {
-          x: (nearestProc.cx + w / 2) * CELL_SIZE,
-          y: (nearestProc.cy + h / 2) * CELL_SIZE,
+          lx: (nearestProc.cx * 256) + (w * 256) / 2,
+          ly: (nearestProc.cy * 256) + (h * 256) / 2,
         };
         e.harvestTick = 0;
       }
@@ -1888,26 +1887,26 @@ export function updateAIRetreat(ctx: AIContext): void {
     const center = aiGetBaseCenter(ctx, e.house);
     if (!center) continue;
 
-    let retreatTarget: WorldPos | null = null;
+    let retreatLP: { lx: number; ly: number } | null = null;
     for (const s of ctx.structures) {
       if (!s.alive || s.house !== e.house || s.type !== 'FIX') continue;
       const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      retreatTarget = {
-        x: (s.cx + w / 2) * CELL_SIZE,
-        y: (s.cy + h / 2) * CELL_SIZE,
+      retreatLP = {
+        lx: (s.cx * 256) + (w * 256) / 2,
+        ly: (s.cy * 256) + (h * 256) / 2,
       };
       break;
     }
 
-    if (!retreatTarget) {
-      retreatTarget = {
-        x: center.cx * CELL_SIZE + CELL_SIZE / 2,
-        y: center.cy * CELL_SIZE + CELL_SIZE / 2,
+    if (!retreatLP) {
+      retreatLP = {
+        lx: center.cx * 256 + 128,
+        ly: center.cy * 256 + 128,
       };
     }
 
     e.mission = Mission.MOVE;
-    e.moveTarget = retreatTarget;
+    e.moveTarget = retreatLP;
     state.attackPool.delete(e.id);
   }
 }
@@ -2132,7 +2131,7 @@ export function updateAIProduction(ctx: AIContext): void {
           if (!staging) {
             unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
           } else {
-            unit.moveTarget = staging;
+            unit.moveTarget = { lx: pixelToLepton(staging.x), ly: pixelToLepton(staging.y) };
             unit.mission = Mission.MOVE;
           }
           ctx.houseCredits.set(house, credits - infCost);
@@ -2174,7 +2173,7 @@ export function updateAIProduction(ctx: AIContext): void {
           if (!staging) {
             unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
           } else {
-            unit.moveTarget = staging;
+            unit.moveTarget = { lx: pixelToLepton(staging.x), ly: pixelToLepton(staging.y) };
             unit.mission = Mission.MOVE;
           }
           ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - vehCost);

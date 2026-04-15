@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW, leptonToPixel } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -2586,10 +2586,12 @@ export class Renderer {
       ctx.setLineDash([3, 3]);
 
       // Draw line from current moveTarget (or position) through queue
-      const start = entity.moveTarget ?? entity.pos;
+      const start = entity.moveTarget
+        ? { x: leptonToPixel(entity.moveTarget.lx), y: leptonToPixel(entity.moveTarget.ly) }
+        : entity.pos;
       let prev = camera.worldToScreen(start.x, start.y);
       for (const wp of entity.moveQueue) {
-        const screen = camera.worldToScreen(wp.x, wp.y);
+        const screen = camera.worldToScreen(leptonToPixel(wp.lx), leptonToPixel(wp.ly));
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(screen.x, screen.y);

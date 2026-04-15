@@ -42,7 +42,7 @@ import {
 } from '../engine/scenario';
 import {
   House, Mission, UnitType, CELL_SIZE, UNIT_STATS,
-  cellToWorld, type CellPos,
+  cellToWorld, type CellPos, cellToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -695,7 +695,7 @@ describe('Waypoint-based spawn locations (reinf.cpp:441)', () => {
     const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
     const mapBounds = { x: 20, y: 30, w: 80, h: 60 };
     const waypoints = new Map<number, CellPos>([[0, { cx: 60, cy: 70 }]]);
-    const originWorld = cellToWorld(60, 70);
+    const originLepton = cellToLepton(60, 70);
     const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(
       action, teamTypes, waypoints, emptyGlobals, emptyTriggers,
@@ -705,8 +705,8 @@ describe('Waypoint-based spawn locations (reinf.cpp:441)', () => {
     expect(result.spawned.length).toBe(1);
     const mig = result.spawned[0];
     expect(mig.moveTarget, 'Aircraft moveTarget should be set to origin waypoint').toBeDefined();
-    expect(mig.moveTarget!.x).toBe(originWorld.x);
-    expect(mig.moveTarget!.y).toBe(originWorld.y);
+    expect(mig.moveTarget!.lx).toBe(originLepton.lx);
+    expect(mig.moveTarget!.ly).toBe(originLepton.ly);
   });
 });
 

@@ -21,7 +21,7 @@ import {
   House, Mission, AnimState, UnitType, Stance,
   CELL_SIZE, LEPTON_SIZE, worldDist,
   WARHEAD_VS_ARMOR, armorIndex,
-  MISSION_CONTROL,
+  MISSION_CONTROL, pixelToLepton,
 } from '../engine/types';
 import {
   updateHunt, updateGuard, updateAreaGuard,
@@ -821,8 +821,8 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
     // Should set moveTarget back to origin (return home)
     expect(guard.moveTarget).not.toBeNull();
     if (guard.moveTarget) {
-      expect(guard.moveTarget.x).toBeCloseTo(200, 0);
-      expect(guard.moveTarget.y).toBeCloseTo(200, 0);
+      expect(guard.moveTarget.lx).toBeCloseTo(pixelToLepton(200), 0);
+      expect(guard.moveTarget.ly).toBeCloseTo(pixelToLepton(200), 0);
     }
   });
 

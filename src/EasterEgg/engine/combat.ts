@@ -357,7 +357,7 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
     const tcx = Math.floor(targetX / CELL_SIZE);
     const tcy = Math.floor(targetY / CELL_SIZE);
     if (!ctx.map.isPassable(tcx, tcy)) return;
-    entity.moveTarget = { x: targetX, y: targetY };
+    entity.moveTarget = { lx: pixelToLepton(targetX), ly: pixelToLepton(targetY) };
     entity.mission = Mission.MOVE;
     return;
   }
@@ -414,8 +414,8 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
   // C++ infantry.cpp:1924-1927 — assign MOVE mission to best cell
   if (bestCell) {
     entity.moveTarget = {
-      x: bestCell.cx * CELL_SIZE + CELL_SIZE / 2,
-      y: bestCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      lx: bestCell.cx * 256 + 128,
+      ly: bestCell.cy * 256 + 128,
     };
     entity.mission = Mission.MOVE;
   }
@@ -658,7 +658,7 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   if (shouldCrushIt(victim, attacker, isVictimPlayerControlled, houseIQ)) {
     victim.target = attacker;
     victim.mission = Mission.MOVE; // C++ unit.cpp:1137-1139: MISSION_MOVE to crush target
-    victim.moveTarget = { x: attacker.pos.x, y: attacker.pos.y };
+    victim.moveTarget = { lx: attacker.leptonX, ly: attacker.leptonY };
     return;
   }
 

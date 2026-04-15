@@ -9,7 +9,7 @@ import {
   type House, type Faction, UnitType, Mission,
   type ProductionItem, getFactoryType,
   COUNTRY_BONUSES, UNIT_STATS,
-  worldToCell,
+  worldToCell, pixelToLepton,
 } from './types';
 import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -382,7 +382,7 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
   const rally = ctx.rallyPoints.get(factoryType);
   if (rally && unitType !== UnitType.V_HARV && !unitStats?.isVessel) {
     entity.mission = Mission.AREA_GUARD;
-    entity.moveTarget = { x: rally.x, y: rally.y };
+    entity.moveTarget = { lx: pixelToLepton(rally.x), ly: pixelToLepton(rally.y) };
     entity.guardOrigin = { x: rally.x, y: rally.y };
     // C++ building.cpp:2039: ArchiveTarget = rally position (used for return-to-rally leash)
     entity.archiveTarget = worldToCell(rally.x, rally.y);

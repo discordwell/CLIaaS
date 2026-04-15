@@ -37,7 +37,7 @@ import {
 import {
   type ProductionItem, type House, type Faction, type WorldPos,
   Mission, UnitType, CELL_SIZE, GAME_TICKS_PER_SEC,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import type { GameMap } from '../engine/map';
@@ -166,7 +166,7 @@ describe('C++ parity: produced units auto-move to rally point (building.cpp:2030
     expect(ctx.entities.length).toBe(1);
     const unit = ctx.entities[0];
     expect(unit.mission).toBe(Mission.AREA_GUARD);
-    expect(unit.moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(rallyPos.x), ly: pixelToLepton(rallyPos.y) });
   });
 
   it('spawned unit gets MOVE when no rally point is set (C++ building.cpp:4539)', () => {
@@ -243,12 +243,12 @@ describe('C++ parity: rally point persistence across multiple productions', () =
     const item = makeItem({ type: '2TNK' as UnitType, prerequisite: 'WEAP' });
     spawnProducedUnit(ctx, item);
     expect(ctx.entities[0].mission).toBe(Mission.AREA_GUARD);
-    expect(ctx.entities[0].moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
+    expect(ctx.entities[0].moveTarget).toEqual({ lx: pixelToLepton(rallyPos.x), ly: pixelToLepton(rallyPos.y) });
 
     // Spawn second unit — should also go to same rally
     spawnProducedUnit(ctx, item);
     expect(ctx.entities[1].mission).toBe(Mission.AREA_GUARD);
-    expect(ctx.entities[1].moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
+    expect(ctx.entities[1].moveTarget).toEqual({ lx: pixelToLepton(rallyPos.x), ly: pixelToLepton(rallyPos.y) });
   });
 
   it('rally point survives production queue completion', () => {
@@ -266,7 +266,7 @@ describe('C++ parity: rally point persistence across multiple productions', () =
 
     // Unit should have spawned and moved to rally
     expect(ctx.entities.length).toBe(1);
-    expect(ctx.entities[0].moveTarget).toEqual({ x: 100, y: 100 });
+    expect(ctx.entities[0].moveTarget).toEqual({ lx: pixelToLepton(100), ly: pixelToLepton(100) });
 
     // Rally point still set for future production
     expect(ctx.rallyPoints.get('WEAP')).toEqual({ x: 100, y: 100 });
@@ -502,7 +502,7 @@ describe('C++ parity: production + rally integration test', () => {
 
     // Unit is moving to rally
     expect(unit.mission).toBe(Mission.AREA_GUARD);
-    expect(unit.moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
+    expect(unit.moveTarget).toEqual({ lx: pixelToLepton(rallyPos.x), ly: pixelToLepton(rallyPos.y) });
   });
 
   it('queued production (queueCount=2): both units go to rally on completion', () => {
@@ -520,7 +520,7 @@ describe('C++ parity: production + rally integration test', () => {
       ctx.tick++;
     }
     expect(ctx.entities.length).toBe(1);
-    expect(ctx.entities[0].moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
+    expect(ctx.entities[0].moveTarget).toEqual({ lx: pixelToLepton(rallyPos.x), ly: pixelToLepton(rallyPos.y) });
 
     // Queue should still have 1 remaining
     const entry = ctx.productionQueue.get('unit');
@@ -533,7 +533,7 @@ describe('C++ parity: production + rally integration test', () => {
       ctx.tick++;
     }
     expect(ctx.entities.length).toBe(2);
-    expect(ctx.entities[1].moveTarget).toEqual({ x: rallyPos.x, y: rallyPos.y });
+    expect(ctx.entities[1].moveTarget).toEqual({ lx: pixelToLepton(rallyPos.x), ly: pixelToLepton(rallyPos.y) });
   });
 
   it('infantry from barracks uses BARR rally point, not WEAP rally', () => {
@@ -551,7 +551,7 @@ describe('C++ parity: production + rally integration test', () => {
     expect(ctx.entities.length).toBe(1);
     const infantry = ctx.entities[0];
     // Should use BARR rally, not WEAP rally
-    expect(infantry.moveTarget).toEqual({ x: 500, y: 500 });
+    expect(infantry.moveTarget).toEqual({ lx: pixelToLepton(500), ly: pixelToLepton(500) });
   });
 
   it('no factory building alive → unit is NOT spawned', () => {

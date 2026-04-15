@@ -74,7 +74,7 @@ import {
   worldToCell, worldDist,
   GAME_TICKS_PER_SEC,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   updateMinelayer,
@@ -424,7 +424,7 @@ describe('mine damage constants from rules.ini [General]', () => {
 describe('mine placement: faction determines mine type', () => {
   it('Allied house (Spain) places AV mine', () => {
     const mnly = makeMinelayer(House.Spain, 10, 10);
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -436,7 +436,7 @@ describe('mine placement: faction determines mine type', () => {
 
   it('Soviet house (USSR) places AP mine', () => {
     const mnly = makeMinelayer(House.USSR, 10, 10);
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -447,7 +447,7 @@ describe('mine placement: faction determines mine type', () => {
 
   it('Ukraine (Soviet faction) places AP mine — C++ HOUSE_UKRAINE check', () => {
     const mnly = makeMinelayer(House.Ukraine, 10, 10);
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -458,7 +458,7 @@ describe('mine placement: faction determines mine type', () => {
 
   it('BadGuy (Soviet faction) places AP mine — C++ HOUSE_BAD check', () => {
     const mnly = makeMinelayer(House.BadGuy, 10, 10);
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -470,14 +470,14 @@ describe('mine placement: faction determines mine type', () => {
   it('mine damage matches INI value for mine type', () => {
     // Allied AV mine
     const avMnly = makeMinelayer(House.Spain, 10, 10);
-    avMnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    avMnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const avCtx = makeContext({ entities: [avMnly] });
     updateMinelayer(avCtx, avMnly);
     expect(avCtx.mines[0].damage).toBe(AV_MINE_DAMAGE);
 
     // Soviet AP mine
     const apMnly = makeMinelayer(House.USSR, 15, 15);
-    apMnly.moveTarget = { x: 15 * CELL_SIZE + CELL_SIZE / 2, y: 15 * CELL_SIZE + CELL_SIZE / 2 };
+    apMnly.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(15 * CELL_SIZE + CELL_SIZE / 2) };
     const apCtx = makeContext({ entities: [apMnly] });
     updateMinelayer(apCtx, apMnly);
     expect(apCtx.mines[0].damage).toBe(AP_MINE_DAMAGE);
@@ -493,7 +493,7 @@ describe('mine placement: ammo mechanics', () => {
   it('placing a mine decrements ammo by 1', () => {
     const mnly = makeMinelayer(House.Spain, 10, 10);
     const initialAmmo = mnly.ammo;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -503,7 +503,7 @@ describe('mine placement: ammo mechanics', () => {
   it('minelayer with 0 ammo cannot place mine', () => {
     const mnly = makeMinelayer(House.Spain, 10, 10);
     mnly.ammo = 0;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -520,7 +520,7 @@ describe('mine placement: ammo mechanics', () => {
     for (let i = 0; i < maxAmmo; i++) {
       const cx = 10 + i;
       mnly.pos = { x: cx * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-      mnly.moveTarget = { x: cx * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+      mnly.moveTarget = { lx: pixelToLepton(cx * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
       const ctx = makeContext({ entities: [mnly], mines });
       updateMinelayer(ctx, mnly);
     }
@@ -535,7 +535,7 @@ describe('mine placement: ammo mechanics', () => {
     ];
     const mnly = makeMinelayer(House.Spain, 10, 10);
     const initialAmmo = mnly.ammo;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly], mines });
     updateMinelayer(ctx, mnly);
 
@@ -562,7 +562,7 @@ describe('mine limit per house', () => {
     }
 
     const mnly = makeMinelayer(House.Spain, 60, 10);
-    mnly.moveTarget = { x: 60 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(60 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly], mines });
     updateMinelayer(ctx, mnly);
 
@@ -881,7 +881,7 @@ describe('TS mine damage constants match rules.ini', () => {
     // TS specialUnits.ts line 175: mineDamage = mineType === 'AP' ? 1000 : 1200
     // This must match rules.ini [General] AVMineDamage
     const avMnly = makeMinelayer(House.Spain, 20, 20);
-    avMnly.moveTarget = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
+    avMnly.moveTarget = { lx: pixelToLepton(20 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(20 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [avMnly] });
     updateMinelayer(ctx, avMnly);
 
@@ -890,7 +890,7 @@ describe('TS mine damage constants match rules.ini', () => {
 
   it('TS AP mine damage matches rules.ini APMineDamage', () => {
     const apMnly = makeMinelayer(House.USSR, 20, 20);
-    apMnly.moveTarget = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
+    apMnly.moveTarget = { lx: pixelToLepton(20 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(20 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [apMnly] });
     updateMinelayer(ctx, apMnly);
 
@@ -908,7 +908,7 @@ describe('mine placement stores correct cell coordinates', () => {
     const targetCx = 15;
     const targetCy = 20;
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, targetCx, targetCy);
-    mnly.moveTarget = { x: targetCx * CELL_SIZE + CELL_SIZE / 2, y: targetCy * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(targetCx * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(targetCy * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 
@@ -926,7 +926,7 @@ describe('mine placement stores correct cell coordinates', () => {
 describe('mine placement state reset', () => {
   it('after placing mine, minelayer returns to GUARD/IDLE', () => {
     const mnly = makeMinelayer(House.Spain, 10, 10);
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);
 

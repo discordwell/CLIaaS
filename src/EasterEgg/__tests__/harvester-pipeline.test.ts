@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { GameMap, Terrain } from '../engine/map';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { findPath } from '../engine/pathfinding';
-import { MAP_CELLS, CELL_SIZE, UnitType, House, Mission, AnimState, UNIT_STATS } from '../engine/types';
+import { MAP_CELLS, CELL_SIZE, UnitType, House, Mission, AnimState, UNIT_STATS, cellToLepton } from '../engine/types';
 import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
 const PRODUCTION_ITEMS = getCanonicalProductionItems();
 import type { MapStructure } from '../engine/scenario';
@@ -112,10 +112,7 @@ function simulateHarvesterTick(
       if (oreCell) {
         harv.harvesterState = 'seeking';
         harv.mission = Mission.MOVE;
-        harv.moveTarget = {
-          x: oreCell.cx * CELL_SIZE + CELL_SIZE / 2,
-          y: oreCell.cy * CELL_SIZE + CELL_SIZE / 2,
-        };
+        harv.moveTarget = cellToLepton(oreCell.cx, oreCell.cy);
         harv.path = findPath(map, ec, oreCell, true);
         harv.pathIndex = 0;
       }
@@ -161,10 +158,7 @@ function simulateHarvesterTick(
           if (newOre && harv.oreLoad < Entity.BAIL_COUNT) {
             harv.harvesterState = 'seeking';
             harv.mission = Mission.MOVE;
-            harv.moveTarget = {
-              x: newOre.cx * CELL_SIZE + CELL_SIZE / 2,
-              y: newOre.cy * CELL_SIZE + CELL_SIZE / 2,
-            };
+            harv.moveTarget = cellToLepton(newOre.cx, newOre.cy);
             harv.path = findPath(map, ec, newOre, true);
             harv.pathIndex = 0;
           } else {
@@ -210,10 +204,7 @@ function simulateHarvesterTick(
       } else {
         const target = { cx: bestProc.cx + 1, cy: bestProc.cy + procH };
         harv.mission = Mission.MOVE;
-        harv.moveTarget = {
-          x: target.cx * CELL_SIZE + CELL_SIZE / 2,
-          y: target.cy * CELL_SIZE + CELL_SIZE / 2,
-        };
+        harv.moveTarget = cellToLepton(target.cx, target.cy);
         harv.path = findPath(map, ec, target, true);
         harv.pathIndex = 0;
         harv.harvestTick = 0;
@@ -356,8 +347,8 @@ describe('Harvester Pipeline', () => {
       setOverlay(map, 55, 50, 0x08); // ore 5 cells east
       simulateHarvesterTick(harv, map, [], House.Spain, true, 0);
       expect(harv.moveTarget).toBeDefined();
-      expect(harv.moveTarget!.x).toBe(55 * CELL_SIZE + CELL_SIZE / 2);
-      expect(harv.moveTarget!.y).toBe(50 * CELL_SIZE + CELL_SIZE / 2);
+      expect(harv.moveTarget!.lx).toBe(cellToLepton(55, 50).lx);
+      expect(harv.moveTarget!.ly).toBe(cellToLepton(55, 50).ly);
       expect(harv.path.length).toBeGreaterThan(0);
     });
 
@@ -665,8 +656,8 @@ describe('Harvester Pipeline', () => {
       simulateHarvesterTick(harv, map, [refinery], House.Spain, true, 0);
       // Should be heading to dock cell (56, 57)
       expect(harv.moveTarget).not.toBeNull();
-      expect(harv.moveTarget!.x).toBe(56 * CELL_SIZE + CELL_SIZE / 2);
-      expect(harv.moveTarget!.y).toBe(57 * CELL_SIZE + CELL_SIZE / 2);
+      expect(harv.moveTarget!.lx).toBe(cellToLepton(56, 57).lx);
+      expect(harv.moveTarget!.ly).toBe(cellToLepton(56, 57).ly);
     });
 
     it('returning harvester stuck with empty path times out after 45 ticks', () => {
@@ -1096,10 +1087,11 @@ describe('Harvester Pipeline', () => {
         const procW = 3, procH = 2;
         harv.harvesterState = 'returning';
         harv.mission = Mission.MOVE;
-        harv.moveTarget = {
-          x: (refinery.cx + procW / 2) * CELL_SIZE,
-          y: (refinery.cy + procH / 2) * CELL_SIZE,
-        };
+        const refineryCenter = cellToLepton(
+          Math.floor(refinery.cx + procW / 2),
+          Math.floor(refinery.cy + procH / 2),
+        );
+        harv.moveTarget = refineryCenter;
         harv.harvestTick = 0;
       }
 

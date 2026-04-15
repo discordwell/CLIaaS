@@ -8,7 +8,7 @@
 import {
   type WorldPos, CELL_SIZE,
   type House, UnitType, Mission, AnimState,
-  worldDist, worldToCell, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
+  worldDist, worldToCell, pixelToLepton, leptonToPixel, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
   directionTo, HOUSE_FACTION,
   WARHEAD_META, modifyDamage, type WarheadType,
 } from './types';
@@ -84,12 +84,12 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
     // Follow A* path if available (from harness attack_struct), otherwise direct moveToward
     if (entity.path && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
       const nextCell = entity.path[entity.pathIndex];
-      const wp = { x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2, y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2 };
+      const wp = { lx: nextCell.cx * 256 + 128, ly: nextCell.cy * 256 + 128 };
       if (entity.moveToward(wp, ctx.movementSpeed(entity))) {
         entity.pathIndex++;
       }
     } else {
-      entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity));
+      entity.moveToward({ lx: pixelToLepton(scx), ly: pixelToLepton(scy) }, ctx.movementSpeed(entity));
     }
     return;
   }
@@ -140,7 +140,7 @@ export function updateThief(ctx: SpecialUnitsContext, entity: Entity): void {
   const scx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
   const scy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
   const dist = worldDist(entity.pos, { x: scx, y: scy });
-  if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward({ x: scx, y: scy }, ctx.movementSpeed(entity)); return; }
+  if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward({ lx: pixelToLepton(scx), ly: pixelToLepton(scy) }, ctx.movementSpeed(entity)); return; }
   // Credit theft only applies to PROC/SILO
   if (s.type === 'PROC' || s.type === 'SILO') {
     const enemyCredits = ctx.houseCredits.get(s.house) ?? 0;
@@ -162,8 +162,8 @@ export function updateThief(ctx: SpecialUnitsContext, entity: Entity): void {
 /** Minelayer places AP mines. Mine limit: 50/house. */
 export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void {
   if (entity.type !== UnitType.V_MNLY || !entity.alive || !entity.moveTarget) return;
-  const targetCell = worldToCell(entity.moveTarget.x, entity.moveTarget.y);
-  const dist = worldDist(entity.pos, entity.moveTarget);
+  const targetCell = { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) };
+  const dist = worldDist(entity.pos, { x: leptonToPixel(entity.moveTarget.lx), y: leptonToPixel(entity.moveTarget.ly) });
   if (dist > 0.5) { entity.animState = AnimState.WALK; entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity)); return; }
   // C++ parity: minelayer carries limited ammo (Ammo=5 in rules.ini)
   if (entity.ammo === 0 && entity.maxAmmo > 0) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
@@ -315,7 +315,7 @@ export function deployMADTank(ctx: SpecialUnitsContext, entity: Entity): void {
       // Move away from tank
       const awayX = crew.pos.x + dx * CELL_SIZE * 3;
       const awayY = crew.pos.y + dy * CELL_SIZE * 3;
-      crew.moveTarget = { x: awayX, y: awayY };
+      crew.moveTarget = { lx: pixelToLepton(awayX), ly: pixelToLepton(awayY) };
       ctx.addEntity(crew);
       break;
     }
@@ -349,7 +349,7 @@ export function updateDemoTruck(ctx: SpecialUnitsContext, entity: Entity): void 
   }
   if (!targetPos) { entity.mission = Mission.GUARD; return; }
   const dist = worldDist(entity.pos, targetPos);
-  if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward(targetPos, ctx.movementSpeed(entity)); return; }
+  if (dist > 1.5) { entity.animState = AnimState.WALK; entity.moveToward({ lx: pixelToLepton(targetPos.x), ly: pixelToLepton(targetPos.y) }, ctx.movementSpeed(entity)); return; }
   // Reached target — arm the fuse
   entity.fuseTimer = DEMO_TRUCK_FUSE_TICKS;
 }
@@ -416,7 +416,7 @@ export function updateMechanicUnit(ctx: SpecialUnitsContext, entity: Entity): vo
   if (entity.fear >= Entity.FEAR_SCARED) {
     let ned = Infinity; let nep: WorldPos | null = null;
     for (const o of ctx.entities) { if (!o.alive || ctx.entitiesAllied(entity, o)) continue; const d = worldDist(entity.pos, o.pos); if (d < entity.stats.sight && d < ned) { ned = d; nep = o.pos; } }
-    if (nep) { const dx = entity.pos.x - nep.x; const dy = entity.pos.y - nep.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; entity.animState = AnimState.WALK; entity.moveToward({ x: entity.pos.x + (dx / d) * CELL_SIZE * 3, y: entity.pos.y + (dy / d) * CELL_SIZE * 3 }, ctx.movementSpeed(entity)); entity.healTarget = null; return; }
+    if (nep) { const dx = entity.pos.x - nep.x; const dy = entity.pos.y - nep.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; entity.animState = AnimState.WALK; entity.moveToward({ lx: pixelToLepton(entity.pos.x + (dx / d) * CELL_SIZE * 3), ly: pixelToLepton(entity.pos.y + (dy / d) * CELL_SIZE * 3) }, ctx.movementSpeed(entity)); entity.healTarget = null; return; }
   }
   if (entity.healTarget) { const ht = entity.healTarget; if (!ht.alive || ht.hp >= ht.maxHp || !ctx.isAllied(entity.house, ht.house) || ht.stats.isInfantry || ht.isAirUnit || ht.id === entity.id) entity.healTarget = null; }
   const hsd = entity.stats.scanDelay ?? 22; // C++ Normal_Delay = 22 ticks
@@ -435,7 +435,7 @@ export function updateMechanicUnit(ctx: SpecialUnitsContext, entity: Entity): vo
         if (healed > 0) { ctx.playSoundAt('heal', ht.pos.x, ht.pos.y); ctx.effects.push({ type: 'muzzle', x: ht.pos.x, y: ht.pos.y - 4, frame: 0, maxFrames: 6, size: 4, muzzleColor: '80,200,255' }); ctx.effects.push({ type: 'text', x: ht.pos.x, y: ht.pos.y - 8, frame: 0, maxFrames: 30, size: 0, text: `+${healed}`, textColor: 'rgba(80,200,255,1)' }); }
         if (ht.hp >= ht.maxHp) entity.healTarget = null;
       }
-    } else { entity.animState = AnimState.WALK; entity.moveToward(ht.pos, ctx.movementSpeed(entity)); }
+    } else { entity.animState = AnimState.WALK; entity.moveToward({ lx: ht.leptonX, ly: ht.leptonY }, ctx.movementSpeed(entity)); }
     return;
   }
   entity.animState = AnimState.IDLE;
@@ -473,7 +473,7 @@ export function updateMedic(ctx: SpecialUnitsContext, entity: Entity): void {
       const fleeX = entity.pos.x + (dx / dist) * CELL_SIZE * 3;
       const fleeY = entity.pos.y + (dy / dist) * CELL_SIZE * 3;
       entity.animState = AnimState.WALK;
-      entity.moveToward({ x: fleeX, y: fleeY }, ctx.movementSpeed(entity));
+      entity.moveToward({ lx: pixelToLepton(fleeX), ly: pixelToLepton(fleeY) }, ctx.movementSpeed(entity));
       entity.healTarget = null; // drop heal target when fleeing
       return;
     }
@@ -567,7 +567,7 @@ export function updateMedic(ctx: SpecialUnitsContext, entity: Entity): void {
     } else {
       // Move toward heal target
       entity.animState = AnimState.WALK;
-      entity.moveToward(ht.pos, ctx.movementSpeed(entity));
+      entity.moveToward({ lx: ht.leptonX, ly: ht.leptonY }, ctx.movementSpeed(entity));
     }
     return;
   }

@@ -15,7 +15,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, Mission, CELL_SIZE, UNIT_STATS, SpeedClass,
   cellToWorld, worldToCell, worldDist,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import {
   checkTriggerEvent,
   executeTriggerAction,
@@ -202,7 +202,7 @@ describe('Off-map waypoint exit', () => {
   it('entity at south edge with off-map moveTarget satisfies exit condition', () => {
     const truk = new Entity(UnitType.V_TRUK, House.England, 80 * CELL_SIZE + CELL_SIZE / 2, 85 * CELL_SIZE + CELL_SIZE / 2);
     const offMapTarget = cellToWorld(WP25.cx, WP25.cy);
-    truk.moveTarget = { x: offMapTarget.x, y: offMapTarget.y };
+    truk.moveTarget = { lx: pixelToLepton(offMapTarget.x), ly: pixelToLepton(offMapTarget.y) };
 
     // Entity is at south edge
     const cy = truk.cell.cy;
@@ -210,7 +210,7 @@ describe('Off-map waypoint exit', () => {
     expect(atEdge).toBe(true);
 
     // MoveTarget is outside bounds
-    const tc = worldToCell(truk.moveTarget.x, truk.moveTarget.y);
+    const tc = worldToCell(truk.moveTarget.lx, truk.moveTarget.ly);
     const targetInBounds = tc.cx >= mapBounds.x && tc.cx < mapBounds.x + mapBounds.w &&
                            tc.cy >= mapBounds.y && tc.cy < mapBounds.y + mapBounds.h;
     expect(targetInBounds).toBe(false);

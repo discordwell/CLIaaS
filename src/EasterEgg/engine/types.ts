@@ -1386,6 +1386,12 @@ export interface WorldPos {
   y: number;  // pixel y in world space
 }
 
+/** Lepton-space position (256 leptons per cell). Used for moveTarget to avoid pixel↔lepton roundtrip errors. */
+export interface LeptonPos {
+  lx: number;  // lepton x
+  ly: number;  // lepton y
+}
+
 export interface CellPos {
   cx: number; // cell column (0-127)
   cy: number; // cell row (0-127)

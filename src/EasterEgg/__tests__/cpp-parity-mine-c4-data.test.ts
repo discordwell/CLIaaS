@@ -22,7 +22,7 @@ import {
   UnitType, House, CELL_SIZE, Mission, AnimState,
   UNIT_STATS, CONDITION_RED,
   buildDefaultAlliances,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
 import {
@@ -131,7 +131,7 @@ describe('APMineDamage / AVMineDamage constants (rules.ini:55-56, rules.cpp:202-
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -148,7 +148,7 @@ describe('APMineDamage / AVMineDamage constants (rules.ini:55-56, rules.cpp:202-
     const mnly = entityAtCell(UnitType.V_MNLY, House.USSR, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -191,7 +191,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -207,7 +207,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -220,7 +220,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -235,7 +235,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 0;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -249,7 +249,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [
       { cx: 10, cy: 10, house: House.Spain, damage: 1200, type: 'AV' },
     ];
@@ -265,7 +265,7 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
     mnly.mineCount = 0;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     const ctx = makeSpecialCtx([mnly], [], mines);
 
@@ -289,7 +289,7 @@ describe('Mine limit per house (specialUnits.ts MAX_MINES_PER_HOUSE)', () => {
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     // Fill up to 50 mines for this house
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     for (let i = 0; i < 50; i++) {
@@ -306,7 +306,7 @@ describe('Mine limit per house (specialUnits.ts MAX_MINES_PER_HOUSE)', () => {
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
     mnly.ammo = 5;
     mnly.maxAmmo = 5;
-    mnly.moveTarget = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
     // 50 mines for USSR, but Spain has 0
     const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
     for (let i = 0; i < 50; i++) {

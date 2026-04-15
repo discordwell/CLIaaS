@@ -24,7 +24,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { Mission, House, UnitType, CELL_SIZE } from '../engine/types';
+import { Mission, House, UnitType, CELL_SIZE, pixelToLepton, } from '../engine/types';
 
 beforeEach(() => {
   resetEntityIds();
@@ -35,9 +35,9 @@ function makeUnit(x = 100, y = 100): Entity {
   return new Entity(UnitType.E1, House.Greece, x, y);
 }
 
-/** Helper: create a WorldPos */
-function wp(x: number, y: number) {
-  return { x, y };
+/** Helper: create a LeptonPos (was WorldPos pre-lepton refactor) */
+function wp(lx: number, ly: number) {
+  return { lx, ly };
 }
 
 // =============================================================================
@@ -400,7 +400,7 @@ describe('NavQueue loop mode — C++ foot.cpp:2288-2289,2242-2248', () => {
     expect(consumed).toEqual(wp(100, 100));
 
     // C++ foot.cpp:2242-2248: re-append consumed entry when looping
-    unit.queueWaypoint({ x: consumed.x, y: consumed.y });
+    unit.queueWaypoint(consumed);
     expect(unit.moveQueue.length).toBe(3); // 2 remaining + 1 re-appended
     expect(unit.moveQueue[2]).toEqual(wp(100, 100)); // re-appended at end
   });
@@ -414,7 +414,7 @@ describe('NavQueue loop mode — C++ foot.cpp:2288-2289,2242-2248', () => {
     // C++ Handle_Navigation_List: when queue empty and loop=true, re-populate
     if (unit.moveQueue.length === 0 && unit.navQueueLoop && unit.navQueueOriginal.length > 0) {
       for (const w of unit.navQueueOriginal) {
-        unit.queueWaypoint({ x: w.x, y: w.y });
+        unit.queueWaypoint(w);
       }
     }
 

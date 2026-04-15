@@ -1073,8 +1073,8 @@ describe('dock cell calculation — C++ refinery entrance', () => {
     const expectedDockCx = 55 + 1;
     const expectedDockCy = 55 + procH - 1;
     expect(harv.moveTarget).not.toBeNull();
-    const targetCx = Math.floor((harv.moveTarget!.x - CELL_SIZE / 2) / CELL_SIZE);
-    const targetCy = Math.floor((harv.moveTarget!.y - CELL_SIZE / 2) / CELL_SIZE);
+    const targetCx = Math.floor(harv.moveTarget!.lx / 256);
+    const targetCy = Math.floor(harv.moveTarget!.ly / 256);
     expect(targetCx).toBe(expectedDockCx);
     expect(targetCy).toBe(expectedDockCy);
   });

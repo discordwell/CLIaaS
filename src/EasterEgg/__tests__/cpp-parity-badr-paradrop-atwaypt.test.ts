@@ -33,7 +33,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   UnitType, House, CELL_SIZE, Mission,
-  type WorldPos,
+  type WorldPos, type LeptonPos, pixelToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type AircraftContext, updateAircraft } from '../engine/aircraft';
@@ -107,7 +107,7 @@ function spawnBadrWithPassengers(
   // C++ team.cpp:1705 — Coordinate_Attack assigns MISSION_ATTACK, leaving
   // Target (the ATT_WAYPT waypoint cell) carried through moveTarget.
   badr.mission = Mission.ATTACK;
-  badr.moveTarget = { ...dropTarget };
+  badr.moveTarget = { lx: pixelToLepton(dropTarget.x), ly: pixelToLepton(dropTarget.y) };
   badr.target = null;
   // Face toward the target so the BADR flies in the correct direction
   const dx = dropTarget.x - startWorld.x;
@@ -308,7 +308,7 @@ describe('regression: non-paradrop aircraft flight paths unchanged', () => {
     badr.flightAltitude = Entity.FLIGHT_ALTITUDE;
     badr.aircraftState = 'flying';
     badr.mission = Mission.MOVE;
-    badr.moveTarget = { ...dropTarget };
+    badr.moveTarget = { lx: pixelToLepton(dropTarget.x), ly: pixelToLepton(dropTarget.y) };
     ctx.entities.push(badr);
     ctx.entityById.set(badr.id, badr);
 
@@ -326,7 +326,8 @@ describe('regression: non-paradrop aircraft flight paths unchanged', () => {
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
     heli.aircraftState = 'unload_search'; // separate from 'flying'
     heli.mission = Mission.UNLOAD;
-    heli.moveTarget = cellToWorld(30, 30);
+    const heliTarget = cellToWorld(30, 30);
+    heli.moveTarget = { lx: pixelToLepton(heliTarget.x), ly: pixelToLepton(heliTarget.y) };
     heli._unloadSearchTicks = 0;
     const passenger = new Entity(UnitType.I_E1, House.USSR, heli.pos.x, heli.pos.y);
     passenger.transportRef = heli;

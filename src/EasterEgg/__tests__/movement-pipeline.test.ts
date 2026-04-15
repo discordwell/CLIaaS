@@ -30,7 +30,7 @@ import {
   worldToCell, worldDist, directionTo,
   type WorldPos, type CellPos,
   UNIT_STATS, MAP_CELLS,
-} from '../engine/types';
+pixelToLepton, } from '../engine/types';
 import {
   TRACK_DATA, getTrackArray, smoothTurn, lookupTrackControl,
   getEffectiveTrack, usesTrackMovement, LP, PIXEL_LEPTON_W, F_D,
@@ -54,7 +54,7 @@ describe('Core moveToward — speed class behavior', () => {
     const startX = inf.pos.x;
 
     inf.rotTickedThisFrame = false;
-    inf.moveToward({ x: 300, y: 100 }, speed);
+    inf.moveToward({ lx: pixelToLepton(300), ly: pixelToLepton(100) }, speed);
 
     const moved = inf.pos.x - startX;
     // C++ infantry Coord_Move: maxspeed = floor(speed/LP), axisLeptons = (maxspeed * 127) >> 7
@@ -76,7 +76,7 @@ describe('Core moveToward — speed class behavior', () => {
     const startX = tank.pos.x;
 
     tank.rotTickedThisFrame = false;
-    tank.moveToward({ x: 300, y: 100 }, speed);
+    tank.moveToward({ lx: pixelToLepton(300), ly: pixelToLepton(100) }, speed);
 
     const moved = tank.pos.x - startX;
     // Vehicle: SpeedAccum accumulator then Coord_Move sin/cos
@@ -254,7 +254,7 @@ describe('Cell transitions and occupancy', () => {
     // Move east past the boundary
     unit.facing = Dir.E;
     unit.rotTickedThisFrame = false;
-    unit.moveToward({ x: x + 10, y: CELL_SIZE * 4 + 12 }, 5);
+    unit.moveToward({ lx: pixelToLepton(x + 10), ly: pixelToLepton(CELL_SIZE * 4 + 12) }, 5);
 
     expect(unit.cell.cx).toBe(5);
   });
@@ -954,7 +954,7 @@ describe('Edge cases — zero distance, death, speed=0', () => {
 
     // Should not throw
     expect(() => {
-      unit.moveToward({ x: 200, y: 200 }, 5);
+      unit.moveToward({ lx: pixelToLepton(200), ly: pixelToLepton(200) }, 5);
     }).not.toThrow();
   });
 
@@ -968,7 +968,7 @@ describe('Edge cases — zero distance, death, speed=0', () => {
 
     const startX = unit.pos.x;
     unit.rotTickedThisFrame = false;
-    unit.moveToward({ x: 200, y: 100 }, 0.01);
+    unit.moveToward({ lx: pixelToLepton(200), ly: pixelToLepton(100) }, 0.01);
 
     // At 0 leptons/tick, unit does not move (correct C++ parity)
     expect(unit.pos.x).toBe(startX);
@@ -994,7 +994,7 @@ describe('Edge cases — zero distance, death, speed=0', () => {
     const startX = unit.pos.x;
 
     unit.rotTickedThisFrame = false;
-    unit.moveToward({ x: 200, y: 100 }, 5);
+    unit.moveToward({ lx: pixelToLepton(200), ly: pixelToLepton(100) }, 5);
 
     // speed * speedBias = 5 * 0 = 0, clamped to dist if > 0.5
     // Actually with 0 speed: step = Math.min(0, dist) = 0, no movement
@@ -1005,12 +1005,12 @@ describe('Edge cases — zero distance, death, speed=0', () => {
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     expect(unit.moveQueue).toEqual([]);
 
-    unit.moveQueue.push({ x: 200, y: 200 });
-    unit.moveQueue.push({ x: 300, y: 300 });
+    unit.moveQueue.push({ lx: pixelToLepton(200), ly: pixelToLepton(200) });
+    unit.moveQueue.push({ lx: pixelToLepton(300), ly: pixelToLepton(300) });
     expect(unit.moveQueue).toHaveLength(2);
 
     const next = unit.moveQueue.shift()!;
-    expect(next).toEqual({ x: 200, y: 200 });
+    expect(next).toEqual({ lx: pixelToLepton(200), ly: pixelToLepton(200) });
     expect(unit.moveQueue).toHaveLength(1);
   });
 });
@@ -1095,7 +1095,7 @@ describe('movementSpeed formula components', () => {
     const startX = unit.pos.x;
 
     unit.rotTickedThisFrame = false;
-    unit.moveToward({ x: 300, y: 100 }, baseSpeed);
+    unit.moveToward({ lx: pixelToLepton(300), ly: pixelToLepton(100) }, baseSpeed);
 
     // Infantry Coord_Move uses 256-step direction via Desired_Facing256.
     // Pure east gives DirType 63 (not 64) due to integer arithmetic in the
@@ -1118,7 +1118,7 @@ describe('movementSpeed formula components', () => {
     // moveToward does not use groundspeedBias for translation speed
     // (it only affects rotation accumulation)
     unit.rotTickedThisFrame = false;
-    unit.moveToward({ x: 300, y: 100 }, baseSpeed);
+    unit.moveToward({ lx: pixelToLepton(300), ly: pixelToLepton(100) }, baseSpeed);
 
     const moved = unit.pos.x - startX;
     // Infantry Coord_Move: maxspeed=floor(5/LP)=53, cardinal: (53*127)>>7=52 → 52*LP=4.875
@@ -1409,8 +1409,8 @@ describe('savedMoveTarget — AI movement interruption', () => {
 
   it('savedMoveTarget can store a position for later resumption', () => {
     const e = new Entity(UnitType.I_E1, House.Spain, 100, 100);
-    e.savedMoveTarget = { x: 500, y: 500 };
-    expect(e.savedMoveTarget).toEqual({ x: 500, y: 500 });
+    e.savedMoveTarget = { lx: pixelToLepton(500), ly: pixelToLepton(500) };
+    expect(e.savedMoveTarget).toEqual({ lx: pixelToLepton(500), ly: pixelToLepton(500) });
   });
 });
 

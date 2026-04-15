@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Entity, setPlayerHouses, resetEntityIds } from '../engine/entity';
-import { House, UnitType, Mission, CELL_SIZE, type SpeedClass } from '../engine/types';
+import { House, UnitType, Mission, CELL_SIZE, type SpeedClass, pixelToLepton, } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
 import {
   serializeState, processCommands,
@@ -259,8 +259,8 @@ describe('processCommands — aircraft move', () => {
     expect(tran.mission).toBe(Mission.MOVE);
     expect(tran.path).toEqual([{ cx: 85, cy: 47 }]);
     expect(tran.moveTarget).toEqual({
-      x: 85 * CELL_SIZE + CELL_SIZE / 2,
-      y: 47 * CELL_SIZE + CELL_SIZE / 2,
+      lx: 85 * 256 + 128,
+      ly: 47 * 256 + 128,
     });
   });
 });

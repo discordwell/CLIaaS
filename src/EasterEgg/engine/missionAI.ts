@@ -175,8 +175,8 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       const saved = entity.savedMoveTarget;
       entity.savedMoveTarget = null;
       entity.mission = Mission.MOVE;
-      entity.moveTarget = { x: saved.x, y: saved.y };
-      entity.path = findPath(ctx.map, entity.cell, worldToCell(saved.x, saved.y), true, entity.isNavalUnit, entity.stats.speedClass);
+      entity.moveTarget = { lx: saved.lx, ly: saved.ly };
+      entity.path = findPath(ctx.map, entity.cell, { cx: Math.floor(saved.lx / 256), cy: Math.floor(saved.ly / 256) }, true, entity.isNavalUnit, entity.stats.speedClass);
       entity.pathIndex = 0;
       return;
     }
@@ -185,7 +185,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       const d = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(entity.guardOrigin.x), pixelToLepton(entity.guardOrigin.y));
       if (d > 384) { // 1.5 cells * 256 leptons/cell
         entity.mission = Mission.MOVE;
-        entity.moveTarget = { x: entity.guardOrigin.x, y: entity.guardOrigin.y };
+        entity.moveTarget = { lx: pixelToLepton(entity.guardOrigin.x), ly: pixelToLepton(entity.guardOrigin.y) };
         entity.path = findPath(ctx.map, entity.cell, worldToCell(entity.guardOrigin.x, entity.guardOrigin.y), true, entity.isNavalUnit, entity.stats.speedClass);
         entity.pathIndex = 0;
         return;
@@ -265,7 +265,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
       // LOS blocked — move toward target to get clear shot
       entity.animState = AnimState.WALK;
-      entity.moveToward(entity.target.pos, ctx.movementSpeed(entity));
+      entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, ctx.movementSpeed(entity));
       if (entity.attackCooldown > 0) entity.attackCooldown--;
       if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
       return;
@@ -570,11 +570,11 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       } else {
         // Target still within guard perimeter — pursue briefly
         entity.animState = AnimState.WALK;
-        entity.moveToward(entity.target.pos, ctx.movementSpeed(entity));
+        entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, ctx.movementSpeed(entity));
       }
     } else {
       entity.animState = AnimState.WALK;
-      entity.moveToward(entity.target.pos, ctx.movementSpeed(entity));
+      entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, ctx.movementSpeed(entity));
     }
   }
 
@@ -915,8 +915,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       const bx1 = (ctx.map.boundsX + ctx.map.boundsW) * CELL_SIZE;
       const by1 = (ctx.map.boundsY + ctx.map.boundsH) * CELL_SIZE;
       entity.moveTarget = {
-        x: Math.max(bx0 + CELL_SIZE, Math.min(bx1 - CELL_SIZE, fleeX)),
-        y: Math.max(by0 + CELL_SIZE, Math.min(by1 - CELL_SIZE, fleeY)),
+        lx: pixelToLepton(Math.max(bx0 + CELL_SIZE, Math.min(bx1 - CELL_SIZE, fleeX))),
+        ly: pixelToLepton(Math.max(by0 + CELL_SIZE, Math.min(by1 - CELL_SIZE, fleeY))),
       };
       entity.mission = Mission.MOVE;
       entity.path = [];
@@ -1123,7 +1123,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       return;
     }
     // AG1: Return home but stay in AREA_GUARD (C++ Assign_Destination, not Assign_Mission)
-    entity.moveTarget = { x: origin.x, y: origin.y };
+    entity.moveTarget = { lx: pixelToLepton(origin.x), ly: pixelToLepton(origin.y) };
     entity.target = null;
     entity.targetStructure = null;
     entity.path = findPath(ctx.map, ec, worldToCell(origin.x, origin.y), true, entity.isNavalUnit, entity.stats.speedClass);
@@ -1134,7 +1134,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
 
   // If moving back toward origin, continue moving
   if (entity.moveTarget) {
-    const distToMove = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(entity.moveTarget.x), pixelToLepton(entity.moveTarget.y));
+    const distToMove = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
     if (distToMove > 256) { // 1.0 cell in leptons
       entity.animState = AnimState.WALK;
       entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
@@ -1207,7 +1207,7 @@ export function updateRetreat(ctx: MissionAIContext, entity: Entity): void {
   else if (minDist === distRight) tx = ctx.map.boundsX + ctx.map.boundsW - 1;
   else if (minDist === distTop) ty = ctx.map.boundsY;
   else ty = ctx.map.boundsY + ctx.map.boundsH - 1;
-  entity.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
+  entity.moveTarget = { lx: tx * 256 + 128, ly: ty * 256 + 128 };
   entity.path = findPath(ctx.map, ec, { cx: tx, cy: ty }, true, entity.isNavalUnit, entity.stats.speedClass);
   entity.pathIndex = 0;
 }
@@ -1235,7 +1235,7 @@ export function orderTransportEvacuate(ctx: MissionAIContext, transport: Entity)
   transport.teamMissions = [];
   transport.teamMissionIndex = 0;
   transport.mission = Mission.MOVE;
-  transport.moveTarget = { x: tx * CELL_SIZE + CELL_SIZE / 2, y: ty * CELL_SIZE + CELL_SIZE / 2 };
+  transport.moveTarget = { lx: tx * 256 + 128, ly: ty * 256 + 128 };
   transport.target = null;
   transport.moveQueue = [];
   // Aircraft: ensure takeoff if landed
@@ -1283,19 +1283,18 @@ export function updateRepairMission(ctx: MissionAIContext, entity: Entity): void
   }
   // Find nearest FIX structure
   let bestDist = Infinity;
-  let bestPos: WorldPos | null = null;
+  let bestLPos: { lx: number; ly: number; cx: number; cy: number } | null = null;
   for (const s of ctx.structures) {
     if (!s.alive || s.type !== 'FIX') continue;
     if (!ctx.isAllied(s.house, entity.house)) continue;
-    const sp: WorldPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
     const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
     const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
     const d = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
-    if (d < bestDist) { bestDist = d; bestPos = sp; }
+    if (d < bestDist) { bestDist = d; bestLPos = { lx: sLX, ly: sLY, cx: s.cx + 1, cy: s.cy + 1 }; }
   }
-  if (bestPos) {
-    entity.moveTarget = bestPos;
-    entity.path = findPath(ctx.map, entity.cell, worldToCell(bestPos.x, bestPos.y), true, entity.isNavalUnit, entity.stats.speedClass);
+  if (bestLPos) {
+    entity.moveTarget = { lx: bestLPos.lx, ly: bestLPos.ly };
+    entity.path = findPath(ctx.map, entity.cell, { cx: bestLPos.cx, cy: bestLPos.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
     entity.pathIndex = 0;
   } else {
     // No depot found — fall back to guard
@@ -1468,15 +1467,15 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
     // around buildings instead of moveToward's straight line which gets stuck.
     if (entity.path && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
       const nextCell = entity.path[entity.pathIndex];
-      const wp: WorldPos = {
-        x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
-        y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      const wp = {
+        lx: nextCell.cx * 256 + 128,
+        ly: nextCell.cy * 256 + 128,
       };
       if (entity.moveToward(wp, ctx.movementSpeed(entity))) {
         entity.pathIndex++;
       }
     } else {
-      entity.moveToward(structPos, ctx.movementSpeed(entity));
+      entity.moveToward({ lx: pixelToLepton(structPos.x), ly: pixelToLepton(structPos.y) }, ctx.movementSpeed(entity));
     }
   }
   if (entity.attackCooldown > 0) entity.attackCooldown--;
@@ -1567,7 +1566,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
     }
   } else {
     entity.animState = AnimState.WALK;
-    entity.moveToward(target, ctx.movementSpeed(entity));
+    entity.moveToward({ lx: pixelToLepton(target.x), ly: pixelToLepton(target.y) }, ctx.movementSpeed(entity));
   }
   if (entity.attackCooldown > 0) entity.attackCooldown--;
   if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
