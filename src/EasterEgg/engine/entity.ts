@@ -250,11 +250,12 @@ export class Entity {
    *  Returns true only when infantry is truly idle: standing, not moving,
    *  not firing, idle timer expired. */
   isReadyToRandomAnimate(): boolean {
+    // C++ InfantryClass::Is_Ready_To_Random_Animate (infantry.cpp:4068-4092)
+    // + FootClass::Is_Ready_To_Random_Animate (techno.cpp:5323-5326)
+    // Checks: IdleTimer==0, Height==0, !IsDriving. Does NOT check Doing state.
     if (!this.stats.isInfantry) return false;
-    if (this.idleAnimTimer > 0) return false;   // IdleTimer not expired
-    if (this.doing !== 'stand_ready') return false; // Must be in idle stance
-    if (this.isDriving) return false;            // Not while moving
-    if (this.isFiringAnim) return false;         // Not while firing
+    if (this.idleAnimTimer > 0) return false;   // C++ TechnoClass: IdleTimer == 0
+    if (this.isDriving) return false;            // C++ infantry.cpp:4089: IsDriving
     return true;
   }
 
