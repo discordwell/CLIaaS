@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-test('guard scan debug — which infantry find targets', async ({browser}) => {
+test('tick 1 RNG breakdown', async ({browser}) => {
   test.setTimeout(5*60*1000);
   const wCtx = await browser.newContext();
   const tCtx = await browser.newContext({viewport:{width:1200,height:800}});
@@ -16,20 +16,22 @@ test('guard scan debug — which infantry find targets', async ({browser}) => {
   ]);
   const ws=await wp.evaluate(()=>{const M=(window as any).Module;return JSON.parse(M.ccall('agent_get_state','string',[],[])).rngState});
   await tp.evaluate((s:number)=>{(window as any).__syncRngSeed?.(s)},ws);
-  await tp.evaluate(()=>{(globalThis as any).__debugGuardScan=true;(globalThis as any).__guardScanResults=[];(globalThis as any).__debugAreaGuard=true;(globalThis as any).__debugAreaGuardMiss=0});
-
-  await tp.evaluate(()=>{(window as any).__agentStep?.(1)});
-  const results = await tp.evaluate(()=>(globalThis as any).__guardScanResults as any[]);
-  const agMiss = await tp.evaluate(()=>(globalThis as any).__debugAreaGuardMiss);
-
-  const found = results.filter((r:any)=>r.found);
-  const missed = results.filter((r:any)=>!r.found);
-  console.log(`\nGUARD scan: ${found.length} found targets, ${missed.length} missed`);
-  console.log(`AREA_GUARD scan: ${agMiss} missed (0 found per earlier test)`);
-  console.log(`\nSample found targets:`);
-  for (const r of found.slice(0,5)) console.log(`  ${r.type} at (${r.cx},${r.cy}) m=${r.mission} range=${r.range}`);
-  console.log(`\nSample missed:`);
-  for (const r of missed.slice(0,5)) console.log(`  ${r.type} at (${r.cx},${r.cy}) m=${r.mission} range=${r.range}`);
-
-  await wCtx.close(); await tCtx.close();
+  await tp.evaluate(()=>{(window as any).__rngTagControl('enable')});
+  await wp.evaluate(()=>{const M=(window as any).Module;JSON.parse(M.ccall('agent_get_state','string',[],[]))});
+  const [wLog,_]=await Promise.all([
+    wp.evaluate(async()=>{const r=(window as any).__agentStep(1);const res=r?.then?await r:r;const s=res?.state??res;return(s.rngLog||[])as[number,number][]}),
+    tp.evaluate(()=>{(window as any).__agentStep?.(1)}),
+  ]);
+  const tLog=await tp.evaluate(()=>((window as any).__rngTagControl('read').seedLog||[])as[number,number][]);
+  function cat(log:[number,number][]){let i=0,u=0,b=0,o=0;for(const[_,t]of log){if(t>=10000&&t<11000)i++;else if(t>=11000&&t<12000)u++;else if(t>=12000&&t<13000)b++;else o++}return{i,u,b,o,t:log.length}}
+  const w=cat(wLog),t=cat(tLog);
+  console.log(`WASM: total=${w.t} inf=${w.i} unit=${w.u} bldg=${w.b} other=${w.o}`);
+  console.log(`TS:   total=${t.t} inf=${t.i} unit=${t.u} bldg=${t.b} other=${t.o}`);
+  console.log(`Δ:    total=${t.t-w.t} inf=${t.i-w.i} unit=${t.u-w.u} bldg=${t.b-w.b} other=${t.o-w.o}`);
+  // Histogram
+  function hist(log:[number,number][],off:number){const m=new Map<number,number>();for(const[_,t]of log)if(t>=10000&&t<11000)m.set(t-10000-off,(m.get(t-10000-off)||0)+1);const h=new Map<number,number>();for(const c of m.values())h.set(c,(h.get(c)||0)+1);return h}
+  const wh=hist(wLog,86),th=hist(tLog,2);
+  console.log(`\nWASM hist:`);for(const[c,n]of[...wh].sort((a,b)=>a[0]-b[0]))console.log(`  ${c}calls: ${n}`);
+  console.log(`TS hist:`);for(const[c,n]of[...th].sort((a,b)=>a[0]-b[0]))console.log(`  ${c}calls: ${n}`);
+  await wCtx.close();await tCtx.close();
 });

@@ -1031,7 +1031,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     let bestStructDist = Infinity;
     for (const s of ctx.structures) {
       if (!s.alive) continue;
-      if (s.house === House.Neutral) continue;
+      // C++ Evaluate_Object only skips ALLIED buildings. Neutral buildings
+      // are valid targets when not allied (e.g., USSR vs Neutral in SCG03EA).
       if (ctx.isAllied(entity.house, s.house)) continue;
       // C++ parity: BARL/BRL3 are OverlayClass (overlay), not BuildingClass.
       // They never appear in the C++ TechnoClass target scan. TS represents
