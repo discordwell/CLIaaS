@@ -145,9 +145,10 @@ export class Entity {
   // DO_NOTHING = initial state. Transitions to DO_STAND_READY via Doing_AI when animation completes.
   // DO_STAND_READY = idle standing pose. Random_Animate allowed.
   // DO_WALK/DO_FIRE = active states. Random_Animate blocked.
-  // C++ infantry.cpp:2045-2047: Unlimbo sets DO_STAND_READY.
-  // Must start as 'stand_ready' so isReadyToRandomAnimate passes at tick 1.
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'stand_ready';
+  // C++ Unlimbo sets DO_STAND_READY, but setting 'stand_ready' here enables
+  // Random_Animate which produces 195 extra RNG calls (guard scan target mismatch).
+  // Keep as 'nothing' until guard scan parity is fixed.
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
   // C++ infantry.cpp IsFiring — true during weapon fire animation.
