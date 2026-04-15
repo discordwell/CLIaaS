@@ -111,8 +111,12 @@ export class RandomClass {
    * Consumes 1 RNG call. Returns true with `percent`% probability.
    * Threshold = percent * 32768 / 100 (integer math matching C++ overflow).
    */
+  /**
+   * C++ Percent_Chance(int) — uses Random_Pick(0, 99) < percent.
+   * Must match C++ exactly: rejection-sampled range [0,99], not raw next().
+   */
   percentChance(percent: number): boolean {
-    return this.next() < Math.floor((percent * (1 << SIGNIFICANT_BITS)) / 100);
+    return this.nextInRange(0, 99) < percent;
   }
 }
 
