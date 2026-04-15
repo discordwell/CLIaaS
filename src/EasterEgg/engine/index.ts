@@ -3814,17 +3814,8 @@ export class Game {
     }
     const missionTimerFired = entity.missionTimer <= 0;
 
-    // C++ infantry.cpp:1208-1211 — Commence gate:
-    // Process queued mission when not in a non-interruptible animation.
-    // C++ Commence runs every tick, gated on !IsFiring && !IsFalling && !IsDriving
-    // && (Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt).
-    // TS proxy: isFiringAnim = IsFiring, nonInterruptAnimTicks = !Interrupt Doing.
+    // nonInterruptAnimTicks decrements every tick (gesture/salute animation countdown)
     if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
-    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
-      entity.mission = entity.missionQueue;
-      entity.missionQueue = null;
-      entity.missionTimer = 0; // C++ Commence: Timer = 0 → handler fires this tick
-    }
 
     switch (entity.mission) {
       case Mission.MOVE:
@@ -3999,6 +3990,16 @@ export class Game {
     if (entity.isFiringAnim) {
       if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
       if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
+    }
+
+    // C++ infantry.cpp:1208-1211 — Commence gate (runs AFTER MissionClass::AI dispatch).
+    // In C++, InfantryClass::AI calls Commence() after MissionClass::AI has already
+    // processed the timer for this tick. So Timer=0 from Commence is picked up on the
+    // NEXT tick's MissionClass::AI dispatch — the new mission handler fires 1 tick later.
+    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+      entity.mission = entity.missionQueue;
+      entity.missionQueue = null;
+      entity.missionTimer = 0; // picked up next tick by MissionClass::AI
     }
 
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)
