@@ -164,6 +164,8 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
     m: e.mission,
     ally: isAlly,
   };
+  (u as any).lx = e.leptonX;
+  (u as any).ly = e.leptonY;
   if (e.target?.alive) u.tid = e.target.id;
   if (e.moveTarget) {
     u.mtx = Math.floor(e.moveTarget.lx / 256);

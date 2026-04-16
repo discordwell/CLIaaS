@@ -26,6 +26,20 @@ extern int g_autoplay_mode;
 extern bool Main_Loop();
 extern TARGET As_Target(CELL cell);
 
+// Debug movement log — ring buffer of last 32 entries
+struct DebugMoveEntry { int preLX, preLY, postLX, postLY, dir, dist, headLX, headLY; };
+static DebugMoveEntry g_debug_moves[32];
+static int g_debug_move_idx = 0;
+static int g_debug_move_count = 0;
+
+void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h) {
+	auto &e2 = g_debug_moves[g_debug_move_idx % 32];
+	e2.preLX = a; e2.preLY = b; e2.postLX = c; e2.postLY = d;
+	e2.dir = e; e2.dist = f; e2.headLX = g; e2.headLY = h;
+	g_debug_move_idx++;
+	g_debug_move_count++;
+}
+
 /* --- ID encoding: (rtti << 16) | heap_index --- */
 #define AGENT_ID(rtti, idx) (((int)(rtti) << 16) | (idx))
 #define AGENT_RTTI(id)      ((RTTIType)((id) >> 16))
@@ -913,7 +927,16 @@ char* agent_get_state(void)
 		}
 	}
 
+	// Append debug movement log
+	buf_cat("],\"debugMoves\":[");
+	for (int mi = 0; mi < g_debug_move_count && mi < 32; mi++) {
+		int ri = (g_debug_move_idx - g_debug_move_count + mi + 32) % 32;
+		auto &dm = g_debug_moves[ri];
+		if (mi > 0) buf_cat(",");
+		buf_cat("[%d,%d,%d,%d,%d,%d,%d,%d]", dm.preLX, dm.preLY, dm.postLX, dm.postLY, dm.dir, dm.dist, dm.headLX, dm.headLY);
+	}
 	buf_cat("]}");
+	// Don't reset here — debugMoves persist until agent_step runs next tick
 
 	return s_state_buf;
 }
@@ -1083,6 +1106,8 @@ char* agent_step(int n, char* commands)
 	}
 
 	/* 2. Run N game ticks */
+	g_debug_move_count = 0; // Reset debug move log before ticking
+	g_debug_move_idx = 0;
 	if (n < 1) n = 1;
 	if (n > 300) n = 300;
 	for (int i = 0; i < n; i++) {

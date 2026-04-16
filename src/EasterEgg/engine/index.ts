@@ -3871,11 +3871,44 @@ export class Game {
         // 1-tick delay between Start_Driver and first Coord_Move.
         if (!entity.isDriving && entity.moveTarget && entity.target?.alive && !entity.inRange(entity.target)) {
           // C++ !IsDriving branch: Start_Driver sets IsDriving=true but no movement this tick.
+          // C++ InfantryClass::Start_Driver calls Closest_Free_Spot to find a sub-cell
+          // in the destination cell, storing it as HeadToCoord. Compute and store on entity.
+          if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+            // C++ InfantryClass::Start_Driver → Closest_Free_Spot: find the sub-cell position
+            // the infantry will occupy in the destination cell.
+            const destCell = entity.path[entity.pathIndex];
+            const idx = destCell.cy * 128 + destCell.cx;
+            const slots = this.map.subCellOccupancy.get(idx);
+            // Find first free sub-cell in C++ order: CENTER(0), UL(1), UR(2), LL(3), LR(4)
+            let freeSubCell = 0; // default CENTER
+            if (slots) {
+              const order = [0, 1, 2, 3, 4];
+              for (const s of order) {
+                if (slots[s] === 0 || slots[s] === entity.id) { freeSubCell = s; break; }
+              }
+            }
+            const sc = SUBCELL_LEPTON_OFFSETS[freeSubCell];
+            (entity as any)._headToLX = destCell.cx * 256 + sc.lx;
+            (entity as any)._headToLY = destCell.cy * 256 + sc.ly;
+          } else {
+            (entity as any)._headToLX = 0;
+            (entity as any)._headToLY = 0;
+          }
           entity.isDriving = true;
         } else if (entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget && entity.isDriving) {
           if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            const wp = { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
-            if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
+            // Walk toward the pre-computed sub-cell position (C++ HeadToCoord from Closest_Free_Spot)
+            const htLX = (entity as any)._headToLX as number;
+            const htLY = (entity as any)._headToLY as number;
+            const wp = (htLX > 0) ? { lx: htLX, ly: htLY }
+              : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
+            if (entity.moveToward(wp, this.movementSpeed(entity))) {
+              entity.pathIndex++;
+              // C++ Stop_Driver at waypoint arrival — isDriving will be set again next tick
+              entity.isDriving = false;
+              (entity as any)._headToLX = 0;
+              (entity as any)._headToLY = 0;
+            }
           } else {
             if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
               entity.moveTarget = null; // arrived at approach point
