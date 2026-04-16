@@ -46,6 +46,10 @@ export interface MissionAIContext {
 
   // Movement / speed
   movementSpeed(entity: Entity): number;
+  /** C++ InfantryClass::Start_Driver — find sub-cell, atomic occupy-bit swap */
+  infantryStartDriver(entity: Entity, destCX: number, destCY: number): { lx: number; ly: number };
+  /** C++ Movement_AI:3810 — validate next path cell, re-path if blocked */
+  infantryValidatePath(entity: Entity): void;
 
   // Sound
   playSoundAt(name: string, x: number, y: number): void;

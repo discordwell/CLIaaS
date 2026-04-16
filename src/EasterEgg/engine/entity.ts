@@ -151,6 +151,14 @@ export class Entity {
   doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
+  // C++ HeadToCoord — the sub-cell lepton position the infantry is walking to.
+  // Set by infantryStartDriver, used by movement code for waypoint target.
+  headToLX = 0;
+  headToLY = 0;
+  // Cell+subcell that this infantry has CLAIMED via Set_Occupy_Bit.
+  // Tracks the heading-to reservation for sub-cell occupancy parity.
+  claimedCellIdx = -1;
+  claimedSubCell = -1;
   // C++ infantry.cpp IsFiring — true during weapon fire animation.
   // Stays true for firingAnimTicks after weapon fire; cleared when counter reaches 0.
   isFiringAnim = false;

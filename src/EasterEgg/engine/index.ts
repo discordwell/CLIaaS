@@ -642,6 +642,8 @@ export class Game {
       playEva: (n) => this.playEva(n as SoundName),
       minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
       movementSpeed: (e) => this.movementSpeed(e),
+      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
+      infantryValidatePath: (e) => this.infantryValidatePath(e),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       getArmorBias: (h) => this.getArmorBias(h),
       getROFBias: (h) => this.getROFBias(h),
@@ -763,6 +765,8 @@ export class Game {
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       playSound: (n) => this.audio.play(n as SoundName),
       movementSpeed: (e) => this.movementSpeed(e),
+      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
+      infantryValidatePath: (e) => this.infantryValidatePath(e),
       damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
       damageStructure: (s, d) => this.damageStructure(s, d),
       addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
@@ -943,6 +947,8 @@ export class Game {
       isTanyaEvac: this.isTanyaEvac,
       isAllied: (a, b) => this.isAllied(a, b),
       movementSpeed: (e) => this.movementSpeed(e),
+      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
+      infantryValidatePath: (e) => this.infantryValidatePath(e),
       idleMission: (e) => this.idleMission(e),
       fireWeaponAt: (a, t, w) => this.fireWeaponAt(a, t, w),
       fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
@@ -1076,6 +1082,8 @@ export class Game {
       entitiesAllied: (a, b) => this.entitiesAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       movementSpeed: (e) => this.movementSpeed(e),
+      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
+      infantryValidatePath: (e) => this.infantryValidatePath(e),
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       playEva: (n) => this.playEva(n as SoundName),
       playSound: (n) => this.audio.play(n as SoundName),
@@ -1762,11 +1770,12 @@ export class Game {
         // Air units don't block ground occupancy when airborne
         if (!entity.isAirUnit || entity.flightAltitude === 0) {
           if (entity.stats.isInfantry) {
+            // C++ parity: infantry with an active heading-to claim (isDriving + claimedCell)
+            // have their occupy bit in the DESTINATION cell, not current cell.
+            const skipCurrentClaim = entity.isDriving && entity.claimedCellIdx >= 0;
             // Infantry: occupy a sub-cell (up to 5 per cell)
-            // C++ parity: try to keep the entity's current sub-cell (from INI placement
-            // or previous tick) to preserve lepton positions. Only reassign if the
-            // preferred sub-cell is already taken.
-            const subCell = this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id, entity.subCell);
+            const subCell = skipCurrentClaim ? entity.subCell
+              : this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id, entity.subCell);
             if (subCell >= 0) {
               entity.subCell = subCell;
               // C++ const.cpp StoppingCoordAbs: idle infantry snap to exact sub-cell
@@ -3874,100 +3883,27 @@ export class Game {
           // C++ InfantryClass::Start_Driver calls Closest_Free_Spot to find a sub-cell
           // in the destination cell, storing it as HeadToCoord. Compute and store on entity.
           if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // C++ Movement_AI:3810-3811: validate next path cell is passable.
-            // If Can_Enter_Cell fails, clear path and regenerate via Basic_Path.
-            const nextCell = entity.path[entity.pathIndex];
-            const nextIdx = nextCell.cy * 128 + nextCell.cx;
-            const nextSlots = this.map.subCellOccupancy.get(nextIdx);
-            const nextHasVehicle = this.map.vehicleOccupancy.has(nextIdx);
-            const nextSubCellsFull = nextHasVehicle || (nextSlots != null &&
-              nextSlots[0] !== 0 && nextSlots[1] !== 0 && nextSlots[2] !== 0 &&
-              nextSlots[3] !== 0 && nextSlots[4] !== 0);
-            if (nextSubCellsFull && entity.moveTarget) {
-              // Cell is full — regenerate path from current position
-              entity.path = findPath(this.map, entity.cell,
-                { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) },
-                true, entity.isNavalUnit, entity.stats.speedClass);
-              entity.pathIndex = 0;
-            }
+            // C++ Movement_AI:3810 — validate next cell passable, re-path if blocked
+            this.infantryValidatePath(entity);
           }
           if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // C++ InfantryClass::Start_Driver (infantry.cpp:2080-2114):
-            // headto = Map[headto].Closest_Free_Spot(
-            //   Coord_Move(headto, Direction(headto)+DIR_S, 0x007C));
-            // The probe point is offset 124 leptons OPPOSITE the approach direction,
-            // which determines which sub-cell quadrant the infantry will occupy.
+            // C++ InfantryClass::Start_Driver — find sub-cell, atomic occupy swap
             const destCell = entity.path[entity.pathIndex];
-            const headtoLX = destCell.cx * 256 + 128; // cell center (from Adjacent_Cell + Coord_Snap)
-            const headtoLY = destCell.cy * 256 + 128;
-            // Direction from infantry to headto, then +128 (DIR_S) for opposite direction
-            const dir = directionToLeptons256(entity.leptonX, entity.leptonY, headtoLX, headtoLY);
-            const probeDir = (dir + 128) & 0xFF; // opposite direction
-            // Coord_Move with distance 0x007C (124)
-            const probeLX = headtoLX + ((COS_TABLE_256[probeDir] * 124) >> 7);
-            const probeLY = headtoLY - ((SIN_TABLE_256[probeDir] * 124) >> 7);
-            // C++ Spot_Index: distance to center < 60 → CENTER, else quadrant check
-            const fracX = ((probeLX % 256) + 256) % 256;
-            const fracY = ((probeLY % 256) + 256) % 256;
-            const distToCenter = Math.max(Math.abs(fracX - 128), Math.abs(fracY - 128))
-              + Math.min(Math.abs(fracX - 128), Math.abs(fracY - 128)) * 0.4;
-            let spotIndex: number;
-            if (distToCenter < 60) {
-              spotIndex = 0; // CENTER
-            } else {
-              let idx = 0;
-              if (fracX > 0x80) idx |= 1;
-              if (fracY > 0x80) idx |= 2;
-              spotIndex = idx + 1; // 1=NW, 2=NE, 3=SW, 4=SE
-            }
-            // C++ Closest_Free_Spot: try requested spot, then neighbors
-            const destIdx = destCell.cy * 128 + destCell.cx;
-            let destSlots = this.map.subCellOccupancy.get(destIdx);
-            if (!destSlots) {
-              destSlots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
-              this.map.subCellOccupancy.set(destIdx, destSlots);
-            }
-            // Check if vehicle/building blocks all sub-cells
-            const cellBlocked = this.map.vehicleOccupancy.has(destIdx);
-            let freeSubCell = -1;
-            if (!cellBlocked) {
-              if (destSlots[spotIndex] === 0) {
-                freeSubCell = spotIndex;
-              } else {
-                // C++ _sequence tables for closest neighbor search
-                const _sequence: number[][] = [
-                  [1,2,3,4], [0,2,3,4], [0,1,4,3], [0,1,4,2], [0,2,3,1]
-                ];
-                for (const s of _sequence[spotIndex]) {
-                  if (destSlots[s] === 0) { freeSubCell = s; break; }
-                }
-              }
-            }
-            if (freeSubCell < 0) freeSubCell = spotIndex; // fallback: use requested even if occupied
-            const sc = SUBCELL_LEPTON_OFFSETS[freeSubCell];
-            (entity as any)._headToLX = destCell.cx * 256 + sc.lx;
-            (entity as any)._headToLY = destCell.cy * 256 + sc.ly;
-            // C++ atomic occupy-bit swap: Clear current, Set destination
-            this.map.vacateSubCell(entity.cell.cx, entity.cell.cy, entity.id);
-            destSlots[freeSubCell] = entity.id;
-          } else {
-            (entity as any)._headToLX = 0;
-            (entity as any)._headToLY = 0;
+            this.infantryStartDriver(entity, destCell.cx, destCell.cy);
           }
           entity.isDriving = true;
         } else if (entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget && entity.isDriving) {
           if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // Walk toward the pre-computed sub-cell position (C++ HeadToCoord from Closest_Free_Spot)
-            const htLX = (entity as any)._headToLX as number;
-            const htLY = (entity as any)._headToLY as number;
-            const wp = (htLX > 0) ? { lx: htLX, ly: htLY }
+            // Walk toward the pre-computed sub-cell position (C++ HeadToCoord)
+            const wp = entity.headToLX > 0
+              ? { lx: entity.headToLX, ly: entity.headToLY }
               : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
             if (entity.moveToward(wp, this.movementSpeed(entity))) {
               entity.pathIndex++;
-              // C++ Stop_Driver at waypoint arrival — isDriving will be set again next tick
+              // C++ Stop_Driver at waypoint arrival
               entity.isDriving = false;
-              (entity as any)._headToLX = 0;
-              (entity as any)._headToLY = 0;
+              entity.headToLX = 0;
+              entity.headToLY = 0;
             }
           } else {
             if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
@@ -5126,10 +5062,13 @@ export class Game {
         entity.pathThreshold = MOVE_CLOAK;
         entity.tryCount = PATH_RETRY;
       }
-      const target: LeptonPos = {
-        lx: nextCell.cx * 256 + 128,
-        ly: nextCell.cy * 256 + 128,
-      };
+      // C++ infantry: InfantryClass::Start_Driver uses Closest_Free_Spot for sub-cell
+      let target: LeptonPos;
+      if (entity.stats.isInfantry) {
+        target = this.infantryStartDriver(entity, nextCell.cx, nextCell.cy);
+      } else {
+        target = { lx: nextCell.cx * 256 + 128, ly: nextCell.cy * 256 + 128 };
+      }
       const speed = this.movementSpeed(entity);
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
       // Uses C++ TrackControl table to select pre-computed curved paths.
@@ -5926,6 +5865,109 @@ export class Game {
       return baseSpeed;
     }
     return baseSpeed * terrainMult;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Infantry Movement — C++ InfantryClass::Start_Driver + Movement_AI parity
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * C++ InfantryClass::Start_Driver (infantry.cpp:2080-2114):
+   * Finds a free sub-cell in the destination cell using Closest_Free_Spot,
+   * then atomically swaps occupy bits (clear current, set destination).
+   * Returns the HeadToCoord (sub-cell lepton position) the infantry should walk to.
+   */
+  private infantryStartDriver(entity: Entity, destCX: number, destCY: number): LeptonPos {
+    // Default: cell center
+    let headToLX = destCX * 256 + 128;
+    let headToLY = destCY * 256 + 128;
+
+    // C++ Closest_Free_Spot probe: offset 124 leptons OPPOSITE the approach direction
+    const dir = directionToLeptons256(entity.leptonX, entity.leptonY, headToLX, headToLY);
+    const probeDir = (dir + 128) & 0xFF;
+    const probeLX = headToLX + ((COS_TABLE_256[probeDir] * 124) >> 7);
+    const probeLY = headToLY - ((SIN_TABLE_256[probeDir] * 124) >> 7);
+
+    // C++ Spot_Index: distance to center < 60 → CENTER, else quadrant
+    const fracX = ((probeLX % 256) + 256) % 256;
+    const fracY = ((probeLY % 256) + 256) % 256;
+    const dxC = Math.abs(fracX - 128), dyC = Math.abs(fracY - 128);
+    const distCenter = Math.max(dxC, dyC) + Math.min(dxC, dyC) * 0.4;
+    let spotIndex: number;
+    if (distCenter < 60) {
+      spotIndex = 0;
+    } else {
+      let idx = 0;
+      if (fracX > 0x80) idx |= 1;
+      if (fracY > 0x80) idx |= 2;
+      spotIndex = idx + 1;
+    }
+
+    // Find free sub-cell via C++ Closest_Free_Spot search order
+    const destIdx = destCY * 128 + destCX;
+    let destSlots = this.map.subCellOccupancy.get(destIdx);
+    if (!destSlots) {
+      destSlots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
+      this.map.subCellOccupancy.set(destIdx, destSlots);
+    }
+    const cellBlocked = this.map.vehicleOccupancy.has(destIdx);
+    let freeSubCell = -1;
+    if (!cellBlocked) {
+      if (destSlots[spotIndex] === 0) {
+        freeSubCell = spotIndex;
+      } else {
+        const _sequence: number[][] = [
+          [1,2,3,4], [0,2,3,4], [0,1,4,3], [0,1,4,2], [0,2,3,1]
+        ];
+        for (const s of _sequence[spotIndex]) {
+          if (destSlots[s] === 0) { freeSubCell = s; break; }
+        }
+      }
+    }
+    if (freeSubCell < 0) freeSubCell = spotIndex; // fallback
+
+    const sc = SUBCELL_LEPTON_OFFSETS[freeSubCell];
+    headToLX = destCX * 256 + sc.lx;
+    headToLY = destCY * 256 + sc.ly;
+
+    // Atomic occupy-bit swap: release previous claim, set new claim
+    if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
+      const prevSlots = this.map.subCellOccupancy.get(entity.claimedCellIdx);
+      if (prevSlots && prevSlots[entity.claimedSubCell] === entity.id) {
+        prevSlots[entity.claimedSubCell] = 0;
+      }
+    }
+    destSlots[freeSubCell] = entity.id;
+    entity.claimedCellIdx = destIdx;
+    entity.claimedSubCell = freeSubCell;
+
+    // Store HeadToCoord on entity
+    entity.headToLX = headToLX;
+    entity.headToLY = headToLY;
+
+    return { lx: headToLX, ly: headToLY };
+  }
+
+  /**
+   * C++ Movement_AI path validation (infantry.cpp:3810):
+   * Check if the next path cell can be entered. If all sub-cells are occupied,
+   * regenerate the path from current position.
+   */
+  private infantryValidatePath(entity: Entity): void {
+    if (!entity.path.length || entity.pathIndex >= entity.path.length || !entity.moveTarget) return;
+    const nextCell = entity.path[entity.pathIndex];
+    const nextIdx = nextCell.cy * 128 + nextCell.cx;
+    const nextSlots = this.map.subCellOccupancy.get(nextIdx);
+    const hasVeh = this.map.vehicleOccupancy.has(nextIdx);
+    const allFull = hasVeh || (nextSlots != null &&
+      nextSlots[0] !== 0 && nextSlots[1] !== 0 && nextSlots[2] !== 0 &&
+      nextSlots[3] !== 0 && nextSlots[4] !== 0);
+    if (allFull) {
+      entity.path = findPath(this.map, entity.cell,
+        { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) },
+        true, entity.isNavalUnit, entity.stats.speedClass);
+      entity.pathIndex = 0;
+    }
   }
 
   /** MV1: Follow one tick of track-table movement (C++ drive.cpp While_Moving).
