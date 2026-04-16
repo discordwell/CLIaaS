@@ -5510,8 +5510,11 @@ export class Game {
     const targetLX = entity.target.leptonX;
     const targetLY = entity.target.leptonY;
 
-    // C++ Direction256(tcoord, Center_Coord()) — exact integer algorithm from face.cpp
-    const dir256 = directionToLeptons256(targetLX, targetLY, entity.leptonX, entity.leptonY);
+    // C++ Direction256(tcoord, Center_Coord()) — from target to entity's CELL CENTER.
+    // C++ Center_Coord() returns the cell center, not the exact sub-cell position.
+    const entityCenterLX = entity.cell.cx * 256 + 128;
+    const entityCenterLY = entity.cell.cy * 256 + 128;
+    const dir256 = directionToLeptons256(targetLX, targetLY, entityCenterLX, entityCenterLY);
 
     // C++ sweep: angular offsets [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64]
     const _angles = [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64];
