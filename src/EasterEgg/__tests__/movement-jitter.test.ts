@@ -59,11 +59,15 @@ describe('moveToward — overshoot prevention', () => {
     const target = { x: 103, y: 100 };
 
     inf.rotTickedThisFrame = false;
-    // Speed of 5 > distance of 3, should arrive in one step
-    const arrived = inf.moveToward(target, 5);
+    // C++ infantry: pre-movement snap at Distance < 16 leptons (about 1.5px).
+    // Distance 3px ≈ 32 leptons > 16, so first call moves but doesn't snap.
+    const arrived1 = inf.moveToward(target, 5);
+    expect(arrived1).toBe(false);
 
-    expect(arrived).toBe(true);
-    // Lepton quantization: Math.trunc(103/LP)*LP ≈ 102.9375
+    // Second call: now within snap distance → snap to target
+    inf.rotTickedThisFrame = false;
+    const arrived2 = inf.moveToward(target, 5);
+    expect(arrived2).toBe(true);
     expect(inf.pos.x).toBeCloseTo(103, 0);
   });
 });

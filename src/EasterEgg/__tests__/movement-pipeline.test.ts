@@ -975,14 +975,19 @@ describe('Edge cases — zero distance, death, speed=0', () => {
     expect(unit.speedAccum).toBe(0);
   });
 
-  it('moveToward with very large speed reaches target in one step', () => {
+  it('moveToward with very large speed reaches target in two steps', () => {
+    // C++ infantry: no post-movement snap. First call moves via clamping,
+    // second call triggers pre-movement Distance < 16 snap.
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     const target = { x: 500, y: 300 };
 
     unit.rotTickedThisFrame = false;
-    const arrived = unit.moveToward(target, 10000);
+    const arrived1 = unit.moveToward(target, 10000);
+    expect(arrived1).toBe(false); // moved but no post-movement snap
 
-    expect(arrived).toBe(true);
+    unit.rotTickedThisFrame = false;
+    const arrived2 = unit.moveToward(target, 10000);
+    expect(arrived2).toBe(true); // pre-movement snap catches it
     expect(unit.pos.x).toBeCloseTo(500, 1);
     expect(unit.pos.y).toBeCloseTo(300, 1);
   });

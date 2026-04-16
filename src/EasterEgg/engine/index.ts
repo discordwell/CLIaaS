@@ -3874,22 +3874,64 @@ export class Game {
           // C++ InfantryClass::Start_Driver calls Closest_Free_Spot to find a sub-cell
           // in the destination cell, storing it as HeadToCoord. Compute and store on entity.
           if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // C++ InfantryClass::Start_Driver → Closest_Free_Spot: find the sub-cell position
-            // the infantry will occupy in the destination cell.
+            // C++ InfantryClass::Start_Driver (infantry.cpp:2080-2114):
+            // headto = Map[headto].Closest_Free_Spot(
+            //   Coord_Move(headto, Direction(headto)+DIR_S, 0x007C));
+            // The probe point is offset 124 leptons OPPOSITE the approach direction,
+            // which determines which sub-cell quadrant the infantry will occupy.
             const destCell = entity.path[entity.pathIndex];
-            const idx = destCell.cy * 128 + destCell.cx;
-            const slots = this.map.subCellOccupancy.get(idx);
-            // Find first free sub-cell in C++ order: CENTER(0), UL(1), UR(2), LL(3), LR(4)
-            let freeSubCell = 0; // default CENTER
-            if (slots) {
-              const order = [0, 1, 2, 3, 4];
-              for (const s of order) {
-                if (slots[s] === 0 || slots[s] === entity.id) { freeSubCell = s; break; }
+            const headtoLX = destCell.cx * 256 + 128; // cell center (from Adjacent_Cell + Coord_Snap)
+            const headtoLY = destCell.cy * 256 + 128;
+            // Direction from infantry to headto, then +128 (DIR_S) for opposite direction
+            const dir = directionToLeptons256(entity.leptonX, entity.leptonY, headtoLX, headtoLY);
+            const probeDir = (dir + 128) & 0xFF; // opposite direction
+            // Coord_Move with distance 0x007C (124)
+            const probeLX = headtoLX + ((COS_TABLE_256[probeDir] * 124) >> 7);
+            const probeLY = headtoLY - ((SIN_TABLE_256[probeDir] * 124) >> 7);
+            // C++ Spot_Index: distance to center < 60 → CENTER, else quadrant check
+            const fracX = ((probeLX % 256) + 256) % 256;
+            const fracY = ((probeLY % 256) + 256) % 256;
+            const distToCenter = Math.max(Math.abs(fracX - 128), Math.abs(fracY - 128))
+              + Math.min(Math.abs(fracX - 128), Math.abs(fracY - 128)) * 0.4;
+            let spotIndex: number;
+            if (distToCenter < 60) {
+              spotIndex = 0; // CENTER
+            } else {
+              let idx = 0;
+              if (fracX > 0x80) idx |= 1;
+              if (fracY > 0x80) idx |= 2;
+              spotIndex = idx + 1; // 1=NW, 2=NE, 3=SW, 4=SE
+            }
+            // C++ Closest_Free_Spot: try requested spot, then neighbors
+            const destIdx = destCell.cy * 128 + destCell.cx;
+            let destSlots = this.map.subCellOccupancy.get(destIdx);
+            if (!destSlots) {
+              destSlots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
+              this.map.subCellOccupancy.set(destIdx, destSlots);
+            }
+            // Check if vehicle/building blocks all sub-cells
+            const cellBlocked = this.map.vehicleOccupancy.has(destIdx);
+            let freeSubCell = -1;
+            if (!cellBlocked) {
+              if (destSlots[spotIndex] === 0) {
+                freeSubCell = spotIndex;
+              } else {
+                // C++ _sequence tables for closest neighbor search
+                const _sequence: number[][] = [
+                  [1,2,3,4], [0,2,3,4], [0,1,4,3], [0,1,4,2], [0,2,3,1]
+                ];
+                for (const s of _sequence[spotIndex]) {
+                  if (destSlots[s] === 0) { freeSubCell = s; break; }
+                }
               }
             }
+            if (freeSubCell < 0) freeSubCell = spotIndex; // fallback: use requested even if occupied
             const sc = SUBCELL_LEPTON_OFFSETS[freeSubCell];
             (entity as any)._headToLX = destCell.cx * 256 + sc.lx;
             (entity as any)._headToLY = destCell.cy * 256 + sc.ly;
+            // C++ atomic occupy-bit swap: Clear current, Set destination
+            this.map.vacateSubCell(entity.cell.cx, entity.cell.cy, entity.id);
+            destSlots[freeSubCell] = entity.id;
           } else {
             (entity as any)._headToLX = 0;
             (entity as any)._headToLY = 0;

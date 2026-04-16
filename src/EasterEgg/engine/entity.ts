@@ -1195,16 +1195,10 @@ export class Entity {
       this.leptonY += clampedLY;
       this.syncPosFromLeptons();
 
-      const steppedL = Math.abs(clampedLX) + Math.abs(clampedLY);
-      if (steppedL >= distLeptonsTotal - 16) {
-        // Close enough to arrive — snap to target (C++ Per_Cell_Process handles this)
-        this.leptonX = targetLeptonX;
-        this.leptonY = targetLeptonY;
-        this.syncPosFromLeptons();
-        this.speedAccum = 0;
-        this.isDriving = false;
-        return true;
-      }
+      // C++ does NOT have a post-movement snap check for infantry.
+      // The only snap is the pre-movement Distance < 0x0010 check at the top.
+      // Infantry moves via Coord_Move and the snap triggers on the NEXT tick's
+      // pre-movement check when Distance(Head_To_Coord()) < 16.
       return false;
     }
 
