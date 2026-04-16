@@ -3899,11 +3899,19 @@ export class Game {
               ? { lx: entity.headToLX, ly: entity.headToLY }
               : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
             if (entity.moveToward(wp, this.movementSpeed(entity))) {
-              entity.pathIndex++;
-              // C++ Stop_Driver at waypoint arrival
+              // C++ Stop_Driver at waypoint arrival + Per_Cell_Process
               entity.isDriving = false;
               entity.headToLX = 0;
               entity.headToLY = 0;
+              // C++ Movement_AI: after memmove (path shift), the infantry re-enters
+              // the !IsDriving branch next tick. Basic_Path is re-called if Path[0]==FACING_NONE.
+              // Regenerate remaining path from current position (matches C++ per-segment re-path).
+              if (entity.moveTarget) {
+                entity.path = findPath(this.map, entity.cell,
+                  { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) },
+                  true, entity.isNavalUnit, entity.stats.speedClass);
+                entity.pathIndex = 0;
+              }
             }
           } else {
             if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
