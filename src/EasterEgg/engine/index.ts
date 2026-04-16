@@ -3804,9 +3804,8 @@ export class Game {
     // This is independent of mission timers — units can fire between guard scans.
     if (entity.attackCooldown > 0) entity.attackCooldown--;
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
-    // C++ parity: isDriving is set per-tick by moveToward(). Clear it before mission
-    // dispatch so entities that don't call moveToward this tick are not marked as driving.
-    entity.isDriving = false;
+    // C++ IsDriving persists between ticks — set by Start_Driver, cleared by Stop_Driver.
+    // Do NOT clear it per-tick; let moveToward set it on first call and clear on arrival.
 
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
@@ -3853,6 +3852,10 @@ export class Game {
           if ((entity.mission as Mission) === Mission.ATTACK) entity.mission = Mission.HUNT;
         } else if (missionTimerFired) {
           this.updateHunt(entity);
+          // C++ foot.cpp:698: Mission_Hunt calls Approach_Target on every timer fire
+          if (entity.target?.alive && !entity.inRange(entity.target) && !entity.moveTarget) {
+            this.approachTarget(entity);
+          }
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
         } else if (entity.target?.alive && !entity.inRange(entity.target)) {
           // C++ foot.cpp:856-946 Approach_Target: assign NavCom to a cell within
@@ -3860,24 +3863,33 @@ export class Game {
           if (!entity.moveTarget) {
             this.approachTarget(entity);
           }
-          // Walk toward moveTarget via path (C++ movement system processes NavCom each tick)
-          if (entity.moveTarget) {
-            if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-              const wp = { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
-              if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
-            } else {
-              if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
-                entity.moveTarget = null; // arrived at approach point
-              }
-            }
-            // C++ foot.cpp:1392-1403 Per_Cell_Process: when a HUNT/ATTACK infantry
-            // enters a cell within weapon range, clear NavCom and stop moving.
-            // This prevents walking past the range boundary to the approach cell.
-            if (entity.moveTarget && entity.target?.alive && entity.inRange(entity.target)) {
-              entity.moveTarget = null;
+        }
+        // C++ Movement_AI (infantry.cpp:3765): !IsDriving → Basic_Path + Start_Driver (no move),
+        // IsDriving → Coord_Move (actual movement). isDriving persists between ticks.
+        // On the tick that approachTarget assigns moveTarget, isDriving is false;
+        // moveToward sets isDriving=true on first call. Skip first-tick movement to match C++
+        // 1-tick delay between Start_Driver and first Coord_Move.
+        if (!entity.isDriving && entity.moveTarget && entity.target?.alive && !entity.inRange(entity.target)) {
+          // C++ !IsDriving branch: Start_Driver sets IsDriving=true but no movement this tick.
+          entity.isDriving = true;
+        } else if (entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget && entity.isDriving) {
+          if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+            const wp = { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
+            if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
+          } else {
+            if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
+              entity.moveTarget = null; // arrived at approach point
               entity.path = [];
               entity.pathIndex = 0;
             }
+          }
+          // C++ foot.cpp:1392-1403 Per_Cell_Process: when a HUNT/ATTACK infantry
+          // enters a cell within weapon range, clear NavCom and stop moving.
+          // This prevents walking past the range boundary to the approach cell.
+          if (entity.moveTarget && entity.target?.alive && entity.inRange(entity.target)) {
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
           }
         }
         break;
@@ -5510,11 +5522,11 @@ export class Game {
     const targetLX = entity.target.leptonX;
     const targetLY = entity.target.leptonY;
 
-    // C++ Direction256(tcoord, Center_Coord()) — from target to entity's CELL CENTER.
-    // C++ Center_Coord() returns the cell center, not the exact sub-cell position.
-    const entityCenterLX = entity.cell.cx * 256 + 128;
-    const entityCenterLY = entity.cell.cy * 256 + 128;
-    const dir256 = directionToLeptons256(targetLX, targetLY, entityCenterLX, entityCenterLY);
+    // C++ Direction256(tcoord, Center_Coord()) — from target to entity's actual position.
+    // Center_Coord() returns the object's Coord (sub-cell position for infantry).
+    const entityLX = entity.leptonX;
+    const entityLY = entity.leptonY;
+    const dir256 = directionToLeptons256(targetLX, targetLY, entityLX, entityLY);
 
     // C++ sweep: angular offsets [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64]
     const _angles = [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64];

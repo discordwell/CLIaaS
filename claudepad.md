@@ -1,5 +1,22 @@
 # Session Summaries
 
+## 2026-04-15T02:00Z — HUNT movement parity: 3 fixes + root cause identified
+
+### Landed
+- **HUNT movement every tick** — Movement was gated inside `else if` branch 3, skipping on timer-fire ticks. C++ `Movement_AI` (infantry.cpp:3765) runs independently of `MissionClass::AI`. Extracted movement to unconditional block after HUNT branches.
+- **approachTarget on timer-fire ticks** — C++ `Mission_Hunt` (foot.cpp:698) calls `Approach_Target()` on every timer fire. TS only called it on non-timer ticks. Now called in branch 2 as well.
+- **approachTarget direction uses actual position** — Was using cell center `(cx*256+128, cy*256+128)`. C++ `Center_Coord()` returns the entity's actual sub-cell `Coord` position. Now uses `entity.leptonX/Y`.
+
+### Key Findings
+- C++ `Movement_AI` is called from `InfantryClass::AI` AFTER `MissionClass::AI` and `Commence()`. Movement processes `Path[]` cell-by-cell via `Direction(Head_To_Coord())`, not directly to NavCom.
+- C++ infantry uses `Basic_Path()` (simple facing-based pathfinder) while TS uses A*. Different paths → different per-tick direction rounding → ~26-lepton accumulated position divergence over 80 ticks.
+- SCG03EA HUNT infantry #9 targets ARTY at (62,49), not E7 at (61,50). The approach sweep skips 5 angles at range=585 (all fail octDist<range check), landing on angle=24 dir=192 → cell (60,49).
+- C++ `calcy(v, d) = -((v * d) >> 7)` — negative sign for Y movement in screen coordinates.
+- WASM infantry leaves cell (54,55) at tick 21 (1 tick after TS at tick 20) but overtakes by tick 97 due to per-tick step differences from Basic_Path vs A* path following.
+
+### Remaining Divergence
+SCG03EA first diverges at tick 132 (131 ticks perfect parity). Root cause: ~26-lepton position difference from pathfinding algorithm mismatch. Fixing this requires either implementing C++ `Basic_Path()` in TS or accepting the small position divergence.
+
 ## 2026-04-14T17:30Z — Per-entity RNG tracing: 4 root causes found
 
 ### Landed

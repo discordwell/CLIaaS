@@ -279,7 +279,7 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 	HousesType house = obj->Owner();
 	TechnoClass* tech = (TechnoClass*)obj;
 
-	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s",
+	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s,\"lx\":%d,\"ly\":%d",
 		AGENT_ID(rtti, idx),
 		obj->Class_Of().Name(),
 		agent_house_name(house),
@@ -287,7 +287,21 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		(int)obj->Strength,
 		(int)obj->Class_Of().MaxStrength,
 		(int)obj->Get_Mission(),
-		ally ? "true" : "false");
+		ally ? "true" : "false",
+		(int)Coord_X(coord), (int)Coord_Y(coord));
+
+	// Export target and navcom info for parity debugging
+	if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT) {
+		FootClass* foot = (FootClass*)obj;
+		if (Target_Legal(foot->TarCom)) {
+			COORDINATE tc = As_Coord(foot->TarCom);
+			buf_cat(",\"tlx\":%d,\"tly\":%d", (int)Coord_X(tc), (int)Coord_Y(tc));
+		}
+		if (Target_Legal(foot->NavCom)) {
+			COORDINATE nc = As_Coord(foot->NavCom);
+			buf_cat(",\"nlx\":%d,\"nly\":%d", (int)Coord_X(nc), (int)Coord_Y(nc));
+		}
+	}
 
 	if (tech->Techno_Type_Class()->Max_Passengers() > 0) {
 		buf_cat(",\"cargo\":%d", tech->How_Many());

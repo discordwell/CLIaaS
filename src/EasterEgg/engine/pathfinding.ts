@@ -50,14 +50,51 @@ function nextDirection(facing: number, dir: number): number {
 }
 
 /** C++ CELL_FACING — direction from cell a to cell b (8-way compass) */
+/** C++ findpath.cpp:87 CELL_FACING — uses Desired_Facing8 integer algorithm.
+ *  NO floating-point atan2; uses the exact ((bigger+1)/2) <= smaller diagonal threshold. */
 function cellFacing(ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax;
-  const dy = by - ay;
-  // Use atan2 mapped to 8 facings: 0=N, 1=NE, 2=E, etc.
-  if (dx === 0 && dy === 0) return 0;
-  const angle = Math.atan2(dx, -dy); // note: x,y swapped for N=0 convention
-  const facing = Math.round(angle / (Math.PI / 4));
-  return ((facing % 8) + 8) % 8;
+  // C++ face.cpp:65-123 Desired_Facing8 → Dir_Facing
+  let index = 0;
+
+  let xdiff = bx - ax;
+  if (xdiff < 0) {
+    index |= 0xC0;
+    xdiff = -xdiff;
+  }
+
+  let ydiff = ay - by; // C++ uses y1-y2 (screen Y inverted)
+  if (ydiff < 0) {
+    index ^= 0x40;
+    ydiff = -ydiff;
+  }
+
+  if (xdiff === 0 && ydiff === 0) return 0;
+
+  let bigger: number, smaller: number;
+  if (xdiff < ydiff) {
+    smaller = xdiff;
+    bigger = ydiff;
+  } else {
+    smaller = ydiff;
+    bigger = xdiff;
+  }
+
+  // C++ diagonal threshold: ((bigger+1)/2) <= smaller
+  if (Math.floor((bigger + 1) / 2) <= smaller) {
+    index += 0x20;
+    // Dir_Facing: ((index + 0x10) & 0xFF) >> 5
+    return (((index + 0x10) & 0xFF) >> 5) & 7;
+  }
+
+  // Orthogonal: determine if closer to X or Y axis
+  let adder = index & 0x40;
+  if (xdiff >= ydiff) { // C++ uses "xdiff == bigger" which is "xdiff >= ydiff"
+    adder ^= 0x40;
+  }
+  index += adder;
+
+  // Dir_Facing: ((index + 0x10) & 0xFF) >> 5
+  return (((index + 0x10) & 0xFF) >> 5) & 7;
 }
 
 /** Adjacent cell in given facing direction */
