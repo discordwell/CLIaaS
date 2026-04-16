@@ -1770,9 +1770,10 @@ export class Game {
             if (subCell >= 0) {
               entity.subCell = subCell;
               // C++ const.cpp StoppingCoordAbs: idle infantry snap to exact sub-cell
-              // lepton position. Only snap when not actively moving (isDriving=false)
-              // to avoid interfering with movement interpolation.
-              if (!entity.isDriving) {
+              // lepton position. Only snap when truly idle — not moving or chasing.
+              // C++ IsDriving persists between ticks; TS clears it each tick so also
+              // check moveTarget (entity is walking toward a destination).
+              if (!entity.isDriving && !entity.moveTarget) {
                 const sc = SUBCELL_LEPTON_OFFSETS[subCell];
                 const { cx, cy } = entity.cell;
                 entity.leptonX = (cx << 8) + sc.lx;
