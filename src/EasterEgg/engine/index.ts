@@ -5530,8 +5530,10 @@ export class Game {
         if (distFromTarget < range) {
           const tryCX = Math.floor(tryLX / 256);
           const tryCY = Math.floor(tryLY / 256);
+          // C++ Is_Clear_To_Move: terrain passable + not occupied by vehicles/buildings
           if (tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128 &&
-              this.map.isTerrainPassable(tryCX, tryCY)) {
+              this.map.isTerrainPassable(tryCX, tryCY) &&
+              !this.map.vehicleOccupancy.has(tryCY * 128 + tryCX)) {
             bestCX = tryCX;
             bestCY = tryCY;
             found = true;
