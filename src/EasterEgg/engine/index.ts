@@ -6593,10 +6593,10 @@ export class Game {
           }
           if (best) {
             recruitedSet.add(best);
-            if (ct.missions.length > 0) {
-              best.teamMissions = ct.missions.map(m => ({ mission: m.mission, data: m.data }));
-              best.teamMissionIndex = 0;
-            }
+            // C++ parity: Team::Add does NOT copy missions to the entity.
+            // The TeamInstance coordinator handles missions (coordinateMove,
+            // coordinateDo). Do NOT pre-assign teamMissions — they would
+            // conflict with the coordinator via updateTeamMission.
             recruited.push(best);
           }
         }

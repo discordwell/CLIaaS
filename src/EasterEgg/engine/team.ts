@@ -220,7 +220,10 @@ export class Team {
     this._members.push(entity);
     entity.teamRef = this;
 
-    // Copy mission list to entity for per-entity processing (backward compat)
+    // Copy mission list to entity for per-entity processing (reinforcement teams).
+    // CREATE_TEAM entities don't get pre-assigned teamMissions — they're handled
+    // by the TeamInstance coordinator, so this copy gives them the coordinator's
+    // mission list for per-entity fallback.
     entity.teamMissions = this.missionList;
     entity.teamMissionIndex = Math.max(0, this.currentMission);
 
