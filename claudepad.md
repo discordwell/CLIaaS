@@ -30,7 +30,7 @@
 - WASM lepton positions now match TS PERFECTLY through tick 75 (Δ=0 at every tick).
 
 ### Remaining Divergence
-SCG03EA tick 76+: WASM Head_To_Coord = (14656,13760) = cell(57,53)+LL, moving EAST. TS continues NE to (57,52). Cause: C++ `Can_Enter_Cell` check at Movement_AI:3810 found cell (57,52) blocked by another infantry's heading-to occupy bit, regenerated path via Basic_Path with EAST first step. TS uses pre-computed path from tick 10 without re-validation. Fix: implement tick-by-tick path validation + re-pathfinding when next cell is blocked.
+SCG03EA tick 76+: WASM Head_To_Coord = (14656,13760) = cell(57,53)+LL, moving EAST. TS continues NE to (57,52). Can_Enter_Cell check and Cell_Occupier both show cell (57,52) is empty. Root cause likely: HUNT timer fire at ~tick 58-74 re-runs Approach_Target which computes a DIFFERENT approach cell from the infantry's new position (56,53). The approach probe direction changes, giving approach cell (60,53) instead of (60,49). Path regenerates toward (60,53) with E first step. TS doesn't re-run approachTarget because moveTarget is still set. Fix: allow approachTarget to update when infantry position significantly changes the approach angle.
 
 ## 2026-04-14T17:30Z — Per-entity RNG tracing: 4 root causes found
 
