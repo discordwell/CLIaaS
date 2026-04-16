@@ -29,8 +29,13 @@
 - Atomic occupy-bit swap: `Clear_Occupy_Bit(Coord)` + `Set_Occupy_Bit(headto)` claims the destination sub-cell before movement starts.
 - WASM lepton positions now match TS PERFECTLY through tick 75 (Δ=0 at every tick).
 
+### Combat Parity Breakthrough
+- C++ InfantryClass::Greatest_Threat (infantry.cpp:2295-2297): Tanya does NOT auto-fire when human-controlled. The player must manually order Tanya to attack.
+- TS Tanya was auto-firing on guard scan, killing the SCG03EA HUNT E1 at tick 130. Adding the Tanya auto-fire skip pushed first divergence from tick 132 → tick 173.
+- Random_Animate still runs when guard scan returns no target — Tanya's RNG consumption matches except for the extra `Greatest_Threat` mask check call.
+
 ### Remaining Divergence
-SCG03EA tick 76+: WASM Head_To_Coord = (14656,13760) = cell(57,53)+LL, moving EAST. TS continues NE to (57,52). Can_Enter_Cell check and Cell_Occupier both show cell (57,52) is empty. Root cause likely: HUNT timer fire at ~tick 58-74 re-runs Approach_Target which computes a DIFFERENT approach cell from the infantry's new position (56,53). The approach probe direction changes, giving approach cell (60,53) instead of (60,49). Path regenerates toward (60,53) with E first step. TS doesn't re-run approachTarget because moveTarget is still set. Fix: allow approachTarget to update when infantry position significantly changes the approach angle.
+SCG03EA tick 173+: First divergence from ARTY/E2 RNG mismatch. WASM has 1 Tanya call + multiple E2 calls. TS has extra ARTY + different infantry calls. Likely cascading from another auto-fire issue or guard timer mismatch.
 
 ## 2026-04-14T17:30Z — Per-entity RNG tracing: 4 root causes found
 
