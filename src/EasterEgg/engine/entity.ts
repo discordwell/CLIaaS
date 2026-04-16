@@ -1185,6 +1185,7 @@ export class Entity {
       const stepLX = (COS_TABLE_256[dir256] * distance) >> 7;
       const stepLY = -((SIN_TABLE_256[dir256] * distance) >> 7);
 
+
       // Clamp to avoid overshooting the target position
       const clampedLX = Math.abs(stepLX) <= Math.abs(dxL) ? stepLX : dxL;
       const clampedLY = Math.abs(stepLY) <= Math.abs(dyL) ? stepLY : dyL;

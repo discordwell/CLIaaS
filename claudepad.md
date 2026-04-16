@@ -14,8 +14,16 @@
 - C++ `calcy(v, d) = -((v * d) >> 7)` — negative sign for Y movement in screen coordinates.
 - WASM infantry leaves cell (54,55) at tick 21 (1 tick after TS at tick 20) but overtakes by tick 97 due to per-tick step differences from Basic_Path vs A* path following.
 
+### Additional Findings (same session, continued)
+- `cellFacing()` was using `Math.atan2` (floating point) instead of C++ `Desired_Facing8` integer algorithm. The C++ diagonal threshold `((bigger+1)/2) <= smaller` differs from atan2 at boundaries (e.g., dx=4/dy=2 → C++ gives NE, atan2 gives E).
+- `isDriving` was being cleared every tick (line 3809). C++ `IsDriving` persists between ticks (set by Start_Driver, cleared by Stop_Driver). Now persists in TS.
+- C++ Movement_AI has a 1-tick delay between Start_Driver (sets IsDriving=true, sets HeadToCoord) and first Coord_Move. TS now matches via `isDriving` guard on the movement block.
+- WASM lepton export added to agent_harness.cpp (`Coord_X`, `Coord_Y`). Confirmed positions match perfectly through tick 30 (Δ=0).
+- At tick 31, WASM moves +8/-8 leptons while TS moves +6/-6. Both should compute step=6 with dir=32/dist=10/(89*10>>7=6). The +8 step is unexplained — possibly a WASM compiler optimization artifact or undocumented C++ behavior.
+- WASM NavCom and TS moveTarget both point to cell (60,49) — approach cells match.
+
 ### Remaining Divergence
-SCG03EA first diverges at tick 132 (131 ticks perfect parity). Root cause: ~26-lepton position difference from pathfinding algorithm mismatch. Fixing this requires either implementing C++ `Basic_Path()` in TS or accepting the small position divergence.
+SCG03EA: 131 ticks perfect parity. First divergence at tick 132 from 4-lepton position accumulation starting tick 31 (WASM +8 vs TS +6 per step). Cascades to 1-cell position difference at tick 97, causing guard scan divergence at tick 132. Root cause of +8 step unresolved — requires WASM binary instrumentation to trace.
 
 ## 2026-04-14T17:30Z — Per-entity RNG tracing: 4 root causes found
 
