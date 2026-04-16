@@ -5493,35 +5493,61 @@ export class Game {
   private approachTarget(entity: Entity): void {
     if (!entity.target?.alive || !entity.weapon) return;
 
-    const weaponRange = entity.weapon.range; // cells
-    // C++ subtracts 0x00B7 (183 leptons = ~0.7 cells) safety margin
-    const approachRange = Math.max(weaponRange - 0.7, 0.5);
-    const targetCX = entity.target.cell.cx;
-    const targetCY = entity.target.cell.cy;
-    const entityCX = entity.cell.cx;
-    const entityCY = entity.cell.cy;
+    // C++ foot.cpp:856-946 — exact Approach_Target implementation.
+    // maxrange = Weapon_Range - 0x00B7 (183 leptons)
+    const weaponRangeLeptons = entity.weapon.range * LEPTON_SIZE; // e.g. 3*256=768
+    let maxrange = weaponRangeLeptons - 0xB7; // 768-183=585
+    maxrange = Math.max(maxrange, 0);
 
-    // Direction from target to entity (approach direction)
-    const dx = entityCX - targetCX;
-    const dy = entityCY - targetCY;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const targetLX = entity.target.leptonX;
+    const targetLY = entity.target.leptonY;
+    const entityLX = entity.leptonX;
+    const entityLY = entity.leptonY;
 
-    // Find a cell along the approach direction within weapon range
-    const approachCellsFromTarget = Math.floor(approachRange);
-    let bestCX = targetCX + Math.round(dx / dist * approachCellsFromTarget);
-    let bestCY = targetCY + Math.round(dy / dist * approachCellsFromTarget);
+    // C++ Direction256(tcoord, Center_Coord()) — direction FROM target TO entity
+    const dx = entityLX - targetLX;
+    const dy = entityLY - targetLY;
+    const dir256 = Math.round(Math.atan2(-dy, dx) * 128 / Math.PI) & 0xFF;
 
-    // Clamp to map bounds
-    bestCX = Math.max(0, Math.min(127, bestCX));
-    bestCY = Math.max(0, Math.min(127, bestCY));
+    // C++ sin/cos tables for Coord_Move
+    const COS = (d: number) => Math.round(Math.cos(d * Math.PI / 128) * 127);
+    const SIN = (d: number) => Math.round(Math.sin(d * Math.PI / 128) * 127);
 
-    // Check if passable — if not, try the target cell directly
-    if (!this.map.isTerrainPassable(bestCX, bestCY)) {
-      bestCX = targetCX;
-      bestCY = targetCY;
+    // C++ sweep: angular offsets [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64]
+    const _angles = [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64];
+    let found = false;
+    let bestCX = 0, bestCY = 0;
+
+    // C++ sweeps from maxrange inward in steps of 0x0100 (256 leptons = 1 cell)
+    for (let range = maxrange; range > 0x0080; range -= 0x0100) {
+      for (const angleOff of _angles) {
+        const tryDir = (dir256 + angleOff) & 0xFF;
+        // C++ Coord_Move: move from target in tryDir by range leptons
+        const tryLX = targetLX + ((COS(tryDir) * range) >> 7);
+        const tryLY = targetLY - ((SIN(tryDir) * range) >> 7);
+        // Check distance from target < range (C++ sanity check)
+        const distFromTarget = leptonDist(tryLX, tryLY, targetLX, targetLY);
+        if (distFromTarget < range) {
+          const tryCX = Math.floor(tryLX / 256);
+          const tryCY = Math.floor(tryLY / 256);
+          if (tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128 &&
+              this.map.isTerrainPassable(tryCX, tryCY)) {
+            bestCX = tryCX;
+            bestCY = tryCY;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (found) break;
     }
 
-    // Set moveTarget and path
+    if (!found) {
+      // Fallback: head toward target directly
+      bestCX = Math.floor(targetLX / 256);
+      bestCY = Math.floor(targetLY / 256);
+    }
+
     entity.moveTarget = { lx: bestCX * 256 + 128, ly: bestCY * 256 + 128 };
     entity.path = findPath(this.map, entity.cell, { cx: bestCX, cy: bestCY },
       true, entity.isNavalUnit, entity.stats.speedClass);
