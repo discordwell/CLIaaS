@@ -22,8 +22,15 @@
 - At tick 31, WASM moves +8/-8 leptons while TS moves +6/-6. Both should compute step=6 with dir=32/dist=10/(89*10>>7=6). The +8 step is unexplained — possibly a WASM compiler optimization artifact or undocumented C++ behavior.
 - WASM NavCom and TS moveTarget both point to cell (60,49) — approach cells match.
 
+### Sub-Cell Parity Breakthrough (continued)
+- C++ `InfantryClass::Start_Driver` overrides `FootClass::Start_Driver` — calls `Closest_Free_Spot(Coord_Move(headto, Direction(headto)+DIR_S, 0x007C))`. The probe point is 124 leptons OPPOSITE the approach direction, selecting the sub-cell quadrant matching the approach angle.
+- Infantry walks to SUB-CELL positions (e.g., LL at (64,192)) instead of cell center (128,128). The snap at Distance<16 triggers to the sub-cell position.
+- C++ post-movement snap does NOT exist for infantry. Only pre-movement `Distance(Head_To_Coord()) < 0x0010` check. TS had an extra post-movement `steppedL >= distLeptonsTotal - 16` check causing 1-tick early snap — removed.
+- Atomic occupy-bit swap: `Clear_Occupy_Bit(Coord)` + `Set_Occupy_Bit(headto)` claims the destination sub-cell before movement starts.
+- WASM lepton positions now match TS PERFECTLY through tick 75 (Δ=0 at every tick).
+
 ### Remaining Divergence
-SCG03EA: 131 ticks perfect parity. First divergence at tick 132 from 4-lepton position accumulation starting tick 31 (WASM +8 vs TS +6 per step). Cascades to 1-cell position difference at tick 97, causing guard scan divergence at tick 132. Root cause of +8 step unresolved — requires WASM binary instrumentation to trace.
+SCG03EA tick 76+: WASM Head_To_Coord = (14656,13760) = cell(57,53)+LL, moving EAST. TS continues NE to (57,52). Cause: C++ `Can_Enter_Cell` check at Movement_AI:3810 found cell (57,52) blocked by another infantry's heading-to occupy bit, regenerated path via Basic_Path with EAST first step. TS uses pre-computed path from tick 10 without re-validation. Fix: implement tick-by-tick path validation + re-pathfinding when next cell is blocked.
 
 ## 2026-04-14T17:30Z — Per-entity RNG tracing: 4 root causes found
 

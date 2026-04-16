@@ -3874,6 +3874,24 @@ export class Game {
           // C++ InfantryClass::Start_Driver calls Closest_Free_Spot to find a sub-cell
           // in the destination cell, storing it as HeadToCoord. Compute and store on entity.
           if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+            // C++ Movement_AI:3810-3811: validate next path cell is passable.
+            // If Can_Enter_Cell fails, clear path and regenerate via Basic_Path.
+            const nextCell = entity.path[entity.pathIndex];
+            const nextIdx = nextCell.cy * 128 + nextCell.cx;
+            const nextSlots = this.map.subCellOccupancy.get(nextIdx);
+            const nextHasVehicle = this.map.vehicleOccupancy.has(nextIdx);
+            const nextSubCellsFull = nextHasVehicle || (nextSlots != null &&
+              nextSlots[0] !== 0 && nextSlots[1] !== 0 && nextSlots[2] !== 0 &&
+              nextSlots[3] !== 0 && nextSlots[4] !== 0);
+            if (nextSubCellsFull && entity.moveTarget) {
+              // Cell is full — regenerate path from current position
+              entity.path = findPath(this.map, entity.cell,
+                { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) },
+                true, entity.isNavalUnit, entity.stats.speedClass);
+              entity.pathIndex = 0;
+            }
+          }
+          if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
             // C++ InfantryClass::Start_Driver (infantry.cpp:2080-2114):
             // headto = Map[headto].Closest_Free_Spot(
             //   Coord_Move(headto, Direction(headto)+DIR_S, 0x007C));
