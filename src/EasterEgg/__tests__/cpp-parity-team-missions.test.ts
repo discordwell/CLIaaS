@@ -2442,11 +2442,11 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       expect(e1.teamRef).toBeNull();
       expect(e2.teamRef).toBeNull();
       expect(e3.teamRef).toBeNull();
-      // C++ team.cpp:1139 — Enter_Idle_Mode queues GUARD via Assign_Mission.
-      // Commence processes when !IsFiring. Check missionQueue.
-      expect(e1.missionQueue).toBe(Mission.GUARD);
-      expect(e2.missionQueue).toBe(Mission.GUARD);
-      expect(e3.missionQueue).toBe(Mission.GUARD);
+      // C++ Enter_Idle_Mode: queues GUARD only if NOT already in GUARD/AREA_GUARD.
+      // infantry.cpp:1348 early return when Mission == GUARD/AREA_GUARD.
+      expect(e1.missionQueue).toBe(Mission.GUARD); // was ATTACK → queued
+      expect(e2.missionQueue).toBe(Mission.GUARD); // was MOVE → queued
+      expect(e3.missionQueue).toBeNull();           // was GUARD → no-op (early return)
     });
 
     it('ai() is no-op after dissolve', () => {
