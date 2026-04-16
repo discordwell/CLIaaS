@@ -220,12 +220,13 @@ export class Team {
     this._members.push(entity);
     entity.teamRef = this;
 
-    // Copy mission list to entity for per-entity processing (reinforcement teams).
-    // CREATE_TEAM entities don't get pre-assigned teamMissions — they're handled
-    // by the TeamInstance coordinator, so this copy gives them the coordinator's
-    // mission list for per-entity fallback.
-    entity.teamMissions = this.missionList;
-    entity.teamMissionIndex = Math.max(0, this.currentMission);
+    // C++ parity: Team::Add does NOT copy missions to entity members.
+    // The TeamInstance coordinator (coordinateMove/coordinateDo) handles
+    // mission dispatch. Clear any per-entity teamMissions to prevent
+    // updateTeamMission from competing with the coordinator.
+    // Reinforcement teams set teamMissions AFTER add() in the spawn path.
+    entity.teamMissions = [];
+    entity.teamMissionIndex = 0;
 
     // C++ team.cpp:912 — first member is initiated
     // (In C++ this means "has reached team center and is an active participant")

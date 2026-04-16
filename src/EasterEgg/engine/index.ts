@@ -6715,7 +6715,13 @@ export class Game {
           forcedActive: true,
         });
         for (const e of teamEntities) {
+          // Save teamMissions before add() clears them
+          const savedMissions = e.teamMissions;
+          const savedIdx = e.teamMissionIndex;
           team.add(e);
+          // Restore for reinforcement teams — per-entity mission processing needed
+          e.teamMissions = savedMissions;
+          e.teamMissionIndex = savedIdx;
         }
         registerTeam(team);
       }
