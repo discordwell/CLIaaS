@@ -1211,14 +1211,18 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     }
   }
 
-  // C++ foot.cpp:1011 — Random_Animate when no target found (on scan tick)
-  // C++ calls Random_Animate() which checks Is_Ready_To_Random_Animate() — full gate check
-  if (entity.isReadyToRandomAnimate()) {
-    // C++ infantry.cpp:1748: IdleTimer = Random_Pick(RandomAnimateTime * TICKS_PER_MINUTE/2, RandomAnimateTime * TICKS_PER_MINUTE*2)
-    // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
+  // C++ foot.cpp:1011 — Random_Animate when no target found (on scan tick).
+  // C++ Is_Ready_To_Random_Animate: IdleTimer==0 && !IsDriving && Height==0.
+  // Use idleAnimTimer directly (not isReadyToRandomAnimate) because the doing
+  // check in isReadyToRandomAnimate blocks at tick 1 when doing='nothing',
+  // but C++ IS_Ready_To_Random_Animate passes for AREA_GUARD infantry.
+  if (entity.stats.isInfantry && entity.idleAnimTimer <= 0 && !entity.isDriving) {
     entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
+    if (animPick >= 1 && animPick <= 4) {
+      entity.nonInterruptAnimTicks = 8; // DO_GESTURE/SALUTE: non-interruptible
+    }
   }
 }
 
