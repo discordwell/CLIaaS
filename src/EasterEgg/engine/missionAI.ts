@@ -857,16 +857,17 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
   }
 
-  // Medic auto-heal: handled by updateMedic() — medics are non-combat, skip enemy targeting
+  // C++ Mission_Guard does NOT have special medic handling — medics scan for enemies
+  // and can fire like any other infantry. Medic heal is handled separately by Firing_AI
+  // when the medic has a friendly injured target. Don't early-return for medics.
+  // Mechanic heal is similar — don't skip guard scan.
   if (entity.type === UnitType.I_MEDI) {
     ctx.updateMedic(entity);
-    return;
+    // Fall through to guard scan — C++ parity: medics participate in enemy targeting
   }
-
-  // Mechanic auto-heal: mirrors medic but for vehicles — non-combat, skip enemy targeting
   if (entity.type === UnitType.I_MECH) {
     ctx.updateMechanicUnit(entity);
-    return;
+    // Fall through to guard scan
   }
 
   // IdleTimer decremented in index.ts updateEntity (runs every tick for all missions)
