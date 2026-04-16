@@ -3853,22 +3853,23 @@ export class Game {
         } else if (missionTimerFired) {
           this.updateHunt(entity);
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-        } else {
-          this._runMissionAI(ctx => {
-          if (entity.target?.alive && !entity.inRange(entity.target)) {
-            const targetCell = { cx: Math.floor(entity.target.pos.x / CELL_SIZE), cy: Math.floor(entity.target.pos.y / CELL_SIZE) };
-            if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) {
-              entity.path = findPath(this.map, entity.cell, targetCell, true, entity.isNavalUnit, entity.stats.speedClass);
-              entity.pathIndex = 0;
-            }
+        } else if (entity.target?.alive && !entity.inRange(entity.target)) {
+          // C++ foot.cpp:856-946 Approach_Target: assign NavCom to a cell within
+          // weapon range of target. Only assigns when NavCom is empty (!Target_Legal).
+          if (!entity.moveTarget) {
+            this.approachTarget(entity);
+          }
+          // Walk toward moveTarget via path (C++ movement system processes NavCom each tick)
+          if (entity.moveTarget) {
             if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
               const wp = { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
               if (entity.moveToward(wp, this.movementSpeed(entity))) entity.pathIndex++;
             } else {
-              entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, this.movementSpeed(entity));
+              if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
+                entity.moveTarget = null; // arrived at approach point
+              }
             }
           }
-        });
         }
         break;
       case Mission.GUARD:
@@ -5476,6 +5477,54 @@ export class Game {
   /** Area Guard — delegates to missionAI.ts */
   private updateAreaGuard(entity: Entity, timerFired = true): void {
     this._runMissionAI(ctx => _updateAreaGuard(ctx, entity, timerFired));
+  }
+
+  /**
+   * C++ foot.cpp:856-946 Approach_Target — find a cell within weapon range
+   * of the target and assign it as moveTarget. Only called when moveTarget
+   * is empty (!Target_Legal(NavCom) in C++).
+   *
+   * C++ sweeps from the target's position outward toward the unit, trying
+   * angular offsets, looking for a passable cell within weapon range.
+   * For simplicity, TS finds the cell on the direct path from target to
+   * unit that's within weapon range.
+   */
+  private approachTarget(entity: Entity): void {
+    if (!entity.target?.alive || !entity.weapon) return;
+
+    const weaponRange = entity.weapon.range; // cells
+    // C++ subtracts 0x00B7 (183 leptons = ~0.7 cells) safety margin
+    const approachRange = Math.max(weaponRange - 0.7, 0.5);
+    const targetCX = entity.target.cell.cx;
+    const targetCY = entity.target.cell.cy;
+    const entityCX = entity.cell.cx;
+    const entityCY = entity.cell.cy;
+
+    // Direction from target to entity (approach direction)
+    const dx = entityCX - targetCX;
+    const dy = entityCY - targetCY;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    // Find a cell along the approach direction within weapon range
+    const approachCellsFromTarget = Math.floor(approachRange);
+    let bestCX = targetCX + Math.round(dx / dist * approachCellsFromTarget);
+    let bestCY = targetCY + Math.round(dy / dist * approachCellsFromTarget);
+
+    // Clamp to map bounds
+    bestCX = Math.max(0, Math.min(127, bestCX));
+    bestCY = Math.max(0, Math.min(127, bestCY));
+
+    // Check if passable — if not, try the target cell directly
+    if (!this.map.isTerrainPassable(bestCX, bestCY)) {
+      bestCX = targetCX;
+      bestCY = targetCY;
+    }
+
+    // Set moveTarget and path
+    entity.moveTarget = { lx: bestCX * 256 + 128, ly: bestCY * 256 + 128 };
+    entity.path = findPath(this.map, entity.cell, { cx: bestCX, cy: bestCY },
+      true, entity.isNavalUnit, entity.stats.speedClass);
+    entity.pathIndex = 0;
   }
 
   /** Retreat — delegates to missionAI.ts */
