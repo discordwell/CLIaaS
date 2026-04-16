@@ -145,10 +145,9 @@ export class Entity {
   // DO_NOTHING = initial state. Transitions to DO_STAND_READY via Doing_AI when animation completes.
   // DO_STAND_READY = idle standing pose. Random_Animate allowed.
   // DO_WALK/DO_FIRE = active states. Random_Animate blocked.
-  // C++ WASM data: 0 infantry run Random_Animate at tick 1 via Mission_Guard.
-  // doing='nothing' blocks isReadyToRandomAnimate, matching this behavior.
-  // The team activation gesture (team.cpp:637) handles the Doing state blocking
-  // for infantry in teams via nonInterruptAnimTicks.
+  // C++ Is_Ready_To_Random_Animate blocks RA at tick 1 — IdleTimer CDTimerClass
+  // behavior makes it non-zero at Frame 0. doing='nothing' matches this in TS.
+  // After tick 1, doingAI transitions to 'stand_ready' (enabling future RA).
   doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
