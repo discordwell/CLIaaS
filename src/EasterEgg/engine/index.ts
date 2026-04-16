@@ -9,7 +9,7 @@ import {
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
-	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist,
+	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, directionToLeptons256, COS_TABLE_256, SIN_TABLE_256,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
@@ -5501,17 +5501,9 @@ export class Game {
 
     const targetLX = entity.target.leptonX;
     const targetLY = entity.target.leptonY;
-    const entityLX = entity.leptonX;
-    const entityLY = entity.leptonY;
 
-    // C++ Direction256(tcoord, Center_Coord()) — direction FROM target TO entity
-    const dx = entityLX - targetLX;
-    const dy = entityLY - targetLY;
-    const dir256 = Math.round(Math.atan2(-dy, dx) * 128 / Math.PI) & 0xFF;
-
-    // C++ sin/cos tables for Coord_Move
-    const COS = (d: number) => Math.round(Math.cos(d * Math.PI / 128) * 127);
-    const SIN = (d: number) => Math.round(Math.sin(d * Math.PI / 128) * 127);
+    // C++ Direction256(tcoord, Center_Coord()) — exact integer algorithm from face.cpp
+    const dir256 = directionToLeptons256(targetLX, targetLY, entity.leptonX, entity.leptonY);
 
     // C++ sweep: angular offsets [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64]
     const _angles = [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64];
@@ -5522,9 +5514,9 @@ export class Game {
     for (let range = maxrange; range > 0x0080; range -= 0x0100) {
       for (const angleOff of _angles) {
         const tryDir = (dir256 + angleOff) & 0xFF;
-        // C++ Coord_Move: move from target in tryDir by range leptons
-        const tryLX = targetLX + ((COS(tryDir) * range) >> 7);
-        const tryLY = targetLY - ((SIN(tryDir) * range) >> 7);
+        // C++ Coord_Move: uses COS_TABLE_256/SIN_TABLE_256 lookup tables
+        const tryLX = targetLX + ((COS_TABLE_256[tryDir] * range) >> 7);
+        const tryLY = targetLY - ((SIN_TABLE_256[tryDir] * range) >> 7);
         // Check distance from target < range (C++ sanity check)
         const distFromTarget = leptonDist(tryLX, tryLY, targetLX, targetLY);
         if (distFromTarget < range) {
