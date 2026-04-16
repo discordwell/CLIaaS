@@ -3870,6 +3870,14 @@ export class Game {
                 entity.moveTarget = null; // arrived at approach point
               }
             }
+            // C++ foot.cpp:1392-1403 Per_Cell_Process: when a HUNT/ATTACK infantry
+            // enters a cell within weapon range, clear NavCom and stop moving.
+            // This prevents walking past the range boundary to the approach cell.
+            if (entity.moveTarget && entity.target?.alive && entity.inRange(entity.target)) {
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+            }
           }
         }
         break;
