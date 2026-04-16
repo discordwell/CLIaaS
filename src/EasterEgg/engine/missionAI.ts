@@ -1007,9 +1007,16 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     entity.target = null;
   }
 
+  // C++ infantry.cpp:2295-2297: Tanya does NOT auto-fire when human-controlled.
+  // The player must manually order Tanya to attack — she won't auto-target enemies.
+  // C++ Greatest_Threat returns TARGET_NONE for human Tanya, so Target_Something_Nearby
+  // returns false, then Random_Animate runs (consumes RNG). Match by setting bestTarget=null
+  // but still invoking Random_Animate path below.
+  const tanyaSkip = entity.type === UnitType.I_TANYA && entity.house === ctx.playerHouse;
+
   // Step 2: No valid target — call Greatest_Threat (C++ techno.cpp:5273-5274)
   // C++ Greatest_Threat with THREAT_RANGE scans cells in radial outward pattern.
-  const bestTarget = cellBasedGuardScan(ctx, entity, scanRange, isDog);
+  const bestTarget = tanyaSkip ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
     // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
     // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves
