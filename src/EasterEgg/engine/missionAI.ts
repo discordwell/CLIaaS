@@ -1008,14 +1008,8 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   }
 
   // C++ infantry.cpp:2295-2297: Tanya does NOT auto-fire when human-controlled.
-  // The player must manually order Tanya to attack — she won't auto-target enemies.
-  // C++ Greatest_Threat returns TARGET_NONE for human Tanya, so Target_Something_Nearby
-  // returns false, then Random_Animate runs (consumes RNG). Match by setting bestTarget=null
-  // but still invoking Random_Animate path below.
   const tanyaSkip = entity.type === UnitType.I_TANYA && entity.house === ctx.playerHouse;
 
-  // Step 2: No valid target — call Greatest_Threat (C++ techno.cpp:5273-5274)
-  // C++ Greatest_Threat with THREAT_RANGE scans cells in radial outward pattern.
   const bestTarget = tanyaSkip ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
     // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
@@ -1024,15 +1018,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     // C++ does NOT change mission — unit stays on GUARD, fires via Firing_AI,
     // and does NOT pursue the target. Match by temporarily switching to ATTACK
     // for the inline fire, then restoring GUARD so the unit doesn't chase.
+    // C++ parity: Mission_Guard SETS TarCom via Target_Something_Nearby but does NOT fire.
+    // Firing_AI (which runs at the TOP of updateGuard every tick) will fire NEXT tick
+    // when the target is seen with weapon cooldown ready.
     entity.target = bestTarget;
-    entity.mission = Mission.ATTACK;
-    updateAttack(ctx, entity); // C++ parity: fire inline before next entity processes
-    // Restore GUARD — C++ never leaves guard mission for target engagement.
-    // The target stays set so Firing_AI equivalent can fire on subsequent ticks
-    // when weapon cooldown expires, but the unit doesn't pursue.
-    if (entity.mission === Mission.ATTACK) {
-      entity.mission = Mission.GUARD;
-    }
+    // Stay on GUARD — don't pursue, don't switch to ATTACK. C++ keeps Mission==GUARD.
     return;
   }
 
