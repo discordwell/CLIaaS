@@ -28,7 +28,7 @@ extern TARGET As_Target(CELL cell);
 
 // Debug movement log — ring buffer of last 32 entries
 struct DebugMoveEntry { int preLX, preLY, postLX, postLY, dir, dist, headLX, headLY; };
-static DebugMoveEntry g_debug_moves[32];
+static DebugMoveEntry g_debug_moves[64];
 static int g_debug_move_idx = 0;
 static int g_debug_move_count = 0;
 
@@ -929,8 +929,8 @@ char* agent_get_state(void)
 
 	// Append debug movement log
 	buf_cat("],\"debugMoves\":[");
-	for (int mi = 0; mi < g_debug_move_count && mi < 32; mi++) {
-		int ri = (g_debug_move_idx - g_debug_move_count + mi + 32) % 32;
+	for (int mi = 0; mi < g_debug_move_count && mi < 64; mi++) {
+		int ri = (g_debug_move_idx - g_debug_move_count + mi + 64) % 64;
 		auto &dm = g_debug_moves[ri];
 		if (mi > 0) buf_cat(",");
 		buf_cat("[%d,%d,%d,%d,%d,%d,%d,%d]", dm.preLX, dm.preLY, dm.postLX, dm.postLY, dm.dir, dm.dist, dm.headLX, dm.headLY);
@@ -1106,8 +1106,13 @@ char* agent_step(int n, char* commands)
 	}
 
 	/* 2. Run N game ticks */
-	g_debug_move_count = 0; // Reset debug move log before ticking
-	g_debug_move_idx = 0;
+	// Don't reset debug log on the FIRST agent_step — preserve init-time entries
+	static bool first_step = true;
+	if (!first_step) {
+		g_debug_move_count = 0;
+		g_debug_move_idx = 0;
+	}
+	first_step = false;
 	if (n < 1) n = 1;
 	if (n > 300) n = 300;
 	for (int i = 0; i < n; i++) {

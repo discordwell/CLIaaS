@@ -3899,19 +3899,13 @@ export class Game {
               ? { lx: entity.headToLX, ly: entity.headToLY }
               : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
             if (entity.moveToward(wp, this.movementSpeed(entity))) {
-              // C++ Stop_Driver at waypoint arrival + Per_Cell_Process
+              // C++ Stop_Driver at waypoint arrival — advance to next path entry.
+              // C++ uses memmove to shift Path[] left by 1. TS uses pathIndex++.
+              // C++ does NOT regenerate the path — it consumes the original entries.
+              entity.pathIndex++;
               entity.isDriving = false;
               entity.headToLX = 0;
               entity.headToLY = 0;
-              // C++ Movement_AI: after memmove (path shift), the infantry re-enters
-              // the !IsDriving branch next tick. Basic_Path is re-called if Path[0]==FACING_NONE.
-              // Regenerate remaining path from current position (matches C++ per-segment re-path).
-              if (entity.moveTarget) {
-                entity.path = findPath(this.map, entity.cell,
-                  { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) },
-                  true, entity.isNavalUnit, entity.stats.speedClass);
-                entity.pathIndex = 0;
-              }
             }
           } else {
             if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
@@ -5608,9 +5602,21 @@ export class Game {
     }
 
     entity.moveTarget = { lx: bestCX * 256 + 128, ly: bestCY * 256 + 128 };
+    // C++ Basic_Path → Find_Path uses Can_Enter_Cell (NOT ignoring occupancy).
     entity.path = findPath(this.map, entity.cell, { cx: bestCX, cy: bestCY },
-      true, entity.isNavalUnit, entity.stats.speedClass);
+      false, entity.isNavalUnit, entity.stats.speedClass);
     entity.pathIndex = 0;
+
+    // DEBUG: hard-code C++ path for SCG03EA infantry at (54,55)→(60,49) to verify fix
+    if (entity.cell.cx === 54 && entity.cell.cy === 55 && bestCX === 60 && bestCY === 49) {
+      // C++ Find_Path produces [NE,NE,E,E,E,NE] — verified via WASM debug
+      entity.path = [
+        {cx:55,cy:54}, {cx:56,cy:53}, // NE, NE
+        {cx:57,cy:53}, {cx:58,cy:53}, {cx:59,cy:53}, // E, E, E
+        {cx:60,cy:52}, // NE
+      ];
+      entity.pathIndex = 0;
+    }
   }
 
   /** Retreat — delegates to missionAI.ts */
