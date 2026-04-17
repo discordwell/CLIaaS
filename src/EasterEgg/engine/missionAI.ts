@@ -385,24 +385,31 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         const isHoming = (activeWeapon.projectileROT ?? 0) > 0;
         const scatterCap = isHoming ? 512 : 256;
         scatterMax = Math.min(scatterMax, scatterCap);
-        // Convert scatter from leptons back to pixels: leptons * CELL_SIZE / LEPTON_SIZE
-        const scatterPx = scatterMax * CELL_SIZE / LEPTON_SIZE;
-        const dist = ScenarioRandom.float() * scatterPx;
+        const scatterLeptonsInt = Math.max(0, Math.floor(scatterMax));
         if (activeWeapon.isArcing) {
-          // SC5+SC2: Arcing projectiles — circular scatter with ±5° angular jitter (C++ bullet.cpp:722)
-          const baseAngle = ScenarioRandom.float() * Math.PI * 2;
-          const jitterDeg = ScenarioRandom.nextInRange(0, 10) - 5; // ±5 degrees (C++ Random_Pick(0,10)-5)
-          const angle = baseAngle + (jitterDeg * Math.PI / 180);
-          impactX += Math.cos(angle) * dist;
-          impactY += Math.sin(angle) * dist;
+          // C++ bullet.cpp:709-723 arcing inaccurate scatter, in exact RNG order:
+          //   [1] dir = (dir + (Random_Pick(0,10)-5)) & 0xFF  — firing dir jitter (cosmetic for arc)
+          //   [2] tcoord = Coord_Scatter(tcoord, Random_Pick(0, scatterdist))
+          //         Inside Coord_Scatter: Coord_Move(coord, Random_Pick(DIR_N=0, DIR_MAX=255), distance)
+          //   Order: dir jitter → distance → scatter direction.
+          ScenarioRandom.nextInRange(0, 10); // RNG #1: dir jitter (value discarded for arcing)
+          const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt); // RNG #2
+          const scatterDir256 = ScenarioRandom.nextInRange(0, 255); // RNG #3 via Coord_Scatter→Coord_Move
+          const angle = scatterDir256 * 2 * Math.PI / 256;
+          const distPx = scatterDistLeptons * CELL_SIZE / LEPTON_SIZE;
+          impactX += Math.cos(angle) * distPx;
+          impactY += Math.sin(angle) * distPx;
         } else {
-          // SC2: Non-arcing projectiles — scatter along firing direction (overshoot/undershoot)
+          // Non-arcing ballistic: C++ Coord_Move(tcoord, dir, Random_Pick(0, scatterdist))
+          // Uses firing direction (no separate scatter direction RNG).
+          const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt);
+          const distPx = scatterDistLeptons * CELL_SIZE / LEPTON_SIZE;
           const firingAngle = Math.atan2(
             entity.target.pos.y - entity.pos.y,
             entity.target.pos.x - entity.pos.x,
           );
-          impactX += Math.cos(firingAngle) * dist;
-          impactY += Math.sin(firingAngle) * dist;
+          impactX += Math.cos(firingAngle) * distPx;
+          impactY += Math.sin(firingAngle) * distPx;
         }
         // Check if scattered shot still hits the target (within half-cell)
         const dx = impactX - entity.target.pos.x;
