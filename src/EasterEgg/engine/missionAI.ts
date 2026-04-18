@@ -267,11 +267,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     const ec = entity.cell;
     const tc = entity.target.cell;
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
-      // LOS blocked — move toward target to get clear shot
+      // LOS blocked — move toward target to get clear shot.
+      // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
       entity.animState = AnimState.WALK;
       entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, ctx.movementSpeed(entity));
-      if (entity.attackCooldown > 0) entity.attackCooldown--;
-      if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
       return;
     }
 
@@ -589,8 +588,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
-  if (entity.attackCooldown > 0) entity.attackCooldown--;
-  if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+  // NOTE: cooldown decrement is handled at index.ts:3814 at start of every tick
+  // for ALL entities (matching C++ TechnoClass::AI). Previously this function
+  // also decremented at end, causing a double-decrement that made cooldowns
+  // tick down 64 frames instead of the intended 65 for RoF=65 weapons.
 }
 
 /** Hunt mode — move toward target and attack (C++ foot.cpp:654-703)
@@ -1540,8 +1541,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       entity.moveToward({ lx: pixelToLepton(structPos.x), ly: pixelToLepton(structPos.y) }, ctx.movementSpeed(entity));
     }
   }
-  if (entity.attackCooldown > 0) entity.attackCooldown--;
-  if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+  // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
 }
 
 /** Force-fire on ground — fire at a location with no target entity */
@@ -1636,6 +1636,5 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
     entity.animState = AnimState.WALK;
     entity.moveToward({ lx: pixelToLepton(target.x), ly: pixelToLepton(target.y) }, ctx.movementSpeed(entity));
   }
-  if (entity.attackCooldown > 0) entity.attackCooldown--;
-  if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+  // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
 }
