@@ -305,7 +305,7 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		(int)Coord_X(coord), (int)Coord_Y(coord));
 
 	// Export target and navcom info for parity debugging
-	if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT) {
+	if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT || rtti == RTTI_AIRCRAFT) {
 		FootClass* foot = (FootClass*)obj;
 		if (Target_Legal(foot->TarCom)) {
 			COORDINATE tc = As_Coord(foot->TarCom);
