@@ -983,6 +983,18 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       ? (proj.arcHeight <= 0 && proj.currentFrame > 1)  // skip frame 1 since Height starts at 1
       : (proj.currentFrame >= proj.travelFrames);
     if (hasLanded) {
+      // C++ parity (bullet.cpp:446-483): arcing bullets detonate at their CURRENT
+      // Coord when Height <= 0. The bullet moves horizontally by velocity each tick
+      // via FlyClass::Physics, then ObjectClass::AI updates Height via Riser/Gravity.
+      // When Height <= 0 the bullet lands at whatever horizontal position it has
+      // reached — which can UNDERSHOOT or OVERSHOOT the original scattered tcoord
+      // depending on how flight time (governed by Riser) compares to travel time
+      // (dist/speed). Override impactX/Y to the bullet's actual current position.
+      if (proj.isArcing) {
+        const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+        proj.impactX = proj.startX + (proj.impactX - proj.startX) * t;
+        proj.impactY = proj.startY + (proj.impactY - proj.startY) * t;
+      }
       arrived.push(proj);
     }
   }
