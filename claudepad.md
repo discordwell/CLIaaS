@@ -1,5 +1,32 @@
 # Session Summaries
 
+## 2026-04-19T08:45Z — Aircraft Mission_Move RNG parity (SCG01EA major win)
+
+### Landed
+- **Aircraft Mission_Move RNG parity** (index.ts:1954-1972) — C++ AircraftClass::AI → FootClass::AI → MissionClass::AI fires Mission_Move when Timer==0, consuming Random_Pick(0,2). TS `_updateAircraft` state machine bypasses mission switch, so this RNG was never consumed. Added explicit Random_Pick in Phase 4 for aircraft in MOVE with missionTimer<=0.
+- **In-cargo team members** (index.ts:6931) — C++ Team::Add bypasses IsInLimbo during ScenarioInit (team.cpp:113). Transport passengers (e.g., Tanya in Chinook) are team members. TS now iterates transport.passengers during reinforcement.
+- **Aircraft initial mission = MOVE** (scenario.ts:2735-2750) — was Mission.UNLOAD. C++ transports start flying (MOVE), transition via Commence/team script. TS now sets MOVE initially.
+- **tMissionUnload queue pattern** (team.ts:851-866) — C++ uses MissionQueue; Commence transitions when gate allows (!IsLanding/IsTakingOff). TS now queues via missionQueue instead of direct assignment.
+
+### Metrics
+| Scenario | Before | After | Change |
+|----------|--------|-------|--------|
+| SCG01EA  | 496    | **458** | -38 ticks |
+| SCG02EA  | 267    | 267   | 0 |
+| SCG03EA  | 220    | 220   | 0 |
+| SCG04EA  | 499    | 499   | 0 |
+| SCG06EA  | 499    | 499   | 0 |
+| SCG08EA  | —      | 253   | NEW BASELINE |
+| SCG13EA  | —      | 414   | NEW BASELINE |
+
+SCG01EA first divergence moved from tick 0 to **tick 43** (ticks 0-42 all match exactly).
+
+### Next investigations (tracked as pending tasks)
+- **Task #48 (SCG04EA)**: WASM Coordinate_Move asymmetric — 2nd team member stays GUARD with MissionQueue=MOVE because IsDriving=true gates Commence. Requires full MissionQueue/Commence/IsDriving semantics in TS.
+- **Task #50 (SCG06EA)**: infantry[69] fog-scan parity (C++ techno.cpp:1529 IsOwnedByPlayer bypass vs TS per-cell fog).
+- **SCG07EA tick 0**: TS missing HouseClass::Expert_AI (6 RNG calls, house.cpp:4605).
+- **SCG08EA tick 240**: TS's vessel[82] consumes extra RNG that WASM doesn't.
+
 ## 2026-04-19T07:45Z — Mission_Guard_Area target-found timer parity
 
 ### Landed
