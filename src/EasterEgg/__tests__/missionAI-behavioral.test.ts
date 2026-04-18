@@ -600,7 +600,8 @@ describe('updateAreaGuard', () => {
 
     updateAreaGuard(ctx, guard);
 
-    expect(guard.mission).toBe(Mission.ATTACK);
+    // C++ foot.cpp:1034-1037: target-found path stays AREA_GUARD with TarCom set.
+    expect(guard.mission).toBe(Mission.AREA_GUARD);
     expect(guard.target).toBe(enemy);
   });
 

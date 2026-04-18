@@ -3960,7 +3960,10 @@ export class Game {
         break;
       case Mission.AREA_GUARD:
         this.updateAreaGuard(entity, missionTimerFired);
-        if (missionTimerFired) {
+        // C++ foot.cpp:1036-1037: target-found path returns 1 (no RNG). updateAreaGuard
+        // sets missionTimer=1 directly when it finds a target, so only default the
+        // timer here if it's still 0 (no target found → full scan delay with RNG jitter).
+        if (missionTimerFired && entity.missionTimer <= 0) {
           // C++ foot.cpp:1016-1020: dtime = MissionControl[Mission].Normal_Delay() + Random_Pick(1, 5)
           // rules.ini [Area Guard] Rate=.080. fixed(".080")→Raw=20. Normal_Delay=((20*900)+128)/256=70
           entity.missionTimer = 70 + ScenarioRandom.nextInRange(1, 5);

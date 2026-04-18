@@ -857,9 +857,11 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
 
     updateAreaGuard(ctx, guard);
 
-    // Should find enemy near home position (C++ scans from ArchiveTarget)
+    // Should find enemy near home position (C++ scans from ArchiveTarget).
+    // C++ foot.cpp:1034-1037: target-found path stays AREA_GUARD with TarCom set,
+    // returns timer=1. Firing_AI + Approach_Target handle firing/movement.
     expect(guard.target).not.toBeNull();
-    expect(guard.mission).toBe(Mission.ATTACK);
+    expect(guard.mission).toBe(Mission.AREA_GUARD);
   });
 
   it('unit beyond leash returns home and clears target (C++ foot.cpp:998-1000)', () => {

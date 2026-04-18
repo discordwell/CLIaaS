@@ -199,8 +199,9 @@ describe('Per-house fog-of-war in AI target scans (techno.cpp:1467+)', () => {
 
       updateAreaGuard(ctx, guard, true);
 
-      // Should have found the target and switched to ATTACK
-      expect(guard.mission).toBe(Mission.ATTACK);
+      // C++ foot.cpp:1034-1037: target-found path stays AREA_GUARD, just sets TarCom.
+      // Firing_AI fires; Approach_Target moves. Mission doesn't change to ATTACK.
+      expect(guard.mission).toBe(Mission.AREA_GUARD);
       expect(guard.target).toBe(target);
     });
   });

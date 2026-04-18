@@ -1099,6 +1099,13 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   // Timer and jitter handled by caller (index.ts) via entity.missionTimer.
   if (!timerFired) return;
 
+  // C++ foot.cpp:1031-1042 distinguishes:
+  //   - TarCom legal at entry: Approach_Target, fall through to dtime+Random_Pick(1,5)
+  //   - TarCom not legal, scan finds target: return(1) — early exit, no Random_Pick
+  //   - TarCom not legal, scan finds none: Random_Animate, fall through to dtime+Random_Pick(1,5)
+  // Only the "scan just found new target" path sets timer=1 (no RNG).
+  const hadTargetAtEntry = !!(entity.target && entity.target.alive);
+
   const origin = entity.guardOrigin ?? entity.pos;
   const isDog = entity.type === UnitType.I_DOG;
   // A5: Scan from home position (C++ foot.cpp:967 — temporarily swaps coords)
@@ -1186,8 +1193,12 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   }
 
   if (bestTarget) {
-    entity.mission = Mission.ATTACK;
     entity.target = bestTarget;
+    // C++ foot.cpp:1036-1037: ONLY newly-acquired targets (scan just found one) return(1).
+    // If TarCom was already legal at entry, C++ falls through to dtime+Random_Pick(1,5).
+    if (!hadTargetAtEntry) {
+      entity.missionTimer = 1;
+    }
     return;
   }
 
@@ -1213,8 +1224,11 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       }
     }
     if (bestStruct) {
-      entity.mission = Mission.ATTACK;
+      // C++ parity: stay AREA_GUARD, set target. Newly-acquired target uses timer=1.
       entity.targetStructure = bestStruct;
+      if (!hadTargetAtEntry && !entity.targetStructure) {
+        entity.missionTimer = 1;
+      }
       return;
     }
   }
