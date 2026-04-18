@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-04-19T06:00Z — SCG06EA team recruit pacing divergence identified
+
+### Finding
+SCG06EA tick 2 (labeled "tick 1" in test-rng-entity-diff due to off-by-one: test increments tick at step end, labeling with pre-step tick) has TS firing 4 `percentChance(50)` calls vs WASM's 1. Root cause:
+
+**TS's team.recruit fills teams to full strength on tick 1**, so on tick 2 composition check sees isFullStrength=true and fires activation percentChance. WASM recruits more slowly — teams stay under-strength longer, so only 1 activates on tick 2.
+
+Verified trace with instrumentation:
+- 5 teams created by CREATE_TEAM chain (dog1→dog2→dog3 FORCE_TRIGGER + inf2) on tick 1.
+- Tick 1 ai(): all 5 teams enter with members=0, recruit adds up to `dm.count` members per type per tick (4 USSR teams reach 2/2 full strength, 1 BadGuy stays 1/2).
+- Tick 2 ai(): 4 USSR teams activate → 4 percentChance calls (seeds 4156555451, 144407000, 509796657, 2912747542).
+
+WASM on tick 2 has only 1 percentChance + 2 infantry[69] Random_Animate. So WASM's recruit is either slower (stays under-strength longer) or has different gating.
+
+### Hypothesis
+C++ Recruit is called per-ClassCount-type. Each Recruit() adds UP TO 1 unit per call (the closest match). Since teams have multiple class types (e.g. E1:1, E2:1, 3TNK:1 = 3 types), recruiting all happens in 1 tick, filling to full strength in 1 tick.
+
+BUT C++ Recruit has the `(d < bestdist || bestdist == -1)` check which in C++ only adds when a closer match is found — same as TS. So both should fill at same rate.
+
+Unless C++ teams differ due to `Can_Add` filters (team priority, already-in-another-team, etc.) that TS doesn't replicate precisely.
+
+### Next steps
+- Dump WASM team state at tick 1 + tick 2 via WASM agent_get_state extension; compare member count progression vs TS.
+- Check `Can_Add` implementation parity — TS's `recruit` filters: `mission !== GUARD && mission !== AREA_GUARD`, `target || moveTarget` excludes. C++'s Can_Add may be stricter.
+- Tooling: `scripts/test-team-init.ts` + `__agentTeams()` window accessor + `__agentDebug` extended.
+
 ## 2026-04-19T04:30Z — Invisible projectile Coord_Scatter RNG parity + caller trace tooling
 
 ### Landed

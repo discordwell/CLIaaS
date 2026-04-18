@@ -46,12 +46,11 @@ export class RandomClass {
     // Source-tag logging: records [seed, tag] pairs matching C++ rngLog format
     if (this._tagLogging) {
       this._seedLog.push([this.seed >>> 0, this._sourceTag]);
-      // Also capture caller info via stack trace for human-readable log
+      // Capture several stack frames so we can find meaningful callers even
+      // after minification (frame 2 may be "s.nextInRange" — we want 3-6 for source context).
       const e = new Error();
-      const frame = e.stack?.split('\n')[2]?.trim() || 'unknown';
-      const match = frame.match(/at (?:(\S+) \()?([^)]+)/);
-      const caller = match ? (match[1] || '') + ' ' + (match[2]?.split('/').pop() || '') : frame;
-      this._taggedLog.push(`[${this._sourceTag}] ${caller.trim()}`);
+      const frames = (e.stack ?? '').split('\n').slice(2, 8).map(s => s.trim()).join(' | ');
+      this._taggedLog.push(`[${this._sourceTag}] ${frames}`);
     }
     // Log first 75 gameplay calls after init sync
     if (this.debugLogStart > 0 && this.callCount > this.debugLogStart && this.callCount <= this.debugLogStart + 75) {
