@@ -943,6 +943,61 @@ char* agent_get_state(void)
 		if (mi > 0) buf_cat(",");
 		buf_cat("[%d,%d,%d,%d,%d,%d,%d,%d]", dm.preLX, dm.preLY, dm.postLX, dm.postLY, dm.dir, dm.dist, dm.headLX, dm.headLY);
 	}
+
+	/* --- Teams (for TS parity debugging) --- */
+	buf_cat("],\"teams\":[");
+	{
+		bool tfirst = true;
+		for (int ti = 0; ti < Teams.Count(); ti++) {
+			TeamClass* t = Teams.Ptr(ti);
+			if (!t || !t->IsActive) continue;
+			if (!tfirst) buf_cat(",");
+			tfirst = false;
+			int desired = 0;
+			for (int k = 0; k < t->Class->ClassCount; k++) {
+				desired += t->Class->Members[k].Quantity;
+			}
+			buf_cat("{\"i\":%d,\"cls\":\"%s\",\"house\":\"%s\",\"total\":%d,\"desired\":%d,\"fs\":%s,\"us\":%s,\"fa\":%s,\"mv\":%s,\"hb\":%s,\"rf\":%s,\"alt\":%s,\"members\":[",
+				ti,
+				t->Class->IniName,
+				agent_house_name(t->House->Class->House),
+				t->Total, desired,
+				t->IsFullStrength ? "true" : "false",
+				t->IsUnderStrength ? "true" : "false",
+				t->IsForcedActive ? "true" : "false",
+				t->IsMoving ? "true" : "false",
+				t->IsHasBeen ? "true" : "false",
+				t->IsReforming ? "true" : "false",
+				t->IsAltered ? "true" : "false");
+			// Dump per-typeindex quantity (count from Infantry/Units arrays whose Team == t)
+			bool mfirst = true;
+			for (int k = 0; k < t->Class->ClassCount; k++) {
+				if (!mfirst) buf_cat(",");
+				mfirst = false;
+				int have = 0;
+				TechnoTypeClass const * wantType = t->Class->Members[k].Class;
+				if (wantType) {
+					for (int ii = 0; ii < Infantry.Count(); ii++) {
+						InfantryClass * inf = Infantry.Ptr(ii);
+						if (inf && inf->IsActive && inf->Team == t && &inf->Class_Of() == wantType) have++;
+					}
+					for (int ui = 0; ui < Units.Count(); ui++) {
+						UnitClass * u = Units.Ptr(ui);
+						if (u && u->IsActive && u->Team == t && &u->Class_Of() == wantType) have++;
+					}
+					for (int ai = 0; ai < Aircraft.Count(); ai++) {
+						AircraftClass * a = Aircraft.Ptr(ai);
+						if (a && a->IsActive && a->Team == t && &a->Class_Of() == wantType) have++;
+					}
+				}
+				buf_cat("{\"type\":\"%s\",\"want\":%d,\"have\":%d}",
+					wantType ? wantType->IniName : "?",
+					t->Class->Members[k].Quantity,
+					have);
+			}
+			buf_cat("]}");
+		}
+	}
 	buf_cat("]}");
 	// Don't reset here — debugMoves persist until agent_step runs next tick
 

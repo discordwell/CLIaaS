@@ -274,6 +274,36 @@ export class Team {
     // C++ Recruit uses team origin waypoint as center if set, else team Zone
     const recruitCenter = center ?? this.origin ?? this.zone;
 
+    // C++ team.cpp:961-1029 Can_Add: returns true if the entity can join the team
+    // on ANY typeindex with room. Note: typeindex is OUT — Can_Add finds whichever
+    // slot matches the entity's class. This means Recruit(0) for E1 can actually
+    // pick a DOG if the DOG is closer and Can_Add finds typeindex=1 (DOG) with room.
+    // This is bug-for-bug C++ parity — the `typeindex` param to Recruit is a hint,
+    // not a strict filter. See SCG06EA dog1 team: recruits closest DOG instead of E1.
+    const canAdd = (e: Entity): boolean => {
+      if (!e.alive || e.inLimbo) return false;
+      if (e.house !== this.house) return false;
+      if (e.teamRef === this) return false; // already member
+      if (e.teamRef) return false; // C++ priority check (simplified)
+      if (!MISSION_CONTROL[e.mission]?.isRecruitable) return false;
+      // Find matching class type with room
+      for (const dm of this.desiredMembers) {
+        const targetType = dm.type.toUpperCase();
+        if (e.type !== targetType) continue;
+        // Count current members of this type
+        let current = 0;
+        for (const m of this._members) {
+          if (m.alive && (m.type === targetType || m.type === dm.type)) current++;
+        }
+        if (current < dm.count) return true; // slot has room for this class
+      }
+      return false;
+    };
+
+    // C++ Team::AI loop (team.cpp:668-672): iterate typeindex, call Recruit if Quantity[index] < desired
+    // For each typeindex slot needing fill, scan ALL entities (not filtered by target type)
+    // and pick the closest that Can_Add approves. This mirrors C++ RTTI_INFANTRY recruit
+    // (adds once outside loop) and RTTI_UNIT recruit (adds every closer-best inside loop).
     for (const dm of this.desiredMembers) {
       let current = 0;
       for (const m of this._members) {
@@ -288,56 +318,31 @@ export class Team {
       if (isUnitOrVessel) {
         // C++ UNIT/VESSEL case (team.cpp:1250-1322): iteration-based add.
         // Each iteration where a closer match is found triggers Add.
-        let bestEntity: Entity | null = null;
+        // The Can_Add(infantry, typeindex) call may modify typeindex to ANY matching class,
+        // so this slot's recruit can end up adding a different class type than expected.
         let bestDist = -1;
         for (const e of entities) {
-          if (!e.alive || e.inLimbo) continue;
-          if (e.type !== targetType) continue;
-          if (e.house !== this.house) continue;
-          if (e.teamRef === this) continue; // already a member of THIS team
-          if (e.teamRef) continue; // C++ Can_Add: priority check (simplified)
-          // C++ Can_Add + Is_Recruitable_Mission: filter by rules.ini Recruitable flag.
-          // Excludes: Sleep, Harmless, Sticky, Retreat, Enter, Capture, Harvest,
-          // AREA_GUARD, Hunt, Unload, Sabotage, Construction, Selling.
-          if (!MISSION_CONTROL[e.mission]?.isRecruitable) continue;
-          // C++ Can_Add (team.cpp:961-1029) does NOT filter on target/moveTarget.
-          // The recruitable-mission check alone gates recruitment (e.g., ATTACK is
-          // recruitable even with a target set). Mission filter handles most cases.
-          // C++ Can_Add: team must not be full of this type
-          if (current >= dm.count) break;
-
-          const d = recruitCenter
-            ? worldDist(e.pos, recruitCenter)
-            : 0;
+          if (!canAdd(e)) continue;
+          const d = recruitCenter ? worldDist(e.pos, recruitCenter) : 0;
           // C++ team.cpp:1262: (d < bestdist || bestdist == -1)
           if (bestDist === -1 || d < bestDist) {
             bestDist = d;
-            bestEntity = e;
             // C++ team.cpp:1269-1283: Add(best) inside the for loop, each
             // time best is updated. The previous best stays in the team
             // (Add() is a no-op for existing members).
-            this.add(bestEntity);
-            current++;
+            this.add(e);
           }
         }
         continue;
       }
 
       // C++ INFANTRY/AIRCRAFT case (team.cpp:1208-1247): loop-then-add. Find
-      // the single closest match across all entities, then Add once.
+      // the single closest infantry/aircraft across all entities, then Add once.
       let bestEntity: Entity | null = null;
       let bestDist = -1;
       for (const e of entities) {
-        if (!e.alive || e.inLimbo) continue;
-        if (e.type !== targetType) continue;
-        if (e.house !== this.house) continue;
-        if (e.teamRef) continue;
-        // C++ Can_Add + Is_Recruitable_Mission: filter by rules.ini Recruitable flag.
-        if (!MISSION_CONTROL[e.mission]?.isRecruitable) continue;
-        // C++ Can_Add (team.cpp:961-1029) does NOT filter on target/moveTarget.
-        const d = recruitCenter
-          ? worldDist(e.pos, recruitCenter)
-          : 0;
+        if (!canAdd(e)) continue;
+        const d = recruitCenter ? worldDist(e.pos, recruitCenter) : 0;
         if (bestDist === -1 || d < bestDist) {
           bestDist = d;
           bestEntity = e;
