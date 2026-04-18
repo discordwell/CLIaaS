@@ -300,7 +300,9 @@ export class Team {
           // Excludes: Sleep, Harmless, Sticky, Retreat, Enter, Capture, Harvest,
           // AREA_GUARD, Hunt, Unload, Sabotage, Construction, Selling.
           if (!MISSION_CONTROL[e.mission]?.isRecruitable) continue;
-          if (e.target || e.moveTarget) continue;
+          // C++ Can_Add (team.cpp:961-1029) does NOT filter on target/moveTarget.
+          // The recruitable-mission check alone gates recruitment (e.g., ATTACK is
+          // recruitable even with a target set). Mission filter handles most cases.
           // C++ Can_Add: team must not be full of this type
           if (current >= dm.count) break;
 
@@ -332,7 +334,7 @@ export class Team {
         if (e.teamRef) continue;
         // C++ Can_Add + Is_Recruitable_Mission: filter by rules.ini Recruitable flag.
         if (!MISSION_CONTROL[e.mission]?.isRecruitable) continue;
-        if (e.target || e.moveTarget) continue;
+        // C++ Can_Add (team.cpp:961-1029) does NOT filter on target/moveTarget.
         const d = recruitCenter
           ? worldDist(e.pos, recruitCenter)
           : 0;
