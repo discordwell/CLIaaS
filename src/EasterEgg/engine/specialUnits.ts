@@ -412,7 +412,7 @@ export function updateVehicleCloak(ctx: SpecialUnitsContext, entity: Entity): vo
 /** Mechanic auto-heals vehicles, 5 HP/tick, 6-cell scan range. Fear/flee logic. */
 export function updateMechanicUnit(ctx: SpecialUnitsContext, entity: Entity): void {
   if (entity.type !== UnitType.I_MECH || !entity.alive) return;
-  if (entity.attackCooldown > 0) entity.attackCooldown--;
+  // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
   if (entity.fear >= Entity.FEAR_SCARED) {
     let ned = Infinity; let nep: WorldPos | null = null;
     for (const o of ctx.entities) { if (!o.alive || ctx.entitiesAllied(entity, o)) continue; const d = worldDist(entity.pos, o.pos); if (d < entity.stats.sight && d < ned) { ned = d; nep = o.pos; } }
@@ -448,10 +448,7 @@ export function updateMechanicUnit(ctx: SpecialUnitsContext, entity: Entity): vo
  *  move toward them, and heal when adjacent. Medics are non-combat units
  *  and never attack enemies. They flee when frightened (fear/prone system). */
 export function updateMedic(ctx: SpecialUnitsContext, entity: Entity): void {
-  // Tick down heal cooldown every frame (not rate-limited by scan delay)
-  if (entity.attackCooldown > 0) {
-    entity.attackCooldown--;
-  }
+  // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
 
   // Medics flee when frightened (C++ infantry.cpp fear system) — run from nearest enemy
   if (entity.fear >= Entity.FEAR_SCARED) {

@@ -357,24 +357,22 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // Gap #4: Reset spy disguise when attacking
       if (entity.disguisedAs) entity.disguisedAs = null;
 
-      // Apply weapon inaccuracy — scatter the impact point
+      // C++ bullet.cpp:709 scatter condition:
+      //   (IsInaccurate || Class->IsInaccurate ||
+      //    ((Is_Target_Cell(TarCom) || Is_Target_Infantry(TarCom)) &&
+      //     (Warhead == WARHEAD_AP || Class->IsFueled)))
+      //
+      // C++ BUG (bbdata.cpp:286): reads "Inaccuate" from INI — ALWAYS misses the
+      // "Inaccurate=" rules.ini field. So Class->IsInaccurate is effectively
+      // always false. Only the moving-platform IsInaccurate (techno.cpp:3107) and
+      // the AP/Fueled vs infantry/cell branch ever trigger scatter.
       let impactX = entity.target.pos.x;
       let impactY = entity.target.pos.y;
       let directHit = true;
-      // C5: Moving-platform inaccuracy (C++ techno.cpp:3106-3108)
       const isMoving = entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
-      const baseInaccuracy = activeWeapon.inaccuracy ?? 0;
-      let effectiveInaccuracy = isMoving ? Math.max(baseInaccuracy, 1.0) : baseInaccuracy;
-      // SC1: AP/IsFueled warheads force scatter vs infantry (C++ bullet.cpp:709-710)
-      // C++: (Is_Target_Infantry(TarCom)) && (Warhead == WARHEAD_AP || Class->IsFueled)
-      if ((activeWeapon.warhead === 'AP' || activeWeapon.isFueled) && entity.target.stats.isInfantry && effectiveInaccuracy <= 0) {
-        effectiveInaccuracy = 0.5;
-      }
-      // WH5: IsInaccurate flag — forced scatter on every shot (C++ bullet.h)
-      if (activeWeapon.isInaccurate && effectiveInaccuracy <= 0) {
-        effectiveInaccuracy = 1.0;
-      }
-      if (effectiveInaccuracy > 0) {
+      const isAPvsSoft = (activeWeapon.warhead === 'AP' || activeWeapon.isFueled) && entity.target.stats.isInfantry;
+      const doScatter = isMoving || isAPvsSoft;
+      if (doScatter) {
         // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
         // distance in leptons (1 cell = 256 leptons)
         const distLeptons = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
