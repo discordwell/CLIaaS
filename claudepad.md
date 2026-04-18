@@ -1,5 +1,22 @@
 # Session Summaries
 
+## 2026-04-18T12:00Z — Arcing physics + cooldown double-decrement + scatter typo-bug parity
+
+### Landed
+- **Arcing projectile lands at actual trajectory position** (C++ bullet.cpp:446-483) — when Height<=0 update impactX/Y to bullet's current position via currentFrame/travelFrames. Fixes HUNT E1 surviving at hp=31 in WASM while TS killed it.
+- **attackCooldown double-decrement removed** from updateAttack, updateAttackStructure, updateForceFireGround, updateMedic, updateMechanicUnit, LOS-blocked branch. All paths previously decremented AFTER index.ts:3814's per-tick decrement, causing 64-tick cooldowns for RoF=65 weapons.
+- **Scatter condition matches C++ typo-bug** (bbdata.cpp:286 reads "Inaccuate" not "Inaccurate", so Class->IsInaccurate is ALWAYS false). TS now only triggers scatter for: (1) moving platform, or (2) AP/IsFueled warhead targeting infantry/cell. Previously TS honored activeWeapon.inaccuracy and activeWeapon.isInaccurate from rules.ini, triggering scatter RNG that C++ doesn't.
+
+### Metrics (SCG03EA)
+| Metric | Session Start | Mid-Session | End |
+|--------|---------------|-------------|-----|
+| First divergence | tick 132 | tick 238 | **tick 267** |
+| 500-tick divergent | 369 | 259 | **219** (-41%) |
+
+### Next investigation
+- SCG03EA tick 267: WASM's bullet[282] consumes 1 RNG that TS doesn't (bullet AI or explosion-triggered animation?).
+- SCG01EA tick 1: WASM 67 calls vs TS 66 calls. Scenario-init divergence.
+
 ## 2026-04-18T00:00Z — Tick 173+ divergence eliminated; tick 194 root cause is damage mechanics
 
 ### Landed
