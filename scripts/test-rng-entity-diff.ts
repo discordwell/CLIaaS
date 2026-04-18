@@ -150,7 +150,7 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           seed: s.rngState as number,
           calls: s.rngCalls as number,
           log: (s.rngLog ?? []) as [number, number][],
-          logicLayer: (s.logicLayer ?? []) as [number, string, string][],
+          logicLayer: (s.logicLayer ?? []) as [number, string, string, number, number][],
         };
       }),
       tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
@@ -216,8 +216,8 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     // Also dump entity info at divergent ticks for context
     if (!seedMatch || callDiff !== 0) {
       console.log(`  WASM Logic layer (${wasmData.logicLayer.length} entities):`);
-      for (const [idx, type, house] of wasmData.logicLayer.slice(0, 40)) {
-        console.log(`    [${idx}] ${type} (${house})`);
+      for (const [idx, type, house, cx, cy] of wasmData.logicLayer) {
+        console.log(`    [${idx}] ${type} (${house}) cell(${cx},${cy})`);
       }
       console.log('');
     }

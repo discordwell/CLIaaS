@@ -614,7 +614,14 @@ char* agent_get_state(void)
 			}
 			if (!lfirst) buf_cat(",");
 			lfirst = false;
-			buf_cat("[%d,\"%s\",\"%s\"]", li, tname, hname);
+			int lcx = -1, lcy = -1;
+			if (rtti == RTTI_UNIT || rtti == RTTI_INFANTRY || rtti == RTTI_AIRCRAFT) {
+				TechnoClass * tt = (TechnoClass *)lobj;
+				COORDINATE cc = tt->Coord;
+				lcx = Coord_XCell(cc);
+				lcy = Coord_YCell(cc);
+			}
+			buf_cat("[%d,\"%s\",\"%s\",%d,%d]", li, tname, hname, lcx, lcy);
 		}
 	}
 	buf_cat("],");
