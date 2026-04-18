@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-04-19T07:30Z — Team.recruit bug-for-bug parity via C++ Can_Add typeindex side-effect
+
+### Landed
+- **Team.recruit matches C++ Can_Add** (team.cpp:961-1029) — typeindex is passed BY REFERENCE and Can_Add modifies it to match whichever team slot the entity's class matches. So `Recruit(typeindex=0)` for E1 can add a DOG if DOG is closer AND has a DOG slot with room. Previously TS filtered entities by strict target type, causing over-recruitment.
+- **WASM team state accessor** (`agent_harness.cpp`) — dumps `state.teams[]` with {i, cls, house, total/desired, fs/us/fa/mv/hb/rf/alt flags, per-type want/have counts}. Used via `scripts/test-team-wasm-vs-ts.ts` for side-by-side comparison.
+- **3 new cpp-parity tests** for Can_Add typeindex side-effect (SCG06EA dog1 scenario).
+
+### Verification (SCG06EA step-by-step)
+Both engines now show IDENTICAL team progression:
+
+| Tick | Team state |
+|------|-----------|
+| 1 | dog1/3/4: DOG only (1/2), dog2: E1+DOG (2/2), inf5: E1 (1/2) |
+| 2 | dog2 activates (1 percentChance call). Others recruit to 2/2. |
+| 3 | All 5 teams activate (4 dog + 1 inf5 = 5 percentChance calls). |
+
+### Metrics (500-tick divergent count)
+| Scenario | Before | After | Note |
+|----------|--------|-------|------|
+| SCG03EA  | 220    | 220   | No change |
+| SCG06EA  | 499    | 499   | No improvement despite perfect team match |
+| SCG02EA  | 267    | 267   | No change |
+
+### Remaining SCG06EA divergence
+Engine tick 2 AI now has 1 TS call vs 3 WASM (2-call deficit from infantry[69] Random_Animate). The team recruit fix closed the primary recruit bug, but WASM's infantry on tick 2 does Random_Animate (2 RNG) which TS doesn't replicate at the same tick. Cascade continues from this Random_Animate timing divergence.
+
+Next investigation: why does WASM infantry[69] do Random_Animate on engine tick 2 while TS doesn't? Possibly timing of `isReadyToRandomAnimate` gate (idleAnimTimer initial value, Doing state).
+
 ## 2026-04-19T07:00Z — Team.recruit mission filter fix + C++ Can_Add parity
 
 ### Landed
