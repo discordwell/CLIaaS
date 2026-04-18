@@ -194,6 +194,7 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   if (e.attackCooldown > 0) {
     u.acd = e.attackCooldown;
   }
+  (u as any).mt = e.missionTimer;
   return u;
 }
 

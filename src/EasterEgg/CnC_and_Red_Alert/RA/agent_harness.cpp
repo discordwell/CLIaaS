@@ -315,6 +315,7 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 			COORDINATE nc = As_Coord(foot->NavCom);
 			buf_cat(",\"nlx\":%d,\"nly\":%d", (int)Coord_X(nc), (int)Coord_Y(nc));
 		}
+		buf_cat(",\"mt\":%d", foot->Get_Mission_Timer_Value());
 	}
 
 	if (tech->Techno_Type_Class()->Max_Passengers() > 0) {

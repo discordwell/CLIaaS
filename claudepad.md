@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-04-18T00:00Z — Tick 173+ divergence eliminated; tick 194 root cause is damage mechanics
+
+### Landed
+- **Tanya no auto-fire when human-controlled** (C++ infantry.cpp:2295-2297) — `Greatest_Threat` returns TARGET_NONE for human Tanya. Pushed SCG03EA first divergence tick 132 → 173.
+- **Guard scan SETS target, doesn't fire inline** — C++ Mission_Guard only sets TarCom; Firing_AI fires NEXT tick. TS was calling `updateAttack` inline from the scan-found path, consuming weapon-fire RNG immediately. Removed inline call. Pushed first divergence 173 → 194. 500-tick divergent 322 → 272.
+- **Medic/Mechanic don't skip guard scan** — C++ Mission_Guard has no medic exception; they scan for enemies like any infantry. Removed TS early-return.
+- **Arcing scatter matches C++ Coord_Scatter** — now uses `Random_Pick(0, scatterLeptons)` and `Random_Pick(0, 255)` for discrete 256-direction scatter instead of `float()*2π`. RNG count unchanged.
+- **Debug exposure**: `mt` (missionTimer) + cell position in logicLayer in both agent harnesses.
+
+### Key Findings
+- **Tick 194 root cause**: TS killed HUNT E1 (hp=50→0) via next-tick ARTY Firing_AI after my tick 173 fix. WASM E1 survives at hp=31 because C++ arcing projectile physics + splash damage falloff deal only ~19 damage total. TS's `modifyDamage` formula is correct; the discrepancy is in arcing projectile LANDING POINT physics (Riser + gravity dynamics cause significant overshoot/undershoot from scattered tcoord).
+- **Entity indexing differs**: WASM uses unified Logic array index (buildings first, then units, etc.). TS uses per-phase counter. E.g., Tanya is WASM[93] but TS[9]. Tag schemes differ but RNG values in sequence must match.
+- **E1 (94,65) timer cycle is aligned**: Verified both engines fire its guard timer at tick 194 (mt:14 after fire). Divergence stems from TS's missing HUNT E1's RNG contribution (not a timer offset).
+
+### Metrics (SCG03EA 500-tick)
+| Metric | Start | End |
+|--------|-------|-----|
+| First divergence | tick 132 | tick 194 |
+| Divergent count | 369 | 272 (-26%) |
+| Lepton match | tick 75 | tick 129+ |
+
 ## 2026-04-15T02:00Z — HUNT movement parity: 3 fixes + root cause identified
 
 ### Landed
