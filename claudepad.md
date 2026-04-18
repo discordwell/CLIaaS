@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-04-19T07:45Z — Mission_Guard_Area target-found timer parity
+
+### Landed
+- **Mission_Guard_Area target-found returns 1** (C++ foot.cpp:1037) — when AREA_GUARD unit's scan finds NEW target, timer = 1 (re-fire next tick, no RNG). Previously TS set 70+Random_Pick(1,5), consuming 1 extra RNG.
+- **AREA_GUARD stays AREA_GUARD** on target-found (not transition to ATTACK). Mirrors C++ where Firing_AI/Approach_Target handle firing/movement from AREA_GUARD.
+- Distinction preserved: entry-with-target → normal delay; scan-found-new-target → timer=1; no-target → Random_Animate + normal delay.
+
+### Metrics (500-tick, unchanged)
+| Scenario | Divergent |
+|----------|-----------|
+| SCG03EA  | 220/501   |
+| SCG06EA  | 499/501   |
+| SCG02EA  | 267/501   |
+
+### SCG06EA remaining divergence
+Engine tick 2 AI: WASM 3 calls vs TS 1 call. The 2-call deficit is from infantry[69] (USSR E1 AREA_GUARD at cell 24,67) which in WASM consumes `dtime + Random_Pick(1,5)` (1-2 RNG with rejection) on tick 2. Requires that infantry to have already-acquired target at tick 2 entry (Mission_Guard_Area Approach_Target path).
+
+Attempted fix: added C++ techno.cpp:1529 `player-owned always visible` bypass to TS scan. But this caused TS tick 1 to find MORE targets than WASM (tick 0 Δ=2). Reverted — C++ bypass mechanism unclear in this context, may use Is_Discovered_By_House flag (per-object, set at scenario init) rather than fog reveal.
+
+### Next investigation
+- Understand C++ `Is_Discovered_By_House` semantics — is it per-object flag or per-cell fog?
+- Trace which WASM infantry find targets on engine tick 1 to understand fog/discovery state.
+
 ## 2026-04-19T07:30Z — Team.recruit bug-for-bug parity via C++ Can_Add typeindex side-effect
 
 ### Landed
