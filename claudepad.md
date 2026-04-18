@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-04-19T04:30Z — Invisible projectile Coord_Scatter RNG parity
+
+### Landed
+- **Invisible projectile Coord_Scatter** (C++ bullet.cpp:1012-1014) — `if (Class->IsInvisible) Coord = Coord_Scatter(Coord, 0x0020)` consumes 1 `Random_Pick(DIR_N, DIR_MAX)` per bullet explosion. Added to TS at fire time (matches C++ same-tick-creation-and-detonation semantics for MPH_LIGHT_SPEED invisible bullets via Fuse_Checkup proximity=0). Applies to M1Carbine, Colt45, Pistol, M60mg, Sniper, TeslaZap, ChainGun, Heal, etc. (all Inviso=yes weapons).
+- **7 new cpp-parity tests** (cpp-parity-invisible-bullet-scatter.test.ts) verify RNG consumption and 32-lepton scatter bounds.
+
+### Metrics (SCG03EA)
+| Metric | Before session | After fix |
+|--------|----------------|-----------|
+| First divergence | tick 267 | tick 267 |
+| 500-tick divergent | 219 | 220 |
+
+### Analysis
+The fix is semantically correct (matches C++ RNG consumption count) but exposes a separate 1-tick shooter timing divergence. TS's invisible-bullet fire happens 1 tick later than WASM's in SCG03EA tick 267. Total RNG counts match over the divergence window (RNG stream resyncs at tick 275), but per-tick timing is off. Without this fix, TS would be short by 1 RNG call per invisible-bullet fire, preventing resync.
+
+### Next investigation
+- SCG04EA tick 2: TS consumes 2 extra RNG calls (unit[1]+unit[2]) vs WASM's 1. Pre-existing divergence (not caused by fix). 499/501 divergent ticks — high-value target.
+- 1-tick shooter cooldown mismatch at SCG03EA tick 267/283: identify why infantry[121]'s `Arm` hits 0 one tick later in TS than WASM.
+- SCG01EA tick 0: WASM 67 calls vs TS 66 calls (scenario init).
+
 ## 2026-04-18T12:00Z — Arcing physics + cooldown double-decrement + scatter typo-bug parity
 
 ### Landed
