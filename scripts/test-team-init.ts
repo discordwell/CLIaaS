@@ -29,18 +29,15 @@ test(`${scenario} team init`, async ({ browser }) => {
     console.log(JSON.stringify(t));
   }
 
-  await tsPage.evaluate(() => { (window as any).__agentStep?.(1); });
-  const teams1 = await tsPage.evaluate(() => (window as any).__agentTeams?.());
-  console.log(`\n=== ${scenario} after tick 1 (${teams1?.length ?? 0} active teams) ===`);
-  for (const t of teams1 ?? []) {
-    console.log(JSON.stringify(t));
-  }
-
-  await tsPage.evaluate(() => { (window as any).__agentStep?.(1); });
-  const teams2 = await tsPage.evaluate(() => (window as any).__agentTeams?.());
-  console.log(`\n=== ${scenario} after tick 2 (${teams2?.length ?? 0} active teams) ===`);
-  for (const t of teams2 ?? []) {
-    console.log(JSON.stringify(t));
+  for (let step = 1; step <= 3; step++) {
+    await tsPage.evaluate(() => { (window as any).__agentStep?.(1); });
+    const teams = await tsPage.evaluate(() => (window as any).__agentTeams?.());
+    const gameTick = await tsPage.evaluate(() => (window as any).__agentGame?.tick);
+    const pcCalls = await tsPage.evaluate(() => (globalThis as unknown as { __percentChanceCalls?: string[] }).__percentChanceCalls?.length ?? 0);
+    console.log(`\n=== after step ${step} (engine tick=${gameTick}, teams=${teams?.length ?? 0}, total pc=${pcCalls}) ===`);
+    for (const t of teams ?? []) {
+      console.log(`  team#${t.id} h=${t.house} moving=${t.isMoving} fs=${t.isFullStrength} us=${t.isUnderStrength} mem=${t.members} types=${t.memberTypes?.join(',')}`);
+    }
   }
 
   const dbg = await tsPage.evaluate(() => (window as any).__agentDebug?.());

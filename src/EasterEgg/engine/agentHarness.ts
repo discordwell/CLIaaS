@@ -839,7 +839,9 @@ export function installHarness(game: Game): void {
       isReforming: (t as unknown as { isReforming: boolean }).isReforming,
       skipActivation: (t as unknown as { _skipActivationOnce: boolean })._skipActivationOnce,
       dissolved: (t as unknown as { dissolved: boolean }).dissolved,
-      members: (t as unknown as { _members: Array<{ id: number; type: string }> })._members.length,
+      members: (t as unknown as { _members: Array<{ id: number; type: string; mission?: string }> })._members.length,
+      memberTypes: (t as unknown as { _members: Array<{ type: string; mission?: string }> })._members.map(m => `${m.type}(${m.mission ?? '?'})`),
+      desired: (t as unknown as { desiredMembers?: Array<{ type: string; count: number }> }).desiredMembers?.map(d => `${d.type}:${d.count}`),
     }));
   };
 }

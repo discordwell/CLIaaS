@@ -22,7 +22,7 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
+import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 
@@ -296,7 +296,10 @@ export class Team {
           if (e.house !== this.house) continue;
           if (e.teamRef === this) continue; // already a member of THIS team
           if (e.teamRef) continue; // C++ Can_Add: priority check (simplified)
-          if (e.mission !== Mission.GUARD && e.mission !== Mission.AREA_GUARD) continue;
+          // C++ Can_Add + Is_Recruitable_Mission: filter by rules.ini Recruitable flag.
+          // Excludes: Sleep, Harmless, Sticky, Retreat, Enter, Capture, Harvest,
+          // AREA_GUARD, Hunt, Unload, Sabotage, Construction, Selling.
+          if (!MISSION_CONTROL[e.mission]?.isRecruitable) continue;
           if (e.target || e.moveTarget) continue;
           // C++ Can_Add: team must not be full of this type
           if (current >= dm.count) break;
@@ -327,7 +330,8 @@ export class Team {
         if (e.type !== targetType) continue;
         if (e.house !== this.house) continue;
         if (e.teamRef) continue;
-        if (e.mission !== Mission.GUARD && e.mission !== Mission.AREA_GUARD) continue;
+        // C++ Can_Add + Is_Recruitable_Mission: filter by rules.ini Recruitable flag.
+        if (!MISSION_CONTROL[e.mission]?.isRecruitable) continue;
         if (e.target || e.moveTarget) continue;
         const d = recruitCenter
           ? worldDist(e.pos, recruitCenter)
