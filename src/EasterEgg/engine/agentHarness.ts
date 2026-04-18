@@ -13,6 +13,7 @@ import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
 import { powerMultiplier } from './repairSell';
 import { ScenarioRandom } from './random';
+import { getActiveTeams } from './team';
 
 // === Serialized state types ===
 
@@ -808,11 +809,13 @@ export function installHarness(game: Game): void {
   w.__agentDebug = () => {
     game.debugTriggers = true;
     // Access private triggers via cast
-    const g = game as unknown as { triggers: Array<{ name: string; fired: boolean; forceFirePending: boolean; event1: { type: number; data: number }; action1: { action: number; team: number }; eventControl: number; actionControl: number }> };
+    const g = game as unknown as { triggers: Array<{ name: string; fired: boolean; forceFirePending: boolean; event1: { type: number; data: number }; event2: { type: number; data: number }; action1: { action: number; team: number; trigger: number; data: number }; action2: { action: number; team: number; trigger: number; data: number }; eventControl: number; actionControl: number }> };
     const triggers = g.triggers.map((t, i) => ({
       i, name: t.name, fired: t.fired, force: t.forceFirePending,
       e1: t.event1.type, e1d: t.event1.data,
-      a1: t.action1.action, a1t: t.action1.team,
+      e2: t.event2.type, e2d: t.event2.data,
+      a1: t.action1.action, a1t: t.action1.team, a1tr: t.action1.trigger, a1d: t.action1.data,
+      a2: t.action2.action, a2t: t.action2.team, a2tr: t.action2.trigger, a2d: t.action2.data,
       ec: t.eventControl, ac: t.actionControl,
     }));
     // Check entity triggerNames
@@ -820,5 +823,23 @@ export function installHarness(game: Game): void {
       .filter(e => e.triggerName)
       .map(e => ({ id: e.id, type: e.type, alive: e.alive, triggerName: e.triggerName }));
     return { triggers, entityTriggers };
+  };
+
+  // Team debug accessor — dump all active teams with key state for parity tracing.
+  w.__agentTeams = () => {
+    const teams = getActiveTeams();
+    return teams.map((t, i) => ({
+      i,
+      id: (t as unknown as { id: number }).id,
+      house: (t as unknown as { house: number }).house,
+      isMoving: (t as unknown as { isMoving: boolean }).isMoving,
+      isFullStrength: (t as unknown as { isFullStrength: boolean }).isFullStrength,
+      isForcedActive: (t as unknown as { isForcedActive: boolean }).isForcedActive,
+      isUnderStrength: (t as unknown as { isUnderStrength: boolean }).isUnderStrength,
+      isReforming: (t as unknown as { isReforming: boolean }).isReforming,
+      skipActivation: (t as unknown as { _skipActivationOnce: boolean })._skipActivationOnce,
+      dissolved: (t as unknown as { dissolved: boolean }).dissolved,
+      members: (t as unknown as { _members: Array<{ id: number; type: string }> })._members.length,
+    }));
   };
 }
