@@ -315,7 +315,9 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 			COORDINATE nc = As_Coord(foot->NavCom);
 			buf_cat(",\"nlx\":%d,\"nly\":%d", (int)Coord_X(nc), (int)Coord_Y(nc));
 		}
-		buf_cat(",\"mt\":%d,\"arm\":%d", foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value());
+		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d", foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
+			foot->IsDriving ? "true" : "false",
+			(int)foot->MissionQueue);
 	}
 
 	if (tech->Techno_Type_Class()->Max_Passengers() > 0) {
@@ -969,31 +971,43 @@ char* agent_get_state(void)
 				t->IsHasBeen ? "true" : "false",
 				t->IsReforming ? "true" : "false",
 				t->IsAltered ? "true" : "false");
-			// Dump per-typeindex quantity (count from Infantry/Units arrays whose Team == t)
+			// Dump per-typeindex quantity + member IDs (from Infantry/Units arrays whose Team == t)
 			bool mfirst = true;
 			for (int k = 0; k < t->Class->ClassCount; k++) {
 				if (!mfirst) buf_cat(",");
 				mfirst = false;
 				int have = 0;
 				TechnoTypeClass const * wantType = t->Class->Members[k].Class;
+				char memberIds[256] = "";
+				int midLen = 0;
 				if (wantType) {
 					for (int ii = 0; ii < Infantry.Count(); ii++) {
 						InfantryClass * inf = Infantry.Ptr(ii);
-						if (inf && inf->IsActive && inf->Team == t && &inf->Class_Of() == wantType) have++;
+						if (inf && inf->IsActive && inf->Team == t && &inf->Class_Of() == wantType) {
+							have++;
+							midLen += snprintf(memberIds + midLen, sizeof(memberIds) - midLen, "%s%d", midLen > 0 ? "," : "", AGENT_ID(RTTI_INFANTRY, ii));
+						}
 					}
 					for (int ui = 0; ui < Units.Count(); ui++) {
 						UnitClass * u = Units.Ptr(ui);
-						if (u && u->IsActive && u->Team == t && &u->Class_Of() == wantType) have++;
+						if (u && u->IsActive && u->Team == t && &u->Class_Of() == wantType) {
+							have++;
+							midLen += snprintf(memberIds + midLen, sizeof(memberIds) - midLen, "%s%d", midLen > 0 ? "," : "", AGENT_ID(RTTI_UNIT, ui));
+						}
 					}
 					for (int ai = 0; ai < Aircraft.Count(); ai++) {
 						AircraftClass * a = Aircraft.Ptr(ai);
-						if (a && a->IsActive && a->Team == t && &a->Class_Of() == wantType) have++;
+						if (a && a->IsActive && a->Team == t && &a->Class_Of() == wantType) {
+							have++;
+							midLen += snprintf(memberIds + midLen, sizeof(memberIds) - midLen, "%s%d", midLen > 0 ? "," : "", AGENT_ID(RTTI_AIRCRAFT, ai));
+						}
 					}
 				}
-				buf_cat("{\"type\":\"%s\",\"want\":%d,\"have\":%d}",
+				buf_cat("{\"type\":\"%s\",\"want\":%d,\"have\":%d,\"ids\":[%s]}",
 					wantType ? wantType->IniName : "?",
 					t->Class->Members[k].Quantity,
-					have);
+					have,
+					memberIds);
 			}
 			buf_cat("]}");
 		}

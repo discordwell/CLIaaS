@@ -13,7 +13,7 @@ type Team = {
   total: number; desired: number;
   fs: boolean; us: boolean; fa: boolean; mv: boolean;
   hb: boolean; rf: boolean; alt: boolean;
-  members: Array<{ type: string; want: number; have: number }>;
+  members: Array<{ type: string; want: number; have: number; ids?: number[] }>;
 };
 
 test(`${scenario} WASM vs TS teams`, async ({ browser }) => {
@@ -85,7 +85,7 @@ test(`${scenario} WASM vs TS teams`, async ({ browser }) => {
     console.log(`\n=== After step ${step} (tick=${step}) ===`);
     console.log(`WASM teams (${wasmTeams.length}):`);
     for (const t of wasmTeams) {
-      const mems = t.members.map(m => `${m.type}:${m.have}/${m.want}`).join(',');
+      const mems = t.members.map(m => `${m.type}:${m.have}/${m.want}[${(m.ids ?? []).join(',')}]`).join(',');
       console.log(`  [${t.i}] ${t.cls} h=${t.house} tot=${t.total}/${t.desired} fs=${t.fs} us=${t.us} fa=${t.fa} mv=${t.mv} hb=${t.hb} rf=${t.rf} alt=${t.alt} mem={${mems}}`);
     }
     console.log(`TS teams (${tsTeams.length}):`);
