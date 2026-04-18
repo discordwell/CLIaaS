@@ -786,6 +786,22 @@ export function launchProjectile(
   const speed = weapon.projectileSpeed! * LEPTON_SIZE; // convert cells/tick to leptons/tick
   const travelFrames = Math.max(1, Math.round(dist / speed));
 
+  // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter on detonation.
+  //   if (Class->IsInvisible) { Coord = Coord_Scatter(Coord, 0x0020); }
+  // C++ semantics: invisible projectiles are MPH_LIGHT_SPEED, Unlimbo sets Coord=tcoord
+  // (bullet.cpp:736-738), then bullet.AI runs on the SAME tick as creation (since bullet
+  // is appended to the Logic array and Count() re-reads each iteration). Fuse_Checkup
+  // detonates immediately (proximity=0 to tcoord), consuming 1 Random_Pick.
+  // In TS, the equivalent is to consume the RNG at fire time so it lands on the same tick.
+  if (weapon.isInvisible) {
+    const scatterDir256 = ScenarioRandom.nextInRange(0, 255);
+    // 0x0020 leptons = 32 leptons = 32 * CELL_SIZE / LEPTON_SIZE pixels
+    const scatterPx = 32 * CELL_SIZE / LEPTON_SIZE;
+    const angle = scatterDir256 * 2 * Math.PI / 256;
+    impactX += Math.cos(angle) * scatterPx;
+    impactY += Math.sin(angle) * scatterPx;
+  }
+
   // C++ bullet.cpp:783-789 — ballistic arc initialization for isArcing weapons
   // Riser = ((Distance/2) / (speed+1)) * Rule.Gravity, min 10
   // This gives enough upward velocity to keep the projectile airborne for ~travelFrames ticks.
