@@ -1,11 +1,12 @@
 /**
- * SCG01EA aircraft state check tick 1 - verify Chinook reinforcement
+ * ${scenario} aircraft state check tick 1 - verify Chinook reinforcement
  */
 import { test } from '@playwright/test';
 
 const BASE_URL = 'https://cliaas.com';
+const scenario = process.env.SCENARIO ?? 'SCG01EA';
 
-test('SCG01EA aircraft check', async ({ browser }) => {
+test(`${scenario} aircraft check`, async ({ browser }) => {
   test.setTimeout(3 * 60 * 1000);
   const wasmCtx = await browser.newContext();
   const tsCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
@@ -14,8 +15,8 @@ test('SCG01EA aircraft check', async ({ browser }) => {
   wasmPage.on('dialog', async d => { await d.accept(); });
 
   await Promise.all([
-    wasmPage.goto(`${BASE_URL}/ra/original.html?scenario=SCG01EA.INI&autoplay=1&agentharness=1&seed=0`, { waitUntil: 'load' }),
-    tsPage.goto(`${BASE_URL}?anttest=agent&scenario=SCG01EA&difficulty=normal`, { waitUntil: 'load' }),
+    wasmPage.goto(`${BASE_URL}/ra/original.html?scenario=${scenario}.INI&autoplay=1&agentharness=1&seed=0`, { waitUntil: 'load' }),
+    tsPage.goto(`${BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`, { waitUntil: 'load' }),
   ]);
 
   await Promise.all([

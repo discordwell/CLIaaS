@@ -315,6 +315,12 @@ export class Team {
       const stats = UNIT_STATS[targetType as UnitType];
       const isUnitOrVessel = stats && !stats.isInfantry && !stats.isAircraft;
 
+      // C++ center = As_Coord(Zone); if Class->Origin != -1, center = waypoint.
+      // If Zone is TARGET_NONE, As_Coord returns 0 (map origin) — unit->Distance(0)
+      // still produces different distances per-unit. TS must match this: use (0,0)
+      // as fallback when no recruitCenter, so each entity gets a unique distance.
+      const centerPos: WorldPos = recruitCenter ?? { x: 0, y: 0 };
+
       if (isUnitOrVessel) {
         // C++ UNIT/VESSEL case (team.cpp:1250-1322): iteration-based add.
         // Each iteration where a closer match is found triggers Add.
@@ -323,7 +329,7 @@ export class Team {
         let bestDist = -1;
         for (const e of entities) {
           if (!canAdd(e)) continue;
-          const d = recruitCenter ? worldDist(e.pos, recruitCenter) : 0;
+          const d = worldDist(e.pos, centerPos);
           // C++ team.cpp:1262: (d < bestdist || bestdist == -1)
           if (bestDist === -1 || d < bestDist) {
             bestDist = d;
@@ -342,7 +348,7 @@ export class Team {
       let bestDist = -1;
       for (const e of entities) {
         if (!canAdd(e)) continue;
-        const d = recruitCenter ? worldDist(e.pos, recruitCenter) : 0;
+        const d = worldDist(e.pos, centerPos);
         if (bestDist === -1 || d < bestDist) {
           bestDist = d;
           bestEntity = e;
