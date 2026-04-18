@@ -369,9 +369,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       let impactX = entity.target.pos.x;
       let impactY = entity.target.pos.y;
       let directHit = true;
-      const isMoving = entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+      // C++ techno.cpp:3106-3108 — bullet.IsInaccurate=true when firer Is_Foot() && IsDriving.
+      // IsDriving is a persistent flag (set by Start_Driver, cleared by Stop_Driver) —
+      // true even on the first tick of movement before Movement_AI runs, and true when
+      // stuck mid-path. Previous check `prevPos !== pos` only detected visible movement.
+      const isMovingPlatform = !!entity.isDriving;
       const isAPvsSoft = (activeWeapon.warhead === 'AP' || activeWeapon.isFueled) && entity.target.stats.isInfantry;
-      const doScatter = isMoving || isAPvsSoft;
+      const doScatter = isMovingPlatform || isAPvsSoft;
       if (doScatter) {
         // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
         // distance in leptons (1 cell = 256 leptons)
