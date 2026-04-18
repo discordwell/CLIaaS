@@ -1,5 +1,40 @@
 # Session Summaries
 
+## 2026-04-19T07:00Z — Team.recruit mission filter fix + C++ Can_Add parity
+
+### Landed
+- **Team.recruit uses Is_Recruitable_Mission** (C++ team.cpp:986, mission.cpp:522) — TS was hardcoded to GUARD/AREA_GUARD, missing that rules.ini `[Area Guard] Recruitable=no`. Fixed by using `MISSION_CONTROL[mission].isRecruitable`.
+- **Removed target/moveTarget filter** — C++ Can_Add doesn't check these; only mission-recruitable matters.
+- **8-test cpp-parity suite** for recruit mission filter (`cpp-parity-team-recruit-mission-filter.test.ts`).
+
+### Metrics (unchanged)
+| Scenario | Divergent | Note |
+|----------|-----------|------|
+| SCG03EA  | 220/501   | No regression |
+| SCG06EA  | 499/501   | No improvement |
+| SCG02EA  | 267/501   | No change |
+
+### Analysis
+The fix is semantically correct but doesn't reduce SCG06EA's divergence because:
+1. SCG06EA has 4 USSR E1 + 4 USSR DOG in GUARD mission (plenty for recruitment)
+2. The 4 dog-chain teams (team types 10-13: E1:1+DOG:1) fill exactly from these
+3. TS activates all 4 on engine tick 2 → 4 percentChance calls
+4. WASM activates only 1 team on engine tick 2 → 1 percentChance call
+
+Remaining mystery: why WASM shows only 1 team activation on tick 2 when both engines:
+- Create same 5 teams via dog1→dog2→dog3 FORCE_TRIGGER chain + inf2 on tick 1
+- Have same 8 available USSR infantry (4 E1 + 4 DOG) in GUARD
+- Run Team::AI after LogicTriggers (same order)
+- Use same composition check (isAltered → isFullStrength)
+
+Likely C++ has a Can_Add filter TS doesn't replicate (e.g., In_Radio_Contact, RecruitPriority steal logic), OR WASM's Recruit pacing is inherently slower via per-tick-per-type rate limits.
+
+### Tools
+- `__agentTeams()` — live team state accessor
+- `__agentDebug()` — expanded with action2/trigger refs
+- `scripts/test-team-init.ts` — multi-step team state tracer
+- Deep-stack RNG caller trace in `random.ts`
+
 ## 2026-04-19T06:00Z — SCG06EA team recruit pacing divergence identified
 
 ### Finding
