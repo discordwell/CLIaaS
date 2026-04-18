@@ -1966,6 +1966,15 @@ export class Game {
         entity.turretRotTickedThisFrame = false;
         if (entity.isInRecoilState) entity.isInRecoilState = false;
         if (entity.inLimbo) continue;
+        // C++ AircraftClass::AI → FootClass::AI → MissionClass::AI fires the
+        // mission handler when Timer==0. For a freshly-spawned aircraft in
+        // MOVE mission, Mission_Move returns Normal_Delay + Random_Pick(0,2).
+        // TS's _updateAircraft state machine bypasses the mission switch, so
+        // consume the Random_Pick equivalent here for Mission_Move parity.
+        // (rules.ini [Move] Normal_Delay=14 + jitter 0-2 → timer 14-16.)
+        if (entity.mission === Mission.MOVE && entity.missionTimer <= 0) {
+          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        }
         this.updateEntity(entity);
         entity.tickAnimation();
       }
@@ -6929,6 +6938,14 @@ export class Game {
         });
       }
       if (entity.teamMissions.length > 0) teamEntities.push(entity);
+      // C++ parity: _Is_It_Breathing bypasses IsInLimbo during ScenarioInit,
+      // so cargo (transport passengers) ARE added as team members even though
+      // they're not yet in the entities list. See team.cpp:105-120.
+      if (entity.isTransport && entity.passengers.length > 0) {
+        for (const passenger of entity.passengers) {
+          if (passenger.teamMissions.length > 0) teamEntities.push(passenger);
+        }
+      }
     }
     // C++ parity: ALWAYS create a Team for reinforcements (TACTION_REINFORCEMENTS).
     // C++ reinf.cpp:171-173: _Create_Group() does `new TeamClass(teamtype)` directly

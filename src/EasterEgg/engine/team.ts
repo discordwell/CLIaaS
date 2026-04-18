@@ -853,7 +853,14 @@ export class Team {
     for (const unit of this._members) {
       if (!unit.alive) continue;
       if (unit.passengers && unit.passengers.length > 0) {
-        unit.mission = Mission.UNLOAD;
+        // C++ team.cpp:2148-2152: Assign_Mission(UNLOAD) queues it. Commence
+        // transitions when gated condition met (not IsLanding/IsTakingOff for
+        // aircraft). For tick-1 reinforcement aircraft, IsTakingOff=true means
+        // Commence is skipped and Mission stays MOVE. Mission_Move then
+        // consumes Random_Pick(0,2). Match by queueing instead of direct set.
+        if (unit.mission !== Mission.UNLOAD) {
+          unit.missionQueue = Mission.UNLOAD;
+        }
         finished = false;
       }
     }

@@ -2736,18 +2736,13 @@ export function executeTriggerAction(
           if (stats.isAircraft) {
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
             entity.animState = AnimState.WALK;
-            // C++ parity: transports with UNLOAD mission use Mission_Unload state
-            // machine (SEARCH_FOR_LZ → FLY_TO_LZ → LAND → UNLOAD → TAKE_OFF).
-            // The search phase drifts for 14 ticks matching WASM's curved approach.
-            if (entity.isTransport && hasUnloadMission) {
-              entity.aircraftState = 'unload_search';
-              entity.mission = Mission.UNLOAD;
-              entity.moveTarget = { lx: pixelToLepton(world.x), ly: pixelToLepton(world.y) }; // LZ = team origin
-            } else {
-              entity.aircraftState = 'flying';
-              entity.mission = Mission.MOVE;
-              entity.moveTarget = { lx: pixelToLepton(world.x), ly: pixelToLepton(world.y) };
-            }
+            // C++ parity: aircraft start with MISSION_MOVE (flying toward LZ), then
+            // team/Coordinate_Move transitions them to UNLOAD when close enough.
+            // On tick 1, Mission_Move handler consumes Random_Pick(0,2) for timer
+            // reset. Setting UNLOAD immediately skips that RNG call.
+            entity.aircraftState = entity.isTransport && hasUnloadMission ? 'unload_search' : 'flying';
+            entity.mission = Mission.MOVE;
+            entity.moveTarget = { lx: pixelToLepton(world.x), ly: pixelToLepton(world.y) };
           } else {
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.
