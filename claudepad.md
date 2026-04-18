@@ -1,5 +1,43 @@
 # Session Summaries
 
+## 2026-04-19T10:30Z — Recruit center fallback + aircraft harness visibility
+
+### Landed
+- **Team.recruit null center fallback** (team.ts) — C++ As_Coord(TARGET_NONE)=0 still produces per-entity distances; TS was using d=0 for all entities, breaking iteration-add pattern. Fixed with `{x:0,y:0}` reference.
+- **Aircraft TarCom/NavCom/mt/mq in WASM harness** (agent_harness.cpp) — extended target serialization from INFANTRY+UNIT to include AIRCRAFT. Reveals SCG11EA HIND tick 1 transitions to MISSION_ATTACK WITHOUT TarCom — ruling out Target_Legal path as the 4-RNG source.
+
+### Metrics (500-tick, stable)
+| Scenario | Divergent | Notes |
+|----------|-----------|-------|
+| SCG01EA  | 458/501   | |
+| SCG02EA  | 267/501   | first div at tick 220: TS unit[82] extra RNG |
+| SCG03EA  | 220/501   | |
+| SCG04EA  | 499/501   | MissionQueue/IsDriving (task #48) |
+| SCG06EA  | 499/501   | infantry[69] Random_Animate (task #50) |
+| SCG08EA  | 253/501   | first div at tick 240: TS vessel[82] extra RNG |
+| SCG11EA  | 478/501   | HIND GUARD→ATTACK 4 RNG (task #53) |
+| SCG13EA  | 414/501   | ±2 MRJ pathfinding (task #43) |
+
+### SCG11EA HIND investigation (task #53, unresolved)
+WASM HINDs at HPAD docks transition mission 5 (GUARD) → 1 (ATTACK) at tick 1 without TarCom. Aircraft[131]=1 RNG, aircraft[149]=3 RNG (asymmetric by position). Ruled out:
+- Target_Legal path (no TarCom in WASM serialization)
+- Find_Juicy_Target (deterministic, no RNG)
+- Greatest_Threat (pure cell scan, no RNG)
+- Good_Fire_Location Percent_Chance(50) (only 1 call, doesn't explain 3)
+- Random_Animate (TechnoClass default returns false for non-infantry)
+- Scatter (aircraft version in aircraft.cpp:3638 has no RNG, just Enter_Idle_Mode)
+- Rotation_AI/Movement_AI (deterministic Physics/facing math)
+
+Need deeper instrumentation (add RNG trace tags to WASM) to identify the actual C++ call site.
+
+### SCG06EA infantry[69] investigation (task #50, unresolved)
+WASM consumes 2 RNG at tick 1 from E1 USSR AREA_GUARD. Path analysis:
+- If TarCom at entry: Approach_Target (0 RNG) + Random_Pick(1,5) = 1 RNG
+- If scan finds target: return(1) = 0 RNG
+- If no target: Random_Animate (2 RNG if Is_Ready) + Random_Pick(1,5) = 1-3 RNG
+
+2 RNG pattern suggests Random_Animate fired + 1 skipped case. Requires Doing=DO_STAND_READY/GUARD at Mission_Guard_Area time, but initial Doing=DO_NOTHING (constructor sets it). Doing_AI only runs AFTER MissionClass::AI in InfantryClass::AI. Unresolved: how C++ has Doing=STAND_READY at tick 1.
+
 ## 2026-04-19T08:45Z — Aircraft Mission_Move RNG parity (SCG01EA major win)
 
 ### Landed
