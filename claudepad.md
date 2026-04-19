@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-04-20T02:00Z — Round 4: applied each pending fix, all reverted or zero-effect
+
+Attempted each pending task fix from the round-3 agent findings:
+
+**#53 SCG11EA** — Applied agent's HPAD GUARD→ATTACK transition fix via `_juicyTargetFound` flag to preserve the juicy-scan signal past the range-check clear. Tick 1 matched perfectly (Δ=0), but shifted 3 RNG away from tick 0 → SCG11EA 478→500 REGRESSION. Reverted.
+
+**#43 SCG13EA** — Agent pinned the 3 excess RNG calls at `missionAI.ts:1093/1094/1096` (updateGuard Random_Animate). TS's `isReadyToRandomAnimate` returns true at tick 43 but C++ returns false. Why: unknown — requires TS-WASM per-entity state diff (`doing`, `idleAnimTimer`, `isFiringAnim`) at tick 43. Deferred.
+
+**#48 SCG04EA** — Tried adding `!unit.isDriving` gate in `coordinateMove`. Zero effect. The "2nd 3TNK drives mid-transition" hypothesis doesn't match the actual tick timing. Unit[2] fires 2 RNG at tick 2 but isDriving is false at the gate moment. Real root cause unclear.
+
+**#52 SCG07EA** — Confirmed 6 extra WASM vessel RNG calls (vessel[182-185]) at tick 0 END are processed by TS at TICK 1 start. Same vessels, same seeds, different tick. Fix requires aligning TS Phase 3 vessel processing order with C++ Logic layer. Deep refactor.
+
+**#50 SCG06EA** — Re-confirmed: `!other.isPlayerUnit` fog bypass at missionAI.ts:1200 matches tick 1 but regresses tick 0 → 499→500. Fundamental per-object vs per-cell fog model mismatch. Requires Is_Discovered_By_House porting.
+
+### Net for this round: ZERO metric changes (baseline preserved)
+SCG01EA 458 • SCG02EA 267 • SCG03EA **217** • SCG04EA 499 • SCG06EA 499 • SCG08EA 253 • SCG11EA 478 • SCG13EA 414
+
+### Key common pattern
+Each remaining divergence is a TICK ALIGNMENT issue, not a total RNG count issue. Fixing one side of a divergence shifts RNG between ticks, often worsening the per-tick metric even when C++-correct. True resolution requires matching BOTH sides of the divergence simultaneously or a larger refactor.
+
 ## 2026-04-19T23:55Z — Diagnostic Opus agents round 2 + SCG03EA -3 ticks
 
 Metric improvement: **SCG03EA 220 → 217** via invisible-projectile Coord_Scatter detonation-time fix (commit e8565581). 7 other scenarios unchanged.
