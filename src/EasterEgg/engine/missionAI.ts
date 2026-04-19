@@ -370,10 +370,11 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       let impactY = entity.target.pos.y;
       let directHit = true;
       // C++ techno.cpp:3106-3108 — bullet.IsInaccurate=true when firer Is_Foot() && IsDriving.
-      // IsDriving is a persistent flag (set by Start_Driver, cleared by Stop_Driver) —
-      // true even on the first tick of movement before Movement_AI runs, and true when
-      // stuck mid-path. Previous check `prevPos !== pos` only detected visible movement.
-      const isMovingPlatform = !!entity.isDriving;
+      // C++ IsDriving is set by Start_Driver for all FootClass units; TS only sets it for
+      // infantry (entity.ts:1155) while vehicles use track-based movement that doesn't
+      // flip the flag. To catch both cases, combine: isDriving OR visible movement.
+      const isMovingPlatform = !!entity.isDriving ||
+        entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
       const isAPvsSoft = (activeWeapon.warhead === 'AP' || activeWeapon.isFueled) && entity.target.stats.isInfantry;
       const doScatter = isMovingPlatform || isAPvsSoft;
       if (doScatter) {
