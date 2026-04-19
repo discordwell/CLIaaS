@@ -318,6 +318,16 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d", foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
 			foot->IsDriving ? "true" : "false",
 			(int)foot->MissionQueue);
+		// Task #43 diagnostic: expose IdleTimer + Doing + IsFiring for infantry
+		// to compare with TS's isReadyToRandomAnimate gate.
+		if (rtti == RTTI_INFANTRY) {
+			InfantryClass* inf = (InfantryClass*)obj;
+			buf_cat(",\"idle\":%d,\"doing\":%d,\"firing\":%s,\"prone\":%s",
+				(int)inf->IdleTimer.Value(),
+				(int)inf->Doing,
+				inf->IsFiring ? "true" : "false",
+				inf->IsProne ? "true" : "false");
+		}
 	}
 
 	if (tech->Techno_Type_Class()->Max_Passengers() > 0) {
