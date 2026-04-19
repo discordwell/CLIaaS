@@ -96,6 +96,9 @@
 
 #include	"function.h"
 
+// RNG parity debug tags — used to attribute RNG calls to specific C++ code paths.
+// See random.cpp:99 for the mechanism. Tag range 40000-40099 reserved for aircraft.
+extern int g_rng_source_tag;
 
 /***********************************************************************************************
  * _Counts_As_Civ_Evac -- Is the specified object a candidate for civilian evac logic?         *
@@ -843,6 +846,7 @@ int AircraftClass::Mission_Hunt(void)
 			return(1);
 		}
 	}
+	g_rng_source_tag = 40010; // aircraft Mission_Hunt final Random_Pick(0,2)
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
 }
 
@@ -867,6 +871,8 @@ void AircraftClass::AI(void)
 	assert(Aircraft.ID(this) == ID);
 	assert(IsActive);
 
+	g_rng_source_tag = 40000; // aircraft AI entry (before Commence/FootClass::AI)
+
 	/*
 	**	A Mission change can always occur if the aircraft is landed or flying.
 	*/
@@ -878,6 +884,7 @@ void AircraftClass::AI(void)
 	**	Perform any base class AI processing. If during this process, the aircraft was
 	**	destroyed, then detect this and bail from this AI routine early.
 	*/
+	g_rng_source_tag = 40001; // aircraft AI → FootClass::AI / TechnoClass::AI
 	FootClass::AI();
 	if (!IsActive) {
 		return;
@@ -894,11 +901,13 @@ void AircraftClass::AI(void)
 	**	Handle any body rotation at this time. Body rotation can occur even if the
 	**	flying object is not actually moving.
 	*/
+	g_rng_source_tag = 40002; // aircraft AI → Rotation_AI
 	Rotation_AI();
 
 	/*
 	**	Handle any aircraft movement at this time.
 	*/
+	g_rng_source_tag = 40003; // aircraft AI → Movement_AI
 	Movement_AI();
 
 	/*
@@ -1212,6 +1221,7 @@ int AircraftClass::Mission_Unload(void)
 				break;
 		}
 	}
+	g_rng_source_tag = 40020; // aircraft Mission_Unload final Random_Pick(0,2)
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
 }
 
@@ -1363,6 +1373,7 @@ int AircraftClass::Mission_Retreat(void)
 		default:
 			break;
 	}
+	g_rng_source_tag = 40030; // aircraft Mission_Retreat final Random_Pick(0,2)
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
 }
 
@@ -1585,6 +1596,7 @@ ResultType AircraftClass::Take_Damage(int & damage, int distance, WarheadType wa
 			/*
 			**	Parachute a survivor if possible.
 			*/
+			g_rng_source_tag = 40060; // aircraft Paradrop_Cargo crew parachute Percent_Chance(90)
 			if (Class->IsCrew && Percent_Chance(90) && Map[Center_Coord()].Is_Clear_To_Move(SPEED_FOOT, true, false)) {
 				InfantryClass * infantry = new InfantryClass(INFANTRY_E1, House->Class->House);
 				if (infantry != NULL) {
@@ -1840,6 +1852,7 @@ int AircraftClass::Mission_Move(void)
 			break;
 	}
 
+	g_rng_source_tag = 40040; // aircraft Mission_Move final Random_Pick(0,2)
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
 }
 
@@ -1864,6 +1877,8 @@ void AircraftClass::Enter_Idle_Mode(bool )
 {
 	assert(Aircraft.ID(this) == ID);
 	assert(IsActive);
+
+	g_rng_source_tag = 40091; // aircraft Enter_Idle_Mode entry
 
 	if (Is_Something_Attached()) {
 		FootClass* passenger = Attached_Object();
@@ -2602,6 +2617,7 @@ int AircraftClass::Mission_Attack(void)
 			break;
 	}
 
+	g_rng_source_tag = 40050; // aircraft Mission_Attack final Random_Pick(0,2)
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
 }
 
@@ -2636,6 +2652,7 @@ TARGET AircraftClass::New_LZ(TARGET oldlz) const
 		**	in cells.
 		*/
 		for (int radius = 0; radius < Rule.LZScanRadius / CELL_LEPTON_W; radius++) {
+			g_rng_source_tag = 40070; // aircraft New_LZ radius scan Random_Pick(FACING_N, FACING_NW)
 			FacingType modifier = Random_Pick(FACING_N, FACING_NW);
 			CELL lastcell = -1;
 
@@ -3117,6 +3134,7 @@ TARGET AircraftClass::Good_Fire_Location(TARGET target) const
 		**	a target value.
 		*/
 		if (bestval != -1) {
+			g_rng_source_tag = 40080; // aircraft Good_Fire_Location Percent_Chance(50)
 			if (Percent_Chance(50)) {
 				return(::As_Target(bestcell));
 			} else {
@@ -3679,6 +3697,8 @@ int AircraftClass::Mission_Guard(void)
 {
 	assert(Aircraft.ID(this) == ID);
 	assert(IsActive);
+
+	g_rng_source_tag = 40090; // aircraft Mission_Guard entry
 
 	if (Is_Something_Attached()) {
 		FootClass* passenger = Attached_Object();
