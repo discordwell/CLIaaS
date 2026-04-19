@@ -1544,6 +1544,10 @@ export interface ScenarioResult {
   map: GameMap;
   entities: Entity[];
   structures: MapStructure[];
+  /** Count of TERRAIN_MINE entities (ore mines / gem blossoms) from scenario INI.
+   *  Each fires 2 RNGs every GrowthRate*TICKS_PER_MINUTE via C++ TerrainClass::AI
+   *  → CellClass::Spread_Tiberium (terrain.cpp:497, cell.cpp:2963-2978). */
+  terrainMineCount: number;
   name: string;
   briefing: string;
   waypoints: Map<number, CellPos>;
@@ -1970,10 +1974,22 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // This avoids changing the seed during load, which would alter
   // scatter positions and entity placement.
 
+  // Count TERRAIN_MINE entities for Spread_Tiberium RNG parity (C++ terrain.cpp:497).
+  // C++ creates a TerrainClass object per MINE; each is an ObjectClass in the Logic
+  // array with AI that calls Spread_Tiberium — 2 RNGs per mine at Frame=0 and every
+  // GrowthRate*TICKS_PER_MINUTE. Three RA mine types: MINE (ore), GMINE (gem),
+  // TC05 (also a mine variant in some themes). Match C++ TerrainTypeClass IsSpawnsTiberium.
+  let terrainMineCount = 0;
+  for (const t of data.terrain) {
+    const up = t.type.toUpperCase();
+    if (up === 'MINE' || up === 'GMINE') terrainMineCount++;
+  }
+
   return {
     map,
     entities,
     structures,
+    terrainMineCount,
     name: data.name,
     briefing: data.briefing,
     waypoints: data.waypoints,

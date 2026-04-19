@@ -328,6 +328,9 @@ export class Game {
    *  < _preBuildingEntityCount are processed BEFORE structure timers; entities with
    *  index >= _preBuildingEntityCount are processed AFTER structure timers. */
   _preBuildingEntityCount = 0;
+  /** Count of TERRAIN_MINE entities (ore mines, gem blossoms) from scenario.
+   *  Each fires 2 RNGs every GrowthRate*TICKS_PER_MINUTE via C++ Spread_Tiberium. */
+  _terrainMineCount = 0;
   selectedIds = new Set<number>();
   selectedStructureIdx = -1; // index into structures[] for selected building (-1 = none)
   controlGroups: Map<number, Set<number>> = new Map(); // 0-9 → entity IDs (C++ parity: keys 1-0)
@@ -1157,6 +1160,7 @@ export class Game {
     // They were added to the C++ Logic array before buildings during Read_Scenario_INI.
     // Entities added later (reinforcements, created teams) go after buildings.
     this._preBuildingEntityCount = scenario.entities.length;
+    this._terrainMineCount = scenario.terrainMineCount ?? 0;
     this.entityById.clear();
     for (const e of scenario.entities) this.entityById.set(e.id, e);
     this.missionName = scenario.name;
@@ -1807,6 +1811,30 @@ export class Game {
       ScenarioRandom._sourceTag = 1; // C++ Team AI tag
     }
     _updateAllTeams(this.waypoints, { structures: this.structures, entities: this.entities });
+
+    // C++ terrain.cpp:497 — TerrainClass::AI on TERRAIN_MINE fires Spread_Tiberium
+    // every Frame % (Rule.GrowthRate * TICKS_PER_MINUTE) == 0. Consumes 2 RNGs:
+    //   1. Random_Pick(FACING_N, FACING_NW)                 (cell.cpp:2968)
+    //   2. Random_Pick(OVERLAY_GOLD1, OVERLAY_GOLD4)        (cell.cpp:2973)
+    // Each MINE is a separate ObjectClass in the Logic array processed BEFORE
+    // units/infantry/buildings. We consume the same RNGs here to keep the seed
+    // chain aligned without implementing per-mine tiberium germination (TS has
+    // its own ore-growth model in map.ts growOre). Rule.GrowthRate = 2 (rules.ini
+    // [General] default), TICKS_PER_MINUTE = 900 → fires every 1800 ticks.
+    // TS increments this.tick at the start of each update (line 1677), so during
+    // the first step (C++ Frame=0), this.tick is already 1. Shift the check.
+    if (this._terrainMineCount > 0 && (this.tick - 1) % 1800 === 0) {
+      for (let i = 0; i < this._terrainMineCount; i++) {
+        if (ScenarioRandom._tagLogging) {
+          // Tag format matches WASM logic.cpp:297 default case: 2000+Logic-index.
+          // TERRAIN entities are at Logic[0..N-1] — we don't know their exact
+          // positions without porting terrain fully, so use 2000+i which approximates.
+          ScenarioRandom._sourceTag = 2000 + i;
+        }
+        ScenarioRandom.nextInRange(0, 7);  // FACING_N (0) .. FACING_NW (7)
+        ScenarioRandom.nextInRange(0, 3);  // OVERLAY_GOLD1 .. OVERLAY_GOLD4 (4 options, magnitude=3)
+      }
+    }
 
     // C++ Logic.AI() (logic.cpp:284) processes ALL objects in a single loop from
     // Logic[0] to Logic[Count()-1]. Read_Scenario_INI loads: Units → Vessels →

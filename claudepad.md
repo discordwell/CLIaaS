@@ -1,5 +1,29 @@
 # Session Summaries
 
+## 2026-04-20T16:15Z — SCG06EA tick-0 TERRAIN_MINE fix + AREA_GUARD fog bypass landed
+
+**Result:** SCG06EA 499 → 497 divergent (-2). Ticks 0, 1, 2 now align PERFECTLY. Seven other scenarios preserved at baseline.
+
+**Two coordinated fixes:**
+
+1. **TERRAIN_MINE Spread_Tiberium RNG consumption** (scenario.ts + index.ts)
+   - C++ `TerrainClass::AI` (terrain.cpp:497) on TERRAIN_MINE fires `Map[..].Spread_Tiberium(true)` every `Rule.GrowthRate * TICKS_PER_MINUTE` ticks (1800). `Spread_Tiberium` consumes 2 RNGs: `Random_Pick(FACING_N, FACING_NW)` + `Random_Pick(OVERLAY_GOLD1, OVERLAY_GOLD4)` (cell.cpp:2968, 2973).
+   - Each MINE is a separate `ObjectClass` in the Logic array at indices 0-45 (TERRAIN comes first). SCG06EA has 3 MINEs → 6 RNGs at every 1800-tick interval.
+   - TS had no terrain entities and skipped these 6 RNGs. Added `terrainMineCount` to `ScenarioResult`, populated from scenario.ts:1672 terrain loop matching type `MINE`/`GMINE`. At every `(this.tick - 1) % 1800 === 0` in the tick loop (tick 1, 1801, 3601…), fire `N * 2` RNGs with source tag `2000 + i` matching the C++ default case for TERRAIN.
+
+2. **AREA_GUARD `!isPlayerUnit` bypass** (missionAI.ts:1222)
+   - C++ `Evaluate_Object` at techno.cpp:1529 bypasses the `Is_Discovered_By_House` check for player-owned units. TS's main AREA_GUARD scan was missing this bypass (already present at lines 638, 769, 1167). Added it.
+   - Previously couldn't land because removing the incorrect TS RNG exposed the tick-0 MINE gap; with MINE fix in place, bypass correctly aligns tick 1.
+
+**Verification:** SCG01/02/03/04/08/11/13 all at baseline (no regressions). 55071 vitest pass.
+
+**Artifacts retained:**
+- `scripts/test-scg06ea-tick0-rng.ts` — per-call side-by-side RNG dump with source+entity tags
+- `scripts/test-scg06ea-inf69-state.ts` — AREA_GUARD infantry state probe
+- `scripts/test-scg06ea-wasm-building-dump.ts` — building identity lookup
+- `scripts/test-scg06ea-mine-count.ts` — MINE count verification
+- Tagged WASM Mission_Guard RNG call sites (70001/70002/70003 in building.cpp:3300/3302/3305) — permanent diagnostic tags for future debugging
+
 ## 2026-04-20T14:50Z — SCG06EA deep-dive: AREA_GUARD fog bypass + tick-0 building RNG gap
 
 **Task:** #50 SCG06EA Mission_Guard_Area timer init divergence. Baseline 499/501.

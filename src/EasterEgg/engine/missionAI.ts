@@ -1208,18 +1208,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
     if (other.cloakState === CloakState.CLOAKED) continue;
     // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check.
-    // Note: C++ techno.cpp:1529 (Evaluate_Object) bypasses discovery for player-owned
-    // units: `if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer)`. Adding
-    // the `!other.isPlayerUnit` bypass here IS C++-correct and resolves the tick-1
-    // AREA_GUARD divergence in SCG06EA (see scripts/test-scg06ea-inf69-state.ts),
-    // but it exposes a separate tick-0 gap: WASM fires 2 extra RNG calls for the last
-    // building (FTUR) that TS doesn't replicate (source_tag stays at the building's
-    // raw tag, origin unidentified — likely an init RNG inside BuildingClass::AI).
-    // Without a compensating fix for those 2 RNGs, the bypass shifts a Δ=2 gap from
-    // tick 1 to tick 0, slightly worsening cascade (499→500 on SCG06EA). Keep the
-    // current (wrong but metric-matching) behavior until the building[114] RNG
-    // source is identified. See claudepad.md for the full investigation.
-    if (areaGuardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
+    // C++ techno.cpp:1529 (Evaluate_Object) bypasses discovery for player-owned units:
+    // `if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer)`. Matches
+    // the bypass at lines 638, 769, 1167.
+    if (areaGuardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = leptonDist(originLX, originLY, other.leptonX, other.leptonY);
     if (dist > scanRange * LEPTON_SIZE) continue;
