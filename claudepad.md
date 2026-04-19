@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-04-19T12:15Z — Moving-platform inaccuracy + isDriving discovery
+
+### Landed
+- **Moving-platform inaccuracy compound check** (missionAI.ts) — C++ techno.cpp:3106 uses IsDriving; TS only sets isDriving=true for infantry (entity.ts:1155), so initial `entity.isDriving` check regressed vehicle scatter. Fixed with `isDriving || prevPos !== pos`.
+
+### Key discovery: isDriving gap for vehicles
+- TS `entity.isDriving` is set to `true` ONLY in: (a) entity.ts:1155 for infantry via moveToward, (b) index.ts:3903 in Mission.HUNT case (for any entity).
+- Vehicles using TRACK-BASED movement (index.ts:5179+ followTrackStep) never flip isDriving=true.
+- C++ IsDriving is set by FootClass::Start_Driver for ALL FootClass subclasses (infantry, units, vessels, aircraft).
+- Impact: any TS logic gated by isDriving fires incorrectly for vehicles in TS.
+
+### Attempted + reverted: Commence gate refactor
+- Changed coordinateMove to use missionQueue pattern (like coordinateDo) + added !isDriving to Commence gate.
+- Broke 8 existing cpp-parity tests that assert immediate Mission.MOVE transition after team.ai().
+- Regressed SCG04EA from 499→500 divergent ticks. Reverted.
+- Implication: A proper C++ MissionQueue/Commence/IsDriving refactor requires updating many tests that encode the current non-parity behavior.
+
+### Metrics (unchanged)
+SCG01EA 458, SCG02EA 267, SCG03EA 220, SCG04EA 499, SCG06EA 499, SCG08EA 253, SCG11EA 478, SCG13EA 414.
+
 ## 2026-04-19T10:30Z — Recruit center fallback + aircraft harness visibility
 
 ### Landed
