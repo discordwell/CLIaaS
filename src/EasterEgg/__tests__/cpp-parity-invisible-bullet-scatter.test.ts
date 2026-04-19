@@ -126,19 +126,27 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(WEAPON_STATS['90mm'].isInvisible).toBeFalsy();
   });
 
-  it('invisible weapon fire consumes exactly 1 RNG call (Coord_Scatter)', () => {
+  it('invisible weapon consumes exactly 1 RNG call (Coord_Scatter) on DETONATION', () => {
+    // C++ bullet.cpp:1012-1014 — Coord_Scatter fires during Bullet_Explodes,
+    // not at Unlimbo. Verified via WASM tag 50002 at SCG03EA tick 267 bullet[282].
     const ctx = makeCombatCtx();
     const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
     const target = new Entity(UnitType.I_E1, House.Greece, 200, 100);
     ctx.entities = [attacker, target];
     ctx.entityById = new Map([[attacker.id, attacker], [target.id, target]]);
 
-    const before = ScenarioRandom.seed;
+    const beforeLaunch = ScenarioRandom.seed;
     launchProjectile(ctx, attacker, target, WEAPON_STATS.M1Carbine, 15, 200, 100, true);
-    const after = ScenarioRandom.seed;
+    // No RNG at launch — scatter is deferred to detonation
+    expect(ScenarioRandom.seed).toBe(beforeLaunch);
 
-    // Exactly 1 ScenarioRandom.nextInRange(0, 255) consumed for Coord_Scatter dir
-    expect(after).not.toBe(before);
+    // Advance projectiles until detonation (travelFrames may be > 0)
+    const beforeDetonate = ScenarioRandom.seed;
+    for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+      updateInflightProjectiles(ctx);
+    }
+    // Exactly 1 ScenarioRandom.nextInRange(0, 255) consumed for Coord_Scatter dir at detonation
+    expect(ScenarioRandom.seed).not.toBe(beforeDetonate);
   });
 
   it('visible weapon fire (90mm) consumes 0 RNG calls', () => {
@@ -156,17 +164,22 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(after).toBe(before);
   });
 
-  it('Colt45 (Tanya, Inviso=yes) consumes 1 RNG on fire', () => {
+  it('Colt45 (Tanya, Inviso=yes) consumes 1 RNG on DETONATION', () => {
     const ctx = makeCombatCtx();
     const attacker = new Entity(UnitType.I_E7, House.Spain, 100, 100);
     const target = new Entity(UnitType.I_E1, House.USSR, 200, 100);
     ctx.entities = [attacker, target];
     ctx.entityById = new Map([[attacker.id, attacker], [target.id, target]]);
 
-    const before = ScenarioRandom.seed;
+    const beforeLaunch = ScenarioRandom.seed;
     launchProjectile(ctx, attacker, target, WEAPON_STATS.Colt45, 50, 200, 100, true);
-    const after = ScenarioRandom.seed;
-    expect(after).not.toBe(before);
+    expect(ScenarioRandom.seed).toBe(beforeLaunch);
+
+    const beforeDetonate = ScenarioRandom.seed;
+    for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+      updateInflightProjectiles(ctx);
+    }
+    expect(ScenarioRandom.seed).not.toBe(beforeDetonate);
   });
 
   it('invisible projectile scatters impact position within 32-lepton radius', () => {

@@ -464,6 +464,15 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         const projStrength = Math.max(1, Math.round(activeWeapon.damage * houseBias));
         ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit);
       } else {
+        // C++ bullet.cpp:1012-1014 — Coord_Scatter for invisible projectiles fires during
+        // Bullet_Explodes, even for light-speed instant-damage bullets (M1Carbine, Sniper, etc).
+        // In WASM all invisible bullets go through Bullet_Explodes; in TS the direct-damage
+        // path bypasses the projectile pipeline. Consume the RNG here for parity.
+        // Verified via WASM tag 50002 at SCG03EA tick 267 bullet[282].
+        if (activeWeapon.isInvisible) {
+          ScenarioRandom.nextInRange(0, 255); // Coord_Scatter DIR_N..DIR_MAX
+        }
+
         // Instant damage (melee, hitscan weapons)
         const killed = directHit ? ctx.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;
 

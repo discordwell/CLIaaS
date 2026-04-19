@@ -786,21 +786,12 @@ export function launchProjectile(
   const speed = weapon.projectileSpeed! * LEPTON_SIZE; // convert cells/tick to leptons/tick
   const travelFrames = Math.max(1, Math.round(dist / speed));
 
-  // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter on detonation.
-  //   if (Class->IsInvisible) { Coord = Coord_Scatter(Coord, 0x0020); }
-  // C++ semantics: invisible projectiles are MPH_LIGHT_SPEED, Unlimbo sets Coord=tcoord
-  // (bullet.cpp:736-738), then bullet.AI runs on the SAME tick as creation (since bullet
-  // is appended to the Logic array and Count() re-reads each iteration). Fuse_Checkup
-  // detonates immediately (proximity=0 to tcoord), consuming 1 Random_Pick.
-  // In TS, the equivalent is to consume the RNG at fire time so it lands on the same tick.
-  if (weapon.isInvisible) {
-    const scatterDir256 = ScenarioRandom.nextInRange(0, 255);
-    // 0x0020 leptons = 32 leptons = 32 * CELL_SIZE / LEPTON_SIZE pixels
-    const scatterPx = 32 * CELL_SIZE / LEPTON_SIZE;
-    const angle = scatterDir256 * 2 * Math.PI / 256;
-    impactX += Math.cos(angle) * scatterPx;
-    impactY += Math.sin(angle) * scatterPx;
-  }
+  // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter on DETONATION.
+  // Verified via WASM tag 50002 (Coord_Scatter dir pick) at SCG03EA tick 267 bullet[282].
+  // Scatter is consumed when bullet.AI → Bullet_Explodes runs, NOT at launch. For
+  // non-instant invisible bullets (Dumbullet: Speed=100, Inviso=yes), launch tick ≠
+  // detonation tick, so firing at launch put the RNG 1+ tick early. The RNG is now
+  // consumed at detonation time in updateInflightProjectiles.
 
   // C++ bullet.cpp:783-789 — ballistic arc initialization for isArcing weapons
   // Riser = ((Distance/2) / (speed+1)) * Rule.Gravity, min 10
@@ -1033,11 +1024,9 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // C++ bullet.cpp:478-480 — use degraded strength (proj.strength) instead of original damage
     const impactDamage = proj.strength;
 
-    // C++ bullet.cpp:991 — Bullet_Explodes calls Explosion_Damage as the SOLE damage path.
-    // There is NO separate direct-hit damage call in C++. ALL weapons — including non-splash
-    // ones like M60mg — route through Explosion_Damage, which iterates all objects in the
-    // impact cell and 8 adjacent cells, applying distance-based damage (range = 1.5 cells).
-    // The direct-hit target at distance ~0 gets full damage; nearby entities get reduced damage.
+    // C++ bullet.cpp:991 — Bullet_Explodes calls Explosion_Damage at ORIGINAL coord, BEFORE
+    // the Coord_Scatter for invisible projectiles (line 1012). Damage uses un-scattered
+    // position; only anim/effect display uses scattered position.
     {
       const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
       // C++ combat.cpp:176: range = ICON_LEPTON_W + (ICON_LEPTON_W >> 1) = 1.5 cells
@@ -1051,6 +1040,18 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
         -1,  // No entity excluded from splash (firer is already excluded inside applySplashDamage)
         attackerHouse, attacker ?? undefined,
       );
+    }
+
+    // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter AFTER damage applied.
+    // Consumes 1 Random_Pick(DIR_N, DIR_MAX) via Coord_Scatter → Coord_Move.
+    // Tag 50002 verified at SCG03EA tick 267 bullet[282].
+    if (proj.weapon.isInvisible) {
+      const scatterDir256 = ScenarioRandom.nextInRange(0, 255);
+      // 0x0020 leptons = 32 leptons = 32 * CELL_SIZE / LEPTON_SIZE pixels
+      const scatterPx = 32 * CELL_SIZE / LEPTON_SIZE;
+      const angle = scatterDir256 * 2 * Math.PI / 256;
+      proj.impactX += Math.cos(angle) * scatterPx;
+      proj.impactY += Math.sin(angle) * scatterPx;
     }
 
     // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
