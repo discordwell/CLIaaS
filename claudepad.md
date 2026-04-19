@@ -1,5 +1,46 @@
 # Session Summaries
 
+## 2026-04-19T21:30Z — CRITICAL: parallel agent fixes caused massive regressions, reverted
+
+Spun up 5 Opus subagents in parallel for tasks #43, #48, #50, #52, #53. Each produced a commit. Full parity sweep AFTER merge showed CATASTROPHIC regressions across all 8 scenarios:
+
+| Scenario | Baseline | After agents | Regression |
+|----------|----------|-------------|------------|
+| SCG01EA  | 458 | 481 | +23 |
+| SCG02EA  | 267 | **486** | **+219** |
+| SCG03EA  | 220 | **501** | **+281** |
+| SCG04EA  | 499 | 501 | +2 |
+| SCG06EA  | 499 | 501 | +2 |
+| SCG08EA  | 253 | **497** | **+244** |
+| SCG11EA  | 478 | 499 | +21 |
+| SCG13EA  | 414 | **501** | **+87** |
+
+Reverted the 2 behavioral commits via `git revert` (commits 8d971520, fc4d72ce). Baseline fully restored. Kept doc commits (6022b90f) and benign C++ tag instrumentation (4253e100).
+
+### Root cause of each agent's regression:
+
+1. **Agent #48 (Team.coordinateMove → missionQueue + !isDriving Commence gate)**: The C++ semantic looked right in isolation but shifted mission timing globally. Deferred Commence transitions mis-align with when TS team AI runs in the tick order vs C++ team AI. Scenario cascade was severe.
+
+2. **Agent #50 (infantry.doing = 'stand_ready' at init)**: Added Random_Animate RNG for ALL infantry at tick 1. WASM infantry do NOT all fire Random_Animate at tick 1 — only specific ones in specific mission states. This speculative fix uniformly over-fires RNG, breaking sequencing across many scenarios.
+
+3. **Agent #52 (Expert_AI stub 6 RNG)**: Not committed (caught before regression). Would likely have caused same issue — stub consumes 6 RNG with GUESSED (min,max) values; if any differs from C++, downstream RNG diverges.
+
+### Key takeaway — **speculative parity fixes are dangerous**:
+
+RNG parity is deterministic and global. A fix that adds/removes/reorders RNG calls affects EVERY subsequent tick. Speculative C++-inspired fixes without verified WASM-side RNG tag matching typically REGRESS rather than improve. Any future parity work MUST:
+
+1. First add WASM RNG tag instrumentation to confirm EXACT C++ call site
+2. Rebuild WASM, deploy, and run parity sweep to verify the tag identifies the divergence
+3. Port the exact (min, max) RNG arguments in the exact order
+4. Guard the port with the exact C++ preconditions
+
+Agent 4 (#53 aircraft.cpp instrumentation) did step 1 correctly — added granular tags without a speculative fix. This is the right pattern for future work.
+
+### What to do differently next time:
+- Never merge speculative parity fixes without post-merge sweep verification
+- Always run full 8-scenario sweep after any mission/AI logic change
+- Agents in parallel with the same main branch can conflict silently — use true worktree isolation or serialize agent work
+
 ## 2026-04-19T12:15Z — Moving-platform inaccuracy + isDriving discovery
 
 ### Landed
