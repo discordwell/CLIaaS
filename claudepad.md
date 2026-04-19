@@ -1,5 +1,34 @@
 # Session Summaries
 
+## 2026-04-19T23:55Z — Diagnostic Opus agents round 2 + SCG03EA -3 ticks
+
+Metric improvement: **SCG03EA 220 → 217** via invisible-projectile Coord_Scatter detonation-time fix (commit e8565581). 7 other scenarios unchanged.
+
+Landed this session:
+- **e8565581**: Coord_Scatter fires at DETONATION not launch (+detonation in direct-damage path for M1Carbine/Sniper/M60mg/Colt45/Heal). Verified via WASM tag 50002.
+- WASM instrumentation tags: 30000-30003 (Mission_Guard_Area, Random_Animate), 40000-40099 (aircraft AI), 50000 (bridge destroy), 50001 (scorch smudge), 50002 (Coord_Scatter).
+
+Diagnostic Opus agents (5 launched, stricter guardrails this round — feature branches, no main commits, forced post-fix sweep, revert on ANY regression):
+- **#47 SCG03EA bullet[282]**: FIXED. Tag 50002 Coord_Scatter at detonation. -3 ticks.
+- **#50 SCG06EA infantry[69]**: Root cause identified — missionAI.ts:1200 AREA_GUARD scan missing !isPlayerUnit bypass (siblings at 638/769/1156 have it). Applied fix: matched tick 1 but shifted 2 RNG from tick 0 to tick 1 → 499→500 divergent ticks. Reverted. Need matching change elsewhere to preserve tick 0 alignment.
+- **#53 SCG11EA HIND**: All 4 RNG identified as tag 40050 Mission_Attack Random_Pick(0,2). Each HIND fires Mission_Attack TWICE per tick (mystery). TS HINDs never transition GUARD→ATTACK. No fix applied.
+- **#43 SCG13EA**: Counter-intuitive: TS fires **3 RNG** where WASM fires **1** (Random_Animate triplet 44-176/0-10/0-7). idleAnimTimer isn't mutated. Source HIDDEN. Needs TS-side RNG call-site logging.
+- **#48 SCG04EA**: Root cause confirmed (coordinateMove eager transition). 2 fix directions proposed, NOT implemented.
+- **#52 SCG07EA**: Task premise WRONG. The 6-RNG gap is VESSEL AI (tag 14182-14185), NOT Expert_AI. Same pattern as SCG08EA vessel[82]. Rename task.
+
+### Metrics (after e8565581)
+SCG01EA 458 • SCG02EA 267 • SCG03EA **217** (-3) • SCG04EA 499 • SCG06EA 499 • SCG08EA 253 • SCG11EA 478 • SCG13EA 414
+
+### Agent branches (unmerged, investigation only)
+- task-48-scg04ea-investigation: commit a13deb45
+- task-50-scg06ea-investigation: commit 6a191263
+- task-43-scg13ea-guard-timer: commit 2c97acc8
+- task-53-scg11ea-hind: empty
+- task-52-expert-ai: empty
+
+### Key insight from this round
+Speculative parity fixes are dangerous even with tag-verified root causes — applying the C++-correct AREA_GUARD fog bypass at a single site matched one tick but shifted RNG to a different tick, worsening the divergent-tick metric. Future fixes must verify they preserve per-tick alignment, not just total RNG count.
+
 ## 2026-04-19T21:30Z — CRITICAL: parallel agent fixes caused massive regressions, reverted
 
 Spun up 5 Opus subagents in parallel for tasks #43, #48, #50, #52, #53. Each produced a commit. Full parity sweep AFTER merge showed CATASTROPHIC regressions across all 8 scenarios:
