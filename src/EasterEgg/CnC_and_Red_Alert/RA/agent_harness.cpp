@@ -592,10 +592,13 @@ char* agent_get_state(void)
 		agent_house_name(player_house),
 		Scen.RandomNumber.Seed,
 		g_rng_call_count);
-	// Dump all seed+source pairs from the per-tick log (up to buffer size)
+	// Dump all seed+source+entity triples from the per-tick log (up to buffer size)
+	// Entity tag identifies WHICH entity a call belongs to, regardless of granular
+	// source tag override (e.g., 30001, 60043). Task #43+ diagnostic infrastructure.
+	extern int g_rng_entity_log[];
 	for (int li = 0; li < g_rng_log_count && li < 290; li++) {
 		if (li > 0) buf_cat(",");
-		buf_cat("[%lu,%d]", g_rng_seed_log[li], g_rng_source_log[li]);
+		buf_cat("[%lu,%d,%d]", g_rng_seed_log[li], g_rng_source_log[li], g_rng_entity_log[li]);
 	}
 	buf_cat("],");
 	// Reset log for next step (keep logging enabled)

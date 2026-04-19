@@ -93,10 +93,12 @@ bool g_rng_tracking = false;
 // Per-tick RNG call log for parity debugging
 #define RNG_LOG_SIZE 300
 unsigned long g_rng_seed_log[RNG_LOG_SIZE];
-int g_rng_source_log[RNG_LOG_SIZE]; // source tag for each call
+int g_rng_source_log[RNG_LOG_SIZE]; // source tag for each call (granular, e.g., 30001 or 60043)
+int g_rng_entity_log[RNG_LOG_SIZE]; // entity tag for each call (e.g., 10000+infantry_index)
 int g_rng_log_count = 0;
 bool g_rng_log_enabled = false;
 int g_rng_source_tag = 0; // current caller tag (set before calling Random_Pick)
+int g_rng_entity_tag = 0; // current entity tag (set by logic.cpp at entity loop start)
 
 int RandomClass::operator ()(void)
 {
@@ -113,10 +115,11 @@ int RandomClass::operator ()(void)
 	*/
 	Seed = (Seed * MULT_CONSTANT) + ADD_CONSTANT;
 
-	// Log seed + source for parity debugging
+	// Log seed + source + entity for parity debugging
 	if (g_rng_log_enabled && g_rng_log_count < RNG_LOG_SIZE) {
 		g_rng_seed_log[g_rng_log_count] = Seed;
 		g_rng_source_log[g_rng_log_count] = g_rng_source_tag;
+		g_rng_entity_log[g_rng_log_count] = g_rng_entity_tag;
 		g_rng_log_count++;
 	}
 
