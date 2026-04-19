@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-04-20T13:50Z — Team coordinator refactor: gesture-block parity landed
+
+**Fix:** Made TS's team-activation gesture block match C++ exactly. Three coordinated changes:
+
+1. `team.ts:498-506` — Unconditionally set `nonInterruptAnimTicks = 8` on all live infantry members on team activation (previously set only when `percentChance(50)` returned TRUE). C++ picks DO_GESTURE1 OR DO_GESTURE2 based on the roll, and BOTH have `Interrupt=false` in `MasterDoControls` (infantry.cpp:115/117) — so both block Commence regardless of outcome. Still consume the RNG to keep the chain aligned. Skip members whose niat is already >0 (matches C++ Do_Action at infantry.cpp:1979 which fails on non-interruptible current state).
+
+2. `team.ts:683, 727-732, 841-844` — `coordinateRegroup` and `coordinatePatrol` now queue the mission via `missionQueue` for infantry members (C++ team.cpp:1761/1938 Assign_Mission queues; Commence pops). Vehicles/aircraft keep the direct-assignment path to avoid disturbing non-gesturing paths. The queue gate at `index.ts:4067` respects niat and promotes at the correct tick.
+
+3. `missionAI.ts:1111-1113` — Bumped Random_Animate `nonInterruptAnimTicks` from 6 to 7 for gesture/salute animations, accounting for the C++ Commence → Mission_Move 1-tick dispatch delay that TS's queue-promote doesn't naturally replicate.
+
+**Result:** SCG13EA 402 → 401 (-1 tick). Ticks 95-100 now PERFECTLY ALIGN (were diverging before). Tick 100 Mission_Move fires simultaneously in both engines. All 7 other scenarios preserved at baseline (SCG01 458 • SCG02 267 • SCG03 217 • SCG04 499 • SCG06 499 • SCG08 253 • SCG11 478). All 55068 vitest pass (including 3 new cpp-parity-team-lifecycle tests for the gesture-block behavior).
+
+**Why only -1 tick:** Fixing the tick-100 first-divergence resolves the direct cascade but the next divergence (tick 101) still has +1 call (an unrelated infantry's GUARD timer fires 1 tick earlier in WASM due to cumulative drift from some earlier event). That's a separate, smaller divergence not chased this session.
+
 ## 2026-04-20T06:10Z — SCG13EA tick 100 deep-dive: team coordinator gesture divergence
 
 **Finding:** The next divergence after the SPY fix (tick 100 Mission_Move RNG gap) traces to **gesture animation blocking Commence() differently between TS and WASM**, driven by **iteration-order divergence of `percentChance(50)` rolls at team activation**.

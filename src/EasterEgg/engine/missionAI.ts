@@ -1107,9 +1107,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     }
     // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
     // idata.cpp: DO_SALUTE1/2, DO_GESTURE1/2 = {Count:3, Rate:2} = 3*2=6 ticks.
-    // This blocks Commence() until the animation completes.
+    // +1 accounts for the C++ Commence→Mission_Move dispatch delay that TS's queue
+    // promote doesn't naturally replicate (see team.ts activation niat=8).
     if (animPick >= 1 && animPick <= 4) {
-      entity.nonInterruptAnimTicks = 6; // 3 frames × rate 2
+      entity.nonInterruptAnimTicks = 7;
     }
     entity.doing = 'idle_anim';
   }

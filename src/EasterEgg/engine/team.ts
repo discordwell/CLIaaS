@@ -491,19 +491,27 @@ export class Team {
       this.isHasBeen = true;
       this.isUnderStrength = false;
 
-      // C++ team.cpp:637: Percent_Chance(50) → if true, all initiated members
-      // Do_Action(DO_GESTURE1). DO_GESTURE1 is non-interruptible (MasterDoControls
-      // Interrupt=false), blocking Commence for 3 frames × rate 2 = 6 ticks.
-      // This prevents team members from accepting queued missions during the gesture.
-      const doGesture = ScenarioRandom.percentChance(50);
-      if (doGesture) {
-        for (const m of this._members) {
-          if (m.alive && m.stats.isInfantry) {
-            // C++ WASM data: Doing=16 (DO_GESTURE1) blocks ticks 4-8 (5 ticks),
-            // gesture set at tick 2. Gate opens tick 9, Commence fires, handler
-            // fires tick 10. Total blocking: 8 ticks from gesture set.
-            m.nonInterruptAnimTicks = 8;
-          }
+      // C++ team.cpp:637: `doaction = Percent_Chance(50) ? DO_GESTURE1 : DO_GESTURE2;`
+      // Then Do_Action(doaction) for each initiated infantry member. Both DO_GESTURE1
+      // and DO_GESTURE2 have Interrupt=false in infantry.cpp:115/117 MasterDoControls.
+      //
+      // C++ Do_Action (infantry.cpp:1979) ONLY applies the new action if
+      // `Doing == DO_NOTHING || force || MasterDoControls[Doing].Interrupt` — i.e.,
+      // members already in a non-interruptible animation (e.g. from a prior
+      // Random_Animate gesture) keep their existing animation.
+      //
+      // Animation duration Count=3 × Rate=2 = 6 ticks. nonInterruptAnimTicks=8
+      // accounts for the pre-decrement at index.ts:3839 + the 1-tick C++ delay
+      // between Commence() popping the queue and MissionClass::AI dispatching
+      // the new mission on the following tick.
+      //
+      // Consume the RNG to keep the chain aligned (same call as C++), but apply
+      // the block regardless of outcome — TS previously only set niat on TRUE,
+      // missing ~50% of team activations and firing Mission_Move too early.
+      ScenarioRandom.percentChance(50);
+      for (const m of this._members) {
+        if (m.alive && m.stats.isInfantry && m.nonInterruptAnimTicks <= 0) {
+          m.nonInterruptAnimTicks = 8;
         }
       }
 
@@ -679,9 +687,16 @@ export class Team {
       // C++ team.cpp:2054-2056: aircraft get 3x stray distance
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
       if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > stray) {
-        // Member too far — order to move to zone
-        unit.mission = Mission.MOVE;
-        unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
+        // Queue for infantry to respect gesture gate; direct set for vehicles/aircraft.
+        if (unit.stats.isInfantry) {
+          if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
+            unit.missionQueue = Mission.MOVE;
+          }
+          unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
+        } else {
+          unit.mission = Mission.MOVE;
+          unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
+        }
         regrouped = false;
       } else {
         // Close enough — guard
@@ -837,7 +852,19 @@ export class Team {
       const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
-        if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
+        // For infantry, queue the mission so the gesture gate at index.ts:4067
+        // blocks promotion during the team-activation DO_GESTURE1/2 animation
+        // (C++ team.cpp:1938 Coordinate_Move → Assign_Mission queues). Non-infantry
+        // (vehicles/aircraft) keep the direct-assignment path — they don't gesture
+        // and Commence semantics differ.
+        if (unit.stats.isInfantry) {
+          if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
+            unit.missionQueue = Mission.MOVE;
+          }
+          if (!unit.moveTarget) {
+            unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+          }
+        } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
         }

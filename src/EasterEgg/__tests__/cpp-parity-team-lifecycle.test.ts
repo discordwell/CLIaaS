@@ -435,6 +435,82 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
     });
   });
 
+  describe('Activation gesture block (team.cpp:637, infantry.cpp:115-118)', () => {
+    // C++ team.cpp:637 — at team activation, `doaction = Percent_Chance(50) ? DO_GESTURE1 : DO_GESTURE2`.
+    // Both DO_GESTURE1 and DO_GESTURE2 have Interrupt=false in MasterDoControls (infantry.cpp:115/117),
+    // so BOTH block Commence() regardless of the percentChance outcome. TS must therefore set
+    // nonInterruptAnimTicks on ALL activations, not only when the roll returns TRUE — otherwise
+    // teams whose roll picks GESTURE2 lose the gate and fire Mission_Move ~6 ticks too early.
+
+    it('sets nonInterruptAnimTicks on infantry members regardless of percentChance outcome', () => {
+      const team = makeTeam({
+        house: House.USSR,
+        memberDefs: [{ type: UnitType.I_E1, count: 2 }],
+        missions: [{ mission: TMISSION_PATROL, data: 0 }],
+        forcedActive: true,
+      });
+
+      const e1 = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+      const e2 = makeEntity(UnitType.I_E1, House.USSR, 120, 100);
+      team.add(e1);
+      team.add(e2);
+
+      expect(e1.nonInterruptAnimTicks).toBe(0);
+      expect(e2.nonInterruptAnimTicks).toBe(0);
+
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: 20, cy: 20 });
+      team.ai(waypoints);
+
+      // Both infantry must be gesture-blocked — regardless of which gesture
+      // percentChance selected, both are non-interruptible in C++.
+      expect(e1.nonInterruptAnimTicks).toBeGreaterThan(0);
+      expect(e2.nonInterruptAnimTicks).toBeGreaterThan(0);
+    });
+
+    it('does not override pre-existing gesture block (C++ Do_Action fails on non-interruptible)', () => {
+      // C++ Do_Action at infantry.cpp:1979 only applies the new action if current Doing is
+      // DO_NOTHING or MasterDoControls[Doing].Interrupt. Members already in a non-interruptible
+      // animation (e.g. from a prior Random_Animate gesture) keep their existing countdown.
+      const team = makeTeam({
+        house: House.USSR,
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_PATROL, data: 0 }],
+        forcedActive: true,
+      });
+
+      const e1 = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+      e1.nonInterruptAnimTicks = 3; // simulate an in-flight Random_Animate gesture
+      team.add(e1);
+
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: 20, cy: 20 });
+      team.ai(waypoints);
+
+      // Must preserve the existing niat, not overwrite with the larger team value
+      expect(e1.nonInterruptAnimTicks).toBe(3);
+    });
+
+    it('does not set gesture block on non-infantry members (vehicles/aircraft)', () => {
+      const team = makeTeam({
+        house: House.USSR,
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions: [{ mission: TMISSION_PATROL, data: 0 }],
+        forcedActive: true,
+      });
+
+      const v1 = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+      team.add(v1);
+
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: 20, cy: 20 });
+      team.ai(waypoints);
+
+      // Vehicles don't gesture — no niat block
+      expect(v1.nonInterruptAnimTicks).toBe(0);
+    });
+  });
+
   describe('ATTACK mission — coordinated attack (team.cpp:1636-1721)', () => {
     it('sends all members to attack waypoint (Mission.ATTACK)', () => {
       // Use ATT_WAYPT so the waypoint sets the mission target (C++ team.cpp:732-738)
