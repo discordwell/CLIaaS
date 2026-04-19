@@ -1906,6 +1906,13 @@ export class Game {
             heli.turretRotTickedThisFrame = false;
             if (heli.isInRecoilState) heli.isInRecoilState = false;
             if (!heli.inLimbo) {
+              // C++ AircraftClass::AI Commence (aircraft.cpp:877-879) — promote
+              // queued mission (from Team::Coordinate_Move) when not landing.
+              if (heli.missionQueue !== null && heli.aircraftState !== 'unload_land') {
+                heli.mission = heli.missionQueue;
+                heli.missionQueue = null;
+                heli.missionTimer = 0;
+              }
               if (heli.mission === Mission.GUARD && heli.aircraftState === 'landed') {
                 if (heli.missionTimer > 0) {
                   heli.missionTimer--;
@@ -1966,6 +1973,19 @@ export class Game {
         entity.turretRotTickedThisFrame = false;
         if (entity.isInRecoilState) entity.isInRecoilState = false;
         if (entity.inLimbo) continue;
+        // C++ AircraftClass::AI (aircraft.cpp:877-879, 893-895) calls Commence()
+        // when !IsLanding && !IsTakingOff. Aircraft lack the FootClass !IsDriving
+        // gate used by ground units. Promote any queued mission immediately so
+        // Team::Coordinate_Move → MissionQueue transitions fire for air units
+        // (paradrop transports, HPAD helicopters, etc.).
+        if (
+          entity.missionQueue !== null &&
+          entity.aircraftState !== 'unload_land'
+        ) {
+          entity.mission = entity.missionQueue;
+          entity.missionQueue = null;
+          entity.missionTimer = 0;
+        }
         // C++ AircraftClass::AI → FootClass::AI → MissionClass::AI fires the
         // mission handler when Timer==0. For a freshly-spawned aircraft in
         // MOVE mission, Mission_Move returns Normal_Delay + Random_Pick(0,2).
@@ -4061,10 +4081,20 @@ export class Game {
     }
 
     // C++ infantry.cpp:1208-1211 — Commence gate (runs AFTER MissionClass::AI dispatch).
+    //   if (!IsFiring && !IsFalling && !IsDriving && (Doing == DO_NOTHING || ...)) Commence();
     // In C++, InfantryClass::AI calls Commence() after MissionClass::AI has already
     // processed the timer for this tick. So Timer=0 from Commence is picked up on the
     // NEXT tick's MissionClass::AI dispatch — the new mission handler fires 1 tick later.
-    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+    // The !IsDriving gate is critical: a unit still mid-track from a prior move keeps
+    // its current mission (e.g. GUARD) for this tick, running Mission_Guard one more
+    // time before the queued MOVE takes effect. Skipping this gate causes TS to fire
+    // Mission_Move (and its Target_Something_Nearby RNG calls) 1 tick earlier than C++.
+    if (
+      entity.missionQueue !== null &&
+      !entity.isFiringAnim &&
+      !entity.isDriving &&
+      entity.nonInterruptAnimTicks <= 0
+    ) {
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
       entity.missionTimer = 0; // picked up next tick by MissionClass::AI

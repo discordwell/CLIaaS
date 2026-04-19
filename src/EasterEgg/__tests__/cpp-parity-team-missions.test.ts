@@ -1067,9 +1067,12 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(waypoints); // activate
       team.ai(waypoints); // advance to MOVE
 
-      // Members should be ordered to move
-      expect(e1.mission).toBe(Mission.MOVE);
-      expect(e2.mission).toBe(Mission.MOVE);
+      // Members should be ordered to move.
+      // C++ team.cpp:1938-1940: Coordinate_Move → Assign_Mission(MISSION_MOVE) queues.
+      // mission.cpp:343-359 Commence() transitions MissionQueue→Mission — gated by
+      // infantry.cpp:1208 (!IsFiring && !IsDriving). team.ai() doesn't run that gate.
+      expect(e1.missionQueue).toBe(Mission.MOVE);
+      expect(e2.missionQueue).toBe(Mission.MOVE);
 
       // Should still be on MOVE mission
       expect(team.currentMission).toBe(0);
@@ -1392,8 +1395,10 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(waypoints); // activate
       team.ai(waypoints); // Coordinate_Move
 
-      // dist > 512 → true → unit should be ordered to MOVE
-      expect(e.mission).toBe(Mission.MOVE);
+      // dist > 512 → true → unit should be ordered to MOVE.
+      // C++ team.cpp:1938-1940 queues via Assign_Mission; Commence transitions later
+      // (gated by !IsDriving in infantry.cpp:1208). team.ai() doesn't run the gate.
+      expect(e.missionQueue).toBe(Mission.MOVE);
       expect(team.currentMission).toBe(0); // still on MOVE mission (not advanced)
     });
 

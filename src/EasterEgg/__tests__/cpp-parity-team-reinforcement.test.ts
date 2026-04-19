@@ -1708,15 +1708,19 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
     // First ai() tick: activation + mission advance + coordinateMove
     team.ai(waypoints);
 
-    // All vessels should now be in MOVE (not GUARD)
+    // All vessels should now have MOVE QUEUED.
     // C++ parity: Coordinate_Move → Assign_Mission(MISSION_MOVE) → MissionQueue
-    // Then VesselClass::AI → Commence() picks up MOVE → Mission_Move fires
+    // (team.cpp:1938-1940). Mission.Commence() transitions MissionQueue→Mission
+    // (mission.cpp:343-359), but that's gated on !IsFiring && !IsDriving at the
+    // entity AI level (infantry.cpp:1208). team.ai() doesn't run that gate —
+    // the engine's _processGroundEntity (index.ts) does.
     for (const v of vessels) {
-      expect(v.mission, `Vessel should be in MOVE, not GUARD`).toBe(Mission.MOVE);
+      expect(v.missionQueue, `Vessel should have MOVE queued`).toBe(Mission.MOVE);
     }
-    // Timer should be reset to 0 by coordinateMove (matching C++ Commence() Timer=0)
+    // missionTimer is only reset when Commence actually transitions. team.ai()
+    // alone doesn't run Commence, so timer stays at its spawn value (0 here).
     for (const v of vessels) {
-      expect(v.missionTimer, 'missionTimer should be 0 (C++ Commence Timer reset)').toBe(0);
+      expect(v.missionTimer, 'missionTimer unchanged by team.ai alone').toBe(0);
     }
   });
 
@@ -1800,7 +1804,9 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
     // Tick 2: isReforming=false → mission advance + coordinateMove
     team.ai(waypoints);
     expect(team.currentMission, 'Mission should advance to 0 on tick 2').toBe(0);
-    expect(v.mission, 'Vessel should now be in MOVE').toBe(Mission.MOVE);
+    // C++ team.cpp:1938-1940: Coordinate_Move queues MOVE via Assign_Mission.
+    // Commence gate (infantry.cpp:1208) runs in entity AI, not team.ai().
+    expect(v.missionQueue, 'Vessel should have MOVE queued').toBe(Mission.MOVE);
   });
 
   it('forcedActive team matches SCG07EA "cover" team: 3 patrol boats process MOVE at tick 1', () => {
@@ -1843,9 +1849,13 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
     expect(team.currentMission, 'Should be on mission 0 (MOVE to wp0)').toBe(0);
     expect(team.isReforming, 'No reforming for forcedActive teams').toBe(false);
 
-    // All patrol boats should be in MOVE with timer=0
+    // All patrol boats should have MOVE QUEUED (team.ai alone doesn't run Commence gate).
+    // C++ team.cpp:1938-1940: Coordinate_Move → Assign_Mission(MISSION_MOVE) → MissionQueue.
+    // Mission.Commence (mission.cpp:343-359) transitions MissionQueue→Mission, gated on
+    // !IsFiring && !IsDriving (infantry.cpp:1208). That gate lives in the engine's
+    // _processGroundEntity, not in team.ai().
     for (let i = 0; i < pts.length; i++) {
-      expect(pts[i].mission, `PT[${i}] should be MOVE`).toBe(Mission.MOVE);
+      expect(pts[i].missionQueue, `PT[${i}] should have MOVE queued`).toBe(Mission.MOVE);
       expect(pts[i].missionTimer, `PT[${i}] missionTimer should be 0`).toBe(0);
     }
   });
