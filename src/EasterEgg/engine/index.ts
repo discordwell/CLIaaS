@@ -5184,6 +5184,10 @@ export class Game {
             entity.trackCellSpan = useLongTrack ? 2 : 1;
             entity.trackControlIndex = nextFacing8 * 8 + followingFacing8; // C++ TrackNumber (TC index)
             entity.speedAccum = 0; // C++: fresh budget per While_Moving() call
+            // C++ FootClass::Start_Driver (foot.cpp:781-802) sets IsDriving=true for
+            // all FootClass when movement begins. TS previously only set it for infantry
+            // via moveToward; vehicles using track movement need it set here.
+            entity.isDriving = true;
             // Long tracks target the SECOND cell ahead; short tracks target the next cell
             const trackTarget = useLongTrack
               ? { x: followingCell!.cx * CELL_SIZE + CELL_SIZE / 2,
@@ -6005,6 +6009,7 @@ export class Game {
     if (!track) {
       entity.trackNumber = -1; entity.trackControlIndex = -1;
       entity.trackCellSpan = 1;
+      if (!entity.stats.isInfantry) entity.isDriving = false;
       return true;
     }
     let flags = entity.trackFlags;
@@ -6054,6 +6059,8 @@ export class Game {
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
+        // C++ FootClass::Stop_Driver clears IsDriving when track completes
+        if (!entity.stats.isInfantry) entity.isDriving = false;
         return true;
       }
 
@@ -6065,6 +6072,8 @@ export class Game {
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
+        // C++ FootClass::Stop_Driver clears IsDriving when track completes
+        if (!entity.stats.isInfantry) entity.isDriving = false;
         return true;
       }
 
