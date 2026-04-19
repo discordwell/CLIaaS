@@ -1197,8 +1197,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
     if (other.cloakState === CloakState.CLOAKED) continue;
     // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-    // C++ techno.cpp:1529: player-owned entities always visible (bypass fog check)
-    if (areaGuardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
+    if (areaGuardHouseIdx >= 0 && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = leptonDist(originLX, originLY, other.leptonX, other.leptonY);
     if (dist > scanRange * LEPTON_SIZE) continue;
