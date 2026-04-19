@@ -722,22 +722,14 @@ export class Team {
       const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
-        // Not yet arrived — order move.
-        // C++ team.cpp:1938-1940: Assign_Mission(MISSION_MOVE) QUEUES the mission.
-        // The actual mission transition happens in InfantryClass::AI / DriveClass::AI
-        // via Commence(), but ONLY when !IsFiring && !IsFalling && !IsDriving.
-        // A unit mid-track (IsDriving from a prior move) stays in its CURRENT mission
-        // for this tick, running the old mission handler one more time before the
-        // queued MOVE takes effect. Setting unit.mission directly here causes TS to
-        // fire Mission_Move one tick earlier than C++.
-        // Queue the mission and let the engine-level Commence gate pick it up at the
-        // right moment. Assign_Destination (C++ team.cpp:1958) is separate and sets
-        // NavCom immediately regardless of mission state.
-        if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
-          unit.missionQueue = Mission.MOVE;
+        // Not yet arrived — order move
+        if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
+          unit.mission = Mission.MOVE;
+          unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+          // C++ Commence() resets Timer=0 when mission changes (team.cpp:354).
+          // This triggers Mission_Move() → Random_Pick(0,2) on next entity AI tick.
+          unit.missionTimer = 0;
         }
-        // C++ Assign_Destination: NavCom = target. Unconditional.
-        unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
         finished = false;
       } else {
         // Arrived — idle

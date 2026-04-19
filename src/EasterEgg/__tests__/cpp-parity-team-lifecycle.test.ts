@@ -394,16 +394,9 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       // Tick 1: activate → advance to MOVE mission 0 → execute
       team.ai(waypoints);
 
-      // Members should be ordered to move.
-      // C++ team.cpp:1938-1940: Coordinate_Move calls Assign_Mission(MISSION_MOVE)
-      // which QUEUES into MissionQueue. The actual Mission field transition happens
-      // in MissionClass::Commence (mission.cpp:343-359), which runs inside
-      // InfantryClass::AI / DriveClass::AI gated on !IsFiring && !IsDriving (infantry.cpp:1208).
-      // team.ai() itself does NOT run the Commence gate — that's the engine's
-      // _processGroundEntity step (index.ts). So after team.ai(), C++-correct state is
-      // mission=GUARD (unchanged) + missionQueue=MOVE + moveTarget set.
-      expect(e1.missionQueue).toBe(Mission.MOVE);
-      expect(e2.missionQueue).toBe(Mission.MOVE);
+      // Members should be ordered to move
+      expect(e1.mission).toBe(Mission.MOVE);
+      expect(e2.mission).toBe(Mission.MOVE);
       expect(e1.moveTarget).toBeTruthy();
       expect(e2.moveTarget).toBeTruthy();
     });
