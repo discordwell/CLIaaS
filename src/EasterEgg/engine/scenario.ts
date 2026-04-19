@@ -1772,6 +1772,20 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.subCell = inf.subCell;
     if (inf.trigger && inf.trigger !== 'None') entity.triggerName = inf.trigger;
     applyMission(entity, inf.mission);
+    // C++ parity (Task #50 SCG06EA tick 1 RNG divergence): WASM consumes 2 extra RNGs
+    // for some AREA_GUARD infantry at tick 1 — IdleTimer pick + switch pick inside
+    // InfantryClass::Random_Animate (infantry.cpp:1748,1759). For Random_Animate to
+    // fire, Is_Ready_To_Random_Animate must return true, which requires Doing to be
+    // DO_STAND_READY or DO_STAND_GUARD (infantry.cpp:4132). The InfantryClass
+    // constructor sets Doing=DO_NOTHING (infantry.cpp:178), and neither Unlimbo nor
+    // Commence explicitly set Doing. However, WASM RNG traces show the Random_Animate
+    // path firing on tick 1 — implying that DoControls[DO_NOTHING].Count==0 or some
+    // engine init path advances Doing. Matching WASM behaviour, seed infantry with
+    // Doing=DO_STAND_READY at scenario init so Is_Ready_To_Random_Animate returns
+    // true on the first AI tick.
+    if (entity.stats.isInfantry) {
+      entity.doing = 'stand_ready';
+    }
     entities.push(entity);
   }
 
