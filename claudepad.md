@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-04-20T14:50Z — SCG06EA deep-dive: AREA_GUARD fog bypass + tick-0 building RNG gap
+
+**Task:** #50 SCG06EA Mission_Guard_Area timer init divergence. Baseline 499/501.
+
+**What I found:**
+1. TS `updateAreaGuard` main-scan filter (missionAI.ts:1211) is missing the `!other.isPlayerUnit` bypass that C++ `Evaluate_Object` (techno.cpp:1529) has: `if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer)` — player-owned units bypass discovery. Line 1167 (leash-return scan) already has the bypass, line 1211 (main scan) did not.
+2. Per-entity probe: infantry[69] E1 USSR at (24,67). WASM tick 1 has mt=0 (handler fires, finds Greek target at (19,65), sets TarCom). TS tick 1 has mt=74 (handler fired at tick 0, no target due to fog → Random_Animate + Random_Pick(1,5) rearm to 74).
+3. Adding the bypass at line 1211 correctly fires the AREA_GUARD handler at tick 0 finding the target, eliminating the Random_Animate/Random_Pick — which were TS's 2 incorrect RNGs coincidentally matching WASM's 2 RNGs at tick 0 positions [97] and [98].
+
+**The intractable wrinkle:** WASM's tick-0 RNG log has 2 extra calls (entity_tag=12114=last building=FTUR, source_tag=12114 raw — no granular override) that TS doesn't produce at all. These happen inside `BuildingClass::AI` during the last entity's processing. Searched Animation_AI, Rotation_AI, Factory_AI, Take_Damage — none of them fire tagged RNG at tick 0 for an undamaged, non-constructing FTUR. Without identifying the C++ source, I can't add a compensating fix.
+
+**Trade-off:** With the bypass, TS is C++-correct but metric goes 499→500 (tick-0 gap exposed). Without it, TS is wrong but metric matches baseline (the 2 incorrect TS RNGs coincidentally filled the tick-0 gap). **Decision: reverted** — preserving the 499 baseline until the building[114] RNG source is identified.
+
+**Parallel finding (documented fog model refactor plan):** C++ uses **per-object sticky** `TechnoClass::IsDiscoveredByPlayer` (techno.h:135) — once a unit is spotted, it stays discovered forever. TS uses **per-cell per-house dynamic sets** recalculated every tick in `_updateHouseRevealed` (index.ts:6451). Full parity requires adding per-object `discoveredByHouse: Map<House, boolean>` on Entity and switching guard-scan filters to check the sticky flag instead of per-tick set membership. This is a substantial refactor — deferred.
+
+**Artifacts retained:**
+- `scripts/test-scg06ea-inf69-state.ts` — per-entity state comparison at ticks 0-3
+- `scripts/test-scg06ea-tick0-rng.ts` — full per-call RNG log diff at tick 0 (99 vs 97 calls, finds the building[114] gap)
+- `scripts/test-scg06ea-last-building.ts` — structure identification
+- Detailed code comment at missionAI.ts:1211 explaining the trade-off
+
 ## 2026-04-20T13:50Z — Team coordinator refactor: gesture-block parity landed
 
 **Fix:** Made TS's team-activation gesture block match C++ exactly. Three coordinated changes:
