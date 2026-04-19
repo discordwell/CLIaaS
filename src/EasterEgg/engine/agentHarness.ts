@@ -825,6 +825,10 @@ export function installHarness(game: Game): void {
     return { triggers, entityTriggers };
   };
 
+  // Raw team accessor — returns actual Team objects (not serialized).
+  // Use for deep inspection of private fields during parity debugging.
+  w.__rawTeams = () => getActiveTeams();
+
   // Team debug accessor — dump all active teams with key state for parity tracing.
   w.__agentTeams = () => {
     const teams = getActiveTeams();

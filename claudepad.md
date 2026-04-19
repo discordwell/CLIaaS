@@ -1,5 +1,34 @@
 # Session Summaries
 
+## 2026-04-20T06:10Z — SCG13EA tick 100 deep-dive: team coordinator gesture divergence
+
+**Finding:** The next divergence after the SPY fix (tick 100 Mission_Move RNG gap) traces to **gesture animation blocking Commence() differently between TS and WASM**, driven by **iteration-order divergence of `percentChance(50)` rolls at team activation**.
+
+**Chain of causation:**
+1. SCG13EA has 2 USSR teams (`kptrl`, `nptrl`) that activate at tick 93 (isMoving=true).
+2. C++ team.cpp:637 and TS team.ts:498 each roll `percentChance(50)` per team. If TRUE, set `Doing=DO_GESTURE1` on all infantry members — this is non-interruptible (MasterDoControls[DO_GESTURE1].Interrupt=false per infantry.cpp:115), blocking Commence() for ~6 ticks.
+3. For the team containing ent109 (E1 USSR @ 61,67): TS's percentChance returned FALSE, WASM's returned TRUE (verified via instrumentation).
+4. So WASM's ent852056 is gesture-blocked; MissionQueue=MOVE sits pending until gesture completes at ~tick 99, then Commence pops, Mission_Move fires at tick 100 (1 RNG).
+5. TS's ent109 has no gesture block; team.ts:841 `coordinatePatrol` direct-sets mission=MOVE at tick 94 (keeping the GUARD timer value). Mission_Move only fires ~8 ticks later when timer expires.
+
+**Attempted fix (reverted):** Changed team.ts:841/683 to use `missionQueue` instead of direct mission set. Fix properly queues the MOVE transition, but because TS's percentChance returned FALSE, there's no `nonInterruptAnimTicks` block, so the queue promotes immediately at tick 94. TS then fires Mission_Move at tick 95 (1 tick after promote). That's EARLIER than WASM's tick 100 → divergent at tick 95 (worse than before).
+
+**Root cause is structural:** Multiple teams' percentChance calls consume RNG in a specific order during tick 93. TS and WASM produce identical seeds (tick 93 matches at 18/18), but each call's relative position determines which boolean each team gets. The team ordering within the tick loop differs between engines. This is the same class of bug as task #52 SCG07EA vessel ordering.
+
+**What would fix it:** Align TS team iteration order with C++ `Teams.Ptr(i)` order. Not a local change — requires end-to-end team-creation sequencing to match.
+
+**Metrics preserved at baseline (no regressions):**
+SCG01EA 458 • SCG02EA 267 • SCG03EA 217 • SCG04EA 499 • SCG06EA 499 • SCG08EA 253 • SCG11EA 478 • SCG13EA **402** (SPY fix -12)
+
+**Artifacts retained (all under scripts/test-scg13ea-*):**
+- `tick100-who.ts` — decodes WASM rngLog entity_tag triplet
+- `ent-team-mission.ts` — per-entity teamMissions trace
+- `team109-trace.ts` — raw team state via new `__rawTeams` harness accessor
+- `wasm-team-trace.ts` — WASM-side team state dump
+- `gesture-check.ts` — console capture of percentChance outcome
+
+**Harness addition:** `__rawTeams()` on window — returns getActiveTeams() for deep inspection (agentHarness.ts).
+
 ## 2026-04-20T04:45Z — SCG13EA task #43 resolved: player SPY Random_Animate fall-through
 
 **Fix:** `missionAI.ts:961-965` player-owned SPY early-return replaced with `spyPlayerSkipAutoTarget` flag that bypasses target-scan blocks but allows Mission_Guard to fall through to Random_Animate (matching C++ `FootClass::Mission_Guard` at `foot.cpp:594`).
