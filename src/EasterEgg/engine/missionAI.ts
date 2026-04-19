@@ -962,7 +962,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // when given an explicit attack command by the player. Without this, the
   // spy auto-infiltrates the nearest enemy building on disembark, consuming
   // itself before the player/oracle can direct it.
-  if (entity.type === UnitType.I_SPY && entity.isPlayerUnit) return;
+  // Task #43: SPY must still reach Random_Animate (C++ FootClass::Mission_Guard
+  // calls Random_Animate when no target found). Previously returned early here,
+  // so TS SPY at SCG13EA (9,53) skipped animation RNG that WASM consumed.
+  const spyPlayerSkipAutoTarget = entity.type === UnitType.I_SPY && entity.isPlayerUnit;
 
   // Gap #4: Auto-disguise spies near enemies
   if (entity.type === UnitType.I_SPY && entity.alive && !entity.disguisedAs && entity.isPlayerUnit) {
@@ -996,8 +999,15 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   const isDog = entity.type === 'DOG';
   // C++ foot.cpp:593 — guard scan uses THREAT_RANGE → Threat_Range(0) = weapon range.
-  // guardRange from INI overrides if set, otherwise use max weapon range (C++ parity).
-  const weaponScanRange = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0) || entity.stats.sight;
+  // C++ techno.cpp:2048-2053: if Threat_Range returns 0 (no weapon), falls back to
+  //   crange = max(Weapon_Range(0), Weapon_Range(1)) / ICON_LEPTON_W + 1
+  // which is +1 cell (0 + 1 for weaponless units). NOT sight range.
+  // Previous TS `|| sight` fallback scanned too widely for SPY/THF (no weapon),
+  // causing them to find targets WASM never scans. Task #43 SCG13EA SPY (9,53)
+  // at tick 43 fired Random_Animate in WASM (no target found) but auto-targeted
+  // in TS (found target in sight), breaking RNG parity.
+  const weaponMax = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
+  const weaponScanRange = weaponMax > 0 ? weaponMax : 1; // C++ +1 cell fallback
   const baseRange = entity.stats.guardRange ?? weaponScanRange;
   const scanRange = entity.stance === Stance.DEFENSIVE
     ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
@@ -1007,7 +1017,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // Step 1: If existing target is still legal AND in range, KEEP IT — don't rescan.
   // C++ checks Target_Legal(TarCom) then In_Range(TarCom, primary).
   // Only if the existing target is invalid or out of range do we call Greatest_Threat.
-  if (entity.target?.alive && !entity.target.inLimbo) {
+  if (!spyPlayerSkipAutoTarget && entity.target?.alive && !entity.target.inLimbo) {
     // C++ techno.cpp:5260-5266: check if existing target still in range (THREAT_RANGE mode)
     if (entity.inRange(entity.target)) {
       // Target still valid and in range — C++ keeps TarCom, skips Greatest_Threat.
@@ -1030,7 +1040,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // C++ infantry.cpp:2295-2297: Tanya does NOT auto-fire when human-controlled.
   const tanyaSkip = entity.type === UnitType.I_TANYA && entity.house === ctx.playerHouse;
 
-  const bestTarget = tanyaSkip ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
+  const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget) ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
     // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
     // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves
@@ -1048,7 +1058,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   // M4: No mobile targets — check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
   // C++ techno.cpp:1610-1618: human units only auto-target ARMED buildings (with PrimaryWeapon)
-  if (!isDog && entity.weapon) {
+  if (!isDog && entity.weapon && !spyPlayerSkipAutoTarget) {
     let bestStruct: MapStructure | null = null;
     let bestStructDist = Infinity;
     for (const s of ctx.structures) {

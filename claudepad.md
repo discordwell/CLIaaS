@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-04-20T04:45Z — SCG13EA task #43 resolved: player SPY Random_Animate fall-through
+
+**Fix:** `missionAI.ts:961-965` player-owned SPY early-return replaced with `spyPlayerSkipAutoTarget` flag that bypasses target-scan blocks but allows Mission_Guard to fall through to Random_Animate (matching C++ `FootClass::Mission_Guard` at `foot.cpp:594`).
+
+**Root cause:** Greek SPY at SCG13EA (9,53) at tick 43 — WASM fired Random_Animate (97 RNG total); TS early-returned before reaching the Random_Animate gate (96 RNG). Previous fix-attempts focused on `isReadyToRandomAnimate()` but the SPY never reached the gate at all — the `I_SPY && isPlayerUnit` early-return at line 965 skipped the entire rest of updateGuard.
+
+**Result:** SCG13EA first divergent tick pushed from 43 → 100 (99 perfect-parity ticks). No regressions (SCG01/02/03 baseline preserved). Added 3 parity unit tests at `cpp-parity-guard-scan-logic.test.ts`. All 55068 vitest tests pass.
+
 ## 2026-04-20T02:00Z — Round 4: applied each pending fix, all reverted or zero-effect
 
 Attempted each pending task fix from the round-3 agent findings:

@@ -198,3 +198,70 @@ describe('Area guard leash and scan range — C++ Threat_Range(1)/2', () => {
     expect(guard.target).toBe(enemy);
   });
 });
+
+describe('Player SPY Mission_Guard — C++ foot.cpp:594 Random_Animate fall-through', () => {
+  // C++ FootClass::Mission_Guard (foot.cpp:589-634) always reaches Random_Animate
+  // when Target_Something_Nearby returns no target — regardless of unit type or ownership.
+  // TS previously early-returned for player-owned spies to prevent auto-infiltrate, which
+  // also skipped Random_Animate. That caused SCG13EA tick 43 RNG divergence: WASM's Greek
+  // SPY at (9,53) fired Random_Animate (advancing RNG), TS's SPY skipped it entirely.
+
+  it('player-owned SPY runs Random_Animate when idle and no target (fall-through)', () => {
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100, 100);
+    spy.mission = Mission.GUARD;
+    spy.missionTimer = 0; // timer fires this tick
+    spy.idleAnimTimer = 0;
+    spy.doing = 'stand_ready';
+
+    // Seed RNG deterministically so we can observe consumption
+    ScenarioRandom.seed = 0x12345678;
+    const seedBefore = ScenarioRandom.seed;
+
+    const ctx = makeCtx({ entities: [spy] });
+    updateGuard(ctx, spy);
+
+    // C++ Random_Animate consumes at least the idle-timer roll (Random_Pick(44, 176))
+    // and the animation selection roll (Random_Pick(0, 10)).
+    const seedAfter = ScenarioRandom.seed;
+    expect(seedAfter).not.toBe(seedBefore);
+    // idleAnimTimer must be set by Random_Animate (range 44-176 per C++ infantry.cpp:1748)
+    expect(spy.idleAnimTimer).toBeGreaterThanOrEqual(44);
+    expect(spy.idleAnimTimer).toBeLessThanOrEqual(176);
+  });
+
+  it('player-owned SPY does NOT auto-target enemies on GUARD (no infiltrate chain)', () => {
+    // Prevents TS-specific bug: SPY auto-infiltrates nearest enemy on disembark.
+    const spy = makeEntity(UnitType.I_SPY, House.Greece, 100, 100);
+    spy.mission = Mission.GUARD;
+    spy.missionTimer = 0;
+    spy.idleAnimTimer = 0;
+    spy.doing = 'stand_ready';
+
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 100 + 2 * CELL_SIZE, 100);
+    enemy.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [spy, enemy] });
+    updateGuard(ctx, spy);
+
+    // Must NOT have auto-acquired a target
+    expect(spy.target).toBeNull();
+    expect(spy.mission).toBe(Mission.GUARD);
+  });
+
+  it('enemy-owned SPY also runs Mission_Guard normally (not gated by player check)', () => {
+    const spy = makeEntity(UnitType.I_SPY, House.USSR, 100, 100);
+    spy.mission = Mission.GUARD;
+    spy.missionTimer = 0;
+    spy.idleAnimTimer = 0;
+    spy.doing = 'stand_ready';
+
+    ScenarioRandom.seed = 0xabcdef01;
+    const seedBefore = ScenarioRandom.seed;
+
+    const ctx = makeCtx({ entities: [spy] });
+    updateGuard(ctx, spy);
+
+    // Enemy SPY also advances through Random_Animate
+    expect(ScenarioRandom.seed).not.toBe(seedBefore);
+  });
+});
