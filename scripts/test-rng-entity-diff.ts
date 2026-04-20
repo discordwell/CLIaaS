@@ -27,20 +27,78 @@ const startTick = Number(process.env.START ?? 89);
 const endTick = Number(process.env.END ?? 100);
 
 function tagName(tag: number): string {
-  if (tag >= 16000) return `anim[${tag - 16000}]`;
-  if (tag >= 15000) return `bullet[${tag - 15000}]`;
-  if (tag >= 14000) return `vessel[${tag - 14000}]`;
-  if (tag >= 13000) return `aircraft[${tag - 13000}]`;
-  if (tag >= 12000) return `building[${tag - 12000}]`;
-  if (tag >= 11000) return `unit[${tag - 11000}]`;
-  if (tag >= 10000) return `infantry[${tag - 10000}]`;
-  if (tag >= 200) return `Expert_AI`;
+  // Logic-indexed entity tags (logic.cpp:288-298). Object-AI loop assigns these
+  // per iteration; a granular tag override may fire ON TOP of this within the
+  // entity's AI — but the RNG log captures whichever was active at call time.
+  if (tag >= 16000 && tag < 17000) return `anim[${tag - 16000}]`;
+  if (tag >= 15000 && tag < 16000) return `bullet[${tag - 15000}]`;
+  if (tag >= 14000 && tag < 15000) return `vessel[${tag - 14000}]`;
+  if (tag >= 13000 && tag < 14000) return `aircraft[${tag - 13000}]`;
+  if (tag >= 12000 && tag < 13000) return `building[${tag - 12000}]`;
+  if (tag >= 11000 && tag < 12000) return `unit[${tag - 11000}]`;
+  if (tag >= 10000 && tag < 11000) return `infantry[${tag - 10000}]`;
+  if (tag >= 2000 && tag < 10000) return `logic[${tag - 2000}]`; // TERRAIN_MINE / default
+
+  // Granular source_tag overrides (set inside specific functions — building.cpp,
+  // foot.cpp, aircraft.cpp, infantry.cpp, combat.cpp, coord.cpp).
+  const granular: Record<number, string> = {
+    30000: 'Mission_Guard_Area',
+    30001: 'RandomAnim_IdleTimer',
+    30002: 'RandomAnim_switch',
+    30003: 'RandomAnim_facing',
+    40000: 'Aircraft_AI_entry',
+    40001: 'Aircraft_FootAI',
+    40002: 'Aircraft_Rotation_AI',
+    40003: 'Aircraft_Movement_AI',
+    40010: 'Mission_Hunt',
+    40020: 'Mission_Unload',
+    40030: 'Mission_Retreat',
+    40040: 'Mission_Move_air',
+    40050: 'Mission_Attack_air',
+    40060: 'Paradrop_Cargo',
+    40090: 'Mission_Guard_air_entry',
+    40091: 'EnterIdle_air',
+    50000: 'Explosion_bridge',
+    50001: 'Wide_Area_Damage',
+    50002: 'Coord_Scatter',
+    60010: 'Mission_Move_foot',
+    60020: 'FootAI_60020',
+    60030: 'FootAI_60030',
+    60040: 'Mission_Guard_general',
+    60041: 'Mission_Guard_vessel_DDPT',
+    60042: 'Mission_Guard_vessel_CA',
+    60043: 'Mission_Guard_infantry_E1E3',
+    60050: 'FootAI_60050',
+    60060: 'FootAI_60060',
+    60070: 'FootAI_60070',
+    60080: 'FootAI_60080',
+    60081: 'FootAI_60081',
+    60082: 'FootAI_60082',
+    60090: 'FootAI_60090',
+    60091: 'FootAI_60091',
+    70001: 'Building_AI_70001',
+    70002: 'Building_AI_70002',
+    70003: 'Building_AI_70003',
+    70010: 'Factory_AI',
+    70011: 'Building_70011',
+    70012: 'Charging_AI',
+    70013: 'Repair_AI_entry',
+    70014: 'Building_70014',
+    70015: 'Building_70015',
+    70020: 'Repair_RepairTimer',
+    70021: 'Repair_SellBack',
+  };
+  if (granular[tag] !== undefined) return granular[tag];
+
+  // House-AI sub-tags 100-200 (house.cpp Expert_AI cascade).
+  if (tag === 200) return 'Expert_AI';
   if (tag >= 100 && tag < 200) return `House_AI[${tag}]`;
-  const names: Record<number, string> = {
+
+  const base: Record<number, string> = {
     0: 'untagged', 1: 'TeamAI', 3: 'Map.Logic', 4: 'FactoryAI',
     5: 'House_AI_preamble', 20: 'Do_Fade_AI', 21: 'LogicTrigger',
   };
-  return names[tag] ?? `tag[${tag}]`;
+  return base[tag] ?? `tag[${tag}]`;
 }
 
 test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ browser }) => {
