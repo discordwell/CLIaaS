@@ -1,5 +1,71 @@
 # Session Summaries
 
+## 2026-04-20T20:00Z — SCG06EA tick 68 deep investigation (deferred — structural)
+
+**Result:** No metric change. All 7 scenarios' first-divergence ticks unchanged: SCG01=45, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=8, SCG13=101.
+
+**Symptom:** At tick 68, WASM fires 1 Coord_Scatter RNG (tag 50002, seed=1354545911). TS fires 0. Ticks 60-67 match perfectly. WASM also fires a Coord_Scatter at tick 65 — TS consumes 1 RNG at tick 65 too (under tag 5 House_AI_preamble), so seed alignment survives one tick past the first bullet. The second bullet at tick 68 is unmatched in TS.
+
+**Root cause chain (verified via per-entity state dumps in both engines at SCG06EA ticks 60-75):**
+
+1. Three Greece E1 rifle infantry sit at cells (20,64), (19,65), (18,64). Two BadGuy E1 rifle infantry sit at (19,68) and (18,68). M1Carbine weapon: `rof=20, damage=15, warhead=SA, projSpeed=100, isInvisible=true`.
+
+2. In C++: `TechnoClass::Fire_At` creates a `BulletClass` with `MPH_LIGHT_SPEED` + `Inviso=yes`. `BulletClass::Unlimbo` teleports Coord directly to tcoord (bullet.cpp:736-738). Next `BulletClass::AI` tick (N+1) runs `Fuse_Checkup` → `Bullet_Explodes` → `Explosion_Damage` → `Coord_Scatter(Coord, 0x0020)` (bullet.cpp:1013). **Damage AND scatter both apply at tick N+1, not N.**
+
+3. **In TS (missionAI.ts:439-488):** M1Carbine has no `projectileSpeed` field (lowercase), only `projSpeed`. The `activeWeapon.projectileSpeed` check at line 439 is false, so the fire path takes the HITSCAN branch (line 446-488). In this branch:
+   - `ctx.deferInvisibleScatter()` queues a scatter for tick N+1 (CORRECT — matches WASM).
+   - `ctx.damageEntity(entity.target, damage, ...)` applies damage at tick N (WRONG — 1 tick early).
+   - `ctx.triggerRetaliation(target, attacker)` fires at tick N (WRONG — 1 tick early).
+
+4. **Concrete trace at SCG06EA:** Greece#28 at (19,65) fires M1Carbine at tick 64 targeting BadGuy#22. TS instant-damages BadGuy#22 hp 50→35 at tick 64. TS defers scatter → flushed at tick 65 (matches WASM's tick 65 scatter). WASM has damage applied at tick 65. Symmetric on the scatter, asymmetric on damage timing. Ticks 65-67 match because retaliation doesn't consume RNG (`triggerRetaliation` returns early since BadGuy#22 already has `tid=28` from team MOVE orders set at tick 62).
+
+5. **The missing tick 68 scatter:** In WASM, a second invisible bullet detonates at tick 68 (so fire was at tick 67). The firing entity is a BadGuy E1 shooting a Greece E1 — WASM Greece E1 at (19,65) drops hp 50→35 at tick 68 (observed via `__agentState` unit list). In TS, neither BadGuy ever successfully fires over ticks 60-75 — they're in mission=MOVE with `tid=28` but never close range + fire. Brief ATTACK transitions at tick 67 (BadGuy#23) and tick 68 (BadGuy#22) are immediately reverted to MOVE without firing.
+
+6. **Why the BadGuy doesn't fire in TS:** Two intertwined C++ parity gaps:
+   - **C++ `InfantryClass::Firing_AI` runs every tick** (infantry.cpp:3575-3660) regardless of Mission_Guard's 8-tick cadence. When `Target_Legal(TarCom) && Can_Fire() == FIRE_OK`, it starts an animation (`IsFiring=true`) and fires at a specific animation frame (`Class->FireLaunch`). TS has a partial equivalent at missionAI.ts:886-898 (every-tick fire-if-target), but this runs inside `updateGuard`, NOT inside Mission_Move. A BadGuy in mission=MOVE with a target cannot fire in TS.
+   - **C++ `FootClass::Mission_Move`** (foot.cpp:520-540) calls `Target_Something_Nearby(THREAT_RANGE)` when no TarCom (non-player houses only), which sets TarCom and lets Firing_AI fire next tick. TS `updateMove` (index.ts:5068-5108) only scans every 15 ticks via `(tick + id) % 15 === 0`, and when a target is found it switches to `Mission.ATTACK` rather than keeping mission=MOVE + firing via Firing_AI.
+
+7. **Damage-timing offset as proximate cause:** The 1-tick early damage in TS has a second effect — at tick 64 TS's BadGuy is already damaged (hp=35) when `Can_Fire` would next evaluate. In WASM at tick 64 the BadGuy is still at hp=50. This affects downstream AI scoring/decisions by 1 tick.
+
+**Parity deltas (all 7 RA scenarios unchanged):**
+- SCG01EA: 45 (unchanged)
+- SCG03EA: 267 (unchanged)
+- SCG04EA: 3 (unchanged)
+- SCG06EA: 68 (unchanged — this investigation)
+- SCG07EA: 1 (unchanged)
+- SCG11EA: 8 (unchanged)
+- SCG13EA: 101 (unchanged)
+
+**Why deferred:** Closing this requires one of:
+- (a) Route all invisible-bullet weapons (M1Carbine/Sniper/Colt45/Heal/M60mg/Pistol/ChainGun/TeslaZap) through the `launchProjectile` path with `travelFrames=1` instead of hitscan. This moves damage+scatter+retaliation to the detonation tick (N+1), matching WASM. Needs: (i) add `projectileSpeed` ≥ 100 cells/tick to every invisible weapon in types.ts, (ii) delete the hitscan `if (activeWeapon.isInvisible)` branch in missionAI.ts:446-488, (iii) verify `updateInflightProjectiles` handles SA warhead + zero splash cleanly, (iv) re-run `cpp-parity-invisible-bullet-scatter.test.ts` and all `cpp-parity-*` tests touching infantry damage, (v) re-run 7-scenario first-divergence to confirm the tick 68 bug is fixed without regressing SCG03=267 or others. Moderate risk — changes damage application order for a very large class of weapons.
+- (b) Implement C++ `InfantryClass::Firing_AI` parity — every-tick fire-if-target regardless of Mission_Guard cadence, including within Mission_Move. Plus implement `FootClass::Mission_Move`'s `Target_Something_Nearby(THREAT_RANGE)` non-player auto-target scan at every Mission_Move invocation (not every 15 ticks). Much larger scope, touches many scenarios.
+- (c) Minimal hack-fix: keep hitscan, but defer damage+retaliation alongside the scatter in a richer `_pendingInvisibleFire` record. This matches WASM's tick N+1 detonation but keeps the existing hitscan architecture. Medium complexity.
+
+Approach (a) is the correctness path because it matches C++ BulletClass::AI architecture. Approach (c) is the fastest parity fix without structural refactoring.
+
+**Key files (investigation paths):**
+- `src/EasterEgg/engine/types.ts:951` — M1Carbine definition (no `projectileSpeed`, hitscan-only)
+- `src/EasterEgg/engine/missionAI.ts:439-488` — fire-path branch (hitscan vs projectile)
+- `src/EasterEgg/engine/combat.ts:780-848` — `launchProjectile` (would need `projectileSpeed` defined)
+- `src/EasterEgg/engine/combat.ts:1020-1055` — `updateInflightProjectiles` applies damage+Coord_Scatter at detonation
+- `src/EasterEgg/engine/index.ts:5068-5108` — updateMove A2 scan (every 15 ticks, wrong cadence)
+- `src/EasterEgg/engine/missionAI.ts:886-898` — updateGuard every-tick fire-if-target (good, but only runs for mission=GUARD)
+- `src/EasterEgg/CnC_and_Red_Alert/RA/bullet.cpp:344-489` — BulletClass::AI
+- `src/EasterEgg/CnC_and_Red_Alert/RA/bullet.cpp:970-1015` — Bullet_Explodes (Explosion_Damage + Coord_Scatter at N+1)
+- `src/EasterEgg/CnC_and_Red_Alert/RA/bullet.cpp:736-738` — MPH_LIGHT_SPEED Inviso bullet teleports Coord
+- `src/EasterEgg/CnC_and_Red_Alert/RA/foot.cpp:520-540` — Mission_Move auto-target non-player
+- `src/EasterEgg/CnC_and_Red_Alert/RA/infantry.cpp:3575-3660` — InfantryClass::Firing_AI (every-tick fire)
+
+**Verified via (not committed — temp scripts deleted):**
+- `scripts/test-scg06-tick68-dump.ts` — dumped WASM and TS per-tick RNG tags + seeds ticks 55-72
+- `scripts/test-scg06-e1-states.ts` — TS `__agentState()` for Greece+BadGuy E1s ticks 60-75
+- `scripts/test-scg06-wasm-states.ts` — WASM `agent_get_state` for all units in top-left area
+
+**Prior related work:**
+- `2a99bce6` — deferred scatter (1 tick) for invisible hitscan.
+- `062f2f8e` — moved scatter flush to top of `Game.update()` (fixed SCG03 tick 267, +3 ticks on SCG06).
+- `103fd61b` — civilian Mission_Guard Random_Animate fall-through.
+
 ## 2026-04-20T18:00Z — SCG13EA tick 101 deep investigation (deferred — structural)
 
 **Result:** No metric change. All 7 scenarios' first-divergence ticks unchanged: SCG01=44, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=8, SCG13=101.
