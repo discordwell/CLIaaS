@@ -70,6 +70,11 @@ export interface MissionAIContext {
     attacker: Entity, target: Entity | null, weapon: WeaponStats,
     damage: number, impactX: number, impactY: number, directHit: boolean,
   ): void;
+  /** Queue a Coord_Scatter RNG for NEXT tick. C++ BulletClass::AI creates the
+   *  invisible bullet at target coord on fire tick, then Bullet_Explodes fires
+   *  Coord_Scatter on the NEXT AI tick via Fuse_Checkup. TS's instant-damage path
+   *  otherwise consumes the RNG at fire time — 1+ ticks too early. */
+  deferInvisibleScatter(): void;
   applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
     primaryTargetId: number, attackerHouse: House, attacker?: Entity,
@@ -126,6 +131,13 @@ const _HOUSE_IDX: Record<string, number> = {
  *  Uses exactly 1 ScenarioRandom call (matching C++ RNG consumption). */
 function scatterInfantry(ctx: MissionAIContext, victim: Entity, attackerPos: WorldPos): void {
   if (!victim.alive || !victim.stats.isInfantry || victim.isAnt) return;
+  // C++ infantry.cpp:1887 InfantryClass::Scatter early-return (called from
+  // Take_Damage with forced=false):
+  //   `if (!Class->IsFraidyCat && Target_Legal(TarCom) && !forced) return;`
+  // Combat infantry already engaging a target don't scatter when hit — they
+  // fight back. Civilians (IsFraidyCat) still scatter. Without this check TS
+  // fires a Random_Pick(0,4) that WASM skips.
+  if (!victim.stats.isFraidyCat && (victim.target?.alive || victim.targetStructure?.alive)) return;
   // C++ infantry.cpp:1883: player infantry don't scatter unless Rule.IsScatter
   // C++ infantry.cpp:1885: always scatter when forced (random check commented out)
   // C++ infantry.cpp:1888-1890: direction = away from threat + Random_Pick(0,4)-2
@@ -465,12 +477,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit);
       } else {
         // C++ bullet.cpp:1012-1014 — Coord_Scatter for invisible projectiles fires during
-        // Bullet_Explodes, even for light-speed instant-damage bullets (M1Carbine, Sniper, etc).
-        // In WASM all invisible bullets go through Bullet_Explodes; in TS the direct-damage
-        // path bypasses the projectile pipeline. Consume the RNG here for parity.
-        // Verified via WASM tag 50002 at SCG03EA tick 267 bullet[282].
+        // Bullet_Explodes, which runs on the bullet's FIRST AI tick after creation.
+        // Bullet spawned at tcoord with MPH_LIGHT_SPEED→MPH_IMMOBILE; Arm_Fuse with
+        // Timer=4, Arming=0. Next AI tick Fuse_Checkup returns true because Distance
+        // from Coord to HeadTo == 0 < 0x10 → Bullet_Explodes → Coord_Scatter.
+        // Net: RNG fires 1 frame AFTER the firing entity. Defer so TS matches WASM.
         if (activeWeapon.isInvisible) {
-          ScenarioRandom.nextInRange(0, 255); // Coord_Scatter DIR_N..DIR_MAX
+          ctx.deferInvisibleScatter();
         }
 
         // Instant damage (melee, hitscan weapons)

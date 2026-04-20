@@ -484,6 +484,11 @@ export class Game {
   private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
   private scenarioWarheadProps: Record<string, WarheadProps> = WARHEAD_PROPS;
   private inflightProjectiles: InflightProjectile[] = [];
+  /** Invisible-bullet Coord_Scatter RNGs queued this tick (consumed next tick).
+   *  Mirrors C++ BulletClass::AI → Bullet_Explodes running on bullet's next AI tick. */
+  private _pendingInvisibleScatters = 0;
+  /** Captured at start of update() so this-tick new queues drain NEXT tick. */
+  private _scattersToFlushThisTick = 0;
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
   private allowWin = 0; // C++ house.h:335 Blockage counter — each ALLOWWIN trigger increments; win requires <= 0
@@ -1096,6 +1101,7 @@ export class Game {
       triggerRetaliation: (v, a) => this.triggerRetaliation(v, a),
       handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
       launchProjectile: (a, t, w, d, ix, iy, dh) => this.launchProjectile(a, t, w, d, ix, iy, dh),
+      deferInvisibleScatter: () => { this._pendingInvisibleScatters++; },
       applySplashDamage: (c, w, pid, ah, att) => this.applySplashDamage(c, w, pid, ah, att),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       getArmorBias: (h) => this.getArmorBias(h),
@@ -1679,6 +1685,11 @@ export class Game {
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
+    // Capture invisible-scatter queue BEFORE any phase can add to it so this tick's
+    // new entries drain on the NEXT tick (matching C++ Bullet_Explodes-on-next-
+    // AI-tick). Flush happens in updateInflightProjectiles below.
+    this._scattersToFlushThisTick = this._pendingInvisibleScatters;
+    this._pendingInvisibleScatters = 0;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
     // RNG audit: enable tagged logging for ticks 1-15.
@@ -1940,6 +1951,21 @@ export class Game {
             heli.turretRotTickedThisFrame = false;
             if (heli.isInRecoilState) heli.isInRecoilState = false;
             if (!heli.inLimbo) {
+              // C++ AircraftClass::Mission_Attack (aircraft.cpp:2620) always fires
+              // Random_Pick(0,2) at end even when VALIDATE_AZ routes to RETURN_TO_BASE
+              // (target lost). TS aircraft.ts 'landed' state early-returns without
+              // ticking the mission timer, so landed-ATTACK-no-target never fires the
+              // RNG. Tick the timer here and consume Random_Pick when it fires.
+              if (heli.mission === Mission.ATTACK && heli.aircraftState === 'landed') {
+                const stillHasTarget = (heli.target?.alive) ||
+                  (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                if (!stillHasTarget) {
+                  if (heli.missionTimer > 0) heli.missionTimer--;
+                  if (heli.missionTimer <= 0) {
+                    heli.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+                  }
+                }
+              }
               if (heli.mission === Mission.GUARD && heli.aircraftState === 'landed') {
                 if (heli.missionTimer > 0) {
                   heli.missionTimer--;
@@ -1953,11 +1979,23 @@ export class Game {
                   } else {
                     heli.target = null;
                     heli.targetStructure = null;
-                    this._heliGuardScan(heli);
-                    if (heli.attackCooldown > 0) {
+                    // C++ aircraft.cpp:3821-3824: Assign_Mission(ATTACK) queued BEFORE
+                    // range-check. juicyFound captures Step 7's result so we queue
+                    // ATTACK even when Step 8 clears heli.target.
+                    const juicyFound = this._heliGuardScan(heli);
+                    const hasTargetAfterScan = (heli.target?.alive) ||
+                      (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                    // C++ foot.cpp:694 FootClass::Mission_Guard ALWAYS fires
+                    // Random_Pick(0,2) for the return value (dtime + jitter), regardless
+                    // of whether AircraftClass::Mission_Guard queued ATTACK above.
+                    const mgJitter = ScenarioRandom.nextInRange(0, 2);
+                    if (juicyFound || hasTargetAfterScan) {
+                      heli.mission = Mission.ATTACK;
+                      heli.missionTimer = 1;
+                    } else if (heli.attackCooldown > 0) {
                       heli.missionTimer = heli.attackCooldown;
                     } else {
-                      heli.missionTimer = GUARD_NORMAL_DELAY + ScenarioRandom.nextInRange(0, 2);
+                      heli.missionTimer = GUARD_NORMAL_DELAY + mgJitter;
                     }
                   }
                 }
@@ -5434,7 +5472,13 @@ export class Game {
    *  base defense zone (Which_Zone == ZONE_NONE), preferring harvesters.
    *  Target_Something_Nearby (techno.cpp:5251) then validates/overrides within
    *  weapon range. */
-  private _heliGuardScan(heli: Entity): void {
+  /** Returns true if Find_Juicy_Target (Step 7) located a juicy enemy — even if
+   *  downstream range-validation (Step 8) clears heli.target later. Callers use
+   *  this to trigger MISSION_ATTACK transition, mirroring C++ AircraftClass::
+   *  Mission_Guard (aircraft.cpp:3821-3824 — Assign_Mission(ATTACK) is queued
+   *  BEFORE the FootClass::Mission_Guard → Target_Something_Nearby range-filter). */
+  private _heliGuardScan(heli: Entity): boolean {
+    let juicyFound = false;
     this._runMissionAI(ctx => {
       // ── Step 7: C++ aircraft.cpp:3798-3805 — Find_Juicy_Target ──
       // Only when House->State != STATE_ATTACKED (not recently under attack).
@@ -5483,12 +5527,13 @@ export class Game {
         }
 
         if (juicyTarget) {
-          // C++ aircraft.cpp:3801-3804: Assign_Target(target); Assign_Mission(MISSION_ATTACK);
-          // Sets TarCom. Does NOT return — falls through to FootClass::Mission_Guard
-          // where Target_Something_Nearby will validate (clear if out of weapon range).
+          // C++ aircraft.cpp:3821-3824: Assign_Target(target); Assign_Mission(MISSION_ATTACK);
+          // Sets TarCom + queues ATTACK. Then falls through to FootClass::Mission_Guard
+          // where Target_Something_Nearby may clear TarCom (out of range) — but the
+          // queued ATTACK is already committed, so next tick enters MISSION_ATTACK
+          // regardless. juicyFound captures that pre-clear result.
           heli.target = juicyTarget;
-          // Note: mission change to ATTACK happens in the caller when it checks hasTarget
-          // on the next timer fire (matching C++ line 3773 on next Mission_Guard call).
+          juicyFound = true;
         }
       }
 
@@ -5560,6 +5605,7 @@ export class Game {
         }
       }
     });
+    return juicyFound;
   }
 
   /** Submarine cloaking state machine — manages cloak transitions for SS/MSUB.
@@ -6284,8 +6330,16 @@ export class Game {
     _launchProjectile(this._combatCtx, attacker, target, weapon, damage, impactX, impactY, directHit);
   }
 
-  /** Advance in-flight projectiles — delegates to combat.ts */
+  /** Advance in-flight projectiles — delegates to combat.ts.
+   *  Flushes invisible-bullet Coord_Scatter RNGs queued on the PREVIOUS tick.
+   *  Runs AFTER Phase 1–4 entity AI, matching WASM's bullet position in the Logic
+   *  array (high indices iterate after normal entities). */
   private updateInflightProjectiles(): void {
+    const flushCount = this._scattersToFlushThisTick;
+    this._scattersToFlushThisTick = 0;
+    for (let i = 0; i < flushCount; i++) {
+      ScenarioRandom.nextInRange(0, 255);
+    }
     this._runCombat(ctx => _updateInflightProjectiles(ctx));
   }
 
@@ -8729,14 +8783,20 @@ export class Game {
                   //   - Height==0 && !In_Radio_Contact → scatter (docked, skip)
                   //   - House->State != STATE_ATTACKED → Find_Juicy_Target (house.cpp:6900)
                   //   - FootClass::Mission_Guard → Target_Something_Nearby validates/overrides
-                  this._heliGuardScan(heli);
-
+                  const juicyFound = this._heliGuardScan(heli);
+                  const hasTargetAfterScan = (heli.target?.alive) ||
+                    (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                  const mgJitter = ScenarioRandom.nextInRange(0, 2);
+                  if (juicyFound || hasTargetAfterScan) {
+                    heli.mission = Mission.ATTACK;
+                    heli.missionTimer = 1;
+                  } else
                   // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0,2))
                   // dtime = Normal_Delay = 42 for aircraft (rules.ini [Guard] Rate=.050)
                   if (heli.attackCooldown > 0) {
                     heli.missionTimer = heli.attackCooldown;
                   } else {
-                    heli.missionTimer = GUARD_NORMAL_DELAY + ScenarioRandom.nextInRange(0, 2);
+                    heli.missionTimer = GUARD_NORMAL_DELAY + mgJitter;
                   }
                 }
               }

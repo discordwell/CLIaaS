@@ -1976,6 +1976,11 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
         heli.aircraftState = 'landed';
         heli.flightAltitude = 0;
         heli.landedAtStructure = si; // dock helicopter at this HPAD index
+        // C++ building.cpp:2485 Assign_Mission(MISSION_GUARD) leaves MissionTimer=0 so
+        // Mission_Guard fires on the first AI tick — Find_Juicy_Target may transition
+        // to MISSION_ATTACK (aircraft.cpp:3821-3824). Without this, the HIND sits in
+        // GUARD for 42+ ticks before scanning.
+        heli.missionTimer = 0;
         entities.push(heli);
         // C++ building.cpp:2438-2455 — record helicopter ID on HPAD for interleaved processing.
         // In C++, this helicopter enters the Logic array right after the HPAD building,
