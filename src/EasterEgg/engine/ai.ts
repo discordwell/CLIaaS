@@ -80,6 +80,16 @@ export interface AIHouseState {
   // C++ CDTimer equivalents for House::AI timer-gated sections
   alertTimer: number;   // C++ AlertTime (init=0, fires immediately if IsAlerted)
   teamTimer: number;    // C++ TeamTime (init=TeamDelay*TICKS_PER_MINUTE)
+  /** C++ HouseClass::DidRepair (house.cpp:1371) — set true when repair starts, reset when RepairTimer=0. */
+  didRepair: boolean;
+  /** C++ HouseClass::RepairTimer (house.h:170) — countdown to next allowed repair. */
+  repairTimer: number;
+  /** Tick on which repairTimer was last set — used to skip the decrement on that tick.
+   *  C++ CDTimerClass semantics: on Frame F where Started=F, operator()() returns Target
+   *  (no decrement yet on the set frame). Decrement begins on F+1. */
+  repairTimerSetTick: number;
+  /** C++ Rule.Diff[handicap].RepairDelay — fixed-point, default .02 for all three difficulty sections in rules.ini. */
+  repairDelay: number;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -401,6 +411,15 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     alertTimer: 0,
     // C++ TeamTime init = Rule.TeamDelay * TICKS_PER_MINUTE. TeamDelay=5 → 5*60*15=4500
     teamTimer: 5 * 60 * GAME_TICKS_PER_SEC,
+    // C++ house.cpp:525 DidRepair(0), RepairTimer(0)
+    didRepair: false,
+    repairTimer: 0,
+    repairTimerSetTick: -1,
+    // C++ rules.cpp:322 Get_Fixed("RepairDelay", ".02"). fixed 8.8: 0.02*256 = 5.12 → raw=5.
+    // Then (fixed(5)*TICKS_PER_MINUTE/4).to_int() = (5*225+128)/256 = 4.
+    // (fixed(5)*TICKS_PER_MINUTE*2).to_int() = (5*1800+128)/256 = 36.
+    // Store in fixed-point-matching form: the lo/hi range the Random_Pick spans.
+    repairDelay: 0.02,
   };
 }
 

@@ -570,6 +570,11 @@ interface ScenarioData {
     cell: number;
     facing: number;
     trigger: string;
+    /** C++ INI 7th field: 1 = player-sellable. Stored on building as IsAllowedToSell. */
+    sellable?: boolean;
+    /** C++ INI 8th field: 1 = AI auto-rebuilds this building when destroyed.
+     *  Combined with STRUCT_CONST to set IsToRepair (building.cpp:5140). */
+    rebuild?: boolean;
   }>;
   terrain: Array<{
     cell: number;
@@ -753,6 +758,10 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
           cell: parseInt(parts[3]),
           facing: parseInt(parts[4]),
           trigger: parts[5],
+          // C++ scenario parse (building.cpp:5115-5125): 7th = sellable, 8th = rebuild.
+          // IsToRepair = rebuild || *b == STRUCT_CONST (building.cpp:5140).
+          sellable: parts.length > 6 ? parseInt(parts[6]) !== 0 : false,
+          rebuild: parts.length > 7 ? parseInt(parts[7]) !== 0 : false,
         });
       }
     }
@@ -1312,6 +1321,14 @@ export interface MapStructure {
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
   /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
   missionTimer: number;
+  /** C++ building.cpp:5140 `IsToRepair = rebuild || *b == STRUCT_CONST` — set at scenario load
+   *  for all Construction Yards (FACT/CONS) so Repair_AI auto-repairs them when damaged.
+   *  Used at building.cpp:5495 inner repair condition. */
+  isToRepair?: boolean;
+  /** C++ building.cpp:5497 BuildingClass::IsRepairing — true once Repair(1) was called
+   *  (non-human house; players use UI). Reset when Strength hits MaxStrength or Available_Money
+   *  drops below Repair_Cost. */
+  isRepairing?: boolean;
   /** C++ building.cpp:990-993 — Gap Generator Arm timer (CDTimerClass).
    *  When Arm==0, consumes Random_Pick(1, TICKS_PER_SECOND) and resets to
    *  TICKS_PER_MINUTE * GapRegenInterval + jitter. Only used for GAP buildings. */
@@ -1806,6 +1823,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       triggerName: trigName,
       missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick
       ...(s.type === 'GAP' ? { gapArmTimer: 0 } : {}), // C++ TechnoClass::Arm initialized to 0
+      // C++ building.cpp:5140 `IsToRepair = rebuild || *b == STRUCT_CONST` — ConYards auto-repair,
+      // plus any building with the 8th INI field set to 1 (AI-repairable in this scenario).
+      ...(s.type === 'FACT' || s.type === 'CONS' || s.rebuild ? { isToRepair: true } : {}),
     });
     // Mark structure footprint cells as impassable (WALL terrain)
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];

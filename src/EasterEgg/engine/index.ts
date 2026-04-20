@@ -1909,6 +1909,12 @@ export class Game {
         // Firing_AI — weapon targeting and fire
         _updateSingleStructureCombat(ctx, s, isLowPower);
 
+        // C++ BuildingClass::Repair_AI (building.cpp:5484-5536) — per-building auto-repair
+        // tick for computer-controlled houses. Only computes the Random_Pick that initiates
+        // the repair timer; actual HP restoration uses TS's updateAIRepair cadence.
+        // The RNG consumption is what keeps the RNG stream aligned with WASM.
+        this._repairAITick(s);
+
         // C++ building.cpp:990-993: Gap Generator Arm timer
         // When Arm==0, consume Random_Pick(1, TICKS_PER_SECOND) and reset Arm.
         // C++ base: TICKS_PER_MINUTE * Rule.GapRegenInterval
@@ -2007,6 +2013,24 @@ export class Game {
         entity.tickAnimation();
       }
     });
+
+    // C++ HouseClass::AI repair timer tick (house.cpp:1371-1373):
+    //   if (DidRepair && RepairTimer == 0) DidRepair = false;
+    // CDTimerClass (operator()() returns (Started+Target)-Frame) is "virtual":
+    // value decreases implicitly as Frame advances. On the set Frame, the timer
+    // still reads Target (no decrement on set frame). HouseClass::AI runs in
+    // Logic.AI (logic.cpp:365-392) AFTER Object AI (where Repair_AI fires), so
+    // the reset observation happens after Repair_AI has already read DidRepair
+    // this frame. Decrement+reset therefore runs HERE (after entity loops) —
+    // and we skip the decrement on the tick the timer was set, matching
+    // CDTimer's "no decrement on set frame" semantics so fire-to-fire spacing
+    // is exactly Target+1 frames (set on F, fire on F+Target+1).
+    for (const state of this.aiStates.values()) {
+      if (state.repairTimerSetTick !== this.tick && state.repairTimer > 0) {
+        state.repairTimer--;
+      }
+      if (state.didRepair && state.repairTimer <= 0) state.didRepair = false;
+    }
 
     // C++ logic.cpp:267+ Logic.AI runs BEFORE Map.Sight_From — fog is computed AFTER AI.
     // Rebuild per-house revealed sets so AI scans can filter by house fog.
@@ -8394,6 +8418,60 @@ export class Game {
   /** AI auto-repair — IQ >= 3 houses repair damaged structures using their own credits */
   private updateAIRepair(): void {
     this._runAI(ctx => _updateAIRepair(ctx));
+  }
+
+  /** C++ BuildingClass::Repair_AI per-building tick (building.cpp:5484-5536).
+   *  For AI houses: if the building is damaged and meets trigger conditions
+   *  (IsToRepair || IsCaptured, enough money, !DidRepair, !IsRepairing), fire one
+   *  Random_Pick to seed the house's RepairTimer. The RNG consumption is what keeps
+   *  the seed stream aligned with WASM — actual HP restoration still uses TS's
+   *  updateAIRepair cadence. */
+  private _repairAITick(s: MapStructure): void {
+    // C++ building.cpp:5495 outer condition: House->IQ >= Rule.IQRepairSell
+    // (player-allied houses in single-player don't fire Repair_AI).
+    if (this.isAllied(s.house, this.playerHouse)) return;
+    const state = this.aiStates.get(s.house);
+    if (!state || state.iq < 1) return;
+    // Skip buildings mid-construction / mid-sell (Mission == CONSTRUCTION/DECONSTRUCTION).
+    if (s.buildProgress !== undefined || s.sellProgress !== undefined) return;
+    // Can_Repair(): must be damaged. (techno.cpp:3583)
+    if (s.hp >= s.maxHp) return;
+    // Rule.RepairThreshhold guard.
+    const credits = this.houseCredits.get(s.house) ?? 0;
+    const REPAIR_THRESHHOLD = 1000;
+    if (credits < REPAIR_THRESHHOLD) return;
+    // Once any building in this house has fired Repair_AI this cycle, others skip.
+    if (state.didRepair) return;
+    // Already repairing: don't re-seed the timer.
+    if (s.isRepairing) return;
+    // The inner gate: IsCaptured || IsToRepair || IsHuman || multiplayer.
+    // For AI in single-player campaigns, only IsToRepair (or IsCaptured) qualifies.
+    if (!s.isToRepair) return;
+
+    // Mark this house as having initiated a repair this cycle.
+    state.didRepair = true;
+    s.isRepairing = true;
+
+    // C++ building.cpp:5514:
+    //   House->RepairTimer = Random_Pick((int)(House->RepairDelay * (TICKS_PER_MINUTE/4)),
+    //                                    (int)(House->RepairDelay * TICKS_PER_MINUTE * 2));
+    // C++ * is left-to-right associative: `RepairDelay * TICKS_PER_MINUTE * 2` evaluates as
+    //   (RepairDelay * TICKS_PER_MINUTE) * 2 = (fixed * int) * int = int * int.
+    // The intermediate fixed*int truncates/rounds BEFORE the ×2, so it is NOT equivalent to
+    // RepairDelay * 1800. For default RepairDelay=0.02 (raw=5, TICKS_PER_MINUTE=900):
+    //   intermediate = (5*900 + 128) / 256 = 4628 / 256 = 18
+    //   hi = 18 * 2 = 36
+    //   lo = (5*225 + 128) / 256 = 1253 / 256 = 4
+    //   Random_Pick(4, 36). magnitude = 32 (NOT 31 — matters for rejection sampling).
+    // Using the short formula (raw*1800+128)/256 would give hi=35 → magnitude=31, leading to
+    // 1-RNG draws when WASM needs up to 4-RNG rejection-sampled draws. Must preserve the
+    // intermediate truncation to match WASM exactly.
+    const rawDelay = Math.round(state.repairDelay * 256); // fixed 8.8 raw
+    const lo = Math.floor((rawDelay * 225 + 128) / 256);
+    const hiInner = Math.floor((rawDelay * 900 + 128) / 256);
+    const hi = hiInner * 2;
+    state.repairTimer = ScenarioRandom.nextInRange(lo, hi);
+    state.repairTimerSetTick = this.tick;
   }
 
   /** AI auto-sell — IQ >= 3 houses sell near-death structures for partial refund */

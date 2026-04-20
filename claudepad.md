@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-04-20T00:30Z — SCG06EA Repair_AI port complete (488 → 438, -50 ticks)
+
+**Result:** SCG06EA 488 → **438** divergent (-50). First divergence moved from tick 11 → tick 40. Total session improvement on SCG06EA since baseline: 499→438 (-61).
+
+**Two fixes combined:**
+1. **Off-by-one CDTimer semantics (index.ts).** Moved Repair_AI decrement+reset from top-of-tick to post-entity-loop (matching logic.cpp: HouseClass::AI runs AFTER Object AI within one frame). Added `repairTimerSetTick` to `AIHouseState` to skip the decrement on the same tick the timer was set — CDTimerClass returns Target on the set frame (no implicit decrement until F+1). Without this, TS fired Repair_AI at tick N+Target (1 tick early vs WASM fire at N+Target+1).
+
+2. **fixed*int intermediate truncation (index.ts:_repairAITick).** C++ `Random_Pick(RepairDelay * TICKS_PER_MINUTE/4, RepairDelay * TICKS_PER_MINUTE * 2)` — the hi bound is `(RepairDelay * 900) * 2` with intermediate truncation (fixed*int returns int), NOT `RepairDelay * 1800`. For raw=5: inner = (5*900+128)/256 = 18, hi = 36 (NOT 35). Magnitude = 32, not 31. This matters because mag=31 means mask=31 (never rejects) but mag=32 means mask=63 (rejects up to 3 times). WASM's observed 4-RNG draws at tick 13 required the correct magnitude.
+
+**Locked in via test:** `cpp-parity-repair-ai-timer.test.ts` asserts the formula yields (4,36,32) for raw=5, (11,84,73) for raw=12, documents the naive-formula bug.
+
+**Remaining SCG06EA tick 40 divergence:** Different bug — TS fires infantry[21] Mission_Move at tick 40 while WASM fires at tick 41. Looks like another CDTimer-style off-by-one on infantry mission timers. Next investigation.
+
 ## 2026-04-20T17:45Z — SCG06EA tick-13 identified: `Repair_AI` `RepairTimer` Random_Pick
 
 **Status:** Identified but not fixed. 4-RNG gap at tick 13 traced to `BuildingClass::Repair_AI` (building.cpp:5488-5510). Metric unchanged (489).
