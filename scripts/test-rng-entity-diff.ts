@@ -21,7 +21,8 @@
  */
 import { test } from '@playwright/test';
 
-const BASE_URL = 'https://cliaas.com';
+const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
+const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 const scenario = process.env.SCENARIO ?? 'SCG08EA';
 const startTick = Number(process.env.START ?? 89);
 const endTick = Number(process.env.END ?? 100);
@@ -119,7 +120,7 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
       { waitUntil: 'load' },
     ),
     tsPage.goto(
-      `${BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`,
+      `${TS_BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`,
       { waitUntil: 'load' },
     ),
   ]);

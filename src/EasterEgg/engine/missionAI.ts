@@ -902,7 +902,14 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // Only run the scan portion when the timer fires.
   if (!timerFired) return;
 
-  // Civilians auto-flee nearby ants (SCA02EA evacuation behavior)
+  // Civilians auto-flee nearby ants (SCA02EA evacuation behavior).
+  // C++ parity: Mission_Guard doesn't early-return for civilians — after the
+  // non-ant-threat scan fails, Random_Animate still fires (infantry.cpp:1748
+  // IdleTimer pick + switch case). Only skip the cellBasedGuardScan weapon
+  // target loop below (civilians have no Primary weapon and shouldn't auto-
+  // target enemies). Found via SCG01EA tick 44: C8 England (Greek ally) skipped
+  // Random_Animate here, missing 4 RNGs WASM fires. See infantry.cpp:1742-1838.
+  let civilianSkipScan = false;
   if (entity.isCivilian && entity.isPlayerUnit) {
     let nearestAntDist = Infinity;
     let nearestAntPos: WorldPos | null = null;
@@ -934,8 +941,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       entity.mission = Mission.MOVE;
       entity.path = [];
       entity.pathIndex = 0;
+      return;
     }
-    return; // civilians don't auto-attack
+    // No ant threat — civilians don't auto-target enemies (skip cellBasedGuardScan
+    // and structure scan), but STILL run Random_Animate like C++ Mission_Guard.
+    civilianSkipScan = true;
   }
 
   // Hold fire stance: never auto-engage
@@ -1026,7 +1036,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // C++ infantry.cpp:2295-2297: Tanya does NOT auto-fire when human-controlled.
   const tanyaSkip = entity.type === UnitType.I_TANYA && entity.house === ctx.playerHouse;
 
-  const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget) ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
+  const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget || civilianSkipScan) ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
     // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
     // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves
@@ -1044,7 +1054,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   // M4: No mobile targets — check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
   // C++ techno.cpp:1610-1618: human units only auto-target ARMED buildings (with PrimaryWeapon)
-  if (!isDog && entity.weapon && !spyPlayerSkipAutoTarget) {
+  if (!isDog && entity.weapon && !spyPlayerSkipAutoTarget && !civilianSkipScan) {
     let bestStruct: MapStructure | null = null;
     let bestStructDist = Infinity;
     for (const s of ctx.structures) {
@@ -1086,11 +1096,16 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   if (entity.isReadyToRandomAnimate()) {
     // C++ infantry.cpp:1748: IdleTimer = Random_Pick(RandomAnimateTime * TICKS_PER_MINUTE/2, RandomAnimateTime * TICKS_PER_MINUTE*2)
     // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
+    const saved = ScenarioRandom._sourceTag;
+    ScenarioRandom._sourceTag = 30001;
     entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
+    ScenarioRandom._sourceTag = 30002;
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {
+      ScenarioRandom._sourceTag = 30003;
       ScenarioRandom.nextInRange(0, 7); // C++ facing change: Random_Pick(FACING_N, FACING_NW)
     }
+    ScenarioRandom._sourceTag = saved;
     // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
     // idata.cpp: DO_SALUTE1/2, DO_GESTURE1/2 = {Count:3, Rate:2} = 3*2=6 ticks.
     // +1 accounts for the C++ Commence→Mission_Move dispatch delay that TS's queue

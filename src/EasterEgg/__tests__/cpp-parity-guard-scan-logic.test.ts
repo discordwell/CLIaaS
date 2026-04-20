@@ -265,3 +265,65 @@ describe('Player SPY Mission_Guard — C++ foot.cpp:594 Random_Animate fall-thro
     expect(ScenarioRandom.seed).not.toBe(seedBefore);
   });
 });
+
+describe('Player-allied civilian Mission_Guard — C++ foot.cpp:594 Random_Animate fall-through', () => {
+  // C++ FootClass::Mission_Guard (foot.cpp:589-634) calls Random_Animate when
+  // Target_Something_Nearby returns no target. Civilians are infantry like any
+  // other — they hit the Is_Ready_To_Random_Animate path (infantry.cpp:1748)
+  // which fires IdleTimer + switch Random_Picks.
+  //
+  // TS previously short-circuited for ALL player-allied civilians (even with no
+  // ants nearby) via SCA02EA's auto-flee block, skipping Random_Animate entirely.
+  // SCG01EA tick 44 regression: C8 England (Greek ally per SCG01EA.ini
+  // Allies=England) skipped 4 RNG calls that WASM fired, desyncing the stream.
+
+  it('player-allied civilian with no ant threat runs Random_Animate', () => {
+    const civ = makeEntity(UnitType.I_C8, House.Greece, 100, 100);
+    civ.mission = Mission.GUARD;
+    civ.missionTimer = 0;
+    civ.idleAnimTimer = 0;
+    civ.doing = 'stand_ready';
+
+    ScenarioRandom.seed = 0x12345678;
+    const seedBefore = ScenarioRandom.seed;
+
+    const ctx = makeCtx({ entities: [civ] });
+    updateGuard(ctx, civ);
+
+    expect(ScenarioRandom.seed).not.toBe(seedBefore);
+    expect(civ.idleAnimTimer).toBeGreaterThanOrEqual(44);
+    expect(civ.idleAnimTimer).toBeLessThanOrEqual(176);
+  });
+
+  it('player-allied civilian does NOT auto-target enemies (no weapon)', () => {
+    const civ = makeEntity(UnitType.I_C8, House.Greece, 100, 100);
+    civ.mission = Mission.GUARD;
+    civ.missionTimer = 0;
+    civ.idleAnimTimer = 0;
+    civ.doing = 'stand_ready';
+
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE, 100);
+    enemy.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [civ, enemy] });
+    updateGuard(ctx, civ);
+
+    expect(civ.target).toBeNull();
+    expect(civ.mission).toBe(Mission.GUARD);
+  });
+
+  it('player-allied civilian with nearby ant flees via Mission.MOVE', () => {
+    const civ = makeEntity(UnitType.I_C8, House.Greece, 100, 100);
+    civ.mission = Mission.GUARD;
+    civ.missionTimer = 0;
+    civ.doing = 'stand_ready';
+
+    const ant = makeEntity(UnitType.ANT1, House.BadGuy, 100 + 2 * CELL_SIZE, 100);
+
+    const ctx = makeCtx({ entities: [civ, ant] });
+    updateGuard(ctx, civ);
+
+    expect(civ.mission).toBe(Mission.MOVE);
+    expect(civ.moveTarget).not.toBeNull();
+  });
+});
