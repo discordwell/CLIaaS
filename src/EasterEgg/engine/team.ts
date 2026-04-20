@@ -747,17 +747,17 @@ export class Team {
         // Queue for infantry so the gesture gate at index.ts:4067 blocks promotion
         // during the team-activation DO_GESTURE1/2 animation. Vehicles/aircraft
         // keep direct assignment (no gesture, different Commence semantics).
-        if (unit.stats.isInfantry) {
-          if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
-            unit.missionQueue = Mission.MOVE;
-          }
-          if (!unit.moveTarget) {
-            unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
-          }
-        } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
-          unit.mission = Mission.MOVE;
+        // C++ team.cpp Coordinate_Move → Assign_Mission(MISSION_MOVE) QUEUES for
+        // BOTH infantry and vehicles (mission.cpp:379-390 sets MissionQueue).
+        // Commence() pops the queue at end of UnitClass::AI / InfantryClass::AI.
+        // Direct-setting unit.mission=MOVE here caused SCG11EA MCV Mission_Move
+        // to fire 1 tick early (tick 1 instead of tick 2), burning 1 Random_Pick
+        // that WASM consumes later — drift propagates from tick 15 onward.
+        if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
+          unit.missionQueue = Mission.MOVE;
+        }
+        if (!unit.moveTarget) {
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
-          unit.missionTimer = 0;
         }
         finished = false;
       } else {

@@ -1686,6 +1686,8 @@ export class Game {
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
+    (globalThis as any).__currentGameTick = this.tick;
+    (globalThis as any).__missionTimerTrace = true;
     // Flush invisible-bullet Coord_Scatter RNGs that were queued by the PREVIOUS
     // tick's fire path. Must run BEFORE any entity AI so the scatter consumes
     // the same RNG stream position it occupies in WASM.
@@ -3930,6 +3932,25 @@ export class Game {
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
     // C++ IsDriving persists between ticks — set by Start_Driver, cleared by Stop_Driver.
     // Do NOT clear it per-tick; let moveToward set it on first call and clear on arrival.
+
+    // C++ UnitClass::AI pre-Commence gate (unit.cpp:404-407):
+    //   if (Height == 0 && !IsDumping && !IsDriving && Is_Door_Closed()) Commence();
+    // Runs BEFORE DriveClass::AI → MissionClass::AI, so a mission queued earlier
+    // this tick (by Team.AI → Coordinate_Move) pops immediately and the new
+    // handler fires on the SAME tick. Infantry does NOT have this — InfantryClass::AI
+    // only calls Commence AFTER MissionClass::AI (infantry.cpp:1210). The pre-gate
+    // is essential for SCG11EA MCV reinforcement: Team.AI queues MOVE at tick 1,
+    // pre-Commence pops → mission=MOVE, timer=0 → MissionClass::AI fires Mission_Move
+    // at tick 1 (not tick 2). Without this, TS consumed an extra GUARD Random_Pick
+    // at tick 1 that WASM consumed as MOVE, drifting 1 tick later for the timer cycle.
+    // Conditions: vehicles only (not infantry, aircraft handled elsewhere), not
+    // driving (IsDriving), no gesture animation. Same guards as post-Commence.
+    if (!entity.stats.isInfantry && !entity.isAirUnit && entity.missionQueue !== null &&
+        !entity.isDriving && entity.nonInterruptAnimTicks <= 0) {
+      entity.mission = entity.missionQueue;
+      entity.missionQueue = null;
+      entity.missionTimer = 0;
+    }
 
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
