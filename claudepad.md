@@ -1,5 +1,48 @@
 # Session Summaries
 
+## 2026-04-20T18:00Z — SCG13EA tick 101 deep investigation (deferred — structural)
+
+**Result:** No metric change. All 7 scenarios' first-divergence ticks unchanged: SCG01=44, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=8, SCG13=101.
+
+**Symptom:** At tick 101, WASM fires 7 RNGs, TS fires 6. The missing 7th call is the jitter-rejection second inner call of one Mission_Guard (tag 60043). Ticks 1-100 match perfectly. Tick 100 both engines fire 1 RNG (Mission_Move jitter for eid=10153 / TS id=109 at cell(61,67)) — same seed.
+
+**Root cause chain (verified via per-entity RNG attribution):**
+1. SCG13EA USSR team `kptrl`/`nptrl` (TMISSION_PATROL=16) activates around tick 92-93. At team activation, TS sets `nonInterruptAnimTicks=8` for infantry members (team.ts:513-515) to mirror C++ DO_GESTURE1/2 non-interruptible animation. Team coordinator queues `missionQueue=MOVE` (coordinatePatrol line 888).
+2. Gesture blocks Commence for ~7 ticks (niat=8 pre-decrement). At tick 99 niat reaches 0 → Commence pops queue → Mission=MOVE, Timer=0.
+3. Tick 100: Both engines fire Mission_Move jitter (1 RNG). Post-fire: Mission=MOVE, Timer=14+jitter (~15).
+4. **Divergence at tick 100→101:** WASM transitions the entity back to GUARD with Timer=0 via Movement_AI → Per_Cell_Process → Enter_Idle_Mode → Commence (in-tick). TS does not — Mission stays MOVE with Timer=15, decrementing normally.
+5. Tick 101: WASM fires Mission_Guard jitter (2 RNG inner calls via rejection sampling = `[60043, 60043]` in log). TS fires nothing for this entity (timer not zero).
+
+**Verified entity identity:** WASM eid=10153 = TS logicIdx 108 = id=109 = E1 USSR cell(61,67). Both engines process this entity at the same RNG-stream position (tag=10108 in TS matches eid=10153 in WASM at tick 100 seed=2896050033 — identical).
+
+**Why WASM transitions to GUARD after Mission_Move but TS doesn't:** The entity's NavCom target (cell 61,79) is 12 cells away. Neither engine arrives in tick 100. WASM must be clearing NavCom via some path (likely `infantry.cpp:3872` Close_Enough check failing BUT then something else fires, or pathfinding encounters an issue). Without a WASM-side `missionTimer`/`mission` dump, the exact C++ path that fires Commence mid-tick on tick 100 is not pinpointed. The behavior is INFERRED from the observable RNG trace.
+
+**TS code path (committed c84c22a1):** `index.ts` case Mission.MOVE at lines 3950-3965 handles missionTimerFired correctly — if moveTarget cleared + !isDriving + missionQueue null → transition to GUARD with Timer=0 (no RNG). Else → Timer=14+jitter (1 RNG). Matches C++ Mission_Move semantics. `updateMove → finishMove` clears moveTarget on arrival and sets mission=GUARD. No apparent bug in TS — the divergence is that WASM's cell-arrival/path-failure path triggers AT tick 100 when TS's equivalent doesn't (entity position differs subtly — possibly movement speed/pixel interpolation differences).
+
+**Why deferred:** The fix requires either:
+- (a) Making TS's moveToward + cell-boundary detection fire Per_Cell_Process(PCP_END) → Enter_Idle_Mode → Commence semantics identically to C++'s infantry Movement_AI flow, including Timer=0 reset mid-tick. This is an architectural change to the movement subsystem.
+- (b) Root-causing why WASM's entity experiences NavCom clearing at tick 100 — requires WASM-side instrumentation of `Target_Legal(NavCom)`, `IsDriving`, `Path[]`, `TryTryAgain` state for eid=10153 during tick 100 movement phase.
+
+The previous session (2026-04-20T06:10Z) deferred a related team-activation-ordering divergence as "requires end-to-end team-creation sequencing to match". Current finding is DOWNSTREAM of that — team activation IS aligned in TS (niat=8 blocks correctly), but the POST-gesture MOVE-then-GUARD transition diverges.
+
+**Key files (investigation paths):**
+- `src/EasterEgg/engine/index.ts:3950-3965` — TS MOVE case jitter gate (correct per C++ parity)
+- `src/EasterEgg/engine/index.ts:4200-4232` — TS Commence gate (matches C++ infantry.cpp:1208-1211, minus `!IsDriving` for infantry)
+- `src/EasterEgg/engine/team.ts:854-908` — TS coordinatePatrol
+- `src/EasterEgg/engine/missionAI.ts:1086-1103` — TS Random_Animate (in updateGuard)
+- `src/EasterEgg/CnC_and_Red_Alert/RA/foot.cpp:520-540` — C++ Mission_Move jitter
+- `src/EasterEgg/CnC_and_Red_Alert/RA/infantry.cpp:911-914` — C++ Per_Cell_Process(PCP_END) Enter_Idle_Mode + Commence (the KEY missing TS path)
+- `src/EasterEgg/CnC_and_Red_Alert/RA/infantry.cpp:1208-1211` — C++ InfantryClass::AI Commence gate
+
+**Parity deltas (all 7 RA scenarios unchanged):**
+- SCG01EA: 44 (unchanged)
+- SCG03EA: 267 (unchanged)
+- SCG04EA: 3 (unchanged)
+- SCG06EA: 68 (unchanged)
+- SCG07EA: 1 (unchanged)
+- SCG11EA: 8 (unchanged)
+- SCG13EA: 101 (unchanged; root cause localized to eid=10153 Mission_Move → Mission_Guard transition at tick 100→101)
+
 ## 2026-04-20T15:00Z — SCG11EA first-divergence tick 8 investigation (updateTeamMission bypass)
 
 **Result:** No metric change. Root-caused the tick-8 divergence to `updateTeamMission` direct-setting `mission=MOVE; missionTimer=0` for vehicle reinforcements that are in the canonical C++ "GUARD + IsDriving + MissionQueue=MOVE" state. All 7 scenarios' first-divergence ticks unchanged: SCG01=44, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=8, SCG13=101.
