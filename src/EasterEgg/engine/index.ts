@@ -4117,9 +4117,24 @@ export class Game {
     // processed the timer for this tick. So Timer=0 from Commence is picked up on the
     // NEXT tick's MissionClass::AI dispatch — the new mission handler fires 1 tick later.
     if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+      // A2 restore: if popping back to MOVE from a TS-only ATTACK the A2 scan created
+      // (signaled by savedMoveTarget != null), keep the current missionTimer instead of
+      // resetting to 0. Without this, the unit's Mission_Move fires on the next tick and
+      // consumes Random_Pick(0,2) one cycle earlier than WASM (which never entered ATTACK
+      // because C++ has no per-tick A2 scan — only Target_Something_Nearby inside
+      // Mission_Move itself). SCG06EA tick 40 fix.
+      const popFromA2 =
+        entity.missionQueue === Mission.MOVE &&
+        entity.mission === Mission.ATTACK &&
+        entity.savedMoveTarget !== null;
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
-      entity.missionTimer = 0; // picked up next tick by MissionClass::AI
+      if (popFromA2) {
+        entity.savedMoveTarget = null;
+        // Timer preserved from prior ATTACK — continues the C++-aligned countdown.
+      } else {
+        entity.missionTimer = 0; // picked up next tick by MissionClass::AI
+      }
     }
 
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)

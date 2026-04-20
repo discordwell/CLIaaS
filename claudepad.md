@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-04-20T01:30Z — SCG06EA A2 Commence preserve missionTimer (438 → 432)
+
+**Result:** SCG06EA 438 → **432** divergent ticks (-6). First divergence moved from tick 40 → ~tick 50+. No regression on the other 6 scenarios.
+
+**Root cause:** TS has an A2 target-acquisition scan in `updateMove` (C++ has no equivalent per-tick scan — C++ only calls Target_Something_Nearby from within Mission_Move's timer-fire path). A2 switches the unit to `Mission.ATTACK` mid-movement. Team `coordinateMove` on the next tick then sees `mission !== MOVE` and queues `missionQueue=MOVE`. The Commence gate pops the queue with `missionTimer=0`, firing Mission_Move one cycle earlier than WASM. WASM never enters ATTACK (no A2) so its timer decrements naturally to the correct fire tick.
+
+**Fix:** In the Commence gate (index.ts:4119), detect "A2-induced pop" (queueing MOVE while in ATTACK with `savedMoveTarget` set) and preserve the existing `missionTimer` instead of resetting to 0. The pre-existing `savedMoveTarget` field is the A2 signal; clear it on restore. Normal mission transitions still reset the timer to 0 (C++ Commence semantics).
+
+**Diagnostic pattern:** The trace showed entity at tick 38 MOVE mt=3 → tick 39 ATTACK mt=3 → tick 40 MOVE mt=0 → tick 41 MOVE mt=16 (fires). Tying the pop path back to A2 lets the fix target only that specific edge.
+
 ## 2026-04-20T00:30Z — SCG06EA Repair_AI port complete (488 → 438, -50 ticks)
 
 **Result:** SCG06EA 488 → **438** divergent (-50). First divergence moved from tick 11 → tick 40. Total session improvement on SCG06EA since baseline: 499→438 (-61).
