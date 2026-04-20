@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-04-20T17:00Z — SCG06EA tick-4 coordinateMove missionQueue fix
+
+**Result:** SCG06EA 497 → **489** divergent (-8 more). Total session improvement: 499→489 (-10).
+
+**Root cause:** `Team.coordinateMove` (team.ts:741-746) was directly setting `unit.mission = Mission.MOVE` with `missionTimer = 0` for infantry, bypassing the gesture gate set during team activation. C++ `Coordinate_Move` (team.cpp:1938) calls `Assign_Mission(MISSION_MOVE)` which queues; `Commence()` pops only when Doing is interruptible (infantry.cpp:1208 — skip during DO_GESTURE1/2 animation).
+
+**Fix:** For infantry members, use `unit.missionQueue = Mission.MOVE` instead of direct set. Vehicles/aircraft keep direct assignment (no gesture). Matches the earlier SCG13EA fix for `coordinatePatrol`/`coordinateRegroup` — now covers all three team-level move paths.
+
+**Concrete SCG06EA case:** BadGuy infantry team with TMISSION_MOVE mission. Both engines activate team at tick 3, set gesture on members. TS's coordinateMove at tick 4 direct-set mission=MOVE + timer=0, firing 3 RNGs at Mission_Move rearm. WASM queued the mission; Commence blocked by gesture until tick ~10; Mission_Move fires at tick 10. After fix: TS ticks 0-11 match perfectly (including tick 10's 3 RNGs at the correct moment).
+
+**Verified:** SCG01/02/03/04/08/11/13 all at baseline. 55071 vitest pass.
+
 ## 2026-04-20T16:15Z — SCG06EA tick-0 TERRAIN_MINE fix + AREA_GUARD fog bypass landed
 
 **Result:** SCG06EA 499 → 497 divergent (-2). Ticks 0, 1, 2 now align PERFECTLY. Seven other scenarios preserved at baseline.

@@ -737,12 +737,22 @@ export class Team {
       const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
-        // Not yet arrived — order move
-        if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
+        // Not yet arrived — order move.
+        // C++ team.cpp:1938 Coordinate_Move → Assign_Mission(MISSION_MOVE) queues.
+        // Commence() (infantry.cpp:1210) pops when Doing is interruptible.
+        // Queue for infantry so the gesture gate at index.ts:4067 blocks promotion
+        // during the team-activation DO_GESTURE1/2 animation. Vehicles/aircraft
+        // keep direct assignment (no gesture, different Commence semantics).
+        if (unit.stats.isInfantry) {
+          if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
+            unit.missionQueue = Mission.MOVE;
+          }
+          if (!unit.moveTarget) {
+            unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+          }
+        } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           unit.mission = Mission.MOVE;
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
-          // C++ Commence() resets Timer=0 when mission changes (team.cpp:354).
-          // This triggers Mission_Move() → Random_Pick(0,2) on next entity AI tick.
           unit.missionTimer = 0;
         }
         finished = false;
