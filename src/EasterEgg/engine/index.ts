@@ -4399,9 +4399,16 @@ export class Game {
           // Arrived at waypoint — advance to next mission
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          // C++ team.cpp Coordinate_Move → Assign_Mission(MISSION_MOVE) → Commence()
+          // pops queue, sets Timer=0 (mission.cpp:354). Without the Timer reset, the
+          // Mission_Move handler won't fire Random_Pick(0,2) jitter for ~14 ticks,
+          // diverging from WASM which fires within 1-2 ticks of the MOVE assignment.
+          // SCG11EA tick 3: USSR 4TNK blok-team MOVE — WASM fires tag 60010 at tick 3,
+          // TS missed it entirely without this reset.
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.target = null;
+          entity.missionTimer = 0;
 
           // Off-map waypoints (e.g. convoy exit WP25 in SCG02EA): path to nearest
           // map edge cell instead, keeping moveTarget off-map so the edge exit check
@@ -4464,6 +4471,8 @@ export class Game {
           // No targets — move toward the waypoint
           const target = this.teamMissionWaypointTarget(entity, wp);
           if (worldDist(entity.pos, leptonPosToWorld(target)) > 3) {
+            // C++ Commence() Timer=0 reset on Assign_Mission(MOVE).
+            if (entity.mission !== Mission.MOVE) entity.missionTimer = 0;
             entity.mission = Mission.MOVE;
             entity.moveTarget = target;
             entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
@@ -4733,6 +4742,8 @@ export class Game {
         if (worldDist(entity.pos, leptonPosToWorld(target)) < 2) {
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          // C++ Commence() Timer=0 reset on mission change.
+          if (entity.mission !== Mission.MOVE) entity.missionTimer = 0;
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.path = findPath(this.map, entity.cell, { cx: wp.cx, cy: wp.cy }, true, entity.isNavalUnit, entity.stats.speedClass);
@@ -4780,6 +4791,8 @@ export class Game {
         if (worldDist(entity.pos, leptonPosToWorld(target)) < 2) {
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          // C++ Commence() Timer=0 reset on mission change.
+          if (entity.mission !== Mission.MOVE) entity.missionTimer = 0;
           entity.mission = Mission.MOVE;
           entity.target = null;
           entity.targetStructure = null;
@@ -4803,6 +4816,8 @@ export class Game {
           entity.moveTarget = null;
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          // C++ Commence() Timer=0 reset on mission change.
+          if (entity.mission !== Mission.MOVE) entity.missionTimer = 0;
           entity.mission = Mission.MOVE;
           entity.moveTarget = target;
           entity.target = null;

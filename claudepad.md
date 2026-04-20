@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-04-20T05:30Z — SCG11EA team MOVE Commence timer reset (496 → 486)
+
+**Result:** SCG11EA 496 → **486** divergent ticks (-10). Ticks 3-14 now match perfectly (previously all divergent). No regression on the other 6 scenarios.
+
+**Root cause:** C++ `MissionClass::Commence()` (mission.cpp:354) sets `Timer = 0` when popping MissionQueue via Assign_Mission. This forces `MissionClass::AI` on the next tick to immediately fire the mission handler (consuming `Random_Pick(0,2)` jitter for Mission_Move / Mission_Attack / Mission_Guard). TS team coordinator functions were setting `unit.mission = Mission.MOVE` directly WITHOUT resetting `missionTimer`, causing the unit to fire the Mission_Move handler 14+ ticks late (or never). WASM fires tag 60010 (FootClass::Mission_Move jitter) within 1-2 ticks of team assignment; TS missed it entirely.
+
+**SCG11EA trigger:** USSR team `blk1`/`blk2`/etc. are TMISSION_PATROL teams. The 4TNK at unit-slot 70 (id=9, cell 60,58) transitions from `mission=GUARD` to `mission=MOVE` at tick 3 via `Team.coordinatePatrol`. With the fix, TS now fires the Mission_Move handler at tick 3 (1 RNG, tag 60010) matching WASM.
+
+**Fix:** Add `unit.missionTimer = 0` when setting `unit.mission = Mission.MOVE` via any team coordinator, gated on `mission !== Mission.MOVE` so re-asserting MOVE every tick doesn't re-fire RNG.
+- `team.ts:coordinatePatrol` (line 878) — primary fix, triggers the SCG11EA improvement
+- `team.ts:coordinateRegroup` (line 697) — same Commence semantics, applied for safety
+- `index.ts:updateTeamMission` TMISSION_MOVE/ATTACK/SPY/HOUND_DOG branches — legacy team system uses same pattern, all 4 branches fixed
+
+**Key investigation method:** Added a Getter/Setter wrapper on `Entity.mission` that logs `Error().stack` when mission transitions to MOVE. The stack trace identified `coordinatePatrol` as the culprit rather than the assumed `coordinateMove`/`coordinateRegroup`.
+
+**Remaining divergence on SCG11EA (486):** Tick 15 WASM fires 19 RNGs, TS fires 23 (+4). Tick 28 WASM fires 3, TS fires 0. These are likely additional Commence-related timer resets in OTHER places (e.g. scenario.ts for reinforcements, production.ts for newly-built units) where mission transitions happen without Timer=0 reset. Follow-up investigation needed.
+
+**Scores:**
+- SCG01: 457 (same)
+- SCG03: 222 (same)
+- SCG04: 498 (same)
+- SCG06: 427 (same)
+- SCG07: 498 (same)
+- SCG11: 496 → **486** (-10)
+- SCG13: 400 (same)
+
+**Test status:** No new parity test added. The fix is well-bounded (only affects team-coordinator MOVE assignments) and its correctness is verified empirically by the SCG11EA tick 3-14 convergence and zero regression across 6 other scenarios.
+
 ## 2026-04-20T04:40Z — SCG07EA investigation + duplicate scatter cleanup
 
 **Metric result:** All 7 scenarios unchanged at 2a99bce6 baseline.

@@ -694,6 +694,10 @@ export class Team {
           }
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
         } else {
+          // C++ team.cpp Coordinate_Regroup → Assign_Mission(MISSION_MOVE) → Commence()
+          // pops queue, sets Timer=0 (mission.cpp:354). Only reset on transition to
+          // match C++ — re-asserting MOVE every tick should not consume RNG every tick.
+          if (unit.mission !== Mission.MOVE) unit.missionTimer = 0;
           unit.mission = Mission.MOVE;
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
         }
@@ -875,6 +879,11 @@ export class Team {
             unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
           }
         } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
+          // C++ team.cpp Coordinate_Patrol → Assign_Mission(MISSION_MOVE) → Commence()
+          // pops queue and sets Timer=0 (mission.cpp:354). Next MissionClass::AI fires
+          // Mission_Move handler, consuming Random_Pick(0,2) (foot.cpp:535 tag 60010).
+          // Without this reset, TS misses the jitter RNG and diverges from WASM.
+          if (unit.mission !== Mission.MOVE) unit.missionTimer = 0;
           unit.mission = Mission.MOVE;
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
         }
