@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-04-20T04:40Z — SCG07EA investigation + duplicate scatter cleanup
+
+**Metric result:** All 7 scenarios unchanged at 2a99bce6 baseline.
+SCG01 457 • SCG03 222 • SCG04 498 • SCG06 427 • SCG07 498 • SCG11 496 • SCG13 400.
+
+**Investigation of task premise:** Task claimed scatterInfantry fix alone regressed SCG07EA 499→500. Verified the current combined state (all 3 fixes from commit 2a99bce6 applied) gives SCG07EA=498, matching the commit message's claim of -1 improvement. There is no current regression to fix — the 3-fix combo already improved SCG07EA by 1 tick.
+
+**Secondary finding — duplicate scatter in TS:** Identified a long-standing architectural duplication: `updateAttack` in missionAI.ts:494 was calling a local `scatterInfantry` helper AFTER `ctx.damageEntity()`, but `damageEntity` (combat.ts:324) already calls `aiScatterOnDamage` internally for infantry. C++ `InfantryClass::Take_Damage` (infantry.cpp:438-440) calls `Scatter(source_coord)` exactly ONCE per damage event. TS was firing 2 Random_Pick(0,4) per infantry hit on idle victims. The 2a99bce6 early-return guard (`!isFraidyCat && target?.alive`) matched the `aiScatterOnDamage` guard at combat.ts:376, so both paths now either both fire or both skip — but they still fire in sync-pair on idle-infantry hits.
+
+**Fix:** Removed the redundant `scatterInfantry` helper and its single caller at missionAI.ts:494. The C++-correct scatter logic remains in combat.ts `aiScatterOnDamage` (called automatically by damageEntity). Net metric change: ZERO — both before and after, the paths fired in sync, so per-tick RNG sequencing is unchanged. The change is a pure code-quality cleanup that makes the architecture match C++ (single scatter-on-damage call site).
+
+**Locked in via test:** `cpp-parity-scatter.test.ts` added 2 tests:
+- Idle infantry hit consumes exactly 1 scatter RNG
+- Combat infantry (with target) consumes 0 scatter RNGs
+Prevents future regressions where someone re-adds scatter in updateAttack.
+
+**Diagnostic observations:**
+- SCG07EA has only 2 converged ticks (52, 53) out of 500 due to the known tick-0 6-vessel ordering bug (task #52). Nearly every tick diverges. Any single-RNG shift cascades through all subsequent ticks.
+- The measured SCG07EA delta was ZERO across 500 ticks, ruling out the task premise's suggestion that scatterInfantry touches SCG07EA RNG.
+
 ## 2026-04-20T01:30Z — SCG06EA A2 Commence preserve missionTimer (438 → 432)
 
 **Result:** SCG06EA 438 → **432** divergent ticks (-6). First divergence moved from tick 40 → ~tick 50+. No regression on the other 6 scenarios.

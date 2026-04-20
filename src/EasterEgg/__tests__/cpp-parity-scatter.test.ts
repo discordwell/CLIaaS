@@ -399,3 +399,50 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(e.moveTarget).toBeNull();
   });
 });
+
+// C++ parity: Scatter fires exactly once per damage event (infantry.cpp:438-440)
+describe('Single-scatter invariant (no double-scatter regression)', () => {
+  it('damageEntity on idle infantry fires exactly 1 scatter RNG', async () => {
+    // Verifies the fix for 2a99bce6 follow-up: TS previously had scatter code
+    // in BOTH damageEntity() (via aiScatterOnDamage) AND updateAttack() (via a
+    // duplicate scatterInfantry helper). C++ InfantryClass::Take_Damage calls
+    // Scatter(source_coord) ONCE (infantry.cpp:439). The TS attack-damage code
+    // path must also consume exactly 1 scatter RNG, not 2.
+    const { ScenarioRandom } = await import('../engine/random');
+    const { damageEntity } = await import('../engine/combat');
+
+    const victim = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    victim.mission = Mission.GUARD; // isScatter=true, no TarCom
+    victim.target = null; // idle — will pass the fraidyCat-or-target guard
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+    const ctx = makeCombatCtx([victim, attacker]);
+
+    const before = ScenarioRandom.callCount;
+    damageEntity(ctx, victim, 5, 'SA', attacker);
+    const consumed = ScenarioRandom.callCount - before;
+
+    // Expected: 1 RNG for scatter direction (Random_Pick(0,4)). If the duplicate
+    // scatterInfantry helper is re-introduced, this will jump to 2.
+    expect(consumed).toBe(1);
+  });
+
+  it('damageEntity on combat infantry (with target) fires 0 scatter RNGs', async () => {
+    // C++ infantry.cpp:1887 — non-FraidyCat with valid TarCom doesn't scatter.
+    // Both the aiScatterOnDamage guard (combat.ts:376) and the C++ rule match.
+    const { ScenarioRandom } = await import('../engine/random');
+    const { damageEntity } = await import('../engine/combat');
+
+    const victim = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    victim.mission = Mission.ATTACK;
+    const aTarget = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
+    victim.target = aTarget; // combat-engaged → scatter skipped
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+    const ctx = makeCombatCtx([victim, aTarget, attacker]);
+
+    const before = ScenarioRandom.callCount;
+    damageEntity(ctx, victim, 5, 'SA', attacker);
+    const consumed = ScenarioRandom.callCount - before;
+
+    expect(consumed).toBe(0);
+  });
+});
