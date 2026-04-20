@@ -70,6 +70,21 @@ test('SCG06EA tick 0 RNG log side-by-side', async ({ browser }) => {
   await tsPage.evaluate(() => { (window as any).__rngTagControl('enable'); });
   await tsPage.evaluate(() => { (window as any).__rngTagControl('reset'); });
 
+  // Skip to tick 13 first
+  const skipTicks = Number(process.env.SKIP_TICKS ?? 0);
+  if (skipTicks > 0) {
+    await Promise.all([
+      wasmPage.evaluate(async (n: number) => { const r = (window as any).__agentStep(n); if (r?.then) await r; }, skipTicks),
+      tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, skipTicks),
+    ]);
+    // Reset logs after skip
+    await wasmPage.evaluate(() => {
+      const M = (window as any).Module;
+      JSON.parse(M.ccall('agent_get_state','string',[],[]));
+    });
+    await tsPage.evaluate(() => { (window as any).__rngTagControl('reset'); });
+  }
+
   const [wasmStep] = await Promise.all([
     wasmPage.evaluate(async () => {
       const r = (window as any).__agentStep(1);

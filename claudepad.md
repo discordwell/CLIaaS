@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-04-20T17:45Z — SCG06EA tick-13 identified: `Repair_AI` `RepairTimer` Random_Pick
+
+**Status:** Identified but not fixed. 4-RNG gap at tick 13 traced to `BuildingClass::Repair_AI` (building.cpp:5488-5510). Metric unchanged (489).
+
+**Root cause:** C++ Repair_AI for USSR's FACT (Construction Yard) fires `Random_Pick(RepairDelay * TICKS_PER_MINUTE/4, RepairDelay * TICKS_PER_MINUTE * 2)` to set `House->RepairTimer`. With rejection sampling, the single call consumes 4 raw RNGs (3 rejects + 1 accept).
+
+**Trigger conditions:** `House->IQ >= Rule.IQRepairSell` AND `Can_Repair()` AND `Available_Money() >= Rule.RepairThreshhold` (1000) AND `!DidRepair` AND `!IsRepairing && (IsCaptured || IsToRepair || IsHuman || Session.Type != GAME_NORMAL)`. FACT has `IsToRepair=true` at scenario init because of building.cpp:5140: `b->IsToRepair = rebuild || *b == STRUCT_CONST` — all ConYards auto-repair.
+
+**Why tick 13:** `Available_Money() = Tiberium + Credits` crosses `RepairThreshhold=1000` at tick 13 (before that, USSR doesn't have enough; AI harvests + refines over first ~13 ticks to cross threshold).
+
+**Fix plan (deferred):**
+1. Port `IsToRepair` and `DidRepair` flags per-building/per-house.
+2. At each AI tick, iterate computer-controlled buildings. If `Can_Repair() && Available_Money >= 1000 && !DidRepair && IsToRepair`: fire `ScenarioRandom.nextInRange(RepairDelay*225, RepairDelay*1800)` (TS's rejection sampling will naturally consume matching raw RNGs). Set `DidRepair=true`.
+3. House-level `RepairTimer` decrements each tick; when 0, reset `DidRepair=false`.
+
+**C++ tags added (permanent diagnostic):** building.cpp Repair_AI's 2 Random_Pick sites tagged 70020 and 70021. BuildingClass::AI sub-AIs tagged 70010-70015.
+
+**Artifacts retained:** `scripts/test-scg06ea-tick0-rng.ts` now supports `SKIP_TICKS=N` env var to probe any tick.
+
 ## 2026-04-20T17:00Z — SCG06EA tick-4 coordinateMove missionQueue fix
 
 **Result:** SCG06EA 497 → **489** divergent (-8 more). Total session improvement: 499→489 (-10).
