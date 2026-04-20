@@ -208,8 +208,9 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           tick: s.tick as number,
           seed: s.rngState as number,
           calls: s.rngCalls as number,
-          log: (s.rngLog ?? []) as [number, number][],
+          log: (s.rngLog ?? []) as [number, number, number][],
           logicLayer: (s.logicLayer ?? []) as [number, string, string, number, number][],
+          structures: (s.structures ?? []) as any[],
         };
       }),
       tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
@@ -246,16 +247,19 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
       `tick ${tick}: ${marker}  WASM(${wasmData.log.length} calls, seed=${wasmData.seed >>> 0})  TS(${tsData.log.length} calls, seed=${tsData.seed >>> 0})  Δcalls=${callDiff}${trackInfo}`,
     );
 
-    if (!seedMatch || callDiff !== 0) {
-      totalDivergences++;
+    const ALWAYS_DUMP = process.env.DUMP_ALL === '1';
+    if (!seedMatch || callDiff !== 0 || ALWAYS_DUMP) {
+      if (!seedMatch || callDiff !== 0) totalDivergences++;
 
       // Print side-by-side log comparison
       const maxLen = Math.max(wasmData.log.length, tsData.log.length);
       for (let i = 0; i < maxLen; i++) {
         const wEntry = wasmData.log[i];
         const tEntry = tsData.log[i];
-        const wStr = wEntry ? `[${tagName(wEntry[1]).padEnd(18)} seed=${(wEntry[0] >>> 0)}]` : '(none)'.padEnd(35);
-        const tStr = tEntry ? `[${tagName(tEntry[1]).padEnd(18)} seed=${(tEntry[0] >>> 0)}]` : '(none)'.padEnd(35);
+        const wEnt = wEntry && wEntry[2] !== undefined ? ` ent=${tagName(wEntry[2])}` : '';
+        const tEnt = tEntry && (tEntry as any)[2] !== undefined ? ` ent=${tagName((tEntry as any)[2])}` : '';
+        const wStr = wEntry ? `[${tagName(wEntry[1]).padEnd(18)} seed=${(wEntry[0] >>> 0)}${wEnt}]` : '(none)'.padEnd(35);
+        const tStr = tEntry ? `[${tagName(tEntry[1]).padEnd(18)} seed=${(tEntry[0] >>> 0)}${tEnt}]` : '(none)'.padEnd(35);
 
         const match = wEntry && tEntry && (wEntry[0] >>> 0) === (tEntry[0] >>> 0) && wEntry[1] === tEntry[1];
         const seedSame = wEntry && tEntry && (wEntry[0] >>> 0) === (tEntry[0] >>> 0);
@@ -273,7 +277,7 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     }
 
     // Also dump entity info at divergent ticks for context
-    if (!seedMatch || callDiff !== 0) {
+    if ((!seedMatch || callDiff !== 0) && !ALWAYS_DUMP) {
       console.log(`  WASM Logic layer (${wasmData.logicLayer.length} entities):`);
       for (const [idx, type, house, cx, cy] of wasmData.logicLayer) {
         console.log(`    [${idx}] ${type} (${house}) cell(${cx},${cy})`);

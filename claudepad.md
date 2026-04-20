@@ -1,5 +1,49 @@
 # Session Summaries
 
+## 2026-04-20T23:30Z — SCG01EA tick 45 investigation (no metric change)
+
+**Result:** No metric change. All 7 first-divergence ticks unchanged (SCG01=45, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=19, SCG13=101). Investigation only — added entity-tag annotations to the per-entity RNG diff harness for clearer debugging.
+
+**Symptom:** Tick 45 first-divergence RNG: WASM emits `Coord_Scatter` (tag 50002) for `bullet[74]`. TS does not emit this RNG. Δcalls=1, seed mismatch from tick 45 onward.
+
+**Root cause chain (verified in WASM via `__agentState` arm-tracking and per-entity RNG log):**
+
+1. **`Speed=100` invisible weapons are MPH_LIGHT_SPEED in C++.** `CCINIClass::Get_MPHType` (ccini.cpp:336-340) calls `_Scale_To_256(val=100)` = `min((100*256)/100, 255) = 255 = MPH_LIGHT_SPEED`. So M60mg, M1Carbine, TeslaZap, Sniper, Heal, Pistol etc. all have `MaxSpeed=255` regardless of the INI value reading "100". **The Speed value in INI is a 0-100 PERCENTAGE, not a raw lepton/tick rate.**
+
+2. **MPH_LIGHT_SPEED+IsInvisible bullets teleport+detonate same tick.** In `BulletClass::Unlimbo` (bullet.cpp:736-738):
+   ```cpp
+   if (MaxSpeed == MPH_LIGHT_SPEED && Class->IsInvisible) {
+       Coord = tcoord;  // teleport to target
+   }
+   ```
+   The bullet is then `Logic.Submit`'d. The C++ Logic loop iterates `for (i=0; i<Count(); ++i)` re-evaluating `Count()` each iteration, so the new bullet IS processed in the SAME tick. Bullet AI runs `Fuse_Checkup(Coord)` → `proximity = Distance(Coord, HeadTo) = 0 < 0x10` → returns true → `Bullet_Explodes` → `Coord_Scatter(Coord, 0x0020)` (bullet.cpp:1013). Tag 50002 fires same tick as Fire_At.
+
+3. **SCG01EA tick 45 specifics:** JEEP (Greece) at cell (62,50) with M60mg (range=4) acquires USSR E1 at (62,54) — exactly 4 cells away, in range. Verified via `arm` tracking: JEEP arm transitions 0→19 at tick 45 (Rearm_Delay=20, decremented once = 19). Bullet[74] is the resulting M60mg invisible bullet — created, teleported to E1's coord, detonates same tick → Coord_Scatter at tick 45.
+
+4. **TS implementation gap:** TS's `updateGuard` (missionAI.ts:1048+) sets `entity.target = bestTarget` on first scan that finds a target, then RETURNS without firing. The fire happens NEXT tick via the early-tick path at line 895. Two C++ behaviors that TS misses:
+   - Same-tick fire: C++ `InfantryClass::AI` / `UnitClass::AI` calls `Firing_AI()` AFTER `Mission_Dispatch` within the same entity AI cycle (infantry.cpp:1237, unit.cpp:425), so target acquisition and fire happen on the same tick. TS defers fire by 1 tick.
+   - Same-tick scatter: When TS does fire (next tick), the instant-damage path (`activeWeapon.projectileSpeed` falsy → branch at line 446) calls `ctx.deferInvisibleScatter()` which queues the scatter for tick N+1 of fire (so tick N+2 of WASM's fire). WASM fires scatter SAME tick as Fire_At because the bullet teleports + detonates in the same Logic loop iteration.
+
+**Why a one-line fix isn't viable:** Tested adding same-tick fire in `updateGuard` plus immediate Coord_Scatter (replacing `deferInvisibleScatter` with direct `ScenarioRandom.nextInRange(0, 255)`):
+   - The fire-same-tick branch IS reached: TS JEEP at (62,50) successfully fires at tick 45 (verified via __agentState `acd` field going 0→20).
+   - But the RNG ordering shifts because TS executes Coord_Scatter INSIDE the firer's updateGuard slot, while WASM executes Coord_Scatter AFTER all other entities' AI in a separate Logic-loop iteration on the bullet entity. Net: TS's call count matches WASM's count BUT the seed sequence diverges by entity ordering.
+   - Additionally, the existing `deferInvisibleScatter` exists specifically to fix the SCG03EA tick 267 + SCG06EA tick 68 timing. Removing it without a full per-entity bullet-detonation-tick model risks regressions on those scenarios.
+
+**The proper fix requires modeling C++'s "instant invisible bullet" as a deferred RNG that fires AFTER all entity AI in the same tick** — i.e., the existing `_pendingInvisibleScatters` mechanism but flushed AT THE END of the same tick (not the start of the next tick). This mirrors WASM's behavior of bullet[idx] being iterated AFTER all other entities in the Logic loop, with the new index always > all firers' indices. This is a structural change that touches the entity ordering / scatter-flush timing in `index.ts:_runMissionAI` and `index.ts:1706` flush location.
+
+**Diff harness improvement:** `scripts/test-rng-entity-diff.ts` now prints `ent=<entity>` next to each RNG entry, using the third element of WASM's `[seed, source_tag, entity_tag]` log tuples. Also adds `DUMP_ALL=1` env var to dump the full RNG log for ALL ticks (not just divergent ones), useful for confirming pre-divergence ordering. This change made the bullet[74] origin trivially identifiable.
+
+**Key files:**
+- `src/EasterEgg/CnC_and_Red_Alert/RA/ccini.cpp:253-260` — `_Scale_To_256` percentage-to-MPHType conversion
+- `src/EasterEgg/CnC_and_Red_Alert/RA/bullet.cpp:736-738` — MPH_LIGHT_SPEED+IsInvisible teleport
+- `src/EasterEgg/CnC_and_Red_Alert/RA/bullet.cpp:1012-1014` — Coord_Scatter on detonation
+- `src/EasterEgg/CnC_and_Red_Alert/RA/fuse.cpp:120-149` — Fuse_Checkup proximity detonation
+- `src/EasterEgg/CnC_and_Red_Alert/RA/infantry.cpp:1237` / `unit.cpp:425` — Firing_AI after Mission_Dispatch
+- `src/EasterEgg/engine/missionAI.ts:1048-1055` — TS deferred-target-acquisition path (the gap)
+- `src/EasterEgg/engine/missionAI.ts:446-455` — TS instant-damage + deferInvisibleScatter
+- `src/EasterEgg/engine/index.ts:1685-1710` — _pendingInvisibleScatters flush at tick start
+
+
 ## 2026-04-20T23:00Z — Port C++ DriveClass::AI drives-in-GUARD (SCG11 8→19)
 
 **Result:** SCG11EA 8 → **19** (+11 ticks). Goal ≥15 achieved. All other 6 scenarios unchanged. No regressions. 51,075 EasterEgg tests pass (5 new drive-in-GUARD parity tests).
