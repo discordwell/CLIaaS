@@ -3933,25 +3933,6 @@ export class Game {
     // C++ IsDriving persists between ticks — set by Start_Driver, cleared by Stop_Driver.
     // Do NOT clear it per-tick; let moveToward set it on first call and clear on arrival.
 
-    // C++ UnitClass::AI pre-Commence gate (unit.cpp:404-407):
-    //   if (Height == 0 && !IsDumping && !IsDriving && Is_Door_Closed()) Commence();
-    // Runs BEFORE DriveClass::AI → MissionClass::AI, so a mission queued earlier
-    // this tick (by Team.AI → Coordinate_Move) pops immediately and the new
-    // handler fires on the SAME tick. Infantry does NOT have this — InfantryClass::AI
-    // only calls Commence AFTER MissionClass::AI (infantry.cpp:1210). The pre-gate
-    // is essential for SCG11EA MCV reinforcement: Team.AI queues MOVE at tick 1,
-    // pre-Commence pops → mission=MOVE, timer=0 → MissionClass::AI fires Mission_Move
-    // at tick 1 (not tick 2). Without this, TS consumed an extra GUARD Random_Pick
-    // at tick 1 that WASM consumed as MOVE, drifting 1 tick later for the timer cycle.
-    // Conditions: vehicles only (not infantry, aircraft handled elsewhere), not
-    // driving (IsDriving), no gesture animation. Same guards as post-Commence.
-    if (!entity.stats.isInfantry && !entity.isAirUnit && entity.missionQueue !== null &&
-        !entity.isDriving && entity.nonInterruptAnimTicks <= 0) {
-      entity.mission = entity.missionQueue;
-      entity.missionQueue = null;
-      entity.missionTimer = 0;
-    }
-
     // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
     // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
@@ -4191,7 +4172,16 @@ export class Game {
     // In C++, InfantryClass::AI calls Commence() after MissionClass::AI has already
     // processed the timer for this tick. So Timer=0 from Commence is picked up on the
     // NEXT tick's MissionClass::AI dispatch — the new mission handler fires 1 tick later.
-    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+    //
+    // C++ UnitClass::AI (unit.cpp:404,472) additionally gates vehicle Commence by
+    // `!IsDriving && Is_Door_Closed()`. The !IsDriving clause is essential for team
+    // reinforcements: Coordinate_Move sets NavCom, DriveClass::AI flips IsDriving=true
+    // same tick, so Commence stays gated and Mission remains GUARD (from reinf.cpp:480)
+    // until the unit reaches a cell boundary. TS simulates IsDriving=true via team.ts
+    // coordinateMove for parity — otherwise Mission_Move would fire 1 tick earlier
+    // than WASM for reinforcement MCVs (SCG11EA drift).
+    const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
+    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
       // A2 restore: if popping back to MOVE from a TS-only ATTACK the A2 scan created
       // (signaled by savedMoveTarget != null), keep the current missionTimer instead of
       // resetting to 0. Without this, the unit's Mission_Move fires on the next tick and

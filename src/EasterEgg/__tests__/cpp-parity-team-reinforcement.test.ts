@@ -1708,15 +1708,14 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
     // First ai() tick: activation + mission advance + coordinateMove
     team.ai(waypoints);
 
-    // All vessels should now be in MOVE (not GUARD)
-    // C++ parity: Coordinate_Move → Assign_Mission(MISSION_MOVE) → MissionQueue
-    // Then VesselClass::AI → Commence() picks up MOVE → Mission_Move fires
+    // C++ parity: Coordinate_Move → Assign_Mission(MISSION_MOVE) → MissionQueue=MOVE.
+    // Mission does NOT transition to MOVE in the same tick — Commence() pops queue
+    // later (vessel.cpp has a `!IsDriving && Is_Door_Closed()` gate similar to
+    // unit.cpp:472). TS simulates this by setting isDriving=true on NavCom assignment.
     for (const v of vessels) {
-      expect(v.mission, `Vessel should be in MOVE, not GUARD`).toBe(Mission.MOVE);
-    }
-    // Timer should be reset to 0 by coordinateMove (matching C++ Commence() Timer=0)
-    for (const v of vessels) {
-      expect(v.missionTimer, 'missionTimer should be 0 (C++ Commence Timer reset)').toBe(0);
+      expect(v.mission, `Vessel mission should remain GUARD after queue`).toBe(Mission.GUARD);
+      expect(v.missionQueue, `Vessel missionQueue should hold MOVE for Commence pop`).toBe(Mission.MOVE);
+      expect(v.moveTarget, 'Vessel moveTarget (NavCom) should be set').not.toBeNull();
     }
   });
 
@@ -1800,7 +1799,10 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
     // Tick 2: isReforming=false → mission advance + coordinateMove
     team.ai(waypoints);
     expect(team.currentMission, 'Mission should advance to 0 on tick 2').toBe(0);
-    expect(v.mission, 'Vessel should now be in MOVE').toBe(Mission.MOVE);
+    // C++ parity: Coordinate_Move queues; Commence() pops later. The test
+    // only runs team.ai() (TeamClass::AI), not the entity's MissionClass::AI
+    // + Commence cycle, so the queue is set but not yet popped.
+    expect(v.missionQueue, 'Vessel missionQueue should be MOVE after coordinateMove').toBe(Mission.MOVE);
   });
 
   it('forcedActive team matches SCG07EA "cover" team: 3 patrol boats process MOVE at tick 1', () => {
@@ -1843,10 +1845,11 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
     expect(team.currentMission, 'Should be on mission 0 (MOVE to wp0)').toBe(0);
     expect(team.isReforming, 'No reforming for forcedActive teams').toBe(false);
 
-    // All patrol boats should be in MOVE with timer=0
+    // All patrol boats should have MOVE queued (mission stays GUARD until Commence pops).
+    // C++ Coordinate_Move → Assign_Mission sets MissionQueue, not Mission directly.
     for (let i = 0; i < pts.length; i++) {
-      expect(pts[i].mission, `PT[${i}] should be MOVE`).toBe(Mission.MOVE);
-      expect(pts[i].missionTimer, `PT[${i}] missionTimer should be 0`).toBe(0);
+      expect(pts[i].missionQueue, `PT[${i}] missionQueue should be MOVE`).toBe(Mission.MOVE);
+      expect(pts[i].moveTarget, `PT[${i}] moveTarget (NavCom) should be set`).not.toBeNull();
     }
   });
 });

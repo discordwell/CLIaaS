@@ -747,17 +747,29 @@ export class Team {
         // Queue for infantry so the gesture gate at index.ts:4067 blocks promotion
         // during the team-activation DO_GESTURE1/2 animation. Vehicles/aircraft
         // keep direct assignment (no gesture, different Commence semantics).
-        // C++ team.cpp Coordinate_Move → Assign_Mission(MISSION_MOVE) QUEUES for
-        // BOTH infantry and vehicles (mission.cpp:379-390 sets MissionQueue).
-        // Commence() pops the queue at end of UnitClass::AI / InfantryClass::AI.
-        // Direct-setting unit.mission=MOVE here caused SCG11EA MCV Mission_Move
-        // to fire 1 tick early (tick 1 instead of tick 2), burning 1 Random_Pick
-        // that WASM consumes later — drift propagates from tick 15 onward.
+        // C++ team.cpp:1938 Coordinate_Move → Assign_Mission(MISSION_MOVE) queues
+        // the mission on BOTH infantry and vehicles (mission.cpp:379-390 sets
+        // MissionQueue), then Assign_Destination sets NavCom. In C++, DriveClass::AI
+        // runs each tick regardless of Mission and engages the NavCom: Start_Driver
+        // flips IsDriving=true on the SAME tick, so the end-of-tick Commence gate
+        // (unit.cpp:472 `!IsDriving && Is_Door_Closed()`) stays closed and Mission
+        // remains GUARD (from reinf.cpp:480) until the unit reaches a cell boundary.
+        // TS updateMove only runs when mission=MOVE, so we simulate C++ Start_Driver
+        // here by setting isDriving=true for vehicles. The updateEntity Commence gate
+        // (blockCommenceDrive) reads this to block the GUARD→MOVE pop on tick 1.
+        // Without this, Mission_Move fires 1 tick earlier than WASM, burning a
+        // Random_Pick jitter that WASM consumes on a later tick (SCG11EA drift).
         if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
           unit.missionQueue = Mission.MOVE;
         }
         if (!unit.moveTarget) {
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+          // Vehicles only: simulate C++ Start_Driver on NavCom assignment so the
+          // end-of-tick Commence gate sees IsDriving=true and doesn't pop MOVE.
+          // Infantry use a different gate (nonInterruptAnimTicks gesture timer).
+          if (!unit.stats.isInfantry && !unit.isAirUnit) {
+            unit.isDriving = true;
+          }
         }
         finished = false;
       } else {

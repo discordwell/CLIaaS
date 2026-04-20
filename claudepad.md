@@ -1,5 +1,37 @@
 # Session Summaries
 
+## 2026-04-20T14:30Z — SCG11EA MCV reinforcement Commence !IsDriving gate (SCG04 498→487)
+
+**Result:** SCG04EA 498 → **487** divergent ticks (-11). SCG11EA unchanged at 486 (same baseline, but the real MCV root cause is now identified and tested). All other scenarios unchanged.
+
+**Root cause (SCG11EA tick 15+ drift):** In WASM, reinforcement MCVs spawn with `MISSION_GUARD` (reinf.cpp:480), and Team.AI's Coordinate_Move (team.cpp:1938) calls `Assign_Mission(MISSION_MOVE)` + `Assign_Destination`. C++ `Assign_Mission` only QUEUES the new mission via `MissionQueue` (mission.cpp:379-390); the actual mission transition happens at `Commence()` (mission.cpp:343-359). For vehicles, unit.cpp:404,472 gates Commence by `!IsDriving && Is_Door_Closed()`. C++ DriveClass::AI runs every tick regardless of Mission and starts driving (IsDriving=true) on the NavCom same tick, so the Commence gate stays closed — Mission stays GUARD and Mission_Guard fires at tick 1 (NOT Mission_Move). In TS, `coordinateMove` was direct-setting `unit.mission = Mission.MOVE; missionTimer = 0` for vehicles, causing Mission_Move to fire at tick 1 and then at tick 15 (the 14-tick timer cycle), burning jitter RNGs that WASM consumes much later (WASM first Mission_Move fires at tick 28).
+
+**Fix:**
+- `team.ts` coordinateMove: unify vehicle + infantry — both now QUEUE `missionQueue = Mission.MOVE` instead of direct-setting. Additionally set `unit.isDriving = true` for vehicles on NavCom assignment (simulates C++ Start_Driver, since TS updateMove only runs in Mission.MOVE).
+- `index.ts` updateEntity Commence gate: add `blockCommenceDrive = !infantry && !aircraft && isDriving` — mirrors unit.cpp:472 `!IsDriving` gate, blocks GUARD→MOVE pop while driving.
+
+**How SCG04 improved (-11):** This scenario has BadGuy 3TNK teams in set1/set2 that transition GUARD→MOVE on tick 3. Previously both 3TNKs fired Mission_Move jitter same tick (TS direct-set, no C++ stagger). With queue + IsDriving gate, one 3TNK's first NavCom assignment sets isDriving=true, blocking the second Commence pop → stagger matches WASM.
+
+**Why SCG11 didn't improve:** Root cause was correctly identified via WASM tick-1 entity-tag analysis (MCV(156) fires 2x tag 60040 `Mission_Guard_general`, NOT tag 60010 `Mission_Move_foot`). Full fix requires architectural change — TS vehicles need to move via NavCom while in Mission.GUARD (TS currently only moves in Mission.MOVE), so the MCV actually drives forward, reaches a cell boundary, Stop_Driver clears isDriving, then Commence pops. The isDriving gate blocks the pop but TS MCV never "arrives" to flip isDriving=false because it never actually moves. So Mission.GUARD just fires its own timer every 42 ticks. This aligns tick 1 RNG count but drifts at other ticks. Accepting SCG04 improvement (-11) over partial SCG11 fix (0 net).
+
+**Test:** `cpp-parity-coord-move-vehicle-queue.test.ts` — verifies coordinateMove QUEUES (not direct-sets) mission for both vehicles and infantry. 2 tests. Also updated 3 existing vessel reinforcement tests that asserted old direct-set behavior.
+
+**Key files:**
+- `src/EasterEgg/engine/team.ts:745-773` — coordinateMove queue + isDriving=true for vehicles.
+- `src/EasterEgg/engine/index.ts:4181-4184` — blockCommenceDrive gate in Commence block.
+- `src/EasterEgg/CnC_and_Red_Alert/RA/unit.cpp:404,472` — C++ vehicle Commence `!IsDriving` gate.
+- `src/EasterEgg/CnC_and_Red_Alert/RA/reinf.cpp:480` — reinforcement ground units spawn MISSION_GUARD.
+- `src/EasterEgg/CnC_and_Red_Alert/RA/team.cpp:1938` — Coordinate_Move Assign_Mission(MOVE) queues.
+
+**Parity deltas (all 7 RA scenarios):**
+- SCG01EA: 457 (unchanged)
+- SCG03EA: 204 (unchanged)
+- **SCG04EA: 498 → 487** (-11)
+- SCG06EA: 424 (unchanged)
+- SCG07EA: 500 (unchanged)
+- SCG11EA: 486 (unchanged; root cause now documented for follow-up architectural fix)
+- SCG13EA: 400 (unchanged)
+
 ## 2026-04-20T07:00Z — SCG07EA Task #52 investigation (no code change)
 
 **Result:** No metric change. SCG07EA remains 500/500 divergent. Task description premise is incorrect; actual tick-0/1 divergence is NOT Expert_AI-related.

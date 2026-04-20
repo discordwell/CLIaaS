@@ -1067,11 +1067,12 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(waypoints); // activate
       team.ai(waypoints); // advance to MOVE
 
-      // Members should be ordered to move
-      expect(e1.mission).toBe(Mission.MOVE);
-      expect(e2.mission).toBe(Mission.MOVE);
+      // C++ Coordinate_Move queues MOVE via MissionQueue — mission transition
+      // happens via Commence(), not in team.ai().
+      expect(e1.missionQueue).toBe(Mission.MOVE);
+      expect(e2.missionQueue).toBe(Mission.MOVE);
 
-      // Should still be on MOVE mission
+      // Should still be on MOVE team-mission (the first entry in the team's mission list)
       expect(team.currentMission).toBe(0);
     });
   });
@@ -1392,8 +1393,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(waypoints); // activate
       team.ai(waypoints); // Coordinate_Move
 
-      // dist > 512 → true → unit should be ordered to MOVE
-      expect(e.mission).toBe(Mission.MOVE);
+      // dist > 512 → true → unit should be QUEUED for MOVE (C++ Assign_Mission
+      // queues via MissionQueue; actual Mission transition happens via Commence).
+      expect(e.missionQueue).toBe(Mission.MOVE);
       expect(team.currentMission).toBe(0); // still on MOVE mission (not advanced)
     });
 

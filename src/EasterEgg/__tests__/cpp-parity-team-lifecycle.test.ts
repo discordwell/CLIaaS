@@ -394,9 +394,10 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       // Tick 1: activate → advance to MOVE mission 0 → execute
       team.ai(waypoints);
 
-      // Members should be ordered to move
-      expect(e1.mission).toBe(Mission.MOVE);
-      expect(e2.mission).toBe(Mission.MOVE);
+      // C++ Coordinate_Move queues MOVE via Assign_Mission → MissionQueue.
+      // Mission does not transition until Commence() pops (unit.cpp:404,472).
+      expect(e1.missionQueue).toBe(Mission.MOVE);
+      expect(e2.missionQueue).toBe(Mission.MOVE);
       expect(e1.moveTarget).toBeTruthy();
       expect(e2.moveTarget).toBeTruthy();
     });
