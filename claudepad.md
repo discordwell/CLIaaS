@@ -1,5 +1,38 @@
 # Session Summaries
 
+## 2026-04-20T07:00Z — SCG07EA Task #52 investigation (no code change)
+
+**Result:** No metric change. SCG07EA remains 500/500 divergent. Task description premise is incorrect; actual tick-0/1 divergence is NOT Expert_AI-related.
+
+**Task claim:** "SCG07EA has 6 Expert_AI RNG calls at tick 0 that TS does NOT fire."
+
+**Actual finding via `SCENARIO=SCG07EA START=0 END=1 scripts/test-rng-entity-diff.ts`:**
+- Tick 0: WASM 195 calls, TS 194 calls (Δ=+1 WASM). Seeds at positions 0-193 match EXACTLY.
+- Tick 1: WASM 7 calls, TS 13 calls (Δ=-6 WASM, i.e. TS fires 6 MORE than WASM).
+- Net across 2 ticks: TS consumes 5 MORE RNGs than WASM.
+
+**Why the task premise is wrong:** The `tagName()` helper in `scripts/test-rng-entity-diff.ts:37` labels ANY tag ≥ 200 as "Expert_AI". That catches BOTH WASM's genuine `g_rng_source_tag = 200` (house.cpp:1324) AND TS's TERRAIN_MINE Spread_Tiberium tags `2000 + i` (index.ts:1859). At tick 1, TS has 3 terrain mines firing 2 RNGs each = 6 calls tagged "Expert_AI", which coincidentally consume seeds matching WASM's 6 genuine Expert_AI RNGs. Seeds match; tags differ cosmetically.
+
+**True tick-0 divergence:** WASM fires ONE extra vessel Mission_Guard RNG at position 194 (tag 60041, foot.cpp:691, `Random_Pick(0,2)` jitter for DD/PT vessels). TS's Phase 3 vessel loop ends after vessel[135]; WASM processes one more vessel with tag 60041.
+
+**True tick-1 divergence:** TS fires 6 extra RNGs for infantry[59,60,85] and vessel[132-135]. These are Mission_Move/Mission_Guard jitter calls that WASM has ALREADY fired at end of tick 0. TS's RNG consumption is TIME-SHIFTED, not count-different — the same work happens but at different tick boundaries.
+
+**Why no fix attempted:**
+1. Task premise (missing Expert_AI) is false — TS already fires 6 coincidentally-matching RNGs via terrain mines.
+2. Real divergence is tick-boundary alignment of vessel/infantry Mission_Guard, which would require reworking Phase 3 entity iteration order — HIGH regression risk for 6 other working scenarios (SCG01:457, SCG03:204, SCG04:498, SCG06:424, SCG11:486, SCG13:400).
+3. Constraint says "If blocked, commit analysis notes as `chore:`".
+
+**Key files:**
+- `scripts/test-rng-entity-diff.ts:37` — misleading `tagName()` (all tag ≥ 200 → "Expert_AI"). Future agents should fix this labeling to distinguish tag==200, tag∈[200,2000), tag∈[2000,10000) ranges.
+- `src/EasterEgg/engine/index.ts:1853-1864` — terrain mine Spread_Tiberium loop at tick 1 (this.tick-1=0, fires every 1800 ticks). Generates the 6 "Expert_AI"-labeled RNGs.
+- `src/EasterEgg/engine/ai.ts:2639` — `aiPerTick` with `_sourceTag = 5` (House AI preamble) — does NOT set tag 200; real Expert_AI port (house.cpp:4605 `HouseClass::Expert_AI`) is not present in TS. However, the absent Expert_AI RNG does NOT cause the SCG07EA divergence — terrain mines already consume those seeds.
+- `src/EasterEgg/CnC_and_Red_Alert/RA/house.cpp:1323-1326` — C++ Expert_AI gate `if (IsBaseBuilding && AITimer == 0)`. In SCG07EA, USSR has IQ=3 < IQProduction=5, so IsBaseBuilding stays false; no trigger sets it. Expert_AI likely doesn't fire at tick 1 in C++ either — meaning WASM's 6 "tag 200" calls in the trace might actually be from a different Expert_AI-like code path, or AITimer init happens differently.
+
+**Recommended next steps:**
+1. Fix `tagName()` in `scripts/test-rng-entity-diff.ts` to disambiguate tag ranges 200-1999 (house AI) vs 2000-9999 (terrain/other).
+2. Investigate vessel Mission_Guard cadence at tick 0/1 — count how many vessels WASM processes vs TS in Phase 3.
+3. Consider logging `aiStates.get('USSR').isBaseBuilding` at tick 0 to confirm whether TS should run Expert_AI at all for SCG07EA.
+
 ## 2026-04-20T06:00Z — SCG03EA tick 267 flush ordering (222 → 204)
 
 **Result:** SCG03EA 222 → **204** divergent ticks (-18). Also SCG06 427 → **424** (-3). Small +2 regression on SCG07 (498 → 500) — acceptable because SCG07 is already fundamentally divergent (498/500) and the 2 lost ticks were coincidental seed alignment, not meaningful parity.
