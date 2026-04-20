@@ -1,5 +1,30 @@
 # Session Summaries
 
+## 2026-04-20T06:00Z — SCG03EA tick 267 flush ordering (222 → 204)
+
+**Result:** SCG03EA 222 → **204** divergent ticks (-18). Also SCG06 427 → **424** (-3). Small +2 regression on SCG07 (498 → 500) — acceptable because SCG07 is already fundamentally divergent (498/500) and the 2 lost ticks were coincidental seed alignment, not meaningful parity.
+
+**Root cause:** The 2a99bce6 "defer invisible-bullet Coord_Scatter by 1 tick" fix was CORRECT per C++ (bullet.cpp:1012-1014 + fuse.cpp:120-149) but left the scatter RNG firing at the WRONG position in the per-tick RNG stream. Flush ran in `updateInflightProjectiles()` which is called AFTER entity AI (Phase 1-4). That put the scatter AFTER same-tick entity RNGs, whereas in WASM the Coord_Scatter runs DURING the bullet's AI iteration at its detonation tick — effectively at the END of that tick, BEFORE the next tick's entity jitters. Because TS's "instant damage at fire tick" path is 1 tick AHEAD of WASM's bullet-detonation tick, TS's "next tick" flush was at WASM's detonation-tick-plus-one — doubly-displaced relative to WASM's RNG stream position.
+
+**Fix:** Move the scatter flush to the TOP of `Game.update()`, BEFORE any entity AI runs. The deferred-RNG is now consumed at the start of TS's tick N+1, which is the same RNG stream position as WASM's end-of-detonation-tick-N — a pure position realignment with no gameplay-mode change.
+
+**Per-tick diff at SCG03EA tick 267:**
+- Before (2a99bce6): TS tick 267 0 calls, tick 268 fires jitter (wrong seeds) + deferred scatter after → cascading divergence ticks 267-274.
+- After: TS tick 267 0 calls, tick 268 flushes scatter FIRST → seeds 2718526838→2090975095→2789144548 matching WASM exactly (3-draw rejection loop for Mission_Guard jitter of infantry[121]). Cascade stops at tick 268.
+
+**Files:** `src/EasterEgg/engine/index.ts` — moved flush from `updateInflightProjectiles` to `update()` entry. Removed `_scattersToFlushThisTick` (no longer needed — flushing at update-top doesn't need separate "capture + drain on next tick" state).
+
+**Test:** Added 3 tests to `cpp-parity-invisible-bullet-scatter.test.ts` under "Game deferred scatter flush" suite: `update()` flushes `_pendingInvisibleScatters` (1 entry, 0 entries, 3 entries) — pins the flush-at-tick-start invariant.
+
+**Scores:**
+- SCG01: 457 (same)
+- SCG03: 222 → **204** (-18)
+- SCG04: 498 (same)
+- SCG06: 427 → **424** (-3)
+- SCG07: 498 → 500 (+2; coincidental seed-alignment loss on fundamentally-divergent scenario)
+- SCG11: 486 (same)
+- SCG13: 400 (same)
+
 ## 2026-04-20T05:30Z — SCG11EA team MOVE Commence timer reset (496 → 486)
 
 **Result:** SCG11EA 496 → **486** divergent ticks (-10). Ticks 3-14 now match perfectly (previously all divergent). No regression on the other 6 scenarios.

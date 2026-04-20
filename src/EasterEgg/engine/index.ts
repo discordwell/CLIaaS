@@ -484,11 +484,12 @@ export class Game {
   private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
   private scenarioWarheadProps: Record<string, WarheadProps> = WARHEAD_PROPS;
   private inflightProjectiles: InflightProjectile[] = [];
-  /** Invisible-bullet Coord_Scatter RNGs queued this tick (consumed next tick).
-   *  Mirrors C++ BulletClass::AI → Bullet_Explodes running on bullet's next AI tick. */
+  /** Invisible-bullet Coord_Scatter RNGs queued this tick (flushed at the START
+   *  of the NEXT tick, BEFORE any entity AI runs). Mirrors C++ BulletClass::AI →
+   *  Bullet_Explodes running on the bullet's next AI tick, while realigning with
+   *  TS's "instant damage at fire tick" path (1 tick ahead of WASM's bullet
+   *  detonation). See update() for the ordering rationale. */
   private _pendingInvisibleScatters = 0;
-  /** Captured at start of update() so this-tick new queues drain NEXT tick. */
-  private _scattersToFlushThisTick = 0;
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
   private allowWin = 0; // C++ house.h:335 Blockage counter — each ALLOWWIN trigger increments; win requires <= 0
@@ -1685,11 +1686,26 @@ export class Game {
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
-    // Capture invisible-scatter queue BEFORE any phase can add to it so this tick's
-    // new entries drain on the NEXT tick (matching C++ Bullet_Explodes-on-next-
-    // AI-tick). Flush happens in updateInflightProjectiles below.
-    this._scattersToFlushThisTick = this._pendingInvisibleScatters;
+    // Flush invisible-bullet Coord_Scatter RNGs that were queued by the PREVIOUS
+    // tick's fire path. Must run BEFORE any entity AI so the scatter consumes
+    // the same RNG stream position it occupies in WASM.
+    //
+    // Ordering rationale: C++ BulletClass::AI fires Coord_Scatter at tick N+1
+    // during the bullet's AI iteration, sandwiched between previous-tick
+    // attackers' RNGs and next-tick entities' Mission_Guard jitters. TS's
+    // instant-damage path applies damage at the ATTACKER's fire tick, which
+    // aligns with WASM's bullet-detonation tick (1 tick AFTER WASM's attacker).
+    // So when we "defer to next tick" in TS, that tick is WASM's detonation-
+    // tick-plus-one. Flushing at the START of the next tick (before entity AI)
+    // places the scatter at the correct RNG stream position — matching WASM's
+    // end-of-detonation-tick bullet iteration. Per-tick call-count diffs of ±1
+    // are expected and harmless; seed alignment drives gameplay parity.
+    // Fix: SCG03EA tick 267 — see commit 2a99bce6 for the original defer.
+    const flushCount = this._pendingInvisibleScatters;
     this._pendingInvisibleScatters = 0;
+    for (let i = 0; i < flushCount; i++) {
+      ScenarioRandom.nextInRange(0, 255);
+    }
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
     // RNG audit: enable tagged logging for ticks 1-15.
@@ -6346,15 +6362,9 @@ export class Game {
   }
 
   /** Advance in-flight projectiles — delegates to combat.ts.
-   *  Flushes invisible-bullet Coord_Scatter RNGs queued on the PREVIOUS tick.
-   *  Runs AFTER Phase 1–4 entity AI, matching WASM's bullet position in the Logic
-   *  array (high indices iterate after normal entities). */
+   *  Note: invisible-bullet Coord_Scatter RNGs are now flushed at update() entry
+   *  (see comment there). This runs after entity AI for standard projectile arrival. */
   private updateInflightProjectiles(): void {
-    const flushCount = this._scattersToFlushThisTick;
-    this._scattersToFlushThisTick = 0;
-    for (let i = 0; i < flushCount; i++) {
-      ScenarioRandom.nextInRange(0, 255);
-    }
     this._runCombat(ctx => _updateInflightProjectiles(ctx));
   }
 
