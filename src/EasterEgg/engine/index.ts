@@ -4050,6 +4050,18 @@ export class Game {
         // Capture attackCooldown before updateGuard (which may fire weapon + set cooldown).
         { const armBeforeScan = entity.attackCooldown;
         this.updateGuard(entity, missionTimerFired);
+        // C++ drive.cpp:1376 — DriveClass::AI continues to drive while Mission==GUARD
+        // when NavCom is legal. Team::Coordinate_Move queues MissionQueue=MOVE and
+        // assigns NavCom, then Start_Driver flips IsDriving=true the same tick. The
+        // unit stays in GUARD (blocked by the !IsDriving Commence gate, unit.cpp:472)
+        // and drives via DriveClass::AI until Per_Cell_Process clears NavCom at the
+        // destination cell. Only vehicles/vessels (UnitClass/VesselClass share
+        // DriveClass::AI) participate; infantry use FootClass::AI only and don't drive
+        // in GUARD. Aircraft use AircraftClass::AI (separate movement path).
+        if (!entity.stats.isInfantry && !entity.isAirUnit &&
+            entity.isDriving && entity.moveTarget) {
+          this.updateMove(entity, /*fromGuardDrive=*/ true);
+        }
         if (missionTimerFired) {
           // C++ foot.cpp:597-634: dtime = MissionControl[Mission].Normal_Delay()
           // C++ uses the MISSION-SPECIFIC rate, not entity-type rate.
@@ -4426,6 +4438,22 @@ export class Game {
           // Arrived at waypoint — advance to next mission
           entity.teamMissionIndex++;
         } else if (entity.mission !== Mission.MOVE || !entity.moveTarget) {
+          // C++ drive.cpp parity: a vehicle/vessel already in the canonical
+          // "GUARD + IsDriving + MissionQueue=MOVE" state (set up by
+          // TeamInstance.coordinateMove → missionQueue=MOVE + isDriving=true) is
+          // mid-drive toward the same waypoint via DriveClass::AI's drives-in-
+          // GUARD path. Direct-setting `mission=MOVE; missionTimer=0` here
+          // bypasses the `!IsDriving` Commence gate (unit.cpp:472) that C++ uses
+          // to stagger the Mission_Move jitter across cell-boundary Stop_Driver
+          // transitions. Trust the queue — drive-in-GUARD + Commence will pop
+          // the mission when the vehicle arrives at the destination cell.
+          const alreadyDrivingQueued =
+            !entity.stats.isInfantry && !entity.isAirUnit &&
+            entity.isDriving &&
+            entity.missionQueue === Mission.MOVE &&
+            entity.moveTarget !== null;
+          if (alreadyDrivingQueued) break;
+
           // C++ team.cpp Coordinate_Move → Assign_Mission(MISSION_MOVE) → Commence()
           // pops queue, sets Timer=0 (mission.cpp:354). Without the Timer reset, the
           // Mission_Move handler won't fire Random_Pick(0,2) jitter for ~14 ticks,
@@ -5005,7 +5033,7 @@ export class Game {
   }
 
   /** Move toward move target along path */
-  private updateMove(entity: Entity): void {
+  private updateMove(entity: Entity, fromGuardDrive = false): void {
     // C++ PathDelay countdown (foot.cpp:463 — CDTimerClass decrements each frame)
     if (entity.pathDelay > 0) entity.pathDelay--;
 
@@ -5018,8 +5046,19 @@ export class Game {
       return;
     }
 
+    // C++ drive.cpp:1376 parity: when DriveClass::AI runs in Mission==GUARD
+    // (drives-in-guard case), movement completion does NOT change Mission — the
+    // unit stays in GUARD until Commence() pops MissionQueue on the next tick
+    // (once IsDriving=false from Stop_Driver). setMissionIdle centralizes the
+    // suppression so every arrival/abort path in updateMove honors it.
+    const setMissionIdle = () => {
+      if (!fromGuardDrive) {
+        entity.mission = this.idleMission(entity);
+      }
+    };
+
     if (!entity.moveTarget && entity.path.length === 0) {
-      entity.mission = this.idleMission(entity);
+      setMissionIdle();
       entity.animState = AnimState.IDLE;
       return;
     }
@@ -5027,8 +5066,11 @@ export class Game {
     entity.animState = AnimState.WALK;
 
     // A2: AI target acquisition while moving (C++ foot.cpp:492-505)
-    // AI-controlled units scan for enemies every 15 ticks during MOVE and auto-engage
-    if (!entity.isPlayerUnit && entity.weapon &&
+    // AI-controlled units scan for enemies every 15 ticks during MOVE and auto-engage.
+    // C++ drive.cpp parity: when DriveClass::AI runs while Mission==GUARD (drives-in-
+    // guard), target acquisition is handled by Mission_Guard's Target_Something_Nearby,
+    // not by a separate Movement scan. Skip A2 to avoid double-scanning the RNG.
+    if (!fromGuardDrive && !entity.isPlayerUnit && entity.weapon &&
         (this.tick + entity.id) % 15 === 0) {
       const ec = entity.cell;
       const scanRange = entity.stats.sight;
@@ -5088,7 +5130,7 @@ export class Game {
           }
           entity.moveTarget = next;
         } else {
-          entity.mission = this.idleMission(entity);
+          setMissionIdle();
           entity.animState = AnimState.IDLE;
         }
       }
@@ -5146,7 +5188,7 @@ export class Game {
             entity.pathIndex = 0;
             entity.trackNumber = -1; entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
-            entity.mission = this.idleMission(entity);
+            setMissionIdle();
             entity.animState = AnimState.IDLE;
             resetPathThreshold(entity);
           }
@@ -5214,7 +5256,7 @@ export class Game {
             entity.pathIndex = 0;
             entity.trackNumber = -1; entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
-            entity.mission = this.idleMission(entity);
+            setMissionIdle();
             entity.animState = AnimState.IDLE;
             resetPathThreshold(entity);
           }
@@ -5392,7 +5434,7 @@ export class Game {
           entity.path = findPath(this.map, entity.cell, { cx: Math.floor(next.lx / 256), cy: Math.floor(next.ly / 256) }, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
         } else {
-          entity.mission = this.idleMission(entity);
+          setMissionIdle();
           entity.animState = AnimState.IDLE;
         }
       };
@@ -5461,7 +5503,7 @@ export class Game {
                 entity.moveTarget = null;
                 entity.path = [];
                 entity.pathIndex = 0;
-                entity.mission = this.idleMission(entity);
+                setMissionIdle();
                 entity.animState = AnimState.IDLE;
                 resetPathThreshold(entity);
               }
@@ -5474,7 +5516,7 @@ export class Game {
         finishMove();
       }
     } else {
-      entity.mission = this.idleMission(entity);
+      setMissionIdle();
       entity.animState = AnimState.IDLE;
     }
   }

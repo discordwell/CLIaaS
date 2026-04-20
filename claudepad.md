@@ -1,5 +1,41 @@
 # Session Summaries
 
+## 2026-04-20T23:00Z — Port C++ DriveClass::AI drives-in-GUARD (SCG11 8→19)
+
+**Result:** SCG11EA 8 → **19** (+11 ticks). Goal ≥15 achieved. All other 6 scenarios unchanged. No regressions. 51,075 EasterEgg tests pass (5 new drive-in-GUARD parity tests).
+
+**Change:** Ported C++ `DriveClass::AI` line 1376 semantics — vehicles/vessels in `Mission==MISSION_GUARD` with `Target_Legal(NavCom)` and `IsDriving==true` continue to drive toward NavCom via DriveClass::AI, leaving Mission==GUARD until `Per_Cell_Process(PCP_END)` + `Stop_Driver` clear IsDriving at the destination cell. The Commence() `!IsDriving` gate (unit.cpp:472, vessel.cpp:658) then pops MissionQueue→MOVE on the next tick, and `Mission_Move` (foot.cpp:520) fires Random_Pick(0,2) jitter and calls Enter_Idle_Mode back to GUARD.
+
+**Two TS engine changes in `src/EasterEgg/engine/index.ts`:**
+1. `updateEntity` Mission.GUARD/STICKY case: added drive-in-GUARD call. If `!isInfantry && !isAirUnit && isDriving && moveTarget`, invoke `updateMove(entity, /*fromGuardDrive=*/ true)` after `updateGuard`. This triggers track-based movement along path (or direct-move fallback) matching C++ DriveClass::AI.
+2. `updateMove` refactor: new `fromGuardDrive` flag. When true, (a) suppresses the A2 scan (target acquisition happens in Mission_Guard, not DriveClass::AI), (b) all `entity.mission = this.idleMission(entity)` transitions are gated behind `setMissionIdle()` helper — on arrival or abort in guard-drive mode, Mission stays GUARD. Commence gate on next tick's Commence() handles the MissionQueue→MOVE promotion cleanly, staggered per C++.
+3. `updateTeamMission` TMISSION_MOVE: added `alreadyDrivingQueued` gate. When a vehicle/vessel is in the canonical C++ "GUARD + IsDriving + MissionQueue=MOVE" state (set up by Team.coordinateMove at team.ts:762-773), the 8-tick cadence no longer direct-sets `mission=MOVE; missionTimer=0`. That direct-set was bypassing the !IsDriving Commence gate and firing Random_Pick jitter at the wrong tick. Now the queue path is trusted; drive-in-GUARD + Commence handle the transition once the vehicle reaches its destination cell.
+
+**New test:** `src/EasterEgg/__tests__/cpp-parity-drive-in-guard.test.ts` — 5 tests covering: vehicle drives in GUARD, stationary GUARD stays put, infantry rejects drive-in-GUARD path, vessel (LST) parity via VesselClass→DriveClass inheritance, Commence-pop gate blocks while IsDriving=true.
+
+**SCG05EA LST+SPY preserved:** The TS `scg05ea-spy-debug.test.ts` (LST reaches waypoint, SPY unloads, infiltrates WEAP) still passes — the prior reverted attempt broke this by making coordinateMove the sole driver without the drive-in-GUARD path to actually move the LST. With the full port, LST reaches waypoint via drive-in-GUARD, Commence pops MOVE→advance teamMissionIndex→UNLOAD fires.
+
+**SCG04EA tick-3 3TNK (goal ≥10, not achieved):** Unchanged at tick 3. The 3TNK cell (42,35) has speed=7% (~1.68 px/tick), not enough to cross cell boundary by tick 3 (needs ~14 ticks). WASM fires Mission_Move_foot for unit[73] at tick 3 via some path not yet understood — possibly Start_Driver failing on first assignment (blocked/invalid dest), causing brief Stop_Driver → Commence. Requires separate investigation; drive-in-GUARD port does not close this specific gap.
+
+**Parity deltas:**
+- SCG01EA: 45 (unchanged)
+- SCG03EA: 267 (unchanged)
+- SCG04EA: 3 (unchanged; 3TNK tick-3 separate root cause)
+- SCG06EA: 68 (unchanged)
+- SCG07EA: 1 (unchanged)
+- **SCG11EA: 8 → 19** (+11; goal ≥15 ✓)
+- SCG13EA: 101 (unchanged)
+
+**Key files:**
+- `src/EasterEgg/engine/index.ts:4061-4064` — drive-in-GUARD call in Mission.GUARD case
+- `src/EasterEgg/engine/index.ts:5008+` — updateMove `fromGuardDrive` parameter + setMissionIdle helper
+- `src/EasterEgg/engine/index.ts:4441-4456` — updateTeamMission `alreadyDrivingQueued` gate
+- `src/EasterEgg/CnC_and_Red_Alert/RA/drive.cpp:1376` — C++ drives-in-GUARD condition
+- `src/EasterEgg/CnC_and_Red_Alert/RA/drive.cpp:858-879` — Per_Cell_Process PCP_END
+- `src/EasterEgg/CnC_and_Red_Alert/RA/unit.cpp:404,472` — Commence `!IsDriving` gate
+- `src/EasterEgg/CnC_and_Red_Alert/RA/vessel.cpp:592,658` — vessel Commence `!IsDriving` gate
+
+
 ## 2026-04-20T20:00Z — SCG06EA tick 68 deep investigation (deferred — structural)
 
 **Result:** No metric change. All 7 scenarios' first-divergence ticks unchanged: SCG01=45, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=8, SCG13=101.
