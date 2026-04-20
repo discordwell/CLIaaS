@@ -1,5 +1,49 @@
 # Session Summaries
 
+## 2026-04-20T15:00Z — SCG11EA first-divergence tick 8 investigation (updateTeamMission bypass)
+
+**Result:** No metric change. Root-caused the tick-8 divergence to `updateTeamMission` direct-setting `mission=MOVE; missionTimer=0` for vehicle reinforcements that are in the canonical C++ "GUARD + IsDriving + MissionQueue=MOVE" state. All 7 scenarios' first-divergence ticks unchanged: SCG01=44, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=8, SCG13=101.
+
+**Root cause (SCG11EA tick 8, reproducing post 2a99bce6/c84c22a1/927e3786):** Both Greece MCV reinforcements (entIdx 46, 47 → logicIdx 94, 95 after Phase 2's 48 structures + 2 HPAD-helicopter interleave increments) fire one Random_Pick(0,2) each at tick 8, tagged `unit[94]` and `unit[95]` (11000+logicIdx per Phase 3 loop tagger). WASM fires these at tick 15 (14-tick GUARD timer + jitter, or more likely the first cell-boundary Stop_Driver → Commence → Mission_Move cycle).
+
+The TS path at tick 8:
+1. `updateEntity → updateTeamMission` fires on the Team AI 8-tick cadence (`tick - lastAIScan >= 8` since lastAIScan=0).
+2. TMISSION_MOVE branch (index.ts:4437-4438) checks `entity.mission !== Mission.MOVE || !entity.moveTarget`. MCV has `mission=GUARD` (Commence blocked by isDriving=true from coordinateMove) → condition true → direct-sets `mission=MOVE; missionTimer=0`.
+3. Mission.MOVE case in the switch sees `missionTimerFired=true` (timer=0 after decrement from 0 clamp) → fires `Random_Pick(0,2)` for the new timer.
+
+This bypasses the Commence `!IsDriving` gate added by c84c22a1. The 4TNK TMISSION_PATROL path (coordinatePatrol direct-set, no isDriving=true) doesn't have this bug — its WASM tick-3 Mission_Move_foot parity is preserved.
+
+**Tried-and-reverted architectural fix:** Added DriveClass-in-GUARD simulation in the Mission.GUARD case (moveToward vehicle when `isDriving && moveTarget && mission===GUARD`, clear isDriving on cell-boundary crossing or arrival). This matches C++ drive.cpp's behavior but did not close the tick-8 gap: MCV speed (6% = ~1.44 px/tick) plus pre-boundary rotation means the first boundary crossing happens later than tick 8, AND `updateTeamMission` still direct-sets at tick 8 before the Mission.GUARD case runs that tick (updateTeamMission is invoked at the TOP of updateEntity, line 3906, well before the switch that would run the drive-in-GUARD block).
+
+Combining the drive-in-GUARD fix with an isDriving-aware skip in `updateTeamMission` TMISSION_MOVE (leave missionQueue=MOVE pending instead of direct-setting) breaks SCG05EA LST+SPY delivery: LST (also a vessel caught by `!isInfantry && !isAirUnit && isDriving`) never reaches its distant waypoint within the drive-in-GUARD cadence, so Commence never pops, LST never promotes to Mission.MOVE, SPY never unloads, 2 SCG05EA debug tests fail with `Cannot read properties of undefined (reading 'id')` when searching for the SPY in state.
+
+**Correct architectural fix (deferred):** Port C++ DriveClass::AI fully — vehicles (including vessels) need to move via NavCom while in Mission.GUARD, with Per_Cell_Process firing Stop_Driver at each cell-boundary crossing (not only at final arrival). This is the mechanism by which C++ MCV reaches tick ~15 naturally. Today TS only drives in Mission.MOVE, and moveToward's "snap at destination" model doesn't model the per-cell Stop_Driver callback. Both the MCV and LST cases require this proper port.
+
+**Investigation artifacts:** scripts/test-scg11ea-tick8-probe.ts (wrote, deleted) + direct inspection of game.entities via `window.__agentGame`. The probe confirmed:
+- Entity idx 46/47 are MCV reinforcements (Greece, post-building), not the Phase-2 HINDs.
+- Logic-idx math: Phase1 (44) + Phase2 (48 structures + 2 HPAD-helis = 50 increments) = 94 starts Phase 3 → MCVs at logicIdx 94/95.
+- Pre-tick-8: mission=GUARD, missionTimer=36, isDriving=true, missionQueue=MOVE, moveTarget set, path.length=0.
+- Post-tick-8: mission=MOVE, missionTimer=14/16 (= 14 + Random_Pick(0,2)).
+
+**Key files (no changes made, documentation only):**
+- `src/EasterEgg/engine/index.ts:3903-3910` — updateEntity team-mission 8-tick cadence.
+- `src/EasterEgg/engine/index.ts:4428-4455` — updateTeamMission TMISSION_MOVE direct-set.
+- `src/EasterEgg/engine/index.ts:4183-4184` — post-Commence `blockCommenceDrive` gate (c84c22a1).
+- `src/EasterEgg/engine/team.ts:745-773` — coordinateMove vehicle queue + isDriving=true.
+- `src/EasterEgg/CnC_and_Red_Alert/RA/drive.cpp` — C++ DriveClass::AI (not yet ported).
+- `src/EasterEgg/CnC_and_Red_Alert/RA/unit.cpp:404,472` — C++ Commence `!IsDriving` gate.
+
+**Parity deltas (all 7 RA scenarios unchanged):**
+- SCG01EA: tick 44 — WASM(11) TS(7)
+- SCG03EA: tick 267 — WASM(1) TS(0)
+- SCG04EA: tick 3 — WASM(1) TS(0)
+- SCG06EA: tick 68 — WASM(1) TS(0)
+- SCG07EA: tick 1 — WASM(195) TS(194)
+- **SCG11EA: tick 8** — WASM(0) TS(2)  ← target (unchanged)
+- SCG13EA: tick 101 — WASM(7) TS(6)
+
+---
+
 ## 2026-04-20T14:30Z — SCG11EA MCV reinforcement Commence !IsDriving gate (SCG04 498→487)
 
 **Result:** SCG04EA 498 → **487** divergent ticks (-11). SCG11EA unchanged at 486 (same baseline, but the real MCV root cause is now identified and tested). All other scenarios unchanged.
