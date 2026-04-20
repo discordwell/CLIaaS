@@ -105,6 +105,7 @@ function makeMockContext(overrides: Partial<MissionAIContext> = {}): MissionAICo
     triggerRetaliation: vi.fn(),
     handleUnitDeath: vi.fn(),
     launchProjectile: vi.fn(),
+    deferInvisibleScatter: vi.fn(),
     applySplashDamage: vi.fn(),
 
     // Warhead helpers

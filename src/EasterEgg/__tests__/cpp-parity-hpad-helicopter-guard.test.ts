@@ -77,7 +77,12 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
     const methodBody = indexSource.slice(methodStart, methodStart + 8000);
 
     // C++ foot.cpp:634: dtime=Normal_Delay(42) + Random_Pick(0,2)
-    expect(methodBody).toContain('GUARD_NORMAL_DELAY + ScenarioRandom.nextInRange(0, 2)');
+    // After 2a99bce6 the jitter is extracted into `mgJitter` so the full
+    // expression is split across two lines (`const mgJitter = ...; ...
+    // GUARD_NORMAL_DELAY + mgJitter;`). Assert both halves instead of the
+    // inlined form.
+    expect(methodBody).toMatch(/const mgJitter = ScenarioRandom\.nextInRange\(0, 2\);/);
+    expect(methodBody).toContain('GUARD_NORMAL_DELAY + mgJitter');
   });
 
   it('attack cooldowns are ticked by updateAircraft, not duplicated in guard logic', () => {
