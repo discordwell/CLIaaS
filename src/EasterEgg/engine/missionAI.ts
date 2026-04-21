@@ -926,7 +926,15 @@ function cellBasedGuardScan(
   // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
   const cellMap = new Map<number, Entity>();
   const cellKey = (cx: number, cy: number) => cy * 128 + cx;
-  const guardHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
+  // C++ techno.cpp:624,3781 — IsOwnedByPlayer is STRICTLY (PlayerPtr == House),
+  // true only for the player's direct house, NOT player-allied houses. Using
+  // entity.isPlayerUnit here (which covers Greece + allied England) makes allied
+  // scanners bypass fog filtering that C++ enforces on non-PlayerPtr houses.
+  // SCG07EA tick 1: England JEEP (player-allied) was scanning through fog and
+  // finding USSR targets that C++'s Evaluate_Object rejects (!IsOwnedByPlayer &&
+  // !IsDiscoveredByPlayer at techno.cpp:1529). Fix: use strict PlayerPtr match.
+  const isStrictPlayer = entity.house === ctx.playerHouse;
+  const guardHouseIdx = isStrictPlayer ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
   const isDog = entity.type === UnitType.I_DOG;
   for (const other of ctx.entities) {
     if (!other.alive || other.inLimbo) continue;
@@ -942,9 +950,9 @@ function cellBasedGuardScan(
     if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
     // C++ techno.cpp:1467-1470: fully cloaked units
     if (other.cloakState === CloakState.CLOAKED) continue;
-    // C++ techno.cpp:1529: player-owned entities are ALWAYS visible (IsOwnedByPlayer
-    // bypasses the IsDiscoveredByPlayer check). Only non-player entities use fog.
-    if (guardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
+    // C++ techno.cpp:1529: IsOwnedByPlayer bypass is STRICT PlayerPtr-match only
+    // (see SCG07EA fix in updateAreaGuard — same rationale applies here).
+    if (guardHouseIdx >= 0 && other.house !== ctx.playerHouse && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
     // Naval combat filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat filtering: airborne aircraft require AA weapon. Already covered
