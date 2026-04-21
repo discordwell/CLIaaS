@@ -2604,14 +2604,16 @@ function aiPerTickTimers(ctx: AIContext, house: House, state: AIHouseState): voi
   if (state.alertTimer > 0) state.alertTimer--;
   if (state.teamTimer > 0) state.teamTimer--;
 
-  // C++ house.cpp:990-1011: AlertTime handler
+  // C++ house.cpp:990-1011: AlertTime handler (tags 100,101,102)
   if (state.isAlerted && state.alertTimer <= 0) {
     // C++ line 996: Random_Pick(2, ((TechLevel-1)/3)+1)
     const maxTeamsUpper = Math.max(Math.floor((state.techLevel - 1) / 3) + 1, 2);
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 100;
     const maxTeams = ScenarioRandom.nextInRange(2, maxTeamsUpper);
 
     for (let t = 0; t < maxTeams; t++) {
       // C++ line 999: Suggested_New_Team(true) — 1 RNG call each
+      if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 101;
       suggestedNewTeam(ctx, house, true);
       // Note: actual team spawning is separate; this just consumes RNG for parity
     }
@@ -2619,12 +2621,14 @@ function aiPerTickTimers(ctx: AIContext, house: House, state: AIHouseState): voi
     // C++ line 1007: AlertTime = Rule.AutocreateTime * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2)
     const halfMin = Math.floor(GAME_TICKS_PER_SEC * 30); // TICKS_PER_MINUTE/2 = 450
     const doubleMin = GAME_TICKS_PER_SEC * 120; // TICKS_PER_MINUTE*2 = 1800
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 102;
     state.alertTimer = 5 * ScenarioRandom.nextInRange(halfMin, doubleMin); // AutocreateTime=5
   }
 
-  // C++ house.cpp:1061-1070: TeamTime handler
+  // C++ house.cpp:1061-1070: TeamTime handler (tag 103)
   if (!state.isAlerted && state.teamTimer <= 0) {
     // C++ line 1064: Suggested_New_Team(false) — 1 RNG call
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 103;
     suggestedNewTeam(ctx, house, false);
     // C++ line 1069: TeamTime = Rule.TeamDelay * TICKS_PER_MINUTE
     state.teamTimer = 5 * 60 * GAME_TICKS_PER_SEC; // TeamDelay=5
@@ -2649,14 +2653,19 @@ export function aiPerTick(ctx: AIContext): void {
 
     // C++ execution order within House::AI():
     // 1. AI_Building (tag 110)
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 110;
     aiPerTickBuilding(ctx, house, state);
     // 2. AI_Unit (tag 120)
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 120;
     aiPerTickUnit(ctx, house, state);
     // 3. AI_Vessel (tag 130)
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 130;
     aiPerTickVessel(ctx, house, state);
     // 4. AI_Infantry (tag 140)
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 140;
     aiPerTickInfantry(ctx, house, state);
     // 5. AI_Aircraft (tag 150) — no RNG
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 150;
     aiPerTickAircraft(ctx, house, state);
     // 6. Timer-gated sections (tags 100-103)
     aiPerTickTimers(ctx, house, state);

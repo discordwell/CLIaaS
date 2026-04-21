@@ -4482,7 +4482,34 @@ export class Game {
             entity.isDriving &&
             entity.missionQueue === Mission.MOVE &&
             entity.moveTarget !== null;
-          if (alreadyDrivingQueued) break;
+
+          // Compute path goal (clamp off-map waypoints to map edge).
+          // C++ reinf.cpp/team.cpp parity: the team Coordinate_Move assigns NavCom
+          // (→ Basic_Path in DriveClass::AI), so a driving vehicle must always have
+          // a live Path[] to follow. TS's early-break trusted the queue state but
+          // forgot to seed the path — the MNLY sat with trackNumber=-1 until random
+          // drift nudged it across a cell boundary. Always set path when empty.
+          let pathGoal = { cx: wp.cx, cy: wp.cy };
+          if (!this.map.inBounds(wp.cx, wp.cy) && !entity.stats.isAircraft) {
+            const bx = this.map.boundsX, by = this.map.boundsY;
+            const bw = this.map.boundsW, bh = this.map.boundsH;
+            pathGoal = {
+              cx: Math.max(bx, Math.min(bx + bw - 1, wp.cx)),
+              cy: Math.max(by, Math.min(by + bh - 1, wp.cy)),
+            };
+          }
+
+          if (alreadyDrivingQueued) {
+            // Drive-in-GUARD path: trust the queue but still seed Path[] if missing
+            // so DriveClass::AI can actually follow Basic_Path (C++ drive.cpp AI()
+            // reads from Path each tick). Without this the vehicle is stuck driving
+            // to a NavCom it can't reach via track movement.
+            if (entity.path.length === 0) {
+              entity.path = findPath(this.map, entity.cell, pathGoal, true, entity.isNavalUnit, entity.stats.speedClass);
+              entity.pathIndex = 0;
+            }
+            break;
+          }
 
           // C++ team.cpp Coordinate_Move → Assign_Mission(MISSION_MOVE) → Commence()
           // pops queue, sets Timer=0 (mission.cpp:354). Without the Timer reset, the
@@ -4494,19 +4521,6 @@ export class Game {
           entity.moveTarget = target;
           entity.target = null;
           entity.missionTimer = 0;
-
-          // Off-map waypoints (e.g. convoy exit WP25 in SCG02EA): path to nearest
-          // map edge cell instead, keeping moveTarget off-map so the edge exit check
-          // in processTick fires when the unit reaches the boundary.
-          let pathGoal = { cx: wp.cx, cy: wp.cy };
-          if (!this.map.inBounds(wp.cx, wp.cy) && !entity.stats.isAircraft) {
-            const bx = this.map.boundsX, by = this.map.boundsY;
-            const bw = this.map.boundsW, bh = this.map.boundsH;
-            pathGoal = {
-              cx: Math.max(bx, Math.min(bx + bw - 1, wp.cx)),
-              cy: Math.max(by, Math.min(by + bh - 1, wp.cy)),
-            };
-          }
 
           entity.path = findPath(this.map, entity.cell, pathGoal, true, entity.isNavalUnit, entity.stats.speedClass);
           entity.pathIndex = 0;
@@ -6461,9 +6475,42 @@ export class Game {
    * fires Trigger->Spring(TEVENT_DISCOVERED, this) and sets House->IsDiscovered = true.
    * C++ techno.cpp:3899 — Record_The_Kill() also fires TEVENT_DISCOVERED.
    *
-   * We check each enemy entity/structure: if the player can see its cell (visibility == 2)
-   * and it hasn't been discovered yet, mark it discovered and set the trigger flags.
+   * C++ Revealed() is gated by ACTUAL sight (Map_Cell called when a unit's sight-range
+   * reveals a cell, cell.cpp:615-623 / display.cpp:1496-1499). The debug/agent
+   * fogDisabled override paints visibility=2 across the whole map, but must NOT
+   * trigger Revealed() — otherwise every enemy object "discovers" on tick 1,
+   * firing TEVENT_DISCOVERED-attached triggers (e.g. AUTOCREATE) spuriously and
+   * diverging from WASM's normal-fog behavior. We compute true sight here using
+   * player unit/structure SightRange + octagonal distance (cpp coord.cpp:124-136).
    */
+  private isCellTrulySeen(cx: number, cy: number): boolean {
+    // C++ parity: cell is "truly seen" if any player unit/structure has it in sight range.
+    // Uses octagonal distance matching coord.cpp Distance() (big*2 + small <= sight*2).
+    for (const e of this.entities) {
+      if (!e.alive || !e.isPlayerUnit) continue;
+      const sight = e.stats.sight;
+      if (!sight || sight > 10) continue;
+      const dx = Math.abs(e.cell.cx - cx);
+      const dy = Math.abs(e.cell.cy - cy);
+      const big = dx > dy ? dx : dy;
+      const small = dx > dy ? dy : dx;
+      if (big * 2 + small <= sight * 2) return true;
+    }
+    if (this.baseDiscovered) {
+      for (const s of this.structures) {
+        if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
+        const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+        if (!sight || sight > 10) continue;
+        const dx = Math.abs(s.cx - cx);
+        const dy = Math.abs(s.cy - cy);
+        const big = dx > dy ? dx : dy;
+        const small = dx > dy ? dy : dx;
+        if (big * 2 + small <= sight * 2) return true;
+      }
+    }
+    return false;
+  }
+
   private checkDiscoveryTriggers(): void {
     // Check entities
     for (const entity of this.entities) {
@@ -6471,9 +6518,9 @@ export class Game {
       if (this.isPlayerControlled(entity)) continue; // only enemy/neutral
       if (this.discoveredEntityIds.has(entity.id)) continue; // already discovered
 
-      // Check if player can see this entity's cell
-      const vis = this.map.getVisibility(entity.cell.cx, entity.cell.cy);
-      if (vis < 2) continue; // not visible
+      // C++ parity: use TRUE sight (unit/structure SightRange), not display fog state.
+      // fogDisabled=true artificially paints vis=2; must not trigger Revealed().
+      if (!this.isCellTrulySeen(entity.cell.cx, entity.cell.cy)) continue;
 
       this.discoveredEntityIds.add(entity.id);
 
@@ -6500,9 +6547,8 @@ export class Game {
       if (this.isAllied(s.house, this.playerHouse)) continue; // only enemy/neutral
       if (this.discoveredStructureIds.has(si)) continue;
 
-      // Check if player can see this structure's cell
-      const vis = this.map.getVisibility(s.cx, s.cy);
-      if (vis < 2) continue;
+      // C++ parity: use TRUE sight (not display fog)
+      if (!this.isCellTrulySeen(s.cx, s.cy)) continue;
 
       this.discoveredStructureIds.add(si);
 

@@ -747,6 +747,7 @@ export function installHarness(game: Game): void {
 
   w.__agentState = () => serializeState(game);
 
+
   w.__agentCommand = (commands: AgentCommand[]) => processCommands(game, commands);
 
   w.__agentStep = (n = 15, commands?: AgentCommand[]) => {

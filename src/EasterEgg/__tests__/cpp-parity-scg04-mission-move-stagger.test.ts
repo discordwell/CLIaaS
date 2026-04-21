@@ -179,12 +179,24 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank2.isDriving, 'tank2 (second team): isDriving=true (Basic_Path success)').toBe(true);
   });
 
-  it('single-team vehicle reinforcement: isDriving=true (SCG11 MCV parity preserved)', () => {
+  it('single-team vehicle reinforcement: isDriving gated by facing alignment (C++ Start_Driver parity)', () => {
     // SCG11EA-style scenario: a single team with one MCV. No sibling team
-    // claims the same target, so isDriving stays true (original behavior).
-    // The pre-Commence gate does NOT pop MissionQueue because IsDriving=true
-    // (matches unit.cpp:404's `!IsDriving && ...` gate).
+    // claims the same target.
+    //
+    // C++ drive.cpp:1079-1086 DriveClass::AI calls Do_Turn() and returns early
+    // while the unit's facing does not match the first path step; Start_Driver
+    // (which sets IsDriving=true) is only reached AFTER rotation completes.
+    // The TS emulation previously set isDriving=true eagerly in Team::coordinateMove,
+    // but this blocked Commence for solo reinforcements that still needed to
+    // rotate (SCG04EA miner MNLY: mission stuck in GUARD → Mission_Move jitter
+    // never fired, diverging from WASM at tick 15).
+    //
+    // The fix: only simulate Start_Driver success when the unit's body facing
+    // already matches the direction to the target. Otherwise leave isDriving
+    // false so the pre-Commence gate pops MOVE on this tick and the rotation
+    // phase happens under Mission=MOVE (matching C++ drive.cpp Do_Turn path).
     const game = createGame();
+    // Default facing is 0 (North). Target is East — rotation required.
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
 
     const team = new Team({
@@ -203,12 +215,43 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
 
     expect(mcv.missionQueue, 'single-team MCV queues MOVE').toBe(Mission.MOVE);
     expect(mcv.moveTarget, 'single-team MCV moveTarget set').not.toBeNull();
-    expect(mcv.isDriving, 'single-team MCV isDriving stays true (no sibling conflict)').toBe(true);
+    // Facing=0 (N), target east → facing mismatch → isDriving stays false
+    // so the pre-Commence gate pops MOVE and Mission_Move jitter can fire.
+    expect(mcv.isDriving, 'facing mismatch → isDriving stays false (C++ Do_Turn, no Start_Driver)').toBe(false);
 
-    // Pre-Commence gate in updateEntity should NOT pop the queue on this tick
-    // because isDriving=true (matches C++ unit.cpp:404 `!IsDriving` clause).
+    // Pre-Commence gate pops queue on this tick because isDriving=false.
     tickEntity(game, mcv);
-    expect(mcv.mission, 'MCV stays GUARD (Commence blocked by isDriving)').toBe(Mission.GUARD);
+    expect(mcv.mission, 'MCV pops to MOVE when isDriving=false (C++ unit.cpp:404 Commence)').toBe(Mission.MOVE);
+    expect(mcv.missionQueue, 'MCV queue cleared after pop').toBeNull();
+  });
+
+  it('single-team vehicle with pre-aligned facing: isDriving=true (Start_Driver parity)', () => {
+    // When the vehicle's body facing already matches the direction to the
+    // target cell, C++ Start_Driver fires synchronously (no rotation needed).
+    // TS mirrors this: set isDriving=true and stay in GUARD drive-in-GUARD.
+    const game = createGame();
+    const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
+    mcv.facing = 2; // East — matches target direction (22,10) dx=+1,dy=0
+
+    const team = new Team({
+      house: House.Greece,
+      desiredMembers: [{ type: UnitType.V_MCV, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 26 }],
+      forcedActive: true,
+    });
+    team.add(mcv);
+    registerTeam(team);
+
+    const waypoints = new Map<number, { cx: number; cy: number }>([
+      [26, { cx: 22, cy: 10 }],
+    ]);
+    updateAllTeams(waypoints, { structures: [], entities: [mcv] });
+
+    expect(mcv.isDriving, 'facing already aligned → isDriving=true (Start_Driver success)').toBe(true);
+
+    // Pre-Commence gate does NOT pop queue because isDriving=true.
+    tickEntity(game, mcv);
+    expect(mcv.mission, 'MCV stays GUARD (Commence blocked by isDriving=true)').toBe(Mission.GUARD);
     expect(mcv.missionQueue, 'MCV queue still MOVE').toBe(Mission.MOVE);
   });
 

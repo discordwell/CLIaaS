@@ -811,7 +811,40 @@ export class Team {
             if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
               prior.isDriving = false;
             }
-            unit.isDriving = true;
+            // C++ Start_Driver is only called from DriveClass::AI AFTER rotation
+            // completes (drive.cpp:1079-1086 Do_Turn returns early while facing
+            // mismatches target). Setting isDriving=true here eagerly blocks the
+            // Commence gate during rotation for SOLO reinforcement vehicles —
+            // Mission stays stuck in GUARD and Mission_Move jitter never fires
+            // (SCG04EA tick 15 miner MNLY). Check the facing alignment with the
+            // first cell of the path before simulating Start_Driver success.
+            // For SAME-cell competing teams, the second team's Start_Driver DOES
+            // succeed even while rotating (C++ TrackNumber assigned mid-Do_Turn),
+            // so keep isDriving=true on the second-team path (prior claim exists).
+            if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
+              unit.isDriving = true;
+            } else {
+              // First team / solo: only set isDriving=true if facing already
+              // matches the first path step direction (Start_Driver succeeded).
+              // Otherwise let Commence pop Mission=MOVE for the rotation phase.
+              const dx = Math.sign(this.target.x - unit.pos.x);
+              const dy = Math.sign(this.target.y - unit.pos.y);
+              // Facing 0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW
+              let targetFacing = unit.facing;
+              if (dx === 0 && dy < 0) targetFacing = 0;
+              else if (dx > 0 && dy < 0) targetFacing = 1;
+              else if (dx > 0 && dy === 0) targetFacing = 2;
+              else if (dx > 0 && dy > 0) targetFacing = 3;
+              else if (dx === 0 && dy > 0) targetFacing = 4;
+              else if (dx < 0 && dy > 0) targetFacing = 5;
+              else if (dx < 0 && dy === 0) targetFacing = 6;
+              else if (dx < 0 && dy < 0) targetFacing = 7;
+              if (unit.facing === targetFacing) {
+                unit.isDriving = true;
+              }
+              // Else: leave isDriving=false. Commence pops MOVE, rotation
+              // happens under Mission_Move (C++ drive.cpp:1084 Do_Turn return).
+            }
             claims?.set(claimKey, unit);
           }
         }
