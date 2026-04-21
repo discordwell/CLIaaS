@@ -1,5 +1,81 @@
 # Session Summaries
 
+## 2026-04-21T03:30Z — SCG06EA tick 65 deep re-investigation: Greece E1 target acquisition at tick 63 (deferred — structural)
+
+**Result:** No metric change. All 7 scenarios' first-divergence ticks unchanged: SCG01=45, SCG03=239, SCG04=15, SCG06=65, SCG07=3, SCG11=19, SCG13=101.
+
+**Symptom:** At SCG06EA tick 65, WASM fires 1 `Coord_Scatter` RNG (tag 50002, seed=3574408950, ent=15115 = bullet[115]). TS fires 0. Ticks 60-64 match. Similar Coord_Scatter divergences at ticks 68 (ent=15116 = bullet[116]) and 71. Current main-branch baseline SCG06=65 first-divergence.
+
+**Verified via instrumented state dumps (ticks 1-72, both engines):**
+
+1. WASM Greece E1 infantry at cell (19, 65) (id 851974) is in `MISSION_GUARD` (m=5, unchanged throughout). M1Carbine: `rof=20, damage=15, projSpeed=100, isInvisible=true, range=3.0`.
+
+2. At tick 62 she has: `mt:0, arm:0, target=null (no tlx), doing:0, firing:false, idle:60`. Completely idle, Mission_Guard timer just expired.
+
+3. **At tick 63**, without any intervening damage, her state suddenly becomes: `mt:14, arm:0, tlx:4901 tly:17452 (BadGuy E1 at cell 19,68 — lepton coords), doing:4=DO_FIRE_WEAPON, firing:true, idle:59`. Target magically appeared AND firing animation started — SAME TICK.
+
+4. At tick 64, she's still in the firing animation (`firing:true, arm:0`). At tick 65, `Fire_At` executes (arm jumps 0→19, firing:false, bullet[115] Unlimbo'd and same-tick Bullet_Explodes → Coord_Scatter). BadGuy at (19,68) drops hp 50→35 (−15 damage, M1Carbine direct hit). BadGuy at (18,68) drops hp 50→49 (−1 damage = Explosion_Damage radial splash to adjacent cell, combat.cpp:162-237 damage falloff by distance).
+
+5. At tick 67 (arm=17), BadGuy[851968] (who'd been in `MISSION_MOVE` with `tlx:4992,tly:16768` since tick 57 — targeting Greece E1) finally fires back: `arm:0→19` at tick 68, Greece E1 hp 50→35. Scatter bullet[116] Coord_Scatter at tick 68 matches this.
+
+6. **TS Greece E1[28] at (19,65) state, ticks 1-72**: `mission=GUARD, tid=null, acd=0, wpn=M1Carbine(r=3)`. Target NEVER set. Firing never starts. She sits idle forever. TS BadGuy E1[22] at (19,68) is in `mission=MOVE, tid=null` — never acquires target either (WASM's tlx=4992,tly=16768 at tick 57 missing in TS).
+
+**The unexplained WASM behavior:**
+
+Mission_Guard for regular infantry is documented as mask=0 no-op (techno.cpp:2013-2040 adds THREAT_INFANTRY bits ONLY for dogs/medics; for rifle infantry E1/E3, THREAT_RANGE alone produces mask=0, and Evaluate_Object at techno.cpp:1539 rejects every candidate). This was the premise of commit `b7c130d7` (dog-only gate) and is matches a strict read of the source.
+
+Yet WASM **definitively** assigns TarCom to Greece E1 at tick 63 and to BadGuy E1 at tick 57, both regular infantry in MISSION_GUARD / MISSION_MOVE. Neither was damaged before target acquisition.
+
+**Ruled out as the mechanism:**
+- Mission_Guard → Target_Something_Nearby(THREAT_RANGE) → Greatest_Threat with mask=0 (empirically mask=0 for E1, rejects all)
+- Mission_Move → Target_Something_Nearby(THREAT_RANGE) for non-human (also mask=0)
+- Retaliation (hp unchanged before target set — no take_damage call happened)
+- Fear_AI (doesn't assign TarCom — only Scatter/pose)
+- Base_Is_Attacked (early-returns when House->IsHuman; Greece IS human)
+- Random_Animate (pure animation, no Assign_Target)
+- InfantryClass::Read_INI (only assigns Mission, no TarCom)
+- Greek scenario triggers (spy1/win1/los1/etc. have no TarCom-assigning actions on Greek E1s)
+- CellTriggers (none near (19,65))
+- Greek teamtypes inf3/inf4 (missions are MOVE + DO MISSION_GUARD_AREA, which regroups without assigning TarCom — Coordinate_Do @ team.cpp:1809-1856 only Assign_Mission(MISSION_GUARD_AREA), no Assign_Target)
+
+**Unresolved hypothesis:** Either (a) an `#ifdef`'d code path in the WASM build adds THREAT_INFANTRY to method for regular infantry (would need to inspect linked `RA.wasm` symbols directly, not source), or (b) the `Target_Something_Nearby(THREAT_NORMAL)` full-map scan path (else branch of techno.cpp:2047) is being invoked from somewhere I haven't traced and somehow non-zero-masks (also unlikely — same mask builder). Most likely: the WASM source has a local modification between upstream RA C++ and this repo's shipped WASM build that I didn't find. Options to verify: (i) diff the shipped `RA.wasm` against a fresh build from the current C++ source, (ii) instrument RA C++ to log every `Assign_Target(!TARGET_NONE)` call site with `Frame` + entity id and rebuild+run SCG06EA ticks 55-70.
+
+**Why 05194047's fix proposals don't resolve this one:**
+- Route invisible-bullet through `launchProjectile travelFrames=1`: moves TS's Coord_Scatter from fire tick to fire+1. Doesn't help — TS never fires in the first place.
+- Implement `Firing_AI` per-tick parity: already done in commit `a47eb9a9`. Doesn't help because target is null.
+- Defer damage+retaliation: same issue — no fire, no damage to defer.
+
+**The real fix requires:** porting whatever mechanism WASM uses to assign TarCom to regular Greek/BadGuy infantry in MISSION_GUARD / MISSION_MOVE before any damage is taken. Current evidence says that mechanism is NOT documented in the upstream RA source as I've been reading it. Tracing requires C++ instrumentation of every `Assign_Target` call site (and/or disassembly of the shipped WASM).
+
+**Parity deltas (all 7 RA scenarios unchanged):**
+- SCG01EA=45, SCG03EA=239, SCG04EA=15, SCG06EA=65, SCG07EA=3, SCG11EA=19, SCG13EA=101.
+
+**Why deferred:** The investigation turned up a concrete anomaly — WASM assigns TarCom to non-player-human regular-infantry units via an unknown path, contradicting the plain-source interpretation used in commit `b7c130d7`. Without either WASM disassembly or per-call-site C++ instrumentation, the mechanism can't be named, and a faithful port is impossible. Guessing would violate "correctness over metric" (already tried once with the fabricated `cellBasedGuardScan` pre-b7c130d7 — produced an extra Coord_Scatter RNG WASM never consumes when paired with the `a47eb9a9` same-tick Firing_AI). Two correct next steps, both outside this session's scope:
+- (A) Diff the shipped `RA.wasm` vs a fresh build from the C++ in `src/EasterEgg/CnC_and_Red_Alert/RA/` — if they differ, dump the actual Greatest_Threat/Target_Something_Nearby bytecode and identify the mask-building change.
+- (B) Add temporary `g_rng_source_tag = 99999` + `fprintf(stderr, ...)` to every `TechnoClass::Assign_Target(TARGET_NONE != target)` call site (techno.cpp:2817 and direct callers in foot.cpp/team.cpp/building.cpp). Rebuild WASM. Re-run SCG06EA and read stderr through agent_get_state for tick 55-70 — the instrumented log will pinpoint the call site for Greece E1@(19,65) at tick 63.
+
+**Key files (investigation paths):**
+- `src/EasterEgg/CnC_and_Red_Alert/RA/foot.cpp:520-540` — Mission_Move (Target_Something_Nearby(THREAT_RANGE))
+- `src/EasterEgg/CnC_and_Red_Alert/RA/foot.cpp:638-697` — Mission_Guard (Target_Something_Nearby(THREAT_RANGE))
+- `src/EasterEgg/CnC_and_Red_Alert/RA/foot.cpp:1037-1098` — Mission_Guard_Area (Target_Something_Nearby(THREAT_AREA))
+- `src/EasterEgg/CnC_and_Red_Alert/RA/techno.cpp:1987-2267` — Greatest_Threat (mask construction + radial/full-map scan)
+- `src/EasterEgg/CnC_and_Red_Alert/RA/techno.cpp:2817+` — Assign_Target implementation
+- `src/EasterEgg/CnC_and_Red_Alert/RA/team.cpp:1636-1720` — Coordinate_Attack (Assign_Target for TMISSION_ATT_WAYPT/ATTACKTARCOM)
+- `src/EasterEgg/CnC_and_Red_Alert/RA/team.cpp:1809-1856` — Coordinate_Do (no Assign_Target — rules out TMISSION_DO path)
+- `src/EasterEgg/engine/missionAI.ts:1038-1061` — TS dog-only gate for updateGuard's cellBasedGuardScan
+- `src/EasterEgg/engine/index.ts:5060-5110` — TS updateMove (post-0c5b65ec: A2 auto-target removed, matches mask=0 reading)
+
+**Verified via (scripts deleted post-investigation):**
+- `scripts/test-scg06-tick65-entity.ts` — WASM-only: per-tick rngLog entity tags + hp tracking for cells (10-30, 60-85) at ticks 60-70. Confirmed Coord_Scatter at tick 65 is bullet[115] and at tick 68 is bullet[116]; logic.cpp:285 same-tick bullet iteration applies.
+- `scripts/test-scg06-ts-e1-state.ts` — TS+WASM side-by-side: full Entity JSON (tlx, tly, arm, mt, doing, firing, idle, hp) for cells (15-25, 60-75) at every tick 1-72. This is the script that surfaced the "tick 63 sudden TarCom appearance" anomaly.
+
+**Prior related work on this divergence:**
+- `05194047` — prior investigation (SCG06=68): identified scatter-vs-damage 1-tick skew but attributed to hitscan vs projectile. **That attribution was incomplete** — the deeper issue is that TS's E1 never fires at all, scatter timing is moot.
+- `b7c130d7` — dog-only Mission_Guard gate: based on source reading of mask=0. Moved SCG06 from 63 → 65. The +2 advance came from removing a fabricated scan; the new first-divergence at 65 exposed that WASM ALSO acquires targets via some path this commit didn't replicate.
+- `a47eb9a9` — same-tick Firing_AI after target-set. Works correctly but dormant here because target is never set.
+- `9a334f4b` — same-tick end-of-loop scatter flush. Verified correct via invisible-bullet cpp-parity tests.
+- `0407f6af` — Take_Damage retaliation chain. Verified correct but doesn't help (no damage before tick 63).
+
 ## 2026-04-21T02:00Z — SCG07EA vessel reinforcement Phase-3 cadence fix (tick 2→3)
 
 **Result:** SCG07EA first-divergence pushed from tick 2 to tick 3. Other 6 scenarios unchanged (SCG01=45, SCG03=239, SCG04=15, SCG06=65, SCG07=3, SCG11=19, SCG13=101).
