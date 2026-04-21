@@ -5080,48 +5080,16 @@ export class Game {
 
     entity.animState = AnimState.WALK;
 
-    // A2: AI target acquisition while moving (C++ foot.cpp:492-505)
-    // AI-controlled units scan for enemies every 15 ticks during MOVE and auto-engage.
-    // C++ drive.cpp parity: when DriveClass::AI runs while Mission==GUARD (drives-in-
-    // guard), target acquisition is handled by Mission_Guard's Target_Something_Nearby,
-    // not by a separate Movement scan. Skip A2 to avoid double-scanning the RNG.
-    if (!fromGuardDrive && !entity.isPlayerUnit && entity.weapon &&
-        (this.tick + entity.id) % 15 === 0) {
-      const ec = entity.cell;
-      const scanRange = entity.stats.sight;
-      // A2 scan only runs for !entity.isPlayerUnit (line above), so this is always AI.
-      const moveHouseIdx = Game.HOUSE_TO_INDEX[entity.house] ?? -1;
-      let bestTarget: Entity | null = null;
-      let bestScore = -Infinity;
-      for (const other of this.entities) {
-        if (!other.alive || other.inLimbo || this.entitiesAllied(entity, other)) continue;
-        // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
-        if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
-        // C++ techno.cpp:1476-1479: units on IsNoThreat missions (e.g. HARMLESS) are
-        // invisible to auto-target. SCG03EA: this scan was picking up a Greece MEDI
-        // in HARMLESS mission as a target for nearby USSR E1s, killing it.
-        if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
-        // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
-        if (other.cloakState === CloakState.CLOAKED) continue;
-        // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-        if (moveHouseIdx >= 0 && !this.isRevealedToHouse(other.cell.cx, other.cell.cy, moveHouseIdx)) continue;
-        const dist = worldDist(entity.pos, other.pos);
-        if (dist > scanRange) continue;
-        if (!this.map.hasLineOfSight(ec.cx, ec.cy, other.cell.cx, other.cell.cy)) continue;
-        const score = this.threatScore(entity, other, dist);
-        if (score > bestScore) { bestScore = score; bestTarget = other; }
-      }
-      if (bestTarget) {
-        // Save current move destination so unit can resume after killing
-        entity.savedMoveTarget = entity.moveTarget ? { lx: entity.moveTarget.lx, ly: entity.moveTarget.ly } : null;
-        entity.target = bestTarget;
-        entity.mission = Mission.ATTACK;
-        entity.animState = AnimState.ATTACK;
-        entity.trackNumber = -1; entity.trackControlIndex = -1; // MV1: reset track on mission interrupt
-        entity.trackCellSpan = 1;
-        return;
-      }
-    }
+    // No A2 scan here: C++ Mission_Move's `Target_Something_Nearby(THREAT_RANGE)`
+    // call at foot.cpp:529-531 is effectively a no-op. Greatest_Threat
+    // (techno.cpp:2032-2040) builds its RTTI mask from THREAT_INFANTRY |
+    // THREAT_VEHICLES | THREAT_BUILDINGS bits; THREAT_RANGE alone contributes no
+    // RTTI bits → mask=0 → Evaluate_Object (techno.cpp:1539) rejects every
+    // candidate. In C++ a moving unit only ever *clears* an out-of-range TarCom;
+    // it never *assigns* a new target during Mission_Move. Targets come from:
+    // explicit orders, team-assigned TarCom, or the unit's GUARD scan
+    // (THREAT_AREA|THREAT_RANGE with RTTI bits set). Auto-acquiring here was a
+    // TS-only fabrication. (Agent f90c3b68 investigation, 2026-04-20.)
 
     // Air units fly directly to destination — no pathfinding, no terrain collision
     if (entity.isAirUnit && entity.moveTarget) {
