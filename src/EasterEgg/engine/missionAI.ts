@@ -57,10 +57,11 @@ export interface MissionAIContext {
   playSound(name: string): void;
   weaponSound(name: string): string;
 
-  // Combat delegation — these call back into the Game class / combat.ts wrappers
+  // Combat delegation — these call back into the Game class / combat.ts wrappers.
+  // Retaliation is now embedded in damageEntity (C++ FootClass::Take_Damage unified
+  // entry point — foot.cpp:1166-1234), so no separate callback is needed.
   damageEntity(target: Entity, amount: number, warhead: WarheadType, attacker?: Entity): boolean;
   damageStructure(s: MapStructure, damage: number): boolean;
-  triggerRetaliation(victim: Entity, attacker: Entity): void;
   handleUnitDeath(victim: Entity, opts: {
     screenShake: number; explosionSize: number; debris: boolean;
     decal: { infantry: number; vehicle: number; opacity: number } | null;
@@ -458,18 +459,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           ctx.deferInvisibleScatter();
         }
 
-        // Instant damage (melee, hitscan weapons)
+        // Instant damage (melee, hitscan weapons).
+        // C++ infantry.cpp:438-440 — Scatter fires exactly once per damage event
+        // inside InfantryClass::Take_Damage. The scatter RNG is consumed inside
+        // ctx.damageEntity() → damageEntity() → aiScatterOnDamage() (combat.ts).
+        // Retaliation also runs inside damageEntity (unified C++ FootClass::Take_Damage
+        // entry point — foot.cpp:1166-1234).
         const killed = directHit ? ctx.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;
-
-        if (directHit && !killed) {
-          // C++ infantry.cpp:438-440 — Scatter fires exactly once per damage event
-          // inside InfantryClass::Take_Damage. The scatter RNG is already consumed
-          // inside ctx.damageEntity() → damageEntity() → aiScatterOnDamage()
-          // (combat.ts:324). Calling scatterInfantry again here would fire a
-          // SECOND Random_Pick(0,4) with no C++ counterpart, over-firing RNG by 1
-          // on every non-fatal infantry hit.
-          ctx.triggerRetaliation(entity.target, entity);
-        }
 
         if (activeWeapon.splash && activeWeapon.splash > 0) {
           const splashCenter = { x: impactX, y: impactY };

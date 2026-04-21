@@ -986,7 +986,9 @@ describe('retaliation targeting gates (C++ techno.cpp:2735-2780)', () => {
     expect(victim.target).toBeNull();
   });
 
-  it('team mission units in HUNT DO retaliate', () => {
+  it('units in HUNT do NOT retaliate (C++ rules.ini Hunt.Retaliate=no)', () => {
+    // rules.ini [Hunt] Retaliate=no → MissionControl[HUNT].IsRetaliate = false.
+    // C++ techno.cpp:4934 Is_Allowed_To_Retaliate blocks at the mission gate.
     const ctx = mockCombatCtx();
     const victim = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
     const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
@@ -996,8 +998,9 @@ describe('retaliation targeting gates (C++ techno.cpp:2735-2780)', () => {
 
     triggerRetaliation(ctx, victim, attacker);
 
-    // HUNT units are already attacking — retaliation makes sense
-    expect(victim.target).toBe(attacker);
+    // HUNT units already pursue via Mission_Hunt; C++ blocks retaliation at the
+    // mission gate so they aren't redirected mid-hunt.
+    expect(victim.target).toBeNull();
   });
 
   it('dead victim does not retaliate', () => {

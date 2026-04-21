@@ -69,7 +69,6 @@ import {
   fireWeaponAt as _fireWeaponAt,
   fireWeaponAtStructure as _fireWeaponAtStructure,
   handleUnitDeath as _handleUnitDeath,
-  triggerRetaliation as _triggerRetaliation,
   checkVehicleCrush as _checkVehicleCrush,
   checkWallCrush as _checkWallCrush,
   launchProjectile as _launchProjectile,
@@ -1109,7 +1108,6 @@ export class Game {
       weaponSound: (n) => this.audio.weaponSound(n),
       damageEntity: (t, a, w, att) => this.damageEntity(t, a, w, att),
       damageStructure: (s, d) => this.damageStructure(s, d),
-      triggerRetaliation: (v, a) => this.triggerRetaliation(v, a),
       handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
       launchProjectile: (a, t, w, d, ix, iy, dh) => this.launchProjectile(a, t, w, d, ix, iy, dh),
       deferInvisibleScatter: () => { this._pendingInvisibleScatters++; },
@@ -6399,11 +6397,6 @@ export class Game {
   /** Check if an entity is player-controlled (allied to playerHouse) */
   private isPlayerControlled(e: Entity): boolean {
     return this.isAllied(e.house, this.playerHouse);
-  }
-
-  /** Trigger retaliation — delegates to combat.ts */
-  private triggerRetaliation(victim: Entity, attacker: Entity): void {
-    _triggerRetaliation(this._combatCtx, victim, attacker);
   }
 
   /** Launch a projectile — delegates to combat.ts */

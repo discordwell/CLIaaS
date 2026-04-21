@@ -885,23 +885,23 @@ describe('Retaliation system — triggerRetaliation', () => {
     expect(victim.mission).not.toBe(Mission.ATTACK);
   });
 
-  it('scripted team mission units do not retarget (except HUNT)', () => {
+  it('scripted team mission units do not retarget; HUNT mission also blocked', () => {
     const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
     victim.teamMissions = [{ type: 'MOVE', target: { x: 50, y: 50 } }];
     victim.mission = Mission.MOVE;
     const ctx = makeMockCombatContext();
     triggerRetaliation(ctx, victim, attacker);
-    // Should NOT retarget because unit has scripted team missions and is not HUNT
+    // Should NOT retarget because unit has scripted team missions
     expect(victim.target).toBeNull();
 
-    // HUNT mission units DO retaliate even with team missions
+    // HUNT units also don't retaliate per C++ rules.ini [Hunt] Retaliate=no
+    // (techno.cpp:4934 Is_Allowed_To_Retaliate checks MissionControl[HUNT].IsRetaliate).
     const hunter = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     hunter.teamMissions = [{ type: 'HUNT' }];
     hunter.mission = Mission.HUNT;
     triggerRetaliation(ctx, hunter, attacker);
-    expect(hunter.target).toBe(attacker);
-    expect(hunter.mission).toBe(Mission.ATTACK);
+    expect(hunter.target).toBeNull();
   });
 
   it('retaliation triggers from projectile arrival and splash damage paths', () => {

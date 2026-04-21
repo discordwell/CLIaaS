@@ -677,11 +677,16 @@ describe('Damage → scatter integration (infantry.cpp:438-439, combat.ts)', () 
     // Deal non-lethal damage
     damageEntity(ctx, inf, 5, 'AP' as WarheadType, attacker);
 
-    // Infantry should be alive, have fear > 0, and have scattered
+    // Infantry should be alive, have fear > 0. With the C++ FootClass::Take_Damage
+    // retaliation chain integrated into damageEntity (foot.cpp:1166-1234), the AI
+    // infantry acquires the attacker as TarCom — setting mission to ATTACK overrides
+    // the scatter's MOVE assignment. This matches C++ where retaliation (FootClass)
+    // runs before Scatter (InfantryClass override) and Scatter then skips for
+    // non-FraidyCat units with a valid TarCom (infantry.cpp:1872).
     expect(inf.alive).toBe(true);
     expect(inf.fear).toBeGreaterThan(0);
-    expect(inf.mission).toBe(Mission.MOVE);
-    expect(inf.moveTarget).not.toBeNull();
+    expect(inf.target).toBe(attacker); // retaliation acquired the attacker
+    expect(inf.mission).toBe(Mission.ATTACK); // retaliation transitioned to ATTACK
   });
 
   it('dead infantry does NOT scatter', () => {

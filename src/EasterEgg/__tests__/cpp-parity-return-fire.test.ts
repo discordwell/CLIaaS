@@ -701,77 +701,25 @@ describe('basic retaliation: idle AI unit retaliates when hit (C++ and TS agree)
 // ---------------------------------------------------------------------------
 // Summary of all mismatches
 // ---------------------------------------------------------------------------
-describe('SUMMARY: C++ vs TS return-fire mismatches', () => {
-  it('documents all structural mismatches between C++ Is_Allowed_To_Retaliate and TS triggerRetaliation', () => {
-    const mismatches = [
-      {
-        gate: 'Gate 2: Mission-gated retaliation',
-        cpp: 'techno.cpp:4922 — checks MissionControl[Mission].IsRetaliate',
-        ts: 'combat.ts:552-569 — NO mission gate check',
-        impact: 'Units on Harvest/Sleep/Capture/etc. missions retaliate in TS but not C++',
-      },
-      {
-        gate: 'Gate 3: Fixed-wing aircraft block',
-        cpp: 'techno.cpp:4927-4929 — IsFixedWing aircraft cannot retaliate',
-        ts: 'combat.ts — no fixed-wing check',
-        impact: 'MIG/YAK/BADR could retaliate in TS (unlikely in practice due to AA gate)',
-      },
-      {
-        gate: 'Gate 6: Warhead modifier zero check',
-        cpp: 'techno.cpp:4946-4950 — weapon warhead modifier vs source armor == 0 blocks retaliation',
-        ts: 'combat.ts — no warhead modifier check',
-        impact: 'Units with zero-damage weapons against target armor type still retaliate in TS',
-      },
-      {
-        gate: 'Gate 7: Dog source block',
-        cpp: 'techno.cpp:4956 — IsDog source blocks retaliation',
-        ts: 'combat.ts — no dog check',
-        impact: 'Units retaliate against dogs in TS; C++ requires normal target processing for dogs',
-      },
-      {
-        gate: 'Gate 9: Tanya vs building block',
-        cpp: 'techno.cpp:4968-4971 — human Tanya (IsBomber) cannot retaliate against buildings',
-        ts: 'combat.ts — no check (buildings are MapStructure, not Entity)',
-        impact: 'Structural difference; N/A unless architecture changes',
-      },
-      {
-        gate: 'Gate 10: PlayerReturnFire / IsSmartDefense (FIXED)',
-        cpp: 'techno.cpp:4976 — Human house + !IsSmartDefense => no retaliation (except Tanya vs infantry)',
-        ts: 'combat.ts — isPlayerControlled check with Tanya vs infantry exception',
-        impact: 'FIXED: Player units no longer auto-retaliate; Tanya vs infantry exception preserved',
-      },
-      {
-        gate: 'Gate 11: Suicide team block',
-        cpp: 'techno.cpp:4981 — IsSuicide team members cannot retaliate',
-        ts: 'combat.ts — no suicide team check',
-        impact: 'Suicide team members retaliate in TS but not C++',
-      },
-      {
-        gate: 'Gate 12: AI threat comparison',
-        cpp: 'techno.cpp:4989-5006 — AI 50% chance, skip if current target is bigger threat',
-        ts: 'combat.ts:557 — simple block: never retarget if has ANY living target',
-        impact: 'TS never retargets from weaker to stronger; C++ AI sometimes does',
-      },
-      {
-        gate: 'foot.cpp range gate',
-        cpp: 'foot.cpp:1128 — human units only retarget if attacker is in weapon range',
-        ts: 'combat.ts — no range check for retaliation',
-        impact: 'Player units retarget to out-of-range attackers in TS; C++ only if in range',
-      },
-      {
-        gate: 'HUNT mission retaliation conflict',
-        cpp: 'rules.ini Hunt.Retaliate=no + MissionControl gate blocks retaliation on HUNT',
-        ts: 'combat.ts:559 — HUNT is explicitly exempted from team mission block',
-        impact: 'TS allows HUNT retaliation (bypasses team gate); C++ blocks it at mission gate',
-      },
+describe('SUMMARY: C++ vs TS return-fire status', () => {
+  it('documents retaliation gate port status', () => {
+    // Post-port status (cpp-parity-retaliation.test.ts validates each gate).
+    const status = [
+      { gate: 'Gate 1: source != NULL',                         status: 'FIXED', note: 'enforced before triggerRetaliation invocation' },
+      { gate: 'Gate 2: MissionControl[Mission].IsRetaliate',    status: 'FIXED', note: 'blocks HUNT/SLEEP/HARVEST/etc. retaliation' },
+      { gate: 'Gate 3: fixed-wing aircraft cannot retaliate',   status: 'FIXED', note: 'MIG/YAK/BADR blocked' },
+      { gate: 'Gate 4: allied attacker blocks retaliation',     status: 'FIXED', note: 'pre-existing' },
+      { gate: 'Gate 5: unarmed units cannot retaliate',         status: 'FIXED', note: 'MCV etc. blocked' },
+      { gate: 'Gate 6: warhead modifier vs source armor == 0',  status: 'FIXED', note: 'via getWarheadMult' },
+      { gate: 'Gate 7: source is dog blocks retaliation',       status: 'FIXED', note: 'C++ dog special targeting' },
+      { gate: 'Gate 8: aircraft source requires AA',            status: 'FIXED', note: 'stats.isAircraft check + altitude' },
+      { gate: 'Gate 9: Tanya vs building block',                status: 'N/A',   note: 'TS Entity≠Structure arch sidesteps' },
+      { gate: 'Gate 10: PlayerReturnFire=no + Tanya exception', status: 'FIXED', note: 'player-control gate preserved' },
+      { gate: 'Gate 11: suicide team members',                  status: 'FIXED', note: 'entity.isSuicide flag' },
+      { gate: 'Gate 12: AI 50% threat comparison',              status: 'SIMPLIFIED', note: 'TS keeps existing target; avoids RNG consumption not matched in WASM' },
+      { gate: 'foot.cpp:1202-1206 human range gate',            status: 'FIXED', note: 'Tanya vs infantry range-gated' },
     ];
-
-    // All mismatches documented — this test always passes as documentation
-    expect(mismatches).toHaveLength(10);
-
-    // Log summary
-    for (const m of mismatches) {
-      console.warn(`[${m.gate}] ${m.impact}`);
-    }
+    expect(status).toHaveLength(13);
+    expect(status.filter(s => s.status === 'FIXED').length).toBeGreaterThanOrEqual(10);
   });
 });

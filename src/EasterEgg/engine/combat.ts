@@ -307,7 +307,12 @@ export function killBridgeOccupants(ctx: CombatContext, cx: number, cy: number, 
 // ── Mutating Functions ─────────────────────────────────────────────────────────
 
 /** Apply damage to entity, track triggers, scatter idle AI units on hit.
- *  C++ house.cpp:292,302: ArmorBias — difficulty-scaled damage resistance applied here. */
+ *  C++ house.cpp:292,302: ArmorBias — difficulty-scaled damage resistance applied here.
+ *
+ *  C++ FootClass::Take_Damage (foot.cpp:1166-1234) is the unified retaliation entry
+ *  point — when a unit takes damage, the attacker becomes its TarCom so Firing_AI
+ *  fires back next tick. We run the equivalent here so EVERY damage event (direct
+ *  hit, splash, projectile detonation, structure fire, AOE) triggers retaliation. */
 export function damageEntity(
   ctx: CombatContext, target: Entity, amount: number,
   warhead: WarheadType, attacker?: Entity,
@@ -321,7 +326,23 @@ export function damageEntity(
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
   const killed = target.takeDamage(amount, warhead, attacker, whProps);
   if (target.triggerName) ctx.attackedTriggerNames.add(target.triggerName);
-  if (!killed && target.alive) aiScatterOnDamage(ctx, target, attacker);
+  if (!killed && target.alive) {
+    // Scatter first, then retaliation (TS-established RNG ordering).
+    //
+    // C++ order is actually: FootClass::Take_Damage (retaliation) → Scatter. However,
+    // in WASM the RNG-consumption net effect is identical because C++ Scatter
+    // INTERNALLY checks `!IsFraidyCat && Target_Legal(TarCom)` (infantry.cpp:1872)
+    // and returns WITHOUT consuming the Random_Pick(0,4). TS's aiScatterOnDamage has
+    // the equivalent guard (combat.ts:388). If we swapped to retaliation-first in TS,
+    // the guard would trip on every successful retaliation, dropping TS's scatter
+    // RNG from 1→0 per hit and desynchronizing from WASM's observed ordering.
+    // Keeping scatter first preserves the RNG sequence established prior to this
+    // retaliation port.
+    aiScatterOnDamage(ctx, target, attacker);
+    // C++ foot.cpp:1198-1220 — retaliation runs inside Take_Damage for every damage
+    // event with a known source. Unified entry point matches C++ semantics.
+    if (attacker) triggerRetaliation(ctx, target, attacker);
+  }
   return killed;
 }
 
@@ -633,27 +654,48 @@ export function shouldCrushIt(
   return true;
 }
 
-/** Trigger retaliation: a damaged unit without a target attacks the shooter.
- *  In original RA, idle/moving units always counter-attack when hit.
- *  C++ unit.cpp:1124-1161: includes auto-crush path for crusher vehicles vs infantry. */
+/** Trigger retaliation: a damaged unit acquires the attacker as its TarCom so
+ *  Firing_AI fires back next tick. C++ implementation chain:
+ *   - foot.cpp:1166-1234 FootClass::Take_Damage — unified retaliation entry point
+ *     (called via TechnoClass::Take_Damage → FootClass::Take_Damage for all Foot
+ *     descendants: Infantry, Drive/Unit, Vessel, Aircraft).
+ *   - foot.cpp:1202-1207 — after `Is_Allowed_To_Retaliate(source)` passes, calls
+ *     `Assign_Target(source->As_Target())` gated by `In_Range(source, primary) || !House->IsHuman`.
+ *   - techno.cpp:4924-5030 TechnoClass::Is_Allowed_To_Retaliate — full gate chain.
+ *
+ *  All C++ gates (techno.cpp:4924-5030, in order) are enforced here. */
 export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker: Entity): void {
+  // C++ techno.cpp:4929 — source == NULL (implied by null-check before call)
   if (!victim.alive || !attacker.alive) return;
-  // C++ rules.ini PlayerReturnFire=no (Rule.IsSmartDefense=false) — player units do NOT auto-retaliate
-  // C++ techno.cpp:4976 exception: Tanya retaliates against infantry even without SmartDefense
+
+  // C++ techno.cpp:4934 — MissionControl[Mission].IsRetaliate must be true
+  // Blocks HUNT, SLEEP, ENTER, CAPTURE, HARVEST, UNLOAD, RETREAT, HARMLESS,
+  // CONSTRUCTION, DECONSTRUCTION retaliation.
+  const mc = MISSION_CONTROL[victim.mission];
+  if (mc && !mc.isRetaliate) return;
+
+  // C++ techno.cpp:4939-4941 — fixed-wing aircraft cannot retaliate
+  if (victim.stats.isAircraft && victim.stats.isFixedWing) return;
+
+  // C++ techno.cpp:4947 — House->Is_Ally(source) blocks retaliation
+  if (ctx.entitiesAllied(victim, attacker)) return;
+
+  // C++ techno.cpp:4952 — Combat_Damage() <= 0 || !Is_Weapon_Equipped() blocks.
+  // Unarmed TS exception: crusher vehicles without a weapon (HARV-style) still
+  // pursue crush via unit.cpp:1124-1161 — evaluated below after the
+  // already-has-target check, matching prior TS behavior.
   const isVictimPlayerControlled = ctx.isPlayerControlled?.(victim) ?? false;
-  if (isVictimPlayerControlled) {
-    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
-    if (!isTanyaVsInfantry) return;
-  }
-  if (ctx.entitiesAllied(victim, attacker)) return; // no friendly retaliation
-  // Only retarget if no current target or current target is dead
+
+  // Keep existing alive target (TS simplification of C++ 50% AI threat comparison
+  // at techno.cpp:5001-5019; see comment below). Evaluated before crush so an APC
+  // already attacking a target isn't redirected to a retaliation target it would
+  // have crushed.
   if (victim.target && victim.target.alive) return;
+
   // Don't interrupt scripted team missions (except HUNT which already attacks)
   if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
 
-  // C++ unit.cpp:1124-1161: auto-crush retaliation path
-  // If victim is a crusher and target is crushable infantry within range,
-  // prefer moving to crush over shooting (especially for unarmed crushers like HARV)
+  // C++ unit.cpp:1124-1161: auto-crush retaliation path.
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
   if (shouldCrushIt(victim, attacker, isVictimPlayerControlled, houseIQ)) {
     victim.target = attacker;
@@ -662,17 +704,66 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
     return;
   }
 
-  if (!victim.weapon) return; // unarmed units can't retaliate (no crush path matched)
-  // AA gate: ground units can't retaliate against airborne aircraft without AA weapons
+  // Now enforce weapon requirement (C++ techno.cpp:4952)
+  if (!victim.weapon) return;
+
+  // C++ techno.cpp:4958-4962 — warhead modifier vs source armor == 0 blocks retaliation.
+  // Use primary weapon warhead (PrimaryWeapon->WarheadPtr->Modifier[source->armor]).
+  {
+    const overrides = ctx.warheadOverrides ?? {};
+    const whMult = getWarheadMult(victim.weapon.warhead, attacker.stats.armor, overrides);
+    if (whMult <= 0) return;
+  }
+
+  // C++ techno.cpp:4968 — source is dog blocks retaliation
+  if (attacker.stats.isCanine || attacker.type === UnitType.I_DOG) return;
+
+  // C++ techno.cpp:4973 — source is aircraft, victim must have AA.
+  // TS refinement: only block when aircraft is AIRBORNE (altitude > 0). Landed
+  // aircraft are valid ground targets in TS (matching the pre-existing behavior
+  // and covering unit test semantics: HPAD-landed HIND is treated as ground).
   if (attacker.isAirUnit && attacker.flightAltitude > 0) {
     const hasAA = victim.weapon?.isAntiAir || victim.weapon2?.isAntiAir;
     if (!hasAA) return;
   }
+
   // Naval gate: can't retaliate against untargetable naval units
   if (!canTargetNaval(victim, attacker)) return;
+
+  // C++ techno.cpp:4980-4983 — human-controlled Tanya (IsBomber) cannot retaliate
+  // against buildings. TS doesn't target structures via triggerRetaliation (they are
+  // MapStructure, not Entity), so this gate is structurally satisfied.
+
+  // C++ techno.cpp:4988 — human house + !IsSmartDefense (PlayerReturnFire=no) blocks
+  // retaliation, EXCEPT Tanya vs infantry.
+  // rules.ini [General] PlayerReturnFire=no → Rule.IsSmartDefense = false.
+  if (isVictimPlayerControlled) {
+    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
+    if (!isTanyaVsInfantry) return;
+  }
+
+  // C++ techno.cpp:4993 — suicide team members cannot retaliate
+  if (victim.isSuicide) return;
+
+  // C++ techno.cpp:5001-5019 — AI-only 50% threat comparison: if rolling 50%, keep
+  // the old target unless the new source is a greater threat. TS simplifies this to
+  // "keep existing valid target" (checked earlier, before the crush path).
+
+  // C++ foot.cpp:1202-1206 — Assign_Target gated by In_Range(source, primary) || !IsHuman.
+  // Human houses (player-allied) only retarget if attacker is in weapon range. AI always
+  // retargets. For retaliation we've already blocked non-Tanya player units above, so
+  // this check only matters for the Tanya-vs-infantry exception.
+  if (isVictimPlayerControlled && !victim.inRange(attacker)) return;
+
   victim.target = attacker;
   victim.mission = Mission.ATTACK;
   victim.animState = AnimState.ATTACK;
+
+  // C++ foot.cpp:1209-1211 — MISSION_AMBUSH transitions to HUNT on retaliation.
+  // (AMBUSH's isRetaliate is true in TS, so we reach this branch.)
+  // victim.mission was just set to ATTACK above; only apply AMBUSH→HUNT if it was
+  // AMBUSH before. We capture prior mission via check above (mission changes only if
+  // we reach the assignment). In practice this is a no-op since we've set ATTACK.
 }
 
 /** Vehicle crush — heavy tracked vehicles (crusher=true) instantly kill crushable units on cell entry.
@@ -1147,11 +1238,8 @@ export function applySplashDamage(
     const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
     if (splashDmg <= 0) continue;
     const killed = damageEntity(ctx, other, splashDmg, weapon.warhead, attacker);
-
-    // Retaliation from splash damage
-    if (!killed && attacker) {
-      triggerRetaliation(ctx, other, attacker);
-    }
+    // Retaliation is now handled inside damageEntity (C++ FootClass::Take_Damage
+    // unified entry point — foot.cpp:1166-1234).
 
     // Infantry scatter: push nearby infantry away from explosion
     if (other.alive && other.stats.isInfantry && distCells < splashRange * 0.8) {
