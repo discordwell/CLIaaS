@@ -1,5 +1,29 @@
 # Session Summaries
 
+## 2026-04-21T22:30Z — Three-agent parallel sweep: SCG07 1→3, SCG11 19→28 (+11 more, +17 session total)
+
+**Result after three parallel opus agents:** Net **+17 ticks** across 7 scenarios from session start (536→553 total).
+
+| Scenario | Start | End | Δ |
+|---|---|---|---|
+| SCG01EA | 78 | 80 | +2 |
+| SCG03EA | 238 | 238 | — |
+| SCG04EA | 36 | 36 | — (architectural, deferred) |
+| SCG06EA | 63 | 67 | +4 |
+| SCG07EA | 1 | 3 | +2 |
+| SCG11EA | 19 | 28 | +9 |
+| SCG13EA | 101 | 101 | — |
+
+**Fixes landed:**
+
+1. **`5a3e7282`** FireLaunch stage gate port — `InfantryClass::Firing_AI` (infantry.cpp:3580-3670, idata.cpp:404). Infantry that acquire a target enter a per-tick `firePrepStage` countdown (from unit-type FireLaunch frame) before the bullet launches. Invisible-bullet Coord_Scatter RNG now consumes on WASM's exact tick N+FireLaunch. (+SCG01 2, +SCG06 4)
+
+2. **`cb87d8b1`** cellBasedGuardScan strict PlayerPtr fog bypass. `entity.isPlayerUnit` treated allies (England in SCG07EA) as "player" and bypassed fog. C++ techno.cpp:624 `IsOwnedByPlayer = (PlayerPtr == House)` — only Greece qualifies. England's JEEP was firing at USSR targets through fog that WASM rejects. Fix mirrors earlier `updateAreaGuard` fix (8bcb62fc). (+SCG07 2)
+
+3. **`26ccc481`** Basic_Path friendly-blocker close-enough abort. USSR 4TNK patrol-assigned MOVE to (62,59) had friendly 4TNK blocking (61,59). C++ drive.cpp:970 clears NavCom when `Distance(NavCom) < CloseEnoughDistance && Mission==MISSION_MOVE`, transitions to GUARD silently. TS was crawling and firing Mission_Move jitter every ~14 ticks. New `patrolBlockedTargetLX/LY` entity fields suppress re-trigger. (+SCG11 9)
+
+**SCG04 tick 36 deferred** — diagnosed: drives-in-GUARD team vehicles need `DriveClass::Start_Of_Move` → `DriveClass::AI` → `Per_Cell_Process(PCP_END)` port to populate `path[]` and flip `isDriving=false` at destination. ~100-200 LOC scope.
+
 ## 2026-04-21T21:00Z — FireLaunch stage gate port (5a3e7282): SCG01 78→80, SCG06 63→67
 
 **Result:** First-divergence ticks after cherry-picking `1bd992e2` onto main as `5a3e7282`:
