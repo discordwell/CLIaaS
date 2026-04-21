@@ -77,6 +77,7 @@ function makeCtx(overrides?: Partial<MissionAIContext>): MissionAIContext {
     triggerRetaliation: () => {},
     handleUnitDeath: () => {},
     launchProjectile: () => {},
+    deferInvisibleScatter: () => {},
     applySplashDamage: () => {},
     getFirepowerBias: () => 1.0,
     getROFBias: () => 1.0,

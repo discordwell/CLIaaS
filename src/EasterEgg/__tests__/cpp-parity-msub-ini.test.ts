@@ -635,6 +635,7 @@ describe('BEHAVIORAL: updateAttack blocks firing while cloaked/uncloaking (vesse
       triggerRetaliation: () => {},
       handleUnitDeath: () => {},
       launchProjectile: () => {},
+    deferInvisibleScatter: () => {},
       applySplashDamage: () => {},
       getFirepowerBias: () => 1.0,
       getROFBias: () => 1.0,

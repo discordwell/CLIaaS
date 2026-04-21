@@ -73,6 +73,7 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; t
     triggerRetaliation: () => {},
     handleUnitDeath: () => {},
     launchProjectile: () => {},
+    deferInvisibleScatter: () => {},
     applySplashDamage: () => {},
     getFirepowerBias: () => 1,
     getArmorBias: () => 1,

@@ -1042,17 +1042,26 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget || civilianSkipScan) ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
-    // C++ foot.cpp:593 — Target_Something_Nearby sets TarCom, then Firing_AI
-    // fires WITHIN THE SAME ENTITY UPDATE. Damage + infantry scatter resolves
-    // before the next entity's guard scan runs (sequential processing).
-    // C++ does NOT change mission — unit stays on GUARD, fires via Firing_AI,
-    // and does NOT pursue the target. Match by temporarily switching to ATTACK
-    // for the inline fire, then restoring GUARD so the unit doesn't chase.
-    // C++ parity: Mission_Guard SETS TarCom via Target_Something_Nearby but does NOT fire.
-    // Firing_AI (which runs at the TOP of updateGuard every tick) will fire NEXT tick
-    // when the target is seen with weapon cooldown ready.
+    // C++ infantry.cpp:1237 / unit.cpp:425 — after Mission_Dispatch (Mission_Guard
+    // calls Target_Something_Nearby, setting TarCom), Firing_AI runs SAME TICK and
+    // fires if target is in range with Arm=0. Mission stays MISSION_GUARD (C++
+    // Target_Something_Nearby never reassigns mission). Without this same-tick
+    // fire, TS's top-of-updateGuard Firing_AI block (line 890+) only fires on the
+    // NEXT tick, putting TS's scatter RNG 1 tick behind WASM's — surfaced as
+    // SCG03 tick 247 / SCG06 tick 64 divergence after 9a334f4b's same-tick
+    // scatter refactor.
     entity.target = bestTarget;
-    // Stay on GUARD — don't pursue, don't switch to ATTACK. C++ keeps Mission==GUARD.
+    if (entity.weapon && entity.attackCooldown <= 0 && entity.inRange(bestTarget)) {
+      // Temporarily switch to ATTACK so updateAttack's fire path runs, then
+      // restore GUARD. C++ keeps Mission==GUARD throughout; updateAttack may
+      // also stay ATTACK if it does internal transitions, so guard with the
+      // post-check.
+      entity.mission = Mission.ATTACK;
+      updateAttack(ctx, entity);
+      if ((entity.mission as Mission) === Mission.ATTACK) {
+        entity.mission = Mission.GUARD;
+      }
+    }
     return;
   }
 

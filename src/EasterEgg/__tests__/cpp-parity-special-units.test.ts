@@ -92,6 +92,7 @@ function makeMissionAIContext(overrides: Partial<MissionAIContext> = {}): Missio
     triggerRetaliation: vi.fn(),
     handleUnitDeath: vi.fn(),
     launchProjectile: vi.fn(),
+    deferInvisibleScatter: vi.fn(),
     applySplashDamage: vi.fn(),
     getFirepowerBias: () => 1,
     getROFBias: () => 1,
