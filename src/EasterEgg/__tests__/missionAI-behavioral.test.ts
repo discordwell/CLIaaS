@@ -160,13 +160,18 @@ describe('updateGuard', () => {
     expect(entity.animState).toBe(AnimState.IDLE);
   });
 
-  it('entity in GUARD auto-engages nearby enemy within scan range', () => {
-    const player = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
+  it('dog in GUARD auto-engages nearby enemy within scan range', () => {
+    // C++ FootClass::Mission_Guard → Target_Something_Nearby(THREAT_RANGE).
+    // Per techno.cpp:2013-2026, only DOGS / MEDICS / MECHANICS get type bits added to
+    // the scan mask; regular infantry get mask=0 → Evaluate_Object rejects everything
+    // → scan is a no-op. Regular-unit auto-engage in GUARD happens via retaliation or
+    // explicit orders. This test uses a DOG to exercise the in-range scan path.
+    const player = makeEntity(UnitType.I_DOG, House.Spain, 300, 300);
     player.mission = Mission.GUARD;
     player.lastGuardScan = 0;
 
     const enemy = makeEntity(UnitType.I_E1, House.USSR, 330, 300);
-    // Place enemy close enough (within sight range = 4 cells = 96px; dist ~1.25 cells)
+    // Place enemy close enough (~1.25 cells; well within dog guardRange=7)
     const ctx = makeMockContext({ entities: [player, enemy] });
 
     updateGuard(ctx, player);

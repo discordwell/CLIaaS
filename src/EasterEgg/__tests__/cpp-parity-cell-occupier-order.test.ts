@@ -106,7 +106,10 @@ describe('Cell occupier LIFO order — C++ cell.cpp:1189 Occupy_Up + techno.cpp:
     // Two enemy infantry in the same cell (different sub-cells), both in range.
     // ctx.entities order = INI/unlimbo order: [older, newer].
     // C++ should pick "newer" (LIFO head). TS must match.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    // Use DOG scanner: C++ Mission_Guard only scans for dog/medic/mechanic
+    // (techno.cpp:2013-2026 — type bits added only for these). Regular infantry
+    // Mission_Guard is a mask=0 no-op scan.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
     scanner.target = null;
 
@@ -140,7 +143,10 @@ describe('Cell occupier LIFO order — C++ cell.cpp:1189 Occupy_Up + techno.cpp:
 
   it('picks newest among 3+ infantry sharing a cell', () => {
     // Stress test: 3 infantry sharing a cell. C++ LIFO picks the last unlimboed.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    // Use DOG scanner: C++ Mission_Guard only scans for dog/medic/mechanic
+    // (techno.cpp:2013-2026 — type bits added only for these). Regular infantry
+    // Mission_Guard is a mask=0 no-op scan.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
     scanner.target = null;
 
@@ -173,7 +179,10 @@ describe('Cell occupier LIFO order — C++ cell.cpp:1189 Occupy_Up + techno.cpp:
     // Two cells each with 2 enemies. The guard scan picks one entity per cell,
     // then the bestval bug makes the last cell in scan order win overall.
     // Within each cell, the newest (last in entity array) should be picked.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    // Use DOG scanner: C++ Mission_Guard only scans for dog/medic/mechanic
+    // (techno.cpp:2013-2026 — type bits added only for these). Regular infantry
+    // Mission_Guard is a mask=0 no-op scan.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
     scanner.target = null;
 

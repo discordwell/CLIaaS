@@ -100,13 +100,20 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; t
 }
 
 describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <=', () => {
-  it('target at EXACTLY weapon range is included (C++ Distance <= Weapon_Range)', () => {
-    // C++ In_Range: ::Distance(Fire_Coord, target->Center_Coord()) <= Weapon_Range
-    // M1Carbine range = 3.0 cells. Target at exactly 3.0 should be in range.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+  // C++ parity note: FootClass::Mission_Guard calls Target_Something_Nearby(THREAT_RANGE)
+  // → Greatest_Threat(THREAT_RANGE). Per techno.cpp:2013-2026, only DOGS / MEDICS / MECHANICS
+  // get type bits added to the scan mask; regular infantry and vehicles get mask=0, which
+  // makes Evaluate_Object (techno.cpp:1539) reject every candidate — the scan is a no-op.
+  // These tests therefore use a DOG scanner, which gets THREAT_INFANTRY bits added and
+  // can actually acquire infantry targets via Mission_Guard's cell-based scan.
+
+  it('target at EXACTLY guard scan range is included (C++ Distance <= scanRange)', () => {
+    // C++ In_Range: ::Distance(Fire_Coord, target->Center_Coord()) <= scanRange
+    // Dog guardRange = 7 cells. Target at exactly 7.0 should be in range.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    // Place target at exactly 3 cells away (horizontal)
-    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + 3.0 * CELL_SIZE, 100);
+    const dogScanRange = scanner.stats.guardRange!; // 7 cells
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + dogScanRange * CELL_SIZE, 100);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });
@@ -116,26 +123,47 @@ describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <
     expect(scanner.target).toBe(target);
   });
 
-  it('target just beyond weapon range is excluded (C++ Distance > Weapon_Range)', () => {
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+  it('target just beyond guard scan range is excluded (C++ Distance > scanRange)', () => {
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    // Place target at 3.1 cells (just outside M1Carbine range=3.0)
-    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + 3.1 * CELL_SIZE, 100);
+    const dogScanRange = scanner.stats.guardRange!; // 7 cells
+    // Place target just outside guardRange
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + (dogScanRange + 0.1) * CELL_SIZE, 100);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });
     updateGuard(ctx, scanner);
 
-    // Should NOT find this target — beyond weapon range
+    // Should NOT find this target — beyond guard scan range
+    expect(scanner.target).toBeNull();
+  });
+
+  it('regular infantry Mission_Guard does NOT auto-acquire targets (C++ mask=0 no-op)', () => {
+    // C++ FootClass::Mission_Guard → Target_Something_Nearby(THREAT_RANGE) →
+    // Greatest_Threat(THREAT_RANGE). For non-dog/medic/mechanic infantry, mask=0 and
+    // Evaluate_Object rejects every candidate. Mission_Guard auto-acquire for regular
+    // units happens ONLY via retaliation from damage or explicit orders.
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    scanner.mission = Mission.GUARD;
+    // Target in-range
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + 2.0 * CELL_SIZE, 100);
+    target.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [scanner, target] });
+    updateGuard(ctx, scanner);
+
+    // C++ parity: no target acquired (mask=0 → Evaluate_Object always false)
     expect(scanner.target).toBeNull();
   });
 });
 
 describe('Guard scan has no terrain LOS check — C++ Evaluate_Object parity', () => {
-  it('target behind wall is still valid (C++ has no hasLineOfSight in Evaluate_Object)', () => {
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+  it('dog target behind wall is still valid (C++ has no hasLineOfSight in Evaluate_Object)', () => {
+    // Use DOG as scanner: C++ adds THREAT_INFANTRY bits so Mission_Guard actually scans.
+    // Regular infantry Mission_Guard is a no-op scan (mask=0).
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + 1 * CELL_SIZE, 100);
     target.mission = Mission.GUARD;
 
     // LOS blocked by terrain, but C++ doesn't check LOS in guard scan

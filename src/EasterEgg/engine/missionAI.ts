@@ -1040,7 +1040,29 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // C++ infantry.cpp:2295-2297: Tanya does NOT auto-fire when human-controlled.
   const tanyaSkip = entity.type === UnitType.I_TANYA && entity.house === ctx.playerHouse;
 
-  const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget || civilianSkipScan) ? null : cellBasedGuardScan(ctx, entity, scanRange, isDog);
+  // C++ foot.cpp:642 Mission_Guard calls Target_Something_Nearby(THREAT_RANGE)
+  //   → Greatest_Threat(THREAT_RANGE) at techno.cpp:1987.
+  // Per techno.cpp:2013-2026, type bits are added ONLY for:
+  //   - Dogs (IsDog) → THREAT_INFANTRY
+  //   - Medics (Combat_Damage() < 0) → THREAT_INFANTRY
+  //   - Mechanics (FIXIT_CSII) → THREAT_VEHICLES | THREAT_AIR
+  // Regular infantry, vehicles, and vessels get NO type bits added → mask=0 →
+  // Evaluate_Object at techno.cpp:1539 rejects every candidate. The scan is a
+  // complete no-op for them. Only dogs (and medics/mechanics, which are already
+  // dispatched earlier via updateMedic/updateMechanicUnit) should scan here.
+  //
+  // Mission.GUARD auto-acquire in C++ happens ONLY via:
+  //   (a) Retaliation from damage — TechnoClass::Assign_Target(source) in take_damage
+  //   (b) Explicit player/team orders — Assign_Target / Assign_Mission from AI
+  //   (c) Dog/medic/mechanic specialized scans (handled here or in updateMedic)
+  //
+  // Gating this scan to isDog only also prevents the same-tick Firing_AI fix
+  // (commit a47eb9a9) from firing a weapon on a target WASM never acquires,
+  // which produced an extra Coord_Scatter RNG at SCG06 tick 63 and SCG03 tick 238.
+  const scanAllowedInGuard = isDog;
+  const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget || civilianSkipScan || !scanAllowedInGuard)
+    ? null
+    : cellBasedGuardScan(ctx, entity, scanRange, isDog);
   if (bestTarget) {
     // C++ infantry.cpp:1237 / unit.cpp:425 — after Mission_Dispatch (Mission_Guard
     // calls Target_Something_Nearby, setting TarCom), Firing_AI runs SAME TICK and
@@ -1065,44 +1087,13 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     return;
   }
 
-  // M4: No mobile targets — check for enemy structures in range (C++ Target_Something_Nearby includes buildings)
-  // C++ techno.cpp:1610-1618: human units only auto-target ARMED buildings (with PrimaryWeapon)
-  if (!isDog && entity.weapon && !spyPlayerSkipAutoTarget && !civilianSkipScan) {
-    let bestStruct: MapStructure | null = null;
-    let bestStructDist = Infinity;
-    for (const s of ctx.structures) {
-      if (!s.alive) continue;
-      // C++ Evaluate_Object only skips ALLIED buildings. Neutral buildings
-      // are valid targets when not allied (e.g., USSR vs Neutral in SCG03EA).
-      if (ctx.isAllied(entity.house, s.house)) continue;
-      // C++ parity: BARL/BRL3 are OverlayClass (overlay), not BuildingClass.
-      // They never appear in the C++ TechnoClass target scan. TS represents
-      // them as MapStructure for damage tracking, but they must be excluded
-      // from auto-target. Reproduced via SCG03EA: V2RL at (76,66) was firing
-      // a SCUD at the BRL3 at (84,65), exploding the barrel and breaking
-      // RNG sync from tick 1 onward.
-      if (s.type === 'BARL' || s.type === 'BRL3') continue;
-      // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings
-      if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
-      // Structure center in leptons
-      // C++ Center_Coord: cell origin + half footprint. 1x1 buildings = +128, 2x2 = +256.
-      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      const sLX = s.cx * LEPTON_SIZE + (fw * LEPTON_SIZE) / 2;
-      const sLY = s.cy * LEPTON_SIZE + (fh * LEPTON_SIZE) / 2;
-      const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
-      // C++ techno.cpp:1517-1523: In_Range uses <= (inclusive boundary)
-      if (dist > scanRange * LEPTON_SIZE) continue;
-      if (dist < bestStructDist) {
-        bestStructDist = dist;
-        bestStruct = s;
-      }
-    }
-    if (bestStruct) {
-      entity.mission = Mission.ATTACK;
-      entity.targetStructure = bestStruct;
-      return;
-    }
-  }
+  // C++ parity: structure auto-target in Mission_Guard is DISABLED.
+  // Greatest_Threat(THREAT_RANGE) at techno.cpp:2032-2040 only adds RTTI_BUILDING
+  // to mask when one of THREAT_BUILDINGS / THREAT_CIVILIANS / THREAT_BASE_DEFENSE /
+  // THREAT_CAPTURE / THREAT_TIBERIUM / THREAT_POWER / THREAT_FACTORIES / THREAT_FAKES
+  // is set. Mission_Guard passes THREAT_RANGE only, and the dog branch forces
+  // method=THREAT_INFANTRY (no BUILDING bit either). Scan removed; legitimate
+  // structure targets come from explicit orders or team HUNT logic.
 
   // C++ foot.cpp:594 — Random_Animate() when no target found (on scan tick).
   // Infantry consume 2-3 RNG values (IdleTimer + animation selection + optional facing).

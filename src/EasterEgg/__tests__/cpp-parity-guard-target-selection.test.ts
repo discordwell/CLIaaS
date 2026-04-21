@@ -126,11 +126,15 @@ describe('Existing target retention — C++ techno.cpp:5260-5266', () => {
   it('clears existing target when out of range and rescans', () => {
     // C++ Target_Something_Nearby: if Target_Legal(TarCom) && !(In_Range(TarCom, primary)),
     // Assign_Target(TARGET_NONE), then call Greatest_Threat.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    //
+    // Use DOG scanner: C++ Mission_Guard only scans (acquires) for dog/medic/mechanic
+    // (techno.cpp:2013-2026 — type bits added only for these). Regular infantry
+    // Mission_Guard is a mask=0 no-op scan.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
 
-    // Place existing target well out of range (M1Carbine range = 3.0 cells)
-    const farTarget = makeEntity(UnitType.I_E1, House.Greece, 200 + 10 * CELL_SIZE, 200);
+    // Place existing target well out of range (dog guardRange = 7 cells)
+    const farTarget = makeEntity(UnitType.I_E1, House.Greece, 200 + 12 * CELL_SIZE, 200);
     farTarget.mission = Mission.GUARD;
 
     // A new target in range
@@ -147,7 +151,8 @@ describe('Existing target retention — C++ techno.cpp:5260-5266', () => {
   });
 
   it('clears existing target when dead and rescans', () => {
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    // Use DOG scanner — see note above.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
 
     const deadTarget = makeEntity(UnitType.I_E1, House.Greece, 200 + 2 * CELL_SIZE, 200);
@@ -173,7 +178,10 @@ describe('Cell-based scan order — C++ techno.cpp:2108-2209', () => {
     //
     // With two targets in the same ring, the one scanned LAST should win,
     // not the one with the higher threat score.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    //
+    // Use DOG scanner: C++ Mission_Guard only scans for dog/medic/mechanic; regular
+    // infantry Mission_Guard is a mask=0 no-op scan (techno.cpp:2013-2026).
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
     scanner.target = null;
 
@@ -206,21 +214,23 @@ describe('Cell-based scan order — C++ techno.cpp:2108-2209', () => {
 
   it('early bailout at crange/4 prevents scanning outer rings', () => {
     // C++ techno.cpp:2198-2205: if bestobject != NULL at radius == crange/4, return early.
-    // For E1 M1Carbine (range=3.0), crange = floor(3.0)+1 = 4, crange/4 = 1.
-    // So if a target is found at ring 0 or 1, it returns at ring 1 without checking ring 2/3.
-    const scanner = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    // For DOG guardRange=7, crange = floor(7)+1 = 8, crange/4 = 2, crange/2 = 4.
+    // If a target is found by radius == crange/4 (ring 2), return immediately.
+    //
+    // Use DOG scanner: regular infantry Mission_Guard is a mask=0 no-op scan.
+    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 200, 200);
     scanner.mission = Mission.GUARD;
     scanner.target = null;
 
-    // Inner target at ring 1
+    // Inner target at ring 2 (the bailout ring)
     const innerTarget = makeEntity(UnitType.I_E1, House.Greece,
-      200 + 1 * CELL_SIZE, 200);
+      200 + 2 * CELL_SIZE, 200);
     innerTarget.mission = Mission.GUARD;
 
-    // Outer target at ring 2 — would have higher score if scanned,
-    // but early bailout prevents it
+    // Outer target at ring 5 — would have higher score if scanned,
+    // but early bailout at ring 2 prevents reaching ring 5.
     const outerTarget = makeEntity(UnitType.I_E1, House.Greece,
-      200 + 2 * CELL_SIZE, 200);
+      200 + 5 * CELL_SIZE, 200);
     outerTarget.mission = Mission.GUARD;
 
     const ctx = makeCtx({
@@ -232,8 +242,8 @@ describe('Cell-based scan order — C++ techno.cpp:2108-2209', () => {
     });
     updateGuard(ctx, scanner);
 
-    // Early bailout at crange/4=1 means innerTarget (found at ring 1) is returned
-    // before outerTarget (ring 2) is ever checked.
+    // Early bailout at crange/4=2 means innerTarget (found at ring 2) is returned
+    // before outerTarget (ring 5) is ever checked.
     expect(scanner.target).toBe(innerTarget);
   });
 });

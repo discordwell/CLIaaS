@@ -505,11 +505,14 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
    */
 
   it('guard scan uses weapon range (THREAT_RANGE, C++ foot.cpp:593)', () => {
-    // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE)
-    // THREAT_RANGE means scan within weapon range (Threat_Range(0))
-    // C++ parity: guard scan now uses weapon range (M1Carbine range=3.0)
-    const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
-    // Place enemy within weapon range (2 cells < M1Carbine range=3.0)
+    // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE) → Greatest_Threat(THREAT_RANGE).
+    // Per techno.cpp:2013-2026, only DOGS / MEDICS / MECHANICS get type bits added;
+    // regular infantry get mask=0, making Evaluate_Object reject all candidates. This
+    // is a no-op scan for regular infantry — auto-target comes via retaliation or team
+    // orders. So this test verifies a DOG (the main mask-eligible unit) acquires an
+    // in-range enemy infantry via Mission_Guard's cell scan.
+    const guard = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    // Place enemy within dog guardRange (2 cells < guardRange=7)
     const nearEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
 
     const ctx = makeCtx({
@@ -521,8 +524,7 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     guard.lastGuardScan = 0; // allow scan
     updateGuard(ctx, guard);
 
-    // C++ parity: guard fires inline via Firing_AI then restores GUARD.
-    // Target stays set for subsequent Firing_AI ticks.
+    // C++ parity: dog acquires target in Mission_Guard (THREAT_INFANTRY mask added).
     expect(guard.target).not.toBeNull();
     expect(guard.mission).toBe(Mission.GUARD);
   });
@@ -594,9 +596,14 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     expect(guard.target).toBeNull();
   });
 
-  it('guard auto-targets structures when no mobile enemies (C++ Target_Something_Nearby includes buildings)', () => {
-    // C++ foot.cpp:593: Target_Something_Nearby scans buildings too
-    // TS missionAI.ts:783-801: second pass scans structures
+  it('guard does NOT auto-target structures (C++ THREAT_RANGE mask excludes RTTI_BUILDING)', () => {
+    // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE) → Greatest_Threat.
+    // techno.cpp:2032-2040 — RTTI_BUILDING is added to mask ONLY when method includes
+    // THREAT_BUILDINGS / THREAT_CIVILIANS / THREAT_BASE_DEFENSE / THREAT_CAPTURE /
+    // THREAT_TIBERIUM / THREAT_POWER / THREAT_FACTORIES / THREAT_FAKES. Mission_Guard
+    // passes THREAT_RANGE only, so buildings are invisible to the scan.
+    // Legitimate building targets come from explicit orders (updateMove/updateAttack
+    // with targetStructure) or team HUNT logic.
     const guard = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
 
     const enemyStruct = {
@@ -614,9 +621,9 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     guard.lastGuardScan = 0;
     updateGuard(ctx, guard);
 
-    // Should target the structure
-    expect(guard.targetStructure).not.toBeNull();
-    expect(guard.mission).toBe(Mission.ATTACK);
+    // C++ parity: Mission_Guard does NOT auto-target structures.
+    expect(guard.targetStructure).toBeNull();
+    expect(guard.mission).toBe(Mission.GUARD);
   });
 });
 
@@ -731,10 +738,16 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
     expect(dog.target).toBeNull();
   });
 
-  it('infantry targets normal enemy but ignores spy when both present (C++ techno.cpp:1557)', () => {
-    const guard = makeEntity(UnitType.E1, House.USSR, 100, 100);
+  it('dog targets spy preferentially via dog-spy detection (3-cell range)', () => {
+    // C++ techno.cpp:1557-1564: spies are invisible to non-dog scanners; dogs see
+    // them. TS additionally has a 3-cell "fast" dog-spy detect (missionAI.ts ~line 984)
+    // that fires BEFORE the normal guard scan. With both a spy and a regular enemy
+    // in range, the dog switches to ATTACK on the spy directly.
+    //
+    // Regular infantry Mission_Guard is a mask=0 no-op scan (techno.cpp:2013-2026),
+    // so this test uses DOG to make the scan observable.
+    const guard = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     const spy = makeEntity(UnitType.I_SPY, House.Greece, 100 + 2 * CELL_SIZE, 100);
-    // Place enemy within weapon range (2.5 cells < M1Carbine range=3.0)
     const normalEnemy = makeEntity(UnitType.E1, House.Greece, 100 + 2.5 * CELL_SIZE, 100);
 
     const ctx = makeCtx({
@@ -746,10 +759,9 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
     guard.lastGuardScan = 0;
     updateGuard(ctx, guard);
 
-    // Should target the normal enemy, NOT the spy
-    // C++ parity: guard fires inline then restores GUARD
-    expect(guard.target).toBe(normalEnemy);
-    expect(guard.mission).toBe(Mission.GUARD);
+    // Dog-spy detection at 3 cells switches to ATTACK on the spy.
+    expect(guard.target).toBe(spy);
+    expect(guard.mission).toBe(Mission.ATTACK);
   });
 
   it('V2 rocket launcher ignores spy (C++ techno.cpp:1557-1563)', () => {
