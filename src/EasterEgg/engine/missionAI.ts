@@ -1163,9 +1163,12 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
-      // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-      // C++ techno.cpp:1529: player-owned entities always visible (bypass fog check)
-      if (areaGuardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
+      // C++ techno.cpp:1529 Evaluate_Object: `!IsOwnedByPlayer && !IsDiscoveredByPlayer` rejects target.
+      // `IsOwnedByPlayer = (PlayerPtr == House)` (techno.cpp:624) is STRICTLY the player's own house,
+      // not player-allied. TS's `isPlayerUnit` covers all allied houses (_playerHouses set), which
+      // made the bypass too permissive — SCG07EA tick 0 E4 USSR targeting England's JEEP that C++
+      // filters (England != PlayerPtr=Greece, and not yet IsDiscoveredByPlayer at tick 0).
+      if (areaGuardHouseIdx >= 0 && other.house !== ctx.playerHouse && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
       const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
       if (dist > entity.stats.sight * LEPTON_SIZE) continue;
       // C++ Evaluate_Object has no terrain LOS check — removed for parity.
@@ -1208,11 +1211,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
     // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
     if (other.cloakState === CloakState.CLOAKED) continue;
-    // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check.
-    // C++ techno.cpp:1529 (Evaluate_Object) bypasses discovery for player-owned units:
-    // `if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer)`. Matches
-    // the bypass at lines 638, 769, 1167.
-    if (areaGuardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
+    // C++ techno.cpp:1529 Evaluate_Object: `!IsOwnedByPlayer && !IsDiscoveredByPlayer` rejects target.
+    // IsOwnedByPlayer is STRICTLY `(PlayerPtr == House)` — see leash-scan block above for full
+    // explanation of the SCG07EA tick 0 E4 USSR + England JEEP case this prevents.
+    if (areaGuardHouseIdx >= 0 && other.house !== ctx.playerHouse && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
     // A5: Use scanPos (home) for distance check, not entity's current position
     const dist = leptonDist(originLX, originLY, other.leptonX, other.leptonY);
     if (dist > scanRange * LEPTON_SIZE) continue;

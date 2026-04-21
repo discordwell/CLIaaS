@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-04-20T23:40Z — SCG07EA Mission_Guard_Area IsOwnedByPlayer strict fix (tick 1→2)
+
+**Result:** SCG07EA first-divergence pushed from tick 1 to tick 2. Other 6 scenarios unchanged (SCG01=45, SCG03=120+, SCG04=15, SCG06=65, SCG07=2, SCG11=19, SCG13=101).
+
+**Root cause:** C++ `techno.cpp:1529` (`Evaluate_Object`) filters target candidates by `!IsOwnedByPlayer && !IsDiscoveredByPlayer`. `IsOwnedByPlayer` is STRICTLY `(PlayerPtr == House)` (techno.cpp:624, 3781) — true only for the human player's direct house, NOT player-allied houses.
+
+TS's `Entity.isPlayerUnit` (entity.ts:517-519) evaluates via `_playerHouses.has(this.house)` where `_playerHouses` is populated with the player's house PLUS all declared allies (index.ts:1227-1232). Using `!other.isPlayerUnit` as the fog-bypass in `updateAreaGuard` (missionAI.ts:1168, 1215) made AI scans see through to allied houses that C++ filters.
+
+**SCG07EA tick 0 manifestation:** Player = Greece, ally = England. E4 USSR (AI, Area Guard) at cell (30,61) scans. England's JEEP at (27,58) is ~4 cells away, within the 10-cell scan range. TS: `!other.isPlayerUnit` = false (England is player-allied) → skips fog filter → distance passes → E4 acquires target → `missionTimer = 1` → `updateAreaGuard` caller (index.ts:4095) sees `missionTimer <= 0` false → skips `Random_Pick(1,5)` jitter. C++: England JEEP is not IsOwnedByPlayer (England ≠ Greece) and not yet IsDiscoveredByPlayer (tick 0 fog empty) → Evaluate_Object rejects → scanner falls through to `Random_Animate() + Random_Pick(1,5)` (2 RNG calls). 3 E4 USSR Area Guard infantry affected.
+
+Net effect: TS fires 1 fewer RNG than WASM at tick 0 (the exact +1 first-divergence delta). Per-entity diff confirmed TS missing infantry[59, 60, 85] (Logic 109, 110, 135) RNG firings entirely.
+
+**Fix:** `src/EasterEgg/engine/missionAI.ts:1168, 1215` — change `!other.isPlayerUnit` to `other.house !== ctx.playerHouse` in `updateAreaGuard` leash-scan + main scan. Only applied to Area Guard; Hunt (line 624) and Guard (line 755) left with `isPlayerUnit` since they showed no improvement without the fix and applying there caused cascading regressions in SCG04EA (where Greece's ally chain triggers differently).
+
+**Test:** `src/EasterEgg/__tests__/cpp-parity-area-guard-fog.test.ts` — 3 tests. AI scanner filters out player-allied target with empty fog; AI scanner acquires strict PlayerPtr target via IsOwnedByPlayer bypass; AI scanner acquires allied target once fog has revealed the cell.
+
+**Remaining SCG07EA tick-2 divergence (Δ=1):** WASM fires 7 `Mission_Move_foot` RNGs at tick 1 (4 reinforcement vessels: LST + 3 PTs, the last PT's jitter produces 1 extra rejection draw). TS fires 6 — the last vessel is skipped. Same Phase 3 vessel-cadence off-by-one pattern identified in the earlier SCG07EA Task #52 investigation. Structural, not a correctness bug in targeting.
+
+---
+
 ## 2026-04-20T23:30Z — SCG01EA tick 45 investigation (no metric change)
 
 **Result:** No metric change. All 7 first-divergence ticks unchanged (SCG01=45, SCG03=267, SCG04=3, SCG06=68, SCG07=1, SCG11=19, SCG13=101). Investigation only — added entity-tag annotations to the per-entity RNG diff harness for clearer debugging.
