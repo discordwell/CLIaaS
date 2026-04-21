@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-04-21T02:00Z — SCG07EA vessel reinforcement Phase-3 cadence fix (tick 2→3)
+
+**Result:** SCG07EA first-divergence pushed from tick 2 to tick 3. Other 6 scenarios unchanged (SCG01=45, SCG03=239, SCG04=15, SCG06=65, SCG07=3, SCG11=19, SCG13=101).
+
+**Root cause:** The SCG04EA `vehicleClaims` path-reservation emulation (team.ts:785 → commit 2a4ee8d2) applied the same chain-flip logic to vessels that was designed for vehicles. In SCG07EA, the two reinforcement teams `mcvlst` (1× LST) and `cover` (3× PT) both target unload waypoint 0 and all 4 vessels unlimbo at the same water-edge cell (9, 53). The chain-flip ran as: LST claims → prior=null, LST.isDriving=true; PT1 claims → prior=LST, LST.isDriving=false, PT1.isDriving=true; PT2 claims → prior=PT1, PT1.isDriving=false, PT2.isDriving=true; PT3 claims → prior=PT2, PT2.isDriving=false, PT3.isDriving=true. Final: 3 vessels have isDriving=false, the last (PT3) has isDriving=true. Entity-AI phase: pre-Commence pops MOVE for the 3 with isDriving=false → 3 Mission_Move_foot fires (6 RNG with LCG rejection). PT3 is blocked by the pre-Commence gate and silently drops its jitter, versus WASM's 4-vessel / 7-RNG tick-2 fan-out.
+
+**Fix:** `src/EasterEgg/engine/team.ts:785-809` — exclude vessels from the `vehicleClaims` path-reservation emulation. Both the `unit.isDriving=true` initial set AND the `prior.isDriving=false` retroactive flip now skip when `stats.isVessel` is true. Vehicles (3TNK, MCV, etc.) preserve the SCG04EA flip semantics unchanged; vessels fall through to the end-of-tick Commence path that doesn't exhibit the asymmetric drop-one-jitter artifact. Rationale: C++ VesselClass::AI (vessel.cpp:592, 658) uses an additional `Is_Door_Closed()` gate separate from `!IsDriving` — the door-closed check is what actually delays LST transports with open doors, not IsDriving. The vehicle flip emulates Basic_Path transient reservation conflicts between 2 vehicle teams, which doesn't map to vessels.
+
+**Test:** `src/EasterEgg/__tests__/cpp-parity-scg07-vessel-reinforce.test.ts` — 2 tests. (1) Sibling-team vessel reinforcements share uniform isDriving state (no chain-flip asymmetry). (2) Regression guard: non-vessel vehicles still participate in the path-reservation flip (SCG04EA set1/set2 stagger preserved).
+
+**WASM rngLog evidence at tick 2 (diff harness, pre-fix):** `[Mission_Move_foot seed=2115638804, ...]` × 7 calls with WASM entity tags 14182, 14183×3, 14184×2, 14185 (logic idx = 4 distinct vessels). TS fires only 6 calls tagged `vessel[132/133×3/134×2]` — the 4th vessel never fires. Post-fix: TS fires 7 calls matching WASM seed-by-seed.
+
+**7-scenario deltas:** SCG01=45 (unchanged), SCG03=239 (unchanged), SCG04=15 (unchanged), SCG06=65 (unchanged), **SCG07=2→3 (+1)**, SCG11=19 (unchanged), SCG13=101 (unchanged).
+
+**C++ references:** reinf.cpp:471 (Unlimbo at Calculated_Cell); reinf.cpp:480 (post-spawn Assign_Mission(GUARD)+Commence); vessel.cpp:592,658 (VesselClass::AI `!IsDriving && Is_Door_Closed()` gate); drive.cpp:1304-1398 (DriveClass::AI drives-in-GUARD); team.cpp:1874-2008 (Coordinate_Move); foot.cpp:520-539 (Mission_Move jitter, tag 60010).
+
+---
+
 ## 2026-04-20T23:40Z — SCG07EA Mission_Guard_Area IsOwnedByPlayer strict fix (tick 1→2)
 
 **Result:** SCG07EA first-divergence pushed from tick 1 to tick 2. Other 6 scenarios unchanged (SCG01=45, SCG03=120+, SCG04=15, SCG06=65, SCG07=2, SCG11=19, SCG13=101).
