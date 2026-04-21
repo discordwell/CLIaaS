@@ -124,6 +124,20 @@ export class Entity {
   path: CellPos[] = [];
   pathIndex = 0;
 
+  // C++ parity: when DriveClass::AI → Start_Of_Move → Basic_Path fails for a close
+  // target blocked by friendly unit (drive.cpp:970), the unit's NavCom is cleared
+  // and it returns to GUARD. WASM's Coordinate_Move then re-assigns NavCom via
+  // Assign_Destination (no Timer reset — Assign_Mission queues MOVE for Commence).
+  // TS's team.coordinatePatrol line 898 resets missionTimer=0 on every re-assign,
+  // which would fire Mission_Move's Random_Pick jitter every cycle. To match
+  // WASM, when the unit's path is blocked by a friendly and close enough, flag
+  // the entity so coordinatePatrol skips the timer reset (letting the GUARD
+  // delay run its course instead of re-firing Mission_Move RNG). Flag stores
+  // the lepton-space target it was blocked on — if the team's target changes,
+  // the flag is cleared and normal MOVE assignment resumes.
+  patrolBlockedTargetLX = -1;
+  patrolBlockedTargetLY = -1;
+
   // Animation
   animState: AnimState = AnimState.IDLE;
   animFrame = 0;

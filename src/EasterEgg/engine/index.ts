@@ -5115,6 +5115,79 @@ export class Game {
       return;
     }
 
+    // C++ DriveClass::AI → Start_Of_Move → Basic_Path failure (drive.cpp:961-972 +
+    // foot.cpp:313-500). When a vehicle has moveTarget but no path, and Basic_Path
+    // fails because the direct cell toward the target is blocked by a friendly
+    // unit (Can_Enter_Cell returns MOVE_TEMP), C++ at drive.cpp:970 checks:
+    //   Distance(NavCom) < Rule.CloseEnoughDistance && Mission == MISSION_MOVE
+    // If satisfied, Assign_Destination(TARGET_NONE) — NavCom cleared immediately.
+    // Mission_Move on the next tick sees !NavCom && !IsDriving → Enter_Idle_Mode
+    // (foot.cpp:524) → Mission=GUARD, no Random_Pick fired.
+    //
+    // TS's direct-move fallback sub-cell crawls toward the target even when
+    // Basic_Path would fail in C++, eventually firing Mission_Move jitter
+    // (Random_Pick(0,2)) every ~14 ticks. WASM never fires this RNG because
+    // NavCom was cleared before the first timer expiry. SCG11EA tick 19:
+    // USSR 4TNK at (60,58) patrol-assigned MOVE to (62,59); friendly 4TNK at
+    // (61,59) is the direct-cell blocker.
+    //
+    // Fix: mirror C++ drive.cpp:970 — when path is empty and the adjacent cell
+    // toward the target is occupied by a FRIENDLY unit, AND the target is within
+    // CloseEnoughDistance, clear moveTarget (Enter_Idle_Mode equivalent). Flag
+    // the entity's blocked target so coordinatePatrol (team.ts) doesn't reset
+    // missionTimer=0 on next re-assign — avoids Mission_Move jitter oscillation.
+    //
+    // Gate on `missionTimer > 0` OR previously-blocked: Mission_Move's Random_Pick(0,2)
+    // jitter fires when timer=0 (foot.cpp:536). At Mission.MOVE assignment Commence
+    // sets timer=0 so Mission_Move fires ONCE on the entry tick, consuming RNG to
+    // match WASM's Mission_Move fire. On subsequent ticks (timer > 0) we can safely
+    // clear moveTarget. But if we've already blocked on this target before (flag
+    // set), the initial Mission_Move jitter already fired on the entry tick, and
+    // any timer=0 we see now is a subsequent re-fire — skip the RNG by clearing
+    // moveTarget before the timer-fire handler (block line 3957 takes Enter_Idle
+    // branch without RNG).
+    const alreadyBlockedThisTarget = entity.moveTarget !== null &&
+      entity.patrolBlockedTargetLX === entity.moveTarget.lx &&
+      entity.patrolBlockedTargetLY === entity.moveTarget.ly;
+    if (!fromGuardDrive && entity.moveTarget && entity.path.length === 0 &&
+        (entity.missionTimer > 0 || alreadyBlockedThisTarget) &&
+        !entity.stats.isInfantry && !entity.isAirUnit && !entity.isDriving) {
+      const tgtCellX = Math.floor(entity.moveTarget.lx / 256);
+      const tgtCellY = Math.floor(entity.moveTarget.ly / 256);
+      const curCell = entity.cell;
+      if (tgtCellX !== curCell.cx || tgtCellY !== curCell.cy) {
+        // C++ rules.ini [General] CloseEnough=2.75 → 2.75 * 256 = 704 leptons
+        const CLOSE_ENOUGH_LEPTONS = 704;
+        const dxL = entity.moveTarget.lx - entity.leptonX;
+        const dyL = entity.moveTarget.ly - entity.leptonY;
+        const adx = Math.abs(dxL), ady = Math.abs(dyL);
+        // Octagonal Distance() approximation (C++ coord.cpp Distance)
+        const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+        if (octDist < CLOSE_ENOUGH_LEPTONS) {
+          const sx = Math.sign(tgtCellX - curCell.cx);
+          const sy = Math.sign(tgtCellY - curCell.cy);
+          const adjCellX = curCell.cx + sx;
+          const adjCellY = curCell.cy + sy;
+          const adjOcc = this.map.getOccupancy(adjCellX, adjCellY);
+          if (adjOcc > 0 && adjOcc !== entity.id) {
+            const blocker = this.entityById.get(adjOcc);
+            if (blocker?.alive && this.entitiesAllied(entity, blocker)) {
+              // Flag blocked target so team.coordinatePatrol skips timer reset.
+              entity.patrolBlockedTargetLX = entity.moveTarget.lx;
+              entity.patrolBlockedTargetLY = entity.moveTarget.ly;
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+              setMissionIdle();
+              entity.animState = AnimState.IDLE;
+              resetPathThreshold(entity);
+              return;
+            }
+          }
+        }
+      }
+    }
+
     entity.animState = AnimState.WALK;
 
     // No A2 scan here: C++ Mission_Move's `Target_Something_Nearby(THREAT_RANGE)`

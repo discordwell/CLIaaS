@@ -972,9 +972,25 @@ export class Team {
           // pops queue and sets Timer=0 (mission.cpp:354). Next MissionClass::AI fires
           // Mission_Move handler, consuming Random_Pick(0,2) (foot.cpp:535 tag 60010).
           // Without this reset, TS misses the jitter RNG and diverges from WASM.
-          if (unit.mission !== Mission.MOVE) unit.missionTimer = 0;
+          //
+          // C++ parity guard: updateMove may have cleared moveTarget and set Mission
+          // to GUARD when Basic_Path failed (adjacent cell blocked by friendly unit,
+          // target within CloseEnoughDistance — see index.ts updateMove friendly-
+          // blocker check). In that case, WASM's Coordinate_Move re-assigns NavCom
+          // without resetting Timer (Assign_Mission queues via MissionQueue; Timer=0
+          // reset happens only on Commence pop, which is gated). Skip the Timer
+          // reset when the unit was blocked on this exact target — prevents
+          // Mission_Move from firing Random_Pick jitter on every tick cycle.
+          const targetLXlepton = pixelToLepton(this.target.x);
+          const targetLYlepton = pixelToLepton(this.target.y);
+          const sameBlockedTarget =
+            unit.patrolBlockedTargetLX === targetLXlepton &&
+            unit.patrolBlockedTargetLY === targetLYlepton;
+          if (unit.mission !== Mission.MOVE && !sameBlockedTarget) {
+            unit.missionTimer = 0;
+          }
           unit.mission = Mission.MOVE;
-          unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+          unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
         }
         allArrived = false;
       }
