@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-04-21T14:15Z — Mission_Guard scan: weapon Allowed_Threats override (b7c130d7 correction)
+
+**Result:** SCG01EA 45→78 (+33, matches task target ≥78). Minor regressions on SCG03 (239→238 −1), SCG06 (65→63 −2), SCG07 (3→1 −2). Net +28 ticks across 7 scenarios.
+
+Commit `b7c130d7` had gated `cellBasedGuardScan` in `updateGuard` to dogs only, based on a misreading of C++ `techno.cpp:2013-2040` showing that base `TechnoClass::Greatest_Threat` computes mask=0 for regular infantry/vehicles when called with just THREAT_RANGE. That reading missed the SUBCLASS VIRTUAL DISPATCH: `InfantryClass::Greatest_Threat` (infantry.cpp:2314-2319) and `UnitClass::Greatest_Threat` (unit.cpp:4623-4628) OR `PrimaryWeapon->Allowed_Threats()` (weapon.cpp:317-327) into the threat mask BEFORE delegating to the base-class Greatest_Threat. Anti-ground weapons contribute `THREAT_INFANTRY|VEHICLES|BOATS|BUILDINGS`; anti-air contributes `THREAT_AIR`. The resulting mask accepts the correct RTTI candidates.
+
+**Fix** (`src/EasterEgg/engine/missionAI.ts`):
+- Added `guardScanMask(entity, isHumanControlled)` helper that computes the RTTI mask from weapon properties with subclass-override handling (dog/medic/mechanic, organic warhead, human-infantry-clears-buildings). Vessels return mask=0 for now — enabling their Mission_Guard scan causes iteration-order RNG skew at SCG07 tick 1 that we leave as a future refinement.
+- `cellBasedGuardScan` signature changed from `(ctx, entity, range, isDog)` to `(ctx, entity, range, rttiMask)`. The per-entity filter now does `entityRttiBit(other) & rttiMask` instead of the old dog-only filter.
+- Re-enabled the structure auto-target block for armed non-human units (their mask includes RTTI_BUILDING via weapon Allowed_Threats). Sub-surface-only weapons (SS torpedoes) skip the structure scan via an explicit guard.
+
+**Tests updated:**
+- `cpp-parity-mission-guard-scan-mask.test.ts` — 12 tests, pin the new behavior: E1 auto-acquires infantry, 3TNK auto-acquires vehicles, AI vehicles target structures, human infantry don't, dog mask=INFANTRY only, civilians/harvester don't scan, Tanya-human doesn't auto-fire, retaliation target is kept.
+- `cpp-parity-weapon-allowed-threats.test.ts` — NEW (15 tests) pinning WeaponStats flag interpretation for M1Carbine, 120mm, Dragon, RedEye, ChainGun, TorpTube + integration tests against guardScanMask (E3 acquires airborne heli, 3TNK rejects airborne heli, MECH rejects infantry, etc.).
+- Flipped single test case in `cpp-parity-guard-scan-logic` (regular-infantry-acquires) and `cpp-parity-mission-ai` (AI-vehicle-targets-structure).
+
+**Key files:**
+- `src/EasterEgg/engine/missionAI.ts:690-796` — `RTTI` enum + `guardScanMask` helper + `entityRttiBit` mapping
+- `src/EasterEgg/engine/missionAI.ts:800-870` — `cellBasedGuardScan` with the mask filter
+- `src/EasterEgg/engine/missionAI.ts:1152-1200` — updateGuard gate using `guardScanMask`
+- `src/EasterEgg/__tests__/cpp-parity-weapon-allowed-threats.test.ts` — new test suite
+
+**Known residual issues:**
+- SCG07EA tick 1: TS has +12 RNG calls vs WASM. Vessels are gated off to contain damage, but iteration-order divergence between TS's logic loop and WASM's still surfaces at tick 1. Needs follow-up logic-loop entity-ordering work.
+- SCG03/SCG06 lost 1-2 ticks because Firing_AI same-tick fire is now more aggressive (acquires targets earlier than the original Greek-E1-via-damage path WASM was using).
+
 ## 2026-04-21T03:30Z — SCG06EA tick 65 deep re-investigation: Greece E1 target acquisition at tick 63 (deferred — structural)
 
 **Result:** No metric change. All 7 scenarios' first-divergence ticks unchanged: SCG01=45, SCG03=239, SCG04=15, SCG06=65, SCG07=3, SCG11=19, SCG13=101.

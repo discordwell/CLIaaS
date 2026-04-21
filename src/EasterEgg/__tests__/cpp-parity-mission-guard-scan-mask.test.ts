@@ -1,50 +1,57 @@
 /**
- * C++ Parity: Mission_Guard Scan Mask — THREAT_RANGE → mask=0 No-Op for Regular Units
+ * C++ Parity: Mission_Guard Scan Mask — Weapon Allowed_Threats Determines RTTI Mask
  *
  * FootClass::Mission_Guard (foot.cpp:638-698) calls:
  *   Target_Something_Nearby(THREAT_RANGE)
- *     → Greatest_Threat(THREAT_RANGE) (techno.cpp:1987)
+ *     → Greatest_Threat(THREAT_RANGE)
  *
- * In Greatest_Threat, method = THREAT_RANGE is preserved through the dog/medic branch
- * (techno.cpp:2013-2026):
- *   - Dogs (IsDog) → method = THREAT_INFANTRY | (method & RANGE/AREA)
- *   - Medics (Combat_Damage() < 0) → method = THREAT_INFANTRY | (method & RANGE/AREA)
- *   - Mechanics (FIXIT_CSII) → method = (THREAT_VEHICLES|THREAT_AIR) | (method & RANGE/AREA)
- *   - Everything else → method unchanged (= THREAT_RANGE only)
+ * Virtual dispatch lands in the SUBCLASS override before the base-class scan:
+ *   - InfantryClass::Greatest_Threat (infantry.cpp:2283-2352)
+ *   - UnitClass::Greatest_Threat     (unit.cpp:4620-4637)
  *
- * The mask is then built (techno.cpp:2032-2040) from type bits (CIVILIANS, AIR, CAPTURE,
- * INFANTRY, VEHICLES, BUILDINGS, BOATS, TIBERIUM, BASE_DEFENSE). For pure THREAT_RANGE
- * with no type bits, mask = 0.
+ * Both subclass overrides OR the weapon's Allowed_Threats bits into the `threat`
+ * parameter BEFORE delegating to FootClass/TechnoClass::Greatest_Threat:
+ *   threat |= Class->PrimaryWeapon->Allowed_Threats();
+ *   threat |= Class->SecondaryWeapon->Allowed_Threats();
  *
- * Evaluate_Object (techno.cpp:1534-1542) hard-rejects when mask = 0:
- *   RTTIType otype = object->What_Am_I();
- *   if (!((1 << otype) & mask)) return(false);   // Mask failure.
+ * WeaponTypeClass::Allowed_Threats (weapon.cpp:317-327) returns:
+ *   - THREAT_NORMAL always
+ *   - if Bullet->IsAntiAircraft: | THREAT_AIR
+ *   - if Bullet->IsAntiGround:   | THREAT_INFANTRY|THREAT_VEHICLES|THREAT_BOATS|THREAT_BUILDINGS
  *
- * Therefore: for regular infantry and vehicles, Mission_Guard's scan is a no-op. Auto-
- * acquire in GUARD happens only via:
- *   (a) TechnoClass::Assign_Target(source) in take_damage — retaliation
- *   (b) Explicit player/team orders
- *   (c) Dog/medic/mechanic specialized scans
+ * The base TechnoClass::Greatest_Threat (techno.cpp:2032-2040) then converts
+ * threat bits to an RTTI mask. Evaluate_Object (techno.cpp:1534-1542) hard-rejects
+ * candidates whose RTTI type doesn't match the mask.
  *
- * Regression context:
- *   - Before commit a47eb9a9 (same-tick Firing_AI), TS's cellBasedGuardScan could set
- *     a target but Firing_AI only fired on the NEXT tick — tolerable for RNG timing.
- *   - After a47eb9a9, Firing_AI fires SAME TICK as scan. Combined with commit 9a334f4b
- *     (invisible-bullet Coord_Scatter same-tick end-of-loop), TS now consumed an extra
- *     Coord_Scatter RNG on ticks where C++ would never have acquired a target at all.
- *   - Surfaced as SCG03EA tick 238 and SCG06EA tick 63 divergences.
+ * CONSEQUENCE:
+ *   - Regular armed infantry (E1/E3/etc.) with anti-ground weapon: MASK includes
+ *     RTTI_INFANTRY | RTTI_UNIT | RTTI_VESSEL | RTTI_BUILDING (+RTTI_AIRCRAFT for
+ *     landed aircraft via techno.cpp:2089-2091). They DO auto-acquire in GUARD.
+ *   - Regular armed vehicles: same set.
+ *   - Dogs (IsDog hack, techno.cpp:2018-2019): method = THREAT_INFANTRY → only
+ *     infantry candidates. Spies excluded from non-dog scans (techno.cpp:1557-1564).
+ *   - Human-controlled armed infantry: BUILDINGS cleared (infantry.cpp:2332-2334).
+ *   - Human-controlled Tanya: returns TARGET_NONE (infantry.cpp:2310-2312).
+ *   - Civilians without a PrimaryWeapon: infantry.cpp:2300-2304 early-returns
+ *     TARGET_NONE.
+ *   - Organic warhead (dog jaw, medic heal): infantry.cpp:2325-2326 clears
+ *     BUILDING|VEHICLE|BOAT|AIR — they only see infantry.
  *
- * Fix: gate cellBasedGuardScan + structure-scan in updateGuard to run only for dogs
- * (the only unit type where C++ Mission_Guard's scan mask is non-zero — medics and
- * mechanics are dispatched earlier via updateMedic/updateMechanicUnit).
+ * Empirical confirmation (WASM fprintf traces):
+ *   - SCG06EA tick 62: Greek E1 rifleman at cell (19,65) acquires BadGuy E1 via
+ *     Mission_Guard → Target_Something_Nearby → Greatest_Threat → Assign_Target.
+ *   - SCG01EA tick 44: Greek JEEP at cell (62,50) acquires a BadGuy infantry.
  *
  * C++ references:
  *   - foot.cpp:638-698       — FootClass::Mission_Guard (base, THREAT_RANGE)
- *   - foot.cpp:1037-1098     — FootClass::Mission_Guard_Area (THREAT_AREA, also mask=0)
- *   - techno.cpp:1987-2210   — TechnoClass::Greatest_Threat (mask construction + cell scan)
- *   - techno.cpp:1534-1542   — Evaluate_Object mask check (rejects when mask & RTTI == 0)
- *   - techno.cpp:2013-2026   — Type-bit additions for dog/medic/mechanic only
- *   - techno.cpp:5263-5293   — Target_Something_Nearby (delegates to Greatest_Threat)
+ *   - infantry.cpp:2283-2352 — InfantryClass::Greatest_Threat (weapon OR + cleanup)
+ *   - unit.cpp:4620-4637     — UnitClass::Greatest_Threat (weapon OR)
+ *   - weapon.cpp:317-327     — WeaponTypeClass::Allowed_Threats
+ *   - techno.cpp:1987-2210   — base TechnoClass::Greatest_Threat (mask + cell scan)
+ *   - techno.cpp:1534-1542   — Evaluate_Object mask check
+ *   - techno.cpp:2013-2026   — Dog/medic/mechanic method OVERRIDE (wipes weapon bits)
+ *   - techno.cpp:2089-2091   — THREAT_VEHICLES also adds RTTI_AIRCRAFT to mask
+ *   - techno.cpp:5263-5293   — Target_Something_Nearby
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -126,24 +133,24 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; s
   };
 }
 
-describe('Mission_Guard scan mask — C++ techno.cpp:2013-2026 + 2032-2040', () => {
-  it('regular infantry (E1) Mission_Guard does NOT auto-acquire infantry targets (mask=0)', () => {
-    // C++ Greatest_Threat(THREAT_RANGE) for non-dog/medic/mechanic: mask=0 →
-    // Evaluate_Object rejects every RTTI type → no target found.
+describe('Mission_Guard scan mask — C++ InfantryClass/UnitClass::Greatest_Threat weapon OR', () => {
+  it('regular infantry (E1) Mission_Guard DOES auto-acquire enemy infantry (weapon is anti-ground)', () => {
+    // C++ InfantryClass::Greatest_Threat ORs M1Carbine.Allowed_Threats (IsAntiGround)
+    // → mask includes RTTI_INFANTRY. Evaluate_Object accepts the E1 candidate.
+    // Empirical: SCG06EA tick 62 Greek E1 acquires BadGuy E1 via this path.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    // Enemy well within weapon range (M1Carbine=3.0)
     const enemy = makeEntity(UnitType.I_E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
     enemy.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, enemy] });
     updateGuard(ctx, scanner);
 
-    expect(scanner.target).toBeNull();
-    expect(scanner.mission).toBe(Mission.GUARD);
+    expect(scanner.target).toBe(enemy);
   });
 
-  it('regular infantry (E1) Mission_Guard does NOT auto-acquire vehicle targets (mask=0)', () => {
+  it('regular infantry (E3) Mission_Guard DOES auto-acquire enemy vehicle (weapon is anti-ground)', () => {
+    // Dragon is anti-ground AND anti-air — Allowed_Threats includes vehicles.
     const scanner = makeEntity(UnitType.I_E3, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
     const enemy = makeEntity(UnitType.V_JEEP, House.Greece, 100 + 2 * CELL_SIZE, 100);
@@ -152,10 +159,12 @@ describe('Mission_Guard scan mask — C++ techno.cpp:2013-2026 + 2032-2040', () 
     const ctx = makeCtx({ entities: [scanner, enemy] });
     updateGuard(ctx, scanner);
 
-    expect(scanner.target).toBeNull();
+    expect(scanner.target).toBe(enemy);
   });
 
-  it('vehicle (3TNK) Mission_Guard does NOT auto-acquire enemy vehicle (mask=0)', () => {
+  it('vehicle (3TNK) Mission_Guard DOES auto-acquire enemy vehicle (120mm anti-ground)', () => {
+    // Empirical: SCG01EA tick 44 Greek JEEP acquires BadGuy infantry via the
+    // same UnitClass::Greatest_Threat weapon-OR path.
     const scanner = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
     const enemy = makeEntity(UnitType.V_1TNK, House.Greece, 100 + 3 * CELL_SIZE, 100);
@@ -164,13 +173,13 @@ describe('Mission_Guard scan mask — C++ techno.cpp:2013-2026 + 2032-2040', () 
     const ctx = makeCtx({ entities: [scanner, enemy] });
     updateGuard(ctx, scanner);
 
-    expect(scanner.target).toBeNull();
+    expect(scanner.target).toBe(enemy);
   });
 
-  it('vehicle (3TNK) Mission_Guard does NOT auto-acquire enemy STRUCTURE (mask=0)', () => {
-    // C++ techno.cpp:2032-2040 — RTTI_BUILDING added to mask only for THREAT_BUILDINGS/
-    // CIVILIANS/BASE_DEFENSE/CAPTURE/TIBERIUM/POWER/FACTORIES/FAKES. None are set by
-    // Mission_Guard's THREAT_RANGE, so buildings are invisible.
+  it('NON-human armed vehicle DOES auto-acquire enemy STRUCTURE (anti-ground weapon includes THREAT_BUILDINGS)', () => {
+    // C++ UnitClass::Greatest_Threat does NOT clear BUILDINGS (unit.cpp:4630-4634
+    // #ifdef OBSOLETE gates out the human-skip). An AI vehicle with anti-ground
+    // weapon targets enemy structures in range.
     const scanner = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
     const enemyStruct = {
@@ -178,16 +187,40 @@ describe('Mission_Guard scan mask — C++ techno.cpp:2013-2026 + 2032-2040', () 
       type: 'WEAP', hp: 100, maxHp: 400,
     };
 
-    const ctx = makeCtx({ entities: [scanner], structures: [enemyStruct] });
+    const ctx = makeCtx({
+      entities: [scanner],
+      structures: [enemyStruct],
+      playerHouse: House.Greece, // USSR = AI
+    });
+    updateGuard(ctx, scanner);
+
+    expect(scanner.targetStructure).toBe(enemyStruct);
+    expect(scanner.mission).toBe(Mission.ATTACK);
+  });
+
+  it('HUMAN-controlled armed infantry (E1) does NOT auto-acquire enemy STRUCTURE (BUILDINGS cleared)', () => {
+    // C++ infantry.cpp:2332-2334: human infantry with weapon → threat &= ~THREAT_BUILDINGS.
+    // Mask loses RTTI_BUILDING. The infantry can still acquire other infantry.
+    const scanner = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
+    scanner.mission = Mission.GUARD;
+    const enemyStruct = {
+      alive: true, cx: 4, cy: 4, house: House.USSR,
+      type: 'WEAP', hp: 100, maxHp: 400,
+    };
+
+    const ctx = makeCtx({
+      entities: [scanner],
+      structures: [enemyStruct],
+      playerHouse: House.Greece, // Greece = human
+    });
     updateGuard(ctx, scanner);
 
     expect(scanner.targetStructure).toBeNull();
     expect(scanner.mission).toBe(Mission.GUARD);
   });
 
-  it('DOG Mission_Guard DOES auto-acquire infantry targets (THREAT_INFANTRY bit added)', () => {
-    // C++ techno.cpp:2018-2019 — dogs get method = THREAT_INFANTRY → mask includes
-    // RTTI_INFANTRY. Dogs can auto-acquire infantry targets in Mission_Guard.
+  it('DOG Mission_Guard DOES auto-acquire infantry (THREAT_INFANTRY override wipes weapon bits)', () => {
+    // C++ techno.cpp:2018-2019: dog branch REPLACES method with THREAT_INFANTRY.
     const dog = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     dog.mission = Mission.GUARD;
     const enemy = makeEntity(UnitType.I_E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
@@ -212,42 +245,74 @@ describe('Mission_Guard scan mask — C++ techno.cpp:2013-2026 + 2032-2040', () 
     expect(dog.target).toBeNull();
   });
 
-  it('retaliation target is respected even though Mission_Guard scan is a no-op', () => {
-    // Real-world path: C++ take_damage calls Assign_Target(source) on the victim, so
-    // the victim's next updateGuard sees entity.target set and fires via Firing_AI
-    // (missionAI.ts line ~886). The gating does NOT prevent this — it only skips
-    // the fresh cell-scan target-acquisition step.
+  it('civilian (C1) without PrimaryWeapon does NOT auto-acquire (mask=0, also civilianSkipScan)', () => {
+    // C++ infantry.cpp:2300-2304: unarmed infantry that are not Renovator/Spy/Thief
+    // return TARGET_NONE early. TS civilians also hit the civilianSkipScan branch.
+    const civilian = makeEntity(UnitType.I_C1, House.Greece, 100, 100);
+    civilian.mission = Mission.GUARD;
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 100 + 2 * CELL_SIZE, 100);
+    enemy.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [civilian, enemy], playerHouse: House.Greece });
+    updateGuard(ctx, civilian);
+
+    expect(civilian.target).toBeNull();
+  });
+
+  it('human-controlled TANYA does NOT auto-acquire (infantry.cpp:2310-2312 TARGET_NONE)', () => {
+    // Special hack: Tanya under human control does not auto-fire.
+    const tanya = makeEntity(UnitType.I_TANYA, House.Greece, 100, 100);
+    tanya.mission = Mission.GUARD;
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 100 + 2 * CELL_SIZE, 100);
+    enemy.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [tanya, enemy], playerHouse: House.Greece });
+    updateGuard(ctx, tanya);
+
+    expect(tanya.target).toBeNull();
+  });
+
+  it('harvester (V_HARV) does NOT auto-acquire (no primary weapon, early-return)', () => {
+    const harv = makeEntity(UnitType.V_HARV, House.USSR, 100, 100);
+    harv.mission = Mission.GUARD;
+    const enemy = makeEntity(UnitType.I_E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
+    enemy.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [harv, enemy] });
+    updateGuard(ctx, harv);
+
+    expect(harv.target).toBeNull();
+  });
+
+  it('retaliation target is kept across the scan (top-of-updateGuard Firing_AI retains legal TarCom)', () => {
+    // C++ Target_Something_Nearby (techno.cpp:5298-5305) retains TarCom if legal
+    // AND in range, so retaliation targets persist across GUARD ticks.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
     const attacker = makeEntity(UnitType.I_E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
     attacker.mission = Mission.GUARD;
-    // Simulate retaliation: attacker damaged scanner → scanner.target = attacker
     scanner.target = attacker;
 
     const ctx = makeCtx({ entities: [scanner, attacker] });
     updateGuard(ctx, scanner);
 
-    // Target kept (C++ Target_Something_Nearby techno.cpp:5272-5279 retains legal TarCom
-    // in range before calling Greatest_Threat).
     expect(scanner.target).toBe(attacker);
   });
 
-  it('stale out-of-range target is cleared and NOT replaced by scan (mask=0)', () => {
+  it('stale out-of-range target is cleared, scan picks up a new in-range candidate', () => {
+    // C++ Target_Something_Nearby clears TarCom when out-of-range, then calls
+    // Greatest_Threat. With the weapon-OR mask, a new in-range candidate is found.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    // Target far out of weapon range (M1Carbine=3.0 cells)
     const farTarget = makeEntity(UnitType.I_E1, House.Greece, 100 + 10 * CELL_SIZE, 100);
     farTarget.mission = Mission.GUARD;
     scanner.target = farTarget;
-    // A candidate that WOULD be in range — but scan is mask=0 no-op, so it's ignored.
     const inRangeCandidate = makeEntity(UnitType.I_E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
     inRangeCandidate.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, farTarget, inRangeCandidate] });
     updateGuard(ctx, scanner);
 
-    // Stale target cleared (C++ Assign_Target(TARGET_NONE) at techno.cpp:5276); the
-    // subsequent Greatest_Threat call returns nothing for regular infantry (mask=0).
-    expect(scanner.target).toBeNull();
+    expect(scanner.target).toBe(inRangeCandidate);
   });
 });

@@ -596,14 +596,16 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     expect(guard.target).toBeNull();
   });
 
-  it('guard does NOT auto-target structures (C++ THREAT_RANGE mask excludes RTTI_BUILDING)', () => {
-    // C++ foot.cpp:593: Target_Something_Nearby(THREAT_RANGE) → Greatest_Threat.
-    // techno.cpp:2032-2040 — RTTI_BUILDING is added to mask ONLY when method includes
-    // THREAT_BUILDINGS / THREAT_CIVILIANS / THREAT_BASE_DEFENSE / THREAT_CAPTURE /
-    // THREAT_TIBERIUM / THREAT_POWER / THREAT_FACTORIES / THREAT_FAKES. Mission_Guard
-    // passes THREAT_RANGE only, so buildings are invisible to the scan.
-    // Legitimate building targets come from explicit orders (updateMove/updateAttack
-    // with targetStructure) or team HUNT logic.
+  it('AI guard DOES auto-target enemy structures (anti-ground weapon Allowed_Threats includes BUILDINGS)', () => {
+    // C++ UnitClass::Greatest_Threat (unit.cpp:4623-4627) ORs PrimaryWeapon->
+    // Allowed_Threats. An anti-ground weapon (weapon.cpp:317-327) contributes
+    // THREAT_INFANTRY|VEHICLES|BOATS|BUILDINGS, so mask includes RTTI_BUILDING.
+    // AI (non-human) armed units auto-target enemy structures in range.
+    // Human player units have BUILDING cleared only for INFANTRY (infantry.cpp:
+    // 2332-2334); UnitClass has the human-skip under #ifdef OBSOLETE (unit.cpp:
+    // 4630-4634), so even human vehicles would target buildings — but TS's
+    // existing `!STRUCTURE_WEAPONS[s.type]` filter skips unarmed buildings
+    // for player-controlled units only.
     const guard = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
 
     const enemyStruct = {
@@ -621,9 +623,9 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     guard.lastGuardScan = 0;
     updateGuard(ctx, guard);
 
-    // C++ parity: Mission_Guard does NOT auto-target structures.
-    expect(guard.targetStructure).toBeNull();
-    expect(guard.mission).toBe(Mission.GUARD);
+    // AI vehicle targets the enemy armed structure.
+    expect(guard.targetStructure).toBe(enemyStruct);
+    expect(guard.mission).toBe(Mission.ATTACK);
   });
 });
 

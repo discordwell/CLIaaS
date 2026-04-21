@@ -138,11 +138,12 @@ describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <
     expect(scanner.target).toBeNull();
   });
 
-  it('regular infantry Mission_Guard does NOT auto-acquire targets (C++ mask=0 no-op)', () => {
-    // C++ FootClass::Mission_Guard → Target_Something_Nearby(THREAT_RANGE) →
-    // Greatest_Threat(THREAT_RANGE). For non-dog/medic/mechanic infantry, mask=0 and
-    // Evaluate_Object rejects every candidate. Mission_Guard auto-acquire for regular
-    // units happens ONLY via retaliation from damage or explicit orders.
+  it('regular infantry Mission_Guard DOES auto-acquire in-range targets (weapon Allowed_Threats)', () => {
+    // C++ InfantryClass::Greatest_Threat (infantry.cpp:2314-2319) ORs PrimaryWeapon->
+    // Allowed_Threats into the threat mask before delegating to FootClass/TechnoClass::
+    // Greatest_Threat. M1Carbine is anti-ground (weapon.cpp:317-327) → adds THREAT_
+    // INFANTRY|VEHICLES|BOATS|BUILDINGS → mask includes RTTI_INFANTRY → Evaluate_Object
+    // accepts an in-range E1 candidate. Empirical confirmation: SCG06EA tick 62.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
     // Target in-range
@@ -152,8 +153,7 @@ describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <
     const ctx = makeCtx({ entities: [scanner, target] });
     updateGuard(ctx, scanner);
 
-    // C++ parity: no target acquired (mask=0 → Evaluate_Object always false)
-    expect(scanner.target).toBeNull();
+    expect(scanner.target).toBe(target);
   });
 });
 

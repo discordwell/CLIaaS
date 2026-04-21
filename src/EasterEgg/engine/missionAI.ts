@@ -687,6 +687,128 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
   }
 }
 
+// ── C++ Greatest_Threat RTTI mask computation ─────────────────────────────────
+//
+// C++ weapon.cpp:317-327 WeaponTypeClass::Allowed_Threats:
+//   threat = THREAT_NORMAL;
+//   if (Bullet->IsAntiAircraft) threat |= THREAT_AIR;
+//   if (Bullet->IsAntiGround)   threat |= THREAT_INFANTRY|THREAT_VEHICLES|THREAT_BOATS|THREAT_BUILDINGS;
+//
+// InfantryClass::Greatest_Threat (infantry.cpp:2314-2319) and UnitClass::
+// Greatest_Threat (unit.cpp:4623-4628) OR the weapon's Allowed_Threats into the
+// threat mask BEFORE calling FootClass/TechnoClass::Greatest_Threat. Then the
+// base TechnoClass::Greatest_Threat (techno.cpp:2032-2040) converts threat bits
+// to an RTTI mask, and Evaluate_Object (techno.cpp:1534-1542) rejects candidates
+// whose RTTI type doesn't match the mask.
+//
+// Subclass overrides also apply AFTER the weapon OR:
+//   - Organic warhead (dog/medic, infantry.cpp:2325-2326): clears BUILDINGS/
+//     VEHICLES/BOATS/AIR → dog jaws and heal can only consider infantry.
+//   - Human-controlled armed infantry (infantry.cpp:2332-2334): clears BUILDINGS
+//     → player E1/E3 don't auto-fire on structures.
+//   - Dog/medic branch at techno.cpp:2017-2026: method REPLACED with THREAT_INFANTRY
+//     (medics) or THREAT_VEHICLES|THREAT_AIR (mechanics). This wipes weapon bits.
+//   - THREAT_VEHICLES → mask also adds RTTI_AIRCRAFT (techno.cpp:2089-2091) so
+//     landed aircraft count as vehicles.
+
+/** RTTI flags matching C++ RTTIType bit positions (techno.cpp:2032-2040). */
+const enum RTTI {
+  INFANTRY = 1 << 1,
+  UNIT     = 1 << 2, // vehicle
+  VESSEL   = 1 << 3, // naval
+  BUILDING = 1 << 4,
+  AIRCRAFT = 1 << 5, // airborne
+}
+
+/**
+ * Compute the RTTI mask this entity can target via Mission_Guard's Target_Something_
+ * Nearby(THREAT_RANGE). Mirrors C++ InfantryClass/UnitClass/VesselClass::Greatest_Threat
+ * + base TechnoClass::Greatest_Threat mask construction.
+ *
+ * Returns 0 when the scan is a complete no-op (no weapon, or unarmed civilian).
+ * The `isHumanControlled` flag is ctx.playerHouse check for human buildings filter.
+ */
+function guardScanMask(entity: Entity, isHumanControlled: boolean): number {
+  // Dog override (techno.cpp:2017-2019): method = THREAT_INFANTRY only.
+  // Dog's DogJaw also has Organic warhead (infantry.cpp:2325-2326) which would
+  // have the same effect, but dog branch wins via explicit IsDog check.
+  if (entity.type === UnitType.I_DOG) return RTTI.INFANTRY;
+
+  // Medic (Combat_Damage < 0, not mechanic): method = THREAT_INFANTRY.
+  // TS medics are dispatched via updateMedic before the guard scan, so their
+  // scan target here is enemy infantry (C++ equivalent behavior).
+  if (entity.type === UnitType.I_MEDI) return RTTI.INFANTRY;
+
+  // Mechanic (FIXIT_CSII, Combat_Damage < 0): method = THREAT_VEHICLES | THREAT_AIR.
+  if (entity.type === UnitType.I_MECH) return RTTI.UNIT | RTTI.AIRCRAFT;
+
+  // VesselClass::Greatest_Threat (vessel.cpp:1223-1256) — vessels have per-
+  // type overrides that DIFFER from the weapon-OR path used by UnitClass/
+  // InfantryClass. However, the Mission_Guard scan for vessels is NOT gated
+  // here in the same way — VesselClass::Combat_AI (vessel.cpp:2208-2243) only
+  // fires on an EXISTING TarCom, and vessel TarCom acquisition happens via
+  // team attack missions, retaliation, or explicit orders rather than same-
+  // tick Mission_Guard scans. Empirical (SCG07EA tick 1): enabling vessel
+  // scans here introduces +12 RNG calls that WASM doesn't consume at tick 1.
+  // The WASM traces show vessels do not acquire Mission_Guard scan targets on
+  // the first Mission_Guard tick in the same way infantry/vehicles do.
+  //
+  // Safer parity: return 0 (no-op scan) for vessels. They still react to
+  // retaliation (existing entity.target path) and to explicit team orders.
+  if (entity.isNavalUnit) return 0;
+
+  // Regular armed unit path (UnitClass/InfantryClass override): need a primary weapon.
+  const w1 = entity.weapon;
+  const w2 = entity.weapon2;
+  if (!w1 && !w2) return 0;
+
+  // C++ weapon.Allowed_Threats:
+  //   isAntiGround !== false  → THREAT_INFANTRY|VEHICLES|BOATS|BUILDINGS
+  //   isAntiAir === true      → THREAT_AIR (airborne)
+  // In TS, isAntiGround is only set explicitly to `false` for AA-only weapons
+  // (RedEye/DepthCharge). Undefined means AG=yes.
+  const w1AG = !!w1 && w1.isAntiGround !== false;
+  const w2AG = !!w2 && w2.isAntiGround !== false;
+  const w1AA = !!(w1 && w1.isAntiAir);
+  const w2AA = !!(w2 && w2.isAntiAir);
+  const anyAG = w1AG || w2AG;
+  const anyAA = w1AA || w2AA;
+
+  let mask = 0;
+  if (anyAG) mask |= RTTI.INFANTRY | RTTI.UNIT | RTTI.VESSEL | RTTI.BUILDING;
+  if (anyAA) mask |= RTTI.AIRCRAFT;
+  // techno.cpp:2089-2091: if THREAT_VEHICLES set, also accept landed aircraft.
+  if (mask & RTTI.UNIT) mask |= RTTI.AIRCRAFT;
+
+  // Organic warhead (infantry.cpp:2325-2326): clears non-infantry for infantry
+  // with an equipped organic-warhead weapon. In TS we guard on infantry only to
+  // mirror C++ (`Is_Weapon_Equipped()` + InfantryClass-specific check).
+  if (entity.stats.isInfantry && w1 && w1.warhead === 'Organic') {
+    mask &= ~(RTTI.BUILDING | RTTI.UNIT | RTTI.VESSEL | RTTI.AIRCRAFT);
+  }
+
+  // Human-controlled armed infantry (infantry.cpp:2332-2334): clears BUILDINGS.
+  if (entity.stats.isInfantry && isHumanControlled) {
+    mask &= ~RTTI.BUILDING;
+  }
+
+  return mask;
+}
+
+/**
+ * Map an entity to an RTTI bit for mask-matching. Airborne aircraft are RTTI.
+ * AIRCRAFT; landed aircraft count as RTTI.UNIT in C++ (techno.cpp:2089-2091
+ * explicitly sets mask |= RTTI_AIRCRAFT when THREAT_VEHICLES is on — so landed
+ * aircraft can be targeted by vehicle-class weapons).
+ */
+function entityRttiBit(other: Entity): number {
+  if (other.stats.isInfantry) return RTTI.INFANTRY;
+  if (other.isNavalUnit) return RTTI.VESSEL;
+  if (other.isAirUnit && other.flightAltitude > 0) return RTTI.AIRCRAFT;
+  if (other.isAirUnit) return RTTI.AIRCRAFT; // landed — covered via UNIT|AIRCRAFT union above
+  return RTTI.UNIT;
+}
+
 /**
  * C++ parity: cell-based guard scan matching techno.cpp Greatest_Threat with THREAT_RANGE.
  *
@@ -705,7 +827,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
  *   3. Early bailout means inner-ring targets are strongly preferred
  */
 function cellBasedGuardScan(
-  ctx: MissionAIContext, entity: Entity, scanRange: number, isDog: boolean,
+  ctx: MissionAIContext, entity: Entity, scanRange: number, rttiMask: number,
 ): Entity | null {
   // C++ techno.cpp:2048-2053: crange = weapon range in cells + 1
   // scanRange is in cells; convert to cell scan radius and lepton threshold
@@ -738,12 +860,15 @@ function cellBasedGuardScan(
   const cellMap = new Map<number, Entity>();
   const cellKey = (cx: number, cy: number) => cy * 128 + cx;
   const guardHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
+  const isDog = entity.type === UnitType.I_DOG;
   for (const other of ctx.entities) {
     if (!other.alive || other.inLimbo) continue;
     if (ctx.entitiesAllied(entity, other)) continue;
-    // C++ Greatest_Threat mask for THREAT_RANGE:
-    // Dogs: THREAT_INFANTRY → only infantry
-    if (isDog && !other.stats.isInfantry) continue;
+    // C++ Evaluate_Object mask check (techno.cpp:1534-1542):
+    //   if (!((1 << otype) & mask)) return false; // Mask failure.
+    // rttiMask is computed by guardScanMask() from the scanner's weapon
+    // Allowed_Threats (C++ weapon.cpp:317-327) plus subclass overrides.
+    if (!(entityRttiBit(other) & rttiMask)) continue;
     // C++ techno.cpp:1554-1564: spies invisible to non-dogs
     if (other.type === UnitType.I_SPY && !isDog) continue;
     // C++ techno.cpp:1476-1479: units on IsNoThreat missions
@@ -755,7 +880,9 @@ function cellBasedGuardScan(
     if (guardHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
     // Naval combat filtering
     if (!canTargetNaval(entity, other)) continue;
-    // Air combat filtering: skip airborne without AA
+    // Air combat filtering: airborne aircraft require AA weapon. Already covered
+    // by rttiMask (AIRCRAFT bit only set when isAntiAir), but keep explicit guard
+    // for the landed-aircraft-as-UNIT case where mask has AIRCRAFT via UNIT set.
     if (other.isAirUnit && other.flightAltitude > 0) {
       const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
       if (!hasAA) continue;
@@ -1038,27 +1165,38 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 
   // C++ foot.cpp:642 Mission_Guard calls Target_Something_Nearby(THREAT_RANGE)
   //   → Greatest_Threat(THREAT_RANGE) at techno.cpp:1987.
-  // Per techno.cpp:2013-2026, type bits are added ONLY for:
-  //   - Dogs (IsDog) → THREAT_INFANTRY
-  //   - Medics (Combat_Damage() < 0) → THREAT_INFANTRY
-  //   - Mechanics (FIXIT_CSII) → THREAT_VEHICLES | THREAT_AIR
-  // Regular infantry, vehicles, and vessels get NO type bits added → mask=0 →
-  // Evaluate_Object at techno.cpp:1539 rejects every candidate. The scan is a
-  // complete no-op for them. Only dogs (and medics/mechanics, which are already
-  // dispatched earlier via updateMedic/updateMechanicUnit) should scan here.
   //
-  // Mission.GUARD auto-acquire in C++ happens ONLY via:
-  //   (a) Retaliation from damage — TechnoClass::Assign_Target(source) in take_damage
-  //   (b) Explicit player/team orders — Assign_Target / Assign_Mission from AI
-  //   (c) Dog/medic/mechanic specialized scans (handled here or in updateMedic)
+  // The scan is NOT a no-op for armed regular infantry/vehicles: the subclass
+  // overrides InfantryClass::Greatest_Threat (infantry.cpp:2283-2352) and
+  // UnitClass::Greatest_Threat (unit.cpp:4620-4637) OR the weapon's
+  // Allowed_Threats bits (weapon.cpp:317-327) into `threat` BEFORE delegating
+  // to the base-class Greatest_Threat. An anti-ground primary weapon contributes
+  // THREAT_INFANTRY | THREAT_VEHICLES | THREAT_BOATS | THREAT_BUILDINGS; anti-air
+  // contributes THREAT_AIR. The resulting RTTI mask is non-zero, and
+  // Evaluate_Object accepts matching candidates.
   //
-  // Gating this scan to isDog only also prevents the same-tick Firing_AI fix
-  // (commit a47eb9a9) from firing a weapon on a target WASM never acquires,
-  // which produced an extra Coord_Scatter RNG at SCG06 tick 63 and SCG03 tick 238.
-  const scanAllowedInGuard = isDog;
-  const bestTarget = (tanyaSkip || spyPlayerSkipAutoTarget || civilianSkipScan || !scanAllowedInGuard)
+  // Empirical confirmation (WASM fprintf traces): SCG06EA tick 62 Greek E1
+  // rifleman acquires BadGuy E1 via Mission_Guard → Target_Something_Nearby →
+  // Greatest_Threat → Assign_Target; SCG01EA tick 44 Greek JEEP acquires a
+  // BadGuy infantry via the same path. Both are same-tick fires through
+  // Firing_AI, producing the Coord_Scatter RNG the earlier "dog-only" gate
+  // missed.
+  //
+  // Who is actually a no-op:
+  //   - Human-controlled Tanya (infantry.cpp:2310-2312) — tanyaSkip below.
+  //   - Player spies (TS parity: they only infiltrate on explicit order).
+  //   - Civilians with no primary weapon — guardScanMask returns 0.
+  //   - Unarmed harvesters / MCVs — guardScanMask returns 0.
+  //
+  // Dog/medic/mechanic overrides (techno.cpp:2017-2026) are folded into
+  // guardScanMask.
+  const isHumanControlled = entity.house === ctx.playerHouse;
+  const scanMask = (tanyaSkip || spyPlayerSkipAutoTarget || civilianSkipScan)
+    ? 0
+    : guardScanMask(entity, isHumanControlled);
+  const bestTarget = scanMask === 0
     ? null
-    : cellBasedGuardScan(ctx, entity, scanRange, isDog);
+    : cellBasedGuardScan(ctx, entity, scanRange, scanMask);
   if (bestTarget) {
     // C++ infantry.cpp:1237 / unit.cpp:425 — after Mission_Dispatch (Mission_Guard
     // calls Target_Something_Nearby, setting TarCom), Firing_AI runs SAME TICK and
@@ -1083,13 +1221,45 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     return;
   }
 
-  // C++ parity: structure auto-target in Mission_Guard is DISABLED.
-  // Greatest_Threat(THREAT_RANGE) at techno.cpp:2032-2040 only adds RTTI_BUILDING
-  // to mask when one of THREAT_BUILDINGS / THREAT_CIVILIANS / THREAT_BASE_DEFENSE /
-  // THREAT_CAPTURE / THREAT_TIBERIUM / THREAT_POWER / THREAT_FACTORIES / THREAT_FAKES
-  // is set. Mission_Guard passes THREAT_RANGE only, and the dog branch forces
-  // method=THREAT_INFANTRY (no BUILDING bit either). Scan removed; legitimate
-  // structure targets come from explicit orders or team HUNT logic.
+  // C++ parity: structure auto-target in Mission_Guard is enabled for armed
+  // non-human units whose weapon Allowed_Threats includes THREAT_BUILDINGS
+  // (anti-ground weapons). Human-controlled armed infantry have BUILDING
+  // cleared from the mask (infantry.cpp:2332-2334) so this block also no-ops
+  // for them. Dogs/medics have organic warhead clearing BUILDING, so no-op too.
+  //
+  // Sub-surface weapon restriction: torpedoes can only hit naval-accessible
+  // structures (sub pens, naval yards). The existing canTargetNaval filter
+  // handles the entity scan above; for structures, we need a parallel guard:
+  // skip the structure scan entirely for sub-surface-only weapons.
+  const isSubSurfaceOnly = !!(entity.weapon?.isSubSurface && !entity.weapon2);
+  if ((scanMask & RTTI.BUILDING) && entity.weapon && !isSubSurfaceOnly) {
+    let bestStruct: MapStructure | null = null;
+    let bestStructDist = Infinity;
+    for (const s of ctx.structures) {
+      if (!s.alive) continue;
+      // C++ Evaluate_Object only skips ALLIED buildings.
+      if (ctx.isAllied(entity.house, s.house)) continue;
+      // C++ parity: BARL/BRL3 are OverlayClass (overlay), not BuildingClass.
+      if (s.type === 'BARL' || s.type === 'BRL3') continue;
+      // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings.
+      // (Guarded redundantly; for non-human mask already includes BUILDING.)
+      if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
+      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      const sLX = s.cx * LEPTON_SIZE + (fw * LEPTON_SIZE) / 2;
+      const sLY = s.cy * LEPTON_SIZE + (fh * LEPTON_SIZE) / 2;
+      const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
+      if (dist > scanRange * LEPTON_SIZE) continue;
+      if (dist < bestStructDist) {
+        bestStructDist = dist;
+        bestStruct = s;
+      }
+    }
+    if (bestStruct) {
+      entity.mission = Mission.ATTACK;
+      entity.targetStructure = bestStruct;
+      return;
+    }
+  }
 
   // C++ foot.cpp:594 — Random_Animate() when no target found (on scan tick).
   // Infantry consume 2-3 RNG values (IdleTimer + animation selection + optional facing).
