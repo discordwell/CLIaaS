@@ -1,0 +1,259 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * C++ Behavioral Parity: SCG04EA tick-3 Mission_Move stagger for twin 1-member
+ * vehicle teams targeting the same waypoint.
+ *
+ * Two 3TNKs, each in its own 1-member team (set1, set2 via trigger set3
+ * TACTION_CREATE_TEAM), both targeting waypoint 1 (cell (48, 38)). WASM's
+ * observed tick-3 state:
+ *   - unit[73] (set1 member): Mission=MOVE, IsDriving=false, fires Mission_Move
+ *     jitter Random_Pick(0,2) tagged 60010.
+ *   - unit[74] (set2 member): Mission=GUARD, IsDriving=true, MissionQueue=MOVE,
+ *     drives-in-GUARD (drive.cpp:1376).
+ *
+ * The asymmetry comes from C++ Basic_Path's transient cell reservations: when
+ * team1 (processed first via Teams.Ptr(i)->AI()) calls Assign_Destination →
+ * Start_Of_Move → Basic_Path, the path reservation conflicts with a downstream
+ * reservation, Start_Driver bails, IsDriving stays false. UnitClass::AI line 404
+ * Commence fires because !IsDriving, popping MissionQueue=MOVE → Mission=MOVE,
+ * Timer=0. MissionClass::AI (invoked via TechnoClass::AI → RadioClass::AI)
+ * dispatches Mission_Move on the SAME tick and fires Random_Pick(0,2) jitter.
+ *
+ * Team2's Basic_Path succeeds, Start_Driver fires IsDriving=true. UnitClass::AI
+ * line 404 Commence is blocked (!IsDriving false), MissionQueue stays MOVE,
+ * Mission stays GUARD. DriveClass::AI (drive.cpp:1376) drives the vehicle toward
+ * NavCom in GUARD. Mission_Move does NOT fire — Mission stays GUARD and
+ * Mission_Guard timer continues decrementing.
+ *
+ * The TS port emulates this with two coordinated pieces:
+ *
+ *   1. A per-tick `vehicleClaims` Map threaded through TeamAIContext. The
+ *      FIRST team to claim a target cell gets isDriving=TRUE (optimistic,
+ *      matching single-team SCG11 MCV reinforce). When a SECOND team claims
+ *      the same target cell in the same pass, the logic retroactively resets
+ *      the first team's unit to isDriving=FALSE and gives the second team
+ *      isDriving=TRUE — matching WASM's observed "first-fails, second-succeeds"
+ *      outcome.
+ *
+ *   2. A pre-dispatch Commence gate in updateEntity that pops MissionQueue →
+ *      Mission + Timer=0 BEFORE the Mission switch runs for vehicles/vessels
+ *      (matching UnitClass::AI line 404 in C++). Without this, the popped
+ *      Mission=MOVE handler would dispatch 1 tick later, delaying Mission_Move
+ *      jitter by 1 tick (tick 4 instead of tick 3).
+ *
+ * Combined, tick 3 in TS now matches WASM: one vehicle pops + fires jitter,
+ * the other stays GUARD+IsDriving=true.
+ *
+ * C++ source refs:
+ *   team.cpp:1874-2008 — TeamClass::Coordinate_Move (Assign_Mission + Assign_Destination)
+ *   team.cpp:1938      — Assign_Mission(MISSION_MOVE) → MissionQueue=MOVE
+ *   drive.cpp:591-641  — DriveClass::Assign_Destination → Start_Of_Move
+ *   drive.cpp:906-1277 — DriveClass::Start_Of_Move → Basic_Path → Start_Driver
+ *   drive.cpp:1304-1398— DriveClass::AI drives-in-GUARD (line 1376)
+ *   unit.cpp:404       — UnitClass::AI pre-DriveClass::AI Commence (!IsDriving gate)
+ *   foot.cpp:520-539   — Mission_Move returns Normal_Delay + Random_Pick(0,2)
+ *   mission.cpp:343    — MissionClass::Commence pops queue, Timer=0, Status=0
+ *   mission.cpp:213    — MissionClass::AI dispatches Mission handler when Timer==0
+ */
+
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { Game } from '../engine/index';
+import { Entity, resetEntityIds } from '../engine/entity';
+import {
+  House, Mission, UnitType, CELL_SIZE, RESFACTOR,
+} from '../engine/types';
+import {
+  Team,
+  TMISSION_MOVE,
+  clearAllTeams,
+  registerTeam,
+  resetTeamIds,
+  updateAllTeams,
+} from '../engine/team';
+
+class FakeAudio {
+  src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
+  addEventListener(): void {} removeEventListener(): void {}
+  play(): Promise<void> { return Promise.resolve(); } pause(): void {}
+  cloneNode(): FakeAudio { return new FakeAudio(); }
+}
+
+function createCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320 * RESFACTOR;
+  canvas.height = 200 * RESFACTOR;
+  return canvas;
+}
+
+function createGame(): Game {
+  const game = new Game(createCanvas());
+  game.map.setBounds(0, 0, 64, 64);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      game.map.setTerrain(x, y, 0);
+    }
+  }
+  return game;
+}
+
+function placeVehicle(game: Game, type: UnitType, house: House, cx: number, cy: number): Entity {
+  const e = new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+  e.mission = Mission.GUARD;
+  e.missionTimer = 40;
+  game.entities.push(e);
+  game.entityById.set(e.id, e);
+  return e;
+}
+
+function tickEntity(game: Game, entity: Entity): void {
+  (game as unknown as { updateEntity(e: Entity): void }).updateEntity(entity);
+}
+
+beforeAll(() => {
+  vi.stubGlobal('Audio', FakeAudio);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
+    { imageSmoothingEnabled: false } as unknown as CanvasRenderingContext2D
+  ));
+});
+
+beforeEach(() => {
+  resetEntityIds();
+  resetTeamIds();
+  clearAllTeams();
+});
+
+describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
+  it('twin vehicle teams targeting same waypoint: first fails, second succeeds', () => {
+    // Reproduce SCG04EA set1/set2: two 1-member 3TNK teams, both targeting
+    // waypoint 1 (cell (48, 38)). In WASM, set1 (first in iteration) ends with
+    // Mission=MOVE + IsDriving=false (Basic_Path fails → Commence pops).
+    // set2 ends with Mission=GUARD + IsDriving=true (Basic_Path succeeds →
+    // Commence blocked, drives-in-GUARD).
+    const game = createGame();
+
+    const tank1 = placeVehicle(game, UnitType.V_3TNK, House.BadGuy, 42, 35);
+    const tank2 = placeVehicle(game, UnitType.V_3TNK, House.BadGuy, 39, 34);
+
+    const waypoints = new Map<number, { cx: number; cy: number }>([
+      [1, { cx: 48, cy: 38 }],
+    ]);
+
+    // Both teams pre-activated with the same mission (MOVE to waypoint 1).
+    const team1 = new Team({
+      house: House.BadGuy,
+      desiredMembers: [{ type: UnitType.V_3TNK, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 1 }],
+      forcedActive: true,
+    });
+    team1.add(tank1);
+    registerTeam(team1);
+
+    const team2 = new Team({
+      house: House.BadGuy,
+      desiredMembers: [{ type: UnitType.V_3TNK, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 1 }],
+      forcedActive: true,
+    });
+    team2.add(tank2);
+    registerTeam(team2);
+
+    // updateAllTeams iterates _activeTeams in insertion order — team1 first,
+    // team2 second. It threads `claimedVehicleTargets` through TeamAIContext,
+    // which lets the second team's coordinateMove retroactively reset the
+    // first team's isDriving flag (simulating C++ Basic_Path path-reservation
+    // conflict).
+    updateAllTeams(waypoints, { structures: [], entities: [tank1, tank2] });
+
+    // Post-team-AI state: both vehicles have MissionQueue=MOVE + moveTarget set.
+    expect(tank1.missionQueue, 'tank1 queue MOVE').toBe(Mission.MOVE);
+    expect(tank2.missionQueue, 'tank2 queue MOVE').toBe(Mission.MOVE);
+    expect(tank1.moveTarget, 'tank1 moveTarget set').not.toBeNull();
+    expect(tank2.moveTarget, 'tank2 moveTarget set').not.toBeNull();
+
+    // Critical: first claimant's isDriving was RESET to false when the second
+    // team registered the same target — Mission_Move will fire for tank1 on
+    // the entity-AI phase. tank2 keeps isDriving=true → drives-in-GUARD.
+    expect(tank1.isDriving, 'tank1 (first team): isDriving=false (Basic_Path failure)').toBe(false);
+    expect(tank2.isDriving, 'tank2 (second team): isDriving=true (Basic_Path success)').toBe(true);
+  });
+
+  it('single-team vehicle reinforcement: isDriving=true (SCG11 MCV parity preserved)', () => {
+    // SCG11EA-style scenario: a single team with one MCV. No sibling team
+    // claims the same target, so isDriving stays true (original behavior).
+    // The pre-Commence gate does NOT pop MissionQueue because IsDriving=true
+    // (matches unit.cpp:404's `!IsDriving && ...` gate).
+    const game = createGame();
+    const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
+
+    const team = new Team({
+      house: House.Greece,
+      desiredMembers: [{ type: UnitType.V_MCV, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 26 }],
+      forcedActive: true,
+    });
+    team.add(mcv);
+    registerTeam(team);
+
+    const waypoints = new Map<number, { cx: number; cy: number }>([
+      [26, { cx: 22, cy: 10 }],
+    ]);
+    updateAllTeams(waypoints, { structures: [], entities: [mcv] });
+
+    expect(mcv.missionQueue, 'single-team MCV queues MOVE').toBe(Mission.MOVE);
+    expect(mcv.moveTarget, 'single-team MCV moveTarget set').not.toBeNull();
+    expect(mcv.isDriving, 'single-team MCV isDriving stays true (no sibling conflict)').toBe(true);
+
+    // Pre-Commence gate in updateEntity should NOT pop the queue on this tick
+    // because isDriving=true (matches C++ unit.cpp:404 `!IsDriving` clause).
+    tickEntity(game, mcv);
+    expect(mcv.mission, 'MCV stays GUARD (Commence blocked by isDriving)').toBe(Mission.GUARD);
+    expect(mcv.missionQueue, 'MCV queue still MOVE').toBe(Mission.MOVE);
+  });
+
+  it('pre-dispatch Commence: popping tank1 fires Mission_Move jitter on the SAME tick', () => {
+    // Verify the pre-dispatch Commence gate in updateEntity pops MissionQueue
+    // BEFORE the Mission switch dispatches, so Mission_Move's Random_Pick(0,2)
+    // jitter fires on the activation tick (not 1 tick later).
+    const game = createGame();
+
+    // Simulate post-coordinateMove state directly: Mission=GUARD, MissionQueue
+    // =MOVE, isDriving=false (the "first-team-fails" case after retroactive
+    // reset by a sibling team claim).
+    const tank = placeVehicle(game, UnitType.V_3TNK, House.BadGuy, 42, 35);
+    tank.missionQueue = Mission.MOVE;
+    tank.moveTarget = { lx: 48 * 256 + 128, ly: 38 * 256 + 128 };
+    tank.isDriving = false;
+    tank.missionTimer = 40; // Mission_Guard timer, will decrement to 39
+
+    tickEntity(game, tank);
+
+    // After the pre-dispatch Commence: Mission=MOVE, MissionQueue=null,
+    // Timer was reset to 0 → Mission_Move handler fired → Timer=14+jitter
+    // (jitter 0..2 from ScenarioRandom.nextInRange).
+    expect(tank.mission, 'Mission popped to MOVE on entity-AI tick').toBe(Mission.MOVE);
+    expect(tank.missionQueue, 'MissionQueue cleared after pop').toBeNull();
+    expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeGreaterThanOrEqual(14);
+    expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeLessThanOrEqual(16);
+  });
+
+  it('drives-in-GUARD remains unaffected for second-team isDriving=true vehicles', () => {
+    // The pre-Commence gate must NOT pop the queue when isDriving=true — that
+    // vehicle stays in GUARD and drives via drives-in-GUARD (drive.cpp:1376).
+    const game = createGame();
+    const tank = placeVehicle(game, UnitType.V_3TNK, House.BadGuy, 39, 34);
+    tank.missionQueue = Mission.MOVE;
+    tank.moveTarget = { lx: 48 * 256 + 128, ly: 38 * 256 + 128 };
+    tank.isDriving = true;
+    tank.missionTimer = 40;
+
+    tickEntity(game, tank);
+
+    // isDriving=true → pre-Commence skipped → Mission stays GUARD, queue intact.
+    // drives-in-GUARD path in Mission.GUARD case runs updateMove, which may
+    // start the path or rotation but never pop Mission to MOVE.
+    expect(tank.mission, 'isDriving=true: Mission stays GUARD').toBe(Mission.GUARD);
+    expect(tank.missionQueue, 'isDriving=true: MissionQueue still MOVE').toBe(Mission.MOVE);
+  });
+});

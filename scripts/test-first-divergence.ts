@@ -8,7 +8,8 @@
  */
 import { test } from '@playwright/test';
 
-const BASE_URL = 'https://cliaas.com';
+const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
+const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 const ALL = ['SCG01EA','SCG03EA','SCG04EA','SCG06EA','SCG07EA','SCG11EA','SCG13EA'];
 const scenarios = process.env.SCENARIOS?.split(',') ?? ALL;
 const maxTicks = Number(process.env.MAX ?? 500);
@@ -24,7 +25,7 @@ for (const scenario of scenarios) {
 
     await Promise.all([
       wp.goto(`${BASE_URL}/ra/original.html?scenario=${scenario}.INI&autoplay=1&agentharness=1&seed=0`, { waitUntil: 'load' }),
-      tp.goto(`${BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`, { waitUntil: 'load' }),
+      tp.goto(`${TS_BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`, { waitUntil: 'load' }),
     ]);
     await Promise.all([
       wp.waitForFunction(() => { try { const M=(window as any).Module; return M?.ccall && JSON.parse(M.ccall('agent_get_state','string',[],[])).units?.length>0; } catch { return false; } }, { timeout: 180_000, polling: 2000 }),

@@ -22,13 +22,27 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
+import { House, MAP_CELLS, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 
-/** Optional context for building-based retreat targeting (C++ team.cpp:590-616) */
+/**
+ * Optional context threaded through Team.ai() / coordinateMove() for a full
+ * per-tick pass.
+ *
+ * `structures` — used by coordinateRegroup retreat-target search (C++ team.cpp:590-616).
+ * `vehicleClaims` — per-tick path-reservation emulation. Maps cell-key
+ * (cy*MAP_CELLS+cx) to the first vehicle that queued a moveTarget at that
+ * destination during the current Team-AI pass. When a SECOND team queues the
+ * same destination, we retroactively flip the FIRST unit to isDriving=false
+ * (C++ Start_Driver-failure equivalent — its Commence pops Mission=MOVE and
+ * fires Mission_Move_foot jitter) and give the second unit isDriving=true
+ * (Start_Driver-success → stays GUARD, drives-in-GUARD). Matches WASM's
+ * SCG04EA tick 3 set1/set2 3TNK stagger. See coordinateMove for details.
+ */
 export interface TeamAIContext {
   structures?: MapStructure[];
+  vehicleClaims?: Map<number, Entity>;
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -473,7 +487,7 @@ export class Team {
           this.target = { ...this.zone };
         }
         if (this.target) {
-          this.coordinateMove(waypoints);
+          this.coordinateMove(waypoints, ctx);
         }
         return;
       } else {
@@ -618,7 +632,7 @@ export class Team {
 
         case TMISSION_MOVE:
         case TMISSION_MOVECELL:
-          this.coordinateMove(waypoints);
+          this.coordinateMove(waypoints, ctx);
           break;
 
         case TMISSION_GUARD:
@@ -662,7 +676,7 @@ export class Team {
       if (this.isMoving) {
         this.isReforming = !this.coordinateRegroup();
       } else {
-        this.coordinateMove(waypoints);
+        this.coordinateMove(waypoints, ctx);
       }
     }
   }
@@ -718,7 +732,7 @@ export class Team {
    * C++ Coordinate_Move (team.cpp:1874-2008)
    * All members move toward the team's target. When all arrive, advance mission.
    */
-  coordinateMove(_waypoints?: Map<number, { cx: number; cy: number }>): void {
+  coordinateMove(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     if (!this.target && this.missionTarget) {
       this.target = { ...this.missionTarget };
     }
@@ -764,11 +778,28 @@ export class Team {
         }
         if (!unit.moveTarget) {
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
-          // Vehicles only: simulate C++ Start_Driver on NavCom assignment so the
-          // end-of-tick Commence gate sees IsDriving=true and doesn't pop MOVE.
-          // Infantry use a different gate (nonInterruptAnimTicks gesture timer).
+          // Vehicles only: simulate C++ Start_Driver on NavCom assignment so
+          // the Commence gate (blockCommenceDrive) sees IsDriving=true and
+          // doesn't pop MOVE until the unit arrives at destination. Infantry
+          // use a different gate (nonInterruptAnimTicks gesture timer).
           if (!unit.stats.isInfantry && !unit.isAirUnit) {
+            // Per-tick path-reservation emulation (SCG04EA tick 3 fix):
+            // C++ Basic_Path succeeds for the first team and fails for the
+            // second team claiming the same target (transient cell
+            // reservation). Emulate by flipping: when a SECOND team queues
+            // the same cell, reset the FIRST unit to isDriving=false so its
+            // Commence pops Mission=MOVE and fires Mission_Move_foot jitter;
+            // current unit stays isDriving=true (drives-in-GUARD).
+            const tcx = Math.floor(this.target.x / CELL_SIZE);
+            const tcy = Math.floor(this.target.y / CELL_SIZE);
+            const claimKey = tcy * MAP_CELLS + tcx;
+            const claims = ctx?.vehicleClaims;
+            const prior = claims?.get(claimKey);
+            if (prior && !prior.stats.isInfantry && !prior.isAirUnit) {
+              prior.isDriving = false;
+            }
             unit.isDriving = true;
+            claims?.set(claimKey, unit);
           }
         }
         finished = false;
@@ -1138,9 +1169,13 @@ export function clearAllTeams(): void {
  * This matches C++ Logic_AI() iterating through Teams[] and calling AI() on each.
  */
 export function updateAllTeams(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
+  // Fresh per-tick vehicleClaims map for Basic_Path path-reservation emulation
+  // (see TeamAIContext doc). Overrides any caller-provided map so tick boundaries
+  // always reset cleanly.
+  const mergedCtx: TeamAIContext = { ...(ctx ?? {}), vehicleClaims: new Map() };
   for (const team of _activeTeams) {
     if (!team.dissolved) {
-      team.ai(waypoints, ctx);
+      team.ai(waypoints, mergedCtx);
     }
   }
   cleanupTeams();

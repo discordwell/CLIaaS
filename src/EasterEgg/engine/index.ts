@@ -3956,10 +3956,27 @@ export class Game {
     if (entity.missionTimer > 0) {
       entity.missionTimer--;
     }
-    const missionTimerFired = entity.missionTimer <= 0;
+    let missionTimerFired = entity.missionTimer <= 0;
 
     // nonInterruptAnimTicks decrements every tick (gesture/salute animation countdown)
     if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
+
+    // C++ UnitClass::AI (unit.cpp:404) / VesselClass::AI (vessel.cpp:592) — pre-Commence
+    // gate that runs BEFORE MissionClass::AI dispatch. Vehicles/vessels call Commence()
+    // twice per AI tick: once before DriveClass::AI, once after (unit.cpp:472). Infantry
+    // only Commence AFTER MissionClass::AI (infantry.cpp:1210), so the post-dispatch gate
+    // below handles them. Without this pre-Commence, a team-activation tick that queues
+    // MissionQueue=MOVE gets a 1-tick delay: queue pops at end-of-tick, Mission_Move
+    // fires on the following tick — whereas C++ pops and dispatches Mission_Move on the
+    // SAME tick (SCG04EA tick 3: WASM fires tag 60010 at tick 3, TS at tick 4).
+    if (!entity.stats.isInfantry && !entity.isAirUnit &&
+        entity.missionQueue !== null && !entity.isDriving &&
+        !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+      entity.mission = entity.missionQueue;
+      entity.missionQueue = null;
+      entity.missionTimer = 0;
+      missionTimerFired = true;
+    }
 
     switch (entity.mission) {
       case Mission.MOVE:
