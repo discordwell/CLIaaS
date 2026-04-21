@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-04-21T21:00Z — FireLaunch stage gate port (5a3e7282): SCG01 78→80, SCG06 63→67
+
+**Result:** First-divergence ticks after cherry-picking `1bd992e2` onto main as `5a3e7282`:
+- SCG01EA: 78 → **80** (+2)
+- SCG03EA: 238 (unchanged from post-b7c130d7 regression baseline)
+- SCG04EA: 36 (unchanged — architectural, needs DriveClass::Start_Of_Move port)
+- SCG06EA: 63 → **67** (+4)
+- SCG07EA: 1 (unchanged — iteration-order skew, Δ=-12)
+- SCG11EA: 19 (unchanged — architectural, Basic_Path friendly-blocker)
+- SCG13EA: 101 (unchanged — needs WASM Per_Cell_Process instrumentation)
+
+**Fix:** Ported C++ `InfantryClass::Firing_AI` FireLaunch stage animation gate (`infantry.cpp:3580-3670`, `idata.cpp:404`). Infantry that acquire a target in updateGuard/updateAttack now enter a per-tick `firePrepStage` countdown (from unit-type FireLaunch frame) before the bullet is launched. Paired with same-tick Coord_Scatter flush position so TS and WASM agree on the exact tick at which invisible-weapon scatter RNG is consumed.
+
+**Key files:**
+- `src/EasterEgg/engine/entity.ts` — added `firePrepActive` / `firePrepStage` fields
+- `src/EasterEgg/engine/missionAI.ts` — FireLaunch gate in updateAttack; same-tick Firing_AI call after target acquisition in updateGuard
+- `src/EasterEgg/engine/index.ts` — per-tick `firePrepStage++` in TechnoClass::AI equivalent; invisible-bullet scatter flush stays at end-of-entity-loop (no change from 9a334f4b)
+- `src/EasterEgg/__tests__/cpp-parity-infantry-fire-launch.test.ts` — NEW (14 tests)
+
+**Tests:** All 51,160 Easter Egg tests pass.
+
 ## 2026-04-21T14:15Z — Mission_Guard scan: weapon Allowed_Threats override (b7c130d7 correction)
 
 **Result:** SCG01EA 45→78 (+33, matches task target ≥78). Minor regressions on SCG03 (239→238 −1), SCG06 (65→63 −2), SCG07 (3→1 −2). Net +28 ticks across 7 scenarios.
