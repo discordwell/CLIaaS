@@ -2687,9 +2687,20 @@ export function executeTriggerAction(
       })) : null;
       let transport: Entity | null = null;
       const cargo: Entity[] = [];
-      // C++ reinf.cpp:439: Determine spawn edge for deterministic facing
-      const spawnEdge = getSpawnEdge(teamHouse, houseEdges, mapBounds, wp);
-      const spawnFacing = edgeToFacing(spawnEdge);
+      // C++ reinf.cpp:428-439: facing derives from the RAW house source edge
+      // (NOT the waypoint-inferred edge that Calculated_Cell uses for cell positioning).
+      //   SourceType source = HouseClass::As_Pointer(teamtype->House)->Control.Edge;
+      //   if (source == SOURCE_NONE) source = SOURCE_NORTH;
+      //   FacingType eface = (FacingType)(source << 1);   // facing from raw source
+      //   CELL cell = Map.Calculated_Cell(source, teamtype->Origin, -1, ...); // cell may use waypoint
+      // SCG11EA: Greece house has no Edge= (defaults to NORTH) and origin waypoint is
+      // near the south map edge. Calculated_Cell infers 'south' for the cell, but the
+      // MCV's facing is NORTH (house default), so it can immediately drive toward its
+      // TMISSION_MOVE target without rotating 180°. Prior TS code used the waypoint-
+      // inferred edge for facing too, making the MCV face SOUTH — it spent ~25 ticks
+      // rotating before the first movement, diverging from WASM within a few ticks.
+      const spawnFacingEdge = normalizeHouseEdge(houseEdges?.get(teamHouse));
+      const spawnFacing = edgeToFacing(spawnFacingEdge);
       // C++ reinf.cpp:251: Check if team has TMISSION_UNLOAD for IsALoaner flag
       const hasUnloadMission = team.missions.some(m => m.mission === 8); // TMISSION_UNLOAD = 8
       // C++ parity (reinf.cpp:441): ground reinforcements spawn at the map edge
