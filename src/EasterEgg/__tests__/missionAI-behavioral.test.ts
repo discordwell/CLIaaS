@@ -307,10 +307,18 @@ describe('updateAttack', () => {
     entity.desiredFacing = 2;
 
     const ctx = makeMockContext({ entities: [entity, enemy] });
+    // C++ InfantryClass::Firing_AI FireLaunch gate (infantry.cpp:3651): E1 FireLaunch=2.
+    // First updateAttack starts firing animation (Stage=0) — bullet does NOT launch yet.
+    updateAttack(ctx, entity);
+    expect(entity.firePrepActive).toBe(true);
+    expect(entity.attackCooldown).toBe(0);
+    entity.firePrepStage = 1; // Graphic_Logic would advance stage each tick in the real loop
+    updateAttack(ctx, entity);
+    expect(entity.attackCooldown).toBe(0); // still in prep
+    entity.firePrepStage = 2;
     updateAttack(ctx, entity);
 
-    // Since M1Carbine has projSpeed (deferred projectile), it should launch
-    // Verify playSoundAt was called (weapon sound effect) or effects were pushed
+    // Stage reached FireLaunch — bullet launches (deferred invisible scatter + arm set)
     expect(entity.animState).toBe(AnimState.ATTACK);
     expect(entity.attackCooldown).toBeGreaterThan(0);
   });
@@ -363,6 +371,11 @@ describe('updateAttack', () => {
       e4.target = jeep;
 
       const ctx = makeMockContext({ entities: [e4, jeep] });
+      // E4 FireLaunch=2 (idata.cpp:464) — 3 updateAttack calls to reach Fire_At.
+      updateAttack(ctx, e4);
+      e4.firePrepStage = 1;
+      updateAttack(ctx, e4);
+      e4.firePrepStage = 2;
       updateAttack(ctx, e4);
 
       // launchProjectile must have been called (Flamer has projectileSpeed)
@@ -390,6 +403,11 @@ describe('updateAttack', () => {
       e4.target = jeep;
 
       const ctx = makeMockContext({ entities: [e4, jeep] });
+      // E4 FireLaunch=2 — 3 updateAttack calls required to fire.
+      updateAttack(ctx, e4);
+      e4.firePrepStage = 1;
+      updateAttack(ctx, e4);
+      e4.firePrepStage = 2;
       updateAttack(ctx, e4);
 
       expect(ctx.launchProjectile).toHaveBeenCalled();
@@ -443,6 +461,11 @@ describe('updateAttack', () => {
       e1.target = enemy;
 
       const ctx = makeMockContext({ entities: [e1, enemy] });
+      // E1 FireLaunch=2 (idata.cpp:404) — advance through the pre-fire stages.
+      updateAttack(ctx, e1);
+      e1.firePrepStage = 1;
+      updateAttack(ctx, e1);
+      e1.firePrepStage = 2;
       updateAttack(ctx, e1);
 
       // M1Carbine has no projectileSpeed → instant-hit path → damageEntity is called,

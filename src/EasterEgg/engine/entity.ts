@@ -163,6 +163,15 @@ export class Entity {
   // Stays true for firingAnimTicks after weapon fire; cleared when counter reaches 0.
   isFiringAnim = false;
   firingAnimTicks = 0; // countdown for fire animation duration
+  // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) — FireLaunch animation-stage gate.
+  //   !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.
+  //   IsFiring && Fetch_Stage()==FireLaunch → Fire_At (actual bullet launch).
+  // E1 FireLaunch=2 (idata.cpp:404): 2 ticks between "decide to fire" and "launch".
+  // Vehicles fire same-tick (unit.cpp:656-663 has no stage gate). firePrepActive
+  // mirrors C++ IsFiring DURING the pre-fire stage; the post-fire anim uses the
+  // existing isFiringAnim/firingAnimTicks fields.
+  firePrepActive = false;
+  firePrepStage = 0;
   // C++ Doing state: non-interruptible animation timer.
   // When > 0, Commence() is blocked (gesture, salute, lie down, get up animations).
   // Set by Random_Animate (guard scan idle animations) and Fear_AI.

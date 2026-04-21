@@ -2307,7 +2307,10 @@ export class Game {
     // advances existing non-invisible projectiles). Mirrors WASM's position
     // AFTER all normal entity AI and post-Object-AI subsystems (repair timer,
     // map/factory/house AI equivalents), representing the same-tick
-    // bullet-at-high-idx iteration.
+    // bullet-at-high-idx iteration. Paired with the InfantryClass::Firing_AI
+    // FireLaunch stage gate in updateAttack so the bullet is launched on WASM's
+    // exact tick N+FireLaunch and consumes its Coord_Scatter RNG within that
+    // tick.
     //
     // See commit 61767115 for the C++ investigation that replaced the
     // earlier "defer to next tick" logic (2a99bce6 / 062f2f8e).
@@ -3943,6 +3946,11 @@ export class Game {
     // This is independent of mission timers — units can fire between guard scans.
     if (entity.attackCooldown > 0) entity.attackCooldown--;
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    // C++ TechnoClass::AI (techno.cpp:2392-2398) → StageClass::Graphic_Logic advances
+    // animation stage each tick. InfantryClass::Firing_AI reads Fetch_Stage() AFTER
+    // this increment when gating Fire_At. Stage advances BEFORE the per-tick Firing_AI
+    // check so that tick N+FireLaunch observes stage == FireLaunch.
+    if (entity.firePrepActive) entity.firePrepStage++;
     // C++ IsDriving persists between ticks — set by Start_Driver, cleared by Stop_Driver.
     // Do NOT clear it per-tick; let moveToward set it on first call and clear on arrival.
 

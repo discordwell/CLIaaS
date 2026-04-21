@@ -123,6 +123,32 @@ const _HOUSE_IDX: Record<string, number> = {
   [House.GoodGuy]: 8, [House.BadGuy]: 9, [House.Neutral]: 10,
 };
 
+// ── Infantry FireLaunch (pre-fire animation stage gate) ────────────────────
+// C++ idata.cpp — per-InfantryTypeClass "Frame of projectile launch" constructor arg.
+// InfantryClass::Firing_AI (infantry.cpp:3651) fires only when Fetch_Stage() == FireLaunch.
+// DO_FIRE_WEAPON has rate=1 (infantry.cpp:103) so stage advances 1 per tick. Vehicles
+// use UnitClass::Firing_AI (unit.cpp:643-687) which has no stage gate — fire same-tick.
+export function infantryFireLaunch(type: string): number {
+  switch (type) {
+    case UnitType.I_DOG: return 1;              // Dog idata.cpp:384
+    case UnitType.I_E1: return 2;               // Rifle idata.cpp:404
+    case UnitType.I_E2: return 14;              // Grenadier idata.cpp:424
+    case UnitType.I_E3: return 3;               // Rocket idata.cpp:444
+    case UnitType.I_E4: return 2;               // Flamethrower idata.cpp:464
+    case UnitType.I_E6: return 3;               // Engineer idata.cpp:484
+    case UnitType.I_SPY: return 3;              // Spy idata.cpp:504
+    case 'E9':                                  // Thief idata.cpp:524
+    case 'THF': return 3;
+    case UnitType.I_TANYA: return 2;            // Tanya/E7 idata.cpp:544
+    case UnitType.I_MEDI: return 25;            // Medic idata.cpp:563
+    case UnitType.I_MECH: return 25;            // Mechanic (Medic-based)
+    case UnitType.I_GNRL: return 2;             // General/Stavros idata.cpp:582
+    case UnitType.I_EINSTEIN: return 0;         // Einstein idata.cpp:793 — fires same-tick
+    // Civilians, Delphi: FireLaunch=2 (CivilianDoControls, idata.cpp:601-854)
+    default: return 2;
+  }
+}
+
 // ── Exported mission functions ──────────────────────────────────────────────
 
 /** Attack mission — main combat state machine for ground/naval units.
@@ -155,6 +181,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
   if (!entity.target?.alive) {
     entity.target = null;
     entity.forceFirePos = null;
+    // C++ infantry.cpp:3671-3677 — if !Target_Legal, clear IsFiring. Drop the
+    // pre-fire animation state so the next target acquisition restarts the gate.
+    entity.firePrepActive = false;
+    entity.firePrepStage = 0;
     // Resume saved move destination (AI units interrupted MOVE to attack)
     if (entity.savedMoveTarget) {
       const saved = entity.savedMoveTarget;
@@ -250,6 +280,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
       // LOS blocked — move toward target to get clear shot.
       // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
+      // C++ Firing_AI clears IsFiring when Target_Legal fails (infantry.cpp:3671);
+      // moving out of fire conditions likewise aborts the pre-fire animation.
+      entity.firePrepActive = false;
+      entity.firePrepStage = 0;
       entity.animState = AnimState.WALK;
       entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, ctx.movementSpeed(entity));
       return;
@@ -305,6 +339,35 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     const isSecondary = activeWeapon === entity.weapon2;
 
     if (activeWeapon && ((isSecondary ? entity.attackCooldown2 : entity.attackCooldown) <= 0)) {
+      // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) pre-fire animation gate:
+      //   Tick N:  !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.
+      //            Check Fetch_Stage()==FireLaunch: stage=0 → skip Fire_At (unless FireLaunch=0).
+      //   Tick N+1..N+(FireLaunch-1): StageClass::Graphic_Logic advances stage. Skip.
+      //   Tick N+FireLaunch: stage==FireLaunch → Fire_At.
+      // UnitClass::Firing_AI (unit.cpp:643-687) fires same-tick — no stage gate.
+      // This delay pushes the invisible-bullet Coord_Scatter RNG from fire tick to
+      // fire tick + FireLaunch, matching WASM's Bullet_Explodes timing.
+      // SCG06EA tick 63: Greek E1 @(19,65) started firing animation; WASM Fire_At ran
+      // at tick 65 (FireLaunch=2), producing the Coord_Scatter RNG at that tick.
+      if (entity.stats.isInfantry && !isSecondary) {
+        const fireLaunch = infantryFireLaunch(entity.type);
+        if (!entity.firePrepActive) {
+          // C++ !IsFiring case: start firing animation. No bullet launch this tick
+          // (unless FireLaunch==0 — Einstein and unarmed types).
+          entity.firePrepActive = true;
+          entity.firePrepStage = 0;
+        }
+        if (entity.firePrepStage < fireLaunch) {
+          // Stage not yet at FireLaunch — keep the fire animation running, but do
+          // NOT launch the bullet / consume Coord_Scatter RNG / set Arm yet.
+          entity.animState = AnimState.ATTACK;
+          return;
+        }
+        // Stage reached FireLaunch — reset prep state and fall through to Fire_At.
+        entity.firePrepActive = false;
+        entity.firePrepStage = 0;
+      }
+
       // C1: Set burst count for multi-shot weapons (e.g. MammothTusk burst: 2)
       const burst = activeWeapon.burst ?? 1;
       if (entity.burstCount > 0) {
@@ -560,6 +623,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 
     }
   } else {
+    // Out of range — target must be chased. Drop any pre-fire animation state
+    // (C++ Firing_AI only runs when in range; moving breaks the fire gate).
+    entity.firePrepActive = false;
+    entity.firePrepStage = 0;
     // M5: Defensive stance: chase if target within weapon range of guard origin (C++ Threat_Range)
     // Only give up if target is too far from the home position, not current position
     if (entity.stance === Stance.DEFENSIVE) {
@@ -1198,20 +1265,20 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     ? null
     : cellBasedGuardScan(ctx, entity, scanRange, scanMask);
   if (bestTarget) {
-    // C++ infantry.cpp:1237 / unit.cpp:425 — after Mission_Dispatch (Mission_Guard
-    // calls Target_Something_Nearby, setting TarCom), Firing_AI runs SAME TICK and
-    // fires if target is in range with Arm=0. Mission stays MISSION_GUARD (C++
-    // Target_Something_Nearby never reassigns mission). Without this same-tick
-    // fire, TS's top-of-updateGuard Firing_AI block (line 890+) only fires on the
-    // NEXT tick, putting TS's scatter RNG 1 tick behind WASM's — surfaced as
-    // SCG03 tick 247 / SCG06 tick 64 divergence after 9a334f4b's same-tick
-    // scatter refactor.
+    // C++ infantry.cpp:1237 / unit.cpp:425 — after MissionClass::AI dispatch
+    // (Mission_Guard calls Target_Something_Nearby → Assign_Target), Firing_AI
+    // runs SAME TICK and fires if target is in range with Arm=0. Mission stays
+    // MISSION_GUARD (C++ Target_Something_Nearby never reassigns mission).
+    // Without this same-tick fire, TS's top-of-updateGuard Firing_AI block
+    // only fires on the NEXT tick, putting TS's scatter RNG 1 tick behind
+    // WASM's (SCG03 tick 247 / SCG06 tick 64 after 9a334f4b's same-tick
+    // scatter refactor). For infantry the FireLaunch gate in updateAttack
+    // defers the actual bullet launch to tick N+FireLaunch; this call starts
+    // the firing animation (firePrepActive) on the target-acquisition tick.
     entity.target = bestTarget;
     if (entity.weapon && entity.attackCooldown <= 0 && entity.inRange(bestTarget)) {
       // Temporarily switch to ATTACK so updateAttack's fire path runs, then
-      // restore GUARD. C++ keeps Mission==GUARD throughout; updateAttack may
-      // also stay ATTACK if it does internal transitions, so guard with the
-      // post-check.
+      // restore GUARD. C++ keeps Mission==GUARD throughout.
       entity.mission = Mission.ATTACK;
       updateAttack(ctx, entity);
       if ((entity.mission as Mission) === Mission.ATTACK) {
