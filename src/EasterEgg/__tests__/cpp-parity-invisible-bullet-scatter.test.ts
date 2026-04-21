@@ -229,13 +229,15 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
   });
 });
 
-// ── Game-level flush ordering (the SCG03EA tick 267 fix) ───────────────────────
+// ── Game-level flush ordering (C++ bullet.cpp:736-738 + logic.cpp:285) ────────
 // Verifies that `deferInvisibleScatter()` queues a Coord_Scatter RNG that gets
-// flushed at the START of the NEXT call to Game.update(), BEFORE any entity AI.
-// This is what keeps the RNG stream aligned with WASM, which consumes the
-// scatter at the end of the DETONATION tick (WASM's bullet-AI iteration) —
-// equivalently, at the start of the TICK AFTER TS's instant-damage fire tick.
-describe('Game deferred scatter flush (update() ordering, fix SCG03EA tick 267)', () => {
+// flushed at the END of the SAME tick's entity-AI phase (after Phase 1-4
+// entity loops complete, just before updateInflightProjectiles which advances
+// non-invisible projectiles). Mirrors WASM, where an invisible weapon's
+// newly-Submit'd bullet sits at a high Logic idx and fires Bullet_Explodes →
+// Coord_Scatter inside the SAME Logic loop iteration as the firing entity.
+// See commit 61767115 for the C++ investigation.
+describe('Game same-tick scatter flush (end of entity-AI phase)', () => {
   beforeAll(() => {
     vi.stubGlobal('Audio', class {
       src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -248,13 +250,13 @@ describe('Game deferred scatter flush (update() ordering, fix SCG03EA tick 267)'
     ));
   });
 
-  it('update() consumes 1 scatter RNG at tick start when _pendingInvisibleScatters > 0', async () => {
+  it('update() consumes 1 scatter RNG same-tick when _pendingInvisibleScatters > 0', async () => {
     const { Game } = await import('../engine/index');
     const canvas = document.createElement('canvas');
     canvas.width = 640; canvas.height = 400;
     const game = new Game(canvas);
     // Cast to access private internals — this is a regression test for the
-    // flush-at-tick-start invariant, which is the entire fix.
+    // same-tick end-of-entity-phase flush invariant, which is the entire fix.
     const g = game as unknown as {
       _pendingInvisibleScatters: number;
       update: () => void;
@@ -263,7 +265,8 @@ describe('Game deferred scatter flush (update() ordering, fix SCG03EA tick 267)'
       structures: unknown[];
     };
 
-    // Simulate the previous tick's fire path queueing a scatter.
+    // Simulate a queued scatter (would have been queued by this tick's fire
+    // path in real runs; here we seed it directly to test the flush).
     g._pendingInvisibleScatters = 1;
     const seedBefore = ScenarioRandom.seed >>> 0;
 
@@ -272,11 +275,10 @@ describe('Game deferred scatter flush (update() ordering, fix SCG03EA tick 267)'
     g.update();
     const callsAfter = ScenarioRandom.callCount;
 
-    // At minimum, the deferred scatter must have been consumed during this
-    // update() (exactly 1 RNG call for nextInRange(0, 255)). Other per-tick
-    // subsystems (e.g. team AI) may fire more RNGs, but the flush itself
-    // contributes exactly 1 and happens first — _pendingInvisibleScatters
-    // must be drained back to 0.
+    // The queued scatter must have been consumed during this update()
+    // (exactly 1 RNG call for nextInRange(0, 255)). Other per-tick
+    // subsystems (e.g. team AI) may fire more RNGs — we just verify
+    // _pendingInvisibleScatters is drained back to 0 and ≥1 call fired.
     expect(g._pendingInvisibleScatters).toBe(0);
     expect(callsAfter).toBeGreaterThanOrEqual(callsBefore + 1);
     // Seed must have changed (scatter consumed).
@@ -308,7 +310,7 @@ describe('Game deferred scatter flush (update() ordering, fix SCG03EA tick 267)'
     expect(callsAfter - callsBefore).toBeGreaterThanOrEqual(0);
   });
 
-  it('multiple queued scatters are all flushed on the next update()', async () => {
+  it('multiple queued scatters are all flushed on the same update()', async () => {
     const { Game } = await import('../engine/index');
     const canvas = document.createElement('canvas');
     canvas.width = 640; canvas.height = 400;

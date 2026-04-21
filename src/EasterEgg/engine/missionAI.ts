@@ -444,12 +444,16 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         const projStrength = Math.max(1, Math.round(activeWeapon.damage * houseBias));
         ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit);
       } else {
-        // C++ bullet.cpp:1012-1014 — Coord_Scatter for invisible projectiles fires during
-        // Bullet_Explodes, which runs on the bullet's FIRST AI tick after creation.
-        // Bullet spawned at tcoord with MPH_LIGHT_SPEED→MPH_IMMOBILE; Arm_Fuse with
-        // Timer=4, Arming=0. Next AI tick Fuse_Checkup returns true because Distance
-        // from Coord to HeadTo == 0 < 0x10 → Bullet_Explodes → Coord_Scatter.
-        // Net: RNG fires 1 frame AFTER the firing entity. Defer so TS matches WASM.
+        // C++ bullet.cpp:736-738 + 1012-1014 — invisible weapons (Speed=100 →
+        // MPH_LIGHT_SPEED) are constructed AT the target coord (Coord = tcoord)
+        // and Arm_Fuse'd with proximity 0. logic.cpp:285 re-evaluates Count()
+        // each iteration, so the Submit'd bullet (at high Logic idx) gets its
+        // AI call inside the SAME tick as the fire: Fuse_Checkup returns true
+        // (distance=0 < 0x10) → Bullet_Explodes → Coord_Scatter.
+        // Net: the scatter Random_Pick(0,255) fires on the SAME tick as the
+        // firing entity, but AFTER all lower-idx entities have been processed.
+        // Defer so the flush (end of entity-AI phase in Game.update()) matches
+        // WASM's end-of-Logic-loop position.
         if (activeWeapon.isInvisible) {
           ctx.deferInvisibleScatter();
         }

@@ -484,11 +484,21 @@ export class Game {
   private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
   private scenarioWarheadProps: Record<string, WarheadProps> = WARHEAD_PROPS;
   private inflightProjectiles: InflightProjectile[] = [];
-  /** Invisible-bullet Coord_Scatter RNGs queued this tick (flushed at the START
-   *  of the NEXT tick, BEFORE any entity AI runs). Mirrors C++ BulletClass::AI →
-   *  Bullet_Explodes running on the bullet's next AI tick, while realigning with
-   *  TS's "instant damage at fire tick" path (1 tick ahead of WASM's bullet
-   *  detonation). See update() for the ordering rationale. */
+  /** Invisible-bullet Coord_Scatter RNGs queued this tick by the fire path
+   *  (missionAI updateAttack → deferInvisibleScatter). Flushed at END of the
+   *  current tick's entity-AI phase — SAME tick as fire, after Phase 1-4 entity
+   *  loops complete.
+   *
+   *  C++ parity (bullet.cpp:736-738 + logic.cpp:285): an invisible weapon with
+   *  Speed=100 (MPH_LIGHT_SPEED) is constructed AT the target coord (Coord =
+   *  tcoord), then Arm_Fuse'd with proximity 0. The Logic loop
+   *  `for (index = 0; index < Count(); index++)` re-reads Count() each
+   *  iteration, so when Fire_At's `new BulletClass(...)` Submits the bullet
+   *  to the Logic array, the loop's next iteration picks it up — still same
+   *  tick. Fuse_Checkup returns true (distance=0 < 0x10), Bullet_Explodes
+   *  runs, and Coord_Scatter fires. Net: the scatter RNG fires on the same
+   *  tick as the weapon fire, after all lower-index entities have been
+   *  processed. See update() for the flush site. */
   private _pendingInvisibleScatters = 0;
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
@@ -1688,26 +1698,6 @@ export class Game {
     this.tick++;
     (globalThis as any).__currentGameTick = this.tick;
     (globalThis as any).__missionTimerTrace = true;
-    // Flush invisible-bullet Coord_Scatter RNGs that were queued by the PREVIOUS
-    // tick's fire path. Must run BEFORE any entity AI so the scatter consumes
-    // the same RNG stream position it occupies in WASM.
-    //
-    // Ordering rationale: C++ BulletClass::AI fires Coord_Scatter at tick N+1
-    // during the bullet's AI iteration, sandwiched between previous-tick
-    // attackers' RNGs and next-tick entities' Mission_Guard jitters. TS's
-    // instant-damage path applies damage at the ATTACKER's fire tick, which
-    // aligns with WASM's bullet-detonation tick (1 tick AFTER WASM's attacker).
-    // So when we "defer to next tick" in TS, that tick is WASM's detonation-
-    // tick-plus-one. Flushing at the START of the next tick (before entity AI)
-    // places the scatter at the correct RNG stream position — matching WASM's
-    // end-of-detonation-tick bullet iteration. Per-tick call-count diffs of ±1
-    // are expected and harmless; seed alignment drives gameplay parity.
-    // Fix: SCG03EA tick 267 — see commit 2a99bce6 for the original defer.
-    const flushCount = this._pendingInvisibleScatters;
-    this._pendingInvisibleScatters = 0;
-    for (let i = 0; i < flushCount; i++) {
-      ScenarioRandom.nextInRange(0, 255);
-    }
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
 
     // RNG audit: enable tagged logging for ticks 1-15.
@@ -2305,6 +2295,31 @@ export class Game {
 
     // Gap Generator shroud jamming (every ~90 ticks)
     this.updateGapGenerators();
+
+    // C++ invisible-bullet Coord_Scatter (bullet.cpp:736-738 + 1012-1014):
+    // Invisible weapons (Speed=100 → MPH_LIGHT_SPEED) construct the bullet AT
+    // target coord with proximity 0; logic.cpp:285's
+    //   for (index = 0; index < Count(); index++)
+    // re-reads Count() each iteration, so the freshly-Submitted bullet (at
+    // high Logic idx) gets its AI call INSIDE the SAME tick as fire —
+    // Fuse_Checkup returns true (distance=0 < 0x10), Bullet_Explodes runs,
+    // and Coord_Scatter consumes 1 Random_Pick(0,255).
+    //
+    // Flush here (same-tick, right before updateInflightProjectiles which
+    // advances existing non-invisible projectiles). Mirrors WASM's position
+    // AFTER all normal entity AI and post-Object-AI subsystems (repair timer,
+    // map/factory/house AI equivalents), representing the same-tick
+    // bullet-at-high-idx iteration.
+    //
+    // See commit 61767115 for the C++ investigation that replaced the
+    // earlier "defer to next tick" logic (2a99bce6 / 062f2f8e).
+    {
+      const flushCount = this._pendingInvisibleScatters;
+      this._pendingInvisibleScatters = 0;
+      for (let i = 0; i < flushCount; i++) {
+        ScenarioRandom.nextInRange(0, 255);
+      }
+    }
 
     // Advance in-flight projectiles
     this.updateInflightProjectiles();
@@ -6415,8 +6430,11 @@ export class Game {
   }
 
   /** Advance in-flight projectiles — delegates to combat.ts.
-   *  Note: invisible-bullet Coord_Scatter RNGs are now flushed at update() entry
-   *  (see comment there). This runs after entity AI for standard projectile arrival. */
+   *  Note: invisible-bullet Coord_Scatter RNGs are flushed at end of entity-AI
+   *  phase in update() just before this runs (mirroring C++
+   *  bullet.cpp:736-738 + logic.cpp:285 — same-tick end-of-Logic-loop). This
+   *  runs after entity AI for standard (non-invisible, travelling) projectile
+   *  arrival. */
   private updateInflightProjectiles(): void {
     this._runCombat(ctx => _updateInflightProjectiles(ctx));
   }
