@@ -1,5 +1,32 @@
 # Session Summaries
 
+## 2026-04-22T14:45Z — updateAreaGuard Firing_AI — SCG01+7, SCG06 Δ-preserved
+
+**Result:** Added C++ infantry.cpp:1237 Firing_AI hook to `updateAreaGuard`, mirroring the existing `updateGuard` pattern (missionAI.ts:1164-1176). Pre-fix, a Mission_Guard_Area unit that path-shorten'd into firing range (foot.cpp:1471-1483) sat idle until the next Mission_Guard_Area timer fire (~70+ ticks later). Post-fix, updateAreaGuard temporarily swaps to ATTACK mission so updateAttack's Fire_At path runs, then restores AREA_GUARD.
+
+**Commit:** `e552d0c7` (main, cherry-picked from worktree `fa3d938e`). Deployed.
+
+**All 7 scenarios (before → after):**
+- **SCG01EA: 80+ → 87 (advanced +7)** ← unplanned side-benefit
+- SCG03EA: 238 → 238 (unchanged)
+- SCG04EA: 36 → 36 (unchanged)
+- SCG06EA: 76 → 76 (unchanged; Δ=+2 preserved — WASM fires bullet[115] at t76, TS's Fire_At at t80 because findPath produces different sequence than C++ Basic_Path)
+- SCG07EA: 17 → 17 (unchanged)
+- SCG11EA: 32 → 32 (unchanged)
+- SCG13EA: 101 → 101 (unchanged)
+
+**What the trace revealed (cpp-parity-scg06ea-t76-trace-runtime.test.ts):**
+- TS findPath (24,67)→(20,66) produces `(23,67)→(22,67)→(21,66)→(20,66)`, arriving in-range at (21,66) t≈77.
+- Pre-fix: firePrepActive never set — unit idle at (21,66) for 70+ ticks waiting for next Mission_Guard_Area dispatch.
+- Post-fix: path-shorten clears moveTarget at t=77 → Firing_AI hook fires t=78 (stage 0) → Fire_At at t=80.
+- WASM's walk differs (tick 18 (23,67), tick 25 (23,66), tick 65 (22,65), fire at t=76). Root cause of residual SCG06 Δ=+2 is pathfinder divergence, NOT Firing_AI — separate investigation.
+
+**Files:** src/EasterEgg/engine/missionAI.ts (+34 LOC Firing_AI block above timer-gate in updateAreaGuard), cpp-parity-scg06ea-tick-76.test.ts (+3 unit tests), cpp-parity-scg06ea-t76-trace.test.ts (findPath geometry pin, 6 tests), cpp-parity-scg06ea-t76-trace-runtime.test.ts (end-to-end SCG06 trace asserting firePrepActive within 2 ticks of path-shorten).
+
+**Tests:** 51,308 EasterEgg vitest pass (+3 tests).
+
+**Next:** SCG06 residual Δ=+2 at t76 is a TS-vs-C++ pathfinder divergence — TS findPath takes W-W-NW-W, WASM Basic_Path takes N-W-W-N-W-N or similar through (22,65). Investigate `findPath` + `Approach_Target` sweep determinism vs C++ Basic_Path for the specific (24,67)→(20,66) geometry.
+
 ## 2026-04-22T14:20Z — Mission_Move path-failure short-circuit — no-advance, no-regression
 
 **Result:** All 3 commits landed on main + deployed. `MISSION_MOVE_PATH_FAILURE=true` wires the foot.cpp:520-540 Enter_Idle_Mode guard into the Mission.MOVE case. **SCG13 stayed at t101 Δ=+1**. **Zero regressions** on all 7 scenarios.
