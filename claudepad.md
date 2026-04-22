@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-04-22T04:05Z — SCG11EA tick 28 investigation (architectural blocker documented)
+
+**Result:** No code change. Documented per-cell-boundary Commence gap via `cpp-parity-scg11ea-tick-28.test.ts`. All 55,219 vitest tests pass; all 7 scenario first-divergences unchanged.
+
+**Tick 28 divergence:** WASM fires 3 × `Mission_Move_foot` (tag 60010) for two Greece MCVs (logic 156, 157) — 1 for MCV-156, **2 for MCV-157** (double-fire unexplained). TS fires 0. MCVs move from (22,103)→(22,100) and (28,103)→(28,100) via teamtypes `mcv1`/`mcv2` with `TMISSION_MOVE` to waypoints 26/30.
+
+**Root cause — missing per-cell-boundary Commence port:** C++ `UnitClass::Per_Cell_Process` (unit.cpp:1756) calls `Commence()` at each cell boundary mid-drive, popping `MissionQueue=MOVE` → `Mission=MOVE, Timer=0`. Next tick's `MissionClass::AI` fires `Mission_Move` → Random_Pick(0,2) jitter RNG. TS's `perCellNavComCheck` (index.ts:5434) only clears NavCom at destination; no Commence. MCVs stay in drive-in-GUARD until arrival where `Enter_Idle_Mode` consumes zero RNG.
+
+**Naive fix tested and rejected:** adding Commence-equivalent to `perCellNavComCheck` produced 2 calls at tick 29 (not 3 at tick 28) — fails on timing (off-by-one) and on the unexplained MCV-157 double-fire. Introduced 5 new divergent ticks in 29-33 range (cascade). User warning: "Accuracy over metric. Document architectural blockers without committing half-port."
+
+**Unexplained:** MCV-157's double Mission_Move RNG within a single tick. Three hypotheses: (a) DriveClass::AI's double-Commence + mid-tick Per_Cell_Process allowing two MissionClass::AI dispatches, (b) Start_Of_Move Basic_Path regeneration path consuming uncaptured RNG, (c) track chaining re-entering MissionClass::AI. None confirmed without single-step C++ instrumentation.
+
+**Deferred:** full `Per_Cell_Process` port requires cross-cutting refactor of `updateMove`, `updateGuard`, and `team.ts` coordinateMove — every vehicle-move path passes through these.
+
+**Session state (unchanged):** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=3, SCG11=28, SCG13=101.
+
 ## 2026-04-22T02:45Z — Session cumulative: +33 ticks across 7 scenarios (536→569)
 
 **State:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=3, SCG11=28, SCG13=101.
