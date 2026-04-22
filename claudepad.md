@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-04-22T02:45Z — Session cumulative: +33 ticks across 7 scenarios (536→569)
+
+**State:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=3, SCG11=28, SCG13=101.
+
+**All commits this session (chronological):**
+- `5a3e7282` FireLaunch stage gate (SCG01 78→80, SCG06 63→68)
+- `cb87d8b1` cellBasedGuardScan strict PlayerPtr fog (SCG07 1→3)
+- `26ccc481` Basic_Path friendly-blocker close-enough abort (SCG11 19→28)
+- `58a661aa` team-member retaliation skip (SCG06 67→68)
+- `6079da63` infantry Can_Fire FIRE_MOVING gate (SCG01 80→87)
+- `7fac4188` UnitClass Can_Fire FIRE_ROTATING gate + scatter source_tag reset (SCG01 87 Δ -2→-1)
+- `7ef9199d` docs: SCG03 tick 238 CDTimer architectural blocker
+- `34f91c92` team-retaliation sets individual TarCom + Firing_AI-in-MOVE (SCG06 68→76)
+
+**Deferred:** SCG04 tick 36 (DriveClass::Start_Of_Move port), SCG07 tick 3 (CREATE_TEAM Recruit cadence — needs WASM instrumentation), SCG03 tick 238 (CDTimer refactor), SCG13 tick 101 (Per_Cell_Process internals).
+
 ## 2026-04-22T02:20Z — SCG06 tick 68 → 76: team-retaliation target-set + Firing_AI-in-MOVE (C++ foot.cpp:1172 + infantry.cpp:1237)
 
 **Result:** SCG06EA first-divergence advanced 68 → **76** (+8). All 7 scenarios verified, no regressions.
