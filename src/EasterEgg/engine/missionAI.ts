@@ -594,6 +594,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         // Defer so the flush (end of entity-AI phase in Game.update()) matches
         // WASM's end-of-Logic-loop position.
         if (activeWeapon.isInvisible) {
+          if ((globalThis as any)._debugInvisibleScatter) {
+            // eslint-disable-next-line no-console
+            console.log(`[INVISIBLE_SCATTER] tick=${ctx.tick} entity=${entity.type}#${entity.id} cell=(${entity.cell.cx},${entity.cell.cy}) target=${entity.target?.type}#${entity.target?.id} tf32=${entity.turretFacing32} desired=${entity.desiredTurretFacing} weapon=${activeWeapon.name}`);
+          }
           ctx.deferInvisibleScatter();
         }
 
@@ -1549,6 +1553,16 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     // If TarCom was already legal at entry, C++ falls through to dtime+Random_Pick(1,5).
     if (!hadTargetAtEntry) {
       entity.missionTimer = 1;
+    } else {
+      // C++ foot.cpp:1082-1084 — TarCom was already legal at entry → Approach_Target.
+      // This moves the unit within weapon range of an out-of-range target so it can fire.
+      // SCG06EA: USSR E1 @(24,67) had Greek E1 @(20,64) as initial TarCom (5 cells, out of
+      // range 3). C++ Approach_Target sets NavCom → unit gradually closes distance; first
+      // cell change at tick 18, reaches firing position by tick ~76 and fires bullet[115].
+      // Without this call TS units sat static with a valid-but-out-of-range target forever.
+      if (!entity.inRange(bestTarget) && !entity.moveTarget && ctx.approachTarget) {
+        ctx.approachTarget(entity);
+      }
     }
     return;
   }
