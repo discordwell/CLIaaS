@@ -1,6 +1,50 @@
 /**
  * C++ Parity: SCG03EA tick-238 ARTY Mission_Guard Arm-Return Timing
  *
+ * ## Status: deferred — end-of-tick decrement refactor cascades to earlier ticks
+ *
+ * **2026-04-22 attempt (commit d6db5f97, reverted by 4277d897):**
+ * Implemented the CDTimer end-of-tick decrement refactor described below
+ * (Approach A from the task brief). Per-entity CDTimer-semantic decrements
+ * moved from START → END of updateEntity; fire conditions flipped from
+ * `<=0 after decrement` to `===0 before decrement`.
+ *
+ * Local Node test suite: all 51,253 tests passed. BUT Playwright first-
+ * divergence regressed on multiple scenarios:
+ *   - SCG03EA:  238 → **10**  (-228 ticks, REGRESSION)
+ *   - SCG06EA:  76  → **11**  (-65 ticks, REGRESSION)
+ *   - SCG07EA:  17  → **6**   (-11 ticks, REGRESSION)
+ *   - SCG01EA:  87  → 87  (unchanged)
+ *   - SCG04EA:  36  → 36  (unchanged)
+ *   - SCG11EA:  28  → 28  (unchanged)
+ *   - SCG13EA:  101 → 101 (unchanged)
+ *
+ * ## Hypothesis for the cascade
+ *
+ * Per-entity decrements at the end of each entity's updateEntity occur
+ * PROGRESSIVELY through the Logic loop, while C++'s Frame++ happens ONCE at
+ * the end of Main_Loop (after ALL entities have processed). When entity[K+1]
+ * reads state-derived properties of entity[K] (e.g., via target scans that
+ * depend on pose/mission state), it sees entity[K]'s state at a different
+ * timer-offset than WASM would. This inter-entity coupling is what likely
+ * drives the earlier-tick regressions.
+ *
+ * A correct fix would require either:
+ *   (a) Collecting decrements into a post-entity-loop batch pass (analogous
+ *       to C++ Frame++ at end of Main_Loop), preserving cross-entity read
+ *       consistency within the tick.
+ *   (b) Making reads of other entities' timers go through a pre-decrement
+ *       accessor that compensates for the progressive intra-loop decrement.
+ *
+ * Option (a) is less invasive but requires separating "decrement data" from
+ * "entity.fieldName" since TS uses raw field access everywhere. Option (b)
+ * requires auditing every read site.
+ *
+ * The attempt has been reverted. The new cpp-parity-cdtimer-end-of-tick
+ * test (committed then reverted) demonstrated the local behavioral contract
+ * at unit-test level; the integration regressions were only visible via
+ * Playwright WASM-vs-TS diff against the deployed site.
+ *
  * ## Observed divergence
  * - Scenario: SCG03EA ("Protect Tesla Convoy"), ARTY unit at cell (62,49).
  * - tick 237 both engines: missionTimer=1, attackCooldown=1 (end-of-tick).
