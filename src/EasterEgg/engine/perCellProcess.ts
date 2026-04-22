@@ -226,7 +226,7 @@ export const PER_CELL_TRACK_JUMP_ENABLED = true;
  * Session 3 will enable the path-shorten sub-case via a separate
  * `PCP_PATH_SHORTEN_ENABLED` flag (kept off here for Session 2 isolation).
  */
-export const FOOT_PER_CELL_ENABLED = false;
+export const FOOT_PER_CELL_ENABLED = true;
 
 /**
  * PCP Session 3 — FootClass path-shorten when target is in range.
