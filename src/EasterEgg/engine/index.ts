@@ -1102,6 +1102,7 @@ export class Game {
       movementSpeed: (e) => this.movementSpeed(e),
       infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
       infantryValidatePath: (e) => this.infantryValidatePath(e),
+      approachTarget: (e) => this.approachTarget(e),
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       playEva: (n) => this.playEva(n as SoundName),
       playSound: (n) => this.audio.play(n as SoundName),
@@ -4191,6 +4192,41 @@ export class Game {
           // C++ foot.cpp:1016-1020: dtime = MissionControl[Mission].Normal_Delay() + Random_Pick(1, 5)
           // rules.ini [Area Guard] Rate=.080. fixed(".080")→Raw=20. Normal_Delay=((20*900)+128)/256=70
           entity.missionTimer = 70 + ScenarioRandom.nextInRange(1, 5);
+        }
+        // C++ Movement_AI (infantry.cpp:3765) runs every tick for all missions with NavCom.
+        // Mission_Guard_Area → Approach_Target sets NavCom (moveTarget); the unit then walks
+        // along its path each tick until it closes within weapon range of the target.
+        // Mirror HUNT's Start_Driver → Coord_Move → Stop_Driver state machine (above in
+        // Mission.HUNT case ~line 4094), gated on "out of range & has moveTarget".
+        // SCG06EA tick 76: USSR E1[24] @(24,67) with target Greek E1 @(20,64) —
+        // movement closes the gap until bullet[115] Bullet_Explodes RNG fires.
+        if (entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget) {
+          if (!entity.isDriving) {
+            if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+              this.infantryValidatePath(entity);
+            }
+            if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+              const destCell = entity.path[entity.pathIndex];
+              this.infantryStartDriver(entity, destCell.cx, destCell.cy);
+            }
+            entity.isDriving = true;
+          } else {
+            if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+              const wp = entity.headToLX > 0
+                ? { lx: entity.headToLX, ly: entity.headToLY }
+                : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
+              if (entity.moveToward(wp, this.movementSpeed(entity))) {
+                entity.pathIndex++;
+                entity.isDriving = false;
+                entity.headToLX = 0;
+                entity.headToLY = 0;
+              }
+            } else if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+            }
+          }
         }
         break;
       case Mission.SLEEP:
