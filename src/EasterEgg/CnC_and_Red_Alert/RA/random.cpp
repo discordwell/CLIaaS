@@ -99,6 +99,7 @@ int g_rng_log_count = 0;
 bool g_rng_log_enabled = false;
 int g_rng_source_tag = 0; // current caller tag (set before calling Random_Pick)
 int g_rng_entity_tag = 0; // current entity tag (set by logic.cpp at entity loop start)
+int g_tarcom_tag = 0; // tarcom assignment tag (foot.cpp/team.cpp/techno.cpp debug hooks)
 
 int RandomClass::operator ()(void)
 {

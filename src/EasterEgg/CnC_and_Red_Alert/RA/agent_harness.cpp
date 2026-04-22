@@ -604,7 +604,11 @@ char* agent_get_state(void)
 	// Reset log for next step (keep logging enabled)
 	g_rng_log_count = 0;
 
-	// Dump Logic layer entity order (units/infantry/aircraft only) for parity debugging
+	// Dump Logic layer entity order (units/infantry/aircraft/buildings/vessels) for parity debugging.
+	// Buildings/vessels included so cross-engine structure iteration order can be verified
+	// (BuildingClass::Unlimbo insertion vs TS INI section order — SCG11EA t32 SAM, task ad83df56).
+	// TERRAIN/ANIM/BULLET are skipped to keep the dump compact (SCG03EA has 84 TERRAIN entries
+	// which otherwise push the state buffer past 128KB and crash the ccall with OOB).
 	buf_cat("\"logicLayer\":[");
 	{
 		bool lfirst = true;
@@ -612,32 +616,47 @@ char* agent_get_state(void)
 			ObjectClass * lobj = Logic[li];
 			if (!lobj || !lobj->IsActive) continue;
 			RTTIType rtti = lobj->What_Am_I();
-			if (rtti != RTTI_UNIT && rtti != RTTI_INFANTRY && rtti != RTTI_AIRCRAFT) continue;
+			if (rtti != RTTI_UNIT && rtti != RTTI_INFANTRY && rtti != RTTI_AIRCRAFT
+				&& rtti != RTTI_BUILDING && rtti != RTTI_VESSEL) continue;
 			const char * tname = "?";
 			const char * hname = "?";
 			if (rtti == RTTI_UNIT) {
 				UnitClass * u = (UnitClass *)lobj;
-				tname = u->Class->IniName;
-				hname = agent_house_name(u->House->Class->House);
+				if (u->Class) tname = u->Class->IniName;
+				if (u->House && u->House->Class) hname = agent_house_name(u->House->Class->House);
 			} else if (rtti == RTTI_INFANTRY) {
 				InfantryClass * inf = (InfantryClass *)lobj;
-				tname = inf->Class->IniName;
-				hname = agent_house_name(inf->House->Class->House);
+				if (inf->Class) tname = inf->Class->IniName;
+				if (inf->House && inf->House->Class) hname = agent_house_name(inf->House->Class->House);
 			} else if (rtti == RTTI_AIRCRAFT) {
 				AircraftClass * a = (AircraftClass *)lobj;
-				tname = a->Class->IniName;
-				hname = agent_house_name(a->House->Class->House);
+				if (a->Class) tname = a->Class->IniName;
+				if (a->House && a->House->Class) hname = agent_house_name(a->House->Class->House);
+			} else if (rtti == RTTI_BUILDING) {
+				BuildingClass * b = (BuildingClass *)lobj;
+				if (b->Class) tname = b->Class->IniName;
+				if (b->House && b->House->Class) hname = agent_house_name(b->House->Class->House);
+			} else if (rtti == RTTI_VESSEL) {
+				VesselClass * v = (VesselClass *)lobj;
+				if (v->Class) tname = v->Class->IniName;
+				if (v->House && v->House->Class) hname = agent_house_name(v->House->Class->House);
 			}
 			if (!lfirst) buf_cat(",");
 			lfirst = false;
 			int lcx = -1, lcy = -1;
-			if (rtti == RTTI_UNIT || rtti == RTTI_INFANTRY || rtti == RTTI_AIRCRAFT) {
+			{
 				TechnoClass * tt = (TechnoClass *)lobj;
 				COORDINATE cc = tt->Coord;
 				lcx = Coord_XCell(cc);
 				lcy = Coord_YCell(cc);
 			}
-			buf_cat("[%d,\"%s\",\"%s\",%d,%d]", li, tname, hname, lcx, lcy);
+			// RTTI one-letter tag: U=unit, I=infantry, A=aircraft, B=building, V=vessel
+			char rtag = 'U';
+			if (rtti == RTTI_INFANTRY) rtag = 'I';
+			else if (rtti == RTTI_AIRCRAFT) rtag = 'A';
+			else if (rtti == RTTI_BUILDING) rtag = 'B';
+			else if (rtti == RTTI_VESSEL) rtag = 'V';
+			buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\"]", li, tname, hname, lcx, lcy, rtag);
 		}
 	}
 	buf_cat("],");
