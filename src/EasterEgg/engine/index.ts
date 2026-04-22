@@ -3964,13 +3964,20 @@ export class Game {
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
     }
 
-    // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
-    if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
-
-    // C++ TechnoClass::AI: Arm (attack cooldown) ticks every tick for ALL missions.
-    // This is independent of mission timers — units can fire between guard scans.
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    // C++ CDTimerClass<FrameTimerClass> (ftimer.h:449-625): Timer values decrement
+    // LAZILY via `Frame++` at end of Main_Loop (conquer.cpp:2542). During Logic.AI,
+    // Timer.Value reads the PRE-Frame++ (pre-decrement) value. The decrement
+    // happens once per tick, AFTER all entity AI has completed.
+    //
+    // TS parity: per-entity CDTimer-semantic fields are decremented at the END of
+    // updateEntity (see the end of this method). Reads during mission/firing AI
+    // observe the pre-decrement value — matching C++ semantics.
+    //
+    // Fire condition: C++ MissionClass::AI fires when `Timer == 0` (mission.cpp:232)
+    // at Logic.AI time. TS equivalent: `missionTimer === 0` BEFORE decrement.
+    // C++ Firing_AI fires when `Arm == 0` (pre-decrement); TS equivalent:
+    // `attackCooldown === 0` before end-of-tick decrement.
+    //
     // C++ TechnoClass::AI (techno.cpp:2392-2398) → StageClass::Graphic_Logic advances
     // animation stage each tick. InfantryClass::Firing_AI reads Fetch_Stage() AFTER
     // this increment when gating Fire_At. Stage advances BEFORE the per-tick Firing_AI
@@ -3983,14 +3990,9 @@ export class Game {
     // Timer counts down each tick. When Timer reaches 0, the mission handler fires
     // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
     // Between timer fires, per-tick systems (Firing_AI, movement) still run.
-    // C++ CDTimerClass: decrement then check. Timer=14 fires after 14 ticks.
-    if (entity.missionTimer > 0) {
-      entity.missionTimer--;
-    }
-    let missionTimerFired = entity.missionTimer <= 0;
-
-    // nonInterruptAnimTicks decrements every tick (gesture/salute animation countdown)
-    if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
+    // C++ mission.cpp:232 — `if (Timer == 0 && Strength > 0)` fires. TS: check
+    // pre-decrement value (end-of-tick decrement placed after all AI runs).
+    let missionTimerFired = entity.missionTimer === 0;
 
     // C++ UnitClass::AI (unit.cpp:404) / VesselClass::AI (vessel.cpp:592) — pre-Commence
     // gate that runs BEFORE MissionClass::AI dispatch. Vehicles/vessels call Commence()
@@ -4150,6 +4152,8 @@ export class Game {
         // Pass missionTimerFired so updateGuard only scans when timer fires.
         // C++ foot.cpp:634: return value uses Arm from BEFORE Firing_AI runs.
         // Capture attackCooldown before updateGuard (which may fire weapon + set cooldown).
+        // With end-of-tick decrement (CDTimer parity), attackCooldown here IS
+        // the C++ Arm.Value at Logic.AI time (pre-Frame++).
         { const armBeforeScan = entity.attackCooldown;
         this.updateGuard(entity, missionTimerFired);
         // C++ drive.cpp:1376 — DriveClass::AI continues to drive while Mission==GUARD
@@ -4463,6 +4467,18 @@ export class Game {
         }
       }
     }
+
+    // C++ CDTimerClass end-of-tick decrement (matches conquer.cpp:2542 Frame++).
+    // All per-entity CDTimer-semantic fields decrement here, AFTER MissionClass::AI,
+    // Firing_AI, Movement_AI, and all mission handlers have run. This lets the
+    // in-tick reads observe the pre-decrement (C++ Logic.AI) value.
+    // Values: missionTimer (CDTimer Timer), attackCooldown/attackCooldown2 (CDTimer Arm/Arm2),
+    // idleAnimTimer (CDTimer IdleTimer), nonInterruptAnimTicks (CDTimer AnimTimer).
+    if (entity.missionTimer > 0) entity.missionTimer--;
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
+    if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
 
     entity.tickAnimation();
   }
