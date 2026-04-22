@@ -196,13 +196,21 @@ describe('C++ InfantryClass::Can_Fire FIRE_MOVING gate (SCG01EA tick 80)', () =>
   it('vehicle (V_JEEP) with isDriving=true DOES fire', () => {
     // C++ UnitClass::Can_Fire (unit.cpp) has no IsDriving check. Vehicles
     // can fire on the move. The FIRE_MOVING gate is infantry-only.
+    //
+    // Pre-align the JEEP turret so the 256-step FIRE_FACING gate (unit.cpp:4163-4181)
+    // does not interfere — that gate is independent of IsDriving and is covered
+    // by cpp-parity-scg01ea-tick-87-turret.test.ts.
     const game = createGame();
     const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 62, 53);
-    const e1 = placeInfantry(game, UnitType.I_E1, House.USSR, 63, 50);
+    const e1 = placeInfantry(game, UnitType.I_E1, House.USSR, 62, 51);
     jeep.mission = Mission.HUNT;
     jeep.target = e1;
     jeep.attackCooldown = 0;
     jeep.isDriving = true;
+    // Target is due north → turret must be North for the FIRE_FACING gate to pass.
+    jeep.turretFacing = 0; // Dir.N
+    jeep.turretFacing32 = 0;
+    jeep.desiredTurretFacing = 0;
 
     const cooldownBefore = jeep.attackCooldown;
 

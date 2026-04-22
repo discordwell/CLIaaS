@@ -426,6 +426,7 @@ describe('updateAttack', () => {
       tank.facing = 2;
       tank.desiredFacing = 2;
       tank.turretFacing = 2;
+      tank.turretFacing32 = 2 * 4; // keep 32-step in sync with 8-dir (Dir.E → 8)
       tank.desiredTurretFacing = 2;
       tank.turretDir = 2;
 

@@ -9,7 +9,7 @@ import {
   type WarheadType, type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
-  leptonDist, pixelToLepton, directionTo, worldToCell, DIR_DX, DIR_DY,
+  leptonDist, pixelToLepton, directionTo, directionToLeptons256, worldToCell, DIR_DX, DIR_DY,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
 } from './types';
@@ -50,6 +50,10 @@ export interface MissionAIContext {
   infantryStartDriver(entity: Entity, destCX: number, destCY: number): { lx: number; ly: number };
   /** C++ Movement_AI:3810 — validate next path cell, re-path if blocked */
   infantryValidatePath(entity: Entity): void;
+  /** C++ FootClass::Approach_Target (foot.cpp:926) — find a passable cell within
+   *  weapon range of entity.target and assign it as moveTarget. Called when a
+   *  mission (HUNT, AREA_GUARD) has a legal TarCom but the target is out of range. */
+  approachTarget(entity: Entity): void;
 
   // Sound
   playSoundAt(name: string, x: number, y: number): void;
@@ -290,8 +294,17 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
 
     // Turreted vehicles: turret tracks target, body may stay still
+    // C++ UnitClass::AI order (unit.cpp:425,437): Firing_AI runs BEFORE Rotation_AI.
+    // That means Can_Fire sees the turret facing from the END of the previous tick's
+    // Rotation_AI — NOT the rotation triggered by this tick's newly acquired target.
+    // TS used to call tickTurretRotation() here (before the fire gate), which let
+    // the turret rotate AND fire in the same tick — 1 tick earlier than WASM.
+    // We now capture the pre-rotation 32-step turret facing for the FIRE_FACING
+    // gate below, then tick the rotation after the gate decision is made.
     let turretFacingReady = true;
+    let preRotTurretFacing32 = 0;
     if (entity.hasTurret) {
+      preRotTurretFacing32 = entity.turretFacing32;
       entity.desiredTurretFacing = directionTo(entity.pos, entity.target.pos);
       turretFacingReady = entity.tickTurretRotation();
     } else {
@@ -354,22 +367,49 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
 
     // C++ UnitClass::Can_Fire (unit.cpp:4159-4181) — FIRE_ROTATING / FIRE_FACING gate.
-    // Turreted vehicles must have turret within 8/256 (≈11°) of target direction before
-    // firing. Non-homing projectiles (Bullet->ROT == 0) block fire while IsRotating.
-    // Homing projectiles skip the gate (diff >>= 2 tolerance).
-    // Without this gate, TS vehicles fire the moment they acquire a target via
-    // Mission_Guard scan, consuming an invisible-bullet Coord_Scatter RNG
-    // (bullet.cpp:1012-1014) one or more ticks ahead of WASM.
-    // SCG01EA tick 87: Greek JEEP#27 (63,50) and JEEP#30 (64,50) acquire DOG/E1
-    // targets from Mission_Guard scan; WASM waits one tick for turret to face,
-    // TS fires same-tick. 2 extra Coord_Scatter RNG calls tagged `aircraft[51]`
-    // (source_tag leak from aircraft loop → pendingInvisibleScatters flush).
-    if (entity.hasTurret && activeWeapon && !turretFacingReady) {
-      // C++ checks weapon->Bullet->ROT (projectile rotation rate). Homing
-      // projectiles (ROT != 0) bypass facing requirement; non-homing must face.
+    // C++ UnitClass::AI order: Firing_AI (unit.cpp:425) runs BEFORE Rotation_AI
+    // (unit.cpp:437). That means Can_Fire checks the turret facing from END of
+    // LAST tick's Rotation_AI — THIS tick's rotation has not happened yet.
+    //
+    // The gate is two-part:
+    //   (A) FIRE_ROTATING (unit.cpp:4159): if the turret is still rotating toward
+    //       the OLD desired facing AND the weapon is non-homing (Bullet->ROT==0),
+    //       block fire.
+    //   (B) FIRE_FACING  (unit.cpp:4163-4181): compute 256-step diff between target
+    //       direction and CURRENT turret (pre-rotation this tick). If diff >= 8
+    //       (with diff >>= 2 for homing), block fire.
+    //
+    // SCG01EA tick 87: Greek JEEP (63,50) acquires DOG target S via Mission_Guard.
+    // In WASM, Firing_AI sees turret still facing body-dir (N or NE) — diff >> 8 →
+    // FIRE_FACING. Rotation_AI then rotates the turret one step. Fire happens a
+    // tick later.
+    //
+    // TS used to call tickTurretRotation() BEFORE this gate, allowing turret to
+    // rotate AND fire in the same tick. Now the pre-rotation 32-step turret
+    // facing (preRotTurretFacing32) is captured above and used here.
+    if (entity.hasTurret && activeWeapon) {
       const projROT = (activeWeapon.projectileROT ?? 0) as number;
-      if (projROT === 0) {
+      // (A) FIRE_ROTATING: if the turret finished rotating last tick (turretFacingReady
+      // is the post-rotation state, so turretFacingReady=false means still rotating),
+      // non-homing weapons must wait.
+      if (!turretFacingReady && projROT === 0) {
         return;
+      }
+      // (B) 256-step FIRE_FACING gate. Use PRE-rotation turret facing (C++ parity).
+      const dir256 = directionToLeptons256(
+        entity.leptonX, entity.leptonY,
+        entity.target.leptonX, entity.target.leptonY,
+      );
+      // preRotTurretFacing32 captured before tickTurretRotation. *8 → 256-step.
+      const turret256 = (preRotTurretFacing32 * 8) & 0xFF;
+      // C++ facing.h:70 Difference: (int)(signed char)(desired - current).
+      let diff = (dir256 - turret256) & 0xFF;
+      if (diff > 127) diff -= 256;
+      diff = Math.abs(diff);
+      // Homing projectiles get 4× tolerance (diff >>= 2 → diff < 32 effective).
+      if (projROT !== 0) diff >>= 2;
+      if (diff >= 8) {
+        return; // FIRE_FACING
       }
     }
 
