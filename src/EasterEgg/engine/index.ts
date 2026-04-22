@@ -7317,6 +7317,26 @@ export class Game {
             // NOT call Force_Active. Team activates via normal Percent_Chance(50)
             // in Team::AI on subsequent ticks.
             forcedActive: false,
+            // C++ parity: WASM observation shows CREATE_TEAM teams composed of
+            // VESSEL members (e.g. SCG07EA subz, BadGuy SS:3) take an EXTRA
+            // tick to begin recruiting — tick 1 empty, tick 2 first recruit,
+            // tick 3 full. INFANTRY/UNIT/AIRCRAFT CREATE_TEAM teams begin
+            // recruiting on tick 1 (e.g. SCG03EA sov1 E1:1 reaches full
+            // strength tick 1; SCG11EA mmth1 4TNK:2 reaches full strength
+            // tick 1). The mechanism in the C++ source is unclear — both
+            // UNIT (team.cpp:1250-1286) and VESSEL (team.cpp:1288-1322)
+            // use the same inside-loop `if (best) { Add(best); }` pattern
+            // and equivalent iteration. Observed: VESSEL teams always show
+            // total=0 at tick 1 in WASM regardless of waypoint origin.
+            // Gate skipFirstAiCall on presence of a vessel member type so
+            // we match the SCG07EA subz cadence without regressing the
+            // non-vessel teams that WASM recruits immediately.
+            skipFirstAiCall: teamType.members.some(m => {
+              const t = m.type.toUpperCase();
+              // RA vessels: SS (submarine), DD (destroyer), CA (cruiser),
+              // PT (patrol), LST (transport), MSUB (missile sub).
+              return t === 'SS' || t === 'DD' || t === 'CA' || t === 'PT' || t === 'LST' || t === 'MSUB';
+            }),
           });
           // Empty team — Team.recruit() in Team.ai() adds members 1/tick
           registerTeam(team);

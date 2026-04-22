@@ -43,6 +43,9 @@ import { ScenarioRandom } from './random';
 export interface TeamAIContext {
   structures?: MapStructure[];
   vehicleClaims?: Map<number, Entity>;
+  /** Entities pool — used by TeamClass::Recruit (team.cpp:1180-1328) to find
+   *  candidates for team membership. Passed through ai() → recruit(). */
+  entities?: Entity[];
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -154,6 +157,21 @@ export class Team {
    *  until the tick AFTER members are added. This flag suppresses activation
    *  for one ai() call, matching C++ timing. */
   private _skipActivationOnce = false;
+  /** C++ CREATE_TEAM parity (taction.cpp:658-661): the team is created during
+   *  LogicTrigger processing — which in practice runs AFTER the Teams AI loop
+   *  for the tick in which it was created (observed WASM behavior: tick 1 has
+   *  the team but total=0, tick 2 first recruits 1). This flag suppresses the
+   *  ENTIRE first ai() call (composition check + recruit + activation), so
+   *  the team's first real AI happens on the tick following creation.
+   *
+   *  SCG07EA subz trigger test case:
+   *    WASM tick 1: team exists, total=0       (team created, no AI yet)
+   *    WASM tick 2: total=1                    (recruit adds 1 SS)
+   *    WASM tick 3: total=3                    (recruit adds 2 SS inside-loop)
+   *    WASM tick 4: fs=true, mv=true           (Percent_Chance fires)
+   *  Without this flag, TS tick 1 recruits 1, tick 2 reaches 3, tick 3
+   *  activates — 1 tick too early. */
+  private _skipFirstAiCall = false;
 
   /** Is team dissolved? */
   dissolved = false;
@@ -169,6 +187,11 @@ export class Team {
     forcedActive?: boolean;
     /** Delay activation by 1 tick (for CREATE_TEAM teams that C++ creates empty) */
     delayActivation?: boolean;
+    /** Skip entire first ai() call (for CREATE_TEAM teams — C++ trigger creates
+     *  team but Team::AI doesn't run until next tick). Prefer this over
+     *  delayActivation for CREATE_TEAM — the full tick delay also pushes
+     *  recruit cadence to match WASM (tick 1: empty, tick 2: 1st recruit). */
+    skipFirstAiCall?: boolean;
   }) {
     this.id = nextTeamId++;
     this.house = opts.house;
@@ -180,6 +203,9 @@ export class Team {
     this.origin = opts.origin ?? null;
     if (opts.delayActivation) {
       this._skipActivationOnce = true;
+    }
+    if (opts.skipFirstAiCall) {
+      this._skipFirstAiCall = true;
     }
     if (opts.forcedActive) {
       // C++ team.h:215 — Force_Active() sets BOTH flags:
@@ -404,6 +430,18 @@ export class Team {
    */
   ai(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     if (this.dissolved) return;
+
+    // C++ CREATE_TEAM parity (taction.cpp:658-661 + logic.cpp:214-271): the team
+    // is created during the LogicTrigger pre-pass on this tick; WASM observation
+    // on SCG07EA subz shows Team::AI does NOT effectively run for the newly
+    // created team on the creation tick (tick 1: total=0 despite team existing).
+    // We model this by skipping the first ai() call entirely for CREATE_TEAM
+    // teams — no composition check, no recruit, no activation. Subsequent
+    // ai() calls proceed normally.
+    if (this._skipFirstAiCall) {
+      this._skipFirstAiCall = false;
+      return;
+    }
 
     // C++ team.cpp:484-489 — check suspend timer
     if (this.suspended) {

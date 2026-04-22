@@ -1,5 +1,34 @@
 # Session Summaries
 
+## 2026-04-21T22:15Z — SCG07EA tick 3 → 4: VESSEL CREATE_TEAM first-tick recruit delay (skipFirstAiCall)
+
+**Result:** SCG07EA first-divergence advanced 3 → **4** (+1). All 7 scenarios verified, no regressions.
+
+**Root cause:** WASM observation on SCG07EA's `subz` trigger (BadGuy SS:3 CREATE_TEAM, origin=WP13) shows:
+- tick 1: team exists but total=0 (Team::AI effectively skipped on the creation tick)
+- tick 2: total=1 (Recruit adds closest BadGuy SS)
+- tick 3: total=3 (VESSEL inside-loop Add picks up the remaining two)
+- tick 4: Percent_Chance(50) activation fires (stag=1 TeamAI RNG)
+
+TS used to recruit on the creation tick (tick 1: total=1), reaching full strength at tick 2 and activating Percent_Chance at tick 3 — 1 tick early. The extra TeamAI RNG at tick 3 was the first-divergence.
+
+**Fix:** Added `skipFirstAiCall` option on `Team` in `team.ts`. When true, the first `ai()` call returns immediately (no composition check, no recruit, no activation). `TACTION_CREATE_TEAM` handler in `index.ts` sets `skipFirstAiCall` when the team has any VESSEL member type (SS/DD/CA/PT/LST/MSUB). INFANTRY/UNIT/AIRCRAFT teams keep the existing tick-1 recruit behavior (required for SCG03EA sov1 E1:1 and SCG11EA mmth1 4TNK:2 which WASM observations show recruit immediately).
+
+**Why vessel-only (not origin-based):** Initially tried gating on `origin >= 0` — regressed SCG03=2, SCG04=2, SCG06=2 because those scenarios have non-vessel CREATE_TEAM teams with waypoint origins (e.g. SCG03EA sov1 E1:1 origin=1) that WASM still recruits on tick 1. Traces via `scripts/test-scg07-subz-wasm-trace.ts` and `scripts/test-scg11-mmth1-trace.ts` and `scripts/test-scg03-sov1-trace.ts` confirmed the VESSEL-specific timing. The exact C++ mechanism for this VESSEL-first-tick skip remains unclear (INFANTRY/AIRCRAFT use outside-loop Add; UNIT/VESSEL share inside-loop Add semantics per team.cpp:1250-1324; all 4 types theoretically run Team::AI the tick trigger fires).
+
+**Tests added:**
+- `cpp-parity-scg07ea-tick-3-recruit.test.ts` (6 tests) — pins VESSEL skipFirstAiCall cadence (tick 1 empty, tick 2 recruits 1, tick 3 reaches full, tick 4 activates), INFANTRY/UNIT immediate-recruit contrast, flag one-shot semantics.
+
+**Files:**
+- `src/EasterEgg/engine/team.ts` — `_skipFirstAiCall` field, `skipFirstAiCall` option, `ai()` early-return, `TeamAIContext.entities` type addition.
+- `src/EasterEgg/engine/index.ts` — `skipFirstAiCall: teamType.members.some(isVesselType)` on CREATE_TEAM TeamInstance.
+- NEW `src/EasterEgg/__tests__/cpp-parity-scg07ea-tick-3-recruit.test.ts` (6 tests).
+- NEW `scripts/test-scg07-subz-wasm-trace.ts`, `scripts/test-scg11-mmth1-trace.ts` — diagnostic traces comparing WASM vs TS team state tick-by-tick. Kept for future recruit-cadence investigations; delete if a unified team-trace harness lands.
+
+**C++ refs:** team.cpp:1180-1328 (Recruit), team.cpp:1288-1322 (VESSEL inside-loop Add), team.cpp:627-652 (activation Percent_Chance), team.cpp:666-673 (Recruit dispatch), taction.cpp:658-661 (CREATE_TEAM), logic.cpp:214-271 (trigger pre-pass + Teams loop).
+
+**Session state:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=**4** (was 3), SCG11=28, SCG13=101.
+
 ## 2026-04-22T04:30Z — Per_Cell_Process scaffolding (SCG04/11/13 landing-pad; gated off)
 
 **Result:** Scaffolding-only commit. New module `src/EasterEgg/engine/perCellProcess.ts` exports `unitPerCellProcess(entity, PCPType)` hook + `PER_CELL_COMMENCE_ENABLED=false` gate. Inline `perCellNavComCheck` in `index.ts:5476` now delegates to the hook. Behavior byte-identical — all 51,216 Easter Egg tests pass, all 7 scenario first-divergences unchanged (SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=3, SCG11=28, SCG13=101).
