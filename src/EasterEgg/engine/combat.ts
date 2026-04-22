@@ -695,17 +695,30 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // Don't interrupt scripted team missions (except HUNT which already attacks)
   if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
 
-  // C++ foot.cpp:1172 — FootClass::Take_Damage delegates to Team->Took_Damage when
-  // the victim is a team member; team damage handling does NOT call Assign_Target
-  // on the individual unit (team.cpp:1574-1618 only adjusts Team->Target under
-  // IsMoving, never per-unit TarCom). Skipping per-unit retaliation here prevents
-  // TS from injecting target+mission=ATTACK on team members, which then churns
-  // the unit through a Commence MOVE→ATTACK→MOVE cycle and fires a rogue
-  // Mission_Move jitter RNG (Random_Pick(0,2)) that WASM never consumes. SCG06EA
-  // tick 67 divergence: BadGuy E1 @(18,68) takes rifle damage from Greek E1 at
-  // tick 65 → TS retaliated and reset missionTimer → Mission_Move jitter fired
-  // tick 67 ahead of WASM's tick-68 bullet[116] Coord_Scatter.
-  if (victim.teamRef) return;
+  // C++ foot.cpp:1172 — FootClass::Take_Damage delegates to Team->Took_Damage
+  // when the victim is a team member. Team->Took_Damage sets Team->Target =
+  // source (team.cpp:1613). Observed WASM behavior: team members acquire the
+  // aggressor as their individual TarCom on the tick immediately following
+  // damage (via downstream team dispatch / Coordinate_Attack propagation at
+  // team.cpp:1715-1718).
+  //
+  // SCG06EA tick 66: BadGuy E1 @(19,68) takes rifle damage at tick 65 from
+  // Greek E1 @(19,65). Individual TarCom is set to Greek by tick 66, and
+  // InfantryClass::AI Firing_AI (infantry.cpp:1237) starts the pre-fire
+  // animation (FireLaunch=2 for E1). Fire_At runs at tick 68 → bullet[116]
+  // Coord_Scatter (tag 50002).
+  //
+  // TS parity: set TarCom on the individual team member while preserving
+  // mission and missionTimer — no Commence MOVE→ATTACK→MOVE cycle, so no
+  // rogue Mission_Move jitter RNG fires at tick 67 (matching WASM's
+  // observed quiet tick 67). The paired Firing_AI-for-MOVE branch in
+  // index.ts picks up the new target and starts the pre-fire animation.
+  if (victim.teamRef) {
+    if (!victim.target || !victim.target.alive) {
+      victim.target = attacker;
+    }
+    return;
+  }
 
   // C++ unit.cpp:1124-1161: auto-crush retaliation path.
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;

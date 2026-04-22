@@ -1,5 +1,48 @@
 # Session Summaries
 
+## 2026-04-22T02:20Z — SCG06 tick 68 → 76: team-retaliation target-set + Firing_AI-in-MOVE (C++ foot.cpp:1172 + infantry.cpp:1237)
+
+**Result:** SCG06EA first-divergence advanced 68 → **76** (+8). All 7 scenarios verified, no regressions.
+
+| Scenario | Start | End | Δ |
+|---|---|---|---|
+| SCG01EA | 87 | 87 | — |
+| SCG03EA | 238 | 238 | — |
+| SCG04EA | 36 | 36 | — (architectural, deferred) |
+| SCG06EA | 68 | **76** | **+8** |
+| SCG07EA | 3 | 3 | — |
+| SCG11EA | 28 | 28 | — |
+| SCG13EA | 101 | 101 | — |
+
+**Root cause:** WASM fires `Coord_Scatter` (tag 50002) at tick 68 from `bullet[116]` — BadGuy E1 @(19,68) retaliates via `Fire_At` after taking rifle damage at tick 65. Two-part C++ path TS was missing:
+
+1. **Team damage propagates TarCom to individual unit.** `FootClass::Take_Damage` (foot.cpp:1172) delegates team members to `TeamClass::Took_Damage` which sets `Team->Target=source` (team.cpp:1613). `Coordinate_Attack` (team.cpp:1715-1718) then propagates it to each unit's TarCom via `Assign_Target(Target)`. The previous TS fix (commit `58a661aa`) blocked all team-member retaliation — correct for avoiding the tick-67 Mission_Move jitter RNG, but too aggressive: it also prevented the legitimate tick-68 retaliation fire.
+
+2. **Firing_AI runs every tick regardless of mission.** `InfantryClass::AI` (infantry.cpp:1237) unconditionally calls `Firing_AI()` before `Movement_AI()`. When a team member in MOVE acquires TarCom with in-range target + Arm=0, Firing_AI starts DO_FIRE_WEAPON animation same-tick, and Movement_AI's `!IsFiring` gate (infantry.cpp:3790) halts movement. FireLaunch=2 for E1 (idata.cpp:404) — Fire_At runs 2 ticks later → `bullet[116]` Coord_Scatter tag 50002.
+
+**Fix:**
+- `combat.ts:triggerRetaliation` teamRef branch — set `victim.target = attacker` (when no existing valid target), preserve mission + missionTimer. No Commence MOVE→ATTACK→MOVE cycle, so no rogue Mission_Move jitter.
+- `index.ts:updateEntity` Mission.MOVE handler — call `updateAttack` BEFORE `updateMove` when infantry has in-range target + weapon ready. Temporarily clear `isDriving` so FIRE_MOVING gate doesn't block pre-fire animation start (mirrors C++ Firing_AI running BEFORE Movement_AI). If `firePrepActive` is set, skip `updateMove` this tick.
+
+**Files:**
+- `src/EasterEgg/engine/combat.ts` — teamRef target-only retaliation path
+- `src/EasterEgg/engine/index.ts` — Firing_AI-in-MOVE (co-authored with `7fac4188`)
+- `src/EasterEgg/__tests__/cpp-parity-scg06ea-tick-67.test.ts` — updated (4 tests: TarCom set, mission preserved)
+- `src/EasterEgg/__tests__/cpp-parity-scg06ea-tick-68.test.ts` — NEW (5 tests)
+
+**Tests:** 51,196 Easter Egg tests pass; 55,206 project tests pass.
+
+**C++ refs:**
+- `foot.cpp:1166-1237` FootClass::Take_Damage (Team branch)
+- `team.cpp:1574-1618` TeamClass::Took_Damage (Team->Target = source)
+- `team.cpp:1715-1718` TeamClass::Coordinate_Attack (propagates TarCom)
+- `infantry.cpp:1237/1247` InfantryClass::AI (Firing_AI before Movement_AI)
+- `infantry.cpp:1639` InfantryClass::Can_Fire FIRE_MOVING
+- `infantry.cpp:3575-3677` InfantryClass::Firing_AI (FireLaunch stage)
+- `infantry.cpp:3790` Movement_AI `!IsFiring` gate
+- `bullet.cpp:1012-1014` Bullet_Explodes invisible Coord_Scatter
+- `coord.cpp:390-408` Coord_Scatter (source_tag 50002)
+
 ## 2026-04-22T01:15Z — SCG01 tick 80 → 87 + SCG06 tick 67 → 68: infantry FIRE_MOVING gate (C++ infantry.cpp:1639)
 
 **Result:** SCG01EA advanced 80 → **87** (+7), SCG06EA 67 → **68** (+1). All 7 scenarios verified, no regressions.

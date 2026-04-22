@@ -118,21 +118,37 @@ function makeMockCtx(overrides: Partial<CombatContext> = {}): CombatContext {
 }
 
 describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1172)', () => {
-  it('team member in MOVE does NOT get per-unit retaliation when damaged', () => {
+  it('team member in MOVE sets TarCom but does NOT change mission (C++ team.cpp:1613 + 1715-1718)', () => {
     // Repro of the SCG06EA tick 65 event: a BadGuy E1 in MOVE mission, part of a
-    // team, is hit by a Greek E1's rifle. WASM delegates to TeamClass::Took_Damage
-    // (team.cpp:1574) which never touches per-unit TarCom; TS should match.
+    // team, is hit by a Greek E1's rifle. C++ foot.cpp:1172 delegates to
+    // TeamClass::Took_Damage → sets Team->Target = source (team.cpp:1613). Team
+    // dispatch (Coordinate_Attack at team.cpp:1715-1718) propagates Team->Target
+    // to the individual unit's TarCom via Assign_Target. The unit's Mission
+    // remains MOVE — no Commence MOVE→ATTACK→MOVE cycle, so no rogue
+    // Mission_Move jitter RNG fires.
+    //
+    // TS parity: in triggerRetaliation, set victim.target = attacker when the
+    // victim is a team member (and has no existing valid target), but preserve
+    // mission and missionTimer. The paired Firing_AI-in-MOVE branch in
+    // index.ts then starts the pre-fire animation on the next tick.
     const ctx = makeMockCtx();
     const victim = makeEntity(UnitType.I_E1, House.BadGuy, 18 * CELL_SIZE, 68 * CELL_SIZE);
     victim.mission = Mission.MOVE;
+    const originalTimer = 12;
+    victim.missionTimer = originalTimer;
     victim.teamRef = { id: 1 }; // any non-null placeholder for team membership
 
     const attacker = makeEntity(UnitType.I_E1, House.Greece, 19 * CELL_SIZE, 65 * CELL_SIZE);
 
     triggerRetaliation(ctx, victim, attacker);
 
-    expect(victim.target).toBeNull();
+    // TarCom set to aggressor — mirrors C++ Coordinate_Attack propagation.
+    expect(victim.target).toBe(attacker);
+    // Mission and timer MUST remain untouched — this is the critical tick-67
+    // quiet-tick parity. A mission change would set missionTimer=0 via
+    // Commence, triggering a rogue Mission_Move jitter RNG at the next tick.
     expect(victim.mission).toBe(Mission.MOVE);
+    expect(victim.missionTimer).toBe(originalTimer);
   });
 
   it('non-team unit on MOVE still retaliates (regression guard)', () => {
@@ -150,21 +166,25 @@ describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1
     expect(victim.mission).toBe(Mission.ATTACK);
   });
 
-  it('damageEntity honours the teamRef delegation (unified entry point)', () => {
+  it('damageEntity honours the teamRef target-only path (unified entry point)', () => {
     // damageEntity is the TS equivalent of C++ FootClass::Take_Damage. The
-    // teamRef short-circuit must fire whether retaliation is invoked directly
-    // or via the damage chain.
+    // teamRef branch must set TarCom without changing mission whether
+    // retaliation is invoked directly or via the damage chain.
     const ctx = makeMockCtx();
     const victim = makeEntity(UnitType.I_E1, House.BadGuy, 18 * CELL_SIZE, 68 * CELL_SIZE);
     victim.mission = Mission.MOVE;
+    victim.missionTimer = 8;
     victim.teamRef = { id: 1 };
     ctx.entities.push(victim);
 
     const attacker = makeEntity(UnitType.I_E1, House.Greece, 19 * CELL_SIZE, 65 * CELL_SIZE);
     damageEntity(ctx, victim, 15, 'SA', attacker);
 
-    expect(victim.target).toBeNull();
+    // Target set (individual TarCom from team damage propagation).
+    expect(victim.target).toBe(attacker);
+    // Mission/timer preserved — no Commence cycle, no Mission_Move jitter RNG.
     expect(victim.mission).toBe(Mission.MOVE);
+    expect(victim.missionTimer).toBe(8);
   });
 
   it('team member with pre-existing valid target is untouched (C++ team.cpp:1596-1604)', () => {
