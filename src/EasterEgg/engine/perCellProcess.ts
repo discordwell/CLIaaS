@@ -324,9 +324,23 @@ export const AREA_GUARD_APPROACH_RETRY = true;
  *
  * ## Rollout
  *
- * Session 3.3 ships the stub with the flag OFF (default). Session 3.4 flips ON
- * only after 3.1+3.2 prove stable. If SCG04 tick-3 regresses, the rollback is:
- * flip this flag OFF first (riskiest change of the three).
+ * Session 3.3 ships the stub with the flag OFF (default). Session 3.4 attempted
+ * to flip ON but encountered two categories of test failures:
+ *   - `cpp-parity-scg04-mission-move-stagger.test.ts` (2 cases): asserts
+ *     tank2.isDriving=true after the vehicleClaims prior-reset flip. With the
+ *     refactor, vehicleClaims still resets prior.isDriving=false but skips the
+ *     second-team isDriving=true step, breaking SCG04 tick-3 stagger parity.
+ *   - `cpp-parity-scg07-vessel-reinforce.test.ts` (1 case): same assertion
+ *     structure for sibling-team vehicles (SCG07 vessel mix).
+ *
+ * The divergence metric showed no advance with the flag ON (SCG04/06/11 all
+ * unchanged), so the refactor brought cost without benefit. Per plan §8 S3.4
+ * rollback priority, this flag stays OFF. The 3.3 stub infrastructure (findPath
+ * path population, map plumbing, flag gating) is retained so a future session
+ * can revisit with updated test expectations that encode the new refactor
+ * semantics — or with a more nuanced carve-out that preserves the SCG04
+ * tick-3 second-team isDriving=true while skipping the solo facing-alignment
+ * shortcut.
  *
  * ## C++ refs
  *
