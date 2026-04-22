@@ -695,6 +695,18 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // Don't interrupt scripted team missions (except HUNT which already attacks)
   if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
 
+  // C++ foot.cpp:1172 — FootClass::Take_Damage delegates to Team->Took_Damage when
+  // the victim is a team member; team damage handling does NOT call Assign_Target
+  // on the individual unit (team.cpp:1574-1618 only adjusts Team->Target under
+  // IsMoving, never per-unit TarCom). Skipping per-unit retaliation here prevents
+  // TS from injecting target+mission=ATTACK on team members, which then churns
+  // the unit through a Commence MOVE→ATTACK→MOVE cycle and fires a rogue
+  // Mission_Move jitter RNG (Random_Pick(0,2)) that WASM never consumes. SCG06EA
+  // tick 67 divergence: BadGuy E1 @(18,68) takes rifle damage from Greek E1 at
+  // tick 65 → TS retaliated and reset missionTimer → Mission_Move jitter fired
+  // tick 67 ahead of WASM's tick-68 bullet[116] Coord_Scatter.
+  if (victim.teamRef) return;
+
   // C++ unit.cpp:1124-1161: auto-crush retaliation path.
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
   if (shouldCrushIt(victim, attacker, isVictimPlayerControlled, houseIQ)) {

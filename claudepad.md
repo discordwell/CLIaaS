@@ -1,5 +1,29 @@
 # Session Summaries
 
+## 2026-04-21T23:30Z — SCG06 tick 67 → 68: team-member retaliation delegation (C++ foot.cpp:1172)
+
+**Result:** SCG06EA first-divergence advanced 67 → **68** (+1). All 7 scenarios verified, no regressions.
+
+| Scenario | Start | End | Δ |
+|---|---|---|---|
+| SCG01EA | 80 | 80 | — |
+| SCG03EA | 238 | 238 | — |
+| SCG04EA | 36 | 36 | — (architectural, deferred) |
+| SCG06EA | 67 | 68 | +1 |
+| SCG07EA | 3 | 3 | — |
+| SCG11EA | 28 | 28 | — |
+| SCG13EA | 101 | 101 | — |
+
+**Root cause:** TS `triggerRetaliation` fired on every damaged unit including team members. C++ `FootClass::Take_Damage` (foot.cpp:1172) checks `if (result != RESULT_NONE && Team)` and delegates to `Team->Took_Damage` (team.cpp:1574-1618), which only adjusts the team's collective Target pointer under IsMoving — never calls Assign_Target on the individual unit. SCG06EA tick 65: Greek E1 @(19,65) rifles BadGuy E1 @(18,68) (team member in MOVE). TS's retaliation set `target + mission=ATTACK`; team.coordinateMove re-queued MOVE; Commence popped the queue, reset `missionTimer=0` — tick 67 Mission_Move handler then consumed `14 + Random_Pick(0,2)` jitter (tag `infantry[21]`). WASM never fires this RNG because the per-unit retaliation path was skipped.
+
+**Fix:** `combat.ts:triggerRetaliation` early-return when `victim.teamRef` is set. The existing `teamMissions.length > 0` guard only catches per-entity team-mission scripts (reinforcement entries); pure coordinated team members have empty teamMissions + non-null teamRef.
+
+**Files:**
+- `src/EasterEgg/engine/combat.ts` — `if (victim.teamRef) return;` added to triggerRetaliation
+- `src/EasterEgg/__tests__/cpp-parity-scg06ea-tick-67.test.ts` — NEW (4 tests)
+
+**Tests:** 51,176 Easter Egg tests pass.
+
 ## 2026-04-21T22:30Z — Three-agent parallel sweep: SCG07 1→3, SCG11 19→28 (+11 more, +17 session total)
 
 **Result after three parallel opus agents:** Net **+17 ticks** across 7 scenarios from session start (536→553 total).
