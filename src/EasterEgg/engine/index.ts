@@ -222,6 +222,24 @@ import {
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
 import { PCPType, unitPerCellProcess } from './perCellProcess';
 
+// === PCP refactor diagnostic flag (Session 1 / plan §5) ===
+// When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
+// in the browser), followTrackStep dumps per-tick drive telemetry for
+// speed/accumulator parity comparison vs WASM drive.cpp:481-490. No behavior
+// change. Kept behind a `const` rather than an `if (import.meta.env...)`
+// because the engine runs both in Node (tests) and the browser (Playwright).
+const DEBUG_PCP_LOG: boolean = (() => {
+  try {
+    // Node/Vitest
+    if (typeof process !== 'undefined' && process?.env?.DEBUG_PCP_LOG) return true;
+  } catch { /* no-op */ }
+  try {
+    // Browser opt-in (set via `window.__DEBUG_PCP_LOG = true` before run)
+    if (typeof globalThis !== 'undefined' && (globalThis as Record<string, unknown>).__DEBUG_PCP_LOG) return true;
+  } catch { /* no-op */ }
+  return false;
+})();
+
 // Re-export subsystem types and functions for external consumers
 export type { InflightProjectileType as InflightProjectile };
 export { SPLASH_RADIUS } from './combat';
@@ -3937,6 +3955,16 @@ export class Game {
 
   /** Update a single entity's AI and movement */
   private updateEntity(entity: Entity): void {
+    // C++ parity: obj->AI() runs once per tick. Reset per-tick PCP counters
+    // and Commence dedup flags at the top of each updateEntity call so the
+    // track-jump PCP wiring (plan §6) and the diagnostic dumps (plan §5) see
+    // a clean slate. These fields are declared on Entity; reset here rather
+    // than in Entity's tick hook to keep the control flow visible.
+    entity.speedBudgetConsumed = 0;
+    entity.cellBoundaryCrossings = 0;
+    entity._commenceFiredThisTick = false;
+    entity._commenceFiredBoundaries.clear();
+
     // Team mission script execution (rate-limited to every 8 ticks)
     // Area Guard ants use their own patrol logic, not global hunt AI
     if (entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD &&
@@ -6470,12 +6498,15 @@ export class Game {
 
     // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern)
     let actual = entity.speedAccum + (biasedSpeed / LP);
+    // Instrument: total leptons granted this followTrackStep invocation (entry accum + add)
+    const speedGranted = actual;
 
     // Track number for RawTracks lookup (C++ uses tracknum = track->Track or track->StartTrack)
     let rawTrackNum = entity.trackNumber;
 
     while (actual > PIXEL_LEPTON_W) {
       actual -= PIXEL_LEPTON_W;
+      entity.speedBudgetConsumed += PIXEL_LEPTON_W;
 
       if (entity.trackIndex >= track!.length) {
         entity.setPosition(targetX, targetY);
@@ -6484,6 +6515,7 @@ export class Game {
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
         // C++ FootClass::Stop_Driver clears IsDriving when track completes
         if (!entity.stats.isInfantry) entity.isDriving = false;
+        entity.cellBoundaryCrossings++;
         return true;
       }
 
@@ -6497,6 +6529,7 @@ export class Game {
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
         // C++ FootClass::Stop_Driver clears IsDriving when track completes
         if (!entity.stats.isInfantry) entity.isDriving = false;
+        entity.cellBoundaryCrossings++;
         return true;
       }
 
@@ -6572,6 +6605,7 @@ export class Game {
                   // The jump transitions from the current track's target area to the
                   // next cell, so advance pathIndex by 1.
                   entity.pathIndex++;
+                  entity.cellBoundaryCrossings++;
 
                   // Update trackCellSpan: new long tracks cover 2 cells
                   entity.trackCellSpan = (newTC.flag & F_D) ? 2 : 1;
@@ -6594,6 +6628,22 @@ export class Game {
     }
 
     entity.speedAccum = actual; // carry remainder to next tick
+    // === DEBUG_PCP_LOG diagnostic (plan §5) ===
+    // Per-tick per-entity drive telemetry for speed/accumulator parity vs WASM
+    // drive.cpp:481-490 agent_debug_log(80000,...). Gated by env flag; dumps
+    // only track-advancing ticks so other entity types stay silent. No behavior
+    // change — pure diagnostic. Remove once parity confirmed byte-identical.
+    if (DEBUG_PCP_LOG) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `PCP_DRIVE t=${this.tick} id=${entity.id} type=${entity.type} ` +
+        `lx=${entity.leptonX} ly=${entity.leptonY} ` +
+        `speedAccum=${entity.speedAccum} speedGranted=${speedGranted.toFixed(2)} ` +
+        `speedConsumed=${entity.speedBudgetConsumed} ` +
+        `trackIndex=${entity.trackIndex} trackNumber=${entity.trackNumber} ` +
+        `pathIndex=${entity.pathIndex} crossings=${entity.cellBoundaryCrossings}`,
+      );
+    }
     return false;
   }
 

@@ -322,6 +322,21 @@ export class Entity {
   trackControlIndex = -1; // C++ TrackNumber: index into TrackControl[] table (0-66), for track jumping
   speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
 
+  // === PCP refactor debug/dedup fields (Session 1 — track-jump PCP) ===
+  // Reset at top of updateEntity each tick. Instrumented via DEBUG_PCP_LOG env
+  // flag in index.ts for first-divergence diagnostics. Plan §5, §6.
+  /** Leptons advanced by followTrackStep this tick. C++ drive.cpp:481-490 mirror. */
+  speedBudgetConsumed = 0;
+  /** Number of cell-boundary crossings this tick (track completions + track-jumps). */
+  cellBoundaryCrossings = 0;
+  /** Per-tick Commence dedup: C++ obj->AI() runs Commence once per-tick before
+   *  MissionClass::AI — TS track-jump PCP must not double-fire Mission_Move jitter
+   *  when a second PCP_END fires later in the same tick. */
+  _commenceFiredThisTick = false;
+  /** Per-boundary Commence dedup. Keyed `${trackIndex}-${pathIndex}` at moment
+   *  of PCP_END call-site. Plan §6 MCV-157 double-fire nuance. */
+  _commenceFiredBoundaries: Set<string> = new Set();
+
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
   savedMoveTarget: LeptonPos | null = null;
