@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-04-22T08:30Z — SCG01EA tick-87 invisible-bullet scatter investigation (prior Logic-idx theory refuted)
+
+**Result:** No code change. Prior agent's "WASM's invisible bullet idx submission ordering" theory refuted by static C++ trace. Real root cause is upstream from the scatter flush. SCG01=87 Δ=-1 unchanged.
+
+**Key findings (C++ trace):**
+- BulletClass::Unlimbo (bullet.cpp:736-803) for invisible M60mg (Speed=100 → Get_MPHType scales to 255 = MPH_LIGHT_SPEED, Inviso=yes): sets `Coord = tcoord`, Arm_Fuse with `range = Distance(tcoord, Coord)/MaxSpeed + 4 = 0/255 + 4 = 4`, Timer=4, Arming=0. `Fly_Speed(255, MPH_IMMOBILE)` → SpeedAdd=0.
+- FuseClass::Fuse_Checkup (fuse.cpp:120-149) first call: Timer 4→3, Arming=0 falls to else, !Timer=false, `proximity = Distance(newlocation, HeadTo) = Distance(tcoord, tcoord) = 0 < 0x0010` → **returns true on first call**.
+- BulletClass::AI (bullet.cpp:474-485): `!forced && (IsDropping || !Fuse_Checkup)` → `!forced && !true = false` → else branch → `Bullet_Explodes(); delete this;` → Coord_Scatter fires same AI call.
+- Bullets ARE sentient (bbdata.cpp:66-77 `ObjectTypeClass(...,true,...)` = is_sentient) → ObjectClass::Unlimbo submits to Logic via `Logic.Submit(this)` at object.cpp:1412-1414.
+- Logic.Submit → LayerClass::Add → appends to DynamicVector end. Main loop `for (index=0; index<Count(); index++)` re-reads Count() each iteration → bullet appended at idx N > firer idx K IS reached same-tick.
+
+**Empirical contradicts C++ trace:**
+- Tick 65 & 85 (JEEP#3 → E1#14): WASM Coord_Scatter fires SAME tick as TS — prior-bullet `bullet[74]` matches byte-for-byte.
+- Tick 87 (JEEP#1 → DOG#5): TS Coord_Scatter fires same-tick; WASM fires at tick 88 on `bullet[76]` (stag 15076 + 50002, 2 RNG calls for Explosion_Damage scorch + Coord_Scatter dir-pick).
+- Seed math aligns: end-of-tick-88 seed matches between engines (3146263394 both); divergence is WITHIN-tick tag assignment only. TS JEEP#1 → DOG fires 1 tick earlier than WASM JEEP[22] → DOG, propagating mis-tagged RNG.
+
+**Instrumented deferInvisibleScatter:** TS fires invisible bullets at ticks 65, 85 (JEEP#3 → E1), 87 (JEEP#1 → DOG), 89 (JEEP#4 → E1). WASM's observable equivalents at ticks 65, 85, 88, and later. The 2-tick offset between TS tick 87 and WASM tick 88 for JEEP#1 is the first divergence.
+
+**Why prior idx-based fix fails:** The Logic-array ordering semantics are already equivalent. The disagreement is in WHEN JEEP#1 first fires on the DOG target — not WHEN the scatter fires relative to the bullet's creation. TS's JEEP#1 acquires TarCom=DOG and fires Firing_AI same-tick at 87; WASM's JEEP[22] does one of: (a) fires at tick 88 (Mission_Guard scan cadence differs), or (b) fuses differently for DOG-type target. Neither is explained by a simple Fuse_Checkup re-read.
+
+**Why narrow fix deferred:** Requires instrumenting WASM's Mission_Guard cadence / TarCom assignment for JEEP[22] at ticks 86-88 to pinpoint the divergence. A per-tick `stag 60040` delta shows both engines scanning at tick 87, but WASM's scan may not find DOG in range (Greatest_Threat evaluation differs) while TS's cellBasedGuardScan does. Plausible architectural gap: `In_Range` / `Distance`+`THREAT_RANGE` threshold between TS `entity.inRange(target)` and C++ `techno.cpp:5260-5266`.
+
+**Files:** No code changes. Instrumentation commit `fdc2e4b9` (TS INVISIBLE_SCATTER debug log) already on main.
+
+**Diagnostic command:** `SCENARIO=SCG01EA START=80 END=90 DUMP_ALL=1 npx playwright test scripts/test-rng-entity-diff.ts --reporter=list`
+
+**Session state (unchanged):** SCG01=**87**, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=28, SCG13=101.
+
 ## 2026-04-22T06:00Z — SCG07EA tick-17 first-divergence (architectural blocker documented)
 
 **Result:** No code change. Documented the tick-17 divergence via `cpp-parity-scg07ea-tick-17.test.ts` (7 tests). All 51,241 Easter Egg tests pass; all 7 scenario first-divergences unchanged (SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=**17** still, SCG11=28, SCG13=101).
