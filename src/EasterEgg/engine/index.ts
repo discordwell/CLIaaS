@@ -220,7 +220,7 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess } from './perCellProcess';
+import { PCPType, unitPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED } from './perCellProcess';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -6600,6 +6600,37 @@ export class Game {
                   flags = entity.trackFlags;
                   rawTrackNum = newRawTrackNum;
                   adj = false; // C++ drive.cpp:755: adj = false (prevent re-jumping)
+
+                  // === Track-jump PCP_END (C++ drive.cpp:773) ===
+                  // C++ sequence at the track-jump site:
+                  //   Stop_Driver() → IsDriving=true → Per_Cell_Process(PCP_END)
+                  //   → IsDriving=false → Start_Driver(c) (which does Path memmove).
+                  // The IsDriving=true/false brackets gate Commence semantics.
+                  //
+                  // Dedup strategy (plan §6): key the fire on the PRE-shift
+                  // `${trackIndex}-${pathIndex}` so each unique boundary can only
+                  // Commence once — prevents the MCV-157-style double-fire observed
+                  // on SCG11 tick 28 while still permitting per-tick re-entry when
+                  // two distinct boundaries are crossed in one speed budget.
+                  //
+                  // Gated by PER_CELL_TRACK_JUMP_ENABLED — OFF in step 1.2 (stub),
+                  // ON in step 1.3 behind the per-boundary Set<string> dedup.
+                  if (PER_CELL_TRACK_JUMP_ENABLED) {
+                    // Capture boundary key at moment of cross (pre-`pathIndex++`
+                    // so the key identifies the boundary being left).
+                    const boundaryKey = `${entity.trackIndex}-${entity.pathIndex}`;
+                    if (!entity._commenceFiredBoundaries.has(boundaryKey)) {
+                      // C++ IsDriving=true bracket (drive.cpp:773-775)
+                      const savedIsDriving = entity.isDriving;
+                      entity.isDriving = true;
+                      const r = unitPerCellProcess(entity, PCPType.PCP_END);
+                      entity.isDriving = savedIsDriving;
+                      if (r.commenceFired) {
+                        entity._commenceFiredBoundaries.add(boundaryKey);
+                        entity._commenceFiredThisTick = true;
+                      }
+                    }
+                  }
 
                   // Advance path: consume one cell (C++ memmove shifts Path left by 1)
                   // The jump transitions from the current track's target area to the

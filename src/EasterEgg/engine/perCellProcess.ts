@@ -166,6 +166,29 @@ export enum PCPType {
 export const PER_CELL_COMMENCE_ENABLED = true;
 
 /**
+ * PCP Session 1 — track-jump PCP_END gate.
+ *
+ * C++ drive.cpp:773 fires a full `UnitClass::Per_Cell_Process(PCP_END)` when a
+ * vehicle performs a track-jump (`Stop_Driver()` → `IsDriving=true` →
+ * `Per_Cell_Process(PCP_END)` → `IsDriving=false` → `Start_Driver(c)`). This
+ * is in addition to the track-completion PCP_END at drive.cpp:816.
+ *
+ * Current TS (`index.ts` track-jump site) skips the PCP and only does
+ * `pathIndex++`. Result: one missing Commence per track-jump, which blocks
+ * SCG04 tick 36 (reinforcement MCV still has `MissionQueue=MOVE` after a
+ * curved track-jump; never pops it mid-drive, so Mission_Move never re-fires).
+ *
+ * **Gate rationale** — a naive ON flip regressed SCG04 36→24 AND SCG11 32→21
+ * because the second Commence on the same tick fires Mission_Move RNG a
+ * second time via the same-tick post-Commence dispatch (commit 79b13cb3).
+ * The fix requires PER-BOUNDARY dedup keyed by `${trackIndex}-${pathIndex}`
+ * to match C++'s single Commence-per-obj->AI() contract (mission.cpp:213-321
+ * — no loop inside MissionClass::AI). Plan §6 spec'd this design; step 1.3
+ * flips this flag to true behind that dedup. Step 1.2 ships the stub OFF.
+ */
+export const PER_CELL_TRACK_JUMP_ENABLED = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.
