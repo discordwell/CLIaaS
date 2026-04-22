@@ -160,22 +160,22 @@ describe('SCG11EA tick-28 MCV Mission_Move mid-drive jitter (architectural block
       },
     };
 
-    // TS after partial Per_Cell_Process port: MCVs now fire Mission_Move
-    // mid-drive at the first track-end boundary (Commence popped
-    // MissionQueue → Mission=MOVE, Timer=0 → next-tick Mission_Move
-    // Random_Pick consumed). WASM's 2 single-fires are now matched; the
-    // MCV-157 double-fire remains unexplained (DriveClass::AI double-cycle
-    // not yet ported).
-    const tsPostPartialPort = {
+    // TS after same-tick post-Commence dispatch fix (follow-up to
+    // PER_CELL_COMMENCE_ENABLED=true partial port): MCVs now fire all 3
+    // Mission_Move_foot Random_Picks SAME-TICK as C++ WASM — commit adds
+    // post-updateMove dispatch in the Mission.GUARD case so mid-tick
+    // Commence (inside updateMove) consumes jitter immediately rather
+    // than deferring to NEXT tick's updateEntity top-level
+    // missionTimerFired check.
+    //
+    // Contract: TS tick 28 now matches WASM tick 28 exactly (Δcalls=0,
+    // postSeed=3006003099). First-divergence has advanced to tick 32
+    // (unrelated building AI ordering blocker).
+    const tsPostSameTickDispatchFix = {
       tick28: {
-        rngCalls: 2 /* one per MCV, single fire each */,
-        // exact postSeed depends on WASM-TS seed order; recorded for
-        // regression monitoring via scripts/test-first-divergence.ts.
-      },
-      residualGap: {
-        missingCall: 'MCV-157 second Mission_Move (double-fire)',
-        expectedCount: 2,
-        observedCount: 1,
+        rngCalls: 3,
+        postSeed: 3006003099,
+        matchesWasm: true,
       },
     };
 
@@ -185,10 +185,10 @@ describe('SCG11EA tick-28 MCV Mission_Move mid-drive jitter (architectural block
     expect(wasmBehavior.tick28.tagsByEntity[0].name).toBe('Mission_Move_foot');
     expect(wasmBehavior.tick28.tagsByEntity[1].count).toBe(2); // double-fire
 
-    // Partial port matches 2 of 3 WASM calls; residual double-fire gap documented.
-    expect(tsPostPartialPort.tick28.rngCalls).toBe(2);
-    expect(tsPostPartialPort.residualGap.expectedCount).toBe(2);
-    expect(tsPostPartialPort.residualGap.observedCount).toBe(1);
+    // Post-fix TS assertions — now fully matches WASM at tick 28.
+    expect(tsPostSameTickDispatchFix.tick28.rngCalls).toBe(3);
+    expect(tsPostSameTickDispatchFix.tick28.postSeed).toBe(3006003099);
+    expect(tsPostSameTickDispatchFix.tick28.matchesWasm).toBe(true);
   });
 
   it('documents the FootClass::Mission_Move RNG-tag contract (foot.cpp:520-539)', () => {
