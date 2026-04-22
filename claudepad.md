@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-04-22T12:55Z — PCP Session 1: track-jump PCP_END (SCG04 t36) — no-advance, no-regression
+
+**Result:** All 3 Session-1 commits landed on main + deployed. **SCG04 did NOT advance past tick 36** with `PER_CELL_TRACK_JUMP_ENABLED=true` behind the `_commenceFiredBoundaries` Set<string> dedup. **Zero regressions** on any of the 7 scenarios. Flag left ON because it is correct (matches C++ drive.cpp:773) and costs nothing.
+
+**Commits (one per checkpoint):**
+- `1d28280e` — 1.1 debug fields + DEBUG_PCP_LOG instrumentation (speedBudgetConsumed, cellBoundaryCrossings, _commenceFiredThisTick, _commenceFiredBoundaries on Entity; reset at top of updateEntity; per-tick dump gated by env/global flag). Pure diagnostic.
+- `e3e6e88b` — 1.2 PER_CELL_TRACK_JUMP_ENABLED=false stub wired at index.ts track-jump site. Flag OFF — behavior identical.
+- `5c63010a` — 1.3 flipped flag ON with per-boundary dedup key `${trackIndex}-${pathIndex}`.
+
+**All 7 scenarios (before → after):** SCG01=87→87, SCG03=238→238, **SCG04=36→36**, SCG06=76→76, SCG07=17→17, SCG11=32→32, SCG13=101→101.
+
+**What this tells us:** Either (a) the SCG04 tick-36 MCV does NOT perform a track-jump at that tick (the Commence hook is never hit for the first-divergent entity), or (b) it hits the hook but `missionQueue === null` at that moment (so nothing to pop). Plan §6 assumed track-jump was load-bearing for SCG04 36 — that assumption was not validated by this experiment. The dedup design proved correct (SCG11 did NOT regress, which would have happened with per-tick instead of per-boundary dedup).
+
+**LOC:** ~130 across 3 commits (entity.ts +15, index.ts +55 incl. DEBUG_PCP_LOG + wire, perCellProcess.ts +25, 2 new test files).
+
+**Tests:** 51,279 EasterEgg vitest pass (5 new tests for debug fields + gate). 7/7 Playwright first-divergence scenarios still passing.
+
+**Next:** SCG04 t36 needs a different hypothesis — inspect DEBUG_PCP_LOG=1 dump at tick 35-37 to see whether the first-divergent entity is track-jumping at all. Plan Session 2 (infantry cell-arrival Enter_Idle_Mode, SCG13) and Session 3 (Approach_Target re-call, SCG06) remain independent.
+
 ## 2026-04-22T10:00Z — SCG11EA tick-28 FIXED (same-tick post-Commence dispatch)
 
 **Result:** SCG11EA first-divergence ADVANCED from tick 28 to tick 32. MCV Mission_Move_foot jitter (tag 60010) now fires same-tick as WASM. Including the previously-unexplained MCV-157 double-fire — all 3 WASM RNG seeds matched byte-for-byte. Commit 79b13cb3 pushed to main and deployed.
