@@ -143,13 +143,20 @@ import { describe, it, expect } from 'vitest';
 import { PER_CELL_COMMENCE_ENABLED } from '../engine/perCellProcess';
 
 describe('SCG11EA tick-28 MCV Mission_Move — narrow-proxy feasibility (architectural blocker)', () => {
-  it('scaffolding gate stays DISABLED — narrow proxy rejected', () => {
-    // A future port that flips this flag MUST:
-    //   - Reproduce the 3-call tick-28 pattern (not 2).
-    //   - Explain the tick-1 Mission_Guard double-fire (MCV-156 double).
-    //   - Not cascade into SCG04EA tick-36 or SCG13EA tick-101 first-
-    //     divergences.
-    expect(PER_CELL_COMMENCE_ENABLED).toBe(false);
+  it('scaffolding gate now ENABLED — partial Commence port landed', () => {
+    // Post-port status (SCG11EA tick-28 investigation):
+    //   - The gate is enabled: Commence fires at every PCP_END boundary
+    //     via `unitPerCellProcess` (engine/perCellProcess.ts:195+).
+    //   - For MCV reinforcements with MissionQueue=MOVE, the first
+    //     track-end cell boundary pops the queue → next tick's
+    //     MissionClass::AI fires Mission_Move with Random_Pick(0,2) and
+    //     consumes 1 RNG (tag 60010). This closes the MCV-156 single-fire.
+    //   - The MCV-157 DOUBLE-fire remains UNEXPLAINED (DriveClass::AI
+    //     drive.cpp:1340-1345 double-cycle suspected, not yet ported).
+    //     Expect 1/2 of WASM's tick-28 RNG (2 of 3 calls) after this
+    //     partial port; SCG11EA first-divergence moves from tick 28 to a
+    //     later tick reflecting the residual double-fire gap.
+    expect(PER_CELL_COMMENCE_ENABLED).toBe(true);
   });
 
   it('documents per-entity RNG tag counts at tick 28 (WASM contract)', () => {

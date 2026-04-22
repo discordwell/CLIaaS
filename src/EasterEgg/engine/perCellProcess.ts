@@ -98,28 +98,72 @@ export enum PCPType {
 /**
  * Feature gate for the per-cell Commence port.
  *
- * When `true`, `unitPerCellProcess(entity, PCP_END)` will call Commence()
- * equivalent logic (pop MissionQueue → Mission + Timer=0), matching C++
- * `UnitClass::Per_Cell_Process` line 1756.
+ * When `true` (current), `unitPerCellProcess(entity, PCP_END)` calls Commence()
+ * equivalent logic (pop MissionQueue → Mission + Timer=0 + Status=0),
+ * matching C++ `UnitClass::Per_Cell_Process` line 1756 — fired at EVERY
+ * track-end cell boundary, not just at destination arrival.
  *
- * When `false` (default), the hook only performs the NavCom-at-destination
- * clear (DriveClass::Per_Cell_Process drive.cpp:869-873) — which is what
- * the legacy `perCellNavComCheck` did. Behavior is unchanged from before
- * this module landed.
+ * ## Enabled rationale (partial port, SCG11EA tick-28 investigation)
  *
- * DO NOT flip this to `true` without:
- *   1. A plan for the DriveClass::AI double-cycle (drive.cpp:1340-1345)
- *      — the re-entrant Start_Of_Move+While_Moving path that may be
- *      responsible for SCG11 MCV-157's double Mission_Move RNG draw.
- *   2. Audit of `team.ts` coordinateMove's eager `isDriving=true` —
- *      it bypasses the C++ Start_Driver validation path that controls
- *      whether Commence fires pre-drive vs mid-drive.
- *   3. First-divergence regression checks on all 7 RA scenarios
- *      (SCG01/03/04/06/07/11/13).
+ * C++ `UnitClass::Per_Cell_Process` at unit.cpp:1756 unconditionally calls
+ * `Commence()` at every PCP_END (drive.cpp:773, 816) during a vehicle's
+ * drive. `Commence()` pops `MissionQueue` if it is not `MISSION_NONE`,
+ * zeroing Timer so the next `MissionClass::AI` dispatch fires the new
+ * mission's handler on the FOLLOWING tick.
  *
- * See `cpp-parity-scg11ea-tick-28.test.ts` for the full failure analysis.
+ * For a reinforcement MCV that spawns with `Mission=GUARD` and
+ * `MissionQueue=MOVE` (via `team.cpp` Coordinate_Move), Commence at the
+ * first track boundary mid-drive pops MissionQueue → Mission=MOVE,
+ * Timer=0. The following tick's `MissionClass::AI` sees Mission=MOVE,
+ * Timer=0, `!Target_Legal(NavCom)==false` (still en route), so
+ * `Mission_Move()` runs the normal path:
+ *   - `g_rng_source_tag = 60010;`
+ *   - `Random_Pick(0, 2);`  // tag-60010 jitter
+ *   - returns `Normal_Delay + jitter` → Timer set.
+ *
+ * This is the RNG consumption WASM logs at SCG11EA tick 28 (see
+ * `cpp-parity-scg11ea-tick-28.test.ts`). Before this port, TS only fired
+ * `perCellNavComCheck` on final destination arrival, after which
+ * Mission_Move took the `Enter_Idle_Mode` early-return (no RNG).
+ *
+ * ## What is still NOT ported (documented limitations)
+ *
+ * 1. **MCV-157 double-fire at SCG11 tick 28** — WASM consumes 2 RNG calls
+ *    for the east MCV vs 1 for the west. This remains unexplained without
+ *    single-step C++ instrumentation. Most plausible mechanism is the
+ *    `DriveClass::AI` re-entrant path at drive.cpp:1340-1345 where
+ *    `Start_Of_Move` + `While_Moving` fire a second time within one tick
+ *    when the current track completes and NavCom/Path still has remaining
+ *    moves. A TS port of that double-cycle would need to invoke Commence
+ *    TWICE in one tick but only when the second While_Moving also crosses
+ *    a cell boundary — a narrow path geometry condition. Not yet modeled.
+ *
+ * 2. **`team.ts` coordinateMove eager `isDriving=true`** — the TS team
+ *    code sets `isDriving=true` pre-emptively when facing already matches
+ *    the path (team.ts:922). C++ sets IsDriving only after Start_Driver
+ *    succeeds within DriveClass::AI. The TS path works for 6 of 7 scenarios
+ *    but may produce off-by-one Commence timing for edge cases with
+ *    impossible-turn initial facings.
+ *
+ * 3. **Mid-track PCP_DURING crushable/Overrun_Square dispatch** — already
+ *    handled inline by `followTrackStep` in `index.ts`. This module's
+ *    PCP_DURING branch remains a no-op stub for future consolidation.
+ *
+ * ## Regression acceptance criteria
+ *
+ *   - Flipping this flag MUST NOT cascade SCG01/03/06/07 first-divergence
+ *     timings. Those scenarios have already reached tick 80+/238/76/17
+ *     with the flag false; the flag enable must advance or leave them
+ *     unchanged.
+ *   - The SCG04EA tick-36, SCG11EA tick-28, SCG13EA tick-101 docs tests
+ *     record the pre-port divergence; they must be updated to reflect
+ *     the new post-port behavior (and mark which parts are now matching
+ *     WASM vs which parts remain architectural blockers).
+ *
+ * See `cpp-parity-scg11ea-tick-28.test.ts` and
+ * `cpp-parity-per-cell-process-enabled.test.ts` for the contract.
  */
-export const PER_CELL_COMMENCE_ENABLED = false;
+export const PER_CELL_COMMENCE_ENABLED = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose

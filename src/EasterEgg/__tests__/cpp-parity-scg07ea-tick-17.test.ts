@@ -215,14 +215,18 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
       cppRefs: ['drive.cpp:1304-1399', 'drive.cpp:1340-1345', 'vessel.cpp:593', 'vessel.cpp:659'],
       tsScaffolding: 'src/EasterEgg/engine/perCellProcess.ts',
       scaffoldingGate: 'PER_CELL_COMMENCE_ENABLED',
-      currentGateState: false,
+      currentGateState: true, // partial port landed
       sharedWith: ['cpp-parity-scg11ea-tick-28.test.ts', 'cpp-parity-scg04ea-tick-36.test.ts'],
       vesselDoubleFiresAtTick17: 2, // 2 extra Mission_Move calls vs single-fire TS
+      // Residual blocker after partial port: the double-fire portion is
+      // NOT yet ported. The single-Commence per PCP_END now works; the
+      // DriveClass::AI drive.cpp:1340-1345 re-entrant double-cycle is not.
     };
     expect(blocker.currentGateState).toBe(PER_CELL_COMMENCE_ENABLED);
     expect(blocker.vesselDoubleFiresAtTick17).toBe(2);
 
-    // Verify the hook is in its gated state (no Commence side-effects).
+    // Verify the hook's Commence branch is now active: MissionQueue=MOVE
+    // at PCP_END pops → Mission=MOVE, Timer=0, Status=0.
     type M = 'MOVE' | 'GUARD';
     const vessel = {
       moveTarget: { lx: 100 * 256 + 128, ly: 100 * 256 + 128 },
@@ -230,14 +234,15 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
       path: [{ cx: 46, cy: 45 }],
       pathIndex: 0,
       missionQueue: 'MOVE' as M | null,
-      mission: 'MOVE' as M,
+      mission: 'GUARD' as M,
       missionTimer: 5,
       isDriving: true,
     };
     const r = unitPerCellProcess(vessel, PCPType.PCP_END);
-    expect(r.commenceFired).toBe(false); // gated
+    expect(r.commenceFired).toBe(true); // enabled
     expect(vessel.mission).toBe('MOVE');
-    expect(vessel.missionTimer).toBe(5);
+    expect(vessel.missionQueue).toBe(null);
+    expect(vessel.missionTimer).toBe(0);
   });
 
   it('documents the Random_Animate gating divergence', () => {

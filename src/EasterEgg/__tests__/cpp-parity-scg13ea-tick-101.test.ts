@@ -145,15 +145,18 @@ describe('SCG13EA tick-101 Mission_Move → Mission_Guard transition (architectu
     expect(tsCurrent.tick101.rngCallsForThisEntity).toBe(0);
   });
 
-  it('documents the Per_Cell_Process scaffolding and its gated state', () => {
-    // The scaffolding hook exists but its Commence branch is gated OFF.
-    // When the future port flips PER_CELL_COMMENCE_ENABLED to `true`, this
-    // assertion will fire and the scaffolding docstring must be updated to
-    // match the actual behavior.
-    expect(PER_CELL_COMMENCE_ENABLED).toBe(false);
+  it('documents the Per_Cell_Process scaffolding and its ENABLED state', () => {
+    // The scaffolding hook exists; Commence branch is now gated ON.
+    // Note: SCG13EA's tick-101 divergence is NOT fixed by enabling this
+    // flag alone — it involves INFANTRY Enter_Idle_Mode (infantry.cpp:911)
+    // which is a different code path (FootClass::Mission_Move internal
+    // short-circuit, not per-cell Commence). The Commence flip is scoped
+    // to vehicles (UnitClass::Per_Cell_Process). SCG13EA remains an
+    // architectural blocker pending the Enter_Idle_Mode port.
+    expect(PER_CELL_COMMENCE_ENABLED).toBe(true);
 
-    // The hook is callable and runs only the NavCom-at-destination clear.
-    // Verify: entity not at NavCom → navComCleared === false, no field mutation.
+    // When Commence fires on a vehicle with MissionQueue=MOVE, it pops
+    // the queue to Mission + zeros Timer.
     type M = 'MOVE' | 'GUARD';
     const entity = {
       moveTarget: { lx: 100 * 256 + 128, ly: 100 * 256 + 128 },
@@ -161,16 +164,16 @@ describe('SCG13EA tick-101 Mission_Move → Mission_Guard transition (architectu
       path: [{ cx: 62, cy: 67 }],
       pathIndex: 0,
       missionQueue: 'MOVE' as M | null,
-      mission: 'MOVE' as M,
+      mission: 'GUARD' as M,
       missionTimer: 5,
       isDriving: true,
     };
     const r = unitPerCellProcess(entity, PCPType.PCP_END);
-    expect(r.navComCleared).toBe(false);
-    expect(r.commenceFired).toBe(false);
-    expect(entity.mission).toBe('MOVE');
-    expect(entity.missionQueue).toBe('MOVE');
-    expect(entity.missionTimer).toBe(5); // untouched while gated
+    expect(r.navComCleared).toBe(false); // not at dest
+    expect(r.commenceFired).toBe(true);
+    expect(entity.mission).toBe('MOVE'); // popped
+    expect(entity.missionQueue).toBe(null);
+    expect(entity.missionTimer).toBe(0); // C++ mission.cpp:354
   });
 
   it('documents the Enter_Idle_Mode → Commence + Mission_Guard RNG-tag contract', () => {

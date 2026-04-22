@@ -39,11 +39,12 @@ function makeEntity(overrides: Partial<PCPEntity<M>> = {}): PCPEntity<M> {
 }
 
 describe('Per_Cell_Process scaffolding (src/EasterEgg/engine/perCellProcess.ts)', () => {
-  it('has Commence gate DISABLED by default (preserves legacy behavior)', () => {
-    // Flipping this to true requires also updating the SCG04/11/13 parity
-    // tests to match the new expected behavior. See perCellProcess.ts
-    // docstring for the three blocking reasons.
-    expect(PER_CELL_COMMENCE_ENABLED).toBe(false);
+  it('has Commence gate ENABLED (SCG11EA tick-28 partial port)', () => {
+    // Partial port landed: Commence fires at every PCP_END, matching
+    // C++ unit.cpp:1756. See `cpp-parity-per-cell-process-enabled.test.ts`
+    // for the full behavioral contract and `perCellProcess.ts` docstring
+    // for documented-but-not-ported limitations.
+    expect(PER_CELL_COMMENCE_ENABLED).toBe(true);
   });
 
   it('exposes three PCPType values (C++ PCP_DURING, PCP_END, PCP_ROTATION)', () => {
@@ -83,9 +84,10 @@ describe('Per_Cell_Process scaffolding (src/EasterEgg/engine/perCellProcess.ts)'
     expect(e.pathIndex).toBe(1);
   });
 
-  it('PCP_END does NOT fire Commence while gate is disabled (SCG04/11/13 blocker)', () => {
-    // Queue a MOVE mission; hook should LEAVE it queued while the gate
-    // is off. Future port flips the gate and this expectation changes.
+  it('PCP_END fires Commence mid-drive when MissionQueue is non-null (C++ unit.cpp:1756)', () => {
+    // Matches C++ UnitClass::Per_Cell_Process Commence branch: pop
+    // MissionQueue → Mission, zero Timer. Fires at EVERY PCP_END, not
+    // just destination arrival.
     const e = makeEntity({
       moveTarget: { lx: 20 * 256 + 128, ly: 30 * 256 + 128 },
       cell: { cx: 12, cy: 20 }, // mid-drive — not at dest
@@ -94,10 +96,51 @@ describe('Per_Cell_Process scaffolding (src/EasterEgg/engine/perCellProcess.ts)'
       missionTimer: 7,
     });
     const r = unitPerCellProcess(e, PCPType.PCP_END);
+    expect(r.commenceFired).toBe(true);
+    expect(e.mission).toBe('MOVE'); // popped from queue
+    expect(e.missionQueue).toBe(null); // cleared
+    expect(e.missionTimer).toBe(0); // C++ mission.cpp:354
+    // NavCom clear does NOT fire at mid-drive (cell != dest)
+    expect(r.navComCleared).toBe(false);
+    expect(e.moveTarget).not.toBe(null);
+  });
+
+  it('PCP_END Commence is a no-op when MissionQueue is empty', () => {
+    // C++ mission.cpp:347: Commence returns false when MissionQueue==NONE.
+    const e = makeEntity({
+      moveTarget: { lx: 20 * 256 + 128, ly: 30 * 256 + 128 },
+      cell: { cx: 12, cy: 20 },
+      missionQueue: null,
+      mission: 'MOVE',
+      missionTimer: 7,
+    });
+    const r = unitPerCellProcess(e, PCPType.PCP_END);
     expect(r.commenceFired).toBe(false);
-    expect(e.mission).toBe('GUARD'); // unchanged
-    expect(e.missionQueue).toBe('MOVE'); // still queued
+    expect(e.mission).toBe('MOVE'); // untouched
     expect(e.missionTimer).toBe(7); // untouched
+  });
+
+  it('PCP_END Commence fires BEFORE NavCom-at-destination clear (C++ unit.cpp:1756 → 1882 order)', () => {
+    // When a vehicle arrives at destination with MissionQueue=MOVE queued,
+    // both Commence AND NavCom-clear fire in one PCP_END call. Commence
+    // runs first (UnitClass::Per_Cell_Process line 1756), then NavCom
+    // clear (DriveClass::Per_Cell_Process line 869 via the base-class
+    // call at line 1882).
+    const e = makeEntity({
+      moveTarget: { lx: 10 * 256 + 128, ly: 20 * 256 + 128 },
+      cell: { cx: 10, cy: 20 }, // at destination
+      missionQueue: 'MOVE',
+      mission: 'GUARD',
+      missionTimer: 5,
+    });
+    const r = unitPerCellProcess(e, PCPType.PCP_END);
+    expect(r.commenceFired).toBe(true);
+    expect(r.navComCleared).toBe(true);
+    expect(e.mission).toBe('MOVE');
+    expect(e.missionQueue).toBe(null);
+    expect(e.missionTimer).toBe(0);
+    expect(e.moveTarget).toBe(null);
+    expect(e.path).toEqual([]);
   });
 
   it('PCP_DURING is a no-op (mid-track midpoint — crush/overlay handled in followTrackStep)', () => {
