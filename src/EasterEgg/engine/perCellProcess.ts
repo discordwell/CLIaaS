@@ -1,0 +1,248 @@
+/**
+ * C++ parity scaffolding: UnitClass::Per_Cell_Process hook.
+ *
+ * ## What this module is
+ *
+ * A single, well-typed entry point for cell-boundary processing during
+ * vehicle/vessel movement. It is called from the track-advance loop in
+ * `index.ts` each time a vehicle finishes entering a new cell (PCP_END),
+ * each time it crosses a mid-track midpoint (PCP_DURING), or each time
+ * it finishes a stationary rotation (PCP_ROTATION).
+ *
+ * The long-term goal is full behavioral parity with C++
+ * `UnitClass::Per_Cell_Process` (unit.cpp:1610-1884) which handles:
+ *   - Deploy trigger for MCVs mid-rotation (unit.cpp:1623-1626)
+ *   - Transport / building entry + IM_IN radio (unit.cpp:1636-1665)
+ *   - Tether scatter / unload radio (unit.cpp:1672-1719)
+ *   - Edge-of-world cull (unit.cpp:1726-1729)
+ *   - Look()/Shroud_Regen (unit.cpp:1737-1750)
+ *   - **Commence() — pop MissionQueue mid-drive (unit.cpp:1756)**
+ *   - Flag pickup / flag-home scoring (unit.cpp:1771-1802)
+ *   - Land-mine trigger (unit.cpp:1807-1838)
+ *   - Impassable-cell suicide (unit.cpp:1846-1852)
+ *   - Crushable-overlay destruction (unit.cpp:1858-1870, PCP_END + PCP_DURING)
+ *   - Overrun_Square infantry crush (unit.cpp:1876, PCP_END + PCP_DURING)
+ *   - DriveClass::Per_Cell_Process (drive.cpp:858-879) — NavCom-at-dest clear
+ *
+ * ## Current scope (as of SCG04/11/13 architectural-blocker session)
+ *
+ * The Commence sub-case — the load-bearing piece for SCG04 tick-36, SCG11
+ * tick-28, and SCG13 tick-101 first-divergences — is **gated behind the
+ * `PER_CELL_COMMENCE_ENABLED` feature flag**, which defaults to `false`.
+ *
+ * Why gated, not shipped:
+ *   1. Prior naive port (commit-branch investigation, documented in
+ *      `cpp-parity-scg11ea-tick-28.test.ts`) produced off-by-one Mission_Move
+ *      jitter timing (tick 29 not 28) AND failed to explain WASM MCV-157's
+ *      double-fire within a single tick. Introduced 5 new divergent ticks in
+ *      the 29-33 range as a cascade.
+ *   2. DriveClass::AI (drive.cpp:1340-1345) can re-enter Start_Of_Move +
+ *      While_Moving within a single tick when the current track completes
+ *      with more path/NavCom remaining. This double-cycle may be the
+ *      mechanism for the unexplained second Mission_Move RNG draw — but
+ *      requires C++ single-step instrumentation to confirm.
+ *   3. The fix touches `updateMove`, `updateGuard`, `team.ts coordinateMove`,
+ *      and every vehicle-move code path — 7 scenarios, 55k+ tests at risk.
+ *
+ * The scaffolding here establishes the hook point, documents each sub-case
+ * with its C++ line reference, and preserves current behavior byte-for-byte.
+ * It exists specifically so future fixes can flip the flag scenario-by-scenario
+ * instead of landing a cross-cutting refactor in one go.
+ *
+ * ## C++ call-path refs (authoritative)
+ *
+ *   drive.cpp:661-834          DriveClass::While_Moving (per-cell trigger loop)
+ *   drive.cpp:735-742          PCP_DURING dispatch (mid-track midpoint)
+ *   drive.cpp:773              PCP_END during track-jump (Stop_Driver → Commence)
+ *   drive.cpp:816              PCP_END on track completion (Stop_Driver → Commence)
+ *   drive.cpp:858-879          DriveClass::Per_Cell_Process (NavCom-at-dest clear)
+ *   drive.cpp:1304-1399        DriveClass::AI (TrackNumber dispatch; double-cycle path)
+ *   unit.cpp:397-474           UnitClass::AI (pre/post Commence bookends)
+ *   unit.cpp:1610-1884         UnitClass::Per_Cell_Process (full sub-case list)
+ *   unit.cpp:1756              Commence() — pops MissionQueue → Mission + Timer=0
+ *   mission.cpp:343-359        MissionClass::Commence (Timer=0, Status=0)
+ *   mission.cpp:213-321        MissionClass::AI (Timer==0 dispatch)
+ *   foot.cpp:492-539           FootClass::Mission_Move (tag 60010 jitter)
+ */
+
+/**
+ * Per-cell-process boundary type. Mirrors C++ `PCPType` (defsg.h:122 or
+ * drive.h depending on build — the three-value enum).
+ */
+export enum PCPType {
+  /**
+   * Mid-track boundary: vehicle crossed an intermediate midpoint during
+   * a 2-cell (long) track. C++ drive.cpp:735-742 — triggers Overrun_Square
+   * + crushable-overlay destruction only. Does NOT fire Commence.
+   */
+  PCP_DURING = 0,
+
+  /**
+   * End-of-track boundary: vehicle finished entering the target cell (or
+   * performed a track-jump hand-off). C++ drive.cpp:773, 816 — this is
+   * where UnitClass::Per_Cell_Process fires Commence (unit.cpp:1756),
+   * clears NavCom at destination (drive.cpp:869-873), triggers mine blow,
+   * picks up flags, and does the full Look() pass.
+   */
+  PCP_END = 1,
+
+  /**
+   * Stationary rotation finish: vehicle was rotating in place (no track)
+   * and just finished. C++ drive.cpp:1365 — used by MCV deploy-after-turn
+   * (unit.cpp:1623-1626). Does NOT fire Commence (MCV branches into
+   * Try_To_Deploy instead).
+   */
+  PCP_ROTATION = 2,
+}
+
+/**
+ * Feature gate for the per-cell Commence port.
+ *
+ * When `true`, `unitPerCellProcess(entity, PCP_END)` will call Commence()
+ * equivalent logic (pop MissionQueue → Mission + Timer=0), matching C++
+ * `UnitClass::Per_Cell_Process` line 1756.
+ *
+ * When `false` (default), the hook only performs the NavCom-at-destination
+ * clear (DriveClass::Per_Cell_Process drive.cpp:869-873) — which is what
+ * the legacy `perCellNavComCheck` did. Behavior is unchanged from before
+ * this module landed.
+ *
+ * DO NOT flip this to `true` without:
+ *   1. A plan for the DriveClass::AI double-cycle (drive.cpp:1340-1345)
+ *      — the re-entrant Start_Of_Move+While_Moving path that may be
+ *      responsible for SCG11 MCV-157's double Mission_Move RNG draw.
+ *   2. Audit of `team.ts` coordinateMove's eager `isDriving=true` —
+ *      it bypasses the C++ Start_Driver validation path that controls
+ *      whether Commence fires pre-drive vs mid-drive.
+ *   3. First-divergence regression checks on all 7 RA scenarios
+ *      (SCG01/03/04/06/07/11/13).
+ *
+ * See `cpp-parity-scg11ea-tick-28.test.ts` for the full failure analysis.
+ */
+export const PER_CELL_COMMENCE_ENABLED = false;
+
+/**
+ * Minimal entity shape for the hook. We intentionally keep this loose
+ * (only the fields the hook actually reads/writes) so the module stays
+ * free of the full `Entity` import and can be unit-tested in isolation.
+ *
+ * `mission` / `missionQueue` are typed as `M` generics because the engine
+ * uses a string enum (`Mission`) that is not assignable to `number`. The
+ * hook's Commence branch does a generic field swap (`mission = missionQueue`)
+ * that works for any enum type, so we let callers parameterize.
+ */
+export interface PCPEntity<M = unknown> {
+  moveTarget: { lx: number; ly: number } | null;
+  cell: { cx: number; cy: number };
+  path: Array<{ cx: number; cy: number }>;
+  pathIndex: number;
+  missionQueue: M | null;
+  mission: M;
+  missionTimer: number;
+  isDriving: boolean;
+  // Optional fields that full Commence port will touch (currently unused
+  // by the NavCom-clear path, but documented here for future sub-cases).
+  // status?: number;     // C++ Status — set to 0 by Commence
+}
+
+/**
+ * Result of a per-cell-process call, signalling whether the caller should
+ * stop further movement this tick.
+ */
+export interface PCPResult {
+  /**
+   * True when the vehicle has arrived at its NavCom destination and
+   * movement for this tick must halt. Matches the legacy
+   * `perCellNavComCheck` return value.
+   */
+  navComCleared: boolean;
+
+  /**
+   * True when Commence popped MissionQueue. Currently always `false`
+   * because `PER_CELL_COMMENCE_ENABLED === false`. When the gate flips,
+   * callers can use this to skip the next-tick pre-Commence gate in
+   * `updateEntity` (index.ts:3997) to avoid double-pop.
+   */
+  commenceFired: boolean;
+}
+
+/**
+ * C++ parity hook: `UnitClass::Per_Cell_Process(PCPType)`.
+ *
+ * Called from the track-advance loop each time a vehicle crosses a cell
+ * boundary. For now, this is only the NavCom-at-destination clear from
+ * `DriveClass::Per_Cell_Process` (drive.cpp:869-873).
+ *
+ * Sub-cases not yet ported (see module header for the full C++ enumeration):
+ *   - TODO(SCG04/11/13 port): Commence (unit.cpp:1756) — gated by
+ *     PER_CELL_COMMENCE_ENABLED.
+ *   - TODO(mine port): land-mine blow (unit.cpp:1807-1838).
+ *   - TODO(flag port): flag pickup / flag-home (unit.cpp:1771-1802).
+ *   - TODO(transport port): RADIO_IM_IN / IM_IN (unit.cpp:1636-1665).
+ *
+ * The existing TS engine handles several of these (vehicle crush,
+ * Look() fog reveal) directly in `followTrackStep`'s mid-cell branch
+ * — they are NOT duplicated here. This hook is additive, not a
+ * rewrite of the existing track loop.
+ *
+ * @param entity  The vehicle/vessel crossing the boundary.
+ * @param why     Which kind of boundary (PCP_DURING / PCP_END / PCP_ROTATION).
+ * @returns       `{ navComCleared, commenceFired }` — callers should
+ *                halt movement for this tick when `navComCleared === true`.
+ */
+export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPResult {
+  const result: PCPResult = { navComCleared: false, commenceFired: false };
+
+  // PCP_ROTATION: MCV-deploy branch and nothing else. Not currently used
+  // by the TS engine's rotation path (rotation is decoupled from track
+  // movement). Placeholder for future MCV-deploy parity work.
+  if (why === PCPType.PCP_ROTATION) {
+    // TODO(MCV deploy): invoke deploy-after-rotation path when IsDeploying
+    // is set. C++ unit.cpp:1623-1626.
+    return result;
+  }
+
+  // PCP_DURING: mid-track midpoint. C++ runs Overrun_Square and
+  // crushable-overlay destruction here. The TS engine already handles
+  // these inside `followTrackStep`'s mid-cell branch (index.ts:6481-6495),
+  // so we intentionally no-op. A future refactor should move those calls
+  // here for a cleaner one-to-one mapping with C++ sub-cases.
+  if (why === PCPType.PCP_DURING) {
+    return result;
+  }
+
+  // PCP_END: the main event. Order matches C++ UnitClass::Per_Cell_Process
+  // + DriveClass::Per_Cell_Process call chain (unit.cpp:1882 hands off to
+  // DriveClass::Per_Cell_Process after the UnitClass-specific work).
+
+  // ---- 1. Commence (unit.cpp:1756) — GATED ----
+  // Pops MissionQueue mid-drive. This is the load-bearing piece for
+  // SCG04/11/13 but is gated off by default (see PER_CELL_COMMENCE_ENABLED
+  // docstring for the three blocking reasons).
+  if (PER_CELL_COMMENCE_ENABLED && entity.missionQueue !== null) {
+    entity.mission = entity.missionQueue;
+    entity.missionQueue = null;
+    entity.missionTimer = 0; // C++ mission.cpp:354
+    // C++ mission.cpp:355 sets Status=0. TS engine doesn't track Status on
+    // vehicles (only infantry have a small status FSM for move/attack
+    // animations). Safe to skip for vehicles.
+    result.commenceFired = true;
+  }
+
+  // ---- 2. DriveClass::Per_Cell_Process NavCom-at-destination clear ----
+  // C++ drive.cpp:869-873: if the current cell matches As_Cell(NavCom),
+  // clear NavCom and Path[0]=FACING_NONE. This is the behavior the legacy
+  // inline `perCellNavComCheck` did, preserved exactly.
+  if (entity.moveTarget) {
+    const navCellX = Math.floor(entity.moveTarget.lx / 256);
+    const navCellY = Math.floor(entity.moveTarget.ly / 256);
+    if (navCellX === entity.cell.cx && navCellY === entity.cell.cy) {
+      entity.moveTarget = null;
+      entity.path = [];
+      entity.pathIndex = 0;
+      result.navComCleared = true;
+    }
+  }
+
+  return result;
+}

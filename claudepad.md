@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-04-22T04:30Z — Per_Cell_Process scaffolding (SCG04/11/13 landing-pad; gated off)
+
+**Result:** Scaffolding-only commit. New module `src/EasterEgg/engine/perCellProcess.ts` exports `unitPerCellProcess(entity, PCPType)` hook + `PER_CELL_COMMENCE_ENABLED=false` gate. Inline `perCellNavComCheck` in `index.ts:5476` now delegates to the hook. Behavior byte-identical — all 51,216 Easter Egg tests pass, all 7 scenario first-divergences unchanged (SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=3, SCG11=28, SCG13=101).
+
+**What was ported:** Hook signature + PCPType enum (`PCP_DURING=0, PCP_END=1, PCP_ROTATION=2`) matching C++ `UnitClass::Per_Cell_Process` parameter. PCP_END runs the existing NavCom-at-destination clear (C++ `DriveClass::Per_Cell_Process` drive.cpp:869-873). Commence branch (C++ unit.cpp:1756 — MissionQueue pop mid-drive) is gated off; documented with three blocking reasons (naive-fix cascade on ticks 29-33, unexplained WASM double-fire, cross-cutting refactor risk).
+
+**Why not the full port:** Prior agents already documented that a naive Commence-at-cell-boundary port produces 2 calls at tick 29 instead of 3 at tick 28 for SCG11 MCVs, and fails to explain WASM MCV-157's double Mission_Move RNG within a single tick. The DriveClass::AI double-cycle (drive.cpp:1340-1345: While_Moving → Start_Of_Move → While_Moving within one tick when current track ends with more path) is the likely mechanism but requires C++ single-step instrumentation to confirm. Cross-cutting refactor touches `updateMove`, `updateGuard`, `team.ts` coordinateMove — too risky for 7-scenario sweep.
+
+**Tests added:**
+- `per-cell-process-scaffolding.test.ts` (8 tests) — hook contract: PCPType enum values, PCP_END NavCom-clear, PCP_END Commence-gated-off, PCP_DURING/PCP_ROTATION no-ops, PCPResult shape.
+- `cpp-parity-scg13ea-tick-101.test.ts` (4 tests) — docs-only, WASM contract + TS divergence for the MOVE→GUARD mid-tick transition missing from TS. Inherits 4a7ef2aa's analysis.
+
+**Files:**
+- NEW `src/EasterEgg/engine/perCellProcess.ts` (167 lines, docs-heavy)
+- `src/EasterEgg/engine/index.ts` — import + `perCellNavComCheck` wraps `unitPerCellProcess(entity, PCPType.PCP_END)`
+- NEW `src/EasterEgg/__tests__/per-cell-process-scaffolding.test.ts`
+- NEW `src/EasterEgg/__tests__/cpp-parity-scg13ea-tick-101.test.ts`
+
+**C++ refs in scaffolding:** unit.cpp:1610-1884, unit.cpp:1756 (Commence), drive.cpp:858-879, drive.cpp:1304-1399, drive.cpp:735/773/816 (PCP dispatches), mission.cpp:343-359, mission.cpp:213-321, foot.cpp:492-539.
+
+**Next step for future porter:** Flip `PER_CELL_COMMENCE_ENABLED=true` after (a) C++-side probe of DriveClass::AI double-cycle for the MCV-157 double-fire, (b) audit `team.ts coordinateMove` eager `isDriving=true` vs C++ Start_Driver, (c) all-7-scenarios first-divergence regression check. Scaffolding contract test will fail when flag flips, forcing concurrent update of SCG04/11/13 parity tests.
+
 ## 2026-04-22T04:05Z — SCG11EA tick 28 investigation (architectural blocker documented)
 
 **Result:** No code change. Documented per-cell-boundary Commence gap via `cpp-parity-scg11ea-tick-28.test.ts`. All 55,219 vitest tests pass; all 7 scenario first-divergences unchanged.

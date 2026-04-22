@@ -215,6 +215,12 @@ import {
   updateRepairMission as _updateRepairMission,
   orderTransportEvacuate as _orderTransportEvacuate,
 } from './missionAI';
+// C++ parity scaffolding: UnitClass::Per_Cell_Process hook. Currently only
+// does NavCom-at-destination clear (legacy perCellNavComCheck behavior);
+// Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
+// preserve behavior while establishing the future port's hook point.
+// See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
+import { PCPType, unitPerCellProcess } from './perCellProcess';
 
 // Re-export subsystem types and functions for external consumers
 export type { InflightProjectileType as InflightProjectile };
@@ -5462,23 +5468,22 @@ export class Game {
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
       // Uses C++ TrackControl table to select pre-computed curved paths.
       // Track offsets are relative to target cell center, transformed via Smooth_Turn flags.
-      // C++ DriveClass::Per_Cell_Process (drive.cpp:844-865):
-      // When a vehicle/vessel finishes moving into a cell (PCP_END), check if the
-      // entity's current cell matches As_Cell(NavCom). If so, clear NavCom and the
-      // path. This causes Team::Coordinate_Move to re-assign MOVE (resetting the
-      // mission timer and consuming Random_Pick(0,2) RNG).
+      // C++ parity: UnitClass::Per_Cell_Process (unit.cpp:1610-1884) +
+      // DriveClass::Per_Cell_Process (drive.cpp:844-865).
+      //
+      // Boundary dispatch: each time a vehicle finishes entering a cell
+      // (PCP_END), C++ runs sub-cases in order — Commence (unit.cpp:1756),
+      // NavCom-at-dest clear (drive.cpp:869-873), mine blow, flag pickup,
+      // etc. For now the hook does only the NavCom clear (legacy behavior);
+      // see `perCellProcess.ts` header for the gated Commence port and the
+      // remaining sub-cases (transport, flag, mine).
+      //
+      // Returns `true` when NavCom was cleared, signalling the caller to
+      // halt further movement this tick (matches C++ While_Moving break
+      // after Per_Cell_Process at drive.cpp:820).
       const perCellNavComCheck = (): boolean => {
-        if (entity.moveTarget) {
-          const navCell = { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) };
-          const curCell = entity.cell;
-          if (navCell.cx === curCell.cx && navCell.cy === curCell.cy) {
-            entity.moveTarget = null;
-            entity.path = [];
-            entity.pathIndex = 0;
-            return true; // NavCom cleared — stop further movement this tick
-          }
-        }
-        return false;
+        const r = unitPerCellProcess(entity, PCPType.PCP_END);
+        return r.navComCleared;
       };
 
       if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
