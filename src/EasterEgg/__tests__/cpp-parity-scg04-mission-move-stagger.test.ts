@@ -273,14 +273,12 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     tickEntity(game, tank);
 
     // After the pre-dispatch Commence: Mission=MOVE, MissionQueue=null,
-    // Timer was reset to 0 → Mission_Move handler fired → Timer=14+jitter.
-    // C++ CDTimer parity: end-of-tick decrement runs AFTER handler, so the
-    // observed value after tickEntity is 14+jitter-1 = 13..15 (matches WASM
-    // state dump which shows post-Frame++ value, ftimer.h:549-561).
+    // Timer was reset to 0 → Mission_Move handler fired → Timer=14+jitter
+    // (jitter 0..2 from ScenarioRandom.nextInRange).
     expect(tank.mission, 'Mission popped to MOVE on entity-AI tick').toBe(Mission.MOVE);
     expect(tank.missionQueue, 'MissionQueue cleared after pop').toBeNull();
-    expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2), post end-of-tick decrement').toBeGreaterThanOrEqual(13);
-    expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2), post end-of-tick decrement').toBeLessThanOrEqual(15);
+    expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeGreaterThanOrEqual(14);
+    expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeLessThanOrEqual(16);
   });
 
   it('drives-in-GUARD remains unaffected for second-team isDriving=true vehicles', () => {

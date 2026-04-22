@@ -23,18 +23,13 @@ describe('SCG05EA spy infiltration test', () => {
   it('sends spy to (47,49) then attack_struct on WEAP', async () => {
     await adapter.loadScenario('SCG05EA');
 
-    // Get spy (reinforcement from scripted trigger — timing may vary slightly
-    // with CDTimer end-of-tick parity adjustments).
+    // Get spy
     let state = adapter.step(1).state;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 40; i++) {
       state = adapter.step(15).state;
       if (state.units.find(u => u.t === 'SPY')) break;
     }
-    const spy = state.units.find(u => u.t === 'SPY');
-    if (!spy) {
-      console.log(`SPY did not spawn within ${state.tick} ticks — skipping`);
-      return;
-    }
+    const spy = state.units.find(u => u.t === 'SPY')!;
 
     // Move spy directly to (47,49) via cell-by-cell
     const wps = [
