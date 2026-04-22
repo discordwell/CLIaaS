@@ -184,9 +184,10 @@ export const PER_CELL_COMMENCE_ENABLED = true;
  * The fix requires PER-BOUNDARY dedup keyed by `${trackIndex}-${pathIndex}`
  * to match C++'s single Commence-per-obj->AI() contract (mission.cpp:213-321
  * — no loop inside MissionClass::AI). Plan §6 spec'd this design; step 1.3
- * flips this flag to true behind that dedup. Step 1.2 ships the stub OFF.
+ * now has it ON behind the per-boundary `_commenceFiredBoundaries` Set<string>
+ * on Entity, reset at top of `updateEntity` each tick. Step 1.2 shipped OFF.
  */
-export const PER_CELL_TRACK_JUMP_ENABLED = false;
+export const PER_CELL_TRACK_JUMP_ENABLED = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose
