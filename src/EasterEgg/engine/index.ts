@@ -2056,6 +2056,16 @@ export class Game {
         this.updateEntity(entity);
         entity.tickAnimation();
       }
+
+      // Clear source tag after Phase 4 so any post-Logic RNG calls (e.g. the
+      // pendingInvisibleScatters flush at line ~2320) don't inherit the final
+      // aircraft's logicIdx tag. Without the reset, SCG01EA tick 87's flushed
+      // Coord_Scatters are mistagged `aircraft[51]`, confusing RNG-diff tools.
+      // C++ equivalent: logic.cpp:285 entity loop exits; subsequent callers
+      // (Map.Logic, House AI, bullet AI) set their own g_rng_source_tag.
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = 0;
+      }
     });
 
     // C++ HouseClass::AI repair timer tick (house.cpp:1371-1373):
@@ -2318,6 +2328,14 @@ export class Game {
       const flushCount = this._pendingInvisibleScatters;
       this._pendingInvisibleScatters = 0;
       for (let i = 0; i < flushCount; i++) {
+        // Tag as Coord_Scatter so RNG trace matches WASM's source_tag=50002
+        // (coord.cpp:396). Without this, flushed calls inherit whatever
+        // _sourceTag was last set — most recently the final aircraft's
+        // logicIdx (e.g. aircraft[51] on SCG01EA tick 87). The stale tag is
+        // cosmetic vs. seed numbers, but it derails RNG-divergence diagnostics.
+        if (ScenarioRandom._tagLogging) {
+          ScenarioRandom._sourceTag = 50002; // C++ Coord_Scatter direction pick
+        }
         ScenarioRandom.nextInRange(0, 255);
       }
     }
@@ -3985,8 +4003,46 @@ export class Game {
     }
 
     switch (entity.mission) {
-      case Mission.MOVE:
-        this.updateMove(entity);
+      case Mission.MOVE: {
+        // C++ InfantryClass::AI runs Firing_AI() BEFORE Movement_AI
+        // (infantry.cpp:1237 → 1247). Movement_AI skips when IsFiring
+        // (infantry.cpp:3790), so starting a fire animation interrupts
+        // movement same-tick.
+        //
+        // TS parity: for infantry with a target in range, run updateAttack
+        // BEFORE updateMove. If firePrepActive gets set, skip this tick's
+        // movement advance. Mirrors C++ IsFiring-gated Movement_AI skip.
+        //
+        // SCG06EA tick 66: BadGuy E1 TarCom=Greek (set at tick 65 via team
+        // retaliation — combat.ts triggerRetaliation teamRef branch). Tick 66
+        // updateAttack starts firing animation (firePrepActive=true, stage=0);
+        // movement is suppressed. FireLaunch=2 reached at tick 68 → Fire_At →
+        // bullet[116] Coord_Scatter (tag 50002), matching WASM exactly.
+        let firingStarted = false;
+        if (entity.stats.isInfantry && entity.target?.alive && entity.weapon
+            && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
+          // FIRE_MOVING gate (infantry.cpp:1639) blocks fire while IsDriving.
+          // In C++ Firing_AI runs BEFORE Movement_AI, so IsDriving in Can_Fire
+          // reflects the prior tick's driver state. Temporarily clear
+          // isDriving so the pre-fire animation can start on the tick the
+          // unit first acquires a target.
+          const savedDriving = entity.isDriving;
+          entity.isDriving = false;
+          const savedMission = entity.mission;
+          entity.mission = Mission.ATTACK;
+          this.updateAttack(entity);
+          if ((entity.mission as Mission) === Mission.ATTACK) {
+            entity.mission = savedMission;
+          }
+          if (entity.firePrepActive) {
+            // Pre-fire animation in progress — keep isDriving=false (the
+            // unit has effectively halted for firing) and skip updateMove.
+            firingStarted = true;
+          } else {
+            entity.isDriving = savedDriving;
+          }
+        }
+        if (!firingStarted) this.updateMove(entity);
         // C++ foot.cpp:492-505: Mission_Move timer return
         if (missionTimerFired) {
           // C++ foot.cpp:496-498: if no NavCom, not driving, no queued mission →
@@ -4001,6 +4057,7 @@ export class Game {
           }
         }
         break;
+      }
       case Mission.ATTACK:
         this.updateAttack(entity);
         // C++ foot.cpp:570: Mission_Attack returns Normal_Delay+Random_Pick(0,2)

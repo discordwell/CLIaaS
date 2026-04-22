@@ -191,11 +191,32 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
   ]);
   console.log(`Pre-loop seeds — WASM: ${wasmPreSeed >>> 0}, TS: ${tsPreSeed >>> 0}, match: ${(wasmPreSeed >>> 0) === (tsPreSeed >>> 0)}\n`);
 
+  // Capture TS console.log for debugging
+  tsPage.on('console', (msg) => {
+    const t = msg.text();
+    if (t.includes('INVISIBLE_SCATTER') || t.includes('[FIRE_AT]')) {
+      console.log(`    [TS-LOG] ${t}`);
+    }
+  });
+
+  // Enable invisible-scatter debug
+  await tsPage.evaluate(() => {
+    (globalThis as any)._debugInvisibleScatter = true;
+    const g = (window as any).game;
+    if (g) (g as any)._debugInvisibleScatter = true;
+  });
+
   // Tick-by-tick diff
   let totalDivergences = 0;
   for (let tick = startTick; tick <= endTick; tick++) {
     // Reset TS log before stepping
     await tsPage.evaluate(() => { (window as any).__rngTagControl('reset'); });
+
+    // Dump PRE-STEP aircraft state (for debugging tick-by-tick transitions)
+    const preAircraft = await tsPage.evaluate(() => {
+      const dbg = (window as any).__agentAircraft;
+      return dbg ? dbg() : [];
+    });
 
     // Step both engines 1 tick — capture rngLog from step return (not separate agent_get_state)
     const [wasmStepResult, _] = await Promise.all([
@@ -221,11 +242,14 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     const tsData = await tsPage.evaluate(() => {
       const r = (window as any).__rngTagControl('read');
       const s = (window as any).__agentState();
+      const dbg = (window as any).__agentAircraft;
       return {
         tick: s.tick as number,
         seed: r.seed as number,
         calls: r.callCount as number,
         log: (r.seedLog ?? []) as [number, number][],
+        taggedLog: (r.taggedLog ?? []) as string[],
+        aircraft: dbg ? dbg() : [],
       };
     });
 
@@ -258,8 +282,8 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
         const tEntry = tsData.log[i];
         const wEnt = wEntry && wEntry[2] !== undefined ? ` ent=${tagName(wEntry[2])}` : '';
         const tEnt = tEntry && (tEntry as any)[2] !== undefined ? ` ent=${tagName((tEntry as any)[2])}` : '';
-        const wStr = wEntry ? `[${tagName(wEntry[1]).padEnd(18)} seed=${(wEntry[0] >>> 0)}${wEnt}]` : '(none)'.padEnd(35);
-        const tStr = tEntry ? `[${tagName(tEntry[1]).padEnd(18)} seed=${(tEntry[0] >>> 0)}${tEnt}]` : '(none)'.padEnd(35);
+        const wStr = wEntry ? `[${tagName(wEntry[1]).padEnd(18)} seed=${(wEntry[0] >>> 0)} stag=${wEntry[1]}${wEnt}]` : '(none)'.padEnd(35);
+        const tStr = tEntry ? `[${tagName(tEntry[1]).padEnd(18)} seed=${(tEntry[0] >>> 0)} stag=${tEntry[1]}${tEnt}]` : '(none)'.padEnd(35);
 
         const match = wEntry && tEntry && (wEntry[0] >>> 0) === (tEntry[0] >>> 0) && wEntry[1] === tEntry[1];
         const seedSame = wEntry && tEntry && (wEntry[0] >>> 0) === (tEntry[0] >>> 0);
@@ -281,6 +305,18 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
       console.log(`  WASM Logic layer (${wasmData.logicLayer.length} entities):`);
       for (const [idx, type, house, cx, cy] of wasmData.logicLayer) {
         console.log(`    [${idx}] ${type} (${house}) cell(${cx},${cy})`);
+      }
+      console.log(`  TS aircraft PRE-STEP (${preAircraft.length}):`);
+      for (const a of preAircraft) {
+        console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
+      }
+      console.log(`  TS aircraft POST-STEP (${(tsData as any).aircraft?.length ?? 0}):`);
+      for (const a of (tsData as any).aircraft ?? []) {
+        console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
+      }
+      console.log(`  TS taggedLog (stack frames):`);
+      for (let i = 0; i < (tsData as any).taggedLog.length; i++) {
+        console.log(`    [${i}] ${(tsData as any).taggedLog[i]}`);
       }
       console.log('');
     }

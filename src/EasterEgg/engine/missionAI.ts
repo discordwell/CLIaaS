@@ -290,9 +290,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
 
     // Turreted vehicles: turret tracks target, body may stay still
+    let turretFacingReady = true;
     if (entity.hasTurret) {
       entity.desiredTurretFacing = directionTo(entity.pos, entity.target.pos);
-      entity.tickTurretRotation();
+      turretFacingReady = entity.tickTurretRotation();
     } else {
       entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
       const facingReady = entity.tickRotation();
@@ -350,6 +351,26 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // C++ ref: infantry.cpp:1639 `if (IsDriving || ...) return(FIRE_MOVING);`
     if (entity.stats.isInfantry && entity.isDriving) {
       return;
+    }
+
+    // C++ UnitClass::Can_Fire (unit.cpp:4159-4181) — FIRE_ROTATING / FIRE_FACING gate.
+    // Turreted vehicles must have turret within 8/256 (≈11°) of target direction before
+    // firing. Non-homing projectiles (Bullet->ROT == 0) block fire while IsRotating.
+    // Homing projectiles skip the gate (diff >>= 2 tolerance).
+    // Without this gate, TS vehicles fire the moment they acquire a target via
+    // Mission_Guard scan, consuming an invisible-bullet Coord_Scatter RNG
+    // (bullet.cpp:1012-1014) one or more ticks ahead of WASM.
+    // SCG01EA tick 87: Greek JEEP#27 (63,50) and JEEP#30 (64,50) acquire DOG/E1
+    // targets from Mission_Guard scan; WASM waits one tick for turret to face,
+    // TS fires same-tick. 2 extra Coord_Scatter RNG calls tagged `aircraft[51]`
+    // (source_tag leak from aircraft loop → pendingInvisibleScatters flush).
+    if (entity.hasTurret && activeWeapon && !turretFacingReady) {
+      // C++ checks weapon->Bullet->ROT (projectile rotation rate). Homing
+      // projectiles (ROT != 0) bypass facing requirement; non-homing must face.
+      const projROT = (activeWeapon.projectileROT ?? 0) as number;
+      if (projROT === 0) {
+        return;
+      }
     }
 
     if (activeWeapon && ((isSecondary ? entity.attackCooldown2 : entity.attackCooldown) <= 0)) {

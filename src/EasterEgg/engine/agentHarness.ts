@@ -830,6 +830,34 @@ export function installHarness(game: Game): void {
   // Use for deep inspection of private fields during parity debugging.
   w.__rawTeams = () => getActiveTeams();
 
+  // Aircraft debug accessor — dump all aircraft entities with key state for RNG parity debugging.
+  w.__agentAircraft = () => {
+    return game.entities
+      .filter(e => e.stats?.isAircraft)
+      .map(e => ({
+        id: e.id,
+        type: e.type,
+        house: e.house,
+        alive: e.alive,
+        inLimbo: e.inLimbo,
+        cx: e.cell.cx,
+        cy: e.cell.cy,
+        mission: e.mission,
+        missionQueue: e.missionQueue,
+        missionTimer: e.missionTimer,
+        aircraftState: e.aircraftState,
+        flightAltitude: e.flightAltitude,
+        cargo: e.passengers?.length ?? 0,
+        moveTarget: e.moveTarget ? { lx: e.moveTarget.lx, ly: e.moveTarget.ly } : null,
+        isAirUnit: e.isAirUnit,
+        isHelicopter: e.isHelicopter,
+        isFixedWing: e.isFixedWing,
+        teamRef: !!e.teamRef,
+        teamMissionIndex: e.teamMissionIndex,
+        teamMissions: e.teamMissions?.length ?? 0,
+      }));
+  };
+
   // Team debug accessor — dump all active teams with key state for parity tracing.
   w.__agentTeams = () => {
     const teams = getActiveTeams();
