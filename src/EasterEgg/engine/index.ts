@@ -220,7 +220,7 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED } from './perCellProcess';
+import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED } from './perCellProcess';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -4153,6 +4153,23 @@ export class Game {
               entity.isDriving = false;
               entity.headToLX = 0;
               entity.headToLY = 0;
+              // PCP Session 2.2: infantry cell-arrival Per_Cell_Process(PCP_END).
+              // Mirrors C++ infantry.cpp:3997. Only fires when FOOT_PER_CELL_ENABLED
+              // is true (Session 2.3). In HUNT, target is still live when entering
+              // the final cell-in-range — Enter_Idle_Mode's TarCom-clear guard
+              // blocks the idle branch, but the hook still runs in case a future
+              // path-shorten or Commence pop is needed.
+              if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+                footPerCellProcess(
+                  entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+                  PCPType.PCP_END,
+                  {
+                    hasLegalTarCom: !!(entity.target?.alive) || entity.targetStructure != null,
+                    inRadioContact: false, // TS infantry have no radio handshake
+                  },
+                  { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+                );
+              }
             }
           } else {
             if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
@@ -4289,6 +4306,23 @@ export class Game {
                 entity.isDriving = false;
                 entity.headToLX = 0;
                 entity.headToLY = 0;
+                // PCP Session 2.2: infantry cell-arrival Per_Cell_Process(PCP_END).
+                // Mirrors C++ infantry.cpp:3997. AREA_GUARD analog of the HUNT site
+                // above. TarCom is likely clear here (Mission_Guard_Area scans and
+                // sets TarCom only when a target is in sight), so Enter_Idle_Mode
+                // may queue MISSION_GUARD_AREA on the final cell-arrival if no
+                // enemies remain in sight.
+                if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+                  footPerCellProcess(
+                    entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+                    PCPType.PCP_END,
+                    {
+                      hasLegalTarCom: !!(entity.target?.alive) || entity.targetStructure != null,
+                      inRadioContact: false,
+                    },
+                    { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+                  );
+                }
               }
             } else if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
               entity.moveTarget = null;
@@ -5664,6 +5698,28 @@ export class Game {
         // Infantry/aircraft: free-form movement (FOOT speedClass exempt from tracks)
         if (entity.moveToward(target, speed)) {
           entity.pathIndex++;
+          // PCP Session 2.2: infantry cell-arrival Per_Cell_Process(PCP_END).
+          // Mirrors C++ infantry.cpp:3997 — fires at Distance(Head_To_Coord())<0x0010,
+          // which `moveToward` returning true is the TS equivalent of. Aircraft are
+          // excluded (infantry-only check); their free-form path never triggers
+          // InfantryClass::Per_Cell_Process in C++ either (aircraft.cpp flow).
+          //
+          // This is the SCG13 tick-101 site: at cell-arrival on the last path cell,
+          // Enter_Idle_Mode queues MISSION_GUARD (or MISSION_GUARD_AREA when the
+          // guardOrigin is set), and the subsequent Commence pop transitions mission
+          // to GUARD with Timer=0 — one tick earlier than the current Mission.MOVE
+          // handler's missionTimerFired path (which matches WASM behavior).
+          if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+            footPerCellProcess(
+              entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+              PCPType.PCP_END,
+              {
+                hasLegalTarCom: !!(entity.target?.alive) || entity.targetStructure != null,
+                inRadioContact: false,
+              },
+              { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+            );
+          }
         }
       }
     } else if (entity.moveTarget) {
