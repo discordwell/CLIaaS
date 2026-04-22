@@ -3,7 +3,7 @@
  *
  * ## Status: deferred — end-of-tick decrement refactor cascades to earlier ticks
  *
- * **2026-04-22 attempt (commit d6db5f97, reverted by 4277d897):**
+ * **2026-04-22 attempt #1 (commit d6db5f97, reverted by 4277d897):**
  * Implemented the CDTimer end-of-tick decrement refactor described below
  * (Approach A from the task brief). Per-entity CDTimer-semantic decrements
  * moved from START → END of updateEntity; fire conditions flipped from
@@ -18,6 +18,44 @@
  *   - SCG04EA:  36  → 36  (unchanged)
  *   - SCG11EA:  28  → 28  (unchanged)
  *   - SCG13EA:  101 → 101 (unchanged)
+ *
+ * **2026-04-22 attempt #2 (commit 2effbea4, reverted by 371b9289):**
+ * Addressed attempt #1's per-entity cascade by moving the decrement OUT of
+ * updateEntity entirely into a SINGLE batched pass at the end of
+ * `Game.update()`, AFTER Phase 1-4 entity iteration completes. The rationale
+ * was that C++ Frame++ (conquer.cpp:2542) runs ONCE after the entire
+ * Logic[] array — a true batch — and Attempt #1's regression was blamed on
+ * intra-loop cascading.
+ *
+ * Also removed Arm decrements from aircraft.ts updateAircraft and from the
+ * heli-in-building-loop. Updated fire conditions to `=== 0` pre-decrement.
+ *
+ * Local Node test suite: all 51,265 tests passed. BUT Playwright first-
+ * divergence still regressed — and, counterintuitively, SCG01EA also
+ * regressed (which attempt #1 left unchanged):
+ *   - SCG01EA:   87 → **15**  (-72 ticks, NEW REGRESSION)
+ *   - SCG03EA:  238 → **10**  (-228 ticks, same as attempt #1)
+ *   - SCG06EA:  76  → **11**  (-65 ticks, same)
+ *   - SCG07EA:  17  → **6**   (-11 ticks, same)
+ *   - SCG04EA:  36  → 36  (unchanged)
+ *   - SCG11EA:  28  → 28  (unchanged)
+ *   - SCG13EA:  101 → 101 (unchanged)
+ *
+ * The batched placement did NOT solve the regression — and actually made
+ * SCG01EA worse. This refutes the "intra-loop cascade" hypothesis: the
+ * regression is NOT about mid-tick cross-entity reads.
+ *
+ * **New hypothesis (post-attempt #2):** The TS engine has accumulated many
+ * workarounds built around the current decrement-at-start semantics —
+ * particularly around weapon Firing_AI and team coordination RNG ordering.
+ * A principled fix requires auditing those workarounds and reverting them
+ * atomically WITH the decrement move. Naive relocation (start OR end, per-
+ * entity OR batched) shifts the RNG stream earlier across many scenarios.
+ *
+ * Example: SCG01EA's newly-regressed tick 15 suggests that a structure or
+ * team's Firing_AI fires one tick earlier under batched semantics, consuming
+ * bullet RNG before WASM does. The pre-existing TS cadence hid this by
+ * reading the post-decrement value on the cooldown check.
  *
  * ## Hypothesis for the cascade
  *
