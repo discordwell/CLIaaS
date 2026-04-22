@@ -1066,10 +1066,15 @@ describe('full ammo/rearm/landing cycle integration', () => {
 
     const statesVisited = new Set<string>();
 
-    // Run full cycle
+    // Run full cycle. CDTimer end-of-tick parity: simulate the batched decrement
+    // (Game.update batched pass) by manually decrementing Arm fields here,
+    // since updateAircraft no longer does so.
     for (let tick = 0; tick < 2000; tick++) {
       statesVisited.add(mig.aircraftState);
       updateAircraft(ctx, mig);
+      // Simulate Game.update's batched end-of-tick CDTimer decrement.
+      if (mig.attackCooldown > 0) mig.attackCooldown--;
+      if (mig.attackCooldown2 > 0) mig.attackCooldown2--;
       // If returned to landed with full ammo, cycle is complete
       if (mig.aircraftState === 'landed' && mig.ammo >= mig.maxAmmo) break;
     }
@@ -1101,6 +1106,9 @@ describe('full ammo/rearm/landing cycle integration', () => {
     for (let tick = 0; tick < 5000; tick++) {
       if (heli.aircraftState === 'rearming') sawRearming = true;
       updateAircraft(ctx, heli);
+      // Simulate Game.update's batched end-of-tick CDTimer decrement.
+      if (heli.attackCooldown > 0) heli.attackCooldown--;
+      if (heli.attackCooldown2 > 0) heli.attackCooldown2--;
       if (heli.aircraftState === 'landed' && heli.ammo >= heli.maxAmmo && sawRearming) break;
     }
 

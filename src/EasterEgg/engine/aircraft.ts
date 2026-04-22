@@ -321,9 +321,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
   // Only process aircraft with active state
   if (!entity.stats.isAircraft) return false;
 
-  // Decrement attack cooldowns — aircraft skip normal mission processing
-  if (entity.attackCooldown > 0) entity.attackCooldown--;
-  if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+  // C++ CDTimerClass<FrameTimerClass> (ftimer.h:449-625) end-of-tick parity:
+  // attackCooldown/attackCooldown2 (Arm/Arm2) decrement lazily via Frame++ at end
+  // of Main_Loop (conquer.cpp:2542). TS batches the decrement in Game.update() after
+  // Phase 4. Do NOT decrement here — Firing_AI mid-tick reads observe the C++
+  // pre-Frame++ Value, and the end-of-tick batch brings them down for next tick.
 
   switch (entity.aircraftState) {
     case 'landed': {

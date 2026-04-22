@@ -1418,11 +1418,15 @@ describe('end-to-end flight cycle: attack → deplete → RTB → land → rearm
     const fireWeaponAt = vi.fn();
     const ctx = makeAircraftCtx({ structures: [pad], fireWeaponAt });
 
-    // Phase 2: Run through takeoff (24 ticks) + flying + attacking
+    // Phase 2: Run through takeoff (24 ticks) + flying + attacking.
+    // CDTimer end-of-tick parity: simulate Game.update's batched Arm decrement
+    // (updateAircraft no longer decrements cooldowns per-tick).
     let maxTicks = 500;
     let tick = 0;
     while (tick < maxTicks) {
       updateAircraft(ctx, heli);
+      if (heli.attackCooldown > 0) heli.attackCooldown--;
+      if (heli.attackCooldown2 > 0) heli.attackCooldown2--;
       tick++;
       // Check if helicopter has fired and depleted ammo
       if (heli.ammo === 0 && heli.aircraftState === 'returning') break;
@@ -1436,6 +1440,8 @@ describe('end-to-end flight cycle: attack → deplete → RTB → land → rearm
     tick = 0;
     while (tick < maxTicks) {
       updateAircraft(ctx, heli);
+      if (heli.attackCooldown > 0) heli.attackCooldown--;
+      if (heli.attackCooldown2 > 0) heli.attackCooldown2--;
       tick++;
       if (heli.aircraftState === 'rearming') break;
     }
@@ -1446,6 +1452,8 @@ describe('end-to-end flight cycle: attack → deplete → RTB → land → rearm
     tick = 0;
     while (tick < 10000) {
       updateAircraft(ctx, heli);
+      if (heli.attackCooldown > 0) heli.attackCooldown--;
+      if (heli.attackCooldown2 > 0) heli.attackCooldown2--;
       tick++;
       if (heli.aircraftState === 'landed') break;
     }

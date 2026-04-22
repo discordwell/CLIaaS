@@ -1973,17 +1973,15 @@ export class Game {
                 const stillHasTarget = (heli.target?.alive) ||
                   (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                 if (!stillHasTarget) {
-                  if (heli.missionTimer > 0) heli.missionTimer--;
-                  if (heli.missionTimer <= 0) {
+                  // CDTimer end-of-tick parity: decrement batched in Game.update().
+                  if (heli.missionTimer === 0) {
                     heli.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
                   }
                 }
               }
               if (heli.mission === Mission.GUARD && heli.aircraftState === 'landed') {
-                if (heli.missionTimer > 0) {
-                  heli.missionTimer--;
-                }
-                if (heli.missionTimer <= 0) {
+                // CDTimer end-of-tick parity: decrement batched in Game.update().
+                if (heli.missionTimer === 0) {
                   const hasTarget = (heli.target?.alive) ||
                     (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                   if (hasTarget) {
@@ -2052,12 +2050,13 @@ export class Game {
         if (entity.isInRecoilState) entity.isInRecoilState = false;
         if (entity.inLimbo) continue;
         // C++ AircraftClass::AI → FootClass::AI → MissionClass::AI fires the
-        // mission handler when Timer==0. For a freshly-spawned aircraft in
-        // MOVE mission, Mission_Move returns Normal_Delay + Random_Pick(0,2).
+        // mission handler when Timer==0 (pre-Frame++ value). For a freshly-spawned
+        // aircraft in MOVE mission, Mission_Move returns Normal_Delay + Random_Pick(0,2).
         // TS's _updateAircraft state machine bypasses the mission switch, so
         // consume the Random_Pick equivalent here for Mission_Move parity.
         // (rules.ini [Move] Normal_Delay=14 + jitter 0-2 → timer 14-16.)
-        if (entity.mission === Mission.MOVE && entity.missionTimer <= 0) {
+        // CDTimer end-of-tick: use `=== 0` pre-decrement gate.
+        if (entity.mission === Mission.MOVE && entity.missionTimer === 0) {
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
         }
         this.updateEntity(entity);
@@ -2074,6 +2073,36 @@ export class Game {
         ScenarioRandom._sourceTag = 0;
       }
     });
+
+    // ── C++ CDTimerClass end-of-tick batched decrement (parity with Main_Loop Frame++) ──
+    // C++ conquer.cpp:2542 runs `Frame++` exactly ONCE at the end of Main_Loop, AFTER
+    // the entire Logic[] entity array has been processed. CDTimerClass<FrameTimerClass>
+    // (ftimer.h:449-625) computes Value lazily:
+    //   Value() = max(0, DelayTime - (currentFrame - Started))
+    // so every Timer read during the entity loop observes the SAME currentFrame for
+    // all entities in the tick. After Frame++ the next tick's reads see Value-1.
+    //
+    // TS parity: per-entity CDTimer fields stay unchanged during Phase 1-4 so that
+    // mid-loop cross-entity reads observe the pre-Frame++ value (same semantics as
+    // C++ lazy Value()). We batch the decrement here, AFTER the entity loop exits,
+    // matching Frame++'s placement at end of Main_Loop.
+    //
+    // The prior attempt (d6db5f97, reverted by 4277d897) placed the decrement at the
+    // end of each entity's updateEntity. That cascaded — entity[K+1] saw entity[K]'s
+    // post-decrement value mid-loop, diverging from WASM. Playwright regressions on
+    // SCG03EA (238→10), SCG06EA (76→11), SCG07EA (17→6). This batched placement
+    // avoids the cascade.
+    //
+    // Fields: missionTimer (MissionClass::Timer), attackCooldown/attackCooldown2
+    // (TechnoClass::Arm/Arm2), idleAnimTimer (IdleTimer), nonInterruptAnimTicks
+    // (gesture/salute countdown).
+    for (const entity of this.entities) {
+      if (entity.missionTimer > 0) entity.missionTimer--;
+      if (entity.attackCooldown > 0) entity.attackCooldown--;
+      if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+      if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
+      if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
+    }
 
     // C++ HouseClass::AI repair timer tick (house.cpp:1371-1373):
     //   if (DidRepair && RepairTimer == 0) DidRepair = false;
@@ -3964,13 +3993,28 @@ export class Game {
       entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
     }
 
-    // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
-    if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
-
-    // C++ TechnoClass::AI: Arm (attack cooldown) ticks every tick for ALL missions.
-    // This is independent of mission timers — units can fire between guard scans.
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    // C++ CDTimerClass<FrameTimerClass> (ftimer.h:449-625): Timer values decrement
+    // LAZILY via `Frame++` at end of Main_Loop (conquer.cpp:2542). During Logic.AI
+    // (logic.cpp:267-296) ALL entity reads see Value = DelayTime - (currentFrame -
+    // Started). `currentFrame` is the SAME for every entity in the tick — Frame++
+    // doesn't run until AFTER the entire Logic[] array has been processed.
+    //
+    // TS parity: per-entity CDTimer fields (idleAnimTimer, attackCooldown,
+    // attackCooldown2, missionTimer, nonInterruptAnimTicks) are NOT decremented
+    // here. A single batched pass at the end of Game.update() decrements all
+    // entities' CDTimer fields at once, AFTER Phase 1-4 have completed. This
+    // preserves cross-entity read consistency within the tick (entity[K+1] reads
+    // entity[K]'s pre-Frame++ value, matching WASM).
+    //
+    // The prior attempt (d6db5f97, reverted by 4277d897) placed the decrement at
+    // the END of updateEntity, which still cascaded intra-loop because each
+    // entity's decrement was visible to the NEXT entity in the Phase iteration.
+    // Batched placement avoids that cascade.
+    //
+    // Fire conditions check `Timer === 0` pre-Frame++ (matches mission.cpp:213-232
+    // `if (Timer == 0) { ... }`). attackCooldown gates use `=== 0`/`<= 0`
+    // interchangeably since the batched decrement clamps at 0.
+    //
     // C++ TechnoClass::AI (techno.cpp:2392-2398) → StageClass::Graphic_Logic advances
     // animation stage each tick. InfantryClass::Firing_AI reads Fetch_Stage() AFTER
     // this increment when gating Fire_At. Stage advances BEFORE the per-tick Firing_AI
@@ -3979,18 +4023,14 @@ export class Game {
     // C++ IsDriving persists between ticks — set by Start_Driver, cleared by Stop_Driver.
     // Do NOT clear it per-tick; let moveToward set it on first call and clear on arrival.
 
-    // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
-    // Timer counts down each tick. When Timer reaches 0, the mission handler fires
-    // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
-    // Between timer fires, per-tick systems (Firing_AI, movement) still run.
-    // C++ CDTimerClass: decrement then check. Timer=14 fires after 14 ticks.
-    if (entity.missionTimer > 0) {
-      entity.missionTimer--;
-    }
-    let missionTimerFired = entity.missionTimer <= 0;
+    // C++ MissionClass::AI (mission.cpp:213-232): gated mission handler dispatch.
+    // `if (Timer == 0 && Strength > 0) { Timer = Mission_X(); }`. Timer decrement
+    // happens LAZILY via Frame++ at end of Main_Loop, so Timer==0 here reads the
+    // pre-Frame++ value. TS parity: batched end-of-tick decrement (see Game.update
+    // after Phase 4) — this site checks `=== 0` pre-decrement.
+    let missionTimerFired = entity.missionTimer === 0;
 
-    // nonInterruptAnimTicks decrements every tick (gesture/salute animation countdown)
-    if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
+    // nonInterruptAnimTicks is a CDTimer too — batched end-of-tick decrement.
 
     // C++ UnitClass::AI (unit.cpp:404) / VesselClass::AI (vessel.cpp:592) — pre-Commence
     // gate that runs BEFORE MissionClass::AI dispatch. Vehicles/vessels call Commence()
