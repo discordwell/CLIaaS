@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-04-22T06:00Z — SCG07EA tick-17 first-divergence (architectural blocker documented)
+
+**Result:** No code change. Documented the tick-17 divergence via `cpp-parity-scg07ea-tick-17.test.ts` (7 tests). All 51,241 Easter Egg tests pass; all 7 scenario first-divergences unchanged (SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=**17** still, SCG11=28, SCG13=101).
+
+**Tick 17 divergence:** WASM fires 27 RNG calls, TS fires 20. Post-seeds: WASM=2978978768, TS=4180793233. Δcalls=+7. First 20 calls match seed-for-seed (identical PRNG stream), then WASM continues with 7 more.
+
+**Missing-7 breakdown:**
+- **2× vessel Mission_Move (tag 60010)** — vessel[182] fires TWICE, vessel[183] fires THREE times in one WASM tick. Same `DriveClass::AI` double-Commence blocker as SCG11EA tick-28 (drive.cpp:1340-1345 While_Moving → Start_Of_Move → While_Moving cycle when current track ends with more path). Scaffolded in `perCellProcess.ts`, gated off.
+- **3× infantry Random_Animate (tags 30001/30002/30003)** — C++ `FootClass::Mission_Guard` calls `Random_Animate` unconditionally when no target found (foot.cpp:642-644). TS gates behind `entity.isReadyToRandomAnimate()` which requires `doing === 'stand_ready'`. Infantry 126, 129 at cells (67,66)/(66,66) are in a different `doing` state at TS tick 17.
+- **2× infantry Mission_Guard_E1E3 jitter (tag 60043)** — TS fires the `guardDelay + Random_Pick(0,2)` jitter only on `missionTimerFired` inside Mission.GUARD/AREA_GUARD dispatch. The timer cadence differs because the preceding Random_Animate cascade is skipped.
+- Buildings: both engines fire 5 weapon-equipped Mission_Guard calls (tag 70003); only the ordering differs (WASM building[145,160,161,162], TS building[95,110,111,112]).
+
+**Why narrow fix doesn't land:** Forcing Random_Animate unconditionally regresses SCG01=87, SCG03=238, SCG06=76 which depend on the current gate. The vessel double-fire requires `Per_Cell_Process` + DriveClass::AI port (documented architectural blocker across SCG04/11/13/07). Scaffolding at `src/EasterEgg/engine/perCellProcess.ts` awaits WASM-side probe of drive.cpp:1340-1345 cycle.
+
+**Tests added:**
+- `cpp-parity-scg07ea-tick-17.test.ts` (7 tests) — WASM contract at tick 17 (27 calls breakdown), TS divergence (20 calls, 7 missing split into DriveClass::AI + Random_Animate gating + 60043 cadence), relationship to sibling architectural blockers (SCG11/04/13), pre-tick-17 shared state (ticks 15/16 byte-identical), 94a614cd niat=3 proxy wears off by tick 7.
+
+**Files:**
+- NEW `src/EasterEgg/__tests__/cpp-parity-scg07ea-tick-17.test.ts` (7 tests, docs-only).
+
+**C++ refs documented:** building.cpp:3263-3358 (Mission_Guard tag 70003), drive.cpp:1304-1399, drive.cpp:1340-1345 (double-cycle), foot.cpp:520-539 (Mission_Move tag 60010), foot.cpp:589-697 (Mission_Guard tag 60040/60041/60043), foot.cpp:642-644 (Random_Animate dispatch), infantry.cpp:1742-1838 (Random_Animate tags 30001-30003), logic.cpp:285-306, mission.cpp:213-321/343-359, vessel.cpp:571-666 (double Commence at 593 and 659).
+
+**Diagnostic command:** `SCENARIO=SCG07EA START=16 END=18 DUMP_ALL=1 npx playwright test scripts/test-rng-entity-diff.ts --reporter=list`.
+
+**Session state:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=**17** (architectural blocker documented), SCG11=28, SCG13=101.
+
 ## 2026-04-21T22:15Z — SCG07EA tick 3 → 4: VESSEL CREATE_TEAM first-tick recruit delay (skipFirstAiCall)
 
 **Result:** SCG07EA first-divergence advanced 3 → **4** (+1). All 7 scenarios verified, no regressions.
