@@ -338,6 +338,20 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     const activeWeapon = entity.burstCount > 0 ? entity.weapon : selectedWeapon;
     const isSecondary = activeWeapon === entity.weapon2;
 
+    // C++ InfantryClass::Can_Fire (infantry.cpp:1636-1641) — FIRE_MOVING gate.
+    // Infantry cannot fire while IsDriving is set (actively moving between
+    // sub-cells via Start_Driver). This is an infantry-only restriction —
+    // UnitClass::Can_Fire has no IsDriving check, so vehicles fire on the
+    // move. Without this gate, TS infantry fire during HUNT/GUARD movement
+    // frames that C++ would reject with FIRE_MOVING.
+    // SCG01EA tick 80: USSR E1 in HUNT with isDriving=true fires one shot
+    // WASM never produces — the shot's invisible-bullet Coord_Scatter RNG
+    // appears 5 ticks early vs WASM's later Mission_Guard-initiated fire.
+    // C++ ref: infantry.cpp:1639 `if (IsDriving || ...) return(FIRE_MOVING);`
+    if (entity.stats.isInfantry && entity.isDriving) {
+      return;
+    }
+
     if (activeWeapon && ((isSecondary ? entity.attackCooldown2 : entity.attackCooldown) <= 0)) {
       // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) pre-fire animation gate:
       //   Tick N:  !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.

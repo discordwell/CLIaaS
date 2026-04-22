@@ -1,5 +1,35 @@
 # Session Summaries
 
+## 2026-04-22T01:15Z — SCG01 tick 80 → 87 + SCG06 tick 67 → 68: infantry FIRE_MOVING gate (C++ infantry.cpp:1639)
+
+**Result:** SCG01EA advanced 80 → **87** (+7), SCG06EA 67 → **68** (+1). All 7 scenarios verified, no regressions.
+
+| Scenario | Start | End | Δ |
+|---|---|---|---|
+| SCG01EA | 80 | 87 | +7 |
+| SCG03EA | 238 | 238 | — |
+| SCG04EA | 36 | 36 | — (architectural, deferred) |
+| SCG06EA | 67 | 68 | +1 |
+| SCG07EA | 3 | 3 | — |
+| SCG11EA | 28 | 28 | — |
+| SCG13EA | 101 | 101 | — |
+
+**Root cause:** TS infantry Firing_AI had no IsDriving gate. C++ `InfantryClass::Can_Fire` (infantry.cpp:1636-1641) returns `FIRE_MOVING` when `IsDriving || (Target_Legal(NavCom) && Doing != DO_NOTHING && !MasterDoControls[Doing].Interrupt)`. This is an infantry-only restriction — `UnitClass::Can_Fire` has no such check, so vehicles can and do fire on the move. At SCG01EA tick 80, USSR E1 @(62,53) in HUNT with isDriving=true fired M1Carbine at Greek JEEP @(63,50); invisible-weapon Coord_Scatter `Random_Pick(0,255)` was deferred to end-of-loop, consumed one RNG under lingering `_sourceTag=13051` (aircraft[51]=TRAN transport). WASM never fires that shot — same E1 fire event is Mission_Guard-driven at tick 85 (5 ticks later).
+
+**Fix:** `missionAI.ts:updateAttack` early-return when `entity.stats.isInfantry && entity.isDriving`. Placed after weapon selection but before the FireLaunch/rearm branch so no RNG is consumed.
+
+**Files:**
+- `src/EasterEgg/engine/missionAI.ts` — infantry IsDriving gate in updateAttack
+- `src/EasterEgg/__tests__/cpp-parity-scg01ea-tick-80.test.ts` — NEW (4 tests)
+
+**Tests:** 51,180 Easter Egg tests pass.
+
+**C++ refs:**
+- `infantry.cpp:1611-1644` — InfantryClass::Can_Fire
+- `infantry.cpp:1639` — IsDriving → FIRE_MOVING
+- `infantry.cpp:3580-3670` — InfantryClass::Firing_AI (enters FIRE_OK only on Can_Fire success)
+- `unit.cpp:643-687` — UnitClass::Firing_AI (no IsDriving gate → vehicles fire while driving)
+
 ## 2026-04-21T23:30Z — SCG06 tick 67 → 68: team-member retaliation delegation (C++ foot.cpp:1172)
 
 **Result:** SCG06EA first-divergence advanced 67 → **68** (+1). All 7 scenarios verified, no regressions.
