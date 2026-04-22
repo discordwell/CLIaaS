@@ -296,6 +296,48 @@ export const PCP_PATH_SHORTEN_ENABLED = true;
 export const AREA_GUARD_APPROACH_RETRY = true;
 
 /**
+ * PCP Session 3.3 — Team Start_Driver refactor gate.
+ *
+ * C++ `Team::Coordinate_Move` (team.cpp:1938) calls `Assign_Mission(MISSION_MOVE)`
+ * which queues MissionQueue. It does NOT set IsDriving directly — that flip
+ * happens inside `DriveClass::AI` → `Start_Driver` AFTER rotation completes
+ * (drive.cpp:1079-1086).
+ *
+ * TS `team.coordinateMove` (team.ts:886-928) currently sets `unit.isDriving=true`
+ * eagerly when the facing already matches the path direction — a proxy for
+ * C++'s Start_Driver success. It's a heuristic that works for 6/7 scenarios but
+ * doesn't populate `unit.path` (currently MISSING per plan §8 S3.3), leaving
+ * `updateMove`/`followTrackStep` to lazily findPath on first tick of the MOVE
+ * mission.
+ *
+ * The refactor: when flag is ON:
+ *   1. Call `findPath(unit.cell, target, ...)` and store in `unit.path` +
+ *      `pathIndex=0` at coordinateMove time (mirrors C++ Basic_Path).
+ *   2. Do NOT set `unit.isDriving=true` eagerly. The Mission.GUARD drive-in-GUARD
+ *      handler (index.ts ~4210) invokes `updateMove`, which calls
+ *      `followTrackStep`, which sets isDriving=true via C++-parity semantics.
+ *   3. `vehicleClaims` logic MUST STAY (plan §8 S3.3 explicit note) — it's
+ *      load-bearing for SCG04 tick 3 transient Basic_Path cell reservation.
+ *      When flag is ON, `vehicleClaims` still flips `prior.isDriving=false`
+ *      for the second-team case, but does NOT set `unit.isDriving=true` for
+ *      the current team.
+ *
+ * ## Rollout
+ *
+ * Session 3.3 ships the stub with the flag OFF (default). Session 3.4 flips ON
+ * only after 3.1+3.2 prove stable. If SCG04 tick-3 regresses, the rollback is:
+ * flip this flag OFF first (riskiest change of the three).
+ *
+ * ## C++ refs
+ *
+ *   team.cpp:1938      Coordinate_Move → Assign_Mission(MISSION_MOVE)
+ *   drive.cpp:1079-1086 Start_Driver returns early during rotation
+ *   drive.cpp:1304-1399 DriveClass::AI TrackNumber dispatch
+ *   foot.cpp:856-946    Basic_Path / Approach_Target pathfinding
+ */
+export const TEAM_START_DRIVER_REFACTOR = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

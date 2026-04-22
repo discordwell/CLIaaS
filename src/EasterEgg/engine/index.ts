@@ -1852,7 +1852,7 @@ export class Game {
     if (ScenarioRandom._tagLogging) {
       ScenarioRandom._sourceTag = 1; // C++ Team AI tag
     }
-    _updateAllTeams(this.waypoints, { structures: this.structures, entities: this.entities });
+    _updateAllTeams(this.waypoints, { structures: this.structures, entities: this.entities, map: this.map });
 
     // C++ terrain.cpp:497 — TerrainClass::AI on TERRAIN_MINE fires Spread_Tiberium
     // every Frame % (Rule.GrowthRate * TICKS_PER_MINUTE) == 0. Consumes 2 RNGs:

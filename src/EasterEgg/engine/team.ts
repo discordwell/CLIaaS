@@ -25,6 +25,9 @@ import { Entity, type TeamMissionEntry } from './entity';
 import { House, MAP_CELLS, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
+import { findPath } from './pathfinding';
+import type { GameMap } from './map';
+import { TEAM_START_DRIVER_REFACTOR } from './perCellProcess';
 
 /**
  * Optional context threaded through Team.ai() / coordinateMove() for a full
@@ -46,6 +49,10 @@ export interface TeamAIContext {
   /** Entities pool — used by TeamClass::Recruit (team.cpp:1180-1328) to find
    *  candidates for team membership. Passed through ai() → recruit(). */
   entities?: Entity[];
+  /** Map reference — Session 3.3 coordinateMove findPath needs it to populate
+   *  unit.path at team-move-queue time (mirrors C++ Basic_Path). Optional for
+   *  back-compat with pre-3.3 callers; when undefined, findPath is skipped. */
+  map?: GameMap;
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -891,41 +898,74 @@ export class Team {
             if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
               prior.isDriving = false;
             }
-            // C++ Start_Driver is only called from DriveClass::AI AFTER rotation
-            // completes (drive.cpp:1079-1086 Do_Turn returns early while facing
-            // mismatches target). Setting isDriving=true here eagerly blocks the
-            // Commence gate during rotation for SOLO reinforcement vehicles —
-            // Mission stays stuck in GUARD and Mission_Move jitter never fires
-            // (SCG04EA tick 15 miner MNLY). Check the facing alignment with the
-            // first cell of the path before simulating Start_Driver success.
-            // For SAME-cell competing teams, the second team's Start_Driver DOES
-            // succeed even while rotating (C++ TrackNumber assigned mid-Do_Turn),
-            // so keep isDriving=true on the second-team path (prior claim exists).
-            if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
-              unit.isDriving = true;
-            } else {
-              // First team / solo: only set isDriving=true if facing already
-              // matches the first path step direction (Start_Driver succeeded).
-              // Otherwise let Commence pop Mission=MOVE for the rotation phase.
-              const dx = Math.sign(this.target.x - unit.pos.x);
-              const dy = Math.sign(this.target.y - unit.pos.y);
-              // Facing 0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW
-              let targetFacing = unit.facing;
-              if (dx === 0 && dy < 0) targetFacing = 0;
-              else if (dx > 0 && dy < 0) targetFacing = 1;
-              else if (dx > 0 && dy === 0) targetFacing = 2;
-              else if (dx > 0 && dy > 0) targetFacing = 3;
-              else if (dx === 0 && dy > 0) targetFacing = 4;
-              else if (dx < 0 && dy > 0) targetFacing = 5;
-              else if (dx < 0 && dy === 0) targetFacing = 6;
-              else if (dx < 0 && dy < 0) targetFacing = 7;
-              if (unit.facing === targetFacing) {
-                unit.isDriving = true;
+            // Session 3.3 — TEAM_START_DRIVER_REFACTOR gates the eager-isDriving
+            // flip. When ON: populate unit.path via findPath (mirrors C++ Basic_Path)
+            // and leave isDriving=false; the Mission.GUARD drive-in-GUARD handler
+            // invokes updateMove → followTrackStep which sets isDriving=true when
+            // rotation aligns (C++ parity).
+            //
+            // When OFF (current default): keep the pre-3.3 heuristic that eagerly
+            // flips isDriving=true based on facing match (6/7-scenario heuristic).
+            // vehicleClaims prior-reset ABOVE stays in both modes — load-bearing
+            // for SCG04 tick-3 per plan §8 S3.3.
+            if (TEAM_START_DRIVER_REFACTOR) {
+              // Populate unit.path so updateMove/followTrackStep has a real path
+              // to follow (currently MISSING per plan §8 S3.3).
+              if (ctx?.map && unit.path.length === 0) {
+                const destCell = { cx: tcx, cy: tcy };
+                const path = findPath(
+                  ctx.map,
+                  unit.cell,
+                  destCell,
+                  true,
+                  unit.isNavalUnit,
+                  unit.stats.speedClass
+                );
+                if (path.length > 0) {
+                  unit.path = path;
+                  unit.pathIndex = 0;
+                }
               }
-              // Else: leave isDriving=false. Commence pops MOVE, rotation
-              // happens under Mission_Move (C++ drive.cpp:1084 Do_Turn return).
+              // Do NOT set isDriving eagerly — let DriveClass::AI equivalent
+              // (updateMove/followTrackStep via drive-in-GUARD) handle it.
+              claims?.set(claimKey, unit);
+            } else {
+              // C++ Start_Driver is only called from DriveClass::AI AFTER rotation
+              // completes (drive.cpp:1079-1086 Do_Turn returns early while facing
+              // mismatches target). Setting isDriving=true here eagerly blocks the
+              // Commence gate during rotation for SOLO reinforcement vehicles —
+              // Mission stays stuck in GUARD and Mission_Move jitter never fires
+              // (SCG04EA tick 15 miner MNLY). Check the facing alignment with the
+              // first cell of the path before simulating Start_Driver success.
+              // For SAME-cell competing teams, the second team's Start_Driver DOES
+              // succeed even while rotating (C++ TrackNumber assigned mid-Do_Turn),
+              // so keep isDriving=true on the second-team path (prior claim exists).
+              if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
+                unit.isDriving = true;
+              } else {
+                // First team / solo: only set isDriving=true if facing already
+                // matches the first path step direction (Start_Driver succeeded).
+                // Otherwise let Commence pop Mission=MOVE for the rotation phase.
+                const dx = Math.sign(this.target.x - unit.pos.x);
+                const dy = Math.sign(this.target.y - unit.pos.y);
+                // Facing 0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW
+                let targetFacing = unit.facing;
+                if (dx === 0 && dy < 0) targetFacing = 0;
+                else if (dx > 0 && dy < 0) targetFacing = 1;
+                else if (dx > 0 && dy === 0) targetFacing = 2;
+                else if (dx > 0 && dy > 0) targetFacing = 3;
+                else if (dx === 0 && dy > 0) targetFacing = 4;
+                else if (dx < 0 && dy > 0) targetFacing = 5;
+                else if (dx < 0 && dy === 0) targetFacing = 6;
+                else if (dx < 0 && dy < 0) targetFacing = 7;
+                if (unit.facing === targetFacing) {
+                  unit.isDriving = true;
+                }
+                // Else: leave isDriving=false. Commence pops MOVE, rotation
+                // happens under Mission_Move (C++ drive.cpp:1084 Do_Turn return).
+              }
+              claims?.set(claimKey, unit);
             }
-            claims?.set(claimKey, unit);
           }
         }
         finished = false;
