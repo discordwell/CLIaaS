@@ -1,5 +1,29 @@
 # Session Summaries
 
+## 2026-04-22T09:10Z — CDTimer end-of-tick decrement refactor (Approach A) — attempted & reverted
+
+**Result:** Net regression. Refactor committed (d6db5f97), deployed, Playwright verification showed 3 scenario regressions. Reverted via 4277d897; docs updated in cpp-parity-scg03ea-tick-238.test.ts (commit 62ee841d).
+
+**Change:** Moved per-entity CDTimer-semantic decrements (missionTimer, attackCooldown, attackCooldown2, idleAnimTimer, nonInterruptAnimTicks) from START → END of updateEntity. Flipped fire conditions from `<=0 after decrement` to `===0 before decrement`. Mirrors C++ Frame++ at end of Main_Loop (conquer.cpp:2542) + CDTimerClass lazy Value (ftimer.h:549-561).
+
+**Local tests passed:** all 51,253 Easter Egg tests pass (including new cpp-parity-cdtimer-end-of-tick.test.ts, 7 cases).
+
+**Playwright regressions (deployed):**
+- SCG03EA:  238 → 10  (target scenario, regressed -228 ticks)
+- SCG06EA:  76 → 11   (-65 ticks)
+- SCG07EA:  17 → 6    (-11 ticks)
+- SCG01EA/04EA/11EA/13EA: unchanged
+
+**Hypothesis:** per-entity decrement at end of each entity's updateEntity runs PROGRESSIVELY through the Logic loop. C++'s Frame++ fires ONCE at end of Main_Loop (after ALL entities). When entity[K+1] reads entity[K]'s state (target scans, pose), the observed timer-offset differs from WASM. This intra-loop coupling produces earlier-tick regressions.
+
+**Path forward:** a batched end-of-all-entities decrement pass (separate data structure or post-loop walk) would match C++ Frame++ placement semantically. Not attempted this session — the refactor is correctly structured at the per-entity unit-test level; the cross-entity coupling is the subtlety.
+
+**Files touched (reverted on main):** src/EasterEgg/engine/index.ts (per-entity decrement placement + fire conditions), 4 test updates, 1 new test (cpp-parity-cdtimer-end-of-tick.test.ts).
+
+**Files kept on main:** cpp-parity-scg03ea-tick-238.test.ts — now documents both the original divergence AND the 2026-04-22 attempted-refactor outcome.
+
+**Session state (unchanged):** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=28, SCG13=101.
+
 ## 2026-04-22T08:30Z — SCG01EA tick-87 invisible-bullet scatter investigation (prior Logic-idx theory refuted)
 
 **Result:** No code change. Prior agent's "WASM's invisible bullet idx submission ordering" theory refuted by static C++ trace. Real root cause is upstream from the scatter flush. SCG01=87 Δ=-1 unchanged.
