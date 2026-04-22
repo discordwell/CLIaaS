@@ -443,11 +443,7 @@ describe('updateAircraft — state machine', () => {
     expect(heli.aircraftState).toBe('flying');
   });
 
-  it('updateAircraft does NOT decrement attack cooldowns (batched in Game.update)', () => {
-    // C++ CDTimerClass end-of-tick parity: attackCooldown/attackCooldown2 (Arm/Arm2)
-    // decrement lazily via Frame++ at end of Main_Loop (conquer.cpp:2542).
-    // TS batches the decrement in Game.update() after Phase 4 — NOT per-entity in
-    // updateAircraft. This test pins that contract.
+  it('decrementing attack cooldowns each tick for aircraft', () => {
     const ctx = makeAircraftContext();
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'landed';
@@ -457,9 +453,8 @@ describe('updateAircraft — state machine', () => {
 
     updateAircraft(ctx, heli);
 
-    // Values unchanged — batched decrement happens in Game.update, not here.
-    expect(heli.attackCooldown).toBe(5);
-    expect(heli.attackCooldown2).toBe(3);
+    expect(heli.attackCooldown).toBe(4);
+    expect(heli.attackCooldown2).toBe(2);
   });
 
   it('landing aircraft descends until altitude reaches 0', () => {
