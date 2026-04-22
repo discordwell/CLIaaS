@@ -1442,6 +1442,40 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFired = true): void {
   entity.animState = AnimState.IDLE;
 
+  // C++ infantry.cpp:1237 / unit.cpp:425 — Firing_AI runs EVERY tick on EVERY
+  // mission, not just at MissionClass::AI dispatch ticks. The pre-existing
+  // updateGuard handler mirrors this (missionAI.ts:1164-1176) but
+  // updateAreaGuard previously omitted it — the AREA_GUARD case in index.ts
+  // (~4341) had no analogous Firing_AI hook either, so a Mission_Guard_Area
+  // unit that path-shorten'd into firing range sat idle until the next
+  // Approach_Target timer fire (~70 ticks later).
+  //
+  // SCG06EA tick 76 residual: USSR E1[24] @(24,67) walks toward Greek E1
+  // @(20,64). Path-shorten clears moveTarget at the first in-range cell-
+  // arrival but the unit then waits for the Mission_Guard_Area timer to
+  // re-fire — never starting Fire_At in the gap. WASM fires the bullet[115]
+  // Coord_Scatter at tick 76 because C++ Firing_AI runs every tick.
+  // Mirror it here with the same temporary-ATTACK swap pattern updateGuard
+  // uses (so updateAttack's Fire_At path runs without leaving Mission=ATTACK
+  // post-call).
+  if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0) {
+    if (entity.inRange(entity.target)) {
+      entity.mission = Mission.ATTACK;
+      updateAttack(ctx, entity);
+      if ((entity.mission as Mission) === Mission.ATTACK) {
+        entity.mission = Mission.AREA_GUARD;
+      }
+      // C++ Firing_AI does NOT early-return; it falls through to the rest of
+      // the mission handler. But once a fire animation has been initiated
+      // (firePrepActive set), Movement_AI's `!IsFiring` gate suppresses
+      // further movement (infantry.cpp:3790). The walk loop in index.ts
+      // checks `entity.target?.alive && !entity.inRange(entity.target) &&
+      // entity.moveTarget` — if target is in range, walk loop is a no-op,
+      // matching the C++ IsFiring behavior implicitly.
+      return;
+    }
+  }
+
   // C++ MissionClass::Timer gates when Mission_Guard_Area fires.
   // Timer and jitter handled by caller (index.ts) via entity.missionTimer.
   if (!timerFired) return;

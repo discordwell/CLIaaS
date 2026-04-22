@@ -218,6 +218,96 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
     expect(approachCalled).toBe(false);
   });
 
+  it('Firing_AI runs every tick on AREA_GUARD when target is in range (C++ infantry.cpp:1237)', () => {
+    // SCG06EA tick 76 residual fix: C++ InfantryClass::AI calls Firing_AI()
+    // unconditionally each tick (infantry.cpp:1237) before MissionClass::AI
+    // dispatches to the per-mission handler. updateAreaGuard previously had
+    // no Firing_AI hook, so a Mission_Guard_Area unit that path-shorten'd
+    // into firing range sat idle for ~70 ticks until the next timer fire.
+    //
+    // After the fix: when target is alive + in range + Arm==0,
+    // updateAreaGuard temporarily switches mission to ATTACK to dispatch
+    // updateAttack's Fire_At path, then restores AREA_GUARD. The pattern
+    // mirrors updateGuard (missionAI.ts:1164-1176) for parity.
+    const guard = makeEntity(UnitType.I_E1, House.USSR, 22, 65);
+    guard.mission = Mission.AREA_GUARD;
+    guard.guardOrigin = { x: 24 * CELL_SIZE + CELL_SIZE/2, y: 67 * CELL_SIZE + CELL_SIZE/2 };
+    guard.attackCooldown = 0; // Arm == 0 — weapon ready
+
+    const greek = makeEntity(UnitType.I_E1, House.Greece, 20, 64);
+    guard.target = greek;
+
+    let attackCalled = false;
+    const ctx = makeMockCtx({
+      entities: [guard, greek],
+      // Mock updateAttack-equivalent — when Mission flips to ATTACK with target,
+      // mark the call. This proves updateAreaGuard delegated to the fire path.
+      // NOTE: missionAI's updateAttack is called directly (not via ctx), so
+      // we can only observe via firePrepActive after the call.
+    });
+
+    // Confirm target is in range before invocation.
+    expect(guard.inRange(greek)).toBe(true);
+
+    updateAreaGuard(ctx, guard, /* timerFired */ false);
+
+    // After Firing_AI runs, the entity should have started the pre-fire
+    // animation (firePrepActive=true) OR fired immediately, depending on
+    // the FireLaunch stage progression. Either way, mission is restored
+    // to AREA_GUARD (not left as ATTACK).
+    expect(guard.mission).toBe(Mission.AREA_GUARD);
+    // updateAttack sets firePrepActive when starting the fire animation OR
+    // launches an immediate bullet. Verify SOME fire-related state changed.
+    const fireState = guard.firePrepActive || guard.firePrepStage > 0 || guard.attackCooldown > 0;
+    expect(fireState, 'Firing_AI should have triggered fire prep or fire').toBe(true);
+    // suppress unused-var warning
+    void attackCalled;
+  });
+
+  it('does NOT trigger Firing_AI when target is out of range', () => {
+    // Sanity check: the Firing_AI gate's `entity.inRange(target)` clause
+    // must short-circuit when the target is too far away. Otherwise the
+    // unit would attempt to fire from outside weapon range.
+    const guard = makeEntity(UnitType.I_E1, House.USSR, 24, 67);
+    guard.mission = Mission.AREA_GUARD;
+    guard.guardOrigin = { x: guard.pos.x, y: guard.pos.y };
+    guard.attackCooldown = 0;
+
+    const greek = makeEntity(UnitType.I_E1, House.Greece, 20, 64);
+    guard.target = greek;
+
+    expect(guard.inRange(greek)).toBe(false);
+
+    const before = { fp: guard.firePrepActive, stage: guard.firePrepStage, cd: guard.attackCooldown };
+    updateAreaGuard(makeMockCtx({ entities: [guard, greek] }), guard, /* timerFired */ false);
+    // No fire state change.
+    expect(guard.firePrepActive).toBe(before.fp);
+    expect(guard.firePrepStage).toBe(before.stage);
+    expect(guard.attackCooldown).toBe(before.cd);
+  });
+
+  it('does NOT trigger Firing_AI when attackCooldown > 0 (Arm not yet ready)', () => {
+    // C++ Firing_AI gates on Arm == 0. An entity that just fired has Arm
+    // counting down; Firing_AI must wait until Arm==0 to fire again.
+    const guard = makeEntity(UnitType.I_E1, House.USSR, 22, 65);
+    guard.mission = Mission.AREA_GUARD;
+    guard.guardOrigin = { x: 24 * CELL_SIZE + CELL_SIZE/2, y: 67 * CELL_SIZE + CELL_SIZE/2 };
+    guard.attackCooldown = 5; // weapon on cooldown
+
+    const greek = makeEntity(UnitType.I_E1, House.Greece, 20, 64);
+    guard.target = greek;
+
+    expect(guard.inRange(greek)).toBe(true);
+
+    const beforeCd = guard.attackCooldown;
+    const beforeFp = guard.firePrepActive;
+    updateAreaGuard(makeMockCtx({ entities: [guard, greek] }), guard, /* timerFired */ false);
+    // attackCooldown unchanged (Firing_AI didn't fire and reset it; the
+    // engine's per-tick decrement happens in updateEntity, not here).
+    expect(guard.attackCooldown).toBe(beforeCd);
+    expect(guard.firePrepActive).toBe(beforeFp);
+  });
+
   it('initial position (24,67) → target (20,64) is out of weapon range (3 cells)', () => {
     // Precondition: confirm the SCG06EA init geometry requires an approach.
     // C++ octagonal distance (coord.cpp:124-136): max(|dx|,|dy|) + min/2
