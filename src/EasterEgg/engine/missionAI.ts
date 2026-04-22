@@ -21,6 +21,7 @@ import { findPath } from './pathfinding';
 import { canTargetNaval } from './aircraft';
 import { combatAnim } from './combat';
 import { ScenarioRandom } from './random';
+import { AREA_GUARD_APPROACH_RETRY } from './perCellProcess';
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -1557,8 +1558,26 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     // range 3). C++ Approach_Target sets NavCom → unit gradually closes distance; first
     // cell change at tick 18, reaches firing position by tick ~76 and fires bullet[115].
     // Without this call TS units sat static with a valid-but-out-of-range target forever.
-    if (!entity.inRange(bestTarget) && !entity.moveTarget && ctx.approachTarget) {
-      ctx.approachTarget(entity);
+    //
+    // Session 3.2 — `AREA_GUARD_APPROACH_RETRY` ON: also re-fire when unit is
+    // already moving (moveTarget set) if cell has changed since last approach.
+    // C++ re-calls Approach_Target every timer fire regardless of moveTarget,
+    // re-picking the approach cell as both unit and target move. Cell-change
+    // gate is TS-specific (plan §8 S3.2) to prevent per-tick findPath spam.
+    if (!entity.inRange(bestTarget) && ctx.approachTarget) {
+      const cellKey = entity.cell.cy * 256 + entity.cell.cx;
+      if (!entity.moveTarget) {
+        ctx.approachTarget(entity);
+        entity._lastAreaGuardApproachCellKey = cellKey;
+      } else if (AREA_GUARD_APPROACH_RETRY
+                 && hadTargetAtEntry
+                 && entity._lastAreaGuardApproachCellKey !== cellKey) {
+        // C++ foot.cpp:1082-1084 per-timer re-fire. Unit has moveTarget but
+        // has crossed a cell boundary since the previous approach call —
+        // re-pick the approach cell using the current target position.
+        ctx.approachTarget(entity);
+        entity._lastAreaGuardApproachCellKey = cellKey;
+      }
     }
     return;
   }

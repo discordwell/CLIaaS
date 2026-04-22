@@ -253,6 +253,49 @@ export const FOOT_PER_CELL_ENABLED = true;
 export const PCP_PATH_SHORTEN_ENABLED = true;
 
 /**
+ * PCP Session 3.2 — Mission_Guard_Area Approach_Target re-fire gate.
+ *
+ * C++ foot.cpp:1082-1084: every Mission_Guard_Area timer cycle when
+ * `Target_Legal(TarCom)`, call `Approach_Target()`. This re-assigns NavCom
+ * toward the current target EVEN when moveTarget is already set (drifting the
+ * approach cell as the target moves / as the unit moves).
+ *
+ * TS `updateAreaGuard` currently calls `approachTarget` only when the scan
+ * finds a target AND `!entity.moveTarget`. This misses:
+ *   1. `hadTargetAtEntry && !scanFound`: target still alive but out of scan
+ *      range this tick — C++ would still fire Approach_Target on the existing
+ *      TarCom. Rare in practice (TarCom usually stays in scan range while the
+ *      unit is closing distance) but possible at the scan radius edge.
+ *   2. `hadTargetAtEntry && scanFound && moveTarget`: unit is already moving
+ *      toward an approach cell but target has moved — C++ re-picks approach
+ *      cell each timer. TS sticks with the stale cell forever.
+ *
+ * Both cases contribute to SCG06 tick 76: USSR E1 at (24,67) closes toward
+ * Greek E1 at (20,64). At cell boundaries, moveTarget stays stale until the
+ * next timer fire (up to 70+ ticks apart at Area Guard Normal_Delay=70 +
+ * Random_Pick(1,5)). The path-shorten from 3.1 clears moveTarget on cell
+ * arrival with in-range, but when still out of range the unit may stop
+ * moving (end of path) without re-calling approachTarget.
+ *
+ * ## Gate-by-cell-change rationale
+ *
+ * C++ re-calls Approach_Target every timer fire without regard to cell
+ * identity. TS could theoretically match that, but:
+ *   - approachTarget in TS calls findPath (expensive) and can produce
+ *     different results than C++'s Basic_Path due to pathfinder nuances.
+ *   - Re-firing every timer even when nothing has changed (cell, target pos)
+ *     is potentially a cascade risk — so we gate by `entity.cell` change
+ *     since last approach call. This is TS-specific guard noted in the plan
+ *     (§8 S3.2 "Gate by cell-change since last approach call").
+ *
+ * Session 3.2 ships with the flag ON (initial infrastructure was gated OFF
+ * here so the re-fire can be backed out by flipping the flag if regressions
+ * appear). Tracked via `_lastAreaGuardApproachCellKey` on Entity (reset
+ * never — persists across ticks).
+ */
+export const AREA_GUARD_APPROACH_RETRY = true;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

@@ -336,6 +336,10 @@ export class Entity {
   /** Per-boundary Commence dedup. Keyed `${trackIndex}-${pathIndex}` at moment
    *  of PCP_END call-site. Plan §6 MCV-157 double-fire nuance. */
   _commenceFiredBoundaries: Set<string> = new Set();
+  /** Session 3.2 — cell-key of last `approachTarget` call in AREA_GUARD.
+   *  Cell-change gate prevents infinite re-pathfinding per tick when
+   *  Mission_Guard_Area retry fires. `-1` = no prior approach. */
+  _lastAreaGuardApproachCellKey = -1;
 
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
