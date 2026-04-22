@@ -4157,15 +4157,20 @@ export class Game {
               // Mirrors C++ infantry.cpp:3997. Only fires when FOOT_PER_CELL_ENABLED
               // is true (Session 2.3). In HUNT, target is still live when entering
               // the final cell-in-range — Enter_Idle_Mode's TarCom-clear guard
-              // blocks the idle branch, but the hook still runs in case a future
-              // path-shorten or Commence pop is needed.
+              // blocks the idle branch. Session 3.1: path-shorten sub-case fires
+              // here when target is in range + mission is HUNT/AREA_GUARD/ATTACK —
+              // clears moveTarget/path so Firing_AI engages next tick.
               if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+                const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+                const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
                 footPerCellProcess(
                   entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
                   PCPType.PCP_END,
                   {
-                    hasLegalTarCom: !!(entity.target?.alive) || entity.targetStructure != null,
+                    hasLegalTarCom: liveTar,
                     inRadioContact: false, // TS infantry have no radio handshake
+                    pathShortenEligible: true, // Mission.HUNT ∈ {HUNT, AREA_GUARD, ATTACK, RESCUE}
+                    targetInRange: inRangeNow,
                   },
                   { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
                 );
@@ -4178,14 +4183,11 @@ export class Game {
               entity.pathIndex = 0;
             }
           }
-          // C++ foot.cpp:1392-1403 Per_Cell_Process: when a HUNT/ATTACK infantry
-          // enters a cell within weapon range, clear NavCom and stop moving.
-          // This prevents walking past the range boundary to the approach cell.
-          if (entity.moveTarget && entity.target?.alive && entity.inRange(entity.target)) {
-            entity.moveTarget = null;
-            entity.path = [];
-            entity.pathIndex = 0;
-          }
+          // C++ foot.cpp:1471-1483 path-shorten — handled in footPerCellProcess
+          // at cell-arrival (above, PCP Session 3.1). The HUNT-only inline version
+          // that used to live here is now covered globally by the PCP hook for
+          // HUNT + AREA_GUARD + ATTACK, firing on every cell-arrival regardless
+          // of mission handler.
         }
         break;
       case Mission.GUARD:
@@ -4311,14 +4313,19 @@ export class Game {
                 // above. TarCom is likely clear here (Mission_Guard_Area scans and
                 // sets TarCom only when a target is in sight), so Enter_Idle_Mode
                 // may queue MISSION_GUARD_AREA on the final cell-arrival if no
-                // enemies remain in sight.
+                // enemies remain in sight. Session 3.1: path-shorten sub-case fires
+                // when target enters range mid-patrol (SCG06 tick 76 load-bearing).
                 if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+                  const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+                  const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
                   footPerCellProcess(
                     entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
                     PCPType.PCP_END,
                     {
-                      hasLegalTarCom: !!(entity.target?.alive) || entity.targetStructure != null,
+                      hasLegalTarCom: liveTar,
                       inRadioContact: false,
+                      pathShortenEligible: true, // Mission.AREA_GUARD ∈ attack-type
+                      targetInRange: inRangeNow,
                     },
                     { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
                   );
@@ -5710,12 +5717,23 @@ export class Game {
           // to GUARD with Timer=0 — one tick earlier than the current Mission.MOVE
           // handler's missionTimerFired path (which matches WASM behavior).
           if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+            // C++ foot.cpp:1479 — path-shorten applies in attack-type missions only.
+            // At this updateMove site mission is typically MOVE; include the whole
+            // set here for correctness so cross-mission callers (e.g. updateMove
+            // called from Mission.GUARD drive-in-GUARD) behave consistently.
+            const m = entity.mission as Mission;
+            const pathShortenEligible = m === Mission.HUNT || m === Mission.AREA_GUARD
+                                        || m === Mission.ATTACK;
+            const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+            const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
             footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
-                hasLegalTarCom: !!(entity.target?.alive) || entity.targetStructure != null,
+                hasLegalTarCom: liveTar,
                 inRadioContact: false,
+                pathShortenEligible,
+                targetInRange: inRangeNow,
               },
               { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
             );

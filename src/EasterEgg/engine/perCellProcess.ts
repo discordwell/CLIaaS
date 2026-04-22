@@ -237,15 +237,20 @@ export const FOOT_PER_CELL_ENABLED = true;
  * + `Path[0] = FACING_NONE` — stopping further pathwalk and letting Firing_AI
  * engage the target on the next tick.
  *
- * TS already has an inline version of this at `index.ts:4167-4171` (HUNT only).
- * Session 3 will move it into `footPerCellProcess` so AREA_GUARD and ATTACK
- * also benefit — which is the load-bearing piece for SCG06 tick 76.
+ * TS previously had an inline version of this at `index.ts:4184-4188` (HUNT only).
+ * Session 3.1 moves it into `footPerCellProcess` so AREA_GUARD + ATTACK + RESCUE
+ * also benefit — the load-bearing piece for SCG06 tick 76 where a USSR E1 in
+ * AREA_GUARD walking toward a Greek E1 target needs to stop moving the instant
+ * the target enters weapon range (C++ stops at cell-arrival, TS was walking past
+ * the range boundary to the approach cell).
  *
- * Kept OFF here so Session 2 can land the Enter_Idle_Mode branch in
- * isolation (the path-shorten sub-case has a HIGH-risk cascade profile of
- * its own and is out of scope for Session 2).
+ * The caller supplies `pathShortenEligible` (mission ∈ {HUNT, AREA_GUARD, ATTACK,
+ * RESCUE}) and `targetInRange` (inRange check on live TarCom) via ctx so this
+ * module stays loosely typed. When ON, the sub-case fires before Enter_Idle_Mode
+ * so NavCom is cleared prior to the four-guard check — but in practice the live
+ * target means TarCom guard still fails and Enter_Idle_Mode is skipped anyway.
  */
-export const PCP_PATH_SHORTEN_ENABLED = false;
+export const PCP_PATH_SHORTEN_ENABLED = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose
@@ -474,7 +479,23 @@ export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPRe
 export function footPerCellProcess<M>(
   entity: FootPCPEntity<M>,
   why: PCPType,
-  ctx: { hasLegalTarCom: boolean; inRadioContact: boolean },
+  ctx: {
+    hasLegalTarCom: boolean;
+    inRadioContact: boolean;
+    /**
+     * Session 3.1 — whether the current mission is one of C++'s attack-type
+     * missions {RESCUE, GUARD_AREA, ATTACK, HUNT} (foot.cpp:1479). Callers that
+     * predate Session 3 may omit; defaults to `false` (no path-shorten).
+     */
+    pathShortenEligible?: boolean;
+    /**
+     * Session 3.1 — whether the live TarCom target is within primary-weapon
+     * range. C++ uses `In_Range(TarCom, primary)` with a Likely_Coord adjustment
+     * for moving Foot targets (foot.cpp:1473-1477). Callers compute this via
+     * `entity.inRange(entity.target)` or similar.
+     */
+    targetInRange?: boolean;
+  },
   missions: EnterIdleModeOptions<M>
 ): PCPResult {
   const result: PCPResult = { navComCleared: false, commenceFired: false };
@@ -486,22 +507,26 @@ export function footPerCellProcess<M>(
   // Master gate — Session 2.1 ships OFF; Session 2.3 flips ON after wiring.
   if (!FOOT_PER_CELL_ENABLED) return result;
 
-  // ---- 1. Path-shorten (foot.cpp:1471-1483) — Session 3, gated separately ----
+  // ---- 1. Path-shorten (foot.cpp:1471-1483) — Session 3.1 ----
   //
-  // C++ checks `Target_Legal(TarCom)` and weapon range of primary weapon. If
-  // the target is in range AND mission is attack-type, `Assign_Destination(TARGET_NONE)`
-  // + `Path[0] = FACING_NONE`.
+  // C++ checks `Target_Legal(TarCom)` + weapon range of primary weapon + mission
+  // ∈ { RESCUE, GUARD_AREA, ATTACK, HUNT }. If ALL hold:
+  //   Assign_Destination(TARGET_NONE); Path[0] = FACING_NONE;
   //
-  // The caller supplies `hasLegalTarCom` because we don't import Entity here.
-  // Range + mission check are deferred to Session 3's wiring (the caller will
-  // pass `pathShortenEligible` in a future ctx extension; for now the
-  // sub-case is a no-op).
-  if (PCP_PATH_SHORTEN_ENABLED && ctx.hasLegalTarCom) {
-    // TODO(Session 3): port foot.cpp:1471-1483 here. Requires:
-    //   - primary weapon lookup (What_Weapon_Should_I_Use)
-    //   - In_Range(TarCom, primary) on FootClass target Likely_Coord
-    //   - mission ∈ { RESCUE, GUARD_AREA, ATTACK, HUNT }
-    // Kept as a stub so Session 3 can land without re-visiting the gate design.
+  // TS: clear moveTarget + path + pathIndex. This stops further pathwalk and
+  // lets Firing_AI engage the target on the next tick. The caller supplies all
+  // three checks as pre-computed ctx booleans (module stays loose-typed).
+  //
+  // `navComCleared` is set so callers can short-circuit subsequent movement
+  // this tick (mirrors the `unitPerCellProcess` NavCom-at-dest semantics).
+  if (PCP_PATH_SHORTEN_ENABLED
+      && ctx.hasLegalTarCom
+      && ctx.pathShortenEligible === true
+      && ctx.targetInRange === true) {
+    entity.moveTarget = null;
+    entity.path = [];
+    entity.pathIndex = 0;
+    result.navComCleared = true;
   }
 
   // ---- 2. Enter_Idle_Mode (infantry.cpp:911) ----
