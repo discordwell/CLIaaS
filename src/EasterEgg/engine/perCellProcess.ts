@@ -413,6 +413,119 @@ export const TEAM_START_DRIVER_REFACTOR = false;
 export const MISSION_MOVE_PATH_FAILURE = true;
 
 /**
+ * PCP Session 4 — InfantryClass::Movement_AI MOVE+!NavCom top-of-handler
+ * Enter_Idle_Mode guard.
+ *
+ * ## C++ reference
+ *
+ * `InfantryClass::Movement_AI` opens (infantry.cpp:3786-3788) with:
+ *
+ *   if (Mission == MISSION_MOVE && !Target_Legal(NavCom)) {
+ *       Enter_Idle_Mode();
+ *   }
+ *
+ * This is a FAILSAFE guard that runs at the very top of Movement_AI BEFORE
+ * Path/Start_Driver/Per_Cell_Process. It catches the case where Mission has
+ * been transitioned to MOVE (typically via pre-Commence at line 1210 popping
+ * `MissionQueue=MOVE`) but `NavCom` is legal-less — either never assigned,
+ * cleared by a prior Movement_AI PCP NavCom-match branch (line 4003-4006),
+ * or cleared by a Basic_Path-close-enough short-circuit (line 3866, 3873).
+ *
+ * ## SCG13EA tick-99 divergence (the true first-divergence root cause)
+ *
+ * Prior investigation (`cpp-parity-scg13ea-tick-101-fix.test.ts`, Session 3.5
+ * `footPerCellProcess` wiring + `MISSION_MOVE_PATH_FAILURE` short-circuit
+ * both landed but neither advanced SCG13 past tick 101) concluded the
+ * divergence is firmly at **tick 99** not tick 100 or 101.
+ *
+ * The E1 USSR patrol infantry (WASM logic[153], TS id=109) at cell (61,67):
+ *   - End-of-tick-98: both engines GUARD with a pending Timer countdown.
+ *   - Tick 99: team AI phase Coordinate_Patrol re-picks the next waypoint,
+ *     queues MissionQueue=MOVE, and assigns NavCom toward cell (61,79).
+ *   - Tick 99 object-AI phase: FootClass::AI → MissionClass::AI Commence
+ *     pops MOVE → Mission=MOVE, Timer=0. InfantryClass::Movement_AI runs.
+ *   - **Line 3786-3788 fires in WASM**: `Mission==MOVE && !Target_Legal(NavCom)`
+ *     → Enter_Idle_Mode → order=GUARD (NavCom and TarCom both clear) →
+ *     Assign_Mission(GUARD) → MissionQueue=GUARD.
+ *   - End-of-tick-99 WASM state: Mission=MOVE, Timer=0, MissionQueue=GUARD.
+ *   - Tick 100: Commence pops GUARD → Mission=GUARD, Timer=0. Mission_Guard
+ *     runs at tick 101, fires tag-60043 Arm_Delay Random_Pick(0,2).
+ *
+ * TS never clears NavCom between Coordinate_Patrol (which sets moveTarget)
+ * and the object-AI Mission.MOVE handler, so `Target_Legal(NavCom)` is
+ * always true in this sequence. The line 3786 guard never fires, the unit
+ * stays in MOVE mission, and the 60043 RNG call is missing at tick 101.
+ *
+ * ## Why this is NOT redundant with existing guards
+ *
+ *   1. `updateMove` at `index.ts:5382` — only fires when BOTH `moveTarget`
+ *      is null AND `path.length === 0`. C++ line 3786 only requires
+ *      `!Target_Legal(NavCom)` (moveTarget null).
+ *   2. `footPerCellProcess` — fires at cell-arrival (post-`moveToward` snap).
+ *      Does NOT fire at Movement_AI entry before path-walking begins.
+ *   3. `MISSION_MOVE_PATH_FAILURE` — fires when `missionTimerFired` AND
+ *      path-is-blocked AND findPath-refresh-fails. Requires 3 stacked
+ *      conditions vs C++'s single NavCom check.
+ *   4. Mission.MOVE case `!moveTarget && !isDriving && missionQueue===null`
+ *      at `index.ts:4153-4155` — currently sets `Mission=GUARD, Timer=0`
+ *      DIRECTLY, not via queue+Commence. Does NOT match C++ Enter_Idle_Mode
+ *      semantics (which queue GUARD, letting the next Commence pop).
+ *
+ * None of these fire when TS's moveTarget is set (via Coordinate_Patrol's
+ * `unit.moveTarget = ...` at team.ts:1088 or :1113) but WASM's NavCom
+ * would have been implicitly cleared by a chain that TS doesn't model.
+ *
+ * ## Gate rationale
+ *
+ * Shipping **OFF** by default. Flipping this guard ON is cross-cutting:
+ *   - Every tick for every infantry in MOVE mission, the guard runs at the
+ *     top of `updateMove`. If NavCom/moveTarget is missing for ANY reason
+ *     (pathfinder refresh in-progress, coord queued but waypoint not yet
+ *     assigned, transport-unload race), the guard queues GUARD prematurely.
+ *   - SCG01/03/06/07 patrol teams depend on Mission_Move firing 60010 jitter
+ *     on the tick after Commence pop — if the guard queues GUARD before the
+ *     Mission_Move handler dispatches on the same tick, the jitter is
+ *     missed and those scenarios regress (cf. prior 4a7ef2aa cascade).
+ *
+ * When flipped ON (a future session 4.1 or later), the guard fires only
+ * when ALL of:
+ *   1. `entity.stats.isInfantry` (vehicles go through UnitClass::AI, different Commence path).
+ *   2. `entity.mission === Mission.MOVE` (exact C++ Mission==MOVE match).
+ *   3. `entity.moveTarget === null` (C++ !Target_Legal(NavCom)).
+ *   4. NOT `fromGuardDrive` (drives-in-GUARD path should not re-queue).
+ *
+ * Enter_Idle_Mode equivalent: queue GUARD (or AREA_GUARD when `guardOrigin`
+ * is set), leave `missionQueue = GUARD`, do NOT reset missionTimer or
+ * Mission. The post-dispatch Commence block at `index.ts:~4380` pops the
+ * queue same-tick, matching WASM's `Commence()` call at `infantry.cpp:1210`.
+ *
+ * ## Regression acceptance criteria
+ *
+ * Before flipping ON:
+ *   - Confirm SCG01 tick 87, SCG03 tick 247, SCG06 tick 66, SCG07 tick 17,
+ *     SCG11 tick 28 all still pass the 500-tick first-divergence run.
+ *   - Confirm SCG04 tick 36 behavior is unchanged (vehicle MCV, different
+ *     code path — but a prophylactic check is cheap).
+ *   - Confirm SCG13 advances past tick 101.
+ *
+ * ## C++ refs
+ *
+ *   infantry.cpp:3786-3788  Movement_AI top-of-handler guard (THIS port)
+ *   infantry.cpp:1663-1721  Enter_Idle_Mode (GUARD vs GUARD_AREA)
+ *   infantry.cpp:1208-1211  Pre-Commence on !IsDriving && idle
+ *   foot.cpp:520-540        Mission_Move top-of-handler guard (adjacent case)
+ *   mission.cpp:343-359     MissionClass::Commence
+ *   team.cpp:1874-2008      Coordinate_Move (queues MOVE, assigns NavCom)
+ *
+ * ## TS refs
+ *
+ *   src/EasterEgg/engine/team.ts:1083-1114   coordinatePatrol infantry branch
+ *   src/EasterEgg/engine/index.ts:5358-5386  updateMove entry
+ *   src/EasterEgg/engine/index.ts:4041-4160  Mission.MOVE case handler
+ */
+export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

@@ -220,7 +220,7 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE } from './perCellProcess';
+import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD } from './perCellProcess';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -5366,6 +5366,33 @@ export class Game {
     if (entity.stats.isVessel && entity.isTransport && entity.doorOpen) {
       entity.animState = AnimState.IDLE;
       return;
+    }
+
+    // PCP Session 4 — InfantryClass::Movement_AI top-of-handler Enter_Idle_Mode
+    // guard. Mirrors C++ infantry.cpp:3786-3788:
+    //
+    //   if (Mission == MISSION_MOVE && !Target_Legal(NavCom)) Enter_Idle_Mode();
+    //
+    // True SCG13EA tick-99 first-divergence root cause per
+    // `cpp-parity-scg13ea-tick-99-pcp.test.ts`. Gated behind
+    // `MOVEMENT_AI_MOVE_NAVCOM_GUARD` (OFF by default) — see the flag
+    // docstring in `perCellProcess.ts` for the cascade risk and rollout plan.
+    //
+    // When ON, queues GUARD (or AREA_GUARD when guardOrigin is set) via
+    // missionQueue — the post-dispatch Commence block at ~index.ts:4380
+    // pops same-tick on infantry, matching WASM's Commence at
+    // infantry.cpp:1210. No RNG consumed.
+    if (MOVEMENT_AI_MOVE_NAVCOM_GUARD
+        && !fromGuardDrive
+        && entity.stats.isInfantry
+        && (entity.mission as Mission) === Mission.MOVE
+        && entity.moveTarget === null) {
+      entity.missionQueue = entity.guardOrigin != null
+        ? Mission.AREA_GUARD
+        : Mission.GUARD;
+      // Do NOT reset missionTimer or clear path here — Enter_Idle_Mode in C++
+      // only calls Assign_Mission(order). Timer=0 fires via the subsequent
+      // Commence() pop in the same tick.
     }
 
     // C++ drive.cpp:1376 parity: when DriveClass::AI runs in Mission==GUARD
