@@ -190,6 +190,64 @@ export const PER_CELL_COMMENCE_ENABLED = true;
 export const PER_CELL_TRACK_JUMP_ENABLED = true;
 
 /**
+ * PCP Session 2 — Infantry cell-arrival `Per_Cell_Process(PCP_END)`.
+ *
+ * C++ infantry.cpp:3992-4010 triggers `Per_Cell_Process(PCP_END)` at
+ * `Distance(Head_To_Coord()) < 0x0010` — i.e. when an infantry arrives at
+ * the center of a cell. The PCP chain then runs (in order):
+ *   1. FootClass::Per_Cell_Process path-shorten (foot.cpp:1471-1483) — if a
+ *      target is in weapon range and mission is RESCUE/GUARD_AREA/ATTACK/HUNT,
+ *      clear NavCom + zero Path[0] so the unit stops and engages.
+ *   2. InfantryClass::Per_Cell_Process Enter_Idle_Mode probe
+ *      (infantry.cpp:911) — when the FOUR guards hold:
+ *        - `MissionQueue == MISSION_NONE`
+ *        - `!Target_Legal(NavCom)`   (moveTarget === null)
+ *        - `!Target_Legal(TarCom)`   (target === null && targetStructure === null)
+ *        - `!In_Radio_Contact()`     (TS infantry have no radio — DROP and DOCUMENT)
+ *      → call `Enter_Idle_Mode()` which sets `MissionQueue = MISSION_GUARD` (or
+ *      `MISSION_GUARD_AREA` when a guard origin is set). NOT `Mission = GUARD`.
+ *   3. Commence() (infantry.cpp:914) — pops MissionQueue → Mission + Timer=0.
+ *
+ * Both step (2)-assigned queue AND any pre-existing `MissionQueue` (e.g.
+ * `Coordinate_Move` queued a MOVE) are popped by the same Commence call at
+ * step (3). The next tick's `MissionClass::AI` fires the new handler.
+ *
+ * ## Gate rationale
+ *
+ * A prior narrow port of Enter_Idle_Mode cascaded SCG01/03/06/07 (likely
+ * dropped one of the four guards — see plan §8 S2.3 note). All four MUST
+ * hold, and when the `In_Radio_Contact` check is absent, it is documented
+ * explicitly here as a TS-always-false simplification.
+ *
+ * Session 2.1 ships the stub with `FOOT_PER_CELL_ENABLED=false` — wires the
+ * hook but does NOT alter behavior. Session 2.3 flips ON after the
+ * cell-arrival sites are wired (Session 2.2) so the activation is atomic.
+ *
+ * Session 3 will enable the path-shorten sub-case via a separate
+ * `PCP_PATH_SHORTEN_ENABLED` flag (kept off here for Session 2 isolation).
+ */
+export const FOOT_PER_CELL_ENABLED = false;
+
+/**
+ * PCP Session 3 — FootClass path-shorten when target is in range.
+ *
+ * C++ foot.cpp:1471-1483: at every PCP_END for a foot, if `Target_Legal(TarCom)`
+ * and the unit is on an attack-type mission (RESCUE, GUARD_AREA, ATTACK, HUNT)
+ * and the target is within primary-weapon range, `Assign_Destination(TARGET_NONE)`
+ * + `Path[0] = FACING_NONE` — stopping further pathwalk and letting Firing_AI
+ * engage the target on the next tick.
+ *
+ * TS already has an inline version of this at `index.ts:4167-4171` (HUNT only).
+ * Session 3 will move it into `footPerCellProcess` so AREA_GUARD and ATTACK
+ * also benefit — which is the load-bearing piece for SCG06 tick 76.
+ *
+ * Kept OFF here so Session 2 can land the Enter_Idle_Mode branch in
+ * isolation (the path-shorten sub-case has a HIGH-risk cascade profile of
+ * its own and is out of scope for Session 2).
+ */
+export const PCP_PATH_SHORTEN_ENABLED = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.
@@ -211,6 +269,38 @@ export interface PCPEntity<M = unknown> {
   // Optional fields that full Commence port will touch (currently unused
   // by the NavCom-clear path, but documented here for future sub-cases).
   // status?: number;     // C++ Status — set to 0 by Commence
+}
+
+/**
+ * Extended entity shape for `footPerCellProcess`. Adds the fields Enter_Idle_Mode
+ * needs to check (`target`, `targetStructure`, `guardOrigin`) plus path-shorten
+ * bookkeeping. Missing fields on a minimal caller are tolerated; only the
+ * branches whose fields are present will run.
+ *
+ * Keeping the shape loose mirrors `PCPEntity<M>` above — no Entity import.
+ */
+export interface FootPCPEntity<M = unknown> extends PCPEntity<M> {
+  /** TarCom equivalent #1: live entity target. `null` when no target. */
+  target?: { alive: boolean } | null;
+  /** TarCom equivalent #2: structure target. `null` when no target. */
+  targetStructure?: unknown | null;
+  /** AREA_GUARD origin marker. `null` when GUARD. Present = pick `AREA_GUARD`. */
+  guardOrigin?: { x: number; y: number } | null;
+}
+
+/**
+ * Which `GUARD` flavor to assign in `Enter_Idle_Mode`. The caller supplies
+ * the concrete Mission enum values because this module does not import from
+ * engine/types (keeps the hook self-contained for testing).
+ *
+ * C++ `Enter_Idle_Mode` is virtual (infantry.cpp has InfantryClass override)
+ * — for standard infantry with no guard origin it queues MISSION_GUARD; when
+ * IsInitiated + guardOrigin is set (e.g. Area Guard spawn), queues
+ * MISSION_GUARD_AREA. TS mirrors this via `entity.guardOrigin != null`.
+ */
+export interface EnterIdleModeOptions<M> {
+  guardMission: M;
+  areaGuardMission: M;
 }
 
 /**
@@ -310,6 +400,149 @@ export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPRe
       entity.pathIndex = 0;
       result.navComCleared = true;
     }
+  }
+
+  return result;
+}
+
+/**
+ * C++ parity hook: `InfantryClass::Per_Cell_Process(PCPType)` (chaining to
+ * `FootClass::Per_Cell_Process`). Mirrors infantry.cpp:3992-4010 +
+ * :911-914.
+ *
+ * Called at cell-arrival when `Distance(Head_To_Coord()) < 0x0010` (the
+ * infantry-snap condition) from 3 sites in `index.ts`:
+ *   - Mission.MOVE updateMove infantry free-form (index.ts:5665-5667)
+ *   - Mission.HUNT Stop_Driver at waypoint arrival (index.ts:4150-4155)
+ *   - Mission.AREA_GUARD analogous path (index.ts:4286-4291)
+ *
+ * C++ ordering (all three sub-cases run in sequence at PCP_END):
+ *   1. **Path-shorten** (foot.cpp:1471-1483) — if TarCom is legal AND we're
+ *      on an attack-type mission AND target is in primary-weapon range,
+ *      clear NavCom + Path[0]. Gated by `PCP_PATH_SHORTEN_ENABLED` (Session 3).
+ *   2. **Enter_Idle_Mode** (infantry.cpp:911) — when the FOUR guards hold,
+ *      queue GUARD/AREA_GUARD (NOT mission=GUARD). Gated by
+ *      `FOOT_PER_CELL_ENABLED` (Session 2 — this step).
+ *   3. **Commence** (infantry.cpp:914) — pop MissionQueue, mirrors
+ *      `unitPerCellProcess`'s Commence sub-case, reused via `PER_CELL_COMMENCE_ENABLED`.
+ *
+ * ## The four Enter_Idle_Mode guards (infantry.cpp:911)
+ *
+ * ```cpp
+ * if (MissionQueue == MISSION_NONE
+ *     && !Target_Legal(NavCom)
+ *     && !Target_Legal(TarCom)
+ *     && !In_Radio_Contact()) { Enter_Idle_Mode(); }
+ * ```
+ *
+ * TS mapping (ALL must hold):
+ *   - `entity.missionQueue === null`
+ *   - `entity.moveTarget === null`           ← NavCom cleared
+ *   - `entity.target === null && entity.targetStructure === null`  ← TarCom cleared
+ *   - (no In_Radio_Contact equivalent for infantry in TS) ← always true
+ *
+ * **On `In_Radio_Contact` — documented absence:** C++ RadioClass tracks
+ * peer-to-peer IM_IN / IM_OUT radio handshakes (e.g. between a vehicle and
+ * its passenger entering/exiting, a harvester and its refinery). TS infantry
+ * never enter radio contact in the current engine (no transport/refinery
+ * handshake at the infantry level). Dropping the check is safe because the
+ * TS-side `hasLegalTarCom` / `inRadioContact` flags are passed in by the
+ * caller — the caller MAY supply `inRadioContact=true` to preserve the guard
+ * if a future refactor adds infantry-level radio semantics.
+ *
+ * ## Why `missionQueue = GUARD` (not `mission = GUARD`)
+ *
+ * C++ `Enter_Idle_Mode` calls `Assign_Mission(MISSION_GUARD)` which sets
+ * `MissionQueue`, not `Mission`. Then Commence() (step 3 above) pops it the
+ * same tick — so `Mission` does transition to GUARD mid-tick, but only
+ * after the intermediate queue step. If we set `mission=GUARD` directly, the
+ * subsequent Commence pop would be a no-op (MissionQueue already null) — we
+ * lose the `missionTimer=0` reset that Commence produces. This breaks
+ * MissionClass::AI dispatch timing. Plan §8 S2.3 note calls this out.
+ *
+ * @param entity  The infantry crossing a cell boundary.
+ * @param why     Which kind of boundary. Only PCP_END triggers the chain.
+ * @param ctx     Caller-supplied flags:
+ *                - `hasLegalTarCom`: set to `true` when `entity.target?.alive` or
+ *                  `entity.targetStructure` is non-null (caller computes because
+ *                  the hook doesn't depend on Entity types).
+ *                - `inRadioContact`: ALWAYS `false` for TS infantry; reserved.
+ * @param missions  Pass the Mission enum's GUARD and AREA_GUARD values.
+ * @returns       `{ navComCleared, commenceFired }` — same contract as
+ *                `unitPerCellProcess` for caller uniformity.
+ */
+export function footPerCellProcess<M>(
+  entity: FootPCPEntity<M>,
+  why: PCPType,
+  ctx: { hasLegalTarCom: boolean; inRadioContact: boolean },
+  missions: EnterIdleModeOptions<M>
+): PCPResult {
+  const result: PCPResult = { navComCleared: false, commenceFired: false };
+
+  // Only PCP_END runs the chain; PCP_DURING / PCP_ROTATION are no-ops for
+  // infantry (infantry don't have rotation tracks; PCP_DURING is vehicle-only).
+  if (why !== PCPType.PCP_END) return result;
+
+  // Master gate — Session 2.1 ships OFF; Session 2.3 flips ON after wiring.
+  if (!FOOT_PER_CELL_ENABLED) return result;
+
+  // ---- 1. Path-shorten (foot.cpp:1471-1483) — Session 3, gated separately ----
+  //
+  // C++ checks `Target_Legal(TarCom)` and weapon range of primary weapon. If
+  // the target is in range AND mission is attack-type, `Assign_Destination(TARGET_NONE)`
+  // + `Path[0] = FACING_NONE`.
+  //
+  // The caller supplies `hasLegalTarCom` because we don't import Entity here.
+  // Range + mission check are deferred to Session 3's wiring (the caller will
+  // pass `pathShortenEligible` in a future ctx extension; for now the
+  // sub-case is a no-op).
+  if (PCP_PATH_SHORTEN_ENABLED && ctx.hasLegalTarCom) {
+    // TODO(Session 3): port foot.cpp:1471-1483 here. Requires:
+    //   - primary weapon lookup (What_Weapon_Should_I_Use)
+    //   - In_Range(TarCom, primary) on FootClass target Likely_Coord
+    //   - mission ∈ { RESCUE, GUARD_AREA, ATTACK, HUNT }
+    // Kept as a stub so Session 3 can land without re-visiting the gate design.
+  }
+
+  // ---- 2. Enter_Idle_Mode (infantry.cpp:911) ----
+  //
+  // The four-guard check. ALL must hold to queue Enter_Idle_Mode.
+  //
+  // NOTE ON `In_Radio_Contact`: TS infantry never participate in radio
+  // handshakes in the current engine (no passenger/refinery IM_IN chain at
+  // the infantry level). `ctx.inRadioContact` is accepted by the hook for
+  // forward compatibility but callers pass `false` today. Documenting the
+  // absence so future refactors (transport load/unload, MadTank commissar)
+  // can flip this without re-deriving the invariant.
+  const tarComClear = !ctx.hasLegalTarCom
+    && (entity.target == null || entity.target.alive === false)
+    && entity.targetStructure == null;
+
+  if (entity.missionQueue === null
+      && entity.moveTarget === null
+      && tarComClear
+      && !ctx.inRadioContact) {
+    // C++ Enter_Idle_Mode() for InfantryClass calls Assign_Mission(MISSION_GUARD)
+    // which sets MissionQueue (not Mission — Commence pops it next).
+    // When `guardOrigin` is set, the AREA_GUARD flavor runs instead (C++ mirrors
+    // this via IsInitiated + AreaPos state on team/deploy spawn).
+    entity.missionQueue = entity.guardOrigin != null
+      ? missions.areaGuardMission
+      : missions.guardMission;
+  }
+
+  // ---- 3. Commence (infantry.cpp:914) ----
+  //
+  // Reuse the same Commence logic the vehicle hook uses. `PER_CELL_COMMENCE_ENABLED`
+  // is already TRUE (vehicle per-cell Commence is live), so this branch fires
+  // whenever the Enter_Idle_Mode branch above queued GUARD (or some prior
+  // upstream caller queued a MOVE / HUNT). Same semantics: pop → Mission,
+  // null queue, Timer=0.
+  if (PER_CELL_COMMENCE_ENABLED && entity.missionQueue !== null) {
+    entity.mission = entity.missionQueue;
+    entity.missionQueue = null;
+    entity.missionTimer = 0; // C++ mission.cpp:354
+    result.commenceFired = true;
   }
 
   return result;
