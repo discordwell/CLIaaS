@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-04-22T14:20Z — Mission_Move path-failure short-circuit — no-advance, no-regression
+
+**Result:** All 3 commits landed on main + deployed. `MISSION_MOVE_PATH_FAILURE=true` wires the foot.cpp:520-540 Enter_Idle_Mode guard into the Mission.MOVE case. **SCG13 stayed at t101 Δ=+1**. **Zero regressions** on all 7 scenarios.
+
+**Commit:** `9342e6fc` (main, cherry-picked from worktree `63e95d06`).
+
+**Why no-advance:** SCG13 tick-101 real root-cause is InfantryClass::Movement_AI cell-arrival Enter_Idle_Mode at tick 99 (infantry.cpp:3992-4010), not Mission_Move at tick 100. The E1 id=109 entity at tick 100 has `isDriving=true` with an active path — so the short-circuit's five-guard invariant (next-cell-blocked + findPath-empty) doesn't trip. Task spec named foot.cpp:520 but empirically the divergence is 1 tick earlier at the cell-arrival PCP site, which is already wired via `footPerCellProcess` (Session 2.3).
+
+**Value:** Short-circuit is correct per C++ (Mission_Move top guard) and narrowly gated — dormant for all 7 existing scenarios but covers future stuck-infantry cases where a path exists but terminal cell is un-reachable and no alt route findable. Ships ON because cost is zero (5-guard invariant prevents false fires).
+
+**All 7 scenarios (before → after):** SCG01=87→87, SCG03=no-div→no-div, SCG04=36→36, SCG06=76→76, SCG07=17→17, SCG11=32→32, SCG13=101→101.
+
+**Files:** src/EasterEgg/engine/perCellProcess.ts (+ const flag MISSION_MOVE_PATH_FAILURE, +70 LOC doc), src/EasterEgg/engine/index.ts (Mission.MOVE case +60 LOC short-circuit), cpp-parity-scg13ea-mission-move-shortcircuit.test.ts (new, 6 tests).
+
+**Tests:** 51,304 EasterEgg vitest pass (+6 new). Full repo 55,312 vitest pass (1 pre-existing flaky api-features concurrent-test).
+
+**Next:** The real SCG13 t101 fix requires earlier intervention at the cell-arrival PCP path — not Mission_Move-time. Investigate: at tick 99 what TS's `footPerCellProcess` call sees for entity 109 cell-match check. TS `moveToward` hasn't fired cell-arrival yet, so PCP_END hook doesn't run. Possible: at Mission.MOVE Commence-pop (tick 99, not 100), the entity IS at its NavCom cell but we don't check — consider adding NavCom-match probe at Commence-pop rather than requiring physical lepton arrival.
+
 ## 2026-04-22T12:55Z — PCP Session 1: track-jump PCP_END (SCG04 t36) — no-advance, no-regression
 
 **Result:** All 3 Session-1 commits landed on main + deployed. **SCG04 did NOT advance past tick 36** with `PER_CELL_TRACK_JUMP_ENABLED=true` behind the `_commenceFiredBoundaries` Set<string> dedup. **Zero regressions** on any of the 7 scenarios. Flag left ON because it is correct (matches C++ drive.cpp:773) and costs nothing.
