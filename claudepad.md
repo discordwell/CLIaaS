@@ -1,5 +1,30 @@
 # Session Summaries
 
+## 2026-04-22T10:00Z — SCG11EA tick-28 FIXED (same-tick post-Commence dispatch)
+
+**Result:** SCG11EA first-divergence ADVANCED from tick 28 to tick 32. MCV Mission_Move_foot jitter (tag 60010) now fires same-tick as WASM. Including the previously-unexplained MCV-157 double-fire — all 3 WASM RNG seeds matched byte-for-byte. Commit 79b13cb3 pushed to main and deployed.
+
+**Fix:** In `updateEntity` Mission.GUARD case, after the drive-in-GUARD `updateMove` call, if `entity.mission === Mission.MOVE && entity.missionTimer === 0 && !missionTimerFired`, dispatch the Mission_Move handler's timer-return path (foot.cpp:492-505 equivalent) same-tick. Consumes `Random_Pick(0,2)` + sets `missionTimer = 14 + jitter`.
+
+**Why it works:** The c4310105 PER_CELL_COMMENCE_ENABLED=true port had Commence firing at the correct mid-tick inside `updateMove` (via `unitPerCellProcess` → mission=MOVE, timer=0), but `missionTimerFired` was captured at the TOP of updateEntity BEFORE updateMove ran. So jitter consumption deferred to NEXT tick. C++ dispatches same-tick via TechnoClass::AI → RadioClass::AI = MissionClass::AI (techno.cpp:2344) which runs AFTER pre-movement Commence (unit.cpp:406) but BEFORE While_Moving. The fix emulates this ordering.
+
+**All 7 scenarios (before → after):**
+- SCG01EA: 87 → 87 (unchanged)
+- SCG03EA: 238 → 238 (unchanged)
+- SCG04EA: 36 → 36 (unchanged)
+- SCG06EA: 76 → 76 (unchanged)
+- SCG07EA: 17 → 17 (unchanged)
+- **SCG11EA: 28 → 32 (advanced)**
+- SCG13EA: 101 → 101 (unchanged)
+
+**Tick 28 detail (post-fix):** All 3 WASM Mission_Move_foot calls match TS: seeds 2901914261, 303996842, 3006003099. Tick 29-31 now also match exactly. New first-divergence at tick 32 is unrelated building AI ordering (Δ=-5).
+
+**Files:** src/EasterEgg/engine/index.ts (same-tick dispatch block in Mission.GUARD case, ~35 lines), cpp-parity-same-tick-post-commence-dispatch.test.ts (new, 4 tests), cpp-parity-scg11ea-tick-28.test.ts (updated assertions to reflect new behavior).
+
+**Tests:** 51,260 EasterEgg vitest (all passing). 7/7 Playwright first-divergence scenarios passing.
+
+**Session state:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=**32**, SCG13=101.
+
 ## 2026-04-22T09:10Z — CDTimer end-of-tick decrement refactor (Approach A) — attempted & reverted
 
 **Result:** Net regression. Refactor committed (d6db5f97), deployed, Playwright verification showed 3 scenario regressions. Reverted via 4277d897; docs updated in cpp-parity-scg03ea-tick-238.test.ts (commit 62ee841d).
