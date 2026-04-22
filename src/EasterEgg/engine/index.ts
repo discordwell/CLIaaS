@@ -220,7 +220,7 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED } from './perCellProcess';
+import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE } from './perCellProcess';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -4080,10 +4080,77 @@ export class Game {
         if (!firingStarted) this.updateMove(entity);
         // C++ foot.cpp:492-505: Mission_Move timer return
         if (missionTimerFired) {
+          // Mission_Move internal path-failure short-circuit — residual port
+          // of the C++ InfantryClass::Movement_AI Basic_Path chain. See
+          // perCellProcess.ts:MISSION_MOVE_PATH_FAILURE for the full docstring
+          // + C++ refs. Fires ONE tick earlier than the all-retries-exhausted
+          // path in updateMove: when the timer fires, path is non-empty, but
+          // the next cell is blocked AND a one-shot findPath refresh also
+          // fails. Queues GUARD (or AREA_GUARD when guardOrigin is set) with
+          // no RNG consumed, matching WASM's Enter_Idle_Mode via Mission_Move.
+          let pathFailureHandled = false;
+          if (MISSION_MOVE_PATH_FAILURE &&
+              entity.stats.isInfantry &&
+              entity.moveTarget &&
+              entity.missionQueue === null &&
+              entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+            const nextCell = entity.path[entity.pathIndex];
+            const nextPassable = entity.isNavalUnit
+              ? this.map.isWaterPassable(nextCell.cx, nextCell.cy)
+              : this.map.isTerrainPassable(nextCell.cx, nextCell.cy);
+            // Occupancy: blocked if non-self and not friendly-pushable, and
+            // infantry sub-cell is full (infantry share cells when possible).
+            const occId = this.map.getOccupancy(nextCell.cx, nextCell.cy);
+            const infCanEnter = entity.stats.isInfantry &&
+              this.map.hasAvailableSubCell(nextCell.cx, nextCell.cy);
+            let occBlocked = false;
+            if (occId > 0 && occId !== entity.id && !infCanEnter) {
+              const blocker = this.entityById.get(occId);
+              if (blocker?.alive && !this.entitiesAllied(entity, blocker)) {
+                occBlocked = true;
+              } else if (!blocker?.alive) {
+                occBlocked = true;
+              }
+            }
+            if (!nextPassable || occBlocked) {
+              // One-shot Basic_Path refresh. C++ foot.cpp:313-500 Basic_Path
+              // returns false when no path exists. We emulate by asking findPath
+              // and short-circuiting when empty.
+              const dest = {
+                cx: Math.floor(entity.moveTarget.lx / 256),
+                cy: Math.floor(entity.moveTarget.ly / 256),
+              };
+              const freshPath = findPath(
+                this.map, entity.cell, dest, true,
+                entity.isNavalUnit, entity.stats.speedClass
+              );
+              if (freshPath.length === 0) {
+                // Enter_Idle_Mode equivalent — mirrors footPerCellProcess's
+                // Enter_Idle_Mode sub-case (perCellProcess.ts:641-656).
+                entity.moveTarget = null;
+                entity.path = [];
+                entity.pathIndex = 0;
+                entity.isDriving = false;
+                // Queue GUARD (or AREA_GUARD when guardOrigin is set). The
+                // post-dispatch Commence block (index.ts:~4381) pops this
+                // same tick for infantry, matching WASM Enter_Idle_Mode.
+                entity.missionQueue = entity.guardOrigin != null
+                  ? Mission.AREA_GUARD
+                  : Mission.GUARD;
+                entity.missionTimer = 0;
+                entity.animState = AnimState.IDLE;
+                pathFailureHandled = true;
+              }
+            }
+          }
           // C++ foot.cpp:496-498: if no NavCom, not driving, no queued mission →
           // Enter_Idle_Mode() transitions to GUARD (unit.cpp:1291-1358).
           // Returns 1 (no RNG consumed) — the GUARD timer fires on the next tick.
-          if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
+          if (pathFailureHandled) {
+            // No RNG consumed — Mission_Move returns 1 when Enter_Idle_Mode
+            // path taken (foot.cpp:526). Commence popup handles the mission
+            // transition at the post-dispatch block.
+          } else if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
             entity.mission = Mission.GUARD;
             entity.missionTimer = 0; // fires immediately in GUARD handler
           } else {

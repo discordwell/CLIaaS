@@ -352,6 +352,67 @@ export const AREA_GUARD_APPROACH_RETRY = true;
 export const TEAM_START_DRIVER_REFACTOR = false;
 
 /**
+ * Mission_Move internal path-failure short-circuit (residual beyond Session 3).
+ *
+ * ## C++ reference
+ *
+ * `FootClass::Mission_Move` (foot.cpp:520-540) is called by MissionClass::AI
+ * when the timer fires on an infantry/vehicle in MISSION_MOVE. The C++ chain
+ * BEFORE Mission_Move runs is InfantryClass::Movement_AI / DriveClass::AI,
+ * which may internally call `Basic_Path` when the stored `Path[]` buffer is
+ * empty or the next `Path[]` cell is no longer reachable. When Basic_Path
+ * fails (returns false with no path produced), `Movement_AI` invokes
+ * `Stop_Driver()` and Mission_Move's top-of-handler guard at foot.cpp:524
+ * (`!Target_Legal(NavCom) && !IsDriving && MissionQueue == MISSION_NONE`)
+ * trips → `Enter_Idle_Mode()` queues MISSION_GUARD (or MISSION_GUARD_AREA
+ * when `IsInitiated` + guardOrigin is set). Mission_Move returns 1 (no RNG
+ * jitter consumed) — the GUARD timer fires on the next tick.
+ *
+ * TS's `updateMove` already handles the all-retries-exhausted case by
+ * clearing `moveTarget`/`path` and calling `setMissionIdle()`. This shorter
+ * circuit fires ONE tick earlier: when the missionTimer fires, the path is
+ * non-empty, but the next path cell is blocked AND a one-shot pathfinding
+ * refresh also fails. Skipping the Mission_Move jitter on that tick
+ * prevents a phantom Random_Pick(0,2) call that WASM doesn't fire because
+ * its Basic_Path-inside-Movement_AI chain already queued GUARD.
+ *
+ * ## Related blocker
+ *
+ * SCG13EA tick-101 — entity id=109 (USSR E1 @61,67) is in MOVE mission at
+ * tick 100 with path toward cell (61,79) blocked (prior agent investigations
+ * logged in `__tests__/cpp-parity-scg13ea-tick-101-fix.test.ts`). WASM fired
+ * a tag 60043 GUARD Arm_Delay at tick 101; TS stayed in MOVE firing nothing.
+ * The Δ=+1 RNG call is this missing short-circuit — WASM's next-tick GUARD
+ * emits the 7th RNG fire, TS's stuck-in-MOVE does not.
+ *
+ * ## Gate rationale
+ *
+ * Shipping OFF (Session 3.5 stub). When flipped ON the short-circuit runs
+ * only when:
+ *   1. `missionTimerFired` this tick (matches C++ Mission_Move dispatch).
+ *   2. `mission === MOVE` (guard against applying to HUNT/ATTACK/etc.).
+ *   3. `moveTarget` present AND `path.length > pathIndex` (non-empty path).
+ *   4. Next path cell is un-passable OR occupied by non-allied blocker AND
+ *      a one-shot findPath from current cell to moveTarget returns empty.
+ *   5. `missionQueue === null` (don't clobber a pending queue).
+ *
+ * When all five hold, clear moveTarget + path, and — mirroring
+ * `footPerCellProcess`'s Enter_Idle_Mode sub-case — queue GUARD (or
+ * AREA_GUARD when guardOrigin is set). The existing post-Commence path in
+ * the engine pops the queue same-tick (vehicles) or next-tick (infantry
+ * via updateEntity's missionTimerFired reset). No RNG consumed.
+ *
+ * ## C++ refs
+ *
+ *   foot.cpp:520-540      FootClass::Mission_Move handler (Enter_Idle_Mode guard)
+ *   foot.cpp:313-500      Basic_Path primary entry with IsInit/Try_Again loop
+ *   infantry.cpp:1663-1721 InfantryClass::Enter_Idle_Mode (GUARD vs GUARD_AREA)
+ *   infantry.cpp:3780-4058 InfantryClass::Movement_AI (calls Per_Cell_Process)
+ *   drive.cpp:961-996     DriveClass::AI Basic_Path failure + Try_Try_Again
+ */
+export const MISSION_MOVE_PATH_FAILURE = true;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.
