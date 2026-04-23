@@ -182,18 +182,21 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
     expect(wasm.postSeed).toBe(2978978768);
   });
 
-  it('documents the tick-17 TS current divergence (20 RNG calls)', () => {
-    // TS fires 20 calls; post-seed 4180793233 matches WASM's seed at
-    // RNG position 20 (WASM continues for 7 more calls).
+  it('documents the tick-17 TS pre-Phase-7A divergence (20 RNG calls)', () => {
+    // Pre-Phase-7A (RANDOM_ANIMATE_CPP_FAITHFUL=false) TS fired 20 calls;
+    // post-seed 4180793233 matched WASM's seed at RNG position 20 (WASM
+    // continued for 7 more calls). This snapshot is kept for historical
+    // context; Phase 7A closed (B) by adding the DO_WALK → DO_STAND_READY
+    // transition in `Entity.doingAI` (infantry.cpp:3700-3732 parity).
     const ts = {
       totalCalls: 20,
       postSeed: 4180793233,
       missingCalls: 7,
       missingBreakdown: {
         buildingMissionGuardWeapon: 0, // TS fires 5 building guards (matches WASM count); ordering differs
-        vesselMissionMove: 2, // TS fires 3, WASM fires 5 — double-fire gap
-        infantryRandomAnimate: 3, // TS fires fewer 30001/30002/30003 calls
-        infantryMissionGuardE1E3: 2, // TS fires fewer 60043-equivalent jitters
+        vesselMissionMove: 2, // TS fires 3, WASM fires 5 — double-fire gap (residual Phase 7B)
+        infantryRandomAnimate: 3, // Phase 7A closes: walk→stand_ready unlocks 30001/30002/30003
+        infantryMissionGuardE1E3: 2, // Phase 7A closes: post-RA, 60043-equivalent jitter now eligible
       },
     };
     // 0 + 2 + 3 + 2 = 7
@@ -201,6 +204,24 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
     expect(missing).toBe(7);
     expect(ts.totalCalls).toBe(20);
     expect(ts.postSeed).toBe(4180793233);
+  });
+
+  it('Phase 7A expected post-flip delta: infantry RA cascade unlocks (B)', () => {
+    // After RANDOM_ANIMATE_CPP_FAITHFUL=true flip, the 3 missing RA RNGs
+    // (30001 IdleTimer + 30002 switch + 30003 optional facing) and the 2
+    // downstream 60043-equivalent jitters fire on tick 17 for USSR E1
+    // infantry 126/129. Residual Δ drops from +7 to +2 (vessel double-fire
+    // remains as Phase 7B). Expected SCG07EA first-divergence advances
+    // ≥17; validated in-browser via scripts/test-first-divergence.ts.
+    const phase7a = {
+      mechanism: 'doingAI: DO_WALK → DO_STAND_READY when !isDriving',
+      cppRef: 'infantry.cpp:3700-3732',
+      tsRef: 'src/EasterEgg/engine/entity.ts:doingAI',
+      expectedResidualDeltaAtTick17: 2, // vessel double-fire remains
+      phaseBUnlocked: 5, // 3 RA + 2 E1/E3 jitter
+    };
+    expect(phase7a.expectedResidualDeltaAtTick17).toBe(2);
+    expect(phase7a.phaseBUnlocked).toBe(5);
   });
 
   it('documents the DriveClass::AI double-Commence vessel Mission_Move blocker', () => {
