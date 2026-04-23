@@ -4598,6 +4598,63 @@ export class Game {
   }
 
   /**
+   * Phase 1 Checkpoint 1.C — Infantry Movement_AI extraction stub.
+   *
+   * Mirrors C++ `InfantryClass::Movement_AI` (infantry.cpp:3765-4060). Runs
+   * every tick for infantry when isDriving is set or moveTarget is present:
+   *   - `!IsDriving + NavCom legal` → Start_Driver (validate path, pick sub-cell)
+   *   - `IsDriving + path` → Coord_Move toward HeadToCoord; on arrival, Stop_Driver
+   *     + PCP_END (which may Enter_Idle_Mode or path-shorten to engage TarCom)
+   *
+   * Not yet called — STAGE D of updateEntity will invoke this once
+   * DISPATCH_ORDER_REFACTOR flips on. The Mission.HUNT and Mission.AREA_GUARD
+   * cases in `dispatchMission` currently inline this exact logic under their
+   * "target in range / out of range" branches; STAGE D will route through here
+   * instead.
+   *
+   * ## C++ refs
+   *   infantry.cpp:3765    InfantryClass::Movement_AI top
+   *   infantry.cpp:3790    IsFiring gate (skips movement)
+   *   infantry.cpp:3810    Basic_Path validate / re-path on next cell blocked
+   *   infantry.cpp:3997    PCP_END call at cell-arrival
+   */
+  private runInfantryMovementAI(entity: Entity): void {
+    // Stub: when STAGE D lands, this body will contain the Start_Driver /
+    // Coord_Move / Stop_Driver loop currently inlined in dispatchMission's
+    // Mission.HUNT / Mission.AREA_GUARD branches. Intentionally empty while
+    // DISPATCH_ORDER_REFACTOR is OFF so it can be safely introduced without
+    // wiring conflicts.
+    void entity;
+  }
+
+  /**
+   * Phase 1 Checkpoint 1.C — DriveClass::AI (vehicle/vessel) Movement_AI stub.
+   *
+   * Mirrors C++ `DriveClass::AI` (drive.cpp:1304-1399), the per-tick track
+   * dispatcher that moves vehicles/vessels along their current track. Calls
+   * into `updateMove(entity, fromGuardDrive=?)` which runs While_Moving →
+   * Per_Cell_Process chains. The `fromGuardDrive` flag is essential for parity:
+   * it signals that the caller is in Mission.GUARD with isDriving=true, so
+   * updateMove should NOT alter `mission` on arrival (drive-in-GUARD semantics).
+   *
+   * Not yet called — STAGE D wires this on flag flip. Current callers still
+   * invoke `updateMove` directly from Mission.MOVE / Mission.GUARD inline.
+   *
+   * ## C++ refs
+   *   drive.cpp:1304      DriveClass::AI top
+   *   drive.cpp:1340-1345 Start_Of_Move + While_Moving double-cycle
+   *   drive.cpp:1376      Drive-in-GUARD path (NavCom legal while Mission==GUARD)
+   *   unit.cpp:404,472    UnitClass::AI Commence bookends (pre- and post-Drive)
+   *   vessel.cpp:591-659  VesselClass::AI (same structure, two Commence bookends)
+   */
+  private runDriveClassAI(entity: Entity): void {
+    // Stub: STAGE D will call `this.updateMove(entity, fromGuardDrive=?)` here.
+    // For DISPATCH_ORDER_REFACTOR=false, current inline logic in
+    // dispatchMission's Mission.MOVE + Mission.GUARD branches remains authoritative.
+    void entity;
+  }
+
+  /**
    * Phase 1 refactor scaffold: extracted the per-tick entity finalization block
    * that previously lived at the bottom of `updateEntity` (post-switch / pre-tail
    * harvesters + civilian panic etc). Semantics preserved byte-for-byte.
