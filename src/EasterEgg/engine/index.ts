@@ -6194,6 +6194,54 @@ export class Game {
       const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
       const infantryCanEnter = entity.stats.isInfantry && this.map.hasAvailableSubCell(nextCell.cx, nextCell.cy);
       if (occ > 0 && occ !== entity.id && !infantryCanEnter && entity.moveTarget) {
+        // Phase 3 v3 — port C++ drive.cpp:1102-1105 reactive close-enough.
+        //
+        // C++ Start_Of_Move track-start branch (drive.cpp:1087-1146):
+        //   destcell = Coord_Cell(dest);
+        //   Mark(MARK_UP); MoveType cando = Can_Enter_Cell(destcell, facing); Mark(MARK_DOWN);
+        //   if (cando != MOVE_OK) {
+        //     if (Mission == MISSION_MOVE && Distance(NavCom) < Rule.CloseEnoughDistance) {
+        //       Assign_Destination(TARGET_NONE);  // drive.cpp:1103
+        //     }
+        //     ... (MOVE_TEMP scatter, Stop_Driver, ...)
+        //   }
+        //
+        // Semantics: when about to start a new track but the next cell is not
+        // OK (friendly occupant = MOVE_TEMP / MOVE_MOVING_BLOCK), and we're
+        // already within CloseEnoughDistance of NavCom, just clear NavCom.
+        // Matches the SCG11EA t19 USSR 4TNK patrol-blocked-by-friendly case
+        // previously handled by W16 (path.length===0 sticky patrolBlockedTargetLX).
+        //
+        // Gated on DRIVE_CLASS_AI_PORT — same feature flag as the rest of
+        // Phase 3 v2/v3 so a single flip activates both path regen + reactive
+        // close-enough together.
+        if (DRIVE_CLASS_AI_PORT
+            && entity.mission === Mission.MOVE
+            && !entity.stats.isInfantry
+            && !entity.isAirUnit) {
+          const CLOSE_ENOUGH_LEPTONS = 704;
+          const dxL = entity.moveTarget.lx - entity.leptonX;
+          const dyL = entity.moveTarget.ly - entity.leptonY;
+          const adx = Math.abs(dxL), ady = Math.abs(dyL);
+          const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+          if (octDist < CLOSE_ENOUGH_LEPTONS) {
+            const blocker = this.entityById.get(occ);
+            if (blocker?.alive && this.entitiesAllied(entity, blocker)) {
+              // Preserve W16 sticky flag so team.coordinatePatrol skips the
+              // timer reset on re-assignment (prevents duplicate Mission_Move
+              // jitter RNG at the next patrol cycle).
+              entity.patrolBlockedTargetLX = entity.moveTarget.lx;
+              entity.patrolBlockedTargetLY = entity.moveTarget.ly;
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+              setMissionIdle();
+              entity.animState = AnimState.IDLE;
+              resetPathThreshold(entity);
+              return;
+            }
+          }
+        }
         // PF2: "Tell blocking unit to move" (C++ drive.cpp — nudge idle friendly units aside)
         const blocker = this.entityById.get(occ);
         if (blocker?.alive && this.entitiesAllied(entity, blocker) &&
