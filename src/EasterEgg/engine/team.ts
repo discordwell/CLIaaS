@@ -28,6 +28,7 @@ import { ScenarioRandom } from './random';
 import { findPath } from './pathfinding';
 import type { GameMap } from './map';
 import { TEAM_START_DRIVER_REFACTOR } from './perCellProcess';
+import { assignMission } from './missionLifecycle';
 
 /**
  * Optional context threaded through Team.ai() / coordinateMove() for a full
@@ -860,9 +861,10 @@ export class Team {
         // (blockCommenceDrive) reads this to block the GUARD→MOVE pop on tick 1.
         // Without this, Mission_Move fires 1 tick earlier than WASM, burning a
         // Random_Pick jitter that WASM consumes on a later tick (SCG11EA drift).
-        if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
-          unit.missionQueue = Mission.MOVE;
-        }
+        // Phase 2: route through assignMission (C++ mission.cpp:379-390 Assign_Mission)
+        // — no-op when already in MOVE, queues otherwise. Equivalent to the prior
+        // inline guard since entities in MOVE with queue=null stay that way.
+        assignMission(unit, Mission.MOVE);
         if (!unit.moveTarget) {
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
           // Vehicles only: simulate C++ Start_Driver on NavCom assignment so
