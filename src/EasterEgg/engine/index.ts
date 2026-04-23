@@ -214,6 +214,7 @@ import {
   updateAmbush as _updateAmbush,
   updateRepairMission as _updateRepairMission,
   orderTransportEvacuate as _orderTransportEvacuate,
+  runFiringAI as _runFiringAI,
 } from './missionAI';
 // C++ parity scaffolding: UnitClass::Per_Cell_Process hook. Currently only
 // does NavCom-at-destination clear (legacy perCellNavComCheck behavior);
@@ -4109,12 +4110,27 @@ export class Game {
         missionHandlerRan = true;
       }
 
-      // STAGE C: Firing_AI stub (runFiringAI is currently a no-op on Game —
-      // see missionAI.ts exported runFiringAI for the standalone version).
-      // TODO: wire runFiringAI for per-tick Firing_AI parity.
+      // STAGE C: Firing_AI — per-tick fire-through when target in range and
+      // weapon ready. Mirrors C++ TechnoClass::Firing_AI (infantry.cpp:3651 /
+      // unit.cpp:2429) which runs every tick independent of MissionClass::AI
+      // timer dispatch. Idempotent — updateAttack gates on attackCooldown and
+      // firePrep so repeat calls within the same tick are no-ops.
+      //
+      // Skipped when STAGE B already dispatched a handler that runs its own
+      // Firing_AI swap (updateGuard lines 1208-1220, updateAreaGuard lines
+      // 1505-1521). Those handlers return after the swap, and we don't want
+      // a second attack this tick. Detected via `missionHandlerRan` flag.
+      if (!missionHandlerRan) {
+        this._runMissionAI(ctx => _runFiringAI(ctx, entity));
+      }
 
-      // STAGE D: Movement_AI stubs.
-      if (!entity.isAirUnit) {
+      // STAGE D: Movement_AI — per-tick movement advance for MOVE / HUNT /
+      // AREA_GUARD (infantry), MOVE / GUARD drive-in (vehicles/vessels).
+      // Skipped when STAGE B already ran the handler: on the handler tick
+      // the inline movement blocks in dispatchMission still execute (they're
+      // unchanged), so STAGE D would double-move. Between timer fires STAGE
+      // B is idle and STAGE D is the only mover.
+      if (!missionHandlerRan && !entity.isAirUnit) {
         if (entity.stats.isInfantry) {
           this.runInfantryMovementAI(entity);
         } else {
@@ -4717,12 +4733,119 @@ export class Game {
    *   infantry.cpp:3997    PCP_END call at cell-arrival
    */
   private runInfantryMovementAI(entity: Entity): void {
-    // Stub: when STAGE D lands, this body will contain the Start_Driver /
-    // Coord_Move / Stop_Driver loop currently inlined in dispatchMission's
-    // Mission.HUNT / Mission.AREA_GUARD branches. Intentionally empty while
-    // DISPATCH_ORDER_REFACTOR is OFF so it can be safely introduced without
-    // wiring conflicts.
-    void entity;
+    // Per-tick infantry Movement_AI — dispatched from STAGE D when
+    // DISPATCH_ORDER_REFACTOR=true. Mirrors the per-tick walk loops currently
+    // inlined in `dispatchMission`'s Mission.MOVE / Mission.HUNT /
+    // Mission.AREA_GUARD branches. Runs only on ticks STAGE B did NOT run a
+    // handler (otherwise the inline code there already moved this tick).
+    //
+    // ## C++ refs
+    //   infantry.cpp:3765-4060  InfantryClass::Movement_AI
+    //   infantry.cpp:3790       IsFiring gate (skips movement)
+    //   infantry.cpp:3997       PCP_END at cell-arrival
+    if (!entity.stats.isInfantry) return;
+    const m = entity.mission as Mission;
+
+    if (m === Mission.MOVE) {
+      // Mission.MOVE infantry: Firing_AI-before-Movement_AI (infantry.cpp:1237)
+      // + updateMove. Mirrors dispatchMission's Mission.MOVE inline block so
+      // that between timer fires the unit still moves toward moveTarget.
+      let firingStarted = false;
+      if (entity.target?.alive && entity.weapon
+          && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
+        const savedDriving = entity.isDriving;
+        entity.isDriving = false;
+        const savedMission = entity.mission;
+        entity.mission = Mission.ATTACK;
+        this.updateAttack(entity);
+        if ((entity.mission as Mission) === Mission.ATTACK) {
+          entity.mission = savedMission;
+        }
+        if (entity.firePrepActive) {
+          firingStarted = true;
+        } else {
+          entity.isDriving = savedDriving;
+        }
+      }
+      if (!firingStarted) this.updateMove(entity);
+      return;
+    }
+
+    if (m === Mission.HUNT || m === Mission.RESCUE) {
+      // HUNT per-tick walk loop (lifted from dispatchMission Mission.HUNT).
+      // Firing_AI in-range case is already handled by STAGE C (runFiringAI).
+      // Approach_Target on cell-boundary / out-of-range-with-moveTarget only.
+      if (entity.target?.alive && !entity.inRange(entity.target) && !entity.moveTarget) {
+        this.approachTarget(entity);
+      }
+      this._infantryWalkStep(entity);
+      return;
+    }
+
+    if (m === Mission.AREA_GUARD) {
+      // AREA_GUARD per-tick walk loop (lifted from dispatchMission).
+      // Firing_AI in-range case handled by STAGE C; walk advances path.
+      this._infantryWalkStep(entity);
+      return;
+    }
+  }
+
+  /**
+   * Shared per-tick infantry walk-step. Mirrors the Start_Driver / Coord_Move /
+   * Stop_Driver / PCP_END chain from dispatchMission's Mission.HUNT and
+   * Mission.AREA_GUARD inline blocks. Used by `runInfantryMovementAI` under
+   * STAGE D when DISPATCH_ORDER_REFACTOR=true.
+   *
+   * C++ ref: infantry.cpp:3812 (Start_Driver) + 3997 (PCP_END).
+   */
+  private _infantryWalkStep(entity: Entity): void {
+    if (!(entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget)) {
+      return;
+    }
+    if (!entity.isDriving) {
+      if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+        this.infantryValidatePath(entity);
+      }
+      if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+        const destCell = entity.path[entity.pathIndex];
+        this.infantryStartDriver(entity, destCell.cx, destCell.cy);
+      }
+      entity.isDriving = true;
+      return;
+    }
+    if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+      const wp = entity.headToLX > 0
+        ? { lx: entity.headToLX, ly: entity.headToLY }
+        : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
+      if (entity.moveToward(wp, this.movementSpeed(entity))) {
+        entity.pathIndex++;
+        entity.isDriving = false;
+        entity.headToLX = 0;
+        entity.headToLY = 0;
+        if (FOOT_PER_CELL_ENABLED) {
+          const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+          const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
+          footPerCellProcess(
+            entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+            PCPType.PCP_END,
+            {
+              hasLegalTarCom: liveTar,
+              inRadioContact: false,
+              pathShortenEligible: true,
+              targetInRange: inRangeNow,
+              approachTargetRefire: (e) => this.approachTarget(e as Entity),
+            },
+            { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+          );
+        }
+      }
+    } else if (entity.moveTarget) {
+      if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
+        entity.moveTarget = null;
+        entity.path = [];
+        entity.pathIndex = 0;
+      }
+    }
   }
 
   /**
@@ -4746,10 +4869,42 @@ export class Game {
    *   vessel.cpp:591-659  VesselClass::AI (same structure, two Commence bookends)
    */
   private runDriveClassAI(entity: Entity): void {
-    // Stub: STAGE D will call `this.updateMove(entity, fromGuardDrive=?)` here.
-    // For DISPATCH_ORDER_REFACTOR=false, current inline logic in
-    // dispatchMission's Mission.MOVE + Mission.GUARD branches remains authoritative.
-    void entity;
+    // Per-tick DriveClass::AI — vehicle/vessel per-tick movement dispatched
+    // from STAGE D when DISPATCH_ORDER_REFACTOR=true. Mirrors the inline
+    // Mission.MOVE + drive-in-GUARD blocks currently in dispatchMission.
+    //
+    // ## C++ refs
+    //   drive.cpp:1304-1399  DriveClass::AI — per-tick track follow
+    //   drive.cpp:1376       Drive-in-GUARD (NavCom legal, Mission==GUARD)
+    //   vessel.cpp:591-659   VesselClass::AI — same structure, double Commence
+    if (entity.stats.isInfantry) return; // Handled by runInfantryMovementAI
+    const m = entity.mission as Mission;
+
+    if (m === Mission.MOVE) {
+      this.updateMove(entity);
+      return;
+    }
+
+    if (m === Mission.GUARD || m === Mission.STICKY) {
+      // Drive-in-GUARD: units given Mission.MOVE via coordinateMove with
+      // isDriving=true continue to drive even while Mission stays GUARD
+      // (blocked by !IsDriving Commence gate). Mirror the inline block in
+      // dispatchMission Mission.GUARD case.
+      if (entity.isDriving && entity.moveTarget) {
+        this.updateMove(entity, /*fromGuardDrive=*/ true);
+        // Same-tick Mission_Move dispatch after per-cell Commence — see
+        // dispatchMission Mission.GUARD for full documentation.
+        if ((entity.mission as Mission) === Mission.MOVE && entity.missionTimer === 0) {
+          if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
+            entity.mission = Mission.GUARD;
+            entity.missionTimer = 0;
+          } else {
+            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+          }
+        }
+      }
+      return;
+    }
   }
 
   /**
