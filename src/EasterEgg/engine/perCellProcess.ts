@@ -782,6 +782,66 @@ export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = true;
 export const PCP_DOUBLE_CYCLE_ENABLED = true;
 
 /**
+ * Phase 7A — C++-faithful `Random_Animate` gate (JOINT-REFACTOR plan §7A).
+ *
+ * ## Purpose
+ *
+ * TS `Entity.isReadyToRandomAnimate` currently requires `doing === 'stand_ready'`.
+ * C++ `InfantryClass::Is_Ready_To_Random_Animate` (infantry.cpp:4103-4158) only
+ * rejects when `Doing != DO_STAND_GUARD && Doing != DO_STAND_READY`. The TS
+ * enum collapses those two idle stances into `'stand_ready'` — that part is
+ * fine. The parity hole is in `doingAI`:
+ *
+ *   C++ `InfantryClass::Doing_AI` (infantry.cpp:3698-3760) transitions
+ *   DO_WALK → DO_STAND_READY when `Fetch_Stage() >= DoControls[DO_WALK].Count`
+ *   and `!IsDriving`. TS `doingAI` only whitelists `{nothing, idle_anim, fire}`
+ *   for the re-evaluation, so once `doing === 'walk'` an infantry is sticky
+ *   in that state even after it stops moving. All subsequent `Mission_Guard`
+ *   timer fires skip `Random_Animate` because the gate still says `!== 'stand_ready'`.
+ *
+ * SCG07EA tick 17: infantry[126] + infantry[129] (USSR E1 guards at cells
+ * (67,66) and (66,66)) sit in `doing === 'walk'` but `isDriving === false`.
+ * C++ fires Random_Animate (3 extra RNG draws: 30001 IdleTimer + 30002 anim
+ * pick + 30003 optional facing). TS skips → Δ+3 at tick 17.
+ *
+ * ## Mechanism (flag ON)
+ *
+ *   1. `Entity.doingAI` gains a DO_WALK → DO_STAND_READY transition when
+ *      `!isDriving`, matching infantry.cpp:3714-3718 / 3721-3728.
+ *   2. No change to `isReadyToRandomAnimate` itself — the TS gate's
+ *      `doing === 'stand_ready'` check IS the C++ gate once the state
+ *      machine is corrected.
+ *
+ * ## Shipping OFF (initial)
+ *
+ * Plan §7A requires the additive scaffold in OFF state first, then a flip
+ * commit. OFF means `doingAI` keeps its current whitelist — no behavior change.
+ * ON flips the whitelist to include `'walk'`, unlocking the 3 missing RA
+ * calls at SCG07EA tick 17.
+ *
+ * ## Risks (plan §7A "Rollback criteria")
+ *
+ *   - SCG01EA/SCG03EA/SCG06EA depend on the current stickiness at specific
+ *     tick windows. If the flip regresses ANY scenario by > 5 ticks, revert.
+ *
+ * ## C++ refs
+ *
+ *   infantry.cpp:3698-3760  InfantryClass::Doing_AI (DO_WALK → DO_STAND_READY)
+ *   infantry.cpp:4103-4158  InfantryClass::Is_Ready_To_Random_Animate
+ *   infantry.cpp:1742-1838  InfantryClass::Random_Animate (RNG cascade)
+ *   techno.cpp:5350-5368    TechnoClass::Is_Ready_To_Random_Animate (IdleTimer base)
+ *   foot.cpp:638-698        FootClass::Mission_Guard dispatch
+ *
+ * ## TS refs
+ *
+ *   src/EasterEgg/engine/entity.ts:268-281    doingAI (flip site)
+ *   src/EasterEgg/engine/entity.ts:286-293    isReadyToRandomAnimate
+ *   src/EasterEgg/engine/missionAI.ts:1461    updateGuard Random_Animate call
+ *   src/EasterEgg/engine/missionAI.ts:1749    updateAreaGuard Random_Animate call
+ */
+export const RANDOM_ANIMATE_CPP_FAITHFUL = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

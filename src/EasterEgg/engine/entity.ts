@@ -16,6 +16,7 @@ import {
 } from './types';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { ScenarioRandom, NonCriticalRandom } from './random';
+import { RANDOM_ANIMATE_CPP_FAITHFUL } from './perCellProcess';
 
 // === C++ Points lookup (techno.cpp:6290: Risk = Reward = Points) ===
 // Used by threatScore() to compute C++ Value() = Risk + Reward = 2 * Points
@@ -267,11 +268,25 @@ export class Entity {
 
   /** C++ InfantryClass::Doing_AI — transition Doing state when animation completes.
    *  Called once per tick after mission processing. Doing=DO_NOTHING transitions
-   *  to DO_STAND_READY (idle pose) if not driving. */
+   *  to DO_STAND_READY (idle pose) if not driving.
+   *
+   *  Phase 7A (RANDOM_ANIMATE_CPP_FAITHFUL): C++ infantry.cpp:3700-3732 also
+   *  transitions DO_WALK → DO_STAND_READY when `Fetch_Stage() >= DoControls[DO_WALK].Count`
+   *  and `!IsDriving`. Without this transition, infantry that stopped walking
+   *  stay stuck at `doing === 'walk'` and `Random_Animate` is permanently gated
+   *  off (see SCG07EA tick 17 missing-3-RA divergence).
+   */
   doingAI(): void {
     if (!this.stats.isInfantry) return;
-    // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed
-    if (this.doing === 'nothing' || this.doing === 'idle_anim' || this.doing === 'fire') {
+    // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed.
+    // Phase 7A flag ON: include 'walk' so stopping infantry transitions back to
+    // DO_STAND_READY, enabling Random_Animate on subsequent Mission_Guard ticks.
+    const canTransition =
+      this.doing === 'nothing' ||
+      this.doing === 'idle_anim' ||
+      this.doing === 'fire' ||
+      (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk');
+    if (canTransition) {
       if (this.isDriving) {
         this.doing = 'walk';
       } else {
