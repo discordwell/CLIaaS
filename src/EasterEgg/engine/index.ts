@@ -4512,41 +4512,11 @@ export class Game {
             entity.isDriving && entity.moveTarget) {
           this.updateMove(entity, /*fromGuardDrive=*/ true);
         }
-        // C++ parity: same-tick Mission_Move dispatch after per-cell Commence.
-        // When unitPerCellProcess (inside updateMove above) pops MissionQueue →
-        // Mission=MOVE, missionTimer=0 mid-tick, C++ MissionClass::AI at the TOP
-        // of the NEXT obj->AI() would normally fire Mission_Move. But because
-        // our updateEntity captures `missionTimerFired` at the top BEFORE the
-        // drive-in-GUARD updateMove runs, the handler gets deferred 1 tick —
-        // producing Mission_Move jitter RNG 1 tick late vs WASM.
-        //
-        // C++ equivalent mechanism (same-tick dispatch): UnitClass::AI
-        // (unit.cpp:406) pre-Commence pops MissionQueue when !IsDriving &&
-        // Is_Door_Closed(), and DriveClass::AI's internal RadioClass::AI =
-        // MissionClass::AI dispatch at techno.cpp:2344 fires Mission_Move on
-        // the SAME tick. We emulate by re-dispatching Mission.MOVE handler
-        // immediately after updateMove if Commence transitioned the entity
-        // to MOVE with Timer=0 (detectable: mission changed AND timer 0 AND
-        // we haven't already dispatched Mission.MOVE jitter this tick).
-        //
-        // SCG11EA tick 28: WASM MCVs fire tag 60010 Mission_Move_foot jitter
-        // at tick 28. Pre-fix, TS fires jitter at tick 29 (1 tick late). With
-        // this fix, jitter consumed same-tick as Commence, matching WASM.
-        if ((entity.mission as Mission) === Mission.MOVE && entity.missionTimer === 0 &&
-            !missionTimerFired) {
-          // Mid-tick Commence just fired: synthesize the Mission.MOVE handler
-          // return path (foot.cpp:492-505 equivalent). moveTarget and isDriving
-          // are still live (drive-in-GUARD keeps them across the transition),
-          // so take the normal RNG-consuming path.
-          if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
-            entity.mission = Mission.GUARD;
-            entity.missionTimer = 0;
-          } else {
-            // C++ foot.cpp:504: Normal_Delay + Random_Pick(0,2)
-            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-          }
-          break; // Handled — skip the GUARD-timer reset block below
-        }
+        // Step 8 cleanup: removed the `!missionTimerFired` same-tick Mission_Move
+        // dispatch block. Under DISPATCH_ORDER_REFACTOR=true (current), all
+        // dispatchMission callers pass missionTimerFired=true, making the
+        // `!missionTimerFired` gate unreachable. The same-tick post-Commence
+        // dispatch is handled uniformly by STAGE F at updateEntity line 4186.
         if (missionTimerFired) {
           // C++ foot.cpp:597-634: dtime = MissionControl[Mission].Normal_Delay()
           // C++ uses the MISSION-SPECIFIC rate, not entity-type rate.
