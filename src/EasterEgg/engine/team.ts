@@ -962,9 +962,11 @@ export class Team {
         }
         finished = false;
       } else {
-        // Arrived — idle
+        // Arrived — idle. C++ team.cpp:1971-1974 calls Enter_Idle_Mode which
+        // queues GUARD (or AREA_GUARD). Session 20: route through assignMission
+        // queue to match.
         if (unit.mission === Mission.MOVE && !unit.moveTarget) {
-          unit.mission = Mission.GUARD;
+          assignMission(unit, Mission.GUARD);
         }
       }
     }
