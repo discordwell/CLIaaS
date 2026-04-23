@@ -5066,16 +5066,13 @@ export class Game {
         // dispatchMission Mission.GUARD case.
         if (entity.isDriving && entity.moveTarget) {
           this.updateMove(entity, /*fromGuardDrive=*/ true);
-          // Same-tick Mission_Move dispatch after per-cell Commence — see
-          // dispatchMission Mission.GUARD for full documentation.
-          if ((entity.mission as Mission) === Mission.MOVE && entity.missionTimer === 0) {
-            if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
-              entity.mission = Mission.GUARD;
-              entity.missionTimer = 0;
-            } else {
-              entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-            }
-          }
+          // Step 7 cleanup: removed the manual `missionTimer = 14 +
+          // Random_Pick(0,2)` jitter fire that was a proxy for Mission_Move
+          // dispatch. STAGE F naturally re-dispatches Mission_Move when
+          // mission==MOVE && missionTimer==0 post-Commence, firing the jitter
+          // RNG once via the Mission_Move handler — matches C++ techno.cpp:2344
+          // dispatch cadence. The previous proxy caused double-fires when
+          // STAGE F also ran (observed as unit[94] firing 3× at SCG11EA t15).
         } else {
           // Not driving → no track to advance; break out (single dispatch).
           return;
