@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-04-23T13:45Z — Sessions 14-13: SCG11EA tick 19 deeper analysis
+
+**Session 13:** Investigated SCG11EA tick 19 extra RNG call (TS unit[8] fires 1 Mission_Move jitter WASM doesn't). Member-state-diff reveals TS/WASM arrays iterate in different order — TS index vs WASM index don't align without cell-level matching. Further investigation requires per-cell entity matching tool, which is beyond current diagnostic infrastructure.
+
+**Session 14:** (above)
+
 ## 2026-04-23T13:30Z — Sessions 14-15: analysis, no code changes
 
 **Session 15:** Claudepad summary only for Session 16.
