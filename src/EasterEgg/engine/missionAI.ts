@@ -156,6 +156,50 @@ export function infantryFireLaunch(type: string): number {
 
 // ── Exported mission functions ──────────────────────────────────────────────
 
+/**
+ * Phase 1 Checkpoint 1.B — Firing_AI extraction for DISPATCH_ORDER_REFACTOR.
+ *
+ * Mirrors C++ TechnoClass::Firing_AI (infantry.cpp:3651 / unit.cpp:2429). Runs
+ * every tick for all missions where the entity has a legal TarCom, a ready
+ * weapon, and the target is in range. This is currently inlined in the
+ * Mission.MOVE / Mission.HUNT / Mission.GUARD (via updateGuard) / Mission.ATTACK
+ * handlers; Phase 1 STAGE C lifts it to a single per-tick call so the order of
+ * operations matches C++:
+ *
+ *   InfantryClass::AI (infantry.cpp:1237-1247):
+ *     - MissionClass::AI()    ← dispatch
+ *     - Firing_AI()           ← THIS function (stage fire-prep + Fire_At)
+ *     - Movement_AI()         ← track / cell advance
+ *     - Commence()            ← pop MissionQueue
+ *
+ * NOTE: Not currently called from `updateEntity`. Exists as a stub for
+ * `DISPATCH_ORDER_REFACTOR` (ships OFF). See index.ts `updateEntity` STAGE C.
+ *
+ * The per-tick `firePrepStage++` bump still happens at the top of updateEntity
+ * (C++ StageClass::Graphic_Logic runs before Firing_AI reads Fetch_Stage).
+ * This function only handles the stage=FireLaunch gate + Fire_At dispatch, by
+ * delegating to `updateAttack` when the gate conditions pass.
+ *
+ * ## C++ refs
+ *   infantry.cpp:3651    InfantryClass::Firing_AI top
+ *   infantry.cpp:1237    InfantryClass::AI Firing_AI dispatch
+ *   infantry.cpp:1639    FIRE_MOVING gate (blocks fire while IsDriving)
+ *   unit.cpp:2429        UnitClass Firing_AI call
+ *   techno.cpp:2392      StageClass::Graphic_Logic (per-tick stage advance)
+ */
+export function runFiringAI(ctx: MissionAIContext, entity: Entity): void {
+  if (!entity.target?.alive) return;
+  if (!entity.weapon) return;
+  if (entity.attackCooldown > 0) return;
+  if (!entity.inRange(entity.target)) return;
+  // C++ infantry.cpp:1639 FIRE_MOVING — blocks fire while driving. Callers that
+  // want the C++ pre-Movement_AI semantics (IsDriving reflects prior tick) must
+  // clear isDriving before calling this function; the legacy Mission.MOVE inline
+  // block does exactly that (temporarily clears + restores isDriving if firePrep
+  // didn't latch).
+  updateAttack(ctx, entity);
+}
+
 /** Attack mission — main combat state machine for ground/naval units.
  *  Handles target acquisition, weapon selection, firing, projectiles, effects. */
 export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
