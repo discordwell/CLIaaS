@@ -398,7 +398,7 @@ void UnitClass::AI(void)
 {
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
-	// Session 16 diagnostic: trace all mobile units ticks 0-5 at UnitClass::AI entry
+	// Session 16 diagnostic: trace all mobile units ticks 0-5 at UnitClass::AI ENTRY
 	{
 		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
 		if (Frame < 6) {
@@ -409,6 +409,14 @@ void UnitClass::AI(void)
 				gate, Target_Legal(NavCom) ? 1:0);
 		}
 	}
+	// Session 15 diagnostic: also trace at end of UnitClass::AI (post-processing)
+	auto __s15_logExit = [this](int phase) {
+		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
+		if (Frame < 6) {
+			agent_debug_log(2000000 + Frame * 10 + phase, Units.ID(this), (int)Mission, (int)MissionQueue,
+				(int)Get_Mission_Timer_Value(), IsDriving ? 1:0, 0, Target_Legal(NavCom) ? 1:0);
+		}
+	};
 	/*
 	**	Act on new orders if the unit is at a good position to do so.
 	*/
@@ -416,7 +424,9 @@ void UnitClass::AI(void)
 //		if (MissionQueue == MISSION_NONE) Enter_Idle_Mode();
 		Commence();
 	}
+	__s15_logExit(1); // post pre-Commence
 	DriveClass::AI();
+	__s15_logExit(2); // post DriveClass::AI
 	if (!IsActive || Height > 0) {
 		return;
 	}
@@ -483,6 +493,7 @@ void UnitClass::AI(void)
 	if (!IsDumping && !IsDriving && Is_Door_Closed()/*&& Mission != MISSION_UNLOAD*/) {
 		Commence();
 	}
+	__s15_logExit(3); // end of UnitClass::AI
 
 	/*
 	**	A cloaked object that is carrying the flag will always shimmer.
