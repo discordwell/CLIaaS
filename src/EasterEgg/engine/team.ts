@@ -27,7 +27,9 @@ import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario
 import { ScenarioRandom } from './random';
 import { findPath } from './pathfinding';
 import type { GameMap } from './map';
-import { TEAM_START_DRIVER_REFACTOR } from './perCellProcess';
+// TEAM_START_DRIVER_REFACTOR flag was removed along with its `false` branch
+// in Step 6 of the C++-parity refactor. The flag remains in perCellProcess.ts
+// as documentation but is no longer read.
 import { assignMission } from './missionLifecycle';
 
 /**
@@ -853,106 +855,52 @@ export class Team {
           // doesn't pop MOVE until the unit arrives at destination. Infantry
           // use a different gate (nonInterruptAnimTicks gesture timer).
           if (!unit.stats.isInfantry && !unit.isAirUnit && !unit.stats.isVessel) {
-            // W2 deleted (Step 2): the retroactive `prior.isDriving=false`
-            // chain-flip had no C++ counterpart. C++ `TeamClass::Coordinate_Move`
-            // (team.cpp:1878-2012) never touches IsDriving. Second-team's
-            // Basic_Path will either succeed on a detour (cellClaims Map steers
-            // around first team's path) or fail naturally via findPath.
+            // C++ `TeamClass::Coordinate_Move` (team.cpp:1878-2012) for vehicles:
+            // only `Assign_Mission(MOVE)` + `Assign_Destination(Target)`. Never
+            // touches IsDriving, Path, or Timer.
             //
-            // vehicleClaims Map retained for cellClaims path-reservation
-            // (simulates live Cell_Occupier that Basic_Path reads per
-            // candidate cell in C++ findpath.cpp:1266-1293).
+            // TS parallel: `assignMission` + `moveTarget` (already done above
+            // at line 1048-ish for generic members). For vehicles only, we
+            // additionally pre-populate `unit.path` via `findPath` (Basic_Path
+            // simulation) with cellClaims path-reservation — matches C++ live
+            // Cell_Occupier reads in findpath.cpp:1266-1293, applied at
+            // team-coordination scope to make same-target team members route
+            // differently.
+            //
+            // IsDriving is NOT touched — `DriveClass::Start_Driver`
+            // (drive.cpp:1270) sets it after rotation completes on the unit's
+            // own DriveClass::AI tick.
             const tcx = Math.floor(this.target.x / CELL_SIZE);
             const tcy = Math.floor(this.target.y / CELL_SIZE);
             const claimKey = tcy * MAP_CELLS + tcx;
             const claims = ctx?.vehicleClaims;
-            const prior = claims?.get(claimKey);
-            // Session 3.3 — TEAM_START_DRIVER_REFACTOR gates the eager-isDriving
-            // flip. When ON: populate unit.path via findPath (mirrors C++ Basic_Path)
-            // and leave isDriving=false; the Mission.GUARD drive-in-GUARD handler
-            // invokes updateMove → followTrackStep which sets isDriving=true when
-            // rotation aligns (C++ parity).
-            //
-            // When OFF (current default): keep the pre-3.3 heuristic that eagerly
-            // flips isDriving=true based on facing match (6/7-scenario heuristic).
-            // vehicleClaims prior-reset ABOVE stays in both modes — load-bearing
-            // for SCG04 tick-3 per plan §8 S3.3.
-            if (TEAM_START_DRIVER_REFACTOR) {
-              // Populate unit.path so updateMove/followTrackStep has a real path
-              // to follow (currently MISSING per plan §8 S3.3).
-              //
-              // Phase 3.4 — pass cellClaims + unit.id so findPath treats cells
-              // already claimed by prior team members as blocked (mirrors C++
-              // Basic_Path transient cell reservation).
-              if (ctx?.map && unit.path.length === 0) {
-                const destCell = { cx: tcx, cy: tcy };
-                const path = findPath(
-                  ctx.map,
-                  unit.cell,
-                  destCell,
-                  true,
-                  unit.isNavalUnit,
-                  unit.stats.speedClass,
-                  undefined, // _isMoving
-                  ctx?.cellClaims,
-                  unit.id,
-                );
-                if (path.length > 0) {
-                  unit.path = path;
-                  unit.pathIndex = 0;
-                  // Claim every cell in the new path so downstream team members
-                  // see them reserved. Matches C++ Basic_Path's overlap bitmap
-                  // behavior at the team coordination scope.
-                  if (ctx?.cellClaims) {
-                    for (const cell of path) {
-                      const k = cell.cy * MAP_CELLS + cell.cx;
-                      if (!ctx.cellClaims.has(k)) {
-                        ctx.cellClaims.set(k, unit.id);
-                      }
+            if (ctx?.map && unit.path.length === 0) {
+              const destCell = { cx: tcx, cy: tcy };
+              const path = findPath(
+                ctx.map,
+                unit.cell,
+                destCell,
+                true,
+                unit.isNavalUnit,
+                unit.stats.speedClass,
+                undefined,
+                ctx?.cellClaims,
+                unit.id,
+              );
+              if (path.length > 0) {
+                unit.path = path;
+                unit.pathIndex = 0;
+                if (ctx?.cellClaims) {
+                  for (const cell of path) {
+                    const k = cell.cy * MAP_CELLS + cell.cx;
+                    if (!ctx.cellClaims.has(k)) {
+                      ctx.cellClaims.set(k, unit.id);
                     }
                   }
                 }
               }
-              // Do NOT set isDriving eagerly — let DriveClass::AI equivalent
-              // (updateMove/followTrackStep via drive-in-GUARD) handle it.
-              claims?.set(claimKey, unit);
-            } else {
-              // C++ Start_Driver is only called from DriveClass::AI AFTER rotation
-              // completes (drive.cpp:1079-1086 Do_Turn returns early while facing
-              // mismatches target). Setting isDriving=true here eagerly blocks the
-              // Commence gate during rotation for SOLO reinforcement vehicles —
-              // Mission stays stuck in GUARD and Mission_Move jitter never fires
-              // (SCG04EA tick 15 miner MNLY). Check the facing alignment with the
-              // first cell of the path before simulating Start_Driver success.
-              // For SAME-cell competing teams, the second team's Start_Driver DOES
-              // succeed even while rotating (C++ TrackNumber assigned mid-Do_Turn),
-              // so keep isDriving=true on the second-team path (prior claim exists).
-              if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
-                unit.isDriving = true;
-              } else {
-                // First team / solo: only set isDriving=true if facing already
-                // matches the first path step direction (Start_Driver succeeded).
-                // Otherwise let Commence pop Mission=MOVE for the rotation phase.
-                const dx = Math.sign(this.target.x - unit.pos.x);
-                const dy = Math.sign(this.target.y - unit.pos.y);
-                // Facing 0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW
-                let targetFacing = unit.facing;
-                if (dx === 0 && dy < 0) targetFacing = 0;
-                else if (dx > 0 && dy < 0) targetFacing = 1;
-                else if (dx > 0 && dy === 0) targetFacing = 2;
-                else if (dx > 0 && dy > 0) targetFacing = 3;
-                else if (dx === 0 && dy > 0) targetFacing = 4;
-                else if (dx < 0 && dy > 0) targetFacing = 5;
-                else if (dx < 0 && dy === 0) targetFacing = 6;
-                else if (dx < 0 && dy < 0) targetFacing = 7;
-                if (unit.facing === targetFacing) {
-                  unit.isDriving = true;
-                }
-                // Else: leave isDriving=false. Commence pops MOVE, rotation
-                // happens under Mission_Move (C++ drive.cpp:1084 Do_Turn return).
-              }
-              claims?.set(claimKey, unit);
             }
+            claims?.set(claimKey, unit);
           }
         }
         finished = false;
