@@ -1,5 +1,40 @@
 # Session Summaries
 
+## 2026-04-23T08:30Z — Autonomous 25-session run: sessions 25-18 findings
+
+**Current divergence state (all 7 scenarios stable at Step 7 baseline):**
+- SCG01=87, SCG03=238, SCG04=3, SCG06=76, SCG07=4, SCG11=15, SCG13=101
+
+**Commits landed sessions 25→18:**
+- `5f48bbf3` — per-member Mission/state diff tool
+- `f30b37b9` — per-team state diff + __teamsList harness hook
+- `747b1e8d` — __traceStageA diagnostic
+- `1e0e05af` — remove cellClaims from team.coordinateMove (C++-faithful cleanup)
+
+**Key findings:**
+
+1. **Team composition/activation matches** — TS and WASM both have 3 teams for SCG04EA (miner + set1 + set2), each with same members, both activate at tick 2.
+
+2. **Per-unit divergence:** WASM W[1] (3TNK at 39,34) at tick 3 has `Mission=GUARD, mq=MOVE, drv=T, NavCom set` (drive-in-GUARD state). TS T[1] pops to `Mission=MOVE`. Both end with `drv=T`.
+
+3. **Scenario init difference:** C++ `UnitClass::Read_INI` at unit.cpp:4708-4709 calls `Assign_Mission + Commence` inline — popping the queue during scenario load. TS's scenario init sets `entity.mission = Mission.X` directly (equivalent end state but different code path). CDTimer mt display offset by 1 is cosmetic.
+
+4. **Unresolved:** Why WASM W[1] pre-Commence blocks at tick 3 with drv=T. Without live WASM-side instrumentation of the exact pre-Commence moment, the mechanism is opaque. Could be `Is_Door_Closed`, `IsDumping`, or some trigger-activation that sets IsDriving pre-pop.
+
+5. **SCG13 E1 id=109** analysis requires matching per-cell (not per-index) since TS/WASM iterate entities in different order. Deferred.
+
+**Diagnostic infrastructure:**
+- `scripts/test-member-state-diff.ts` — per-entity WASM vs TS state
+- `scripts/test-team-state-diff.ts` — per-team state
+- `scripts/test-scg04-stage-a-trace.ts` — STAGE A pop trace
+- `scripts/test-scg04-move-trace.ts` — RNG fire trace
+
+**For future sessions:** The remaining divergence mechanisms are largely opaque to end-of-tick state observation. Progress requires either:
+(a) WASM-side instrumentation (rebuild WASM with per-tick mid-AI state dump)
+(b) Accept current state as stable ±1 tick around architectural C++ semantics differences
+
+
+
 ## 2026-04-23T07:30Z — Step 8 rotation-gate port attempted, reverted
 
 Implemented Do_Turn rotation gate at STAGE A (80f3a07c): when popping
