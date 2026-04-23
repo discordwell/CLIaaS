@@ -842,6 +842,93 @@ export const PCP_DOUBLE_CYCLE_ENABLED = true;
 export const RANDOM_ANIMATE_CPP_FAITHFUL = true;
 
 /**
+ * Phase 3 (JOINT-REFACTOR plan §3) — Port DriveClass::AI's per-tick handling:
+ *   (a) close-enough NavCom clear (drive.cpp:970)
+ *   (b) Basic_Path regeneration on empty-path entry
+ *
+ * ## Purpose
+ *
+ * C++ `DriveClass::AI` (drive.cpp:1304-1399) runs per tick for every vehicle/
+ * vessel regardless of Mission (HUNT/MOVE/GUARD/etc). When Mission==MOVE and
+ * the NavCom is within `Rule.CloseEnoughDistance` (0x180 leptons ≈ 1.5 cells),
+ * drive.cpp:970 calls `Assign_Destination(TARGET_NONE)` — clearing the NavCom
+ * unconditionally. This is how C++ handles patrol teams whose move target is
+ * already close (e.g. SCG11EA 4TNK[70] unit at (60,58) moving toward (62,59)
+ * blocked by friendly tank at (61,59)): NavCom cleared → Enter_Idle_Mode →
+ * GUARD → Mission_Guard_general jitter fires at the correct tick.
+ *
+ * Additionally, when the vehicle has NavCom but no Path[] (e.g. just after
+ * Team::Coordinate_Move queued MOVE and populated moveTarget, but path was
+ * not pre-populated), drive.cpp:906 calls `Start_Of_Move` which calls
+ * `Basic_Path` to fill Path[] and fire Start_Driver. TS currently lets
+ * `updateMove` lazily findPath at first missionTimer=0 fire. Porting the
+ * regen logic into `runDriveClassAI` closes the per-tick gap for GUARD-mode
+ * vehicles drive-in-GUARD with NavCom but no path.
+ *
+ * ## Mechanism (flag ON)
+ *
+ * Inside `runDriveClassAI` before the double-cycle loop (index.ts ~4915):
+ *
+ *   if (Mission == MOVE) {
+ *     if (dist(entity, moveTarget) < 0x180) {
+ *       moveTarget = null; path = []; pathIndex = 0;
+ *       enterIdleMode();  // queues GUARD via missionQueue
+ *       return;
+ *     }
+ *   }
+ *   if (moveTarget && path.length === 0) {
+ *     const path = findPath(map, cell, destCell, ...);
+ *     if (path.length === 0) enterIdleMode();
+ *     else { entity.path = path; entity.pathIndex = 0; }
+ *   }
+ *
+ * Gate rationale:
+ *   - `!fromGuardDrive`: the close-enough clear must only fire when the
+ *     DriveClass::AI runs with Mission==MOVE from the primary dispatch
+ *     (drive.cpp:1304 top), not the drives-in-GUARD re-entry path which
+ *     already handles arrival via `setMissionIdle` in updateMove.
+ *   - `!entity.stats.isInfantry`: infantry use InfantryClass::Movement_AI
+ *     which has its own Enter_Idle_Mode path.
+ *   - `!entity.isAirUnit`: aircraft don't use Path[] or NavCom semantics.
+ *
+ * ## Shipping OFF
+ *
+ * Plan §3 checkpoint ladder requires landing the mechanism gated OFF first
+ * so the pre-Commence / close-enough / path-regen logic can be reviewed
+ * independently, then flipping ON in a dedicated refactor commit
+ * (checkpoint 3.5).
+ *
+ * ## Expected target scenarios (flag ON)
+ *
+ *   SCG11EA tick 57: 4TNK[70] at (60,58) in Mission.MOVE with moveTarget
+ *   (62,59) blocked by friendly 4TNK at (61,59). Close-enough clears
+ *   NavCom → enterIdleMode queues GUARD → Mission_Guard_general fires at
+ *   tick 57 matching WASM's 60040 tag.
+ *
+ * ## Risks
+ *
+ * Patrol vehicles in sparse terrain (SCG04, SCG07) may hit close-enough
+ * earlier than expected — the 0x180-lepton threshold is 1.5 cells. If a
+ * team queues a move to a cell already adjacent to the unit, the clear
+ * fires immediately and Mission_Move jitter doesn't consume RNG. Mitigated
+ * by the `!fromGuardDrive` gate (drives-in-GUARD still processes normally).
+ *
+ * ## C++ refs
+ *
+ *   drive.cpp:906-1277   DriveClass::Start_Of_Move → Basic_Path
+ *   drive.cpp:970        Close-enough NavCom clear (Mission==MOVE gate)
+ *   drive.cpp:1304-1399  DriveClass::AI per-tick dispatch
+ *   foot.cpp:520-539     Mission_Move (Enter_Idle_Mode guard + jitter)
+ *   rules.ini [General] CloseEnough=2.75 (override of C++ 0x0280 default)
+ *
+ * ## TS refs
+ *
+ *   src/EasterEgg/engine/index.ts ~4887  runDriveClassAI (integration point)
+ *   src/EasterEgg/engine/missionLifecycle.ts  enterIdleMode
+ */
+export const DRIVE_CLASS_AI_PORT = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

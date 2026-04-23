@@ -221,7 +221,8 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR, PCP_DOUBLE_CYCLE_ENABLED } from './perCellProcess';
+import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR, PCP_DOUBLE_CYCLE_ENABLED, DRIVE_CLASS_AI_PORT } from './perCellProcess';
+import { enterIdleMode } from './missionLifecycle';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -4923,6 +4924,86 @@ export class Game {
       // the target. Not subject to DriveClass::AI double-cycle.
       this._infantryWalkStep(entity);
       return;
+    }
+
+    // Phase 3 (JOINT-REFACTOR §3.2) — DriveClass::AI close-enough NavCom clear +
+    // Basic_Path regeneration. Gated on DRIVE_CLASS_AI_PORT. See the flag
+    // docstring in perCellProcess.ts for the full rationale.
+    //
+    // Close-enough clear (drive.cpp:970):
+    //   if (Mission == MOVE && Distance(NavCom) < Rule.CloseEnoughDistance) {
+    //     Assign_Destination(TARGET_NONE);  // NavCom cleared
+    //     // Mission_Move top-of-handler guard at foot.cpp:520-524 detects
+    //     // !Target_Legal(NavCom) && !IsDriving && MissionQueue==NONE →
+    //     // Enter_Idle_Mode() → Mission=GUARD (or AREA_GUARD).
+    //   }
+    //
+    // Path regen (drive.cpp:906 Start_Of_Move calls Basic_Path when Path[] empty):
+    //   if (moveTarget && path.length === 0) {
+    //     path = findPath(cell, destCell, ...);
+    //     if (path.length === 0) enterIdleMode();  // Basic_Path failure
+    //   }
+    if (DRIVE_CLASS_AI_PORT
+        && !entity.isAirUnit
+        && entity.moveTarget) {
+      // (a) Close-enough NavCom clear — Mission==MOVE only.
+      if (m0 === Mission.MOVE) {
+        // rules.ini [General] CloseEnough=2.75 → 2.75 * 256 = 704 leptons.
+        // C++ drive.cpp:970 uses Rule.CloseEnoughDistance (default 0x0280 =
+        // 640 leptons, overridden by rules.ini to 704).
+        const CLOSE_ENOUGH_LEPTONS = 704;
+        const dxL = entity.moveTarget.lx - entity.leptonX;
+        const dyL = entity.moveTarget.ly - entity.leptonY;
+        const adx = Math.abs(dxL), ady = Math.abs(dyL);
+        // Octagonal Distance() approximation (C++ coord.cpp Distance).
+        const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+        if (octDist < CLOSE_ENOUGH_LEPTONS) {
+          entity.moveTarget = null;
+          entity.path = [];
+          entity.pathIndex = 0;
+          // enterIdleMode queues GUARD via missionQueue — the post-dispatch
+          // Commence block at ~index.ts:4157 pops same-tick on vehicles when
+          // !IsDriving. For SCG11 t57, unit[70] is not driving (Basic_Path
+          // never fired Start_Driver), so the pop fires this tick and
+          // Mission_Guard_general consumes its Random_Pick(0,2) RNG.
+          enterIdleMode(entity);
+          return;
+        }
+      }
+
+      // (b) Path regeneration when moveTarget is set but path is empty. This
+      // mirrors C++ drive.cpp:906 Start_Of_Move → Basic_Path entry. Only fires
+      // for Mission==MOVE or drive-in-GUARD (isDriving + Mission==GUARD).
+      const isDriveInGuard = (m0 === Mission.GUARD || m0 === Mission.STICKY)
+        && entity.isDriving;
+      if ((m0 === Mission.MOVE || isDriveInGuard)
+          && entity.path.length === 0) {
+        const destCell = {
+          cx: Math.floor(entity.moveTarget.lx / 256),
+          cy: Math.floor(entity.moveTarget.ly / 256),
+        };
+        // Skip if already at destination cell — C++ Basic_Path returns empty
+        // for this case and drive.cpp:970's close-enough check already handled
+        // Mission==MOVE above.
+        if (destCell.cx !== entity.cell.cx || destCell.cy !== entity.cell.cy) {
+          const newPath = findPath(
+            this.map, entity.cell, destCell,
+            /*ignoreOccupancy=*/ true,
+            entity.isNavalUnit, entity.stats.speedClass,
+          );
+          if (newPath.length === 0) {
+            // Basic_Path failure — Enter_Idle_Mode (drive.cpp:992 Try_Try_Again
+            // exhausted → Assign_Mission(MISSION_GUARD)).
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
+            enterIdleMode(entity);
+            return;
+          }
+          entity.path = newPath;
+          entity.pathIndex = 0;
+        }
+      }
     }
 
     // Double-cycle loop for MOVE + drive-in-GUARD. C++ drive.cpp:1340-1345
