@@ -3385,6 +3385,17 @@ bool UnitClass::Start_Driver(COORDINATE & headto)
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
 
+	// Session 14 diagnostic: log every Start_Driver entry (catches IsDriving flip)
+	{
+		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
+		if (Frame < 6) {
+			// tag 3000000+Frame, target unit id, Mission, MissionQueue, Timer, pre-IsDriving, headto cell X, headto cell Y
+			agent_debug_log(3000000 + Frame, Units.ID(this), (int)Mission, (int)MissionQueue,
+				(int)Get_Mission_Timer_Value(), IsDriving ? 1 : 0,
+				headto ? Cell_X(Coord_Cell(headto)) : -1,
+				headto ? Cell_Y(Coord_Cell(headto)) : -1);
+		}
+	}
 	if (DriveClass::Start_Driver(headto) && IsActive) {//BG IsActive can be cleared by Start_Driver
 		Mark_Track(headto, MARK_DOWN);
 		return(true);

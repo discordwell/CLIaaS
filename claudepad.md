@@ -1,5 +1,25 @@
 # Session Summaries
 
+## 2026-04-23T08:40Z — Session 14: root cause of SCG04 t3 divergence pinpointed
+
+**Finding:** In C++, `DriveClass::Assign_Destination` (drive.cpp:638-640) synchronously calls `Start_Of_Move()` when `!IsDriving && Mission != MISSION_UNLOAD`. On path success with matching facing, `Start_Of_Move` invokes `Start_Driver` which flips `IsDriving=true`. This chain fires from **TeamClass::AI → Coordinate_Move → Assign_Destination** during the Team.AI phase of LogicClass::AI, BEFORE the unit's own AI iteration runs.
+
+**Trace evidence (SCG04 W[1] tick 2):**
+- `[4100002]` pre-Team.AI marker
+- `[3000002,unit=2,m=5,mq=2,timer=40,pre-drv=0,dest=(41,35)]` — Start_Driver call
+- `[4200002]` post-Team.AI marker
+- `[1000002,unit=0,...,drv=0]` — unit[0].AI starts
+- `[1000002,unit=2,...,drv=1]` — unit[2].AI starts with drv already flipped
+
+**Implication for refactor plan:** The plan's W3 premise ("C++ Coordinate_Move never sets IsDriving") was incomplete. Coordinate_Move itself doesn't, but its call to `Assign_Destination` does transitively via Start_Of_Move. Deleting W3 (eager isDriving in TS coordinateMove) caused the regression because TS `moveTarget = ...` does NOT trigger the TS Start_Of_Move equivalent.
+
+**TS port needed (Session 13 target):** In `team.coordinateMove`, when setting `moveTarget` on a vehicle, invoke the Start_Of_Move TS equivalent (path validation + facing check + cell-can-enter check + isDriving=true on success). The existing `runDriveClassAI` in `perCellProcess.ts` has the full logic — extract/reuse it at team-coordinate scope.
+
+**Instrumentation landed (for Session 13 iteration):**
+- `UnitClass::Start_Driver` entry (unit.cpp:3389+)
+- `LogicClass::AI` 4-phase markers: entry (4000000+Frame), pre-Team (4100000), post-Team (4200000), pre-Object (4300000)
+- agent_harness ring buffer fixed to full 64 entries
+
 ## 2026-04-23T08:30Z — Autonomous 25-session run: sessions 25-18 findings
 
 **Current divergence state (all 7 scenarios stable at Step 7 baseline):**

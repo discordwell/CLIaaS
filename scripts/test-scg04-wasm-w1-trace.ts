@@ -24,9 +24,7 @@ test('SCG04 W1 tick-3 UnitClass::AI entry trace', async ({ browser }) => {
   const state = await page.evaluate(async () => {
     const r = (window as any).__agentStep(3);
     const res = r?.then ? await r : r;
-    const s = res?.state ?? res;
-    const M = (window as any).Module;
-    return JSON.parse(M.ccall('agent_get_state','string',[],[]));
+    return res?.state ?? res;
   });
 
   console.log('\n=== SCG04 W[1] tick-3 UnitClass::AI entry trace ===');

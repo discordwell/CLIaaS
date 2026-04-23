@@ -71,11 +71,11 @@ static int g_debug_move_idx = 0;
 static int g_debug_move_count = 0;
 
 void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h) {
-	auto &e2 = g_debug_moves[g_debug_move_idx % 32];
+	auto &e2 = g_debug_moves[g_debug_move_idx % 64];
 	e2.preLX = a; e2.preLY = b; e2.postLX = c; e2.postLY = d;
 	e2.dir = e; e2.dist = f; e2.headLX = g; e2.headLY = h;
 	g_debug_move_idx++;
-	g_debug_move_count++;
+	if (g_debug_move_count < 64) g_debug_move_count++;
 }
 
 /* --- ID encoding: (rtti << 16) | heap_index --- */
