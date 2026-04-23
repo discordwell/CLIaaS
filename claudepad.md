@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-04-22T20:30Z — Session wind-down (+76 ticks across 7 scenarios, 25 commits)
+
+**Final:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=**57**, SCG13=101. Start 536 → End 612. **Net +76.**
+
+**Biggest win:** `d8239b49` HIND Mission_Attack two-stage landed transition (SCG11 32→57, +25).
+
+**PCP refactor landed (Sessions 1-3 + 4 stubs):** all infrastructure flagged. `PER_CELL_TRACK_JUMP_ENABLED`, `FOOT_PER_CELL_ENABLED`, `PCP_PATH_SHORTEN_ENABLED`, `AREA_GUARD_APPROACH_RETRY` all ON. `TEAM_START_DRIVER_REFACTOR` + `MOVEMENT_AI_MOVE_NAVCOM_GUARD` OFF (cascades).
+
+**Refuted hypotheses (valuable negative results, docs tests landed):** CDTimer end-of-tick (2 attempts), SCG01 bullet Logic-idx, structure iteration order, findPath-vs-Basic_Path algorithm.
+
+**Remaining blockers (all architectural with documented cascades):** SCG01 Mission_Guard cadence; SCG03 CDTimer Arm-return; SCG04 3TNK Path never populated; SCG06 Approach_Target re-call cadence; SCG07 Random_Animate gate + vessel PCP; SCG11 Coordinate_Move joint; SCG13 Movement_AI NavCom-guard.
+
+**C++ source constraint discovered:** only `agent_harness.cpp`, `aircraft.cpp`, `input_inject.cpp`, `random.cpp` in-repo. Prior C++ refs (drive/foot/techno/unit/infantry/mission.cpp) came from training-knowledge + WASM behavioral validation. Rebuilt WASM has RTTI + Logic order dump available.
+
+**Tooling added:** `scripts/test-wasm-logic-dump.ts`, `scripts/test-scg11-sam-timer.ts`, `scripts/test-scg11ea-mcv-trace.ts`, `scripts/test-scg07-subz-wasm-trace.ts`, `scripts/test-scg11-mmth1-trace.ts`, `src/EasterEgg/engine/perCellProcess.ts`, `src/EasterEgg/PCP-JOINT-REFACTOR-PLAN.md`.
+
 ## 2026-04-22T19:50Z — findPath cpp-parity test; SCG06 t76 residual is NOT a findPath bug
 
 **Result:** No runtime code change. Wrote `cpp-parity-findpath-basic-path.test.ts` (9 tests) pinning TS `findPath` algorithmic invariants against C++ `Find_Path` (findpath.cpp:435-752) / `Basic_Path` (foot.cpp:313-472). All 7 scenarios unchanged.
