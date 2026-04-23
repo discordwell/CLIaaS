@@ -4116,11 +4116,17 @@ export class Game {
       // timer dispatch. Idempotent — updateAttack gates on attackCooldown and
       // firePrep so repeat calls within the same tick are no-ops.
       //
-      // Skipped when STAGE B already dispatched a handler that runs its own
-      // Firing_AI swap (updateGuard lines 1208-1220, updateAreaGuard lines
-      // 1505-1521). Those handlers return after the swap, and we don't want
-      // a second attack this tick. Detected via `missionHandlerRan` flag.
-      if (!missionHandlerRan) {
+      // Skipped when:
+      //   (1) STAGE B already dispatched a handler that runs its own Firing_AI
+      //       swap (updateGuard lines 1208-1220, updateAreaGuard lines 1505-1521).
+      //       Those handlers return after the swap — avoid double-fire.
+      //   (2) Mission.MOVE infantry — STAGE D's MOVE branch has a dedicated
+      //       firing-gate that temporarily clears isDriving across the
+      //       updateAttack call to bypass FIRE_MOVING (infantry.cpp:1639).
+      //       runFiringAI can't replicate that without mission-specific wiring.
+      const skipFiringAIForMoveInfantry =
+        entity.stats.isInfantry && (entity.mission as Mission) === Mission.MOVE;
+      if (!missionHandlerRan && !skipFiringAIForMoveInfantry) {
         this._runMissionAI(ctx => _runFiringAI(ctx, entity));
       }
 
@@ -4748,8 +4754,12 @@ export class Game {
 
     if (m === Mission.MOVE) {
       // Mission.MOVE infantry: Firing_AI-before-Movement_AI (infantry.cpp:1237)
-      // + updateMove. Mirrors dispatchMission's Mission.MOVE inline block so
-      // that between timer fires the unit still moves toward moveTarget.
+      // + updateMove. Lifted verbatim from dispatchMission's Mission.MOVE
+      // inline block. STAGE C's runFiringAI does NOT handle Mission.MOVE
+      // infantry because the FIRE_MOVING gate (infantry.cpp:1639) would block
+      // fire while IsDriving — legacy fix is to temporarily clear isDriving
+      // across the updateAttack call (mirrors C++ pre-Movement_AI semantics
+      // where IsDriving still reflects prior tick's state).
       let firingStarted = false;
       if (entity.target?.alive && entity.weapon
           && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
