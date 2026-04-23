@@ -54,6 +54,20 @@ export interface TeamAIContext {
    *  unit.path at team-move-queue time (mirrors C++ Basic_Path). Optional for
    *  back-compat with pre-3.3 callers; when undefined, findPath is skipped. */
   map?: GameMap;
+  /**
+   * Phase 3 (§3.4) — per-team-ai-pass cell reservation map. Keys are
+   * `cy*MAP_CELLS + cx`, values are entity IDs. When a Team member's
+   * coordinateMove calls findPath, we pass this map + the unit id; cells
+   * already claimed by OTHER members are treated as impassable for this
+   * call. After the call, the unit claims its destination cell so later
+   * members see the reservation.
+   *
+   * Separate from `vehicleClaims` (which tracks Entity references for the
+   * retroactive-isDriving flip used by pre-3.3 SCG04 tick-3 parity). The
+   * two coexist until the `TEAM_START_DRIVER_REFACTOR` flip retires
+   * `vehicleClaims` in favor of `cellClaims`.
+   */
+  cellClaims?: Map<number, number>;
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -913,6 +927,10 @@ export class Team {
             if (TEAM_START_DRIVER_REFACTOR) {
               // Populate unit.path so updateMove/followTrackStep has a real path
               // to follow (currently MISSING per plan §8 S3.3).
+              //
+              // Phase 3.4 — pass cellClaims + unit.id so findPath treats cells
+              // already claimed by prior team members as blocked (mirrors C++
+              // Basic_Path transient cell reservation).
               if (ctx?.map && unit.path.length === 0) {
                 const destCell = { cx: tcx, cy: tcy };
                 const path = findPath(
@@ -921,11 +939,25 @@ export class Team {
                   destCell,
                   true,
                   unit.isNavalUnit,
-                  unit.stats.speedClass
+                  unit.stats.speedClass,
+                  undefined, // _isMoving
+                  ctx?.cellClaims,
+                  unit.id,
                 );
                 if (path.length > 0) {
                   unit.path = path;
                   unit.pathIndex = 0;
+                  // Claim every cell in the new path so downstream team members
+                  // see them reserved. Matches C++ Basic_Path's overlap bitmap
+                  // behavior at the team coordination scope.
+                  if (ctx?.cellClaims) {
+                    for (const cell of path) {
+                      const k = cell.cy * MAP_CELLS + cell.cx;
+                      if (!ctx.cellClaims.has(k)) {
+                        ctx.cellClaims.set(k, unit.id);
+                      }
+                    }
+                  }
                 }
               }
               // Do NOT set isDriving eagerly — let DriveClass::AI equivalent
@@ -1353,10 +1385,15 @@ export function clearAllTeams(): void {
  * This matches C++ Logic_AI() iterating through Teams[] and calling AI() on each.
  */
 export function updateAllTeams(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
-  // Fresh per-tick vehicleClaims map for Basic_Path path-reservation emulation
-  // (see TeamAIContext doc). Overrides any caller-provided map so tick boundaries
-  // always reset cleanly.
-  const mergedCtx: TeamAIContext = { ...(ctx ?? {}), vehicleClaims: new Map() };
+  // Fresh per-tick vehicleClaims + cellClaims maps for Basic_Path path-
+  // reservation emulation (see TeamAIContext doc). Overrides any caller-
+  // provided maps so tick boundaries always reset cleanly. Phase 3.4 adds
+  // cellClaims for the TEAM_START_DRIVER_REFACTOR findPath codepath.
+  const mergedCtx: TeamAIContext = {
+    ...(ctx ?? {}),
+    vehicleClaims: new Map(),
+    cellClaims: new Map(),
+  };
   for (const team of _activeTeams) {
     if (!team.dissolved) {
       team.ai(waypoints, mergedCtx);
