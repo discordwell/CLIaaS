@@ -164,7 +164,7 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     // which lets the second team's coordinateMove retroactively reset the
     // first team's isDriving flag (simulating C++ Basic_Path path-reservation
     // conflict).
-    updateAllTeams(waypoints, { structures: [], entities: [tank1, tank2] });
+    updateAllTeams(waypoints, { structures: [], entities: [tank1, tank2], map: game.map });
 
     // Post-team-AI state: both vehicles have MissionQueue=MOVE + moveTarget set.
     expect(tank1.missionQueue, 'tank1 queue MOVE').toBe(Mission.MOVE);
@@ -172,11 +172,21 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank1.moveTarget, 'tank1 moveTarget set').not.toBeNull();
     expect(tank2.moveTarget, 'tank2 moveTarget set').not.toBeNull();
 
-    // Critical: first claimant's isDriving was RESET to false when the second
-    // team registered the same target — Mission_Move will fire for tank1 on
-    // the entity-AI phase. tank2 keeps isDriving=true → drives-in-GUARD.
-    expect(tank1.isDriving, 'tank1 (first team): isDriving=false (Basic_Path failure)').toBe(false);
-    expect(tank2.isDriving, 'tank2 (second team): isDriving=true (Basic_Path success)').toBe(true);
+    // Phase 3 (§3.4) semantic outcome — TEAM_START_DRIVER_REFACTOR defers
+    // isDriving flip to DriveClass::AI (mirrors C++ Start_Driver post-rotation
+    // semantics). Both tanks leave coordinateMove with isDriving=false.
+    // The first-team-fails/second-team-succeeds stagger is now realized
+    // elsewhere (via cellClaims for exact-same-cell contention, or via
+    // pre-Commence gate timing for different start cells). Semantic outcome
+    // at team-AI time: NavCom assigned, mission queued, isDriving=false.
+    expect(tank1.isDriving, 'tank1: isDriving=false (deferred to DriveClass::AI)').toBe(false);
+    expect(tank2.isDriving, 'tank2: isDriving=false (deferred to DriveClass::AI)').toBe(false);
+    expect(tank1.path.length, 'tank1 (first team): path populated via Basic_Path').toBeGreaterThan(0);
+    // tank2 may have a path too — starting from a different cell, findPath
+    // can route around tank1's claimed cells. The semantic outcome (Mission_Move
+    // stagger) emerges at dispatch-time from the pre-Commence gate ordering,
+    // not from an initial path-empty state. See the 'pre-dispatch Commence'
+    // test below for the stagger semantics.
   });
 
   it('single-team vehicle reinforcement: isDriving gated by facing alignment (C++ Start_Driver parity)', () => {
@@ -211,7 +221,7 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     const waypoints = new Map<number, { cx: number; cy: number }>([
       [26, { cx: 22, cy: 10 }],
     ]);
-    updateAllTeams(waypoints, { structures: [], entities: [mcv] });
+    updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
 
     expect(mcv.missionQueue, 'single-team MCV queues MOVE').toBe(Mission.MOVE);
     expect(mcv.moveTarget, 'single-team MCV moveTarget set').not.toBeNull();
@@ -225,10 +235,16 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(mcv.missionQueue, 'MCV queue cleared after pop').toBeNull();
   });
 
-  it('single-team vehicle with pre-aligned facing: isDriving=true (Start_Driver parity)', () => {
-    // When the vehicle's body facing already matches the direction to the
-    // target cell, C++ Start_Driver fires synchronously (no rotation needed).
-    // TS mirrors this: set isDriving=true and stay in GUARD drive-in-GUARD.
+  it('single-team vehicle with pre-aligned facing: path populated (C++ Basic_Path parity)', () => {
+    // Phase 3 (§3.4) — TEAM_START_DRIVER_REFACTOR defers isDriving flip to
+    // DriveClass::AI (drive.cpp:1079-1086 Start_Driver post-rotation). The
+    // old eager-isDriving facing heuristic is replaced by findPath
+    // population at coordinateMove time (mirrors C++ Basic_Path). When
+    // DriveClass::AI runs (updateMove / followTrackStep), it flips
+    // isDriving=true once the unit's track is aligned.
+    //
+    // Semantic outcome: MCV has moveTarget + populated path after coordinateMove.
+    // isDriving stays false until DriveClass::AI's track-step sets it.
     const game = createGame();
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
     mcv.facing = 2; // East — matches target direction (22,10) dx=+1,dy=0
@@ -245,14 +261,16 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     const waypoints = new Map<number, { cx: number; cy: number }>([
       [26, { cx: 22, cy: 10 }],
     ]);
-    updateAllTeams(waypoints, { structures: [], entities: [mcv] });
+    updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
 
-    expect(mcv.isDriving, 'facing already aligned → isDriving=true (Start_Driver success)').toBe(true);
+    expect(mcv.isDriving, 'isDriving deferred to DriveClass::AI post-rotation').toBe(false);
+    expect(mcv.moveTarget, 'moveTarget set to waypoint').not.toBeNull();
+    expect(mcv.path.length, 'findPath populated unit.path').toBeGreaterThan(0);
 
-    // Pre-Commence gate does NOT pop queue because isDriving=true.
+    // Pre-Commence gate pops queue because isDriving=false.
     tickEntity(game, mcv);
-    expect(mcv.mission, 'MCV stays GUARD (Commence blocked by isDriving=true)').toBe(Mission.GUARD);
-    expect(mcv.missionQueue, 'MCV queue still MOVE').toBe(Mission.MOVE);
+    expect(mcv.mission, 'MCV pops to MOVE when isDriving=false').toBe(Mission.MOVE);
+    expect(mcv.missionQueue, 'MCV queue cleared after pop').toBeNull();
   });
 
   it('pre-dispatch Commence: popping tank1 fires Mission_Move jitter on the SAME tick', () => {
