@@ -65,6 +65,107 @@
  *   foot.cpp:492-539           FootClass::Mission_Move (tag 60010 jitter)
  */
 
+// ============================================================================
+// Phase 0 instrumentation — DEBUG_PCP_TRACE (plan §0 line 136).
+//
+// Self-contained block: env-gated PCP call trace. When
+// `process.env.DEBUG_PCP_TRACE === "1"`, every unit/foot per-cell-process call
+// logs `(tick, entityId, why, beforeState, afterState)` to the global buffer.
+// When the env var is unset, _PCP_TRACE_ENABLED is `false` and `pcpTrace()` is
+// a single boolean-check early-return — zero allocation, zero behavior change.
+//
+// Consumers: scripts/test-dispatch-order.ts reads globalThis.__pcpTraceBuffer.
+// Reset via globalThis.__pcpTraceReset().
+//
+// Placed at top of file as a self-contained block so it merges cleanly against
+// the Phase 1 agent's edits further down in unitPerCellProcess/footPerCellProcess.
+// ============================================================================
+const _PCP_TRACE_ENABLED: boolean =
+  typeof process !== 'undefined' &&
+  typeof process.env !== 'undefined' &&
+  process.env.DEBUG_PCP_TRACE === '1';
+
+export interface PCPTraceEntry {
+  tick: number;
+  entityId: number | string;
+  why: number; // PCPType value
+  beforeState: {
+    mission: string | number | null;
+    missionQueue: string | number | null;
+    missionTimer: number;
+    cx: number;
+    cy: number;
+    moveTargetLX?: number;
+    moveTargetLY?: number;
+  };
+  afterState: {
+    mission: string | number | null;
+    missionQueue: string | number | null;
+    missionTimer: number;
+    cx: number;
+    cy: number;
+    moveTargetLX?: number;
+    moveTargetLY?: number;
+  };
+  navComCleared: boolean;
+  commenceFired: boolean;
+}
+
+// Lazily attach buffer to globalThis so test scripts can read it regardless of
+// bundler scope. No-op at import time; only touched when the env flag is set.
+function _pcpTraceBuffer(): PCPTraceEntry[] {
+  const g = globalThis as any;
+  if (!Array.isArray(g.__pcpTraceBuffer)) g.__pcpTraceBuffer = [];
+  return g.__pcpTraceBuffer as PCPTraceEntry[];
+}
+
+if (_PCP_TRACE_ENABLED) {
+  (globalThis as any).__pcpTraceReset = () => {
+    (globalThis as any).__pcpTraceBuffer = [];
+  };
+  (globalThis as any).__pcpTraceEnabled = true;
+}
+
+/**
+ * Snapshot an entity's PCP-relevant state for before/after comparison.
+ * Called only from the trace path (when _PCP_TRACE_ENABLED is true).
+ */
+function _pcpSnapshot(entity: any): PCPTraceEntry['beforeState'] {
+  return {
+    mission: entity?.mission ?? null,
+    missionQueue: entity?.missionQueue ?? null,
+    missionTimer: entity?.missionTimer ?? 0,
+    cx: entity?.cell?.cx ?? -1,
+    cy: entity?.cell?.cy ?? -1,
+    moveTargetLX: entity?.moveTarget?.lx,
+    moveTargetLY: entity?.moveTarget?.ly,
+  };
+}
+
+/**
+ * Record a single PCP trace entry. Hot-path guard: when the env flag is
+ * unset, `_PCP_TRACE_ENABLED` is `false` and this is a single boolean check.
+ */
+function _pcpTraceRecord(
+  entity: any,
+  why: number,
+  beforeState: PCPTraceEntry['beforeState'],
+  result: { navComCleared: boolean; commenceFired: boolean }
+): void {
+  if (!_PCP_TRACE_ENABLED) return;
+  const g = globalThis as any;
+  const tick = typeof g.__agentTick === 'function' ? g.__agentTick() : (g.__currentTick ?? -1);
+  _pcpTraceBuffer().push({
+    tick,
+    entityId: entity?.id ?? entity?.logicIdx ?? -1,
+    why,
+    beforeState,
+    afterState: _pcpSnapshot(entity),
+    navComCleared: result.navComCleared,
+    commenceFired: result.commenceFired,
+  });
+}
+
 /**
  * Per-cell-process boundary type. Mirrors C++ `PCPType` (defsg.h:122 or
  * drive.h depending on build — the three-value enum).
@@ -662,12 +763,16 @@ export interface PCPResult {
 export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPResult {
   const result: PCPResult = { navComCleared: false, commenceFired: false };
 
+  // Phase 0 DEBUG_PCP_TRACE — single bool check when flag unset (zero cost).
+  const _pcpBefore = _PCP_TRACE_ENABLED ? _pcpSnapshot(entity) : null;
+
   // PCP_ROTATION: MCV-deploy branch and nothing else. Not currently used
   // by the TS engine's rotation path (rotation is decoupled from track
   // movement). Placeholder for future MCV-deploy parity work.
   if (why === PCPType.PCP_ROTATION) {
     // TODO(MCV deploy): invoke deploy-after-rotation path when IsDeploying
     // is set. C++ unit.cpp:1623-1626.
+    if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
     return result;
   }
 
@@ -677,6 +782,7 @@ export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPRe
   // so we intentionally no-op. A future refactor should move those calls
   // here for a cleaner one-to-one mapping with C++ sub-cases.
   if (why === PCPType.PCP_DURING) {
+    if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
     return result;
   }
 
@@ -713,6 +819,7 @@ export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPRe
     }
   }
 
+  if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
   return result;
 }
 
@@ -806,12 +913,21 @@ export function footPerCellProcess<M>(
 ): PCPResult {
   const result: PCPResult = { navComCleared: false, commenceFired: false };
 
+  // Phase 0 DEBUG_PCP_TRACE — single bool check when flag unset (zero cost).
+  const _pcpBefore = _PCP_TRACE_ENABLED ? _pcpSnapshot(entity) : null;
+
   // Only PCP_END runs the chain; PCP_DURING / PCP_ROTATION are no-ops for
   // infantry (infantry don't have rotation tracks; PCP_DURING is vehicle-only).
-  if (why !== PCPType.PCP_END) return result;
+  if (why !== PCPType.PCP_END) {
+    if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+    return result;
+  }
 
   // Master gate — Session 2.1 ships OFF; Session 2.3 flips ON after wiring.
-  if (!FOOT_PER_CELL_ENABLED) return result;
+  if (!FOOT_PER_CELL_ENABLED) {
+    if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+    return result;
+  }
 
   // ---- 1. Path-shorten (foot.cpp:1471-1483) — Session 3.1 ----
   //
@@ -876,5 +992,6 @@ export function footPerCellProcess<M>(
     result.commenceFired = true;
   }
 
+  if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
   return result;
 }
