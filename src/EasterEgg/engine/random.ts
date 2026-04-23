@@ -71,8 +71,8 @@ export class RandomClass {
     if (minval === maxval) return minval;
     if ((globalThis as any).__traceAllRng) {
       const t = (globalThis as any).__currentGameTick;
-      if (t === 3 && minval === 0 && maxval === 2) {
-        const stk = new Error().stack?.split('\n').slice(2, 8).join(' | ') ?? '';
+      if (t === 3) {
+        const stk = new Error().stack?.split('\n').slice(2, 7).join(' | ') ?? '';
         console.log(`[RNG] t=${t} min=${minval} max=${maxval} tag=${(this as any)._sourceTag} stk=${stk}`);
       }
     }
