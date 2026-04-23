@@ -725,6 +725,63 @@ export const DISPATCH_ORDER_REFACTOR = true;
 export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = true;
 
 /**
+ * Phase 5 — DriveClass::AI double-cycle per tick (JOINT-REFACTOR plan §5).
+ *
+ * ## Purpose
+ *
+ * Models C++ `DriveClass::AI` (drive.cpp:1304-1399) running its `While_Moving`
+ * → `Start_Of_Move` → `While_Moving` inner dispatch up to **two** times per
+ * `obj->AI()` tick when the current track completes with more path remaining.
+ * The second cycle is what produces the "unexplained" double- and triple-fires
+ * of `Mission_Move` for the same vessel/vehicle within a single tick.
+ *
+ * Likewise, `VesselClass::AI` (vessel.cpp:571-666) gates a SECOND `Commence()`
+ * call between the pre-DriveClass::AI and post-DriveClass::AI bookends on
+ * `Is_Door_Closed()`. When the door is closed (the default outside of LST
+ * unload sequences), both bookends fire, potentially popping MissionQueue
+ * twice per tick. This is the mechanism producing vessel[182]'s 2× and
+ * vessel[183]'s 3× Mission_Move jitter at SCG07EA tick 17 (see
+ * `cpp-parity-scg07ea-tick-17.test.ts`).
+ *
+ * ## Mechanism (flag ON)
+ *
+ * `runDriveClassAI` wraps its existing per-tick dispatch (`updateMove` /
+ * `_infantryWalkStep`) in an up-to-2-iteration loop. The second iteration
+ * fires only when the first advanced `pathIndex` AND there is still remaining
+ * path (track-complete-with-more-path condition, drive.cpp:1340-1345).
+ *
+ * The gate intentionally observes `entity.pathIndex` and `entity.path.length`
+ * at loop boundaries rather than trying to detect cell-boundary crossings from
+ * inside `updateMove` — matching the observable C++ behavior rather than the
+ * internal state machine. Vessels with doors-open (LST loading/unloading)
+ * short-circuit on the pre-Commence gate already present in `updateMove`
+ * (index.ts:5788 — early-return on `entity.stats.isVessel && isTransport && doorOpen`),
+ * so the second iteration is a no-op for them.
+ *
+ * ## Shipping OFF
+ *
+ * The plan's §5 checkpoint ladder requires the mechanism landed with the flag
+ * OFF first (checkpoint 5.2), pinning tests updated, then flipped ON in a
+ * dedicated refactor commit (checkpoint 5.4). When OFF the loop executes
+ * exactly once — identical to pre-Phase-5 behavior.
+ *
+ * ## C++ refs
+ *
+ *   drive.cpp:1304-1399  DriveClass::AI per-tick movement dispatch
+ *   drive.cpp:1340-1345  track-complete → Start_Of_Move re-entry
+ *   unit.cpp:397-474     UnitClass::AI Commence bookends
+ *   vessel.cpp:571-666   VesselClass::AI (two Commence bookends gated on Is_Door_Closed)
+ *   vessel.cpp:593       pre-DriveClass::AI Commence
+ *   vessel.cpp:659       post-DriveClass::AI Commence (gated on IsDoorClosed)
+ *
+ * ## TS refs
+ *
+ *   src/EasterEgg/engine/index.ts ~4887  runDriveClassAI
+ *   src/EasterEgg/engine/index.ts ~5780  updateMove
+ */
+export const PCP_DOUBLE_CYCLE_ENABLED = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

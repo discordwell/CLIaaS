@@ -221,7 +221,7 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR } from './perCellProcess';
+import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR, PCP_DOUBLE_CYCLE_ENABLED } from './perCellProcess';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -4890,47 +4890,107 @@ export class Game {
     // Mission.MOVE + drive-in-GUARD + Mission.HUNT blocks currently in
     // dispatchMission.
     //
+    // ## Phase 5 double-cycle (gated on PCP_DOUBLE_CYCLE_ENABLED)
+    // C++ DriveClass::AI can re-enter its While_Moving → Start_Of_Move →
+    // While_Moving inner loop up to twice per tick when the current track
+    // completes with more path remaining (drive.cpp:1340-1345). The second
+    // cycle produces a second per-cell Commence pop — the load-bearing
+    // mechanism for vessel[182]/vessel[183] firing Mission_Move 2-3× at
+    // SCG07EA t17 and MCV-157 firing twice at SCG11EA t28.
+    //
+    // When the flag is OFF the loop runs exactly once — identical to
+    // pre-Phase-5 behavior. When ON, the second iteration fires only when
+    // the first iteration advanced pathIndex AND there is still remaining
+    // path AND the current mission is still a drive-class mission (MOVE or
+    // drive-in-GUARD). HUNT/RESCUE walk-step branches are NOT double-cycled
+    // (C++ drive.cpp:1340-1345 applies only to the track-following path).
+    //
     // ## C++ refs
     //   drive.cpp:1304-1399  DriveClass::AI — per-tick track follow
+    //   drive.cpp:1340-1345  While_Moving → Start_Of_Move double-cycle
     //   drive.cpp:1376       Drive-in-GUARD (NavCom legal, Mission==GUARD)
     //   vessel.cpp:591-659   VesselClass::AI — same structure, double Commence
+    //   vessel.cpp:593       pre-DriveClass::AI Commence
+    //   vessel.cpp:659       post-DriveClass::AI Commence (gated IsDoorClosed)
     if (entity.stats.isInfantry) return; // Handled by runInfantryMovementAI
-    const m = entity.mission as Mission;
+    const m0 = entity.mission as Mission;
 
-    if (m === Mission.MOVE) {
-      this.updateMove(entity);
-      return;
-    }
-
-    if (m === Mission.GUARD || m === Mission.STICKY) {
-      // Drive-in-GUARD: units given Mission.MOVE via coordinateMove with
-      // isDriving=true continue to drive even while Mission stays GUARD
-      // (blocked by !IsDriving Commence gate). Mirror the inline block in
-      // dispatchMission Mission.GUARD case.
-      if (entity.isDriving && entity.moveTarget) {
-        this.updateMove(entity, /*fromGuardDrive=*/ true);
-        // Same-tick Mission_Move dispatch after per-cell Commence — see
-        // dispatchMission Mission.GUARD for full documentation.
-        if ((entity.mission as Mission) === Mission.MOVE && entity.missionTimer === 0) {
-          if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
-            entity.mission = Mission.GUARD;
-            entity.missionTimer = 0;
-          } else {
-            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-          }
-        }
-      }
-      return;
-    }
-
-    if (m === Mission.HUNT || m === Mission.RESCUE) {
+    if (m0 === Mission.HUNT || m0 === Mission.RESCUE) {
       // Vehicle HUNT per-tick walk: same walk-step pattern as infantry but
       // without the infantryStartDriver/validatePath calls (gated off in
       // _infantryWalkStep for non-infantry). Lifted from dispatchMission's
       // Mission.HUNT walk block so between-fire ticks still advance toward
-      // the target.
+      // the target. Not subject to DriveClass::AI double-cycle.
       this._infantryWalkStep(entity);
       return;
+    }
+
+    // Double-cycle loop for MOVE + drive-in-GUARD. C++ drive.cpp:1340-1345
+    // caps at 2 iterations; the second only runs when the first advanced
+    // the track and there is more path remaining.
+    let cyclesThisTick = 0;
+    const MAX_CYCLES = 2;
+    while (cyclesThisTick < MAX_CYCLES) {
+      const prevPathIndex = entity.pathIndex;
+      const prevPathLen = entity.path.length;
+      const m = entity.mission as Mission;
+
+      if (m === Mission.MOVE) {
+        this.updateMove(entity);
+      } else if (m === Mission.GUARD || m === Mission.STICKY) {
+        // Drive-in-GUARD: units given Mission.MOVE via coordinateMove with
+        // isDriving=true continue to drive even while Mission stays GUARD
+        // (blocked by !IsDriving Commence gate). Mirror the inline block in
+        // dispatchMission Mission.GUARD case.
+        if (entity.isDriving && entity.moveTarget) {
+          this.updateMove(entity, /*fromGuardDrive=*/ true);
+          // Same-tick Mission_Move dispatch after per-cell Commence — see
+          // dispatchMission Mission.GUARD for full documentation.
+          if ((entity.mission as Mission) === Mission.MOVE && entity.missionTimer === 0) {
+            if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
+              entity.mission = Mission.GUARD;
+              entity.missionTimer = 0;
+            } else {
+              entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+            }
+          }
+        } else {
+          // Not driving → no track to advance; break out (single dispatch).
+          return;
+        }
+      } else {
+        // Mission transitioned to something outside MOVE/GUARD/STICKY during
+        // the first cycle (e.g. Commence popped to ATTACK). Don't re-enter.
+        return;
+      }
+
+      cyclesThisTick++;
+
+      // Second-iteration gate (flag OFF → always break; flag ON → require
+      // track-advance + more path remaining, per drive.cpp:1340-1345).
+      if (!PCP_DOUBLE_CYCLE_ENABLED) break;
+
+      // Track-complete condition: pathIndex advanced this iteration AND
+      // more path still remains. `entity.path.length` may have been reset
+      // to 0 by an Enter_Idle_Mode branch inside updateMove (arrival) —
+      // that's handled by the `entity.pathIndex < entity.path.length` check.
+      const pathAdvanced = entity.pathIndex > prevPathIndex;
+      const morePathRemaining = entity.path.length > 0
+        && entity.pathIndex < entity.path.length;
+      if (!pathAdvanced || !morePathRemaining) break;
+
+      // Vessel Is_Door_Closed gate: vessel.cpp:659 gates the post-Commence
+      // behind `Is_Door_Closed()`. For non-LST vessels door is always
+      // closed; for LSTs `doorOpen` is toggled open during cargo load/unload.
+      // When open, do NOT run the second cycle (the pre-Commence gate in
+      // updateMove at ~5788 would short-circuit to IDLE anyway, but we
+      // keep the semantic gate explicit here).
+      if (entity.stats.isVessel && entity.doorOpen) break;
+
+      // Sanity: if path length SHRANK unexpectedly this iteration (not just
+      // pathIndex advancing), something outside the driver mutated state —
+      // don't re-enter.
+      if (entity.path.length > prevPathLen) break;
     }
   }
 
