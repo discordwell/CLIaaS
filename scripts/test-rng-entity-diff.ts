@@ -28,9 +28,24 @@ const startTick = Number(process.env.START ?? 89);
 const endTick = Number(process.env.END ?? 100);
 
 function tagName(tag: number): string {
-  // Logic-indexed entity tags (logic.cpp:288-298). Object-AI loop assigns these
-  // per iteration; a granular tag override may fire ON TOP of this within the
-  // entity's AI — but the RNG log captures whichever was active at call time.
+  // ============================================================================
+  // Tag-range disambiguation (Phase 0 checkpoint 0.1 — plan §0 line 132).
+  //
+  // Prior sessions observed collapsing of 200-1999 tags to `Expert_AI`; the
+  // canonical ranges are:
+  //   200-1999   → house AI subranges (tag=200 Expert_AI, 100-199 cascade,
+  //                remaining 201-1999 reserved for future house-tag overrides)
+  //   2000-9999  → terrain index (logic-layer TERRAIN_MINE default)
+  //   10000+     → logic-indexed entity tags (infantry/unit/building/etc.)
+  //
+  // Granular override tags (30000/40000/50000/60000/70000 ranges) below are
+  // set INSIDE specific functions and fire ON TOP of the logic-layer tag.
+  // ============================================================================
+
+  // --- 10000+: logic-indexed entity tags (logic.cpp:288-298) ---
+  // Object-AI loop assigns these per iteration; a granular tag override may
+  // fire ON TOP of this within the entity's AI — but the RNG log captures
+  // whichever was active at call time.
   if (tag >= 16000 && tag < 17000) return `anim[${tag - 16000}]`;
   if (tag >= 15000 && tag < 16000) return `bullet[${tag - 15000}]`;
   if (tag >= 14000 && tag < 15000) return `vessel[${tag - 14000}]`;
@@ -38,6 +53,8 @@ function tagName(tag: number): string {
   if (tag >= 12000 && tag < 13000) return `building[${tag - 12000}]`;
   if (tag >= 11000 && tag < 12000) return `unit[${tag - 11000}]`;
   if (tag >= 10000 && tag < 11000) return `infantry[${tag - 10000}]`;
+
+  // --- 2000-9999: terrain / logic idx fallback ---
   if (tag >= 2000 && tag < 10000) return `logic[${tag - 2000}]`; // TERRAIN_MINE / default
 
   // Granular source_tag overrides (set inside specific functions — building.cpp,
@@ -91,9 +108,13 @@ function tagName(tag: number): string {
   };
   if (granular[tag] !== undefined) return granular[tag];
 
-  // House-AI sub-tags 100-200 (house.cpp Expert_AI cascade).
+  // --- 200-1999: house AI subranges (house.cpp Expert_AI cascade) ---
+  // tag=200 is Expert_AI, 100-199 sub-cascade; 201-1999 is currently reserved
+  // (no known granular overrides in this band — keep labelled so future
+  // house-tag additions surface distinctly instead of as raw `tag[...]`).
   if (tag === 200) return 'Expert_AI';
   if (tag >= 100 && tag < 200) return `House_AI[${tag}]`;
+  if (tag >= 201 && tag < 2000) return `HouseAI_sub[${tag}]`;
 
   const base: Record<number, string> = {
     0: 'untagged', 1: 'TeamAI', 3: 'Map.Logic', 4: 'FactoryAI',
