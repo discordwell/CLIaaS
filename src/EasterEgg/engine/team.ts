@@ -1002,10 +1002,11 @@ export class Team {
       if (unit.isALoaner && unit.mission === Mission.RETREAT) continue;
 
       // C++ team.cpp:1703-1708 — assign ATTACK mission
+      // Session 22: route through queue (Assign_Mission) per mission.cpp:388.
+      // No-op when Mission == ATTACK. Commence pops via STAGE A when idle.
       if (unit.mission !== Mission.ATTACK) {
-        unit.mission = Mission.ATTACK;
+        assignMission(unit, Mission.ATTACK);
         unit.moveTarget = null;
-        unit.missionTimer = 0; // C++ Commence() Timer reset
       }
       // Set move target toward attack position if no entity target
       if (!unit.target && this.target) {

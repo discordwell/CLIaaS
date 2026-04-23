@@ -533,8 +533,10 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       // Tick 1: activate → advance to ATT_WAYPT mission 0 → execute
       team.ai(waypoints);
 
-      expect(e1.mission).toBe(Mission.ATTACK);
-      expect(e2.mission).toBe(Mission.ATTACK);
+      // Session 22: Coordinate_Attack queues ATTACK via Assign_Mission
+      // (mission.cpp:388). Commence pops later (post-team-AI STAGE A).
+      expect(e1.missionQueue).toBe(Mission.ATTACK);
+      expect(e2.missionQueue).toBe(Mission.ATTACK);
     });
 
     it('advances mission when no target is available (team.cpp:1675-1676)', () => {

@@ -404,9 +404,11 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(waypoints); // activate
       team.ai(waypoints); // advance to ATT_WAYPT
 
-      // Should be on ATT_WAYPT mission (0), member in ATTACK mode
+      // Should be on ATT_WAYPT mission (0), member has ATTACK queued.
+      // Session 22: Coordinate_Attack queues via Assign_Mission;
+      // Commence pops via STAGE A when !IsDriving on next entity tick.
       expect(team.currentMission).toBe(0);
-      expect(e.mission).toBe(Mission.ATTACK);
+      expect(e.missionQueue).toBe(Mission.ATTACK);
     });
   });
 
