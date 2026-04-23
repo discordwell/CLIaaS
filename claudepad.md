@@ -1,5 +1,35 @@
 # Session Summaries
 
+## 2026-04-23T07:00Z — Step 8 Mission_Move over-fire diagnosis complete (root cause identified)
+
+Added global RNG instrumentation + per-entity trace script
+(`scripts/test-scg04-move-trace.ts`). Deployed + captured console
+logs. Findings:
+
+**SCG04 t3:** eid=2 (logicIdx=1) and eid=3 (logicIdx=2) each fire
+Mission.MOVE jitter exactly once. WASM fires ONLY unit[73] once.
+Two team vehicles fire jitter → two extra RNGs vs WASM.
+
+**Root cause:** TS STAGE A pre-Commence pops MissionQueue for all
+`!isDriving` vehicles simultaneously. After W3 deletion, all team
+members are `!isDriving` post-coord → all pop same tick → all fire
+Mission_Move jitter.
+
+**C++ behavior (drive.cpp:1079-1086):** Per-member DriveClass::AI
+gates pop via Do_Turn rotation check. Only vehicles whose facing
+matches the first path step get IsDriving=true + pop MissionQueue.
+Others rotate under Mission=GUARD with Do_Turn returning early
+(drive.cpp:1084). Rotation completes over multiple ticks (ROT
+= Rate_Of_Turn from rules.ini), staggering the Mission_Move pops.
+
+**Real next port:** C++-faithful DriveClass::Do_Turn + Start_Driver
+rotation gate on STAGE A. Only pop MissionQueue when facing matches
+first path step (or within rotation tolerance). Otherwise leave queue
+in place; rotation happens under Mission=GUARD with Do_Turn tracking.
+
+Instrumentation reverted (2f3c63a8). Trace script retained for
+future use. Tests 51,363 still pass. Tick counters unchanged.
+
 ## 2026-04-23T06:00Z — Step 8 Mission_Move dedup (partial)
 
 Removed the drive-in-GUARD Mission_Move jitter proxy (b1ca294d) — was
