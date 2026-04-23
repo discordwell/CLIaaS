@@ -43,13 +43,6 @@ export class RandomClass {
   next(): number {
     this.callCount++;
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
-    if ((globalThis as any).__traceAllRng) {
-      const t = (globalThis as any).__currentGameTick;
-      if (t === 3) {
-        const stk = new Error().stack?.split('\n').slice(2, 8).join(' | ') ?? '';
-        console.log(`[RNG.next] t=${t} seed=${this.seed} tag=${this._sourceTag} stk=${stk}`);
-      }
-    }
     // Source-tag logging: records [seed, tag] pairs matching C++ rngLog format
     if (this._tagLogging) {
       this._seedLog.push([this.seed >>> 0, this._sourceTag]);
@@ -76,13 +69,6 @@ export class RandomClass {
    */
   nextInRange(minval: number, maxval: number): number {
     if (minval === maxval) return minval;
-    if ((globalThis as any).__traceAllRng) {
-      const t = (globalThis as any).__currentGameTick;
-      if (t === 3) {
-        const stk = new Error().stack?.split('\n').slice(2, 7).join(' | ') ?? '';
-        console.log(`[RNG] t=${t} min=${minval} max=${maxval} tag=${(this as any)._sourceTag} stk=${stk}`);
-      }
-    }
 
     // Swap if out of order
     if (minval > maxval) {
