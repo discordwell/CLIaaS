@@ -1,5 +1,20 @@
 # Session Summaries
 
+## 2026-04-23T11:30Z — Session 9 + 8: coordinateRegroup port + divergence survey
+
+**Session 9:** Ported `Assign_Destination → Start_Of_Move` to `coordinateRegroup` (mirror of Session 13's coordinateMove port). Added `findPath` populate + facing-match → `isDriving=true` flip. All tests pass. Divergence ticks unchanged — scenario set doesn't exercise this path at the relevant ticks. C++-faithful cleanup for future scenarios. (Commit 53e428a1.)
+
+**Session 8:** Surveyed remaining divergences.
+- SCG07EA t4: 1 extra TS vessel[37] Mission_Move_foot jitter. WASM spreads to t6. Vessel double-cycle timing (VesselClass::AI IsDoorClosed gate).
+- SCG06EA t76: WASM has 2 extra RNG calls from `bullet[115]` (bullet AI + Coord_Scatter). TS doesn't have this bullet — downstream of earlier combat state.
+- SCG13EA t101: 1 TS extra call. Deep-tick; likely downstream.
+
+**Strategic conclusion:** Remaining divergences are either (a) vessel-specific (SCG07 — needs IsDoorClosed port) or (b) downstream cascades from combat/AI timing at long ticks that aren't single-mechanism fixable. Further gains require either the vessel double-cycle port or accepting current state.
+
+**Final baseline (after Session 9):**
+SCG01=87, SCG03=238, SCG04=24, SCG06=76, SCG07=4, SCG11=19, SCG13=101.
+Sum from baseline (25 pre-Session-25 → now): +25 ticks.
+
 ## 2026-04-23T09:30Z — Session 10: PCP_END trace + Coordinate_Regroup GUARD re-assignment
 
 WASM PCP entry instrumentation (tag 6000000+Frame at UnitClass::Per_Cell_Process) revealed:
