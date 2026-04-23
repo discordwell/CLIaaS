@@ -201,8 +201,6 @@ void LogicClass::AI(void)
 
 	FramesPerSecond++;
 
-	// Session 14 diagnostic: disabled in Session 10 to free ring buffer.
-
 	/*
 	** Fading to B&W or color due to the chronosphere is handled here.
 	*/
@@ -268,18 +266,8 @@ void LogicClass::AI(void)
 	**	Team AI is processed.
 	*/
 	g_rng_source_tag = 1; // Team AI
-	// Session 14 diagnostic: pre-Team.AI phase marker. tag 4100000+Frame
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (false) { agent_debug_log(4100000 + Frame, 0, 0, 0, 0, 0, 0, 0); }
-	}
 	for (index = 0; index < Teams.Count(); index++) {
 		Teams.Ptr(index)->AI();
-	}
-	// Session 14 diagnostic: post-Team.AI phase marker. tag 4200000+Frame
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (false) { agent_debug_log(4200000 + Frame, 0, 0, 0, 0, 0, 0, 0); }
 	}
 
 	/*
@@ -291,11 +279,6 @@ void LogicClass::AI(void)
 	}
 
 	ChronalVortex.AI();
-	// Session 14 diagnostic: pre-Object.AI loop marker. tag 4300000+Frame
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (false) { agent_debug_log(4300000 + Frame, 0, 0, 0, 0, 0, 0, 0); }
-	}
 	/*
 	**	AI for all sentient objects is processed.
 	*/

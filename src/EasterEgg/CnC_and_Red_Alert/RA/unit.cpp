@@ -398,9 +398,6 @@ void UnitClass::AI(void)
 {
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
-	// Session 10: older Session 15/16 entry/phase trace disabled (Frame<0 never fires)
-	// to free ring buffer space for PCP Commence trace.
-	auto __s15_logExit = [](int) {};
 	/*
 	**	Act on new orders if the unit is at a good position to do so.
 	*/
@@ -408,9 +405,7 @@ void UnitClass::AI(void)
 //		if (MissionQueue == MISSION_NONE) Enter_Idle_Mode();
 		Commence();
 	}
-	__s15_logExit(1); // post pre-Commence
 	DriveClass::AI();
-	__s15_logExit(2); // post DriveClass::AI
 	if (!IsActive || Height > 0) {
 		return;
 	}
@@ -477,7 +472,6 @@ void UnitClass::AI(void)
 	if (!IsDumping && !IsDriving && Is_Door_Closed()/*&& Mission != MISSION_UNLOAD*/) {
 		Commence();
 	}
-	__s15_logExit(3); // end of UnitClass::AI
 
 	/*
 	**	A cloaked object that is carrying the flag will always shimmer.
@@ -1618,18 +1612,6 @@ void UnitClass::Per_Cell_Process(PCPType why)
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
 
-	// Session 10 diagnostic: log every UnitClass::Per_Cell_Process entry.
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 30) {
-			int cellX = Cell_X(Coord_Cell(Coord));
-			int cellY = Cell_Y(Coord_Cell(Coord));
-			// tag 6000000+Frame, unit id, Mission, MissionQueue, cellX, cellY, (int)why, IsDriving
-			agent_debug_log(6000000 + Frame, Units.ID(this), (int)Mission, (int)MissionQueue,
-				cellX, cellY, (int)why, IsDriving ? 1 : 0);
-		}
-	}
-
 	CELL	cell = Coord_Cell(Coord);
 	HousesType house;
 
@@ -1771,20 +1753,6 @@ void UnitClass::Per_Cell_Process(PCPType why)
 		**	Act on new orders if the unit is at a good position to do so.
 		*/
 		if (!IsDumping) {
-			// Session 10 diagnostic: log Per_Cell_Process Commence calls at Frame 20-30
-			// to verify drive-in-GUARD → MOVE pop timing for SCG04EA W[1]/unit[2].
-			{
-				extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-				if (Frame < 30) {
-					int preMission = (int)Mission;
-					int preMQ = (int)MissionQueue;
-					int cellX = Cell_X(Coord_Cell(Coord));
-					int cellY = Cell_Y(Coord_Cell(Coord));
-					// tag 5000000+Frame, unit id, preMission, preMQ, cellX, cellY, IsDriving, 0
-					agent_debug_log(5000000 + Frame, Units.ID(this), preMission, preMQ,
-						cellX, cellY, IsDriving ? 1 : 0, 0);
-				}
-			}
 			Commence();
 		}
 
@@ -3395,17 +3363,6 @@ bool UnitClass::Start_Driver(COORDINATE & headto)
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
 
-	// Session 14 diagnostic: log every Start_Driver entry (catches IsDriving flip)
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 6) {
-			// tag 3000000+Frame, target unit id, Mission, MissionQueue, Timer, pre-IsDriving, headto cell X, headto cell Y
-			agent_debug_log(3000000 + Frame, Units.ID(this), (int)Mission, (int)MissionQueue,
-				(int)Get_Mission_Timer_Value(), IsDriving ? 1 : 0,
-				headto ? Cell_X(Coord_Cell(headto)) : -1,
-				headto ? Cell_Y(Coord_Cell(headto)) : -1);
-		}
-	}
 	if (DriveClass::Start_Driver(headto) && IsActive) {//BG IsActive can be cleared by Start_Driver
 		Mark_Track(headto, MARK_DOWN);
 		return(true);
