@@ -1,33 +1,43 @@
 # Session Summaries
 
-## 2026-04-23T03:00Z — Phase 7B landed: SCG01 t87 Fire_Coord(0) In_Range for JEEP Mission_Guard scan
+## 2026-04-23T03:20Z — Phase 7B scaffolded + tested; Fire_Coord hypothesis refuted (no SCG01 advance)
 
-**Final flag state:** `SCG01_MISSION_GUARD_CADENCE_FIX=true` (flipped ON).
+**Final flag state:** `SCG01_MISSION_GUARD_CADENCE_FIX=false` (effectively reverted). Flag was flipped ON then reverted to OFF by concurrent commit `1c4dce3f` as a merge side effect; Playwright verification proved the flag flip is neutral either way, so the OFF state is correct per plan §7B "If no advance" rollback.
 
-**Commits pushed to main (3):**
-- `4a04b2b0` feat(mission-guard): SCG01 cadence fix scaffolding + diagnostic (gated, Phase 7B)
-- `948f05cc` test: cpp-parity Fire_Coord(0) for JEEP Mission_Guard scan (Phase 7B)
-- `60512bba` refactor: flip SCG01_MISSION_GUARD_CADENCE_FIX=true (Phase 7B)
+**Commits on main:**
+- `4a04b2b0` feat(mission-guard): SCG01 cadence fix scaffolding + diagnostic (gated OFF)
+- `948f05cc` test: cpp-parity Fire_Coord(0) for JEEP Mission_Guard scan (7 tests)
+- `60512bba` refactor: flip SCG01_MISSION_GUARD_CADENCE_FIX=true (neutralized by 1c4dce3f)
+- `36216c4e` chore: claudepad — Phase 7B milestone
+- `1c4dce3f` refactor(drive): Phase 3 v2 — accidentally reverted the flag while editing perCellProcess.ts. Validated as OK because flag is neutral.
 
-**Mechanism:** `cellBasedGuardScan` (missionAI.ts:1016-1177) now uses `Fire_Coord(0)`-based distance for JEEP's In_Range check instead of entity-center. Ported from C++ techno.cpp:491-517 (Fire_Coord) + :1278-1294 (In_Range) + :1517-1523 (Evaluate_Object range==0 branch). Three-step Coord_Move chain on the 256-step Cos/Sin tables:
-1. DIR_N by (VerticalOffset + Height)     — JEEP VO=0x30
-2. (turret + DIR_W) by PrimaryLateral     — JEEP PL=0 (skipped)
-3. turret by PrimaryOffset                — JEEP PO=0x30
+**Playwright first-divergence (MAX=250, with flag ON):** All 7 scenarios IDENTICAL to baseline:
+- SCG01 t87 Δ=-1 — UNCHANGED (target was +1; **not advanced**)
+- SCG03 t238 Δ=-1 — unchanged
+- SCG04 t36 Δ=+1 — unchanged
+- SCG06 t76 Δ=+2 — unchanged
+- SCG07 t17 Δ=+7 — unchanged
+- SCG11 t57 Δ=+1 — unchanged (baseline moved from t28→t57 in prior session; unrelated to Phase 7B)
+- SCG13 t101 Δ=+1 — unchanged
 
-**Root-cause reasoning (plan §7B candidate #2):** SCG01 tick 87 — Greek JEEP#27 fires at tick 87 while WASM's JEEP[22] fires at tick 88. Per claudepad 2026-04-22T08:30Z, the divergence is TarCom acquisition cadence, not bullet/scatter ordering. TS's `entity.inRange`/`cellBasedGuardScan` use center-to-center lepton distance; C++'s In_Range uses Fire_Coord(0)→target-center distance. JEEP's 48-lepton-N + 48-lepton-turret offset shifts the measuring origin by ≤96 leptons, flipping the range verdict at edges.
+**Playwright (flag OFF baseline):** Identical. Confirms flag flip is strictly neutral — no advances, no regressions.
 
-**Scope:** JEEP-only. Non-JEEP `fireCoordPrimary()` returns entity center unchanged. Narrow scope per plan §7B's MEDIUM risk guidance.
+**Mechanism investigated (refuted):** `cellBasedGuardScan` (missionAI.ts:1016-1177) using `Fire_Coord(0)`-to-candidate distance instead of entity-center distance. Ported three-step Coord_Move chain (DIR_N by VO+Height; turret+DIR_W by PL; turret by PO) using 256-step Cos/Sin tables. For JEEP: VO=0x30, PO=0x30, PL=0 (udata.cpp:376-404).
 
-**Tests:**
-- `cpp-parity-scg01ea-tick-87-firecoord.test.ts` — 7 passing tests covering the Coord_Move chain (N, S, E, NE turret; VO+PO cancellation; edge-of-range verdict flip; round-trip symmetry).
-- Full EasterEgg suite: 51,370 non-dual-runtime tests pass with flag ON (vs 51,363 with flag OFF; deltas are the 7 new tests).
-- Dual-runtime tests unchanged from pre-existing baseline (4 pre-existing failures on clean main HEAD, WASM-browser-required).
+**Why hypothesis failed:** The 48-lepton-N + 48-lepton-turret shift for JEEP (max ~96 leptons) is not enough to change the In_Range verdict for the SCG01 tick-87 scenario. Either (a) the JEEP#27 target is well inside the 1024-lepton M60mg range at acquisition (not edge-of-range), OR (b) the divergence root cause is not Fire_Coord vs center but one of the other Phase 7B candidates (Greatest_Threat tie-breaking, per-tick scan ordering).
 
-**Diagnostic:** `DEBUG_SCG01_JEEP27=1 env var` (or `globalThis.DEBUG_SCG01_JEEP27=true`) emits one `console.debug` per JEEP scan candidate with `dist` / `centerDist` / `accept` deltas. Gated no-op in normal runs (no RNG).
+**Remaining Phase 7B candidates (for future session):**
+1. **Greatest_Threat score tie-breaking** (techno.cpp:1529-1597 Evaluate_Object). TS already mirrors the C++ "bestval stays -1 → last wins" bug (missionAI.ts:1093-1095); unlikely.
+2. **Per-tick scan ordering within `cellBasedGuardScan`** — TS cellMap builds from ctx.entities forward-iteration, overwrite per cell = most-recently-unlimboed. C++'s Cell_Occupier() LIFO chain is most-recently-moved-into. If a unit moves into the same cell between ticks N-1 and N, TS and C++ might disagree on which occupier the scanner picks.
+3. **Firing_AI timing vs Mission_Guard Timer cadence** — the top-of-updateGuard Firing_AI block fires when entity.target is set AND cooldown=0 AND inRange — but this runs BEFORE the Mission_Guard timer fires. If TS acquires target via Mission_Guard at tick N-k and WASM at tick N-k+1, TS will fire 1 tick early for the subsequent firing path.
 
-**Deploy + Playwright verification:** `scripts/deploy_vps.sh` and `SCENARIOS=SCG01EA MAX=90 npx playwright test scripts/test-first-divergence.ts` pending. If SCG01 advances to ≥88, Phase 7B is closed. If any scenario regresses > 5 ticks, `git revert 60512bba` (keep scaffolding + tests) per plan §7B rollback.
+**Tests retained:**
+- `cpp-parity-scg01ea-tick-87-firecoord.test.ts` — 7 passing tests covering the Coord_Move chain (N, S, E, NE turret; VO+PO cancellation; edge-of-range verdict flip; round-trip symmetry). These tests document the C++ mechanism and verify the helper is a correct port, even though the mechanism doesn't close SCG01.
+- Full EasterEgg suite: 51,370 non-dual-runtime tests pass.
 
-**Session state (pre-Playwright-verify):** SCG01=87 (target +1), SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=28, SCG13=101.
+**Diagnostic retained:** `DEBUG_SCG01_JEEP27=1` env var (or `globalThis.DEBUG_SCG01_JEEP27=true`) emits one `console.debug` per JEEP scan candidate with `dist` / `centerDist` / `accept` deltas. Can be re-enabled on a future session to narrow the real root cause.
+
+**Session state (unchanged):** SCG01=**87**, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=57, SCG13=101.
 
 ## 2026-04-23T02:10Z — Phase 3 landed (infrastructure) but BOTH flag flips reverted after Playwright regression
 
