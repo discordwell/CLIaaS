@@ -6256,8 +6256,8 @@ export class Game {
       // Returns `true` when NavCom was cleared, signalling the caller to
       // halt further movement this tick (matches C++ While_Moving break
       // after Per_Cell_Process at drive.cpp:820).
-      const perCellNavComCheck = (): boolean => {
-        const r = unitPerCellProcess(entity, PCPType.PCP_END);
+      const perCellNavComCheck = (skipCommence: boolean = false): boolean => {
+        const r = unitPerCellProcess(entity, PCPType.PCP_END, { skipCommence });
         return r.navComCleared;
       };
 
@@ -6291,7 +6291,9 @@ export class Game {
               entity.pathIndex += entity.trackCellSpan;
               entity.trackCellSpan = 1; // reset for next track
               // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
-              if (perCellNavComCheck()) break;
+              // Session 16: skipCommence=true — defer mq pop to STAGE E / next tick
+              // to match C++ drive.cpp:816 "PCP only at actual=0" semantic.
+              if (perCellNavComCheck(true)) break;
               // Continue loop to chain next track on same tick (Fix 1)
               continue;
             }
@@ -6353,7 +6355,9 @@ export class Game {
               entity.pathIndex += entity.trackCellSpan;
               entity.trackCellSpan = 1;
               // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
-              if (perCellNavComCheck()) break;
+              // Session 16: skipCommence=true — defer mq pop to STAGE E / next tick
+              // to match C++ drive.cpp:816 "PCP only at actual=0" semantic.
+              if (perCellNavComCheck(true)) break;
               continue; // Chain next track
             }
             break; // Track not yet complete
@@ -6366,7 +6370,7 @@ export class Game {
               if (entity.moveToward(chainTargetLP, speed)) {
                 entity.pathIndex++;
                 // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
-                perCellNavComCheck();
+                perCellNavComCheck(true);
               }
             }
             break; // Free-form doesn't chain

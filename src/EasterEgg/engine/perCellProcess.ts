@@ -1038,7 +1038,11 @@ export interface PCPResult {
  * @returns       `{ navComCleared, commenceFired }` — callers should
  *                halt movement for this tick when `navComCleared === true`.
  */
-export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPResult {
+export function unitPerCellProcess<M>(
+  entity: PCPEntity<M>,
+  why: PCPType,
+  opts?: { skipCommence?: boolean },
+): PCPResult {
   const result: PCPResult = { navComCleared: false, commenceFired: false };
 
   // Phase 0 DEBUG_PCP_TRACE — single bool check when flag unset (zero cost).
@@ -1072,13 +1076,17 @@ export function unitPerCellProcess<M>(entity: PCPEntity<M>, why: PCPType): PCPRe
   // Pops MissionQueue mid-drive. This is the load-bearing piece for
   // SCG04/11/13 but is gated off by default (see PER_CELL_COMMENCE_ENABLED
   // docstring for the three blocking reasons).
-  if (PER_CELL_COMMENCE_ENABLED && entity.missionQueue !== null) {
+  //
+  // Session 16: `skipCommence` option lets chain-loop callers defer the
+  // Commence pop to STAGE E (post-Movement) or next tick's STAGE A.
+  // C++ drive.cpp:816 fires PCP_END at track completion (actual=0), but
+  // TS's chain loop fires after EVERY track completion — causing mq=MOVE
+  // to pop at intermediate cells. Deferring Commence to STAGE E matches
+  // C++: Commence at the end of movement, not at every cell crossing.
+  if (!opts?.skipCommence && PER_CELL_COMMENCE_ENABLED && entity.missionQueue !== null) {
     entity.mission = entity.missionQueue;
     entity.missionQueue = null;
     entity.missionTimer = 0; // C++ mission.cpp:354
-    // C++ mission.cpp:355 sets Status=0. TS engine doesn't track Status on
-    // vehicles (only infantry have a small status FSM for move/attack
-    // animations). Safe to skip for vehicles.
     result.commenceFired = true;
   }
 
