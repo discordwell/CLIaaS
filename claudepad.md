@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-04-23T11:40Z — Session 7: vessel door-gate port attempted, reverted
+
+Added `!(entity.stats.isVessel && entity.doorOpen)` to STAGE A pre-Commence gate at index.ts:4091 to match C++ vessel.cpp:592 `!IsDriving && Is_Door_Closed()`.
+
+**Result:** 2 pre-existing tests broke:
+- `scg05ea-liveterrain.test.ts > tracks spy tick-by-tick`
+- `scg05ea-spy-debug.test.ts > sends spy to (47,49) then attack_struct on WEAP`
+
+Both fail with `state.units.find(u => u.t === 'SPY')` returning undefined — the SPY (delivered by LST) never arrives because the gate blocks the LST's Mission queue pops during the cargo-carry + drive phase.
+
+**Revert:** change removed. All 51,363 tests pass.
+
+**Lesson:** The C++ vessel door gate interacts with MISSION_UNLOAD / MISSION_MOVE transitions in ways that require per-mission-type logic, not a blanket !doorOpen block. A narrower fix would need to distinguish (a) pre-unload drive state vs (b) post-unload door-close wait, and only gate (b).
+
 ## 2026-04-23T11:30Z — Session 9 + 8: coordinateRegroup port + divergence survey
 
 **Session 9:** Ported `Assign_Destination → Start_Of_Move` to `coordinateRegroup` (mirror of Session 13's coordinateMove port). Added `findPath` populate + facing-match → `isDriving=true` flip. All tests pass. Divergence ticks unchanged — scenario set doesn't exercise this path at the relevant ticks. C++-faithful cleanup for future scenarios. (Commit 53e428a1.)
