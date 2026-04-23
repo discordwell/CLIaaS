@@ -1,5 +1,36 @@
 # Session Summaries
 
+## 2026-04-23T02:05Z — Phase 3 DriveClass::AI port + TEAM_START_DRIVER_REFACTOR landed (both flags flipped ON)
+
+**Flags flipped:** `DRIVE_CLASS_AI_PORT=true` + `TEAM_START_DRIVER_REFACTOR=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §3 checkpoints 3.1-3.6).
+
+**Main commits (5 cherry-picked from worktree):**
+  - `c4f7180f` feat(drive): close-enough NavCom clear + path regen in runDriveClassAI (gated OFF)
+  - `896b74d5` feat(pathfinding): cellClaims path-reservation param (no-op when unused)
+  - `d974c074` feat(team): cellClaims path-reservation in Team.ai() (gated OFF)
+  - `77eb480d` refactor: flip DRIVE_CLASS_AI_PORT=true
+  - `f87d8f78` refactor: flip TEAM_START_DRIVER_REFACTOR=true
+
+**What changed:**
+  - `runDriveClassAI` (index.ts) gains (a) close-enough NavCom clear (drive.cpp:970, 704 leptons) and (b) Basic_Path regen on empty-path entry. Fires for Mission==MOVE + drive-in-GUARD (isDriving+GUARD). On findPath failure → enterIdleMode queues GUARD.
+  - `findPath` (pathfinding.ts) gains optional `cellClaims: Map<cellIdx,entityId>` + `claimingEntityId`. Threaded through isPassable/followEdge/registerCell/optimizeMoves. Cells owned by OTHER entities are impassable for that call.
+  - `Team.ai()` populates `ctx.cellClaims` per-tick; each member's coordinateMove findPath claims its returned path cells so later members see them reserved.
+  - `TEAM_START_DRIVER_REFACTOR` path now populates unit.path via findPath + defers isDriving flip to DriveClass::AI (drive.cpp:1079-1086 Start_Driver post-rotation).
+
+**Test updates (semantic outcome, not intermediate state):**
+  - `cpp-parity-scg04-mission-move-stagger.test.ts`: both tanks leave coordinateMove isDriving=false (deferred); tank1 path populated via Basic_Path; tank2 may route around claims. Pre-Commence pop semantics unchanged.
+  - `cpp-parity-scg07-vessel-reinforce.test.ts`: same deferred-isDriving assertions for vehicles.
+  - `cpp-parity-drive-in-guard.test.ts`: fix LST test terrain from 4=WALL to 2=WATER (latent bug exposed by new path-regen).
+  - Tests pass `map: game.map` through TeamAIContext for findPath population.
+
+**Target scenarios expected to advance (per plan §3 "Expected outcome"):**
+  - SCG11 t57: 4TNK[70] at (60,58) patrol blocked by friendly 4TNK at (61,59) hits close-enough (<704 leptons) → enterIdleMode queues GUARD → Mission_Guard_general fires.
+  - SCG04 t36: 3TNK gets path[] populated at tick 3 (coordinateMove time) → track-jump PCP fires at first cell boundary.
+
+**Tests:** 51,353 EasterEgg vitest pass (same as baseline). Playwright/WASM dual-runtime-parity and dual-runtime-m8-comparison failures are environmental WASM-harness timeouts unrelated to this change.
+
+**LOC:** ~200 net (~85 in perCellProcess.ts flag docstring, ~85 in index.ts runDriveClassAI, ~50 in pathfinding.ts cellClaims thread, ~40 in team.ts).
+
 ## 2026-04-23T01:45Z — Phase 7A RANDOM_ANIMATE_CPP_FAITHFUL landed (flag flipped ON, zero regressions)
 
 **Flag flipped:** `RANDOM_ANIMATE_CPP_FAITHFUL=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §7A checkpoints 7A.1-7A.5).
