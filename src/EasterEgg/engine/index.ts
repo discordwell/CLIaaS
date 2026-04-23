@@ -4095,26 +4095,31 @@ export class Game {
         missionTimerFired = true;
       }
 
-      // STAGE B + C + D: MissionClass::AI dispatch + Firing_AI + Movement_AI.
-      // The monolithic `dispatchMission` method currently bundles all three
-      // per-tick systems (each mission handler inlines Firing_AI + Movement_AI
-      // as needed). STAGE C/D extraction into `runFiringAI` /
-      // `runInfantryMovementAI` / `runDriveClassAI` is prepared (Checkpoint
-      // 1.B + 1.C stubs) but NOT yet wired here — those stubs are empty and
-      // calling them would double-fire inline code still present in
-      // `dispatchMission`. Full lift-and-shift is a follow-up within Phase 1.
+      // STAGE B: MissionClass::AI — dispatch only when Timer==0, matching
+      // C++ mission.cpp:213-321. When Timer>0, C++ continues to run Firing_AI
+      // and Movement_AI separately (STAGE C + STAGE D). The per-tick inline
+      // firing/movement currently bundled inside `dispatchMission` handlers
+      // is therefore NOT invoked between timer fires under this flow — this
+      // is an intentional regression that Phase 1's STAGE C/D lift-and-shift
+      // will restore. Current stubs are empty, so Firing_AI + Movement_AI
+      // are skipped between timer fires when the flag is ON.
       let missionHandlerRan = false;
       if (entity.missionTimer === 0) {
-        // STAGE B: Mission handler dispatch (mirrors C++ MissionClass::AI
-        // Timer==0 branch, mission.cpp:213-321).
         this.dispatchMission(entity, true);
         missionHandlerRan = true;
-      } else {
-        // Per-tick Firing_AI + Movement_AI only (no mission-timer dispatch).
-        // For semantic parity with the legacy code we still call dispatchMission
-        // with missionTimerFired=false so Mission.HUNT/AREA_GUARD/MOVE run
-        // their per-tick movement branches. Remove once STAGE C/D stubs land.
-        this.dispatchMission(entity, false);
+      }
+
+      // STAGE C: Firing_AI stub (runFiringAI is currently a no-op on Game —
+      // see missionAI.ts exported runFiringAI for the standalone version).
+      // TODO: wire runFiringAI for per-tick Firing_AI parity.
+
+      // STAGE D: Movement_AI stubs.
+      if (!entity.isAirUnit) {
+        if (entity.stats.isInfantry) {
+          this.runInfantryMovementAI(entity);
+        } else {
+          this.runDriveClassAI(entity);
+        }
       }
 
       // C++ Doing_AI + firing-anim countdown — unchanged from legacy flow.
@@ -4143,13 +4148,20 @@ export class Game {
 
       // STAGE F: re-dispatch if STAGE E's Commence just popped and Timer==0.
       // Generalizes commit 79b13cb3's drive-in-GUARD same-tick post-Commence
-      // dispatch to ALL missions. Previously this re-dispatch was inlined in
+      // dispatch to ALL vehicle/vessel missions. Previously inlined in
       // Mission.GUARD case of dispatchMission; here it fires uniformly.
+      //
+      // Infantry are EXCLUDED — C++ FootClass::AI (foot.cpp) does NOT have
+      // the DriveClass::AI re-dispatch cycle (drive.cpp:1340-1345). Infantry
+      // Commence at infantry.cpp:1208-1211 lets MissionClass::AI pick up the
+      // new mission on the NEXT tick only. Aircraft use AircraftClass::AI
+      // (separate state machine, orthogonal).
+      //
       // When `missionHandlerRan` is true, STAGE B already consumed the
       // mission-timer jitter RNG — so we only re-enter if the handler has
-      // NOT already run this tick. This matches C++ DriveClass::AI's
-      // internal same-tick dispatch (drive.cpp:1340-1345, techno.cpp:2344).
-      if (!missionHandlerRan && entity.missionTimer === 0) {
+      // NOT already run this tick. Matches C++ techno.cpp:2344 re-dispatch.
+      if (!missionHandlerRan && entity.missionTimer === 0 &&
+          !entity.stats.isInfantry && !entity.isAirUnit) {
         this.dispatchMission(entity, true);
       }
 

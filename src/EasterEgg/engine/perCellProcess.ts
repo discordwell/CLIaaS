@@ -657,7 +657,7 @@ export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = false;
  * ## TS refs
  *   src/EasterEgg/engine/index.ts ~4010  updateEntity — new STAGE A-F flow
  */
-export const DISPATCH_ORDER_REFACTOR = false;
+export const DISPATCH_ORDER_REFACTOR = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose
