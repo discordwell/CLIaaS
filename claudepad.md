@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-04-22T22:58Z — Phase 4 Approach_Target cell-boundary re-fire landed (SCG06 t76 residual closed)
+
+**Flag flipped:** `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §4.4).
+
+**Worktree commits:** `af9e2d0f` flag+field, `63f988f4` PCP subcase, `4ff17996` timer-cycle re-fire in updateAreaGuard, `69513d77` isDriving-clear safety net, `82011fdf` flag flip.
+
+**Main cherry-picks:** `993ce523`, `f9b5dfaf`, `766e0a60`, `9b017971`, `a01e74bd`. Pushed + deployed via `scripts/deploy_vps.sh`.
+
+**SCG06EA before → after (with Phase 1 DISPATCH_ORDER_REFACTOR also on):** pathShortenTick 77 → **75**, firePrep starts t=78 → **t=76** — now fires at the same tick as WASM. Approach_Target re-fires 1→3 times (t=1, t=13, t=51), re-picking approach cell as unit walks closer. Final cell (22,66) matches WASM geometry.
+
+**Implementation pattern:** Cell-boundary re-fire in `footPerCellProcess` (new subcase 1b) gated by cell-change dedup (`_lastAreaGuardApproachCellKey`). Timer-cycle re-fire added to `updateAreaGuard` post-scan fallback (flag-gated by `AREA_GUARD_APPROACH_RETRY=true`). Safety net in `updateAreaGuard` Firing_AI: clear isDriving + moveTarget + path when target enters range mid-cell (C++ `IsFiring`/`Stop_Driver` mirror, infantry.cpp:1639/3790).
+
+**Zero regressions:** 51,347 EasterEgg tests pass. All 7 SCG scenarios stable.
+
 ## 2026-04-22T20:30Z — Session wind-down (+76 ticks across 7 scenarios, 25 commits)
 
 **Final:** SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=**57**, SCG13=101. Start 536 → End 612. **Net +76.**
