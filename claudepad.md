@@ -1,5 +1,44 @@
 # Session Summaries
 
+## 2026-04-23T07:30Z — Step 8 rotation-gate port attempted, reverted
+
+Implemented Do_Turn rotation gate at STAGE A (80f3a07c): when popping
+MissionQueue=MOVE on a vehicle with non-empty path, check facing
+alignment with path[0] direction first. If mismatched, rotate via
+tickRotation() and leave queue pending for next tick.
+
+**Reverted (8e26c68b):** SCG04 regressed 3→2. The non-popped unit falls
+into Mission.GUARD dispatch path (STAGE B fires Mission.GUARD handler
+when Timer==0), which runs `updateGuard` including `cellBasedGuardScan`
+— firing MORE RNGs than the Mission.MOVE handler would have. Net effect:
+rotation gate reduces Mission_Move jitter but increases Mission_Guard
+jitter + scan RNGs.
+
+**For a correct port:** the rotation-gate unit must stay entirely OUT
+of STAGE B dispatch this tick (no handler runs). C++ achieves this
+via: unit in MOVE mission entering Start_Of_Move + Do_Turn returning
+true means the MissionClass::AI dispatch was already run (jitter fired)
+BEFORE Start_Of_Move. Sequence:
+  1. MissionClass::AI fires Mission_Move jitter (once)
+  2. DriveClass::AI runs Start_Of_Move → Do_Turn on mismatch → return
+  3. Next tick: Timer counts down; no new Mission_Move dispatch until Timer=0
+
+So C++ fires Mission_Move jitter ONCE per Commence pop, regardless of
+rotation. Multiple team members popping same tick → multiple jitters
+same tick. My "only 1 WASM jitter" observation must come from members
+NOT popping same tick (different states).
+
+**New hypothesis:** members in SCG04 aren't all in `MissionQueue=MOVE`
+at tick 3. Either they popped earlier (Mission=MOVE already, Timer>0
+counting down) or haven't had Coord_Move target them yet. Need to
+compare per-member WASM state across ticks 0-3.
+
+**Session 8 end state:** Tick counters unchanged from Step 7 finish.
+Trace infrastructure retained (scripts/test-scg04-move-trace.ts,
+RNG debug hooks removed). The real fix needs per-tick per-member
+Mission/MissionQueue state comparison between TS and WASM — a longer
+investigation than one session.
+
 ## 2026-04-23T07:00Z — Step 8 Mission_Move over-fire diagnosis complete (root cause identified)
 
 Added global RNG instrumentation + per-entity trace script
