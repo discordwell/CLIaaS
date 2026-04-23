@@ -1504,6 +1504,26 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   // post-call).
   if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0) {
     if (entity.inRange(entity.target)) {
+      // C++ path-shorten equivalent for mid-walk in-range transition. When
+      // target enters weapon range mid-cell (between PCP_END boundaries),
+      // path-shorten inside `footPerCellProcess` does NOT fire because the
+      // unit is not at a cell boundary. This leaves `isDriving=true` stuck,
+      // which blocks updateAttack via the FIRE_MOVING gate (missionAI.ts:410
+      // / C++ infantry.cpp:1639). Clear the drive state here to mirror C++'s
+      // Stop_Driver-on-IsFiring semantics (infantry.cpp:3790 `!IsFiring`
+      // gate suppresses Movement_AI — equivalent to stopping the walk once
+      // firing begins). This matters for the Phase 4 approach-refire path
+      // where the re-picked cell takes the unit through a DIFFERENT route
+      // than the original sweep's destination, so in-range can occur mid-
+      // cell rather than at the destination boundary.
+      if (entity.isDriving || entity.moveTarget) {
+        entity.isDriving = false;
+        entity.moveTarget = null;
+        entity.path = [];
+        entity.pathIndex = 0;
+        entity.headToLX = 0;
+        entity.headToLY = 0;
+      }
       entity.mission = Mission.ATTACK;
       updateAttack(ctx, entity);
       if ((entity.mission as Mission) === Mission.ATTACK) {
