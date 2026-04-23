@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-04-23T09:10Z — Session 11: Per_Cell_Process hypothesis analysis
+
+**Hypothesis:** TS `unitPerCellProcess(PCP_END)` fires at every chain iteration (every cell crossing) when TS double-cycles tracks. C++ Per_Cell_Process(PCP_END) fires only at *track completion* — and for a drive-in-GUARD moving through intermediate cells at high speed with long tracks, it may not fire at every intermediate cell, letting mq=MOVE persist until actual destination.
+
+**C++ code investigated:**
+- `drive.cpp:773` — PCP_END during track-jump (only when `adj=true`, i.e. direction change)
+- `drive.cpp:816` — PCP_END at track completion (when `actual=0` ran out of budget)
+- `unit.cpp:1777-1779` — inside PCP_END: `if (!IsDumping) Commence();` unconditional
+- `mission.cpp:343-359` — Commence unconditionally pops MissionQueue
+
+**Observation not yet explained:** WASM W[1] (3TNK at 40,34) traverses to (41,35) between tick 24 and 25 but keeps `Mission=GUARD, mq=MOVE` at tick 25. Somehow Per_Cell_Process/Commence isn't popping the queue during this traversal.
+
+Possible reasons (Session 10 targets to instrument):
+1. Track-jump path not entered (`adj=false` because SE→SE linear)
+2. Track-completion PCP not reached because track still active
+3. Some other gate I haven't found
+
+**Session 10 plan:** Add WASM instrumentation to log every MissionClass::Commence call for W[1] at ticks 22-30. That will reveal whether Per_Cell_Process triggers Commence in drive-in-GUARD traversal, and if not, why.
+
+No code changes landed in Session 11. Analysis only.
+
 ## 2026-04-23T09:00Z — Session 12: post-Session-13 divergence analysis
 
 After Session 13's Assign_Destination port, I ran rng-entity-diff + member-state-diff at the new first-divergence ticks for all three improved scenarios:
