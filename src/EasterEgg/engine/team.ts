@@ -828,9 +828,12 @@ export class Team {
         }
         regrouped = false;
       } else {
-        // Close enough — guard
-        if (unit.mission !== Mission.AREA_GUARD) {
-          unit.mission = Mission.GUARD;
+        // Close enough — guard (C++ team.cpp:1783 Assign_Mission(MISSION_GUARD))
+        // Session 23: route through queue instead of direct Mission set to
+        // match C++ mission.cpp:388 Assign_Mission semantics. moveTarget=null
+        // mirrors Assign_Destination(TARGET_NONE).
+        if (unit.mission !== Mission.AREA_GUARD && unit.mission !== Mission.GUARD) {
+          assignMission(unit, Mission.GUARD);
           unit.moveTarget = null;
         }
       }
