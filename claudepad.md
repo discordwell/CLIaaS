@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-04-23T09:00Z — Session 12: post-Session-13 divergence analysis
+
+After Session 13's Assign_Destination port, I ran rng-entity-diff + member-state-diff at the new first-divergence ticks for all three improved scenarios:
+
+**SCG04EA tick 24 (+21 from prior baseline):**
+- TS T[1] 3TNK already at cell (41,35) with m=MOVE mq=-- mt=14
+- WASM W[1] 3TNK still at cell (40,34) with m=GUARD mq=MOVE mt=18 (drive-in-GUARD)
+- TS is **1 tick ahead** on the MOVE queue pop. TS appears to pop MOVE immediately on cell arrival; C++ waits for end-of-track + next-tick Commence when drv=F.
+- Root cause likely: TS `perCellNavComCheck` at index.ts:~6294 clears NavCom on cell arrival, causing the GUARD→MOVE pop via Commence gate 1 tick early.
+
+**SCG11EA tick 19 (+4):**
+- TS unit[8] (a 4TNK) fires 1 Mission_Move jitter RNG call (stag=11008) that WASM does NOT fire.
+- tick 21: TS unit[94], unit[95] fire 3 additional jitters WASM doesn't.
+- Pattern: TS fires patrol re-target jitters that WASM suppresses during drive-in-GUARD.
+
+**SCG07EA tick 4 (unchanged):**
+- Vessel timing. TS fires 4 Mission_Move_foot; WASM fires 3. TS has an extra vessel[37] firing. Tick 6: WASM vessel[87] fires one; TS silent.
+- Classic vessel double-cycle W4 territory. VesselClass::AI IsDoorClosed gate.
+
+**Next mechanism to port (Session 11 target):** The SCG04 drive-in-GUARD pop timing (1-tick lag in C++ from cell arrival to Commence pop when drv=T at NavCom). Port drive.cpp PCP_END track-completion flag: IsDriving stays true through cell-center-arrival tick, flips false at the START of next tick's While_Moving, only then does the Commence gate open. That's the C++ path for drive-in-GUARD → MOVE transition.
+
 ## 2026-04-23T08:50Z — Session 13: ported Assign_Destination → Start_Of_Move → +25 ticks total
 
 **Port applied** (team.ts:892-919): In `team.coordinateMove`, after `findPath` populates `unit.path`, check if `directionTo(unit.pos, path[0] center)` matches `unit.facing`. On match, set `unit.isDriving = true`. Emulates C++ drive.cpp:638-640 Assign_Destination → Start_Of_Move → Start_Driver chain from Team.AI scope.
