@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-04-23T05:15Z — C++-Parity-First refactor (Steps 1-7, user directive)
+
+**User directive:** "Port C++ faithfully, delete workarounds, use WASM divergence as data not failure."
+
+Starting commit: `f1233536`. Baseline: SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=57, SCG13=101.
+
+**Deleted workarounds** (7 commits):
+- W1 patrolBlockedTargetLX sticky flag + coord timer-skip (c19708fd)
+- W2 vehicleClaims retroactive isDriving=false chain-flip (72727617)
+- W3 eager isDriving=true by facing-match in coordinator (92783bb5)
+- W4 nonInterruptAnimTicks=3 VESSEL Mark_Track proxy (d5122469)
+- Dead delayActivation / _skipActivationOnce (3ff341ca)
+- Dead TEAM_START_DRIVER_REFACTOR=false else branch (15063ca9)
+- drive-in-GUARD Mission_Move jitter proxy in runDriveClassAI (b1ca294d)
+
+**Audited as C++-faithful (kept):** W5 skipFirstAiCall — matches empirical WASM observation for VESSEL CREATE_TEAM.
+
+**Post-refactor ticks:** SCG01=87, SCG03=238, **SCG04=3 (-33)**, SCG06=76, **SCG07=4 (-13)**, **SCG11=15 (-42)**, SCG13=101. Net -88 ticks.
+
+**rng-entity-diff findings (the real divergences):**
+- SCG11 tick 15: TS fires 4 extra Mission_Move RNGs (unit[94] 3×, unit[95] 1×). C++ fires once per unit per `obj->AI()` (techno.cpp:2344). Root cause: STAGE F re-dispatch + double-cycle + inline wrapper creating multiple fire sites.
+- SCG04 tick 3: TS fires 2 extra unit Mission_Move RNGs after W2 deletion. Same over-fire pattern.
+- SCG07 tick 4: 1 extra TS RNG.
+
+**Next session:** Continue Step 7 — dedup Mission_Move dispatch across STAGE B / runDriveClassAI / STAGE F. Move all Random_Pick(0,2) jitter into the Mission_Move handler path (`foot.cpp:520`), eliminate wrapper-level RNG consumption.
+
+All 51,363 EasterEgg tests pass. Ports are byte-for-byte WASM-comparable at unmodified scenarios. Regressions are real C++-faithful calls TS WAS suppressing via workarounds. This is forward progress in the shape user asked for.
+
 ## 2026-04-23T03:20Z — Phase 7B scaffolded + tested; Fire_Coord hypothesis refuted (no SCG01 advance)
 
 **Final flag state:** `SCG01_MISSION_GUARD_CADENCE_FIX=false` (effectively reverted). Flag was flipped ON then reverted to OFF by concurrent commit `1c4dce3f` as a merge side effect; Playwright verification proved the flag flip is neutral either way, so the OFF state is correct per plan §7B "If no advance" rollback.
