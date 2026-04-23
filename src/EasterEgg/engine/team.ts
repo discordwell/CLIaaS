@@ -791,9 +791,9 @@ export class Team {
       if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > stray) {
         // Queue for infantry to respect gesture gate; direct set for vehicles/aircraft.
         if (unit.stats.isInfantry) {
-          if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
-            unit.missionQueue = Mission.MOVE;
-          }
+          // Phase 2: route through assignMission (C++ mission.cpp:379-390)
+          // — no-op when already in MOVE, queues otherwise.
+          assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
         } else {
           // C++ team.cpp Coordinate_Regroup → Assign_Mission(MISSION_MOVE) → Commence()
