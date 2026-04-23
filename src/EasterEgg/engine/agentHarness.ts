@@ -745,6 +745,12 @@ export function installHarness(game: Game): void {
   w.__agentReady = true;
   w.__agentGame = game; // Expose for debug/testing
 
+  // Expose active teams for per-tick parity comparison with WASM's agent_get_state
+  // (session 23 of the 25-session parity run — scripts/test-team-state-diff.ts).
+  import('./team').then(({ getActiveTeams }) => {
+    w.__teamsList = () => getActiveTeams();
+  });
+
   w.__agentState = () => serializeState(game);
 
 
