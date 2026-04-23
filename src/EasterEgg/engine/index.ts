@@ -4813,10 +4813,13 @@ export class Game {
       return;
     }
     if (!entity.isDriving) {
-      if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+      // C++ !IsDriving branch: Start_Driver (infantry only — vehicles use
+      // track-based movement). Mirrors dispatchMission's HUNT block where the
+      // validatePath / startDriver calls are gated on `entity.stats.isInfantry`.
+      if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
         this.infantryValidatePath(entity);
       }
-      if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+      if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
         const destCell = entity.path[entity.pathIndex];
         this.infantryStartDriver(entity, destCell.cx, destCell.cy);
       }
@@ -4832,7 +4835,10 @@ export class Game {
         entity.isDriving = false;
         entity.headToLX = 0;
         entity.headToLY = 0;
-        if (FOOT_PER_CELL_ENABLED) {
+        // PCP_END cell-arrival — infantry only. Vehicles use their own
+        // unitPerCellProcess chain via followTrackStep (not reached here
+        // since this path uses moveToward, not the track-based mover).
+        if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
           const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
           const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
           footPerCellProcess(
@@ -4881,7 +4887,8 @@ export class Game {
   private runDriveClassAI(entity: Entity): void {
     // Per-tick DriveClass::AI — vehicle/vessel per-tick movement dispatched
     // from STAGE D when DISPATCH_ORDER_REFACTOR=true. Mirrors the inline
-    // Mission.MOVE + drive-in-GUARD blocks currently in dispatchMission.
+    // Mission.MOVE + drive-in-GUARD + Mission.HUNT blocks currently in
+    // dispatchMission.
     //
     // ## C++ refs
     //   drive.cpp:1304-1399  DriveClass::AI — per-tick track follow
@@ -4913,6 +4920,16 @@ export class Game {
           }
         }
       }
+      return;
+    }
+
+    if (m === Mission.HUNT || m === Mission.RESCUE) {
+      // Vehicle HUNT per-tick walk: same walk-step pattern as infantry but
+      // without the infantryStartDriver/validatePath calls (gated off in
+      // _infantryWalkStep for non-infantry). Lifted from dispatchMission's
+      // Mission.HUNT walk block so between-fire ticks still advance toward
+      // the target.
+      this._infantryWalkStep(entity);
       return;
     }
   }
