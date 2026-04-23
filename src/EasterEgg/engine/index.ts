@@ -4968,17 +4968,19 @@ export class Game {
     //   at blocking cell is MOVE_MOVING_BLOCK = pathable), tank starts
     //   rotating, next tick Can_Enter_Cell fails → reactive close-enough
     //   at drive.cpp:1102 fires — two ticks later than v1.
+    // Narrow scope: only Mission.MOVE land vehicles. Vessels (LST etc.) have
+    // divergent VesselClass::AI semantics including door-state gating; their
+    // drive-in-GUARD preservation is asserted by
+    // `cpp-parity-drive-in-guard.test.ts` and must not regen paths the way
+    // land vehicles do. Drive-in-GUARD regen is handled by the existing
+    // inline paths in `updateMove` / Mission.GUARD block and not duplicated
+    // here.
     if (DRIVE_CLASS_AI_PORT
         && !entity.isAirUnit
+        && !entity.isNavalUnit
         && entity.moveTarget
         && entity.path.length === 0) {
-      // Only attempt Basic_Path-equivalent when MOVE or drive-in-GUARD
-      // (isDriving && Mission==GUARD) — matches C++ Start_Of_Move entry
-      // conditions. Drive-in-GUARD path regen is speculative but preserves
-      // v1 behavior for GUARD-mission vehicles that acquired a NavCom.
-      const isDriveInGuard = (m0 === Mission.GUARD || m0 === Mission.STICKY)
-        && entity.isDriving;
-      if (m0 === Mission.MOVE || isDriveInGuard) {
+      if (m0 === Mission.MOVE) {
         const destCell = {
           cx: Math.floor(entity.moveTarget.lx / 256),
           cy: Math.floor(entity.moveTarget.ly / 256),
