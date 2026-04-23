@@ -886,34 +886,20 @@ export class Team {
           // doesn't pop MOVE until the unit arrives at destination. Infantry
           // use a different gate (nonInterruptAnimTicks gesture timer).
           if (!unit.stats.isInfantry && !unit.isAirUnit && !unit.stats.isVessel) {
-            // Per-tick path-reservation emulation (SCG04EA tick 3 fix):
-            // C++ Basic_Path succeeds for the first team and fails for the
-            // second team claiming the same target (transient cell
-            // reservation). Emulate by flipping: when a SECOND team queues
-            // the same cell, reset the FIRST unit to isDriving=false so its
-            // Commence pops Mission=MOVE and fires Mission_Move_foot jitter;
-            // current unit stays isDriving=true (drives-in-GUARD).
+            // W2 deleted (Step 2): the retroactive `prior.isDriving=false`
+            // chain-flip had no C++ counterpart. C++ `TeamClass::Coordinate_Move`
+            // (team.cpp:1878-2012) never touches IsDriving. Second-team's
+            // Basic_Path will either succeed on a detour (cellClaims Map steers
+            // around first team's path) or fail naturally via findPath.
             //
-            // Vessels EXCLUDED: C++ VesselClass::AI uses an additional
-            // `Is_Door_Closed()` gate (vessel.cpp:592, 658) separate from the
-            // `!IsDriving` clause — door-closed is what actually delays LST
-            // transport reinforcements from popping MOVE, not IsDriving.
-            // Reinforcement vessels (SCG07EA mcvlst LST + cover 3×PT) need
-            // to pop their MOVE queue same-tick as C++ does to match WASM's
-            // tick-2 Mission_Move_foot fan-out (4 vessels → 7 RNG w/ LCG
-            // rejection). Applying the vehicle path-reservation flip to
-            // same-cell vessel reinforcements leaves exactly one vessel
-            // stuck with isDriving=true (the last member in iteration order),
-            // blocking its pre-Commence gate and silently dropping one
-            // Mission_Move_foot jitter relative to WASM. SCG07EA tick 2 fix.
+            // vehicleClaims Map retained for cellClaims path-reservation
+            // (simulates live Cell_Occupier that Basic_Path reads per
+            // candidate cell in C++ findpath.cpp:1266-1293).
             const tcx = Math.floor(this.target.x / CELL_SIZE);
             const tcy = Math.floor(this.target.y / CELL_SIZE);
             const claimKey = tcy * MAP_CELLS + tcx;
             const claims = ctx?.vehicleClaims;
             const prior = claims?.get(claimKey);
-            if (prior && !prior.stats.isInfantry && !prior.isAirUnit && !prior.stats.isVessel) {
-              prior.isDriving = false;
-            }
             // Session 3.3 — TEAM_START_DRIVER_REFACTOR gates the eager-isDriving
             // flip. When ON: populate unit.path via findPath (mirrors C++ Basic_Path)
             // and leave isDriving=false; the Mission.GUARD drive-in-GUARD handler
