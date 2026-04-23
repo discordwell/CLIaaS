@@ -237,19 +237,11 @@ describe('C++ SCG07EA tick-2 vessel Mission_Move fan-out', () => {
     team2.add(tank2);
     registerTeam(team2);
 
-    updateAllTeams(waypoints, { structures: [], entities: [tank1, tank2], map: game.map });
+    updateAllTeams(waypoints, { structures: [], entities: [tank1, tank2] });
 
-    // Phase 3 (§3.4) — TEAM_START_DRIVER_REFACTOR replaces the eager-isDriving
-    // flip with cellClaims path-reservation + deferred Start_Driver.
-    // Semantic outcome: both tanks leave coordinateMove with isDriving=false;
-    // tank1 (first team) has a populated path; tank2's path may be non-empty
-    // if its start cell is different enough to route around tank1's claims.
-    expect(tank1.isDriving, 'tank1 (first vehicle team): isDriving deferred').toBe(false);
-    expect(tank2.isDriving, 'tank2 (second vehicle team): isDriving deferred').toBe(false);
-    expect(tank1.path.length, 'tank1: Basic_Path populated').toBeGreaterThan(0);
-    // tank2 may have a path routing around tank1's claimed cells — the
-    // stagger outcome emerges at dispatch-time via pre-Commence ordering,
-    // not from initial path state. See cpp-parity-scg04-mission-move-stagger
-    // for the full semantic outcome test.
+    // Vehicle flip preserved: first team's tank gets isDriving=false (flipped
+    // by team2's claim), second team's tank gets isDriving=true.
+    expect(tank1.isDriving, 'tank1 (first vehicle team): isDriving=false after flip').toBe(false);
+    expect(tank2.isDriving, 'tank2 (second vehicle team): isDriving=true after claim').toBe(true);
   });
 });

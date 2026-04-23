@@ -450,7 +450,7 @@ export const AREA_GUARD_APPROACH_RETRY = true;
  *   drive.cpp:1304-1399 DriveClass::AI TrackNumber dispatch
  *   foot.cpp:856-946    Basic_Path / Approach_Target pathfinding
  */
-export const TEAM_START_DRIVER_REFACTOR = true;
+export const TEAM_START_DRIVER_REFACTOR = false;
 
 /**
  * Mission_Move internal path-failure short-circuit (residual beyond Session 3).
