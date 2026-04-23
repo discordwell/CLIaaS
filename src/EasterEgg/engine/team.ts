@@ -599,43 +599,22 @@ export class Team {
       this.isNextMission = true;
     }
 
-    // C++ parity (SCG07EA subz VESSEL activation): WASM observation shows the
-    // first TMISSION_MOVE handler advances on the activation tick, firing
-    // Mission_Move jitter (tag 60010) for vessel members (2 of 3 SS fire at
-    // tick 4, the 3rd at tick 6). The composition transition at line 503
-    // sets isReforming=true, which would block the advance+execute block
-    // below. In C++ this transition is gated by IsReinforcable: for
-    // non-reinforceable teams, the intent is to activate-and-go without
-    // regrouping first. Clear isReforming here so the tick-4 advance+execute
-    // runs same-tick for vessel teams, matching WASM's cadence.
+    // W4 deleted (Step 4): the nonInterruptAnimTicks=3 proxy on the last
+    // vessel member was a TS-only emulation of C++ VesselClass::AI's
+    // `Is_Door_Closed()` double-Commence gate (vessel.cpp:592, 659). C++
+    // vessels fire two Commence calls per AI tick, gated by door state; no
+    // artificial timer involved. The real port is in PCP_DOUBLE_CYCLE_ENABLED
+    // (Phase 5, index.ts runDriveClassAI). Proxy removed.
     //
-    // Gated on: activation-this-tick + non-reinforceable + all vessel members.
-    // This preserves regroup-first behavior for infantry/mixed teams that
-    // WASM does handle via Coordinate_Regroup at activation (and for
-    // reinforceable teams which can drop back to under-strength).
-    //
-    // Additionally: WASM only fires Mission_Move for 2 of 3 SS on tick 4, with
-    // the 3rd firing at tick 6. This mirrors a C++ DriveClass::Start_Driver +
-    // Mark_Track cell-reservation conflict where one sub's path blocks another
-    // for ~2 ticks, gating its Commence. To reproduce, delay the LAST member
-    // (iteration-order last, matches WASM's vessel[87] = sub3) from popping
-    // MissionQueue=MOVE by 2 ticks via nonInterruptAnimTicks. The pre-Commence
-    // gate at index.ts:4003 checks `nonInterruptAnimTicks <= 0`; setting to 3
-    // yields 2 ticks of blocking (post-decrement: 2→1→0, with the gate firing
-    // only on the third tick when niat==0).
+    // C++ parity (SCG07EA non-reinforceable VESSEL activation): clear
+    // isReforming on activation for non-reinforceable all-vessel teams so
+    // the advance+execute block runs same-tick (matches WASM cadence for
+    // CREATE_TEAM VESSEL activation).
     if (activatedThisTick && !this.isReinforcable && this.isReforming) {
       const allVessels = this._members.length > 0 &&
         this._members.every(m => m.alive && m.stats.isVessel);
       if (allVessels) {
         this.isReforming = false;
-        // Defer last member's Commence pop by 2 ticks to match WASM tick-6 fire
-        // on the third SS (vessel[87]). Skip for teams with ≤2 members.
-        if (this._members.length > 2) {
-          const lastMember = this._members[this._members.length - 1];
-          if (lastMember.alive && lastMember.nonInterruptAnimTicks <= 0) {
-            lastMember.nonInterruptAnimTicks = 3;
-          }
-        }
       }
     }
 

@@ -143,15 +143,18 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     void team;
   });
 
-  it('last member gets nonInterruptAnimTicks=3 (delays Commence 2 ticks for Mission_Move cadence)', () => {
+  it('post-W4-deletion: no member gets nonInterruptAnimTicks proxy (C++ uses VesselClass IsDoorClosed)', () => {
+    // W4 deleted (Step 4 of C++-parity-first refactor): the
+    // nonInterruptAnimTicks=3 proxy on the last VESSEL member was a TS-only
+    // emulation of C++ VesselClass::AI `Is_Door_Closed()` double-Commence
+    // gate (vessel.cpp:592, 659). The real port lives in PCP_DOUBLE_CYCLE.
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
     updateAllTeams(wps, { entities: subs });
 
-    // subs[2] is the last-iterated member (matches WASM's vessel[87] = sub3).
-    expect(subs[2].nonInterruptAnimTicks, 'last member delayed 3 ticks').toBe(3);
-    expect(subs[0].nonInterruptAnimTicks, 'first member not delayed').toBe(0);
-    expect(subs[1].nonInterruptAnimTicks, 'second member not delayed').toBe(0);
+    expect(subs[0].nonInterruptAnimTicks, 'no niat proxy').toBe(0);
+    expect(subs[1].nonInterruptAnimTicks, 'no niat proxy').toBe(0);
+    expect(subs[2].nonInterruptAnimTicks, 'no niat proxy on last member').toBe(0);
     void team;
   });
 
