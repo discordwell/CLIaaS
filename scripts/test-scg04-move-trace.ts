@@ -14,7 +14,7 @@ test('SCG04 tick 3 move-fire trace', async ({ browser }) => {
   const logs: string[] = [];
   page.on('console', m => {
     const text = m.text();
-    if (text.includes('[MOVE_FIRE]') || text.includes('[GUARD_FIRE]') || text.includes('[RNG]')) logs.push(text);
+    if (text.includes('[MOVE_FIRE]') || text.includes('[GUARD_FIRE]') || text.includes('[RNG]') || text.includes('[RNG.next]')) logs.push(text);
   });
 
   await page.goto(`${BASE}/?anttest=agent&scenario=SCG04EA&difficulty=normal`, {
