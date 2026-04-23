@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-04-23T13:00Z — Session 17: root cause of SCG04 t24 divergence = PCP_END chain over-fire
+
+Confirmed via rng-entity-diff that SCG04 tick 24 TS unit[2] fires 1 extra RNG call (Mission_Move jitter). At tick 24, TS unit arrives at cell (41,35) → `unitPerCellProcess(PCP_END)` fires at chain loop `perCellNavComCheck()` (index.ts:6294) → Commence pops mq=MOVE → Mission=MOVE → dispatchMission fires Mission_Move jitter.
+
+**WASM at same arrival DOES NOT fire PCP_END** (per Session 10 WASM instrumentation). The track-jump path at drive.cpp:773 requires `adj=true` (direction change); for straight-line paths (SE-SE-SE), adj=false, no PCP fires. PCP only fires at drive.cpp:816 track completion (speed budget exhausted).
+
+**TS over-fires PCP** because the chain loop calls `perCellNavComCheck()` at every track completion within the same tick — unlike C++ which only calls PCP at drive.cpp:816 when `actual=0`.
+
+**Potential fix (NOT DONE):** narrow `perCellNavComCheck()` call at index.ts:6294 to skip the Commence step when chain continues. Only fire full PCP_END on the LAST chain iteration (when `actual=0` equivalent is true).
+
+**Risk:** The current chain PCP fires Commence which is load-bearing for several scenarios. A narrow fix requires per-tick tracking of "is this the final chain step".
+
 ## 2026-04-23T12:45Z — Sessions 24-18: routed all team.ts direct Mission assignments through assignMission queue
 
 Applied C++ mission.cpp:388 `Assign_Mission` queue semantic to all direct `unit.mission = X` sites in `team.ts`:
