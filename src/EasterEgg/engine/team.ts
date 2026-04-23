@@ -1108,25 +1108,19 @@ export class Team {
             unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
           }
         } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
-          // C++ team.cpp Coordinate_Patrol → Assign_Mission(MISSION_MOVE) → Commence()
-          // pops queue and sets Timer=0 (mission.cpp:354). Next MissionClass::AI fires
-          // Mission_Move handler, consuming Random_Pick(0,2) (foot.cpp:535 tag 60010).
-          // Without this reset, TS misses the jitter RNG and diverges from WASM.
+          // C++ team.cpp Coordinate_Patrol (team.cpp:Coordinate_Move-equivalent
+          // patrol variant) → Assign_Mission(MISSION_MOVE) → Commence() pops
+          // queue and sets Timer=0 (mission.cpp:354). Next MissionClass::AI
+          // fires Mission_Move handler, consuming Random_Pick(0,2) jitter
+          // (foot.cpp:535 tag 60010).
           //
-          // C++ parity guard: updateMove may have cleared moveTarget and set Mission
-          // to GUARD when Basic_Path failed (adjacent cell blocked by friendly unit,
-          // target within CloseEnoughDistance — see index.ts updateMove friendly-
-          // blocker check). In that case, WASM's Coordinate_Move re-assigns NavCom
-          // without resetting Timer (Assign_Mission queues via MissionQueue; Timer=0
-          // reset happens only on Commence pop, which is gated). Skip the Timer
-          // reset when the unit was blocked on this exact target — prevents
-          // Mission_Move from firing Random_Pick jitter on every tick cycle.
+          // W1 deleted (Step 3): no sticky patrolBlockedTarget flag. C++
+          // fires the Mission_Move jitter on every re-assignment, including
+          // re-targets to the same blocked cell. The drive.cpp:1102 reactive
+          // close-enough in followTrackStep clears NavCom when blocked.
           const targetLXlepton = pixelToLepton(this.target.x);
           const targetLYlepton = pixelToLepton(this.target.y);
-          const sameBlockedTarget =
-            unit.patrolBlockedTargetLX === targetLXlepton &&
-            unit.patrolBlockedTargetLY === targetLYlepton;
-          if (unit.mission !== Mission.MOVE && !sameBlockedTarget) {
+          if (unit.mission !== Mission.MOVE) {
             unit.missionTimer = 0;
           }
           unit.mission = Mission.MOVE;

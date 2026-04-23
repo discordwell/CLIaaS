@@ -6037,57 +6037,13 @@ export class Game {
     // CloseEnoughDistance, clear moveTarget (Enter_Idle_Mode equivalent). Flag
     // the entity's blocked target so coordinatePatrol (team.ts) doesn't reset
     // missionTimer=0 on next re-assign — avoids Mission_Move jitter oscillation.
-    //
-    // Gate on `missionTimer > 0` OR previously-blocked: Mission_Move's Random_Pick(0,2)
-    // jitter fires when timer=0 (foot.cpp:536). At Mission.MOVE assignment Commence
-    // sets timer=0 so Mission_Move fires ONCE on the entry tick, consuming RNG to
-    // match WASM's Mission_Move fire. On subsequent ticks (timer > 0) we can safely
-    // clear moveTarget. But if we've already blocked on this target before (flag
-    // set), the initial Mission_Move jitter already fired on the entry tick, and
-    // any timer=0 we see now is a subsequent re-fire — skip the RNG by clearing
-    // moveTarget before the timer-fire handler (block line 3957 takes Enter_Idle
-    // branch without RNG).
-    const alreadyBlockedThisTarget = entity.moveTarget !== null &&
-      entity.patrolBlockedTargetLX === entity.moveTarget.lx &&
-      entity.patrolBlockedTargetLY === entity.moveTarget.ly;
-    if (!fromGuardDrive && entity.moveTarget && entity.path.length === 0 &&
-        (entity.missionTimer > 0 || alreadyBlockedThisTarget) &&
-        !entity.stats.isInfantry && !entity.isAirUnit && !entity.isDriving) {
-      const tgtCellX = Math.floor(entity.moveTarget.lx / 256);
-      const tgtCellY = Math.floor(entity.moveTarget.ly / 256);
-      const curCell = entity.cell;
-      if (tgtCellX !== curCell.cx || tgtCellY !== curCell.cy) {
-        // C++ rules.ini [General] CloseEnough=2.75 → 2.75 * 256 = 704 leptons
-        const CLOSE_ENOUGH_LEPTONS = 704;
-        const dxL = entity.moveTarget.lx - entity.leptonX;
-        const dyL = entity.moveTarget.ly - entity.leptonY;
-        const adx = Math.abs(dxL), ady = Math.abs(dyL);
-        // Octagonal Distance() approximation (C++ coord.cpp Distance)
-        const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
-        if (octDist < CLOSE_ENOUGH_LEPTONS) {
-          const sx = Math.sign(tgtCellX - curCell.cx);
-          const sy = Math.sign(tgtCellY - curCell.cy);
-          const adjCellX = curCell.cx + sx;
-          const adjCellY = curCell.cy + sy;
-          const adjOcc = this.map.getOccupancy(adjCellX, adjCellY);
-          if (adjOcc > 0 && adjOcc !== entity.id) {
-            const blocker = this.entityById.get(adjOcc);
-            if (blocker?.alive && this.entitiesAllied(entity, blocker)) {
-              // Flag blocked target so team.coordinatePatrol skips timer reset.
-              entity.patrolBlockedTargetLX = entity.moveTarget.lx;
-              entity.patrolBlockedTargetLY = entity.moveTarget.ly;
-              entity.moveTarget = null;
-              entity.path = [];
-              entity.pathIndex = 0;
-              setMissionIdle();
-              entity.animState = AnimState.IDLE;
-              resetPathThreshold(entity);
-              return;
-            }
-          }
-        }
-      }
-    }
+    // W1 deleted (Step 3): sticky patrolBlockedTargetLX/LY close-enough
+    // check was a TS-only workaround that suppressed legitimate C++
+    // Mission_Move jitter RNG. C++ Coord_Patrol re-assigns MOVE each
+    // cycle and Mission_Move fires Random_Pick(0,2) on Commence pop
+    // (foot.cpp:535). drive.cpp:1102 close-enough in followTrackStep
+    // (below) handles the patrol-blocked-by-friendly close-enough clear
+    // reactively, matching C++ exactly.
 
     entity.animState = AnimState.WALK;
 
@@ -6227,16 +6183,14 @@ export class Game {
           if (octDist < CLOSE_ENOUGH_LEPTONS) {
             const blocker = this.entityById.get(occ);
             if (blocker?.alive && this.entitiesAllied(entity, blocker)) {
-              // Preserve W16 sticky flag so team.coordinatePatrol skips the
-              // timer reset on re-assignment (prevents duplicate Mission_Move
-              // jitter RNG at the next patrol cycle).
-              entity.patrolBlockedTargetLX = entity.moveTarget.lx;
-              entity.patrolBlockedTargetLY = entity.moveTarget.ly;
+              // drive.cpp:1102-1105 — Assign_Destination(TARGET_NONE) only.
+              // C++ does NOT call Enter_Idle_Mode here; the next tick's
+              // Mission_Move handler (foot.cpp:524) sees !moveTarget and
+              // fires Enter_Idle_Mode, consuming Random_Pick(0,2) jitter.
+              // No W1 sticky flag — legitimate RNG fires each cycle.
               entity.moveTarget = null;
               entity.path = [];
               entity.pathIndex = 0;
-              setMissionIdle();
-              entity.animState = AnimState.IDLE;
               resetPathThreshold(entity);
               return;
             }
