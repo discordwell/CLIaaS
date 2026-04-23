@@ -4081,6 +4081,83 @@ export class Game {
     // MissionQueue=MOVE gets a 1-tick delay: queue pops at end-of-tick, Mission_Move
     // fires on the following tick — whereas C++ pops and dispatches Mission_Move on the
     // SAME tick (SCG04EA tick 3: WASM fires tag 60010 at tick 3, TS at tick 4).
+    // ── Phase 1 Checkpoint 1.D: STAGE A-F flow gated behind flag ─────────────
+    if (DISPATCH_ORDER_REFACTOR) {
+      // STAGE A: Pre-MissionClass::AI Commence (vehicles, unit.cpp:406).
+      // Identical to the legacy pre-Commence gate — pop MissionQueue when
+      // idle so the new mission's handler fires under STAGE B this tick.
+      if (!entity.stats.isInfantry && !entity.isAirUnit &&
+          entity.missionQueue !== null && !entity.isDriving &&
+          !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+        entity.mission = entity.missionQueue;
+        entity.missionQueue = null;
+        entity.missionTimer = 0;
+        missionTimerFired = true;
+      }
+
+      // STAGE B + C + D: MissionClass::AI dispatch + Firing_AI + Movement_AI.
+      // The monolithic `dispatchMission` method currently bundles all three
+      // per-tick systems (each mission handler inlines Firing_AI + Movement_AI
+      // as needed). STAGE C/D extraction into `runFiringAI` /
+      // `runInfantryMovementAI` / `runDriveClassAI` is prepared (Checkpoint
+      // 1.B + 1.C stubs) but NOT yet wired here — those stubs are empty and
+      // calling them would double-fire inline code still present in
+      // `dispatchMission`. Full lift-and-shift is a follow-up within Phase 1.
+      let missionHandlerRan = false;
+      if (entity.missionTimer === 0) {
+        // STAGE B: Mission handler dispatch (mirrors C++ MissionClass::AI
+        // Timer==0 branch, mission.cpp:213-321).
+        this.dispatchMission(entity, true);
+        missionHandlerRan = true;
+      } else {
+        // Per-tick Firing_AI + Movement_AI only (no mission-timer dispatch).
+        // For semantic parity with the legacy code we still call dispatchMission
+        // with missionTimerFired=false so Mission.HUNT/AREA_GUARD/MOVE run
+        // their per-tick movement branches. Remove once STAGE C/D stubs land.
+        this.dispatchMission(entity, false);
+      }
+
+      // C++ Doing_AI + firing-anim countdown — unchanged from legacy flow.
+      entity.doingAI();
+      if (entity.isFiringAnim) {
+        if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
+        if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
+      }
+
+      // STAGE E: Post-Movement_AI Commence (vehicles unit.cpp:472,
+      // vessels :658; infantry infantry.cpp:1208-1211).
+      const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
+      if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
+        const popFromA2 =
+          entity.missionQueue === Mission.MOVE &&
+          entity.mission === Mission.ATTACK &&
+          entity.savedMoveTarget !== null;
+        entity.mission = entity.missionQueue;
+        entity.missionQueue = null;
+        if (popFromA2) {
+          entity.savedMoveTarget = null;
+        } else {
+          entity.missionTimer = 0;
+        }
+      }
+
+      // STAGE F: re-dispatch if STAGE E's Commence just popped and Timer==0.
+      // Generalizes commit 79b13cb3's drive-in-GUARD same-tick post-Commence
+      // dispatch to ALL missions. Previously this re-dispatch was inlined in
+      // Mission.GUARD case of dispatchMission; here it fires uniformly.
+      // When `missionHandlerRan` is true, STAGE B already consumed the
+      // mission-timer jitter RNG — so we only re-enter if the handler has
+      // NOT already run this tick. This matches C++ DriveClass::AI's
+      // internal same-tick dispatch (drive.cpp:1340-1345, techno.cpp:2344).
+      if (!missionHandlerRan && entity.missionTimer === 0) {
+        this.dispatchMission(entity, true);
+      }
+
+      this._updateEntityPostDispatch(entity);
+      return;
+    }
+
+    // ── Legacy flow (DISPATCH_ORDER_REFACTOR=false) ────────────────────────
     if (!entity.stats.isInfantry && !entity.isAirUnit &&
         entity.missionQueue !== null && !entity.isDriving &&
         !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
