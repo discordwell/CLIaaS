@@ -722,7 +722,7 @@ export const DISPATCH_ORDER_REFACTOR = true;
  *   foot.cpp:1471-1483  FootClass::Per_Cell_Process path-shorten entry
  *   foot.cpp:856-946    Basic_Path / Approach_Target pathfinding
  */
-export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = false;
+export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose
