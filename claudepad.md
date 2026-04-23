@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-04-22T19:50Z — findPath cpp-parity test; SCG06 t76 residual is NOT a findPath bug
+
+**Result:** No runtime code change. Wrote `cpp-parity-findpath-basic-path.test.ts` (9 tests) pinning TS `findPath` algorithmic invariants against C++ `Find_Path` (findpath.cpp:435-752) / `Basic_Path` (foot.cpp:313-472). All 7 scenarios unchanged.
+
+**Commit:** `97ef69d0` on main (cherry-picked from worktree `6511d1eb`).
+
+**Investigation verdict:** TS findPath IS a faithful C++ Find_Path port. For (24,67)→(20,66) it correctly produces `[(23,67), (22,67), (21,66), (20,66)]` = W,W,NW,W. The NW diagonal at (22,67)→(20,66) matches C++ Desired_Facing8 threshold `((2+1)/2)=1 ≤ smaller(1)` — diagonal. SCG06EA t76 residual Δ=+2 is NOT a findPath algorithmic divergence.
+
+**Root cause of residual (already documented):** Approach_Target re-call cadence. Per `cpp-parity-scg06ea-tick-76-path.test.ts`, WASM's fire-cell (22,65) has octagonal distance 608 to target (20,64) — exceeds Approach_Target range=585 gate. WASM cannot have selected (22,65) as the initial destination. It reached (22,65) by walking toward a DIFFERENT destination, chosen by a LATER Approach_Target call when the entity had already moved and dir256 had rotated. TS calls Approach_Target once in `updateAreaGuard` and locks in (20,66); WASM re-calls mid-walk.
+
+**Invariants pinned by new test:**
+- (A) CELL_FACING diagonal threshold `((bigger+1)/2) ≤ smaller`
+- (B) FacingType enum 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
+- (C) Follow_Edge fixed-order scan rotation (not heuristic-sorted)
+- (D) Pick shorter of CW/CCW edge-follow
+- (E) Uniform cost (no Manhattan/octagonal weighting)
+- (F) MAX_MLIST_SIZE=200 staging buffer (foot.cpp:371 workpath1[200])
+
+**All 7 scenarios (before → after):** SCG01=87→87, SCG03=238→238, SCG04=36→36, SCG06=76→76, SCG07=17→17, SCG11=57→57, SCG13=101→101.
+
+**Tests:** 51,344 EasterEgg vitest pass (+9 new tests). Zero regressions.
+
+**Files:** src/EasterEgg/__tests__/cpp-parity-findpath-basic-path.test.ts (new, 302 LOC).
+
+**Next:** SCG06 residual requires porting WASM's Approach_Target re-call trigger. Likely occurs when entity crosses a cell boundary and target is still out of range (foot.cpp, after While_Moving). Alternative: probe WASM `stag` at tick 18/25/65 during the (22,65) walk to confirm Approach_Target was called with post-move dir256. Not pursued this session — high-risk algorithm change blocked by lack of C++ source access for the exact re-call condition.
+
 ## 2026-04-22T14:45Z — updateAreaGuard Firing_AI — SCG01+7, SCG06 Δ-preserved
 
 **Result:** Added C++ infantry.cpp:1237 Firing_AI hook to `updateAreaGuard`, mirroring the existing `updateGuard` pattern (missionAI.ts:1164-1176). Pre-fix, a Mission_Guard_Area unit that path-shorten'd into firing range (foot.cpp:1471-1483) sat idle until the next Mission_Guard_Area timer fire (~70+ ticks later). Post-fix, updateAreaGuard temporarily swaps to ATTACK mission so updateAttack's Fire_At path runs, then restores AREA_GUARD.
