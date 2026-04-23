@@ -893,6 +893,63 @@ export class Entity {
   }
 
   /**
+   * C++ `TechnoClass::Fire_Coord(0)` — bullet-launch coordinate, in leptons.
+   * (techno.cpp:491-517.) Applies three Coord_Move offsets in order:
+   *
+   *   1. DIR_N by (VerticalOffset + Height)
+   *   2. (turret + DIR_W) by PrimaryLateral      (IsSecondShot ? DIR_E)
+   *   3. turret by PrimaryOffset
+   *
+   * Used by `In_Range` (techno.cpp:1289) inside `Evaluate_Object` when the
+   * radial-scan caller passes `range == 0` (THREAT_RANGE).
+   *
+   * Per-type offsets: currently JEEP-only (udata.cpp:376-404: VO=0x30, PO=0x30,
+   * PL=0). Other types return center (no offset) — a full port would extend the
+   * table to all turreted vehicles + infantry but Phase 7B narrows to SCG01
+   * t87 only. `IsSecondShot` is false in the Mission_Guard scan path (no
+   * active second-shot cycle when acquiring a fresh TarCom), so we always
+   * use the DIR_W branch. Height is 0 for ground vehicles.
+   */
+  fireCoordPrimary(): { lx: number; ly: number } {
+    let lx = this.leptonX;
+    let ly = this.leptonY;
+    if (this.type !== UnitType.V_JEEP) return { lx, ly };
+    // Step 1: move north by VerticalOffset + Height.
+    //   DIR_N in the 256-step facing table is index 0; CosTable[0]=0,
+    //   SinTable[0]=127. x += calcx(0, d) = 0. y += calcy(127, d) = -d.
+    //   (calcy returns -(v*d)>>7; with v=127, -(127*d)>>7 ≈ -d.)
+    const VERTICAL_OFFSET = 0x0030; // JEEP udata.cpp:382
+    const PRIMARY_OFFSET = 0x0030;  // JEEP udata.cpp:383
+    const PRIMARY_LATERAL = 0x0000; // JEEP udata.cpp:384
+    // Height is 0 for ground vehicles (non-airborne); we use this.flightAltitude
+    // as a proxy, matching techno.cpp:508 Height field semantics.
+    const height = this.flightAltitude ?? 0;
+    const dN = VERTICAL_OFFSET + height;
+    // calcy(SIN_TABLE_256[0]=127, dN) = -(127*dN)>>7
+    ly += -((127 * dN) >> 7);
+    // calcx(COS_TABLE_256[0]=0, dN) = 0 → no x change.
+
+    // Step 2: move (turret + DIR_W) by PrimaryLateral.
+    //   DIR_W = 192 in the 256-step table. (turret + DIR_W) wraps via & 0xFF.
+    //   For PrimaryLateral=0, this is a no-op; skip the math.
+    const turret256 = (this.turretFacing32 * 8) & 0xFF;
+    if (PRIMARY_LATERAL !== 0) {
+      const dir2 = (turret256 + 192) & 0xFF;
+      const c2 = COS_TABLE_256[dir2];
+      const s2 = SIN_TABLE_256[dir2];
+      lx += (c2 * PRIMARY_LATERAL) >> 7;
+      ly += -((s2 * PRIMARY_LATERAL) >> 7);
+    }
+
+    // Step 3: move turret dir by PrimaryOffset.
+    const c3 = COS_TABLE_256[turret256];
+    const s3 = SIN_TABLE_256[turret256];
+    lx += (c3 * PRIMARY_OFFSET) >> 7;
+    ly += -((s3 * PRIMARY_OFFSET) >> 7);
+    return { lx, ly };
+  }
+
+  /**
    * Select the best weapon against a target based on effective damage (C++ TechnoClass::Can_Fire).
    * Returns the weapon that deals more effective damage considering warhead-vs-armor multipliers.
    * If one weapon is on cooldown but the other is ready, prefers the ready one.

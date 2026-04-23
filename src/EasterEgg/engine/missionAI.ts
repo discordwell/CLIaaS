@@ -21,7 +21,7 @@ import { findPath } from './pathfinding';
 import { canTargetNaval } from './aircraft';
 import { combatAnim } from './combat';
 import { ScenarioRandom } from './random';
-import { AREA_GUARD_APPROACH_RETRY } from './perCellProcess';
+import { AREA_GUARD_APPROACH_RETRY, SCG01_MISSION_GUARD_CADENCE_FIX, isScg01Jeep27DebugEnabled } from './perCellProcess';
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -1028,6 +1028,17 @@ function cellBasedGuardScan(
   const cellX = entity.cell.cx;
   const cellY = entity.cell.cy;
 
+  // Phase 7B (SCG01_MISSION_GUARD_CADENCE_FIX): Fire_Coord-based In_Range for
+  // JEEP. When OFF, use center-to-center distance (legacy TS behavior). When
+  // ON, use Fire_Coord(0)-to-center distance (C++ techno.cpp:1289). See
+  // perCellProcess.ts `SCG01_MISSION_GUARD_CADENCE_FIX` docstring.
+  const useFireCoordRange = SCG01_MISSION_GUARD_CADENCE_FIX
+    && entity.type === UnitType.V_JEEP;
+  const fireCoord = useFireCoordRange ? entity.fireCoordPrimary() : null;
+  const rangeSrcLx = fireCoord ? fireCoord.lx : entity.leptonX;
+  const rangeSrcLy = fireCoord ? fireCoord.ly : entity.leptonY;
+  const debugJeep = isScg01Jeep27DebugEnabled() && entity.type === UnitType.V_JEEP;
+
   // Map bounds for clipping
   const mapX = ctx.map.boundsX;
   const mapY = ctx.map.boundsY;
@@ -1108,7 +1119,15 @@ function cellBasedGuardScan(
         if (ent) {
           // C++ Evaluate_Object range check: when range==0 (THREAT_RANGE), use In_Range
           // In_Range: Distance(Fire_Coord(which), target->Center_Coord()) <= Weapon_Range(which)
-          const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+          const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
+          if (debugJeep) {
+            // eslint-disable-next-line no-console
+            console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
+              `scanning (${cx},${topY}) cand=${ent.type}#${ent.id} dist=${dist} ` +
+              `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+              `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
+              `accept=${dist <= scanRangeLeptons}`);
+          }
           if (dist <= scanRangeLeptons) {
             // C++ bestval < value is always true (bestval stays -1) → always overwrite
             bestObject = ent;
@@ -1123,7 +1142,15 @@ function cellBasedGuardScan(
         if (radius > 0 || x !== -radius) {
           const ent = cellMap.get(cellKey(cx, botY));
           if (ent) {
-            const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+            const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
+            if (debugJeep) {
+              // eslint-disable-next-line no-console
+              console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
+                `scanning (${cx},${botY}) cand=${ent.type}#${ent.id} dist=${dist} ` +
+                `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+                `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
+                `accept=${dist <= scanRangeLeptons}`);
+            }
             if (dist <= scanRangeLeptons) {
               bestObject = ent;
             }
@@ -1143,7 +1170,15 @@ function cellBasedGuardScan(
       if (leftX >= mapX && leftX < mapX + mapW) {
         const ent = cellMap.get(cellKey(leftX, cy));
         if (ent) {
-          const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+          const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
+          if (debugJeep) {
+            // eslint-disable-next-line no-console
+            console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
+              `scanning (${leftX},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
+              `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+              `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
+              `accept=${dist <= scanRangeLeptons}`);
+          }
           if (dist <= scanRangeLeptons) {
             bestObject = ent;
           }
@@ -1155,7 +1190,15 @@ function cellBasedGuardScan(
       if (rightX >= mapX && rightX < mapX + mapW) {
         const ent = cellMap.get(cellKey(rightX, cy));
         if (ent) {
-          const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+          const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
+          if (debugJeep) {
+            // eslint-disable-next-line no-console
+            console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
+              `scanning (${rightX},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
+              `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+              `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
+              `accept=${dist <= scanRangeLeptons}`);
+          }
           if (dist <= scanRangeLeptons) {
             bestObject = ent;
           }

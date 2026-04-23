@@ -1319,3 +1319,113 @@ export function footPerCellProcess<M>(
   if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
   return result;
 }
+
+/**
+ * Phase 7B (JOINT-REFACTOR plan §7B) — Fire_Coord-based In_Range for
+ * Mission_Guard cell scan. SCG01EA tick-87 residual.
+ *
+ * ## Purpose
+ *
+ * C++ `TechnoClass::Evaluate_Object` (techno.cpp:1517-1523) performs the
+ * in-range check for the `THREAT_RANGE` Mission_Guard scan via:
+ *
+ *   if (range == 0) {
+ *       int primary = What_Weapon_Should_I_Use(object->As_Target());
+ *       if (!In_Range(object, primary)) return(false);
+ *   }
+ *
+ * `TechnoClass::In_Range` (techno.cpp:1278-1294) uses:
+ *
+ *   ::Distance(Fire_Coord(which), target->Center_Coord()) <= range
+ *
+ * `Fire_Coord` (techno.cpp:491-517) applies three offsets in order:
+ *
+ *   1. Coord_Move(Center_Coord(), DIR_N, VerticalOffset + Height)
+ *   2. Coord_Move(coord, turret_facing + DIR_W, PrimaryLateral)   (first shot)
+ *      or Coord_Move(coord, turret_facing + DIR_E, PrimaryLateral) (second shot)
+ *   3. Coord_Move(coord, turret_facing, PrimaryOffset)
+ *
+ * For JEEP (udata.cpp:376-404): VerticalOffset=0x30, PrimaryOffset=0x30,
+ * PrimaryLateral=0x00. Net: 48 leptons N, then 48 leptons in turret dir.
+ *
+ * TS `cellBasedGuardScan` currently uses `entity.leptonX/leptonY` (center) for
+ * the distance compare, ignoring Fire_Coord offsets. At edge-of-range, this
+ * diverges from C++ — when the turret faces AWAY from the candidate, C++'s
+ * Fire_Coord shifts further from candidate and exceeds weapon range, while
+ * TS's center-based measurement still says "in range".
+ *
+ * SCG01EA tick 87: Greek JEEP#27 (TS) acquires DOG target 1 tick before WASM
+ * JEEP[22] does because the TS scan's center-distance is ≤ range while the
+ * C++ Fire_Coord distance is > range (turret not yet rotated at candidacy).
+ * TS fires at tick 87; WASM fires at tick 88.
+ *
+ * ## Mechanism (flag ON)
+ *
+ * Inside `cellBasedGuardScan` (missionAI.ts:1016-1177):
+ *
+ *   - Distance compare: use Fire_Coord→candidate-center distance instead of
+ *     center→center distance (C++ :1289 inside Evaluate_Object :1519).
+ *   - Origin cell for radial sweep: keep `entity.cell` (the Fire_Coord cell
+ *     almost always equals the center cell because offsets < 256 leptons and
+ *     the center sits at cell*256+128; shifting ≤128 leptons from center
+ *     rarely crosses into an adjacent cell, and any edge case would be
+ *     caught by the radius-N sweep picking up the right neighbor anyway).
+ *     Keeping the cell origin identical avoids a second-order cell-scan
+ *     ordering divergence; only the In_Range distance check is touched.
+ *
+ * Scope: only applies when `entity.type === UnitType.V_JEEP` initially. A
+ * full port would apply to all turreted vehicles + infantry, but Phase 7B's
+ * narrow goal is SCG01 t87 only; we gate type-narrowly to avoid cascading
+ * regressions in SCG03/04/06/07/11/13.
+ *
+ * ## Shipping OFF (initial)
+ *
+ * Plan §7B checkpoint ladder: land scaffolding with flag OFF, then flip in a
+ * dedicated refactor commit. OFF preserves pre-fix TS behavior exactly.
+ *
+ * ## Risks (plan §7B "Rollback criteria")
+ *
+ *   - Any scenario regresses > 5 ticks → revert the flip, keep scaffolding.
+ *   - Even for JEEP-only, there's a cross-scenario surface (every JEEP in
+ *     every mission executes cellBasedGuardScan on its own cadence), so
+ *     SCG03/SCG06/SCG11/SCG13 must be rechecked after the flip.
+ *
+ * ## C++ refs
+ *
+ *   techno.cpp:491-517      TechnoClass::Fire_Coord (three-step offset chain)
+ *   techno.cpp:1278-1294    TechnoClass::In_Range (Distance(Fire_Coord, ...))
+ *   techno.cpp:1449-1763    TechnoClass::Evaluate_Object
+ *   techno.cpp:1517-1523    range==0 → In_Range call site
+ *   techno.cpp:2047-2209    TechnoClass::Greatest_Threat cell-scan outer loop
+ *   techno.cpp:2055         cell = Coord_Cell(Fire_Coord(0)) origin
+ *   udata.cpp:376-404       UnitJeep offsets (VO=0x30, PO=0x30, PL=0)
+ *   coord.cpp:351-363       Coord_Move (applies dir+distance via Move_Point)
+ *   coord.cpp:445-570       Move_Point (256-step Cos/Sin, 7-bit right shift)
+ *
+ * ## TS refs
+ *
+ *   src/EasterEgg/engine/missionAI.ts:1016     cellBasedGuardScan entry
+ *   src/EasterEgg/engine/missionAI.ts:1111     leptonDist compare (flip site)
+ *   src/EasterEgg/engine/entity.ts             fireCoordPrimary helper
+ */
+export const SCG01_MISSION_GUARD_CADENCE_FIX = false;
+
+/**
+ * Diagnostic gate: when `true`, `cellBasedGuardScan` emits a one-line
+ * `console.debug` for every JEEP scan with its candidate distance, delta vs
+ * Fire_Coord distance, and acquired-target decision. Intended for local
+ * bring-up only; the ambient default is false.
+ *
+ * Enable via:
+ *   - process.env.DEBUG_SCG01_JEEP27 = "1"
+ *   - or (window as any).DEBUG_SCG01_JEEP27 = true in browser console.
+ *
+ * Emits nothing on main path (env not set). No RNG consequences.
+ */
+export function isScg01Jeep27DebugEnabled(): boolean {
+  if (typeof process !== 'undefined' && process.env?.DEBUG_SCG01_JEEP27) return true;
+  if (typeof globalThis !== 'undefined' && (globalThis as unknown as {
+    DEBUG_SCG01_JEEP27?: boolean
+  }).DEBUG_SCG01_JEEP27) return true;
+  return false;
+}
