@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-04-22T23:00Z — Phase 1 DISPATCH_ORDER_REFACTOR landed (STAGE C/D per-tick lift + flag flip)
+
+**Flag flipped:** `DISPATCH_ORDER_REFACTOR=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §1 Phase 1 Checkpoint 1.I).
+
+**Main commits:** `c1047c1e` STAGE C/D lift with flag OFF, `b4ffbb40` STAGE C skip for MOVE-infantry FIRE_MOVING, `12473828` STAGE D vehicle HUNT + infantry-gate walk step, `554805c5` flag flip ON. Pushed to origin/main.
+
+**What changed:** Prior agent `a7712cb7` landed STAGE A-F scaffolding; flag ON regressed SCG06EA t76 runtime trace because STAGE C/D stubs were empty. This session populated the stubs to run per-tick Firing_AI + Movement_AI between handler ticks (matching C++ infantry.cpp:1237-1247 / unit.cpp:425-472 ordering).
+
+**STAGE C:** `runFiringAI` wired into `_runMissionAI` wrapper. Skipped when STAGE B already fired (handler tick) OR when Mission.MOVE infantry (STAGE D's dedicated MOVE branch handles FIRE_MOVING isDriving-clear).
+
+**STAGE D:** `runInfantryMovementAI` handles MOVE (firing-gate + updateMove), HUNT/RESCUE (_infantryWalkStep), AREA_GUARD (_infantryWalkStep). `runDriveClassAI` handles MOVE (updateMove), GUARD drive-in (updateMove fromGuardDrive + same-tick post-Commence dispatch), HUNT/RESCUE (walk). Both skipped on handler tick via `missionHandlerRan` gate to avoid double-movement.
+
+**Shared `_infantryWalkStep`:** Extracted common walk-step (Start_Driver → Coord_Move → PCP_END chain). infantryValidatePath/infantryStartDriver + FOOT_PER_CELL gated on `entity.stats.isInfantry` so vehicles can share.
+
+**Zero regressions:** 51,347 EasterEgg tests pass (excl. dual-runtime which needs deployed WASM). All 7 SCG scenarios stable. Parallel Phase 4 agent's `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY=true` cherry-picked on top — both flags live simultaneously, no conflicts. SCG06 t76 runtime trace: pathShortenTick=75 (was 77 pre-Phase-4).
+
+**Phase 2 prerequisites now in place:** STAGE C/D wiring lets `MOVEMENT_AI_MOVE_NAVCOM_GUARD` flip safely in Phase 2 (the guard runs at top of runInfantryMovementAI's MOVE branch; queues GUARD; STAGE E commences; STAGE F re-dispatches Mission_Guard same tick).
+
 ## 2026-04-22T22:58Z — Phase 4 Approach_Target cell-boundary re-fire landed (SCG06 t76 residual closed)
 
 **Flag flipped:** `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §4.4).
