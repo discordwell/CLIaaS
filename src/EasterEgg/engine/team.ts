@@ -1142,8 +1142,10 @@ export class Team {
   tMissionDeploy(): void {
     for (const unit of this._members) {
       if (!unit.alive) continue;
-      // Signal deploy intent via mission
-      unit.mission = Mission.UNLOAD; // DEPLOY maps to UNLOAD in TS context
+      // Signal deploy intent via mission (DEPLOY maps to UNLOAD in TS).
+      // Session 19: route through assignMission queue to match C++
+      // mission.cpp:388 semantic.
+      assignMission(unit, Mission.UNLOAD);
     }
     this.isNextMission = true;
   }
