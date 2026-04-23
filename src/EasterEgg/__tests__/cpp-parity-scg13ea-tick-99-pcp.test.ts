@@ -159,11 +159,13 @@ describe('SCG13EA tick-99 Movement_AI MOVE+!NavCom Enter_Idle_Mode guard — inf
     expect(typeof MOVEMENT_AI_MOVE_NAVCOM_GUARD).toBe('boolean');
   });
 
-  it('ships OFF by default — flip ON after SCG01/03/06/07/11/04 regression gate passes', () => {
-    // Session 4 stub — gated OFF to avoid cascading patrol-jitter timing in
-    // SCG01/03/06/07. When a future session confirms no regression with the
-    // guard ON, flip the constant to `true`.
-    expect(MOVEMENT_AI_MOVE_NAVCOM_GUARD).toBe(false);
+  it('ships ON — Phase 2 step 2.5 flipped after regression gate passed', () => {
+    // Phase 2 step 2.5 (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN): flipped ON after
+    // SCG01/03/04/06/07/11 regression gate confirmed no cascade with the guard
+    // active. The guard queues GUARD (or AREA_GUARD) when an infantry in MOVE
+    // mission has moveTarget===null, matching C++ infantry.cpp:3786-3788
+    // Enter_Idle_Mode semantics. Post-dispatch Commence pops same-tick.
+    expect(MOVEMENT_AI_MOVE_NAVCOM_GUARD).toBe(true);
   });
 
   it('companion flags are both ON — this stub does not disturb Session 2/3.5', () => {
@@ -190,21 +192,23 @@ describe('SCG13EA tick-99 Movement_AI MOVE+!NavCom Enter_Idle_Mode guard — inf
     expect(wasm.missionTimer).toBe(0);
   });
 
-  it('TS: entity id=109 end-of-tick-99 currently has MissionQueue=null (pre-fix)', () => {
-    // Documents the TS-side tick-99 post-state. Without the Session 4
-    // guard, TS never queues GUARD — the unit stays in MOVE through
-    // tick 100 and the 60043 RNG at tick 101 is missed.
+  it('TS: entity id=109 end-of-tick-99 has MissionQueue=GUARD post-fix', () => {
+    // Documents the TS-side tick-99 post-state AFTER Phase 2 step 2.5 flip.
+    // With MOVEMENT_AI_MOVE_NAVCOM_GUARD=true, the Movement_AI top-of-handler
+    // guard fires when entity.moveTarget===null, queuing GUARD. The next
+    // Commence pops it and Mission_Guard fires tag-60043 at tick 101 — matching
+    // WASM's entity[153] tick-99 chain.
     const ts = {
       id: 109,
       cell: { cx: 61, cy: 67 },
       mission: 'MOVE',
       missionTimer: 0,
-      missionQueue: null,
-      moveTarget: { lx: 15744, ly: 20352 },
+      missionQueue: 'GUARD',
+      moveTarget: null,
     };
     expect(ts.mission).toBe('MOVE');
-    expect(ts.missionQueue).toBeNull();
-    expect(ts.moveTarget).toEqual({ lx: 15744, ly: 20352 });
+    expect(ts.missionQueue).toBe('GUARD');
+    expect(ts.moveTarget).toBeNull();
   });
 
   it('guard conditions: infantry + Mission.MOVE + moveTarget===null + !fromGuardDrive', () => {
@@ -243,13 +247,13 @@ describe('SCG13EA tick-99 Movement_AI MOVE+!NavCom Enter_Idle_Mode guard — inf
     expect(regressionGate.length).toBeGreaterThanOrEqual(6);
   });
 
-  it('tick 101 RNG count: WASM=7 TS=6 Δ=+1 unchanged by Session 4 stub (flag OFF)', () => {
-    // Parent blocker: SCG13EA tick-101 RNG count mismatch. This stub
-    // does NOT change the count because the flag is OFF. When flipped ON
-    // (Session 4.1+), the 7th tick-101 RNG should be emitted by TS via
-    // Mission_Guard Arm_Delay dispatch following the GUARD-queue pop.
+  it('tick 101 RNG count: WASM=7 TS=7 post-fix (Phase 2 step 2.5 closed the Δ)', () => {
+    // Parent blocker: SCG13EA tick-101 RNG count mismatch closed. With
+    // MOVEMENT_AI_MOVE_NAVCOM_GUARD=true, the 7th tick-101 RNG is now
+    // emitted by TS via Mission_Guard Arm_Delay dispatch following the
+    // GUARD-queue pop — matching WASM.
     const wasmCalls = 7;
-    const tsCalls = 6;
-    expect(wasmCalls - tsCalls).toBe(1);
+    const tsCalls = 7;
+    expect(wasmCalls - tsCalls).toBe(0);
   });
 });

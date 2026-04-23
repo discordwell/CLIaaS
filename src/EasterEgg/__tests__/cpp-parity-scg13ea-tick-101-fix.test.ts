@@ -127,29 +127,31 @@ describe('SCG13EA tick-101 follow-up — precise state capture', () => {
     expect(wasmEnd100.missionQueue).toBe('NONE');
   });
 
-  it('TS: entity id=109 @(61,67) is MOVE mt=15 drv=true at end of tick 100', () => {
-    // Captured from __agentGame.entities after synced 100-tick run.
+  it('TS: entity id=109 @(61,67) is GUARD mt=0 at end of tick 100 (post Phase 2 step 2.5)', () => {
+    // After MOVEMENT_AI_MOVE_NAVCOM_GUARD=true, TS matches WASM's tick-99 chain:
+    // Movement_AI top-of-handler guard queues GUARD → Commence pops same-tick →
+    // end-of-tick-100 state is GUARD mt=0 mq=NONE (isDriving=false), matching
+    // WASM entity[153].
     const tsEnd100 = {
       id: 109,
       cell: { cx: 61, cy: 67 },
-      mission: 'MOVE',
-      missionTimer: 15,
+      mission: 'GUARD',
+      missionTimer: 0,
       missionQueue: null,
-      isDriving: true,
-      moveTarget: { lx: 15744, ly: 20352 }, // cell (61.5, 79.5) — patrol destination
+      isDriving: false,
+      moveTarget: null,
     };
-    expect(tsEnd100.mission).toBe('MOVE');
-    expect(tsEnd100.missionTimer).toBe(15);
+    expect(tsEnd100.mission).toBe('GUARD');
+    expect(tsEnd100.missionTimer).toBe(0);
     expect(tsEnd100.missionQueue).toBeNull();
-    expect(tsEnd100.isDriving).toBe(true);
+    expect(tsEnd100.isDriving).toBe(false);
   });
 
-  it('tick 101 RNG count divergence: WASM=7, TS=6, Δ=+1', () => {
-    // Byte-for-byte identical seeds for calls [0]-[5].
-    // WASM fires a 7th call attributed to infantry[192] (USSR E1 @27,46)
-    // at tag 60043. But the underlying divergence is actually entity[153]
-    // (USSR E1 @61,67): WASM has it in GUARD mt=0 → fires 2 Guard jitters;
-    // TS has it in MOVE mt=15 → fires 0 Guard jitters.
+  it('tick 101 RNG count parity: WASM=7, TS=7 after Phase 2 step 2.5', () => {
+    // Byte-for-byte identical seeds for calls [0]-[5]. Post-flip of
+    // MOVEMENT_AI_MOVE_NAVCOM_GUARD, entity[153] (USSR E1 @61,67) transitions
+    // to GUARD at tick 99 via Enter_Idle_Mode, fires 60043 Arm_Delay at
+    // tick 101 — closing the +1 Δ.
     const sharedSeeds = [
       1185429846, 2241646039, 1975867076, 621664685, 1208390882, 888565875,
     ];
@@ -158,8 +160,8 @@ describe('SCG13EA tick-101 follow-up — precise state capture', () => {
     expect(wasmExtraSeed).toBe(3475184432);
     // RNG counts
     const wasmCalls = 7;
-    const tsCalls = 6;
-    expect(wasmCalls - tsCalls).toBe(1);
+    const tsCalls = 7;
+    expect(wasmCalls - tsCalls).toBe(0);
   });
 
   it('root cause: TS lacks InfantryClass::Movement_AI cell-arrival Enter_Idle_Mode path', () => {

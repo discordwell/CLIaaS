@@ -624,7 +624,7 @@ export const MISSION_MOVE_PATH_FAILURE = true;
  *   src/EasterEgg/engine/index.ts:5358-5386  updateMove entry
  *   src/EasterEgg/engine/index.ts:4041-4160  Mission.MOVE case handler
  */
-export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = false;
+export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = true;
 
 /**
  * Phase 1 — Mission-dispatch order reorder (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN).
