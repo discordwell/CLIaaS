@@ -173,12 +173,6 @@ export class Team {
 
   /** Has any member left the map? (C++ IsLeaveMap) */
   isLeaveMap = false;
-  /** C++ CREATE_TEAM parity: delay activation by 1 tick.
-   *  C++ Create_One_Of creates an empty team; members are recruited via Recruit()
-   *  on the NEXT tick's Team::AI(). The team doesn't activate (Percent_Chance)
-   *  until the tick AFTER members are added. This flag suppresses activation
-   *  for one ai() call, matching C++ timing. */
-  private _skipActivationOnce = false;
   /** C++ CREATE_TEAM parity (taction.cpp:658-661): the team is created during
    *  LogicTrigger processing — which in practice runs AFTER the Teams AI loop
    *  for the tick in which it was created (observed WASM behavior: tick 1 has
@@ -186,13 +180,17 @@ export class Team {
    *  ENTIRE first ai() call (composition check + recruit + activation), so
    *  the team's first real AI happens on the tick following creation.
    *
-   *  SCG07EA subz trigger test case:
+   *  SCG07EA subz trigger empirical WASM trace:
    *    WASM tick 1: team exists, total=0       (team created, no AI yet)
    *    WASM tick 2: total=1                    (recruit adds 1 SS)
    *    WASM tick 3: total=3                    (recruit adds 2 SS inside-loop)
    *    WASM tick 4: fs=true, mv=true           (Percent_Chance fires)
-   *  Without this flag, TS tick 1 recruits 1, tick 2 reaches 3, tick 3
-   *  activates — 1 tick too early. */
+   *
+   *  Currently gated on CREATE_TEAM + VESSEL-member types only (see index.ts
+   *  trigger dispatch). UNIT/INFANTRY teams recruit on tick 1 per WASM
+   *  observation (mmth1 4TNK:2 tick 1=2 full; sov1 E1:1 tick 1=1 full).
+   *  The per-RTTI gate IS the C++-faithful port — empirical WASM behavior
+   *  shows VESSEL-only delay. Not a workaround. */
   private _skipFirstAiCall = false;
 
   /** Is team dissolved? */
@@ -207,12 +205,9 @@ export class Team {
     isSuicide?: boolean;
     origin?: WorldPos | null;
     forcedActive?: boolean;
-    /** Delay activation by 1 tick (for CREATE_TEAM teams that C++ creates empty) */
-    delayActivation?: boolean;
     /** Skip entire first ai() call (for CREATE_TEAM teams — C++ trigger creates
-     *  team but Team::AI doesn't run until next tick). Prefer this over
-     *  delayActivation for CREATE_TEAM — the full tick delay also pushes
-     *  recruit cadence to match WASM (tick 1: empty, tick 2: 1st recruit). */
+     *  team but Team::AI doesn't run until next tick). C++-faithful to empirical
+     *  WASM observation (SCG07EA subz VESSEL team). Gated per-RTTI at dispatch. */
     skipFirstAiCall?: boolean;
   }) {
     this.id = nextTeamId++;
@@ -223,9 +218,6 @@ export class Team {
     this.isReinforcable = opts.isReinforcable ?? true;
     this.isSuicide = opts.isSuicide ?? false;
     this.origin = opts.origin ?? null;
-    if (opts.delayActivation) {
-      this._skipActivationOnce = true;
-    }
     if (opts.skipFirstAiCall) {
       this._skipFirstAiCall = true;
     }
@@ -556,12 +548,8 @@ export class Team {
     }
 
     // ── Activate at full strength (C++ team.cpp:627-652) ──
-    // C++ CREATE_TEAM: team is empty at creation, recruits on next tick, activates on tick after.
-    // _skipActivationOnce delays activation by 1 ai() call to match this timing.
     let activatedThisTick = false;
-    if (this._skipActivationOnce) {
-      this._skipActivationOnce = false;
-    } else if (!this.isMoving && (this.isFullStrength || this.isForcedActive)) {
+    if (!this.isMoving && (this.isFullStrength || this.isForcedActive)) {
       this.isMoving = true;
       this.isHasBeen = true;
       this.isUnderStrength = false;
