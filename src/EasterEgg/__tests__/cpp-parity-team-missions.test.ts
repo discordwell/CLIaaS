@@ -1293,8 +1293,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // Not all regrouped → returns false
       expect(result).toBe(false);
 
-      // Distant unit should be ordered to MOVE
-      expect(e2.mission).toBe(Mission.MOVE);
+      // Session 24: C++ Coordinate_Regroup calls Assign_Mission(MOVE) which
+      // QUEUES (mission.cpp:388). Commence pops later. Post-call: mq=MOVE.
+      expect(e2.missionQueue).toBe(Mission.MOVE);
       expect(e2.moveTarget).toBeTruthy();
     });
   });

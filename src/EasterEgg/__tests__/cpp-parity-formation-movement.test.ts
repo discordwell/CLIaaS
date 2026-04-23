@@ -1122,8 +1122,10 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
 
     // At 2.5 cells, exceeds 2-cell threshold → triggers regroup
     expect(result).toBe(false);
-    // u2 should be ordered to move toward zone
-    expect(u2.mission).toBe(Mission.MOVE);
+    // Session 24: C++ Coordinate_Regroup calls Assign_Mission(MOVE) which
+    // QUEUES the mission (mission.cpp:388). Commence pops later. Post-call
+    // state: missionQueue=MOVE, mission still GUARD.
+    expect(u2.missionQueue, 'MOVE queued via Assign_Mission').toBe(Mission.MOVE);
   });
 
   it('unit beyond 4 cells of zone triggers regroup', () => {
@@ -1142,8 +1144,8 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
 
     // At 4 cells, exceeds 2-cell threshold → not regrouped
     expect(result).toBe(false);
-    // u2 should be ordered to move toward zone
-    expect(u2.mission).toBe(Mission.MOVE);
+    // Session 24: C++ Assign_Mission(MOVE) queues — Commence pops later.
+    expect(u2.missionQueue, 'MOVE queued via Assign_Mission').toBe(Mission.MOVE);
   });
 
   it('Session 9: ctx.map + facing-match → isDriving=true post-regroup', () => {
@@ -1169,7 +1171,8 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
 
     team.coordinateRegroup({ structures: [], entities: [u1, u2], map });
 
-    expect(u2.mission, 'far unit triggers MOVE').toBe(Mission.MOVE);
+    // Session 24: Assign_Mission queues; Mission stays GUARD, mq=MOVE
+    expect(u2.missionQueue, 'far unit queues MOVE').toBe(Mission.MOVE);
     expect(u2.path.length, 'path populated via findPath').toBeGreaterThan(0);
     expect(u2.isDriving, 'facing=W matches path[0] direction → isDriving=true (Session 9)').toBe(true);
   });

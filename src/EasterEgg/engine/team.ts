@@ -779,12 +779,17 @@ export class Team {
           assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
         } else {
-          // C++ team.cpp Coordinate_Regroup → Assign_Mission(MISSION_MOVE) → Commence()
-          // pops queue, sets Timer=0 (mission.cpp:354). Only reset on transition to
-          // match C++ — re-asserting MOVE every tick should not consume RNG every tick.
+          // C++ team.cpp:1765 Coordinate_Regroup → Assign_Mission(MISSION_MOVE).
+          // Per mission.cpp:388: Assign_Mission QUEUES the mission only when
+          // Mission != order. Commence later pops (same-tick via STAGE A for
+          // vehicles, next-tick for infantry).
+          //
+          // Session 24: route through assignMission (queue) instead of direct
+          // Mission set. For vehicles this is equivalent: STAGE A Commence
+          // pops the queue this tick when !IsDriving. For drive-in-GUARD
+          // (IsDriving=true), the pop defers — matching C++ exactly.
           const wasNewAssignment = unit.mission !== Mission.MOVE;
-          if (wasNewAssignment) unit.missionTimer = 0;
-          unit.mission = Mission.MOVE;
+          assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
           // Session 9 port: C++ DriveClass::Assign_Destination (drive.cpp:638-640)
           // calls Start_Of_Move synchronously. Mirrors Session 13's coordinateMove
