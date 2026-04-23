@@ -26,6 +26,44 @@ extern int g_autoplay_mode;
 extern bool Main_Loop();
 extern TARGET As_Target(CELL cell);
 
+/* ============================================================================
+ * Phase 0 instrumentation — PCP / Commence / Mission-dispatch / Enter_Idle tags
+ * (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN.md §0 line 137-141).
+ *
+ * These globals are declared `extern "C"` here so that a future rebuild with
+ * access to the full RA source tree (unit.cpp, infantry.cpp, drive.cpp,
+ * mission.cpp, foot.cpp) can wire them at the call sites listed below. They
+ * mirror the existing `g_rng_source_tag` instrumentation pattern (defined in
+ * logic.cpp inside the full source, not in this repo's slice).
+ *
+ * Intended wiring (documentation only until full source is available):
+ *   g_pcp_call_tag       = 80000 + pcp_type  BEFORE every Per_Cell_Process
+ *                          call (drive.cpp:735 PCP_DURING, drive.cpp:773 +
+ *                          drive.cpp:816 PCP_END, drive.cpp:1365 PCP_ROTATION).
+ *   g_commence_pop_tag   = 80100 + popped_mission  BEFORE every Commence()
+ *                          that actually pops MissionQueue (mission.cpp:343-359).
+ *   g_mission_dispatch_tag = 80200 + mission  BEFORE every MissionClass::AI
+ *                          Timer==0 dispatch branch (mission.cpp:213-321).
+ *   g_enter_idle_tag     = 80300  BEFORE every Enter_Idle_Mode call (the
+ *                          InfantryClass / FootClass overrides).
+ *
+ * CONSTRAINT: This repo contains only agent_harness.cpp, aircraft.cpp,
+ * random.cpp, and input_inject.cpp from the RA source tree. The actual
+ * Per_Cell_Process / Commence / MissionClass::AI / Enter_Idle_Mode functions
+ * live in unit.cpp / drive.cpp / infantry.cpp / mission.cpp / foot.cpp, which
+ * are NOT in the repository. Therefore these variables are declared but NOT
+ * wired to any call site. No WASM rebuild is required for this change — the
+ * existing binary contains zero references to these globals. A future
+ * integration with the full source will provide the set-sites; diagnostic
+ * scripts can then read these via a new `agent_get_state` field.
+ * ============================================================================ */
+extern "C" {
+	int g_pcp_call_tag = 0;
+	int g_commence_pop_tag = 0;
+	int g_mission_dispatch_tag = 0;
+	int g_enter_idle_tag = 0;
+}
+
 // Debug movement log — ring buffer of last 32 entries
 struct DebugMoveEntry { int preLX, preLY, postLX, postLY, dir, dist, headLX, headLY; };
 static DebugMoveEntry g_debug_moves[64];
