@@ -34,6 +34,7 @@ import {
   TMISSION_FORMATION, TMISSION_MOVE,
   clearAllTeams,
 } from '../engine/team';
+import { GameMap } from '../engine/map';
 
 beforeEach(() => {
   resetEntityIds();
@@ -1143,6 +1144,34 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
     expect(result).toBe(false);
     // u2 should be ordered to move toward zone
     expect(u2.mission).toBe(Mission.MOVE);
+  });
+
+  it('Session 9: ctx.map + facing-match → isDriving=true post-regroup', () => {
+    // C++ team.cpp:1765-1766 Coordinate_Regroup → Assign_Destination →
+    // drive.cpp:638-640 Start_Of_Move → Start_Driver (on path+facing match)
+    // flips IsDriving=true. This port (Session 9) mirrors Session 13's
+    // coordinateMove treatment for regroup-triggered MOVE assignments.
+    const map = new GameMap(64, 64);
+    for (let y = 0; y < 64; y++) {
+      for (let x = 0; x < 64; x++) map.setTerrain(x, y, 0);
+    }
+    const team = makeTeam({
+      memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
+      forcedActive: true,
+    });
+    // u1 near zone, u2 far east (triggers regroup toward zone which is west of u2)
+    const u1 = makeEntity(UnitType.V_3TNK, House.USSR, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 14 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    u2.facing = 6; // West — matches regroup direction (toward u1/zone)
+    team.add(u1);
+    team.add(u2);
+    team.zone = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+
+    team.coordinateRegroup({ structures: [], entities: [u1, u2], map });
+
+    expect(u2.mission, 'far unit triggers MOVE').toBe(Mission.MOVE);
+    expect(u2.path.length, 'path populated via findPath').toBeGreaterThan(0);
+    expect(u2.isDriving, 'facing=W matches path[0] direction → isDriving=true (Session 9)').toBe(true);
   });
 });
 
