@@ -707,7 +707,7 @@ export class Team {
           break;
 
         case TMISSION_GUARD:
-          this.coordinateRegroup();
+          this.coordinateRegroup(ctx);
           // C++ team.cpp:856-858 — guard times out
           if (this.timeOut > 0) {
             this.timeOut--;
@@ -745,7 +745,7 @@ export class Team {
     } else {
       // C++ team.cpp:862-869 — reforming or not yet moving
       if (this.isMoving) {
-        this.isReforming = !this.coordinateRegroup();
+        this.isReforming = !this.coordinateRegroup(ctx);
       } else {
         this.coordinateMove(waypoints, ctx);
       }
@@ -758,7 +758,7 @@ export class Team {
    * C++ Coordinate_Regroup (team.cpp:1740-1789)
    * Members move toward team zone center. Returns true when all regrouped.
    */
-  coordinateRegroup(): boolean {
+  coordinateRegroup(ctx?: TeamAIContext): boolean {
     let regrouped = true;
 
     for (const unit of this._members) {
@@ -782,9 +782,44 @@ export class Team {
           // C++ team.cpp Coordinate_Regroup → Assign_Mission(MISSION_MOVE) → Commence()
           // pops queue, sets Timer=0 (mission.cpp:354). Only reset on transition to
           // match C++ — re-asserting MOVE every tick should not consume RNG every tick.
-          if (unit.mission !== Mission.MOVE) unit.missionTimer = 0;
+          const wasNewAssignment = unit.mission !== Mission.MOVE;
+          if (wasNewAssignment) unit.missionTimer = 0;
           unit.mission = Mission.MOVE;
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
+          // Session 9 port: C++ DriveClass::Assign_Destination (drive.cpp:638-640)
+          // calls Start_Of_Move synchronously. Mirrors Session 13's coordinateMove
+          // change. On new MOVE assignment, populate path via findPath (Basic_Path
+          // emulation) and if first-segment direction matches unit.facing, flip
+          // isDriving=true. Only for vehicles (not infantry/air/vessels).
+          if (wasNewAssignment && !unit.stats.isInfantry && !unit.isAirUnit && !unit.stats.isVessel) {
+            if (ctx?.map && unit.path.length === 0) {
+              const zcx = Math.floor(this.zone.x / CELL_SIZE);
+              const zcy = Math.floor(this.zone.y / CELL_SIZE);
+              const path = findPath(
+                ctx.map,
+                unit.cell,
+                { cx: zcx, cy: zcy },
+                true,
+                unit.isNavalUnit,
+                unit.stats.speedClass,
+              );
+              if (path.length > 0) {
+                unit.path = path;
+                unit.pathIndex = 0;
+              }
+            }
+            if (unit.path.length > 0) {
+              const firstCell = unit.path[0];
+              const firstCellCenter: WorldPos = {
+                x: firstCell.cx * CELL_SIZE + CELL_SIZE / 2,
+                y: firstCell.cy * CELL_SIZE + CELL_SIZE / 2,
+              };
+              const firstDir = directionTo(unit.pos, firstCellCenter);
+              if (unit.facing === firstDir) {
+                unit.isDriving = true;
+              }
+            }
+          }
         }
         regrouped = false;
       } else {
