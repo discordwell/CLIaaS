@@ -341,6 +341,23 @@ export class Entity {
    *  Mission_Guard_Area retry fires. `-1` = no prior approach. */
   _lastAreaGuardApproachCellKey = -1;
 
+  // === Phase 0 — additive debug fields (JOINT-REFACTOR plan §0 line 133-135) ===
+  // These are ADDITIVE and gated. They MUST NOT affect behavior when debug
+  // env flags are unset. All Phase 0 instrumentation lives behind either
+  //   - `undefined` defaults (cheap; no work until a writer populates them)
+  //   - `process.env.DEBUG_PCP_TRACE === "1"` or similar env gates elsewhere.
+  // See scripts/test-dispatch-order.ts + scripts/test-cdtimer-cross-entity-read.ts.
+  /** Tick at which MissionClass::AI most recently dispatched the Timer==0 branch
+   *  for this entity. Written only when a mission handler actually fires.
+   *  `undefined` = no dispatch yet observed. Not reset — carries across ticks
+   *  so diagnostic scripts can see "last dispatch was N ticks ago". */
+  _missionDispatchTick?: number;
+  /** Commence() trace buffer — populated only when the caller is running under
+   *  a debug env flag. Each entry: `{tick, from: Mission-before, to: Mission-after, reason}`.
+   *  Left empty by default (zero allocation cost); debug-only writers push
+   *  entries. Consumers trim / clear as needed. */
+  _commenceTrace?: Array<{ tick: number; from: string; to: string; reason: string }>;
+
   // Saved move target for AI target acquisition while moving (C++ foot.cpp:492-505)
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
   savedMoveTarget: LeptonPos | null = null;
