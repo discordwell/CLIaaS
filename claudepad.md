@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-04-23T06:00Z — Step 8 Mission_Move dedup (partial)
+
+Removed the drive-in-GUARD Mission_Move jitter proxy (b1ca294d) — was
+a redundant RNG fire alongside STAGE F dispatch. Cleaned up the
+unreachable `!missionTimerFired` dead block in Mission.GUARD case
+(03249cc6).
+
+Post-cleanup: same tick counters. SCG04 t3 still shows TS firing 3
+Mission_Move jitters (unit[1] 1×, unit[2] 2×) vs WASM's 1. SCG11 t15
+still shows unit[94] 3× + unit[95] 1×.
+
+**Diagnosis left unresolved:** The duplicate unit[2] / unit[94] fires
+within a single updateEntity() are hard to identify without runtime
+instrumentation. The obvious paths (STAGE B + STAGE F) are gated by
+`missionHandlerRan` — should be mutually exclusive. Over-fire mechanism
+is subtle; needs targeted console.log at each Random_Pick(0,2) site
+inside dispatchMission with per-entity counter. Deferred.
+
+**Next session:** Add instrumentation: per-entity `_missionFireCount`
+on Entity, increment at each `ScenarioRandom.nextInRange(0, 2)` site
+inside dispatchMission and updateMove, log stack when count > 1.
+Deploy + capture Playwright console output at SCG04 t3 or SCG11 t15.
+
 ## 2026-04-23T05:15Z — C++-Parity-First refactor (Steps 1-7, user directive)
 
 **User directive:** "Port C++ faithfully, delete workarounds, use WASM divergence as data not failure."
