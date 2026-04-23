@@ -398,13 +398,13 @@ void UnitClass::AI(void)
 {
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
-	// Session 16 diagnostic: trace all 3TNK mid-unit-AI state ticks 0-6
+	// Session 16 diagnostic: trace all mobile units ticks 0-5 at UnitClass::AI entry
 	{
 		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 7 && Class->Type == UNIT_HTANK) {
-			// Encode: (Frame, unit_id, Mission, MissionQueue, Timer, IsDriving, MissionQueue-stage-A-gate-would-fire, NavCom-legal)
+		if (Frame < 6) {
+			// Encode: (1000000+Frame, unit_idx, Mission, MissionQueue, Timer, IsDriving, gate, NavCom-legal)
 			int gate = (Height == 0 && !IsDumping && !IsDriving && Is_Door_Closed()) ? 1 : 0;
-			agent_debug_log(Frame, ID, (int)Mission, (int)MissionQueue,
+			agent_debug_log(1000000 + Frame, Units.ID(this), (int)Mission, (int)MissionQueue,
 				(int)Get_Mission_Timer_Value(), IsDriving ? 1:0,
 				gate, Target_Legal(NavCom) ? 1:0);
 		}
