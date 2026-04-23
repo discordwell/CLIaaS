@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-04-23T08:50Z — Session 13: ported Assign_Destination → Start_Of_Move → +25 ticks total
+
+**Port applied** (team.ts:892-919): In `team.coordinateMove`, after `findPath` populates `unit.path`, check if `directionTo(unit.pos, path[0] center)` matches `unit.facing`. On match, set `unit.isDriving = true`. Emulates C++ drive.cpp:638-640 Assign_Destination → Start_Of_Move → Start_Driver chain from Team.AI scope.
+
+**Divergence tick results:**
+| Scenario | Prior (Session 14) | Now | Change |
+|---|---|---|---|
+| SCG01EA | 87 | 87 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | **24** | **+21** |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 4 | 4 | 0 |
+| SCG11EA | 15 | **19** | **+4** |
+| SCG13EA | 101 | 101 | 0 |
+
+Sum: **+25 ticks** from a principled C++ port. All 51,363 vitest tests pass. No regressions on existing scenarios. The Session 14 refactor-plan revision (W3 wasn't purely TS-only; Assign_Destination does synchronously Start_Of_Move) was correct.
+
+**Next (Session 12):** Re-run rng-entity-diff at new first-divergence ticks (24, 19, 4) to identify next C++ mechanism to port.
+
 ## 2026-04-23T08:40Z — Session 14: root cause of SCG04 t3 divergence pinpointed
 
 **Finding:** In C++, `DriveClass::Assign_Destination` (drive.cpp:638-640) synchronously calls `Start_Of_Move()` when `!IsDriving && Mission != MISSION_UNLOAD`. On path success with matching facing, `Start_Of_Move` invokes `Start_Driver` which flips `IsDriving=true`. This chain fires from **TeamClass::AI → Coordinate_Move → Assign_Destination** during the Team.AI phase of LogicClass::AI, BEFORE the unit's own AI iteration runs.

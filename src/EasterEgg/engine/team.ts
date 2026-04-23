@@ -22,7 +22,7 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, MAP_CELLS, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
+import { House, MAP_CELLS, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel, directionTo } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 import { findPath } from './pathfinding';
@@ -892,6 +892,26 @@ export class Team {
               if (path.length > 0) {
                 unit.path = path;
                 unit.pathIndex = 0;
+                // Session 13 port: C++ DriveClass::Assign_Destination
+                // (drive.cpp:638-640) calls Start_Of_Move synchronously when
+                // !IsDriving && Mission != UNLOAD. On path-found + facing match,
+                // Start_Driver (foot.cpp:830) flips IsDriving=true from the
+                // Team.AI phase — before the unit's own AI iteration runs.
+                //
+                // TS Start_Of_Move emulation: compute first-segment direction
+                // from unit.pos to path[0] center; if it matches unit.facing,
+                // set isDriving=true. If not, unit must rotate first (C++
+                // Do_Turn at drive.cpp:1084) and isDriving stays false until
+                // rotation completes during updateMove.
+                const firstCell = path[0];
+                const firstCellCenter: WorldPos = {
+                  x: firstCell.cx * CELL_SIZE + CELL_SIZE / 2,
+                  y: firstCell.cy * CELL_SIZE + CELL_SIZE / 2,
+                };
+                const firstDir = directionTo(unit.pos, firstCellCenter);
+                if (unit.facing === firstDir) {
+                  unit.isDriving = true;
+                }
               }
             }
             claims?.set(claimKey, unit);
