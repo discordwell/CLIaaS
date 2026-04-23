@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-04-23T02:10Z — Phase 3 landed (infrastructure) but BOTH flag flips reverted after Playwright regression
+
+**Final flag state:** `DRIVE_CLASS_AI_PORT=false` + `TEAM_START_DRIVER_REFACTOR=false` (reverted from ON). Infrastructure commits (pathfinding cellClaims + runDriveClassAI close-enough + team cellClaims wiring) remain in main, gated OFF.
+
+**Commits in main (9 total, 2 reverts at tip):**
+  - `c4f7180f` feat(drive): close-enough + path regen in runDriveClassAI (gated OFF) — KEPT
+  - `896b74d5` feat(pathfinding): cellClaims path-reservation param — KEPT (no-op when unused)
+  - `d974c074` feat(team): cellClaims path-reservation in Team.ai() (gated OFF) — KEPT
+  - `77eb480d` refactor: flip DRIVE_CLASS_AI_PORT=true → `289c4dd4` Revert (rolled back)
+  - `f87d8f78` refactor: flip TEAM_START_DRIVER_REFACTOR=true → `472201ea` Revert (rolled back)
+
+**Playwright first-divergence (post-flip-ON, MAX=120):**
+  - SCG01 t87 unchanged
+  - SCG03 no divergence in 120 ticks (improved or Playwright limit)
+  - SCG04 t3 REGRESSED from t36
+  - SCG06 t76 unchanged
+  - SCG07 t17 unchanged
+  - SCG11 t4 REGRESSED from t57
+  - SCG13 t101 unchanged
+
+**Rollback rationale (plan §3 "Rollback criteria"):** SCG04 t3 regression is catastrophic per plan; SCG11 did NOT advance to t65+. Rollback both flips was the plan-mandated path. Post-rollback Playwright verification pending.
+
+**Infrastructure retained for future iteration:** The pathfinding `cellClaims` threading, runDriveClassAI close-enough/regen scaffold, and team.ts cellClaims wiring all land in main as no-op-when-flag-OFF additions. A future Phase 3.x session can carve out more selective gating (e.g. vehicles-only, or patrol-only) to target SCG11 t57 without regressing SCG04 t3.
+
+**Tests:** 51,353 EasterEgg vitest pass (same as baseline). All 18 targeted cpp-parity-* tests (scg04/07/11/drive-in-guard/coord-move-vehicle-queue) pass with flags OFF.
+
 ## 2026-04-23T02:05Z — Phase 3 DriveClass::AI port + TEAM_START_DRIVER_REFACTOR landed (both flags flipped ON)
 
 **Flags flipped:** `DRIVE_CLASS_AI_PORT=true` + `TEAM_START_DRIVER_REFACTOR=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §3 checkpoints 3.1-3.6).
