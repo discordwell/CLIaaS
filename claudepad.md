@@ -1,5 +1,40 @@
 # Session Summaries
 
+## 2026-04-23T12:00Z — 25-session run wrap-up (sessions 25→0)
+
+**Pre-run state (Session 25 start):** SCG01=87, SCG03=238, SCG04=3, SCG06=76, SCG07=4, SCG11=15, SCG13=101.
+**Post-run state (Session 2 / commit bc1d354b):** SCG01=87, SCG03=238, SCG04=**24**, SCG06=76, SCG07=4, SCG11=**19**, SCG13=101.
+
+**Net result:** +21 ticks SCG04EA, +4 ticks SCG11EA. Sum: **+25 ticks across 7 scenarios.** Zero regressions.
+
+**Note:** The Session 25 baseline was already post-refactor — the broader plan deleted TS-only workarounds W1-W5 in commits prior to the 25-session run. Those deletions regressed tick counters (from earlier WASM-matching ~87/238/36/76/17/57/101 baseline). The 25-session run's job was to replace those with C++-faithful ports. SCG04 recovered most of its regression (3 → 24, target was 36); SCG07/SCG11 still require more work.
+
+**Landmark win this run:** Session 13's port of C++ `DriveClass::Assign_Destination → Start_Of_Move → Start_Driver` chain into TS `team.coordinateMove`. This delivered **+21 ticks on SCG04EA** and **+4 ticks on SCG11EA** via a single principled change (team.ts:892-919).
+
+**Key findings this run:**
+1. (Session 14) C++ IsDriving flip for drive-in-GUARD happens in **Team.AI phase** (not unit.AI) via `Assign_Destination`'s synchronous call to `Start_Of_Move`. The refactor plan's W3 premise ("C++ coordinateMove never sets IsDriving") was incomplete — it doesn't directly, but transitively via Assign_Destination. Session 13 ported this.
+2. (Session 10) `TeamClass::Coordinate_Regroup` (team.cpp:1745-1789) re-assigns GUARD/MOVE every tick based on Zone distance, causing Mission oscillation in drive-in-GUARD scenarios. Session 9 ported the same Start_Of_Move chain to TS `coordinateRegroup` (team.ts:781-817). Divergence unchanged in current 7 scenarios but C++-faithful.
+3. (Session 7) Vessel door-gate port to STAGE A Commence was too blunt — blocked LST cargo delivery (spy). Reverted; needs per-mission-type logic.
+4. (Session 8) Remaining divergences (SCG01/06/13 at ticks 87/76/101) are downstream of combat/bullet-scatter state, not single-mechanism fixable.
+
+**Commits landed (25→0):**
+- Sessions 25-18: diagnostic tool construction (member/team state diffs, STAGE A traces, cellClaims removal)
+- Sessions 17-15: WASM instrumentation for understanding IsDriving flip timing
+- Session 14: pinpointed Team.AI phase as the flip origin
+- Session 13: **ported Assign_Destination → Start_Of_Move (+25 ticks)**
+- Session 12-10: post-port divergence analysis + Per_Cell_Process tracing
+- Session 9: ported same chain to coordinateRegroup (no-op for current scenarios, C++-faithful)
+- Session 8-7: vessel door-gate attempt (reverted)
+- Sessions 6-3: cleanup (stale WASM instrumentation + diagnostic scripts)
+- Sessions 5-4: cpp-parity tests for Sessions 13 and 9 ports
+
+**All vitest tests pass: 51,365 (was 51,363 at start, +2 coverage tests landed).**
+
+**Next steps (outside this run):**
+- Vessel double-cycle port (IsDoorClosed gate) for SCG07
+- Direct Mission assignments (e.g. coordinateRegroup line 786) could be routed through `assignMission` queue for strict C++ parity — risky, needs careful test updates
+- Deep downstream combat divergence (bullet scatter, E1/E3 guard timing) requires multi-session investigation
+
 ## 2026-04-23T11:40Z — Session 7: vessel door-gate port attempted, reverted
 
 Added `!(entity.stats.isVessel && entity.doorOpen)` to STAGE A pre-Commence gate at index.ts:4091 to match C++ vessel.cpp:592 `!IsDriving && Is_Door_Closed()`.
