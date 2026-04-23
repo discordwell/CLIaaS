@@ -4943,66 +4943,105 @@ export class Game {
     //     path = findPath(cell, destCell, ...);
     //     if (path.length === 0) enterIdleMode();  // Basic_Path failure
     //   }
+    // Phase 3 v2 — C++-faithful Start_Of_Move port (drive.cpp:906-1066).
+    //
+    // CRITICAL LESSON from Phase 3 v1 (commits c4f7180f / 77eb480d reverted):
+    //   v1 fired close-enough at the TOP of runDriveClassAI every tick
+    //   whenever `Mission==MOVE && octDist<704`. That is NOT what C++ does.
+    //
+    // C++ semantics (verified against drive.cpp:906-1066 in-repo):
+    //   1. Start_Of_Move is only entered when `facing == FACING_NONE` —
+    //      i.e. when `Path[]` is empty (new track needed).
+    //   2. Close-enough check (drive.cpp:970-972) fires ONLY inside
+    //      `if (!Basic_Path())` — i.e. when pathfinding itself fails.
+    //   3. The action is narrow: `Assign_Destination(TARGET_NONE)` only.
+    //      No direct `Enter_Idle_Mode`. The idle transition happens one
+    //      tick later when `FootClass::Mission_Move` (foot.cpp:524) sees
+    //      `!Target_Legal(NavCom) && !IsDriving && MissionQueue == NONE`
+    //      and calls `Enter_Idle_Mode()` itself.
+    //   4. Guards: `!Is_On_Priority_Mission() && (Mission == MISSION_MOVE
+    //      || Mission == MISSION_GUARD_AREA)`.
+    //
+    // Regression explanation (SCG11 t57):
+    //   4TNK target is 640 leptons away (< 704). v1 called enterIdleMode
+    //   at tick N. C++ instead calls Basic_Path, which SUCCEEDS (friendly
+    //   at blocking cell is MOVE_MOVING_BLOCK = pathable), tank starts
+    //   rotating, next tick Can_Enter_Cell fails → reactive close-enough
+    //   at drive.cpp:1102 fires — two ticks later than v1.
     if (DRIVE_CLASS_AI_PORT
         && !entity.isAirUnit
-        && entity.moveTarget) {
-      // (a) Close-enough NavCom clear — Mission==MOVE only.
-      if (m0 === Mission.MOVE) {
-        // rules.ini [General] CloseEnough=2.75 → 2.75 * 256 = 704 leptons.
-        // C++ drive.cpp:970 uses Rule.CloseEnoughDistance (default 0x0280 =
-        // 640 leptons, overridden by rules.ini to 704).
-        const CLOSE_ENOUGH_LEPTONS = 704;
-        const dxL = entity.moveTarget.lx - entity.leptonX;
-        const dyL = entity.moveTarget.ly - entity.leptonY;
-        const adx = Math.abs(dxL), ady = Math.abs(dyL);
-        // Octagonal Distance() approximation (C++ coord.cpp Distance).
-        const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
-        if (octDist < CLOSE_ENOUGH_LEPTONS) {
-          entity.moveTarget = null;
-          entity.path = [];
-          entity.pathIndex = 0;
-          // enterIdleMode queues GUARD via missionQueue — the post-dispatch
-          // Commence block at ~index.ts:4157 pops same-tick on vehicles when
-          // !IsDriving. For SCG11 t57, unit[70] is not driving (Basic_Path
-          // never fired Start_Driver), so the pop fires this tick and
-          // Mission_Guard_general consumes its Random_Pick(0,2) RNG.
-          enterIdleMode(entity);
-          return;
-        }
-      }
-
-      // (b) Path regeneration when moveTarget is set but path is empty. This
-      // mirrors C++ drive.cpp:906 Start_Of_Move → Basic_Path entry. Only fires
-      // for Mission==MOVE or drive-in-GUARD (isDriving + Mission==GUARD).
+        && entity.moveTarget
+        && entity.path.length === 0) {
+      // Only attempt Basic_Path-equivalent when MOVE or drive-in-GUARD
+      // (isDriving && Mission==GUARD) — matches C++ Start_Of_Move entry
+      // conditions. Drive-in-GUARD path regen is speculative but preserves
+      // v1 behavior for GUARD-mission vehicles that acquired a NavCom.
       const isDriveInGuard = (m0 === Mission.GUARD || m0 === Mission.STICKY)
         && entity.isDriving;
-      if ((m0 === Mission.MOVE || isDriveInGuard)
-          && entity.path.length === 0) {
+      if (m0 === Mission.MOVE || isDriveInGuard) {
         const destCell = {
           cx: Math.floor(entity.moveTarget.lx / 256),
           cy: Math.floor(entity.moveTarget.ly / 256),
         };
-        // Skip if already at destination cell — C++ Basic_Path returns empty
-        // for this case and drive.cpp:970's close-enough check already handled
-        // Mission==MOVE above.
-        if (destCell.cx !== entity.cell.cx || destCell.cy !== entity.cell.cy) {
-          const newPath = findPath(
-            this.map, entity.cell, destCell,
-            /*ignoreOccupancy=*/ true,
-            entity.isNavalUnit, entity.stats.speedClass,
-          );
-          if (newPath.length === 0) {
-            // Basic_Path failure — Enter_Idle_Mode (drive.cpp:992 Try_Try_Again
-            // exhausted → Assign_Mission(MISSION_GUARD)).
+
+        // If already at destination cell, clear NavCom without enterIdleMode
+        // — the next-tick Mission_Move handler handles the idle transition.
+        if (destCell.cx === entity.cell.cx && destCell.cy === entity.cell.cy) {
+          entity.moveTarget = null;
+          entity.path = [];
+          entity.pathIndex = 0;
+          return;
+        }
+
+        const newPath = findPath(
+          this.map, entity.cell, destCell,
+          /*ignoreOccupancy=*/ true,
+          entity.isNavalUnit, entity.stats.speedClass,
+        );
+
+        if (newPath.length === 0) {
+          // Basic_Path failed — C++ drive.cpp:961 `if (!Basic_Path())` branch.
+          //
+          // drive.cpp:970-972 — close-enough reactive clear:
+          //   !Is_On_Priority_Mission() && Distance(NavCom) < CloseEnoughDistance
+          //   && (Mission == MOVE || Mission == GUARD_AREA) → NavCom=TARGET_NONE.
+          //
+          // NOTE: C++ does NOT call Enter_Idle_Mode here. It only clears
+          // NavCom. The idle transition happens next tick in Mission_Move.
+          // Matching this preserves the 2-tick state cadence and RNG timing.
+          const CLOSE_ENOUGH_LEPTONS = 704; // rules.ini [General] CloseEnough=2.75 × 256.
+          const dxL = entity.moveTarget.lx - entity.leptonX;
+          const dyL = entity.moveTarget.ly - entity.leptonY;
+          const adx = Math.abs(dxL), ady = Math.abs(dyL);
+          // Octagonal Distance() approximation (C++ coord.cpp:124-136).
+          const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+
+          // TS doesn't model Is_On_Priority_Mission() for team patrol; treat
+          // as false (matches the common case for patrol/team MOVE units).
+          const isPriority = false;
+          const missionEligible = (m0 === Mission.MOVE || m0 === Mission.AREA_GUARD);
+
+          if (!isPriority && octDist < CLOSE_ENOUGH_LEPTONS && missionEligible) {
+            // drive.cpp:970-972: close-enough clear only (no Enter_Idle_Mode).
             entity.moveTarget = null;
             entity.path = [];
             entity.pathIndex = 0;
-            enterIdleMode(entity);
             return;
           }
-          entity.path = newPath;
+
+          // Basic_Path failed and not close-enough. C++ has TryTryAgain--
+          // with retry cycle; for now just clear NavCom to prevent infinite
+          // path-regen attempts per tick (matches drive.cpp:1006 fallback
+          // when TryTryAgain expires).
+          entity.moveTarget = null;
+          entity.path = [];
           entity.pathIndex = 0;
+          return;
         }
+
+        // Basic_Path succeeded.
+        entity.path = newPath;
+        entity.pathIndex = 0;
       }
     }
 

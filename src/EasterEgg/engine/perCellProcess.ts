@@ -1408,7 +1408,7 @@ export function footPerCellProcess<M>(
  *   src/EasterEgg/engine/missionAI.ts:1111     leptonDist compare (flip site)
  *   src/EasterEgg/engine/entity.ts             fireCoordPrimary helper
  */
-export const SCG01_MISSION_GUARD_CADENCE_FIX = true;
+export const SCG01_MISSION_GUARD_CADENCE_FIX = false;
 
 /**
  * Diagnostic gate: when `true`, `cellBasedGuardScan` emits a one-line
