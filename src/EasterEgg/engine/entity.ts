@@ -477,6 +477,17 @@ export class Entity {
    *  Modulates effective movement speed. 0xFF=1.0, 0x40=0.25, 0x20=0.125, 0x00=0.0.
    *  cpp-parity: helicopters ramp speed during takeoff and stop at half-height during landing. */
   aircraftSpeedFraction = 1.0;
+  /** C++ AircraftClass::Status (aircraft.cpp:2418-2425) for MISSION_ATTACK state machine.
+   *  Tracks VALIDATE_AZ=0 → PICK_ATTACK_LOCATION=1 → TAKE_OFF=2 → FLY_TO_POSITION=3 →
+   *  FIRE_AT_TARGET=4 → FIRE_AT_TARGET2=5 → RETURN_TO_BASE=6. TS's aircraft state
+   *  machine (aircraftState) covers most of these implicitly, but the landed-no-target
+   *  transition path (VALIDATE_AZ → RETURN_TO_BASE → Enter_Idle_Mode → GUARD) requires
+   *  a two-stage timer fire that the high-level aircraftState doesn't capture — this
+   *  field bridges that gap for the Phase 2 HPAD helicopter Mission_Attack handler.
+   *  Currently used only for: 0 = VALIDATE_AZ (initial), 6 = RETURN_TO_BASE (post-target-lost).
+   *  C++ ref: aircraft.cpp:2432-2438 (VALIDATE_AZ→RETURN_TO_BASE on !Target_Legal),
+   *  aircraft.cpp:2603-2614 (RETURN_TO_BASE runs Enter_Idle_Mode). */
+  aircraftAttackStatus: number = 0;
   /** C++ aircraft.cpp:441-445 — helicopter hover jitter offset (pixels).
    *  Applied when at FLIGHT_ALTITUDE and speed < 3 (hovering). Pattern repeats every 16 ticks.
    *  cpp-parity: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0} indexed by frame%16. */

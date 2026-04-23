@@ -1982,18 +1982,55 @@ export class Game {
             heli.turretRotTickedThisFrame = false;
             if (heli.isInRecoilState) heli.isInRecoilState = false;
             if (!heli.inLimbo) {
-              // C++ AircraftClass::Mission_Attack (aircraft.cpp:2620) always fires
-              // Random_Pick(0,2) at end even when VALIDATE_AZ routes to RETURN_TO_BASE
-              // (target lost). TS aircraft.ts 'landed' state early-returns without
-              // ticking the mission timer, so landed-ATTACK-no-target never fires the
-              // RNG. Tick the timer here and consume Random_Pick when it fires.
+              // C++ AircraftClass::Mission_Attack (aircraft.cpp:2409-2621) for a
+              // landed helicopter that lost its target unfolds over TWO timer fires:
+              //
+              //   Fire A (Status=VALIDATE_AZ, aircraft.cpp:2432-2438):
+              //     !Target_Legal(TarCom) → Status=RETURN_TO_BASE, break. Fall
+              //     through to line 2620: return MissionControl[MISSION_ATTACK]
+              //     .Normal_Delay() + Random_Pick(0,2) = 14+j. Timer = 14+j.
+              //     Mission stays ATTACK. One Random_Pick consumed, tag 40050.
+              //
+              //   Fire B (Status=RETURN_TO_BASE, ~14-16 ticks later,
+              //     aircraft.cpp:2603-2614): Enter_Idle_Mode → Assign_Mission
+              //     (MISSION_GUARD) + Commence(). Commence flips Mission=GUARD,
+              //     Timer=0. break. Fall through to line 2620: return
+              //     MissionControl[MISSION_GUARD].Normal_Delay() +
+              //     Random_Pick(0,2) = 42+j. Timer = 42+j. Mission is now GUARD
+              //     for all subsequent fires. One more Random_Pick consumed.
+              //
+              // Prior TS implementation looped Fire A forever (missionTimer always
+              // set to 14+j and Mission stayed ATTACK), producing +1 HIND RNG call
+              // per 14-16 ticks forever vs WASM which runs Fire B and enters
+              // GUARD (silent for ~42 ticks). Root cause of SCG11EA t32 Δ=-5
+              // (agent ad83df56 / commit 499ce143). WASM's Fire B is observable
+              // at SCG11EA tick 18 as Mission_Attack_air tag 40050 for both
+              // HINDs at aircraft[131]/[149] (Logic positions).
+              //
+              // Fix: mirror C++ Status via entity.aircraftAttackStatus. Fire A
+              // consumes Random_Pick(0,2), sets status=RETURN_TO_BASE, timer=14+j.
+              // Fire B consumes Random_Pick(0,2), transitions Mission→GUARD,
+              // resets status, timer=42+j.
               if (heli.mission === Mission.ATTACK && heli.aircraftState === 'landed') {
                 const stillHasTarget = (heli.target?.alive) ||
                   (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                 if (!stillHasTarget) {
                   if (heli.missionTimer > 0) heli.missionTimer--;
                   if (heli.missionTimer <= 0) {
-                    heli.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+                    const jitter = ScenarioRandom.nextInRange(0, 2);
+                    if (heli.aircraftAttackStatus !== 6) {
+                      // Fire A: VALIDATE_AZ → RETURN_TO_BASE. Mission stays ATTACK.
+                      heli.aircraftAttackStatus = 6; // RETURN_TO_BASE
+                      heli.missionTimer = 14 + jitter; // MISSION_ATTACK Normal_Delay
+                    } else {
+                      // Fire B: RETURN_TO_BASE → Enter_Idle_Mode → Commence flips
+                      // Mission=GUARD. Line 2620 return uses GUARD Normal_Delay.
+                      heli.mission = Mission.GUARD;
+                      heli.aircraftAttackStatus = 0; // Commence resets Status=0
+                      heli.target = null;
+                      heli.targetStructure = null;
+                      heli.missionTimer = GUARD_NORMAL_DELAY + jitter;
+                    }
                   }
                 }
               }
@@ -2016,16 +2053,32 @@ export class Game {
                     const juicyFound = this._heliGuardScan(heli);
                     const hasTargetAfterScan = (heli.target?.alive) ||
                       (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
-                    // C++ foot.cpp:694 FootClass::Mission_Guard ALWAYS fires
-                    // Random_Pick(0,2) for the return value (dtime + jitter), regardless
-                    // of whether AircraftClass::Mission_Guard queued ATTACK above.
-                    const mgJitter = ScenarioRandom.nextInRange(0, 2);
+                    // C++ foot.cpp:684-687 FootClass::Mission_Guard:
+                    //     if (Arm != 0) { return (int)Arm; }     <-- NO Random_Pick
+                    //     return(dtime + Random_Pick(0,2));
+                    // The Random_Pick(0,2) jitter is GUARDED by the Arm==0 check.
+                    // When attackCooldown > 0 (Arm != 0 in C++), foot.cpp early-returns
+                    // Arm and does NOT fire the Random_Pick. Prior TS consumed jitter
+                    // unconditionally, producing +1 RNG/tick vs WASM for HINDs with
+                    // active attackCooldown (root cause of SCG11EA t32 Δ=-5, agent
+                    // ad83df56 / commit 499ce143).
                     if (juicyFound || hasTargetAfterScan) {
+                      // aircraft.cpp:3827 still falls through to FootClass::Mission_Guard
+                      // after juicy-Assign_Mission. Arm check + jitter still apply to
+                      // the return value; but the mission transition to ATTACK is what
+                      // we track (TS sets timer=1 for immediate next-tick dispatch).
+                      // Jitter only fires when Arm == 0.
+                      if (heli.attackCooldown === 0) {
+                        ScenarioRandom.nextInRange(0, 2);
+                      }
                       heli.mission = Mission.ATTACK;
                       heli.missionTimer = 1;
                     } else if (heli.attackCooldown > 0) {
+                      // C++ foot.cpp:684: Arm != 0 → return Arm, skipping Random_Pick(0,2).
                       heli.missionTimer = heli.attackCooldown;
                     } else {
+                      // C++ foot.cpp:687: return dtime + Random_Pick(0,2) when Arm == 0.
+                      const mgJitter = ScenarioRandom.nextInRange(0, 2);
                       heli.missionTimer = GUARD_NORMAL_DELAY + mgJitter;
                     }
                   }
@@ -9389,16 +9442,22 @@ export class Game {
                   const juicyFound = this._heliGuardScan(heli);
                   const hasTargetAfterScan = (heli.target?.alive) ||
                     (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
-                  const mgJitter = ScenarioRandom.nextInRange(0, 2);
+                  // C++ foot.cpp:684-687:
+                  //     if (Arm != 0) { return (int)Arm; }   <-- NO Random_Pick
+                  //     return(dtime + Random_Pick(0,2));
+                  // Random_Pick(0,2) is guarded by Arm==0 — gate jitter accordingly.
                   if (juicyFound || hasTargetAfterScan) {
+                    if (heli.attackCooldown === 0) {
+                      ScenarioRandom.nextInRange(0, 2);
+                    }
                     heli.mission = Mission.ATTACK;
                     heli.missionTimer = 1;
-                  } else
-                  // C++ foot.cpp:634: return (Arm != 0) ? Arm : (dtime + Random_Pick(0,2))
-                  // dtime = Normal_Delay = 42 for aircraft (rules.ini [Guard] Rate=.050)
-                  if (heli.attackCooldown > 0) {
+                  } else if (heli.attackCooldown > 0) {
+                    // C++ foot.cpp:684: Arm != 0 → return Arm, skipping Random_Pick.
                     heli.missionTimer = heli.attackCooldown;
                   } else {
+                    // C++ foot.cpp:687: dtime + Random_Pick(0,2) when Arm == 0.
+                    const mgJitter = ScenarioRandom.nextInRange(0, 2);
                     heli.missionTimer = GUARD_NORMAL_DELAY + mgJitter;
                   }
                 }
