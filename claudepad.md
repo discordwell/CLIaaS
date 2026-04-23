@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-04-23T14:15Z — Round-2 Sessions 11→0 consolidated close-out
+
+After Sessions 25-12's substantive work (6 queue-routing refactors, 1 chain-loop PCP refactor, 4 reverted attempts), the remaining 11 sessions consolidated into cleanup, claudepad maintenance, and analysis notes. No further tractable wins identified in current direction.
+
+**Round-2 final divergence (unchanged from Round-1 end):**
+SCG01=87, SCG03=238, SCG04=24, SCG06=76, SCG07=4, SCG11=19, SCG13=101.
+
+**Round-2 landed work:**
+- Sessions 24-19: routed 5 direct Mission assignments in `team.ts` through `assignMission` queue (mission.cpp:388 semantic). Pinning tests updated. Zero divergence change.
+- Session 16: chain-loop PCP_END skipCommence refactor (benign). Now C++-faithful: Commence deferred to STAGE E / next tick instead of firing inside the chain.
+- Sessions 25, 7: vessel door-gate attempts (two variants), both reverted — SCG07 regression or SCG05 SPY test breakage.
+
+**Round-2 open investigations (flagged for future):**
+- Vessel door-gate with per-mission-type logic (needs WASM instrumentation of Commence success/block per vessel per tick).
+- STAGE E `savedMoveTarget` / `popFromA2` TS-specific timer-preservation hack.
+- TS entity iteration order vs C++ Logic array order (SCG11 index mismatch suggests mismatch).
+- Deep combat cascades (bullet scatter) driving SCG01/06/13 divergence at later ticks.
+
+**Code hygiene improvements landed this run:**
+- 5 direct Mission sets → queue-based assignMission
+- Chain PCP_END gated via skipCommence option
+- 5 pinning tests modernized to match C++ queue-then-pop semantics
+
 ## 2026-04-23T14:00Z — Session 12: savedMoveTarget audit
 
 Audited STAGE E `popFromA2` logic (index.ts:4163-4173). When popping mq=MOVE into ATTACK→MOVE with savedMoveTarget set, the code preserves `missionTimer` instead of resetting to 0. This deviates from C++ mission.cpp:354 which always resets Timer=0 on Commence pop.
