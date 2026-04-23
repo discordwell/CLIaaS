@@ -526,6 +526,39 @@ export const MISSION_MOVE_PATH_FAILURE = true;
 export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = false;
 
 /**
+ * Phase 1 — Mission-dispatch order reorder (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN).
+ *
+ * When `true`, `Engine.updateEntity` runs the new STAGE A-F flow:
+ *   A. Pre-MissionClass::AI Commence   (vehicles, unit.cpp:406)
+ *   B. MissionClass::AI                (dispatch if missionTimer==0)
+ *   C. Firing_AI                       (every tick, all missions)
+ *   D. Movement_AI                     (infantry / drive-class / aircraft)
+ *   E. Post-Movement_AI Commence       (vehicles unit.cpp:472, vessels :658)
+ *   F. Re-dispatch if Commence popped  (generalizes drive-in-GUARD 79b13cb3)
+ *
+ * When `false` (default), the legacy top-level `missionTimerFired` capture +
+ * monolithic switch flow runs byte-for-byte the same as main.
+ *
+ * Ships OFF. Flag flip lives in a dedicated commit once STAGE A-F land.
+ *
+ * ## What this enables / removes (plan §1 workaround ledger)
+ *   - W7 (premature `missionTimerFired` capture at top of updateEntity)
+ *   - W8 (special-case Mission.GUARD post-Commence dispatch — generalized)
+ *   - W11 (direct mission=GUARD transition — replaced by queue+Commence)
+ *   - W12 (inline Firing_AI-in-MOVE — replaced by STAGE C)
+ *
+ * ## C++ refs
+ *   infantry.cpp:1237-1247  InfantryClass::AI (Firing_AI → Movement_AI order)
+ *   unit.cpp:397-474        UnitClass::AI (pre-Commence + post-Commence bookends)
+ *   vessel.cpp:591-659      VesselClass::AI (double Commence across DriveClass::AI)
+ *   mission.cpp:213-321     MissionClass::AI (Timer==0 dispatch)
+ *
+ * ## TS refs
+ *   src/EasterEgg/engine/index.ts ~4010  updateEntity — new STAGE A-F flow
+ */
+export const DISPATCH_ORDER_REFACTOR = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.

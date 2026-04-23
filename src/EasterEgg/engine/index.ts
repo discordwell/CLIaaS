@@ -220,7 +220,7 @@ import {
 // Commence sub-case is gated behind PER_CELL_COMMENCE_ENABLED=false to
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
-import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD } from './perCellProcess';
+import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR } from './perCellProcess';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -4090,6 +4090,72 @@ export class Game {
       missionTimerFired = true;
     }
 
+    this.dispatchMission(entity, missionTimerFired);
+
+    // C++ InfantryClass::Doing_AI — transition Doing state after mission processing.
+    // Called once per tick. Transitions DO_NOTHING → DO_STAND_READY when idle.
+    entity.doingAI();
+    // C++ infantry.cpp:1190-1195 + 3657-3661: IsFiring is cleared when fire animation
+    // frame sequence completes. firingAnimTicks counts down the animation duration
+    // (~8 ticks for most infantry fire animations).
+    if (entity.isFiringAnim) {
+      if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
+      if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
+    }
+
+    // C++ infantry.cpp:1208-1211 — Commence gate (runs AFTER MissionClass::AI dispatch).
+    // In C++, InfantryClass::AI calls Commence() after MissionClass::AI has already
+    // processed the timer for this tick. So Timer=0 from Commence is picked up on the
+    // NEXT tick's MissionClass::AI dispatch — the new mission handler fires 1 tick later.
+    //
+    // C++ UnitClass::AI (unit.cpp:404,472) additionally gates vehicle Commence by
+    // `!IsDriving && Is_Door_Closed()`. The !IsDriving clause is essential for team
+    // reinforcements: Coordinate_Move sets NavCom, DriveClass::AI flips IsDriving=true
+    // same tick, so Commence stays gated and Mission remains GUARD (from reinf.cpp:480)
+    // until the unit reaches a cell boundary. TS simulates IsDriving=true via team.ts
+    // coordinateMove for parity — otherwise Mission_Move would fire 1 tick earlier
+    // than WASM for reinforcement MCVs (SCG11EA drift).
+    const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
+    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
+      // A2 restore: if popping back to MOVE from a TS-only ATTACK the A2 scan created
+      // (signaled by savedMoveTarget != null), keep the current missionTimer instead of
+      // resetting to 0. Without this, the unit's Mission_Move fires on the next tick and
+      // consumes Random_Pick(0,2) one cycle earlier than WASM (which never entered ATTACK
+      // because C++ has no per-tick A2 scan — only Target_Something_Nearby inside
+      // Mission_Move itself). SCG06EA tick 40 fix.
+      const popFromA2 =
+        entity.missionQueue === Mission.MOVE &&
+        entity.mission === Mission.ATTACK &&
+        entity.savedMoveTarget !== null;
+      entity.mission = entity.missionQueue;
+      entity.missionQueue = null;
+      if (popFromA2) {
+        entity.savedMoveTarget = null;
+        // Timer preserved from prior ATTACK — continues the C++-aligned countdown.
+      } else {
+        entity.missionTimer = 0; // picked up next tick by MissionClass::AI
+      }
+    }
+
+    this._updateEntityPostDispatch(entity);
+    return;
+  }
+
+  /**
+   * Phase 1 refactor scaffold: extracted the current monolithic switch block
+   * from `updateEntity` verbatim. When `DISPATCH_ORDER_REFACTOR` is `false`
+   * this is the only entry point for mission handling and preserves behavior
+   * byte-for-byte. When the flag flips `true`, STAGE A-F in `updateEntity`
+   * will route selected paths through helpers (`runFiringAI`,
+   * `runInfantryMovementAI`, `runDriveClassAI`) instead.
+   *
+   * C++ refs: MissionClass::AI (mission.cpp:213-321) dispatches per mission
+   * when Timer==0; runs under the enclosing TechnoClass::AI call, so several
+   * handlers here still need Firing_AI-equivalent side effects (see Mission.MOVE
+   * and Mission.HUNT branches below — currently inlined, to be lifted in
+   * Checkpoint 1.B).
+   */
+  private dispatchMission(entity: Entity, missionTimerFired: boolean): void {
     switch (entity.mission) {
       case Mission.MOVE: {
         // C++ InfantryClass::AI runs Firing_AI() BEFORE Movement_AI
@@ -4529,52 +4595,18 @@ export class Game {
         entity.animState = AnimState.IDLE;
         break;
     }
+  }
 
-    // C++ InfantryClass::Doing_AI — transition Doing state after mission processing.
-    // Called once per tick. Transitions DO_NOTHING → DO_STAND_READY when idle.
-    entity.doingAI();
-    // C++ infantry.cpp:1190-1195 + 3657-3661: IsFiring is cleared when fire animation
-    // frame sequence completes. firingAnimTicks counts down the animation duration
-    // (~8 ticks for most infantry fire animations).
-    if (entity.isFiringAnim) {
-      if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
-      if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
-    }
-
-    // C++ infantry.cpp:1208-1211 — Commence gate (runs AFTER MissionClass::AI dispatch).
-    // In C++, InfantryClass::AI calls Commence() after MissionClass::AI has already
-    // processed the timer for this tick. So Timer=0 from Commence is picked up on the
-    // NEXT tick's MissionClass::AI dispatch — the new mission handler fires 1 tick later.
-    //
-    // C++ UnitClass::AI (unit.cpp:404,472) additionally gates vehicle Commence by
-    // `!IsDriving && Is_Door_Closed()`. The !IsDriving clause is essential for team
-    // reinforcements: Coordinate_Move sets NavCom, DriveClass::AI flips IsDriving=true
-    // same tick, so Commence stays gated and Mission remains GUARD (from reinf.cpp:480)
-    // until the unit reaches a cell boundary. TS simulates IsDriving=true via team.ts
-    // coordinateMove for parity — otherwise Mission_Move would fire 1 tick earlier
-    // than WASM for reinforcement MCVs (SCG11EA drift).
-    const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
-    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
-      // A2 restore: if popping back to MOVE from a TS-only ATTACK the A2 scan created
-      // (signaled by savedMoveTarget != null), keep the current missionTimer instead of
-      // resetting to 0. Without this, the unit's Mission_Move fires on the next tick and
-      // consumes Random_Pick(0,2) one cycle earlier than WASM (which never entered ATTACK
-      // because C++ has no per-tick A2 scan — only Target_Something_Nearby inside
-      // Mission_Move itself). SCG06EA tick 40 fix.
-      const popFromA2 =
-        entity.missionQueue === Mission.MOVE &&
-        entity.mission === Mission.ATTACK &&
-        entity.savedMoveTarget !== null;
-      entity.mission = entity.missionQueue;
-      entity.missionQueue = null;
-      if (popFromA2) {
-        entity.savedMoveTarget = null;
-        // Timer preserved from prior ATTACK — continues the C++-aligned countdown.
-      } else {
-        entity.missionTimer = 0; // picked up next tick by MissionClass::AI
-      }
-    }
-
+  /**
+   * Phase 1 refactor scaffold: extracted the per-tick entity finalization block
+   * that previously lived at the bottom of `updateEntity` (post-switch / pre-tail
+   * harvesters + civilian panic etc). Semantics preserved byte-for-byte.
+   *
+   * Contains: Doing_AI, firing-anim countdown, Commence (post-MissionClass::AI),
+   * civilian panic flee, harvester AI, turret re-centering, wall/vehicle crush,
+   * auto-load into transport, tickAnimation.
+   */
+  private _updateEntityPostDispatch(entity: Entity): void {
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)
     if (entity.alive && entity.isCivilian && entity.mission === Mission.GUARD &&
         this.tick - entity.lastGuardScan >= 45) {
