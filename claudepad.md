@@ -1,5 +1,32 @@
 # Session Summaries
 
+## 2026-04-23T09:30Z — Session 10: PCP_END trace + Coordinate_Regroup GUARD re-assignment
+
+WASM PCP entry instrumentation (tag 6000000+Frame at UnitClass::Per_Cell_Process) revealed:
+- SCG04 unit[2] Per_Cell_Process(PCP_END) fires at Frame=15 with state Mission=5(GUARD) mq=2(MOVE) cell=(40,34) drv=1.
+- Inside PCP: `if (!IsDumping) Commence();` pops mq=MOVE → Mission=MOVE, but end-of-tick state shows Mission=GUARD mq=MOVE again.
+
+**Root cause found:** `TeamClass::Coordinate_Regroup` (team.cpp:1745+) re-assigns **GUARD or MOVE** every tick based on Zone distance:
+```cpp
+if (unit->Distance(Zone) > Rule.StrayDistance) {
+    unit->Assign_Mission(MISSION_MOVE);  // queues MOVE (no-op if already MOVE)
+    unit->Assign_Destination(Zone);      // → Start_Of_Move → Start_Driver → drv=1
+} else {
+    unit->Assign_Mission(MISSION_GUARD); // queues GUARD
+    unit->Assign_Destination(TARGET_NONE);
+}
+```
+
+So the tick-by-tick cycle is:
+1. Team.AI Coord_Regroup fires → `Assign_Mission(GUARD)` (queues GUARD into MQ)
+2. Team.AI next pass fires → `Assign_Mission(MOVE)` (if still MOVE no-op; if Mission=GUARD now, queues MOVE)
+3. Unit traverses cell boundary → PCP_END Commence pops MQ
+4. Mission oscillates via Coord_Regroup ↔ Commence loop
+
+**TS parity implication:** The TS `coordinateMove` port I did in Session 13 invoked `Start_Of_Move` semantics only at first `moveTarget` assignment. C++ does this every tick via `Assign_Destination` eager Start_Of_Move. For full parity, `team.coordinateRegroup` (if present in TS) needs same treatment, AND `coordinateMove`'s `Assign_Mission(GUARD)` branch needs porting.
+
+**Session 10 ends without code changes** — the mechanism is understood but the port is a multi-session effort.
+
 ## 2026-04-23T09:10Z — Session 11: Per_Cell_Process hypothesis analysis
 
 **Hypothesis:** TS `unitPerCellProcess(PCP_END)` fires at every chain iteration (every cell crossing) when TS double-cycles tracks. C++ Per_Cell_Process(PCP_END) fires only at *track completion* — and for a drive-in-GUARD moving through intermediate cells at high speed with long tracks, it may not fire at every intermediate cell, letting mq=MOVE persist until actual destination.

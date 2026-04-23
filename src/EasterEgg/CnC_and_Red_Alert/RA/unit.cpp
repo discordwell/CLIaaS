@@ -398,25 +398,9 @@ void UnitClass::AI(void)
 {
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
-	// Session 16 diagnostic: trace all mobile units ticks 0-5 at UnitClass::AI ENTRY
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 6) {
-			// Encode: (1000000+Frame, unit_idx, Mission, MissionQueue, Timer, IsDriving, gate, NavCom-legal)
-			int gate = (Height == 0 && !IsDumping && !IsDriving && Is_Door_Closed()) ? 1 : 0;
-			agent_debug_log(1000000 + Frame, Units.ID(this), (int)Mission, (int)MissionQueue,
-				(int)Get_Mission_Timer_Value(), IsDriving ? 1:0,
-				gate, Target_Legal(NavCom) ? 1:0);
-		}
-	}
-	// Session 15 diagnostic: also trace at end of UnitClass::AI (post-processing)
-	auto __s15_logExit = [this](int phase) {
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 6) {
-			agent_debug_log(2000000 + Frame * 10 + phase, Units.ID(this), (int)Mission, (int)MissionQueue,
-				(int)Get_Mission_Timer_Value(), IsDriving ? 1:0, 0, Target_Legal(NavCom) ? 1:0);
-		}
-	};
+	// Session 10: older Session 15/16 entry/phase trace disabled (Frame<0 never fires)
+	// to free ring buffer space for PCP Commence trace.
+	auto __s15_logExit = [](int) {};
 	/*
 	**	Act on new orders if the unit is at a good position to do so.
 	*/
@@ -1634,6 +1618,18 @@ void UnitClass::Per_Cell_Process(PCPType why)
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
 
+	// Session 10 diagnostic: log every UnitClass::Per_Cell_Process entry.
+	{
+		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
+		if (Frame < 30) {
+			int cellX = Cell_X(Coord_Cell(Coord));
+			int cellY = Cell_Y(Coord_Cell(Coord));
+			// tag 6000000+Frame, unit id, Mission, MissionQueue, cellX, cellY, (int)why, IsDriving
+			agent_debug_log(6000000 + Frame, Units.ID(this), (int)Mission, (int)MissionQueue,
+				cellX, cellY, (int)why, IsDriving ? 1 : 0);
+		}
+	}
+
 	CELL	cell = Coord_Cell(Coord);
 	HousesType house;
 
@@ -1775,6 +1771,20 @@ void UnitClass::Per_Cell_Process(PCPType why)
 		**	Act on new orders if the unit is at a good position to do so.
 		*/
 		if (!IsDumping) {
+			// Session 10 diagnostic: log Per_Cell_Process Commence calls at Frame 20-30
+			// to verify drive-in-GUARD → MOVE pop timing for SCG04EA W[1]/unit[2].
+			{
+				extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
+				if (Frame < 30) {
+					int preMission = (int)Mission;
+					int preMQ = (int)MissionQueue;
+					int cellX = Cell_X(Coord_Cell(Coord));
+					int cellY = Cell_Y(Coord_Cell(Coord));
+					// tag 5000000+Frame, unit id, preMission, preMQ, cellX, cellY, IsDriving, 0
+					agent_debug_log(5000000 + Frame, Units.ID(this), preMission, preMQ,
+						cellX, cellY, IsDriving ? 1 : 0, 0);
+				}
+			}
 			Commence();
 		}
 
