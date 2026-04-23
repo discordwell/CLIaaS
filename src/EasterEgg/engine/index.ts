@@ -4091,6 +4091,10 @@ export class Game {
       if (!entity.stats.isInfantry && !entity.isAirUnit &&
           entity.missionQueue !== null && !entity.isDriving &&
           !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+        if ((globalThis as any).__traceStageA) {
+          const t = (globalThis as any).__currentGameTick;
+          console.log(`[STAGE_A_POP] t=${t} eid=${entity.id} cell=(${entity.cell.cx},${entity.cell.cy}) mq->${entity.missionQueue} path.len=${entity.path.length} moveTgt=${entity.moveTarget ? `(${entity.moveTarget.lx},${entity.moveTarget.ly})` : 'null'}`);
+        }
         entity.mission = entity.missionQueue;
         entity.missionQueue = null;
         entity.missionTimer = 0;
