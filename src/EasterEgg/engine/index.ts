@@ -4386,6 +4386,10 @@ export class Game {
             entity.missionTimer = 0; // fires immediately in GUARD handler
           } else {
             // C++ foot.cpp:504: Normal path — Normal_Delay + Random_Pick(0,2)
+            if ((globalThis as any).__traceMoveFires) {
+              const stk = new Error().stack?.split('\n').slice(2, 6).join(' | ') ?? '';
+              console.log(`[MOVE_FIRE] t=${(globalThis as any).__currentGameTick} eid=${entity.id} mis=${Mission[entity.mission]} stk=${stk}`);
+            }
             entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
           }
         }
