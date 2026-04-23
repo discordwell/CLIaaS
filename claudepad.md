@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-04-23T13:15Z — Session 16: chain-loop PCP_END skipCommence refactor (benign)
+
+Added `skipCommence` option to `unitPerCellProcess`; all chain-loop call sites now pass `skipCommence=true` to defer Commence from PCP_END to STAGE E / next tick's STAGE A. Matches C++ drive.cpp which only fires PCP_END at track completion (actual=0), not at every cell crossing.
+
+**Effect: benign.** No divergence tick change because `followTrackStep` sets `isDriving=false` on track completion (index.ts:7269, 7283), which means STAGE E's `blockCommenceDrive` gate is FALSE, and STAGE E pops the queue at end-of-tick. So the Commence still fires same-tick, just at STAGE E instead of inside the chain.
+
+**Deeper insight:** To fully defer the pop (preserving drive-in-GUARD across cell transitions), `followTrackStep` would need to keep `isDriving=true` when more path remains. But C++'s drive.cpp:774 `IsDriving=false` + drive.cpp:776 `Start_Driver(c)` is a transient flip around Per_Cell_Process — not relevant to the tick-end state. The TS tick-end isDriving value is what matters for STAGE E/A gating.
+
+All 51,365 tests pass. Refactor landed as C++-faithful semantic improvement despite no tick-count impact.
+
 ## 2026-04-23T13:00Z — Session 17: root cause of SCG04 t24 divergence = PCP_END chain over-fire
 
 Confirmed via rng-entity-diff that SCG04 tick 24 TS unit[2] fires 1 extra RNG call (Mission_Move jitter). At tick 24, TS unit arrives at cell (41,35) → `unitPerCellProcess(PCP_END)` fires at chain loop `perCellNavComCheck()` (index.ts:6294) → Commence pops mq=MOVE → Mission=MOVE → dispatchMission fires Mission_Move jitter.
