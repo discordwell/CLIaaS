@@ -1,5 +1,11 @@
 # Session Summaries
 
+## 2026-04-23T14:00Z — Session 12: savedMoveTarget audit
+
+Audited STAGE E `popFromA2` logic (index.ts:4163-4173). When popping mq=MOVE into ATTACK→MOVE with savedMoveTarget set, the code preserves `missionTimer` instead of resetting to 0. This deviates from C++ mission.cpp:354 which always resets Timer=0 on Commence pop.
+
+This is a TS-specific optimization for a specific A2 workflow. Changing would risk regressions. Flagged for future investigation; not changed in Session 12.
+
 ## 2026-04-23T13:45Z — Sessions 14-13: SCG11EA tick 19 deeper analysis
 
 **Session 13:** Investigated SCG11EA tick 19 extra RNG call (TS unit[8] fires 1 Mission_Move jitter WASM doesn't). Member-state-diff reveals TS/WASM arrays iterate in different order — TS index vs WASM index don't align without cell-level matching. Further investigation requires per-cell entity matching tool, which is beyond current diagnostic infrastructure.
