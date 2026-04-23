@@ -69,6 +69,13 @@ export class RandomClass {
    */
   nextInRange(minval: number, maxval: number): number {
     if (minval === maxval) return minval;
+    if ((globalThis as any).__traceAllRng) {
+      const t = (globalThis as any).__currentGameTick;
+      if (t === 3 && minval === 0 && maxval === 2) {
+        const stk = new Error().stack?.split('\n').slice(2, 8).join(' | ') ?? '';
+        console.log(`[RNG] t=${t} min=${minval} max=${maxval} tag=${(this as any)._sourceTag} stk=${stk}`);
+      }
+    }
 
     // Swap if out of order
     if (minval > maxval) {
