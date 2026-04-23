@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-04-23T12:45Z — Sessions 24-18: routed all team.ts direct Mission assignments through assignMission queue
+
+Applied C++ mission.cpp:388 `Assign_Mission` queue semantic to all direct `unit.mission = X` sites in `team.ts`:
+- Session 24: `coordinateRegroup` MOVE branch (was direct-set)
+- Session 23: `coordinateRegroup` GUARD branch
+- Session 22: `coordinateAttack` ATTACK assignment
+- Session 21: `coordinatePatrol` vehicle MOVE branch
+- Session 20: `coordinateMove` arrival→GUARD branch
+- Session 19: `tMissionDeploy` UNLOAD assignment
+
+Removed associated manual `missionTimer = 0` resets — Commence (mission.cpp:354) resets Timer=0 when it actually pops, so the manual reset was a TS-only shortcut to emulate same-tick timing that STAGE A Commence now handles uniformly.
+
+**Zero divergence tick change** across all 7 scenarios. All 51,365 tests pass (5 pinning tests updated from `mission === X` to `missionQueue === X` to match C++ queue-then-pop semantic).
+
+**Session 18:** surveyed remaining direct Mission assignments. All outside team.ts (ai.ts player AI, agentHarness commands, aircraft.ts state machine, etc.) are in different contexts from `team.cpp Coordinate_*` and should not be converted. Exhausted the team-coordinated queue refactor.
+
 ## 2026-04-23T12:20Z — Round-2 Session 25: vessel door-gate narrower attempt, reverted
 
 Tried gating STAGE A + STAGE E Commence for vessels with `doorOpen=true` AND `missionQueue ∈ {MOVE, ATTACK}` (narrower than Session 7's all-queue block). Added for BOTH stages.
