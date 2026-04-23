@@ -763,6 +763,15 @@ export interface FootPCPEntity<M = unknown> extends PCPEntity<M> {
   targetStructure?: unknown | null;
   /** AREA_GUARD origin marker. `null` when GUARD. Present = pick `AREA_GUARD`. */
   guardOrigin?: { x: number; y: number } | null;
+  /**
+   * Phase 4 — cell-key of the last `approachTarget` re-fire for this entity.
+   * Encoded as `cy * 256 + cx` matching the existing Session 3.2 convention
+   * in `missionAI.ts updateAreaGuard`. Absent/`-1` = no prior approach call
+   * at any cell. Used by the cell-boundary dedup in the re-fire subcase to
+   * prevent per-tick findPath churn when `footPerCellProcess` is called
+   * multiple times at the same cell (e.g. via overlapping walk paths).
+   */
+  _lastAreaGuardApproachCellKey?: number;
 }
 
 /**
@@ -973,6 +982,15 @@ export function footPerCellProcess<M>(
      * `entity.inRange(entity.target)` or similar.
      */
     targetInRange?: boolean;
+    /**
+     * Phase 4 — optional callback to re-invoke `FootClass::Approach_Target`
+     * (foot.cpp:856-946) at cell boundary. Gated by
+     * `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY`. When present AND the flag is
+     * ON AND the entity is in AREA_GUARD with a live TarCom still out of
+     * range, this is invoked once per cell change to refresh the approach
+     * cell selection as the entity walks closer.
+     */
+    approachTargetRefire?: (entity: FootPCPEntity<M>) => void;
   },
   missions: EnterIdleModeOptions<M>
 ): PCPResult {
@@ -1014,6 +1032,43 @@ export function footPerCellProcess<M>(
     entity.path = [];
     entity.pathIndex = 0;
     result.navComCleared = true;
+  }
+
+  // ---- 1b. Phase 4 — Approach_Target cell-boundary re-fire ----
+  //
+  // C++ implicitly re-invokes `FootClass::Approach_Target` at every
+  // Per_Cell_Process call that leaves the unit mid-walk toward a still-
+  // legal TarCom (foot.cpp:1082-1084 timer path + path-shorten adjacency).
+  // TS's `updateAreaGuard` only re-fires on the Mission_Guard_Area timer
+  // cycle (Session 3.2 `AREA_GUARD_APPROACH_RETRY`), which at Normal_Delay
+  // ~70 ticks is too coarse: once the approach cell has been picked, the
+  // walk follows the cached route even as both unit and target move.
+  //
+  // This subcase fires ONCE per cell boundary (keyed via
+  // `_lastAreaGuardApproachCellKey`) to refresh the approach cell on every
+  // cell-arrival, matching WASM's per-cell geometry updates observed in
+  // SCG06EA tick 76 (`cpp-parity-scg06ea-t76-trace-runtime.test.ts`).
+  //
+  // Preconditions (ALL must hold):
+  //   - `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY` flag ON.
+  //   - `approachTargetRefire` callback provided by caller.
+  //   - Entity still in AREA_GUARD (mission === areaGuardMission).
+  //   - Live TarCom: target alive.
+  //   - Path-shorten did NOT fire this call (target still out of range).
+  //   - Cell key differs from last-approach cell key (dedup).
+  //
+  // This is a NO-OP when the flag is OFF (Phase 4 ship state).
+  if (APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY
+      && !result.navComCleared
+      && ctx.approachTargetRefire
+      && entity.mission === missions.areaGuardMission
+      && entity.target != null
+      && entity.target.alive === true) {
+    const cellKey = entity.cell.cy * 256 + entity.cell.cx;
+    if (entity._lastAreaGuardApproachCellKey !== cellKey) {
+      entity._lastAreaGuardApproachCellKey = cellKey;
+      ctx.approachTargetRefire(entity);
+    }
   }
 
   // ---- 2. Enter_Idle_Mode (infantry.cpp:911) ----

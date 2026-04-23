@@ -4446,6 +4446,9 @@ export class Game {
                     inRadioContact: false, // TS infantry have no radio handshake
                     pathShortenEligible: true, // Mission.HUNT ∈ {HUNT, AREA_GUARD, ATTACK, RESCUE}
                     targetInRange: inRangeNow,
+                    // Phase 4 — cell-boundary Approach_Target re-fire. Gated by
+                    // APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY (default OFF).
+                    approachTargetRefire: (e) => this.approachTarget(e as Entity),
                   },
                   { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
                 );
@@ -4601,6 +4604,12 @@ export class Game {
                       inRadioContact: false,
                       pathShortenEligible: true, // Mission.AREA_GUARD ∈ attack-type
                       targetInRange: inRangeNow,
+                      // Phase 4 — cell-boundary Approach_Target re-fire. Gated by
+                      // APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY (default OFF).
+                      // This is the LOAD-BEARING site for SCG06EA tick 76 residual:
+                      // USSR E1 @(24,67) walks toward Greek E1 @(19,65) in AREA_GUARD.
+                      // WASM re-picks the approach cell as the entity walks closer.
+                      approachTargetRefire: (e) => this.approachTarget(e as Entity),
                     },
                     { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
                   );
@@ -6059,6 +6068,9 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // Phase 4 — cell-boundary Approach_Target re-fire. Gated by
+                // APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY (default OFF).
+                approachTargetRefire: (e) => this.approachTarget(e as Entity),
               },
               { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
             );
