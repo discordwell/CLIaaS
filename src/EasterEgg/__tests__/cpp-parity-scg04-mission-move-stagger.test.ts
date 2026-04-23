@@ -300,6 +300,41 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeLessThanOrEqual(16);
   });
 
+  it('Session 13: ctx.map + facing-match → isDriving=true post-coord (Assign_Destination → Start_Of_Move)', () => {
+    // C++ DriveClass::Assign_Destination (drive.cpp:638-640) synchronously
+    // calls Start_Of_Move when !IsDriving. On path success + facing match,
+    // Start_Driver (foot.cpp:830) flips IsDriving=true from the Team.AI
+    // phase — before the unit's own AI iteration runs. This was load-bearing
+    // for SCG04EA tick 3 W[1] drive-in-GUARD behavior and contributed +21
+    // divergence ticks when ported in Session 13.
+    //
+    // This test validates the port: when ctx.map is provided (production
+    // runtime), findPath populates the path and if the first segment's
+    // direction matches unit.facing, isDriving flips true.
+    const game = createGame();
+    const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
+    mcv.facing = 2; // East — matches target direction
+
+    const team = new Team({
+      house: House.Greece,
+      desiredMembers: [{ type: UnitType.V_MCV, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 26 }],
+      forcedActive: true,
+    });
+    team.add(mcv);
+    registerTeam(team);
+
+    const waypoints = new Map<number, { cx: number; cy: number }>([
+      [26, { cx: 22, cy: 10 }],
+    ]);
+    // Provide ctx.map — this triggers the Session 13 findPath + facing check.
+    updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
+
+    expect(mcv.moveTarget, 'MCV moveTarget set').not.toBeNull();
+    expect(mcv.path.length, 'path populated via findPath (Basic_Path emulation)').toBeGreaterThan(0);
+    expect(mcv.isDriving, 'facing=E matches path[0] direction → isDriving=true (Session 13)').toBe(true);
+  });
+
   it('drives-in-GUARD remains unaffected for second-team isDriving=true vehicles', () => {
     // The pre-Commence gate must NOT pop the queue when isDriving=true — that
     // vehicle stays in GUARD and drives via drives-in-GUARD (drive.cpp:1376).
