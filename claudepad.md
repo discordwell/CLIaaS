@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-04-23T01:45Z — Phase 7A RANDOM_ANIMATE_CPP_FAITHFUL landed (flag flipped ON, zero regressions)
+
+**Flag flipped:** `RANDOM_ANIMATE_CPP_FAITHFUL=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §7A checkpoints 7A.1-7A.5).
+
+**Main commits:** `7c68360e` flag scaffolding OFF + audit test, `d1ffbfaa` flag flip ON, `d2d754de` SCG07 t17 doc snapshot update.
+
+**Audit finding:** C++ `Is_Ready_To_Random_Animate` (infantry.cpp:4103-4158) accepts Doing ∈ {DO_STAND_GUARD, DO_STAND_READY}. TS's gate (`doing === 'stand_ready'`) already matched that BUT TS's `doingAI` (entity.ts:271-281) only re-evaluated `{nothing, idle_anim, fire}` — once an infantry transitioned to `doing === 'walk'`, it was sticky forever even after stopping. C++ `InfantryClass::Doing_AI` (infantry.cpp:3700-3732) transitions DO_WALK → DO_STAND_READY when `Fetch_Stage() >= DoControls[DO_WALK].Count && !IsDriving`. This was the parity hole. Phase 7A adds `'walk'` to TS's transition whitelist behind the flag.
+
+**SCG07EA tick 17 impact:** USSR E1 guards 126/129 at cells (67,66)/(66,66) were stuck in `doing === 'walk'` → Random_Animate blocked → 3 missing RNG draws (30001 IdleTimer + 30002 anim switch + 30003 optional facing) + 2 downstream 60043-equivalent jitters. Post-flip: Δ+7 → Δ+2 (residual vessel Mission_Move double-fire remains for Phase 7B).
+
+**Tests:** 51,383 EasterEgg vitest pass (same as flag OFF). 8 Playwright dual-runtime failures are pre-existing WASM-harness timeouts, unrelated. New contract: `cpp-parity-random-animate-gate.test.ts` (9 tests pinning the gate + flag-state assertions).
+
+**Files:** `src/EasterEgg/engine/perCellProcess.ts` (+62 lines — flag), `src/EasterEgg/engine/entity.ts` (doingAI conditional transition), `src/EasterEgg/__tests__/cpp-parity-random-animate-gate.test.ts` (new, 105 LOC), `src/EasterEgg/__tests__/cpp-parity-scg07ea-tick-17.test.ts` (doc snapshot updated).
+
 ## 2026-04-23T00:30Z — Phase 5 PCP_DOUBLE_CYCLE_ENABLED landed (flag flipped ON, zero regressions)
 
 **Flag flipped:** `PCP_DOUBLE_CYCLE_ENABLED=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §5 checkpoints 5.1-5.5).
