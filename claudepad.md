@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-04-23T00:30Z — Phase 5 PCP_DOUBLE_CYCLE_ENABLED landed (flag flipped ON, zero regressions)
+
+**Flag flipped:** `PCP_DOUBLE_CYCLE_ENABLED=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §5 checkpoints 5.1-5.5).
+
+**Main commits:** `aa0710fe` flag+mechanism (gated OFF), `2b8026a3` flag flip ON, `f0a94e2f` cpp-parity double-cycle contract test. Pushed to origin/main + deployed via `scripts/deploy_vps.sh`.
+
+**What changed:** Wraps `runDriveClassAI` MOVE + drive-in-GUARD branches with up-to-2-iteration loop mirroring C++ DriveClass::AI While_Moving → Start_Of_Move → While_Moving (drive.cpp:1340-1345). HUNT/RESCUE walk-step is NOT double-cycled. Vessel `Is_Door_Closed` gate (vessel.cpp:659) blocks second cycle when LST `doorOpen===true`. Second-iteration gate: pathIndex advanced + path-remaining + drive-class mission + door closed + path length stable.
+
+**Test coverage:** 51353 EasterEgg vitest pass (+6 new double-cycle contract tests). All 7 first-divergence scenarios unchanged: SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=57, SCG13=101.
+
+**SCG07 t17 not advanced:** Per plan §5 line 618 — Random_Animate cadence (B) requires separate Phase 7 port. The double-cycle wrapper as specified (plan lines 586-611, pseudocode calls `updateMove` without re-dispatching Mission_Move) does not generate additional Mission_Move RNG consumption inside iteration 2 because MissionQueue is empty after the first Commence pop. The SCG07 t17 vessel 2-3× Mission_Move fire requires dispatching Mission_Move from within the second While_Moving cycle — a deeper refactor than the current scaffolding. Current implementation is safe (zero regressions, 51353 tests pass) and leaves the door open for future iteration.
+
+**No merge conflicts with Phase 2:** Phase 2's `missionLifecycle.ts` + `coordinateMove` refactor landed between my commits and the flag flip. Cherry-picks clean; combined test run 51353 passed.
+
+**Files:** `src/EasterEgg/engine/perCellProcess.ts` (+57 lines — flag), `src/EasterEgg/engine/index.ts` (+89 lines — double-cycle wrapper in runDriveClassAI), `src/EasterEgg/__tests__/cpp-parity-drive-class-ai-double-cycle.test.ts` (new, 153 LOC).
+
 ## 2026-04-22T23:00Z — Phase 1 DISPATCH_ORDER_REFACTOR landed (STAGE C/D per-tick lift + flag flip)
 
 **Flag flipped:** `DISPATCH_ORDER_REFACTOR=true` (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §1 Phase 1 Checkpoint 1.I).
