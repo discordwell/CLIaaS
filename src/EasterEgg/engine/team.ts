@@ -874,6 +874,11 @@ export class Team {
             const tcy = Math.floor(this.target.y / CELL_SIZE);
             const claimKey = tcy * MAP_CELLS + tcx;
             const claims = ctx?.vehicleClaims;
+            // Session 20 fix: cellClaims was a TS-only mechanism that made
+            // second-team path-reservation distinct from first-team. C++ has
+            // no such reservation at coordinator scope (findpath.cpp:1266-1293
+            // checks live Cell_Occupier, not a claim map). Removing cellClaims
+            // + unit.id params lets both team members compute same path.
             if (ctx?.map && unit.path.length === 0) {
               const destCell = { cx: tcx, cy: tcy };
               const path = findPath(
@@ -883,21 +888,10 @@ export class Team {
                 true,
                 unit.isNavalUnit,
                 unit.stats.speedClass,
-                undefined,
-                ctx?.cellClaims,
-                unit.id,
               );
               if (path.length > 0) {
                 unit.path = path;
                 unit.pathIndex = 0;
-                if (ctx?.cellClaims) {
-                  for (const cell of path) {
-                    const k = cell.cy * MAP_CELLS + cell.cx;
-                    if (!ctx.cellClaims.has(k)) {
-                      ctx.cellClaims.set(k, unit.id);
-                    }
-                  }
-                }
               }
             }
             claims?.set(claimKey, unit);
