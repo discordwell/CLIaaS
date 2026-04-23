@@ -1691,6 +1691,36 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     }
   }
 
+  // Phase 4 — timer-cycle Approach_Target re-fire when the scan above did
+  // NOT pick `bestTarget` (e.g. target is still alive but out of scan range
+  // this cycle, or the scan filter rejected it) but the preserved TarCom
+  // (`entity.target`) is still legal.
+  //
+  // C++ foot.cpp:1082-1084 calls `Approach_Target` on every Mission_Guard_Area
+  // timer cycle whenever `Target_Legal(TarCom)` holds — without re-qualifying
+  // the target against the scan. The unit chases its existing TarCom with
+  // fresh path geometry each cycle.
+  //
+  // Gated by `AREA_GUARD_APPROACH_RETRY` (already ON). Cell-change dedup is
+  // kept here (same rationale as Session 3.2 — prevents per-tick findPath
+  // churn at the pathfinder layer). This fires ONLY when:
+  //   1. Scan above didn't find `bestTarget` (we reached this fallthrough).
+  //   2. `hadTargetAtEntry`: preserved TarCom was legal at entry.
+  //   3. `entity.target.alive`: target still alive now.
+  //   4. Out of range (no point re-approaching something we can fire at).
+  //   5. Cell key changed since last approach call.
+  if (AREA_GUARD_APPROACH_RETRY
+      && hadTargetAtEntry
+      && entity.target?.alive
+      && ctx.approachTarget
+      && !entity.inRange(entity.target)) {
+    const cellKey = entity.cell.cy * 256 + entity.cell.cx;
+    if (entity._lastAreaGuardApproachCellKey !== cellKey) {
+      ctx.approachTarget(entity);
+      entity._lastAreaGuardApproachCellKey = cellKey;
+    }
+  }
+
   // C++ foot.cpp:1011 — Random_Animate when no target found.
   // C++ Is_Ready_To_Random_Animate checks Doing != DO_STAND_GUARD/READY → blocks.
   // At tick 1: Doing = DO_NOTHING (set by constructor, Doing_AI hasn't run yet).
