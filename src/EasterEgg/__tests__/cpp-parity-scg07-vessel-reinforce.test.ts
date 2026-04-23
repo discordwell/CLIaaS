@@ -239,9 +239,13 @@ describe('C++ SCG07EA tick-2 vessel Mission_Move fan-out', () => {
 
     updateAllTeams(waypoints, { structures: [], entities: [tank1, tank2] });
 
-    // Vehicle flip preserved: first team's tank gets isDriving=false (flipped
-    // by team2's claim), second team's tank gets isDriving=true.
-    expect(tank1.isDriving, 'tank1 (first vehicle team): isDriving=false after flip').toBe(false);
-    expect(tank2.isDriving, 'tank2 (second vehicle team): isDriving=true after claim').toBe(true);
+    // C++ parity (post-W3 deletion, TEAM_START_DRIVER_REFACTOR=true):
+    // `TeamClass::Coordinate_Move` (team.cpp:1878-2012) never sets IsDriving.
+    // Both sibling-team tanks keep isDriving=false post-coord; Start_Driver
+    // fires from each unit's own DriveClass::AI tick per drive.cpp:1270.
+    expect(tank1.isDriving, 'tank1: isDriving=false (C++ coord never sets IsDriving)').toBe(false);
+    expect(tank2.isDriving, 'tank2: isDriving=false (C++ coord never sets IsDriving)').toBe(false);
+    expect(tank1.missionQueue, 'tank1 queues MOVE').toBe(Mission.MOVE);
+    expect(tank2.missionQueue, 'tank2 queues MOVE').toBe(Mission.MOVE);
   });
 });

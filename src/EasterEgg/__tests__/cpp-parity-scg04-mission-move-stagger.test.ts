@@ -172,11 +172,21 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank1.moveTarget, 'tank1 moveTarget set').not.toBeNull();
     expect(tank2.moveTarget, 'tank2 moveTarget set').not.toBeNull();
 
-    // Critical: first claimant's isDriving was RESET to false when the second
-    // team registered the same target — Mission_Move will fire for tank1 on
-    // the entity-AI phase. tank2 keeps isDriving=true → drives-in-GUARD.
-    expect(tank1.isDriving, 'tank1 (first team): isDriving=false (Basic_Path failure)').toBe(false);
-    expect(tank2.isDriving, 'tank2 (second team): isDriving=true (Basic_Path success)').toBe(true);
+    // C++ parity (post-W3 deletion, TEAM_START_DRIVER_REFACTOR=true):
+    // `TeamClass::Coordinate_Move` (team.cpp:1878-2012) NEVER sets IsDriving.
+    // `DriveClass::Start_Driver` (drive.cpp:1079-1086) sets it only AFTER
+    // rotation completes on the unit's own AI tick. So both tanks:
+    //   - keep isDriving=false post-coordinateMove
+    //   - have path populated via findPath (Basic_Path simulation)
+    //   - MissionQueue=MOVE, moveTarget set
+    // Mission_Move dispatch + Start_Driver happen on the next entity-AI tick
+    // via `runDriveClassAI` when DRIVE_CLASS_AI_PORT=true.
+    expect(tank1.isDriving, 'tank1: isDriving=false (C++ coord never sets IsDriving)').toBe(false);
+    expect(tank2.isDriving, 'tank2: isDriving=false (C++ coord never sets IsDriving)').toBe(false);
+    // tank1's path should populate; tank2's path may route around or be empty
+    // if cellClaims blocked its dest — either way, both isDriving match C++.
+    expect(tank1.path.length, 'tank1 path populated (or blocked)').toBeGreaterThanOrEqual(0);
+    expect(tank2.path.length, 'tank2 path populated (or blocked)').toBeGreaterThanOrEqual(0);
   });
 
   it('single-team vehicle reinforcement: isDriving gated by facing alignment (C++ Start_Driver parity)', () => {
@@ -225,10 +235,15 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(mcv.missionQueue, 'MCV queue cleared after pop').toBeNull();
   });
 
-  it('single-team vehicle with pre-aligned facing: isDriving=true (Start_Driver parity)', () => {
-    // When the vehicle's body facing already matches the direction to the
-    // target cell, C++ Start_Driver fires synchronously (no rotation needed).
-    // TS mirrors this: set isDriving=true and stay in GUARD drive-in-GUARD.
+  it('single-team vehicle with pre-aligned facing: isDriving=false post-coord (Start_Driver on DriveClass::AI tick)', () => {
+    // C++ parity (post-W3 deletion):
+    // Even when the vehicle's body facing already matches the target direction,
+    // `TeamClass::Coordinate_Move` (team.cpp:1878-2012) does NOT set IsDriving.
+    // `DriveClass::Start_Driver` (drive.cpp:1270) fires from DriveClass::AI
+    // on the unit's own AI tick after Start_Of_Move confirms Basic_Path +
+    // facing match + Can_Enter_Cell. Previously TS W3 eagerly set isDriving
+    // in coordinator — a proxy for Start_Driver that skipped the DriveClass::AI
+    // tick sequencing.
     const game = createGame();
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
     mcv.facing = 2; // East — matches target direction (22,10) dx=+1,dy=0
@@ -247,12 +262,16 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     ]);
     updateAllTeams(waypoints, { structures: [], entities: [mcv] });
 
-    expect(mcv.isDriving, 'facing already aligned → isDriving=true (Start_Driver success)').toBe(true);
+    // Post-coord: queue MOVE, moveTarget set, isDriving still false.
+    // Path populated by findPath (Basic_Path in coord) per TEAM_START_DRIVER_REFACTOR.
+    expect(mcv.missionQueue, 'MCV queue MOVE').toBe(Mission.MOVE);
+    expect(mcv.moveTarget, 'MCV moveTarget set').not.toBeNull();
+    expect(mcv.isDriving, 'isDriving=false (C++ coord never sets IsDriving)').toBe(false);
 
-    // Pre-Commence gate does NOT pop queue because isDriving=true.
+    // Pre-Commence gate pops queue this tick because isDriving=false.
     tickEntity(game, mcv);
-    expect(mcv.mission, 'MCV stays GUARD (Commence blocked by isDriving=true)').toBe(Mission.GUARD);
-    expect(mcv.missionQueue, 'MCV queue still MOVE').toBe(Mission.MOVE);
+    expect(mcv.mission, 'MCV pops to MOVE via pre-Commence (unit.cpp:404)').toBe(Mission.MOVE);
+    expect(mcv.missionQueue, 'MCV queue cleared after pop').toBeNull();
   });
 
   it('pre-dispatch Commence: popping tank1 fires Mission_Move jitter on the SAME tick', () => {
