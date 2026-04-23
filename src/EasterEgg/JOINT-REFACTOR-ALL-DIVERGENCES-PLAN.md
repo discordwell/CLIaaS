@@ -2,6 +2,12 @@
 
 **Status:** Design specification for the next major engineering push.
 
+**Execution log (2026-04-23):** Phase 0, 1, 2A/B, 4, 5, 7A, 7B all landed behind flags. Phase 3 v1 flipped ON → cascaded (SCG04 36→3, SCG11 57→4) → reverted. Phase 3 v2 (this repo at `1c4dce3f`) is a C++-faithful rewrite verified against in-repo `drive.cpp:906-1066`. Flipping v2 ON regressed SCG11 57→19 because the v2 path-regen conflicts with the existing W16 sticky-flag close-enough in `updateMove` (~line 6000). A complete Phase 3 v3 must (a) port `drive.cpp:1102` Can_Enter_Cell-failure reactive close-enough, AND (b) disable W16 simultaneously. Flag left OFF.
+
+**C++ source constraint correction:** Full Westwood RA source IS in-repo at `src/EasterEgg/CnC_and_Red_Alert/RA/` (drive.cpp, foot.cpp, team.cpp, findpath.cpp, techno.cpp, infantry.cpp, unit.cpp, mission.cpp, coord.cpp, facing.cpp, cell.cpp, bullet.cpp, etc.). Prior "not in repo" agent claims were based on a narrow `*.cpp` glob miss. Future sessions should read C++ directly instead of relying on training-knowledge reconstructions.
+
+
+
 **Scope:** All 7 first-divergences (SCG01=87, SCG03=238, SCG04=36, SCG06=76, SCG07=17, SCG11=57, SCG13=101) in a single coordinated engineering push. Assumes 6-10 engineering sessions. Designed to break the "narrow fix → cascade regression" pattern documented over 20+ prior sessions.
 
 **Brutal honesty upfront:** The 7 divergences do NOT form a single, cleanly resolvable unit. They partition into **three genuinely coupled sub-groups** and **two outliers**. Expect the refactor to eliminate **4-5** of the 7 divergences, meaningfully advance the remaining 2-3, but NOT solve all 7 simultaneously. Every prior session that promised "just one more fix" has regressed because the workaround-fix graph is cyclic. This plan's job is to break the cycles, not to promise the impossible.
