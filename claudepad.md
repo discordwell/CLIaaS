@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-04-23T13:30Z — Sessions 14-15: analysis, no code changes
+
+**Session 15:** Claudepad summary only for Session 16.
+
+**Session 14:** Surveyed direct `entity.mission = X` sites outside team.ts:
+- `aircraft.ts` (11 sites): AircraftClass has its own state machine; direct sets match C++ AircraftClass::AI patterns. Not converted without deeper understanding.
+- `ai.ts` (player AI): different context (player commands); not converted.
+- `agentHarness.ts` (control commands): test harness paths.
+
+`savedMoveTarget` A2 attack→move transition at index.ts:4166 is a TS-specific mechanism worth auditing eventually, but not low-risk.
+
+**Remaining known issues unchanged:** vessel double-cycle IsDoorClosed gate (SCG07), deep combat/bullet-scatter divergence (SCG01/06/13).
+
 ## 2026-04-23T13:15Z — Session 16: chain-loop PCP_END skipCommence refactor (benign)
 
 Added `skipCommence` option to `unitPerCellProcess`; all chain-loop call sites now pass `skipCommence=true` to defer Commence from PCP_END to STAGE E / next tick's STAGE A. Matches C++ drive.cpp which only fires PCP_END at track completion (actual=0), not at every cell crossing.
