@@ -336,9 +336,11 @@ export class Entity {
   /** Per-boundary Commence dedup. Keyed `${trackIndex}-${pathIndex}` at moment
    *  of PCP_END call-site. Plan §6 MCV-157 double-fire nuance. */
   _commenceFiredBoundaries: Set<string> = new Set();
-  /** Session 3.2 — cell-key of last `approachTarget` call in AREA_GUARD.
-   *  Cell-change gate prevents infinite re-pathfinding per tick when
-   *  Mission_Guard_Area retry fires. `-1` = no prior approach. */
+  /** Session 3.2 / Phase 4 — cell-key of last `approachTarget` call in
+   *  AREA_GUARD. Cell-change gate prevents infinite re-pathfinding per
+   *  tick when Mission_Guard_Area timer-cycle retry (Session 3.2) or
+   *  cell-boundary retry (Phase 4, `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY`)
+   *  fires. Encoded as `cy * 256 + cx`. `-1` = no prior approach. */
   _lastAreaGuardApproachCellKey = -1;
 
   // === Phase 0 — additive debug fields (JOINT-REFACTOR plan §0 line 133-135) ===

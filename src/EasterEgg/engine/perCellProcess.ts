@@ -660,6 +660,71 @@ export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = false;
 export const DISPATCH_ORDER_REFACTOR = false;
 
 /**
+ * Phase 4 — Approach_Target re-call on cell-boundary (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §4).
+ *
+ * ## Purpose
+ *
+ * Fires an additional `approachTarget(entity)` call from inside the foot
+ * per-cell-process chain whenever an AREA_GUARD infantry with a live TarCom
+ * finishes entering a new cell — mirroring C++'s behavior where
+ * `FootClass::Approach_Target` is re-invoked on every Mission_Guard_Area
+ * timer cycle AND implicitly on every Per_Cell_Process call that leaves
+ * the unit still out-of-range of its TarCom (foot.cpp:1082-1084 +
+ * foot.cpp:1471-1483 path-shorten guard).
+ *
+ * Without this, once `approachTarget` has run ONCE (at scan-found-target
+ * time in `updateAreaGuard`), the cached approach cell sticks forever
+ * and the unit walks to a potentially-stale destination. WASM's trace
+ * shows Approach_Target re-firing with updated dir256 geometry as the
+ * entity walks, producing subtly different destination cells per cell
+ * boundary — which is what reaches (22,65) at tick 65 vs TS's static
+ * path to (20,66).
+ *
+ * ## SCG06EA tick 76 residual
+ *
+ * The USSR E1 @(24,67) targets Greek E1 @(19,65). TS selects approach cell
+ * (20,66) via the initial sweep (pinned in
+ * `cpp-parity-scg06ea-tick-76-path.test.ts`) and walks straight to it.
+ * WASM re-calls Approach_Target mid-walk — the Coord_Move sweep at the new
+ * entity position produces a different winning angle, so the final cell
+ * is (22,65). That 1-cell divergence shifts the firing tick by ~4 ticks,
+ * which cascades to the tick-76 first-divergence divergence.
+ *
+ * ## Why gated ON-default risk
+ *
+ * Re-calling `approachTarget` fires `findPath` internally. TS's pathfinder
+ * is NOT guaranteed to produce the identical route as C++'s Basic_Path for
+ * every geometry. Flipping ON universally would potentially cascade
+ * SCG01/03/07/11/13 if any AREA_GUARD unit in those scenarios has a
+ * moveTarget whose re-path produces a different route than WASM.
+ *
+ * ## Gate-by-cell-boundary rationale
+ *
+ * The re-fire fires ONCE per cell boundary (keyed by `${cx},${cy}`). Without
+ * the cell-key dedup, `footPerCellProcess(PCP_END)` re-fires approachTarget
+ * at every tick the unit is mid-cell, producing per-tick pathfinder churn.
+ * Cell-change-gate is TS-specific (plan §4 and §8 S3.2) and matches the
+ * semantic that C++'s Per_Cell_Process also only fires at cell boundaries,
+ * not mid-cell.
+ *
+ * ## Rollout
+ *
+ * Ships OFF. Intended to flip ON in Phase 4.4 after each checkpoint is
+ * individually verified. The re-fire logic is also adjacent to the existing
+ * timer-cycle re-fire in `missionAI.ts updateAreaGuard` (Session 3.2
+ * `AREA_GUARD_APPROACH_RETRY`) — that flag covers the timer-fire window
+ * while this one covers the mid-walk cell-boundary window. Together they
+ * approximate C++'s "every Per_Cell_Process + every timer cycle" behavior.
+ *
+ * ## C++ refs
+ *
+ *   foot.cpp:1082-1084  Mission_Guard_Area Approach_Target per-timer re-fire
+ *   foot.cpp:1471-1483  FootClass::Per_Cell_Process path-shorten entry
+ *   foot.cpp:856-946    Basic_Path / Approach_Target pathfinding
+ */
+export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = false;
+
+/**
  * Minimal entity shape for the hook. We intentionally keep this loose
  * (only the fields the hook actually reads/writes) so the module stays
  * free of the full `Entity` import and can be unit-tested in isolation.
