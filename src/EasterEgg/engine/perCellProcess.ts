@@ -926,7 +926,7 @@ export const RANDOM_ANIMATE_CPP_FAITHFUL = true;
  *   src/EasterEgg/engine/index.ts ~4887  runDriveClassAI (integration point)
  *   src/EasterEgg/engine/missionLifecycle.ts  enterIdleMode
  */
-export const DRIVE_CLASS_AI_PORT = false;
+export const DRIVE_CLASS_AI_PORT = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose

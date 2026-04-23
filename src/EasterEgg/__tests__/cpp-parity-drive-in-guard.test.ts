@@ -178,10 +178,12 @@ describe('C++ DriveClass::AI drives-in-GUARD (drive.cpp:1376)', () => {
     // coordinateMove → missionQueue=MOVE + isDriving=true → drive toward waypoint
     // in GUARD → Stop_Driver at destination → Commence pops → TMISSION_UNLOAD.
     const game = createGame();
-    // Water cells for LST
+    // Water cells for LST. Terrain.WATER=2 (map.ts:26) — terrain 4 is WALL,
+    // which was a latent bug fixed when Phase 3 path-regen started reading
+    // isWaterPassable for drive-in-GUARD vessels.
     for (let y = 8; y <= 12; y++) {
       for (let x = 8; x <= 30; x++) {
-        game.map.setTerrain(x, y, 4); // water / river
+        game.map.setTerrain(x, y, 2); // Terrain.WATER
       }
     }
     const lst = placeVehicle(game, UnitType.V_LST, House.Greece, 10, 10);
