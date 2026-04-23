@@ -213,8 +213,21 @@ function isPassable(
   cx: number, cy: number,
   naval: boolean,
   ignoreOccupancy: boolean,
+  cellClaims?: Map<number, number>,
+  claimingEntityId?: number,
 ): boolean {
   if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+  // Phase 3.3 — per-team path reservation (JOINT-REFACTOR §3.3).
+  // When cellClaims is set, cells claimed by OTHER entities are treated as
+  // impassable (mirrors C++ Basic_Path transient friendly-blocker semantics
+  // in drive.cpp:917 where Can_Enter_Cell returns MOVE_MOVING_BLOCK for
+  // cells currently moving through). The claiming entity's own cells stay
+  // passable so its start/dest remain reachable from its own perspective.
+  if (cellClaims !== undefined) {
+    const idx = cy * MAP_CELLS + cx;
+    const owner = cellClaims.get(idx);
+    if (owner !== undefined && owner !== claimingEntityId) return false;
+  }
   if (ignoreOccupancy) {
     return naval ? map.isWaterPassable(cx, cy) : map.isTerrainPassable(cx, cy);
   }
@@ -235,7 +248,13 @@ function registerCell(
   map: GameMap,
   naval: boolean,
   ignoreOccupancy: boolean,
+  _cellClaims?: Map<number, number>,
+  _claimingEntityId?: number,
 ): boolean {
+  // cellClaims args preserved for signature parity with isPassable but not
+  // read here — registerCell appends moves already validated by the caller's
+  // isPassable check (which applies the cellClaims filter).
+  void _cellClaims; void _claimingEntityId;
   if (path.overlap.test(cellIdx)) {
     // Overlap detected — check if immediate backtrack
     if (path.length > 0 && path.command[path.length - 1] === opposite(dir)) {
@@ -303,6 +322,8 @@ function followEdge(
   map: GameMap,
   naval: boolean,
   ignoreOccupancy: boolean,
+  cellClaims?: Map<number, number>,
+  claimingEntityId?: number,
 ): boolean {
   let newdir: number;
   let oldcell_cx = startCx;
@@ -340,7 +361,7 @@ function followEdge(
         const [checkCx, checkCy] = adjacentCell(oldcell_cx, oldcell_cy, checkdir);
 
         if (checkCx === targetCx && checkCy === targetCy) {
-          if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy)) {
+          if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
             newdir = checkdir;
             [newcell_cx, newcell_cy] = adjacentCell(oldcell_cx, oldcell_cy, newdir);
             foundPassable = true;
@@ -369,7 +390,7 @@ function followEdge(
 
       [newcell_cx, newcell_cy] = adjacentCell(oldcell_cx, oldcell_cy, newdir);
 
-      if (!forcefail && isPassable(map, newcell_cx, newcell_cy, naval, ignoreOccupancy)) {
+      if (!forcefail && isPassable(map, newcell_cx, newcell_cy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
         foundPassable = true;
         break;
       } else {
@@ -386,7 +407,7 @@ function followEdge(
     // Record the direction (C++ line 938-976)
     if (!forceout) {
       const newIdx = cellIndex(newcell_cx, newcell_cy);
-      if (!registerCell(path, newIdx, newcell_cx, newcell_cy, newdir, map, naval, ignoreOccupancy)) {
+      if (!registerCell(path, newIdx, newcell_cx, newcell_cy, newdir, map, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
         // Loop unravel failed — in our simplified version, just fail
         // C++ tries Unravel_Loop, but the core behavior for pathfinding parity
         // is to return false on unrecoverable loops
@@ -453,6 +474,8 @@ function optimizeMoves(
   map: GameMap,
   naval: boolean,
   ignoreOccupancy: boolean,
+  cellClaims?: Map<number, number>,
+  claimingEntityId?: number,
 ): void {
   if (path.length === 0) return;
 
@@ -504,7 +527,7 @@ function optimizeMoves(
             // 90 degree diagonal smoothing (C++ line 1139-1148)
             // Only if the intermediate cell is passable
             const [checkCx, checkCy] = adjacentCell(cellCx, cellCy, newdir);
-            if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy)) {
+            if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
               path.command[cmd2idx] = newdir;
               path.command[cmd1idx] = newdir;
             }
@@ -591,6 +614,19 @@ function facingsToPath(
 // Signature matches the old A* findPath for drop-in compatibility.
 // ============================================================================
 
+/**
+ * Main pathfinder entry (C++ Find_Path).
+ *
+ * Phase 3.3 (JOINT-REFACTOR §3.3) — added optional `cellClaims` + `claimingEntityId`
+ * params. When `cellClaims` is provided, cells already owned by OTHER entities
+ * are treated as impassable for this call (models C++ Basic_Path's transient
+ * friendly-blocker semantics). When `claimingEntityId` matches an entry, that
+ * cell is still passable (so the claiming entity's own reservation doesn't
+ * block its own path). Callers are responsible for claim bookkeeping —
+ * typically `team.ts Team.ai()` pre-populates and updates the map per-member.
+ *
+ * When omitted (undefined), behavior is identical to the pre-3.3 API.
+ */
 export function findPath(
   map: GameMap,
   start: CellPos,
@@ -599,6 +635,8 @@ export function findPath(
   naval = false,
   _speedClass: SpeedClass = SpeedClass.WHEEL,
   _isMoving?: (entityId: number) => boolean,
+  cellClaims?: Map<number, number>,
+  claimingEntityId?: number,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
@@ -620,9 +658,9 @@ export function findPath(
     const [nextCx, nextCy] = adjacentCell(startcell_cx, startcell_cy, direction);
 
     // Can we move directly? (C++ line 551)
-    if (isPassable(map, nextCx, nextCy, naval, ignoreOccupancy)) {
+    if (isPassable(map, nextCx, nextCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
       const nextIdx = cellIndex(nextCx, nextCy);
-      registerCell(path, nextIdx, nextCx, nextCy, direction, map, naval, ignoreOccupancy);
+      registerCell(path, nextIdx, nextCx, nextCy, direction, map, naval, ignoreOccupancy, cellClaims, claimingEntityId);
       startcell_cx = nextCx;
       startcell_cy = nextCy;
       continue;
@@ -644,7 +682,7 @@ export function findPath(
         const scanDir = cellFacing(scanCx, scanCy, goal.cx, goal.cy);
         [scanCx, scanCy] = adjacentCell(scanCx, scanCy, scanDir);
 
-        if (isPassable(map, scanCx, scanCy, naval, ignoreOccupancy)) {
+        if (isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
           break; // Found the far side
         }
 
@@ -659,7 +697,7 @@ export function findPath(
       }
 
       if (scanCx === goal.cx && scanCy === goal.cy &&
-          !isPassable(map, scanCx, scanCy, naval, ignoreOccupancy)) {
+          !isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
         // Dest unreachable
         break;
       }
@@ -671,6 +709,7 @@ export function findPath(
         scanCx, scanCy,
         pleft, -1, direction, // -1 = COUNTERCLOCK
         MAX_MLIST_SIZE, map, naval, ignoreOccupancy,
+        cellClaims, claimingEntityId,
       );
 
       const pright = clonePathState(path, maxlen);
@@ -679,6 +718,7 @@ export function findPath(
         scanCx, scanCy,
         pright, 1, direction, // +1 = CLOCK
         MAX_MLIST_SIZE, map, naval, ignoreOccupancy,
+        cellClaims, claimingEntityId,
       );
 
       if (leftOk || rightOk) {
@@ -715,7 +755,7 @@ export function findPath(
         }
         const ddir = cellFacing(scanCx, scanCy, goal.cx, goal.cy);
         [scanCx, scanCy] = adjacentCell(scanCx, scanCy, ddir);
-        if (!isPassable(map, scanCx, scanCy, naval, ignoreOccupancy)) {
+        if (!isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
           doughnutEscape = true;
           break;
         }
@@ -737,7 +777,7 @@ export function findPath(
   }
 
   // Optimize moves (C++ line 746-747)
-  optimizeMoves(path, map, naval, ignoreOccupancy);
+  optimizeMoves(path, map, naval, ignoreOccupancy, cellClaims, claimingEntityId);
 
   return facingsToPath(start.cx, start.cy, path.command, path.length);
 }
