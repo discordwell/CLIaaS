@@ -4540,9 +4540,15 @@ export class Game {
               (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
             guardDelay = isInfAA ? 14 : 42;
           }
-          entity.missionTimer = armBeforeScan > 0
-            ? armBeforeScan
-            : guardDelay + ScenarioRandom.nextInRange(0, 2);
+          if (armBeforeScan > 0) {
+            entity.missionTimer = armBeforeScan;
+          } else {
+            if ((globalThis as any).__traceMoveFires) {
+              const stk = new Error().stack?.split('\n').slice(2, 6).join(' | ') ?? '';
+              console.log(`[GUARD_FIRE] t=${(globalThis as any).__currentGameTick} eid=${entity.id} mis=${Mission[entity.mission]} stk=${stk}`);
+            }
+            entity.missionTimer = guardDelay + ScenarioRandom.nextInRange(0, 2);
+          }
         }
         } // close armBeforeScan block
         break;
