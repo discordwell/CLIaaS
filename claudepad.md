@@ -1,6 +1,18 @@
 # Session Summaries
 
-## 2026-04-23T12:00Z — 25-session run wrap-up (sessions 25→0)
+## 2026-04-23T12:20Z — Round-2 Session 25: vessel door-gate narrower attempt, reverted
+
+Tried gating STAGE A + STAGE E Commence for vessels with `doorOpen=true` AND `missionQueue ∈ {MOVE, ATTACK}` (narrower than Session 7's all-queue block). Added for BOTH stages.
+
+**Tests:** all 51,365 pass (SCG05 narrow filter preserves LST cargo-handling paths).
+
+**Divergence:** SCG07EA regressed from tick 4 → tick 2. At tick 2, WASM fires 7 RNG calls; TS with my gate fires only 6. The gate defers one vessel's Mission_Move jitter past tick 2, but WASM fires it AT tick 2.
+
+**Conclusion:** C++ vessel door-gate is more nuanced. Not all doorOpen vessels get blocked at tick 2. Depends on IsDriving state, whether door was auto-opened vs spawn-opened, whether Mission was set directly vs queued. Reverted.
+
+Next angles: route direct `entity.mission = X` in coordinateMove/coordinateRegroup through `assignMission` queue; instrument WASM Commence per-vessel per-tick.
+
+## 2026-04-23T12:00Z — 25-session run wrap-up (round 1, sessions 25→0)
 
 **Pre-run state (Session 25 start):** SCG01=87, SCG03=238, SCG04=3, SCG06=76, SCG07=4, SCG11=15, SCG13=101.
 **Post-run state (Session 2 / commit bc1d354b):** SCG01=87, SCG03=238, SCG04=**24**, SCG06=76, SCG07=4, SCG11=**19**, SCG13=101.
