@@ -4086,15 +4086,57 @@ export class Game {
     // ── Phase 1 Checkpoint 1.D: STAGE A-F flow gated behind flag ─────────────
     if (DISPATCH_ORDER_REFACTOR) {
       // STAGE A: Pre-MissionClass::AI Commence (vehicles, unit.cpp:406).
-      // Identical to the legacy pre-Commence gate — pop MissionQueue when
-      // idle so the new mission's handler fires under STAGE B this tick.
+      //
+      // Step 8 addition — Do_Turn rotation gate (C++ drive.cpp:1079-1086).
+      // When queueing MOVE with a pre-populated path (TS team.coordinateMove
+      // populates via findPath at queue time), only pop the queue when the
+      // body facing already matches the first path step direction. Otherwise
+      // rotate in place (tickRotation) and leave the queue pending; try again
+      // next tick.
+      //
+      // This emulates C++ DriveClass::Start_Of_Move rotation pre-check: the
+      // facing-mismatch path calls Do_Turn + return(true) without advancing
+      // IsDriving or consuming Mission_Move RNG. Rotation happens over
+      // multiple ticks at Techno_Type_Class()->ROT rate; staggers Mission_Move
+      // jitter fires across team members with different initial facings.
       if (!entity.stats.isInfantry && !entity.isAirUnit &&
           entity.missionQueue !== null && !entity.isDriving &&
           !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
-        entity.mission = entity.missionQueue;
-        entity.missionQueue = null;
-        entity.missionTimer = 0;
-        missionTimerFired = true;
+        // Rotation gate applies only to MOVE queue with a populated path.
+        // Other queued missions (HUNT/ATTACK/etc.) or MOVE with empty path
+        // pop normally — path-empty means Basic_Path hasn't run yet, which
+        // matches C++ where pre-Commence runs before Start_Of_Move.
+        let shouldPop = true;
+        if (entity.missionQueue === Mission.MOVE && entity.path.length > 0) {
+          const step = entity.path[0];
+          const targetCenterX = step.cx * CELL_SIZE + CELL_SIZE / 2;
+          const targetCenterY = step.cy * CELL_SIZE + CELL_SIZE / 2;
+          const dx = Math.sign(targetCenterX - entity.pos.x);
+          const dy = Math.sign(targetCenterY - entity.pos.y);
+          let stepFacing = entity.facing;
+          if (dx === 0 && dy < 0) stepFacing = 0 as Dir;
+          else if (dx > 0 && dy < 0) stepFacing = 1 as Dir;
+          else if (dx > 0 && dy === 0) stepFacing = 2 as Dir;
+          else if (dx > 0 && dy > 0) stepFacing = 3 as Dir;
+          else if (dx === 0 && dy > 0) stepFacing = 4 as Dir;
+          else if (dx < 0 && dy > 0) stepFacing = 5 as Dir;
+          else if (dx < 0 && dy === 0) stepFacing = 6 as Dir;
+          else if (dx < 0 && dy < 0) stepFacing = 7 as Dir;
+          if (entity.facing !== stepFacing) {
+            // Facing mismatch — rotate toward first path step without popping.
+            // C++ drive.cpp:1084 Do_Turn + return(true) — rotation progresses,
+            // MissionQueue stays set for next tick's pre-Commence check.
+            entity.desiredFacing = stepFacing;
+            entity.tickRotation();
+            shouldPop = false;
+          }
+        }
+        if (shouldPop) {
+          entity.mission = entity.missionQueue;
+          entity.missionQueue = null;
+          entity.missionTimer = 0;
+          missionTimerFired = true;
+        }
       }
 
       // STAGE B: MissionClass::AI — dispatch only when Timer==0, matching
