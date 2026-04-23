@@ -1083,9 +1083,9 @@ export class Team {
         // (vehicles/aircraft) keep the direct-assignment path — they don't gesture
         // and Commence semantics differ.
         if (unit.stats.isInfantry) {
-          if (unit.mission !== Mission.MOVE && unit.missionQueue !== Mission.MOVE) {
-            unit.missionQueue = Mission.MOVE;
-          }
+          // Phase 2: route through assignMission (C++ mission.cpp:379-390)
+          // — no-op when already in MOVE, queues otherwise.
+          assignMission(unit, Mission.MOVE);
           if (!unit.moveTarget) {
             unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
           }
