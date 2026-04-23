@@ -839,7 +839,7 @@ export const PCP_DOUBLE_CYCLE_ENABLED = true;
  *   src/EasterEgg/engine/missionAI.ts:1461    updateGuard Random_Animate call
  *   src/EasterEgg/engine/missionAI.ts:1749    updateAreaGuard Random_Animate call
  */
-export const RANDOM_ANIMATE_CPP_FAITHFUL = false;
+export const RANDOM_ANIMATE_CPP_FAITHFUL = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose
