@@ -1093,10 +1093,10 @@ export class Team {
           // close-enough in followTrackStep clears NavCom when blocked.
           const targetLXlepton = pixelToLepton(this.target.x);
           const targetLYlepton = pixelToLepton(this.target.y);
-          if (unit.mission !== Mission.MOVE) {
-            unit.missionTimer = 0;
-          }
-          unit.mission = Mission.MOVE;
+          // Session 21: route through queue (Assign_Mission). Commence
+          // resets Timer=0 when it pops (mission.cpp:354); manual reset
+          // removed to match C++ exactly.
+          assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
         }
         allArrived = false;

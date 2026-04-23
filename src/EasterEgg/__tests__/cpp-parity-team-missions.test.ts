@@ -1480,7 +1480,8 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.ai(waypoints); // activate
       team.ai(waypoints); // start PATROL
 
-      expect(e.mission).toBe(Mission.MOVE);
+      // Session 21: coordinatePatrol queues MOVE via Assign_Mission.
+      expect(e.missionQueue).toBe(Mission.MOVE);
       expect(e.moveTarget).toBeTruthy();
     });
 

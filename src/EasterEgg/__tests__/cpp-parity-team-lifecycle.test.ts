@@ -734,9 +734,11 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       // Tick 1: activate → advance to PATROL mission 0 → execute
       team.ai(waypoints);
 
-      // Members should be moving toward the patrol waypoint
-      expect(e1.mission).toBe(Mission.MOVE);
-      expect(e2.mission).toBe(Mission.MOVE);
+      // Members should be queued to move toward the patrol waypoint.
+      // Session 21: coordinatePatrol queues MOVE via Assign_Mission;
+      // Commence pops via STAGE A when !IsDriving on entity tick.
+      expect(e1.missionQueue).toBe(Mission.MOVE);
+      expect(e2.missionQueue).toBe(Mission.MOVE);
     });
   });
 
