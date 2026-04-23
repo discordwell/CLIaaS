@@ -779,7 +779,7 @@ export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = true;
  *   src/EasterEgg/engine/index.ts ~4887  runDriveClassAI
  *   src/EasterEgg/engine/index.ts ~5780  updateMove
  */
-export const PCP_DOUBLE_CYCLE_ENABLED = false;
+export const PCP_DOUBLE_CYCLE_ENABLED = true;
 
 /**
  * Minimal entity shape for the hook. We intentionally keep this loose
