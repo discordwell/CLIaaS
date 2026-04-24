@@ -1317,8 +1317,39 @@ export class Team {
   /**
    * Set mission target, clearing old target if needed
    * (C++ Assign_Mission_Target, team.cpp:396-450).
+   *
+   * Phase 3j: C++ iterates members and clears TarCom/NavCom if set to old
+   * MissionTarget, queuing GUARD. This was missing — caused SCG11 4TNK@60,58
+   * to stay in Mission=MOVE indefinitely because NavCom was never cleared on
+   * team mission transition.
    */
   private setMissionTarget(newTarget: WorldPos | null): void {
+    const oldTarget = this.missionTarget;
+    if (oldTarget) {
+      // Convert old target to lepton target cell for NavCom comparison.
+      const oldTargetLX = pixelToLepton(oldTarget.x);
+      const oldTargetLY = pixelToLepton(oldTarget.y);
+      for (const unit of this._members) {
+        if (!unit.alive) continue;
+        const navMatch = unit.moveTarget &&
+          unit.moveTarget.lx === oldTargetLX && unit.moveTarget.ly === oldTargetLY;
+        const tarMatch = !!(unit.target &&
+          oldTarget.x === Math.trunc(unit.target.leptonX * CELL_SIZE / LEPTON_SIZE) &&
+          oldTarget.y === Math.trunc(unit.target.leptonY * CELL_SIZE / LEPTON_SIZE));
+        if (navMatch || tarMatch) {
+          assignMission(unit, Mission.GUARD);
+          if (navMatch) {
+            unit.moveTarget = null;
+            unit.path = [];
+            unit.pathIndex = 0;
+          }
+          if (tarMatch) {
+            unit.target = null;
+          }
+        }
+      }
+    }
+
     if (this.target && this.missionTarget &&
         this.target.x === this.missionTarget.x && this.target.y === this.missionTarget.y) {
       this.missionTarget = newTarget;

@@ -406,7 +406,7 @@ bool DriveClass::Teleport_To(CELL cell)
 	Force_Track(-1, 0);
 	PrimaryFacing.Set_Current(PrimaryFacing.Desired());
 	Transmit_Message(RADIO_OVER_OUT);
-	Assign_Destination(TARGET_NONE);
+	{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 	Assign_Target(TARGET_NONE);
 	Assign_Mission(MISSION_NONE);
 	Commence();
@@ -597,6 +597,7 @@ void DriveClass::Assign_Destination(TARGET target)
 	**	or the unit already is assigned the specified destination.
 	*/
 	if (target == NavCom) return;
+
 
 	/*
 	**	For harvesting type vehicles, it might go into a dock and unload procedure
@@ -968,7 +969,7 @@ bool DriveClass::Start_Of_Move(void)
 			**	several units with the same mouse click.
 			*/
 			if (!Is_On_Priority_Mission() && Distance(NavCom) < Rule.CloseEnoughDistance && (Mission == MISSION_MOVE || Mission == MISSION_GUARD_AREA)) {
-				Assign_Destination(TARGET_NONE);
+				{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 				if (!IsActive) return(false);
 			} else {
 				/*
@@ -990,7 +991,7 @@ bool DriveClass::Start_Of_Move(void)
 							**	object can just say "good enough" and stop here.
 							*/
 							if (Distance(NavCom) < Rule.CloseEnoughDistance && !In_Radio_Contact()) {
-								Assign_Destination(TARGET_NONE);
+								{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 								return(false);
 							} else {
 								cellptr->Incoming(0, true, false);
@@ -1003,7 +1004,7 @@ bool DriveClass::Start_Of_Move(void)
 				if (TryTryAgain > 0) {
 					TryTryAgain--;
 				} else {
-					Assign_Destination(TARGET_NONE);
+					{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 					if (!IsActive) return(false);
 					if (IsNewNavCom) Sound_Effect(VOC_SCOLD);
 					IsNewNavCom = false;
@@ -1051,7 +1052,7 @@ bool DriveClass::Start_Of_Move(void)
 					**	object can just say "good enough" and stop here.
 					*/
 					if (Distance(NavCom) < Rule.CloseEnoughDistance && !In_Radio_Contact()) {
-						Assign_Destination(TARGET_NONE);
+						{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 						return(false);
 					} else {
 						cellptr->Incoming(0, true, false);
@@ -1100,7 +1101,7 @@ bool DriveClass::Start_Of_Move(void)
 		if (cando != MOVE_OK) {
 
 			if (Mission == MISSION_MOVE /*KO&& House->IsHuman */&& Distance(NavCom) < Rule.CloseEnoughDistance) {
-				Assign_Destination(TARGET_NONE);
+				{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 				if (!IsActive) return(false);//BG
 			}
 
@@ -1383,7 +1384,7 @@ void DriveClass::AI(void)
 					*/
 					if (IsLocked && Mission != MISSION_ENTER && Target_Legal(NavCom) && !Is_In_Same_Zone(As_Cell(NavCom))) {
 						Stop_Driver();
-						Assign_Destination(TARGET_NONE);
+						{ extern int g_nav_clear_site_id; g_nav_clear_site_id = __LINE__; Assign_Destination(TARGET_NONE); }
 					} else {
 						Start_Of_Move();
 						if (!IsActive) return;

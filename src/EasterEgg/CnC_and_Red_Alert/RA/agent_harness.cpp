@@ -62,6 +62,7 @@ extern "C" {
 	int g_commence_pop_tag = 0;
 	int g_mission_dispatch_tag = 0;
 	int g_enter_idle_tag = 0;
+	int g_nav_clear_site_id = 0;
 }
 
 // Debug movement log — ring buffer of last 32 entries
