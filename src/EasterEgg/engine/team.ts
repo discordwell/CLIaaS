@@ -979,6 +979,13 @@ export class Team {
                 const firstDir = directionTo(unit.pos, firstCellCenter);
                 if (unit.facing === firstDir) {
                   unit.isDriving = true;
+                } else {
+                  // Phase 3h: match C++ Start_Of_Move → Do_Turn (drive.cpp:1084).
+                  // When facing doesn't match, C++ calls Do_Turn(dir) to start
+                  // rotation. TS equivalent: set desiredFacing so tickRotation
+                  // progresses toward the target direction. IsDriving stays
+                  // false until rotation completes and Start_Driver fires.
+                  unit.desiredFacing = firstDir;
                 }
               }
             }
