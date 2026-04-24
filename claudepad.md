@@ -1,5 +1,48 @@
 # Session Summaries
 
+## 2026-04-24T13:20Z — C++-parity-first refactor Steps 1-7 landed (6 commits)
+
+**Plan:** `~/.claude/plans/mellow-wishing-sky.md` — strip 5 TS-only workarounds to restore C++-faithful baseline. Accept tick-counter drops as data.
+
+**Commits (6):**
+- `32c1f4f5` Step 1 — delete W3 (eager isDriving + Phase 3h desiredFacing) in coordinateMove
+- `0bcfa38b` Step 2 — delete W2 (vehicleClaims dead code; chain-flip was already gone)
+- Step 3 — W1 (patrolBlockedTargetLX/LY) was already deleted pre-refactor; no-op
+- `27d801d3` Step 4 — delete W4 (nonInterruptAnimTicks=3 vessel niat proxy)
+- Step 5 — kept W5 skipFirstAiCall (empirical WASM shows VESSEL-only tick-1 skip, non-vessel teams recruit on tick 1 — current per-RTTI gate IS C++-faithful per existing docstring)
+- `3fcf05ae` Step 6 — strip coordinateMove + coordinateRegroup to C++ purity (no path population, no isDriving/desiredFacing flip, no cellClaims Map)
+
+**Tests:** All 51,363 EasterEgg vitest pass across all 6 commits. Updated 3 pinning tests (scg04 Session 13, scg07 Phase 3b, formation-movement Session 9) from workaround behavior to C++-faithful behavior.
+
+**Playwright first-divergence (Step 7 audit):**
+| scenario | before | after | delta |
+|---|---|---|---|
+| SCG01EA | 87 | 87 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 25 | **3** | **-22** |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | **4** | **-13** |
+| SCG11EA | 19 | **15** | **-4** |
+| SCG13EA | 101 | 101 | 0 |
+
+**Per-tag divergence (via rng-entity-diff):**
+
+- **SCG04EA t3** (-22): Two BadGuy 3TNK in DIFFERENT teams target same cell. WASM fires `Mission_Move_foot` (tag 60010) on ONE tank (unit[73]); TS fires on BOTH + extra (3 total). Candidate C++ mechanism: `Basic_Path` friendly-blocker live `Can_Enter_Cell` MOVE_TEMP return (findpath.cpp:1266-1293) causing 2nd tank's Start_Driver to fail → Mission_Move Enter_Idle_Mode early exit without `Random_Pick(0,2)`.
+
+- **SCG07EA t4** (-13): 3-SS vessel team (subz). WASM fires Mission_Move_foot on 2 of 3 vessels (vessel[85],[86]); TS fires on all 3 (vessel[35],[36],[37]). Candidate C++ mechanism: `VesselClass::Start_Driver` (vessel.cpp:2104-2113) calls `Mark_Track(headto, MARK_DOWN)` to reserve dest cell. 3rd vessel's Start_Driver fails (destination reserved by earlier vessels) → Mission_Move Enter_Idle_Mode early exit.
+
+- **SCG11EA t15** (-4): mmth1 4TNK team (2 tanks). WASM doesn't fire 4 RNG calls that TS does on unit[94]/unit[95]. Likely related to post-coord path regen timing — TS's runDriveClassAI `findPath` + drive cadence doesn't match WASM's per-unit DriveClass::AI sequencing.
+
+**Root cause all 3:** TS lacks C++'s transient cell-reservation semantics. Vessels need Mark_Track port (vessel.cpp:2104-2113). Vehicles need proper Basic_Path friendly Can_Enter_Cell MOVE_TEMP (findpath.cpp:1266-1293) at Start_Driver time. These are legitimate C++ mechanisms, not workarounds.
+
+**Next investigation:** Port Mark_Track for vessels first (narrowest; explains SCG07). Then revisit Basic_Path for vehicle teams (explains SCG04, SCG11).
+
+**Refactor deltas:**
+- team.ts: -300 LOC (removed W3/W2/W4, TeamAIContext cellClaims, unused imports)
+- 3 pinning tests updated (Session 13, Phase 3b, Session 9 → C++-faithful assertions)
+
+**User can revert to `f1233536` at any point** (starting commit).
+
 ## 2026-04-24T08:00Z — Phase 3j: Assign_Mission_Target member NavCom clear
 
 **Mystery solved.** WASM instrumentation at `DriveClass::Assign_Destination` with per-callsite `__LINE__` tagging (via `g_nav_clear_site_id` global set before each `Assign_Destination(TARGET_NONE)` call) caught the elusive tick-14 NavCom clear in SCG11EA:
