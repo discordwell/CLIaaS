@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-04-24T04:00Z — Round-3 extended: +14 ticks total (SCG07+13, SCG04+1)
+
+After the SCG07 niat fix, Phase 3d added WASM instrumentation at
+`drive.cpp:681-685` (SpeedAccum + maxspeed * fixed(Speed, 256)) for
+SCG04EA unit[2] Frame 22-27. Confirmed:
+
+  F22 SpeedAccum=10 → actual=27 (+17 exact)
+  F23 SpeedAccum=7  → actual=24 (+17 exact)
+  ... (C++ adds +17 integer leptons/tick for 3TNK at Speed=255)
+
+TS was adding 17.92 leptons/tick (floating-point) because
+`biasedSpeed / LP` = `7 * 0.24 / 0.09375` = 17.92 (not truncated).
+
+Fix at `index.ts:7252`: `Math.floor(biasedSpeed / LP)` to match C++
+integer semantics of `_Scale_To_256` (rules.cpp:74).
+
+Per-unit-type accumulated floor-error per tick:
+- 3TNK (Speed=7): 0.92/tick — crossed PIXEL_LEPTON_W in ~11 ticks
+- 4TNK (Speed=4): 0.24/tick — <10 leptons in 19 ticks, no effect on SCG11
+- MCV  (Speed=6): 0.36/tick — <10 in 19 ticks, no effect
+- MNLY (Speed=9): 0.04/tick — negligible
+
+So SCG04 advances +1 (24→25). Other scenarios unchanged — their unit
+types have smaller float errors that don't cross PIXEL_LEPTON_W within
+their first-divergence timeframes.
+
 ## 2026-04-24T02:00Z — Round-3 combat-parity sweep: Phase 0-4 (+13 ticks SCG07EA)
 
 **Structured 5-phase parity sweep** per docs/parity/commit-protocol.md.
