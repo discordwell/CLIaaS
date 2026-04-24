@@ -7248,8 +7248,23 @@ export class Game {
     // C++ drive.cpp:664: maxspeed * SpeedBias * House->GroundspeedBias
     const biasedSpeed = speedPixels * entity.speedBias * entity.groundspeedBias;
 
-    // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern)
-    let actual = entity.speedAccum + (biasedSpeed / LP);
+    // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern).
+    //
+    // Phase 3d fix: C++ drive.cpp:685 computes `actual = SpeedAccum + maxspeed *
+    // fixed(Speed, 256)` in INTEGER lepton arithmetic. `maxspeed` is an integer
+    // MPHType derived from the INI Speed% via _Scale_To_256 (rules.cpp:74 —
+    // truncates at every step). 3TNK with Speed=7 INI → MaxSpeed=17 leptons/tick.
+    //
+    // TS previously computed `biasedSpeed / LP` in floating-point = 17.92
+    // leptons/tick for 3TNK, accumulating ~1 extra lepton every ~3 ticks.
+    // Over 10+ ticks the floor error crosses a PIXEL_LEPTON_W boundary, giving
+    // TS an extra track step vs WASM. That's the SCG04 t24 mechanism (TS
+    // arrives at cell (41,35) 1 tick before WASM).
+    //
+    // Floor to match C++ integer truncation. Bias multipliers stay as
+    // floating point (they can be non-1.0 via crates/house bias) but the
+    // final lepton delta is integer.
+    let actual = entity.speedAccum + Math.floor(biasedSpeed / LP);
     // Instrument: total leptons granted this followTrackStep invocation (entry accum + add)
     const speedGranted = actual;
 
