@@ -1,5 +1,36 @@
 # Session Summaries
 
+## 2026-04-24T08:00Z — Phase 3j: Assign_Mission_Target member NavCom clear
+
+**Mystery solved.** WASM instrumentation at `DriveClass::Assign_Destination` with per-callsite `__LINE__` tagging (via `g_nav_clear_site_id` global set before each `Assign_Destination(TARGET_NONE)` call) caught the elusive tick-14 NavCom clear in SCG11EA:
+
+```
+F14 AssignDest(TARGET_NONE) unit[8] cell=(60,58) prevNavComCell=7614 Mission=MOVE drv=0 callerLine=200424
+```
+
+Caller line 200424 → team.cpp:424 (prefix 200000 for team.cpp). That's `TeamClass::Assign_Mission_Target`:
+
+```cpp
+if (MissionTarget != TARGET_NONE) {
+    while (unit != NULL) {
+        bool tar = (unit->TarCom == MissionTarget);
+        bool nav = (unit->NavCom == MissionTarget);
+        if (tar || nav) {
+            unit->Assign_Mission(MISSION_GUARD);
+            if (nav) { unit->Assign_Destination(TARGET_NONE); }  // ← line 424
+            if (tar) { unit->Assign_Target(TARGET_NONE); }
+        }
+        unit = unit->Member;
+    }
+}
+```
+
+**TS was missing this entire member iteration.** `setMissionTarget` (team.ts:1321) just updated the property. Phase 3j ports the loop with lepton-coord comparison.
+
+**Effect on SCG11 t19:** None — TS's mmth1 team (the 4TNK's team) doesn't advance mission within first 19 ticks in TS, while WASM's does at tick 14. So the port's iteration doesn't fire. **Separate issue to investigate:** why TS team mission doesn't advance.
+
+**Round-3 extended totals:** +14 ticks still. 3 additional C++-faithful refactors (Phase 3h/3i/3j). The team-advance timing divergence is the new target for future work.
+
 ## 2026-04-24T07:00Z — Phase 3i: coordinateMove arrival Distance(NavCom) < CELL_LEPTON_W check
 
 Phase 3i landed the port of C++ team.cpp:1971-1974's arrival branch:
