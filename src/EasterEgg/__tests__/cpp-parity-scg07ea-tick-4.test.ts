@@ -143,23 +143,22 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     void team;
   });
 
-  it('Phase 3b: LAST vessel member gets narrow niat=3 proxy (models Mark_Track cell-reservation delay)', () => {
-    // Phase 3b finding: W4 deletion was over-zealous. WASM observation
-    // (SCG07EA subz: 3 SS) shows Mark_Track cell-reservation conflict at
-    // vessel.cpp:2104-2113 blocks the last sub's Start_Driver — its
-    // Mission_Move delays ~2 ticks. TS doesn't model cell reservation, so
-    // a narrow niat=3 proxy on the LAST member of 3+ vessel teams gates
-    // Commence at STAGE A for 2 ticks post-decrement — matches WASM.
-    //
-    // C++ ref: vessel.cpp:2104-2113 Mark_Track, drive.cpp:1079-1086
-    // Start_Driver rotation/path check.
+  it('W4 deleted (Step 4): no niat proxy written post-coord for any vessel team member', () => {
+    // W4 deletion (C++-parity refactor Step 4): the Phase 3b niat=3 proxy on
+    // the last vessel member was a TS-only emulation of C++ VesselClass::AI
+    // Mark_Track cell-reservation (vessel.cpp:2104-2113). C++-faithful port
+    // is the vessel.cpp:659 Is_Door_Closed() gate inside the double-cycle
+    // loop (PCP_DOUBLE_CYCLE_ENABLED), not a fabricated animation timer.
+    // All vessel members leave coordinateMove with niat=0. If SCG07 regresses,
+    // fix the double-cycle iter-2 Mission_Move re-dispatch — do not re-add
+    // this proxy.
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
     updateAllTeams(wps, { entities: subs });
 
-    expect(subs[0].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
-    expect(subs[1].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
-    expect(subs[2].nonInterruptAnimTicks, 'last member gets niat=3 proxy').toBe(3);
+    expect(subs[0].nonInterruptAnimTicks, 'member 0 niat unchanged (=0)').toBe(0);
+    expect(subs[1].nonInterruptAnimTicks, 'member 1 niat unchanged (=0)').toBe(0);
+    expect(subs[2].nonInterruptAnimTicks, 'last member niat unchanged (=0) post-W4-deletion').toBe(0);
     void team;
   });
 
