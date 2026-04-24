@@ -1,5 +1,16 @@
 # Session Summaries
 
+## 2026-04-24T06:00Z — Phase 3h: set desiredFacing on facing mismatch (C++-faithful, no tick change)
+
+team.coordinateMove Session 13 port only flipped isDriving=true on facing match. C++ drive.cpp:1084 additionally calls `Do_Turn(dir)` on mismatch (starts rotation). Added `unit.desiredFacing = firstDir` else-branch to match.
+
+All 7 scenarios unchanged. TS's initial facing-match semantics already tolerate either ordering. The deeper drive-in-GUARD issue (TS's 4TNK@60,58 ends up in Mission=MOVE while WASM stays in Mission=GUARD+mq=MOVE+drv=T) requires figuring out WHY WASM's Start_Driver fires successfully when facing DOESN'T match the initial direction. Current hypothesis unclear — may be team-activation tick timing or rotation granularity.
+
+**Total Round-3 new session progress:** +14 ticks (SCG07:+13, SCG04:+1), 4 C++-faithful refactors, 3 mechanism dossiers, comprehensive Phase 0 regression infrastructure.
+
+**Final divergence state after 4 commits this session:**
+SCG01=87  SCG03=238  SCG04=25  SCG06=76  SCG07=17  SCG11=19  SCG13=101
+
 ## 2026-04-24T05:30Z — Phase 3g: keep isDriving=true when path remains (C++-faithful, no tick change)
 
 Applied the fix identified in Phase 3f: `followTrackStep` at index.ts:7278+/7292+ now only clears `isDriving=false` when `!hasMorePath`. Preserves drive-in-GUARD invariant across cell transitions.
