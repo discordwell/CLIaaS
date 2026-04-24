@@ -1,5 +1,32 @@
 # Session Summaries
 
+## 2026-04-24T05:15Z — Phase 3f: SCG11 t19 = same family as SCG04 t24
+
+Per-cell diff + test-scg11-unit8-id confirmed: TS's logic-position-8 at tick 19 is `4TNK@60,58`; WASM's unit[8] is `MCV@28,103`. **Logic indices refer to different entities in TS vs WASM** — TS has 4TNKs before MCVs in iteration, WASM has MCVs before 4TNKs.
+
+Looking at the actual `4TNK@60,58` in both runtimes:
+- WASM t19: Mission=GUARD, mq=MOVE, drv=T (drive-in-GUARD, NavCom=16008,15240)
+- TS   t19: Mission=MOVE, mq=--, drv=F, mt=14 (Mission_Move handler just fired jitter → tag 60010)
+
+Same divergence pattern as SCG04 unit[2] (Phase 3c): TS's drive-in-GUARD state decays to Mission=MOVE because isDriving gets cleared (by `followTrackStep` on track completion at index.ts:7269, 7283). WASM keeps IsDriving=true because `FootClass::Start_Driver` returns true (`Goodie_Check` always returns true even for empty cells — `cell.cpp:2620`), keeping IsDriving=true set at foot.cpp:830.
+
+**Key C++ insight (foot.cpp:823-844):** Start_Driver's flow:
+```cpp
+HeadToCoord = headto;
+IsDriving = true;
+if (Map[headto].Goodie_Check(this)) {  // returns TRUE for any cell (cell.cpp:2620)
+    return(true);  // ← exits here with IsDriving=TRUE preserved
+}
+// unreachable for normal cells:
+HeadToCoord = 0;  IsDriving = false;
+```
+
+So C++ Start_Driver ALWAYS leaves IsDriving=true (for normal movement). TS's `followTrackStep` at track completion flipping isDriving=false is the divergence.
+
+**Fix direction for Phase 4:** In TS, when `followTrackStep` completes a track but there's more path remaining, keep `isDriving=true` (new track initiation at chain loop sets it true again anyway). Only flip isDriving=false when path exhausted AND no new moveTarget.
+
+Risk: this could break other tests. Deferred pending SCG05 smoke + dual-runtime verification cycle. Would likely advance SCG04, SCG11, and possibly SCG03 in one change.
+
 ## 2026-04-24T04:00Z — Round-3 extended: +14 ticks total (SCG07+13, SCG04+1)
 
 After the SCG07 niat fix, Phase 3d added WASM instrumentation at
