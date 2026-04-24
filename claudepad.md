@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-04-24T05:30Z — Phase 3g: keep isDriving=true when path remains (C++-faithful, no tick change)
+
+Applied the fix identified in Phase 3f: `followTrackStep` at index.ts:7278+/7292+ now only clears `isDriving=false` when `!hasMorePath`. Preserves drive-in-GUARD invariant across cell transitions.
+
+No tick-count change across 7 scenarios — C++-faithful refactor only. The issue is deeper: TS 4TNK@60,58 in SCG11 is ALREADY in Mission=MOVE by tick 17 (way before my fix point could apply). The initial Mission=MOVE transition happens at team activation when facing doesn't match target direction → STAGE A pre-Commence gate opens → mq=MOVE pops.
+
+In WASM, the same initial conditions exist but eventually a cycle with Assign_Destination/Start_Of_Move restores drive-in-GUARD. TS doesn't replicate this cycle because STAGE A already popped the queue and there's no mechanism to re-establish drive-in-GUARD.
+
+**Deeper fix needed**: when Team.AI calls Assign_Destination (via team.coordinateMove setting moveTarget), if the unit's mission is already MOVE but the new target differs, trigger Start_Of_Move which may set isDriving=true (same as C++ drive.cpp:638-640 did for new Mission transitions). This would recover the drive-in-GUARD state mid-movement. Deferred — requires careful investigation to avoid regressions.
+
 ## 2026-04-24T05:15Z — Phase 3f: SCG11 t19 = same family as SCG04 t24
 
 Per-cell diff + test-scg11-unit8-id confirmed: TS's logic-position-8 at tick 19 is `4TNK@60,58`; WASM's unit[8] is `MCV@28,103`. **Logic indices refer to different entities in TS vs WASM** — TS has 4TNKs before MCVs in iteration, WASM has MCVs before 4TNKs.
