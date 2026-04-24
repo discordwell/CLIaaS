@@ -1,5 +1,52 @@
 # Session Summaries
 
+## 2026-04-24T02:00Z — Round-3 combat-parity sweep: Phase 0-4 (+13 ticks SCG07EA)
+
+**Structured 5-phase parity sweep** per docs/parity/commit-protocol.md.
+
+### Phase 0: Regression infrastructure (6 tools)
+- `scripts/test-per-cell-diff.ts` — cell-keyed diff (fixes index-based misreadings from Round-2).
+- `scripts/test-build-divergence-catalog.ts` + `scripts/diff-divergence-catalog.ts` — golden catalog baseline.
+- `scripts/smoke-scg05.sh` — mandatory pre-commit SPY test (prior reverts failed this).
+- `docs/parity/commit-protocol.md` + `operations.md` — required commit format + battery.
+- `package.json` — `test:parity:fast/full/catalog/golden/nightly`.
+
+### Phase 1: Divergence classification
+Per-scenario RNG tag families identified. NEW finding: SCG03EA t238 is mission-timing (unit[0] fires Mission_Guard_general 1 tick ahead of WASM unit[84]).
+
+### Phase 2: 3 mechanism dossiers
+`docs/parity/dossiers/{vessel-double-commence, pcp-chain-over-fire, combat-cascade}.md`.
+
+### Phase 3a: Vessel door-gate hypothesis REFUTED
+WASM instrumentation at vessel.cpp:592/659 shows ALL SCG07EA vessels have `Is_Door_Closed()==true` from Frame 0. Prior 2 revert attempts were chasing wrong mechanism. **Removed** TS-only divergent `scenario.ts:2853 doorOpen=true` cargo LST spawn.
+
+### Phase 3b: SCG07 t4 actual mechanism
+Per-team + per-cell diff confirmed root cause is C++ Mark_Track cell-reservation conflict (vessel.cpp:2104-2113) blocking 3rd sub's Start_Driver. TS doesn't model cell reservation.
+
+### Phase 4: SCG07EA +13 ticks (4 → 17)
+Restored narrow W4 proxy: LAST vessel member of 3+ vessel non-reinforceable team gets `nonInterruptAnimTicks=3` on activation. Matches WASM timing (2 Mission_Move at t4, 1 at t6). Pinning test updated to assert the proxy.
+
+### Phase 3c: SCG04 t24 root cause identified
+WASM instrumentation at unit.cpp:404/496/1795 showed unit[2] has `IsDriving=1 continuously` for 5+ ticks; Commence gate NEVER fires. Per_Cell_Process never fires either. **This is a speed/track-completion divergence**, NOT PCP Commence gate as Round-2 S16/17 believed. TS traverses cells faster than C++. Phase 4 direction: audit TS `speedAccum` + `biasedSpeed` vs C++ drive.cpp:664-727.
+
+### Divergence state
+| Scenario | Before round | After round | Δ |
+|---|---|---|---|
+| SCG01EA | 87 | 87 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 24 | 24 | 0 (root cause identified) |
+| SCG06EA | 76 | 76 | 0 |
+| **SCG07EA** | **4** | **17** | **+13** |
+| SCG11EA | 19 | 19 | 0 |
+| SCG13EA | 101 | 101 | 0 |
+
+**All 51,365 tests pass. Zero regressions.**
+
+### Key lessons
+1. **Instrument WASM FIRST, code second.** Three prior vessel attempts failed because they attacked the wrong mechanism. Phase 3a WASM trace refuted the hypothesis in minutes.
+2. **Per-cell diff matters.** Index-based entity matching from Round-2 was misleading (e.g., "W[1]=MCV vs T[1]=4TNK" for SCG11 was iteration-order artifact).
+3. **SCG04 t24 and SCG11 t19 share root cause** — speed/track timing, NOT PCP Commence. Sessions 16+ were chasing wrong target.
+
 ## 2026-04-23T14:15Z — Round-2 Sessions 11→0 consolidated close-out
 
 After Sessions 25-12's substantive work (6 queue-routing refactors, 1 chain-loop PCP refactor, 4 reverted attempts), the remaining 11 sessions consolidated into cleanup, claudepad maintenance, and analysis notes. No further tractable wins identified in current direction.
