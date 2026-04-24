@@ -3,6 +3,37 @@
 **Affects:** SCG07EA first-divergence tick 4
 **Prior attempts:** 2 reverts (R1 S7 broad gate, R2 S25 narrow gate)
 
+## Phase 3b finding — actual SCG07 t4 mechanism identified
+
+Per-team state diff (`test-team-state-diff.ts`) + per-vessel state diff
+(`test-per-cell-diff.ts`) at SCG07EA ticks 1-5 confirms:
+
+- WASM subz team has `rf=true` (IsReforming) at **end-of-tick-4** but its
+  Coord_Move has already run earlier in tick 4's Team.AI — so rf flips
+  POST-execute (likely via `Lagging_Units` check in team.cpp).
+- At tick 4, WASM fires 2 Mission_Move for vessels [85], [86]. The **3rd
+  vessel [87]** doesn't fire at tick 4 — it fires at tick 6.
+- C++ mechanism (per `cpp-parity-scg07ea-tick-4.test.ts` docstring):
+  Start_Driver + Mark_Track cell-reservation conflict (`vessel.cpp:2104-2113`).
+  The 3rd sub's Basic_Path is blocked by the 1st/2nd subs' cell reservations;
+  Start_Driver fails; IsDriving stays false; Mission_Move doesn't dispatch.
+
+In TS, the prior `W4` proxy (niat=3 on the last vessel member) modeled this
+delay but was deleted. Without it, the 3rd sub fires at tick 4 same as the
+first two — causing TS `Δcalls=-1` at t4.
+
+**Fix options (for Phase 4):**
+
+1. Restore `W4` proxy — set `nonInterruptAnimTicks=3` on the LAST vessel
+   member on activation tick (narrower gate than the deleted version).
+   TS-only heuristic but known to match WASM timing for SCG07.
+
+2. Port `Mark_Track` cell-reservation semantics — more C++-faithful but
+   requires modeling the vessel path-reservation conflict. May have broader
+   effects on other vessel movement.
+
+Option 1 is the pragmatic choice; option 2 is the long-term fix.
+
 ## Phase 3a result — hypothesis REFUTED
 
 WASM instrumentation at `vessel.cpp:592` + `vessel.cpp:659` for SCG07EA

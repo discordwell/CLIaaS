@@ -599,7 +599,15 @@ export class Team {
     // C++ parity (SCG07EA non-reinforceable VESSEL activation): clear
     // isReforming on activation for non-reinforceable all-vessel teams so
     // the advance+execute block runs same-tick (matches WASM cadence for
-    // CREATE_TEAM VESSEL activation).
+    // CREATE_TEAM VESSEL activation). See cpp-parity-scg07ea-tick-4.test.ts
+    // for the documented WASM sequence (2 Mission_Move fires at t4, 1 at t6).
+    //
+    // Phase 3b note: team-state-diff at tick 4 shows WASM rf=true — this
+    // is set POST-tick-4-Team.AI (probably via Lagging_Units in team.cpp).
+    // Within Team.AI on tick 4, rf is already false (cleared here) so
+    // Coord_Move runs. The extra TS Mission_Move_foot at t4 (Δ=-1) comes
+    // from the LAST sub firing at t4 where WASM delays to t6.
+    // nonInterruptAnimTicks heuristic in subsequent code handles that delay.
     if (activatedThisTick && !this.isReinforcable && this.isReforming) {
       const allVessels = this._members.length > 0 &&
         this._members.every(m => m.alive && m.stats.isVessel);
