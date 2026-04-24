@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-04-24T01:50:00.000Z",
+  "max": 50,
+  "note": "Bootstrap baseline. first_divergence values match observed state at commit 41520b9a. Regenerate with 'pnpm test:parity:catalog' + 'UPDATE_GOLDEN=1 pnpm test:parity:golden' once the full catalog completes.",
+  "scenarios": {
+    "SCG01EA": {
+      "first_divergence": null,
+      "total_divergent_ticks": 0,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "First-divergence is actually at tick 87 (past MAX=50). At MAX>=90 expect total_divergent_ticks > 0."
+    },
+    "SCG03EA": {
+      "first_divergence": null,
+      "total_divergent_ticks": 0,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "First-divergence is actually at tick 238. Well past MAX=50."
+    },
+    "SCG04EA": {
+      "first_divergence": 24,
+      "total_divergent_ticks": null,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "Known state: TS unit[2] fires 1 extra Mission_Move_foot jitter at tick 24. To populate ticks[], rerun catalog."
+    },
+    "SCG06EA": {
+      "first_divergence": null,
+      "total_divergent_ticks": 0,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "First-divergence at tick 76. Past MAX=50."
+    },
+    "SCG07EA": {
+      "first_divergence": 4,
+      "total_divergent_ticks": null,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "Vessel double-cycle IsDoorClosed gate. TS fires 4 Mission_Move_foot, WASM 3."
+    },
+    "SCG11EA": {
+      "first_divergence": 19,
+      "total_divergent_ticks": null,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "PCP chain over-fire. TS unit[8] extra Mission_Move jitter."
+    },
+    "SCG13EA": {
+      "first_divergence": null,
+      "total_divergent_ticks": 0,
+      "total_ticks": 50,
+      "ticks": [],
+      "comment": "First-divergence at tick 101. Past MAX=50."
+    }
+  }
+}
