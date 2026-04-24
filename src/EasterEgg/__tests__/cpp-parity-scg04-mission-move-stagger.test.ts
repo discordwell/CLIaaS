@@ -300,15 +300,13 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeLessThanOrEqual(16);
   });
 
-  it('ctx.map + facing-match → isDriving=false post-coord (W3 deleted, Start_Driver on DriveClass::AI tick)', () => {
-    // Post-W3 deletion (Step 1 of C++-parity refactor): C++
-    // `TeamClass::Coordinate_Move` (team.cpp:1878-2012) NEVER sets IsDriving,
-    // even when the unit's facing already matches the first path step.
-    // Start_Driver (drive.cpp:1079-1086) runs from the unit's own
-    // DriveClass::AI tick AFTER rotation completes. The earlier TS "Session
-    // 13 Assign_Destination → Start_Of_Move" eager-flip was a proxy for
-    // ticking RNG parity; the C++-faithful port produces isDriving=false at
-    // this point.
+  it('coordinateMove stripped to C++ purity: no path population, no isDriving flip (Step 6)', () => {
+    // Post-Step-6 strip: C++ `TeamClass::Coordinate_Move` (team.cpp:1938)
+    // is just `Assign_Mission(MOVE) + Assign_Destination(target)`. It does
+    // NOT call Basic_Path, Start_Driver, or Do_Turn. Those run later from
+    // `DriveClass::AI` → `Start_Of_Move` (drive.cpp:906) on the unit's own
+    // AI tick. `runDriveClassAI` (index.ts) regens the path when
+    // `path.length === 0` at dispatch.
     const game = createGame();
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
     mcv.facing = 2; // East — matches target direction
@@ -325,12 +323,11 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     const waypoints = new Map<number, { cx: number; cy: number }>([
       [26, { cx: 22, cy: 10 }],
     ]);
-    // Provide ctx.map — triggers findPath path population for vehicles.
     updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
 
-    expect(mcv.moveTarget, 'MCV moveTarget set').not.toBeNull();
-    expect(mcv.path.length, 'path populated via findPath (Basic_Path emulation)').toBeGreaterThan(0);
-    // C++ Coordinate_Move never sets IsDriving — even when facing matches.
+    expect(mcv.moveTarget, 'MCV moveTarget set (Assign_Destination)').not.toBeNull();
+    // C++ Coordinate_Move doesn't call Basic_Path — path stays empty post-coord.
+    expect(mcv.path.length, 'path NOT populated at coord (Basic_Path runs from DriveClass::AI)').toBe(0);
     expect(mcv.isDriving, 'isDriving=false post-coord (C++ coord never sets IsDriving)').toBe(false);
   });
 

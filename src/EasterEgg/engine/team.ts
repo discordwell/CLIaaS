@@ -22,10 +22,9 @@
  */
 
 import { Entity, type TeamMissionEntry } from './entity';
-import { House, MAP_CELLS, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel, directionTo } from './types';
+import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
-import { findPath } from './pathfinding';
 import type { GameMap } from './map';
 // TEAM_START_DRIVER_REFACTOR flag was removed along with its `false` branch
 // in Step 6 of the C++-parity refactor. The flag remains in perCellProcess.ts
@@ -33,30 +32,17 @@ import type { GameMap } from './map';
 import { assignMission } from './missionLifecycle';
 
 /**
- * Optional context threaded through Team.ai() / coordinateMove() for a full
- * per-tick pass.
+ * Optional context threaded through Team.ai() for a full per-tick pass.
  *
  * `structures` — used by coordinateRegroup retreat-target search (C++ team.cpp:590-616).
+ * `entities`   — used by TeamClass::Recruit (team.cpp:1180-1328) to find candidates.
+ * `map`        — retained in signature for future use (Step 6 stripped the coord-
+ *                scope findPath call; Basic_Path now runs from DriveClass::AI).
  */
 export interface TeamAIContext {
   structures?: MapStructure[];
-  /** Entities pool — used by TeamClass::Recruit (team.cpp:1180-1328) to find
-   *  candidates for team membership. Passed through ai() → recruit(). */
   entities?: Entity[];
-  /** Map reference — coordinateMove findPath needs it to populate unit.path
-   *  at team-move-queue time (mirrors C++ Basic_Path). Optional for
-   *  back-compat with callers that don't route through ai(). */
   map?: GameMap;
-  /**
-   * Per-team-ai-pass cell reservation map. Keys are `cy*MAP_CELLS + cx`,
-   * values are entity IDs. When a Team member's coordinateMove calls
-   * findPath, we pass this map + the unit id; cells already claimed by
-   * OTHER members are treated as impassable for this call. After the
-   * call, the unit claims its destination cell so later members see the
-   * reservation. Simulates C++ findpath.cpp:1266-1293 live Cell_Occupier
-   * checks at team-coordination scope.
-   */
-  cellClaims?: Map<number, number>;
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -783,50 +769,14 @@ export class Team {
         } else {
           // C++ team.cpp:1765 Coordinate_Regroup → Assign_Mission(MISSION_MOVE).
           // Per mission.cpp:388: Assign_Mission QUEUES the mission only when
-          // Mission != order. Commence later pops (same-tick via STAGE A for
-          // vehicles, next-tick for infantry).
+          // Mission != order. Commence later pops.
           //
-          // Session 24: route through assignMission (queue) instead of direct
-          // Mission set. For vehicles this is equivalent: STAGE A Commence
-          // pops the queue this tick when !IsDriving. For drive-in-GUARD
-          // (IsDriving=true), the pop defers — matching C++ exactly.
-          const wasNewAssignment = unit.mission !== Mission.MOVE;
+          // Step 6 strip: removed the W3-mirror Session 9 port that pre-
+          // populated path + eagerly set isDriving=true on facing match. That
+          // was a proxy; C++ Coordinate_Regroup doesn't call Basic_Path or
+          // Start_Driver. DriveClass::AI runs those per unit (drive.cpp:906+).
           assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
-          // Session 9 port: C++ DriveClass::Assign_Destination (drive.cpp:638-640)
-          // calls Start_Of_Move synchronously. Mirrors Session 13's coordinateMove
-          // change. On new MOVE assignment, populate path via findPath (Basic_Path
-          // emulation) and if first-segment direction matches unit.facing, flip
-          // isDriving=true. Only for vehicles (not infantry/air/vessels).
-          if (wasNewAssignment && !unit.stats.isInfantry && !unit.isAirUnit && !unit.stats.isVessel) {
-            if (ctx?.map && unit.path.length === 0) {
-              const zcx = Math.floor(this.zone.x / CELL_SIZE);
-              const zcy = Math.floor(this.zone.y / CELL_SIZE);
-              const path = findPath(
-                ctx.map,
-                unit.cell,
-                { cx: zcx, cy: zcy },
-                true,
-                unit.isNavalUnit,
-                unit.stats.speedClass,
-              );
-              if (path.length > 0) {
-                unit.path = path;
-                unit.pathIndex = 0;
-              }
-            }
-            if (unit.path.length > 0) {
-              const firstCell = unit.path[0];
-              const firstCellCenter: WorldPos = {
-                x: firstCell.cx * CELL_SIZE + CELL_SIZE / 2,
-                y: firstCell.cy * CELL_SIZE + CELL_SIZE / 2,
-              };
-              const firstDir = directionTo(unit.pos, firstCellCenter);
-              if (unit.facing === firstDir) {
-                unit.isDriving = true;
-              }
-            }
-          }
         }
         regrouped = false;
       } else {
@@ -871,74 +821,17 @@ export class Team {
       const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
-        // Not yet arrived — order move.
-        // C++ team.cpp:1938 Coordinate_Move → Assign_Mission(MISSION_MOVE) queues.
-        // Commence() (infantry.cpp:1210) pops when Doing is interruptible.
-        // Queue for infantry so the gesture gate at index.ts:4067 blocks promotion
-        // during the team-activation DO_GESTURE1/2 animation. Vehicles/aircraft
-        // keep direct assignment (no gesture, different Commence semantics).
-        // C++ team.cpp:1938 Coordinate_Move → Assign_Mission(MISSION_MOVE) queues
-        // the mission on BOTH infantry and vehicles (mission.cpp:379-390 sets
-        // MissionQueue), then Assign_Destination sets NavCom. In C++, DriveClass::AI
-        // runs each tick regardless of Mission and engages the NavCom: Start_Driver
-        // flips IsDriving=true on the SAME tick, so the end-of-tick Commence gate
-        // (unit.cpp:472 `!IsDriving && Is_Door_Closed()`) stays closed and Mission
-        // remains GUARD (from reinf.cpp:480) until the unit reaches a cell boundary.
-        // TS updateMove only runs when mission=MOVE, so we simulate C++ Start_Driver
-        // here by setting isDriving=true for vehicles. The updateEntity Commence gate
-        // (blockCommenceDrive) reads this to block the GUARD→MOVE pop on tick 1.
-        // Without this, Mission_Move fires 1 tick earlier than WASM, burning a
-        // Random_Pick jitter that WASM consumes on a later tick (SCG11EA drift).
-        // Phase 2: route through assignMission (C++ mission.cpp:379-390 Assign_Mission)
-        // — no-op when already in MOVE, queues otherwise. Equivalent to the prior
-        // inline guard since entities in MOVE with queue=null stay that way.
+        // C++ `TeamClass::Coordinate_Move` (team.cpp:1938) is just:
+        //   unit->Assign_Mission(MISSION_MOVE);          // queues
+        //   unit->Assign_Target(TARGET_NONE);
+        //   unit->Assign_Destination(target);            // sets NavCom
+        // No path population, no IsDriving flip, no Do_Turn. Basic_Path
+        // runs later from `DriveClass::AI` → `Start_Of_Move` (drive.cpp:906)
+        // on the unit's own AI tick. `runDriveClassAI` (index.ts) already
+        // does this when `path.length === 0` for Mission==MOVE vehicles.
         assignMission(unit, Mission.MOVE);
         if (!unit.moveTarget) {
           unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
-          // Vehicles only: simulate C++ Start_Driver on NavCom assignment so
-          // the Commence gate (blockCommenceDrive) sees IsDriving=true and
-          // doesn't pop MOVE until the unit arrives at destination. Infantry
-          // use a different gate (nonInterruptAnimTicks gesture timer).
-          if (!unit.stats.isInfantry && !unit.isAirUnit && !unit.stats.isVessel) {
-            // C++ `TeamClass::Coordinate_Move` (team.cpp:1878-2012) for vehicles:
-            // only `Assign_Mission(MOVE)` + `Assign_Destination(Target)`. Never
-            // touches IsDriving, Path, or Timer.
-            //
-            // TS parallel: `assignMission` + `moveTarget` (already done above
-            // at line 1048-ish for generic members). For vehicles only, we
-            // additionally pre-populate `unit.path` via `findPath` (Basic_Path
-            // simulation) with cellClaims path-reservation — matches C++ live
-            // Cell_Occupier reads in findpath.cpp:1266-1293, applied at
-            // team-coordination scope to make same-target team members route
-            // differently.
-            //
-            // IsDriving is NOT touched — `DriveClass::Start_Driver`
-            // (drive.cpp:1270) sets it after rotation completes on the unit's
-            // own DriveClass::AI tick.
-            const tcx = Math.floor(this.target.x / CELL_SIZE);
-            const tcy = Math.floor(this.target.y / CELL_SIZE);
-            if (ctx?.map && unit.path.length === 0) {
-              const destCell = { cx: tcx, cy: tcy };
-              const path = findPath(
-                ctx.map,
-                unit.cell,
-                destCell,
-                true,
-                unit.isNavalUnit,
-                unit.stats.speedClass,
-              );
-              if (path.length > 0) {
-                unit.path = path;
-                unit.pathIndex = 0;
-                // W3 deleted (Step 1): C++ `TeamClass::Coordinate_Move`
-                // (team.cpp:1878-2012) NEVER sets IsDriving or calls Do_Turn.
-                // Start_Of_Move → Do_Turn → Start_Driver runs later from each
-                // unit's own `DriveClass::AI` tick (drive.cpp:906-1086).
-                // TS parallel: leave isDriving=false, desiredFacing unchanged.
-                // runDriveClassAI (index.ts) handles the rotation + drive.
-              }
-            }
-          }
         }
         finished = false;
       } else {
@@ -1381,15 +1274,9 @@ export function clearAllTeams(): void {
  * This matches C++ Logic_AI() iterating through Teams[] and calling AI() on each.
  */
 export function updateAllTeams(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
-  // Fresh per-tick cellClaims map for Basic_Path path-reservation emulation.
-  // Overrides any caller-provided map so tick boundaries reset cleanly.
-  const mergedCtx: TeamAIContext = {
-    ...(ctx ?? {}),
-    cellClaims: new Map(),
-  };
   for (const team of _activeTeams) {
     if (!team.dissolved) {
-      team.ai(waypoints, mergedCtx);
+      team.ai(waypoints, ctx);
     }
   }
   cleanupTeams();

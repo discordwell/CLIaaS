@@ -1148,11 +1148,13 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
     expect(u2.missionQueue, 'MOVE queued via Assign_Mission').toBe(Mission.MOVE);
   });
 
-  it('Session 9: ctx.map + facing-match → isDriving=true post-regroup', () => {
-    // C++ team.cpp:1765-1766 Coordinate_Regroup → Assign_Destination →
-    // drive.cpp:638-640 Start_Of_Move → Start_Driver (on path+facing match)
-    // flips IsDriving=true. This port (Session 9) mirrors Session 13's
-    // coordinateMove treatment for regroup-triggered MOVE assignments.
+  it('Step 6: coordinateRegroup is pure C++ port — no path population, no isDriving flip', () => {
+    // Post-Step-6 strip: C++ team.cpp:1765 Coordinate_Regroup is just
+    // `Assign_Mission(MOVE) + Assign_Destination(zone)`. It does NOT call
+    // Basic_Path, Start_Driver, or Do_Turn. Those run from DriveClass::AI
+    // (drive.cpp:906+) on the unit's own AI tick. The earlier Session 9
+    // port eagerly populated path + flipped isDriving on facing match —
+    // a W3-mirror workaround now deleted.
     const map = new GameMap(64, 64);
     for (let y = 0; y < 64; y++) {
       for (let x = 0; x < 64; x++) map.setTerrain(x, y, 0);
@@ -1161,20 +1163,20 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
       memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
       forcedActive: true,
     });
-    // u1 near zone, u2 far east (triggers regroup toward zone which is west of u2)
     const u1 = makeEntity(UnitType.V_3TNK, House.USSR, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
     const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 14 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
-    u2.facing = 6; // West — matches regroup direction (toward u1/zone)
+    u2.facing = 6; // West — even with facing match, coord doesn't flip isDriving
     team.add(u1);
     team.add(u2);
     team.zone = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
 
     team.coordinateRegroup({ structures: [], entities: [u1, u2], map });
 
-    // Session 24: Assign_Mission queues; Mission stays GUARD, mq=MOVE
-    expect(u2.missionQueue, 'far unit queues MOVE').toBe(Mission.MOVE);
-    expect(u2.path.length, 'path populated via findPath').toBeGreaterThan(0);
-    expect(u2.isDriving, 'facing=W matches path[0] direction → isDriving=true (Session 9)').toBe(true);
+    expect(u2.missionQueue, 'far unit queues MOVE (Assign_Mission)').toBe(Mission.MOVE);
+    // Path stays empty — coord does NOT call Basic_Path.
+    expect(u2.path.length, 'path NOT populated at coord (Basic_Path runs from DriveClass::AI)').toBe(0);
+    // isDriving stays false — coord does NOT call Start_Driver.
+    expect(u2.isDriving, 'isDriving=false post-coord (Start_Driver on DriveClass::AI tick)').toBe(false);
   });
 });
 
