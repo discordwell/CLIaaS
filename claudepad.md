@@ -1,5 +1,30 @@
 # Session Summaries
 
+## 2026-04-24T13:40Z — VesselClass::Start_Driver Mark_Track ported (vessel.cpp:2104-2113)
+
+**Commit:** `ee9ba67f` — first structural port following the Steps 1-7 audit.
+
+**What it does:** Game-scoped `_vesselMarkedCells: Set<cellIdx>` reset per tick at top of `update()`. At the Mission.MOVE dispatch site (`index.ts:~4399`), BEFORE firing Random_Pick(0,2) jitter:
+- If entity is a vessel + moveTarget set + !isDriving:
+  - destKey = destCy * MAP_CELLS + destCx
+  - If destKey already in set → Start_Driver failure → clear moveTarget/path, queue GUARD, missionTimer=0, skip jitter (`pathFailureHandled=true`).
+  - Else → add destKey to set (Mark_Track DOWN) → proceed with jitter.
+
+**C++ reference chain:**
+- vessel.cpp:2104-2113 `VesselClass::Start_Driver` → `Mark_Track(headto, MARK_DOWN)`
+- drive.cpp:1649-1684 `DriveClass::Mark_Track` → `Map[cell].Flag.Occupy.Vehicle`
+- vessel.cpp:312 `VesselClass::Can_Enter_Cell` returns `MOVE_MOVING_BLOCK`
+
+**Test:** `cpp-parity-vessel-mark-track.test.ts` — 4 tests validating Set membership semantics, per-tick clear, non-vessel bypass. All 51,367 EasterEgg vitest pass. SCG05 smoke passes.
+
+**Deploy status:** not deployed (user permission declined — production deploy requires explicit user intent). Playwright verification of SCG07EA tick-4 regression fix pending next user-initiated deploy.
+
+**Expected effect when deployed:** SCG07EA tick 4 divergence (currently -13 from baseline) should restore. 3rd SS vessel in subz team hits Mark_Track conflict → Mission_Move Enter_Idle_Mode → no Random_Pick(0,2) → WASM's 2-of-3 cadence matched.
+
+**Remaining regressions from Step 7 audit (not yet addressed):**
+- SCG04 -22: vehicle Basic_Path friendly-blocker semantics (MOVE_MOVING_BLOCK via findpath.cpp:1266-1293 live Cell_Occupier). Narrow port candidate: pass `ignoreOccupancy=false` to findPath for team-coordinated vehicles; broad impact risk requires careful gating.
+- SCG11 -4: DriveClass::AI post-coord drive cadence. Related to path regen timing after Step 6's coord-purity strip.
+
 ## 2026-04-24T13:20Z — C++-parity-first refactor Steps 1-7 landed (6 commits)
 
 **Plan:** `~/.claude/plans/mellow-wishing-sky.md` — strip 5 TS-only workarounds to restore C++-faithful baseline. Accept tick-counter drops as data.
