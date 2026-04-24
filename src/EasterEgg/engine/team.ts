@@ -960,33 +960,12 @@ export class Team {
               if (path.length > 0) {
                 unit.path = path;
                 unit.pathIndex = 0;
-                // Session 13 port: C++ DriveClass::Assign_Destination
-                // (drive.cpp:638-640) calls Start_Of_Move synchronously when
-                // !IsDriving && Mission != UNLOAD. On path-found + facing match,
-                // Start_Driver (foot.cpp:830) flips IsDriving=true from the
-                // Team.AI phase — before the unit's own AI iteration runs.
-                //
-                // TS Start_Of_Move emulation: compute first-segment direction
-                // from unit.pos to path[0] center; if it matches unit.facing,
-                // set isDriving=true. If not, unit must rotate first (C++
-                // Do_Turn at drive.cpp:1084) and isDriving stays false until
-                // rotation completes during updateMove.
-                const firstCell = path[0];
-                const firstCellCenter: WorldPos = {
-                  x: firstCell.cx * CELL_SIZE + CELL_SIZE / 2,
-                  y: firstCell.cy * CELL_SIZE + CELL_SIZE / 2,
-                };
-                const firstDir = directionTo(unit.pos, firstCellCenter);
-                if (unit.facing === firstDir) {
-                  unit.isDriving = true;
-                } else {
-                  // Phase 3h: match C++ Start_Of_Move → Do_Turn (drive.cpp:1084).
-                  // When facing doesn't match, C++ calls Do_Turn(dir) to start
-                  // rotation. TS equivalent: set desiredFacing so tickRotation
-                  // progresses toward the target direction. IsDriving stays
-                  // false until rotation completes and Start_Driver fires.
-                  unit.desiredFacing = firstDir;
-                }
+                // W3 deleted (Step 1): C++ `TeamClass::Coordinate_Move`
+                // (team.cpp:1878-2012) NEVER sets IsDriving or calls Do_Turn.
+                // Start_Of_Move → Do_Turn → Start_Driver runs later from each
+                // unit's own `DriveClass::AI` tick (drive.cpp:906-1086).
+                // TS parallel: leave isDriving=false, desiredFacing unchanged.
+                // runDriveClassAI (index.ts) handles the rotation + drive.
               }
             }
             claims?.set(claimKey, unit);

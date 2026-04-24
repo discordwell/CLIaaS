@@ -300,17 +300,15 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeLessThanOrEqual(16);
   });
 
-  it('Session 13: ctx.map + facing-match → isDriving=true post-coord (Assign_Destination → Start_Of_Move)', () => {
-    // C++ DriveClass::Assign_Destination (drive.cpp:638-640) synchronously
-    // calls Start_Of_Move when !IsDriving. On path success + facing match,
-    // Start_Driver (foot.cpp:830) flips IsDriving=true from the Team.AI
-    // phase — before the unit's own AI iteration runs. This was load-bearing
-    // for SCG04EA tick 3 W[1] drive-in-GUARD behavior and contributed +21
-    // divergence ticks when ported in Session 13.
-    //
-    // This test validates the port: when ctx.map is provided (production
-    // runtime), findPath populates the path and if the first segment's
-    // direction matches unit.facing, isDriving flips true.
+  it('ctx.map + facing-match → isDriving=false post-coord (W3 deleted, Start_Driver on DriveClass::AI tick)', () => {
+    // Post-W3 deletion (Step 1 of C++-parity refactor): C++
+    // `TeamClass::Coordinate_Move` (team.cpp:1878-2012) NEVER sets IsDriving,
+    // even when the unit's facing already matches the first path step.
+    // Start_Driver (drive.cpp:1079-1086) runs from the unit's own
+    // DriveClass::AI tick AFTER rotation completes. The earlier TS "Session
+    // 13 Assign_Destination → Start_Of_Move" eager-flip was a proxy for
+    // ticking RNG parity; the C++-faithful port produces isDriving=false at
+    // this point.
     const game = createGame();
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
     mcv.facing = 2; // East — matches target direction
@@ -327,12 +325,13 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     const waypoints = new Map<number, { cx: number; cy: number }>([
       [26, { cx: 22, cy: 10 }],
     ]);
-    // Provide ctx.map — this triggers the Session 13 findPath + facing check.
+    // Provide ctx.map — triggers findPath path population for vehicles.
     updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
 
     expect(mcv.moveTarget, 'MCV moveTarget set').not.toBeNull();
     expect(mcv.path.length, 'path populated via findPath (Basic_Path emulation)').toBeGreaterThan(0);
-    expect(mcv.isDriving, 'facing=E matches path[0] direction → isDriving=true (Session 13)').toBe(true);
+    // C++ Coordinate_Move never sets IsDriving — even when facing matches.
+    expect(mcv.isDriving, 'isDriving=false post-coord (C++ coord never sets IsDriving)').toBe(false);
   });
 
   it('drives-in-GUARD remains unaffected for second-team isDriving=true vehicles', () => {
