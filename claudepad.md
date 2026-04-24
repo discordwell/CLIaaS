@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-04-24T07:00Z — Phase 3i: coordinateMove arrival Distance(NavCom) < CELL_LEPTON_W check
+
+Phase 3i landed the port of C++ team.cpp:1971-1974's arrival branch:
+```
+if (unit->Mission == MISSION_MOVE && (!Target_Legal(unit->NavCom) ||
+    Distance(unit->NavCom) < CELL_LEPTON_W)) {
+  unit->Assign_Destination(TARGET_NONE);
+  unit->Enter_Idle_Mode();
+}
+```
+
+TS added the `Distance < 256 leptons` branch with octagonal approx. Zero tick change — for SCG11 4TNK@60,58 the distance to NavCom is ~832 leptons (not < 256), so this branch doesn't fire.
+
+**Deeper investigation of WASM t15 transition:** At tick 15, WASM's 4TNK@60,58 clears NavCom via some mechanism I haven't identified:
+- drive.cpp:971/1102 CloseEnough (704 leptons) — distance 832 > 704, doesn't fire
+- drive.cpp:869-873 PCP NavCom clear at destination cell — unit not at destination
+- team.cpp:1971 arrival Distance(NavCom) < CELL_LEPTON_W — too far (832 > 256)
+- foot.cpp:2071 death-target clear — NavCom is cell, not entity
+
+Some other path. Requires deeper WASM instrumentation (log all NavCom=TARGET_NONE writes for unit[70]). Out of scope for this session.
+
+**Round-3 FINAL session tally: +14 ticks (SCG07+13, SCG04+1)** across 10+ commits (1 tick-advancing fixes + 9 C++-faithful refactors + infrastructure).
+
 ## 2026-04-24T06:00Z — Phase 3h: set desiredFacing on facing mismatch (C++-faithful, no tick change)
 
 team.coordinateMove Session 13 port only flipped isDriving=true on facing match. C++ drive.cpp:1084 additionally calls `Do_Turn(dir)` on mismatch (starts rotation). Added `unit.desiredFacing = firstDir` else-branch to match.
