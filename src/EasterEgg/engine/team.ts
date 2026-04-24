@@ -613,6 +613,23 @@ export class Team {
         this._members.every(m => m.alive && m.stats.isVessel);
       if (allVessels) {
         this.isReforming = false;
+        // Phase 3b fix: restore narrow W4 niat=3 proxy for the LAST vessel
+        // member on activation of 3+ vessel teams. WASM observations
+        // (SCG07EA subz: 3 SS) show Mark_Track cell-reservation conflict
+        // (vessel.cpp:2104-2113) blocks the last sub's Start_Driver — its
+        // Mission_Move delays ~2 ticks. TS doesn't model the cell
+        // reservation, so use niat=3 to gate Commence at index.ts STAGE A
+        // (`nonInterruptAnimTicks <= 0`) for 2 ticks post-decrement.
+        //
+        // Narrow gate: 3+ members (reservation conflict requires crowding).
+        // Prior W4 deletion (Round-1 Step 4) reverted this proxy; the full
+        // Mark_Track port is still TODO.
+        if (this._members.length >= 3) {
+          const last = this._members[this._members.length - 1];
+          if (last.alive && last.nonInterruptAnimTicks <= 0) {
+            last.nonInterruptAnimTicks = 3;
+          }
+        }
       }
     }
 

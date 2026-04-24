@@ -143,18 +143,23 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     void team;
   });
 
-  it('post-W4-deletion: no member gets nonInterruptAnimTicks proxy (C++ uses VesselClass IsDoorClosed)', () => {
-    // W4 deleted (Step 4 of C++-parity-first refactor): the
-    // nonInterruptAnimTicks=3 proxy on the last VESSEL member was a TS-only
-    // emulation of C++ VesselClass::AI `Is_Door_Closed()` double-Commence
-    // gate (vessel.cpp:592, 659). The real port lives in PCP_DOUBLE_CYCLE.
+  it('Phase 3b: LAST vessel member gets narrow niat=3 proxy (models Mark_Track cell-reservation delay)', () => {
+    // Phase 3b finding: W4 deletion was over-zealous. WASM observation
+    // (SCG07EA subz: 3 SS) shows Mark_Track cell-reservation conflict at
+    // vessel.cpp:2104-2113 blocks the last sub's Start_Driver — its
+    // Mission_Move delays ~2 ticks. TS doesn't model cell reservation, so
+    // a narrow niat=3 proxy on the LAST member of 3+ vessel teams gates
+    // Commence at STAGE A for 2 ticks post-decrement — matches WASM.
+    //
+    // C++ ref: vessel.cpp:2104-2113 Mark_Track, drive.cpp:1079-1086
+    // Start_Driver rotation/path check.
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
     updateAllTeams(wps, { entities: subs });
 
-    expect(subs[0].nonInterruptAnimTicks, 'no niat proxy').toBe(0);
-    expect(subs[1].nonInterruptAnimTicks, 'no niat proxy').toBe(0);
-    expect(subs[2].nonInterruptAnimTicks, 'no niat proxy on last member').toBe(0);
+    expect(subs[0].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
+    expect(subs[1].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
+    expect(subs[2].nonInterruptAnimTicks, 'last member gets niat=3 proxy').toBe(3);
     void team;
   });
 
