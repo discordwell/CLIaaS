@@ -190,7 +190,49 @@ This is the part we don't fully understand yet. Phase 3 should instrument
 C++'s actual Mission/MissionQueue transitions per tick for SCG04 unit[2]
 Frame 20-30 and confirm.
 
-## Phase 3 confirmation plan
+## Phase 3c CONFIRMATION (critical finding)
+
+WASM instrumentation at `unit.cpp:404`, `:496`, `:1795` Commence call sites,
+narrowed to SCG04EA unit[2] Frame 22-27 (see `scripts/test-scg04-commence-trace.ts`).
+
+**Observation — across ALL of Frames 22-27:**
+```
+Mission=GUARD  mq=MOVE  drv=1  gate=0 (at all Commence call sites)
+mt decrements 20→19→18→17→16→15 (Mission_Guard timer)
+NO Per_Cell_Process entries fire
+```
+
+Meaning:
+1. `IsDriving=true` the entire time → Commence gate at unit.cpp:404/496
+   blocks (`!IsDriving && Is_Door_Closed()` is false).
+2. `Per_Cell_Process` is NOT called between Frame 22-27 — unit[2] never
+   reaches `actual==0` (speed exhausted) or track-jump point during these
+   5 ticks.
+3. Mission stays GUARD, mq stays MOVE, drv stays 1 — classic sustained
+   drive-in-GUARD where the vehicle moves toward NavCom without completing
+   any track.
+
+**Comparison to TS:**
+- TS tick 24: cell (40,34)→(41,35), Mission=GUARD→MOVE, mq MOVE→--, drv=T
+- WASM tick 25: cell (40,34)→(41,35), Mission=GUARD (unchanged), mq=MOVE
+  (unchanged), drv=1
+
+TS moves 1 cell faster AND pops mq=MOVE at cell arrival. WASM reaches cell
+(41,35) 1 tick LATER and keeps Mission=GUARD.
+
+**Revised root cause:** This is a **speed / track-completion timing** divergence,
+not a PCP Commence gate issue. TS's `followTrackStep` completes tracks faster
+than C++'s `DriveClass::AI` while-loop. Specifically:
+- WASM unit[2] takes 5+ ticks to traverse 1 cell (no track completion)
+- TS unit takes fewer ticks — track completes faster
+
+Phase 4 fix direction: audit TS speed accumulator (`entity.speedAccum`)
+vs C++ actual/PIXEL_LEPTON_W logic at drive.cpp:719-727. Likely one of:
+- TS adds speed-per-tick incorrectly (too much)
+- TS track length (lepton distance between cells) shorter than C++
+- TS SpeedBias/groundspeedBias multiplier off
+
+## Phase 3 confirmation plan (original, superseded by 3c)
 
 Add WASM agent_debug_log:
 

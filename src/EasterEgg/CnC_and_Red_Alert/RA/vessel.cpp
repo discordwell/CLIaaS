@@ -589,18 +589,6 @@ void VesselClass::AI(void)
 	/*
 	**	Act on new orders if the unit is at a good position to do so.
 	*/
-	// Phase 3a diagnostic: log every VesselClass::AI pre-Commence call site
-	// state. Tag 8100000+Frame, vessel id, Mission, MissionQueue, IsDriving,
-	// Is_Door_Closed, DoorShutCountDown, gate=(pre gate bool).
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 10) {
-			int gateFires = (!IsDriving && Is_Door_Closed()) ? 1 : 0;
-			agent_debug_log(8100000 + Frame, Vessels.ID(this), (int)Mission, (int)MissionQueue,
-				IsDriving ? 1 : 0, Is_Door_Closed() ? 1 : 0,
-				(int)DoorShutCountDown, gateFires);
-		}
-	}
 	if (!IsDriving && Is_Door_Closed() /*Mission != MISSION_UNLOAD*/) {
 		Commence();
 	}
@@ -667,17 +655,6 @@ void VesselClass::AI(void)
 	**	Don't start a new mission unless the vehicle is in the center of
 	**	a cell (not driving) and the door (if any) is closed.
 	*/
-	// Phase 3a diagnostic: log every VesselClass::AI post-Commence call site.
-	// Tag 8200000+Frame.
-	{
-		extern void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h);
-		if (Frame < 10) {
-			int gateFires = (!IsDriving && Is_Door_Closed()) ? 1 : 0;
-			agent_debug_log(8200000 + Frame, Vessels.ID(this), (int)Mission, (int)MissionQueue,
-				IsDriving ? 1 : 0, Is_Door_Closed() ? 1 : 0,
-				(int)DoorShutCountDown, gateFires);
-		}
-	}
 	if (!IsDriving && Is_Door_Closed()/*&& Mission != MISSION_UNLOAD*/) {
 		Commence();
 	}
