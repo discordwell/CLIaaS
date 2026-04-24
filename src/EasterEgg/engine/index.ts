@@ -7280,8 +7280,16 @@ export class Game {
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
-        // C++ FootClass::Stop_Driver clears IsDriving when track completes
-        if (!entity.stats.isInfantry) entity.isDriving = false;
+        // Phase 3g: only clear isDriving if path is exhausted (unit has arrived
+        // at end of NavCom path). C++ FootClass::Start_Driver returns TRUE via
+        // the Goodie_Check path (cell.cpp:2620 always returns true for any cell),
+        // keeping IsDriving=true for continued driving. Round-3 Phase 3f found
+        // TS was clearing isDriving here even when path had more cells, causing
+        // drive-in-GUARD state decay → Commence gate opens → Mission_Move handler
+        // fires jitter 1 tick ahead of WASM.
+        const hasMorePath = !entity.stats.isInfantry && entity.moveTarget &&
+          entity.pathIndex + entity.trackCellSpan < entity.path.length;
+        if (!entity.stats.isInfantry && !hasMorePath) entity.isDriving = false;
         entity.cellBoundaryCrossings++;
         return true;
       }
@@ -7294,8 +7302,10 @@ export class Game {
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
-        // C++ FootClass::Stop_Driver clears IsDriving when track completes
-        if (!entity.stats.isInfantry) entity.isDriving = false;
+        // Phase 3g: same as above — keep isDriving=true when more path remains.
+        const hasMorePath2 = !entity.stats.isInfantry && entity.moveTarget &&
+          entity.pathIndex + entity.trackCellSpan < entity.path.length;
+        if (!entity.stats.isInfantry && !hasMorePath2) entity.isDriving = false;
         entity.cellBoundaryCrossings++;
         return true;
       }
