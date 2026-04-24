@@ -66,16 +66,16 @@ extern "C" {
 
 // Debug movement log — ring buffer of last 32 entries
 struct DebugMoveEntry { int preLX, preLY, postLX, postLY, dir, dist, headLX, headLY; };
-static DebugMoveEntry g_debug_moves[64];
+static DebugMoveEntry g_debug_moves[256];
 static int g_debug_move_idx = 0;
 static int g_debug_move_count = 0;
 
 void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h) {
-	auto &e2 = g_debug_moves[g_debug_move_idx % 64];
+	auto &e2 = g_debug_moves[g_debug_move_idx % 256];
 	e2.preLX = a; e2.preLY = b; e2.postLX = c; e2.postLY = d;
 	e2.dir = e; e2.dist = f; e2.headLX = g; e2.headLY = h;
 	g_debug_move_idx++;
-	if (g_debug_move_count < 64) g_debug_move_count++;
+	if (g_debug_move_count < 256) g_debug_move_count++;
 }
 
 /* --- ID encoding: (rtti << 16) | heap_index --- */
@@ -1009,8 +1009,8 @@ char* agent_get_state(void)
 
 	// Append debug movement log
 	buf_cat("],\"debugMoves\":[");
-	for (int mi = 0; mi < g_debug_move_count && mi < 64; mi++) {
-		int ri = (g_debug_move_idx - g_debug_move_count + mi + 64) % 64;
+	for (int mi = 0; mi < g_debug_move_count && mi < 256; mi++) {
+		int ri = (g_debug_move_idx - g_debug_move_count + mi + 256) % 256;
 		auto &dm = g_debug_moves[ri];
 		if (mi > 0) buf_cat(",");
 		buf_cat("[%d,%d,%d,%d,%d,%d,%d,%d]", dm.preLX, dm.preLY, dm.postLX, dm.postLY, dm.dir, dm.dist, dm.headLX, dm.headLY);

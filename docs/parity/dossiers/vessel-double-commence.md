@@ -3,6 +3,32 @@
 **Affects:** SCG07EA first-divergence tick 4
 **Prior attempts:** 2 reverts (R1 S7 broad gate, R2 S25 narrow gate)
 
+## Phase 3a result — hypothesis REFUTED
+
+WASM instrumentation at `vessel.cpp:592` + `vessel.cpp:659` for SCG07EA
+Frames 0-7 shows:
+
+```
+F 0 PRE  vessel[0]..vessel[22]: doorClosed=1, doorShut=0, gateFires=1 (except IsDriving=1)
+F 1..7 same pattern
+```
+
+**ALL vessels have `Is_Door_Closed()==true` from Frame 0.** None spawn with
+door open. The Commence gate fires every tick (gated only by IsDriving).
+
+This means:
+1. Neither of the prior two vessel-door-gate fix attempts could have
+   worked even in principle — the door gate simply doesn't fire in SCG07EA.
+2. The SCG07 t4 divergence is caused by something OTHER than door state.
+3. The dossier's next-step section should investigate Mission=MOVE timer
+   expiration and team activation timing for vessels [16]..[22] (the MOVE
+   vessels at Frame 6+).
+
+The `doorOpen=true` path in TS `scenario.ts:2853` for spawned cargo LSTs
+may actually be a TS-only divergence from C++. In SCG07EA, cargo LSTs
+are spawned via reinforcement triggers that do NOT auto-open the door.
+Door only opens during the MISSION_UNLOAD sequence after arrival.
+
 ## C++ source (authoritative)
 
 ### VesselClass::AI — two Commence bookends (vessel.cpp:571-666)

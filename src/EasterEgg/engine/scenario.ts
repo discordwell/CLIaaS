@@ -2844,15 +2844,14 @@ export function executeTriggerAction(
           const idx = result.spawned.indexOf(unit);
           if (idx >= 0) result.spawned.splice(idx, 1);
         }
-        // C++ vessel.cpp:649-651 — LST with cargo spawns with door OPEN. The vessel
-        // can't Commence its mission (start moving) until Is_Door_Closed() returns
-        // true. Close_Door(5, 6) ticks at 5 frames/stage × 5 stages = 25 ticks.
-        // Without this delay, TS LST starts moving immediately, reaching the unload
-        // waypoint ~25 ticks earlier than WASM and unloading too soon.
-        if (transport.stats.isVessel && transport.type === 'LST') {
-          transport.doorOpen = true;
-          transport.doorTimer = 25; // C++ Close_Door(5, 6) → 5 stages × 5 ticks
-        }
+        // Phase 3a finding: WASM instrumentation at vessel.cpp:592/659 for
+        // SCG07EA Frame 0-7 shows ALL vessels (including loaded cargo LSTs)
+        // have Is_Door_Closed()==true from Frame 0 with DoorShutCountDown=0.
+        // The prior 25-tick delay here was speculative / from a misread of
+        // reinf.cpp. Cargo LSTs in C++ spawn with door CLOSED; door only
+        // opens during MISSION_UNLOAD at the delivery point.
+        //
+        // See docs/parity/dossiers/vessel-double-commence.md for the trace.
       }
       break;
     }
