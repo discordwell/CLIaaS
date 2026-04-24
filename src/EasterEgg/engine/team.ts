@@ -994,11 +994,39 @@ export class Team {
         }
         finished = false;
       } else {
-        // Arrived — idle. C++ team.cpp:1971-1974 calls Enter_Idle_Mode which
-        // queues GUARD (or AREA_GUARD). Session 20: route through assignMission
-        // queue to match.
-        if (unit.mission === Mission.MOVE && !unit.moveTarget) {
-          assignMission(unit, Mission.GUARD);
+        // Arrived — idle. C++ team.cpp:1971-1974:
+        //   if (unit->Mission == MISSION_MOVE && (!Target_Legal(unit->NavCom) ||
+        //       Distance(unit->NavCom) < CELL_LEPTON_W)) {
+        //     unit->Assign_Destination(TARGET_NONE);
+        //     unit->Enter_Idle_Mode();
+        //   }
+        //
+        // Phase 3i: previously only handled the `!moveTarget` case (NavCom
+        // already cleared). Added the "within 1 cell of NavCom" case to
+        // match C++ — unit with moveTarget still set but near it.
+        // SCG11 4TNK@60,58 has moveTarget=(16000,15232)=cell(62,59) while
+        // unit at cell(60,58); within stray distance of team target but
+        // not within 1 cell of NavCom. WASM's Enter_Idle_Mode fires from
+        // this path, TS was missing the condition.
+        if (unit.mission === Mission.MOVE) {
+          let shouldIdle = !unit.moveTarget;
+          if (!shouldIdle && unit.moveTarget) {
+            const navDx = unit.moveTarget.lx - unit.leptonX;
+            const navDy = unit.moveTarget.ly - unit.leptonY;
+            // C++ Distance(NavCom) = octagonal approx via coord.cpp:124-136.
+            const adx = Math.abs(navDx), ady = Math.abs(navDy);
+            const navDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+            const CELL_LEPTON_W = 256;
+            if (navDist < CELL_LEPTON_W) {
+              unit.moveTarget = null;
+              unit.path = [];
+              unit.pathIndex = 0;
+              shouldIdle = true;
+            }
+          }
+          if (shouldIdle) {
+            assignMission(unit, Mission.GUARD);
+          }
         }
       }
     }
