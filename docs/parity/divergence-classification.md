@@ -18,7 +18,7 @@ Used as input to Phase 2 (analysis) and Phase 3 (WASM confirmation).
 | SCG03EA | 238 | −1 | Mission_Guard_general | 60040 | unit[0] | mission-timing | **NEW finding** |
 | SCG04EA | 24 | −1 | Mission_Move_foot | 60010 | unit[2] | mission-timing | analyzed (Round-2 S17) |
 | SCG06EA | 76 | +2 | Coord_Scatter + bullet[115] | 50002, 15115 | bullet[115] | combat-cascade | unanalyzed |
-| SCG07EA | 4 | −1 | Mission_Move_foot | 60010 | vessel[37] | vessel | analyzed (R1 S7, R2 S25) |
+| SCG07EA | ~~4~~ **17** | +7 | Mission_Guard_vessel_DDPT | 60041 | vessel[69], [70] | vessel-guard | RESOLVED t4 (R3 niat fix) → new divergence at t17 |
 | SCG11EA | 19 | −1 | (entity-level) | — | unit[8] | mission-timing | unanalyzed |
 | SCG13EA | 101 | +1 | Mission_Guard_infantry_E1E3 | 60043 | infantry[192] | combat-cascade | unanalyzed |
 
