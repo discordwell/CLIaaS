@@ -488,19 +488,6 @@ export class Game {
   private static readonly MAX_CORPSES = 100;
   state: GameState = 'loading';
   tick = 0;
-  /**
-   * Per-tick vessel Mark_Track cell reservation set. C++ VesselClass::Start_Driver
-   * (vessel.cpp:2104-2113) calls Mark_Track(headto, MARK_DOWN) on each successful
-   * Start_Driver to set Map[cell].Flag.Occupy.Vehicle=true. Subsequent vessel
-   * Can_Enter_Cell (vessel.cpp:312) returns MOVE_MOVING_BLOCK for marked cells.
-   *
-   * TS port: cleared at the top of each tick; populated when a vessel's
-   * Mission_Move first fires (Start_Driver success); consulted at the same site
-   * to fail Start_Driver for later vessels targeting the same cell.
-   *
-   * Keys are cell indices (`cy * MAP_CELLS + cx`).
-   */
-  private _vesselMarkedCells: Set<number> = new Set();
   missionName = '';
   missionBriefing = '';
   scenarioId = '';
@@ -1737,11 +1724,6 @@ export class Game {
     (globalThis as any).__currentGameTick = this.tick;
     (globalThis as any).__missionTimerTrace = true;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
-
-    // C++ parity: per-tick vessel Mark_Track state resets at start of Logic_AI.
-    // Each vessel's successful Start_Driver (vessel.cpp:2104-2113) marks its
-    // dest cell DOWN; subsequent vessels hitting that cell get MOVE_MOVING_BLOCK.
-    this._vesselMarkedCells.clear();
 
     // RNG audit: enable tagged logging for ticks 1-15.
     // When _tagLoggingExternal is set, an external test controls logging — skip built-in toggle.
@@ -4394,37 +4376,6 @@ export class Game {
                 entity.animState = AnimState.IDLE;
                 pathFailureHandled = true;
               }
-            }
-          }
-          // C++ VesselClass::Start_Driver (vessel.cpp:2104-2113) Mark_Track port.
-          // When a vessel enters Mission_Move with a legal NavCom and there is
-          // no Start_Driver-success yet this tick, check the per-tick vessel
-          // cell-reservation set. A sibling vessel's earlier Start_Driver may
-          // have Mark_Track'd our destination cell — that's Can_Enter_Cell =
-          // MOVE_MOVING_BLOCK in C++ (vessel.cpp:312), which causes this
-          // vessel's Basic_Path/Start_Driver to fail. Mission_Move then falls
-          // through to the Enter_Idle_Mode branch (foot.cpp:524) without firing
-          // the Random_Pick(0,2) jitter.
-          if (!pathFailureHandled
-              && entity.stats.isVessel
-              && entity.moveTarget
-              && !entity.isDriving) {
-            const destCx = Math.floor(entity.moveTarget.lx / 256);
-            const destCy = Math.floor(entity.moveTarget.ly / 256);
-            const destKey = destCy * MAP_CELLS + destCx;
-            if (this._vesselMarkedCells.has(destKey)) {
-              // Start_Driver fails — Enter_Idle_Mode equivalent. No RNG consumed.
-              entity.moveTarget = null;
-              entity.path = [];
-              entity.pathIndex = 0;
-              entity.missionQueue = entity.guardOrigin != null
-                ? Mission.AREA_GUARD
-                : Mission.GUARD;
-              entity.missionTimer = 0;
-              pathFailureHandled = true;
-            } else {
-              // Start_Driver succeeds — Mark_Track(headto, MARK_DOWN).
-              this._vesselMarkedCells.add(destKey);
             }
           }
           // C++ foot.cpp:496-498: if no NavCom, not driving, no queued mission →
