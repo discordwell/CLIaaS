@@ -1,5 +1,48 @@
 # Session Summaries
 
+## 2026-04-24T21:32Z — Mark_Track full port reverted; narrow niat=3 proxy restored (SCG07EA +13 recovered)
+
+**Commits this round:**
+- `f55c1bf1` REVERT Mark_Track full port (over-suppressed)
+- `a19d95cf` narrow niat=3 proxy on last vessel of 3+ vessel teams (placeholder)
+
+**Why Mark_Track full port failed:**
+Direct port at Mission.MOVE dispatch site (using `moveTarget` cell as Mark_Track key)
+suppressed 6 legitimate Mission_Move calls at SCG07EA tick 2 — many vessels
+in different teams firing legitimate Random_Pick(0,2). The issue: C++ Mark_Track
+uses per-vessel computed `headto` (different cells across team members because
+of per-path Basic_Path geometry). TS's `moveTarget` is shared across team
+members. Without per-vessel `headto` modeling, the dispatch-site port over-
+matches.
+
+**Narrow niat=3 proxy:**
+Restored at team-activation time for 3+ vessel non-reinforceable teams. Last
+member only. Niat decrements 3→2→1→0 over 3 ticks; pre-Commence gate at
+index.ts:~4005 (`niat <= 0`) blocks until niat reaches 0.
+
+Empirically matches WASM SCG07EA subz cadence: 2 fires at tick 4, 3rd vessel's
+Mission_Move delays to tick 6 (when niat reaches 0).
+
+**Playwright divergence (post-deploy):**
+| scenario | session start | now | net |
+|---|---|---|---|
+| SCG01EA | 87 | 87 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 25 | 3 | -22 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 15 | -4 |
+| SCG13EA | 101 | 101 | 0 |
+
+**Net:** SCG07 fully recovered. SCG04 still -22 (vehicle Basic_Path friendly-
+blocker port pending). SCG11 still -4 (DriveClass::AI multi-dispatch RNG
+firing pending investigation).
+
+**Future work for proper Mark_Track port:**
+- Track per-vessel computed `headto` (not just team `moveTarget`).
+- Apply Mark_Track only when this is the FIRST tick the vessel enters MOVE
+  (Start_Driver-success transition), not every tick where vessel + !isDriving + moveTarget.
+
 ## 2026-04-24T13:40Z — VesselClass::Start_Driver Mark_Track ported (vessel.cpp:2104-2113)
 
 **Commit:** `ee9ba67f` — first structural port following the Steps 1-7 audit.
