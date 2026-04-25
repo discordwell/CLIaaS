@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-04-24T21:50Z — SCG11 t15 root cause identified: MCV reinforcements, one-tick RNG timing drift
+
+**Investigation:** Captured live entity state via `__agentGame.entities` at SCG11EA ticks 14-16.
+
+**Finding:** Tag `11094`/`11095` in WASM ↔ TS rng diff = MCV reinforcements (id=47/48). They are *post-building* phase entities (logicIdx 94/95 after Phase-2 structures bump the counter past 46). NOT the mmth1 4TNK team I initially assumed.
+
+**State at tick 15 (TS):**
+| entity | mission | timer | path | pathIdx | isDriving |
+|---|---|---|---|---|---|
+| MCV id=47 | MOVE | 2 | 4 | 0 | true |
+| MCV id=48 | MOVE | 14 (just reset) | 4 | 0 | true |
+
+**Mechanism:**
+- TS MCV id=48: missionTimer hit 0 mid-tick 15 → Mission_Move handler fired Random_Pick(0,2) → reset to 14+jitter.
+- TS MCV id=47: missionTimer 3→2→1→fires at tick 17.
+
+**Crucial seed evidence:** TS tick 15 unit[94] seeds (4134575856, 469826665, 462005998) **EXACTLY match WASM tick 16 calls 0-2** (Building_AI_70003 building[108]). So the RNG stream is correct — just one tick earlier in TS than WASM.
+
+**Implication:** The 4 "extra" TS RNGs at tick 15 aren't extra at all. They are legitimate Mission_Move/Repair_AI RNGs that WASM fires at tick 16. The divergence is *Mission_Move timer initialization* offset by 1 tick at MCV reinforcement spawn — likely a small rounding or sequence-of-events difference at scenario load.
+
+**Why not fixed yet:** Requires deeper instrumentation to identify exact tick where MCVs receive their initial missionTimer value, and whether that initial value matches WASM. Punted to next session.
+
 ## 2026-04-24T21:32Z — Mark_Track full port reverted; narrow niat=3 proxy restored (SCG07EA +13 recovered)
 
 **Commits this round:**
