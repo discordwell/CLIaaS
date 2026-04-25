@@ -143,22 +143,30 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     void team;
   });
 
-  it('W4 deleted (Step 4): no niat proxy written post-coord for any vessel team member', () => {
-    // W4 deletion (C++-parity refactor Step 4): the Phase 3b niat=3 proxy on
-    // the last vessel member was a TS-only emulation of C++ VesselClass::AI
-    // Mark_Track cell-reservation (vessel.cpp:2104-2113). C++-faithful port
-    // is the vessel.cpp:659 Is_Door_Closed() gate inside the double-cycle
-    // loop (PCP_DOUBLE_CYCLE_ENABLED), not a fabricated animation timer.
-    // All vessel members leave coordinateMove with niat=0. If SCG07 regresses,
-    // fix the double-cycle iter-2 Mission_Move re-dispatch — do not re-add
-    // this proxy.
+  it('narrow Mark_Track approximation: LAST vessel of 3+ vessel team gets niat=3 on activation', () => {
+    // Empirical Mark_Track approximation (placeholder until per-vessel headto
+    // computation lands). C++ VesselClass::Start_Driver (vessel.cpp:2104-2113)
+    // calls Mark_Track on the destination — the 3rd team vessel hits a
+    // reserved cell, Start_Driver fails, Mission_Move enters Enter_Idle_Mode
+    // without firing Random_Pick(0,2).
+    //
+    // A direct dispatch-site port over-suppressed (ee9ba67f reverted) because
+    // C++ uses per-vessel `headto` coords while TS's `moveTarget` is shared
+    // across team members. Niat=3 on the last vessel produces the same
+    // 2-tick delay observed in WASM (subz cadence: 2 fires at tick 4; last
+    // vessel delays to tick 6 when niat reaches 0).
+    //
+    // Gate: 3+ vessel non-reinforceable team activating this tick.
+    //
+    // C++ refs: vessel.cpp:2104-2113 Mark_Track, drive.cpp:1079-1086
+    // Start_Driver rotation/path check, foot.cpp:524 Mission_Move Enter_Idle_Mode.
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
     updateAllTeams(wps, { entities: subs });
 
-    expect(subs[0].nonInterruptAnimTicks, 'member 0 niat unchanged (=0)').toBe(0);
-    expect(subs[1].nonInterruptAnimTicks, 'member 1 niat unchanged (=0)').toBe(0);
-    expect(subs[2].nonInterruptAnimTicks, 'last member niat unchanged (=0) post-W4-deletion').toBe(0);
+    expect(subs[0].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
+    expect(subs[1].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
+    expect(subs[2].nonInterruptAnimTicks, 'last member gets niat=3 (Mark_Track approx)').toBe(3);
     void team;
   });
 

@@ -586,13 +586,35 @@ export class Team {
         this._members.every(m => m.alive && m.stats.isVessel);
       if (allVessels) {
         this.isReforming = false;
-        // W4 deleted (Step 4): the nonInterruptAnimTicks=3 proxy on the
-        // last vessel member was a TS-only emulation of C++ VesselClass::AI
-        // Mark_Track cell-reservation (vessel.cpp:2104-2113). The proper
-        // port is the vessel.cpp:659 Is_Door_Closed() gate already provided
-        // by PCP_DOUBLE_CYCLE_ENABLED. If SCG07 regresses, the fix is to
-        // ensure the double-cycle iteration 2 re-dispatches Mission_Move
-        // when missionTimer===0 post-Commence — not to re-add this proxy.
+        // Narrow Mark_Track approximation for 3+ vessel teams.
+        //
+        // C++ ref: VesselClass::Start_Driver (vessel.cpp:2104-2113) calls
+        // Mark_Track(headto, MARK_DOWN) which sets Map[headto].Flag.Occupy.
+        // Vehicle. Subsequent vessel Can_Enter_Cell (vessel.cpp:312) returns
+        // MOVE_MOVING_BLOCK for marked cells, causing the 3rd team-coordinated
+        // vessel's Start_Driver to fail → Mission_Move Enter_Idle_Mode →
+        // no Random_Pick(0,2) jitter (foot.cpp:524).
+        //
+        // A direct port of Mark_Track at the dispatch site over-suppressed
+        // (commit ee9ba67f reverted): C++ uses per-path computed `headto`
+        // coords which differ across vessels even when the team waypoint is
+        // shared, while TS's `moveTarget` cell is shared across team members.
+        //
+        // Until per-vessel `headto` is properly modeled, this narrow
+        // niat-on-last proxy delays the LAST vessel's Mission_Move by ~2
+        // ticks — empirically matches WASM's SCG07EA subz cadence (2 fires
+        // at tick 4, 3rd delayed to tick 6). Niat decrements 3→2→1→0;
+        // the pre-Commence gate at index.ts:~4005 (`niat <= 0`) unblocks
+        // when niat reaches 0 (after 3 ticks).
+        //
+        // Gate is narrow: only 3+ vessel non-reinforceable teams activating
+        // this tick. Doesn't affect cross-team or single-vessel scenarios.
+        if (this._members.length >= 3) {
+          const last = this._members[this._members.length - 1];
+          if (last.alive && last.nonInterruptAnimTicks <= 0) {
+            last.nonInterruptAnimTicks = 3;
+          }
+        }
       }
     }
 
