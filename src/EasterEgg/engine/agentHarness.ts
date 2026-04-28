@@ -8,7 +8,7 @@
 import { type Game } from './index';
 import { type Entity } from './entity';
 import { House, Mission, CELL_SIZE, worldToCell, worldDist, pixelToLepton, leptonToPixel, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType } from './types';
-import { findPath } from './pathfinding';
+import { findPath, nearbyLocation } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
 import { powerMultiplier } from './repairSell';
@@ -347,6 +347,30 @@ function clearTeamScripts(e: Entity): void {
   e.guardOrigin = null;
 }
 
+function resolveBasicPathGoal(game: Game, e: Entity, goal: { cx: number; cy: number }): { cx: number; cy: number } {
+  const map = game.map as unknown as {
+    canEnterCell?: (cx: number, cy: number, naval?: boolean) => number;
+    isTerrainPassable: (cx: number, cy: number) => boolean;
+    isWaterPassable?: (cx: number, cy: number) => boolean;
+  };
+  const moveResult = typeof map.canEnterCell === 'function'
+    ? map.canEnterCell(goal.cx, goal.cy, e.isNavalUnit)
+    : (e.isNavalUnit
+      ? (map.isWaterPassable?.(goal.cx, goal.cy) ? 0 : 5)
+      : (map.isTerrainPassable(goal.cx, goal.cy) ? 0 : 5));
+
+  if (moveResult <= 1) return goal;
+
+  const goalWorld = {
+    x: goal.cx * CELL_SIZE + CELL_SIZE / 2,
+    y: goal.cy * CELL_SIZE + CELL_SIZE / 2,
+  };
+  // rules.ini [General] CloseEnough=2.75; worldDist returns cells.
+  if (worldDist(e.pos, goalWorld) <= 2.75) return goal;
+
+  return nearbyLocation(game.map, goal, e.isNavalUnit, game.tick) ?? goal;
+}
+
 export function processCommands(game: Game, commands: AgentCommand[]): CommandResult[] {
   const results: CommandResult[] = [];
 
@@ -387,7 +411,8 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               // IsDriving clears.
               assignMission(e, Mission.MOVE);
               e.pathThreshold = 1;
-              e.path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
+              const pathGoal = resolveBasicPathGoal(game, e, { cx: c.cx, cy: c.cy });
+              e.path = findPath(game.map, e.cell, pathGoal, true, e.isNavalUnit, e.stats.speedClass);
               e.pathIndex = 0;
               if (!e.stats.isInfantry && e.path.length > 0) {
                 e.isDriving = true;

@@ -19,6 +19,10 @@ vi.mock('../engine/pathfinding', () => ({
     if (start.cx === goal.cx && start.cy === goal.cy) return [];
     return [{ cx: goal.cx, cy: goal.cy }];
   },
+  nearbyLocation: (_map: unknown, cell: { cx: number; cy: number }) => ({
+    cx: cell.cx + 1,
+    cy: cell.cy,
+  }),
 }));
 
 // Helper: create minimal mock Game
@@ -239,6 +243,27 @@ describe('processCommands — move', () => {
     expect(unit.target).toBe(enemy);
     expect(unit.moveTarget).toBeTruthy();
     expect(unit.isDriving).toBe(true);
+  });
+
+  it('paths to nearby passable cell when distant destination is impassable', () => {
+    const game = makeGame();
+    (game as unknown as { map: MockGame['map'] }).map = {
+      ...game.map,
+      canEnterCell: (cx: number, cy: number) => (cx === 55 && cy === 55 ? 5 : 0),
+      isTerrainPassable: (cx: number, cy: number) => !(cx === 55 && cy === 55),
+    };
+    const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    addEntity(game, unit);
+
+    const cmds: AgentCommand[] = [{ cmd: 'move', unitIds: [1], cx: 55, cy: 55 }];
+    const results = processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
+
+    expect(results[0].ok).toBe(true);
+    expect(unit.moveTarget).toEqual({
+      lx: 55 * 256 + 128,
+      ly: 55 * 256 + 128,
+    });
+    expect(unit.path).toEqual([{ cx: 56, cy: 55 }]);
   });
 
   it('reports error for invalid unit ID', () => {

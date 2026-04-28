@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GameMap, MoveResult, Terrain } from '../engine/map';
-import { findPath, findPathAStar } from '../engine/pathfinding';
+import { findPath, findPathAStar, nearbyLocation } from '../engine/pathfinding';
 import { MAP_CELLS, SpeedClass } from '../engine/types';
 
 let map: GameMap;
@@ -173,6 +173,43 @@ describe('C++ parity: impassable cells rejected in pathfinding', () => {
         expect(terrain, `LOS should not path through WALL at (${cell.cx},${cell.cy})`).not.toBe(Terrain.WALL);
       }
     }
+  });
+});
+
+// =============================================================================
+//  2b. Equal left/right detour tie-break
+//      C++ findpath.cpp:700-710 keeps clockwise path when lengths tie
+// =============================================================================
+
+describe('C++ parity: equal detours prefer clockwise edge-follow path', () => {
+
+  it('chooses the clockwise detour when left and right paths have equal length', () => {
+    map.setTerrain(13, 15, Terrain.ROCK);
+
+    const path = findPath(map, { cx: 11, cy: 15 }, { cx: 15, cy: 15 }, true);
+
+    expect(path.slice(0, 4)).toEqual([
+      { cx: 12, cy: 15 },
+      { cx: 13, cy: 16 },
+      { cx: 14, cy: 15 },
+      { cx: 15, cy: 15 },
+    ]);
+  });
+});
+
+// =============================================================================
+//  2c. Nearby_Location ring order and Frame % count selection
+//      C++ map.cpp:1680-1729 top/bottom rows, then left/right columns
+// =============================================================================
+
+describe('C++ parity: Nearby_Location scan selection', () => {
+
+  it('selects from the first ten clear cells using Frame modulo count', () => {
+    map.setTerrain(15, 15, Terrain.WATER);
+
+    expect(nearbyLocation(map, { cx: 15, cy: 15 }, false, 0)).toEqual({ cx: 14, cy: 14 });
+    expect(nearbyLocation(map, { cx: 15, cy: 15 }, false, 5)).toEqual({ cx: 16, cy: 16 });
+    expect(nearbyLocation(map, { cx: 15, cy: 15 }, false, 13)).toEqual({ cx: 16, cy: 16 });
   });
 });
 

@@ -725,7 +725,7 @@ export function findPath(
         // Pick shorter path (C++ line 700-710)
         let which: PathState;
         if (rightOk && leftOk) {
-          which = pleft.length <= pright.length ? pleft : pright;
+          which = pleft.length < pright.length ? pleft : pright;
         } else {
           which = leftOk ? pleft : pright;
         }
@@ -812,26 +812,69 @@ function heuristic(ax: number, ay: number, bx: number, by: number): number {
 
 const MAX_SEARCH = 500;
 
-/** C++ foot.cpp:333-335 Nearby_Location — spiral scan outward from an impassable cell
- *  to find the nearest passable cell. Used when the destination is blocked terrain. */
-export function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean): CellPos | null {
-  const passable = naval
-    ? (cx: number, cy: number) => map.isWaterPassable(cx, cy)
-    : (cx: number, cy: number) => map.isTerrainPassable(cx, cy);
-  // Spiral scan: ring 1, ring 2, ... up to ring 10
-  for (let ring = 1; ring <= 10; ring++) {
-    for (let dx = -ring; dx <= ring; dx++) {
-      for (let dy = -ring; dy <= ring; dy++) {
-        if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue; // only ring edges
-        const nx = cell.cx + dx;
-        const ny = cell.cy + dy;
-        if (nx >= 0 && nx < MAP_CELLS && ny >= 0 && ny < MAP_CELLS && passable(nx, ny)) {
-          return { cx: nx, cy: ny };
-        }
-      }
+/** C++ map.cpp:1653-1731 MapClass::Nearby_Location.
+ *  Scans square rings, keeps the first ten clear cells on the first usable
+ *  radius, then chooses one with Frame % count. */
+export function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean, frame = 0): CellPos | null {
+  const boundsX = map.boundsX ?? 0;
+  const boundsY = map.boundsY ?? 0;
+  const boundsW = map.boundsW ?? MAP_CELLS;
+  const boundsH = map.boundsH ?? MAP_CELLS;
+  const left = cell.cx - boundsX;
+  const right = boundsW - left - 1;
+  const top = cell.cy - boundsY;
+  const bottom = boundsH - top - 1;
+  const topTen: CellPos[] = [];
+
+  const clearToMove = (cx: number, cy: number): boolean => {
+    if (cx < boundsX || cx >= boundsX + boundsW || cy < boundsY || cy >= boundsY + boundsH) {
+      return false;
     }
+    if (typeof map.canEnterCell === 'function') {
+      return map.canEnterCell(cx, cy, naval) === MoveResult.OK;
+    }
+    return naval ? map.isWaterPassable(cx, cy) : map.isTerrainPassable(cx, cy);
+  };
+
+  const tryCell = (cx: number, cy: number): void => {
+    if (topTen.length < 10 && clearToMove(cx, cy)) {
+      topTen.push({ cx, cy });
+    }
+  };
+
+  for (let radius = 0; radius < MAP_CELLS / 2; radius++) {
+    for (let x = -radius; x <= radius; x++) {
+      if (x >= -left && radius <= top) {
+        tryCell(cell.cx + x, cell.cy - radius);
+      }
+      if (topTen.length === 10) break;
+
+      if (x <= right && radius <= bottom) {
+        tryCell(cell.cx + x, cell.cy + radius);
+      }
+      if (topTen.length === 10) break;
+    }
+
+    if (topTen.length === 10) break;
+
+    for (let y = -(radius - 1); y <= radius - 1; y++) {
+      if (y >= -top && radius <= left) {
+        tryCell(cell.cx - radius, cell.cy + y);
+      }
+      if (topTen.length === 10) break;
+
+      if (y <= bottom && radius <= right) {
+        tryCell(cell.cx + radius, cell.cy + y);
+      }
+      if (topTen.length === 10) break;
+    }
+
+    if (topTen.length > 0) break;
   }
-  return null;
+
+  if (topTen.length === 0) return null;
+  const index = ((Math.trunc(frame) % topTen.length) + topTen.length) % topTen.length;
+  return topTen[index];
 }
 
 export function findPathAStar(
