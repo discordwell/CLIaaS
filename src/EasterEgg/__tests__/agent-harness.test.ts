@@ -222,17 +222,23 @@ describe('serializeState', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('processCommands — move', () => {
-  it('sets mission MOVE and path for valid unit', () => {
+  it('queues MOVE and starts drive-class movement for valid unit', () => {
     const game = makeGame();
     const unit = makeEntity(1, UnitType.V_2TNK, House.Spain, 50, 50);
+    const enemy = makeEntity(2, UnitType.V_3TNK, House.USSR, 55, 55);
+    unit.target = enemy;
     addEntity(game, unit);
+    addEntity(game, enemy);
 
     const cmds: AgentCommand[] = [{ cmd: 'move', unitIds: [1], cx: 55, cy: 55 }];
     const results = processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
 
     expect(results[0].ok).toBe(true);
-    expect(unit.mission).toBe(Mission.MOVE);
+    expect(unit.mission).toBe(Mission.GUARD);
+    expect(unit.missionQueue).toBe(Mission.MOVE);
+    expect(unit.target).toBe(enemy);
     expect(unit.moveTarget).toBeTruthy();
+    expect(unit.isDriving).toBe(true);
   });
 
   it('reports error for invalid unit ID', () => {
@@ -430,7 +436,8 @@ describe('stutter-stepping dedup — move', () => {
     const cmds: AgentCommand[] = [{ cmd: 'move', unitIds: [1], cx: 55, cy: 55 }];
     processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
 
-    expect(unit.mission).toBe(Mission.MOVE);
+    expect(unit.mission).toBe(Mission.GUARD);
+    expect(unit.missionQueue).toBe(Mission.MOVE);
     expect(unit.pathIndex).toBe(0);
     expect(unit.path!.length).toBeGreaterThan(0);
 
@@ -441,7 +448,8 @@ describe('stutter-stepping dedup — move', () => {
     processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
 
     expect(unit.pathIndex).toBe(3); // preserved, not reset to 0
-    expect(unit.mission).toBe(Mission.MOVE);
+    expect(unit.mission).toBe(Mission.GUARD);
+    expect(unit.missionQueue).toBe(Mission.MOVE);
   });
 
   it('move to a DIFFERENT cell DOES reset pathIndex', () => {

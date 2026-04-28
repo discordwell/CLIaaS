@@ -43,8 +43,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
-  House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton,
+  Dir, House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton,
 } from '../engine/types';
+import { Terrain } from '../engine/map';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -124,6 +125,32 @@ describe('C++ DriveClass::AI drives-in-GUARD (drive.cpp:1376)', () => {
     // If the MCV started moving, x should have increased (or stayed the same
     // during pre-rotation). It should NEVER have decreased.
     expect(mcv.pos.x, 'vehicle did not move backward').toBeGreaterThanOrEqual(startX);
+  });
+
+  it('vehicle track speed uses destination-cell terrain cost', () => {
+    const game = createGame();
+    game.map.setTerrain(10, 10, Terrain.ROAD);
+    game.map.setTerrain(10, 11, Terrain.CLEAR);
+
+    const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 10, 10);
+    jeep.facing = Dir.S;
+    jeep.desiredFacing = Dir.S;
+    jeep.missionQueue = Mission.MOVE;
+    jeep.moveTarget = {
+      lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2),
+    };
+    jeep.path = [{ cx: 10, cy: 11 }];
+    jeep.pathIndex = 0;
+    jeep.isDriving = true;
+
+    const startLy = jeep.leptonY;
+    tickEntity(game, jeep);
+
+    // Clear ground wheel cost is 60%, so JEEP MaxSpeed 25 grants one 10-lepton
+    // track step with 5 leptons carried. Using the road current cell grants two.
+    expect(jeep.leptonY - startLy).toBe(11);
+    expect(jeep.speedAccum).toBe(5);
   });
 
   it('vehicle in GUARD without isDriving does NOT drive (C++ line 1376 false)', () => {

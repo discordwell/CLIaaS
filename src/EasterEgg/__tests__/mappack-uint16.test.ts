@@ -47,13 +47,12 @@ describe('MapPack uint16 template types', () => {
     expect(map.templateType[idx]).toBe(0);
   });
 
-  it('road detection works with uint16 templateType', () => {
+  it('road templates do not override per-icon terrain speed', () => {
     setup();
     const idx = 50 * MAP_CELLS + 50;
     map.templateType[idx] = 180; // road template (173-228 range)
-    // getSpeedMultiplier checks TEMPLATE_ROAD_MIN/MAX against templateType
     const mult = map.getSpeedMultiplier(50, 50);
-    expect(mult).toBe(1.0); // roads are passable at base speed
+    expect(mult).toBe(0.60); // default CLEAR terrain, not ROAD
   });
 
   it('bridge detection works with uint16 values in countBridgeCells', () => {

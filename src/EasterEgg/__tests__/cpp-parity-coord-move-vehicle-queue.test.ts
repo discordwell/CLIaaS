@@ -26,6 +26,7 @@ import {
   Team, resetTeamIds, clearAllTeams,
   TMISSION_MOVE,
 } from '../engine/team';
+import type { GameMap } from '../engine/map';
 
 beforeEach(() => {
   resetEntityIds();
@@ -56,7 +57,12 @@ describe('C++ Coordinate_Move parity: vehicle mission queueing', () => {
     ]);
 
     // Run team.ai() once — activates + dispatches TMISSION_MOVE → coordinateMove
-    team.ai(waypoints, { structures: [], entities: [mcv] });
+    const passableMap = {
+      isTerrainPassable: (_cx: number, _cy: number) => true,
+      isWaterPassable: (_cx: number, _cy: number) => true,
+    } as unknown as GameMap;
+
+    team.ai(waypoints, { structures: [], entities: [mcv], map: passableMap });
 
     // C++ Assign_Mission behavior: MissionQueue set, Mission unchanged.
     // Prior (broken) TS: mission=MOVE, missionTimer=0 directly.
@@ -64,6 +70,8 @@ describe('C++ Coordinate_Move parity: vehicle mission queueing', () => {
     expect(mcv.mission, 'mission should remain GUARD until Commence() pops').toBe(Mission.GUARD);
     expect(mcv.missionQueue, 'missionQueue should hold MOVE for Commence() pop').toBe(Mission.MOVE);
     expect(mcv.moveTarget, 'moveTarget (NavCom) should be set by coordinateMove').not.toBeNull();
+    expect(mcv.isDriving, 'DriveClass::Assign_Destination should start the driver immediately').toBe(true);
+    expect(mcv.path.length, 'DriveClass::Start_Of_Move should populate Basic_Path').toBeGreaterThan(0);
   });
 
   it('infantry coordinateMove also queues (gesture gate, not driving gate)', () => {

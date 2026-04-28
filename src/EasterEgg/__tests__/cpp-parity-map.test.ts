@@ -684,10 +684,15 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
-  it('WHEEL: road template = 1.0', () => {
+  it('WHEEL: ROAD terrain = 1.0', () => {
+    map.setTerrain(15, 15, Terrain.ROAD);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(1.0);
+  });
+
+  it('WHEEL: clear icon inside road template stays CLEAR speed', () => {
     map.setTerrain(15, 15, Terrain.CLEAR);
     map.templateType[15 * MAP_CELLS + 15] = TEMPLATE_ROAD_MIN;
-    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(1.0);
+    expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBe(0.60);
   });
 
   // -- FOOT (infantry) --
@@ -722,8 +727,8 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(0.90);
   });
 
-  it('FOOT: road template = 1.0', () => {
-    map.setTerrain(15, 15, Terrain.CLEAR);
+  it('FOOT: ROAD terrain = 1.0', () => {
+    map.setTerrain(15, 15, Terrain.ROAD);
     map.templateType[15 * MAP_CELLS + 15] = TEMPLATE_ROAD_MAX;
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBe(1.0);
   });
@@ -756,7 +761,7 @@ describe('Speed multipliers — C++ drive.cpp Ground[] cost tables', () => {
   // -- MV5: Cap at 1.0 --
 
   it('MV5: all multipliers capped at 1.0 — roads cannot exceed base speed', () => {
-    map.setTerrain(15, 15, Terrain.CLEAR);
+    map.setTerrain(15, 15, Terrain.ROAD);
     map.templateType[15 * MAP_CELLS + 15] = TEMPLATE_ROAD_MIN + 5; // A road template
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL)).toBeLessThanOrEqual(1.0);
     expect(map.getSpeedMultiplier(15, 15, SpeedClass.FOOT)).toBeLessThanOrEqual(1.0);

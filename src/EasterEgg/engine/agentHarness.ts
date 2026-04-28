@@ -14,6 +14,7 @@ import { getEffectiveCost } from './production';
 import { powerMultiplier } from './repairSell';
 import { ScenarioRandom } from './random';
 import { getActiveTeams } from './team';
+import { assignMission } from './missionLifecycle';
 
 // === Serialized state types ===
 
@@ -365,21 +366,32 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             // resending a move to the same cell restarts pathfinding from
             // waypoint 0 which causes visible stutter-stepping.
             if (e.moveTarget && e.moveTarget.lx === destLX && e.moveTarget.ly === destLY
-                && e.mission === Mission.MOVE && e.path && e.path.length > 0) {
+                && (e.mission === Mission.MOVE || e.missionQueue === Mission.MOVE)
+                && e.path && e.path.length > 0) {
               continue;
             }
 
             clearTeamScripts(e);
-            e.mission = Mission.MOVE;
-            e.target = null;
             e.moveTarget = { lx: destLX, ly: destLY };
             if (e.stats.isAircraft) {
+              e.mission = Mission.MOVE;
+              e.target = null;
               // Aircraft fly directly — no ground pathfinding needed
               e.path = [{ cx: c.cx, cy: c.cy }];
               e.pathIndex = 0;
             } else {
+              // C++ agent_harness.cpp uses Assign_Destination(dest) followed
+              // by Assign_Mission(MOVE). DriveClass::Assign_Destination resets
+              // Path[] and starts the driver immediately, then Assign_Mission
+              // queues MOVE so UnitClass::AI keeps the current mission until
+              // IsDriving clears.
+              assignMission(e, Mission.MOVE);
+              e.pathThreshold = 1;
               e.path = findPath(game.map, e.cell, { cx: c.cx, cy: c.cy }, true, e.isNavalUnit, e.stats.speedClass);
               e.pathIndex = 0;
+              if (!e.stats.isInfantry && e.path.length > 0) {
+                e.isDriving = true;
+              }
             }
           }
           results.push({ cmd: 'move', ok: errs.length === 0, error: errs.length ? errs.join('; ') : undefined });

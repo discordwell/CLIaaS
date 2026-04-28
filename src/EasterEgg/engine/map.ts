@@ -3,7 +3,7 @@
  * The map is 128×128 cells but only a portion (typically 50×50) is playable.
  */
 
-import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, TERRAIN_SPEED } from './types';
+import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED } from './types';
 import { ScenarioRandom } from './random';
 
 /** C++ MoveType enum (defines.h:828-837) — Can_Enter_Cell() return values for pathfinding.
@@ -430,14 +430,6 @@ export class GameMap {
     const terrainKey = TERRAIN_NAME_MAP[terrain];
     const entry = TERRAIN_SPEED[terrainKey];
     if (!entry) return 1.0; // unknown terrain defaults to full speed
-
-    // Check if cell has a road template overlay (overrides terrain speed)
-    const tmpl = this.templateType[cy * MAP_CELLS + cx];
-    const isRoad = tmpl >= TEMPLATE_ROAD_MIN && tmpl <= TEMPLATE_ROAD_MAX;
-    if (isRoad && terrain === Terrain.CLEAR) {
-      const roadEntry = TERRAIN_SPEED['Road'];
-      if (roadEntry) return Math.min(roadEntry[speedClass], 1.0);
-    }
 
     return Math.min(entry[speedClass], 1.0);
   }

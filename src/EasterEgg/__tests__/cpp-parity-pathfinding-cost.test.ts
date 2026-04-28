@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GameMap, MoveResult, Terrain } from '../engine/map';
 import { findPath, findPathAStar } from '../engine/pathfinding';
-import { MAP_CELLS, SpeedClass, TEMPLATE_ROAD_MIN } from '../engine/types';
+import { MAP_CELLS, SpeedClass } from '../engine/types';
 
 let map: GameMap;
 
@@ -73,9 +73,9 @@ describe('C++ parity: speed multiplier excluded from pathfinding costs', () => {
     // Add a road corridor at y=14 (one row above)
     // C++ pathfinder should take direct path (y=15), not detour to road (y=14)
 
-    // Mark y=14 cells as road templates (gives higher speedMult)
+    // Mark y=14 cells as ROAD terrain (gives higher speedMult)
     for (let x = 11; x <= 18; x++) {
-      map.templateType[14 * MAP_CELLS + x] = TEMPLATE_ROAD_MIN;
+      map.setTerrain(x, 14, Terrain.ROAD);
     }
 
     const start = { cx: 11, cy: 15 };

@@ -26,6 +26,7 @@ import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDis
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
 import type { GameMap } from './map';
+import { findPath } from './pathfinding';
 // TEAM_START_DRIVER_REFACTOR flag was removed along with its `false` branch
 // in Step 6 of the C++-parity refactor. The flag remains in perCellProcess.ts
 // as documentation but is no longer read.
@@ -36,8 +37,8 @@ import { assignMission } from './missionLifecycle';
  *
  * `structures` — used by coordinateRegroup retreat-target search (C++ team.cpp:590-616).
  * `entities`   — used by TeamClass::Recruit (team.cpp:1180-1328) to find candidates.
- * `map`        — retained in signature for future use (Step 6 stripped the coord-
- *                scope findPath call; Basic_Path now runs from DriveClass::AI).
+ * `map`        — used by drive-class Coordinate_Move to mirror
+ *                DriveClass::Assign_Destination -> Start_Of_Move.
  */
 export interface TeamAIContext {
   structures?: MapStructure[];
@@ -843,17 +844,34 @@ export class Team {
       const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
-        // C++ `TeamClass::Coordinate_Move` (team.cpp:1938) is just:
-        //   unit->Assign_Mission(MISSION_MOVE);          // queues
-        //   unit->Assign_Target(TARGET_NONE);
-        //   unit->Assign_Destination(target);            // sets NavCom
-        // No path population, no IsDriving flip, no Do_Turn. Basic_Path
-        // runs later from `DriveClass::AI` → `Start_Of_Move` (drive.cpp:906)
-        // on the unit's own AI tick. `runDriveClassAI` (index.ts) already
-        // does this when `path.length === 0` for Mission==MOVE vehicles.
+        // C++ queues MOVE, clears TarCom, then Assign_Destination(target).
+        // DriveClass::Assign_Destination starts the driver immediately unless
+        // the destination is unchanged.
+        const nextMoveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+        const targetChanged =
+          !unit.moveTarget ||
+          unit.moveTarget.lx !== nextMoveTarget.lx ||
+          unit.moveTarget.ly !== nextMoveTarget.ly;
+
         assignMission(unit, Mission.MOVE);
-        if (!unit.moveTarget) {
-          unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+        unit.target = null;
+        unit.targetStructure = null;
+        unit.forceFirePos = null;
+
+        if (targetChanged) {
+          unit.moveTarget = nextMoveTarget;
+          unit.pathThreshold = 1;
+          unit.path = [];
+          unit.pathIndex = 0;
+
+          if (ctx?.map && !unit.stats.isInfantry && !unit.isAirUnit && unit.mission !== Mission.UNLOAD) {
+            const goal = {
+              cx: Math.floor(this.target.x / CELL_SIZE),
+              cy: Math.floor(this.target.y / CELL_SIZE),
+            };
+            unit.path = findPath(ctx.map, unit.cell, goal, true, unit.isNavalUnit, unit.stats.speedClass);
+            if (unit.path.length > 0) unit.isDriving = true;
+          }
         }
         finished = false;
       } else {

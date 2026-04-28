@@ -318,24 +318,22 @@ describe('Road speed bonus — C++ rules.cpp:850-852', () => {
     expect(getTerrainSpeed('Road', SpeedClass.FLOAT)).toBe(0.0);
   });
 
-  it('GameMap.getSpeedMultiplier applies road bonus on CLEAR with road template', () => {
+  it('GameMap.getSpeedMultiplier uses per-icon ROAD terrain for road bonus', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 50, 50);
-    map.setTerrain(10, 10, Terrain.CLEAR);
-    // Simulate road template overlay
+    map.setTerrain(10, 10, Terrain.ROAD);
     map.templateType[10 * 128 + 10] = 180; // within TEMPLATE_ROAD_MIN(173)..TEMPLATE_ROAD_MAX(228)
     const multiplier = map.getSpeedMultiplier(10, 10, SpeedClass.WHEEL);
     expect(multiplier).toBe(1.0);
   });
 
-  it('GameMap.getSpeedMultiplier returns lower value for CLEAR without road template', () => {
+  it('GameMap.getSpeedMultiplier keeps CLEAR speed inside road template clear icons', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 50, 50);
     map.setTerrain(10, 10, Terrain.CLEAR);
-    map.templateType[10 * 128 + 10] = 0; // no road template
+    map.templateType[10 * 128 + 10] = 180; // road template, but control-map land type is CLEAR
     const multiplier = map.getSpeedMultiplier(10, 10, SpeedClass.WHEEL);
-    // Should be the CLEAR speed, not 1.0
-    expect(multiplier).toBeLessThan(1.0);
+    expect(multiplier).toBe(0.60);
   });
 });
 

@@ -316,19 +316,17 @@ describe('Terrain template ranges -- C++ defines.h TemplateType enum', () => {
     expect(roadCount).toBe(56);
   });
 
-  it('Road template on CLEAR terrain grants road speed bonus', () => {
-    // C++ drive.cpp: if cell has road template, use Road speed instead of Clear speed
-    // TS map.ts:268-272: checks TEMPLATE_ROAD_MIN..MAX range
+  it('Road template with CLEAR control-map land type keeps clear speed', () => {
+    // C++ cdata.cpp Land_Type reads per-icon control-map data. A road template
+    // can contain clear icons, and those cells must not get road speed.
     const map = new GameMap();
     map.setBounds(0, 0, 128, 128);
     map.setTerrain(15, 15, Terrain.CLEAR);
     map.templateType[15 * MAP_CELLS + 15] = TEMPLATE_ROAD_MIN; // first road template
 
-    // Road speed for WHEEL = 1.0 (rules.ini: Road 100% for all classes)
-    const roadSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL);
+    const roadTemplateClearSpeed = map.getSpeedMultiplier(15, 15, SpeedClass.WHEEL);
     const clearSpeed = TERRAIN_SPEED['Clear'][SpeedClass.WHEEL]; // 0.60 (rules.ini)
-    expect(roadSpeed).toBeGreaterThan(clearSpeed);
-    expect(roadSpeed).toBe(1.0); // Road gives full speed
+    expect(roadTemplateClearSpeed).toBe(clearSpeed);
   });
 
   it('Water template ID = 1 (C++ TEMPLATE_WATER1 = 1, used by destroyBridge Phase 2)', () => {

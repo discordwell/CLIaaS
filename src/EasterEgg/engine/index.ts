@@ -6242,7 +6242,7 @@ export class Game {
       } else {
         target = { lx: nextCell.cx * 256 + 128, ly: nextCell.cy * 256 + 128 };
       }
-      const speed = this.movementSpeed(entity);
+      const speed = this.movementSpeed(entity, nextCell);
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
       // Uses C++ TrackControl table to select pre-computed curved paths.
       // Track offsets are relative to target cell center, transformed via Smooth_Turn flags.
@@ -7072,13 +7072,13 @@ export class Game {
    *  C++ house.cpp:291,301: AirspeedBias from difficulty applied to aircraft.
    *  C++ infantry.cpp:3996-3997: Dogs get 2x movement speed when they have a
    *  valid navigation target (hunting/attacking). */
-  private movementSpeed(entity: Entity): number {
+  private movementSpeed(entity: Entity, speedCell: { cx: number; cy: number } = entity.cell): number {
     const speedBias = entity.stats.isAircraft
       ? this.getAirspeedBias(entity.house)
       : this.getGroundspeedBias(entity.house);
     // C++ infantry.cpp:4019 — infantry moves at full speed regardless of terrain type.
     // Only vehicles (DriveClass) apply terrain speed modifiers via Speed_Boost.
-    const terrainMult = entity.stats.isInfantry ? 1.0 : this.map.getSpeedMultiplier(entity.cell.cx, entity.cell.cy, entity.stats.speedClass);
+    const terrainMult = entity.stats.isInfantry ? 1.0 : this.map.getSpeedMultiplier(speedCell.cx, speedCell.cy, entity.stats.speedClass);
     let baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
 
     // C++ infantry.cpp:3996-3997: canine 2x sprint when navigating toward a target
