@@ -138,6 +138,15 @@ function placeGem(map: GameMap, cx: number, cy: number, density = 0x12): void {
   map.setTerrain(cx, cy, Terrain.ORE);
 }
 
+function getOverlay(map: GameMap, cx: number, cy: number): number {
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
+}
+
 // ============================================================================
 // 1. Core Constants — rules.ini is authoritative
 //    rules.ini overrides C++ constructor defaults
@@ -252,13 +261,13 @@ describe('Ore scan ranges — rules.ini [AI] OreNearScan=6, OreFarScan=48', () =
     ctx.entities.push(harv);
 
     // Run enough ticks for one harvest cycle (harvestTick increments, fires at %10==0)
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 36; i++) {
       updateHarvester(ctx, harv);
     }
 
     // After depleting 1-bail cell, harvester should re-seek (short scan finds 55,50)
     expect(harv.harvesterState).toBe('seeking');
-    expect(harv.oreLoad).toBe(1); // harvested 1 bail before depletion
+    expect(harv.oreLoad).toBe(0);
   });
 });
 
@@ -282,7 +291,7 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     ctx.entities.push(harv);
 
     // Tick up to first harvest cycle (harvestTick: 0->1->...->10, fires at 10)
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -303,7 +312,7 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     harv.harvestTick = 0;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -329,7 +338,7 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     harv.oreCreditValue = 650;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -365,7 +374,7 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     harv.oreCreditValue = 625;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -393,7 +402,7 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     harv.oreCreditValue = 675;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -416,7 +425,7 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     harv.harvesterState = 'harvesting';
     harv.oreLoad = 28; // already full
     harv.oreCreditValue = 700;
-    harv.harvestTick = 9; // next tick fires harvest check
+    harv.harvestTick = 17; // next tick fires harvest check
     ctx.entities.push(harv);
 
     updateHarvester(ctx, harv);
@@ -627,7 +636,7 @@ describe('Return-to-refinery logic — C++ FINDHOME state', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // next tick fires harvest check
+    harv.harvestTick = 17; // next tick fires harvest check
     harv.oreLoad = 27;    // one bail from full
     harv.oreCreditValue = 675;
     ctx.entities.push(harv);
@@ -722,7 +731,7 @@ describe('depleteOre — C++ cell.cpp Reduce_Tiberium parity', () => {
     placeGold(map, 50, 50, 0x0E); // GOLD12
     const credits = map.depleteOre(50, 50);
     expect(credits).toBe(25);
-    expect(map.overlay[50 * MAP_CELLS + 50]).toBe(0x0D); // decremented by 1
+    expect(getOverlay(map, 50, 50)).toBe(0x0D); // decremented by 1
   });
 
   it('last gold bail depletes cell fully (overlay -> 0xFF)', () => {
@@ -730,8 +739,8 @@ describe('depleteOre — C++ cell.cpp Reduce_Tiberium parity', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 0x03); // GOLD01 — single bail
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(25);
-    expect(map.overlay[50 * MAP_CELLS + 50]).toBe(0xFF); // fully depleted
+    expect(credits).toBe(0);
+    expect(getOverlay(map, 50, 50)).toBe(0xFF); // fully depleted
   });
 
   it('gem depletion decreases overlay by 1 per bail', () => {
@@ -739,15 +748,15 @@ describe('depleteOre — C++ cell.cpp Reduce_Tiberium parity', () => {
     placeGem(map, 50, 50, 0x12); // GEM04
     const credits = map.depleteOre(50, 50);
     expect(credits).toBe(50);
-    expect(map.overlay[50 * MAP_CELLS + 50]).toBe(0x11); // decremented
+    expect(getOverlay(map, 50, 50)).toBe(0x11); // decremented
   });
 
   it('last gem bail depletes cell fully (overlay -> 0xFF)', () => {
     const map = makeMap();
     placeGem(map, 50, 50, 0x0F); // GEM01 — single bail
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(50);
-    expect(map.overlay[50 * MAP_CELLS + 50]).toBe(0xFF);
+    expect(credits).toBe(0);
+    expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
   it('depleting empty cell returns 0', () => {
@@ -821,7 +830,7 @@ describe('Documented C++ vs TS mismatches', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 28; // already full
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);

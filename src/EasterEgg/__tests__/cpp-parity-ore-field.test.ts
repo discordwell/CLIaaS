@@ -31,9 +31,10 @@
  *   defines.h:3031-3032 -- TICKS_PER_SECOND=15, TICKS_PER_MINUTE=900
  *
  * === TS Overlay Encoding (map.ts) ===
- *   Gold ore: 0x03 (GOLD, density 0) through 0x0E (density 11) -- 12 levels
- *   Gems:     0x0F (GEM, density 0) through 0x12 (density 3)   -- 4 levels
+ *   Gold ore: 0x03 through 0x0E -- visual variants
+ *   Gems:     0x0F through 0x12 -- visual variants
  *   No overlay: 0xFF
+ *   Actual harvestable amount lives in CellClass::OverlayData / map.oreDensity.
  *
  * === Red Alert vs Tiberian Dawn ===
  *   Red Alert does NOT have infantry tiberium damage. That mechanic (where infantry
@@ -102,7 +103,12 @@ const CPP_TICKS_PER_MINUTE = CPP_TICKS_PER_SECOND * 60; // 900
 // Helpers
 // ============================================================
 function getOverlay(map: GameMap, cx: number, cy: number): number {
-  return map.overlay[cy * MAP_CELLS + cx];
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
 }
 
 function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {
@@ -281,7 +287,7 @@ describe('ore depletion — Reduce_Tiberium (cell.cpp:1630-1648)', () => {
     //   -> Overlay = OVERLAY_NONE, OverlayData = 0
     // TS: 0x03 (min) -> 0xFF (no overlay)
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
-    expect(credits).toBe(INI_GOLD_VALUE);
+    expect(credits).toBe(0);
   });
 
   it('depleting gold at max density (0x0E) reduces to 0x0D', () => {
@@ -303,7 +309,7 @@ describe('ore depletion — Reduce_Tiberium (cell.cpp:1630-1648)', () => {
     setOverlay(map, 50, 50, 0x0F); // min gem
     const credits = map.depleteOre(50, 50);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
-    expect(credits).toBe(INI_GEM_VALUE);
+    expect(credits).toBe(0);
   });
 
   it('depleting gem at max density (0x12) reduces to 0x11', () => {
@@ -332,9 +338,10 @@ describe('ore depletion — Reduce_Tiberium (cell.cpp:1630-1648)', () => {
       totalCredits += credits;
       bails++;
     }
-    // 12 density levels (0x0E down to 0x03, then fully depleted)
-    expect(bails).toBe(12);
-    expect(totalCredits).toBe(12 * INI_GOLD_VALUE);
+    // C++ Reduce_Tiberium returns 0 when OverlayData is already 0, so
+    // OverlayData=11 yields 11 paid bails before the final clear.
+    expect(bails).toBe(11);
+    expect(totalCredits).toBe(11 * INI_GOLD_VALUE);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
@@ -349,9 +356,9 @@ describe('ore depletion — Reduce_Tiberium (cell.cpp:1630-1648)', () => {
       totalCredits += credits;
       bails++;
     }
-    // 4 density levels (0x12 down to 0x0F, then fully depleted)
-    expect(bails).toBe(4);
-    expect(totalCredits).toBe(4 * INI_GEM_VALUE);
+    // C++ Reduce_Tiberium returns 0 when OverlayData is already 0.
+    expect(bails).toBe(3);
+    expect(totalCredits).toBe(3 * INI_GEM_VALUE);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
@@ -402,8 +409,8 @@ describe('credit values per bail — C++ Tiberium_Adjust (cell.cpp:2034-2056)', 
     expect(INI_GEM_VALUE).toBe(INI_GOLD_VALUE * 2);
   });
 
-  it('gold bail value is consistent across all gold density levels', () => {
-    for (let ovl = 0x03; ovl <= 0x0E; ovl++) {
+  it('gold bail value is consistent across harvestable gold density levels', () => {
+    for (let ovl = 0x04; ovl <= 0x0E; ovl++) {
       const map = makeMap();
       setOverlay(map, 50, 50, ovl);
       expect(
@@ -413,8 +420,8 @@ describe('credit values per bail — C++ Tiberium_Adjust (cell.cpp:2034-2056)', 
     }
   });
 
-  it('gem bail value is consistent across all gem density levels', () => {
-    for (let ovl = 0x0F; ovl <= 0x12; ovl++) {
+  it('gem bail value is consistent across harvestable gem density levels', () => {
+    for (let ovl = 0x10; ovl <= 0x12; ovl++) {
       const map = makeMap();
       setOverlay(map, 50, 50, ovl);
       expect(
@@ -726,13 +733,11 @@ describe('spread threshold — OverlayData > 6 (cell.cpp:2914)', () => {
     ScenarioRandom.seed = 0;
   });
 
-  it('TS ORE_SPREAD_MIN_DENSITY = 0x09 matches C++ OverlayData=6 boundary', () => {
+  it('TS ORE_SPREAD_MIN_DENSITY is OverlayData 6', () => {
     // C++ boundary: OverlayData <= 6 returns false => OverlayData=6 CANNOT spread
-    // OverlayData=6 => TS overlay = 0x03 + 6 = 0x09
-    // TS: ovl <= 0x09 skips => 0x09 CANNOT spread
+    // TS: density <= 6 skips => 0x09 CANNOT spread
     // PARITY MATCH
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY - 0x03).toBe(6); // C++ OverlayData=6
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 
   it('overlay 0x09 (C++ OverlayData=6) does NOT spread', () => {

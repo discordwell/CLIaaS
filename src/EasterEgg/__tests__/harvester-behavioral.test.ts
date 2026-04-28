@@ -237,7 +237,7 @@ describe('updateHarvester — state transitions', () => {
     const harv = makeEntity(UnitType.V_HARV, House.Spain,
       cellCx * CELL_SIZE + CELL_SIZE / 2, cellCy * CELL_SIZE + CELL_SIZE / 2);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // next tick will be 10 (harvest happens every 10 ticks)
+    harv.harvestTick = 17; // next tick completes the load animation (harvest happens every 10 ticks)
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     harv.mission = Mission.GUARD;
@@ -246,8 +246,8 @@ describe('updateHarvester — state transitions', () => {
 
     updateHarvester(ctx, harv);
 
-    // harvestTick should have been incremented to 10, triggering a harvest
-    expect(harv.harvestTick).toBe(10);
+    // The completed load animation triggers a harvest and resets the cycle.
+    expect(harv.harvestTick).toBe(0);
     expect(harv.oreLoad).toBeGreaterThan(0);
     expect(harv.oreCreditValue).toBeGreaterThan(0);
   });
@@ -260,7 +260,7 @@ describe('updateHarvester — state transitions', () => {
     harv.harvesterState = 'harvesting';
     harv.oreLoad = Entity.BAIL_COUNT - 1; // one bail short of full
     harv.oreCreditValue = 25 * (Entity.BAIL_COUNT - 1);
-    harv.harvestTick = 9; // next tick triggers harvest
+    harv.harvestTick = 17; // next tick completes the load animation
     harv.mission = Mission.GUARD;
 
     const ctx = makeHarvesterContext({ map, entities: [harv] });

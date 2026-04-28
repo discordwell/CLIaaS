@@ -42,7 +42,12 @@ function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {
 
 /** Get overlay at cell */
 function getOverlay(map: GameMap, cx: number, cy: number): number {
-  return map.overlay[cy * MAP_CELLS + cx];
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
 }
 
 /** Create a minimal MapStructure for refinery (PROC) */
@@ -140,15 +145,19 @@ function simulateHarvesterTick(
     }
     case 'harvesting': {
       harv.harvestTick++;
-      if (harv.harvestTick % 10 === 0) {
+      if (harv.harvestTick >= 18) {
+        harv.harvestTick = 0;
         const ec = harv.cell;
         const bailCredits = map.depleteOre(ec.cx, ec.cy);
         if (bailCredits > 0) {
           harv.oreLoad += 1;
           harv.oreCreditValue += bailCredits;
           if (bailCredits >= 50) {
-            harv.oreLoad += 2;
-            harv.oreCreditValue += 100;
+            for (let bonus = 0; bonus < 3; bonus++) {
+              if (harv.oreLoad >= Entity.BAIL_COUNT) break;
+              harv.oreLoad += 1;
+              harv.oreCreditValue += 50;
+            }
           }
         }
         if (harv.oreLoad >= Entity.BAIL_COUNT) {
@@ -413,19 +422,19 @@ describe('Harvester Pipeline', () => {
       map = makeMap();
     });
 
-    it('harvesting depletes one bail every 10 ticks', () => {
+    it('harvesting depletes one bail after the 18-tick load animation', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
       setOverlay(map, 50, 50, 0x0E); // max gold density (12 depletes)
 
-      // Tick 1-9: no depletion
-      for (let i = 1; i <= 9; i++) {
+      // Tick 1-17: no depletion
+      for (let i = 1; i <= 17; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
       expect(harv.oreLoad).toBe(0);
 
-      // Tick 10: first bail depleted
-      simulateHarvesterTick(harv, map, [], House.Spain, true, 10);
+      // Tick 18: first bail depleted
+      simulateHarvesterTick(harv, map, [], House.Spain, true, 18);
       expect(harv.oreLoad).toBe(1);
       expect(harv.oreCreditValue).toBe(25);
     });
@@ -435,25 +444,25 @@ describe('Harvester Pipeline', () => {
       harv.harvesterState = 'harvesting';
       setOverlay(map, 50, 50, 0x0E); // max gold (12 bails from this cell)
 
-      // Simulate 30 ticks (3 harvest cycles)
-      for (let i = 1; i <= 30; i++) {
+      // Simulate 54 ticks (3 harvest cycles)
+      for (let i = 1; i <= 54; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
       expect(harv.oreLoad).toBe(3);
       expect(harv.oreCreditValue).toBe(3 * 25); // 75 credits
     });
 
-    it('harvesting gems adds 3 bails (1 + 2 bonus) and 150 credits per harvest action', () => {
+    it('harvesting gems adds 4 bails (1 base + 3 bonus) and 200 credits per harvest action', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
       setOverlay(map, 50, 50, 0x12); // max gem density (4 depletes)
 
-      // First harvest at tick 10
-      for (let i = 1; i <= 10; i++) {
+      // First harvest at tick 18
+      for (let i = 1; i <= 18; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
-      expect(harv.oreLoad).toBe(3); // 1 base + 2 bonus
-      expect(harv.oreCreditValue).toBe(50 + 100); // 150 credits
+      expect(harv.oreLoad).toBe(4); // 1 base + 3 bonus
+      expect(harv.oreCreditValue).toBe(200);
     });
 
     it('gem bonus: harvester fills when accumulated bails reach BAIL_COUNT', () => {
@@ -463,9 +472,9 @@ describe('Harvester Pipeline', () => {
       // Max gem density is 0x12 (4 steps). We need 10 gem harvests (30 bails).
       // Place multiple gem cells around harvester and manually simulate gem harvesting.
       // Each gem harvest: +3 bails, +150 credits. 10th harvest → 30 bails >= 28 → returning.
-      for (let i = 0; i < 10; i++) {
-        harv.oreLoad += 3;
-        harv.oreCreditValue += 150;
+      for (let i = 0; i < 7; i++) {
+        harv.oreLoad += 4;
+        harv.oreCreditValue += 200;
         if (harv.oreLoad >= Entity.BAIL_COUNT) break;
       }
       expect(harv.oreLoad).toBeGreaterThanOrEqual(Entity.BAIL_COUNT);
@@ -492,21 +501,15 @@ describe('Harvester Pipeline', () => {
     it('depleted cell triggers re-seek to nearby ore', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
-      setOverlay(map, 50, 50, 0x03); // min gold density — 1 depletion step
+      setOverlay(map, 50, 50, 0x03); // OverlayData 0 clears without a paid bail
       setOverlay(map, 52, 50, 0x07); // more ore 2 cells away
 
-      // First harvest at tick 10 depletes cell, finds nearby ore, transitions to seeking
-      for (let i = 1; i <= 10; i++) {
+      // First completed load animation clears the cell and finds nearby ore.
+      for (let i = 1; i <= 18; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
-      // After harvesting the first bail, cell is 0xFF. Ore load = 1 < 28, nearby ore exists.
-      expect(harv.oreLoad).toBe(1);
+      expect(harv.oreLoad).toBe(0);
       expect(getOverlay(map, 50, 50)).toBe(0xFF);
-
-      // Next tick at 20: bailCredits=0, checks findNearestOre, transitions to seeking
-      for (let i = 11; i <= 20; i++) {
-        simulateHarvesterTick(harv, map, [], House.Spain, true, i);
-      }
       expect(harv.harvesterState).toBe('seeking');
       expect(harv.mission).toBe(Mission.MOVE);
     });
@@ -514,13 +517,14 @@ describe('Harvester Pipeline', () => {
     it('depleted cell with no nearby ore and load > 0 triggers return', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
-      setOverlay(map, 50, 50, 0x03); // min gold — 1 depletion
+      harv.oreLoad = 1;
+      harv.oreCreditValue = 25;
+      setOverlay(map, 50, 50, 0x03); // OverlayData 0 clears without a paid bail
       // No other ore on map
 
-      for (let i = 1; i <= 20; i++) {
+      for (let i = 1; i <= 18; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
-      // After harvesting: oreLoad=1, cell depleted, no nearby ore → returning
       expect(harv.oreLoad).toBe(1);
       expect(harv.harvesterState).toBe('returning');
     });
@@ -530,7 +534,7 @@ describe('Harvester Pipeline', () => {
       harv.harvesterState = 'harvesting';
       harv.oreLoad = 0;
       // No ore at current cell or nearby
-      // harvestTick will increment but depleteOre returns 0 at tick 10
+      // harvestTick will increment but depleteOre returns 0 at tick 18
 
       for (let i = 1; i <= 20; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
@@ -538,13 +542,13 @@ describe('Harvester Pipeline', () => {
       expect(harv.harvesterState).toBe('idle');
     });
 
-    it('harvesting does not deplete between tick intervals (ticks 1-9 no depletion)', () => {
+    it('harvesting does not deplete before the load animation completes (ticks 1-17)', () => {
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.harvesterState = 'harvesting';
       setOverlay(map, 50, 50, 0x0E);
       const initialOverlay = getOverlay(map, 50, 50);
 
-      for (let i = 1; i <= 9; i++) {
+      for (let i = 1; i <= 17; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
       expect(getOverlay(map, 50, 50)).toBe(initialOverlay);
@@ -855,7 +859,7 @@ describe('Harvester Pipeline', () => {
       // PROC at (50,50) is 3x2 → dock at (51,52)
       // Place harvester at dock cell
       const harv = makeHarvester(House.Spain, 51, 52);
-      setOverlay(map, 54, 52, 0x03); // min gold 3 cells east of dock
+      setOverlay(map, 54, 52, 0x04); // one paid bail, then final clear
 
       // Step 1: idle → seeking
       expect(harv.harvesterState).toBe('idle');
@@ -869,12 +873,10 @@ describe('Harvester Pipeline', () => {
       simulateHarvesterTick(harv, map, [refinery], House.Spain, true, 1);
       expect(harv.harvesterState).toBe('harvesting');
 
-      // Step 3: harvesting → depletes 1 bail at tick 10, no more ore → returning
-      for (let i = 1; i <= 20; i++) {
+      // Step 3: harvests one paid bail, then clears the final visible ore level.
+      for (let i = 1; i <= 36; i++) {
         simulateHarvesterTick(harv, map, [refinery], House.Spain, true, i);
       }
-      // After tick 10: oreLoad=1, cell depleted (0xFF). No nearby ore → returning.
-      // After tick 20: bailCredits=0 triggers next check.
       expect(harv.oreLoad).toBe(1);
       expect(harv.harvesterState).toBe('returning');
 
@@ -916,12 +918,12 @@ describe('Harvester Pipeline', () => {
       expect(getOverlay(map, 50, 50)).toBe(0xFF);
     });
 
-    it('max gold density cell yields exactly 12 bails before depletion', () => {
+    it('max gold density cell yields exactly 11 paid bails before final clear', () => {
       const map = makeMap();
       setOverlay(map, 50, 50, 0x0E);
       let bails = 0;
       while (map.depleteOre(50, 50) > 0) bails++;
-      expect(bails).toBe(12); // 0x0E - 0x03 + 1 = 12
+      expect(bails).toBe(11);
     });
 
     it('gem density decreases by 1 per depletion', () => {
@@ -936,12 +938,12 @@ describe('Harvester Pipeline', () => {
       expect(getOverlay(map, 50, 50)).toBe(0xFF);
     });
 
-    it('max gem density cell yields exactly 4 bails before depletion', () => {
+    it('max gem density cell yields exactly 3 paid bails before final clear', () => {
       const map = makeMap();
       setOverlay(map, 50, 50, 0x12);
       let bails = 0;
       while (map.depleteOre(50, 50) > 0) bails++;
-      expect(bails).toBe(4); // 0x12 - 0x0F + 1 = 4
+      expect(bails).toBe(3);
     });
 
     it('depleting already-depleted cell returns 0', () => {
@@ -1193,8 +1195,8 @@ describe('Harvester Pipeline', () => {
       expect(GameMap.RESERVOIR_SIZE).toBe(64);
     });
 
-    it('ORE_SPREAD_MIN_DENSITY threshold is 0x09 (density > 6 required)', () => {
-      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+    it('ORE_SPREAD_MIN_DENSITY threshold is OverlayData 6', () => {
+      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
     });
   });
 
@@ -1215,8 +1217,7 @@ describe('Harvester Pipeline', () => {
     });
 
     it('harvester load never exceeds BAIL_COUNT check threshold', () => {
-      // Gem harvest adds 3 bails at once. Starting from 27 bails, adding 3 = 30.
-      // The check is oreLoad >= BAIL_COUNT, so 30 >= 28 → returning.
+      // Starting from 27 bails, the base gem bail fills to 28 and bonus bails are capped.
       const harv = makeHarvester(House.Spain, 50, 50);
       harv.oreLoad = 27;
       harv.oreCreditValue = 27 * 25;
@@ -1224,12 +1225,11 @@ describe('Harvester Pipeline', () => {
       const map = makeMap();
       setOverlay(map, 50, 50, 0x10); // gem
 
-      // Force tick to harvest at tick 10
-      for (let i = 1; i <= 10; i++) {
+      // Force tick to harvest at tick 18
+      for (let i = 1; i <= 18; i++) {
         simulateHarvesterTick(harv, map, [], House.Spain, true, i);
       }
-      // 27 + 3 = 30 >= 28 → returning
-      expect(harv.oreLoad).toBe(30);
+      expect(harv.oreLoad).toBe(28);
       expect(harv.harvesterState).toBe('returning');
     });
 

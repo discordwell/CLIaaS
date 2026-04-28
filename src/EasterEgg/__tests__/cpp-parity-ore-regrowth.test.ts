@@ -62,13 +62,9 @@
  *   OVERLAY_GEMS3 = 11
  *   OVERLAY_GEMS4 = 12
  *
- * TS overlay encoding (map.ts:532-535):
- *   Gold ore: 0x03-0x0E (12 density levels, single-byte)
- *   Gems:     0x0F-0x12 (4 density levels)
- *   No overlay: 0xFF
- *
- * C++ model: OverlayType (GOLD1-4) + OverlayData (0-11) = 4 subtypes x 12 densities
- * TS model:  Single byte 0x03-0x0E = 12 density levels (subtype collapsed)
+ * TS stores overlay visual variants separately from oreDensity, mirroring
+ * C++ OverlayType + OverlayData. Some assertions below use a collapsed
+ * legacy ore-level helper (0x03 + OverlayData) for readability.
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
@@ -80,7 +76,12 @@ import { ScenarioRandom } from '../engine/random';
 // Helpers
 // ============================================================
 function getOverlay(map: GameMap, cx: number, cy: number): number {
-  return map.overlay[cy * MAP_CELLS + cx];
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
 }
 
 function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {

@@ -88,6 +88,15 @@ function placeGem(map: GameMap, cx: number, cy: number, density = 0x12): void {
   map.setTerrain(cx, cy, Terrain.ORE);
 }
 
+function getOverlay(map: GameMap, cx: number, cy: number): number {
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
+}
+
 // =============================================================================
 // 1. Entity Constants: BAIL_COUNT and ORE_CAPACITY
 //    C++ UnitTypeClass::Max_Pips = 28 (rules.ini BailCount=28)
@@ -120,11 +129,11 @@ describe('gold ore credit value — C++ rules.ini GoldValue=25', () => {
     expect(credits).toBe(25);
   });
 
-  it('depleteOre returns 25 for minimum density gold (0x03)', () => {
+  it('minimum density gold (0x03) clears without a paid bail', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 0x03); // min density — will be fully depleted
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(25);
+    expect(credits).toBe(0);
   });
 
   it('depleting min gold (0x03) sets overlay to 0xFF (empty)', () => {
@@ -138,7 +147,7 @@ describe('gold ore credit value — C++ rules.ini GoldValue=25', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 0x0A);
     map.depleteOre(50, 50);
-    expect(map.overlay[50 * MAP_CELLS + 50]).toBe(0x09);
+    expect(getOverlay(map, 50, 50)).toBe(0x09);
   });
 });
 
@@ -155,11 +164,11 @@ describe('gem credit value — C++ rules.ini GemValue=50', () => {
     expect(credits).toBe(50);
   });
 
-  it('depleteOre returns 50 for minimum density gem (0x0F)', () => {
+  it('minimum density gem (0x0F) clears without a paid bail', () => {
     const map = makeMap();
     placeGem(map, 50, 50, 0x0F);
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(50);
+    expect(credits).toBe(0);
   });
 
   it('depleting min gem (0x0F) sets overlay to 0xFF (empty)', () => {
@@ -173,7 +182,7 @@ describe('gem credit value — C++ rules.ini GemValue=50', () => {
     const map = makeMap();
     placeGem(map, 50, 50, 0x11);
     map.depleteOre(50, 50);
-    expect(map.overlay[50 * MAP_CELLS + 50]).toBe(0x10);
+    expect(getOverlay(map, 50, 50)).toBe(0x10);
   });
 });
 
@@ -189,10 +198,10 @@ describe('gold overlay range — C++ GOLD01(0x03) through GOLD12(0x0E)', () => {
     expect(map.depleteOre(50, 50)).toBe(0);
   });
 
-  it('overlay 0x03 IS gold (GOLD01 minimum)', () => {
+  it('overlay 0x03 is visible gold but OverlayData 0 pays no bail', () => {
     const map = makeMap();
     map.overlay[50 * MAP_CELLS + 50] = 0x03;
-    expect(map.depleteOre(50, 50)).toBe(25);
+    expect(map.depleteOre(50, 50)).toBe(0);
   });
 
   it('overlay 0x0E IS gold (GOLD12 maximum)', () => {
@@ -212,10 +221,10 @@ describe('gold overlay range — C++ GOLD01(0x03) through GOLD12(0x0E)', () => {
 // =============================================================================
 
 describe('gem overlay range — C++ GEM01(0x0F) through GEM04(0x12)', () => {
-  it('overlay 0x0F IS gem (GEM01 minimum)', () => {
+  it('overlay 0x0F is visible gem but OverlayData 0 pays no bail', () => {
     const map = makeMap();
     map.overlay[50 * MAP_CELLS + 50] = 0x0F;
-    expect(map.depleteOre(50, 50)).toBe(50);
+    expect(map.depleteOre(50, 50)).toBe(0);
   });
 
   it('overlay 0x12 IS gem (GEM04 maximum)', () => {
@@ -287,7 +296,7 @@ describe('full gem trip value — C++ unit.cpp:2306-2308 gem bonus bails', () =>
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // next tick (10) will trigger harvest
+    harv.harvestTick = 17; // next tick completes the load animation
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -349,7 +358,7 @@ describe('harvest timing — one bail every 10 ticks', () => {
     placeGold(map, 50, 50, 0x0E);
 
     // Tick 1 through 9 — no harvest should occur
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 17; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(0);
@@ -367,7 +376,7 @@ describe('harvest timing — one bail every 10 ticks', () => {
 
     placeGold(map, 50, 50, 0x0E);
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(1);
@@ -386,7 +395,7 @@ describe('harvest timing — one bail every 10 ticks', () => {
 
     placeGold(map, 50, 50, 0x0E);
 
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 36; i++) {
       updateHarvester(ctx, harv);
       // Replenish if depleted
       if (map.overlay[50 * MAP_CELLS + 50] === 0xFF || map.overlay[50 * MAP_CELLS + 50] < 0x03) {
@@ -624,8 +633,8 @@ describe('state machine: harvesting -> returning (full load)', () => {
 
     placeGold(map, 50, 50, 0x0E);
 
-    // Tick 10 times to trigger one harvest
-    for (let i = 0; i < 10; i++) {
+    // Tick 18 times to trigger one harvest
+    for (let i = 0; i < 18; i++) {
       updateHarvester(ctx, harv);
     }
 
@@ -645,7 +654,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // next tick triggers harvest
+    harv.harvestTick = 17; // next tick completes the load animation
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -657,8 +666,8 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
 
     updateHarvester(ctx, harv);
 
-    // Should have harvested 1 bail (depleting the cell) then started seeking adjacent
-    expect(harv.oreLoad).toBe(1);
+    // OverlayData 0 clears without a paid bail, then starts seeking adjacent ore.
+    expect(harv.oreLoad).toBe(0);
     expect(harv.harvesterState).toBe('seeking');
   });
 
@@ -667,7 +676,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 5;
     harv.oreCreditValue = 125; // 5 * 25
     ctx.entities.push(harv);
@@ -678,7 +687,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
 
     updateHarvester(ctx, harv);
 
-    expect(harv.oreLoad).toBe(6); // harvested one more
+    expect(harv.oreLoad).toBe(5);
     expect(harv.harvesterState).toBe('returning'); // returns with partial load
   });
 
@@ -687,7 +696,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -696,10 +705,8 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
 
     updateHarvester(ctx, harv);
 
-    // Harvested 1 bail, then depleted, has load > 0 but no nearby ore => returning
-    // Actually: oreLoad=1 > 0 so should return
-    expect(harv.oreLoad).toBe(1);
-    expect(harv.harvesterState).toBe('returning');
+    expect(harv.oreLoad).toBe(0);
+    expect(harv.harvesterState).toBe('idle');
   });
 });
 
@@ -807,8 +814,8 @@ describe('ore regrowth mechanics — C++ map.cpp:1017 Overlay::AI()', () => {
     expect(foundOre).toBe(false);
   });
 
-  it('ORE_SPREAD_MIN_DENSITY is 0x09 — spread requires density > 6', () => {
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+  it('ORE_SPREAD_MIN_DENSITY is OverlayData 6 — spread requires density > 6', () => {
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 
   it('ore spread only happens on CLEAR/ROAD terrain', () => {
@@ -945,7 +952,7 @@ describe('all ore depleted behavior', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
     ctx.entities.push(harv);
@@ -955,9 +962,9 @@ describe('all ore depleted behavior', () => {
 
     updateHarvester(ctx, harv);
 
-    // Harvested 1 more bail, cell depleted, no nearby ore => returning
+    // Final visible ore clears without a paid bail, then returns with existing load.
     expect(harv.harvesterState).toBe('returning');
-    expect(harv.oreLoad).toBe(11);
+    expect(harv.oreLoad).toBe(10);
   });
 
   it('idle harvester with no ore anywhere stays idle', () => {
@@ -1183,7 +1190,7 @@ describe('adjacent ore search after depletion — 6-cell radius', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     ctx.entities.push(harv);
 
@@ -1256,7 +1263,7 @@ describe('C++ harvest timing per cell — weapon ROF vs fixed interval', () => {
       ticksToFirstHarvest++;
     }
 
-    expect(ticksToFirstHarvest).toBe(10); // TS fixed interval
+    expect(ticksToFirstHarvest).toBe(18); // full load animation
   });
 });
 
@@ -1365,8 +1372,8 @@ describe('ore growth reservoir sampling constants', () => {
     expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
-  it('ORE_SPREAD_MIN_DENSITY is 0x09 (density > 6 to spread)', () => {
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+  it('ORE_SPREAD_MIN_DENSITY is OverlayData 6 (spread requires density > 6)', () => {
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 });
 

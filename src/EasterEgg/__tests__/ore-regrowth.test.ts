@@ -7,9 +7,10 @@ import { ScenarioRandom } from '../engine/random';
  * Ore Regrowth Tests — C++ parity with OverlayClass::AI()
  *
  * Overlay values:
- *   0x03-0x0E = Gold ore (GOLD01-GOLD12, 12 density levels)
- *   0x0F-0x12 = Gems (GEM01-GEM04, 4 density levels)
+ *   0x03-0x0E = Gold ore visual variants
+ *   0x0F-0x12 = Gem visual variants
  *   0xFF      = No overlay
+ * Actual harvestable amount lives in CellClass::OverlayData.
  *
  * C++ behavior:
  *   - Growth fires every ~1821 ticks (~121s at 15 FPS)
@@ -34,9 +35,14 @@ describe('Ore Regrowth (C++ parity)', () => {
     ScenarioRandom.seed = 0;
   });
 
-  /** Helper: get overlay at cell */
+  /** Helper: get collapsed legacy ore level at cell for density assertions. */
   function getOverlay(cx: number, cy: number): number {
-    return map.overlay[cy * MAP_CELLS + cx];
+    const idx = cy * MAP_CELLS + cx;
+    const ovl = map.overlay[idx];
+    const density = map.oreDensity[idx];
+    if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+    if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+    return ovl;
   }
 
   /** Helper: set overlay at cell */
@@ -279,8 +285,8 @@ describe('Ore Regrowth (C++ parity)', () => {
       expect(GameMap.RESERVOIR_SIZE).toBe(64);
     });
 
-    it('ORE_SPREAD_MIN_DENSITY is 0x09', () => {
-      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+    it('ORE_SPREAD_MIN_DENSITY is OverlayData 6', () => {
+      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
     });
   });
 });

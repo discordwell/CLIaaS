@@ -155,6 +155,10 @@ export class GameMap {
   /** Overlay types from OverlayPack (0xFF = no overlay) */
   overlay: Uint8Array;
 
+  /** C++ CellClass::OverlayData for ore/gems.
+   *  0xFF means "not initialized" for tests/manual overlay writes. */
+  oreDensity: Uint8Array;
+
   /** Wall type at each cell ('' = no wall, 'SBAG'/'FENC'/'BARB'/'BRIK' = wall type) */
   wallType: string[];
 
@@ -204,6 +208,7 @@ export class GameMap {
     this.templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
     this.templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
+    this.oreDensity = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.wallType = new Array(MAP_CELLS * MAP_CELLS).fill('');
     this.treeType = new Array(MAP_CELLS * MAP_CELLS).fill('');
     this.boundsX = 0;
@@ -772,8 +777,9 @@ export class GameMap {
   }
 
   // === Ore/Gem overlay constants (C++ overlay.cpp) ===
-  // Gold ore: 0x03 (GOLD01, min) through 0x0E (GOLD12, max) — 12 density levels
-  // Gems:     0x0F (GEM01, min) through 0x12 (GEM04, max) — 4 density levels
+  // Gold ore: 0x03 (GOLD01) through 0x0E (GOLD12) — visual variants
+  // Gems:     0x0F (GEM01) through 0x12 (GEM04) — visual variants
+  // Actual harvestable amount lives in CellClass::OverlayData.
   // No overlay: 0xFF
 
   /** Ore regrowth interval in ticks — C++ map.cpp:1017 scans MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
@@ -784,9 +790,72 @@ export class GameMap {
    *  When more eligible cells exist, reservoir sampling selects exactly this many. */
   static readonly RESERVOIR_SIZE = 64;
 
-  /** Minimum gold density level required for ore to spread (C++ parity: density > 6 on 0-12 scale).
-   *  Gold overlay range is 0x03 (density 0) to 0x0E (density 11), so density > 6 means overlay > 0x09. */
-  static readonly ORE_SPREAD_MIN_DENSITY = 0x09;
+  /** Minimum gold OverlayData level required for ore to spread (C++ Can_Tiberium_Spread: > 6). */
+  static readonly ORE_SPREAD_MIN_DENSITY = 6;
+
+  private static readonly ORE_DENSITY_UNKNOWN = 0xFF;
+
+  private static isGoldOverlay(ovl: number): boolean {
+    return ovl >= 0x03 && ovl <= 0x0E;
+  }
+
+  private static isGemOverlayId(ovl: number): boolean {
+    return ovl >= 0x0F && ovl <= 0x12;
+  }
+
+  private static isOreOverlay(ovl: number): boolean {
+    return GameMap.isGoldOverlay(ovl) || GameMap.isGemOverlayId(ovl);
+  }
+
+  private inferLegacyOreDensity(ovl: number): number {
+    if (GameMap.isGoldOverlay(ovl)) return ovl - 0x03;
+    if (GameMap.isGemOverlayId(ovl)) return ovl - 0x0F;
+    return 0;
+  }
+
+  private oreDataAt(idx: number): number {
+    const ovl = this.overlay[idx];
+    if (!GameMap.isOreOverlay(ovl)) return 0;
+    const density = this.oreDensity[idx];
+    if (density !== GameMap.ORE_DENSITY_UNKNOWN) return density;
+    const inferred = this.inferLegacyOreDensity(ovl);
+    this.oreDensity[idx] = inferred;
+    return inferred;
+  }
+
+  /** Initialize C++ CellClass::OverlayData for scenario ore overlays.
+   *  Tiberium_Adjust(true) derives density from adjacent ore count; overlay IDs
+   *  are visual variants, not the amount of harvestable ore. */
+  initializeOreDensityFromOverlay(): void {
+    const goldByAdj = [0, 1, 3, 4, 6, 7, 8, 10, 11];
+    const gemByAdj = [0, 0, 0, 1, 1, 1, 2, 2, 2];
+    const dirs: [number, number][] = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
+
+    this.oreDensity.fill(GameMap.ORE_DENSITY_UNKNOWN);
+    for (let cy = 0; cy < MAP_CELLS; cy++) {
+      for (let cx = 0; cx < MAP_CELLS; cx++) {
+        const idx = cy * MAP_CELLS + cx;
+        const ovl = this.overlay[idx];
+        if (!GameMap.isOreOverlay(ovl)) continue;
+
+        let count = 0;
+        for (const [dx, dy] of dirs) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
+          if (GameMap.isOreOverlay(this.overlay[ny * MAP_CELLS + nx])) count++;
+        }
+
+        this.oreDensity[idx] = GameMap.isGemOverlayId(ovl)
+          ? Math.min(gemByAdj[count], 2)
+          : goldByAdj[count];
+        this.cells[idx] = Terrain.ORE;
+      }
+    }
+  }
 
   /** Ore regrowth — C++ two-phase reservoir sampling model (map.cpp:1017-1098).
    *
@@ -828,11 +897,11 @@ export class GameMap {
           cy < this.boundsY || cy >= this.boundsY + this.boundsH) continue;
 
       const ovl = this.overlay[idx];
-      const isGold = ovl >= 0x03 && ovl <= 0x0E;
-      if (!isGold) continue;
+      if (!GameMap.isGoldOverlay(ovl)) continue;
+      const density = this.oreDataAt(idx);
 
       // Can_Tiberium_Grow (cell.cpp:2869-2884): gold overlay with OverlayData < 11
-      if (ovl < 0x0E) {
+      if (density < 11) {
         // C++ map.cpp:1028-1044: reservoir sampling for growth
         if (growthRes.length < R) {
           growthRes.push(idx);
@@ -847,7 +916,7 @@ export class GameMap {
       }
 
       // Can_Tiberium_Spread (cell.cpp:2904-2918): gold overlay with OverlayData > 6
-      if (ovl > GameMap.ORE_SPREAD_MIN_DENSITY) {
+      if (density > GameMap.ORE_SPREAD_MIN_DENSITY) {
         // C++ map.cpp:1046-1060: reservoir sampling for spread
         if (spreadRes.length < R) {
           spreadRes.push(idx);
@@ -866,8 +935,9 @@ export class GameMap {
     // C++ map.cpp:1078-1084: Grow_Tiberium() — OverlayData++ (no random)
     for (const idx of growthRes) {
       const ovl = this.overlay[idx];
-      if (ovl >= 0x03 && ovl < 0x0E) {
-        this.overlay[idx] = ovl + 1;
+      const density = this.oreDataAt(idx);
+      if (GameMap.isGoldOverlay(ovl) && density < 11) {
+        this.oreDensity[idx] = density + 1;
       }
     }
 
@@ -893,6 +963,8 @@ export class GameMap {
         if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) continue;
         if (this.vehicleOccupancy.has(nidx)) continue;
         this.overlay[nidx] = 0x03;
+        this.oreDensity[nidx] = 0;
+        this.cells[nidx] = Terrain.ORE;
         break;
       }
     }
@@ -977,24 +1049,46 @@ export class GameMap {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
-    if (ovl >= 0x03 && ovl <= 0x0E) {
+    if (GameMap.isGoldOverlay(ovl)) {
       // Gold ore (GOLD01-GOLD12) — 25 credits per bail (rules.ini GoldValue=25)
-      if (ovl > 0x03) {
-        this.overlay[idx] = ovl - 1;
-      } else {
-        this.overlay[idx] = 0xFF; // fully depleted
+      const density = this.oreDataAt(idx);
+      if (density > 0) {
+        this.oreDensity[idx] = density - 1;
+        return 25;
       }
-      return 25;
-    } else if (ovl >= 0x0F && ovl <= 0x12) {
+      this.overlay[idx] = 0xFF;
+      this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
+      if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
+      return 0;
+    } else if (GameMap.isGemOverlayId(ovl)) {
       // Gems (GEM01-GEM04) — 50 credits per bail (rules.ini GemValue=50)
-      if (ovl > 0x0F) {
-        this.overlay[idx] = ovl - 1;
-      } else {
-        this.overlay[idx] = 0xFF;
+      const density = this.oreDataAt(idx);
+      if (density > 0) {
+        this.oreDensity[idx] = density - 1;
+        return 50;
       }
-      return 50;
+      this.overlay[idx] = 0xFF;
+      this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
+      if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
+      return 0;
     }
     return 0;
+  }
+
+  /** Destroy one ore OverlayData level without awarding credits (combat splash). */
+  reduceOreLevel(cx: number, cy: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    const ovl = this.overlay[idx];
+    if (!GameMap.isOreOverlay(ovl)) return;
+    const density = this.oreDataAt(idx);
+    if (density > 0) {
+      this.oreDensity[idx] = density - 1;
+    } else {
+      this.overlay[idx] = 0xFF;
+      this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
+      if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
+    }
   }
 
   /** Check if overlay at a cell is a gem overlay (0x0F-0x12) */

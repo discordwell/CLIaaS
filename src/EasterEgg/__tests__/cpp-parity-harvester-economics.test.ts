@@ -151,7 +151,12 @@ function placeGem(map: GameMap, cx: number, cy: number, density = 1): void {
 }
 
 function getOverlay(map: GameMap, cx: number, cy: number): number {
-  return map.overlay[cy * MAP_CELLS + cx];
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
 }
 
 // =============================================================================
@@ -278,8 +283,8 @@ describe('TS engine static constants match INI-parsed values', () => {
    * Gold at EVERY density level (0x03-0x0E) yields exactly GoldValue per bail.
    */
   it('gold at every density level yields exactly GoldValue per bail', () => {
-    const map = makeMap();
-    for (let ovl = 0x03; ovl <= 0x0E; ovl++) {
+    for (let ovl = 0x04; ovl <= 0x0E; ovl++) {
+      const map = makeMap();
       map.overlay[50 * MAP_CELLS + 50] = ovl;
       const credits = map.depleteOre(50, 50);
       expect(credits, `overlay 0x${ovl.toString(16).padStart(2, '0')}`).toBe(iniGoldValue);
@@ -290,8 +295,8 @@ describe('TS engine static constants match INI-parsed values', () => {
    * Gems at EVERY density level (0x0F-0x12) yield exactly GemValue per bail.
    */
   it('gems at every density level yield exactly GemValue per bail', () => {
-    const map = makeMap();
-    for (let ovl = 0x0F; ovl <= 0x12; ovl++) {
+    for (let ovl = 0x10; ovl <= 0x12; ovl++) {
+      const map = makeMap();
       map.overlay[50 * MAP_CELLS + 50] = ovl;
       const credits = map.depleteOre(50, 50);
       expect(credits, `overlay 0x${ovl.toString(16).padStart(2, '0')}`).toBe(iniGemValue);
@@ -359,7 +364,7 @@ describe('Ore depletion matches C++ cell.cpp:1630-1648 Reduce_Tiberium', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 0); // overlay 0x03 (minimum)
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(iniGoldValue);
+    expect(credits).toBe(0);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
@@ -367,7 +372,7 @@ describe('Ore depletion matches C++ cell.cpp:1630-1648 Reduce_Tiberium', () => {
     const map = makeMap();
     placeGem(map, 50, 50, 0); // overlay 0x0F
     const credits = map.depleteOre(50, 50);
-    expect(credits).toBe(iniGemValue);
+    expect(credits).toBe(0);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
@@ -392,10 +397,10 @@ describe('Ore depletion matches C++ cell.cpp:1630-1648 Reduce_Tiberium', () => {
   });
 
   /**
-   * Gold has 12 density levels. Fully depleting max density takes 12 depletions.
-   * Each yields GoldValue. Total = 12 * GoldValue.
+   * Gold OverlayData 11 pays 11 bails; the final OverlayData=0 reduction clears
+   * the visible ore and returns 0.
    */
-  it('fully depleting max-density gold cell yields 12 bails', () => {
+  it('fully depleting max-density gold cell yields 11 paid bails', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 11); // overlay 0x0E
     let depletions = 0;
@@ -406,15 +411,15 @@ describe('Ore depletion matches C++ cell.cpp:1630-1648 Reduce_Tiberium', () => {
       totalCredits += c;
       depletions++;
     }
-    expect(depletions).toBe(12);
-    expect(totalCredits).toBe(12 * iniGoldValue);
+    expect(depletions).toBe(11);
+    expect(totalCredits).toBe(11 * iniGoldValue);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
   /**
-   * Gems have 4 density levels. Fully depleting max density takes 4 depletions.
+   * Gems at OverlayData 3 pay 3 bails before the final clear returns 0.
    */
-  it('fully depleting max-density gem cell yields 4 bails', () => {
+  it('fully depleting max-density gem cell yields 3 paid bails', () => {
     const map = makeMap();
     placeGem(map, 50, 50, 3); // overlay 0x12
     let depletions = 0;
@@ -425,8 +430,8 @@ describe('Ore depletion matches C++ cell.cpp:1630-1648 Reduce_Tiberium', () => {
       totalCredits += c;
       depletions++;
     }
-    expect(depletions).toBe(4);
-    expect(totalCredits).toBe(4 * iniGemValue);
+    expect(depletions).toBe(3);
+    expect(totalCredits).toBe(3 * iniGemValue);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
@@ -464,7 +469,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // triggers on tick 10
+    harv.harvestTick = 17; // completes the load animation next tick
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -483,7 +488,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 26;
     harv.oreCreditValue = 26 * iniGemValue;
     ctx.entities.push(harv);
@@ -501,7 +506,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = iniBailCount - 1;
     harv.oreCreditValue = (iniBailCount - 1) * iniGemValue;
     ctx.entities.push(harv);
@@ -519,7 +524,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -654,10 +659,10 @@ describe('Ore growth rules (cell.cpp:2869-2884, map.cpp:1017)', () => {
 
   /**
    * C++ cell.cpp:2914: if (OverlayData <= 6) return(false);
-   * ORE_SPREAD_MIN_DENSITY = 0x09 (density 6 = 0x03+6), spread when > 0x09.
+   * ORE_SPREAD_MIN_DENSITY is stored as C++ OverlayData 6; spread when > 6.
    */
   it('ORE_SPREAD_MIN_DENSITY matches C++ threshold (density > 6)', () => {
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 
   /**
@@ -847,7 +852,7 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -860,9 +865,9 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
   });
 
   /**
-   * Harvesting triggers only when harvestTick % 10 === 0.
+   * Harvesting triggers when the 9-stage load animation completes.
    */
-  it('harvest triggers only when harvestTick is divisible by 10', () => {
+  it('harvest triggers when the 18-tick load animation completes', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
@@ -872,12 +877,12 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 11);
 
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 17; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(0);
 
-    // 10th tick triggers harvest
+    // 18th tick triggers harvest.
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(1);
   });
@@ -889,15 +894,15 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
-    placeGold(ctx.map, 50, 50, 0); // depletes fully
+    placeGold(ctx.map, 50, 50, 0); // clears without a paid bail
     placeGold(ctx.map, 51, 50, 5); // nearby ore
 
     updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(1);
+    expect(harv.oreLoad).toBe(0);
     expect(getOverlay(ctx.map, 50, 50)).toBe(0xFF);
     expect(harv.harvesterState).toBe('seeking');
   });
@@ -909,11 +914,11 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 5;
     harv.oreCreditValue = 5 * iniGoldValue;
     ctx.entities.push(harv);
-    placeGold(ctx.map, 50, 50, 0); // depletes fully, no other ore nearby
+    placeGold(ctx.map, 50, 50, 0); // clears without a paid bail, no other ore nearby
 
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');

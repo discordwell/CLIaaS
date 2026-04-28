@@ -38,6 +38,13 @@ function isIdleMission(mission: Mission): boolean {
   return mission === Mission.GUARD || mission === Mission.AREA_GUARD || mission === Mission.HARVEST;
 }
 
+// C++ Mission_Harvest gates each ore bail on the HARV load animation:
+// UnitTypeClass::Harvester_Load_List has 9 stages and the shipping rules use
+// OreTruckRate/OreDumpRate=2 frames per stage.
+const HARVESTER_LOAD_STAGE_COUNT = 9;
+const HARVESTER_LOAD_STAGE_RATE = 2;
+const HARVESTER_LOAD_TICKS = HARVESTER_LOAD_STAGE_COUNT * HARVESTER_LOAD_STAGE_RATE;
+
 // ---------------------------------------------------------------------------
 // Exported functions
 // ---------------------------------------------------------------------------
@@ -169,8 +176,11 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
     case 'harvesting': {
       entity.harvestTick++;
       // C++ unit.cpp Shape_Number — Harvester_Load_List[9] scoop cycle (0..8)
-      // Set_Rate(OreDumpRate=1) → advance 1 stage per tick; wrap via modulo.
-      entity.harvesterAnimStage = (entity.harvesterAnimStage + 1) % 9;
+      // Set_Rate(OreDumpRate=2) → advance one stage every two ticks.
+      entity.harvesterAnimStage = Math.min(
+        Math.floor(entity.harvestTick / HARVESTER_LOAD_STAGE_RATE),
+        HARVESTER_LOAD_STAGE_COUNT - 1,
+      );
       entity.isHarvesterMining = true;
       // C++ unit.cpp:2280: if (Tiberium_Load() < 1) — return when already full
       if (entity.oreLoad >= Entity.BAIL_COUNT) {
@@ -178,8 +188,10 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity): void {
         entity.harvesterState = 'returning';
         break;
       }
-      // Harvest every 10 ticks (~0.67s)
-      if (entity.harvestTick % 10 === 0) {
+      // Wait for the load animation to complete before pulling the next bail.
+      if (entity.harvestTick >= HARVESTER_LOAD_TICKS) {
+        entity.harvestTick = 0;
+        entity.harvesterAnimStage = 0;
         const ec = entity.cell;
         const bailCredits = ctx.map.depleteOre(ec.cx, ec.cy);
         if (bailCredits > 0) {

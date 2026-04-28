@@ -1687,6 +1687,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // Decode OverlayPack for ore/gem/wall overlays
   if (data.overlayPack) {
     decodeOverlayPack(data.overlayPack, map);
+    map.initializeOreDensityFromOverlay();
   }
 
   // Apply terrain features from [TERRAIN] section

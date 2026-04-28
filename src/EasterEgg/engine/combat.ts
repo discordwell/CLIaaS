@@ -1401,17 +1401,8 @@ export function applySplashDamage(
         }
         // CF9: Ore destruction from splash — warheads with IsTiberiumDestroyer flag (C++ combat.cpp)
         if (whMeta.destroysOre) {
-          const oreIdx = ty * MAP_CELLS + tx;
           if (tx >= 0 && tx < MAP_CELLS && ty >= 0 && ty < MAP_CELLS) {
-            const ovl = ctx.map.overlay[oreIdx];
-            if (ovl >= 0x03 && ovl <= 0x12) {
-              // Reduce ore density by one level; fully depleted if at minimum
-              if (ovl === 0x03 || ovl === 0x0F) {
-                ctx.map.overlay[oreIdx] = 0xFF; // fully depleted
-              } else {
-                ctx.map.overlay[oreIdx] = ovl - 1;
-              }
-            }
+            ctx.map.reduceOreLevel(tx, ty);
           }
         }
       }

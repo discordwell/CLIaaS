@@ -71,7 +71,12 @@ function placeGem(map: GameMap, cx: number, cy: number, density = 1): void {
 
 /** Read overlay value at a cell */
 function getOverlay(map: GameMap, cx: number, cy: number): number {
-  return map.overlay[cy * MAP_CELLS + cx];
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  const density = map.oreDensity[idx];
+  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
+  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  return ovl;
 }
 
 // 1. Rules Constants Parity (rules.cpp defaults)
@@ -223,7 +228,7 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // will trigger harvest on tick 10
+    harv.harvestTick = 17; // will complete the load animation next tick
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -241,7 +246,7 @@ describe('Gem bonus bails — unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 27; // near capacity
     harv.oreCreditValue = 27 * 50;
     ctx.entities.push(harv);
@@ -530,7 +535,7 @@ describe('Can_Tiberium_Spread — cell.cpp:2904-2919', () => {
     // C++: OverlayData <= 6 → false (cannot spread)
     // TS: ovl <= 0x09 → does not spread (same result)
     expect(getOverlay(map, 50, 50)).toBe(0x09);
-    expect(getOverlay(map, 50, 50)).toBeLessThanOrEqual(GameMap.ORE_SPREAD_MIN_DENSITY);
+    expect(getOverlay(map, 50, 50) - 0x03).toBeLessThanOrEqual(GameMap.ORE_SPREAD_MIN_DENSITY);
   });
 
   it('density 7 (OverlayData=7) CAN spread (cell.cpp:2914)', () => {
@@ -666,7 +671,7 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
     harv.oreLoad = Entity.BAIL_COUNT; // full
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 5);
 
@@ -713,7 +718,7 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 5;
     harv.oreCreditValue = 125;
     ctx.entities.push(harv);
@@ -785,7 +790,7 @@ describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = Entity.BAIL_COUNT - 1; // one more bail fills it
     harv.oreCreditValue = (Entity.BAIL_COUNT - 1) * 25;
     ctx.entities.push(harv);
@@ -832,16 +837,16 @@ describe('Harvest timing — unit.cpp:2841-2846 OreDumpRate', () => {
    *
    * TS harvests every 10 ticks (harvester.ts:151: entity.harvestTick % 10 === 0).
    */
-  it('C++ OreDumpRate = 2; TS harvests every 10 ticks', () => {
+  it('C++ OreDumpRate = 2; TS harvests after the 18-tick load animation', () => {
     const cppOreDumpRate = 2;
-    const tsHarvestInterval = 10;
+    const tsHarvestInterval = 18;
     // These are different timing systems — C++ uses animation frames,
     // TS uses a fixed tick interval. Not directly comparable.
     expect(cppOreDumpRate).toBe(2);
-    expect(tsHarvestInterval).toBe(10);
+    expect(tsHarvestInterval).toBe(18);
   });
 
-  it('TS harvests on tick multiples of 10', () => {
+  it('TS harvests on the 18-tick load animation boundary', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
@@ -850,24 +855,20 @@ describe('Harvest timing — unit.cpp:2841-2846 OreDumpRate', () => {
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 11); // high density so it doesn't run out
 
-    // Tick 1-9: no harvest
-    for (let i = 0; i < 9; i++) {
+    // Ticks 1-17: no harvest
+    for (let i = 0; i < 17; i++) {
       harv.harvestTick = i;
-      const loadBefore = harv.oreLoad;
       updateHarvester(ctx, harv);
-      if (i % 10 !== 9) {
-        // harvestTick increments first, then checks % 10
-        // Actually harvestTick++ happens, then check harvestTick % 10
-      }
+      expect(harv.oreLoad).toBe(0);
     }
 
-    // Reset and check tick 10 explicitly
-    harv.harvestTick = 9; // will become 10 after increment
+    // Reset and check the completing tick explicitly.
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     placeGold(ctx.map, 50, 50, 5);
     updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(1); // harvested on tick 10
+    expect(harv.oreLoad).toBe(1);
   });
 });
 
@@ -1249,7 +1250,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9; // next update will be tick 10
+    harv.harvestTick = 17; // next update will be tick 10
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -1264,7 +1265,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -1280,7 +1281,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 27; // one more bail will fill it
     harv.oreCreditValue = 27 * 25;
     ctx.entities.push(harv);
@@ -1295,7 +1296,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 5;
     harv.oreCreditValue = 5 * 25;
     ctx.entities.push(harv);
@@ -1308,7 +1309,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     // oreLoad goes from 5 to 6. Cell is now empty — harvester detects
     // depletion on the SAME tick and immediately seeks adjacent ore.
     updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(6);
+    expect(harv.oreLoad).toBe(5);
     expect(harv.harvesterState).toBe('seeking');
   });
 
@@ -1316,7 +1317,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 5;
     harv.oreCreditValue = 5 * 25;
     ctx.entities.push(harv);
@@ -1327,7 +1328,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     // oreLoad 5→6. Cell is now empty — harvester detects depletion on the
     // SAME tick and returns with partial load (no nearby ore).
     updateHarvester(ctx, harv);
-    expect(harv.oreLoad).toBe(6);
+    expect(harv.oreLoad).toBe(5);
     expect(harv.harvesterState).toBe('returning');
   });
 
@@ -1335,7 +1336,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 9;
+    harv.harvestTick = 17;
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -1492,7 +1493,7 @@ describe('full harvest cycle: idle → seek → harvest → return → unload �
     while (harv.oreLoad < Entity.BAIL_COUNT && safetyCounter < 200) {
       safetyCounter++;
       if (harv.harvesterState === 'harvesting') {
-        harv.harvestTick = 9; // trigger harvest on next update
+        harv.harvestTick = 17; // trigger harvest on next update
         updateHarvester(ctx, harv);
       } else if (harv.harvesterState === 'seeking') {
         // Teleport harvester to the target ore cell and simulate arrival
