@@ -17,6 +17,9 @@ const SERVER_LOG = path.join(REPORT_DIR, 'agent-parity-server.log');
 const SERVER_PID = path.join(REPORT_DIR, 'agent-parity-server.pid');
 const HARD_TIMEOUT_MS = 12 * 60_000;
 const strict = process.argv.includes('--strict');
+const SCENARIO_ID = normalizeScenarioId(process.env.RA_PARITY_SCENARIO ?? 'SCG01EA');
+const SCENARIO_FILE = `${SCENARIO_ID}.INI`;
+const WASM_AUTOPLAY_MODE = SCENARIO_ID.startsWith('SCA') ? 'ants' : 'allies';
 
 type AgentCommand =
   | { cmd: 'move'; unitIds: number[]; cx: number; cy: number }
@@ -45,6 +48,10 @@ interface AgentParityReport {
 }
 
 type SequenceCheckpoints = Partial<Record<'initial' | 'idle-60' | 'jeep-move-120' | 'jeep-stop-45', AgentLikeState>>;
+
+function normalizeScenarioId(raw: string): string {
+  return raw.trim().replace(/\.ini$/i, '').toUpperCase();
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -88,43 +95,77 @@ function isProcessAlive(pid: number): boolean {
 }
 
 function listDescendantPids(rootPid: number): number[] {
+  if (process.platform === 'win32') {
+    try {
+      const output = execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+        ],
+        { encoding: 'utf8' },
+      );
+      return collectDescendantPids(rootPid, output);
+    } catch {
+      return [];
+    }
+  }
+
   try {
     const output = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
-    const childrenByParent = new Map<number, number[]>();
-
-    for (const line of output.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      const [pidText, parentText] = trimmed.split(/\s+/, 2);
-      const pid = Number.parseInt(pidText, 10);
-      const parentPid = Number.parseInt(parentText, 10);
-      if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
-        continue;
-      }
-
-      const siblings = childrenByParent.get(parentPid) ?? [];
-      siblings.push(pid);
-      childrenByParent.set(parentPid, siblings);
-    }
-
-    const descendants: number[] = [];
-    const stack = [...(childrenByParent.get(rootPid) ?? [])];
-    while (stack.length > 0) {
-      const pid = stack.pop();
-      if (pid === undefined) {
-        continue;
-      }
-      descendants.push(pid);
-      stack.push(...(childrenByParent.get(pid) ?? []));
-    }
-    return descendants;
+    return collectDescendantPids(rootPid, output);
   } catch {
     return [];
   }
 }
 
+function collectDescendantPids(rootPid: number, processList: string): number[] {
+  const childrenByParent = new Map<number, number[]>();
+
+  for (const line of processList.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const [pidText, parentText] = trimmed.split(/\s+/, 2);
+    const pid = Number.parseInt(pidText, 10);
+    const parentPid = Number.parseInt(parentText, 10);
+    if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
+      continue;
+    }
+
+    const siblings = childrenByParent.get(parentPid) ?? [];
+    siblings.push(pid);
+    childrenByParent.set(parentPid, siblings);
+  }
+
+  const descendants: number[] = [];
+  const stack = [...(childrenByParent.get(rootPid) ?? [])];
+  while (stack.length > 0) {
+    const pid = stack.pop();
+    if (pid === undefined) {
+      continue;
+    }
+    descendants.push(pid);
+    stack.push(...(childrenByParent.get(pid) ?? []));
+  }
+  return descendants;
+}
+
 function signalManagedProcessTree(pid: number, signal: NodeJS.Signals): boolean {
+  if (process.platform === 'win32') {
+    try {
+      const args = ['/PID', String(pid), '/T'];
+      if (signal === 'SIGKILL') {
+        args.push('/F');
+      }
+      execFileSync('taskkill.exe', args, { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   let signaled = false;
   for (const childPid of listDescendantPids(pid).reverse()) {
     try {
@@ -203,8 +244,17 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<void> {
 function startDevServer(): ChildProcessWithoutNullStreams {
   fs.mkdirSync(REPORT_DIR, { recursive: true });
   const logStream = fs.createWriteStream(SERVER_LOG, { flags: 'w' });
-  const server = spawn('pnpm', ['next', 'dev', '--port', '3001'], {
+  const npmExecPath = process.env.npm_execpath;
+  const command = npmExecPath ? process.execPath : 'pnpm';
+  const args = npmExecPath
+    ? [npmExecPath, 'next', 'dev', '--port', '3001']
+    : ['next', 'dev', '--port', '3001'];
+  const server = spawn(command, args, {
     cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (server.pid) {
@@ -271,7 +321,7 @@ async function stopServer(server: ChildProcessWithoutNullStreams | undefined): P
 
 async function loadTsAgent(page: Page): Promise<AgentLikeState> {
   console.log('TS: opening agent page');
-  await page.goto(`${BASE_URL}?anttest=agent&scenario=SCA01EA`, { waitUntil: 'load', timeout: 120_000 });
+  await page.goto(`${BASE_URL}?anttest=agent&scenario=${encodeURIComponent(SCENARIO_ID)}`, { waitUntil: 'load', timeout: 120_000 });
   console.log('TS: waiting for canvas');
   await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });
   console.log('TS: waiting for __agentReady');
@@ -316,7 +366,10 @@ async function loadWasmSequence(page: Page): Promise<SequenceCheckpoints> {
     page.on('pageerror', onPageError);
   });
 
-  await page.goto(`${BASE_URL}/ra/original.html?agentautoplay=ants&agentseq=1&agentwait=1&scenario=SCA01EA.INI`, { waitUntil: 'load', timeout: 120_000 });
+  await page.goto(
+    `${BASE_URL}/ra/original.html?agentharness=1&agentautoplay=${encodeURIComponent(WASM_AUTOPLAY_MODE)}&agentseq=1&agentwait=1&scenario=${encodeURIComponent(SCENARIO_FILE)}`,
+    { waitUntil: 'load', timeout: 120_000 },
+  );
   console.log('WASM: waiting for canvas');
   await page.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });
   console.log('WASM: waiting for agent bridge');
@@ -367,14 +420,16 @@ async function runSequence(page: Page): Promise<SequenceCheckpoints> {
     state = (await w.__agentStep(60)).state;
     checkpoints['idle-60'] = state;
 
-    const jeepMatches = state.units.filter(unit => unit.t === 'JEEP');
-    const jeepId = jeepMatches.length === 1 ? jeepMatches[0].id : null;
+    const jeepId = [...state.units]
+      .filter(unit => unit.t === 'JEEP')
+      .sort((a, b) => a.cy - b.cy || a.cx - b.cx || a.id - b.id)[0]?.id ?? null;
     if (jeepId !== null) {
       state = (await w.__agentStep(120, [{ cmd: 'move', unitIds: [jeepId], cx: 45, cy: 84 }])).state;
       checkpoints['jeep-move-120'] = state;
 
-      const jeepMatches2 = state.units.filter(unit => unit.t === 'JEEP');
-      const jeepId2 = jeepMatches2.length === 1 ? jeepMatches2[0].id : null;
+      const jeepId2 = [...state.units]
+        .filter(unit => unit.t === 'JEEP')
+        .sort((a, b) => a.cy - b.cy || a.cx - b.cx || a.id - b.id)[0]?.id ?? null;
       if (jeepId2 !== null) {
         state = (await w.__agentStep(45, [{ cmd: 'stop', unitIds: [jeepId2] }])).state;
         checkpoints['jeep-stop-45'] = state;
@@ -518,7 +573,7 @@ async function main(): Promise<void> {
       addCheckpoint(checkpoints, 'idle-60', 'No commands, both engines advanced 60 ticks', tsSequence['idle-60'], wasmSequence['idle-60'], tsStartTick, wasmStartTick);
 
       if (tsSequence['jeep-move-120'] && wasmSequence['jeep-move-120']) {
-        addCheckpoint(checkpoints, 'jeep-move-120', 'Unique allied JEEP ordered to move toward cell (45,84)', tsSequence['jeep-move-120'], wasmSequence['jeep-move-120'], tsStartTick, wasmStartTick);
+        addCheckpoint(checkpoints, 'jeep-move-120', 'First allied JEEP ordered to move toward cell (45,84)', tsSequence['jeep-move-120'], wasmSequence['jeep-move-120'], tsStartTick, wasmStartTick);
       }
 
       if (tsSequence['jeep-stop-45'] && wasmSequence['jeep-stop-45']) {

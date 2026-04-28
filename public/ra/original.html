@@ -1536,14 +1536,18 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
     state = (await window.__agentStep(60)).state;
     checkpoints['idle-60'] = state;
 
-    var jeepMatches = state.units.filter(function(unit) { return unit.t === 'JEEP'; });
-    var jeepId = jeepMatches.length === 1 ? jeepMatches[0].id : null;
+    function pickJeepId(units) {
+      return units
+        .filter(function(unit) { return unit.t === 'JEEP'; })
+        .sort(function(a, b) { return (a.cy - b.cy) || (a.cx - b.cx) || (a.id - b.id); })[0]?.id ?? null;
+    }
+
+    var jeepId = pickJeepId(state.units);
     if (jeepId !== null) {
       state = (await window.__agentStep(120, [{ cmd: 'move', unitIds: [jeepId], cx: 45, cy: 84 }])).state;
       checkpoints['jeep-move-120'] = state;
 
-      var jeepMatches2 = state.units.filter(function(unit) { return unit.t === 'JEEP'; });
-      var jeepId2 = jeepMatches2.length === 1 ? jeepMatches2[0].id : null;
+      var jeepId2 = pickJeepId(state.units);
       if (jeepId2 !== null) {
         state = (await window.__agentStep(45, [{ cmd: 'stop', unitIds: [jeepId2] }])).state;
         checkpoints['jeep-stop-45'] = state;
