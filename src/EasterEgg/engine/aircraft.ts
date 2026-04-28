@@ -300,6 +300,9 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
 
 /** Handle aircraft (and passengers) leaving the map */
 function handleMapExit(ctx: AircraftContext, entity: Entity): void {
+  // Leaving the map is evacuation/escape, not destruction. Keep leave-map
+  // counters, but disarm TEVENT_DESTROYED attachments before marking dead.
+  entity.triggerName = '';
   entity.alive = false;
   entity.mission = Mission.DIE;
   ctx.unitsLeftMap++;
@@ -308,6 +311,7 @@ function handleMapExit(ctx: AircraftContext, entity: Entity): void {
   }
   if (entity.passengers && entity.passengers.length > 0) {
     for (const p of entity.passengers) {
+      p.triggerName = '';
       p.alive = false;
       ctx.unitsLeftMap++;
       if (countsAsCivEvac(ctx, p.type)) {

@@ -2231,6 +2231,9 @@ export class Game {
         if (entity.moveTarget) {
           const tc = { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) };
           if (!this.map.inBounds(tc.cx, tc.cy)) {
+            // C++ leave-map/evacuation is not object destruction. Preserve
+            // TEVENT_LEAVES_MAP counters but avoid firing attached destroyed triggers.
+            entity.triggerName = '';
             entity.alive = false;
             entity.mission = Mission.DIE;
             this.unitsLeftMap++;
