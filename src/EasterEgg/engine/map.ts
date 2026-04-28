@@ -453,6 +453,19 @@ export class GameMap {
     return this.occupancy[cy * MAP_CELLS + cx];
   }
 
+  private refreshSubCellOccupancy(cellIdx: number): void {
+    const slots = this.subCellOccupancy.get(cellIdx);
+    if (slots) {
+      for (let i = 0; i < 5; i++) {
+        if (slots[i] !== 0) {
+          this.occupancy[cellIdx] = slots[i];
+          return;
+        }
+      }
+    }
+    if (!this.vehicleOccupancy.has(cellIdx)) this.occupancy[cellIdx] = 0;
+  }
+
   /** Clear all sub-cell occupancy data (called at start of each tick rebuild) */
   clearSubCellOccupancy(): void {
     this.subCellOccupancy.clear();
@@ -502,6 +515,35 @@ export class GameMap {
     return -1; // all 5 sub-cells occupied
   }
 
+  /** Restore an infantry destination claim by absolute cell index.
+   *  C++ InfantryClass::Start_Driver clears the current occupy bit and sets
+   *  the destination occupy bit while the infantry is in transit. */
+  occupyClaimedSubCell(cellIdx: number, entityId: number, subCell: number): boolean {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return false;
+    if (this.vehicleOccupancy.has(cellIdx)) return false;
+
+    let slots = this.subCellOccupancy.get(cellIdx);
+    if (!slots) {
+      slots = [0, 0, 0, 0, 0];
+      this.subCellOccupancy.set(cellIdx, slots);
+    }
+
+    if (slots[subCell] !== 0 && slots[subCell] !== entityId) return false;
+    slots[subCell] = entityId;
+    if (this.occupancy[cellIdx] === 0) this.occupancy[cellIdx] = entityId;
+    return true;
+  }
+
+  /** Clear an infantry destination claim by absolute cell index. */
+  vacateClaimedSubCell(cellIdx: number, entityId: number, subCell: number): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return;
+    const slots = this.subCellOccupancy.get(cellIdx);
+    if (slots && slots[subCell] === entityId) {
+      slots[subCell] = 0;
+      this.refreshSubCellOccupancy(cellIdx);
+    }
+  }
+
   /** Vacate a sub-cell when an infantry unit leaves a cell.
    *  Called when infantry dies, is loaded into transport, etc. */
   vacateSubCell(cx: number, cy: number, entityId: number): void {
@@ -512,6 +554,7 @@ export class GameMap {
       for (let i = 0; i < 5; i++) {
         if (slots[i] === entityId) {
           slots[i] = 0;
+          this.refreshSubCellOccupancy(idx);
           break;
         }
       }

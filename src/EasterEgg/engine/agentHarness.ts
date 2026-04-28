@@ -347,14 +347,24 @@ function clearTeamScripts(e: Entity): void {
   e.guardOrigin = null;
 }
 
+function isMovingBlocker(game: Game, mover: Entity, entityId: number): boolean {
+  const occupant = game.entityById.get(entityId);
+  if (!occupant?.alive) return false;
+  const gameAllies = game as unknown as { isAllied?: (a: House, b: House) => boolean };
+  const allied = typeof gameAllies.isAllied === 'function'
+    ? gameAllies.isAllied.call(game, mover.house, occupant.house)
+    : mover.isPlayerUnit === occupant.isPlayerUnit;
+  return allied && (occupant.isDriving || occupant.trackNumber > 0 || occupant.moveTarget !== null);
+}
+
 function resolveBasicPathGoal(game: Game, e: Entity, goal: { cx: number; cy: number }): { cx: number; cy: number } {
   const map = game.map as unknown as {
-    canEnterCell?: (cx: number, cy: number, naval?: boolean) => number;
+    canEnterCell?: (cx: number, cy: number, naval?: boolean, isMoving?: (entityId: number) => boolean) => number;
     isTerrainPassable: (cx: number, cy: number) => boolean;
     isWaterPassable?: (cx: number, cy: number) => boolean;
   };
   const moveResult = typeof map.canEnterCell === 'function'
-    ? map.canEnterCell(goal.cx, goal.cy, e.isNavalUnit)
+    ? map.canEnterCell(goal.cx, goal.cy, e.isNavalUnit, id => isMovingBlocker(game, e, id))
     : (e.isNavalUnit
       ? (map.isWaterPassable?.(goal.cx, goal.cy) ? 0 : 5)
       : (map.isTerrainPassable(goal.cx, goal.cy) ? 0 : 5));
@@ -412,7 +422,10 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               assignMission(e, Mission.MOVE);
               e.pathThreshold = 1;
               const pathGoal = resolveBasicPathGoal(game, e, { cx: c.cx, cy: c.cy });
-              e.path = findPath(game.map, e.cell, pathGoal, true, e.isNavalUnit, e.stats.speedClass);
+              e.path = findPath(
+                game.map, e.cell, pathGoal, false, e.isNavalUnit, e.stats.speedClass,
+                id => isMovingBlocker(game, e, id), undefined, undefined, e.stats.isInfantry,
+              );
               e.pathIndex = 0;
               if (!e.stats.isInfantry && e.path.length > 0) {
                 e.isDriving = true;

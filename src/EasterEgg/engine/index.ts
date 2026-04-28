@@ -29,7 +29,7 @@ import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
 import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, CLOAK_DELAY_TICKS } from './entity';
-import { GameMap, Terrain } from './map';
+import { GameMap, Terrain, MoveResult } from './map';
 import { ScenarioRandom } from './random';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { findPath, nearbyLocation } from './pathfinding';
@@ -1814,15 +1814,34 @@ export class Game {
     this.map.occupancy.fill(0);
     this.map.clearSubCellOccupancy();
     for (const entity of this.entities) {
+      if (entity.alive && !entity.inLimbo &&
+          (!entity.isAirUnit || entity.flightAltitude === 0) &&
+          !entity.stats.isInfantry) {
+        this.map.setVehicleOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
+      }
+    }
+    const restoredInfantryClaims = new Set<number>();
+    for (const entity of this.entities) {
+      if (entity.alive && !entity.inLimbo &&
+          (!entity.isAirUnit || entity.flightAltitude === 0) &&
+          entity.stats.isInfantry &&
+          entity.isDriving &&
+          entity.claimedCellIdx >= 0 &&
+          entity.claimedSubCell >= 0 &&
+          this.map.occupyClaimedSubCell(entity.claimedCellIdx, entity.id, entity.claimedSubCell)) {
+        restoredInfantryClaims.add(entity.id);
+      }
+    }
+    for (const entity of this.entities) {
       if (entity.alive && !entity.inLimbo) {
         // Air units don't block ground occupancy when airborne
         if (!entity.isAirUnit || entity.flightAltitude === 0) {
           if (entity.stats.isInfantry) {
             // C++ parity: infantry with an active heading-to claim (isDriving + claimedCell)
             // have their occupy bit in the DESTINATION cell, not current cell.
-            const skipCurrentClaim = entity.isDriving && entity.claimedCellIdx >= 0;
+            const skipCurrentClaim = restoredInfantryClaims.has(entity.id);
             // Infantry: occupy a sub-cell (up to 5 per cell)
-            const subCell = skipCurrentClaim ? entity.subCell
+            const subCell = skipCurrentClaim ? entity.claimedSubCell
               : this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id, entity.subCell);
             if (subCell >= 0) {
               entity.subCell = subCell;
@@ -1839,9 +1858,6 @@ export class Game {
               }
             }
             // else: all sub-cells full — entity keeps its previous subCell
-          } else {
-            // Vehicles/buildings: block entire cell (all sub-cells)
-            this.map.setVehicleOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
           }
         }
       }
@@ -4191,6 +4207,7 @@ export class Game {
       // mission-timer jitter RNG — so we only re-enter if the handler has
       // NOT already run this tick. Matches C++ techno.cpp:2344 re-dispatch.
       if (!missionHandlerRan && entity.missionTimer === 0 &&
+          !entity._commenceFiredThisTick &&
           !entity.stats.isInfantry && !entity.isAirUnit) {
         this.dispatchMission(entity, true);
       }
@@ -5932,6 +5949,42 @@ export class Game {
     return entity.guardOrigin ? Mission.AREA_GUARD : Mission.GUARD;
   }
 
+  private isEntityMovingBlockerFor(mover: Entity, entityId: number): boolean {
+    const occupant = this.entityById.get(entityId);
+    return !!occupant?.alive &&
+      this.entitiesAllied(mover, occupant) &&
+      (occupant.isDriving || occupant.trackNumber > 0 || occupant.moveTarget !== null);
+  }
+
+  private canEnterTrackJumpCell(entity: Entity, cx: number, cy: number): MoveResult {
+    const move = this.map.canEnterCell(
+      cx,
+      cy,
+      entity.isNavalUnit,
+      id => this.isEntityMovingBlockerFor(entity, id),
+    );
+    if (move !== MoveResult.OK) return move;
+
+    // C++ UnitClass::Can_Enter_Cell first walks the physical Cell_Occupier()
+    // chain, then separately checks occupy/reservation bits. TS infantry
+    // claims live in the destination sub-cell grid while their physical cell
+    // can still block a drive-class track jump this tick.
+    for (const other of this.entities) {
+      if (other.id === entity.id || !other.alive || other.inLimbo) continue;
+      if (other.isAirUnit && other.flightAltitude > 0) continue;
+      if (other.cell.cx !== cx || other.cell.cy !== cy) continue;
+      if (this.entitiesAllied(entity, other)) {
+        return (other.isDriving || other.trackNumber > 0 || other.moveTarget !== null)
+          ? MoveResult.OCCUPIED
+          : MoveResult.TEMP_BLOCKED;
+      }
+      if (entity.stats.crusher && other.stats.isInfantry) continue;
+      return MoveResult.DESTROYABLE;
+    }
+
+    return MoveResult.OK;
+  }
+
   /** Move toward move target along path */
   private updateMove(entity: Entity, fromGuardDrive = false): void {
     // C++ PathDelay countdown (foot.cpp:463 — CDTimerClass decrements each frame)
@@ -6261,6 +6314,7 @@ export class Game {
       // after Per_Cell_Process at drive.cpp:820).
       const perCellNavComCheck = (skipCommence: boolean = false): boolean => {
         const r = unitPerCellProcess(entity, PCPType.PCP_END, { skipCommence });
+        if (r.commenceFired) entity._commenceFiredThisTick = true;
         return r.navComCleared;
       };
 
@@ -6293,14 +6347,32 @@ export class Game {
               // Track complete — vehicle is at target cell center
               entity.pathIndex += entity.trackCellSpan;
               entity.trackCellSpan = 1; // reset for next track
-              // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
-              // Session 16: skipCommence=true — defer mq pop to STAGE E / next tick
-              // to match C++ drive.cpp:816 "PCP only at actual=0" semantic.
-              if (perCellNavComCheck(true)) break;
+              // C++ DriveClass::Per_Cell_Process PCP_END runs the full chain,
+              // including UnitClass::Per_Cell_Process Commence before the
+              // DriveClass NavCom-at-dest clear.
+              if (perCellNavComCheck()) break;
               // Continue loop to chain next track on same tick (Fix 1)
               continue;
             }
             break; // Track not yet complete — done for this tick
+          }
+
+          const entryMove = (!entity.stats.isInfantry && !entity.isAirUnit)
+            ? this.canEnterTrackJumpCell(entity, chainCell.cx, chainCell.cy)
+            : MoveResult.OK;
+          if (entryMove !== MoveResult.OK) {
+            entity.trackNumber = -1;
+            entity.trackControlIndex = -1;
+            entity.trackCellSpan = 1;
+            entity.isDriving = false;
+            if (entryMove === MoveResult.DESTROYABLE || entryMove === MoveResult.IMPASSABLE) {
+              entity.moveTarget = null;
+              entity.path = [];
+              entity.pathIndex = 0;
+              setMissionIdle();
+              resetPathThreshold(entity);
+            }
+            break;
           }
 
           // Need to initiate a new track for this cell-to-cell segment
@@ -6357,10 +6429,9 @@ export class Game {
             if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
               entity.pathIndex += entity.trackCellSpan;
               entity.trackCellSpan = 1;
-              // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
-              // Session 16: skipCommence=true — defer mq pop to STAGE E / next tick
-              // to match C++ drive.cpp:816 "PCP only at actual=0" semantic.
-              if (perCellNavComCheck(true)) break;
+              // C++ DriveClass::Per_Cell_Process PCP_END runs Commence at
+              // track completion; STAGE F is suppressed for this same tick.
+              if (perCellNavComCheck()) break;
               continue; // Chain next track
             }
             break; // Track not yet complete
@@ -6825,8 +6896,11 @@ export class Game {
 
     entity.moveTarget = { lx: bestCX * 256 + 128, ly: bestCY * 256 + 128 };
     // C++ Basic_Path → Find_Path uses Can_Enter_Cell (NOT ignoring occupancy).
-    entity.path = findPath(this.map, entity.cell, { cx: bestCX, cy: bestCY },
-      false, entity.isNavalUnit, entity.stats.speedClass);
+    entity.path = findPath(
+      this.map, entity.cell, { cx: bestCX, cy: bestCY },
+      false, entity.isNavalUnit, entity.stats.speedClass,
+      id => this.isEntityMovingBlockerFor(entity, id), undefined, undefined, entity.stats.isInfantry,
+    );
     entity.pathIndex = 0;
 
     // DEBUG: hard-code C++ path for SCG03EA infantry at (54,55)→(60,49) to verify fix
@@ -7168,12 +7242,10 @@ export class Game {
 
     // Atomic occupy-bit swap: release previous claim, set new claim
     if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
-      const prevSlots = this.map.subCellOccupancy.get(entity.claimedCellIdx);
-      if (prevSlots && prevSlots[entity.claimedSubCell] === entity.id) {
-        prevSlots[entity.claimedSubCell] = 0;
-      }
+      this.map.vacateClaimedSubCell(entity.claimedCellIdx, entity.id, entity.claimedSubCell);
     }
     destSlots[freeSubCell] = entity.id;
+    if (this.map.occupancy[destIdx] === 0) this.map.occupancy[destIdx] = entity.id;
     entity.claimedCellIdx = destIdx;
     entity.claimedSubCell = freeSubCell;
 
@@ -7225,6 +7297,7 @@ export class Game {
     // adj = true when nextface differs from the current track's ending facing.
     let nextFace8 = -1; // -1 = FACING_NONE (no next direction)
     let adj = false;
+    let jumpToCell: { cx: number; cy: number } | undefined;
     const tcIdx = entity.trackControlIndex;
     if (tcIdx >= 0 && tcIdx < TRACK_CONTROL.length) {
       // Compute next path direction for track jumping (C++ drive.cpp:688 nextface = Path[0])
@@ -7244,6 +7317,7 @@ export class Game {
         const currentEndFacing8 = Math.floor(TRACK_CONTROL[tcIdx].facing / 32);
         if (nextFace8 !== currentEndFacing8) {
           adj = true;
+          jumpToCell = followingCell;
         }
       }
     }
@@ -7283,16 +7357,10 @@ export class Game {
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
-        // Phase 3g: only clear isDriving if path is exhausted (unit has arrived
-        // at end of NavCom path). C++ FootClass::Start_Driver returns TRUE via
-        // the Goodie_Check path (cell.cpp:2620 always returns true for any cell),
-        // keeping IsDriving=true for continued driving. Round-3 Phase 3f found
-        // TS was clearing isDriving here even when path had more cells, causing
-        // drive-in-GUARD state decay → Commence gate opens → Mission_Move handler
-        // fires jitter 1 tick ahead of WASM.
-        const hasMorePath = !entity.stats.isInfantry && entity.moveTarget &&
-          entity.pathIndex + entity.trackCellSpan < entity.path.length;
-        if (!entity.stats.isInfantry && !hasMorePath) entity.isDriving = false;
+        // C++ Stop_Driver() always clears IsDriving at track completion.
+        // DriveClass::AI may Start_Of_Move again later in the same pass; TS
+        // mirrors that by setting isDriving only when the next track starts.
+        if (!entity.stats.isInfantry) entity.isDriving = false;
         entity.cellBoundaryCrossings++;
         return true;
       }
@@ -7305,10 +7373,7 @@ export class Game {
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
-        // Phase 3g: same as above — keep isDriving=true when more path remains.
-        const hasMorePath2 = !entity.stats.isInfantry && entity.moveTarget &&
-          entity.pathIndex + entity.trackCellSpan < entity.path.length;
-        if (!entity.stats.isInfantry && !hasMorePath2) entity.isDriving = false;
+        if (!entity.stats.isInfantry) entity.isDriving = false;
         entity.cellBoundaryCrossings++;
         return true;
       }
@@ -7356,6 +7421,13 @@ export class Game {
           rawTrackNum >= 1 && rawTrackNum <= RAW_TRACKS.length) {
         const rawMeta = RAW_TRACKS[rawTrackNum - 1];
         if (rawMeta.jump >= 0 && rawMeta.jump === entity.trackIndex) {
+          const jumpMove = jumpToCell
+            ? this.canEnterTrackJumpCell(entity, jumpToCell.cx, jumpToCell.cy)
+            : MoveResult.IMPASSABLE;
+          if (jumpMove !== MoveResult.OK) {
+            entity.trackIndex++;
+            continue;
+          }
           // C++ drive.cpp:738: tnum = Dir_Facing(track->Facing) * FACING_COUNT + nextface
           const currentEndFacing8 = tcIdx >= 0 ? Math.floor(TRACK_CONTROL[tcIdx].facing / 32) : -1;
           if (currentEndFacing8 >= 0) {

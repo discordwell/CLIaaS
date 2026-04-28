@@ -525,6 +525,37 @@ describe('Occupancy grid — entity ID per cell (cell.cpp)', () => {
     map.setOccupancy(15, 15, 100000);
     expect(map.getOccupancy(15, 15)).toBe(100000);
   });
+
+  it('infantry destination claims occupy the requested sub-cell', () => {
+    const idx = 15 * MAP_CELLS + 15;
+
+    expect(map.occupyClaimedSubCell(idx, 42, 3)).toBe(true);
+
+    expect(map.getOccupancy(15, 15)).toBe(42);
+    expect(map.subCellOccupancy.get(idx)?.[3]).toBe(42);
+  });
+
+  it('vacating an infantry destination claim preserves other sub-cell occupants', () => {
+    const idx = 15 * MAP_CELLS + 15;
+    map.occupyClaimedSubCell(idx, 42, 1);
+    map.occupyClaimedSubCell(idx, 43, 2);
+
+    map.vacateClaimedSubCell(idx, 42, 1);
+
+    expect(map.getOccupancy(15, 15)).toBe(43);
+    expect(map.subCellOccupancy.get(idx)?.[1]).toBe(0);
+    expect(map.subCellOccupancy.get(idx)?.[2]).toBe(43);
+  });
+
+  it('infantry destination claims do not override vehicle occupancy', () => {
+    const idx = 15 * MAP_CELLS + 15;
+    map.setVehicleOccupancy(15, 15, 99);
+
+    expect(map.occupyClaimedSubCell(idx, 42, 3)).toBe(false);
+
+    expect(map.getOccupancy(15, 15)).toBe(99);
+    expect(map.subCellOccupancy.get(idx)).toBeUndefined();
+  });
 });
 
 // =============================================================================

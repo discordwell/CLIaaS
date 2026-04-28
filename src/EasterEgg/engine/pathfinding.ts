@@ -213,8 +213,10 @@ function isPassable(
   cx: number, cy: number,
   naval: boolean,
   ignoreOccupancy: boolean,
+  isMoving?: (entityId: number) => boolean,
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
+  isInfantry = false,
 ): boolean {
   if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
   // Phase 3.3 — per-team path reservation (JOINT-REFACTOR §3.3).
@@ -231,9 +233,11 @@ function isPassable(
   if (ignoreOccupancy) {
     return naval ? map.isWaterPassable(cx, cy) : map.isTerrainPassable(cx, cy);
   }
-  const result = map.canEnterCell(cx, cy, naval);
-  // C++ parity: both MOVE_MOVING_BLOCK(OCCUPIED=2) and MOVE_TEMP(TEMP_BLOCKED=4) are passable
-  return result === MoveResult.OK || result === MoveResult.OCCUPIED || result === MoveResult.TEMP_BLOCKED;
+  const result = map.canEnterCell(cx, cy, naval, isMoving, isInfantry);
+  // C++ Passable_Cell starts at MOVE_CLOAK for normal move paths and only
+  // relaxes OK/CLOAK cells beyond one cell to MOVE_MOVING_BLOCK. Stationary
+  // blockers (MOVE_TEMP) are not part of that relaxed threshold.
+  return result === MoveResult.OK || result === MoveResult.CLOAK || result === MoveResult.OCCUPIED;
 }
 
 // ============================================================================
@@ -250,11 +254,12 @@ function registerCell(
   ignoreOccupancy: boolean,
   _cellClaims?: Map<number, number>,
   _claimingEntityId?: number,
+  _isInfantry = false,
 ): boolean {
   // cellClaims args preserved for signature parity with isPassable but not
   // read here — registerCell appends moves already validated by the caller's
   // isPassable check (which applies the cellClaims filter).
-  void _cellClaims; void _claimingEntityId;
+  void _cellClaims; void _claimingEntityId; void _isInfantry;
   if (path.overlap.test(cellIdx)) {
     // Overlap detected — check if immediate backtrack
     if (path.length > 0 && path.command[path.length - 1] === opposite(dir)) {
@@ -322,8 +327,10 @@ function followEdge(
   map: GameMap,
   naval: boolean,
   ignoreOccupancy: boolean,
+  isMoving?: (entityId: number) => boolean,
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
+  isInfantry = false,
 ): boolean {
   let newdir: number;
   let oldcell_cx = startCx;
@@ -361,7 +368,7 @@ function followEdge(
         const [checkCx, checkCy] = adjacentCell(oldcell_cx, oldcell_cy, checkdir);
 
         if (checkCx === targetCx && checkCy === targetCy) {
-          if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+          if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
             newdir = checkdir;
             [newcell_cx, newcell_cy] = adjacentCell(oldcell_cx, oldcell_cy, newdir);
             foundPassable = true;
@@ -390,7 +397,7 @@ function followEdge(
 
       [newcell_cx, newcell_cy] = adjacentCell(oldcell_cx, oldcell_cy, newdir);
 
-      if (!forcefail && isPassable(map, newcell_cx, newcell_cy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+      if (!forcefail && isPassable(map, newcell_cx, newcell_cy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
         foundPassable = true;
         break;
       } else {
@@ -407,7 +414,7 @@ function followEdge(
     // Record the direction (C++ line 938-976)
     if (!forceout) {
       const newIdx = cellIndex(newcell_cx, newcell_cy);
-      if (!registerCell(path, newIdx, newcell_cx, newcell_cy, newdir, map, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+      if (!registerCell(path, newIdx, newcell_cx, newcell_cy, newdir, map, naval, ignoreOccupancy, cellClaims, claimingEntityId, isInfantry)) {
         // Loop unravel failed — in our simplified version, just fail
         // C++ tries Unravel_Loop, but the core behavior for pathfinding parity
         // is to return false on unrecoverable loops
@@ -474,8 +481,10 @@ function optimizeMoves(
   map: GameMap,
   naval: boolean,
   ignoreOccupancy: boolean,
+  isMoving?: (entityId: number) => boolean,
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
+  isInfantry = false,
 ): void {
   if (path.length === 0) return;
 
@@ -527,13 +536,14 @@ function optimizeMoves(
             // 90 degree diagonal smoothing (C++ line 1139-1148)
             // Only if the intermediate cell is passable
             const [checkCx, checkCy] = adjacentCell(cellCx, cellCy, newdir);
-            if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+            if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
               path.command[cmd2idx] = newdir;
               path.command[cmd1idx] = newdir;
             }
-            // C++ line 1145-1147: advance cell and continue regardless
-            cellCx += FACING_DX[cmd1 & 7];
-            cellCy += FACING_DY[cmd1 & 7];
+            // C++ line 1145 uses *cmd1 after the optional rewrite above.
+            const advancedDir = path.command[cmd1idx];
+            cellCx += FACING_DX[advancedDir & 7];
+            cellCy += FACING_DY[advancedDir & 7];
             cmd2idx++;
             continue;
           }
@@ -634,9 +644,10 @@ export function findPath(
   ignoreOccupancy = false,
   naval = false,
   _speedClass: SpeedClass = SpeedClass.WHEEL,
-  _isMoving?: (entityId: number) => boolean,
+  isMoving?: (entityId: number) => boolean,
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
+  isInfantry = false,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
@@ -658,9 +669,9 @@ export function findPath(
     const [nextCx, nextCy] = adjacentCell(startcell_cx, startcell_cy, direction);
 
     // Can we move directly? (C++ line 551)
-    if (isPassable(map, nextCx, nextCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+    if (isPassable(map, nextCx, nextCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
       const nextIdx = cellIndex(nextCx, nextCy);
-      registerCell(path, nextIdx, nextCx, nextCy, direction, map, naval, ignoreOccupancy, cellClaims, claimingEntityId);
+      registerCell(path, nextIdx, nextCx, nextCy, direction, map, naval, ignoreOccupancy, cellClaims, claimingEntityId, isInfantry);
       startcell_cx = nextCx;
       startcell_cy = nextCy;
       continue;
@@ -682,7 +693,7 @@ export function findPath(
         const scanDir = cellFacing(scanCx, scanCy, goal.cx, goal.cy);
         [scanCx, scanCy] = adjacentCell(scanCx, scanCy, scanDir);
 
-        if (isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+        if (isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
           break; // Found the far side
         }
 
@@ -697,7 +708,7 @@ export function findPath(
       }
 
       if (scanCx === goal.cx && scanCy === goal.cy &&
-          !isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+          !isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
         // Dest unreachable
         break;
       }
@@ -709,7 +720,7 @@ export function findPath(
         scanCx, scanCy,
         pleft, -1, direction, // -1 = COUNTERCLOCK
         MAX_MLIST_SIZE, map, naval, ignoreOccupancy,
-        cellClaims, claimingEntityId,
+        isMoving, cellClaims, claimingEntityId, isInfantry,
       );
 
       const pright = clonePathState(path, maxlen);
@@ -718,7 +729,7 @@ export function findPath(
         scanCx, scanCy,
         pright, 1, direction, // +1 = CLOCK
         MAX_MLIST_SIZE, map, naval, ignoreOccupancy,
-        cellClaims, claimingEntityId,
+        isMoving, cellClaims, claimingEntityId, isInfantry,
       );
 
       if (leftOk || rightOk) {
@@ -755,7 +766,7 @@ export function findPath(
         }
         const ddir = cellFacing(scanCx, scanCy, goal.cx, goal.cy);
         [scanCx, scanCy] = adjacentCell(scanCx, scanCy, ddir);
-        if (!isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, cellClaims, claimingEntityId)) {
+        if (!isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
           doughnutEscape = true;
           break;
         }
@@ -777,7 +788,7 @@ export function findPath(
   }
 
   // Optimize moves (C++ line 746-747)
-  optimizeMoves(path, map, naval, ignoreOccupancy, cellClaims, claimingEntityId);
+  optimizeMoves(path, map, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry);
 
   return facingsToPath(start.cx, start.cy, path.command, path.length);
 }
