@@ -5202,8 +5202,11 @@ export class Game {
         const dist = worldDist(entity.pos, other.pos);
         if (dist < 0.7) {
           // Same cell — check if move target was the transport
-          const tgtDist = worldDist(leptonPosToWorld(entity.moveTarget), other.pos);
-          if (tgtDist < 2) {
+          const targetCell = {
+            cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+            cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+          };
+          if (targetCell.cx === other.cell.cx && targetCell.cy === other.cell.cy) {
             other.passengers.push(entity);
             entity.transportRef = other;
             entity.selected = false;

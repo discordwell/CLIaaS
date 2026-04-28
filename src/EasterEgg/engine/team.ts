@@ -1060,6 +1060,17 @@ export class Team {
     for (const unit of this._members) {
       if (!unit.alive) continue;
       if (unit.passengers && unit.passengers.length > 0) {
+        const aircraftUnloading =
+          unit.stats.isAircraft &&
+          (unit.aircraftState === 'unload_search' ||
+            unit.aircraftState === 'unload_fly' ||
+            unit.aircraftState === 'unload_land' ||
+            unit.aircraftState === 'unload_eject');
+        if (aircraftUnloading) {
+          finished = false;
+          continue;
+        }
+
         // C++ team.cpp:2148-2152: Assign_Mission(UNLOAD) queues it. Commence
         // transitions when gated condition met (not IsLanding/IsTakingOff for
         // aircraft). For tick-1 reinforcement aircraft, IsTakingOff=true means
@@ -1247,14 +1258,15 @@ export class Team {
   dissolve(): void {
     for (const m of this._members) {
       m.teamRef = null;
-      // C++ team.cpp:1139 — Remove calls Enter_Idle_Mode.
-      // infantry.cpp:1348: Enter_Idle_Mode has EARLY RETURN if the infantry is
-      // already in GUARD or AREA_GUARD — it does NOT call Assign_Mission.
-      // This preserves any pending missionQueue (e.g., HUNT from coordinateDo).
-      // Only queue GUARD if the member is NOT already in a guard mission.
-      if (m.alive && m.mission !== Mission.RETREAT &&
-          m.mission !== Mission.GUARD && m.mission !== Mission.AREA_GUARD) {
-        m.missionQueue = Mission.GUARD;
+      // C++ team.cpp:1139: Remove calls Enter_Idle_Mode. Infantry preserves a
+      // legal NavCom by assigning MOVE; otherwise guard missions are left alone
+      // and non-guard units queue GUARD.
+      if (m.alive && m.mission !== Mission.RETREAT) {
+        if (m.moveTarget) {
+          assignMission(m, Mission.MOVE);
+        } else if (m.mission !== Mission.GUARD && m.mission !== Mission.AREA_GUARD) {
+          assignMission(m, Mission.GUARD);
+        }
       }
     }
     this._members = [];
