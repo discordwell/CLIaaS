@@ -166,6 +166,12 @@ function countsAsCivEvac(ctx: AircraftContext, unitType: string): boolean {
   return false;
 }
 
+/** C++ fixed(speed, 256) * maxspeed rounds with +128 before dividing by 256. */
+function aircraftSpeedAdd(maxSpeedLeptons: number, speedFraction = 1.0): number {
+  const speedByte = Math.max(0, Math.min(0xFF, Math.round(speedFraction * 0xFF)));
+  return Math.floor((maxSpeedLeptons * speedByte + 128) / 256);
+}
+
 /** C++ aircraft movement: rotate toward target, then move in CURRENT facing.
  *  Unlike entity.moveToward() which moves in desiredFacing, this replicates C++
  *  Rotation_AI() + Physics(Coord, PrimaryFacing) — the aircraft follows a curved
@@ -230,11 +236,9 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     entity.aircraftSpeedFraction = speedFraction;
   }
 
-  const effectiveSpeed = baseSpeed * entity.speedBias * (entity.aircraftSpeedFraction ?? 1.0);
-
   // Lepton accumulator (C++ fly.cpp:62-106) — same math as entity.moveToward
-  const maxSpeedLeptons = Math.floor(effectiveSpeed / LP);
-  const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+  const maxSpeedLeptons = Math.floor((baseSpeed * entity.speedBias) / LP);
+  const speedAdd = aircraftSpeedAdd(maxSpeedLeptons, entity.aircraftSpeedFraction ?? 1.0);
   const actual = speedAdd + entity.speedAccum;
   const remainder = actual % PIXEL_LEPTON_W;
   entity.speedAccum = remainder;
@@ -550,7 +554,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       if (entity.facing256 >= 0) {
         const speed = ctx.movementSpeed(entity);
         const maxSpeedLeptons = Math.floor(speed * entity.speedBias / LP);
-        const speedAdd = Math.floor((maxSpeedLeptons * 255) / 256);
+        const speedAdd = aircraftSpeedAdd(maxSpeedLeptons);
         const actual = speedAdd + entity.speedAccum;
         const remainder = actual % PIXEL_LEPTON_W;
         entity.speedAccum = remainder;

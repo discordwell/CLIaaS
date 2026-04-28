@@ -20,6 +20,7 @@ const strict = process.argv.includes('--strict');
 const SCENARIO_ID = normalizeScenarioId(process.env.RA_PARITY_SCENARIO ?? 'SCG01EA');
 const SCENARIO_FILE = `${SCENARIO_ID}.INI`;
 const WASM_AUTOPLAY_MODE = SCENARIO_ID.startsWith('SCA') ? 'ants' : 'allies';
+const PARITY_SEED = '0';
 
 type AgentCommand =
   | { cmd: 'move'; unitIds: number[]; cx: number; cy: number }
@@ -37,6 +38,8 @@ interface CheckpointReport {
 interface AgentParityReport {
   timestamp: string;
   baseUrl: string;
+  scenario: string;
+  seed: string;
   serverStartedByScript: boolean;
   status: 'ok' | 'blocked';
   blockers: string[];
@@ -366,8 +369,16 @@ async function loadWasmSequence(page: Page): Promise<SequenceCheckpoints> {
     page.on('pageerror', onPageError);
   });
 
+  const url = new URL('/ra/original.html', BASE_URL);
+  url.searchParams.set('agentharness', '1');
+  url.searchParams.set('agentautoplay', WASM_AUTOPLAY_MODE);
+  url.searchParams.set('agentseq', '1');
+  url.searchParams.set('agentwait', '1');
+  url.searchParams.set('scenario', SCENARIO_FILE);
+  url.searchParams.set('seed', PARITY_SEED);
+
   await page.goto(
-    `${BASE_URL}/ra/original.html?agentharness=1&agentautoplay=${encodeURIComponent(WASM_AUTOPLAY_MODE)}&agentseq=1&agentwait=1&scenario=${encodeURIComponent(SCENARIO_FILE)}`,
+    url.toString(),
     { waitUntil: 'load', timeout: 120_000 },
   );
   console.log('WASM: waiting for canvas');
@@ -591,6 +602,8 @@ async function main(): Promise<void> {
     const report: AgentParityReport = {
       timestamp: new Date().toISOString(),
       baseUrl: BASE_URL,
+      scenario: SCENARIO_ID,
+      seed: PARITY_SEED,
       serverStartedByScript: startedByScript,
       status: blockers.length > 0 ? 'blocked' : 'ok',
       blockers,
@@ -605,6 +618,8 @@ async function main(): Promise<void> {
       '',
       `Generated: ${report.timestamp}`,
       `Base URL: ${report.baseUrl}`,
+      `Scenario: ${report.scenario}`,
+      `Seed: ${report.seed}`,
       `Server started by script: ${report.serverStartedByScript ? 'yes' : 'no'}`,
       `Status: ${report.status}`,
       '',
