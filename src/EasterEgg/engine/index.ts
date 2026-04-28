@@ -4,7 +4,7 @@
  */
 
 import {
-  type WorldPos, type UnitStats, type WeaponStats, type ArmorType,
+  type WorldPos, type CellPos, type UnitStats, type WeaponStats, type ArmorType,
   type WarheadMeta, type WarheadProps, type LeptonPos,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
@@ -308,6 +308,42 @@ function resetPathThreshold(entity: Entity): void {
   entity.pathThreshold = MOVE_CLOAK;
   // C++ foot.cpp:1723-1735: Assign_Destination only resets PathThreshhold.
   // TryTryAgain stays at its current value; PathDelay (CDTimerClass) is not reset.
+}
+
+const IQ_GUARD_AREA = 4; // rules.ini [IQ] GuardArea=4
+
+function cellsInSameMovementZone(map: GameMap, start: CellPos, goal: CellPos, naval: boolean): boolean {
+  if (start.cx === goal.cx && start.cy === goal.cy) return true;
+
+  const passable = (cx: number, cy: number) => naval
+    ? map.isWaterPassable(cx, cy)
+    : map.isTerrainPassable(cx, cy);
+
+  if (!passable(start.cx, start.cy) || !passable(goal.cx, goal.cy)) return false;
+
+  const seen = new Uint8Array(MAP_CELLS * MAP_CELLS);
+  const qx: number[] = [start.cx];
+  const qy: number[] = [start.cy];
+  seen[start.cy * MAP_CELLS + start.cx] = 1;
+
+  for (let head = 0; head < qx.length; head++) {
+    const cx = qx[head];
+    const cy = qy[head];
+    for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
+      const idx = ny * MAP_CELLS + nx;
+      if (seen[idx]) continue;
+      if (!passable(nx, ny)) continue;
+      if (nx === goal.cx && ny === goal.cy) return true;
+      seen[idx] = 1;
+      qx.push(nx);
+      qy.push(ny);
+    }
+  }
+
+  return false;
 }
 
 /** Helper: convert WorldPos (pixels) to LeptonPos */
@@ -3981,9 +4017,12 @@ export class Game {
     // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
     if (entity.stats.isInfantry && entity.fear > 0) {
       entity.fear--;
-      // Go prone when fear >= FEAR_ANXIOUS (crawl animation handles prone+moving)
-      // C++ infantry.cpp:3496: !Class->IsDog — dogs never go prone
-      if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS && entity.type !== UnitType.I_DOG) {
+      // C++ infantry.cpp:3488-3496: prone only when afraid, on the ground, and
+      // with no legal NavCom while not actively driving. Moving HUNT/MOVE
+      // infantry keep running upright and therefore do not receive
+      // ProneDamageBias.
+      if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS && entity.type !== UnitType.I_DOG &&
+          entity.flightAltitude <= 0 && !entity.isDriving && !entity.moveTarget) {
         entity.isProne = true;
       }
       // Stand up when fear drops below FEAR_ANXIOUS
@@ -4386,12 +4425,10 @@ export class Game {
                 entity.path = [];
                 entity.pathIndex = 0;
                 entity.isDriving = false;
-                // Queue GUARD (or AREA_GUARD when guardOrigin is set). The
-                // post-dispatch Commence block (index.ts:~4381) pops this
-                // same tick for infantry, matching WASM Enter_Idle_Mode.
-                entity.missionQueue = entity.guardOrigin != null
-                  ? Mission.AREA_GUARD
-                  : Mission.GUARD;
+                // Queue the class-specific idle mission. The post-dispatch
+                // Commence block (index.ts:~4381) pops this same tick for
+                // infantry, matching WASM Enter_Idle_Mode.
+                entity.missionQueue = this.idleMission(entity);
                 entity.missionTimer = 0;
                 entity.animState = AnimState.IDLE;
                 pathFailureHandled = true;
@@ -4406,7 +4443,7 @@ export class Game {
             // path taken (foot.cpp:526). Commence popup handles the mission
             // transition at the post-dispatch block.
           } else if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
-            entity.mission = Mission.GUARD;
+            entity.mission = this.idleMission(entity);
             entity.missionTimer = 0; // fires immediately in GUARD handler
           } else {
             // C++ foot.cpp:504: Normal path — Normal_Delay + Random_Pick(0,2)
@@ -4918,6 +4955,35 @@ export class Game {
       // the target. Not subject to DriveClass::AI double-cycle.
       this._infantryWalkStep(entity);
       return;
+    }
+
+    if (DRIVE_CLASS_AI_PORT
+        && !entity.isAirUnit
+        && !entity.isNavalUnit
+        && !entity.stats.isInfantry
+        && !entity.isDriving
+        && entity.moveTarget
+        && entity.pathIndex > 0
+        && m0 !== Mission.ENTER) {
+      const destCell = {
+        cx: Math.floor(entity.moveTarget.lx / 256),
+        cy: Math.floor(entity.moveTarget.ly / 256),
+      };
+      if (!cellsInSameMovementZone(this.map, entity.cell, destCell, entity.isNavalUnit)) {
+        // C++ drive.cpp:1385-1388: DriveClass::AI clears NavCom for locked
+        // vehicles whose destination is outside their movement zone. The
+        // initial Assign_Destination call can still start one track immediately
+        // (drive.cpp:638-640), so TS only applies this after at least one path
+        // entry has been consumed.
+        entity.moveTarget = null;
+        entity.path = [];
+        entity.pathIndex = 0;
+        entity.trackNumber = -1;
+        entity.trackControlIndex = -1;
+        entity.trackCellSpan = 1;
+        resetPathThreshold(entity);
+        return;
+      }
     }
 
     // Phase 3 (JOINT-REFACTOR §3.2) — DriveClass::AI close-enough NavCom clear +
@@ -5947,8 +6013,37 @@ export class Game {
     }
   }
 
-  /** Get the idle mission for an entity (AREA_GUARD if it has a guard origin, otherwise GUARD) */
+  /** Get the C++ default idle mission for an entity class. */
   private idleMission(entity: Entity): Mission {
+    const houseIQ = this.houseIQs.get(entity.house) ?? (entity.house === this.playerHouse ? 0 : 3);
+    const hasTeam = entity.teamRef != null;
+    const isHumanHouse = entity.house === this.playerHouse;
+
+    if (entity.stats.isInfantry) {
+      // C++ InfantryClass::Enter_Idle_Mode: human/team infantry idle to GUARD.
+      // AI dogs area-guard regardless of IQ; other armed infantry need IQGuardArea.
+      if (isHumanHouse || hasTeam) return Mission.GUARD;
+      if (entity.type === UnitType.I_DOG) return Mission.AREA_GUARD;
+      return houseIQ >= IQ_GUARD_AREA && (entity.weapon != null || entity.weapon2 != null)
+        ? Mission.AREA_GUARD
+        : Mission.GUARD;
+    }
+
+    if (entity.isNavalUnit) {
+      // C++ VesselClass::Enter_Idle_Mode: human/team or unarmed vessels idle to GUARD;
+      // AI armed vessels need IQGuardArea for MISSION_GUARD_AREA.
+      if (isHumanHouse || hasTeam || entity.weapon == null) return Mission.GUARD;
+      return houseIQ >= IQ_GUARD_AREA ? Mission.AREA_GUARD : Mission.GUARD;
+    }
+
+    if (!entity.isAirUnit) {
+      // C++ UnitClass::Enter_Idle_Mode: unarmed/team land vehicles idle to GUARD;
+      // otherwise IQGuardArea selects AREA_GUARD. Scenario guardOrigin is only
+      // a TS return-point marker and must not force AREA_GUARD on player units.
+      if (hasTeam || entity.weapon == null) return Mission.GUARD;
+      return houseIQ >= IQ_GUARD_AREA ? Mission.AREA_GUARD : Mission.GUARD;
+    }
+
     return entity.guardOrigin ? Mission.AREA_GUARD : Mission.GUARD;
   }
 
@@ -6021,9 +6116,7 @@ export class Game {
         && entity.stats.isInfantry
         && (entity.mission as Mission) === Mission.MOVE
         && entity.moveTarget === null) {
-      entity.missionQueue = entity.guardOrigin != null
-        ? Mission.AREA_GUARD
-        : Mission.GUARD;
+      entity.missionQueue = this.idleMission(entity);
       // Do NOT reset missionTimer or clear path here — Enter_Idle_Mode in C++
       // only calls Assign_Mission(order). Timer=0 fires via the subsequent
       // Commence() pop in the same tick.
@@ -6862,6 +6955,8 @@ export class Game {
     const _angles = [0, 8, -8, 16, -16, 24, -24, 32, -32, 48, -48, 64, -64];
     let found = false;
     let bestCX = 0, bestCY = 0;
+    let fallbackCX = Math.floor(targetLX / 256);
+    let fallbackCY = Math.floor(targetLY / 256);
 
     // C++ sweeps from maxrange inward in steps of 0x0100 (256 leptons = 1 cell)
     for (let range = maxrange; range > 0x0080; range -= 0x0100) {
@@ -6875,6 +6970,8 @@ export class Game {
         if (distFromTarget < range) {
           const tryCX = Math.floor(tryLX / 256);
           const tryCY = Math.floor(tryLY / 256);
+          fallbackCX = tryCX;
+          fallbackCY = tryCY;
           // C++ Is_Clear_To_Move: terrain passable + cell not occupied
           const cellIdx = tryCY * 128 + tryCX;
           if (tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128 &&
@@ -6892,9 +6989,13 @@ export class Game {
     }
 
     if (!found) {
-      // Fallback: head toward target directly
-      bestCX = Math.floor(targetLX / 256);
-      bestCY = Math.floor(targetLY / 256);
+      // C++ foot.cpp:1010-1011: if the approach sweep finds no clear cell,
+      // fall back through Map.Nearby_Location(trycell), choosing by Frame % count.
+      // Game.update increments TS tick before AI dispatch; C++ Frame still names
+      // the frame being processed. Use tick-1 so first-frame AI sees Frame % n == 0.
+      const nearby = nearbyLocation(this.map, { cx: fallbackCX, cy: fallbackCY }, entity.isNavalUnit, Math.max(0, this.tick - 1));
+      bestCX = nearby?.cx ?? fallbackCX;
+      bestCY = nearby?.cy ?? fallbackCY;
     }
 
     entity.moveTarget = { lx: bestCX * 256 + 128, ly: bestCY * 256 + 128 };

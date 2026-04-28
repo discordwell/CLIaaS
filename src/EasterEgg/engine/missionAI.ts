@@ -779,6 +779,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
   // tick down 64 frames instead of the intended 65 for RoF=65 weapons.
 }
 
+function groundLayerSortKey(entity: Entity): number {
+  // C++ Map.Layer[LAYER_GROUND] is kept in ObjectClass::Sort_Y order.
+  // FootClass adds 0x30 to Y; UnitClass/AircraftClass add 0x80.
+  const yOffset = entity.stats.isInfantry ? 0x30 : 0x80;
+  return (entity.leptonY + yOffset) * 0x10000 + entity.leptonX;
+}
+
 /** Hunt mode — move toward target and attack (C++ foot.cpp:654-703)
  *  Actively calls Target_Something_Nearby when target is null or dead. */
 export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
@@ -797,6 +804,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     const huntHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
+    let bestSortKey = Infinity;
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
       if (!canTargetNaval(entity, other)) continue;
@@ -819,7 +827,12 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       // C++ Evaluate_Object has no terrain LOS check for ANY scan mode.
       // The only visibility filter is IsDiscoveredByPlayer (fog of war).
       const score = ctx.threatScore(entity, other, dist / LEPTON_SIZE);
-      if (score > bestScore) { bestScore = score; bestTarget = other; }
+      const sortKey = groundLayerSortKey(other);
+      if (score > bestScore || (score === bestScore && sortKey < bestSortKey)) {
+        bestScore = score;
+        bestSortKey = sortKey;
+        bestTarget = other;
+      }
     }
     if (bestTarget) {
       // Found a new target — continue hunting
