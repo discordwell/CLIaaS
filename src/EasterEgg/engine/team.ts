@@ -35,15 +35,21 @@ import { assignMission } from './missionLifecycle';
 /**
  * Optional context threaded through Team.ai() for a full per-tick pass.
  *
- * `structures` — used by coordinateRegroup retreat-target search (C++ team.cpp:590-616).
- * `entities`   — used by TeamClass::Recruit (team.cpp:1180-1328) to find candidates.
- * `map`        — used by drive-class Coordinate_Move to mirror
- *                DriveClass::Assign_Destination -> Start_Of_Move.
+ * `structures`     — used by coordinateRegroup retreat-target search (C++ team.cpp:590-616).
+ * `entities`       — used by TeamClass::Recruit (team.cpp:1180-1328) to find candidates.
+ * `map`            — used by drive-class Coordinate_Move to mirror
+ *                    DriveClass::Assign_Destination -> Start_Of_Move.
+ * `canEnterCell`   — vehicle Can_Enter_Cell predicate. When provided,
+ *                    coordinateMove uses it to gate the eager IsDriving=true
+ *                    flip — matching C++ `Start_Of_Move` semantics that only
+ *                    fire `Start_Driver` when Basic_Path's first cell is
+ *                    enterable (drive.cpp:638-640 + foot.cpp:313-500).
  */
 export interface TeamAIContext {
   structures?: MapStructure[];
   entities?: Entity[];
   map?: GameMap;
+  canEnterCell?: (entity: Entity, cx: number, cy: number) => boolean;
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -870,19 +876,25 @@ export class Team {
               cy: Math.floor(this.target.y / CELL_SIZE),
             };
             unit.path = findPath(ctx.map, unit.cell, goal, true, unit.isNavalUnit, unit.stats.speedClass);
-            // C++ Start_Of_Move fires Start_Driver only when Can_Enter_Cell for
-            // the next path cell returns OK. For vessels (vessel.cpp:592 / 658),
-            // post-Commence is gated on `!IsDriving && Is_Door_Closed()` —
-            // setting IsDriving=true at coord time blocks Commence pop on the
-            // next tick → Mission_Move never fires. WASM cadence (SCG07EA t2:
-            // LST+3PT reinforcement vessels) shows Mission_Move firing tick 2,
-            // implying IsDriving was false when Commence ran.
+            // C++ Start_Of_Move (drive.cpp:638-640) fires Start_Driver only
+            // when Basic_Path's FIRST step is enterable (Can_Enter_Cell == OK).
+            // For vessels, vessel.cpp:592/658 gates Commence on `!IsDriving &&
+            // Is_Door_Closed()` — eager flip blocks Mission_Move for SCG07
+            // reinforcements.
             //
-            // Skip the eager IsDriving flip for VESSELS to allow the Commence
-            // → MOVE → Mission_Move chain. Land vehicles still get the flip
-            // (drive-in-GUARD semantic preserves SCG04 t3 stagger behavior).
+            // Strategy: skip flip for vessels (vessel.cpp gate). For land
+            // vehicles, additionally check Can_Enter_Cell on the first path
+            // step (when ctx.canEnterCell provided). If blocked, Basic_Path
+            // would have failed in C++ → no Start_Driver → IsDriving stays
+            // false → Commence pops next tick → Mission_Move fires its jitter
+            // (matches SCG04EA t3 unit[73] firing Mission_Move_foot in WASM).
             if (unit.path.length > 0 && !unit.stats.isVessel) {
-              unit.isDriving = true;
+              const firstStep = unit.path[0];
+              const firstStepEnterable =
+                !ctx.canEnterCell || ctx.canEnterCell(unit, firstStep.cx, firstStep.cy);
+              if (firstStepEnterable) {
+                unit.isDriving = true;
+              }
             }
           }
         }

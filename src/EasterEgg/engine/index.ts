@@ -1906,7 +1906,15 @@ export class Game {
     if (ScenarioRandom._tagLogging) {
       ScenarioRandom._sourceTag = 1; // C++ Team AI tag
     }
-    _updateAllTeams(this.waypoints, { structures: this.structures, entities: this.entities, map: this.map });
+    _updateAllTeams(this.waypoints, {
+      structures: this.structures,
+      entities: this.entities,
+      map: this.map,
+      // C++ Can_Enter_Cell port (vehicles only): drive.cpp:638-640 Start_Of_Move
+      // fires Start_Driver iff Basic_Path's first step is enterable. This
+      // callback delegates to the same helper used by drive-class track-jump.
+      canEnterCell: (entity, cx, cy) => this.canEnterTrackJumpCell(entity, cx, cy) === MoveResult.OK,
+    });
 
     // C++ terrain.cpp:497 — TerrainClass::AI on TERRAIN_MINE fires Spread_Tiberium
     // every Frame % (Rule.GrowthRate * TICKS_PER_MINUTE) == 0. Consumes 2 RNGs:
