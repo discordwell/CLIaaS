@@ -870,7 +870,20 @@ export class Team {
               cy: Math.floor(this.target.y / CELL_SIZE),
             };
             unit.path = findPath(ctx.map, unit.cell, goal, true, unit.isNavalUnit, unit.stats.speedClass);
-            if (unit.path.length > 0) unit.isDriving = true;
+            // C++ Start_Of_Move fires Start_Driver only when Can_Enter_Cell for
+            // the next path cell returns OK. For vessels (vessel.cpp:592 / 658),
+            // post-Commence is gated on `!IsDriving && Is_Door_Closed()` —
+            // setting IsDriving=true at coord time blocks Commence pop on the
+            // next tick → Mission_Move never fires. WASM cadence (SCG07EA t2:
+            // LST+3PT reinforcement vessels) shows Mission_Move firing tick 2,
+            // implying IsDriving was false when Commence ran.
+            //
+            // Skip the eager IsDriving flip for VESSELS to allow the Commence
+            // → MOVE → Mission_Move chain. Land vehicles still get the flip
+            // (drive-in-GUARD semantic preserves SCG04 t3 stagger behavior).
+            if (unit.path.length > 0 && !unit.stats.isVessel) {
+              unit.isDriving = true;
+            }
           }
         }
         finished = false;
