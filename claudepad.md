@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-04-29T14:50Z — Can_Enter_Cell gate + SCG04 root cause is Basic_Path MOVE_TEMP
+
+**Commit:** `5981a542` "fix(team): add Can_Enter_Cell gate before isDriving flip in coordinateMove"
+
+**What:** Threaded an optional `canEnterCell(entity, cx, cy)` callback through TeamAIContext. Game wires it to `canEnterTrackJumpCell === MoveResult.OK`. coordinateMove only flips isDriving=true when first path step is enterable — matching C++ Start_Of_Move (drive.cpp:638-640) → Start_Driver (foot.cpp:830) gate.
+
+**Effect on SCG04 t3:** None. Both BadGuy 3TNK paths' first cells are open in TS. canEnterCell returns OK for both → both get isDriving=true → both Commence-blocked → neither fires Mission_Move. WASM has unit[73] (3TNK at 42,35) IsDriving=false (Mission_Move fires), unit[74] IsDriving=true (drives-in-GUARD).
+
+**SCG04 t3 root cause (unfixed):** WASM's `FootClass::Basic_Path` (foot.cpp:313) uses `maxtype=MOVE_TEMP` for AI units. This evaluates friendly Cell_Occupier-occupied cells as MOVE_TEMP (transient block) and treats some path costs as failures. TS's `findPath(ignoreOccupancy=true)` does terrain-only — never fails for occupancy reasons. Without porting the full Basic_Path MOVE_TEMP/MOVE_OK/MOVE_NO cost gradient + global path reservation map (findpath.cpp), unit[73]'s Basic_Path won't fail like WASM's does.
+
+**Captured live state via scripts/test-scg04-t3-tanks.ts:**
+- Tick 3 TS: tank id=2 (cell 42,35) Mission=GUARD/MOVE-queued, drv=true, path=6 — Commence blocked.
+- Tick 3 TS: tank id=3 (cell 39,34) Mission=GUARD/MOVE-queued, drv=true, path=9 — Commence blocked.
+- WASM equivalents: unit[73] IsDriving=false (Mission_Move fires), unit[74] IsDriving=true.
+- Geometry rules out simple friendly-blocker — paths don't intersect each other's starting cells.
+
+**Verdict:** SCG04 t3 is a structural port gap (Basic_Path cost gradient) requiring substantial work, deferred to a future session.
+
 ## 2026-04-29T14:30Z — Merged Codex parity branch + narrow vessel isDriving fix
 
 **Codex branch merged:** 9 commits from `codex/easter-egg-parity-windows-setup` (~1600 LOC additions across pathfinding, drive blocker occupancy, transport unload cadence, terrain speeds, harvester/ore parity, SCG01 drive+hunt, Windows build).
