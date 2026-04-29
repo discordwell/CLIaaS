@@ -300,13 +300,14 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     expect(tank.missionTimer, 'Mission_Move set Timer = 14 + jitter (0..2)').toBeLessThanOrEqual(16);
   });
 
-  it('coordinateMove stripped to C++ purity: no path population, no isDriving flip (Step 6)', () => {
-    // Post-Step-6 strip: C++ `TeamClass::Coordinate_Move` (team.cpp:1938)
-    // is just `Assign_Mission(MOVE) + Assign_Destination(target)`. It does
-    // NOT call Basic_Path, Start_Driver, or Do_Turn. Those run later from
-    // `DriveClass::AI` → `Start_Of_Move` (drive.cpp:906) on the unit's own
-    // AI tick. `runDriveClassAI` (index.ts) regens the path when
-    // `path.length === 0` at dispatch.
+  it('coordinateMove with map ctx: path populated via Basic_Path + isDriving=true (C++ Start_Driver)', () => {
+    // C++ port: `Coordinate_Move` calls `Assign_Destination`, which calls
+    // `Start_Of_Move` synchronously (drive.cpp:638-640) when `!IsDriving`.
+    // `Start_Of_Move` calls `Basic_Path` (foot.cpp:313-500). On path success,
+    // `Start_Driver` fires and flips `IsDriving=true` — all from the
+    // team-coord phase (Codex commit c6907cda "Mirror C++ blocked-destination
+    // path setup"). My earlier Step 1/Step 6 strip removed both behaviors;
+    // they were correct C++ ports, not workarounds.
     const game = createGame();
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
     mcv.facing = 2; // East — matches target direction
@@ -326,9 +327,8 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
 
     expect(mcv.moveTarget, 'MCV moveTarget set (Assign_Destination)').not.toBeNull();
-    // C++ Coordinate_Move doesn't call Basic_Path — path stays empty post-coord.
-    expect(mcv.path.length, 'path NOT populated at coord (Basic_Path runs from DriveClass::AI)').toBe(0);
-    expect(mcv.isDriving, 'isDriving=false post-coord (C++ coord never sets IsDriving)').toBe(false);
+    expect(mcv.path.length, 'path populated via Basic_Path at coord (drive.cpp:638-640)').toBeGreaterThan(0);
+    expect(mcv.isDriving, 'isDriving=true post-coord (C++ Assign_Destination → Start_Of_Move → Start_Driver)').toBe(true);
   });
 
   it('drives-in-GUARD remains unaffected for second-team isDriving=true vehicles', () => {
