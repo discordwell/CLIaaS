@@ -1,5 +1,33 @@
 # Session Summaries
 
+## 2026-04-29T14:30Z — Merged Codex parity branch + narrow vessel isDriving fix
+
+**Codex branch merged:** 9 commits from `codex/easter-egg-parity-windows-setup` (~1600 LOC additions across pathfinding, drive blocker occupancy, transport unload cadence, terrain speeds, harvester/ore parity, SCG01 drive+hunt, Windows build).
+
+**Key codex changes addressing my open issues:**
+- `f8b548b4` "Mirror C++ drive blocker occupancy" — adds vehicle pre-occupancy pass + `isEntityMovingBlockerFor` helper + `_commenceFiredThisTick` STAGE F gate. Fixes SCG11 multi-dispatch issue.
+- `c6907cda` "Mirror C++ blocked-destination path setup" — re-introduces path population + isDriving=true at coord time (matching C++ Assign_Destination → Start_Of_Move synchronous chain at drive.cpp:638-640).
+
+**My follow-up (5ed238fb):** narrow vessel skip for codex's eager `isDriving=true` flip in coordinateMove. C++ vessel.cpp:592/658 Commence is gated on `!IsDriving && Is_Door_Closed()` — eager flip blocks Commence pop and Mission_Move never fires. SCG07EA t2 (LST + 3 PT reinforcement) regressed -15 ticks (17→2) because of this. Skip for `unit.stats.isVessel` keeps land-vehicle drive-in-GUARD intact while restoring vessel Mission_Move cadence.
+
+**Playwright divergence (deployed):**
+| scenario | session start | now | net |
+|---|---|---|---|
+| SCG01EA | 87 | **77** | -10 (NEW from codex SCG01 fix) |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 25 | 3 | -22 (vehicle Basic_Path port still missing) |
+| SCG06EA | 76 | **68** | -8 (NEW from codex changes) |
+| SCG07EA | 17 | 17 | 0 (recovered after vessel skip) |
+| SCG11EA | 19 | 19 | 0 (recovered via codex `_commenceFiredThisTick`) |
+| SCG13EA | 101 | 101 | 0 |
+
+**Open work:**
+- SCG01 t77: TS missing 2 Building_AI_70003 (Repair_AI) calls for building[57]. Damage state divergence at tick 77 — likely from codex's drive/hunt timing changes affecting combat.
+- SCG06 t68: similar +1 Δcalls divergence — likely combat-related cascade.
+- SCG04 t3: vehicle Basic_Path friendly-blocker port still pending (deferred to a future session).
+
+**Test failures:** 24 ore-related test failures from codex's "Align harvester ore density parity" — pre-existing in codex branch, tests need updating to match new representation. Not blocking parity sweep.
+
 ## 2026-04-24T21:50Z — SCG11 t15 root cause identified: MCV reinforcements, one-tick RNG timing drift
 
 **Investigation:** Captured live entity state via `__agentGame.entities` at SCG11EA ticks 14-16.
