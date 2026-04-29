@@ -440,13 +440,15 @@ describe('Ore destruction via warhead (combat.cpp)', () => {
     expect(WARHEAD_META.Super.destroysOre).toBeFalsy();
   });
 
-  it('Nuke splash destroys ore overlay at impact', () => {
+  it('Nuke splash destroys ore density at impact', () => {
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 10);
     const ctx = makeCombatCtx([attacker]);
 
-    // Place gold ore at (10, 10) — overlay value 0x05 (gold, medium density)
+    // Place gold ore at (10, 10): visual variant 0x05 + density 5.
+    // C++ Reduce_Tiberium decrements OverlayData (oreDensity), not Overlay.
     const oreIdx = 10 * 128 + 10;
     ctx.map.overlay[oreIdx] = 0x05;
+    ctx.map.oreDensity[oreIdx] = 5;
 
     applySplashDamage(
       ctx,
@@ -455,8 +457,8 @@ describe('Ore destruction via warhead (combat.cpp)', () => {
       -1, attacker.house, attacker,
     );
 
-    // Ore density should have decreased (0x05 → 0x04, or fully depleted for minimum density)
-    expect(ctx.map.overlay[oreIdx]).toBeLessThan(0x05);
+    // C++ Nuke warhead destroysOre → reduceOreLevel decrements oreDensity by 1.
+    expect(ctx.map.oreDensity[oreIdx], 'oreDensity decremented').toBe(4);
   });
 
   it('HE splash does NOT destroy ore overlay', () => {

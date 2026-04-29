@@ -871,9 +871,9 @@ describe('Ore growth/spread rules (cell.cpp:2877-2918)', () => {
 
   it('gold ore spread requires density > 6 (C++ cell.cpp:2914)', () => {
     // C++ cell.cpp:2914: if (OverlayData <= 6) return(false);
-    // TS: GameMap.ORE_SPREAD_MIN_DENSITY = 0x09 (overlay 0x09 = density 6)
-    // Spread triggers when density > 6, i.e., overlay > 0x09
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+    // Codex's port (commit 5052eb5e) stores density in oreDensity[] directly,
+    // matching C++ Overlay vs OverlayData split. The constant equals C++'s.
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 });
 

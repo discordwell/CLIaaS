@@ -70,12 +70,43 @@ const CPP_RESERVOIR_SIZE = CPP_MAP_CELL_W / 2;               // map.h:160 = 64
 // ============================================================
 // Helpers
 // ============================================================
+/**
+ * Codex's representation port (commit 5052eb5e) split TS's old "12 linear gold
+ * density bytes" into separate `overlay[]` (visual variant) + `oreDensity[]`
+ * (C++ OverlayData) — matching C++ defines.h:1487-1490 OVERLAY_GOLD1..GOLD4 and
+ * cell.cpp:1630-1648 Reduce_Tiberium semantics.
+ *
+ * These tests originally encoded density inline into the overlay byte (e.g.
+ * `setOverlay(map, x, y, 0x0D)` meant "gold at density 10"). The helpers below
+ * preserve that compact spelling but route to BOTH arrays so density-sensitive
+ * Can_Tiberium_Grow / Can_Tiberium_Spread checks see the right value.
+ */
 function getOverlay(map: GameMap, cx: number, cy: number): number {
-  return map.overlay[cy * MAP_CELLS + cx];
+  const idx = cy * MAP_CELLS + cx;
+  const ovl = map.overlay[idx];
+  if (ovl >= 0x03 && ovl <= 0x0E) {
+    // Re-encode visual + density back into the legacy 0x03-0x0E byte the
+    // tests expect (density 0..11 → byte 0x03..0x0E).
+    const density = map.oreDensity[idx];
+    if (density !== undefined && density !== 0xFF) {
+      return 0x03 + Math.min(11, density);
+    }
+  }
+  return ovl;
 }
 
 function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {
-  map.overlay[cy * MAP_CELLS + cx] = val;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = val;
+  if (val >= 0x03 && val <= 0x0E) {
+    // Gold visual byte → density = byte - 0x03 (matches old TS encoding).
+    map.oreDensity[idx] = val - 0x03;
+  } else if (val >= 0x0F && val <= 0x12) {
+    // Gem visual byte → density = byte - 0x0F (4 visual variants).
+    map.oreDensity[idx] = val - 0x0F;
+  } else {
+    map.oreDensity[idx] = 0xFF;
+  }
 }
 
 // ============================================================
@@ -243,11 +274,11 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
    * TS map.ts:751: "if (ovl <= GameMap.ORE_SPREAD_MIN_DENSITY) continue;"
    * So TS requires ovl > 0x09, i.e. ovl >= 0x0A. PARITY MATCH.
    */
-  it('ORE_SPREAD_MIN_DENSITY=0x09 matches C++ OverlayData <= 6 check', () => {
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
-    // C++ threshold: OverlayData > 6, i.e. overlay >= 0x0A (= 0x03 + 7)
-    // TS threshold: overlay > 0x09, i.e. overlay >= 0x0A
-    // PARITY MATCH
+  it('ORE_SPREAD_MIN_DENSITY=6 matches C++ OverlayData > 6 check', () => {
+    // C++ cell.cpp:2904-2918 Can_Tiberium_Spread: `if (OverlayData > 6)`.
+    // Codex's port stores density directly in oreDensity[]; the constant is
+    // the raw C++ threshold value (no overlay-byte indirection needed).
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 
   it('overlay 0x09 (OverlayData=6) canNOT spread', () => {

@@ -1223,22 +1223,31 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
   // -- Overlay ranges --
 
-  it('gold ore range: 0x03 (GOLD01) through 0x0E (GOLD12)', () => {
-    // Verify depleteOre returns 25 (rules.ini GoldValue=25) for entire gold range
+  it('gold ore range: 0x03 (GOLD01) through 0x0E (GOLD12) — visual variants only', () => {
+    // C++ defines.h:1487-1490: OVERLAY_GOLD1..GOLD4 (4 visual variants).
+    // C++ stores density in CellClass::OverlayData (separate field).
+    // TS encodes 12 visual byte values (compatibility legacy from MapPack); each
+    // is gold IF the cell also has density > 0. depleteOre returns 25 only when
+    // density > 0 (matching C++ Reduce_Tiberium semantics: cell.cpp:1630-1648).
     for (let ovl = 0x03; ovl <= 0x0E; ovl++) {
       const m = new GameMap();
-      m.overlay[15 * MAP_CELLS + 15] = ovl;
+      const idx = 15 * MAP_CELLS + 15;
+      m.overlay[idx] = ovl;
+      m.oreDensity[idx] = 5; // explicit non-zero density (~mid-level)
       const credits = m.depleteOre(15, 15);
-      expect(credits, `overlay 0x${ovl.toString(16)} should be gold`).toBe(25);
+      expect(credits, `overlay 0x${ovl.toString(16)} with density=5 should yield 25`).toBe(25);
     }
   });
 
-  it('gem range: 0x0F (GEM01) through 0x12 (GEM04)', () => {
+  it('gem range: 0x0F (GEM01) through 0x12 (GEM04) — visual variants only', () => {
+    // C++ defines.h:1491-1494: OVERLAY_GEMS1..GEMS4. Density in OverlayData.
     for (let ovl = 0x0F; ovl <= 0x12; ovl++) {
       const m = new GameMap();
-      m.overlay[15 * MAP_CELLS + 15] = ovl;
+      const idx = 15 * MAP_CELLS + 15;
+      m.overlay[idx] = ovl;
+      m.oreDensity[idx] = 2; // explicit gem density (max=2)
       const credits = m.depleteOre(15, 15);
-      expect(credits, `overlay 0x${ovl.toString(16)} should be gem`).toBe(50);
+      expect(credits, `overlay 0x${ovl.toString(16)} with density=2 should yield 50`).toBe(50);
     }
   });
 
@@ -1258,30 +1267,41 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
   // -- Depletion mechanics --
 
-  it('depleting gold ore decrements overlay by 1', () => {
+  it('depleting gold ore decrements oreDensity by 1 (C++ OverlayData -= 1)', () => {
+    // C++ cell.cpp:1630-1648 Reduce_Tiberium: decrements OverlayData (density),
+    // NOT Overlay (visual type). Overlay only changes when density reaches 0
+    // and the cell empties.
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x08; // gold density 5
+    map.overlay[idx] = 0x08; // GOLD visual variant
+    map.oreDensity[idx] = 5;
     map.depleteOre(15, 15);
-    expect(map.overlay[idx]).toBe(0x07);
+    expect(map.oreDensity[idx], 'density decremented').toBe(4);
+    expect(map.overlay[idx], 'overlay (visual type) unchanged while density > 0').toBe(0x08);
   });
 
-  it('depleting gold ore at minimum (0x03) sets to 0xFF (fully depleted)', () => {
+  it('depleting gold ore at density=0 sets overlay to 0xFF (fully depleted)', () => {
+    // C++ cell.cpp:1640-1644: when OverlayData+1 <= levels (i.e. density=0
+    // and trying to deplete 1), Overlay = OVERLAY_NONE, OverlayData = 0.
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x03; // gold minimum
+    map.overlay[idx] = 0x03;
+    map.oreDensity[idx] = 0;
     map.depleteOre(15, 15);
     expect(map.overlay[idx]).toBe(0xFF);
   });
 
-  it('depleting gem decrements overlay by 1', () => {
+  it('depleting gem decrements oreDensity by 1', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x11; // gem density 2
+    map.overlay[idx] = 0x11; // GEM visual variant
+    map.oreDensity[idx] = 2;
     map.depleteOre(15, 15);
-    expect(map.overlay[idx]).toBe(0x10);
+    expect(map.oreDensity[idx]).toBe(1);
+    expect(map.overlay[idx]).toBe(0x11);
   });
 
-  it('depleting gem at minimum (0x0F) sets to 0xFF (fully depleted)', () => {
+  it('depleting gem at density=0 sets overlay to 0xFF (fully depleted)', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x0F;
+    map.oreDensity[idx] = 0;
     map.depleteOre(15, 15);
     expect(map.overlay[idx]).toBe(0xFF);
   });
@@ -1289,12 +1309,14 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
   it('gold bail value = 25 credits (rules.ini GoldValue=25)', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x08;
+    map.oreDensity[idx] = 5;
     expect(map.depleteOre(15, 15)).toBe(25);
   });
 
   it('gem bail value = 50 credits (rules.ini GemValue=50)', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.overlay[idx] = 0x10;
+    map.oreDensity[idx] = 2;
     expect(map.depleteOre(15, 15)).toBe(50);
   });
 
@@ -1880,8 +1902,10 @@ describe('Ore growth constants (C++ overlay.cpp parity)', () => {
     expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
-  it('ORE_SPREAD_MIN_DENSITY = 0x09 (density > 6 required to spread)', () => {
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+  it('ORE_SPREAD_MIN_DENSITY = 6 (C++ Can_Tiberium_Spread checks OverlayData > 6)', () => {
+    // C++ cell.cpp:2904-2918: Spread requires `OverlayData > 6` (density > 6).
+    // Codex's representation stores density directly, so the constant is 6.
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 
   it('ORE_GROWTH_INTERVAL = 1821 ticks (~121 seconds at 15 FPS)', () => {

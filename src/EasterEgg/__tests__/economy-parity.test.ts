@@ -30,14 +30,33 @@ describe('Economy Parity (C++ Red Alert)', () => {
     ScenarioRandom.seed = 0;
   });
 
-  /** Helper: get overlay at cell */
+  /** Helper: re-encode overlay+oreDensity back into legacy compact byte form
+   *  for tests written against pre-codex representation. */
   function getOverlay(cx: number, cy: number): number {
-    return map.overlay[cy * MAP_CELLS + cx];
+    const idx = cy * MAP_CELLS + cx;
+    const ovl = map.overlay[idx];
+    if (ovl >= 0x03 && ovl <= 0x0E) {
+      const d = map.oreDensity[idx];
+      if (d !== undefined && d !== 0xFF) return 0x03 + Math.min(11, d);
+    }
+    if (ovl >= 0x0F && ovl <= 0x12) {
+      const d = map.oreDensity[idx];
+      if (d !== undefined && d !== 0xFF) return 0x0F + Math.min(3, d);
+    }
+    return ovl;
   }
 
-  /** Helper: set overlay at cell */
+  /** Helper: split legacy compact byte into the C++-faithful pair. */
   function setOverlay(cx: number, cy: number, val: number): void {
-    map.overlay[cy * MAP_CELLS + cx] = val;
+    const idx = cy * MAP_CELLS + cx;
+    map.overlay[idx] = val;
+    if (val >= 0x03 && val <= 0x0E) {
+      map.oreDensity[idx] = val - 0x03;
+    } else if (val >= 0x0F && val <= 0x12) {
+      map.oreDensity[idx] = val - 0x0F;
+    } else {
+      map.oreDensity[idx] = 0xFF;
+    }
   }
 
   // === EC1/EC2: depleteOre credit values ===
@@ -55,11 +74,20 @@ describe('Economy Parity (C++ Red Alert)', () => {
       expect(credits).toBe(25);
     });
 
-    it('depleting gold ore at min density returns 25 and fully depletes', () => {
-      setOverlay(50, 50, 0x03); // GOLD01 min density
-      const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(25);
-      expect(getOverlay(50, 50)).toBe(0xFF); // fully depleted
+    it('depleting from density=1 returns 25 then depleting again clears overlay (C++ Reduce_Tiberium)', () => {
+      // C++ cell.cpp:1630-1648 Reduce_Tiberium semantics:
+      //   OverlayData=1, levels=1 → OverlayData+1>1 true → OverlayData-=1 → 0,
+      //                              reducer=1 returned.
+      //   OverlayData=0, levels=1 → OverlayData+1>1 false → Overlay=NONE,
+      //                              reducer=0 returned.
+      // So fully depleting takes TWO calls: first yields a bail, second clears.
+      const idx = 50 * MAP_CELLS + 50;
+      map.overlay[idx] = 0x03;
+      map.oreDensity[idx] = 1;
+      expect(map.depleteOre(50, 50), 'first call yields last bail').toBe(25);
+      expect(map.oreDensity[idx], 'density now 0').toBe(0);
+      expect(map.depleteOre(50, 50), 'second call returns 0 (overlay cleared)').toBe(0);
+      expect(map.overlay[idx], 'overlay finally cleared').toBe(0xFF);
     });
 
     it('depleting empty cell returns 0', () => {
@@ -80,11 +108,14 @@ describe('Economy Parity (C++ Red Alert)', () => {
       expect(credits).toBe(50);
     });
 
-    it('depleting gem at min density returns 50 and fully depletes', () => {
-      setOverlay(50, 50, 0x0F); // GEM01 min density
-      const credits = map.depleteOre(50, 50);
-      expect(credits).toBe(50);
-      expect(getOverlay(50, 50)).toBe(0xFF); // fully depleted
+    it('depleting gem from density=1 returns 50 then clears (C++ Reduce_Tiberium)', () => {
+      const idx = 50 * MAP_CELLS + 50;
+      map.overlay[idx] = 0x0F;
+      map.oreDensity[idx] = 1;
+      expect(map.depleteOre(50, 50)).toBe(50);
+      expect(map.oreDensity[idx]).toBe(0);
+      expect(map.depleteOre(50, 50)).toBe(0);
+      expect(map.overlay[idx]).toBe(0xFF);
     });
   });
 
@@ -313,8 +344,10 @@ describe('Economy Parity (C++ Red Alert)', () => {
       expect(getOverlay(49, 49)).toBe(0x03); // spread to NW diagonal
     });
 
-    it('ORE_SPREAD_MIN_DENSITY is 0x09', () => {
-      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+    it('ORE_SPREAD_MIN_DENSITY is 6 (C++ OverlayData > 6)', () => {
+      // C++ cell.cpp:2904-2918 Can_Tiberium_Spread requires OverlayData > 6.
+      // Codex's port stores density directly (no overlay-byte indirection).
+      expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
     });
   });
 

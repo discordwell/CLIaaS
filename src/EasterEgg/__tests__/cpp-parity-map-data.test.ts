@@ -171,25 +171,30 @@ describe('Overlay constants -- C++ OverlayType enum (defines.h:1487-1499)', () =
       expect(TS_GOLD_MAX - TS_GOLD_MIN + 1).toBe(12);
     });
 
-    it('REPRESENTATION DIVERGENCE: C++ 4 gold types x density-per-cell; TS 12 linear density bytes', () => {
-      // C++ uses 4 OverlayType enums (GOLD1-4) x per-cell density counters.
-      // TS encodes the same range as 12 linear bytes (0x03-0x0E).
-      // Different internal representation, identical gameplay behavior:
-      // every bail yields GoldValue=25 regardless of density level.
+    it('REPRESENTATION PARITY: C++ Overlay (4 gold types) + OverlayData (density) ↔ TS overlay[] + oreDensity[]', () => {
+      // C++ defines.h:1487-1490 has 4 gold OverlayType enums (GOLD1-4 = visual
+      // variants) plus per-cell OverlayData density. TS now mirrors via two
+      // arrays: overlay[] (12 visual byte values from MapPack legacy) +
+      // oreDensity[] (density 0-11). depleteOre yields GoldValue=25 per bail
+      // when density > 0, matching C++ Reduce_Tiberium (cell.cpp:1630-1648).
       const map = new GameMap();
       map.setBounds(0, 0, 128, 128);
-      const TS_GOLD_MIN = 0x03;
-      const TS_GOLD_MAX = 0x0E;
-      for (let density = TS_GOLD_MIN; density <= TS_GOLD_MAX; density++) {
-        map.overlay[60 * MAP_CELLS + 60] = density;
-        expect(map.depleteOre(60, 60), `density 0x${density.toString(16)} should yield 25`).toBe(25);
+      const idx = 60 * MAP_CELLS + 60;
+      // For each visual variant, set explicit non-zero density and verify
+      // depleteOre yields 25 — proves visual is decoupled from density.
+      for (let visual = 0x03; visual <= 0x0E; visual++) {
+        map.overlay[idx] = visual;
+        map.oreDensity[idx] = 5; // arbitrary mid-level density
+        expect(map.depleteOre(60, 60), `visual 0x${visual.toString(16)} d=5 → 25`).toBe(25);
       }
     });
 
-    it('depleteOre returns 25 credits for gold (rules.ini GoldValue=25)', () => {
+    it('depleteOre returns 25 credits for gold with non-zero density (rules.ini GoldValue=25)', () => {
       const map = new GameMap();
       map.setBounds(0, 0, 128, 128);
-      map.overlay[50 * MAP_CELLS + 50] = 0x05; // mid-density gold
+      const idx = 50 * MAP_CELLS + 50;
+      map.overlay[idx] = 0x05; // GOLD3 visual
+      map.oreDensity[idx] = 5;  // mid-level density
       expect(map.depleteOre(50, 50)).toBe(25);
       expect(iniFloat('General', 'GoldValue')).toBe(25);
     });
@@ -401,11 +406,11 @@ describe('GrowthRate -- ore regrowth timing', () => {
     expect(GameMap.RESERVOIR_SIZE).toBe(64);
   });
 
-  it('ORE_SPREAD_MIN_DENSITY = 0x09 (density > 6 threshold for spreading)', () => {
-    // C++ cell.cpp:2936: "if (OverlayData[cell] > 6)" (0-based density index)
-    // TS gold overlay range: 0x03 (density 0) to 0x0E (density 11)
-    // Density > 6 means overlay byte > 0x03 + 6 = 0x09
-    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(0x09);
+  it('ORE_SPREAD_MIN_DENSITY = 6 (density > 6 threshold for spreading)', () => {
+    // C++ cell.cpp:2936: `if (OverlayData[cell] > 6)`. Codex's TS port stores
+    // density in `oreDensity[]` (separate from `overlay[]` visual variant),
+    // so the constant is the raw C++ threshold value.
+    expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 });
 
