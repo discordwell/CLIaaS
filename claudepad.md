@@ -1,5 +1,23 @@
 # Session Summaries
 
+## 2026-04-30T00:30Z — Investigated remaining divergences (no fixes landed)
+
+After SCG06 +8 win, investigated several remaining first-divergence ticks. Found timer/ordering offsets but no quick fixes:
+
+**SCG13EA t101 (TS missing 1 call):** Both TS and WASM have E1 USSR @(27,46) in Mission.STICKY. Both timers fire at tick 101. Confirmed via instrumentation that TS dispatchMission STICKY case calls `ScenarioRandom.nextInRange(0,2)` (logged jitter=0). Yet `__rngTagControl` callCount only +6 at tick 101 — should be +7. Likely a code-splitting issue (chunks 89711 & 94745 both reference `_seedLog`) or some compile-time anomaly. Would need bundle inspection to confirm.
+
+**SCG11EA t19 (TS extra 1 call):** TS 4TNK USSR @(60,58) stays in Mission.MOVE; WASM equivalent unit cycles GUARD↔MOVE via Mission_Move's Enter_Idle_Mode (NavCom invalidated → switches to GUARD). Tick 1 timer values differ (TS=43, WASM=42) despite RNG totals matching at tick 1 (139 each) — suggests order of fire differs, not RNG call count. Requires deeper team coordinator port to mirror C++ drive-in-GUARD.
+
+**SCG07EA t17 (TS missing 7 calls):** 2 Building_AI_70003 (Mission_Guard for TSLAs at 83,80 and 93,73) + 5 Mission_Move_foot for vessels[182,183] (LST + PT reinforcements). TSLA timer offset; vessels delayed by niat=3 proxy. Both require structural port work.
+
+**SCG03EA t238 (TS extra 1 call):** TS fires Mission_Guard ONE TICK EARLY for some unit (logicIdx 0). Same general 1-tick offset pattern as SCG11.
+
+**SCG06EA t76 (TS missing 2 calls):** Path-shorten timing offset — TS at tick 75, WASM at tick 74. USSR E1 id=24 firePrepActive stage advances 0→5 over t73-78. Potentially the underlying movement-speed or PCP_END timing.
+
+**SCG01EA t77 (TS missing 2 calls):** Building_AI_70003 for building[57] firing twice (rejection sampling). Damaged building Mission_Guard cycle. Timer offset.
+
+**Verdict:** All remaining divergences are timer-initialization 1-tick drifts or substantial structural port work (Basic_Path MOVE_TEMP, vessel double-Commence, team coord drive-in-GUARD). No quick fixes found.
+
 ## 2026-04-29T19:50Z — coordinateDo TarCom-preservation fix (preventive)
 
 **Commit:** `9e44cb62` "fix(team): preserve TarCom in coordinateDo (analogous to coordinateMove)"
