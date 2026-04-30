@@ -1,5 +1,13 @@
 # Session Summaries
 
+## 2026-04-29T19:50Z — coordinateDo TarCom-preservation fix (preventive)
+
+**Commit:** `9e44cb62` "fix(team): preserve TarCom in coordinateDo (analogous to coordinateMove)"
+
+Code review of `14e56d67` flagged the analogous bug in `team.coordinateDo`. C++ `TeamClass::Coordinate_Do` (team.cpp:1813-1860) only clears TarCom/NavCom inside the regrouping branch (line 1848), gated by `!Target_Legal(unit->TarCom) && !Target_Legal(unit->NavCom) && unit->Mission != do_mission` — i.e., the clears are redundant in C++. TS unconditionally cleared `unit.target` and `unit.moveTarget` for every member.
+
+Removed the unconditional clears. No first-divergence ticks change for the 7 tracked scenarios — preventive C++-faithful fix that protects against the same hazard the coordinateMove fix addressed (a `triggerRetaliation`-set TarCom being nullified the next time a team mission was queued). 51,378 vitest pass.
+
 ## 2026-04-29T19:30Z — coordinateMove TarCom-preservation fix (SCG06EA 68→76)
 
 **Commit:** `14e56d67` "fix(team): preserve TarCom in coordinateMove (SCG06EA 68→76)"
