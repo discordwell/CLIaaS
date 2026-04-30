@@ -994,18 +994,25 @@ export class Team {
    * Assign a specific mission to all members.
    */
   coordinateDo(mission: TeamMissionEntry): void {
-    // C++ team.cpp:1844-1849 — Coordinate_Do calls Assign_Mission(do_mission)
-    // which QUEUES the mission. Commence() in InfantryClass::AI then switches
-    // it and resets Timer=0, but ONLY when !IsFiring && !IsFalling && !IsDriving.
-    // Queue the mission so the Commence gate in _processGroundEntity handles timing.
+    // C++ team.cpp:1813-1860 Coordinate_Do — for each member: queue do_mission
+    // and (only when in the regrouping branch — line 1848) clear ArchiveTarget,
+    // TarCom, and NavCom. The regrouping branch is gated by:
+    //   !Target_Legal(unit->TarCom) && !Target_Legal(unit->NavCom)
+    //     && unit->Mission != do_mission
+    // i.e., the clears happen ONLY when TarCom and NavCom are already null —
+    // making the clears redundant in C++. The non-regrouping branch
+    // (Distance(Zone) > 2*StrayDistance) never touches TarCom or NavCom.
+    //
+    // Queue the mission for every member; Commence processes when animation
+    // allows. Do NOT unconditionally clear TarCom/NavCom — that would nullify
+    // a triggerRetaliation-set TarCom (see commit 14e56d67 for the analogous
+    // SCG06EA t68 issue in coordinateMove).
     const doMission = this.mapCppMission(mission.data);
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
       // C++ Assign_Mission queues; Commence processes when animation allows
       unit.missionQueue = doMission;
-      unit.target = null;
-      unit.moveTarget = null;
     }
 
     this.isNextMission = true;
