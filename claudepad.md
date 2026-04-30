@@ -1,5 +1,39 @@
 # Session Summaries
 
+## 2026-04-29T19:30Z — coordinateMove TarCom-preservation fix (SCG06EA 68→76)
+
+**Commit:** `14e56d67` "fix(team): preserve TarCom in coordinateMove (SCG06EA 68→76)"
+
+**Root cause:** Codex commit `ff8ccea8` ("Queue drive-class moves and use per-icon terrain speeds") added unconditional `unit.target = null + targetStructure = null + forceFirePos = null` in `team.coordinateMove` based on a misreading of C++ semantics. C++ `TeamClass::Coordinate_Move` (team.cpp:1942-1962) only calls `Assign_Mission(MISSION_MOVE)` and `Assign_Destination(Target)` — it does NOT clear TarCom. Only dogs (line 1916-1920) clear TarCom, and only when distance > stray.
+
+**Effect on SCG06EA t68:** This nullified the `triggerRetaliation` TarCom assignment between team-coordinator passes. After Greek E1 hit BadGuy E1 at tick 65 and `triggerRetaliation` set TarCom=Greek, the next coord pass cleared it → Mission.MOVE handler skipped updateAttack → no firePrepActive → no Fire_At at tick 68 → bullet[116] never fired → -1 Coord_Scatter (tag 50002) divergence.
+
+**Fix:** Removed the three target-clearing lines from coordinateMove. The `assignMission(unit, Mission.MOVE)` queue is sufficient; TarCom continues to drive Firing_AI (which runs before Movement_AI per infantry.cpp:1237).
+
+**Trace via probe `test-scg06ea-t68-dump.ts`:**
+- Tick 65: BadGuy E1 id=22 hp=50→35, target=28 (Greek E1) — retaliation worked.
+- Tick 66: BadGuy E1 id=22 target=null — coordinateMove cleared it!
+- Tick 68: WASM bullet[116] Coord_Scatter; TS missing.
+
+**Playwright divergence (post-deploy):**
+| scenario | session start | now | net |
+|---|---|---|---|
+| SCG01EA | 87 | 77 | -10 (no change) |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 25 | 3 | -22 (Basic_Path port still pending) |
+| SCG06EA | 76 | **76** | **+8** (was 68) |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| SCG13EA | 101 | 101 | 0 |
+
+**Open work:**
+- SCG06 t76: TS missing 2 RNG calls (`bullet[115]` AI + Coord_Scatter). Some unit fires at tick 76 in WASM that doesn't in TS — possibly another retaliation chain that unblocks now.
+- SCG07 t17: TS missing 7 RNG calls — 2 Building_AI_70003 + 5 Mission_Move_foot for vessels[182,183]. Likely related to vessel niat=3 proxy still over-suppressing.
+- SCG13 t101: TS missing 1 Mission_Guard_infantry_E1E3 for infantry[192].
+- SCG04 t3: still requires C++ Basic_Path MOVE_TEMP cost gradient port (deferred).
+
+**Possible follow-ups for similar bug:** `team.coordinateDo` at team.ts:1001 also unconditionally clears `unit.target` and `unit.moveTarget`. C++ `Coordinate_Do` (team.cpp:1813-1860) only does this when `!Target_Legal(unit->TarCom) && !Target_Legal(unit->NavCom) && unit->Mission != do_mission`. Same TarCom-preservation principle applies. Not blocking SCG06 but potentially helpful for ATTACK_TARGET/GUARD_AREA missions in other scenarios.
+
 ## 2026-04-29T14:50Z — Can_Enter_Cell gate + SCG04 root cause is Basic_Path MOVE_TEMP
 
 **Commit:** `5981a542` "fix(team): add Can_Enter_Cell gate before isDriving flip in coordinateMove"
