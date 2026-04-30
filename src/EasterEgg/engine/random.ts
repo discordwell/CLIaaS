@@ -123,11 +123,20 @@ export class RandomClass {
  * Synced RNG — used for all gameplay-critical decisions.
  * Deterministic: same seed produces same sequence across all clients.
  * Must be saved/restored with game state for multiplayer sync.
+ *
+ * Pinned to globalThis so Next.js code-splitting (which can duplicate this
+ * module across chunks 89711 and 94745) doesn't fork into two singletons —
+ * verified empirically at SCG13EA tick 101 where __rngTagControl saw 6
+ * calls but a 7th call ran on a separate instance, advancing entity state
+ * without showing up in the audit log.
  */
-export const ScenarioRandom = new RandomClass();
+const globalScope = globalThis as { __scenarioRandom?: RandomClass; __nonCriticalRandom?: RandomClass };
+export const ScenarioRandom: RandomClass =
+  globalScope.__scenarioRandom ?? (globalScope.__scenarioRandom = new RandomClass());
 
 /**
  * Non-critical RNG — used for cosmetic/visual effects that
  * don't need to stay in sync (particle offsets, sound variation, etc.)
  */
-export const NonCriticalRandom = new RandomClass();
+export const NonCriticalRandom: RandomClass =
+  globalScope.__nonCriticalRandom ?? (globalScope.__nonCriticalRandom = new RandomClass());
