@@ -214,6 +214,38 @@ describe('SCG06EA tick 68 — BadGuy E1 team-retaliation Fire_At (C++ foot.cpp:1
     expect(dist).toBeLessThanOrEqual(range * LEPTON_SIZE);
   });
 
+  it('TeamClass.coordinateMove preserves TarCom (team.cpp:1942-1962)', async () => {
+    // C++ TeamClass::Coordinate_Move (team.cpp:1942-1962) calls
+    // Assign_Mission(MISSION_MOVE) and Assign_Destination(Target) per unit.
+    // It does NOT clear TarCom. Only dogs (line 1916-1920) clear TarCom and
+    // only when TarCom distance > stray range.
+    //
+    // Prior bug (codex commit ff8ccea8): coordinateMove cleared unit.target,
+    // unit.targetStructure, unit.forceFirePos. This nullified the
+    // triggerRetaliation TarCom assignment between tick 65 and 66, so the
+    // BadGuy E1 in MOVE mission never reached firePrepActive → no Fire_At
+    // at tick 68 → SCG06EA t68 +1 Δcalls divergence.
+    const { Team } = await import('../engine/team');
+    const ctx = makeMockCtx();
+    // Build a BadGuy team with the victim, in MOVE mission to a far target.
+    const victim = makeEntity(UnitType.I_E1, House.BadGuy, 18, 68);
+    victim.mission = Mission.MOVE;
+    const attacker = makeEntity(UnitType.I_E1, House.Greece, 19, 65);
+    victim.target = attacker; // simulate post-retaliation TarCom
+    const team = new Team({
+      house: House.BadGuy,
+      desiredMembers: [{ type: 'E1', count: 1 }],
+      missionList: [],
+    });
+    team.add(victim);
+    team.target = { x: 19 * CELL_SIZE + CELL_SIZE / 2, y: 60 * CELL_SIZE + CELL_SIZE / 2 };
+    team.coordinateMove(undefined, {
+      structures: [], entities: [victim, attacker], map: ctx.map,
+    });
+    // TarCom must still point to attacker — no team-coordinator clobbering.
+    expect(victim.target).toBe(attacker);
+  });
+
   it('E1 FireLaunch is 2 ticks (idata.cpp:404) — Fire_At runs at tick N+2', () => {
     // The second half of the port relies on E1's FireLaunch=2 for the
     // tick-68 scatter timing. Fire animation starts at tick 66 (when TarCom

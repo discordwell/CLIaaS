@@ -850,9 +850,18 @@ export class Team {
       const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
-        // C++ queues MOVE, clears TarCom, then Assign_Destination(target).
-        // DriveClass::Assign_Destination starts the driver immediately unless
-        // the destination is unchanged.
+        // C++ team.cpp:1942-1962 — Coordinate_Move calls Assign_Mission(MISSION_MOVE)
+        // and Assign_Destination(Target). It does NOT clear TarCom. C++ FootClass::AI
+        // (foot.cpp:1237 InfantryClass::Firing_AI) runs Firing_AI before Movement_AI,
+        // so a team member with a TarCom in range continues firing while the team
+        // coordinator queues a new MOVE. Only dogs (line 1916-1920) clear TarCom
+        // and only when distance > stray.
+        //
+        // SCG06EA tick 65: BadGuy E1 acquired Greek E1 as TarCom via
+        // triggerRetaliation (combat.ts:716 teamRef branch). If we clear
+        // unit.target here, the BadGuy E1 misses its FireLaunch=2 retaliation
+        // window at tick 68 → bullet[116] Coord_Scatter (tag 50002) never
+        // fires.
         const nextMoveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
         const targetChanged =
           !unit.moveTarget ||
@@ -860,9 +869,6 @@ export class Team {
           unit.moveTarget.ly !== nextMoveTarget.ly;
 
         assignMission(unit, Mission.MOVE);
-        unit.target = null;
-        unit.targetStructure = null;
-        unit.forceFirePos = null;
 
         if (targetChanged) {
           unit.moveTarget = nextMoveTarget;
