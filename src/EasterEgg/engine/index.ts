@@ -5153,6 +5153,32 @@ export class Game {
 
       cyclesThisTick++;
 
+      // Vessel double-Commence Mission_Move dispatch (vessel.cpp:592+659).
+      //
+      // C++ vessels run TWO Commence() calls within one VesselClass::AI tick:
+      // pre-DriveClass::AI at vessel.cpp:592 and post-DriveClass::AI at :659,
+      // both gated on `!IsDriving && Is_Door_Closed()`. PCP_END Commence
+      // inside DriveClass::AI's While_Moving loop adds a third opportunity
+      // for MissionQueue=MOVE to pop mid-cycle. Each pop sets Timer=0; if
+      // MissionClass::AI dispatches afterward, Mission_Move fires another
+      // Random_Pick(0,2) jitter (foot.cpp:536, tag 60010).
+      //
+      // Empirical WASM observation (cpp-parity-scg07ea-tick-17.test.ts):
+      // vessel[182] fires Mission_Move 2× per tick; vessel[183] fires 3×.
+      // TS without this dispatch fires once per tick → +5 RNG divergence at
+      // SCG07EA t17.
+      //
+      // Gate narrowly to vessels — land vehicles' MCV multi-fire was caused
+      // by an old jitter proxy + STAGE F (commit history: SCG11EA t15
+      // unit[94] firing 3×) which has been removed. Land vehicles do NOT
+      // have the documented double-Commence pattern.
+      if (PCP_DOUBLE_CYCLE_ENABLED && entity.stats.isVessel &&
+          entity.mission === Mission.MOVE &&
+          entity.missionTimer === 0 &&
+          entity.missionQueue === null) {
+        this.dispatchMission(entity, true);
+      }
+
       // Second-iteration gate (flag OFF → always break; flag ON → require
       // track-advance + more path remaining, per drive.cpp:1340-1345).
       if (!PCP_DOUBLE_CYCLE_ENABLED) break;

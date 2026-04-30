@@ -1,5 +1,21 @@
 # Session Summaries
 
+## 2026-04-30T07:50Z — Vessel double-Commence Mission_Move dispatch (SCG07EA t17 structural fix)
+
+**Structural fix landed:** added in-loop `dispatchMission` call within `runDriveClassAI`'s double-cycle for vessels. After each iter's `updateMove`, when post-state matches PCP_END Commence pop signature (`mission===MOVE && missionTimer===0 && missionQueue===null`), fires Mission_Move dispatch. Vessel-only gate to avoid land-vehicle regressions.
+
+**Mechanism:** C++ `VesselClass::AI` runs TWO Commence calls (vessel.cpp:592 pre-DriveClass + vessel.cpp:659 post-DriveClass), plus PCP_END Commence inside `DriveClass::AI`'s While_Moving loop. Each pop sets Timer=0; if MissionClass::AI dispatches afterward, Mission_Move fires another `Random_Pick(0,2)` jitter. WASM SCG07EA t17: vessel[182] fires 2×, vessel[183] fires 3×. TS pre-fix fires once → +5 RNG divergence.
+
+**Files changed:**
+- `src/EasterEgg/engine/index.ts:5156-5181` — added vessel-gated dispatch within runDriveClassAI loop
+- `src/EasterEgg/__tests__/cpp-parity-vessel-double-commence-dispatch.test.ts` — new test (3 cases)
+
+**Test status:** 51,379 vitest pass (3 new tests added; baseline was 51,376). No regressions in SCG07/SCG11/SCG13/SCG04 parity tests.
+
+**Verification pending:** playwright `test-first-divergence.ts` requires deploy to confirm SCG07EA t17 first-divergence advances. Local test suite confirms no regressions.
+
+**Caveat:** The fix only applies when `runDriveClassAI` runs (i.e., STAGE B did NOT dispatch this tick — Timer != 0 entering STAGE B). For SCG11EA t28 MCV-157 double-fire (vehicle, not vessel), the fix doesn't apply. That case requires a different mechanism (likely STAGE B's Mission.MOVE handler also needs in-handler PCP_END dispatch — substantial work).
+
 ## 2026-04-30T01:30Z — SCG13EA t101 root cause: Greek E1 timer drift, not our STICKY
 
 Earlier session note about SCG13EA t101 was wrong about WHICH unit was missing. Detailed investigation:
