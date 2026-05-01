@@ -1,20 +1,26 @@
 # Session Summaries
 
-## 2026-04-30T07:50Z — Vessel double-Commence Mission_Move dispatch (SCG07EA t17 structural fix)
+## 2026-04-30T07:50Z — DriveClass mid-cycle Mission_Move dispatch (SCG07EA t17 + SCG11EA t28 structural fix)
 
-**Structural fix landed:** added in-loop `dispatchMission` call within `runDriveClassAI`'s double-cycle for vessels. After each iter's `updateMove`, when post-state matches PCP_END Commence pop signature (`mission===MOVE && missionTimer===0 && missionQueue===null`), fires Mission_Move dispatch. Vessel-only gate to avoid land-vehicle regressions.
+**Structural fix landed in 2 commits:**
+- `abca2aa1` — vessel-only first cut
+- `c64004f9` — broadened to all DriveClass entities (vehicles + vessels)
 
-**Mechanism:** C++ `VesselClass::AI` runs TWO Commence calls (vessel.cpp:592 pre-DriveClass + vessel.cpp:659 post-DriveClass), plus PCP_END Commence inside `DriveClass::AI`'s While_Moving loop. Each pop sets Timer=0; if MissionClass::AI dispatches afterward, Mission_Move fires another `Random_Pick(0,2)` jitter. WASM SCG07EA t17: vessel[182] fires 2×, vessel[183] fires 3×. TS pre-fix fires once → +5 RNG divergence.
+**What:** added in-loop `dispatchMission` call within `runDriveClassAI`'s double-cycle. After each iter's `updateMove`, when post-state matches PCP_END Commence pop signature (`mission===MOVE && missionTimer===0 && missionQueue===null`), fires Mission_Move dispatch. The Timer→14+jitter transition prevents re-trigger this iter.
+
+**Mechanism:** C++ vehicles (unit.cpp:404+472, unit.cpp:1756 PCP_END) and vessels (vessel.cpp:592+659) both run multiple Commence calls per AI tick. Each pop sets Timer=0; when MissionClass::AI dispatches afterward, Mission_Move fires `Random_Pick(0,2)` jitter (foot.cpp:536, tag 60010). WASM observations:
+- SCG07EA t17: vessel[182] 2×, vessel[183] 3×
+- SCG11EA t28: MCV-157 fires Mission_Move 2×
 
 **Files changed:**
-- `src/EasterEgg/engine/index.ts:5156-5181` — added vessel-gated dispatch within runDriveClassAI loop
+- `src/EasterEgg/engine/index.ts:5156-5188` — added gated dispatch within runDriveClassAI loop
 - `src/EasterEgg/__tests__/cpp-parity-vessel-double-commence-dispatch.test.ts` — new test (3 cases)
 
-**Test status:** 51,379 vitest pass (3 new tests added; baseline was 51,376). No regressions in SCG07/SCG11/SCG13/SCG04 parity tests.
+**Test status:** 51,379 vitest pass (+3 new tests). No regressions in SCG04/SCG06/SCG07/SCG11/SCG13 parity tests.
 
-**Verification pending:** playwright `test-first-divergence.ts` requires deploy to confirm SCG07EA t17 first-divergence advances. Local test suite confirms no regressions.
+**Verification pending:** playwright `test-first-divergence.ts` needs deploy to confirm SCG07EA t17 / SCG11EA t28 first-divergence advances.
 
-**Caveat:** The fix only applies when `runDriveClassAI` runs (i.e., STAGE B did NOT dispatch this tick — Timer != 0 entering STAGE B). For SCG11EA t28 MCV-157 double-fire (vehicle, not vessel), the fix doesn't apply. That case requires a different mechanism (likely STAGE B's Mission.MOVE handler also needs in-handler PCP_END dispatch — substantial work).
+**Caveat:** Fix only applies when `runDriveClassAI` runs (STAGE B did NOT dispatch — Timer != 0 entering STAGE B). The case where STAGE B's Mission.MOVE handler runs AND PCP_END pops queue mid-handler isn't yet covered. The C++ mechanism for that double-fire (MCV-157 has Timer==0 entering tick 28 from prior PCP_END) remains unexplained — see `cpp-parity-scg11ea-tick-28-proxy.test.ts` notes. Logically MissionClass::AI dispatches once per `obj->AI()` call per logic.cpp:306, so the multi-fire path is non-obvious.
 
 ## 2026-04-30T01:30Z — SCG13EA t101 root cause: Greek E1 timer drift, not our STICKY
 
