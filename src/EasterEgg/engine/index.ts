@@ -5153,26 +5153,33 @@ export class Game {
 
       cyclesThisTick++;
 
-      // Vessel double-Commence Mission_Move dispatch (vessel.cpp:592+659).
+      // DriveClass mid-cycle Mission_Move dispatch (vessel.cpp:592+659,
+      // unit.cpp:404+472, drive.cpp:1340-1345 PCP_END Commence).
       //
-      // C++ vessels run TWO Commence() calls within one VesselClass::AI tick:
-      // pre-DriveClass::AI at vessel.cpp:592 and post-DriveClass::AI at :659,
-      // both gated on `!IsDriving && Is_Door_Closed()`. PCP_END Commence
-      // inside DriveClass::AI's While_Moving loop adds a third opportunity
-      // for MissionQueue=MOVE to pop mid-cycle. Each pop sets Timer=0; if
-      // MissionClass::AI dispatches afterward, Mission_Move fires another
-      // Random_Pick(0,2) jitter (foot.cpp:536, tag 60010).
+      // C++ vehicles AND vessels run TWO Commence() calls within one AI tick:
+      // pre-DriveClass::AI at unit.cpp:404 / vessel.cpp:592, post-DriveClass::AI
+      // at unit.cpp:472 / vessel.cpp:659. PCP_END Commence inside DriveClass::AI's
+      // While_Moving loop (unit.cpp:1756 for vehicles) adds another pop
+      // opportunity. Each pop sets Timer=0; when MissionClass::AI dispatches
+      // afterward, Mission_Move fires another Random_Pick(0,2) jitter
+      // (foot.cpp:536, tag 60010).
       //
-      // Empirical WASM observation (cpp-parity-scg07ea-tick-17.test.ts):
-      // vessel[182] fires Mission_Move 2× per tick; vessel[183] fires 3×.
-      // TS without this dispatch fires once per tick → +5 RNG divergence at
-      // SCG07EA t17.
+      // Empirical WASM observations:
+      //   - cpp-parity-scg07ea-tick-17.test.ts: vessel[182] 2×, vessel[183] 3×
+      //   - cpp-parity-scg11ea-tick-28.test.ts: MCV-157 fires Mission_Move 2×
       //
-      // Gate narrowly to vessels — land vehicles' MCV multi-fire was caused
-      // by an old jitter proxy + STAGE F (commit history: SCG11EA t15
-      // unit[94] firing 3×) which has been removed. Land vehicles do NOT
-      // have the documented double-Commence pattern.
-      if (PCP_DOUBLE_CYCLE_ENABLED && entity.stats.isVessel &&
+      // Without this dispatch, TS fires once per tick → +N RNG divergence.
+      // STAGE F is gated off by `_commenceFiredThisTick` so it can't fire here.
+      // The dispatch is gated on `mission===MOVE && Timer===0 && queue===null`
+      // — the exact post-PCP_END-Commence-pop signature. After dispatch fires,
+      // Timer becomes 14+jitter so the gate doesn't re-trigger this iter.
+      //
+      // Note: this only fires when STAGE B did NOT dispatch this tick (because
+      // runDriveClassAI is skipped when missionHandlerRan=true). The case
+      // where STAGE B dispatches AND PCP_END pops queue AGAIN within the
+      // Mission.MOVE handler's updateMove call is a separate gap requiring
+      // an in-handler dispatch refactor.
+      if (PCP_DOUBLE_CYCLE_ENABLED &&
           entity.mission === Mission.MOVE &&
           entity.missionTimer === 0 &&
           entity.missionQueue === null) {

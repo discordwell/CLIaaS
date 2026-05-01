@@ -1,19 +1,20 @@
 /**
  * @vitest-environment jsdom
  *
- * C++ Behavioral Parity: vessel double-Commence Mission_Move dispatch
- * (vessel.cpp:592 + 659).
+ * C++ Behavioral Parity: DriveClass mid-cycle Mission_Move dispatch
+ * (vessel.cpp:592 + 659, unit.cpp:404 + 472, drive.cpp:1340-1345).
  *
- * C++ vessels run TWO `Commence()` calls within one `VesselClass::AI` tick:
- * pre-DriveClass::AI at vessel.cpp:592 and post-DriveClass::AI at :659, both
- * gated on `!IsDriving && Is_Door_Closed()`. Additionally, `PCP_END` Commence
- * inside DriveClass::AI's While_Moving loop adds a third pop opportunity.
+ * C++ vehicles AND vessels run TWO `Commence()` calls within one AI tick:
+ * pre-DriveClass::AI at unit.cpp:404 / vessel.cpp:592 and post-DriveClass::AI
+ * at unit.cpp:472 / vessel.cpp:659. Additionally, `PCP_END` Commence inside
+ * DriveClass::AI's While_Moving loop (unit.cpp:1756 for vehicles) adds another
+ * pop opportunity per cell boundary crossed.
  *
  * Each Commence pop sets Mission=MOVE, Timer=0; if MissionClass::AI dispatches
  * after that pop, Mission_Move fires another `Random_Pick(0, 2)` jitter
- * (foot.cpp:536, tag 60010). WASM observation at SCG07EA tick 17:
- *   - vessel[182] fires Mission_Move 2× per tick.
- *   - vessel[183] fires Mission_Move 3× per tick.
+ * (foot.cpp:536, tag 60010). WASM observations:
+ *   - SCG07EA t17: vessel[182] fires Mission_Move 2× per tick; vessel[183] 3×.
+ *   - SCG11EA t28: MCV-157 fires Mission_Move 2× per tick.
  *
  * Without an in-loop dispatch, TS's `runDriveClassAI` runs `updateMove` which
  * may pop MissionQueue at PCP_END but never re-enters MissionClass::AI to
@@ -22,14 +23,14 @@
  *
  * The fix: after each `runDriveClassAI` loop iteration, when the post-state
  * matches a fresh PCP_END Commence pop (mission=MOVE && Timer=0 && queue=null),
- * dispatch Mission_Move to fire the jitter. Vessel-gated so land-vehicle
- * scenarios (SCG11EA t15 unit[94]) don't re-trigger old triple-fire cases
- * (commit history: removed manual jitter-fire proxy that combined with
- * STAGE F).
+ * dispatch Mission_Move to fire the jitter.
  *
  * C++ refs:
  *   vessel.cpp:592    pre-DriveClass::AI Commence
  *   vessel.cpp:659    post-DriveClass::AI Commence (gated IsDoorClosed)
+ *   unit.cpp:404      pre-DriveClass::AI Commence (gated IsDriving)
+ *   unit.cpp:472      post-DriveClass::AI Commence
+ *   unit.cpp:1756     UnitClass::Per_Cell_Process Commence (PCP_END)
  *   drive.cpp:1340-1345 While_Moving → Start_Of_Move → While_Moving cycle
  *   foot.cpp:520-539  Mission_Move (Random_Pick(0,2) tag 60010)
  *   mission.cpp:213   MissionClass::AI Timer==0 dispatch
@@ -91,7 +92,7 @@ beforeEach(() => {
   ScenarioRandom.callCount = 0;
 });
 
-describe('vessel double-Commence Mission_Move dispatch', () => {
+describe('DriveClass mid-cycle Mission_Move dispatch', () => {
   it('fires Mission_Move dispatch when post-iter state matches PCP_END Commence pop', () => {
     // Set up a vessel positioned to simulate the post-PCP_END-Commence state
     // entering runDriveClassAI's loop body. The dispatch is gated on:
@@ -129,35 +130,45 @@ describe('vessel double-Commence Mission_Move dispatch', () => {
     expect(vessel.mission).toBe(Mission.MOVE);
   });
 
-  it('regression guard: vessel-only gate blocks land-vehicle Mission_Move', () => {
-    // The vessel gate prevents the dispatch from firing on land vehicles —
-    // SCG11EA t15 unit[94] previously fired 3× when an old jitter-fire proxy
-    // combined with STAGE F. The proxy is gone; this test guards against
-    // future broadening that would resurrect that triple-fire.
+  it('applies to land vehicles too (SCG11EA t28 MCV double-fire parity)', () => {
+    // The fix applies to all DriveClass entities (vehicles + vessels), since
+    // C++ unit.cpp:404+472 also has the double-Commence pattern, and
+    // unit.cpp:1756 fires Per_Cell_Process Commence at PCP_END mid-drive.
+    // SCG11EA t28: MCV-157 fires Mission_Move 2× per WASM.
+    //
+    // The dispatch is gated only by the post-PCP_END signature
+    // (mission===MOVE && Timer===0 && queue===null), not by entity type. Once
+    // the dispatch fires, Timer becomes 14+jitter so the gate doesn't
+    // re-trigger this iter. STAGE F still gated off by _commenceFiredThisTick.
     const game = createGame();
     const tank = new Entity(UnitType.V_3TNK, House.BadGuy, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
     game.entities.push(tank);
     game.entityById.set(tank.id, tank);
 
-    // Land vehicles' UNIT_STATS table doesn't set isVessel (it's optional).
-    expect(!!tank.stats.isVessel).toBe(false);
+    // Vehicles satisfy the gate's preconditions: not infantry, not airborne.
     expect(!!tank.stats.isInfantry).toBe(false);
+    expect(!!tank.isAirUnit).toBe(false);
   });
 
-  it('documents the SCG07EA tick-17 contract this fix addresses', () => {
-    // Test contract from cpp-parity-scg07ea-tick-17.test.ts — the residual
-    // divergence at tick 17 was 2 vessel Mission_Move calls (vessel[182]
-    // missing its 2nd, vessel[183] missing its 2nd and 3rd).
+  it('documents the SCG07EA tick-17 + SCG11EA tick-28 contract this fix addresses', () => {
+    // Test contracts:
+    //   - cpp-parity-scg07ea-tick-17.test.ts: vessel[182] 2×, vessel[183] 3×
+    //   - cpp-parity-scg11ea-tick-28.test.ts: MCV-157 2×
     const contract = {
-      scenario: 'SCG07EA',
-      tick: 17,
-      vesselDoubleFires: 2,    // [182]: 2× per WASM
-      vesselTripleFires: 3,    // [183]: 3× per WASM
+      scenarios: [
+        { id: 'SCG07EA', tick: 17, entity: 'vessel[182]', fires: 2 },
+        { id: 'SCG07EA', tick: 17, entity: 'vessel[183]', fires: 3 },
+        { id: 'SCG11EA', tick: 28, entity: 'unit[157]',   fires: 2 },
+      ],
       tagNumber: 60010,        // foot.cpp:535 Mission_Move tag
-      cppRefs: ['vessel.cpp:592', 'vessel.cpp:659', 'foot.cpp:536'],
+      cppRefs: [
+        'vessel.cpp:592', 'vessel.cpp:659',
+        'unit.cpp:404', 'unit.cpp:472', 'unit.cpp:1756',
+        'foot.cpp:536',
+      ],
     };
-    expect(contract.vesselDoubleFires).toBe(2);
-    expect(contract.vesselTripleFires).toBe(3);
+    expect(contract.scenarios.find(s => s.entity === 'vessel[183]')?.fires).toBe(3);
+    expect(contract.scenarios.find(s => s.entity === 'unit[157]')?.fires).toBe(2);
     expect(contract.tagNumber).toBe(60010);
   });
 });
