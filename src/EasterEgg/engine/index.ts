@@ -5153,7 +5153,7 @@ export class Game {
 
       cyclesThisTick++;
 
-      // DriveClass mid-cycle Mission_Move dispatch (vessel.cpp:592+659,
+      // DriveClass mid-cycle Mission_Move jitter consumption (vessel.cpp:592+659,
       // unit.cpp:404+472, drive.cpp:1340-1345 PCP_END Commence).
       //
       // C++ vehicles AND vessels run TWO Commence() calls within one AI tick:
@@ -5168,22 +5168,29 @@ export class Game {
       //   - cpp-parity-scg07ea-tick-17.test.ts: vessel[182] 2×, vessel[183] 3×
       //   - cpp-parity-scg11ea-tick-28.test.ts: MCV-157 fires Mission_Move 2×
       //
-      // Without this dispatch, TS fires once per tick → +N RNG divergence.
-      // STAGE F is gated off by `_commenceFiredThisTick` so it can't fire here.
-      // The dispatch is gated on `mission===MOVE && Timer===0 && queue===null`
-      // — the exact post-PCP_END-Commence-pop signature. After dispatch fires,
-      // Timer becomes 14+jitter so the gate doesn't re-trigger this iter.
+      // Without this jitter consumption, TS fires once per tick → +N RNG
+      // divergence. STAGE F is gated off by `_commenceFiredThisTick` so it
+      // can't fire here.
+      //
+      // Inline the Random_Pick(0,2) directly rather than calling dispatchMission
+      // — C++ Mission_Move only updates Timer, doesn't do movement. dispatchMission's
+      // Mission.MOVE handler would call updateMove again as a side effect, causing
+      // path over-advancement. Mirrors foot.cpp:536-538 directly.
+      //
+      // Gate signature: post-PCP_END Commence pop (mission===MOVE && Timer===0
+      // && queue===null). After Timer set to 14+jitter, the gate doesn't
+      // re-trigger this iter.
       //
       // Note: this only fires when STAGE B did NOT dispatch this tick (because
-      // runDriveClassAI is skipped when missionHandlerRan=true). The case
-      // where STAGE B dispatches AND PCP_END pops queue AGAIN within the
-      // Mission.MOVE handler's updateMove call is a separate gap requiring
-      // an in-handler dispatch refactor.
+      // runDriveClassAI is skipped when missionHandlerRan=true).
       if (PCP_DOUBLE_CYCLE_ENABLED &&
           entity.mission === Mission.MOVE &&
           entity.missionTimer === 0 &&
           entity.missionQueue === null) {
-        this.dispatchMission(entity, true);
+        // C++ foot.cpp:536-538 Mission_Move return value:
+        //   Normal_Delay() + Random_Pick(0, 2)
+        // [Move] Rate=.016 → Normal_Delay = 14 (fixed-point conversion).
+        entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
       }
 
       // Second-iteration gate (flag OFF → always break; flag ON → require
