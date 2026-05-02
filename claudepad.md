@@ -1,5 +1,30 @@
 # Session Summaries
 
+## 2026-05-01T05:30Z — SCG13EA advanced +13 ticks (101 → 114) via WASM instrumentation + TMission_Patrol port
+
+**WASM instrumentation landed (`e8844b97`):** added `Get_Current_Mission()`/`Get_Time_Out()` to TeamClass, extended `agent_harness.cpp` team serialization with cur, to, tgtX/tgtY, mtgtX/mtgtY, missions[]. Rebuilt `rasdl.wasm`/`.js`. Also fixed `build-wasm.sh` empty-array `set -u` crash.
+
+**Critical discovery via instrumentation:** WASM `nptrl` PATROL team's `TMission_Patrol` (team.cpp:2965-2976) fires periodic threat scan every 14 ticks (`Rule.PatrolTime=.016` × 900 fixed-point). When no threat found, calls `Assign_Mission_Target(TARGET_NONE)` which:
+- For each member with NavCom == old MissionTarget: clear NavCom (no queue change for already-GUARD units per C++ Assign_Mission semantics)
+- Set Target/MissionTarget to NONE
+
+Subsequent flow: existing mq=MOVE Commence pop next tick → Mission_Move Enter_Idle_Mode → mq=GUARD → Mission_Guard fires (consuming the missing 60043 RNG call).
+
+**Port landed (`cd1c9128`, `4e65ad54`, `ac27d7ce`):** implemented TMission_Patrol periodic scan in TS coordinatePatrol. C++ Frame is 0-indexed, TS tick is 1-indexed → fires when `(tick-1) % 14 === 0` (matches Frame % 14 == 0). Greatest_Threat uses simple 5-cell proximity check (no RNG, matches C++).
+
+**Divergence after fix:**
+| scenario | before | after | net |
+|---|---|---|---|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **101** | **114** | **+13** |
+
+**Remaining SCG13 t114 divergence (Δcalls=-3, TS has 3 EXTRA):** TS fires 4 Mission_Guard calls at t114, WASM fires 1. Indicates TS patrol scan at tick 113 (next 14-tick cycle) is over-clearing. Need to refine Greatest_Threat (per-unit weapon range) or check team's MissionTarget state more carefully — possibly some teams in WASM had MissionTarget already cleared (advanced to next mission).
+
 ## 2026-05-01T03:30Z — Phase 7B Doing-state port completed (structurally landed, no divergence advance)
 
 **Phase 7B scaffolding + integration landed in 3 commits:**
