@@ -1093,9 +1093,23 @@ export class Team {
           }
         }
         if (!foundThreat) {
-          // Equivalent of Assign_Mission_Target(TARGET_NONE).
+          // Equivalent of C++ Assign_Mission_Target(TARGET_NONE) (team.cpp:396-437):
           // For each member: if NavCom (moveTarget) == old MissionTarget,
-          // queue GUARD + clear NavCom.
+          //   - assignMission(GUARD): C++ Assign_Mission ONLY sets queue when
+          //     Mission != target (mission.cpp:388). For unit already in GUARD,
+          //     this is a no-op — queue stays MOVE.
+          //   - Clear moveTarget (NavCom).
+          //
+          // The subsequent flow:
+          //   1. Unit's existing mq=MOVE Commence pops next tick → Mission_Move
+          //   2. Mission_Move's Enter_Idle_Mode triggers (foot.cpp:524 — !NavCom
+          //      && !IsDriving && mq==NONE) → queues GUARD
+          //   3. Tick after: Commence pops GUARD → m=GUARD
+          //   4. Mission_Guard fires (consuming RNG)
+          //
+          // Critical: do NOT call assignMission(GUARD) when unit is already in
+          // GUARD — it's a no-op in C++ Assign_Mission, which preserves the
+          // existing mq=MOVE that drives the Mission_Move → Enter_Idle_Mode chain.
           const oldMissionTargetLX = this.missionTarget ? pixelToLepton(this.missionTarget.x) : null;
           const oldMissionTargetLY = this.missionTarget ? pixelToLepton(this.missionTarget.y) : null;
           for (const m of this._members) {
@@ -1103,8 +1117,13 @@ export class Team {
             if (m.moveTarget &&
                 oldMissionTargetLX !== null && oldMissionTargetLY !== null &&
                 m.moveTarget.lx === oldMissionTargetLX && m.moveTarget.ly === oldMissionTargetLY) {
-              // C++ Assign_Mission_Target line 417: Assign_Mission(MISSION_GUARD)
-              assignMission(m, Mission.GUARD);
+              // C++ Assign_Mission(GUARD) is a no-op when Mission==GUARD already.
+              // assignMission in TS has the same semantics (clears queue when
+              // already-in-target, sets queue otherwise). Using direct queue write
+              // would over-clear; rely on assignMission's no-op semantic.
+              if (m.mission !== Mission.GUARD) {
+                assignMission(m, Mission.GUARD);
+              }
               // C++ line 424: Assign_Destination(TARGET_NONE) — clear NavCom
               m.moveTarget = null;
               m.path = [];
