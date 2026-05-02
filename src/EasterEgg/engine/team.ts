@@ -1124,10 +1124,13 @@ export class Team {
               if (m.mission !== Mission.GUARD) {
                 assignMission(m, Mission.GUARD);
               }
-              // C++ line 424: Assign_Destination(TARGET_NONE) — clear NavCom
+              // C++ Assign_Destination(TARGET_NONE) — foot.cpp:1809-1820 only
+              // sets NavCom = TARGET_NONE and resets PathThreshhold. It does
+              // NOT clear Path[]. Don't clear path here — unit continues
+              // walking remaining path cells until exhausted, at which point
+              // drv→false naturally and Commence pops the queued GUARD.
               m.moveTarget = null;
-              m.path = [];
-              m.pathIndex = 0;
+              m.pathThreshold = 1; // C++ MOVE_CLOAK
             }
           }
           this.missionTarget = null;
