@@ -557,12 +557,15 @@ export class Team {
       ScenarioRandom.percentChance(50);
       for (const m of this._members) {
         if (m.alive && m.stats.isInfantry && m.nonInterruptAnimTicks <= 0) {
-          m.nonInterruptAnimTicks = 8;
+          // niat=7 (was 8): per WASM trace test-scg13ea-wasm-doing.ts for
+          // SCG13EA USSR E1 (61,67), gesture animation runs ticks 92-97
+          // (6 ticks, doing=16). Doing transitions to 0 (DO_STAND_READY) at
+          // tick 98. TS niat=8 expired at tick 99 — 1 tick late. niat=7 aligns
+          // Commence pop with WASM's tick 98 transition.
+          m.nonInterruptAnimTicks = 7;
           // Phase 7B — track Doing state for C++-faithful Commence gate
           // (entity.ts isDoingInterruptible). Mirrors C++ Do_Action(DO_GESTURE1).
           // doingAI transitions back to stand_ready when niat reaches 0.
-          // Only set for currently-interruptible members (mirrors C++ Do_Action
-          // semantics — won't override an in-progress non-interruptible animation).
           if (m.doing !== 'gesture') {
             m.doing = 'gesture';
           }
