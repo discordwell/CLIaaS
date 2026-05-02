@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-05-01T06:30Z — SCG13EA t114 refined: isDriving gate for infantry STAGE E (Δ-3 → -1)
+
+**Fix landed (`f074336f`):** removed `!isInfantry` exemption from `blockCommenceDrive` in STAGE E. C++ infantry.cpp:1208 Commence requires `!IsDriving`; TS was popping queue for infantry regardless of driving state.
+
+**Effect:** TS's 4 PATROL members at SCG13EA tick 113 no longer all immediately pop queue=GUARD (over-fire fixed). Now only units with `drv=false` pop, matching WASM's 1-of-4-popped pattern.
+
+**Divergence delta at SCG13EA t114:**
+| metric | before isDriving fix | after isDriving fix |
+|---|---|---|
+| Δcalls | -3 (TS over-fired 3) | -1 (TS missing 1) |
+
+**Remaining 1-call gap at t114:** WASM has unit 852084 (kptrl member, USSR E1 at (59,61)) firing Mission_Guard. Its `drv=false` at tick 113 entering (already stopped). TS PATROL members all have `drv=true` at tick 113. Likely a per-unit timer/path cycle offset accumulated from earlier ticks — TS units haven't reached the "stop walking" point that WASM has for 852084.
+
 ## 2026-05-01T05:30Z — SCG13EA advanced +13 ticks (101 → 114) via WASM instrumentation + TMission_Patrol port
 
 **WASM instrumentation landed (`e8844b97`):** added `Get_Current_Mission()`/`Get_Time_Out()` to TeamClass, extended `agent_harness.cpp` team serialization with cur, to, tgtX/tgtY, mtgtX/mtgtY, missions[]. Rebuilt `rasdl.wasm`/`.js`. Also fixed `build-wasm.sh` empty-array `set -u` crash.
