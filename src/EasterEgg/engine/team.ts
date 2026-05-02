@@ -1089,6 +1089,38 @@ export class Team {
           unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
         }
         allArrived = false;
+      } else {
+        // C++ team.cpp:1971-1974 — Coordinate_Move/Patrol arrived branch:
+        //   if (unit->Mission == MISSION_MOVE && (!Target_Legal(unit->NavCom) ||
+        //       Distance(unit->NavCom) < CELL_LEPTON_W)) {
+        //     unit->Assign_Destination(TARGET_NONE);
+        //     unit->Enter_Idle_Mode();
+        //   }
+        //
+        // coordinateMove had this; coordinatePatrol was missing it. Mirrors the
+        // identical C++ team.cpp branch for both. SCG13EA t99 USSR E1 (61,67):
+        // unit's distance to team target reaches close-enough → queue GUARD →
+        // Commence pops to GUARD next tick → Mission_Guard fires at tick 101
+        // (the missing 60043 RNG call vs WASM).
+        if (unit.mission === Mission.MOVE) {
+          let shouldIdle = !unit.moveTarget;
+          if (!shouldIdle && unit.moveTarget) {
+            const navDx = unit.moveTarget.lx - unit.leptonX;
+            const navDy = unit.moveTarget.ly - unit.leptonY;
+            const adx = Math.abs(navDx), ady = Math.abs(navDy);
+            const navDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+            const CELL_LEPTON_W = 256;
+            if (navDist < CELL_LEPTON_W) {
+              unit.moveTarget = null;
+              unit.path = [];
+              unit.pathIndex = 0;
+              shouldIdle = true;
+            }
+          }
+          if (shouldIdle) {
+            assignMission(unit, Mission.GUARD);
+          }
+        }
       }
     }
 
