@@ -1914,6 +1914,8 @@ export class Game {
       // fires Start_Driver iff Basic_Path's first step is enterable. This
       // callback delegates to the same helper used by drive-class track-jump.
       canEnterCell: (entity, cx, cy) => this.canEnterTrackJumpCell(entity, cx, cy) === MoveResult.OK,
+      // Phase 7B: tick for TMission_Patrol periodic threat scan timing.
+      tick: this.tick,
     });
 
     // C++ terrain.cpp:497 — TerrainClass::AI on TERRAIN_MINE fires Spread_Tiberium

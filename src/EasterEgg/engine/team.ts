@@ -50,6 +50,10 @@ export interface TeamAIContext {
   entities?: Entity[];
   map?: GameMap;
   canEnterCell?: (entity: Entity, cx: number, cy: number) => boolean;
+  /** Game tick counter — used by TMission_Patrol for periodic threat scan
+   *  (C++ team.cpp:2965 — Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0).
+   *  Rule.PatrolTime=.016, TICKS_PER_MINUTE=900 → fires every 14 ticks. */
+  tick?: number;
 }
 
 // ── Team Mission Type constants (C++ teamtype.h TeamMissionType enum) ────
@@ -717,7 +721,7 @@ export class Team {
 
       switch (mission.mission) {
         case TMISSION_PATROL:
-          this.coordinatePatrol(waypoints);
+          this.coordinatePatrol(waypoints, ctx);
           break;
 
         case TMISSION_ATTACK:
@@ -1030,7 +1034,7 @@ export class Team {
    * Patrol to waypoint — move but attack enemies en route
    * (C++ TMission_Patrol, team.cpp:2883)
    */
-  coordinatePatrol(_waypoints?: Map<number, { cx: number; cy: number }>): void {
+  coordinatePatrol(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     // Patrol combines MOVE + ATTACK behaviors
     // If any member is in combat, let it fight; otherwise, move toward target
     if (!this.target && this.missionTarget) {
@@ -1039,6 +1043,76 @@ export class Team {
     if (!this.target) {
       this.isNextMission = true;
       return;
+    }
+
+    // C++ team.cpp:2965-2976 — TMission_Patrol periodic threat scan.
+    //   if (Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0) {
+    //     leader = Fetch_A_Leader();
+    //     target = leader->Greatest_Threat(THREAT_NORMAL|THREAT_RANGE);
+    //     if (Target_Legal(target)) Assign_Mission_Target(target);
+    //     else                       Assign_Mission_Target(TARGET_NONE);
+    //   }
+    //
+    // Rule.PatrolTime=.016, TICKS_PER_MINUTE=900. Fixed-point: (4*900+128)/256=14.
+    // Fires every 14 ticks. When no enemy in range, MissionTarget=TARGET_NONE,
+    // which calls Assign_Mission_Target chain (team.cpp:396-437):
+    //   For each member with NavCom == old_MissionTarget:
+    //     Assign_Mission(GUARD)              ← queues GUARD
+    //     Assign_Destination(TARGET_NONE)    ← clears NavCom
+    //
+    // SCG13EA t99: this fires for nptrl team. Member id=109 (USSR E1 at 61,67)
+    // gets queue=GUARD, NavCom cleared. Mission_Move on next tick triggers
+    // Enter_Idle_Mode → m=GUARD → fires Mission_Guard at tick 101 (the missing
+    // 60043 RNG call vs WASM).
+    //
+    // C++ Greatest_Threat doesn't consume RNG (techno.cpp:1987-2300 — pure scan).
+    // We use a simple proximity check: any enemy within THREAT_RANGE (~5 cells).
+    const PATROL_TIME_TICKS = 14;
+    if (ctx?.tick !== undefined && ctx.tick > 0 && ctx.tick % PATROL_TIME_TICKS === 0) {
+      const leader = this._members.find(m => m.alive);
+      if (leader && ctx.entities) {
+        // Greatest_Threat scan: look for any non-allied entity in threat range.
+        // C++ Threat_Range with THREAT_RANGE=true returns weapon-range-based.
+        // For an E1 with weapon range ~4 cells, threat range ~5 cells.
+        const THREAT_RANGE_LEPTONS = 5 * 256;
+        let foundThreat = false;
+        for (const e of ctx.entities) {
+          if (!e.alive || e.house === leader.house) continue;
+          const dx = e.leptonX - leader.leptonX;
+          const dy = e.leptonY - leader.leptonY;
+          const adx = Math.abs(dx), ady = Math.abs(dy);
+          const dist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+          if (dist <= THREAT_RANGE_LEPTONS) {
+            foundThreat = true;
+            break;
+          }
+        }
+        if (!foundThreat) {
+          // Equivalent of Assign_Mission_Target(TARGET_NONE).
+          // For each member: if NavCom (moveTarget) == old MissionTarget,
+          // queue GUARD + clear NavCom.
+          const oldMissionTargetLX = this.missionTarget ? pixelToLepton(this.missionTarget.x) : null;
+          const oldMissionTargetLY = this.missionTarget ? pixelToLepton(this.missionTarget.y) : null;
+          for (const m of this._members) {
+            if (!m.alive) continue;
+            if (m.moveTarget &&
+                oldMissionTargetLX !== null && oldMissionTargetLY !== null &&
+                m.moveTarget.lx === oldMissionTargetLX && m.moveTarget.ly === oldMissionTargetLY) {
+              // C++ Assign_Mission_Target line 417: Assign_Mission(MISSION_GUARD)
+              assignMission(m, Mission.GUARD);
+              // C++ line 424: Assign_Destination(TARGET_NONE) — clear NavCom
+              m.moveTarget = null;
+              m.path = [];
+              m.pathIndex = 0;
+            }
+          }
+          this.missionTarget = null;
+          this.target = null;
+          // After clearing target, return early — Coordinate_Move would skip
+          // member iteration anyway (C++ team.cpp:1891 `if (Target_Legal(Target))`).
+          return;
+        }
+      }
     }
 
     let allArrived = true;
