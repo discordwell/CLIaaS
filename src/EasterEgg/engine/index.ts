@@ -4224,17 +4224,8 @@ export class Game {
 
       // STAGE E: Post-Movement_AI Commence (vehicles unit.cpp:472,
       // vessels :658; infantry infantry.cpp:1208-1211).
-      //
-      // Phase 7B: for infantry, gate on isDoingInterruptible() (mirrors C++
-      // infantry.cpp:1208 `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt`)
-      // INSTEAD of the niat<=0 timer proxy. Vehicles still use niat (they don't
-      // model Doing the same way). For infantry with doing='gesture', Commence
-      // is blocked until doingAI transitions to stand_ready (when niat reaches 0).
       const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
-      const commenceAllowed = entity.stats.isInfantry
-        ? entity.isDoingInterruptible()
-        : entity.nonInterruptAnimTicks <= 0;
-      if (entity.missionQueue !== null && !entity.isFiringAnim && commenceAllowed && !blockCommenceDrive) {
+      if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
         const popFromA2 =
           entity.missionQueue === Mission.MOVE &&
           entity.mission === Mission.ATTACK &&
