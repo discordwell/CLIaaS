@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-05-01T07:30Z — SCG13EA t114 refined further: doingAI stand_ready→walk + path preserve
+
+**3 additional fixes landed:**
+- `f074336f` — STAGE E gate on !isDriving for infantry (Δ-3 → -1)
+- `d687e9a6` — patrol scan preserves path[] (C++ Assign_Destination only clears NavCom per foot.cpp:1809)
+- `2857d588` — doingAI allows stand_ready → walk transition when isDriving (C++ Doing_AI fires every tick for DO_STAND_READY because Count=0)
+
+**State at SCG13EA t114 unit id=137 (kptrl member):**
+- Fixed: doing now correctly transitions to 'walk' when isDriving
+- Fixed: path preserved across patrol scan
+- Remaining: drv=true at tick 113 end (WASM has drv=false). TS walk doesn't complete in same tick as WASM. Timing differs by 1 sub-cell hop — likely requires speed/distance math instrumentation to root-cause.
+
+**Divergence:** SCG13EA stays at t114 with Δcalls=-1 (stable). All other scenarios baseline. All 51,379 vitest pass.
+
 ## 2026-05-01T06:30Z — SCG13EA t114 refined: isDriving gate for infantry STAGE E (Δ-3 → -1)
 
 **Fix landed (`f074336f`):** removed `!isInfantry` exemption from `blockCommenceDrive` in STAGE E. C++ infantry.cpp:1208 Commence requires `!IsDriving`; TS was popping queue for infantry regardless of driving state.
