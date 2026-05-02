@@ -4,7 +4,8 @@
  */
 import { test } from '@playwright/test';
 
-const BASE_URL = 'https://cliaas.com';
+const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
+const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 
 test('SCG13EA 852084 walk trace', async ({ browser }) => {
   test.setTimeout(5 * 60 * 1000);
@@ -16,7 +17,7 @@ test('SCG13EA 852084 walk trace', async ({ browser }) => {
 
   await Promise.all([
     wasmPage.goto(`${BASE_URL}/ra/original.html?scenario=SCG13EA.INI&autoplay=1&agentharness=1&seed=0`, { waitUntil: 'load' }),
-    tsPage.goto(`${BASE_URL}?anttest=agent&scenario=SCG13EA&difficulty=normal`, { waitUntil: 'load' }),
+    tsPage.goto(`${TS_BASE_URL}?anttest=agent&scenario=SCG13EA&difficulty=normal`, { waitUntil: 'load' }),
   ]);
   await Promise.all([
     wasmPage.waitForFunction(() => {
@@ -44,7 +45,9 @@ test('SCG13EA 852084 walk trace', async ({ browser }) => {
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
       const all = [...(s.units ?? []), ...(s.enemies ?? [])];
       const u = all.find((x: { id: number }) => x.id === 852084);
-      return u ? `m=${u.m} mt=${u.mt} mq=${u.mq} drv=${u.drv} doing=${u.doing} c=(${u.cx},${u.cy})` : '?';
+      return u ? `m=${u.m} mt=${u.mt} mq=${u.mq} drv=${u.drv} doing=${u.doing} c=(${u.cx},${u.cy}) ` +
+        `pos=(${u.lx},${u.ly}) head=${u.hlx !== undefined ? `(${u.hlx},${u.hly})` : 'null'} ` +
+        `nav=${u.nlx !== undefined ? `(${u.nlx},${u.nly})` : 'null'} p0=${u.p0} spd=${u.spd}` : '?';
     });
     const ts = await tsPage.evaluate(() => {
       const game = (window as any).__agentGame;
@@ -56,7 +59,14 @@ test('SCG13EA 852084 walk trace', async ({ browser }) => {
           x.alive && x.type === 'E1' && x.house === 'USSR' && x.teamRef?.id === 1);
       }
       if (!e) return '?';
-      return `[id=${e.id} c=(${e.cell.cx},${e.cell.cy})] m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} drv=${e.isDriving} doing=${e.doing}`;
+      const speed = Math.floor(game.movementSpeed ? game.movementSpeed(e) / (24 / 256) : -1);
+      const head = e.headToLX > 0 ? `(${e.headToLX},${e.headToLY})` : 'null';
+      const nav = e.moveTarget ? `(${e.moveTarget.lx},${e.moveTarget.ly})` : 'null';
+      const path = `${e.pathIndex}/${e.path?.length ?? 0}:${(e.path ?? []).slice(e.pathIndex, e.pathIndex + 3)
+        .map((p: { cx: number; cy: number }) => `${p.cx},${p.cy}`).join('|')}`;
+      return `[id=${e.id} c=(${e.cell.cx},${e.cell.cy})] m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} ` +
+        `drv=${e.isDriving} doing=${e.doing} pos=(${e.leptonX},${e.leptonY}) head=${head} nav=${nav} ` +
+        `path=${path} max=${speed}`;
     });
     if (wasm !== prevWasm || ts !== prevTs) {
       console.log(`t=${t} W: ${wasm} | TS: ${ts}`);

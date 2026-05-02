@@ -9,7 +9,7 @@ import {
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
   MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
-	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, directionToLeptons256, COS_TABLE_256, SIN_TABLE_256,
+	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, directionToLeptons, directionToLeptons256, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
@@ -6197,7 +6197,9 @@ export class Game {
       }
     };
 
-    if (!entity.moveTarget && entity.path.length === 0) {
+    const hasInfantryHeadTo =
+      entity.stats.isInfantry && entity.isDriving && entity.headToLX > 0 && entity.headToLY > 0;
+    if (!entity.moveTarget && entity.path.length === 0 && !hasInfantryHeadTo) {
       setMissionIdle();
       entity.animState = AnimState.IDLE;
       return;
@@ -6269,6 +6271,64 @@ export class Game {
         } else {
           setMissionIdle();
           entity.animState = AnimState.IDLE;
+        }
+      }
+      return;
+    }
+
+    if (entity.stats.isInfantry && entity.path.length === 0 &&
+        (entity.moveTarget || hasInfantryHeadTo)) {
+      const finishMove = () => {
+        entity.moveTarget = null;
+        if (entity.moveQueue.length === 0 && entity.navQueueLoop && entity.navQueueOriginal.length > 0) {
+          for (const wp of entity.navQueueOriginal) {
+            entity.queueWaypoint({ lx: wp.lx, ly: wp.ly });
+          }
+        }
+        if (entity.moveQueue.length > 0) {
+          const next = entity.moveQueue.shift()!;
+          if (entity.navQueueLoop) {
+            entity.queueWaypoint({ lx: next.lx, ly: next.ly });
+          }
+          entity.moveTarget = next;
+          entity.path = findPath(
+            this.map,
+            entity.cell,
+            { cx: Math.floor(next.lx / 256), cy: Math.floor(next.ly / 256) },
+            true,
+            entity.isNavalUnit,
+            entity.stats.speedClass
+          );
+          entity.pathIndex = 0;
+        } else {
+          setMissionIdle();
+          entity.animState = AnimState.IDLE;
+        }
+      };
+
+      if ((entity.headToLX <= 0 || entity.headToLY <= 0) && entity.moveTarget) {
+        this.infantryStartDirectDriver(entity, entity.moveTarget);
+      }
+
+      if (entity.headToLX > 0 && entity.headToLY > 0) {
+        if (!entity.moveTarget && entity.navComClearedTick !== this.tick) {
+          entity.headToLX = 0;
+          entity.headToLY = 0;
+          entity.isDriving = false;
+          entity.animState = AnimState.IDLE;
+          return;
+        }
+
+        const speed = this.movementSpeed(entity);
+        const headTo = { lx: entity.headToLX, ly: entity.headToLY };
+        if (entity.moveToward(headTo, speed)) {
+          entity.headToLX = 0;
+          entity.headToLY = 0;
+
+          if (entity.moveTarget &&
+              leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 16) {
+            finishMove();
+          }
         }
       }
       return;
@@ -7422,6 +7482,103 @@ export class Game {
     entity.headToLY = headToLY;
 
     return { lx: headToLX, ly: headToLY };
+  }
+
+  /** C++ InfantryClass direct Start_Driver for a NavCom with no Basic_Path.
+   *
+   *  WASM traces show patrol infantry can have Path[0] == FACING_NONE while
+   *  Head_To_Coord still points at the next sub-cell walking target. When team
+   *  patrol scan clears NavCom, C++ preserves this Head_To_Coord so the current
+   *  segment finishes before Commence can pop queued GUARD.
+   *
+   *  This synthesizes that active Head_To_Coord from the unit's current sub-cell
+   *  and NavCom direction. It is intentionally separate from infantryStartDriver:
+   *  that helper enters a specific path cell via Closest_Free_Spot, while this
+   *  one advances one current/adjacent sub-cell segment toward a long-range
+   *  direct destination.
+   */
+  private infantryStartDirectDriver(entity: Entity, nav: LeptonPos): LeptonPos {
+    const dir = directionToLeptons(entity.leptonX, entity.leptonY, nav.lx, nav.ly);
+    const dx = DIR_DX[dir];
+    const dy = DIR_DY[dir];
+    const fracX = ((entity.leptonX % 256) + 256) % 256;
+    const fracY = ((entity.leptonY % 256) + 256) % 256;
+
+    let destCX = entity.cell.cx;
+    let destCY = entity.cell.cy;
+    let subLX = fracX < 128 ? 64 : 192;
+    let subLY = fracY < 128 ? 64 : 192;
+
+    if (dx < 0) {
+      if (fracX <= 128) destCX--;
+      subLX = 192;
+    } else if (dx > 0) {
+      if (fracX >= 128) destCX++;
+      subLX = 64;
+    }
+
+    if (dy < 0) {
+      if (fracY <= 128) destCY--;
+      subLY = 192;
+    } else if (dy > 0) {
+      if (fracY >= 128) destCY++;
+      subLY = 64;
+    }
+
+    // If the chosen edge sub-cell is the unit's current coordinate, advance
+    // one adjacent cell along the dominant axis. C++ still starts a driver in
+    // this case; a zero-length Head_To_Coord would make TS stop immediately
+    // and pop queued GUARD one tick too early.
+    if (destCX * 256 + subLX === entity.leptonX &&
+        destCY * 256 + subLY === entity.leptonY) {
+      const navDx = nav.lx - entity.leptonX;
+      const navDy = nav.ly - entity.leptonY;
+      if (Math.abs(navDx) >= Math.abs(navDy)) {
+        if (navDx < 0) {
+          destCX--;
+          subLX = 192;
+        } else if (navDx > 0) {
+          destCX++;
+          subLX = 64;
+        }
+      } else {
+        if (navDy < 0) {
+          destCY--;
+          subLY = 192;
+        } else if (navDy > 0) {
+          destCY++;
+          subLY = 64;
+        }
+      }
+    }
+
+    const spotIndex =
+      subLX === 64 && subLY === 64 ? 1 :
+      subLX === 192 && subLY === 64 ? 2 :
+      subLX === 64 && subLY === 192 ? 3 :
+      subLX === 192 && subLY === 192 ? 4 : 0;
+
+    const destIdx = destCY * 128 + destCX;
+    let destSlots = this.map.subCellOccupancy.get(destIdx);
+    if (!destSlots) {
+      destSlots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
+      this.map.subCellOccupancy.set(destIdx, destSlots);
+    }
+
+    if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
+      this.map.vacateClaimedSubCell(entity.claimedCellIdx, entity.id, entity.claimedSubCell);
+    }
+    if (destSlots[spotIndex] === 0 || destSlots[spotIndex] === entity.id) {
+      destSlots[spotIndex] = entity.id;
+      if (this.map.occupancy[destIdx] === 0) this.map.occupancy[destIdx] = entity.id;
+      entity.claimedCellIdx = destIdx;
+      entity.claimedSubCell = spotIndex;
+    }
+
+    entity.headToLX = destCX * 256 + subLX;
+    entity.headToLY = destCY * 256 + subLY;
+    entity.isDriving = true;
+    return { lx: entity.headToLX, ly: entity.headToLY };
   }
 
   /**

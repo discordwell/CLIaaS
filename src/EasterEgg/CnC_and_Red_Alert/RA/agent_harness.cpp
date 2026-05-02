@@ -354,9 +354,16 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 			COORDINATE nc = As_Coord(foot->NavCom);
 			buf_cat(",\"nlx\":%d,\"nly\":%d", (int)Coord_X(nc), (int)Coord_Y(nc));
 		}
-		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d", foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
+		COORDINATE hc = foot->Head_To_Coord();
+		if (hc) {
+			buf_cat(",\"hlx\":%d,\"hly\":%d", (int)Coord_X(hc), (int)Coord_Y(hc));
+		}
+		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d,\"p0\":%d,\"spd\":%d",
+			foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
 			foot->IsDriving ? "true" : "false",
-			(int)foot->MissionQueue);
+			(int)foot->MissionQueue,
+			(int)foot->Path[0],
+			(int)foot->Speed);
 		// Task #43 diagnostic: expose IdleTimer + Doing + IsFiring for infantry
 		// to compare with TS's isReadyToRandomAnimate gate.
 		if (rtti == RTTI_INFANTRY) {

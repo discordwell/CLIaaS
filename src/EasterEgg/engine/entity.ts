@@ -168,6 +168,9 @@ export class Entity {
   // Set by infantryStartDriver, used by movement code for waypoint target.
   headToLX = 0;
   headToLY = 0;
+  // Tick when NavCom was cleared while a HeadToCoord segment was active.
+  // Lets infantry finish the clear tick's movement, then Stop_Driver next tick.
+  navComClearedTick = -1;
   // Cell+subcell that this infantry has CLAIMED via Set_Occupy_Bit.
   // Tracks the heading-to reservation for sub-cell occupancy parity.
   claimedCellIdx = -1;

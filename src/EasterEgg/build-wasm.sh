@@ -63,9 +63,9 @@ emcmake cmake -B "$BUILD_DIR" -S "$SRC_DIR" \
 echo "Building Red Alert (rasdl target)..."
 JOBS=1
 if command -v sysctl &> /dev/null; then
-    JOBS=$(sysctl -n hw.ncpu)
+    JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 1)
 elif command -v nproc &> /dev/null; then
-    JOBS=$(nproc)
+    JOBS=$(nproc 2>/dev/null || echo 1)
 fi
 emmake cmake --build "$BUILD_DIR" --target rasdl -j"$JOBS"
 

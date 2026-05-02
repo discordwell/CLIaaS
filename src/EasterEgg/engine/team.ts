@@ -1125,11 +1125,12 @@ export class Team {
                 assignMission(m, Mission.GUARD);
               }
               // C++ Assign_Destination(TARGET_NONE) — foot.cpp:1809-1820 only
-              // sets NavCom = TARGET_NONE and resets PathThreshhold. It does
-              // NOT clear Path[]. Don't clear path here — unit continues
-              // walking remaining path cells until exhausted, at which point
-              // drv→false naturally and Commence pops the queued GUARD.
+              // clears NavCom and resets PathThreshhold. It does not clear the
+              // active Head_To_Coord segment; Movement_AI gets the current tick
+              // to advance, then Stop_Driver happens on the following tick if
+              // the segment did not arrive.
               m.moveTarget = null;
+              m.navComClearedTick = ctx?.tick ?? -1;
               m.pathThreshold = 1; // C++ MOVE_CLOAK
             }
           }
