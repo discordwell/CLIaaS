@@ -546,10 +546,14 @@ export class Team {
       // members already in a non-interruptible animation (e.g. from a prior
       // Random_Animate gesture) keep their existing animation.
       //
-      // Animation duration Count=3 × Rate=2 = 6 ticks. nonInterruptAnimTicks=8
-      // accounts for the pre-decrement at index.ts:3839 + the 1-tick C++ delay
-      // between Commence() popping the queue and MissionClass::AI dispatching
-      // the new mission on the following tick.
+      // Animation duration Count=3 × Rate=2 = 6 ticks. Empirically WASM blocks
+      // Commence longer than this for some units (e.g., SCG13EA tick 91-100
+      // USSR E1 (61,67) — see test-scg13ea-stuck-trace.ts). doing=16 in WASM
+      // is non-interruptible 9+ ticks after team activation.
+      //
+      // Increased from 8 to 15 to better match observed WASM Commence-gate
+      // duration. Risk: may delay Mission_Move dispatch for other units.
+      // SCG13 advancement check (after deploy) will validate.
       //
       // Consume the RNG to keep the chain aligned (same call as C++), but apply
       // the block regardless of outcome — TS previously only set niat on TRUE,
@@ -557,7 +561,7 @@ export class Team {
       ScenarioRandom.percentChance(50);
       for (const m of this._members) {
         if (m.alive && m.stats.isInfantry && m.nonInterruptAnimTicks <= 0) {
-          m.nonInterruptAnimTicks = 8;
+          m.nonInterruptAnimTicks = 15;
         }
       }
 
