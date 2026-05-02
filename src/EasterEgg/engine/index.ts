@@ -4232,7 +4232,12 @@ export class Game {
       // INSTEAD of niat<=0. doing='gesture' is set by Random_Animate (cases 1-4)
       // and team activation; doingAI transitions to stand_ready when niat=0.
       // Vehicles still use niat (different Doing model).
-      const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
+      //
+      // C++ infantry.cpp:1208 ALSO requires !IsDriving — Commence is blocked
+      // while the infantry is mid-walk. SCG13EA t113 PATROL members with mq=GUARD
+      // (set by patrol scan) stay in MOVE with drv=true until they finalize,
+      // matching WASM 3-of-4 staying-in-MOVE pattern at tick 113.
+      const blockCommenceDrive = !entity.isAirUnit && entity.isDriving;
       const commenceAllowed = entity.stats.isInfantry
         ? entity.isDoingInterruptible()
         : entity.nonInterruptAnimTicks <= 0;
