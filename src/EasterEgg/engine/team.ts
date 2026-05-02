@@ -1067,8 +1067,13 @@ export class Team {
     //
     // C++ Greatest_Threat doesn't consume RNG (techno.cpp:1987-2300 — pure scan).
     // We use a simple proximity check: any enemy within THREAT_RANGE (~5 cells).
+    // C++ Frame is 0-indexed (starts at 0); TS tick is 1-indexed (starts at 1).
+    // C++ Frame % 14 == 0 fires at Frame 0, 14, 28, ..., 98, 112.
+    // TS tick at scan fire = Frame + 1, so scan fires when (tick-1) % 14 == 0.
+    // SCG13EA t99 nptrl: WASM clears target during tick 99 processing
+    // (probe shows tgtX=0 at tick 99 end). (99-1)%14 = 98%14 = 0 ✓.
     const PATROL_TIME_TICKS = 14;
-    if (ctx?.tick !== undefined && ctx.tick > 0 && ctx.tick % PATROL_TIME_TICKS === 0) {
+    if (ctx?.tick !== undefined && ctx.tick > 0 && (ctx.tick - 1) % PATROL_TIME_TICKS === 0) {
       const leader = this._members.find(m => m.alive);
       if (leader && ctx.entities) {
         // Greatest_Threat scan: look for any non-allied entity in threat range.
