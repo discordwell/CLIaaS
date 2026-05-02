@@ -155,7 +155,13 @@ export class Entity {
   // C++ Is_Ready_To_Random_Animate blocks RA at tick 1 — IdleTimer CDTimerClass
   // behavior makes it non-zero at Frame 0. doing='nothing' matches this in TS.
   // After tick 1, doingAI transitions to 'stand_ready' (enabling future RA).
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' = 'nothing';
+  //
+  // 'gesture' represents C++ DO_GESTURE1/DO_GESTURE2/DO_SALUTE1/DO_SALUTE2 —
+  // non-interruptible animations triggered by team activation (team.cpp:637).
+  // C++ MasterDoControls.Interrupt=false for all gesture types. Used by the
+  // STAGE A/E Commence gate to defer MissionQueue pop until animation
+  // completes (infantry.cpp:1208 — `Doing == DO_NOTHING || Interrupt`).
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' | 'gesture' = 'nothing';
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
   // C++ HeadToCoord — the sub-cell lepton position the infantry is walking to.
@@ -273,11 +279,16 @@ export class Entity {
     // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed.
     // Phase 7A flag ON: include 'walk' so stopping infantry transitions back to
     // DO_STAND_READY, enabling Random_Animate on subsequent Mission_Guard ticks.
+    //
+    // 'gesture' transitions to stand_ready when nonInterruptAnimTicks reaches 0
+    // (the duration counter set by team activation in team.ts). Mirrors C++
+    // Doing_AI's `Fetch_Stage() >= DoControls[DO_GESTURE1].Count` check.
     const canTransition =
       this.doing === 'nothing' ||
       this.doing === 'idle_anim' ||
       this.doing === 'fire' ||
-      (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk');
+      (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk') ||
+      (this.doing === 'gesture' && this.nonInterruptAnimTicks <= 0);
     if (canTransition) {
       if (this.isDriving) {
         this.doing = 'walk';
@@ -285,6 +296,19 @@ export class Entity {
         this.doing = 'stand_ready';
       }
     }
+  }
+
+  /** C++ infantry.cpp:1208 Commence gate — `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt`.
+   *  Returns true when the entity's current Doing state allows MissionQueue
+   *  pop. Mirrors the C++ MasterDoControls Interrupt flags (infantry.cpp:98-120).
+   *
+   *  Interruptible: stand_ready, walk, fire, idle_anim, nothing.
+   *  Non-interruptible: gesture (DO_GESTURE1/2 + DO_SALUTE1/2 + death animations).
+   *
+   *  Called from STAGE A/E Commence gates in updateEntity. */
+  isDoingInterruptible(): boolean {
+    if (this.doing === 'gesture') return false;
+    return true;
   }
 
   /** C++ InfantryClass::Is_Ready_To_Random_Animate — checks all gates.

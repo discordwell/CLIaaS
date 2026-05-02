@@ -558,6 +558,14 @@ export class Team {
       for (const m of this._members) {
         if (m.alive && m.stats.isInfantry && m.nonInterruptAnimTicks <= 0) {
           m.nonInterruptAnimTicks = 8;
+          // Phase 7B — track Doing state for C++-faithful Commence gate
+          // (entity.ts isDoingInterruptible). Mirrors C++ Do_Action(DO_GESTURE1).
+          // doingAI transitions back to stand_ready when niat reaches 0.
+          // Only set for currently-interruptible members (mirrors C++ Do_Action
+          // semantics — won't override an in-progress non-interruptible animation).
+          if (m.doing !== 'gesture') {
+            m.doing = 'gesture';
+          }
         }
       }
 
