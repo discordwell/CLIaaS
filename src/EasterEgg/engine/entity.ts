@@ -280,6 +280,13 @@ export class Entity {
     // Phase 7A flag ON: include 'walk' so stopping infantry transitions back to
     // DO_STAND_READY, enabling Random_Animate on subsequent Mission_Guard ticks.
     //
+    // Phase 7B: 'stand_ready' is added — C++ DoControls[DO_STAND_READY].Count=0,
+    // so Fetch_Stage() >= 0 is always true → Doing_AI fires every tick. When
+    // IsDriving, transitions to DO_WALK. Without this, units in stand_ready that
+    // start walking (e.g., team patrol re-MOVE) keep doing='stand_ready' forever,
+    // blocking the C++ DO_WALK → DO_STAND_READY chain that signals walk
+    // completion to the Commence gate.
+    //
     // 'gesture' transitions to stand_ready when nonInterruptAnimTicks reaches 0
     // (the duration counter set by team activation in team.ts). Mirrors C++
     // Doing_AI's `Fetch_Stage() >= DoControls[DO_GESTURE1].Count` check.
@@ -287,6 +294,7 @@ export class Entity {
       this.doing === 'nothing' ||
       this.doing === 'idle_anim' ||
       this.doing === 'fire' ||
+      this.doing === 'stand_ready' ||
       (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk') ||
       (this.doing === 'gesture' && this.nonInterruptAnimTicks <= 0);
     if (canTransition) {
