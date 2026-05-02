@@ -1,5 +1,56 @@
 # Session Summaries
 
+## 2026-05-01T00:50Z — SCG13EA t101 expanded root cause: TS USSR E1 (61,67) stuck in MOVE
+
+**Probe findings via `test-scg13ea-all-fires.ts`:** at tick 100 end, WASM has 4 E1/E3 about to fire at tick 101; TS has only 2.
+
+**Per-unit divergence:**
+| unit | WASM | TS |
+|---|---|---|
+| Greek E1 (12,54) | GUARD mt=0 | GUARD mt=1 (1-tick offset) |
+| USSR E1 (61,67) | GUARD mt=0 | **MOVE mt=15** (wrong mission!) |
+| USSR E1 (62,78) | GUARD mt=1 | GUARD mt=2 (1-tick offset) |
+| USSR STICKY (27,46) | STICKY mt=0 | STICKY mt=1 (1-tick offset) |
+
+**Critical finding for USSR E1 (61,67):** Stuck in MOVE with `mt=15, mq=null, moveTarget=(15744,20352), isDriving=true, path=[], pathIdx=0, team=2`.
+
+The unit has a moveTarget but EMPTY PATH and isDriving=true. Cannot move (no path) but isDriving=true blocks `MOVEMENT_AI_MOVE_NAVCOM_GUARD` and pre-Commence gates.
+
+WASM has same unit in GUARD — WASM transitioned MOVE→GUARD somewhere between scenario start and tick 100. TS missed that transition.
+
+**Structural fix candidates (one of):**
+1. When infantry's path empties mid-MOVE with moveTarget still set, re-attempt findPath. If fails, clear moveTarget + isDriving → next tick MOVEMENT_AI_MOVE_NAVCOM_GUARD triggers Enter_Idle_Mode.
+2. When path is exhausted, set isDriving=false. Then `MOVEMENT_AI_MOVE_NAVCOM_GUARD` would also fire (since !isDriving + !moveTarget after some other clear).
+
+Both candidates need verification and may regress existing scenarios. The 1-tick init drift on Greek E1/USSR (62,78)/USSR STICKY is a separate, harder problem (RNG-ordering at scenario load).
+
+## 2026-05-01T00:30Z — Divergence verification post-fix + SCG13EA Greek E1 root cause confirmed
+
+**Playwright divergence after vessel/DriveClass commits (post-deploy):**
+| scenario | net |
+|---|---|
+| SCG01EA | 77 (no change) |
+| SCG03EA | 238 (no change) |
+| SCG04EA | 3 (no change) |
+| SCG06EA | 76 (no change) |
+| SCG07EA | 17 (no change, Δcalls still 7) |
+| SCG11EA | 19 (no change) |
+| SCG13EA | 101 (no change) |
+
+**Why no advancement:** the gate `mission===MOVE && Timer===0 && queue===null` only matches when PCP_END Commence pop happened mid-iter. PCP_END Commence requires MissionQueue=MOVE entering the iter. `assignMission(unit, MOVE)` clears queue when entity already in MOVE → so coordinateMove rarely sets queue=MOVE for already-moving units. The fix is dead code in the actual scenarios.
+
+**SCG13EA Greek E1 (12,54) probe results (script `test-scg13ea-greek-e1-init.ts`):**
+- Tick 100 end: WASM mt=0, TS mt=1 (TS 1 tick ahead in countdown)
+- Tick 101 end: WASM mt=13 (jitter=0), TS mt=15 (jitter=1)
+
+**Root cause:** at the FIRST Mission_Guard fire (tick 1), TS jitter=0 (mt=14) while WASM jitter=0 (mt=13 = 14-1 after Frame++ post-dispatch). The 1-tick offset persists. Then at subsequent fires, jitter values diverge because the RNG seed at dispatch time differs. The 2-tick drift accumulates by tick 101.
+
+**Why TS shows 14 vs WASM shows 13 immediately post-dispatch at tick 1:** WASM uses CDTimerClass (Frame-based), where `remaining = Started+Duration - CurrentFrame`. After Frame++ at end of tick, remaining decreases by 1. TS uses simple integer with decrement at start of next tick. So TS's mt=14 is "current value", WASM's remaining=13 is "after end-of-tick frame increment".
+
+**Functionally equivalent for fire timing** (both fire 14 ticks after dispatch), but the DISPLAYED value differs — and crucially, when an entity's INITIAL mt is set differently (e.g. from init RNG ordering), the offset propagates.
+
+**SCG13 t101 structural fix would be:** audit init-time RNG ordering to make TS's per-entity jitter values match WASM's at scenario load. This requires per-call instrumentation + comparison. Not a quick fix.
+
 ## 2026-04-30T07:50Z — DriveClass mid-cycle Mission_Move dispatch (SCG07EA t17 + SCG11EA t28 structural fix)
 
 **Structural fix landed in 2 commits:**
