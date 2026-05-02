@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-05-01T03:30Z — Phase 7B Doing-state port completed (structurally landed, no divergence advance)
+
+**Phase 7B scaffolding + integration landed in 3 commits:**
+- `e99b0282` — added 'gesture' to entity.doing enum + isDoingInterruptible() helper
+- `0163b33e` — wired isDoingInterruptible() into STAGE E Commence gate; updated missionAI.ts Random_Animate sites to set doing='gesture'
+- `32540907` — reverted niat=7 experiment that regressed SCG06 (76→10) and SCG13 (101→100)
+
+**Result:** Doing-state tracking now mirrors C++ MasterDoControls.Interrupt for infantry. STAGE E Commence gate gates on doing-interruptibility for infantry, niat-timer for vehicles. Behavior identical to baseline because doingAI transitions gesture→stand_ready exactly when niat reaches 0.
+
+**WASM trace findings (test-scg13ea-wasm-doing.ts):** SCG13EA USSR E1 (61,67) WASM trace:
+- Tick 91 end: doing=0 (DO_STAND_READY), mt=0 — about to fire Mission_Guard
+- Tick 92: Mission_Guard fires, sets Doing=16 (DO_GESTURE1), IdleTimer=59, mt=15
+- Ticks 92-97: doing=16 stable (6-tick gesture animation)
+- Tick 98: doing=0 (transitions back, animation complete)
+- Tick 99: Commence pops MOVE from queue → m=MOVE, mt=0; ALSO mq=GUARD (source unclear — possibly team coord transition)
+- Tick 100: Commence pops GUARD → m=GUARD, mt=0
+- Tick 101: Mission_Guard fires (the missing 60043 RNG call)
+
+**TS sequence:** team activation at tick 92 sets niat=8, expires tick 99 (1 tick LATE relative to WASM's tick 98 transition). But niat=7 broke other scenarios — fix isn't simply uniform niat reduction.
+
+**Remaining work for full SCG13 t101 fix:**
+- Identify what queued GUARD on the WASM unit at tick 99 (team coord? Mission_Move?). TS isn't replicating this transition.
+- The unit needs to land in m=GUARD at tick 100 end so Mission_Guard fires at tick 101 (tag 60043 — the missing call).
+
+Phase 7B scaffolding is in place; future session can add per-Class DoControls or Doing transitions to extend coverage. All 51,379 vitest pass; divergence preserved at baseline.
+
 ## 2026-05-01T02:00Z — niat=15 experiment regressed SCG03EA + SCG06EA (reverted)
 
 **Tried** increasing `nonInterruptAnimTicks` from 8 to 15 in `team.ts:560` to extend Commence-block duration matching WASM's observed 9+ tick gating for SCG13EA USSR E1 (61,67).
