@@ -54,9 +54,10 @@ fi
 # Configure
 echo "Configuring CMake with Emscripten..."
 rm -rf "$BUILD_DIR"
+# Use ${arr[@]+...} to safely expand possibly-empty array under set -u
 emcmake cmake -B "$BUILD_DIR" -S "$SRC_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
-    "${SDL2_CMAKE_ARGS[@]}"
+    ${SDL2_CMAKE_ARGS[@]+"${SDL2_CMAKE_ARGS[@]}"}
 
 # Build
 echo "Building Red Alert (rasdl target)..."

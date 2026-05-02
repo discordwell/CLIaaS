@@ -41,7 +41,7 @@ test('SCG13EA WASM team mission trace', async ({ browser }) => {
     const wasmTeams = await wasmPage.evaluate(() => {
       const M = (window as any).Module;
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
-      return s.teams ?? [];
+      return (s.teams ?? []).filter((t: { cls: string }) => t.cls === 'nptrl');
     });
     const tsTeam = await tsPage.evaluate(() => {
       const game = (window as any).__agentGame;
@@ -59,8 +59,17 @@ test('SCG13EA WASM team mission trace', async ({ browser }) => {
           `${m.id}:${m.mission}/mt=${m.missionTimer}/mq=${m.missionQueue}`),
       };
     });
+    // Also probe unit 852056/109 state
+    const wasmUnit = await wasmPage.evaluate(() => {
+      const M = (window as any).Module;
+      const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
+      const all = [...(s.units ?? []), ...(s.enemies ?? [])];
+      const u = all.find((x: { id: number }) => x.id === 852056);
+      return u ? { m: u.m, mt: u.mt, mq: u.mq, drv: u.drv, doing: u.doing, nlx: u.nlx, nly: u.nly, lx: u.lx, ly: u.ly } : null;
+    });
     console.log(`tick ${t}:`);
     console.log(`  WASM teams: ${JSON.stringify(wasmTeams).slice(0, 500)}`);
+    console.log(`  WASM unit 852056: ${JSON.stringify(wasmUnit)}`);
     console.log(`  TS team 2: ${JSON.stringify(tsTeam)}`);
 
     if (t < 103) {

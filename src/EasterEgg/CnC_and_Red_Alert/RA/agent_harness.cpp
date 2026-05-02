@@ -1030,7 +1030,16 @@ char* agent_get_state(void)
 			for (int k = 0; k < t->Class->ClassCount; k++) {
 				desired += t->Class->Members[k].Quantity;
 			}
-			buf_cat("{\"i\":%d,\"cls\":\"%s\",\"house\":\"%s\",\"total\":%d,\"desired\":%d,\"fs\":%s,\"us\":%s,\"fa\":%s,\"mv\":%s,\"hb\":%s,\"rf\":%s,\"alt\":%s,\"members\":[",
+			// Phase 7B+ probe extension — expose mission state for TS parity:
+			// currentMission (private, accessor added), Target/MissionTarget coords,
+			// mission list contents, and timeout. SCG13EA t101 root-cause requires
+			// knowing whether team has advanced missions.
+			int cur_mission = t->Get_Current_Mission();
+			int time_out = t->Get_Time_Out();
+			COORDINATE tgt_coord = Target_Legal(t->Target) ? As_Coord(t->Target) : 0;
+			COORDINATE mtgt_coord = Target_Legal(t->MissionTarget) ? As_Coord(t->MissionTarget) : 0;
+
+			buf_cat("{\"i\":%d,\"cls\":\"%s\",\"house\":\"%s\",\"total\":%d,\"desired\":%d,\"fs\":%s,\"us\":%s,\"fa\":%s,\"mv\":%s,\"hb\":%s,\"rf\":%s,\"alt\":%s,\"cur\":%d,\"to\":%d,\"tgtX\":%d,\"tgtY\":%d,\"mtgtX\":%d,\"mtgtY\":%d,\"missions\":[",
 				ti,
 				t->Class->IniName,
 				agent_house_name(t->House->Class->House),
@@ -1041,7 +1050,18 @@ char* agent_get_state(void)
 				t->IsMoving ? "true" : "false",
 				t->IsHasBeen ? "true" : "false",
 				t->IsReforming ? "true" : "false",
-				t->IsAltered ? "true" : "false");
+				t->IsAltered ? "true" : "false",
+				cur_mission, time_out,
+				(int)Coord_X(tgt_coord), (int)Coord_Y(tgt_coord),
+				(int)Coord_X(mtgt_coord), (int)Coord_Y(mtgt_coord));
+			// Mission list dump (TeamMissionType enum + argument)
+			for (int mi = 0; mi < t->Class->MissionCount; mi++) {
+				if (mi > 0) buf_cat(",");
+				buf_cat("[%d,%ld]",
+					(int)t->Class->MissionList[mi].Mission,
+					(long)t->Class->MissionList[mi].Data.Value);
+			}
+			buf_cat("],\"members\":[");
 			// Dump per-typeindex quantity + member IDs (from Infantry/Units arrays whose Team == t)
 			bool mfirst = true;
 			for (int k = 0; k < t->Class->ClassCount; k++) {
