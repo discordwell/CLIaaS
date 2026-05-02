@@ -1533,8 +1533,14 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     // promote doesn't naturally replicate (see team.ts activation niat=8).
     if (animPick >= 1 && animPick <= 4) {
       entity.nonInterruptAnimTicks = 7;
+      // Phase 7B: track Doing as 'gesture' so isDoingInterruptible() blocks
+      // Commence — mirrors C++ Do_Action(DO_GESTURE1/2 / DO_SALUTE1/2) all of
+      // which have Interrupt=false in MasterDoControls (infantry.cpp:115-118).
+      entity.doing = 'gesture';
+    } else {
+      // animPick 0 or >=5: idle animations (interruptible). C++ Do_Action(DO_IDLE1/2).
+      entity.doing = 'idle_anim';
     }
-    entity.doing = 'idle_anim';
   }
 }
 
@@ -1808,6 +1814,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
     if (animPick >= 1 && animPick <= 4) {
       entity.nonInterruptAnimTicks = 8;
+      // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
+      entity.doing = 'gesture';
     }
   }
 }
