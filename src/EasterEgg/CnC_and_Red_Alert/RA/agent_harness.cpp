@@ -358,10 +358,11 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		if (hc) {
 			buf_cat(",\"hlx\":%d,\"hly\":%d", (int)Coord_X(hc), (int)Coord_Y(hc));
 		}
-		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d,\"p0\":%d,\"spd\":%d",
+		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d,\"init\":%s,\"p0\":%d,\"spd\":%d",
 			foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
 			foot->IsDriving ? "true" : "false",
 			(int)foot->MissionQueue,
+			foot->IsInitiated ? "true" : "false",
 			(int)foot->Path[0],
 			(int)foot->Speed);
 		// Task #43 diagnostic: expose IdleTimer + Doing + IsFiring for infantry
@@ -1045,8 +1046,10 @@ char* agent_get_state(void)
 			int time_out = t->Get_Time_Out();
 			COORDINATE tgt_coord = Target_Legal(t->Target) ? As_Coord(t->Target) : 0;
 			COORDINATE mtgt_coord = Target_Legal(t->MissionTarget) ? As_Coord(t->MissionTarget) : 0;
+			COORDINATE zone_coord = Target_Legal(t->Zone) ? As_Coord(t->Zone) : 0;
+			COORDINATE close_coord = Target_Legal(t->ClosestMember) ? As_Coord(t->ClosestMember) : 0;
 
-			buf_cat("{\"i\":%d,\"cls\":\"%s\",\"house\":\"%s\",\"total\":%d,\"desired\":%d,\"fs\":%s,\"us\":%s,\"fa\":%s,\"mv\":%s,\"hb\":%s,\"rf\":%s,\"alt\":%s,\"cur\":%d,\"to\":%d,\"tgtX\":%d,\"tgtY\":%d,\"mtgtX\":%d,\"mtgtY\":%d,\"missions\":[",
+			buf_cat("{\"i\":%d,\"cls\":\"%s\",\"house\":\"%s\",\"total\":%d,\"desired\":%d,\"fs\":%s,\"us\":%s,\"fa\":%s,\"mv\":%s,\"hb\":%s,\"rf\":%s,\"alt\":%s,\"next\":%s,\"lag\":%s,\"cur\":%d,\"to\":%d,\"tgtX\":%d,\"tgtY\":%d,\"mtgtX\":%d,\"mtgtY\":%d,\"zoneX\":%d,\"zoneY\":%d,\"closeX\":%d,\"closeY\":%d,\"missions\":[",
 				ti,
 				t->Class->IniName,
 				agent_house_name(t->House->Class->House),
@@ -1058,9 +1061,13 @@ char* agent_get_state(void)
 				t->IsHasBeen ? "true" : "false",
 				t->IsReforming ? "true" : "false",
 				t->IsAltered ? "true" : "false",
+				t->IsNextMission ? "true" : "false",
+				t->IsLagging ? "true" : "false",
 				cur_mission, time_out,
 				(int)Coord_X(tgt_coord), (int)Coord_Y(tgt_coord),
-				(int)Coord_X(mtgt_coord), (int)Coord_Y(mtgt_coord));
+				(int)Coord_X(mtgt_coord), (int)Coord_Y(mtgt_coord),
+				(int)Coord_X(zone_coord), (int)Coord_Y(zone_coord),
+				(int)Coord_X(close_coord), (int)Coord_Y(close_coord));
 			// Mission list dump (TeamMissionType enum + argument)
 			for (int mi = 0; mi < t->Class->MissionCount; mi++) {
 				if (mi > 0) buf_cat(",");

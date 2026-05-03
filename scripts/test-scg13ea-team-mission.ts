@@ -4,7 +4,7 @@
  */
 import { test } from '@playwright/test';
 
-const BASE_URL = 'https://cliaas.com';
+const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
 
 test('SCG13EA WASM team mission trace', async ({ browser }) => {
   test.setTimeout(5 * 60 * 1000);
@@ -45,10 +45,20 @@ test('SCG13EA WASM team mission trace', async ({ browser }) => {
     });
     const tsTeam = await tsPage.evaluate(() => {
       const game = (window as any).__agentGame;
-      // Access team via the unit's teamRef
-      const e = game.entities.find((x: { id: number }) => x.id === 109);
-      if (!e?.teamRef) return null;
-      const t = e.teamRef;
+      const teams = Array.from(new Set(
+        game.entities
+          .filter((e: { alive: boolean; type: string; house: string; teamRef?: unknown }) =>
+            e.alive && e.type === 'E1' && e.house === 'USSR' && e.teamRef)
+          .map((e: { teamRef: unknown }) => e.teamRef)
+      )) as Array<any>;
+      const t = teams.find((team) =>
+        team.missionList?.map((m: { mission: number; data: number }) => `${m.mission}:${m.data}`).join(',') ===
+        '16:15,16:16,16:15,16:13,6:0');
+      if (!t) return { teams: teams.map((team) => ({
+        id: team.id,
+        currentMission: team.currentMission,
+        missionList: team.missionList?.map((m: { mission: number; data: number }) => `${m.mission}:${m.data}`),
+      })) };
       return {
         id: t.id, isMoving: t.isMoving, isNextMission: t.isNextMission,
         currentMission: t.currentMission,
@@ -68,7 +78,7 @@ test('SCG13EA WASM team mission trace', async ({ browser }) => {
       return u ? { m: u.m, mt: u.mt, mq: u.mq, drv: u.drv, doing: u.doing, nlx: u.nlx, nly: u.nly, lx: u.lx, ly: u.ly } : null;
     });
     console.log(`tick ${t}:`);
-    console.log(`  WASM teams: ${JSON.stringify(wasmTeams).slice(0, 500)}`);
+    console.log(`  WASM teams: ${JSON.stringify(wasmTeams).slice(0, 1000)}`);
     console.log(`  WASM unit 852056: ${JSON.stringify(wasmUnit)}`);
     console.log(`  TS team 2: ${JSON.stringify(tsTeam)}`);
 

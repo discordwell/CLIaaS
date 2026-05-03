@@ -257,8 +257,10 @@ export class Team {
       entity.teamRef.remove(entity);
     }
 
+    const isFirstMember = this._members.length === 0;
     this._members.push(entity);
     entity.teamRef = this;
+    entity.teamInitiated = isFirstMember;
 
     // C++ parity: Team::Add does NOT copy missions to entity members.
     // The TeamInstance coordinator (coordinateMove/coordinateDo) handles
@@ -270,7 +272,6 @@ export class Team {
 
     // C++ team.cpp:912 — first member is initiated
     // (In C++ this means "has reached team center and is an active participant")
-    // We simplify: all members of spawned teams are initiated immediately.
 
     // Mark team composition as altered for re-evaluation
     this.isAltered = true;
@@ -280,6 +281,33 @@ export class Team {
     }
 
     return true;
+  }
+
+  /** C++ team.cpp:141 _Is_It_Playing — active, breathing, initiated member. */
+  private isItPlaying(unit: Entity): boolean {
+    return unit.alive && (unit.teamInitiated || unit.isAirUnit);
+  }
+
+  /** C++ team.cpp:2285 Coordinate_Conscript.
+   *  Non-initiated members move toward the team Zone until close enough, then
+   *  become initiated and participate in Coordinate_Move/Attack. */
+  private coordinateConscript(unit: Entity): boolean {
+    if (!unit.alive || unit.teamInitiated || unit.isAirUnit) return false;
+    if (!this.zone) {
+      unit.teamInitiated = true;
+      return false;
+    }
+    if (leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > STRAY_DISTANCE) {
+      if (!unit.moveTarget) {
+        assignMission(unit, Mission.MOVE);
+        unit.target = null;
+        unit.formationOffset = null;
+        unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
+      }
+      return true;
+    }
+    unit.teamInitiated = true;
+    return false;
   }
 
   /**
@@ -413,6 +441,7 @@ export class Team {
 
     this._members.splice(idx, 1);
     entity.teamRef = null;
+    entity.teamInitiated = false;
     // C++ team.cpp:2285-2289 — clears IsFormationMove when member is removed/dies
     entity.formationOffset = null;
     this.isAltered = true;
@@ -575,6 +604,9 @@ export class Team {
 
       if (this.isReforming || this.isForcedActive) {
         // All members become initiated
+        for (const m of this._members) {
+          if (m.alive) m.teamInitiated = true;
+        }
       }
 
       this.currentMission = -1;
@@ -853,6 +885,11 @@ export class Team {
       // C++ vessel/aircraft loaner transports auto-retreat after unloading and
       // must NOT be re-grouped by the team they were spawned with.
       if (unit.mission === Mission.RETREAT) continue;
+      if (this.coordinateConscript(unit)) {
+        finished = false;
+        continue;
+      }
+      if (!this.isItPlaying(unit)) continue;
       found = true;
 
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
@@ -1146,6 +1183,11 @@ export class Team {
     let allArrived = true;
     for (const unit of this._members) {
       if (!unit.alive) continue;
+      if (this.coordinateConscript(unit)) {
+        allArrived = false;
+        continue;
+      }
+      if (!this.isItPlaying(unit)) continue;
 
       if (unit.mission === Mission.ATTACK && unit.target?.alive) {
         allArrived = false;
@@ -1438,6 +1480,7 @@ export class Team {
   dissolve(): void {
     for (const m of this._members) {
       m.teamRef = null;
+      m.teamInitiated = false;
       // C++ team.cpp:1139: Remove calls Enter_Idle_Mode. Infantry preserves a
       // legal NavCom by assigning MOVE; otherwise guard missions are left alone
       // and non-guard units queue GUARD.

@@ -465,6 +465,10 @@ export class Entity {
   // Typed loosely to avoid circular dependency (team.ts imports entity.ts)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   teamRef: any = null;
+  // C++ FootClass::IsInitiated — only initiated team members participate in
+  // TeamClass Coordinate_Move/Attack. Non-initiated members first regroup to
+  // the team Zone via Coordinate_Conscript.
+  teamInitiated = false;
 
   // Superweapon effect timers
   ironCurtainTick = 0;  // ticks remaining for Iron Curtain invulnerability
