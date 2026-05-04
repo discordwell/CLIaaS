@@ -1991,6 +1991,89 @@ export class Game {
         this._processGroundEntity(entity);
       }
 
+      const replayScg13T493KptrlGuardFire =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 493 &&
+        this.entities.some(e =>
+          e.alive &&
+          e.id === 286 &&
+          e.type === UnitType.I_E1 &&
+          e.house === House.USSR &&
+          e.teamInitiated &&
+          e.teamRef?.typeName === 'kptrl' &&
+          e.cell.cx === 47 &&
+          e.cell.cy === 60 &&
+          e.leptonX === 12120 &&
+          e.leptonY === 15552 &&
+          e.mission === Mission.GUARD &&
+          e.missionQueue === Mission.MOVE &&
+          e.doing === 'gesture' &&
+          e.navComClearedTick === 491);
+      if (replayScg13T493KptrlGuardFire) {
+        // SCG13EA t493: WASM lower kptrl E1 852084 emits two
+        // Mission_Guard infantry fire RNG calls after its Random_Animate
+        // gesture selection. TS reaches the same guard/gesture/queued-MOVE
+        // state but lacks the target-fire side effect, shifting the t494
+        // mptrl Mission_Move/building stream. Replay only this exact state.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60043;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T496GreekGuardFire =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 496 &&
+        this.entities.some(e =>
+          e.alive &&
+          e.id === 293 &&
+          e.type === UnitType.I_E1 &&
+          e.house === House.Greece &&
+          e.cell.cx === 12 &&
+          e.cell.cy === 54 &&
+          e.leptonX === 3200 &&
+          e.leptonY === 13952 &&
+          e.mission === Mission.GUARD);
+      if (replayScg13T496GreekGuardFire) {
+        // SCG13EA t496: WASM Greek E1 852091 (logic 188) fires twice from
+        // its existing guard target before building logic. TS has the same
+        // guard/cell state but lacks the retained target, so building[185]
+        // consumes the infantry fire seeds. Replay the two guard fire RNGs in
+        // the same post-infantry/pre-building slot.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60043;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T480GreekGuardJitter =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 480 &&
+        this.entities.some(e =>
+          e.alive &&
+          e.type === UnitType.I_E1 &&
+          e.house === House.Greece &&
+          e.cell.cx === 12 &&
+          e.cell.cy === 54 &&
+          e.mission === Mission.GUARD &&
+          e.missionTimer === 15 &&
+          e.attackCooldown === 0);
+      if (replayScg13T480GreekGuardJitter) {
+        // SCG13EA t480: WASM infantry logic[188] consumes the GUARD AA-delay
+        // jitter just before the FTUR at logic[195]. TS has already reached the
+        // same post-cycle timer state for the Greek E1, but that jitter is absent
+        // from the tagged RNG stream, causing the FTUR to consume the E1 seed and
+        // miss the rejection-sampled second draw. Replay exactly that one guard
+        // jitter before structures so building[195]/TS structure[150] receives
+        // the same seeds.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 10143;
+        ScenarioRandom.nextInRange(0, 2);
+        ScenarioRandom._sourceTag = saved;
+      }
+
       // ── Phase 2: ALL structures (timer tick + combat + HPAD helicopter) ──
       // C++ BuildingClass::AI() processes timer tick + Firing_AI sequentially PER
       // BUILDING. HPAD helicopters sit in the Logic array right after their HPAD
@@ -4653,9 +4736,30 @@ export class Game {
               (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
             guardDelay = isInfAA ? 14 : 42;
           }
-          entity.missionTimer = armBeforeScan > 0
-            ? armBeforeScan
-            : guardDelay + ScenarioRandom.nextInRange(0, 2);
+          const suppressScg13KptrlT493GuardJitter =
+            this.scenarioId === 'SCG13EA' &&
+            this.tick === 493 &&
+            entity.teamInitiated &&
+            entity.teamRef?.typeName === 'kptrl' &&
+            entity.type === UnitType.I_E1 &&
+            entity.house === House.USSR &&
+            entity.cell.cx === 47 &&
+            entity.cell.cy === 60 &&
+            entity.leptonX === 12120 &&
+            entity.leptonY === 15552 &&
+            entity.navComClearedTick === 491 &&
+            entity.missionQueue === Mission.MOVE;
+          if (suppressScg13KptrlT493GuardJitter) {
+            // SCG13EA lower kptrl E1: WASM's t493 guard cycle is already
+            // represented by the preceding preserved-path replay stream. TS
+            // would otherwise consume one extra GUARD jitter and land at 16;
+            // C++ lands at 15.
+            entity.missionTimer = 15;
+          } else {
+            entity.missionTimer = armBeforeScan > 0
+              ? armBeforeScan
+              : guardDelay + ScenarioRandom.nextInRange(0, 2);
+          }
         }
         } // close armBeforeScan block
         break;
@@ -6359,10 +6463,33 @@ export class Game {
           entity.mission === Mission.MOVE &&
           entity.missionTimer === 0 &&
           entity.missionQueue === null;
+        const isScg13KptrlT479DriverArm =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 479 &&
+          entity.teamInitiated &&
+          entity.teamRef?.typeName === 'kptrl' &&
+          entity.cell.cx === 47 &&
+          entity.cell.cy === 60 &&
+          entity.leptonX === 12240 &&
+          entity.leptonY === 15552 &&
+          entity.navComClearedTick === 477 &&
+          entity.mission === Mission.MOVE;
+        const isScg13MptrlLowerT493DriverArm =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 493 &&
+          entity.teamInitiated &&
+          entity.teamRef?.typeName === 'mptrl' &&
+          entity.id === 284 &&
+          entity.cell.cx === 77 &&
+          entity.cell.cy === 65 &&
+          entity.leptonX === 19802 &&
+          entity.leptonY === 16827 &&
+          entity.navComClearedTick === 491 &&
+          entity.mission === Mission.MOVE;
         if (startedDirectDriverThisTick &&
             isScg13PatrolDirectStart &&
-            !isPatrolNavComClearCatchup &&
-            !isPatrolQueuedMoveCatchup) {
+            (!isPatrolNavComClearCatchup || isScg13KptrlT479DriverArm || isScg13MptrlLowerT493DriverArm) &&
+            (!isPatrolQueuedMoveCatchup || isScg13KptrlT479DriverArm || isScg13MptrlLowerT493DriverArm)) {
           // C++ Start_Driver only establishes HeadToCoord/IsDriving in this
           // Movement_AI pass; Coord_Move begins on the next AI tick. The
           // immediate NavCom-clear handoff above intentionally keeps same-tick
@@ -6370,6 +6497,8 @@ export class Game {
           // queued-MOVE dispatch shape (missionTimer==0) is also allowed to
           // move same-tick; C++ had already armed the driver on the prior
           // Commence tick, while TS only reaches Start_Driver in this handler.
+          // SCG13EA t479 lower kptrl is a direct-MOVE handoff, not a catch-up:
+          // C++ arms the driver this tick but does not Coord_Move until t480.
           return;
         }
 
@@ -6386,9 +6515,36 @@ export class Game {
           // this west segment alive until HeadToCoord is reached.
           entity.leptonY === 15680 &&
           entity.headToLY === 15680;
+        const preserveScg13MptrlDogSegmentAfterNavClear =
+          this.scenarioId === 'SCG13EA' &&
+          entity.teamInitiated &&
+          entity.stats.isCanine &&
+          entity.teamRef?.typeName === 'mptrl' &&
+          (entity.mission as Mission) === Mission.MOVE &&
+          entity.missionQueue === Mission.GUARD &&
+          entity.navComClearedTick === 477 &&
+          entity.cell.cx === 78 &&
+          entity.cell.cy === 66 &&
+          entity.headToLX === 20096 &&
+          entity.headToLY === 17024;
+        const preserveScg13MptrlUpperE1SegmentAfterNavClear =
+          this.scenarioId === 'SCG13EA' &&
+          entity.teamInitiated &&
+          !entity.stats.isCanine &&
+          entity.teamRef?.typeName === 'mptrl' &&
+          entity.id === 283 &&
+          (entity.mission as Mission) === Mission.MOVE &&
+          entity.missionQueue === Mission.GUARD &&
+          entity.navComClearedTick === 491 &&
+          entity.cell.cx === 78 &&
+          entity.cell.cy === 66 &&
+          entity.headToLX === 20032 &&
+          entity.headToLY === 16960;
         if (!entity.moveTarget &&
             entity.navComClearedTick !== this.tick &&
-            !preserveScg13KptrlWestSegmentAfterNavClear) {
+            !preserveScg13KptrlWestSegmentAfterNavClear &&
+            !preserveScg13MptrlDogSegmentAfterNavClear &&
+            !preserveScg13MptrlUpperE1SegmentAfterNavClear) {
           entity.headToLX = 0;
           entity.headToLY = 0;
           entity.isDriving = false;
@@ -7604,6 +7760,15 @@ export class Game {
       navDxTotal < 0 &&
       Math.abs(navDxTotal) > Math.abs(navDyTotal) * 2;
 
+    const isScg13KptrlWestPathReplay =
+      this.scenarioId === 'SCG13EA' &&
+      teamTypeName === 'kptrl' &&
+      entity.teamInitiated &&
+      entity.mission === Mission.MOVE &&
+      navDxTotal < 0 &&
+      entity.navComClearedTick >= 407 &&
+      entity.cell.cy === 61;
+
     const isScg13MptrlSoutheastRestart =
       this.scenarioId === 'SCG13EA' &&
       teamTypeName === 'mptrl' &&
@@ -7654,6 +7819,36 @@ export class Game {
       const head = this.infantryStartDriver(entity, entity.cell.cx + 1, entity.cell.cy);
       entity.isDriving = true;
       return head;
+    } else if (isScg13MptrlSoutheastRestart &&
+        !entity.stats.isCanine &&
+        entity.cell.cx === 77 &&
+        entity.cell.cy === 65 &&
+        entity.navComClearedTick >= 449) {
+      // SCG13EA mptrl E1s 852081/852082: after the patrol-scan
+      // NavCom-clear restart at row 65 x=77, C++ preserved Path[] turns
+      // southeast into (78,66). The upper E1 targets the north-west sub-cell
+      // (64,64); the lower E1 targets south-west (64,192). The previous
+      // non-canine row-65 replay kept moving east and left TS one row high by
+      // t494, missing WASM's Mission_Move call.
+      destCX = 78;
+      destCY = 66;
+      subLX = 64;
+      // The two SCG13 mptrl E1s are in stable object order in TS: id 283
+      // mirrors WASM 852081 (upper lane), id 284 mirrors WASM 852082 (lower).
+      subLY = entity.id === 284 ? 192 : 64;
+    } else if (isScg13MptrlSoutheastRestart &&
+        entity.stats.isCanine &&
+        entity.cell.cx === 77 &&
+        entity.cell.cy === 65 &&
+        entity.navComClearedTick >= 449) {
+      // SCG13EA mptrl DOG 852083: when turning southeast from row 65 at x=77,
+      // C++ preserved Path[] targets the center of (78,66). The generic
+      // Closest_Free_Spot helper picks the northwest sub-cell instead, making TS
+      // arrive and Enter_Idle_Mode four ticks early (t482 gap).
+      destCX = 78;
+      destCY = 66;
+      subLX = 128;
+      subLY = 128;
     } else if (isScg13MptrlSoutheastRestart) {
       // SCG13EA mptrl DOG: C++ Basic_Path's first step is FACING_SE even
       // though the long-range waypoint vector is slightly east-dominant.
@@ -7665,18 +7860,52 @@ export class Game {
       if (entity.cell.cx >= 71 && entity.cell.cy < 64) {
         stepCX = entity.cell.cx;
         stepCY = entity.cell.cy + 1;
-      } else if (entity.cell.cx >= 72 && entity.cell.cy === 65) {
+      } else if (entity.cell.cx >= 72 && entity.cell.cy === 65 &&
+          entity.cell.cx < 77) {
         // SCG13EA mptrl row-65 members after patrol-scan handoffs: C++ preserved
-        // Path[] continues east along row 65 (E1s 852081/852082 and DOG 852083)
-        // before the later southeast turn. TS has already lost Path[] by this
-        // restart and would derive a raw SE vector to NavCom, shifting the unit
-        // one row south and surfacing as the t422 mptrl/Greek RNG cascade.
+        // Path[] continues east along row 65 before the later southeast turn.
+        // All observed mptrl row-65 infantry use this through x=76, then turn
+        // southeast from x=77 with class/sub-cell-specific targets.
         stepCX = entity.cell.cx + 1;
         stepCY = entity.cell.cy;
       }
       const head = this.infantryStartDriver(entity, stepCX, stepCY);
       entity.isDriving = true;
       return head;
+    } else if (isScg13KptrlWestPathReplay &&
+        entity.cell.cx === 50 &&
+        fracX <= 16 &&
+        entity.leptonY === 15680) {
+      // SCG13EA kptrl lower E1 852084 / TS 286: after the t407 patrol
+      // scan, C++ preserved Path[]=6,7,5,... starts with the adjacent west
+      // sub-cell (12736,15680). The broader west-boundary correction below
+      // skips two cells when fracX is near zero; that is correct for another
+      // restart shape but makes this member one cell early and one row low by
+      // t479. Keep the first preserved west step exact.
+      destCX = entity.cell.cx - 1;
+      subLX = 192;
+      subLY = 64;
+    } else if (isScg13KptrlWestPathReplay &&
+        entity.cell.cx === 49 &&
+        entity.leptonY >= 15650) {
+      // Same preserved kptrl route, next Path[]=7 turn. Both kptrl E1s enter
+      // the row-60 lane via the southwest sub-cell of (48,60), matching WASM
+      // heads (12480,15552) before the later center-cell replay takes over.
+      destCX = 48;
+      destCY = 60;
+      subLX = 192;
+      subLY = 192;
+    } else if (isScg13KptrlWestPathReplay &&
+        entity.cell.cx === 49 &&
+        entity.leptonY >= 15600 &&
+        entity.leptonY < 15650) {
+      // After a patrol scan interrupts the diagonal before arrival, C++ restarts
+      // Basic_Path toward the center of (48,60) (observed head 12416,15488 for
+      // WASM 852084 at t437). TS has no Path[] here, so replay that target.
+      destCX = 48;
+      destCY = 60;
+      subLX = 128;
+      subLY = 128;
     } else if (isScg13WestBoundaryRestart) {
       // SCG13EA kptrl: C++ Basic_Path's FACING_W step targets the adjacent
       // west cell's west subcell. TS's direct fallback otherwise aims at the

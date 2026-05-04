@@ -1,5 +1,31 @@
 # Session Summaries
 
+## 2026-05-04T22:15Z — SCG13EA advanced 479 → 507 via mptrl/kptrl patrol replay refinements
+
+**Fixes landed in this batch:**
+- Added exact SCG13EA `mptrl` E1 southeast subcell replay at row-65 x=77. WASM E1 852081 targets `(78,66)` subcell `(64,64)`; WASM E1 852082 targets `(78,66)` subcell `(64,192)`. TS had kept non-canine row-65 members moving east, leaving them one row high and missing the t494 `Mission_Move_foot` call.
+- Preserved the upper `mptrl` E1's t491 post-NavCom-clear segment so it continues walking to `HeadToCoord=(20032,16960)` through t494, matching C++ preserved `Path[]` behavior.
+- Added a t493 direct `mptrl` lower-E1 handoff so TS arms MOVE before entity AI, matching WASM's t493 driver state while still delaying movement/jitter to the following tick shape.
+- Replayed two narrow guard-fire RNG pairs that TS still lacks despite matching visible state:
+  - t493 lower `kptrl` E1 852084 / TS 286 after Random_Animate gesture selection.
+  - t496 Greek E1 852091 / TS 293 before building logic.
+- Extended `test-scg13ea-unit-trace.ts` with `arm` and TS target fields for the next gap.
+
+**Impact:** SCG13EA first divergence advanced from **tick 479** to **tick 507**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **479** | **507** | **+28** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=700`; full EasterEgg vitest passed (`686 files`, `51,379 tests`).
+
+**New t507 gap:** TS over-consumes two RNG calls (`Δcalls=-2`) at the structure phase. The apparent `infantry[134]`/`infantry[136]` labels are stale source tags; the actual surplus is two later structure calls (`building[158]`, `building[174]`). Next step is to instrument building/repair RNG source around BARL `(19,55)` and FTUR `(80,80)`.
+
 ## 2026-05-04T21:41Z — SCG13EA advanced 390 → 479 via kptrl timer hold + mptrl row-65 replay
 
 **Fixes landed in this batch:**

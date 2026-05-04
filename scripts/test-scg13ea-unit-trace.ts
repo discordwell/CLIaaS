@@ -51,7 +51,7 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
       const all = [...(s.units ?? []), ...(s.enemies ?? [])];
       const u = all.find((x: { id: number }) => x.id === id);
       if (!u) return '?';
-      return `m=${u.m} mt=${u.mt} mq=${u.mq} drv=${u.drv} doing=${u.doing} c=(${u.cx},${u.cy}) ` +
+      return `m=${u.m} mt=${u.mt} arm=${u.arm ?? '?'} mq=${u.mq} drv=${u.drv} doing=${u.doing} c=(${u.cx},${u.cy}) ` +
         `pos=(${u.lx},${u.ly}) head=${u.hlx !== undefined ? `(${u.hlx},${u.hly})` : 'null'} ` +
         `nav=${u.nlx !== undefined ? `(${u.nlx},${u.nly})` : 'null'} ` +
         `path=${[u.p0,u.p1,u.p2,u.p3,u.p4,u.p5].join(',')} spd=${u.spd}`;
@@ -63,13 +63,15 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
       if (!e) return '?';
       const head = e.headToLX > 0 ? `(${e.headToLX},${e.headToLY})` : 'null';
       const nav = e.moveTarget ? `(${e.moveTarget.lx},${e.moveTarget.ly})` : 'null';
+      const tgt = e.target ? `${e.target.id ?? '?'}@(${e.target.cell?.cx ?? '?'},${e.target.cell?.cy ?? '?'})` :
+        e.targetStructure ? `${e.targetStructure.type}@(${e.targetStructure.cx},${e.targetStructure.cy})` : 'null';
       const path = `${e.pathIndex}/${e.path?.length ?? 0}:${(e.path ?? []).slice(e.pathIndex, e.pathIndex + 3)
         .map((p: { cx: number; cy: number }) => `${p.cx},${p.cy}`).join('|')}`;
-      return `m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} drv=${e.isDriving} ` +
+      return `m=${e.mission} mt=${e.missionTimer} arm=${e.attackCooldown ?? 0} mq=${e.missionQueue ?? 'null'} drv=${e.isDriving} ` +
         `init=${e.teamInitiated} team=${e.teamRef?.typeName ?? '-'}#${e.teamRef?.id ?? '-'} ` +
         `nct=${e.navComClearedTick ?? -1} ` +
         `doing=${e.doing} c=(${e.cell.cx},${e.cell.cy}) pos=(${e.leptonX},${e.leptonY}) ` +
-        `head=${head} nav=${nav} path=${path}`;
+        `head=${head} nav=${nav} tgt=${tgt} path=${path}`;
     }, TS_ID);
 
     const line = `t=${t} W: ${wasm} | TS: ${ts}`;
