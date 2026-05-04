@@ -43,8 +43,15 @@ test(`SCG13EA teams probe ${START}-${END}`, async ({ browser }) => {
     const teams = await wasmPage.evaluate(() => {
       const M = (window as any).Module;
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
-      return (s.teams ?? []).map((tm: { i: number; cls: string; cur: number; next?: boolean; lag?: boolean; tgtX: number; tgtY: number; mtgtX: number; mtgtY: number; missions: unknown[] }) =>
-        ({ i: tm.i, cls: tm.cls, cur: tm.cur, next: tm.next, lag: tm.lag, tgt: `(${tm.tgtX},${tm.tgtY})`, mtgt: `(${tm.mtgtX},${tm.mtgtY})`, missions: tm.missions }));
+      const all = [...(s.units ?? []), ...(s.enemies ?? [])];
+      return (s.teams ?? []).map((tm: { i: number; cls: string; cur: number; next?: boolean; lag?: boolean; tgtX: number; tgtY: number; mtgtX: number; mtgtY: number; missions: unknown[]; members?: Array<{ ids?: number[] }> }) => {
+        const ids = (tm.members ?? []).flatMap(m => m.ids ?? []);
+        const states = ids.map(id => {
+          const u = all.find((x: { id: number }) => x.id === id);
+          return u ? `${u.id}:${u.t}/m=${u.m}/mt=${u.mt}/mq=${u.mq}/drv=${u.drv}/c=(${u.cx},${u.cy})/p=${[u.p0,u.p1,u.p2].join(',')}` : `${id}:?`;
+        });
+        return { i: tm.i, cls: tm.cls, cur: tm.cur, next: tm.next, lag: tm.lag, tgt: `(${tm.tgtX},${tm.tgtY})`, mtgt: `(${tm.mtgtX},${tm.mtgtY})`, missions: tm.missions, members: states };
+      });
     });
     const tsTeams = await tsPage.evaluate(() => {
       const game = (window as any).__agentGame;

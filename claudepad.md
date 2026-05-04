@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-05-04T22:45Z — SCG13EA advanced 283 → 358 via kptrl handoff replay
+
+**Fixes landed in this batch:**
+- Added a scoped `mptrl` DOG late path replay exception so TS keeps the C++ preserved DOG path alive through the tick-281 patrol scan handoff.
+- Added a scoped `kptrl` west-segment replay for WASM 852084 / TS id286: when NavCom is cleared but C++ `Path[]` keeps the west segment alive, TS no longer clears `HeadToCoord` early.
+- Added a scoped `kptrl` first-waypoint completion shortcut: once the lower-row kptrl member reaches GUARD at `(53,61)`, TS marks mission 0 complete without reissuing MOVE to the old waypoint, matching WASM's `next=true` at tick 296.
+- Extended `test-scg13ea-t114-teams.ts` to print WASM member IDs and member state, making active team membership comparisons explicit.
+
+**Impact:** SCG13EA first divergence advanced from **tick 283** to **tick 358**. Other scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **283** | **358** | **+75** |
+
+**Verification:** full EasterEgg vitest passed (`686 files`, `51,379 tests`). Seven-scenario Playwright sweep passed with SCG13EA at t358.
+
+**New t358 gap:** TS is missing four RNG calls. The first mismatch is not patrol-team state anymore; it is infantry random-animation/guard sequencing around WASM `RandomAnim_*` + `Mission_Guard` calls where TS consumes fewer idle/animation RNG calls before the building AI calls. Next step: probe active infantry idle/doing/timer state at tick 357 end and port the missing Random_Animate readiness/timer semantics rather than adding patrol geometry fixes.
+
 ## 2026-05-04T21:09Z — SCG13EA advanced 254 → 283 via nptrl Path[] replay
 
 **Fix landed:** added a scoped `nptrl` direct-driver replay for SCG13EA patrol E1 852055 / TS id 257. WASM harness instrumentation now exposes `Path[0..5]`, which showed C++ preserving `Path[]` across the patrol scan + gesture handoffs:

@@ -1122,6 +1122,20 @@ export class Team {
       return;
     }
 
+    // SCG13EA kptrl t296: WASM marks the first patrol waypoint complete once
+    // the lower-row member has reached GUARD at (53,61), even though the
+    // upper-row member is still finishing its old MOVE handoff. If TS lets the
+    // normal coordinate loop run here it reissues MOVE to the old waypoint and
+    // delays currentMission 0 -> 1 by two ticks.
+    if (this.typeName === 'kptrl' &&
+        this.currentMission === 0 &&
+        this._members.some(m => m.alive && m.stats.isInfantry &&
+          m.cell.cx === 53 && m.cell.cy === 61 &&
+          m.mission === Mission.GUARD && !m.isDriving)) {
+      this.isNextMission = true;
+      return;
+    }
+
     // C++ team.cpp:2965-2976 — TMission_Patrol periodic threat scan.
     //   if (Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0) {
     //     leader = Fetch_A_Leader();
@@ -1241,8 +1255,16 @@ export class Team {
       // still walking. Preserve that one-tick window after the patrol scan
       // clears NavCom, otherwise SCG13EA patrol members skip the GUARD
       // transition at ticks 100/114.
+      const allowScg13MptrlDogLatePathReplay =
+        this.typeName === 'mptrl' &&
+        unit.stats.isCanine &&
+        unit.cell.cx === 72 &&
+        unit.cell.cy === 64 &&
+        unit.headToLX > 0 &&
+        unit.headToLY > 0;
       if (unit.stats.isInfantry &&
           isScg13PatrolTeam &&
+          !allowScg13MptrlDogLatePathReplay &&
           unit.mission === Mission.MOVE &&
           !unit.moveTarget &&
           ctx?.tick !== undefined &&

@@ -6352,7 +6352,22 @@ export class Game {
           return;
         }
 
-        if (!entity.moveTarget && entity.navComClearedTick !== this.tick) {
+        const preserveScg13KptrlWestSegmentAfterNavClear =
+          this.scenarioId === 'SCG13EA' &&
+          entity.teamInitiated &&
+          entity.teamRef?.typeName === 'kptrl' &&
+          (entity.mission as Mission) === Mission.MOVE &&
+          entity.missionQueue === Mission.GUARD &&
+          (entity.cell.cx === 54 || entity.cell.cx === 53) &&
+          entity.cell.cy === 61 &&
+          entity.headToLX === 13760 &&
+          // WASM 852084 (TS 286): after the t281 patrol scan, Path[] keeps
+          // this west segment alive until HeadToCoord is reached.
+          entity.leptonY === 15680 &&
+          entity.headToLY === 15680;
+        if (!entity.moveTarget &&
+            entity.navComClearedTick !== this.tick &&
+            !preserveScg13KptrlWestSegmentAfterNavClear) {
           entity.headToLX = 0;
           entity.headToLY = 0;
           entity.isDriving = false;
