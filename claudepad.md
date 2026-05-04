@@ -1,5 +1,17 @@
 # Session Summaries
 
+## 2026-05-04T12:00Z — SCG13EA t115 follow-up: patrol restore variants still unsafe
+
+**Baseline reverified:** SCG13EA first divergence remains **tick 115** (`WASM=5`, `TS=4`, `Delta=1`) after reverting all experiments.
+
+**Additional experiments tried and reverted:**
+- Restore current patrol waypoint at `coordinatePatrol()` entry exactly like C++ `team.cpp:2954-2961`: regressed SCG13EA to **tick 101**.
+- Delay restore while any member is in `MOVE && !NavCom && !IsDriving`: regressed to **tick 103**.
+- Restore waypoint plus same-tick post-Commence `runInfantryMovementAI()` for infantry MOVE: regressed to **tick 102**.
+- Hold target-null patrol missions for one 14-tick scan window before restoring: regressed to **tick 102**.
+
+**Conclusion:** the `CurrentMission=0` vs TS mission-index drift is real, but all patrol-only repairs break the earlier t100/t101 no-NavCom GUARD handoff. The next durable step is still a fuller infantry order port: split `Mission_Move` timer work from Movement_AI so TS can run infantry `Commence` before `Movement_AI` without losing the existing post-movement side effects.
+
 ## 2026-05-03T10:30Z — SCG13EA t115 investigation: patrol restore needs full infantry AI order
 
 **Safe commit landed:** `4999d4c4` ports `FootClass::IsInitiated`/`Coordinate_Conscript` and extends WASM harness state (`init`, `next`, `lag`, `zone`, `close`). No divergence movement, but no regressions.
