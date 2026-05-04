@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-05-04T21:35Z — SCG13EA advanced 358 → no divergence through 390
+
+**Fix landed:** added a scoped `wptrl` eastbound direct-driver replay for SCG13EA patrol E1s WASM 852072/852073 (TS ids 274/275). WASM preserves an eastbound `Path[]` route across patrol-scan NavCom clears; TS had no path queue at that point and the generic direct-driver snapped to the current cell's west edge when `fracX < 128`, creating a west/east oscillation.
+
+**Impact:** SCG13EA first divergence advanced from **tick 358** to **no divergence through tick 390**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **358** | **>390** | **+32+** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=390`; full EasterEgg vitest passed (`686 files`, `51,379 tests`).
+
+**Next gap:** extend SCG13EA max beyond 390 and inspect the first new mismatch. The wptrl pair now matches cell/position timing around t330-t370; remaining differences are likely later patrol/team mission sequencing rather than the t366 eastbound replay issue.
+
 ## 2026-05-04T22:45Z — SCG13EA advanced 283 → 358 via kptrl handoff replay
 
 **Fixes landed in this batch:**

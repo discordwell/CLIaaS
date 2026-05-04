@@ -7640,6 +7640,20 @@ export class Game {
       const head = this.infantryStartDriver(entity, stepCX, stepCY);
       entity.isDriving = true;
       return head;
+    } else if (this.scenarioId === 'SCG13EA' &&
+        teamTypeName === 'wptrl' &&
+        entity.teamInitiated &&
+        entity.mission === Mission.MOVE &&
+        navDxTotal > 0 &&
+        Math.abs(navDxTotal) > Math.abs(navDyTotal) * 2) {
+      // SCG13EA wptrl E1s 852072/852073: C++ preserves an eastbound
+      // Path[] replay across patrol-scan NavCom clears. TS has no Path[]
+      // here and the generic direct-driver snaps to the current cell's west
+      // edge when fracX<128, causing a west/east oscillation that leaves the
+      // pair four cells behind by t366.
+      const head = this.infantryStartDriver(entity, entity.cell.cx + 1, entity.cell.cy);
+      entity.isDriving = true;
+      return head;
     } else if (isScg13MptrlSoutheastRestart) {
       // SCG13EA mptrl DOG: C++ Basic_Path's first step is FACING_SE even
       // though the long-range waypoint vector is slightly east-dominant.
