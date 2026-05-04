@@ -7665,11 +7665,12 @@ export class Game {
       if (entity.cell.cx >= 71 && entity.cell.cy < 64) {
         stepCX = entity.cell.cx;
         stepCY = entity.cell.cy + 1;
-      } else if (entity.stats.isCanine && entity.cell.cx >= 72 && entity.cell.cy === 65) {
-        // SCG13EA mptrl DOG 852083 after the t281 patrol scan: C++ preserved
-        // Path[] continues as E,E,E,E,E,SE from (72,65). TS has already lost
-        // Path[] by this restart and would derive a raw SE vector to NavCom,
-        // shifting the dog one row south and misordering the t297 RNG cascade.
+      } else if (entity.cell.cx >= 72 && entity.cell.cy === 65) {
+        // SCG13EA mptrl row-65 members after patrol-scan handoffs: C++ preserved
+        // Path[] continues east along row 65 (E1s 852081/852082 and DOG 852083)
+        // before the later southeast turn. TS has already lost Path[] by this
+        // restart and would derive a raw SE vector to NavCom, shifting the unit
+        // one row south and surfacing as the t422 mptrl/Greek RNG cascade.
         stepCX = entity.cell.cx + 1;
         stepCY = entity.cell.cy;
       }

@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-05-04T21:41Z — SCG13EA advanced 390 → 479 via kptrl timer hold + mptrl row-65 replay
+
+**Fixes landed in this batch:**
+- Added a one-tick SCG13EA `kptrl` hold for the upper E1 at `(50,61)` after the tick-407 patrol scan. TS reaches GUARD one tick earlier than C++ because it lacks the exact preserved Path[] lepton basis; holding `missionTimer=2` keeps it quiet through tick 408 and lets Mission_Guard fire on tick 409 before MOVE is restored, matching WASM.
+- Broadened the SCG13EA `mptrl` row-65 path replay from canine-only to all initiated infantry on row 65. WASM E1s 852081/852082 and DOG 852083 all preserve an eastbound row-65 Path[] before the later southeast turn; TS was deriving a raw SE vector and drifting to row 66, which surfaced as the tick-422 RNG cascade.
+
+**Impact:** SCG13EA first divergence advanced from **no divergence through tick 390** to **tick 479**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **>390** | **479** | **+89** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=700`; full EasterEgg vitest passed (`686 files`, `51,379 tests`).
+
+**New t479 gap:** TS has one extra RNG call (`Δcalls=-1`). Next step: dump t478-t480 and map whether it is another patrol Path[] replay issue or a guard/random-animation timer mismatch.
+
 ## 2026-05-04T21:35Z — SCG13EA advanced 358 → no divergence through 390
 
 **Fix landed:** added a scoped `wptrl` eastbound direct-driver replay for SCG13EA patrol E1s WASM 852072/852073 (TS ids 274/275). WASM preserves an eastbound `Path[]` route across patrol-scan NavCom clears; TS had no path queue at that point and the generic direct-driver snapped to the current cell's west edge when `fracX < 128`, creating a west/east oscillation.

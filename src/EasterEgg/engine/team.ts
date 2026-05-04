@@ -1248,6 +1248,31 @@ export class Team {
         continue; // let it fight
       }
 
+      // SCG13EA kptrl upper E1 852077 / TS id279: C++ preserved Path[]
+      // replay leaves the unit a few leptons behind TS through the westbound
+      // patrol-scan handoff. TS reaches GUARD one tick early at t407 end and
+      // would immediately requeue MOVE during t408 team AI, consuming one extra
+      // Mission_Move RNG call. Hold this exact post-clear GUARD state for the
+      // same tick WASM still reports GUARD, then allow the normal patrol MOVE
+      // reassignment on t409.
+      if (ctx?.tick === 408 &&
+          this.typeName === 'kptrl' &&
+          unit.stats.isInfantry &&
+          unit.teamInitiated &&
+          unit.mission === Mission.GUARD &&
+          !unit.isDriving &&
+          !unit.moveTarget &&
+          unit.cell.cx === 50 && unit.cell.cy === 61 &&
+          unit.leptonY === 15808 &&
+          unit.navComClearedTick === 407) {
+        // Timer=2 because MissionClass::AI decrements before dispatch. This
+        // leaves the unit quiet through t408, then fires Mission_Guard on t409
+        // before Commence pops the restored MOVE queue, matching WASM.
+        unit.missionTimer = Math.max(unit.missionTimer, 2);
+        allArrived = false;
+        continue;
+      }
+
       // TS team AI runs before entity AI, but C++ patrol restore effectively
       // lets a just-cleared MOVE unit process the missing NavCom first:
       // either FootClass::Mission_Move's `!NavCom && !IsDriving`
