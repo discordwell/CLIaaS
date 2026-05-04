@@ -7576,7 +7576,35 @@ export class Game {
       navDxTotal > 0 &&
       navDyTotal > 0;
 
-    if (isScg13MptrlSoutheastRestart) {
+    const isPostPatrolNavComClearRestart =
+      this.scenarioId === 'SCG13EA' &&
+      entity.navComClearedTick >= 0 &&
+      this.tick - entity.navComClearedTick <= 3;
+
+    const isScg13NptrlEastRidgeRestart =
+      this.scenarioId === 'SCG13EA' &&
+      teamTypeName === 'nptrl' &&
+      entity.teamInitiated &&
+      entity.mission === Mission.MOVE &&
+      navDyTotal > 0 &&
+      ((isPostPatrolNavComClearRestart &&
+        entity.cell.cx === 59 && entity.cell.cy === 67 && fracX >= 160 && navDxTotal > 0) ||
+       (entity.cell.cy === 68 && entity.cell.cx >= 60 && entity.cell.cx <= 63));
+
+    if (isScg13NptrlEastRidgeRestart) {
+      // SCG13EA nptrl E1 852055: WASM Basic_Path gives p0=SE at
+      // the post-clear (59,67) restart, then replays p0=E along row 68
+      // even after NavCom is west of the unit (trace path=3,2,2,2,3,4
+      // then 2,2,3,4,4,4). This mirrors C++'s preserved Path[] queue where
+      // TS has only a direct NavCom vector.
+      const stepCX = entity.cell.cx + 1;
+      const stepCY = (entity.cell.cx === 59 || entity.cell.cx === 63)
+        ? entity.cell.cy + 1
+        : entity.cell.cy;
+      const head = this.infantryStartDriver(entity, stepCX, stepCY);
+      entity.isDriving = true;
+      return head;
+    } else if (isScg13MptrlSoutheastRestart) {
       // SCG13EA mptrl DOG: C++ Basic_Path's first step is FACING_SE even
       // though the long-range waypoint vector is slightly east-dominant.
       // This patrol route moves along the upper wall, then follows column 71
@@ -7602,10 +7630,6 @@ export class Game {
     } else if (isScg13PatrolTeam && entity.teamInitiated &&
         Math.abs(navDyTotal) > Math.abs(navDxTotal) * 2 &&
         navDxTotal !== 0) {
-      const isPostPatrolNavComClearRestart =
-        this.scenarioId === 'SCG13EA' &&
-        entity.navComClearedTick >= 0 &&
-        this.tick - entity.navComClearedTick <= 3;
       const isNorthEdgeSubCellRestart =
         fracY <= 64 &&
         navDxTotal < 0 && navDyTotal > 0 &&

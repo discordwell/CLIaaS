@@ -392,12 +392,17 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		if (hc) {
 			buf_cat(",\"hlx\":%d,\"hly\":%d", (int)Coord_X(hc), (int)Coord_Y(hc));
 		}
-		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d,\"init\":%s,\"p0\":%d,\"spd\":%d",
+		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d,\"init\":%s,\"p0\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,\"p5\":%d,\"spd\":%d",
 			foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
 			foot->IsDriving ? "true" : "false",
 			(int)foot->MissionQueue,
 			foot->IsInitiated ? "true" : "false",
 			(int)foot->Path[0],
+			(int)foot->Path[1],
+			(int)foot->Path[2],
+			(int)foot->Path[3],
+			(int)foot->Path[4],
+			(int)foot->Path[5],
 			(int)foot->Speed);
 		// Task #43 diagnostic: expose IdleTimer + Doing + IsFiring for infantry
 		// to compare with TS's isReadyToRandomAnimate gate.

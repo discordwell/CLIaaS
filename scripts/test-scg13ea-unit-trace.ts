@@ -53,7 +53,8 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
       if (!u) return '?';
       return `m=${u.m} mt=${u.mt} mq=${u.mq} drv=${u.drv} doing=${u.doing} c=(${u.cx},${u.cy}) ` +
         `pos=(${u.lx},${u.ly}) head=${u.hlx !== undefined ? `(${u.hlx},${u.hly})` : 'null'} ` +
-        `nav=${u.nlx !== undefined ? `(${u.nlx},${u.nly})` : 'null'} p0=${u.p0} spd=${u.spd}`;
+        `nav=${u.nlx !== undefined ? `(${u.nlx},${u.nly})` : 'null'} ` +
+        `path=${[u.p0,u.p1,u.p2,u.p3,u.p4,u.p5].join(',')} spd=${u.spd}`;
     }, WASM_ID);
 
     const ts = await tsPage.evaluate((id: number) => {
@@ -66,6 +67,7 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
         .map((p: { cx: number; cy: number }) => `${p.cx},${p.cy}`).join('|')}`;
       return `m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} drv=${e.isDriving} ` +
         `init=${e.teamInitiated} team=${e.teamRef?.typeName ?? '-'}#${e.teamRef?.id ?? '-'} ` +
+        `nct=${e.navComClearedTick ?? -1} ` +
         `doing=${e.doing} c=(${e.cell.cx},${e.cell.cy}) pos=(${e.leptonX},${e.leptonY}) ` +
         `head=${head} nav=${nav} path=${path}`;
     }, TS_ID);

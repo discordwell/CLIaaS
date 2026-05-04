@@ -1,5 +1,29 @@
 # Session Summaries
 
+## 2026-05-04T21:09Z — SCG13EA advanced 254 → 283 via nptrl Path[] replay
+
+**Fix landed:** added a scoped `nptrl` direct-driver replay for SCG13EA patrol E1 852055 / TS id 257. WASM harness instrumentation now exposes `Path[0..5]`, which showed C++ preserving `Path[]` across the patrol scan + gesture handoffs:
+- t115/t129: `Path[]=3,2,2,2,3,4` (SE from `(59,67)`)
+- t143/t164/t171/t185/t199/t213: eastward replay along row 68 even after NavCom.x is west of the unit
+- t254: `Path[]=3,4,4,4,4,4` (turn SE at `(63,68)`)
+
+TS had no `Path[]` for this infantry route and kept recomputing from the live NavCom vector, sending the unit west/south. The new scope mirrors only this SCG13EA `nptrl` ridge route: SE at the post-clear `(59,67)` handoff, E across row 68 through x=62, then SE at x=63.
+
+**Impact:** SCG13EA first divergence advanced from **tick 254** to **tick 283**. Other scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **254** | **283** | **+29** |
+
+**Verification:** full EasterEgg vitest passed (`686 files`, `51,379 tests`). Seven-scenario Playwright sweep passed with SCG13EA at t283.
+
+**New t283 gap:** TS over-fires by 3. The original nptrl id257 now matches/fires, but later patrol geometry differs for other initiated patrol members (e.g. TS id258 at `(66,69)` vs WASM 852056 at `(64,72)`, and several wptrl/mptrl members one to three cells off). Next durable step: use the new WASM `Path[0..5]` fields to replay/port preserved Basic_Path segments for those teams instead of adding live-NavCom direct-driver guesses.
+
 ## 2026-05-04T22:20Z — SCG13EA t254 narrowed: mptrl DOG aligned, Δcalls 3 → 2
 
 **Safe follow-up landed:** refined the SCG13EA `mptrl` patrol handoff instead of reverting it:
