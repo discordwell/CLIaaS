@@ -65,7 +65,8 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
       const path = `${e.pathIndex}/${e.path?.length ?? 0}:${(e.path ?? []).slice(e.pathIndex, e.pathIndex + 3)
         .map((p: { cx: number; cy: number }) => `${p.cx},${p.cy}`).join('|')}`;
       return `m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} drv=${e.isDriving} ` +
-        `init=${e.teamInitiated} doing=${e.doing} c=(${e.cell.cx},${e.cell.cy}) pos=(${e.leptonX},${e.leptonY}) ` +
+        `init=${e.teamInitiated} team=${e.teamRef?.typeName ?? '-'}#${e.teamRef?.id ?? '-'} ` +
+        `doing=${e.doing} c=(${e.cell.cx},${e.cell.cy}) pos=(${e.leptonX},${e.leptonY}) ` +
         `head=${head} nav=${nav} path=${path}`;
     }, TS_ID);
 

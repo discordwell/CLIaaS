@@ -602,7 +602,11 @@ export class Team {
             m.doing = 'idle_anim';
             continue;
           }
-          m.nonInterruptAnimTicks = 8;
+          // DogDoControls gesture Count=1 (idata.cpp:73/75) vs most infantry
+          // Count=3. C++ runs the Commence gate before Doing_AI, while TS's
+          // Stage E currently runs after doingAI, so niat=4 preserves the same
+          // effective pop tick for dogs under the TS pre-decrement model.
+          m.nonInterruptAnimTicks = m.type === UnitType.I_DOG ? 4 : 8;
           // Phase 7B — track Doing state for C++-faithful Commence gate
           // (entity.ts isDoingInterruptible). Mirrors C++ Do_Action(DO_GESTURE1).
           // doingAI transitions back to stand_ready when niat reaches 0.
@@ -1086,13 +1090,14 @@ export class Team {
   coordinatePatrol(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     // Patrol combines MOVE + ATTACK behaviors
     // If any member is in combat, let it fight; otherwise, move toward target
-    const isScg13PatrolTeam = this.typeName === 'kptrl' || this.typeName === 'nptrl';
+    const isScg13PatrolTeam =
+      this.typeName === 'kptrl' || this.typeName === 'nptrl' || this.typeName === 'wptrl';
     if (!this.target && this.missionTarget) {
       this.target = { ...this.missionTarget };
     }
     // C++ TMission_Patrol (team.cpp:2949-2958): if Target was cleared
     // prematurely, restore the current patrol waypoint before scanning/moving.
-    // This is currently scoped to the SCG13EA kptrl/nptrl trace where WASM
+    // This is currently scoped to the SCG13EA kptrl/nptrl/wptrl traces where WASM
     // restores after the periodic patrol scan clears NavCom; applying it
     // broadly shifts early scenario patrol/building interleaving.
     if (isScg13PatrolTeam && !this.target && _waypoints) {

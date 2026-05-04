@@ -50,12 +50,16 @@ test(`SCG13EA logic window tick ${TICK}`, async ({ browser }) => {
     const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
     const all = [...(s.units ?? []), ...(s.enemies ?? [])];
     return (s.logicLayer ?? [])
-      .filter((r: [number, string, string, number, number, string]) => r[0] >= from && r[0] <= to)
-      .map((r: [number, string, string, number, number, string]) => {
+      .filter((r: [number, string, string, number, number, string, number?, number?, number?, number?, boolean?, number?, number?, number?]) => r[0] >= from && r[0] <= to)
+      .map((r: [number, string, string, number, number, string, number?, number?, number?, number?, boolean?, number?, number?, number?]) => {
         const u = all.find((x: { t: string; house: string; cx: number; cy: number }) =>
           x.t === r[1] && x.house === r[2] && x.cx === r[3] && x.cy === r[4]);
         return {
           logic: r[0], type: r[1], house: r[2], cell: `(${r[3]},${r[4]})`,
+          direct: r.length >= 14 ? {
+            id: r[6], m: r[7], mt: r[8], mq: r[9], drv: r[10], doing: r[11],
+            pos: `(${r[12]},${r[13]})`,
+          } : null,
           unit: u ? {
             id: u.id, m: u.m, mt: u.mt, mq: u.mq, drv: u.drv, init: u.init,
             doing: u.doing, pos: `(${u.lx},${u.ly})`,

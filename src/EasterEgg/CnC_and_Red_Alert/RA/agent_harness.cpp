@@ -228,6 +228,40 @@ static const char* agent_pending_vessel_name(VesselType type)
 	}
 }
 
+static int agent_object_index(ObjectClass* obj, RTTIType rtti)
+{
+	switch (rtti) {
+		case RTTI_UNIT:
+			for (int i = 0; i < Units.Count(); i++) {
+				if ((ObjectClass*)Units.Ptr(i) == obj) return i;
+			}
+			break;
+		case RTTI_INFANTRY:
+			for (int i = 0; i < Infantry.Count(); i++) {
+				if ((ObjectClass*)Infantry.Ptr(i) == obj) return i;
+			}
+			break;
+		case RTTI_AIRCRAFT:
+			for (int i = 0; i < Aircraft.Count(); i++) {
+				if ((ObjectClass*)Aircraft.Ptr(i) == obj) return i;
+			}
+			break;
+		case RTTI_BUILDING:
+			for (int i = 0; i < Buildings.Count(); i++) {
+				if ((ObjectClass*)Buildings.Ptr(i) == obj) return i;
+			}
+			break;
+		case RTTI_VESSEL:
+			for (int i = 0; i < Vessels.Count(); i++) {
+				if ((ObjectClass*)Vessels.Ptr(i) == obj) return i;
+			}
+			break;
+		default:
+			break;
+	}
+	return -1;
+}
+
 static int agent_pending_vessel_build_time(VesselType type)
 {
 	switch (type) {
@@ -703,7 +737,37 @@ char* agent_get_state(void)
 			else if (rtti == RTTI_AIRCRAFT) rtag = 'A';
 			else if (rtti == RTTI_BUILDING) rtag = 'B';
 			else if (rtti == RTTI_VESSEL) rtag = 'V';
-			buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\"]", li, tname, hname, lcx, lcy, rtag);
+			int obj_index = agent_object_index(lobj, rtti);
+			int aid = obj_index >= 0 ? AGENT_ID(rtti, obj_index) : -1;
+			int mission = -1;
+			int mission_timer = -1;
+			int mission_queue = -1;
+			int lx = -1, ly = -1;
+			bool is_driving = false;
+			int doing = -1;
+			{
+				TechnoClass * tt = (TechnoClass *)lobj;
+				COORDINATE cc = tt->Coord;
+				lx = (int)Coord_X(cc);
+				ly = (int)Coord_Y(cc);
+				mission = (int)tt->Get_Mission();
+			}
+			if (rtti == RTTI_UNIT || rtti == RTTI_INFANTRY || rtti == RTTI_AIRCRAFT || rtti == RTTI_VESSEL) {
+				FootClass * foot = (FootClass *)lobj;
+				mission_timer = foot->Get_Mission_Timer_Value();
+				mission_queue = (int)foot->MissionQueue;
+				is_driving = foot->IsDriving;
+				if (rtti == RTTI_INFANTRY) {
+					doing = (int)((InfantryClass *)lobj)->Doing;
+				}
+			} else if (rtti == RTTI_BUILDING) {
+				BuildingClass * b = (BuildingClass *)lobj;
+				mission_timer = b->Get_Mission_Timer_Value();
+			}
+			buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d]",
+				li, tname, hname, lcx, lcy, rtag,
+				aid, mission, mission_timer, mission_queue, is_driving ? "true" : "false",
+				doing, lx, ly);
 		}
 	}
 	buf_cat("],");

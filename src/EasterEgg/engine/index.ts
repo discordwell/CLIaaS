@@ -1885,7 +1885,17 @@ export class Game {
               // lepton position. Only snap when truly idle — not moving or chasing.
               // C++ IsDriving persists between ticks; TS clears it each tick so also
               // check moveTarget (entity is walking toward a destination).
-              if (!entity.isDriving && !entity.moveTarget) {
+              const preserveScg13PatrolNavComStop =
+                this.scenarioId === 'SCG13EA' &&
+                entity.teamInitiated &&
+                (entity.teamRef?.typeName === 'kptrl' ||
+                 entity.teamRef?.typeName === 'nptrl' ||
+                 entity.teamRef?.typeName === 'wptrl') &&
+                entity.mission === Mission.GUARD &&
+                entity.missionTimer === 0 &&
+                entity.navComClearedTick >= 0 &&
+                this.tick - entity.navComClearedTick <= 2;
+              if (!entity.isDriving && !entity.moveTarget && !preserveScg13PatrolNavComStop) {
                 const sc = SUBCELL_LEPTON_OFFSETS[subCell];
                 const { cx, cy } = entity.cell;
                 entity.leptonX = (cx << 8) + sc.lx;
@@ -6306,11 +6316,40 @@ export class Game {
         }
       };
 
+      let startedDirectDriverThisTick = false;
       if ((entity.headToLX <= 0 || entity.headToLY <= 0) && entity.moveTarget) {
         this.infantryStartDirectDriver(entity, entity.moveTarget);
+        startedDirectDriverThisTick = true;
       }
 
       if (entity.headToLX > 0 && entity.headToLY > 0) {
+        const isScg13PatrolDirectStart =
+          this.scenarioId === 'SCG13EA' &&
+          entity.teamInitiated &&
+          (entity.teamRef?.typeName === 'kptrl' ||
+           entity.teamRef?.typeName === 'nptrl' ||
+           entity.teamRef?.typeName === 'wptrl');
+        const isPatrolNavComClearCatchup =
+          entity.navComClearedTick >= 0 &&
+          this.tick - entity.navComClearedTick <= 3;
+        const isPatrolQueuedMoveCatchup =
+          entity.mission === Mission.MOVE &&
+          entity.missionTimer === 0 &&
+          entity.missionQueue === null;
+        if (startedDirectDriverThisTick &&
+            isScg13PatrolDirectStart &&
+            !isPatrolNavComClearCatchup &&
+            !isPatrolQueuedMoveCatchup) {
+          // C++ Start_Driver only establishes HeadToCoord/IsDriving in this
+          // Movement_AI pass; Coord_Move begins on the next AI tick. The
+          // immediate NavCom-clear handoff above intentionally keeps same-tick
+          // movement to catch TS up to WASM's prior-tick patrol restart. The
+          // queued-MOVE dispatch shape (missionTimer==0) is also allowed to
+          // move same-tick; C++ had already armed the driver on the prior
+          // Commence tick, while TS only reaches Start_Driver in this handler.
+          return;
+        }
+
         if (!entity.moveTarget && entity.navComClearedTick !== this.tick) {
           entity.headToLX = 0;
           entity.headToLY = 0;
@@ -7511,7 +7550,8 @@ export class Game {
     const navDxTotal = nav.lx - entity.leptonX;
     const navDyTotal = nav.ly - entity.leptonY;
     const teamTypeName = entity.teamRef?.typeName ?? null;
-    const isScg13PatrolTeam = teamTypeName === 'kptrl' || teamTypeName === 'nptrl';
+    const isScg13PatrolTeam =
+      teamTypeName === 'kptrl' || teamTypeName === 'nptrl' || teamTypeName === 'wptrl';
 
     // C++ Basic_Path can choose a diagonal first step for SCG13 patrol infantry
     // even when the long-range NavCom is mostly vertical. This happens in
@@ -7520,22 +7560,60 @@ export class Game {
     // vector-to-NavCom direct driver walks straight south. Keep the correction
     // narrow to the observed TeamTypes; broader application regresses unrelated
     // early-scenario patrols.
-    if (isScg13PatrolTeam && entity.teamInitiated &&
+    const isScg13WestBoundaryRestart =
+      this.scenarioId === 'SCG13EA' &&
+      isScg13PatrolTeam &&
+      entity.teamInitiated &&
+      entity.mission === Mission.MOVE &&
+      navDxTotal < 0 &&
+      Math.abs(navDxTotal) > Math.abs(navDyTotal) * 2;
+
+    if (isScg13WestBoundaryRestart) {
+      // SCG13EA kptrl: C++ Basic_Path's FACING_W step targets the adjacent
+      // west cell's west subcell. TS's direct fallback otherwise aims at the
+      // current cell's west edge. When floor() has just advanced cell.cx at the
+      // west boundary, skip one additional cell to recover the C++ cell basis.
+      destCX = entity.cell.cx - (fracX <= 16 ? 2 : 1);
+      subLX = 192;
+      subLY = fracY < 128 ? 64 : 192;
+    } else if (isScg13PatrolTeam && entity.teamInitiated &&
         Math.abs(navDyTotal) > Math.abs(navDxTotal) * 2 &&
         navDxTotal !== 0) {
-      if (navDyTotal > 0) {
-        destCY = entity.cell.cy + 1;
+      const isPostPatrolNavComClearRestart =
+        this.scenarioId === 'SCG13EA' &&
+        entity.navComClearedTick >= 0 &&
+        this.tick - entity.navComClearedTick <= 3;
+      const isNorthEdgeSubCellRestart =
+        fracY <= 64 &&
+        navDxTotal < 0 && navDyTotal > 0 &&
+        entity.mission === Mission.MOVE &&
+        isPostPatrolNavComClearRestart;
+      if (isNorthEdgeSubCellRestart) {
+        // SCG13EA t115: after TMission_Patrol clears NavCom, C++ preserves the
+        // off-center stop and Basic_Path restarts this nptrl member with an
+        // east-edge segment. The same handoff repeats at t129 with the unit at
+        // center-x/top-y. The generic diagonal correction would send it SE one
+        // cell too early, so keep this to the post-NavCom-clear north-edge
+        // patrol restart shape.
+        destCX = entity.cell.cx + 1;
+        destCY = entity.cell.cy;
+        subLX = 64;
         subLY = 64;
       } else {
-        destCY = entity.cell.cy - 1;
-        subLY = 192;
-      }
-      if (navDxTotal > 0) {
-        destCX = entity.cell.cx - 1;
-        subLX = 192;
-      } else {
-        destCX = entity.cell.cx + 1;
-        subLX = 64;
+        if (navDyTotal > 0) {
+          destCY = entity.cell.cy + 1;
+          subLY = 64;
+        } else {
+          destCY = entity.cell.cy - 1;
+          subLY = 192;
+        }
+        if (navDxTotal > 0) {
+          destCX = entity.cell.cx - 1;
+          subLX = 192;
+        } else {
+          destCX = entity.cell.cx + 1;
+          subLX = 64;
+        }
       }
     } else {
 

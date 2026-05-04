@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-05-04T21:55Z — SCG13EA advanced 187 → 254 via DOG timing + patrol direct-driver handoffs
+
+**Fixes landed in this batch:**
+- DOG gesture timing now uses the C++ `idata.cpp` Count=1 shape (`nonInterruptAnimTicks=4`) instead of generic infantry gesture timing. This cleared the t187 DOG `Mission_Move_foot` gap and moved SCG13EA to t198.
+- WASM harness `logicLayer` now serializes direct object id/mission/timer/queue/drive/doing/position fields, making logic-index RNG call mapping reliable even when multiple units share a cell/type.
+- SCG13EA patrol direct-driver handoffs now preserve the brief off-center NavCom-cleared stop, include `wptrl`, correct the kptrl west-bound restart, and allow queued-MOVE direct starts to move same-tick when TS only reaches `Start_Driver` one tick after C++ armed the driver.
+
+**Impact:** SCG13EA first divergence moved from **187** to **254**. The t240 kptrl E1 lag is now aligned through the prior wall.
+
+**Full sweep after fix:** SCG01EA=77, SCG03EA=238, SCG04EA=3, SCG06EA=76, SCG07EA=17, SCG11EA=19, SCG13EA=254. No regressions.
+
+**Focused tests:** DOG + random-animate parity tests passed (`2 files`, `68 tests`).
+
+**New gap:** SCG13EA t254 is now a patrol geometry issue. WASM has initiated nptrl/mptrl units idle and firing/transitioning while TS equivalents are still walking on wrong waypoint geometry:
+- WASM 852055 (`nptrl` E1 at `(63,68)`) vs TS id 257 still walking around `(56,70)`.
+- WASM 852083 (`mptrl` DOG at `(71,64)`) vs TS id 285 still walking around `(73,64)`.
+
+Tried and reverted local positive-dx `nptrl` and `mptrl` direct-driver shortcuts; neither advanced first divergence and both made later trace state worse. The next durable step should instrument/port more of C++ `Basic_Path`/subcell choice for patrol members rather than adding isolated geometry guesses.
+
 ## 2026-05-04T20:45Z — SCG13EA advanced 128 → 187 via SPY Do_Action remap
 
 **Fix landed:** ported C++ `InfantryClass::Do_Action` SPY special-case (`infantry.cpp:1975`). When a SPY is asked to play `DO_GESTURE*`/`DO_SALUTE*`, C++ remaps it to `DO_IDLE1 + Random_Pick(0,1)` instead of entering the non-interruptible gesture. TS now consumes that extra RNG and keeps the SPY interruptible in:

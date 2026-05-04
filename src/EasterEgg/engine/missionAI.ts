@@ -1534,11 +1534,12 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
         ScenarioRandom.nextInRange(0, 1);
         entity.doing = 'idle_anim';
       } else {
+        const gestureTicks = entity.type === UnitType.I_DOG ? 4 : 7;
         // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
-        // idata.cpp: DO_SALUTE1/2, DO_GESTURE1/2 = {Count:3, Rate:2} = 3*2=6 ticks.
+        // idata.cpp: most infantry gesture Count=3; dogs use Count=1.
         // +1 accounts for the C++ Commence→Mission_Move dispatch delay that TS's queue
         // promote doesn't naturally replicate (see team.ts activation niat=8).
-        entity.nonInterruptAnimTicks = 7;
+        entity.nonInterruptAnimTicks = gestureTicks;
         // Phase 7B: track Doing as 'gesture' so isDoingInterruptible() blocks
         // Commence — mirrors C++ Do_Action(DO_GESTURE1/2 / DO_SALUTE1/2) all of
         // which have Interrupt=false in MasterDoControls (infantry.cpp:115-118).
@@ -1826,7 +1827,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
         ScenarioRandom.nextInRange(0, 1);
         entity.doing = 'idle_anim';
       } else {
-        entity.nonInterruptAnimTicks = 8;
+        entity.nonInterruptAnimTicks = entity.type === UnitType.I_DOG ? 4 : 8;
         // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
         entity.doing = 'gesture';
       }
