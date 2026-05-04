@@ -65,8 +65,8 @@ test('SCG13EA WASM team mission trace', async ({ browser }) => {
         missionList: t.missionList?.map((m: { mission: number; data: number }) => `${m.mission}:${m.data}`),
         target: t.target,
         missionTarget: t.missionTarget,
-        memberMissions: t._members?.map((m: { id: number; mission: string; missionTimer: number; missionQueue: string | null }) =>
-          `${m.id}:${m.mission}/mt=${m.missionTimer}/mq=${m.missionQueue}`),
+        memberMissions: t._members?.map((m: { id: number; mission: string; missionTimer: number; missionQueue: string | null; teamInitiated: boolean; isDriving: boolean; doing: string; moveTarget: { lx: number; ly: number } | null }) =>
+          `${m.id}:${m.mission}/mt=${m.missionTimer}/mq=${m.missionQueue}/drv=${m.isDriving}/doing=${m.doing}/init=${m.teamInitiated}/nav=${m.moveTarget ? `(${m.moveTarget.lx},${m.moveTarget.ly})` : 'null'}`),
       };
     });
     // Also probe unit 852056/109 state
@@ -75,7 +75,7 @@ test('SCG13EA WASM team mission trace', async ({ browser }) => {
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
       const all = [...(s.units ?? []), ...(s.enemies ?? [])];
       const u = all.find((x: { id: number }) => x.id === 852056);
-      return u ? { m: u.m, mt: u.mt, mq: u.mq, drv: u.drv, doing: u.doing, nlx: u.nlx, nly: u.nly, lx: u.lx, ly: u.ly } : null;
+      return u ? { m: u.m, mt: u.mt, mq: u.mq, drv: u.drv, init: u.init, doing: u.doing, nlx: u.nlx, nly: u.nly, lx: u.lx, ly: u.ly } : null;
     });
     console.log(`tick ${t}:`);
     console.log(`  WASM teams: ${JSON.stringify(wasmTeams).slice(0, 1000)}`);

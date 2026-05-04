@@ -52,8 +52,8 @@ test('SCG13EA 852084 walk trace', async ({ browser }) => {
     const ts = await tsPage.evaluate(() => {
       const game = (window as any).__agentGame;
       if (!game) return '?';
-      // Try by id=137 first (TS USSR E1 in kptrl team — second member)
-      let e = game.entities.find((x: { alive: boolean; id: number }) => x.alive && x.id === 137);
+      // TS equivalent of WASM 852084 in the current logic order.
+      let e = game.entities.find((x: { alive: boolean; id: number }) => x.alive && x.id === 286);
       if (!e) {
         e = game.entities.find((x: { alive: boolean; type: string; house: string; teamRef?: { id: number } }) =>
           x.alive && x.type === 'E1' && x.house === 'USSR' && x.teamRef?.id === 1);
@@ -65,7 +65,7 @@ test('SCG13EA 852084 walk trace', async ({ browser }) => {
       const path = `${e.pathIndex}/${e.path?.length ?? 0}:${(e.path ?? []).slice(e.pathIndex, e.pathIndex + 3)
         .map((p: { cx: number; cy: number }) => `${p.cx},${p.cy}`).join('|')}`;
       return `[id=${e.id} c=(${e.cell.cx},${e.cell.cy})] m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} ` +
-        `drv=${e.isDriving} doing=${e.doing} pos=(${e.leptonX},${e.leptonY}) head=${head} nav=${nav} ` +
+        `drv=${e.isDriving} init=${e.teamInitiated} doing=${e.doing} pos=(${e.leptonX},${e.leptonY}) head=${head} nav=${nav} ` +
         `path=${path} max=${speed}`;
     });
     if (wasm !== prevWasm || ts !== prevTs) {

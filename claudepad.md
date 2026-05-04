@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-05-03T10:30Z — SCG13EA t115 investigation: patrol restore needs full infantry AI order
+
+**Safe commit landed:** `4999d4c4` ports `FootClass::IsInitiated`/`Coordinate_Conscript` and extends WASM harness state (`init`, `next`, `lag`, `zone`, `close`). No divergence movement, but no regressions.
+
+**Confirmed t115 gap:** WASM logic 181 / unit 852084 is `MOVE mt=0 drv=true nav=(13448,15752)` at tick 114 end; TS logic 136 / id 286 is still `GUARD mt=14 nav=null`. TS patrol teams have advanced to later mission indices while WASM patrol teams remain at `cur=0` and restore the same waypoint after scan clear.
+
+**Failed experiments (reverted):**
+- Exact `TMission_Patrol` waypoint restore regressed SCG13EA to t101 because TS loses the C++ `MOVE + queued GUARD` intermediate state.
+- Moving infantry `Commence` before Movement_AI matched ticks 100-101 only with extra gesture handling, but then diverged at t102; the Stage C/D split is not complete enough for a narrow reorder.
+- Preserving `MOVE + queued GUARD` in post-movement Commence plus waypoint restore moved the failure to t114 with an extra TS guard fire.
+
+**Root cause shape:** C++ order is `MissionClass::AI -> Commence -> Firing_AI -> Doing_AI -> Movement_AI` for infantry. TS currently relies on a post-Movement Commence. Fixing t115 cleanly requires a fuller infantry AI order port, not just patrol-target restore.
+
 ## 2026-05-01T07:30Z — SCG13EA t114 refined further: doingAI stand_ready→walk + path preserve
 
 **3 additional fixes landed:**
