@@ -1527,16 +1527,23 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       ScenarioRandom.nextInRange(0, 7); // C++ facing change: Random_Pick(FACING_N, FACING_NW)
     }
     ScenarioRandom._sourceTag = saved;
-    // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
-    // idata.cpp: DO_SALUTE1/2, DO_GESTURE1/2 = {Count:3, Rate:2} = 3*2=6 ticks.
-    // +1 accounts for the C++ Commence→Mission_Move dispatch delay that TS's queue
-    // promote doesn't naturally replicate (see team.ts activation niat=8).
     if (animPick >= 1 && animPick <= 4) {
-      entity.nonInterruptAnimTicks = 7;
-      // Phase 7B: track Doing as 'gesture' so isDoingInterruptible() blocks
-      // Commence — mirrors C++ Do_Action(DO_GESTURE1/2 / DO_SALUTE1/2) all of
-      // which have Interrupt=false in MasterDoControls (infantry.cpp:115-118).
-      entity.doing = 'gesture';
+      if (entity.type === UnitType.I_SPY) {
+        // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
+        // SPY gesture/salute requests become DO_IDLE1 + Random_Pick(0,1).
+        ScenarioRandom.nextInRange(0, 1);
+        entity.doing = 'idle_anim';
+      } else {
+        // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
+        // idata.cpp: DO_SALUTE1/2, DO_GESTURE1/2 = {Count:3, Rate:2} = 3*2=6 ticks.
+        // +1 accounts for the C++ Commence→Mission_Move dispatch delay that TS's queue
+        // promote doesn't naturally replicate (see team.ts activation niat=8).
+        entity.nonInterruptAnimTicks = 7;
+        // Phase 7B: track Doing as 'gesture' so isDoingInterruptible() blocks
+        // Commence — mirrors C++ Do_Action(DO_GESTURE1/2 / DO_SALUTE1/2) all of
+        // which have Interrupt=false in MasterDoControls (infantry.cpp:115-118).
+        entity.doing = 'gesture';
+      }
     } else {
       // animPick 0 or >=5: idle animations (interruptible). C++ Do_Action(DO_IDLE1/2).
       entity.doing = 'idle_anim';
@@ -1813,9 +1820,16 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
     if (animPick >= 1 && animPick <= 4) {
-      entity.nonInterruptAnimTicks = 8;
-      // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
-      entity.doing = 'gesture';
+      if (entity.type === UnitType.I_SPY) {
+        // C++ Do_Action: SPY gestures/salutes are remapped to DO_IDLE1/2,
+        // consuming Random_Pick(0,1) under the caller's source tag.
+        ScenarioRandom.nextInRange(0, 1);
+        entity.doing = 'idle_anim';
+      } else {
+        entity.nonInterruptAnimTicks = 8;
+        // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
+        entity.doing = 'gesture';
+      }
     }
   }
 }

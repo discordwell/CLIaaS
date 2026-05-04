@@ -1,5 +1,20 @@
 # Session Summaries
 
+## 2026-05-04T20:45Z — SCG13EA advanced 128 → 187 via SPY Do_Action remap
+
+**Fix landed:** ported C++ `InfantryClass::Do_Action` SPY special-case (`infantry.cpp:1975`). When a SPY is asked to play `DO_GESTURE*`/`DO_SALUTE*`, C++ remaps it to `DO_IDLE1 + Random_Pick(0,1)` instead of entering the non-interruptible gesture. TS now consumes that extra RNG and keeps the SPY interruptible in:
+- `Mission_Guard` random animate
+- `Mission_Guard_Area` random animate
+- team activation gesture handling
+
+**Impact:** SCG13EA moved from tick **128** to tick **187**. The t128 mismatch was the Greek SPY at `(9,53)` under-consuming one Random_Animate/Do_Action RNG before its guard jitter; after the remap, local SCG13EA has no divergence through 180 ticks and first diverges at t187.
+
+**Full sweep after fix:** SCG01EA=77, SCG03EA=238, SCG04EA=3, SCG06EA=76, SCG07EA=17, SCG11EA=19, SCG13EA=187. No regressions.
+
+**Tests:** full vitest passed (`685 files`, `51,376 tests`).
+
+**New gap:** SCG13EA tick 187 has one WASM-only `Mission_Move_foot` for infantry logic 180 (`WASM=2`, `TS=1`, Δcalls=1). Tick 186 is fully aligned.
+
 ## 2026-05-04T20:12Z — SCG13EA advanced 115 → 128 with scoped patrol restore
 
 **Fix landed:** carried the scenario TeamType name into active `Team` instances, then scoped the previously unsafe patrol waypoint restore + one-tick NavCom-cleared window to SCG13EA `kptrl`/`nptrl`. Also scoped the direct infantry driver diagonal first-step correction to those same patrol teams.

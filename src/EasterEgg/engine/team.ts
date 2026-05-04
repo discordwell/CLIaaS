@@ -594,6 +594,14 @@ export class Team {
       ScenarioRandom.percentChance(50);
       for (const m of this._members) {
         if (m.alive && m.stats.isInfantry && m.nonInterruptAnimTicks <= 0) {
+          if (m.type === UnitType.I_SPY) {
+            // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
+            // team activation DO_GESTURE1/2 maps spies to DO_IDLE1/2 and
+            // consumes Random_Pick(0,1), keeping the animation interruptible.
+            ScenarioRandom.nextInRange(0, 1);
+            m.doing = 'idle_anim';
+            continue;
+          }
           m.nonInterruptAnimTicks = 8;
           // Phase 7B — track Doing state for C++-faithful Commence gate
           // (entity.ts isDoingInterruptible). Mirrors C++ Do_Action(DO_GESTURE1).
