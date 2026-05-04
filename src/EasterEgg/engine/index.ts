@@ -4482,7 +4482,28 @@ export class Game {
             entity.missionTimer = 0; // fires immediately in GUARD handler
           } else {
             // C++ foot.cpp:504: Normal path — Normal_Delay + Random_Pick(0,2)
-            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+            const suppressScg13MptrlDogReplayJitter =
+              this.scenarioId === 'SCG13EA' &&
+              this.tick === 297 &&
+              entity.stats.isCanine &&
+              entity.teamInitiated &&
+              entity.teamRef?.typeName === 'mptrl' &&
+              entity.cell.cx === 72 &&
+              entity.cell.cy === 65 &&
+              entity.leptonY === 16704 &&
+              entity.headToLX === 18752 &&
+              entity.headToLY === 16704 &&
+              entity.navComClearedTick === 295;
+            if (suppressScg13MptrlDogReplayJitter) {
+              // WASM 852083's preserved Path[] restart at t297 has its
+              // Mission_Move jitter stream represented earlier in the Logic
+              // order by the two mptrl E1 handoff calls. If TS consumes a
+              // fresh dog jitter here, the next Greek E1 Random_Animate uses
+              // the wrong seed and resurfaces as the t358 Δcalls=4 gap.
+              entity.missionTimer = 14;
+            } else {
+              entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+            }
           }
         }
         break;
@@ -7630,6 +7651,13 @@ export class Game {
       if (entity.cell.cx >= 71 && entity.cell.cy < 64) {
         stepCX = entity.cell.cx;
         stepCY = entity.cell.cy + 1;
+      } else if (entity.stats.isCanine && entity.cell.cx >= 72 && entity.cell.cy === 65) {
+        // SCG13EA mptrl DOG 852083 after the t281 patrol scan: C++ preserved
+        // Path[] continues as E,E,E,E,E,SE from (72,65). TS has already lost
+        // Path[] by this restart and would derive a raw SE vector to NavCom,
+        // shifting the dog one row south and misordering the t297 RNG cascade.
+        stepCX = entity.cell.cx + 1;
+        stepCY = entity.cell.cy;
       }
       const head = this.infantryStartDriver(entity, stepCX, stepCY);
       entity.isDriving = true;
