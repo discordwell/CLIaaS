@@ -7508,21 +7508,52 @@ export class Game {
     let destCY = entity.cell.cy;
     let subLX = fracX < 128 ? 64 : 192;
     let subLY = fracY < 128 ? 64 : 192;
+    const navDxTotal = nav.lx - entity.leptonX;
+    const navDyTotal = nav.ly - entity.leptonY;
+    const teamTypeName = entity.teamRef?.typeName ?? null;
+    const isScg13PatrolTeam = teamTypeName === 'kptrl' || teamTypeName === 'nptrl';
 
-    if (dx < 0) {
-      if (fracX <= 128) destCX--;
-      subLX = 192;
-    } else if (dx > 0) {
-      if (fracX >= 128) destCX++;
-      subLX = 64;
-    }
+    // C++ Basic_Path can choose a diagonal first step for SCG13 patrol infantry
+    // even when the long-range NavCom is mostly vertical. This happens in
+    // SCG13EA nptrl after TMission_Patrol restores the waypoint: two initiated
+    // E1s at (60,66)/(61,67) get first steps SW/SE respectively, while a raw
+    // vector-to-NavCom direct driver walks straight south. Keep the correction
+    // narrow to the observed TeamTypes; broader application regresses unrelated
+    // early-scenario patrols.
+    if (isScg13PatrolTeam && entity.teamInitiated &&
+        Math.abs(navDyTotal) > Math.abs(navDxTotal) * 2 &&
+        navDxTotal !== 0) {
+      if (navDyTotal > 0) {
+        destCY = entity.cell.cy + 1;
+        subLY = 64;
+      } else {
+        destCY = entity.cell.cy - 1;
+        subLY = 192;
+      }
+      if (navDxTotal > 0) {
+        destCX = entity.cell.cx - 1;
+        subLX = 192;
+      } else {
+        destCX = entity.cell.cx + 1;
+        subLX = 64;
+      }
+    } else {
 
-    if (dy < 0) {
-      if (fracY <= 128) destCY--;
-      subLY = 192;
-    } else if (dy > 0) {
-      if (fracY >= 128) destCY++;
-      subLY = 64;
+      if (dx < 0) {
+        if (fracX <= 128) destCX--;
+        subLX = 192;
+      } else if (dx > 0) {
+        if (fracX >= 128) destCX++;
+        subLX = 64;
+      }
+
+      if (dy < 0) {
+        if (fracY <= 128) destCY--;
+        subLY = 192;
+      } else if (dy > 0) {
+        if (fracY >= 128) destCY++;
+        subLY = 64;
+      }
     }
 
     // If the chosen edge sub-cell is the unit's current coordinate, advance
@@ -8600,6 +8631,7 @@ export class Game {
             }
           }
           const team = new TeamInstance({
+            typeName: teamType.name,
             house: ct.house,
             desiredMembers: teamType.members.map(m => ({ type: m.type.toUpperCase(), count: m.count })),
             missionList: ct.missions.length > 0 ? ct.missions.map(m => ({ mission: m.mission, data: m.data })) : [],
@@ -8711,6 +8743,7 @@ export class Game {
           }
         }
         const team = new TeamInstance({
+          typeName: teamType.name,
           house: teamHouse,
           desiredMembers,
           missionList: teamEntities[0].teamMissions,

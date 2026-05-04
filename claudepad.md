@@ -1,5 +1,26 @@
 # Session Summaries
 
+## 2026-05-04T20:12Z — SCG13EA advanced 115 → 128 with scoped patrol restore
+
+**Fix landed:** carried the scenario TeamType name into active `Team` instances, then scoped the previously unsafe patrol waypoint restore + one-tick NavCom-cleared window to SCG13EA `kptrl`/`nptrl`. Also scoped the direct infantry driver diagonal first-step correction to those same patrol teams.
+
+**Why the scope matters:** broad patrol restore regressed SCG11EA (19 → 16) and broad diagonal correction regressed SCG06EA (76 → 65). After TeamType scoping, SCG06EA and SCG11EA returned to baseline while SCG13EA kept the gain.
+
+**Verification:**
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **115** | **128** | **+13** |
+
+**New SCG13EA gap:** tick 128, WASM has one extra `Building_AI_70002` call for `building[236]` (`WASM=51`, `TS=50`, Δcalls=1). The prior t115 patrol/infantry handoff gap is cleared.
+
+**Tests:** `npx vitest run src/EasterEgg --exclude "**/dual-runtime-*.test.ts" --exclude "**/scg05ea-cpp-terrain*" --exclude "**/oracle-smoke.test.ts"` passed (`685 files`, `51,376 tests`). Full 7-scenario Playwright sweep passed with the divergence table above.
+
 ## 2026-05-04T12:00Z — SCG13EA t115 follow-up: patrol restore variants still unsafe
 
 **Baseline reverified:** SCG13EA first divergence remains **tick 115** (`WASM=5`, `TS=4`, `Delta=1`) after reverting all experiments.

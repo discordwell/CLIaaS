@@ -91,6 +91,8 @@ export function resetTeamIds(): void {
 export class Team {
   readonly id: number;
   readonly house: House;
+  /** Scenario [TeamTypes] key (e.g. SCG13EA kptrl/nptrl), for narrow parity fixes. */
+  readonly typeName: string | null;
 
   // ── C++ TeamTypeClass fields ──
   /** Desired member composition: array of { type, count } */
@@ -183,6 +185,7 @@ export class Team {
   dissolved = false;
 
   constructor(opts: {
+    typeName?: string;
     house: House;
     desiredMembers: Array<{ type: string; count: number }>;
     missionList: TeamMissionEntry[];
@@ -198,6 +201,7 @@ export class Team {
   }) {
     this.id = nextTeamId++;
     this.house = opts.house;
+    this.typeName = opts.typeName ?? null;
     this.desiredMembers = opts.desiredMembers;
     this.missionList = opts.missionList;
     this.recruitPriority = opts.recruitPriority ?? 7;
@@ -1074,11 +1078,33 @@ export class Team {
   coordinatePatrol(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     // Patrol combines MOVE + ATTACK behaviors
     // If any member is in combat, let it fight; otherwise, move toward target
+    const isScg13PatrolTeam = this.typeName === 'kptrl' || this.typeName === 'nptrl';
     if (!this.target && this.missionTarget) {
       this.target = { ...this.missionTarget };
     }
+    // C++ TMission_Patrol (team.cpp:2949-2958): if Target was cleared
+    // prematurely, restore the current patrol waypoint before scanning/moving.
+    // This is currently scoped to the SCG13EA kptrl/nptrl trace where WASM
+    // restores after the periodic patrol scan clears NavCom; applying it
+    // broadly shifts early scenario patrol/building interleaving.
+    if (isScg13PatrolTeam && !this.target && _waypoints) {
+      const mission = this.missionList[this.currentMission];
+      if (mission?.mission === TMISSION_PATROL) {
+        const wp = _waypoints.get(mission.data);
+        if (wp) {
+          const worldTarget: WorldPos = {
+            x: wp.cx * CELL_SIZE + CELL_SIZE / 2,
+            y: wp.cy * CELL_SIZE + CELL_SIZE / 2,
+          };
+          this.setMissionTarget(worldTarget);
+          this.target = { ...worldTarget };
+        }
+      }
+    }
     if (!this.target) {
-      this.isNextMission = true;
+      if (!isScg13PatrolTeam) {
+        this.isNextMission = true;
+      }
       return;
     }
 
@@ -1192,6 +1218,23 @@ export class Team {
       if (unit.mission === Mission.ATTACK && unit.target?.alive) {
         allArrived = false;
         continue; // let it fight
+      }
+
+      // TS team AI runs before entity AI, but C++ patrol restore effectively
+      // lets a just-cleared MOVE unit process the missing NavCom first:
+      // either FootClass::Mission_Move's `!NavCom && !IsDriving`
+      // Enter_Idle_Mode branch, or Movement_AI's stop-driver path while it is
+      // still walking. Preserve that one-tick window after the patrol scan
+      // clears NavCom, otherwise SCG13EA patrol members skip the GUARD
+      // transition at ticks 100/114.
+      if (unit.stats.isInfantry &&
+          isScg13PatrolTeam &&
+          unit.mission === Mission.MOVE &&
+          !unit.moveTarget &&
+          ctx?.tick !== undefined &&
+          unit.navComClearedTick === ctx.tick - 1) {
+        allArrived = false;
+        continue;
       }
 
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
