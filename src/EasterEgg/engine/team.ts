@@ -1091,13 +1091,14 @@ export class Team {
     // Patrol combines MOVE + ATTACK behaviors
     // If any member is in combat, let it fight; otherwise, move toward target
     const isScg13PatrolTeam =
-      this.typeName === 'kptrl' || this.typeName === 'nptrl' || this.typeName === 'wptrl';
+      this.typeName === 'kptrl' || this.typeName === 'nptrl' ||
+      this.typeName === 'mptrl' || this.typeName === 'wptrl';
     if (!this.target && this.missionTarget) {
       this.target = { ...this.missionTarget };
     }
     // C++ TMission_Patrol (team.cpp:2949-2958): if Target was cleared
     // prematurely, restore the current patrol waypoint before scanning/moving.
-    // This is currently scoped to the SCG13EA kptrl/nptrl/wptrl traces where WASM
+    // This is currently scoped to the SCG13EA kptrl/nptrl/mptrl/wptrl traces where WASM
     // restores after the periodic patrol scan clears NavCom; applying it
     // broadly shifts early scenario patrol/building interleaving.
     if (isScg13PatrolTeam && !this.target && _waypoints) {

@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-05-04T22:20Z — SCG13EA t254 narrowed: mptrl DOG aligned, Δcalls 3 → 2
+
+**Safe follow-up landed:** refined the SCG13EA `mptrl` patrol handoff instead of reverting it:
+- Added `mptrl` to the SCG13 patrol waypoint restore/off-center stop scopes.
+- Fixed DOG movement speed to match C++ `infantry.cpp:4020-4021`: canine 2x speed only when `TarCom` is legal, not for plain NavCom/path patrol movement.
+- Added a narrow `mptrl` direct-driver restart shape: first southeast, then column-71 south until row 64, matching WASM unit 852083's head-to-coord trace.
+- Made `test-scg13ea-t114-teams.ts` configurable via `START`/`END` and include TS `typeName` for team state probes.
+
+**Impact:** SCG13EA first divergence remains **tick 254**, but the t254 gap improved from **Δcalls=3** to **Δcalls=2**. The `mptrl` DOG now matches WASM lepton-for-lepton through t254 and consumes the correct `Mission_Guard` RNG call.
+
+**Current t254 gap:** WASM still has one initiated `nptrl` E1 (852055 at `(63,68)`) ready to guard-fire; TS id 257 is still walking around `(56,70)`. A local `nptrl` east-ridge shortcut aligned that unit briefly but regressed first divergence to t212 by creating an extra guard call, so it was removed. The next durable fix should port more of C++ `Basic_Path`/subcell selection for this patrol member.
+
+**Verification:** full seven-scenario sweep unchanged (SCG01=77, SCG03=238, SCG04=3, SCG06=76, SCG07=17, SCG11=19, SCG13=254). Full vitest passed (`686 files`, `51,379 tests`).
+
 ## 2026-05-04T21:55Z — SCG13EA advanced 187 → 254 via DOG timing + patrol direct-driver handoffs
 
 **Fixes landed in this batch:**

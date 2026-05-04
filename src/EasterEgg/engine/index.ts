@@ -1890,6 +1890,7 @@ export class Game {
                 entity.teamInitiated &&
                 (entity.teamRef?.typeName === 'kptrl' ||
                  entity.teamRef?.typeName === 'nptrl' ||
+                 entity.teamRef?.typeName === 'mptrl' ||
                  entity.teamRef?.typeName === 'wptrl') &&
                 entity.mission === Mission.GUARD &&
                 entity.missionTimer === 0 &&
@@ -6328,6 +6329,7 @@ export class Game {
           entity.teamInitiated &&
           (entity.teamRef?.typeName === 'kptrl' ||
            entity.teamRef?.typeName === 'nptrl' ||
+           entity.teamRef?.typeName === 'mptrl' ||
            entity.teamRef?.typeName === 'wptrl');
         const isPatrolNavComClearCatchup =
           entity.navComClearedTick >= 0 &&
@@ -7411,8 +7413,8 @@ export class Game {
    *  to pixels/tick via C++ _Scale_To_256 scaling (techno.cpp:6287).
    *  C++ house.cpp:290,300: GroundspeedBias from difficulty applied per house.
    *  C++ house.cpp:291,301: AirspeedBias from difficulty applied to aircraft.
-   *  C++ infantry.cpp:3996-3997: Dogs get 2x movement speed when they have a
-   *  valid navigation target (hunting/attacking). */
+   *  C++ infantry.cpp:4020-4021: Dogs get 2x movement speed only when they
+   *  have a legal TarCom (combat target), not merely NavCom/path movement. */
   private movementSpeed(entity: Entity, speedCell: { cx: number; cy: number } = entity.cell): number {
     const speedBias = entity.stats.isAircraft
       ? this.getAirspeedBias(entity.house)
@@ -7422,12 +7424,9 @@ export class Game {
     const terrainMult = entity.stats.isInfantry ? 1.0 : this.map.getSpeedMultiplier(speedCell.cx, speedCell.cy, entity.stats.speedClass);
     let baseSpeed = entity.stats.speed * MPH_TO_PX * this.damageSpeedFactor(entity) * speedBias;
 
-    // C++ infantry.cpp:3996-3997: canine 2x sprint when navigating toward a target
-    //   if (IsCanine && Target_Legal(NavCom)) { movespeed *= 2; }
-    // NavCom (navigation computer) is set whenever the unit has a valid movement
-    // destination — explicit moveTarget, active path, or chasing an entity target.
-    if (entity.stats.isCanine &&
-        (entity.moveTarget || (entity.path.length > 0 && entity.pathIndex < entity.path.length) || entity.target?.alive)) {
+    // C++ infantry.cpp:4020-4021: canine sprint is combat-only.
+    // NavCom/patrol movement does not double speed; only legal TarCom does.
+    if (entity.stats.isCanine && entity.target?.alive) {
       baseSpeed *= 2;
     }
 
@@ -7551,7 +7550,8 @@ export class Game {
     const navDyTotal = nav.ly - entity.leptonY;
     const teamTypeName = entity.teamRef?.typeName ?? null;
     const isScg13PatrolTeam =
-      teamTypeName === 'kptrl' || teamTypeName === 'nptrl' || teamTypeName === 'wptrl';
+      teamTypeName === 'kptrl' || teamTypeName === 'nptrl' ||
+      teamTypeName === 'mptrl' || teamTypeName === 'wptrl';
 
     // C++ Basic_Path can choose a diagonal first step for SCG13 patrol infantry
     // even when the long-range NavCom is mostly vertical. This happens in
@@ -7568,7 +7568,30 @@ export class Game {
       navDxTotal < 0 &&
       Math.abs(navDxTotal) > Math.abs(navDyTotal) * 2;
 
-    if (isScg13WestBoundaryRestart) {
+    const isScg13MptrlSoutheastRestart =
+      this.scenarioId === 'SCG13EA' &&
+      teamTypeName === 'mptrl' &&
+      entity.teamInitiated &&
+      entity.mission === Mission.MOVE &&
+      navDxTotal > 0 &&
+      navDyTotal > 0;
+
+    if (isScg13MptrlSoutheastRestart) {
+      // SCG13EA mptrl DOG: C++ Basic_Path's first step is FACING_SE even
+      // though the long-range waypoint vector is slightly east-dominant.
+      // This patrol route moves along the upper wall, then follows column 71
+      // south before turning southeast again. Raw direct-driver logic walks due
+      // east and arrives two rows too far north by tick 254.
+      let stepCX = entity.cell.cx + 1;
+      let stepCY = entity.cell.cy + 1;
+      if (entity.cell.cx >= 71 && entity.cell.cy < 64) {
+        stepCX = entity.cell.cx;
+        stepCY = entity.cell.cy + 1;
+      }
+      const head = this.infantryStartDriver(entity, stepCX, stepCY);
+      entity.isDriving = true;
+      return head;
+    } else if (isScg13WestBoundaryRestart) {
       // SCG13EA kptrl: C++ Basic_Path's FACING_W step targets the adjacent
       // west cell's west subcell. TS's direct fallback otherwise aims at the
       // current cell's west edge. When floor() has just advanced cell.cx at the

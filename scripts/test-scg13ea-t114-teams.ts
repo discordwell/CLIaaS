@@ -1,11 +1,16 @@
 /**
- * Probe ALL WASM teams + units at tick 113-114 to identify why TS over-fires.
+ * Probe ALL WASM teams + TS teams over a configurable tick window.
+ *
+ * Env:
+ *   START=253 END=255
  */
 import { test } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
+const START = Number(process.env.START ?? '113');
+const END = Number(process.env.END ?? '115');
 
-test('SCG13EA t114 teams probe', async ({ browser }) => {
+test(`SCG13EA teams probe ${START}-${END}`, async ({ browser }) => {
   test.setTimeout(5 * 60 * 1000);
   const wasmCtx = await browser.newContext();
   const tsCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
@@ -27,14 +32,14 @@ test('SCG13EA t114 teams probe', async ({ browser }) => {
     tsPage.waitForFunction(() => (window as any).__agentReady === true, { timeout: 120_000, polling: 1000 }),
   ]);
 
-  for (let t = 0; t < 113; t++) {
+  for (let t = 0; t < START; t++) {
     await Promise.all([
       wasmPage.evaluate(async () => { const r = (window as any).__agentStep(1); if (r?.then) await r; }),
       tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
     ]);
   }
 
-  for (let t = 113; t <= 115; t++) {
+  for (let t = START; t <= END; t++) {
     const teams = await wasmPage.evaluate(() => {
       const M = (window as any).Module;
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
@@ -51,6 +56,7 @@ test('SCG13EA t114 teams probe', async ({ browser }) => {
       )) as Array<any>;
       return teams.map((tm) => ({
         id: tm.id,
+        typeName: tm.typeName,
         cur: tm.currentMission,
         next: tm.isNextMission,
         tgt: tm.target,
@@ -65,7 +71,7 @@ test('SCG13EA t114 teams probe', async ({ browser }) => {
     console.log('  TS');
     for (const tm of tsTeams) console.log(`    ${JSON.stringify(tm)}`);
 
-    if (t < 115) {
+    if (t < END) {
       await Promise.all([
         wasmPage.evaluate(async () => { const r = (window as any).__agentStep(1); if (r?.then) await r; }),
         tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
