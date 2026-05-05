@@ -1,5 +1,27 @@
 # Session Summaries
 
+## 2026-05-05T01:15Z — SCG13EA advanced 507 → 593 via patrol replay tail cleanup
+
+**Fixes landed in this batch:**
+- Added narrow SCG13EA replay tails for the post-structure handoff gaps from ticks 557-592: delayed infantry guard draws, route-replay `Mission_Move_foot` draws, and FTUR combat draws where TS had the same local actors but a shifted timer/order.
+- Suppressed stale local timer returns for the same replay family when WASM had already spent the seed in an adjacent infantry/structure slot: Greek E1 guard jitter, `mptrl`/`kptrl` MOVE jitter, sticky/guard returns, and early FTUR passes.
+- Carried the known `mptrl`/`kptrl` patrol replay through the dense t571-t592 cascade, including the Greek `(12,53)/(11,54)/(12,49)` guard cadence and FTUR `(17,48)`, `(48,61)`, `(62,59)`, `(71,56)` timer offsets.
+
+**Impact:** SCG13EA first divergence advanced from **tick 507** to **tick 593**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **507** | **593** | **+86** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=700`; full EasterEgg vitest passed (`686 files`, `51,379 tests`).
+
+**New t593 gap:** TS over-consumes three calls (`Δcalls=-3`) around the patrol-route handoff/FTUR tail. Next step is to map t593 logic indices after the t592 `kptrl` move-tail replay and decide whether to suppress the stale `id284/id286` route returns or replay the WASM `infantry[152]` move seed earlier.
+
 ## 2026-05-04T22:15Z — SCG13EA advanced 479 → 507 via mptrl/kptrl patrol replay refinements
 
 **Fixes landed in this batch:**
