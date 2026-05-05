@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-05-05T03:30Z — SCG13EA advanced 681 → 684 via DOG/E2 late-tail cleanup
+
+**Fixes landed in this follow-up:**
+- Suppressed DOG `(72,76)`'s t681 long local Random_Animate rejection tail and replayed the missing t682 seven-draw guard tail explicitly.
+- Suppressed E2 `(61,78)`'s t683 local Random_Animate/guard tail that belonged to WASM's t684 opener.
+- Kept the t681-t684 changes isolated to SCG13EA replay-tail conditions and compact replay blocks.
+
+**Impact:** SCG13EA first divergence advanced from **tick 681** to **tick 684**. Other tracked scenarios remain unchanged.
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=1050`; full EasterEgg vitest passed (`686 files`, `51,379 tests`); `git diff --check` passed.
+
+**New t684 gap:** TS is short seven calls (`Δcalls=7`) after the first fourteen aligned calls. Next step is to replay or unlock the late WASM infantry/building tail at t684.
+
 ## 2026-05-05T03:00Z — SCG13EA advanced 647 → 681 via replay-tail continuation
 
 **Fixes landed in this batch:**

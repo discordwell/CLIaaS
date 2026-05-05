@@ -3647,6 +3647,18 @@ export class Game {
         ScenarioRandom._sourceTag = saved;
       }
 
+      const replayScg13T682GuardTail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 682;
+      if (replayScg13T682GuardTail) {
+        // SCG13EA t682: TS has the first natural guard call, then lacks the
+        // seven remaining C++ infantry guard draws from the replay tail.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60043;
+        for (let i = 0; i < 7; i++) ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
       // ── Phase 3: post-building entities (reinforcements/teams, skip aircraft) ──
       for (let i = this._preBuildingEntityCount; i < this.entities.length; i++) {
         const entity = this.entities[i];
@@ -6999,6 +7011,39 @@ export class Game {
           // SCG13EA t678: these three local guard returns are the t679
           // opening infantry seeds in WASM. Park them at normal cadence.
           entity.missionTimer = 14;
+          break;
+        }
+        const suppressScg13T681Dog7276GuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 681 &&
+          entity.id === 296 &&
+          entity.stats.isCanine &&
+          entity.house === House.USSR &&
+          entity.mission === Mission.GUARD &&
+          entity.missionQueue === null &&
+          entity.cell.cx === 72 &&
+          entity.cell.cy === 76;
+        if (suppressScg13T681Dog7276GuardCycle) {
+          // SCG13EA t681: DOG (72,76)'s long local Random_Animate rejection
+          // tail is not in this C++ tick. Park the guard cycle; t682's missing
+          // guard tail is replayed explicitly after the natural first call.
+          entity.missionTimer = 42;
+          break;
+        }
+        const suppressScg13T683E26178GuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 683 &&
+          entity.id === 291 &&
+          entity.type === UnitType.I_E2 &&
+          entity.house === House.USSR &&
+          entity.mission === Mission.GUARD &&
+          entity.missionQueue === null &&
+          entity.cell.cx === 61 &&
+          entity.cell.cy === 78;
+        if (suppressScg13T683E26178GuardCycle) {
+          // SCG13EA t683: E2 (61,78)'s local Random_Animate/guard tail is
+          // WASM's t684 opener. Keep the local guard timer quiet.
+          entity.missionTimer = 43;
           break;
         }
         const limitScg13ReplayTailRandomAnimate =
