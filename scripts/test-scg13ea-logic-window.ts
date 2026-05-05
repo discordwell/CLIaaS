@@ -80,7 +80,7 @@ test(`SCG13EA logic window tick ${TICK}`, async ({ browser }) => {
           logic, phase, id: e?.id, type: e?.type, house: e?.house,
           cell: e ? `(${e.cell.cx},${e.cell.cy})` : null,
           m: e?.mission, mt: e?.missionTimer, mq: e?.missionQueue ?? null,
-          drv: e?.isDriving, init: e?.teamInitiated, doing: e?.doing, idle: e?.idleAnimTimer,
+          drv: e?.isDriving, init: e?.teamInitiated, doing: e?.doing,
           pos: e ? `(${e.leptonX},${e.leptonY})` : null,
           head: e?.headToLX > 0 ? `(${e.headToLX},${e.headToLY})` : null,
           nav: e?.moveTarget ? `(${e.moveTarget.lx},${e.moveTarget.ly})` : null,

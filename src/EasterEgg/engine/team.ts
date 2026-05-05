@@ -1248,31 +1248,6 @@ export class Team {
         continue; // let it fight
       }
 
-      // SCG13EA kptrl upper E1 852077 / TS id279: C++ preserved Path[]
-      // replay leaves the unit a few leptons behind TS through the westbound
-      // patrol-scan handoff. TS reaches GUARD one tick early at t407 end and
-      // would immediately requeue MOVE during t408 team AI, consuming one extra
-      // Mission_Move RNG call. Hold this exact post-clear GUARD state for the
-      // same tick WASM still reports GUARD, then allow the normal patrol MOVE
-      // reassignment on t409.
-      if (ctx?.tick === 408 &&
-          this.typeName === 'kptrl' &&
-          unit.stats.isInfantry &&
-          unit.teamInitiated &&
-          unit.mission === Mission.GUARD &&
-          !unit.isDriving &&
-          !unit.moveTarget &&
-          unit.cell.cx === 50 && unit.cell.cy === 61 &&
-          unit.leptonY === 15808 &&
-          unit.navComClearedTick === 407) {
-        // Timer=2 because MissionClass::AI decrements before dispatch. This
-        // leaves the unit quiet through t408, then fires Mission_Guard on t409
-        // before Commence pops the restored MOVE queue, matching WASM.
-        unit.missionTimer = Math.max(unit.missionTimer, 2);
-        allArrived = false;
-        continue;
-      }
-
       // TS team AI runs before entity AI, but C++ patrol restore effectively
       // lets a just-cleared MOVE unit process the missing NavCom first:
       // either FootClass::Mission_Move's `!NavCom && !IsDriving`
@@ -1311,56 +1286,11 @@ export class Team {
         // (vehicles/aircraft) keep the direct-assignment path — they don't gesture
         // and Commence semantics differ.
         if (unit.stats.isInfantry) {
-          const targetLXlepton = pixelToLepton(this.target.x);
-          const targetLYlepton = pixelToLepton(this.target.y);
-          if (ctx?.tick === 479 &&
-              this.typeName === 'kptrl' &&
-              unit.teamInitiated &&
-              unit.mission === Mission.GUARD &&
-              !unit.isDriving &&
-              !unit.moveTarget &&
-              unit.cell.cx === 47 && unit.cell.cy === 60 &&
-              unit.leptonX === 12240 && unit.leptonY === 15552 &&
-              unit.navComClearedTick === 477) {
-            // SCG13EA kptrl lower E1 852084 / TS 286: C++ has the patrol
-            // re-MOVE active before this unit's t479 Mission_Guard handler
-            // would scan, so no GUARD RNG fires. Mission_Move jitter still
-            // waits until t480; timer=1 becomes 0 in the same tick shape as
-            // WASM's logic-layer state, restoring the single t479 guard jitter
-            // that the DOG no longer supplies after preserving its Path[].
-            unit.mission = Mission.MOVE;
-            unit.missionQueue = null;
-            unit.missionTimer = 1;
-            unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
-          } else if (ctx?.tick === 493 &&
-              this.typeName === 'mptrl' &&
-              unit.id === 284 &&
-              unit.teamInitiated &&
-              unit.mission === Mission.GUARD &&
-              !unit.isDriving &&
-              !unit.moveTarget &&
-              unit.cell.cx === 77 && unit.cell.cy === 65 &&
-              unit.leptonX === 19802 && unit.leptonY === 16827 &&
-              unit.navComClearedTick === 491) {
-            // SCG13EA mptrl lower E1 852082 / TS 284: C++ has the patrol
-            // re-MOVE driver armed by t493 end, but it does not advance or
-            // consume Mission_Move jitter until t494. Queueing MOVE via the
-            // generic Assign_Mission path lets infantry Commence pop only
-            // after this entity's t493 MissionClass::AI pass, leaving TS one
-            // tick late. Directly arm the MOVE mission with timer=2: the t493
-            // decrement leaves timer=1, STAGE D starts the driver, and the
-            // index.ts t493 arm guard prevents same-tick Coord_Move.
-            unit.mission = Mission.MOVE;
-            unit.missionQueue = null;
-            unit.missionTimer = 2;
-            unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
-          } else {
-            // Phase 2: route through assignMission (C++ mission.cpp:379-390)
-            // — no-op when already in MOVE, queues otherwise.
-            assignMission(unit, Mission.MOVE);
-            if (!unit.moveTarget) {
-              unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
-            }
+          // Phase 2: route through assignMission (C++ mission.cpp:379-390)
+          // — no-op when already in MOVE, queues otherwise.
+          assignMission(unit, Mission.MOVE);
+          if (!unit.moveTarget) {
+            unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
           }
         } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
           // C++ team.cpp Coordinate_Patrol (team.cpp:Coordinate_Move-equivalent

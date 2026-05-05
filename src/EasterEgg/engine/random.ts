@@ -39,19 +39,8 @@ export class RandomClass {
    *  each call records [seed_after, sourceTag] for comparison with WASM rngLog. */
   _sourceTag = 0;
   _seedLog: Array<[number, number]> = []; // [seed_after, sourceTag]
-  _debugContext = '';
-  _suppressAfterCalls: number | null = null;
-  _suppressCallCount = 0;
 
   next(): number {
-    if (this._suppressAfterCalls !== null) {
-      if (this._suppressCallCount >= this._suppressAfterCalls) {
-        // Replay-only parity gate: return a deterministic accepted value
-        // without advancing/logging the LCG. Scoped by Game.update.
-        return 0;
-      }
-      this._suppressCallCount++;
-    }
     this.callCount++;
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
     // Source-tag logging: records [seed, tag] pairs matching C++ rngLog format
@@ -61,8 +50,7 @@ export class RandomClass {
       // after minification (frame 2 may be "s.nextInRange" — we want 3-6 for source context).
       const e = new Error();
       const frames = (e.stack ?? '').split('\n').slice(2, 8).map(s => s.trim()).join(' | ');
-      const context = this._debugContext ? ` ${this._debugContext}` : '';
-      this._taggedLog.push(`[${this._sourceTag}]${context} ${frames}`);
+      this._taggedLog.push(`[${this._sourceTag}] ${frames}`);
     }
     // Log first 75 gameplay calls after init sync
     if (this.debugLogStart > 0 && this.callCount > this.debugLogStart && this.callCount <= this.debugLogStart + 75) {

@@ -5,7 +5,7 @@
  */
 import { test } from '@playwright/test';
 
-const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
+const BASE_URL = 'https://cliaas.com';
 const scenario = process.env.SCENARIO ?? 'SCG04EA';
 const targetTick = Number(process.env.TICK ?? 2);
 
