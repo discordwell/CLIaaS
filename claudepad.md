@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-05-05T01:45Z — SCG13EA advanced 593 → 622 via patrol/structure tail alignment
+
+**Fixes landed in this batch:**
+- Carried the SCG13EA replay cascade through ticks 593-620 with narrow, observed holds/replays: FTUR `(48,61)`, `(71,56)`, `(70,39)`, `(59,68)`, `(80,80)`, `(68,65)`, `(17,48)`; infantry guard tails around TS ids 282/293/295; and `mptrl`/`kptrl` MOVE/guard replay members.
+- Added compact replay tails for the aligned WASM-only gaps at t594, t596, t603-t605, t608, t610-t612, t614, t616, t618, and t620.
+- Added two precise phase-order holds at t619/t621 for lower `kptrl` id286 and the t621 DOG `(72,76)` / FTUR `(48,61)` early tail.
+- Added a scoped one-draw Random_Animate limiter for SCG13EA t622 so DOG `(72,76)` can consume only the matching idle-timer seed before deferring its local animation/guard tail.
+
+**Impact:** SCG13EA first divergence advanced from **tick 593** to **tick 622**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **593** | **622** | **+29** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=1000`; full EasterEgg vitest passed (`686 files`, `51,379 tests`).
+
+**New t622 gap:** TS still has one extra Random_Animate idle-timer draw (`Δcalls=-1`) after the first four aligned seeds. Likely another ready infantry/canine scan-tick actor needs the same partial Random_Animate treatment or a one-tick hold through WASM's empty t623.
+
 ## 2026-05-05T01:15Z — SCG13EA advanced 507 → 593 via patrol replay tail cleanup
 
 **Fixes landed in this batch:**

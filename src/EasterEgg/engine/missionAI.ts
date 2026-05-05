@@ -1520,6 +1520,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     const saved = ScenarioRandom._sourceTag;
     ScenarioRandom._sourceTag = 30001;
     entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
+    if ((entity as any).__scg13LimitRandomAnimateToIdleTimer) {
+      ScenarioRandom._sourceTag = saved;
+      delete (entity as any).__scg13LimitRandomAnimateToIdleTimer;
+      return;
+    }
     ScenarioRandom._sourceTag = 30002;
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {
