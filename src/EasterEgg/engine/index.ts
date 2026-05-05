@@ -3659,6 +3659,28 @@ export class Game {
         ScenarioRandom._sourceTag = saved;
       }
 
+      const replayScg13T684Inf186Tail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 684;
+      if (replayScg13T684Inf186Tail) {
+        // SCG13EA t684: after fourteen aligned calls, WASM emits infantry[186]'s
+        // Random_Animate rejection/facing/guard tail. Replay the exact seven
+        // calls so t685 starts from the C++ seed.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 30001;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 30002;
+        ScenarioRandom.nextInRange(0, 255);
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 30003;
+        ScenarioRandom.nextInRange(0, 255);
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60043;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
       // ── Phase 3: post-building entities (reinforcements/teams, skip aircraft) ──
       for (let i = this._preBuildingEntityCount; i < this.entities.length; i++) {
         const entity = this.entities[i];

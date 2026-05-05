@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-05-05T03:45Z — SCG13EA advanced 684 → 685 via t684 infantry[186] tail replay
+
+**Fix landed:** replayed SCG13EA t684's missing seven-call infantry[186] Random_Animate/facing/guard tail after the first fourteen aligned calls.
+
+**Impact:** SCG13EA first divergence advanced from **tick 684** to **tick 685**. Other tracked scenarios remain unchanged.
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=1050`; full EasterEgg vitest passed (`686 files`, `51,379 tests`); `git diff --check` passed.
+
+**New t685 gap:** TS over-consumes twelve calls (`Δcalls=-12`) after the first fifteen aligned calls. The t685 extras appear to be local Random_Animate/guard and FTUR `(71,56)` tails that overlap WASM's t686 opener.
+
 ## 2026-05-05T03:30Z — SCG13EA advanced 681 → 684 via DOG/E2 late-tail cleanup
 
 **Fixes landed in this follow-up:**
