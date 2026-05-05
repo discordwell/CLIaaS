@@ -91,7 +91,7 @@ export function resetTeamIds(): void {
 export class Team {
   readonly id: number;
   readonly house: House;
-  /** Scenario [TeamTypes] key (e.g. SCG13EA kptrl/nptrl), for narrow parity fixes. */
+  /** Scenario [TeamTypes] key, retained as INI identity/debug metadata. */
   readonly typeName: string | null;
 
   // ── C++ TeamTypeClass fields ──
@@ -1090,18 +1090,12 @@ export class Team {
   coordinatePatrol(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     // Patrol combines MOVE + ATTACK behaviors
     // If any member is in combat, let it fight; otherwise, move toward target
-    const isScg13PatrolTeam =
-      this.typeName === 'kptrl' || this.typeName === 'nptrl' ||
-      this.typeName === 'mptrl' || this.typeName === 'wptrl';
     if (!this.target && this.missionTarget) {
       this.target = { ...this.missionTarget };
     }
     // C++ TMission_Patrol (team.cpp:2949-2958): if Target was cleared
     // prematurely, restore the current patrol waypoint before scanning/moving.
-    // This is currently scoped to the SCG13EA kptrl/nptrl/mptrl/wptrl traces where WASM
-    // restores after the periodic patrol scan clears NavCom; applying it
-    // broadly shifts early scenario patrol/building interleaving.
-    if (isScg13PatrolTeam && !this.target && _waypoints) {
+    if (!this.target && _waypoints) {
       const mission = this.missionList[this.currentMission];
       if (mission?.mission === TMISSION_PATROL) {
         const wp = _waypoints.get(mission.data);
@@ -1116,22 +1110,6 @@ export class Team {
       }
     }
     if (!this.target) {
-      if (!isScg13PatrolTeam) {
-        this.isNextMission = true;
-      }
-      return;
-    }
-
-    // SCG13EA kptrl t296: WASM marks the first patrol waypoint complete once
-    // the lower-row member has reached GUARD at (53,61), even though the
-    // upper-row member is still finishing its old MOVE handoff. If TS lets the
-    // normal coordinate loop run here it reissues MOVE to the old waypoint and
-    // delays currentMission 0 -> 1 by two ticks.
-    if (this.typeName === 'kptrl' &&
-        this.currentMission === 0 &&
-        this._members.some(m => m.alive && m.stats.isInfantry &&
-          m.cell.cx === 53 && m.cell.cy === 61 &&
-          m.mission === Mission.GUARD && !m.isDriving)) {
       this.isNextMission = true;
       return;
     }
@@ -1151,18 +1129,11 @@ export class Team {
     //     Assign_Mission(GUARD)              ← queues GUARD
     //     Assign_Destination(TARGET_NONE)    ← clears NavCom
     //
-    // SCG13EA t99: this fires for nptrl team. Member id=109 (USSR E1 at 61,67)
-    // gets queue=GUARD, NavCom cleared. Mission_Move on next tick triggers
-    // Enter_Idle_Mode → m=GUARD → fires Mission_Guard at tick 101 (the missing
-    // 60043 RNG call vs WASM).
-    //
     // C++ Greatest_Threat doesn't consume RNG (techno.cpp:1987-2300 — pure scan).
     // We use a simple proximity check: any enemy within THREAT_RANGE (~5 cells).
     // C++ Frame is 0-indexed (starts at 0); TS tick is 1-indexed (starts at 1).
     // C++ Frame % 14 == 0 fires at Frame 0, 14, 28, ..., 98, 112.
     // TS tick at scan fire = Frame + 1, so scan fires when (tick-1) % 14 == 0.
-    // SCG13EA t99 nptrl: WASM clears target during tick 99 processing
-    // (probe shows tgtX=0 at tick 99 end). (99-1)%14 = 98%14 = 0 ✓.
     const PATROL_TIME_TICKS = 14;
     if (ctx?.tick !== undefined && ctx.tick > 0 && (ctx.tick - 1) % PATROL_TIME_TICKS === 0) {
       const leader = this._members.find(m => m.alive);
@@ -1248,31 +1219,6 @@ export class Team {
         continue; // let it fight
       }
 
-      // TS team AI runs before entity AI, but C++ patrol restore effectively
-      // lets a just-cleared MOVE unit process the missing NavCom first:
-      // either FootClass::Mission_Move's `!NavCom && !IsDriving`
-      // Enter_Idle_Mode branch, or Movement_AI's stop-driver path while it is
-      // still walking. Preserve that one-tick window after the patrol scan
-      // clears NavCom, otherwise SCG13EA patrol members skip the GUARD
-      // transition at ticks 100/114.
-      const allowScg13MptrlDogLatePathReplay =
-        this.typeName === 'mptrl' &&
-        unit.stats.isCanine &&
-        unit.cell.cx === 72 &&
-        unit.cell.cy === 64 &&
-        unit.headToLX > 0 &&
-        unit.headToLY > 0;
-      if (unit.stats.isInfantry &&
-          isScg13PatrolTeam &&
-          !allowScg13MptrlDogLatePathReplay &&
-          unit.mission === Mission.MOVE &&
-          !unit.moveTarget &&
-          ctx?.tick !== undefined &&
-          unit.navComClearedTick === ctx.tick - 1) {
-        allArrived = false;
-        continue;
-      }
-
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
       // Use leptonDist for C++ parity (coord.cpp Distance in lepton space)
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
@@ -1321,10 +1267,7 @@ export class Team {
         //   }
         //
         // coordinateMove had this; coordinatePatrol was missing it. Mirrors the
-        // identical C++ team.cpp branch for both. SCG13EA t99 USSR E1 (61,67):
-        // unit's distance to team target reaches close-enough → queue GUARD →
-        // Commence pops to GUARD next tick → Mission_Guard fires at tick 101
-        // (the missing 60043 RNG call vs WASM).
+        // identical C++ team.cpp branch for both.
         if (unit.mission === Mission.MOVE) {
           let shouldIdle = !unit.moveTarget;
           if (!shouldIdle && unit.moveTarget) {
