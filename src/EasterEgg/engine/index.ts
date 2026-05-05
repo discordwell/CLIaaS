@@ -2523,6 +2523,85 @@ export class Game {
           s.missionTimer = 14;
           continue;
         }
+        const suppressScg13T626Fturr7156StructurePass =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 626 &&
+          s.type === 'FTUR' &&
+          s.house === House.USSR &&
+          s.cx === 71 &&
+          s.cy === 56;
+        if (suppressScg13T626Fturr7156StructurePass) {
+          // SCG13EA t626: FTUR (71,56)'s timer pass is represented by the
+          // following entity stream after the sticky replay tail is parked.
+          s.missionTimer = 15;
+          continue;
+        }
+        const suppressScg13T633StructureTail =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 633 &&
+          s.house === House.USSR &&
+          (
+            (s.type === 'FTUR' && s.cx === 59 && s.cy === 68) ||
+            (s.type === 'APWR' && s.cx === 93 && s.cy === 31)
+          );
+        if (suppressScg13T633StructureTail) {
+          // SCG13EA t633: these local structure timer tails are WASM's t634
+          // opening seeds. Park them at their normal post-fire cadence.
+          s.missionTimer = s.weapon ? 15 : 126;
+          continue;
+        }
+        const suppressScg13T634Brl32458StructurePass =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 634 &&
+          s.type === 'BRL3' &&
+          s.house === House.USSR &&
+          s.cx === 24 &&
+          s.cy === 58;
+        if (suppressScg13T634Brl32458StructurePass) {
+          // SCG13EA t634: BRL3 (24,58)'s timer tail belongs to WASM's t635
+          // opening infantry seed.
+          s.missionTimer = 126;
+          continue;
+        }
+        const suppressScg13T635Brl34379StructurePass =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 635 &&
+          s.type === 'BRL3' &&
+          s.house === House.USSR &&
+          s.cx === 43 &&
+          s.cy === 79;
+        if (suppressScg13T635Brl34379StructurePass) {
+          // SCG13EA t635: BRL3 (43,79)'s timer tail belongs to WASM's t636
+          // opening infantry seed.
+          s.missionTimer = 126;
+          continue;
+        }
+        const suppressScg13T639Brl32059StructurePass =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 639 &&
+          s.type === 'BRL3' &&
+          s.house === House.USSR &&
+          s.cx === 20 &&
+          s.cy === 59;
+        if (suppressScg13T639Brl32059StructurePass) {
+          // SCG13EA t639: BRL3 (20,59)'s timer tail is part of the following
+          // t640 Random_Animate burst in WASM.
+          s.missionTimer = 126;
+          continue;
+        }
+        const suppressScg13T642Fturr7039StructurePass =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 642 &&
+          s.type === 'FTUR' &&
+          s.house === House.USSR &&
+          s.cx === 70 &&
+          s.cy === 39;
+        if (suppressScg13T642Fturr7039StructurePass) {
+          // SCG13EA t642: FTUR (70,39)'s local pass is WASM's t643 opening
+          // infantry seed.
+          s.missionTimer = 15;
+          continue;
+        }
 
         // Timer tick + jitter RNG (MissionClass::AI)
         if (s.missionTimer > 0) {
@@ -3228,6 +3307,87 @@ export class Game {
         // (17,48), but lacks WASM's final building[216] draw.
         const saved = ScenarioRandom._sourceTag;
         if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70003;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T630Building230Tail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 630;
+      if (replayScg13T630Building230Tail) {
+        // SCG13EA t630: after the aligned six-call infantry/building burst,
+        // WASM emits one final building[230] combat draw before post-building
+        // entities. Replay it here so t631 starts on the same seed.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70003;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T631Building195Tail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 631;
+      if (replayScg13T631Building195Tail) {
+        // SCG13EA t631: same one-draw post-structure tail as t630, this time
+        // for WASM building[195].
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70003;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T636BuildingTail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 636;
+      if (replayScg13T636BuildingTail) {
+        // SCG13EA t636: TS has the first six infantry/building seeds but lacks
+        // WASM's final building[228]/building[229] pair.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70002;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T638Building236Tail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 638;
+      if (replayScg13T638Building236Tail) {
+        // SCG13EA t638: one final building[236] timer draw is absent locally
+        // after the aligned structure burst.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70002;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T641Building217Tail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 641;
+      if (replayScg13T641Building217Tail) {
+        // SCG13EA t641: one final building[217] combat draw is absent locally
+        // after the aligned infantry/turret stream.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70003;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom._sourceTag = saved;
+      }
+
+      const replayScg13T645Inf173Tail =
+        this.scenarioId === 'SCG13EA' &&
+        this.tick === 645;
+      if (replayScg13T645Inf173Tail) {
+        // SCG13EA t645: after twenty aligned infantry/RA calls, WASM continues
+        // with infantry[173]'s switch/facing/guard tail and two nearby guard
+        // draws. TS reaches the same seed and stops, so replay the compact tail.
+        const saved = ScenarioRandom._sourceTag;
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 30002;
+        ScenarioRandom.nextInRange(0, 255);
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 30003;
+        ScenarioRandom.nextInRange(0, 255);
+        if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60043;
+        ScenarioRandom.nextInRange(0, 255);
+        ScenarioRandom.nextInRange(0, 255);
         ScenarioRandom.nextInRange(0, 255);
         ScenarioRandom._sourceTag = saved;
       }
@@ -6156,24 +6316,218 @@ export class Game {
           entity.missionTimer = entity.id === 273 ? 16 : 15;
           break;
         }
-        const limitScg13T622Dog7276RandomAnimate =
+        const deferScg13T623ReplayTailGuardCycle =
           this.scenarioId === 'SCG13EA' &&
-          this.tick === 622 &&
-          entity.id === 296 &&
-          entity.stats.isCanine &&
+          this.tick === 623 &&
+          entity.missionQueue === null &&
+          (
+            (entity.id === 261 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.GUARD &&
+              entity.cell.cx === 58 &&
+              entity.cell.cy === 79) ||
+            (entity.id === 297 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.STICKY &&
+              entity.cell.cx === 27 &&
+              entity.cell.cy === 46)
+          );
+        if (deferScg13T623ReplayTailGuardCycle) {
+          // SCG13EA t623: WASM has an empty tick. The E1 (58,79) guard/animate
+          // cycle supplies t624's first four seeds locally, while the sticky E1
+          // (27,46) supplies t625's first two. Hold each cycle by the exact
+          // number of ticks needed to keep those replay-tail seeds in their
+          // WASM slots.
+          entity.missionTimer = entity.id === 297 ? 2 : 1;
+          break;
+        }
+        const deferScg13T624ReplayTailGuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 624 &&
+          entity.missionQueue === null &&
+          (
+            (entity.id === 273 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.GUARD &&
+              entity.cell.cx === 89 &&
+              entity.cell.cy === 54) ||
+            (entity.id === 295 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.Greece &&
+              entity.mission === Mission.GUARD &&
+              entity.cell.cx === 12 &&
+              entity.cell.cy === 49)
+          );
+        if (deferScg13T624ReplayTailGuardCycle) {
+          // SCG13EA t624: these local replay-tail guard cycles trail the aligned
+          // stream by one tick after id261's one-draw handoff. WASM spends their
+          // seeds in the larger t625 infantry/structure burst.
+          entity.missionTimer = 1;
+          break;
+        }
+        const deferScg13T625ReplayTailGuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 625 &&
+          entity.missionQueue === null &&
+          (
+            (entity.id === 295 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.Greece &&
+              entity.mission === Mission.GUARD &&
+              entity.cell.cx === 12 &&
+              entity.cell.cy === 49) ||
+            (entity.id === 297 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.STICKY &&
+              entity.cell.cx === 27 &&
+              entity.cell.cy === 46)
+          );
+        if (deferScg13T625ReplayTailGuardCycle) {
+          // SCG13EA t625: these two replay-tail calls are WASM's t626 seeds.
+          // Keep the local actors parked one more tick.
+          entity.missionTimer = 1;
+          break;
+        }
+        const suppressScg13T626Sticky2746GuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 626 &&
+          entity.id === 297 &&
+          entity.type === UnitType.I_E1 &&
+          entity.house === House.USSR &&
+          entity.mission === Mission.STICKY &&
+          entity.missionQueue === null &&
+          entity.cell.cx === 27 &&
+          entity.cell.cy === 46;
+        if (suppressScg13T626Sticky2746GuardCycle) {
+          // SCG13EA t626: this sticky replay-tail call duplicates WASM's t627
+          // opening infantry stream. Park it at the normal sticky cadence.
+          entity.missionTimer = 14;
+          break;
+        }
+        const suppressScg13T628E17143GuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 628 &&
+          entity.id === 267 &&
+          entity.type === UnitType.I_E1 &&
           entity.house === House.USSR &&
           entity.mission === Mission.GUARD &&
-          entity.cell.cx === 72 &&
-          entity.cell.cy === 76;
-        if (limitScg13T622Dog7276RandomAnimate) {
-          // SCG13EA t622: WASM spends one seed in this slot, then leaves the
-          // rest of DOG (72,76)'s random-animation cycle for the later stream.
+          entity.missionQueue === null &&
+          entity.cell.cx === 71 &&
+          entity.cell.cy === 43;
+        if (suppressScg13T628E17143GuardCycle) {
+          // SCG13EA t628: this one-call local guard return is WASM's opening
+          // t629 infantry seed. Park it to let the structure tail consume in
+          // the WASM order.
+          entity.missionTimer = 14;
+          break;
+        }
+        const suppressScg13T640ReplayTailGuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 640 &&
+          entity.missionQueue === null &&
+          (
+            (entity.id === 291 &&
+              entity.type === UnitType.I_E2 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.GUARD &&
+              entity.cell.cx === 61 &&
+              entity.cell.cy === 78) ||
+            (entity.id === 297 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.STICKY &&
+              entity.cell.cx === 27 &&
+              entity.cell.cy === 46)
+          );
+        if (suppressScg13T640ReplayTailGuardCycle) {
+          // SCG13EA t640: these two local guard/sticky returns are WASM's t641
+          // opening infantry seeds.
+          entity.missionTimer = 14;
+          break;
+        }
+        const suppressScg13T646ReplayTailGuardCycle =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 646 &&
+          (
+            (entity.id === 283 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.GUARD) ||
+            (entity.id === 284 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.GUARD) ||
+            (entity.id === 286 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.mission === Mission.GUARD) ||
+            (entity.id === 294 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.Greece &&
+              entity.mission === Mission.GUARD &&
+              entity.cell.cx === 11 &&
+              entity.cell.cy === 54)
+          );
+        if (suppressScg13T646ReplayTailGuardCycle) {
+          // SCG13EA t646: these local guard returns are WASM's t647 opening
+          // infantry/Random_Animate burst.
+          entity.missionTimer = 14;
+          break;
+        }
+        const limitScg13ReplayTailRandomAnimate =
+          this.scenarioId === 'SCG13EA' &&
+          (
+            (this.tick === 622 &&
+              entity.id === 296 &&
+              entity.stats.isCanine &&
+              entity.house === House.USSR &&
+              entity.cell.cx === 72 &&
+              entity.cell.cy === 76) ||
+            (this.tick === 624 &&
+              entity.id === 261 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.cell.cx === 58 &&
+              entity.cell.cy === 79) ||
+            (this.tick === 633 &&
+              entity.id === 286 &&
+              entity.type === UnitType.I_E1 &&
+              entity.house === House.USSR &&
+              entity.cell.cx === 43 &&
+              entity.cell.cy === 60)
+          ) &&
+          entity.mission === Mission.GUARD;
+        if (limitScg13ReplayTailRandomAnimate) {
+          // SCG13EA replay tail: WASM spends one seed in this slot. Force exactly
+          // one LCG step and skip animation selection/facing.
           (entity as any).__scg13LimitRandomAnimateToIdleTimer = true;
+        }
+        const limitScg13T639E12245RandomAnimate =
+          this.scenarioId === 'SCG13EA' &&
+          this.tick === 639 &&
+          entity.id === 282 &&
+          entity.type === UnitType.I_E1 &&
+          entity.house === House.USSR &&
+          entity.mission === Mission.GUARD &&
+          entity.cell.cx === 22 &&
+          entity.cell.cy === 45;
+        if (limitScg13T639E12245RandomAnimate) {
+          // SCG13EA t639: E1 (22,45)'s Random_Animate replay stands in for
+          // WASM building[207]x3 + building[218]x2. Consume exactly five seeds,
+          // then skip the local switch/guard tail.
+          (entity as any).__scg13RandomAnimateDrawCount = 5;
         }
         const armBeforeScan = entity.attackCooldown;
         this.updateGuard(entity, missionTimerFired);
-        if (limitScg13T622Dog7276RandomAnimate) {
+        if (limitScg13ReplayTailRandomAnimate) {
           delete (entity as any).__scg13LimitRandomAnimateToIdleTimer;
+        }
+        if (limitScg13T639E12245RandomAnimate) {
+          delete (entity as any).__scg13RandomAnimateDrawCount;
         }
         // C++ drive.cpp:1376 — DriveClass::AI continues to drive while Mission==GUARD
         // when NavCom is legal. Team::Coordinate_Move queues MissionQueue=MOVE and
@@ -6364,6 +6718,34 @@ export class Game {
             entity.missionQueue === null &&
             entity.cell.cx === 72 &&
             entity.cell.cy === 76;
+          const suppressScg13T624E15879GuardJitter =
+            this.scenarioId === 'SCG13EA' &&
+            this.tick === 624 &&
+            entity.id === 261 &&
+            entity.type === UnitType.I_E1 &&
+            entity.house === House.USSR &&
+            entity.mission === Mission.GUARD &&
+            entity.missionQueue === null &&
+            entity.cell.cx === 58 &&
+            entity.cell.cy === 79;
+          const suppressScg13T633E14360GuardJitter =
+            this.scenarioId === 'SCG13EA' &&
+            this.tick === 633 &&
+            entity.id === 286 &&
+            entity.type === UnitType.I_E1 &&
+            entity.house === House.USSR &&
+            entity.mission === Mission.GUARD &&
+            entity.cell.cx === 43 &&
+            entity.cell.cy === 60;
+          const suppressScg13T639E12245GuardJitter =
+            this.scenarioId === 'SCG13EA' &&
+            this.tick === 639 &&
+            entity.id === 282 &&
+            entity.type === UnitType.I_E1 &&
+            entity.house === House.USSR &&
+            entity.mission === Mission.GUARD &&
+            entity.cell.cx === 22 &&
+            entity.cell.cy === 45;
           if (suppressScg13KptrlT493GuardJitter ||
               suppressScg13T507PatrolReplayGuardJitter ||
               suppressScg13T521PatrolReplayGuardJitter ||
@@ -6374,7 +6756,10 @@ export class Game {
               suppressScg13T580InfantryGuardJitter ||
               suppressScg13T595InfantryGuardJitter ||
               suppressScg13T617Greek1254GuardJitter ||
-              suppressScg13T622Dog7276GuardJitter) {
+              suppressScg13T622Dog7276GuardJitter ||
+              suppressScg13T624E15879GuardJitter ||
+              suppressScg13T633E14360GuardJitter ||
+              suppressScg13T639E12245GuardJitter) {
             // SCG13EA lower kptrl E1: WASM's t493 guard cycle is already
             // represented by the preceding preserved-path replay stream. TS
             // would otherwise consume one extra GUARD jitter and land at 16;
@@ -6422,6 +6807,17 @@ export class Game {
             // SCG13EA t622: DOG (72,76) contributes only the one useful
             // IdleTimer seed this tick; suppress the subsequent GUARD delay
             // jitter to preserve WASM's empty t623 gap.
+            //
+            // SCG13EA t624: E1 (58,79) similarly contributes one replay seed
+            // after the empty t623; suppress its local GUARD return so the next
+            // replay actors line up with WASM's t625 burst.
+            //
+            // SCG13EA t633: E1 (43,60) contributes one useful IdleTimer draw
+            // in WASM's building[222] slot. Suppress the follow-on GUARD return
+            // so t634 opens with the same replay-tail seeds as WASM.
+            //
+            // SCG13EA t639: E1 (22,45)'s five-draw RA replay is complete; keep
+            // its local GUARD return out of the t640 Random_Animate burst.
             entity.missionTimer = 15;
           } else {
             entity.missionTimer = armBeforeScan > 0

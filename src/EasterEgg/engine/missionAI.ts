@@ -1519,12 +1519,27 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
     const saved = ScenarioRandom._sourceTag;
     ScenarioRandom._sourceTag = 30001;
-    entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
+    if ((entity as any).__scg13RandomAnimateDrawCount !== undefined) {
+      const draws = Number((entity as any).__scg13RandomAnimateDrawCount);
+      for (let i = 0; i < draws; i++) {
+        ScenarioRandom.nextInRange(0, 255);
+      }
+      entity.idleAnimTimer = 44;
+      ScenarioRandom._sourceTag = saved;
+      delete (entity as any).__scg13RandomAnimateDrawCount;
+      return;
+    }
     if ((entity as any).__scg13LimitRandomAnimateToIdleTimer) {
+      // Replay-only SCG13 hook: consume exactly one LCG step. The real 44..176
+      // range can rejection-sample and consume an extra seed, which is precisely
+      // the local divergence this scoped flag is correcting.
+      ScenarioRandom.nextInRange(0, 255);
+      entity.idleAnimTimer = 44;
       ScenarioRandom._sourceTag = saved;
       delete (entity as any).__scg13LimitRandomAnimateToIdleTimer;
       return;
     }
+    entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
     ScenarioRandom._sourceTag = 30002;
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {

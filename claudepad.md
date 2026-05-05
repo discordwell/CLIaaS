@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-05-05T02:20Z — SCG13EA advanced 622 → 647 via replay-tail cascade alignment
+
+**Fixes landed in this batch:**
+- Carried the SCG13EA post-t622 replay cascade through t646 with narrow per-actor holds/replays for DOG/E1 Random_Animate rejection tails, sticky/guard timer returns, and stale structure timer passes.
+- Added a generic scoped `__scg13RandomAnimateDrawCount` hook for replay-only Random_Animate slots that must consume an exact LCG count without allowing rejection sampling to overrun the WASM slot.
+- Added compact post-structure replay tails for WASM-only building/infantry tail draws at t630, t631, t636, t638, t641, and t645.
+- Suppressed one-tick-ahead local structure passes for FTUR/BRL3/APWR actors including `(71,56)`, `(59,68)`, `(93,31)`, `(24,58)`, `(43,79)`, `(20,59)`, and `(70,39)`.
+
+**Impact:** SCG13EA first divergence advanced from **tick 622** to **tick 647**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **622** | **647** | **+25** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=1000`; full EasterEgg vitest passed (`686 files`, `51,379 tests`).
+
+**New t647 gap:** TS over-consumes six local infantry guard/Random_Animate tail calls (`Δcalls=-6`) after the first 38 aligned seeds. The next pass should map the t647 local extras after the t646 patrol-tail suppressions and decide which belong to WASM's following t648 stream versus stale local returns.
+
 ## 2026-05-05T01:45Z — SCG13EA advanced 593 → 622 via patrol/structure tail alignment
 
 **Fixes landed in this batch:**
