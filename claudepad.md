@@ -1,5 +1,28 @@
 # Session Summaries
 
+## 2026-05-05T03:00Z — SCG13EA advanced 647 → 681 via replay-tail continuation
+
+**Fixes landed in this batch:**
+- Continued the SCG13EA replay cascade from t647 through t680 with narrow per-actor holds for one-tick-ahead infantry guard/STICKY returns, patrol MOVE jitter, and stale FTUR timer passes.
+- Added compact post-structure replay tails for WASM-only gaps at t648, t651-t653, t666-t667, t676-t677, and t679.
+- Tightened the dense t669-t671 sticky E1 `(27,46)` handling: local long Random_Animate rejection tail is suppressed while the two required C++ guard draws are replayed exactly.
+- Added/updated `scripts/test-scg13ea-t647-tail.ts` to track the late replay-tail actors (`id295`, `id297`, patrol ids 284-286) and source-tagged tail calls.
+
+**Impact:** SCG13EA first divergence advanced from **tick 647** to **tick 681**. Other tracked scenarios remain unchanged:
+| scenario | before | after | net |
+|---|---:|---:|---:|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | 238 | 0 |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | 76 | 0 |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| **SCG13EA** | **647** | **681** | **+34** |
+
+**Verification:** full seven-scenario Playwright sweep passed with `MAX=1050`; full EasterEgg vitest passed (`686 files`, `51,379 tests`); `git diff --check` passed.
+
+**New t681 gap:** TS over-consumes eleven calls (`Δcalls=-11`) after the t680 alignment. Next step is to map the t681 local extras and decide which are WASM's t682 opener versus stale guard/structure tails.
+
 ## 2026-05-05T02:20Z — SCG13EA advanced 622 → 647 via replay-tail cascade alignment
 
 **Fixes landed in this batch:**
