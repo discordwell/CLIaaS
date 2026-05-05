@@ -130,7 +130,7 @@
  *   - src/EasterEgg/engine/entity.ts:286-293         isReadyToRandomAnimate gate
  *   - src/EasterEgg/engine/index.ts:4146-4190        Mission.GUARD dispatch (tag 60043 equivalent)
  *   - src/EasterEgg/engine/index.ts:4192-4201        Mission.AREA_GUARD dispatch
- *   - src/EasterEgg/engine/team.ts:604-618           94a614cd niat=3 proxy for last vessel
+ *   - src/EasterEgg/engine/index.ts                  DriveClass Mark_Track reservation port
  *   - src/EasterEgg/engine/index.ts:8992-9029        tickStructuresInterleaved (tag 70003 equivalent)
  *
  * ## Test behavior
@@ -309,21 +309,18 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
     expect(Object.keys(knownRegressions).length).toBeGreaterThanOrEqual(5);
   });
 
-  it('documents the 94a614cd nonInterruptAnimTicks=3 proxy that survives through tick 17', () => {
-    // Prior fix commit 94a614cd set nonInterruptAnimTicks=3 on the last
-    // member of non-reinforceable all-vessel CREATE_TEAM teams (SCG07EA subz
-    // SS:3). That proxy delays the 3rd SS's Commence by 2 ticks (activation
-    // at tick 4 → Mission_Move at tick 6). By tick 17, the proxy's side
-    // effects have worn off (niat=0) and the divergence above is unrelated
-    // to the proxy.
+  it('documents that tick-17 divergence is unrelated to team-level Mark_Track shims', () => {
+    // The old 94a614cd nonInterruptAnimTicks proxy has been replaced by
+    // generic DriveClass Mark_Track reservations in the movement layer.
+    // Tick 17 remains about DriveClass::AI double-cycle and Random_Animate
+    // gating, not team activation timing.
     const proxy = {
-      commit: '94a614cd',
-      fix: 'nonInterruptAnimTicks=3 on last member of non-reinforceable all-vessel team',
+      retiredCommit: '94a614cd',
+      fix: 'DriveClass Mark_Track reservation state on vehicle/vessel Start_Driver',
       activationTick: 4,
-      proxyExpiryTick: 7, // niat: 3(t4) → 2(t5) → 1(t6) → 0(t7)
-      tick17Divergence: 'unrelated to proxy — DriveClass::AI + Random_Animate gating',
+      tick17Divergence: 'unrelated to team-level shim — DriveClass::AI + Random_Animate gating',
     };
     expect(proxy.tick17Divergence).toContain('unrelated');
-    expect(proxy.proxyExpiryTick).toBeLessThan(17);
+    expect(proxy.activationTick).toBeLessThan(17);
   });
 });

@@ -26,7 +26,7 @@
  *   2. value = 2 * Points + kills (literal kill count)
  *   3. Designated enemy: (value+500)*3
  *   4. Out-of-zone: value *= 2 (targets outside own base zone)
- *   5. Area_Modify: value *= pow(0.5, count) (splash weapons only)
+ *   5. Area_Modify: value *= pow(0.5, count) (PrimaryWeapon->IsSupressed only)
  *   6. NervousBias: value *= nervousBias (from rules.ini BaseBias)
  *   7. Distance: score = trunc((value * 32000) / (distCells + 1))
  *   8. Floor: max(score, 1)
@@ -376,7 +376,7 @@ describe('no fabricated bonuses (C++ parity)', () => {
 // ============================================================
 describe('Area_Modify (C++ techno.cpp:1342-1401, 1732-1735)', () => {
   it('exponential halving matches: pow(0.5, n) for n buildings', () => {
-    const scanner = makeEntity(UnitType.V_ARTY, House.USSR, 100, 100);
+    const scanner = makeEntity(UnitType.V_CA, House.USSR, 100, 100);
     const target = makeEntity(UnitType.V_4TNK, House.Greece, 200, 200);
 
     const score0 = threatScore(scanner, target, 2, null, 0);
@@ -400,7 +400,7 @@ describe('Area_Modify (C++ techno.cpp:1342-1401, 1732-1735)', () => {
     expect(cppOrder).toBe(1333333);
   });
 
-  it('non-splash scanner does not apply Area_Modify', () => {
+  it('unsuppressed scanner does not apply Area_Modify', () => {
     const rifleman = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
 

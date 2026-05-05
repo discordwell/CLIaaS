@@ -430,9 +430,9 @@ describe('AI4: Designated enemy house bonus', () => {
 // === AI5: Area modification ===
 
 describe('AI5: Area_Modify — C++ exponential halving per nearby building', () => {
-  it('splash-weapon scanner: threat reduced when target near friendly structures', () => {
-    // V2RL has SCUD weapon with splash: 2.0
-    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
+  it('Supress=yes scanner: threat reduced when target near friendly structures', () => {
+    // CA has 8Inch, which rules.ini marks Supress=yes.
+    const scanner = makeEntity(UnitType.V_CA, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
     const normalScore = threatScore(scanner, target, 3, null, 0);
@@ -444,20 +444,20 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     expect(nearOneStruct / normalScore).toBeCloseTo(0.5, 2);
   });
 
-  it('non-splash scanner: no penalty regardless of structure count', () => {
-    // E1 has M1Carbine — no splash
+  it('Supress default false scanner: no penalty regardless of structure count', () => {
+    // E1 has M1Carbine — no Supress entry, so C++ default IsSupressed=false.
     const scanner = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
     const scoreDefault = threatScore(scanner, target, 3);
     const scoreWithStructures = threatScore(scanner, target, 3, null, 3);
 
-    // Non-splash weapons are unaffected by nearby structure count
+    // Unsuppressed weapons are unaffected by nearby structure count.
     expect(scoreDefault).toBe(scoreWithStructures);
   });
 
   it('count of 0 gives same score as omitted parameter', () => {
-    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 100, 100);
+    const scanner = makeEntity(UnitType.V_CA, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
 
     const scoreDefault = threatScore(scanner, target, 3);

@@ -725,12 +725,12 @@ describe('V2 Rocket weapon data', () => {
 });
 
 // ============================================================================
-// AI5: Per-target splash avoidance — nearby friendly structures reduce threat score
+// AI5: Per-target Supress avoidance — nearby friendly structures reduce threat score
 // ============================================================================
 describe('AI5: Area_Modify — C++ exponential halving per nearby building', () => {
-  it('splash-weapon scanner: threatScore halves per nearby friendly structure (C++ odds/=2)', () => {
-    // V2RL has SCUD weapon with splash: 2.0
-    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
+  it('Supress=yes scanner: threatScore halves per nearby friendly structure (C++ odds/=2)', () => {
+    // CA has 8Inch weapon with Supress=yes.
+    const scanner = makeEntity(UnitType.V_CA, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
     const scoreNone = threatScore(scanner, target, 1, null, 0);
@@ -751,8 +751,8 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     expect(scoreThree / scoreNone).toBeCloseTo(0.125, 1);
   });
 
-  it('splash-weapon scanner: penalty continues exponentially (no floor)', () => {
-    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
+  it('Supress=yes scanner: penalty continues exponentially (no floor)', () => {
+    const scanner = makeEntity(UnitType.V_CA, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
     const scoreNone = threatScore(scanner, target, 1, null, 0);
@@ -766,20 +766,20 @@ describe('AI5: Area_Modify — C++ exponential halving per nearby building', () 
     expect(scoreTen / scoreNone).toBeCloseTo(Math.pow(0.5, 10), 1);
   });
 
-  it('non-splash scanner: nearFriendlyStructureCount has no effect', () => {
-    // 2TNK has 90mm weapon with no splash
+  it('unsuppressed scanner: nearFriendlyStructureCount has no effect', () => {
+    // 2TNK has 90mm weapon with no Supress entry.
     const scanner = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
     const scoreNone = threatScore(scanner, target, 1, null, 0);
     const scoreThree = threatScore(scanner, target, 1, null, 3);
 
-    // No splash weapon means no penalty regardless of structure count
+    // Unsuppressed weapon means no penalty regardless of structure count.
     expect(scoreThree).toBe(scoreNone);
   });
 
-  it('count of 0 applies no penalty even for splash weapons', () => {
-    const scanner = makeEntity(UnitType.V_V2RL, House.Spain, 200, 200);
+  it('count of 0 applies no penalty even for Supress=yes weapons', () => {
+    const scanner = makeEntity(UnitType.V_CA, House.Spain, 200, 200);
     const target = makeEntity(UnitType.V_1TNK, House.USSR, 220, 200);
 
     const scoreUndefined = threatScore(scanner, target, 1, null, undefined);

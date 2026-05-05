@@ -61,6 +61,14 @@ function parseVerses(raw: string | undefined): [number, number, number, number, 
   return undefined;
 }
 
+function parseIniBool(raw: string | undefined): boolean | undefined {
+  if (raw === undefined) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'yes' || normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'no' || normalized === 'false' || normalized === '0') return false;
+  return undefined;
+}
+
 export function buildScenarioRuleOverrides(
   rawSections: Map<string, Map<string, string>>,
 ): ScenarioRuleOverrides {
@@ -125,6 +133,10 @@ export function buildScenarioRuleOverrides(
     if (section.has('Range')) base.range = Number.parseFloat(section.get('Range')!);
     if (section.has('Warhead')) base.warhead = section.get('Warhead')! as WarheadType;
     if (section.has('Burst')) base.burst = Number.parseInt(section.get('Burst')!, 10);
+    if (section.has('Supress')) {
+      const isSupressed = parseIniBool(section.get('Supress'));
+      if (isSupressed !== undefined) base.isSupressed = isSupressed;
+    }
     scenarioWeaponStats[weaponName] = base;
   }
 

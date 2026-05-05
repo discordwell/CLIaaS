@@ -250,6 +250,8 @@ export class Team {
    * Add entity to this team (C++ TeamClass::Add).
    * - If entity is in another team, removes from it first (team.cpp:904-906)
    * - First member gets IsInitiated = true (team.cpp:912)
+   * - New members are inserted at the head of the member chain
+   *   (team.cpp:913-914: obj->Member = Member; Member = obj)
    * - Sets entity.teamRef back-pointer
    */
   add(entity: Entity): boolean {
@@ -262,7 +264,7 @@ export class Team {
     }
 
     const isFirstMember = this._members.length === 0;
-    this._members.push(entity);
+    this._members.unshift(entity);
     entity.teamRef = this;
     entity.teamInitiated = isFirstMember;
 
@@ -274,7 +276,10 @@ export class Team {
     entity.teamMissions = [];
     entity.teamMissionIndex = 0;
 
-    // C++ team.cpp:912 — first member is initiated
+    // C++ team.cpp:912-914 — first member is initiated, but the linked
+    // Member chain is newest-first. Several team coordinators depend on
+    // this order because Coordinate_Conscript can initiate or move later
+    // recruits before older members are processed.
     // (In C++ this means "has reached team center and is an active participant")
 
     // Mark team composition as altered for re-evaluation
@@ -546,7 +551,7 @@ export class Team {
       this.currentMission = -1;
 
       if (this.total > 0) {
-        this.calcCenter();
+        this.calcCenter(ctx);
         // C++ team.cpp:590-616 — retreat to nearest friendly unarmed building
         // Prefer STRUCT_REPAIR (FIX) — distance halved for repair facility.
         // Scans Buildings[] for b.House == House && b.PrimaryWeapon == NULL.
@@ -629,65 +634,9 @@ export class Team {
       this.isNextMission = true;
     }
 
-    // W4 deleted (Step 4): the nonInterruptAnimTicks=3 proxy on the last
-    // vessel member was a TS-only emulation of C++ VesselClass::AI's
-    // `Is_Door_Closed()` double-Commence gate (vessel.cpp:592, 659). C++
-    // vessels fire two Commence calls per AI tick, gated by door state; no
-    // artificial timer involved. The real port is in PCP_DOUBLE_CYCLE_ENABLED
-    // (Phase 5, index.ts runDriveClassAI). Proxy removed.
-    //
-    // C++ parity (SCG07EA non-reinforceable VESSEL activation): clear
-    // isReforming on activation for non-reinforceable all-vessel teams so
-    // the advance+execute block runs same-tick (matches WASM cadence for
-    // CREATE_TEAM VESSEL activation). See cpp-parity-scg07ea-tick-4.test.ts
-    // for the documented WASM sequence (2 Mission_Move fires at t4, 1 at t6).
-    //
-    // Phase 3b note: team-state-diff at tick 4 shows WASM rf=true — this
-    // is set POST-tick-4-Team.AI (probably via Lagging_Units in team.cpp).
-    // Within Team.AI on tick 4, rf is already false (cleared here) so
-    // Coord_Move runs. The extra TS Mission_Move_foot at t4 (Δ=-1) comes
-    // from the LAST sub firing at t4 where WASM delays to t6.
-    // nonInterruptAnimTicks heuristic in subsequent code handles that delay.
-    if (activatedThisTick && !this.isReinforcable && this.isReforming) {
-      const allVessels = this._members.length > 0 &&
-        this._members.every(m => m.alive && m.stats.isVessel);
-      if (allVessels) {
-        this.isReforming = false;
-        // Narrow Mark_Track approximation for 3+ vessel teams.
-        //
-        // C++ ref: VesselClass::Start_Driver (vessel.cpp:2104-2113) calls
-        // Mark_Track(headto, MARK_DOWN) which sets Map[headto].Flag.Occupy.
-        // Vehicle. Subsequent vessel Can_Enter_Cell (vessel.cpp:312) returns
-        // MOVE_MOVING_BLOCK for marked cells, causing the 3rd team-coordinated
-        // vessel's Start_Driver to fail → Mission_Move Enter_Idle_Mode →
-        // no Random_Pick(0,2) jitter (foot.cpp:524).
-        //
-        // A direct port of Mark_Track at the dispatch site over-suppressed
-        // (commit ee9ba67f reverted): C++ uses per-path computed `headto`
-        // coords which differ across vessels even when the team waypoint is
-        // shared, while TS's `moveTarget` cell is shared across team members.
-        //
-        // Until per-vessel `headto` is properly modeled, this narrow
-        // niat-on-last proxy delays the LAST vessel's Mission_Move by ~2
-        // ticks — empirically matches WASM's SCG07EA subz cadence (2 fires
-        // at tick 4, 3rd delayed to tick 6). Niat decrements 3→2→1→0;
-        // the pre-Commence gate at index.ts:~4005 (`niat <= 0`) unblocks
-        // when niat reaches 0 (after 3 ticks).
-        //
-        // Gate is narrow: only 3+ vessel non-reinforceable teams activating
-        // this tick. Doesn't affect cross-team or single-vessel scenarios.
-        if (this._members.length >= 3) {
-          const last = this._members[this._members.length - 1];
-          if (last.alive && last.nonInterruptAnimTicks <= 0) {
-            last.nonInterruptAnimTicks = 3;
-          }
-        }
-      }
-    }
-
     // ── Recalc center (C++ team.cpp:658-660) ──
     if (this.isReforming || this.isMoving || this.zone === null) {
-      this.calcCenter();
+      this.calcCenter(ctx);
     }
 
     // ── Recruit when under strength (C++ team.cpp:666-673) ──
@@ -845,29 +794,29 @@ export class Team {
       // were spawned with. The team should leave them alone to retreat off-map.
       if (unit.mission === Mission.RETREAT) continue;
 
+      // C++ team.cpp:1757 then 1759 — Coordinate_Regroup first gives
+      // non-initiated recruits a chance to move toward the team zone, then
+      // only runs regroup orders for _Is_It_Playing members. This prevents
+      // later recruits from immediately executing the main team move on the
+      // activation tick.
+      this.coordinateConscript(unit);
+      if (!this.isItPlaying(unit)) continue;
+
       // C++ rules.cpp:260: StrayDistance = 0x0200 = 512 leptons
       // C++ team.cpp:2054-2056: aircraft get 3x stray distance
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
       if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > stray) {
-        // Queue for infantry to respect gesture gate; direct set for vehicles/aircraft.
-        if (unit.stats.isInfantry) {
-          // Phase 2: route through assignMission (C++ mission.cpp:379-390)
-          // — no-op when already in MOVE, queues otherwise.
-          assignMission(unit, Mission.MOVE);
-          unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
-        } else {
+        // C++ team.cpp:1761-1776 only marks regroup as incomplete when NavCom
+        // is illegal and this call assigns a fresh destination. If a far member
+        // already has a NavCom, retval remains true; the next Team::AI can clear
+        // IsReforming even while that member continues moving.
+        if (!unit.moveTarget) {
           // C++ team.cpp:1765 Coordinate_Regroup → Assign_Mission(MISSION_MOVE).
-          // Per mission.cpp:388: Assign_Mission QUEUES the mission only when
-          // Mission != order. Commence later pops.
-          //
-          // Step 6 strip: removed the W3-mirror Session 9 port that pre-
-          // populated path + eagerly set isDriving=true on facing match. That
-          // was a proxy; C++ Coordinate_Regroup doesn't call Basic_Path or
-          // Start_Driver. DriveClass::AI runs those per unit (drive.cpp:906+).
+          // Per mission.cpp:388: Assign_Mission queues when Mission != order.
           assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: pixelToLepton(this.zone.x), ly: pixelToLepton(this.zone.y) };
+          regrouped = false;
         }
-        regrouped = false;
       } else {
         // Close enough — guard (C++ team.cpp:1783 Assign_Mission(MISSION_GUARD))
         // Session 23: route through queue instead of direct Mission set to
@@ -1429,9 +1378,13 @@ export class Team {
   /**
    * Calculate center position of team members (C++ Calc_Center, team.cpp:1390-1551).
    */
-  calcCenter(): void {
-    const alive = this._members.filter(m => m.alive);
-    if (alive.length === 0) {
+  calcCenter(ctx?: TeamAIContext): void {
+    // C++ team.cpp:1495-1517 — Calc_Center only counts _Is_It_Playing
+    // members (breathing + initiated, or aircraft). New recruits that have
+    // not reached the team center do not pull the regroup zone toward
+    // themselves.
+    const playing = this._members.filter(m => this.isItPlaying(m));
+    if (playing.length === 0) {
       this.zone = null;
       return;
     }
@@ -1439,12 +1392,45 @@ export class Team {
     // C++ team.cpp:1390 Calc_Center uses lepton coordinates.
     // Compute average in lepton space, then convert to pixel WorldPos.
     let lx = 0, ly = 0;
-    for (const m of alive) {
+    let closest: Entity | null = null;
+    let closestDist = Infinity;
+    for (const m of playing) {
       lx += m.leptonX;
       ly += m.leptonY;
+      const d = this.target
+        ? leptonDist(m.leptonX, m.leptonY, pixelToLepton(this.target.x), pixelToLepton(this.target.y))
+        : 0;
+      if (closest === null || d < closestDist) {
+        closest = m;
+        closestDist = d;
+      }
     }
-    lx = Math.trunc(lx / alive.length);
-    ly = Math.trunc(ly / alive.length);
+    lx = Math.trunc(lx / playing.length);
+    ly = Math.trunc(ly / playing.length);
+
+    // C++ records ClosestMember while scanning. When Target is TARGET_NONE
+    // during reforming activation, the comparison never has a meaningful team
+    // target; the linked-list head remains the effective regroup anchor. That
+    // is what WASM exposes for SCG07EA subz at tick 4: Zone and ClosestMember
+    // both equal the head member's cell, while the other two subs move toward it.
+    if (!this.target && this.isReforming && closest) {
+      lx = (closest.cell.cx << 8) + 128;
+      ly = (closest.cell.cy << 8) + 128;
+    }
+
+    // C++ team.cpp:1530-1540 — if the averaged center is not enterable
+    // by the closest member, use that closest member's current cell as the
+    // regroup point instead. This matters for naval teams whose average cell
+    // can land on shore/blocked terrain even though every member is afloat.
+    if (closest && ctx?.canEnterCell) {
+      const centerCx = Math.floor(leptonToPixel(lx) / CELL_SIZE);
+      const centerCy = Math.floor(leptonToPixel(ly) / CELL_SIZE);
+      if (!ctx.canEnterCell(closest, centerCx, centerCy)) {
+        lx = (closest.cell.cx << 8) + 128;
+        ly = (closest.cell.cy << 8) + 128;
+      }
+    }
+
     this.zoneLeptonX = lx;
     this.zoneLeptonY = ly;
     this.zone = { x: Math.trunc(lx * 24 / 256), y: Math.trunc(ly * 24 / 256) };

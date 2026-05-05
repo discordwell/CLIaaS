@@ -17,33 +17,25 @@
  * Before this fix, TS fired all 3 Mission_Move at tick 5 (1 tick late for
  * sub1/sub2, 1 tick early for sub3), producing Δcalls=+2 on tick 4.
  *
- * Mechanism — two pieces:
+ * Mechanism — three C++ pieces:
  *
- * 1. Composition-check transition at team.ts:503 sets isReforming=true when
- *    old_under(true) != isUnderStrength(false) on the activation tick. This
- *    blocks the advance+execute block (TMISSION_MOVE → Coordinate_Move) that
- *    queues MOVE on members. TS previously fell through to coordinateRegroup
- *    which kept all 3 SS in GUARD (within StrayDistance of zone center).
- *    WASM's observed cadence (2 fires at tick 4) implies advance+execute DOES
- *    run. For non-reinforceable all-vessel teams, clear isReforming after
- *    activation so advance+execute runs same-tick.
+ * 1. C++ TeamClass::Add inserts new members at the HEAD of the Member linked
+ *    list. The newest SS is processed first during regroup.
  *
- * 2. WASM fires Mission_Move for only 2 of 3 SS at tick 4, with the 3rd
- *    delayed to tick 6. In C++ this is a DriveClass::Start_Driver +
- *    Mark_Track cell-reservation conflict (vessel.cpp:2104-2113) where the
- *    last sub's path is blocked by prior subs' reservations, gating its
- *    Commence() for ~2 ticks. Model this in TS by setting the LAST member's
- *    nonInterruptAnimTicks=3 on activation — the pre-Commence gate at
- *    index.ts:4005 checks `nonInterruptAnimTicks <= 0`, so niat=3 blocks for
- *    2 ticks (post-decrement: 3→2→1→0, gate fires when niat==0 on the 3rd
- *    tick after activation).
+ * 2. C++ activation leaves IsReforming=true and runs Coordinate_Regroup, not
+ *    the main TMISSION_MOVE. Regroup anchors to the newest/closest member and
+ *    queues MOVE only for the two far subs; the close sub stays GUARD.
  *
- * Gated on: activation-this-tick + !isReinforcable + allVessels + members > 2.
+ * 3. C++ Coordinate_Regroup returns false only while assigning fresh NavCom.
+ *    On the following tick, the two far subs already have NavCom, so reforming
+ *    clears; the team then advances and queues the third sub's MOVE, producing
+ *    the tick-6 Mission_Move jitter.
  *
  * C++ source refs:
  *   - team.cpp:495-572     TeamClass::AI composition check (IsReforming xsition)
  *   - team.cpp:627-652     TeamClass::AI activation (Percent_Chance Tag 1)
- *   - team.cpp:1874-2008   Coordinate_Move (Assign_Mission(MOVE) queues)
+ *   - team.cpp:891-914     TeamClass::Add (newest-first Member chain)
+ *   - team.cpp:1744-1792   Coordinate_Regroup
  *   - foot.cpp:520-539     FootClass::Mission_Move (Random_Pick(0,2) tag 60010)
  *   - mission.cpp:343-358  MissionClass::Commence (pops MissionQueue, Timer=0)
  *   - vessel.cpp:2104-2113 VesselClass::Start_Driver (Mark_Track cell reserve)
@@ -73,9 +65,8 @@ beforeEach(() => {
 describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Mission_Move cadence', () => {
   /**
    * Minimal reproduction: 3 SS members, non-reinforceable, TMISSION_MOVE list.
-   * Members placed within StrayDistance of zone center — so Coordinate_Regroup
-   * would keep them in GUARD. With the fix, advance+execute runs same-tick,
-   * queuing MOVE on all 3, but the LAST member's Commence is delayed 2 ticks.
+   * TeamClass::Add inserts at the linked-list head, so after adding
+   * [sub1, sub2, sub3], the C++/TS member order is [sub3, sub2, sub1].
    */
   function setupSubzLike(): { team: Team; subs: Entity[] } {
     const sub1 = new Entity(UnitType.V_SS, House.BadGuy, 101 * 24 + 12, 50 * 24 + 12);
@@ -94,7 +85,7 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     });
     registerTeam(team);
     // Preload members (skip the recruit cadence — we test the activation path).
-    // Order matches TS recruit post-tick-3: [sub1, sub2, sub3].
+    // add() must mirror C++ newest-first linked-list insertion.
     for (const s of subs) team.add(s);
     // Simulate post-recruit state: isAltered=true, isUnderStrength=true (from
     // tick 3's composition check pre-full-strength), isHasBeen=false.
@@ -106,67 +97,68 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     return { team, subs };
   }
 
-  it('activates on first ai() call (composition + activation + advance run same-tick)', () => {
+  it('activates into reforming regroup, not main mission advance', () => {
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
 
     updateAllTeams(wps, { entities: subs });
 
-    // Post-activation state: isMoving=true, advance ran → currentMission=0
     const tAny = team as unknown as {
       isMoving: boolean;
       isReforming: boolean;
       isReinforcable: boolean;
       currentMission: number;
       missionTarget: unknown;
+      zoneLeptonX: number;
+      zoneLeptonY: number;
     };
     expect(tAny.isMoving, 'team activated').toBe(true);
     expect(tAny.isReinforcable, 'non-reinforceable').toBe(false);
-    expect(tAny.isReforming, 'isReforming cleared post-activation for all-vessel non-reinf').toBe(false);
-    expect(tAny.currentMission, 'advance ran — currentMission advanced to 0').toBe(0);
-    expect(tAny.missionTarget, 'missionTarget set from wp14').toBeTruthy();
+    expect(tAny.isReforming, 'C++ leaves IsReforming true after tick-4 regroup assigned NavCom').toBe(true);
+    expect(tAny.currentMission, 'main mission has not advanced while reforming').toBe(-1);
+    expect(tAny.missionTarget, 'mission target not set until reforming clears').toBeNull();
+    expect(tAny.zoneLeptonX).toBe(99 * 256 + 128);
+    expect(tAny.zoneLeptonY).toBe(48 * 256 + 128);
   });
 
-  it('queues MOVE on all 3 subs (Coordinate_Move ran)', () => {
+  it('queues MOVE only on the two far subs during Coordinate_Regroup', () => {
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
     updateAllTeams(wps, { entities: subs });
 
-    // All subs should have missionQueue=MOVE from Coordinate_Move
-    // (members within stray would only receive GUARD in regroup path).
-    for (const s of subs) {
-      expect(
-        s.mission === Mission.MOVE || s.missionQueue === Mission.MOVE,
-        `sub ${s.id} should have MOVE queued or active`,
-      ).toBe(true);
-    }
+    expect(team.members.map(m => m.id)).toEqual([subs[2].id, subs[1].id, subs[0].id]);
+    expect(subs[0].mission === Mission.MOVE || subs[0].missionQueue === Mission.MOVE).toBe(true);
+    expect(subs[1].mission === Mission.MOVE || subs[1].missionQueue === Mission.MOVE).toBe(true);
+    expect(subs[2].mission).toBe(Mission.GUARD);
+    expect(subs[2].missionQueue).toBeNull();
     void team;
   });
 
-  it('narrow Mark_Track approximation: LAST vessel of 3+ vessel team gets niat=3 on activation', () => {
-    // Empirical Mark_Track approximation (placeholder until per-vessel headto
-    // computation lands). C++ VesselClass::Start_Driver (vessel.cpp:2104-2113)
-    // calls Mark_Track on the destination — the 3rd team vessel hits a
-    // reserved cell, Start_Driver fails, Mission_Move enters Enter_Idle_Mode
-    // without firing Random_Pick(0,2).
-    //
-    // A direct dispatch-site port over-suppressed (ee9ba67f reverted) because
-    // C++ uses per-vessel `headto` coords while TS's `moveTarget` is shared
-    // across team members. Niat=3 on the last vessel produces the same
-    // 2-tick delay observed in WASM (subz cadence: 2 fires at tick 4; last
-    // vessel delays to tick 6 when niat reaches 0).
-    //
-    // Gate: 3+ vessel non-reinforceable team activating this tick.
-    //
-    // C++ refs: vessel.cpp:2104-2113 Mark_Track, drive.cpp:1079-1086
-    // Start_Driver rotation/path check, foot.cpp:524 Mission_Move Enter_Idle_Mode.
+  it('clears reforming on the next Team::AI once far subs already have NavCom', () => {
+    const { team, subs } = setupSubzLike();
+    const wps = new Map([[14, { cx: 68, cy: 46 }]]);
+    updateAllTeams(wps, { entities: subs });
+    expect((team as unknown as { isReforming: boolean }).isReforming).toBe(true);
+
+    updateAllTeams(wps, { entities: subs });
+
+    const tAny = team as unknown as { isReforming: boolean; currentMission: number };
+    expect(tAny.isReforming).toBe(false);
+    expect(tAny.currentMission).toBe(-1);
+  });
+
+  it('does not use the old team-level niat Mark_Track proxy', () => {
+    // C++ VesselClass::Start_Driver calls DriveClass::Mark_Track on the
+    // per-vessel HeadToCoord. The TS port now lives in GameMap/updateMove,
+    // so TeamClass activation must not delay the last vessel with a
+    // nonInterruptAnimTicks shim.
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
     updateAllTeams(wps, { entities: subs });
 
-    expect(subs[0].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
-    expect(subs[1].nonInterruptAnimTicks, 'first 2 members no niat').toBe(0);
-    expect(subs[2].nonInterruptAnimTicks, 'last member gets niat=3 (Mark_Track approx)').toBe(3);
+    expect(subs[0].nonInterruptAnimTicks).toBe(0);
+    expect(subs[1].nonInterruptAnimTicks).toBe(0);
+    expect(subs[2].nonInterruptAnimTicks).toBe(0);
     void team;
   });
 

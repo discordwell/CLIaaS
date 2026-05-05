@@ -7,7 +7,7 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { House, Mission, CELL_SIZE, worldToCell, worldDist, pixelToLepton, leptonToPixel, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType } from './types';
+import { House, Mission, CELL_SIZE, worldToCell, worldDist, pixelToLepton, leptonToPixel, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType, WEAPON_STATS } from './types';
 import { findPath, nearbyLocation } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
@@ -24,9 +24,15 @@ export interface AgentUnit {
   h: string;      // house
   cx: number;      // cell x
   cy: number;      // cell y
+  lx?: number;     // lepton x (debug/parity)
+  ly?: number;     // lepton y (debug/parity)
   hp: number;
   mhp: number;     // max hp
   m: string;       // mission
+  mt?: number;     // mission timer (debug/parity)
+  mq?: string | null; // mission queue (debug/parity)
+  drv?: boolean;   // IsDriving (debug/parity)
+  init?: boolean;  // IsInitiated/team activation state (debug/parity)
   tid?: number;    // target entity ID
   mtx?: number;    // move target cell x
   mty?: number;    // move target cell y
@@ -43,6 +49,7 @@ export interface AgentUnit {
   rng2?: number;   // secondary weapon range
   dmg?: number;    // primary weapon base damage
   wh?: string;     // primary weapon warhead type
+  sup?: boolean;   // C++ WeaponTypeClass::IsSupressed ("Supress" INI key)
 }
 
 export interface AgentStructure {
@@ -55,6 +62,11 @@ export interface AgentStructure {
   mhp: number;
   ally: boolean;
   rep?: boolean;  // repairing
+}
+
+export interface AgentWeapon {
+  name: string;
+  sup: boolean;
 }
 
 export interface AgentQueueItem {
@@ -112,12 +124,14 @@ export interface AgentState {
   missionTimerExpired: boolean;
   allowWin: boolean;
   globals: number[];
+  weapons: AgentWeapon[];
   unitsLeftMap: number;
   civiliansEvacuated: number;
   triggers: { name: string; fired: boolean; house: number; e1: number; e1d: number; a1: number; a1d: number }[];
   rngState: number;
   rngCalls: number;
   rngDebug: unknown[];
+  rngSeedLog?: Array<[number, number]>;
 }
 
 export type AgentCommand =
@@ -166,8 +180,8 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
     m: e.mission,
     ally: isAlly,
   };
-  (u as any).lx = e.leptonX;
-  (u as any).ly = e.leptonY;
+  u.lx = e.leptonX;
+  u.ly = e.leptonY;
   if (e.target?.alive) u.tid = e.target.id;
   if (e.moveTarget) {
     u.mtx = Math.floor(e.moveTarget.lx / 256);
@@ -184,6 +198,7 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
     u.rng = e.weapon.range;
     u.dmg = e.weapon.damage;
     u.wh = e.weapon.warhead;
+    if (e.weapon.isSupressed) u.sup = true;
   }
   if (e.weapon2) {
     u.wpn2 = e.weapon2.name;
@@ -196,7 +211,10 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   if (e.attackCooldown > 0) {
     u.acd = e.attackCooldown;
   }
-  (u as any).mt = e.missionTimer;
+  u.mt = e.missionTimer;
+  u.mq = e.missionQueue;
+  u.drv = e.isDriving;
+  u.init = e.teamInitiated;
   return u;
 }
 
@@ -294,6 +312,11 @@ export function serializeState(game: Game): AgentState {
   }
 
   const pwrMult = powerMultiplier(game.powerProduced, game.powerConsumed);
+  const weaponStats = ((game as unknown as { scenarioWeaponStats?: typeof WEAPON_STATS }).scenarioWeaponStats ?? WEAPON_STATS);
+  const weapons: AgentWeapon[] = Object.entries(weaponStats).map(([name, stats]) => ({
+    name,
+    sup: !!stats.isSupressed,
+  }));
 
   return {
     tick: game.tick,
@@ -324,6 +347,7 @@ export function serializeState(game: Game): AgentState {
     missionTimerExpired: ((game as unknown as Record<string, unknown>).missionTimerExpired as boolean) ?? false,
     allowWin: ((game as unknown as Record<string, unknown>).allowWin as number) <= 0,
     globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
+    weapons,
     unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
     civiliansEvacuated: ((game as unknown as Record<string, unknown>).civiliansEvacuated as number) ?? 0,
     rngState: ScenarioRandom.seed, // RNG seed for parity comparison

@@ -1288,6 +1288,8 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       const e2 = makeEntity(UnitType.V_3TNK, House.USSR, 500, 500); // far away
       team.add(e1);
       team.add(e2);
+      e1.teamInitiated = true;
+      e2.teamInitiated = true;
 
       team.calcCenter();
       const result = team.coordinateRegroup();

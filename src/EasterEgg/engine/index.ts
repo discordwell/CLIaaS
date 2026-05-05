@@ -1856,6 +1856,7 @@ export class Game {
         this.map.setVehicleOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
       }
     }
+    this.map.applyVehicleTrackReservations();
     const restoredInfantryClaims = new Set<number>();
     for (const entity of this.entities) {
       if (entity.alive && !entity.inLimbo &&
@@ -6118,12 +6119,73 @@ export class Game {
       (occupant.isDriving || occupant.trackNumber > 0 || occupant.moveTarget !== null);
   }
 
+  /** C++ DriveClass::Mark_Track(MARK_UP): release this unit's reserved vehicle bits. */
+  private clearDriveTrackReservations(entity: Entity): void {
+    for (const cellIdx of entity.trackReservationCells) {
+      this.map.clearVehicleTrackReservation(cellIdx, entity.id);
+    }
+    entity.trackReservationCells = [];
+  }
+
+  private reserveDriveTrackCell(entity: Entity, cellIdx: number): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS) return;
+    if (!entity.trackReservationCells.includes(cellIdx)) {
+      entity.trackReservationCells.push(cellIdx);
+    }
+    this.map.setVehicleTrackReservation(cellIdx, entity.id);
+  }
+
+  /** C++ DriveClass::Mark_Track(MARK_DOWN): reserve head-to and unpassed midpoint. */
+  private markDriveTrack(entity: Entity, headToLX: number, headToLY: number): void {
+    if (headToLX <= 0 || headToLY <= 0) return;
+
+    const headCellIdx = ((headToLY >> 8) & 0x7F) * MAP_CELLS + ((headToLX >> 8) & 0x7F);
+
+    if (entity.trackNumber > 0) {
+      const raw = RAW_TRACKS[entity.trackNumber - 1];
+      const track = getTrackArray(entity.trackNumber);
+      if (raw && track && raw.cell > -1 && entity.trackIndex < raw.cell) {
+        const step = track[raw.cell];
+        if (step) {
+          const mid = smoothTurn(step.x, step.y, step.facing, entity.trackFlags);
+          const midLX = headToLX + mid.x;
+          const midLY = headToLY + mid.y;
+          const midCellIdx = ((midLY >> 8) & 0x7F) * MAP_CELLS + ((midLX >> 8) & 0x7F);
+          this.reserveDriveTrackCell(entity, midCellIdx);
+        }
+      }
+    }
+
+    this.reserveDriveTrackCell(entity, headCellIdx);
+  }
+
+  /** C++ UnitClass/VesselClass::Start_Driver wrapper around FootClass::Start_Driver + Mark_Track. */
+  private startDriveTrack(entity: Entity, headToLX: number, headToLY: number): boolean {
+    this.stopDriveTrack(entity);
+    if (headToLX <= 0 || headToLY <= 0) return false;
+    entity.headToLX = headToLX;
+    entity.headToLY = headToLY;
+    entity.isDriving = true;
+    this.markDriveTrack(entity, headToLX, headToLY);
+    return true;
+  }
+
+  /** C++ DriveClass::Stop_Driver: unmark reserved track bits, clear HeadToCoord/IsDriving. */
+  private stopDriveTrack(entity: Entity): void {
+    this.clearDriveTrackReservations(entity);
+    entity.headToLX = 0;
+    entity.headToLY = 0;
+    if (!entity.stats.isInfantry) entity.isDriving = false;
+  }
+
   private canEnterTrackJumpCell(entity: Entity, cx: number, cy: number): MoveResult {
     const move = this.map.canEnterCell(
       cx,
       cy,
       entity.isNavalUnit,
       id => this.isEntityMovingBlockerFor(entity, id),
+      false,
+      entity.id,
     );
     if (move !== MoveResult.OK) return move;
 
@@ -6582,10 +6644,10 @@ export class Game {
             ? this.canEnterTrackJumpCell(entity, chainCell.cx, chainCell.cy)
             : MoveResult.OK;
           if (entryMove !== MoveResult.OK) {
+            this.stopDriveTrack(entity);
             entity.trackNumber = -1;
             entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
-            entity.isDriving = false;
             if (entryMove === MoveResult.DESTROYABLE || entryMove === MoveResult.IMPASSABLE) {
               entity.moveTarget = null;
               entity.path = [];
@@ -6637,15 +6699,18 @@ export class Game {
             entity.trackCellSpan = useLongTrack ? 2 : 1;
             entity.trackControlIndex = nextFacing8 * 8 + followingFacing8; // C++ TrackNumber (TC index)
             entity.speedAccum = 0; // C++: fresh budget per While_Moving() call
-            // C++ FootClass::Start_Driver (foot.cpp:781-802) sets IsDriving=true for
-            // all FootClass when movement begins. TS previously only set it for infantry
-            // via moveToward; vehicles using track movement need it set here.
-            entity.isDriving = true;
             // Long tracks target the SECOND cell ahead; short tracks target the next cell
             const trackTarget = useLongTrack
               ? { x: followingCell!.cx * CELL_SIZE + CELL_SIZE / 2,
                   y: followingCell!.cy * CELL_SIZE + CELL_SIZE / 2 }
               : chainTarget;
+            // C++ UnitClass/VesselClass::Start_Driver reserves HeadToCoord via
+            // DriveClass::Mark_Track before While_Moving advances.
+            this.startDriveTrack(
+              entity,
+              Math.trunc(trackTarget.x / LP),
+              Math.trunc(trackTarget.y / LP),
+            );
             // Follow first step this tick
             if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
               entity.pathIndex += entity.trackCellSpan;
@@ -7290,10 +7355,10 @@ export class Game {
     // AI4: Designated enemy from AI house state (if any)
     const aiState = this.aiStates.get(scanner.house);
     const designatedEnemy = aiState?.designatedEnemy ?? null;
-    // AI5: Area_Modify — count friendly buildings within 1 cell of target (C++ Rule.SupressRadius=1)
-    // Only computed for scanners with splash weapons (proxy for C++ IsSupressed flag)
+    // AI5: Area_Modify — count friendly buildings near target when PrimaryWeapon->IsSupressed.
+    // C++ techno.cpp:1345 returns 1 unless the primary weapon has IsSupressed.
     let nearFriendlyCount = 0;
-    if (scanner.weapon?.splash && scanner.weapon.splash > 0) {
+    if (scanner.weapon?.isSupressed) {
       const tcx = target.pos.x / CELL_SIZE;
       const tcy = target.pos.y / CELL_SIZE;
       for (const s of this.structures) {
@@ -7608,9 +7673,9 @@ export class Game {
   private followTrackStep(entity: Entity, speedPixels: number, targetX: number, targetY: number): boolean {
     let track = getTrackArray(entity.trackNumber);
     if (!track) {
+      this.stopDriveTrack(entity);
       entity.trackNumber = -1; entity.trackControlIndex = -1;
       entity.trackCellSpan = 1;
-      if (!entity.stats.isInfantry) entity.isDriving = false;
       return true;
     }
     let flags = entity.trackFlags;
@@ -7677,13 +7742,10 @@ export class Game {
 
       if (entity.trackIndex >= track!.length) {
         entity.setPosition(targetX, targetY);
+        this.stopDriveTrack(entity);
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
-        // C++ Stop_Driver() always clears IsDriving at track completion.
-        // DriveClass::AI may Start_Of_Move again later in the same pass; TS
-        // mirrors that by setting isDriving only when the next track starts.
-        if (!entity.stats.isInfantry) entity.isDriving = false;
         entity.cellBoundaryCrossings++;
         return true;
       }
@@ -7693,10 +7755,10 @@ export class Game {
       // End marker: offset (0,0) and trackIndex > 0 (C++ drive.cpp:712)
       if (step.x === 0 && step.y === 0 && entity.trackIndex > 0) {
         entity.setPosition(targetX, targetY);
+        this.stopDriveTrack(entity);
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
         entity.speedAccum = 0; // C++ drive.cpp:792: actual=0 on track completion
-        if (!entity.stats.isInfantry) entity.isDriving = false;
         entity.cellBoundaryCrossings++;
         return true;
       }
@@ -7776,6 +7838,10 @@ export class Game {
                   rawTrackNum = newRawTrackNum;
                   adj = false; // C++ drive.cpp:755: adj = false (prevent re-jumping)
 
+                  // C++ drive.cpp:772 Stop_Driver releases old head-to
+                  // reservation after switching TrackNumber/TrackIndex.
+                  this.stopDriveTrack(entity);
+
                   // === Track-jump PCP_END (C++ drive.cpp:773) ===
                   // C++ sequence at the track-jump site:
                   //   Stop_Driver() → IsDriving=true → Per_Cell_Process(PCP_END)
@@ -7796,10 +7862,9 @@ export class Game {
                     const boundaryKey = `${entity.trackIndex}-${entity.pathIndex}`;
                     if (!entity._commenceFiredBoundaries.has(boundaryKey)) {
                       // C++ IsDriving=true bracket (drive.cpp:773-775)
-                      const savedIsDriving = entity.isDriving;
                       entity.isDriving = true;
                       const r = unitPerCellProcess(entity, PCPType.PCP_END);
-                      entity.isDriving = savedIsDriving;
+                      entity.isDriving = false;
                       if (r.commenceFired) {
                         entity._commenceFiredBoundaries.add(boundaryKey);
                         entity._commenceFiredThisTick = true;
@@ -7822,6 +7887,11 @@ export class Game {
                   if (newTargetCell) {
                     targetX = newTargetCell.cx * CELL_SIZE + CELL_SIZE / 2;
                     targetY = newTargetCell.cy * CELL_SIZE + CELL_SIZE / 2;
+                    this.startDriveTrack(
+                      entity,
+                      Math.trunc(targetX / LP),
+                      Math.trunc(targetY / LP),
+                    );
                   }
                 }
               }

@@ -860,6 +860,8 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       const e2 = makeEntity(UnitType.V_3TNK, House.USSR, 200, 400);
       team.add(e1);
       team.add(e2);
+      e1.teamInitiated = true;
+      e2.teamInitiated = true;
 
       team.calcCenter();
 

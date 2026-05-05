@@ -1621,10 +1621,10 @@ describe('out-of-zone bonus (C++ techno.cpp:1668-1670)', () => {
 
 
 // ============================================================
-// Section 25: Area_Modify — Splash Weapon Friendly Fire Suppression
+// Section 25: Area_Modify — IsSupressed Weapon Friendly Fire Suppression
 // C++ techno.cpp:1732-1735, 1342-1401
 // ============================================================
-describe('Area_Modify splash suppression (C++ techno.cpp:1342-1401)', () => {
+describe('Area_Modify IsSupressed suppression (C++ techno.cpp:1342-1401)', () => {
   /*
    * C++ techno.cpp:1342-1401 (Area_Modify):
    *   Checks if primary weapon has "IsSupressed" flag.
@@ -1635,15 +1635,15 @@ describe('Area_Modify splash suppression (C++ techno.cpp:1342-1401)', () => {
    *   fixed areamod = Area_Modify(Coord_Cell(object->Center_Coord()));
    *   if (areamod != 1) { value = areamod * value; }
    *
-   * TS entity.ts:881-888:
-   *   if (nearFriendlyStructureCount > 0 && scanner.weapon?.splash) {
+   * TS entity.ts:
+   *   if (nearFriendlyStructureCount > 0 && scanner.weapon?.isSupressed) {
    *     value = Math.trunc(value * Math.pow(0.5, nearFriendlyStructureCount));
    *   }
    */
 
   it('1 friendly structure near target halves score (pow(0.5,1))', () => {
-    // Use V2RL which has splash weapon
-    const scanner = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
+    // Use CA, whose 8Inch primary has rules.ini Supress=yes.
+    const scanner = makeEntity(UnitType.V_CA, House.USSR, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
@@ -1655,7 +1655,7 @@ describe('Area_Modify splash suppression (C++ techno.cpp:1342-1401)', () => {
   });
 
   it('2 friendly structures quarter the base value (pow(0.5,2)=0.25)', () => {
-    const scanner = makeEntity(UnitType.V_V2RL, House.USSR, 100, 100);
+    const scanner = makeEntity(UnitType.V_CA, House.USSR, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
 
@@ -1672,8 +1672,8 @@ describe('Area_Modify splash suppression (C++ techno.cpp:1342-1401)', () => {
     expect(twoFriendly).toBeGreaterThan(0);
   });
 
-  it('non-splash weapon ignores friendly structure count', () => {
-    // E1 (M1Carbine) has no splash
+  it('unsuppressed weapon ignores friendly structure count', () => {
+    // E1 (M1Carbine) has no Supress entry.
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
     target.kills = 0;
@@ -1681,7 +1681,7 @@ describe('Area_Modify splash suppression (C++ techno.cpp:1342-1401)', () => {
     const noFriendly = threatScore(scanner, target, 2, null, 0);
     const threeFriendly = threatScore(scanner, target, 2, null, 3);
 
-    // Non-splash weapon: score unaffected by friendly structures
+    // Unsuppressed weapon: score unaffected by friendly structures.
     expect(threeFriendly).toBe(noFriendly);
   });
 });

@@ -365,7 +365,6 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 	CELL cell = Coord_Cell(coord);
 	HousesType house = obj->Owner();
 	TechnoClass* tech = (TechnoClass*)obj;
-
 	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s,\"lx\":%d,\"ly\":%d",
 		AGENT_ID(rtti, idx),
 		obj->Class_Of().Name(),
@@ -378,8 +377,23 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		(int)Coord_X(coord), (int)Coord_Y(coord));
 
 	// Export target and navcom info for parity debugging
-	if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT || rtti == RTTI_AIRCRAFT) {
+	if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT || rtti == RTTI_AIRCRAFT || rtti == RTTI_VESSEL) {
 		FootClass* foot = (FootClass*)obj;
+		WeaponTypeClass const* primary = NULL;
+		if (rtti == RTTI_INFANTRY) {
+			primary = ((InfantryClass*)obj)->Class->PrimaryWeapon;
+		} else if (rtti == RTTI_UNIT) {
+			primary = ((UnitClass*)obj)->Class->PrimaryWeapon;
+		} else if (rtti == RTTI_AIRCRAFT) {
+			primary = ((AircraftClass*)obj)->Class->PrimaryWeapon;
+		} else if (rtti == RTTI_VESSEL) {
+			primary = ((VesselClass*)obj)->Class->PrimaryWeapon;
+		}
+		if (primary != NULL) {
+			buf_cat(",\"wpn\":\"%s\",\"sup\":%s",
+				primary->Name(),
+				primary->IsSupressed ? "true" : "false");
+		}
 		if (Target_Legal(foot->TarCom)) {
 			COORDINATE tc = As_Coord(foot->TarCom);
 			buf_cat(",\"tlx\":%d,\"tly\":%d", (int)Coord_X(tc), (int)Coord_Y(tc));
@@ -794,6 +808,21 @@ char* agent_get_state(void)
 		if (!first) buf_cat(",");
 		first = false;
 		buf_cat("%d", global);
+	}
+	buf_cat("],");
+
+	buf_cat("\"weapons\":[");
+	first = true;
+	for (int windex = 0; windex < WEAPON_COUNT; windex++) {
+		if (windex >= Weapons.Length()) break;
+		WeaponTypeClass* weapon = Weapons.Raw_Ptr(windex);
+		if (!weapon) continue;
+		if (!first) buf_cat(",");
+		first = false;
+		buf_cat("{\"id\":%d,\"name\":\"%s\",\"sup\":%s}",
+			weapon->ID,
+			weapon->Name(),
+			weapon->IsSupressed ? "true" : "false");
 	}
 	buf_cat("],");
 

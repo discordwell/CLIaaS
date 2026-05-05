@@ -617,10 +617,10 @@ describe('threat evaluation context for ARTY (techno.cpp)', () => {
     expect(weaponDanger).toBe(200);
   });
 
-  it('ARTY has high splash, triggering Area_Modify for targets near friendly structures', () => {
+  it('ARTY has splash but no Supress flag, so it does not trigger Area_Modify', () => {
     const arty = new Entity(UnitType.V_ARTY, House.Spain, 100, 100);
-    // splash > 0 enables the Area_Modify penalty
     expect(arty.weapon!.splash).toBeDefined();
     expect(arty.weapon!.splash!).toBeGreaterThan(0);
+    expect(arty.weapon!.isSupressed).toBeFalsy();
   });
 });

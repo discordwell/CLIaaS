@@ -816,6 +816,7 @@ export interface WeaponStats {
   range: number;  // range in cells
   warhead: WarheadType;
   splash?: number;    // AOE splash radius in cells (0 = point damage only)
+  isSupressed?: boolean; // C++ WeaponTypeClass::IsSupressed, INI key "Supress" (default false)
   inaccuracy?: number; // scatter radius in cells (0 = perfect aim)
   minRange?: number;   // minimum range in cells (artillery can't fire at close range)
   projectileSpeed?: number; // cells/tick travel speed (undefined = instant hit)
@@ -982,7 +983,7 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },  // Helicopter missile (HELI)
   ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 100, isInvisible: true },  // Invisible projectile — HIND/YAK rapid-fire
   // New parity weapons
-  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 6, isArcing: true, inaccuracy: 1.0, isHigh: true, isInaccurate: true },   // Cruiser main gun
+  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 6, isArcing: true, inaccuracy: 1.0, isSupressed: true, isHigh: true, isInaccurate: true },   // Cruiser main gun, rules.ini Supress=yes
   '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 25 },  // Cannon projectile — Gunboat weapon
   Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 100, isInvisible: true },  // Tanya — Invisible projectile
   Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 100, isInvisible: true },  // Invisible projectile — civilian weapon

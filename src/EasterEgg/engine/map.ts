@@ -145,6 +145,11 @@ export class GameMap {
    *  C++ cell.h Flag.Occupy.Vehicle | Flag.Occupy.Monolith | Flag.Occupy.Building */
   vehicleOccupancy = new Set<number>();
 
+  /** DriveClass::Mark_Track reservations. C++ stores these in the same
+   *  Flag.Occupy.Vehicle bit; TS keeps owner ids so Stop_Driver clears only
+   *  the cells reserved by that unit. */
+  vehicleTrackReservations = new Map<number, number>();
+
   /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
   visibility: Uint8Array;
 
@@ -468,13 +473,22 @@ export class GameMap {
         }
       }
     }
-    if (!this.vehicleOccupancy.has(cellIdx)) this.occupancy[cellIdx] = 0;
+    if (!this.vehicleOccupancy.has(cellIdx) && !this.vehicleTrackReservations.has(cellIdx)) {
+      this.occupancy[cellIdx] = 0;
+    }
   }
 
   /** Clear all sub-cell occupancy data (called at start of each tick rebuild) */
   clearSubCellOccupancy(): void {
     this.subCellOccupancy.clear();
     this.vehicleOccupancy.clear();
+  }
+
+  /** Overlay persistent DriveClass track reservations onto this tick's grid. */
+  applyVehicleTrackReservations(): void {
+    for (const [idx, entityId] of this.vehicleTrackReservations) {
+      if (this.occupancy[idx] === 0) this.occupancy[idx] = entityId;
+    }
   }
 
   /** Mark a vehicle/building as occupying a cell (blocks all sub-cells).
@@ -487,6 +501,30 @@ export class GameMap {
     }
   }
 
+  setVehicleTrackReservation(cellIdx: number, entityId: number): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS) return;
+    this.vehicleTrackReservations.set(cellIdx, entityId);
+    if (this.occupancy[cellIdx] === 0) this.occupancy[cellIdx] = entityId;
+  }
+
+  clearVehicleTrackReservation(cellIdx: number, entityId: number): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS) return;
+    if (this.vehicleTrackReservations.get(cellIdx) !== entityId) return;
+    this.vehicleTrackReservations.delete(cellIdx);
+    if (this.occupancy[cellIdx] === entityId && !this.vehicleOccupancy.has(cellIdx)) {
+      this.refreshSubCellOccupancy(cellIdx);
+      if (this.occupancy[cellIdx] === 0) {
+        const reservedBy = this.vehicleTrackReservations.get(cellIdx);
+        if (reservedBy) this.occupancy[cellIdx] = reservedBy;
+      }
+    }
+  }
+
+  getVehicleTrackReservation(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
+    return this.vehicleTrackReservations.get(cy * MAP_CELLS + cx) ?? 0;
+  }
+
   /** Occupy a sub-cell for an infantry unit. Returns the assigned sub-cell index (0-4),
    *  or -1 if all sub-cells are full or a vehicle is present.
    *  C++ cell.cpp Closest_Free_Spot: prefers CENTER (0), then corners in order. */
@@ -494,7 +532,7 @@ export class GameMap {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return -1;
     const idx = cy * MAP_CELLS + cx;
     // Vehicle/building blocks all sub-cells
-    if (this.vehicleOccupancy.has(idx)) return -1;
+    if (this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx)) return -1;
     let slots = this.subCellOccupancy.get(idx);
     if (!slots) {
       slots = [0, 0, 0, 0, 0];
@@ -525,7 +563,7 @@ export class GameMap {
    *  the destination occupy bit while the infantry is in transit. */
   occupyClaimedSubCell(cellIdx: number, entityId: number, subCell: number): boolean {
     if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return false;
-    if (this.vehicleOccupancy.has(cellIdx)) return false;
+    if (this.vehicleOccupancy.has(cellIdx) || this.vehicleTrackReservations.has(cellIdx)) return false;
 
     let slots = this.subCellOccupancy.get(cellIdx);
     if (!slots) {
@@ -570,7 +608,7 @@ export class GameMap {
   getSubCellCount(cx: number, cy: number): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 5;
     const idx = cy * MAP_CELLS + cx;
-    if (this.vehicleOccupancy.has(idx)) return 5;
+    if (this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx)) return 5;
     const slots = this.subCellOccupancy.get(idx);
     if (!slots) return 0;
     let count = 0;
@@ -584,7 +622,7 @@ export class GameMap {
   hasAvailableSubCell(cx: number, cy: number): boolean {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
     const idx = cy * MAP_CELLS + cx;
-    if (this.vehicleOccupancy.has(idx)) return false;
+    if (this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx)) return false;
     const slots = this.subCellOccupancy.get(idx);
     if (!slots) return true; // no occupants = all 5 free
     for (let i = 0; i < 5; i++) {
@@ -596,7 +634,8 @@ export class GameMap {
   /** Check if a cell has a vehicle occupying it (blocks all sub-cells) */
   hasVehicleOccupancy(cx: number, cy: number): boolean {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
-    return this.vehicleOccupancy.has(cy * MAP_CELLS + cx);
+    const idx = cy * MAP_CELLS + cx;
+    return this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx);
   }
 
   /** Check if cell is only occupied by infantry (no vehicles/buildings).
@@ -604,7 +643,7 @@ export class GameMap {
   isOnlyInfantryOccupied(cx: number, cy: number): boolean {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
     const idx = cy * MAP_CELLS + cx;
-    if (this.vehicleOccupancy.has(idx)) return false;
+    if (this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx)) return false;
     const slots = this.subCellOccupancy.get(idx);
     if (!slots) return false;
     for (let i = 0; i < 5; i++) {
@@ -1169,7 +1208,7 @@ export class GameMap {
   /** PF3: C++ Can_Enter_Cell — returns nuanced MoveResult for pathfinding.
    *  @param isMoving Optional callback: given occupant entity ID, returns true if that entity is currently moving
    *  @param isInfantry If true, cell is passable if sub-cells are available (C++ infantry sub-cell system) */
-  canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean, isInfantry = false): MoveResult {
+  canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean, isInfantry = false, ignoreEntityId = 0): MoveResult {
     // C++ parity: pathfinding extends 1 cell beyond map bounds.
     if (cx < this.boundsX - 1 || cx >= this.boundsX + this.boundsW + 1 ||
         cy < this.boundsY - 1 || cy >= this.boundsY + this.boundsH + 1) {
@@ -1188,17 +1227,22 @@ export class GameMap {
     if (isInfantry) {
       const idx = cy * MAP_CELLS + cx;
       // Vehicle/building blocks all sub-cells
-      if (this.vehicleOccupancy.has(idx)) return MoveResult.OCCUPIED;
+      if (this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx)) return MoveResult.OCCUPIED;
       // Check if any sub-cell is free
       if (this.hasAvailableSubCell(cx, cy)) return MoveResult.OK;
       return MoveResult.OCCUPIED; // all 5 sub-cells full
     }
 
+    const reservationOwner = this.getVehicleTrackReservation(cx, cy);
     const occupant = this.getOccupancy(cx, cy);
-    if (occupant > 0) {
+    if (occupant > 0 && occupant !== ignoreEntityId) {
+      if (reservationOwner === occupant) return MoveResult.OCCUPIED;
       // C++ unit.cpp:3176-3194: moving ally → MOVE_MOVING_BLOCK(2), stationary ally → MOVE_TEMP(4)
       if (isMoving && isMoving(occupant)) return MoveResult.OCCUPIED;   // MOVE_MOVING_BLOCK(2)
       return MoveResult.TEMP_BLOCKED;                                    // MOVE_TEMP(4)
+    }
+    if (reservationOwner > 0 && reservationOwner !== ignoreEntityId) {
+      return MoveResult.OCCUPIED; // C++ Flag.Occupy.Vehicle → MOVE_MOVING_BLOCK
     }
     return MoveResult.OK;
   }

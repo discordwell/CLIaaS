@@ -363,6 +363,9 @@ export class Entity {
   trackCellSpan = 1;   // cells covered by current track: 1=short, 2=long 2-cell track
   trackControlIndex = -1; // C++ TrackNumber: index into TrackControl[] table (0-66), for track jumping
   speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
+  // C++ DriveClass::Mark_Track reservation bits. Stores absolute cell indices
+  // currently marked by this unit so Stop_Driver can clear them.
+  trackReservationCells: number[] = [];
 
   // === PCP refactor debug/dedup fields (Session 1 — track-jump PCP) ===
   // Reset at top of updateEntity each tick. Instrumented via DEBUG_PCP_LOG env
@@ -1486,7 +1489,7 @@ export const RECOIL_OFFSETS: Array<{ dx: number; dy: number }> = [
  *  @param isTargetAttackingAlly Whether the target is currently attacking an allied unit (unused, C++ handles elsewhere)
  *  @param closingSpeed Rate of distance change (unused, C++ has no equivalent)
  *  @param designatedEnemy AI4: enemy house that gets massive bonus (or null)
- *  @param nearFriendlyStructureCount AI5: count of friendly structures within splash radius of target */
+ *  @param nearFriendlyStructureCount AI5: count of friendly structures near target for Area_Modify */
 export function threatScore(
   scanner: Entity, target: Entity, dist: number,
   designatedEnemy?: House | null,
@@ -1522,9 +1525,9 @@ export function threatScore(
   // AI5: Area_Modify — reduce threat when target is near friendly structures
   // C++ techno.cpp:1732-1735: applied to value BEFORE distance (integer multiply)
   // C++ techno.cpp:1342-1401: odds /= 2 per nearby building (exponential halving)
-  // Only applies when scanner has splash weapon (proxy for C++ IsSupressed flag)
+  // C++ techno.cpp:1345: only applies when the primary weapon has IsSupressed.
   if (nearFriendlyStructureCount !== undefined && nearFriendlyStructureCount > 0 &&
-      scanner.weapon?.splash && scanner.weapon.splash > 0) {
+      scanner.weapon?.isSupressed) {
     value = Math.trunc(value * Math.pow(0.5, nearFriendlyStructureCount));
   }
 

@@ -237,9 +237,9 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
     //   }
     //
     // TS: score *= Math.pow(0.5, nearFriendlyStructureCount)
-    // Only applies when scanner has splash weapon
-    const scanner = makeEntity(UnitType.V_ARTY, House.USSR, 100, 100);
-    // ARTY has 155mm with splash: 2.0 (C++ AOE weapon)
+    // Only applies when scanner's primary weapon has IsSupressed.
+    const scanner = makeEntity(UnitType.V_CA, House.USSR, 100, 100);
+    // CA has 8Inch with rules.ini Supress=yes.
     // Use 4TNK (points=60) for larger base value — small points cause integer
     // truncation artifacts in pow(0.5, n) since Math.trunc(value * 0.25) loses precision
     const target = makeEntity(UnitType.V_4TNK, House.Greece, 200, 200);

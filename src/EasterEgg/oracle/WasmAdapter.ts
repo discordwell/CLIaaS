@@ -17,9 +17,13 @@ import * as path from 'node:path';
 export interface RAGameState {
   tick: number;
   credits: number;
+  rngState?: number;
+  rngCalls?: number;
+  rngLog?: Array<[number, number, number]>;
   playerHouse?: string;
   alliedHouses?: string[];
   globals?: number[];
+  weapons?: RAWeapon[];
   missionTimer?: number;
   missionTimerActive?: boolean;
   civEvacuated?: boolean;
@@ -42,14 +46,39 @@ export interface RAEntity {
   house?: string;
   cx: number;  // cell X
   cy: number;  // cell Y
+  lx?: number; // lepton X
+  ly?: number; // lepton Y
   hp: number;
   mhp: number; // max HP
   m: number;   // mission enum
+  mt?: number; // mission timer
+  mq?: number; // mission queue enum (-1 = none)
+  drv?: boolean; // FootClass::IsDriving
+  init?: boolean; // FootClass::IsInitiated
+  nlx?: number; // NavCom lepton X
+  nly?: number; // NavCom lepton Y
+  hlx?: number; // Head_To_Coord lepton X
+  hly?: number; // Head_To_Coord lepton Y
+  spd?: number;
+  p0?: number;
+  p1?: number;
+  p2?: number;
+  p3?: number;
+  p4?: number;
+  p5?: number;
   ally: boolean;
   cargo?: number;
   cargoTop?: string;
   ammo?: number;     // current ammo (minelayer mines, etc.)
   maxAmmo?: number;  // max ammo capacity
+  wpn?: string;      // primary weapon INI name
+  sup?: boolean;     // C++ WeaponTypeClass::IsSupressed
+}
+
+export interface RAWeapon {
+  id: number;
+  name: string;
+  sup: boolean;
 }
 
 export interface RAStructure extends RAEntity {
@@ -392,9 +421,13 @@ export class WasmAdapter {
     return {
       tick: typeof state.tick === 'number' ? state.tick : 0,
       credits: typeof state.credits === 'number' ? state.credits : 0,
+      rngState: typeof state.rngState === 'number' ? state.rngState : undefined,
+      rngCalls: typeof state.rngCalls === 'number' ? state.rngCalls : undefined,
+      rngLog: Array.isArray(state.rngLog) ? state.rngLog as Array<[number, number, number]> : [],
       playerHouse: state.playerHouse,
       alliedHouses: Array.isArray(state.alliedHouses) ? state.alliedHouses : [],
       globals: Array.isArray(state.globals) ? state.globals : [],
+      weapons: Array.isArray(state.weapons) ? state.weapons : [],
       missionTimer: state.missionTimer,
       missionTimerActive: Boolean(state.missionTimerActive),
       civEvacuated: Boolean(state.civEvacuated),

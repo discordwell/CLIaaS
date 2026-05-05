@@ -1096,6 +1096,8 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
     const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 100 + 1.5 * CELL_SIZE, 100);
     team.add(u1);
     team.add(u2);
+    u1.teamInitiated = true;
+    u2.teamInitiated = true;
 
     // Manually set zone (normally calculated by calcCenter)
     team.zone = { x: 100, y: 100 };
@@ -1115,6 +1117,8 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
     const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 100 + 2.5 * CELL_SIZE, 100);
     team.add(u1);
     team.add(u2);
+    u1.teamInitiated = true;
+    u2.teamInitiated = true;
 
     team.zone = { x: 100, y: 100 };
 
@@ -1137,6 +1141,8 @@ describe('coordinateRegroup stray behavior — TS team.ts:484-505', () => {
     const u2 = makeEntity(UnitType.V_3TNK, House.USSR, 100 + 4 * CELL_SIZE, 100);
     team.add(u1);
     team.add(u2);
+    u1.teamInitiated = true;
+    u2.teamInitiated = true;
 
     team.zone = { x: 100, y: 100 };
 
