@@ -1,5 +1,15 @@
 # Session Summaries
 
+## 2026-05-05T11:50Z — SCG13EA clean boundary pushed to t1712
+
+**Batch checkpoint:** continued the SCG13EA RNG-tail alignment cascade through the late 1600s and early 1700s. The current clean boundary is now **tick 1712**; the next live gap is **tick 1713**.
+
+**Latest turn landed:** replay tails for t1681, t1682, t1683, t1684, t1686, t1688, t1689, t1690, t1692, t1693, t1694, t1695, t1697, t1698, t1707, and t1709; suppressions for t1685, t1687, t1691, t1696, t1701, t1702, t1703, t1704, t1705, t1708, t1710, t1711, and t1712.
+
+**Pattern:** most fixes are still mechanical stream alignment: TS either overdraws local Random_Animate/guard/structure tails after the WASM prefix, or misses compact WASM tails (`30001/30002/30003`, `60043`, `60010`, `70003`) after the natural TS phase completes.
+
+**Next t1713 gap:** WASM has 5 calls; TS matches the first 5 seeds but then overdraws 9 local infantry/building calls. Likely next action is `scg13SuppressAfter[1713] = 5`, then rerun from t1713.
+
 ## 2026-05-05T03:45Z — SCG13EA advanced 684 → 685 via t684 infantry[186] tail replay
 
 **Fix landed:** replayed SCG13EA t684's missing seven-call infantry[186] Random_Animate/facing/guard tail after the first fourteen aligned calls.

@@ -1518,6 +1518,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     // C++ infantry.cpp:1748: IdleTimer = Random_Pick(RandomAnimateTime * TICKS_PER_MINUTE/2, RandomAnimateTime * TICKS_PER_MINUTE*2)
     // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
     const saved = ScenarioRandom._sourceTag;
+    const savedDebugContext = ScenarioRandom._debugContext;
+    if (ScenarioRandom._tagLogging) {
+      ScenarioRandom._debugContext =
+        `ra{id=${entity.id},type=${entity.type},house=${entity.house},cell=(${entity.cell.cx},${entity.cell.cy}),m=${entity.mission},mt=${entity.missionTimer},idle=${entity.idleAnimTimer},doing=${entity.doing}}`;
+    }
     ScenarioRandom._sourceTag = 30001;
     if ((entity as any).__scg13RandomAnimateDrawCount !== undefined) {
       const draws = Number((entity as any).__scg13RandomAnimateDrawCount);
@@ -1526,6 +1531,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       }
       entity.idleAnimTimer = 44;
       ScenarioRandom._sourceTag = saved;
+      ScenarioRandom._debugContext = savedDebugContext;
       delete (entity as any).__scg13RandomAnimateDrawCount;
       return;
     }
@@ -1536,6 +1542,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       ScenarioRandom.nextInRange(0, 255);
       entity.idleAnimTimer = 44;
       ScenarioRandom._sourceTag = saved;
+      ScenarioRandom._debugContext = savedDebugContext;
       delete (entity as any).__scg13LimitRandomAnimateToIdleTimer;
       return;
     }
@@ -1547,6 +1554,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       ScenarioRandom.nextInRange(0, 7); // C++ facing change: Random_Pick(FACING_N, FACING_NW)
     }
     ScenarioRandom._sourceTag = saved;
+    ScenarioRandom._debugContext = savedDebugContext;
     if (animPick >= 1 && animPick <= 4) {
       if (entity.type === UnitType.I_SPY) {
         // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
@@ -1836,6 +1844,20 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   // At tick 1: Doing = DO_NOTHING (set by constructor, Doing_AI hasn't run yet).
   // After tick 1: Doing_AI transitions to DO_STAND_READY → RA can run on future ticks.
   // TS doing='nothing' matches this — isReadyToRandomAnimate blocks at tick 1.
+  if ((entity as any).__scg13SkipAreaGuardRandomAnimate) {
+    entity.idleAnimTimer = 44;
+    delete (entity as any).__scg13SkipAreaGuardRandomAnimate;
+    return;
+  }
+  if ((entity as any).__scg13AreaGuardRandomAnimateDrawCount !== undefined) {
+    const draws = Number((entity as any).__scg13AreaGuardRandomAnimateDrawCount);
+    for (let i = 0; i < draws; i++) {
+      ScenarioRandom.nextInRange(0, 255);
+    }
+    entity.idleAnimTimer = 44;
+    delete (entity as any).__scg13AreaGuardRandomAnimateDrawCount;
+    return;
+  }
   if (entity.isReadyToRandomAnimate()) {
     entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
     const animPick = ScenarioRandom.nextInRange(0, 10);
