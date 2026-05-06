@@ -1,16 +1,17 @@
 /**
  * @vitest-environment jsdom
  *
- * C++ Behavioral Parity: SCG07EA tick-2 Mission_Move_foot fan-out for
- * reinforcement vessels spawned by sibling teams onto the same unload cell.
+ * C++ Behavioral Parity: SCG07EA vessel Mission_Move path-claim behavior.
  *
  * SCG07EA triggers two reinforcement teams at tick 1:
  *   - `mcvlst`: 1× LST (carrying 2TNK:2, JEEP:1, MCV:1 as passengers)
  *   - `cover`:  3× PT
  *
  * Both teams have mission list starting with `TMISSION_MOVE, data=0` (Greek
- * reinforcement waypoint 0). All 4 vessels unlimbo at the same water-edge
- * cell — cell (9, 53) in the deployed scenario.
+ * reinforcement waypoint 0). C++ computes each action's reinforcement cell
+ * independently: the LST action claims west-edge cell (9,53), then the cover
+ * PT action calls Calculated_Cell again and Good_Reinforcement_Cell rejects
+ * the occupied outcell/incell, so the PTs spawn at (9,54).
  *
  * WASM behavior at tick 2: all 4 vessels have Mission=MOVE, Timer=0 (popped
  * from the MissionQueue during tick 1's post-dispatch Commence), and so all 4
@@ -21,8 +22,8 @@
  * The TS port's SCG04EA-originating `vehicleClaims` path-reservation emulation
  * (cpp-parity-scg04-mission-move-stagger.test.ts) RETROACTIVELY flips the
  * prior claimant's `isDriving` to false when a later unit queues the same
- * target cell. Applied to SCG07's same-cell vessel reinforcements, the chain
- * runs:
+ * target cell. Applied to a sibling-team vessel fixture where all units target
+ * the same move destination, the chain runs:
  *
  *   LST (mcvlst):  claim → prior=null → LST.isDriving=true
  *   PT1 (cover):   claim → prior=LST  → LST.isDriving=false, PT1.isDriving=true
@@ -124,8 +125,12 @@ beforeEach(() => {
 
 describe('C++ SCG07EA tick-2 vessel Mission_Move fan-out', () => {
   it('sibling-team vessel reinforcements targeting same cell: all 4 keep isDriving=true (no chain flip)', () => {
-    // Reproduce SCG07EA mcvlst + cover teams: 1 LST + 3 PTs unlimboing at the
-    // same water-edge cell, both teams mission list [TMISSION_MOVE, data=0].
+    // Regression fixture shaped like SCG07EA mcvlst + cover teams:
+    // 1 LST + 3 PTs, both teams mission list [TMISSION_MOVE, data=0].
+    // This intentionally gives the four vessels the same starting cell to
+    // isolate the old TS path-claim bug. Real C++ SCG07EA spawn placement is
+    // covered by cpp-parity-naval-reinforcement.test.ts and puts the cover PTs
+    // at (9,54) after the LST occupies (9,53).
     // In WASM, all 4 vessels end tick 1 with MissionQueue=MOVE and IsDriving
     // unset (Start_Driver hasn't executed yet or fails on same-cell crowd),
     // so tick 2's pre-Commence pops all 4 → 4 Mission_Move_foot fires (7 RNG

@@ -8998,7 +8998,7 @@ export class Game {
         const actionResult = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
           this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
-          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map,
+          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map, this.entities,
         );
         this.applyTriggerActionResult(actionResult, trigger);
       };
@@ -9220,7 +9220,7 @@ export class Game {
         const result = executeTriggerAction(
           action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
           this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
-          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map,
+          Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map, this.entities,
         );
         this.applyTriggerActionResult(result, trigger);
       };

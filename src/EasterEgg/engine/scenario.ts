@@ -1130,6 +1130,8 @@ export function calculateHouseEdgeSpawnCell(
    *  C++ display.cpp:2505-2527: Calculated_Cell with SPEED_FLOAT only returns WATER cells. */
   map?: GameMap,
   naval = false,
+  /** C++ Good_Reinforcement_Cell rejects occupied outcell or incell. */
+  isOccupied?: (cx: number, cy: number) => boolean,
 ): CellPos | null {
   if (!mapBounds) {
     return null;
@@ -1193,34 +1195,35 @@ export function calculateHouseEdgeSpawnCell(
     // The outcell is outside the map boundary — cells there may have different terrain
     // (e.g., CLEAR land behind a water edge). Both must be water-passable.
     const outWater = map.isWaterPassableRelaxed(candidate.cx, candidate.cy);
-    if (!outWater || !map.isWaterPassable(inCx, inCy)) {
-      // Scan along the edge for the nearest water cell (check both inside AND outside)
+    const occupied = isOccupied?.(candidate.cx, candidate.cy) || isOccupied?.(inCx, inCy);
+    if (!outWater || !map.isWaterPassable(inCx, inCy) || occupied) {
+      // Scan along the edge in C++ order, starting at the aligned waypoint
+      // coordinate and wrapping forward. Do not choose nearest-by-distance:
+      // display.cpp:2507-2520 uses `((y + index) % MapCellHeight)` /
+      // `((x + index) % MapCellWidth)`.
       const edgeCoord = isHorizontalEdge ? candidate.cy : candidate.cx;
       const scanStart = isHorizontalEdge ? x : y;
       const scanLen = isHorizontalEdge ? w : h;
       const alignCoord = isHorizontalEdge ? candidate.cx : candidate.cy;
 
-      let bestCell: CellPos | null = null;
-      let bestDist = Infinity;
+      const alignOffset = ((alignCoord - scanStart) % scanLen + scanLen) % scanLen;
       for (let i = 0; i < scanLen; i++) {
-        const sc = scanStart + i;
+        const sc = scanStart + ((alignOffset + i) % scanLen);
         // C++ Good_Reinforcement_Cell: check BOTH outside AND inside cells
         const checkCx = isHorizontalEdge ? sc : (edge === 'west' ? edgeCoord + 1 : edgeCoord - 1);
         const checkCy = isHorizontalEdge ? (edge === 'north' ? edgeCoord + 1 : edgeCoord - 1) : sc;
         const outCx = isHorizontalEdge ? sc : edgeCoord;
         const outCy = isHorizontalEdge ? edgeCoord : sc;
-        if (map.isWaterPassable(checkCx, checkCy) && map.isWaterPassableRelaxed(outCx, outCy)) {
-          const dist = Math.abs(sc - alignCoord);
-          if (dist < bestDist) {
-            bestDist = dist;
-            // Return the outside-edge spawn cell (aligned with this water cell)
-            const cx = isHorizontalEdge ? sc : edgeCoord;
-            const cy = isHorizontalEdge ? edgeCoord : sc;
-            bestCell = { cx, cy };
-          }
+        if (map.isWaterPassable(checkCx, checkCy) &&
+            map.isWaterPassableRelaxed(outCx, outCy) &&
+            !isOccupied?.(outCx, outCy) &&
+            !isOccupied?.(checkCx, checkCy)) {
+          // Return the outside-edge spawn cell (aligned with this water cell)
+          const cx = isHorizontalEdge ? sc : edgeCoord;
+          const cy = isHorizontalEdge ? edgeCoord : sc;
+          return { cx, cy };
         }
       }
-      if (bestCell) return bestCell;
       // No water found on this edge — fall back to candidate (C++ would also fail)
     }
   }
@@ -2649,6 +2652,7 @@ export function executeTriggerAction(
   mapBounds?: { x: number; y: number; w: number; h: number },
   playerHouseId?: number,
   map?: GameMap,
+  existingEntities?: Entity[],
 ): TriggerActionResult {
   const result: TriggerActionResult = { spawned: [] };
 
@@ -2721,6 +2725,8 @@ export function executeTriggerAction(
             () => ScenarioRandom.float(),
             isNavalTeam ? map : undefined,
             isNavalTeam,
+            (cx, cy) => !!existingEntities?.some(e =>
+              e.alive && !e.inLimbo && e.cell.cx === cx && e.cell.cy === cy),
           )
         : null;
 

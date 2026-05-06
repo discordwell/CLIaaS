@@ -182,6 +182,36 @@ describe('Naval reinforcement — C++ parity', () => {
       expect(edgeCell!.cy).toBe(MAP_BOUNDS.y - 1);
     });
 
+    it('skips occupied naval edge cells using C++ forward scan order', () => {
+      // SCG07EA shape: action1 spawns the mcvlst LST at west-edge (9,53).
+      // action2 then spawns the cover PT team. C++ Good_Reinforcement_Cell
+      // rejects occupied outcell/incell and display.cpp scans forward from
+      // the waypoint row: 53, 54, 55, ... wrapping. It does NOT choose the
+      // nearest absolute row, so row 52 must not win over row 54.
+      const bounds = { x: 10, y: 20, w: 80, h: 80 };
+      const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
+      const originWp = { cx: 10, cy: 53 }; // SCG07EA waypoint 0 is cell (10,53)
+      const map = new GameMap();
+      map.setBounds(bounds.x, bounds.y, bounds.w, bounds.h);
+      for (const cy of [52, 53, 54]) {
+        map.setTerrain(9, cy, Terrain.WATER);  // outside west edge
+        map.setTerrain(10, cy, Terrain.WATER); // inside west edge
+      }
+
+      const edgeCell = calculateHouseEdgeSpawnCell(
+        House.Greece,
+        houseEdges,
+        bounds,
+        originWp,
+        Math.random,
+        map,
+        true,
+        (cx, cy) => cx === 9 && cy === 53,
+      );
+
+      expect(edgeCell).toEqual({ cx: 9, cy: 54 });
+    });
+
     it('without naval flag, returns edge cell regardless of terrain', () => {
       const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
       const originWp = { cx: 30, cy: 11 }; // near north edge so inference picks north
