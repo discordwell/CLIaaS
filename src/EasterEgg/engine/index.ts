@@ -5082,8 +5082,13 @@ export class Game {
 
         const newPath = findPath(
           this.map, entity.cell, destCell,
-          /*ignoreOccupancy=*/ true,
+          // C++ Basic_Path calls Can_Enter_Cell; stationary friendly blockers
+          // are MOVE_TEMP (not pathable), moving blockers are MOVE_MOVING_BLOCK.
+          // SCG11EA t16 4TNK must route E-first around a stationary ally.
+          /*ignoreOccupancy=*/ false,
           entity.isNavalUnit, entity.stats.speedClass,
+          id => this.isEntityMovingBlockerFor(entity, id),
+          undefined, undefined, entity.stats.isInfantry,
         );
 
         if (newPath.length === 0) {
@@ -5512,7 +5517,15 @@ export class Game {
             // reads from Path each tick). Without this the vehicle is stuck driving
             // to a NavCom it can't reach via track movement.
             if (entity.path.length === 0) {
-              entity.path = findPath(this.map, entity.cell, pathGoal, true, entity.isNavalUnit, entity.stats.speedClass);
+              entity.path = findPath(
+                this.map, entity.cell, pathGoal,
+                // Team MOVE seeds DriveClass::AI's Basic_Path; don't ignore
+                // stationary blockers or the later Start_Of_Move cadence shifts.
+                /*ignoreOccupancy=*/ false,
+                entity.isNavalUnit, entity.stats.speedClass,
+                id => this.isEntityMovingBlockerFor(entity, id),
+                undefined, undefined, entity.stats.isInfantry,
+              );
               entity.pathIndex = 0;
             }
             break;
@@ -5529,7 +5542,15 @@ export class Game {
           entity.target = null;
           entity.missionTimer = 0;
 
-          entity.path = findPath(this.map, entity.cell, pathGoal, true, entity.isNavalUnit, entity.stats.speedClass);
+          entity.path = findPath(
+            this.map, entity.cell, pathGoal,
+            // Team MOVE seeds DriveClass::AI's Basic_Path; don't ignore
+            // stationary blockers or the later Start_Of_Move cadence shifts.
+            /*ignoreOccupancy=*/ false,
+            entity.isNavalUnit, entity.stats.speedClass,
+            id => this.isEntityMovingBlockerFor(entity, id),
+            undefined, undefined, entity.stats.isInfantry,
+          );
           entity.pathIndex = 0;
         }
         break;

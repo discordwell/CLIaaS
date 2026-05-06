@@ -131,6 +131,33 @@ describe('C++ parity: Find_Path algorithm (findpath.cpp:435-752)', () => {
     expect(p3[0]).toEqual({ cx: 29, cy: 29 }); // NW diagonal
   });
 
+  it('Basic_Path treats stationary friendly blockers as MOVE_TEMP, not pathable', () => {
+    // SCG11EA t16: USSR 4TNK at (60,58) targets (62,59). The raw facing
+    // preference is SE into (61,59), but that cell contains a stationary
+    // friendly vehicle. C++ Can_Enter_Cell returns MOVE_TEMP for stationary
+    // friendlies, so Basic_Path chooses the E-first alternate instead.
+    //
+    // Moving blockers are passable as MOVE_MOVING_BLOCK; stationary blockers
+    // are not. This pins the drive-class Basic_Path calls to use
+    // ignoreOccupancy=false with the C++ moving-blocker callback.
+    const map = makeMap(55, 55, 15, 15);
+    map.setOccupancy(61, 59, 42);
+
+    const path = findPath(
+      map,
+      { cx: 60, cy: 58 },
+      { cx: 62, cy: 59 },
+      /*ignoreOccupancy=*/ false,
+      false,
+      SpeedClass.TRACK,
+      () => false,
+    );
+
+    expect(path.length).toBeGreaterThan(0);
+    expect(path[0]).toEqual({ cx: 61, cy: 58 });
+    expect(path).not.toContainEqual({ cx: 61, cy: 59 });
+  });
+
   // ==========================================================================
   // (B) FacingType enum / adjacency offsets
   // ==========================================================================

@@ -32,6 +32,20 @@ import { findPath } from './pathfinding';
 // as documentation but is no longer read.
 import { assignMission } from './missionLifecycle';
 
+function facingFromCellStep(from: { cx: number; cy: number }, to: { cx: number; cy: number }): number {
+  const dx = Math.sign(to.cx - from.cx);
+  const dy = Math.sign(to.cy - from.cy);
+  if (dx === 0 && dy < 0) return 0;   // N
+  if (dx > 0 && dy < 0) return 1;     // NE
+  if (dx > 0 && dy === 0) return 2;   // E
+  if (dx > 0 && dy > 0) return 3;     // SE
+  if (dx === 0 && dy > 0) return 4;   // S
+  if (dx < 0 && dy > 0) return 5;     // SW
+  if (dx < 0 && dy === 0) return 6;   // W
+  if (dx < 0 && dy < 0) return 7;     // NW
+  return 0;
+}
+
 /**
  * Optional context threaded through Team.ai() for a full per-tick pass.
  *
@@ -912,7 +926,14 @@ export class Team {
               const firstStep = unit.path[0];
               const firstStepEnterable =
                 !ctx.canEnterCell || ctx.canEnterCell(unit, firstStep.cx, firstStep.cy);
-              if (firstStepEnterable) {
+              const desiredFacing = facingFromCellStep(unit.cell, firstStep);
+              if (unit.facing !== desiredFacing) {
+                // C++ drive.cpp:1079-1086 — Start_Of_Move stops at Do_Turn()
+                // when the body is not facing Path[0]. It keeps IsDriving=false,
+                // so UnitClass::AI's pre-Drive Commence can still pop queued MOVE
+                // on this tick (SCG04EA unit[73] t3 Mission_Move_foot).
+                unit.desiredFacing = desiredFacing;
+              } else if (firstStepEnterable) {
                 unit.isDriving = true;
               }
             }
