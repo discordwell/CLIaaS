@@ -13,7 +13,7 @@ import {
 } from './types';
 import { buildScenarioRuleOverrides } from './scenarioRules';
 import { Entity } from './entity';
-import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, type MapTree } from './map';
+import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, TERRAIN_OBJECT_OCCUPY, type MapTree } from './map';
 import { type TilesetMeta, type AssetManager } from './assets';
 import { nearbyLocation } from './pathfinding';
 import { ScenarioRandom } from './random';
@@ -1747,6 +1747,12 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
           map.setTreeType(pos.cx + dx, pos.cy + dy, '_clump');
         }
       }
+    } else if (TERRAIN_OBJECT_OCCUPY[type]) {
+      // C++ TerrainClass objects that are not trees still occupy cells.
+      // Example: SCG13EA BOXES02 at cell 8737 (82,75) blocks C++ infantry
+      // pathing via TerrainTypeClass::Occupy_List (_List10), so TS must
+      // register the same blocker instead of treating it as decoration.
+      map.addTerrainObject(type, pos.cx, pos.cy, TERRAIN_OBJECT_OCCUPY[type]);
     }
   }
 

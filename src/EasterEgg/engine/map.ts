@@ -77,6 +77,17 @@ export interface MapTree {
   occupyCells: number[]; // cell indices this tree occupies (blocks ground movement)
 }
 
+/** Non-tree C++ TerrainClass object placed on the map.
+ *  Examples: interior BOXES01-09 and terrain MINE. These are not trees:
+ *  they are immune TerrainClass objects with Occupy_List cells that block
+ *  movement but do not participate in tree HP/damage routing. */
+export interface MapTerrainObject {
+  type: string;
+  cx: number;
+  cy: number;
+  occupyCells: number[];
+}
+
 /** C++ RA tdata.cpp Occupy_List per tree type — cells blocked by each tree, as [dx,dy] offsets
  *  from the origin cell. Decoded from C++ cell offset arrays (_List0010, _List10, etc.)
  *  where MAP_CELL_W=128 encodes row offsets.
@@ -107,6 +118,25 @@ export const TREE_OCCUPY: Record<string, [number, number][]> = {
   'tc03': [[0, 0], [1, 0], [0, 1], [1, 1]],                           // _List110110
   'tc04': [[0, 1], [1, 1], [2, 1], [0, 2]],                           // _List000011101000
   'tc05': [[2, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]],          // _List001011100110
+};
+
+/** C++ RA tdata.cpp non-tree TerrainTypeClass Occupy_List entries.
+ *  `_List10={0}` means the terrain object occupies its origin cell.
+ *
+ *  BOXES01-09 are interior TerrainClass objects (not overlays), and MINE is
+ *  the ore-spread terrain object. C++ pathing sees both through the
+ *  CellClass occupier chain; TS must mark the same cells blocked. */
+export const TERRAIN_OBJECT_OCCUPY: Record<string, [number, number][]> = {
+  'mine': [[0, 0]],      // TERRAIN_MINE, _List10
+  'boxes01': [[0, 0]],   // TERRAIN_BOXES01, _List10
+  'boxes02': [[0, 0]],   // TERRAIN_BOXES02, _List10
+  'boxes03': [[0, 0]],   // TERRAIN_BOXES03, _List10
+  'boxes04': [[0, 0]],   // TERRAIN_BOXES04, _List10
+  'boxes05': [[0, 0]],   // TERRAIN_BOXES05, _List10
+  'boxes06': [[0, 0]],   // TERRAIN_BOXES06, _List10
+  'boxes07': [[0, 0]],   // TERRAIN_BOXES07, _List10
+  'boxes08': [[0, 0]],   // TERRAIN_BOXES08, _List10
+  'boxes09': [[0, 0]],   // TERRAIN_BOXES09, _List10
 };
 
 /** C++ RA tdata.cpp XYP_COORD — pixel offset from origin cell top-left to tree center.
@@ -180,6 +210,16 @@ export class GameMap {
 
   /** Reverse lookup: cell index → MapTree that occupies it (for damage routing) */
   private treeCellToTree = new Map<number, MapTree>();
+
+  /** Non-tree TerrainClass objects keyed by origin cell.
+   *  cpp-parity: RA tdata.cpp BOXES/MINE Occupy_List cells block movement. */
+  terrainObjects = new Map<number, MapTerrainObject>();
+
+  /** Cell indices occupied by non-tree TerrainClass objects. */
+  terrainObjectOccupied = new Set<number>();
+
+  /** Reverse lookup: cell index → terrain object occupying it. */
+  private terrainObjectCellToObject = new Map<number, MapTerrainObject>();
 
   /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
   decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
@@ -299,6 +339,26 @@ export class GameMap {
     }
   }
 
+  /** Register a non-tree TerrainClass object on the map.
+   *  cpp-parity: RA terrain.cpp TerrainClass::Unlimbo + tdata.cpp Occupy_List. */
+  addTerrainObject(type: string, cx: number, cy: number, occupyOffsets: [number, number][]): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const occupyCells: number[] = [];
+    for (const [dx, dy] of occupyOffsets) {
+      const ocx = cx + dx;
+      const ocy = cy + dy;
+      if (ocx >= 0 && ocx < MAP_CELLS && ocy >= 0 && ocy < MAP_CELLS) {
+        occupyCells.push(ocy * MAP_CELLS + ocx);
+      }
+    }
+    const object: MapTerrainObject = { type, cx, cy, occupyCells };
+    this.terrainObjects.set(cy * MAP_CELLS + cx, object);
+    for (const cellIdx of occupyCells) {
+      this.terrainObjectOccupied.add(cellIdx);
+      this.terrainObjectCellToObject.set(cellIdx, object);
+    }
+  }
+
   /** Get the tree object that occupies a given cell (any of its occupy cells).
    *  Returns undefined if no tree occupies this cell. */
   getTreeAtCell(cx: number, cy: number): MapTree | undefined {
@@ -350,6 +410,18 @@ export class GameMap {
     return this.treeOccupied.has(cy * MAP_CELLS + cx);
   }
 
+  /** Check if a cell is occupied by a non-tree TerrainClass object. */
+  isTerrainObjectOccupied(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    return this.terrainObjectOccupied.has(cy * MAP_CELLS + cx);
+  }
+
+  /** Get the non-tree TerrainClass object that occupies a given cell. */
+  getTerrainObjectAtCell(cx: number, cy: number): MapTerrainObject | undefined {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return undefined;
+    return this.terrainObjectCellToObject.get(cy * MAP_CELLS + cx);
+  }
+
   /** Check if a cell is passable (terrain + occupancy).
    *  C++ parity: pathfinding extends 1 cell beyond map bounds.
    *  Map bounds define the visible area, not the pathfinding boundary. */
@@ -359,8 +431,8 @@ export class GameMap {
       return false;
     }
     if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
-    // C++ parity: tree-occupied cells block ground movement
-    if (this.isTreeOccupied(cx, cy)) return false;
+    // C++ parity: TerrainClass Occupy_List cells block ground movement.
+    if (this.isTreeOccupied(cx, cy) || this.isTerrainObjectOccupied(cx, cy)) return false;
     return true;
   }
 
@@ -368,7 +440,7 @@ export class GameMap {
    *  cpp-parity: tree-occupied cells are impassable even when ignoring unit occupancy. */
   isTerrainPassable(cx: number, cy: number): boolean {
     if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
-    if (this.isTreeOccupied(cx, cy)) return false;
+    if (this.isTreeOccupied(cx, cy) || this.isTerrainObjectOccupied(cx, cy)) return false;
     return true;
   }
 
@@ -1217,9 +1289,9 @@ export class GameMap {
     const passable = naval ? this.getTerrain(cx, cy) === Terrain.WATER : PASSABLE.has(this.getTerrain(cx, cy));
     if (!passable) return MoveResult.IMPASSABLE;
 
-    // C++ parity: trees occupy cells and block ground movement (RA terrain.cpp Occupy_List).
-    // Both infantry and vehicles are blocked by tree-occupied cells.
-    if (!naval && this.treeOccupied.has(cy * MAP_CELLS + cx)) {
+    // C++ parity: TerrainClass objects occupy cells and block ground movement
+    // (RA terrain.cpp Occupy_List). Both infantry and vehicles are blocked.
+    if (!naval && (this.treeOccupied.has(cy * MAP_CELLS + cx) || this.terrainObjectOccupied.has(cy * MAP_CELLS + cx))) {
       return MoveResult.IMPASSABLE;
     }
 
