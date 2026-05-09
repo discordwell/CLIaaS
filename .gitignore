@@ -79,3 +79,12 @@ next-env.d.ts
 # The .baseline.json file IS committed as the golden reference.
 artifacts/*.json
 !artifacts/divergence-catalog.baseline.json
+
+# Local Red Alert parity scratch probes. Tracked harness scripts are still tracked.
+/scripts/test-scenario-*.ts
+/scripts/test-scg*.ts
+/scripts/test-logic-window.ts
+/scripts/tmp-*.ts
+
+# Local standalone Three.js flight-sim demo, not wired into the CLIaaS app.
+/Game Demo/
