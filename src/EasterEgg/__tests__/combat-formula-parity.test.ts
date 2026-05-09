@@ -170,20 +170,20 @@ describe('modifyDamage — C++ Modify_Damage formula', () => {
   });
 
   // Distance falloff: distFactor = distPixels * 2 / spreadFactor
-  it('distance falloff: distFactor = distPixels * 2 / spreadFactor', () => {
+  it('distance falloff uses integer division after fixed-point armor multiply', () => {
     // 100 damage, HE warhead (spread=6), none armor (mult=0.9)
     // dist = 12 pixels → distFactor = 12*2/6 = 4.0
-    // damage = 100 * 0.9 / 4.0 = 22.5 → rounds to 23
+    // damage = round(100 * 0.9) / 4 = 90 / 4 = 22 (integer trunc)
     const result = modifyDamage(100, 'HE', 'none', 12);
-    expect(result).toBe(23);
+    expect(result).toBe(22);
   });
 
   it('wider spread → less falloff at same distance', () => {
     // Same damage/distance but different warhead spread
     const heDmg = modifyDamage(100, 'HE', 'none', 12);   // spread=6
     const saDmg = modifyDamage(100, 'SA', 'none', 12);    // spread=3
-    // HE: distFactor=12*2/6=4 → 90/4=22.5→23
-    // SA: distFactor=12*2/3=8 → 100/8=12.5→13
+    // HE: distFactor=12*2/6=4 → 90/4=22
+    // SA: distFactor=12*2/3=8 → 100/8=12
     expect(heDmg).toBeGreaterThan(saDmg);
   });
 
@@ -203,13 +203,12 @@ describe('modifyDamage — C++ Modify_Damage formula', () => {
   });
 
   // MinDamage threshold: distFactor < 4 → max(damage, 1) — combat.cpp:122-124
-  it('MinDamage=1 when distFactor < 4 (close range guarantee)', () => {
-    // Very small base damage that would round to 0 without threshold
+  it('MinDamage does not revive damage that rounded to 0 at the armor-multiply step', () => {
+    // fixed::operator*(int) rounds 1*25% to 0 before the `if (damage)` block.
     // 1 damage, SA vs heavy (mult=0.25), dist=2 → distFactor=2*2/3=1.33
-    // damage = 1*0.25/1.33 = 0.19 → before MinDamage would be 0
-    // distFactor 1.33 < 4 → max(0.19, 1) = 1
+    // Since damage is already 0, C++ skips distance falloff and MinDamage.
     const result = modifyDamage(1, 'SA', 'heavy', 2);
-    expect(result).toBe(1);
+    expect(result).toBe(0);
   });
 
   it('MinDamage does NOT apply when distFactor >= 4', () => {

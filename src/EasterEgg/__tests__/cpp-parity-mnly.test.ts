@@ -262,6 +262,7 @@ describe('MNLY retaliation (techno.cpp)', () => {
     mnly.target = null;
 
     const ctx = makeCombatCtx([mnly, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, mnly, attacker);
 
     // C++ unit.cpp:1137-1139: Should_Crush_It → MISSION_MOVE to crush target
@@ -285,17 +286,18 @@ describe('MNLY retaliation (techno.cpp)', () => {
     expect(mnly.mission).toBe(Mission.MOVE);
   });
 
-  it('contrast: armed vehicle (2TNK) retaliates with ATTACK mission', () => {
+  it('contrast: armed vehicle (2TNK) assigns a target without changing GUARD mission', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
     tank.mission = Mission.GUARD;
     tank.target = null;
 
     const ctx = makeCombatCtx([tank, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, attacker);
 
     expect(tank.target).toBe(attacker);
-    expect(tank.mission).toBe(Mission.ATTACK);
+    expect(tank.mission).toBe(Mission.GUARD);
   });
 });
 
@@ -472,7 +474,7 @@ describe('MNLY AI scatter on damage (techno.cpp)', () => {
       mnly.mission = Mission.GUARD;
       const ctx = makeCombatCtx([mnly]);
       aiScatterOnDamage(ctx, mnly);
-      if (mnly.mission === Mission.MOVE && mnly.moveTarget !== null) {
+      if (mnly.moveTarget !== null) {
         scattered = true;
         break;
       }

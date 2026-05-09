@@ -63,6 +63,42 @@ extern "C" {
 	int g_mission_dispatch_tag = 0;
 	int g_enter_idle_tag = 0;
 	int g_nav_clear_site_id = 0;
+		int g_cover_coord_move_target_x = 0;
+		int g_cover_coord_move_target_y = 0;
+		int g_cover_coord_move_mission_target_x = 0;
+		int g_cover_coord_move_mission_target_y = 0;
+		int g_agent_overlay_read_window[21] = {0};
+		int g_agent_team_remove_site = 0;
+	}
+
+struct DebugBulletScatterEntry {
+	int frame, bulletId, bulletType, warhead, paybackRtti, maxSpeed;
+	int coordX, coordY, targetX, targetY;
+	int paybackX, paybackY;
+};
+static DebugBulletScatterEntry g_debug_bullet_scatters[64];
+static int g_debug_bullet_scatter_idx = 0;
+static int g_debug_bullet_scatter_count = 0;
+
+extern "C" void agent_debug_bullet_scatter(int frame, int bulletId, int bulletType,
+	int warhead, int paybackRtti, int maxSpeed, int coordX, int coordY, int targetX, int targetY,
+	int paybackX, int paybackY)
+{
+	auto &e = g_debug_bullet_scatters[g_debug_bullet_scatter_idx % 64];
+	e.frame = frame;
+	e.bulletId = bulletId;
+	e.bulletType = bulletType;
+	e.warhead = warhead;
+	e.paybackRtti = paybackRtti;
+	e.maxSpeed = maxSpeed;
+	e.coordX = coordX;
+	e.coordY = coordY;
+	e.targetX = targetX;
+	e.targetY = targetY;
+	e.paybackX = paybackX;
+	e.paybackY = paybackY;
+	g_debug_bullet_scatter_idx++;
+	if (g_debug_bullet_scatter_count < 64) g_debug_bullet_scatter_count++;
 }
 
 // Debug movement log — ring buffer of last 32 entries
@@ -79,15 +115,39 @@ void agent_debug_log(int a, int b, int c, int d, int e, int f, int g, int h) {
 	if (g_debug_move_count < 256) g_debug_move_count++;
 }
 
+struct DebugTeamRemoveEntry {
+	int frame, teamIndex, rtti, index, site, totalBefore, currentMission, cellX, cellY;
+};
+static DebugTeamRemoveEntry g_debug_team_removes[128];
+static int g_debug_team_remove_idx = 0;
+static int g_debug_team_remove_count = 0;
+
+extern "C" void agent_debug_team_remove(int frame, int teamIndex,
+	int rtti, int index, int site, int totalBefore, int currentMission, int cellX, int cellY)
+{
+	auto &e = g_debug_team_removes[g_debug_team_remove_idx % 128];
+	e.frame = frame;
+	e.teamIndex = teamIndex;
+	e.rtti = rtti;
+	e.index = index;
+	e.site = site;
+	e.totalBefore = totalBefore;
+	e.currentMission = currentMission;
+	e.cellX = cellX;
+	e.cellY = cellY;
+	g_debug_team_remove_idx++;
+	if (g_debug_team_remove_count < 128) g_debug_team_remove_count++;
+}
+
 /* --- ID encoding: (rtti << 16) | heap_index --- */
 #define AGENT_ID(rtti, idx) (((int)(rtti) << 16) | (idx))
 #define AGENT_RTTI(id)      ((RTTIType)((id) >> 16))
 #define AGENT_IDX(id)       ((id) & 0xFFFF)
 
 /* --- Static output buffers --- */
-#define STATE_BUF_SIZE 131072
+#define STATE_BUF_SIZE 524288
 #define CMD_BUF_SIZE   4096
-#define STEP_BUF_SIZE  131072
+#define STEP_BUF_SIZE  524288
 
 static char s_state_buf[STATE_BUF_SIZE];
 static char s_cmd_buf[CMD_BUF_SIZE];
@@ -361,20 +421,39 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 {
 	if (!is_first) buf_cat(",");
 
-	COORDINATE coord = obj->Center_Coord();
+		COORDINATE coord = obj->Center_Coord();
+		COORDINATE raw_coord = obj->Coord;
 	CELL cell = Coord_Cell(coord);
 	HousesType house = obj->Owner();
 	TechnoClass* tech = (TechnoClass*)obj;
-	buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s,\"lx\":%d,\"ly\":%d",
-		AGENT_ID(rtti, idx),
-		obj->Class_Of().Name(),
-		agent_house_name(house),
-		Cell_X(cell), Cell_Y(cell),
-		(int)obj->Strength,
-		(int)obj->Class_Of().MaxStrength,
-		(int)obj->Get_Mission(),
-		ally ? "true" : "false",
-		(int)Coord_X(coord), (int)Coord_Y(coord));
+		buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"m\":%d,\"ally\":%s,\"lx\":%d,\"ly\":%d,\"tcx\":%d,\"tcy\":%d,\"op\":%s,\"dp\":%s,\"vis\":%s,\"map\":%s",
+			AGENT_ID(rtti, idx),
+			obj->Class_Of().Name(),
+			agent_house_name(house),
+			Cell_X(cell), Cell_Y(cell),
+			(int)obj->Strength,
+			(int)obj->Class_Of().MaxStrength,
+			(int)obj->Get_Mission(),
+			ally ? "true" : "false",
+			(int)Coord_X(coord), (int)Coord_Y(coord),
+			(int)Coord_X(coord), (int)Coord_Y(coord),
+			tech->IsOwnedByPlayer ? "true" : "false",
+			tech->IsDiscoveredByPlayer ? "true" : "false",
+			Map[cell].IsVisible ? "true" : "false",
+			Map[cell].IsMapped ? "true" : "false");
+			buf_cat(",\"lock\":%s,\"rawM\":%d,\"rawQ\":%d,\"mt\":%d,\"lock\":%s,\"cloak\":%d,\"stage\":%d,\"rate\":%d,\"cstage\":%d,\"crate\":%d,\"cdelay\":%d,\"readyCloak\":%s",
+					tech->IsLocked ? "true" : "false",
+					(int)tech->Mission,
+					(int)tech->MissionQueue,
+					(int)tech->Get_Mission_Timer_Value(),
+					tech->IsLocked ? "true" : "false",
+					(int)tech->Cloak,
+					tech->Fetch_Stage(),
+					tech->Fetch_Rate(),
+					tech->CloakingDevice.Fetch_Stage(),
+				tech->CloakingDevice.Fetch_Rate(),
+				(int)tech->CloakDelay.Value(),
+				tech->Is_Ready_To_Cloak() ? "true" : "false");
 
 	// Export target and navcom info for parity debugging
 	if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT || rtti == RTTI_AIRCRAFT || rtti == RTTI_VESSEL) {
@@ -390,14 +469,31 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 			primary = ((VesselClass*)obj)->Class->PrimaryWeapon;
 		}
 		if (primary != NULL) {
+			buf_cat(",\"rawx\":%d,\"rawy\":%d,\"rawcx\":%d,\"rawcy\":%d",
+				(int)Coord_X(raw_coord), (int)Coord_Y(raw_coord),
+				Cell_X(Coord_Cell(raw_coord)), Cell_Y(Coord_Cell(raw_coord)));
 			buf_cat(",\"wpn\":\"%s\",\"sup\":%s",
 				primary->Name(),
 				primary->IsSupressed ? "true" : "false");
 		}
+		COORDINATE fc0 = tech->Fire_Coord(0);
+		buf_cat(",\"fcx\":%d,\"fcy\":%d,\"wr0\":%d,\"wr1\":%d,\"tr0\":%d,\"tr1\":%d",
+			(int)Coord_X(fc0), (int)Coord_Y(fc0),
+			(int)tech->Weapon_Range(0), (int)tech->Weapon_Range(1),
+			(int)tech->Threat_Range(0), (int)tech->Threat_Range(1));
+		MZoneType move_zone = tech->Techno_Type_Class()->MZone;
+		int cur_zone = (int)Map[Coord_Cell(tech->Center_Coord())].Zones[move_zone];
+		int tar_zone = -1;
+		int same_zone = -1;
 		if (Target_Legal(foot->TarCom)) {
 			COORDINATE tc = As_Coord(foot->TarCom);
 			buf_cat(",\"tlx\":%d,\"tly\":%d", (int)Coord_X(tc), (int)Coord_Y(tc));
+			CELL tcell = As_Cell(foot->TarCom);
+			tar_zone = (int)Map[tcell].Zones[move_zone];
+			same_zone = tech->Is_In_Same_Zone(tcell) ? 1 : 0;
 		}
+		buf_cat(",\"mzone\":%d,\"czone\":%d,\"tzone\":%d,\"sameZone\":%d",
+			(int)move_zone, cur_zone, tar_zone, same_zone);
 		if (Target_Legal(foot->NavCom)) {
 			COORDINATE nc = As_Coord(foot->NavCom);
 			buf_cat(",\"nlx\":%d,\"nly\":%d", (int)Coord_X(nc), (int)Coord_Y(nc));
@@ -406,32 +502,100 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		if (hc) {
 			buf_cat(",\"hlx\":%d,\"hly\":%d", (int)Coord_X(hc), (int)Coord_Y(hc));
 		}
-		buf_cat(",\"mt\":%d,\"arm\":%d,\"drv\":%s,\"mq\":%d,\"init\":%s,\"p0\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,\"p5\":%d,\"spd\":%d",
-			foot->Get_Mission_Timer_Value(), (int)foot->Arm.Value(),
-			foot->IsDriving ? "true" : "false",
-			(int)foot->MissionQueue,
-			foot->IsInitiated ? "true" : "false",
-			(int)foot->Path[0],
+		int agentMaxSpeed = min(tech->Techno_Type_Class()->MaxSpeed * foot->SpeedBias * foot->House->GroundspeedBias, (int)MPH_LIGHT_SPEED);
+		if (foot->IsFormationMove) agentMaxSpeed = foot->FormationMaxSpeed;
+		int agentSpeedAdd = agentMaxSpeed * fixed(foot->Speed, 256);
+		int assignDestStopClear = Map[foot->Center_Coord()].Is_Clear_To_Move(tech->Techno_Type_Class()->Speed, true, false) ? 1 : 0;
+		int secondaryCurrent = -1;
+		int secondaryDesired = -1;
+		bool isTurretEquipped = false;
+		if (rtti == RTTI_UNIT) {
+			secondaryCurrent = (int)((UnitClass*)obj)->SecondaryFacing.Current();
+			secondaryDesired = (int)((UnitClass*)obj)->SecondaryFacing.Desired();
+			isTurretEquipped = ((UnitClass*)obj)->Class->IsTurretEquipped;
+		} else if (rtti == RTTI_VESSEL) {
+			secondaryCurrent = (int)tech->Turret_Facing();
+			secondaryDesired = -1;
+			isTurretEquipped = ((VesselClass*)obj)->Class->IsTurretEquipped;
+		} else if (rtti == RTTI_AIRCRAFT) {
+			secondaryCurrent = (int)((AircraftClass*)obj)->SecondaryFacing.Current();
+			secondaryDesired = (int)((AircraftClass*)obj)->SecondaryFacing.Desired();
+		}
+					buf_cat(",\"mt\":%d,\"status\":%d,\"arm\":%d,\"drv\":%s,\"rot\":%s,\"mq\":%d,\"init\":%s,\"p0\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,\"p9\":%d,\"p10\":%d,\"p11\":%d,\"p12\":%d,\"p13\":%d,\"p14\":%d,\"p15\":%d,\"spd\":%d,\"pf\":%d,\"pfd\":%d,\"sf\":%d,\"sfd\":%d,\"tur\":%s,\"ms\":%d,\"gsb\":%d,\"sb\":%d,\"fm\":%s,\"fsp\":%d,\"fms\":%d,\"mx\":%d,\"add\":%d,\"plw\":%d,\"adsc\":%d",
+						foot->Get_Mission_Timer_Value(), (int)foot->Status, (int)foot->Arm.Value(),
+						foot->IsDriving ? "true" : "false",
+						foot->IsRotating ? "true" : "false",
+						(int)foot->MissionQueue,
+					foot->IsInitiated ? "true" : "false",
+				(int)foot->Path[0],
 			(int)foot->Path[1],
-			(int)foot->Path[2],
-			(int)foot->Path[3],
-			(int)foot->Path[4],
-			(int)foot->Path[5],
-			(int)foot->Speed);
+				(int)foot->Path[2],
+				(int)foot->Path[3],
+				(int)foot->Path[4],
+					(int)foot->Path[5],
+					(int)foot->Path[6],
+					(int)foot->Path[7],
+					(int)foot->Path[8],
+					(int)foot->Path[9],
+					(int)foot->Path[10],
+					(int)foot->Path[11],
+					(int)foot->Path[12],
+					(int)foot->Path[13],
+					(int)foot->Path[14],
+					(int)foot->Path[15],
+						(int)foot->Speed,
+						(int)tech->PrimaryFacing.Current(),
+						(int)tech->PrimaryFacing.Desired(),
+						secondaryCurrent,
+						secondaryDesired,
+						isTurretEquipped ? "true" : "false",
+						(int)tech->Techno_Type_Class()->MaxSpeed,
+					(int)(foot->House->GroundspeedBias * 256),
+					(int)(foot->SpeedBias * 256),
+					foot->IsFormationMove ? "true" : "false",
+					(int)foot->FormationSpeed,
+					(int)foot->FormationMaxSpeed,
+					agentMaxSpeed,
+					agentSpeedAdd,
+					PIXEL_LEPTON_W,
+					assignDestStopClear);
+				if (rtti == RTTI_UNIT || rtti == RTTI_VESSEL) {
+					DriveClass* drive = (DriveClass*)obj;
+					buf_cat(",\"tn\":%d,\"ti\":%d,\"sa\":%d,\"wspd\":%d,\"wmx\":%d,\"wact\":%d,\"wend\":%d,\"wsteps\":%d",
+					drive->Agent_Track_Number(),
+					drive->Agent_Track_Index(),
+					drive->Agent_Speed_Accum(),
+					drive->Agent_Last_Move_Speed(),
+					drive->Agent_Last_Max_Speed(),
+					drive->Agent_Last_Actual_Start(),
+					drive->Agent_Last_Actual_End(),
+					drive->Agent_Last_Steps());
+					if (rtti == RTTI_VESSEL) {
+						VesselClass* vessel = (VesselClass*)obj;
+						buf_cat(",\"pulse\":%d", (int)vessel->PulseCountDown.Value());
+					} else if (rtti == RTTI_UNIT) {
+						UnitClass* unit = (UnitClass*)obj;
+						buf_cat(",\"tib\":%d,\"gold\":%d,\"gems\":%d,\"ustatus\":%d",
+							unit->Tiberium, unit->Gold, unit->Gems, (int)unit->Status);
+					}
+				}
 		// Task #43 diagnostic: expose IdleTimer + Doing + IsFiring for infantry
 		// to compare with TS's isReadyToRandomAnimate gate.
 		if (rtti == RTTI_INFANTRY) {
 			InfantryClass* inf = (InfantryClass*)obj;
-			buf_cat(",\"idle\":%d,\"doing\":%d,\"firing\":%s,\"prone\":%s",
-				(int)inf->IdleTimer.Value(),
-				(int)inf->Doing,
-				inf->IsFiring ? "true" : "false",
-				inf->IsProne ? "true" : "false");
+				buf_cat(",\"idle\":%d,\"doing\":%d,\"stage\":%d,\"firing\":%s,\"prone\":%s,\"fear\":%d,\"hgt\":%d",
+					(int)inf->IdleTimer.Value(),
+					(int)inf->Doing,
+					(int)inf->Fetch_Stage(),
+					inf->IsFiring ? "true" : "false",
+					inf->IsProne ? "true" : "false",
+					(int)inf->Fear,
+					(int)inf->Height);
 		}
 	}
 
 	if (tech->Techno_Type_Class()->Max_Passengers() > 0) {
-		buf_cat(",\"cargo\":%d", tech->How_Many());
+		buf_cat(",\"cargo\":%d,\"tether\":%s", tech->How_Many(), tech->IsTethered ? "true" : "false");
 		if (tech->Is_Something_Attached()) {
 			FootClass* passenger = tech->Attached_Object();
 			if (passenger) {
@@ -660,6 +824,80 @@ extern "C" {
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+char* agent_get_bullet_scatter_log(void)
+{
+	buf_init(s_state_buf, STATE_BUF_SIZE);
+	buf_cat("{\"tick\":%ld,\"scatter\":[", Frame);
+	bool first = true;
+	int start = g_debug_bullet_scatter_idx - g_debug_bullet_scatter_count;
+	for (int i = 0; i < g_debug_bullet_scatter_count; i++) {
+		auto &e = g_debug_bullet_scatters[(start + i) % 64];
+		if (!first) buf_cat(",");
+		first = false;
+		buf_cat("{\"frame\":%d,\"bid\":%d,\"bt\":%d,\"wh\":%d,\"pb\":%d,\"max\":%d,"
+			"\"cx\":%d,\"cy\":%d,\"tx\":%d,\"ty\":%d,\"pbx\":%d,\"pby\":%d}",
+			e.frame, e.bulletId, e.bulletType, e.warhead, e.paybackRtti, e.maxSpeed,
+			e.coordX, e.coordY, e.targetX, e.targetY, e.paybackX, e.paybackY);
+	}
+	buf_cat("]}");
+	return s_state_buf;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int agent_tick_only(int n)
+{
+	if (n < 1) n = 1;
+	if (n > 1000) n = 1000;
+	g_autoplay_mode = 1;
+	int done = 0;
+	for (int i = 0; i < n; i++) {
+		done = do_tick();
+		if (done) break;
+	}
+	return done;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_get_scg06_nearby_infantry(void)
+{
+	buf_init(s_state_buf, STATE_BUF_SIZE);
+	buf_cat("{\"tick\":%ld,\"inf\":[", Frame);
+	bool first = true;
+	for (int ii = 0; ii < Infantry.Count(); ii++) {
+		InfantryClass* inf = Infantry.Ptr(ii);
+		if (!inf || !inf->IsActive) continue;
+		CELL cell = Coord_Cell(inf->Center_Coord());
+		int cx = Cell_X(cell);
+		int cy = Cell_Y(cell);
+		if (cx < 16 || cx > 24 || cy < 62 || cy > 70) continue;
+		if (!first) buf_cat(",");
+		first = false;
+		FootClass* foot = (FootClass*)inf;
+		COORDINATE coord = inf->Center_Coord();
+		COORDINATE tcoord = Target_Legal(foot->TarCom) ? As_Coord(foot->TarCom) : 0;
+		COORDINATE ncoord = Target_Legal(foot->NavCom) ? As_Coord(foot->NavCom) : 0;
+		buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,"
+			"\"lx\":%d,\"ly\":%d,\"m\":%d,\"mt\":%d,\"mq\":%d,\"arm\":%d,"
+			"\"drv\":%s,\"doing\":%d,\"stage\":%d,\"firing\":%s,"
+			"\"tlx\":%d,\"tly\":%d,\"nlx\":%d,\"nly\":%d}",
+			AGENT_ID(RTTI_INFANTRY, ii), inf->Class_Of().Name(), agent_house_name(inf->Owner()),
+			cx, cy, (int)Coord_X(coord), (int)Coord_Y(coord),
+			(int)inf->Get_Mission(), foot->Get_Mission_Timer_Value(), (int)foot->MissionQueue,
+			(int)foot->Arm.Value(), foot->IsDriving ? "true" : "false",
+			(int)inf->Doing, (int)inf->Fetch_Stage(), inf->IsFiring ? "true" : "false",
+			(int)Coord_X(tcoord), (int)Coord_Y(tcoord), (int)Coord_X(ncoord), (int)Coord_Y(ncoord));
+	}
+	buf_cat("]}");
+	return s_state_buf;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 char* agent_get_state(void)
 {
 	buf_init(s_state_buf, STATE_BUF_SIZE);
@@ -684,14 +922,29 @@ char* agent_get_state(void)
 	extern unsigned long g_rng_seed_log[];
 	extern int g_rng_source_log[];
 	extern int g_rng_log_count;
+	extern int g_nav_clear_site_id;
+	extern int g_cover_coord_move_target_x;
+	extern int g_cover_coord_move_target_y;
+	extern int g_cover_coord_move_mission_target_x;
+	extern int g_cover_coord_move_mission_target_y;
 	// Enable tracking + logging on first state read
 	if (!g_rng_tracking) { g_rng_tracking = true; g_rng_log_enabled = true; }
-	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,\"rngCalls\":%lu,\"rngLog\":[",
+	buf_cat("{\"tick\":%ld,\"credits\":%ld,\"playerHouse\":\"%s\",\"rngState\":%lu,\"rngCalls\":%lu,\"navClearSite\":%d,\"coverMoveTargetX\":%d,\"coverMoveTargetY\":%d,\"coverMoveMissionTargetX\":%d,\"coverMoveMissionTargetY\":%d,\"tibScan\":%d,\"tibGrowCount\":%d,\"tibGrowExcess\":%d,\"tibSpreadCount\":%d,\"tibSpreadExcess\":%d,\"rngLog\":[",
 		Frame,
 		(long)(PlayerPtr->Credits + PlayerPtr->Tiberium),
 		agent_house_name(player_house),
 		Scen.RandomNumber.Seed,
-		g_rng_call_count);
+		g_rng_call_count,
+		g_nav_clear_site_id,
+		g_cover_coord_move_target_x,
+		g_cover_coord_move_target_y,
+		g_cover_coord_move_mission_target_x,
+		g_cover_coord_move_mission_target_y,
+		(int)Map.Agent_Tiberium_Scan(),
+		Map.Agent_Tiberium_Growth_Count(),
+		Map.Agent_Tiberium_Growth_Excess(),
+		Map.Agent_Tiberium_Spread_Count(),
+		Map.Agent_Tiberium_Spread_Excess());
 	// Dump all seed+source+entity triples from the per-tick log (up to buffer size)
 	// Entity tag identifies WHICH entity a call belongs to, regardless of granular
 	// source tag override (e.g., 30001, 60043). Task #43+ diagnostic infrastructure.
@@ -701,10 +954,26 @@ char* agent_get_state(void)
 		buf_cat("[%lu,%d,%d]", g_rng_seed_log[li], g_rng_source_log[li], g_rng_entity_log[li]);
 	}
 	buf_cat("],");
-	// Reset log for next step (keep logging enabled)
-	g_rng_log_count = 0;
+		// Reset log for next step (keep logging enabled)
+		g_rng_log_count = 0;
 
-	// Dump Logic layer entity order (units/infantry/aircraft/buildings/vessels) for parity debugging.
+		buf_cat("\"tibCells\":[");
+			for (int ci = 2748; ci <= 2885; ci++) {
+				if (ci > 2748) buf_cat(",");
+			CellClass const &cell = Map[(CELL)ci];
+			buf_cat("{\"i\":%d,\"ov\":%d,\"data\":%d,\"land\":%d}",
+				ci, (int)cell.Overlay, (int)cell.OverlayData, (int)cell.Land_Type());
+		}
+			buf_cat("],");
+
+			buf_cat("\"overlayReadWindow\":[");
+			for (int oi = 0; oi < 21; oi++) {
+				if (oi > 0) buf_cat(",");
+				buf_cat("%d", g_agent_overlay_read_window[oi]);
+			}
+			buf_cat("],");
+
+			// Dump Logic layer entity order (units/infantry/aircraft/buildings/vessels) for parity debugging.
 	// Buildings/vessels included so cross-engine structure iteration order can be verified
 	// (BuildingClass::Unlimbo insertion vs TS INI section order — SCG11EA t32 SAM, task ad83df56).
 	// TERRAIN/ANIM/BULLET are skipped to keep the dump compact (SCG03EA has 84 TERRAIN entries
@@ -762,6 +1031,10 @@ char* agent_get_state(void)
 			int mission_timer = -1;
 			int mission_queue = -1;
 			int lx = -1, ly = -1;
+			int hp = -1, mhp = -1, cloak = -1, cstage = -1, crate = -1, cdelay = -1;
+			int arm = -1, pulse = -1;
+			int tarx = 0, tary = 0;
+			bool ready_cloak = false;
 			bool is_driving = false;
 			int doing = -1;
 			{
@@ -770,6 +1043,19 @@ char* agent_get_state(void)
 				lx = (int)Coord_X(cc);
 				ly = (int)Coord_Y(cc);
 				mission = (int)tt->Get_Mission();
+				hp = (int)tt->Strength;
+				mhp = (int)tt->Class_Of().MaxStrength;
+				cloak = (int)tt->Cloak;
+				cstage = tt->CloakingDevice.Fetch_Stage();
+				crate = tt->CloakingDevice.Fetch_Rate();
+				cdelay = (int)tt->CloakDelay.Value();
+				arm = (int)tt->Arm.Value();
+				ready_cloak = tt->Is_Ready_To_Cloak();
+				if (Target_Legal(tt->TarCom)) {
+					COORDINATE tc = As_Coord(tt->TarCom);
+					tarx = (int)Coord_X(tc);
+					tary = (int)Coord_Y(tc);
+				}
 			}
 			if (rtti == RTTI_UNIT || rtti == RTTI_INFANTRY || rtti == RTTI_AIRCRAFT || rtti == RTTI_VESSEL) {
 				FootClass * foot = (FootClass *)lobj;
@@ -778,15 +1064,91 @@ char* agent_get_state(void)
 				is_driving = foot->IsDriving;
 				if (rtti == RTTI_INFANTRY) {
 					doing = (int)((InfantryClass *)lobj)->Doing;
+				} else if (rtti == RTTI_VESSEL) {
+					pulse = (int)((VesselClass *)lobj)->PulseCountDown.Value();
 				}
 			} else if (rtti == RTTI_BUILDING) {
 				BuildingClass * b = (BuildingClass *)lobj;
 				mission_timer = b->Get_Mission_Timer_Value();
 			}
-			buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d]",
-				li, tname, hname, lcx, lcy, rtag,
-				aid, mission, mission_timer, mission_queue, is_driving ? "true" : "false",
-				doing, lx, ly);
+				buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d]",
+					li, tname, hname, lcx, lcy, rtag,
+					aid, mission, mission_timer, mission_queue, is_driving ? "true" : "false",
+					doing, lx, ly, hp, mhp, cloak, cstage, crate, cdelay,
+					ready_cloak ? "true" : "false", tarx, tary, arm, pulse,
+					(int)((TechnoClass *)lobj)->Mission,
+					(int)((TechnoClass *)lobj)->MissionQueue,
+					(int)((TechnoClass *)lobj)->Status);
+		}
+	}
+	buf_cat("],");
+
+	buf_cat("\"anims\":[");
+	{
+		bool afirst = true;
+		for (int ai = 0; ai < Anims.Count(); ai++) {
+			AnimClass * a = Anims.Ptr(ai);
+			if (!a || !a->IsActive) continue;
+			AnimType atype = (AnimType)(*a);
+			AnimTypeClass const & aclass = (AnimTypeClass const &)a->Class_Of();
+			COORDINATE ac = a->Center_Coord();
+			if (!afirst) buf_cat(",");
+			afirst = false;
+			buf_cat("{\"i\":%d,\"id\":%d,\"name\":\"%s\",\"type\":%d,"
+				"\"cx\":%d,\"cy\":%d,\"lx\":%d,\"ly\":%d,"
+				"\"stage\":%d,\"rate\":%d,\"about\":%s,"
+				"\"biggest\":%d,\"stages\":%d,\"loopStart\":%d,\"loopEnd\":%d,\"loops\":%d}",
+				ai, AGENT_ID(RTTI_ANIM, ai), Anim_Name(atype), (int)atype,
+				Coord_XCell(ac), Coord_YCell(ac), Coord_X(ac), Coord_Y(ac),
+				a->Fetch_Stage(), a->Fetch_Rate(), a->About_To_Change() ? "true" : "false",
+				aclass.Biggest, aclass.Stages, aclass.LoopStart, aclass.LoopEnd, (int)a->Loops);
+		}
+	}
+		buf_cat("],");
+
+		buf_cat("\"bulletScatterLog\":[");
+		{
+			bool first = true;
+			int start = g_debug_bullet_scatter_idx - g_debug_bullet_scatter_count;
+			for (int i = 0; i < g_debug_bullet_scatter_count; i++) {
+				auto &e = g_debug_bullet_scatters[(start + i) % 64];
+				if (!first) buf_cat(",");
+				first = false;
+					buf_cat("{\"frame\":%d,\"bid\":%d,\"bt\":%d,\"wh\":%d,\"pb\":%d,\"max\":%d,"
+						"\"cx\":%d,\"cy\":%d,\"tx\":%d,\"ty\":%d,\"pbx\":%d,\"pby\":%d}",
+						e.frame, e.bulletId, e.bulletType, e.warhead, e.paybackRtti, e.maxSpeed,
+						e.coordX, e.coordY, e.targetX, e.targetY, e.paybackX, e.paybackY);
+			}
+		}
+		buf_cat("],");
+
+		buf_cat("\"bullets\":[");
+	{
+		bool bfirst = true;
+		for (int bi = 0; bi < Bullets.Count(); bi++) {
+			BulletClass * b = Bullets.Ptr(bi);
+			if (!b || !b->IsActive) continue;
+			if (!bfirst) buf_cat(",");
+			bfirst = false;
+			COORDINATE bc = b->Coord;
+			COORDINATE ft = b->Fuse_Target();
+			TARGET bt = b->Agent_Target();
+			COORDINATE tc = Target_Legal(bt) ? As_Coord(bt) : 0;
+			TechnoClass * payback = b->Agent_Payback();
+			int payback_id = -1;
+			if (payback) {
+				payback_id = agent_object_index(payback, payback->What_Am_I());
+				if (payback_id >= 0) payback_id = AGENT_ID(payback->What_Am_I(), payback_id);
+			}
+			buf_cat("{\"i\":%d,\"type\":\"%s\",\"cx\":%d,\"cy\":%d,\"lx\":%d,\"ly\":%d,"
+				"\"tx\":%d,\"ty\":%d,\"fx\":%d,\"fy\":%d,\"str\":%d,\"wh\":%d,"
+				"\"timer\":%d,\"max\":%d,\"pb\":%d,\"down\":%s,\"limbo\":%s}",
+				bi,
+				b->Class ? b->Class->IniName : "?",
+				Coord_XCell(bc), Coord_YCell(bc), Coord_X(bc), Coord_Y(bc),
+				Coord_X(tc), Coord_Y(tc), Coord_X(ft), Coord_Y(ft),
+				(int)b->Strength, b->Agent_Warhead(), (int)b->Timer, b->Agent_Max_Speed(),
+				payback_id, b->IsDown ? "true" : "false", b->IsInLimbo ? "true" : "false");
 		}
 	}
 	buf_cat("],");
@@ -919,7 +1281,7 @@ char* agent_get_state(void)
 		CELL cell = Coord_Cell(coord);
 		HousesType house = b->Owner();
 
-		buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"ally\":%s,\"repairing\":%s}",
+		buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,\"hp\":%d,\"mhp\":%d,\"ally\":%s,\"repairing\":%s",
 			AGENT_ID(RTTI_BUILDING, i),
 			b->Class_Of().Name(),
 			agent_house_name(house),
@@ -928,6 +1290,76 @@ char* agent_get_state(void)
 			(int)b->Class_Of().MaxStrength,
 			ally ? "true" : "false",
 			b->IsRepairing ? "true" : "false");
+		if (b->Factory) {
+			FactoryClass* factory = b->Factory;
+			const char* prod_name = agent_factory_item_name(factory, b->Class->ToBuild);
+			buf_cat(",\"factory\":{\"t\":\"%s\",\"prog\":%d,\"done\":%s,\"building\":%s,\"rtti\":%d}",
+				prod_name ? prod_name : "?",
+				factory->Completion(),
+				factory->Has_Completed() ? "true" : "false",
+				factory->Is_Building() ? "true" : "false",
+				(int)b->Class->ToBuild);
+		}
+		buf_cat(",\"placementDelay\":%d}", (int)b->PlacementDelay.Value());
+	}
+	buf_cat("],");
+
+	/* --- House AI / production state (oracle instrumentation) --- */
+	buf_cat("\"houses\":[");
+	first = true;
+	for (int hi = 0; hi < Houses.Count(); hi++) {
+		HouseClass* h = Houses.Ptr(hi);
+		if (!h || !h->Class) continue;
+		if (!first) buf_cat(",");
+		first = false;
+		const char* build_inf = NULL;
+		if (h->BuildInfantry != INFANTRY_NONE) {
+			build_inf = InfantryTypeClass::As_Reference(h->BuildInfantry).Name();
+		}
+		buf_cat("{\"i\":%d,\"house\":\"%s\",\"iscan\":%lu,\"aiscan\":%lu,"
+			"\"buildInf\":%d,\"buildInfName\":\"%s\",\"curInf\":%u,\"maxInf\":%u,"
+			"\"started\":%s,\"base\":%s,\"alerted\":%s,\"iq\":%d,\"money\":%d,\"infFac\":%d}",
+			hi,
+			agent_house_name(h->Class->House),
+			(unsigned long)h->IScan,
+			(unsigned long)h->ActiveIScan,
+			(int)h->BuildInfantry,
+			build_inf ? build_inf : "",
+			h->CurInfantry,
+			h->Control.MaxInfantry,
+			h->IsStarted ? "true" : "false",
+			h->IsBaseBuilding ? "true" : "false",
+			h->IsAlerted ? "true" : "false",
+			(int)h->IQ,
+			(int)h->Available_Money(),
+			(int)h->InfantryFactories);
+	}
+	buf_cat("],");
+
+	/* --- Raw infantry pool, including limbo/dead, for HouseClass::IScan parity. --- */
+	buf_cat("\"infantryPool\":[");
+	first = true;
+	for (int ii = 0; ii < Infantry.Count(); ii++) {
+		InfantryClass* inf = Infantry.Ptr(ii);
+		if (!inf) continue;
+		if (!first) buf_cat(",");
+		first = false;
+		CELL icell = Coord_Cell(inf->Center_Coord());
+		FootClass* foot = (FootClass*)inf;
+		buf_cat("{\"id\":%d,\"t\":\"%s\",\"house\":\"%s\",\"cx\":%d,\"cy\":%d,"
+			"\"hp\":%d,\"limbo\":%s,\"locked\":%s,\"active\":%s,\"m\":%d,\"mt\":%d,\"mq\":%d,\"doing\":%d}",
+			AGENT_ID(RTTI_INFANTRY, ii),
+			inf->Class_Of().Name(),
+			agent_house_name(inf->Owner()),
+			Cell_X(icell), Cell_Y(icell),
+			(int)inf->Strength,
+			inf->IsInLimbo ? "true" : "false",
+			inf->IsLocked ? "true" : "false",
+			inf->IsActive ? "true" : "false",
+			(int)inf->Get_Mission(),
+			foot->Get_Mission_Timer_Value(),
+			(int)foot->MissionQueue,
+			(int)inf->Doing);
 	}
 	buf_cat("],");
 
@@ -1115,16 +1547,27 @@ char* agent_get_state(void)
 	}
 
 	// Append debug movement log
-	buf_cat("],\"debugMoves\":[");
-	for (int mi = 0; mi < g_debug_move_count && mi < 256; mi++) {
-		int ri = (g_debug_move_idx - g_debug_move_count + mi + 256) % 256;
-		auto &dm = g_debug_moves[ri];
-		if (mi > 0) buf_cat(",");
-		buf_cat("[%d,%d,%d,%d,%d,%d,%d,%d]", dm.preLX, dm.preLY, dm.postLX, dm.postLY, dm.dir, dm.dist, dm.headLX, dm.headLY);
-	}
+		buf_cat("],\"debugMoves\":[");
+		for (int mi = 0; mi < g_debug_move_count && mi < 256; mi++) {
+			int ri = (g_debug_move_idx - g_debug_move_count + mi + 256) % 256;
+			auto &dm = g_debug_moves[ri];
+			if (mi > 0) buf_cat(",");
+			buf_cat("[%d,%d,%d,%d,%d,%d,%d,%d]", dm.preLX, dm.preLY, dm.postLX, dm.postLY, dm.dir, dm.dist, dm.headLX, dm.headLY);
+		}
 
-	/* --- Teams (for TS parity debugging) --- */
-	buf_cat("],\"teams\":[");
+		buf_cat("],\"teamRemoveLog\":[");
+		for (int tri = 0; tri < g_debug_team_remove_count && tri < 128; tri++) {
+			int ri = (g_debug_team_remove_idx - g_debug_team_remove_count + tri + 128) % 128;
+			auto &tr = g_debug_team_removes[ri];
+			if (tri > 0) buf_cat(",");
+			buf_cat("{\"frame\":%d,\"team\":%d,\"rtti\":%d,\"idx\":%d,"
+				"\"site\":%d,\"total\":%d,\"cur\":%d,\"cx\":%d,\"cy\":%d}",
+				tr.frame, tr.teamIndex, tr.rtti, tr.index,
+				tr.site, tr.totalBefore, tr.currentMission, tr.cellX, tr.cellY);
+		}
+
+		/* --- Teams (for TS parity debugging) --- */
+		buf_cat("],\"teams\":[");
 	{
 		bool tfirst = true;
 		for (int ti = 0; ti < Teams.Count(); ti++) {
@@ -1203,6 +1646,13 @@ char* agent_get_state(void)
 						if (a && a->IsActive && a->Team == t && &a->Class_Of() == wantType) {
 							have++;
 							midLen += snprintf(memberIds + midLen, sizeof(memberIds) - midLen, "%s%d", midLen > 0 ? "," : "", AGENT_ID(RTTI_AIRCRAFT, ai));
+						}
+					}
+					for (int vi = 0; vi < Vessels.Count(); vi++) {
+						VesselClass * v = Vessels.Ptr(vi);
+						if (v && v->IsActive && v->Team == t && &v->Class_Of() == wantType) {
+							have++;
+							midLen += snprintf(memberIds + midLen, sizeof(memberIds) - midLen, "%s%d", midLen > 0 ? "," : "", AGENT_ID(RTTI_VESSEL, vi));
 						}
 					}
 				}
@@ -1410,7 +1860,214 @@ char* agent_step(int n, char* commands)
 }
 
 /* ======================================================================
- * EXPORT 4: agent_render — force a visual frame render for screenshots.
+ * EXPORT 4: agent_get_cell_occupiers — serialize a cell's OccupierPtr chain.
+ * Generic diagnostics for TechnoClass::Evaluate_Cell parity. This does not
+ * mutate game state; it only exposes the exact linked list that C++ scans.
+ * ====================================================================== */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_get_cell_occupiers(int cx, int cy)
+{
+	buf_init(s_cmd_buf, CMD_BUF_SIZE);
+
+	if (cx < 0 || cx >= MAP_CELL_W || cy < 0 || cy >= MAP_CELL_H) {
+		buf_cat("{\"error\":\"out-of-bounds\",\"cx\":%d,\"cy\":%d}", cx, cy);
+		return s_cmd_buf;
+	}
+
+	CELL cell = XY_Cell(cx, cy);
+	CellClass* cellptr = &Map[cell];
+	buf_cat("{\"cx\":%d,\"cy\":%d,\"cell\":%d,\"occ\":[", cx, cy, (int)cell);
+	bool first = true;
+	ObjectClass* object = cellptr->Cell_Occupier();
+	int depth = 0;
+	while (object != NULL && depth < 16) {
+		if (!first) buf_cat(",");
+		first = false;
+		RTTIType rtti = object->What_Am_I();
+		int idx = agent_object_index(object, rtti);
+		int aid = idx >= 0 ? AGENT_ID(rtti, idx) : -1;
+		const char* tname = object->Class_Of().Name();
+		const char* hname = "None";
+		int mission = -1;
+		int lx = -1;
+		int ly = -1;
+		bool is_techno = object->Is_Techno();
+		bool in_limbo = object->IsInLimbo;
+		bool owned_player = false;
+		bool discovered_player = false;
+		int strength = -1;
+		if (is_techno) {
+			TechnoClass* tech = (TechnoClass*)object;
+			hname = agent_house_name(tech->Owner());
+			mission = (int)tech->Get_Mission();
+			COORDINATE coord = tech->Center_Coord();
+			lx = (int)Coord_X(coord);
+			ly = (int)Coord_Y(coord);
+			owned_player = tech->IsOwnedByPlayer;
+			discovered_player = tech->IsDiscoveredByPlayer;
+			strength = (int)tech->Strength;
+		}
+		buf_cat("{\"d\":%d,\"id\":%d,\"rtti\":%d,\"t\":\"%s\",\"house\":\"%s\","
+			"\"tech\":%s,\"down\":%s,\"toDamage\":%s,\"limbo\":%s,\"m\":%d,\"lx\":%d,\"ly\":%d,\"hp\":%d,"
+			"\"op\":%s,\"dp\":%s}",
+			depth, aid, (int)rtti, tname, hname,
+			is_techno ? "true" : "false",
+			object->IsDown ? "true" : "false",
+			object->IsToDamage ? "true" : "false",
+			in_limbo ? "true" : "false",
+			mission, lx, ly, strength,
+			owned_player ? "true" : "false",
+			discovered_player ? "true" : "false");
+		object = object->Next;
+		depth++;
+	}
+	buf_cat("]}");
+	return s_cmd_buf;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_get_cell_info(int cx, int cy, int infantry_id)
+{
+	buf_init(s_cmd_buf, CMD_BUF_SIZE);
+
+	if (cx < 0 || cx >= MAP_CELL_W || cy < 0 || cy >= MAP_CELL_H) {
+		buf_cat("{\"error\":\"out-of-bounds\",\"cx\":%d,\"cy\":%d}", cx, cy);
+		return s_cmd_buf;
+	}
+
+	CELL cell = XY_Cell(cx, cy);
+	CellClass* cellptr = &Map[cell];
+	LandType land = cellptr->Land_Type();
+	bool foot_zero = (Ground[land].Cost[SPEED_FOOT] == 0);
+	bool in_radar = Map.In_Radar(cell);
+
+	int can_enter = -1;
+	TechnoClass* tech = agent_lookup(infantry_id);
+	if (tech != NULL) {
+		if (tech->What_Am_I() == RTTI_INFANTRY) {
+			can_enter = (int)((InfantryClass*)tech)->Can_Enter_Cell(cell);
+		} else if (tech->What_Am_I() == RTTI_UNIT) {
+			can_enter = (int)((UnitClass*)tech)->Can_Enter_Cell(cell);
+		} else if (tech->What_Am_I() == RTTI_VESSEL) {
+			can_enter = (int)((VesselClass*)tech)->Can_Enter_Cell(cell);
+		}
+	}
+
+	buf_cat("{\"cx\":%d,\"cy\":%d,\"cell\":%d,\"ttype\":%d,\"ticon\":%d,"
+		"\"land\":%d,\"footZero\":%s,\"inRadar\":%s,\"canEnter\":%d,"
+		"\"flag\":%d,\"infType\":%d}",
+		cx, cy, (int)cell, (int)cellptr->TType, (int)cellptr->TIcon,
+		(int)land, foot_zero ? "true" : "false", in_radar ? "true" : "false",
+		can_enter, (int)cellptr->Flag.Composite, (int)cellptr->InfType);
+	return s_cmd_buf;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_debug_eval_target(int scanner_id, int target_id)
+{
+	buf_init(s_cmd_buf, CMD_BUF_SIZE);
+
+	TechnoClass* scanner = agent_lookup(scanner_id);
+	TechnoClass* target = agent_lookup(target_id);
+	if (scanner == NULL || target == NULL) {
+		buf_cat("{\"error\":\"lookup\",\"scanner\":%s,\"target\":%s}",
+			scanner == NULL ? "false" : "true",
+			target == NULL ? "false" : "true");
+		return s_cmd_buf;
+	}
+
+	ThreatType method = THREAT_RANGE;
+	TechnoTypeClass* stype = scanner->Techno_Type_Class();
+	if (stype->PrimaryWeapon != NULL) {
+		method = (ThreatType)(method | stype->PrimaryWeapon->Allowed_Threats());
+	}
+	if (stype->SecondaryWeapon != NULL) {
+		method = (ThreatType)(method | stype->SecondaryWeapon->Allowed_Threats());
+	}
+
+	int mask = 0;
+	if (method & THREAT_CIVILIANS) mask |= ((1 << RTTI_BUILDING) | (1 << RTTI_INFANTRY) | (1 << RTTI_UNIT));
+	if (method & THREAT_AIR) mask |= (1 << RTTI_AIRCRAFT);
+	if (method & THREAT_CAPTURE) mask |= (1 << RTTI_BUILDING);
+	if (method & (THREAT_CIVILIANS|THREAT_BUILDINGS|THREAT_FACTORIES|THREAT_POWER|THREAT_FAKES|THREAT_BASE_DEFENSE|THREAT_TIBERIUM)) mask |= (1 << RTTI_BUILDING);
+	if (method & (THREAT_CIVILIANS|THREAT_INFANTRY|THREAT_BASE_DEFENSE)) mask |= (1 << RTTI_INFANTRY);
+	if (method & THREAT_VEHICLES) mask |= (1 << RTTI_UNIT);
+	if (method & THREAT_BASE_DEFENSE) mask |= (1 << RTTI_BUILDING);
+	if (method & THREAT_BOATS) mask |= (1 << RTTI_VESSEL);
+	if (method & THREAT_VEHICLES) mask |= (1 << RTTI_AIRCRAFT);
+
+	int range = scanner->Threat_Range(0);
+	int primary = scanner->What_Weapon_Should_I_Use(target->As_Target());
+	int can0 = (int)scanner->Can_Fire(target->As_Target(), 0);
+	int can1 = (int)scanner->Can_Fire(target->As_Target(), 1);
+	int canPrimary = (int)scanner->Can_Fire(target->As_Target(), primary);
+	int value = -9999;
+	bool eval = scanner->Evaluate_Object(method, mask, range, target, value, -1);
+	bool in_range = scanner->In_Range(target, primary);
+	int dist = Distance(scanner->Fire_Coord(primary), target->Center_Coord());
+
+	TechnoClass const* cell_obj = NULL;
+	int cell_value = -9999;
+	bool cell_eval = scanner->Evaluate_Cell(method, mask, Coord_Cell(target->Center_Coord()), range, &cell_obj, cell_value, -1);
+	int cell_obj_id = -1;
+	if (cell_obj != NULL) {
+		int idx = agent_object_index((ObjectClass*)cell_obj, cell_obj->What_Am_I());
+		if (idx >= 0) cell_obj_id = AGENT_ID(cell_obj->What_Am_I(), idx);
+	}
+
+	TARGET best = scanner->Greatest_Threat(THREAT_RANGE);
+	int best_id = -1;
+	int best_cx = -1;
+	int best_cy = -1;
+	if (Target_Legal(best)) {
+		COORDINATE bc = As_Coord(best);
+		best_cx = Cell_X(Coord_Cell(bc));
+		best_cy = Cell_Y(Coord_Cell(bc));
+		if (Is_Target_Object(best)) {
+			ObjectClass* best_obj = As_Object(best);
+			int idx = agent_object_index(best_obj, best_obj->What_Am_I());
+			if (idx >= 0) best_id = AGENT_ID(best_obj->What_Am_I(), idx);
+		}
+	}
+
+	buf_cat("{\"scanner\":%d,\"target\":%d,\"method\":%d,\"mask\":%d,"
+		"\"range\":%d,\"primary\":%d,\"can0\":%d,\"can1\":%d,\"canPrimary\":%d,\"dist\":%d,\"inRange\":%s,"
+		"\"eval\":%s,\"value\":%d,\"cellEval\":%s,\"cellValue\":%d,"
+		"\"cellObj\":%d,\"bestLegal\":%s,\"bestId\":%d,\"bestCell\":\"(%d,%d)\","
+		"\"ally\":%s,\"noThreat\":%s,\"targetMission\":%d,"
+		"\"targetType\":\"%s\",\"targetHouse\":\"%s\",\"targetStrength\":%d,"
+		"\"targetCx\":%d,\"targetCy\":%d,"
+		"\"targetLegal\":%s,\"targetOwnedPlayer\":%s,\"targetDiscovered\":%s,"
+		"\"scannerLocked\":%s,\"targetLimbo\":%s,\"targetCloak\":%d}",
+		scanner_id, target_id, (int)method, mask,
+		range, primary, can0, can1, canPrimary, dist, in_range ? "true" : "false",
+		eval ? "true" : "false", value, cell_eval ? "true" : "false", cell_value,
+		cell_obj_id, Target_Legal(best) ? "true" : "false", best_id, best_cx, best_cy,
+		scanner->House->Is_Ally(target) ? "true" : "false",
+		MissionControl[target->Get_Mission()].IsNoThreat ? "true" : "false",
+		(int)target->Get_Mission(),
+		target->Class_Of().Name(),
+		agent_house_name(target->Owner()),
+		(int)target->Strength,
+		Cell_X(Coord_Cell(target->Center_Coord())),
+		Cell_Y(Coord_Cell(target->Center_Coord())),
+		target->Class_Of().IsLegalTarget ? "true" : "false",
+		target->IsOwnedByPlayer ? "true" : "false",
+		target->IsDiscoveredByPlayer ? "true" : "false",
+		scanner->IsLocked ? "true" : "false",
+		target->IsInLimbo ? "true" : "false",
+		(int)target->Cloak);
+	return s_cmd_buf;
+}
+
+/* ======================================================================
+ * EXPORT 5: agent_render — force a visual frame render for screenshots.
  * Temporarily disables the autoplay rendering skip so that Map.Render()
  * + SDL blit actually pushes pixels to the canvas. After rendering,
  * copies the canvas to window.__agentFrame as a data URL.

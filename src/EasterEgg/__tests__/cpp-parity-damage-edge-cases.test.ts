@@ -187,7 +187,7 @@ function makeCombatCtx(
 
 // ============================================================
 // Section 1: Minimum damage is 1 — combat.cpp:122-124
-// C++ guarantees MinDamage=1 at close range (distFactor < 4)
+// C++ applies MinDamage only after warhead fixed-point multiply leaves non-zero damage.
 // ============================================================
 describe('Minimum damage is 1 at close range (combat.cpp:122-124)', () => {
 
@@ -196,22 +196,22 @@ describe('Minimum damage is 1 at close range (combat.cpp:122-124)', () => {
     expect(INI_MIN_DAMAGE).toBe(1);
   });
 
-  it('tiny damage (baseDamage=1) with low warhead mult still yields 1 at point-blank', () => {
-    // C++ combat.cpp:122-124: if (distFactor < 4) damage = max(damage, MinDamage=1)
-    // baseDamage=1, HollowPoint vs wood (mult=0.05): 1 * 0.05 = 0.05 → MinDamage=1 → round(1)=1
+  it('tiny damage with low warhead mult can round to 0 before MinDamage', () => {
+    // fixed::operator*(int) reduces 1*5% to 0, and combat.cpp skips the
+    // distance/MinDamage block when damage is already zero.
     const result = modifyDamage(1, 'HollowPoint', 'wood', 0);
-    expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
+    expect(result).toBe(0);
   });
 
-  it('MinDamage applies at distFactor=3 but NOT at distFactor=4', () => {
+  it('MinDamage applies at distFactor=3 only when multiplied damage is non-zero', () => {
     // C++ combat.cpp:122: if (distance < 4) — strict less-than
-    // SA spread=3: dist=5px → distFactor=floor(10/3)=3 < 4 → MinDamage applies
-    const atDist3 = modifyDamage(1, 'SA', 'heavy', 5);
+    // AP spread=3: dist=4.5px → distFactor=3 < 4; 10*30% fixed gives 3, /3 gives 1.
+    const atDist3 = modifyDamage(10, 'AP', 'none', 4.5);
     expect(atDist3).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
 
     // SA spread=3: dist=6px → distFactor=floor(12/3)=4, NOT < 4 → MinDamage does NOT apply
     const atDist4 = modifyDamage(1, 'SA', 'heavy', 6);
-    // 1 * 0.25 / 4 = 0.0625 → round(0.0625) = 0 (no MinDamage guarantee)
+    // 1 * 25% fixed is 0, so the distance/MinDamage block is skipped.
     expect(atDist4).toBe(0);
   });
 
@@ -480,13 +480,11 @@ describe('Fixed-point rounding: C++ integer truncation (combat.cpp:108-114)', ()
     expect(result).toBe(50); // if rounded to 3: 100/3=33 — wrong
   });
 
-  it('damage division is floored after mult: 90/4 = 22.5 → rounds to 23', () => {
+  it('damage division is floored after mult: 90/4 = 22.5 → 22', () => {
     // HE vs none at dist=12px: mult=0.9, distFactor=4
-    // C++ integer truncation of 90/4 = 22 (floor), but TS uses Math.round → 23
-    // Actually C++ uses: damage = Fixed(damage) / distFactor which produces 22.5
-    // C++ keeps fixed-point until final cast. The expected value per existing tests is 23.
+    // C++ `damage` is an int; integer division truncates toward zero.
     const result = modifyDamage(100, 'HE', 'none', 12);
-    expect(result).toBe(23);
+    expect(result).toBe(22);
   });
 
   it('result is always integer', () => {
@@ -556,9 +554,9 @@ describe('Country firepower bias stacking (house.cpp:289,299)', () => {
 
   it('firepower bias stacks with distance falloff', () => {
     // SA vs none, dist=6px: distFactor=4, bias=1.1
-    // damage = 100 * 1.0 * 1.1 = 110, then /4 = 27.5 → round(27.5) = 28
+    // damage = 100 * 1.0 * 1.1 = 110, then /4 truncates to 27
     const result = modifyDamage(100, 'SA', 'none', 6, INI_GERMANY_FIREPOWER);
-    expect(result).toBe(28);
+    expect(result).toBe(27);
   });
 
   it('firepower bias can push damage to MaxDamage cap', () => {

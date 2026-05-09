@@ -16,6 +16,8 @@ import {
   UnitType, House, CELL_SIZE, RULE_GRAVITY,
   UNIT_STATS, WEAPON_STATS,
   buildDefaultAlliances,
+  directionToLeptons256,
+  pixelToLepton,
   type WeaponStats,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
@@ -45,6 +47,7 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     entityById: new Map(entities.map(e => [e.id, e])),
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -89,6 +92,14 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
 
 /** Create a raw InflightProjectile for direct testing of update logic */
 function makeProjectile(overrides: Partial<InflightProjectile>): InflightProjectile {
+  const startX = overrides.startX ?? 0;
+  const startY = overrides.startY ?? 0;
+  const impactX = overrides.impactX ?? 100;
+  const impactY = overrides.impactY ?? 100;
+  const logicalLX = overrides.logicalLX ?? pixelToLepton(startX);
+  const logicalLY = overrides.logicalLY ?? pixelToLepton(startY);
+  const headToLX = overrides.headToLX ?? pixelToLepton(impactX);
+  const headToLY = overrides.headToLY ?? pixelToLepton(impactY);
   return {
     attackerId: 1,
     targetId: 2,
@@ -99,14 +110,14 @@ function makeProjectile(overrides: Partial<InflightProjectile>): InflightProject
     travelFrames: 20,
     currentFrame: 0,
     directHit: true,
-    impactX: 100,
-    impactY: 100,
+    impactX,
+    impactY,
     attackerIsPlayer: false,
     isArcing: false,
     arcHeight: 0,
     arcRiser: 0,
-    startX: 0,
-    startY: 0,
+    startX,
+    startY,
     dogRiderId: -1,
     fuelTimer: 10,
     isFueled: false,
@@ -114,6 +125,16 @@ function makeProjectile(overrides: Partial<InflightProjectile>): InflightProject
     dropHeight: 0,
     isFlameEquipped: false,
     flameToggle: false,
+    logicalLX,
+    logicalLY,
+    headToLX,
+    headToLY,
+    facing256: overrides.facing256 ?? directionToLeptons256(logicalLX, logicalLY, headToLX, headToLY),
+    speedAccum: 0,
+    speedAdd: 0,
+    fuseTimer: 100,
+    armingTimer: 0,
+    proximity: 0x7fffffff,
     ...overrides,
   };
 }
@@ -192,7 +213,7 @@ describe('IsFueled — fuel timer detonation (fuse.cpp:127-139)', () => {
     expect(ctx.inflightProjectiles.length).toBe(1);
   });
 
-  it('launchProjectile sets fuelTimer = min(0xFF, travelFrames+4) for fueled weapons (fuse.cpp:94-97)', () => {
+  it('launchProjectile sets fuelTimer = min(0xFF, travelFrames) for fueled weapons', () => {
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 5, 5);
     const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -203,8 +224,8 @@ describe('IsFueled — fuel timer detonation (fuse.cpp:127-139)', () => {
     expect(ctx.inflightProjectiles.length).toBe(1);
     const proj = ctx.inflightProjectiles[0];
     expect(proj.isFueled).toBe(true);
-    // fuelTimer = min(0xFF, travelFrames + 4)
-    expect(proj.fuelTimer).toBe(Math.min(0xFF, proj.travelFrames + 4));
+    // travelFrames already includes bullet.cpp's +4 launch offset.
+    expect(proj.fuelTimer).toBe(Math.min(0xFF, proj.travelFrames));
   });
 });
 

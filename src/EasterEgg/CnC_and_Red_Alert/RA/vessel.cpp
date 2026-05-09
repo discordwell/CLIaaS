@@ -67,6 +67,10 @@
 
 #include "function.h"
 
+extern "C" {
+	extern int g_agent_team_remove_site;
+}
+
 
 /***********************************************************************************************
  * VesselClass::VesselClass -- Constructor for vessel class objects.                           *
@@ -148,11 +152,14 @@ VesselClass::~VesselClass(void)
 		/*
 		**	Remove this member from any team it may be associated with. This must occur at the
 		**	top most level of the inheritance hierarchy because it may call virtual functions.
-		*/
-		if (Team.Is_Valid()) {
-			Team->Remove(this);
-			Team = NULL;
-		}
+			*/
+			if (Team.Is_Valid()) {
+				int site_save = g_agent_team_remove_site;
+				g_agent_team_remove_site = 153;
+				Team->Remove(this);
+				g_agent_team_remove_site = site_save;
+				Team = NULL;
+			}
 
 		House->Tracking_Remove(this);
 
@@ -1910,10 +1917,13 @@ int VesselClass::Mission_Retreat(void)
 			IsALoaner = true;
 			if (!Target_Legal(NavCom)) {
 //				CELL cell = Map.Calculated_Cell(House->Control.Edge, (Team.Is_Valid()) ? Team->Class->Origin : -1, -1, Class->Speed);
-				CELL cell = Map.Calculated_Cell(House->Control.Edge, (Team.Is_Valid()) ? Team->Class->Origin : -1, Coord_Cell(Center_Coord()), Class->Speed);
-				if (Team.Is_Valid()) {
-					Team->Remove(this);
-				}
+					CELL cell = Map.Calculated_Cell(House->Control.Edge, (Team.Is_Valid()) ? Team->Class->Origin : -1, Coord_Cell(Center_Coord()), Class->Speed);
+					if (Team.Is_Valid()) {
+						int site_save = g_agent_team_remove_site;
+						g_agent_team_remove_site = 1915;
+						Team->Remove(this);
+						g_agent_team_remove_site = site_save;
+					}
 				Assign_Destination(::As_Target(cell));
 			}
 			Status = TRAVEL;

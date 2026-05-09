@@ -25,8 +25,10 @@ import {
   updateVehicleCloak, updateMechanicUnit, updateMedic,
   tickVortices,
   DEMO_TRUCK_DAMAGE, DEMO_TRUCK_RADIUS, DEMO_TRUCK_FUSE_TICKS,
-  CHRONO_TANK_COOLDOWN, MAD_TANK_CHARGE_TICKS, MAD_TANK_DAMAGE,
-  MAD_TANK_RADIUS, MAX_MINES_PER_HOUSE,
+  CHRONO_TANK_COOLDOWN, MAD_TANK_CHARGE_TICKS,
+  MAD_TANK_UNIT_DAMAGE_PERCENT, MAD_TANK_BUILDING_DAMAGE_PERCENT,
+  MAD_TANK_INFANTRY_DAMAGE, MAD_TANK_RADIUS, MAD_TANK_SCREEN_SHAKE,
+  MAX_MINES_PER_HOUSE,
   MECHANIC_HEAL_RANGE, MECHANIC_HEAL_AMOUNT,
 } from '../engine/specialUnits';
 
@@ -1045,23 +1047,27 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
     expect(MAX_MINES_PER_HOUSE).toBe(50);
   });
 
-  it('updateMinelayer only runs for V_MNLY with moveTarget', () => {
+  it('updateMinelayer only runs for V_MNLY in Mission.UNLOAD', () => {
     // Non-MNLY entity: should be a no-op
     const tank = makeEntity(UnitType.V_2TNK, House.Spain);
+    tank.mission = Mission.UNLOAD;
     tank.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, tank);
     expect(ctx.mines.length).toBe(0);
 
-    // MNLY without moveTarget: no-op
+    // MNLY in ordinary movement: no-op. C++ mine placement is Mission_Unload.
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
-    mnly.moveTarget = null;
+    mnly.mission = Mission.MOVE;
+    mnly.moveTarget = { lx: pixelToLepton(200), ly: pixelToLepton(200) };
     updateMinelayer(ctx, mnly);
     expect(ctx.mines.length).toBe(0);
+    expect(mnly.mission).toBe(Mission.MOVE);
   });
 
   it('updateMinelayer respects ammo limit', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     mnly.ammo = 0;
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
@@ -1072,6 +1078,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer respects per-house mine limit', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     // Fill up mines to MAX_MINES_PER_HOUSE
     const existingMines = Array.from({ length: MAX_MINES_PER_HOUSE }, (_, i) => ({
@@ -1084,6 +1091,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer prevents duplicate mines at same cell', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     const targetCell = worldToCell(mnly.pos.x, mnly.pos.y);
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext({
@@ -1096,6 +1104,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer places AV mine with 1200 damage for allied house', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
@@ -1107,6 +1116,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer decrements ammo on mine placement', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     const prevAmmo = mnly.ammo;
@@ -1116,6 +1126,7 @@ describe('Minelayer (MNLY) — mine placement state machine', () => {
 
   it('updateMinelayer increments entity mineCount', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);
@@ -1285,8 +1296,11 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
 
   it('static constants match C++ parity', () => {
     expect(MAD_TANK_CHARGE_TICKS).toBe(120);  // aftrmath.ini QuakeDelay=120
-    expect(MAD_TANK_DAMAGE).toBe(600);
+    expect(MAD_TANK_UNIT_DAMAGE_PERCENT).toBe(0.45);
+    expect(MAD_TANK_BUILDING_DAMAGE_PERCENT).toBe(0.40);
+    expect(MAD_TANK_INFANTRY_DAMAGE).toBe(0);
     expect(MAD_TANK_RADIUS).toBe(20);          // aftrmath.ini MTankDistance=20
+    expect(MAD_TANK_SCREEN_SHAKE).toBe(8);
   });
 
   it('deployMADTank sets isDeployed = true and starts timer', () => {
@@ -1355,7 +1369,7 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
     expect(qtnk.deployTimer).toBe(49);
   });
 
-  it('updateMADTank damages vehicles (not infantry, not air, not self)', () => {
+  it('updateMADTank damages vehicles and aircraft, skips infantry damage, and kills self', () => {
     const qtnk = makeEntity(UnitType.V_QTNK, House.Spain);
     qtnk.isDeployed = true;
     qtnk.deployTimer = 1; // will fire this tick
@@ -1377,12 +1391,14 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
     });
     updateMADTank(ctx, qtnk);
 
-    // Tank should be damaged
+    // Tank should be damaged for 45% max HP with forced AP damage.
     const tankCall = (ctx.damageEntity as ReturnType<typeof vi.fn>).mock.calls.find(
       (c: any[]) => c[0] === tank
     );
     expect(tankCall).toBeDefined();
-    expect(tankCall![1]).toBe(MAD_TANK_DAMAGE);
+    expect(tankCall![1]).toBe(Math.floor(tank.maxHp * MAD_TANK_UNIT_DAMAGE_PERCENT));
+    expect(tankCall![2]).toBe('AP');
+    expect(tankCall![3]).toEqual({ forced: true });
 
     // Infantry should NOT be damaged
     const infantryCall = (ctx.damageEntity as ReturnType<typeof vi.fn>).mock.calls.find(
@@ -1390,14 +1406,21 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
     );
     expect(infantryCall).toBeUndefined();
 
-    // Air unit should NOT be damaged
+    // Air unit should be damaged by the C++ default non-infantry branch.
     const heliCall = (ctx.damageEntity as ReturnType<typeof vi.fn>).mock.calls.find(
       (c: any[]) => c[0] === heli
     );
-    expect(heliCall).toBeUndefined();
+    expect(heliCall).toBeDefined();
+    expect(heliCall![1]).toBe(Math.floor(heli.maxHp * MAD_TANK_UNIT_DAMAGE_PERCENT));
+    expect(heliCall![2]).toBe('AP');
+
+    const selfCall = (ctx.damageEntity as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === qtnk
+    );
+    expect(selfCall).toBeDefined();
   });
 
-  it('updateMADTank uses MAD_TANK_DAMAGE and MAD_TANK_RADIUS', () => {
+  it('updateMADTank uses percentage damage and strict MTankDistance radius', () => {
     const qtnk = makeEntity(UnitType.V_QTNK, House.Spain);
     qtnk.isDeployed = true;
     qtnk.deployTimer = 1;
@@ -1405,9 +1428,21 @@ describe('MAD Tank (QTNK) — seismic shockwave state machine', () => {
     const tank = makeEntity(UnitType.V_2TNK, House.USSR);
     tank.pos.x = qtnk.pos.x + (MAD_TANK_RADIUS - 1) * CELL_SIZE;
     tank.pos.y = qtnk.pos.y;
-    const ctx = makeMockSpecialUnitsContext({ entities: [qtnk, tank] });
+    const edgeTank = makeEntity(UnitType.V_2TNK, House.USSR);
+    edgeTank.pos.x = qtnk.pos.x + MAD_TANK_RADIUS * CELL_SIZE;
+    edgeTank.pos.y = qtnk.pos.y;
+    const ctx = makeMockSpecialUnitsContext({ entities: [qtnk, tank, edgeTank] });
     updateMADTank(ctx, qtnk);
-    expect(ctx.damageEntity).toHaveBeenCalledWith(tank, MAD_TANK_DAMAGE, 'HE');
+    expect(ctx.damageEntity).toHaveBeenCalledWith(
+      tank,
+      Math.floor(tank.maxHp * MAD_TANK_UNIT_DAMAGE_PERCENT),
+      'AP',
+      { forced: true },
+    );
+    const edgeCall = (ctx.damageEntity as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === edgeTank
+    );
+    expect(edgeCall).toBeUndefined();
   });
 
   it('updateMADTank self-destructs after shockwave', () => {
@@ -1757,8 +1792,9 @@ describe('Game tick loop — special unit update integration', () => {
     expect(stnk.cloakState).toBe(CloakState.CLOAKING);
   });
 
-  it('updateMinelayer runs when MNLY has moveTarget', () => {
+  it('updateMinelayer runs for MNLY Mission.UNLOAD', () => {
     const mnly = makeEntity(UnitType.V_MNLY, House.Spain);
+    mnly.mission = Mission.UNLOAD;
     mnly.moveTarget = { lx: pixelToLepton(mnly.pos.x), ly: pixelToLepton(mnly.pos.y) };
     const ctx = makeMockSpecialUnitsContext();
     updateMinelayer(ctx, mnly);

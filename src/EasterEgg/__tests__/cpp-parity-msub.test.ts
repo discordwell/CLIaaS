@@ -48,7 +48,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -697,7 +697,7 @@ describe('MSUB retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, msub, attacker);
 
     expect(msub.target).toBe(attacker);
-    expect(msub.mission).toBe(Mission.ATTACK);
+    expect(msub.mission).toBe(Mission.GUARD);
   });
 
   it('MSUB CAN retaliate (has SubSCUD weapon)', () => {
@@ -737,19 +737,14 @@ describe('MSUB retaliation (techno.cpp)', () => {
 // C++ techno.cpp -- AI-controlled units on GUARD move to adjacent cell when damaged
 
 describe('MSUB AI scatter on damage (techno.cpp)', () => {
-  it('AI-controlled MSUB on GUARD mission changes position when damaged (IQ >= 2)', () => {
-    let scattered = false;
-    for (let i = 0; i < 50; i++) {
-      const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
-      msub.mission = Mission.GUARD;
-      const ctx = makeCombatCtx([msub]);
-      aiScatterOnDamage(ctx, msub);
-      if (msub.mission === Mission.MOVE && msub.moveTarget !== null) {
-        scattered = true;
-        break;
-      }
-    }
-    expect(scattered).toBe(true);
+  it('AI-controlled MSUB on GUARD mission does not use FootClass fallback scatter', () => {
+    const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
+    msub.mission = Mission.GUARD;
+    const ctx = makeCombatCtx([msub]);
+    aiScatterOnDamage(ctx, msub);
+
+    expect(msub.moveTarget).toBeNull();
+    expect(msub.mission).toBe(Mission.GUARD);
   });
 
   it('player-controlled MSUB does NOT scatter', () => {

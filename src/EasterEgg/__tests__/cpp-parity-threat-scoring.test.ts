@@ -535,6 +535,47 @@ describe('numerical parity — exact C++ vs TS score comparison', () => {
     expect(scoreExpNear).toBeGreaterThan(scoreChNear);
   });
 
+  it('transport cargo contributes to TechnoClass::Value when content scan is enabled', () => {
+    const scanner = makeEntity(UnitType.V_SS, House.USSR, 0, 0);
+    const lst = makeEntity(UnitType.V_LST, House.Greece, 0, 0);
+    const tank1 = makeEntity(UnitType.V_2TNK, House.Greece, 0, 0);
+    const tank2 = makeEntity(UnitType.V_2TNK, House.Greece, 0, 0);
+    const jeep = makeEntity(UnitType.V_JEEP, House.Greece, 0, 0);
+    const mcv = makeEntity(UnitType.V_MCV, House.Greece, 0, 0);
+    lst.passengers.push(tank1, tank2, jeep, mcv);
+
+    const withoutCargo = threatScore(scanner, lst, 12);
+    const withCargo = threatScore(scanner, lst, 12, null, 0, false, undefined, true);
+
+    // LST base: 2*25 = 50.
+    // Cargo: 2TNK 2*(2*40) + JEEP 2*20 + MCV 2*60 = 320.
+    // Total Value() with cargo = 370; at 12 cells divisor is 13.
+    expect(withoutCargo).toBe(Math.floor((50 * 32000) / 13));
+    expect(withCargo).toBe(Math.floor((370 * 32000) / 13));
+  });
+
+  it('SCG07EA submarine threat ordering: loaded LST outranks closer PT boat', () => {
+    const scanner = makeEntity(UnitType.V_SS, House.USSR, 0, 0);
+    const pt = makeEntity(UnitType.V_PT, House.Greece, 0, 0);
+    const lst = makeEntity(UnitType.V_LST, House.Greece, 0, 0);
+    lst.passengers.push(
+      makeEntity(UnitType.V_2TNK, House.Greece, 0, 0),
+      makeEntity(UnitType.V_2TNK, House.Greece, 0, 0),
+      makeEntity(UnitType.V_JEEP, House.Greece, 0, 0),
+      makeEntity(UnitType.V_MCV, House.Greece, 0, 0),
+    );
+
+    // SCG07EA geometry: initial PTs are about 8 cells away; reinforcement
+    // cargo LST is about 12 cells away. C++ VesselClass::Greatest_Threat
+    // selects the LST once cargo is included in Value().
+    const ptScore = threatScore(scanner, pt, 8, null, 0, false, undefined, true);
+    const lstScore = threatScore(scanner, lst, 12, null, 0, false, undefined, true);
+
+    expect(ptScore).toBe(Math.floor((60 * 32000) / 9));
+    expect(lstScore).toBe(Math.floor((370 * 32000) / 13));
+    expect(lstScore).toBeGreaterThan(ptScore);
+  });
+
   it('V2RL at 1 cell — matches C++ Value()=2*40=80', () => {
     const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.V_V2RL, House.Greece, 200, 200);

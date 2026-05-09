@@ -405,10 +405,11 @@ describe('TRUK cannot retaliate (techno.cpp — no weapon)', () => {
     expect(jeep.weapon).not.toBeNull();
 
     const ctx = makeCombatCtx([jeep, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, jeep, attacker);
 
     expect(jeep.target).toBe(attacker);
-    expect(jeep.mission).toBe(Mission.ATTACK);
+    expect(jeep.mission).toBe(Mission.GUARD);
   });
 });
 
@@ -499,7 +500,7 @@ describe('TRUK stop-rotate-move (drive.cpp parity)', () => {
     jeep.bodyFacing32 = Dir.N * 4;
 
     // C++ parity: all vehicles use Rotation_Adjust accumulator.
-    // ROT=10 is fast but not instant. JEEP takes 7 ticks for 90 degrees.
+    // ROT=10 is fast but not instant. C++ full 256-facing rotation reaches 90 degrees in 5 ticks.
     let ticks = 0;
     while (jeep.facing !== Dir.E && ticks < 20) {
       jeep.rotTickedThisFrame = false;
@@ -507,7 +508,7 @@ describe('TRUK stop-rotate-move (drive.cpp parity)', () => {
       ticks++;
     }
     expect(jeep.facing).toBe(Dir.E);
-    expect(ticks).toBe(7);
+    expect(ticks).toBe(5);
   });
 
   it('TRUK gradual rotation: tickRotation does NOT snap for ROT=5', () => {
@@ -620,7 +621,7 @@ describe('TRUK AI scatter on damage (techno.cpp)', () => {
       truk.mission = Mission.GUARD;
       const ctx = makeCombatCtx([truk]);
       aiScatterOnDamage(ctx, truk);
-      if (truk.mission === Mission.MOVE && truk.moveTarget !== null) {
+      if (truk.moveTarget !== null) {
         scattered = true;
         break;
       }

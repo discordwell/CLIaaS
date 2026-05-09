@@ -46,6 +46,7 @@ function makeCombatCtx(
     entityById: new Map(entities.map(e => [e.id, e])),
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -106,17 +107,18 @@ function oppositeDir(d: Dir): Dir {
 
 describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
 
-  // C++ infantry.cpp:1888-1890 — direction from threat to infantry, with +-2 offset
+  // C++ infantry.cpp:1888-1890 — direction from threat to infantry, with +-2 offset.
+  // This source-threat branch executes only for forced scatter or FraidyCat infantry.
   it('infantry scatters AWAY from threat direction', () => {
     // Attacker is to the SOUTH of infantry → infantry should scatter NORTH-ish
-    const infantry = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    const infantry = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
     infantry.mission = Mission.GUARD;
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 13); // 3 cells south
 
     // Run many times; collect scatter directions
     const scatterDirs = new Set<Dir>();
     for (let i = 0; i < 200; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       aiScatterOnDamage(ctx, e, attacker);
@@ -149,7 +151,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
 
     const scatterDirs = new Set<Dir>();
     for (let i = 0; i < 300; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       aiScatterOnDamage(ctx, e, attacker);
@@ -168,7 +170,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
   it('infantry blocked in away direction tries other cells', () => {
     // Place infantry at cell (1, 1), attacker to east at (5, 1)
     // Block the west cell (0, 1) — away direction
-    const e = entityAtCell(UnitType.I_E1, House.USSR, 1, 1);
+    const e = entityAtCell(UnitType.I_C1, House.USSR, 1, 1);
     e.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([e]);
@@ -181,7 +183,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     // If direct west is blocked, it should try the next directions in order
     let scattered = false;
     for (let i = 0; i < 100; i++) {
-      const te = entityAtCell(UnitType.I_E1, House.USSR, 1, 1);
+      const te = entityAtCell(UnitType.I_C1, House.USSR, 1, 1);
       te.mission = Mission.GUARD;
       const tctx = makeCombatCtx([te]);
       tctx.map.setTerrain(0, 1, Terrain.ROCK); // block west cell
@@ -225,6 +227,23 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(scatterDirs.size).toBeGreaterThan(1);
   });
 
+  it('vessels do not use the FootClass damage scatter fallback', async () => {
+    const { ScenarioRandom } = await import('../engine/random');
+
+    const vessel = entityAtCell(UnitType.V_DD, House.USSR, 10, 10);
+    vessel.mission = Mission.GUARD;
+    expect(vessel.isNavalUnit).toBe(true);
+
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+    const ctx = makeCombatCtx([vessel, attacker]);
+    const before = ScenarioRandom.callCount;
+
+    aiScatterOnDamage(ctx, vessel, attacker);
+
+    expect(ScenarioRandom.callCount - before).toBe(0);
+    expect(vessel.moveTarget).toBeNull();
+  });
+
   // C++ infantry.cpp:1860 — IsDriving → forced=false; line 1885 — !forced && !FraidyCat → skip
   it('already-moving infantry (IsDriving) does not scatter unless FraidyCat', () => {
     // E1 is not FraidyCat — should NOT scatter when already driving
@@ -250,13 +269,14 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       const c1 = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       c1.mission = Mission.MOVE;
       c1.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(10 * CELL_SIZE) };
+      const origTarget = { ...c1.moveTarget };
       const ctx = makeCombatCtx([c1]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, c1, attacker);
       // FraidyCat with moveTarget: forced=false, but isFraidyCat check at line 1885 passes
       // MISSION_CONTROL[MOVE].isScatter is true, so line 1866 passes
       // c1.target is null, so line 1872 passes
-      if (c1.moveTarget!.lx !== 15 * 256 + 128 || c1.moveTarget!.ly !== 10 * 256 + 128) {
+      if (c1.moveTarget!.lx !== origTarget.lx || c1.moveTarget!.ly !== origTarget.ly) {
         scattered = true;
         break;
       }
@@ -264,16 +284,16 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(scattered).toBe(true);
   });
 
-  // ATTACK has isScatter=true (C++ default, no INI override) — infantry CAN scatter
+  // ATTACK has isScatter=true (C++ default, no INI override) — FraidyCat infantry can scatter.
   it('infantry on ATTACK mission CAN scatter (isScatter=true per C++ defaults)', () => {
     let scattered = false;
     for (let i = 0; i < 50; i++) {
-      const e1 = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e1 = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e1.mission = Mission.ATTACK;
       const ctx = makeCombatCtx([e1]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, e1, attacker);
-      if (e1.mission === Mission.MOVE && e1.moveTarget !== null) {
+      if (e1.missionQueue === Mission.MOVE && e1.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -339,7 +359,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       aiScatterOnDamage(ctx, e);
-      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+      if (e.missionQueue === Mission.MOVE && e.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -372,8 +392,8 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(scatterDirs.has(Dir.E) || scatterDirs.has(Dir.NE) || scatterDirs.has(Dir.SE)).toBe(true);
   });
 
-  // Non-infantry on non-GUARD mission doesn't scatter at all
-  it('non-infantry on ATTACK mission does not scatter', () => {
+  // UnitClass::Scatter allows ATTACK if the mission is scatterable and no NavCom blocks it.
+  it('non-infantry on ATTACK mission assigns a scatter destination without changing mission immediately', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
     tank.mission = Mission.ATTACK;
 
@@ -382,7 +402,7 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     aiScatterOnDamage(ctx, tank, attacker);
 
     expect(tank.mission).toBe(Mission.ATTACK);
-    expect(tank.moveTarget).toBeNull();
+    expect(tank.moveTarget).not.toBeNull();
   });
 
   // AI IQ < 2 should prevent scatter
@@ -402,31 +422,37 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
 
 // C++ parity: Scatter fires exactly once per damage event (infantry.cpp:438-440)
 describe('Single-scatter invariant (no double-scatter regression)', () => {
-  it('damageEntity on idle infantry fires exactly 1 scatter RNG', async () => {
-    // Verifies the fix for 2a99bce6 follow-up: TS previously had scatter code
-    // in BOTH damageEntity() (via aiScatterOnDamage) AND updateAttack() (via a
-    // duplicate scatterInfantry helper). C++ InfantryClass::Take_Damage calls
-    // Scatter(source_coord) ONCE (infantry.cpp:439). The TS attack-damage code
-    // path must also consume exactly 1 scatter RNG, not 2.
+  it('damageEntity on non-Fraidy source-hit infantry does not run scatter', async () => {
+    // C++ FootClass::Take_Damage first tries retaliation. InfantryClass then
+    // calls Scatter(source_coord), but non-Fraidy infantry exit before the
+    // Random_Pick offset unless scatter was forced.
     const { ScenarioRandom } = await import('../engine/random');
     const { damageEntity } = await import('../engine/combat');
 
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     victim.mission = Mission.GUARD; // isScatter=true, no TarCom
-    victim.target = null; // idle — will pass the fraidyCat-or-target guard
-    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
+    victim.target = null;
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 12);
     const ctx = makeCombatCtx([victim, attacker]);
 
+    const savedSeed = ScenarioRandom.seed;
+    const savedCallCount = ScenarioRandom.callCount;
+    ScenarioRandom.seed = 0;
+    ScenarioRandom.callCount = 0;
     const before = ScenarioRandom.callCount;
     damageEntity(ctx, victim, 5, 'SA', attacker);
     const consumed = ScenarioRandom.callCount - before;
+    ScenarioRandom.seed = savedSeed;
+    ScenarioRandom.callCount = savedCallCount;
 
-    // Expected: 1 RNG for scatter direction (Random_Pick(0,4)). If the duplicate
-    // scatterInfantry helper is re-introduced, this will jump to 2.
+    // The one accepted RNG call is the AI threat comparison, not scatter.
     expect(consumed).toBe(1);
+    expect(victim.moveTarget).toBeNull();
+    expect(victim.missionQueue).toBeNull();
+    expect(victim.target).toBe(attacker);
   });
 
-  it('damageEntity on combat infantry (with target) fires 0 scatter RNGs', async () => {
+  it('damageEntity on combat infantry (with target) skips scatter but still runs AI threat RNG', async () => {
     // C++ infantry.cpp:1887 — non-FraidyCat with valid TarCom doesn't scatter.
     // Both the aiScatterOnDamage guard (combat.ts:376) and the C++ rule match.
     const { ScenarioRandom } = await import('../engine/random');
@@ -439,10 +465,18 @@ describe('Single-scatter invariant (no double-scatter regression)', () => {
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
     const ctx = makeCombatCtx([victim, aTarget, attacker]);
 
+    const savedSeed = ScenarioRandom.seed;
+    const savedCallCount = ScenarioRandom.callCount;
+    ScenarioRandom.seed = 0;
+    ScenarioRandom.callCount = 0;
     const before = ScenarioRandom.callCount;
     damageEntity(ctx, victim, 5, 'SA', attacker);
     const consumed = ScenarioRandom.callCount - before;
+    ScenarioRandom.seed = savedSeed;
+    ScenarioRandom.callCount = savedCallCount;
 
-    expect(consumed).toBe(0);
+    expect(consumed).toBe(1);
+    expect(victim.moveTarget).toBeNull();
+    expect(victim.missionQueue).toBeNull();
   });
 });

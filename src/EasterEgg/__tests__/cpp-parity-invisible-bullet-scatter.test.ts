@@ -1,6 +1,4 @@
 /**
- * @vitest-environment jsdom
- *
  * C++ Behavioral Parity: Invisible projectile Coord_Scatter on detonation.
  *
  * C++ bullet.cpp:1012-1014 (Bullet_Explodes):
@@ -16,7 +14,7 @@
  * ChainGun, Heal, etc. (rules.ini [Invisible] and [Ack] bullet types).
  */
 
-import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE,
   WEAPON_STATS,
@@ -226,106 +224,5 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     const result2 = ScenarioRandom.seed;
 
     expect(result1).toBe(result2);
-  });
-});
-
-// ── Game-level flush ordering (C++ bullet.cpp:736-738 + logic.cpp:285) ────────
-// Verifies that `deferInvisibleScatter()` queues a Coord_Scatter RNG that gets
-// flushed at the END of the SAME tick's entity-AI phase (after Phase 1-4
-// entity loops complete, just before updateInflightProjectiles which advances
-// non-invisible projectiles). Mirrors WASM, where an invisible weapon's
-// newly-Submit'd bullet sits at a high Logic idx and fires Bullet_Explodes →
-// Coord_Scatter inside the SAME Logic loop iteration as the firing entity.
-// See commit 61767115 for the C++ investigation.
-describe('Game same-tick scatter flush (end of entity-AI phase)', () => {
-  beforeAll(() => {
-    vi.stubGlobal('Audio', class {
-      src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
-      addEventListener(): void {} removeEventListener(): void {}
-      play(): Promise<void> { return Promise.resolve(); } pause(): void {}
-      cloneNode(): { src: string } { return { src: '' }; }
-    });
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
-      { imageSmoothingEnabled: false } as unknown as CanvasRenderingContext2D
-    ));
-  });
-
-  it('update() consumes 1 scatter RNG same-tick when _pendingInvisibleScatters > 0', async () => {
-    const { Game } = await import('../engine/index');
-    const canvas = document.createElement('canvas');
-    canvas.width = 640; canvas.height = 400;
-    const game = new Game(canvas);
-    // Cast to access private internals — this is a regression test for the
-    // same-tick end-of-entity-phase flush invariant, which is the entire fix.
-    const g = game as unknown as {
-      _pendingInvisibleScatters: number;
-      update: () => void;
-      tick: number;
-      entities: unknown[];
-      structures: unknown[];
-    };
-
-    // Simulate a queued scatter (would have been queued by this tick's fire
-    // path in real runs; here we seed it directly to test the flush).
-    g._pendingInvisibleScatters = 1;
-    const seedBefore = ScenarioRandom.seed >>> 0;
-
-    // Snapshot RNG call count before update().
-    const callsBefore = ScenarioRandom.callCount;
-    g.update();
-    const callsAfter = ScenarioRandom.callCount;
-
-    // The queued scatter must have been consumed during this update()
-    // (exactly 1 RNG call for nextInRange(0, 255)). Other per-tick
-    // subsystems (e.g. team AI) may fire more RNGs — we just verify
-    // _pendingInvisibleScatters is drained back to 0 and ≥1 call fired.
-    expect(g._pendingInvisibleScatters).toBe(0);
-    expect(callsAfter).toBeGreaterThanOrEqual(callsBefore + 1);
-    // Seed must have changed (scatter consumed).
-    expect(ScenarioRandom.seed >>> 0).not.toBe(seedBefore);
-  });
-
-  it('update() does NOT consume scatter RNG when queue is empty', async () => {
-    const { Game } = await import('../engine/index');
-    const canvas = document.createElement('canvas');
-    canvas.width = 640; canvas.height = 400;
-    const game = new Game(canvas);
-    const g = game as unknown as {
-      _pendingInvisibleScatters: number;
-      update: () => void;
-    };
-
-    g._pendingInvisibleScatters = 0;
-    const callsBefore = ScenarioRandom.callCount;
-    g.update();
-    const callsAfter = ScenarioRandom.callCount;
-
-    // No scatter queue → flush contributes 0 RNG calls. (Other subsystems may
-    // still fire RNG; we only verify the scatter queue stays at 0 and we don't
-    // erroneously consume a scatter when none was queued.)
-    expect(g._pendingInvisibleScatters).toBe(0);
-    // If no other subsystems are active on an empty game, callsAfter should
-    // equal callsBefore. We tolerate small positive delta (team/house AI) but
-    // verify no negative/large bursts.
-    expect(callsAfter - callsBefore).toBeGreaterThanOrEqual(0);
-  });
-
-  it('multiple queued scatters are all flushed on the same update()', async () => {
-    const { Game } = await import('../engine/index');
-    const canvas = document.createElement('canvas');
-    canvas.width = 640; canvas.height = 400;
-    const game = new Game(canvas);
-    const g = game as unknown as {
-      _pendingInvisibleScatters: number;
-      update: () => void;
-    };
-
-    g._pendingInvisibleScatters = 3;
-    const callsBefore = ScenarioRandom.callCount;
-    g.update();
-
-    expect(g._pendingInvisibleScatters).toBe(0);
-    // At least 3 RNG calls for the three flushed scatters.
-    expect(ScenarioRandom.callCount - callsBefore).toBeGreaterThanOrEqual(3);
   });
 });

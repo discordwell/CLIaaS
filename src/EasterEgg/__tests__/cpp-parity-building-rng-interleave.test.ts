@@ -82,17 +82,26 @@ describe('Building RNG Interleaving — C++ parity', () => {
   });
 
   it('interleaved loop processes timer jitter RNG before combat for each building', () => {
-    // In the interleaved method, ScenarioRandom.nextInRange(0, 2) (timer jitter)
-    // must appear BEFORE _updateSingleStructureCombat for the same building iteration
-    const methodStart = indexSource.indexOf('private tickStructuresInterleaved(');
-    expect(methodStart).toBeGreaterThan(-1);
-    const methodBody = indexSource.slice(methodStart, methodStart + 3000);
-    const jitterIdx = methodBody.indexOf('ScenarioRandom.nextInRange(0, 2)');
-    const combatIdx = methodBody.indexOf('_updateSingleStructureCombat(');
-    expect(jitterIdx).toBeGreaterThan(-1);
+    // In the live Phase 2 structure loop, ScenarioRandom.nextInRange(0, 2)
+    // (timer jitter) must appear BEFORE _updateSingleStructureCombat for the
+    // same building iteration.
+    const phaseStart = indexSource.indexOf('Phase 2: ALL structures');
+    const phaseEnd = indexSource.indexOf('Phase 3: post-building entities');
+    expect(phaseStart).toBeGreaterThan(-1);
+    expect(phaseEnd).toBeGreaterThan(phaseStart);
+    const phaseBody = indexSource.slice(phaseStart, phaseEnd);
+    const timerIdx = phaseBody.indexOf('dispatchStructureMissionTimer(');
+    const combatIdx = phaseBody.indexOf('_updateSingleStructureCombat(');
+    expect(timerIdx).toBeGreaterThan(-1);
     expect(combatIdx).toBeGreaterThan(-1);
-    // Timer jitter RNG must come before combat call (matching C++ AI() → Firing_AI() order)
-    expect(jitterIdx).toBeLessThan(combatIdx);
+    // Timer dispatch, which owns the jitter RNG, must come before combat call
+    // (matching C++ AI() → Firing_AI() order).
+    expect(timerIdx).toBeLessThan(combatIdx);
+
+    const helperStart = indexSource.indexOf('private dispatchStructureMissionTimer(');
+    expect(helperStart).toBeGreaterThan(-1);
+    const helperBody = indexSource.slice(helperStart, helperStart + 2500);
+    expect(helperBody).toContain('ScenarioRandom.nextInRange(0, 2)');
   });
 
   it('updateStructureCombat wrapper delegates to updateSingleStructureCombat', () => {

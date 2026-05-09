@@ -372,9 +372,10 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     expect(hunter.target?.id).toBe(near.id);
   });
 
-  it('hunt transitions to ATTACK when target is in range (C++ Approach_Target → attack)', () => {
+  it('hunt keeps HUNT while preparing to fire at an in-range target', () => {
     // C++ foot.cpp:698: Approach_Target() handles moving toward target
-    // Once in weapon range, the unit attacks.
+    // without assigning MISSION_ATTACK for ordinary armed units. Combat_AI /
+    // Firing_AI can fire while Mission remains HUNT.
     const hunter = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const target = makeEntity(UnitType.E1, House.Greece, 100 + CELL_SIZE, 100); // very close
 
@@ -387,9 +388,11 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
 
     updateHunt(ctx, hunter);
 
-    // If target is in weapon range, should transition to ATTACK
+    // If target is in weapon range, should prepare the attack animation while
+    // preserving HUNT so future hunt scans still run.
     if (hunter.inRange(target)) {
-      expect(hunter.mission).toBe(Mission.ATTACK);
+      expect(hunter.mission).toBe(Mission.HUNT);
+      expect(hunter.animState).toBe(AnimState.ATTACK);
     }
   });
 

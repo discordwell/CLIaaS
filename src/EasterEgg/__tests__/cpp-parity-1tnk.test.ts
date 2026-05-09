@@ -258,24 +258,22 @@ describe('1TNK turret (unit.cpp:542)', () => {
 
   it('turret rotation uses ROT+1 speed (C++ unit.cpp:542)', () => {
     const tank = entityAtCell(UnitType.V_1TNK, House.Spain, 10, 10);
-    // ROT=5, so turret rotates at rate 6 per tick
-    // 32-step system: need accumulator >= 8 to advance one step
-    // After 1 tick: accumulator = 6 (not yet >= 8)
-    // After 2 ticks: accumulator = 12 → advance one step (12-8=4 remainder)
+    // ROT=5, so C++ FacingClass::Rotation_Adjust applies 6 DirType ticks per tick.
     tank.turretFacing = Dir.N;
     tank.desiredTurretFacing = Dir.E;
     tank.turretFacing32 = Dir.N * 4; // 0
+    tank.turretFacing256 = 0;
     tank.turretRotAccumulator = 0;
 
-    // Tick 1: accumulator 0+6=6 < 8 — no step
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(0); // unchanged
+    expect(tank.turretFacing256).toBe(6);
+    expect(tank.turretFacing32).toBe(1);
 
-    // Tick 2: accumulator 6+6=12 >= 8 — advance one step
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(1); // advanced by 1
+    expect(tank.turretFacing256).toBe(12);
+    expect(tank.turretFacing32).toBe(2);
   });
 
   it('turret eventually aligns to desired facing', () => {
@@ -507,13 +505,15 @@ describe('1TNK body rotation (drive.cpp 32-step system)', () => {
     tank.facing = Dir.N;
     tank.desiredFacing = Dir.E;
     tank.bodyFacing32 = Dir.N * 4;
+    tank.bodyFacing256 = 0;
     tank.rotAccumulator = 0;
 
-    // One tick: accumulator 0+5=5 < 8 — no step
+    // One tick: C++ applies ROT=5 directly in 256-dir space.
     tank.rotTickedThisFrame = false;
     const aligned = tank.tickRotation();
     expect(aligned).toBe(false);
-    expect(tank.bodyFacing32).toBe(0); // no change yet
+    expect(tank.bodyFacing256).toBe(5);
+    expect(tank.bodyFacing32).toBe(1);
   });
 
   it('after 2 ticks, bodyFacing32 advances by 1 step', () => {
@@ -521,14 +521,14 @@ describe('1TNK body rotation (drive.cpp 32-step system)', () => {
     tank.facing = Dir.N;
     tank.desiredFacing = Dir.E;
     tank.bodyFacing32 = Dir.N * 4; // 0
+    tank.bodyFacing256 = 0;
     tank.rotAccumulator = 0;
 
-    // Tick 1: 0+5=5 < 8
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
-    // Tick 2: 5+5=10 >= 8 → step, remainder = 2
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
+    expect(tank.bodyFacing256).toBe(10);
     expect(tank.bodyFacing32).toBe(1);
   });
 
@@ -563,10 +563,11 @@ describe('1TNK retaliation (techno.cpp)', () => {
     tank.target = null;
 
     const ctx = makeCombatCtx([tank, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, attacker);
 
     expect(tank.target).toBe(attacker);
-    expect(tank.mission).toBe(Mission.ATTACK);
+    expect(tank.mission).toBe(Mission.GUARD);
   });
 
   it('1TNK CAN retaliate (has weapon)', () => {
@@ -583,6 +584,7 @@ describe('1TNK retaliation (techno.cpp)', () => {
     tank.target = existingTarget;
 
     const ctx = makeCombatCtx([tank, existingTarget, newAttacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, newAttacker);
 
     // Should keep existing target, not switch
@@ -609,10 +611,11 @@ describe('1TNK retaliation (techno.cpp)', () => {
     tank.target = null;
 
     const ctx = makeCombatCtx([tank, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, attacker);
 
     expect(tank.target).toBe(attacker);
-    expect(tank.mission).toBe(Mission.ATTACK);
+    expect(tank.mission).toBe(Mission.AREA_GUARD);
   });
 });
 

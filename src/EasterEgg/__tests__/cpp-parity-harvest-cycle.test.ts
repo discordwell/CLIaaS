@@ -78,13 +78,17 @@ function makeContext(overrides: Partial<HarvesterContext> = {}): HarvesterContex
 
 /** Place gold ore at a cell (overlay 0x03=min to 0x0E=max density) */
 function placeGold(map: GameMap, cx: number, cy: number, density = 0x0E): void {
-  map.overlay[cy * MAP_CELLS + cx] = density;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+  map.oreDensity[idx] = density - 0x03;
   map.setTerrain(cx, cy, Terrain.ORE);
 }
 
 /** Place gem at a cell (overlay 0x0F=min to 0x12=max density) */
 function placeGem(map: GameMap, cx: number, cy: number, density = 0x12): void {
-  map.overlay[cy * MAP_CELLS + cx] = density;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+  map.oreDensity[idx] = density - 0x0F;
   map.setTerrain(cx, cy, Terrain.ORE);
 }
 
@@ -92,9 +96,16 @@ function getOverlay(map: GameMap, cx: number, cy: number): number {
   const idx = cy * MAP_CELLS + cx;
   const ovl = map.overlay[idx];
   const density = map.oreDensity[idx];
-  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
-  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  if (density !== 0xFF && GameMap.isGoldOverlayId(ovl)) return 0x03 + density;
+  if (density !== 0xFF && GameMap.isGemOverlayId(ovl)) return 0x0F + density;
   return ovl;
+}
+
+function primeHarvestReady(entity: Entity): void {
+  entity.harvesterAnimRate = 1;
+  entity.harvesterAnimTimer = 1;
+  entity.harvesterAnimStage = 9;
+  entity.harvestTick = 9;
 }
 
 // =============================================================================
@@ -200,13 +211,13 @@ describe('gold overlay range — C++ GOLD01(0x03) through GOLD12(0x0E)', () => {
 
   it('overlay 0x03 is visible gold but OverlayData 0 pays no bail', () => {
     const map = makeMap();
-    map.overlay[50 * MAP_CELLS + 50] = 0x03;
+    placeGold(map, 50, 50, 0x03);
     expect(map.depleteOre(50, 50)).toBe(0);
   });
 
   it('overlay 0x0E IS gold (GOLD12 maximum)', () => {
     const map = makeMap();
-    map.overlay[50 * MAP_CELLS + 50] = 0x0E;
+    placeGold(map, 50, 50, 0x0E);
     expect(map.depleteOre(50, 50)).toBe(25);
   });
 
@@ -223,13 +234,13 @@ describe('gold overlay range — C++ GOLD01(0x03) through GOLD12(0x0E)', () => {
 describe('gem overlay range — C++ GEM01(0x0F) through GEM04(0x12)', () => {
   it('overlay 0x0F is visible gem but OverlayData 0 pays no bail', () => {
     const map = makeMap();
-    map.overlay[50 * MAP_CELLS + 50] = 0x0F;
+    placeGem(map, 50, 50, 0x0F);
     expect(map.depleteOre(50, 50)).toBe(0);
   });
 
   it('overlay 0x12 IS gem (GEM04 maximum)', () => {
     const map = makeMap();
-    map.overlay[50 * MAP_CELLS + 50] = 0x12;
+    placeGem(map, 50, 50, 0x12);
     expect(map.depleteOre(50, 50)).toBe(50);
   });
 
@@ -296,7 +307,7 @@ describe('full gem trip value — C++ unit.cpp:2306-2308 gem bonus bails', () =>
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17; // next tick completes the load animation
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -344,8 +355,8 @@ describe('full gem trip value — C++ unit.cpp:2306-2308 gem bonus bails', () =>
 //    C++ parity: harvestTick increments each tick, harvest fires at % 10 === 0
 // =============================================================================
 
-describe('harvest timing — one bail every 10 ticks', () => {
-  it('no harvest on tick 1-9 (harvestTick not divisible by 10)', () => {
+describe('harvest timing — C++ HARV load animation gate', () => {
+  it('no harvest before the initial 9-stage load animation completes', () => {
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
@@ -357,14 +368,15 @@ describe('harvest timing — one bail every 10 ticks', () => {
 
     placeGold(map, 50, 50, 0x0E);
 
-    // Tick 1 through 9 — no harvest should occur
+    // Initial LOOKING starts the HARV load animation at rate 2; it has not
+    // completed before 18 update calls.
     for (let i = 0; i < 17; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(0);
   });
 
-  it('first harvest occurs on tick 10 (harvestTick reaches 10)', () => {
+  it('first harvest occurs after the initial rate-2 load animation completes', () => {
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
@@ -376,7 +388,7 @@ describe('harvest timing — one bail every 10 ticks', () => {
 
     placeGold(map, 50, 50, 0x0E);
 
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 20; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(1);
@@ -531,7 +543,7 @@ describe('state machine: idle -> seeking', () => {
     updateHarvester(ctx, harv);
 
     expect(harv.harvesterState).toBe('seeking');
-    expect(harv.mission).toBe(Mission.MOVE);
+    expect(harv.mission).toBe(Mission.HARVEST);
   });
 
   it('idle harvester stays idle when no ore exists', () => {
@@ -626,19 +638,19 @@ describe('state machine: harvesting -> returning (full load)', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     harv.oreLoad = 27; // one bail away from full
     harv.oreCreditValue = 675; // 27 * 25
     ctx.entities.push(harv);
 
     placeGold(map, 50, 50, 0x0E);
 
-    // Tick 18 times to trigger one harvest
-    for (let i = 0; i < 18; i++) {
-      updateHarvester(ctx, harv);
-    }
-
+    updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(28);
+    expect(harv.harvesterState).toBe('harvesting');
+
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
   });
 });
@@ -654,7 +666,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17; // next tick completes the load animation
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -666,9 +678,15 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
 
     updateHarvester(ctx, harv);
 
-    // OverlayData 0 clears without a paid bail, then starts seeking adjacent ore.
+    // OverlayData 0 clears without a paid bail, and C++ waits for the next
+    // completed load animation before short-scanning for the next cell.
     expect(harv.oreLoad).toBe(0);
-    expect(harv.harvesterState).toBe('seeking');
+    expect(harv.harvesterState).toBe('harvesting');
+
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('harvesting');
+    expect(harv.moveTarget).not.toBeNull();
   });
 
   it('when current cell depleted and NO adjacent ore, returns with partial load', () => {
@@ -676,7 +694,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 5;
     harv.oreCreditValue = 125; // 5 * 25
     ctx.entities.push(harv);
@@ -688,6 +706,10 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     updateHarvester(ctx, harv);
 
     expect(harv.oreLoad).toBe(5);
+    expect(harv.harvesterState).toBe('harvesting');
+
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning'); // returns with partial load
   });
 
@@ -696,7 +718,7 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -706,6 +728,10 @@ describe('harvesting depleted cell — seek adjacent ore', () => {
     updateHarvester(ctx, harv);
 
     expect(harv.oreLoad).toBe(0);
+    expect(harv.harvesterState).toBe('harvesting');
+
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
   });
 });
@@ -764,8 +790,8 @@ describe('findNearestOre scan radii — C++ OreNearScan=6, OreFarScan=48', () =>
 // =============================================================================
 
 describe('ore regrowth mechanics — C++ map.cpp:1017 Overlay::AI()', () => {
-  it('ORE_GROWTH_INTERVAL is 1821 ticks', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
+  it('ORE_GROWTH_INTERVAL is 2048 ticks', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(2048);
   });
 
   it('growOre does nothing on tick 0', () => {
@@ -793,8 +819,7 @@ describe('ore regrowth mechanics — C++ map.cpp:1017 Overlay::AI()', () => {
     }
     // Gem overlay should remain exactly as placed or unchanged since gems don't grow
     // (It might still be 0x0F since gems never grow)
-    const ovl = map.overlay[50 * MAP_CELLS + 50];
-    expect(ovl >= 0x0F && ovl <= 0x12).toBe(true); // still a gem, never became gold
+    expect(GameMap.isGemOverlayId(map.overlay[50 * MAP_CELLS + 50])).toBe(true);
   });
 
   it('depleted cell (0xFF) does not spontaneously regrow — needs seed cell', () => {
@@ -834,12 +859,11 @@ describe('ore regrowth mechanics — C++ map.cpp:1017 Overlay::AI()', () => {
 
 // =============================================================================
 // 16. Harvester Scan Range in findHarvesterOre
-//     C++ parity: harvester.ts findHarvesterOre uses maxRange=32 for idle seek
+//     C++ parity: idle seek uses OreFarScan=48 for new patch search
 // =============================================================================
 
-describe('findHarvesterOre scan range — idle harvester uses maxRange=32', () => {
-  it('idle harvester passes maxRange=32 to findHarvesterOre', () => {
-    // The updateHarvester idle state uses maxRange=32
+describe('findHarvesterOre scan range — idle harvester uses OreFarScan=48', () => {
+  it('idle harvester starts seeking a far ore patch', () => {
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
@@ -853,27 +877,32 @@ describe('findHarvesterOre scan range — idle harvester uses maxRange=32', () =
     updateHarvester(ctx, harv);
 
     expect(harv.harvesterState).toBe('seeking');
+    expect(harv.moveTarget).not.toBeNull();
   });
 
-  it('C++ OreFarScan=48 vs TS maxRange=32 — potential divergence', () => {
-    // C++ rules.ini: OreFarScan=48 cells for new patch scan
-    // TS harvester.ts line 114: findHarvesterOre(ctx, entity, ec.cx, ec.cy, 32)
-    // This test documents the expected C++ value
-    const cppOreFarScan = 48;
-    const tsMaxRange = 32; // from harvester.ts line 114
-    expect(cppOreFarScan).toBe(48);
-    expect(tsMaxRange).toBe(32);
-    // C++ uses 48, TS uses 32 — this is a parity gap if harvester fails to find
-    // ore patches between 33-48 cells away
+  it('idle harvester uses C++ OreFarScan=48 for new patch search', () => {
+    const map = makeMap();
+    const ctx = makeContext({ map });
+    const harv = makeHarvester(House.Spain, 50, 50);
+    harv.harvesterState = 'idle';
+    harv.mission = Mission.GUARD;
+    ctx.entities.push(harv);
+
+    placeGold(map, 88, 50, 0x0E); // 38 cells away: outside 32, inside 48
+
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('seeking');
+    expect(harv.mission).toBe(Mission.HARVEST);
   });
 });
 
 // =============================================================================
-// 17. AI Harvester Spread Logic — Avoid Clustering
-//     C++ parity: AI harvesters avoid cells targeted by friendly harvesters
+// 17. AI Harvester Ore Search
+//     C++ parity: UnitClass::Goto_Tiberium uses ring order only; it has no
+//     anti-clustering heuristic for other harvesters.
 // =============================================================================
 
-describe('AI harvester spread logic — avoid clustering on same ore patch', () => {
+describe('AI harvester ore search — C++ ring order', () => {
   it('player harvester uses simple nearest-ore (no spreading)', () => {
     const map = makeMap();
     const ctx = makeContext({ map, isPlayerControlled: () => true });
@@ -888,7 +917,7 @@ describe('AI harvester spread logic — avoid clustering on same ore patch', () 
     expect(result!.cx).toBe(52); // always nearest for player
   });
 
-  it('AI harvester avoids ore within 3 cells of another friendly harvester target', () => {
+  it('AI harvester uses the same nearest ring-order ore as player harvesters', () => {
     const map = makeMap();
     const ctx = makeContext({
       map,
@@ -910,9 +939,8 @@ describe('AI harvester spread logic — avoid clustering on same ore patch', () 
 
     const result = findHarvesterOre(ctx, harv2, 50, 50, 32);
 
-    // Should skip 52,50 (near harv1) and find 60,50
     expect(result).not.toBeNull();
-    expect(result!.cx).toBe(60);
+    expect(result!.cx).toBe(52);
   });
 
   it('AI harvester falls back to nearest if ALL ore is targeted', () => {
@@ -952,7 +980,7 @@ describe('all ore depleted behavior', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
     ctx.entities.push(harv);
@@ -962,7 +990,11 @@ describe('all ore depleted behavior', () => {
 
     updateHarvester(ctx, harv);
 
-    // Final visible ore clears without a paid bail, then returns with existing load.
+    // Final visible ore clears without a paid bail. The next completed load
+    // cycle observes that harvesting failed and switches to FINDHOME.
+    expect(harv.harvesterState).toBe('harvesting');
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
     expect(harv.oreLoad).toBe(10);
   });
@@ -1101,6 +1133,7 @@ describe('seeking timeout — stuck detection at 30 ticks', () => {
     harv.mission = Mission.MOVE;
     harv.path = [];
     harv.pathIndex = 0;
+    harv.moveTarget = { lx: 1, ly: 1 };
     harv.harvestTick = 0;
     harv.oreLoad = 0;
     ctx.entities.push(harv);
@@ -1122,6 +1155,7 @@ describe('seeking timeout — stuck detection at 30 ticks', () => {
     harv.mission = Mission.MOVE;
     harv.path = [];
     harv.pathIndex = 0;
+    harv.moveTarget = { lx: 1, ly: 1 };
     harv.harvestTick = 0;
     harv.oreLoad = 10;
     harv.oreCreditValue = 250;
@@ -1190,7 +1224,7 @@ describe('adjacent ore search after depletion — 6-cell radius', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     ctx.entities.push(harv);
 
@@ -1199,7 +1233,11 @@ describe('adjacent ore search after depletion — 6-cell radius', () => {
 
     updateHarvester(ctx, harv);
 
-    expect(harv.harvesterState).toBe('seeking');
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
+
+    expect(harv.harvesterState).toBe('harvesting');
+    expect(harv.moveTarget).not.toBeNull();
   });
 });
 
@@ -1209,17 +1247,17 @@ describe('adjacent ore search after depletion — 6-cell radius', () => {
 // =============================================================================
 
 describe('isGemOverlay helper — C++ overlay.cpp', () => {
-  it('returns true for gem overlays 0x0F-0x12', () => {
+  it('returns true for C++ gem overlay IDs OVERLAY_GEMS1..4', () => {
     const map = makeMap();
-    for (let ovl = 0x0F; ovl <= 0x12; ovl++) {
+    for (let ovl = GameMap.OVERLAY_GEMS1; ovl <= GameMap.OVERLAY_GEMS4; ovl++) {
       map.overlay[50 * MAP_CELLS + 50] = ovl;
       expect(map.isGemOverlay(50, 50)).toBe(true);
     }
   });
 
-  it('returns false for gold overlays 0x03-0x0E', () => {
+  it('returns false for C++ gold overlay IDs OVERLAY_GOLD1..4', () => {
     const map = makeMap();
-    for (let ovl = 0x03; ovl <= 0x0E; ovl++) {
+    for (let ovl = GameMap.OVERLAY_GOLD1; ovl <= GameMap.OVERLAY_GOLD4; ovl++) {
       map.overlay[50 * MAP_CELLS + 50] = ovl;
       expect(map.isGemOverlay(50, 50)).toBe(false);
     }
@@ -1263,7 +1301,7 @@ describe('C++ harvest timing per cell — weapon ROF vs fixed interval', () => {
       ticksToFirstHarvest++;
     }
 
-    expect(ticksToFirstHarvest).toBe(18); // full load animation
+    expect(ticksToFirstHarvest).toBe(20); // initial rate-2 full load animation
   });
 });
 

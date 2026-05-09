@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { triggerRetaliation } from '../engine/combat';
-import { UnitType, House, Mission, AnimState, WEAPON_STATS } from '../engine/types';
+import { UnitType, House, Mission, AnimState, WEAPON_STATS, CELL_SIZE } from '../engine/types';
 
 beforeEach(() => resetEntityIds());
 
@@ -28,7 +28,7 @@ function mockCombatCtx() {
 
 /** Create an airborne helicopter entity */
 function makeAircraft(house: House): Entity {
-  const e = new Entity(UnitType.V_HIND, house, 200, 200);
+  const e = new Entity(UnitType.V_HIND, house, 100 + 2 * CELL_SIZE, 100);
   // Simulate airborne state
   e.flightAltitude = Entity.FLIGHT_ALTITUDE; // 24
   e.aircraftState = 'flying';
@@ -37,7 +37,7 @@ function makeAircraft(house: House): Entity {
 
 /** Create a landed aircraft (flightAltitude = 0) */
 function makeLandedAircraft(house: House): Entity {
-  const e = new Entity(UnitType.V_HIND, house, 200, 200);
+  const e = new Entity(UnitType.V_HIND, house, 100 + 2 * CELL_SIZE, 100);
   e.flightAltitude = 0;
   e.aircraftState = 'landed';
   return e;
@@ -95,8 +95,8 @@ describe('triggerRetaliation AA gate', () => {
 
     // Should retarget to the attacker
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
-    expect(victim.animState).toBe(AnimState.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
+    expect(victim.animState).toBe(AnimState.IDLE);
   });
 
   it('ground unit DOES retaliate against landed aircraft (flightAltitude=0)', () => {
@@ -108,7 +108,7 @@ describe('triggerRetaliation AA gate', () => {
 
     // Landed aircraft are valid ground targets
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 });
 

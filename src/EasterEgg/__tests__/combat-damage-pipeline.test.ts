@@ -17,6 +17,7 @@ import {
   armorIndex, getWarheadMultiplier, modifyDamage, worldDist,
   buildDefaultAlliances, Mission, AnimState,
   PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
+  directionToLeptons256, pixelToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { Game } from '../engine/index';
@@ -58,6 +59,7 @@ function makeMockCombatContext(overrides: Partial<CombatContext> = {}): CombatCo
     entityById,
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -104,6 +106,55 @@ function makeMockCombatContext(overrides: Partial<CombatContext> = {}): CombatCo
 function registerEntities(ctx: CombatContext, ...ents: Entity[]): void {
   ctx.entities.push(...ents);
   for (const e of ents) ctx.entityById.set(e.id, e);
+}
+
+function makeInflightProjectile(overrides: Partial<InflightProjectile> = {}): InflightProjectile {
+  const startX = overrides.startX ?? 100;
+  const startY = overrides.startY ?? 100;
+  const impactX = overrides.impactX ?? 200;
+  const impactY = overrides.impactY ?? 100;
+  const logicalLX = overrides.logicalLX ?? pixelToLepton(startX);
+  const logicalLY = overrides.logicalLY ?? pixelToLepton(startY);
+  const headToLX = overrides.headToLX ?? pixelToLepton(impactX);
+  const headToLY = overrides.headToLY ?? pixelToLepton(impactY);
+  const travelFrames = overrides.travelFrames ?? 5;
+  return {
+    attackerId: 1,
+    targetId: 2,
+    weapon: WEAPON_STATS['90mm'],
+    damage: 30,
+    strength: overrides.damage ?? 30,
+    speed: 2,
+    travelFrames,
+    currentFrame: 0,
+    directHit: true,
+    impactX,
+    impactY,
+    attackerIsPlayer: true,
+    isArcing: false,
+    arcHeight: 0,
+    arcRiser: 0,
+    startX,
+    startY,
+    dogRiderId: -1,
+    fuelTimer: Math.min(0xff, travelFrames + 4),
+    isFueled: false,
+    isDropping: false,
+    dropHeight: 0,
+    isFlameEquipped: false,
+    flameToggle: false,
+    logicalLX,
+    logicalLY,
+    headToLX,
+    headToLY,
+    facing256: overrides.facing256 ?? directionToLeptons256(logicalLX, logicalLY, headToLX, headToLY),
+    speedAccum: 0,
+    speedAdd: 0,
+    fuseTimer: travelFrames,
+    armingTimer: 0,
+    proximity: 0x7fffffff,
+    ...overrides,
+  };
 }
 
 // =========================================================================
@@ -209,8 +260,8 @@ describe('damageEntity behavior (via Entity.takeDamage)', () => {
     damageEntity(ctx, target, 5, 'SA');
     expect(target.hp).toBe(hpBefore - 5);
     expect(target.alive).toBe(true);
-    // aiScatterOnDamage sets mission to MOVE for GUARD-mission AI units
-    expect(target.mission).toBe(Mission.MOVE);
+    // C++ only scatters from the damage path when a source coordinate exists.
+    expect(target.mission).toBe(Mission.GUARD);
   });
 
   it('damageEntity tracks attacked trigger names', () => {
@@ -466,11 +517,11 @@ describe('checkVehicleCrush — crush execution', () => {
 // =========================================================================
 describe('Projectile lifecycle', () => {
   it('InflightProjectile has all required fields', () => {
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: 1, targetId: 2, weapon: WEAPON_STATS['90mm'],
       damage: 30, speed: 2, travelFrames: 3, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-    };
+    });
     expect(proj.attackerId).toBe(1);
     expect(proj.targetId).toBe(2);
     expect(proj.weapon).toBeDefined();
@@ -495,35 +546,28 @@ describe('Projectile lifecycle', () => {
     const proj = ctx.inflightProjectiles[0];
     // attacker pos is lepton-quantized (~100.03125), impact at raw (220,100)
     // dist ≈ 119.97/24 ≈ 4.999 cells, travelFrames = round(4.999/2.0) = round(2.499) = 2
-    const expectedDist = worldDist(attacker.pos, { x: 220, y: 100 });
-    const expectedFrames = Math.max(1, Math.round(expectedDist / 2.0));
+    const expectedFrames = Math.max(1, Math.trunc(proj.proximity / proj.speed) + 4);
     expect(proj.travelFrames).toBe(expectedFrames);
     expect(proj.currentFrame).toBe(0);
   });
 
   it('projectile travel frames = max(1, round(dist / speed))', () => {
-    // Mirror the formula from launchProjectile
+    // Mirror the C++ BulletClass/FuseClass frame formula from launchProjectile.
     const shooterPos = { x: 100, y: 100 };
     const impactPos = { x: 220, y: 100 };
-    const dist = worldDist(shooterPos, impactPos);
-    const speed = 2.0; // cells per tick
-    const travelFrames = Math.max(1, Math.round(dist / speed));
-    // dist = (220-100)/24 = 5.0 cells, 5.0/2.0 = 2.5, round = 3
-    expect(travelFrames).toBe(3);
+    const distLeptons = Math.trunc(worldDist(shooterPos, impactPos) * 256);
+    const speed = Math.trunc(40 * 256 / 100);
+    const travelFrames = Math.max(1, Math.trunc(distLeptons / speed) + 4);
+    expect(travelFrames).toBe(16);
   });
 
   it('updateInflightProjectiles increments currentFrame each tick', () => {
     const ctx = makeMockCombatContext();
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: 1, targetId: 2, weapon: WEAPON_STATS['90mm'],
       damage: 30, strength: 30, speed: 2, travelFrames: 5, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 9, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
+    });
     ctx.inflightProjectiles.push(proj);
     updateInflightProjectiles(ctx);
     // After one update, currentFrame should be 1 (and not yet arrived since travelFrames=5)
@@ -537,16 +581,11 @@ describe('Projectile lifecycle', () => {
     target.hp = 5; // ensure kill on arrival
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
       damage: 30, strength: 30, speed: 2, travelFrames: 1, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 5, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
+    });
     ctx.inflightProjectiles.push(proj);
     updateInflightProjectiles(ctx);
     expect(target.alive).toBe(false);
@@ -555,25 +594,16 @@ describe('Projectile lifecycle', () => {
   });
 
   it('arrived projectiles with splash trigger splash damage to nearby units', () => {
-    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 176, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
-    const bystander = makeEntity(UnitType.I_E1, House.USSR, 200 + CELL_SIZE, 100); // 1 cell away from impact
+    const bystander = makeEntity(UnitType.I_E1, House.USSR, 200 + CELL_SIZE / 2, 100); // within splash radius
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target, bystander);
-    const weapon = { ...WEAPON_STATS.MammothTusk, splash: 1.5 }; // HE warhead with splash
-    const proj: InflightProjectile = {
-      attackerId: attacker.id, targetId: target.id, weapon,
-      damage: 75, strength: 75, speed: 2, travelFrames: 1, currentFrame: 0,
-      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 5, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
-    ctx.inflightProjectiles.push(proj);
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.SCUD, 600, target.pos.x, target.pos.y, true);
     const bystanderHpBefore = bystander.hp;
-    updateInflightProjectiles(ctx);
+    for (let i = 0; i < 80 && ctx.inflightProjectiles.length > 0; i++) {
+      updateInflightProjectiles(ctx);
+    }
     // Bystander should take splash damage (within 1.5-cell radius)
     expect(bystander.hp).toBeLessThan(bystanderHpBefore);
   });
@@ -584,16 +614,11 @@ describe('Projectile lifecycle', () => {
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
     const weapon = { ...WEAPON_STATS.MammothTusk, projectileROT: 10, projectileSpeed: 2 };
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: attacker.id, targetId: target.id, weapon,
       damage: 75, strength: 75, speed: 2, travelFrames: 10, currentFrame: 0,
       directHit: true, impactX: 180, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 14, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
+    });
     ctx.inflightProjectiles.push(proj);
     // Move target to a new position
     target.pos.x = 250;
@@ -610,16 +635,11 @@ describe('Projectile lifecycle', () => {
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
     const weapon = { ...WEAPON_STATS.MammothTusk, projectileROT: 10, projectileSpeed: 2 };
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: attacker.id, targetId: target.id, weapon,
       damage: 75, strength: 75, speed: 2, travelFrames: 10, currentFrame: 0,
       directHit: true, impactX: 150, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 14, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
+    });
     ctx.inflightProjectiles.push(proj);
     target.pos.x = 350; // move target away
     // Frame 1 (odd) — no homing update
@@ -863,7 +883,7 @@ describe('Retaliation system — triggerRetaliation', () => {
     expect(victim.target).toBe(existingTarget);
   });
 
-  it('sets victim.mission to ATTACK and target to attacker', () => {
+  it('sets target to attacker without forcing mission ATTACK', () => {
     const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
     victim.target = null;
@@ -871,8 +891,8 @@ describe('Retaliation system — triggerRetaliation', () => {
     const ctx = makeMockCombatContext();
     triggerRetaliation(ctx, victim, attacker);
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
-    expect(victim.animState).toBe(AnimState.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
+    expect(victim.animState).toBe(AnimState.IDLE);
   });
 
   it('unarmed units cannot retaliate', () => {
@@ -906,27 +926,30 @@ describe('Retaliation system — triggerRetaliation', () => {
 
   it('retaliation triggers from projectile arrival and splash damage paths', () => {
     // Projectile arrival path: target retaliates against attacker
-    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
+    const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 180, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 200, 100);
     target.mission = Mission.GUARD;
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
-      damage: 5, speed: 2, travelFrames: 1, currentFrame: 0,
-      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-    };
+      damage: 5, strength: 5, speed: 2, travelFrames: 1, currentFrame: 0,
+      startX: attacker.pos.x, startY: attacker.pos.y,
+      logicalLX: attacker.leptonX, logicalLY: attacker.leptonY,
+      headToLX: target.leptonX, headToLY: target.leptonY,
+      directHit: true, impactX: target.pos.x, impactY: target.pos.y, attackerIsPlayer: true,
+    });
     ctx.inflightProjectiles.push(proj);
     updateInflightProjectiles(ctx);
     expect(target.alive).toBe(true);
     expect(target.target).toBe(attacker);
-    expect(target.mission).toBe(Mission.ATTACK);
+    expect(target.mission).toBe(Mission.GUARD);
 
     // Splash damage path: nearby unit retaliates
-    const splashVictim = makeEntity(UnitType.I_E1, House.USSR, 300, 100);
+    const splashVictim = makeEntity(UnitType.I_E1, House.USSR, 210, 100);
     splashVictim.mission = Mission.GUARD;
     registerEntities(ctx, splashVictim);
-    applySplashDamage(ctx, { x: 300 + CELL_SIZE / 2, y: 100 },
+    applySplashDamage(ctx, splashVictim.pos,
       { damage: 50, warhead: 'HE', splash: 1.5 }, -1, House.Spain, attacker);
     expect(splashVictim.target).toBe(attacker);
   });
@@ -1298,7 +1321,7 @@ describe('Entity.selectWeapon', () => {
     expect(selected).toBe(tank.weapon);
   });
 
-  it('dual-weapon unit selects weapon with higher effective damage', () => {
+  it('dual-weapon unit selects weapon with higher C++ warhead score', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     const heavyTarget = makeEntity(UnitType.V_3TNK, House.USSR, 200, 100);
 
@@ -1310,29 +1333,29 @@ describe('Entity.selectWeapon', () => {
     mammoth.attackCooldown2 = 0;
 
     const selected = mammoth.selectWeapon(heavyTarget, getWarheadMultiplier);
-    // Should pick the weapon with higher effective damage vs heavy armor
-    // 120mm: AP vs heavy = 1.0, damage 40 -> eff = 40
-    // MammothTusk: HE vs heavy = 0.25, damage 75 -> eff = 18.75
+    // Should pick the weapon with higher C++ warhead score vs heavy armor.
+    // 120mm: AP vs heavy = 1.0
+    // MammothTusk: HE vs heavy = 0.25
     // 120mm wins
     expect(selected?.name).toBe('120mm');
   });
 
-  it('returns null when both weapons are on cooldown', () => {
+  it('still selects a weapon when both cooldown mirrors are nonzero', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     const target = makeEntity(UnitType.V_2TNK, House.USSR, 200, 100);
     mammoth.attackCooldown = 10;
     mammoth.attackCooldown2 = 10;
     const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
-    expect(selected).toBeNull();
+    expect(selected?.name).toBe('120mm');
   });
 
-  it('returns ready weapon when one is on cooldown', () => {
+  it('ignores cooldown when selecting; firing gate handles Arm', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     const target = makeEntity(UnitType.V_2TNK, House.USSR, 200, 100);
-    mammoth.attackCooldown = 10; // primary on cooldown
-    mammoth.attackCooldown2 = 0; // secondary ready
+    mammoth.attackCooldown = 10;
+    mammoth.attackCooldown2 = 0;
     const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
-    expect(selected?.name).toBe('MammothTusk');
+    expect(selected?.name).toBe('120mm');
   });
 });
 
@@ -1420,8 +1443,8 @@ describe('Splash damage — radius and falloff', () => {
   it('modifyDamage at max falloff (distFactor=16) gives minimum', () => {
     const distPixels = 2 * CELL_SIZE; // 48px
     const dmg = modifyDamage(100, 'HE', 'none', distPixels);
-    // distFactor = 48*2/6 = 16, damage = 90/16 = 5.625 -> 6
-    expect(dmg).toBe(6);
+    // C++ integer division truncates 90/16 to 5.
+    expect(dmg).toBe(5);
   });
 });
 
@@ -1532,8 +1555,8 @@ describe('Edge cases', () => {
   it('modifyDamage MinDamage=1 guarantee at close range (distFactor < 4)', () => {
     // Very small damage + heavy armor + close range
     const result = modifyDamage(1, 'SA', 'heavy', 2);
-    // distFactor = 2*2/3 = 1.33 (< 4), so MinDamage applies
-    expect(result).toBe(1);
+    // Fixed multiply produces zero before the MinDamage guard; C++ does not revive it.
+    expect(result).toBe(0);
   });
 
   it('multiple damage events reduce HP additively', () => {

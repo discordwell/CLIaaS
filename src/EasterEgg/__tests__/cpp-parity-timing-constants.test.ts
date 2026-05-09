@@ -300,12 +300,11 @@ describe('fixed-point Rate= parsing (rules.ini -> C++ fixed class)', () => {
     expect(ticks).toBe(7); // ((2 * 900) + 128) / 256 = trunc(1928/256) = 7
   });
 
-  it('PathDelay: TS uses naive float (9), C++ fixed gives 7 — known 2-tick divergence', () => {
+  it('PathDelay: TS must use C++ fixed-point ticks, not naive float ticks', () => {
     const naiveFloat = INI_PATH_DELAY * TICKS_PER_MINUTE;
     expect(naiveFloat).toBe(9);
     const fixedResult = minutesToTicksFixed(INI_PATH_DELAY, TICKS_PER_MINUTE);
     expect(fixedResult).toBe(7);
-    // TS index.ts:257: PATH_DELAY_TICKS = 9 (naive float, not fixed-point)
   });
 
   it('rules.ini C4Delay=.03 -> fixed Raw = 7, ticks = 25 (naive: 27)', () => {
@@ -386,13 +385,15 @@ describe('TS engine timing constants match rules.ini derivations', () => {
   });
 
   // map.ts ORE_GROWTH_INTERVAL
-  it('ORE_GROWTH_INTERVAL = ceil(MAP_CELL_TOTAL / floor(MAP_CELL_TOTAL / (GrowthRate * TPM)))', () => {
+  it('ORE_GROWTH_INTERVAL matches C++ boundary-index scan progression', () => {
     // C++ map.cpp:1017: cells/tick = MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
     const MAP_CELL_TOTAL = 128 * 128; // 16384
     const cellsPerTick = Math.floor(MAP_CELL_TOTAL / (INI_GROWTH_RATE * TICKS_PER_MINUTE));
     expect(cellsPerTick).toBe(9); // 16384 / (2 * 900) = 9.1 -> 9
-    const expectedInterval = Math.ceil(MAP_CELL_TOTAL / cellsPerTick);
-    expect(expectedInterval).toBe(1821); // ceil(16384/9) = 1821
+    // map.cpp assigns TiberiumScan to the boundary index when it breaks, so
+    // ticks after the first advance by cellsPerTick - 1 new cells.
+    const expectedInterval = 1 + Math.ceil((MAP_CELL_TOTAL - cellsPerTick) / (cellsPerTick - 1));
+    expect(expectedInterval).toBe(2048);
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(expectedInterval);
   });
 });
@@ -677,8 +678,8 @@ describe('cross-validation: tick/second/minute relationships', () => {
     expect(repairTicks / TICKS_PER_SECOND).toBeCloseTo(0.933, 2);
   });
 
-  it('ore growth full-map scan = ~121.4 seconds at 15 TPS', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL / TICKS_PER_SECOND).toBeCloseTo(121.4, 0);
+  it('ore growth full-map scan = ~136.5 seconds at 15 TPS', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL / TICKS_PER_SECOND).toBeCloseTo(136.5, 0);
   });
 });
 

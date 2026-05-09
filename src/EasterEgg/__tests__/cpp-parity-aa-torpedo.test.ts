@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, WEAPON_STATS,
-  buildDefaultAlliances, worldToCell,
+  buildDefaultAlliances, worldToCell, pixelToLepton, leptonDist, directionToLeptons256,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -49,6 +49,7 @@ function makeCombatCtx(
     entityById: new Map(entities.map(e => [e.id, e])),
     structures: [] as MapStructure[],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -101,6 +102,12 @@ function makeProjectile(
   impactY: number,
   travelFrames: number,
 ): InflightProjectile {
+  const logicalLX = pixelToLepton(startX);
+  const logicalLY = pixelToLepton(startY);
+  const headToLX = pixelToLepton(impactX);
+  const headToLY = pixelToLepton(impactY);
+  const dist = leptonDist(logicalLX, logicalLY, headToLX, headToLY);
+  const speedAdd = Math.max(10, Math.ceil((dist / Math.max(1, travelFrames)) / 10) * 10);
   return {
     attackerId,
     targetId,
@@ -119,6 +126,23 @@ function makeProjectile(
     arcRiser: weapon.isArcing ? 10 : 0,
     startX,
     startY,
+    dogRiderId: -1,
+    fuelTimer: travelFrames + 4,
+    isFueled: false,
+    isDropping: false,
+    dropHeight: 0,
+    isFlameEquipped: false,
+    flameToggle: false,
+    logicalLX,
+    logicalLY,
+    headToLX,
+    headToLY,
+    facing256: directionToLeptons256(logicalLX, logicalLY, headToLX, headToLY),
+    speedAccum: 0,
+    speedAdd,
+    fuseTimer: travelFrames,
+    armingTimer: 0,
+    proximity: dist,
   };
 }
 
@@ -322,18 +346,19 @@ describe('torpedo water boundary (bullet.cpp:920-941)', () => {
     );
     ctx.inflightProjectiles.push(proj);
 
-    // Run for 14 frames — should still be inflight (all water, no early detonation)
-    for (let i = 0; i < 14; i++) {
+    let arrivedAtTarget = false;
+    for (let i = 0; i < 15; i++) {
       updateInflightProjectiles(ctx);
+      if (ctx.inflightProjectiles.length === 0) {
+        const impactCell = worldToCell(proj.impactX, proj.impactY);
+        expect(impactCell.cx).toBe(10);
+        expect(impactCell.cy).toBe(5);
+        arrivedAtTarget = true;
+        break;
+      }
     }
 
-    // At frame 14 the torpedo should still be inflight (arrives at frame 15)
-    expect(proj.currentFrame).toBe(14);
-    expect(ctx.inflightProjectiles.length).toBe(1);
-
-    // Frame 15 — normal arrival
-    updateInflightProjectiles(ctx);
-    expect(ctx.inflightProjectiles.length).toBe(0);
+    expect(arrivedAtTarget).toBe(true);
   });
 
   it('non-torpedo projectile ignores water boundary', () => {

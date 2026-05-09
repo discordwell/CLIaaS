@@ -903,7 +903,8 @@ describe('Ore/gem credit values from rules.ini (cell.cpp:2041, 2050)', () => {
     const map = new GameMap();
     map.setBounds(10, 10, 40, 40);
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x05; // gold, density 2
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = 1;
     const credits = map.depleteOre(15, 15);
     expect(credits).toBe(iniGoldValue);
   });
@@ -912,7 +913,8 @@ describe('Ore/gem credit values from rules.ini (cell.cpp:2041, 2050)', () => {
     const map = new GameMap();
     map.setBounds(10, 10, 40, 40);
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x10; // gem, density 1
+    map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+    map.oreDensity[idx] = 1;
     const credits = map.depleteOre(15, 15);
     expect(credits).toBe(iniGemValue);
   });

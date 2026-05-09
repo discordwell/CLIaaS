@@ -62,7 +62,7 @@ describe('HPAD Auto-Helicopter Interleaving — C++ parity', () => {
   it('tickStructuresInterleaved processes HPAD helicopter after HPAD building', () => {
     const methodStart = indexSource.indexOf('private tickStructuresInterleaved(');
     expect(methodStart).toBeGreaterThan(-1);
-    const methodBody = indexSource.slice(methodStart, methodStart + 8000);
+    const methodBody = indexSource.slice(methodStart, methodStart + 16000);
     // Must check hpadHelicopterId and process the helicopter
     expect(methodBody).toContain('s.hpadHelicopterId');
     expect(methodBody).toContain('this.entityById.get(s.hpadHelicopterId)');

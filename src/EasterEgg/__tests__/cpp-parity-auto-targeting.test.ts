@@ -356,7 +356,7 @@ describe('retaliation: attacked units counter-attack (C++ techno.cpp:2735-2780)'
     const ctx = mockCombatCtx();
     // EINSTEIN has primaryWeapon=null (truly unarmed). C1 has Pistol (armed civilian).
     const einstein = makeEntity(UnitType.I_EINSTEIN, House.Greece, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
     einstein.mission = Mission.GUARD;
 
     triggerRetaliation(ctx, einstein, attacker);
@@ -370,7 +370,7 @@ describe('retaliation: attacked units counter-attack (C++ techno.cpp:2735-2780)'
     const ctx = mockCombatCtx();
     // C1 civilian has Primary=Pistol in rules.ini — is armed
     const c1 = makeEntity(UnitType.I_C1, House.Greece, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
     c1.mission = Mission.GUARD;
     c1.target = null;
 
@@ -382,20 +382,20 @@ describe('retaliation: attacked units counter-attack (C++ techno.cpp:2735-2780)'
 
     // Armed civilian retaliates
     expect(c1.target).toBe(attacker);
-    expect(c1.mission).toBe(Mission.ATTACK);
+    expect(c1.mission).toBe(Mission.GUARD);
   });
 
   it('armed unit retaliates against attacker when idle', () => {
     const ctx = mockCombatCtx();
     const victim = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
     victim.mission = Mission.GUARD;
     victim.target = null;
 
     triggerRetaliation(ctx, victim, attacker);
 
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 
   it('does NOT retarget if already attacking a live target', () => {
@@ -1498,9 +1498,9 @@ describe('medic/dog threat type override (C++ techno.cpp:2017-2026)', () => {
    *   if (isDog && !other.stats.isInfantry) continue;
    * — correctly limits dogs to infantry.
    *
-   * TS missionAI.ts:667-669:
-   *   if (entity.type === UnitType.I_MEDI) { ctx.updateMedic(entity); return; }
-   * — medics are handled by a separate code path (non-combat).
+   * TS missionAI mirrors this in guardScanMask() + cellBasedGuardScan():
+   * medics use the normal Mission_Guard Target_Something_Nearby path, but
+   * Combat_Damage() < 0 restricts cell candidates to injured allied infantry.
    */
 
   it('dogs only target infantry (TS matches C++ THREAT_INFANTRY)', () => {
@@ -1520,10 +1520,8 @@ describe('medic/dog threat type override (C++ techno.cpp:2017-2026)', () => {
   it('medic has negative combat damage (Combat_Damage < 0)', () => {
     const medic = makeEntity(UnitType.I_MEDI, House.Greece, 100, 100);
     // In C++, Combat_Damage() < 0 means the weapon heals.
-    // TS medics are handled by a separate updateMedic() path.
     expect(medic.type).toBe(UnitType.I_MEDI);
-    // Verify medic has no offensive weapon (or a healing weapon)
-    // The key behavioral test: medic is routed to ctx.updateMedic, not guard scan
+    expect(medic.weapon?.damage).toBeLessThan(0);
   });
 });
 

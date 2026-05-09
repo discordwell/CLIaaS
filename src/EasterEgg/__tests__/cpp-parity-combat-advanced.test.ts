@@ -105,7 +105,8 @@ function makeCombatCtx(
 //
 // When IsSubSurface=true (torpedo), the projectile checks the land type of its current
 // cell each tick. If the cell is NOT water, the torpedo is forced to explode immediately.
-// The explosion position is set to the cell center.
+// The explosion position remains the current bullet Coord unless a Cell_Techno or bridge
+// override applies.
 
 describe('Torpedo water boundary (bullet.cpp:920-941)', () => {
 
@@ -175,9 +176,9 @@ describe('Torpedo water boundary (bullet.cpp:920-941)', () => {
     expect(impactCell.cx).not.toBe(8);
   });
 
-  it('torpedo impact position is snapped to cell center on land boundary', () => {
-    // C++ bullet.cpp:930-937: force explosion at cell center when leaving water.
-    // coord = Cell_Coord(Coord_Cell(coord)) which is cell center.
+  it('torpedo impact position remains current bullet coord on land boundary', () => {
+    // C++ bullet.cpp:930-939 only changes coord for Cell_Techno or bridge.
+    // Plain land-boundary detonation returns the current bullet Coord.
     const attacker = entityAtCell(UnitType.V_SS, House.Spain, 2, 5);
     const target = entityAtCell(UnitType.V_DD, House.USSR, 8, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -197,13 +198,12 @@ describe('Torpedo water boundary (bullet.cpp:920-941)', () => {
       ticks++;
     }
 
-    // Impact coords should be at cell center
+    // Impact coords should be in the blocking land cell, but not snapped to center.
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     expect(explosions.length).toBeGreaterThan(0);
     const expectedCenterX = 5 * CELL_SIZE + CELL_SIZE / 2;
-    const expectedCenterY = 5 * CELL_SIZE + CELL_SIZE / 2;
-    expect(explosions[0].x).toBe(expectedCenterX);
-    expect(explosions[0].y).toBe(expectedCenterY);
+    expect(worldToCell(explosions[0].x, explosions[0].y)).toEqual({ cx: 5, cy: 5 });
+    expect(explosions[0].x).not.toBe(expectedCenterX);
   });
 
   it('non-submarine weapon (isSubSurface=false) is not affected by water boundary', () => {
@@ -720,9 +720,9 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     expect(weapon.isFueled).toBe(true);
   });
 
-  it('fuelTimer is initialized to min(0xFF, travelFrames + 4)', () => {
-    // C++ bullet.cpp:744-746: range = (Distance/speed) + 4, capped at 0xFF
-    // TS combat.ts:595: fuelTimer = Math.min(0xFF, travelFrames + 4)
+  it('fuelTimer is initialized to min(0xFF, range)', () => {
+    // C++ bullet.cpp:749: range = (Distance/speed) + 4.
+    // C++ fuse.cpp:97: Timer = min(range, 0xFF).
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 2, 5);
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 8, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -733,9 +733,10 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     const proj = ctx.inflightProjectiles[0];
     expect(proj.isFueled).toBe(true);
 
-    // fuelTimer should be travelFrames + 4, capped at 0xFF
-    const expectedTimer = Math.min(0xFF, proj.travelFrames + 4);
+    // TS `travelFrames` is the C++ range value, including bullet.cpp's +4 bias.
+    const expectedTimer = Math.min(0xFF, proj.travelFrames);
     expect(proj.fuelTimer).toBe(expectedTimer);
+    expect(proj.fuseTimer).toBe(expectedTimer);
   });
 
   it('fuelTimer decrements by 1 each tick (fuse.cpp:127)', () => {
@@ -770,7 +771,7 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     const ctx = makeCombatCtx([attacker, target]);
 
     // Give the projectile a tiny fuel timer by using very slow speed
-    const weapon = { ...WEAPON_STATS['SCUD'], projectileSpeed: 0.1 };
+    const weapon = { ...WEAPON_STATS['SCUD'], projSpeed: 1 };
     launchProjectile(ctx, attacker, target, weapon, 600, target.pos.x, target.pos.y, true);
 
     const proj = ctx.inflightProjectiles[0];
@@ -799,11 +800,11 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 40, 5);
     const ctx = makeCombatCtx([attacker, target]);
 
-    const weapon = { ...WEAPON_STATS['SCUD'], projectileSpeed: 0.1 };
+    const weapon = { ...WEAPON_STATS['SCUD'], projSpeed: 1 };
     launchProjectile(ctx, attacker, target, weapon, 600, target.pos.x, target.pos.y, true);
 
     const proj = ctx.inflightProjectiles[0];
-    // travelFrames + 4 would exceed 255, so it should be capped
+    // C++ range = distance / speed + 4 exceeds 255, so it should be capped.
     expect(proj.fuelTimer).toBeLessThanOrEqual(0xFF);
     expect(proj.fuelTimer).toBe(0xFF);
   });

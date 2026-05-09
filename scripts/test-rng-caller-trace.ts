@@ -5,7 +5,8 @@
  */
 import { test } from '@playwright/test';
 
-const BASE_URL = 'https://cliaas.com';
+const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
+const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 const scenario = process.env.SCENARIO ?? 'SCG04EA';
 const targetTick = Number(process.env.TICK ?? 2);
 
@@ -20,7 +21,7 @@ test(`${scenario} RNG caller trace tick ${targetTick}`, async ({ browser }) => {
 
   await Promise.all([
     wasmPage.goto(`${BASE_URL}/ra/original.html?scenario=${scenario}.INI&autoplay=1&agentharness=1&seed=0`, { waitUntil: 'load' }),
-    tsPage.goto(`${BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`, { waitUntil: 'load' }),
+    tsPage.goto(`${TS_BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`, { waitUntil: 'load' }),
   ]);
 
   await Promise.all([

@@ -49,7 +49,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -158,7 +158,7 @@ describe('MGG no weapon -- support vehicle (udata.cpp)', () => {
 
   it('cannot retaliate when attacked (no weapon to fire back)', () => {
     const mgg = entityAtCell(UnitType.V_MGG, House.Spain, 10, 10);
-    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    const attacker = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
     mgg.mission = Mission.GUARD;
     mgg.target = null;
 
@@ -391,7 +391,7 @@ describe('MGG AI scatter on damage (techno.cpp)', () => {
       mgg.mission = Mission.GUARD;
       const ctx = makeCombatCtx([mgg]);
       aiScatterOnDamage(ctx, mgg);
-      if (mgg.mission === Mission.MOVE && mgg.moveTarget !== null) {
+      if (mgg.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -405,6 +405,7 @@ describe('MGG AI scatter on damage (techno.cpp)', () => {
     mgg.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([mgg]);
+    ctx.playerHouse = House.Spain;
     aiScatterOnDamage(ctx, mgg);
 
     // Should remain on GUARD, no scatter

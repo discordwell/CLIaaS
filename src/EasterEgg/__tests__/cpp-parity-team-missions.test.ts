@@ -35,7 +35,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { House, Mission, UnitType, CELL_SIZE, LEPTON_SIZE, worldDistLeptons, STRAY_DISTANCE } from '../engine/types';
+import { House, Mission, UnitType, CELL_SIZE, LEPTON_SIZE, worldDistLeptons, STRAY_DISTANCE, cellTargetToLepton } from '../engine/types';
 import {
   Team, resetTeamIds,
   TMISSION_MOVE, TMISSION_ATTACK, TMISSION_ATT_WAYPT, TMISSION_GUARD,
@@ -182,12 +182,12 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // on the FIRST ai() tick:
       //   activate → currentMission=-1, isNextMission=true
       //   advance  → currentMission=0 (GUARD), timeOut = 1*90 = 90
-      //   execute  → GUARD: coordinateRegroup, timeOut-- → 89
+      //   execute  → GUARD: coordinateRegroup, TimeOut.Value() is still 90
       team.ai();
 
-      // C++ sets TimeOut = 1 * 90 = 90, after first GUARD tick: 89
-      // TS now matches: timeOut = 1 * 90 = 90, after first tick: 89
-      expect(team.timeOut).toBe(1 * TS_SCALING - 1); // 90 - 1 = 89 after first tick
+      // C++ CDTimerClass assignment stores Started=Frame, so same-frame Value()
+      // returns the full delay. It drops on subsequent frames, not immediately.
+      expect(team.timeOut).toBe(1 * TS_SCALING);
       expect(TS_SCALING).toBe(CPP_SCALING); // C++ parity: both use 90
     });
 
@@ -204,12 +204,11 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       team.add(e);
 
       // C++ Force_Active() sets IsUnderStrength=false, so no reforming delay.
-      // Single ai() tick: activate → advance to GUARD → execute GUARD (timeOut--)
+      // Single ai() tick: activate → advance to GUARD → execute GUARD.
       team.ai();
 
-      // Initial: 5 * 90 = 450, after first GUARD tick: 450 - 1 = 449
-      // Matches C++ parity: 5 * 90 = 450
-      expect(team.timeOut).toBe(5 * 90 - 1); // 450 - 1 = 449
+      // C++ TimeOut is a CDTimerClass; same-frame Value() remains full.
+      expect(team.timeOut).toBe(5 * 90);
     });
   });
 
@@ -593,18 +592,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
      */
     it('DO with data=14 (HUNT) assigns Mission.HUNT to all members', () => {
       /**
-       * When DO is the LAST mission, it sets the member mission and then the
-       * team dissolves (mission queue exhausted). After dissolution, members
-       * enter idle mode (GUARD) per team.cpp destructor calling Remove()→Enter_Idle_Mode().
-       *
-       * When DO is followed by another mission, the next mission's coordination
-       * (e.g. Coordinate_Regroup for GUARD) overrides the member mission in the
-       * same tick that it advances.
-       *
-       * To test that DO actually assigns the correct mission, we make DO the
-       * sole mission. The member briefly gets HUNT, then dissolution sets GUARD.
-       * We verify DO advances immediately (tested separately) and that
-       * mapCppMission(14) returns HUNT by testing coordinateDo directly.
+       * C++ Coordinate_Do assigns the requested mission but does not advance
+       * CurrentMission. Test the mapping directly so later team coordination
+       * cannot obscure the queued member mission.
        */
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
@@ -689,11 +679,11 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       expect(e.missionQueue).toBe(Mission.AREA_GUARD);
     });
 
-    it('DO advances immediately (isNextMission=true, team.cpp:1856 equivalent)', () => {
+    it('DO does not advance the team mission (team.cpp:1813-1860)', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
         missions: [
-          { mission: TMISSION_DO, data: 14 },      // index 0 — advances immediately
+          { mission: TMISSION_DO, data: 14 },      // index 0 — remains current
           { mission: TMISSION_GUARD, data: 100 },   // index 1
         ],
         forcedActive: true,
@@ -702,13 +692,15 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
       team.add(e);
 
-      // Run enough ticks to get past DO
+      // Run enough ticks that the old TS behavior would have advanced past DO.
       for (let i = 0; i < 5; i++) {
         team.ai();
       }
 
-      // Should be on GUARD (mission index 1) since DO advances immediately
-      expect(team.currentMission).toBe(1);
+      // C++ Coordinate_Do never sets IsNextMission, so the team remains on DO.
+      expect(team.currentMission).toBe(0);
+      expect(team.isNextMission).toBe(false);
+      expect(team.dissolved).toBe(false);
     });
   });
 
@@ -836,6 +828,32 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
         expect(team.target!.x).toBe(targetBefore.x);
         expect(team.target!.y).toBe(targetBefore.y);
       }
+    });
+
+    it('does not retarget when team head is an LST transport (team.cpp:1587-1589)', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_LST, count: 1 }, { type: UnitType.V_2TNK, count: 1 }],
+        missions: [{ mission: TMISSION_MOVE, data: 0 }],
+        forcedActive: true,
+      });
+
+      const tank = makeEntity(UnitType.V_2TNK, House.Greece, 100, 100);
+      const lst = makeEntity(UnitType.V_LST, House.Greece, 100, 100);
+      // Team::Add inserts at the head; LST added last mirrors INI order where
+      // transport appears after cargo (SCG07EA mcvlst).
+      team.add(tank);
+      team.add(lst);
+
+      const attacker = makeEntity(UnitType.V_SS, House.USSR, 200, 200);
+      const waypoints = new Map<number, { cx: number; cy: number }>();
+      waypoints.set(0, { cx: 50, cy: 50 });
+      team.ai(waypoints);
+      team.ai(waypoints);
+
+      const targetBefore = team.target ? { ...team.target } : null;
+      team.tookDamage(lst, attacker);
+
+      expect(team.target).toEqual(targetBefore);
     });
 
     it('does not retarget if source is dead (team.cpp:1589 source check)', () => {
@@ -1076,6 +1094,85 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       // Should still be on MOVE team-mission (the first entry in the team's mission list)
       expect(team.currentMission).toBe(0);
+    });
+  });
+
+  describe('Coordinate_Move target legality (team.cpp:1887-1890)', () => {
+    it('falls back to MissionTarget when an override Target entity is dead', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
+        missions: [{ mission: TMISSION_MOVE, data: 0 }],
+        forcedActive: true,
+      });
+      const member = makeEntity(UnitType.V_3TNK, House.USSR, 0, 0);
+      team.add(member);
+
+      const missionCell = { cx: 20, cy: 20 };
+      const missionWorld = {
+        x: missionCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: missionCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+      (team as unknown as {
+        setMissionTarget(target: typeof missionWorld, cell: typeof missionCell): void;
+        setTarget(target: typeof missionWorld, cell: typeof missionCell): void;
+      }).setMissionTarget(missionWorld, missionCell);
+      (team as unknown as {
+        setTarget(target: typeof missionWorld, cell: typeof missionCell): void;
+      }).setTarget(missionWorld, missionCell);
+
+      const attacker = makeEntity(UnitType.V_3TNK, House.Greece, 5 * CELL_SIZE + 12, 5 * CELL_SIZE + 12);
+      team.tookDamage(member, attacker, { entities: [member, attacker] });
+      attacker.alive = false;
+      member.moveTarget = null;
+      member.mission = Mission.GUARD;
+      member.missionQueue = null;
+
+      team.coordinateMove();
+
+      const expected = cellTargetToLepton(missionCell.cx, missionCell.cy);
+      expect(member.moveTarget).toEqual(expected);
+      expect(member.moveTarget).not.toEqual({ lx: attacker.leptonX, ly: attacker.leptonY });
+    });
+
+    it('clears a cloaking techno override through TeamClass::Detach and resumes MissionTarget', () => {
+      const team = makeTeam({
+        house: House.Greece,
+        memberDefs: [{ type: UnitType.V_PT, count: 1 }],
+        missions: [{ mission: TMISSION_MOVE, data: 0 }],
+        forcedActive: true,
+      });
+      const member = makeEntity(UnitType.V_PT, House.Greece, 18 * CELL_SIZE + 12, 53 * CELL_SIZE + 12);
+      team.add(member);
+      team.isMoving = true;
+
+      const missionCell = { cx: 14, cy: 53 };
+      const missionWorld = {
+        x: missionCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: missionCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+      (team as unknown as {
+        setMissionTarget(target: typeof missionWorld, cell: typeof missionCell): void;
+      }).setMissionTarget(missionWorld, missionCell);
+      (team as unknown as {
+        setTarget(target: typeof missionWorld, cell: typeof missionCell): void;
+      }).setTarget(missionWorld, missionCell);
+
+      const sub = makeEntity(UnitType.V_SS, House.USSR, 20 * CELL_SIZE + 12, 53 * CELL_SIZE + 12);
+      team.tookDamage(member, sub, { entities: [member, sub] });
+      expect((team as unknown as { targetEntityRef: Entity | null }).targetEntityRef).toBe(sub);
+
+      // C++ TechnoClass::Do_Cloak calls Detach_All(false), which reaches
+      // TeamClass::Detach and clears Team::Target when it points at the cloaker.
+      team.detachTargetEntity(sub);
+      member.mission = Mission.GUARD;
+      member.missionQueue = null;
+      member.moveTarget = null;
+
+      team.coordinateMove();
+
+      expect((team as unknown as { targetEntityRef: Entity | null }).targetEntityRef).toBeNull();
+      expect(member.moveTarget).toEqual(cellTargetToLepton(missionCell.cx, missionCell.cy));
+      expect(member.moveTarget).not.toEqual({ lx: sub.leptonX, ly: sub.leptonY });
     });
   });
 
@@ -1577,13 +1674,13 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
   // Verify that a complex multi-mission queue processes in correct order
   // ==========================================================================
   describe('Complex mission queue ordering', () => {
-    it('SET_GLOBAL → DO → GUARD processes in sequence', () => {
+    it('SET_GLOBAL advances into DO, then DO holds current mission', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
         missions: [
           { mission: TMISSION_SET_GLOBAL, data: 1 },  // index 0 — immediate
-          { mission: TMISSION_DO, data: 14 },          // index 1 — HUNT, immediate
-          { mission: TMISSION_GUARD, data: 100 },      // index 2 — stays here
+          { mission: TMISSION_DO, data: 14 },          // index 1 — HUNT, holds
+          { mission: TMISSION_GUARD, data: 100 },      // index 2 — not reached by DO
         ],
         forcedActive: true,
       });
@@ -1600,19 +1697,16 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
         }
       }
 
-      // Should have visited missions 0, 1, 2 in order
+      // SET_GLOBAL advances to DO; C++ Coordinate_Do does not set IsNextMission.
       expect(missionsSeen).toContain(0);
       expect(missionsSeen).toContain(1);
-      expect(missionsSeen).toContain(2);
+      expect(missionsSeen).not.toContain(2);
 
-      // Should end on GUARD (index 2) since it hasn't timed out
-      expect(team.currentMission).toBe(2);
+      // Should remain on DO (index 1).
+      expect(team.currentMission).toBe(1);
 
-      // Member mission is NOT HUNT because the GUARD mission's
-      // coordinateRegroup() overrides it. This is correct C++ behavior:
-      // Coordinate_Regroup assigns MISSION_GUARD or MISSION_MOVE to members.
-      // The DO mission briefly set HUNT, but the GUARD coordination replaced it.
-      expect(e.mission).not.toBe(Mission.HUNT);
+      // C++ Assign_Mission queues; Commence is outside Team::AI.
+      expect(e.missionQueue).toBe(Mission.HUNT);
 
       // Team should NOT be dissolved
       expect(team.dissolved).toBe(false);

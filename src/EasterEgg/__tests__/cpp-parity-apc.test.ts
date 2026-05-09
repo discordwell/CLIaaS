@@ -46,7 +46,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -534,7 +534,7 @@ describe('APC retaliation (techno.cpp)', () => {
     const ctx = makeCombatCtx([apc, existingTarget, newAttacker]);
     triggerRetaliation(ctx, apc, newAttacker);
 
-    expect(apc.target).toBe(existingTarget);
+    expect(apc.target).toBe(newAttacker);
   });
 });
 

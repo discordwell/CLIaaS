@@ -131,11 +131,9 @@ describe('modifyDamage (C++ Modify_Damage parity)', () => {
     expect(dmg).toBe(6);
   });
 
-  it('MinDamage=1 when distanceFactor < 4', () => {
-    // Small distance, small base damage that would round to 0
-    const dmg = modifyDamage(1, 'AP', 'none', 2);
-    // AP vs none = 0.3, so 1 * 0.3 = 0.3; distFactor = 2*2/3 = 1.33; 0.3/1.33 = 0.225
-    // But distFactor < 4, so MinDamage=1 kicks in
+  it('MinDamage=1 when distanceFactor < 4 and fixed multiply leaves non-zero damage', () => {
+    const dmg = modifyDamage(10, 'AP', 'none', 4.5);
+    // AP vs none = fixed 30%, so 10 becomes 3; distFactor=3; 3/3 = 1.
     expect(dmg).toBeGreaterThanOrEqual(1);
   });
 

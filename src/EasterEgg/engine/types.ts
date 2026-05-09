@@ -25,6 +25,14 @@ export function cellToLepton(cx: number, cy: number): { lx: number; ly: number }
   return { lx: cx * 256 + 128, ly: cy * 256 + 128 };
 }
 
+/** Convert a C++ TARGET built from a CELL back to lepton coordinates.
+ *  C++ target.cpp As_Target(CELL) stores cell coords in 4-bit pixel units with
+ *  an 0x08 offset; As_Coord(TARGET) shifts back and adds another 0x08. The
+ *  resulting NavCom coordinate is cell*256 + 0x88, not the visual cell center. */
+export function cellTargetToLepton(cx: number, cy: number): { lx: number; ly: number } {
+  return { lx: cx * 256 + 0x88, ly: cy * 256 + 0x88 };
+}
+
 /** Convert lepton position to cell coordinates */
 export function leptonToCell(lx: number, ly: number): { cx: number; cy: number } {
   return { cx: Math.floor(lx / 256), cy: Math.floor(ly / 256) };
@@ -730,6 +738,7 @@ export interface UnitStats {
   points?: number;           // rules.ini Points= — kill score value (C++ techno.cpp:6290, separate from Cost=)
   canSwim?: boolean;         // Agent 9: Tanya can traverse water tiles (C++ amphibious flag)
   isFraidyCat?: boolean;     // C++ idata.cpp IsFraidyCat — civilians/unarmed scatter more readily (rules.ini Fraidycat=yes)
+  isCrawling?: boolean;      // C++ InfantryTypeClass IsCrawling — prone movement crawls at half speed
   hasC4?: boolean;           // C++ infantry.h IsC4 — can plant C4 charges on buildings (rules.ini C4=yes)
   isInfiltrate?: boolean;    // C++ infantry.h IsInfiltrate — can enter/infiltrate enemy buildings (rules.ini Infiltrate=yes)
   isCanine?: boolean;        // C++ infantry.h IsCanine — dog unit (rules.ini IsCanine=yes)
@@ -886,15 +895,15 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   MCV:    { type: UnitType.V_MCV, name: 'MCV', image: 'mcv', strength: 600, armor: 'light', speed: 6, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 60, crewed: true },  // C++ udata.cpp:358 IsCrusher=true
   TRUK:   { type: UnitType.V_TRUK, name: 'Supply Truck', image: 'truk', strength: 110, armor: 'light', speed: 10, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 1, points: 5 },
   // Infantry (C++ idata.cpp MPH values) — all infantry are crushable
-  E1:   { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'M1Carbine', crushable: true, owner: 'both', cost: 100, points: 5 },
-  E2:   { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Grenade', crushable: true, owner: 'soviet', cost: 160, explodesOnDeath: true, points: 10 },
-  E3:   { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'RedEye', secondaryWeapon: 'Dragon', scanDelay: 20, crushable: true, owner: 'allied', cost: 300, points: 10 },
-  E4:   { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Flamer', crushable: true, owner: 'soviet', cost: 300, explodesOnDeath: true, points: 15 },
+  E1:   { type: UnitType.I_E1, name: 'Rifle Infantry', image: 'e1', strength: 50, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'M1Carbine', crushable: true, owner: 'both', cost: 100, points: 5, isCrawling: true },
+  E2:   { type: UnitType.I_E2, name: 'Grenadier', image: 'e2', strength: 50, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Grenade', crushable: true, owner: 'soviet', cost: 160, explodesOnDeath: true, points: 10, isCrawling: true },
+  E3:   { type: UnitType.I_E3, name: 'Rocket Soldier', image: 'e3', strength: 45, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'RedEye', secondaryWeapon: 'Dragon', scanDelay: 20, crushable: true, owner: 'allied', cost: 300, points: 10, isCrawling: true },
+  E4:   { type: UnitType.I_E4, name: 'Flamethrower', image: 'e4', strength: 40, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'Flamer', crushable: true, owner: 'soviet', cost: 300, explodesOnDeath: true, points: 15, isCrawling: true },
   E6:   { type: UnitType.I_E6, name: 'Engineer', image: 'e6', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, owner: 'both', cost: 500, isInfiltrate: true, points: 20 },
   DOG:  { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 12, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw', scanDelay: 8, crushable: true, owner: 'soviet', cost: 200, isCanine: true, guardRange: 7, points: 5 },
   SPY:  { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 15 },
-  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal', crushable: true, owner: 'allied', cost: 800, points: 15 },
-  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, isInfiltrate: true, points: 15 },  // rules.ini: Infiltrate=yes
+  MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal', crushable: true, owner: 'allied', cost: 800, points: 15, isCrawling: true },
+  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, isInfiltrate: true, points: 15, isCrawling: true },  // rules.ini: Infiltrate=yes
   CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, points: 1 },
   DELPHI: { type: UnitType.I_DELPHI, name: 'Agent Delphi', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, maxAmmo: 10, points: 1 },
   // Civilians — crushable, IsFraidyCat=true (C++ idata.cpp / rules.ini Fraidycat=yes)
@@ -910,8 +919,8 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   C10: { type: UnitType.I_C10, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, isFraidyCat: true, points: 1 },
   EINSTEIN: { type: UnitType.I_EINSTEIN, name: 'Prof. Einstein', image: 'einstein', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, isFraidyCat: true, points: 1 },
   // Counterstrike/Aftermath expansion infantry — SHOK is NOT crushable (C++ aftrmath.ini Crushable=no)
-  SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: false, noMovingFire: true, owner: 'soviet', cost: 900, points: 15 },
-  MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true, owner: 'allied', cost: 950, points: 15 },
+  SHOK: { type: UnitType.I_SHOK, name: 'Shock Trooper', image: 'shok', strength: 80, armor: 'none', speed: 3, speedClass: SpeedClass.FOOT, sight: 4, rot: 8, isInfantry: true, primaryWeapon: 'PortaTesla', crushable: false, noMovingFire: true, owner: 'soviet', cost: 900, points: 15, isCrawling: true },
+  MECH: { type: UnitType.I_MECH, name: 'Mechanic', image: 'medi', strength: 60, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'GoodWrench', crushable: true, owner: 'allied', cost: 950, points: 15, isCrawling: true },
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
   STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true, points: 25 },  // aftrmath.ini Tracked=yes
   CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true, points: 25 },  // aftrmath.ini Tracked=yes
@@ -938,7 +947,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6, guardRange: 30, points: 50, crewed: true },
   HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12, guardRange: 30, points: 40, crewed: true },
   // Tanya & Thief (new infantry)
-  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25 },
+  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25, isCrawling: true },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 10 },  // NO Fraidycat=yes in rules.ini
   // Expansion vehicles (V2 Rocket, Minelayer)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true, points: 40, crewed: true },  // rules.ini Tracked=yes
@@ -1292,6 +1301,7 @@ export const SUB_CELL_OFFSETS: { x: number; y: number }[] = SUBCELL_LEPTON_OFFSE
 
 // === Entity Mission States (AI1: full C++ 22-mission system from mission.h) ===
 export enum Mission {
+  NONE = 'NONE',
   // Original 7 — fully implemented
   GUARD = 'GUARD',
   AREA_GUARD = 'AREA_GUARD', // patrol/defend spawn area — return if straying too far
@@ -1333,6 +1343,7 @@ export interface MissionControl {
 // C++ mission.cpp:532-543 defaults: NoThreat=false, Zombie=false, Recruitable=true, Paralyzed=false, Retaliate=true, Scatter=true
 // rules.ini overrides only explicitly set keys. Read_INI (mission.cpp:556-573) uses simple Get_Bool with default.
 export const MISSION_CONTROL: Record<string, MissionControl> = {
+  [Mission.NONE]:           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // C++ mission.cpp:522 special-cases MISSION_NONE as recruitable; constructor defaults for flags
   [Mission.GUARD]:          { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
   [Mission.AREA_GUARD]:     { isNoThreat: false, isZombie: false, isRecruitable: false, isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: Recruitable=no
   [Mission.MOVE]:           { isNoThreat: false, isZombie: false, isRecruitable: true,  isParalyzed: false, isRetaliate: true,  isScatter: true  },  // INI: (no flags)
@@ -1516,6 +1527,15 @@ export function projectileVisualConfig(weaponName: string): ProjectileVisualConf
   }
 }
 
+/** C++ fixed::operator*(int) (fixed.h:109) using fixed raw 8.8 values.
+ *  INI percentage fixed values are parsed as `(percent * 256) / 100`, i.e.
+ *  raw floor of multiplier*256 (fixed.cpp:124). */
+function cppFixedMultiplyInt(value: number, multiplier: number): number {
+  if (multiplier <= 0) return 0;
+  const raw = Math.trunc(multiplier * 256 + 1e-9);
+  return Math.trunc(((raw * value) + 128) / 256);
+}
+
 /** C++ Modify_Damage (combat.cpp:72-129) — compute damage with warhead, armor, and distance falloff.
  *  Distance is from explosion center to target (0 = point-blank direct hit).
  *  @param baseDamage - weapon's raw damage value
@@ -1547,33 +1567,42 @@ export function modifyDamage(
   const mult = warheadMultOverride ?? getWarheadMultiplier(warhead, armor);
   if (mult <= 0) return 0;
 
-  let damage = baseDamage * mult * houseBias;
+  // C++ firepower bias is applied to weapon damage as fixed*int before
+  // Modify_Damage, then combat.cpp:101 applies the warhead Modifier fixed*int.
+  // Do not use JS Math.round(baseDamage * mult): C++ fixed("90%") has raw 230,
+  // so 35 * 90% is ((230*35)+128)/256 = 31, not Math.round(31.5)=32.
+  let damage = cppFixedMultiplyInt(baseDamage, houseBias);
+  damage = cppFixedMultiplyInt(damage, mult);
 
   // C++ combat.cpp:106 — distance block gated on if(damage); zero/negative skipped entirely.
   // Covers: C++ fixed-point truncation to 0, and TS-only negative houseBias.
   if (damage <= 0) return 0;
 
   // Step 2: Distance-based falloff (combat.cpp:106-125)
-  // C++ converts lepton distance using PIXEL_LEPTON_W (=256/24=10 via integer division).
-  //   SpreadFactor==0: distance /= PIXEL_LEPTON_W/4  → dist_leptons / 2  → distPixels * 5
-  //   SpreadFactor >0: distance /= SpreadFactor*(PIXEL_LEPTON_W/2) → distPixels * 2 / SpreadFactor
-  // C++ uses integer division — Math.floor matches the truncation behavior.
+  // C++ receives `distance` in leptons and divides by PIXEL_LEPTON_W derived
+  // with integer division: ICON_LEPTON_W / ICON_PIXEL_W = 256 / 24 = 10.
+  // Do not operate directly in display pixels here: 288 leptons is 27 TS
+  // pixels, but C++ divides 288 / (8 * (10/2)) = 7 for Fire splash. The
+  // previous pixel-space shortcut floored 27 * 2 / 8 = 6 and over-damaged
+  // SCG07EA prone infantry by 1 HP per fireball.
   const spreadFactor = spreadFactorOverride ?? WARHEAD_META[warhead]?.spreadFactor ?? 1;
+  const distLeptons = Math.trunc((distPixels * LEPTON_SIZE) / CELL_SIZE);
+  const cppPixelLeptons = Math.trunc(LEPTON_SIZE / CELL_SIZE);
   let distFactor: number;
   if (spreadFactor === 0) {
     // C++ combat.cpp:108 — distance /= PIXEL_LEPTON_W/4 = 10/4 = 2 (integer)
-    // In pixel space: (distPixels * PIXEL_LEPTON_W) / 2 = distPixels * 5
-    distFactor = distPixels * 5;
+    distFactor = Math.trunc(distLeptons / Math.trunc(cppPixelLeptons / 4));
   } else {
     // C++ combat.cpp:110 — distance /= SpreadFactor * (PIXEL_LEPTON_W/2) = SpreadFactor * 5
-    // In pixel space: (distPixels * PIXEL_LEPTON_W) / (SpreadFactor * 5) = distPixels * 2 / SpreadFactor
-    distFactor = (distPixels * 2) / spreadFactor;
+    distFactor = Math.trunc(distLeptons / (spreadFactor * Math.trunc(cppPixelLeptons / 2)));
   }
-  distFactor = Math.floor(distFactor);                    // C++ integer truncation (combat.cpp:108-110)
   distFactor = Math.max(0, Math.min(16, distFactor));     // combat.cpp:112 Bound(distance, 0, 16)
 
   if (distFactor > 0) {
-    damage = damage / distFactor; // combat.cpp:114
+    // C++ combat.cpp:114 divides integer `damage` by integer `distance`.
+    // This truncates toward zero. Rounding here creates bogus 1-damage
+    // far-edge splash hits (for example 15 SA / 16 should be 0, not 1).
+    damage = Math.trunc(damage / distFactor);
   }
 
   // Step 3: MinDamage threshold — close enough = at least 1 damage (combat.cpp:122-124)
@@ -1584,7 +1613,7 @@ export function modifyDamage(
   // Step 4: MaxDamage cap (combat.cpp:127)
   damage = Math.min(damage, MAX_DAMAGE);
 
-  return Math.max(0, Math.round(damage));
+  return Math.max(0, damage);
 }
 
 /** C++ coord.cpp:124-136 Distance() — octagonal approximation in integer leptons.

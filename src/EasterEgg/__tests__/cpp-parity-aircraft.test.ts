@@ -73,6 +73,7 @@ function makeCombatCtx(
     entityById: new Map(entities.map(e => [e.id, e])),
     structures,
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -116,7 +117,7 @@ function makeCombatCtx(
 }
 
 function makeDefenseStructure(
-  type: string, house: House, cx: number, cy: number, facing: number = 1,
+  type: string, house: House, cx: number, cy: number, facing: number = 2,
 ): MapStructure {
   const weapon = STRUCTURE_WEAPONS[type];
   const TURRETED = new Set(['GUN', 'SAM', 'AGUN']);

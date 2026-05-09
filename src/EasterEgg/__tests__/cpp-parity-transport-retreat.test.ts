@@ -155,13 +155,13 @@ describe('Takeoff ascent during retreat (aircraft.cpp:1332-1336)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SECTION 4: Flying RETREAT — compute edge target and fly toward it
+// SECTION 4: Flying RETREAT — face house edge and fly without a NavCom target
 // C++ aircraft.cpp:1341-1361 — FACE_MAP_EDGE: Set_Speed(0xFF), face friendly edge
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
-  it('RETREAT in flying state computes map edge moveTarget', () => {
-    const ctx = makeAircraftContext();
+  it('RETREAT in flying state faces the owning house edge without creating moveTarget', () => {
+    const ctx = makeAircraftContext({ houseEdges: new Map([[House.Spain, 'west']]) });
     const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 30, 30);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
@@ -170,42 +170,50 @@ describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
     tran.moveTarget = null;
 
     updateAircraft(ctx, tran);
-    // Should have computed a moveTarget toward the nearest map edge
-    expect(tran.moveTarget).not.toBeNull();
+    expect(tran.aircraftSpeedFraction).toBe(1.0);
+    expect(tran.desiredFacing256).toBe(192);
+    expect(tran.desiredFacing).toBe(6);
+    expect(tran.moveTarget).toBeNull();
   });
 
-  it('RETREAT moveTarget is outside map bounds (to trigger exit)', () => {
+  it('RETREAT movement follows house edge rather than nearest edge', () => {
     const map = makeMap(1, 1, 62, 62); // bounds: x=1..62, y=1..62
-    const ctx = makeAircraftContext({ map });
-    // Place at cell (5, 30) — closest edge is left (x=1), distance=4
+    const ctx = makeAircraftContext({ map, houseEdges: new Map([[House.Spain, 'east']]) });
+    // Place near the left edge; C++ still uses House->Control.Edge, not nearest edge.
     const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 5, 30);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
     tran.moveTarget = null;
+    tran.facing256 = 64;
+    tran.desiredFacing256 = 64;
+    const startX = tran.pos.x;
+    const startY = tran.pos.y;
 
     updateAircraft(ctx, tran);
-    expect(tran.moveTarget).not.toBeNull();
-    // Target should be at x=0 (boundsX - 1 = 0), which is outside bounds
-    const targetCellX = Math.floor(tran.moveTarget!.lx / 256);
-    expect(targetCellX).toBe(0); // one cell outside left edge
+    expect(tran.desiredFacing256).toBe(64);
+    expect(tran.moveTarget).toBeNull();
+    expect(tran.pos.x).toBeGreaterThan(startX);
+    expect(tran.pos.y).toBe(startY);
   });
 
-  it('TRAN at top edge: retreat target is above bounds', () => {
+  it('RETREAT defaults to north when no house edge is configured', () => {
     const map = makeMap(1, 1, 62, 62);
     const ctx = makeAircraftContext({ map });
-    // Place at cell (30, 3) — closest edge is top (y=1), distance=2
     const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 30, 3);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.moveTarget = null;
+    tran.facing256 = 0;
+    tran.desiredFacing256 = 0;
+    const startY = tran.pos.y;
 
     updateAircraft(ctx, tran);
-    expect(tran.moveTarget).not.toBeNull();
-    const targetCellY = Math.floor(tran.moveTarget!.ly / 256);
-    expect(targetCellY).toBe(0); // one cell outside top edge
+    expect(tran.desiredFacing256).toBe(0);
+    expect(tran.moveTarget).toBeNull();
+    expect(tran.pos.y).toBeLessThan(startY);
   });
 });
 

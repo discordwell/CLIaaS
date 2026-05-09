@@ -33,6 +33,7 @@ import {
   SPLASH_RADIUS,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
+import { ScenarioRandom } from '../engine/random';
 
 // ── INI Parser ────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,16 @@ function cppModifyDamage(
   if (damage === 0) return 0;
   if (damage < 0) return 0; // simplified; heal logic tested separately
 
-  let dmg = damage * armorMult * houseBias;
+  const fixedMultiplyInt = (value: number, multiplier: number): number => {
+    if (multiplier <= 0) return 0;
+    const raw = Math.trunc(multiplier * 256 + 1e-9);
+    return Math.trunc(((raw * value) + 128) / 256);
+  };
+
+  // C++ applies house firepower as fixed*int before Modify_Damage, then applies
+  // the warhead modifier with fixed::operator*(int) in combat.cpp:101.
+  let dmg = fixedMultiplyInt(damage, houseBias);
+  dmg = fixedMultiplyInt(dmg, armorMult);
   if (dmg <= 0) return 0;
 
   // C++ combat.cpp:107-111 — distance normalization
@@ -220,7 +230,8 @@ function cppModifyDamage(
 
   // combat.cpp:113-115 — damage / distance
   if (distance > 0) {
-    dmg = dmg / distance;
+    // `dmg` is an int in C++; integer division truncates toward zero.
+    dmg = Math.trunc(dmg / distance);
   }
 
   // combat.cpp:122-124 — MinDamage threshold: distance < 4 means at least MinDamage
@@ -231,7 +242,7 @@ function cppModifyDamage(
   // combat.cpp:127 — MaxDamage cap
   dmg = Math.min(dmg, INI_MAX_DAMAGE);
 
-  return dmg;
+  return Math.max(0, dmg);
 }
 
 // =============================================================================
@@ -396,22 +407,22 @@ describe('modifyDamage() formula matches C++ Modify_Damage (combat.cpp:72-129)',
     it('HE at dist=3 pixels: distFactor=floor(3*2/6)=1, damage/1', () => {
       const result = modifyDamage(100, 'HE', 'none', 3);
       // distFactor=floor(6/6)=1, damage/1=90
-      const expected = Math.round(100 * heVsNone / 1);
+      const expected = Math.trunc(Math.round(100 * heVsNone) / 1);
       expect(result).toBe(expected); // 90
     });
 
     it('HE at dist=6 pixels: distFactor=floor(6*2/6)=2, damage/2', () => {
       const result = modifyDamage(100, 'HE', 'none', 6);
       // distFactor=floor(12/6)=2, 90/2=45
-      const expected = Math.round(100 * heVsNone / 2);
+      const expected = Math.trunc(Math.round(100 * heVsNone) / 2);
       expect(result).toBe(expected); // 45
     });
 
     it('HE at dist=12 pixels: distFactor=floor(12*2/6)=4, damage/4', () => {
       const result = modifyDamage(100, 'HE', 'none', 12);
-      // distFactor=floor(24/6)=4, 90/4=22.5 → 23
-      const expected = Math.round(100 * heVsNone / 4);
-      expect(result).toBe(expected); // 23
+      // distFactor=floor(24/6)=4, 90/4=22.5 → 22 (C++ int division)
+      const expected = Math.trunc(Math.round(100 * heVsNone) / 4);
+      expect(result).toBe(expected); // 22
     });
 
     // SA warhead has Spread=3, tighter spread
@@ -421,13 +432,13 @@ describe('modifyDamage() formula matches C++ Modify_Damage (combat.cpp:72-129)',
     it('SA at dist=3 pixels: distFactor=floor(3*2/3)=2, damage/2', () => {
       const result = modifyDamage(100, 'SA', 'none', 3);
       // distFactor=floor(6/3)=2, 100/2=50
-      expect(result).toBe(Math.round(100 * saVsNone / 2)); // 50
+      expect(result).toBe(Math.trunc(Math.round(100 * saVsNone) / 2)); // 50
     });
 
     it('SA at dist=6 pixels: distFactor=floor(6*2/3)=4, damage/4', () => {
       const result = modifyDamage(100, 'SA', 'none', 6);
       // distFactor=floor(12/3)=4, 100/4=25
-      expect(result).toBe(Math.round(100 * saVsNone / 4)); // 25
+      expect(result).toBe(Math.trunc(Math.round(100 * saVsNone) / 4)); // 25
     });
 
     // Fire warhead has Spread=8, widest spread
@@ -437,13 +448,13 @@ describe('modifyDamage() formula matches C++ Modify_Damage (combat.cpp:72-129)',
     it('Fire at dist=8 pixels: distFactor=floor(8*2/8)=2, damage/2', () => {
       const result = modifyDamage(100, 'Fire', 'none', 8);
       // distFactor=floor(16/8)=2, 90/2=45
-      expect(result).toBe(Math.round(100 * fireVsNone / 2)); // 45
+      expect(result).toBe(Math.trunc(Math.round(100 * fireVsNone) / 2)); // 45
     });
 
     it('Fire at dist=16 pixels: distFactor=floor(16*2/8)=4, damage/4', () => {
       const result = modifyDamage(100, 'Fire', 'none', 16);
-      // distFactor=floor(32/8)=4, 90/4=22.5 → 23
-      expect(result).toBe(Math.round(100 * fireVsNone / 4)); // 23
+      // distFactor=floor(32/8)=4, 90/4=22.5 → 22 (C++ int division)
+      expect(result).toBe(Math.trunc(Math.round(100 * fireVsNone) / 4)); // 22
     });
   });
 
@@ -462,7 +473,7 @@ describe('modifyDamage() formula matches C++ Modify_Damage (combat.cpp:72-129)',
     it('Organic at dist=1 pixel: distFactor=floor(1*5)=5, damage/5=20', () => {
       // Very steep falloff: 1 pixel away already divides by 5
       const result = modifyDamage(100, 'Organic', 'none', 1);
-      expect(result).toBe(Math.round(100 * orgVsNone / 5)); // 20
+      expect(result).toBe(Math.trunc(Math.round(100 * orgVsNone) / 5)); // 20
     });
 
     it('Organic does 0 damage to armored targets (Verses=0%)', () => {
@@ -483,41 +494,44 @@ describe('modifyDamage() formula matches C++ Modify_Damage (combat.cpp:72-129)',
     it('HollowPoint at dist=20 pixels: distFactor clamped to 16, damage/16', () => {
       // distFactor = floor(20*2/1) = 40, clamped to 16
       const result = modifyDamage(100, 'HollowPoint', 'none', 20);
-      // damage = 100 * 1.0 / 16 = 6.25 → round=6
+      // damage = 100 * 1.0 / 16 = 6.25 → 6 (C++ int division)
       // distFactor=16 >= 4, so no minDamage guarantee
-      expect(result).toBe(Math.round(100 * hpVsNone / 16)); // 6
+      expect(result).toBe(Math.trunc(Math.round(100 * hpVsNone) / 16)); // 6
     });
 
     it('Super at dist=50 pixels: distFactor clamped to 16', () => {
       // Super Spread=1: distFactor = floor(50*2/1)=100, clamped to 16
       const result = modifyDamage(200, 'Super', 'none', 50);
-      // 200 / 16 = 12.5 → 13
-      expect(result).toBe(Math.round(200 / 16)); // 13
+      // 200 / 16 = 12.5 → 12 (C++ int division)
+      expect(result).toBe(Math.trunc(200 / 16)); // 12
     });
   });
 
   // ── 5f. MinDamage guarantee when distFactor < 4 (combat.cpp:122-124) ──
 
-  describe('MinDamage=1 guaranteed when distFactor < 4 (combat.cpp:122-124)', () => {
-    // Even low damage * low armor multiplier should yield at least 1 damage at close range
-    it('1 damage * SA vs heavy (25%) at dist=0: result >= 1', () => {
-      const saVsHeavy = parsedWarheads['SA'].verses[3]; // 0.25
-      // 1 * 0.25 = 0.25, but distFactor=0 < 4, so min(damage, 1) applies
+  describe('MinDamage=1 only applies after armor multiply leaves non-zero damage (combat.cpp:106, 122-124)', () => {
+    it('1 damage * SA vs heavy (25%) at dist=0: fixed multiply rounds to 0, so no MinDamage', () => {
+      // fixed::operator*(int) rounds 1*25% to 0, so C++ skips the whole distance/minDamage block.
       const result = modifyDamage(1, 'SA', 'heavy', 0);
-      expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
+      expect(result).toBe(0);
     });
 
-    it('2 damage * HollowPoint vs heavy (5%) at dist=0: result >= 1', () => {
-      // 2 * 0.05 = 0.1, round = 0, but min damage = 1
+    it('2 damage * HollowPoint vs heavy (5%) at dist=0: fixed multiply rounds to 0, so no MinDamage', () => {
+      // 2 * 0.05 = 0.1 → fixed multiply rounds to 0 before `if (damage)`.
       const result = modifyDamage(2, 'HollowPoint', 'heavy', 0);
+      expect(result).toBe(0);
+    });
+
+    it('distFactor=3 (< 4) still gets MinDamage when armor multiply is non-zero', () => {
+      // AP Spread=3: dist=4.5 pixels → distFactor=floor(4.5*2/3)=3
+      // 10 * AP_vs_none(0.3) = 3; 3 / 3 = 1; distFactor=3 < 4 preserves at least 1.
+      const result = modifyDamage(10, 'AP', 'none', 4.5);
       expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
     });
 
-    it('distFactor=3 (< 4) still gets MinDamage guarantee', () => {
-      // AP Spread=3: dist=4.5 pixels → distFactor=floor(4.5*2/3)=3
-      // 1 * AP_vs_none(0.3) = 0.3 / 3 = 0.1, but distFactor=3 < 4 → at least 1
-      const result = modifyDamage(1, 'AP', 'none', 4.5);
-      expect(result).toBeGreaterThanOrEqual(INI_MIN_DAMAGE);
+    it('far-edge SA splash can truncate to 0 after distance division', () => {
+      // SCG06EA-style case: 15 SA vs none rounds to 15, distFactor=16, 15/16 truncates to 0.
+      expect(modifyDamage(15, 'SA', 'none', 24)).toBe(0);
     });
   });
 
@@ -608,10 +622,10 @@ describe('TS modifyDamage matches C++ reference implementation', () => {
       const armorMult = parsed.verses[armorIdx];
       const spreadFactor = parsed.spread;
 
-      // Convert pixel distance to leptons for C++ reference
-      // C++ operates in lepton space; TS operates in pixel space.
-      // 1 pixel = PIXEL_LEPTON_W leptons = 10 leptons (C++ display.h:55)
-      const distLeptons = tc.distPx * PIXEL_LEPTON_W;
+      // Convert TS display pixels back to C++ coordinate leptons. PIXEL_LEPTON_W
+      // is only used inside combat.cpp after Distance() has already returned
+      // leptons; pixel->lepton conversion uses the coordinate scale 256/24.
+      const distLeptons = Math.trunc((tc.distPx * ICON_LEPTON_W) / ICON_PIXEL_W);
 
       const cppExpected = cppModifyDamage(tc.baseDmg, spreadFactor, armorMult, distLeptons);
       const tsResult = modifyDamage(tc.baseDmg, tc.wh, tc.armor, tc.distPx);
@@ -621,6 +635,24 @@ describe('TS modifyDamage matches C++ reference implementation', () => {
       expect(tsResult).toBeLessThanOrEqual(Math.ceil(cppExpected) + 1);
     });
   }
+
+  it('SCG07EA fireball splash bucket: 70 Fire vs prone infantry at 288 leptons deals 4 after prone bias', () => {
+    // C++ trace: Explosion_Damage(coord=(6976,15168), victim=(6784,14976))
+    // distance=288, prone raw=35, Fire Verses[none]=90%, Spread=8.
+    // fixed(90%) raw=230; ((230*35)+128)/256 => 31.
+    // distance bucket floor(288 / (8 * 5)) => 7; 31 / 7 truncates to 4.
+    const distPx = 288 * ICON_PIXEL_W / ICON_LEPTON_W;
+    expect(modifyDamage(35, 'Fire', 'none', distPx)).toBe(4);
+  });
+
+  it('SCG07EA fireball splash bucket: 70 Fire vs prone infantry at 352 leptons deals 3 after C++ fixed multiply', () => {
+    // C++ trace: Explosion_Damage(coord=(6848,15296), victim=(6784,14976))
+    // distance=352, prone raw=35, Fire Verses[none]=90%, Spread=8.
+    // fixed(90%) raw=230; ((230*35)+128)/256 => 31.
+    // distance bucket floor(352 / (8 * 5)) => 8; 31 / 8 truncates to 3.
+    const distPx = 352 * ICON_PIXEL_W / ICON_LEPTON_W;
+    expect(modifyDamage(35, 'Fire', 'none', distPx)).toBe(3);
+  });
 });
 
 // =============================================================================
@@ -655,6 +687,22 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     expect(target.hp).toBe(hpBefore);
   });
 
+  it('entity exactly at 1.5-cell splash radius takes no damage (strict C++ distance < range)', () => {
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    const target = new Entity(UnitType.I_E1, House.USSR, center.x + (1.5 * CELL_SIZE), center.y);
+    const ctx = makeCombatCtx([target]);
+    const hpBefore = target.hp;
+
+    applySplashDamage(
+      ctx,
+      center,
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    expect(target.hp).toBe(hpBefore);
+  });
+
   // ── 7c. Entity at distance 0 (point-blank) takes full splash damage ──
 
   it('entity at explosion center takes full warhead damage (distance=0)', () => {
@@ -678,6 +726,42 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     expect(hpBefore - target.hp).toBe(expectedDmg);
   });
 
+  it('negative Organic explosion heals unarmored infantry at direct impact', () => {
+    const target = entityAtCell(UnitType.I_E1, House.Greece, 10, 10);
+    target.hp = target.maxHp - 30;
+    const medic = entityAtCell(UnitType.I_MEDI, House.Greece, 9, 10);
+    const ctx = makeCombatCtx([target, medic]);
+    ScenarioRandom.seed = 12345;
+    const seedBefore = ScenarioRandom.seed;
+
+    applySplashDamage(
+      ctx,
+      target.pos,
+      { damage: -50, warhead: 'Organic', splash: 1.5 },
+      -1, House.Greece, medic,
+    );
+
+    expect(target.hp).toBe(target.maxHp);
+    expect(ScenarioRandom.seed).toBe(seedBefore);
+    expect(target.moveTarget).toBeNull();
+  });
+
+  it('negative Organic explosion does not heal armored units', () => {
+    const target = entityAtCell(UnitType.V_2TNK, House.Greece, 10, 10);
+    target.hp = target.maxHp - 30;
+    const medic = entityAtCell(UnitType.I_MEDI, House.Greece, 9, 10);
+    const ctx = makeCombatCtx([target, medic]);
+
+    applySplashDamage(
+      ctx,
+      target.pos,
+      { damage: -50, warhead: 'Organic', splash: 1.5 },
+      -1, House.Greece, medic,
+    );
+
+    expect(target.hp).toBe(target.maxHp - 30);
+  });
+
   // ── 7d. Entity at 1 cell distance takes reduced splash damage ──
 
   it('entity 1 cell from explosion takes distance-reduced damage', () => {
@@ -693,13 +777,44 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     );
 
     // 1 cell = CELL_SIZE=24 pixels; modifyDamage with HE(Spread=6):
-    // distFactor = floor(24*2/6) = 8; damage = 200*0.9/8 = 22.5 → 23
+    // distFactor = floor(24*2/6) = 8; damage = round(200*0.9)/8 = 22
     const heVsNone = parsedWarheads['HE'].verses[0];
     const heSpread = parsedWarheads['HE'].spread;
     const distFactor = Math.floor(CELL_SIZE * 2 / heSpread);
-    const expectedDmg = Math.round(200 * heVsNone / distFactor);
+    const expectedDmg = Math.trunc(Math.round(200 * heVsNone) / distFactor);
 
     expect(hpBefore - target.hp).toBe(expectedDmg);
+  });
+
+  it('applies infantry prone bias before distance falloff', () => {
+    // C++ order:
+    //   infantry.cpp:329 ProneDamageBias first
+    //   object.cpp:1581 Modify_Damage distance falloff second.
+    //
+    // For 15 SA at ~0.7 cells, prone bias turns 15 -> 8; SA Spread=3 then
+    // truncates 8 / 12 to 0. Applying falloff first would produce 1 damage.
+    const center = {
+      x: 10 * CELL_SIZE + CELL_SIZE / 2,
+      y: 10 * CELL_SIZE + CELL_SIZE / 2,
+    };
+    const direct = new Entity(UnitType.I_E4, House.USSR, center.x, center.y);
+    direct.isProne = true;
+    const nearbyProne = new Entity(UnitType.I_E4, House.USSR, center.x + CELL_SIZE / 2, center.y + CELL_SIZE / 2);
+    nearbyProne.isProne = true;
+    const ctx = makeCombatCtx([direct, nearbyProne]);
+    const directHp = direct.hp;
+    const nearbyHp = nearbyProne.hp;
+
+    applySplashDamage(
+      ctx,
+      center,
+      { damage: 15, warhead: 'SA', splash: 1.5 },
+      -1,
+      House.England,
+    );
+
+    expect(directHp - direct.hp).toBe(Math.round(15 * PRONE_DAMAGE_BIAS));
+    expect(nearbyProne.hp).toBe(nearbyHp);
   });
 
   // ── 7e. Firer excluded from own splash (combat.cpp:207) ──
@@ -717,6 +832,47 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     );
 
     expect(attacker.hp).toBe(attackerHpBefore);
+  });
+
+  it('wall Reduce_Wall is impact-cell only and uses C++ DamagePoints rejection RNG', () => {
+    const ctx = makeCombatCtx([]);
+    const cx = 10;
+    const cy = 10;
+    ctx.map.setWallType(cx, cy, 'SBAG');      // DamagePoints=20, DamageLevels=1
+    ctx.map.setWallType(cx + 1, cy, 'SBAG');  // Adjacent wall must not be touched.
+
+    ScenarioRandom.seed = 115696874;
+    ScenarioRandom.callCount = 0;
+
+    applySplashDamage(
+      ctx,
+      { x: cx * CELL_SIZE + CELL_SIZE / 2, y: cy * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 16, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.Spain,
+    );
+
+    // C++ CellClass::Reduce_Wall calls Random_Pick(0, 20). From this seed the
+    // first masked pick is rejected (28), the second is accepted (15 < damage).
+    expect(ScenarioRandom.callCount).toBe(2);
+    expect(ScenarioRandom.seed).toBe(3602595448);
+    expect(ctx.map.getWallType(cx, cy)).toBe('');
+    expect(ctx.map.getWallType(cx + 1, cy)).toBe('SBAG');
+  });
+
+  it('non-impact walls are not cleared by Explosion_Damage splash radius', () => {
+    const ctx = makeCombatCtx([]);
+    ctx.map.setWallType(11, 10, 'SBAG');
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 100, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.Spain,
+    );
+
+    expect(ctx.map.getWallType(11, 10)).toBe('SBAG');
   });
 });
 

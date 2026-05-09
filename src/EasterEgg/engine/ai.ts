@@ -8,16 +8,16 @@
 import {
   type WorldPos, type UnitStats, type WeaponStats, type ProductionItem,
   CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC,
-  House, Mission, UnitType,
+  House, Mission, UnitType, MISSION_CONTROL,
   UNIT_STATS, HOUSE_FACTION,
   type Faction,
   pixelToLepton, worldDist,
 } from './types';
-import { Entity } from './entity';
+import { Entity, dir256ToFacing32 } from './entity';
 import { nearbyLocation } from './pathfinding';
 import {
   type MapStructure, type TeamType,
-  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_ARMOR, getBibCells,
+  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_ARMOR, getBibCells, getStructureOccupyCells,
   applyScenarioOverrides,
 } from './scenario';
 import { type GameMap, Terrain } from './map';
@@ -223,6 +223,17 @@ export interface AIContext {
   // Autocreate
   autocreateEnabled: boolean;
   teamTypes: TeamType[];
+  /** C++ global Teams collection, used by HouseClass::AI_Unit/Vessel/Infantry
+   *  to request replacement members for active under-strength teams. */
+  activeTeams?: readonly {
+    readonly house: House;
+    readonly desiredMembers: readonly { type: string; count: number }[];
+    readonly isReinforcable: boolean;
+    readonly isFullStrength: boolean;
+    readonly isForcedActive: boolean;
+    readonly isHasBeen: boolean;
+    readonly isAltered: boolean;
+  }[];
   destroyedTeams: Set<number>;
   /** C++ TeamTypeClass::Number — active instance count per team type index */
   autocreateTeamCounts: Map<number, number>;
@@ -239,6 +250,45 @@ export interface AIContext {
 }
 
 // ── Pure helper functions ────────────────────────────────────────────────
+
+function aiTeamNeedsProduction(
+  team: NonNullable<AIContext['activeTeams']>[number],
+  house: House,
+): boolean {
+  if (team.house !== house) return false;
+  // C++ HouseClass::AI_Unit/Vessel/Infantry:
+  //   (IsReinforcable && !IsFullStrength)
+  //   || (!IsForcedActive && !IsHasBeen && !JustAltered)
+  // TS tracks JustAltered with isAltered for the composition window.
+  return (team.isReinforcable && !team.isFullStrength) ||
+    (!team.isForcedActive && !team.isHasBeen && !team.isAltered);
+}
+
+function isRecruitableForAIProduction(entity: Entity, house: House): boolean {
+  if (!entity.alive || entity.house !== house) return false;
+  // C++ FootClass::Is_Recruitable rejects already-teamed foot objects before
+  // checking MissionClass::Is_Recruitable_Mission.
+  if (entity.teamRef) return false;
+  if (entity.mission === Mission.NONE) return true;
+  return MISSION_CONTROL[entity.mission]?.isRecruitable === true;
+}
+
+function houseHasInfantryScanType(ctx: AIContext, house: House, type: string): boolean {
+  // C++ house.cpp:6723-6769 Recalc_Attributes sets IScan from every
+  // InfantryClass pointer in the global infantry array. It does not require
+  // IsLocked/!IsInLimbo/alive; those gates only affect ActiveIScan. This means
+  // a recently killed dog still blocks AI_Infantry's DOG pick until the object
+  // leaves the infantry pool.
+  const scan = (entity: Entity): boolean =>
+    entity.house === house && entity.type === type && entity.stats.isInfantry;
+  for (const entity of ctx.entities) {
+    if (scan(entity)) return true;
+    for (const passenger of entity.passengers) {
+      if (scan(passenger)) return true;
+    }
+  }
+  return false;
+}
 
 /** Count alive structures of a given type for a house */
 export function aiCountStructure(ctx: AIContext, house: House, type: string): number {
@@ -385,7 +435,11 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     aggressionMult: mods.aggressionMult,
     designatedEnemy: null,
     preferredTarget: null,
-    iq: ctx.houseIQs.get(house) ?? 3,
+    // C++ HouseClass constructor initializes IQ from HouseStaticClass::Control.IQ.
+    // Scenario INI may override this via [House] IQ=, but absent IQ stays 0
+    // (SCG01EA USSR is the observable case). Do not default hostile houses to
+    // "medium AI"; that incorrectly enables C++ IQ/production gates.
+    iq: ctx.houseIQs.get(house) ?? 0,
     techLevel: ctx.houseTechLevels.get(house) ?? 10,
     maxUnit: ctx.houseMaxUnits.get(house) ?? CPP_DEFAULT_MAX_UNIT,
     maxInfantry: ctx.houseMaxInfantry.get(house) ?? CPP_DEFAULT_MAX_INFANTRY,
@@ -400,7 +454,9 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     buildingsKilledBy: new Map(),
     unitsKilledBy: new Map(),
     lastAttackerEnemy: null,
-    isStarted: true,
+    // C++ house.cpp:522: IsStarted(false). Only Begin_Production,
+    // Base_Building, or IQ >= Rule.IQProduction flips this on.
+    isStarted: false,
     isAlerted: false,
     isBaseBuilding: false,
     buildUnit: null,
@@ -876,11 +932,8 @@ export function spawnAIStructure(ctx: AIContext, type: string, house: House, cx:
     buildProgress: 0,
   });
 
-  const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
-  for (let dy = 0; dy < fh; dy++) {
-    for (let dx = 0; dx < fw; dx++) {
-      ctx.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
-    }
+  for (const cell of getStructureOccupyCells(type, cx, cy)) {
+    ctx.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
   }
   // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
   for (const bc of getBibCells(type, cx, cy)) {
@@ -1873,7 +1926,7 @@ export function updateAIRetreat(ctx: AIContext): void {
     if (e.type === UnitType.V_HARV) {
       const hpRatio = e.hp / e.maxHp;
       if (hpRatio >= retreatPercent) continue;
-      if (e.harvesterState === 'returning' || e.harvesterState === 'unloading') continue;
+      if (e.harvesterState === 'returning' || e.harvesterState === 'headinghome' || e.harvesterState === 'unloading') continue;
       if (e.mission === Mission.MOVE && e.moveTarget) continue;
       let nearestProc: MapStructure | null = null;
       let nearestDist = Infinity;
@@ -2296,7 +2349,8 @@ function spawnTeam(ctx: AIContext, teamIdx: number, house: House): void {
       const offsetY = (ScenarioRandom.float() - 0.5) * 48;
       const entity = new Entity(unitType, house, world.x + offsetX, world.y + offsetY);
       entity.facing = ScenarioRandom.nextInRange(0, 7);
-      entity.bodyFacing32 = entity.facing * 4;
+      entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+      entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
 
       if (teamMissionScript) {
         entity.teamMissions = teamMissionScript;
@@ -2411,13 +2465,23 @@ function aiPerTickUnit(ctx: AIContext, house: House, state: AIHouseState): void 
   // Build counter: for each unit type, how many more we need
   const counter: Record<string, number> = {};
 
+  // C++ 5828-5842: scan active Teams for under-strength/unstarted teams.
+  for (const team of ctx.activeTeams ?? []) {
+    if (!aiTeamNeedsProduction(team, house)) continue;
+    for (const member of team.desiredMembers) {
+      if (classifyUnitType(member.type) !== 'unit') continue;
+      // C++ AI_Unit sets the active-team counter to 1, independent of quantity.
+      counter[member.type] = 1;
+    }
+  }
+
   // C++ 5849-5861: scan TeamTypes for prebuilt teams
   // (In single-player, this is the primary path — active Teams rarely exist early)
   for (const ttype of ctx.teamTypes) {
     if (houseIdToHouse(ttype.house) !== house) continue;
     // C++ 5851: team->IsPrebuilt && (!team->IsAutocreate || IsAlerted)
-    const isPrebuilt = !!(ttype.flags & 2); // bit1 = IsPrebuilt (from team flags)
-    const isAutocreate = !!(ttype.flags & 4); // bit2 = IsAutocreate
+    const isPrebuilt = !!(ttype.flags & 0x0008);
+    const isAutocreate = !!(ttype.flags & 0x0004);
     if (!isPrebuilt) continue;
     if (isAutocreate && !state.isAlerted) continue;
 
@@ -2429,7 +2493,7 @@ function aiPerTickUnit(ctx: AIContext, house: House, state: AIHouseState): void 
 
   // C++ 5867-5872: subtract existing recruitable units
   for (const e of ctx.entities) {
-    if (e.alive && e.house === house && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) {
+    if (isRecruitableForAIProduction(e, house) && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) {
       if ((counter[e.type] ?? 0) > 0) {
         counter[e.type]--;
       }
@@ -2471,10 +2535,20 @@ function aiPerTickInfantry(ctx: AIContext, house: House, state: AIHouseState): v
   // C++ house.cpp:6062-6146: GAME_NORMAL team-based infantry scanning
   const counter: Record<string, number> = {};
 
+  // C++ 6069-6084: scan active Teams for under-strength/unstarted teams.
+  for (const team of ctx.activeTeams ?? []) {
+    if (!aiTeamNeedsProduction(team, house)) continue;
+    for (const member of team.desiredMembers) {
+      if (classifyUnitType(member.type) !== 'infantry') continue;
+      // C++ infantry path adds the requested quantity, plus one for reinforceable teams.
+      counter[member.type] = (counter[member.type] ?? 0) + member.count + (team.isReinforcable ? 1 : 0);
+    }
+  }
+
   for (const ttype of ctx.teamTypes) {
     if (houseIdToHouse(ttype.house) !== house) continue;
-    const isPrebuilt = !!(ttype.flags & 2);
-    const isAutocreate = !!(ttype.flags & 4);
+    const isPrebuilt = !!(ttype.flags & 0x0008);
+    const isAutocreate = !!(ttype.flags & 0x0004);
     if (!isPrebuilt) continue;
     if (isAutocreate && !state.isAlerted) continue;
 
@@ -2486,7 +2560,7 @@ function aiPerTickInfantry(ctx: AIContext, house: House, state: AIHouseState): v
 
   // Subtract existing
   for (const e of ctx.entities) {
-    if (e.alive && e.house === house && e.stats.isInfantry) {
+    if (isRecruitableForAIProduction(e, house) && e.stats.isInfantry) {
       if ((counter[e.type] ?? 0) > 0) counter[e.type]--;
     }
   }
@@ -2496,6 +2570,12 @@ function aiPerTickInfantry(ctx: AIContext, house: House, state: AIHouseState): v
   const bestlist: string[] = [];
   for (const [itype, count] of Object.entries(counter)) {
     if (count <= 0) continue;
+    // C++ house.cpp:6127 — dogs are skipped when IScan already contains
+    // INFANTRYF_DOG. IScan is the house existence bit, not recruitability, so
+    // a HUNTing/non-recruitable dog still blocks AI_Infantry from queuing
+    // another one. SCG01EA starts with a USSR HUNT dog; without this, TS builds
+    // an extra kennel dog at tick 57 that C++ never creates.
+    if (itype === UnitType.I_DOG && houseHasInfantryScanType(ctx, house, UnitType.I_DOG)) continue;
     if (bestval === -1 || bestval < count) {
       bestval = count;
       bestlist.length = 0;
@@ -2521,10 +2601,20 @@ function aiPerTickVessel(ctx: AIContext, house: House, state: AIHouseState): voi
 
   const counter: Record<string, number> = {};
 
+  // C++ 5960-5975: scan active Teams for under-strength/unstarted teams.
+  for (const team of ctx.activeTeams ?? []) {
+    if (!aiTeamNeedsProduction(team, house)) continue;
+    for (const member of team.desiredMembers) {
+      if (classifyUnitType(member.type) !== 'vessel') continue;
+      // C++ AI_Vessel sets the active-team counter to 1, independent of quantity.
+      counter[member.type] = 1;
+    }
+  }
+
   for (const ttype of ctx.teamTypes) {
     if (houseIdToHouse(ttype.house) !== house) continue;
-    const isPrebuilt = !!(ttype.flags & 2);
-    const isAutocreate = !!(ttype.flags & 4);
+    const isPrebuilt = !!(ttype.flags & 0x0008);
+    const isAutocreate = !!(ttype.flags & 0x0004);
     if (!isPrebuilt) continue;
     if (isAutocreate && !state.isAlerted) continue;
 
@@ -2535,7 +2625,7 @@ function aiPerTickVessel(ctx: AIContext, house: House, state: AIHouseState): voi
   }
 
   for (const e of ctx.entities) {
-    if (e.alive && e.house === house && e.stats.isVessel) {
+    if (isRecruitableForAIProduction(e, house) && e.stats.isVessel) {
       if ((counter[e.type] ?? 0) > 0) counter[e.type]--;
     }
   }

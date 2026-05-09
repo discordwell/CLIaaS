@@ -457,10 +457,12 @@ describe('canEnterCell — C++ Can_Enter_Cell() for pathfinding (findpath.cpp)',
 
   // -- Naval occupancy --
 
-  it('occupied water cell (naval) → MoveResult.TEMP_BLOCKED (stationary=MOVE_TEMP)', () => {
+  it('occupied water cell (naval) → MoveResult.OCCUPIED (MOVE_MOVING_BLOCK)', () => {
     map.setTerrain(15, 15, Terrain.WATER);
     map.setOccupancy(15, 15, 99);
-    expect(map.canEnterCell(15, 15, true)).toBe(MoveResult.TEMP_BLOCKED);
+    // C++ VesselClass::Can_Enter_Cell checks Occupy.Vehicle and returns
+    // MOVE_MOVING_BLOCK; it does not distinguish stationary vessels as MOVE_TEMP.
+    expect(map.canEnterCell(15, 15, true)).toBe(MoveResult.OCCUPIED);
   });
 
   it('occupied water cell with moving naval unit → MoveResult.OCCUPIED (MOVE_MOVING_BLOCK)', () => {
@@ -1223,13 +1225,10 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
   // -- Overlay ranges --
 
-  it('gold ore range: 0x03 (GOLD01) through 0x0E (GOLD12) — visual variants only', () => {
+  it('gold ore range: OVERLAY_GOLD1 through OVERLAY_GOLD4 (5..8)', () => {
     // C++ defines.h:1487-1490: OVERLAY_GOLD1..GOLD4 (4 visual variants).
     // C++ stores density in CellClass::OverlayData (separate field).
-    // TS encodes 12 visual byte values (compatibility legacy from MapPack); each
-    // is gold IF the cell also has density > 0. depleteOre returns 25 only when
-    // density > 0 (matching C++ Reduce_Tiberium semantics: cell.cpp:1630-1648).
-    for (let ovl = 0x03; ovl <= 0x0E; ovl++) {
+    for (let ovl = GameMap.OVERLAY_GOLD1; ovl <= GameMap.OVERLAY_GOLD4; ovl++) {
       const m = new GameMap();
       const idx = 15 * MAP_CELLS + 15;
       m.overlay[idx] = ovl;
@@ -1239,9 +1238,9 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
     }
   });
 
-  it('gem range: 0x0F (GEM01) through 0x12 (GEM04) — visual variants only', () => {
+  it('gem range: OVERLAY_GEMS1 through OVERLAY_GEMS4 (9..12)', () => {
     // C++ defines.h:1491-1494: OVERLAY_GEMS1..GEMS4. Density in OverlayData.
-    for (let ovl = 0x0F; ovl <= 0x12; ovl++) {
+    for (let ovl = GameMap.OVERLAY_GEMS1; ovl <= GameMap.OVERLAY_GEMS4; ovl++) {
       const m = new GameMap();
       const idx = 15 * MAP_CELLS + 15;
       m.overlay[idx] = ovl;
@@ -1255,14 +1254,13 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
     expect(map.depleteOre(15, 15)).toBe(0);
   });
 
-  it('overlay 0x02 (below gold range) returns 0 credits', () => {
-    map.overlay[15 * MAP_CELLS + 15] = 0x02;
-    expect(map.depleteOre(15, 15)).toBe(0);
-  });
-
-  it('overlay 0x13 (above gem range) returns 0 credits', () => {
-    map.overlay[15 * MAP_CELLS + 15] = 0x13;
-    expect(map.depleteOre(15, 15)).toBe(0);
+  it('wall and civilian overlays are not ore', () => {
+    for (const ovl of [0, 1, 2, 3, 4, 13, 14, 15, 16, 17, 18]) {
+      map.overlay[15 * MAP_CELLS + 15] = ovl;
+      map.oreDensity[15 * MAP_CELLS + 15] = 5;
+      expect(map.depleteOre(15, 15), `overlay ${ovl} should not be harvestable`).toBe(0);
+      expect(GameMap.isOreOverlayId(ovl), `overlay ${ovl} should not be ore`).toBe(false);
+    }
   });
 
   // -- Depletion mechanics --
@@ -1272,18 +1270,18 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
     // NOT Overlay (visual type). Overlay only changes when density reaches 0
     // and the cell empties.
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x08; // GOLD visual variant
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4; // GOLD visual variant
     map.oreDensity[idx] = 5;
     map.depleteOre(15, 15);
     expect(map.oreDensity[idx], 'density decremented').toBe(4);
-    expect(map.overlay[idx], 'overlay (visual type) unchanged while density > 0').toBe(0x08);
+    expect(map.overlay[idx], 'overlay (visual type) unchanged while density > 0').toBe(GameMap.OVERLAY_GOLD4);
   });
 
   it('depleting gold ore at density=0 sets overlay to 0xFF (fully depleted)', () => {
     // C++ cell.cpp:1640-1644: when OverlayData+1 <= levels (i.e. density=0
     // and trying to deplete 1), Overlay = OVERLAY_NONE, OverlayData = 0.
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x03;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
     map.oreDensity[idx] = 0;
     map.depleteOre(15, 15);
     expect(map.overlay[idx]).toBe(0xFF);
@@ -1291,16 +1289,16 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
   it('depleting gem decrements oreDensity by 1', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x11; // GEM visual variant
+    map.overlay[idx] = GameMap.OVERLAY_GEMS3; // GEM visual variant
     map.oreDensity[idx] = 2;
     map.depleteOre(15, 15);
     expect(map.oreDensity[idx]).toBe(1);
-    expect(map.overlay[idx]).toBe(0x11);
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GEMS3);
   });
 
   it('depleting gem at density=0 sets overlay to 0xFF (fully depleted)', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x0F;
+    map.overlay[idx] = GameMap.OVERLAY_GEMS1;
     map.oreDensity[idx] = 0;
     map.depleteOre(15, 15);
     expect(map.overlay[idx]).toBe(0xFF);
@@ -1308,14 +1306,14 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
   it('gold bail value = 25 credits (rules.ini GoldValue=25)', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x08;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
     map.oreDensity[idx] = 5;
     expect(map.depleteOre(15, 15)).toBe(25);
   });
 
   it('gem bail value = 50 credits (rules.ini GemValue=50)', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x10;
+    map.overlay[idx] = GameMap.OVERLAY_GEMS2;
     map.oreDensity[idx] = 2;
     expect(map.depleteOre(15, 15)).toBe(50);
   });
@@ -1327,15 +1325,15 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
   // -- isGemOverlay --
 
-  it('isGemOverlay returns true for gem overlays (0x0F-0x12)', () => {
-    for (let ovl = 0x0F; ovl <= 0x12; ovl++) {
+  it('isGemOverlay returns true for gem overlays (9..12)', () => {
+    for (let ovl = GameMap.OVERLAY_GEMS1; ovl <= GameMap.OVERLAY_GEMS4; ovl++) {
       map.overlay[15 * MAP_CELLS + 15] = ovl;
       expect(map.isGemOverlay(15, 15)).toBe(true);
     }
   });
 
   it('isGemOverlay returns false for gold overlays', () => {
-    map.overlay[15 * MAP_CELLS + 15] = 0x08;
+    map.overlay[15 * MAP_CELLS + 15] = GameMap.OVERLAY_GOLD4;
     expect(map.isGemOverlay(15, 15)).toBe(false);
   });
 
@@ -1351,22 +1349,29 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
   // -- findNearestOre --
 
   it('findNearestOre finds gold ore', () => {
-    map.overlay[18 * MAP_CELLS + 15] = 0x08; // gold at (15,18)
+    map.overlay[18 * MAP_CELLS + 15] = GameMap.OVERLAY_GOLD4; // gold at (15,18)
     const result = map.findNearestOre(15, 15);
     expect(result).toEqual({ cx: 15, cy: 18 });
   });
 
   it('findNearestOre finds gem', () => {
-    map.overlay[18 * MAP_CELLS + 15] = 0x10; // gem at (15,18)
+    map.overlay[18 * MAP_CELLS + 15] = GameMap.OVERLAY_GEMS2; // gem at (15,18)
     const result = map.findNearestOre(15, 15);
     expect(result).toEqual({ cx: 15, cy: 18 });
   });
 
   it('findNearestOre returns nearest by squared distance', () => {
-    map.overlay[15 * MAP_CELLS + 17] = 0x08; // gold at (17,15) distance=4
-    map.overlay[15 * MAP_CELLS + 16] = 0x08; // gold at (16,15) distance=1
+    map.overlay[15 * MAP_CELLS + 17] = GameMap.OVERLAY_GOLD4; // gold at (17,15) distance=4
+    map.overlay[15 * MAP_CELLS + 16] = GameMap.OVERLAY_GOLD4; // gold at (16,15) distance=1
     const result = map.findNearestOre(15, 15);
     expect(result).toEqual({ cx: 16, cy: 15 }); // nearer one
+  });
+
+  it('findNearestOre ignores wall/civilian overlays adjacent to harvesters', () => {
+    for (const [ovl, x] of [[3, 14], [4, 15], [13, 16], [18, 17]] as const) {
+      map.overlay[15 * MAP_CELLS + x] = ovl;
+    }
+    expect(map.findNearestOre(15, 15, 3)).toBeNull();
   });
 
   it('findNearestOre returns null when no ore within range', () => {
@@ -1374,19 +1379,19 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
   });
 
   it('findNearestOre respects maxRange parameter', () => {
-    map.overlay[40 * MAP_CELLS + 15] = 0x08; // gold at (15,40) — 25 cells away
+    map.overlay[40 * MAP_CELLS + 15] = GameMap.OVERLAY_GOLD4; // gold at (15,40) — 25 cells away
     expect(map.findNearestOre(15, 15, 5)).toBeNull();
     expect(map.findNearestOre(15, 15, 30)).toEqual({ cx: 15, cy: 40 });
   });
 
   it('findNearestOre default maxRange is 6 (C++ short scan)', () => {
     // Place ore at distance 5 — should be found
-    map.overlay[20 * MAP_CELLS + 15] = 0x08; // (15,20) → dy=5
+    map.overlay[20 * MAP_CELLS + 15] = GameMap.OVERLAY_GOLD4; // (15,20) → dy=5
     expect(map.findNearestOre(15, 15)).toEqual({ cx: 15, cy: 20 });
 
     // Place ore at distance 7 — should NOT be found with default
     const m2 = new GameMap();
-    m2.overlay[22 * MAP_CELLS + 15] = 0x08; // (15,22) → dy=7
+    m2.overlay[22 * MAP_CELLS + 15] = GameMap.OVERLAY_GOLD4; // (15,22) → dy=7
     expect(m2.findNearestOre(15, 15)).toBeNull();
   });
 });
@@ -1397,68 +1402,70 @@ describe('Ore/Gem system — overlays and depletion (overlay.cpp)', () => {
 
 describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
 
-  it('ORE_GROWTH_INTERVAL = 1821 ticks (C++ map.cpp:1017 full scan)', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
+  it('ORE_GROWTH_INTERVAL = 2048 ticks (C++ map.cpp:1017 full scan)', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(2048);
   });
 
   it('growOre does nothing at tick 0', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x08;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
     map.growOre(0);
-    expect(map.overlay[idx]).toBe(0x08); // unchanged
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GOLD4); // unchanged
   });
 
   it('growOre does nothing at non-interval ticks', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x08;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
     map.growOre(100);
-    expect(map.overlay[idx]).toBe(0x08);
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GOLD4);
     map.growOre(1820);
-    expect(map.overlay[idx]).toBe(0x08);
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GOLD4);
   });
 
-  it('growOre fires at tick 1821 (first interval)', () => {
-    // With deterministic random, we can't predict exact outcome, but we can
-    // check that it runs without error and the overlay is in a valid range
+  it('growOre fires at tick 2048 (first interval)', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x05; // mid-range gold
-    map.growOre(1821);
-    // Overlay should still be in gold range (possibly incremented)
-    expect(map.overlay[idx]).toBeGreaterThanOrEqual(0x05);
-    expect(map.overlay[idx]).toBeLessThanOrEqual(0x06);
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = 5;
+    map.growOre(2048);
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GOLD1);
+    expect(map.oreDensity[idx]).toBe(6);
   });
 
-  it('EC6: gems (0x0F-0x12) never grow — skipped entirely', () => {
+  it('EC6: gems (9..12) never grow — skipped entirely', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x0F; // gem minimum
+    map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+    map.oreDensity[idx] = 1;
     // Run many growth cycles
-    for (let tick = 1821; tick <= 1821 * 100; tick += 1821) {
+    for (let tick = 2048; tick <= 2048 * 100; tick += 2048) {
       map.growOre(tick);
     }
     // Gem overlay should be completely unchanged
-    expect(map.overlay[idx]).toBe(0x0F);
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GEMS1);
+    expect(map.oreDensity[idx]).toBe(1);
   });
 
-  it('gold ore at max density (0x0E) cannot grow further', () => {
+  it('gold ore at max OverlayData density cannot grow further', () => {
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x0E; // max gold
-    for (let tick = 1821; tick <= 1821 * 50; tick += 1821) {
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
+    map.oreDensity[idx] = 11;
+    for (let tick = 2048; tick <= 2048 * 50; tick += 2048) {
       map.growOre(tick);
     }
-    expect(map.overlay[idx]).toBe(0x0E); // stays at max
+    expect(map.overlay[idx]).toBe(GameMap.OVERLAY_GOLD4);
+    expect(map.oreDensity[idx]).toBe(11);
   });
 
-  it('EC7: spread only occurs when density > ORE_SPREAD_MIN_DENSITY (0x09)', () => {
+  it('EC7: spread only occurs when OverlayData > ORE_SPREAD_MIN_DENSITY', () => {
     // C++ parity: OverlayClass::AI() captures overlay value BEFORE growth,
-    // then checks `if (ovl > 6)` (mapped to ovl > 0x09 in our 0x03-0x0E range).
-    // At exactly 0x09, ovl <= 0x09 is true → spread is skipped.
-    // Even if density growth bumps the cell to 0x0A during this cycle,
+    // then checks OverlayData > 6. At exactly 6, spread is skipped.
+    // Even if density growth bumps the cell to 7 during this cycle,
     // the spread decision was already made using the pre-growth snapshot.
     const idx = 15 * MAP_CELLS + 15;
-    map.overlay[idx] = 0x09; // exactly at threshold — spread should NOT fire
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = GameMap.ORE_SPREAD_MIN_DENSITY;
     // All neighbors are CLEAR (default) — spread-eligible terrain
     // Run a single cycle so density growth can't push us multiple levels
-    map.growOre(1821);
+    map.growOre(2048);
     let neighborOreCount = 0;
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -1474,7 +1481,8 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
   it('EC7: spread only targets CLEAR terrain (not WATER, ROCK, etc.)', () => {
     const cx = 15, cy = 15;
     const idx = cy * MAP_CELLS + cx;
-    map.overlay[idx] = 0x0E; // max gold, high density
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
+    map.oreDensity[idx] = 11;
     // Surround with non-CLEAR terrain
     map.setTerrain(cx + 1, cy, Terrain.WATER);
     map.setTerrain(cx - 1, cy, Terrain.ROCK);
@@ -1484,7 +1492,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
     map.setTerrain(cx - 1, cy - 1, Terrain.ORE);
     map.setTerrain(cx + 1, cy - 1, Terrain.BEACH);
     map.setTerrain(cx - 1, cy + 1, Terrain.RIVER);
-    for (let tick = 1821; tick <= 1821 * 200; tick += 1821) {
+    for (let tick = 2048; tick <= 2048 * 200; tick += 2048) {
       map.growOre(tick);
     }
     // None of the neighbors should have ore (only CLEAR allows spread)
@@ -1500,7 +1508,8 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
   it('EC7: spread does not target cells with walls', () => {
     const cx = 15, cy = 15;
     const idx = cy * MAP_CELLS + cx;
-    map.overlay[idx] = 0x0E;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
+    map.oreDensity[idx] = 11;
     // All neighbors are CLEAR (default) but have walls
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -1508,7 +1517,7 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
         map.setWallType(cx + dx, cy + dy, 'SBAG');
       }
     }
-    for (let tick = 1821; tick <= 1821 * 200; tick += 1821) {
+    for (let tick = 2048; tick <= 2048 * 200; tick += 2048) {
       map.growOre(tick);
     }
     for (let dy = -1; dy <= 1; dy++) {
@@ -1523,24 +1532,25 @@ describe('Ore growth — C++ OverlayClass::AI (overlay.cpp)', () => {
   it('EC7: spread does not target cells with existing overlay', () => {
     const cx = 15, cy = 15;
     const idx = cy * MAP_CELLS + cx;
-    map.overlay[idx] = 0x0E;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD4;
+    map.oreDensity[idx] = 11;
     // Place existing overlay on a neighbor
-    map.overlay[cy * MAP_CELLS + cx + 1] = 0x03; // existing gold
-    for (let tick = 1821; tick <= 1821 * 200; tick += 1821) {
+    map.overlay[cy * MAP_CELLS + cx + 1] = GameMap.OVERLAY_GOLD1; // existing gold
+    for (let tick = 2048; tick <= 2048 * 200; tick += 2048) {
       map.growOre(tick);
     }
-    // The neighbor with existing ore should have grown but not been overwritten to 0x03
-    expect(map.overlay[cy * MAP_CELLS + cx + 1]).toBeGreaterThanOrEqual(0x03);
+    // The neighbor with existing ore should not be overwritten by spread.
+    expect(map.overlay[cy * MAP_CELLS + cx + 1]).toBe(GameMap.OVERLAY_GOLD1);
   });
 
   it('growOre only processes cells within bounds', () => {
     // Place gold outside bounds
-    map.overlay[5 * MAP_CELLS + 5] = 0x0E;
+    map.overlay[5 * MAP_CELLS + 5] = GameMap.OVERLAY_GOLD4;
     for (let tick = 256; tick <= 256 * 10; tick += 256) {
       map.growOre(tick);
     }
     // Should be unchanged (not processed)
-    expect(map.overlay[5 * MAP_CELLS + 5]).toBe(0x0E);
+    expect(map.overlay[5 * MAP_CELLS + 5]).toBe(GameMap.OVERLAY_GOLD4);
   });
 });
 
@@ -1908,7 +1918,7 @@ describe('Ore growth constants (C++ overlay.cpp parity)', () => {
     expect(GameMap.ORE_SPREAD_MIN_DENSITY).toBe(6);
   });
 
-  it('ORE_GROWTH_INTERVAL = 1821 ticks (~121 seconds at 15 FPS)', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
+  it('ORE_GROWTH_INTERVAL = 2048 ticks (~121 seconds at 15 FPS)', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(2048);
   });
 });

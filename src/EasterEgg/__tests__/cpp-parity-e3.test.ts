@@ -293,7 +293,7 @@ describe('AP warhead effectiveness (combat.cpp warhead tables)', () => {
 });
 
 // == Weapon Selection (techno.cpp:Can_Fire) ===================================
-// C++ techno.cpp -- selectWeapon picks higher effective damage based on warhead-vs-armor
+// C++ techno.cpp -- selectWeapon picks higher C++ warhead score based on target armor
 
 describe('E3 weapon selection (techno.cpp:Can_Fire)', () => {
   it('vs heavy armor ground target: picks Dragon (RedEye is AA-only, isAntiGround=false)', () => {
@@ -504,10 +504,11 @@ describe('E3 retaliation (techno.cpp)', () => {
     e3.target = null;
 
     const ctx = makeCombatCtx([e3, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, e3, attacker);
 
     expect(e3.target).toBe(attacker);
-    expect(e3.mission).toBe(Mission.ATTACK);
+    expect(e3.mission).toBe(Mission.GUARD);
   });
 
   it('E3 CAN retaliate (has weapon)', () => {
@@ -554,7 +555,7 @@ describe('E3 AI scatter on damage (techno.cpp)', () => {
       testE3.mission = Mission.GUARD;
       const testCtx = makeCombatCtx([testE3]);
       aiScatterOnDamage(testCtx, testE3);
-      if (testE3.mission === Mission.MOVE && testE3.moveTarget !== null) {
+      if (testE3.missionQueue === Mission.MOVE && testE3.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -567,7 +568,8 @@ describe('E3 AI scatter on damage (techno.cpp)', () => {
     e3.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([e3]);
-    aiScatterOnDamage(ctx, e3);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, e3, attacker);
 
     expect(e3.mission).toBe(Mission.GUARD);
     expect(e3.moveTarget).toBeNull();
@@ -580,7 +582,7 @@ describe('E3 AI scatter on damage (techno.cpp)', () => {
       testE3.mission = Mission.ATTACK;
       const testCtx = makeCombatCtx([testE3]);
       aiScatterOnDamage(testCtx, testE3);
-      if (testE3.mission === Mission.MOVE && testE3.moveTarget !== null) {
+      if (testE3.missionQueue === Mission.MOVE && testE3.moveTarget !== null) {
         scattered = true;
         break;
       }

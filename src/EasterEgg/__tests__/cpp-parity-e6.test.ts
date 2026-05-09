@@ -411,7 +411,7 @@ describe('E6 AI scatter on damage (techno.cpp)', () => {
       e6.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e6]);
       aiScatterOnDamage(ctx, e6);
-      if (e6.mission === Mission.MOVE && e6.moveTarget !== null) {
+      if (e6.missionQueue === Mission.MOVE && e6.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -423,7 +423,8 @@ describe('E6 AI scatter on damage (techno.cpp)', () => {
     const e6 = entityAtCell(UnitType.I_E6, House.Spain, 10, 10);
     e6.mission = Mission.GUARD;
     const ctx = makeCombatCtx([e6]);
-    aiScatterOnDamage(ctx, e6);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, e6, attacker);
     expect(e6.mission).toBe(Mission.GUARD);
     expect(e6.moveTarget).toBeNull();
   });

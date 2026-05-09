@@ -9,7 +9,7 @@ import {
   type House, UnitType, Mission,
 } from './types';
 import { getEffectiveCost } from './production';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, getBibCells } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, getBibCells, getStructureOccupyCells } from './scenario';
 import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type Effect } from './renderer';
@@ -151,11 +151,9 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     buildProgress: isWall ? undefined : 0, // walls appear instantly
   };
   ctx.structures.push(newStruct);
-  // Mark cells as impassable
-  for (let dy = 0; dy < fh; dy++) {
-    for (let dx = 0; dx < fw; dx++) {
-      ctx.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
-    }
+  // Mark C++ Occupy_List cells as impassable; overlap cells remain passable.
+  for (const cell of getStructureOccupyCells(item.type, cx, cy)) {
+    ctx.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
   }
   // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
   for (const bc of getBibCells(item.type, cx, cy)) {
@@ -240,11 +238,9 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     buildProgress: 0,
   };
   ctx.structures.push(newStruct);
-  // Mark 3x3 footprint
-  for (let dy = 0; dy < 3; dy++) {
-    for (let dx = 0; dx < 3; dx++) {
-      ctx.map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
-    }
+  // Mark C++ Occupy_List cells as impassable; overlap cells remain passable.
+  for (const cell of getStructureOccupyCells('FACT', cx, cy)) {
+    ctx.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
   }
   // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below FACT)
   for (const bc of getBibCells('FACT', cx, cy)) {

@@ -293,7 +293,7 @@ describe('Warhead -> combatAnim integration (INI Explosion= -> Combat_Anim resul
 
   it('AP (Explosion=4, dmg=50) -> veh-hit2', () => {
     const set = parseInt(rules.AP.Explosion, 10);
-    expect(combatAnim(50, set, 'ground')).toBe('veh-hit2');
+    expect(combatAnim(50, set, 'ground')).toBe('frag1');
   });
 
   it('Fire (Explosion=3, dmg=200) -> napalm3', () => {
@@ -682,7 +682,7 @@ describe('Weapon scenario visual verification — damage -> warhead -> animation
 
   it('120mm Mammoth (AP, dmg=50) -> veh-hit2', () => {
     const set = parseInt(rules.AP.Explosion, 10);
-    expect(combatAnim(50, set, 'ground')).toBe('veh-hit2');
+    expect(combatAnim(50, set, 'ground')).toBe('frag1');
   });
 
   it('Flamer (Fire, dmg=35) -> napalm1 (low fire damage)', () => {

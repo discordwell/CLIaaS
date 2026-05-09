@@ -40,8 +40,14 @@ import {
   type EnterIdleModeOptions,
 } from '../engine/perCellProcess';
 
-type M = 'GUARD' | 'AREA_GUARD' | 'MOVE' | 'HUNT';
-const MISSIONS: EnterIdleModeOptions<M> = { guardMission: 'GUARD', areaGuardMission: 'AREA_GUARD' };
+type M = 'GUARD' | 'AREA_GUARD' | 'MOVE' | 'HUNT' | 'ATTACK' | 'RESCUE';
+const MISSIONS: EnterIdleModeOptions<M> = {
+  guardMission: 'GUARD',
+  areaGuardMission: 'AREA_GUARD',
+  attackMission: 'ATTACK',
+  huntMission: 'HUNT',
+  rescueMission: 'RESCUE',
+};
 
 /** Factory for a baseline idle-infantry entity that would satisfy all four Enter_Idle_Mode guards. */
 function idleInfantry(overrides: Partial<FootPCPEntity<M>> = {}): FootPCPEntity<M> {
@@ -189,5 +195,38 @@ describe('footPerCellProcess — C++ infantry.cpp:911-914 + foot.cpp PCP_END cha
     expect(entity.missionQueue).toBe(null);
     expect(entity.missionTimer).toBe(0);
     expect(r.commenceFired).toBe(true);
+  });
+
+  it('runs FootClass path-shorten after infantry Commence, using the post-queue mission', () => {
+    // C++ infantry.cpp:914 calls Commence() before chaining to
+    // FootClass::Per_Cell_Process at infantry.cpp:963. Therefore a unit that
+    // enters PCP_END as Mission=MOVE with MissionQueue=ATTACK is already on
+    // Mission=ATTACK by the time foot.cpp:1479 checks the attack-type mission
+    // gate, so path-shorten may clear NavCom immediately.
+    const entity = idleInfantry({
+      mission: 'MOVE',
+      missionQueue: 'ATTACK',
+      missionTimer: 7,
+      moveTarget: { lx: 2000, ly: 2000 },
+      path: [{ cx: 10, cy: 10 }, { cx: 11, cy: 10 }],
+      pathIndex: 1,
+      target: { alive: true },
+    });
+    const r = footPerCellProcess(entity, PCPType.PCP_END,
+      {
+        hasLegalTarCom: true,
+        inRadioContact: false,
+        pathShortenEligible: true,
+        targetInRange: true,
+      }, MISSIONS);
+
+    expect(entity.mission).toBe('ATTACK');
+    expect(entity.missionQueue).toBe(null);
+    expect(entity.missionTimer).toBe(0);
+    expect(entity.moveTarget).toBe(null);
+    expect(entity.path).toEqual([]);
+    expect(entity.pathIndex).toBe(0);
+    expect(r.commenceFired).toBe(true);
+    expect(r.navComCleared).toBe(true);
   });
 });

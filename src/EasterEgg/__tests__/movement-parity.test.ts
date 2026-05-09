@@ -234,12 +234,13 @@ describe('MV9: GroundspeedBias multiplies rotation rate', () => {
     expect(slow.bodyFacing32).toBeLessThanOrEqual(normal.bodyFacing32);
   });
 
-  it('rotation accumulator uses stats.rot * groundspeedBias', () => {
+  it('rotation rate uses C++ fixed-point ROT * groundspeedBias', () => {
     const tank = new Entity(UnitType.V_1TNK, House.Spain, 100, 100);
     expect(tank.stats.rot).toBe(5); // 1TNK has rot=5
 
     tank.groundspeedBias = 1.5;
     tank.facing = Dir.N;
+    tank.bodyFacing256 = Dir.N * 32;
     tank.desiredFacing = Dir.S; // need to rotate
     tank.bodyFacing32 = 0;
     tank.rotAccumulator = 0;
@@ -247,16 +248,17 @@ describe('MV9: GroundspeedBias multiplies rotation rate', () => {
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
 
-    // After one tick: accumulator should have gotten rot * groundspeedBias = 5 * 1.5 = 7.5
-    // Since 7.5 < 8 threshold, no step yet, accumulator holds the value
-    expect(tank.rotAccumulator).toBeCloseTo(7.5, 5);
-    expect(tank.bodyFacing32).toBe(0); // no step yet
+    // C++ fixed::operator*(int): raw(1.5)=384, ((384*5)+128)/256 = 8.
+    // N->S has signed-char diff -128, so it rotates counterclockwise to 248.
+    expect(tank.bodyFacing256).toBe(248);
+    expect(tank.bodyFacing32).toBe(31);
+    expect(tank.rotAccumulator).toBe(0);
 
-    // Second tick: accumulator = 7.5 + 7.5 = 15, >= 8 so step once, remainder = 15 - 8 = 7
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
-    expect(tank.rotAccumulator).toBeCloseTo(7.0, 5);
-    expect(tank.bodyFacing32).not.toBe(0); // should have stepped
+    expect(tank.bodyFacing256).toBe(240);
+    expect(tank.bodyFacing32).toBe(30);
+    expect(tank.rotAccumulator).toBe(0);
   });
 });
 

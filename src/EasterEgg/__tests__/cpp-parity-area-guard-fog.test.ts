@@ -112,7 +112,9 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; s
     spyDisguise: () => {},
     spyInfiltrate: () => {},
     minimapAlert: () => {},
-    // Default: nothing revealed to any house (tick-0 empty fog)
+    // Default: nothing discovered by PlayerPtr (tick-0 empty fog). C++
+    // Evaluate_Object uses IsDiscoveredByPlayer, not scanner-house fog.
+    isDiscoveredByPlayer: () => false,
     isRevealedToHouse: () => false,
     ...overrides,
   };
@@ -152,9 +154,9 @@ describe('Mission_Guard_Area fog filter — C++ techno.cpp:1525-1532 IsOwnedByPl
     expect(scanner.target, 'AI scanner MUST acquire PlayerPtr (Greece) target via IsOwnedByPlayer bypass').toBe(greeceJeep);
   });
 
-  it('AI scanner acquires player-ALLIED target when it is revealed to scanner-house fog', () => {
-    // If USSR's fog has revealed England JEEP's cell (e.g. from a later tick after
-    // USSR has seen the area), the scanner can acquire it.
+  it('AI scanner does NOT acquire player-ALLIED target through scanner-house fog alone', () => {
+    // C++ Evaluate_Object ignores scanner-house fog here; England is not PlayerPtr
+    // and must be IsDiscoveredByPlayer before the scanner can acquire it.
     const scanner = makeEntity(UnitType.I_E4, House.USSR, 30, 61);
     scanner.mission = Mission.AREA_GUARD;
     scanner.guardOrigin = { x: scanner.pos.x, y: scanner.pos.y };
@@ -169,6 +171,24 @@ describe('Mission_Guard_Area fog filter — C++ techno.cpp:1525-1532 IsOwnedByPl
     });
     updateAreaGuard(ctx, scanner);
 
-    expect(scanner.target, 'AI scanner must acquire England target when revealed to scanner fog').toBe(englandJeep);
+    expect(scanner.target, 'AI scanner must not acquire England target through scanner fog alone').toBeNull();
+  });
+
+  it('AI scanner acquires player-ALLIED target when it is IsDiscoveredByPlayer', () => {
+    const scanner = makeEntity(UnitType.I_E4, House.USSR, 30, 61);
+    scanner.mission = Mission.AREA_GUARD;
+    scanner.guardOrigin = { x: scanner.pos.x, y: scanner.pos.y };
+
+    const englandJeep = makeEntity(UnitType.V_JEEP, House.England, 28, 60);
+    englandJeep.mission = Mission.GUARD;
+
+    const ctx = makeCtx({
+      entities: [scanner, englandJeep],
+      isDiscoveredByPlayer: (e) => e === englandJeep,
+      isRevealedToHouse: () => false,
+    });
+    updateAreaGuard(ctx, scanner);
+
+    expect(scanner.target, 'AI scanner must acquire England target once IsDiscoveredByPlayer is true').toBe(englandJeep);
   });
 });

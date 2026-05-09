@@ -33,6 +33,7 @@ function makeCombatContext(entities: Entity[], mapW = 20, mapH = 20): CombatCont
     entityById,
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [],
     tick: 0,
     playerHouse: House.Greece,
@@ -64,7 +65,6 @@ function makeCombatContext(entities: Entity[], mapW = 20, mapH = 20): CombatCont
     getFirepowerBias: () => 1.0,
     getArmorBias: () => 1.0,
     getROFBias: () => 1.0,
-    getArmorBias: () => 1.0,
     damageStructure: () => false,
     aiIQ: () => 1,
     warheadMuzzleColor: () => '#fff',
@@ -74,6 +74,12 @@ function makeCombatContext(entities: Entity[], mapW = 20, mapH = 20): CombatCont
     screenShake: 0,
     screenFlash: 0,
   };
+}
+
+function runProjectilesToImpact(ctx: CombatContext, maxTicks = 200): void {
+  for (let i = 0; i < maxTicks && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
 }
 
 beforeEach(() => {
@@ -135,11 +141,7 @@ describe('Dog unlimbos at impact point when bullet arrives', () => {
 
     expect(dog.inLimbo).toBe(true);
 
-    // Advance projectile to completion
-    const proj = ctx.inflightProjectiles[0];
-    proj.currentFrame = proj.travelFrames; // force arrival
-
-    updateInflightProjectiles(ctx);
+    runProjectilesToImpact(ctx);
 
     expect(dog.inLimbo).toBe(false);
     expect(dog.alive).toBe(true);
@@ -160,9 +162,7 @@ describe('Dog unlimbos at impact point when bullet arrives', () => {
     const weapon = WEAPON_STATS.DogJaw;
     launchProjectile(ctx, dog, target, weapon, weapon.damage, target.pos.x, target.pos.y, true);
 
-    const proj = ctx.inflightProjectiles[0];
-    proj.currentFrame = proj.travelFrames;
-    updateInflightProjectiles(ctx);
+    runProjectilesToImpact(ctx);
 
     // C++ bullet.cpp:152 — Do_Action(DO_DOG_MAUL, true)
     expect(dog.animState).toBe(AnimState.ATTACK);
@@ -186,9 +186,7 @@ describe('Dog unlimbo falls back to adjacent cells when impact cell is impassabl
     const weapon = WEAPON_STATS.DogJaw;
     launchProjectile(ctx, dog, target, weapon, weapon.damage, target.pos.x, target.pos.y, true);
 
-    const proj = ctx.inflightProjectiles[0];
-    proj.currentFrame = proj.travelFrames;
-    updateInflightProjectiles(ctx);
+    runProjectilesToImpact(ctx);
 
     // Dog should have unlimboed at an adjacent passable cell
     expect(dog.inLimbo).toBe(false);
@@ -220,9 +218,7 @@ describe('Dog unlimbo falls back to adjacent cells when impact cell is impassabl
     const weapon = WEAPON_STATS.DogJaw;
     launchProjectile(ctx, dog, target, weapon, weapon.damage, targetX, targetY, true);
 
-    const proj = ctx.inflightProjectiles[0];
-    proj.currentFrame = proj.travelFrames;
-    updateInflightProjectiles(ctx);
+    runProjectilesToImpact(ctx);
 
     // C++ bullet.cpp:165-167 — if (!unlimbo) delete dog
     expect(dog.alive).toBe(false);

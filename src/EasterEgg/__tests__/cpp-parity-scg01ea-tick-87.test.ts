@@ -94,6 +94,10 @@ function callUpdateAttack(game: Game, entity: Entity): void {
   (game as unknown as { updateAttack(e: Entity): void }).updateAttack(entity);
 }
 
+function callUpdateGuard(game: Game, entity: Entity, timerFired = true): void {
+  (game as unknown as { updateGuard(e: Entity, timerFired?: boolean): void }).updateGuard(entity, timerFired);
+}
+
 beforeAll(() => {
   vi.stubGlobal('Audio', FakeAudio);
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
@@ -137,30 +141,33 @@ describe('C++ UnitClass::Can_Fire FIRE_ROTATING gate (SCG01EA tick 87)', () => {
       'no RNG consumed by blocked JEEP fire').toBe(rngBefore);
   });
 
-  it('JEEP with turret already facing target DOES fire', () => {
-    // JEEP turret pre-aligned with target direction. This is the second-order
-    // SCG01EA case (JEEP #27 at tick 87) — not blocked by the new gate because
-    // tickTurretRotation() returns facingReady=true immediately when
-    // turretFacing === desiredTurretFacing.
+  it('Mission_Guard does not run UnitClass::Firing_AI inline for non-infantry', () => {
+    // C++ UnitClass::AI order:
+    //   MissionClass::AI(Mission_Guard assigns/keeps TarCom)
+    //   DriveClass::AI
+    //   Firing_AI()
+    //   Rotation_AI()
+    //
+    // TS previously called updateAttack inside updateGuard, then ran the
+    // separate non-infantry Firing_AI pass later in the same tick. SCG01EA
+    // tick 87 JEEP @(63,50) used that double opportunity to rotate and fire
+    // one tick early. The guard handler should preserve TarCom only.
     const game = createGame();
     const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 63, 50);
-    const target = placeInfantry(game, UnitType.I_DOG, House.USSR, 63, 53);
-    jeep.mission = Mission.GUARD;
+    const target = placeInfantry(game, UnitType.I_E1, House.USSR, 62, 52);
     jeep.target = target;
     jeep.attackCooldown = 0;
-    // Pre-align turret with target (directly south → Dir.S = 4).
     jeep.turretFacing = Dir.S;
     jeep.turretFacing32 = Dir.S * 4;
+    jeep.turretFacing256 = Dir.S * 32;
     jeep.desiredTurretFacing = Dir.S;
+    jeep.desiredTurretFacing256 = Dir.S * 32;
 
-    const pendingBefore = (game as unknown as { _pendingInvisibleScatters: number })._pendingInvisibleScatters;
+    callUpdateGuard(game, jeep, false);
 
-    callUpdateAttack(game, jeep);
-
-    // Aligned turret → fire proceeds → invisible scatter deferred.
-    const pendingAfter = (game as unknown as { _pendingInvisibleScatters: number })._pendingInvisibleScatters;
-    expect(pendingAfter,
-      'pre-aligned JEEP fires and defers invisible scatter').toBeGreaterThan(pendingBefore);
+    expect(jeep.target).toBe(target);
+    expect(jeep.attackCooldown,
+      'Mission_Guard must not fire non-infantry weapons inline').toBe(0);
   });
 
   it('non-turreted vehicle (no hasTurret) is unaffected by the gate', () => {

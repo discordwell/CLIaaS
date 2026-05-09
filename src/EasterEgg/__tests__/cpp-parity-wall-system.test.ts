@@ -404,9 +404,10 @@ describe('Splash damage clears wall overlay from map (combat.cpp:244-270)', () =
     expect(ctx.map.getWallType(10, 10)).toBe(type);
 
     const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const weapon = { damage: 50, warhead: 'HE' as const, splash: 1.5 };
+    const weapon = { damage: 100, warhead: 'HE' as const, splash: 1.5 };
     applySplashDamage(ctx, center, weapon, -1, House.Spain);
-    expect(ctx.map.getWallType(10, 10)).toBe('');
+    expect(ctx.map.getWallType(10, 10)).toBe(type === 'BRIK' ? 'BRIK' : '');
+    if (type === 'BRIK') expect(ctx.map.getWallDamageLevel(10, 10)).toBe(1);
   });
 
   it.each(WALL_SECTIONS)('AP splash destroys %s wall overlay on map cell', (type) => {
@@ -415,9 +416,10 @@ describe('Splash damage clears wall overlay from map (combat.cpp:244-270)', () =
     expect(ctx.map.getWallType(10, 10)).toBe(type);
 
     const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
-    const weapon = { damage: 50, warhead: 'AP' as const, splash: 1.5 };
+    const weapon = { damage: 100, warhead: 'AP' as const, splash: 1.5 };
     applySplashDamage(ctx, center, weapon, -1, House.Spain);
-    expect(ctx.map.getWallType(10, 10)).toBe('');
+    expect(ctx.map.getWallType(10, 10)).toBe(type === 'BRIK' ? 'BRIK' : '');
+    if (type === 'BRIK') expect(ctx.map.getWallDamageLevel(10, 10)).toBe(1);
   });
 
   it.each(WALL_SECTIONS)('SA splash does NOT destroy %s wall overlay', (type) => {
@@ -439,7 +441,7 @@ describe('Splash damage clears wall overlay from map (combat.cpp:244-270)', () =
     const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
     const weapon = { damage: 50, warhead: 'Fire' as const, splash: 1.5 };
     applySplashDamage(ctx, center, weapon, -1, House.Spain);
-    expect(ctx.map.getWallType(10, 10)).toBe(type);
+    expect(ctx.map.getWallType(10, 10)).toBe(type === 'WOOD' ? '' : type);
   });
 });
 

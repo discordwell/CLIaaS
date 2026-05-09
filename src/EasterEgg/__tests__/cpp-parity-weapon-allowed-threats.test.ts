@@ -267,12 +267,26 @@ describe('WeaponTypeClass::Allowed_Threats — TS WeaponStats flag interpretatio
     expect(medic.target).toBeNull();
   });
 
-  it('MECH (GoodWrench, Mechanical) + enemy vehicle: scan mask is VEHICLES|AIR — vehicle visible', () => {
-    // C++ techno.cpp:2021-2023: MECHANIC branch sets method = THREAT_VEHICLES | THREAT_AIR.
+  it('MECH (GoodWrench, Mechanical) ignores enemy vehicles despite the vehicle mask', () => {
+    // C++ Evaluate_Cell first filters repair weapons to injured allies only
+    // (techno.cpp:1834-1839). Enemy vehicles are not valid GoodWrench targets.
     const mech = makeEntity(UnitType.I_MECH, House.USSR, 100, 100);
     mech.mission = Mission.GUARD;
     const veh = makeEntity(UnitType.V_JEEP, House.Greece, 100 + 1 * CELL_SIZE, 100);
     veh.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [mech, veh] });
+    updateGuard(ctx, mech);
+
+    expect(mech.target).toBeNull();
+  });
+
+  it('MECH (GoodWrench, Mechanical) selects an injured allied vehicle', () => {
+    const mech = makeEntity(UnitType.I_MECH, House.USSR, 100, 100);
+    mech.mission = Mission.GUARD;
+    const veh = makeEntity(UnitType.V_JEEP, House.USSR, 100 + 1 * CELL_SIZE, 100);
+    veh.mission = Mission.GUARD;
+    veh.hp = veh.maxHp - 1;
 
     const ctx = makeCtx({ entities: [mech, veh] });
     updateGuard(ctx, mech);

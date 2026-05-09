@@ -129,8 +129,9 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; s
     spyDisguise: () => {},
     spyInfiltrate: () => {},
     minimapAlert: () => {},
-    // Default: fog is empty (tick-1 before any discovery). isRevealedToHouse
-    // returns false for every (cell, house) pair.
+    // Default: fog/discovery is empty (tick-1 before any discovery).
+    // C++ Evaluate_Object uses strict IsDiscoveredByPlayer, not scanner-house fog.
+    isDiscoveredByPlayer: () => false,
     isRevealedToHouse: () => false,
     aiIQ: () => 3,
     ...overrides,
@@ -157,8 +158,10 @@ describe('SCG07EA tick 1 — Mission_Guard scan strict IsOwnedByPlayer (C++ tech
     expect(jeep.target, 'England JEEP must NOT acquire USSR target under empty fog').toBeNull();
   });
 
-  it('Greece scanner (strict PlayerPtr) DOES bypass fog and acquire USSR target', () => {
-    // Greece IS the PlayerPtr — IsOwnedByPlayer=true → fog bypass allowed.
+  it('Greece scanner does NOT acquire undiscovered USSR target just because scanner is PlayerPtr', () => {
+    // C++ Evaluate_Object applies IsOwnedByPlayer to the candidate object, not
+    // the scanner. USSR is not PlayerPtr-owned, so it still needs
+    // IsDiscoveredByPlayer before Greece can acquire it.
     const jeep = makeEntity(UnitType.V_JEEP, House.Greece, 27, 58);
     jeep.mission = Mission.GUARD;
     jeep.attackCooldown = 0;
@@ -169,12 +172,29 @@ describe('SCG07EA tick 1 — Mission_Guard scan strict IsOwnedByPlayer (C++ tech
     const ctx = makeCtx({ entities: [jeep, ussrInf] });
     updateGuard(ctx, jeep, /*timerFired=*/ true);
 
-    expect(jeep.target, 'Greece JEEP must acquire USSR target via IsOwnedByPlayer fog bypass').toBe(ussrInf);
+    expect(jeep.target, 'Greece JEEP must not acquire undiscovered USSR target').toBeNull();
   });
 
-  it('England JEEP acquires USSR target once fog has revealed the target cell to England', () => {
-    // Symmetric to the Area-Guard test: once England's fog reveals the USSR
-    // cell (e.g. later in the mission after discovery), the scanner can acquire.
+  it('Greece scanner acquires USSR target once the target is IsDiscoveredByPlayer', () => {
+    const jeep = makeEntity(UnitType.V_JEEP, House.Greece, 27, 58);
+    jeep.mission = Mission.GUARD;
+    jeep.attackCooldown = 0;
+
+    const ussrInf = makeEntity(UnitType.I_E1, House.USSR, 29, 60);
+    ussrInf.mission = Mission.GUARD;
+
+    const ctx = makeCtx({
+      entities: [jeep, ussrInf],
+      isDiscoveredByPlayer: (e) => e === ussrInf,
+    });
+    updateGuard(ctx, jeep, /*timerFired=*/ true);
+
+    expect(jeep.target, 'Greece JEEP must acquire once C++ IsDiscoveredByPlayer is true').toBe(ussrInf);
+  });
+
+  it('England JEEP does NOT acquire USSR target through scanner-house fog alone', () => {
+    // C++ Evaluate_Object does not ask "has England revealed this cell?" here.
+    // It asks whether the candidate is strict PlayerPtr-owned or IsDiscoveredByPlayer.
     const jeep = makeEntity(UnitType.V_JEEP, House.England, 27, 58);
     jeep.mission = Mission.GUARD;
     jeep.attackCooldown = 0;
@@ -188,7 +208,25 @@ describe('SCG07EA tick 1 — Mission_Guard scan strict IsOwnedByPlayer (C++ tech
     });
     updateGuard(ctx, jeep, /*timerFired=*/ true);
 
-    expect(jeep.target, 'England JEEP must acquire USSR target when cell is revealed to England').toBe(ussrInf);
+    expect(jeep.target, 'England JEEP must not acquire through scanner-house fog alone').toBeNull();
+  });
+
+  it('England JEEP acquires USSR target once the target is IsDiscoveredByPlayer', () => {
+    const jeep = makeEntity(UnitType.V_JEEP, House.England, 27, 58);
+    jeep.mission = Mission.GUARD;
+    jeep.attackCooldown = 0;
+
+    const ussrInf = makeEntity(UnitType.I_E1, House.USSR, 29, 60);
+    ussrInf.mission = Mission.GUARD;
+
+    const ctx = makeCtx({
+      entities: [jeep, ussrInf],
+      isDiscoveredByPlayer: (e) => e === ussrInf,
+      isRevealedToHouse: () => false,
+    });
+    updateGuard(ctx, jeep, /*timerFired=*/ true);
+
+    expect(jeep.target, 'England JEEP must acquire once C++ IsDiscoveredByPlayer is true').toBe(ussrInf);
   });
 
   it('USSR scanner (NOT player-allied) still respects fog — no regression on AI scanners', () => {

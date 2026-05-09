@@ -26,6 +26,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -77,6 +78,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -124,6 +126,13 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
+}
+
 // ── Power_Fraction parity (house.cpp:4160-4170) ─────────────────────────────
 
 describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
@@ -140,7 +149,7 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
     const s = makeStructure('TSLA', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([s], [enemy], { powerProduced: 200, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -149,7 +158,7 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
     const s = makeStructure('TSLA', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([s], [enemy], { powerProduced: 0, powerConsumed: 0 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // TS: powerConsumed(0) > powerProduced(0) is false, so isLowPower=false → fires (correct)
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
@@ -160,7 +169,7 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([s], [enemy], { powerProduced: 50, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore); // should not fire under power deficit
   });
 
@@ -172,7 +181,7 @@ describe('C++ Power_Fraction semantics used by TS isLowPower', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([s], [enemy], { powerProduced: 0, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ says: Power_Fraction()=0 < 1 → FIRE_BUSY → no fire
     // TS says: powerConsumed(100) > powerProduced(0) → isLowPower=true → no fire
     expect(enemy.hp).toBe(hpBefore); // C++ behavior: should NOT fire
@@ -247,7 +256,7 @@ describe('TSLA does not fire during power deficit (building.cpp:2853)', () => {
     const tsla = makeStructure('TSLA', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -256,7 +265,7 @@ describe('TSLA does not fire during power deficit (building.cpp:2853)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -265,7 +274,7 @@ describe('TSLA does not fire during power deficit (building.cpp:2853)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 99, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -275,13 +284,13 @@ describe('TSLA does not fire during power deficit (building.cpp:2853)', () => {
 
     // Frame 1: low power — no fire
     const ctx1 = makeCombatCtx([tsla], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx1);
+    fireStructures(ctx1);
     expect(enemy.hp).toBe(enemy.maxHp);
 
     // Frame 2: power restored — fire
     tsla.attackCooldown = 0; // reset cooldown
     const ctx2 = makeCombatCtx([tsla], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx2);
+    fireStructures(ctx2);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
@@ -295,7 +304,7 @@ describe('SAM fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     sam.desiredTurretDir = 2;
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const ctx = makeCombatCtx([sam], [aircraft], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(aircraft.hp).toBeLessThan(aircraft.maxHp);
   });
 
@@ -305,7 +314,7 @@ describe('SAM fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     sam.desiredTurretDir = 2;
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const ctx = makeCombatCtx([sam], [aircraft], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(aircraft.hp).toBeLessThan(aircraft.maxHp);
   });
 });
@@ -320,7 +329,7 @@ describe('PBOX fires during power deficit (not in STRUCTURE_POWERED)', () => {
     const pbox = makeStructure('PBOX', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -328,7 +337,7 @@ describe('PBOX fires during power deficit (not in STRUCTURE_POWERED)', () => {
     const pbox = makeStructure('PBOX', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy], { powerProduced: 0, powerConsumed: 0 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
@@ -338,7 +347,7 @@ describe('HBOX fires during power deficit (not in STRUCTURE_POWERED)', () => {
     const hbox = makeStructure('HBOX', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([hbox], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
@@ -349,7 +358,7 @@ describe('FTUR fires during power deficit (not in STRUCTURE_POWERED)', () => {
     const ftur = makeStructure('FTUR', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
@@ -368,7 +377,7 @@ describe('GUN (Turret) fires during power deficit — C++ IsPowered=false', () =
     gun.desiredTurretDir = 2;
     const enemy = entityAtCell(UnitType.V_HTNK, House.USSR, 12, 10); // 2 cells east
     const ctx = makeCombatCtx([gun], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // GUN is NOT in STRUCTURE_POWERED — fires normally during deficit (matches C++)
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
@@ -381,7 +390,7 @@ describe('AGUN (AA Gun) does NOT fire during power deficit — rules.ini Powered
     agun.desiredTurretDir = 2;
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const ctx = makeCombatCtx([agun], [aircraft], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // AGUN has Powered=true in rules.ini, so it does NOT fire during power deficit
     expect(aircraft.hp).toBe(aircraft.maxHp);
   });
@@ -402,7 +411,7 @@ describe('TSLA Charging_AI power dependency (building.cpp:5382-5413)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 50, powerConsumed: 200 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 });
@@ -417,7 +426,7 @@ describe('Power boundary conditions', () => {
     const tsla = makeStructure('TSLA', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 100, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -427,7 +436,7 @@ describe('Power boundary conditions', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 99, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -436,7 +445,7 @@ describe('Power boundary conditions', () => {
     const tsla = makeStructure('TSLA', 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 101, powerConsumed: 100 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -448,7 +457,7 @@ describe('Power boundary conditions', () => {
     const ctx = makeCombatCtx([tsla, sam], [aircraft, infantry], {
       powerProduced: 50, powerConsumed: 500,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(aircraft.hp).toBe(aircraft.maxHp);
     expect(infantry.hp).toBe(infantry.maxHp);
   });
@@ -462,7 +471,7 @@ describe('Power boundary conditions', () => {
     const ctx = makeCombatCtx([pbox, tsla], [enemy1, enemy2], {
       powerProduced: 50, powerConsumed: 200,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy1.hp).toBeLessThan(enemy1.maxHp); // PBOX fires
     expect(enemy2.hp).toBe(enemy2.maxHp);          // TSLA silent
   });
@@ -480,7 +489,7 @@ describe('Cooldown continues during power deficit (building.cpp:2853 check is in
     tsla.attackCooldown = 50; // still cooling down
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -489,7 +498,7 @@ describe('Cooldown continues during power deficit (building.cpp:2853 check is in
     pbox.attackCooldown = 50;
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -505,7 +514,7 @@ describe('Structures under construction or being sold do not fire (building.cpp 
     tsla.buildProgress = 0.5; // under construction
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -514,7 +523,7 @@ describe('Structures under construction or being sold do not fire (building.cpp 
     pbox.sellProgress = 0.3;
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -528,7 +537,7 @@ describe('Dead structures do not participate in combat', () => {
     tsla.rubble = true;
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([tsla], [enemy], { powerProduced: 200, powerConsumed: 50 });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });

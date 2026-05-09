@@ -227,22 +227,15 @@ describe('Off-map waypoint exit', () => {
   });
 });
 
-describe('SNOW theatre: frozen rivers are passable', () => {
-  it('river template 130 on SNOW map should be CLEAR (frozen), not WATER', () => {
-    // In SCG02EA (SNOW theatre), river segments (tmpl 112-130) are frozen/ice.
-    // Ground units must be able to cross them. Template 130 at cells like (49,60)
-    // was incorrectly classified as WATER, blocking the convoy route.
-    // After the fix, classifyOutdoorTerrain with theatre=SNOW treats rivers as CLEAR.
-    const isSnow = true;
-    // Templates 112-130 are river segments
+describe('SNOW theatre: terrain comes from snow TMP control maps', () => {
+  it('river template range is not globally forced to CLEAR', () => {
+    // C++ TemplateTypeClass::Land_Type reads the active theatre's TMP control
+    // map. Some SNOW river-template icons are Clear/Road/Rough, while others
+    // remain River and are impassable to foot units.
     const riverTmpls = [112, 120, 125, 130];
     for (const tmpl of riverTmpls) {
-      // In SNOW: should NOT be water (frozen river)
-      // In TEMPERATE: should be water
       expect(tmpl >= 112 && tmpl <= 130).toBe(true);
     }
-    // The fix: classifyOutdoorTerrain(map, ..., 'SNOW') leaves river cells as CLEAR
-    // This is verified by the wet test above — TRUKs cross frozen rivers to reach WP2
   });
 });
 

@@ -47,7 +47,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -529,7 +529,7 @@ describe('V2RL retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, v2, attacker);
 
     expect(v2.target).toBe(attacker);
-    expect(v2.mission).toBe(Mission.ATTACK);
+    expect(v2.mission).toBe(Mission.GUARD);
   });
 
   it('V2RL has a weapon (SCUD) so can retaliate', () => {
@@ -577,7 +577,7 @@ describe('V2RL AI scatter on damage (techno.cpp)', () => {
       v2.mission = Mission.GUARD;
       const ctx = makeCombatCtx([v2]);
       aiScatterOnDamage(ctx, v2);
-      if (v2.mission === Mission.MOVE && v2.moveTarget !== null) {
+      if (v2.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -590,6 +590,7 @@ describe('V2RL AI scatter on damage (techno.cpp)', () => {
     v2.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([v2]);
+    ctx.playerHouse = House.Spain;
     aiScatterOnDamage(ctx, v2);
 
     expect(v2.mission).toBe(Mission.GUARD);

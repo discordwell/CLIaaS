@@ -33,7 +33,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  WEAPON_STATS, COUNTRY_BONUSES,
+  WEAPON_STATS, COUNTRY_BONUSES, UnitType, House,
   type WeaponStats,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
@@ -356,7 +356,7 @@ describe('Weapon range cell-to-lepton conversion (weapon.h:149, display.h:47)', 
 
 describe('IsSecondShot cadence for dual-weapon units (techno.cpp:3120-3122)', () => {
   it('Entity.isSecondShot initializes to false (entity.ts:170)', () => {
-    const e = new Entity(1, '4TNK', { x: 0, y: 0 }, 'GoodGuy' as any, WEAPON_STATS['120mm']);
+    const e = new Entity(UnitType.V_4TNK, House.GoodGuy, 0, 0);
     expect(e.isSecondShot).toBe(false);
   });
 

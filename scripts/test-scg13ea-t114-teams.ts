@@ -44,14 +44,15 @@ test(`SCG13EA teams probe ${START}-${END}`, async ({ browser }) => {
       const M = (window as any).Module;
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
       const all = [...(s.units ?? []), ...(s.enemies ?? [])];
-      return (s.teams ?? []).map((tm: { i: number; cls: string; cur: number; next?: boolean; lag?: boolean; tgtX: number; tgtY: number; mtgtX: number; mtgtY: number; missions: unknown[]; members?: Array<{ ids?: number[] }> }) => {
+      const mapped = (s.teams ?? []).map((tm: { i: number; cls: string; cur: number; next?: boolean; lag?: boolean; tgtX: number; tgtY: number; mtgtX: number; mtgtY: number; missions: unknown[]; members?: Array<{ ids?: number[] }> }) => {
         const ids = (tm.members ?? []).flatMap(m => m.ids ?? []);
         const states = ids.map(id => {
           const u = all.find((x: { id: number }) => x.id === id);
-          return u ? `${u.id}:${u.t}/m=${u.m}/mt=${u.mt}/mq=${u.mq}/drv=${u.drv}/c=(${u.cx},${u.cy})/p=${[u.p0,u.p1,u.p2].join(',')}` : `${id}:?`;
+          return u ? `${u.id}:${u.t}/m=${u.m}/mt=${u.mt}/mq=${u.mq}/drv=${u.drv}/init=${u.init}/c=(${u.cx},${u.cy})/l=(${u.lx},${u.ly})/h=${u.hlx ? `(${u.hlx},${u.hly})` : 'null'}/nav=${u.nlx ? `(${u.nlx},${u.nly})` : 'null'}/p=${[u.p0,u.p1,u.p2].join(',')}` : `${id}:?`;
         });
         return { i: tm.i, cls: tm.cls, cur: tm.cur, next: tm.next, lag: tm.lag, tgt: `(${tm.tgtX},${tm.tgtY})`, mtgt: `(${tm.mtgtX},${tm.mtgtY})`, missions: tm.missions, members: states };
       });
+      return { teams: mapped, debugMoves: s.debugMoves ?? [] };
     });
     const tsTeams = await tsPage.evaluate(() => {
       const game = (window as any).__agentGame;
@@ -74,7 +75,8 @@ test(`SCG13EA teams probe ${START}-${END}`, async ({ browser }) => {
     });
     console.log(`tick ${t} teams:`);
     console.log('  WASM');
-    for (const tm of teams) console.log(`    ${JSON.stringify(tm)}`);
+    for (const tm of teams.teams) console.log(`    ${JSON.stringify(tm)}`);
+    console.log(`    debug=${JSON.stringify(teams.debugMoves.slice(-30))}`);
     console.log('  TS');
     for (const tm of tsTeams) console.log(`    ${JSON.stringify(tm)}`);
 

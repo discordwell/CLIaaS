@@ -8,7 +8,7 @@
 import {
   type WorldPos, CELL_SIZE,
   type House, UnitType, Mission, AnimState,
-  worldDist, worldToCell, pixelToLepton, leptonToPixel, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
+  worldDist, worldToCell, pixelToLepton, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
   directionTo, HOUSE_FACTION,
   WARHEAD_META, modifyDamage, type WarheadType,
 } from './types';
@@ -25,8 +25,11 @@ export const DEMO_TRUCK_RADIUS = 3;
 export const DEMO_TRUCK_FUSE_TICKS = 45;
 export const CHRONO_TANK_COOLDOWN = 2700;
 export const MAD_TANK_CHARGE_TICKS = 120;  // aftrmath.ini QuakeDelay=120
-export const MAD_TANK_DAMAGE = 600;        // TODO: should be % of target MaxStrength (45% units, 40% buildings)
+export const MAD_TANK_UNIT_DAMAGE_PERCENT = 0.45;     // aftrmath.ini QuakeUnitDamage=45%
+export const MAD_TANK_BUILDING_DAMAGE_PERCENT = 0.40; // aftrmath.ini QuakeBuildingDamage=40%
+export const MAD_TANK_INFANTRY_DAMAGE = 0;            // aftrmath.ini QuakeInfantryDamage=0
 export const MAD_TANK_RADIUS = 20;         // aftrmath.ini MTankDistance=20
+export const MAD_TANK_SCREEN_SHAKE = 8;    // logic.cpp:278 Shake_The_Screen(8)
 export const MECHANIC_HEAL_RANGE = 6;
 export const MECHANIC_HEAL_AMOUNT = 100; // C++ GoodWrench weapon Damage=-100 (heals 100 HP per application)
 
@@ -53,7 +56,12 @@ export interface SpecialUnitsContext {
   playSoundAt(name: string, x: number, y: number): void;
   playSound(name: string): void;
   movementSpeed(entity: Entity): number;
-  damageEntity(target: Entity, amount: number, warhead: string): boolean;
+  damageEntity(
+    target: Entity,
+    amount: number,
+    warhead: string,
+    options?: { forced?: boolean },
+  ): boolean;
   damageStructure(s: MapStructure, damage: number): boolean;
   addEntity(entity: Entity): void;
 
@@ -159,12 +167,17 @@ export function updateThief(ctx: SpecialUnitsContext, entity: Entity): void {
 
 // === 4. Minelayer ===
 
-/** Minelayer places AP mines. Mine limit: 50/house. */
+/** Minelayer places AP/AV mines from MISSION_UNLOAD.
+ *
+ * C++ UnitClass::Mission_Unload handles UNIT_MINELAYER as a deploy state
+ * machine (unit.cpp:2580-2636). Ordinary MISSION_MOVE is still just
+ * DriveClass movement; there is no separate minelayer AI that moves toward
+ * NavCom. Keep this function side-effect-only for mine deployment so MNLY
+ * movement remains owned by DriveClass.
+ */
 export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void {
-  if (entity.type !== UnitType.V_MNLY || !entity.alive || !entity.moveTarget) return;
-  const targetCell = { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) };
-  const dist = worldDist(entity.pos, { x: leptonToPixel(entity.moveTarget.lx), y: leptonToPixel(entity.moveTarget.ly) });
-  if (dist > 0.5) { entity.animState = AnimState.WALK; entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity)); return; }
+  if (entity.type !== UnitType.V_MNLY || !entity.alive || entity.mission !== Mission.UNLOAD) return;
+  const targetCell = entity.cell;
   // C++ parity: minelayer carries limited ammo (Ammo=5 in rules.ini)
   if (entity.ammo === 0 && entity.maxAmmo > 0) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
   const houseMines = ctx.mines.filter(m => m.house === entity.house).length;
@@ -279,22 +292,66 @@ export function teleportChronoTank(ctx: SpecialUnitsContext, entity: Entity, tar
 
 // === 8. MAD Tank Update ===
 
-/** Deployed MAD Tank ticks down, then damages all non-infantry non-air entities in radius. Self-destructs. */
+/** Deployed MAD Tank ticks down, then applies the C++ time-quake damage rule. */
 export function updateMADTank(ctx: SpecialUnitsContext, entity: Entity): void {
   if (!entity.alive || !entity.isDeployed) return;
   entity.deployTimer--;
   entity.animState = AnimState.IDLE;
   if (entity.deployTimer <= 0) {
     const radius = MAD_TANK_RADIUS;
+    entity.hp = Math.min(entity.hp, 1); // unit.cpp:2709 Strength = 1 before quake damage.
+    ctx.screenShake = Math.max(ctx.screenShake, MAD_TANK_SCREEN_SHAKE);
+
     for (const other of ctx.entities) {
-      if (!other.alive || other.id === entity.id || other.stats.isInfantry || other.isAirUnit) continue;
-      if (worldDist(entity.pos, other.pos) <= radius) {
-        ctx.damageEntity(other, MAD_TANK_DAMAGE, 'HE');
+      if (!other.alive) continue;
+      if (worldDist(entity.pos, other.pos) < radius) {
+        const damage = other.stats.isInfantry
+          ? MAD_TANK_INFANTRY_DAMAGE
+          : Math.floor(other.maxHp * MAD_TANK_UNIT_DAMAGE_PERCENT);
+        if (damage > 0) {
+          ctx.damageEntity(other, damage, 'AP', { forced: true });
+          ctx.effects.push({
+            type: 'explosion',
+            x: other.pos.x,
+            y: other.pos.y,
+            frame: 0,
+            maxFrames: 20,
+            size: 16,
+            sprite: 'veh-hit2',
+            spriteStart: 0,
+          });
+        }
       }
     }
+
+    for (const s of ctx.structures) {
+      if (!s.alive) continue;
+      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+      const sx = (s.cx + sw / 2) * CELL_SIZE;
+      const sy = (s.cy + sh / 2) * CELL_SIZE;
+      if (worldDist(entity.pos, { x: sx, y: sy }) < radius) {
+        const damage = Math.floor(s.maxHp * MAD_TANK_BUILDING_DAMAGE_PERCENT);
+        if (damage > 0) {
+          ctx.damageStructure(s, damage);
+          ctx.effects.push({
+            type: 'explosion',
+            x: sx,
+            y: sy,
+            frame: 0,
+            maxFrames: 20,
+            size: 16,
+            sprite: 'veh-hit2',
+            spriteStart: 0,
+          });
+        }
+      }
+    }
+
     ctx.effects.push({ type: 'explosion', x: entity.pos.x, y: entity.pos.y, frame: 0, maxFrames: 20, size: 24 });
     ctx.playSoundAt('building_explode', entity.pos.x, entity.pos.y);
-    entity.hp = 0; entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
+    if (entity.hp <= 0) {
+      entity.hp = 0; entity.alive = false; entity.mission = Mission.DIE; entity.animState = AnimState.DIE; entity.animFrame = 0; entity.deathTick = 0;
+    }
   }
 }
 

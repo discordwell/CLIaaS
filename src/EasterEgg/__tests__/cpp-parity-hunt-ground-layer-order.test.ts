@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
+import { GameMap } from '../engine/map';
 import { updateHunt, type MissionAIContext } from '../engine/missionAI';
 import { CELL_SIZE, House, LEPTON_SIZE, Mission, UnitType } from '../engine/types';
 
@@ -28,6 +29,9 @@ describe('Mission_Hunt full-map target tie order', () => {
     const ctx = {
       entities: [scanner, middleJeep, leftJeep, rightJeep],
       structures: [],
+      map: new GameMap(),
+      playerHouse: House.Greece,
+      isAllied: (a: House, b: House) => a === b,
       entitiesAllied: (a: Entity, b: Entity) => a.house === b.house,
       threatScore: () => 100,
       isRevealedToHouse: () => true,

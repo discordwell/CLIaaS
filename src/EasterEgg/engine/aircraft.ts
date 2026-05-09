@@ -7,8 +7,8 @@ import {
   type WorldPos, type WeaponStats, type LeptonPos,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
   worldDist, directionTo, worldToCell, leptonDist, leptonToPixel, pixelToLepton, DIR_DX, DIR_DY,
-  CIVILIAN_UNIT_TYPES,
-  COS_TABLE_256, SIN_TABLE_256,
+  CIVILIAN_UNIT_TYPES, cellTargetToLepton,
+  COS_TABLE_256, SIN_TABLE_256, SUBCELL_LEPTON_OFFSETS,
 } from './types';
 // Re-export tables for backward compatibility (canonical definitions now in types.ts).
 export { COS_TABLE_256, SIN_TABLE_256 };
@@ -16,6 +16,8 @@ import { Entity, CloakState } from './entity';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap, MoveResult } from './map';
+import { ScenarioRandom } from './random';
+import { assignMission } from './missionLifecycle';
 
 /** Helper: convert LeptonPos to WorldPos (pixel space) for rendering/distance APIs */
 function leptonPosToWorld(lp: LeptonPos): WorldPos {
@@ -86,6 +88,8 @@ export interface AircraftContext {
   entityById: Map<number, Entity>;
   structures: MapStructure[];
   map: GameMap;
+  houseEdges?: Map<House, string>;
+  tick?: number;
 
   // Mutable counters
   unitsLeftMap: number;
@@ -166,8 +170,8 @@ function countsAsCivEvac(ctx: AircraftContext, unitType: string): boolean {
   return false;
 }
 
-const TRANSPORT_UNLOAD_DELAY = 32;
 const LOANER_RETREAT_DELAY = 88;
+const TRANSPORT_GUARD_DELAY = TICKS_PER_SECOND * 3;
 
 const AIRCRAFT_EXIT_CELLS = [
   { dx: 0, dy: 1 },
@@ -191,10 +195,145 @@ function findAircraftExitCell(ctx: AircraftContext, transport: Entity, passenger
   return { ...transport.cell };
 }
 
+/** C++ InfantryClass::Unlimbo calls CellClass::Closest_Free_Spot on the
+ *  aircraft's Coord before ObjectClass::Coord_Fixup. This snaps unloaded
+ *  infantry to a legal sub-cell in the aircraft's current cell; movement then
+ *  starts from that sub-cell, not the aircraft's exact lepton coordinate.
+ */
+export function closestInfantryUnlimboSpot(
+  ctx: AircraftContext,
+  passenger: Entity,
+  lx: number,
+  ly: number,
+): { lx: number; ly: number; subCell: number; cellIdx: number } {
+  const cx = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(lx / LEPTON_SIZE)));
+  const cy = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(ly / LEPTON_SIZE)));
+  const cellIdx = cy * MAP_CELLS + cx;
+
+  const fracX = ((lx % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  const fracY = ((ly % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  let preferred = 0;
+  if (leptonDist(fracX, fracY, 0x80, 0x80) >= 60) {
+    if (fracX > 0x80) preferred |= 0x01;
+    if (fracY > 0x80) preferred |= 0x02;
+    preferred += 1;
+  }
+
+  const slots = ctx.map.subCellOccupancy.get(cellIdx);
+  const order: number[][] = [
+    [0, 1, 2, 3, 4],
+    [1, 0, 2, 3, 4],
+    [2, 0, 1, 4, 3],
+    [3, 0, 1, 4, 2],
+    [4, 0, 2, 3, 1],
+  ];
+  let subCell = preferred;
+  if (slots?.[subCell] && slots[subCell] !== passenger.id) {
+    for (const candidate of order[preferred]) {
+      if (!slots[candidate] || slots[candidate] === passenger.id) {
+        subCell = candidate;
+        break;
+      }
+    }
+  }
+
+  const spot = SUBCELL_LEPTON_OFFSETS[subCell];
+  return {
+    lx: cx * LEPTON_SIZE + spot.lx,
+    ly: cy * LEPTON_SIZE + spot.ly,
+    subCell,
+    cellIdx,
+  };
+}
+
+function aircraftCanCommence(entity: Entity): boolean {
+  // C++ aircraft.cpp:879,896 — AircraftClass::AI calls Commence() only when
+  // neither IsLanding nor IsTakingOff. TS represents landing/takeoff through
+  // these state-machine labels.
+  return entity.aircraftState !== 'takeoff' &&
+    entity.aircraftState !== 'landing' &&
+    entity.aircraftState !== 'unload_land';
+}
+
+function commenceAircraft(ctx: AircraftContext, entity: Entity): void {
+  if (entity.missionQueue === null || !aircraftCanCommence(entity)) return;
+  if (ctx.tick !== undefined && entity.missionQueueSetTick === ctx.tick) return;
+  entity.mission = entity.missionQueue;
+  entity.missionQueue = null;
+  entity.missionQueueSetTick = -1;
+  entity.missionTimer = 0;
+}
+
+function beginTransportMissionUnload(entity: Entity): void {
+  // C++ aircraft.cpp:1077-1225 — Mission_Unload SEARCH_FOR_LZ for helicopters.
+  // When the transport is already on the ground, SEARCH_FOR_LZ first falls
+  // through to the final Normal_Delay + Random_Pick(0,2) return with Status
+  // still at 0. On the next Mission_Unload dispatch it transitions to
+  // UNLOAD_PASSENGERS and consumes another delay before ejecting cargo.
+  if (!entity.moveTarget && entity.teamRef?.origin) {
+    const originCell = worldToCell(entity.teamRef.origin.x, entity.teamRef.origin.y);
+    entity.moveTarget = cellTargetToLepton(originCell.cx, originCell.cy);
+  }
+  entity.aircraftState = 'unload_wait';
+  entity.missionTimer = 13 + ScenarioRandom.nextInRange(0, 2);
+}
+
 /** C++ fixed(speed, 256) * maxspeed rounds with +128 before dividing by 256. */
 function aircraftSpeedAdd(maxSpeedLeptons: number, speedFraction = 1.0): number {
   const speedByte = Math.max(0, Math.min(0xFF, Math.round(speedFraction * 0xFF)));
   return Math.floor((maxSpeedLeptons * speedByte + 128) / 256);
+}
+
+function houseEdgeDirection256(ctx: AircraftContext, house: House): number {
+  // C++ aircraft.cpp:1353-1361:
+  // PrimaryFacing.Set_Desired((DirType)((House->Control.Edge & 0x03) << 6)).
+  // SourceType enum: NORTH=0, EAST=1, SOUTH=2, WEST=3. Missing Edge defaults
+  // to NORTH in HouseClass setup.
+  switch ((ctx.houseEdges?.get(house) ?? 'north').toLowerCase()) {
+    case 'east': return 64;
+    case 'south': return 128;
+    case 'west': return 192;
+    case 'north':
+    default: return 0;
+  }
+}
+
+function aircraftFlyCurrentFacing(entity: Entity, baseSpeed: number): void {
+  // C++ Mission_Retreat FACE_MAP_EDGE sets Desired facing once; Movement_AI then
+  // rotates and applies Physics(Coord, PrimaryFacing) without a NavCom target.
+  entity.rotTickedThisFrame = false;
+  if (entity.facing256 >= 0) {
+    entity.tickRotation256();
+  } else {
+    entity.tickRotation();
+  }
+
+  const maxSpeedLeptons = Math.floor((baseSpeed * entity.speedBias) / LP);
+  const speedAdd = aircraftSpeedAdd(maxSpeedLeptons, entity.aircraftSpeedFraction ?? 1.0);
+  const actual = speedAdd + entity.speedAccum;
+  const remainder = actual % PIXEL_LEPTON_W;
+  entity.speedAccum = remainder;
+  const moveLeptons = actual - remainder;
+  if (moveLeptons <= 0) return;
+
+  if (entity.facing256 >= 0) {
+    const f256 = entity.facing256;
+    const cosVal = COS_TABLE_256[f256];
+    const sinVal = SIN_TABLE_256[f256];
+    entity.leptonX += (moveLeptons * cosVal) >> 7;
+    entity.leptonY -= (moveLeptons * sinVal) >> 7;
+    entity.syncPosFromLeptons();
+  } else {
+    const face = entity.facing;
+    const fdx = DIR_DX[face];
+    const fdy = DIR_DY[face];
+    const isDiagonal = fdx !== 0 && fdy !== 0;
+    const sinFactor8 = isDiagonal ? 90 : 127;
+    const axisLeptons8 = (moveLeptons * sinFactor8) >> 7;
+    entity.leptonX += fdx * axisLeptons8;
+    entity.leptonY += fdy * axisLeptons8;
+    entity.syncPosFromLeptons();
+  }
 }
 
 /** C++ aircraft movement: rotate toward target, then move in CURRENT facing.
@@ -209,13 +348,22 @@ function aircraftSpeedAdd(maxSpeedLeptons: number, speedFraction = 1.0): number 
  *  @param target  World position to fly toward
  *  @param baseSpeed  Base movement speed in px/tick (from ctx.movementSpeed)
  *  @returns true if arrived at target */
-function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number): boolean {
-  const dx = target.x - entity.pos.x;
-  const dy = target.y - entity.pos.y;
+function aircraftFlyInFacing(entity: Entity, target: WorldPos | LeptonPos, baseSpeed: number): boolean {
+  const targetLX = 'lx' in target ? target.lx : pixelToLepton(target.x);
+  const targetLY = 'ly' in target ? target.ly : pixelToLepton(target.y);
+  // Keep fractional pixel precision for facing. C++ Direction() receives a
+  // COORDINATE, so converting a NavCom through integer render pixels here loses
+  // the low 4-bit TARGET offset from target.cpp.
+  const targetWorld = {
+    x: targetLX * CELL_SIZE / LEPTON_SIZE,
+    y: targetLY * CELL_SIZE / LEPTON_SIZE,
+  };
+  const dx = targetWorld.x - entity.pos.x;
+  const dy = targetWorld.y - entity.pos.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
   if (dist <= 0.5) {
-    entity.setPosition(target.x, target.y);
+    entity.setPosition(targetWorld.x, targetWorld.y);
     entity.speedAccum = 0;
     return true; // arrived
   }
@@ -224,8 +372,6 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
   // All distance checks (flyToInterval, approach slowdown, stop threshold) must
   // use this metric. Euclidean pixel distance is ~15% shorter at diagonal angles,
   // causing approach slowdown to trigger too early and flight times to diverge.
-  const targetLX = Math.trunc(target.x * LEPTON_SIZE / CELL_SIZE);
-  const targetLY = Math.trunc(target.y * LEPTON_SIZE / CELL_SIZE);
   const distLeptons = leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY);
 
   // Step 1: Set desired facing toward target and rotate.
@@ -240,10 +386,10 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
 
   const use256 = entity.facing256 >= 0;
   if (use256) {
-    if (updateDesired) entity.desiredFacing256 = directionTo256(entity.pos, target);
+    if (updateDesired) entity.desiredFacing256 = directionTo256(entity.pos, targetWorld);
     entity.tickRotation256();
   } else {
-    if (updateDesired) entity.desiredFacing = directionTo(entity.pos, target);
+    if (updateDesired) entity.desiredFacing = directionTo(entity.pos, targetWorld);
     entity.tickRotation();
   }
 
@@ -302,7 +448,7 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     entity.leptonY += dyLeptons;
     entity.syncPosFromLeptons();
 
-    return dist <= 1.5;
+    return leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY) < 16;
   } else {
     // Legacy 8-dir path for non-256 aircraft (fallback)
     const face = entity.facing;
@@ -314,8 +460,8 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos, baseSpeed: number
     // Integer lepton movement for 8-dir aircraft
     const sinFactor8 = isDiagonal ? 90 : 127;
     const axisLeptons8 = (moveLeptons * sinFactor8) >> 7;
-    const tLX = Math.trunc(target.x / LP);
-    const tLY = Math.trunc(target.y / LP);
+    const tLX = targetLX;
+    const tLY = targetLY;
     const dxL = tLX - entity.leptonX;
     const dyL = tLY - entity.leptonY;
     const stepLX = Math.min(Math.abs(fdx * axisLeptons8), Math.abs(dxL)) * Math.sign(dxL || fdx);
@@ -353,6 +499,166 @@ function handleMapExit(ctx: AircraftContext, entity: Entity): void {
   }
 }
 
+function paradropOnePassenger(ctx: AircraftContext, entity: Entity): void {
+  const passenger = entity.passengers.shift()!;
+  passenger.alive = true;
+  if (passenger.stats.isInfantry) {
+    // C++ AircraftClass::Paradrop_Cargo passes Center_Coord() to
+    // InfantryClass::Paradrop, which runs InfantryClass::Unlimbo and snaps the
+    // passenger to CellClass::Closest_Free_Spot before the falling AI begins.
+    const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+    passenger.leptonX = spot.lx;
+    passenger.leptonY = spot.ly;
+    passenger.syncPosFromLeptons();
+    passenger.subCell = spot.subCell;
+    passenger.claimedCellIdx = spot.cellIdx;
+    passenger.claimedSubCell = spot.subCell;
+  } else {
+    passenger.setPosition(entity.pos.x, entity.pos.y);
+  }
+  passenger.transportRef = null;
+  passenger.isTethered = false;
+  passenger.inLimbo = false;
+  // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
+  // Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
+  passenger.isFalling = true;
+  passenger.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+  passenger.fallRiser = 0;
+  passenger.fallHasAttachedAnim = true;
+  passenger.flightAltitude = leptonToPixel(passenger.fallHeightLeptons);
+  // C++ AircraftClass::Paradrop_Cargo removes the passenger from the team,
+  // then (bug-compatible unqualified call) assigns the aircraft GUARD/HUNT.
+  if (entity.teamRef && passenger.teamRef) {
+    passenger.teamRef.remove(passenger);
+  }
+  assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
+  ctx.entities.push(passenger);
+  ctx.entityById.set(passenger.id, passenger);
+  if (entity.teamRef) {
+    entity.mission = passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT;
+  }
+}
+
+function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boolean {
+  if (!entity.moveTarget) return false;
+
+  // C++ fixed-wing Mission_Hunt status values.
+  const LOOK_FOR_TARGET = 0;
+  const TAKE_OFF = 1;
+  const FLY_TO_TARGET = 2;
+  const DROP_BOMBS = 3;
+  const REGROUP = 4;
+
+  let handled = false;
+  const flyCurrentFacing = () => {
+    // C++ AircraftClass::AI runs MissionClass dispatch first, then Rotation_AI,
+    // then Movement_AI. Fixed-wing Mission_Hunt only changes PrimaryFacing
+    // desired during mission dispatch; physical movement then uses the current
+    // PrimaryFacing after Rotation_AI.
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+  };
+
+  if (entity.missionTimer > 0) {
+    entity.missionTimer--;
+    flyCurrentFacing();
+    return true;
+  }
+
+  switch (entity.aircraftAttackStatus) {
+    case LOOK_FOR_TARGET:
+      entity.aircraftAttackStatus = TAKE_OFF;
+      handled = true;
+      break;
+
+    case TAKE_OFF:
+      // Reinforcement BADRs are already airborne at FLIGHT_LEVEL, so
+      // Process_Take_Off succeeds immediately and Status advances.
+      entity.aircraftAttackStatus = FLY_TO_TARGET;
+      handled = true;
+      break;
+
+    case FLY_TO_TARGET: {
+      if (entity.passengers.length === 0) {
+        // C++ Can_Fire: Passenger && !Is_Something_Attached() => FIRE_AMMO.
+        // Mission_Hunt handles FIRE_AMMO by entering REGROUP and returning the
+        // final Normal_Delay + Random_Pick path after the delay below expires.
+        entity.aircraftAttackStatus = REGROUP;
+        entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2) - 1; // end-of-tick value 6
+        handled = true;
+        break;
+      }
+
+      // C++ Mission_Hunt FLY_TO_TARGET: when Can_Fire does not produce FIRE_OK
+      // and PrimaryFacing is not already rotating, set desired facing toward
+      // TarCom during the mission dispatch. Rotation_AI then applies this in
+      // the same AircraftClass::AI pass before Movement_AI.
+      if (entity.facing256 >= 0) {
+        if (entity.facing256 === entity.desiredFacing256) {
+          const targetWorld = leptonPosToWorld(entity.moveTarget);
+          entity.desiredFacing256 = directionTo256(entity.pos, targetWorld);
+          entity.desiredFacing = entity.facing;
+        }
+      } else if (entity.facing === entity.desiredFacing) {
+        entity.desiredFacing = directionTo(entity.pos, leptonPosToWorld(entity.moveTarget));
+      }
+
+      const dist = leptonDist(
+        entity.leptonX, entity.leptonY,
+        entity.moveTarget.lx, entity.moveTarget.ly,
+      );
+      if (dist < 0x0200) {
+        entity.aircraftAttackStatus = DROP_BOMBS;
+      } else {
+        // C++ FLY_TO_TARGET returns TICKS_PER_SECOND/2. Because this TS
+        // aircraft handler owns the countdown directly, store the end-of-frame
+        // value observed after the C++ CDTimer tick.
+        entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2) - 1;
+      }
+      handled = true;
+      break;
+    }
+
+    case DROP_BOMBS:
+      if (entity.passengers.length > 0 &&
+          leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 0x0200) {
+        paradropOnePassenger(ctx, entity);
+      }
+      entity.aircraftAttackStatus = LOOK_FOR_TARGET;
+      entity.missionTimer = 0;
+      handled = true;
+      break;
+
+    case REGROUP: {
+      // C++ REGROUP for an empty passenger loaner assigns RETREAT/Commence, but
+      // Mission_Hunt still consumes its final Random_Pick(0,2) before returning.
+      const prevTag = ScenarioRandom._sourceTag;
+      ScenarioRandom._sourceTag = 40010;
+      ScenarioRandom.nextInRange(0, 2);
+      ScenarioRandom._sourceTag = prevTag;
+      if (entity.isALoaner) {
+        if (entity.teamRef) entity.teamRef.remove(entity);
+        entity.mission = Mission.RETREAT;
+        entity.missionQueue = null;
+        entity.missionTimer = LOANER_RETREAT_DELAY;
+        entity.aircraftAttackStatus = LOOK_FOR_TARGET;
+        entity.aircraftState = 'flying';
+      }
+      handled = true;
+      break;
+    }
+
+    default:
+      entity.aircraftAttackStatus = LOOK_FOR_TARGET;
+      handled = true;
+      break;
+  }
+
+  if (handled && entity.alive) {
+    flyCurrentFacing();
+  }
+  return true;
+}
+
 // ── State Machine ──────────────────────────────────────────────────────────────
 
 /** Aircraft state machine — returns true if aircraft handled this tick (skip normal update) */
@@ -363,6 +669,15 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
   // Decrement attack cooldowns — aircraft skip normal mission processing
   if (entity.attackCooldown > 0) entity.attackCooldown--;
   if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+
+  commenceAircraft(ctx, entity);
+  if (entity.mission === Mission.UNLOAD &&
+      entity.isTransport &&
+      !entity.isFixedWing &&
+      entity.aircraftState === 'landed') {
+    beginTransportMissionUnload(entity);
+    return true;
+  }
 
   switch (entity.aircraftState) {
     case 'landed': {
@@ -440,6 +755,13 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.hoverJitter = 0;
       }
 
+      if (entity.isFixedWing &&
+          entity.aircraftPassengerCarrier &&
+          entity.moveTarget &&
+          (entity.mission === Mission.ATTACK || entity.mission === Mission.HUNT)) {
+        return updateFixedWingPassengerHunt(ctx, entity);
+      }
+
       // ── C++ Paradrop_Cargo (aircraft.cpp:1442-1468, 1489-1501) ────────────────
       // Fixed-wing passenger transports (BADR) paradrop passengers onto the
       // target cell instead of bombing. C++ Fire_At detects Is_Something_Attached()
@@ -457,23 +779,41 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         if (dropDist <= 2) { // worldDist returns cells; 2 cells ≈ 0x0200 leptons
           const passenger = entity.passengers.shift()!;
           passenger.alive = true;
-          passenger.setPosition(entity.pos.x, entity.pos.y);
-          passenger.mission = Mission.GUARD;
+          if (passenger.stats.isInfantry) {
+            const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+            passenger.leptonX = spot.lx;
+            passenger.leptonY = spot.ly;
+            passenger.syncPosFromLeptons();
+            passenger.subCell = spot.subCell;
+            passenger.claimedCellIdx = spot.cellIdx;
+            passenger.claimedSubCell = spot.subCell;
+          } else {
+            passenger.setPosition(entity.pos.x, entity.pos.y);
+          }
           passenger.transportRef = null;
+          passenger.isTethered = false;
           passenger.inLimbo = false;
-          // C++ aircraft.cpp:1458-1461 — human player → MISSION_GUARD,
-          // AI (team owner) → MISSION_HUNT. We use GUARD; team AI will
-          // pick up the dropped infantry on its next recruit scan.
+          // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
+          //   Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
+          // C++ TechnoClass::AI (techno.cpp:2346) returns early for non-aircraft
+          // while Height > 0, so the newly appended passenger can enter Logic this
+          // same tick without running infantry MissionClass::AI/RNG.
+          passenger.isFalling = true;
+          passenger.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+          passenger.fallRiser = 0;
+          passenger.fallHasAttachedAnim = true;
+          passenger.flightAltitude = leptonToPixel(passenger.fallHeightLeptons);
+          // C++ InfantryClass::Paradrop (infantry.cpp:4183-4194):
+          // human player → MISSION_GUARD, AI → MISSION_HUNT. Route through
+          // Assign_Mission so Commence timing remains C++-faithful after landing.
+          assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
           ctx.entities.push(passenger);
           ctx.entityById.set(passenger.id, passenger);
 
-          if (entity.passengers.length === 0) {
-            // C++ aircraft.cpp:293 — BADR always has IsALoaner=true.
-            // After the last drop, retreat to the nearest map edge
-            // (Mission_Retreat FACE_MAP_EDGE → KEEP_FLYING).
-            entity.mission = Mission.RETREAT;
-            entity.moveTarget = null;
-          }
+          // Do not force RETREAT after the last drop. C++ Paradrop_Cargo only
+          // detaches the passenger (and may assign a mission through the normal
+          // aircraft mission queue); IsALoaner retreat happens later in
+          // Mission_Hunt REGROUP (aircraft.cpp:802-818), not at detach time.
           // Continue flight this tick (do not return early so the BADR keeps
           // moving forward — fixed-wings can't stop in midair).
         }
@@ -490,7 +830,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           // above ejects passengers when within 2 cells; returning to base here
           // would crash-land the BADR (no airfield for fixed-wings).
           if (entity.isFixedWing && entity.moveTarget && entity.passengers.length > 0) {
-            aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity));
+            aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
             return true;
           }
           // Target lost — RTB
@@ -508,22 +848,33 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         // Fly toward target — C++ curved path via Rotation_AI + Physics(PrimaryFacing)
         aircraftFlyInFacing(entity, targetPos, ctx.movementSpeed(entity));
       } else if (entity.mission === Mission.RETREAT) {
-        // C++ aircraft.cpp:1309-1367 Mission_Retreat — fly to nearest map edge and exit.
-        // FACE_MAP_EDGE: compute exit point if not already set, then KEEP_FLYING toward it.
-        if (!entity.moveTarget) {
-          // Compute nearest map edge exit point (one cell OUTSIDE bounds so exit triggers)
-          const ec = entity.cell;
-          const distLeft = ec.cx - ctx.map.boundsX;
-          const distRight = (ctx.map.boundsX + ctx.map.boundsW - 1) - ec.cx;
-          const distTop = ec.cy - ctx.map.boundsY;
-          const distBottom = (ctx.map.boundsY + ctx.map.boundsH - 1) - ec.cy;
-          const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-          let tx = ec.cx, ty = ec.cy;
-          if (minDist === distLeft) tx = ctx.map.boundsX - 1;
-          else if (minDist === distRight) tx = ctx.map.boundsX + ctx.map.boundsW;
-          else if (minDist === distTop) ty = ctx.map.boundsY - 1;
-          else ty = ctx.map.boundsY + ctx.map.boundsH;
-          entity.moveTarget = { lx: tx * 256 + 128, ly: ty * 256 + 128 };
+        // C++ aircraft.cpp:1309-1367 Mission_Retreat.
+        // Helicopters do not compute a NavCom/nearest-edge point here. FACE_MAP_EDGE
+        // sets full speed and desired facing from House->Control.Edge, then
+        // KEEP_FLYING just lets Movement_AI carry the aircraft off-map.
+        if (entity.missionTimer > 0) {
+          entity.missionTimer--;
+        } else if (!entity.isFixedWing) {
+          // C++ aircraft.cpp:1375-1377 — helicopter Mission_Retreat KEEP_FLYING
+          // returns MissionControl[RETREAT].Normal_Delay() + Random_Pick(0,2).
+          // Store the observed end-of-frame value: the C++ CDTimer has already
+          // consumed one tick by the time agent_get_state reports `mt`.
+          const prevTag = ScenarioRandom._sourceTag;
+          ScenarioRandom._sourceTag = 40030;
+          const jitter = ScenarioRandom.nextInRange(0, 2);
+          ScenarioRandom._sourceTag = prevTag;
+          entity.missionTimer = LOANER_RETREAT_DELAY - 1 + jitter;
+        } else {
+          // Fixed-wing Mission_Retreat does not use Random_Pick. At flight
+          // level C++ returns TICKS_PER_SECOND*10; below it returns 3 while
+          // increasing Height. TS represents fixed-wing airborne state at
+          // flight level in pixels.
+          entity.missionTimer = TICKS_PER_SECOND * 10 - 1;
+        }
+        if (!entity.isFixedWing) {
+          entity.aircraftSpeedFraction = 1.0;
+          entity.desiredFacing256 = houseEdgeDirection256(ctx, entity.house);
+          entity.desiredFacing = Math.round(entity.desiredFacing256 / 32) & 7;
         }
         // Check if at map edge — exit
         const ec = entity.cell;
@@ -532,8 +883,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           handleMapExit(ctx, entity);
           return true;
         }
-        // Fly toward the edge — C++ curved path
-        aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity));
+        if (entity.isFixedWing && entity.moveTarget) {
+          aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+        } else {
+          aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+        }
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
         // Check if aircraft is at map edge with out-of-bounds target — exit map
         const ec = entity.cell;
@@ -545,7 +899,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           return true;
         }
         // Simple move — fly to destination (C++ curved path)
-        if (aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity))) {
+        if (aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity))) {
           // Arrived — check if destination was out of bounds (aircraft map exit)
           const arrCell = worldToCell(leptonToPixel(entity.moveTarget.lx), leptonToPixel(entity.moveTarget.ly));
           if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
@@ -618,7 +972,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // The slowdown approximates WASM's ~139 tick total deployment time (search
       // 14 + approach 104 + land 24 + eject 1 = 143 ≈ WASM's 139).
       if (!entity.moveTarget) { entity.aircraftState = 'returning'; return true; }
-      const arrived = aircraftFlyInFacing(entity, leptonPosToWorld(entity.moveTarget), ctx.movementSpeed(entity));
+      const arrived = aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
       if (arrived) {
         entity.aircraftState = 'unload_land';
       }
@@ -633,13 +987,31 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       if (entity.flightAltitude <= 0) {
         entity.flightAltitude = 0;
         entity.aircraftSpeedFraction = 0;
-        entity.mission = Mission.UNLOAD;
-        entity.missionQueue = null;
-        // C++ reaches UNLOAD_PASSENGERS through MissionClass timing after the
-        // landing state, so cargo does not detach on the touchdown tick.
-        entity.missionTimer = TRANSPORT_UNLOAD_DELAY;
-        entity.aircraftState = 'unload_eject';
+        // C++ aircraft.cpp:1837-1848 Mission_Move LAND:
+        // Process_Landing clears IsLanding. If no queue is pending, it enters
+        // idle mode; for a passenger-carrying loaner transport, Enter_Idle_Mode
+        // selects MISSION_GUARD while the team keeps MISSION_UNLOAD queued via
+        // TMission_Unload. Do not jump directly to UNLOAD_PASSENGERS here.
+        entity.moveTarget = null;
+        if (entity.missionQueue === null) {
+          entity.mission = Mission.GUARD;
+          entity.missionTimer = TRANSPORT_GUARD_DELAY;
+        }
+        entity.aircraftState = 'landed';
       }
+      return true;
+    }
+
+    case 'unload_wait': {
+      // C++ SEARCH_FOR_LZ -> UNLOAD_PASSENGERS transition. The transition itself
+      // returns MissionControl[UNLOAD].Normal_Delay() + Random_Pick(0,2), so no
+      // passenger is detached on this dispatch.
+      if (entity.missionTimer > 0) {
+        entity.missionTimer--;
+        return true;
+      }
+      entity.aircraftState = 'unload_eject';
+      entity.missionTimer = 13 + ScenarioRandom.nextInRange(0, 2);
       return true;
     }
 
@@ -658,7 +1030,16 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         return true;
       }
 
-      // C++ UNLOAD_PASSENGERS (lines 1158-1187): eject one passenger per tick.
+      // C++ UNLOAD_PASSENGERS (aircraft.cpp:1164-1187): a transport does not
+      // detach the next passenger while it is still tethered to the previously
+      // unloaded passenger. The function still falls through to the final
+      // Mission_Unload Random_Pick(0,2), so the next check is delayed by the
+      // normal unload cadence.
+      const nextUnloadDelay = 13 + ScenarioRandom.nextInRange(0, 2);
+      if (entity.isTethered) {
+        entity.missionTimer = nextUnloadDelay;
+        return true;
+      }
       if (entity.passengers.length > 0) {
         const passenger = entity.passengers.shift()!;
         const exitCell = findAircraftExitCell(ctx, entity, passenger);
@@ -670,21 +1051,54 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         // C++ Exit_Object: Unlimbo at transport Coord, then Assign_Mission(MOVE)
         // and Assign_Destination(adjacent cell) so the unit clears the LZ.
         passenger.alive = true;
-        passenger.setPosition(entity.pos.x, entity.pos.y);
-        passenger.mission = Mission.MOVE;
+        if (passenger.stats.isInfantry) {
+          const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+          passenger.leptonX = spot.lx;
+          passenger.leptonY = spot.ly;
+          passenger.syncPosFromLeptons();
+          passenger.subCell = spot.subCell;
+          passenger.claimedCellIdx = spot.cellIdx;
+          passenger.claimedSubCell = spot.subCell;
+        } else {
+          passenger.setPosition(entity.pos.x, entity.pos.y);
+        }
+        // C++ TechnoClass::Unlimbo runs Enter_Idle_Mode(true) + Commence before
+        // AircraftClass::Exit_Object queues MISSION_MOVE. This resets stale
+        // cargo animation state (for example a team-activation gesture) and
+        // leaves the passenger in GUARD with Timer=0, so its same-tick
+        // FootClass::AI can run Mission_Guard before Commence promotes MOVE.
+        passenger.mission = ctx.idleMission(passenger);
         passenger.missionQueue = null;
         passenger.missionTimer = 0;
+        // TechnoClass::Unlimbo starts from DO_NOTHING; InfantryClass::AI's
+        // Commence gate allows DO_NOTHING, but Is_Ready_To_Random_Animate does
+        // not. This prevents an unloaded passenger from taking a random idle
+        // animation before its queued MOVE commences in the same tick.
+        passenger.doing = 'nothing';
+        passenger.nonInterruptAnimTicks = 0;
+        passenger.nonInterruptAnimSetTick = -1;
+        passenger.firePrepActive = false;
+        passenger.isFiringAnim = false;
+        assignMission(passenger, Mission.MOVE);
         passenger.moveTarget = exitTarget;
         passenger.moveQueue = [];
         passenger.path = [];
         passenger.pathIndex = 0;
         passenger.isDriving = false;
-        passenger.claimedCellIdx = -1;
-        passenger.claimedSubCell = -1;
+        if (!passenger.stats.isInfantry) {
+          passenger.claimedCellIdx = -1;
+          passenger.claimedSubCell = -1;
+        }
         passenger.teamMissions = [];
         passenger.teamMissionIndex = 0;
         passenger.teamMissionWaiting = 0;
-        passenger.transportRef = null;
+        // C++ AircraftClass::Exit_Object establishes radio contact via
+        // RADIO_HELLO/RADIO_UNLOAD. InfantryClass::Per_Cell_Process cuts this
+        // tether at the first cell boundary, then starts the unload gesture
+        // (infantry.cpp:878-906), which blocks Commence until the gesture ends.
+        passenger.transportRef = entity;
+        passenger.isTethered = true;
+        entity.isTethered = true;
         passenger.inLimbo = false;
         ctx.entities.push(passenger);
         ctx.entityById.set(passenger.id, passenger);
@@ -704,6 +1118,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           entity.aircraftState = 'returning';
           entity.flightAltitude = 1; // start climbing
         }
+      } else {
+        entity.missionTimer = nextUnloadDelay;
       }
       return true;
     }

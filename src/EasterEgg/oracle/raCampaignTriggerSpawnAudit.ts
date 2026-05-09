@@ -279,6 +279,28 @@ function compareTeamMissions(expected: TeamMission[], actual: TeamMission[] | nu
   );
 }
 
+function expectedReinforcementMissions(team: TeamType): TeamMission[] {
+  // C++ Do_Reinforcements injects an implicit leading TMISSION_MOVE for
+  // transport teams that only declare TMISSION_UNLOAD. scenario.ts mirrors this
+  // before assigning teamMissions to spawned members, so the audit must compare
+  // against the runtime script rather than the raw INI script.
+  const hasUnloadMission = team.missions.some((mission) => mission.mission === 8);
+  const hasTransportMember = team.members.some((member) => {
+    const stats = UNIT_STATS[member.type];
+    return !!stats?.passengers && (stats.isAircraft || stats.isVessel);
+  });
+
+  if (hasUnloadMission &&
+      hasTransportMember &&
+      team.origin >= 0 &&
+      team.missions.length === 1 &&
+      team.missions[0].mission === 8) {
+    return [{ mission: 3, data: team.origin }, ...team.missions];
+  }
+
+  return team.missions;
+}
+
 function auditSpawnCheck(
   scenarioId: string,
   trigger: ScenarioTrigger,
@@ -451,7 +473,8 @@ function auditSpawnCheck(
     ? data.triggers[team.trigger].name
     : '';
   const expectedSuicide = (team.flags & 2) !== 0;
-  const missionSummary = formatMissionSequence(team.missions);
+  const expectedMissions = expectedReinforcementMissions(team);
+  const missionSummary = formatMissionSequence(expectedMissions);
 
   let houseMismatch = 0;
   let triggerMismatch = 0;
@@ -469,10 +492,10 @@ function auditSpawnCheck(
     if (Boolean(entity.isSuicide) !== expectedSuicide) {
       suicideMismatch += 1;
     }
-    if (!compareTeamMissions(team.missions, entity.teamMissions)) {
+    if (!compareTeamMissions(expectedMissions, entity.teamMissions)) {
       missionMismatch += 1;
     }
-    if (team.missions.length > 0 && entity.teamMissionIndex !== 0) {
+    if (expectedMissions.length > 0 && entity.teamMissionIndex !== 0) {
       missionIndexMismatch += 1;
     }
   }

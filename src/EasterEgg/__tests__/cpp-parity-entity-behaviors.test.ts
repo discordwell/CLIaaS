@@ -396,23 +396,27 @@ describe('Body rotation — C++ 32-step facing system', () => {
     expect(tank.facing).toBe(Dir.N); // hasn't rotated yet
   });
 
-  it('vehicles take 2 ticks per 32-step at ROT=5 (accumulates 5 per tick, step at 8)', () => {
+  it('vehicles rotate by ROT in 256-dir space; Dir_To_32 derives visual frame', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Greece, 200, 200);
     tank.facing = Dir.N;
+    tank.bodyFacing256 = Dir.N * 32;
     tank.bodyFacing32 = 0;
     tank.desiredFacing = Dir.NE;
     tank.rotAccumulator = 0;
 
-    // Tick 1: accumulator = 0 + 5 = 5 (< 8, no step)
+    // Tick 1: C++ Rotation_Adjust applies +5 immediately. Dir_To_32(5) = 1.
     tank.rotTickedThisFrame = false;
     tank.tickRotation();
-    expect(tank.bodyFacing32).toBe(0);
-
-    // Tick 2: accumulator = 5 + 5 = 10 (>= 8, step once, remainder = 2)
-    tank.rotTickedThisFrame = false;
-    tank.tickRotation();
+    expect(tank.bodyFacing256).toBe(5);
     expect(tank.bodyFacing32).toBe(1);
-    expect(tank.rotAccumulator).toBe(2);
+    expect(tank.rotAccumulator).toBe(0);
+
+    // Tick 2: current DirType is 10. Dir_To_32(10) is still frame 1.
+    tank.rotTickedThisFrame = false;
+    tank.tickRotation();
+    expect(tank.bodyFacing256).toBe(10);
+    expect(tank.bodyFacing32).toBe(1);
+    expect(tank.rotAccumulator).toBe(0);
   });
 
   it('rotation uses shortest path around 32-step ring', () => {

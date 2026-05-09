@@ -78,6 +78,12 @@
 #include "function.h"
 #include "mission.h"
 
+extern "C" {
+	extern int g_agent_team_remove_site;
+	void agent_debug_team_remove(int frame, int teamIndex,
+		int rtti, int index, int site, int totalBefore, int currentMission, int cellX, int cellY);
+}
+
 
 /***********************************************************************************************
  * _Is_It_Breathing -- Checks to see if unit is an active team member.                         *
@@ -117,6 +123,24 @@ static inline bool _Is_It_Breathing(FootClass const * object)
 	**	"breathing"), then return that it is ok.
 	*/
 	return(true);
+}
+
+static int agent_team_member_index(FootClass * obj)
+{
+	if (obj == NULL) return(-1);
+	switch (obj->What_Am_I()) {
+		case RTTI_UNIT:
+			return(Units.ID((UnitClass *)obj));
+		case RTTI_INFANTRY:
+			return(Infantry.ID((InfantryClass *)obj));
+		case RTTI_AIRCRAFT:
+			return(Aircraft.ID((AircraftClass *)obj));
+		case RTTI_VESSEL:
+			return(Vessels.ID((VesselClass *)obj));
+		default:
+			break;
+	}
+	return(-1);
 }
 
 
@@ -291,10 +315,13 @@ void TeamClass::operator delete(void * ptr)
  *=============================================================================================*/
 TeamClass::~TeamClass(void)
 {
-	if (GameActive && Class.Is_Valid()) {
-		while (Member != NULL) {
-			Remove(Member);
-		}
+		if (GameActive && Class.Is_Valid()) {
+			while (Member != NULL) {
+				int site_save = g_agent_team_remove_site;
+				g_agent_team_remove_site = 320;
+				Remove(Member);
+				g_agent_team_remove_site = site_save;
+			}
 		Class->Number--;
 
 		/*
@@ -902,7 +929,10 @@ bool TeamClass::Add(FootClass * obj)
 	**	another team, then it must be removed from that team first.
 	*/
 	if (obj->Team.Is_Valid()) {
+		int site_save = g_agent_team_remove_site;
+		g_agent_team_remove_site = 929;
 		obj->Team->Remove(obj);
+		g_agent_team_remove_site = site_save;
 	}
 
 	/*
@@ -1061,6 +1091,21 @@ bool TeamClass::Remove(FootClass * obj, int typeindex)
 	*/
 	if (this != obj->Team) {
 		return(true);
+	}
+
+	{
+		COORDINATE remove_coord = obj->Center_Coord();
+		CELL remove_cell = Coord_Cell(remove_coord);
+		agent_debug_team_remove(
+			Frame,
+			Teams.ID(this),
+			(int)obj->What_Am_I(),
+			agent_team_member_index(obj),
+			g_agent_team_remove_site,
+			Total,
+			CurrentMission,
+			Cell_X(remove_cell),
+			Cell_Y(remove_cell));
 	}
 
 	/*
@@ -1888,6 +1933,19 @@ void TeamClass::Coordinate_Move(void)
 		Target = MissionTarget;
 	}
 
+	if (Class && Class->IniName && strcmp(Class->IniName, "cover") == 0) {
+		extern int g_cover_coord_move_target_x;
+		extern int g_cover_coord_move_target_y;
+		extern int g_cover_coord_move_mission_target_x;
+		extern int g_cover_coord_move_mission_target_y;
+		COORDINATE tgt = Target_Legal(Target) ? As_Coord(Target) : 0;
+		COORDINATE mtgt = Target_Legal(MissionTarget) ? As_Coord(MissionTarget) : 0;
+		g_cover_coord_move_target_x = Coord_X(tgt);
+		g_cover_coord_move_target_y = Coord_Y(tgt);
+		g_cover_coord_move_mission_target_x = Coord_X(mtgt);
+		g_cover_coord_move_mission_target_y = Coord_Y(mtgt);
+	}
+
 	if (Target_Legal(Target)) {
 
 		if (!Lagging_Units()) {
@@ -1921,8 +1979,8 @@ void TeamClass::Coordinate_Move(void)
 					}
 					found = true;
 
-					int dist = unit->Distance(Target);
-					if (unit->IsFormationMove) {
+						int dist = unit->Distance(Target);
+						if (unit->IsFormationMove) {
 						if (::As_Target(Coord_Cell(unit->Coord)) != unit->NavCom) {
 							dist = Rule.StrayDistance + 1;	// formation moves must be exact.
 						}
@@ -2163,7 +2221,10 @@ int TeamClass::TMission_Unload(void)
 				**	have been offloaded.
 				*/
 				if (unit->IsALoaner) {
+					int site_save = g_agent_team_remove_site;
+					g_agent_team_remove_site = 2203;
 					Remove(unit);
+					g_agent_team_remove_site = site_save;
 					unit->Assign_Mission(MISSION_RETREAT);
 					unit->Commence();
 				}
@@ -2358,11 +2419,14 @@ void TeamClass::Suspend_Teams(int priority, HouseClass const * house)
 		**	If a team is below the "survival priority level", then it gets
 		**	destroyed. The team members are then free to be reassigned.
 		*/
-		if (team != NULL && team->House == house && team->Class->RecruitPriority < priority) {
-			FootClass * unit = team->Member;
-			while (team->Member) {
-				team->Remove(team->Member);
-			}
+			if (team != NULL && team->House == house && team->Class->RecruitPriority < priority) {
+				FootClass * unit = team->Member;
+				while (team->Member) {
+					int site_save = g_agent_team_remove_site;
+					g_agent_team_remove_site = 2401;
+					team->Remove(team->Member);
+					g_agent_team_remove_site = site_save;
+				}
 			team->IsAltered = team->JustAltered = true;
 			team->SuspendTimer = Rule.SuspendDelay * TICKS_PER_MINUTE;
 			team->Suspended = true;

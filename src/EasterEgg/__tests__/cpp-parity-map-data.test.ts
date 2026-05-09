@@ -164,25 +164,20 @@ describe('Overlay constants -- C++ OverlayType enum (defines.h:1487-1499)', () =
       expect(CPP_OVERLAY_GOLD4 - CPP_OVERLAY_GOLD1 + 1).toBe(4);
     });
 
-    it('TS gold min = 0x03, max = 0x0E (12 linear density levels)', () => {
-      // TS map.ts:549: Gold ore: 0x03 through 0x0E -- 12 density levels
-      const TS_GOLD_MIN = 0x03;
-      const TS_GOLD_MAX = 0x0E;
-      expect(TS_GOLD_MAX - TS_GOLD_MIN + 1).toBe(12);
+    it('TS uses C++ gold overlay type IDs (OVERLAY_GOLD1..GOLD4 = 5..8)', () => {
+      expect(GameMap.OVERLAY_GOLD1).toBe(5);
+      expect(GameMap.OVERLAY_GOLD4).toBe(8);
+      expect(GameMap.OVERLAY_GOLD4 - GameMap.OVERLAY_GOLD1 + 1).toBe(4);
     });
 
-    it('REPRESENTATION PARITY: C++ Overlay (4 gold types) + OverlayData (density) ↔ TS overlay[] + oreDensity[]', () => {
+    it('REPRESENTATION PARITY: overlay[] stores C++ visual type, oreDensity[] stores OverlayData', () => {
       // C++ defines.h:1487-1490 has 4 gold OverlayType enums (GOLD1-4 = visual
-      // variants) plus per-cell OverlayData density. TS now mirrors via two
-      // arrays: overlay[] (12 visual byte values from MapPack legacy) +
-      // oreDensity[] (density 0-11). depleteOre yields GoldValue=25 per bail
-      // when density > 0, matching C++ Reduce_Tiberium (cell.cpp:1630-1648).
+      // variants) plus per-cell OverlayData density. TS mirrors this with
+      // overlay[] (5..8 visual type) + oreDensity[] (density 0..11).
       const map = new GameMap();
       map.setBounds(0, 0, 128, 128);
       const idx = 60 * MAP_CELLS + 60;
-      // For each visual variant, set explicit non-zero density and verify
-      // depleteOre yields 25 — proves visual is decoupled from density.
-      for (let visual = 0x03; visual <= 0x0E; visual++) {
+      for (let visual = GameMap.OVERLAY_GOLD1; visual <= GameMap.OVERLAY_GOLD4; visual++) {
         map.overlay[idx] = visual;
         map.oreDensity[idx] = 5; // arbitrary mid-level density
         expect(map.depleteOre(60, 60), `visual 0x${visual.toString(16)} d=5 → 25`).toBe(25);
@@ -208,24 +203,22 @@ describe('Overlay constants -- C++ OverlayType enum (defines.h:1487-1499)', () =
       expect(CPP_OVERLAY_GEMS4 - CPP_OVERLAY_GEMS1 + 1).toBe(4);
     });
 
-    it('TS gem min = 0x0F, max = 0x12 (4 density levels)', () => {
-      // TS map.ts:550: Gems: 0x0F through 0x12 -- 4 density levels
-      const TS_GEM_MIN = 0x0F;
-      const TS_GEM_MAX = 0x12;
-      expect(TS_GEM_MAX - TS_GEM_MIN + 1).toBe(4);
+    it('TS uses C++ gem overlay type IDs (OVERLAY_GEMS1..GEMS4 = 9..12)', () => {
+      expect(GameMap.OVERLAY_GEMS1).toBe(9);
+      expect(GameMap.OVERLAY_GEMS4).toBe(12);
+      expect(GameMap.OVERLAY_GEMS4 - GameMap.OVERLAY_GEMS1 + 1).toBe(4);
     });
 
     it('TS gem count matches C++ gem type count (4)', () => {
-      // Both C++ and TS have 4 gem levels. TS density happens to equal C++ type count.
       const CPP_GEM_TYPES = 4;
-      const TS_GEM_LEVELS = 0x12 - 0x0F + 1;
-      expect(TS_GEM_LEVELS).toBe(CPP_GEM_TYPES);
+      expect(GameMap.OVERLAY_GEMS4 - GameMap.OVERLAY_GEMS1 + 1).toBe(CPP_GEM_TYPES);
     });
 
     it('depleteOre returns 50 credits for gems (rules.ini GemValue=50)', () => {
       const map = new GameMap();
       map.setBounds(0, 0, 128, 128);
-      map.overlay[50 * MAP_CELLS + 50] = 0x10; // mid-density gem
+      map.overlay[50 * MAP_CELLS + 50] = GameMap.OVERLAY_GEMS2; // visual gem variant
+      map.oreDensity[50 * MAP_CELLS + 50] = 2;
       expect(map.depleteOre(50, 50)).toBe(50);
       expect(iniFloat('General', 'GemValue')).toBe(50);
     });
@@ -366,31 +359,32 @@ describe('GrowthRate -- ore regrowth timing', () => {
     expect(iniBool('General', 'OreSpreads')).toBe(true);
   });
 
-  it('TS ORE_GROWTH_INTERVAL = 1821 ticks', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
+  it('TS ORE_GROWTH_INTERVAL = 2048 ticks', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(2048);
   });
 
-  it('C++ derivation: ceil(16384 / floor(16384 / (2 * 900))) = 1821', () => {
+  it('C++ derivation: first scan processes 9 cells, then advances 8 new cells/tick = 2048', () => {
     // C++ map.cpp:1017: subcount = MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
     // subcount = 16384 / (2 * 900) = 16384 / 1800 = 9 (integer division)
-    // Full map scan = ceil(16384 / 9) = ceil(1820.44) = 1821 ticks
+    // The loop stores TiberiumScan at the boundary index before the for-loop
+    // increment, so each later tick reprocesses one cell and advances 8 new cells.
     const MAP_CELL_TOTAL = 128 * 128;
     const CPP_GROWTH_RATE = 2;
     const CPP_TICKS_PER_MINUTE = 900; // 15 Hz * 60
     const subcount = Math.floor(MAP_CELL_TOTAL / (CPP_GROWTH_RATE * CPP_TICKS_PER_MINUTE));
     expect(subcount).toBe(9);
-    const fullCycle = Math.ceil(MAP_CELL_TOTAL / subcount);
-    expect(fullCycle).toBe(1821);
+    const fullCycle = 1 + Math.ceil((MAP_CELL_TOTAL - subcount) / (subcount - 1));
+    expect(fullCycle).toBe(2048);
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(fullCycle);
   });
 
   it('ORE_GROWTH_INTERVAL derived from C++ 15Hz timing, TS now matches at 15Hz', () => {
-    // The 1821-tick interval was calculated using TICKS_PER_MINUTE = 900 (15Hz).
+    // The 2048-tick interval was calculated using TICKS_PER_MINUTE = 900 (15Hz).
     // TS now runs at 15Hz (same as C++), so tick counts match exactly.
-    const tsRealTimeSec = 1821 / GAME_TICKS_PER_SEC;
-    const cppRealTimeSec = 1821 / 15;
-    expect(tsRealTimeSec).toBeCloseTo(121.4, 1);
-    expect(cppRealTimeSec).toBeCloseTo(121.4, 1);
+    const tsRealTimeSec = 2048 / GAME_TICKS_PER_SEC;
+    const cppRealTimeSec = 2048 / 15;
+    expect(tsRealTimeSec).toBeCloseTo(136.5, 1);
+    expect(cppRealTimeSec).toBeCloseTo(136.5, 1);
     // Exact parity: TS and C++ ore regrowth timing now matches
     expect(tsRealTimeSec).toBeCloseTo(cppRealTimeSec, 5);
   });

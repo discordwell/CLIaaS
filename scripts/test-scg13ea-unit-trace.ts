@@ -35,16 +35,20 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
   const wasmSeed = await wasmPage.evaluate(() => JSON.parse((window as any).Module.ccall('agent_get_state','string',[],[])).rngState);
   await tsPage.evaluate((s: number) => { (window as any).__syncRngSeed?.(s); }, wasmSeed);
 
-  let prev = '';
-  for (let t = 0; t <= END; t++) {
-    if (t > 0) {
+  if (START > 0) {
+    let remaining = START;
+    while (remaining > 0) {
+      const batch = Math.min(remaining, 300);
+      remaining -= batch;
       await Promise.all([
-        wasmPage.evaluate(async () => { const r = (window as any).__agentStep(1); if (r?.then) await r; }),
-        tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
+        wasmPage.evaluate(async (n: number) => { const r = (window as any).__agentStep(n); if (r?.then) await r; }, batch),
+        tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, batch),
       ]);
     }
-    if (t < START) continue;
+  }
 
+  let prev = '';
+  for (let t = START; t <= END; t++) {
     const wasm = await wasmPage.evaluate((id: number) => {
       const M = (window as any).Module;
       const s = JSON.parse(M.ccall('agent_get_state','string',[],[]));
@@ -65,17 +69,25 @@ test(`SCG13EA unit trace WASM ${WASM_ID} / TS ${TS_ID}`, async ({ browser }) => 
       const nav = e.moveTarget ? `(${e.moveTarget.lx},${e.moveTarget.ly})` : 'null';
       const path = `${e.pathIndex}/${e.path?.length ?? 0}:${(e.path ?? []).slice(e.pathIndex, e.pathIndex + 3)
         .map((p: { cx: number; cy: number }) => `${p.cx},${p.cy}`).join('|')}`;
+      const next = e.path?.[e.pathIndex];
+      const slots = next ? game.map?.subCellOccupancy?.get(next.cy * 128 + next.cx)?.join(',') ?? '-' : '-';
       return `m=${e.mission} mt=${e.missionTimer} mq=${e.missionQueue ?? 'null'} drv=${e.isDriving} ` +
         `init=${e.teamInitiated} team=${e.teamRef?.typeName ?? '-'}#${e.teamRef?.id ?? '-'} ` +
         `nct=${e.navComClearedTick ?? -1} ` +
         `doing=${e.doing} c=(${e.cell.cx},${e.cell.cy}) pos=(${e.leptonX},${e.leptonY}) ` +
-        `head=${head} nav=${nav} path=${path}`;
+        `head=${head} nav=${nav} path=${path} slots=${slots}`;
     }, TS_ID);
 
     const line = `t=${t} W: ${wasm} | TS: ${ts}`;
     if (line !== prev) {
       console.log(line);
       prev = line;
+    }
+    if (t < END) {
+      await Promise.all([
+        wasmPage.evaluate(async () => { const r = (window as any).__agentStep(1); if (r?.then) await r; }),
+        tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
+      ]);
     }
   }
 });

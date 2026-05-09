@@ -557,7 +557,7 @@ describe('Wall destruction via splash (destroysWalls warhead flag)', () => {
     expect(ctx.map.getWallType(10, 10)).toBe('BRIK');
   });
 
-  it('HE splash clears adjacent wall cells within splash radius', () => {
+  it('HE splash clears only the impact wall cell', () => {
     const ctx = makeCombatCtx();
     ctx.map.setWallType(10, 10, 'SBAG');
     ctx.map.setWallType(11, 10, 'SBAG');
@@ -568,8 +568,8 @@ describe('Wall destruction via splash (destroysWalls warhead flag)', () => {
     applySplashDamage(ctx, center, weapon, -1, House.Spain);
 
     expect(ctx.map.getWallType(10, 10)).toBe('');
-    expect(ctx.map.getWallType(11, 10)).toBe('');
-    expect(ctx.map.getWallType(10, 11)).toBe('');
+    expect(ctx.map.getWallType(11, 10)).toBe('SBAG');
+    expect(ctx.map.getWallType(10, 11)).toBe('SBAG');
   });
 });
 

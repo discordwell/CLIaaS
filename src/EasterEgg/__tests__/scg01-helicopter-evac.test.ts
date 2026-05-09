@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, Mission, AnimState, UNIT_STATS, CELL_SIZE,
-  cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES, cellToLepton,
+  cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES, cellTargetToLepton,
 } from '../engine/types';
 import {
   calculateHouseEdgeSpawnCell,
@@ -202,7 +202,7 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(heli.mission).toBe(Mission.MOVE);
 
     // Move target should be the origin waypoint (WP23)
-    const wp23Lepton = cellToLepton(WP23.cx, WP23.cy);
+    const wp23Lepton = cellTargetToLepton(WP23.cx, WP23.cy);
     expect(heli.moveTarget!.lx).toBe(wp23Lepton.lx);
     expect(heli.moveTarget!.ly).toBe(wp23Lepton.ly);
   });
@@ -248,7 +248,7 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(tran!.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
 
     // Move target should be the origin waypoint (WP0)
-    const wp0Lepton = cellToLepton(WP0.cx, WP0.cy);
+    const wp0Lepton = cellTargetToLepton(WP0.cx, WP0.cy);
     expect(tran!.moveTarget!.lx).toBe(wp0Lepton.lx);
     expect(tran!.moveTarget!.ly).toBe(wp0Lepton.ly);
 

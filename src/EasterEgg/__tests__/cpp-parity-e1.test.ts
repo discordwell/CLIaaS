@@ -339,10 +339,11 @@ describe('E1 retaliation (techno.cpp)', () => {
     e1.target = null;
 
     const ctx = makeCombatCtx([e1, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, e1, attacker);
 
     expect(e1.target).toBe(attacker);
-    expect(e1.mission).toBe(Mission.ATTACK);
+    expect(e1.mission).toBe(Mission.GUARD);
   });
 
   it('E1 CAN retaliate (has weapon)', () => {
@@ -412,7 +413,7 @@ describe('E1 AI scatter on damage (techno.cpp)', () => {
       testE1.mission = Mission.GUARD;
       const testCtx = makeCombatCtx([testE1]);
       aiScatterOnDamage(testCtx, testE1);
-      if (testE1.mission === Mission.MOVE && testE1.moveTarget !== null) {
+      if (testE1.missionQueue === Mission.MOVE && testE1.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -426,7 +427,8 @@ describe('E1 AI scatter on damage (techno.cpp)', () => {
     e1.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([e1]);
-    aiScatterOnDamage(ctx, e1);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, e1, attacker);
 
     // Should remain on GUARD, no scatter
     expect(e1.mission).toBe(Mission.GUARD);
@@ -440,7 +442,7 @@ describe('E1 AI scatter on damage (techno.cpp)', () => {
       testE1.mission = Mission.ATTACK;
       const testCtx = makeCombatCtx([testE1]);
       aiScatterOnDamage(testCtx, testE1);
-      if (testE1.mission === Mission.MOVE && testE1.moveTarget !== null) {
+      if (testE1.missionQueue === Mission.MOVE && testE1.moveTarget !== null) {
         scattered = true;
         break;
       }

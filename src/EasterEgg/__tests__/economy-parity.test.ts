@@ -35,11 +35,11 @@ describe('Economy Parity (C++ Red Alert)', () => {
   function getOverlay(cx: number, cy: number): number {
     const idx = cy * MAP_CELLS + cx;
     const ovl = map.overlay[idx];
-    if (ovl >= 0x03 && ovl <= 0x0E) {
+    if (GameMap.isGoldOverlayId(ovl)) {
       const d = map.oreDensity[idx];
       if (d !== undefined && d !== 0xFF) return 0x03 + Math.min(11, d);
     }
-    if (ovl >= 0x0F && ovl <= 0x12) {
+    if (GameMap.isGemOverlayId(ovl)) {
       const d = map.oreDensity[idx];
       if (d !== undefined && d !== 0xFF) return 0x0F + Math.min(3, d);
     }
@@ -49,14 +49,22 @@ describe('Economy Parity (C++ Red Alert)', () => {
   /** Helper: split legacy compact byte into the C++-faithful pair. */
   function setOverlay(cx: number, cy: number, val: number): void {
     const idx = cy * MAP_CELLS + cx;
-    map.overlay[idx] = val;
     if (val >= 0x03 && val <= 0x0E) {
+      map.overlay[idx] = GameMap.OVERLAY_GOLD1;
       map.oreDensity[idx] = val - 0x03;
     } else if (val >= 0x0F && val <= 0x12) {
+      map.overlay[idx] = GameMap.OVERLAY_GEMS1;
       map.oreDensity[idx] = val - 0x0F;
     } else {
+      map.overlay[idx] = val;
       map.oreDensity[idx] = 0xFF;
     }
+  }
+
+  function mockOreSpreadDirection(direction: number): void {
+    vi.spyOn(ScenarioRandom, 'nextInRange').mockImplementation((lo, hi) => (
+      lo === 0 && hi === 7 ? direction : lo
+    ));
   }
 
   // === EC1/EC2: depleteOre credit values ===
@@ -82,8 +90,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
       //                              reducer=0 returned.
       // So fully depleting takes TWO calls: first yields a bail, second clears.
       const idx = 50 * MAP_CELLS + 50;
-      map.overlay[idx] = 0x03;
-      map.oreDensity[idx] = 1;
+      setOverlay(50, 50, 0x04);
       expect(map.depleteOre(50, 50), 'first call yields last bail').toBe(25);
       expect(map.oreDensity[idx], 'density now 0').toBe(0);
       expect(map.depleteOre(50, 50), 'second call returns 0 (overlay cleared)').toBe(0);
@@ -110,8 +117,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
 
     it('depleting gem from density=1 returns 50 then clears (C++ Reduce_Tiberium)', () => {
       const idx = 50 * MAP_CELLS + 50;
-      map.overlay[idx] = 0x0F;
-      map.oreDensity[idx] = 1;
+      setOverlay(50, 50, 0x10);
       expect(map.depleteOre(50, 50)).toBe(50);
       expect(map.oreDensity[idx]).toBe(0);
       expect(map.depleteOre(50, 50)).toBe(0);
@@ -240,14 +246,14 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold ore density increases on growth cycle', () => {
       setOverlay(50, 50, 0x05); // gold density 2
       // Growth is deterministic for sampled cells (< 64 eligible) — no random mock needed
-      map.growOre(1821);
+      map.growOre(2048);
       expect(getOverlay(50, 50)).toBe(0x06); // increased by 1
     });
 
     it('gem overlay does NOT increase density on growth cycle', () => {
       setOverlay(50, 50, 0x0F); // GEM01 min density
       // No mock needed — growOre skips gems entirely (EC6)
-      map.growOre(1821);
+      map.growOre(2048);
       // Gem should remain unchanged — growOre skips gems entirely
       expect(getOverlay(50, 50)).toBe(0x0F);
     });
@@ -255,14 +261,14 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gem at max density does NOT increase', () => {
       setOverlay(50, 50, 0x12); // GEM04 max density
       // No mock needed — growOre skips gems entirely (EC6)
-      map.growOre(1821);
+      map.growOre(2048);
       expect(getOverlay(50, 50)).toBe(0x12);
     });
 
     it('gem overlay does NOT spread to adjacent empty cells', () => {
       setOverlay(50, 50, 0x12); // gem at max density
       // No mock needed — growOre skips gems entirely (EC6), so no spread occurs
-      map.growOre(1821);
+      map.growOre(2048);
       // All adjacent cells should remain empty — gems don't spread
       expect(getOverlay(50, 49)).toBe(0xFF);
       expect(getOverlay(51, 50)).toBe(0xFF);
@@ -273,8 +279,8 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold ore still spreads normally when gems are skipped', () => {
       setOverlay(50, 50, 0x0C); // gold at high density (> 0x09 so spread allowed)
       // ScenarioRandom.nextInRange(0,7) controls spread direction; 0 = N
-      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(0);
-      map.growOre(1821);
+      mockOreSpreadDirection(0);
+      map.growOre(2048);
       expect(getOverlay(50, 49)).toBe(0x03); // gold spread
     });
   });
@@ -286,7 +292,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
       // 0x03 = density 0, 0x09 = density 6. Spread requires > 6, so overlay must be > 0x09
       setOverlay(50, 50, 0x07); // density 4 — below threshold
       // No mock needed — density below spread threshold, spread never attempted
-      map.growOre(1821);
+      map.growOre(2048);
       // Density may have increased (0x07 -> 0x08), but no spreading
       for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
         expect(getOverlay(50 + dx, 50 + dy)).toBe(0xFF);
@@ -296,7 +302,7 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold at density 0x09 (density 6, exactly at threshold) does NOT spread', () => {
       setOverlay(50, 50, 0x09);
       // No mock needed — at threshold (not above), spread never attempted
-      map.growOre(1821);
+      map.growOre(2048);
       // Spread eligibility uses original overlay (0x09) which is NOT > 0x09
       // so this cell is never added to spreadCells
       for (const [dx, dy] of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]) {
@@ -307,40 +313,40 @@ describe('Economy Parity (C++ Red Alert)', () => {
     it('gold at density 0x0A (density 7, above threshold) CAN spread', () => {
       setOverlay(50, 50, 0x0A);
       // ScenarioRandom.nextInRange(0,7) controls spread direction; 0 = N
-      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(0);
-      map.growOre(1821);
+      mockOreSpreadDirection(0);
+      map.growOre(2048);
       expect(getOverlay(50, 49)).toBe(0x03); // spread occurred
     });
 
     it('spread uses 8 directions including diagonals (NE)', () => {
       setOverlay(50, 50, 0x0C); // high density gold
       // ScenarioRandom.nextInRange(0,7) controls spread direction; 1 = NE
-      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(1);
-      map.growOre(1821);
+      mockOreSpreadDirection(1);
+      map.growOre(2048);
       expect(getOverlay(51, 49)).toBe(0x03); // spread to NE diagonal
     });
 
     it('spread uses 8 directions including diagonals (SE)', () => {
       setOverlay(50, 50, 0x0C);
       // ScenarioRandom.nextInRange(0,7) controls spread direction; 3 = SE
-      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(3);
-      map.growOre(1821);
+      mockOreSpreadDirection(3);
+      map.growOre(2048);
       expect(getOverlay(51, 51)).toBe(0x03); // spread to SE diagonal
     });
 
     it('spread uses 8 directions including diagonals (SW)', () => {
       setOverlay(50, 50, 0x0C);
       // ScenarioRandom.nextInRange(0,7) controls spread direction; 5 = SW
-      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(5);
-      map.growOre(1821);
+      mockOreSpreadDirection(5);
+      map.growOre(2048);
       expect(getOverlay(49, 51)).toBe(0x03); // spread to SW diagonal
     });
 
     it('spread uses 8 directions including diagonals (NW)', () => {
       setOverlay(50, 50, 0x0C);
       // ScenarioRandom.nextInRange(0,7) controls spread direction; 7 = NW
-      vi.spyOn(ScenarioRandom, 'nextInRange').mockReturnValue(7);
-      map.growOre(1821);
+      mockOreSpreadDirection(7);
+      map.growOre(2048);
       expect(getOverlay(49, 49)).toBe(0x03); // spread to NW diagonal
     });
 

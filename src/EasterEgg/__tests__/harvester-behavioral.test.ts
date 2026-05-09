@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, Mission, AnimState, CELL_SIZE, MAP_CELLS,
   UNIT_STATS, WEAPON_STATS, Dir,
-pixelToLepton, } from '../engine/types';
+  pixelToLepton,
+} from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -59,11 +60,27 @@ function makeStructure(
 function makeMapWithOre(oreCells: { cx: number; cy: number; value?: number }[]): GameMap {
   const map = new GameMap();
   for (const { cx, cy, value } of oreCells) {
-    // 0x03 = GOLD01 (minimum gold ore), 0x0E = GOLD12 (maximum gold ore)
-    // 0x0F = GEM01, 0x12 = GEM04
-    map.overlay[cy * MAP_CELLS + cx] = value ?? 0x05; // default to gold ore
+    const idx = cy * MAP_CELLS + cx;
+    const val = value ?? 0x05;
+    if (val >= 0x03 && val <= 0x0E) {
+      map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+      map.oreDensity[idx] = val - 0x03;
+    } else if (val >= 0x0F && val <= 0x12) {
+      map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+      map.oreDensity[idx] = val - 0x0F;
+    } else {
+      map.overlay[idx] = val;
+      map.oreDensity[idx] = 0xFF;
+    }
   }
   return map;
+}
+
+function primeHarvestReady(entity: Entity): void {
+  entity.harvesterAnimRate = 1;
+  entity.harvesterAnimTimer = 1;
+  entity.harvesterAnimStage = 9;
+  entity.harvestTick = 9;
 }
 
 function makeHarvesterContext(overrides: Partial<HarvesterContext> = {}): HarvesterContext {
@@ -127,7 +144,7 @@ describe('findHarvesterOre', () => {
     expect(result!.cy).toBe(50);
   });
 
-  it('AI harvester avoids ore targeted by another friendly harvester', () => {
+  it('AI harvester uses C++ ring-order search even if another harvester is nearby', () => {
     const oreCells = [
       { cx: 52, cy: 50 }, // nearby ore — but another harvester is targeting it
       { cx: 60, cy: 50 }, // farther ore — untargeted
@@ -149,9 +166,8 @@ describe('findHarvesterOre', () => {
 
     const result = findHarvesterOre(ctx, testHarv, 50, 50, 20);
 
-    // Should pick the farther untargeted ore, not the nearby targeted one
     expect(result).not.toBeNull();
-    expect(result!.cx).toBe(60);
+    expect(result!.cx).toBe(52);
     expect(result!.cy).toBe(50);
   });
 
@@ -199,7 +215,7 @@ describe('updateHarvester — state transitions', () => {
     updateHarvester(ctx, harv);
 
     expect(harv.harvesterState).toBe('seeking');
-    expect(harv.mission).toBe(Mission.MOVE);
+    expect(harv.mission).toBe(Mission.HARVEST);
     expect(harv.moveTarget).not.toBeNull();
   });
 
@@ -237,7 +253,7 @@ describe('updateHarvester — state transitions', () => {
     const harv = makeEntity(UnitType.V_HARV, House.Spain,
       cellCx * CELL_SIZE + CELL_SIZE / 2, cellCy * CELL_SIZE + CELL_SIZE / 2);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17; // next tick completes the load animation (harvest happens every 10 ticks)
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     harv.mission = Mission.GUARD;
@@ -260,7 +276,7 @@ describe('updateHarvester — state transitions', () => {
     harv.harvesterState = 'harvesting';
     harv.oreLoad = Entity.BAIL_COUNT - 1; // one bail short of full
     harv.oreCreditValue = 25 * (Entity.BAIL_COUNT - 1);
-    harv.harvestTick = 17; // next tick completes the load animation
+    primeHarvestReady(harv);
     harv.mission = Mission.GUARD;
 
     const ctx = makeHarvesterContext({ map, entities: [harv] });
@@ -268,6 +284,10 @@ describe('updateHarvester — state transitions', () => {
     updateHarvester(ctx, harv);
 
     expect(harv.oreLoad).toBe(Entity.BAIL_COUNT);
+    expect(harv.harvesterState).toBe('harvesting');
+
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
   });
 

@@ -48,7 +48,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -253,7 +253,7 @@ describe('MCV crusher (C++ udata.cpp:358 IsCrusher=true)', () => {
 describe('MCV cannot retaliate (techno.cpp)', () => {
   it('MCV has no weapon so triggerRetaliation does not assign a target', () => {
     const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
-    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    const attacker = entityAtCell(UnitType.V_2TNK, House.USSR, 11, 10);
     mcv.mission = Mission.GUARD;
     mcv.target = null;
 
@@ -287,7 +287,7 @@ describe('MCV AI scatter on damage (techno.cpp)', () => {
       mcv.mission = Mission.GUARD;
       const ctx = makeCombatCtx([mcv]);
       aiScatterOnDamage(ctx, mcv);
-      if (mcv.mission === Mission.MOVE && mcv.moveTarget !== null) {
+      if (mcv.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -300,6 +300,7 @@ describe('MCV AI scatter on damage (techno.cpp)', () => {
     mcv.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([mcv]);
+    ctx.playerHouse = House.Spain;
     aiScatterOnDamage(ctx, mcv);
 
     expect(mcv.mission).toBe(Mission.GUARD);

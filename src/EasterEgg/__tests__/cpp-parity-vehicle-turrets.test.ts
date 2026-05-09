@@ -396,15 +396,15 @@ describe('5. Turret rotation rate = ROT+1 per tick (C++ unit.cpp:542)', () => {
     tank.desiredTurretFacing = Dir.E;
     tank.turretRotTickedThisFrame = false;
 
-    // C++ accumulator model: accumulate ROT+1 per tick, step when >= 8 (one 32-step division)
-    // Tick 1: acc = 0 + (5+1) = 6 < 8 -> no visual step
+    // C++ applies ROT+1 directly in 256-dir space; derived 32-step facing rounds from that.
+    // Tick 1: current256=6, which rounds to visual step 1.
     tank.tickTurretRotation();
-    expect(tank.turretFacing32, 'tick 1: accumulator < 8, no step').toBe(0);
+    expect(tank.turretFacing32, 'tick 1: 256-dir current rounds to visual step 1').toBe(1);
 
-    // Tick 2: acc = 6 + 6 = 12 >= 8 -> step. acc = 12 - 8 = 4
+    // Tick 2: current256=12, which rounds to visual step 2.
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32, 'tick 2: accumulator >= 8, one step CW').toBe(1);
+    expect(tank.turretFacing32, 'tick 2: 256-dir current rounds to visual step 2').toBe(2);
   });
 
   it('turret 90-degree rotation is faster than body for same ROT (all turreted units)', () => {
@@ -418,9 +418,10 @@ describe('5. Turret rotation rate = ROT+1 per tick (C++ unit.cpp:542)', () => {
       bodyEntity.bodyFacing32 = 0;
       bodyEntity.desiredFacing = Dir.E;
       let bodyTicks = 0;
-      while (bodyEntity.facing !== Dir.E && bodyTicks < 100) {
+      let bodyDone = false;
+      while (!bodyDone && bodyTicks < 100) {
         bodyEntity.rotTickedThisFrame = false;
-        bodyEntity.tickRotation();
+        bodyDone = bodyEntity.tickRotation();
         bodyTicks++;
       }
 
@@ -430,9 +431,10 @@ describe('5. Turret rotation rate = ROT+1 per tick (C++ unit.cpp:542)', () => {
       turretEntity.turretFacing32 = 0;
       turretEntity.desiredTurretFacing = Dir.E;
       let turretTicks = 0;
-      while (turretEntity.turretFacing !== Dir.E && turretTicks < 100) {
+      let turretDone = false;
+      while (!turretDone && turretTicks < 100) {
         turretEntity.turretRotTickedThisFrame = false;
-        turretEntity.tickTurretRotation();
+        turretDone = turretEntity.tickTurretRotation();
         turretTicks++;
       }
 
@@ -960,19 +962,18 @@ describe('17. Fire direction uses turret facing for turreted units (C++ techno.c
 
 describe('18. Turret 90-degree rotation tick counts from INI ROT values', () => {
   // For each turreted unit, calculate expected ticks for a 90-degree turret rotation
-  // 90 degrees = 8 steps in 32-step ring
-  // Each tick accumulates ROT+1; a step happens when accumulator >= 8
+  // 90 degrees = 64 units in the 256-step C++ FacingClass ring.
 
   function turret90DegreeTicks(rot: number): number {
     const rate = rot + 1; // C++ unit.cpp:542 ROT+1
-    let acc = 0;
-    let steps = 0;
+    let current = 0;
     let ticks = 0;
-    while (steps < 8 && ticks < 200) {
-      acc += rate;
-      while (acc >= 8 && steps < 8) {
-        acc -= 8;
-        steps++;
+    while (current !== 64 && ticks < 200) {
+      const diff = 64 - current;
+      if (Math.abs(diff) < rate) {
+        current = 64;
+      } else {
+        current += rate;
       }
       ticks++;
     }
@@ -993,9 +994,10 @@ describe('18. Turret 90-degree rotation tick counts from INI ROT values', () => 
       entity.desiredTurretFacing = Dir.E; // 90 degrees CW
 
       let actualTicks = 0;
-      while (entity.turretFacing !== Dir.E && actualTicks < 200) {
+      let done = false;
+      while (!done && actualTicks < 200) {
         entity.turretRotTickedThisFrame = false;
-        entity.tickTurretRotation();
+        done = entity.tickTurretRotation();
         actualTicks++;
       }
 

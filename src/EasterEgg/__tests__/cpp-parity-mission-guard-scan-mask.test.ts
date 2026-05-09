@@ -54,7 +54,7 @@
  *   - techno.cpp:5263-5293   — Target_Something_Nearby
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { updateGuard, type MissionAIContext } from '../engine/missionAI';
 import {
@@ -243,6 +243,67 @@ describe('Mission_Guard scan mask — C++ InfantryClass/UnitClass::Greatest_Thre
     updateGuard(ctx, dog);
 
     expect(dog.target).toBeNull();
+  });
+
+  it('MEDI Mission_Guard acquires injured allied infantry via normal C++ negative-damage scan', () => {
+    // C++ FootClass::Mission_Guard has no medic-only pre-pass. The normal
+    // Target_Something_Nearby(THREAT_RANGE) path reaches TechnoClass::Evaluate_Cell:
+    // if Combat_Damage() < 0, it picks the first injured allied techno in the
+    // cell occupier chain (techno.cpp:1831-1843), and Evaluate_Object accepts it
+    // only if Health_Ratio() != ConditionGreen (techno.cpp:1491-1506).
+    const medic = makeEntity(UnitType.I_MEDI, House.Greece, 100, 100);
+    medic.mission = Mission.GUARD;
+    const wounded = makeEntity(UnitType.I_E1, House.Greece, 100 + CELL_SIZE, 100);
+    wounded.mission = Mission.GUARD;
+    wounded.hp = wounded.maxHp - 1;
+    const updateMedic = vi.fn();
+
+    const ctx = makeCtx({ entities: [medic, wounded], updateMedic });
+    updateGuard(ctx, medic);
+
+    expect(updateMedic).not.toHaveBeenCalled();
+    expect(medic.target).toBe(wounded);
+  });
+
+  it('MEDI Mission_Guard rejects full-health allies and enemies in C++ negative-damage cell scan', () => {
+    // For Combat_Damage() < 0, Evaluate_Cell does not break on enemies and only
+    // breaks on allies whose Health_Ratio() < ConditionGreen.
+    const medic = makeEntity(UnitType.I_MEDI, House.Greece, 100, 100);
+    medic.mission = Mission.GUARD;
+    const healthyAlly = makeEntity(UnitType.I_E1, House.Greece, 100 + CELL_SIZE, 100);
+    healthyAlly.mission = Mission.GUARD;
+    healthyAlly.hp = healthyAlly.maxHp;
+    const enemy = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE, 100 + CELL_SIZE);
+    enemy.mission = Mission.GUARD;
+
+    const ctx = makeCtx({ entities: [medic, healthyAlly, enemy] });
+    updateGuard(ctx, medic);
+
+    expect(medic.target).toBeNull();
+  });
+
+  it('MECH Mission_Guard acquires injured allied vehicles, not infantry', () => {
+    // FIXIT_CSII mechanic path: Combat_Damage() < 0 plus method =
+    // THREAT_VEHICLES|THREAT_AIR (techno.cpp:2013-2026). The friendly/injured
+    // negative-damage Evaluate_Cell rule is shared with medics.
+    const mech = makeEntity(UnitType.I_MECH, House.Greece, 100, 100);
+    mech.mission = Mission.GUARD;
+    // Keep this focused on Target_Something_Nearby acquisition. The separate
+    // infantry Firing_AI path has its own launch-stage/repair tests.
+    mech.attackCooldown = 1;
+    const woundedInfantry = makeEntity(UnitType.I_E1, House.Greece, 100 + CELL_SIZE, 100);
+    woundedInfantry.mission = Mission.GUARD;
+    woundedInfantry.hp = woundedInfantry.maxHp - 1;
+    const woundedVehicle = makeEntity(UnitType.V_JEEP, House.Greece, 100, 100 + CELL_SIZE / 2);
+    woundedVehicle.mission = Mission.GUARD;
+    woundedVehicle.hp = woundedVehicle.maxHp - 1;
+    const updateMechanicUnit = vi.fn();
+
+    const ctx = makeCtx({ entities: [mech, woundedInfantry, woundedVehicle], updateMechanicUnit });
+    updateGuard(ctx, mech);
+
+    expect(updateMechanicUnit).not.toHaveBeenCalled();
+    expect(mech.target).toBe(woundedVehicle);
   });
 
   it('civilian (C1) without PrimaryWeapon does NOT auto-acquire (mask=0, also civilianSkipScan)', () => {

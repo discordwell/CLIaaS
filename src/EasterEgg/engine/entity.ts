@@ -25,6 +25,79 @@ for (const item of PRODUCTION_ITEMS) {
   UNIT_POINTS[item.type] = item.points ?? item.cost;
 }
 
+function technoBaseValue(entity: Entity): number {
+  const points = entity.stats.points ?? UNIT_POINTS[entity.type] ?? entity.stats.strength;
+  return Math.trunc(points * 2);
+}
+
+function technoValue(entity: Entity, includeTransportContents: boolean, seen = new Set<number>()): number {
+  if (seen.has(entity.id)) return 0;
+  seen.add(entity.id);
+
+  let value = technoBaseValue(entity);
+
+  // C++ techno.cpp:4549-4566 — TechnoClass::Value includes attached cargo
+  // only when Rule.Diff[House->Difficulty].IsContentScan or House->IQ >=
+  // Rule.IQContentScan. Crew.Kills is not part of Value(); Evaluate_Object
+  // adds the root object's Crew.Kills separately.
+  if (includeTransportContents && entity.passengers.length > 0) {
+    for (const passenger of entity.passengers) {
+      value += technoValue(passenger, includeTransportContents, seen);
+    }
+  }
+
+  return value;
+}
+
+interface FireCoordOffsets {
+  vertical: number;
+  primary: number;
+  lateral: number;
+  secondary: number;
+  secondaryLateral: number;
+}
+
+const INFANTRY_FIRE_COORD_OFFSETS: FireCoordOffsets = {
+  vertical: 0x0035, // idata.cpp:394 et al.
+  primary: 0x0010,  // idata.cpp:395 et al.
+  lateral: 0x0000,
+  secondary: 0x0000,
+  secondaryLateral: 0x0000,
+};
+
+const DOG_FIRE_COORD_OFFSETS: FireCoordOffsets = {
+  vertical: 0x0015, // idata.cpp:374
+  primary: 0x0010,  // idata.cpp:375
+  lateral: 0x0000,
+  secondary: 0x0000,
+  secondaryLateral: 0x0000,
+};
+
+// C++ udata.cpp UnitTypeClass constructor offsets:
+//   VerticalOffset, PrimaryOffset, PrimaryLateral, SecondaryOffset, SecondaryLateral.
+// TechnoClass::Fire_Coord uses these for vehicle launch/range coordinates.
+const UNIT_FIRE_COORD_OFFSETS: Partial<Record<UnitType, FireCoordOffsets>> = {
+  [UnitType.V_V2RL]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_1TNK]: { vertical: 0x0020, primary: 0x00C0, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_3TNK]: { vertical: 0x0040, primary: 0x0080, lateral: 0x0018, secondary: 0x0080, secondaryLateral: 0x0018 },
+  [UnitType.V_2TNK]: { vertical: 0x0030, primary: 0x00C0, lateral: 0x0000, secondary: 0x00C0, secondaryLateral: 0x0000 },
+  [UnitType.V_4TNK]: { vertical: 0x0020, primary: 0x00C0, lateral: 0x0028, secondary: 0x0008, secondaryLateral: 0x0040 },
+  [UnitType.V_MRJ]:  { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_MGG]:  { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_ARTY]: { vertical: 0x0040, primary: 0x0060, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_HARV]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_MCV]:  { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_JEEP]: { vertical: 0x0030, primary: 0x0030, lateral: 0x0000, secondary: 0x0030, secondaryLateral: 0x0000 },
+  [UnitType.V_APC]:  { vertical: 0x0030, primary: 0x0030, lateral: 0x0000, secondary: 0x0030, secondaryLateral: 0x0000 },
+  [UnitType.V_MNLY]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_TRUK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_CTNK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_TTNK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_QTNK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_DTRK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_STNK]: { vertical: 0x0030, primary: 0x0030, lateral: 0x0000, secondary: 0x0030, secondaryLateral: 0x0000 },
+};
+
 // === Submarine Cloak State Machine ===
 export enum CloakState {
   UNCLOAKED = 0,
@@ -80,6 +153,16 @@ export function getPlayerHouses(): Set<House> {
   return _playerHouses;
 }
 
+/** C++ inline.h:630 Dir_Facing — round 256-step DirType to 8-way FacingType. */
+export function dir256ToFacing8(dir: number): Dir {
+  return ((((dir + 0x10) & 0xff) >> 5) % 8) as Dir;
+}
+
+/** C++ coord.cpp Dir_To_32 equivalent for visual body facing. */
+export function dir256ToFacing32(dir: number): number {
+  return (((dir + 4) & 0xff) >> 3) % 32;
+}
+
 export class Entity {
   id = nextId++;
   type: UnitType;
@@ -100,7 +183,6 @@ export class Entity {
 
   // C++ 256-step facing for aircraft (coord.cpp DirType 0-255).
   // 0=N, 64=E, 128=S, 192=W. Used for precise curved flight paths.
-  // Ground units continue to use the 8-dir `facing` field.
   facing256 = -1;          // -1 = not using 256-step (ground units); 0-255 for aircraft
   desiredFacing256 = -1;   // -1 = not active
 
@@ -112,6 +194,10 @@ export class Entity {
   // Mission / AI (AI1: 22-mission system with queue)
   mission: Mission = Mission.GUARD;
   missionQueue: Mission | null = null; // AI1: next mission to promote at cell center
+  /** Tick when TeamClass assigned the current missionQueue. Used where TS team
+   *  AI runs before an object's AI but C++ exposes that queue to the next object
+   *  pass (not the same frame). */
+  missionQueueSetTick = -1;
   stance: Stance = Stance.AGGRESSIVE; // default aggressive (like original RA)
   target: Entity | null = null;
   healTarget: Entity | null = null;  // medic auto-heal target (C++ infantry.cpp AI)
@@ -124,6 +210,11 @@ export class Entity {
   navQueueOriginal: LeptonPos[] = [];  // saved waypoints for loop re-population
   path: CellPos[] = [];
   pathIndex = 0;
+  /** C++ FootClass::Path[] mirror for DriveClass objects.
+   *  TS keeps `path` as absolute cells for existing callers/debug traces; this
+   *  stores the remaining FacingType commands that C++ consumes with memmove()
+   *  in DriveClass::Start_Of_Move and While_Moving track jumps. */
+  drivePathFacings: number[] = [];
 
   // W1 deleted (Step 3): patrolBlockedTargetLX/LY was a sticky flag used
   // by team.coordinatePatrol to skip Mission_Move jitter RNG on re-assignment
@@ -161,7 +252,15 @@ export class Entity {
   // C++ MasterDoControls.Interrupt=false for all gesture types. Used by the
   // STAGE A/E Commence gate to defer MissionQueue pop until animation
   // completes (infantry.cpp:1208 — `Doing == DO_NOTHING || Interrupt`).
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' | 'gesture' = 'nothing';
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' | 'gesture' | 'lie_down' | 'prone' | 'get_up' = 'nothing';
+  // C++ StageClass backing the current infantry Doing animation. Only a subset
+  // of Doing values currently need logic, but the fields mirror Stage/Rate/Timer
+  // so Firing_AI can read Fetch_Stage() even when Do_Action(DO_FIRE_*) is blocked
+  // by a non-interruptible action such as DO_LIE_DOWN.
+  doingStage = 0;
+  doingRate = 0;
+  doingRateTimer = 0;
+  doingSetTick = -1;
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
   // C++ HeadToCoord — the sub-cell lepton position the infantry is walking to.
@@ -188,10 +287,23 @@ export class Entity {
   // existing isFiringAnim/firingAnimTicks fields.
   firePrepActive = false;
   firePrepStage = 0;
+  // C++ Firing_AI ignores Do_Action's return value: if DO_FIRE_PRONE/WEAPON is
+  // blocked by the current non-interruptible Doing, IsFiring still becomes true
+  // and Fire_At gates on the current StageClass stage. TS uses this flag for
+  // that path instead of the independent firePrepStage counter.
+  firePrepUsesDoingStage = false;
+  // C++ infantry.cpp:3621-3623 latches PrimaryFacing when IsFiring starts.
+  // Retargeting while the fire animation is running must not move the muzzle.
+  firePrepFacing256 = -1;
   // C++ Doing state: non-interruptible animation timer.
   // When > 0, Commence() is blocked (gesture, salute, lie down, get up animations).
   // Set by Random_Animate (guard scan idle animations) and Fear_AI.
   nonInterruptAnimTicks = 0;
+  // Frame on which nonInterruptAnimTicks was set. C++ StageClass::Set_Rate()
+  // starts a CDTimer at the current Frame; Graphic_Logic cannot immediately
+  // consume one tick in that same frame. TS uses this to avoid decrementing a
+  // newly started gesture during the same game tick.
+  nonInterruptAnimSetTick = -1;
 
   // Legacy fields (kept for compatibility but no longer used for timing)
   lastGuardScan = 0;
@@ -216,8 +328,15 @@ export class Entity {
 
   // 32-step visual facing for smooth vehicle rotation (C++ Dir_To_32)
   // Game logic uses 8-dir `facing`; visual rendering uses 32-step for smooth sprite animation
+  // Exact C++ PrimaryFacing.Current() for ground/naval vehicles.
+  // Movement start is gated on exact DesiredFacing equality, not rounded 8-dir parity.
+  bodyFacing256 = -1; // lazy init from facing * 32 for legacy callers
   bodyFacing32 = 0;   // 0-31, initialized to facing * 4
   prevBodyFacing32 = 0;   // previous tick bodyFacing32 for visual interpolation
+  // Exact C++ SecondaryFacing.Current()/Desired() for turreted units (unit.h:115).
+  // Logic uses this 256-step state; turretFacing32 is only the visual derivative.
+  turretFacing256 = -1; // lazy init from turretFacing/turretFacing32
+  desiredTurretFacing256 = -1;
   turretFacing32 = 0; // 0-31, initialized to turretFacing * 4
   prevTurretFacing32 = 0; // previous tick turretFacing32 for visual interpolation
 
@@ -233,18 +352,25 @@ export class Entity {
 
   // Combat
   attackCooldown = 0;
+  // C++ CDTimerClass Arm.Value() as observed at this object's Logic/AI entry.
+  // TS currently decrements attackCooldown explicitly near the start of updateEntity;
+  // mission handlers that mirror C++ pre-Frame++ reads use this snapshot instead.
+  attackCooldownAtLogicStart = 0;
   attackCooldown2 = 0;
+  attackCooldown2AtLogicStart = 0;
   weapon: WeaponStats | null;
   weapon2: WeaponStats | null = null;
   kills = 0;      // kills by this unit
+  suppressFiringAITick = -1; // C++ Arm-return path: block same-tick TS post-decrement fire
 
   // Burst fire (C++ weapon.cpp:78 Weapon.Burst — multiple shots per trigger pull)
   burstCount = 0;   // remaining shots in current burst
   burstDelay = 0;   // ticks between burst shots (3 ticks between each)
 
-  // CF12: Dual-weapon IsSecondShot cadence (C++ techno.cpp:2857-2870)
-  // For dual-weapon units: first shot gets 3-tick rearm, second shot gets full ROF
-  isSecondShot = false;
+  // C++ TechnoClass::IsSecondShot. This is NOT a primary/secondary cooldown
+  // selector: C++ has one shared Arm timer. IsSecondShot only gives a quick
+  // follow-up shot for true two-shooters (Primary == Secondary or Burst > 1).
+  isSecondShot = true;
 
   // Moving-platform tracking (C++ techno.cpp:3106-3108 — units firing while moving get extra inaccuracy)
   prevPos: WorldPos = { x: 0, y: 0 }; // position from previous tick, for detecting movement
@@ -279,6 +405,20 @@ export class Entity {
    */
   doingAI(): void {
     if (!this.stats.isInfantry) return;
+    if (this.doing === 'lie_down' && this.doingStage >= this.infantryLieDownDoingCount()) {
+      this.doing = 'prone';
+      this.doingStage = 0;
+      this.doingRate = 0;
+      this.doingRateTimer = 0;
+      return;
+    }
+    if (this.doing === 'get_up' && this.doingStage >= this.infantryGetUpDoingCount()) {
+      this.doing = 'stand_ready';
+      this.doingStage = 0;
+      this.doingRate = 0;
+      this.doingRateTimer = 0;
+      return;
+    }
     // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed.
     // Phase 7A flag ON: include 'walk' so stopping infantry transitions back to
     // DO_STAND_READY, enabling Random_Animate on subsequent Mission_Guard ticks.
@@ -293,10 +433,12 @@ export class Entity {
     // 'gesture' transitions to stand_ready when nonInterruptAnimTicks reaches 0
     // (the duration counter set by team activation in team.ts). Mirrors C++
     // Doing_AI's `Fetch_Stage() >= DoControls[DO_GESTURE1].Count` check.
+    const fireAnimComplete =
+      this.doing === 'fire' && this.doingStage >= this.infantryFireDoingCount();
     const canTransition =
       this.doing === 'nothing' ||
       this.doing === 'idle_anim' ||
-      this.doing === 'fire' ||
+      fireAnimComplete ||
       this.doing === 'stand_ready' ||
       (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk') ||
       (this.doing === 'gesture' && this.nonInterruptAnimTicks <= 0);
@@ -319,7 +461,126 @@ export class Entity {
    *  Called from STAGE A/E Commence gates in updateEntity. */
   isDoingInterruptible(): boolean {
     if (this.doing === 'gesture') return false;
+    if (this.doing === 'lie_down' || this.doing === 'get_up') return false;
     return true;
+  }
+
+  /** C++ InfantryClass::Do_Action gesture/salute effective duration.
+   *  MasterDoControls[DO_GESTURE*].Rate is 2 for all infantry; the per-type
+   *  DoInfo Count comes from idata.cpp. Tanya/civilians/dogs use Count=1,
+   *  while common combat infantry use Count=3.
+   */
+  infantryGestureDurationTicks(): number {
+    const anim = INFANTRY_ANIMS[this.type];
+    const count = anim?.gesture1?.count ?? anim?.gesture2?.count ?? 1;
+    return Math.max(1, count * 2);
+  }
+
+  /** C++ infantry.cpp:878-889 tether cut.
+   *  When infantry reaches its first cell after exiting a transport or
+   *  infantry factory, Per_Cell_Process sends RADIO_UNLOADED and calls
+   *  Do_Action(DO_GESTURE1) for Soviet-side houses, otherwise DO_GESTURE2.
+   *  C++ notes that the tether parent can be a building.
+   */
+  startTransportUnloadGesture(tick: number): void {
+    if (!this.stats.isInfantry) return;
+    if (!this.isDoingInterruptible()) return;
+
+    if (this.type === UnitType.I_SPY) {
+      // C++ InfantryClass::Do_Action special-case: spy gesture/salute requests
+      // remap to DO_IDLE1/2 and consume Random_Pick(0,1).
+      ScenarioRandom.nextInRange(0, 1);
+      this.doing = 'idle_anim';
+      return;
+    }
+
+    const anim = INFANTRY_ANIMS[this.type];
+    const sovietSide = this.house === House.USSR || this.house === House.Ukraine;
+    this.gestureDoInfo = sovietSide
+      ? (anim?.gesture1 ?? anim?.gesture2 ?? null)
+      : (anim?.gesture2 ?? anim?.gesture1 ?? null);
+    this.nonInterruptAnimTicks = this.infantryGestureDurationTicks();
+    this.nonInterruptAnimSetTick = tick;
+    this.doing = 'gesture';
+    this.doingStage = 0;
+    this.doingRate = 2;
+    this.doingRateTimer = 2;
+    this.doingSetTick = tick;
+  }
+
+  /** C++ StageClass::Graphic_Logic for infantry Doing animations. */
+  advanceDoingStage(tick: number): void {
+    if (!this.stats.isInfantry || this.doingRate <= 0 || this.doingSetTick === tick) return;
+    if (this.doingRateTimer > 0) this.doingRateTimer--;
+    if (this.doingRateTimer <= 0) {
+      this.doingStage++;
+      this.doingRateTimer = this.doingRate;
+    }
+  }
+
+  /** C++ Class->DoControls[DO_FIRE_WEAPON/DO_FIRE_PRONE].Count. */
+  infantryFireDoingCount(): number {
+    const anim = INFANTRY_ANIMS[this.type];
+    if (!anim) return 0;
+    if (this.isProne) return (anim.fireProne ?? anim.fire).count;
+    return anim.fire.count;
+  }
+
+  /** C++ per-type DoControls[DO_LIE_DOWN].Count.
+   *  Civilians/Einstein have no real lie-down art but still have Count=1 in
+   *  idata.cpp, so they become DO_PRONE sooner than E1/E3-style soldiers. */
+  infantryLieDownDoingCount(): number {
+    return INFANTRY_ANIMS[this.type]?.lieDown?.count ?? 1;
+  }
+
+  /** C++ per-type DoControls[DO_GET_UP].Count. */
+  infantryGetUpDoingCount(): number {
+    return INFANTRY_ANIMS[this.type]?.getUp?.count ?? 1;
+  }
+
+  /** Start C++ DO_FIRE_WEAPON / DO_FIRE_PRONE for InfantryClass::Firing_AI.
+   *
+   *  C++ Do_Action sets Doing, Set_Rate(MasterDoControls[Doing].Rate), and
+   *  Set_Stage(0). Firing_AI then gates Fire_At on Fetch_Stage()==FireLaunch.
+   *
+   *  TS ticks increment at update entry; C++ Frame++ happens after object AI
+   *  (conquer.cpp:2542). In serialized tick terms, a freshly started rate=1
+   *  DO_FIRE_WEAPON uses MasterDoControls rate=1 (infantry.cpp:103), so the
+   *  stage advances once per object AI tick after the action starts.
+   */
+  startFireDoing(tick: number): boolean {
+    if (!this.stats.isInfantry) return false;
+    if (this.infantryFireDoingCount() <= 0) return false;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return false;
+    if (this.doing === 'fire') return false;
+    this.doing = 'fire';
+    this.doingStage = 0;
+    this.doingRate = 1;
+    this.doingRateTimer = 1;
+    this.doingSetTick = tick;
+    return true;
+  }
+
+  /** Start C++ DO_LIE_DOWN (MasterDoControls rate=2, E1 DoControls count=2). */
+  startLieDownDoing(tick: number): void {
+    if (!this.stats.isInfantry) return;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    this.doing = 'lie_down';
+    this.doingStage = 0;
+    this.doingRate = 2;
+    this.doingRateTimer = 2;
+    this.doingSetTick = tick;
+  }
+
+  /** Start C++ DO_GET_UP (MasterDoControls rate=3, E1 DoControls count=2). */
+  startGetUpDoing(tick: number): void {
+    if (!this.stats.isInfantry) return;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    this.doing = 'get_up';
+    this.doingStage = 0;
+    this.doingRate = 3;
+    this.doingRateTimer = 3;
+    this.doingSetTick = tick;
   }
 
   /** C++ InfantryClass::Is_Ready_To_Random_Animate — checks all gates.
@@ -330,6 +591,7 @@ export class Entity {
     if (this.idleAnimTimer > 0) return false;   // IdleTimer not expired
     if (this.doing !== 'stand_ready') return false; // Must be in idle stance
     if (this.isDriving) return false;            // Not while moving
+    if (this.isProne) return false;              // C++ infantry.cpp:4137 — no prone idle anims
     if (this.isFiringAnim) return false;         // Not while firing
     return true;
   }
@@ -363,6 +625,10 @@ export class Entity {
   trackCellSpan = 1;   // cells covered by current track: 1=short, 2=long 2-cell track
   trackControlIndex = -1; // C++ TrackNumber: index into TrackControl[] table (0-66), for track jumping
   speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
+  // C++ FootClass::Speed throttle for active DriveClass tracks. Start_Of_Move
+  // sets this from destination terrain; track jumps preserve it via
+  // drive.cpp:767-788 `oldspeed = Speed` / `Set_Speed(oldspeed)`.
+  driveSpeed = 0;
   // C++ DriveClass::Mark_Track reservation bits. Stores absolute cell indices
   // currently marked by this unit so Stop_Driver can clear them.
   trackReservationCells: number[] = [];
@@ -381,13 +647,6 @@ export class Entity {
   /** Per-boundary Commence dedup. Keyed `${trackIndex}-${pathIndex}` at moment
    *  of PCP_END call-site. Plan §6 MCV-157 double-fire nuance. */
   _commenceFiredBoundaries: Set<string> = new Set();
-  /** Session 3.2 / Phase 4 — cell-key of last `approachTarget` call in
-   *  AREA_GUARD. Cell-change gate prevents infinite re-pathfinding per
-   *  tick when Mission_Guard_Area timer-cycle retry (Session 3.2) or
-   *  cell-boundary retry (Phase 4, `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY`)
-   *  fires. Encoded as `cy * 256 + cx`. `-1` = no prior approach. */
-  _lastAreaGuardApproachCellKey = -1;
-
   // === Phase 0 — additive debug fields (JOINT-REFACTOR plan §0 line 133-135) ===
   // These are ADDITIVE and gated. They MUST NOT affect behavior when debug
   // env flags are unset. All Phase 0 instrumentation lives behind either
@@ -415,15 +674,20 @@ export class Entity {
 
   // Transport passengers
   passengers: Entity[] = [];       // loaded cargo: infantry + vehicles (hidden from entity list)
-  transportRef: Entity | null = null; // reference to transport carrying this unit
+  transportRef: Entity | null = null; // transport carrying or radio-tethered to this unit
+  // C++ RadioClass IsTethered while an unloaded passenger is still in radio
+  // contact with its transport. UnitClass/InfantryClass::Per_Cell_Process sends
+  // RADIO_UNLOADED on the first cell boundary; infantry also plays the
+  // house-specific unload gesture.
+  isTethered = false;
 
   // Harvester economy (EC3: bail-based capacity — 28 bails max per harvester load)
   oreLoad = 0;                     // number of bails currently carried
   oreCreditValue = 0;              // total credit value of carried bails
   static readonly BAIL_COUNT = 28; // max bails per trip (C++ UnitTypeClass::Max_Pips)
   static readonly ORE_CAPACITY = 28; // alias for BAIL_COUNT (backward compat)
-  harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'unloading' = 'idle';
-  harvestTick = 0;                 // ticks spent harvesting current cell
+  harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'headinghome' | 'unloading' = 'idle';
+  harvestTick = 0;                 // legacy mirror of harvesterAnimStage while loading
   /** C++ unit.cpp:2794-2797, 2851 — ArchiveTarget: remembers last known ore location.
    *  When returning to refinery, saves current cell. On next idle seek, heads there first. */
   archiveTarget: { cx: number; cy: number } | null = null;
@@ -431,6 +695,11 @@ export class Entity {
    *  During 'unloading': advances 0..21 over 22 ticks (Harvester_Dump_List).
    *  During 'harvesting' (stationary at ore): advances 0..8 (Harvester_Load_List). */
   harvesterAnimStage = 0;
+  /** C++ StageClass::Rate/Timer for the harvester load animation. Mission_Harvest
+   *  starts the first load pass at rate 2, then Harvesting() uses Rule.OreDumpRate
+   *  (1) after each bail. */
+  harvesterAnimRate = 0;
+  harvesterAnimTimer = 0;
   /** True while harvester is stopped at ore cell mining (C++ IsHarvesting).
    *  Renderer uses this to draw scoop animation frames 32-95. */
   isHarvesterMining = false;
@@ -522,6 +791,10 @@ export class Entity {
   // LST door state
   doorOpen = false;
   doorTimer = 0;          // countdown to auto-close
+  doorOpeningTicks = 0;   // C++ DoorClass Open_Door(5, 6): 5 * (6 - 1)
+  /** C++ VesselClass::Mission_Unload Status enum:
+   *  0 INITIAL_CHECK, 1 MANEUVERING, 2 OPENING_DOOR, 3 UNLOADING, 4 CLOSING_DOOR. */
+  vesselUnloadStatus = 0;
 
   // Agent 9: New unit special ability fields
   c4Timer = 0;              // C4 countdown on structures (Tanya)
@@ -535,7 +808,7 @@ export class Entity {
   ammo = -1;                    // -1 = unlimited
   maxAmmo = -1;
   landedAtStructure = -1;       // structure index, -1 = airborne
-  aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' | 'unload_search' | 'unload_fly' | 'unload_land' | 'unload_eject' = 'idle';
+  aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' | 'unload_search' | 'unload_fly' | 'unload_land' | 'unload_wait' | 'unload_eject' = 'idle';
   _unloadSearchTicks = 0; // C++ SEARCH_FOR_LZ delay counter
   _flyToTicks = 0; // C++ FLY_TO_LZ Process_Fly_To call interval counter
   rearmTimer = 0;
@@ -556,6 +829,10 @@ export class Entity {
    *  C++ ref: aircraft.cpp:2432-2438 (VALIDATE_AZ→RETURN_TO_BASE on !Target_Legal),
    *  aircraft.cpp:2603-2614 (RETURN_TO_BASE runs Enter_Idle_Mode). */
   aircraftAttackStatus: number = 0;
+  /** C++ AircraftClass::Passenger flag. Set when aircraft unlimbos with cargo
+   *  attached and intentionally remains true after the last passenger drops, so
+   *  Can_Fire returns FIRE_AMMO and Mission_Hunt enters REGROUP/RETREAT. */
+  aircraftPassengerCarrier = false;
   /** C++ aircraft.cpp:441-445 — helicopter hover jitter offset (pixels).
    *  Applied when at FLIGHT_ALTITUDE and speed < 3 (hovering). Pattern repeats every 16 ticks.
    *  cpp-parity: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0} indexed by frame%16. */
@@ -565,6 +842,23 @@ export class Entity {
    *  cpp-parity: building.cpp:3473 — IsNominal infantry get IsTechnician=true. */
   isTechnician = false;
 
+  /** C++ ScenarioInit Unlimbo semantics.
+   *  InfantryClass::Unlimbo calls Closest_Free_Spot(coord, ScenarioInit). When
+   *  ScenarioInit is true, C++ returns the requested coord even if that infantry
+   *  sub-spot is already occupied. Trigger reinforcements and building survivor
+   *  spawns use this path, so several infantry can briefly share the same exact
+   *  lepton coord until Start_Driver claims their first walking sub-cell. */
+  scenarioInitUnlimbo = false;
+  /** C++ UnitClass::IsToScatter.
+   *  VesselClass::Mission_Unload sets this on RTTI_UNIT passengers after they
+   *  leave an LST. The next UnitClass::Enter_Idle_Mode consumes the flag and
+   *  calls Scatter(0, true), assigning a clear nearby destination instead of
+   *  falling straight into GUARD. */
+  isToScatter = false;
+  /** Frame when this object was unlimboed into Logic during another object's AI.
+   *  Informational only. C++ logic.cpp re-reads Logic.Count() while iterating,
+   *  so transport cargo appended by Unlimbo can run later in the same frame. */
+  unlimboTick = -1;
   /** C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter RNG parity.
    *  In C++, HPAD helicopters enter the Logic array right after their HPAD building
    *  and are processed interleaved with buildings, NOT in the aircraft pass.
@@ -588,9 +882,14 @@ export class Entity {
     this.weapon2 = this.stats.secondaryWeapon
       ? WEAPON_STATS[this.stats.secondaryWeapon] ?? null
       : null;
+    // C++ unit/vessel/infantry constructors set IsSecondShot = !Class->Is_Two_Shooter().
+    this.isSecondShot = !this.isTwoShooter();
     // Initialize 32-step visual facing from 8-dir facing
+    this.bodyFacing256 = (this.facing * 32) & 0xff;
     this.bodyFacing32 = this.facing * 4;
     this.prevBodyFacing32 = this.bodyFacing32;
+    this.turretFacing256 = (this.turretFacing * 32) & 0xff;
+    this.desiredTurretFacing256 = this.turretFacing256;
     this.turretFacing32 = this.turretFacing * 4;
     this.prevTurretFacing32 = this.turretFacing32;
     // Initialize prevPos to lepton-rounded starting position (matches pos so no interpolation jump)
@@ -680,6 +979,19 @@ export class Entity {
   /** Flight altitude offset (pixels) — visual only, for rendering above ground */
   flightAltitude = 0;
   static readonly FLIGHT_ALTITUDE = 24; // pixels above ground when airborne (C++ FLIGHT_LEVEL = 24)
+  /** C++ ObjectClass::Height while IsFalling, stored in leptons.
+   *  ObjectClass::FLIGHT_LEVEL is 256 leptons; renderer-facing
+   *  flightAltitude is derived with Lepton_To_Pixel. */
+  fallHeightLeptons = 0;
+  /** C++ ObjectClass::IsFalling/Riser. Used by paradropped infantry and any
+   *  future non-air falling object. TechnoClass::AI returns early while
+   *  Height > 0 for non-aircraft. */
+  isFalling = false;
+  fallRiser = 0;
+  /** C++ ObjectClass::Paradrop attaches an AnimClass parachute, so falling
+   *  uses the IsAnimAttached branch: Riser -= 1, clamped to -3. */
+  fallHasAttachedAnim = false;
+  static readonly FLIGHT_LEVEL_LEPTONS = 256; // C++ object.h: FLIGHT_LEVEL
 
   get hasTurret(): boolean {
     return !this.stats.isInfantry && !this.isAnt && !this.stats.isAircraft &&
@@ -837,7 +1149,13 @@ export class Entity {
 
   /** Take damage, return true if killed. warhead affects death animation.
    *  Optional attacker parameter enables DG1: dog instant-kill when attacking its designated target. */
-  takeDamage(amount: number, warhead?: string, attacker?: Entity, warheadPropsOverride?: WarheadProps): boolean {
+  takeDamage(
+    amount: number,
+    warhead?: string,
+    attacker?: Entity,
+    warheadPropsOverride?: WarheadProps,
+    options: { skipArmorBias?: boolean; skipProneBias?: boolean } = {},
+  ): boolean {
     if (!this.alive) return false;
     if (this.isInvulnerable) return false; // invulnerability (crate or Iron Curtain)
     // DG2: Dog collateral prevention — dogs only hurt their designated target (C++ combat.cpp)
@@ -850,12 +1168,12 @@ export class Entity {
       amount = this.maxHp; // override damage to guaranteed kill (not this.hp which could leave at 0)
     }
     // CR2: Apply armor bias (damage reduction multiplier from crate, default 1.0)
-    if (this.armorBias > 1.0 && amount > 0) {
+    if (!options.skipArmorBias && this.armorBias > 1.0 && amount > 0) {
       amount = Math.max(1, Math.round(amount / this.armorBias));
     }
     // C++ infantry.cpp:329-330 — prone infantry take 50% damage (ProneDamageBias)
     // C++ only applies ProneDamageBias in infantry.cpp, not unit.cpp — vehicles are unaffected
-    if (this.isProne && amount > 0 && this.stats.isInfantry) {
+    if (!options.skipProneBias && this.isProne && amount > 0 && this.stats.isInfantry) {
       amount = Math.max(1, Math.round(amount * PRONE_DAMAGE_BIAS));
     }
     this.hp -= amount;
@@ -903,6 +1221,7 @@ export class Entity {
         p.alive = false;
         p.mission = Mission.DIE;
         p.transportRef = null;
+        p.isTethered = false;
       }
       this.passengers = [];
       return true;
@@ -912,18 +1231,108 @@ export class Entity {
 
   /** Check if target is in range of any weapon (primary or secondary) */
   /** C++ techno.cpp:1313-1318 In_Range — integer lepton distance vs weapon range.
-   *  Uses C++ Distance() octagonal approximation (max+min/2) via leptonDist().
+   *  Uses C++ Fire_Coord(which), then Distance() octagonal approximation
+   *  (max+min/2) via leptonDist().
    *  Compares directly in lepton space — no pixel conversion needed. */
   inRange(other: Entity): boolean {
-    const dist = leptonDist(this.leptonX, this.leptonY, other.leptonX, other.leptonY);
-    if (this.weapon && dist <= this.weapon.range * LEPTON_SIZE) return true;
-    if (this.weapon2 && dist <= this.weapon2.range * LEPTON_SIZE) return true;
+    return this.inRangeCoord(other.leptonX, other.leptonY);
+  }
+
+  /** C++ FootClass::Likely_Coord — use Head_To_Coord when a foot target is mid-hop. */
+  likelyCoord(): LeptonPos {
+    if (this.headToLX > 0 && this.headToLY > 0) {
+      return { lx: this.headToLX, ly: this.headToLY };
+    }
+    return { lx: this.leptonX, ly: this.leptonY };
+  }
+
+  /** C++ TechnoClass::In_Range(COORDINATE, weapon) variant used by PCP path-shorten. */
+  inRangeCoord(lx: number, ly: number): boolean {
+    if (this.weapon) {
+      const fc = this.fireCoordForWeapon(this.weapon);
+      if (leptonDist(fc.lx, fc.ly, lx, ly) <= this.weapon.range * LEPTON_SIZE) return true;
+    }
+    if (this.weapon2) {
+      const fc = this.fireCoordForWeapon(this.weapon2);
+      if (leptonDist(fc.lx, fc.ly, lx, ly) <= this.weapon2.range * LEPTON_SIZE) return true;
+    }
     return false;
+  }
+
+  /** C++ foot.cpp:1475-1477 path-shorten: use target FootClass::Likely_Coord(). */
+  inRangeOfLikelyCoord(other: Entity): boolean {
+    const coord = other.likelyCoord();
+    return this.inRangeCoord(coord.lx, coord.ly);
   }
 
   /** Check if target is in range of a specific weapon */
   inRangeWith(other: Entity, weapon: WeaponStats): boolean {
-    return leptonDist(this.leptonX, this.leptonY, other.leptonX, other.leptonY) <= weapon.range * LEPTON_SIZE;
+    return this.inRangeWithCoord(other.leptonX, other.leptonY, weapon);
+  }
+
+  inRangeWithCoord(lx: number, ly: number, weapon: WeaponStats): boolean {
+    const fc = this.fireCoordForWeapon(weapon);
+    return leptonDist(fc.lx, fc.ly, lx, ly) <= weapon.range * LEPTON_SIZE;
+  }
+
+  /** C++ TechnoClass::Can_Fire target-class legality used by What_Weapon_Should_I_Use.
+   *  This mirrors only FIRE_CANT/FIRE_ILLEGAL target gates; range and Arm timers are
+   *  handled by the caller's actual fire gate. */
+  canWeaponTarget(target: Entity, weapon: WeaponStats): boolean {
+    const targetIsAircraft = !!target.stats.isAircraft;
+    const targetIsAirborne = targetIsAircraft && target.flightAltitude > 0;
+    const targetIsSubmarine = target.type === UnitType.V_SS || target.type === UnitType.V_MSUB;
+    const targetIsSea = target.isNavalUnit;
+    const targetIsGrounded = !targetIsAircraft || target.flightAltitude <= 0;
+
+    if (targetIsAirborne && !weapon.isAntiAir) return false;
+    if (weapon.isAntiGround === false && targetIsGrounded && !targetIsSubmarine) return false;
+
+    if (targetIsSubmarine && !weapon.isAntiSub) return false;
+    if (weapon.isAntiSub) {
+      if (!targetIsSea) return false;
+      if (target.isNavalUnit && !targetIsSubmarine && !weapon.isSubSurface) return false;
+    }
+
+    return true;
+  }
+
+  /** C++ TechnoClass::Fire_Coord(which), with VesselClass overrides. */
+  fireCoordForWeapon(weapon: WeaponStats | null): { lx: number; ly: number } {
+    const which = weapon && this.weapon2 && weapon === this.weapon2 ? 1 : 0;
+    const move = (coord: { lx: number; ly: number }, dir256: number, dist: number) => {
+      const dir = dir256 & 0xFF;
+      return {
+        lx: coord.lx + ((COS_TABLE_256[dir] * dist) >> 7),
+        ly: coord.ly - ((SIN_TABLE_256[dir] * dist) >> 7),
+      };
+    };
+
+    if (this.type === UnitType.V_PT) {
+      // C++ vessel.cpp:1177-1180 — PT uses this override for both 2Inch and
+      // DepthCharge: PrimaryFacing 0x80, north 0x20, Turret_Facing 0x10.
+      let coord = { lx: this.leptonX, ly: this.leptonY };
+      const primaryFacing = this.bodyFacing256 >= 0 ? this.bodyFacing256 & 0xFF : (this.facing * 32) & 0xFF;
+      const turretFacing = this.turretFacing256 >= 0 ? this.turretFacing256 & 0xFF : (this.turretFacing * 32) & 0xFF;
+      coord = move(coord, primaryFacing, 0x0080);
+      coord = move(coord, 0, 0x0020);
+      coord = move(coord, turretFacing, 0x0010);
+      return coord;
+    }
+
+    if (this.type === UnitType.V_CA) {
+      // C++ vessel.cpp:1163-1174 — cruiser alternates fore/aft by IsSecondShot,
+      // then applies a north and turret offset. The `which` parameter is ignored.
+      let coord = { lx: this.leptonX, ly: this.leptonY };
+      const primaryFacing = this.bodyFacing256 >= 0 ? this.bodyFacing256 & 0xFF : (this.facing * 32) & 0xFF;
+      const turretFacing = this.turretFacing256 >= 0 ? this.turretFacing256 & 0xFF : (this.turretFacing * 32) & 0xFF;
+      coord = move(coord, this.isSecondShot ? (primaryFacing + 128) : primaryFacing, 0x0100);
+      coord = move(coord, 0, 0x0030);
+      coord = move(coord, turretFacing, 0x0040);
+      return coord;
+    }
+
+    return this.fireCoordByWeaponIndex(which);
   }
 
   /**
@@ -937,60 +1346,87 @@ export class Entity {
    * Used by `In_Range` (techno.cpp:1289) inside `Evaluate_Object` when the
    * radial-scan caller passes `range == 0` (THREAT_RANGE).
    *
-   * Per-type offsets: currently JEEP-only (udata.cpp:376-404: VO=0x30, PO=0x30,
-   * PL=0). Other types return center (no offset) — a full port would extend the
-   * table to all turreted vehicles + infantry but Phase 7B narrows to SCG01
-   * t87 only. `IsSecondShot` is false in the Mission_Guard scan path (no
-   * active second-shot cycle when acquiring a fresh TarCom), so we always
-   * use the DIR_W branch. Height is 0 for ground vehicles.
+   * Per-type offsets ported from C++ type constructors:
+   * - Vehicles: udata.cpp UnitTypeClass initializers
+   * - Infantry: idata.cpp:370-864, DOG VO=0x15/PO=0x10, all others
+   *   VO=0x35/PO=0x10. Infantry Turret_Facing resolves to body facing.
+   *
+   * `IsSecondShot` is false in the Mission_Guard scan path (no active
+   * second-shot cycle when acquiring a fresh TarCom), so we use DIR_W for
+   * lateral offset. Height is 0 for ground units.
    */
   fireCoordPrimary(): { lx: number; ly: number } {
-    let lx = this.leptonX;
-    let ly = this.leptonY;
-    if (this.type !== UnitType.V_JEEP) return { lx, ly };
+    return this.fireCoordByWeaponIndex(0);
+  }
+
+  /** C++ TechnoClass::Fire_Coord(0) evaluated from a temporary Coord.
+   *
+   *  FootClass::Mission_Guard_Area temporarily swaps `Coord` to ArchiveTarget
+   *  before calling Target_Something_Nearby(THREAT_AREA). TechnoClass::
+   *  Greatest_Threat seeds its ring scan from Coord_Cell(Fire_Coord(0)), so
+   *  the temporary coordinate still receives infantry/vehicle muzzle offsets. */
+  fireCoordPrimaryFrom(lx: number, ly: number): { lx: number; ly: number } {
+    return this.fireCoordByWeaponIndex(0, lx, ly);
+  }
+
+  private fireCoordByWeaponIndex(which: 0 | 1, baseLX = this.leptonX, baseLY = this.leptonY): { lx: number; ly: number } {
+    let lx = baseLX;
+    let ly = baseLY;
+    const offsets =
+      this.type === UnitType.I_DOG ? DOG_FIRE_COORD_OFFSETS :
+      this.stats.isInfantry ? INFANTRY_FIRE_COORD_OFFSETS :
+      UNIT_FIRE_COORD_OFFSETS[this.type];
+    if (!offsets) return { lx, ly };
+    const forwardOffset = which === 0 ? offsets.primary : offsets.secondary;
+    const lateralOffset = which === 0 ? offsets.lateral : offsets.secondaryLateral;
+
     // Step 1: move north by VerticalOffset + Height.
     //   DIR_N in the 256-step facing table is index 0; CosTable[0]=0,
     //   SinTable[0]=127. x += calcx(0, d) = 0. y += calcy(127, d) = -d.
     //   (calcy returns -(v*d)>>7; with v=127, -(127*d)>>7 ≈ -d.)
-    const VERTICAL_OFFSET = 0x0030; // JEEP udata.cpp:382
-    const PRIMARY_OFFSET = 0x0030;  // JEEP udata.cpp:383
-    const PRIMARY_LATERAL = 0x0000; // JEEP udata.cpp:384
     // Height is 0 for ground vehicles (non-airborne); we use this.flightAltitude
     // as a proxy, matching techno.cpp:508 Height field semantics.
     const height = this.flightAltitude ?? 0;
-    const dN = VERTICAL_OFFSET + height;
+    const dN = offsets.vertical + height;
     // calcy(SIN_TABLE_256[0]=127, dN) = -(127*dN)>>7
     ly += -((127 * dN) >> 7);
     // calcx(COS_TABLE_256[0]=0, dN) = 0 → no x change.
 
-    // Step 2: move (turret + DIR_W) by PrimaryLateral.
+    // Step 2: move (turret + DIR_W) by Primary/SecondaryLateral.
     //   DIR_W = 192 in the 256-step table. (turret + DIR_W) wraps via & 0xFF.
-    //   For PrimaryLateral=0, this is a no-op; skip the math.
-    const turret256 = (this.turretFacing32 * 8) & 0xFF;
-    if (PRIMARY_LATERAL !== 0) {
-      const dir2 = (turret256 + 192) & 0xFF;
+    //   C++ uses DIR_E instead when IsSecondShot is true.
+    //   For lateral=0, this is a no-op; skip the math.
+    const turret256 = this.stats.isInfantry
+      ? (this.bodyFacing256 >= 0 ? this.bodyFacing256 & 0xFF : (this.facing * 32) & 0xFF)
+      : this.turretFacing256 >= 0 &&
+        dir256ToFacing32(this.turretFacing256) === this.turretFacing32 &&
+        dir256ToFacing8(this.turretFacing256) === this.turretFacing
+          ? this.turretFacing256 & 0xFF
+          : (this.turretFacing32 * 8) & 0xFF;
+    if (lateralOffset !== 0) {
+      const lateralBase = this.isSecondShot ? 64 : 192; // DIR_E or DIR_W
+      const dir2 = (turret256 + lateralBase) & 0xFF;
       const c2 = COS_TABLE_256[dir2];
       const s2 = SIN_TABLE_256[dir2];
-      lx += (c2 * PRIMARY_LATERAL) >> 7;
-      ly += -((s2 * PRIMARY_LATERAL) >> 7);
+      lx += (c2 * lateralOffset) >> 7;
+      ly += -((s2 * lateralOffset) >> 7);
     }
 
-    // Step 3: move turret dir by PrimaryOffset.
+    // Step 3: move turret dir by Primary/SecondaryOffset.
     const c3 = COS_TABLE_256[turret256];
     const s3 = SIN_TABLE_256[turret256];
-    lx += (c3 * PRIMARY_OFFSET) >> 7;
-    ly += -((s3 * PRIMARY_OFFSET) >> 7);
+    lx += (c3 * forwardOffset) >> 7;
+    ly += -((s3 * forwardOffset) >> 7);
     return { lx, ly };
   }
 
-  /**
-   * Select the best weapon against a target based on effective damage (C++ TechnoClass::Can_Fire).
-   * Returns the weapon that deals more effective damage considering warhead-vs-armor multipliers.
-   * If one weapon is on cooldown but the other is ready, prefers the ready one.
-   * Never returns both — only one weapon fires per tick (C++ alternating behavior).
-   */
+  /** C++ TechnoClass::What_Weapon_Should_I_Use (techno.cpp:342-384).
+   *  Scores weapons by warhead-vs-armor modifier only, doubles the score when
+   *  that weapon is in range, and zeros only Can_Fire results that are
+   *  FIRE_CANT/FIRE_ILLEGAL. Cooldown (FIRE_REARM), range (FIRE_RANGE), ammo,
+   *  facing, and movement gates do not change the selected weapon; the caller's
+   *  fire gate decides whether the selected weapon can actually fire this tick. */
   selectWeapon(target: Entity, getWarheadMult: (warhead: WarheadType, armor: ArmorType) => number): WeaponStats | null {
-    const dist = leptonDist(this.leptonX, this.leptonY, target.leptonX, target.leptonY);
     const w1 = this.weapon;
     const w2 = this.weapon2;
 
@@ -998,44 +1434,23 @@ export class Entity {
     if (!w2) return w1;
     if (!w1) return w2;
 
-    // C++ techno.cpp:1898-1941 What_Weapon_Should_I_Use — AG/AA projectile constraints
-    // If primary weapon has AG=no (isAntiGround===false, e.g. RedEye/AAMissile), it cannot
-    // fire at ground targets. Use secondary for ground targets.
-    const targetIsAircraft = !!target.stats.isAircraft;
-    const targetIsAirborne = targetIsAircraft && target.flightAltitude > 0;
-    if (w1.isAntiGround === false && !targetIsAircraft && w2) return w2;
-    if (w2.isAntiGround === false && !targetIsAircraft && w1) return w1;
+    const scoreWeapon = (weapon: WeaponStats): number => {
+      if (!this.canWeaponTarget(target, weapon)) return 0;
+      let score = getWarheadMult(weapon.warhead, target.stats.armor) * 1000;
+      if (this.inRangeWith(target, weapon)) score *= 2;
+      return score;
+    };
 
-    // C++ techno.cpp:2702-2707 — AA gate: weapons without isAntiAir cannot hit airborne aircraft
-    // (returns FIRE_CANT). This makes 4TNK use MammothTusk missiles vs helicopters instead of 120mm cannon.
-    if (targetIsAirborne) {
-      const w1AA = !!w1.isAntiAir;
-      const w2AA = !!w2.isAntiAir;
-      if (!w1AA && w2AA) return w2;
-      if (w1AA && !w2AA) return w1;
-      if (!w1AA && !w2AA) return null; // neither weapon can hit airborne targets
-    }
+    const score1 = scoreWeapon(w1);
+    const score2 = scoreWeapon(w2);
 
-    const w1InRange = dist <= w1.range * LEPTON_SIZE;
-    const w2InRange = dist <= w2.range * LEPTON_SIZE;
-    const w1Ready = this.attackCooldown <= 0 && w1InRange;
-    const w2Ready = this.attackCooldown2 <= 0 && w2InRange;
+    return score2 > score1 ? w2 : w1;
+  }
 
-    // Neither ready — return null (both on cooldown)
-    if (!w1Ready && !w2Ready) return null;
-
-    // Only one ready — use that one
-    if (w1Ready && !w2Ready) return w1;
-    if (!w1Ready && w2Ready) return w2;
-
-    // Both ready — pick the one with higher effective damage vs target armor
-    const mult1 = getWarheadMult(w1.warhead, target.stats.armor);
-    const mult2 = getWarheadMult(w2.warhead, target.stats.armor);
-    const eff1 = w1.damage * mult1;
-    const eff2 = w2.damage * mult2;
-
-    // Prefer higher effective damage; on tie, prefer primary
-    return eff2 > eff1 ? w2 : w1;
+  /** C++ TechnoTypeClass::Is_Two_Shooter (techno.cpp:6262-6268). */
+  isTwoShooter(): boolean {
+    if (!this.weapon) return false;
+    return this.weapon === this.weapon2 || (this.weapon.burst ?? 1) > 1;
   }
 
   /** Update animation frame — uses per-type rate overrides from C++ MasterDoControls */
@@ -1171,51 +1586,71 @@ export class Entity {
   }
 
   /** Gradually rotate facing toward desiredFacing based on rot speed.
-   *  C++ RA rotation: 32-step visual rotation. ROT accumulates per tick; one visual step
-   *  when accumulator >= 8 (256 values / 32 steps = 8 per step). Game-logic 8-dir `facing`
-   *  is derived from bodyFacing32. Infantry (rot >= 8) snap instantly.
-   *  Returns true if facing matches desiredFacing. */
+   *  C++ facing.cpp:142-180 FacingClass::Rotation_Adjust.
+   *  Vehicles rotate in exact 256-step DirType space and only report ready
+   *  when PrimaryFacing.Current() == DesiredFacing. The 8-way facing is a
+   *  rounded derivative for compatibility/rendering, not the movement gate.
+   *  Infantry snap instantly. */
   tickRotation(): boolean {
-    if (this.facing === this.desiredFacing) {
-      this.rotAccumulator = 0;
-      // Snap visual facing to match game-logic facing
-      this.bodyFacing32 = this.facing * 4;
-      return true;
-    }
-    // Guard against double-accumulation in the same game tick
-    if (this.rotTickedThisFrame) return this.facing === this.desiredFacing;
-    this.rotTickedThisFrame = true;
-
     // Infantry snap instantly — C++ doesn't use Rotation_Adjust for infantry body facing.
-    // Vehicles always use the accumulator regardless of ROT value (e.g. JEEP ROT=10
-    // still takes 7 ticks for 90 degrees in C++).
     if (this.stats.isInfantry) {
       this.facing = this.desiredFacing;
+      this.bodyFacing256 = (this.facing * 32) & 0xff;
       this.bodyFacing32 = this.facing * 4;
       this.rotAccumulator = 0;
       return true;
     }
 
-    // 32-step vehicle rotation: accumulate ROT per tick, advance bodyFacing32 by ±1 when >= 8
-    // MV9: groundspeedBias multiplies rotation rate (C++ GroundSpeed affects ROT accumulation)
-    // C++ Rotation_Adjust uses a while loop — high ROT can advance multiple steps per tick.
-    const desiredFacing32 = this.desiredFacing * 4;
-    this.rotAccumulator += this.stats.rot * this.groundspeedBias;
-    while (this.rotAccumulator >= 8 && this.bodyFacing32 !== desiredFacing32) {
-      this.rotAccumulator -= 8;
-      // Shortest path in 32-step ring
-      // C++ facing.cpp:168-172: (signed char)(desired-current). When diff==128 (half circle),
-      // signed char gives -128 → counterclockwise. In 32-step: diff==16 → CCW to match C++.
-      const diff32 = (desiredFacing32 - this.bodyFacing32 + 32) % 32;
-      if (diff32 > 0 && diff32 < 16) {
-        this.bodyFacing32 = (this.bodyFacing32 + 1) % 32;
+    if (
+      this.bodyFacing256 >= 0 &&
+      dir256ToFacing8(this.bodyFacing256) !== this.facing
+    ) {
+      this.bodyFacing256 = (this.facing * 32) & 0xff;
+      this.bodyFacing32 = this.facing * 4;
+    } else if (this.bodyFacing256 < 0) {
+      this.bodyFacing256 = (this.facing * 32) & 0xff;
+    }
+
+    // C++ PrimaryFacing is a FacingClass with 256-step Current/Desired.
+    // `desiredFacing` is only the rounded 8-way derivative. Use the exact
+    // desiredFacing256 when a class AI path (for example VesselClass::Combat_AI)
+    // has set it; otherwise fall back to the legacy 8-way desired.
+    const desiredFacing256 = this.desiredFacing256 >= 0
+      ? (this.desiredFacing256 & 0xff)
+      : ((this.desiredFacing * 32) & 0xff);
+    if (this.bodyFacing256 === desiredFacing256) {
+      this.rotAccumulator = 0;
+      this.facing = dir256ToFacing8(this.bodyFacing256);
+      this.bodyFacing32 = dir256ToFacing32(this.bodyFacing256);
+      this.desiredFacing = dir256ToFacing8(desiredFacing256);
+      return true;
+    }
+
+    // Guard against double-rotation in the same game tick.
+    if (this.rotTickedThisFrame) return this.bodyFacing256 === desiredFacing256;
+    this.rotTickedThisFrame = true;
+
+    // C++ Rotation_Adjust clamps rate to 127 and applies the whole rate in
+    // 256-dir space. GroundspeedBias is an 8.8 fixed-point value; multiplying
+    // ROT by it uses fixed::operator*(int), which rounds with +128 before /256.
+    const groundspeedRaw = Math.trunc(this.groundspeedBias * 256 + 1e-9);
+    const rate = Math.min(Math.trunc((this.stats.rot * groundspeedRaw + 128) / 256), 127);
+    if (rate > 0) {
+      let diff = (desiredFacing256 - this.bodyFacing256) & 0xff;
+      if (diff >= 128) diff -= 256; // C++ signed char wrap
+      if (Math.abs(diff) < rate) {
+        this.bodyFacing256 = desiredFacing256;
+      } else if (diff < 0) {
+        this.bodyFacing256 = (this.bodyFacing256 - rate + 256) & 0xff;
       } else {
-        this.bodyFacing32 = (this.bodyFacing32 + 31) % 32; // -1 mod 32 (counterclockwise)
+        this.bodyFacing256 = (this.bodyFacing256 + rate) & 0xff;
       }
     }
-    // Derive 8-dir facing from bodyFacing32 for game logic compatibility
-    this.facing = Math.floor(this.bodyFacing32 / 4) as Dir;
-    return this.facing === this.desiredFacing;
+
+    this.facing = dir256ToFacing8(this.bodyFacing256);
+    this.bodyFacing32 = dir256ToFacing32(this.bodyFacing256);
+    this.desiredFacing = dir256ToFacing8(desiredFacing256);
+    return this.bodyFacing256 === desiredFacing256;
   }
 
   /** C++ facing.cpp:142 Rotation_Adjust for aircraft 256-step facing.
@@ -1229,8 +1664,8 @@ export class Entity {
 
     if (this.facing256 === this.desiredFacing256) {
       // Already aligned — sync derived facings
-      this.facing = Math.floor(this.facing256 / 32) as Dir;
-      this.bodyFacing32 = Math.floor(this.facing256 / 8) % 32;
+      this.facing = dir256ToFacing8(this.facing256);
+      this.bodyFacing32 = dir256ToFacing32(this.facing256);
       return true;
     }
 
@@ -1244,7 +1679,7 @@ export class Entity {
     let diff = (this.desiredFacing256 - this.facing256) & 0xFF;
     if (diff > 127) diff -= 256; // convert to signed: 128..255 → -128..-1
 
-    if (Math.abs(diff) <= rate) {
+    if (Math.abs(diff) < rate) {
       // Snap to desired (C++ facing.cpp:159-160)
       this.facing256 = this.desiredFacing256;
     } else if (diff < 0) {
@@ -1256,42 +1691,59 @@ export class Entity {
     }
 
     // Sync derived facings for rendering and game logic
-    this.facing = (Math.floor(this.facing256 / 32) % 8) as Dir;
-    this.bodyFacing32 = Math.floor(this.facing256 / 8) % 32;
-    this.desiredFacing = (Math.floor(this.desiredFacing256 / 32) % 8) as Dir;
+    this.facing = dir256ToFacing8(this.facing256);
+    this.bodyFacing32 = dir256ToFacing32(this.facing256);
+    this.desiredFacing = dir256ToFacing8(this.desiredFacing256);
     return this.facing256 === this.desiredFacing256;
   }
 
   /** Gradually rotate turret toward desiredTurretFacing.
    *  C++ RA unit.cpp:542: SecondaryFacing.Rotation_Adjust(Class->ROT+1).
-   *  Turret rotates at ROT+1 (not ROT*2); one visual step when accumulator >= 8. */
+   *  Turret rotates in exact 256-step DirType space; 32-step turretFacing32 is
+   *  only the rounded sprite-facing derivative. */
   tickTurretRotation(): boolean {
-    if (this.turretFacing === this.desiredTurretFacing) {
-      this.turretRotAccumulator = 0;
+    if (this.turretFacing256 < 0 ||
+        dir256ToFacing32(this.turretFacing256) !== this.turretFacing32 ||
+        dir256ToFacing8(this.turretFacing256) !== this.turretFacing) {
       this.turretFacing32 = this.turretFacing * 4;
+      this.turretFacing256 = (this.turretFacing * 32) & 0xff;
+    }
+    if (this.desiredTurretFacing256 < 0 ||
+        dir256ToFacing8(this.desiredTurretFacing256) !== this.desiredTurretFacing) {
+      this.desiredTurretFacing256 = (this.desiredTurretFacing * 32) & 0xff;
+    }
+
+    const desired256 = this.desiredTurretFacing256 & 0xff;
+    if (this.turretFacing256 === desired256) {
+      this.turretRotAccumulator = 0;
+      this.turretFacing = dir256ToFacing8(this.turretFacing256);
+      this.desiredTurretFacing = dir256ToFacing8(desired256);
+      this.turretFacing32 = dir256ToFacing32(this.turretFacing256);
       return true;
     }
     // Guard against double-accumulation in the same game tick
-    if (this.turretRotTickedThisFrame) return this.turretFacing === this.desiredTurretFacing;
+    if (this.turretRotTickedThisFrame) return this.turretFacing256 === desired256;
     this.turretRotTickedThisFrame = true;
 
-    // 32-step turret rotation at ROT+1 (C++ unit.cpp:542)
-    // C++ Rotation_Adjust uses a while loop — high ROT can advance multiple steps per tick.
-    const desiredTurretFacing32 = this.desiredTurretFacing * 4;
-    this.turretRotAccumulator += this.stats.rot + 1;
-    while (this.turretRotAccumulator >= 8 && this.turretFacing32 !== desiredTurretFacing32) {
-      this.turretRotAccumulator -= 8;
-      // C++ facing.cpp:168-172: diff==16 (180°) → counterclockwise (signed char -128)
-      const diff32 = (desiredTurretFacing32 - this.turretFacing32 + 32) % 32;
-      if (diff32 > 0 && diff32 < 16) {
-        this.turretFacing32 = (this.turretFacing32 + 1) % 32;
+    // C++ FacingClass::Rotation_Adjust: clamp to 127, then apply the full rate
+    // in 256-dir space using signed-char shortest-path difference.
+    const rate = Math.min(this.stats.rot + 1, 127);
+    if (rate > 0) {
+      let diff = (desired256 - this.turretFacing256) & 0xff;
+      if (diff >= 128) diff -= 256;
+      if (Math.abs(diff) < rate) {
+        this.turretFacing256 = desired256;
+      } else if (diff < 0) {
+        this.turretFacing256 = (this.turretFacing256 - rate + 256) & 0xff;
       } else {
-        this.turretFacing32 = (this.turretFacing32 + 31) % 32;
+        this.turretFacing256 = (this.turretFacing256 + rate) & 0xff;
       }
     }
-    // Derive 8-dir turretFacing from turretFacing32 for game logic
-    this.turretFacing = Math.floor(this.turretFacing32 / 4) as Dir;
-    return this.turretFacing === this.desiredTurretFacing;
+
+    this.turretFacing = dir256ToFacing8(this.turretFacing256);
+    this.desiredTurretFacing = dir256ToFacing8(desired256);
+    this.turretFacing32 = dir256ToFacing32(this.turretFacing256);
+    return this.turretFacing256 === desired256;
   }
 
   /** Move toward a world position at the unit's speed.
@@ -1334,6 +1786,7 @@ export class Entity {
 
     // C++ uses integer lepton coordinates for direction computation (Desired_Facing8).
     this.desiredFacing = directionToLeptons(this.leptonX, this.leptonY, targetLeptonX, targetLeptonY);
+    if (!this.stats.isInfantry) this.desiredFacing256 = (this.desiredFacing * 32) & 0xff;
     const facingAligned = this.tickRotation();
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)
@@ -1343,27 +1796,31 @@ export class Entity {
       return false; // still rotating — don't move yet
     }
 
-    // --- Infantry path: C++ infantry.cpp:4019 moves at constant speed per tick ---
-    // C++ infantry.cpp:4019: Coord_Move(Coord, Direction(Head_To_Coord()), maxspeed * fixed(movespeed, 256))
+    // --- Infantry path: C++ infantry.cpp:4020-4056 ---
+    // C++: Coord_Move(Coord, Direction(Head_To_Coord()), maxspeed * fixed(movespeed, 256))
     // Direction() is Desired_Facing256 — full 256-step precision toward the target.
     // This is NOT the 8-dir visual facing; it's the precise direction for movement math.
     if (this.stats.isInfantry) {
-      // C++ infantry.cpp:3990-4019:
+      // C++ infantry.cpp:4020-4036:
       //   movespeed = Speed;  // TechnoClass::Speed = current speed fraction (0-255)
       //   if (IsDog && TarCom) movespeed *= 2;
+      //   if (IsProne && !IsDog) {
+      //     if (IsFraidyCat && !IsCrawling) movespeed = Speed*2;
+      //     else movespeed = Speed/2;
+      //   }
       //   Coord_Move(dir, maxspeed * fixed(movespeed, 256));
       //
       // Speed=255 for full speed. maxspeed = _Scale_To_256(MaxSpeed).
-      // C++ fixed(255,256) * int: ((255 * maxspeed + 128) / 256) rounds to maxspeed
-      // for all infantry speeds (max=10). So distance ≈ maxspeed.
-      // With canine sprint: movespeed=510 → maxspeed * 510/256 ≈ 2*maxspeed.
-      //
-      // effectiveSpeed already includes canine sprint: Speed * MPH_TO_PX * 2.
+      // movementSpeed() already folds in canine sprint for the existing TS call
+      // path; apply the prone/crawling modifier here so prone combat infantry
+      // crawl at half speed instead of walking full speed.
       // maxspeed = floor(effectiveSpeed / LP) directly matches the C++ _Scale_To_256 result.
       const maxspeed = Math.floor(effectiveSpeed / LP);
-      // C++ fixed(movespeed, 256) * int: rounds back to maxspeed for movespeed=255
-      // Exact formula: floor((maxspeed * 255 + 128) / 256) = maxspeed for small values.
-      const distance = Math.trunc((maxspeed * 255 + 128) / 256);
+      let movespeed = 255;
+      if (this.isProne && !this.stats.isCanine) {
+        movespeed = (this.stats.isFraidyCat && !this.stats.isCrawling) ? 510 : 127;
+      }
+      const distance = Math.trunc((maxspeed * movespeed + 128) / 256);
 
       // C++ Coord_Move: 256-step direction from Desired_Facing256(Coord, Head_To_Coord())
       const dir256 = directionToLeptons256(this.leptonX, this.leptonY, targetLeptonX, targetLeptonY);
@@ -1372,13 +1829,13 @@ export class Entity {
       const stepLY = -((SIN_TABLE_256[dir256] * distance) >> 7);
 
 
-      // Clamp to avoid overshooting the target position
-      const clampedLX = Math.abs(stepLX) <= Math.abs(dxL) ? stepLX : dxL;
-      const clampedLY = Math.abs(stepLY) <= Math.abs(dyL) ? stepLY : dyL;
-
-      // Integer lepton movement — write to leptonX/Y, derive pos
-      this.leptonX += clampedLX;
-      this.leptonY += clampedLY;
+      // C++ infantry.cpp:3992-4048 has no post-move per-axis clamp.
+      // It snaps only before moving when Distance(Head_To_Coord()) < 0x10,
+      // then applies Coord_Move in the exact 256-step direction. Per-axis
+      // clamping lets TS flatten one axis early (e.g. y reaches HeadToCoord
+      // while x keeps walking), which changes later weapon range checks.
+      this.leptonX += stepLX;
+      this.leptonY += stepLY;
       this.syncPosFromLeptons();
 
       // C++ does NOT have a post-movement snap check for infantry.
@@ -1496,6 +1953,7 @@ export function threatScore(
   nearFriendlyStructureCount?: number,
   isTargetOutOfZone?: boolean,
   nervousBias?: number,
+  includeTransportContents = false,
 ): number {
   // AI6: Spy target exclusion — spies are not normal targets (except for dogs)
   // C++ techno.cpp:1557-1563
@@ -1504,11 +1962,8 @@ export function threatScore(
   }
 
   // C++ techno.cpp:1651-1652: value = object->Value() + object->Crew.Kills
-  // Value() = Risk() + Reward = 2 * Points (techno.cpp:4519, 6290: Risk = Reward = Points)
-  // Points comes from RULES.INI "Points=" — separate from Cost= (C++ techno.cpp:6290)
-  // Lookup: UNIT_STATS.points > PRODUCTION_ITEMS points > strength fallback
-  const points = target.stats.points ?? UNIT_POINTS[target.type] ?? target.stats.strength;
-  let value = Math.trunc(points * 2) + target.kills;  // Value() + Crew.Kills
+  // Value() = Risk() + Reward + attached cargo value (techno.cpp:4549-4566).
+  let value = technoValue(target, includeTransportContents) + target.kills;
 
   // AI4: Designated enemy house bonus — +500 then multiply by 3
   // C++ techno.cpp:1659-1662

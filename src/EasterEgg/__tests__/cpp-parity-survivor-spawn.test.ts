@@ -203,6 +203,7 @@ describe('IsCrew flag from rules.ini — vehicles', () => {
     expect(iniCrewed('TRUK')).toBe(false);
     expect(iniMaxPassengers('TRUK')).toBe(1);
   });
+
 });
 
 // ============================================================
@@ -277,14 +278,19 @@ describe('C++ vehicle crew spawning (unit.cpp:1046-1069)', () => {
     expect(true).toBe(true); // documented C++ behavior
   });
 
-  it('C++ vehicle Crew_Type: unarmed → C1 civilian, armed → E1 soldier', () => {
-    // C++ unit.cpp:3965-3978:
+  it('C++ vehicle death crew: unarmed → C1 technician, armed → E1 soldier', () => {
+    // C++ unit.cpp:1049-1054 death path:
     //   if (Class->PrimaryWeapon == NULL) {
-    //     50% INFANTRY_C1, 50% INFANTRY_C7
+    //     i = new InfantryClass(INFANTRY_C1, ...);
+    //     i->IsTechnician = true;
+    //   } else {
+    //     i = new InfantryClass(INFANTRY_E1, ...);
     //   }
-    //   return DriveClass::Crew_Type() → TechnoClass::Crew_Type() → INFANTRY_E1
+    //
+    // UnitClass::Crew_Type() has a C1/C7 random branch, but the destruction
+    // crew path does not call Crew_Type().
 
-    // Unarmed vehicles (no Primary weapon) → civilian survivor:
+    // Unarmed vehicles (no Primary weapon) → C1 technician survivor:
     expect(iniPrimary('HARV')).toBeUndefined();
     expect(iniPrimary('MCV')).toBeUndefined();
     expect(iniPrimary('MGG')).toBeUndefined();
@@ -322,7 +328,7 @@ describe('C++ vehicle crew spawning (unit.cpp:1046-1069)', () => {
   it('FIXED: TS spawns crew survivors from destroyed vehicles (50% chance)', () => {
     // TS handleUnitDeath (combat.ts) now checks victim.stats.crewed,
     // Max_Passengers==0, and rolls 50% probability to spawn a survivor.
-    // Armed vehicles -> E1, unarmed vehicles -> 50/50 C1/C7.
+    // Armed vehicles -> E1, unarmed vehicles -> C1 technician.
     // Crewed vehicles have crewed:true in UNIT_STATS (types.ts).
     expect(true).toBe(true); // FIXED: crew spawning implemented in handleUnitDeath
   });

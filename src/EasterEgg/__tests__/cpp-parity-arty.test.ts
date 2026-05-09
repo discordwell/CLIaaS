@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, Dir, CELL_SIZE,
+  UnitType, House, Dir, CELL_SIZE, LEPTON_SIZE,
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
   worldDist, directionTo, getWarheadMultiplier,
   modifyDamage,
@@ -28,6 +28,13 @@ beforeEach(() => resetEntityIds());
 /** Place an entity at the center of a cell */
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function setLeptonPos(entity: Entity, lx: number, ly: number): void {
+  entity.leptonX = lx;
+  entity.leptonY = ly;
+  entity.pos.x = lx * CELL_SIZE / LEPTON_SIZE;
+  entity.pos.y = ly * CELL_SIZE / LEPTON_SIZE;
 }
 
 /** Distance in cells between two cell-centered entities */
@@ -456,15 +463,19 @@ describe('ARTY entity behavioral integration', () => {
     expect(arty.inRange(target)).toBe(true);
   });
 
-  it('inRange returns true for target at 6 cells (max range)', () => {
+  it('inRange returns true for target exactly at max range from Fire_Coord', () => {
     const arty = entityAtCell(UnitType.V_ARTY, House.Spain, 10, 10);
     const target = entityAtCell(UnitType.I_E1, House.USSR, 16, 10);
+    const fireCoord = arty.fireCoordForWeapon(arty.weapon);
+    setLeptonPos(target, fireCoord.lx + arty.weapon!.range * LEPTON_SIZE, fireCoord.ly);
     expect(arty.inRange(target)).toBe(true);
   });
 
-  it('inRange returns false for target at 7 cells (beyond max range)', () => {
+  it('inRange returns false for target beyond max range from Fire_Coord', () => {
     const arty = entityAtCell(UnitType.V_ARTY, House.Spain, 10, 10);
     const target = entityAtCell(UnitType.I_E1, House.USSR, 17, 10);
+    const fireCoord = arty.fireCoordForWeapon(arty.weapon);
+    setLeptonPos(target, fireCoord.lx + (arty.weapon!.range + 1) * LEPTON_SIZE, fireCoord.ly);
     expect(arty.inRange(target)).toBe(false);
   });
 

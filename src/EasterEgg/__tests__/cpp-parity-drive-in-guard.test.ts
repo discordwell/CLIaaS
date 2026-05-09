@@ -127,6 +127,32 @@ describe('C++ DriveClass::AI drives-in-GUARD (drive.cpp:1376)', () => {
     expect(mcv.pos.x, 'vehicle did not move backward').toBeGreaterThanOrEqual(startX);
   });
 
+  it('vehicle in GUARD keeps driving an active path after NavCom is cleared', () => {
+    // C++ Assign_Destination(TARGET_NONE) clears NavCom, not the current driver.
+    // DriveClass::AI must keep following TrackNumber/Path until Stop_Driver.
+    const game = createGame();
+    const jeep = placeVehicle(game, UnitType.V_JEEP, House.USSR, 10, 10);
+    jeep.facing = Dir.E;
+    jeep.desiredFacing = Dir.E;
+    jeep.bodyFacing256 = Dir.E * 32;
+    jeep.bodyFacing32 = Dir.E * 4;
+    jeep.missionQueue = Mission.MOVE;
+    jeep.moveTarget = null;
+    jeep.path = [{ cx: 11, cy: 10 }];
+    jeep.pathIndex = 0;
+    jeep.isDriving = true;
+
+    const startLX = jeep.leptonX;
+    tickEntity(game, jeep);
+
+    expect(jeep.mission, 'mission stays GUARD while active driver finishes').toBe(Mission.GUARD);
+    expect(jeep.missionQueue, 'queued MOVE remains blocked by isDriving').toBe(Mission.MOVE);
+    expect(
+      jeep.leptonX > startLX || jeep.trackNumber > 0 || jeep.pathIndex > 0,
+      'DriveClass::AI advances or starts the preserved path even with NavCom cleared'
+    ).toBe(true);
+  });
+
   it('vehicle track speed uses destination-cell terrain cost', () => {
     const game = createGame();
     game.map.setTerrain(10, 10, Terrain.ROAD);
@@ -135,6 +161,8 @@ describe('C++ DriveClass::AI drives-in-GUARD (drive.cpp:1376)', () => {
     const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 10, 10);
     jeep.facing = Dir.S;
     jeep.desiredFacing = Dir.S;
+    jeep.bodyFacing256 = Dir.S * 32;
+    jeep.bodyFacing32 = Dir.S * 4;
     jeep.missionQueue = Mission.MOVE;
     jeep.moveTarget = {
       lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),

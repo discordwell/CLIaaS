@@ -23,6 +23,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -80,6 +81,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -120,6 +122,13 @@ function makeCombatCtx(
     powerProduced: 100,
     ...overrides,
   } as CombatContext;
+}
+
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
 }
 
 // -- Structure Stats (rules.ini / building.cpp) --------------------------------
@@ -218,7 +227,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -229,7 +238,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const hpBefore = tank.hp;
     expect(hpBefore).toBeGreaterThan(100); // precondition: must survive the hit
     const ctx = makeCombatCtx([tsla], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // rules.ini [TeslaZap] Damage=100. Super vs heavy = 1.0, base 100
     expect(hpBefore - tank.hp).toBe(100);
   });
@@ -240,7 +249,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 13, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([tsla], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // rules.ini [TeslaZap] Damage=100. Super vs heavy = 1.0, base 100
     expect(hpBefore - tank.hp).toBe(100);
   });
@@ -250,7 +259,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const apc = entityAtCell(UnitType.V_APC, House.USSR, 13, 10);
     const hpBefore = apc.hp;
     const ctx = makeCombatCtx([tsla], [apc]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // rules.ini [TeslaZap] Damage=100. Super vs light = 1.0, base 100
     expect(hpBefore - apc.hp).toBe(100);
   });
@@ -260,16 +269,17 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     // Enemy 10 cells east — beyond range 8.5
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 20, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
   it('fires at enemy at maximum range (~8 cells)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
-    // Enemy 8 cells east — within range 8.5
-    const enemy = entityAtCell(UnitType.I_E1, House.USSR, 18, 10);
+    // Building threat scan uses the structure anchor coordinate; this target is
+    // just inside the 8.5-cell TeslaZap range after C++ lepton distance.
+    const enemy = entityAtCell(UnitType.I_E1, House.USSR, 17, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -278,7 +288,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     // Greece is allied with Spain
     const ally = entityAtCell(UnitType.I_E1, House.Greece, 13, 10);
     const ctx = makeCombatCtx([tsla], [ally]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ally.hp).toBe(ally.maxHp);
   });
 
@@ -286,7 +296,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(tsla.attackCooldown).toBe(120);
   });
 
@@ -294,7 +304,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10, { cooldown: 50 });
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -302,7 +312,7 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10, { cooldown: 50 });
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(tsla.attackCooldown).toBe(49);
   });
 });
@@ -317,7 +327,7 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 200,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -329,7 +339,7 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 50,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -341,7 +351,7 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 100,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -352,7 +362,7 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 100,
       powerProduced: 0,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ house.cpp:4164: isLowPower = consumed > produced (100 > 0 = true)
     // TSLA is powered, so it does NOT fire during low power
     expect(enemy.hp).toBe(enemy.maxHp);
@@ -366,7 +376,7 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 0,
       powerProduced: 0,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // isLowPower = consumed > produced (0 > 0 = false) — not low power
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
@@ -379,7 +389,7 @@ describe('TSLA cannot fire during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 200,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 });
@@ -391,7 +401,7 @@ describe('TSLA has no turret rotation (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(tsla.turretDir).toBeUndefined();
   });
 
@@ -399,7 +409,7 @@ describe('TSLA has no turret rotation (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(tsla.desiredTurretDir).toBeUndefined();
   });
 
@@ -407,7 +417,7 @@ describe('TSLA has no turret rotation (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(tsla.firingFlash).toBeUndefined();
   });
 });
@@ -420,7 +430,7 @@ describe('TSLA does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const heli = entityAtCell(UnitType.V_HIND, House.USSR, 13, 10);
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE; // airborne
     const ctx = makeCombatCtx([tsla], [heli]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(heli.hp).toBe(heli.maxHp);
   });
 
@@ -429,7 +439,7 @@ describe('TSLA does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const mig = entityAtCell(UnitType.V_MIG, House.USSR, 13, 10);
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const ctx = makeCombatCtx([tsla], [mig]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(mig.hp).toBe(mig.maxHp);
   });
 
@@ -438,7 +448,7 @@ describe('TSLA does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const heli = entityAtCell(UnitType.V_HIND, House.USSR, 13, 10);
     heli.flightAltitude = 0; // landed
     const ctx = makeCombatCtx([tsla], [heli]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 });
@@ -450,7 +460,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const teslaEffects = ctx.effects.filter(e => e.type === 'tesla');
     expect(teslaEffects.length).toBe(1);
   });
@@ -459,7 +469,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const projectiles = ctx.effects.filter(e => e.type === 'projectile');
     expect(projectiles.length).toBe(0);
   });
@@ -468,11 +478,11 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
+    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
+    const expectedY = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
     expect((tesla as any).startX).toBe(expectedX);
     expect((tesla as any).startY).toBe(expectedY);
   });
@@ -481,7 +491,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
     expect((tesla as any).endX).toBe(enemy.pos.x);
@@ -492,7 +502,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
     expect((tesla as any).blendMode).toBe('screen');
@@ -505,7 +515,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const ctx = makeCombatCtx([tsla], [enemy], {
       playSoundAt: (name: string) => { sounds.push(name); },
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(sounds).toContain('teslazap');
   });
 
@@ -516,7 +526,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const ctx = makeCombatCtx([tsla], [enemy], {
       playSoundAt: (name: string) => { sounds.push(name); },
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(sounds).not.toContain('machinegun');
   });
 
@@ -524,7 +534,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const muzzles = ctx.effects.filter(e => e.type === 'muzzle');
     expect(muzzles.length).toBeGreaterThanOrEqual(1);
   });
@@ -540,7 +550,7 @@ describe('TSLA splash damage (splash=1.0, combat.cpp)', () => {
     // Secondary target in same cell as primary — within splash radius
     const secondary = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [primary, secondary]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Primary gets direct hit damage
     expect(primary.hp).toBeLessThan(primary.maxHp);
     // Secondary gets splash damage (within splash radius 1.5 cells)
@@ -553,7 +563,7 @@ describe('TSLA splash damage (splash=1.0, combat.cpp)', () => {
     // Far enemy — 3 cells away from primary, well beyond 1.5 splash radius
     const farEnemy = entityAtCell(UnitType.I_E1, House.USSR, 16, 10);
     const ctx = makeCombatCtx([tsla], [primary, farEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(primary.hp).toBeLessThan(primary.maxHp);
     expect(farEnemy.hp).toBe(farEnemy.maxHp);
   });
@@ -567,7 +577,7 @@ describe('TSLA target selection — threat-based scoring (building.cpp)', () => 
     const closeEnemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10); // 2 cells
     const farEnemy = entityAtCell(UnitType.I_E1, House.USSR, 17, 10);   // 7 cells
     const ctx = makeCombatCtx([tsla], [closeEnemy, farEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const closeDmg = closeEnemy.maxHp - closeEnemy.hp;
     const farDmg = farEnemy.maxHp - farEnemy.hp;
     // Exactly one target should be damaged (single shot per tick)
@@ -582,7 +592,7 @@ describe('TSLA target selection — threat-based scoring (building.cpp)', () => 
     deadEnemy.hp = 0;
     deadEnemy.alive = false;
     const ctx = makeCombatCtx([tsla], [deadEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(tsla.attackCooldown).toBe(0);
   });
 
@@ -591,7 +601,7 @@ describe('TSLA target selection — threat-based scoring (building.cpp)', () => 
     tsla.alive = false;
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -606,7 +616,7 @@ describe('TSLA kill tracking (building.cpp)', () => {
     weakEnemy.hp = 1;
     const ctx = makeCombatCtx([tsla], [weakEnemy]);
     expect(ctx.killCount).toBe(0);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(weakEnemy.alive).toBe(false);
     expect(ctx.killCount).toBe(1);
   });
@@ -616,7 +626,7 @@ describe('TSLA kill tracking (building.cpp)', () => {
     const rifleman = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     // E1 Rifle Infantry has 50 HP; Super warhead 1.0 mult => 100 damage kills
     const ctx = makeCombatCtx([tsla], [rifleman]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(rifleman.alive).toBe(false);
   });
 });
@@ -672,11 +682,11 @@ describe('TSLA muzzle effect originates from structure center (rendering parity)
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
+    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
+    const expectedY = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });

@@ -792,16 +792,18 @@ describe('Rotation mechanics', () => {
     tank.bodyFacing32 = Dir.N * 4;
     tank.rotAccumulator = 0;
 
-    // First tick: accumulate 5, threshold=8, no step yet
+    // First tick: C++ Rotation_Adjust applies ROT=5 directly in 256-dir space.
     tank.rotTickedThisFrame = false;
     let aligned = tank.tickRotation();
     expect(aligned).toBe(false);
-    expect(tank.bodyFacing32).toBe(0); // no step yet
+    expect(tank.bodyFacing256).toBe(5);
+    expect(tank.bodyFacing32).toBe(1);
 
-    // Second tick: accumulate 5 more = total 10-8=2 remainder, 1 step
+    // Second tick: another +5 in 256-dir space; 32-step facing is derived.
     tank.rotTickedThisFrame = false;
     aligned = tank.tickRotation();
-    expect(tank.bodyFacing32).toBe(1); // stepped once clockwise
+    expect(tank.bodyFacing256).toBe(10);
+    expect(tank.bodyFacing32).toBe(1);
 
     // Keep ticking until aligned
     let ticks = 2;
@@ -840,8 +842,10 @@ describe('Rotation mechanics', () => {
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
 
-    // Should accumulate rot+1 = 5+1 = 6
-    expect(tank.turretRotAccumulator).toBeCloseTo(6, 5);
+    // C++ unit.cpp:542 applies ROT+1 directly in 256-dir space.
+    expect(tank.turretFacing256).toBe(6);
+    expect(tank.turretFacing32).toBe(1);
+    expect(tank.turretRotAccumulator).toBe(0);
   });
 
   it('rotation takes shortest path around the ring', () => {
@@ -975,21 +979,23 @@ describe('Edge cases — zero distance, death, speed=0', () => {
     expect(unit.speedAccum).toBe(0);
   });
 
-  it('moveToward with very large speed reaches target in two steps', () => {
-    // C++ infantry: no post-movement snap. First call moves via clamping,
-    // second call triggers pre-movement Distance < 16 snap.
+  it('moveToward with very large speed does not post-clamp to the target', () => {
+    // C++ infantry: no post-movement snap or per-axis clamp. Coord_Move can
+    // overshoot; only a later pre-movement Distance < 16 check reports arrival.
     const unit = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     const target = { x: 500, y: 300 };
 
     unit.rotTickedThisFrame = false;
     const arrived1 = unit.moveToward(target, 10000);
-    expect(arrived1).toBe(false); // moved but no post-movement snap
+    expect(arrived1).toBe(false);
+    expect(unit.pos.x).not.toBeCloseTo(500, 1);
+    expect(unit.pos.y).not.toBeCloseTo(300, 1);
 
     unit.rotTickedThisFrame = false;
     const arrived2 = unit.moveToward(target, 10000);
-    expect(arrived2).toBe(true); // pre-movement snap catches it
-    expect(unit.pos.x).toBeCloseTo(500, 1);
-    expect(unit.pos.y).toBeCloseTo(300, 1);
+    expect(arrived2).toBe(false);
+    expect(unit.pos.x).not.toBeCloseTo(500, 1);
+    expect(unit.pos.y).not.toBeCloseTo(300, 1);
   });
 
   it('speed bias of 0 effectively stops movement', () => {

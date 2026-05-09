@@ -9,7 +9,7 @@
  * display.h:45-55
  *
  * In pixel space (TS coordinates):
- *   SpreadFactor==0: distFactor = distPixels * 5  (was incorrectly *4)
+ *   SpreadFactor==0: distFactor = floor(floor(distPixels * 256/24) / 2)
  *   SpreadFactor >0: distFactor = distPixels * 2 / SpreadFactor
  */
 
@@ -34,11 +34,12 @@ describe('Damage falloff — C++ parity', () => {
     expect(dmg).toBe(100);
   });
 
-  it('SpreadFactor=0: 3px distance gives distFactor=15', () => {
+  it('SpreadFactor=0: 3px distance gives distFactor=16 after lepton truncation', () => {
     const dmg = modifyDamage(100, 'Organic', 'none', 3, 1.0, undefined, 0);
-    // distFactor = floor(3 * 5) = 15, clamped [0,16] = 15
-    // damage = 100 / 15 ≈ 6.67
-    expect(dmg).toBeCloseTo(100 / 15, 0);
+    // distLeptons = floor(3 * 256 / 24) = 32.
+    // distFactor = floor(32 / (10/4 integer => 2)) = 16.
+    // damage = trunc(100 / 16) = 6.
+    expect(dmg).toBe(6);
   });
 
   it('SpreadFactor=0: 4px distance clamps distFactor to 16', () => {

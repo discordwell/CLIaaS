@@ -239,15 +239,15 @@ describe('Fear on damage (infantry.cpp:442-457)', () => {
 
 describe('IQ scatter gate (cell.cpp:1931, rules.cpp IQScatter=3)', () => {
 
-  it('AI with IQ >= 3 scatters infantry on damage', () => {
-    const inf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
+  it('FraidyCat infantry passes the C++ direct scatter execution gate', () => {
+    const inf = entityAtCell(UnitType.I_C1, House.USSR, 30, 30);
     inf.mission = Mission.GUARD;
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 32, 30);
     const ctx = makeCombatCtx([inf, attacker], { aiIQ: 3 });
 
     aiScatterOnDamage(ctx, inf, attacker);
-    // Should have assigned a MOVE mission with moveTarget
-    expect(inf.mission).toBe(Mission.MOVE);
+    // C++ Assign_Mission queues MOVE; Commence promotes it later.
+    expect(inf.missionQueue).toBe(Mission.MOVE);
     expect(inf.moveTarget).not.toBeNull();
   });
 
@@ -365,11 +365,11 @@ describe('MissionControl isScatter flags (infantry.cpp:1866)', () => {
 
 describe('Directional scatter (infantry.cpp:1888-1900)', () => {
 
-  it('infantry scatters generally AWAY from threat direction', () => {
+  it('FraidyCat infantry scatters generally AWAY from threat direction', () => {
     // C++ infantry.cpp:1889: toface = Dir_Facing(Direction8(threat, Coord))
     // Direction from threat (12,10) to infantry (10,10) is WEST (left)
     // Random offset +-2 means scatter cell should be roughly westward
-    const inf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
+    const inf = entityAtCell(UnitType.I_C1, House.USSR, 30, 30);
     inf.mission = Mission.GUARD;
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 32, 30);
     const ctx = makeCombatCtx([inf, attacker]);
@@ -378,7 +378,7 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
     let westwardCount = 0;
     const trials = 100;
     for (let i = 0; i < trials; i++) {
-      const testInf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
+      const testInf = entityAtCell(UnitType.I_C1, House.USSR, 30, 30);
       testInf.mission = Mission.GUARD;
       aiScatterOnDamage(ctx, testInf, attacker);
       if (testInf.moveTarget && testInf.moveTarget.lx < testInf.leptonX) {
@@ -389,17 +389,17 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
     expect(westwardCount).toBeGreaterThan(30);
   });
 
-  it('scatter assigns MOVE mission and moveTarget to adjacent cell center', () => {
-    const inf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
+  it('scatter queues MOVE and assigns moveTarget to adjacent C++ cell target', () => {
+    const inf = entityAtCell(UnitType.I_C1, House.USSR, 30, 30);
     inf.mission = Mission.GUARD;
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 32, 30);
     const ctx = makeCombatCtx([inf, attacker]);
 
     aiScatterOnDamage(ctx, inf, attacker);
-    expect(inf.mission).toBe(Mission.MOVE);
+    expect(inf.missionQueue).toBe(Mission.MOVE);
     expect(inf.moveTarget).not.toBeNull();
 
-    // Target should be 1 cell away (adjacent cell center)
+    // Target should be 1 cell away (C++ As_Target(newcell), near center)
     const dx = Math.abs(leptonToPixel(inf.moveTarget!.lx) - inf.pos.x);
     const dy = Math.abs(leptonToPixel(inf.moveTarget!.ly) - inf.pos.y);
     // Max 1 cell diagonal = sqrt(2) * CELL_SIZE ≈ 1.414 * CELL_SIZE
@@ -411,7 +411,7 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
   it('scatter tries 8 directions to find passable cell (infantry.cpp:1905-1915)', () => {
     // Place infantry surrounded by impassable cells except one direction
     const map = new GameMap();
-    const inf = entityAtCell(UnitType.I_E1, House.USSR, 30, 30);
+    const inf = entityAtCell(UnitType.I_C1, House.USSR, 30, 30);
     inf.mission = Mission.GUARD;
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 32, 30);
 
@@ -427,7 +427,7 @@ describe('Directional scatter (infantry.cpp:1888-1900)', () => {
     aiScatterOnDamage(ctx, inf, attacker);
 
     // Should have found the south cell as the only passable option
-    expect(inf.mission).toBe(Mission.MOVE);
+    expect(inf.missionQueue).toBe(Mission.MOVE);
     expect(inf.moveTarget).not.toBeNull();
     const targetCY = Math.floor(inf.moveTarget!.ly / 256);
     expect(targetCY).toBe(31); // south cell
@@ -463,7 +463,7 @@ describe('Combat target prevents scatter (infantry.cpp:1872)', () => {
     const ctx = makeCombatCtx([civ, enemy]);
 
     aiScatterOnDamage(ctx, civ, enemy);
-    expect(civ.mission).toBe(Mission.MOVE);
+    expect(civ.missionQueue).toBe(Mission.MOVE);
     expect(civ.moveTarget).not.toBeNull();
   });
 });
@@ -677,16 +677,14 @@ describe('Damage → scatter integration (infantry.cpp:438-439, combat.ts)', () 
     // Deal non-lethal damage
     damageEntity(ctx, inf, 5, 'AP' as WarheadType, attacker);
 
-    // Infantry should be alive, have fear > 0. With the C++ FootClass::Take_Damage
-    // retaliation chain integrated into damageEntity (foot.cpp:1166-1234), the AI
-    // infantry acquires the attacker as TarCom — setting mission to ATTACK overrides
-    // the scatter's MOVE assignment. This matches C++ where retaliation (FootClass)
-    // runs before Scatter (InfantryClass override) and Scatter then skips for
-    // non-FraidyCat units with a valid TarCom (infantry.cpp:1872).
+    // Infantry should be alive, have fear > 0. C++ FootClass::Take_Damage
+    // assigns TarCom; Assign_Target does not change Mission. InfantryClass then
+    // calls Scatter(source_coord), which skips for non-FraidyCat units with a
+    // valid TarCom (infantry.cpp:1872).
     expect(inf.alive).toBe(true);
     expect(inf.fear).toBeGreaterThan(0);
     expect(inf.target).toBe(attacker); // retaliation acquired the attacker
-    expect(inf.mission).toBe(Mission.ATTACK); // retaliation transitioned to ATTACK
+    expect(inf.mission).toBe(Mission.GUARD);
   });
 
   it('dead infantry does NOT scatter', () => {

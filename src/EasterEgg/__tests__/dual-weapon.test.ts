@@ -1,7 +1,8 @@
 /**
  * Tests for dual-weapon (primary + secondary) firing system.
- * C++ parity: TechnoClass::Fire_At() / Can_Fire() — units with two weapons select
- * the best weapon based on target armor and alternate using independent cooldowns.
+ * C++ parity: TechnoClass::What_Weapon_Should_I_Use selects the best weapon by
+ * warhead score and range bonus. The actual Firing_AI/Can_Fire path gates Arm
+ * cooldown and range before a shot is launched.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -88,13 +89,13 @@ describe('Single-weapon unit (no regression)', () => {
 });
 
 describe('Weapon selection based on target armor effectiveness', () => {
-  it('selects weapon with higher effective damage vs target armor', () => {
+  it('selects weapon with higher C++ warhead score vs target armor', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     // Target with heavy armor
     const heavyTarget = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
 
-    // 120mm: AP warhead, 40 damage, vs heavy armor: 1.0 multiplier → eff = 40
-    // MammothTusk: HE warhead, 75 damage, vs heavy armor: 0.25 multiplier → eff = 18.75
+    // 120mm: AP vs heavy armor = 1.0
+    // MammothTusk: HE vs heavy armor = 0.25
     // 120mm should be selected against heavy armor
     const selected = mammoth.selectWeapon(heavyTarget, getWarheadMult);
     expect(selected).toBe(mammoth.weapon); // 120mm (AP is better vs heavy)
@@ -123,32 +124,31 @@ describe('Weapon selection based on target armor effectiveness', () => {
   });
 });
 
-describe('Cooldown-based weapon selection', () => {
-  it('fires secondary when primary is on cooldown', () => {
+describe('Selection ignores cooldown; firing gate owns cooldown', () => {
+  it('still selects primary by C++ score when Arm is rearming', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     const target = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
 
-    // Put primary on cooldown
+    // C++ has one shared Arm timer. FIRE_REARM does not zero weapon score.
     mammoth.attackCooldown = 50;
-    mammoth.attackCooldown2 = 0; // secondary ready
+    mammoth.attackCooldown2 = 0;
 
     const selected = mammoth.selectWeapon(target, getWarheadMult);
-    expect(selected).toBe(mammoth.weapon2); // secondary fires because primary is cooling
+    expect(selected).toBe(mammoth.weapon);
   });
 
-  it('fires primary when secondary is on cooldown', () => {
+  it('ignores legacy secondary cooldown mirror when selecting', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     const target = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
 
-    // Put secondary on cooldown
-    mammoth.attackCooldown = 0; // primary ready
+    mammoth.attackCooldown = 0;
     mammoth.attackCooldown2 = 50;
 
     const selected = mammoth.selectWeapon(target, getWarheadMult);
-    expect(selected).toBe(mammoth.weapon); // primary fires because secondary is cooling
+    expect(selected).toBe(mammoth.weapon);
   });
 
-  it('returns null when both weapons are on cooldown', () => {
+  it('returns selected weapon even when both cooldown mirrors are nonzero', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     const target = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
 
@@ -156,7 +156,7 @@ describe('Cooldown-based weapon selection', () => {
     mammoth.attackCooldown2 = 30;
 
     const selected = mammoth.selectWeapon(target, getWarheadMult);
-    expect(selected).toBeNull();
+    expect(selected).toBe(mammoth.weapon);
   });
 });
 
@@ -276,12 +276,11 @@ describe('selectWeapon respects range', () => {
     expect(selected).toBe(rocket.weapon2); // Dragon (AG constraint overrides range)
   });
 
-  it('selects primary when target is only in primary weapon range (secondary on cooldown or out of range)', () => {
+  it('selects primary when target is in primary weapon range', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
     // Target at 4 cells: within 120mm (4.75) and MammothTusk (5.0) range
     const target = makeEntity(UnitType.V_3TNK, House.USSR, 100 + 24 * 4, 100);
 
-    // Put secondary on cooldown
     mammoth.attackCooldown2 = 50;
 
     const selected = mammoth.selectWeapon(target, getWarheadMult);
@@ -290,18 +289,12 @@ describe('selectWeapon respects range', () => {
 });
 
 describe('Weapon selection — tie-breaking', () => {
-  it('prefers primary weapon on equal effective damage', () => {
+  it('prefers primary weapon on equal C++ warhead score', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.Spain, 100, 100);
 
-    // Create a scenario where both weapons have the same effectiveness:
-    // We need a target where w1.damage * mult1 == w2.damage * mult2
-    // This is unlikely with real stats, but we can verify that selectWeapon
-    // returns primary (w1) when eff2 is NOT strictly greater than eff1
-    // For 120mm (40 AP) vs MammothTusk (75 HE), they never tie exactly,
-    // but we can verify the tie-breaking logic by checking the code's preference
-    // Just ensure selectWeapon returns a weapon when both are ready
-    const target = makeEntity(UnitType.V_3TNK, House.USSR, 150, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 150, 100);
+    target.stats = { ...target.stats, armor: 'wood' as ArmorType };
     const selected = mammoth.selectWeapon(target, getWarheadMult);
-    expect(selected).not.toBeNull();
+    expect(selected).toBe(mammoth.weapon);
   });
 });

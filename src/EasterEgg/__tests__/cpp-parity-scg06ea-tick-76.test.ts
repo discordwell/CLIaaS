@@ -51,7 +51,7 @@ import {
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap } from '../engine/map';
-import { updateAreaGuard, type MissionAIContext } from '../engine/missionAI';
+import { runFiringAI, updateAreaGuard, type MissionAIContext } from '../engine/missionAI';
 import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
@@ -142,14 +142,10 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
     expect(approachCalled).toBe(true);
   });
 
-  it('also calls approachTarget when scan newly-acquires an out-of-range target', () => {
-    // !hadTargetAtEntry path — scan finds Greek for the first time. C++ falls
-    // through to the Approach_Target call at foot.cpp:1082 either way (the
-    // !TarCom branch runs Target_Something_Nearby which sets TarCom, then the
-    // else-branch runs on the next timer fire). In TS both scenarios hit the
-    // same bestTarget code path — we issue Approach_Target unconditionally
-    // when the scan produces any legal out-of-range target, matching the
-    // net effect.
+  it('newly-acquired out-of-range target returns immediately and approaches on the next timer fire', () => {
+    // !hadTargetAtEntry path — scan finds Greek for the first time. C++ returns
+    // 1 immediately at foot.cpp:1077-1079; Approach_Target runs only on the
+    // next timer fire, when TarCom is legal at entry.
     const guard = makeEntity(UnitType.I_E1, House.USSR, 24, 67);
     guard.mission = Mission.AREA_GUARD;
     guard.guardOrigin = { x: guard.pos.x, y: guard.pos.y };
@@ -167,6 +163,10 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
 
     // Scan should have picked up Greek as bestTarget.
     expect(guard.target).toBe(greek);
+    expect(guard.missionTimer).toBe(1);
+    expect(approachCalled).toBe(false);
+
+    updateAreaGuard(ctx, guard, /* timerFired */ true);
     expect(approachCalled).toBe(true);
   });
 
@@ -218,7 +218,7 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
     expect(approachCalled).toBe(false);
   });
 
-  it('Firing_AI runs every tick on AREA_GUARD when target is in range (C++ infantry.cpp:1237)', () => {
+  it('caller Firing_AI runs every tick on AREA_GUARD when target is in range (C++ infantry.cpp:1237)', () => {
     // SCG06EA tick 76 residual fix: C++ InfantryClass::AI calls Firing_AI()
     // unconditionally each tick (infantry.cpp:1237) before MissionClass::AI
     // dispatches to the per-mission handler. updateAreaGuard previously had
@@ -237,31 +237,26 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
     const greek = makeEntity(UnitType.I_E1, House.Greece, 20, 64);
     guard.target = greek;
 
-    let attackCalled = false;
     const ctx = makeMockCtx({
       entities: [guard, greek],
-      // Mock updateAttack-equivalent — when Mission flips to ATTACK with target,
-      // mark the call. This proves updateAreaGuard delegated to the fire path.
-      // NOTE: missionAI's updateAttack is called directly (not via ctx), so
-      // we can only observe via firePrepActive after the call.
     });
 
     // Confirm target is in range before invocation.
     expect(guard.inRange(greek)).toBe(true);
 
     updateAreaGuard(ctx, guard, /* timerFired */ false);
+    expect(guard.mission).toBe(Mission.AREA_GUARD);
 
-    // After Firing_AI runs, the entity should have started the pre-fire
+    runFiringAI(ctx, guard);
+
+    // After the caller's Firing_AI runs, the entity should have started the pre-fire
     // animation (firePrepActive=true) OR fired immediately, depending on
-    // the FireLaunch stage progression. Either way, mission is restored
-    // to AREA_GUARD (not left as ATTACK).
+    // the FireLaunch stage progression.
     expect(guard.mission).toBe(Mission.AREA_GUARD);
     // updateAttack sets firePrepActive when starting the fire animation OR
     // launches an immediate bullet. Verify SOME fire-related state changed.
     const fireState = guard.firePrepActive || guard.firePrepStage > 0 || guard.attackCooldown > 0;
     expect(fireState, 'Firing_AI should have triggered fire prep or fire').toBe(true);
-    // suppress unused-var warning
-    void attackCalled;
   });
 
   it('does NOT trigger Firing_AI when target is out of range', () => {

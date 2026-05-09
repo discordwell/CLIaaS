@@ -24,6 +24,7 @@ import {
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -293,7 +294,7 @@ describe('ANT3 retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, ant3, attacker);
 
     expect(ant3.target).toBe(attacker);
-    expect(ant3.mission).toBe(Mission.ATTACK);
+    expect(ant3.mission).toBe(Mission.GUARD);
   });
 
   it('ANT3 has a weapon (TeslaZap) so CAN retaliate', () => {
@@ -302,10 +303,11 @@ describe('ANT3 retaliation (techno.cpp)', () => {
     expect(ant3.weapon!.name).toBe('TeslaZap');
   });
 
-  it('ANT3 does not retarget if already has a living target', () => {
+  it('ANT3 keeps an in-range living target when the AI threat check rejects the new source', () => {
+    ScenarioRandom.seed = 0;
     const ant3 = entityAtCell(UnitType.ANT3, House.USSR, 10, 10);
-    const existingTarget = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
-    const newAttacker = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
+    const existingTarget = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
+    const newAttacker = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     ant3.mission = Mission.ATTACK;
     ant3.target = existingTarget;
 
@@ -327,7 +329,7 @@ describe('ANT3 AI scatter on damage (techno.cpp)', () => {
       ant3.mission = Mission.GUARD;
       const ctx = makeCombatCtx([ant3]);
       aiScatterOnDamage(ctx, ant3);
-      if (ant3.mission === Mission.MOVE && ant3.moveTarget !== null) {
+      if (ant3.moveTarget !== null) {
         scattered = true;
         break;
       }

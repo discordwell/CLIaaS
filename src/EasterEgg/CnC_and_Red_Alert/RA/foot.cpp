@@ -83,6 +83,10 @@
 
 #include	"function.h"
 
+extern "C" {
+	extern int g_agent_team_remove_site;
+}
+
 
 /***********************************************************************************************
  * FootClass::FootClass -- Default constructor for foot class objects.                         *
@@ -1842,7 +1846,10 @@ void FootClass::Detach_All(bool all)
 	assert(IsActive);
 
 	if (Team && !ScenarioInit) {
+		int site_save = g_agent_team_remove_site;
+		if (g_agent_team_remove_site == 0) g_agent_team_remove_site = 1845;
 		Team->Remove(this);
+		g_agent_team_remove_site = site_save;
 		Team = NULL;
 	}
 
@@ -2639,4 +2646,3 @@ int FootClass::Mission_Retreat(void)
 		return(MissionControl[Mission].Normal_Delay() + __mret_jitter);
 	}
 }
-

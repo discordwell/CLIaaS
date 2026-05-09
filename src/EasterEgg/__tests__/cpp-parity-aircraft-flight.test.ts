@@ -46,6 +46,7 @@ import {
   UNIT_STATS, WEAPON_STATS,
 pixelToLepton, } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
+import { RandomClass, ScenarioRandom } from '../engine/random';
 import {
   type AircraftContext,
   findLandingPad,
@@ -97,6 +98,14 @@ const CPP_TICKS_PER_MINUTE = CPP_TICKS_PER_SECOND * 60; // = 900, defines.h:3032
 const CPP_FLIGHT_LEVEL = 256;      // object.h:252 — leptons
 const CPP_ICON_PIXEL_W = 24;       // display.h:45
 const CPP_ICON_LEPTON_W = 256;     // display.h:47
+
+/** C++ fixed-point mission delay:
+ *  rules.ini fixed raw=floor(rate*256), then TICKS_PER_MINUTE * Rate rounds
+ *  with +128 before /256 (fixed multiply semantics). */
+function cppMissionDelay(rate: number): number {
+  const raw = Math.floor(rate * 256);
+  return Math.floor((raw * CPP_TICKS_PER_MINUTE + 128) / 256);
+}
 
 /** C++ inline.h:119-121: Pixel_To_Lepton */
 function pixelToLepton(pixel: number): number {
@@ -880,6 +889,56 @@ describe('transport helicopter special behavior (TRAN)', () => {
     expect(tran.aircraftState).toBe('landing');
   });
 
+  it('Exit_Object establishes a passenger tether until the unloaded unit clears the LZ', () => {
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 300, 300);
+    const tanya = makeEntity(UnitType.I_E7, House.Greece, 300, 300);
+    tanya.alive = false;
+    tanya.inLimbo = true;
+
+    tran.aircraftState = 'unload_eject';
+    tran.flightAltitude = 0;
+    tran.mission = Mission.UNLOAD;
+    tran.missionTimer = 0;
+    tran.passengers = [tanya];
+
+    const entities: Entity[] = [];
+    const entityById = new Map<number, Entity>([[tran.id, tran]]);
+    const ctx = makeAircraftCtx({ entities, entityById });
+
+    updateAircraft(ctx, tran);
+
+    expect(tanya.alive).toBe(true);
+    expect(tanya.inLimbo).toBe(false);
+    expect(tanya.transportRef).toBe(tran);
+    expect(tanya.isTethered).toBe(true);
+    expect(tran.isTethered).toBe(true);
+    expect(tanya.mission).toBe(Mission.GUARD);
+    expect(tanya.missionQueue).toBe(Mission.MOVE);
+    expect(entities).toContain(tanya);
+    expect(entityById.get(tanya.id)).toBe(tanya);
+  });
+
+  it('UNLOAD_PASSENGERS waits when the transport is still tethered', () => {
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 300, 300);
+    const passenger = makeEntity(UnitType.I_E1, House.Greece, 300, 300);
+
+    tran.aircraftState = 'unload_eject';
+    tran.flightAltitude = 0;
+    tran.mission = Mission.UNLOAD;
+    tran.missionTimer = 0;
+    tran.isTethered = true;
+    tran.passengers = [passenger];
+
+    const ctx = makeAircraftCtx({ entities: [], entityById: new Map([[tran.id, tran]]) });
+    updateAircraft(ctx, tran);
+
+    expect(tran.passengers).toEqual([passenger]);
+    expect(passenger.inLimbo).toBe(false);
+    expect(passenger.transportRef).toBeNull();
+    expect(tran.missionTimer).toBeGreaterThanOrEqual(13);
+    expect(tran.missionTimer).toBeLessThanOrEqual(15);
+  });
+
   it('combat helicopter (HELI) orbits when no pad available', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'returning';
@@ -890,6 +949,88 @@ describe('transport helicopter special behavior (TRAN)', () => {
     updateAircraft(ctx, heli);
     // Non-transport stays in returning (orbiting)
     expect(heli.aircraftState).toBe('returning');
+  });
+});
+
+describe('aircraft Mission_Retreat timer and RNG parity (aircraft.cpp:1319-1377)', () => {
+  function saveScenarioRandom() {
+    return {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      tagLogging: ScenarioRandom._tagLogging,
+      seedLog: ScenarioRandom._seedLog,
+      sourceTag: ScenarioRandom._sourceTag,
+    };
+  }
+
+  function restoreScenarioRandom(saved: ReturnType<typeof saveScenarioRandom>): void {
+    ScenarioRandom.seed = saved.seed;
+    ScenarioRandom.callCount = saved.callCount;
+    ScenarioRandom._tagLogging = saved.tagLogging;
+    ScenarioRandom._seedLog = saved.seedLog;
+    ScenarioRandom._sourceTag = saved.sourceTag;
+  }
+
+  it('helicopter KEEP_FLYING consumes Mission_Retreat Random_Pick(0,2) with tag 40030', () => {
+    const saved = saveScenarioRandom();
+    try {
+      const retreatRate = parseFloat(ini['Retreat']?.Rate ?? '0.1');
+      const normalDelay = cppMissionDelay(retreatRate);
+      const seed = 0x12345678;
+      const expectedRng = new RandomClass(seed);
+      const jitter = expectedRng.nextInRange(0, 2);
+
+      ScenarioRandom.seed = seed;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._seedLog = [];
+      ScenarioRandom._sourceTag = 0;
+
+      const tran = makeEntity(UnitType.V_TRAN, House.Greece, 300, 300);
+      tran.aircraftState = 'flying';
+      tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+      tran.mission = Mission.RETREAT;
+      tran.missionTimer = 0;
+      tran.moveTarget = { lx: tran.leptonX + 256, ly: tran.leptonY };
+
+      const ctx = makeAircraftCtx({ movementSpeed: () => 0 });
+      updateAircraft(ctx, tran);
+
+      expect(ScenarioRandom.seed).toBe(expectedRng.seed);
+      expect(ScenarioRandom._seedLog[0]?.[1]).toBe(40030);
+      expect(tran.missionTimer).toBe(normalDelay - 1 + jitter);
+    } finally {
+      restoreScenarioRandom(saved);
+    }
+  });
+
+  it('fixed-wing Mission_Retreat does not consume Random_Pick(0,2)', () => {
+    const saved = saveScenarioRandom();
+    try {
+      const seed = 0x23456789;
+      ScenarioRandom.seed = seed;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._seedLog = [];
+      ScenarioRandom._sourceTag = 0;
+
+      const mig = makeEntity(UnitType.V_MIG, House.USSR, 300, 300);
+      mig.aircraftState = 'flying';
+      mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
+      mig.mission = Mission.RETREAT;
+      mig.missionTimer = 0;
+      mig.moveTarget = { lx: mig.leptonX + 256, ly: mig.leptonY };
+
+      const ctx = makeAircraftCtx({ movementSpeed: () => 0 });
+      updateAircraft(ctx, mig);
+
+      expect(ScenarioRandom.seed).toBe(seed);
+      expect(ScenarioRandom.callCount).toBe(0);
+      expect(ScenarioRandom._seedLog).toEqual([]);
+      expect(mig.missionTimer).toBe(TICKS_PER_SECOND * 10 - 1);
+    } finally {
+      restoreScenarioRandom(saved);
+    }
   });
 });
 

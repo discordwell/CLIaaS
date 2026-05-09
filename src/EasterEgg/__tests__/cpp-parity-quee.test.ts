@@ -22,6 +22,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -78,6 +79,7 @@ function makeCombatCtx(
     entityById: new Map(entities.map(e => [e.id, e])),
     structures,
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -119,6 +121,13 @@ function makeCombatCtx(
     powerProduced: 100,
     ...overrides,
   } as CombatContext;
+}
+
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
 }
 
 // -- Structure Stats (rules.ini / building.cpp) --------------------------------
@@ -209,7 +218,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -220,7 +229,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const hpBefore = tank.hp;
     expect(hpBefore).toBeGreaterThan(60); // precondition: must survive the hit
     const ctx = makeCombatCtx([quee], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs heavy = 1.0, base 60
     expect(hpBefore - tank.hp).toBe(60);
   });
@@ -230,7 +239,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 13, 10);
     const hpBefore = apc.hp;
     const ctx = makeCombatCtx([quee], [apc]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Super vs light = 1.0, base 60
     expect(hpBefore - apc.hp).toBe(60);
   });
@@ -240,7 +249,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     // Enemy 7 cells east — beyond range 5
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 17, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -249,7 +258,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     // Enemy 4 cells east — within range 5 (2x2 structure center offset helps)
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 14, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -258,7 +267,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     // BadGuy is allied with itself — place another BadGuy unit
     const ally = entityAtCell(UnitType.I_E1, House.BadGuy, 13, 10);
     const ctx = makeCombatCtx([quee], [ally]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ally.hp).toBe(ally.maxHp);
   });
 
@@ -266,7 +275,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(quee.attackCooldown).toBe(30);
   });
 
@@ -274,7 +283,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10, { cooldown: 15 });
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -282,7 +291,7 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10, { cooldown: 15 });
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(quee.attackCooldown).toBe(14);
   });
 });
@@ -298,7 +307,7 @@ describe('QUEE fires during power outage — not power-dependent (building.cpp)'
       powerConsumed: 200,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -310,7 +319,7 @@ describe('QUEE fires during power outage — not power-dependent (building.cpp)'
       powerConsumed: 50,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -327,7 +336,7 @@ describe('QUEE has no turret rotation (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(quee.turretDir).toBeUndefined();
   });
 
@@ -335,7 +344,7 @@ describe('QUEE has no turret rotation (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(quee.desiredTurretDir).toBeUndefined();
   });
 
@@ -343,7 +352,7 @@ describe('QUEE has no turret rotation (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(quee.firingFlash).toBeUndefined();
   });
 });
@@ -356,7 +365,7 @@ describe('QUEE does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const heli = entityAtCell(UnitType.V_HIND, House.Spain, 13, 10);
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE; // airborne
     const ctx = makeCombatCtx([quee], [heli]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(heli.hp).toBe(heli.maxHp);
   });
 
@@ -365,7 +374,7 @@ describe('QUEE does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const mig = entityAtCell(UnitType.V_MIG, House.Spain, 13, 10);
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const ctx = makeCombatCtx([quee], [mig]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(mig.hp).toBe(mig.maxHp);
   });
 
@@ -374,7 +383,7 @@ describe('QUEE does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const heli = entityAtCell(UnitType.V_HIND, House.Spain, 13, 10);
     heli.flightAltitude = 0; // landed
     const ctx = makeCombatCtx([quee], [heli]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 });
@@ -386,7 +395,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const teslaEffects = ctx.effects.filter(e => e.type === 'tesla');
     expect(teslaEffects.length).toBe(1);
   });
@@ -395,7 +404,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const projectiles = ctx.effects.filter(e => e.type === 'projectile');
     expect(projectiles.length).toBe(0);
   });
@@ -404,12 +413,12 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
-    // Combat center uses fixed +CELL_SIZE offset (combat.ts:1378-1379)
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
+    // C++ BSIZE_21 CenterOffset = 0xff,0x80.
+    const expectedX = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
+    const expectedY = 10 * CELL_SIZE + CELL_SIZE / 2;
     expect((tesla as any).startX).toBe(expectedX);
     expect((tesla as any).startY).toBe(expectedY);
   });
@@ -418,7 +427,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
     expect((tesla as any).endX).toBe(enemy.pos.x);
@@ -429,7 +438,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
     expect((tesla as any).blendMode).toBe('screen');
@@ -442,7 +451,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const ctx = makeCombatCtx([quee], [enemy], {
       playSoundAt: (name: string) => { sounds.push(name); },
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(sounds).toContain('teslazap');
   });
 
@@ -453,7 +462,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const ctx = makeCombatCtx([quee], [enemy], {
       playSoundAt: (name: string) => { sounds.push(name); },
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(sounds).not.toContain('machinegun');
   });
 
@@ -461,7 +470,7 @@ describe('QUEE produces tesla effect — not projectile (building.cpp)', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const muzzles = ctx.effects.filter(e => e.type === 'muzzle');
     expect(muzzles.length).toBeGreaterThanOrEqual(1);
   });
@@ -477,7 +486,7 @@ describe('QUEE splash damage (splash=1, combat.cpp)', () => {
     // Secondary target in same cell as primary — within splash radius
     const secondary = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [primary, secondary]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Primary gets direct hit damage
     expect(primary.hp).toBeLessThan(primary.maxHp);
     // Secondary gets splash damage (within splash radius)
@@ -490,7 +499,7 @@ describe('QUEE splash damage (splash=1, combat.cpp)', () => {
     // Far enemy — 3 cells away from primary, well beyond splash radius
     const farEnemy = entityAtCell(UnitType.I_E1, House.Spain, 16, 10);
     const ctx = makeCombatCtx([quee], [primary, farEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(primary.hp).toBeLessThan(primary.maxHp);
     expect(farEnemy.hp).toBe(farEnemy.maxHp);
   });
@@ -504,7 +513,7 @@ describe('QUEE target selection — threat-based scoring (building.cpp)', () => 
     const closeEnemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10); // 2 cells
     const farEnemy = entityAtCell(UnitType.I_E1, House.Spain, 14, 10);   // 4 cells
     const ctx = makeCombatCtx([quee], [closeEnemy, farEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const closeDmg = closeEnemy.maxHp - closeEnemy.hp;
     const farDmg = farEnemy.maxHp - farEnemy.hp;
     // Exactly one target should be damaged (single shot per tick)
@@ -519,7 +528,7 @@ describe('QUEE target selection — threat-based scoring (building.cpp)', () => 
     deadEnemy.hp = 0;
     deadEnemy.alive = false;
     const ctx = makeCombatCtx([quee], [deadEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(quee.attackCooldown).toBe(0);
   });
 
@@ -528,7 +537,7 @@ describe('QUEE target selection — threat-based scoring (building.cpp)', () => 
     quee.alive = false;
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -543,7 +552,7 @@ describe('QUEE kill tracking (building.cpp)', () => {
     weakEnemy.hp = 1;
     const ctx = makeCombatCtx([quee], [weakEnemy]);
     expect(ctx.killCount).toBe(0);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(weakEnemy.alive).toBe(false);
     expect(ctx.killCount).toBe(1);
   });
@@ -553,7 +562,7 @@ describe('QUEE kill tracking (building.cpp)', () => {
     const rifleman = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     // E1 Rifle Infantry has 50 HP; Super warhead 1.0 mult => 60 damage kills
     const ctx = makeCombatCtx([quee], [rifleman]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(rifleman.alive).toBe(false);
   });
 });
@@ -633,12 +642,12 @@ describe('QUEE muzzle effect originates from structure center (rendering parity)
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
     // Combat center uses fixed +CELL_SIZE offset (combat.ts:1378-1379)
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
+    const expectedX = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
+    const expectedY = 10 * CELL_SIZE + CELL_SIZE / 2;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });

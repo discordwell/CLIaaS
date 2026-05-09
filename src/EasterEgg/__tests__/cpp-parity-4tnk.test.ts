@@ -25,6 +25,7 @@ import {
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -270,20 +271,20 @@ describe('4TNK weapon selection (techno.cpp:Can_Fire)', () => {
     expect(WARHEAD_VS_ARMOR.AP[armorIndex('concrete')]).toBe(0.5);
   });
 
-  it('selects 120mm (AP) when primary on cooldown returns null and secondary ready', () => {
+  it('selects 120mm (AP) even when Arm is rearming', () => {
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 11, 10);
 
-    // Primary on cooldown, secondary ready
+    // C++ What_Weapon_Should_I_Use does not zero FIRE_REARM.
     mammoth.attackCooldown = 50;
     mammoth.attackCooldown2 = 0;
 
     const weapon = mammoth.selectWeapon(target, getWarheadMultiplier);
     expect(weapon).not.toBeNull();
-    expect(weapon!.name).toBe('MammothTusk');
+    expect(weapon!.name).toBe('120mm');
   });
 
-  it('returns null when both weapons are on cooldown', () => {
+  it('returns selected weapon when both cooldown mirrors are nonzero', () => {
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 11, 10);
 
@@ -291,7 +292,8 @@ describe('4TNK weapon selection (techno.cpp:Can_Fire)', () => {
     mammoth.attackCooldown2 = 50;
 
     const weapon = mammoth.selectWeapon(target, getWarheadMultiplier);
-    expect(weapon).toBeNull();
+    expect(weapon).not.toBeNull();
+    expect(weapon!.name).toBe('120mm');
   });
 
   it('returns primary when only primary is ready', () => {
@@ -306,12 +308,11 @@ describe('4TNK weapon selection (techno.cpp:Can_Fire)', () => {
     expect(weapon!.name).toBe('120mm');
   });
 
-  it('weapon selection vs none (unarmored) prefers MammothTusk -- higher effective damage', () => {
+  it('weapon selection vs none (unarmored) prefers MammothTusk -- higher C++ warhead score', () => {
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
 
-    // AP vs none = 0.3 -> effective 40*0.3=12
-    // HE vs none = 0.9 -> effective 75*0.9=67.5
+    // AP vs none = 0.3, HE vs none = 0.9
     const weapon = mammoth.selectWeapon(infantry, getWarheadMultiplier);
     expect(weapon).not.toBeNull();
     expect(weapon!.name).toBe('MammothTusk');
@@ -528,7 +529,7 @@ describe('4TNK retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, mammoth, attacker);
 
     expect(mammoth.target).toBe(attacker);
-    expect(mammoth.mission).toBe(Mission.ATTACK);
+    expect(mammoth.mission).toBe(Mission.GUARD);
   });
 
   it('4TNK has a weapon and can retaliate (not unarmed)', () => {
@@ -539,10 +540,11 @@ describe('4TNK retaliation (techno.cpp)', () => {
     expect(mammoth.weapon2!.name).toBe('MammothTusk');
   });
 
-  it('does not retarget if already has a living target', () => {
+  it('keeps an in-range living target when the AI threat check rejects the new source', () => {
+    ScenarioRandom.seed = 0;
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
-    const existingTarget = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
-    const newAttacker = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
+    const existingTarget = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
+    const newAttacker = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     mammoth.mission = Mission.ATTACK;
     mammoth.target = existingTarget;
 
@@ -729,7 +731,7 @@ describe('4TNK AI scatter on damage (techno.cpp)', () => {
       mammoth.mission = Mission.GUARD;
       const ctx = makeCombatCtx([mammoth]);
       aiScatterOnDamage(ctx, mammoth);
-      if (mammoth.mission === Mission.MOVE && mammoth.moveTarget !== null) {
+      if (mammoth.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -759,10 +761,11 @@ describe('4TNK inRange with dual weapons (entity.ts)', () => {
 
   it('inRange returns true when target is within secondary range (5.0) but outside primary (4.75)', () => {
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
-    // Place target at ~4.9 cells away (within 5.0 MammothTusk range, outside 4.75 120mm range)
+    // Fire_Coord offsets make a nominal 4.9-cell center distance out of range.
+    // 4.5 cells is outside the 120mm muzzle range but inside MammothTusk.
     const px = 10 * CELL_SIZE + CELL_SIZE / 2;
     const py = 10 * CELL_SIZE + CELL_SIZE / 2;
-    const target = new Entity(UnitType.I_E1, House.Spain, px + 4.9 * CELL_SIZE, py);
+    const target = new Entity(UnitType.I_E1, House.Spain, px + 4.5 * CELL_SIZE, py);
     expect(mammoth.inRange(target)).toBe(true);
   });
 

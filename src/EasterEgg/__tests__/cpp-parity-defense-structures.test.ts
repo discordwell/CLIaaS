@@ -31,6 +31,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -154,6 +155,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -194,6 +196,13 @@ function makeCombatCtx(
     powerProduced: 100,
     ...overrides,
   } as CombatContext;
+}
+
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
 }
 
 // ============================================================================
@@ -556,7 +565,7 @@ describe('Unpowered defenses fire during power outage (PBOX, HBOX, GUN, FTUR)', 
         powerConsumed: 200,
         powerProduced: 50,
       });
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(enemy.hp, `${bldg} should still fire during low power`).toBeLessThan(hpBefore);
     });
   }
@@ -570,7 +579,7 @@ describe('TSLA does NOT fire during power outage', () => {
       powerConsumed: 200,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -582,7 +591,7 @@ describe('TSLA does NOT fire during power outage', () => {
       powerConsumed: 50,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -594,7 +603,7 @@ describe('TSLA does NOT fire during power outage', () => {
       powerConsumed: 100,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 });
@@ -616,7 +625,7 @@ describe('Attack cooldown matches INI-parsed ROF', () => {
         bldg === 'GUN' ? { turretDir: 2, desiredTurretDir: 2 } : {});
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(s.attackCooldown).toBe(iniROF);
     });
   }
@@ -630,7 +639,7 @@ describe('Defense structures do NOT fire while on cooldown', () => {
       const s = makeDefenseStructure(bldg, house, 10, 10, { cooldown: 10 });
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(enemy.hp).toBe(enemy.maxHp);
     });
   }
@@ -644,7 +653,7 @@ describe('Cooldown decrements each tick', () => {
       const s = makeDefenseStructure(bldg, house, 10, 10, { cooldown: 5 });
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(s.attackCooldown).toBe(4);
     });
   }
@@ -669,7 +678,7 @@ describe('Defense structures respect INI-parsed range', () => {
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const hpBefore = enemy.hp;
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(enemy.hp, `${bldg} should hit enemy 2 cells away (range ${iniRange})`).toBeLessThan(hpBefore);
     });
 
@@ -682,7 +691,7 @@ describe('Defense structures respect INI-parsed range', () => {
         bldg === 'GUN' ? { turretDir: 2, desiredTurretDir: 2 } : {});
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, outOfRangeCx, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(enemy.hp, `${bldg} should NOT hit enemy at ${outOfRangeCx - 10} cells (range ${iniRange})`).toBe(enemy.maxHp);
     });
   }
@@ -703,7 +712,7 @@ describe('Warhead damage application matches INI Verses=', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([pbox], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // INI: SA Verses=100%,50%,60%,25%,25% => vs none = 1.0
     // INI: [Vulcan] Damage=40
     const iniDamage = Number(ini['Vulcan'].Damage);
@@ -717,7 +726,7 @@ describe('Warhead damage application matches INI Verses=', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([pbox], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // INI: SA Verses vs heavy = index 3
     const iniDamage = Number(ini['Vulcan'].Damage);
     const iniVersesHeavy = parseVerses(ini['SA'].Verses)[3];
@@ -732,10 +741,8 @@ describe('Warhead damage application matches INI Verses=', () => {
     enemy.maxHp = 200;
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
-    const iniDamage = Number(ini['FireballLauncher'].Damage);
-    const iniVersesNone = parseVerses(ini['Fire'].Verses)[0];
-    const expectedDamage = Math.round(iniDamage * iniVersesNone);
+    fireStructures(ctx);
+    const expectedDamage = 112; // fixed::operator*(int): 125 * fixed(90%)
     expect(hpBefore - enemy.hp).toBe(expectedDamage);
   });
 
@@ -744,7 +751,7 @@ describe('Warhead damage application matches INI Verses=', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 12, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([ftur], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const iniDamage = Number(ini['FireballLauncher'].Damage);
     const iniVersesHeavy = parseVerses(ini['Fire'].Verses)[3];
     const expectedDamage = Math.round(iniDamage * iniVersesHeavy);
@@ -757,7 +764,7 @@ describe('Warhead damage application matches INI Verses=', () => {
     const hpBefore = tank.hp;
     expect(hpBefore).toBeGreaterThan(100); // precondition: must survive
     const ctx = makeCombatCtx([tsla], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const iniDamage = Number(ini['TeslaZap'].Damage);
     const iniVersesHeavy = parseVerses(ini['Super'].Verses)[3];
     const expectedDamage = Math.round(iniDamage * iniVersesHeavy);
@@ -770,7 +777,7 @@ describe('Warhead damage application matches INI Verses=', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // GUN uses TurretGun with AP warhead, which has splash
     // AP Verses vs none = index 0
     const iniDamage = Number(ini['TurretGun'].Damage);
@@ -787,7 +794,7 @@ describe('Warhead damage application matches INI Verses=', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([gun], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const iniDamage = Number(ini['TurretGun'].Damage);
     const iniVersesHeavy = parseVerses(ini['AP'].Verses)[3];
     const expectedDamage = Math.round(iniDamage * iniVersesHeavy);
@@ -816,7 +823,7 @@ describe('Defense structures do NOT target airborne aircraft', () => {
       const heli = entityAtCell(UnitType.V_HIND, enemyHouse, 12, 10);
       heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
       const ctx = makeCombatCtx([s], [heli]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(heli.hp).toBe(heli.maxHp);
     });
   }
@@ -831,7 +838,7 @@ describe('TSLA produces tesla-type effect when firing', () => {
     const tsla = makeDefenseStructure('TSLA', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const teslaEffects = ctx.effects.filter(e => e.type === 'tesla');
     expect(teslaEffects.length).toBeGreaterThanOrEqual(1);
   });
@@ -840,7 +847,7 @@ describe('TSLA produces tesla-type effect when firing', () => {
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const projEffects = ctx.effects.filter(e => e.type === 'projectile');
     expect(projEffects.length).toBeGreaterThanOrEqual(1);
     const teslaEffects = ctx.effects.filter(e => e.type === 'tesla');
@@ -862,7 +869,7 @@ describe('Destroyed defense structures do NOT fire', () => {
       s.hp = 0;
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(enemy.hp).toBe(enemy.maxHp);
     });
   }
@@ -880,7 +887,7 @@ describe('Defense structures do NOT fire at allied units', () => {
       // Greece is allied with Spain
       const ally = entityAtCell(UnitType.I_E1, House.Greece, 12, 10);
       const ctx = makeCombatCtx([s], [ally]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(ally.hp).toBe(ally.maxHp);
     });
   }
@@ -1002,7 +1009,7 @@ describe('GUN turret must align before firing', () => {
     });
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Turret must rotate before it can fire — should NOT damage enemy this tick
     expect(enemy.hp).toBe(enemy.maxHp);
   });
@@ -1015,7 +1022,7 @@ describe('GUN turret must align before firing', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -1026,7 +1033,7 @@ describe('GUN turret must align before firing', () => {
     });
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(gun.firingFlash).toBe(4);
   });
 });
@@ -1045,7 +1052,7 @@ describe('Non-turreted defenses (PBOX, HBOX, FTUR, TSLA) have no turret state', 
       const s = makeDefenseStructure(bldg, house, 10, 10);
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(s.turretDir).toBeUndefined();
     });
 
@@ -1055,7 +1062,7 @@ describe('Non-turreted defenses (PBOX, HBOX, FTUR, TSLA) have no turret state', 
       const s = makeDefenseStructure(bldg, house, 10, 10);
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       expect(s.firingFlash).toBeUndefined();
     });
   }

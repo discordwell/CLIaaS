@@ -807,6 +807,45 @@ describe('Naval reinforcement — C++ parity', () => {
       expect(cruiser.teamMissions![1].mission).toBe(TMISSION_UNLOAD);
       expect(cruiser.teamMissionIndex).toBe(0);
     });
+
+    it('preserves C++ Team::Add creation order before LST cargo is hidden', () => {
+      // C++ reinf.cpp:_Create_Group calls Team::Add for every member in INI
+      // order, then transport->Attach(object) limbos cargo. The visible spawned
+      // list contains only the LST, but Team member order still comes from the
+      // original creation sequence.
+      const team: TeamType = {
+        name: 'mcvlst',
+        house: 1,
+        flags: 0,
+        maxAllowed: 1,
+        origin: 0,
+        trigger: -1,
+        members: [
+          { type: '2TNK', count: 2 },
+          { type: 'JEEP', count: 1 },
+          { type: 'MCV', count: 1 },
+          { type: 'LST', count: 1 },
+        ],
+        missions: [
+          { mission: TMISSION_MOVE, data: 1 },
+          { mission: TMISSION_UNLOAD, data: 0 },
+        ],
+      };
+
+      const result = executeTriggerAction(
+        { action: TACTION_REINFORCEMENTS, team: 0, trigger: -1, data: 0 },
+        [team],
+        new Map<number, CellPos>([[0, { cx: 10, cy: 53 }], [1, { cx: 14, cy: 53 }]]),
+        new Set<number>(),
+        [],
+        undefined,
+        new Map<House, string>([[House.Greece, 'west']]),
+        { x: 10, y: 20, w: 80, h: 80 },
+      );
+
+      expect(result.spawned.map((e) => e.type)).toEqual(['LST']);
+      expect(result.teamCreationOrder?.map((e) => e.type)).toEqual(['2TNK', '2TNK', 'JEEP', 'MCV', 'LST']);
+    });
   });
 
   // ============================================================

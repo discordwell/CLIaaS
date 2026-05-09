@@ -27,6 +27,7 @@ import {
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
 import { COUNTRY_BONUSES } from '../engine/types';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -526,10 +527,11 @@ describe('2TNK retaliation (techno.cpp)', () => {
     tank.target = null;
 
     const ctx = makeCombatCtx([tank, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, attacker);
 
     expect(tank.target).toBe(attacker);
-    expect(tank.mission).toBe(Mission.ATTACK);
+    expect(tank.mission).toBe(Mission.GUARD);
   });
 
   it('2TNK CAN retaliate (has weapon)', () => {
@@ -538,17 +540,18 @@ describe('2TNK retaliation (techno.cpp)', () => {
     expect(tank.weapon!.name).toBe('90mm');
   });
 
-  it('does not retarget if already has a living target', () => {
+  it('keeps an in-range living target when the AI threat check rejects the new source', () => {
+    ScenarioRandom.seed = 0;
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
-    const existingTarget = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
-    const newAttacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    const existingTarget = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    const newAttacker = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     tank.mission = Mission.ATTACK;
     tank.target = existingTarget;
 
     const ctx = makeCombatCtx([tank, existingTarget, newAttacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, newAttacker);
 
-    // Should keep existing target, not switch
     expect(tank.target).toBe(existingTarget);
   });
 
@@ -574,6 +577,7 @@ describe('2TNK retaliation (techno.cpp)', () => {
     tank.target = deadTarget;
 
     const ctx = makeCombatCtx([tank, deadTarget, newAttacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, newAttacker);
 
     // Should switch to new attacker since old target is dead
@@ -689,12 +693,13 @@ describe('2TNK range check (techno.cpp)', () => {
 
   it('1TNK has shorter range than 2TNK (4.0 vs 4.75)', () => {
     const tank1 = entityAtCell(UnitType.V_1TNK, House.Spain, 10, 10);
-    // Target at 4.5 cells: in range for 2TNK (4.75) but out of range for 1TNK (4.0)
+    // Fire_Coord offsets mean the center-to-center separation must be below
+    // the nominal range to stay inside C++ In_Range.
     const target = new Entity(UnitType.V_2TNK, House.USSR,
-      tank1.pos.x + CELL_SIZE * 4.5, tank1.pos.y);
+      tank1.pos.x + CELL_SIZE * 4.2, tank1.pos.y);
     const tank2 = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
-    expect(tank1.inRange(target)).toBe(false); // 4.5 > 4.0
-    expect(tank2.inRange(target)).toBe(true);  // 4.5 < 4.75
+    expect(tank1.inRange(target)).toBe(false);
+    expect(tank2.inRange(target)).toBe(true);
   });
 });
 

@@ -34,7 +34,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { UnitType } from '../engine/types';
-import { infantryFireLaunch } from '../engine/missionAI';
+import { infantryFireLaunch, infantryProneLaunch } from '../engine/missionAI';
 
 describe('Infantry FireLaunch values match C++ idata.cpp constructor args', () => {
   it('DOG FireLaunch = 1 (idata.cpp:384 Dog constructor)', () => {
@@ -91,5 +91,25 @@ describe('Infantry FireLaunch values match C++ idata.cpp constructor args', () =
 
   it('Unknown types fall back to default FireLaunch = 2', () => {
     expect(infantryFireLaunch('UNKNOWN')).toBe(2);
+  });
+});
+
+describe('Infantry ProneLaunch values match C++ idata.cpp constructor args', () => {
+  it('E4 (Flamethrower) ProneLaunch = 0, so prone fire launches same tick', () => {
+    expect(infantryProneLaunch(UnitType.I_E4)).toBe(0);
+  });
+
+  it('E2 (Grenadier) ProneLaunch = 6, shorter than standing FireLaunch=14', () => {
+    expect(infantryProneLaunch(UnitType.I_E2)).toBe(6);
+  });
+
+  it('E1 and E3 ProneLaunch match their standing FireLaunch values', () => {
+    expect(infantryProneLaunch(UnitType.I_E1)).toBe(2);
+    expect(infantryProneLaunch(UnitType.I_E3)).toBe(3);
+  });
+
+  it('Civilian/unknown prone launch falls back to 0 per CivilianDoControls', () => {
+    expect(infantryProneLaunch(UnitType.I_C1)).toBe(0);
+    expect(infantryProneLaunch('UNKNOWN')).toBe(0);
   });
 });

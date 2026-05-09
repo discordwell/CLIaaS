@@ -18,8 +18,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   MAD_TANK_CHARGE_TICKS,
-  MAD_TANK_DAMAGE,
+  MAD_TANK_UNIT_DAMAGE_PERCENT,
+  MAD_TANK_BUILDING_DAMAGE_PERCENT,
+  MAD_TANK_INFANTRY_DAMAGE,
   MAD_TANK_RADIUS,
+  MAD_TANK_SCREEN_SHAKE,
   updateMADTank,
   deployMADTank,
   type SpecialUnitsContext,
@@ -135,25 +138,18 @@ describe('Damage type — percentage-based, WARHEAD_AP (logic.cpp:287-307)', () 
     expect(expectedDamage).toBe(Math.floor(400 * 0.45)); // 180
   });
 
-  it('TS MAD_TANK_DAMAGE is flat 600 — MISMATCH with C++ percentage-based damage', () => {
-    // C++ applies 45% of MaxStrength per unit, TS applies flat 600 to all
-    // This means TS over-damages low-HP units and under-damages high-HP units
-    expect(MAD_TANK_DAMAGE).toBe(600); // documents current TS value
-    // A Medium Tank (400 HP) should take 180 damage (45%), not 600
-    // A Mammoth Tank (600 HP) should take 270 damage (45%), not 600
-    const mammothHP = UNIT_STATS['4TNK'].strength;
-    const cppDamage = Math.floor(mammothHP * CPP_QUAKE_UNIT_DAMAGE_PCT);
-    expect(cppDamage).not.toBe(MAD_TANK_DAMAGE); // mismatch
+  it('TS exports the C++ percentage damage constants, not a flat damage value', () => {
+    expect(MAD_TANK_UNIT_DAMAGE_PERCENT).toBe(CPP_QUAKE_UNIT_DAMAGE_PCT);
+    expect(MAD_TANK_BUILDING_DAMAGE_PERCENT).toBe(CPP_QUAKE_BUILDING_DAMAGE_PCT);
+    expect(MAD_TANK_INFANTRY_DAMAGE).toBe(CPP_QUAKE_INFANTRY_DAMAGE);
   });
 
-  it('C++ uses WARHEAD_AP (logic.cpp:307), TS uses HE', () => {
+  it('C++ uses WARHEAD_AP (logic.cpp:307)', () => {
     // logic.cpp:307: obj->Take_Damage(damage, 0, WARHEAD_AP, 0, true)
-    // WARHEAD_AP has different armor multipliers than HE
     expect(CPP_WARHEAD).toBe('AP');
-    // TS updateMADTank uses 'HE' — verified by reading specialUnits.ts:291
   });
 
-  it('TS updateMADTank applies flat damage with HE warhead to nearby vehicles', () => {
+  it('updateMADTank applies 45% max-strength forced AP damage to nearby vehicles', () => {
     resetEntityIds();
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 11, 10); // 1 cell away
@@ -163,11 +159,10 @@ describe('Damage type — percentage-based, WARHEAD_AP (logic.cpp:287-307)', () 
     const ctx = makeSpecialUnitsCtx([qtnk, target]);
     updateMADTank(ctx, qtnk);
 
-    // TS applies flat MAD_TANK_DAMAGE with 'HE' warhead
     const hit = ctx.damagedEntities.find(d => d.id === target.id);
     expect(hit).toBeDefined();
-    expect(hit!.amount).toBe(MAD_TANK_DAMAGE); // flat 600
-    expect(hit!.warhead).toBe('HE'); // should be 'AP' per C++
+    expect(hit!.amount).toBe(Math.floor(target.maxHp * CPP_QUAKE_UNIT_DAMAGE_PCT));
+    expect(hit!.warhead).toBe(CPP_WARHEAD);
   });
 });
 
@@ -193,7 +188,7 @@ describe('Blast radius — aftrmath.ini MTankDistance=20 (logic.cpp:291)', () =>
     // TS now matches C++ with radius=20
     const dist = 19;
     expect(dist < CPP_MTANK_DISTANCE).toBe(true);  // C++ would damage
-    expect(dist <= MAD_TANK_RADIUS).toBe(true);     // TS now also damages (20 cell radius)
+    expect(dist < MAD_TANK_RADIUS).toBe(true);     // TS now also damages (20 cell radius)
   });
 
   it('TS updateMADTank damages entity at 9 cells (inside radius 20)', () => {
@@ -213,6 +208,20 @@ describe('Blast radius — aftrmath.ini MTankDistance=20 (logic.cpp:291)', () =>
     const hit = ctx.damagedEntities.find(d => d.id === target.id);
     expect(hit).toBeDefined(); // TS now matches C++ behavior
   });
+
+  it('updateMADTank excludes entities exactly at MTankDistance', () => {
+    resetEntityIds();
+    const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
+    const target = entityAtCell(UnitType.V_2TNK, House.Spain, 30, 10);
+    qtnk.isDeployed = true;
+    qtnk.deployTimer = 1;
+
+    const ctx = makeSpecialUnitsCtx([qtnk, target]);
+    updateMADTank(ctx, qtnk);
+
+    expect(worldDist(qtnk.pos, target.pos)).toBe(20);
+    expect(ctx.damagedEntities.find(d => d.id === target.id)).toBeUndefined();
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -231,7 +240,7 @@ describe('Building damage — aftrmath.ini QuakeBuildingDamage=40% (logic.cpp:29
     expect(expectedDamage).toBe(400);
   });
 
-  it('TS updateMADTank does NOT damage structures at all — MISMATCH', () => {
+  it('updateMADTank damages structures at 40% of MaxStrength', () => {
     resetEntityIds();
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     qtnk.isDeployed = true;
@@ -251,9 +260,7 @@ describe('Building damage — aftrmath.ini QuakeBuildingDamage=40% (logic.cpp:29
     const ctx = makeSpecialUnitsCtx([qtnk], structures);
     updateMADTank(ctx, qtnk);
 
-    // TS does not call damageStructure for MAD Tank shockwave
-    expect(ctx.damagedStructures.length).toBe(0);
-    // C++ would damage this structure: 1000 * 0.40 = 400 damage with WARHEAD_AP
+    expect(ctx.damagedStructures).toEqual([{ type: 'WEAP', damage: 400 }]);
   });
 });
 
@@ -284,7 +291,7 @@ describe('Infantry exclusion — aftrmath.ini QuakeInfantryDamage=0 (logic.cpp:2
     expect(infantry.hp).toBe(infantry.maxHp);
   });
 
-  it('TS also excludes air units (C++ would damage them as non-infantry)', () => {
+  it('updateMADTank damages air units as non-infantry objects', () => {
     // C++ logic.cpp:299-300 default case: damage = QuakeUnitDamage * MaxStrength
     // Aircraft are NOT infantry, so C++ WOULD damage them within radius
     // TS excludes isAirUnit — this is a MISMATCH for air units
@@ -298,8 +305,9 @@ describe('Infantry exclusion — aftrmath.ini QuakeInfantryDamage=0 (logic.cpp:2
     updateMADTank(ctx, qtnk);
 
     const hit = ctx.damagedEntities.find(d => d.id === heli.id);
-    // TS excludes air units, C++ would damage them (MISMATCH for aircraft)
-    expect(hit).toBeUndefined(); // documents TS behavior
+    expect(hit).toBeDefined();
+    expect(hit!.amount).toBe(Math.floor(heli.maxHp * CPP_QUAKE_UNIT_DAMAGE_PCT));
+    expect(hit!.warhead).toBe(CPP_WARHEAD);
   });
 });
 
@@ -320,7 +328,7 @@ describe('Self-destruct — unit.cpp:2709 Strength=1, then quake kills (logic.cp
     expect(selfDamageFromQuake).toBeGreaterThan(1); // guarantees death
   });
 
-  it('TS directly sets hp=0, alive=false (functionally equivalent kill)', () => {
+  it('updateMADTank sets self to 1 HP before quake damage kills it', () => {
     resetEntityIds();
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     qtnk.isDeployed = true;
@@ -329,7 +337,9 @@ describe('Self-destruct — unit.cpp:2709 Strength=1, then quake kills (logic.cp
     const ctx = makeSpecialUnitsCtx([qtnk]);
     updateMADTank(ctx, qtnk);
 
-    // TS directly kills the tank (specialUnits.ts:296)
+    const selfHit = ctx.damagedEntities.find(d => d.id === qtnk.id);
+    expect(selfHit).toBeDefined();
+    expect(selfHit!.amount).toBe(Math.floor(300 * CPP_QUAKE_UNIT_DAMAGE_PCT));
     expect(qtnk.alive).toBe(false);
     expect(qtnk.hp).toBe(0);
     expect(qtnk.mission).toBe(Mission.DIE);
@@ -347,7 +357,7 @@ describe('Screen shake — logic.cpp:273 Shake_The_Screen(8)', () => {
     expect(CPP_SCREEN_SHAKE).toBe(8);
   });
 
-  it('TS updateMADTank does not set screenShake — MISMATCH', () => {
+  it('updateMADTank sets screenShake to C++ quake intensity', () => {
     resetEntityIds();
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
     qtnk.isDeployed = true;
@@ -358,9 +368,8 @@ describe('Screen shake — logic.cpp:273 Shake_The_Screen(8)', () => {
 
     updateMADTank(ctx, qtnk);
 
-    // TS does not set screenShake during MAD Tank detonation
-    // C++ calls Shake_The_Screen(8)
-    expect(ctx.screenShake).toBe(0); // documents that shake is missing
+    expect(ctx.screenShake).toBe(CPP_SCREEN_SHAKE);
+    expect(MAD_TANK_SCREEN_SHAKE).toBe(CPP_SCREEN_SHAKE);
   });
 });
 

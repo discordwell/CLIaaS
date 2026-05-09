@@ -20,9 +20,9 @@ describe('tickRotation — 32-step accumulator system', () => {
     expect(inf.bodyFacing32).toBe(Dir.SE * 4);
   });
 
-  it('Mammoth Tank (rot=5) takes 7 ticks to advance one 8-dir facing step', () => {
-    // 32-step system: 4 visual steps per 8-dir step
-    // rot=5, threshold=8: visual steps at ticks 2,4,5,7 → facing change at tick 7
+  it('Mammoth Tank (rot=5) takes 4 ticks to advance one 8-dir facing step', () => {
+    // C++ FacingClass::Rotation_Adjust applies the full ROT in 256-dir space.
+    // Dir_Facing rounds to the next 8-way facing once current reaches 16.
     const mammoth = new Entity(UnitType.V_4TNK, House.Spain, 100, 100);
     expect(mammoth.stats.rot).toBe(5);
     mammoth.facing = Dir.N;
@@ -35,9 +35,9 @@ describe('tickRotation — 32-step accumulator system', () => {
       mammoth.tickRotation();
       ticksForFirst++;
     }
-    expect(ticksForFirst).toBe(7);
+    expect(ticksForFirst).toBe(4);
     expect(mammoth.facing).toBe(Dir.NE);
-    expect(mammoth.bodyFacing32).toBe(4); // NE = 4 in 32-step
+    expect(mammoth.bodyFacing32).toBe(3);
   });
 
   it('bodyFacing32 advances smoothly through intermediate visual steps', () => {
@@ -80,7 +80,7 @@ describe('tickRotation — 32-step accumulator system', () => {
     expect(ticks).toBeLessThanOrEqual(23);
   });
 
-  it('Artillery (rot=2) rotates very slowly — ~16 ticks per 8-dir step', () => {
+  it('Artillery (rot=2) rotates very slowly — 8 ticks per 8-dir facing step', () => {
     const arty = new Entity(UnitType.V_ARTY, House.Spain, 100, 100);
     expect(arty.stats.rot).toBe(2);
     arty.facing = Dir.N;
@@ -93,8 +93,8 @@ describe('tickRotation — 32-step accumulator system', () => {
       arty.tickRotation();
       ticks++;
     }
-    // rot=2, 4 visual steps × ceil(8/2)=4 ticks each = 16 ticks
-    expect(ticks).toBe(16);
+    // rot=2 in 256-dir space: current=16 at tick 8, rounded to NE.
+    expect(ticks).toBe(8);
     expect(arty.facing).toBe(Dir.NE);
   });
 
@@ -169,12 +169,10 @@ describe('tickTurretRotation — 2x body speed, 32-step', () => {
       tank.tickTurretRotation();
       ticks++;
     }
-    // Turret: rot+1=6, threshold=8, 4 visual steps (C++ unit.cpp:542)
-    // tick1: acc=6. tick2: acc=12→step(acc=4). tick3: acc=10→step(acc=2).
-    // tick4: acc=8→step(acc=0). tick5: acc=6. tick6: acc=12→step(acc=4).
-    expect(ticks).toBe(6);
+    // Turret: rot+1=6 in 256-dir space, current=18 at tick 3, rounded to NE.
+    expect(ticks).toBe(3);
     expect(tank.turretFacing).toBe(Dir.NE);
-    expect(tank.turretFacing32).toBe(4);
+    expect(tank.turretFacing32).toBe(2);
   });
 
   it('turret rotation is faster than body for same unit (ROT+1 vs ROT)', () => {

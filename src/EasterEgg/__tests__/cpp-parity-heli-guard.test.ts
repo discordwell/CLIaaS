@@ -271,7 +271,7 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     game.entityById.set(hind.id, hind);
 
     // Rocket soldier (AA) at (12,10) — 2 cells, distance doubled to 4 via AA penalty
-    const rocket = entityAtCell(UnitType.I_E2, House.Greece, 12, 10);
+    const rocket = entityAtCell(UnitType.I_E3, House.Greece, 12, 10);
     game.entities.push(rocket);
     game.entityById.set(rocket.id, rocket);
 
@@ -282,10 +282,12 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
 
     callHeliGuardScan(game, hind);
 
-    // Both are in scan range. Find_Juicy_Target would pick rifleman (3 < 4 after AA penalty).
-    // But Target_Something_Nearby may override with Greatest_Threat scoring.
-    // The important thing is that SOME target is found.
-    expect(hind.target).not.toBeNull();
+    expect(rocket.weapon?.isAntiAir || rocket.weapon2?.isAntiAir).toBe(true);
+    expect(rifleman.weapon?.isAntiAir || rifleman.weapon2?.isAntiAir).toBeFalsy();
+
+    // Both are in scan range. Find_Juicy_Target should pick rifleman (3 < 4 after AA penalty).
+    // Target_Something_Nearby then validates and keeps the existing in-range TarCom.
+    expect(hind.target).toBe(rifleman);
   });
 });
 

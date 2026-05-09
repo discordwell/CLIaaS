@@ -289,15 +289,15 @@ describe('3. TS tickRotation parity with C++ Rotation_Adjust', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.desiredFacing = Dir.E;
     let tsTicks = 0;
-    while (tank.facing !== Dir.E && tsTicks < 100) {
+    let aligned = false;
+    while (!aligned && tsTicks < 100) {
       tank.rotTickedThisFrame = false;
-      tank.tickRotation();
+      aligned = tank.tickRotation();
       tsTicks++;
     }
 
-    // TS 32-step accumulator system produces identical tick count to C++ for 90-degree turns.
-    // This is because both systems are governed by the same ROT rate; the TS accumulator
-    // threshold of 8 (= 256/32) correctly maps 8 DirType units per visual step.
+    // The movement gate is exact PrimaryFacing.Current()==DesiredFacing, not
+    // rounded 8-way facing. Rounded facing reaches E earlier; Start_Of_Move must wait.
     expect(tsTicks).toBe(cppTicks);
     expect(tsTicks).toBe(13);
   });
@@ -321,15 +321,14 @@ describe('3. TS tickRotation parity with C++ Rotation_Adjust', () => {
     const arty = new Entity(UnitType.V_ARTY, House.Spain, 100, 100);
     arty.desiredFacing = Dir.E;
     let tsTicks = 0;
-    while (arty.facing !== Dir.E && tsTicks < 100) {
+    let aligned = false;
+    while (!aligned && tsTicks < 100) {
       arty.rotTickedThisFrame = false;
-      arty.tickRotation();
+      aligned = arty.tickRotation();
       tsTicks++;
     }
 
-    // TS with ROT=2, threshold=8: 4 ticks per visual step (2*4=8).
-    // 8 visual steps to go from bodyFacing32=0 to bodyFacing32=8.
-    // 8 × 4 = 32 ticks. Matches C++!
+    // Exact 256-step Rotation_Adjust matches C++ tick count.
     expect(tsTicks).toBe(cppTicks);
     expect(tsTicks).toBe(32);
   });
@@ -350,14 +349,15 @@ describe('3. TS tickRotation parity with C++ Rotation_Adjust', () => {
     const jeep = new Entity(UnitType.V_JEEP, House.Spain, 100, 100);
     jeep.desiredFacing = Dir.E;
     let tsTicks = 0;
-    while (jeep.facing !== Dir.E && tsTicks < 100) {
+    let aligned = false;
+    while (!aligned && tsTicks < 100) {
       jeep.rotTickedThisFrame = false;
-      jeep.tickRotation();
+      aligned = jeep.tickRotation();
       tsTicks++;
     }
 
-    // Fixed: TS now uses the accumulator for all vehicles (including ROT=10 Jeeps),
-    // matching C++ Rotation_Adjust behavior. Only infantry snap instantly.
+    // Fixed: TS now uses exact 256-step Rotation_Adjust for all vehicles
+    // (including ROT=10 Jeeps). Only infantry snap instantly.
     expect(tsTicks).toBe(cppTicks);
     expect(tsTicks).toBe(7);
   });
@@ -448,12 +448,14 @@ describe('5. Turret rotation at ROT+1 (unit.cpp:542)', () => {
 
     // Body: N→NE
     tank.facing = Dir.N;
+    tank.bodyFacing256 = Dir.N * 32;
     tank.bodyFacing32 = 0;
     tank.desiredFacing = Dir.NE;
     let bodyTicks = 0;
-    while (tank.facing !== Dir.NE && bodyTicks < 30) {
+    let bodyAligned = false;
+    while (!bodyAligned && bodyTicks < 30) {
       tank.rotTickedThisFrame = false;
-      tank.tickRotation();
+      bodyAligned = tank.tickRotation();
       bodyTicks++;
     }
 
@@ -472,21 +474,24 @@ describe('5. Turret rotation at ROT+1 (unit.cpp:542)', () => {
     expect(turretTicks).toBeLessThan(bodyTicks);
   });
 
-  it('TS tickTurretRotation accumulates at ROT+1 per tick', () => {
+  it('TS tickTurretRotation applies ROT+1 in 256-dir space', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.turretFacing = Dir.N;
+    tank.turretFacing256 = Dir.N * 32;
     tank.turretFacing32 = 0;
     tank.desiredTurretFacing = Dir.E; // 4 8-dir steps = 8 visual steps in 32-step
 
-    // First tick: accumulate ROT+1 = 6. 6 < 8, no step.
+    // First tick: CurrentFacing += ROT+1 = 6. Dir_To_32(6) = 1.
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(0); // no step yet
+    expect(tank.turretFacing256).toBe(6);
+    expect(tank.turretFacing32).toBe(1);
 
-    // Second tick: acc = 6+6 = 12 >= 8, step. acc = 12-8 = 4.
+    // Second tick: CurrentFacing = 12. Dir_To_32(12) = 2.
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(1); // one visual step CW
+    expect(tank.turretFacing256).toBe(12);
+    expect(tank.turretFacing32).toBe(2);
   });
 });
 
@@ -687,6 +692,7 @@ describe('9. Stop-rotate-move for vehicles (drive.cpp:1064-1071, entity.ts:moveT
   it('vehicle moves once facing is aligned', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     tank.facing = Dir.E;
+    tank.bodyFacing256 = Dir.E * 32;
     tank.bodyFacing32 = Dir.E * 4;
     tank.desiredFacing = Dir.E;
     const startX = tank.pos.x;
@@ -794,7 +800,7 @@ describe('10. 32-step bodyFacing32 and BODY_SHAPE sprite mapping (inline.h:694)'
 
 describe('11. GroundspeedBias multiplies rotation rate (drive.cpp:1346)', () => {
   // C++ drive.cpp:1346: PrimaryFacing.Rotation_Adjust(Techno_Type_Class()->ROT * House->GroundspeedBias)
-  // TS entity.ts:669: this.rotAccumulator += this.stats.rot * this.groundspeedBias;
+  // TS entity.ts: tickRotation applies ROT * groundspeedBias in 256-dir space.
 
   it('default groundspeedBias is 1.0 (no modification)', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
@@ -843,12 +849,12 @@ describe('12. Double-accumulation prevention (entity.ts:655-656)', () => {
     tank.tickRotation();
     expect(tank.rotTickedThisFrame).toBe(true);
 
-    const accAfterFirst = tank.rotAccumulator;
+    const bodyFacingAfterFirst = tank.bodyFacing256;
     const bf32AfterFirst = tank.bodyFacing32;
 
     // Second call in same frame: no change
     tank.tickRotation();
-    expect(tank.rotAccumulator).toBe(accAfterFirst);
+    expect(tank.bodyFacing256).toBe(bodyFacingAfterFirst);
     expect(tank.bodyFacing32).toBe(bf32AfterFirst);
   });
 
@@ -937,6 +943,7 @@ describe('14. Accumulator reset when facing matches desired (entity.ts:649-651)'
     tank.facing = Dir.E;
     tank.desiredFacing = Dir.E;
     tank.rotAccumulator = 42; // leftover from previous rotation
+    tank.bodyFacing256 = Dir.E * 32;
     tank.bodyFacing32 = 7;    // slightly off
 
     const aligned = tank.tickRotation();

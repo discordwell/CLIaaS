@@ -238,7 +238,6 @@ void UnitClass::operator delete(void * ptr)
 UnitClass::~UnitClass(void)
 {
 	if (GameActive && Class.Is_Valid()) {
-
 		/*
 		**	Remove this member from any team it may be associated with. This must occur at the
 		**	top most level of the inheritance hierarchy because it may call virtual functions.

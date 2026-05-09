@@ -41,7 +41,9 @@ beforeEach(() => resetEntityIds());
 // -- Helpers ------------------------------------------------------------------
 
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
-  return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+  const entity = new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+  if (type === UnitType.V_MNLY) entity.mission = Mission.UNLOAD;
+  return entity;
 }
 
 function makeStructure(
@@ -185,6 +187,21 @@ describe('Minelayer placement mechanics (rules.ini:685 Ammo=5, udata.cpp)', () =
   it('MNLY has crusher=true (can crush infantry)', () => {
     // C++ udata.cpp: MNLY IsCrusher=true (wheeled but still crushes)
     expect(stats.crusher).toBe(true);
+  });
+
+  it('does not place a mine from ordinary Mission.Move', () => {
+    const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
+    mnly.mission = Mission.MOVE;
+    mnly.moveTarget = { lx: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
+    const mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
+    const ctx = makeSpecialCtx([mnly], [], mines);
+    const start = { ...mnly.pos };
+
+    updateMinelayer(ctx, mnly);
+
+    expect(mines.length).toBe(0);
+    expect(mnly.pos).toEqual(start);
+    expect(mnly.mission).toBe(Mission.MOVE);
   });
 
   it('minelayer places mine at target cell', () => {

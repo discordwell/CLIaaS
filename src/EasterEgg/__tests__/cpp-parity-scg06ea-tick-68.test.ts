@@ -72,6 +72,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type CombatContext, triggerRetaliation } from '../engine/combat';
 import { GameMap } from '../engine/map';
+import { Team } from '../engine/team';
 import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
@@ -138,6 +139,18 @@ function makeMockCtx(overrides: Partial<CombatContext> = {}): CombatContext {
   } as CombatContext;
 }
 
+function makeMovingTeam(member: Entity): Team {
+  const team = new Team({
+    house: member.house,
+    desiredMembers: [{ type: member.type, count: 1 }],
+    missionList: [],
+    isReinforcable: false,
+  });
+  team.add(member);
+  team.isMoving = true;
+  return team;
+}
+
 describe('SCG06EA tick 68 — BadGuy E1 team-retaliation Fire_At (C++ foot.cpp:1172 + infantry.cpp:1237)', () => {
   it('team member in MOVE acquires attacker as TarCom (team.cpp:1613+1715-1718)', () => {
     // Part 1 of the port: triggerRetaliation teamRef branch sets individual
@@ -148,13 +161,14 @@ describe('SCG06EA tick 68 — BadGuy E1 team-retaliation Fire_At (C++ foot.cpp:1
     const victim = makeEntity(UnitType.I_E1, House.BadGuy, 19, 68);
     victim.mission = Mission.MOVE;
     victim.missionTimer = 7;
-    victim.teamRef = { id: 1 };
+    const team = makeMovingTeam(victim);
 
     const attacker = makeEntity(UnitType.I_E1, House.Greece, 19, 65);
 
     triggerRetaliation(ctx, victim, attacker);
 
-    expect(victim.target).toBe(attacker);
+    expect(team.targetEntityRef).toBe(attacker);
+    expect(victim.target).toBeNull();
     // Critical: mission and timer unchanged. A mission change would reset
     // missionTimer via Commence, firing a Mission_Move jitter RNG.
     expect(victim.mission).toBe(Mission.MOVE);
@@ -168,7 +182,7 @@ describe('SCG06EA tick 68 — BadGuy E1 team-retaliation Fire_At (C++ foot.cpp:1
     const ctx = makeMockCtx();
     const victim = makeEntity(UnitType.I_E1, House.BadGuy, 19, 68);
     victim.mission = Mission.MOVE;
-    victim.teamRef = { id: 1 };
+    const team = makeMovingTeam(victim);
 
     const existingTarget = makeEntity(UnitType.I_E1, House.Greece, 20, 64);
     victim.target = existingTarget;
@@ -177,6 +191,7 @@ describe('SCG06EA tick 68 — BadGuy E1 team-retaliation Fire_At (C++ foot.cpp:1
     triggerRetaliation(ctx, victim, attacker);
 
     expect(victim.target).toBe(existingTarget);
+    expect(team.targetEntityRef).toBe(attacker);
   });
 
   it('non-team AI unit still runs individual retaliation branch (regression guard)', () => {
@@ -192,7 +207,7 @@ describe('SCG06EA tick 68 — BadGuy E1 team-retaliation Fire_At (C++ foot.cpp:1
     triggerRetaliation(ctx, victim, attacker);
 
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 
   it('BadGuy E1 @(19,68) is in rifle range of Greek E1 @(19,65) (3-cell range)', () => {

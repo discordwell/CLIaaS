@@ -311,6 +311,7 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     const game = createGame();
     const mcv = placeVehicle(game, UnitType.V_MCV, House.Greece, 10, 10);
     mcv.facing = 2; // East — matches target direction
+    mcv.bodyFacing256 = 64;
 
     const team = new Team({
       house: House.Greece,
@@ -324,7 +325,12 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     const waypoints = new Map<number, { cx: number; cy: number }>([
       [26, { cx: 22, cy: 10 }],
     ]);
-    updateAllTeams(waypoints, { structures: [], entities: [mcv], map: game.map });
+    updateAllTeams(waypoints, {
+      structures: [],
+      entities: [mcv],
+      map: game.map,
+      startDriveClassMove: (unit) => (game as any).startDriveClassMove(unit),
+    });
 
     expect(mcv.moveTarget, 'MCV moveTarget set (Assign_Destination)').not.toBeNull();
     expect(mcv.path.length, 'path populated via Basic_Path at coord (drive.cpp:638-640)').toBeGreaterThan(0);

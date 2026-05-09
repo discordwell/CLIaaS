@@ -7,13 +7,13 @@
 import {
   type WorldPos, type WeaponStats, type ArmorType,
   type WarheadType, type WarheadMeta, type WarheadProps,
-  CELL_SIZE, LEPTON_SIZE,
+  CELL_SIZE, LEPTON_SIZE, MAP_CELLS,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
   leptonDist, pixelToLepton, directionTo, directionToLeptons256, worldToCell, DIR_DX, DIR_DY,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
 } from './types';
-import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8, dir256ToFacing32 } from './entity';
 import { type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, Terrain } from './map';
@@ -21,7 +21,8 @@ import { findPath } from './pathfinding';
 import { canTargetNaval } from './aircraft';
 import { combatAnim } from './combat';
 import { ScenarioRandom } from './random';
-import { AREA_GUARD_APPROACH_RETRY, SCG01_MISSION_GUARD_CADENCE_FIX, isScg01Jeep27DebugEnabled } from './perCellProcess';
+import { isScg01Jeep27DebugEnabled } from './perCellProcess';
+import { type LogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ export interface MissionAIContext {
   entities: Entity[];
   structures: MapStructure[];
   effects: Effect[];
+  logicAnims: LogicAnim[];
   map: GameMap;
   tick: number;
   playerHouse: House;
@@ -48,7 +50,9 @@ export interface MissionAIContext {
   // Movement / speed
   movementSpeed(entity: Entity): number;
   /** C++ InfantryClass::Start_Driver — find sub-cell, atomic occupy-bit swap */
-  infantryStartDriver(entity: Entity, destCX: number, destCY: number): { lx: number; ly: number };
+  infantryStartDriver(entity: Entity, destCX: number, destCY: number): { lx: number; ly: number } | null;
+  /** C++ InfantryClass::Stop_Driver — clear Head_To_Coord claim, occupy current coord */
+  stopInfantryDriver?: (entity: Entity) => void;
   /** C++ Movement_AI:3810 — validate next path cell, re-path if blocked */
   infantryValidatePath(entity: Entity): void;
   /** C++ FootClass::Approach_Target (foot.cpp:926) — find a passable cell within
@@ -71,16 +75,17 @@ export interface MissionAIContext {
     screenShake: number; explosionSize: number; debris: boolean;
     decal: { infantry: number; vehicle: number; opacity: number } | null;
     explodeLgSound: boolean; attackerIsPlayer: boolean; trackLoss: boolean;
+    attacker?: Entity;
   }): void;
   launchProjectile(
     attacker: Entity, target: Entity | null, weapon: WeaponStats,
     damage: number, impactX: number, impactY: number, directHit: boolean,
+    launchCoord?: { lx: number; ly: number },
   ): void;
-  /** Queue a Coord_Scatter RNG for NEXT tick. C++ BulletClass::AI creates the
-   *  invisible bullet at target coord on fire tick, then Bullet_Explodes fires
-   *  Coord_Scatter on the NEXT AI tick via Fuse_Checkup. TS's instant-damage path
-   *  otherwise consumes the RNG at fire time — 1+ ticks too early. */
-  deferInvisibleScatter(): void;
+  /** C++ TechnoClass::Fire_At (techno.cpp:3263-3265) — if a non-player
+   *  shooter fires while hidden from PlayerPtr, it reveals a 2-cell radius
+   *  around itself via Map.Sight_From(..., PlayerPtr, false). */
+  revealShooterFromFire?(entity: Entity): void;
   applySplashDamage(
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
     primaryTargetId: number, attackerHouse: House, attacker?: Entity,
@@ -115,8 +120,65 @@ export interface MissionAIContext {
   // Minimap alert
   minimapAlert(cx: number, cy: number): void;
 
-  // Per-house fog-of-war — C++ techno.cpp:1467+ Evaluate_Object checks Is_Discovered_By_House
+  // C++ techno.cpp:1529 Evaluate_Object checks strict PlayerPtr visibility:
+  // candidate is valid if IsOwnedByPlayer OR IsDiscoveredByPlayer.
+  isDiscoveredByPlayer?(entity: Entity): boolean;
+  // Per-house fog-of-war — retained for older mission-specific approximations.
   isRevealedToHouse(cx: number, cy: number, houseIdx: number): boolean;
+}
+
+/** C++ TechnoClass::Fire_At ammo decrement + InfantryClass::Fire_At fraidy-cat
+ *  empty-ammo panic side effect (techno.cpp:3249-3250, infantry.cpp:2198-2208).
+ *  Applies only after a projectile/fire action was actually launched. */
+function consumeAmmoAfterSuccessfulFire(entity: Entity): void {
+  if (entity.ammo > 0) entity.ammo--;
+
+  if (entity.stats.isInfantry && entity.stats.isFraidyCat && entity.ammo === 0) {
+    entity.fear = Entity.FEAR_MAXIMUM;
+    if (entity.mission === Mission.ATTACK || entity.mission === Mission.HUNT) {
+      entity.mission = Mission.GUARD;
+    }
+  }
+}
+
+export interface GreatestThreatRangeContext {
+  entities: Entity[];
+  map: GameMap;
+  tick: number;
+  playerHouse: House;
+  entitiesAllied(a: Entity, b: Entity): boolean;
+  isPlayerControlled(e: Entity): boolean;
+  isDiscoveredByPlayer?(entity: Entity): boolean;
+  isRevealedToHouse(cx: number, cy: number, houseIdx: number): boolean;
+}
+
+function fireCoordForWeaponAtLatchedFacing(entity: Entity, weapon: WeaponStats, facing256: number): { lx: number; ly: number } {
+  if (!entity.stats.isInfantry || facing256 < 0) return entity.fireCoordForWeapon(weapon);
+
+  const savedBodyFacing256 = entity.bodyFacing256;
+  const savedBodyFacing32 = entity.bodyFacing32;
+  const savedFacing = entity.facing;
+  try {
+    entity.bodyFacing256 = facing256 & 0xFF;
+    entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
+    entity.facing = dir256ToFacing8(entity.bodyFacing256);
+    return entity.fireCoordForWeapon(weapon);
+  } finally {
+    entity.bodyFacing256 = savedBodyFacing256;
+    entity.bodyFacing32 = savedBodyFacing32;
+    entity.facing = savedFacing;
+  }
+}
+
+/** C++ InfantryClass::Random_Animate cases 6-10:
+ *  `PrimaryFacing.Set(Facing_Dir(Random_Pick(FACING_N, FACING_NW)))`.
+ *  FacingType is 0..7 and Facing_Dir maps it to DirType by `facing << 5`. */
+function setInfantryPrimaryFacingFromFacingType(entity: Entity, facing: number): void {
+  const dir256 = (facing << 5) & 0xff;
+  entity.bodyFacing256 = dir256;
+  entity.bodyFacing32 = dir256ToFacing32(dir256);
+  entity.facing = dir256ToFacing8(dir256);
+  entity.desiredFacing = entity.facing;
 }
 
 /** Per-house index mapping — mirrors Game.HOUSE_TO_INDEX for fog-of-war checks.
@@ -127,6 +189,30 @@ const _HOUSE_IDX: Record<string, number> = {
   [House.France]: 6, [House.Turkey]: 7,
   [House.GoodGuy]: 8, [House.BadGuy]: 9, [House.Neutral]: 10,
 };
+
+function isAssignableObjectTarget(target: Entity | null | undefined): target is Entity {
+  // C++ TechnoClass::Assign_Target rejects object targets that are inactive or
+  // zero-strength (techno.cpp:2887-2889). Evaluate_Object can still return a
+  // zero-strength object while it remains in the cell occupier chain; assigning
+  // it clears TarCom.
+  return !!target && !target.inLimbo && target.alive && target.hp > 0;
+}
+
+function assignTargetForTechno(entity: Entity, target: Entity | null): void {
+  // C++ InfantryClass::Assign_Target starts with Path[0] = FACING_NONE before
+  // delegating to FootClass::Assign_Target (infantry.cpp:1123-1134). It does
+  // not clear NavCom. In TS, non-driving infantry need an empty path so the
+  // InfantryClass::Movement_AI Basic_Path branch recomputes from moveTarget.
+  //
+  // Do not touch active drivers here: C++ keeps the current Head_To_Coord hop
+  // alive even when Path[0] is cleared, and TS cannot safely invalidate the
+  // cached path mid-hop without stalling the in-flight driver representation.
+  if (entity.stats.isInfantry && !entity.isDriving) {
+    entity.path = [];
+    entity.pathIndex = 0;
+  }
+  entity.target = target;
+}
 
 // ── Infantry FireLaunch (pre-fire animation stage gate) ────────────────────
 // C++ idata.cpp — per-InfantryTypeClass "Frame of projectile launch" constructor arg.
@@ -151,6 +237,30 @@ export function infantryFireLaunch(type: string): number {
     case UnitType.I_EINSTEIN: return 0;         // Einstein idata.cpp:793 — fires same-tick
     // Civilians, Delphi: FireLaunch=2 (CivilianDoControls, idata.cpp:601-854)
     default: return 2;
+  }
+}
+
+// C++ idata.cpp — per-InfantryTypeClass "Frame of projectile launch while prone"
+// constructor arg. InfantryClass::Firing_AI switches from FireLaunch to
+// ProneLaunch when IsProne is set (infantry.cpp:3656-3658).
+export function infantryProneLaunch(type: string): number {
+  switch (type) {
+    case UnitType.I_DOG: return 1;              // Dog idata.cpp:385
+    case UnitType.I_E1: return 2;               // Rifle idata.cpp:405
+    case UnitType.I_E2: return 6;               // Grenadier idata.cpp:425
+    case UnitType.I_E3: return 3;               // Rocket idata.cpp:445
+    case UnitType.I_E4: return 0;               // Flamethrower idata.cpp:465
+    case UnitType.I_E6: return 3;               // Engineer idata.cpp:485
+    case UnitType.I_SPY: return 3;              // Spy idata.cpp:505
+    case 'E9':                                  // Thief idata.cpp:525
+    case 'THF': return 3;
+    case UnitType.I_TANYA: return 2;            // Tanya/E7 idata.cpp:545
+    case UnitType.I_MEDI: return 25;            // Medic idata.cpp:564
+    case UnitType.I_MECH: return 25;            // Mechanic (Medic-based)
+    case UnitType.I_GNRL: return 2;             // General/Stavros idata.cpp:583
+    case UnitType.I_EINSTEIN: return 0;         // Einstein idata.cpp:794
+    // Civilians, Delphi: ProneLaunch=0 (CivilianDoControls, idata.cpp:603-854)
+    default: return 0;
   }
 }
 
@@ -190,6 +300,13 @@ export function infantryFireLaunch(type: string): number {
 export function runFiringAI(ctx: MissionAIContext, entity: Entity): void {
   if (!entity.target?.alive) return;
   if (!entity.weapon) return;
+  if (entity.suppressFiringAITick === ctx.tick) return;
+  // C++ InfantryClass::Firing_AI calls Can_Fire even while Arm/rearm is nonzero.
+  // InfantryClass::Can_Fire checks negative-damage weapons before delegating to
+  // TechnoClass::Can_Fire's Arm gate, so medics clear fully healed/non-infantry
+  // TarCom targets every tick instead of pinning Mission_Guard and suppressing
+  // Random_Animate until the heal cooldown expires.
+  if (clearIllegalNegativeDamageTarget(entity)) return;
   if (entity.attackCooldown > 0) return;
   if (!entity.inRange(entity.target)) return;
   // C++ infantry.cpp:1639 FIRE_MOVING — blocks fire while driving. Callers that
@@ -198,6 +315,27 @@ export function runFiringAI(ctx: MissionAIContext, entity: Entity): void {
   // block does exactly that (temporarily clears + restores isDriving if firePrep
   // didn't latch).
   updateAttack(ctx, entity);
+}
+
+function clearIllegalNegativeDamageTarget(entity: Entity): boolean {
+  if (!entity.stats.isInfantry || !entity.target?.alive || !entity.weapon) return false;
+  if (entity.weapon.damage >= 0) return false;
+
+  // RA non-FIXIT InfantryClass::Can_Fire treats negative damage as valid only
+  // for injured infantry. Firing_AI handles FIRE_ILLEGAL by Assign_Target(NONE)
+  // once the infantry target reaches ConditionGreen, and also clears non-infantry
+  // targets. This check intentionally ignores rearm state, matching the C++
+  // ordering before TechnoClass::Can_Fire's Arm gate.
+  if (!entity.target.stats.isInfantry || entity.target.hp >= entity.target.maxHp) {
+    entity.target = null;
+    entity.firePrepActive = false;
+    entity.firePrepStage = 0;
+    entity.firePrepUsesDoingStage = false;
+    entity.firePrepFacing256 = -1;
+    return true;
+  }
+
+  return false;
 }
 
 /** Attack mission — main combat state machine for ground/naval units.
@@ -234,6 +372,8 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // pre-fire animation state so the next target acquisition restarts the gate.
     entity.firePrepActive = false;
     entity.firePrepStage = 0;
+    entity.firePrepUsesDoingStage = false;
+    entity.firePrepFacing256 = -1;
     // Resume saved move destination (AI units interrupted MOVE to attack)
     if (entity.savedMoveTarget) {
       const saved = entity.savedMoveTarget;
@@ -323,19 +463,25 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
   }
 
   if (entity.inRange(entity.target)) {
-    // Check line of sight — can't fire through walls/rocks
-    const ec = entity.cell;
-    const tc = entity.target.cell;
-    if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, tc.cx, tc.cy)) {
-      // LOS blocked — move toward target to get clear shot.
-      // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
-      // C++ Firing_AI clears IsFiring when Target_Legal fails (infantry.cpp:3671);
-      // moving out of fire conditions likewise aborts the pre-fire animation.
-      entity.firePrepActive = false;
-      entity.firePrepStage = 0;
-      entity.animState = AnimState.WALK;
-      entity.moveToward({ lx: entity.target.leptonX, ly: entity.target.leptonY }, ctx.movementSpeed(entity));
-      return;
+    // C++ TechnoClass::Can_Fire + Unit/VesselClass::Can_Fire do not perform
+    // a terrain LOS gate for object targets. Fire legality is rearm, range,
+    // ammo, cloak, moving/NavCom, and facing. Target selection visibility is
+    // handled earlier by Evaluate_Object/Target_Something_Nearby.
+
+    // C++ UnitClass::Can_Fire / VesselClass::Can_Fire moving gates:
+    //   unit.cpp:4150-4153   IsNoFireWhileMoving && Target_Legal(NavCom)
+    //   vessel.cpp:1109-1112 !IsTurretEquipped && Target_Legal(NavCom)
+    //
+    // This is NavCom-based, not just IsDriving-based: a vessel/unit that still
+    // has an assigned destination cannot fire from this class path even if it
+    // is momentarily between track updates. SCG07EA's HUNTing sub at logic 73
+    // has TarCom in range at tick 71/72 but NavCom is still legal, so C++
+    // returns FIRE_MOVING and consumes no Fire_At RNG until the destination is
+    // cleared.
+    if (!entity.stats.isInfantry && entity.moveTarget) {
+      if ((entity.isNavalUnit && !entity.hasTurret) || entity.stats.noMovingFire) {
+        return;
+      }
     }
 
     // Turreted vehicles: turret tracks target, body may stay still
@@ -344,24 +490,128 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // Rotation_AI — NOT the rotation triggered by this tick's newly acquired target.
     // TS used to call tickTurretRotation() here (before the fire gate), which let
     // the turret rotate AND fire in the same tick — 1 tick earlier than WASM.
-    // We now capture the pre-rotation 32-step turret facing for the FIRE_FACING
+    // We now capture the pre-rotation 256-step SecondaryFacing for the FIRE_FACING
     // gate below, then tick the rotation after the gate decision is made.
-    let turretFacingReady = true;
-    let preRotTurretFacing32 = 0;
+    let fireGateTurretFacing256 = 0;
+    let fireGateTurretWasRotating = false;
+    let fireGateBodyFacing256 = entity.bodyFacing256 >= 0
+      ? entity.bodyFacing256 & 0xFF
+      : (entity.facing * 32) & 0xFF;
+    let fireGateBodyWasRotating = false;
     if (entity.hasTurret) {
-      preRotTurretFacing32 = entity.turretFacing32;
-      entity.desiredTurretFacing = directionTo(entity.pos, entity.target.pos);
-      turretFacingReady = entity.tickTurretRotation();
+      const preRotTurretFacing256 = entity.turretFacing256 >= 0
+        && dir256ToFacing32(entity.turretFacing256) === entity.turretFacing32
+        && dir256ToFacing8(entity.turretFacing256) === entity.turretFacing
+        ? entity.turretFacing256 & 0xFF
+        : (entity.turretFacing32 * 8) & 0xFF;
+      const preRotDesiredTurretFacing256 = entity.desiredTurretFacing256 >= 0
+        ? entity.desiredTurretFacing256 & 0xFF
+        : (entity.desiredTurretFacing * 32) & 0xFF;
+      // C++ UnitClass::AI runs Firing_AI before Rotation_AI (unit.cpp:425,
+      // :437). Can_Fire's FIRE_ROTATING gate therefore checks the IsRotating
+      // state left by the previous tick's Rotation_AI, not whether rotation
+      // happens to finish later in this tick. Preserve that pre-rotation flag.
+      const preRotTurretWasRotating = preRotTurretFacing256 !== preRotDesiredTurretFacing256;
+      entity.desiredTurretFacing256 = directionToLeptons256(
+        entity.leptonX, entity.leptonY,
+        entity.target.leptonX, entity.target.leptonY,
+      );
+      entity.desiredTurretFacing = dir256ToFacing8(entity.desiredTurretFacing256);
+      const turretReadyAfterRotation = entity.tickTurretRotation();
+
+      if (entity.isNavalUnit) {
+        // C++ VesselClass::AI order is Rotation_AI then Combat_AI
+        // (vessel.cpp:623-631), so VesselClass::Can_Fire sees the post-rotation
+        // SecondaryFacing and post-rotation IsRotating flag. This lets a PT fire
+        // on the same tick its turret reaches the target direction.
+        fireGateTurretFacing256 = entity.turretFacing256 & 0xFF;
+        fireGateTurretWasRotating = !turretReadyAfterRotation;
+      } else {
+        // C++ UnitClass::AI order is Firing_AI then Rotation_AI
+        // (unit.cpp:425,437), so land units gate on the pre-rotation state.
+        fireGateTurretFacing256 = preRotTurretFacing256;
+        fireGateTurretWasRotating = preRotTurretWasRotating;
+      }
     } else {
-      entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
-      const facingReady = entity.tickRotation();
-      // NoMovingFire units must face target before attacking.
-      // Exception: melee weapons (range <= 2) bypass facing check to prevent
-      // rotation lock where ants never catch up to moving targets.
-      const isMelee = entity.weapon && entity.weapon.range <= 2;
-      if (entity.stats.noMovingFire && !facingReady && !isMelee) {
-        entity.animState = AnimState.IDLE;
-        return;
+      let facingReady: boolean;
+      if (entity.isNavalUnit) {
+        // C++ VesselClass::Combat_AI does NOT rotate non-turret vessels here.
+        // Can_Fire reads PrimaryFacing after DriveClass::AI has already had its
+        // chance to rotate this tick; on FIRE_FACING the switch below only sets
+        // PrimaryFacing.Desired(Direction(TarCom)). The actual Rotation_Adjust
+        // happens in the next DriveClass::AI pass.
+        if (entity.bodyFacing256 < 0) {
+          entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+        }
+        fireGateBodyFacing256 = entity.bodyFacing256 & 0xff;
+        const previousDesired256 = entity.desiredFacing256 >= 0
+          ? entity.desiredFacing256 & 0xff
+          : fireGateBodyFacing256;
+        fireGateBodyWasRotating = fireGateBodyFacing256 !== previousDesired256;
+        facingReady = true;
+      } else if (entity.stats.isInfantry) {
+        if (entity.firePrepActive) {
+          // C++ InfantryClass::Firing_AI sets PrimaryFacing when IsFiring starts
+          // (infantry.cpp:3621-3623). Retargeting while the fire animation is
+          // running must not rotate the muzzle or re-run Can_Fire facing gates.
+          const latchedFacing = entity.firePrepFacing256 >= 0
+            ? entity.firePrepFacing256 & 0xFF
+            : (entity.bodyFacing256 >= 0 ? entity.bodyFacing256 & 0xFF : (entity.facing * 32) & 0xFF);
+          fireGateBodyFacing256 = latchedFacing;
+          fireGateBodyWasRotating = false;
+          facingReady = true;
+        } else {
+          entity.desiredFacing = directionTo(entity.pos, entity.target.pos);
+          entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
+          facingReady = entity.tickRotation();
+        }
+      } else {
+        // C++ UnitClass::AI order for fixed-body land units:
+        //   DriveClass::AI() rotates PrimaryFacing first (drive.cpp:1369),
+        //   Firing_AI()/Can_Fire() reads that pre-fire facing (unit.cpp:424),
+        //   Rotation_AI() only sets the next PrimaryFacing.Desired() (unit.cpp:521).
+        //
+        // Do not call tickRotation() from this Firing_AI path. Doing so rotates
+        // and fires in one TS pass; C++ waits until the next DriveClass::AI pass.
+        const desired256 = directionToLeptons256(
+          entity.leptonX, entity.leptonY,
+          entity.target.leptonX, entity.target.leptonY,
+        );
+        fireGateBodyFacing256 = entity.bodyFacing256 >= 0
+          ? entity.bodyFacing256 & 0xFF
+          : (entity.facing * 32) & 0xFF;
+        const previousDesired256 = entity.desiredFacing256 >= 0
+          ? entity.desiredFacing256 & 0xFF
+          : (entity.desiredFacing * 32) & 0xFF;
+        fireGateBodyWasRotating = fireGateBodyFacing256 !== previousDesired256;
+        entity.desiredFacing256 = desired256;
+        entity.desiredFacing = dir256ToFacing8(desired256);
+        facingReady = fireGateBodyFacing256 === desired256;
+      }
+      if (!entity.stats.isInfantry && !entity.isNavalUnit && !entity.hasTurret) {
+        // Fixed-body land units use UnitClass::Can_Fire's PrimaryFacing
+        // FIRE_FACING gate (unit.cpp:4167-4180). This is independent of
+        // IsNoFireWhileMoving; e.g. ARTY must face within 8 dir steps before
+        // Fire_At may consume RNG.
+        // The active weapon is selected below, so the projectile ROT tolerance
+        // is applied in the post-selection gate.
+      } else {
+        if (!entity.isNavalUnit) {
+          if (!(entity.stats.isInfantry && entity.firePrepActive)) {
+            fireGateBodyFacing256 = entity.bodyFacing256 >= 0
+              ? entity.bodyFacing256 & 0xFF
+              : (entity.facing * 32) & 0xFF;
+          }
+          fireGateBodyWasRotating = !facingReady;
+        }
+        // NoMovingFire units must face target before attacking.
+        // Exception: melee weapons (range <= 2) bypass facing check to prevent
+        // rotation lock where ants never catch up to moving targets.
+        const isMelee = entity.weapon && entity.weapon.range <= 2;
+        if (entity.stats.noMovingFire && !facingReady && !isMelee) {
+          entity.animState = AnimState.IDLE;
+          return;
+        }
       }
     }
     entity.animState = AnimState.ATTACK;
@@ -386,9 +636,9 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // burstDelay reached 0 — fire next burst shot (fall through to fire logic)
     }
 
-    // Dual-weapon selection (C++ TechnoClass::Fire_At / Can_Fire):
-    // Select the best weapon based on target armor effectiveness and cooldown state.
-    // Only one weapon fires per tick — they alternate based on cooldowns and effectiveness.
+    // Dual-weapon selection (C++ TechnoClass::What_Weapon_Should_I_Use):
+    // Select the best weapon by warhead score and range bonus. Rearm/range do
+    // not change selection; Can_Fire gates actual shooting below.
     const selectedWeapon = entity.selectWeapon(
       entity.target, (wh, ar) => ctx.getWarheadMult(wh, ar),
     );
@@ -396,6 +646,22 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // If a burst is in progress, continue with the primary weapon (burst belongs to primary)
     const activeWeapon = entity.burstCount > 0 ? entity.weapon : selectedWeapon;
     const isSecondary = activeWeapon === entity.weapon2;
+
+    if (!activeWeapon) return;
+
+    // C++ TechnoClass::Can_Fire gates that do not affect What_Weapon_Should_I_Use:
+    // FIRE_REARM and FIRE_RANGE stop this tick's shot but leave the selected
+    // weapon intact for approach/path-shortening decisions.
+    if (!entity.canWeaponTarget(entity.target, activeWeapon)) return;
+    if (entity.attackCooldown > 0) return;
+    if (!entity.inRangeWith(entity.target, activeWeapon)) return;
+
+    // C++ TechnoClass::Can_Fire (techno.cpp:2754): Ammo == 0 returns
+    // FIRE_AMMO before InfantryClass::Firing_AI can start a firing action.
+    // Unlimited ammo is represented as -1 in both C++ and TS.
+    if (entity.ammo === 0) {
+      return;
+    }
 
     // C++ InfantryClass::Can_Fire (infantry.cpp:1636-1641) — FIRE_MOVING gate.
     // Infantry cannot fire while IsDriving is set (actively moving between
@@ -430,23 +696,22 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // tick later.
     //
     // TS used to call tickTurretRotation() BEFORE this gate, allowing turret to
-    // rotate AND fire in the same tick. Now the pre-rotation 32-step turret
-    // facing (preRotTurretFacing32) is captured above and used here.
+    // rotate AND fire in the same tick. Now the pre-rotation 256-step
+    // SecondaryFacing (preRotTurretFacing256) is captured above and used here.
     if (entity.hasTurret && activeWeapon) {
       const projROT = (activeWeapon.projectileROT ?? 0) as number;
-      // (A) FIRE_ROTATING: if the turret finished rotating last tick (turretFacingReady
-      // is the post-rotation state, so turretFacingReady=false means still rotating),
-      // non-homing weapons must wait.
-      if (!turretFacingReady && projROT === 0) {
+      // (A) FIRE_ROTATING: if the turret was still rotating at Firing_AI entry,
+      // non-homing weapons must wait even if Rotation_AI would finish this tick.
+      if (fireGateTurretWasRotating && projROT === 0) {
         return;
       }
-      // (B) 256-step FIRE_FACING gate. Use PRE-rotation turret facing (C++ parity).
+      // (B) 256-step FIRE_FACING gate. Land units use pre-rotation facing;
+      // vessels use post-rotation facing, matching their different C++ AI order.
       const dir256 = directionToLeptons256(
         entity.leptonX, entity.leptonY,
         entity.target.leptonX, entity.target.leptonY,
       );
-      // preRotTurretFacing32 captured before tickTurretRotation. *8 → 256-step.
-      const turret256 = (preRotTurretFacing32 * 8) & 0xFF;
+      const turret256 = fireGateTurretFacing256 & 0xFF;
       // C++ facing.h:70 Difference: (int)(signed char)(desired - current).
       let diff = (dir256 - turret256) & 0xFF;
       if (diff > 127) diff -= 256;
@@ -456,9 +721,50 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       if (diff >= 8) {
         return; // FIRE_FACING
       }
+    } else if (entity.isNavalUnit && activeWeapon) {
+      // C++ VesselClass::Can_Fire (vessel.cpp:1124-1136) also gates
+      // non-turret vessels on PrimaryFacing. VesselClass::AI runs
+      // DriveClass::AI before Combat_AI, so use the post-DriveClass body facing
+      // captured above. On FIRE_FACING, VesselClass::Combat_AI sets
+      // PrimaryFacing.Desired(Direction(TarCom)) but does not rotate or fire
+      // until a later pass.
+      const projROT = (activeWeapon.projectileROT ?? 0) as number;
+      const dir256 = directionToLeptons256(
+        entity.leptonX, entity.leptonY,
+        entity.target.leptonX, entity.target.leptonY,
+      );
+      let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
+      if (diff > 127) diff -= 256;
+      diff = Math.abs(diff);
+      if (projROT !== 0) diff >>= 2;
+      if (diff > 8) {
+        if (!fireGateBodyWasRotating) {
+          entity.desiredFacing256 = dir256;
+          entity.desiredFacing = dir256ToFacing8(dir256);
+        }
+        return; // FIRE_FACING (vessel.cpp uses strict > 8)
+      }
+    } else if (!entity.stats.isInfantry && activeWeapon) {
+      // C++ UnitClass::Can_Fire fixed-body path (unit.cpp:4167-4180):
+      // compare target direction against PrimaryFacing as it existed when
+      // Firing_AI began. UnitClass::Rotation_AI updates desired facing later,
+      // but does not rotate PrimaryFacing until the next DriveClass::AI pass.
+      const projROT = (activeWeapon.projectileROT ?? 0) as number;
+      const dir256 = directionToLeptons256(
+        entity.leptonX, entity.leptonY,
+        entity.target.leptonX, entity.target.leptonY,
+      );
+      let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
+      if (diff > 127) diff -= 256;
+      diff = Math.abs(diff);
+      if (projROT !== 0) diff >>= 2;
+      if (diff >= 8) {
+        return; // FIRE_FACING (unit.cpp requires diff < 8)
+      }
     }
 
-    if (activeWeapon && ((isSecondary ? entity.attackCooldown2 : entity.attackCooldown) <= 0)) {
+    if (activeWeapon && entity.attackCooldown <= 0) {
+      let fireAtFacing256 = -1;
       // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) pre-fire animation gate:
       //   Tick N:  !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.
       //            Check Fetch_Stage()==FireLaunch: stage=0 → skip Fire_At (unless FireLaunch=0).
@@ -469,23 +775,54 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // fire tick + FireLaunch, matching WASM's Bullet_Explodes timing.
       // SCG06EA tick 63: Greek E1 @(19,65) started firing animation; WASM Fire_At ran
       // at tick 65 (FireLaunch=2), producing the Coord_Scatter RNG at that tick.
-      if (entity.stats.isInfantry && !isSecondary) {
-        const fireLaunch = infantryFireLaunch(entity.type);
+      if (entity.stats.isInfantry) {
+        const fireLaunch = entity.isProne
+          ? infantryProneLaunch(entity.type)
+          : infantryFireLaunch(entity.type);
         if (!entity.firePrepActive) {
           // C++ !IsFiring case: start firing animation. No bullet launch this tick
           // (unless FireLaunch==0 — Einstein and unarmed types).
           entity.firePrepActive = true;
           entity.firePrepStage = 0;
+          // C++ InfantryClass::Firing_AI starts DO_FIRE_WEAPON / DO_FIRE_PRONE
+          // through Do_Action, then gates Fire_At on StageClass::Fetch_Stage().
+          // If Do_Action is blocked by an active non-interruptible sequence
+          // (e.g. DO_LIE_DOWN/DO_GET_UP), C++ still sets IsFiring and reads the
+          // existing StageClass stage. TS follows that path by using doingStage
+          // whenever either the fire Do_Action succeeds or another Doing
+          // animation is already running.
+          const startedFireDoing = entity.startFireDoing(ctx.tick);
+          entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
+          entity.firePrepFacing256 = entity.bodyFacing256 >= 0
+            ? entity.bodyFacing256 & 0xFF
+            : (entity.facing * 32) & 0xFF;
+
+          // C++ infantry.cpp:3629-3636 — when a soldier starts firing and
+          // TarCom == NavCom, clear NavCom and Path[0] so it stops pursuing the
+          // same target it is now shooting. TS represents object NavCom as the
+          // target's current lepton coordinate, so exact coordinate equality is
+          // the narrow equivalent of TARGET equality here.
+          if (entity.target?.alive && entity.moveTarget &&
+              entity.moveTarget.lx === entity.target.leptonX &&
+              entity.moveTarget.ly === entity.target.leptonY) {
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
+            entity.navComClearedTick = ctx.tick;
+          }
         }
-        if (entity.firePrepStage < fireLaunch) {
+        const prepStage = entity.firePrepUsesDoingStage ? entity.doingStage : entity.firePrepStage;
+        if (prepStage < fireLaunch) {
           // Stage not yet at FireLaunch — keep the fire animation running, but do
           // NOT launch the bullet / consume Coord_Scatter RNG / set Arm yet.
           entity.animState = AnimState.ATTACK;
           return;
         }
         // Stage reached FireLaunch — reset prep state and fall through to Fire_At.
+        fireAtFacing256 = entity.firePrepFacing256;
         entity.firePrepActive = false;
         entity.firePrepStage = 0;
+        entity.firePrepUsesDoingStage = false;
       }
 
       // C1: Set burst count for multi-shot weapons (e.g. MammothTusk burst: 2)
@@ -495,23 +832,23 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         entity.burstCount--;
         entity.burstDelay = 3; // 3 ticks between burst shots (C++ standard)
       } else {
-        // CF12: IsSecondShot cadence for dual-weapon units (C++ techno.cpp:2857-2870)
-        // First shot: 3-tick rearm (quick follow-up). Second shot: full ROF (reload delay).
-        // C++ house.cpp:293,303: ROFBias scales rearm delay (techno.cpp Rearm_Delay)
-        const isDualWeapon = entity.weapon && entity.weapon2;
+        // C++ techno.cpp:2918-2930 / 3180-3183:
+        // TechnoClass has one shared Arm timer. IsSecondShot only applies to
+        // TechnoTypeClass::Is_Two_Shooter() (Primary==Secondary or primary Burst>1),
+        // not to ordinary primary/secondary pairs such as PT 2Inch+DepthCharge.
         const rofBias = ctx.getROFBias(entity.house);
         let rearmTime = Math.max(1, Math.round(activeWeapon.rof * rofBias));
-        if (isDualWeapon) {
+        if (entity.isTwoShooter()) {
           if (!entity.isSecondShot) {
             rearmTime = 3; // first shot: quick 3-tick rearm
           }
           entity.isSecondShot = !entity.isSecondShot;
-        }
-        if (isSecondary) {
-          entity.attackCooldown2 = rearmTime;
         } else {
-          entity.attackCooldown = rearmTime;
+          entity.isSecondShot = true;
         }
+        entity.attackCooldown = rearmTime;
+        // Legacy mirror for diagnostics/UI/tests. C++ has no Arm2.
+        if (entity.weapon2) entity.attackCooldown2 = rearmTime;
         entity.burstCount = burst - 1; // remaining shots after this one
         if (entity.burstCount > 0) entity.burstDelay = 3;
       }
@@ -533,6 +870,12 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       let impactX = entity.target.pos.x;
       let impactY = entity.target.pos.y;
       let directHit = true;
+      // C++ techno.cpp:3124 + bullet.cpp:700-730 — inaccurate bullet
+      // scatter is computed from Fire_Coord(which), the same coordinate used
+      // to Unlimbo the bullet. Center_Coord lags/shortens flame projectile
+      // flights by several ticks in close-range infantry fire.
+      const fireCoord = fireCoordForWeaponAtLatchedFacing(entity, activeWeapon, fireAtFacing256);
+      if (fireAtFacing256 >= 0) entity.firePrepFacing256 = -1;
       // C++ techno.cpp:3106-3108 — bullet.IsInaccurate=true when firer Is_Foot() && IsDriving.
       // C++ IsDriving is set by Start_Driver for all FootClass units; TS only sets it for
       // infantry (entity.ts:1155) while vehicles use track-based movement that doesn't
@@ -544,7 +887,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       if (doScatter) {
         // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
         // distance in leptons (1 cell = 256 leptons)
-        const distLeptons = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
+        const distLeptons = leptonDist(fireCoord.lx, fireCoord.ly, entity.target.leptonX, entity.target.leptonY);
         // C++ formula: scatterMax = max(0, (distance / 16) - 64)
         let scatterMax = Math.max(0, (distLeptons / 16) - 64);
         // Cap at HomingScatter(512) for homing, BallisticScatter(256) for ballistic
@@ -571,8 +914,8 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt);
           const distPx = scatterDistLeptons * CELL_SIZE / LEPTON_SIZE;
           const firingAngle = Math.atan2(
-            entity.target.pos.y - entity.pos.y,
-            entity.target.pos.x - entity.pos.x,
+            entity.target.leptonY - fireCoord.ly,
+            entity.target.leptonX - fireCoord.lx,
           );
           impactX += Math.cos(firingAngle) * distPx;
           impactY += Math.sin(firingAngle) * distPx;
@@ -583,20 +926,30 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
       }
 
-      // CF7: Heal guard — negative damage weapons must pass proximity and armor checks (C++ combat.cpp:86-96)
+      // CF7: Heal guard — negative damage weapons still fire normal C++ bullets.
+      // C++ TechnoClass::Fire_At creates an Invisible BulletClass for Heal/
+      // GoodWrench. Bullet_Explodes then applies Explosion_Damage and consumes
+      // the invisible impact Coord_Scatter RNG. Do not apply healing directly
+      // here; doing so skips the bullet AI and desynchronizes RNG.
       if (activeWeapon.damage < 0) {
-        const healDist = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
-        const HEAL_PROXIMITY = 192; // 0.75 cells * 256 leptons/cell
-        if (activeWeapon.warhead === 'Mechanical') {
-          // GoodWrench/Mechanic: only heals armored targets (armor !== 'none') within 0.75 cells
-          if (healDist >= HEAL_PROXIMITY || entity.target.stats.armor === 'none') return;
-        } else {
-          // Heal warhead (Organic): only heals unarmored targets (armor === 'none') within 0.75 cells
-          if (healDist >= HEAL_PROXIMITY || entity.target.stats.armor !== 'none') return;
+        if (entity.target.hp >= entity.target.maxHp) {
+          entity.target = null;
+          return;
         }
-        // Apply healing directly — modifyDamage clamps negative values to 0
-        const healAmount = Math.abs(activeWeapon.damage);
-        entity.target.hp = Math.min(entity.target.maxHp, entity.target.hp + healAmount);
+        const targetArmor = entity.target.stats.armor;
+        const canHealArmor = activeWeapon.warhead === 'Mechanical'
+          ? targetArmor !== 'none'
+          : targetArmor === 'none';
+        if (!canHealArmor) {
+          entity.target = null;
+          return;
+        }
+        ctx.revealShooterFromFire?.(entity);
+        if (activeWeapon.projSpeed !== undefined || activeWeapon.projectileSpeed !== undefined) {
+          ctx.launchProjectile(entity, entity.target, activeWeapon, activeWeapon.damage, impactX, impactY, directHit, fireCoord);
+        } else {
+          ctx.damageEntity(entity.target, activeWeapon.damage, activeWeapon.warhead, entity);
+        }
         return;
       }
 
@@ -620,35 +973,30 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         return;
       }
 
-      if (activeWeapon.projectileSpeed) {
+      ctx.revealShooterFromFire?.(entity);
+
+      if (activeWeapon.projSpeed !== undefined || activeWeapon.projectileSpeed !== undefined) {
         // C++ bullet.cpp:478 — bullet strength at firing time = weapon.damage * FirepowerBias.
         // Warhead-vs-armor and distance falloff are applied ONCE on arrival via
         // applySplashDamage → modifyDamage (combat.cpp:106-125, 207). Passing already-modified
         // damage here would double-apply the warhead-vs-armor multiplier.
+        //
+        // Any non-invisible C++ weapon with rules.ini Speed= creates a
+        // BulletClass, even if TS has no legacy projectileSpeed field. This
+        // includes invisible Speed=100 bullets: C++ bullet.cpp:736-771 places
+        // them at the target coord, arms a normal fuse, and processes damage +
+        // Coord_Scatter in BulletClass::AI instead of inside Fire_At.
         const projStrength = Math.max(1, Math.round(activeWeapon.damage * houseBias));
-        ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit);
+        ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit, fireCoord);
       } else {
-        // C++ bullet.cpp:736-738 + 1012-1014 — invisible weapons (Speed=100 →
-        // MPH_LIGHT_SPEED) are constructed AT the target coord (Coord = tcoord)
-        // and Arm_Fuse'd with proximity 0. logic.cpp:285 re-evaluates Count()
-        // each iteration, so the Submit'd bullet (at high Logic idx) gets its
-        // AI call inside the SAME tick as the fire: Fuse_Checkup returns true
-        // (distance=0 < 0x10) → Bullet_Explodes → Coord_Scatter.
-        // Net: the scatter Random_Pick(0,255) fires on the SAME tick as the
-        // firing entity, but AFTER all lower-idx entities have been processed.
-        // Defer so the flush (end of entity-AI phase in Game.update()) matches
-        // WASM's end-of-Logic-loop position.
-        if (activeWeapon.isInvisible) {
-          ctx.deferInvisibleScatter();
-        }
-
         // Instant damage (melee, hitscan weapons).
         // C++ infantry.cpp:438-440 — Scatter fires exactly once per damage event
         // inside InfantryClass::Take_Damage. The scatter RNG is consumed inside
         // ctx.damageEntity() → damageEntity() → aiScatterOnDamage() (combat.ts).
         // Retaliation also runs inside damageEntity (unified C++ FootClass::Take_Damage
         // entry point — foot.cpp:1166-1234).
-        const killed = directHit ? ctx.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;
+        let killed = false;
+        killed = directHit ? ctx.damageEntity(entity.target, damage, activeWeapon.warhead, entity) : false;
 
         if (activeWeapon.splash && activeWeapon.splash > 0) {
           const splashCenter = { x: impactX, y: impactY };
@@ -666,9 +1014,12 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
             explodeLgSound: true,
             attackerIsPlayer: ctx.isPlayerControlled(entity),
             trackLoss: true,
+            attacker: entity,
           });
         }
       }
+
+      consumeAmmoAfterSuccessfulFire(entity);
 
       // Armor-based hit indicator at impact point (fires immediately regardless of projectile travel)
       {
@@ -739,6 +1090,9 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         ctx.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0,
           maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
           sprite: impactSprite, spriteStart: 0 } as Effect);
+        if (!activeWeapon.projectileSpeed) {
+          spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, impactSprite, impactX, impactY);
+        }
       }
 
     }
@@ -747,6 +1101,17 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // (C++ Firing_AI only runs when in range; moving breaks the fire gate).
     entity.firePrepActive = false;
     entity.firePrepStage = 0;
+    entity.firePrepUsesDoingStage = false;
+    entity.firePrepFacing256 = -1;
+    if (entity.stats.isInfantry) {
+      // C++ Firing_AI does not move infantry directly. Mission_Attack/Hunt/
+      // Guard_Area call FootClass::Approach_Target on their timer fire, then
+      // InfantryClass::Movement_AI walks the assigned NavCom. Direct
+      // moveToward() here sets IsDriving without Head_To_Coord/NavCom and can
+      // leave attacking infantry stuck mid-walk.
+      entity.animState = AnimState.WALK;
+      return;
+    }
     // M5: Defensive stance: chase if target within weapon range of guard origin (C++ Threat_Range)
     // Only give up if target is too far from the home position, not current position
     if (entity.stance === Stance.DEFENSIVE) {
@@ -798,25 +1163,44 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     // THREAT_NORMAL = 0 → Threat_Range(-1) = unlimited range (entire map scan).
     // Note: foot.cpp:501 (Mission_MOVE) uses THREAT_RANGE, but HUNT uses THREAT_NORMAL.
     const huntRange = Infinity; // C++ parity: THREAT_NORMAL = no range limit
+    const rttiMask = huntScanMask(entity, entity.house === ctx.playerHouse);
+    if (rttiMask === 0) return;
     const ec = entity.cell;
-    // C++ parity: player units use the player's fog (effectively everything visible
-    // when fogDisabled=true in agent harness). Only AI houses use per-house fog.
-    const huntHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
+    // C++ techno.cpp:1999-2008 — full-map scans restrict ground movers to
+    // their current movement zone. THREAT_RANGE scans skip this because range
+    // is stricter; vessels/buildings/aircraft are exempt. Without this, HUNT
+    // infantry can select high-value targets across unreachable terrain instead
+    // of the best target in their own zone (SCG04EA opening USSR E1s).
+    const huntReachableZone = (!entity.isNavalUnit && !entity.isAirUnit)
+      ? movementZoneCells(ctx.map, ec, false)
+      : null;
+    // C++ techno.cpp:1529 — Evaluate_Object checks candidate visibility against
+    // the player discovery map (`IsDiscoveredByPlayer`), not the scanner's own
+    // house. Candidate-owned-by-player is the only bypass.
+    const playerHouseIdx = _HOUSE_IDX[ctx.playerHouse] ?? -1;
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     let bestSortKey = Infinity;
     for (const other of ctx.entities) {
       if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
+      // C++ Target_Something_Nearby delegates through class Greatest_Threat.
+      // InfantryClass::Greatest_Threat ORs weapon Allowed_Threats, then clears
+      // non-infantry targets for Organic warheads/dogs (infantry.cpp:2315-2326;
+      // techno.cpp:2017-2038). Mission_Hunt must respect that same RTTI mask:
+      // SCG01EA's USSR dog targets the nearby infantry at (63,49), not the JEEP.
+      if (!(entityRttiBit(other) & rttiMask)) continue;
       if (!canTargetNaval(entity, other)) continue;
+      if (huntReachableZone && !huntReachableZone[other.cell.cy * MAP_CELLS + other.cell.cx]) continue;
       // C++ parity: spies are INVISIBLE to all non-dog units (techno.cpp:1554-1564)
       if (other.type === UnitType.I_SPY && entity.type !== UnitType.I_DOG) continue;
       // C++ techno.cpp:1476-1479: units on IsNoThreat missions are invisible to hunt scan
       if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
-      // C++ techno.cpp:1467+ Is_Discovered_By_House — per-house fog check
-      // C++ techno.cpp:1529: player-owned entities always visible (bypass fog check)
-      if (huntHouseIdx >= 0 && !other.isPlayerUnit && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, huntHouseIdx)) continue;
+      // C++ techno.cpp:1529: PlayerPtr-owned entities are always visible;
+      // otherwise candidate must be discovered by PlayerPtr. This is strict
+      // player ownership, not "allied with player".
+      if (!isCandidateVisibleToPlayer(ctx, other, playerHouseIdx)) continue;
       // AA gate: ground units on hunt can't target airborne aircraft without AA weapons
       if (other.isAirUnit && other.flightAltitude > 0) {
         const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
@@ -841,23 +1225,35 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       // M3: No mobile targets — scan structures (C++ Target_Something_Nearby includes buildings)
       let bestStruct: MapStructure | null = null;
       let bestStructDist = huntRange;
-      for (const s of ctx.structures) {
-        if (!s.alive) continue;
-        if (s.house === House.Neutral) continue;
-        if (ctx.isAllied(entity.house, s.house)) continue;
-        // C++ parity: BARL/BRL3 are OverlayClass, not BuildingClass — never auto-targeted.
-        if (s.type === 'BARL' || s.type === 'BRL3') continue;
-        // Structure center in leptons: cell * 256 + 256 (for 2x2 buildings, center offset by 1 cell)
-        const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
-        const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
-        const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
-        if (dist < bestStructDist) {
-          bestStructDist = dist;
-          bestStruct = s;
+      if (rttiMask & RTTI.BUILDING) {
+        for (const s of ctx.structures) {
+          if (!s.alive) continue;
+          if (s.house === House.Neutral) continue;
+          if (ctx.isAllied(entity.house, s.house)) continue;
+          // C++ parity: BARL/BRL3 are OverlayClass, not BuildingClass — never auto-targeted.
+          if (s.type === 'BARL' || s.type === 'BRL3') continue;
+          // Structure center in leptons: cell * 256 + 256 (for 2x2 buildings, center offset by 1 cell)
+          const sLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
+          const sLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
+          if (huntReachableZone) {
+            const scx = Math.floor(sLX / LEPTON_SIZE);
+            const scy = Math.floor(sLY / LEPTON_SIZE);
+            if (!huntReachableZone[scy * MAP_CELLS + scx]) continue;
+          }
+          const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
+          if (dist < bestStructDist) {
+            bestStructDist = dist;
+            bestStruct = s;
+          }
         }
       }
       if (bestStruct) {
-        entity.mission = Mission.ATTACK;
+        // C++ FootClass::Mission_Hunt keeps Mission == HUNT for ordinary
+        // targets. Target_Something_Nearby assigns TarCom, then Mission_Hunt
+        // calls Approach_Target(); the class-specific Combat_AI/Firing_AI
+        // later fires while the mission remains HUNT. Do not promote to
+        // ATTACK here or hunt units stop rescanning and can hold stale targets
+        // (SCG07EA SS stayed on PT @(13,51), launching a TS-only torpedo).
         entity.targetStructure = bestStruct;
         return;
       }
@@ -867,18 +1263,20 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         // rules.ini IdleActionFrequency=.1 → fixed(.1)=25/256. C++ fixed*int: ((25*450)+128)/256=44, ((25*1800)+128)/256=176
         entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
         const animPick = ScenarioRandom.nextInRange(0, 10);
-        if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
+        if (animPick >= 6) {
+          setInfantryPrimaryFacingFromFacingType(entity, ScenarioRandom.nextInRange(0, 7));
+        }
         entity.doing = 'idle_anim';
       }
       return;
     }
   }
 
-  // C++ Mission_Hunt: only scans for targets and switches to ATTACK if in range.
-  // Does NOT move the infantry — movement happens in the per-tick AI loop (Approach_Target).
-  // Moving here would give an extra movement tick on the scan tick.
+  // C++ FootClass::Mission_Hunt: scan/assign TarCom, then Approach_Target().
+  // It does NOT Assign_Mission(MISSION_ATTACK) for normal armed units. Firing
+  // happens later via class-specific Firing_AI/Combat_AI while Mission remains
+  // HUNT, preserving future hunt timer scans.
   if (entity.inRange(entity.target)) {
-    entity.mission = Mission.ATTACK;
     entity.animState = AnimState.ATTACK;
   } else {
     entity.animState = AnimState.WALK;
@@ -935,27 +1333,40 @@ function guardScanMask(entity: Entity, isHumanControlled: boolean): number {
   if (entity.type === UnitType.I_DOG) return RTTI.INFANTRY;
 
   // Medic (Combat_Damage < 0, not mechanic): method = THREAT_INFANTRY.
-  // TS medics are dispatched via updateMedic before the guard scan, so their
-  // scan target here is enemy infantry (C++ equivalent behavior).
+  // Friendly/injured filtering is handled in cellBasedGuardScan, matching
+  // techno.cpp:1831-1843 Evaluate_Cell and techno.cpp:1491-1506 Evaluate_Object.
   if (entity.type === UnitType.I_MEDI) return RTTI.INFANTRY;
 
   // Mechanic (FIXIT_CSII, Combat_Damage < 0): method = THREAT_VEHICLES | THREAT_AIR.
   if (entity.type === UnitType.I_MECH) return RTTI.UNIT | RTTI.AIRCRAFT;
 
-  // VesselClass::Greatest_Threat (vessel.cpp:1223-1256) — vessels have per-
-  // type overrides that DIFFER from the weapon-OR path used by UnitClass/
-  // InfantryClass. However, the Mission_Guard scan for vessels is NOT gated
-  // here in the same way — VesselClass::Combat_AI (vessel.cpp:2208-2243) only
-  // fires on an EXISTING TarCom, and vessel TarCom acquisition happens via
-  // team attack missions, retaliation, or explicit orders rather than same-
-  // tick Mission_Guard scans. Empirical (SCG07EA tick 1): enabling vessel
-  // scans here introduces +12 RNG calls that WASM doesn't consume at tick 1.
-  // The WASM traces show vessels do not acquire Mission_Guard scan targets on
-  // the first Mission_Guard tick in the same way infantry/vehicles do.
-  //
-  // Safer parity: return 0 (no-op scan) for vessels. They still react to
-  // retaliation (existing entity.target path) and to explicit team orders.
-  if (entity.isNavalUnit) return 0;
+  // VesselClass::Greatest_Threat (vessel.cpp:1223-1256). FootClass::
+  // Mission_Guard calls Target_Something_Nearby(THREAT_RANGE) for vessels too;
+  // the virtual VesselClass override rewrites/extends the threat bits before
+  // delegating to TechnoClass::Greatest_Threat. SCG07EA tick 287: Greece PT at
+  // (19,53) acquires the damaged USSR SS at (20,53), fires, and later Mission_
+  // Guard returns Arm instead of consuming Random_Pick at tick 296.
+  if (entity.isNavalUnit) {
+    if (entity.type === UnitType.V_SS || entity.type === UnitType.V_MSUB) {
+      // Submarines replace THREAT_RANGE with THREAT_BOATS plus buildings/factories.
+      return RTTI.VESSEL | RTTI.BUILDING;
+    }
+
+    const w1 = entity.weapon;
+    const w2 = entity.weapon2;
+    if (!w1 && !w2) return 0;
+
+    const anyAG = (!!w1 && w1.isAntiGround !== false) || (!!w2 && w2.isAntiGround !== false);
+    const anyAA = !!(w1?.isAntiAir || w2?.isAntiAir);
+    let mask = 0;
+    if (anyAG) mask |= RTTI.INFANTRY | RTTI.UNIT | RTTI.VESSEL | RTTI.BUILDING;
+    if (anyAA) mask |= RTTI.AIRCRAFT;
+    if (mask & RTTI.UNIT) mask |= RTTI.AIRCRAFT;
+
+    // vessel.cpp:1248 — cruisers can never hit infantry.
+    if (entity.type === UnitType.V_CA) mask &= ~RTTI.INFANTRY;
+    return mask;
+  }
 
   // Regular armed unit path (UnitClass/InfantryClass override): need a primary weapon.
   const w1 = entity.weapon;
@@ -995,6 +1406,38 @@ function guardScanMask(entity: Entity, isHumanControlled: boolean): number {
   return mask;
 }
 
+/** C++ FootClass::Mission_Hunt calls Target_Something_Nearby(THREAT_NORMAL).
+ *  For vessels, the virtual VesselClass::Greatest_Threat override still applies:
+ *  submarines replace THREAT_NORMAL with BOATS|BUILDINGS|FACTORIES, while other
+ *  vessels OR in weapon Allowed_Threats and cruisers drop INFANTRY. Keep the
+ *  Mission_Guard vessel no-op above isolated to guard scans only. */
+function huntScanMask(entity: Entity, isHumanControlled: boolean): number {
+  if (!entity.isNavalUnit) {
+    return guardScanMask(entity, isHumanControlled);
+  }
+
+  if (entity.type === UnitType.V_SS) {
+    return RTTI.VESSEL | RTTI.BUILDING;
+  }
+
+  const w1 = entity.weapon;
+  const w2 = entity.weapon2;
+  if (!w1 && !w2) return 0;
+
+  const anyAG = (!!w1 && w1.isAntiGround !== false) || (!!w2 && w2.isAntiGround !== false);
+  const anyAA = !!(w1?.isAntiAir || w2?.isAntiAir);
+  let mask = 0;
+  if (anyAG) mask |= RTTI.INFANTRY | RTTI.UNIT | RTTI.VESSEL | RTTI.BUILDING;
+  if (anyAA) mask |= RTTI.AIRCRAFT;
+  if (mask & RTTI.UNIT) mask |= RTTI.AIRCRAFT;
+
+  // vessel.cpp:1248 — cruisers cannot target infantry.
+  if (entity.type === UnitType.V_CA) {
+    mask &= ~RTTI.INFANTRY;
+  }
+  return mask;
+}
+
 /**
  * Map an entity to an RTTI bit for mask-matching. Airborne aircraft are RTTI.
  * AIRCRAFT; landed aircraft count as RTTI.UNIT in C++ (techno.cpp:2089-2091
@@ -1007,6 +1450,55 @@ function entityRttiBit(other: Entity): number {
   if (other.isAirUnit && other.flightAltitude > 0) return RTTI.AIRCRAFT;
   if (other.isAirUnit) return RTTI.AIRCRAFT; // landed — covered via UNIT|AIRCRAFT union above
   return RTTI.UNIT;
+}
+
+function isCandidateVisibleToPlayer(ctx: GreatestThreatRangeContext, other: Entity, playerHouseIdx: number): boolean {
+  // C++ techno.cpp:624 + 1529: IsOwnedByPlayer is strict PlayerPtr ownership,
+  // not "player allied". Non-PlayerPtr candidates require IsDiscoveredByPlayer.
+  if (other.house === ctx.playerHouse) return true;
+  if (ctx.isDiscoveredByPlayer) return ctx.isDiscoveredByPlayer(other);
+  // Fallback for unit tests that have not wired discovery state yet.
+  return playerHouseIdx >= 0 && ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, playerHouseIdx);
+}
+
+function cellTargetRoundTripLepton(lepton: number): number {
+  // C++ target.cpp:798 As_Target(COORDINATE) stores coordinate-cell targets at
+  // 16-lepton precision, and target.cpp:487 As_Coord(TARGET) restores them as
+  // `(stored << 4) + 8`. FootClass::Mission_Guard_Area stores ArchiveTarget as
+  // As_Target(Coord), then temporarily scans from As_Coord(ArchiveTarget).
+  return Math.trunc(lepton / 16) * 16 + 8;
+}
+
+export function movementZoneCells(map: GameMap, start: { cx: number; cy: number }, naval: boolean): Uint8Array {
+  const passable = (cx: number, cy: number) => naval
+    ? map.isWaterPassable(cx, cy)
+    : map.isTerrainPassable(cx, cy);
+
+  const seen = new Uint8Array(MAP_CELLS * MAP_CELLS);
+  if (start.cx < 0 || start.cx >= MAP_CELLS || start.cy < 0 || start.cy >= MAP_CELLS) return seen;
+  if (!passable(start.cx, start.cy)) return seen;
+
+  const qx: number[] = [start.cx];
+  const qy: number[] = [start.cy];
+  seen[start.cy * MAP_CELLS + start.cx] = 1;
+
+  for (let head = 0; head < qx.length; head++) {
+    const cx = qx[head];
+    const cy = qy[head];
+    for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
+      const idx = ny * MAP_CELLS + nx;
+      if (seen[idx]) continue;
+      if (!passable(nx, ny)) continue;
+      seen[idx] = 1;
+      qx.push(nx);
+      qy.push(ny);
+    }
+  }
+
+  return seen;
 }
 
 /**
@@ -1027,30 +1519,73 @@ function entityRttiBit(other: Entity): number {
  *   3. Early bailout means inner-ring targets are strongly preferred
  */
 function cellBasedGuardScan(
-  ctx: MissionAIContext, entity: Entity, scanRange: number, rttiMask: number,
+  ctx: GreatestThreatRangeContext,
+  entity: Entity,
+  scanRange: number,
+  rttiMask: number,
+  opts?: {
+    /** C++ TechnoClass::Greatest_Threat THREAT_AREA uses Threat_Range(1) directly.
+     *  THREAT_RANGE uses range==0 and computes crange = weapon range + 1. */
+    mode?: 'range' | 'area';
+    /** Optional scan center/range source when C++ temporarily swaps Coord,
+     *  e.g. FootClass::Mission_Guard_Area scans from ArchiveTarget. */
+    sourceLX?: number;
+    sourceLY?: number;
+  },
 ): Entity | null {
-  // C++ techno.cpp:2048-2053: crange = weapon range in cells + 1
-  // scanRange is in cells; convert to cell scan radius and lepton threshold
-  const crange = Math.floor(scanRange) + 1;
+  // C++ techno.cpp:2048-2053:
+  //   THREAT_RANGE: range==0 → crange = max weapon range in cells + 1.
+  //   THREAT_AREA:  range>0  → crange = Threat_Range(1) in cells.
+  const mode = opts?.mode ?? 'range';
+  const crange = mode === 'area' ? Math.floor(scanRange) : Math.floor(scanRange) + 1;
   const scanRangeLeptons = scanRange * LEPTON_SIZE;
   if (crange <= 0) return null;
 
-  // C++ techno.cpp:2055: CELL cell = Coord_Cell(Fire_Coord(0))
-  // Fire_Coord has weapon offsets from Center_Coord, but for infantry/units the offset
-  // is typically small. Use entity.cell (derived from lepton coords) as approximation.
-  const cellX = entity.cell.cx;
-  const cellY = entity.cell.cy;
+  const sourceLX = opts?.sourceLX ?? entity.leptonX;
+  const sourceLY = opts?.sourceLY ?? entity.leptonY;
+  // C++ techno.cpp:2055: CELL cell = Coord_Cell(Fire_Coord(0)).
+  // For THREAT_AREA, FootClass::Mission_Guard_Area temporarily swaps Coord to
+  // ArchiveTarget before calling Target_Something_Nearby, so Fire_Coord(0) must
+  // be evaluated from the temporary source coordinate, not the live unit coord.
+  const scanFireCoord = mode === 'area'
+    ? entity.fireCoordPrimaryFrom(sourceLX, sourceLY)
+    : entity.fireCoordPrimary();
+  const cellX = Math.floor(scanFireCoord.lx / LEPTON_SIZE);
+  const cellY = Math.floor(scanFireCoord.ly / LEPTON_SIZE);
 
-  // Phase 7B (SCG01_MISSION_GUARD_CADENCE_FIX): Fire_Coord-based In_Range for
-  // JEEP. When OFF, use center-to-center distance (legacy TS behavior). When
-  // ON, use Fire_Coord(0)-to-center distance (C++ techno.cpp:1289). See
-  // perCellProcess.ts `SCG01_MISSION_GUARD_CADENCE_FIX` docstring.
-  const useFireCoordRange = SCG01_MISSION_GUARD_CADENCE_FIX
-    && entity.type === UnitType.V_JEEP;
-  const fireCoord = useFireCoordRange ? entity.fireCoordPrimary() : null;
-  const rangeSrcLx = fireCoord ? fireCoord.lx : entity.leptonX;
-  const rangeSrcLy = fireCoord ? fireCoord.ly : entity.leptonY;
+  // C++ TechnoClass::Evaluate_Object:
+  //   THREAT_RANGE (range==0): calls In_Range(object, primary), which uses
+  //   Fire_Coord(primary).
+  //   THREAT_AREA (range>0): calls Distance(object), which uses the scanner's
+  //   current Coord. FootClass::Mission_Guard_Area temporarily sets Coord to
+  //   ArchiveTarget before calling Target_Something_Nearby(THREAT_AREA), so
+  //   range checks must use sourceLX/sourceLY, not the unit's live fire coord.
+  const rangeSrcLx = mode === 'area' ? sourceLX : scanFireCoord.lx;
+  const rangeSrcLy = mode === 'area' ? sourceLY : scanFireCoord.ly;
   const debugJeep = isScg01Jeep27DebugEnabled() && entity.type === UnitType.V_JEEP;
+  const cellKey = (cx: number, cy: number) => cy * 128 + cx;
+
+  // C++ techno.cpp:1999-2008 + 1480-1484 — Greatest_Threat applies movement
+  // zone filtering for non-THREAT_RANGE scans unless the scanner is a vessel,
+  // building, or aircraft. Mission_Guard_Area temporarily swaps Coord to
+  // ArchiveTarget before calling Target_Something_Nearby(THREAT_AREA), so the
+  // zone source is that temporary Coord, not the unit's live position or muzzle.
+  //
+  // This is not a scenario rule: Evaluate_Object rejects candidates outside
+  // Map[Center_Coord()].Zones[Techno_Type_Class()->MZone] when `zone != -1`.
+  // TS already used this for full-map HUNT scans; AREA scans need it too.
+  let reachableZone: Uint8Array | null = null;
+  if (mode === 'area' && !entity.isNavalUnit && !entity.isAirUnit) {
+    const zoneSource = {
+      cx: Math.floor(sourceLX / LEPTON_SIZE),
+      cy: Math.floor(sourceLY / LEPTON_SIZE),
+    };
+    reachableZone = movementZoneCells(ctx.map, zoneSource, false);
+    if (!reachableZone[cellKey(zoneSource.cx, zoneSource.cy)]) {
+      // C++ zone can be -1 for invalid/unzoned cells; that disables the check.
+      reachableZone = null;
+    }
+  }
 
   // Map bounds for clipping
   const mapX = ctx.map.boundsX;
@@ -1058,31 +1593,66 @@ function cellBasedGuardScan(
   const mapW = ctx.map.boundsW;
   const mapH = ctx.map.boundsH;
 
-  // Build cell→entity lookup: for each cell, store the LAST non-allied enemy techno.
+  // Build cell→entity lookup: for each cell, store the LAST candidate techno.
   //
-  // C++ Evaluate_Cell (techno.cpp:1831-1843) traverses the Cell_Occupier() linked list
-  // and picks the FIRST non-allied techno (break on first match). The occupier list is
-  // LIFO — Occupy_Up (cell.cpp:1189) prepends: object->Next = OccupierPtr; OccupierPtr = object.
-  // So the FIRST in the LIFO chain is the MOST RECENTLY unlimboed entity in that cell.
+  // C++ Evaluate_Cell (techno.cpp:1831-1843) traverses the Cell_Occupier() linked list:
+  //   - normal weapons pick the FIRST non-allied techno
+  //   - negative-damage weapons pick the FIRST injured allied techno
+  //
+  // The occupier list is LIFO — Occupy_Up (cell.cpp:1189) prepends:
+  // object->Next = OccupierPtr; OccupierPtr = object. So the FIRST in the LIFO
+  // chain is the MOST RECENTLY unlimboed entity in that cell.
   //
   // ctx.entities is in INI/unlimbo order (oldest first). To match C++'s "most recently
   // unlimboed" selection, we always overwrite — the LAST entity per cell in our forward
   // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
   const cellMap = new Map<number, Entity>();
-  const cellKey = (cx: number, cy: number) => cy * 128 + cx;
-  // C++ techno.cpp:624,3781 — IsOwnedByPlayer is STRICTLY (PlayerPtr == House),
-  // true only for the player's direct house, NOT player-allied houses. Using
-  // entity.isPlayerUnit here (which covers Greece + allied England) makes allied
-  // scanners bypass fog filtering that C++ enforces on non-PlayerPtr houses.
-  // SCG07EA tick 1: England JEEP (player-allied) was scanning through fog and
-  // finding USSR targets that C++'s Evaluate_Object rejects (!IsOwnedByPlayer &&
-  // !IsDiscoveredByPlayer at techno.cpp:1529). Fix: use strict PlayerPtr match.
-  const isStrictPlayer = entity.house === ctx.playerHouse;
-  const guardHouseIdx = isStrictPlayer ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
+  // C++ techno.cpp:1529 — visibility is checked on the candidate object:
+  //   if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer && GAME_NORMAL)
+  //       reject;
+  //
+  // This is NOT "if the scanner is player-controlled, bypass fog". The bypass only
+  // applies when the candidate itself belongs to PlayerPtr. SCG06EA t87: Greece
+  // JEEP's guard scan must reject an undiscovered BadGuy E1 and keep scanning to
+  // the discovered USSR E1, matching C++.
+  const playerHouseIdx = _HOUSE_IDX[ctx.playerHouse] ?? -1;
   const isDog = entity.type === UnitType.I_DOG;
+  const isRepairWeapon = (entity.weapon?.damage ?? 0) < 0;
   for (const other of ctx.entities) {
-    if (!other.alive || other.inLimbo) continue;
-    if (ctx.entitiesAllied(entity, other)) continue;
+    // C++ Evaluate_Object does NOT reject zero-strength ACTIVE objects. It can
+    // select an object that is still in the Cell_Occupier chain with Strength=0;
+    // only Assign_Target later clears that target (techno.cpp:2875-2889).
+    //
+    // TS `alive=false` ordinary infantry can still approximate a C++ active
+    // zero-strength object during its death animation, so keep those candidates.
+    // Dogs are the exception observed in C++: dog deaths are removed/limboed
+    // from the occupier chain before they can poison later scans. SCG01EA t147:
+    // a dead DOG record at (63,52) must not block the JEEP from selecting the
+    // live E1 behind it, while SCG06EA t132 still needs a dead E1 blocker.
+    if (other.inLimbo) continue;
+    // C++ infantry can remain in Cell_Occupier while playing death animation,
+    // which is why dead non-dog infantry must still be visible to the scan in
+    // a few parity cases. Destroyed vehicles/buildings are not valid occupiers
+    // for TechnoClass::Evaluate_Cell in the same way; keeping them here lets
+    // AREA_GUARD units target husks C++ has already removed (SCG07EA t177).
+    if (!other.alive && !other.stats.isInfantry) continue;
+    if (!other.alive && other.type === UnitType.I_DOG) continue;
+    const allied = ctx.entitiesAllied(entity, other);
+    if (isRepairWeapon) {
+      // C++ techno.cpp:1836:
+      //   if (Combat_Damage() < 0) {
+      //     if (tentative->Health_Ratio() < Rule.ConditionGreen
+      //         && House->Is_Ally(tentative)) break;
+      //   }
+      //
+      // Rule.ConditionGreen is fixed(1), so only not-full-health allies are
+      // legal repair/heal targets. Enemies are not selected by Evaluate_Cell
+      // for negative-damage scanners.
+      if (!allied) continue;
+      if (other.hp >= other.maxHp) continue;
+    } else if (allied) {
+      continue;
+    }
     // C++ Evaluate_Object mask check (techno.cpp:1534-1542):
     //   if (!((1 << otype) & mask)) return false; // Mask failure.
     // rttiMask is computed by guardScanMask() from the scanner's weapon
@@ -1094,9 +1664,11 @@ function cellBasedGuardScan(
     if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
     // C++ techno.cpp:1467-1470: fully cloaked units
     if (other.cloakState === CloakState.CLOAKED) continue;
-    // C++ techno.cpp:1529: IsOwnedByPlayer bypass is STRICT PlayerPtr-match only
-    // (see SCG07EA fix in updateAreaGuard — same rationale applies here).
-    if (guardHouseIdx >= 0 && other.house !== ctx.playerHouse && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, guardHouseIdx)) continue;
+    // C++ techno.cpp:1529: candidate-owned-by-player bypass is strict PlayerPtr
+    // match; otherwise candidate must be IsDiscoveredByPlayer. Per-house sight
+    // is not enough; SCG07EA England JEEP is player-allied but not PlayerPtr
+    // and must not acquire undiscovered USSR E4s through its own allied sight.
+    if (!isCandidateVisibleToPlayer(ctx, other, playerHouseIdx)) continue;
     // Naval combat filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat filtering: airborne aircraft require AA weapon. Already covered
@@ -1106,7 +1678,15 @@ function cellBasedGuardScan(
       const hasAA = entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir;
       if (!hasAA) continue;
     }
+    // C++ Evaluate_Cell reads Map[cell].Cell_Occupier(). Infantry movement
+    // reservation is separate: InfantryClass::Set_Occupy_Bit only toggles
+    // Map[cell].Flag.Composite/InfType, not the Cell_Occupier linked list
+    // (infantry.cpp:3021-3077). So targeting scans must use the infantry's
+    // current Coord_Cell, not Head_To_Coord/claimedCellIdx. SCG01EA t87:
+    // the dog reserves (63,52), but C++ cell occupiers show (63,52) empty;
+    // using claimedCellIdx makes TS pick the dog instead of the wounded E1.
     const oc = other.cell;
+    if (reachableZone && !reachableZone[cellKey(oc.cx, oc.cy)]) continue;
     const key = cellKey(oc.cx, oc.cy);
     // C++ LIFO: last unlimboed = head of chain = picked by Evaluate_Cell.
     // TS forward iteration: always overwrite so last (= most recently unlimboed) wins.
@@ -1130,14 +1710,15 @@ function cellBasedGuardScan(
       if (topY >= mapY && topY < mapY + mapH) {
         const ent = cellMap.get(cellKey(cx, topY));
         if (ent) {
-          // C++ Evaluate_Object range check: when range==0 (THREAT_RANGE), use In_Range
-          // In_Range: Distance(Fire_Coord(which), target->Center_Coord()) <= Weapon_Range(which)
+          // C++ Evaluate_Object range check:
+          //   THREAT_RANGE range==0: In_Range(Fire_Coord, Center_Coord)
+          //   THREAT_AREA  range>0: Distance(scanner Coord, Center_Coord) <= range
           const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
           if (debugJeep) {
             // eslint-disable-next-line no-console
             console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
               `scanning (${cx},${topY}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-              `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+              `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
               `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
               `accept=${dist <= scanRangeLeptons}`);
           }
@@ -1160,7 +1741,7 @@ function cellBasedGuardScan(
               // eslint-disable-next-line no-console
               console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
                 `scanning (${cx},${botY}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-                `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+                `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
                 `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
                 `accept=${dist <= scanRangeLeptons}`);
             }
@@ -1188,7 +1769,7 @@ function cellBasedGuardScan(
             // eslint-disable-next-line no-console
             console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
               `scanning (${leftX},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-              `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+              `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
               `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
               `accept=${dist <= scanRangeLeptons}`);
           }
@@ -1208,7 +1789,7 @@ function cellBasedGuardScan(
             // eslint-disable-next-line no-console
             console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
               `scanning (${rightX},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-              `rangeLeptons=${scanRangeLeptons} useFireCoord=${useFireCoordRange} ` +
+              `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
               `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
               `accept=${dist <= scanRangeLeptons}`);
           }
@@ -1224,12 +1805,43 @@ function cellBasedGuardScan(
       const q = Math.floor(crange / 4);
       const h = Math.floor(crange / 2);
       if (radius === q || radius === h) {
-        return bestObject;
+        return isAssignableObjectTarget(bestObject) ? bestObject : null;
       }
     }
   }
 
-  return bestObject;
+  return isAssignableObjectTarget(bestObject) ? bestObject : null;
+}
+
+/** C++ TechnoClass::Target_Something_Nearby(THREAT_RANGE).
+ * Assigns TarCom when a nearby target is found; does not fire or change Mission.
+ * Used by FootClass::Mission_Move (foot.cpp:530) and Mission_Guard.
+ */
+export function greatestThreatRangeTarget(ctx: GreatestThreatRangeContext, entity: Entity): Entity | null {
+  const weaponMax = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
+  const scanMask = guardScanMask(entity, ctx.isPlayerControlled(entity));
+  if (weaponMax <= 0 || scanMask === 0) return null;
+  return cellBasedGuardScan(ctx, entity, weaponMax, scanMask);
+}
+
+export function targetSomethingNearbyRange(ctx: MissionAIContext, entity: Entity): Entity | null {
+  const weaponMax = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
+  const scanMask = guardScanMask(entity, ctx.isPlayerControlled(entity));
+  if (weaponMax <= 0 || scanMask === 0) {
+    assignTargetForTechno(entity, null);
+    return null;
+  }
+
+  if (isAssignableObjectTarget(entity.target)) {
+    if (entity.inRange(entity.target)) return entity.target;
+    assignTargetForTechno(entity, null);
+  } else {
+    assignTargetForTechno(entity, null);
+  }
+
+  const bestTarget = cellBasedGuardScan(ctx, entity, weaponMax, scanMask);
+  assignTargetForTechno(entity, bestTarget);
+  return bestTarget;
 }
 
 /** Guard mode — attack nearby enemies or auto-heal (rate-limited to every 15 ticks) */
@@ -1241,39 +1853,14 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
   }
 
-  // C++ Mission_Guard does NOT have special medic handling — medics scan for enemies
-  // and can fire like any other infantry. Medic heal is handled separately by Firing_AI
-  // when the medic has a friendly injured target. Don't early-return for medics.
-  // Mechanic heal is similar — don't skip guard scan.
-  if (entity.type === UnitType.I_MEDI) {
-    ctx.updateMedic(entity);
-    // Fall through to guard scan — C++ parity: medics participate in enemy targeting
-  }
-  if (entity.type === UnitType.I_MECH) {
-    ctx.updateMechanicUnit(entity);
-    // Fall through to guard scan
-  }
+  // C++ FootClass::Mission_Guard has no separate medic/mechanic pre-pass.
+  // Negative-damage units acquire injured allied targets through the normal
+  // Target_Something_Nearby(THREAT_RANGE) path, via TechnoClass::Evaluate_Cell
+  // and Evaluate_Object.
 
   // IdleTimer decremented in index.ts updateEntity (runs every tick for all missions)
 
   // Cooldowns are now ticked globally in index.ts (C++ TechnoClass::AI ticks Arm for ALL missions).
-
-  // C++ unit.cpp:425 Firing_AI — runs EVERY tick, independent of guard scan timer.
-  // If the entity has a target from a previous guard scan and weapon is ready, fire.
-  // This is how C++ units continue shooting between 45-tick guard scan intervals.
-  if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0) {
-    if (entity.inRange(entity.target)) {
-      // Temporarily switch to ATTACK for updateAttack's fire logic, then restore GUARD
-      entity.mission = Mission.ATTACK;
-      updateAttack(ctx, entity);
-      if (entity.mission === Mission.ATTACK) {
-        entity.mission = Mission.GUARD;
-      }
-      return; // fired this tick — skip scan
-    } else {
-      entity.target = null; // target moved out of range, clear for next scan
-    }
-  }
 
   // C++ MissionClass::Timer gates when Mission_Guard fires.
   // Timer and jitter are now handled by the caller (index.ts) via entity.missionTimer.
@@ -1284,9 +1871,12 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // C++ parity: Mission_Guard doesn't early-return for civilians — after the
   // non-ant-threat scan fails, Random_Animate still fires (infantry.cpp:1748
   // IdleTimer pick + switch case). Only skip the cellBasedGuardScan weapon
-  // target loop below (civilians have no Primary weapon and shouldn't auto-
-  // target enemies). Found via SCG01EA tick 44: C8 England (Greek ally) skipped
-  // Random_Animate here, missing 4 RNGs WASM fires. See infantry.cpp:1742-1838.
+  // target loop below when the civilian is actually weaponless. C++ does not
+  // special-case armed civilians here: InfantryClass::Greatest_Threat returns
+  // TARGET_NONE only when !Is_Weapon_Equipped() (infantry.cpp:2308-2311), while
+  // human-controlled armed infantry merely clear THREAT_BUILDINGS
+  // (infantry.cpp:2337-2341). Found via SCG04EA tick 938: a player-owned C1
+  // survivor with Pistol acquires a BadGuy E1 and later fires.
   let civilianSkipScan = false;
   if (entity.isCivilian && entity.isPlayerUnit) {
     let nearestAntDist = Infinity;
@@ -1321,9 +1911,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       entity.pathIndex = 0;
       return;
     }
-    // No ant threat — civilians don't auto-target enemies (skip cellBasedGuardScan
-    // and structure scan), but STILL run Random_Animate like C++ Mission_Guard.
-    civilianSkipScan = true;
+    // No ant threat — weaponless civilians still run Random_Animate like C++
+    // Mission_Guard, but armed C1/C7 civilians must continue into the normal
+    // Target_Something_Nearby scan.
+    civilianSkipScan = !entity.weapon && !entity.weapon2;
   }
 
   // Hold fire stance: never auto-engage
@@ -1391,12 +1982,17 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // Step 1: If existing target is still legal AND in range, KEEP IT — don't rescan.
   // C++ checks Target_Legal(TarCom) then In_Range(TarCom, primary).
   // Only if the existing target is invalid or out of range do we call Greatest_Threat.
-  if (!spyPlayerSkipAutoTarget && entity.target?.alive && !entity.target.inLimbo) {
+  if (!spyPlayerSkipAutoTarget && isAssignableObjectTarget(entity.target)) {
     // C++ techno.cpp:5260-5266: check if existing target still in range (THREAT_RANGE mode)
     if (entity.inRange(entity.target)) {
       // Target still valid and in range — C++ keeps TarCom, skips Greatest_Threat.
-      // Fire via Firing_AI equivalent:
-      if (entity.weapon && entity.attackCooldown <= 0) {
+      // Fire via Firing_AI equivalent. Only infantry run inline here:
+      // InfantryClass::AI calls MissionClass::AI, then Firing_AI in the same
+      // class handler path. Unit/Vessel firing happens later in the separate
+      // UnitClass/VesselClass combat pass, after Mission_Guard returns its
+      // timer jitter. Running vehicles here consumes projectile scatter before
+      // the C++ Mission_Guard delay RNG (SCG07EA 2TNK at tick 475).
+      if (entity.stats.isInfantry && entity.weapon && entity.suppressFiringAITick !== ctx.tick && entity.attackCooldown <= 0) {
         entity.mission = Mission.ATTACK;
         updateAttack(ctx, entity);
         if (entity.mission === Mission.ATTACK) {
@@ -1449,18 +2045,15 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     ? null
     : cellBasedGuardScan(ctx, entity, scanRange, scanMask);
   if (bestTarget) {
-    // C++ infantry.cpp:1237 / unit.cpp:425 — after MissionClass::AI dispatch
-    // (Mission_Guard calls Target_Something_Nearby → Assign_Target), Firing_AI
-    // runs SAME TICK and fires if target is in range with Arm=0. Mission stays
-    // MISSION_GUARD (C++ Target_Something_Nearby never reassigns mission).
-    // Without this same-tick fire, TS's top-of-updateGuard Firing_AI block
-    // only fires on the NEXT tick, putting TS's scatter RNG 1 tick behind
-    // WASM's (SCG03 tick 247 / SCG06 tick 64 after 9a334f4b's same-tick
-    // scatter refactor). For infantry the FireLaunch gate in updateAttack
-    // defers the actual bullet launch to tick N+FireLaunch; this call starts
-    // the firing animation (firePrepActive) on the target-acquisition tick.
+    // C++ Mission_Guard calls Target_Something_Nearby → Assign_Target, then
+    // the enclosing class AI runs Firing_AI once later in the same tick.
+    // Non-infantry uses index.ts' separate post-DriveClass Firing_AI pass for
+    // that. Infantry needs the inline call because Stage C intentionally skips
+    // the separate pass when this handler has run; FireLaunch still delays the
+    // actual bullet launch just as C++ InfantryClass::Firing_AI does.
     entity.target = bestTarget;
-    if (entity.weapon && entity.attackCooldown <= 0 && entity.inRange(bestTarget)) {
+    if (entity.stats.isInfantry &&
+        entity.weapon && entity.suppressFiringAITick !== ctx.tick && entity.attackCooldown <= 0 && entity.inRange(bestTarget)) {
       // Temporarily switch to ATTACK so updateAttack's fire path runs, then
       // restore GUARD. C++ keeps Mission==GUARD throughout.
       entity.mission = Mission.ATTACK;
@@ -1524,7 +2117,10 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     const animPick = ScenarioRandom.nextInRange(0, 10);
     if (animPick >= 6) {
       ScenarioRandom._sourceTag = 30003;
-      ScenarioRandom.nextInRange(0, 7); // C++ facing change: Random_Pick(FACING_N, FACING_NW)
+      setInfantryPrimaryFacingFromFacingType(
+        entity,
+        ScenarioRandom.nextInRange(0, 7), // C++ Random_Pick(FACING_N, FACING_NW)
+      );
     }
     ScenarioRandom._sourceTag = saved;
     if (animPick >= 1 && animPick <= 4) {
@@ -1534,12 +2130,11 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
         ScenarioRandom.nextInRange(0, 1);
         entity.doing = 'idle_anim';
       } else {
-        const gestureTicks = entity.type === UnitType.I_DOG ? 4 : 7;
         // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
-        // idata.cpp: most infantry gesture Count=3; dogs use Count=1.
-        // +1 accounts for the C++ Commence→Mission_Move dispatch delay that TS's queue
-        // promote doesn't naturally replicate (see team.ts activation niat=8).
-        entity.nonInterruptAnimTicks = gestureTicks;
+        // idata.cpp supplies per-infantry Count (Tanya/dogs/civilians=1,
+        // common combat infantry=3); MasterDoControls gesture Rate=2.
+        entity.nonInterruptAnimTicks = entity.infantryGestureDurationTicks();
+        entity.nonInterruptAnimSetTick = ctx.tick;
         // Phase 7B: track Doing as 'gesture' so isDoingInterruptible() blocks
         // Commence — mirrors C++ Do_Action(DO_GESTURE1/2 / DO_SALUTE1/2) all of
         // which have Interrupt=false in MasterDoControls (infantry.cpp:115-118).
@@ -1555,60 +2150,6 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
 /** Area Guard — defend spawn area, attack nearby enemies but return if straying too far */
 export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFired = true): void {
   entity.animState = AnimState.IDLE;
-
-  // C++ infantry.cpp:1237 / unit.cpp:425 — Firing_AI runs EVERY tick on EVERY
-  // mission, not just at MissionClass::AI dispatch ticks. The pre-existing
-  // updateGuard handler mirrors this (missionAI.ts:1164-1176) but
-  // updateAreaGuard previously omitted it — the AREA_GUARD case in index.ts
-  // (~4341) had no analogous Firing_AI hook either, so a Mission_Guard_Area
-  // unit that path-shorten'd into firing range sat idle until the next
-  // Approach_Target timer fire (~70 ticks later).
-  //
-  // SCG06EA tick 76 residual: USSR E1[24] @(24,67) walks toward Greek E1
-  // @(20,64). Path-shorten clears moveTarget at the first in-range cell-
-  // arrival but the unit then waits for the Mission_Guard_Area timer to
-  // re-fire — never starting Fire_At in the gap. WASM fires the bullet[115]
-  // Coord_Scatter at tick 76 because C++ Firing_AI runs every tick.
-  // Mirror it here with the same temporary-ATTACK swap pattern updateGuard
-  // uses (so updateAttack's Fire_At path runs without leaving Mission=ATTACK
-  // post-call).
-  if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0) {
-    if (entity.inRange(entity.target)) {
-      // C++ path-shorten equivalent for mid-walk in-range transition. When
-      // target enters weapon range mid-cell (between PCP_END boundaries),
-      // path-shorten inside `footPerCellProcess` does NOT fire because the
-      // unit is not at a cell boundary. This leaves `isDriving=true` stuck,
-      // which blocks updateAttack via the FIRE_MOVING gate (missionAI.ts:410
-      // / C++ infantry.cpp:1639). Clear the drive state here to mirror C++'s
-      // Stop_Driver-on-IsFiring semantics (infantry.cpp:3790 `!IsFiring`
-      // gate suppresses Movement_AI — equivalent to stopping the walk once
-      // firing begins). This matters for the Phase 4 approach-refire path
-      // where the re-picked cell takes the unit through a DIFFERENT route
-      // than the original sweep's destination, so in-range can occur mid-
-      // cell rather than at the destination boundary.
-      if (entity.isDriving || entity.moveTarget) {
-        entity.isDriving = false;
-        entity.moveTarget = null;
-        entity.path = [];
-        entity.pathIndex = 0;
-        entity.headToLX = 0;
-        entity.headToLY = 0;
-      }
-      entity.mission = Mission.ATTACK;
-      updateAttack(ctx, entity);
-      if ((entity.mission as Mission) === Mission.ATTACK) {
-        entity.mission = Mission.AREA_GUARD;
-      }
-      // C++ Firing_AI does NOT early-return; it falls through to the rest of
-      // the mission handler. But once a fire animation has been initiated
-      // (firePrepActive set), Movement_AI's `!IsFiring` gate suppresses
-      // further movement (infantry.cpp:3790). The walk loop in index.ts
-      // checks `entity.target?.alive && !entity.inRange(entity.target) &&
-      // entity.moveTarget` — if target is in range, walk loop is a no-op,
-      // matching the C++ IsFiring behavior implicitly.
-      return;
-    }
-  }
 
   // C++ MissionClass::Timer gates when Mission_Guard_Area fires.
   // Timer and jitter handled by caller (index.ts) via entity.missionTimer.
@@ -1637,11 +2178,13 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   const scanRange = threatRange1;
 
   // If too far from origin (> leash range), return home — but still attack enemies en route
-  const originLX = pixelToLepton(origin.x);
-  const originLY = pixelToLepton(origin.y);
+  // C++ foot.cpp:1049-1077 stores ArchiveTarget as a TARGET and later converts
+  // it back through As_Coord before leash checks, pathing, and THREAT_AREA
+  // scans. That coordinate target round-trip is lossy at 16-lepton precision.
+  const originLX = cellTargetRoundTripLepton(pixelToLepton(origin.x));
+  const originLY = cellTargetRoundTripLepton(pixelToLepton(origin.y));
   const distFromOrigin = leptonDist(entity.leptonX, entity.leptonY, originLX, originLY);
   const ec = entity.cell;
-  const areaGuardHouseIdx = entity.isPlayerUnit ? -1 : (_HOUSE_IDX[entity.house] ?? -1);
   if (distFromOrigin > leashRange * LEPTON_SIZE) {
     // Check for enemies while returning
     for (const other of ctx.entities) {
@@ -1652,12 +2195,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
       // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
       if (other.cloakState === CloakState.CLOAKED) continue;
-      // C++ techno.cpp:1529 Evaluate_Object: `!IsOwnedByPlayer && !IsDiscoveredByPlayer` rejects target.
-      // `IsOwnedByPlayer = (PlayerPtr == House)` (techno.cpp:624) is STRICTLY the player's own house,
-      // not player-allied. TS's `isPlayerUnit` covers all allied houses (_playerHouses set), which
-      // made the bypass too permissive — SCG07EA tick 0 E4 USSR targeting England's JEEP that C++
-      // filters (England != PlayerPtr=Greece, and not yet IsDiscoveredByPlayer at tick 0).
-      if (areaGuardHouseIdx >= 0 && other.house !== ctx.playerHouse && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
+      // C++ techno.cpp:1529 Evaluate_Object visibility gate:
+      // target is valid only if it is strict PlayerPtr-owned or IsDiscoveredByPlayer.
+      // Scanner-house fog is not enough.
+      if (!isCandidateVisibleToPlayer(ctx, other, _HOUSE_IDX[ctx.playerHouse] ?? -1)) continue;
       const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
       if (dist > entity.stats.sight * LEPTON_SIZE) continue;
       // C++ Evaluate_Object has no terrain LOS check — removed for parity.
@@ -1677,74 +2218,59 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     return;
   }
 
-  // If moving back toward origin, continue moving
-  if (entity.moveTarget) {
-    const distToMove = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
-    if (distToMove > 256) { // 1.0 cell in leptons
-      entity.animState = AnimState.WALK;
-      entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
-      return;
-    }
-    entity.moveTarget = null;
-    entity.path = [];
-  }
-
-  // A5: Look for enemies within scan range from HOME position (C++ foot.cpp:967)
-  let bestTarget: Entity | null = null;
-  let bestScore = -Infinity;
-  for (const other of ctx.entities) {
-    if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
-    // C++ parity: spies invisible to non-dogs (techno.cpp:1554-1564)
-    if (other.type === UnitType.I_SPY && !isDog) continue;
-    // C++ techno.cpp:1476-1479: units on IsNoThreat missions are invisible
-    if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
-    // C++ techno.cpp:1467-1470: fully cloaked units cannot be auto-targeted
-    if (other.cloakState === CloakState.CLOAKED) continue;
-    // C++ techno.cpp:1529 Evaluate_Object: `!IsOwnedByPlayer && !IsDiscoveredByPlayer` rejects target.
-    // IsOwnedByPlayer is STRICTLY `(PlayerPtr == House)` — see leash-scan block above for full
-    // explanation of the SCG07EA tick 0 E4 USSR + England JEEP case this prevents.
-    if (areaGuardHouseIdx >= 0 && other.house !== ctx.playerHouse && !ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, areaGuardHouseIdx)) continue;
-    // A5: Use scanPos (home) for distance check, not entity's current position
-    const dist = leptonDist(originLX, originLY, other.leptonX, other.leptonY);
-    if (dist > scanRange * LEPTON_SIZE) continue;
-    // C++ Evaluate_Object has no terrain LOS check — removed for parity.
-    const score = ctx.threatScore(entity, other, dist / LEPTON_SIZE);
-    if (score > bestScore) { bestScore = score; bestTarget = other; }
-  }
+  // A5: Look for enemies within scan range from HOME position.
+  // C++ foot.cpp:1073-1077 temporarily swaps Coord to ArchiveTarget, then calls
+  // Target_Something_Nearby(THREAT_AREA). That funnels through the same
+  // TechnoClass::Greatest_Threat cell-ring scan as Mission_Guard, not a
+  // score-sorted all-entity loop.
+  const isHumanControlled = entity.house === ctx.playerHouse;
+  const scanMask = guardScanMask(entity, isHumanControlled);
+  const bestTarget = scanMask === 0
+    ? null
+    : cellBasedGuardScan(ctx, entity, scanRange, scanMask, {
+      mode: 'area',
+      sourceLX: originLX,
+      sourceLY: originLY,
+    });
 
   if (bestTarget) {
     entity.target = bestTarget;
-    // C++ foot.cpp:1036-1037: ONLY newly-acquired targets (scan just found one) return(1).
-    // If TarCom was already legal at entry, C++ falls through to dtime+Random_Pick(1,5).
     if (!hadTargetAtEntry) {
+      // C++ foot.cpp:1073-1079: when Target_Something_Nearby finds a new
+      // TarCom, Mission_Guard_Area returns 1 immediately. The enclosing
+      // InfantryClass::AI still runs Firing_AI later in the same object AI pass
+      // (infantry.cpp:1237), so an in-range newly acquired target starts its
+      // DO_FIRE animation immediately. It does not call Approach_Target until
+      // the next timer fire, when TarCom is legal at entry and execution takes
+      // the `else { Approach_Target(); }` branch.
       entity.missionTimer = 1;
+      if (entity.stats.isInfantry &&
+          entity.weapon &&
+          entity.suppressFiringAITick !== ctx.tick &&
+          entity.attackCooldown <= 0 &&
+          entity.inRange(bestTarget)) {
+        entity.mission = Mission.ATTACK;
+        updateAttack(ctx, entity);
+        if ((entity.mission as Mission) === Mission.ATTACK) {
+          entity.mission = Mission.AREA_GUARD;
+        }
+      }
+      return;
     }
-    // C++ foot.cpp:1082-1084 — when TarCom is legal (either hadTargetAtEntry OR scan found
-    // one), Mission_Guard_Area calls Approach_Target. This moves the unit within weapon
-    // range of an out-of-range target so it can fire.
+    // C++ foot.cpp:1082-1084 — when TarCom is legal at entry,
+    // Mission_Guard_Area calls Approach_Target. Approach_Target itself is gated
+    // by foot.cpp:943: it only assigns a destination when NavCom is illegal
+    // (`!Target_Legal(NavCom)`). Do not re-pick the approach cell while an
+    // existing moveTarget is still legal; that is a TS-only path shim.
+    //
+    // This moves the unit within weapon range of an out-of-range target so it can fire.
     // SCG06EA: USSR E1 @(24,67) had Greek E1 @(20,64) as initial TarCom (5 cells, out of
     // range 3). C++ Approach_Target sets NavCom → unit gradually closes distance; first
     // cell change at tick 18, reaches firing position by tick ~76 and fires bullet[115].
     // Without this call TS units sat static with a valid-but-out-of-range target forever.
-    //
-    // Session 3.2 — `AREA_GUARD_APPROACH_RETRY` ON: also re-fire when unit is
-    // already moving (moveTarget set) if cell has changed since last approach.
-    // C++ re-calls Approach_Target every timer fire regardless of moveTarget,
-    // re-picking the approach cell as both unit and target move. Cell-change
-    // gate is TS-specific (plan §8 S3.2) to prevent per-tick findPath spam.
     if (!entity.inRange(bestTarget) && ctx.approachTarget) {
-      const cellKey = entity.cell.cy * 256 + entity.cell.cx;
       if (!entity.moveTarget) {
         ctx.approachTarget(entity);
-        entity._lastAreaGuardApproachCellKey = cellKey;
-      } else if (AREA_GUARD_APPROACH_RETRY
-                 && hadTargetAtEntry
-                 && entity._lastAreaGuardApproachCellKey !== cellKey) {
-        // C++ foot.cpp:1082-1084 per-timer re-fire. Unit has moveTarget but
-        // has crossed a cell boundary since the previous approach call —
-        // re-pick the approach cell using the current target position.
-        ctx.approachTarget(entity);
-        entity._lastAreaGuardApproachCellKey = cellKey;
       }
     }
     return;
@@ -1772,54 +2298,30 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       }
     }
     if (bestStruct) {
-      // C++ parity: stay AREA_GUARD, set target. Newly-acquired target uses timer=1.
+      // C++ parity: stay AREA_GUARD, set target. Newly-acquired target uses
+      // timer=1 and does not approach until the next timer fire.
       entity.targetStructure = bestStruct;
-      if (!hadTargetAtEntry && !entity.targetStructure) {
+      if (!hadTargetAtEntry) {
         entity.missionTimer = 1;
       }
       return;
     }
   }
 
-  // Phase 4 — timer-cycle Approach_Target re-fire when the scan above did
-  // NOT pick `bestTarget` (e.g. target is still alive but out of scan range
-  // this cycle, or the scan filter rejected it) but the preserved TarCom
-  // (`entity.target`) is still legal.
-  //
-  // C++ foot.cpp:1082-1084 calls `Approach_Target` on every Mission_Guard_Area
-  // timer cycle whenever `Target_Legal(TarCom)` holds — without re-qualifying
-  // the target against the scan. The unit chases its existing TarCom with
-  // fresh path geometry each cycle.
-  //
-  // Gated by `AREA_GUARD_APPROACH_RETRY` (already ON). Cell-change dedup is
-  // kept here (same rationale as Session 3.2 — prevents per-tick findPath
-  // churn at the pathfinder layer). This fires ONLY when:
-  //   1. Scan above didn't find `bestTarget` (we reached this fallthrough).
-  //   2. `hadTargetAtEntry`: preserved TarCom was legal at entry.
-  //   3. `entity.target.alive`: target still alive now.
-  //   4. Out of range (no point re-approaching something we can fire at).
-  //   5. Cell key changed since last approach call.
-  if (AREA_GUARD_APPROACH_RETRY
-      && hadTargetAtEntry
-      && entity.target?.alive
-      && ctx.approachTarget
-      && !entity.inRange(entity.target)) {
-    const cellKey = entity.cell.cy * 256 + entity.cell.cx;
-    if (entity._lastAreaGuardApproachCellKey !== cellKey) {
-      ctx.approachTarget(entity);
-      entity._lastAreaGuardApproachCellKey = cellKey;
-    }
-  }
-
-  // C++ foot.cpp:1011 — Random_Animate when no target found.
-  // C++ Is_Ready_To_Random_Animate checks Doing != DO_STAND_GUARD/READY → blocks.
-  // At tick 1: Doing = DO_NOTHING (set by constructor, Doing_AI hasn't run yet).
-  // After tick 1: Doing_AI transitions to DO_STAND_READY → RA can run on future ticks.
-  // TS doing='nothing' matches this — isReadyToRandomAnimate blocks at tick 1.
+  // C++ foot.cpp:1081 — Random_Animate when no target found.
+  // Mirrors infantry.cpp:1742-1838 exactly for gameplay RNG:
+  //   30001 IdleTimer, 30002 switch, 30003 facing cases.
+  // Only switch cases 1-5 and 7 call Do_Action; facing-only cases leave Doing
+  // unchanged. SPY gesture/salute requests are remapped by Do_Action and consume
+  // Random_Pick(0,1) under the caller's saved logic-layer tag.
   if (entity.isReadyToRandomAnimate()) {
+    const saved = ScenarioRandom._sourceTag;
+    ScenarioRandom._sourceTag = 30001;
     entity.idleAnimTimer = ScenarioRandom.nextInRange(44, 176);
+    ScenarioRandom._sourceTag = 30002;
     const animPick = ScenarioRandom.nextInRange(0, 10);
-    if (animPick >= 6) ScenarioRandom.nextInRange(0, 7);
+    ScenarioRandom._sourceTag = saved;
+
     if (animPick >= 1 && animPick <= 4) {
       if (entity.type === UnitType.I_SPY) {
         // C++ Do_Action: SPY gestures/salutes are remapped to DO_IDLE1/2,
@@ -1827,10 +2329,19 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
         ScenarioRandom.nextInRange(0, 1);
         entity.doing = 'idle_anim';
       } else {
-        entity.nonInterruptAnimTicks = entity.type === UnitType.I_DOG ? 4 : 8;
+        entity.nonInterruptAnimTicks = entity.infantryGestureDurationTicks();
+        entity.nonInterruptAnimSetTick = ctx.tick;
         // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
         entity.doing = 'gesture';
       }
+    } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
+      entity.doing = 'idle_anim';
+    }
+
+    if (animPick >= 6) {
+      ScenarioRandom._sourceTag = 30003;
+      setInfantryPrimaryFacingFromFacingType(entity, ScenarioRandom.nextInRange(0, 7));
+      ScenarioRandom._sourceTag = saved;
     }
   }
 }
@@ -2069,6 +2580,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
     }
 
     entity.desiredFacing = directionTo(entity.pos, structPos);
+    entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
     entity.tickRotation();
     if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
       entity.animState = AnimState.IDLE;
@@ -2076,6 +2588,8 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
     }
     entity.animState = AnimState.ATTACK;
     if (entity.attackCooldown <= 0 && entity.weapon) {
+      // C++ TechnoClass::Can_Fire returns FIRE_AMMO before Fire_At.
+      if (entity.ammo === 0) return;
       // C++ parity: use warhead-vs-armor lookup (structures have 'concrete' armor)
       const wh = entity.weapon.warhead as WarheadType;
       const mult = ctx.getWarheadMult(wh, 'concrete');
@@ -2095,8 +2609,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
         // idata.cpp E1DoControls: DO_FIRE_WEAPON = {64, 8, 8} (Count=8).
         entity.firingAnimTicks = 9;
       }
-      // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
-      if (entity.ammo > 0) entity.ammo--;
+      consumeAmmoAfterSuccessfulFire(entity);
       ctx.playSoundAt(ctx.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
       // Muzzle + impact effects (color by warhead — C++ parity)
       ctx.effects.push({
@@ -2112,6 +2625,9 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
         frame: 0, maxFrames: EXPLOSION_FRAMES[structImpactSprite] ?? 17, size: 8,
         sprite: structImpactSprite, spriteStart: 0,
       } as Effect);
+      if (!entity.weapon.projectileSpeed) {
+        spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, structImpactSprite, structPos.x, structPos.y);
+      }
       if (destroyed) {
         if (ctx.isPlayerControlled(entity)) ctx.killCount++;
       }
@@ -2151,6 +2667,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
 
   if (dist <= range * LEPTON_SIZE) {
     entity.desiredFacing = directionTo(entity.pos, target);
+    entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
     const facingReady = entity.tickRotation();
     if (entity.stats.noMovingFire && !facingReady) {
       entity.animState = AnimState.IDLE;
@@ -2159,6 +2676,8 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
     entity.animState = AnimState.ATTACK;
 
     if (entity.attackCooldown <= 0 && entity.weapon) {
+      // C++ TechnoClass::Can_Fire returns FIRE_AMMO before Fire_At.
+      if (entity.ammo === 0) return;
       // C++ house.cpp:293,303: ROFBias scales rearm delay
       entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
@@ -2170,8 +2689,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
         // idata.cpp E1DoControls: DO_FIRE_WEAPON = {64, 8, 8} (Count=8).
         entity.firingAnimTicks = 9;
       }
-      // Ground unit ammo consumption (C++ parity: V2RL fires once, civilians fire 10x)
-      if (entity.ammo > 0) entity.ammo--;
+      consumeAmmoAfterSuccessfulFire(entity);
 
       // Apply scatter
       let impactX = target.x;
@@ -2221,6 +2739,9 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
         type: 'explosion', x: impactX, y: impactY,
         frame: 0, maxFrames: EXPLOSION_FRAMES[ffImpactSprite] ?? 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
       } as Effect);
+      if (!entity.weapon.projectileSpeed) {
+        spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, ffImpactSprite, impactX, impactY);
+      }
       const tc = worldToCell(impactX, impactY);
       ctx.map.addDecal(tc.cx, tc.cy, 3, 0.3);
       // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)

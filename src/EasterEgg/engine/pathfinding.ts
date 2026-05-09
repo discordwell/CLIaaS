@@ -35,6 +35,8 @@ const FACING_NONE = -1; // END marker
 const FACING_DX = [0, 1, 1, 1, 0, -1, -1, -1];
 const FACING_DY = [-1, -1, 0, 1, 1, 1, 0, -1];
 
+export type PathCanEnterCell = (cx: number, cy: number, facing: number) => MoveResult;
+
 // ============================================================================
 // Utility: C++ operations
 // ============================================================================
@@ -100,6 +102,13 @@ function cellFacing(ax: number, ay: number, bx: number, by: number): number {
 /** Adjacent cell in given facing direction */
 function adjacentCell(cx: number, cy: number, facing: number): [number, number] {
   return [cx + FACING_DX[facing & 7], cy + FACING_DY[facing & 7]];
+}
+
+/** C++ coord.cpp Distance approximation in lepton space. */
+function cellLeptonDistance(ax: number, ay: number, bx: number, by: number): number {
+  const dx = Math.abs((bx - ax) * 256);
+  const dy = Math.abs((by - ay) * 256);
+  return dx > dy ? dx + (dy >> 1) : dy + (dx >> 1);
 }
 
 /** C++ Point_Relative_To_Line (findpath.cpp:191-194) */
@@ -217,6 +226,10 @@ function isPassable(
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
   isInfantry = false,
+  threshold: MoveResult = MoveResult.OCCUPIED,
+  distanceOrigin?: CellPos,
+  canEnterCell?: PathCanEnterCell,
+  facing: number = FACING_NONE,
 ): boolean {
   if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
   // Phase 3.3 — per-team path reservation (JOINT-REFACTOR §3.3).
@@ -233,11 +246,24 @@ function isPassable(
   if (ignoreOccupancy) {
     return naval ? map.isWaterPassable(cx, cy) : map.isTerrainPassable(cx, cy);
   }
-  const result = map.canEnterCell(cx, cy, naval, isMoving, isInfantry);
-  // C++ Passable_Cell starts at MOVE_CLOAK for normal move paths and only
-  // relaxes OK/CLOAK cells beyond one cell to MOVE_MOVING_BLOCK. Stationary
-  // blockers (MOVE_TEMP) are not part of that relaxed threshold.
-  return result === MoveResult.OK || result === MoveResult.CLOAK || result === MoveResult.OCCUPIED;
+  const result = canEnterCell
+    ? canEnterCell(cx, cy, facing)
+    : map.canEnterCell(cx, cy, naval, isMoving, isInfantry, claimingEntityId ?? 0);
+
+  // C++ findpath.cpp:1266-1272 FootClass::Passable_Cell:
+  //   move = Can_Enter_Cell(cell, face)
+  //   if (move < MOVE_MOVING_BLOCK && Distance(Cell_Coord(cell)) > 0x0100)
+  //       threshhold = MOVE_MOVING_BLOCK;
+  //   if (move > threshhold) return 0;
+  //
+  // The relaxation only happens for OK/CLOAK cells. A cell that is itself
+  // MOVE_MOVING_BLOCK must still wait for PathThreshhold to escalate to 2.
+  let effectiveThreshold = threshold;
+  if (distanceOrigin && result < MoveResult.OCCUPIED &&
+      cellLeptonDistance(distanceOrigin.cx, distanceOrigin.cy, cx, cy) > 0x0100) {
+    effectiveThreshold = MoveResult.OCCUPIED;
+  }
+  return result <= effectiveThreshold;
 }
 
 // ============================================================================
@@ -314,6 +340,62 @@ function registerCell(
 }
 
 // ============================================================================
+// Unravel_Loop — C++ findpath.cpp:224-292
+// ============================================================================
+
+function unravelLoop(
+  path: PathState,
+  cellCx: number,
+  cellCy: number,
+  dir: number,
+  startCx: number,
+  startCy: number,
+  targetCx: number,
+  targetCy: number,
+): { ok: boolean; cx: number; cy: number; dir: number } {
+  let currDir = dir;
+  let [currCx, currCy] = adjacentCell(cellCx, cellCy, opposite(currDir));
+  let idx = path.length;
+  let listIdx = idx - 1;
+  let lastWasLine = false;
+
+  while (idx > 0) {
+    const onLine = pointRelativeToLine(currCx, currCy, startCx, startCy, targetCx, targetCy) === 0;
+    if (onLine || lastWasLine) {
+      // C++ fixes only diagonal exits from the line and refuses to apply the same
+      // fixup at the same cell twice.
+      if ((currDir & 1) !== 0 && cellIndex(currCx, currCy) !== path.lastFixup) {
+        if (listIdx - 1 < 0) break;
+        path.length = idx;
+        path.lastFixup = cellIndex(currCx, currCy);
+        return {
+          ok: true,
+          cx: currCx,
+          cy: currCy,
+          dir: path.command[listIdx - 1],
+        };
+      }
+      lastWasLine = !lastWasLine;
+    }
+
+    const listDir = path.command[listIdx];
+    if (listDir === FACING_NONE || listDir === EMPTY_CMD) break;
+
+    // Cost is only used as a tiebreak/debug field in this TS port; C++ subtracts
+    // Passable_Cell() here while removing cells from the overlap bitmap.
+    path.cost = Math.max(0, path.cost - 1);
+    path.overlap.clear(cellIndex(currCx, currCy));
+
+    currDir = listDir;
+    [currCx, currCy] = adjacentCell(currCx, currCy, opposite(currDir));
+    idx--;
+    listIdx--;
+  }
+
+  return { ok: false, cx: cellCx, cy: cellCy, dir };
+}
+
+// ============================================================================
 // Follow_Edge — C++ findpath.cpp:779-1018
 // ============================================================================
 
@@ -331,6 +413,9 @@ function followEdge(
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
   isInfantry = false,
+  threshold: MoveResult = MoveResult.OCCUPIED,
+  distanceOrigin?: CellPos,
+  canEnterCell?: PathCanEnterCell,
 ): boolean {
   let newdir: number;
   let oldcell_cx = startCx;
@@ -368,7 +453,7 @@ function followEdge(
         const [checkCx, checkCy] = adjacentCell(oldcell_cx, oldcell_cy, checkdir);
 
         if (checkCx === targetCx && checkCy === targetCy) {
-          if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+          if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, distanceOrigin, canEnterCell, checkdir)) {
             newdir = checkdir;
             [newcell_cx, newcell_cy] = adjacentCell(oldcell_cx, oldcell_cy, newdir);
             foundPassable = true;
@@ -397,7 +482,7 @@ function followEdge(
 
       [newcell_cx, newcell_cy] = adjacentCell(oldcell_cx, oldcell_cy, newdir);
 
-      if (!forcefail && isPassable(map, newcell_cx, newcell_cy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+      if (!forcefail && isPassable(map, newcell_cx, newcell_cy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, distanceOrigin, canEnterCell, newdir)) {
         foundPassable = true;
         break;
       } else {
@@ -415,10 +500,13 @@ function followEdge(
     if (!forceout) {
       const newIdx = cellIndex(newcell_cx, newcell_cy);
       if (!registerCell(path, newIdx, newcell_cx, newcell_cy, newdir, map, naval, ignoreOccupancy, cellClaims, claimingEntityId, isInfantry)) {
-        // Loop unravel failed — in our simplified version, just fail
-        // C++ tries Unravel_Loop, but the core behavior for pathfinding parity
-        // is to return false on unrecoverable loops
-        return false;
+        const unraveled = unravelLoop(path, newcell_cx, newcell_cy, newdir, startCx, startCy, targetCx, targetCy);
+        if (!unraveled.ok) {
+          return false;
+        }
+        newcell_cx = unraveled.cx;
+        newcell_cy = unraveled.cy;
+        newdir = nextDirection(unraveled.dir, search * 2);
       }
 
       // Track which side of the line we're on (C++ line 964-972)
@@ -485,6 +573,9 @@ function optimizeMoves(
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
   isInfantry = false,
+  threshold: MoveResult = MoveResult.OCCUPIED,
+  distanceOrigin?: CellPos,
+  canEnterCell?: PathCanEnterCell,
 ): void {
   if (path.length === 0) return;
 
@@ -536,7 +627,7 @@ function optimizeMoves(
             // 90 degree diagonal smoothing (C++ line 1139-1148)
             // Only if the intermediate cell is passable
             const [checkCx, checkCy] = adjacentCell(cellCx, cellCy, newdir);
-            if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+            if (isPassable(map, checkCx, checkCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, distanceOrigin, canEnterCell, newdir)) {
               path.command[cmd2idx] = newdir;
               path.command[cmd1idx] = newdir;
             }
@@ -648,6 +739,8 @@ export function findPath(
   cellClaims?: Map<number, number>,
   claimingEntityId?: number,
   isInfantry = false,
+  threshold: MoveResult = MoveResult.OCCUPIED,
+  canEnterCell?: PathCanEnterCell,
 ): CellPos[] {
   if (start.cx === goal.cx && start.cy === goal.cy) return [];
 
@@ -669,7 +762,7 @@ export function findPath(
     const [nextCx, nextCy] = adjacentCell(startcell_cx, startcell_cy, direction);
 
     // Can we move directly? (C++ line 551)
-    if (isPassable(map, nextCx, nextCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+    if (isPassable(map, nextCx, nextCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell, direction)) {
       const nextIdx = cellIndex(nextCx, nextCy);
       registerCell(path, nextIdx, nextCx, nextCy, direction, map, naval, ignoreOccupancy, cellClaims, claimingEntityId, isInfantry);
       startcell_cx = nextCx;
@@ -693,7 +786,9 @@ export function findPath(
         const scanDir = cellFacing(scanCx, scanCy, goal.cx, goal.cy);
         [scanCx, scanCy] = adjacentCell(scanCx, scanCy, scanDir);
 
-        if (isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+        // C++ findpath.cpp:587 scans for the far side with Passable_Cell(next,
+        // FACING_NONE), not with the direction used to reach the probe cell.
+        if (isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell, FACING_NONE)) {
           break; // Found the far side
         }
 
@@ -708,7 +803,7 @@ export function findPath(
       }
 
       if (scanCx === goal.cx && scanCy === goal.cy &&
-          !isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+          !isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell, FACING_NONE)) {
         // Dest unreachable
         break;
       }
@@ -720,7 +815,8 @@ export function findPath(
         scanCx, scanCy,
         pleft, -1, direction, // -1 = COUNTERCLOCK
         MAX_MLIST_SIZE, map, naval, ignoreOccupancy,
-        isMoving, cellClaims, claimingEntityId, isInfantry,
+        isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start,
+        canEnterCell,
       );
 
       const pright = clonePathState(path, maxlen);
@@ -729,7 +825,8 @@ export function findPath(
         scanCx, scanCy,
         pright, 1, direction, // +1 = CLOCK
         MAX_MLIST_SIZE, map, naval, ignoreOccupancy,
-        isMoving, cellClaims, claimingEntityId, isInfantry,
+        isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start,
+        canEnterCell,
       );
 
       if (leftOk || rightOk) {
@@ -766,7 +863,7 @@ export function findPath(
         }
         const ddir = cellFacing(scanCx, scanCy, goal.cx, goal.cy);
         [scanCx, scanCy] = adjacentCell(scanCx, scanCy, ddir);
-        if (!isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry)) {
+        if (!isPassable(map, scanCx, scanCy, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell, ddir)) {
           doughnutEscape = true;
           break;
         }
@@ -788,7 +885,7 @@ export function findPath(
   }
 
   // Optimize moves (C++ line 746-747)
-  optimizeMoves(path, map, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry);
+  optimizeMoves(path, map, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell);
 
   return facingsToPath(start.cx, start.cy, path.command, path.length);
 }

@@ -504,20 +504,22 @@ describe('Map Size Constants (defines.h:81-83)', () => {
     const growthRate = parseFloat_(general.get('GrowthRate')!);
     const ticksPerMinute = GAME_TICKS_PER_SEC * 60;
     const subcount = Math.floor((MAP_CELLS * MAP_CELLS) / (growthRate * ticksPerMinute));
-    const fullCycle = Math.ceil((MAP_CELLS * MAP_CELLS) / subcount);
+    const mapTotal = MAP_CELLS * MAP_CELLS;
+    const fullCycle = Math.ceil((mapTotal - 1) / (subcount - 1));
 
     // subcount = 16384 / (2 * 900) = 9
     expect(subcount).toBe(9);
-    // full cycle = ceil(16384 / 9) = 1821 ticks
-    expect(fullCycle).toBe(1821);
+    // full cycle = ceil((16384 - 1) / (9 - 1)) = 2048 ticks
+    expect(fullCycle).toBe(2048);
   });
 
   // Verify TS GameMap.ORE_GROWTH_INTERVAL matches the INI-derived value
-  it('GameMap.ORE_GROWTH_INTERVAL matches rules.ini-derived full cycle (1821 ticks)', () => {
+  it('GameMap.ORE_GROWTH_INTERVAL matches rules.ini-derived full cycle (2048 ticks)', () => {
     const growthRate = parseFloat_(general.get('GrowthRate')!);
     const ticksPerMinute = GAME_TICKS_PER_SEC * 60;
     const subcount = Math.floor((MAP_CELLS * MAP_CELLS) / (growthRate * ticksPerMinute));
-    const expectedFullCycle = Math.ceil((MAP_CELLS * MAP_CELLS) / subcount);
+    const mapTotal = MAP_CELLS * MAP_CELLS;
+    const expectedFullCycle = Math.ceil((mapTotal - 1) / (subcount - 1));
 
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(expectedFullCycle);
   });

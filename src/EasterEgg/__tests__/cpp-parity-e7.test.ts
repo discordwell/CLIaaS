@@ -451,7 +451,7 @@ describe('E7 retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, tanya, attacker);
 
     expect(tanya.target).toBe(attacker);
-    expect(tanya.mission).toBe(Mission.ATTACK);
+    expect(tanya.mission).toBe(Mission.GUARD);
   });
 
   it('Tanya CAN retaliate (has Colt45 weapon)', () => {
@@ -460,7 +460,7 @@ describe('E7 retaliation (techno.cpp)', () => {
     expect(tanya.weapon!.name).toBe('Colt45');
   });
 
-  it('Tanya does not retarget if already has a living target', () => {
+  it('human Tanya can retarget infantry despite an existing target', () => {
     const tanya = entityAtCell(UnitType.I_TANYA, House.Spain, 10, 10);
     const existingTarget = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const newAttacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
@@ -470,7 +470,7 @@ describe('E7 retaliation (techno.cpp)', () => {
     const ctx = makeCombatCtx([tanya, existingTarget, newAttacker]);
     triggerRetaliation(ctx, tanya, newAttacker);
 
-    expect(tanya.target).toBe(existingTarget);
+    expect(tanya.target).toBe(newAttacker);
   });
 
   it('Tanya does not retaliate against allies', () => {
@@ -596,7 +596,7 @@ describe('E7 AI scatter on damage (techno.cpp)', () => {
       tanya.mission = Mission.GUARD;
       const ctx = makeCombatCtx([tanya]);
       aiScatterOnDamage(ctx, tanya);
-      if (tanya.mission === Mission.MOVE && tanya.moveTarget !== null) {
+      if (tanya.missionQueue === Mission.MOVE && tanya.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -608,7 +608,8 @@ describe('E7 AI scatter on damage (techno.cpp)', () => {
     const tanya = entityAtCell(UnitType.I_TANYA, House.Spain, 10, 10);
     tanya.mission = Mission.GUARD;
     const ctx = makeCombatCtx([tanya]);
-    aiScatterOnDamage(ctx, tanya);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, tanya, attacker);
     expect(tanya.mission).toBe(Mission.GUARD);
     expect(tanya.moveTarget).toBeNull();
   });

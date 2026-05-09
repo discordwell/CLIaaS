@@ -47,6 +47,9 @@ function placeVehicle(game: Game, type: UnitType, cx: number, cy: number, facing
   e.mission = Mission.MOVE;
   e.facing = facing;
   e.desiredFacing = facing;
+  e.bodyFacing256 = (facing * 32) & 0xff;
+  e.bodyFacing32 = facing * 4;
+  e.prevBodyFacing32 = e.bodyFacing32;
   game.entities.push(e);
   game.entityById.set(e.id, e);
   return e;
@@ -96,6 +99,41 @@ describe('DriveClass::Mark_Track vehicle reservations', () => {
     expect(second.trackNumber).toBe(-1);
     expect(second.trackReservationCells).toEqual([]);
     expect(ScenarioRandom.callCount, 'blocked Start_Driver path does not add Mission_Move jitter RNG').toBe(callsBefore);
+  });
+
+  it('skips a just-entered absolute path cell before Start_Of_Move selects the next track', () => {
+    const game = createGame();
+    const tank = placeVehicle(game, UnitType.V_3TNK, 10, 10, Dir.E);
+    tank.moveTarget = { lx: 11 * 256 + 128, ly: 10 * 256 + 128 };
+    // TS stores absolute cells; C++ Path[] has already memmoved past the
+    // current cell in this state and exposes only the next FacingType.
+    tank.path = [{ cx: 10, cy: 10 }, { cx: 11, cy: 10 }];
+
+    updateMove(game, tank);
+
+    expect(tank.pathIndex).toBe(1);
+    expect(tank.isDriving).toBe(true);
+    expect(tank.headToLX).toBe(11 * 256 + 128);
+    expect(tank.headToLY).toBe(10 * 256 + 128);
+    expect(game.map.getVehicleTrackReservation(11, 10)).toBe(tank.id);
+  });
+
+  it('skips stale absolute path cells before the current cell after track jumps', () => {
+    const game = createGame();
+    const tank = placeVehicle(game, UnitType.V_3TNK, 10, 10, Dir.E);
+    tank.moveTarget = { lx: 11 * 256 + 128, ly: 10 * 256 + 128 };
+    // Track jumps can leave TS's absolute cursor before the cell C++ has
+    // already entered. C++ Path[] cannot point behind the object after memmove;
+    // it exposes the first facing after the current cell.
+    tank.path = [{ cx: 9, cy: 10 }, { cx: 10, cy: 10 }, { cx: 11, cy: 10 }];
+
+    updateMove(game, tank);
+
+    expect(tank.pathIndex).toBe(2);
+    expect(tank.isDriving).toBe(true);
+    expect(tank.headToLX).toBe(11 * 256 + 128);
+    expect(tank.headToLY).toBe(10 * 256 + 128);
+    expect(game.map.getVehicleTrackReservation(11, 10)).toBe(tank.id);
   });
 
   it('reserves the unpassed midpoint for long two-cell tracks', () => {

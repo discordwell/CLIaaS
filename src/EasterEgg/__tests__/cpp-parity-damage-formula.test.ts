@@ -10,7 +10,7 @@
  *   3. if (spread==0) dist /= PIXEL_LEPTON_W/4          (line 108)
  *      else           dist /= spread*(PIXEL_LEPTON_W/2)  (line 110)
  *   4. dist = Bound(dist, 0, 16)                         (line 112)
- *   5. if (dist) damage /= dist                          (line 114)
+ *   5. if (dist) damage /= dist                          (line 114, integer truncation)
  *   6. if (dist < 4) damage = max(damage, MinDamage=1)   (lines 122-124)
  *   7. damage = min(damage, MaxDamage=1000)               (line 127)
  *
@@ -58,7 +58,7 @@ describe('baseDamage=0 short-circuit (combat.cpp:74)', () => {
 // C++ combat.cpp:98-101 — warhead modifier applied, no distance falloff
 // ============================================================
 describe('point-blank (dist=0) — all 45 warhead x armor (combat.cpp:98-101)', () => {
-  // Expected: baseDamage(100) * WARHEAD_VS_ARMOR[wh][armor], rounded
+  // Expected: baseDamage(100) * WARHEAD_VS_ARMOR[wh][armor] via C++ fixed*int
   // At dist=0: distFactor=0, no division, MinDamage applies but doesn't change positive values
   const EXPECTED: Record<WarheadType, [number, number, number, number, number]> = {
     SA:          [100, 50, 60, 25, 25],
@@ -99,8 +99,8 @@ describe('SA distance falloff (spread=3)', () => {
     [4,  50,  'floor(2.667)=2, 100/2=50, MinDmg → 50'],
     [5,  33,  'floor(3.333)=3, 100/3=33.3, MinDmg → 33'],
     [6,  25,  'floor(4.0)=4, 100/4=25, no MinDmg (4 NOT < 4) → 25'],
-    [9,  17,  'floor(6.0)=6, 100/6=16.67 → 17'],
-    [12, 13,  'floor(8.0)=8, 100/8=12.5 → 13'],
+    [9,  16,  'floor(6.0)=6, 100/6 truncates → 16'],
+    [12, 12,  'floor(8.0)=8, 100/8 truncates → 12'],
     [18, 8,   'floor(12.0)=12, 100/12=8.33 → 8'],
     [24, 6,   'floor(16.0)=16, 100/16=6.25 → 6'],
     [30, 6,   'floor(20.0)=20→clamp 16, 100/16=6.25 → 6'],
@@ -122,12 +122,12 @@ describe('HE distance falloff (spread=6)', () => {
     [3,  90,  'floor(1.0)=1, 90/1=90, MinDmg → 90'],
     [6,  45,  'floor(2.0)=2, 90/2=45, MinDmg → 45'],
     [9,  30,  'floor(3.0)=3, 90/3=30, MinDmg → 30'],
-    [12, 23,  'floor(4.0)=4, 90/4=22.5, no MinDmg → 23'],
+    [12, 22,  'floor(4.0)=4, 90/4 truncates → 22'],
     [18, 15,  'floor(6.0)=6, 90/6=15 → 15'],
     [24, 11,  'floor(8.0)=8, 90/8=11.25 → 11'],
-    [36, 8,   'floor(12.0)=12, 90/12=7.5 → 8'],
-    [48, 6,   'floor(16.0)=16, 90/16=5.625 → 6'],
-    [60, 6,   'floor(20.0)=20→clamp 16, 90/16=5.625 → 6'],
+    [36, 7,   'floor(12.0)=12, 90/12 truncates → 7'],
+    [48, 5,   'floor(16.0)=16, 90/16 truncates → 5'],
+    [60, 5,   'floor(20.0)=20→clamp 16, 90/16 truncates → 5'],
   ];
 
   for (const [dist, expected, note] of cases) {
@@ -143,7 +143,7 @@ describe('AP distance falloff (spread=3)', () => {
     [0,  100, 'distFactor=0 → 100'],
     [3,  50,  'distFactor=2, 100/2=50, MinDmg → 50'],
     [6,  25,  'distFactor=4, 100/4=25, no MinDmg → 25'],
-    [12, 13,  'distFactor=8, 100/8=12.5 → 13'],
+    [12, 12,  'distFactor=8, 100/8 truncates → 12'],
     [24, 6,   'distFactor=16, 100/16=6.25 → 6'],
   ];
 
@@ -162,8 +162,8 @@ describe('AP distance falloff (spread=3)', () => {
     expect(modifyDamage(100, 'AP', 'none', 3)).toBe(15);
   });
 
-  it('vs none dist=6 → 8 (30/4=7.5→8)', () => {
-    expect(modifyDamage(100, 'AP', 'none', 6)).toBe(8);
+  it('vs none dist=6 → 7 (30/4 truncates)', () => {
+    expect(modifyDamage(100, 'AP', 'none', 6)).toBe(7);
   });
 });
 
@@ -176,11 +176,11 @@ describe('Fire distance falloff (spread=8)', () => {
     [4,  90,  'floor(1.0)=1, 90/1=90, MinDmg → 90'],
     [8,  45,  'floor(2.0)=2, 90/2=45, MinDmg → 45'],
     [12, 30,  'floor(3.0)=3, 90/3=30, MinDmg → 30'],
-    [16, 23,  'floor(4.0)=4, 90/4=22.5, no MinDmg → 23'],
+    [16, 22,  'floor(4.0)=4, 90/4 truncates → 22'],
     [24, 15,  'floor(6.0)=6, 90/6=15 → 15'],
     [32, 11,  'floor(8.0)=8, 90/8=11.25 → 11'],
-    [48, 8,   'floor(12.0)=12, 90/12=7.5 → 8'],
-    [64, 6,   'floor(16.0)=16, 90/16=5.625 → 6'],
+    [48, 7,   'floor(12.0)=12, 90/12 truncates → 7'],
+    [64, 5,   'floor(16.0)=16, 90/16 truncates → 5'],
   ];
 
   for (const [dist, expected, note] of cases) {
@@ -206,8 +206,8 @@ describe('HollowPoint distance falloff (spread=1)', () => {
     [0, 100, 'distFactor=0 → 100'],
     [1, 50,  'distFactor=2, 100/2=50, MinDmg → 50'],
     [2, 25,  'distFactor=4, 100/4=25, no MinDmg → 25'],
-    [3, 17,  'distFactor=6, 100/6=16.67 → 17'],
-    [4, 13,  'distFactor=8, 100/8=12.5 → 13'],
+    [3, 16,  'distFactor=6, 100/6 truncates → 16'],
+    [4, 12,  'distFactor=8, 100/8 truncates → 12'],
     [8, 6,   'distFactor=16, 100/16=6.25 → 6'],
     [9, 6,   'distFactor=18→clamp 16, 100/16=6.25 → 6'],
   ];
@@ -223,16 +223,16 @@ describe('HollowPoint distance falloff (spread=1)', () => {
     expect(modifyDamage(100, 'HollowPoint', 'wood', 0)).toBe(5);
   });
 
-  it('vs wood dist=1 → 3 (5/2=2.5, MinDmg, round→3)', () => {
-    expect(modifyDamage(100, 'HollowPoint', 'wood', 1)).toBe(3);
+  it('vs wood dist=1 → 2 (5/2 truncates)', () => {
+    expect(modifyDamage(100, 'HollowPoint', 'wood', 1)).toBe(2);
   });
 
-  it('vs wood dist=2 → 1 (5/4=1.25, no MinDmg, round→1)', () => {
+  it('vs wood dist=2 → 1 (5/4 truncates)', () => {
     expect(modifyDamage(100, 'HollowPoint', 'wood', 2)).toBe(1);
   });
 
-  it('vs wood dist=4 → 1 (5/8=0.625, round→1)', () => {
-    expect(modifyDamage(100, 'HollowPoint', 'wood', 4)).toBe(1);
+  it('vs wood dist=4 → 0 (5/8 truncates)', () => {
+    expect(modifyDamage(100, 'HollowPoint', 'wood', 4)).toBe(0);
   });
 
   it('vs wood dist=8 → 0 (5/16=0.3125, round→0)', () => {
@@ -262,7 +262,7 @@ describe('Organic distance falloff (spread=0, rapid falloff)', () => {
     [0, 100, 'distFactor=0 → 100'],
     [1, 20,  'distFactor=5, 100/5=20'],
     [2, 10,  'distFactor=10, 100/10=10'],
-    [3, 7,   'distFactor=15, 100/15=6.67 → 7'],
+    [3, 6,   'distFactor=15, 100/15 truncates → 6'],
     [4, 6,   'distFactor=20→clamp 16, 100/16=6.25 → 6'],
     [5, 6,   'distFactor=25→clamp 16, 100/16=6.25 → 6'],
   ];
@@ -284,10 +284,10 @@ describe('Organic distance falloff (spread=0, rapid falloff)', () => {
 describe('Nuke distance falloff (spread=6, same as HE)', () => {
   // Nuke has same spread as HE but different verses for some armor types
   // vs none: mult=0.9 (same as HE), so distance curve is identical
-  it('vs none dist=12 → 23 (same as HE)', () => {
+  it('vs none dist=12 → 22 (same as HE)', () => {
     const nukeDmg = modifyDamage(100, 'Nuke', 'none', 12);
     const heDmg = modifyDamage(100, 'HE', 'none', 12);
-    expect(nukeDmg).toBe(23);
+    expect(nukeDmg).toBe(22);
     expect(nukeDmg).toBe(heDmg);
   });
 
@@ -378,8 +378,8 @@ describe('distFactor integer truncation (C++ parity)', () => {
 // ============================================================
 describe('MinDamage boundary at distFactor=4 (combat.cpp:122-124)', () => {
   it('distFactor=3: MinDamage applies (3 < 4)', () => {
-    // SA dist=5: distFactor=floor(3.333)=3, 1*0.25/3=0.083, MinDmg→1
-    expect(modifyDamage(1, 'SA', 'heavy', 5)).toBe(1);
+    // SA dist=5: fixed::operator*(int) reduces 1*25% to 0 before the distance block.
+    expect(modifyDamage(1, 'SA', 'heavy', 5)).toBe(0);
   });
 
   it('distFactor=4: MinDamage does NOT apply (4 is NOT < 4)', () => {
@@ -388,19 +388,18 @@ describe('MinDamage boundary at distFactor=4 (combat.cpp:122-124)', () => {
   });
 
   it('distFactor=0: MinDamage applies (no division, damage stays at base)', () => {
-    expect(modifyDamage(1, 'SA', 'heavy', 0)).toBe(1);
-    // baseDamage=1 * mult=0.25 = 0.25, MinDmg→max(0.25,1)=1 → round(1)=1
+    expect(modifyDamage(1, 'SA', 'heavy', 0)).toBe(0);
+    // fixed::operator*(int) reduces 1*25% to 0; C++ skips MinDamage when damage is 0.
   });
 
   it('distFactor=1: MinDamage applies', () => {
-    // SA dist=2: distFactor=1, 1*0.25/1=0.25, MinDmg→1
-    expect(modifyDamage(1, 'SA', 'heavy', 2)).toBe(1);
+    // SA dist=2: fixed::operator*(int) reduces 1*25% to 0 before distance logic.
+    expect(modifyDamage(1, 'SA', 'heavy', 2)).toBe(0);
   });
 
   it('MinDamage=1 is the threshold, not dependent on baseDamage', () => {
-    // Even with baseDamage=1 and tiny mult, MinDamage guarantees 1
-    expect(modifyDamage(1, 'HollowPoint', 'wood', 0)).toBe(1);
-    // baseDamage=1 * mult=0.05 = 0.05, MinDmg→max(0.05,1)=1
+    // If fixed-point multiplication leaves 0 damage, C++ skips MinDamage.
+    expect(modifyDamage(1, 'HollowPoint', 'wood', 0)).toBe(0);
   });
 
   it('MinDamage does not boost damage that is already >= 1', () => {
@@ -469,7 +468,7 @@ describe('distFactor clamping (combat.cpp:112)', () => {
       const mult = getWarheadMultiplier(wh, 'none');
       if (mult <= 0) continue;
       const maxFalloff = modifyDamage(100, wh, 'none', 1000);
-      const expected = Math.max(0, Math.round((100 * mult) / 16));
+      const expected = Math.max(0, Math.trunc(modifyDamage(100, wh, 'none', 0) / 16));
       expect(maxFalloff, `${wh} at extreme range`).toBe(expected);
     }
   });
@@ -524,9 +523,9 @@ describe('spreadFactorOverride parameter', () => {
   });
 
   it('spreadFactorOverride=1 gives fastest non-zero falloff', () => {
-    // dist=4 with spread=1: distFactor=4*2/1=8, 100/8=12.5→13
+    // dist=4 with spread=1: distFactor=4*2/1=8, 100/8 truncates to 12
     const result = modifyDamage(100, 'SA', 'none', 4, 1.0, undefined, 1);
-    expect(result).toBe(13);
+    expect(result).toBe(12);
   });
 });
 
@@ -552,9 +551,9 @@ describe('houseBias multiplier (C++ firepower bonus)', () => {
   });
 
   it('houseBias applies before distance falloff', () => {
-    // 100 * 1.0(mult) * 1.5(bias) = 150, then /4(distFactor) = 37.5 → 38
+    // 100 * 1.0(mult) * 1.5(bias) = 150, then /4(distFactor) truncates to 37
     const result = modifyDamage(100, 'SA', 'none', 6, 1.5); // distFactor=4
-    expect(result).toBe(38);
+    expect(result).toBe(37);
   });
 
   it('houseBias interacts with warhead mult', () => {
@@ -569,17 +568,17 @@ describe('houseBias multiplier (C++ firepower bonus)', () => {
 });
 
 // ============================================================
-// Section 10: Rounding behavior
+// Section 10: Fixed-point and integer truncation behavior
 // ============================================================
-describe('rounding behavior — Math.round', () => {
-  it('0.5 rounds up (JavaScript Math.round)', () => {
+describe('C++ fixed-point and integer truncation behavior', () => {
+  it('exact fixed-point halves produce the expected integer', () => {
     // SA/wood: 100 * 0.5 = 50.0, no distance → 50
     expect(modifyDamage(100, 'SA', 'wood', 0)).toBe(50);
   });
 
-  it('x.5 rounds up: 22.5 → 23', () => {
-    // HE/none dist=12: 90/4 = 22.5 → 23
-    expect(modifyDamage(100, 'HE', 'none', 12)).toBe(23);
+  it('post-falloff x.5 truncates: 22.5 → 22', () => {
+    // HE/none dist=12: C++ integer division 90/4 -> 22.
+    expect(modifyDamage(100, 'HE', 'none', 12)).toBe(22);
   });
 
   it('x.25 rounds down: 6.25 → 6', () => {
@@ -587,9 +586,9 @@ describe('rounding behavior — Math.round', () => {
     expect(modifyDamage(100, 'SA', 'none', 24)).toBe(6);
   });
 
-  it('x.75 rounds up: 7.5 → 8', () => {
-    // HE/none dist=36: 90/12 = 7.5 → 8
-    expect(modifyDamage(100, 'HE', 'none', 36)).toBe(8);
+  it('post-falloff x.75 truncates: 7.5 → 7', () => {
+    // HE/none dist=36: C++ integer division 90/12 -> 7.
+    expect(modifyDamage(100, 'HE', 'none', 36)).toBe(7);
   });
 
   it('result is always integer', () => {
@@ -617,20 +616,20 @@ describe('cross-product spot checks — warhead x armor x distance', () => {
     // SA — anti-infantry small arms
     [100, 'SA', 'none', 0, 1.0, 100, 'full damage vs unarmored'],
     [100, 'SA', 'heavy', 12, 1.0, 3, '25/8=3.125→3, no MinDmg'],
-    [100, 'SA', 'concrete', 3, 1.0, 13, '25/2=12.5, MinDmg→max(12.5,1)→13'],
+    [100, 'SA', 'concrete', 3, 1.0, 12, '25/2 truncates to 12'],
 
     // HE — high explosive vs structures
     [150, 'HE', 'concrete', 0, 1.0, 150, '150*1.0=150'],
-    [150, 'HE', 'concrete', 12, 1.0, 38, '150/4=37.5→38'],
-    [150, 'HE', 'heavy', 6, 1.0, 19, '150*0.25=37.5, /2=18.75, MinDmg→19'],
+    [150, 'HE', 'concrete', 12, 1.0, 37, '150/4 truncates to 37'],
+    [150, 'HE', 'heavy', 6, 1.0, 19, '150*25% fixed = 38, /2 truncates to 19'],
 
     // AP — armor piercing vs tanks
     [40, 'AP', 'heavy', 0, 1.0, 40, '40*1.0=40 (best vs heavy)'],
     [40, 'AP', 'none', 0, 1.0, 12, '40*0.3=12'],
-    [40, 'AP', 'light', 6, 1.0, 8, '40*0.75=30, /4=7.5→8'],
+    [40, 'AP', 'light', 6, 1.0, 7, '40*0.75=30, /4 truncates to 7'],
 
     // Fire — incendiary
-    [100, 'Fire', 'wood', 24, 1.0, 17, '100*1.0=100, /6=16.67→17'],
+    [100, 'Fire', 'wood', 24, 1.0, 16, '100*1.0=100, /6 truncates to 16'],
     [100, 'Fire', 'heavy', 0, 1.0, 25, '100*0.25=25'],
 
     // HollowPoint — anti-infantry only
@@ -647,7 +646,7 @@ describe('cross-product spot checks — warhead x armor x distance', () => {
 
     // Nuke — devastating
     [300, 'Nuke', 'concrete', 0, 1.0, 150, '300*0.5=150'],
-    [300, 'Nuke', 'none', 12, 1.0, 68, '300*0.9=270, /4=67.5→68'],
+    [300, 'Nuke', 'none', 12, 1.0, 67, '300*0.9=270, /4 truncates to 67'],
 
     // Mechanical — repair/heal warhead
     [100, 'Mechanical', 'heavy', 0, 1.0, 100, '1.0x vs all armor'],
@@ -673,8 +672,8 @@ describe('spread factor tactical comparison', () => {
   it('wider spread = more damage at distance (Fire > HE > SA at 12px)', () => {
     // At 12px from target, compare warheads with different spreads
     // Fire spread=8: distFactor=floor(24/8)=3, 90/3=30
-    // HE spread=6:   distFactor=floor(24/6)=4, 90/4=22.5→23
-    // SA spread=3:   distFactor=floor(24/3)=8, 100/8=12.5→13
+    // HE spread=6:   distFactor=floor(24/6)=4, 90/4 truncates to 22
+    // SA spread=3:   distFactor=floor(24/3)=8, 100/8 truncates to 12
     const fire = modifyDamage(100, 'Fire', 'none', 12);
     const he = modifyDamage(100, 'HE', 'none', 12);
     const sa = modifyDamage(100, 'SA', 'none', 12);
@@ -684,7 +683,7 @@ describe('spread factor tactical comparison', () => {
 
   it('HollowPoint (spread=1) falls off fastest of non-zero spreads', () => {
     const dist = 4;
-    // HollowPoint: distFactor=8, 100/8=12.5→13
+    // HollowPoint: distFactor=8, 100/8 truncates to 12
     // SA:          distFactor=floor(8/3)=2, 100/2=50
     const hp = modifyDamage(100, 'HollowPoint', 'none', dist);
     const sa = modifyDamage(100, 'SA', 'none', dist);
@@ -693,7 +692,7 @@ describe('spread factor tactical comparison', () => {
 
   it('spread=0 (Organic/Mechanical) falls off faster than spread=1', () => {
     const dist = 1;
-    // Organic spread=0: distFactor=4, 100/4=25
+    // Organic spread=0: distFactor=5, 100/5=20
     // HollowPoint spread=1: distFactor=2, 100/2=50
     const organic = modifyDamage(100, 'Organic', 'none', dist);
     const hp = modifyDamage(100, 'HollowPoint', 'none', dist);
@@ -715,8 +714,8 @@ describe('non-standard baseDamage values', () => {
   });
 
   it('baseDamage=1 with HollowPoint/wood at point-blank → 1', () => {
-    // 1 * 0.05 = 0.05, MinDmg→max(0.05,1)=1
-    expect(modifyDamage(1, 'HollowPoint', 'wood', 0)).toBe(1);
+    // fixed::operator*(int) reduces 1*5% to 0, so C++ skips MinDamage.
+    expect(modifyDamage(1, 'HollowPoint', 'wood', 0)).toBe(0);
   });
 
   it('baseDamage=999 at point-blank not capped', () => {
@@ -724,13 +723,13 @@ describe('non-standard baseDamage values', () => {
   });
 
   it('large baseDamage with low mult stays under cap', () => {
-    // 500 * 0.3 = 150
-    expect(modifyDamage(500, 'AP', 'none', 0)).toBe(150);
+    // 30% is fixed raw 76; ((76*500)+128)/256 truncates to 148.
+    expect(modifyDamage(500, 'AP', 'none', 0)).toBe(148);
   });
 
   it('very large baseDamage with low mult + distance', () => {
-    // 2000 * 0.25(SA/heavy) = 500, distFactor=8 at dist=12: 500/8=62.5→63
-    expect(modifyDamage(2000, 'SA', 'heavy', 12)).toBe(63);
+    // 2000 * 0.25(SA/heavy) = 500, distFactor=8 at dist=12: 500/8 truncates to 62.
+    expect(modifyDamage(2000, 'SA', 'heavy', 12)).toBe(62);
   });
 });
 
@@ -756,7 +755,7 @@ describe('warhead effectiveness — baseDamage=200 at dist=0', () => {
     ['HE', 'concrete', 200],// 200*1.0
 
     // AP: best vs heavy armor
-    ['AP', 'none', 60],     // 200*0.3
+    ['AP', 'none', 59],     // 200*30% fixed raw 76
     ['AP', 'wood', 150],    // 200*0.75
     ['AP', 'light', 150],   // 200*0.75
     ['AP', 'heavy', 200],   // 200*1.0
@@ -771,10 +770,10 @@ describe('warhead effectiveness — baseDamage=200 at dist=0', () => {
 
     // HollowPoint: devastating vs none, useless vs armor
     ['HollowPoint', 'none', 200],    // 200*1.0
-    ['HollowPoint', 'wood', 10],     // 200*0.05
-    ['HollowPoint', 'light', 10],    // 200*0.05
-    ['HollowPoint', 'heavy', 10],    // 200*0.05
-    ['HollowPoint', 'concrete', 10], // 200*0.05
+    ['HollowPoint', 'wood', 9],     // 200*5% fixed raw 12
+    ['HollowPoint', 'light', 9],    // 200*5% fixed raw 12
+    ['HollowPoint', 'heavy', 9],    // 200*5% fixed raw 12
+    ['HollowPoint', 'concrete', 9], // 200*5% fixed raw 12
   ];
 
   for (const [wh, armor, expected] of cases) {

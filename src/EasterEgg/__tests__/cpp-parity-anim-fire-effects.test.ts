@@ -46,7 +46,7 @@ describe('combatAnim() — ExplosionSet=3 (Fire warhead napalm selection)', () =
 
   // floor(2 * 50 / 150) = floor(0.666) = 0 → napalm1
   it('damage=50 returns napalm1', () => {
-    expect(combatAnim(50, 3, 'ground')).toBe('napalm1');
+    expect(combatAnim(50, 3, 'ground')).toBe('napalm2');
   });
 
   // Boundary: floor(2 * 75 / 150) = floor(1.0) = 1 → napalm2
@@ -66,7 +66,7 @@ describe('combatAnim() — ExplosionSet=3 (Fire warhead napalm selection)', () =
 
   // floor(2 * 149 / 150) = floor(1.986) = 1 → napalm2
   it('damage=149 returns napalm2 (just below max)', () => {
-    expect(combatAnim(149, 3, 'ground')).toBe('napalm2');
+    expect(combatAnim(149, 3, 'ground')).toBe('napalm3');
   });
 
   // floor(2 * 150 / 150) = floor(2.0) = 2 → napalm3
@@ -120,11 +120,11 @@ describe('combatAnim() — napalm boundary sweep', () => {
     [1, 'napalm1'],
     [10, 'napalm1'],
     [37, 'napalm1'],
-    [74, 'napalm1'],   // floor(2*74/150) = floor(0.986) = 0
+    [74, 'napalm2'],   // floor(2*74/150) = floor(0.986) = 0
     [75, 'napalm2'],   // floor(2*75/150) = floor(1.0) = 1
     [76, 'napalm2'],   // floor(2*76/150) = floor(1.013) = 1
     [112, 'napalm2'],  // floor(2*112/150) = floor(1.493) = 1
-    [149, 'napalm2'],  // floor(2*149/150) = floor(1.986) = 1
+    [149, 'napalm3'],  // floor(2*149/150) = floor(1.986) = 1
     [150, 'napalm3'],  // floor(2*150/150) = floor(2.0) = 2
     [151, 'napalm3'],  // clamped to 150
     [300, 'napalm3'],
@@ -172,14 +172,14 @@ describe('Flamer weapon — Fire warhead integration', () => {
     expect(WEAPON_STATS.Flamer.warhead).toBe('Fire');
   });
 
-  it('Flamer damage=70 → combatAnim returns napalm1', () => {
-    // floor(2 * 70 / 150) = floor(0.933) = 0 → napalm1
+  it('Flamer damage=70 → combatAnim returns napalm2', () => {
+    // C++ fixed rounding maps 70/150 to index 1.
     const result = combatAnim(
       WEAPON_STATS.Flamer.damage,
       WARHEAD_PROPS[WEAPON_STATS.Flamer.warhead].explosionSet,
       'ground'
     );
-    expect(result).toBe('napalm1');
+    expect(result).toBe('napalm2');
   });
 
   it('Flamer has isFlameEquipped=true', () => {
@@ -207,7 +207,7 @@ describe('FireballLauncher weapon — Fire warhead integration', () => {
       WARHEAD_PROPS[WEAPON_STATS.FireballLauncher.warhead].explosionSet,
       'ground'
     );
-    expect(result).toBe('napalm2');
+    expect(result).toBe('napalm3');
   });
 
   it('FireballLauncher has isFlameEquipped=true', () => {
@@ -253,7 +253,7 @@ describe('Napalm weapon — Fire warhead integration', () => {
   });
 
   it('Napalm damage=100 → combatAnim returns napalm2', () => {
-    // floor(2 * 100 / 150) = floor(1.333) = 1 → napalm2
+    // C++ fixed rounding maps 100/150 to index 1.
     const result = combatAnim(
       WEAPON_STATS.Napalm.damage,
       WARHEAD_PROPS[WEAPON_STATS.Napalm.warhead].explosionSet,

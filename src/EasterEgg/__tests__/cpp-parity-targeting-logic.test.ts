@@ -516,7 +516,7 @@ describe('selectWeapon AG/AA routing (C++ techno.cpp:1898-1941)', () => {
     expect(weapon?.name).toBe('M1Carbine');
   });
 
-  it('dual-weapon unit picks higher effective damage when both ready', () => {
+  it('dual-weapon unit picks the C++ warhead-score winner when both ready', () => {
     const mammoth = makeEntity(UnitType.V_4TNK, House.USSR, 100, 100);
     mammoth.attackCooldown = 0;
     mammoth.attackCooldown2 = 0;

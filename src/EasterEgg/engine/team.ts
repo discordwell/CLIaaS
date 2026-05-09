@@ -21,16 +21,17 @@
  *   teamtype.cpp — mission names, TeamMissionClass array
  */
 
-import { Entity, type TeamMissionEntry } from './entity';
-import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, CELL_SIZE, LEPTON_SIZE, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel } from './types';
+import { Entity, CloakState, threatScore as computeThreatScore, type TeamMissionEntry } from './entity';
+import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel, cellTargetToLepton, cellIndexToPos } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from './scenario';
 import { ScenarioRandom } from './random';
-import type { GameMap } from './map';
-import { findPath } from './pathfinding';
+import { MoveResult, type GameMap } from './map';
+import { findPath, nearbyLocation } from './pathfinding';
+import { greatestThreatRangeTarget, movementZoneCells, type GreatestThreatRangeContext } from './missionAI';
 // TEAM_START_DRIVER_REFACTOR flag was removed along with its `false` branch
 // in Step 6 of the C++-parity refactor. The flag remains in perCellProcess.ts
 // as documentation but is no longer read.
-import { assignMission } from './missionLifecycle';
+import { assignMission, commence } from './missionLifecycle';
 
 function facingFromCellStep(from: { cx: number; cy: number }, to: { cx: number; cy: number }): number {
   const dx = Math.sign(to.cx - from.cx);
@@ -58,12 +59,29 @@ function facingFromCellStep(from: { cx: number; cy: number }, to: { cx: number; 
  *                    flip — matching C++ `Start_Of_Move` semantics that only
  *                    fire `Start_Driver` when Basic_Path's first cell is
  *                    enterable (drive.cpp:638-640 + foot.cpp:313-500).
+ * `startDriveClassMove` — C++ DriveClass::Assign_Destination immediate
+ *                    Start_Of_Move hook for vehicles/vessels.
  */
 export interface TeamAIContext {
   structures?: MapStructure[];
   entities?: Entity[];
   map?: GameMap;
   canEnterCell?: (entity: Entity, cx: number, cy: number) => boolean;
+  startDriveClassMove?: (entity: Entity) => void;
+  /** C++ InfantryClass::Stop_Driver — clear Head_To_Coord claim, occupy current coord. */
+  stopInfantryDriver?: (entity: Entity) => void;
+  /** C++ InfantryClass::Assign_Destination line 1046 predicate:
+   *  Stop_Driver only when Map[Center_Coord()].Is_Clear_To_Move(Class->Speed,
+   *  ignoreinfantry=true, ignorevehicles=false) is true. */
+  canStopInfantryDriverForAssignDestination?: (entity: Entity) => boolean;
+  /** Context required by C++ TechnoClass::Greatest_Threat for patrol scans. */
+  playerHouse?: House;
+  entitiesAllied?: (a: Entity, b: Entity) => boolean;
+  isPlayerControlled?: (entity: Entity) => boolean;
+  isDiscoveredByPlayer?: (entity: Entity) => boolean;
+  isRevealedToHouse?: (cx: number, cy: number, houseIdx: number) => boolean;
+  /** C++ TechnoClass::Evaluate_Object value calculation, including AI house bias. */
+  threatScore?: (scanner: Entity, target: Entity, distCells: number) => number;
   /** Game tick counter — used by TMission_Patrol for periodic threat scan
    *  (C++ team.cpp:2965 — Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0).
    *  Rule.PatrolTime=.016, TICKS_PER_MINUTE=900 → fires every 14 ticks. */
@@ -89,6 +107,29 @@ export const TMISSION_INVULNERABLE = 13;  // C++ teamtype.h:57 — makes team in
 export const TMISSION_LOAD         = 14;  // C++ teamtype.h:58
 export const TMISSION_SPY          = 15;  // C++ teamtype.h:59
 export const TMISSION_PATROL       = 16;  // C++ teamtype.h:60
+
+// C++ defines.h:2422-2438 QuarryType.
+const QUARRY_NONE = 0;
+const QUARRY_ANYTHING = 1;
+const QUARRY_BUILDINGS = 2;
+const QUARRY_HARVESTERS = 3;
+const QUARRY_INFANTRY = 4;
+const QUARRY_VEHICLES = 5;
+const QUARRY_VESSELS = 6;
+const QUARRY_FACTORIES = 7;
+const QUARRY_DEFENSE = 8;
+const QUARRY_THREAT = 9;
+const QUARRY_POWER = 10;
+const QUARRY_FAKES = 11;
+
+/** RTTI flags matching C++ RTTIType bit positions used by TechnoClass::Greatest_Threat. */
+const enum TeamThreatRTTI {
+  INFANTRY = 1 << 1,
+  UNIT = 1 << 2,
+  VESSEL = 1 << 3,
+  BUILDING = 1 << 4,
+  AIRCRAFT = 1 << 5,
+}
 
 let nextTeamId = 1;
 
@@ -158,14 +199,30 @@ export class Team {
   /** Suspend timer in ticks (C++ SuspendTimer) */
   suspendTimer = 0;
 
-  /** Mission timeout in ticks (C++ TimeOut) */
+  /** Mission timeout value (C++ TimeOut.Value()). */
   timeOut = 0;
+  /** C++ CDTimerClass<FrameTimerClass> backing state for TimeOut. */
+  private timeOutDelay = 0;
+  private timeOutStartedFrame = 0;
+  /** Fallback frame counter for unit tests that call Team.ai() without a game tick. */
+  private localFrame = 0;
 
   /** Team target — current objective (C++ Target) */
   target: WorldPos | null = null;
+  /** Cell identity for C++ RTTI_CELL Target values. WorldPos alone loses the
+   *  target.cpp As_Target(CELL) → As_Coord(TARGET) +0x88 coordinate quirk. */
+  private targetCell: CellPos | null = null;
+  /** C++ Target carries RTTI. Preserve whether target is a Techno vs a coord. */
+  targetEntityRef: Entity | null = null;
+  /** C++ Target may also resolve from a cell to a BuildingClass object. */
+  private targetStructureRef: MapStructure | null = null;
 
   /** Mission target — the scripted objective (C++ MissionTarget) */
   missionTarget: WorldPos | null = null;
+  private missionTargetCell: CellPos | null = null;
+  /** C++ MissionTarget can be an object TARGET, not just a cell/coord. */
+  private missionTargetEntityRef: Entity | null = null;
+  private missionTargetStructureRef: MapStructure | null = null;
 
   /** Team center/zone (C++ Zone) — average position of members */
   zone: WorldPos | null = null;
@@ -258,6 +315,35 @@ export class Team {
     return sum;
   }
 
+  /** Current C++ Frame equivalent for this Team::AI call.
+   *
+   * Runtime passes `ctx.tick` from the game loop. Unit tests sometimes call
+   * Team.ai() directly; for those, `localFrame` advances once per AI call.
+   */
+  private currentFrame(ctx?: TeamAIContext): number {
+    return ctx?.tick ?? this.localFrame;
+  }
+
+  /** C++ CDTimerClass assignment (`TimeOut = value`).
+   *
+   * `CDTimerClass(set)` stores DelayTime=set and Started=Frame. Reading it in
+   * the same frame returns the full delay, then it counts down automatically
+   * as Frame advances. This differs from decrementing an integer inside the
+   * same mission branch.
+   */
+  private setTimeOut(delay: number, ctx?: TeamAIContext): void {
+    this.timeOutDelay = Math.max(0, delay | 0);
+    this.timeOutStartedFrame = this.currentFrame(ctx);
+    this.refreshTimeOut(ctx);
+  }
+
+  /** Refresh public TimeOut.Value() from the CDTimer backing state. */
+  private refreshTimeOut(ctx?: TeamAIContext): number {
+    const elapsed = Math.max(0, this.currentFrame(ctx) - this.timeOutStartedFrame);
+    this.timeOut = Math.max(0, this.timeOutDelay - elapsed);
+    return this.timeOut;
+  }
+
   // ── Add / Remove (C++ team.cpp:891-936, 1053-1158) ──
 
   /**
@@ -286,7 +372,6 @@ export class Team {
     // The TeamInstance coordinator (coordinateMove/coordinateDo) handles
     // mission dispatch. Clear any per-entity teamMissions to prevent
     // updateTeamMission from competing with the coordinator.
-    // Reinforcement teams set teamMissions AFTER add() in the spawn path.
     entity.teamMissions = [];
     entity.teamMissionIndex = 0;
 
@@ -308,6 +393,11 @@ export class Team {
 
   /** C++ team.cpp:141 _Is_It_Playing — active, breathing, initiated member. */
   private isItPlaying(unit: Entity): boolean {
+    // C++ _Is_It_Breathing excludes IsInLimbo after ScenarioInit. Loaded
+    // transport cargo is TS's limbo equivalent: it remains in the Team member
+    // chain, but must not participate in Calc_Center/Coordinate_Move until
+    // TMission_Unload unlimbos it.
+    if (unit.transportRef) return false;
     return unit.alive && (unit.teamInitiated || unit.isAirUnit);
   }
 
@@ -315,6 +405,12 @@ export class Team {
    *  Non-initiated members move toward the team Zone until close enough, then
    *  become initiated and participate in Coordinate_Move/Attack. */
   private coordinateConscript(unit: Entity): boolean {
+    // C++ _Is_It_Breathing (team.cpp:99-120) rejects IsInLimbo members after
+    // ScenarioInit. Transport cargo is limboed by CargoClass::Attach
+    // (cargo.cpp:87-95), so loaded passengers must not receive conscript MOVE
+    // orders while still inside a BADR/APC/LST. Their mission queue is assigned
+    // when they are actually detached/unlimboed.
+    if (unit.transportRef || unit.inLimbo) return false;
     if (!unit.alive || unit.teamInitiated || unit.isAirUnit) return false;
     if (!this.zone) {
       unit.teamInitiated = true;
@@ -372,7 +468,17 @@ export class Team {
     // This is bug-for-bug C++ parity — the `typeindex` param to Recruit is a hint,
     // not a strict filter. See SCG06EA dog1 team: recruits closest DOG instead of E1.
     const canAdd = (e: Entity): boolean => {
-      if (!e.alive || e.inLimbo) return false;
+      // C++ paradropped infantry are active/unlimboed while Height > 0, but
+      // TechnoClass::AI returns before MissionClass::AI and the team recruit
+      // pass does not pull those falling objects back into a team. Treat the
+      // falling window as not recruitable so a just-dropped passenger keeps its
+      // queued HUNT order until it lands.
+      if (!e.alive || e.inLimbo || e.isFalling) return false;
+      // C++ TeamClass::Can_Add (team.cpp:980): candidates in radio contact
+      // are considered busy and cannot be recruited. TS uses `isTethered` for
+      // BuildingClass::Exit_Object / transport radio contact until the first
+      // Per_Cell_Process tether cut.
+      if (e.isTethered || e.transportRef) return false;
       if (e.house !== this.house) return false;
       if (e.teamRef === this) return false; // already member
       if (e.teamRef) return false; // C++ priority check (simplified)
@@ -458,7 +564,7 @@ export class Team {
    * - Sets entity to idle mode (team.cpp:1139)
    * - Marks team as altered
    */
-  remove(entity: Entity): boolean {
+  remove(entity: Entity, ctx?: TeamAIContext): boolean {
     const idx = this._members.indexOf(entity);
     if (idx === -1) return true; // C++ returns true if not a member
 
@@ -468,6 +574,13 @@ export class Team {
     // C++ team.cpp:2285-2289 — clears IsFormationMove when member is removed/dies
     entity.formationOffset = null;
     this.isAltered = true;
+
+    // C++ team.cpp:1139 — a member that breaks off a team immediately runs
+    // its virtual Enter_Idle_Mode(). If it still has NavCom, this is a MOVE
+    // no-op; if not, it queues the class idle mission. This is load-bearing for
+    // TeamClass::Suspend_Teams during base-defense response: low-priority
+    // teams release members without continuing Coordinate_Move on later ticks.
+    this.enterIdleAfterTeamRelease(entity, ctx);
 
     return true;
   }
@@ -482,6 +595,9 @@ export class Team {
    */
   ai(waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     if (this.dissolved) return;
+    if (ctx?.tick === undefined) {
+      this.localFrame++;
+    }
 
     // C++ CREATE_TEAM parity (taction.cpp:658-661 + logic.cpp:214-271): the team
     // is created during the LogicTrigger pre-pass on this tick; WASM observation
@@ -546,7 +662,7 @@ export class Team {
 
         // C++ team.cpp:544-562 — dissolve empty team that has been active
         if (this.isHasBeen) {
-          this.dissolve();
+          this.dissolve(ctx);
           return;
         }
       }
@@ -571,10 +687,10 @@ export class Team {
         // Scans Buildings[] for b.House == House && b.PrimaryWeapon == NULL.
         const retreatTarget = this.findRetreatBuilding(ctx?.structures);
         if (retreatTarget) {
-          this.target = retreatTarget;
+          this.setTarget(retreatTarget);
         } else if (this.zone) {
           // Fallback to zone center if no buildings available
-          this.target = { ...this.zone };
+          this.setTarget(this.zone);
         }
         if (this.target) {
           this.coordinateMove(waypoints, ctx);
@@ -602,17 +718,25 @@ export class Team {
       // members already in a non-interruptible animation (e.g. from a prior
       // Random_Animate gesture) keep their existing animation.
       //
-      // Animation duration Count=3 × Rate=2 = 6 ticks. nonInterruptAnimTicks=8
-      // accounts for the pre-decrement at index.ts:3839 + the 1-tick C++ delay
-      // between Commence() popping the queue and MissionClass::AI dispatching
-      // the new mission on the following tick.
+      // Animation duration is Class->DoControls[DO_GESTURE*].Count multiplied
+      // by MasterDoControls[DO_GESTURE*].Rate. For E1/E2/E3/E4/E6 this is
+      // Count=3 × Rate=2 = 6 ticks; for dogs Count=1 × Rate=2 = 2 ticks.
+      //
+      // Store the raw C++ animation duration. TS decrements before the infantry
+      // Commence gate and runs Doing_AI after the gate, so when the counter
+      // reaches 0 on tick N, the gesture still blocks tick N Commence and
+      // transitions to stand_ready afterward; the queue can pop on tick N+1.
       //
       // Consume the RNG to keep the chain aligned (same call as C++), but apply
       // the block regardless of outcome — TS previously only set niat on TRUE,
       // missing ~50% of team activations and firing Mission_Move too early.
       ScenarioRandom.percentChance(50);
       for (const m of this._members) {
-        if (m.alive && m.stats.isInfantry && m.nonInterruptAnimTicks <= 0) {
+        // C++ team.cpp:638-640 gates the startup gesture through
+        // _Is_It_Breathing(). CargoClass::Attach limbos passengers, so loaded
+        // BADR/APC/LST cargo stays in the member chain but does not receive the
+        // non-interruptible gesture until it is actually on the map.
+        if (m.alive && m.stats.isInfantry && !m.transportRef && !m.inLimbo && m.nonInterruptAnimTicks <= 0) {
           if (m.type === UnitType.I_SPY) {
             // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
             // team activation DO_GESTURE1/2 maps spies to DO_IDLE1/2 and
@@ -621,11 +745,10 @@ export class Team {
             m.doing = 'idle_anim';
             continue;
           }
-          // DogDoControls gesture Count=1 (idata.cpp:73/75) vs most infantry
-          // Count=3. C++ runs the Commence gate before Doing_AI, while TS's
-          // Stage E currently runs after doingAI, so niat=4 preserves the same
-          // effective pop tick for dogs under the TS pre-decrement model.
-          m.nonInterruptAnimTicks = m.type === UnitType.I_DOG ? 4 : 8;
+          // idata.cpp supplies per-infantry Count (Tanya/dogs/civilians=1,
+          // common combat infantry=3); MasterDoControls gesture Rate=2.
+          m.nonInterruptAnimTicks = m.infantryGestureDurationTicks();
+          m.nonInterruptAnimSetTick = ctx?.tick ?? -1;
           // Phase 7B — track Doing state for C++-faithful Commence gate
           // (entity.ts isDoingInterruptible). Mirrors C++ Do_Action(DO_GESTURE1).
           // doingAI transitions back to stand_ready when niat reaches 0.
@@ -660,7 +783,7 @@ export class Team {
 
     // ── Dissolve if empty and has been active (C++ team.cpp:679-697) ──
     if (this.isEmpty && this.isHasBeen) {
-      this.dissolve();
+      this.dissolve(ctx);
       return;
     }
 
@@ -672,15 +795,24 @@ export class Team {
       if (this.currentMission < this.missionList.length) {
         const mission = this.missionList[this.currentMission];
 
-        // C++ team.cpp:710 — timeout from mission data
-        this.timeOut = mission.data * 90; // C++ team.cpp:710: TICKS_PER_MINUTE/10 = 900/10 = 90
-        this.target = null;
+        // C++ team.cpp:710 — TimeOut is a CDTimerClass, not a manually
+        // decremented integer. Assignment starts the countdown at the current
+        // Frame, so the value remains full for this AI call.
+        this.setTimeOut(mission.data * 90, ctx); // TICKS_PER_MINUTE/10 = 900/10 = 90
+        this.setTarget(null);
 
         // Set mission target based on mission type
         switch (mission.mission) {
           case TMISSION_MOVECELL:
-            // Move to cell (data is cell number — convert to world pos)
-            this.setMissionTarget(null); // Will be set by coordinate functions
+            // C++ team.cpp:715 — Assign_Mission_Target(::As_Target((CELL)data)).
+            {
+              const cell = cellIndexToPos(mission.data);
+              const worldTarget: WorldPos = {
+                x: cell.cx * CELL_SIZE + CELL_SIZE / 2,
+                y: cell.cy * CELL_SIZE + CELL_SIZE / 2,
+              };
+              this.setMissionTarget(worldTarget, cell);
+            }
             break;
 
           case TMISSION_MOVE:
@@ -691,12 +823,51 @@ export class Team {
             if (waypoints) {
               const wp = waypoints.get(mission.data);
               if (wp) {
+                let cell = { cx: wp.cx, cy: wp.cy };
+                if (mission.mission === TMISSION_MOVE) {
+                  // C++ team.cpp:721-724 — TMISSION_MOVE adjusts the waypoint
+                  // through Map.Nearby_Location when the team leader cannot
+                  // enter the exact waypoint cell. TMISSION_PATROL/ATT_WAYPT/SPY
+                  // do not apply this adjustment.
+                  const leader = this._members.find(m => m.alive);
+                  let canEnter = true;
+                  if (leader?.stats.isInfantry && ctx?.map) {
+                    canEnter = ctx.map.canEnterCell(
+                      cell.cx,
+                      cell.cy,
+                      leader.isNavalUnit,
+                      undefined,
+                      true,
+                      leader.id,
+                    ) === MoveResult.OK;
+                  } else if (leader && ctx?.canEnterCell) {
+                    canEnter = ctx.canEnterCell(leader, cell.cx, cell.cy);
+                  } else if (leader && ctx?.map) {
+                    canEnter = ctx.map.canEnterCell(
+                      cell.cx,
+                      cell.cy,
+                      leader.isNavalUnit,
+                      id => ctx.entities?.find(e => e.id === id)?.isDriving ?? false,
+                      false,
+                      leader.id,
+                    ) === MoveResult.OK;
+                  }
+                  if (leader && canEnter === false && ctx?.map) {
+                    const nearby = nearbyLocation(
+                      ctx.map,
+                      cell,
+                      leader.isNavalUnit,
+                      Math.max(0, (ctx.tick ?? 1) - 1),
+                    );
+                    if (nearby) cell = nearby;
+                  }
+                }
                 const worldTarget: WorldPos = {
-                  x: wp.cx * CELL_SIZE + CELL_SIZE / 2,
-                  y: wp.cy * CELL_SIZE + CELL_SIZE / 2,
+                  x: cell.cx * CELL_SIZE + CELL_SIZE / 2,
+                  y: cell.cy * CELL_SIZE + CELL_SIZE / 2,
                 };
-                this.setMissionTarget(worldTarget);
-                this.target = { ...worldTarget };
+                this.setMissionTarget(worldTarget, cell);
+                this.setTarget(worldTarget, cell);
               }
             }
             break;
@@ -716,15 +887,15 @@ export class Team {
         }
       } else {
         // C++ team.cpp:750 — past end of mission list → dissolve
-        this.dissolve();
+        this.dissolve(ctx);
         return;
       }
     }
 
     // ── Execute current mission (C++ team.cpp:758-870) ──
     if (!this.isEmpty && this.isMoving && !this.isReforming && !this.isUnderStrength) {
-      if (!this.target && this.missionTarget) {
-        this.target = { ...this.missionTarget };
+      if (!this.isTargetLegal() && this.missionTarget) {
+        this.copyMissionTargetToTarget();
       }
 
       const mission = this.missionList[this.currentMission];
@@ -736,9 +907,12 @@ export class Team {
           break;
 
         case TMISSION_ATTACK:
+          this.tMissionAttack(ctx);
+          break;
+
         case TMISSION_ATTACKTARCOM:
         case TMISSION_ATT_WAYPT:
-          this.coordinateAttack();
+          this.coordinateAttack(ctx);
           break;
 
         case TMISSION_MOVE:
@@ -748,17 +922,14 @@ export class Team {
 
         case TMISSION_GUARD:
           this.coordinateRegroup(ctx);
-          // C++ team.cpp:856-858 — guard times out
-          if (this.timeOut > 0) {
-            this.timeOut--;
-          }
-          if (this.timeOut <= 0) {
+          // C++ team.cpp:856-858 — guard times out when CDTimer value is 0.
+          if (this.refreshTimeOut(ctx) <= 0) {
             this.isNextMission = true;
           }
           break;
 
         case TMISSION_UNLOAD:
-          this.tMissionUnload();
+          this.tMissionUnload(ctx);
           break;
 
         case TMISSION_DEPLOY:
@@ -851,10 +1022,12 @@ export class Team {
    * All members move toward the team's target. When all arrive, advance mission.
    */
   coordinateMove(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
-    if (!this.target && this.missionTarget) {
-      this.target = { ...this.missionTarget };
+    if (!this.isTargetLegal() && this.missionTarget) {
+      this.copyMissionTargetToTarget();
     }
-    if (!this.target) return;
+    if (!this.isTargetLegal()) return;
+    const targetLepton = this.targetLepton();
+    if (!targetLepton) return;
 
     let finished = true;
     let found = false;
@@ -874,8 +1047,8 @@ export class Team {
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
       // Use leptonDist for C++ parity (coord.cpp Distance in lepton space)
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
-      const targetLX = Math.trunc(this.target.x * LEPTON_SIZE / CELL_SIZE);
-      const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
+      const targetLX = targetLepton.lx;
+      const targetLY = targetLepton.ly;
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
         // C++ team.cpp:1942-1962 — Coordinate_Move calls Assign_Mission(MISSION_MOVE)
@@ -890,7 +1063,7 @@ export class Team {
         // unit.target here, the BadGuy E1 misses its FireLaunch=2 retaliation
         // window at tick 68 → bullet[116] Coord_Scatter (tag 50002) never
         // fires.
-        const nextMoveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+        const nextMoveTarget = { ...targetLepton };
         const targetChanged =
           !unit.moveTarget ||
           unit.moveTarget.lx !== nextMoveTarget.lx ||
@@ -901,42 +1074,47 @@ export class Team {
         if (targetChanged) {
           unit.moveTarget = nextMoveTarget;
           unit.pathThreshold = 1;
-          unit.path = [];
-          unit.pathIndex = 0;
 
-          if (ctx?.map && !unit.stats.isInfantry && !unit.isAirUnit && unit.mission !== Mission.UNLOAD) {
-            const goal = {
-              cx: Math.floor(this.target.x / CELL_SIZE),
-              cy: Math.floor(this.target.y / CELL_SIZE),
-            };
-            unit.path = findPath(ctx.map, unit.cell, goal, true, unit.isNavalUnit, unit.stats.speedClass);
-            // C++ Start_Of_Move (drive.cpp:638-640) fires Start_Driver only
-            // when Basic_Path's FIRST step is enterable (Can_Enter_Cell == OK).
-            // For vessels, vessel.cpp:592/658 gates Commence on `!IsDriving &&
-            // Is_Door_Closed()` — eager flip blocks Mission_Move for SCG07
-            // reinforcements.
+          if (unit.stats.isInfantry) {
+            // C++ InfantryClass::Assign_Destination override (infantry.cpp:1044):
+            // if a moving infantry unit receives a legal destination and is not
+            // formation-moving, Stop_Driver() first. Then, for ordinary
+            // destinations (non ENTER), infantry.cpp:1099 sets Path[0] =
+            // FACING_NONE before FootClass::Assign_Destination updates NavCom
+            // + PathThreshhold. TS stores a cell path plus pathIndex, so clearing
+            // the path is the Path[0]=FACING_NONE equivalent and forces the next
+            // Movement_AI pass to Basic_Path from the current cell.
             //
-            // Strategy: skip flip for vessels (vessel.cpp gate). For land
-            // vehicles, additionally check Can_Enter_Cell on the first path
-            // step (when ctx.canEnterCell provided). If blocked, Basic_Path
-            // would have failed in C++ → no Start_Driver → IsDriving stays
-            // false → Commence pops next tick → Mission_Move fires its jitter
-            // (matches SCG04EA t3 unit[73] firing Mission_Move_foot in WASM).
-            if (unit.path.length > 0 && !unit.stats.isVessel) {
-              const firstStep = unit.path[0];
-              const firstStepEnterable =
-                !ctx.canEnterCell || ctx.canEnterCell(unit, firstStep.cx, firstStep.cy);
-              const desiredFacing = facingFromCellStep(unit.cell, firstStep);
-              if (unit.facing !== desiredFacing) {
-                // C++ drive.cpp:1079-1086 — Start_Of_Move stops at Do_Turn()
-                // when the body is not facing Path[0]. It keeps IsDriving=false,
-                // so UnitClass::AI's pre-Drive Commence can still pop queued MOVE
-                // on this tick (SCG04EA unit[73] t3 Mission_Move_foot).
-                unit.desiredFacing = desiredFacing;
-              } else if (firstStepEnterable) {
-                unit.isDriving = true;
+            // SCG06EA t66: team retaliation changes the team Target while the
+            // BadGuy E1 is mid-hop. C++ stops the old driver and invalidates
+            // Path[0], so the next Movement_AI computes a fresh northward path.
+            // Preserving TS's stale path sends the unit southwest and delays the
+            // follow-up rifle shot that becomes the tick-100 bullet[121] impact.
+            if (unit.isDriving && !unit.formationOffset &&
+                (ctx?.canStopInfantryDriverForAssignDestination?.(unit) ?? true)) {
+              if (ctx?.stopInfantryDriver) {
+                ctx.stopInfantryDriver(unit);
+              } else {
+                unit.isDriving = false;
+                unit.headToLX = 0;
+                unit.headToLY = 0;
+              }
+              if (unit.nonInterruptAnimTicks <= 0) {
+                unit.doing = 'stand_ready';
               }
             }
+            unit.path = [];
+            unit.pathIndex = 0;
+          } else if (!ctx?.startDriveClassMove) {
+            unit.path = [];
+            unit.pathIndex = 0;
+          }
+
+          // C++ DriveClass::Assign_Destination immediately calls Start_Of_Move
+          // after clearing Path[0] (drive.cpp:638-645). The Game callback owns
+          // Basic_Path, Do_Turn, Can_Enter_Cell, and real Start_Driver state.
+          if (ctx?.startDriveClassMove && !unit.stats.isInfantry && !unit.isAirUnit) {
+            ctx.startDriveClassMove(unit);
           }
         }
         finished = false;
@@ -948,32 +1126,22 @@ export class Team {
         //     unit->Enter_Idle_Mode();
         //   }
         //
-        // Phase 3i: previously only handled the `!moveTarget` case (NavCom
-        // already cleared). Added the "within 1 cell of NavCom" case to
-        // match C++ — unit with moveTarget still set but near it.
-        // SCG11 4TNK@60,58 has moveTarget=(16000,15232)=cell(62,59) while
-        // unit at cell(60,58); within stray distance of team target but
-        // not within 1 cell of NavCom. WASM's Enter_Idle_Mode fires from
-        // this path, TS was missing the condition.
-        if (unit.mission === Mission.MOVE) {
-          let shouldIdle = !unit.moveTarget;
-          if (!shouldIdle && unit.moveTarget) {
-            const navDx = unit.moveTarget.lx - unit.leptonX;
-            const navDy = unit.moveTarget.ly - unit.leptonY;
-            // C++ Distance(NavCom) = octagonal approx via coord.cpp:124-136.
-            const adx = Math.abs(navDx), ady = Math.abs(navDy);
-            const navDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
-            const CELL_LEPTON_W = 256;
-            if (navDist < CELL_LEPTON_W) {
-              unit.moveTarget = null;
-              unit.path = [];
-              unit.pathIndex = 0;
-              shouldIdle = true;
-            }
-          }
-          if (shouldIdle) {
-            assignMission(unit, Mission.GUARD);
-          }
+        // Important C++ quirk: this is inside TeamClass, so the unqualified
+        // `Distance(unit->NavCom)` resolves to TeamClass::Distance(), not
+        // unit->Distance(). TeamClass never updates AbstractClass::Coord from
+        // 0xFFFFFFFF, so this does NOT behave as a per-unit close-enough check.
+        // Treat only the explicit `!Target_Legal(unit->NavCom)` half as
+        // behaviorally effective. TS previously used unit-to-NavCom distance
+        // here, forcing SCG11EA MCV teams into GUARD while WASM kept MOVE.
+        if (unit.mission === Mission.MOVE && !unit.moveTarget) {
+          assignMission(unit, Mission.GUARD);
+        }
+        // C++ team.cpp:1980-1985 — even when close enough to the team target,
+        // a member with a legal NavCom keeps the movement mission in progress.
+        // This prevents early team mission advancement/dissolve while units are
+        // still finishing their assigned path.
+        if (unit.moveTarget) {
+          finished = false;
         }
       }
     }
@@ -987,18 +1155,176 @@ export class Team {
   }
 
   /**
+   * C++ TMission_Attack (team.cpp:2704-2766).
+   *
+   * If MissionTarget is empty, the team leader runs Greatest_Threat() with the
+   * mission's quarry mask, then Coordinate_Attack assigns that TARGET as each
+   * member's TarCom. TS previously skipped this dispatcher and called
+   * Coordinate_Attack with no target, so one-mission "hunt*" teams dissolved or
+   * fell back to GUARD instead of attacking the selected quarry.
+   */
+  private tMissionAttack(ctx?: TeamAIContext): void {
+    if (!this.isMissionTargetLegal()) {
+      const mission = this.missionList[this.currentMission];
+      const candidate = this.fetchLeader();
+      const target = candidate && mission
+        ? this.greatestThreatForTeamAttack(candidate, mission.data, ctx)
+        : null;
+
+      if (target) {
+        this.setMissionTarget({ x: target.pos.x, y: target.pos.y }, null, target);
+      } else {
+        this.setMissionTarget(null);
+        this.isNextMission = true;
+      }
+    }
+
+    this.coordinateAttack(ctx);
+  }
+
+  private isMissionTargetLegal(): boolean {
+    if (!this.missionTarget) return false;
+    if (this.missionTargetEntityRef) return this.missionTargetEntityRef.alive && !this.missionTargetEntityRef.inLimbo;
+    if (this.missionTargetStructureRef) return this.missionTargetStructureRef.alive;
+    return true;
+  }
+
+  private greatestThreatForTeamAttack(scanner: Entity, quarry: number, ctx?: TeamAIContext): Entity | null {
+    if (!ctx?.entities || !ctx.map || !ctx.entitiesAllied) return null;
+    if (quarry === QUARRY_NONE) return null;
+
+    const baseMask = this.teamAttackQuarryMask(quarry);
+    let mask = baseMask | this.weaponAllowedThreatMask(scanner, ctx.isPlayerControlled?.(scanner) ?? false);
+    if (mask & TeamThreatRTTI.UNIT) mask |= TeamThreatRTTI.AIRCRAFT;
+    if (mask === 0) return null;
+
+    const zone = (!scanner.isNavalUnit && !scanner.isAirUnit)
+      ? movementZoneCells(ctx.map, scanner.cell, false)
+      : null;
+    const useZone = !!zone && !!zone[scanner.cell.cy * MAP_CELLS + scanner.cell.cx];
+
+    const sorted = [...ctx.entities].sort((a, b) => {
+      const aAir = a.isAirUnit && a.flightAltitude > 0 ? 0 : 1;
+      const bAir = b.isAirUnit && b.flightAltitude > 0 ? 0 : 1;
+      if (aAir !== bAir) return aAir - bAir;
+      return this.groundLayerSortKey(a) - this.groundLayerSortKey(b);
+    });
+
+    let best: Entity | null = null;
+    let bestValue = -1;
+    for (const other of sorted) {
+      if (!other.alive || other.inLimbo) continue;
+      if (ctx.entitiesAllied(scanner, other)) continue;
+      if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+      if (other.cloakState === CloakState.CLOAKED) continue;
+      if (other.type === UnitType.I_SPY && scanner.type !== UnitType.I_DOG) continue;
+      if (!(this.teamThreatRttiBit(other) & mask)) continue;
+      if (quarry === QUARRY_HARVESTERS && other.type !== UnitType.V_HARV) continue;
+      if (useZone && zone && !zone[other.cell.cy * MAP_CELLS + other.cell.cx]) continue;
+      if (!this.isVisibleToPlayerForThreat(ctx, other)) continue;
+      if (other.isAirUnit && other.flightAltitude > 0 && !(scanner.weapon?.isAntiAir || scanner.weapon2?.isAntiAir)) continue;
+
+      const distCells = leptonDist(scanner.leptonX, scanner.leptonY, other.leptonX, other.leptonY) / LEPTON_SIZE;
+      const value = ctx.threatScore
+        ? ctx.threatScore(scanner, other, distCells)
+        : computeThreatScore(scanner, other, distCells);
+      if (value > bestValue) {
+        bestValue = value;
+        best = other;
+      }
+    }
+    return best;
+  }
+
+  private teamAttackQuarryMask(quarry: number): number {
+    switch (quarry) {
+      case QUARRY_BUILDINGS:
+      case QUARRY_FACTORIES:
+      case QUARRY_DEFENSE:
+      case QUARRY_POWER:
+      case QUARRY_FAKES:
+        return TeamThreatRTTI.BUILDING;
+      case QUARRY_HARVESTERS:
+        return TeamThreatRTTI.UNIT | TeamThreatRTTI.BUILDING;
+      case QUARRY_INFANTRY:
+        return TeamThreatRTTI.INFANTRY;
+      case QUARRY_VEHICLES:
+      case QUARRY_THREAT:
+        return TeamThreatRTTI.UNIT | TeamThreatRTTI.AIRCRAFT;
+      case QUARRY_VESSELS:
+        return TeamThreatRTTI.VESSEL;
+      case QUARRY_ANYTHING:
+      default:
+        return 0;
+    }
+  }
+
+  private weaponAllowedThreatMask(entity: Entity, isHumanControlled: boolean): number {
+    if (entity.type === UnitType.I_DOG) return TeamThreatRTTI.INFANTRY;
+    if (entity.type === UnitType.I_MEDI) return TeamThreatRTTI.INFANTRY;
+    if (entity.type === UnitType.I_MECH) return TeamThreatRTTI.UNIT | TeamThreatRTTI.AIRCRAFT;
+
+    const w1 = entity.weapon;
+    const w2 = entity.weapon2;
+    if (!w1 && !w2) return 0;
+
+    const anyAG = (!!w1 && w1.isAntiGround !== false) || (!!w2 && w2.isAntiGround !== false);
+    const anyAA = !!(w1?.isAntiAir || w2?.isAntiAir);
+    let mask = 0;
+    if (anyAG) mask |= TeamThreatRTTI.INFANTRY | TeamThreatRTTI.UNIT | TeamThreatRTTI.VESSEL | TeamThreatRTTI.BUILDING;
+    if (anyAA) mask |= TeamThreatRTTI.AIRCRAFT;
+    if (mask & TeamThreatRTTI.UNIT) mask |= TeamThreatRTTI.AIRCRAFT;
+
+    if (entity.stats.isInfantry && w1?.warhead === 'Organic') {
+      mask &= ~(TeamThreatRTTI.BUILDING | TeamThreatRTTI.UNIT | TeamThreatRTTI.VESSEL | TeamThreatRTTI.AIRCRAFT);
+    }
+    if (entity.stats.isInfantry && isHumanControlled) {
+      mask &= ~TeamThreatRTTI.BUILDING;
+    }
+    return mask;
+  }
+
+  private teamThreatRttiBit(other: Entity): number {
+    if (other.stats.isInfantry) return TeamThreatRTTI.INFANTRY;
+    if (other.isNavalUnit) return TeamThreatRTTI.VESSEL;
+    if (other.isAirUnit) return TeamThreatRTTI.AIRCRAFT;
+    return TeamThreatRTTI.UNIT;
+  }
+
+  private groundLayerSortKey(entity: Entity): number {
+    const yOffset = entity.stats.isInfantry ? 0x30 : 0x80;
+    return (entity.leptonY + yOffset) * 0x10000 + entity.leptonX;
+  }
+
+  private isVisibleToPlayerForThreat(ctx: TeamAIContext, other: Entity): boolean {
+    if (other.house === ctx.playerHouse) return true;
+    if (other.isAirUnit) return true;
+    if (ctx.isDiscoveredByPlayer) return ctx.isDiscoveredByPlayer(other);
+    return true;
+  }
+
+  /**
    * C++ Coordinate_Attack (team.cpp:1636-1721)
    * All members attack the team's target. If target is invalid, advance mission.
    */
-  coordinateAttack(): void {
-    if (!this.target) {
+  coordinateAttack(ctx?: TeamAIContext): void {
+    if (!this.isTargetLegal()) {
       if (this.missionTarget) {
-        this.target = { ...this.missionTarget };
+        this.copyMissionTargetToTarget();
       } else {
         this.isNextMission = true;
         return;
       }
     }
+
+    this.resolveCellAttackTarget(ctx);
+
+    if (!this.isTargetLegal()) {
+      this.isNextMission = true;
+      return;
+    }
+
+    const targetLepton = this.targetLepton();
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
@@ -1010,16 +1336,52 @@ export class Team {
       // after its E2 paratroopers were dropped).
       if (unit.isALoaner && unit.mission === Mission.RETREAT) continue;
 
-      // C++ team.cpp:1703-1708 — assign ATTACK mission
-      // Session 22: route through queue (Assign_Mission) per mission.cpp:388.
-      // No-op when Mission == ATTACK. Commence pops via STAGE A when idle.
-      if (unit.mission !== Mission.ATTACK) {
+      // C++ team.cpp:1685-1687 — Coordinate_Attack always runs
+      // Coordinate_Conscript first, then only assigns ATTACK/TarCom to
+      // _Is_It_Playing members. This is important for reinforcement cargo:
+      // loaded passengers are in limbo and must not have their post-paradrop
+      // HUNT queue overwritten by team MOVE/ATTACK coordination.
+      this.coordinateConscript(unit);
+      if (!this.isItPlaying(unit)) continue;
+
+      // C++ team.cpp:1705-1710 — when changing into ATTACK, clear TarCom and
+      // NavCom after queueing the mission. InfantryClass::Assign_Destination
+      // with TARGET_NONE invalidates pending Path[0] but does not stop an
+      // active Head_To_Coord hop; TS preserves path while driving so the current
+      // hop can complete, and clears queued path when not driving.
+      if (unit.mission !== Mission.ATTACK &&
+          unit.mission !== Mission.ENTER &&
+          unit.mission !== Mission.CAPTURE) {
         assignMission(unit, Mission.ATTACK);
         unit.moveTarget = null;
+        unit.target = null;
+        unit.targetStructure = null;
+        unit.forceFirePos = null;
+        unit.pathThreshold = 1; // C++ MOVE_CLOAK
+        if (!unit.isDriving) {
+          unit.path = [];
+          unit.pathIndex = 0;
+        }
       }
-      // Set move target toward attack position if no entity target
-      if (!unit.target && this.target) {
-        unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+
+      if (this.targetEntityRef && unit.target !== this.targetEntityRef) {
+        unit.target = this.targetEntityRef;
+        unit.targetStructure = null;
+        unit.forceFirePos = null;
+        unit.moveTarget = null;
+      } else if (this.targetStructureRef && unit.targetStructure !== this.targetStructureRef) {
+        unit.target = null;
+        unit.targetStructure = this.targetStructureRef;
+        unit.forceFirePos = null;
+        unit.moveTarget = null;
+      } else if (!this.targetEntityRef && !this.targetStructureRef && unit.isAirUnit && targetLepton) {
+        // C++ allows aircraft teams to attack an empty cell (paradrops and
+        // parabombs). Keep the waypoint as the aircraft's fly-to/drop NavCom.
+        unit.moveTarget = { ...targetLepton };
+      } else if (!this.targetEntityRef && !this.targetStructureRef && unit.target == null && targetLepton) {
+        // Bridge cell fallback: no TS bridge object exists, so keep a coordinate
+        // TarCom surrogate. Non-bridge empty cells were invalidated above.
+        unit.moveTarget = { ...targetLepton };
       }
     }
   }
@@ -1029,28 +1391,43 @@ export class Team {
    * Assign a specific mission to all members.
    */
   coordinateDo(mission: TeamMissionEntry): void {
-    // C++ team.cpp:1813-1860 Coordinate_Do — for each member: queue do_mission
-    // and (only when in the regrouping branch — line 1848) clear ArchiveTarget,
-    // TarCom, and NavCom. The regrouping branch is gated by:
-    //   !Target_Legal(unit->TarCom) && !Target_Legal(unit->NavCom)
-    //     && unit->Mission != do_mission
-    // i.e., the clears happen ONLY when TarCom and NavCom are already null —
-    // making the clears redundant in C++. The non-regrouping branch
-    // (Distance(Zone) > 2*StrayDistance) never touches TarCom or NavCom.
-    //
-    // Queue the mission for every member; Commence processes when animation
-    // allows. Do NOT unconditionally clear TarCom/NavCom — that would nullify
-    // a triggerRetaliation-set TarCom (see commit 14e56d67 for the analogous
-    // SCG06EA t68 issue in coordinateMove).
+    // C++ team.cpp:1822-1854 Coordinate_Do does NOT blindly queue the DO
+    // mission. It first lets conscripts move toward Zone, then only assigns the
+    // special mission when both TarCom and NavCom are illegal. Members already
+    // attacking or moving are left alone.
     const doMission = this.mapCppMission(mission.data);
 
     for (const unit of this._members) {
       if (!unit.alive) continue;
-      // C++ Assign_Mission queues; Commence processes when animation allows
-      unit.missionQueue = doMission;
+      this.coordinateConscript(unit);
+      if (!this.isItPlaying(unit)) continue;
+
+      const hasTarCom = (unit.target?.alive ?? false) || (unit.targetStructure?.alive ?? false);
+      const hasNavCom = !!unit.moveTarget;
+      if (hasTarCom || hasNavCom) continue;
+
+      if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > STRAY_DISTANCE * 2) {
+        // C++ line 1835: regroup strays before assigning do_mission.
+        assignMission(unit, Mission.MOVE);
+        unit.moveTarget = { lx: this.zoneLeptonX, ly: this.zoneLeptonY };
+        unit.pathThreshold = 1;
+        continue;
+      }
+
+      if (unit.mission !== doMission) {
+        unit.target = null;
+        unit.targetStructure = null;
+        unit.moveTarget = null;
+        assignMission(unit, doMission);
+      }
     }
 
-    this.isNextMission = true;
+    // C++ team.cpp:1813-1860 Coordinate_Do does not set IsNextMission.
+    // The team remains on the DO mission and keeps coordinating members there.
+    // Advancing here dissolves short mission lists such as SCG06EA `inf5`
+    // (MOVE, DO ATTACK), clearing member Team pointers and incorrectly routing
+    // later damage through standalone FootClass retaliation instead of
+    // TeamClass::Took_Damage.
   }
 
   /**
@@ -1060,29 +1437,32 @@ export class Team {
   coordinatePatrol(_waypoints?: Map<number, { cx: number; cy: number }>, ctx?: TeamAIContext): void {
     // Patrol combines MOVE + ATTACK behaviors
     // If any member is in combat, let it fight; otherwise, move toward target
-    if (!this.target && this.missionTarget) {
-      this.target = { ...this.missionTarget };
+    if (!this.isTargetLegal() && this.missionTarget) {
+      this.copyMissionTargetToTarget();
     }
     // C++ TMission_Patrol (team.cpp:2949-2958): if Target was cleared
     // prematurely, restore the current patrol waypoint before scanning/moving.
-    if (!this.target && _waypoints) {
+    if (!this.isTargetLegal() && _waypoints) {
       const mission = this.missionList[this.currentMission];
       if (mission?.mission === TMISSION_PATROL) {
         const wp = _waypoints.get(mission.data);
         if (wp) {
+          const cell = { cx: wp.cx, cy: wp.cy };
           const worldTarget: WorldPos = {
             x: wp.cx * CELL_SIZE + CELL_SIZE / 2,
             y: wp.cy * CELL_SIZE + CELL_SIZE / 2,
           };
-          this.setMissionTarget(worldTarget);
-          this.target = { ...worldTarget };
+          this.setMissionTarget(worldTarget, cell);
+          this.setTarget(worldTarget, cell);
         }
       }
     }
-    if (!this.target) {
+    if (!this.isTargetLegal()) {
       this.isNextMission = true;
       return;
     }
+    const targetLepton = this.targetLepton();
+    if (!targetLepton) return;
 
     // C++ team.cpp:2965-2976 — TMission_Patrol periodic threat scan.
     //   if (Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0) {
@@ -1100,30 +1480,28 @@ export class Team {
     //     Assign_Destination(TARGET_NONE)    ← clears NavCom
     //
     // C++ Greatest_Threat doesn't consume RNG (techno.cpp:1987-2300 — pure scan).
-    // We use a simple proximity check: any enemy within THREAT_RANGE (~5 cells).
+    // Use the same cell-based THREAT_RANGE scan as Mission_Guard; do not use a
+    // proximity shortcut, because C++ filters by visibility, RTTI mask, weapon
+    // range, occupier LIFO order, and the TechnoClass bestval overwrite bug.
     // C++ Frame is 0-indexed (starts at 0); TS tick is 1-indexed (starts at 1).
     // C++ Frame % 14 == 0 fires at Frame 0, 14, 28, ..., 98, 112.
     // TS tick at scan fire = Frame + 1, so scan fires when (tick-1) % 14 == 0.
     const PATROL_TIME_TICKS = 14;
     if (ctx?.tick !== undefined && ctx.tick > 0 && (ctx.tick - 1) % PATROL_TIME_TICKS === 0) {
       const leader = this._members.find(m => m.alive);
-      if (leader && ctx.entities) {
-        // Greatest_Threat scan: look for any non-allied entity in threat range.
-        // C++ Threat_Range with THREAT_RANGE=true returns weapon-range-based.
-        // For an E1 with weapon range ~4 cells, threat range ~5 cells.
-        const THREAT_RANGE_LEPTONS = 5 * 256;
-        let foundThreat = false;
-        for (const e of ctx.entities) {
-          if (!e.alive || e.house === leader.house) continue;
-          const dx = e.leptonX - leader.leptonX;
-          const dy = e.leptonY - leader.leptonY;
-          const adx = Math.abs(dx), ady = Math.abs(dy);
-          const dist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
-          if (dist <= THREAT_RANGE_LEPTONS) {
-            foundThreat = true;
-            break;
-          }
-        }
+      if (leader && ctx.entities && ctx.map && ctx.playerHouse !== undefined &&
+          ctx.entitiesAllied && ctx.isPlayerControlled && ctx.isRevealedToHouse) {
+        const threatCtx: GreatestThreatRangeContext = {
+          entities: ctx.entities,
+          map: ctx.map,
+          tick: ctx.tick,
+          playerHouse: ctx.playerHouse,
+          entitiesAllied: ctx.entitiesAllied,
+          isPlayerControlled: ctx.isPlayerControlled,
+          isDiscoveredByPlayer: ctx.isDiscoveredByPlayer,
+          isRevealedToHouse: ctx.isRevealedToHouse,
+        };
+        const foundThreat = greatestThreatRangeTarget(threatCtx, leader) !== null;
         if (!foundThreat) {
           // Equivalent of C++ Assign_Mission_Target(TARGET_NONE) (team.cpp:396-437):
           // For each member: if NavCom (moveTarget) == old MissionTarget,
@@ -1142,32 +1520,37 @@ export class Team {
           // Critical: do NOT call assignMission(GUARD) when unit is already in
           // GUARD — it's a no-op in C++ Assign_Mission, which preserves the
           // existing mq=MOVE that drives the Mission_Move → Enter_Idle_Mode chain.
-          const oldMissionTargetLX = this.missionTarget ? pixelToLepton(this.missionTarget.x) : null;
-          const oldMissionTargetLY = this.missionTarget ? pixelToLepton(this.missionTarget.y) : null;
+          const oldMissionTarget = this.missionTargetLepton();
+          const oldMissionTargetLX = oldMissionTarget ? oldMissionTarget.lx : null;
+          const oldMissionTargetLY = oldMissionTarget ? oldMissionTarget.ly : null;
           for (const m of this._members) {
             if (!m.alive) continue;
             if (m.moveTarget &&
                 oldMissionTargetLX !== null && oldMissionTargetLY !== null &&
                 m.moveTarget.lx === oldMissionTargetLX && m.moveTarget.ly === oldMissionTargetLY) {
-              // C++ Assign_Mission(GUARD) is a no-op when Mission==GUARD already.
-              // assignMission in TS has the same semantics (clears queue when
-              // already-in-target, sets queue otherwise). Using direct queue write
-              // would over-clear; rely on assignMission's no-op semantic.
+              // C++ Assign_Mission(GUARD) is a true no-op when Mission==GUARD
+              // already; it preserves any pending queue (mission.cpp:388).
+              // Route through assignMission only when it can actually enqueue.
               if (m.mission !== Mission.GUARD) {
                 assignMission(m, Mission.GUARD);
               }
-              // C++ Assign_Destination(TARGET_NONE) — foot.cpp:1809-1820 only
-              // clears NavCom and resets PathThreshhold. It does not clear the
-              // active Head_To_Coord segment; Movement_AI gets the current tick
-              // to advance, then Stop_Driver happens on the following tick if
-              // the segment did not arrive.
+              // C++ virtual Assign_Destination(TARGET_NONE):
+              //   InfantryClass::Assign_Destination clears Path[0] first
+              //   (infantry.cpp:1099-1101), then FootClass clears NavCom and
+              //   resets PathThreshhold. It does not stop the active
+              //   Head_To_Coord segment here because TARGET_NONE is not legal.
               m.moveTarget = null;
               m.navComClearedTick = ctx?.tick ?? -1;
+              if (m.stats.isInfantry && !m.isDriving) {
+                m.path = [];
+                m.pathIndex = 0;
+              }
               m.pathThreshold = 1; // C++ MOVE_CLOAK
             }
           }
           this.missionTarget = null;
-          this.target = null;
+          this.missionTargetCell = null;
+          this.setTarget(null);
           // After clearing target, return early — Coordinate_Move would skip
           // member iteration anyway (C++ team.cpp:1891 `if (Target_Legal(Target))`).
           return;
@@ -1192,8 +1575,8 @@ export class Team {
       // C++ team.cpp:1908-1910: stray = Rule.StrayDistance; aircraft *= 3
       // Use leptonDist for C++ parity (coord.cpp Distance in lepton space)
       const stray = unit.isAirUnit ? STRAY_DISTANCE * 3 : STRAY_DISTANCE;
-      const targetLX = Math.trunc(this.target.x * LEPTON_SIZE / CELL_SIZE);
-      const targetLY = Math.trunc(this.target.y * LEPTON_SIZE / CELL_SIZE);
+      const targetLX = targetLepton.lx;
+      const targetLY = targetLepton.ly;
       const dist = leptonDist(unit.leptonX, unit.leptonY, targetLX, targetLY);
       if (dist > stray) {
         // For infantry, queue the mission so the gesture gate at index.ts:4067
@@ -1206,9 +1589,30 @@ export class Team {
           // — no-op when already in MOVE, queues otherwise.
           assignMission(unit, Mission.MOVE);
           if (!unit.moveTarget) {
-            unit.moveTarget = { lx: pixelToLepton(this.target.x), ly: pixelToLepton(this.target.y) };
+            // C++ Coordinate_Move calls InfantryClass::Assign_Destination.
+            // infantry.cpp:1046 stops an already-driving, non-formation infantry
+            // before FootClass::Assign_Destination writes the new legal NavCom;
+            // infantry.cpp:1099 also clears Path[0]. coordinateMove already ports
+            // this; patrol shares the same Coordinate_Move implementation in C++.
+            if (unit.isDriving && !unit.formationOffset &&
+                (ctx?.canStopInfantryDriverForAssignDestination?.(unit) ?? true)) {
+              if (ctx?.stopInfantryDriver) {
+                ctx.stopInfantryDriver(unit);
+              } else {
+                unit.isDriving = false;
+                unit.headToLX = 0;
+                unit.headToLY = 0;
+              }
+              if (unit.nonInterruptAnimTicks <= 0) {
+                unit.doing = 'stand_ready';
+              }
+            }
+            unit.path = [];
+            unit.pathIndex = 0;
+            unit.moveTarget = { ...targetLepton };
+            unit.pathThreshold = 1;
           }
-        } else if (unit.mission !== Mission.MOVE || !unit.moveTarget) {
+        } else {
           // C++ team.cpp Coordinate_Patrol (team.cpp:Coordinate_Move-equivalent
           // patrol variant) → Assign_Mission(MISSION_MOVE) → Commence() pops
           // queue and sets Timer=0 (mission.cpp:354). Next MissionClass::AI
@@ -1219,13 +1623,34 @@ export class Team {
           // fires the Mission_Move jitter on every re-assignment, including
           // re-targets to the same blocked cell. The drive.cpp:1102 reactive
           // close-enough in followTrackStep clears NavCom when blocked.
-          const targetLXlepton = pixelToLepton(this.target.x);
-          const targetLYlepton = pixelToLepton(this.target.y);
+          const targetLXlepton = targetLepton.lx;
+          const targetLYlepton = targetLepton.ly;
+          const targetChanged =
+            !unit.moveTarget ||
+            unit.moveTarget.lx !== targetLXlepton ||
+            unit.moveTarget.ly !== targetLYlepton;
+          if (!targetChanged) {
+            // C++ TMission_Patrol falls through to Coordinate_Move
+            // (team.cpp:2995-2999). Coordinate_Move queues MISSION_MOVE when
+            // needed, but calls Assign_Destination only when unit->NavCom !=
+            // Target (team.cpp:1955-1977). Preserve the existing DriveClass
+            // Path[] when NavCom already points at the patrol target.
+            assignMission(unit, Mission.MOVE);
+            allArrived = false;
+            continue;
+          }
           // Session 21: route through queue (Assign_Mission). Commence
           // resets Timer=0 when it pops (mission.cpp:354); manual reset
           // removed to match C++ exactly.
           assignMission(unit, Mission.MOVE);
           unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
+          if (ctx?.startDriveClassMove && !unit.stats.isInfantry && !unit.isAirUnit) {
+            // C++ DriveClass::Assign_Destination immediately calls Start_Of_Move
+            // after clearing Path[0] (drive.cpp:638-645). Do not synthesize
+            // isDriving in TeamClass; Start_Driver sets it only when a real
+            // track has been selected and reserved.
+            ctx.startDriveClassMove(unit);
+          }
         }
         allArrived = false;
       } else {
@@ -1236,26 +1661,16 @@ export class Team {
         //     unit->Enter_Idle_Mode();
         //   }
         //
-        // coordinateMove had this; coordinatePatrol was missing it. Mirrors the
-        // identical C++ team.cpp branch for both.
-        if (unit.mission === Mission.MOVE) {
-          let shouldIdle = !unit.moveTarget;
-          if (!shouldIdle && unit.moveTarget) {
-            const navDx = unit.moveTarget.lx - unit.leptonX;
-            const navDy = unit.moveTarget.ly - unit.leptonY;
-            const adx = Math.abs(navDx), ady = Math.abs(navDy);
-            const navDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
-            const CELL_LEPTON_W = 256;
-            if (navDist < CELL_LEPTON_W) {
-              unit.moveTarget = null;
-              unit.path = [];
-              unit.pathIndex = 0;
-              shouldIdle = true;
-            }
-          }
-          if (shouldIdle) {
-            assignMission(unit, Mission.GUARD);
-          }
+        // See coordinateMove for the TeamClass::Distance quirk: the distance
+        // half is not a usable per-unit close-enough check in the shipped C++.
+        if (unit.mission === Mission.MOVE && !unit.moveTarget) {
+          assignMission(unit, Mission.GUARD);
+        }
+        // C++ team.cpp:1980-1985 — Coordinate_Patrol falls through the same
+        // Coordinate_Move logic; legal NavCom means the patrol move is not yet
+        // finished even if the unit is within stray distance of the target.
+        if (unit.moveTarget) {
+          allArrived = false;
         }
       }
     }
@@ -1269,31 +1684,31 @@ export class Team {
    * C++ TMission_Unload (team.cpp:2110-2176)
    * Tell transports to unload passengers.
    */
-  tMissionUnload(): void {
+  tMissionUnload(ctx?: TeamAIContext): void {
     let finished = true;
     for (const unit of this._members) {
       if (!unit.alive) continue;
       if (unit.passengers && unit.passengers.length > 0) {
-        const aircraftUnloading =
-          unit.stats.isAircraft &&
-          (unit.aircraftState === 'unload_search' ||
-            unit.aircraftState === 'unload_fly' ||
-            unit.aircraftState === 'unload_land' ||
-            unit.aircraftState === 'unload_eject');
-        if (aircraftUnloading) {
-          finished = false;
-          continue;
-        }
-
-        // C++ team.cpp:2148-2152: Assign_Mission(UNLOAD) queues it. Commence
-        // transitions when gated condition met (not IsLanding/IsTakingOff for
-        // aircraft). For tick-1 reinforcement aircraft, IsTakingOff=true means
-        // Commence is skipped and Mission stays MOVE. Mission_Move then
-        // consumes Random_Pick(0,2). Match by queueing instead of direct set.
+        // C++ team.cpp:2148-2152: do this even while aircraft are landing.
+        // AircraftClass::AI's Commence gate handles IsLanding/IsTakingOff; the
+        // team mission does not wait for a TS aircraft state label.
         if (unit.mission !== Mission.UNLOAD) {
-          unit.missionQueue = Mission.UNLOAD;
+          unit.moveTarget = null;          // Assign_Destination(TARGET_NONE)
+          unit.target = null;              // Assign_Target(TARGET_NONE)
+          unit.targetStructure = null;
+          const alreadyQueuedUnload = unit.missionQueue === Mission.UNLOAD;
+          assignMission(unit, Mission.UNLOAD);
+          if (!alreadyQueuedUnload && unit.missionQueue === Mission.UNLOAD) {
+            unit.missionQueueSetTick = ctx?.tick ?? -1;
+          }
         }
         finished = false;
+      } else if (unit.isALoaner) {
+        // C++ team.cpp:2165-2170 — once a loaner transport has offloaded all
+        // cargo, remove it from the team and immediately start RETREAT.
+        this.remove(unit);
+        assignMission(unit, Mission.RETREAT);
+        commence(unit, 'TeamClass::TMission_Unload loaner retreat');
       }
     }
     if (finished) {
@@ -1343,18 +1758,190 @@ export class Team {
    * Notify team that a member took damage.
    * Non-suicide teams may retarget to the attacker.
    */
-  tookDamage(member: Entity, source: Entity | null): void {
+  tookDamage(member: Entity, source: Entity | null, ctx?: Pick<TeamAIContext, 'entities'>): void {
     if (this.isSuicide) return;
     if (!source || !source.alive) return;
     if (this._members.includes(source)) return; // don't target own team
 
-    // C++ team.cpp:1613 — retarget to attacker
-    if (this.isMoving && this.target) {
-      this.target = { x: source.pos.x, y: source.pos.y };
+    const head = this._members.find(m => m.alive);
+    if (!head) return;
+    // C++ team.cpp:1587-1589 — moving teams respond to attacks, but not if
+    // the team head is aircraft or an LST/transport vessel.
+    if (head.stats.isAircraft || (head.stats.isVessel && head.isTransport)) return;
+
+    // C++ team.cpp:1606-1610 — don't change to sources the team member class
+    // cannot normally attack.
+    if (source.isAirUnit) return;
+    if (source.stats.isVessel && !head.stats.isVessel) return;
+
+    // C++ team.cpp:1596-1603 — don't shuffle away from an existing armed
+    // target if that target can fire on the team zone.
+    if (this.targetEntityRef?.alive && this.targetEntityRef.weapon) {
+      const zone = this.zone ?? {
+        x: this.zoneLeptonX * CELL_SIZE / LEPTON_SIZE,
+        y: this.zoneLeptonY * CELL_SIZE / LEPTON_SIZE,
+      };
+      if (worldDist(this.targetEntityRef.pos, zone) <= this.targetEntityRef.weapon.range * CELL_SIZE) {
+        return;
+      }
+    }
+
+    // C++ team.cpp:1590-1613 — moving teams retarget to their attacker.
+    // This updates Team::Target, not the individual member TarCom. The current
+    // mission target remains unchanged, so later code can resume the scripted
+    // destination after the immediate threat is handled.
+    if (this.isMoving) {
+      this.setTarget({ x: source.pos.x, y: source.pos.y }, null, source);
     }
   }
 
   // ── Internal helpers ──
+
+  private setTarget(
+    newTarget: WorldPos | null,
+    cell: CellPos | null = null,
+    entityRef: Entity | null = null,
+    structureRef: MapStructure | null = null,
+  ): void {
+    this.target = newTarget ? { ...newTarget } : null;
+    this.targetCell = cell ? { ...cell } : null;
+    this.targetEntityRef = entityRef;
+    this.targetStructureRef = structureRef;
+  }
+
+  private copyMissionTargetToTarget(): void {
+    this.setTarget(
+      this.missionTarget,
+      this.missionTargetCell,
+      this.missionTargetEntityRef,
+      this.missionTargetStructureRef,
+    );
+  }
+
+  /** C++ team.cpp:1652-1672 — non-air teams attacking a cell first convert the
+   * cell target into its Cell_Object target; empty non-bridge cells invalidate
+   * Target so the team advances to the next mission. */
+  private resolveCellAttackTarget(ctx?: TeamAIContext): void {
+    if (!this.targetCell || !this.target) return;
+    if (!ctx) return;
+
+    const leader = this.fetchLeader();
+    if (!leader || leader.isAirUnit) return;
+
+    const cell = this.targetCell;
+    const entityTarget = ctx.entities?.find(e =>
+      e.alive &&
+      !e.inLimbo &&
+      !e.isAirUnit &&
+      e.cell.cx === cell.cx &&
+      e.cell.cy === cell.cy);
+    if (entityTarget) {
+      this.setTarget({ x: entityTarget.pos.x, y: entityTarget.pos.y }, null, entityTarget);
+      return;
+    }
+
+    const structureTarget = this.structureAtCell(ctx.structures, cell);
+    if (structureTarget) {
+      const [w, h] = STRUCTURE_SIZE[structureTarget.type] ?? [1, 1];
+      this.setTarget({
+        x: (structureTarget.cx + w / 2) * CELL_SIZE,
+        y: (structureTarget.cy + h / 2) * CELL_SIZE,
+      }, null, null, structureTarget);
+      return;
+    }
+
+    if (ctx.map?.isBridgeCell(cell.cx, cell.cy)) {
+      return;
+    }
+
+    this.setTarget(null);
+  }
+
+  private structureAtCell(structures: MapStructure[] | undefined, cell: CellPos): MapStructure | null {
+    if (!structures) return null;
+    for (const s of structures) {
+      if (!s.alive) continue;
+      const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      if (cell.cx >= s.cx && cell.cx < s.cx + w &&
+          cell.cy >= s.cy && cell.cy < s.cy + h) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  /** C++ TeamClass::Fetch_A_Leader (team.cpp:3070-3092).
+   *  Prefer the first active, initiated, weapon-equipped member; if none exists,
+   *  fall back to the first member in the linked list. This matters for mixed
+   *  aircraft/passenger teams: the BADR remains the leader while paradropping,
+   *  so attack-waypoint cells are not converted to Cell_Object targets. */
+  private fetchLeader(): Entity | null {
+    for (const m of this._members) {
+      if (this.isItPlaying(m) && m.weapon) return m;
+    }
+    return this._members[0] ?? null;
+  }
+
+  /** C++ TeamClass::Detach (team.cpp:1348-1363).
+   *  Called from ObjectClass::Detach_All/Detach_This_From_All when a target is
+   *  removed from targeting systems, including TechnoClass::Do_Cloak()
+   *  (techno.cpp:4144-4150, all=false). If the team Target points at that
+   *  techno, clear it so the next mission coordinator falls back to
+   *  MissionTarget. */
+  detachTargetEntity(target: Entity): void {
+    if (this.targetEntityRef === target) {
+      this.setTarget(null);
+    }
+  }
+
+  private isTargetLegal(): boolean {
+    if (!this.target) return false;
+    if (this.targetEntityRef) {
+      return this.targetEntityRef.alive && !this.targetEntityRef.inLimbo;
+    }
+    if (this.targetStructureRef) {
+      return this.targetStructureRef.alive;
+    }
+    return true;
+  }
+
+  private targetLepton(): LeptonPos | null {
+    if (!this.isTargetLegal()) return null;
+    const target = this.target;
+    if (this.targetEntityRef) {
+      return { lx: this.targetEntityRef.leptonX, ly: this.targetEntityRef.leptonY };
+    }
+    if (this.targetStructureRef) {
+      const [w, h] = STRUCTURE_SIZE[this.targetStructureRef.type] ?? [1, 1];
+      return {
+        lx: Math.trunc((this.targetStructureRef.cx + w / 2) * LEPTON_SIZE),
+        ly: Math.trunc((this.targetStructureRef.cy + h / 2) * LEPTON_SIZE),
+      };
+    }
+    if (this.targetCell) {
+      return cellTargetToLepton(this.targetCell.cx, this.targetCell.cy);
+    }
+    if (!target) return null;
+    return { lx: pixelToLepton(target.x), ly: pixelToLepton(target.y) };
+  }
+
+  private missionTargetLepton(): LeptonPos | null {
+    if (!this.missionTarget) return null;
+    if (this.missionTargetEntityRef?.alive) {
+      return { lx: this.missionTargetEntityRef.leptonX, ly: this.missionTargetEntityRef.leptonY };
+    }
+    if (this.missionTargetStructureRef?.alive) {
+      const [w, h] = STRUCTURE_SIZE[this.missionTargetStructureRef.type] ?? [1, 1];
+      return {
+        lx: Math.trunc((this.missionTargetStructureRef.cx + w / 2) * LEPTON_SIZE),
+        ly: Math.trunc((this.missionTargetStructureRef.cy + h / 2) * LEPTON_SIZE),
+      };
+    }
+    if (this.missionTargetCell) {
+      return cellTargetToLepton(this.missionTargetCell.cx, this.missionTargetCell.cy);
+    }
+    return { lx: pixelToLepton(this.missionTarget.x), ly: pixelToLepton(this.missionTarget.y) };
+  }
 
   /**
    * C++ team.cpp:590-616 — find nearest friendly unarmed building for retreat.
@@ -1415,11 +2002,12 @@ export class Team {
     let lx = 0, ly = 0;
     let closest: Entity | null = null;
     let closestDist = Infinity;
+    const targetLepton = this.targetLepton();
     for (const m of playing) {
       lx += m.leptonX;
       ly += m.leptonY;
-      const d = this.target
-        ? leptonDist(m.leptonX, m.leptonY, pixelToLepton(this.target.x), pixelToLepton(this.target.y))
+      const d = targetLepton
+        ? leptonDist(m.leptonX, m.leptonY, targetLepton.lx, targetLepton.ly)
         : 0;
       if (closest === null || d < closestDist) {
         closest = m;
@@ -1466,19 +2054,31 @@ export class Team {
    * to stay in Mission=MOVE indefinitely because NavCom was never cleared on
    * team mission transition.
    */
-  private setMissionTarget(newTarget: WorldPos | null): void {
+  private setMissionTarget(
+    newTarget: WorldPos | null,
+    cell: CellPos | null = null,
+    entityRef: Entity | null = null,
+    structureRef: MapStructure | null = null,
+  ): void {
     const oldTarget = this.missionTarget;
+    const oldEntityRef = this.missionTargetEntityRef;
+    const oldStructureRef = this.missionTargetStructureRef;
     if (oldTarget) {
       // Convert old target to lepton target cell for NavCom comparison.
-      const oldTargetLX = pixelToLepton(oldTarget.x);
-      const oldTargetLY = pixelToLepton(oldTarget.y);
+      const oldTargetLepton = this.missionTargetLepton();
+      const oldTargetLX = oldTargetLepton ? oldTargetLepton.lx : pixelToLepton(oldTarget.x);
+      const oldTargetLY = oldTargetLepton ? oldTargetLepton.ly : pixelToLepton(oldTarget.y);
       for (const unit of this._members) {
         if (!unit.alive) continue;
         const navMatch = unit.moveTarget &&
           unit.moveTarget.lx === oldTargetLX && unit.moveTarget.ly === oldTargetLY;
-        const tarMatch = !!(unit.target &&
-          oldTarget.x === Math.trunc(unit.target.leptonX * CELL_SIZE / LEPTON_SIZE) &&
-          oldTarget.y === Math.trunc(unit.target.leptonY * CELL_SIZE / LEPTON_SIZE));
+        const tarMatch = oldEntityRef
+          ? unit.target === oldEntityRef
+          : oldStructureRef
+            ? unit.targetStructure === oldStructureRef
+            : !!(unit.target &&
+                oldTarget.x === Math.trunc(unit.target.leptonX * CELL_SIZE / LEPTON_SIZE) &&
+                oldTarget.y === Math.trunc(unit.target.leptonY * CELL_SIZE / LEPTON_SIZE));
         if (navMatch || tarMatch) {
           assignMission(unit, Mission.GUARD);
           if (navMatch) {
@@ -1488,17 +2088,29 @@ export class Team {
           }
           if (tarMatch) {
             unit.target = null;
+            unit.targetStructure = null;
           }
         }
       }
     }
 
-    if (this.target && this.missionTarget &&
-        this.target.x === this.missionTarget.x && this.target.y === this.missionTarget.y) {
+    const targetWasMissionTarget =
+      (oldEntityRef !== null && this.targetEntityRef === oldEntityRef) ||
+      (oldStructureRef !== null && this.targetStructureRef === oldStructureRef) ||
+      (!!this.target && !!this.missionTarget &&
+        this.target.x === this.missionTarget.x && this.target.y === this.missionTarget.y);
+
+    if (targetWasMissionTarget || !this.isTargetLegal()) {
       this.missionTarget = newTarget;
-      this.target = newTarget ? { ...newTarget } : null;
+      this.missionTargetCell = cell ? { ...cell } : null;
+      this.missionTargetEntityRef = entityRef;
+      this.missionTargetStructureRef = structureRef;
+      this.setTarget(newTarget, cell, entityRef, structureRef);
     } else {
       this.missionTarget = newTarget;
+      this.missionTargetCell = cell ? { ...cell } : null;
+      this.missionTargetEntityRef = entityRef;
+      this.missionTargetStructureRef = structureRef;
     }
   }
 
@@ -1506,23 +2118,98 @@ export class Team {
    * Dissolve the team — remove all member references, mark as dissolved.
    * (C++ team.cpp:292-312 destructor + team.cpp:560 delete this)
    */
-  dissolve(): void {
+  dissolve(ctx?: TeamAIContext): void {
     for (const m of this._members) {
       m.teamRef = null;
       m.teamInitiated = false;
-      // C++ team.cpp:1139: Remove calls Enter_Idle_Mode. Infantry preserves a
-      // legal NavCom by assigning MOVE; otherwise guard missions are left alone
-      // and non-guard units queue GUARD.
-      if (m.alive && m.mission !== Mission.RETREAT) {
-        if (m.moveTarget) {
-          assignMission(m, Mission.MOVE);
-        } else if (m.mission !== Mission.GUARD && m.mission !== Mission.AREA_GUARD) {
-          assignMission(m, Mission.GUARD);
-        }
-      }
+      this.enterIdleAfterTeamRelease(m, ctx);
     }
     this._members = [];
     this.dissolved = true;
+  }
+
+  /**
+   * C++ team.cpp:1139 — TeamClass::Remove calls the member's virtual
+   * Enter_Idle_Mode() after clearing Team. InfantryClass::Enter_Idle_Mode
+   * (infantry.cpp:1663-1721) checks TarCom before NavCom; if an infantryman is
+   * already attacking a legal target, Assign_Mission(MISSION_ATTACK) is a true
+   * no-op and preserves any existing MissionQueue.
+   */
+  private enterIdleAfterTeamRelease(entity: Entity, ctx?: TeamAIContext): void {
+    if (!entity.alive || entity.mission === Mission.RETREAT) return;
+
+    if (entity.stats.isInfantry) {
+      const hasLegalTarget = (entity.target?.alive ?? false) || (entity.targetStructure?.alive ?? false);
+      if (hasLegalTarget) {
+        let order = Mission.ATTACK;
+        if (entity.mission === Mission.SABOTAGE || entity.mission === Mission.CAPTURE) {
+          order = entity.mission;
+        }
+        assignMission(entity, order);
+        return;
+      }
+
+      if (entity.moveTarget) {
+        let order = Mission.MOVE;
+        if (entity.mission === Mission.SABOTAGE || entity.mission === Mission.CAPTURE) {
+          order = entity.mission;
+        }
+        assignMission(entity, order);
+        return;
+      }
+    } else {
+      // C++ UnitClass::Enter_Idle_Mode (unit.cpp:1300-1303) consumes the
+      // IsToScatter flag set by LST unload (vessel.cpp:1779) before selecting
+      // the idle mission:
+      //
+      //   if (IsToScatter) { IsToScatter = false; Scatter(0, true); }
+      //
+      // UnitClass::Scatter(0,true) assigns NavCom via
+      // Map.Nearby_Location(Coord_Cell(Coord), Class->Speed), then
+      // Enter_Idle_Mode sees Target_Legal(NavCom) and Assign_Mission(MOVE).
+      // Team dissolution uses this same virtual Enter_Idle_Mode path in C++
+      // (team.cpp destructor/Remove), so cargo that just left an LST keeps
+      // rolling to a nearby clear spot instead of idling into GUARD.
+      if (!entity.isAirUnit && !entity.isNavalUnit && entity.isToScatter) {
+        entity.isToScatter = false;
+        if (!entity.moveTarget && ctx?.map) {
+          const nearby = nearbyLocation(
+            ctx.map,
+            entity.cell,
+            false,
+            Math.max(0, (ctx.tick ?? 1) - 1),
+          );
+          if (nearby) {
+            entity.moveTarget = cellTargetToLepton(nearby.cx, nearby.cy);
+            entity.pathThreshold = MoveResult.CLOAK;
+            if (!entity.isDriving && entity.mission !== Mission.UNLOAD) {
+              ctx.startDriveClassMove?.(entity);
+            }
+          }
+        }
+      }
+
+      if (entity.moveTarget) {
+        assignMission(entity, Mission.MOVE);
+        return;
+      }
+    }
+
+    if (!entity.stats.isInfantry && entity.moveTarget) {
+      assignMission(entity, Mission.MOVE);
+      return;
+    }
+
+    const control = MISSION_CONTROL[entity.mission];
+    if (
+      entity.mission === Mission.GUARD ||
+      entity.mission === Mission.AREA_GUARD ||
+      control?.isParalyzed ||
+      control?.isZombie
+    ) {
+      return;
+    }
+    assignMission(entity, Mission.GUARD);
   }
 
   /**
@@ -1584,4 +2271,26 @@ export function updateAllTeams(waypoints?: Map<number, { cx: number; cy: number 
     }
   }
   cleanupTeams();
+}
+
+/** C++ TeamClass::Suspend_Teams (team.cpp:2365-2383).
+ *  Base defense removes every member from teams below Rule.SuspendPriority,
+ *  then suspends the empty team for Rule.SuspendDelay minutes. The released
+ *  members keep any active NavCom/path and continue under their own mission AI.
+ */
+export function suspendTeamsByPriority(
+  house: House,
+  priority: number,
+  suspendDelayTicks = 2 * 900, // Rule.SuspendDelay=2, TICKS_PER_MINUTE=900
+  ctx?: TeamAIContext,
+): void {
+  for (const team of _activeTeams) {
+    if (team.dissolved || team.house !== house || team.recruitPriority >= priority) continue;
+    while (team.members.length > 0) {
+      team.remove(team.members[0], ctx);
+    }
+    team.isAltered = true;
+    team.suspendTimer = suspendDelayTicks;
+    team.suspended = true;
+  }
 }

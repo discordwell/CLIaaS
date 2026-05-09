@@ -41,7 +41,7 @@ import {
   updateAIHarvesters, updateAIAttackGroups, updateAIDefense,
   updateAIRetreat, updateAIRepair, updateAISellDamaged,
   updateAIIncome, updateAIProduction, updateAIAutocreateTeams,
-  launchAIAttack, aiRecallDefenders,
+  launchAIAttack, aiRecallDefenders, aiPerTick,
 } from '../engine/ai';
 
 beforeEach(() => resetEntityIds());
@@ -55,6 +55,7 @@ const TEST_PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
   { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5 },
   { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2 },
+  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 60, prerequisite: 'KENN', faction: 'soviet', techLevel: 3 },
   { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 2 },
   { type: '2TNK', name: 'Medium Tank', cost: 800, buildTime: 140, prerequisite: 'WEAP', faction: 'allied', techLevel: 5 },
   { type: '3TNK', name: 'Heavy Tank', cost: 950, buildTime: 160, prerequisite: 'WEAP', faction: 'soviet', techLevel: 7 },
@@ -284,6 +285,7 @@ describe('createAIHouseState — difficulty modifier application (HOUSE.CPP)', (
     expect(state.house).toBe(House.USSR);
     expect(state.phase).toBe('economy');
     expect(state.productionEnabled).toBe(false);
+    expect(state.isStarted).toBe(false);
     expect(state.buildQueue).toEqual([]);
     expect(state.attackPool.size).toBe(0);
   });
@@ -306,9 +308,11 @@ describe('createAIHouseState — difficulty modifier application (HOUSE.CPP)', (
     expect(createAIHouseState(ctx, House.USSR).iq).toBe(5);
   });
 
-  it('defaults IQ to 3 when not in map', () => {
+  it('defaults IQ to 0 when not in map', () => {
     const ctx = makeAIContext({});
-    expect(createAIHouseState(ctx, House.USSR).iq).toBe(3);
+    // C++ HouseClass ctor: IQ(Control.IQ). In scenarios such as SCG01EA,
+    // absent [USSR] IQ= leaves the house at IQ=0.
+    expect(createAIHouseState(ctx, House.USSR).iq).toBe(0);
   });
 
   it('reads techLevel from houseTechLevels (default 10)', () => {
@@ -3107,6 +3111,97 @@ describe('updateAIProduction — full production cycle (HOUSE.CPP)', () => {
 // ── 21. Edge cases and integration ─────────────────────────────────────────────
 
 describe('AI edge cases', () => {
+  it('AI_Infantry skips DOG when house IScan already contains a dog', () => {
+    // C++ house.cpp:6127 checks IScan for INFANTRYF_DOG, not recruitability.
+    // A HUNTing dog is not recruitable for a prebuilt team, but it still sets
+    // the house infantry scan bit and blocks the AI from ordering another dog.
+    const dog = entityAtCell(UnitType.I_DOG, House.USSR, 63, 59);
+    dog.mission = Mission.HUNT;
+    const state = makeAIState({
+      house: House.USSR,
+      buildInfantry: null,
+      isAlerted: false,
+      maxInfantry: 99,
+      productionEnabled: false,
+    });
+    const dogTeam: TeamType = {
+      name: 'sov1', house: 2, flags: 0x0008, origin: 0, trigger: -1,
+      maxAllowed: 1,
+      members: [{ type: 'DOG', count: 1 }],
+      missions: [],
+    };
+    const ctx = makeAIContext({
+      tick: 1,
+      entities: [dog],
+      aiStates: new Map([[House.USSR, state]]),
+      houseCredits: new Map([[House.USSR, 1000]]),
+      teamTypes: [dogTeam],
+    });
+
+    aiPerTick(ctx);
+
+    expect(state.buildInfantry).toBeNull();
+  });
+
+  it('AI_Infantry DOG IScan includes recently dead dog objects', () => {
+    // C++ HouseClass::Recalc_Attributes sets IScan from Infantry.Count without
+    // an alive/IsLocked gate. ActiveIScan is filtered; IScan is not.
+    const dog = entityAtCell(UnitType.I_DOG, House.USSR, 63, 59);
+    dog.alive = false;
+    dog.deathTick = 5;
+    const state = makeAIState({
+      house: House.USSR,
+      buildInfantry: null,
+      isAlerted: false,
+      maxInfantry: 99,
+      productionEnabled: false,
+    });
+    const dogTeam: TeamType = {
+      name: 'sov1', house: 2, flags: 0x0008, origin: 0, trigger: -1,
+      maxAllowed: 1,
+      members: [{ type: 'DOG', count: 1 }],
+      missions: [],
+    };
+    const ctx = makeAIContext({
+      tick: 1,
+      entities: [dog],
+      aiStates: new Map([[House.USSR, state]]),
+      houseCredits: new Map([[House.USSR, 1000]]),
+      teamTypes: [dogTeam],
+    });
+
+    aiPerTick(ctx);
+
+    expect(state.buildInfantry).toBeNull();
+  });
+
+  it('AI_Infantry can queue DOG when the house IScan lacks a dog', () => {
+    const state = makeAIState({
+      house: House.USSR,
+      buildInfantry: null,
+      isAlerted: false,
+      maxInfantry: 99,
+      productionEnabled: false,
+    });
+    const dogTeam: TeamType = {
+      name: 'sov1', house: 2, flags: 0x0008, origin: 0, trigger: -1,
+      maxAllowed: 1,
+      members: [{ type: 'DOG', count: 1 }],
+      missions: [],
+    };
+    const ctx = makeAIContext({
+      tick: 1,
+      entities: [],
+      aiStates: new Map([[House.USSR, state]]),
+      houseCredits: new Map([[House.USSR, 1000]]),
+      teamTypes: [dogTeam],
+    });
+
+    aiPerTick(ctx);
+
+    expect(state.buildInfantry).toBe(UnitType.I_DOG);
+  });
+
   it('multiple AI houses operate independently', () => {
     const ussrState = makeAIState({ house: House.USSR, phase: 'economy', iq: 3 });
     const ukrState = makeAIState({ house: House.Ukraine, phase: 'buildup', iq: 3, attackPool: new Set([999]) });

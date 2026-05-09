@@ -357,16 +357,15 @@ describe('IsStarted — production gate (house.h:175)', () => {
    *
    * C++ initializes to false (house.cpp:530).
    *
-   * TS divergence: createAIHouseState() sets isStarted = true by default.
-   * This matches C++ scenario.cpp:2693 behavior for multiplayer AI.
+   * TS createAIHouseState() mirrors the HouseClass constructor default.
+   * Scenario setup/triggers are responsible for flipping this to true.
    */
 
-  it('AI house state initializes isStarted to true', () => {
-    // C++ scenario.cpp:2693: housep->IsStarted = true (for AI opponents)
-    // TS createAIHouseState defaults isStarted = true.
+  it('AI house state initializes isStarted to false', () => {
+    // C++ house.cpp:534: IsStarted(false)
     const ctx = makeAIContext();
     const state = createAIHouseState(ctx, House.USSR);
-    expect(state.isStarted).toBe(true);
+    expect(state.isStarted).toBe(false);
   });
 
   it('IsBaseBuilding triggers IsStarted + IsAlerted cascade', () => {

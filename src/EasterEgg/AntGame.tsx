@@ -706,9 +706,8 @@ export default function AntGame({ onExit }: AntGameProps) {
         game.start(scenarioId, diff).then(() => {
           game.pause();
           game.disableFog();
-          // C++ parity: consume init-time RNG calls AFTER scenario load.
-          // Calls game.consumeInitRNG() which replicates C++ house timer +
-          // unit facing RNG consumption without affecting scenario load.
+          // C++ parity: scenario load has already consumed init-time RNG.
+          // Mark the debug-log boundary before gameplay ticks begin.
           game.consumeInitRNG();
           game.step(0); // render-only — don't advance game state (C++ parity: tick 0 at harness init)
           installHarness(game);

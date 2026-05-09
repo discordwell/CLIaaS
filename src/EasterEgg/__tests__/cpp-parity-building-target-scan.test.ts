@@ -37,6 +37,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
@@ -93,6 +94,7 @@ function makeCombatCtx(
     entityById: new Map(entities.map(e => [e.id, e])),
     structures,
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse,
@@ -140,6 +142,13 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
+}
+
 // ============================================================
 // Section 1: No LOS check for building target acquisition
 //
@@ -164,7 +173,7 @@ describe('building targeting: no LOS check (C++ Evaluate_Object)', () => {
     }
 
     const hpBefore = target.hp;
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // C++ parity: building fires regardless of terrain — no LOS in Evaluate_Object
     expect(target.hp).toBeLessThan(hpBefore);
@@ -180,7 +189,7 @@ describe('building targeting: no LOS check (C++ Evaluate_Object)', () => {
     ctx.map.setTerrain(11, 10, Terrain.ROCK);
 
     const hpBefore = target.hp;
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(target.hp).toBeLessThan(hpBefore);
   });
@@ -217,8 +226,8 @@ describe('building targeting: range boundary inclusive (C++ In_Range <=)', () =>
     //   cellDist = 960/256 = 3.75 — that's < 4, not exactly 4
     // Instead, place entity so distance is exactly 4 cells (1024 leptons).
     // Let's use a manual position.
-    const fturX = 10 * CELL_SIZE + CELL_SIZE; // building fire pos
-    const fturY = 10 * CELL_SIZE + CELL_SIZE;
+    const fturX = 10 * CELL_SIZE + CELL_SIZE / 2; // C++ BSIZE_11 CenterOffset = 0x80,0x80
+    const fturY = 10 * CELL_SIZE + CELL_SIZE / 2;
     // We want leptonDist = 4 * 256 = 1024.
     // Straight east: dy=0, dx = 1024 leptons.
     // 1024 leptons = 1024 * CELL_SIZE / 256 = 1024 * 24 / 256 = 96 pixels east.
@@ -232,7 +241,7 @@ describe('building targeting: range boundary inclusive (C++ In_Range <=)', () =>
     expect(dist).toBe(4); // exactly at range boundary
 
     const hpBefore = target.hp;
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // C++ In_Range: distance <= range → target at exactly range IS valid
     expect(target.hp).toBeLessThan(hpBefore);
@@ -253,7 +262,7 @@ describe('building targeting: range boundary inclusive (C++ In_Range <=)', () =>
     expect(dist).toBeGreaterThan(4); // beyond range
 
     const hpBefore = target.hp;
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // Target beyond range — should NOT be hit
     expect(target.hp).toBe(hpBefore);

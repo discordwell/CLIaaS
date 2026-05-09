@@ -17,6 +17,7 @@ import * as path from 'path';
 const BASE_URL = process.env.COMPARE_URL || 'https://cliaas.com';
 const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
 const SEED = 0;
+const HARNESS_SALT = process.env.HARNESS_SALT ?? 'anti-shim-v1';
 
 // Tick checkpoints — passive observation, no commands
 const SCENARIO = process.env.PARITY_SCENARIO || 'SCG01EA';
@@ -36,6 +37,55 @@ function pad(n: number): string {
 
 function saveJson(data: unknown, filePath: string): void {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+function hashText(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function addHarnessNoise(url: URL, scenario: string, side: 'wasm' | 'ts'): string {
+  const hash = hashText(`${HARNESS_SALT}:${scenario}:${side}`);
+  url.searchParams.set('__parityHarness', 'salted');
+  url.searchParams.set('__parityToken', hash.toString(36));
+  url.searchParams.set('__paritySide', side);
+  url.searchParams.set('__noop', `${(hash >>> 7) % 997}`);
+  return url.toString();
+}
+
+function wasmUrl(baseUrl: string, scenario: string): string {
+  const url = new URL('/ra/original.html', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+  url.searchParams.set('scenario', `${scenario}.INI`);
+  url.searchParams.set('autoplay', '1');
+  url.searchParams.set('agentharness', '1');
+  url.searchParams.set('seed', String(SEED));
+  return addHarnessNoise(url, scenario, 'wasm');
+}
+
+function tsUrl(baseUrl: string, scenario: string): string {
+  const url = new URL(baseUrl);
+  url.searchParams.set('anttest', 'agent');
+  url.searchParams.set('scenario', scenario);
+  url.searchParams.set('difficulty', 'normal');
+  return addHarnessNoise(url, scenario, 'ts');
+}
+
+function stepPlan(total: number, key: string, maxChunk: number): number[] {
+  const plan: number[] = [];
+  let remaining = total;
+  let state = hashText(`${HARNESS_SALT}:${key}:${total}:${maxChunk}`);
+  while (remaining > 0) {
+    state = (Math.imul(state ^ 0x9e3779b9, 0x85ebca6b) + 0xc2b2ae35) >>> 0;
+    const cap = Math.min(remaining, maxChunk);
+    const chunk = 1 + (state % cap);
+    plan.push(chunk);
+    remaining -= chunk;
+  }
+  return plan;
 }
 
 // ── Normalized entity for cross-engine comparison ───────────
@@ -250,13 +300,9 @@ function printDiff(d: CheckpointDiff): string {
 
 async function wasmStep(page: Page, n: number): Promise<Record<string, unknown> | null> {
   const MAX_PER_CALL = 15;
-  let remaining = n;
   let lastState: Record<string, unknown> | null = null;
 
-  while (remaining > 0) {
-    const chunk = Math.min(remaining, MAX_PER_CALL);
-    remaining -= chunk;
-
+  for (const chunk of stepPlan(n, `${SCENARIO}:wasm:${n}`, MAX_PER_CALL)) {
     try {
       const raw = await page.evaluate(async (ticks: number) => {
         const w = window as unknown as {
@@ -287,18 +333,22 @@ async function wasmStep(page: Page, n: number): Promise<Record<string, unknown> 
 // ── TS stepping ─────────────────────────────────────────────
 
 async function tsStep(page: Page, n: number): Promise<Record<string, unknown> | null> {
+  let lastState: Record<string, unknown> | null = null;
   try {
-    const raw = await page.evaluate((ticks: number) => {
-      const w = window as unknown as {
-        __agentStep: (n: number) => { state: Record<string, unknown> };
-      };
-      const r = w.__agentStep(ticks);
-      return r?.state ?? null;
-    }, n);
-    return raw as Record<string, unknown> | null;
+    for (const chunk of stepPlan(n, `${SCENARIO}:ts:${n}`, 19)) {
+      const raw = await page.evaluate((ticks: number) => {
+        const w = window as unknown as {
+          __agentStep: (n: number) => { state: Record<string, unknown> };
+        };
+        const r = w.__agentStep(ticks);
+        return r?.state ?? null;
+      }, chunk);
+      lastState = raw as Record<string, unknown> | null;
+    }
+    return lastState;
   } catch (e) {
     console.log(`TS: Step failed: ${e}`);
-    return null;
+    return lastState;
   }
 }
 
@@ -325,12 +375,9 @@ test.describe(`State Parity: ${SCENARIO} seed=0`, () => {
     // ── Load both engines ──
     console.log('Loading both engines with seed=0...');
 
-    const wasmUrl = `${BASE_URL}/ra/original.html?scenario=${SCENARIO}.INI&autoplay=1&agentharness=1&seed=${SEED}`;
-    const tsUrl = `${BASE_URL}?anttest=agent&scenario=${SCENARIO}&difficulty=normal`;
-
     await Promise.all([
-      wasmPage.goto(wasmUrl, { waitUntil: 'load' }),
-      tsPage.goto(tsUrl, { waitUntil: 'load' }),
+      wasmPage.goto(wasmUrl(BASE_URL, SCENARIO), { waitUntil: 'load' }),
+      tsPage.goto(tsUrl(BASE_URL, SCENARIO), { waitUntil: 'load' }),
     ]);
 
     // ── Wait for both to be ready ──

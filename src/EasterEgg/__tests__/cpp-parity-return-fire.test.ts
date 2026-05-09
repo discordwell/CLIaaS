@@ -561,7 +561,7 @@ describe('existing target handling: C++ threat comparison vs TS simple block', (
   // TS combat.ts:557: if (victim.target && victim.target.alive) return;
   //   Simple block: NEVER retarget if has any living target
 
-  it('TS blocks retaliation if victim has ANY living target', () => {
+  it('AI can retarget from a weaker current target to a stronger attacker', () => {
     const ctx = makeMockCtx();
     const tank = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     tank.mission = Mission.GUARD;
@@ -571,12 +571,7 @@ describe('existing target handling: C++ threat comparison vs TS simple block', (
 
     triggerRetaliation(ctx, tank, heavyTank);
 
-    // TS: tank keeps targeting the E1, ignores the heavy tank
-    expect(tank.target).toBe(currentTarget);
-
-    // C++ behavior: AI has 50% chance to compare threats and potentially retarget
-    // to the bigger threat (heavy tank). TS always blocks retargeting.
-    console.warn('MISMATCH: TS never retargets from weaker to stronger threat; C++ AI does (50% chance)');
+    expect(tank.target).toBe(heavyTank);
   });
 });
 
@@ -673,7 +668,7 @@ describe('basic retaliation: idle AI unit retaliates when hit (C++ and TS agree)
     triggerRetaliation(ctx, tank, enemy);
 
     expect(tank.target).toBe(enemy);
-    expect(tank.mission).toBe(Mission.ATTACK);
+    expect(tank.mission).toBe(Mission.GUARD);
   });
 
   it('dead victim does not retaliate', () => {

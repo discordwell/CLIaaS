@@ -295,11 +295,8 @@ export const PER_CELL_TRACK_JUMP_ENABLED = true;
  *
  * C++ infantry.cpp:3992-4010 triggers `Per_Cell_Process(PCP_END)` at
  * `Distance(Head_To_Coord()) < 0x0010` — i.e. when an infantry arrives at
- * the center of a cell. The PCP chain then runs (in order):
- *   1. FootClass::Per_Cell_Process path-shorten (foot.cpp:1471-1483) — if a
- *      target is in weapon range and mission is RESCUE/GUARD_AREA/ATTACK/HUNT,
- *      clear NavCom + zero Path[0] so the unit stops and engages.
- *   2. InfantryClass::Per_Cell_Process Enter_Idle_Mode probe
+ * the center of a cell. The relevant infantry PCP chain then runs (in order):
+ *   1. InfantryClass::Per_Cell_Process Enter_Idle_Mode probe
  *      (infantry.cpp:911) — when the FOUR guards hold:
  *        - `MissionQueue == MISSION_NONE`
  *        - `!Target_Legal(NavCom)`   (moveTarget === null)
@@ -307,11 +304,15 @@ export const PER_CELL_TRACK_JUMP_ENABLED = true;
  *        - `!In_Radio_Contact()`     (TS infantry have no radio — DROP and DOCUMENT)
  *      → call `Enter_Idle_Mode()` which sets `MissionQueue = MISSION_GUARD` (or
  *      `MISSION_GUARD_AREA` when a guard origin is set). NOT `Mission = GUARD`.
- *   3. Commence() (infantry.cpp:914) — pops MissionQueue → Mission + Timer=0.
+ *   2. Commence() (infantry.cpp:914) — pops MissionQueue → Mission + Timer=0.
+ *   3. FootClass::Per_Cell_Process path-shorten (foot.cpp:1471-1483) — if a
+ *      target is in weapon range and mission is RESCUE/GUARD_AREA/ATTACK/HUNT,
+ *      clear NavCom + zero Path[0] so the unit stops and engages.
  *
- * Both step (2)-assigned queue AND any pre-existing `MissionQueue` (e.g.
+ * Both step (1)-assigned queue AND any pre-existing `MissionQueue` (e.g.
  * `Coordinate_Move` queued a MOVE) are popped by the same Commence call at
- * step (3). The next tick's `MissionClass::AI` fires the new handler.
+ * step (2). The next tick's `MissionClass::AI` fires the new handler. The
+ * subsequent FootClass path-shorten sees the post-Commence Mission value.
  *
  * ## Gate rationale
  *
@@ -347,54 +348,11 @@ export const FOOT_PER_CELL_ENABLED = true;
  *
  * The caller supplies `pathShortenEligible` (mission ∈ {HUNT, AREA_GUARD, ATTACK,
  * RESCUE}) and `targetInRange` (inRange check on live TarCom) via ctx so this
- * module stays loosely typed. When ON, the sub-case fires before Enter_Idle_Mode
- * so NavCom is cleared prior to the four-guard check — but in practice the live
- * target means TarCom guard still fails and Enter_Idle_Mode is skipped anyway.
+ * module stays loosely typed. This sub-case runs after InfantryClass Commence:
+ * C++ calls FootClass::Per_Cell_Process only after infantry.cpp:914, so a queued
+ * ATTACK popped at cell-arrival is immediately eligible for path-shorten.
  */
 export const PCP_PATH_SHORTEN_ENABLED = true;
-
-/**
- * PCP Session 3.2 — Mission_Guard_Area Approach_Target re-fire gate.
- *
- * C++ foot.cpp:1082-1084: every Mission_Guard_Area timer cycle when
- * `Target_Legal(TarCom)`, call `Approach_Target()`. This re-assigns NavCom
- * toward the current target EVEN when moveTarget is already set (drifting the
- * approach cell as the target moves / as the unit moves).
- *
- * TS `updateAreaGuard` currently calls `approachTarget` only when the scan
- * finds a target AND `!entity.moveTarget`. This misses:
- *   1. `hadTargetAtEntry && !scanFound`: target still alive but out of scan
- *      range this tick — C++ would still fire Approach_Target on the existing
- *      TarCom. Rare in practice (TarCom usually stays in scan range while the
- *      unit is closing distance) but possible at the scan radius edge.
- *   2. `hadTargetAtEntry && scanFound && moveTarget`: unit is already moving
- *      toward an approach cell but target has moved — C++ re-picks approach
- *      cell each timer. TS sticks with the stale cell forever.
- *
- * Both cases contribute to SCG06 tick 76: USSR E1 at (24,67) closes toward
- * Greek E1 at (20,64). At cell boundaries, moveTarget stays stale until the
- * next timer fire (up to 70+ ticks apart at Area Guard Normal_Delay=70 +
- * Random_Pick(1,5)). The path-shorten from 3.1 clears moveTarget on cell
- * arrival with in-range, but when still out of range the unit may stop
- * moving (end of path) without re-calling approachTarget.
- *
- * ## Gate-by-cell-change rationale
- *
- * C++ re-calls Approach_Target every timer fire without regard to cell
- * identity. TS could theoretically match that, but:
- *   - approachTarget in TS calls findPath (expensive) and can produce
- *     different results than C++'s Basic_Path due to pathfinder nuances.
- *   - Re-firing every timer even when nothing has changed (cell, target pos)
- *     is potentially a cascade risk — so we gate by `entity.cell` change
- *     since last approach call. This is TS-specific guard noted in the plan
- *     (§8 S3.2 "Gate by cell-change since last approach call").
- *
- * Session 3.2 ships with the flag ON (initial infrastructure was gated OFF
- * here so the re-fire can be backed out by flipping the flag if regressions
- * appear). Tracked via `_lastAreaGuardApproachCellKey` on Entity (reset
- * never — persists across ticks).
- */
-export const AREA_GUARD_APPROACH_RETRY = true;
 
 /**
  * PCP Session 3.3 — Team Start_Driver refactor gate.
@@ -660,71 +618,6 @@ export const MOVEMENT_AI_MOVE_NAVCOM_GUARD = true;
 export const DISPATCH_ORDER_REFACTOR = true;
 
 /**
- * Phase 4 — Approach_Target re-call on cell-boundary (JOINT-REFACTOR-ALL-DIVERGENCES-PLAN §4).
- *
- * ## Purpose
- *
- * Fires an additional `approachTarget(entity)` call from inside the foot
- * per-cell-process chain whenever an AREA_GUARD infantry with a live TarCom
- * finishes entering a new cell — mirroring C++'s behavior where
- * `FootClass::Approach_Target` is re-invoked on every Mission_Guard_Area
- * timer cycle AND implicitly on every Per_Cell_Process call that leaves
- * the unit still out-of-range of its TarCom (foot.cpp:1082-1084 +
- * foot.cpp:1471-1483 path-shorten guard).
- *
- * Without this, once `approachTarget` has run ONCE (at scan-found-target
- * time in `updateAreaGuard`), the cached approach cell sticks forever
- * and the unit walks to a potentially-stale destination. WASM's trace
- * shows Approach_Target re-firing with updated dir256 geometry as the
- * entity walks, producing subtly different destination cells per cell
- * boundary — which is what reaches (22,65) at tick 65 vs TS's static
- * path to (20,66).
- *
- * ## SCG06EA tick 76 residual
- *
- * The USSR E1 @(24,67) targets Greek E1 @(19,65). TS selects approach cell
- * (20,66) via the initial sweep (pinned in
- * `cpp-parity-scg06ea-tick-76-path.test.ts`) and walks straight to it.
- * WASM re-calls Approach_Target mid-walk — the Coord_Move sweep at the new
- * entity position produces a different winning angle, so the final cell
- * is (22,65). That 1-cell divergence shifts the firing tick by ~4 ticks,
- * which cascades to the tick-76 first-divergence divergence.
- *
- * ## Why gated ON-default risk
- *
- * Re-calling `approachTarget` fires `findPath` internally. TS's pathfinder
- * is NOT guaranteed to produce the identical route as C++'s Basic_Path for
- * every geometry. Flipping ON universally would potentially cascade
- * SCG01/03/07/11/13 if any AREA_GUARD unit in those scenarios has a
- * moveTarget whose re-path produces a different route than WASM.
- *
- * ## Gate-by-cell-boundary rationale
- *
- * The re-fire fires ONCE per cell boundary (keyed by `${cx},${cy}`). Without
- * the cell-key dedup, `footPerCellProcess(PCP_END)` re-fires approachTarget
- * at every tick the unit is mid-cell, producing per-tick pathfinder churn.
- * Cell-change-gate is TS-specific (plan §4 and §8 S3.2) and matches the
- * semantic that C++'s Per_Cell_Process also only fires at cell boundaries,
- * not mid-cell.
- *
- * ## Rollout
- *
- * Ships OFF. Intended to flip ON in Phase 4.4 after each checkpoint is
- * individually verified. The re-fire logic is also adjacent to the existing
- * timer-cycle re-fire in `missionAI.ts updateAreaGuard` (Session 3.2
- * `AREA_GUARD_APPROACH_RETRY`) — that flag covers the timer-fire window
- * while this one covers the mid-walk cell-boundary window. Together they
- * approximate C++'s "every Per_Cell_Process + every timer cycle" behavior.
- *
- * ## C++ refs
- *
- *   foot.cpp:1082-1084  Mission_Guard_Area Approach_Target per-timer re-fire
- *   foot.cpp:1471-1483  FootClass::Per_Cell_Process path-shorten entry
- *   foot.cpp:856-946    Basic_Path / Approach_Target pathfinding
- */
-export const APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY = true;
-
-/**
  * Phase 5 — DriveClass::AI double-cycle per tick (JOINT-REFACTOR plan §5).
  *
  * ## Purpose
@@ -967,15 +860,6 @@ export interface FootPCPEntity<M = unknown> extends PCPEntity<M> {
   targetStructure?: unknown | null;
   /** AREA_GUARD origin marker. `null` when GUARD. Present = pick `AREA_GUARD`. */
   guardOrigin?: { x: number; y: number } | null;
-  /**
-   * Phase 4 — cell-key of the last `approachTarget` re-fire for this entity.
-   * Encoded as `cy * 256 + cx` matching the existing Session 3.2 convention
-   * in `missionAI.ts updateAreaGuard`. Absent/`-1` = no prior approach call
-   * at any cell. Used by the cell-boundary dedup in the re-fire subcase to
-   * prevent per-tick findPath churn when `footPerCellProcess` is called
-   * multiple times at the same cell (e.g. via overlapping walk paths).
-   */
-  _lastAreaGuardApproachCellKey?: number;
 }
 
 /**
@@ -991,6 +875,9 @@ export interface FootPCPEntity<M = unknown> extends PCPEntity<M> {
 export interface EnterIdleModeOptions<M> {
   guardMission: M;
   areaGuardMission: M;
+  attackMission?: M;
+  huntMission?: M;
+  rescueMission?: M;
 }
 
 /**
@@ -1014,12 +901,25 @@ export interface PCPResult {
   commenceFired: boolean;
 }
 
+export interface UnitPerCellOptions {
+  skipCommence?: boolean;
+  /**
+   * C++ FootClass::Per_Cell_Process path-shorten inputs. DriveClass chains to
+   * FootClass after its own PCP_END work, and VesselClass chains through
+   * DriveClass, so these apply to vehicles/vessels as well as infantry.
+   */
+  hasLegalTarCom?: boolean;
+  pathShortenEligible?: boolean;
+  targetInRange?: boolean;
+}
+
 /**
- * C++ parity hook: `UnitClass::Per_Cell_Process(PCPType)`.
+ * C++ parity hook: `UnitClass::Per_Cell_Process(PCPType)`, followed by the
+ * shared `DriveClass::Per_Cell_Process` → `FootClass::Per_Cell_Process` chain.
  *
- * Called from the track-advance loop each time a vehicle crosses a cell
- * boundary. For now, this is only the NavCom-at-destination clear from
- * `DriveClass::Per_Cell_Process` (drive.cpp:869-873).
+ * Called from the track-advance loop each time a vehicle or vessel crosses a
+ * cell boundary. Vessels reach this same shared chain via
+ * `VesselClass::Per_Cell_Process` → `DriveClass::Per_Cell_Process`.
  *
  * Sub-cases not yet ported (see module header for the full C++ enumeration):
  *   - TODO(SCG04/11/13 port): Commence (unit.cpp:1756) — gated by
@@ -1041,7 +941,7 @@ export interface PCPResult {
 export function unitPerCellProcess<M>(
   entity: PCPEntity<M>,
   why: PCPType,
-  opts?: { skipCommence?: boolean },
+  opts?: UnitPerCellOptions,
 ): PCPResult {
   const result: PCPResult = { navComCleared: false, commenceFired: false };
 
@@ -1105,6 +1005,23 @@ export function unitPerCellProcess<M>(
     }
   }
 
+  // ---- 3. FootClass::Per_Cell_Process path-shorten ----
+  // C++ drive.cpp chains to foot.cpp after DriveClass-specific PCP_END work.
+  // This is not infantry-only: vessels inherit the same FootClass behavior via
+  // VesselClass -> DriveClass -> FootClass. If an attack-type mission reaches a
+  // cell where TarCom is in primary-weapon range, C++ clears NavCom and Path[0]
+  // so the object stops advancing and can fire instead of continuing toward the
+  // stale destination.
+  if (PCP_PATH_SHORTEN_ENABLED
+      && opts?.hasLegalTarCom === true
+      && opts.pathShortenEligible === true
+      && opts.targetInRange === true) {
+    entity.moveTarget = null;
+    entity.path = [];
+    entity.pathIndex = 0;
+    result.navComCleared = true;
+  }
+
   if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
   return result;
 }
@@ -1121,14 +1038,14 @@ export function unitPerCellProcess<M>(
  *   - Mission.AREA_GUARD analogous path (index.ts:4286-4291)
  *
  * C++ ordering (all three sub-cases run in sequence at PCP_END):
- *   1. **Path-shorten** (foot.cpp:1471-1483) — if TarCom is legal AND we're
- *      on an attack-type mission AND target is in primary-weapon range,
- *      clear NavCom + Path[0]. Gated by `PCP_PATH_SHORTEN_ENABLED` (Session 3).
- *   2. **Enter_Idle_Mode** (infantry.cpp:911) — when the FOUR guards hold,
+ *   1. **Enter_Idle_Mode** (infantry.cpp:911) — when the FOUR guards hold,
  *      queue GUARD/AREA_GUARD (NOT mission=GUARD). Gated by
  *      `FOOT_PER_CELL_ENABLED` (Session 2 — this step).
- *   3. **Commence** (infantry.cpp:914) — pop MissionQueue, mirrors
+ *   2. **Commence** (infantry.cpp:914) — pop MissionQueue, mirrors
  *      `unitPerCellProcess`'s Commence sub-case, reused via `PER_CELL_COMMENCE_ENABLED`.
+ *   3. **Path-shorten** (foot.cpp:1471-1483) — runs in the chained
+ *      FootClass::Per_Cell_Process after infantry Commence, so it sees the
+ *      post-Commence mission.
  *
  * ## The four Enter_Idle_Mode guards (infantry.cpp:911)
  *
@@ -1194,15 +1111,6 @@ export function footPerCellProcess<M>(
      * `entity.inRange(entity.target)` or similar.
      */
     targetInRange?: boolean;
-    /**
-     * Phase 4 — optional callback to re-invoke `FootClass::Approach_Target`
-     * (foot.cpp:856-946) at cell boundary. Gated by
-     * `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY`. When present AND the flag is
-     * ON AND the entity is in AREA_GUARD with a live TarCom still out of
-     * range, this is invoked once per cell change to refresh the approach
-     * cell selection as the entity walks closer.
-     */
-    approachTargetRefire?: (entity: FootPCPEntity<M>) => void;
   },
   missions: EnterIdleModeOptions<M>
 ): PCPResult {
@@ -1224,66 +1132,7 @@ export function footPerCellProcess<M>(
     return result;
   }
 
-  // ---- 1. Path-shorten (foot.cpp:1471-1483) — Session 3.1 ----
-  //
-  // C++ checks `Target_Legal(TarCom)` + weapon range of primary weapon + mission
-  // ∈ { RESCUE, GUARD_AREA, ATTACK, HUNT }. If ALL hold:
-  //   Assign_Destination(TARGET_NONE); Path[0] = FACING_NONE;
-  //
-  // TS: clear moveTarget + path + pathIndex. This stops further pathwalk and
-  // lets Firing_AI engage the target on the next tick. The caller supplies all
-  // three checks as pre-computed ctx booleans (module stays loose-typed).
-  //
-  // `navComCleared` is set so callers can short-circuit subsequent movement
-  // this tick (mirrors the `unitPerCellProcess` NavCom-at-dest semantics).
-  if (PCP_PATH_SHORTEN_ENABLED
-      && ctx.hasLegalTarCom
-      && ctx.pathShortenEligible === true
-      && ctx.targetInRange === true) {
-    entity.moveTarget = null;
-    entity.path = [];
-    entity.pathIndex = 0;
-    result.navComCleared = true;
-  }
-
-  // ---- 1b. Phase 4 — Approach_Target cell-boundary re-fire ----
-  //
-  // C++ implicitly re-invokes `FootClass::Approach_Target` at every
-  // Per_Cell_Process call that leaves the unit mid-walk toward a still-
-  // legal TarCom (foot.cpp:1082-1084 timer path + path-shorten adjacency).
-  // TS's `updateAreaGuard` only re-fires on the Mission_Guard_Area timer
-  // cycle (Session 3.2 `AREA_GUARD_APPROACH_RETRY`), which at Normal_Delay
-  // ~70 ticks is too coarse: once the approach cell has been picked, the
-  // walk follows the cached route even as both unit and target move.
-  //
-  // This subcase fires ONCE per cell boundary (keyed via
-  // `_lastAreaGuardApproachCellKey`) to refresh the approach cell on every
-  // cell-arrival, matching WASM's per-cell geometry updates observed in
-  // SCG06EA tick 76 (`cpp-parity-scg06ea-t76-trace-runtime.test.ts`).
-  //
-  // Preconditions (ALL must hold):
-  //   - `APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY` flag ON.
-  //   - `approachTargetRefire` callback provided by caller.
-  //   - Entity still in AREA_GUARD (mission === areaGuardMission).
-  //   - Live TarCom: target alive.
-  //   - Path-shorten did NOT fire this call (target still out of range).
-  //   - Cell key differs from last-approach cell key (dedup).
-  //
-  // This is a NO-OP when the flag is OFF (Phase 4 ship state).
-  if (APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY
-      && !result.navComCleared
-      && ctx.approachTargetRefire
-      && entity.mission === missions.areaGuardMission
-      && entity.target != null
-      && entity.target.alive === true) {
-    const cellKey = entity.cell.cy * 256 + entity.cell.cx;
-    if (entity._lastAreaGuardApproachCellKey !== cellKey) {
-      entity._lastAreaGuardApproachCellKey = cellKey;
-      ctx.approachTargetRefire(entity);
-    }
-  }
-
-  // ---- 2. Enter_Idle_Mode (infantry.cpp:911) ----
+  // ---- 1. Enter_Idle_Mode (infantry.cpp:911) ----
   //
   // The four-guard check. ALL must hold to queue Enter_Idle_Mode.
   //
@@ -1310,18 +1159,40 @@ export function footPerCellProcess<M>(
       : missions.guardMission;
   }
 
-  // ---- 3. Commence (infantry.cpp:914) ----
+  // ---- 2. Commence (infantry.cpp:914) ----
   //
   // Reuse the same Commence logic the vehicle hook uses. `PER_CELL_COMMENCE_ENABLED`
   // is already TRUE (vehicle per-cell Commence is live), so this branch fires
   // whenever the Enter_Idle_Mode branch above queued GUARD (or some prior
-  // upstream caller queued a MOVE / HUNT). Same semantics: pop → Mission,
-  // null queue, Timer=0.
+  // upstream caller queued a MOVE / HUNT / ATTACK). Same semantics: pop →
+  // Mission, null queue, Timer=0.
   if (PER_CELL_COMMENCE_ENABLED && entity.missionQueue !== null) {
     entity.mission = entity.missionQueue;
     entity.missionQueue = null;
     entity.missionTimer = 0; // C++ mission.cpp:354
     result.commenceFired = true;
+  }
+
+  // ---- 3. Path-shorten (foot.cpp:1471-1483) — Session 3.1 ----
+  //
+  // InfantryClass::Per_Cell_Process calls Commence() first, then chains to
+  // FootClass::Per_Cell_Process where this check lives. This order matters:
+  // if MissionQueue=ATTACK at cell arrival, C++ path-shorten sees Mission=ATTACK
+  // and may clear NavCom in the same PCP_END.
+  const pathShortenMissionEligible =
+    entity.mission === missions.attackMission ||
+    entity.mission === missions.huntMission ||
+    entity.mission === missions.rescueMission ||
+    entity.mission === missions.areaGuardMission;
+  if (PCP_PATH_SHORTEN_ENABLED
+      && ctx.hasLegalTarCom
+      && ctx.pathShortenEligible === true
+      && pathShortenMissionEligible
+      && ctx.targetInRange === true) {
+    entity.moveTarget = null;
+    entity.path = [];
+    entity.pathIndex = 0;
+    result.navComCleared = true;
   }
 
   if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);

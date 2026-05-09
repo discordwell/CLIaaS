@@ -239,20 +239,28 @@ describe('C++ Parity — E3 weapon selection: RedEye (AA) vs Dragon (ground)', (
     expect(selected!.name).toBe('Dragon');
   });
 
-  it('E3 vs aircraft (HELI): C++ selects RedEye (higher damage, AA=yes)', () => {
-    // RedEye: damage=50, AP warhead, vs light armor (HELI has light armor)
-    // Dragon: damage=35, AP warhead, vs light armor
-    // Both AP: same mult, but RedEye has higher damage (50 vs 35)
+  it('E3 vs aircraft (HELI): C++ selects RedEye (primary tie/range winner)', () => {
+    // RedEye and Dragon both use AP vs light armor (HELI has light armor).
     // C++ scores: RedEye = 750 (0.75*1000), Dragon = 750 → tie → primary (RedEye)
-    // Wait: same warhead (AP), so scores equal. C++ returns primary on tie.
-    // But also: RedEye Is_In_Range at 7.5 range, Dragon at 5.0. If target within 5:
+    // RedEye also has 7.5 range vs Dragon's 5.0. If target is within 5:
     //   both in range → both doubled → still tied → primary (RedEye)
     // If target between 5-7.5: RedEye doubled, Dragon not → RedEye wins.
     const [rocket, heli] = pairAtDistance(UnitType.I_E3, UnitType.V_HELI, 3);
     const selected = rocket.selectWeapon(heli, getWarheadMultiplier);
-    // C++ returns primary (RedEye) vs aircraft — both are AA, but RedEye has better range
-    // and same/higher warhead score
+    // C++ returns primary (RedEye) vs aircraft — both are AA, but RedEye has
+    // better range and the same warhead score.
     expect(selected!.name).toBe('RedEye');
+  });
+
+  it('E3 vs landed aircraft: selects Dragon because RedEye is AG=no', () => {
+    // C++ techno.cpp:2734-2740 applies the ground-target IsAntiGround gate
+    // whenever target Height == 0, including RTTI_AIRCRAFT sitting on a pad.
+    const [rocket, heli] = pairAtDistance(UnitType.I_E3, UnitType.V_HELI, 3);
+    heli.flightAltitude = 0;
+    heli.aircraftState = 'landed';
+
+    const selected = rocket.selectWeapon(heli, getWarheadMultiplier);
+    expect(selected!.name).toBe('Dragon');
   });
 });
 
@@ -281,39 +289,16 @@ describe('C++ Parity — 4TNK weapon selection: 120mm vs MammothTusk', () => {
   });
 
   it('4TNK vs wood armor: tie-break to primary (120mm)', () => {
-    // Both AP and HE have 0.75 vs wood. But 120mm dmg=40, MammothTusk dmg=75.
-    // TS eff: 40*0.75=30 vs 75*0.75=56.25 → MammothTusk wins by damage
+    // Both AP and HE have 0.75 vs wood.
     // C++ score: both Modifier[wood]*1000 = 750. C++ tie → primary (120mm)
-    // This is a MISMATCH if TS uses damage*multiplier for tie-breaking.
-    // Actually looking more carefully at C++ code: w1 = warhead_modifier * 1000.
-    // It does NOT multiply by weapon damage. Pure warhead vs armor.
-    // So for 120mm AP vs wood = 0.75*1000 = 750, MammothTusk HE vs wood = 0.75*1000 = 750.
-    // w2 > w1 → 750 > 750 → false → returns primary (120mm).
-    //
-    // TS selectWeapon (entity.ts:637-644): eff1 = w1.damage * mult1 = 40*0.75 = 30
-    // eff2 = w2.damage * mult2 = 75*0.75 = 56.25
-    // eff2 > eff1 → true → returns MammothTusk
-    //
-    // DIVERGENCE: C++ uses ONLY warhead modifier for scoring. TS multiplies by weapon damage.
-    // Against wood armor: C++ picks 120mm (tie→primary), TS picks MammothTusk (higher eff damage).
-    const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.V_ARTY, 3);
-    // ARTY has light armor, not wood. Let's use a unit with wood armor if one exists.
-    // Actually in RA, no unit has wood armor — it's for structures/trees.
-    // Let's test with concrete armor instead:
-    // AP vs concrete = 0.5, HE vs concrete = 1.0 → HE wins in both C++ and TS.
-    // For the divergence test, we need to construct a scenario where warhead mults tie
-    // but damage differs. wood armor: AP=0.75, HE=0.75 — exactly tied.
-    // We can't easily get a unit with wood armor in-game, so this is a structural test.
-    //
-    // For now, test the actual C++ algorithm vs TS algorithm:
+    const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.I_E1, 3);
+    target.stats = { ...target.stats, armor: 'wood' as ArmorType };
     const apVsWood = getWarheadMultiplier('AP', 'wood');   // 0.75
     const heVsWood = getWarheadMultiplier('HE', 'wood');   // 0.75
     expect(apVsWood).toBe(heVsWood); // confirms tie
-    // C++ score for 120mm: 0.75 * 1000 = 750
-    // C++ score for MammothTusk: 0.75 * 1000 = 750
-    // C++ returns primary (w2 > w1 is false)
-    // TS effective: 40*0.75=30 vs 75*0.75=56.25 → TS returns secondary
-    // This is a known scoring divergence (C++ ignores weapon damage in scoring)
+
+    const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
+    expect(selected!.name).toBe('120mm');
   });
 
   it('FIXED: 4TNK vs airborne aircraft selects MammothTusk (AA gate active)', () => {
@@ -331,8 +316,7 @@ describe('C++ Parity — 4TNK weapon selection: 120mm vs MammothTusk', () => {
   });
 
   it('4TNK 120mm should be flagged as NOT anti-air (Cannon projectile has no AA)', () => {
-    // This documents the missing AA constraint: 120mm should never fire at aircraft.
-    // In C++, Can_Fire zeroes the score. In TS, there is no isAntiAir gate.
+    // In C++, Can_Fire zeroes the score. TS mirrors that in selectWeapon.
     const w = WEAPON_STATS['120mm'];
     expect(w.isAntiAir).toBeFalsy(); // Cannon: no AA=yes → IsAntiAircraft=false
   });
@@ -367,36 +351,12 @@ describe('C++ Parity — DD weapon selection: Stinger vs DepthCharge', () => {
     //   For SS: What_Am_I() == RTTI_VESSEL AND vessel == VESSEL_SS → exception passes
     //   So DepthCharge CAN fire at SS despite AG=no.
     //
-    // Both Stinger and DepthCharge use AP warhead. Same warhead effectiveness.
-    // Stinger: range=9, DepthCharge: range=5
-    // C++ scores (if both at close range, both in range):
-    //   w1 = 1000 * 2 = 2000 (Stinger in range)
-    //   w2 = 1000 * 2 = 2000 (DepthCharge in range)
-    //   Tie → returns primary (Stinger)
-    //
-    // But if target is between 5-9 cells:
-    //   w1 = 1000 * 2 = 2000 (Stinger in range at 9)
-    //   w2 = 1000 (DepthCharge out of range, not doubled)
-    //   → returns primary (Stinger)
-    //
-    // Actually C++ would return Stinger (primary) in most cases vs subs too,
-    // because Stinger has better range. DepthCharge is the backup when Stinger
-    // can't be used (which for subs... it can, since Stinger is AA and subs are surface/subsurface).
-    //
-    // The real question: in TS, does selectWeapon handle SS correctly?
-    // TS checks: w2.isAntiGround === false && !targetIsAircraft → return w1
-    // SS is not aircraft, and DepthCharge isAntiGround=false → TS returns Stinger (w1)
-    // This matches C++ for the normal case (Stinger has more range).
-    // But C++ ALSO allows DepthCharge to fire at SS (the sub exception), while TS
-    // would never select DepthCharge vs any non-aircraft target due to the AG gate.
-    //
-    // This matters when Stinger is unavailable (e.g., out of range but DepthCharge in range).
+    // VesselClass::Can_Fire then applies the ASW restriction:
+    //   if target is SS/MSUB and weapon is not ASW → FIRE_CANT.
+    // Stinger is not ASW, so only DepthCharge remains viable.
     const [dd, sub] = pairAtDistance(UnitType.V_DD, UnitType.V_SS, 3);
     const selected = dd.selectWeapon(sub, getWarheadMultiplier);
-    // At close range: TS returns Stinger (AG gate blocks DepthCharge)
-    // C++ at close range: both viable, Stinger ties or beats DepthCharge → Stinger
-    // Result is the same, but the TS reasoning is different (AG gate vs tie-break).
-    expect(selected!.name).toBe('Stinger');
+    expect(selected!.name).toBe('DepthCharge');
   });
 
   it('DD DepthCharge should be able to fire at submarines (C++ VESSEL_SS exception)', () => {
@@ -404,134 +364,91 @@ describe('C++ Parity — DD weapon selection: Stinger vs DepthCharge', () => {
     // DepthCharge (AG=no) can fire at SS and MSUB because they are excluded from the
     // ground-target check. This means DepthCharge is a valid weapon vs subs.
     //
-    // TS selectWeapon at entity.ts:622-623 checks isAntiGround===false and blanket-returns
-    // the other weapon, with NO submarine exception. This means DepthCharge is NEVER
-    // selected by TS selectWeapon against any non-aircraft target, even subs.
-    //
-    // DIVERGENCE: When Stinger is out of range but DepthCharge is in range vs a sub,
-    // C++ would select DepthCharge, TS would return null or select Stinger (out of range).
     const [dd, sub] = pairAtDistance(UnitType.V_DD, UnitType.V_SS, 4);
-    // DepthCharge range = 5, Stinger range = 9 — both in range at 4 cells
-    // Move sub to between DepthCharge range and Stinger range: impossible (Stinger > DepthCharge)
-    // So the divergence doesn't manifest in range-based selection for DD.
-    // But it's still architecturally wrong: TS unconditionally blocks DepthCharge vs subs.
-    const depthCharge = WEAPON_STATS['DepthCharge'];
-    expect(depthCharge.isAntiGround).toBe(false);
-    expect(depthCharge.isAntiSub).toBe(true);
-    // Document: TS has no sub exception for AG=no weapons
+    const selected = dd.selectWeapon(sub, getWarheadMultiplier);
+    expect(selected!.name).toBe('DepthCharge');
   });
 
   it('PT vs submarine: same DepthCharge behavior as DD', () => {
     const [pt, sub] = pairAtDistance(UnitType.V_PT, UnitType.V_SS, 3);
     const selected = pt.selectWeapon(sub, getWarheadMultiplier);
     // PT primary=2Inch (Cannon, no AA), secondary=DepthCharge (AG=no)
-    // TS: DepthCharge blocked by AG gate → returns 2Inch
-    // C++: both valid vs SS (2Inch: Cannon AG=default yes; DepthCharge: sub exception)
-    // Both AP warhead → same scores → tie → primary (2Inch)
-    // Same result, but TS blocks DepthCharge for wrong reason.
-    expect(selected!.name).toBe('2Inch');
+    // C++ VesselClass::Can_Fire rejects non-ASW 2Inch against SS and allows
+    // DepthCharge through the SS/MSUB AG=no exception.
+    expect(selected!.name).toBe('DepthCharge');
   });
 });
 
 // =============================================================================
-// 7. C++ vs TS SCORING DIVERGENCE: damage-weighted vs warhead-only
+// 7. SCORING: warhead-only, not damage-weighted
 //    C++ techno.cpp:359 — w1 = WarheadPtr->Modifier[armor] * 1000
 //    (No weapon damage in the score)
-//    TS entity.ts:640-641 — eff1 = w1.damage * mult1
-//    (Weapon damage IS part of the score)
-//
-//    This causes different outcomes when warhead modifiers tie but damage differs.
 // =============================================================================
 
-describe('C++ Parity — Scoring algorithm divergence (warhead-only vs damage*warhead)', () => {
-  it('DIVERGENCE: C++ uses warhead modifier ONLY, TS multiplies by weapon damage', () => {
-    // C++ techno.cpp:359: w1 = wptr->WarheadPtr->Modifier[armor] * 1000
-    // No damage factor. This means two weapons with same warhead type but different
-    // damage values get EQUAL scores.
-    //
-    // TS entity.ts:640: eff1 = w1.damage * mult1
-    // Damage is a factor. Higher-damage weapon wins when mults are equal.
-    //
-    // Example: 4TNK vs wood armor
-    //   120mm (AP, 40 dmg): C++ score = 0.75*1000 = 750, TS eff = 40*0.75 = 30
-    //   MammothTusk (HE, 75 dmg): C++ score = 0.75*1000 = 750, TS eff = 75*0.75 = 56.25
-    //   C++ result: tie → primary (120mm)
-    //   TS result: 56.25 > 30 → secondary (MammothTusk)
+describe('C++ Parity — Scoring algorithm uses warhead modifier only', () => {
+  it('4TNK vs wood armor ties by warhead score and selects primary 120mm', () => {
+    const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.I_E1, 3);
+    target.stats = { ...target.stats, armor: 'wood' as ArmorType };
+
     const apVsWood = getWarheadMultiplier('AP', 'wood');
     const heVsWood = getWarheadMultiplier('HE', 'wood');
     expect(apVsWood).toBe(0.75);
     expect(heVsWood).toBe(0.75);
 
-    const cppScore120mm = apVsWood * 1000;
-    const cppScoreTusk = heVsWood * 1000;
-    expect(cppScore120mm).toBe(cppScoreTusk); // C++ tie
-
-    const tsEff120mm = 40 * apVsWood;
-    const tsEffTusk = 75 * heVsWood;
-    expect(tsEffTusk).toBeGreaterThan(tsEff120mm); // TS: MammothTusk wins
+    const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
+    expect(selected!.name).toBe('120mm');
   });
 
-  it('DIVERGENCE: C++ tie-breaking with equal warhead mults → prefers primary', () => {
+  it('4TNK vs light armor selects 120mm even though MammothTusk has higher raw damage', () => {
+    const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.V_ARTY, 3);
+    expect(target.stats.armor).toBe('light');
+
+    // C++ scores AP 0.75 > HE 0.60 and ignores weapon damage.
+    // A damage-weighted selector would incorrectly choose MammothTusk.
+    const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
+    expect(selected!.name).toBe('120mm');
+  });
+
+  it('equal warhead scores prefer primary', () => {
     // Same-warhead dual-weapon units (e.g., CA with 8Inch/8Inch) always tie in C++
     // and default to primary. TS would also tie (same damage too) and default to primary.
-    // But for units with DIFFERENT weapons that happen to have same warhead mult vs
-    // specific armor, C++ defaults to primary while TS picks higher damage.
-    //
-    // Practical impact: Against wood-armor targets (rare — mostly structures/terrain),
-    // C++ 4TNK fires 120mm cannon, TS fires MammothTusk missiles. Against real units
-    // with none/light/heavy armor, the warhead mults differ and both engines agree.
-    const apVsLight = getWarheadMultiplier('AP', 'light');  // 0.75
-    const heVsLight = getWarheadMultiplier('HE', 'light');  // 0.60
-    expect(apVsLight).not.toBe(heVsLight); // Not tied → both engines agree on winner
+    const [cruiser, target] = pairAtDistance(UnitType.V_CA, UnitType.V_3TNK, 10);
+    const selected = cruiser.selectWeapon(target, getWarheadMultiplier);
+    expect(selected).toBe(cruiser.weapon);
   });
 });
 
 // =============================================================================
-// 8. C++ vs TS COOLDOWN DIVERGENCE
+// 8. COOLDOWN AND RANGE: selection ignores FIRE_REARM/FIRE_RANGE
 //    C++ What_Weapon_Should_I_Use does NOT consider cooldown (Arm timer).
 //    Can_Fire returns FIRE_REARM when Arm != 0, but that does NOT zero the score
 //    (only FIRE_CANT and FIRE_ILLEGAL zero it).
-//
-//    TS selectWeapon uses cooldown as a primary gate (entity.ts:627-635):
-//    w1Ready = this.attackCooldown <= 0 && w1InRange
-//    If !w1Ready && !w2Ready → returns null
 // =============================================================================
 
-describe('C++ Parity — Cooldown divergence (techno.cpp:2728 vs entity.ts:627-631)', () => {
-  it('DIVERGENCE: C++ picks best weapon even when both on cooldown', () => {
+describe('C++ Parity — Cooldown/range do not erase weapon selection', () => {
+  it('picks best weapon even when both weapons are on cooldown', () => {
     // C++ What_Weapon_Should_I_Use: Arm!=0 → FIRE_REARM (not FIRE_CANT)
     // FIRE_REARM does NOT zero the score. C++ still returns the best weapon.
     // The caller decides whether to actually fire based on rearm state.
     //
-    // TS selectWeapon: if both on cooldown → returns null
-    // This means TS combat code doesn't know WHICH weapon to fire when ready.
     const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.V_3TNK, 3);
     mammoth.attackCooldown = 30;
     mammoth.attackCooldown2 = 30;
 
     const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
-    // C++ would return 120mm (AP vs heavy=1.0 beats HE vs heavy=0.25)
-    // TS returns null (both on cooldown)
-    // This documents the divergence — TS test expects current TS behavior:
-    expect(selected).toBeNull(); // TS behavior: null when both cooling
-    // C++ behavior would be: 120mm (still scores weapons, ignores cooldown)
+    expect(selected!.name).toBe('120mm');
   });
 
-  it('DIVERGENCE: C++ still selects weapon when on cooldown but in range', () => {
+  it('still selects weapon when on cooldown but in range', () => {
     // C++ techno.cpp:360: if (In_Range(target, 0)) w1 *= 2
     // This doubles the score for in-range weapons. But it does NOT zero out-of-range weapons.
     // C++ techno.cpp:362: only FIRE_CANT/FIRE_ILLEGAL zero the score.
     //
-    // TS entity.ts:627: w1Ready = this.attackCooldown <= 0 && w1InRange
-    // TS requires BOTH cooldown=0 AND in range to be "ready".
     const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.I_E1, 3);
-    mammoth.attackCooldown = 10;  // primary on cooldown
-    mammoth.attackCooldown2 = 0;  // secondary ready
+    mammoth.attackCooldown = 10;
+    mammoth.attackCooldown2 = 0;
 
     const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
-    // TS: primary not ready (cooldown=10), secondary ready → MammothTusk
-    // C++: both score non-zero (cooldown doesn't zero), HE vs none (0.9) > AP vs none (0.3)
-    //      → MammothTusk anyway (same result, different reasoning)
     expect(selected!.name).toBe('MammothTusk');
   });
 
@@ -540,15 +457,12 @@ describe('C++ Parity — Cooldown divergence (techno.cpp:2728 vs entity.ts:627-6
     // Out of range weapons still have their base score (not zeroed).
     // Can_Fire returns FIRE_RANGE for out-of-range, NOT FIRE_CANT.
     //
-    // TS entity.ts:627: wReady = cooldown <= 0 && inRange — out of range → not ready → null
     const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.V_3TNK, 20);
     // 120mm range=4.75, MammothTusk range=5.0 — both out of range at 20 cells
 
     const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
-    // TS: neither in range → neither ready → returns null
     // C++: both score non-zero, not doubled, AP vs heavy (1000) > HE vs heavy (250) → 120mm
-    expect(selected).toBeNull(); // TS returns null for out-of-range
-    // C++ would return 120mm (best warhead effectiveness)
+    expect(selected!.name).toBe('120mm');
   });
 });
 
@@ -557,24 +471,17 @@ describe('C++ Parity — Cooldown divergence (techno.cpp:2728 vs entity.ts:627-6
 //    C++ Can_Fire (techno.cpp:2699-2707): if target is aircraft in flight
 //    AND weapon->Bullet->IsAntiAircraft is false → FIRE_CANT → zeroes score.
 //
-//    TS selectWeapon: does NOT gate on isAntiAir. Only checks isAntiGround.
-//    This means weapons without AA capability (Cannon, etc.) are NOT zeroed
-//    against aircraft in TS.
+//    TS selectWeapon mirrors this by zeroing non-AA weapons against airborne aircraft.
 // =============================================================================
 
 describe('C++ Parity — Anti-air constraint in weapon selection', () => {
-  it('C++ zeros non-AA weapons vs aircraft; TS does not check isAntiAir', () => {
+  it('C++ zeros non-AA weapons vs aircraft', () => {
     // 4TNK 120mm uses Cannon projectile: no AA flag → IsAntiAircraft=false
     // C++ Can_Fire(aircraft, 0) → FIRE_CANT → w1=0 → forces MammothTusk
-    // TS: no AA gate in selectWeapon → 120mm scored normally
-    // For 4TNK vs aircraft (light armor): AP=0.75 > HE=0.6 → TS might prefer 120mm!
-    // Except... TS eff = damage * mult: 40*0.75=30 vs 75*0.6=45 → TS picks MammothTusk
-    // So the RESULT is correct, but the REASONING differs.
     const w120mm = WEAPON_STATS['120mm'];
     const wTusk = WEAPON_STATS['MammothTusk'];
     expect(w120mm.isAntiAir).toBeFalsy();  // Cannon: no AA
     expect(wTusk.isAntiAir).toBe(true);    // HeatSeeker: AA=yes
-    // C++ would ZERO 120mm score vs air. TS just scores both.
   });
 
   it('FIXED: selectWeapon picks MammothTusk vs airborne aircraft (AA gate active)', () => {
@@ -700,45 +607,12 @@ describe('C++ Parity — Expected weapon per armor type (C++ warhead-only scorin
     'concrete': 'MammothTusk',  // HE 1.0 > AP 0.5
   };
 
-  // TS uses damage*mult, so the tie on wood armor breaks differently
-  const mammothExpectedTs: Record<ArmorType, string> = {
-    'none':     'MammothTusk',  // HE 75*0.9=67.5 > AP 40*0.3=12
-    'wood':     'MammothTusk',  // HE 75*0.75=56.25 > AP 40*0.75=30 (DIVERGENCE from C++)
-    'light':    '120mm',        // AP 40*0.75=30 > HE 75*0.6=45 ... wait, 45>30 → MammothTusk!
-    'heavy':    '120mm',        // AP 40*1.0=40 > HE 75*0.25=18.75
-    'concrete': 'MammothTusk',  // HE 75*1.0=75 > AP 40*0.5=20
-  };
-
-  // Wait, let me recalculate light armor:
-  // TS: 120mm = 40 * 0.75 = 30, MammothTusk = 75 * 0.6 = 45
-  // TS picks MammothTusk for light armor too! But C++ picks 120mm (AP 0.75 > HE 0.6)
-  // This is ANOTHER divergence.
-
   for (const armor of ['none', 'wood', 'light', 'heavy', 'concrete'] as ArmorType[]) {
     it(`4TNK vs ${armor} armor — C++ expected: ${mammothExpectedCpp[armor]}`, () => {
-      const apScore = getWarheadMultiplier('AP', armor) * 1000;
-      const heScore = getWarheadMultiplier('HE', armor) * 1000;
-      const cppPick = heScore > apScore ? 'MammothTusk' : '120mm';
-      expect(cppPick).toBe(mammothExpectedCpp[armor]);
-    });
-
-    it(`4TNK vs ${armor} armor — TS expected (damage-weighted)`, () => {
-      const apEff = 40 * getWarheadMultiplier('AP', armor);
-      const heEff = 75 * getWarheadMultiplier('HE', armor);
-      const tsPick = heEff > apEff ? 'MammothTusk' : '120mm';
-      // Document TS behavior — may diverge from C++ on wood and light
-      if (armor === 'wood') {
-        // C++ picks 120mm (tie→primary), TS picks MammothTusk (higher eff damage)
-        expect(tsPick).toBe('MammothTusk');
-        expect(mammothExpectedCpp[armor]).toBe('120mm'); // documents divergence
-      } else if (armor === 'light') {
-        // C++ picks 120mm (AP 0.75 > HE 0.6), TS picks MammothTusk (45 > 30)
-        expect(tsPick).toBe('MammothTusk');
-        expect(mammothExpectedCpp[armor]).toBe('120mm'); // documents divergence
-      } else {
-        // none, heavy, concrete: both engines agree
-        expect(tsPick).toBe(mammothExpectedCpp[armor]);
-      }
+      const [mammoth, target] = pairAtDistance(UnitType.V_4TNK, UnitType.I_E1, 3);
+      target.stats = { ...target.stats, armor };
+      const selected = mammoth.selectWeapon(target, getWarheadMultiplier);
+      expect(selected!.name).toBe(mammothExpectedCpp[armor]);
     });
   }
 });
@@ -763,7 +637,7 @@ describe('C++ Parity — selectWeapon integration (in-range, both ready)', () =>
     expect(e3.selectWeapon(tank, getWarheadMultiplier)!.name).toBe('Dragon');
   });
 
-  it('E3 vs aircraft: RedEye (both AA, RedEye primary, higher damage)', () => {
+  it('E3 vs aircraft: RedEye (both AA, RedEye primary tie/range winner)', () => {
     const [e3, heli] = pairAtDistance(UnitType.I_E3, UnitType.V_HELI, 3);
     expect(e3.selectWeapon(heli, getWarheadMultiplier)!.name).toBe('RedEye');
   });

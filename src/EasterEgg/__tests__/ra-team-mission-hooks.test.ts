@@ -6,7 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton, } from '../engine/types';
+import { House, Mission, UnitType, CELL_SIZE, RESFACTOR, cellTargetToLepton, pixelToLepton, } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
 
 class FakeAudio {
@@ -92,7 +92,13 @@ describe('Team mission parity hooks', () => {
 
     callUpdateTeamMission(game, mnly);
 
-    expect(mnly.teamMissionIndex).toBe(1);
+    expect(mnly.teamMissionIndex).toBe(0);
+    expect(mnly.mission).toBe(Mission.UNLOAD);
+    expect(game.mines).toHaveLength(0);
+
+    callUpdateEntity(game, mnly);
+
+    expect(mnly.mission).toBe(Mission.GUARD);
     expect(mnly.ammo).toBe(4);
     expect(game.mines).toContainEqual({
       cx: 7,
@@ -101,6 +107,9 @@ describe('Team mission parity hooks', () => {
       damage: 1000,
       type: 'AP',  // C++ unit.cpp:2616: Soviet houses place AP mines
     });
+
+    callUpdateTeamMission(game, mnly);
+    expect(mnly.teamMissionIndex).toBe(1);
   });
 
   it('TMISSION_SPY turns a waypoint-on-building into a spy infiltration', () => {
@@ -176,10 +185,9 @@ describe('Team mission parity hooks', () => {
     callUpdateTeamMission(game, lead);
     callUpdateTeamMission(game, wing);
 
-    const baseX = 12 * CELL_SIZE + CELL_SIZE / 2;
-    const baseY = 12 * CELL_SIZE + CELL_SIZE / 2;
-    expect(lead.moveTarget).toEqual({ lx: pixelToLepton(baseX), ly: pixelToLepton(baseY - CELL_SIZE) });
-    expect(wing.moveTarget).toEqual({ lx: pixelToLepton(baseX), ly: pixelToLepton(baseY + CELL_SIZE) });
+    const base = cellTargetToLepton(12, 12);
+    expect(lead.moveTarget).toEqual({ lx: base.lx, ly: base.ly - pixelToLepton(CELL_SIZE) });
+    expect(wing.moveTarget).toEqual({ lx: base.lx, ly: base.ly + pixelToLepton(CELL_SIZE) });
   });
 
   // C++ team.cpp:1689-1721 — Coordinate_Attack assigns the team's

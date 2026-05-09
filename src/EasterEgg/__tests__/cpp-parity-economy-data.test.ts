@@ -70,7 +70,17 @@ import { STRUCTURE_POWERED } from '../engine/scenario';
 // Helpers
 // ============================================================
 function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {
-  map.overlay[cy * MAP_CELLS + cx] = val;
+  const idx = cy * MAP_CELLS + cx;
+  if (val >= 0x03 && val <= 0x0E) {
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = val - 0x03;
+  } else if (val >= 0x0F && val <= 0x12) {
+    map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+    map.oreDensity[idx] = val - 0x0F;
+  } else {
+    map.overlay[idx] = val;
+    map.oreDensity[idx] = 0xFF;
+  }
 }
 
 // ============================================================
@@ -138,11 +148,13 @@ describe('BailCount — harvester capacity (rules.ini BailCount=28)', () => {
 //   C++ map.cpp:1017: subcount = MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
 //   MAP_CELL_TOTAL = 128*128 = 16384, TICKS_PER_MINUTE = 900
 //   subcount = 16384 / (2 * 900) = 16384 / 1800 ≈ 9
-//   Full scan interval: ceil(16384 / 9) = 1821 ticks
+//   TiberiumScan reprocesses the boundary cell each frame, so effective
+//   progress is 8 new cells/frame after the first frame.
+//   Full scan interval: ceil((16384 - 1) / (9 - 1)) = 2048 ticks
 // ============================================================
 describe('GrowthRate — ore regrowth interval (rules.ini GrowthRate=2)', () => {
-  it('ORE_GROWTH_INTERVAL = 1821 ticks', () => {
-    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
+  it('ORE_GROWTH_INTERVAL = 2048 ticks', () => {
+    expect(GameMap.ORE_GROWTH_INTERVAL).toBe(2048);
   });
 
   /**
@@ -151,7 +163,9 @@ describe('GrowthRate — ore regrowth interval (rules.ini GrowthRate=2)', () => 
    *   GrowthRate = 2 minutes
    *   TICKS_PER_MINUTE = 900 (15 FPS * 60)
    *   subcount = floor(16384 / (2 * 900)) = floor(16384 / 1800) = 9
-   *   Full cycle = ceil(16384 / 9) = 1821 ticks
+   *   TiberiumScan stores the boundary index after the break, so the next
+   *   frame reprocesses one cell. Effective progress is subcount - 1.
+   *   Full cycle = ceil((16384 - 1) / (9 - 1)) = 2048 ticks
    */
   it('ORE_GROWTH_INTERVAL matches C++ derivation from GrowthRate=2', () => {
     const MAP_CELL_TOTAL = 128 * 128;
@@ -159,8 +173,8 @@ describe('GrowthRate — ore regrowth interval (rules.ini GrowthRate=2)', () => 
     const TICKS_PER_MINUTE = 900;
     const subcount = Math.floor(MAP_CELL_TOTAL / (GROWTH_RATE * TICKS_PER_MINUTE));
     expect(subcount).toBe(9);
-    const fullCycle = Math.ceil(MAP_CELL_TOTAL / subcount);
-    expect(fullCycle).toBe(1821);
+    const fullCycle = Math.ceil((MAP_CELL_TOTAL - 1) / (subcount - 1));
+    expect(fullCycle).toBe(2048);
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(fullCycle);
   });
 });

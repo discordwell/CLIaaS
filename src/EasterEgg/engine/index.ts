@@ -7,9 +7,9 @@ import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats, type ArmorType,
   type WarheadMeta, type WarheadProps, type LeptonPos,
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
-  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
-  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN,
-	  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, directionToLeptons, directionToLeptons256, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
+	  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
+	  MAX_DAMAGE, REPAIR_STEP, REPAIR_PERCENT, CONDITION_RED, CONDITION_YELLOW, POWER_DRAIN, RULE_GRAVITY,
+		  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, directionToLeptons, directionToLeptons256, cellTargetToLepton, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
@@ -28,10 +28,11 @@ import { AssetManager, getSharedAssets } from './assets';
 import { AudioManager, type SoundName } from './audio';
 import { Camera } from './camera';
 import { InputManager } from './input';
-import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, CLOAK_DELAY_TICKS } from './entity';
+import { Entity, resetEntityIds, setPlayerHouses, threatScore as computeThreatScore, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, CLOAK_DELAY_TICKS, dir256ToFacing8, dir256ToFacing32 } from './entity';
 import { GameMap, Terrain, MoveResult } from './map';
 import { ScenarioRandom } from './random';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
+import { type LogicAnim, processLogicAnim } from './logicAnim';
 import { findPath, nearbyLocation } from './pathfinding';
 import {
   usesTrackMovement, lookupTrackControl, getEffectiveTrack, getTrackArray,
@@ -43,7 +44,7 @@ import {
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, houseIdToHouse, houseToId, consumeSemiPersistentAttachment,
-  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells,
+  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, getBibCells, getStructureOccupyCells,
   saveCarryover, TIME_UNIT_TICKS,
   TEVENT_GLOBAL_SET, TEVENT_GLOBAL_CLEAR, TEVENT_TIME, TEVENT_MISSION_TIMER_EXPIRED,
   CREWED_BUILDINGS,
@@ -77,6 +78,7 @@ import {
   structureDamage as _structureDamage,
   updateStructureCombat as _updateStructureCombat,
   updateSingleStructureCombat as _updateSingleStructureCombat,
+  findStructureThreatTarget as _findStructureThreatTarget,
   SPLASH_RADIUS,
 } from './combat';
 import {
@@ -121,8 +123,11 @@ import {
   MAX_MINES_PER_HOUSE as _MAX_MINES_PER_HOUSE,
   CHRONO_TANK_COOLDOWN as _CHRONO_TANK_COOLDOWN,
   MAD_TANK_CHARGE_TICKS as _MAD_TANK_CHARGE_TICKS,
-  MAD_TANK_DAMAGE as _MAD_TANK_DAMAGE,
+  MAD_TANK_UNIT_DAMAGE_PERCENT as _MAD_TANK_UNIT_DAMAGE_PERCENT,
+  MAD_TANK_BUILDING_DAMAGE_PERCENT as _MAD_TANK_BUILDING_DAMAGE_PERCENT,
+  MAD_TANK_INFANTRY_DAMAGE as _MAD_TANK_INFANTRY_DAMAGE,
   MAD_TANK_RADIUS as _MAD_TANK_RADIUS,
+  MAD_TANK_SCREEN_SHAKE as _MAD_TANK_SCREEN_SHAKE,
   DEMO_TRUCK_DAMAGE as _DEMO_TRUCK_DAMAGE,
   DEMO_TRUCK_RADIUS as _DEMO_TRUCK_RADIUS,
   DEMO_TRUCK_FUSE_TICKS as _DEMO_TRUCK_FUSE_TICKS,
@@ -187,7 +192,6 @@ import {
   launchAIAttack as _launchAIAttack,
   aiPickAttackTarget as _aiPickAttackTarget,
   updateAIDefense as _updateAIDefense,
-  updateAIRetreat as _updateAIRetreat,
   updateAIRepair as _updateAIRepair,
   updateAISellDamaged as _updateAISellDamaged,
   updateAIIncome as _updateAIIncome,
@@ -197,10 +201,12 @@ import {
   spawnAIStructure as _spawnAIStructure,
   spawnAIUnit as _spawnAIUnit,
   aiPerTick as _aiPerTick,
+  aiPowerProduced as _aiPowerProduced,
+  aiPowerConsumed as _aiPowerConsumed,
 } from './ai';
 import {
   Team as TeamInstance, registerTeam, updateAllTeams as _updateAllTeams,
-  clearAllTeams as _clearAllTeams,
+  clearAllTeams as _clearAllTeams, getActiveTeams, suspendTeamsByPriority,
 } from './team';
 import {
   type MissionAIContext,
@@ -215,6 +221,8 @@ import {
   updateRepairMission as _updateRepairMission,
   orderTransportEvacuate as _orderTransportEvacuate,
   runFiringAI as _runFiringAI,
+  targetSomethingNearbyRange as _targetSomethingNearbyRange,
+  movementZoneCells,
 } from './missionAI';
 // C++ parity scaffolding: UnitClass::Per_Cell_Process hook. Currently only
 // does NavCom-at-destination clear (legacy perCellNavComCheck behavior);
@@ -222,7 +230,7 @@ import {
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
 import { PCPType, unitPerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR, PCP_DOUBLE_CYCLE_ENABLED, DRIVE_CLASS_AI_PORT } from './perCellProcess';
-import { enterIdleMode } from './missionLifecycle';
+import { assignMission } from './missionLifecycle';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -258,7 +266,9 @@ export {
 export {
   MAX_MINES_PER_HOUSE, DEMO_TRUCK_DAMAGE, DEMO_TRUCK_RADIUS,
   DEMO_TRUCK_FUSE_TICKS, CHRONO_TANK_COOLDOWN,
-  MAD_TANK_CHARGE_TICKS, MAD_TANK_DAMAGE, MAD_TANK_RADIUS,
+  MAD_TANK_CHARGE_TICKS, MAD_TANK_UNIT_DAMAGE_PERCENT,
+  MAD_TANK_BUILDING_DAMAGE_PERCENT, MAD_TANK_INFANTRY_DAMAGE,
+  MAD_TANK_RADIUS, MAD_TANK_SCREEN_SHAKE,
   MECHANIC_HEAL_RANGE, MECHANIC_HEAL_AMOUNT,
 } from './specialUnits';
 export { getEffectiveCost, countPlayerBuildings } from './production';
@@ -293,8 +303,17 @@ const PATH_RETRY = 10;
 const MOVE_CLOAK = 1;         // default starting threshold (easiest)
 const MOVE_DESTROYABLE = 3;   // C++ foot.cpp:386-388: max threshold for human players near dest
 const MOVE_TEMP  = 4;         // maximum threshold (hardest — blocked by friendly)
-/** rules.ini PathDelay=.01 * TICKS_PER_MINUTE(900) = 9 ticks (rules.cpp default was .016→14) */
-const PATH_DELAY_TICKS = 9;
+/** C++ fixed-point rules.ini PathDelay=.01:
+ *  fixed raw=floor(.01*256)=2; fixed multiply rounds ((2*900)+128)/256 = 7 ticks. */
+const PATH_DELAY_TICKS = 7;
+const AI_FACTORY_STEP_COUNT = 54;      // C++ FactoryClass::STEP_COUNT
+const AI_FACTORY_PLACEMENT_DELAY = 45; // C++ TICKS_PER_SECOND * 3
+const EXIT_PYLE_OFFSETS: readonly CellPos[] = [
+  { cx: 1, cy: 2 }, { cx: 2, cy: 2 }, { cx: 0, cy: 2 }, { cx: -1, cy: 2 },
+  { cx: -1, cy: -1 }, { cx: 0, cy: -1 }, { cx: 1, cy: -1 }, { cx: 2, cy: -1 },
+  { cx: 2, cy: -1 }, { cx: -1, cy: 0 }, { cx: 2, cy: 0 }, { cx: 2, cy: 1 },
+  { cx: -1, cy: 1 },
+];
 /** C++ house.cpp:4071 — BorrowedTime = TICKS_PER_MINUTE * Rule.SavourDelay
  *  rules.ini SavourDelay=.03 → 0.03 * 900 = 27 ticks (~1.8s at 15 Hz).
  *  Delay between flagging win/lose and the actual game-end. */
@@ -519,6 +538,10 @@ export class Game {
   sovietUnitsLost = 0;      // C++ score.cpp:551 — NKilled
   sovietBuildingsLost = 0;  // C++ score.cpp:552 — NBKilled
   effects: Effect[] = [];
+  /** C++ AnimClass objects that participate in Logic.AI and consume gameplay RNG. */
+  private logicAnims: LogicAnim[] = [];
+  /** Whether this tick's AnimClass Logic pass has already run. */
+  private logicAnimsProcessedThisTick = false;
   /** Persistent corpses left by dead units (capped to prevent memory growth) */
   corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; isAnt: boolean; alpha: number; deathVariant: number }> = [];
   private static readonly MAX_CORPSES = 100;
@@ -545,22 +568,6 @@ export class Game {
   private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
   private scenarioWarheadProps: Record<string, WarheadProps> = WARHEAD_PROPS;
   private inflightProjectiles: InflightProjectile[] = [];
-  /** Invisible-bullet Coord_Scatter RNGs queued this tick by the fire path
-   *  (missionAI updateAttack → deferInvisibleScatter). Flushed at END of the
-   *  current tick's entity-AI phase — SAME tick as fire, after Phase 1-4 entity
-   *  loops complete.
-   *
-   *  C++ parity (bullet.cpp:736-738 + logic.cpp:285): an invisible weapon with
-   *  Speed=100 (MPH_LIGHT_SPEED) is constructed AT the target coord (Coord =
-   *  tcoord), then Arm_Fuse'd with proximity 0. The Logic loop
-   *  `for (index = 0; index < Count(); index++)` re-reads Count() each
-   *  iteration, so when Fire_At's `new BulletClass(...)` Submits the bullet
-   *  to the Logic array, the loop's next iteration picks it up — still same
-   *  tick. Fuse_Checkup returns true (distance=0 < 0x10), Bullet_Explodes
-   *  runs, and Coord_Scatter fires. Net: the scatter RNG fires on the same
-   *  tick as the weapon fire, after all lower-index entities have been
-   *  processed. See update() for the flush site. */
-  private _pendingInvisibleScatters = 0;
   private alliances: AllianceTable = buildDefaultAlliances();
   private crateOverrides: { silver?: string; wood?: string; water?: string } = {};
   private allowWin = 0; // C++ house.h:335 Blockage counter — each ALLOWWIN trigger increments; win requires <= 0
@@ -689,6 +696,8 @@ export class Game {
       structures: this.structures,
       inflightProjectiles: this.inflightProjectiles,
       effects: this.effects,
+      logicAnims: this.logicAnims,
+      logicAnimsAlreadyProcessed: this.logicAnimsProcessedThisTick,
       tick: this.tick,
       playerHouse: this.playerHouse,
       scenarioId: this.scenarioId,
@@ -722,12 +731,13 @@ export class Game {
       playEva: (n) => this.playEva(n as SoundName),
       minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
       movementSpeed: (e) => this.movementSpeed(e),
-      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
-      infantryValidatePath: (e) => this.infantryValidatePath(e),
+      idleMission: (e) => this.idleMission(e),
+      markDiscoveredIfPlayerVisible: (e) => this.markDiscoveredIfPlayerVisible(e),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       getArmorBias: (h) => this.getArmorBias(h),
       getROFBias: (h) => this.getROFBias(h),
       damageStructure: (s, d) => this.damageStructure(s, d),
+      suspendTeamsByPriority: (house, priority) => suspendTeamsByPriority(house, priority),
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
       warheadMuzzleColor: (w) => this.warheadMuzzleColor(w as WarheadType),
       // damageStructure callbacks
@@ -845,9 +855,11 @@ export class Game {
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       playSound: (n) => this.audio.play(n as SoundName),
       movementSpeed: (e) => this.movementSpeed(e),
-      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
-      infantryValidatePath: (e) => this.infantryValidatePath(e),
-      damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
+      damageEntity: (t, a, w, opts) => this.damageEntity(t, a, w as WarheadType, undefined, opts?.forced ? {
+        skipHouseArmorBias: true,
+        skipEntityArmorBias: true,
+        skipProneBias: true,
+      } : undefined),
       damageStructure: (s, d) => this.damageStructure(s, d),
       addEntity: (e) => { this.entities.push(e); this.entityById.set(e.id, e); },
       screenShake: this.renderer.screenShake,
@@ -975,6 +987,7 @@ export class Game {
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       playSound: (n) => this.audio.play(n as SoundName),
       addCredits: (amount) => { this.addCredits(amount); this.harvestedCredits += amount; },
+      startDriveClassMove: (entity) => this.startDriveClassMove(entity),
     };
   }
 
@@ -1022,13 +1035,13 @@ export class Game {
       entityById: this.entityById,
       structures: this.structures,
       map: this.map,
+      houseEdges: this.houseEdges,
+      tick: this.tick,
       unitsLeftMap: this.unitsLeftMap,
       civiliansEvacuated: this.civiliansEvacuated,
       isTanyaEvac: this.isTanyaEvac,
       isAllied: (a, b) => this.isAllied(a, b),
       movementSpeed: (e) => this.movementSpeed(e),
-      infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
-      infantryValidatePath: (e) => this.infantryValidatePath(e),
       idleMission: (e) => this.idleMission(e),
       fireWeaponAt: (a, t, w) => this.fireWeaponAt(a, t, w),
       fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
@@ -1119,6 +1132,7 @@ export class Game {
       nextWaveId: this.nextWaveId,
       autocreateEnabled: this.autocreateEnabled,
       teamTypes: this.teamTypes,
+      activeTeams: getActiveTeams(),
       destroyedTeams: this.destroyedTeams,
       autocreateTeamCounts: this.autocreateTeamCounts,
       waypoints: this.waypoints,
@@ -1149,6 +1163,7 @@ export class Game {
       entities: this.entities,
       structures: this.structures,
       effects: this.effects,
+      logicAnims: this.logicAnims,
       map: this.map,
       tick: this.tick,
       playerHouse: this.playerHouse,
@@ -1163,6 +1178,7 @@ export class Game {
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       movementSpeed: (e) => this.movementSpeed(e),
       infantryStartDriver: (e, cx, cy) => this.infantryStartDriver(e, cx, cy),
+      stopInfantryDriver: (e) => this.stopInfantryDriver(e),
       infantryValidatePath: (e) => this.infantryValidatePath(e),
       approachTarget: (e) => this.approachTarget(e),
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
@@ -1172,8 +1188,8 @@ export class Game {
       damageEntity: (t, a, w, att) => this.damageEntity(t, a, w, att),
       damageStructure: (s, d) => this.damageStructure(s, d),
       handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
-      launchProjectile: (a, t, w, d, ix, iy, dh) => this.launchProjectile(a, t, w, d, ix, iy, dh),
-      deferInvisibleScatter: () => { this._pendingInvisibleScatters++; },
+      launchProjectile: (a, t, w, d, ix, iy, dh, lc) => this.launchProjectile(a, t, w, d, ix, iy, dh, lc),
+      revealShooterFromFire: (e) => this.revealShooterFromFire(e),
       applySplashDamage: (c, w, pid, ah, att) => this.applySplashDamage(c, w, pid, ah, att),
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       getArmorBias: (h) => this.getArmorBias(h),
@@ -1186,6 +1202,7 @@ export class Game {
       idleMission: (e) => this.idleMission(e),
       retreatFromTarget: (e, p) => this.retreatFromTarget(e, p),
       threatScore: (s, t, d) => this.threatScore(s, t, d),
+      isDiscoveredByPlayer: (e) => e.house === this.playerHouse || this.discoveredEntityIds.has(e.id),
       updateDemoTruck: (e) => this.updateDemoTruck(e),
       updateMedic: (e) => this.updateMedic(e),
       updateMechanicUnit: (e) => this.updateMechanicUnit(e),
@@ -1285,6 +1302,7 @@ export class Game {
     this.nextCrateTick = 0;
     this.crates = [];
     this.inflightProjectiles = [];
+    this.logicAnims = [];
     // Build alliance table: use scenario INI data if available, otherwise default (ant missions)
     if (scenario.houseAllies.size > 0) {
       this.alliances = buildAlliancesFromINI(scenario.houseAllies, this.playerHouse);
@@ -1648,40 +1666,10 @@ export class Game {
     if (wasPaused && this.state === 'playing') this.state = 'paused';
   }
 
-  /** C++ parity: advance RNG to match C++ init seed position.
-   *  C++ makes 95 init calls (house timers, unit facings, etc.), TS makes 68.
-   *  Rather than replicating each call site (which produces different rejection
-   *  counts due to different seed positions), we advance to the EXACT C++ seed.
-   *  The target seed is computed from seed=0 advanced 95 times. */
+  /** C++ parity: mark the end of scenario-init RNG.
+   *  Scenario load now consumes the source-derived init RNG calls directly:
+   *  HouseClass attack timers plus Map.Overpass ore/gem visual randomization. */
   consumeInitRNG(): void {
-    // C++ init consumes a scenario-dependent number of Scen.RandomNumber calls during
-    // Read_Scenario_INI (entity facings, scatter positions, etc.). The total varies by
-    // scenario. We advance TS ScenarioRandom to match the exact C++ post-init seed.
-    // Target seeds determined empirically from WASM agent_get_state at tick 0.
-    const INIT_SEEDS: Record<string, number> = {
-      // Empirically captured from WASM agent_get_state at tick 0 (seed=0 init)
-      SCG01EA: 3520260643,
-      SCG02EA: 3499445261,
-      SCG03EA: 527630783,
-      SCG04EA: 2054541445,
-      SCG06EA: 4168801279,
-      SCG07EA: 2393386280,
-      SCG08EA: 279480590,
-      SCG09EA: 1739690317,
-      SCG10EA: 129816531,
-      SCG11EA: 676953911,
-      SCG12EA: 2400239140,
-      SCG13EA: 527630783,
-    };
-    const TARGET_SEED = INIT_SEEDS[this.scenarioId] ?? INIT_SEEDS.SCG01EA;
-    let safety = 0;
-    while (ScenarioRandom.seed !== TARGET_SEED && safety < 500) {
-      ScenarioRandom.next();
-      safety++;
-    }
-    if (safety >= 500) {
-      console.warn(`[RNG] Failed to reach target seed for ${this.scenarioId} — init parity may be off`);
-    }
     // Set debug log start so gameplay calls are captured (not init calls)
     ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
   }
@@ -1757,6 +1745,7 @@ export class Game {
   /** Fixed-timestep game update */
   private update(): void {
     this.tick++;
+    this.logicAnimsProcessedThisTick = false;
     (globalThis as any).__currentGameTick = this.tick;
     (globalThis as any).__missionTimerTrace = true;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
@@ -1844,15 +1833,31 @@ export class Game {
       if (this.missionTimer <= 0) this.missionTimerExpired = true;
     }
 
+    // C++ FootClass::PathDelay is a CDTimerClass<FrameTimerClass>, not an
+    // object-local timer. Team AI runs before object AI and can call
+    // Assign_Destination()->Start_Of_Move(); it must see the frame-decremented
+    // PathDelay value. Decrement once here at frame scope instead of inside each
+    // entity's later AI pass.
+    for (const entity of this.entities) {
+      if (entity.pathDelay > 0) entity.pathDelay--;
+    }
+
     // Update occupancy grid and assign infantry sub-cell positions
     // C++ cell.h: each cell has 5 sub-positions (CENTER + 4 corners) for infantry,
     // plus Vehicle/Building/Monolith flags that block entire cell.
     this.map.occupancy.fill(0);
     this.map.clearSubCellOccupancy();
     for (const entity of this.entities) {
-      if (entity.alive && !entity.inLimbo &&
+      if (!entity.inLimbo &&
+          (entity.alive || entity.stats.isVessel) &&
           (!entity.isAirUnit || entity.flightAltitude === 0) &&
           !entity.stats.isInfantry) {
+        // C++ cell occupier parity: sunk vessels can remain in the
+        // Cell_Occupier chain with Strength=0 and still return
+        // MOVE_MOVING_BLOCK from Can_Enter_Cell. SCG07EA has a sunk USSR SS at
+        // (20,53) doing exactly this. Dead land vehicles do not keep a vehicle
+        // occupy bit; SCG04EA's destroyed MNLY at (88,52) must not block a
+        // civilian Scatter() into that cell.
         this.map.setVehicleOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
       }
     }
@@ -1877,22 +1882,44 @@ export class Game {
             // C++ parity: infantry with an active heading-to claim (isDriving + claimedCell)
             // have their occupy bit in the DESTINATION cell, not current cell.
             const skipCurrentClaim = restoredInfantryClaims.has(entity.id);
-            // Infantry: occupy a sub-cell (up to 5 per cell)
+            if (!skipCurrentClaim && entity.scenarioInitUnlimbo && !entity.isDriving) {
+              // C++ InfantryClass::Unlimbo passes ScenarioInit into
+              // Closest_Free_Spot. With ScenarioInit=true, C++ keeps the exact
+              // requested coord even when the sub-spot is already occupied
+              // (reinf.cpp:470-481, building.cpp:1734-1738/3521-3528).
+              // Mark the current spot when possible, but never reassign/snap
+              // stacked ScenarioInit infantry to another free sub-cell.
+              const spotIndex = this.infantrySpotIndex(entity.leptonX, entity.leptonY);
+              entity.subCell = spotIndex;
+              const cellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
+              if (this.map.occupyClaimedSubCell(cellIdx, entity.id, spotIndex)) {
+                entity.claimedCellIdx = cellIdx;
+                entity.claimedSubCell = spotIndex;
+              } else {
+                entity.claimedCellIdx = -1;
+                entity.claimedSubCell = -1;
+              }
+              continue;
+            }
+            // Infantry occupy bits are event-driven in C++ (Unlimbo,
+            // Start_Driver, Stop_Driver). Restore only a known claimed bit;
+            // do not infer a fresh bit from current position every tick.
+            // SCG13EA mptrl dog 852083 stops with no current occupy bit after
+            // its NavCom is cleared mid-hop; recreating one at tick rebuild
+            // makes following infantry pick the wrong Head_To_Coord.
             const subCell = skipCurrentClaim ? entity.claimedSubCell
-              : this.map.occupySubCell(entity.cell.cx, entity.cell.cy, entity.id, entity.subCell);
+              : (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0 &&
+                  this.map.occupyClaimedSubCell(entity.claimedCellIdx, entity.id, entity.claimedSubCell)
+                ? entity.claimedSubCell
+                : -1);
             if (subCell >= 0) {
               entity.subCell = subCell;
-              // C++ const.cpp StoppingCoordAbs: idle infantry snap to exact sub-cell
-              // lepton position. Only snap when truly idle — not moving or chasing.
-              // C++ IsDriving persists between ticks; TS clears it each tick so also
-              // check moveTarget (entity is walking toward a destination).
-              if (!entity.isDriving && !entity.moveTarget) {
-                const sc = SUBCELL_LEPTON_OFFSETS[subCell];
-                const { cx, cy } = entity.cell;
-                entity.leptonX = (cx << 8) + sc.lx;
-                entity.leptonY = (cy << 8) + sc.ly;
-                entity.syncPosFromLeptons();
-              }
+              // C++ InfantryClass::Set_Occupy_Bit(Coord) only marks the
+              // nearest sub-cell bit; it does not mutate Coord. Infantry can
+              // stop mid-hop when Stop_Driver() runs after NavCom is cleared
+              // (for example TMission_Patrol Assign_Mission_Target), then
+              // resume from that exact lepton coordinate. Do not snap idle
+              // infantry to StoppingCoordAbs during occupancy rebuild.
             }
             // else: all sub-cells full — entity keeps its previous subCell
           }
@@ -1911,10 +1938,19 @@ export class Game {
       structures: this.structures,
       entities: this.entities,
       map: this.map,
+      playerHouse: this.playerHouse,
+      entitiesAllied: (a, b) => this.entitiesAllied(a, b),
+      isPlayerControlled: (entity) => this.isPlayerControlled(entity),
+      isDiscoveredByPlayer: (entity) => entity.house === this.playerHouse || this.discoveredEntityIds.has(entity.id),
+      isRevealedToHouse: (cx, cy, houseIdx) => this.isRevealedToHouse(cx, cy, houseIdx),
+      threatScore: (scanner, target, distCells) => this.threatScore(scanner, target, distCells),
       // C++ Can_Enter_Cell port (vehicles only): drive.cpp:638-640 Start_Of_Move
       // fires Start_Driver iff Basic_Path's first step is enterable. This
       // callback delegates to the same helper used by drive-class track-jump.
-      canEnterCell: (entity, cx, cy) => this.canEnterTrackJumpCell(entity, cx, cy) === MoveResult.OK,
+        canEnterCell: (entity, cx, cy) => this.canEnterTrackJumpCell(entity, cx, cy) === MoveResult.OK,
+        startDriveClassMove: (entity) => this.startDriveClassMove(entity),
+        stopInfantryDriver: (entity) => this.stopInfantryDriver(entity),
+        canStopInfantryDriverForAssignDestination: (entity) => this.canStopInfantryDriverForAssignDestination(entity),
       // Phase 7B: tick for TMission_Patrol periodic threat scan timing.
       tick: this.tick,
     });
@@ -1970,13 +2006,14 @@ export class Game {
       for (let i = 0; i < this._preBuildingEntityCount; i++) {
         const entity = this.entities[i];
         if (!entity || entity.isAirUnit) continue;
-        if (ScenarioRandom._tagLogging) {
-          ScenarioRandom._sourceTag = entity.stats.isInfantry
-            ? 10000 + logicIdx
-            : entity.isNavalUnit
-              ? 14000 + logicIdx
-              : 11000 + logicIdx;
-        }
+	        if (ScenarioRandom._tagLogging) {
+	          ScenarioRandom._sourceTag = entity.stats.isInfantry
+	            ? 10000 + logicIdx
+	            : entity.isNavalUnit
+	              ? 14000 + logicIdx
+	              : 11000 + logicIdx;
+	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	        }
         logicIdx++;
         this._processGroundEntity(entity);
       }
@@ -1990,37 +2027,34 @@ export class Game {
       const isLowPower = ctx.powerConsumed > ctx.powerProduced;
 
       for (const s of this.structures) {
-        if (ScenarioRandom._tagLogging) {
-          ScenarioRandom._sourceTag = 12000 + logicIdx;
-        }
+	        if (ScenarioRandom._tagLogging) {
+	          ScenarioRandom._sourceTag = 12000 + logicIdx;
+	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	        }
         logicIdx++;
         if (!s.alive) continue;
         if (s.buildProgress !== undefined) continue;
         if (s.sellProgress !== undefined) continue;
 
-        // Timer tick + jitter RNG (MissionClass::AI)
-        if (s.missionTimer > 0) {
-          s.missionTimer--;
-        }
-        if (s.missionTimer <= 0) {
-          const jitter = ScenarioRandom.nextInRange(0, 2);
-          if (s.weapon) {
-            s.missionTimer = GUARD_AA_DELAY + jitter;
-          } else if (s.type === 'FIX') {
-            s.missionTimer = GUARD_NORMAL_DELAY + jitter;
-          } else {
-            s.missionTimer = GUARD_NORMAL_DELAY * 3 + jitter;
-          }
-        }
+        this.tickStructureChargingAnimation(s);
+        const runStructureAttack = this.dispatchStructureMissionTimer(
+          s, ctx, GUARD_NORMAL_DELAY, GUARD_AA_DELAY);
 
-        // Firing_AI — weapon targeting and fire
-        _updateSingleStructureCombat(ctx, s, isLowPower);
+        // C++ Mission_Attack — firing is mission-timer gated, not a free-running loop.
+        if (runStructureAttack) _updateSingleStructureCombat(ctx, s, isLowPower);
+
+        this.updateStructureChargingAI(s, ctx, isLowPower);
 
         // C++ BuildingClass::Repair_AI (building.cpp:5484-5536) — per-building auto-repair
         // tick for computer-controlled houses. Only computes the Random_Pick that initiates
         // the repair timer; actual HP restoration uses TS's updateAIRepair cadence.
         // The RNG consumption is what keeps the RNG stream aligned with WASM.
         this._repairAITick(s);
+
+        // C++ building.cpp:984-993 — computer-controlled buildings own their
+        // factory. This starts/exits products; FactoryClass::AI advances later
+        // in the frame before HouseClass::AI sets the next Build* slot.
+        this.updateAIBuildingFactory(s);
 
         // C++ building.cpp:990-993: Gap Generator Arm timer
         // When Arm==0, consume Random_Pick(1, TICKS_PER_SECOND) and reset Arm.
@@ -2039,9 +2073,10 @@ export class Game {
         if (s.hpadHelicopterId !== undefined) {
           const heli = this.entityById.get(s.hpadHelicopterId);
           if (heli && heli.alive && heli.isAirUnit) {
-            if (ScenarioRandom._tagLogging) {
-              ScenarioRandom._sourceTag = 13000 + logicIdx;
-            }
+	            if (ScenarioRandom._tagLogging) {
+	              ScenarioRandom._sourceTag = 13000 + logicIdx;
+	              ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	            }
             logicIdx++;
             heli.rotTickedThisFrame = false;
             heli.turretRotTickedThisFrame = false;
@@ -2080,6 +2115,10 @@ export class Game {
                 const stillHasTarget = (heli.target?.alive) ||
                   (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                 if (!stillHasTarget) {
+                  // Mission_Attack's landed no-target state is the normal
+                  // MissionClass timer path: decrement then dispatch when it
+                  // reaches zero. This is distinct from landed Mission_Guard's
+                  // Commence-visible zero cadence below.
                   if (heli.missionTimer > 0) heli.missionTimer--;
                   if (heli.missionTimer <= 0) {
                     const jitter = ScenarioRandom.nextInRange(0, 2);
@@ -2100,15 +2139,23 @@ export class Game {
                 }
               }
               if (heli.mission === Mission.GUARD && heli.aircraftState === 'landed') {
-                if (heli.missionTimer > 0) {
-                  heli.missionTimer--;
-                }
-                if (heli.missionTimer <= 0) {
+                // C++ MissionClass::AI reads CDTimer's current value before any
+                // "visible" countdown for this frame. A timer that shows 1 at the
+                // end of tick N becomes visible as 0 at the end of tick N+1, but
+                // Mission_Guard does not dispatch until tick N+2 when Timer==0 at
+                // AI entry. This HPAD interleave is manual because landed aircraft
+                // return from updateAircraft before normal MissionClass::AI.
+                const timerFired = heli.missionTimer <= 0;
+                if (!timerFired && heli.missionTimer > 0) heli.missionTimer--;
+                if (timerFired) {
                   const hasTarget = (heli.target?.alive) ||
                     (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                   if (hasTarget) {
                     heli.mission = Mission.ATTACK;
-                    heli.missionTimer = 1;
+                    // AircraftClass::AI runs Commence() after Mission_Guard.
+                    // Assign_Mission(ATTACK) queues the mission; Commence pops it
+                    // and resets Timer=0, so Mission_Attack dispatches next tick.
+                    heli.missionTimer = 0;
                   } else {
                     heli.target = null;
                     heli.targetStructure = null;
@@ -2116,8 +2163,10 @@ export class Game {
                     // range-check. juicyFound captures Step 7's result so we queue
                     // ATTACK even when Step 8 clears heli.target.
                     const juicyFound = this._heliGuardScan(heli);
-                    const hasTargetAfterScan = (heli.target?.alive) ||
-                      (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                    const scannedTarget = heli.target as Entity | null;
+                    const scannedStructure = heli.targetStructure as MapStructure | null;
+                    const hasTargetAfterScan = (scannedTarget?.alive) ||
+                      (scannedStructure?.alive);
                     // C++ foot.cpp:684-687 FootClass::Mission_Guard:
                     //     if (Arm != 0) { return (int)Arm; }     <-- NO Random_Pick
                     //     return(dtime + Random_Pick(0,2));
@@ -2137,7 +2186,8 @@ export class Game {
                         ScenarioRandom.nextInRange(0, 2);
                       }
                       heli.mission = Mission.ATTACK;
-                      heli.missionTimer = 1;
+                      // Same queued-then-Commence path as Target_Legal(TarCom).
+                      heli.missionTimer = 0;
                     } else if (heli.attackCooldown > 0) {
                       // C++ foot.cpp:684: Arm != 0 → return Arm, skipping Random_Pick(0,2).
                       heli.missionTimer = heli.attackCooldown;
@@ -2161,27 +2211,30 @@ export class Game {
       for (let i = this._preBuildingEntityCount; i < this.entities.length; i++) {
         const entity = this.entities[i];
         if (!entity || entity.isAirUnit) continue;
-        if (ScenarioRandom._tagLogging) {
-          ScenarioRandom._sourceTag = entity.stats.isInfantry
-            ? 10000 + logicIdx
-            : entity.isNavalUnit
-              ? 14000 + logicIdx
-              : 11000 + logicIdx;
-        }
+	        if (ScenarioRandom._tagLogging) {
+	          ScenarioRandom._sourceTag = entity.stats.isInfantry
+	            ? 10000 + logicIdx
+	            : entity.isNavalUnit
+	              ? 14000 + logicIdx
+	              : 11000 + logicIdx;
+	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	        }
         logicIdx++;
         this._processGroundEntity(entity);
       }
 
       // ── Phase 4: aircraft (skip HPAD helicopters already processed in Phase 2) ──
+      const preAircraftEntityCount = this.entities.length;
       for (const entity of this.entities) {
         if (!entity.alive || !entity.isAirUnit) continue;
         if (entity._processedInBuildingPass) {
           entity._processedInBuildingPass = false; // reset for next tick
           continue;
         }
-        if (ScenarioRandom._tagLogging) {
-          ScenarioRandom._sourceTag = 13000 + logicIdx;
-        }
+	        if (ScenarioRandom._tagLogging) {
+	          ScenarioRandom._sourceTag = 13000 + logicIdx;
+	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	        }
         logicIdx++;
         entity.rotTickedThisFrame = false;
         entity.turretRotTickedThisFrame = false;
@@ -2193,12 +2246,56 @@ export class Game {
         // TS's _updateAircraft state machine bypasses the mission switch, so
         // consume the Random_Pick equivalent here for Mission_Move parity.
         // (rules.ini [Move] Normal_Delay=14 + jitter 0-2 → timer 14-16.)
-        if (entity.mission === Mission.MOVE && entity.missionTimer <= 0) {
+        // If Team AI queued a new mission this tick, AircraftClass::AI's
+        // Commence gate must pop it before any old Mission_Move return jitter
+        // can fire. C++ SCG04EA t181 BADR enters ATTACK from TMISSION_ATT_WAYPT
+        // without consuming a stale MISSION_MOVE Random_Pick.
+        if (entity.missionQueue === null &&
+            entity.mission === Mission.MOVE && entity.missionTimer <= 0) {
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
         }
         this.updateEntity(entity);
         entity.tickAnimation();
       }
+
+      // C++ logic.cpp:285 re-reads the Logic.Count() while iterating. A
+      // transport aircraft can Unlimbo a passenger during AircraftClass::AI;
+      // that passenger is appended after the aircraft and receives its normal
+      // FootClass::AI later in the same tick. The split TS phase loop above
+      // would otherwise defer it until the next frame.
+      for (let i = preAircraftEntityCount; i < this.entities.length; i++) {
+        const entity = this.entities[i];
+        if (!entity || !entity.alive || entity.isAirUnit) continue;
+	        if (ScenarioRandom._tagLogging) {
+	          ScenarioRandom._sourceTag = entity.stats.isInfantry
+	            ? 10000 + logicIdx
+	            : entity.isNavalUnit
+	              ? 14000 + logicIdx
+	              : 11000 + logicIdx;
+	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	        }
+        logicIdx++;
+        this._processGroundEntity(entity);
+      }
+
+      // ── Phase 5: C++ AnimClass logic objects appended to Logic ──
+      // C++ ObjectClass::Unlimbo submits ANIM objects to the same Logic array as
+      // techno/buildings (object.cpp:1412-1414). The Logic loop re-reads Count(),
+      // so animations spawned by earlier objects can run later in the same tick,
+      // and AnimClass::Middle consumes gameplay RNG for napalm/fire side effects.
+      this.logicAnimsProcessedThisTick = false;
+      for (let i = 0; i < this.logicAnims.length; i++) {
+	        if (ScenarioRandom._tagLogging) {
+	          ScenarioRandom._sourceTag = 16000 + logicIdx;
+	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+	        }
+        logicIdx++;
+        if (!processLogicAnim(this.logicAnims[i], this.logicAnims, this.effects)) {
+          this.logicAnims.splice(i, 1);
+          i--;
+        }
+      }
+      this.logicAnimsProcessedThisTick = true;
 
       // Clear source tag after Phase 4 so any post-Logic RNG calls (e.g. the
       // pendingInvisibleScatters flush at line ~2320) don't inherit the final
@@ -2206,9 +2303,10 @@ export class Game {
       // Coord_Scatters are mistagged `aircraft[51]`, confusing RNG-diff tools.
       // C++ equivalent: logic.cpp:285 entity loop exits; subsequent callers
       // (Map.Logic, House AI, bullet AI) set their own g_rng_source_tag.
-      if (ScenarioRandom._tagLogging) {
-        ScenarioRandom._sourceTag = 0;
-      }
+	      if (ScenarioRandom._tagLogging) {
+	        ScenarioRandom._sourceTag = 0;
+	        ScenarioRandom._entityTag = 0;
+	      }
     });
 
     // C++ HouseClass::AI repair timer tick (house.cpp:1371-1373):
@@ -2240,7 +2338,16 @@ export class Game {
       for (const id of loadSet) {
         const e = this.entityById.get(id);
       }
+      // C++ Logic keeps buildings between the original scenario objects and
+      // later reinforcements. If TS removes a pre-building entity from the
+      // array, the split point must move left too; otherwise post-building
+      // reinforcements slide into the pre-building pass and run before
+      // BuildingClass::AI.
+      const removedBeforeStructures = this.entities
+        .slice(0, this._preBuildingEntityCount)
+        .filter(e => loadSet.has(e.id)).length;
       this.entities = this.entities.filter(e => !loadSet.has(e.id));
+      this._preBuildingEntityCount = Math.max(0, this._preBuildingEntityCount - removedBeforeStructures);
       for (const id of this._pendingTransportLoads) {
         this.entityById.delete(id);
       }
@@ -2450,44 +2557,39 @@ export class Game {
     // Gap Generator shroud jamming (every ~90 ticks)
     this.updateGapGenerators();
 
-    // C++ invisible-bullet Coord_Scatter (bullet.cpp:736-738 + 1012-1014):
-    // Invisible weapons (Speed=100 → MPH_LIGHT_SPEED) construct the bullet AT
-    // target coord with proximity 0; logic.cpp:285's
-    //   for (index = 0; index < Count(); index++)
-    // re-reads Count() each iteration, so the freshly-Submitted bullet (at
-    // high Logic idx) gets its AI call INSIDE the SAME tick as fire —
-    // Fuse_Checkup returns true (distance=0 < 0x10), Bullet_Explodes runs,
-    // and Coord_Scatter consumes 1 Random_Pick(0,255).
-    //
-    // Flush here (same-tick, right before updateInflightProjectiles which
-    // advances existing non-invisible projectiles). Mirrors WASM's position
-    // AFTER all normal entity AI and post-Object-AI subsystems (repair timer,
-    // map/factory/house AI equivalents), representing the same-tick
-    // bullet-at-high-idx iteration. Paired with the InfantryClass::Firing_AI
-    // FireLaunch stage gate in updateAttack so the bullet is launched on WASM's
-    // exact tick N+FireLaunch and consumes its Coord_Scatter RNG within that
-    // tick.
-    //
-    // See commit 61767115 for the C++ investigation that replaced the
-    // earlier "defer to next tick" logic (2a99bce6 / 062f2f8e).
-    {
-      const flushCount = this._pendingInvisibleScatters;
-      this._pendingInvisibleScatters = 0;
-      for (let i = 0; i < flushCount; i++) {
-        // Tag as Coord_Scatter so RNG trace matches WASM's source_tag=50002
-        // (coord.cpp:396). Without this, flushed calls inherit whatever
-        // _sourceTag was last set — most recently the final aircraft's
-        // logicIdx (e.g. aircraft[51] on SCG01EA tick 87). The stale tag is
-        // cosmetic vs. seed numbers, but it derails RNG-divergence diagnostics.
-        if (ScenarioRandom._tagLogging) {
-          ScenarioRandom._sourceTag = 50002; // C++ Coord_Scatter direction pick
-        }
-        ScenarioRandom.nextInRange(0, 255);
+    // Advance in-flight projectiles
+    const preProjectileEntityCount = this.entities.length;
+    this.updateInflightProjectiles();
+
+    // C++ logic.cpp:285 re-reads Logic.Count() while iterating. Projectile
+    // damage can submit new infantry (e.g. vehicle crew from UnitClass death),
+    // but same-tick-created invisible bullets occupy earlier Logic slots than
+    // the later-submitted infantry. TS batches projectile work after entity AI,
+    // so catch up projectile-spawned ground entities only after the invisible
+    // bullet flush has run.
+    for (let i = preProjectileEntityCount; i < this.entities.length; i++) {
+      const entity = this.entities[i];
+      if (!entity || !entity.alive || entity.isAirUnit) continue;
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = entity.stats.isInfantry
+          ? 10000 + i
+          : entity.isNavalUnit
+            ? 14000 + i
+            : 11000 + i;
       }
+      this._processGroundEntity(entity);
     }
 
-    // Advance in-flight projectiles
-    this.updateInflightProjectiles();
+    // C++ logic.cpp:348-352 — Map.Logic runs after all Logic objects
+    // (technos/buildings/bullets/anims) and before Factory/House AI.
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 3;
+    this.map.growOre(this.tick);
+
+    // C++ logic.cpp:359-363 — FactoryClass::AI runs after Map.Logic and
+    // before HouseClass::AI. BuildingClass::Factory_AI created/started these
+    // factories earlier in the frame; they do not exit products until a later
+    // building AI pass sees STEP_COUNT completed.
+    this.updateAIFactories();
 
     // Queen Ant spawning — QUEE periodically spawns ants (rate varies by difficulty)
     const spawnSec = (DIFFICULTY_MODS[this.difficulty] ?? DIFFICULTY_MODS.normal).spawnInterval;
@@ -2509,12 +2611,15 @@ export class Game {
       this.updateAIHarvesters();
       this.updateAIAttackGroups();
       this.updateAIDefense();
-      this.updateAIRetreat();
     }
 
-    // AI army building (works for both ant missions and strategic AI)
+    // C++ HouseClass::AI already ran AI_Unit/AI_Vessel/AI_Infantry/AI_Aircraft
+    // above in exact enum order. The legacy TS updateAIProduction() pass is a
+    // 60-tick immediate spawner with no C++ counterpart; on SCG07EA tick 61 it
+    // consumed four extra RNG calls after House::AI completed. Keep production
+    // advancement in tickProduction(), and let C++-ported House AI set build
+    // selections instead of running this duplicate strategic layer.
     this.updateAIIncome();
-    this.updateAIProduction();
     this.updateAIAutocreateTeams();
 
     // AI base rebuild (existing, still used for ant missions + gap-fill)
@@ -2522,9 +2627,6 @@ export class Game {
     // AI base intelligence — auto-repair and auto-sell damaged buildings (IQ >= 3, C++ parity)
     this.updateAIRepair();
     this.updateAISellDamaged();
-
-    // Ore regeneration — C++ OverlayClass::AI() fires every ~256 ticks (~17s at 15 FPS)
-    this.map.growOre(this.tick);
 
     // Base discovery — check if a player unit is near any player structure
     this.checkBaseDiscovery();
@@ -2570,25 +2672,49 @@ export class Game {
 
     // fogReEnableTick timer removed — C++ RadarSpied is permanent (infantry.cpp:660-662)
 
-    // Clean up dead entities after death animation — save corpse before removal
+    // C++ techno.cpp:3958-3962 — TechnoClass::Record_The_Kill springs
+    // attached object triggers immediately on death. Do this before corpse
+    // cleanup so semi-persistent AttachCount gates (e.g. SCG01EA `dwig`)
+    // decrement on the death tick, not the next 15-tick LogicTrigger scan.
+    this.springDestroyedObjectTriggers();
+
+    // Clean up dead infantry entities after their death animation. Do not remove
+    // dead drive-class entities here: C++ Cell_Occupier can retain Strength=0
+    // vessels/units as map blockers even though MissionClass::AI skips them
+    // (mission.cpp:235 checks Strength > 0 before dispatch). SCG07EA's sunk SS
+    // at (20,53) is the active parity case.
     const before = this.entities.length;
+    let removedBeforeStructures = 0;
+    const shouldRemoveDeadEntity = (e: Entity): boolean =>
+      !e.alive && e.stats.isInfantry && e.deathTick >= 45;
+    for (let i = 0; i < Math.min(this._preBuildingEntityCount, this.entities.length); i++) {
+      const e = this.entities[i];
+      if (shouldRemoveDeadEntity(e)) removedBeforeStructures++;
+    }
     for (const e of this.entities) {
-      if (!e.alive && e.deathTick >= 45) {
+      if (shouldRemoveDeadEntity(e)) {
         // Persist trigger name before entity is removed from array
         if (e.triggerName) this.destroyedTriggerNames.add(e.triggerName);
-        // Save as persistent corpse
-        if (this.corpses.length >= Game.MAX_CORPSES) this.corpses.shift();
-        this.corpses.push({
-          x: e.pos.x, y: e.pos.y, type: e.type, facing: e.facing,
-          isInfantry: e.stats.isInfantry, isAnt: e.isAnt, alpha: 0.5,
-          deathVariant: e.deathVariant,
-        });
+        // Only infantry leave corpse sprites. Vehicle/vessel wreck visuals are
+        // explosion/decal effects, not retained TechnoClass logic objects.
+        if (e.stats.isInfantry) {
+          if (this.corpses.length >= Game.MAX_CORPSES) this.corpses.shift();
+          this.corpses.push({
+            x: e.pos.x, y: e.pos.y, type: e.type, facing: e.facing,
+            isInfantry: e.stats.isInfantry, isAnt: e.isAnt, alpha: 0.5,
+            deathVariant: e.deathVariant,
+          });
+        }
       }
     }
     this.entities = this.entities.filter(
-      e => e.alive || e.deathTick < 45 // 3 seconds at 15fps
+      e => !shouldRemoveDeadEntity(e)
     );
     if (this.entities.length < before) {
+      // Keep the Logic split aligned with C++ insertion order. Dead initial
+      // objects are removed from the pre-building partition; later spawned
+      // reinforcements remain after buildings instead of sliding before them.
+      this._preBuildingEntityCount = Math.max(0, this._preBuildingEntityCount - removedBeforeStructures);
       this.entityById.clear();
       for (const e of this.entities) this.entityById.set(e.id, e);
       // Prune dead IDs from control groups
@@ -2767,6 +2893,7 @@ export class Game {
               }
               const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
               inf.mission = Mission.GUARD;
+              inf.scenarioInitUnlimbo = true;
               // C++ building.cpp:3473 — IsTechnician: IsNominal infantry (E1) get technician star
               if (crewType === UnitType.I_E1) {
                 inf.isTechnician = true;
@@ -3553,10 +3680,15 @@ export class Game {
             // Close enough — load immediately
             target.passengers.push(unit);
             unit.transportRef = target;
+            unit.isTethered = false;
             unit.selected = false;
             this.selectedIds.delete(unit.id);
             // Remove from world (will be re-added on unload)
+            const removedIdx = this.entities.findIndex(e => e.id === unit.id);
             this.entities = this.entities.filter(e => e.id !== unit.id);
+            if (removedIdx >= 0 && removedIdx < this._preBuildingEntityCount) {
+              this._preBuildingEntityCount = Math.max(0, this._preBuildingEntityCount - 1);
+            }
             this.entityById.delete(unit.id);
             this.map.setOccupancy(unit.cell.cx, unit.cell.cy, 0);
             if (unit.stats.isInfantry) this.map.vacateSubCell(unit.cell.cx, unit.cell.cy, unit.id);
@@ -3607,6 +3739,7 @@ export class Game {
             p.alive = true;
             p.hp = p.hp > 0 ? p.hp : 1; // ensure alive units have HP
             p.transportRef = null;
+            p.isTethered = p.stats.isInfantry;
             p.pos = { x: px, y: py };
             p.mission = Mission.GUARD;
             p.animState = AnimState.IDLE;
@@ -3969,6 +4102,10 @@ export class Game {
   private findStructureAt(pos: WorldPos): MapStructure | null {
     const cx = Math.floor(pos.x / CELL_SIZE);
     const cy = Math.floor(pos.y / CELL_SIZE);
+    return this.findStructureAtCell(cx, cy);
+  }
+
+  private findStructureAtCell(cx: number, cy: number): MapStructure | null {
     for (const s of this.structures) {
       if (!s.alive) continue;
       const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
@@ -3979,14 +4116,38 @@ export class Game {
     return null;
   }
 
+  /** C++ UnitClass::Can_Enter_Cell special case (unit.cpp:3129-3142):
+   *  a vehicle may drive onto the building it is cooperatively entering.
+   *
+   *  TS marks building footprint as WALL terrain instead of putting a
+   *  BuildingClass object in Cell_Occupier(), so the generic map predicate
+   *  would reject refinery docking cells before this exception can apply.
+   *  Keep this scoped to the radio-driven harvester ENTER flow: allied PROC,
+   *  NavCom equal to BuildingClass RADIO_DOCKING's south-center dock cell
+   *  (building.cpp:305-306), and the tested cell inside that PROC footprint. */
+  private isAuthorizedBuildingEnterCell(entity: Entity, cx: number, cy: number): boolean {
+    if ((entity.mission as Mission) !== Mission.ENTER) return false;
+    if (entity.stats.isInfantry || entity.isAirUnit || entity.isNavalUnit) return false;
+    if (entity.type !== UnitType.V_HARV || !entity.moveTarget) return false;
+
+    const structure = this.findStructureAtCell(cx, cy);
+    if (!structure || structure.type !== 'PROC' || !this.isAllied(structure.house, entity.house)) {
+      return false;
+    }
+
+    const [, procH] = STRUCTURE_SIZE[structure.type] ?? [3, 2];
+    const dockCx = structure.cx + 1;
+    const dockCy = structure.cy + procH - 1;
+    const navCx = Math.floor(entity.moveTarget.lx / LEPTON_SIZE);
+    const navCy = Math.floor(entity.moveTarget.ly / LEPTON_SIZE);
+    return navCx === dockCx && navCy === dockCy && cx === navCx && cy === navCy;
+  }
+
   /** Clear a structure's footprint cells back to passable (including bib row) */
   private clearStructureFootprint(s: MapStructure): void {
-    const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-    for (let dy = 0; dy < fh; dy++) {
-      for (let dx = 0; dx < fw; dx++) {
-        this.map.setTerrain(s.cx + dx, s.cy + dy, Terrain.CLEAR);
-        this.map.clearWallType(s.cx + dx, s.cy + dy);
-      }
+    for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
+      this.map.setTerrain(cell.cx, cell.cy, Terrain.CLEAR);
+      this.map.clearWallType(cell.cx, cell.cy);
     }
     // C++ building.cpp:734-740: Clear bib cells when building is removed/destroyed
     for (const bc of getBibCells(s.type, s.cx, s.cy)) {
@@ -4012,9 +4173,11 @@ export class Game {
 
     // C++ bullet.cpp:96-175 — dog in limbo rides bullet; skip all processing
     if (entity.inLimbo) return;
-
-    // Submarine cloaking state machine (SS, MSUB)
-    if (entity.alive && entity.stats.isCloakable) {
+    // C++ TechnoClass::AI runs Cloaking_AI even for destroyed non-infantry
+    // objects that still remain in Logic/Cell_Occupier. SCG07EA has a dead SS
+    // in MISSION_DIE that still burns the low-health Percent_Chance(4) cloak
+    // roll before normal dead-object processing stops.
+    if (entity.stats.isCloakable) {
       this.updateSubCloak(entity);
     }
     // LST door auto-close timer
@@ -4022,25 +4185,11 @@ export class Game {
       entity.doorTimer--;
       if (entity.doorTimer <= 0) entity.doorOpen = false;
     }
+    if (entity.alive && entity.doorOpeningTicks > 0) {
+      entity.doorOpeningTicks--;
+    }
     // Sonar pulse timer decrement
     if (entity.sonarPulseTimer > 0) entity.sonarPulseTimer--;
-
-    // C++ infantry.cpp:3466-3496 Fear_AI — decay fear, update prone state
-    if (entity.stats.isInfantry && entity.fear > 0) {
-      entity.fear--;
-      // C++ infantry.cpp:3488-3496: prone only when afraid, on the ground, and
-      // with no legal NavCom while not actively driving. Moving HUNT/MOVE
-      // infantry keep running upright and therefore do not receive
-      // ProneDamageBias.
-      if (!entity.isProne && entity.fear >= Entity.FEAR_ANXIOUS && entity.type !== UnitType.I_DOG &&
-          entity.flightAltitude <= 0 && !entity.isDriving && !entity.moveTarget) {
-        entity.isProne = true;
-      }
-      // Stand up when fear drops below FEAR_ANXIOUS
-      if (entity.isProne && entity.fear < Entity.FEAR_ANXIOUS) {
-        entity.isProne = false;
-      }
-    }
 
     // C5: Track previous position for moving-platform inaccuracy detection
     // S5: Track wasMoving for NoMovingFire setup time
@@ -4053,6 +4202,13 @@ export class Game {
 
     if (!entity.alive) {
       entity.tickAnimation();
+      // C++ CDTimerClass<FrameTimerClass> timers are frame-derived, not
+      // MissionClass-AI-derived. Destroyed non-infantry Techno objects can
+      // remain in Logic for their MISSION_DIE lifetime, and their Arm timer
+      // continues to expire while TechnoClass::Cloaking_AI still runs. SCG07EA
+      // logic index 72 (dead SS) depends on Arm reaching 0 so
+      // Is_Ready_To_Cloak() burns the low-health Percent_Chance(4) roll.
+      this.decrementEntityCdTimersEndOfLogic(entity);
       return;
     }
     this.updateEntity(entity);
@@ -4067,17 +4223,118 @@ export class Game {
     if (entity.alive && entity.stats.isCloakable && !entity.stats.isVessel) {
       this.updateVehicleCloak(entity);
     }
-    // Minelayer: place mines when reaching move destination
-    if (entity.alive && entity.type === UnitType.V_MNLY && entity.moveTarget) {
-      this.updateMinelayer(entity);
-    }
-
     // S5: Update wasMoving — entity moved this tick if position changed from prevPos
     const movedThisTick = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
     entity.wasMoving = wasMovingBefore || movedThisTick;
   }
 
+  /** C++ ObjectClass::AI falling block (object.cpp:237-254).
+   *  Returns true while non-air TechnoClass::AI must return early because
+   *  Height > 0 (techno.cpp:2346). When the object lands this tick, the C++
+   *  code calls Per_Cell_Process(PCP_END) and then continues into normal
+   *  Techno/Mission AI, so this returns false after landing. */
+  private updateFallingEntity(entity: Entity): boolean {
+    if (!entity.isFalling) return false;
+
+    entity.fallHeightLeptons += entity.fallRiser;
+    if (entity.fallHeightLeptons <= 0) {
+      entity.fallHeightLeptons = 0;
+      entity.flightAltitude = 0;
+      entity.isFalling = false;
+      entity.fallRiser = 0;
+      entity.fallHasAttachedAnim = false;
+
+      if (entity.stats.isInfantry && FOOT_PER_CELL_ENABLED) {
+        const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+        const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
+        const pathShortenEligible =
+          entity.mission === Mission.RESCUE ||
+          entity.mission === Mission.AREA_GUARD ||
+          entity.mission === Mission.ATTACK ||
+          entity.mission === Mission.HUNT;
+        footPerCellProcess(
+          entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+          PCPType.PCP_END,
+          {
+            hasLegalTarCom: liveTar,
+            inRadioContact: false,
+            pathShortenEligible,
+            targetInRange: inRangeNow,
+          },
+          {
+            guardMission: Mission.GUARD,
+            areaGuardMission: Mission.AREA_GUARD,
+            attackMission: Mission.ATTACK,
+            huntMission: Mission.HUNT,
+            rescueMission: Mission.RESCUE,
+          }
+        );
+      }
+      return false;
+    }
+
+    entity.flightAltitude = leptonToPixel(entity.fallHeightLeptons);
+    if (entity.fallHasAttachedAnim) {
+      entity.fallRiser = Math.max(entity.fallRiser - 1, -3);
+    } else {
+      entity.fallRiser = Math.max(entity.fallRiser - RULE_GRAVITY, -100);
+    }
+    return true;
+  }
+
   /** Update a single entity's AI and movement */
+  /** C++ TechnoClass::AI target maintenance (techno.cpp:2378-2387).
+   *
+   * Non-air techno objects clear TarCom when they are not in a team, their
+   * target is outside their movement zone, and the selected weapon is not
+   * already in range. This prevents computer HUNT units from keeping an
+   * unreachable stale target forever; Mission_Hunt can then acquire a new
+   * Greatest_Threat on its next timer tick.
+   */
+  private technoTargetMaintenance(entity: Entity): void {
+    if (entity.isAirUnit) return;
+    if (!entity.target?.alive && !entity.targetStructure) return;
+
+    // C++ exempts FootClass members with a valid Team pointer. TS has both the
+    // C++-style teamRef port and older per-entity teamMissions; treat either as
+    // team ownership so team-assigned targets are not cleared by this generic
+    // TechnoClass maintenance pass.
+    if (entity.teamRef || entity.teamMissions.length > 0) return;
+
+    let targetCx: number;
+    let targetCy: number;
+    let targetInRange = false;
+    if (entity.target?.alive && !entity.target.inLimbo) {
+      targetCx = entity.target.cell.cx;
+      targetCy = entity.target.cell.cy;
+      targetInRange = entity.inRange(entity.target);
+    } else if (entity.targetStructure) {
+      const s = entity.targetStructure as { alive?: boolean; cx: number; cy: number; type?: string };
+      if (s.alive === false) return;
+      const [sw, sh] = s.type ? (STRUCTURE_SIZE[s.type] ?? [1, 1]) : [1, 1];
+      targetCx = s.cx + Math.floor(sw / 2);
+      targetCy = s.cy + Math.floor(sh / 2);
+      targetInRange = entity.inRangeCoord(
+        s.cx * LEPTON_SIZE + Math.floor(sw * LEPTON_SIZE / 2),
+        s.cy * LEPTON_SIZE + Math.floor(sh * LEPTON_SIZE / 2),
+      );
+    } else {
+      return;
+    }
+
+    const zone = movementZoneCells(this.map, entity.cell, entity.isNavalUnit);
+    const targetIdx = targetCy * MAP_CELLS + targetCx;
+    const targetInSameZone =
+      targetCx >= 0 && targetCx < MAP_CELLS &&
+      targetCy >= 0 && targetCy < MAP_CELLS &&
+      zone[targetIdx] !== 0;
+
+    if (!targetInSameZone && !targetInRange) {
+      entity.target = null;
+      entity.targetStructure = null;
+    }
+  }
+
   private updateEntity(entity: Entity): void {
     // C++ parity: obj->AI() runs once per tick. Reset per-tick PCP counters
     // and Commence dedup flags at the top of each updateEntity call so the
@@ -4088,6 +4345,14 @@ export class Game {
     entity.cellBoundaryCrossings = 0;
     entity._commenceFiredThisTick = false;
     entity._commenceFiredBoundaries.clear();
+
+    // C++ TechnoClass::AI (techno.cpp:2346) returns before MissionClass::AI
+    // while a non-air object is still falling from ObjectClass::Paradrop.
+    if (!entity.isAirUnit && this.updateFallingEntity(entity)) {
+      return;
+    }
+
+    this.technoTargetMaintenance(entity);
 
     // Team mission script execution (rate-limited to every 8 ticks)
     // Area Guard ants use their own patrol logic, not global hunt AI
@@ -4119,30 +4384,33 @@ export class Game {
     // C++ TechnoClass::AI: IdleTimer counts down every tick (all missions)
     if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
 
-    // C++ TechnoClass::AI: Arm (attack cooldown) ticks every tick for ALL missions.
-    // This is independent of mission timers — units can fire between guard scans.
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    // C++ CDTimerClass<FrameTimerClass>: Value() is read at Logic entry; Frame++
+    // at the end of the loop makes the timer tick down after this object's AI
+    // has used it. TS mirrors that by dispatching from the current value and
+    // decrementing mission/weapon cooldown timers at end-of-logic.
+    entity.attackCooldownAtLogicStart = entity.attackCooldown;
+    entity.attackCooldown2AtLogicStart = entity.attackCooldown2;
+
     // C++ TechnoClass::AI (techno.cpp:2392-2398) → StageClass::Graphic_Logic advances
     // animation stage each tick. InfantryClass::Firing_AI reads Fetch_Stage() AFTER
     // this increment when gating Fire_At. Stage advances BEFORE the per-tick Firing_AI
     // check so that tick N+FireLaunch observes stage == FireLaunch.
-    if (entity.firePrepActive) entity.firePrepStage++;
+    entity.advanceDoingStage(this.tick);
+    if (entity.firePrepActive && !entity.firePrepUsesDoingStage) entity.firePrepStage++;
     // C++ IsDriving persists between ticks — set by Start_Driver, cleared by Stop_Driver.
     // Do NOT clear it per-tick; let moveToward set it on first call and clear on arrival.
 
-    // C++ MissionClass::AI: Timer countdown + gated mission handler dispatch.
-    // Timer counts down each tick. When Timer reaches 0, the mission handler fires
-    // and returns the new Timer value (Normal_Delay + Random_Pick(0,2)).
-    // Between timer fires, per-tick systems (Firing_AI, movement) still run.
-    // C++ CDTimerClass: decrement then check. Timer=14 fires after 14 ticks.
-    if (entity.missionTimer > 0) {
-      entity.missionTimer--;
-    }
+    // C++ MissionClass::AI dispatch checks Timer.Value() at Logic entry.
+    // The decrement is implicit after Logic through Frame++ (ftimer.h:549-561),
+    // so do not pre-decrement here; decrement at end-of-logic instead.
     let missionTimerFired = entity.missionTimer <= 0;
 
-    // nonInterruptAnimTicks decrements every tick (gesture/salute animation countdown)
-    if (entity.nonInterruptAnimTicks > 0) entity.nonInterruptAnimTicks--;
+    // nonInterruptAnimTicks mirrors C++ StageClass gesture/salute timing.
+    // StageClass::Set_Rate() starts the CDTimer at the current Frame; the
+    // animation cannot consume a tick in the same frame Do_Action was called.
+    if (entity.nonInterruptAnimTicks > 0 && entity.nonInterruptAnimSetTick !== this.tick) {
+      entity.nonInterruptAnimTicks--;
+    }
 
     // C++ UnitClass::AI (unit.cpp:404) / VesselClass::AI (vessel.cpp:592) — pre-Commence
     // gate that runs BEFORE MissionClass::AI dispatch. Vehicles/vessels call Commence()
@@ -4153,17 +4421,14 @@ export class Game {
     // fires on the following tick — whereas C++ pops and dispatches Mission_Move on the
     // SAME tick (SCG04EA tick 3: WASM fires tag 60010 at tick 3, TS at tick 4).
     // ── Phase 1 Checkpoint 1.D: STAGE A-F flow gated behind flag ─────────────
+    const infantryDrivingAtLogicStart = entity.stats.isInfantry && entity.isDriving;
     if (DISPATCH_ORDER_REFACTOR) {
       // STAGE A: Pre-MissionClass::AI Commence (vehicles, unit.cpp:406).
       // Identical to the legacy pre-Commence gate — pop MissionQueue when
       // idle so the new mission's handler fires under STAGE B this tick.
       if (!entity.stats.isInfantry && !entity.isAirUnit &&
           entity.missionQueue !== null && !entity.isDriving &&
-          !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
-        if ((globalThis as any).__traceStageA) {
-          const t = (globalThis as any).__currentGameTick;
-          console.log(`[STAGE_A_POP] t=${t} eid=${entity.id} cell=(${entity.cell.cx},${entity.cell.cy}) mq->${entity.missionQueue} path.len=${entity.path.length} moveTgt=${entity.moveTarget ? `(${entity.moveTarget.lx},${entity.moveTarget.ly})` : 'null'}`);
-        }
+          !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
         entity.mission = entity.missionQueue;
         entity.missionQueue = null;
         entity.missionTimer = 0;
@@ -4179,9 +4444,60 @@ export class Game {
       // will restore. Current stubs are empty, so Firing_AI + Movement_AI
       // are skipped between timer fires when the flag is ON.
       let missionHandlerRan = false;
+      const missionBeforeStageB = entity.mission as Mission;
+      let harvesterMissionClassRan = false;
       if (entity.missionTimer === 0) {
         this.dispatchMission(entity, true);
         missionHandlerRan = true;
+        harvesterMissionClassRan =
+          (missionBeforeStageB === Mission.HARVEST || missionBeforeStageB === Mission.ENTER) &&
+          entity.type === UnitType.V_HARV;
+      }
+
+      // C++ InfantryClass::AI order is:
+      //   FootClass::AI() -> MissionClass::AI()
+      //   Commence()
+      //   Firing_AI()
+      //   Doing_AI()
+      //   Movement_AI()
+      //
+      // The previous TS STAGE E placement popped infantry queues after
+      // Movement_AI. That delayed Start_Driver by one tick: a queued MOVE became
+      // Mission.MOVE at end-of-tick, but Movement_AI did not see it until the
+      // next object AI tick. In C++, Commence runs before Movement_AI, so an
+      // infantry queue popped this tick can start its driver this tick (while
+      // Mission_Move's timer handler still waits for the next tick).
+      if (entity.stats.isInfantry &&
+          !entity.firePrepActive &&
+          !entity.isFiringAnim &&
+          !entity.isDriving &&
+          entity.isDoingInterruptible()) {
+        // C++ infantry.cpp:1208-1210: freshly constructed MissionClass
+        // objects start at MISSION_NONE. If they have no queue, Enter_Idle_Mode
+        // supplies the normal class idle mission before Commence().
+        if (entity.mission === Mission.NONE && entity.missionQueue === null) {
+          entity.missionQueue = this.idleMission(entity);
+        }
+        if (entity.missionQueue !== null) {
+          const popFromA2 =
+            entity.missionQueue === Mission.MOVE &&
+            entity.mission === Mission.ATTACK &&
+            entity.savedMoveTarget !== null;
+          entity.mission = entity.missionQueue;
+          entity.missionQueue = null;
+          if (popFromA2) {
+            entity.savedMoveTarget = null;
+          } else {
+            entity.missionTimer = 0;
+          }
+        }
+      }
+
+      // C++ infantry.cpp:1223 calls Fear_AI() after the Commence gate and
+      // before Firing_AI. Running this earlier lets DO_LIE_DOWN block a
+      // MissionQueue pop that C++ has already accepted.
+      if (entity.stats.isInfantry) {
+        this.runInfantryFearAI(entity, infantryDrivingAtLogicStart);
       }
 
       // STAGE C: Firing_AI — per-tick fire-through when target in range and
@@ -4191,31 +4507,123 @@ export class Game {
       // firePrep so repeat calls within the same tick are no-ops.
       //
       // Skipped when:
-      //   (1) STAGE B already dispatched a handler that runs its own Firing_AI
-      //       swap (updateGuard lines 1208-1220, updateAreaGuard lines 1505-1521).
-      //       Those handlers return after the swap — avoid double-fire.
-      //   (2) Mission.MOVE infantry — STAGE D's MOVE branch has a dedicated
-      //       firing-gate that temporarily clears isDriving across the
-      //       updateAttack call to bypass FIRE_MOVING (infantry.cpp:1639).
-      //       runFiringAI can't replicate that without mission-specific wiring.
+      //   (1) STAGE B already dispatched a handler that still runs its own
+      //       Firing_AI swap (HUNT / ATTACK legacy paths). Guard and Area Guard
+      //       are exceptions: C++ FootClass::Mission_Guard returns its
+      //       Normal_Delay+Random_Pick jitter before InfantryClass::Firing_AI
+      //       runs, so their firing must happen here after dispatch.
+      //   (2) Mission.MOVE infantry — STAGE D's MOVE branch runs the
+      //       Firing_AI-before-Movement_AI path so movement can be skipped
+      //       when a fire animation starts.
       const skipFiringAIForMoveInfantry =
         entity.stats.isInfantry && (entity.mission as Mission) === Mission.MOVE;
-      if (!missionHandlerRan && !skipFiringAIForMoveInfantry) {
+      const runInfantryFiringAfterGuardDispatch =
+        missionHandlerRan &&
+        entity.stats.isInfantry &&
+        (
+          missionBeforeStageB === Mission.ATTACK ||
+          missionBeforeStageB === Mission.GUARD ||
+          missionBeforeStageB === Mission.STICKY ||
+          missionBeforeStageB === Mission.AREA_GUARD
+        );
+      // C++ class order differs by locomotor:
+      //   InfantryClass::AI: Firing_AI before Movement_AI (infantry.cpp:1237-1247)
+      //   Unit/Vessel::AI: DriveClass::AI before Firing/Combat_AI
+      //     (unit.cpp:408/425, vessel.cpp:620/633)
+      //
+      // Earlier TS ran this pre-movement Firing_AI for every entity class, so
+      // SCG07EA's HUNTing submarine fired before its DriveClass::AI step and
+      // consumed the first tick-72 RNG call that C++ gives to Area Guard
+      // Random_Animate. Keep pre-movement firing to infantry only; non-infantry
+      // combat runs after STAGE D below.
+      if (entity.stats.isInfantry &&
+          (!missionHandlerRan || runInfantryFiringAfterGuardDispatch) &&
+          !skipFiringAIForMoveInfantry) {
         this._runMissionAI(ctx => _runFiringAI(ctx, entity));
       }
 
       // STAGE D: Movement_AI — per-tick movement advance for MOVE / HUNT /
       // AREA_GUARD (infantry), MOVE / GUARD drive-in (vehicles/vessels).
-      // Skipped when STAGE B already ran the handler: on the handler tick
-      // the inline movement blocks in dispatchMission still execute (they're
-      // unchanged), so STAGE D would double-move. Between timer fires STAGE
-      // B is idle and STAGE D is the only mover.
-      if (!missionHandlerRan && !entity.isAirUnit) {
+      // Skipped when STAGE B already ran a handler whose inline movement block
+      // has already covered Movement_AI. Exception: infantry Mission_Move may
+      // have Commenced into GUARD after FootClass::Mission_Move returned; C++
+      // still runs InfantryClass::Movement_AI after that Commence and clears
+      // stale NavCom for MISSION_GUARD. Conversely, a handler may Commence into
+      // a NavCom-bearing movement mission before Movement_AI (infantry.cpp:1208-
+      // 1247), so the new mission must be allowed to start/continue its driver
+      // in this same object AI. Vehicle crew spawn hits this as GUARD -> HUNT.
+      const runPostHandlerInfantryGuardMovement =
+        missionHandlerRan &&
+        entity.stats.isInfantry &&
+        (entity.mission as Mission) === Mission.GUARD &&
+        entity.moveTarget !== null;
+      const runPostHandlerInfantryNavComAfterCommence =
+        missionHandlerRan &&
+        entity.stats.isInfantry &&
+        missionBeforeStageB !== (entity.mission as Mission) &&
+        entity.moveTarget !== null &&
+        (
+          (entity.mission as Mission) === Mission.MOVE ||
+          (entity.mission as Mission) === Mission.HUNT ||
+          (entity.mission as Mission) === Mission.RESCUE ||
+          (entity.mission as Mission) === Mission.ATTACK ||
+          (entity.mission as Mission) === Mission.AREA_GUARD
+        ) &&
+        // C++ has only one InfantryClass::Movement_AI pass. When an already
+        // driving MISSION_MOVE infantry completes a Head_To_Coord hop,
+        // Per_Cell_Process may Commence a queued ATTACK/GUARD during that pass,
+        // but infantry.cpp:4008 Stop_Driver() then exits the same pass. Do not
+        // re-enter Movement_AI in TS after dispatchMission(MOVE) already advanced
+        // the active driver this tick.
+        !(missionBeforeStageB === Mission.MOVE && infantryDrivingAtLogicStart);
+      const runPostHandlerInfantryAttackNavCom =
+        missionHandlerRan &&
+        entity.stats.isInfantry &&
+        missionBeforeStageB === Mission.ATTACK &&
+        (entity.mission as Mission) === Mission.ATTACK &&
+        entity.moveTarget !== null;
+      const runPostHandlerHarvesterMovement =
+        missionHandlerRan &&
+        !entity.stats.isInfantry &&
+        (entity.mission as Mission) === Mission.HARVEST &&
+        entity.type === UnitType.V_HARV &&
+        (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving);
+      const runPostHandlerDriveClassMove =
+        missionHandlerRan &&
+        !entity.stats.isInfantry &&
+        !entity.isAirUnit &&
+        (entity.mission as Mission) === Mission.MOVE;
+      const driveClassEnterNeedsRotation =
+        !entity.stats.isInfantry &&
+        !entity.isAirUnit &&
+        (entity.mission as Mission) === Mission.ENTER &&
+        (entity.bodyFacing256 >= 0 ? (entity.bodyFacing256 & 0xff) : ((entity.facing * 32) & 0xff)) !==
+          (entity.desiredFacing256 >= 0 ? (entity.desiredFacing256 & 0xff) : (((entity.desiredFacing ?? entity.facing) * 32) & 0xff));
+      const runPostHandlerDriveClassEnter =
+        missionHandlerRan &&
+        !entity.stats.isInfantry &&
+        !entity.isAirUnit &&
+        (entity.mission as Mission) === Mission.ENTER &&
+        (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving || driveClassEnterNeedsRotation);
+      const runPostHandlerDriveClassHunt =
+        missionHandlerRan &&
+        !entity.stats.isInfantry &&
+        !entity.isAirUnit &&
+        ((entity.mission as Mission) === Mission.HUNT || (entity.mission as Mission) === Mission.RESCUE);
+      if ((!missionHandlerRan || runPostHandlerInfantryGuardMovement || runPostHandlerInfantryNavComAfterCommence || runPostHandlerInfantryAttackNavCom || runPostHandlerHarvesterMovement || runPostHandlerDriveClassMove || runPostHandlerDriveClassEnter || runPostHandlerDriveClassHunt) && !entity.isAirUnit) {
         if (entity.stats.isInfantry) {
           this.runInfantryMovementAI(entity);
         } else {
           this.runDriveClassAI(entity);
         }
+      }
+
+      // C++ UnitClass::AI/VesselClass::AI combat pass runs after DriveClass::AI.
+      // This also runs when MissionClass::AI dispatched this tick; if the mission
+      // handler already fired, attackCooldown/firePrep gates make this idempotent,
+      // while target acquisition from Mission_Guard can still fire same-tick.
+      if (!entity.stats.isInfantry && !entity.isAirUnit && entity.alive) {
+        this._runMissionAI(ctx => _runFiringAI(ctx, entity));
       }
 
       // C++ Doing_AI + firing-anim countdown — unchanged from legacy flow.
@@ -4226,23 +4634,12 @@ export class Game {
       }
 
       // STAGE E: Post-Movement_AI Commence (vehicles unit.cpp:472,
-      // vessels :658; infantry infantry.cpp:1208-1211).
-      //
-      // Phase 7B: for infantry, gate on isDoingInterruptible() (mirrors C++
-      // infantry.cpp:1208 `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt`)
-      // INSTEAD of niat<=0. doing='gesture' is set by Random_Animate (cases 1-4)
-      // and team activation; doingAI transitions to stand_ready when niat=0.
-      // Vehicles still use niat (different Doing model).
-      //
-      // C++ infantry.cpp:1208 ALSO requires !IsDriving — Commence is blocked
-      // while the infantry is mid-walk. SCG13EA t113 PATROL members with mq=GUARD
-      // (set by patrol scan) stay in MOVE with drv=true until they finalize,
-      // matching WASM 3-of-4 staying-in-MOVE pattern at tick 113.
-      const blockCommenceDrive = !entity.isAirUnit && entity.isDriving;
-      const commenceAllowed = entity.stats.isInfantry
-        ? entity.isDoingInterruptible()
-        : entity.nonInterruptAnimTicks <= 0;
-      if (entity.missionQueue !== null && !entity.isFiringAnim && commenceAllowed && !blockCommenceDrive) {
+      // vessels :658). Infantry's main AI Commence runs above, before Firing_AI
+      // and Movement_AI (infantry.cpp:1208-1247); infantry cell-arrival
+      // Commence remains inside footPerCellProcess.
+      if (!entity.stats.isInfantry && entity.missionQueue !== null &&
+          !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 &&
+          !(entity.isDriving && !entity.isAirUnit)) {
         const popFromA2 =
           entity.missionQueue === Mission.MOVE &&
           entity.mission === Mission.ATTACK &&
@@ -4256,34 +4653,21 @@ export class Game {
         }
       }
 
-      // STAGE F: re-dispatch if STAGE E's Commence just popped and Timer==0.
-      // Generalizes commit 79b13cb3's drive-in-GUARD same-tick post-Commence
-      // dispatch to ALL vehicle/vessel missions. Previously inlined in
-      // Mission.GUARD case of dispatchMission; here it fires uniformly.
-      //
-      // Infantry are EXCLUDED — C++ FootClass::AI (foot.cpp) does NOT have
-      // the DriveClass::AI re-dispatch cycle (drive.cpp:1340-1345). Infantry
-      // Commence at infantry.cpp:1208-1211 lets MissionClass::AI pick up the
-      // new mission on the NEXT tick only. Aircraft use AircraftClass::AI
-      // (separate state machine, orthogonal).
-      //
-      // When `missionHandlerRan` is true, STAGE B already consumed the
-      // mission-timer jitter RNG — so we only re-enter if the handler has
-      // NOT already run this tick. Matches C++ techno.cpp:2344 re-dispatch.
-      if (!missionHandlerRan && entity.missionTimer === 0 &&
-          !entity._commenceFiredThisTick &&
-          !entity.stats.isInfantry && !entity.isAirUnit) {
-        this.dispatchMission(entity, true);
-      }
+      // C++ post-movement Commence does NOT re-enter MissionClass::AI in the
+      // same tick. UnitClass::AI and VesselClass::AI call Commence() after
+      // DriveClass::AI (unit.cpp:472, vessel.cpp:659), then continue with
+      // non-mission systems only. MissionClass::AI will dispatch the newly
+      // popped mission on the next object AI tick.
 
-      this._updateEntityPostDispatch(entity);
+      this._updateEntityPostDispatch(entity, harvesterMissionClassRan ? false : missionTimerFired);
+      this.decrementEntityCdTimersEndOfLogic(entity);
       return;
     }
 
     // ── Legacy flow (DISPATCH_ORDER_REFACTOR=false) ────────────────────────
     if (!entity.stats.isInfantry && !entity.isAirUnit &&
         entity.missionQueue !== null && !entity.isDriving &&
-        !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
+        !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
       entity.missionTimer = 0;
@@ -4316,7 +4700,7 @@ export class Game {
     // coordinateMove for parity — otherwise Mission_Move would fire 1 tick earlier
     // than WASM for reinforcement MCVs (SCG11EA drift).
     const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
-    if (entity.missionQueue !== null && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
+    if (entity.missionQueue !== null && !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
       // A2 restore: if popping back to MOVE from a TS-only ATTACK the A2 scan created
       // (signaled by savedMoveTarget != null), keep the current missionTimer instead of
       // resetting to 0. Without this, the unit's Mission_Move fires on the next tick and
@@ -4337,8 +4721,101 @@ export class Game {
       }
     }
 
-    this._updateEntityPostDispatch(entity);
+    if (entity.stats.isInfantry) {
+      this.runInfantryFearAI(entity, infantryDrivingAtLogicStart);
+    }
+
+    this._updateEntityPostDispatch(entity, missionTimerFired);
+    this.decrementEntityCdTimersEndOfLogic(entity);
     return;
+  }
+
+  /** C++ CDTimerClass<FrameTimerClass> timers tick when Frame advances after
+   *  object AI, not before mission/firing logic. Keep this scoped to core
+   *  MissionClass/TechnoClass timers; other bespoke counters retain their
+   *  existing timing until ported with direct C++ evidence. */
+  private decrementEntityCdTimersEndOfLogic(entity: Entity): void {
+    if (entity.missionTimer > 0) entity.missionTimer--;
+    if (entity.attackCooldown > 0) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+  }
+
+  /** C++ infantry.cpp:3489-3532 InfantryClass::Fear_AI.
+   *  Called from InfantryClass::AI after Commence() and before Firing_AI(). */
+  private runInfantryFearAI(entity: Entity, drivingAtLogicStart = false): void {
+    if (!entity.stats.isInfantry || entity.fear <= 0) return;
+
+    entity.fear--;
+
+    // C++ infantry.cpp:3502 — armed fraidy-cat civilians reload a fresh clip
+    // when fear fully decays. This is inside the `Fear > 0` block after the
+    // decrement, so it triggers on the tick fear reaches zero.
+    if (entity.fear === 0 && entity.ammo === 0 && entity.weapon) {
+      entity.ammo = entity.maxAmmo;
+    }
+
+    if (entity.isProne) {
+      if (entity.fear < Entity.FEAR_ANXIOUS) {
+        entity.isProne = false;
+        entity.startGetUpDoing(this.tick);
+      }
+    } else if (
+      entity.type !== UnitType.I_DOG &&
+      entity.flightAltitude <= 0 &&
+      entity.fear >= Entity.FEAR_ANXIOUS &&
+      !entity.moveTarget &&
+      !entity.isDriving &&
+      !drivingAtLogicStart &&
+      entity.navComClearedTick !== this.tick
+    ) {
+      entity.isProne = true;
+      entity.startLieDownDoing(this.tick);
+    }
+
+    // C++ infantry.cpp:3529 — fraidy-cat infantry scatter even without a
+    // concrete threat. This is not scenario-specific civilian flee logic;
+    // it is InfantryClass::Fear_AI calling Scatter(0, true).
+    if (entity.stats.isFraidyCat &&
+        entity.fear > Entity.FEAR_ANXIOUS &&
+        !entity.isFalling &&
+        !entity.isDriving &&
+        !entity.moveTarget) {
+      this.infantryScatterNoThreat(entity);
+    }
+  }
+
+  /** C++ InfantryClass::Scatter(0, true) — forced no-threat infantry scatter.
+   *  Used by Fear_AI for fraidy-cat civilians. Forced scatter bypasses mission,
+   *  target, and human-house voluntary-scatter gates, but still refuses to
+   *  interrupt non-interruptible Doing animations. */
+  private infantryScatterNoThreat(entity: Entity): void {
+    if (!entity.isDoingInterruptible()) return;
+
+    const fracX = entity.leptonX & 0xff;
+    const fracY = entity.leptonY & 0xff;
+    let toface = (fracX !== 0x80 || fracY !== 0x80)
+      ? directionToLeptons(0x80, 0x80, fracX, fracY)
+      : entity.facing;
+
+    const savedSourceTag = ScenarioRandom._sourceTag;
+    ScenarioRandom._sourceTag = 53003;
+    toface = (toface + ScenarioRandom.nextInRange(0, 4) - 2 + DIR_DX.length) % DIR_DX.length;
+    ScenarioRandom._sourceTag = savedSourceTag;
+
+    const cx = entity.cell.cx;
+    const cy = entity.cell.cy;
+    for (let face = 0; face < DIR_DX.length; face++) {
+      const dir = (toface + face) % DIR_DX.length;
+      const ncx = cx + DIR_DX[dir];
+      const ncy = cy + DIR_DY[dir];
+      if (ncx < 0 || ncx >= MAP_CELLS || ncy < 0 || ncy >= MAP_CELLS) continue;
+      if (this.infantryCanEnterCell(entity, ncx, ncy, dir) !== MoveResult.OK) continue;
+
+      assignMission(entity, Mission.MOVE);
+      entity.moveTarget = cellTargetToLepton(ncx, ncy);
+      resetPathThreshold(entity);
+      return;
+    }
   }
 
   /**
@@ -4357,46 +4834,79 @@ export class Game {
    */
   private dispatchMission(entity: Entity, missionTimerFired: boolean): void {
     switch (entity.mission) {
+      case Mission.NONE:
+        // C++ MissionClass constructor state. The base MissionClass handler is
+        // a no-op; InfantryClass::AI may Commence a queued order later in the
+        // same object AI pass before Firing_AI/Movement_AI.
+        break;
       case Mission.MOVE: {
+        // C++ FootClass::Mission_Move evaluates its top-of-handler idle guard
+        // before class-specific Movement_AI can clear NavCom later in the same
+        // object tick. Preserve the entry state for the timer-return block below;
+        // using post-updateMove state makes drive-class units enter GUARD one
+        // Mission_Move cycle early.
+        const missionMoveEntryHadNavCom = entity.moveTarget !== null;
+        const missionMoveEntryWasDriving = entity.isDriving;
+        const missionMoveEntryQueue = entity.missionQueue;
+
+        // C++ FootClass::Mission_Move (foot.cpp:530-532):
+        // when the timer fires and TarCom is empty, non-human/non-player,
+        // non-suicide-team units scan with Target_Something_Nearby(THREAT_RANGE).
+        // The scan only assigns TarCom; Firing_AI below decides whether the
+        // unit can actually start firing.
+        if (missionTimerFired &&
+            !entity.target?.alive &&
+            !this.isPlayerControlled(entity) &&
+            !entity.teamRef?.isSuicide) {
+          this._runMissionAI(ctx => _targetSomethingNearbyRange(ctx, entity));
+        }
+
         // C++ InfantryClass::AI runs Firing_AI() BEFORE Movement_AI
         // (infantry.cpp:1237 → 1247). Movement_AI skips when IsFiring
         // (infantry.cpp:3790), so starting a fire animation interrupts
         // movement same-tick.
         //
         // TS parity: for infantry with a target in range, run updateAttack
-        // BEFORE updateMove. If firePrepActive gets set, skip this tick's
-        // movement advance. Mirrors C++ IsFiring-gated Movement_AI skip.
+        // BEFORE updateMove. updateMove still runs so its top Enter_Idle_Mode
+        // guard can fire; its IsFiring gate then skips movement advance.
         //
         // SCG06EA tick 66: BadGuy E1 TarCom=Greek (set at tick 65 via team
         // retaliation — combat.ts triggerRetaliation teamRef branch). Tick 66
         // updateAttack starts firing animation (firePrepActive=true, stage=0);
         // movement is suppressed. FireLaunch=2 reached at tick 68 → Fire_At →
         // bullet[116] Coord_Scatter (tag 50002), matching WASM exactly.
-        let firingStarted = false;
         if (entity.stats.isInfantry && entity.target?.alive && entity.weapon
             && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
-          // FIRE_MOVING gate (infantry.cpp:1639) blocks fire while IsDriving.
-          // In C++ Firing_AI runs BEFORE Movement_AI, so IsDriving in Can_Fire
-          // reflects the prior tick's driver state. Temporarily clear
-          // isDriving so the pre-fire animation can start on the tick the
-          // unit first acquires a target.
-          const savedDriving = entity.isDriving;
-          entity.isDriving = false;
+          // C++ InfantryClass::Can_Fire returns FIRE_MOVING when IsDriving
+          // (infantry.cpp:1639). Do not clear IsDriving here; moving infantry
+          // keep TarCom but wait until the driver stops before starting the
+          // DO_FIRE_WEAPON animation.
           const savedMission = entity.mission;
           entity.mission = Mission.ATTACK;
           this.updateAttack(entity);
           if ((entity.mission as Mission) === Mission.ATTACK) {
             entity.mission = savedMission;
           }
-          if (entity.firePrepActive) {
-            // Pre-fire animation in progress — keep isDriving=false (the
-            // unit has effectively halted for firing) and skip updateMove.
-            firingStarted = true;
-          } else {
-            entity.isDriving = savedDriving;
-          }
         }
-        if (!firingStarted) this.updateMove(entity);
+        // C++ order for infantry is Mission_Move() -> Commence() -> Firing_AI()
+        // -> Movement_AI(). Movement_AI still runs after Firing_AI, even when
+        // firing just started; its top NavCom guard can Enter_Idle_Mode before
+        // the later IsFiring gate blocks actual movement (infantry.cpp:3786).
+        // If a queued mission exists while the unit is not already driving,
+        // starting a new driver here can set IsDriving before the Commence gate
+        // and incorrectly block that queue pop. If IsDriving is already true,
+        // C++ still advances the active Head_To_Coord hop while the queue waits.
+        const deferInfantryMoveUntilAfterCommence =
+          entity.stats.isInfantry && entity.missionQueue !== null && !entity.isDriving;
+        // C++ FootClass::Mission_Move only returns a timer delay / idle state.
+        // Actual movement runs later in class-specific AI: InfantryClass::
+        // Movement_AI or Unit/Vessel DriveClass::AI. Keep this inline movement
+        // for infantry only; vehicles are handled by STAGE D below.
+        if (entity.stats.isInfantry && !deferInfantryMoveUntilAfterCommence) this.updateMove(entity);
+        const moveCommencedDuringMovement =
+          entity.stats.isInfantry &&
+          (entity.mission as Mission) !== Mission.MOVE &&
+          entity.missionTimer === 0;
         // C++ foot.cpp:492-505: Mission_Move timer return
         if (missionTimerFired) {
           // Mission_Move internal path-failure short-circuit — residual port
@@ -4467,36 +4977,94 @@ export class Game {
             // No RNG consumed — Mission_Move returns 1 when Enter_Idle_Mode
             // path taken (foot.cpp:526). Commence popup handles the mission
             // transition at the post-dispatch block.
-          } else if (!entity.moveTarget && !entity.isDriving && entity.missionQueue === null) {
-            entity.mission = this.idleMission(entity);
+          } else if (!moveCommencedDuringMovement &&
+                     !missionMoveEntryHadNavCom &&
+                     !missionMoveEntryWasDriving &&
+                     missionMoveEntryQueue === null) {
+            entity.mission = this.enterIdleMode(entity);
             entity.missionTimer = 0; // fires immediately in GUARD handler
           } else {
             // C++ foot.cpp:504: Normal path — Normal_Delay + Random_Pick(0,2)
-            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+            const delay = 14 + ScenarioRandom.nextInRange(0, 2);
+            // C++ Mission_Move returns this delay before InfantryClass::AI's
+            // later Commence() can pop MissionQueue and reset Timer=0. TS may
+            // perform the per-cell Commence inside updateMove, so preserve
+            // that reset while still consuming Mission_Move's RNG.
+            if (!moveCommencedDuringMovement) {
+              entity.missionTimer = delay;
+            }
           }
         }
         break;
       }
       case Mission.ATTACK:
-        this.updateAttack(entity);
+        if (DISPATCH_ORDER_REFACTOR && entity.stats.isInfantry) {
+          // C++ InfantryClass::AI order is MissionClass::AI -> Commence ->
+          // Firing_AI -> Movement_AI (infantry.cpp:1208-1247). The
+          // Mission_Attack handler itself is FootClass::Mission_Attack
+          // (foot.cpp:604-619): it only Approach_Target()s or Enter_Idle_Mode()
+          // and returns Normal_Delay + Random_Pick(0,2). It does not fire.
+          //
+          // Running updateAttack() here starts DO_FIRE_WEAPON before Commence,
+          // which blocks a queued MOVE from being popped. SCG06EA logic[67]
+          // then stays ATTACK+mq=MOVE instead of the C++ MOVE+mq=ATTACK chain.
+          if (missionTimerFired) {
+            if (entity.target?.alive || entity.targetStructure?.alive || entity.forceFirePos) {
+              if (this.shouldMissionAttackApproach(entity)) {
+                this.approachTarget(entity);
+              }
+            } else {
+              assignMission(entity, this.infantryEnterIdleMission(entity));
+            }
+          }
+        } else {
+          if (missionTimerFired && this.shouldMissionAttackApproach(entity)) {
+            this.approachTarget(entity);
+          }
+          this.updateAttack(entity);
+        }
+        // C++ infantry.cpp:1237-1247 runs Firing_AI() and then Movement_AI()
+        // for every infantry mission, including MISSION_ATTACK. updateAttack()
+        // maps to Firing_AI. If Can_Fire returns FIRE_MOVING while IsDriving,
+        // no fire animation starts, and Movement_AI must continue the active
+        // Head_To_Coord hop. Without this, attacking infantry can remain frozen
+        // mid-hop in TS while C++ finishes the sub-cell move, goes prone, and
+        // fires on schedule (SCG06EA tick-100 bullet[121]).
+        if (!DISPATCH_ORDER_REFACTOR && entity.stats.isInfantry && !entity.firePrepActive) {
+          this._infantryWalkStep(entity);
+        }
         // C++ foot.cpp:570: Mission_Attack returns Normal_Delay+Random_Pick(0,2)
         if (missionTimerFired) {
-          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+          const delay = 14 + ScenarioRandom.nextInRange(0, 2);
+          // Commence() runs after Mission_Attack and resets Timer=0 if it pops
+          // a queued mission. Do not pop here; InfantryClass::AI's normal
+          // !IsDriving/!IsFiring/Doing gate owns that transition.
+          entity.missionTimer = delay;
         }
         break;
       case Mission.HUNT:
-        // C++ TechnoClass::AI Firing_AI — runs every tick for ALL missions.
-        // If entity has a target in range and weapon ready, fire weapon.
-        if (entity.target?.alive && entity.weapon && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
-          this.updateAttack(entity);
-          if ((entity.mission as Mission) === Mission.ATTACK) entity.mission = Mission.HUNT;
-        } else if (missionTimerFired) {
+        // C++ DriveClass::AI / MissionClass::AI runs Mission_Hunt when the
+        // mission timer fires, even if TarCom is already in range. The
+        // class-specific Combat_AI/Firing_AI runs after that, while Mission
+        // remains HUNT for ordinary armed units (foot.cpp:717-772).
+        if (missionTimerFired) {
           this.updateHunt(entity);
-          // C++ foot.cpp:698: Mission_Hunt calls Approach_Target on every timer fire
+          // C++ foot.cpp:761: Mission_Hunt calls Approach_Target after
+          // Target_Something_Nearby finds a normal target.
           if (entity.target?.alive && !entity.inRange(entity.target) && !entity.moveTarget) {
             this.approachTarget(entity);
           }
+          // C++ foot.cpp:768-771: Normal_Delay + Random_Pick(0,2)
+          // before class Combat_AI/Firing_AI can fire this tick.
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+        }
+
+        // C++ InfantryClass::AI runs Firing_AI before Movement_AI. Unit/Vessel
+        // combat runs after DriveClass::AI in STAGE C below, so keep this
+        // pre-movement fire path infantry-only.
+        if (entity.stats.isInfantry && entity.target?.alive && entity.weapon && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
+          this.updateAttack(entity);
+          if ((entity.mission as Mission) === Mission.ATTACK) entity.mission = Mission.HUNT;
         } else if (entity.target?.alive && !entity.inRange(entity.target)) {
           // C++ foot.cpp:856-946 Approach_Target: assign NavCom to a cell within
           // weapon range of target. Only assigns when NavCom is empty (!Target_Legal).
@@ -4504,77 +5072,14 @@ export class Game {
             this.approachTarget(entity);
           }
         }
-        // C++ Movement_AI (infantry.cpp:3765): !IsDriving → Basic_Path + Start_Driver (no move),
-        // IsDriving → Coord_Move (actual movement). isDriving persists between ticks.
-        // On the tick that approachTarget assigns moveTarget, isDriving is false;
-        // moveToward sets isDriving=true on first call. Skip first-tick movement to match C++
-        // 1-tick delay between Start_Driver and first Coord_Move.
-        if (!entity.isDriving && entity.moveTarget && entity.target?.alive && !entity.inRange(entity.target)) {
-          // C++ !IsDriving branch: Start_Driver sets IsDriving=true but no movement this tick.
-          // C++ InfantryClass::Start_Driver calls Closest_Free_Spot to find a sub-cell
-          // in the destination cell, storing it as HeadToCoord. Compute and store on entity.
-          if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // C++ Movement_AI:3810 — validate next cell passable, re-path if blocked
-            this.infantryValidatePath(entity);
-          }
-          if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // C++ InfantryClass::Start_Driver — find sub-cell, atomic occupy swap
-            const destCell = entity.path[entity.pathIndex];
-            this.infantryStartDriver(entity, destCell.cx, destCell.cy);
-          }
-          entity.isDriving = true;
-        } else if (entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget && entity.isDriving) {
-          if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-            // Walk toward the pre-computed sub-cell position (C++ HeadToCoord)
-            const wp = entity.headToLX > 0
-              ? { lx: entity.headToLX, ly: entity.headToLY }
-              : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
-            if (entity.moveToward(wp, this.movementSpeed(entity))) {
-              // C++ Stop_Driver at waypoint arrival — advance to next path entry.
-              // C++ uses memmove to shift Path[] left by 1. TS uses pathIndex++.
-              // C++ does NOT regenerate the path — it consumes the original entries.
-              entity.pathIndex++;
-              entity.isDriving = false;
-              entity.headToLX = 0;
-              entity.headToLY = 0;
-              // PCP Session 2.2: infantry cell-arrival Per_Cell_Process(PCP_END).
-              // Mirrors C++ infantry.cpp:3997. Only fires when FOOT_PER_CELL_ENABLED
-              // is true (Session 2.3). In HUNT, target is still live when entering
-              // the final cell-in-range — Enter_Idle_Mode's TarCom-clear guard
-              // blocks the idle branch. Session 3.1: path-shorten sub-case fires
-              // here when target is in range + mission is HUNT/AREA_GUARD/ATTACK —
-              // clears moveTarget/path so Firing_AI engages next tick.
-              if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
-                const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
-                const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
-                footPerCellProcess(
-                  entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
-                  PCPType.PCP_END,
-                  {
-                    hasLegalTarCom: liveTar,
-                    inRadioContact: false, // TS infantry have no radio handshake
-                    pathShortenEligible: true, // Mission.HUNT ∈ {HUNT, AREA_GUARD, ATTACK, RESCUE}
-                    targetInRange: inRangeNow,
-                    // Phase 4 — cell-boundary Approach_Target re-fire. Gated by
-                    // APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY (default OFF).
-                    approachTargetRefire: (e) => this.approachTarget(e as Entity),
-                  },
-                  { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
-                );
-              }
-            }
-          } else {
-            if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
-              entity.moveTarget = null; // arrived at approach point
-              entity.path = [];
-              entity.pathIndex = 0;
-            }
-          }
-          // C++ foot.cpp:1471-1483 path-shorten — handled in footPerCellProcess
-          // at cell-arrival (above, PCP Session 3.1). The HUNT-only inline version
-          // that used to live here is now covered globally by the PCP hook for
-          // HUNT + AREA_GUARD + ATTACK, firing on every cell-arrival regardless
-          // of mission handler.
+        if (entity.stats.isInfantry) {
+          // C++ InfantryClass::AI always reaches Movement_AI after Mission_Hunt
+          // dispatch (infantry.cpp:1237-1247). Movement_AI is gated by legal
+          // NavCom/IsDriving, not by live TarCom. This matters for vehicle crew:
+          // UnitClass death calls Scatter() (Assign_Destination), then switches
+          // the survivor to HUNT; the survivor must Start_Driver in the same
+          // Logic pass even when Mission_Hunt found no target.
+          this._infantryWalkStep(entity);
         }
         break;
       case Mission.GUARD:
@@ -4582,21 +5087,33 @@ export class Game {
         // C++ foot.cpp:589-634: Mission_Guard runs when Timer==0.
         // Firing_AI and cooldown run every tick (inside updateGuard).
         // Pass missionTimerFired so updateGuard only scans when timer fires.
-        // C++ foot.cpp:634: return value uses Arm from BEFORE Firing_AI runs.
-        // Capture attackCooldown before updateGuard (which may fire weapon + set cooldown).
+        //
+        // C++ tests Arm before the final jitter return (foot.cpp:683), but the
+        // TS explicit timer fields store the previous end-of-frame visible value.
+        // After this method's start-of-object cooldown decrement, `attackCooldown`
+        // matches C++'s current CDTimer Value(). Reading the pre-decrement value
+        // here makes non-moving-fire units take a stale Arm-return path one tick
+        // too long (SCG03EA ARTY at tick 304).
         { const armBeforeScan = entity.attackCooldown;
         this.updateGuard(entity, missionTimerFired);
-        // C++ drive.cpp:1376 — DriveClass::AI continues to drive while Mission==GUARD
-        // when NavCom is legal. Team::Coordinate_Move queues MissionQueue=MOVE and
-        // assigns NavCom, then Start_Driver flips IsDriving=true the same tick. The
-        // unit stays in GUARD (blocked by the !IsDriving Commence gate, unit.cpp:472)
-        // and drives via DriveClass::AI until Per_Cell_Process clears NavCom at the
-        // destination cell. Only vehicles/vessels (UnitClass/VesselClass share
-        // DriveClass::AI) participate; infantry use FootClass::AI only and don't drive
-        // in GUARD. Aircraft use AircraftClass::AI (separate movement path).
-        if (!entity.stats.isInfantry && !entity.isAirUnit &&
-            entity.isDriving && entity.moveTarget) {
-          this.updateMove(entity, /*fromGuardDrive=*/ true);
+        // C++ UnitClass::AI calls DriveClass::AI after MissionClass::AI even when
+        // Mission_Guard just fired. This matters for non-moving rotation too:
+        // drive.cpp:1359 rotates PrimaryFacing before considering NavCom/path.
+        // SCG11EA t15 4TNK enters GUARD and still snaps body facing 68→64.
+        if (!entity.stats.isInfantry && !entity.isAirUnit) {
+          if (entity.trackNumber <= 0) {
+            if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+            const desiredFacing256 = entity.desiredFacing256 >= 0
+              ? (entity.desiredFacing256 & 0xff)
+              : ((entity.desiredFacing * 32) & 0xff);
+            if (entity.bodyFacing256 !== desiredFacing256) {
+              entity.tickRotation();
+            } else if (this.hasActiveDriveSegment(entity)) {
+              this.updateMove(entity, /*fromGuardDrive=*/ true);
+            }
+          } else if (this.hasActiveDriveSegment(entity)) {
+            this.updateMove(entity, /*fromGuardDrive=*/ true);
+          }
         }
         // Step 8 cleanup: removed the `!missionTimerFired` same-tick Mission_Move
         // dispatch block. Under DISPATCH_ORDER_REFACTOR=true (current), all
@@ -4606,7 +5123,11 @@ export class Game {
         if (missionTimerFired) {
           // C++ foot.cpp:597-634: dtime = MissionControl[Mission].Normal_Delay()
           // C++ uses the MISSION-SPECIFIC rate, not entity-type rate.
-          // E1/E3 infantry override to AA_Delay only for GUARD (foot.cpp:624-626).
+          //
+          // Vessel override (foot.cpp:646-655):
+          //   DD/PT -> AA_Delay; CA -> Normal_Delay * 2.
+          // Infantry override (foot.cpp:668-672):
+          //   E1/E3 -> AA_Delay.
           // STICKY mission (rules.ini [Sticky] Rate=.016) has Normal_Delay=14 for ALL infantry.
           // rules.ini [Guard] Rate=.050, AARate=.016
           //   Guard Normal_Delay: fixed(".050")→Raw=12. ((12*900)+128)/256=42
@@ -4616,15 +5137,33 @@ export class Game {
           if (entity.mission === Mission.STICKY) {
             // Sticky mission: Rate=.016 → Normal_Delay=14 for all entity types
             guardDelay = 14;
+          } else if (entity.isNavalUnit) {
+            if (entity.type === UnitType.V_DD || entity.type === UnitType.V_PT) {
+              guardDelay = 14;
+            } else if (entity.type === UnitType.V_CA) {
+              guardDelay = 84;
+            } else {
+              guardDelay = 42;
+            }
           } else {
             // Guard mission: E1/E3 use AA_Delay=14, others use Normal_Delay=42
             const isInfAA = entity.stats.isInfantry &&
               (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3);
             guardDelay = isInfAA ? 14 : 42;
           }
-          entity.missionTimer = armBeforeScan > 0
-            ? armBeforeScan
-            : guardDelay + ScenarioRandom.nextInRange(0, 2);
+          if (armBeforeScan > 0) {
+            entity.missionTimer = armBeforeScan;
+          } else {
+            const savedTag = ScenarioRandom._sourceTag;
+            if (ScenarioRandom._tagLogging) {
+              ScenarioRandom._sourceTag = entity.stats.isInfantry &&
+                (entity.type === UnitType.I_E1 || entity.type === UnitType.I_E3)
+                ? 60043
+                : 60040;
+            }
+            entity.missionTimer = guardDelay + ScenarioRandom.nextInRange(0, 2);
+            if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+          }
         }
         } // close armBeforeScan block
         break;
@@ -4636,23 +5175,31 @@ export class Game {
         if (missionTimerFired && entity.missionTimer <= 0) {
           // C++ foot.cpp:1016-1020: dtime = MissionControl[Mission].Normal_Delay() + Random_Pick(1, 5)
           // rules.ini [Area Guard] Rate=.080. fixed(".080")→Raw=20. Normal_Delay=((20*900)+128)/256=70
-          entity.missionTimer = 70 + ScenarioRandom.nextInRange(1, 5);
+          const savedTag = ScenarioRandom._sourceTag;
+          ScenarioRandom._sourceTag = 30000;
+          const jitter = ScenarioRandom.nextInRange(1, 5);
+          ScenarioRandom._sourceTag = savedTag;
+          entity.missionTimer = 70 + jitter;
         }
         // C++ Movement_AI (infantry.cpp:3765) runs every tick for all missions with NavCom.
-        // Mission_Guard_Area → Approach_Target sets NavCom (moveTarget); the unit then walks
-        // along its path each tick until it closes within weapon range of the target.
-        // Mirror HUNT's Start_Driver → Coord_Move → Stop_Driver state machine (above in
-        // Mission.HUNT case ~line 4094), gated on "out of range & has moveTarget".
+        // Mission_Guard_Area -> Approach_Target sets NavCom (moveTarget); the unit then walks
+        // along its path until Movement_AI clears/stops it. Continuing a stored path is gated
+        // by legal NavCom/path, not by live TarCom: TarCom may die while NavCom remains valid.
+        // Mirror HUNT's Start_Driver -> Coord_Move -> Stop_Driver state machine (above in
+        // Mission.HUNT case ~line 4094).
         // SCG06EA tick 76: USSR E1[24] @(24,67) with target Greek E1 @(20,64) —
         // movement closes the gap until bullet[115] Bullet_Explodes RNG fires.
-        if (entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget) {
+        const hasPendingAreaGuardPath =
+          entity.moveTarget !== null && entity.path.length > 0 && entity.pathIndex < entity.path.length;
+        if ((entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget) || hasPendingAreaGuardPath) {
           if (!entity.isDriving) {
             if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
               this.infantryValidatePath(entity);
             }
             if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
               const destCell = entity.path[entity.pathIndex];
-              this.infantryStartDriver(entity, destCell.cx, destCell.cy);
+              const started = this.infantryStartDriver(entity, destCell.cx, destCell.cy);
+              if (!started) return;
             }
             entity.isDriving = true;
           } else {
@@ -4662,9 +5209,7 @@ export class Game {
                 : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
               if (entity.moveToward(wp, this.movementSpeed(entity))) {
                 entity.pathIndex++;
-                entity.isDriving = false;
-                entity.headToLX = 0;
-                entity.headToLY = 0;
+                this.stopInfantryDriver(entity);
                 // PCP Session 2.2: infantry cell-arrival Per_Cell_Process(PCP_END).
                 // Mirrors C++ infantry.cpp:3997. AREA_GUARD analog of the HUNT site
                 // above. TarCom is likely clear here (Mission_Guard_Area scans and
@@ -4673,8 +5218,9 @@ export class Game {
                 // enemies remain in sight. Session 3.1: path-shorten sub-case fires
                 // when target enters range mid-patrol (SCG06 tick 76 load-bearing).
                 if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+                  this.cutInfantryTransportTether(entity);
                   const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
-                  const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
+                  const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
                   footPerCellProcess(
                     entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
                     PCPType.PCP_END,
@@ -4683,18 +5229,18 @@ export class Game {
                       inRadioContact: false,
                       pathShortenEligible: true, // Mission.AREA_GUARD ∈ attack-type
                       targetInRange: inRangeNow,
-                      // Phase 4 — cell-boundary Approach_Target re-fire. Gated by
-                      // APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY (default OFF).
-                      // This is the LOAD-BEARING site for SCG06EA tick 76 residual:
-                      // USSR E1 @(24,67) walks toward Greek E1 @(19,65) in AREA_GUARD.
-                      // WASM re-picks the approach cell as the entity walks closer.
-                      approachTargetRefire: (e) => this.approachTarget(e as Entity),
                     },
-                    { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+                    {
+                      guardMission: Mission.GUARD,
+                      areaGuardMission: Mission.AREA_GUARD,
+                      attackMission: Mission.ATTACK,
+                      huntMission: Mission.HUNT,
+                      rescueMission: Mission.RESCUE,
+                    }
                   );
                 }
               }
-            } else if (entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
+            } else if (entity.moveTarget && entity.moveToward(entity.moveTarget, this.movementSpeed(entity))) {
               entity.moveTarget = null;
               entity.path = [];
               entity.pathIndex = 0;
@@ -4708,24 +5254,76 @@ export class Game {
         break;
       // AI1: New C++ parity missions
       case Mission.ENTER:
-        // Entering transport — handled by transport loading code (updateMove with transport target)
-        this.updateMove(entity);
+        // C++ foot.cpp:1746-1789 — Mission_Enter performs docking radio
+        // coordination, then always returns Normal_Delay+Random_Pick(0,2).
+        // For harvesters, the refinery docking reply assigns NavCom; preserve
+        // that path instead of treating FINDHOME/HEADINGHOME as a raw MOVE.
+        if (entity.type === UnitType.V_HARV) {
+          this._runHarvester(ctx => _updateHarvester(ctx, entity, true));
+        } else {
+          // Entering transport — handled by transport loading code (updateMove with transport target)
+          this.updateMove(entity);
+        }
+        if (missionTimerFired) {
+          const savedTag = ScenarioRandom._sourceTag;
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60060;
+          const enterDelay = 14 + ScenarioRandom.nextInRange(0, 2);
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+          // C++ FootClass::Mission_Enter always consumes the return-delay
+          // jitter, even if RADIO_DOCKING/IM_IN changed Mission to UNLOAD
+          // during the handler. Assign_Mission(UNLOAD) leaves the new timer
+          // at 0, so apply the delay only when still in ENTER.
+          if (entity.mission === Mission.ENTER) entity.missionTimer = enterDelay;
+        }
         break;
       case Mission.CAPTURE:
         // Engineer capture — handled by updateAttack with targetStructure
         this.updateAttack(entity);
         break;
       case Mission.HARVEST:
-        // C++ unit.cpp:2922 — Mission_Harvest returns Normal_Delay+Random_Pick(0,2)
-        // after falling through the switch/break in most code paths (LOOKING state
-        // when ore is nearby with NavCom set, or any state that doesn't early-return).
         entity.animState = AnimState.IDLE;
         if (missionTimerFired) {
-          entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+          if (entity.type === UnitType.V_HARV) {
+            const stateBefore = entity.harvesterState;
+            const wasFullLooking = stateBefore === 'idle' && entity.oreLoad >= Entity.BAIL_COUNT;
+            // C++ UnitClass::Mission_Harvest runs before DriveClass::AI. When
+            // LOOKING assigns NavCom, DriveClass can rotate/start the driver in
+            // this same object AI tick. `_updateEntityPostDispatch` still runs a
+            // non-timer harvester pass after movement for arrival bookkeeping.
+            this._runHarvester(ctx => _updateHarvester(ctx, entity, true));
+            if (stateBefore === 'harvesting' || stateBefore === 'headinghome' || wasFullLooking) {
+              entity.missionTimer = 1;
+            } else {
+              // C++ unit.cpp:2922 — fallthrough path: Normal_Delay+Random_Pick(0,2)
+              entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+            }
+          } else {
+            // C++ unit.cpp:2922 — fallthrough path: Normal_Delay+Random_Pick(0,2)
+            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+          }
         }
         break;
       case Mission.UNLOAD:
-        // C++ aircraft.cpp:1215 — Mission_Unload falls through to Normal_Delay+Random_Pick(0,2)
+        if (entity.type === UnitType.V_MNLY) {
+          this.updateMinelayer(entity);
+          if (missionTimerFired && entity.mission === Mission.UNLOAD) {
+            entity.missionTimer = 1;
+          }
+          break;
+        }
+        if (entity.isNavalUnit) {
+          // C++ vessel.cpp:1688-1830 — VesselClass::Mission_Unload has a
+          // status machine before cargo is detached. Once in UNLOADING it
+          // detaches one cargo object per dispatch and returns Normal_Delay()
+          // with NO jitter.
+          entity.animState = AnimState.IDLE;
+          if (missionTimerFired) {
+            entity.missionTimer = this.updateVesselUnloadMission(entity);
+          }
+          break;
+        }
+        // C++ unit.cpp:2726 / aircraft.cpp:1215 — non-vessel Mission_Unload
+        // falls through to Normal_Delay+Random_Pick(0,2).
         entity.animState = AnimState.IDLE;
         if (missionTimerFired) {
           entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
@@ -4812,39 +5410,32 @@ export class Game {
     if (m === Mission.MOVE) {
       // Mission.MOVE infantry: Firing_AI-before-Movement_AI (infantry.cpp:1237)
       // + updateMove. Lifted verbatim from dispatchMission's Mission.MOVE
-      // inline block. STAGE C's runFiringAI does NOT handle Mission.MOVE
-      // infantry because the FIRE_MOVING gate (infantry.cpp:1639) would block
-      // fire while IsDriving — legacy fix is to temporarily clear isDriving
-      // across the updateAttack call (mirrors C++ pre-Movement_AI semantics
-      // where IsDriving still reflects prior tick's state).
-      let firingStarted = false;
+      // inline block. C++ InfantryClass::Can_Fire still rejects IsDriving via
+      // FIRE_MOVING; targets acquired by Mission_Move are retained but cannot
+      // start DO_FIRE_WEAPON until the driver stops.
       if (entity.target?.alive && entity.weapon
           && entity.attackCooldown <= 0 && entity.inRange(entity.target)) {
-        const savedDriving = entity.isDriving;
-        entity.isDriving = false;
         const savedMission = entity.mission;
         entity.mission = Mission.ATTACK;
         this.updateAttack(entity);
         if ((entity.mission as Mission) === Mission.ATTACK) {
           entity.mission = savedMission;
         }
-        if (entity.firePrepActive) {
-          firingStarted = true;
-        } else {
-          entity.isDriving = savedDriving;
-        }
       }
-      if (!firingStarted) this.updateMove(entity);
+      this.updateMove(entity);
       return;
     }
 
-    if (m === Mission.HUNT || m === Mission.RESCUE) {
-      // HUNT per-tick walk loop (lifted from dispatchMission Mission.HUNT).
-      // Firing_AI in-range case is already handled by STAGE C (runFiringAI).
-      // Approach_Target on cell-boundary / out-of-range-with-moveTarget only.
-      if (entity.target?.alive && !entity.inRange(entity.target) && !entity.moveTarget) {
-        this.approachTarget(entity);
-      }
+    if (m === Mission.ATTACK || m === Mission.HUNT || m === Mission.RESCUE) {
+      // ATTACK/HUNT per-tick walk loop. C++ InfantryClass::AI always runs
+      // Movement_AI after Firing_AI (infantry.cpp:1237-1247), including while
+      // Mission==ATTACK. When Can_Fire returns FIRE_MOVING, no fire animation
+      // starts and the active Head_To_Coord hop must continue.
+      // It does NOT call FootClass::Approach_Target between mission timer
+      // fires. C++ Approach_Target is invoked by the Mission_Attack/Hunt/Rescue
+      // handler when MissionClass::AI dispatches (foot.cpp:571, 761); the
+      // movement pass only consumes an already-legal NavCom/path. Re-approaching
+      // here starts fresh HUNT hops early (SCG07EA England E1 852020 at t207).
       this._infantryWalkStep(entity);
       return;
     }
@@ -4853,6 +5444,17 @@ export class Game {
       // AREA_GUARD per-tick walk loop (lifted from dispatchMission).
       // Firing_AI in-range case handled by STAGE C; walk advances path.
       this._infantryWalkStep(entity);
+      return;
+    }
+
+    if (m === Mission.GUARD) {
+      // C++ infantry.cpp:3796-3798 — once a queued GUARD has Commenced, a
+      // non-driving infantry unit must drop any leftover NavCom. This runs in
+      // Movement_AI after Commence, not inside FootClass::Mission_Move.
+      if (!entity.isDriving && entity.missionQueue === null && entity.moveTarget) {
+        entity.moveTarget = null;
+        entity.pathThreshold = 1; // C++ Assign_Destination(TARGET_NONE)
+      }
       return;
     }
   }
@@ -4866,21 +5468,111 @@ export class Game {
    * C++ ref: infantry.cpp:3812 (Start_Driver) + 3997 (PCP_END).
    */
   private _infantryWalkStep(entity: Entity): void {
-    if (!(entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget)) {
+    // C++ InfantryClass::Movement_AI runs after Firing_AI every tick
+    // (infantry.cpp:1237-1247). Once Start_Driver has set IsDriving and
+    // Head_To_Coord, the IsDriving branch continues Coord_Move until that
+    // sub-cell hop completes, even if the target has since entered weapon
+    // range. A non-driving infantryman with a legal NavCom and pending path
+    // also starts the next hop even if TarCom has since died; Movement_AI's
+    // driver gate is NavCom/path legality, not live-target state.
+    //
+    // C++ infantry.cpp:3798 gates the whole movement body on !IsFiring.
+    // The extracted ATTACK/HUNT/AREA_GUARD walk path must honor the same gate;
+    // otherwise an infantryman can start a new Head_To_Coord hop while its fire
+    // animation is still active.
+    if (entity.firePrepActive || entity.isFiringAnim) return;
+
+    const hasActiveHeadTo =
+      entity.isDriving && entity.headToLX > 0 && entity.headToLY > 0;
+    const hasPendingNavComPath =
+      entity.moveTarget !== null && entity.path.length > 0 && entity.pathIndex < entity.path.length;
+    const hasLegalNavCom =
+      entity.moveTarget !== null;
+    if (!hasActiveHeadTo &&
+        !hasPendingNavComPath &&
+        !hasLegalNavCom &&
+        !(entity.target?.alive && !entity.inRange(entity.target) && entity.moveTarget)) {
       return;
     }
     if (!entity.isDriving) {
       // C++ !IsDriving branch: Start_Driver (infantry only — vehicles use
       // track-based movement). Mirrors dispatchMission's HUNT block where the
       // validatePath / startDriver calls are gated on `entity.stats.isInfantry`.
+      if (entity.stats.isInfantry &&
+          entity.moveTarget !== null &&
+          (entity.path.length === 0 || entity.pathIndex >= entity.path.length)) {
+        // C++ InfantryClass::Movement_AI (infantry.cpp:3826-3864): any legal
+        // NavCom with Mission != GUARD runs Basic_Path/Start_Driver, even when
+        // TarCom is empty. Vehicle-crew Scatter() creates exactly that state:
+        // NavCom from Assign_Destination(::As_Target(newcell)), then HUNT queued.
+        if (entity.pathDelay > 0) return;
+        const goal = {
+          cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+          cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+        };
+        const pathGoal = this.resolveInfantryBasicPathGoal(entity, goal);
+        const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+        entity.pathDelay = PATH_DELAY_TICKS;
+        if (newPath.length > 0) {
+          this.setDrivePath(entity, newPath);
+          entity.pathThreshold = MOVE_CLOAK;
+          entity.tryCount = PATH_RETRY;
+        } else {
+          const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
+          if (leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < closeEnough) {
+            entity.moveTarget = null;
+          } else if (entity.tryCount > 0) {
+            entity.tryCount--;
+          }
+          entity.isDriving = false;
+          entity.headToLX = 0;
+          entity.headToLY = 0;
+          return;
+        }
+      }
+      if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
+        this.skipInfantryPathCurrentCell(entity);
+      }
       if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
         this.infantryValidatePath(entity);
       }
       if (entity.stats.isInfantry && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
         const destCell = entity.path[entity.pathIndex];
-        this.infantryStartDriver(entity, destCell.cx, destCell.cy);
+        const canStart = this.infantryCanEnterCell(entity, destCell.cx, destCell.cy);
+        if (canStart !== MoveResult.OK) {
+          entity.path = [];
+          entity.pathIndex = 0;
+          if (entity.pathDelay > 0) return;
+
+          const goal = {
+            cx: Math.floor(entity.moveTarget!.lx / LEPTON_SIZE),
+            cy: Math.floor(entity.moveTarget!.ly / LEPTON_SIZE),
+          };
+          const pathGoal = this.resolveInfantryBasicPathGoal(entity, goal);
+          const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+          entity.pathDelay = PATH_DELAY_TICKS;
+          if (newPath.length === 0) {
+            const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
+            if (entity.moveTarget &&
+                leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < closeEnough) {
+              entity.moveTarget = null;
+            } else if (entity.tryCount > 0) {
+              entity.tryCount--;
+            }
+            entity.isDriving = false;
+            entity.headToLX = 0;
+            entity.headToLY = 0;
+            return;
+          }
+          this.setDrivePath(entity, newPath);
+        }
+
+        const nextDestCell = entity.path[entity.pathIndex];
+        const started = this.infantryStartDriver(entity, nextDestCell.cx, nextDestCell.cy);
+        if (!started) return;
+        entity.isDriving = true;
+        entity.doing = 'walk';
       }
-      entity.isDriving = true;
       return;
     }
     if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
@@ -4888,16 +5580,17 @@ export class Game {
         ? { lx: entity.headToLX, ly: entity.headToLY }
         : { lx: entity.path[entity.pathIndex].cx * 256 + 128, ly: entity.path[entity.pathIndex].cy * 256 + 128 };
       if (entity.moveToward(wp, this.movementSpeed(entity))) {
+        const navComAtArrival = entity.moveTarget;
         entity.pathIndex++;
-        entity.isDriving = false;
-        entity.headToLX = 0;
-        entity.headToLY = 0;
+        this.consumeDrivePathFacings(entity, 1);
+        this.stopInfantryDriver(entity);
         // PCP_END cell-arrival — infantry only. Vehicles use their own
         // unitPerCellProcess chain via followTrackStep (not reached here
         // since this path uses moveToward, not the track-based mover).
         if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+          this.cutInfantryTransportTether(entity);
           const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
-          const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
+          const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
           footPerCellProcess(
             entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
             PCPType.PCP_END,
@@ -4906,10 +5599,29 @@ export class Game {
               inRadioContact: false,
               pathShortenEligible: true,
               targetInRange: inRangeNow,
-              approachTargetRefire: (e) => this.approachTarget(e as Entity),
             },
-            { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+            {
+              guardMission: Mission.GUARD,
+              areaGuardMission: Mission.AREA_GUARD,
+              attackMission: Mission.ATTACK,
+              huntMission: Mission.HUNT,
+              rescueMission: Mission.RESCUE,
+            }
           );
+        }
+        // C++ infantry.cpp:4004-4010 — after PCP_END and Stop_Driver, arrival
+        // at NavCom clears the destination. If Mission is MOVE, Enter_Idle_Mode
+        // queues the next mission (ATTACK when TarCom is legal) for the next
+        // Commence gate; it does not direct-write Mission.
+        if (navComAtArrival &&
+            Math.floor(navComAtArrival.lx / LEPTON_SIZE) === entity.cell.cx &&
+            Math.floor(navComAtArrival.ly / LEPTON_SIZE) === entity.cell.cy) {
+          entity.moveTarget = null;
+          entity.path = [];
+          entity.pathIndex = 0;
+          if ((entity.mission as Mission) === Mission.MOVE) {
+            assignMission(entity, this.infantryEnterIdleMission(entity));
+          }
         }
       }
     } else if (entity.moveTarget) {
@@ -4941,6 +5653,24 @@ export class Game {
    *   unit.cpp:404,472    UnitClass::AI Commence bookends (pre- and post-Drive)
    *   vessel.cpp:591-659  VesselClass::AI (same structure, two Commence bookends)
    */
+  private hasActiveDriveSegment(entity: Entity): boolean {
+    // C++ Assign_Destination(TARGET_NONE) clears NavCom, but it does not stop an
+    // already-started DriveClass track. DriveClass::AI continues While_Moving on
+    // TrackNumber/Path until Stop_Driver clears IsDriving.
+    if (entity.isDriving) {
+      return entity.moveTarget !== null
+        || entity.trackNumber > 0
+        || entity.pathIndex < entity.path.length;
+    }
+
+    // C++ drive.cpp:1376-1402 also starts a new track while Mission==GUARD
+    // when NavCom is legal. This is not an "already active" segment in TS
+    // because Stop_Driver cleared isDriving at the previous cell boundary, but
+    // DriveClass::AI immediately re-enters Start_Of_Move() in the same object
+    // AI pass if the destination remains legal.
+    return entity.moveTarget !== null && entity.trackNumber <= 0;
+  }
+
   private runDriveClassAI(entity: Entity): void {
     // Per-tick DriveClass::AI — vehicle/vessel per-tick movement dispatched
     // from STAGE D when DISPATCH_ORDER_REFACTOR=true. Mirrors the inline
@@ -4958,9 +5688,9 @@ export class Game {
     // When the flag is OFF the loop runs exactly once — identical to
     // pre-Phase-5 behavior. When ON, the second iteration fires only when
     // the first iteration advanced pathIndex AND there is still remaining
-    // path AND the current mission is still a drive-class mission (MOVE or
-    // drive-in-GUARD). HUNT/RESCUE walk-step branches are NOT double-cycled
-    // (C++ drive.cpp:1340-1345 applies only to the track-following path).
+    // path AND the current mission is still a drive-class mission. HUNT/RESCUE/
+    // ATTACK with active NavCom/Path use the same DriveClass track-following
+    // path; infantry-only walk-step logic does not apply to these objects.
     //
     // ## C++ refs
     //   drive.cpp:1304-1399  DriveClass::AI — per-tick track follow
@@ -4971,16 +5701,6 @@ export class Game {
     //   vessel.cpp:659       post-DriveClass::AI Commence (gated IsDoorClosed)
     if (entity.stats.isInfantry) return; // Handled by runInfantryMovementAI
     const m0 = entity.mission as Mission;
-
-    if (m0 === Mission.HUNT || m0 === Mission.RESCUE) {
-      // Vehicle HUNT per-tick walk: same walk-step pattern as infantry but
-      // without the infantryStartDriver/validatePath calls (gated off in
-      // _infantryWalkStep for non-infantry). Lifted from dispatchMission's
-      // Mission.HUNT walk block so between-fire ticks still advance toward
-      // the target. Not subject to DriveClass::AI double-cycle.
-      this._infantryWalkStep(entity);
-      return;
-    }
 
     if (DRIVE_CLASS_AI_PORT
         && !entity.isAirUnit
@@ -5024,7 +5744,7 @@ export class Game {
     //   }
     //
     // Path regen (drive.cpp:906 Start_Of_Move calls Basic_Path when Path[] empty):
-    //   if (moveTarget && path.length === 0) {
+    //   if (moveTarget && Path[0] == FACING_NONE) {
     //     path = findPath(cell, destCell, ...);
     //     if (path.length === 0) enterIdleMode();  // Basic_Path failure
     //   }
@@ -5053,19 +5773,62 @@ export class Game {
     //   at blocking cell is MOVE_MOVING_BLOCK = pathable), tank starts
     //   rotating, next tick Can_Enter_Cell fails → reactive close-enough
     //   at drive.cpp:1102 fires — two ticks later than v1.
-    // Narrow scope: only Mission.MOVE land vehicles. Vessels (LST etc.) have
-    // divergent VesselClass::AI semantics including door-state gating; their
-    // drive-in-GUARD preservation is asserted by
-    // `cpp-parity-drive-in-guard.test.ts` and must not regen paths the way
-    // land vehicles do. Drive-in-GUARD regen is handled by the existing
-    // inline paths in `updateMove` / Mission.GUARD block and not duplicated
-    // here.
+    // DriveClass::AI is shared by units and vessels. VesselClass wraps it with
+    // door/rotation/combat behavior, but Start_Of_Move/Basic_Path regeneration
+    // still belongs to DriveClass and applies to SPEED_FLOAT vessels too.
     if (DRIVE_CLASS_AI_PORT
         && !entity.isAirUnit
-        && !entity.isNavalUnit
+        && !entity.isDriving
+        && entity.trackNumber <= 0
+        && entity.path.length > 0
+        && entity.pathIndex >= entity.path.length) {
+      // C++ Start_Of_Move sees an exhausted path as Path[0] == FACING_NONE
+      // because successful track starts memmove Path[] left (drive.cpp:1234,
+      // 1250). TS stores path + pathIndex, so pathIndex==path.length is the
+      // same state. Normalize it before the Basic_Path branch below; otherwise
+      // drive-class units with legal NavCom but exhausted Path[] sit still
+      // forever. SCG07EA Greek PT id=187 mirrors C++ vessel 1966101 here.
+      entity.path = [];
+      entity.pathIndex = 0;
+    }
+
+    // C++ drive.cpp:1369-1379 — stationary drive-class objects rotate before
+    // Start_Of_Move/Basic_Path is considered. This applies even when Path[0] is
+    // FACING_NONE and PathDelay is active; an earlier Do_Turn request continues
+    // to completion, then Start_Of_Move retries on a later tick.
+    if (DRIVE_CLASS_AI_PORT
+        && !entity.isAirUnit
+        && !entity.stats.isInfantry
+        && !entity.isDriving
+        && entity.trackNumber <= 0) {
+      if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+      const desired256 = entity.desiredFacing256 >= 0
+        ? (entity.desiredFacing256 & 0xff)
+        : (((entity.desiredFacing ?? entity.facing) * 32) & 0xff);
+      if (entity.bodyFacing256 !== desired256) {
+        entity.tickRotation();
+        return;
+      }
+    }
+
+    if (DRIVE_CLASS_AI_PORT
+        && !entity.isAirUnit
+        && !entity.isDriving
+        && entity.trackNumber <= 0
         && entity.moveTarget
-        && entity.path.length === 0) {
-      if (m0 === Mission.MOVE) {
+        && entity.path.length === 0
+        // C++ drive.cpp:1369-1399 checks PrimaryFacing.Is_Rotating() before
+        // considering Start_Of_Move/Basic_Path. A pending turn from an earlier
+        // destination continues even when Path[0] is invalid and PathDelay is
+        // active; only after rotation completes can Start_Of_Move retry pathing.
+        && entity.bodyFacing256 === (entity.desiredFacing256 >= 0
+          ? (entity.desiredFacing256 & 0xff)
+          : (((entity.desiredFacing ?? entity.facing) * 32) & 0xff))) {
+      if (m0 !== Mission.UNLOAD) {
+        // C++ drive.cpp:969 — Start_Of_Move does not call Basic_Path while
+        // PathDelay is active. It returns false and waits for a later AI tick.
+        if (entity.pathDelay > 0) return;
+
         const destCell = {
           cx: Math.floor(entity.moveTarget.lx / 256),
           cy: Math.floor(entity.moveTarget.ly / 256),
@@ -5075,21 +5838,22 @@ export class Game {
         // — the next-tick Mission_Move handler handles the idle transition.
         if (destCell.cx === entity.cell.cx && destCell.cy === entity.cell.cy) {
           entity.moveTarget = null;
-          entity.path = [];
-          entity.pathIndex = 0;
+          this.clearDrivePath(entity);
           return;
         }
 
-        const newPath = findPath(
-          this.map, entity.cell, destCell,
-          // C++ Basic_Path calls Can_Enter_Cell; stationary friendly blockers
-          // are MOVE_TEMP (not pathable), moving blockers are MOVE_MOVING_BLOCK.
-          // SCG11EA t16 4TNK must route E-first around a stationary ally.
-          /*ignoreOccupancy=*/ false,
-          entity.isNavalUnit, entity.stats.speedClass,
-          id => this.isEntityMovingBlockerFor(entity, id),
-          undefined, undefined, entity.stats.isInfantry,
-        );
+        // C++ FootClass::Basic_Path (foot.cpp:323-335) keeps NavCom intact,
+        // but if the NavCom cell is blocked and the unit is beyond the
+        // relevant close-enough/stray distance, it asks Map.Nearby_Location for
+        // a temporary pathing cell. SCG07EA cover PTs hit this when the LST is
+        // sitting on waypoint 1: C++ paths around the occupied waypoint instead
+        // of cutting diagonally through it.
+        const pathGoal = this.resolveBasicPathGoal(entity, destCell);
+
+        const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+        // C++ FootClass::Basic_Path sets PathDelay after every path
+        // calculation, including successful path finds (foot.cpp:475).
+        entity.pathDelay = PATH_DELAY_TICKS;
 
         if (newPath.length === 0) {
           // Basic_Path failed — C++ drive.cpp:961 `if (!Basic_Path())` branch.
@@ -5116,8 +5880,7 @@ export class Game {
           if (!isPriority && octDist < CLOSE_ENOUGH_LEPTONS && missionEligible) {
             // drive.cpp:970-972: close-enough clear only (no Enter_Idle_Mode).
             entity.moveTarget = null;
-            entity.path = [];
-            entity.pathIndex = 0;
+            this.clearDrivePath(entity);
             return;
           }
 
@@ -5126,14 +5889,12 @@ export class Game {
           // path-regen attempts per tick (matches drive.cpp:1006 fallback
           // when TryTryAgain expires).
           entity.moveTarget = null;
-          entity.path = [];
-          entity.pathIndex = 0;
+          this.clearDrivePath(entity);
           return;
         }
 
         // Basic_Path succeeded.
-        entity.path = newPath;
-        entity.pathIndex = 0;
+        this.setDrivePath(entity, newPath);
       }
     }
 
@@ -5146,16 +5907,46 @@ export class Game {
       const prevPathIndex = entity.pathIndex;
       const prevPathLen = entity.path.length;
       const m = entity.mission as Mission;
+      const driveClassTrackReentry = cyclesThisTick > 0;
 
       if (m === Mission.MOVE) {
-        this.updateMove(entity);
+        this.updateMove(entity, false, driveClassTrackReentry);
+      } else if (m === Mission.HUNT || m === Mission.RESCUE || m === Mission.ATTACK) {
+        // DriveClass::AI is mission-agnostic for active NavCom/Path movement.
+        // Keep the mission intact; only Mission_MOVE arrival enters idle.
+        if (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving) {
+          this.updateMove(entity, /*fromGuardDrive=*/ true, driveClassTrackReentry);
+        } else {
+          return;
+        }
+      } else if (m === Mission.ENTER) {
+        // C++ UnitClass::AI always runs DriveClass::AI after MissionClass::AI
+        // (unit.cpp:406-408), so units in MISSION_ENTER keep following NavCom
+        // while FootClass::Mission_Enter's radio/timer state machine runs.
+        // SCG04EA HARV unit[76] drives into the refinery under ENTER; skipping
+        // this pass left TS stationary with a stale path until the next timer.
+        if (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving) {
+          this.updateMove(entity, /*fromGuardDrive=*/ true, driveClassTrackReentry);
+        } else {
+          return;
+        }
+      } else if (m === Mission.HARVEST && entity.type === UnitType.V_HARV) {
+        // C++ UnitClass::Mission_Harvest assigns NavCom but keeps Mission
+        // MISSION_HARVEST; DriveClass::AI still follows the active destination
+        // every tick. Use the guard-drive path so arrival clears NavCom/path
+        // without changing the mission to GUARD.
+        if (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving) {
+          this.updateMove(entity, /*fromGuardDrive=*/ true, driveClassTrackReentry);
+        } else {
+          return;
+        }
       } else if (m === Mission.GUARD || m === Mission.STICKY) {
         // Drive-in-GUARD: units given Mission.MOVE via coordinateMove with
         // isDriving=true continue to drive even while Mission stays GUARD
         // (blocked by !IsDriving Commence gate). Mirror the inline block in
         // dispatchMission Mission.GUARD case.
-        if (entity.isDriving && entity.moveTarget) {
-          this.updateMove(entity, /*fromGuardDrive=*/ true);
+        if (this.hasActiveDriveSegment(entity)) {
+          this.updateMove(entity, /*fromGuardDrive=*/ true, driveClassTrackReentry);
           // Step 7 cleanup: removed the manual `missionTimer = 14 +
           // Random_Pick(0,2)` jitter fire that was a proxy for Mission_Move
           // dispatch. STAGE F naturally re-dispatches Mission_Move when
@@ -5175,58 +5966,93 @@ export class Game {
 
       cyclesThisTick++;
 
-      // DriveClass mid-cycle Mission_Move jitter consumption (vessel.cpp:592+659,
-      // unit.cpp:404+472, drive.cpp:1340-1345 PCP_END Commence).
-      //
-      // C++ vehicles AND vessels run TWO Commence() calls within one AI tick:
-      // pre-DriveClass::AI at unit.cpp:404 / vessel.cpp:592, post-DriveClass::AI
-      // at unit.cpp:472 / vessel.cpp:659. PCP_END Commence inside DriveClass::AI's
-      // While_Moving loop (unit.cpp:1756 for vehicles) adds another pop
-      // opportunity. Each pop sets Timer=0; when MissionClass::AI dispatches
-      // afterward, Mission_Move fires another Random_Pick(0,2) jitter
-      // (foot.cpp:536, tag 60010).
-      //
-      // Empirical WASM observations:
-      //   - cpp-parity-scg07ea-tick-17.test.ts: vessel[182] 2×, vessel[183] 3×
-      //   - cpp-parity-scg11ea-tick-28.test.ts: MCV-157 fires Mission_Move 2×
-      //
-      // Without this jitter consumption, TS fires once per tick → +N RNG
-      // divergence. STAGE F is gated off by `_commenceFiredThisTick` so it
-      // can't fire here.
-      //
-      // Inline the Random_Pick(0,2) directly rather than calling dispatchMission
-      // — C++ Mission_Move only updates Timer, doesn't do movement. dispatchMission's
-      // Mission.MOVE handler would call updateMove again as a side effect, causing
-      // path over-advancement. Mirrors foot.cpp:536-538 directly.
-      //
-      // Gate signature: post-PCP_END Commence pop (mission===MOVE && Timer===0
-      // && queue===null). After Timer set to 14+jitter, the gate doesn't
-      // re-trigger this iter.
-      //
-      // Note: this only fires when STAGE B did NOT dispatch this tick (because
-      // runDriveClassAI is skipped when missionHandlerRan=true).
-      if (PCP_DOUBLE_CYCLE_ENABLED &&
-          entity.mission === Mission.MOVE &&
-          entity.missionTimer === 0 &&
-          entity.missionQueue === null) {
-        // C++ foot.cpp:536-538 Mission_Move return value:
-        //   Normal_Delay() + Random_Pick(0, 2)
-        // [Move] Rate=.016 → Normal_Delay = 14 (fixed-point conversion).
-        entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
-      }
-
       // Second-iteration gate (flag OFF → always break; flag ON → require
       // track-advance + more path remaining, per drive.cpp:1340-1345).
       if (!PCP_DOUBLE_CYCLE_ENABLED) break;
 
+      // C++ drive.cpp:1352 double-cycle gate is explicit:
+      //   if (TrackNumber == -1 && (Target_Legal(NavCom) || Path[0] != NONE)) {
+      //     Start_Of_Move();
+      //     While_Moving();
+      //   }
+      //
+      // A track jump also advances Path[]/pathIndex, but it leaves TrackNumber
+      // live on the newly-jumped track (drive.cpp:773-779). Do not spend a
+      // second While_Moving budget for track jumps; SCG04EA 3TNK t36 otherwise
+      // lands one C++ tick ahead and fires Mission_Guard at t108 instead of t109.
+      const trackCompleted = entity.trackNumber === -1;
+      if (!trackCompleted) break;
+
+      // TS stores drive paths as absolute cells plus a cursor. C++ stores only
+      // remaining facings in Path[]. After a track finishes, a TS absolute path
+      // can still point at the cell the object just reached; in C++ that entry
+      // has already been memmoved away and Path[0] is either the next facing or
+      // FACING_NONE. Normalize stale current-cell entries before deciding whether
+      // the DriveClass::AI same-tick re-entry should consume Path[0] or call
+      // Basic_Path. SCG07EA cover PT 1966102: stale `(15,54)` caused TS to clear
+      // Path/NavCom one tick before C++ instead of regenerating Path[0]=NW.
+      let droppedCurrentCellPath = false;
+      while (entity.path.length > 0 &&
+             entity.pathIndex < entity.path.length &&
+             entity.path[entity.pathIndex]?.cx === entity.cell.cx &&
+             entity.path[entity.pathIndex]?.cy === entity.cell.cy) {
+        entity.pathIndex++;
+        droppedCurrentCellPath = true;
+      }
+
       // Track-complete condition: pathIndex advanced this iteration AND
-      // more path still remains. `entity.path.length` may have been reset
-      // to 0 by an Enter_Idle_Mode branch inside updateMove (arrival) —
-      // that's handled by the `entity.pathIndex < entity.path.length` check.
+      // either more Path[] remains or NavCom is still legal. C++ drive.cpp:1352
+      // explicitly gates on `(Target_Legal(NavCom) || Path[0] != NONE)`.
+      // When Path[] is empty but NavCom remains legal, the second cycle calls
+      // Start_Of_Move(), regenerates Basic_Path(), then spends the second
+      // While_Moving budget in the same tick. SCG07EA Greek PT 1966102 hits
+      // this at tick 128 after its old track finishes under a retargeted NavCom.
       const pathAdvanced = entity.pathIndex > prevPathIndex;
       const morePathRemaining = entity.path.length > 0
         && entity.pathIndex < entity.path.length;
-      if (!pathAdvanced || !morePathRemaining) break;
+      const navComLegal = entity.moveTarget !== null;
+      if (!pathAdvanced || (!morePathRemaining && !navComLegal)) break;
+
+      // C++ stores the active drive path as a FACING array; TS stores absolute
+      // cells plus a cursor. Most cursor-exhausted states are C++ Path[0] ==
+      // FACING_NONE and should re-enter Start_Of_Move below. A curved/long track
+      // can consume a multi-cell TS tail while C++ still retains one immediate
+      // facing in Path[0] after Stop_Driver. Preserve that residual adjacent
+      // step instead of treating it as Basic_Path failure. SCG07EA cover PT
+      // 1966102 shows this: after stopping at (21,53), C++ keeps Path[0]=W
+      // toward the occupied NavCom cell; TS had collapsed it to empty and idled.
+      let preservedResidualPath = false;
+      if (!morePathRemaining && navComLegal && entity.path.length > 0 && entity.pathIndex >= entity.path.length) {
+        const remainingBeforeTrack = Math.max(0, prevPathLen - prevPathIndex);
+        const destCell = entity.moveTarget
+          ? { cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE), cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE) }
+          : null;
+        const adjacentDest =
+          destCell !== null &&
+          Math.max(Math.abs(destCell.cx - entity.cell.cx), Math.abs(destCell.cy - entity.cell.cy)) === 1;
+        if (!droppedCurrentCellPath && remainingBeforeTrack > 0 && adjacentDest && destCell) {
+          entity.path = [destCell];
+          entity.pathIndex = 0;
+          preservedResidualPath = true;
+        } else {
+          entity.path = [];
+          entity.pathIndex = 0;
+        }
+      }
+      // If a residual Path[0] was preserved, keep the C++ double-cycle alive:
+      // drive.cpp:1352 immediately calls Start_Of_Move() again after a track
+      // completes when `Path[0] != FACING_NONE`. That same-tick call can request
+      // Do_Turn() even though no further movement occurs until rotation finishes.
+
+      let regeneratedPathThisCycle = false;
+      if (!morePathRemaining && navComLegal && entity.path.length === 0) {
+        const canBasicPath =
+          (entity.mission as Mission) !== Mission.UNLOAD;
+        if (!canBasicPath || !this.tryRegenerateDriveClassBasicPath(entity, entity.mission as Mission)) {
+          break;
+        }
+        regeneratedPathThisCycle = true;
+      }
 
       // Vessel Is_Door_Closed gate: vessel.cpp:659 gates the post-Commence
       // behind `Is_Door_Closed()`. For non-LST vessels door is always
@@ -5239,7 +6065,7 @@ export class Game {
       // Sanity: if path length SHRANK unexpectedly this iteration (not just
       // pathIndex advancing), something outside the driver mutated state —
       // don't re-enter.
-      if (entity.path.length > prevPathLen) break;
+      if (!regeneratedPathThisCycle && entity.path.length > prevPathLen) break;
     }
   }
 
@@ -5252,7 +6078,7 @@ export class Game {
    * civilian panic flee, harvester AI, turret re-centering, wall/vehicle crush,
    * auto-load into transport, tickAnimation.
    */
-  private _updateEntityPostDispatch(entity: Entity): void {
+  private _updateEntityPostDispatch(entity: Entity, missionTimerFired = false): void {
     // Civilian panic: flee from nearby ants (cooldown prevents oscillation)
     if (entity.alive && entity.isCivilian && entity.mission === Mission.GUARD &&
         this.tick - entity.lastGuardScan >= 45) {
@@ -5295,20 +6121,76 @@ export class Game {
     // Gate allows GUARD, AREA_GUARD (idle/arrival), and MOVE (seeking/returning with timeout tracking)
     if (entity.alive && entity.type === UnitType.V_HARV &&
         !entity.target && entity.mission !== Mission.ATTACK && entity.mission !== Mission.DIE) {
-      this._runHarvester(ctx => _updateHarvester(ctx, entity));
+      this._runHarvester(ctx => _updateHarvester(ctx, entity, missionTimerFired));
     }
 
-    // M2: Turret returns to body facing when idle (C++ unit.cpp:554-559)
-    // When no target, turret aligns to movement direction (if moving) or body facing (if standing)
-    if (entity.alive && entity.hasTurret && !entity.target?.alive && !entity.targetStructure?.alive) {
-      if (entity.moveTarget || entity.path.length > 0) {
-        // Moving — turret faces movement direction
-        entity.desiredTurretFacing = entity.desiredFacing;
+    // C++ UnitClass::Rotation_AI (unit.cpp:506-563) runs after Firing_AI every
+    // tick, independent of Arm/rearm cooldown. This is separate from
+    // DriveClass::AI's PrimaryFacing.Rotation_Adjust, which already ran earlier
+    // this tick. For fixed-body tracked units, Rotation_AI only updates the next
+    // desired facing; the body rotates on the following DriveClass::AI pass.
+    if (entity.alive && !entity.stats.isInfantry && !entity.isAirUnit && !entity.isNavalUnit &&
+        entity.target?.alive) {
+      const dir256 = directionToLeptons256(
+        entity.leptonX, entity.leptonY,
+        entity.target.leptonX, entity.target.leptonY,
+      );
+      if (entity.hasTurret) {
+        entity.desiredTurretFacing256 = dir256;
+        entity.desiredTurretFacing = dir256ToFacing8(dir256);
+        entity.tickTurretRotation();
+      } else if (entity.stats.speedClass === SpeedClass.TRACK &&
+                 !entity.moveTarget && !entity.isDriving) {
+        const body256 = entity.bodyFacing256 >= 0
+          ? entity.bodyFacing256 & 0xff
+          : (entity.facing * 32) & 0xff;
+        if (body256 !== dir256) {
+          entity.desiredFacing256 = dir256;
+          entity.desiredFacing = dir256ToFacing8(dir256);
+        }
+      }
+    }
+
+    // M2: Land-unit turret idle Rotation_AI (C++ unit.cpp:534-559).
+    // If SecondaryFacing is already rotating, C++ rotates toward the existing
+    // desired facing. Only when it is not rotating and there is no TarCom does it
+    // assign a new desired facing: NavCom direction if legal, otherwise
+    // PrimaryFacing.Current(). Critically, that newly assigned desired facing does
+    // not rotate until the next UnitClass::Rotation_AI tick because it is set in
+    // the `else` branch after the Is_Rotating() check.
+    //
+    // Vessels do not use this UnitClass behavior; VesselClass::Rotation_AI only
+    // changes SecondaryFacing for a legal TarCom (vessel.cpp:2166-2187). Applying
+    // the UnitClass idle-return rule to PT/DD/CA pre-rotates their turrets before
+    // target acquisition and skips C++ FIRE_ROTATING delays.
+    if (entity.alive && entity.hasTurret && !entity.isNavalUnit &&
+        !entity.target?.alive && !entity.targetStructure?.alive) {
+      const turret256 = entity.turretFacing256 >= 0
+        ? entity.turretFacing256 & 0xff
+        : (entity.turretFacing32 * 8) & 0xff;
+      const desiredTurret256 = entity.desiredTurretFacing256 >= 0
+        ? entity.desiredTurretFacing256 & 0xff
+        : (entity.desiredTurretFacing * 32) & 0xff;
+      if (turret256 !== desiredTurret256) {
+        entity.tickTurretRotation();
+      } else if (entity.moveTarget) {
+        // C++ Target_Legal(NavCom): turret faces final NavCom coordinate, not
+        // the current path step/body facing. SCG07EA 2TNK reaches the landing
+        // cell with no TarCom; C++ pre-rotates the turret toward NavCom before
+        // Mission_Guard later acquires the E4 target.
+        const dir256 = directionToLeptons256(
+          entity.leptonX, entity.leptonY,
+          entity.moveTarget.lx, entity.moveTarget.ly,
+        );
+        entity.desiredTurretFacing256 = dir256;
+        entity.desiredTurretFacing = dir256ToFacing8(dir256);
       } else {
         // Standing still — turret aligns to body facing
         entity.desiredTurretFacing = entity.facing;
+        entity.desiredTurretFacing256 = entity.bodyFacing256 >= 0
+          ? entity.bodyFacing256 & 0xff
+          : (entity.facing * 32) & 0xff;
       }
-      entity.tickTurretRotation();
     }
 
     // Wall crush: crusher vehicles destroy crushable walls on cell entry
@@ -5345,6 +6227,7 @@ export class Game {
           if (targetCell.cx === other.cell.cx && targetCell.cy === other.cell.cy) {
             other.passengers.push(entity);
             entity.transportRef = other;
+            entity.isTethered = false;
             entity.selected = false;
             this.selectedIds.delete(entity.id);
             // LST door animation on load
@@ -5414,6 +6297,167 @@ export class Game {
     20: Mission.RESCUE,         // MISSION_RESCUE
     21: Mission.MISSILE,        // MISSION_MISSILE
   };
+
+  /** C++ vessel.cpp:1714-1830 — VesselClass::Mission_Unload status machine. */
+  private updateVesselUnloadMission(entity: Entity): number {
+    switch (entity.vesselUnloadStatus) {
+      case 0: // INITIAL_CHECK
+        if (entity.passengers.length > 0) {
+          // Desired_Load_Dir/Do_Turn: TS already arrived facing the shore well
+          // enough for unload; keep the state transition and 1-tick cadence.
+          entity.vesselUnloadStatus = 1;
+          return 1;
+        }
+        entity.mission = Mission.GUARD;
+        return 14;
+
+      case 1: // MANEUVERING
+        if (entity.type === UnitType.V_LST) {
+          entity.doorOpen = true;
+          entity.doorTimer = 60;
+          entity.doorOpeningTicks = 5 * (6 - 1); // LST_Open_Door Open_Door(5, 6)
+        }
+        entity.vesselUnloadStatus = 2;
+        return 1;
+
+      case 2: // OPENING_DOOR
+        if (entity.type !== UnitType.V_LST || entity.doorOpeningTicks <= 0) {
+          entity.vesselUnloadStatus = 3;
+          return 1;
+        }
+        // DoorClass::AI continues the animation every frame; Mission_Unload
+        // falls through to Normal_Delay while Is_Door_Opening() remains true.
+        return 14;
+
+      case 3: // UNLOADING
+        if (entity.passengers.length > 0) {
+          // C++ vessel.cpp:1756-1760 — do not detach the next passenger while
+          // the transport is still in radio contact with the previous unloaded
+          // passenger. The first passenger drives off the ramp, reaches its
+          // first PCP_END, sends RADIO_UNLOADED, and only then can the LST
+          // proceed. SCG07EA: this keeps the JEEP attached while the MCV is
+          // still tethered and prevents the extra tick-286 Mission_Move RNG.
+          if (this.hasTransportRadioContact(entity)) return GAME_TICKS_PER_SEC;
+          this.unloadOneVesselPassenger(entity);
+          return 14;
+        }
+        entity.vesselUnloadStatus = 4;
+        return 14;
+
+      case 4: // CLOSING_DOOR
+        entity.doorOpen = false;
+        entity.doorTimer = 0;
+        entity.doorOpeningTicks = 0;
+        entity.vesselUnloadStatus = 0;
+        if (entity.isALoaner) {
+          entity.mission = Mission.RETREAT;
+          entity.teamMissions = [];
+          entity.teamMissionIndex = 0;
+        } else {
+          entity.mission = Mission.GUARD;
+        }
+        entity.moveTarget = null;
+        entity.path = [];
+        entity.pathIndex = 0;
+        return 14;
+
+      default:
+        entity.vesselUnloadStatus = 0;
+        return 1;
+    }
+  }
+
+  /** C++ vessel.cpp:1761-1791 — LST cargo unload.
+   * Detach the newest passenger, try facings from transport rear clockwise,
+   * unlimbo at a half-cell offset, assign MOVE to the adjacent cell, and
+   * immediately Commence. No random shore scatter, no bulk unload.
+   */
+  private unloadOneVesselPassenger(entity: Entity): boolean {
+    if (entity.passengers.length === 0) return false;
+
+    if (entity.type === UnitType.V_LST) {
+      entity.doorOpen = true;
+      entity.doorTimer = 60;
+    }
+
+    const passenger = entity.passengers.pop()!;
+    const primaryFacing = entity.bodyFacing256 >= 0 ? entity.bodyFacing256 & 0xff : (entity.facing * 32) & 0xff;
+    const toface = (128 + primaryFacing) & 0xff; // DIR_S + PrimaryFacing
+    const sourceCell = entity.cell;
+
+    for (let face = 0; face < 8; face++) {
+      const newface = (toface + (face << 5)) & 0xff; // Facing_Dir(face)
+      const facing8 = dir256ToFacing8(newface);
+      const newcell = {
+        cx: sourceCell.cx + DIR_DX[facing8],
+        cy: sourceCell.cy + DIR_DY[facing8],
+      };
+      const canEnter = this.map.canEnterCell(
+        newcell.cx,
+        newcell.cy,
+        passenger.isNavalUnit,
+        id => this.isEntityMovingBlockerFor(passenger, id),
+        passenger.stats.isInfantry,
+        passenger.id,
+      );
+      if (canEnter !== MoveResult.OK) continue;
+
+      const offsetLX = (COS_TABLE_256[newface] * (LEPTON_SIZE >> 1)) >> 7;
+      const offsetLY = -(SIN_TABLE_256[newface] * (LEPTON_SIZE >> 1)) >> 7;
+      passenger.leptonX = entity.leptonX + offsetLX;
+      passenger.leptonY = entity.leptonY + offsetLY;
+      passenger.syncPosFromLeptons();
+      passenger.facing = facing8;
+      passenger.desiredFacing = facing8;
+      passenger.bodyFacing256 = newface;
+      passenger.bodyFacing32 = dir256ToFacing32(newface);
+      passenger.alive = true;
+      passenger.inLimbo = false;
+      passenger.unlimboTick = this.tick;
+      // C++ vessel.cpp:1778-1779: RADIO_HELLO + RADIO_TETHER establishes
+      // two-way radio contact for every passenger type, not just infantry.
+      // The LST's next Mission_Unload dispatch blocks while this contact is
+      // active; UnitClass/InfantryClass PCP_END cuts it with RADIO_UNLOADED.
+      passenger.transportRef = entity;
+      passenger.isTethered = true;
+      entity.isTethered = true;
+      // C++ vessel.cpp:1781-1783 sets UnitClass::IsToScatter for RTTI_UNIT
+      // passengers. UnitClass::Enter_Idle_Mode consumes it after the ramp move
+      // and calls Scatter(0, true), keeping vehicles like the SCG07EA MCV on
+      // MISSION_MOVE with a nearby destination instead of idling to GUARD.
+      passenger.isToScatter = !passenger.stats.isInfantry && !passenger.isAirUnit;
+      passenger.scenarioInitUnlimbo = true;
+      passenger.deathTick = 0;
+      passenger.flightAltitude = 0;
+      passenger.target = null;
+      passenger.targetStructure = null;
+      passenger.forceFirePos = null;
+      passenger.moveTarget = cellTargetToLepton(newcell.cx, newcell.cy);
+      passenger.path = [];
+      passenger.pathIndex = 0;
+      passenger.pathDelay = 0;
+      passenger.tryCount = PATH_RETRY;
+      passenger.headToLX = 0;
+      passenger.headToLY = 0;
+      passenger.isDriving = false;
+      passenger.mission = Mission.MOVE;
+      passenger.missionQueue = null;
+      passenger.missionQueueSetTick = -1;
+      passenger.missionTimer = 0;
+      passenger.animState = AnimState.IDLE;
+      passenger.animFrame = 0;
+
+      if (!this.entityById.has(passenger.id)) {
+        this.entities.push(passenger);
+        this.entityById.set(passenger.id, passenger);
+      }
+      return true;
+    }
+
+    // C++ re-attaches the passenger if no legal adjacent cell is found.
+    entity.passengers.push(passenger);
+    return false;
+  }
 
   /** Execute team mission scripts — units follow waypoint patrol routes */
   private updateTeamMission(entity: Entity): void {
@@ -5672,6 +6716,24 @@ export class Game {
         if (entity.stats.isAircraft && entity.aircraftState !== 'landed') {
           return; // wait for landing to complete — don't advance teamMissionIndex
         }
+        if (entity.isNavalUnit) {
+          // C++ TeamClass::TMission_Unload only tells transports to enter
+          // MISSION_UNLOAD; VesselClass::Mission_Unload performs the actual
+          // one-passenger detach cadence. Do not run the old TS bulk/random
+          // shore placement shim for LSTs here.
+          if (entity.passengers.length > 0) {
+            entity.doorOpen = entity.type === UnitType.V_LST ? true : entity.doorOpen;
+            if (entity.type === UnitType.V_LST) entity.doorTimer = 60;
+            if (entity.mission !== Mission.UNLOAD) {
+              entity.mission = Mission.UNLOAD;
+              entity.missionTimer = 0;
+              entity.vesselUnloadStatus = 0;
+            }
+            return;
+          }
+          entity.teamMissionIndex++;
+          break;
+        }
         // Unload passengers at current position
         if (entity.passengers.length > 0) {
           // LST door animation on unload
@@ -5710,6 +6772,7 @@ export class Game {
             // C++ parity: preserve passenger HP through transport — do NOT reset to maxHp.
             // C++ cargo.cpp does not heal passengers on unload.
             passenger.transportRef = null;
+            passenger.isTethered = passenger.stats.isInfantry;
             passenger.deathTick = 0;
 
             let px: number, py: number;
@@ -5783,14 +6846,23 @@ export class Game {
           }
 
           const structureHere = this.findStructureAt(entity.pos);
-          if (!structureHere) {
+          const mineHere = this.mines.some(m => m.cx === entity.cell.cx && m.cy === entity.cell.cy);
+          if (entity.mission === Mission.UNLOAD) {
+            break;
+          }
+          if (!structureHere && !mineHere) {
+            // C++ TeamClass::TMission_Deploy assigns MISSION_UNLOAD to
+            // minelayers at their current cell. It does not assign a NavCom
+            // or move the unit; UnitClass::Mission_Unload performs the mine
+            // deployment state machine.
             entity.target = null;
             entity.targetStructure = null;
-            entity.moveTarget = {
-              lx: entity.cell.cx * 256 + 128,
-              ly: entity.cell.cy * 256 + 128,
-            };
-            this.updateMinelayer(entity);
+            entity.moveTarget = null;
+            entity.mission = Mission.UNLOAD;
+            entity.missionTimer = 0;
+            // The team mission remains active until the unit has returned to
+            // GUARD after Mission_Unload.
+            break;
           }
           entity.teamMissionIndex++;
           break;
@@ -5821,6 +6893,7 @@ export class Game {
             if (d < 3) { // within 3 cells
               entity.passengers.push(other);
               other.transportRef = entity;
+              other.isTethered = false;
               // Defer removal from entity list (same as player-initiated load)
               this._pendingTransportLoads.push(other.id);
             }
@@ -6099,6 +7172,60 @@ export class Game {
     }
   }
 
+  /** C++ UnitClass::Scatter(0, true) — no-threat forced scatter.
+   *  Used by UnitClass::Enter_Idle_Mode when IsToScatter was set by LST
+   *  unload. UnitClass overrides the zero-threat branch and uses
+   *  Map.Nearby_Location; it does not consume the Scenario RNG. */
+  private unitClassScatterNoThreat(entity: Entity, nokidding = false): void {
+    if (entity.mission === Mission.SLEEP ||
+        entity.mission === Mission.STICKY ||
+        entity.mission === Mission.UNLOAD) return;
+    if (MISSION_CONTROL[entity.mission]?.isParalyzed) return;
+    // C++ UnitClass::Scatter returns while PrimaryFacing is rotating.
+    if (entity.bodyFacing256 >= 0 &&
+        entity.desiredFacing256 >= 0 &&
+        entity.bodyFacing256 !== entity.desiredFacing256) return;
+    if (entity.moveTarget && !nokidding) return;
+
+    const cell = nearbyLocation(
+      this.map,
+      entity.cell,
+      entity.isNavalUnit,
+      Math.max(0, this.tick - 1),
+    );
+    if (cell) {
+      entity.moveTarget = cellTargetToLepton(cell.cx, cell.cy);
+      resetPathThreshold(entity);
+      this.startDriveClassMove(entity);
+    }
+  }
+
+  /** C++ CellClass::Incoming(0, true, true) for DriveClass MOVE_TEMP blockers.
+   *  Called by DriveClass::Start_Of_Move when a friendly temporary blocker is
+   *  in the next cell. The blocker scatters without changing mission; the
+   *  movement order is stored as NavCom and DriveClass::AI advances it later. */
+  private incomingNoThreatScatterCell(cx: number, cy: number, requesterId = 0): void {
+    for (const blocker of this.entities) {
+      if (blocker.id === requesterId || !blocker.alive || blocker.inLimbo) continue;
+      if (blocker.isAirUnit && blocker.flightAltitude > 0) continue;
+      if (blocker.cell.cx !== cx || blocker.cell.cy !== cy) continue;
+
+      if (!blocker.stats.isInfantry && !blocker.isAirUnit) {
+        this.unitClassScatterNoThreat(blocker, true);
+      }
+    }
+  }
+
+  /** C++ class Enter_Idle_Mode side effects + selected idle mission. */
+  private enterIdleMode(entity: Entity): Mission {
+    if (!entity.stats.isInfantry && !entity.isAirUnit && !entity.isNavalUnit && entity.isToScatter) {
+      entity.isToScatter = false;
+      this.unitClassScatterNoThreat(entity);
+      if (entity.moveTarget) return Mission.MOVE;
+    }
+    return this.idleMission(entity);
+  }
+
   /** Get the C++ default idle mission for an entity class. */
   private idleMission(entity: Entity): Mission {
     const houseIQ = this.houseIQs.get(entity.house) ?? (entity.house === this.playerHouse ? 0 : 3);
@@ -6133,11 +7260,423 @@ export class Game {
     return entity.guardOrigin ? Mission.AREA_GUARD : Mission.GUARD;
   }
 
+  /** C++ InfantryClass::Enter_Idle_Mode mission selection.
+   *  Unlike the class default idle mission above, infantry with a legal TarCom
+   *  queues ATTACK first (infantry.cpp:1663-1720). */
+  private infantryEnterIdleMission(entity: Entity): Mission {
+    if (entity.target?.alive || entity.targetStructure?.alive) {
+      return Mission.ATTACK;
+    }
+    return this.idleMission(entity);
+  }
+
+  /** C++ RadioClass In_Radio_Contact for transport unloads. */
+  private hasTransportRadioContact(transport: Entity): boolean {
+    return this.entities.some(e =>
+      e.alive &&
+      !e.inLimbo &&
+      e.transportRef === transport &&
+      e.isTethered);
+  }
+
+  /** C++ VesselClass::Assign_Destination transport radio side effect.
+   *
+   * vessel.cpp:1866-1869: if a passenger transport is in radio contact with an
+   * infantry/unit passenger when the vessel receives a new NavCom, it sends
+   * RADIO_MOVE_HERE(TARGET_NONE) followed by RADIO_OVER_OUT. FootClass handles
+   * RADIO_MOVE_HERE by Assign_Destination(TARGET_NONE) and
+   * Shorten_Mission_Timer() when NavCom changed (foot.cpp:1700-1710).
+   *
+   * Important parity detail: Assign_Destination(TARGET_NONE) clears NavCom and
+   * resets PathThreshhold only; it does not clear Path[] or stop the active
+   * driver. The passenger keeps rolling off the ramp, but its next
+   * MissionClass::AI pass sees Timer==0 and runs Mission_Move immediately.
+   */
+  private abortTransportRadioContactForNewDestination(transport: Entity): void {
+    if (!transport.stats.isVessel || !transport.isTransport) return;
+    let anyContact = false;
+    for (const passenger of this.entities) {
+      if (!passenger.alive || passenger.inLimbo) continue;
+      if (passenger.transportRef !== transport || !passenger.isTethered) continue;
+      if (passenger.isAirUnit) continue;
+
+      anyContact = true;
+      if (passenger.moveTarget !== null) {
+        if ((passenger.mission as Mission) === Mission.GUARD && passenger.missionQueue === null) {
+          passenger.missionQueue = Mission.MOVE;
+        }
+        passenger.moveTarget = null;
+        resetPathThreshold(passenger);
+        passenger.missionTimer = 0;
+      }
+
+      // RADIO_OVER_OUT cuts the two-way contact after the move-here message.
+      passenger.isTethered = false;
+      passenger.transportRef = null;
+    }
+    if (anyContact) {
+      transport.isTethered = false;
+      if (!transport.isAirUnit) {
+        transport.doorOpen = false;
+        transport.doorOpeningTicks = 0;
+      }
+    }
+  }
+
+  /** C++ UnitClass/InfantryClass::Per_Cell_Process tether exit branch.
+   *  The first PCP_END after a passenger leaves a transport or infantry leaves
+   *  a factory sends RADIO_UNLOADED, cutting the two-way radio tether.
+   *  Infantry additionally plays the unload gesture (infantry.cpp:878-906).
+   */
+  private cutTransportTether(entity: Entity): void {
+    if (!entity.isTethered) return;
+    const transport = entity.transportRef;
+    entity.isTethered = false;
+    entity.transportRef = null;
+    if (transport && !this.hasTransportRadioContact(transport)) {
+      transport.isTethered = false;
+    }
+    if (entity.stats.isInfantry) {
+      entity.startTransportUnloadGesture(this.tick);
+    }
+  }
+
+  private cutInfantryTransportTether(entity: Entity): void {
+    if (!entity.stats.isInfantry) return;
+    this.cutTransportTether(entity);
+  }
+
   private isEntityMovingBlockerFor(mover: Entity, entityId: number): boolean {
     const occupant = this.entityById.get(entityId);
     return !!occupant?.alive &&
       this.entitiesAllied(mover, occupant) &&
       (occupant.isDriving || occupant.trackNumber > 0 || occupant.moveTarget !== null);
+  }
+
+  /** C++ InfantryClass::Can_Enter_Cell (infantry.cpp:1266-1524).
+   *  Infantry can share allied infantry sub-cells while space remains, but
+   *  non-allied infantry are not shareable: armed infantry see them as
+   *  MOVE_DESTROYABLE. This entity-aware check is required by Basic_Path and
+   *  Start_Driver validation; the map-only helper can only answer whether any
+   *  sub-cell is physically open. */
+  private infantryCanEnterCell(entity: Entity, cx: number, cy: number, _facing = -1): MoveResult {
+    const mapMove = this.map.canEnterCell(
+      cx,
+      cy,
+      entity.isNavalUnit,
+      id => this.isEntityMovingBlockerFor(entity, id),
+      true,
+      entity.id,
+    );
+    if (mapMove === MoveResult.IMPASSABLE || mapMove === MoveResult.CLOAK) return mapMove;
+
+    const hasWeapon = (entity.weapon?.damage ?? 0) > 0 || (entity.weapon2?.damage ?? 0) > 0;
+    let result = MoveResult.OK;
+
+    for (const other of this.entities) {
+      if (other.id === entity.id || !other.alive || other.inLimbo) continue;
+      if (other.isAirUnit && other.flightAltitude > 0) continue;
+      if (other.cell.cx !== cx || other.cell.cy !== cy) continue;
+
+      if (this.entitiesAllied(entity, other)) {
+        if (other.stats.isInfantry) continue;
+        if (other.isAirUnit) return MoveResult.IMPASSABLE;
+        const moving = other.isDriving || other.trackNumber > 0 || other.moveTarget !== null;
+        result = Math.max(result, moving ? MoveResult.OCCUPIED : MoveResult.TEMP_BLOCKED);
+      } else {
+        if (!hasWeapon) return MoveResult.IMPASSABLE;
+        if (other.stats.isInfantry && other.type === UnitType.I_SPY && !entity.stats.isCanine) {
+          result = Math.max(result, MoveResult.TEMP_BLOCKED);
+        } else {
+          result = Math.max(result, MoveResult.DESTROYABLE);
+        }
+      }
+    }
+
+    const slots = this.map.subCellOccupancy.get(cy * MAP_CELLS + cx);
+    if (slots) {
+      let filled = 0;
+      for (const occupantId of slots) {
+        if (occupantId === 0 || occupantId === entity.id) continue;
+        filled++;
+        const occupant = this.entityById.get(occupantId);
+        if (!occupant?.alive) continue;
+        if (!this.entitiesAllied(entity, occupant)) {
+          if (!hasWeapon) return MoveResult.IMPASSABLE;
+          if (occupant.stats.isInfantry && occupant.type === UnitType.I_SPY && !entity.stats.isCanine) {
+            result = Math.max(result, MoveResult.TEMP_BLOCKED);
+          } else {
+            result = Math.max(result, MoveResult.DESTROYABLE);
+          }
+        }
+      }
+      if (filled >= 5) result = Math.max(result, MoveResult.OCCUPIED);
+    } else if (mapMove > MoveResult.OK) {
+      result = Math.max(result, mapMove);
+    }
+
+    return result;
+  }
+
+  private basicPathGoalMoveResult(entity: Entity, goal: CellPos): MoveResult {
+    if (!entity.stats.isInfantry && !entity.isAirUnit) {
+      return this.canEnterTrackJumpCell(entity, goal.cx, goal.cy);
+    }
+
+    const mapMove = this.map.canEnterCell(
+      goal.cx,
+      goal.cy,
+      entity.isNavalUnit,
+      id => this.isEntityMovingBlockerFor(entity, id),
+      false,
+      entity.id,
+    );
+    if (mapMove <= MoveResult.CLOAK) return mapMove;
+    if (!entity.stats.isInfantry) return mapMove;
+
+    // C++ InfantryClass::Can_Enter_Cell allows allied infantry sharing a cell
+    // while sub-cells remain free; enemy infantry remains MOVE_DESTROYABLE.
+    let sawNonShareableObject = false;
+    let sawEnemyObject = false;
+    for (const other of this.entities) {
+      if (other.id === entity.id || !other.alive || other.inLimbo) continue;
+      if (other.isAirUnit && other.flightAltitude > 0) continue;
+      if (other.cell.cx !== goal.cx || other.cell.cy !== goal.cy) continue;
+      if (this.entitiesAllied(entity, other) && other.stats.isInfantry) continue;
+      sawNonShareableObject = true;
+      if (!this.entitiesAllied(entity, other)) sawEnemyObject = true;
+    }
+    if (!sawNonShareableObject && this.map.hasAvailableSubCell(goal.cx, goal.cy)) {
+      return MoveResult.OK;
+    }
+    if (sawEnemyObject && ((entity.weapon?.damage ?? 0) > 0 || (entity.weapon2?.damage ?? 0) > 0)) {
+      return MoveResult.DESTROYABLE;
+    }
+    return mapMove;
+  }
+
+  /** C++ FootClass::Basic_Path lines 323-335: keep NavCom unchanged, but
+   * aim Find_Path at a nearby legal cell when NavCom's cell is blocked and the
+   * unit is farther than close-enough/stray distance. */
+  private resolveBasicPathGoal(entity: Entity, goal: CellPos): CellPos {
+    if (!entity.moveTarget) return goal;
+    if (this.basicPathGoalMoveResult(entity, goal) <= MoveResult.CLOAK) return goal;
+
+    const dist = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
+    const checkdist = entity.teamRef ? 0x0200 : 0x0280; // rules.cpp defaults: Stray/CloseEnough
+    if (dist <= checkdist) return goal;
+
+    const nearby = nearbyLocation(this.map, goal, entity.isNavalUnit, Math.max(0, this.tick - 1));
+    if (!nearby) return goal;
+    const goalLX = goal.cx * LEPTON_SIZE + (LEPTON_SIZE >> 1);
+    const goalLY = goal.cy * LEPTON_SIZE + (LEPTON_SIZE >> 1);
+    const nearbyLX = nearby.cx * LEPTON_SIZE + (LEPTON_SIZE >> 1);
+    const nearbyLY = nearby.cy * LEPTON_SIZE + (LEPTON_SIZE >> 1);
+    return leptonDist(goalLX, goalLY, nearbyLX, nearbyLY) < dist ? nearby : goal;
+  }
+
+  /** C++ FootClass::Basic_Path threshold escalation (foot.cpp:381-423).
+   * Starts at PathThreshhold and retries with higher MoveType tolerance until
+   * a path is found or maxtype is exceeded. */
+  private findDriveClassBasicPath(entity: Entity, pathGoal: CellPos): CellPos[] {
+    const maxtype = pathMaxType(entity, this.isPlayerControlled(entity));
+    for (;;) {
+      const newPath = findPath(
+        this.map,
+        entity.cell,
+        pathGoal,
+        // C++ Basic_Path calls Can_Enter_Cell; stationary friendly blockers
+        // are MOVE_TEMP (not pathable until threshold escalation reaches it),
+        // moving blockers are MOVE_MOVING_BLOCK.
+        false,
+        entity.isNavalUnit,
+        entity.stats.speedClass,
+        id => this.isEntityMovingBlockerFor(entity, id),
+        undefined,
+        undefined,
+        entity.stats.isInfantry,
+        entity.pathThreshold as MoveResult,
+        entity.stats.isInfantry
+          ? (cx, cy, facing) => this.infantryCanEnterCell(entity, cx, cy, facing)
+          : (cx, cy) => this.canEnterTrackJumpCell(entity, cx, cy),
+      );
+      if (newPath.length > 0) {
+        entity.pathThreshold = MOVE_CLOAK;
+        entity.tryCount = PATH_RETRY;
+        return newPath;
+      }
+      entity.pathThreshold++;
+      if (entity.pathThreshold > maxtype) break;
+    }
+    return [];
+  }
+
+  /** C++ DriveClass::Start_Of_Move -> FootClass::Basic_Path.
+   *
+   * Used by DriveClass::AI's second-cycle path regeneration when a track
+   * completed with legal NavCom but empty Path[]. The top-of-AI Basic_Path
+   * branch handles the same state before the first cycle; this helper keeps the
+   * re-entry path on the same C++ rules without tick-specific state edits.
+   */
+  private tryRegenerateDriveClassBasicPath(entity: Entity, mission: Mission): boolean {
+    if (!entity.moveTarget || entity.pathDelay > 0) return false;
+
+    const destCell = {
+      cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+      cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+    };
+
+    if (destCell.cx === entity.cell.cx && destCell.cy === entity.cell.cy) {
+      entity.moveTarget = null;
+      this.clearDrivePath(entity);
+      return false;
+    }
+
+    const pathGoal = this.resolveBasicPathGoal(entity, destCell);
+    const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+    // C++ FootClass::Basic_Path sets PathDelay after every path calculation,
+    // including same-tick DriveClass::AI re-entry after a track completes.
+    entity.pathDelay = PATH_DELAY_TICKS;
+
+    if (newPath.length === 0) {
+      const dxL = entity.moveTarget.lx - entity.leptonX;
+      const dyL = entity.moveTarget.ly - entity.leptonY;
+      const adx = Math.abs(dxL), ady = Math.abs(dyL);
+      const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+      const missionEligible = mission === Mission.MOVE || mission === Mission.AREA_GUARD;
+
+      if (octDist < 704 && missionEligible) {
+        entity.moveTarget = null;
+        this.clearDrivePath(entity);
+      }
+      return false;
+    }
+
+    this.setDrivePath(entity, newPath);
+    return true;
+  }
+
+  private resolveInfantryBasicPathGoal(entity: Entity, goal: CellPos): CellPos {
+    return this.resolveBasicPathGoal(entity, goal);
+  }
+
+  /**
+   * C++ DriveClass::Start_Of_Move consumes a FacingType Path[0], not an
+   * absolute-cell cursor. After TS finishes or track-jumps into a cell, the
+   * absolute path can still have the just-entered cell at or after pathIndex.
+   * Normalize that representation before selecting the next track so
+   * Start_Of_Move sees the same next facing C++ would see after its Path[]
+   * memmove.
+   */
+  private skipDrivePathCurrentCell(entity: Entity): boolean {
+    if (entity.stats.isInfantry || entity.isAirUnit) return false;
+    if (!usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) return false;
+    if (entity.trackNumber > 0) return false;
+
+    let advanced = false;
+    for (let i = entity.pathIndex; i < entity.path.length; i++) {
+      const cell = entity.path[i];
+      if (cell.cx !== entity.cell.cx || cell.cy !== entity.cell.cy) break;
+      entity.pathIndex = i + 1;
+      advanced = true;
+      break;
+    }
+    if (!advanced) {
+      for (let i = entity.pathIndex; i < entity.path.length; i++) {
+        const cell = entity.path[i];
+        if (cell.cx === entity.cell.cx && cell.cy === entity.cell.cy) {
+          entity.pathIndex = i + 1;
+          advanced = true;
+          break;
+        }
+      }
+    }
+
+    if (advanced && entity.pathIndex >= entity.path.length) {
+      entity.path = [];
+      entity.pathIndex = 0;
+    }
+    return advanced;
+  }
+
+  /**
+   * C++ InfantryClass::Movement_AI consumes FacingType Path[0] with
+   * Adjacent_Cell(Coord, Path[0]) (infantry.cpp:3919). A valid C++ path entry
+   * therefore always targets an adjacent cell, never the infantry's current
+   * cell. TS stores absolute cells, so after a Head_To_Coord hop completes the
+   * next absolute cell can be the current cell until pathIndex is normalized.
+   * Skipping it prevents a fabricated Start_Driver-to-current-cell hop.
+   */
+  private skipInfantryPathCurrentCell(entity: Entity): boolean {
+    if (!entity.stats.isInfantry || entity.isDriving) return false;
+
+    let advanced = false;
+    while (entity.path.length > 0 &&
+           entity.pathIndex < entity.path.length &&
+           entity.path[entity.pathIndex]?.cx === entity.cell.cx &&
+           entity.path[entity.pathIndex]?.cy === entity.cell.cy) {
+      entity.pathIndex++;
+      advanced = true;
+    }
+
+    if (advanced && entity.pathIndex >= entity.path.length) {
+      entity.path = [];
+      entity.pathIndex = 0;
+    }
+    return advanced;
+  }
+
+  private isDriveClassPathEntity(entity: Entity): boolean {
+    return !entity.stats.isInfantry &&
+      !entity.isAirUnit &&
+      !entity.isNavalUnit &&
+      usesTrackMovement(entity.stats.speedClass, false, false);
+  }
+
+  private shouldCapDrivePathToCxxBuffer(entity: Entity): boolean {
+    return entity.stats.isInfantry || this.isDriveClassPathEntity(entity);
+  }
+
+  // C++ defines.h:2828 / foot.h:223 — FootClass::Path[CONQUER_PATH_MAX].
+  // Basic_Path may find a longer route in its work buffer, but only the first
+  // 12 FacingType commands are copied into the unit. FootClass regenerates the
+  // next chunk when this buffer empties while NavCom remains legal. This applies
+  // to infantry as well as DriveClass ground vehicles; SCG04EA USSR E1 851975
+  // exhausts the buffer at tick 476 and C++ repaths toward the moving target.
+  private static readonly CONQUER_PATH_MAX = 12;
+
+  private deriveDrivePathFacings(start: CellPos, path: CellPos[]): number[] {
+    const facings: number[] = [];
+    let from = start;
+    for (const cell of path) {
+      facings.push(directionTo(
+        { x: from.cx * CELL_SIZE + CELL_SIZE / 2, y: from.cy * CELL_SIZE + CELL_SIZE / 2 },
+        { x: cell.cx * CELL_SIZE + CELL_SIZE / 2, y: cell.cy * CELL_SIZE + CELL_SIZE / 2 },
+      ));
+      from = cell;
+    }
+    return facings;
+  }
+
+  private setDrivePath(entity: Entity, path: CellPos[]): void {
+    entity.path = this.shouldCapDrivePathToCxxBuffer(entity)
+      ? path.slice(0, Game.CONQUER_PATH_MAX)
+      : path;
+    entity.pathIndex = 0;
+    entity.drivePathFacings = this.isDriveClassPathEntity(entity)
+      ? this.deriveDrivePathFacings(entity.cell, entity.path)
+      : [];
+  }
+
+  private clearDrivePath(entity: Entity): void {
+    entity.path = [];
+    entity.pathIndex = 0;
+    entity.drivePathFacings = [];
+  }
+
+  private consumeDrivePathFacings(entity: Entity, count: number): void {
+    if (count <= 0 || entity.drivePathFacings.length === 0) return;
+    entity.drivePathFacings.splice(0, count);
   }
 
   /** C++ DriveClass::Mark_Track(MARK_UP): release this unit's reserved vehicle bits. */
@@ -6200,6 +7739,7 @@ export class Game {
   }
 
   private canEnterTrackJumpCell(entity: Entity, cx: number, cy: number): MoveResult {
+    const authorizedBuildingEnter = this.isAuthorizedBuildingEnterCell(entity, cx, cy);
     const move = this.map.canEnterCell(
       cx,
       cy,
@@ -6208,12 +7748,61 @@ export class Game {
       false,
       entity.id,
     );
-    if (move !== MoveResult.OK) return move;
+    if ((move === MoveResult.IMPASSABLE || move === MoveResult.CLOAK) && !authorizedBuildingEnter) return move;
+
+    const reservationOwner = this.map.getVehicleTrackReservation(cx, cy);
+    // C++ UnitClass::Can_Enter_Cell ignores `obj == this` only while walking
+    // the physical Cell_Occupier chain. The later cell flag check at
+    // unit.cpp:3268-3274 treats Flag.Occupy.Vehicle as MOVE_MOVING_BLOCK
+    // without an owner/self exception. Mark_Track stores DriveClass
+    // reservations in that same vehicle occupancy flag, so a self-reserved
+    // destination cell still blocks Start_Of_Move/track-jump entry.
+    if (reservationOwner > 0) {
+      return MoveResult.OCCUPIED;
+    }
+
+    // C++ VesselClass::Can_Enter_Cell is occupancy-flag based: vehicle
+    // occupancy in water returns MOVE_MOVING_BLOCK, never MOVE_TEMP. The land
+    // UnitClass physical occupier scan below is what distinguishes stationary
+    // friendly blockers as MOVE_TEMP.
+    if (entity.isNavalUnit) return move;
 
     // C++ UnitClass::Can_Enter_Cell first walks the physical Cell_Occupier()
     // chain, then separately checks occupy/reservation bits. TS infantry
     // claims live in the destination sub-cell grid while their physical cell
     // can still block a drive-class track jump this tick.
+    let sawCrushableOnly = false;
+    const occupantId = this.map.getOccupancy(cx, cy);
+    if (occupantId > 0 && occupantId !== entity.id) {
+      const occupant = this.entityById.get(occupantId);
+      if (occupant?.alive) {
+        const physicalOccupier = occupant.cell.cx === cx && occupant.cell.cy === cy;
+        if (occupant.stats.isInfantry && !physicalOccupier) {
+          // C++ UnitClass::Can_Enter_Cell walks Cell_Occupier() for physical
+          // objects in this cell, then checks cell flag bits. TS getOccupancy()
+          // is also fed by infantry sub-cell claims; a moving infantry can claim
+          // a sub-cell in the target cell while its physical Cell_Occupier cell is
+          // still adjacent. C++ only lets crushers ignore enemy infantry reserve
+          // bits; non-crushers still see MOVE_DESTROYABLE/NO from the cell flags.
+          if (!this.entitiesAllied(entity, occupant) && entity.stats.crusher) {
+            sawCrushableOnly = true;
+          }
+        } else
+        if (this.entitiesAllied(entity, occupant)) {
+          return (occupant.isDriving || occupant.trackNumber > 0 || occupant.moveTarget !== null)
+            ? MoveResult.OCCUPIED
+            : MoveResult.TEMP_BLOCKED;
+        }
+        else if (entity.stats.crusher && occupant.stats.isInfantry) {
+          // C++ unit.cpp:3281-3294: enemy infantry occupy/reserve bits do not
+          // block crusher vehicles. The infantry can be present only in the
+          // sub-cell occupation flags here, not as the physical Cell_Occupier().
+          sawCrushableOnly = true;
+        } else {
+          return MoveResult.DESTROYABLE;
+        }
+      }
+    }
     for (const other of this.entities) {
       if (other.id === entity.id || !other.alive || other.inLimbo) continue;
       if (other.isAirUnit && other.flightAltitude > 0) continue;
@@ -6223,18 +7812,202 @@ export class Game {
           ? MoveResult.OCCUPIED
           : MoveResult.TEMP_BLOCKED;
       }
-      if (entity.stats.crusher && other.stats.isInfantry) continue;
+      if (entity.stats.crusher && other.stats.isInfantry) {
+        // C++ UnitClass::Can_Enter_Cell allows crusher vehicles to enter
+        // infantry-occupied cells; the crush is handled by Per_Cell_Process /
+        // Overrun_Square, not by rejecting the track jump.
+        sawCrushableOnly = true;
+        continue;
+      }
       return MoveResult.DESTROYABLE;
     }
 
-    return MoveResult.OK;
+    return move === MoveResult.OK || authorizedBuildingEnter || sawCrushableOnly ? MoveResult.OK : move;
+  }
+
+  /** C++ DriveClass::Assign_Destination -> Start_Of_Move without While_Moving.
+   *
+   * TeamClass coordinate routines call Assign_Destination during Team AI, before
+   * the unit's own AI pass. C++ immediately clears Path[0] and calls
+   * Start_Of_Move: this either requests Do_Turn() or selects/reserves a real
+   * track via Start_Driver. The actual While_Moving budget is spent later in
+   * DriveClass::AI for the same object tick.
+   */
+  private startDriveClassMove(entity: Entity): void {
+    if (entity.stats.isInfantry || entity.isAirUnit || !entity.moveTarget) return;
+
+    const destCell = {
+      cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+      cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+    };
+
+    // DriveClass::Assign_Destination line 641: Path[0] = FACING_NONE.
+    // This happens even while IsDriving. The active TrackNumber and
+    // Head_To_Coord remain alive; only the queued path is invalidated so
+    // While_Moving cannot track-jump from stale Path[0].
+    this.clearDrivePath(entity);
+
+    if (entity.isDriving || entity.mission === Mission.UNLOAD) {
+      entity.pathThreshold = MOVE_CLOAK;
+      return;
+    }
+
+    entity.trackNumber = -1;
+    entity.trackControlIndex = -1;
+    entity.trackCellSpan = 1;
+
+    // C++ DriveClass::Assign_Destination immediately calls Start_Of_Move(),
+    // but Start_Of_Move refuses to call Basic_Path while FootClass::PathDelay
+    // is active (drive.cpp:969). Keep Path[0] invalid and let DriveClass::AI
+    // retry after the timer expires.
+    if (entity.pathDelay > 0) return;
+
+    const pathGoal = this.resolveBasicPathGoal(entity, destCell);
+    const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+    // C++ FootClass::Basic_Path sets PathDelay after every path calculation,
+    // successful or not (foot.cpp:475). Assign_Destination reaches Basic_Path
+    // through Start_Of_Move.
+    entity.pathDelay = PATH_DELAY_TICKS;
+
+    if (newPath.length === 0) {
+      const dxL = entity.moveTarget.lx - entity.leptonX;
+      const dyL = entity.moveTarget.ly - entity.leptonY;
+      const adx = Math.abs(dxL), ady = Math.abs(dyL);
+      const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+      if (octDist < 704 && (entity.mission === Mission.MOVE || entity.mission === Mission.AREA_GUARD)) {
+        entity.moveTarget = null;
+        resetPathThreshold(entity);
+      }
+      return;
+    }
+
+    this.setDrivePath(entity, newPath);
+    entity.pathThreshold = MOVE_CLOAK;
+    entity.tryCount = PATH_RETRY;
+
+    const nextCell = entity.path[0];
+    const nextTarget: WorldPos = {
+      x: nextCell.cx * CELL_SIZE + CELL_SIZE / 2,
+      y: nextCell.cy * CELL_SIZE + CELL_SIZE / 2,
+    };
+    // C++ DriveClass::Start_Of_Move selects `facing` from Path[0]
+    // (drive.cpp:1038-1084), i.e. the cell-to-cell path direction. Do
+    // not derive it from the current lepton position: after a curve the
+    // vehicle/vessel can be slightly off the row/column and pixel geometry
+    // would choose NE/SE where C++ still uses E/W from Path[0].
+    const nextFacing8 = directionTo({
+      x: entity.cell.cx * CELL_SIZE + CELL_SIZE / 2,
+      y: entity.cell.cy * CELL_SIZE + CELL_SIZE / 2,
+    }, nextTarget);
+    if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+    if (entity.bodyFacing256 !== ((nextFacing8 * 32) & 0xff)) {
+      // drive.cpp:1098-1105 Do_Turn(dir): request rotation only.
+      entity.desiredFacing = nextFacing8;
+      entity.desiredFacing256 = (nextFacing8 * 32) & 0xff;
+      return;
+    }
+    entity.desiredFacing = nextFacing8;
+    entity.desiredFacing256 = (nextFacing8 * 32) & 0xff;
+
+    const entryMove = this.canEnterTrackJumpCell(entity, nextCell.cx, nextCell.cy);
+    if (entryMove !== MoveResult.OK) {
+      this.stopDriveTrack(entity);
+      entity.trackNumber = -1;
+      entity.trackControlIndex = -1;
+      entity.trackCellSpan = 1;
+      if (entryMove === MoveResult.TEMP_BLOCKED) {
+        this.incomingNoThreatScatterCell(nextCell.cx, nextCell.cy, entity.id);
+      }
+      // C++ drive.cpp:1109-1116 Start_Of_Move immediate-cell failure:
+      // if Can_Enter_Cell(destcell, facing) fails while Mission==MOVE and
+      // Distance(NavCom) < Rule.CloseEnoughDistance, Assign_Destination(NONE).
+      // It does not Enter_Idle_Mode here; Mission_Move's next timer dispatch
+      // sees !NavCom && !IsDriving and enters the class idle mission.
+      if ((entity.mission as Mission) === Mission.MOVE && entity.moveTarget) {
+        const dxL = entity.moveTarget.lx - entity.leptonX;
+        const dyL = entity.moveTarget.ly - entity.leptonY;
+        const adx = Math.abs(dxL), ady = Math.abs(dyL);
+        const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+        const CLOSE_ENOUGH_LEPTONS = 704; // rules.ini CloseEnough=2.75 cells.
+        if (octDist < CLOSE_ENOUGH_LEPTONS) {
+          entity.moveTarget = null;
+          entity.path = [];
+          entity.pathIndex = 0;
+          return;
+        }
+      }
+      if (entryMove !== MoveResult.OCCUPIED) {
+        entity.path = [];
+        entity.pathIndex = 0;
+      }
+      return;
+    }
+
+    let followingFacing8 = nextFacing8;
+    const followingCell = entity.path[1];
+    if (followingCell) {
+      followingFacing8 = directionTo(nextTarget, {
+        x: followingCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: followingCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      });
+    }
+
+    const ctrl = lookupTrackControl(nextFacing8, followingFacing8);
+    // C++ drive.cpp:1207-1221 substitutes `nextface = facing` when Path[1]
+    // is FACING_NONE, then still honors TrackControl.F_D by checking the cell
+    // one more step beyond `dest`. Do not require an explicit second Path[]
+    // entry for a two-cell track; synthesize the implicit straight-ahead cell.
+    const longTrackCell = (ctrl.flag & F_D)
+      ? (followingCell ?? { cx: nextCell.cx + DIR_DX[followingFacing8], cy: nextCell.cy + DIR_DY[followingFacing8] })
+      : null;
+    const useLongTrack = !!(ctrl.flag & F_D) && longTrackCell !== null && ctrl.track > 0;
+    if (useLongTrack && longTrackCell) {
+      // C++ drive.cpp:1217-1250 validates the second cell of an F_D two-cell
+      // track before Start_Driver. If blocked, Path[0]=FACING_NONE and no
+      // track starts; the next DriveClass::AI pass recomputes Basic_Path.
+      const longMove = this.canEnterTrackJumpCell(entity, longTrackCell.cx, longTrackCell.cy);
+      if (longMove !== MoveResult.OK) {
+        this.stopDriveTrack(entity);
+        if (longMove === MoveResult.TEMP_BLOCKED) {
+          this.incomingNoThreatScatterCell(longTrackCell.cx, longTrackCell.cy, entity.id);
+        }
+        entity.path = [];
+        entity.pathIndex = 0;
+        entity.trackNumber = -1;
+        entity.trackControlIndex = -1;
+        entity.trackCellSpan = 1;
+        return;
+      }
+    }
+    const effectiveTrack = useLongTrack ? ctrl.track : getEffectiveTrack(ctrl);
+    if (effectiveTrack <= 0) {
+      entity.path = [];
+      entity.pathIndex = 0;
+      return;
+    }
+
+    entity.trackNumber = effectiveTrack;
+    entity.trackFlags = ctrl.flag & ~F_D;
+    entity.trackIndex = 0;
+    entity.trackCellSpan = useLongTrack ? 2 : 1;
+    entity.trackControlIndex = nextFacing8 * 8 + followingFacing8;
+    entity.speedAccum = 0;
+    entity.driveSpeed = this.driveSpeedThrottleRaw(entity, nextCell);
+
+    const trackTarget = useLongTrack
+      ? { x: longTrackCell!.cx * CELL_SIZE + CELL_SIZE / 2,
+          y: longTrackCell!.cy * CELL_SIZE + CELL_SIZE / 2 }
+      : nextTarget;
+    this.startDriveTrack(
+      entity,
+      Math.trunc(trackTarget.x / LP),
+      Math.trunc(trackTarget.y / LP),
+    );
+    this.consumeDrivePathFacings(entity, entity.trackCellSpan);
   }
 
   /** Move toward move target along path */
-  private updateMove(entity: Entity, fromGuardDrive = false): void {
-    // C++ PathDelay countdown (foot.cpp:463 — CDTimerClass decrements each frame)
-    if (entity.pathDelay > 0) entity.pathDelay--;
-
+  private updateMove(entity: Entity, fromGuardDrive = false, driveClassTrackReentry = false): void {
     // C++ vessel.cpp:592, 658 — vessel transports can't Commence (start moving)
     // until Is_Door_Closed() returns true. LST spawned with cargo has door open
     // and must wait for it to close (~25 ticks). Without this delay, LST reaches
@@ -6243,6 +8016,9 @@ export class Game {
       entity.animState = AnimState.IDLE;
       return;
     }
+
+    const hasInfantryHeadTo =
+      entity.stats.isInfantry && entity.isDriving && entity.headToLX > 0 && entity.headToLY > 0;
 
     // PCP Session 4 — InfantryClass::Movement_AI top-of-handler Enter_Idle_Mode
     // guard. Mirrors C++ infantry.cpp:3786-3788:
@@ -6254,19 +8030,37 @@ export class Game {
     // `MOVEMENT_AI_MOVE_NAVCOM_GUARD` (OFF by default) — see the flag
     // docstring in `perCellProcess.ts` for the cascade risk and rollout plan.
     //
-    // When ON, queues GUARD (or AREA_GUARD when guardOrigin is set) via
-    // missionQueue — the post-dispatch Commence block at ~index.ts:4380
-    // pops same-tick on infantry, matching WASM's Commence at
-    // infantry.cpp:1210. No RNG consumed.
+    // C++ Enter_Idle_Mode only calls Assign_Mission(order), which writes
+    // MissionQueue and leaves Mission unchanged. Since InfantryClass::AI has
+    // already passed its Commence gate by the time Movement_AI runs, this queue
+    // must NOT pop in the same movement pass. The next legal Commence handles it.
     if (MOVEMENT_AI_MOVE_NAVCOM_GUARD
         && !fromGuardDrive
         && entity.stats.isInfantry
         && (entity.mission as Mission) === Mission.MOVE
         && entity.moveTarget === null) {
-      entity.missionQueue = this.idleMission(entity);
-      // Do NOT reset missionTimer or clear path here — Enter_Idle_Mode in C++
-      // only calls Assign_Mission(order). Timer=0 fires via the subsequent
-      // Commence() pop in the same tick.
+      // C++ infantry.cpp:3786-3788 calls Enter_Idle_Mode() unconditionally.
+      // That routine uses Assign_Mission(), which overwrites an existing
+      // MissionQueue when the selected idle mission differs from current
+      // Mission. This matters when a reached MOVE destination left GUARD
+      // queued but TarCom is legal: C++ replaces the queue with ATTACK.
+      assignMission(entity, this.infantryEnterIdleMission(entity));
+      entity.animState = AnimState.IDLE;
+      // C++ infantry.cpp:3786-3788 calls Enter_Idle_Mode(), then continues
+      // through Movement_AI. If an active Head_To_Coord hop is already in
+      // progress, the IsDriving branch still advances it in this same pass.
+      // Only stationary/no-path units stop here; otherwise line 6596 would
+      // directly mutate Mission to GUARD instead of preserving the queued order.
+      if (!hasInfantryHeadTo && entity.path.length === 0) {
+        return;
+      }
+    }
+
+    // C++ InfantryClass::Movement_AI runs the NavCom/Enter_Idle_Mode guard
+    // above before this gate, then skips the movement body while a fire
+    // animation is active (infantry.cpp:3786-3790).
+    if (entity.stats.isInfantry && (entity.firePrepActive || entity.isFiringAnim)) {
+      return;
     }
 
     // C++ drive.cpp:1376 parity: when DriveClass::AI runs in Mission==GUARD
@@ -6276,13 +8070,33 @@ export class Game {
     // suppression so every arrival/abort path in updateMove honors it.
     const setMissionIdle = () => {
       if (!fromGuardDrive) {
-        entity.mission = this.idleMission(entity);
+        entity.mission = this.enterIdleMode(entity);
       }
     };
 
-    const hasInfantryHeadTo =
-      entity.stats.isInfantry && entity.isDriving && entity.headToLX > 0 && entity.headToLY > 0;
-    if (!entity.moveTarget && entity.path.length === 0 && !hasInfantryHeadTo) {
+    const hasActiveDriveTrackHeadTo =
+      !entity.stats.isInfantry &&
+      !entity.isAirUnit &&
+      usesTrackMovement(entity.stats.speedClass, false, false) &&
+      entity.isDriving &&
+      entity.trackNumber > 0 &&
+      (entity.headToLX !== 0 || entity.headToLY !== 0);
+
+    if (!entity.moveTarget && entity.path.length === 0 && !hasInfantryHeadTo && !hasActiveDriveTrackHeadTo) {
+      // C++ DriveClass::AI does not call Enter_Idle_Mode just because a
+      // drive-class unit has no NavCom/Path during its movement pass. In the
+      // non-driving/no-target branch it only Stop_Driver()s; FootClass::
+      // Mission_Move performs Enter_Idle_Mode later when its mission timer
+      // fires. This distinction matters for LST-unloaded UnitClass objects:
+      // their IsToScatter flag is consumed by UnitClass::Enter_Idle_Mode at
+      // mission-dispatch time, not by the generic driver loop.
+      if (!entity.stats.isInfantry &&
+          !entity.isAirUnit &&
+          (entity.mission as Mission) === Mission.MOVE &&
+          !fromGuardDrive) {
+        entity.animState = AnimState.IDLE;
+        return;
+      }
       setMissionIdle();
       entity.animState = AnimState.IDLE;
       return;
@@ -6390,24 +8204,94 @@ export class Game {
       };
 
       if ((entity.headToLX <= 0 || entity.headToLY <= 0) && entity.moveTarget) {
-        this.infantryStartDirectDriver(entity, entity.moveTarget);
+        // C++ infantry.cpp:3818-3856 — when NavCom is legal and Path[0] is
+        // FACING_NONE, Movement_AI calls Basic_Path(). If a path is found, it
+        // immediately Start_Driver()s the first path cell and returns without
+        // moving this tick. There is no direct long-range NavCom walk fallback.
+        if (entity.pathDelay > 0) return;
+
+        const goal = {
+          cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+          cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+        };
+        const pathGoal = this.resolveInfantryBasicPathGoal(entity, goal);
+        const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+        entity.pathDelay = PATH_DELAY_TICKS;
+
+        if (newPath.length > 0) {
+          this.setDrivePath(entity, newPath);
+          entity.pathThreshold = MOVE_CLOAK;
+          entity.tryCount = PATH_RETRY;
+          const firstCell = entity.path[0];
+          const started = this.infantryStartDriver(entity, firstCell.cx, firstCell.cy);
+          if (started) {
+            entity.isDriving = true;
+            entity.doing = 'walk';
+          }
+        } else {
+          // C++ Basic_Path failure path (infantry.cpp:3855-3902): if already
+          // close enough to NavCom, clear NavCom; otherwise decrement
+          // TryTryAgain and stop the driver for this tick.
+          const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
+          if (leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < closeEnough) {
+            entity.moveTarget = null;
+          } else if (entity.tryCount > 0) {
+            entity.tryCount--;
+          }
+          entity.isDriving = false;
+          entity.headToLX = 0;
+          entity.headToLY = 0;
+        }
+        return;
       }
 
       if (entity.headToLX > 0 && entity.headToLY > 0) {
-        if (!entity.moveTarget &&
-            entity.navComClearedTick !== this.tick) {
-          entity.headToLX = 0;
-          entity.headToLY = 0;
-          entity.isDriving = false;
-          entity.animState = AnimState.IDLE;
-          return;
-        }
-
+        // C++ InfantryClass::Movement_AI active-driver branch does not cancel
+        // an in-progress Head_To_Coord hop just because NavCom was cleared.
+        // It advances toward Head_To_Coord until Distance() < 0x10, then
+        // Stop_Driver()s; Mission_Move/Commence handle the queued idle mission
+        // on a later legal pass. Keeping this hop alive matters for patrol
+        // Assign_Mission_Target(TARGET_NONE), which clears NavCom while members
+        // are still walking.
         const speed = this.movementSpeed(entity);
         const headTo = { lx: entity.headToLX, ly: entity.headToLY };
         if (entity.moveToward(headTo, speed)) {
-          entity.headToLX = 0;
-          entity.headToLY = 0;
+          // C++ infantry.cpp:4004-4008: reaching Head_To_Coord always runs
+          // Per_Cell_Process(PCP_END) and Stop_Driver(), even when NavCom/path
+          // remains legal for another path cell.
+          this.stopInfantryDriver(entity);
+
+          // C++ infantry.cpp:3997 calls Per_Cell_Process(PCP_END) whenever
+          // an active Head_To_Coord hop completes. That is true even when a
+          // prior patrol scan has already cleared NavCom and Path[]; the hop
+          // still reaches its sub-cell destination and the queued idle mission
+          // must Commence here. SCG13EA dog 852083 hits this path after
+          // Assign_Mission_Target(TARGET_NONE) clears NavCom mid-walk.
+          if (FOOT_PER_CELL_ENABLED) {
+            this.cutInfantryTransportTether(entity);
+            const m = (entity.missionQueue ?? entity.mission) as Mission;
+            const pathShortenEligible = m === Mission.HUNT || m === Mission.AREA_GUARD
+                                        || m === Mission.ATTACK;
+            const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+            const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
+            footPerCellProcess(
+              entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+              PCPType.PCP_END,
+              {
+                hasLegalTarCom: liveTar,
+                inRadioContact: false,
+                pathShortenEligible,
+                targetInRange: inRangeNow,
+              },
+              {
+                guardMission: Mission.GUARD,
+                areaGuardMission: Mission.AREA_GUARD,
+                attackMission: Mission.ATTACK,
+                huntMission: Mission.HUNT,
+                rescueMission: Mission.RESCUE,
+              }
+            );
+          }
 
           if (entity.moveTarget &&
               leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 16) {
@@ -6418,13 +8302,98 @@ export class Game {
       return;
     }
 
-    if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-      const nextCell = entity.path[entity.pathIndex];
+    const activeDriveTrackWithoutPath =
+      !entity.stats.isInfantry &&
+      !entity.isAirUnit &&
+      usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft) &&
+      entity.trackNumber > 0 &&
+      (entity.headToLX !== 0 || entity.headToLY !== 0) &&
+      (entity.path.length === 0 || entity.pathIndex >= entity.path.length);
+
+    if ((entity.path.length > 0 && entity.pathIndex < entity.path.length) || activeDriveTrackWithoutPath) {
+      // C++ InfantryClass::Movement_AI has distinct !IsDriving and IsDriving
+      // branches. Once Start_Driver has selected HeadToCoord, later
+      // Mission_Move timer fires must NOT call Start_Driver again; they only
+      // Coord_Move toward the preserved HeadToCoord. Re-starting here changes
+      // the sub-cell slot mid-hop, which drifts the unit off the C++ path
+      // (SCG06EA BadGuy E1 around ticks 11-66).
+      if (entity.stats.isInfantry && entity.isDriving && entity.headToLX > 0 && entity.headToLY > 0) {
+        const headTo = { lx: entity.headToLX, ly: entity.headToLY };
+        if (entity.moveToward(headTo, this.movementSpeed(entity))) {
+	          const reachedNavComCell =
+	            entity.moveTarget !== null &&
+	            entity.cell.cx === Math.floor(entity.moveTarget.lx / LEPTON_SIZE) &&
+	            entity.cell.cy === Math.floor(entity.moveTarget.ly / LEPTON_SIZE);
+	          entity.pathIndex++;
+          // C++ infantry.cpp:4004-4008: every completed infantry sub-cell hop
+          // calls Stop_Driver(). A later AI pass may Start_Driver() for the next
+          // path cell; it does not happen again inside the same Movement_AI pass.
+          this.stopInfantryDriver(entity);
+          if (FOOT_PER_CELL_ENABLED) {
+            // InfantryClass::Per_Cell_Process calls Commence() before chaining to
+            // FootClass::Per_Cell_Process path-shorten. Compute eligibility against
+            // the mission that will be visible after that per-cell Commence pop.
+            this.cutInfantryTransportTether(entity);
+            const m = (entity.missionQueue ?? entity.mission) as Mission;
+            const pathShortenEligible = m === Mission.HUNT || m === Mission.AREA_GUARD
+                                        || m === Mission.ATTACK;
+            const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+            const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
+            footPerCellProcess(
+              entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
+              PCPType.PCP_END,
+              {
+                hasLegalTarCom: liveTar,
+                inRadioContact: false,
+                pathShortenEligible,
+                targetInRange: inRangeNow,
+              },
+              {
+                guardMission: Mission.GUARD,
+                areaGuardMission: Mission.AREA_GUARD,
+                attackMission: Mission.ATTACK,
+                huntMission: Mission.HUNT,
+                rescueMission: Mission.RESCUE,
+              }
+            );
+          }
+
+          // C++ infantry.cpp:3992-4008 — after reaching Head_To_Coord,
+          // Movement_AI checks whether the infantry is now in NavCom's cell.
+          // If so, NavCom is cleared immediately and Mission_Move enters idle
+          // mode. The infantry does not keep walking to the cell center.
+          if (reachedNavComCell) {
+            entity.moveTarget = null;
+            entity.path = [];
+            entity.pathIndex = 0;
+            resetPathThreshold(entity);
+            if ((entity.mission as Mission) === Mission.MOVE) {
+              const idleMission = this.infantryEnterIdleMission(entity);
+              if (entity.mission !== idleMission) entity.missionQueue = idleMission;
+            }
+          }
+        }
+        return;
+      }
+
+      let nextCell = entity.path[entity.pathIndex];
+      if (entity.stats.isInfantry && this.skipInfantryPathCurrentCell(entity)) {
+        nextCell = entity.path[entity.pathIndex];
+      }
+      if (entity.stats.isInfantry && !nextCell) return;
+      const driveTrackActive =
+        !entity.stats.isInfantry &&
+        usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft) &&
+        entity.trackNumber > 0;
+      if (!driveTrackActive && this.skipDrivePathCurrentCell(entity)) {
+        nextCell = entity.path[entity.pathIndex];
+      }
       // Safety check: verify next path cell is still passable (terrain may have changed since path was calculated)
-      const terrainOk = entity.isNavalUnit
+      const terrainOk = !nextCell || (entity.isNavalUnit
         ? this.map.isWaterPassable(nextCell.cx, nextCell.cy)
-        : this.map.isTerrainPassable(nextCell.cx, nextCell.cy);
-      if (!terrainOk && entity.moveTarget) {
+        : (this.map.isTerrainPassable(nextCell.cx, nextCell.cy) ||
+           this.isAuthorizedBuildingEnterCell(entity, nextCell.cx, nextCell.cy)));
+      if (!driveTrackActive && !terrainOk && entity.moveTarget) {
         // C++ PathThreshhold escalation (foot.cpp:396-411, drive.cpp:989-996)
         // Respect PathDelay timer before retrying (C++ foot.cpp:463)
         if (entity.pathDelay > 0) {
@@ -6442,8 +8411,7 @@ export class Game {
             entity.isNavalUnit, entity.stats.speedClass
           );
           if (newPath.length > 0) {
-            entity.path = newPath;
-            entity.pathIndex = 0;
+            this.setDrivePath(entity, newPath);
             entity.trackNumber = -1; entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
             // Successful path — reset threshold (C++ drive.cpp:1050)
@@ -6476,11 +8444,56 @@ export class Game {
         }
         return;
       }
+
+      if (entity.stats.isInfantry && nextCell && entity.moveTarget) {
+        // C++ infantry.cpp:3828-3836 — before Start_Driver, InfantryClass::
+        // Movement_AI validates the cached Path[0] with Can_Enter_Cell().
+        // If the cell is no longer MOVE_OK (for example a moving vehicle has
+        // reserved it), it invalidates the path and immediately retries
+        // Basic_Path when PathDelay allows. This is distinct from vehicle
+        // threshold pathing: infantry Start_Driver requires exactly MOVE_OK.
+        const canStart = this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy);
+        if (canStart !== MoveResult.OK) {
+          entity.path = [];
+          entity.pathIndex = 0;
+          if (entity.pathDelay > 0) return;
+
+          const goal = {
+            cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+            cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+          };
+          const pathGoal = this.resolveInfantryBasicPathGoal(entity, goal);
+          const newPath = this.findDriveClassBasicPath(entity, pathGoal);
+          entity.pathDelay = PATH_DELAY_TICKS;
+          if (newPath.length === 0) {
+            const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
+            if (leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < closeEnough &&
+                !entity.isTethered) {
+              entity.moveTarget = null;
+            } else if (entity.tryCount > 0) {
+              entity.tryCount--;
+            } else {
+              entity.moveTarget = null;
+              entity.pathThreshold = MOVE_CLOAK;
+            }
+            return;
+          }
+
+          this.setDrivePath(entity, newPath);
+          nextCell = entity.path[0];
+        }
+      }
+
       // Check if next cell is blocked by another unit — recalculate path (with cooldown)
       // C++ infantry sub-cell system: infantry can share cells if sub-cells are available
-      const occ = this.map.getOccupancy(nextCell.cx, nextCell.cy);
-      const infantryCanEnter = entity.stats.isInfantry && this.map.hasAvailableSubCell(nextCell.cx, nextCell.cy);
-      if (occ > 0 && occ !== entity.id && !infantryCanEnter && entity.moveTarget) {
+      const occ = nextCell ? this.map.getOccupancy(nextCell.cx, nextCell.cy) : 0;
+      const infantryCanEnter = !!nextCell && entity.stats.isInfantry && this.map.hasAvailableSubCell(nextCell.cx, nextCell.cy);
+      const legacyPreTrackOccupancyCheck =
+        !entity.stats.isInfantry &&
+        (entity.isAirUnit ||
+         !usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft));
+      if (legacyPreTrackOccupancyCheck &&
+          !driveTrackActive && occ > 0 && occ !== entity.id && !infantryCanEnter && entity.moveTarget) {
         // Phase 3 v3 — port C++ drive.cpp:1102-1105 reactive close-enough.
         //
         // C++ Start_Of_Move track-start branch (drive.cpp:1087-1146):
@@ -6527,22 +8540,12 @@ export class Game {
             }
           }
         }
-        // PF2: "Tell blocking unit to move" (C++ drive.cpp — nudge idle friendly units aside)
         const blocker = this.entityById.get(occ);
-        if (blocker?.alive && this.entitiesAllied(entity, blocker) &&
-            blocker.mission !== Mission.MOVE && blocker.mission !== Mission.ATTACK &&
-            !blocker.moveTarget) {
-          // Find adjacent free cell for the blocker to step into
-          for (const [ndx, ndy] of [[0,-1],[1,0],[0,1],[-1,0],[1,-1],[1,1],[-1,1],[-1,-1]]) {
-            const adjX = blocker.cell.cx + ndx;
-            const adjY = blocker.cell.cy + ndy;
-            if (this.map.isPassable(adjX, adjY) && this.map.getOccupancy(adjX, adjY) === 0) {
-              blocker.moveTarget = { lx: adjX * 256 + 128, ly: adjY * 256 + 128 };
-              blocker.mission = Mission.MOVE;
-              blocker.animState = AnimState.WALK;
-              break;
-            }
-          }
+        if (blocker?.alive && this.entitiesAllied(entity, blocker)) {
+          // C++ drive.cpp:1122-1124 / CellClass::Incoming: friendly temporary
+          // blockers are asked to Scatter(0,true,true), which assigns NavCom
+          // without changing their current mission.
+          this.incomingNoThreatScatterCell(nextCell.cx, nextCell.cy, entity.id);
         }
         // C++ PathThreshhold escalation (foot.cpp:396-411, drive.cpp:989-996)
         if (entity.pathDelay > 0) {
@@ -6559,8 +8562,7 @@ export class Game {
             entity.isNavalUnit, entity.stats.speedClass
           );
           if (newPath.length > 0) {
-            entity.path = newPath;
-            entity.pathIndex = 0;
+            this.setDrivePath(entity, newPath);
             entity.trackNumber = -1; entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
             entity.pathThreshold = MOVE_CLOAK;
@@ -6592,61 +8594,113 @@ export class Game {
         entity.pathThreshold = MOVE_CLOAK;
         entity.tryCount = PATH_RETRY;
       }
+      // C++ infantry.cpp:3930-3975: the !IsDriving Movement_AI branch calls
+      // Start_Driver(), sets the DO_WALK action, and returns. It does not fall
+      // through to Coord_Move on the same tick; movement starts on the next
+      // IsDriving branch. Keeping this split is visible at sub-cell boundaries
+      // (SCG06EA BadGuy E1): otherwise TS starts the next hop one tick early.
+      if (entity.stats.isInfantry) {
+        const started = this.infantryStartDriver(entity, nextCell.cx, nextCell.cy);
+        if (started) {
+          entity.isDriving = true;
+          entity.doing = 'walk';
+        }
+        return;
+      }
+
       // C++ infantry: InfantryClass::Start_Driver uses Closest_Free_Spot for sub-cell
       let target: LeptonPos;
-      if (entity.stats.isInfantry) {
-        target = this.infantryStartDriver(entity, nextCell.cx, nextCell.cy);
-      } else {
-        target = { lx: nextCell.cx * 256 + 128, ly: nextCell.cy * 256 + 128 };
-      }
-      const speed = this.movementSpeed(entity, nextCell);
+      target = nextCell
+        ? { lx: nextCell.cx * 256 + 128, ly: nextCell.cy * 256 + 128 }
+        : { lx: entity.headToLX, ly: entity.headToLY };
+      const speed = nextCell ? this.driveSpeedThrottleRaw(entity, nextCell) : (entity.driveSpeed || this.driveSpeedThrottleRaw(entity));
       // MV1: Track-table movement for vehicles (C++ drive.cpp smooth turning)
       // Uses C++ TrackControl table to select pre-computed curved paths.
       // Track offsets are relative to target cell center, transformed via Smooth_Turn flags.
       // C++ parity: UnitClass::Per_Cell_Process (unit.cpp:1610-1884) +
       // DriveClass::Per_Cell_Process (drive.cpp:844-865).
       //
-      // Boundary dispatch: each time a vehicle finishes entering a cell
-      // (PCP_END), C++ runs sub-cases in order — Commence (unit.cpp:1756),
-      // NavCom-at-dest clear (drive.cpp:869-873), mine blow, flag pickup,
-      // etc. For now the hook does only the NavCom clear (legacy behavior);
-      // see `perCellProcess.ts` header for the gated Commence port and the
-      // remaining sub-cases (transport, flag, mine).
+      // Boundary dispatch: each time a vehicle/vessel finishes entering a
+      // cell (PCP_END), C++ runs sub-cases in order — Commence (unit.cpp:1756),
+      // DriveClass NavCom-at-dest clear (drive.cpp:869-873), then shared
+      // FootClass path-shorten (foot.cpp:1471-1483), plus later sub-cases.
+      // See `perCellProcess.ts` header for the remaining transport/flag/mine
+      // work.
       //
       // Returns `true` when NavCom was cleared, signalling the caller to
       // halt further movement this tick (matches C++ While_Moving break
       // after Per_Cell_Process at drive.cpp:820).
       const perCellNavComCheck = (skipCommence: boolean = false): boolean => {
-        const r = unitPerCellProcess(entity, PCPType.PCP_END, { skipCommence });
+        const m = (entity.missionQueue ?? entity.mission) as Mission;
+        const pathShortenEligible =
+          m === Mission.RESCUE ||
+          m === Mission.AREA_GUARD ||
+          m === Mission.ATTACK ||
+          m === Mission.HUNT;
+        const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+        const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
+        this.cutTransportTether(entity);
+        const r = unitPerCellProcess(entity, PCPType.PCP_END, {
+          skipCommence,
+          hasLegalTarCom: liveTar,
+          pathShortenEligible,
+          targetInRange: inRangeNow,
+        });
         if (r.commenceFired) entity._commenceFiredThisTick = true;
         return r.navComCleared;
       };
 
       if (usesTrackMovement(entity.stats.speedClass, !!entity.stats.isInfantry, !!entity.stats.isAircraft)) {
-        // C++ drive.cpp AI() pattern: seamless track chaining on the same tick.
-        // When a track completes, immediately initiate the next track and continue
-        // following it with the remaining movement budget (no one-tick gap).
-        const MAX_CHAIN = 4; // guard against infinite loops
+        if (this.isDriveClassPathEntity(entity) &&
+            entity.trackNumber <= 0 &&
+            entity.path.length > 0 &&
+            entity.pathIndex < entity.path.length &&
+            entity.drivePathFacings.length === 0) {
+          entity.drivePathFacings = this.deriveDrivePathFacings(entity.cell, entity.path.slice(entity.pathIndex));
+        }
+        // C++ drive.cpp: Start_Of_Move/While_Moving executes one movement-budget
+        // pass per call. DriveClass::AI may invoke that pair a second time when
+        // the current track completes with path remaining (drive.cpp:1340-1345);
+        // runDriveClassAI owns that outer two-pass loop. Do not chain multiple
+        // fresh movement budgets here, or fast vessels can consume several path
+        // cells in one TS update where C++ would only spend one While_Moving
+        // budget.
+        const MAX_CHAIN = 1;
         for (let chain = 0; chain < MAX_CHAIN; chain++) {
           // Recompute target for current pathIndex (may have advanced via chaining)
           const chainCell = entity.path[entity.pathIndex];
-          if (!chainCell) break;
-          const chainTarget: WorldPos = {
-            x: chainCell.cx * CELL_SIZE + CELL_SIZE / 2,
-            y: chainCell.cy * CELL_SIZE + CELL_SIZE / 2,
-          };
-          const chainTargetLP: LeptonPos = {
-            lx: chainCell.cx * 256 + 128,
-            ly: chainCell.cy * 256 + 128,
-          };
+          const hasActiveTrackTarget = entity.trackNumber > 0 && (entity.headToLX !== 0 || entity.headToLY !== 0);
+          if (!chainCell && !hasActiveTrackTarget) break;
+          const chainTarget: WorldPos = chainCell
+            ? {
+                x: chainCell.cx * CELL_SIZE + CELL_SIZE / 2,
+                y: chainCell.cy * CELL_SIZE + CELL_SIZE / 2,
+              }
+            : {
+                // C++ DriveClass::Assign_Destination can clear Path[0] while
+                // IsDriving, but While_Moving continues the active track toward
+                // Head_To_Coord. TS stores that reservation in headToLX/headToLY.
+                x: leptonToPixel(entity.headToLX),
+                y: leptonToPixel(entity.headToLY),
+              };
+          const chainTargetLP: LeptonPos = chainCell
+            ? { lx: chainCell.cx * 256 + 128, ly: chainCell.cy * 256 + 128 }
+            : { lx: entity.headToLX, ly: entity.headToLY };
 
           if (entity.trackNumber > 0) {
             // Currently following a track — advance along it
-            // Long 2-cell tracks target the cell AFTER chainCell (entity.trackCellSpan=2)
-            const trackTarget = entity.trackCellSpan === 2 && entity.path[entity.pathIndex + 1]
-              ? { x: entity.path[entity.pathIndex + 1].cx * CELL_SIZE + CELL_SIZE / 2,
-                  y: entity.path[entity.pathIndex + 1].cy * CELL_SIZE + CELL_SIZE / 2 }
-              : chainTarget;
+            // C++ DriveClass::While_Moving follows Head_To_Coord, not the
+            // current Path[0] entry. This matters after track jumping:
+            // drive.cpp:766-790 starts the new track toward
+            // `Adjacent_Cell(Head_To_Coord(), nextface)` but only shifts Path by
+            // one entry, so path[pathIndex] still names the previous head-to
+            // cell. Use Head_To_Coord as the authoritative active-track target.
+            const trackTarget = (entity.headToLX !== 0 || entity.headToLY !== 0)
+              ? { x: leptonToPixel(entity.headToLX), y: leptonToPixel(entity.headToLY) }
+              : (entity.trackCellSpan === 2 && entity.path[entity.pathIndex + 1]
+                  ? { x: entity.path[entity.pathIndex + 1].cx * CELL_SIZE + CELL_SIZE / 2,
+                      y: entity.path[entity.pathIndex + 1].cy * CELL_SIZE + CELL_SIZE / 2 }
+                  : chainTarget);
             if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
               // Track complete — vehicle is at target cell center
               entity.pathIndex += entity.trackCellSpan;
@@ -6661,6 +8715,46 @@ export class Game {
             break; // Track not yet complete — done for this tick
           }
 
+          // C++ DriveClass::AI (drive.cpp:1358-1379) handles in-place body
+          // rotation before Start_Of_Move. If PrimaryFacing is already rotating
+          // at AI entry, it calls Rotation_Adjust and returns; it does not
+          // re-run Can_Enter_Cell or start a track in that same tick.
+          if (!driveClassTrackReentry && !entity.stats.isInfantry && !entity.isAirUnit) {
+            if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+            const currentDesired256 = entity.desiredFacing256 >= 0
+              ? (entity.desiredFacing256 & 0xff)
+              : ((entity.desiredFacing * 32) & 0xff);
+            if (entity.bodyFacing256 !== currentDesired256) {
+              entity.tickRotation();
+              break;
+            }
+          }
+
+          // Need to initiate a new track for this cell-to-cell segment
+          // C++ uses Path[0] as the new track facing. This is the cell-to-cell
+          // direction, not the direction from the current sub-cell/lepton
+          // position to the next cell center. The distinction matters after
+          // curved tracks, where the object may still be vertically offset.
+          const nextFacing8 = directionTo({
+            x: entity.cell.cx * CELL_SIZE + CELL_SIZE / 2,
+            y: entity.cell.cy * CELL_SIZE + CELL_SIZE / 2,
+          }, chainTarget);
+
+          // C++ drive.cpp:1340-1346 checks PrimaryFacing.Is_Rotating()
+          // before Rotation_Adjust. If the final adjustment reaches DesiredFacing
+          // this tick, Start_Of_Move still waits until the next tick.
+          if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xff;
+          if (entity.bodyFacing256 !== ((nextFacing8 * 32) & 0xff)) {
+            // C++ Start_Of_Move calls Do_Turn(dir) here (drive.cpp:1098-1105),
+            // which only sets PrimaryFacing.Desired. Rotation_Adjust is handled
+            // by DriveClass::AI on following ticks.
+            entity.desiredFacing = nextFacing8;
+            entity.desiredFacing256 = (nextFacing8 * 32) & 0xff;
+            break;
+          }
+          entity.desiredFacing = nextFacing8;
+          entity.desiredFacing256 = (nextFacing8 * 32) & 0xff;
+
           const entryMove = (!entity.stats.isInfantry && !entity.isAirUnit)
             ? this.canEnterTrackJumpCell(entity, chainCell.cx, chainCell.cy)
             : MoveResult.OK;
@@ -6669,6 +8763,31 @@ export class Game {
             entity.trackNumber = -1;
             entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
+            if (entryMove === MoveResult.TEMP_BLOCKED) {
+              this.incomingNoThreatScatterCell(chainCell.cx, chainCell.cy, entity.id);
+            }
+            if (DRIVE_CLASS_AI_PORT
+                && entity.mission === Mission.MOVE
+                && !entity.stats.isInfantry
+                && !entity.isAirUnit
+                && entity.moveTarget) {
+              const CLOSE_ENOUGH_LEPTONS = 704;
+              const dxL = entity.moveTarget.lx - entity.leptonX;
+              const dyL = entity.moveTarget.ly - entity.leptonY;
+              const adx = Math.abs(dxL), ady = Math.abs(dyL);
+              const octDist = adx > ady ? adx + (ady >> 1) : ady + (adx >> 1);
+              if (octDist < CLOSE_ENOUGH_LEPTONS) {
+                // drive.cpp:1114-1158: blocked track-start while close enough
+                // calls Assign_Destination(TARGET_NONE), stops the driver, and
+                // returns. It does not Enter_Idle_Mode; FootClass::Mission_Move
+                // handles that on a later timer fire.
+                entity.moveTarget = null;
+                entity.path = [];
+                entity.pathIndex = 0;
+                resetPathThreshold(entity);
+                break;
+              }
+            }
             if (entryMove === MoveResult.DESTROYABLE || entryMove === MoveResult.IMPASSABLE) {
               entity.moveTarget = null;
               entity.path = [];
@@ -6677,19 +8796,6 @@ export class Game {
               resetPathThreshold(entity);
             }
             break;
-          }
-
-          // Need to initiate a new track for this cell-to-cell segment
-          const nextFacing8 = directionTo(entity.pos, chainTarget);
-
-          // Fix 4: Pre-rotation before track start (C++ drive.cpp:1054-1073 Do_Turn)
-          // Entity must face the movement direction before track selection.
-          if (entity.facing !== nextFacing8) {
-            entity.desiredFacing = nextFacing8;
-            entity.tickRotation();
-            if (entity.facing !== nextFacing8) {
-              break; // Still rotating — wait for alignment before starting track
-            }
           }
 
           // Fix 3: Path lookahead for track selection (C++ Path[0]*8 + Path[1])
@@ -6705,11 +8811,32 @@ export class Game {
 
           const ctrl = lookupTrackControl(nextFacing8, followingFacing8);
 
-          // Long 2-cell tracks: when F_D is set and a following cell exists,
-          // use the full long track (ctrl.track) targeting the SECOND cell ahead.
-          // Step 0 of long tracks starts ~2 cells from target, which matches the
-          // entity's current position (~1px offset vs 23px for short tracks).
-          const useLongTrack = !!(ctrl.flag & F_D) && followingCell && ctrl.track > 0;
+          // Long 2-cell tracks: C++ does not require Path[1] to exist. When it
+          // is FACING_NONE, Start_Of_Move sets `nextface = facing` and F_D
+          // still checks/targets the implicit second straight-ahead cell
+          // (drive.cpp:1207-1221).
+          const longTrackCell = (ctrl.flag & F_D)
+            ? (followingCell ?? { cx: chainCell.cx + DIR_DX[followingFacing8], cy: chainCell.cy + DIR_DY[followingFacing8] })
+            : null;
+          const useLongTrack = !!(ctrl.flag & F_D) && longTrackCell !== null && ctrl.track > 0;
+          if (useLongTrack && longTrackCell) {
+            // C++ drive.cpp:1217-1250: an F_D long track checks the second
+            // cell before it shifts Path[] by two entries. If blocked, it
+            // clears Path[0] and does not start a track.
+            const longMove = this.canEnterTrackJumpCell(entity, longTrackCell.cx, longTrackCell.cy);
+            if (longMove !== MoveResult.OK) {
+              this.stopDriveTrack(entity);
+              if (longMove === MoveResult.TEMP_BLOCKED) {
+                this.incomingNoThreatScatterCell(longTrackCell.cx, longTrackCell.cy, entity.id);
+              }
+              entity.path = [];
+              entity.pathIndex = 0;
+              entity.trackNumber = -1;
+              entity.trackControlIndex = -1;
+              entity.trackCellSpan = 1;
+              break;
+            }
+          }
           const effectiveTrack = useLongTrack ? ctrl.track : getEffectiveTrack(ctrl);
 
           if (effectiveTrack > 0) {
@@ -6720,10 +8847,15 @@ export class Game {
             entity.trackCellSpan = useLongTrack ? 2 : 1;
             entity.trackControlIndex = nextFacing8 * 8 + followingFacing8; // C++ TrackNumber (TC index)
             entity.speedAccum = 0; // C++: fresh budget per While_Moving() call
+            // C++ drive.cpp:1164-1190 computes FootClass::Speed once in
+            // Start_Of_Move from the destination terrain. While_Moving reuses
+            // that throttle until the next Start_Of_Move; track jumps preserve
+            // it explicitly with oldspeed/Set_Speed(oldspeed) (drive.cpp:767-788).
+            entity.driveSpeed = speed;
             // Long tracks target the SECOND cell ahead; short tracks target the next cell
             const trackTarget = useLongTrack
-              ? { x: followingCell!.cx * CELL_SIZE + CELL_SIZE / 2,
-                  y: followingCell!.cy * CELL_SIZE + CELL_SIZE / 2 }
+              ? { x: longTrackCell!.cx * CELL_SIZE + CELL_SIZE / 2,
+                  y: longTrackCell!.cy * CELL_SIZE + CELL_SIZE / 2 }
               : chainTarget;
             // C++ UnitClass/VesselClass::Start_Driver reserves HeadToCoord via
             // DriveClass::Mark_Track before While_Moving advances.
@@ -6732,6 +8864,7 @@ export class Game {
               Math.trunc(trackTarget.x / LP),
               Math.trunc(trackTarget.y / LP),
             );
+            this.consumeDrivePathFacings(entity, entity.trackCellSpan);
             // Follow first step this tick
             if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
               entity.pathIndex += entity.trackCellSpan;
@@ -6743,18 +8876,18 @@ export class Game {
             }
             break; // Track not yet complete
           } else {
-            // Impossible turn (Track=0) — free-form fallback with rotation
-            entity.desiredFacing = nextFacing8;
-            entity.tickRotation();
-            if (entity.facing === nextFacing8) {
-              // Facing correct, now move
-              if (entity.moveToward(chainTargetLP, speed)) {
-                entity.pathIndex++;
-                // C++ DriveClass::Per_Cell_Process PCP_END: clear NavCom at destination cell
-                perCellNavComCheck(true);
-              }
-            }
-            break; // Free-form doesn't chain
+            // C++ drive.cpp:1239-1242: if TrackControl[facing*8+nextface].Track
+            // is zero, Start_Of_Move clears Path[0], leaves TrackNumber=-1, and
+            // returns. It does NOT free-form slide toward the next cell. The next
+            // DriveClass::AI pass will recompute Basic_Path while NavCom remains
+            // legal. TS used to moveToward here, which let tracked vehicles drift
+            // before C++ had started a driver (SCG04EA MNLY t13/t21).
+            entity.path = [];
+            entity.pathIndex = 0;
+            entity.trackNumber = -1;
+            entity.trackControlIndex = -1;
+            entity.trackCellSpan = 1;
+            break;
           }
         }
       } else {
@@ -6773,15 +8906,18 @@ export class Game {
           // to GUARD with Timer=0 — one tick earlier than the current Mission.MOVE
           // handler's missionTimerFired path (which matches WASM behavior).
           if (FOOT_PER_CELL_ENABLED && entity.stats.isInfantry) {
+            this.cutInfantryTransportTether(entity);
             // C++ foot.cpp:1479 — path-shorten applies in attack-type missions only.
             // At this updateMove site mission is typically MOVE; include the whole
             // set here for correctness so cross-mission callers (e.g. updateMove
             // called from Mission.GUARD drive-in-GUARD) behave consistently.
-            const m = entity.mission as Mission;
+            // InfantryClass::Per_Cell_Process runs Commence() before the chained
+            // FootClass path-shorten check, so use the queued mission if present.
+            const m = (entity.missionQueue ?? entity.mission) as Mission;
             const pathShortenEligible = m === Mission.HUNT || m === Mission.AREA_GUARD
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
-            const inRangeNow = !!(entity.target?.alive) && entity.inRange(entity.target);
+            const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
             footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
@@ -6790,16 +8926,28 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
-                // Phase 4 — cell-boundary Approach_Target re-fire. Gated by
-                // APPROACH_TARGET_REFIRE_ON_CELL_BOUNDARY (default OFF).
-                approachTargetRefire: (e) => this.approachTarget(e as Entity),
               },
-              { guardMission: Mission.GUARD, areaGuardMission: Mission.AREA_GUARD }
+              {
+                guardMission: Mission.GUARD,
+                areaGuardMission: Mission.AREA_GUARD,
+                attackMission: Mission.ATTACK,
+                huntMission: Mission.HUNT,
+                rescueMission: Mission.RESCUE,
+              }
             );
           }
         }
       }
     } else if (entity.moveTarget) {
+      if (!entity.stats.isInfantry && !entity.isAirUnit &&
+          usesTrackMovement(entity.stats.speedClass, false, false)) {
+        // C++ DriveClass never free-form slides a vehicle/vessel toward NavCom
+        // when Path[] is empty. DriveClass::AI enters Start_Of_Move, which
+        // either regenerates Basic_Path, requests a turn, starts a track, or
+        // leaves TrackNumber=-1 with no movement (drive.cpp:918-1402).
+        // Returning here prevents TS-only drift before a real track starts.
+        return;
+      }
       // C++ drive.cpp only accepts "close enough" as a fallback when pathing is blocked.
       // A direct move order should otherwise continue to the exact commanded cell.
       const closeEnough = 2.75; // rules.ini [General] CloseEnough=2.75 (overrides C++ default 0x0280)
@@ -6853,7 +9001,6 @@ export class Game {
           if (!passable || occBlocked) {
             // C++ PathThreshhold escalation (foot.cpp:396-411, drive.cpp:989-996)
             if (entity.pathDelay > 0) {
-              entity.pathDelay--;
               return;
             }
             entity.lastPathRecalc = this.tick;
@@ -6867,8 +9014,7 @@ export class Game {
                 entity.isNavalUnit, entity.stats.speedClass
               );
               if (newPath.length > 0) {
-                entity.path = newPath;
-                entity.pathIndex = 0;
+                this.setDrivePath(entity, newPath);
                 entity.pathThreshold = MOVE_CLOAK;
                 entity.tryCount = PATH_RETRY;
                 pathFound3 = true;
@@ -6987,7 +9133,7 @@ export class Game {
           // C++ house.cpp:6911: val = Distance(coord, unit->Center_Coord())
           let val = worldDist(heli.pos, other.pos);
           // C++ house.cpp:6913: if (unit->Anti_Air()) val *= 2 — penalize AA
-          if (other.weapon?.isAA || other.weapon2?.isAA) val *= 2;
+          if (other.weapon?.isAntiAir || other.weapon2?.isAntiAir) val *= 2;
           // C++ house.cpp:6915: if (*unit == UNIT_HARVESTER) val /= 2 — prioritize harvesters
           if (other.type === UnitType.V_HARV) val /= 2;
 
@@ -7079,6 +9225,53 @@ export class Game {
     return juicyFound;
   }
 
+  /** C++ FootClass::Detach_All / ObjectClass::Detach_All(false).
+   *  Used by TechnoClass::Do_Cloak before a cloakable unit enters CLOAKING.
+   *  FootClass::Detach_All first removes team membership (foot.cpp:1848-1853),
+   *  then Techno/Object detach clears target computers and team Target refs.
+   *  all=false does not clear BulletClass TarCom (bullet.cpp:653 gates that on
+   *  all=true). */
+  private detachEntityFromTargeting(entity: Entity, all: boolean): void {
+    if (entity.teamRef) {
+      entity.teamRef.remove(entity, {
+        entities: this.entities,
+        map: this.map,
+        tick: this.tick,
+        canEnterCell: (e: Entity, cx: number, cy: number) => this.canEnterTrackJumpCell(e, cx, cy) === MoveResult.OK,
+        startDriveClassMove: (e: Entity) => this.startDriveClassMove(e),
+        stopInfantryDriver: (e: Entity) => this.stopInfantryDriver(e),
+        canStopInfantryDriverForAssignDestination: (e: Entity) => this.canStopInfantryDriverForAssignDestination(e),
+      });
+    }
+
+    for (const other of this.entities) {
+      if (other.id === entity.id) continue;
+      if (other.target === entity) {
+        other.target = null;
+        other.firePrepActive = false;
+        other.firePrepStage = 0;
+        other.firePrepUsesDoingStage = false;
+        if (other.stats.isInfantry) {
+          other.isFiringAnim = false;
+          other.firingAnimTicks = 0;
+        }
+      }
+    }
+
+    for (const team of getActiveTeams()) {
+      team.detachTargetEntity(entity);
+    }
+
+    for (const proj of this.inflightProjectiles) {
+      if (proj.attackerId === entity.id && proj.dogRiderId !== entity.id) {
+        proj.attackerId = -1;
+      }
+      if (all && proj.targetId === entity.id) {
+        proj.targetId = -1;
+      }
+    }
+  }
+
   /** Submarine cloaking state machine — manages cloak transitions for SS/MSUB.
    *  Auto-cloaks when idle + no enemies within 3 cells + sonarPulseTimer === 0.
    *  Auto-uncloaks when firing or taking damage (handled in entity.takeDamage). */
@@ -7089,8 +9282,34 @@ export class Game {
       case CloakState.CLOAKING:
         entity.cloakTimer--;
         if (entity.cloakTimer <= 0) {
+          // C++ techno.cpp:2512-2531 — when Visual_Character reaches
+          // VISUAL_HIDDEN, Cloak becomes CLOAKED and then Detach_All(false)
+          // runs again. For FootClass this virtual dispatch removes the unit
+          // from its team while preserving NavCom/path.
           entity.cloakState = CloakState.CLOAKED;
           entity.cloakTimer = 0;
+          this.detachEntityFromTargeting(entity, false);
+        } else {
+          // C++ techno.cpp:2488-2503 — while CLOAKING, low-health units
+          // can fail to stabilize during the VISUAL_DARKEN band and flip
+          // back to UNCLOAKING on Percent_Chance(25). Visual_Character(true)
+          // maps CloakingDevice stage 10..18 to VISUAL_DARKEN:
+          // fixed(stage, MAX_UNCLOAK_STAGE=38) * 256 in [0x40, 0x80).
+          const cloakStage = CLOAK_TRANSITION_FRAMES - entity.cloakTimer;
+          const rawVisualStage = Math.floor((cloakStage * 256) / CLOAK_TRANSITION_FRAMES);
+          if (rawVisualStage >= 0x40 && rawVisualStage < 0x80 &&
+              entity.hp / entity.maxHp <= CONDITION_RED) {
+            const savedTag = ScenarioRandom._sourceTag;
+            if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60091;
+            const shouldUncloak = ScenarioRandom.percentChance(25);
+            if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+            if (shouldUncloak) {
+              // C++ only changes Cloak=UNCLOAKING here; it does not reset
+              // CloakingDevice stage/rate. Keeping cloakTimer preserves the
+              // remaining distance back to VISUAL_NORMAL.
+              entity.cloakState = CloakState.UNCLOAKING;
+            }
+          }
         }
         break;
       case CloakState.UNCLOAKING:
@@ -7107,11 +9326,25 @@ export class Game {
         if (entity.sonarPulseTimer > 0) break;
         // C++ techno.cpp:2599: CloakDelay != 0 -> don't cloak (cooldown active)
         if (entity.cloakDelay > 0) break;
+        // C++ techno.cpp:2594: Target_Legal(TarCom) && In_Range(TarCom)
+        // blocks recloaking even if the weapon cannot fire yet due facing.
+        if (entity.target?.alive && entity.inRange(entity.target)) break;
         if (entity.mission === Mission.ATTACK) break; // don't cloak while attacking
         // CL4: Don't cloak while weapon is on cooldown (C++ — firing prevents cloak)
         if (entity.weapon && entity.attackCooldown > 0) break;
-        // CL3: Health-gated cloak — below ConditionRed (25%), 96% chance to stay uncloaked
-        if (entity.hp / entity.maxHp <= CONDITION_RED && ScenarioRandom.float() > 0.04) break;
+        // C++ techno.cpp:2446-2451: below ConditionRed, low-health
+        // recloak is gated by Percent_Chance(4), not a raw float threshold.
+        if (entity.hp / entity.maxHp <= CONDITION_RED) {
+          const savedTag = ScenarioRandom._sourceTag;
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60090;
+          const shouldCloak = ScenarioRandom.percentChance(4);
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+          if (!shouldCloak) break;
+        }
+        // C++ TechnoClass::Do_Cloak calls Detach_All(false) before changing
+        // Cloak to CLOAKING. This clears team Target overrides and object
+        // TarCom refs to the submarine while preserving live bullet TarCom.
+        this.detachEntityFromTargeting(entity, false);
         entity.cloakState = CloakState.CLOAKING;
         entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
         break;
@@ -7144,6 +9377,22 @@ export class Game {
    * For simplicity, TS finds the cell on the direct path from target to
    * unit that's within weapon range.
    */
+  private shouldMissionAttackApproach(entity: Entity): boolean {
+    if (!entity.target?.alive || !entity.weapon) return false;
+    // C++ FootClass::Approach_Target is gated by !Target_Legal(NavCom).
+    if (entity.moveTarget) return false;
+    if (!entity.inRange(entity.target)) return true;
+
+    // C++ also approaches when the target is in range but PrimaryFacing is not
+    // locked (foot.cpp:938-940). Infantry can otherwise get stuck with
+    // IsDriving=true and no NavCom when Firing_AI returns FIRE_MOVING.
+    const desired = directionToLeptons(
+      entity.leptonX, entity.leptonY,
+      entity.target.leptonX, entity.target.leptonY,
+    );
+    return entity.facing !== desired;
+  }
+
   private approachTarget(entity: Entity): void {
     if (!entity.target?.alive || !entity.weapon) return;
 
@@ -7183,12 +9432,20 @@ export class Game {
           const tryCY = Math.floor(tryLY / 256);
           fallbackCX = tryCX;
           fallbackCY = tryCY;
-          // C++ Is_Clear_To_Move: terrain passable + cell not occupied
+          // C++ foot.cpp:992 calls CellClass::Is_Clear_To_Move with the
+          // object's SpeedType. FLOAT vessels must evaluate WATER terrain here;
+          // using land passability makes naval Approach_Target miss valid water
+          // cells and fall back near the target (SCG07EA opening sub chase).
           const cellIdx = tryCY * 128 + tryCX;
+          const terrainClear = entity.isNavalUnit
+            ? this.map.isWaterPassable(tryCX, tryCY)
+            : this.map.isTerrainPassable(tryCX, tryCY);
+          const vehicleReservation = this.map.getVehicleTrackReservation(tryCX, tryCY);
           if (tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128 &&
-              this.map.isTerrainPassable(tryCX, tryCY) &&
+              terrainClear &&
               !this.map.vehicleOccupancy.has(cellIdx) &&
-              this.map.occupancy[cellIdx] === 0) {
+              this.map.occupancy[cellIdx] === 0 &&
+              vehicleReservation === 0) {
             bestCX = tryCX;
             bestCY = tryCY;
             found = true;
@@ -7209,7 +9466,9 @@ export class Game {
       bestCY = nearby?.cy ?? fallbackCY;
     }
 
-    entity.moveTarget = { lx: bestCX * 256 + 128, ly: bestCY * 256 + 128 };
+    // C++ Assign_Destination(::As_Target(CELL)) round-trips through TARGET's
+    // 4-bit pixel encoding, yielding cell*256+0x88 rather than visual center.
+    entity.moveTarget = cellTargetToLepton(bestCX, bestCY);
     // C++ Basic_Path → Find_Path uses Can_Enter_Cell (NOT ignoring occupancy).
     entity.path = findPath(
       this.map, entity.cell, { cx: bestCX, cy: bestCY },
@@ -7218,20 +9477,13 @@ export class Game {
     );
     entity.pathIndex = 0;
 
-    // DEBUG: hard-code C++ path for SCG03EA infantry at (54,55)→(60,49) to verify fix
-    if (entity.cell.cx === 54 && entity.cell.cy === 55 && bestCX === 60 && bestCY === 49) {
-      // C++ Find_Path produces [NE,NE,E,E,E,NE] — verified via WASM debug
-      entity.path = [
-        {cx:55,cy:54}, {cx:56,cy:53}, // NE, NE
-        {cx:57,cy:53}, {cx:58,cy:53}, {cx:59,cy:53}, // E, E, E
-        {cx:60,cy:52}, // NE
-      ];
-      entity.pathIndex = 0;
-    }
   }
 
   /** Retreat — delegates to missionAI.ts */
   private updateRetreat(entity: Entity): void {
+    if (entity.stats.isVessel && entity.isTransport && entity.moveTarget === null) {
+      this.abortTransportRadioContactForNewDestination(entity);
+    }
     this._runMissionAI(ctx => _updateRetreat(ctx, entity));
   }
 
@@ -7368,6 +9620,7 @@ export class Game {
     attackerIsPlayer: boolean;
     trackLoss: boolean;
     friendlyFireLoss?: boolean;
+    attacker?: Entity;
   }): void {
     this._runCombat(ctx => _handleUnitDeath(ctx, victim, opts));
   }
@@ -7391,22 +9644,23 @@ export class Game {
         if (d <= 1.0) nearFriendlyCount++;
       }
     }
-    // C++ techno.cpp:1668-1670: out-of-zone check — target outside its own base zone
-    // Approximate via: target's house has structures, but target is far from them
-    const targetAIState = this.aiStates.get(target.house);
+    // C++ techno.cpp:1668-1670: `object->House->Which_Zone(object) == ZONE_NONE`.
+    // This is a property of the target's house, not only AI-controlled houses.
+    // Player reinforcements outside their own base zone get the same 2x boost.
     let isTargetOutOfZone = false;
-    if (targetAIState) {
-      // Check if target is within range of any of its own structures (simple zone approximation)
+    {
+      let hasOwnBase = false;
       let nearOwnBase = false;
       for (const s of this.structures) {
         if (!s.alive || s.house !== target.house) continue;
+        hasOwnBase = true;
         const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
         const scx = (s.cx + sw / 2) * CELL_SIZE;
         const scy = (s.cy + sh / 2) * CELL_SIZE;
         const d = Math.sqrt((scx - target.pos.x) ** 2 + (scy - target.pos.y) ** 2);
         if (d <= 10 * CELL_SIZE) { nearOwnBase = true; break; } // ~10 cells = base zone radius
       }
-      isTargetOutOfZone = !nearOwnBase;
+      isTargetOutOfZone = hasOwnBase && !nearOwnBase;
     }
     // C++ techno.cpp:1742-1744: NervousBias = BaseBias from rules.ini = 2
     // Applied when target is in scanner's own base zone (C++ House::Which_Zone)
@@ -7425,7 +9679,17 @@ export class Game {
     if (targetInScannerBaseZone) {
       nervousBias = NERVOUS_BIAS;
     }
-    return computeThreatScore(scanner, target, dist, designatedEnemy, nearFriendlyCount, isTargetOutOfZone, nervousBias);
+    // C++ techno.cpp:4549-4566 — TechnoClass::Value includes transport
+    // contents when the target's house difficulty allows content scan or
+    // House->IQ >= Rule.IQContentScan. This is visible in SCG07EA: the USSR
+    // submarine targets the Greek LST because its attached MCV/tank/jeep cargo
+    // is included in Value(), outranking the closer PT boats.
+    const targetIQ = this.houseIQs.get(target.house) ?? this.aiStates.get(target.house)?.iq ?? 0;
+    const includeTransportContents =
+      (AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal).isContentScan ||
+      targetIQ >= 4;
+
+    return computeThreatScore(scanner, target, dist, designatedEnemy, nearFriendlyCount, isTargetOutOfZone, nervousBias, includeTransportContents);
   }
 
   private getWarheadMult(warhead: WarheadType, armor: ArmorType): number {
@@ -7440,8 +9704,14 @@ export class Game {
     return _getWarheadProps(warhead as WarheadType, this.scenarioWarheadProps);
   }
 
-  private damageEntity(target: Entity, amount: number, warhead: WarheadType, attacker?: Entity): boolean {
-    return this._runCombat(ctx => _damageEntity(ctx, target, amount, warhead, attacker));
+  private damageEntity(
+    target: Entity,
+    amount: number,
+    warhead: WarheadType,
+    attacker?: Entity,
+    options?: { skipProneBias?: boolean; skipEntityArmorBias?: boolean; skipHouseArmorBias?: boolean },
+  ): boolean {
+    return this._runCombat(ctx => _damageEntity(ctx, target, amount, warhead, attacker, options));
   }
 
   /** AI scatter — delegates to combat.ts */
@@ -7489,6 +9759,36 @@ export class Game {
     return baseSpeed * terrainMult;
   }
 
+  /** C++ drive.cpp:1164-1190 Start_Of_Move terrain throttle.
+   *
+   * FootClass::Speed is not MaxSpeed. It is a raw 0..256 throttle derived from
+   * destination terrain cost, with yellow-health slowdown applied here. C++
+   * then multiplies this throttle by TechnoType::MaxSpeed in While_Moving.
+   */
+  private driveSpeedThrottleRaw(entity: Entity, speedCell: { cx: number; cy: number } = entity.cell): number {
+    const terrainMult = entity.stats.isInfantry
+      ? 1.0
+      : this.map.getSpeedMultiplier(speedCell.cx, speedCell.cy, entity.stats.speedClass);
+    let speed = Math.floor(terrainMult * 256);
+    if (speed <= 0 && entity.stats.speed > 0) {
+      // drive.cpp:1169 — impassable/zero-cost terrain still gets a tiny throttle.
+      speed = 128;
+    }
+    if (entity.hp * 2 <= entity.maxHp) {
+      // drive.cpp:1185 — damage affects FootClass::Speed, not MaxSpeed.
+      speed -= Math.floor(speed / 4);
+    }
+    return speed;
+  }
+
+  /** C++ drive.cpp:684 — integer MaxSpeed before applying FootClass::Speed. */
+  private driveClassMaxSpeedLeptons(entity: Entity): number {
+    const iniSpeed = Math.max(0, Math.min(100, entity.stats.speed));
+    const typeMaxSpeed = Math.min(255, Math.floor((iniSpeed * 256) / 100));
+    const biased = typeMaxSpeed * entity.speedBias * this.getGroundspeedBias(entity.house);
+    return Math.min(255, Math.floor(biased));
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Infantry Movement — C++ InfantryClass::Start_Driver + Movement_AI parity
   // ═══════════════════════════════════════════════════════════════════════════
@@ -7499,8 +9799,9 @@ export class Game {
    * then atomically swaps occupy bits (clear current, set destination).
    * Returns the HeadToCoord (sub-cell lepton position) the infantry should walk to.
    */
-  private infantryStartDriver(entity: Entity, destCX: number, destCY: number): LeptonPos {
-    // Default: cell center
+  private infantryStartDriver(entity: Entity, destCX: number, destCY: number): LeptonPos | null {
+    // C++ Adjacent_Cell(Coord, Path[0]) snaps to the center of the adjacent
+    // cell via Coord_Snap before Start_Driver selects the destination sub-cell.
     let headToLX = destCX * 256 + 128;
     let headToLY = destCY * 256 + 128;
 
@@ -7510,20 +9811,9 @@ export class Game {
     const probeLX = headToLX + ((COS_TABLE_256[probeDir] * 124) >> 7);
     const probeLY = headToLY - ((SIN_TABLE_256[probeDir] * 124) >> 7);
 
-    // C++ Spot_Index: distance to center < 60 → CENTER, else quadrant
-    const fracX = ((probeLX % 256) + 256) % 256;
-    const fracY = ((probeLY % 256) + 256) % 256;
-    const dxC = Math.abs(fracX - 128), dyC = Math.abs(fracY - 128);
-    const distCenter = Math.max(dxC, dyC) + Math.min(dxC, dyC) * 0.4;
-    let spotIndex: number;
-    if (distCenter < 60) {
-      spotIndex = 0;
-    } else {
-      let idx = 0;
-      if (fracX > 0x80) idx |= 1;
-      if (fracY > 0x80) idx |= 2;
-      spotIndex = idx + 1;
-    }
+    // C++ CellClass::Spot_Index: Distance(rel, 0x00800080) < 60,
+    // using the engine's integer octagonal Distance(), not a float estimate.
+    const spotIndex = this.infantrySpotIndex(probeLX, probeLY);
 
     // Find free sub-cell via C++ Closest_Free_Spot search order
     const destIdx = destCY * 128 + destCX;
@@ -7532,34 +9822,58 @@ export class Game {
       destSlots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
       this.map.subCellOccupancy.set(destIdx, destSlots);
     }
-    const cellBlocked = this.map.vehicleOccupancy.has(destIdx);
+    const cellBlocked =
+      this.map.vehicleOccupancy.has(destIdx) ||
+      this.map.vehicleTrackReservations.has(destIdx);
+    if (cellBlocked) return null;
+
     let freeSubCell = -1;
-    if (!cellBlocked) {
-      if (destSlots[spotIndex] === 0) {
-        freeSubCell = spotIndex;
-      } else {
-        const _sequence: number[][] = [
-          [1,2,3,4], [0,2,3,4], [0,1,4,3], [0,1,4,2], [0,2,3,1]
-        ];
-        for (const s of _sequence[spotIndex]) {
-          if (destSlots[s] === 0) { freeSubCell = s; break; }
+    if (destSlots[spotIndex] === 0) {
+      freeSubCell = spotIndex;
+    } else {
+      // C++ cell.cpp:1819-1852: when the requested spot is CENTER and it is
+      // occupied, all four corner locations are equidistant. The original uses
+      // Random_Pick(0, 3) to rotate the corner scan order instead of falling
+      // through to _sequence[0]. Non-center requested spots use _sequence.
+      const _sequence: number[][] = [
+        [1,2,3,4], [0,2,3,4], [0,1,4,3], [0,1,4,2], [0,2,3,1]
+      ];
+      const _alternate: number[][] = [
+        [1,2,3,4], [2,3,4,1], [3,4,1,2], [4,1,2,3]
+      ];
+      const sequence = spotIndex === 0
+        ? _alternate[ScenarioRandom.nextInRange(0, 3)]
+        : _sequence[spotIndex];
+      for (const s of sequence) {
+        if (destSlots[s] === 0) {
+          freeSubCell = s;
+          break;
         }
       }
     }
-    if (freeSubCell < 0) freeSubCell = spotIndex; // fallback
+    if (freeSubCell < 0) return null;
 
     const sc = SUBCELL_LEPTON_OFFSETS[freeSubCell];
     headToLX = destCX * 256 + sc.lx;
     headToLY = destCY * 256 + sc.ly;
 
-    // Atomic occupy-bit swap: release previous claim, set new claim
+    // Atomic occupy-bit swap: release previous claim, set new claim.
+    //
+    // C++ InfantryClass::Start_Driver chooses the destination sub-cell while
+    // the current Coord's occupy bit is still set, then after
+    // FootClass::Start_Driver succeeds it always calls Clear_Occupy_Bit(Coord)
+    // before Set_Occupy_Bit(headto). Do the same by current coordinate, not
+    // only by cached claimedCellIdx: occupancy rebuilds can mark an idle
+    // infantry's current sub-cell even if its cached claim was absent.
     if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
       this.map.vacateClaimedSubCell(entity.claimedCellIdx, entity.id, entity.claimedSubCell);
     }
+    this.map.vacateSubCell(entity.cell.cx, entity.cell.cy, entity.id);
     destSlots[freeSubCell] = entity.id;
     if (this.map.occupancy[destIdx] === 0) this.map.occupancy[destIdx] = entity.id;
     entity.claimedCellIdx = destIdx;
     entity.claimedSubCell = freeSubCell;
+    entity.scenarioInitUnlimbo = false;
 
     // Store HeadToCoord on entity
     entity.headToLX = headToLX;
@@ -7568,101 +9882,66 @@ export class Game {
     return { lx: headToLX, ly: headToLY };
   }
 
-  /** C++ InfantryClass direct Start_Driver for a NavCom with no Basic_Path.
-   *
-   *  WASM traces show patrol infantry can have Path[0] == FACING_NONE while
-   *  Head_To_Coord still points at the next sub-cell walking target. When team
-   *  patrol scan clears NavCom, C++ preserves this Head_To_Coord so the current
-   *  segment finishes before Commence can pop queued GUARD.
-   *
-   *  This synthesizes that active Head_To_Coord from the unit's current sub-cell
-   *  and NavCom direction. It is intentionally separate from infantryStartDriver:
-   *  that helper enters a specific path cell via Closest_Free_Spot, while this
-   *  one advances one current/adjacent sub-cell segment toward a long-range
-   *  direct destination.
+  /** C++ CellClass::Spot_Index (cell.cpp:1744-1766). */
+  private infantrySpotIndex(lx: number, ly: number): number {
+    const fracX = ((lx % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+    const fracY = ((ly % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+    if (leptonDist(fracX, fracY, 0x80, 0x80) < 60) return 0;
+    let index = 0;
+    if (fracX > 0x80) index |= 0x01;
+    if (fracY > 0x80) index |= 0x02;
+    return index + 1;
+  }
+
+  /** C++ InfantryClass::Stop_Driver (infantry.cpp:2042-2067).
+   *  Clear the destination Head_To_Coord occupation, set occupation at the
+   *  infantry's current Coord, then clear HeadToCoord/IsDriving via FootClass.
    */
-  private infantryStartDirectDriver(entity: Entity, nav: LeptonPos): LeptonPos {
-    const dir = directionToLeptons(entity.leptonX, entity.leptonY, nav.lx, nav.ly);
-    const dx = DIR_DX[dir];
-    const dy = DIR_DY[dir];
-    const fracX = ((entity.leptonX % 256) + 256) % 256;
-    const fracY = ((entity.leptonY % 256) + 256) % 256;
-
-    let destCX = entity.cell.cx;
-    let destCY = entity.cell.cy;
-    let subLX = fracX < 128 ? 64 : 192;
-    let subLY = fracY < 128 ? 64 : 192;
-
-    if (dx < 0) {
-      if (fracX <= 128) destCX--;
-      subLX = 192;
-    } else if (dx > 0) {
-      if (fracX >= 128) destCX++;
-      subLX = 64;
-    }
-
-    if (dy < 0) {
-      if (fracY <= 128) destCY--;
-      subLY = 192;
-    } else if (dy > 0) {
-      if (fracY >= 128) destCY++;
-      subLY = 64;
-    }
-
-    // If the chosen edge sub-cell is the unit's current coordinate, advance
-    // one adjacent cell along the dominant axis. C++ still starts a driver in
-    // this case; a zero-length Head_To_Coord would make TS stop immediately
-    // and pop queued GUARD one tick too early.
-    if (destCX * 256 + subLX === entity.leptonX &&
-        destCY * 256 + subLY === entity.leptonY) {
-      const navDx = nav.lx - entity.leptonX;
-      const navDy = nav.ly - entity.leptonY;
-      if (Math.abs(navDx) >= Math.abs(navDy)) {
-        if (navDx < 0) {
-          destCX--;
-          subLX = 192;
-        } else if (navDx > 0) {
-          destCX++;
-          subLX = 64;
-        }
-      } else {
-        if (navDy < 0) {
-          destCY--;
-          subLY = 192;
-        } else if (navDy > 0) {
-          destCY++;
-          subLY = 64;
-        }
-      }
-    }
-
-    const spotIndex =
-      subLX === 64 && subLY === 64 ? 1 :
-      subLX === 192 && subLY === 64 ? 2 :
-      subLX === 64 && subLY === 192 ? 3 :
-      subLX === 192 && subLY === 192 ? 4 : 0;
-
-    const destIdx = destCY * 128 + destCX;
-    let destSlots = this.map.subCellOccupancy.get(destIdx);
-    if (!destSlots) {
-      destSlots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
-      this.map.subCellOccupancy.set(destIdx, destSlots);
+  private stopInfantryDriver(entity: Entity): void {
+    if (!entity.stats.isInfantry) {
+      entity.isDriving = false;
+      entity.headToLX = 0;
+      entity.headToLY = 0;
+      return;
     }
 
     if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
       this.map.vacateClaimedSubCell(entity.claimedCellIdx, entity.id, entity.claimedSubCell);
     }
-    if (destSlots[spotIndex] === 0 || destSlots[spotIndex] === entity.id) {
-      destSlots[spotIndex] = entity.id;
-      if (this.map.occupancy[destIdx] === 0) this.map.occupancy[destIdx] = entity.id;
-      entity.claimedCellIdx = destIdx;
+
+    const cx = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(entity.leptonX / LEPTON_SIZE)));
+    const cy = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(entity.leptonY / LEPTON_SIZE)));
+    const cellIdx = cy * MAP_CELLS + cx;
+    const spotIndex = this.infantrySpotIndex(entity.leptonX, entity.leptonY);
+    if (this.map.occupyClaimedSubCell(cellIdx, entity.id, spotIndex)) {
+      entity.claimedCellIdx = cellIdx;
       entity.claimedSubCell = spotIndex;
+      entity.subCell = spotIndex;
+    } else {
+      entity.claimedCellIdx = -1;
+      entity.claimedSubCell = -1;
     }
 
-    entity.headToLX = destCX * 256 + subLX;
-    entity.headToLY = destCY * 256 + subLY;
-    entity.isDriving = true;
-    return { lx: entity.headToLX, ly: entity.headToLY };
+    entity.isDriving = false;
+    entity.headToLX = 0;
+    entity.headToLY = 0;
+  }
+
+  /** C++ InfantryClass::Assign_Destination (infantry.cpp:1046).
+   *  A moving infantry unit only Stop_Driver()s before accepting a new legal
+   *  NavCom when its current Center_Coord cell is clear for its locomotion,
+   *  ignoring infantry but not vehicles/buildings. If the cell is not clear
+   *  (e.g. rock/blocked terrain while the unit is mid-hop), C++ keeps the
+   *  active Head_To_Coord and merely rewrites NavCom/Path[0].
+   */
+  private canStopInfantryDriverForAssignDestination(entity: Entity): boolean {
+    if (!entity.stats.isInfantry) return true;
+    const cx = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(entity.leptonX / LEPTON_SIZE)));
+    const cy = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(entity.leptonY / LEPTON_SIZE)));
+    const idx = cy * MAP_CELLS + cx;
+    if (!this.map.isTerrainPassable(cx, cy)) return false;
+    if (this.map.vehicleOccupancy.has(idx) || this.map.vehicleTrackReservations.has(idx)) return false;
+    return true;
   }
 
   /**
@@ -7673,16 +9952,12 @@ export class Game {
   private infantryValidatePath(entity: Entity): void {
     if (!entity.path.length || entity.pathIndex >= entity.path.length || !entity.moveTarget) return;
     const nextCell = entity.path[entity.pathIndex];
-    const nextIdx = nextCell.cy * 128 + nextCell.cx;
-    const nextSlots = this.map.subCellOccupancy.get(nextIdx);
-    const hasVeh = this.map.vehicleOccupancy.has(nextIdx);
-    const allFull = hasVeh || (nextSlots != null &&
-      nextSlots[0] !== 0 && nextSlots[1] !== 0 && nextSlots[2] !== 0 &&
-      nextSlots[3] !== 0 && nextSlots[4] !== 0);
-    if (allFull) {
-      entity.path = findPath(this.map, entity.cell,
-        { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) },
-        true, entity.isNavalUnit, entity.stats.speedClass);
+    if (this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy) !== MoveResult.OK) {
+      const goal = {
+        cx: Math.floor(entity.moveTarget.lx / 256),
+        cy: Math.floor(entity.moveTarget.ly / 256),
+      };
+      entity.path = this.findDriveClassBasicPath(entity, this.resolveInfantryBasicPathGoal(entity, goal));
       entity.pathIndex = 0;
     }
   }
@@ -7691,7 +9966,7 @@ export class Game {
    *  Steps through pre-computed track coordinates. Each step costs PIXEL_LEPTON_W leptons
    *  of movement budget. Position = targetCellCenter + Smooth_Turn(offset, flags).
    *  Returns true when track is complete (reached target cell center). */
-  private followTrackStep(entity: Entity, speedPixels: number, targetX: number, targetY: number): boolean {
+  private followTrackStep(entity: Entity, speedThrottleRaw: number, targetX: number, targetY: number): boolean {
     let track = getTrackArray(entity.trackNumber);
     if (!track) {
       this.stopDriveTrack(entity);
@@ -7700,57 +9975,113 @@ export class Game {
       return true;
     }
     let flags = entity.trackFlags;
+    // C++ DriveClass::While_Moving starts by Mark(MARK_UP), then re-applies
+    // Mark(MARK_DOWN) after the movement budget is spent. This matters after
+    // RawTracks[tracknum].Cell has been passed: Mark_Track stops reserving the
+    // intermediate cell, allowing a following vehicle to track-jump through it.
+    // TS previously kept the start-of-track reservation until Stop_Driver,
+    // leaving stale moving-block cells behind fast/curved tracks.
+    this.clearDriveTrackReservations(entity);
 
-    // C++ drive.cpp:688-696: Determine if there's a turn coming up for track jumping.
-    // nextface = Path[0] equivalent: direction from current target cell to next path cell.
+    // C++ drive.cpp:688-696: Determine if there's a turn coming up for track
+    // jumping. `nextface = Path[0]`; Start_Of_Move/track-jump memmove has
+    // already shifted away the path entry that selected the current track.
+    //
+    // TS stores an absolute cell path plus a cursor. After an F_D track jump the
+    // cursor can lag behind the active Head_To_Coord by one cell because C++
+    // jumps to `Adjacent_Cell(Head_To_Coord(), nextface)` and then memmoves
+    // Path by only one entry. Anchor the queued next-face lookup on the active
+    // Head_To_Coord cell, not on the stale absolute cursor. That is the direct
+    // equivalent of C++ Path[0] during While_Moving.
+    //
     // adj = true when nextface differs from the current track's ending facing.
     let nextFace8 = -1; // -1 = FACING_NONE (no next direction)
     let adj = false;
     let jumpToCell: { cx: number; cy: number } | undefined;
     const tcIdx = entity.trackControlIndex;
     if (tcIdx >= 0 && tcIdx < TRACK_CONTROL.length) {
-      // Compute next path direction for track jumping (C++ drive.cpp:688 nextface = Path[0])
-      // For 2-cell tracks, the "next" direction is from the 2nd cell onward;
-      // for 1-cell tracks, from the 1st cell onward.
-      const nextCellOffset = entity.trackCellSpan; // 1 or 2
-      const currentTargetCell = entity.path[entity.pathIndex + nextCellOffset - 1];
-      const followingCell = entity.path[entity.pathIndex + nextCellOffset];
-      if (currentTargetCell && followingCell) {
-        nextFace8 = directionTo(
-          { x: currentTargetCell.cx * CELL_SIZE + CELL_SIZE / 2,
-            y: currentTargetCell.cy * CELL_SIZE + CELL_SIZE / 2 },
-          { x: followingCell.cx * CELL_SIZE + CELL_SIZE / 2,
-            y: followingCell.cy * CELL_SIZE + CELL_SIZE / 2 },
-        );
+      const headCell = {
+        cx: Math.floor(targetX / CELL_SIZE),
+        cy: Math.floor(targetY / CELL_SIZE),
+      };
+      if (entity.drivePathFacings.length > 0) {
+        nextFace8 = entity.drivePathFacings[0];
         // C++ drive.cpp:695: adj = (nextface != FACING_NONE && Dir_Facing(track->Facing) != nextface)
         const currentEndFacing8 = Math.floor(TRACK_CONTROL[tcIdx].facing / 32);
         if (nextFace8 !== currentEndFacing8) {
           adj = true;
-          jumpToCell = followingCell;
+          // C++ drive.cpp:766-768 uses Head_To_Coord() plus nextface, not the
+          // next path cell. For F_D tracks Head_To_Coord() is the second cell.
+          jumpToCell = {
+            cx: Math.floor(targetX / CELL_SIZE) + DIR_DX[nextFace8],
+            cy: Math.floor(targetY / CELL_SIZE) + DIR_DY[nextFace8],
+          };
+        }
+      } else {
+        let path0FromCell = headCell;
+        let path0ToCell: { cx: number; cy: number } | undefined;
+
+        for (let i = Math.max(0, entity.pathIndex); i < entity.path.length - 1; i++) {
+          const p = entity.path[i];
+          if (p.cx === headCell.cx && p.cy === headCell.cy) {
+            path0ToCell = entity.path[i + 1];
+            break;
+          }
+        }
+
+        if (!path0ToCell) {
+          // Fallback for active tracks whose Head_To_Coord is not represented in
+          // TS's absolute path (for example after NavCom was cleared but the track
+          // is still finishing). This preserves the pre-existing short/F_D lookup.
+          const path0Offset = Math.max(0, entity.trackCellSpan - 1);
+          path0FromCell = entity.path[entity.pathIndex + path0Offset] ?? headCell;
+          path0ToCell = entity.path[entity.pathIndex + path0Offset + 1];
+        }
+
+        if (path0FromCell && path0ToCell) {
+          nextFace8 = directionTo(
+            { x: path0FromCell.cx * CELL_SIZE + CELL_SIZE / 2,
+              y: path0FromCell.cy * CELL_SIZE + CELL_SIZE / 2 },
+            { x: path0ToCell.cx * CELL_SIZE + CELL_SIZE / 2,
+              y: path0ToCell.cy * CELL_SIZE + CELL_SIZE / 2 },
+          );
+          // C++ drive.cpp:695: adj = (nextface != FACING_NONE && Dir_Facing(track->Facing) != nextface)
+          const currentEndFacing8 = Math.floor(TRACK_CONTROL[tcIdx].facing / 32);
+          if (nextFace8 !== currentEndFacing8) {
+            adj = true;
+            // C++ drive.cpp:766-768 uses Head_To_Coord() plus nextface, not the
+            // next path cell. For F_D tracks Head_To_Coord() is the second cell.
+            jumpToCell = {
+              cx: Math.floor(targetX / CELL_SIZE) + DIR_DX[nextFace8],
+              cy: Math.floor(targetY / CELL_SIZE) + DIR_DY[nextFace8],
+            };
+          }
         }
       }
     }
 
-    // C++ drive.cpp:664: maxspeed * SpeedBias * House->GroundspeedBias
-    const biasedSpeed = speedPixels * entity.speedBias * entity.groundspeedBias;
+    // C++ drive.cpp:679-686: MaxSpeed * SpeedBias * House->GroundspeedBias,
+    // then actual = SpeedAccum + maxspeed * fixed(FootClass::Speed, 256).
+    //
+    // There is a real C++ wart here: DriveClass::While_Moving checks
+    // `((UnitClass *)this)->Flagged != HOUSE_NONE` to halve flag-carrier speed.
+    // VesselClass also inherits DriveClass, so the C-style cast is invalid for
+    // vessels but still compiled/executed; current WASM probes show LST entering
+    // the half-speed branch (`wact=17` for MaxSpeed=35). Model that DriveClass
+    // behavior for vessels rather than treating naval movement as full speed.
+    const activeThrottle = entity.driveSpeed > 0 ? entity.driveSpeed : speedThrottleRaw;
+    const maxSpeedLeptons = this.driveClassMaxSpeedLeptons(entity);
+    const driveMaxSpeed = entity.stats.isVessel
+      ? Math.floor(maxSpeedLeptons / 2)
+      : maxSpeedLeptons;
 
-    // Convert pixel speed to lepton budget + accumulator (C++ SpeedAccum pattern).
-    //
-    // Phase 3d fix: C++ drive.cpp:685 computes `actual = SpeedAccum + maxspeed *
-    // fixed(Speed, 256)` in INTEGER lepton arithmetic. `maxspeed` is an integer
-    // MPHType derived from the INI Speed% via _Scale_To_256 (rules.cpp:74 —
-    // truncates at every step). 3TNK with Speed=7 INI → MaxSpeed=17 leptons/tick.
-    //
-    // TS previously computed `biasedSpeed / LP` in floating-point = 17.92
-    // leptons/tick for 3TNK, accumulating ~1 extra lepton every ~3 ticks.
-    // Over 10+ ticks the floor error crosses a PIXEL_LEPTON_W boundary, giving
-    // TS an extra track step vs WASM. That's the SCG04 t24 mechanism (TS
-    // arrives at cell (41,35) 1 tick before WASM).
-    //
-    // Floor to match C++ integer truncation. Bias multipliers stay as
-    // floating point (they can be non-1.0 via crates/house bias) but the
-    // final lepton delta is integer.
-    let actual = entity.speedAccum + Math.floor(biasedSpeed / LP);
+    // C++ `fixed` multiply rounds: ((driveMaxSpeed * Speed) + 128) / 256.
+    // The ordering matters. Terrain/damage modifies FootClass::Speed; it does
+    // not pre-scale MaxSpeed as a floating pixel speed. SCG13EA MRJ at t1047
+    // is the observable case: TRACK clear throttle 204, yellow health -> 153;
+    // MaxSpeed 23; speedAdd=floor((23*153+128)/256)=14.
+    const speedAdd = Math.floor((driveMaxSpeed * activeThrottle + 128) / 256);
+    let actual = entity.speedAccum + speedAdd;
     // Instrument: total leptons granted this followTrackStep invocation (entry accum + add)
     const speedGranted = actual;
 
@@ -7762,7 +10093,12 @@ export class Game {
       entity.speedBudgetConsumed += PIXEL_LEPTON_W;
 
       if (entity.trackIndex >= track!.length) {
+        const oldCell = entity.cell;
         entity.setPosition(targetX, targetY);
+        if (!entity.stats.isInfantry && !entity.isAirUnit) {
+          const newCell = entity.cell;
+          this.map.moveVehicleOccupancy(oldCell.cx, oldCell.cy, newCell.cx, newCell.cy, entity.id);
+        }
         this.stopDriveTrack(entity);
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
@@ -7775,7 +10111,12 @@ export class Game {
 
       // End marker: offset (0,0) and trackIndex > 0 (C++ drive.cpp:712)
       if (step.x === 0 && step.y === 0 && entity.trackIndex > 0) {
+        const oldCell = entity.cell;
         entity.setPosition(targetX, targetY);
+        if (!entity.stats.isInfantry && !entity.isAirUnit) {
+          const newCell = entity.cell;
+          this.map.moveVehicleOccupancy(oldCell.cx, oldCell.cy, newCell.cx, newCell.cy, entity.id);
+        }
         this.stopDriveTrack(entity);
         entity.trackNumber = -1; entity.trackControlIndex = -1;
         entity.trackIndex = 0;
@@ -7788,14 +10129,26 @@ export class Game {
       const result = smoothTurn(step.x, step.y, step.facing, flags);
 
       // Position = target cell center + transformed lepton offset (integer lepton space)
+      const oldCell = entity.cell;
       entity.leptonX = Math.trunc(targetX / LP) + result.x;
       entity.leptonY = Math.trunc(targetY / LP) + result.y;
       entity.syncPosFromLeptons();
+      if (!entity.stats.isInfantry && !entity.isAirUnit) {
+        const newCell = entity.cell;
+        this.map.moveVehicleOccupancy(oldCell.cx, oldCell.cy, newCell.cx, newCell.cy, entity.id);
+      }
 
-      // Update facing from transformed DirType → 32-step → 8-dir
-      const dir32 = Math.floor(result.facing / 8);
-      entity.bodyFacing32 = dir32;
-      entity.facing = Math.floor(dir32 / 4) as Dir;
+      // Update facing from transformed DirType. Keep exact 256-step
+      // PrimaryFacing parity for the next Rotation_Adjust gate.
+      entity.bodyFacing256 = result.facing & 0xff;
+      entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
+      entity.facing = dir256ToFacing8(entity.bodyFacing256);
+      // C++ FacingClass::Set(dir) in drive.cpp:710 sets both Current and
+      // Desired while following a track. Leaving TS desiredFacing pointed at
+      // the next path direction makes DriveClass think it was already rotating
+      // at the next Start_Of_Move boundary and starts the next hop too early.
+      entity.desiredFacing = entity.facing;
+      entity.desiredFacing256 = entity.bodyFacing256;
 
       // === Per-Cell Process (C++ drive.cpp:721-728) ===
       // When trackIndex matches RawTracks[tracknum-1].Cell, trigger mid-movement
@@ -7831,6 +10184,14 @@ export class Game {
             ? this.canEnterTrackJumpCell(entity, jumpToCell.cx, jumpToCell.cy)
             : MoveResult.IMPASSABLE;
           if (jumpMove !== MoveResult.OK) {
+            if (jumpMove === MoveResult.TEMP_BLOCKED && jumpToCell &&
+                entity.house !== this.playerHouse) {
+              // C++ drive.cpp:802-809 — While_Moving track-jump MOVE_TEMP:
+              // only non-human houses ask the temporary friendly blocker to
+              // scatter via CellClass::Incoming(0, true, true). Human-owned
+              // units continue the current track without disturbing blockers.
+              this.incomingNoThreatScatterCell(jumpToCell.cx, jumpToCell.cy, entity.id);
+            }
             entity.trackIndex++;
             continue;
           }
@@ -7882,10 +10243,11 @@ export class Game {
                     // so the key identifies the boundary being left).
                     const boundaryKey = `${entity.trackIndex}-${entity.pathIndex}`;
                     if (!entity._commenceFiredBoundaries.has(boundaryKey)) {
-                      // C++ IsDriving=true bracket (drive.cpp:773-775)
-                      entity.isDriving = true;
-                      const r = unitPerCellProcess(entity, PCPType.PCP_END);
-                      entity.isDriving = false;
+	                      // C++ IsDriving=true bracket (drive.cpp:773-775)
+	                      entity.isDriving = true;
+	                      this.cutTransportTether(entity);
+	                      const r = unitPerCellProcess(entity, PCPType.PCP_END);
+	                      entity.isDriving = false;
                       if (r.commenceFired) {
                         entity._commenceFiredBoundaries.add(boundaryKey);
                         entity._commenceFiredThisTick = true;
@@ -7893,18 +10255,30 @@ export class Game {
                     }
                   }
 
-                  // Advance path: consume one cell (C++ memmove shifts Path left by 1)
-                  // The jump transitions from the current track's target area to the
-                  // next cell, so advance pathIndex by 1.
+                  // Advance path: consume one cell (C++ drive.cpp:787-790
+                  // memmove(Path, Path+1)). This is deliberately always one
+                  // entry even when the new TrackControl has F_D: the jump path
+                  // uses `c = Head_To_Coord(); Adjacent_Cell(c, nextface)` and
+                  // does not run Start_Of_Move's F_D two-cell skip branch.
                   entity.pathIndex++;
+                  this.consumeDrivePathFacings(entity, 1);
                   entity.cellBoundaryCrossings++;
 
-                  // Update trackCellSpan: new long tracks cover 2 cells
-                  entity.trackCellSpan = (newTC.flag & F_D) ? 2 : 1;
+                  entity.trackCellSpan = 1;
 
-                  // Recompute target for the new track's destination cell
-                  const newTargetCellIdx = entity.pathIndex + entity.trackCellSpan - 1;
-                  const newTargetCell = entity.path[newTargetCellIdx];
+                  // C++ drive.cpp:766-790 computes the jump destination before
+                  // shifting Path:
+                  //   c = Head_To_Coord();
+                  //   c = Adjacent_Cell(c, nextface);
+                  //   Start_Driver(c);
+                  //   memmove(Path, Path+1,...)
+                  //
+                  // For an F_D long track, the current Head_To_Coord is already
+                  // the second path cell. After the one-entry memmove,
+                  // path[pathIndex] still names that old Head_To cell, so using
+                  // the shifted path entry starts the new track one cell too
+                  // early. Use the precomputed Adjacent_Cell target instead.
+                  const newTargetCell = jumpToCell;
                   if (newTargetCell) {
                     targetX = newTargetCell.cx * CELL_SIZE + CELL_SIZE / 2;
                     targetY = newTargetCell.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -7925,6 +10299,9 @@ export class Game {
     }
 
     entity.speedAccum = actual; // carry remainder to next tick
+    if (entity.trackNumber > 0 && (entity.headToLX !== 0 || entity.headToLY !== 0)) {
+      this.markDriveTrack(entity, entity.headToLX, entity.headToLY);
+    }
     // === DEBUG_PCP_LOG diagnostic (plan §5) ===
     // Per-tick per-entity drive telemetry for speed/accumulator parity vs WASM
     // drive.cpp:481-490 agent_debug_log(80000,...). Gated by env flag; dumps
@@ -7978,8 +10355,9 @@ export class Game {
   private launchProjectile(
     attacker: Entity, target: Entity | null, weapon: WeaponStats,
     damage: number, impactX: number, impactY: number, directHit: boolean,
+    launchCoord?: { lx: number; ly: number },
   ): void {
-    _launchProjectile(this._combatCtx, attacker, target, weapon, damage, impactX, impactY, directHit);
+    _launchProjectile(this._combatCtx, attacker, target, weapon, damage, impactX, impactY, directHit, launchCoord);
   }
 
   /** Advance in-flight projectiles — delegates to combat.ts.
@@ -8036,19 +10414,21 @@ export class Game {
    * fires Trigger->Spring(TEVENT_DISCOVERED, this) and sets House->IsDiscovered = true.
    * C++ techno.cpp:3899 — Record_The_Kill() also fires TEVENT_DISCOVERED.
    *
-   * C++ Revealed() is gated by ACTUAL sight (Map_Cell called when a unit's sight-range
-   * reveals a cell, cell.cpp:615-623 / display.cpp:1496-1499). The debug/agent
-   * fogDisabled override paints visibility=2 across the whole map, but must NOT
-   * trigger Revealed() — otherwise every enemy object "discovers" on tick 1,
-   * firing TEVENT_DISCOVERED-attached triggers (e.g. AUTOCREATE) spuriously and
-   * diverging from WASM's normal-fog behavior. We compute true sight here using
-   * player unit/structure SightRange + octagonal distance (cpp coord.cpp:124-136).
+   * C++ Revealed() is normally reached through DisplayClass::Map_Cell after a
+   * PlayerPtr Sight_From maps a cell. TechnoClass::Per_Cell_Process also calls
+   * Revealed(PlayerPtr) when an object enters a currently visible player cell
+   * (techno.cpp:1061-1064). The debug/agent fogDisabled override paints
+   * visibility=2 across the whole map, but must NOT trigger Revealed().
    */
   private isCellTrulySeen(cx: number, cy: number): boolean {
-    // C++ parity: cell is "truly seen" if any player unit/structure has it in sight range.
+    // C++ parity: cell is "truly seen" if a strict PlayerPtr unit/structure has it
+    // in sight range. Allied AI units do not participate in the player's normal
+    // Look pass (display.cpp:4448-4464). Map_Cell can remap allied house sight to
+    // PlayerPtr, but only if that allied techno actually Look()s; AI ally units do not.
+    // SCG07EA t45: England JEEP sight must not set IsDiscoveredByPlayer on USSR E4.
     // Uses octagonal distance matching coord.cpp Distance() (big*2 + small <= sight*2).
     for (const e of this.entities) {
-      if (!e.alive || !e.isPlayerUnit) continue;
+      if (!e.alive || e.house !== this.playerHouse) continue;
       const sight = e.stats.sight;
       if (!sight || sight > 10) continue;
       const dx = Math.abs(e.cell.cx - cx);
@@ -8076,7 +10456,11 @@ export class Game {
     // Check entities
     for (const entity of this.entities) {
       if (!entity.alive) continue;
-      if (this.isPlayerControlled(entity)) continue; // only enemy/neutral
+      // C++ TechnoClass::IsOwnedByPlayer is strict `(PlayerPtr == House)`,
+      // not "allied to PlayerPtr" (techno.cpp:624). Player-allied houses can
+      // still receive Revealed(PlayerPtr) and set IsDiscoveredByPlayer when
+      // they enter true player-visible cells (techno.cpp:1061-1064).
+      if (entity.house === this.playerHouse) continue;
       if (this.discoveredEntityIds.has(entity.id)) continue; // already discovered
 
       // C++ parity: use TRUE sight (unit/structure SightRange), not display fog state.
@@ -8105,7 +10489,7 @@ export class Game {
     for (let si = 0; si < this.structures.length; si++) {
       const s = this.structures[si];
       if (!s.alive) continue;
-      if (this.isAllied(s.house, this.playerHouse)) continue; // only enemy/neutral
+      if (s.house === this.playerHouse) continue;
       if (this.discoveredStructureIds.has(si)) continue;
 
       // C++ parity: use TRUE sight (not display fog)
@@ -8132,13 +10516,37 @@ export class Game {
     // stay discovered permanently.
     for (const entity of this.entities) {
       if (!entity.alive) continue;
-      if (this.isPlayerControlled(entity)) continue; // only enemy/neutral AI
+      // IsOwnedByPlayer is strict PlayerPtr ownership. Allied AI houses are
+      // not owned by the player and can be hidden again when they leave shroud.
+      if (entity.house === this.playerHouse) continue;
       if (!this.discoveredEntityIds.has(entity.id)) continue; // not discovered
 
       const vis = this.map.getVisibility(entity.cell.cx, entity.cell.cy);
       if (vis < 2) {
         // Entity returned to shroud — clear discovery flag (C++ IsDiscoveredByPlayer = false)
         this.discoveredEntityIds.delete(entity.id);
+      }
+    }
+  }
+
+  private markDiscoveredIfPlayerVisible(entity: Entity): void {
+    if (!entity.alive || entity.house === this.playerHouse) return;
+    if (this.discoveredEntityIds.has(entity.id)) return;
+
+    const playerIdx = Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1;
+    const visible =
+      this.isAllied(entity.house, this.playerHouse)
+        ? playerIdx >= 0 && this.isRevealedToHouse(entity.cell.cx, entity.cell.cy, playerIdx)
+        : this.isCellTrulySeen(entity.cell.cx, entity.cell.cy);
+    if (!visible) return;
+
+    this.discoveredEntityIds.add(entity.id);
+    const hi = Game.HOUSE_TO_INDEX[entity.house];
+    if (hi !== undefined) this.houseDiscovered.set(hi, true);
+
+    if (entity.triggerName) {
+      for (const trigger of this.triggers) {
+        if (trigger.name === entity.triggerName) trigger.objectDiscovered = true;
       }
     }
   }
@@ -8411,6 +10819,162 @@ export class Game {
     }
   }
 
+  /** Shared trigger state snapshot used by immediate object-level springs. */
+  private buildTriggerSharedSnapshot(): {
+    structureTypes: Set<string>; destroyedTriggerNames: Set<string>;
+    enemyUnitsAlive: number; playerFactories: number;
+    houseAlive: Map<number, boolean>; houseUnitsAlive: Map<number, boolean>;
+    houseBuildingsAlive: Map<number, boolean>; builtStructureTypes: Set<string>;
+    buildingsDestroyedByHouse: Map<number, boolean>; fakesExist: boolean;
+    structureTypesByHouse: Map<number, Set<string>>;
+    builtStructureTypesByHouse: Map<number, Set<string>>;
+  } {
+    const structureTypes = new Set<string>();
+    const structureTypesByHouse = new Map<number, Set<string>>();
+    const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
+    const houseAlive = new Map<number, boolean>();
+    const houseUnitsAlive = new Map<number, boolean>();
+    const houseBuildingsAlive = new Map<number, boolean>();
+    const housesWithBuildings = new Set<number>();
+    let playerFactories = 0;
+    let enemyUnitsAlive = 0;
+    let fakesExist = false;
+    const FAKE_TYPES = new Set(['FACF', 'DOMF', 'WEAF']);
+
+    for (const s of this.structures) {
+      if (s.alive) {
+        structureTypes.add(s.type);
+        if (this.isAllied(s.house, this.playerHouse) &&
+            (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'BARR' || s.type === 'TENT' ||
+             s.type === 'AFLD' || s.type === 'HPAD' || s.type === 'SYRD' || s.type === 'SPEN')) {
+          playerFactories++;
+        }
+        const hi = Game.HOUSE_TO_INDEX[s.house];
+        if (hi !== undefined) {
+          houseAlive.set(hi, true);
+          if (!WALL_TYPES.has(s.type)) {
+            houseBuildingsAlive.set(hi, true);
+            housesWithBuildings.add(hi);
+          }
+          let hset = structureTypesByHouse.get(hi);
+          if (!hset) { hset = new Set<string>(); structureTypesByHouse.set(hi, hset); }
+          hset.add(s.type);
+        }
+        if (FAKE_TYPES.has(s.type)) fakesExist = true;
+      } else if (s.triggerName) {
+        destroyedTriggerNames.add(s.triggerName);
+      }
+    }
+
+    for (const e of this.entities) {
+      if (e.alive && !this.isPlayerControlled(e) && !e.isCivilian) enemyUnitsAlive++;
+      if (e.alive) {
+        const hi = Game.HOUSE_TO_INDEX[e.house];
+        if (hi !== undefined) {
+          houseAlive.set(hi, true);
+          houseUnitsAlive.set(hi, true);
+        }
+      } else if (e.triggerName) {
+        destroyedTriggerNames.add(e.triggerName);
+      }
+    }
+
+    const buildingsDestroyedByHouse = new Map<number, boolean>();
+    for (const s of this.structures) {
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi !== undefined && !WALL_TYPES.has(s.type) && !housesWithBuildings.has(hi)) {
+        buildingsDestroyedByHouse.set(hi, true);
+      }
+    }
+
+    return {
+      structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories,
+      houseAlive, houseUnitsAlive, houseBuildingsAlive,
+      builtStructureTypes: this.builtStructureTypes,
+      buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
+      builtStructureTypesByHouse: this.builtStructureTypesByHouse,
+    };
+  }
+
+  private executeTriggerActionFor(trigger: ScenarioTrigger, action: ScenarioTrigger['action1']): void {
+    if ((action.action === 4 || action.action === 7) && this.destroyedTeams.has(action.team)) return;
+    const result = executeTriggerAction(
+      action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
+      this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
+      Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map, this.entities,
+    );
+    this.applyTriggerActionResult(result, trigger);
+  }
+
+  private springDestroyedTriggerByName(triggerName: string): void {
+    const trigger = this.triggers.find(t => t.name === triggerName);
+    if (!trigger || (trigger.fired && trigger.persistence <= 1)) return;
+
+    this.destroyedTriggerNames.add(triggerName);
+    trigger.pendingDestroyedCount++;
+
+    const shared = this.buildTriggerSharedSnapshot();
+    shared.destroyedTriggerNames.add(triggerName);
+    const state = this.buildTriggerState(trigger, shared);
+    const result = this.checkTriggerEvents(trigger, state);
+
+    if (!result.shouldFire) {
+      trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
+      return;
+    }
+
+    // C++ trigger.cpp:277-298 — semi-persistent triggers detach the object
+    // and decrement AttachCount on every successful object Spring call; only
+    // the final attachment executes actions.
+    if (trigger.persistence === 1 && !consumeSemiPersistentAttachment(trigger, 1)) {
+      trigger.pendingDestroyedCount = Math.max(0, trigger.pendingDestroyedCount - 1);
+      return;
+    }
+
+    trigger.fired = true;
+    trigger.pendingDestroyedCount = 0;
+
+    if (trigger.persistence === 2) {
+      trigger.timerTick = this.tick;
+      trigger.playerEntered = false;
+      trigger.objectDiscovered = false;
+      trigger.enteredZone = false;
+      trigger.crossedHorizontal = false;
+      trigger.crossedVertical = false;
+    }
+
+    if (trigger.eventControl === 3) {
+      if (result.e1) this.executeTriggerActionFor(trigger, trigger.action1);
+      if (result.e2) this.executeTriggerActionFor(trigger, trigger.action2);
+    } else {
+      this.executeTriggerActionFor(trigger, trigger.action1);
+      if (trigger.actionControl === 1) {
+        this.executeTriggerActionFor(trigger, trigger.action2);
+      }
+    }
+  }
+
+  /**
+   * C++ object-level death triggers.
+   * TechnoClass::Record_The_Kill invokes Trigger->Spring(TEVENT_DESTROYED, obj)
+   * immediately. The periodic LogicTrigger scan handles global/time/house-level
+   * triggers; attached object deaths must not wait for that scan.
+   */
+  private springDestroyedObjectTriggers(): void {
+    for (const e of this.entities) {
+      if (!e.alive && e.triggerName && !e.triggerDeathProcessed) {
+        this.springDestroyedTriggerByName(e.triggerName);
+        e.triggerDeathProcessed = true;
+      }
+    }
+    for (const s of this.structures) {
+      if (!s.alive && s.triggerName && !s.triggerDeathProcessed) {
+        this.springDestroyedTriggerByName(s.triggerName);
+        s.triggerDeathProcessed = true;
+      }
+    }
+  }
+
   /**
    * Apply side effects from a trigger action result. Extracted from processTriggers
    * to share with springGlobalTriggers (C++ parity #38).
@@ -8452,17 +11016,20 @@ export class Game {
     }
     if (result.revealAll) {
       this.map.revealAll();
+      this.markAllObjectsRevealedToPlayer();
     }
     if (result.revealWaypoint !== undefined) {
       const wp = this.waypoints.get(result.revealWaypoint);
       if (wp) {
-        this.revealAroundCell(wp.cx, wp.cy, 10);
+        // C++ TACTION_REVEAL_SOME: Map.Sight_From(waypoint, Rule.GapShroudRadius=10, PlayerPtr)
+        this.revealSightFromPlayer(wp.cx, wp.cy, 10);
       }
     }
     if (result.dropZone !== undefined) {
       const wp = this.waypoints.get(result.dropZone);
       if (wp) {
-        this.revealAroundCell(wp.cx, wp.cy, 8);
+        // C++ AnimClass::Unlimbo for ANIM_LZ_SMOKE: DropZoneRadius=4 cells.
+        this.revealSightFromPlayer(wp.cx, wp.cy, 4);
         const world = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
         this.effects.push({
           type: 'marker', x: world.x, y: world.y,
@@ -8783,12 +11350,14 @@ export class Game {
     // C++ reinf.cpp:171-173: _Create_Group() does `new TeamClass(teamtype)` directly
     // (NOT Create_One_Of which checks MaxAllowed). Then Force_Active() is called.
     // This is different from TACTION_CREATE_TEAM which uses Create_One_Of + ScenarioInit.
-    if (teamEntities.length > 0 && result.spawnedTeamIdx !== undefined) {
+    const teamMembersForTeam = (result.teamCreationOrder ?? teamEntities)
+      .filter((e) => e.teamMissions.length > 0);
+    if (teamMembersForTeam.length > 0 && result.spawnedTeamIdx !== undefined) {
       const teamType = this.teamTypes[result.spawnedTeamIdx];
       if (teamType) {
-        const teamHouse = teamEntities[0].house;
+        const teamHouse = teamMembersForTeam[0].house;
         const memberCounts = new Map<string, number>();
-        for (const e of teamEntities) {
+        for (const e of teamMembersForTeam) {
           memberCounts.set(e.type, (memberCounts.get(e.type) ?? 0) + 1);
         }
         const desiredMembers = [...memberCounts.entries()].map(([type, count]) => ({ type, count }));
@@ -8811,14 +11380,8 @@ export class Game {
           // C++ reinf.cpp:173: team->Force_Active() — team activates immediately
           forcedActive: true,
         });
-        for (const e of teamEntities) {
-          // Save teamMissions before add() clears them
-          const savedMissions = e.teamMissions;
-          const savedIdx = e.teamMissionIndex;
+        for (const e of teamMembersForTeam) {
           team.add(e);
-          // Restore for reinforcement teams — per-entity mission processing needed
-          e.teamMissions = savedMissions;
-          e.teamMissionIndex = savedIdx;
         }
         registerTeam(team);
       }
@@ -9372,6 +11935,122 @@ export class Game {
     _revealAroundCell(this.map, cx, cy, radius);
   }
 
+  /** C++ TechnoClass::Fire_At (techno.cpp:3263-3265):
+   *  A hidden shooter reveals a 2-cell radius around itself with
+   *  `Map.Sight_From(Coord_Cell(Center_Coord()), 2, PlayerPtr, false)`.
+   *  DisplayClass::Map_Cell then calls `tech->Revealed(PlayerPtr)` for
+   *  objects in newly mapped cells, which sets IsDiscoveredByPlayer. */
+  private revealShooterFromFire(entity: Entity): void {
+    if (!entity.alive) return;
+
+    const ownedByPlayer = entity.house === this.playerHouse;
+    const discoveredByPlayer = this.discoveredEntityIds.has(entity.id);
+    const mapped = this.map.getVisibility(entity.cell.cx, entity.cell.cy) > 0;
+    const shouldReveal =
+      (!ownedByPlayer && !discoveredByPlayer) ||
+      (!mapped && (!entity.isAirUnit || !ownedByPlayer));
+
+    if (!shouldReveal) return;
+
+    this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, 2);
+  }
+
+  /** C++ MapClass::Sight_From(..., PlayerPtr): map cells and run Map_Cell's
+   *  object discovery side effect for the same sight radius. */
+  private revealSightFromPlayer(cx: number, cy: number, radius: number): void {
+    this.revealAroundCell(cx, cy, radius);
+    this.markObjectsRevealedToPlayer(cx, cy, radius);
+  }
+
+  /** Mirror DisplayClass::Map_Cell's `tech->Revealed(PlayerPtr)` side effect
+   *  for cells exposed by a non-standard reveal path such as Fire_At. */
+  private markObjectsRevealedToPlayer(cx: number, cy: number, radius: number): void {
+    const inSight = (x: number, y: number): boolean => {
+      const dx = Math.abs(x - cx);
+      const dy = Math.abs(y - cy);
+      const big = dx > dy ? dx : dy;
+      const small = dx > dy ? dy : dx;
+      return big * 2 + small <= radius * 2;
+    };
+
+    const revealEntity = (e: Entity): void => {
+      if (!e.alive || e.house === this.playerHouse) return;
+      if (!inSight(e.cell.cx, e.cell.cy)) return;
+      if (this.discoveredEntityIds.has(e.id)) return;
+
+      this.discoveredEntityIds.add(e.id);
+      const hi = Game.HOUSE_TO_INDEX[e.house];
+      if (hi !== undefined) this.houseDiscovered.set(hi, true);
+
+      if (e.triggerName) {
+        for (const trigger of this.triggers) {
+          if (trigger.name === e.triggerName) trigger.objectDiscovered = true;
+        }
+      }
+    };
+
+    for (const e of this.entities) revealEntity(e);
+
+    for (let si = 0; si < this.structures.length; si++) {
+      const s = this.structures[si];
+      if (!s.alive || s.house === this.playerHouse) continue;
+      if (this.discoveredStructureIds.has(si)) continue;
+
+      let footprintInSight = false;
+      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+      for (let y = 0; y < sh && !footprintInSight; y++) {
+        for (let x = 0; x < sw; x++) {
+          if (inSight(s.cx + x, s.cy + y)) {
+            footprintInSight = true;
+            break;
+          }
+        }
+      }
+      if (!footprintInSight) continue;
+
+      this.discoveredStructureIds.add(si);
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi !== undefined) this.houseDiscovered.set(hi, true);
+
+      if (s.triggerName) {
+        for (const trigger of this.triggers) {
+          if (trigger.name === s.triggerName) trigger.objectDiscovered = true;
+        }
+      }
+    }
+  }
+
+  /** C++ TACTION_REVEAL_ALL maps every cell with PlayerPtr, so every object
+   *  currently on the map receives Revealed(PlayerPtr). */
+  private markAllObjectsRevealedToPlayer(): void {
+    for (const e of this.entities) {
+      if (!e.alive || e.house === this.playerHouse) continue;
+      if (this.discoveredEntityIds.has(e.id)) continue;
+      this.discoveredEntityIds.add(e.id);
+      const hi = Game.HOUSE_TO_INDEX[e.house];
+      if (hi !== undefined) this.houseDiscovered.set(hi, true);
+      if (e.triggerName) {
+        for (const trigger of this.triggers) {
+          if (trigger.name === e.triggerName) trigger.objectDiscovered = true;
+        }
+      }
+    }
+
+    for (let si = 0; si < this.structures.length; si++) {
+      const s = this.structures[si];
+      if (!s.alive || s.house === this.playerHouse) continue;
+      if (this.discoveredStructureIds.has(si)) continue;
+      this.discoveredStructureIds.add(si);
+      const hi = Game.HOUSE_TO_INDEX[s.house];
+      if (hi !== undefined) this.houseDiscovered.set(hi, true);
+      if (s.triggerName) {
+        for (const trigger of this.triggers) {
+          if (trigger.name === s.triggerName) trigger.objectDiscovered = true;
+        }
+      }
+    }
+  }
+
   /** Check if a player unit has discovered the base (enables production) */
   private checkBaseDiscovery(): void {
     if (this.baseDiscovered) return;
@@ -9627,67 +12306,64 @@ export class Game {
 
   /** Get firepower bias for a house, with ant mission overrides.
    *  In ant missions (SCA*), ant houses use special bias values instead of country bonuses.
-   *  C++ house.cpp:289,299: FirepowerBias = hptr->FirepowerBias * Rule.Diff[handicap].FirepowerBias */
+   *  C++ house.cpp:287-303: in GAME_NORMAL campaign sessions, country
+   *  HouseTypeClass bonuses are not applied; houses use Rule.Diff only. */
   getFirepowerBias(house: House): number {
     if (this.scenarioId.startsWith('SCA') && ANT_HOUSES.has(house)) {
       const ANT_BIAS: Record<string, number> = { USSR: 1.1, Ukraine: 1.0, Germany: 0.9 };
       return ANT_BIAS[house] ?? 1.0;
     }
-    const countryBias = COUNTRY_BONUSES[house]?.firepowerMult ?? 1.0;
-    // C++ parity: non-player houses get difficulty-scaled firepower (house.cpp:289,299)
+    // TS currently models GAME_NORMAL scenarios. C++ applies only Rule.Diff here
+    // (house.cpp:299), not the country bonus table from rules.ini.
     if (house !== this.playerHouse) {
       const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-      return countryBias * diffMods.firepowerBias;
+      return diffMods.firepowerBias;
     }
-    return countryBias;
+    return 1.0;
   }
 
-  /** Get armor bias for a house — difficulty-scaled damage resistance.
-   *  C++ house.cpp:292,302: ArmorBias = Rule.Diff[handicap].ArmorBias
-   *  Returns >1 for tougher (AI takes less damage on hard), <1 for weaker. */
+  /** Get armor bias for a house.
+   *  C++ house.cpp:287-303: GAME_NORMAL uses Rule.Diff only; country armor
+   *  bonuses are multiplayer-only (`Session.Type != GAME_NORMAL`). */
   getArmorBias(house: House): number {
-    const countryBias = COUNTRY_BONUSES[house]?.armorMult ?? 1.0;
     if (house !== this.playerHouse) {
       const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-      return countryBias * diffMods.armorBias;
+      return diffMods.armorBias;
     }
-    return countryBias;
+    return 1.0;
   }
 
   /** Get rate-of-fire bias for a house — difficulty-scaled fire rate.
-   *  C++ house.cpp:293,303: ROFBias = Rule.Diff[handicap].ROFBias
+   *  C++ house.cpp:287-303: GAME_NORMAL uses Rule.Diff only.
    *  Returns <1 for faster fire (hard AI), >1 for slower fire (easy AI). */
   getROFBias(house: House): number {
-    const countryBias = COUNTRY_BONUSES[house]?.rofMult ?? 1.0;
     if (house !== this.playerHouse) {
       const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-      return countryBias * diffMods.rofBias;
+      return diffMods.rofBias;
     }
-    return countryBias;
+    return 1.0;
   }
 
   /** Get ground speed bias for a house — difficulty-scaled movement speed.
-   *  C++ house.cpp:290,300: GroundspeedBias = Rule.Diff[handicap].GroundspeedBias
+   *  C++ house.cpp:287-303: GAME_NORMAL uses Rule.Diff only.
    *  Returns >1 for faster movement (hard AI). */
   getGroundspeedBias(house: House): number {
-    const countryBias = COUNTRY_BONUSES[house]?.groundspeedMult ?? 1.0;
     if (house !== this.playerHouse) {
       const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-      return countryBias * diffMods.groundspeedBias;
+      return diffMods.groundspeedBias;
     }
-    return countryBias;
+    return 1.0;
   }
 
   /** Get aircraft speed bias for a house — difficulty-scaled aircraft movement speed.
-   *  C++ house.cpp:291,301: AirspeedBias = Rule.Diff[handicap].AirspeedBias
+   *  C++ house.cpp:287-303: GAME_NORMAL uses Rule.Diff only.
    *  Returns >1 for faster aircraft (hard AI). */
   getAirspeedBias(house: House): number {
-    const countryBias = COUNTRY_BONUSES[house]?.airspeedMult ?? 1.0;
     if (house !== this.playerHouse) {
       const diffMods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-      return countryBias * diffMods.airspeedBias;
+      return diffMods.airspeedBias;
     }
-    return countryBias;
+    return 1.0;
   }
 
   /** Get buildable items based on current structures + faction + tech prereqs */
@@ -9716,6 +12392,304 @@ export class Game {
   /** Count alive player buildings of a given type */
   private countPlayerBuildings(type: string): number {
     return _countPlayerBuildings(this.structures, type, this.playerHouse, (a, b) => this.isAllied(a, b));
+  }
+
+  /** C++ BuildingTypeClass::ToBuild — only infantry factories are wired here so
+   *  HouseClass::BuildInfantry is consumed by BuildingClass::Factory_AI instead
+   *  of the legacy TS instant-spawn helper. */
+  private aiFactoryKindForStructure(s: MapStructure): 'infantry' | null {
+    switch (s.type) {
+      case 'BARR':
+      case 'TENT':
+      case 'KENN':
+        return 'infantry';
+      default:
+        return null;
+    }
+  }
+
+  private aiInfantryFactoryCount(house: House): number {
+    let count = 0;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== house) continue;
+      if (this.aiFactoryKindForStructure(s) === 'infantry') count++;
+    }
+    return Math.max(1, count);
+  }
+
+  private aiProductionPowerFraction(house: House): number {
+    const ctx = this._aiCtx;
+    const consumed = _aiPowerConsumed(ctx, house);
+    if (consumed <= 0) return 1;
+    const produced = _aiPowerProduced(ctx, house);
+    return produced >= consumed ? 1 : Math.max(0, produced / consumed);
+  }
+
+  private aiFactoryBuildTime(item: ProductionItem, house: House, kind: 'infantry'): number {
+    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+    let time = Math.trunc(item.buildTime * mods.buildSpeedBias);
+
+    // C++ TechnoClass::Time_To_Build power quantization (techno.cpp:677-682).
+    let power = this.aiProductionPowerFraction(house);
+    if (power > 1) power = 1;
+    if (power < 1 && power > 0.75) power = 0.75;
+    if (power < 0.5) power = 0.5;
+    time = Math.trunc(time / power);
+
+    if (kind === 'infantry') {
+      time = Math.trunc(time / this.aiInfantryFactoryCount(house));
+    }
+
+    // C++ FactoryClass::Start build slowdown for computer houses
+    // (factory.cpp:430-431), MaxIQ default=5.
+    if (mods.isBuildSlowdown) {
+      const iq = this.houseIQs.get(house) ?? 3;
+      time = Math.trunc(time * 10 / (iq + 5));
+    }
+
+    return Math.max(1, time);
+  }
+
+  private aiFactoryRate(item: ProductionItem, house: House, kind: 'infantry'): number {
+    const time = this.aiFactoryBuildTime(item, house, kind);
+    const startPower = Math.max(1 / 16, Math.min(1, this.aiProductionPowerFraction(house)));
+    const powerAdjusted = Math.trunc(time / startPower);
+    return Math.max(1, Math.min(255, Math.trunc(powerAdjusted / AI_FACTORY_STEP_COUNT)));
+  }
+
+  private aiFactoryCost(item: ProductionItem, house: House): number {
+    const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
+    return _getEffectiveCost(item, house, mods.costBias);
+  }
+
+  private aiSuggestedFactoryItem(s: MapStructure, kind: 'infantry'): ProductionItem | null {
+    const state = this.aiStates.get(s.house);
+    if (!state || !state.isStarted) return null;
+
+    if (kind === 'infantry') {
+      const type = state.buildInfantry;
+      if (!type) return null;
+      if (s.type === 'KENN' && type !== UnitType.I_DOG) return null;
+      if (s.type !== 'KENN' && type === UnitType.I_DOG) return null;
+      return this.scenarioProductionItems.find(item => item.type === type && !item.isStructure) ?? null;
+    }
+
+    return null;
+  }
+
+  /** C++ BuildingClass::Factory_AI (building.cpp:5253-5382) for AI-owned
+   *  infantry factories. This starts completed BuildInfantry selections,
+   *  handles completed product exit, and clears BuildInfantry through the
+   *  Production_Begun equivalent. */
+  private updateAIBuildingFactory(s: MapStructure): void {
+    if (s.house === this.playerHouse) return; // player production uses sidebar factories
+
+    if (s.aiFactoryPlacementDelay && s.aiFactoryPlacementDelay > 0) {
+      s.aiFactoryPlacementDelay--;
+    }
+
+    const kind = this.aiFactoryKindForStructure(s);
+    if (!kind) return;
+
+    const factory = s.aiFactory;
+    const placementDelay = s.aiFactoryPlacementDelay ?? 0;
+    if (factory && factory.stage >= AI_FACTORY_STEP_COUNT && !factory.suspended && placementDelay === 0) {
+      factory.suspended = true;
+    }
+    if (factory && factory.stage >= AI_FACTORY_STEP_COUNT && placementDelay === 0) {
+      const exitResult = this.exitAIInfantryFactoryProduct(s);
+      if (exitResult === 2) {
+        s.aiFactory = undefined;
+      } else if (exitResult === 1) {
+        s.aiFactoryPlacementDelay = AI_FACTORY_PLACEMENT_DELAY;
+        return;
+      } else {
+        s.aiFactory = undefined;
+      }
+    } else if (factory && factory.suspended && factory.stage < AI_FACTORY_STEP_COUNT && placementDelay === 0) {
+      // Mirrors the abort path for a valid but non-building factory
+      // (building.cpp:5346-5349).
+      const spent = Math.max(0, factory.cost - factory.balance);
+      if (spent > 0) {
+        this.houseCredits.set(s.house, (this.houseCredits.get(s.house) ?? 0) + spent);
+      }
+      s.aiFactory = undefined;
+    }
+
+    if (s.aiFactory !== undefined) return;
+    if (s.mission === Mission.CONSTRUCTION || s.mission === Mission.DECONSTRUCTION) return;
+    if ((this.houseCredits.get(s.house) ?? 0) <= 10) return;
+
+    const item = this.aiSuggestedFactoryItem(s, kind);
+    if (!item) return;
+
+    const cost = this.aiFactoryCost(item, s.house);
+    const rate = this.aiFactoryRate(item, s.house, kind);
+    const costPerTick = Math.trunc(cost / AI_FACTORY_STEP_COUNT);
+    if ((this.houseCredits.get(s.house) ?? 0) < costPerTick) return;
+
+    s.aiFactory = {
+      kind,
+      productType: item.type,
+      stage: 0,
+      rate,
+      timer: rate,
+      balance: cost,
+      cost,
+      startedTick: this.tick,
+      suspended: false,
+    };
+
+    const state = this.aiStates.get(s.house);
+    if (state && kind === 'infantry' && state.buildInfantry === item.type) {
+      state.buildInfantry = null;
+    }
+  }
+
+  /** C++ FactoryClass::AI (factory.cpp:201-238). Runs after Map.Logic and
+   *  before HouseClass::AI, not during BuildingClass::Factory_AI. */
+  private updateAIFactories(): void {
+    for (const s of this.structures) {
+      const factory = s.aiFactory;
+      if (!factory || factory.suspended || factory.stage >= AI_FACTORY_STEP_COUNT) continue;
+      if (factory.startedTick === this.tick) continue;
+
+      if (factory.timer > 0) factory.timer--;
+      if (factory.timer > 0 || factory.rate === 0) continue;
+
+      factory.stage++;
+      factory.timer = factory.rate;
+
+      const steps = AI_FACTORY_STEP_COUNT - factory.stage;
+      const cost = Math.min(factory.balance, steps > 0 ? Math.trunc(factory.balance / steps) : factory.balance);
+      const credits = this.houseCredits.get(s.house) ?? 0;
+      if (cost > credits) {
+        factory.stage--;
+        continue;
+      }
+
+      this.houseCredits.set(s.house, credits - cost);
+      factory.balance -= cost;
+
+      if (factory.stage >= AI_FACTORY_STEP_COUNT) {
+        const remaining = Math.min(factory.balance, this.houseCredits.get(s.house) ?? 0);
+        if (remaining > 0) {
+          this.houseCredits.set(s.house, (this.houseCredits.get(s.house) ?? 0) - remaining);
+        }
+        factory.balance = 0;
+        factory.suspended = true;
+        factory.rate = 0;
+        factory.timer = 0;
+      }
+    }
+  }
+
+  private findInfantryFactoryExitCell(s: MapStructure, product: string): CellPos | null {
+    const offsets = s.type === 'KENN'
+      ? [{ cx: 0, cy: 1 }, ...EXIT_PYLE_OFFSETS]
+      : EXIT_PYLE_OFFSETS;
+    for (const off of offsets) {
+      const cx = s.cx + off.cx;
+      const cy = s.cy + off.cy;
+      if (this.map.canEnterCell(
+        cx,
+        cy,
+        false,
+        id => {
+          const e = this.entityById.get(id);
+          return !!e?.isDriving;
+        },
+        true,
+      ) !== MoveResult.OK) {
+        continue;
+      }
+      if (!UNIT_STATS[product]?.isInfantry) continue;
+      return { cx, cy };
+    }
+    return null;
+  }
+
+  private infantryFactoryExitLepton(s: MapStructure): LeptonPos {
+    // C++ bdata.cpp exit coordinates, converted by XYP_COORD/Pixel_To_Lepton.
+    if (s.type === 'TENT') {
+      return { lx: s.cx * LEPTON_SIZE + pixelToLepton(24), ly: s.cy * LEPTON_SIZE + pixelToLepton(47) };
+    }
+    if (s.type === 'KENN') {
+      return { lx: s.cx * LEPTON_SIZE + pixelToLepton(8), ly: s.cy * LEPTON_SIZE + pixelToLepton(16) };
+    }
+    return { lx: s.cx * LEPTON_SIZE + pixelToLepton(18), ly: s.cy * LEPTON_SIZE + pixelToLepton(47) };
+  }
+
+  private infantryScenarioInitClosestSpot(coord: LeptonPos): LeptonPos {
+    // C++ InfantryClass::Unlimbo calls CellClass::Closest_Free_Spot(coord,
+    // ScenarioInit). When ScenarioInit is true, occupancy is ignored but the
+    // coordinate is still snapped to the nearest StoppingCoordAbs sub-cell.
+    const spot = this.infantrySpotIndex(coord.lx, coord.ly);
+    const off = SUBCELL_LEPTON_OFFSETS[spot] ?? SUBCELL_LEPTON_OFFSETS[0];
+    return {
+      lx: Math.floor(coord.lx / LEPTON_SIZE) * LEPTON_SIZE + off.lx,
+      ly: Math.floor(coord.ly / LEPTON_SIZE) * LEPTON_SIZE + off.ly,
+    };
+  }
+
+  /** C++ BuildingClass::Exit_Object infantry branch (building.cpp:2054-2087). */
+  private exitAIInfantryFactoryProduct(s: MapStructure): 0 | 1 | 2 {
+    const factory = s.aiFactory;
+    if (!factory || factory.kind !== 'infantry') return 0;
+
+    const exitCell = this.findInfantryFactoryExitCell(s, factory.productType);
+    if (!exitCell) return 0;
+
+    const start = this.infantryScenarioInitClosestSpot(this.infantryFactoryExitLepton(s));
+    const entity = new Entity(factory.productType as UnitType, s.house, leptonToPixel(start.lx), leptonToPixel(start.ly));
+    entity.leptonX = start.lx;
+    entity.leptonY = start.ly;
+    entity.syncPosFromLeptons();
+    entity.prevPos = { x: entity.pos.x, y: entity.pos.y };
+    entity.scenarioInitUnlimbo = true;
+    entity.unlimboTick = this.tick;
+    // C++ TechnoClass::Unlimbo calls Enter_Idle_Mode(true) + Commence before
+    // BuildingClass::Exit_Object assigns the produced unit's MOVE order.
+    entity.mission = this.idleMission(entity);
+    entity.missionQueue = Mission.MOVE;
+    entity.missionTimer = 0;
+    entity.moveTarget = cellTargetToLepton(exitCell.cx, exitCell.cy);
+    entity.path = [];
+    entity.pathIndex = 0;
+    entity.pathDelay = 0;
+    entity.isDriving = false;
+    // C++ BuildingClass::Exit_Object establishes radio contact with produced
+    // infantry via RADIO_HELLO/RADIO_UNLOAD. InfantryClass::Per_Cell_Process
+    // cuts this tether on the first reached cell and starts DO_GESTURE1/2.
+    entity.isTethered = true;
+
+    const dir = directionToLeptons256(start.lx, start.ly, entity.moveTarget.lx, entity.moveTarget.ly);
+    entity.bodyFacing256 = dir;
+    entity.facing = dir256ToFacing8(dir);
+    entity.desiredFacing = entity.facing;
+    entity.bodyFacing32 = dir256ToFacing32(dir);
+
+    const spot = this.infantrySpotIndex(entity.leptonX, entity.leptonY);
+    const cellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
+    entity.subCell = spot;
+    if (this.map.occupyClaimedSubCell(cellIdx, entity.id, spot)) {
+      entity.claimedCellIdx = cellIdx;
+      entity.claimedSubCell = spot;
+    }
+
+    const iq = this.houseIQs.get(s.house) ?? 3;
+    // C++ Exit_Object calls Assign_Mission(GUARD_AREA) after queueing MOVE
+    // when IQGuardArea is met. Assign_Mission is a no-op if the current idle
+    // mission is already GUARD_AREA, preserving the queued MOVE for armed AI
+    // infantry/dogs; otherwise it overwrites the queue just like C++.
+    if (iq >= 4 && entity.mission !== Mission.AREA_GUARD) {
+      entity.missionQueue = Mission.AREA_GUARD;
+    }
+
+    this.entities.push(entity);
+    this.entityById.set(entity.id, entity);
+    this.markDiscoveredIfPlayerVisible(entity);
+    return 2;
   }
 
   /** AI base rebuild — delegates to ai.ts */
@@ -10138,9 +13112,12 @@ export class Game {
 
   private teamMissionWaypointTarget(entity: Entity, wp: { cx: number; cy: number }): LeptonPos {
     const offset = entity.formationOffset ?? { x: 0, y: 0 };
+    const base = cellTargetToLepton(wp.cx, wp.cy);
     return {
-      lx: wp.cx * 256 + 128 + pixelToLepton(offset.x),
-      ly: wp.cy * 256 + 128 + pixelToLepton(offset.y),
+      // C++ TeamClass stores waypoint targets as ::As_Target(CELL), and
+      // As_Coord(Target) returns cell*256+0x88 rather than visual center.
+      lx: base.lx + pixelToLepton(offset.x),
+      ly: base.ly + pixelToLepton(offset.y),
     };
   }
 
@@ -10183,10 +13160,6 @@ export class Game {
   }
 
   /** AI retreat — damaged units fall back to repair depot or base */
-  private updateAIRetreat(): void {
-    this._runAI(ctx => _updateAIRetreat(ctx));
-  }
-
   /** AI auto-repair — IQ >= 3 houses repair damaged structures using their own credits */
   private updateAIRepair(): void {
     this._runAI(ctx => _updateAIRepair(ctx));
@@ -10359,6 +13332,127 @@ export class Game {
     this._runSpecialUnits(ctx => _updateTanyaC4(ctx, entity));
   }
 
+  /** C++ weapon.ini Charges=yes currently applies to Tesla coils. */
+  private isElectricStructureWeapon(s: MapStructure): boolean {
+    return s.type === 'TSLA';
+  }
+
+  /** C++ BuildingClass::Animation_AI stage advance for Tesla charge animation.
+   *  Charging_AI sets Set_Rate(3), and the stage is tested against 9 on the
+   *  later Charging_AI pass. This helper represents that pre-mission
+   *  Animation_AI step without affecting unrelated building animations. */
+  private tickStructureChargingAnimation(s: MapStructure): void {
+    if (!this.isElectricStructureWeapon(s) || !s.isCharging || s.isCharged) return;
+    s.chargeRateCounter = (s.chargeRateCounter ?? 0) + 1;
+    if (s.chargeRateCounter >= 3) {
+      s.chargeRateCounter = 0;
+      s.chargeStage = (s.chargeStage ?? 0) + 1;
+    }
+  }
+
+  /** C++ BuildingClass::Charging_AI (building.cpp:5435-5465).
+   *  TeslaZap has Charges=yes. Mission_Attack may select a target, but
+   *  BuildingClass::Can_Fire returns FIRE_BUSY until IsCharged becomes true
+   *  after the charge animation reaches stage 9. */
+  private updateStructureChargingAI(s: MapStructure, combatCtx: CombatContext, isLowPower: boolean): void {
+    if (!this.isElectricStructureWeapon(s)) return;
+
+    const assignedTarget = s.targetEntityId !== undefined
+      ? this.entityById.get(s.targetEntityId)
+      : undefined;
+    const hasTarget = !!(assignedTarget && assignedTarget.alive && !assignedTarget.inLimbo);
+    if (hasTarget && !isLowPower) {
+      if (!s.isCharged) {
+        if (s.isCharging) {
+          if ((s.chargeStage ?? 0) >= 9) {
+            s.isCharged = true;
+            s.isCharging = false;
+            s.chargeRateCounter = 0;
+          }
+        } else if ((s.attackCooldown ?? 0) <= 0) {
+          s.isCharged = false;
+          s.isCharging = true;
+          s.chargeStage = 0;
+          s.chargeRateCounter = 0;
+        }
+      }
+    } else if (s.isCharging || s.isCharged) {
+      s.isCharging = false;
+      s.isCharged = false;
+      s.chargeStage = 0;
+      s.chargeRateCounter = 0;
+    }
+  }
+
+  /** C++ MissionClass::AI for buildings.
+   *
+   *  Weapon buildings do not roll Guard jitter when a target is found. Instead,
+   *  BuildingClass::Mission_Guard assigns MISSION_ATTACK, Commence() resets the
+   *  mission timer/status, and the handler returns 1 (building.cpp:3273-3295).
+   *  Actual firing happens later from Mission_Attack when this returns true.
+   */
+  private dispatchStructureMissionTimer(
+    s: MapStructure,
+    combatCtx: CombatContext,
+    guardNormalDelay: number,
+    guardAADelay: number,
+  ): boolean {
+    if (s.missionTimer > 0) {
+      s.missionTimer--;
+    }
+    if (s.missionTimer > 0) return false;
+
+    const mission = s.mission ?? Mission.GUARD;
+    if (s.weapon) {
+      const assignedTarget = s.targetEntityId !== undefined
+        ? this.entityById.get(s.targetEntityId)
+        : undefined;
+      const hasAssignedTarget = !!(assignedTarget && assignedTarget.alive && !assignedTarget.inLimbo);
+      const assignedTargetInRange = hasAssignedTarget
+        ? leptonDist(s.cx * LEPTON_SIZE, s.cy * LEPTON_SIZE, assignedTarget!.leptonX, assignedTarget!.leptonY) <= s.weapon.range * LEPTON_SIZE
+        : false;
+
+      if (mission === Mission.ATTACK) {
+        if (!hasAssignedTarget || !assignedTargetInRange) {
+          // C++ building.cpp:3726-3730 — invalid/lost target sends building
+          // back to GUARD and returns 1, with no Guard jitter this tick.
+          s.targetEntityId = undefined;
+          s.mission = Mission.GUARD;
+          s.missionTimer = 1;
+          return false;
+        }
+        if (this.isElectricStructureWeapon(s) && !s.isCharged) {
+          // C++ BuildingClass::Can_Fire: TeslaZap Charges=yes returns
+          // FIRE_BUSY until Charging_AI sets IsCharged. Mission_Attack
+          // returns 1 and keeps the target/ATTACK mission alive.
+          s.missionTimer = 1;
+          return false;
+        }
+        s.missionTimer = 1;
+        return true;
+      }
+
+      const target = _findStructureThreatTarget(combatCtx, s);
+      if (target) {
+        s.targetEntityId = target.id;
+        s.mission = Mission.ATTACK;
+        s.missionTimer = 1;
+        return false;
+      }
+
+      s.targetEntityId = undefined;
+      const jitter = ScenarioRandom.nextInRange(0, 2);
+      s.mission = Mission.GUARD;
+      s.missionTimer = guardAADelay + jitter;
+      return false;
+    }
+
+    const jitter = ScenarioRandom.nextInRange(0, 2);
+    s.mission = Mission.GUARD;
+    s.missionTimer = (s.type === 'FIX' ? guardNormalDelay : guardNormalDelay * 3) + jitter;
+    return false;
+  }
+
   /** C++ BuildingClass::AI() — interleaved timer tick + combat per building.
    *  In C++, each building's AI() runs MissionClass::AI() (timer tick with RNG jitter)
    *  then Firing_AI() (weapon targeting/fire with potential RNG for damage/scatter)
@@ -10392,30 +13486,16 @@ export class Game {
       if (s.buildProgress !== undefined) continue; // still under construction
       if (s.sellProgress !== undefined) continue;  // being sold
 
-      // ── Phase 1: MissionClass::AI() — timer tick + jitter RNG ──
-      // C++ CDTimerClass: decrement then check. Timer fires when it reaches 0.
-      if (s.missionTimer > 0) {
-        s.missionTimer--;
-      }
-      if (s.missionTimer <= 0) {
-        // Timer fired (reached 0 this tick or was already 0)
-        const jitter = ScenarioRandom.nextInRange(0, 2);
-        if (s.weapon) {
-          // Weapon-equipped: AA_Delay + jitter (building.cpp:3305)
-          s.missionTimer = GUARD_AA_DELAY + jitter;
-        } else if (s.type === 'FIX') {
-          // Repair facility: Normal_Delay + jitter (building.cpp:3300)
-          s.missionTimer = GUARD_NORMAL_DELAY + jitter;
-        } else {
-          // All other non-weapon buildings: Normal_Delay * 3 + jitter (building.cpp:3302)
-          s.missionTimer = GUARD_NORMAL_DELAY * 3 + jitter;
-        }
-      }
+      this.tickStructureChargingAnimation(s);
+      const runStructureAttack = this.dispatchStructureMissionTimer(
+        s, combatCtx, GUARD_NORMAL_DELAY, GUARD_AA_DELAY);
 
-      // ── Phase 2: Firing_AI() — weapon targeting and fire ──
+      // ── Phase 2: Mission_Attack — weapon targeting and fire ──
       // C++ runs this immediately after timer tick for the SAME building,
       // so combat RNG is consumed at the correct stream position.
-      _updateSingleStructureCombat(combatCtx, s, isLowPower);
+      if (runStructureAttack) _updateSingleStructureCombat(combatCtx, s, isLowPower);
+
+      this.updateStructureChargingAI(s, combatCtx, isLowPower);
 
       // ── Phase 3: Gap Generator Arm timer (building.cpp:990-993) ──
       // C++ BuildingClass::AI() checks STRUCT_GAP after Rotation_AI().
@@ -10465,19 +13545,26 @@ export class Game {
               // Note: attack cooldowns are ticked by updateAircraft() (aircraft.ts:398-399)
               // which runs for ALL aircraft states including 'landed'. No need to tick here.
 
-              // C++ MissionClass::AI: decrement timer, fire handler when 0
-              if (heli.missionTimer > 0) {
+              // C++ MissionClass::AI reads CDTimer's current value at AI entry.
+              // A timer that becomes visible as 0 at the end of this frame is
+              // not dispatched until the next object AI tick. This HPAD path is
+              // manual because landed aircraft return from updateAircraft before
+              // normal MissionClass::AI.
+              const timerFired = heli.missionTimer <= 0;
+              if (!timerFired && heli.missionTimer > 0) {
                 heli.missionTimer--;
               }
-              if (heli.missionTimer <= 0) {
+              if (timerFired) {
                 // C++ aircraft.cpp:3773: if (Target_Legal(TarCom)) → ATTACK, return 1
                 // Previous scan set entity.target/targetStructure — helicopter takes off.
                 const hasTarget = (heli.target?.alive) ||
                   (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                 if (hasTarget) {
                   heli.mission = Mission.ATTACK;
-                  // Timer=1: C++ returns 1 so next AI() tick processes the new ATTACK mission
-                  heli.missionTimer = 1;
+                  // AircraftClass::AI runs Commence() after Mission_Guard.
+                  // Assign_Mission(ATTACK) queues the mission; Commence pops it
+                  // and resets Timer=0, so Mission_Attack dispatches next tick.
+                  heli.missionTimer = 0;
                 } else {
                   heli.target = null; // clear stale target
                   heli.targetStructure = null;
@@ -10487,8 +13574,10 @@ export class Game {
                   //   - House->State != STATE_ATTACKED → Find_Juicy_Target (house.cpp:6900)
                   //   - FootClass::Mission_Guard → Target_Something_Nearby validates/overrides
                   const juicyFound = this._heliGuardScan(heli);
-                  const hasTargetAfterScan = (heli.target?.alive) ||
-                    (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
+                  const scannedTarget = heli.target as Entity | null;
+                  const scannedStructure = heli.targetStructure as MapStructure | null;
+                  const hasTargetAfterScan = (scannedTarget?.alive) ||
+                    (scannedStructure?.alive);
                   // C++ foot.cpp:684-687:
                   //     if (Arm != 0) { return (int)Arm; }   <-- NO Random_Pick
                   //     return(dtime + Random_Pick(0,2));
@@ -10498,7 +13587,8 @@ export class Game {
                       ScenarioRandom.nextInRange(0, 2);
                     }
                     heli.mission = Mission.ATTACK;
-                    heli.missionTimer = 1;
+                    // Same queued-then-Commence path as Target_Legal(TarCom).
+                    heli.missionTimer = 0;
                   } else if (heli.attackCooldown > 0) {
                     // C++ foot.cpp:684: Arm != 0 → return Arm, skipping Random_Pick.
                     heli.missionTimer = heli.attackCooldown;
@@ -10572,8 +13662,11 @@ export class Game {
 
   /** Agent 9: MAD Tank deploy + shockwave — delegates to specialUnits.ts */
   static readonly MAD_TANK_CHARGE_TICKS = _MAD_TANK_CHARGE_TICKS;
-  static readonly MAD_TANK_DAMAGE = _MAD_TANK_DAMAGE;
+  static readonly MAD_TANK_UNIT_DAMAGE_PERCENT = _MAD_TANK_UNIT_DAMAGE_PERCENT;
+  static readonly MAD_TANK_BUILDING_DAMAGE_PERCENT = _MAD_TANK_BUILDING_DAMAGE_PERCENT;
+  static readonly MAD_TANK_INFANTRY_DAMAGE = _MAD_TANK_INFANTRY_DAMAGE;
   static readonly MAD_TANK_RADIUS = _MAD_TANK_RADIUS;
+  static readonly MAD_TANK_SCREEN_SHAKE = _MAD_TANK_SCREEN_SHAKE;
 
   updateMADTank(entity: Entity): void {
     this._runSpecialUnits(ctx => _updateMADTank(ctx, entity));

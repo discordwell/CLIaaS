@@ -3,6 +3,8 @@ import { GameMap, Terrain } from '../engine/map';
 import { MAP_CELLS } from '../engine/types';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { classifyInteriorTerrain } from '../engine/scenario';
+import type { TilesetMeta } from '../engine/assets';
 
 /**
  * Multi-Theatre Tileset Tests
@@ -17,6 +19,10 @@ import { join } from 'path';
 
 const ASSETS_DIR = join(__dirname, '../../../public/ra/assets');
 const hasAssets = existsSync(join(ASSETS_DIR, 'tileset.json'));
+const interiorTilesetPath = join(ASSETS_DIR, 'interior_tileset.json');
+const interiorTilesetMeta: TilesetMeta | null = existsSync(interiorTilesetPath)
+  ? JSON.parse(readFileSync(interiorTilesetPath, 'utf-8'))
+  : null;
 
 describe('Multi-theatre tileset extraction', () => {
   it.skipIf(!hasAssets)('TEMPERATE tileset files exist', () => {
@@ -60,21 +66,8 @@ describe('INTERIOR terrain classification', () => {
     map.setBounds(40, 40, 50, 50);
   }
 
-  /** Apply INTERIOR terrain classification (mirrors classifyInteriorTerrain from scenario.ts) */
-  function classifyInterior(map: GameMap) {
-    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
-      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
-        const idx = cy * MAP_CELLS + cx;
-        const tmpl = map.templateType[idx];
-        if (tmpl === 0xFFFF || tmpl === 0x00 || tmpl === 255) {
-          // Clear floor
-        } else if (tmpl >= 291 && tmpl <= 317) {
-          map.setTerrain(cx, cy, Terrain.WALL);
-        } else if (tmpl >= 329 && tmpl <= 377) {
-          map.setTerrain(cx, cy, Terrain.ROCK);
-        }
-      }
-    }
+  function classifyInterior(map: GameMap, meta: TilesetMeta | null = null) {
+    classifyInteriorTerrain(map, map.templateType, map.templateIcon, meta);
   }
 
   it('wall templates (329-377) classify as ROCK', () => {
@@ -95,13 +88,28 @@ describe('INTERIOR terrain classification', () => {
     }
   });
 
-  it('floor templates (253-290, 318-328, 384-399) stay CLEAR', () => {
+  it('fallback floor templates (253-290, 318-328, 384-399) stay CLEAR without metadata', () => {
     for (const tmpl of [253, 268, 280, 318, 384, 399]) {
       setup();
       map.templateType[50 * MAP_CELLS + 50] = tmpl;
       classifyInterior(map);
       expect(map.getTerrain(50, 50)).toBe(Terrain.CLEAR);
     }
+  });
+
+  it.skipIf(!interiorTilesetMeta)('uses INTERIOR per-icon land type data when available', () => {
+    setup();
+    const idx = 50 * MAP_CELLS + 50;
+    map.templateType[idx] = 397;
+    map.templateIcon[idx] = 1; // interior_tileset.json: lt='Rock'
+    classifyInterior(map, interiorTilesetMeta);
+    expect(map.getTerrain(50, 50)).toBe(Terrain.ROCK);
+
+    setup();
+    map.templateType[idx] = 397;
+    map.templateIcon[idx] = 2; // lt omitted = Clear
+    classifyInterior(map, interiorTilesetMeta);
+    expect(map.getTerrain(50, 50)).toBe(Terrain.CLEAR);
   });
 
   it('templateType stores INTERIOR IDs (253-399) without truncation', () => {

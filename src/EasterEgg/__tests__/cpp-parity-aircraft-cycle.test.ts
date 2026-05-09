@@ -107,6 +107,7 @@ function makeCombatCtx(
     entityById: new Map(entities.map(e => [e.id, e])),
     structures,
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,
@@ -597,6 +598,7 @@ describe('AA weapon targeting gate (combat.cpp, missionAI.cpp)', () => {
     expect(e3.weapon?.isAntiAir || e3.weapon2?.isAntiAir).toBeTruthy();
 
     const ctx = makeCombatCtx([], [e3, mig]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, e3, mig);
 
     // E3 should acquire the airborne MIG
@@ -613,6 +615,7 @@ describe('AA weapon targeting gate (combat.cpp, missionAI.cpp)', () => {
     expect(tank.weapon?.isAntiAir || tank.weapon2?.isAntiAir).toBeTruthy();
 
     const ctx = makeCombatCtx([], [tank, hind]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, hind);
 
     expect(tank.target).toBe(hind);
@@ -625,6 +628,7 @@ describe('AA weapon targeting gate (combat.cpp, missionAI.cpp)', () => {
     mig.flightAltitude = 0; // grounded
 
     const ctx = makeCombatCtx([], [tank, mig]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, tank, mig);
 
     // Tank CAN target grounded MIG

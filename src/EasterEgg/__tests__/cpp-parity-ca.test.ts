@@ -47,7 +47,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -364,7 +364,7 @@ describe('CA retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, ca, attacker);
 
     expect(ca.target).toBe(attacker);
-    expect(ca.mission).toBe(Mission.ATTACK);
+    expect(ca.mission).toBe(Mission.GUARD);
   });
 
   it('CA has weapon — can retaliate', () => {

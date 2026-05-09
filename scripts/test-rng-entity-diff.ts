@@ -26,6 +26,76 @@ const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 const scenario = process.env.SCENARIO ?? 'SCG08EA';
 const startTick = Number(process.env.START ?? 89);
 const endTick = Number(process.env.END ?? 100);
+const HARNESS_SALT = process.env.HARNESS_SALT ?? 'anti-shim-v1';
+
+const MULT_CONSTANT = 0x41C64E6D;
+const ADD_CONSTANT = 0x00003039;
+
+function nextScenarioSeed(seed: number): number {
+  return (Math.imul(seed >>> 0, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
+}
+
+function filterScenarioRngLog(log: Array<[number, number, number]>, startSeed: number): Array<[number, number, number]> {
+  const filtered: Array<[number, number, number]> = [];
+  let seed = startSeed >>> 0;
+  for (const entry of log) {
+    const expected = nextScenarioSeed(seed);
+    if ((entry[0] >>> 0) === expected) {
+      filtered.push(entry);
+      seed = expected;
+    }
+  }
+  return filtered;
+}
+
+function hashText(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function addHarnessNoise(url: URL, scenarioName: string, side: 'wasm' | 'ts'): string {
+  const hash = hashText(`${HARNESS_SALT}:${scenarioName}:${side}`);
+  url.searchParams.set('__parityHarness', 'salted');
+  url.searchParams.set('__parityToken', hash.toString(36));
+  url.searchParams.set('__paritySide', side);
+  url.searchParams.set('__noop', `${(hash >>> 7) % 997}`);
+  return url.toString();
+}
+
+function wasmUrl(baseUrl: string, scenarioName: string): string {
+  const url = new URL('/ra/original.html', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+  url.searchParams.set('scenario', `${scenarioName}.INI`);
+  url.searchParams.set('autoplay', '1');
+  url.searchParams.set('agentharness', '1');
+  url.searchParams.set('seed', '0');
+  return addHarnessNoise(url, scenarioName, 'wasm');
+}
+
+function tsUrl(baseUrl: string, scenarioName: string): string {
+  const url = new URL(baseUrl);
+  url.searchParams.set('anttest', 'agent');
+  url.searchParams.set('scenario', scenarioName);
+  url.searchParams.set('difficulty', 'normal');
+  return addHarnessNoise(url, scenarioName, 'ts');
+}
+
+function stepPlan(total: number, key: string, maxChunk: number): number[] {
+  const plan: number[] = [];
+  let remaining = total;
+  let state = hashText(`${HARNESS_SALT}:${key}:${total}:${maxChunk}`);
+  while (remaining > 0) {
+    state = (Math.imul(state ^ 0x9e3779b9, 0x85ebca6b) + 0xc2b2ae35) >>> 0;
+    const cap = Math.min(remaining, maxChunk);
+    const chunk = 1 + (state % cap);
+    plan.push(chunk);
+    remaining -= chunk;
+  }
+  return plan;
+}
 
 function tagName(tag: number): string {
   // ============================================================================
@@ -136,14 +206,8 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
 
   // Launch both engines
   await Promise.all([
-    wasmPage.goto(
-      `${BASE_URL}/ra/original.html?scenario=${scenario}.INI&autoplay=1&agentharness=1&seed=0`,
-      { waitUntil: 'load' },
-    ),
-    tsPage.goto(
-      `${TS_BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`,
-      { waitUntil: 'load' },
-    ),
+    wasmPage.goto(wasmUrl(BASE_URL, scenario), { waitUntil: 'load' }),
+    tsPage.goto(tsUrl(TS_BASE_URL, scenario), { waitUntil: 'load' }),
   ]);
 
   // Wait for both to be ready
@@ -171,20 +235,31 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
   // Enable TS tag logging
   await tsPage.evaluate(() => { (window as any).__rngTagControl('enable'); });
 
-  // Step both to startTick in bulk (reading WASM state resets its log each time)
+  // Step both to startTick. NO_BULK=1 is slower but keeps the harness on the
+  // same one-frame path as test-first-divergence for late-tick investigations.
   if (startTick > 1) {
     const bulkStep = startTick - 1;
-    let rem = bulkStep;
-    while (rem > 0) {
-      const batch = Math.min(rem, 300);
-      rem -= batch;
-      await Promise.all([
-        wasmPage.evaluate(async (n: number) => {
-          const r = (window as any).__agentStep(n);
-          if (r?.then) await r;
-        }, batch),
-        tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, batch),
-      ]);
+    if (process.env.NO_BULK === '1') {
+      for (let i = 0; i < bulkStep; i++) {
+        await Promise.all([
+          wasmPage.evaluate(async () => {
+            const r = (window as any).__agentStep(1);
+            if (r?.then) await r;
+          }),
+          tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
+        ]);
+      }
+    } else {
+      const plan = stepPlan(bulkStep, `${scenario}:rng-diff-bulk`, 271);
+      for (const batch of plan) {
+        await Promise.all([
+          wasmPage.evaluate(async (n: number) => {
+            const r = (window as any).__agentStep(n);
+            if (r?.then) await r;
+          }, batch),
+          tsPage.evaluate((n: number) => { (window as any).__agentStep?.(n); }, batch),
+        ]);
+      }
     }
     // Read WASM state to reset its log, read+reset TS log
     await Promise.all([
@@ -211,6 +286,7 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     }),
   ]);
   console.log(`Pre-loop seeds — WASM: ${wasmPreSeed >>> 0}, TS: ${tsPreSeed >>> 0}, match: ${(wasmPreSeed >>> 0) === (tsPreSeed >>> 0)}\n`);
+  let wasmScenarioSeed = wasmPreSeed >>> 0;
 
   // Capture TS console.log for debugging
   tsPage.on('console', (msg) => {
@@ -259,7 +335,12 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     ]);
 
     // Read TS RNG log
-    const wasmData = wasmStepResult;
+    const wasmRawLog = wasmStepResult.log;
+    const wasmData = {
+      ...wasmStepResult,
+      rawLog: wasmRawLog,
+      log: filterScenarioRngLog(wasmRawLog, wasmScenarioSeed),
+    };
     const tsData = await tsPage.evaluate(() => {
       const r = (window as any).__rngTagControl('read');
       const s = (window as any).__agentState();
@@ -288,8 +369,9 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
 
     // Always print tick header
     const marker = seedMatch && callDiff === 0 ? '✓' : '✗';
+    const rawNote = wasmData.rawLog.length === wasmData.log.length ? '' : ` rawWASM=${wasmData.rawLog.length}`;
     console.log(
-      `tick ${tick}: ${marker}  WASM(${wasmData.log.length} calls, seed=${wasmData.seed >>> 0})  TS(${tsData.log.length} calls, seed=${tsData.seed >>> 0})  Δcalls=${callDiff}${trackInfo}`,
+      `tick ${tick}: ${marker}  WASM(${wasmData.log.length} scenario calls, seed=${wasmData.seed >>> 0})  TS(${tsData.log.length} calls, seed=${tsData.seed >>> 0})  Δcalls=${callDiff}${rawNote}${trackInfo}`,
     );
 
     const ALWAYS_DUMP = process.env.DUMP_ALL === '1';
@@ -341,6 +423,8 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
       }
       console.log('');
     }
+
+    wasmScenarioSeed = wasmData.seed >>> 0;
   }
 
   console.log(`\n=== Summary: ${totalDivergences} divergent ticks out of ${endTick - startTick + 1} ===\n`);

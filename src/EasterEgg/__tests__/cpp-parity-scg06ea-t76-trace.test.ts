@@ -33,8 +33,9 @@
 import { describe, it, expect } from 'vitest';
 import { GameMap } from '../engine/map';
 import { findPath } from '../engine/pathfinding';
-import { LEPTON_SIZE, SpeedClass } from '../engine/types';
+import { CELL_SIZE, House, LEPTON_SIZE, SpeedClass, UnitType } from '../engine/types';
 import { leptonDist } from '../engine/types';
+import { Entity } from '../engine/entity';
 
 describe('SCG06EA tick 76 trace — findPath (24,67) → (20,66) geometry', () => {
   // Minimal bare-ground map: a 40x80 window of passable land.
@@ -99,6 +100,19 @@ describe('SCG06EA tick 76 trace — findPath (24,67) → (20,66) geometry', () =
     // Trace the findPath result for diagnosis (vitest prints on fail).
     expect({ path: trace, firstInRangeIdx }).toMatchObject({ firstInRangeIdx: expect.any(Number) });
     expect(firstInRangeIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it('uses FootClass::Likely_Coord for path-shorten range checks', () => {
+    // C++ foot.cpp:1475-1477 replaces a moving foot target's current Coord with
+    // Likely_Coord() (Head_To_Coord when set) before deciding whether to clear
+    // NavCom at PCP_END. This catches targets that will be in range shortly.
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 10 * CELL_SIZE, 10 * CELL_SIZE);
+    const movingTarget = new Entity(UnitType.I_E1, House.Greece, 14 * CELL_SIZE, 10 * CELL_SIZE);
+    movingTarget.headToLX = 12 * LEPTON_SIZE + 128;
+    movingTarget.headToLY = 10 * LEPTON_SIZE + 128;
+
+    expect(attacker.inRange(movingTarget)).toBe(false);
+    expect(attacker.inRangeOfLikelyCoord(movingTarget)).toBe(true);
   });
 
   it('traces every cell in TS findPath from (24,67) → (20,66) with distance to (20,64) target', () => {

@@ -303,9 +303,9 @@ describe('ranged ant identity -- only ant with range > 2.0', () => {
 // modifyDamage falloff uses spreadFactor to shape the splash curve.
 
 describe('splash damage -- FireballLauncher area effect (combat.cpp)', () => {
-  it('point-blank direct hit on none armor: 125 * 0.9 = 113 (rounded)', () => {
+  it('point-blank direct hit on none armor: C++ fixed 125 * 0.9 = 112', () => {
     const dmg = modifyDamage(125, 'Fire', 'none', 0);
-    expect(dmg).toBe(113); // Math.round(112.5)
+    expect(dmg).toBe(112);
   });
 
   it('point-blank direct hit on wood armor: 125 * 1.0 = 125', () => {
@@ -515,7 +515,7 @@ describe('ANT2 retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, ant2, attacker);
 
     expect(ant2.target).toBe(attacker);
-    expect(ant2.mission).toBe(Mission.ATTACK);
+    expect(ant2.mission).toBe(Mission.GUARD);
   });
 
   it('ANT2 has a weapon (can retaliate)', () => {
@@ -579,9 +579,9 @@ describe('ANT2 noMovingFire setup time (unit.cpp:1760-1764)', () => {
 // FireballLauncher 125 base damage with Fire warhead at various armor types.
 
 describe('FireballLauncher damage calculations (combat.cpp)', () => {
-  it('one-shots Rifle Infantry (E1): 125 * 0.9 = 113 > 50 HP', () => {
-    const damage = Math.round(125 * getWarheadMultiplier('Fire', 'none'));
-    expect(damage).toBe(113);
+  it('one-shots Rifle Infantry (E1): C++ fixed 125 * 0.9 = 112 > 50 HP', () => {
+    const damage = modifyDamage(125, 'Fire', 'none');
+    expect(damage).toBe(112);
     expect(damage).toBeGreaterThan(UNIT_STATS.E1.strength);
 
     const victim = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
@@ -590,8 +590,8 @@ describe('FireballLauncher damage calculations (combat.cpp)', () => {
     expect(victim.alive).toBe(false);
   });
 
-  it('one-shots Rocket Infantry (E3): 113 > 60 HP', () => {
-    const damage = Math.round(125 * getWarheadMultiplier('Fire', 'none'));
+  it('one-shots Rocket Infantry (E3): 112 > 60 HP', () => {
+    const damage = modifyDamage(125, 'Fire', 'none');
     expect(damage).toBeGreaterThan(UNIT_STATS.E3.strength);
   });
 

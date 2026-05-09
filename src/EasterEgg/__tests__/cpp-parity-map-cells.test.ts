@@ -586,9 +586,11 @@ describe('Overlay ore/gem — C++ defines.h:1487-1494 vs TS encoding', () => {
 
   // Depletion returns credits
   it('TS gold = 25 credits/bail (rules.ini GoldValue=25); TS gem = 50 credits/bail (rules.ini GemValue=50)', () => {
-    map.overlay[15 * MAP_CELLS + 15] = 0x08;
+    map.overlay[15 * MAP_CELLS + 15] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[15 * MAP_CELLS + 15] = 1;
     expect(map.depleteOre(15, 15)).toBe(25);
-    map.overlay[15 * MAP_CELLS + 15] = 0x10;
+    map.overlay[15 * MAP_CELLS + 15] = GameMap.OVERLAY_GEMS1;
+    map.oreDensity[15 * MAP_CELLS + 15] = 1;
     expect(map.depleteOre(15, 15)).toBe(50);
   });
 });

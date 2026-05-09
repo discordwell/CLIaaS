@@ -142,21 +142,32 @@ function makeCtx(overrides?: Partial<HarvesterContext>): HarvesterContext {
 
 /** Place gold ore at (cx,cy) with density 0..11. Overlay range: 0x03..0x0E */
 function placeGold(map: GameMap, cx: number, cy: number, density = 5): void {
-  map.overlay[cy * MAP_CELLS + cx] = 0x03 + density;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+  map.oreDensity[idx] = density;
 }
 
 /** Place gem at (cx,cy) with density 0..3. Overlay range: 0x0F..0x12 */
 function placeGem(map: GameMap, cx: number, cy: number, density = 1): void {
-  map.overlay[cy * MAP_CELLS + cx] = 0x0F + density;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+  map.oreDensity[idx] = density;
 }
 
 function getOverlay(map: GameMap, cx: number, cy: number): number {
   const idx = cy * MAP_CELLS + cx;
   const ovl = map.overlay[idx];
   const density = map.oreDensity[idx];
-  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
-  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  if (density !== 0xFF && GameMap.isGoldOverlayId(ovl)) return 0x03 + density;
+  if (density !== 0xFF && GameMap.isGemOverlayId(ovl)) return 0x0F + density;
   return ovl;
+}
+
+function primeHarvestReady(entity: Entity): void {
+  entity.harvesterAnimRate = 1;
+  entity.harvesterAnimTimer = 1;
+  entity.harvesterAnimStage = 9;
+  entity.harvestTick = 9;
 }
 
 // =============================================================================
@@ -285,7 +296,7 @@ describe('TS engine static constants match INI-parsed values', () => {
   it('gold at every density level yields exactly GoldValue per bail', () => {
     for (let ovl = 0x04; ovl <= 0x0E; ovl++) {
       const map = makeMap();
-      map.overlay[50 * MAP_CELLS + 50] = ovl;
+      placeGold(map, 50, 50, ovl - 0x03);
       const credits = map.depleteOre(50, 50);
       expect(credits, `overlay 0x${ovl.toString(16).padStart(2, '0')}`).toBe(iniGoldValue);
     }
@@ -297,7 +308,7 @@ describe('TS engine static constants match INI-parsed values', () => {
   it('gems at every density level yield exactly GemValue per bail', () => {
     for (let ovl = 0x10; ovl <= 0x12; ovl++) {
       const map = makeMap();
-      map.overlay[50 * MAP_CELLS + 50] = ovl;
+      placeGem(map, 50, 50, ovl - 0x0F);
       const credits = map.depleteOre(50, 50);
       expect(credits, `overlay 0x${ovl.toString(16).padStart(2, '0')}`).toBe(iniGemValue);
     }
@@ -469,7 +480,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17; // completes the load animation next tick
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -488,7 +499,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 26;
     harv.oreCreditValue = 26 * iniGemValue;
     ctx.entities.push(harv);
@@ -496,6 +507,9 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
 
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBeLessThanOrEqual(iniBailCount);
+    expect(harv.harvesterState).toBe('harvesting');
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
   });
 
@@ -506,7 +520,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = iniBailCount - 1;
     harv.oreCreditValue = (iniBailCount - 1) * iniGemValue;
     ctx.entities.push(harv);
@@ -514,6 +528,9 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
 
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(iniBailCount);
+    expect(harv.harvesterState).toBe('harvesting');
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
   });
 
@@ -524,7 +541,7 @@ describe('Gem bonus bails match C++ unit.cpp:2306-2308', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -597,6 +614,7 @@ describe('Harvester capacity (Tiberium_Load — unit.cpp:4272-4280)', () => {
     harv.harvesterState = 'harvesting';
     harv.oreLoad = iniBailCount;
     harv.oreCreditValue = iniBailCount * iniGoldValue;
+    primeHarvestReady(harv);
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 5);
 
@@ -619,7 +637,7 @@ describe('Ore growth rules (cell.cpp:2869-2884, map.cpp:1017)', () => {
    */
   it('ORE_GROWTH_INTERVAL matches C++ map scan formula', () => {
     const subcount = Math.max(1, Math.floor(MAP_CELL_TOTAL / (iniGrowthRate * TICKS_PER_MINUTE)));
-    const expectedInterval = Math.ceil(MAP_CELL_TOTAL / subcount);
+    const expectedInterval = Math.ceil((MAP_CELL_TOTAL - 1) / (subcount - 1));
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(expectedInterval);
   });
 
@@ -852,7 +870,7 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -867,7 +885,7 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
   /**
    * Harvesting triggers when the 9-stage load animation completes.
    */
-  it('harvest triggers when the 18-tick load animation completes', () => {
+  it('harvest triggers when the initial rate-2 load animation completes', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
@@ -877,12 +895,12 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 11);
 
-    for (let i = 0; i < 17; i++) {
+    for (let i = 0; i < 19; i++) {
       updateHarvester(ctx, harv);
     }
     expect(harv.oreLoad).toBe(0);
 
-    // 18th tick triggers harvest.
+    // 20th update dispatch observes the completed load stage and lifts a bail.
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(1);
   });
@@ -894,7 +912,7 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 0;
     harv.oreCreditValue = 0;
     ctx.entities.push(harv);
@@ -904,7 +922,11 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(0);
     expect(getOverlay(ctx.map, 50, 50)).toBe(0xFF);
-    expect(harv.harvesterState).toBe('seeking');
+    expect(harv.harvesterState).toBe('harvesting');
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('harvesting');
+    expect(harv.moveTarget).not.toBeNull();
   });
 
   /**
@@ -914,12 +936,15 @@ describe('Harvesting state machine (unit.cpp:2280-2308)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.USSR, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 5;
     harv.oreCreditValue = 5 * iniGoldValue;
     ctx.entities.push(harv);
     placeGold(ctx.map, 50, 50, 0); // clears without a paid bail, no other ore nearby
 
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('harvesting');
+    primeHarvestReady(harv);
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
   });

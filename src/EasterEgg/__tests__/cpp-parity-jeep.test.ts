@@ -28,6 +28,7 @@ import {
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -406,28 +407,31 @@ describe('JEEP light armor vulnerability (C++ combat.cpp parity)', () => {
 describe('JEEP retaliation (C++ techno.cpp parity)', () => {
   it('JEEP retaliates when attacked with no current target', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.USSR, 100, 100 + 2 * CELL_SIZE);
 
     expect(jeep.weapon).toBeTruthy();
     expect(jeep.target).toBeNull();
     expect(jeep.mission).toBe(Mission.GUARD);
 
     const ctx = makeCombatContext([jeep, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, jeep, attacker);
 
     expect(jeep.target).toBe(attacker);
-    expect(jeep.mission).toBe(Mission.ATTACK);
+    expect(jeep.mission).toBe(Mission.GUARD);
   });
 
-  it('JEEP does not retarget if already has a living target', () => {
+  it('JEEP keeps an in-range living target when the AI threat check rejects the new source', () => {
+    ScenarioRandom.seed = 0;
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
-    const originalTarget = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const originalTarget = makeEntity(UnitType.I_E1, House.USSR, 100, 100 + 2 * CELL_SIZE);
     const newAttacker = makeEntity(UnitType.I_E2, House.USSR, 300, 300);
 
     jeep.target = originalTarget;
     jeep.mission = Mission.ATTACK;
 
     const ctx = makeCombatContext([jeep, originalTarget, newAttacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, jeep, newAttacker);
 
     expect(jeep.target, 'should keep original target').toBe(originalTarget);
@@ -436,13 +440,14 @@ describe('JEEP retaliation (C++ techno.cpp parity)', () => {
   it('JEEP retargets when current target is dead', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     const deadTarget = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
-    const newAttacker = makeEntity(UnitType.I_E2, House.USSR, 300, 300);
+    const newAttacker = makeEntity(UnitType.I_E2, House.USSR, 100, 100 + 2 * CELL_SIZE);
 
     jeep.target = deadTarget;
     jeep.mission = Mission.ATTACK;
     deadTarget.alive = false;
 
     const ctx = makeCombatContext([jeep, deadTarget, newAttacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, jeep, newAttacker);
 
     expect(jeep.target).toBe(newAttacker);
@@ -508,7 +513,7 @@ describe('JEEP stop-rotate-move (C++ drive.cpp parity)', () => {
     const startX = jeep.pos.x;
 
     // C++ parity: all vehicles use Rotation_Adjust accumulator, including JEEP (ROT=10).
-    // JEEP takes 7 ticks for 90-degree turn — does NOT snap instantly on first tick.
+    // JEEP takes 5 ticks for a 90-degree turn with C++ 256-facing ROT=10.
     const arrived = jeep.moveToward(target, jeep.stats.speed);
 
     // First tick: ROT=10 accumulates one 32-step but facing doesn't reach E yet
@@ -543,15 +548,14 @@ describe('JEEP stop-rotate-move (C++ drive.cpp parity)', () => {
     expect(arty.pos.x).toBe(startX);
   });
 
-  it('JEEP ROT=10 uses accumulator — takes 7 ticks for 90 degrees (C++ parity)', () => {
+  it('JEEP ROT=10 reaches 90 degrees in 5 ticks (C++ parity)', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     jeep.facing = Dir.N;
     jeep.desiredFacing = Dir.E;
     jeep.bodyFacing32 = Dir.N * 4;
 
     // C++ parity: vehicles always use Rotation_Adjust accumulator.
-    // ROT=10, 90 degrees = 8 visual steps. With while loop (multiple steps per tick
-    // when accumulator rolls over), JEEP reaches Dir.E in 7 ticks.
+    // ROT=10 applies in the full 256-facing space: 64 / 10 rounds up to 5 ticks.
     let ticks = 0;
     while (jeep.facing !== Dir.E && ticks < 20) {
       jeep.rotTickedThisFrame = false;
@@ -559,7 +563,7 @@ describe('JEEP stop-rotate-move (C++ drive.cpp parity)', () => {
       ticks++;
     }
     expect(jeep.facing).toBe(Dir.E);
-    expect(ticks).toBe(7);
+    expect(ticks).toBe(5);
   });
 });
 
@@ -717,13 +721,12 @@ describe('JEEP range checking (C++ Can_Fire parity)', () => {
     expect(jeep.inRange(target)).toBe(false);
   });
 
-  it('target at exactly 4.0 cells is in range', () => {
+  it('target at exactly 4.0 center-to-center cells is out of range after Fire_Coord offset', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     // Exactly 4 cells = 4 * CELL_SIZE pixels
     const target = makeEntity(UnitType.I_E1, House.USSR, 100 + 4 * CELL_SIZE, 100);
 
-    // worldDist computes Euclidean distance in cells, range comparison is <=
-    expect(jeep.inRange(target)).toBe(true);
+    expect(jeep.inRange(target)).toBe(false);
   });
 });
 

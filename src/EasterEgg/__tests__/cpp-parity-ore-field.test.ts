@@ -106,13 +106,23 @@ function getOverlay(map: GameMap, cx: number, cy: number): number {
   const idx = cy * MAP_CELLS + cx;
   const ovl = map.overlay[idx];
   const density = map.oreDensity[idx];
-  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
-  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  if (density !== 0xFF && GameMap.isGoldOverlayId(ovl)) return 0x03 + density;
+  if (density !== 0xFF && GameMap.isGemOverlayId(ovl)) return 0x0F + density;
   return ovl;
 }
 
 function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {
-  map.overlay[cy * MAP_CELLS + cx] = val;
+  const idx = cy * MAP_CELLS + cx;
+  if (val >= 0x03 && val <= 0x0E) {
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = val - 0x03;
+  } else if (val >= 0x0F && val <= 0x12) {
+    map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+    map.oreDensity[idx] = val - 0x0F;
+  } else {
+    map.overlay[idx] = val;
+    map.oreDensity[idx] = 0xFF;
+  }
 }
 
 function makeMap(): GameMap {
@@ -520,49 +530,28 @@ describe('ore destruction reduces density — combat.ts CF9 matches C++ combat.c
   it('ore destruction reduces gold density by 1 (mid-range)', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x08); // density 5
-    // Simulate ore destruction (same logic as combat.ts CF9)
-    const ovl = getOverlay(map, 50, 50);
-    if (ovl === 0x03 || ovl === 0x0F) {
-      map.overlay[50 * MAP_CELLS + 50] = 0xFF;
-    } else {
-      map.overlay[50 * MAP_CELLS + 50] = ovl - 1;
-    }
+    map.reduceOreLevel(50, 50);
     expect(getOverlay(map, 50, 50)).toBe(0x07);
   });
 
   it('ore destruction at minimum gold density (0x03) removes overlay entirely', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x03);
-    const ovl = getOverlay(map, 50, 50);
-    if (ovl === 0x03 || ovl === 0x0F) {
-      map.overlay[50 * MAP_CELLS + 50] = 0xFF;
-    } else {
-      map.overlay[50 * MAP_CELLS + 50] = ovl - 1;
-    }
+    map.reduceOreLevel(50, 50);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
   it('ore destruction reduces gem density by 1 (mid-range)', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x11); // gem density 2
-    const ovl = getOverlay(map, 50, 50);
-    if (ovl === 0x03 || ovl === 0x0F) {
-      map.overlay[50 * MAP_CELLS + 50] = 0xFF;
-    } else {
-      map.overlay[50 * MAP_CELLS + 50] = ovl - 1;
-    }
+    map.reduceOreLevel(50, 50);
     expect(getOverlay(map, 50, 50)).toBe(0x10);
   });
 
   it('ore destruction at minimum gem density (0x0F) removes overlay entirely', () => {
     const map = makeMap();
     setOverlay(map, 50, 50, 0x0F);
-    const ovl = getOverlay(map, 50, 50);
-    if (ovl === 0x03 || ovl === 0x0F) {
-      map.overlay[50 * MAP_CELLS + 50] = 0xFF;
-    } else {
-      map.overlay[50 * MAP_CELLS + 50] = ovl - 1;
-    }
+    map.reduceOreLevel(50, 50);
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
@@ -571,12 +560,7 @@ describe('ore destruction reduces density — combat.ts CF9 matches C++ combat.c
     setOverlay(map, 50, 50, 0x0E); // max density gold
     let hits = 0;
     while (getOverlay(map, 50, 50) !== 0xFF) {
-      const ovl = getOverlay(map, 50, 50);
-      if (ovl === 0x03 || ovl === 0x0F) {
-        map.overlay[50 * MAP_CELLS + 50] = 0xFF;
-      } else {
-        map.overlay[50 * MAP_CELLS + 50] = ovl - 1;
-      }
+      map.reduceOreLevel(50, 50);
       hits++;
     }
     // 12 density levels: 0x0E -> 0x0D -> ... -> 0x03 -> 0xFF
@@ -588,12 +572,7 @@ describe('ore destruction reduces density — combat.ts CF9 matches C++ combat.c
     setOverlay(map, 50, 50, 0x12); // max density gem
     let hits = 0;
     while (getOverlay(map, 50, 50) !== 0xFF) {
-      const ovl = getOverlay(map, 50, 50);
-      if (ovl === 0x03 || ovl === 0x0F) {
-        map.overlay[50 * MAP_CELLS + 50] = 0xFF;
-      } else {
-        map.overlay[50 * MAP_CELLS + 50] = ovl - 1;
-      }
+      map.reduceOreLevel(50, 50);
       hits++;
     }
     expect(hits).toBe(4);
@@ -907,24 +886,27 @@ describe('growth rate timing — GrowthRate INI to tick interval', () => {
    *   GrowthRate = 2 (from rules.ini [General])
    *   TICKS_PER_MINUTE = 15 * 60 = 900
    *   subcount = floor(16384 / (2 * 900)) = floor(16384 / 1800) = floor(9.1) = 9
-   *   Full scan ticks = ceil(16384 / 9) = ceil(1820.4) = 1821
+   *   TiberiumScan stores the boundary index after break, so each later frame
+   *   reprocesses one cell. Effective progress is 8 new cells/frame.
+   *   Full scan ticks = ceil((16384 - 1) / (9 - 1)) = 2048
    *
-   * After 1821 ticks (~121s at 15 FPS, ~2.02 minutes), one complete
+   * After 2048 ticks (~136.5s at 15 FPS, ~2.28 minutes), one complete
    * growth/spread cycle fires.
    */
 
-  it('GrowthRate=2 from INI yields 1821 tick full scan interval', () => {
+  it('GrowthRate=2 from INI yields 2048 tick full scan interval', () => {
     const mapCellTotal = 128 * 128; // MAP_CELL_TOTAL
     const subcount = Math.floor(mapCellTotal / (INI_GROWTH_RATE * CPP_TICKS_PER_MINUTE));
-    const fullScanTicks = Math.ceil(mapCellTotal / subcount);
+    const fullScanTicks = Math.ceil((mapCellTotal - 1) / (subcount - 1));
     expect(subcount).toBe(9);
-    expect(fullScanTicks).toBe(1821);
+    expect(fullScanTicks).toBe(2048);
     expect(GameMap.ORE_GROWTH_INTERVAL).toBe(fullScanTicks);
   });
 
   it('full scan approximates GrowthRate minutes', () => {
     const scanMinutes = GameMap.ORE_GROWTH_INTERVAL / CPP_TICKS_PER_MINUTE;
-    // 1821 / 900 = 2.023... minutes, close to GrowthRate=2
-    expect(scanMinutes).toBeCloseTo(INI_GROWTH_RATE, 1);
+    // 2048 / 900 = 2.276... minutes because of integer chunking plus
+    // boundary-cell reprocessing.
+    expect(scanMinutes).toBeCloseTo(2048 / CPP_TICKS_PER_MINUTE, 3);
   });
 });

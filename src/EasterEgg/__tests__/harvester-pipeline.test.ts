@@ -37,7 +37,17 @@ function makeHarvester(house: House, cx: number, cy: number): Entity {
 
 /** Set overlay at cell */
 function setOverlay(map: GameMap, cx: number, cy: number, val: number): void {
-  map.overlay[cy * MAP_CELLS + cx] = val;
+  const idx = cy * MAP_CELLS + cx;
+  if (val >= 0x03 && val <= 0x0E) {
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = val - 0x03;
+  } else if (val >= 0x0F && val <= 0x12) {
+    map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+    map.oreDensity[idx] = val - 0x0F;
+  } else {
+    map.overlay[idx] = val;
+    map.oreDensity[idx] = 0xFF;
+  }
 }
 
 /** Get overlay at cell */
@@ -45,8 +55,8 @@ function getOverlay(map: GameMap, cx: number, cy: number): number {
   const idx = cy * MAP_CELLS + cx;
   const ovl = map.overlay[idx];
   const density = map.oreDensity[idx];
-  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
-  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  if (density !== 0xFF && GameMap.isGoldOverlayId(ovl)) return 0x03 + density;
+  if (density !== 0xFF && GameMap.isGemOverlayId(ovl)) return 0x0F + density;
   return ovl;
 }
 
@@ -1181,9 +1191,9 @@ describe('Harvester Pipeline', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('Ore regrowth constants', () => {
-    it('ORE_GROWTH_INTERVAL is 1821 ticks (~121s at 15 FPS)', () => {
-      expect(GameMap.ORE_GROWTH_INTERVAL).toBe(1821);
-      expect(GameMap.ORE_GROWTH_INTERVAL / 15).toBeCloseTo(121.4, 0);
+    it('ORE_GROWTH_INTERVAL is 2048 ticks (~136.5s at 15 FPS)', () => {
+      expect(GameMap.ORE_GROWTH_INTERVAL).toBe(2048);
+      expect(GameMap.ORE_GROWTH_INTERVAL / 15).toBeCloseTo(136.5, 0);
     });
 
     it('RESERVOIR_SIZE is 64 (C++ MAP_CELL_W/2 cap)', () => {

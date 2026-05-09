@@ -22,7 +22,7 @@ import { describe, it, expect } from 'vitest';
 import { Entity } from '../engine/entity';
 import { updateGuard, updateAreaGuard, type MissionAIContext } from '../engine/missionAI';
 import {
-  CELL_SIZE, House, UnitType, Mission, Stance, AnimState,
+  CELL_SIZE, LEPTON_SIZE, House, UnitType, Mission, Stance, AnimState,
   UNIT_STATS, WEAPON_STATS, worldDist,
 } from '../engine/types';
 import { ScenarioRandom } from '../engine/random';
@@ -30,6 +30,13 @@ import { ScenarioRandom } from '../engine/random';
 // Helper to create entity
 function makeEntity(type: UnitType | string, house: House, x: number, y: number): Entity {
   return new Entity(type as UnitType, house, x, y);
+}
+
+function setLeptonPos(entity: Entity, lx: number, ly: number): void {
+  entity.leptonX = lx;
+  entity.leptonY = ly;
+  entity.pos.x = lx * CELL_SIZE / LEPTON_SIZE;
+  entity.pos.y = ly * CELL_SIZE / LEPTON_SIZE;
 }
 
 // Minimal MissionAIContext
@@ -108,12 +115,15 @@ describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <
   // can actually acquire infantry targets via Mission_Guard's cell-based scan.
 
   it('target at EXACTLY guard scan range is included (C++ Distance <= scanRange)', () => {
-    // C++ In_Range: ::Distance(Fire_Coord, target->Center_Coord()) <= scanRange
-    // Dog guardRange = 7 cells. Target at exactly 7.0 should be in range.
+    // C++ In_Range: ::Distance(Fire_Coord, target->Center_Coord()) <= scanRange.
+    // Dog guardRange = 7 cells. Place the target exactly 7 cells from Fire_Coord,
+    // not from the dog's visual center.
     const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
     const dogScanRange = scanner.stats.guardRange!; // 7 cells
     const target = makeEntity(UnitType.I_E1, House.Greece, 100 + dogScanRange * CELL_SIZE, 100);
+    const fireCoord = scanner.fireCoordForWeapon(scanner.weapon);
+    setLeptonPos(target, fireCoord.lx + dogScanRange * LEPTON_SIZE, fireCoord.ly);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });

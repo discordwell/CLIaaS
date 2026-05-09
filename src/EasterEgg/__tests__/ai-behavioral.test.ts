@@ -183,10 +183,10 @@ describe('createAIHouseState', () => {
     expect(state.iq).toBe(5);
   });
 
-  it('defaults IQ to 3 when houseIQs has no entry', () => {
+  it('defaults IQ to 0 when houseIQs has no entry', () => {
     const ctx = makeMockAIContext();
     const state = createAIHouseState(ctx, House.USSR);
-    expect(state.iq).toBe(3);
+    expect(state.iq).toBe(0);
   });
 
   it('reads techLevel from houseTechLevels map', () => {

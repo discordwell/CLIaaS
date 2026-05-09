@@ -4,9 +4,9 @@
  * SCG06EA tick 76 runtime trace — load SCG06EA in Node and step tick-by-tick,
  * dumping USSR E1 @(24,67) state through the AREA_GUARD walk.
  *
- * Diagnoses whether the unit ever enters AREA_GUARD, whether approachTarget
- * sets a path, and whether path-shorten fires at (21,66) per the static-
- * geometry test (cpp-parity-scg06ea-t76-trace.test.ts).
+ * Diagnoses whether the unit enters AREA_GUARD, whether the C++
+ * Target_Something_Nearby(THREAT_AREA) cell-ring scan picks the same target,
+ * and whether approachTarget sets the walk path.
  */
 
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
@@ -43,7 +43,7 @@ describe('SCG06EA runtime trace — USSR E1 @(24,67) tick 1-80', () => {
     adapter.disconnect();
   });
 
-  it('traces the specific E1 state through tick 80 and reports path-shorten firing tick', () => {
+  it('traces the specific E1 state through tick 80 and reports C++ THREAT_AREA target selection', () => {
     // Access raw Game instance for direct entity inspection.
     // The adapter exposes `game` as a private field — we read via cast.
     const game = (adapter as unknown as { game: unknown }).game as {
@@ -177,18 +177,14 @@ describe('SCG06EA runtime trace — USSR E1 @(24,67) tick 1-80', () => {
     expect(rows.length).toBe(80);
 
     // === Regression assertions ===
-    // The Firing_AI port to updateAreaGuard (cpp-parity fix for SCG06EA tick
-    // 76 residual) ensures the unit fires the moment its target enters range,
-    // not 70+ ticks later when the next Mission_Guard_Area timer fires. The
-    // critical observable is that firePrepActive is set within ~1-2 ticks of
-    // path-shorten clearing moveTarget — proving the every-tick Firing_AI
-    // is hooked into the AREA_GUARD case.
-    expect(pathShortenTick).toBeGreaterThan(0);
-    expect(pathShortenTick).toBeLessThan(80);
-    // After path-shorten, firePrepActive must transition to true within 2 ticks
-    // (E1's pre-fire animation kicks off on the next tick after Can_Fire passes).
-    const postShorten = rows.slice(pathShortenTick - 1, pathShortenTick + 2);
-    const sawFirePrep = postShorten.some(r => r.firePrepActive || r.firePrepStage > 0);
-    expect(sawFirePrep, 'firePrepActive should be set within 2 ticks of path-shorten when target is in range').toBe(true);
+    // C++ Mission_Guard_Area temporarily scans from ArchiveTarget/home using
+    // Target_Something_Nearby(THREAT_AREA). That cell-ring scan selects the
+    // Greek E1 at (19,65), not the nearer-looking E1 at (20,64). The old TS
+    // score-sorted all-entity scan selected (20,64), shortened the path, and
+    // produced the wrong SCG06 t76 bullet sequence.
+    expect(rows[0].tgt).toBe('E1@(19,65)');
+    expect(approachLog.length).toBeGreaterThan(0);
+    expect(rows.some(r => r.cx === 22 && r.cy === 65)).toBe(true);
+    expect(pathShortenTick).toBe(-1);
   }, 60_000);
 });

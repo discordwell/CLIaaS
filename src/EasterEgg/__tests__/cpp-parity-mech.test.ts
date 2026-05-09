@@ -538,11 +538,12 @@ describe('MECH retaliation -- mechanic has weapon so retaliates (techno.cpp)', (
     mech.target = null;
 
     const ctx = makeCombatCtx([mech, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, mech, attacker);
 
     // MECH has a weapon (GoodWrench), so retaliation kicks in
     expect(mech.target).toBe(attacker);
-    expect(mech.mission).toBe(Mission.ATTACK);
+    expect(mech.mission).toBe(Mission.GUARD);
   });
 
   it('MECH has a weapon (GoodWrench) -- technically armed for retaliation purposes', () => {
@@ -591,7 +592,7 @@ describe('MECH AI scatter on damage (techno.cpp)', () => {
       mech.mission = Mission.GUARD;
       const ctx = makeCombatCtx([mech]);
       aiScatterOnDamage(ctx, mech);
-      if (mech.mission === Mission.MOVE && mech.moveTarget !== null) {
+      if (mech.missionQueue === Mission.MOVE && mech.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -604,7 +605,8 @@ describe('MECH AI scatter on damage (techno.cpp)', () => {
     mech.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([mech]);
-    aiScatterOnDamage(ctx, mech);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, mech, attacker);
 
     expect(mech.mission).toBe(Mission.GUARD);
     expect(mech.moveTarget).toBeNull();

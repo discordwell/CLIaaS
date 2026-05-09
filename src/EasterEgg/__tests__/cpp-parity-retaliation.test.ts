@@ -44,12 +44,12 @@ import {
   Mission, MISSION_CONTROL,
   COUNTRY_BONUSES,
   buildDefaultAlliances,
-  AnimState,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type CombatContext, triggerRetaliation, damageEntity } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -128,8 +128,8 @@ describe('retaliation TarCom-assignment chain (C++ foot.cpp:1166-1234)', () => {
 
     // C++ foot.cpp:1206 — Assign_Target(source->As_Target())
     expect(victim.target).toBe(attacker);
-    // C++ foot.cpp:1206 follow-on: mission switches to ATTACK for Firing_AI to fire.
-    expect(victim.mission).toBe(Mission.ATTACK);
+    // C++ Assign_Target only updates TarCom; Mission remains GUARD.
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 
   it('AI infantry on GUARD retaliates against enemy infantry', () => {
@@ -141,7 +141,7 @@ describe('retaliation TarCom-assignment chain (C++ foot.cpp:1166-1234)', () => {
     triggerRetaliation(ctx, victim, attacker);
 
     expect(victim.target).toBe(attacker);
-    expect(victim.animState).toBe(AnimState.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 
   it('retaliation is integrated into damageEntity (unified C++ Take_Damage entry point)', () => {
@@ -157,7 +157,7 @@ describe('retaliation TarCom-assignment chain (C++ foot.cpp:1166-1234)', () => {
     // Call damageEntity directly (not triggerRetaliation) — retaliation should fire.
     damageEntity(ctx, victim, 10, 'AP', attacker);
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 
   it('damageEntity without attacker does NOT retaliate (no source — gate 1)', () => {
@@ -305,6 +305,27 @@ describe('C++ techno.cpp:4988 gate — human house + PlayerReturnFire=no', () =>
     expect(tank.target).toBeNull();
   });
 
+  it('player-allied computer house still auto-retaliates (strict House->IsHuman)', () => {
+    const alliances = buildDefaultAlliances();
+    alliances.get(House.Spain)?.add(House.England);
+    alliances.get(House.England)?.add(House.Spain);
+    const ctx = makeMockCtx({
+      playerHouse: House.Spain,
+      isAllied: (a: House, b: House) => alliances.get(a)?.has(b) ?? false,
+      entitiesAllied: (a: Entity, b: Entity) => alliances.get(a.house)?.has(b.house) ?? false,
+      // Game.isPlayerControlled means "player or ally"; C++ House->IsHuman does not.
+      isPlayerControlled: (e: Entity) => alliances.get(e.house)?.has(House.Spain) ?? false,
+    });
+    const englishInf = makeEntity(UnitType.I_E1, House.England, 100, 100);
+    englishInf.mission = Mission.GUARD;
+    const enemy = makeEntity(UnitType.I_E4, House.USSR, 100 + CELL_SIZE, 100);
+
+    triggerRetaliation(ctx, englishInf, enemy);
+
+    expect(englishInf.target).toBe(enemy);
+    expect(englishInf.mission).toBe(Mission.GUARD);
+  });
+
   it('Tanya retaliates against infantry even without SmartDefense (C++ exception)', () => {
     const ctx = makeMockCtx({ playerHouse: House.Spain });
     const tanya = makeEntity(UnitType.I_TANYA, House.Spain, 100, 100);
@@ -343,18 +364,27 @@ describe('C++ techno.cpp:4993 gate — suicide team members', () => {
 // Retaliation propagation via damageEntity (unified entry point)
 // ---------------------------------------------------------------------------
 describe('retaliation runs from every damage path via damageEntity', () => {
-  it('AI unit with existing alive target keeps old target (TS simplification vs C++ 50% AI roll)', () => {
-    // C++ techno.cpp:5001-5019 — AI does 50% threat comparison. TS keeps existing
-    // target simply (avoids introducing RNG consumption WASM doesn't mirror).
+  it('AI unit with existing alive target runs C++ 50% threat comparison roll', () => {
+    // C++ techno.cpp:5027 — AI always consumes Percent_Chance(50) before
+    // deciding whether to keep the current target. With seed=0 the roll enters
+    // the comparison path; equal AP threats keep the old target.
     const ctx = makeMockCtx();
     const tank = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     tank.mission = Mission.ATTACK;
-    const oldTarget = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200);
+    const oldTarget = makeEntity(UnitType.V_2TNK, House.Spain, 100 + CELL_SIZE, 100);
     tank.target = oldTarget;
-    const newAttacker = makeEntity(UnitType.V_4TNK, House.Spain, 100 + CELL_SIZE, 100);
+    const newAttacker = makeEntity(UnitType.V_4TNK, House.Spain, 100 + CELL_SIZE * 2, 100);
+    const savedSeed = ScenarioRandom.seed;
+    const savedCallCount = ScenarioRandom.callCount;
+    ScenarioRandom.seed = 0;
+    ScenarioRandom.callCount = 0;
+    const callsBefore = ScenarioRandom.callCount;
     triggerRetaliation(ctx, tank, newAttacker);
-    // Keeps old target (not newAttacker)
+
+    expect(ScenarioRandom.callCount).toBe(callsBefore + 1);
     expect(tank.target).toBe(oldTarget);
+    ScenarioRandom.seed = savedSeed;
+    ScenarioRandom.callCount = savedCallCount;
   });
 
   it('AI unit with dead target retargets on retaliation', () => {

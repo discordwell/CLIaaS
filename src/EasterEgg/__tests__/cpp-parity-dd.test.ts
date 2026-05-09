@@ -49,7 +49,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -380,7 +380,7 @@ describe('DD dual weapon system (techno.cpp:Can_Fire)', () => {
     expect(dd.weapon2!.name).toBe('DepthCharge');
   });
 
-  it('selectWeapon prefers higher effective damage vs heavy armor', () => {
+  it('selectWeapon uses C++ target legality and warhead score vs surface armor', () => {
     const dd = entityAtCell(UnitType.V_DD, House.Spain, 10, 10);
     const target = entityAtCell(UnitType.V_DD, House.USSR, 12, 10);
 
@@ -393,10 +393,8 @@ describe('DD dual weapon system (techno.cpp:Can_Fire)', () => {
 
     const selected = dd.selectWeapon(target, getWarheadMult as any);
     expect(selected).not.toBeNull();
-    // Both are AP warhead; DepthCharge (80 * 1.0 = 80) > Stinger (30 * 1.0 = 30)
-    // But DepthCharge range is only 5.0 — target at cell 12 may be out of range
-    // This test just verifies weapon selection doesn't crash
-    expect(selected!.warhead).toBe('AP');
+    // DepthCharge is ASW-only and cannot target a surface DD, so Stinger wins.
+    expect(selected!.name).toBe('Stinger');
   });
 
   it('DD separate cooldowns for primary and secondary weapons', () => {
@@ -462,7 +460,7 @@ describe('DD retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, dd, attacker);
 
     expect(dd.target).toBe(attacker);
-    expect(dd.mission).toBe(Mission.ATTACK);
+    expect(dd.mission).toBe(Mission.GUARD);
   });
 
   it('DD CAN retaliate (has weapon)', () => {
@@ -582,19 +580,14 @@ describe('DD movement -- vehicle rotation (drive.cpp)', () => {
 // C++ techno.cpp -- AI-controlled DD on GUARD scatters when damaged
 
 describe('DD AI scatter on damage (techno.cpp)', () => {
-  it('AI-controlled DD on GUARD mission changes position when damaged (IQ >= 2)', () => {
-    let scattered = false;
-    for (let i = 0; i < 50; i++) {
-      const dd = entityAtCell(UnitType.V_DD, House.USSR, 10, 10);
-      dd.mission = Mission.GUARD;
-      const ctx = makeCombatCtx([dd]);
-      aiScatterOnDamage(ctx, dd);
-      if (dd.mission === Mission.MOVE && dd.moveTarget !== null) {
-        scattered = true;
-        break;
-      }
-    }
-    expect(scattered).toBe(true);
+  it('AI-controlled DD on GUARD mission does not use FootClass fallback scatter', () => {
+    const dd = entityAtCell(UnitType.V_DD, House.USSR, 10, 10);
+    dd.mission = Mission.GUARD;
+    const ctx = makeCombatCtx([dd]);
+    aiScatterOnDamage(ctx, dd);
+
+    expect(dd.moveTarget).toBeNull();
+    expect(dd.mission).toBe(Mission.GUARD);
   });
 
   it('player-controlled DD does NOT scatter', () => {

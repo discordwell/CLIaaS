@@ -150,9 +150,9 @@ describe('Splash damage falloff curve (combat.cpp:107-130)', () => {
   // At 12 pixels: distFactor = floor(12*2/6) = floor(4) = 4
   it('HE at 12px: distFactor=4, quarter damage', () => {
     const result = modifyDamage(100, 'HE', 'none', 12);
-    // distFactor = 4; damage = 90/4 = 22.5 → round to 23
+    // distFactor = 4; C++ integer damage = 90/4 -> 22
     // distFactor=4 (NOT < 4) → MinDamage does NOT apply
-    expect(result).toBe(23);
+    expect(result).toBe(22);
   });
 
   // At 24 pixels (1 cell): distFactor = floor(24*2/6) = floor(8) = 8
@@ -165,15 +165,15 @@ describe('Splash damage falloff curve (combat.cpp:107-130)', () => {
   // At 36 pixels (1.5 cells, splash edge): distFactor = floor(36*2/6) = floor(12) = 12
   it('HE at 36px (1.5 cells): distFactor=12', () => {
     const result = modifyDamage(100, 'HE', 'none', 36);
-    // damage = 90/12 = 7.5 → 8
-    expect(result).toBe(8);
+    // C++ integer damage = 90/12 -> 7
+    expect(result).toBe(7);
   });
 
   // At 48 pixels (2 cells): distFactor = floor(48*2/6) = floor(16) = 16 (clamped)
   it('HE at 48px (2 cells): distFactor=16 (max clamp)', () => {
     const result = modifyDamage(100, 'HE', 'none', 48);
-    // damage = 90/16 = 5.625 → 6
-    expect(result).toBe(6);
+    // C++ integer damage = 90/16 -> 5
+    expect(result).toBe(5);
   });
 
   // Beyond max clamp: distFactor stays at 16 regardless of distance
@@ -188,8 +188,8 @@ describe('Splash damage falloff curve (combat.cpp:107-130)', () => {
   // At 12px: distFactor = floor(12*2/3) = 8
   it('AP spread=3 at 12px vs heavy: distFactor=8', () => {
     const result = modifyDamage(100, 'AP', 'heavy', 12);
-    // damage = 100 * 1.0 / 8 = 12.5 → 13
-    expect(result).toBe(13);
+    // C++ integer damage = 100 / 8 -> 12
+    expect(result).toBe(12);
   });
 
   // Fire warhead: spread=8, vs wood: mult=1.0
@@ -351,7 +351,7 @@ describe('Wall destruction via splash (combat.cpp:244-270)', () => {
     expect(WARHEAD_META.SA.destroysWalls).toBeFalsy();
   });
 
-  it('HE splash destroys a wall at impact cell', () => {
+  it('HE splash damages a brick wall level at the impact cell', () => {
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 5, 10);
     const ctx = makeCombatCtx([attacker]);
 
@@ -366,7 +366,20 @@ describe('Wall destruction via splash (combat.cpp:244-270)', () => {
       -1, attacker.house, attacker,
     );
 
-    // Wall should be destroyed
+    // BRIK has three visual damage levels in odata.cpp. A single 100-damage HE
+    // impact reduces it once but does not clear the overlay yet.
+    expect(ctx.map.getWallType(10, 10)).toBe('BRIK');
+    expect(ctx.map.getWallDamageLevel(10, 10)).toBe(1);
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 100, warhead: 'HE', splash: 1.5 },
+      -1, attacker.house, attacker,
+    );
+
+    // C++ clears a wall at the next-to-last damage level when the shape index
+    // low nibble is 0, which is the default for newly placed wall overlays.
     expect(ctx.map.getWallType(10, 10)).toBe('');
   });
 

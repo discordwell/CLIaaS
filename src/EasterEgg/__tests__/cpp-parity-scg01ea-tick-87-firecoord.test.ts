@@ -14,7 +14,7 @@
  * origin, flipping the range verdict.
  *
  * These tests exercise `Entity.fireCoordPrimary()` — the TS port of C++
- * Fire_Coord(0) scoped to JEEP — and verify the three-step Coord_Move chain:
+ * Fire_Coord(0) — and verify the three-step Coord_Move chain:
  *
  *   1. DIR_N by (VerticalOffset + Height)                 (cosTable[0]=0, sinTable[0]=127)
  *   2. (turret + DIR_W) by PrimaryLateral   — skipped when PL=0 (JEEP)
@@ -23,6 +23,7 @@
  * C++ source refs:
  *   techno.cpp:491-517    TechnoClass::Fire_Coord
  *   techno.cpp:1278-1294  TechnoClass::In_Range (Distance(Fire_Coord, ...))
+ *   udata.cpp:158-187     Unit2TNK (VerticalOffset=0x30, PrimaryOffset=0xC0, PrimaryLateral=0x00)
  *   udata.cpp:376-404     UnitJeep (VerticalOffset=0x30, PrimaryOffset=0x30, PrimaryLateral=0x00)
  *   coord.cpp:351-363     Coord_Move
  *   coord.cpp:410-424     calcx = (v * distance) >> 7
@@ -81,14 +82,19 @@ function coordMove(x: number, y: number, dir256: number, distance: number): { x:
 }
 
 describe('C++ TechnoClass::Fire_Coord parity (SCG01EA tick 87 residual, Phase 7B)', () => {
-  it('non-JEEP returns entity center (scoped port)', () => {
-    const e = new Entity(UnitType.V_1TNK, House.Greece, 64 * CELL_SIZE + CELL_SIZE / 2, 50 * CELL_SIZE + CELL_SIZE / 2);
-    e.turretFacing = Dir.S;
-    e.turretFacing32 = 16;
+  it('2TNK uses udata.cpp muzzle offsets rather than entity center', () => {
+    const e = new Entity(UnitType.V_2TNK, House.Greece, 64 * CELL_SIZE + CELL_SIZE / 2, 50 * CELL_SIZE + CELL_SIZE / 2);
+    e.turretFacing = Dir.E;
+    e.turretFacing32 = 8; // 8 * 8 = 64 = DIR_E
     const fc = e.fireCoordPrimary();
-    // Scoped port — 1TNK (+ all non-JEEP) returns center unchanged.
-    expect(fc.lx).toBe(e.leptonX);
-    expect(fc.ly).toBe(e.leptonY);
+    // C++ udata.cpp Unit2TNK: VerticalOffset=0x30, PrimaryOffset=0xC0,
+    // PrimaryLateral=0. Fire_Coord applies DIR_N vertical first, then turret.
+    const a = coordMove(e.leptonX, e.leptonY, 0, 0x30);
+    const b = coordMove(a.x, a.y, 64, 0x00C0);
+    expect(fc.lx).toBe(b.x);
+    expect(fc.ly).toBe(b.y);
+    expect(fc.lx).not.toBe(e.leptonX);
+    expect(fc.ly).not.toBe(e.leptonY);
   });
 
   it('JEEP with turret N returns center shifted up by (VO + PO)', () => {

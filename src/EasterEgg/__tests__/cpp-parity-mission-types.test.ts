@@ -21,6 +21,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Mission, MISSION_CONTROL } from '../engine/types';
+import { assignMission } from '../engine/missionLifecycle';
 
 // ─── C++ MissionType enum (defines.h:979-1008) ─────────────────────────────
 // The canonical enum order and numeric values from C++:
@@ -115,9 +116,10 @@ describe('MissionType enum parity (C++ defines.h:979-1008)', () => {
     expect(cppNames.includes('DIE')).toBe(false);
   });
 
-  it('TS Mission enum has no NONE value (C++ MISSION_NONE=-1)', () => {
-    // C++ uses MISSION_NONE=-1 as sentinel. TS does not have a NONE mission.
-    expect((Mission as Record<string, string>)['NONE']).toBeUndefined();
+  it('TS Mission enum includes NONE for C++ MISSION_NONE sentinel', () => {
+    // C++ uses MISSION_NONE=-1 as sentinel. TS represents the sentinel by name
+    // and keeps it out of the ordinal C++ mission mapping.
+    expect(Mission.NONE).toBe('NONE');
   });
 });
 
@@ -323,8 +325,12 @@ describe('Assign_Mission behavior parity (C++ mission.cpp:379-391)', () => {
   it('C++ Assign_Mission skips if mission==current (mission.cpp:388)', () => {
     // mission.cpp:388: if (order != MISSION_NONE && Mission != order) { MissionQueue = order; }
     // This means assigning the same mission that's already active does nothing.
-    // Document this behavioral contract.
-    expect(true).toBe(true); // Structural documentation test
+    const entity = {
+      mission: Mission.MOVE,
+      missionQueue: Mission.GUARD,
+    };
+    assignMission(entity as any, Mission.MOVE);
+    expect(entity.missionQueue).toBe(Mission.GUARD);
   });
 });
 
@@ -424,17 +430,15 @@ describe('Mission queue system parity (C++ mission.h:56-64)', () => {
     //   MissionType MissionQueue;      — pending mission (dequeued by Commence)
     //   int Status;                    — state machine step within mission
     //
-    // TS uses direct entity.mission assignment (no queue).
-    // This is a documented simplification — TS does not implement the
-    // MissionQueue/Commence/Status state machine from C++.
-    expect(true).toBe(true); // Structural documentation
+    // TS mirrors the queue with entity.missionQueue and promotes it through
+    // the Commence helper instead of direct mission writes.
+    expect(Mission.NONE).toBe('NONE');
   });
 
   it('C++ Get_Mission returns MissionQueue if Mission==NONE (mission.cpp:162)', () => {
     // mission.cpp:162: return(Mission == MISSION_NONE ? MissionQueue : Mission);
     // When Mission is NONE, the queued mission is considered "current".
-    // TS does not have this because it has no NONE mission or queue.
-    expect((Mission as Record<string, string>)['NONE']).toBeUndefined();
+    expect(Mission.NONE).toBe('NONE');
   });
 });
 
@@ -462,7 +466,7 @@ describe('Is_Recruitable_Mission parity (C++ mission.cpp:522-528)', () => {
   it('MISSION_NONE is recruitable (mission.cpp:524-526)', () => {
     // mission.cpp:524-526: if (mission == MISSION_NONE) return true;
     // An object with no mission can be recruited into teams.
-    expect(true).toBe(true); // TS has no NONE, so N/A
+    expect(MISSION_CONTROL[Mission.NONE]?.isRecruitable).toBe(true);
   });
 
   it('GUARD is recruitable; AREA_GUARD is not (INI: Recruitable=no)', () => {

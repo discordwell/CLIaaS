@@ -128,13 +128,17 @@ function makeContext(overrides: Partial<HarvesterContext> = {}): HarvesterContex
 
 /** Place gold ore at a cell (overlay 0x03=min to 0x0E=max density) */
 function placeGold(map: GameMap, cx: number, cy: number, density = 0x0E): void {
-  map.overlay[cy * MAP_CELLS + cx] = density;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+  map.oreDensity[idx] = density - 0x03;
   map.setTerrain(cx, cy, Terrain.ORE);
 }
 
 /** Place gem at a cell (overlay 0x0F=min to 0x12=max density) */
 function placeGem(map: GameMap, cx: number, cy: number, density = 0x12): void {
-  map.overlay[cy * MAP_CELLS + cx] = density;
+  const idx = cy * MAP_CELLS + cx;
+  map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+  map.oreDensity[idx] = density - 0x0F;
   map.setTerrain(cx, cy, Terrain.ORE);
 }
 
@@ -142,9 +146,16 @@ function getOverlay(map: GameMap, cx: number, cy: number): number {
   const idx = cy * MAP_CELLS + cx;
   const ovl = map.overlay[idx];
   const density = map.oreDensity[idx];
-  if (density !== 0xFF && ovl >= 0x03 && ovl <= 0x0E) return 0x03 + density;
-  if (density !== 0xFF && ovl >= 0x0F && ovl <= 0x12) return 0x0F + density;
+  if (density !== 0xFF && GameMap.isGoldOverlayId(ovl)) return 0x03 + density;
+  if (density !== 0xFF && GameMap.isGemOverlayId(ovl)) return 0x0F + density;
   return ovl;
+}
+
+function primeHarvestReady(entity: Entity): void {
+  entity.harvesterAnimRate = 1;
+  entity.harvesterAnimTimer = 1;
+  entity.harvesterAnimStage = 9;
+  entity.harvestTick = 9;
 }
 
 // ============================================================================
@@ -235,15 +246,15 @@ describe('Ore scan ranges — rules.ini [AI] OreNearScan=6, OreFarScan=48', () =
     expect(result).toBeNull();
   });
 
-  it('findNearestOre default maxRange is 6 (OreNearScan)', () => {
+  it('findNearestOre default maxRange uses C++ radius < OreNearScan semantics', () => {
     // C++: TiberiumShortScan defaults to 0x0600 -> 6 cells
     const map = makeMap();
-    placeGold(map, 56, 50, 0x0E); // 6 cells — at boundary
+    placeGold(map, 55, 50, 0x0E); // 5 cells — included by radius < 6 loop
     const found = map.findNearestOre(50, 50); // default range
     expect(found).not.toBeNull();
 
     const map2 = makeMap();
-    placeGold(map2, 57, 50, 0x0E); // 7 cells — beyond default range
+    placeGold(map2, 56, 50, 0x0E); // 6 cells — excluded by radius < 6 loop
     const notFound = map2.findNearestOre(50, 50);
     expect(notFound).toBeNull();
   });
@@ -257,16 +268,17 @@ describe('Ore scan ranges — rules.ini [AI] OreNearScan=6, OreFarScan=48', () =
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     ctx.entities.push(harv);
 
-    // Run enough ticks for one harvest cycle (harvestTick increments, fires at %10==0)
-    for (let i = 0; i < 36; i++) {
-      updateHarvester(ctx, harv);
-    }
+    updateHarvester(ctx, harv);
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
 
-    // After depleting 1-bail cell, harvester should re-seek (short scan finds 55,50)
-    expect(harv.harvesterState).toBe('seeking');
+    // After depleting OverlayData 0, the next completed load cycle short-scans
+    // and keeps MISSION_HARVEST while NavCom points to the next ore.
+    expect(harv.harvesterState).toBe('harvesting');
+    expect(harv.moveTarget).not.toBeNull();
     expect(harv.oreLoad).toBe(0);
   });
 });
@@ -287,13 +299,11 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     ctx.entities.push(harv);
 
     // Tick up to first harvest cycle (harvestTick: 0->1->...->10, fires at 10)
-    for (let i = 0; i < 18; i++) {
-      updateHarvester(ctx, harv);
-    }
+    updateHarvester(ctx, harv);
 
     expect(harv.oreLoad).toBe(1);
     expect(harv.oreCreditValue).toBe(25); // GoldValue=25
@@ -309,110 +319,67 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 18; i++) {
-      updateHarvester(ctx, harv);
-    }
+    updateHarvester(ctx, harv);
 
     // Total: 1 base + 3 bonus = 4 bails, credit = 50 + 150 = 200
     expect(harv.oreLoad).toBe(4);
     expect(harv.oreCreditValue).toBe(200);
   });
 
-  it('MISMATCH: gem bonus bails are NOT capacity-gated in TS (C++ gates each bonus)', () => {
+  it('gem bonus bails are capacity-gated at 26/28 load', () => {
     // C++ unit.cpp:2306-2308: each bonus guarded by (BailCount > Tiberium)
     // When Tiberium=26 before gem harvest:
     //   26->27 (base), 28>27=true->28, 28>28=false->stop. Only 1 bonus.
     //   C++ total: 28 bails (exactly full)
-    // TS: always adds 3 bonus regardless of capacity -> CAN EXCEED BAIL_COUNT
-    //   TS total: 26 + 1 + 3 = 30 (exceeds BailCount!)
     const map = makeMap();
     placeGem(map, 50, 50, 0x12);
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     harv.oreLoad = 26; // near full
     harv.oreCreditValue = 650;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 18; i++) {
-      updateHarvester(ctx, harv);
-    }
-
-    // C++ expected: 26 + 1(base) + 1(bonus, capped at 28) = 28
-    const cppExpectedLoad = 28;
-    const cppExpectedBonusBails = 1;
-
-    // TS actual: 26 + 1(base) + 3(bonus, uncapped) = 30
-    // This documents the mismatch: TS does not gate bonus bails on remaining capacity
-    if (harv.oreLoad > Entity.BAIL_COUNT) {
-      // MISMATCH confirmed: TS allows oreLoad > BailCount
-      expect(harv.oreLoad).toBe(30);
-      // Document what C++ would produce
-      expect(cppExpectedLoad).toBe(28);
-      expect(cppExpectedBonusBails).toBe(1);
-    } else {
-      // If TS is fixed to match C++, it should cap at BailCount
-      expect(harv.oreLoad).toBe(cppExpectedLoad);
-    }
+    updateHarvester(ctx, harv);
+    expect(harv.oreLoad).toBe(Entity.BAIL_COUNT);
   });
 
-  it('MISMATCH: gem at 25/28 load — C++ adds 2 bonus (not 3)', () => {
+  it('gem at 25/28 load adds only the two bonus bails that fit', () => {
     // C++: Tiberium=25 -> 25->26(base), 28>26->27, 28>27->28, 28>28->stop
     // C++ result: 3 bails added (1 base + 2 bonus), total 28
-    // TS: 25 + 1 + 3 = 29 (exceeds by 1)
     const map = makeMap();
     placeGem(map, 50, 50, 0x12);
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     harv.oreLoad = 25;
     harv.oreCreditValue = 625;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 18; i++) {
-      updateHarvester(ctx, harv);
-    }
-
-    const cppExpected = 28;
-    if (harv.oreLoad !== cppExpected) {
-      // TS mismatch: adds 3 bonus unconditionally
-      expect(harv.oreLoad).toBe(29);
-      expect(cppExpected).toBe(28);
-    } else {
-      expect(harv.oreLoad).toBe(28);
-    }
+    updateHarvester(ctx, harv);
+    expect(harv.oreLoad).toBe(Entity.BAIL_COUNT);
   });
 
-  it('MISMATCH: gem at 27/28 load — C++ adds 0 bonus, TS adds 3', () => {
+  it('gem at 27/28 load adds no bonus bails after the base bail fills capacity', () => {
     // C++: Tiberium=27 -> 27->28(base), 28>28=false. 0 bonus bails.
     //   C++ total: 28
-    // TS: 27 + 1 + 3 = 31 (exceeds by 3)
     const map = makeMap();
     placeGem(map, 50, 50, 0x12);
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 0;
+    primeHarvestReady(harv);
     harv.oreLoad = 27;
     harv.oreCreditValue = 675;
     ctx.entities.push(harv);
 
-    for (let i = 0; i < 18; i++) {
-      updateHarvester(ctx, harv);
-    }
-
-    const cppExpected = 28; // 27 + 1 base + 0 bonus
-    if (harv.oreLoad !== cppExpected) {
-      expect(harv.oreLoad).toBe(31); // 27 + 1 + 3
-      expect(cppExpected).toBe(28);
-    } else {
-      expect(harv.oreLoad).toBe(28);
-    }
+    updateHarvester(ctx, harv);
+    expect(harv.oreLoad).toBe(Entity.BAIL_COUNT);
   });
 
   it('harvester stops harvesting when full (oreLoad >= BAIL_COUNT)', () => {
@@ -425,17 +392,13 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     harv.harvesterState = 'harvesting';
     harv.oreLoad = 28; // already full
     harv.oreCreditValue = 700;
-    harv.harvestTick = 17; // next tick fires harvest check
+    primeHarvestReady(harv);
     ctx.entities.push(harv);
 
     updateHarvester(ctx, harv);
 
-    // The harvest fires at tick 10, oreLoad already >= 28 -> 'returning'
     expect(harv.harvesterState).toBe('returning');
-    // oreLoad stays 28 because depleteOre adds 1 bail but the full-check triggers
-    // Actually let's check: oreLoad was 28, depleteOre adds 1 -> 29, then check >= 28 -> returning
-    // This is another mismatch: C++ won't even call Harvesting() when full
-    expect(harv.oreLoad).toBeGreaterThanOrEqual(28);
+    expect(harv.oreLoad).toBe(28);
   });
 });
 
@@ -636,14 +599,16 @@ describe('Return-to-refinery logic — C++ FINDHOME state', () => {
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17; // next tick fires harvest check
+    primeHarvestReady(harv);
     harv.oreLoad = 27;    // one bail from full
     harv.oreCreditValue = 675;
     ctx.entities.push(harv);
 
-    // Tick 10: harvest fires, oreLoad 27->28, check >= 28 -> 'returning'
     updateHarvester(ctx, harv);
     expect(harv.oreLoad).toBe(28);
+    expect(harv.harvesterState).toBe('harvesting');
+    primeHarvestReady(harv);
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
   });
 
@@ -773,11 +738,11 @@ describe('depleteOre — C++ cell.cpp Reduce_Tiberium parity', () => {
 });
 
 // ============================================================================
-// 9. Documented Mismatches Summary
+// 9. Parity Guardrails
 // ============================================================================
 
-describe('Documented C++ vs TS mismatches', () => {
-  it('MISMATCH CATALOG: gem bonus bails not capacity-gated in TS', () => {
+describe('C++ parity guardrails', () => {
+  it('gem bonus bails are capacity-gated like C++', () => {
     // C++ unit.cpp:2306-2308: each bonus bail guarded by (BailCount > Tiberium)
     // TS harvester.ts:159-162: unconditional 3 bonus bails when bailCredits >= 50
     //
@@ -787,64 +752,46 @@ describe('Documented C++ vs TS mismatches', () => {
     //   26:   1 bonus bail  (total 2, fills to 28)
     //   27:   0 bonus bails (total 1, fills to 28)
     //
-    // TS always adds 3 bonus -> overflows BailCount when oreLoad >= 25
     const cppBonusAt24 = 3;
     const cppBonusAt25 = 2;
     const cppBonusAt26 = 1;
     const cppBonusAt27 = 0;
-    const tsBonusAlways = 3;
 
-    expect(cppBonusAt24).toBe(3); // matches TS
-    expect(cppBonusAt25).toBe(2); // TS gives 3 (MISMATCH)
-    expect(cppBonusAt26).toBe(1); // TS gives 3 (MISMATCH)
-    expect(cppBonusAt27).toBe(0); // TS gives 3 (MISMATCH)
-    expect(tsBonusAlways).toBe(3);
+    expect(cppBonusAt24).toBe(3);
+    expect(cppBonusAt25).toBe(2);
+    expect(cppBonusAt26).toBe(1);
+    expect(cppBonusAt27).toBe(0);
   });
 
-  it('MISMATCH: TS harvest interval is fixed 10 ticks, C++ uses animation rate', () => {
+  it('harvest timing is driven by the HARV load animation', () => {
     // C++ unit.cpp:2841-2846: Set_Rate(OreDumpRate), waits for Harvester_Load_List
     //   OreDumpRate=1 from INI. Interval = len(Harvester_Load_List) * rate
-    // TS: harvester.ts:151: harvestTick % 10 === 0 (fixed 10-tick interval)
-    const tsHarvestInterval = 10;
-    expect(tsHarvestInterval).toBe(10);
+    const harvesterLoadStages = 9;
+    expect(harvesterLoadStages).toBe(9);
   });
 
-  it('TS unload now uses drip-feed (1 bail/tick), matching C++ building.cpp:3758-3780', () => {
-    // C++ building.cpp:3758-3780: Offload_Tiberium_Bail() called each tick
-    // TS now matches: 1 bail deposited per tick until empty
-    // Duration = oreLoad ticks (not fixed 14)
+  it('harvester unload uses UNIT_HARVESTER Mission_Unload lump-sum deposit', () => {
+    // C++ UnitClass::Mission_Unload deposits Credit_Load() after the 22-stage
+    // dump animation; the refinery Offload_Tiberium_Bail path is #ifdef TOFIX.
     const cppOreDumpRate = 1; // rules.ini OreTruckRate=1
     expect(cppOreDumpRate).toBe(1);
-    // Note: C++ Offload_Tiberium_Bail (#ifdef TOFIX) returns 0 in unmodified source,
-    // but building.cpp:3769 handles credit deposit via House->Harvested().
-    // TS implements the intended drip-feed behavior.
   });
 
-  it('MISMATCH: TS harvester can harvest when already full (no Tiberium_Load < 1 gate)', () => {
+  it('full harvester does not lift an extra bail', () => {
     // C++ unit.cpp:2280: if (Tiberium_Load() < 1) — prevents harvest when full
-    // TS: no pre-check on oreLoad before calling depleteOre
-    //   The full check only happens AFTER adding bails (line 170)
-    //   This means one extra bail can be harvested when oreLoad == 28
     const map = makeMap();
     placeGold(map, 50, 50, 0x0E);
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
     harv.harvesterState = 'harvesting';
-    harv.harvestTick = 17;
+    primeHarvestReady(harv);
     harv.oreLoad = 28; // already full
     harv.oreCreditValue = 700;
     ctx.entities.push(harv);
 
     updateHarvester(ctx, harv);
 
-    // C++ would NOT harvest (Tiberium_Load() == 1, not < 1)
-    // TS harvests anyway and adds 1 bail -> 29, then checks >= 28 -> returning
-    if (harv.oreLoad > 28) {
-      // MISMATCH confirmed
-      expect(harv.oreLoad).toBe(29);
-    } else {
-      expect(harv.oreLoad).toBe(28);
-    }
+    expect(harv.oreLoad).toBe(28);
     expect(harv.harvesterState).toBe('returning');
   });
 });

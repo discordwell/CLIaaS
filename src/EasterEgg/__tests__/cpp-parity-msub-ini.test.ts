@@ -721,6 +721,12 @@ describe('BEHAVIORAL: updateAttack blocks firing while cloaked/uncloaking (vesse
     msub.mission = Mission.ATTACK;
     msub.target = target;
     msub.attackCooldown = 0;
+    // This case isolates the cloak gate. Non-turret vessels must already face
+    // close enough to the target or C++ VesselClass::Can_Fire returns FIRE_FACING.
+    msub.facing = 2;
+    msub.desiredFacing = 2;
+    msub.bodyFacing256 = 64;
+    msub.desiredFacing256 = 64;
 
     let projectileLaunched = false;
     const ctx = makeMissionCtx([msub, target]);

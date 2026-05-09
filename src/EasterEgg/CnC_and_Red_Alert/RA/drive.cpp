@@ -481,6 +481,11 @@ DriveClass::DriveClass(RTTIType rtti, int id, HousesType house) :
 	IsTurretLockedDown(false),
 	IsOnShortTrack(false),
 	SpeedAccum(0),
+	AgentLastMoveSpeed(0),
+	AgentLastMaxSpeed(0),
+	AgentLastActualStart(0),
+	AgentLastActualEnd(0),
+	AgentLastSteps(0),
 	MoebiusCountDown(0),
 	MoebiusCell(0),
 	TrackNumber(-1),
@@ -685,6 +690,10 @@ bool DriveClass::While_Moving(void)
 	} else {
 		actual = SpeedAccum + maxspeed * fixed(Speed, 256);
 	}
+	AgentLastMoveSpeed = Speed;
+	AgentLastMaxSpeed = maxspeed;
+	AgentLastActualStart = actual;
+	AgentLastSteps = 0;
 
 	if (actual > PIXEL_LEPTON_W) {
 		TurnTrackType	const * track;	// Track control pointer.
@@ -722,6 +731,7 @@ bool DriveClass::While_Moving(void)
 			DirType	dir;
 
 			actual -= PIXEL_LEPTON_W;
+			AgentLastSteps++;
 
 			offset = ptr[TrackIndex].Offset;
 			if (offset || !TrackIndex) {
@@ -831,6 +841,7 @@ bool DriveClass::While_Moving(void)
 	**	accumulator to be processed next pass.
 	*/
 	SpeedAccum = actual;
+	AgentLastActualEnd = actual;
 	return(true);
 }
 
@@ -2343,6 +2354,5 @@ DriveClass::TurnTrackType const DriveClass::TrackControl[67] = {
 	{12,	12,	DIR_SW_X2,	F_},															// Drive back into refinery.
 	{13,	13,	DIR_SW,	F_}																// Drive out of weapons factory.
 };
-
 
 

@@ -50,7 +50,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -502,7 +502,7 @@ describe('Civilian retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, c1, attacker);
 
     expect(c1.target).toBe(attacker);
-    expect(c1.mission).toBe(Mission.ATTACK);
+    expect(c1.mission).toBe(Mission.GUARD);
   });
 
   it('unarmed C5 cannot retaliate (no weapon)', () => {

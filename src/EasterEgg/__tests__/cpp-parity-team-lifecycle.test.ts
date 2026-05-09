@@ -465,8 +465,11 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
 
       // Both infantry must be gesture-blocked — regardless of which gesture
       // percentChance selected, both are non-interruptible in C++.
-      expect(e1.nonInterruptAnimTicks).toBeGreaterThan(0);
-      expect(e2.nonInterruptAnimTicks).toBeGreaterThan(0);
+      // E1DoControls gesture Count=3 and MasterDoControls gesture Rate=2,
+      // so the raw animation duration is 6 ticks. Commence stays blocked on
+      // the tick where the counter reaches zero because Doing_AI runs after it.
+      expect(e1.nonInterruptAnimTicks).toBe(6);
+      expect(e2.nonInterruptAnimTicks).toBe(6);
     });
 
     it('does not override pre-existing gesture block (C++ Do_Action fails on non-interruptible)', () => {
@@ -678,6 +681,48 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
 
       expect(e1.teamRef).toBeNull();
     });
+
+    it('preserves an attacking infantry member queue when dissolve enters idle mode (infantry.cpp:1663)', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const target = makeEntity(UnitType.I_E1, House.Greece, 120, 100);
+      attacker.mission = Mission.ATTACK;
+      attacker.missionQueue = Mission.HUNT;
+      attacker.target = target;
+      team.add(attacker);
+
+      team.dissolve();
+
+      // C++ TeamClass::Remove clears Team then calls InfantryClass::Enter_Idle_Mode.
+      // TarCom is legal, so it calls Assign_Mission(MISSION_ATTACK). Since the
+      // unit is already attacking, Assign_Mission is a true no-op and keeps the
+      // existing MissionQueue instead of overwriting it with GUARD.
+      expect(attacker.teamRef).toBeNull();
+      expect(attacker.mission).toBe(Mission.ATTACK);
+      expect(attacker.missionQueue).toBe(Mission.HUNT);
+    });
+
+    it('infantry dissolve prefers legal TarCom over NavCom before assigning MOVE', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const target = makeEntity(UnitType.I_E1, House.Greece, 120, 100);
+      attacker.mission = Mission.MOVE;
+      attacker.target = target;
+      attacker.moveTarget = { lx: 2560, ly: 2560 };
+      team.add(attacker);
+
+      team.dissolve();
+
+      expect(attacker.missionQueue).toBe(Mission.ATTACK);
+    });
   });
 
   describe('LOOP mission (team.cpp:2869-2876)', () => {
@@ -881,7 +926,7 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
   });
 
   describe('DO mission (team.cpp:1809-1856 Coordinate_Do)', () => {
-    it('assigns specified mission to all members and advances', () => {
+    it('assigns specified mission to all members without advancing', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 2 }],
         missions: [
@@ -897,13 +942,52 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       team.add(e2);
 
       // C++ Force_Active() sets IsUnderStrength=false, so no spurious reforming.
-      // First ai(): activate → advance to DO → execute DO (sets HUNT) in one tick.
+      // First ai(): activate → advance to DO → execute DO (queues HUNT) in one tick.
       team.ai();
 
       // C++ Coordinate_Do calls Assign_Mission (queues), Commence processes
       // when !IsFiring. Check missionQueue since Commence hasn't run.
       expect(e1.missionQueue).toBe(Mission.HUNT);
       expect(e2.missionQueue).toBe(Mission.HUNT);
+      expect(team.currentMission).toBe(0);
+      expect(team.isNextMission).toBe(false);
+    });
+
+    it('does not assign DO mission to a member with legal TarCom', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_DO, data: 14 }], // HUNT
+      });
+      const e1 = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const target = makeEntity(UnitType.I_E1, House.Greece, 120, 100);
+      e1.mission = Mission.ATTACK;
+      e1.target = target;
+      team.add(e1);
+
+      team.coordinateDo({ mission: TMISSION_DO, data: 14 });
+
+      // C++ Coordinate_Do line 1845 is gated by !Target_Legal(TarCom).
+      expect(e1.mission).toBe(Mission.ATTACK);
+      expect(e1.missionQueue).toBeNull();
+      expect(e1.target).toBe(target);
+    });
+
+    it('does not assign DO mission to a member with legal NavCom', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_DO, data: 14 }], // HUNT
+      });
+      const e1 = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      e1.mission = Mission.MOVE;
+      e1.moveTarget = { lx: 2560, ly: 2560 };
+      team.add(e1);
+
+      team.coordinateDo({ mission: TMISSION_DO, data: 14 });
+
+      // C++ Coordinate_Do line 1845 is also gated by !Target_Legal(NavCom).
+      expect(e1.mission).toBe(Mission.MOVE);
+      expect(e1.missionQueue).toBeNull();
+      expect(e1.moveTarget).toEqual({ lx: 2560, ly: 2560 });
     });
   });
 });

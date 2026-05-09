@@ -131,7 +131,7 @@ export interface AgentState {
   rngState: number;
   rngCalls: number;
   rngDebug: unknown[];
-  rngSeedLog?: Array<[number, number]>;
+  rngSeedLog?: Array<[number, number, number]>;
 }
 
 export type AgentCommand =
@@ -444,15 +444,20 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               // queues MOVE so UnitClass::AI keeps the current mission until
               // IsDriving clears.
               assignMission(e, Mission.MOVE);
-              e.pathThreshold = 1;
-              const pathGoal = resolveBasicPathGoal(game, e, { cx: c.cx, cy: c.cy });
-              e.path = findPath(
-                game.map, e.cell, pathGoal, false, e.isNavalUnit, e.stats.speedClass,
-                id => isMovingBlocker(game, e, id), undefined, undefined, e.stats.isInfantry,
-              );
-              e.pathIndex = 0;
-              if (!e.stats.isInfantry && e.path.length > 0) {
-                e.isDriving = true;
+              const driveClassMove = (game as unknown as { startDriveClassMove?: (entity: typeof e) => void }).startDriveClassMove;
+              if (!e.stats.isInfantry && !e.isAirUnit && typeof driveClassMove === 'function') {
+                driveClassMove.call(game, e);
+              } else {
+                e.pathThreshold = 1;
+                const pathGoal = resolveBasicPathGoal(game, e, { cx: c.cx, cy: c.cy });
+                e.path = findPath(
+                  game.map, e.cell, pathGoal, false, e.isNavalUnit, e.stats.speedClass,
+                  id => isMovingBlocker(game, e, id), undefined, undefined, e.stats.isInfantry,
+                );
+                e.pathIndex = 0;
+                if (!e.stats.isInfantry && e.path.length > 0) {
+                  e.isDriving = true;
+                }
               }
             }
           }
@@ -873,16 +878,16 @@ export function installHarness(game: Game): void {
         ScenarioRandom._tagLogging = false;
         ScenarioRandom._tagLoggingExternal = false;
         return { enabled: false };
-      case 'reset':
-        ScenarioRandom._seedLog = [];
-        ScenarioRandom._taggedLog = [];
-        return { reset: true };
-      case 'read':
-        return {
-          seedLog: ScenarioRandom._seedLog.map(e => [e[0], e[1]]),
-          taggedLog: ScenarioRandom._taggedLog.slice(),
-          callCount: ScenarioRandom.callCount,
-          seed: ScenarioRandom.seed >>> 0,
+	      case 'reset':
+	        ScenarioRandom._seedLog = [];
+	        ScenarioRandom._taggedLog = [];
+	        return { reset: true };
+	      case 'read':
+	        return {
+	          seedLog: ScenarioRandom._seedLog.map(e => [e[0], e[1], e[2] ?? 0]),
+	          taggedLog: ScenarioRandom._taggedLog.slice(),
+	          callCount: ScenarioRandom.callCount,
+	          seed: ScenarioRandom.seed >>> 0,
         };
     }
   };

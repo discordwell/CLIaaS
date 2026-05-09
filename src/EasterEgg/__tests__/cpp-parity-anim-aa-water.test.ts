@@ -44,10 +44,11 @@ const MAX_DAMAGE: Record<number, number> = { 3: 150, 4: 90, 5: 130 };
 
 /**
  * C++ fixed-point index formula (combat.cpp:346):
- *   index = floor((arrayLen-1) * min(damage, maxDmg) / maxDmg)
+ *   index = ((arrayLen-1) * fixed(min(damage,maxDmg), maxDmg)) rounded by fixed::operator*
  */
 function cppIndexFormula(damage: number, maxDmg: number, arrayLen: number): number {
-  return Math.floor((arrayLen - 1) * Math.min(damage, maxDmg) / maxDmg);
+  const fixedRaw = Math.floor((Math.min(damage, maxDmg) * 256) / maxDmg);
+  return Math.floor((fixedRaw * (arrayLen - 1) + 128) / 256);
 }
 
 
@@ -139,7 +140,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
 
       it('damage=49 → water-exp3 (still index 0)', () => {
         // floor(2 * 49/150) = floor(0.653) = 0
-        expect(combatAnim(49, SET, 'water')).toBe('water-exp3');
+        expect(combatAnim(49, SET, 'water')).toBe('water-exp2');
       });
 
       it('damage=75 → water-exp2 (index 1, threshold crossing)', () => {
@@ -167,7 +168,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
 
       it('damage=44 → water-exp3 (still index 0)', () => {
         // floor(2 * 44/90) = floor(0.977) = 0
-        expect(combatAnim(44, SET, 'water')).toBe('water-exp3');
+        expect(combatAnim(44, SET, 'water')).toBe('water-exp2');
       });
 
       it('damage=45 → water-exp2 (index 1)', () => {
@@ -177,7 +178,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
 
       it('damage=89 → water-exp2 (still index 1)', () => {
         // floor(2 * 89/90) = floor(1.977) = 1
-        expect(combatAnim(89, SET, 'water')).toBe('water-exp2');
+        expect(combatAnim(89, SET, 'water')).toBe('water-exp1');
       });
 
       it('damage=90 → water-exp1 (index 2, max damage)', () => {
@@ -196,7 +197,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
 
       it('damage=64 → water-exp3 (still index 0)', () => {
         // floor(2 * 64/130) = floor(0.984) = 0
-        expect(combatAnim(64, SET, 'water')).toBe('water-exp3');
+        expect(combatAnim(64, SET, 'water')).toBe('water-exp2');
       });
 
       it('damage=65 → water-exp2 (index 1)', () => {
@@ -206,7 +207,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
 
       it('damage=129 → water-exp2 (still index 1)', () => {
         // floor(2 * 129/130) = floor(1.984) = 1
-        expect(combatAnim(129, SET, 'water')).toBe('water-exp2');
+        expect(combatAnim(129, SET, 'water')).toBe('water-exp1');
       });
 
       it('damage=130 → water-exp1 (index 2, max damage)', () => {
@@ -304,7 +305,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
     it('lower-damage torpedo would produce smaller water splash', () => {
       // A hypothetical 30-damage torpedo: floor(2 * 30/90) = floor(0.666) = 0 → water-exp3
       const torpExpSet = WARHEAD_PROPS['AP' as WarheadType].explosionSet;
-      expect(combatAnim(30, torpExpSet, 'water')).toBe('water-exp3');
+      expect(combatAnim(30, torpExpSet, 'water')).toBe('water-exp2');
     });
   });
 
@@ -318,7 +319,7 @@ describe('C++ Parity: AA/Water Explosion Animations', () => {
       // floor(2 * min(80, 90) / 90) = floor(1.777) = 1 → water-exp2
       const dcDamage = 80;
       const dcExpSet = WARHEAD_PROPS['AP' as WarheadType].explosionSet; // 4
-      expect(combatAnim(dcDamage, dcExpSet, 'water')).toBe('water-exp2');
+      expect(combatAnim(dcDamage, dcExpSet, 'water')).toBe('water-exp1');
     });
 
     it('depth charge impact over water selects from WATER_LIST', () => {

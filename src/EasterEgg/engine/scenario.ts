@@ -5,14 +5,14 @@
 
 import {
   type CellPos, type UnitStats, type WeaponStats, type ArmorType,
-  CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell, pixelToLepton,
+  CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell, pixelToLepton, cellTargetToLepton,
   House, Mission, UnitType, AnimState, Dir,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
   SUBCELL_LEPTON_OFFSETS,
 } from './types';
 import { buildScenarioRuleOverrides } from './scenarioRules';
-import { Entity } from './entity';
+import { Entity, dir256ToFacing8, dir256ToFacing32 } from './entity';
 import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, TERRAIN_OBJECT_OCCUPY, type MapTree } from './map';
 import { type TilesetMeta, type AssetManager } from './assets';
 import { nearbyLocation } from './pathfinding';
@@ -149,7 +149,10 @@ export interface TeamMission {
 export interface TeamType {
   name: string;
   house: number;        // house ID
-  flags: number;        // bitfield: bit1=IsSuicide, bit2=IsAutocreate, etc.
+  /** C++ TeamTypeClass::Fill_In old-format bitfield:
+   *  0x0001=IsRoundAbout, 0x0002=IsSuicide, 0x0004=IsAutocreate,
+   *  0x0008=IsPrebuilt, 0x0010=IsReinforcable. */
+  flags: number;
   recruitPriority?: number; // C++ teamtype.h:198 — priority for stealing members from lower-priority teams (default 7)
   initNum?: number;      // C++ teamtype.h:200 — number of this team to pre-spawn at scenario init (default 0)
   maxAllowed: number;   // C++ MaxAllowed — max active instances of this team type
@@ -625,6 +628,18 @@ const MISSION_NAMES: Record<string, string> = {
   SCA01EA: 'Ant Mission 1', SCA02EA: 'Ant Mission 2',
   SCA03EA: 'Ant Mission 3', SCA04EA: 'Ant Mission 4',
 };
+
+const CXX_HOUSE_COUNT = 20;
+const CXX_TICKS_PER_MINUTE = 900;
+
+function consumeCxxHouseInitRNG(): void {
+  for (let i = 0; i < CXX_HOUSE_COUNT; i++) {
+    // C++ HouseClass constructor:
+    // Attack = Rule.AttackDelay * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2)
+    ScenarioRandom.nextInRange(CXX_TICKS_PER_MINUTE / 2, CXX_TICKS_PER_MINUTE * 2);
+  }
+}
+
 function resolveMissionName(iniName: string, scenarioId: string): string {
   if (iniName && iniName.toLowerCase() !== '<none>' && iniName.toLowerCase() !== 'none') {
     return iniName;
@@ -1324,6 +1339,36 @@ export interface MapStructure {
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
   /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
   missionTimer: number;
+  /** C++ BuildingClass::Factory — computer-controlled building-local factory.
+   *  Player production still lives in the sidebar queue; AI production is owned
+   *  by the producing building and advanced by FactoryClass::AI. */
+  aiFactory?: {
+    kind: 'infantry' | 'unit' | 'vessel' | 'aircraft' | 'building';
+    productType: string;
+    stage: number;
+    rate: number;
+    timer: number;
+    balance: number;
+    cost: number;
+    startedTick: number;
+    suspended: boolean;
+  };
+  /** C++ BuildingClass::PlacementDelay — retry delay when completed product cannot exit. */
+  aiFactoryPlacementDelay?: number;
+  /** C++ MissionClass::Mission for buildings. Weapon buildings use GUARD to scan, then ATTACK to fire. */
+  mission?: Mission;
+  /** C++ TechnoClass::TarCom for weapon buildings. Mission_Guard assigns
+   *  this target; Mission_Attack/Charging_AI use the assigned target rather
+   *  than doing a fresh threat scan each tick. */
+  targetEntityId?: number;
+  /** C++ BuildingClass::IsCharging for electric weapons (TeslaZap Charges=yes). */
+  isCharging?: boolean;
+  /** C++ BuildingClass::IsCharged gate checked by BuildingClass::Can_Fire. */
+  isCharged?: boolean;
+  /** C++ StageClass Fetch_Stage for Tesla charge animation. */
+  chargeStage?: number;
+  /** Local counter for C++ Set_Rate(3) charge animation timing. */
+  chargeRateCounter?: number;
   /** C++ building.cpp:5140 `IsToRepair = rebuild || *b == STRUCT_CONST` — set at scenario load
    *  for all Construction Yards (FACT/CONS) so Repair_AI auto-repairs them when damaged.
    *  Used at building.cpp:5495 inner repair condition. */
@@ -1471,6 +1516,67 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   ...mapStructureSize(CIVILIAN_STRUCTURE_1X1, [1, 1]),
   ...mapStructureSize(CIVILIAN_STRUCTURE_4X2, [4, 2]),
 };
+
+type StructureOffset = readonly [number, number];
+
+const RECT_1X1: readonly StructureOffset[] = [[0, 0]];
+const RECT_2X1: readonly StructureOffset[] = [[0, 0], [1, 0]];
+const RECT_1X2: readonly StructureOffset[] = [[0, 0], [0, 1]];
+const RECT_2X2: readonly StructureOffset[] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+const RECT_3X2: readonly StructureOffset[] = [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]];
+const RECT_3X3: readonly StructureOffset[] = [
+  [0, 0], [1, 0], [2, 0],
+  [0, 1], [1, 1], [2, 1],
+  [0, 2], [1, 2], [2, 2],
+];
+
+/** C++ bdata.cpp Occupy_List cells. These are the movement-blocking foundation
+ * cells, not necessarily the full rendered sprite footprint. Overlap_List cells
+ * visually overlap the map but do not put a BuildingClass in Cell_Occupier().
+ */
+export const STRUCTURE_OCCUPY_OFFSETS: Record<string, readonly StructureOffset[]> = {
+  FACT: RECT_3X3, FACF: RECT_3X3,
+  WEAP: RECT_3X2, WEAF: RECT_3X2,
+  POWR: RECT_2X2, BARR: RECT_2X2, TENT: RECT_2X2, DOME: RECT_2X2, KENN: RECT_2X2,
+  AFLD: RECT_3X2,
+  APWR: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
+  STEK: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
+  ATEK: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
+  PROC: [[1, 0], [0, 1], [1, 1], [2, 1], [0, 2]],
+  HPAD: RECT_2X2,
+  GAP: [[0, 1]],
+  SAM: RECT_2X1,
+  TSLA: [[0, 1]],
+  AGUN: [[0, 1]],
+  FIX: [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]],
+  IRON: [[0, 1], [1, 1]],
+  FCOM: [[0, 1], [1, 1]],
+  PDOX: RECT_2X2,
+  MSLO: RECT_2X1,
+  SYRD: RECT_3X3, SPEN: RECT_3X3,
+  BIO: RECT_2X2, HOSP: RECT_2X2,
+  MISS: RECT_3X2,
+  PBOX: RECT_1X1, HBOX: RECT_1X1, GUN: RECT_1X1, FTUR: RECT_1X1,
+  SILO: RECT_1X1, MINP: RECT_1X1, MINV: RECT_1X1,
+  BARL: RECT_1X1, BRL3: RECT_1X1,
+  SBAG: RECT_1X1, FENC: RECT_1X1, BARB: RECT_1X1, BRIK: RECT_1X1, WOOD: RECT_1X1, CYCL: RECT_1X1,
+  ...Object.fromEntries(CIVILIAN_STRUCTURE_2X2.map(type => [type, RECT_2X2] as const)),
+  ...Object.fromEntries(CIVILIAN_STRUCTURE_2X1.map(type => [type, RECT_2X1] as const)),
+  ...Object.fromEntries(CIVILIAN_STRUCTURE_1X1.map(type => [type, RECT_1X1] as const)),
+  ...Object.fromEntries(CIVILIAN_STRUCTURE_4X2.map(type => [type, [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1], [2, 1], [3, 1]]] as const)),
+};
+
+export function getStructureOccupyCells(type: string, cx: number, cy: number): CellPos[] {
+  const offsets = STRUCTURE_OCCUPY_OFFSETS[type] ?? (() => {
+    const [fw, fh] = STRUCTURE_SIZE[type] ?? [1, 1];
+    const rect: StructureOffset[] = [];
+    for (let dy = 0; dy < fh; dy++) {
+      for (let dx = 0; dx < fw; dx++) rect.push([dx, dy]);
+    }
+    return rect;
+  })();
+  return offsets.map(([dx, dy]) => ({ cx: cx + dx, cy: cy + dy }));
+}
 
 // C++ bdata.cpp:3597-3629 Bib_And_Offset — buildings with IsBibbed=true in rules.ini.
 // Bibs are decorative ground tiles placed beneath certain buildings that make additional
@@ -1675,6 +1781,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   if (!res.ok) throw new Error(`Failed to load scenario: ${url}`);
   const text = await res.text();
   const data = parseScenarioINI(text, scenarioId);
+  consumeCxxHouseInitRNG();
 
   // Set up map
   const map = new GameMap();
@@ -1690,7 +1797,6 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // Decode OverlayPack for ore/gem/wall overlays
   if (data.overlayPack) {
     decodeOverlayPack(data.overlayPack, map);
-    map.initializeOreDensityFromOverlay();
   }
 
   // Apply terrain features from [TERRAIN] section
@@ -1703,12 +1809,13 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       map.setTerrain(pos.cx, pos.cy, Terrain.ROCK);
     } else if (/^tc?\d/.test(type)) {
       // T01-T17 = single trees, TC01-TC05 = tree clumps.
-      // C++ parity: trees are TerrainClass objects on CLEAR ground (RA terrain.cpp).
-      // We set Terrain.TREE on origin cells for rendering (the renderer draws tree
-      // sprites only in the TREE case). Movement blocking uses the separate
-      // treeOccupied system, not the terrain enum.
+      // C++ parity: trees are TerrainClass objects layered on top of the MapPack
+      // land type (RA terrain.cpp TerrainClass::Mark -> Map.Place_Down). Do not
+      // replace the decoded terrain with Terrain.TREE here: the underlying land
+      // still controls UnitClass::Can_Enter_Cell. SCG06EA has a T13 origin on
+      // LAND_WALL at (86,98); C++ blocks the HARV there even though the tree's
+      // Occupy_List only marks the cell south of the origin.
       const isClump = type.startsWith('tc');
-      map.setTerrain(pos.cx, pos.cy, Terrain.TREE);
       map.setTreeType(pos.cx, pos.cy, type);
 
       // Build occupy cell index list from C++ tdata.cpp Occupy_List
@@ -1743,7 +1850,6 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
         };
         const extra = CLUMP_RENDER[type] ?? [];
         for (const [dx, dy] of extra) {
-          map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.TREE);
           map.setTreeType(pos.cx + dx, pos.cy + dy, '_clump');
         }
       }
@@ -1768,11 +1874,27 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     const pos = cellIndexToPos(u.cell);
     const world = cellToWorld(pos.cx, pos.cy);
     const entity = new Entity(unitType, toHouse(u.house), world.x, world.y);
-    entity.facing = Math.floor(u.facing / 32) % 8;
+    entity.bodyFacing256 = u.facing & 0xff;
+    entity.facing = dir256ToFacing8(entity.bodyFacing256);
     entity.desiredFacing = entity.facing;
-    entity.turretFacing = entity.facing;
-    entity.bodyFacing32 = entity.facing * 4;
-    entity.turretFacing32 = entity.turretFacing * 4;
+    entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
+
+    // C++ VesselClass constructor initializes SecondaryFacing from the default
+    // PrimaryFacing, then VesselClass::Read_INI applies the INI facing to
+    // PrimaryFacing only. Turreted vessels therefore start with body facing from
+    // the scenario and turret facing still north. This matters for SCG07EA PT
+    // boats: Can_Fire returns FIRE_ROTATING until SecondaryFacing catches up.
+    if (entity.isNavalUnit && entity.hasTurret) {
+      entity.turretFacing = Dir.N;
+      entity.turretFacing256 = 0;
+    } else {
+      entity.turretFacing = entity.facing;
+      entity.turretFacing256 = entity.bodyFacing256;
+    }
+    entity.desiredTurretFacing256 = entity.turretFacing256;
+    entity.desiredTurretFacing = entity.turretFacing;
+    entity.turretFacing32 = dir256ToFacing32(entity.turretFacing256);
+    entity.prevTurretFacing32 = entity.turretFacing32;
     entity.hp = scenarioStrengthToHP(u.hp, entity.maxHp);
     if (u.trigger && u.trigger !== 'None') entity.triggerName = u.trigger;
     applyMission(entity, u.mission);
@@ -1796,11 +1918,14 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     entity.leptonY = spawnLY;
     entity.syncPosFromLeptons();
     entity.prevPos = { x: entity.pos.x, y: entity.pos.y };
-    entity.facing = Math.floor(inf.facing / 32) % 8;
+    entity.bodyFacing256 = inf.facing & 0xff;
+    entity.facing = dir256ToFacing8(entity.bodyFacing256);
     entity.desiredFacing = entity.facing;
-    entity.bodyFacing32 = entity.facing * 4;
+    entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
     entity.hp = scenarioStrengthToHP(inf.hp, entity.maxHp);
     entity.subCell = inf.subCell;
+    entity.claimedCellIdx = pos.cy * 128 + pos.cx;
+    entity.claimedSubCell = inf.subCell;
     if (inf.trigger && inf.trigger !== 'None') entity.triggerName = inf.trigger;
     applyMission(entity, inf.mission);
     entities.push(entity);
@@ -1830,19 +1955,19 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       attackCooldown: 0,
       ammo: -1,
       maxAmmo: -1,
-      triggerName: trigName,
-      missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick
+	      triggerName: trigName,
+	      mission: Mission.GUARD,
+	      missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick
+      ...(s.type === 'TSLA' ? { isCharging: false, isCharged: false, chargeStage: 0, chargeRateCounter: 0 } : {}),
       ...(s.type === 'GAP' ? { gapArmTimer: 0 } : {}), // C++ TechnoClass::Arm initialized to 0
       // C++ building.cpp:5140 `IsToRepair = rebuild || *b == STRUCT_CONST` — ConYards auto-repair,
       // plus any building with the 8th INI field set to 1 (AI-repairable in this scenario).
       ...(s.type === 'FACT' || s.type === 'CONS' || s.rebuild ? { isToRepair: true } : {}),
     });
-    // Mark structure footprint cells as impassable (WALL terrain)
-    const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-    for (let dy = 0; dy < fh; dy++) {
-      for (let dx = 0; dx < fw; dx++) {
-        map.setTerrain(pos.cx + dx, pos.cy + dy, Terrain.WALL);
-      }
+    // Mark C++ Occupy_List cells as impassable. The rendered footprint can be
+    // larger than the active foundation; overlap cells remain passable.
+    for (const cell of getStructureOccupyCells(s.type, pos.cx, pos.cy)) {
+      map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
     }
     // C++ bdata.cpp:3597-3629: Bib cells are impassable in C++ (rendered via BIB sprites).
     // Without BIB sprite extraction, marking these as WALL causes dark gray boxes because
@@ -2004,10 +2129,10 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // via the runtime AI production system.
   }
 
-  // C++ parity: init-time RNG calls are consumed AFTER scenario load
-  // in AntGame.tsx (after game.start(), before installHarness()).
-  // This avoids changing the seed during load, which would alter
-  // scatter positions and entity placement.
+  // C++ scenario.cpp: Map.Overpass -> CellClass::Tiberium_Adjust(true).
+  // This randomizes ore/gem visual variants after all scenario INI content is
+  // loaded, consuming one Random_Pick per ore/gem cell in playable map order.
+  map.applyScenarioOreOverpass();
 
   // Count TERRAIN_MINE entities for Spread_Tiberium RNG parity (C++ terrain.cpp:497).
   // C++ creates a TerrainClass object per MINE; each is an ObjectClass in the Logic
@@ -2123,8 +2248,33 @@ export function decompressRASections(bytes: Uint8Array, start: number, dest: Uin
 // === OverlayPack Decoder ===
 // OverlayPack contains Base64-encoded, LCW-compressed overlay type data.
 // Single layer: overlay type ID per cell (0xFF = no overlay).
-// RA overlay IDs: 0x03-0x0E = Gold ore (GOLD01-GOLD12), 0x0F-0x12 = Gems (GEM01-GEM04)
-// 0x15-0x1F = Walls (BRIK, SBAG, CYCL, WOOD, FENC)
+// RA overlay IDs: 0..4 = walls, 5..8 = Gold ore visual variants,
+// 9..12 = Gems visual variants, 13..19 = V12..V18 rock overlays,
+// 20 = flag spot, 21/22 = land crates, 23 = FENC wall, 24 = water crate.
+// Harvestable amount lives in CellClass::OverlayData, mirrored by map.oreDensity.
+
+function overlayTerrain(overlayId: number): Terrain | null {
+  // C++ cell.cpp Recalc_Attributes: OverlayTypeClass::Land overrides template
+  // Land_Type when it is not LAND_CLEAR.
+  if (overlayId >= 0 && overlayId <= 4) return Terrain.WALL;
+  if (overlayId >= 5 && overlayId <= 12) return Terrain.ORE;
+  if (overlayId >= 13 && overlayId <= 19) return Terrain.ROCK;
+  if (overlayId === 23) return Terrain.WALL;  // OVERLAY_FENCE/FENC
+  if (overlayId === 24) return Terrain.WATER; // OVERLAY_WATER_CRATE
+  return null;
+}
+
+function overlayWallType(overlayId: number): string {
+  switch (overlayId) {
+    case 0: return 'SBAG';
+    case 1: return 'CYCL';
+    case 2: return 'BRIK';
+    case 3: return 'BARB';
+    case 4: return 'WOOD';
+    case 23: return 'FENC';
+    default: return '';
+  }
+}
 
 function decodeOverlayPack(base64Data: string, map: GameMap): void {
   try {
@@ -2137,6 +2287,16 @@ function decodeOverlayPack(base64Data: string, map: GameMap): void {
     const overlay = new Uint8Array(MAP_SIZE).fill(0xFF);
     decompressRASections(bytes, 0, overlay, MAP_SIZE);
     map.overlay = overlay;
+    for (let idx = 0; idx < MAP_SIZE; idx++) {
+      const terrain = overlayTerrain(overlay[idx]);
+      if (terrain !== null) {
+        map.setTerrain(idx % 128, Math.floor(idx / 128), terrain);
+      }
+      const wallType = overlayWallType(overlay[idx]);
+      if (wallType) {
+        map.setWallType(idx % 128, Math.floor(idx / 128), wallType);
+      }
+    }
   } catch {
     // OverlayPack decode failed — overlays stay empty
   }
@@ -2180,9 +2340,10 @@ function decodeMapPack(base64Data: string, map: GameMap, theatre: string, tilese
 
     // Apply terrain classification based on theatre
     if (theatre === 'INTERIOR') {
-      classifyInteriorTerrain(map, templateType);
+      classifyInteriorTerrain(map, templateType, templateIcon, tilesetMeta);
     } else {
-      // TEMPERATE and SNOW share the same template ID ranges (but SNOW has frozen rivers)
+      // TEMPERATE and SNOW share template ID ranges; each theatre's TMP control
+      // map provides the actual per-icon Land_Type.
       classifyOutdoorTerrain(map, templateType, templateIcon, theatre, tilesetMeta);
     }
   } catch {
@@ -2203,7 +2364,6 @@ export const LAND_NAME_TO_TERRAIN: Record<string, Terrain> = {
 };
 
 /** Classify TEMPERATE/SNOW terrain from MapPack template types.
- *  Both theatres share identical template ID ranges, but SNOW has frozen rivers.
  *
  *  Uses per-icon classification from tileset control map data (C++ cdata.cpp:3002-3032).
  *  Warns loudly if tileset metadata is missing — C++ always has control map data. */
@@ -2215,8 +2375,6 @@ export function classifyOutdoorTerrain(
   theatre = 'TEMPERATE',
   tilesetMeta?: TilesetMeta | null,
 ): void {
-  const isSnow = theatre === 'SNOW';
-
   // C++ parity: classify terrain 1 cell beyond visible bounds on each side.
   // C++ MapPack covers the full 128x128 grid — cells just outside bounds need
   // terrain data for Good_Reinforcement_Cell (checks both outcell and incell).
@@ -2241,14 +2399,7 @@ export function classifyOutdoorTerrain(
         const entry = tilesetMeta.tiles[key];
         if (entry) {
           const landName = entry.lt ?? 'Clear'; // absent lt = Clear
-          let terrain = LAND_NAME_TO_TERRAIN[landName] ?? Terrain.CLEAR;
-
-          // SNOW theatre override: frozen rivers are passable (C++ parity)
-          if (isSnow && (terrain === Terrain.WATER || terrain === Terrain.RIVER)) {
-            if ((tmpl >= 112 && tmpl <= 130) || (tmpl >= 229 && tmpl <= 234)) {
-              terrain = Terrain.CLEAR; // frozen river
-            }
-          }
+          const terrain = LAND_NAME_TO_TERRAIN[landName] ?? Terrain.CLEAR;
 
           if (terrain !== Terrain.CLEAR) {
             map.setTerrain(cx, cy, terrain);
@@ -2272,20 +2423,16 @@ export function classifyOutdoorTerrain(
 
 /** Classify INTERIOR terrain from MapPack template types.
  *  INTERIOR uses IDs 253-399 with completely different semantics. */
-function classifyInteriorTerrain(
+export function classifyInteriorTerrain(
   map: GameMap,
   templateType: Uint16Array,
+  templateIcon: Uint8Array,
+  tilesetMeta?: TilesetMeta | null,
 ): void {
-  // INTERIOR template type IDs (from OpenRA interior.yaml):
-  //   255/0xFFFF/0: clear floor
-  //   253-267: arro (arrows/markings) — floor, passable
-  //   268-274: flor (floor tiles) — passable
-  //   275-279: gflr (green floor) — passable
-  //   280-290: gstr (grate/stripe) — passable
-  //   291-317: lwal (light wall) — impassable
-  //   318-328: strp (stripe) — passable
-  //   329-377: wall (walls) — impassable
-  //   384-399: xtra (extras) — passable
+  // C++ parity: INTERIOR terrain also comes from the TMP control map, not
+  // from broad template ranges. `template,icon` is needed because the same
+  // interior template can mix Clear and Rock cells (e.g. 397,1 is Rock).
+  // Fall back to the old range table only when metadata is unavailable.
   for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
     for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
       const idx = cy * 128 + cx;
@@ -2293,14 +2440,28 @@ function classifyInteriorTerrain(
 
       if (tmpl === 0xFFFF || tmpl === 0x00 || tmpl === 255) {
         // Clear floor (default)
-      } else if (tmpl >= 291 && tmpl <= 317) {
+        continue;
+      }
+
+      if (tilesetMeta) {
+        const icon = templateIcon[idx] ?? 0;
+        const entry = tilesetMeta.tiles[`${tmpl},${icon}`];
+        if (entry) {
+          const terrain = LAND_NAME_TO_TERRAIN[entry.lt ?? 'Clear'] ?? Terrain.CLEAR;
+          if (terrain !== Terrain.CLEAR) {
+            map.setTerrain(cx, cy, terrain);
+          }
+          continue;
+        }
+      }
+
+      if (tmpl >= 291 && tmpl <= 317) {
         // Light walls — impassable
         map.setTerrain(cx, cy, Terrain.WALL);
       } else if (tmpl >= 329 && tmpl <= 377) {
         // Walls — impassable
         map.setTerrain(cx, cy, Terrain.ROCK);
       }
-      // 253-290, 318-328, 384-399: floors, arrows, stripes, extras → CLEAR
     }
   }
 }
@@ -2601,6 +2762,9 @@ export function checkTriggerEvent(
 /** Result from executing a trigger action */
 export interface TriggerActionResult {
   spawned: Entity[];
+  /** C++ reinf.cpp:_Create_Group Team::Add order before transport Attach()
+   * removes cargo from the visible spawned list. */
+  teamCreationOrder?: Entity[];
   spawnedTeamIdx?: number;  // team type index for spawned entities (for Team creation)
   win?: boolean;
   lose?: boolean;
@@ -2692,10 +2856,29 @@ export function executeTriggerAction(
       const world = cellToWorld(wp.cx, wp.cy);
 
       const house = teamHouse;
-      const teamMissionScript = team.missions.length > 0 ? team.missions.map(m => ({
+      // C++ Do_Reinforcements creates transport teams with an implicit leading
+      // TMISSION_MOVE to the origin waypoint before their scripted UNLOAD. This
+      // is visible in WASM for SCG01EA's `tanya` team: the INI lists only
+      // `8:0`, while TeamTypeClass at runtime has `[3:Origin, 8:0]`.
+      const hasUnloadMission = team.missions.some(m => m.mission === 8); // TMISSION_UNLOAD = 8
+      const hasTransportMember = team.members.some(m => {
+        const type = toUnitType(m.type);
+        if (!type) return false;
+        const stats = UNIT_STATS[type];
+        return !!stats?.passengers && (stats.isAircraft || stats.isVessel);
+      });
+      const missionList = (hasUnloadMission &&
+          hasTransportMember &&
+          team.origin >= 0 &&
+          team.missions.length === 1 &&
+          team.missions[0].mission === 8)
+        ? [{ mission: 3, data: team.origin }, ...team.missions] // TMISSION_MOVE = 3
+        : team.missions;
+      const teamMissionScript = missionList.length > 0 ? missionList.map(m => ({
         mission: m.mission,
         data: m.data,
       })) : null;
+      const teamCreationOrder: Entity[] = [];
       let transport: Entity | null = null;
       const cargo: Entity[] = [];
       // C++ reinf.cpp:428-439: facing derives from the RAW house source edge
@@ -2713,7 +2896,6 @@ export function executeTriggerAction(
       const spawnFacingEdge = normalizeHouseEdge(houseEdges?.get(teamHouse));
       const spawnFacing = edgeToFacing(spawnFacingEdge);
       // C++ reinf.cpp:251: Check if team has TMISSION_UNLOAD for IsALoaner flag
-      const hasUnloadMission = team.missions.some(m => m.mission === 8); // TMISSION_UNLOAD = 8
       // C++ parity (reinf.cpp:441): ground reinforcements spawn at the map edge
       // and walk in. The team's origin waypoint determines which edge to use.
       // Only aircraft spawn at the edge cell AND fly — ground units get MISSION_GUARD
@@ -2766,14 +2948,16 @@ export function executeTriggerAction(
             const randomFacing256 = ScenarioRandom.nextInRange(0, 255);
             entity.facing256 = randomFacing256;
             entity.desiredFacing256 = randomFacing256;
+            entity.bodyFacing256 = randomFacing256;
             // Derive 8-dir facing for rendering/game-logic compatibility
-            entity.facing = (Math.floor(randomFacing256 / 32) % 8) as Dir;
+            entity.facing = dir256ToFacing8(randomFacing256);
             entity.desiredFacing = entity.facing;
           } else {
             entity.facing = spawnFacing as Dir;
             entity.desiredFacing = spawnFacing as Dir;
+            entity.bodyFacing256 = (spawnFacing * 32) & 0xff;
           }
-          entity.bodyFacing32 = entity.facing * 4;
+          entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256 >= 0 ? entity.bodyFacing256 : entity.facing * 32);
           // Assign team mission script to each member
           if (teamMissionScript) {
             entity.teamMissions = teamMissionScript;
@@ -2807,11 +2991,17 @@ export function executeTriggerAction(
             // reset. Setting UNLOAD immediately skips that RNG call.
             entity.aircraftState = entity.isTransport && hasUnloadMission ? 'unload_search' : 'flying';
             entity.mission = Mission.MOVE;
-            entity.moveTarget = { lx: pixelToLepton(world.x), ly: pixelToLepton(world.y) };
+            entity.moveTarget = cellTargetToLepton(wp.cx, wp.cy);
           } else {
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.
             entity.mission = Mission.GUARD;
+            if (stats.isInfantry) {
+              // C++ reinf.cpp:470-481 wraps Unlimbo in ScenarioInit++, so
+              // InfantryClass::Unlimbo keeps the exact Calculated_Cell coord
+              // even if the center infantry sub-spot is already occupied.
+              entity.scenarioInitUnlimbo = true;
+            }
           }
           // C++ reinf.cpp:251: IsALoaner on aircraft/vessel transports with UNLOAD mission
           // Transport doesn't count toward unit limits, auto-retreats after unloading
@@ -2838,8 +3028,10 @@ export function executeTriggerAction(
             cargo.push(entity);
           }
           result.spawned.push(entity);
+          teamCreationOrder.push(entity);
         }
       }
+      result.teamCreationOrder = teamCreationOrder;
       // C++ team.cpp:627-652: Team activation gesture RNG (Percent_Chance(50)) is now
       // consumed by the Team instance in team.ts when it activates (forcedActive=true).
       // No manual RNG call needed here.
@@ -2852,6 +3044,15 @@ export function executeTriggerAction(
           const unit = cargo[i];
           transport.passengers.push(unit);
           unit.transportRef = transport;
+          if (transport.stats.isAircraft) {
+            transport.aircraftPassengerCarrier = true;
+            if (transport.stats.isFixedWing) {
+              // C++ AircraftClass::Unlimbo: if cargo is attached, Ammo=0 and
+              // Passenger=true. BADR uses the Passenger Can_Fire path for
+              // paradrop/REGROUP instead of ordinary bombing ammo.
+              transport.ammo = 0;
+            }
+          }
           // Remove loaded unit from spawned list — it lives in transport.passengers
           // and will be re-added to the entity list when unloaded (TMISSION_UNLOAD)
           const idx = result.spawned.indexOf(unit);

@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, WARHEAD_PROPS,
   WARHEAD_META, PRODUCTION_ITEMS, INFANTRY_ANIMS,
-  UnitType, House, Mission, CELL_SIZE, PRONE_DAMAGE_BIAS,
+  UnitType, House, Mission, CELL_SIZE, LEPTON_SIZE, PRONE_DAMAGE_BIAS,
   armorIndex, getWarheadMultiplier, worldDist,
   type ArmorType,
 } from '../engine/types';
@@ -329,13 +329,15 @@ describe('E4 short range behavior (range 3.5)', () => {
     expect(e4.inRange(target)).toBe(true);
   });
 
-  it('E4 at distance exactly 3.5 cells is at max range', () => {
+  it('E4 target exactly 3.5 cells from Fire_Coord is at max range', () => {
     const e4 = new Entity(UnitType.I_E4, House.USSR, 100, 100);
     const target = new Entity(UnitType.I_E1, House.Greece, 100 + 3.5 * CELL_SIZE, 100);
+    const fireCoord = e4.fireCoordForWeapon(e4.weapon);
+    target.leptonX = fireCoord.lx + e4.weapon!.range * LEPTON_SIZE;
+    target.leptonY = fireCoord.ly;
+    target.pos.x = target.leptonX * CELL_SIZE / LEPTON_SIZE;
+    target.pos.y = target.leptonY * CELL_SIZE / LEPTON_SIZE;
 
-    // worldDist returns distance in cells (divides by CELL_SIZE internally)
-    const dist = worldDist(e4.pos, target.pos);
-    expect(dist).toBeCloseTo(3.5, 5);
     expect(e4.inRange(target)).toBe(true);
   });
 

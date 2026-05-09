@@ -38,14 +38,15 @@ export class RandomClass {
    *  Set _sourceTag before each RNG call site. When _tagLogging is true,
    *  each call records [seed_after, sourceTag] for comparison with WASM rngLog. */
   _sourceTag = 0;
-  _seedLog: Array<[number, number]> = []; // [seed_after, sourceTag]
+  _entityTag = 0;
+  _seedLog: Array<[number, number, number]> = []; // [seed_after, sourceTag, entityTag]
 
   next(): number {
     this.callCount++;
     this.seed = (Math.imul(this.seed, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
     // Source-tag logging: records [seed, tag] pairs matching C++ rngLog format
     if (this._tagLogging) {
-      this._seedLog.push([this.seed >>> 0, this._sourceTag]);
+      this._seedLog.push([this.seed >>> 0, this._sourceTag, this._entityTag]);
       // Capture several stack frames so we can find meaningful callers even
       // after minification (frame 2 may be "s.nextInRange" — we want 3-6 for source context).
       const e = new Error();

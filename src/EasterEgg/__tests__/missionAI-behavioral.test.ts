@@ -11,14 +11,17 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-  UnitType, House, Mission, AnimState, CELL_SIZE, Stance,
+  UnitType, House, Mission, AnimState, CELL_SIZE, Stance, Dir,
   UNIT_STATS, WEAPON_STATS, CONDITION_RED,
   type WarheadType, type ArmorType,
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
   COUNTRY_BONUSES,
-  worldDist, worldToCell, buildDefaultAlliances,
+  worldDist, worldToCell, buildDefaultAlliances, directionToLeptons256,
 pixelToLepton, leptonToCell, } from '../engine/types';
-import { Entity, resetEntityIds, CloakState, setPlayerHouses } from '../engine/entity';
+import {
+  Entity, resetEntityIds, CloakState, setPlayerHouses,
+  dir256ToFacing8, dir256ToFacing32,
+} from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_MAX_HP } from '../engine/scenario';
@@ -42,6 +45,12 @@ beforeEach(() => {
 
 function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
+}
+
+function advanceInfantryFirePrep(ctx: MissionAIContext, entity: Entity): void {
+  ctx.tick++;
+  entity.advanceDoingStage(ctx.tick);
+  updateAttack(ctx, entity);
 }
 
 function makeStructure(
@@ -286,12 +295,12 @@ describe('updateAttack', () => {
     entity.target = enemy;
 
     const ctx = makeMockContext({ entities: [entity, enemy] });
-    const startX = entity.pos.x;
     updateAttack(ctx, entity);
 
-    // Entity should have moved toward target
+    // C++ Firing_AI does not move infantry directly. It marks the unit as
+    // walking; the mission/Movement_AI path advances position later.
     expect(entity.animState).toBe(AnimState.WALK);
-    expect(entity.pos.x).toBeGreaterThan(startX);
+    expect(entity.pos.x).toBe(300);
   });
 
   it('entity fires when in range (instant-hit weapon)', () => {
@@ -312,11 +321,9 @@ describe('updateAttack', () => {
     updateAttack(ctx, entity);
     expect(entity.firePrepActive).toBe(true);
     expect(entity.attackCooldown).toBe(0);
-    entity.firePrepStage = 1; // Graphic_Logic would advance stage each tick in the real loop
-    updateAttack(ctx, entity);
-    expect(entity.attackCooldown).toBe(0); // still in prep
-    entity.firePrepStage = 2;
-    updateAttack(ctx, entity);
+    advanceInfantryFirePrep(ctx, entity);
+    expect(entity.attackCooldown).toBe(0); // stage 1
+    advanceInfantryFirePrep(ctx, entity);
 
     // Stage reached FireLaunch — bullet launches (deferred invisible scatter + arm set)
     expect(entity.animState).toBe(AnimState.ATTACK);
@@ -371,12 +378,10 @@ describe('updateAttack', () => {
       e4.target = jeep;
 
       const ctx = makeMockContext({ entities: [e4, jeep] });
-      // E4 FireLaunch=2 (idata.cpp:464) — 3 updateAttack calls to reach Fire_At.
+      // E4 FireLaunch=2 (idata.cpp:464) — advance C++ StageClass to launch.
       updateAttack(ctx, e4);
-      e4.firePrepStage = 1;
-      updateAttack(ctx, e4);
-      e4.firePrepStage = 2;
-      updateAttack(ctx, e4);
+      advanceInfantryFirePrep(ctx, e4);
+      advanceInfantryFirePrep(ctx, e4);
 
       // launchProjectile must have been called (Flamer has projectileSpeed)
       expect(ctx.launchProjectile).toHaveBeenCalled();
@@ -403,12 +408,10 @@ describe('updateAttack', () => {
       e4.target = jeep;
 
       const ctx = makeMockContext({ entities: [e4, jeep] });
-      // E4 FireLaunch=2 — 3 updateAttack calls required to fire.
+      // E4 FireLaunch=2 — advance C++ StageClass to launch.
       updateAttack(ctx, e4);
-      e4.firePrepStage = 1;
-      updateAttack(ctx, e4);
-      e4.firePrepStage = 2;
-      updateAttack(ctx, e4);
+      advanceInfantryFirePrep(ctx, e4);
+      advanceInfantryFirePrep(ctx, e4);
 
       expect(ctx.launchProjectile).toHaveBeenCalled();
       const [, , , damage] = (ctx.launchProjectile as any).mock.calls[0];
@@ -426,8 +429,10 @@ describe('updateAttack', () => {
       tank.facing = 2;
       tank.desiredFacing = 2;
       tank.turretFacing = 2;
+      tank.turretFacing256 = 64;
       tank.turretFacing32 = 2 * 4; // keep 32-step in sync with 8-dir (Dir.E → 8)
       tank.desiredTurretFacing = 2;
+      tank.desiredTurretFacing256 = 64;
       tank.turretDir = 2;
 
       // 90mm range is 4 cells; place Jeep 2 cells away
@@ -444,14 +449,139 @@ describe('updateAttack', () => {
       expect(damage).toBe(30);
     });
 
-    it('instant-hit weapon (M1Carbine) still passes modified damage to damageEntity', () => {
-      // Rifleman firing M1Carbine (SA, 15 dmg, NO projectileSpeed — instant-hit path).
-      // Instant-hit path is intentionally UNCHANGED by the projectile fix:
-      //   damageEntity receives the already-modified damage (single application),
-      //   matching the pre-existing behavior that currently-passing parity scenarios
-      //   depend on.
-      // SA vs none = 1.0, so raw and modified are the same (15). This test locks in
-      // behavior so a future regression would be immediately visible.
+    it('DepthCharge uses BulletClass launch when only rules.ini projSpeed is set', () => {
+      // C++ PT vs SS uses secondary DepthCharge: VesselClass::Can_Fire rejects
+      // non-ASW 2Inch against submarines, then Fire_At creates a Catapult
+      // BulletClass. DepthCharge has Speed=5 (projSpeed) but no legacy TS
+      // projectileSpeed field, so damage must be deferred through launchProjectile.
+      const pt = makeEntity(UnitType.V_PT, House.Greece, 300, 300);
+      pt.mission = Mission.ATTACK;
+      pt.attackCooldown = 0;
+      pt.attackCooldown2 = 0;
+      pt.facing = 2;
+      pt.desiredFacing = 2;
+      pt.turretFacing = 2;
+      pt.turretFacing256 = 64;
+      pt.turretFacing32 = 2 * 4;
+      pt.desiredTurretFacing = 2;
+      pt.desiredTurretFacing256 = 64;
+      pt.turretDir = 2;
+
+      const sub = makeEntity(UnitType.V_SS, House.USSR, 300 + CELL_SIZE * 3, 300);
+      sub.cloakState = CloakState.UNCLOAKED;
+      pt.target = sub;
+
+      const ctx = makeMockContext({ entities: [pt, sub] });
+      updateAttack(ctx, pt);
+
+      expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+      expect(ctx.damageEntity).not.toHaveBeenCalled();
+      const [attacker, target, weapon, damage] = (ctx.launchProjectile as any).mock.calls[0];
+      expect(attacker).toBe(pt);
+      expect(target).toBe(sub);
+      expect(weapon.name).toBe('DepthCharge');
+      expect(damage).toBe(80);
+    });
+
+    it('turreted vessels fire on the tick Rotation_AI finishes (vessel AI order)', () => {
+      // C++ VesselClass::AI runs Rotation_AI before Combat_AI
+      // (vessel.cpp:623-631). Unlike land UnitClass, VesselClass::Can_Fire sees
+      // the post-rotation SecondaryFacing, so a PT whose turret reaches target
+      // direction this tick can fire immediately.
+      const pt = makeEntity(UnitType.V_PT, House.Greece, 300, 300);
+      pt.mission = Mission.ATTACK;
+      pt.attackCooldown = 0;
+      pt.attackCooldown2 = 0;
+      pt.facing = Dir.E;
+      pt.desiredFacing = Dir.E;
+      pt.bodyFacing256 = 64;
+      pt.bodyFacing32 = dir256ToFacing32(64);
+
+      const sub = makeEntity(UnitType.V_SS, House.USSR, 300 + CELL_SIZE * 3, 300);
+      sub.cloakState = CloakState.UNCLOAKED;
+      pt.target = sub;
+
+      // One vessel turret step short of the target direction. PT ROT=7, so
+      // Rotation_Adjust rate=8.
+      const targetDir = directionToLeptons256(pt.leptonX, pt.leptonY, sub.leptonX, sub.leptonY);
+      const startDir = (targetDir - 8 + 256) & 0xFF;
+      pt.turretFacing256 = startDir;
+      pt.turretFacing = dir256ToFacing8(startDir);
+      pt.turretFacing32 = dir256ToFacing32(startDir);
+      pt.desiredTurretFacing256 = targetDir;
+      pt.desiredTurretFacing = dir256ToFacing8(targetDir);
+      pt.turretRotTickedThisFrame = false;
+
+      const ctx = makeMockContext({ entities: [pt, sub] });
+      updateAttack(ctx, pt);
+
+      expect(pt.turretFacing256).toBe(targetDir);
+      expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+      const [, , weapon] = (ctx.launchProjectile as any).mock.calls[0];
+      expect(weapon.name).toBe('DepthCharge');
+    });
+
+    it('non-turret vessels set PrimaryFacing.Desired on FIRE_FACING without rotating in Combat_AI', () => {
+      // C++ VesselClass::AI order for submarines:
+      //   DriveClass::AI() has already rotated PrimaryFacing for this tick,
+      //   Rotation_AI() does not touch non-turret body facing,
+      //   Combat_AI()/FIRE_FACING only sets PrimaryFacing.Desired().
+      const sub = makeEntity(UnitType.V_SS, House.USSR, 300, 300);
+      sub.mission = Mission.ATTACK;
+      sub.attackCooldown = 0;
+      sub.cloakState = CloakState.UNCLOAKED;
+
+      const target = makeEntity(UnitType.V_DD, House.Greece, 300 + CELL_SIZE * 3, 300);
+      sub.target = target;
+
+      const targetDir = directionToLeptons256(sub.leptonX, sub.leptonY, target.leptonX, target.leptonY);
+      sub.bodyFacing256 = (targetDir + 10) & 0xff; // strict vessel FIRE_FACING: diff > 8
+      sub.bodyFacing32 = dir256ToFacing32(sub.bodyFacing256);
+      sub.facing = dir256ToFacing8(sub.bodyFacing256);
+      sub.desiredFacing256 = sub.bodyFacing256;
+      sub.desiredFacing = sub.facing;
+      sub.rotTickedThisFrame = false;
+
+      const ctx = makeMockContext({ entities: [sub, target] });
+      updateAttack(ctx, sub);
+
+      expect(ctx.launchProjectile).not.toHaveBeenCalled();
+      expect(sub.bodyFacing256).toBe((targetDir + 10) & 0xff);
+      expect(sub.desiredFacing256).toBe(targetDir);
+    });
+
+    it('non-turret vessels do not use TS body-rotation state as FIRE_ROTATING', () => {
+      // VesselClass::Rotation_AI clears IsRotating for non-turret vessels; once
+      // PrimaryFacing is within the strict <=8-dir firing window, Can_Fire may
+      // return FIRE_OK even if PrimaryFacing.Desired() is not exact yet.
+      const sub = makeEntity(UnitType.V_SS, House.USSR, 300, 300);
+      sub.mission = Mission.ATTACK;
+      sub.attackCooldown = 0;
+      sub.cloakState = CloakState.UNCLOAKED;
+
+      const target = makeEntity(UnitType.V_DD, House.Greece, 300 + CELL_SIZE * 3, 300);
+      sub.target = target;
+
+      const targetDir = directionToLeptons256(sub.leptonX, sub.leptonY, target.leptonX, target.leptonY);
+      sub.bodyFacing256 = (targetDir + 6) & 0xff; // inside vessel diff <= 8 tolerance
+      sub.bodyFacing32 = dir256ToFacing32(sub.bodyFacing256);
+      sub.facing = dir256ToFacing8(sub.bodyFacing256);
+      sub.desiredFacing256 = targetDir;
+      sub.desiredFacing = dir256ToFacing8(targetDir);
+      sub.rotTickedThisFrame = true; // DriveClass::AI already rotated earlier this tick.
+
+      const ctx = makeMockContext({ entities: [sub, target] });
+      updateAttack(ctx, sub);
+
+      expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+      const [, , weapon] = (ctx.launchProjectile as any).mock.calls[0];
+      expect(weapon.name).toBe('TorpTube');
+    });
+
+    it('invisible projectile weapon (M1Carbine) defers raw bullet strength for explosion damage', () => {
+      // C++ still creates BulletClass for Projectile=Invisible weapons. The bullet
+      // explodes in the same tick, but damage goes through Explosion_Damage with raw
+      // bullet Strength; warhead and distance falloff are applied there.
       const e1 = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
       e1.mission = Mission.ATTACK;
       e1.attackCooldown = 0;
@@ -464,20 +594,19 @@ describe('updateAttack', () => {
       const ctx = makeMockContext({ entities: [e1, enemy] });
       // E1 FireLaunch=2 (idata.cpp:404) — advance through the pre-fire stages.
       updateAttack(ctx, e1);
-      e1.firePrepStage = 1;
-      updateAttack(ctx, e1);
-      e1.firePrepStage = 2;
-      updateAttack(ctx, e1);
+      advanceInfantryFirePrep(ctx, e1);
+      advanceInfantryFirePrep(ctx, e1);
 
-      // M1Carbine has no projectileSpeed → instant-hit path → damageEntity is called,
-      // launchProjectile is NOT called.
-      expect(ctx.launchProjectile).not.toHaveBeenCalled();
-      expect(ctx.damageEntity).toHaveBeenCalled();
-      const dmgCallArgs = (ctx.damageEntity as any).mock.calls[0];
-      const [dmgTarget, dmgAmount] = dmgCallArgs;
-      expect(dmgTarget).toBe(enemy);
-      // SA vs none = 1.0, Spain FirepowerBias = 1.0 → damage unchanged by warhead mult
-      expect(dmgAmount).toBe(15);
+      // M1Carbine is Projectile=Invisible, but C++ still creates a BulletClass
+      // with raw strength; the bullet resolves through the projectile path.
+      expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+      const [attacker, target, weapon, damage] = (ctx.launchProjectile as any).mock.calls[0];
+      expect(attacker).toBe(e1);
+      expect(target).toBe(enemy);
+      expect(weapon.name).toBe('M1Carbine');
+      expect(damage).toBe(15);
+      expect(ctx.damageEntity).not.toHaveBeenCalled();
+      expect(ctx.deferInvisibleScatter).not.toHaveBeenCalled();
     });
   });
 
@@ -513,7 +642,7 @@ describe('updateHunt', () => {
     expect(hunter.target).toBe(enemy);
   });
 
-  it('entity engages found enemy by switching to ATTACK when in range', () => {
+  it('entity engages found enemy while staying in HUNT when in range', () => {
     const hunter = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     hunter.mission = Mission.HUNT;
 
@@ -524,7 +653,8 @@ describe('updateHunt', () => {
     const ctx = makeMockContext({ entities: [hunter, enemy] });
     updateHunt(ctx, hunter);
 
-    expect(hunter.mission).toBe(Mission.ATTACK);
+    expect(hunter.mission).toBe(Mission.HUNT);
+    expect(hunter.animState).toBe(AnimState.ATTACK);
   });
 
   it('no enemies left: stays in HUNT with idle animation (C++ Random_Animate fallthrough)', () => {
@@ -562,17 +692,17 @@ describe('updateHunt', () => {
   });
 
   it('hunts enemy structures when no mobile enemies', () => {
-    const hunter = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
+    const hunter = makeEntity(UnitType.I_E1, House.USSR, 300, 300);
     hunter.mission = Mission.HUNT;
     hunter.target = null;
 
     // Enemy structure within hunt range
-    const struct = makeStructure('POWR', House.USSR, 15, 15);
+    const struct = makeStructure('POWR', House.Spain, 15, 15);
     const ctx = makeMockContext({ entities: [hunter], structures: [struct] });
 
     updateHunt(ctx, hunter);
 
-    expect(hunter.mission).toBe(Mission.ATTACK);
+    expect(hunter.mission).toBe(Mission.HUNT);
     expect(hunter.targetStructure).toBe(struct);
   });
 });

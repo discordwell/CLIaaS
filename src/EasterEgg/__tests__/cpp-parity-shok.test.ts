@@ -339,7 +339,7 @@ describe('SHOK retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, shok, attacker);
 
     expect(shok.target).toBe(attacker);
-    expect(shok.mission).toBe(Mission.ATTACK);
+    expect(shok.mission).toBe(Mission.GUARD);
   });
 
   it('SHOK CAN retaliate (has PortaTesla weapon)', () => {
@@ -387,7 +387,7 @@ describe('SHOK AI scatter on damage (techno.cpp)', () => {
       testShok.mission = Mission.GUARD;
       const testCtx = makeCombatCtx([testShok]);
       aiScatterOnDamage(testCtx, testShok);
-      if (testShok.mission === Mission.MOVE && testShok.moveTarget !== null) {
+      if (testShok.missionQueue === Mission.MOVE && testShok.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -401,7 +401,8 @@ describe('SHOK AI scatter on damage (techno.cpp)', () => {
     shok.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([shok]);
-    aiScatterOnDamage(ctx, shok);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, shok, attacker);
 
     expect(shok.mission).toBe(Mission.GUARD);
     expect(shok.moveTarget).toBeNull();
@@ -414,7 +415,7 @@ describe('SHOK AI scatter on damage (techno.cpp)', () => {
       testShok.mission = Mission.ATTACK;
       const testCtx = makeCombatCtx([testShok]);
       aiScatterOnDamage(testCtx, testShok);
-      if (testShok.mission === Mission.MOVE && testShok.moveTarget !== null) {
+      if (testShok.missionQueue === Mission.MOVE && testShok.moveTarget !== null) {
         scattered = true;
         break;
       }

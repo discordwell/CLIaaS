@@ -182,6 +182,40 @@ describe('launchProjectile arc initialization (bullet.cpp:783-789)', () => {
     const proj = ctx.inflightProjectiles[0];
     expect(proj.arcRiser).toBeGreaterThanOrEqual(10);
   });
+
+  it('DepthCharge/Catapult uses C++ arcing speed and riser formula (bullet.cpp:756-789)', () => {
+    const ctx = makeCombatCtx();
+    const attacker = makeEntity(1, 0, 0);
+    const target = makeEntity(2, 24, 0); // 256 leptons away
+    const weapon = WEAPON_STATS.DepthCharge;
+
+    launchProjectile(ctx, attacker, target, weapon, 80, 24, 0, true);
+
+    const proj = ctx.inflightProjectiles[0];
+    // C++ Get_MPHType: Speed=5 => MaxSpeed=floor(5*256/100)=12.
+    // C++ arcing adjustment: speed=max(12 + Distance/32, 25).
+    expect(proj.travelFrames).toBe(25); // range=(256/12)+4
+    expect(proj.speed).toBe(25);
+    expect(proj.speedAdd).toBe(25);
+    // Riser=max(((Distance/2)/(speed+1))*Gravity, 10).
+    expect(proj.arcRiser).toBe(12);
+  });
+
+  it('arcing projectiles move horizontally through FlyClass physics each tick', () => {
+    const ctx = makeCombatCtx();
+    const attacker = makeEntity(1, 0, 0);
+    const target = makeEntity(2, 24, 0);
+    ctx.entityById.set(1, attacker);
+    ctx.entityById.set(2, target);
+
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.DepthCharge, 80, 24, 0, true);
+    const startLX = ctx.inflightProjectiles[0].logicalLX;
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].logicalLX).toBeGreaterThan(startLX);
+  });
 });
 
 // ── 4. Parabolic arc (height rises then falls) ────────────────────────────
@@ -301,7 +335,7 @@ describe('arcing projectile lands when height <= 0 (object.cpp:241)', () => {
 // ── 6. Non-arcing projectiles unaffected ───────────────────────────────────
 
 describe('non-arcing projectiles fly straight (unchanged behavior)', () => {
-  it('non-arcing projectile lands at travelFrames (not height-based)', () => {
+  it('non-arcing projectile lands via fuse/proximity, not height-based arc state', () => {
     const ctx = makeCombatCtx();
     const attacker = makeEntity(1, 0, 0);
     const target = makeEntity(2, 120, 0);
@@ -320,7 +354,9 @@ describe('non-arcing projectiles fly straight (unchanged behavior)', () => {
       ticks++;
     }
 
-    expect(ticks).toBe(expectedFrames);
+    expect(ticks).toBeLessThanOrEqual(expectedFrames);
+    expect(proj.arcHeight).toBe(0);
+    expect(proj.arcRiser).toBe(0);
   });
 
   it('non-arcing projectile arcHeight remains 0 throughout flight', () => {

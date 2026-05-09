@@ -21,15 +21,21 @@ import { Mission } from './types';
  * Queue a mission for the entity via `missionQueue`.
  *
  * C++ mission.cpp:379-390 Assign_Mission:
- *   - If the entity is already in that mission, clear the queue (no-op).
+ *   - If the entity is already in that mission, do nothing.
  *   - Otherwise write to MissionQueue so the next Commence() pop promotes it.
+ *
+ * The "already in that mission" branch is a true no-op: it preserves any
+ * existing MissionQueue. This matters when team code reissues MOVE while an
+ * earlier Enter_Idle_Mode has already queued GUARD; C++ keeps the GUARD queue.
  *
  * Callers must NOT direct-write `entity.mission = X`. Use this helper so the
  * Commence gate (STAGE A/E) owns the transition timing.
  */
 export function assignMission(entity: Entity, mission: Mission): void {
+  if (mission === Mission.NONE) {
+    return;
+  }
   if (entity.mission === mission) {
-    entity.missionQueue = null;
     return;
   }
   entity.missionQueue = mission;

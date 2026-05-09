@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, CELL_SIZE, WEAPON_STATS,
+  UnitType, House, CELL_SIZE, WEAPON_STATS, Dir,
   buildDefaultAlliances, worldToCell,
   COUNTRY_BONUSES,
 } from '../engine/types';
@@ -36,6 +36,15 @@ beforeEach(() => resetEntityIds());
 /** Place an entity at the center of a cell */
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function faceEast(entity: Entity): void {
+  entity.facing = Dir.E;
+  entity.bodyFacing256 = Dir.E * 32;
+  entity.bodyFacing32 = Dir.E * 4;
+  entity.turretFacing = Dir.E;
+  entity.turretFacing256 = Dir.E * 32;
+  entity.turretFacing32 = Dir.E * 4;
 }
 
 function makeCombatCtx(
@@ -98,6 +107,7 @@ describe('Non-high projectile hits wall (bullet.cpp:903-913)', () => {
   it('tank shell explodes at wall cell instead of reaching target', () => {
     // Attacker at cell (2,5), target at cell (8,5), wall at cell (5,5)
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 2, 5);
+    faceEast(attacker);
     const target = entityAtCell(UnitType.V_2TNK, House.USSR, 8, 5);
     const ctx = makeCombatCtx([attacker, target]);
 
@@ -140,6 +150,7 @@ describe('Non-high projectile hits wall (bullet.cpp:903-913)', () => {
     for (const wallType of wallTypes) {
       resetEntityIds();
       const attacker = entityAtCell(UnitType.V_1TNK, House.Spain, 2, 5);
+      faceEast(attacker);
       const target = entityAtCell(UnitType.V_1TNK, House.USSR, 8, 5);
       const ctx = makeCombatCtx([attacker, target]);
 
@@ -280,6 +291,7 @@ describe('Multiple walls in path — projectile hits first wall', () => {
     // Attacker at cell (2,5), target at cell (10,5)
     // Walls at cells (5,5) and (7,5) — should hit cell 5 first
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 2, 5);
+    faceEast(attacker);
     const target = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 5);
     const ctx = makeCombatCtx([attacker, target]);
 

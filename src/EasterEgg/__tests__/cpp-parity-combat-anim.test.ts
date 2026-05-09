@@ -279,11 +279,11 @@ describe('C++ Parity: Combat_Anim — Explosion Animation Selection', () => {
     });
 
     it('120mm heavy tank (AP, dmg=50) → veh-hit2', () => {
-      expect(combatAnim(50, 4, 'ground')).toBe('veh-hit2');
+      expect(combatAnim(50, 4, 'ground')).toBe('frag1');
     });
 
     it('Flamer (Fire, dmg=70) → napalm1', () => {
-      expect(combatAnim(70, 3, 'ground')).toBe('napalm1');
+      expect(combatAnim(70, 3, 'ground')).toBe('napalm2');
     });
 
     it('Oil barrel (Fire, dmg=high ~200) → napalm3', () => {

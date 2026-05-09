@@ -82,7 +82,17 @@ describe('Ore depletion credits', () => {
   });
 
   function setOverlay(cx: number, cy: number, val: number): void {
-    map.overlay[cy * MAP_CELLS + cx] = val;
+    const idx = cy * MAP_CELLS + cx;
+    if (val >= 0x03 && val <= 0x0E) {
+      map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+      map.oreDensity[idx] = val - 0x03;
+    } else if (val >= 0x0F && val <= 0x12) {
+      map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+      map.oreDensity[idx] = val - 0x0F;
+    } else {
+      map.overlay[idx] = val;
+      map.oreDensity[idx] = 0xFF;
+    }
   }
 
   it('gold ore yields 25 credits per bail (rules.ini GoldValue=25)', () => {
@@ -123,7 +133,17 @@ describe('findNearestOre', () => {
   });
 
   function setOverlay(cx: number, cy: number, val: number): void {
-    map.overlay[cy * MAP_CELLS + cx] = val;
+    const idx = cy * MAP_CELLS + cx;
+    if (val >= 0x03 && val <= 0x0E) {
+      map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+      map.oreDensity[idx] = val - 0x03;
+    } else if (val >= 0x0F && val <= 0x12) {
+      map.overlay[idx] = GameMap.OVERLAY_GEMS1;
+      map.oreDensity[idx] = val - 0x0F;
+    } else {
+      map.overlay[idx] = val;
+      map.oreDensity[idx] = 0xFF;
+    }
   }
 
   it('finds gold ore within range', () => {

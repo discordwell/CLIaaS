@@ -19,14 +19,15 @@
  *    LAND_CLEAR=0, LAND_ROAD=1, LAND_WATER=2, LAND_ROCK=3,
  *    LAND_WALL=4, LAND_TIBERIUM=5, LAND_BEACH=6, LAND_ROUGH=7, LAND_RIVER=8
  *
- * 4. SNOW theatre override:
- *    River templates (112-130, 229-234) become LAND_CLEAR on frozen maps.
+ * 4. Theatre choice:
+ *    TEMPERATE and SNOW use separate TMP control maps. C++ does not apply a
+ *    hard-coded "frozen river" range override after Land_Type().
  *
  * This test verifies:
  *  - CONTROL_MAP_TO_LAND table matches C++ _land[16]
  *  - tileset.json per-icon data matches C++ Land_Type() behavior
  *  - classifyOutdoorTerrain correctly uses per-icon data
- *  - SNOW frozen river override
+ *  - SNOW terrain follows snow_tileset control-map data
  *  - Missing tilesetMeta warns loudly (no silent fallback)
  *  - Speed multipliers on cliff-top cells with per-icon Clear
  */
@@ -35,7 +36,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import { GameMap, Terrain } from '../engine/map';
-import { classifyOutdoorTerrain, LAND_NAME_TO_TERRAIN } from '../engine/scenario';
+import { classifyInteriorTerrain, classifyOutdoorTerrain, LAND_NAME_TO_TERRAIN } from '../engine/scenario';
 import type { TilesetMeta, TilesetEntry } from '../engine/assets';
 import { MAP_CELLS, SpeedClass, TERRAIN_SPEED } from '../engine/types';
 
@@ -45,6 +46,10 @@ import { MAP_CELLS, SpeedClass, TERRAIN_SPEED } from '../engine/types';
 
 const tilesetPath = join(__dirname, '../../..', 'public/ra/assets/tileset.json');
 const tilesetMeta: TilesetMeta = JSON.parse(readFileSync(tilesetPath, 'utf-8'));
+const snowTilesetPath = join(__dirname, '../../..', 'public/ra/assets/snow_tileset.json');
+const snowTilesetMeta: TilesetMeta = JSON.parse(readFileSync(snowTilesetPath, 'utf-8'));
+const interiorTilesetPath = join(__dirname, '../../..', 'public/ra/assets/interior_tileset.json');
+const interiorTilesetMeta: TilesetMeta = JSON.parse(readFileSync(interiorTilesetPath, 'utf-8'));
 
 // =============================================================================
 // C++ _land[16] reference table — inlined from cdata.cpp:3009-3026
@@ -514,31 +519,68 @@ describe('classifyOutdoorTerrain with tilesetMeta (per-icon C++ parity)', () => 
   });
 });
 
+describe('classifyInteriorTerrain with tilesetMeta (per-icon C++ parity)', () => {
+  it('classifies INTERIOR template 397 icon 1 as ROCK, not broad-range CLEAR', () => {
+    const map = new GameMap();
+    map.setBounds(2, 2, 10, 10);
+    map.initDefault();
+
+    const templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
+    const templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    const idx = 5 * MAP_CELLS + 5;
+    templateType[idx] = 397;
+    templateIcon[idx] = 1;
+
+    map.templateType = templateType;
+    map.templateIcon = templateIcon;
+    classifyInteriorTerrain(map, templateType, templateIcon, interiorTilesetMeta);
+
+    expect(interiorTilesetMeta.tiles['397,1']?.lt).toBe('Rock');
+    expect(map.getTerrain(5, 5)).toBe(Terrain.ROCK);
+  });
+
+  it('classifies INTERIOR template 397 icon 2 as CLEAR from omitted lt', () => {
+    const map = new GameMap();
+    map.setBounds(2, 2, 10, 10);
+    map.initDefault();
+
+    const templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
+    const templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    const idx = 5 * MAP_CELLS + 5;
+    templateType[idx] = 397;
+    templateIcon[idx] = 2;
+
+    map.templateType = templateType;
+    map.templateIcon = templateIcon;
+    classifyInteriorTerrain(map, templateType, templateIcon, interiorTilesetMeta);
+
+    expect(interiorTilesetMeta.tiles['397,2']?.lt).toBeUndefined();
+    expect(map.getTerrain(5, 5)).toBe(Terrain.CLEAR);
+  });
+});
+
 // =============================================================================
-// 4. SNOW frozen river override
+// 4. SNOW theatre uses its own TMP control-map data
 // =============================================================================
 
-describe('SNOW theatre frozen river override (C++ parity)', () => {
-  it('river template cells become CLEAR in SNOW theatre', () => {
-    // Template 112 icon 5 = River in TEMPERATE, should be Clear in SNOW
+describe('SNOW theatre terrain classification follows C++ TMP control maps', () => {
+  it('does not force river template cells to CLEAR in SNOW theatre', () => {
+    // C++ TemplateTypeClass::Land_Type (cdata.cpp:3002-3032) is purely
+    // control-map based. It has no theatre/range special case.
     const { map: tempMap } = setupMapWithTemplate(112, 5, tilesetMeta, 'TEMPERATE');
     expect(tempMap.getTerrain(5, 5)).toBe(Terrain.RIVER);
 
-    const { map: snowMap } = setupMapWithTemplate(112, 5, tilesetMeta, 'SNOW');
-    expect(snowMap.getTerrain(5, 5)).toBe(Terrain.CLEAR);
+    const { map: snowMap } = setupMapWithTemplate(112, 5, snowTilesetMeta, 'SNOW');
+    expect(snowMap.getTerrain(5, 5)).toBe(Terrain.RIVER);
   });
 
-  it('Water icons within river templates become CLEAR in SNOW', () => {
-    // Template 126 icon 0 = Water (within river template range 112-130)
-    const entry = tilesetMeta.tiles['126,0'];
+  it('water icons within river template ranges stay WATER when snow TMP says Water', () => {
+    const entry = snowTilesetMeta.tiles['126,0'];
     expect(entry, 'template 126 icon 0 must exist').toBeDefined();
     expect(entry.lt).toBe('Water');
 
-    const { map: tempMap } = setupMapWithTemplate(126, 0, tilesetMeta, 'TEMPERATE');
-    expect(tempMap.getTerrain(5, 5)).toBe(Terrain.WATER);
-
-    const { map: snowMap } = setupMapWithTemplate(126, 0, tilesetMeta, 'SNOW');
-    expect(snowMap.getTerrain(5, 5)).toBe(Terrain.CLEAR);
+    const { map: snowMap } = setupMapWithTemplate(126, 0, snowTilesetMeta, 'SNOW');
+    expect(snowMap.getTerrain(5, 5)).toBe(Terrain.WATER);
   });
 
   it('River bank (Clear) icons in river templates stay CLEAR in both theatres', () => {
@@ -550,37 +592,18 @@ describe('SNOW theatre frozen river override (C++ parity)', () => {
     const { map: tempMap } = setupMapWithTemplate(112, 0, tilesetMeta, 'TEMPERATE');
     expect(tempMap.getTerrain(5, 5)).toBe(Terrain.CLEAR);
 
-    const { map: snowMap } = setupMapWithTemplate(112, 0, tilesetMeta, 'SNOW');
+    const { map: snowMap } = setupMapWithTemplate(112, 0, snowTilesetMeta, 'SNOW');
     expect(snowMap.getTerrain(5, 5)).toBe(Terrain.CLEAR);
   });
 
-  it('ocean water templates (1-2) stay WATER in SNOW (only river templates freeze)', () => {
-    const { map: snowMap } = setupMapWithTemplate(1, 0, tilesetMeta, 'SNOW');
+  it('ocean water templates stay WATER in SNOW', () => {
+    const { map: snowMap } = setupMapWithTemplate(1, 0, snowTilesetMeta, 'SNOW');
     expect(snowMap.getTerrain(5, 5)).toBe(Terrain.WATER);
   });
 
-  it('cliff Rock icons stay ROCK in SNOW (freeze only affects river range)', () => {
-    const { map: snowMap } = setupMapWithTemplate(140, 1, tilesetMeta, 'SNOW');
+  it('cliff Rock icons stay ROCK in SNOW', () => {
+    const { map: snowMap } = setupMapWithTemplate(140, 1, snowTilesetMeta, 'SNOW');
     expect(snowMap.getTerrain(5, 5)).toBe(Terrain.ROCK);
-  });
-
-  it('extended river range (229-234) also freezes in SNOW', () => {
-    // Check if we have entries for templates 229-234
-    for (let tmpl = 229; tmpl <= 234; tmpl++) {
-      const entries = getTemplateEntries(tmpl);
-      if (entries.length === 0) continue; // template not in tileset
-
-      for (const [icon, entry] of entries) {
-        const lt = entry.lt ?? 'Clear';
-        if (lt === 'River' || lt === 'Water') {
-          const { map: snowMap } = setupMapWithTemplate(tmpl, icon, tilesetMeta, 'SNOW');
-          expect(
-            snowMap.getTerrain(5, 5),
-            `template ${tmpl} icon ${icon} (${lt}) should freeze to CLEAR in SNOW`,
-          ).toBe(Terrain.CLEAR);
-        }
-      }
-    }
   });
 });
 

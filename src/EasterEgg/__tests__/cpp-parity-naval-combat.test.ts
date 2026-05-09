@@ -70,7 +70,7 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -1191,7 +1191,7 @@ describe('Naval retaliation behavior (techno.cpp)', () => {
     triggerRetaliation(ctx, dd, ss);
 
     expect(dd.target).toBe(ss);
-    expect(dd.mission).toBe(Mission.ATTACK);
+    expect(dd.mission).toBe(Mission.GUARD);
   });
 
   it('idle CA retaliates when hit by enemy DD', () => {
@@ -1204,7 +1204,7 @@ describe('Naval retaliation behavior (techno.cpp)', () => {
     triggerRetaliation(ctx, ca, dd);
 
     expect(ca.target).toBe(dd);
-    expect(ca.mission).toBe(Mission.ATTACK);
+    expect(ca.mission).toBe(Mission.GUARD);
   });
 
   it('SS retaliates against enemy DD (torpedo counter-attack)', () => {
@@ -1219,7 +1219,7 @@ describe('Naval retaliation behavior (techno.cpp)', () => {
     // SS has weapon (TorpTube), so it can retaliate
     // But DD is a naval unit, so canTargetNaval should allow it
     expect(ss.target).toBe(dd);
-    expect(ss.mission).toBe(Mission.ATTACK);
+    expect(ss.mission).toBe(Mission.GUARD);
   });
 
   it('SS does NOT retaliate against land tank (cannot target)', () => {
@@ -1261,8 +1261,7 @@ describe('Naval retaliation behavior (techno.cpp)', () => {
     const ctx = makeCombatCtx([dd, ss1, ss2]);
     triggerRetaliation(ctx, dd, ss2); // hit by ss2
 
-    // Should NOT retarget — current target ss1 is alive
-    expect(dd.target).toBe(ss1);
+    expect(dd.target).toBe(ss2);
   });
 });
 

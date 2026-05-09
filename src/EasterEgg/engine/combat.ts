@@ -8,20 +8,22 @@ import {
   type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, WEAPON_STATS,
-  armorIndex, leptonDist, pixelToLepton, worldToCell, modifyDamage,
-  directionTo, calcProjectileTravelFrames, projectileVisualConfig,
+  armorIndex, leptonDist, pixelToLepton, worldToCell, cellTargetToLepton, modifyDamage,
+  directionTo, directionToLeptons, directionToLeptons256, calcProjectileTravelFrames, projectileVisualConfig,
   House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
-  DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL,
-  HOUSE_FACTION,
+  DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL, COS_TABLE_256, SIN_TABLE_256,
+  HOUSE_FACTION, PRONE_DAMAGE_BIAS,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS } from './scenario';
+import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
 import { canTargetNaval } from './aircraft';
 import { AI_BUILD_RULES } from './ai';
 import { ScenarioRandom, NonCriticalRandom } from './random';
+import { assignMission } from './missionLifecycle';
+import { type LogicAnim, spawnLogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,34 @@ import { ScenarioRandom, NonCriticalRandom } from './random';
 export const SPLASH_RADIUS = 1.5;
 
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
+const WALL_DAMAGE_POINTS: Record<string, number> = {
+  SBAG: 20, // odata.cpp Sandbag DamagePoints
+  CYCL: 10, // Cyclone fence
+  BRIK: 70, // Brick wall
+  BARB: 2,  // Barbwire
+  WOOD: 2,  // Wood wall
+  FENC: 10, // Fence
+};
+const WALL_DAMAGE_LEVELS: Record<string, number> = {
+  SBAG: 1,
+  CYCL: 2,
+  BRIK: 3,
+  BARB: 1,
+  WOOD: 1,
+  FENC: 2,
+};
+const WOODEN_WALL_TYPES = new Set(['WOOD']);
+const CELL_CENTER_LEPTON = LEPTON_SIZE >> 1;
+const TORPEDO_CENTER_HIT_RADIUS = Math.trunc(LEPTON_SIZE / 3);
+const PIXEL_LEPTON_W = Math.trunc(LEPTON_SIZE / CELL_SIZE);
+const LIGHT_SPEED = 255;
+
+/** C++ ini.cpp Get_MPHType: rules.ini Speed= is a percentage of 256
+ *  leptons/tick, clamped at MPH_LIGHT_SPEED (255). Example: TorpTube
+ *  Speed=15 becomes MaxSpeed=38, matching BulletClass::MaxSpeed in WASM. */
+function iniSpeedToMph(rawSpeed: number): number {
+  return Math.max(1, Math.min(LIGHT_SPEED, Math.trunc((rawSpeed * LEPTON_SIZE) / 100)));
+}
 
 /** Turreted structure types — turret rotates to face target (GUN/SAM/AGUN)
  *  C++ bdata.cpp:571 (GUN), bdata.cpp:601 (AGUN), bdata.cpp:901 (SAM) — IsTurretEquipped=true */
@@ -57,6 +87,7 @@ const STRUCTURE_TURRET_ROT = 5;
 /** In-flight projectile for deferred damage */
 export interface InflightProjectile {
   attackerId: number;
+  attackerHouse?: House;  // structure-fired bullets have no Entity Payback in TS
   targetId: number;
   weapon: WeaponStats;
   damage: number;
@@ -86,6 +117,45 @@ export interface InflightProjectile {
   // C++ bullet.cpp:377-386 — IsFlameEquipped: flame/smoke trail every other tick
   isFlameEquipped: boolean;
   flameToggle: boolean;  // alternates each tick; trail spawns when true (C++ IsToAnimate)
+  // C++ FlyClass/FuseClass state for ordinary projectiles.
+  logicalLX: number;
+  logicalLY: number;
+  headToLX: number;
+  headToLY: number;
+  facing256: number;
+  speedAccum: number;
+  speedAdd: number;
+  fuseTimer: number;
+  armingTimer: number;
+  proximity: number;
+}
+
+function structureFireLeptons(s: MapStructure): { lx: number; ly: number } {
+  const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+  // C++ building.cpp CenterOffset table. Building Coord is fixed to the
+  // upper-left cell corner by BuildingTypeClass::Coord_Fixup; Fire_Coord for
+  // structures with zero primary offset starts from Center_Coord.
+  const offsets: Record<string, { lx: number; ly: number }> = {
+    '1x1': { lx: 0x0080, ly: 0x0080 },
+    '2x1': { lx: 0x00ff, ly: 0x0080 },
+    '1x2': { lx: 0x0080, ly: 0x00ff },
+    '2x2': { lx: 0x00ff, ly: 0x00ff },
+    '2x3': { lx: 0x00ff, ly: 0x0180 },
+    '3x2': { lx: 0x0180, ly: 0x00ff },
+    '3x3': { lx: 0x0180, ly: 0x0180 },
+    '4x2': { lx: 0x0200, ly: 0x00ff },
+    '5x5': { lx: 0x0280, ly: 0x0280 },
+  };
+  const off = offsets[`${w}x${h}`] ?? { lx: Math.trunc((w * LEPTON_SIZE) / 2), ly: Math.trunc((h * LEPTON_SIZE) / 2) };
+  return {
+    lx: s.cx * LEPTON_SIZE + off.lx,
+    ly: s.cy * LEPTON_SIZE + off.ly,
+  };
+}
+
+function structureFirePixels(s: MapStructure): { x: number; y: number } {
+  const p = structureFireLeptons(s);
+  return { x: p.lx * CELL_SIZE / LEPTON_SIZE, y: p.ly * CELL_SIZE / LEPTON_SIZE };
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -102,6 +172,12 @@ export interface CombatContext {
   structures: MapStructure[];
   inflightProjectiles: InflightProjectile[];
   effects: Effect[];
+  logicAnims: LogicAnim[];
+  /** True after this frame's AnimClass Logic pass has run.
+   *  C++ new AnimClass objects are appended to the same Logic array; if the
+   *  current loop has already passed the anim phase in TS, their first
+   *  brand-new skip must be considered consumed for parity. */
+  logicAnimsAlreadyProcessed?: boolean;
   tick: number;
   playerHouse: House;
   scenarioId: string;
@@ -140,12 +216,18 @@ export interface CombatContext {
   playEva(name: string): void;
   minimapAlert(cx: number, cy: number): void;
   movementSpeed(entity: Entity): number;
+  /** C++ TechnoClass::Unlimbo -> Enter_Idle_Mode(true) mission selection. */
+  idleMission?(entity: Entity): Mission;
+  /** C++ TechnoClass::Revealed(PlayerPtr) side effect for newly unlimboed objects. */
+  markDiscoveredIfPlayerVisible?(entity: Entity): void;
   getFirepowerBias(house: House): number;
   /** C++ house.cpp:292,302: ArmorBias — difficulty-scaled damage resistance */
   getArmorBias(house: House): number;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
   damageStructure(s: MapStructure, damage: number): boolean;
+  /** C++ TeamClass::Suspend_Teams, triggered from TechnoClass::Base_Is_Attacked. */
+  suspendTeamsByPriority?(house: House, priority: number): void;
   aiIQ(house: House): number;
   warheadMuzzleColor(warhead: string): string;
 
@@ -195,13 +277,25 @@ export function getWarheadProps(
 //   2. Damage amount (scales which animation in the set's array)
 //   3. LandType (water/air/ground for different sprites)
 //
-// Damage-scaled index formula: floor((arrayLen - 1) * min(damage, maxDamage) / maxDamage)
+// Damage-scaled index formula:
+//   C++ combat.cpp: _list[(len - 1) * fixed(min(damage, max), max)]
+//   fixed.cpp constructor truncates raw 8.8 value, then fixed.h `int * fixed`
+//   rounds to nearest integer with +128 before /256.
 
 /** C++ Combat_Anim animation arrays, indexed by damage-scaled fraction */
 const FIRE_LIST  = ['napalm1', 'napalm2', 'napalm3'];               // ExplosionSet=3, max 150
 const AP_LIST    = ['veh-hit3', 'veh-hit2', 'frag1', 'fball1'];     // ExplosionSet=4, max 90
 const HE_LIST    = ['veh-hit1', 'veh-hit2', 'art-exp1', 'fball1'];  // ExplosionSet=5, max 130
 const WATER_LIST = ['water-exp3', 'water-exp2', 'water-exp1'];      // Water override for sets 3-5
+
+function combatAnimScaledIndex(listLength: number, damage: number, maxDamage: number): number {
+  if (listLength <= 1) return 0;
+  const clampedDamage = Math.max(0, Math.min(damage, maxDamage));
+  // C++ fixed(min(damage,max), max): Raw = (numerator * 256) / denominator, truncating.
+  const fixedRaw = Math.floor((clampedDamage * 256) / maxDamage);
+  // C++ fixed::operator*(int): (((unsigned)Raw * rvalue) + 128) / 256.
+  return Math.floor((fixedRaw * (listLength - 1) + 128) / 256);
+}
 
 /**
  * C++ Combat_Anim() — select explosion sprite based on damage, explosion set, and land type.
@@ -223,21 +317,21 @@ export function combatAnim(damage: number, explosionSet: number, land: 'ground' 
       if (land === 'air') return 'flak';
       const maxDmg = 90;
       const list = land === 'water' ? WATER_LIST : AP_LIST;
-      return list[Math.floor((list.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
+      return list[combatAnimScaledIndex(list.length, damage, maxDmg)];
     }
 
     case 5: {  // HE pops
       if (land === 'air') return 'flak';
       const maxDmg = 130;
       const list = land === 'water' ? WATER_LIST : HE_LIST;
-      return list[Math.floor((list.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
+      return list[combatAnimScaledIndex(list.length, damage, maxDmg)];
     }
 
     case 3: {  // Fire
       if (land === 'air') return 'flak';
       const maxDmg = 150;
       const list = land === 'water' ? WATER_LIST : FIRE_LIST;
-      return list[Math.floor((list.length - 1) * Math.min(damage, maxDmg) / maxDmg)];
+      return list[combatAnimScaledIndex(list.length, damage, maxDmg)];
     }
 
     case 1: return 'piff';  // HollowPoint — always piff
@@ -246,9 +340,12 @@ export function combatAnim(damage: number, explosionSet: number, land: 'ground' 
   }
 }
 
-/** Damage-based speed reduction (C++ drive.cpp:1157-1161).
- *  Single tier: <=50% HP = 75% speed (ConditionYellow). */
+/** Damage-based speed reduction.
+ *  C++ drive.cpp:1182-1187 applies this only in DriveClass speed setup.
+ *  C++ infantry.cpp:4016-4049 computes infantry movement without a health
+ *  multiplier, so wounded infantry stays at normal walking speed. */
 export function damageSpeedFactor(entity: Entity): number {
+  if (entity.stats.isInfantry) return 1.0;
   const ratio = entity.hp / entity.maxHp;
   if (ratio <= CONDITION_YELLOW) return 0.75;
   return 1.0;
@@ -274,6 +371,41 @@ function scatterInfantry(ctx: CombatContext, victim: Entity, attackerPos: WorldP
   const sc = worldToCell(scatterX, scatterY);
   if (ctx.map.isPassable(sc.cx, sc.cy)) {
     victim.setPosition(scatterX, scatterY);
+  }
+}
+
+/** C++ unit.cpp:1058-1060 survivor Scatter(0, true).
+ *  Vehicle crews are spawned at the destroyed unit's Coord, get a random
+ *  half-health Strength, then immediately pick a scatter facing before the
+ *  final HUNT/GUARD mission is queued. This helper mirrors the no-threat
+ *  branch of InfantryClass::Scatter (infantry.cpp:1888-1927). */
+function scatterVehicleCrew(ctx: CombatContext, crew: Entity): void {
+  const fracX = ((crew.leptonX % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  const fracY = ((crew.leptonY % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  let baseFacing = crew.facing;
+  if (fracX !== CELL_CENTER_LEPTON || fracY !== CELL_CENTER_LEPTON) {
+    baseFacing = Math.round(Math.atan2(fracY - CELL_CENTER_LEPTON, fracX - CELL_CENTER_LEPTON) / (Math.PI / 4)) & 7;
+  }
+  const offset = ScenarioRandom.nextInRange(0, 4) - 2;
+  const startFacing = ((baseFacing + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
+
+  let chosen: { cx: number; cy: number } | null = null;
+  const cx = crew.cell.cx;
+  const cy = crew.cell.cy;
+  for (let face = 0; face < DIR_COUNT; face++) {
+    const dir = (startFacing + face) % DIR_COUNT;
+    const ncx = cx + DIR_DX[dir];
+    const ncy = cy + DIR_DY[dir];
+    if (ncx >= 0 && ncx < MAP_CELLS && ncy >= 0 && ncy < MAP_CELLS && ctx.map.isPassable(ncx, ncy)) {
+      chosen = { cx: ncx, cy: ncy };
+      break;
+    }
+  }
+  if (chosen) {
+    // InfantryClass::Scatter assigns ::As_Target(newcell); As_Coord() reads
+    // that back as cell*256+0x88, not the visual center.
+    crew.moveTarget = cellTargetToLepton(chosen.cx, chosen.cy);
+    assignMission(crew, Mission.MOVE);
   }
 }
 
@@ -316,41 +448,114 @@ export function killBridgeOccupants(ctx: CombatContext, cx: number, cy: number, 
 export function damageEntity(
   ctx: CombatContext, target: Entity, amount: number,
   warhead: WarheadType, attacker?: Entity,
+  options: { skipProneBias?: boolean; skipEntityArmorBias?: boolean; skipHouseArmorBias?: boolean } = {},
 ): boolean {
   // C++ parity: apply house-level armor bias from difficulty (house.cpp:292,302)
   // ArmorBias > 1 = tougher (less damage), < 1 = weaker (more damage)
   const houseArmorBias = ctx.getArmorBias(target.house);
-  if (houseArmorBias !== 1.0 && amount > 0) {
+  if (!options.skipHouseArmorBias && houseArmorBias !== 1.0 && amount > 0) {
     amount = Math.max(1, Math.round(amount / houseArmorBias));
   }
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
-  const killed = target.takeDamage(amount, warhead, attacker, whProps);
+  const killed = target.takeDamage(amount, warhead, attacker, whProps, {
+    skipProneBias: options.skipProneBias,
+    skipArmorBias: options.skipEntityArmorBias,
+  });
   if (target.triggerName) ctx.attackedTriggerNames.add(target.triggerName);
+  // C++ negative damage is healing. TechnoClass::Take_Damage repairs strength,
+  // but it must not flow into FootClass retaliation/scatter handling as if the
+  // unit was attacked.
+  if (amount < 0) return false;
+  // C++ unit.cpp:1162-1167 — computer harvesters that survive damage call
+  // TechnoClass::Base_Is_Attacked(source), which can suspend low-priority teams
+  // for the harvester's house. This is the same base-defense hook used by
+  // BuildingClass::Take_Damage, but UnitClass scopes it to UNIT_HARVESTER.
+  if (!killed && target.alive && attacker && target.type === UnitType.V_HARV) {
+    maybeSuspendTeamsForBaseAttack(ctx, attacker, target.house, false);
+  }
   if (!killed && target.alive) {
-    // Scatter first, then retaliation (TS-established RNG ordering).
-    //
-    // C++ order is actually: FootClass::Take_Damage (retaliation) → Scatter. However,
-    // in WASM the RNG-consumption net effect is identical because C++ Scatter
-    // INTERNALLY checks `!IsFraidyCat && Target_Legal(TarCom)` (infantry.cpp:1872)
-    // and returns WITHOUT consuming the Random_Pick(0,4). TS's aiScatterOnDamage has
-    // the equivalent guard (combat.ts:388). If we swapped to retaliation-first in TS,
-    // the guard would trip on every successful retaliation, dropping TS's scatter
-    // RNG from 1→0 per hit and desynchronizing from WASM's observed ordering.
-    // Keeping scatter first preserves the RNG sequence established prior to this
-    // retaliation port.
-    aiScatterOnDamage(ctx, target, attacker);
-    // C++ foot.cpp:1198-1220 — retaliation runs inside Take_Damage for every damage
-    // event with a known source. Unified entry point matches C++ semantics.
+    // C++ damage-response order:
+    //   1. FootClass::Take_Damage handles retaliation / team damage. If
+    //      retaliation is not allowed and the unit has no TarCom/NavCom, it
+    //      calls Scatter(0,true).
+    //   2. InfantryClass::Take_Damage then calls Scatter(source_coord), whose
+    //      Target_Legal(TarCom) guard suppresses voluntary scatter after a
+    //      successful retaliation target assignment.
+    const didFootForcedScatter = shouldFootClassForcedScatter(ctx, target, attacker);
+    if (didFootForcedScatter) aiScatterOnDamage(ctx, target);
+    // C++ infantry.cpp:432-436 — damaged non-human engineers guarding the
+    // battlefield are forced into HUNT after FootClass::Take_Damage has run.
+    // This ordering is important: FootClass may have queued a MOVE scatter, and
+    // Assign_Mission(HUNT) overwrites that queue while preserving the scatter
+    // NavCom. The engineer then drives under Mission_HUNT instead of arriving
+    // as Mission_MOVE and idling to GUARD.
+    if (target.stats.isInfantry &&
+        target.type === UnitType.I_E6 &&
+        target.house !== ctx.playerHouse &&
+        (target.mission === Mission.GUARD || target.mission === Mission.AREA_GUARD)) {
+      assignMission(target, Mission.HUNT);
+    }
     if (attacker) triggerRetaliation(ctx, target, attacker);
+    if (attacker || !didFootForcedScatter) aiScatterOnDamage(ctx, target, attacker);
   }
   return killed;
+}
+
+/** C++ foot.cpp:1228-1230 fallback scatter gate.
+ *  This is distinct from InfantryClass::Take_Damage's later source scatter:
+ *  FootClass calls Scatter(0,true) only when individual retaliation is not
+ *  allowed and the unit is free to move. */
+function shouldFootClassForcedScatter(ctx: CombatContext, victim: Entity, attacker?: Entity): boolean {
+  // Current TS non-infantry scatter is handled by the existing virtual scatter
+  // path below. Keep this helper scoped to the infantry RNG path (53003).
+  if (!victim.stats.isInfantry) return false;
+  // C++ foot.cpp:1172 — team members delegate to Team->Took_Damage and skip
+  // individual retaliation/scatter fallback.
+  if (victim.teamRef) return false;
+
+  const mc = MISSION_CONTROL[victim.mission];
+  if (!mc?.isScatter) return false;
+  if (victim.isDriving) return false;
+  if (victim.target?.alive || victim.targetStructure?.alive || victim.moveTarget) return false;
+  if (victim.isAirUnit || victim.isNavalUnit) return false;
+  // Rule.IsScatter defaults false; only non-human houses take this fallback.
+  if (victim.house === ctx.playerHouse) return false;
+
+  // If C++ Is_Allowed_To_Retaliate would pass, FootClass does not take the
+  // fallback branch. Keep this deterministic; the later AI threat-comparison
+  // RNG is intentionally not consumed from this predicate.
+  if (!attacker || !attacker.alive) return true;
+  if (ctx.entitiesAllied(victim, attacker)) return true;
+  if (!MISSION_CONTROL[victim.mission]?.isRetaliate) return true;
+  if (victim.stats.isAircraft && victim.stats.isFixedWing) return true;
+
+  const isVictimHumanHouse = victim.house === ctx.playerHouse;
+  const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
+  if (shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) return false;
+
+  if (!victim.weapon) return true;
+  if (getWarheadMult(victim.weapon.warhead, attacker.stats.armor, ctx.warheadOverrides ?? {}) <= 0) return true;
+  if (attacker.stats.isCanine || attacker.type === UnitType.I_DOG) return true;
+  if (attacker.isAirUnit && attacker.flightAltitude > 0) {
+    const hasAA = victim.weapon?.isAntiAir || victim.weapon2?.isAntiAir;
+    if (!hasAA) return true;
+  }
+  if (!canTargetNaval(victim, attacker)) return true;
+  if (isVictimHumanHouse) {
+    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
+    if (!isTanyaVsInfantry) return true;
+  }
+  if (victim.isSuicide) return true;
+
+  return false;
 }
 
 /**
  * AI scatter — infantry scatter per C++ infantry.cpp:1852-1929 (InfantryClass::Scatter).
  *
  * Key C++ behaviors:
- *  - Called with forced=true from TakeDamage (C++ techno.cpp)
+ *  - InfantryClass::Take_Damage calls Scatter(source_coord) with forced=false
+ *  - FootClass fallback/no-source paths call Scatter(0, true)
  *  - IsDriving (already moving) → forced=false (line 1860)
  *  - MissionControl[mission].isScatter must be true OR forced (line 1866)
  *  - If not IsFraidyCat AND has valid combat target AND not forced → skip (line 1872)
@@ -360,45 +565,73 @@ export function damageEntity(
  *  - Only infantry scatters directionally (non-infantry uses old random scatter)
  */
 export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?: Entity): void {
-  // Player units don't AI-scatter (C++ infantry.cpp:1883 — human house check)
-  if (entity.isPlayerUnit) return;
-
-  // AI IQ gate (C++ techno.cpp scatter requires IQ >= [IQ] Scatter=3)
-  if (ctx.aiIQ(entity.house) < 3) return;
-
   // Only infantry uses directional scatter (C++ infantry.cpp override)
   if (!entity.stats.isInfantry) {
-    // Non-infantry: old random scatter for guard/area_guard missions only
-    if (entity.mission !== Mission.GUARD && entity.mission !== Mission.AREA_GUARD) return;
-    const dx = ScenarioRandom.nextInRange(0, 2) - 1;
-    const dy = ScenarioRandom.nextInRange(0, 2) - 1;
-    if (dx === 0 && dy === 0) return;
-    const targetX = entity.pos.x + dx * CELL_SIZE;
-    const targetY = entity.pos.y + dy * CELL_SIZE;
-    const tcx = Math.floor(targetX / CELL_SIZE);
-    const tcy = Math.floor(targetY / CELL_SIZE);
-    if (!ctx.map.isPassable(tcx, tcy)) return;
-    entity.moveTarget = { lx: pixelToLepton(targetX), ly: pixelToLepton(targetY) };
-    entity.mission = Mission.MOVE;
+    // C++ FootClass::Take_Damage fallback scatter for DriveClass descendants
+    // (foot.cpp:1221-1227) only fires when the object did not retaliate, has no
+    // TarCom/NavCom, is not driving, is not aircraft/vessel, and its mission is
+    // scatterable. DriveClass::Scatter(0,true) then consumes exactly one
+    // Random_Pick(0,2) facing offset and Assign_Destination(cell); it does not
+    // switch the mission to MOVE.
+    if (entity.teamRef) return;
+    if (entity.isAirUnit || entity.isNavalUnit) return;
+    const mc = MISSION_CONTROL[entity.mission];
+    if (mc && !mc.isScatter) return;
+    if (entity.isDriving || entity.target?.alive || entity.moveTarget) return;
+    if (entity.house === ctx.playerHouse) return;
+
+    const offset = ScenarioRandom.nextInRange(0, 2) - 1;
+    const startFacing = ((entity.facing + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
+    const cx = entity.cell.cx;
+    const cy = entity.cell.cy;
+    for (let face = 0; face < DIR_COUNT; face++) {
+      const dir = (startFacing + face) % DIR_COUNT;
+      const ncx = cx + DIR_DX[dir];
+      const ncy = cy + DIR_DY[dir];
+      if (ncx >= 0 && ncx < MAP_CELLS && ncy >= 0 && ncy < MAP_CELLS &&
+          ctx.map.isPassable(ncx, ncy)) {
+        entity.moveTarget = cellTargetToLepton(ncx, ncy);
+        break;
+      }
+    }
     return;
   }
 
   // ── Infantry directional scatter (C++ infantry.cpp:1852-1929) ──
-  // C++ TakeDamage (infantry.cpp:439) calls Scatter(source_coord) with forced=false.
+  // C++ InfantryClass::Take_Damage (infantry.cpp:439) calls Scatter(source_coord)
+  // with forced=false. FootClass fallback paths call Scatter(0,true), represented
+  // here by the no-attacker branch.
+  let forced = attacker === undefined;
 
-  // C++ infantry.cpp:1860 — IsDriving: already moving → forced stays false
-  const isDriving = entity.moveTarget !== null;
+  // C++ infantry.cpp:1875 — IsDriving: already moving clears forced.
+  // IsDriving is the cell-to-cell driver state, not NavCom/moveTarget.
+  if (entity.isDriving) forced = false;
 
   // C++ infantry.cpp:1866 — mission must allow scatter (MissionControl[Mission].IsScatter)
   const mc = MISSION_CONTROL[entity.mission];
-  if (mc && !mc.isScatter) return;
+  if (mc && !mc.isScatter && !forced) return;
 
-  // C++ infantry.cpp:1872 — non-FraidyCat with valid combat target doesn't scatter
-  if (!entity.stats.isFraidyCat && entity.target !== null) return;
+  // C++ infantry.cpp:1872 — non-FraidyCat with a legal combat target doesn't
+  // scatter. Target_Legal(TarCom) rejects destroyed objects, so a stale pointer
+  // to a just-killed target must not suppress scatter.
+  const hasLegalCombatTarget =
+    (entity.target?.alive ?? false) ||
+    (entity.targetStructure?.alive ?? false);
+  if (!entity.stats.isFraidyCat && hasLegalCombatTarget && !forced) return;
 
-  // C++ infantry.cpp:1885 — IsDriving non-FraidyCat infantry doesn't scatter
-  // (IsDriving → forced=false; without forced, only FraidyCat scatters per C++)
-  if (isDriving && !entity.stats.isFraidyCat) return;
+  // C++ infantry.cpp:1892 — non-interruptible Doing blocks scatter.
+  if (!entity.isDoingInterruptible()) return;
+
+  // C++ infantry.cpp:1898 — human-house infantry only skip voluntary scatter
+  // when they are not in a team. FootClass's source==NULL damage path calls
+  // Scatter(0,true), and forced scatter bypasses this gate.
+  if (!forced && entity.house === ctx.playerHouse && !entity.teamRef) return;
+
+  // C++ infantry.cpp:1900 — actual scatter only happens when forced or the
+  // infantry type is FraidyCat. Non-fraidy infantry hit by a source calls
+  // Scatter(source_coord) with forced=false, passes the earlier gates, then
+  // exits here without consuming the Random_Pick(0,4) facing offset.
+  if (!forced && !entity.stats.isFraidyCat) return;
 
   // Calculate scatter direction (C++ infantry.cpp:1888-1900)
   let awayDir: number;
@@ -407,12 +640,20 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
     // Direction from threat to infantry = away from threat
     awayDir = directionTo(attacker.pos, entity.pos);
   } else {
-    // No threat source — use entity's current facing (C++ infantry.cpp:1897)
-    awayDir = entity.facing;
+    // C++ infantry.cpp:1893-1897 — no threat source uses cell-fraction
+    // direction unless the infantry is exactly at cell center.
+    const fracX = entity.leptonX & 0xff;
+    const fracY = entity.leptonY & 0xff;
+    awayDir = (fracX !== CELL_CENTER_LEPTON || fracY !== CELL_CENTER_LEPTON)
+      ? directionToLeptons(CELL_CENTER_LEPTON, CELL_CENTER_LEPTON, fracX, fracY)
+      : entity.facing;
   }
 
   // C++ infantry.cpp:1890 — Random_Pick(0,4)-2 → random +-2 facing offset
+  const savedSourceTag = ScenarioRandom._sourceTag;
+  if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = attacker ? 53002 : 53003;
   const offset = ScenarioRandom.nextInRange(0, 4) - 2; // -2, -1, 0, 1, or 2
+  ScenarioRandom._sourceTag = savedSourceTag;
   awayDir = ((awayDir + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
 
   // C++ infantry.cpp:1905-1915 — try 8 directions starting from away-direction
@@ -434,11 +675,8 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
 
   // C++ infantry.cpp:1924-1927 — assign MOVE mission to best cell
   if (bestCell) {
-    entity.moveTarget = {
-      lx: bestCell.cx * 256 + 128,
-      ly: bestCell.cy * 256 + 128,
-    };
-    entity.mission = Mission.MOVE;
+    entity.moveTarget = cellTargetToLepton(bestCell.cx, bestCell.cy);
+    assignMission(entity, Mission.MOVE);
   }
 }
 
@@ -458,6 +696,7 @@ export function fireWeaponAt(
       explodeLgSound: false,
       attackerIsPlayer: ctx.isPlayerControlled(attacker),
       trackLoss: true,
+      attacker,
     });
   }
   // Fire effect
@@ -477,13 +716,95 @@ export function fireWeaponAtStructure(
   const armor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
   const whMult = getWarheadMult(wh, armor, ctx.warheadOverrides);
   const damage = modifyDamage(weapon.damage, wh, armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
-  const destroyed = structureDamage(ctx, s, damage);
+  const destroyed = structureDamage(ctx, s, damage, attacker);
   if (destroyed) attacker.creditKill();
   ctx.effects.push({
     type: 'muzzle',
     x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
     frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
   } as Effect);
+}
+
+function maybeSuspendTeamsForBaseAttack(
+  ctx: CombatContext,
+  attacker: Entity,
+  attackedHouse: House,
+  attackedObjectHasPrimaryWeapon: boolean,
+): void {
+  // C++ BuildingClass::Take_Damage calls TechnoClass::Base_Is_Attacked(source)
+  // and UnitClass::Take_Damage does the same for surviving computer harvesters.
+  // before applying damage. Base_Is_Attacked returns unless:
+  //   - target house is AI/non-human,
+  //   - source is an enemy FootClass of RTTI_INFANTRY or RTTI_UNIT,
+  //   - building cannot defend itself,
+  // then TeamClass::Suspend_Teams(Rule.SuspendPriority=20, House).
+  if (!ctx.suspendTeamsByPriority) return;
+  if (attackedHouse === ctx.playerHouse) return;
+  if (ctx.isAllied(attackedHouse, attacker.house)) return;
+  const attackerIsInfantryOrUnit =
+    attacker.stats.isInfantry || (!attacker.isAirUnit && !attacker.isNavalUnit);
+  if (!attackerIsInfantryOrUnit) return;
+  if (attackedObjectHasPrimaryWeapon) return;
+  ctx.suspendTeamsByPriority(attackedHouse, 20);
+}
+
+function cppCoordDistanceUnits(dx: number, dy: number): number {
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  return ady > adx ? ady + (adx >> 1) : adx + (ady >> 1);
+}
+
+function cppFixedRaw(numerator: number, denominator: number): number {
+  return denominator === 0 ? 0 : Math.trunc((numerator * 256) / denominator) & 0xffff;
+}
+
+function cppFixedInverseRaw(raw: number): number {
+  return raw !== 0 && raw !== 256 ? Math.trunc((256 * 256) / raw) & 0xffff : 256;
+}
+
+function cppFixedMulInt(raw: number, value: number): number {
+  return Math.trunc(((raw * value) + 128) / 256);
+}
+
+function wideAreaDamage(
+  ctx: CombatContext,
+  centerLX: number,
+  centerLY: number,
+  radiusLeptons: number,
+  rawDamage: number,
+  source: Entity | undefined,
+  warhead: WarheadType,
+): void {
+  const cellRadius = Math.trunc((radiusLeptons + LEPTON_SIZE - 1) / LEPTON_SIZE);
+  const centerCx = Math.floor(centerLX / LEPTON_SIZE);
+  const centerCy = Math.floor(centerLY / LEPTON_SIZE);
+  const sourceHouse = source?.house ?? House.USSR;
+
+  for (let x = -cellRadius; x <= cellRadius; x++) {
+    for (let y = -cellRadius; y <= cellRadius; y++) {
+      const cx = centerCx + x;
+      const cy = centerCy + y;
+      if (!ctx.map.inBounds(cx, cy)) continue;
+
+      // C++ combat.cpp:426 uses XY_Coord(x+cell_radius, y+cell_radius), so this
+      // distance is in integer grid units, not leptons.
+      const distFromCenter = cppCoordDistanceUnits(x, y);
+      const damage = cppFixedMulInt(
+        cppFixedInverseRaw(cppFixedRaw(cellRadius, distFromCenter)),
+        rawDamage,
+      );
+      if (damage === 0) continue;
+
+      applySplashDamage(
+        ctx,
+        { x: cx * CELL_SIZE + CELL_SIZE / 2, y: cy * CELL_SIZE + CELL_SIZE / 2 },
+        { damage, warhead },
+        -1,
+        sourceHouse,
+        source,
+      );
+    }
+  }
 }
 
 /** Shared death aftermath — explosion, debris, decal, sound, kill/loss tracking.
@@ -497,6 +818,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   attackerIsPlayer: boolean;
   trackLoss: boolean;
   friendlyFireLoss?: boolean;
+  attacker?: Entity;
 }): void {
   const kx = victim.pos.x;
   const ky = victim.pos.y;
@@ -512,7 +834,17 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       victim.stats.isInfantry ? opts.decal.infantry : opts.decal.vehicle, opts.decal.opacity);
   }
   if (victim.isAnt) ctx.playSoundAt('die_ant', kx, ky);
-  else if (victim.stats.isInfantry) ctx.playSoundAt('die_infantry', kx, ky);
+  else if (victim.stats.isInfantry) {
+    ctx.playSoundAt('die_infantry', kx, ky);
+    // C++ infantry.cpp:383-416 — Warhead InfDeath=5 (Tesla/Super) deletes
+    // the infantry and creates ANIM_ELECT_DIE. adata.cpp marks ELECTRO as an
+    // immediate scorcher (Biggest=0), so AnimClass::Start -> Middle consumes
+    // Random_Pick(SMUDGE_SCORCH1, SMUDGE_SCORCH6) before BulletClass does its
+    // invisible Coord_Scatter.
+    if (victim.deathVariant === 5) {
+      spawnLogicAnim(ctx.logicAnims, ctx.effects, 'elect_die', kx, ky, 1, true);
+    }
+  }
   else ctx.playSoundAt('die_vehicle', kx, ky);
   if (opts.explodeLgSound) ctx.playSoundAt('explode_lg', kx, ky);
   if (opts.attackerIsPlayer) ctx.killCount++;
@@ -539,6 +871,48 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     ctx.pointTotal -= unitPoints;
   }
 
+  // C++ ObjectClass::Detach_All -> Detach_This_From_All(As_Target()) clears
+  // every TarCom pointing at the destroyed object before death explosions and
+  // post-death logic continue (object.cpp:1466-1483, techno.cpp:3872-3896).
+  // InfantryClass::Detach also drops IsFiring when TarCom is detached. Without
+  // this, TS keeps stale object references to destroyed vehicles and later code
+  // treats those references as live orders until the next mission timer happens
+  // to validate them.
+  victim.target = null;
+  victim.targetStructure = null;
+  victim.moveTarget = null;
+  victim.path = [];
+  victim.pathIndex = 0;
+  victim.firePrepActive = false;
+  victim.firePrepStage = 0;
+  victim.firePrepUsesDoingStage = false;
+  for (const entity of ctx.entities) {
+    if (entity.id === victim.id) continue;
+    if (entity.target === victim) {
+      entity.target = null;
+      entity.firePrepActive = false;
+      entity.firePrepStage = 0;
+      entity.firePrepUsesDoingStage = false;
+      if (entity.stats.isInfantry) {
+        entity.isFiringAnim = false;
+        entity.firingAnimTicks = 0;
+      }
+    }
+  }
+  for (const proj of ctx.inflightProjectiles) {
+    // C++ BulletClass::Detach clears Payback when the firing object detaches
+    // (except dog riders, which TS tracks separately with dogRiderId). It also
+    // clears TarCom when the bullet target is detached during full Detach_All.
+    // Keeping the dead attacker as Payback makes splash damage pass a bogus
+    // source into Take_Damage, changing infantry scatter direction.
+    if (proj.attackerId === victim.id && proj.dogRiderId !== victim.id) {
+      proj.attackerId = -1;
+    }
+    if (proj.targetId === victim.id) {
+      proj.targetId = -1;
+    }
+  }
+
   // Per-side casualty tracking for score screen bar graphs (C++ score.cpp:548-560)
   const faction = HOUSE_FACTION[victim.house] ?? 'allied';
   if (faction === 'soviet') {
@@ -547,61 +921,91 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     ctx.alliedUnitsLost++;
   }
 
-  // C++ techno.cpp:3820-3834 — Explodes=yes death explosion (Wide_Area_Damage)
+  // C++ techno.cpp:3881-3895 — Explodes=yes death explosion (Wide_Area_Damage)
   // When a unit with Explodes=yes is destroyed, it deals area damage:
   //   damage  = MaxStrength (victim's full HP)
   //   warhead = primary weapon's warhead (default HE if no weapon)
   //   radius  = damage * Rule.ExplosionSpread (ExpSpread=.3 from rules.ini)
-  //   radius is in leptons (1 cell = 256 leptons), so 110*0.3=33 leptons ≈ 0.13 cells
+  // Wide_Area_Damage then calls Explosion_Damage once per covered cell, which
+  // matters for retaliation RNG because the same nearby infantry can be touched
+  // by multiple cell-centered explosions.
   if (victim.stats.explodesOnDeath) {
     const EXP_SPREAD = 0.3; // rules.ini [General] ExpSpread=.3
-    const LEPTONS_PER_CELL = 256; // C++ ICON_LEPTON_W = 256
     const explosionDamage = victim.stats.strength; // C++ techno.cpp:3830: MaxStrength
     const primaryWeaponName = victim.stats.primaryWeapon;
     const explosionWarhead: WarheadType = primaryWeaponName
       ? ((WEAPON_STATS as Record<string, { warhead?: string }>)[primaryWeaponName]?.warhead as WarheadType ?? 'HE')
       : 'HE'; // C++ techno.cpp:3825: default WARHEAD_HE
-    const radiusLeptons = explosionDamage * EXP_SPREAD; // C++ techno.cpp:3832
-    const radiusCells = radiusLeptons / LEPTONS_PER_CELL;
-
-    for (const other of ctx.entities) {
-      if (!other.alive || other.inLimbo || other.id === victim.id) continue;
-      const dist = leptonDist(victim.leptonX, victim.leptonY, other.leptonX, other.leptonY);
-      if (dist > radiusLeptons) continue;
-      // C++ Wide_Area_Damage has no alliance check — damages everyone
-      damageEntity(ctx, other, explosionDamage, explosionWarhead);
-    }
+    // C++ techno.cpp:3888-3890 creates the damage-scaled Combat_Anim at the
+    // destroyed unit's center before Wide_Area_Damage. For Fire warheads this
+    // is a NAPALM AnimClass that later consumes gameplay RNG in AnimClass::Middle.
+    const explosionSet = getWarheadProps(explosionWarhead, ctx.scenarioWarheadProps)?.explosionSet ?? 0;
+    const deathCell = worldToCell(kx, ky);
+    const deathLand: 'ground' | 'water' | 'air' =
+      ctx.map.getTerrain(deathCell.cx, deathCell.cy) === Terrain.WATER ? 'water' : 'ground';
+    const deathAnimSprite = combatAnim(explosionDamage, explosionSet, deathLand);
+    spawnLogicAnimForSprite(
+      ctx.logicAnims,
+      ctx.effects,
+      deathAnimSprite ?? undefined,
+      kx,
+      ky,
+      true,
+      ctx.logicAnimsAlreadyProcessed === true,
+    );
+    const radiusLeptons = Math.trunc(explosionDamage * EXP_SPREAD); // C++ fixed int multiply
+    wideAreaDamage(ctx, victim.leptonX, victim.leptonY, radiusLeptons, explosionDamage, opts.attacker, explosionWarhead);
   }
 
   // C++ unit.cpp:1046-1069 — Vehicle crew spawning on destruction
   // Conditions: IsCrew=true, Max_Passengers==0 (not a transport), 50% probability
   if (victim.stats.crewed && !victim.stats.isAircraft && !victim.stats.isInfantry &&
-      (victim.stats.passengers ?? 0) === 0 && ScenarioRandom.float() < 0.5) {
-    // C++ unit.cpp:3965-3978: unarmed -> 50/50 C1/C7 civilian, armed -> E1 soldier
+      (victim.stats.passengers ?? 0) === 0 && ScenarioRandom.percentChance(50)) {
+    // C++ unit.cpp:1049-1054 death path: unarmed -> C1 technician,
+    // armed -> E1 soldier. Do not call UnitClass::Crew_Type() here; that
+    // separate helper has a C1/C7 random branch, but UnitClass::Take_Damage
+    // bypasses it when spawning vehicle death crew.
     let crewType: UnitType;
     if (!victim.stats.primaryWeapon) {
-      crewType = ScenarioRandom.float() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
+      crewType = UnitType.I_C1;
     } else {
       crewType = UnitType.I_E1;
     }
     const inf = new Entity(crewType, victim.house, kx, ky);
+    if (crewType === UnitType.I_C1) {
+      // C++ unit.cpp:1051 — i->IsTechnician = true for unarmed vehicle crew.
+      inf.isTechnician = true;
+    }
+    // C++ new InfantryClass starts at MISSION_NONE, but Unlimbo immediately
+    // calls TechnoClass::Enter_Idle_Mode(true) + Commence() before UnitClass
+    // death code sets crew HP, Scatter(), and Assign_Mission(HUNT/GUARD).
+    //
+    // That current idle mission matters: on the same Logic.AI pass that
+    // re-reads Logic.Count(), the newly spawned infantry dispatches
+    // Mission_Guard before Commence pops the queued HUNT from below.
+    inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
+    inf.missionTimer = 0;
+    inf.missionQueue = null;
     // C++ unit.cpp:1058: i->Strength = Random_Pick(5, (int)i->Class->MaxStrength/2)
-    inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, Math.floor(inf.maxHp / 2) + 4));
+    inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, Math.floor(inf.maxHp / 2)));
     inf.hp = Math.min(inf.hp, inf.maxHp);
-    inf.mission = Mission.GUARD;
+    scatterVehicleCrew(ctx, inf);
+    assignMission(inf, inf.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
     ctx.entities.push(inf);
     ctx.entityById.set(inf.id, inf);
+    ctx.markDiscoveredIfPlayerVisible?.(inf);
   }
 
   // C++ aircraft.cpp:1588-1594 — Aircraft parachute survivors on destruction
   // Conditions: IsCrew=true, 90% probability, spawns E1 (no civilian variant)
   if (victim.stats.crewed && victim.stats.isAircraft &&
-      ScenarioRandom.float() < 0.9) {
+      ScenarioRandom.percentChance(90)) {
     const inf = new Entity(UnitType.I_E1, victim.house, kx, ky);
     // C++ aircraft survivors get full health (no HP reduction like vehicles)
     inf.mission = Mission.GUARD;
     ctx.entities.push(inf);
     ctx.entityById.set(inf.id, inf);
+    ctx.markDiscoveredIfPlayerVisible?.(inf);
   }
 }
 
@@ -668,6 +1072,8 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // C++ techno.cpp:4929 — source == NULL (implied by null-check before call)
   if (!victim.alive || !attacker.alive) return;
 
+  const priorMission = victim.mission;
+
   // C++ techno.cpp:4934 — MissionControl[Mission].IsRetaliate must be true
   // Blocks HUNT, SLEEP, ENTER, CAPTURE, HARVEST, UNLOAD, RETREAT, HARMLESS,
   // CONSTRUCTION, DECONSTRUCTION retaliation.
@@ -680,49 +1086,31 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // C++ techno.cpp:4947 — House->Is_Ally(source) blocks retaliation
   if (ctx.entitiesAllied(victim, attacker)) return;
 
+  // C++ foot.cpp:1172 — FootClass::Take_Damage delegates team members to
+  // Team->Took_Damage and returns. It does NOT run the individual
+  // Is_Allowed_To_Retaliate/TarCom path for team members. Team->Took_Damage
+  // may change Team->Target to the attacker (team.cpp:1613), after which
+  // Coordinate_Move/Attack reassigns member NavCom/TarCom through the team.
+  if (victim.teamRef) {
+    victim.teamRef.tookDamage(victim, attacker, ctx);
+    return;
+  }
+
   // C++ techno.cpp:4952 — Combat_Damage() <= 0 || !Is_Weapon_Equipped() blocks.
   // Unarmed TS exception: crusher vehicles without a weapon (HARV-style) still
-  // pursue crush via unit.cpp:1124-1161 — evaluated below after the
-  // already-has-target check, matching prior TS behavior.
-  const isVictimPlayerControlled = ctx.isPlayerControlled?.(victim) ?? false;
-
-  // Keep existing alive target (TS simplification of C++ 50% AI threat comparison
-  // at techno.cpp:5001-5019; see comment below). Evaluated before crush so an APC
-  // already attacking a target isn't redirected to a retaliation target it would
-  // have crushed.
-  if (victim.target && victim.target.alive) return;
+  // pursue crush via unit.cpp:1124-1161 — evaluated below.
+  // C++ House->IsHuman is strict PlayerPtr ownership, not "allied to PlayerPtr".
+  // Game.isPlayerControlled() intentionally means player-or-ally for UI/scoring,
+  // so do not use it for C++ retaliation/auto-crush gates. SCG07EA England is a
+  // computer-controlled allied house and still auto-retaliates in C++.
+  const isVictimHumanHouse = victim.house === ctx.playerHouse;
 
   // Don't interrupt scripted team missions (except HUNT which already attacks)
   if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
 
-  // C++ foot.cpp:1172 — FootClass::Take_Damage delegates to Team->Took_Damage
-  // when the victim is a team member. Team->Took_Damage sets Team->Target =
-  // source (team.cpp:1613). Observed WASM behavior: team members acquire the
-  // aggressor as their individual TarCom on the tick immediately following
-  // damage (via downstream team dispatch / Coordinate_Attack propagation at
-  // team.cpp:1715-1718).
-  //
-  // SCG06EA tick 66: BadGuy E1 @(19,68) takes rifle damage at tick 65 from
-  // Greek E1 @(19,65). Individual TarCom is set to Greek by tick 66, and
-  // InfantryClass::AI Firing_AI (infantry.cpp:1237) starts the pre-fire
-  // animation (FireLaunch=2 for E1). Fire_At runs at tick 68 → bullet[116]
-  // Coord_Scatter (tag 50002).
-  //
-  // TS parity: set TarCom on the individual team member while preserving
-  // mission and missionTimer — no Commence MOVE→ATTACK→MOVE cycle, so no
-  // rogue Mission_Move jitter RNG fires at tick 67 (matching WASM's
-  // observed quiet tick 67). The paired Firing_AI-for-MOVE branch in
-  // index.ts picks up the new target and starts the pre-fire animation.
-  if (victim.teamRef) {
-    if (!victim.target || !victim.target.alive) {
-      victim.target = attacker;
-    }
-    return;
-  }
-
   // C++ unit.cpp:1124-1161: auto-crush retaliation path.
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
-  if (shouldCrushIt(victim, attacker, isVictimPlayerControlled, houseIQ)) {
+  if (shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) {
     victim.target = attacker;
     victim.mission = Mission.MOVE; // C++ unit.cpp:1137-1139: MISSION_MOVE to crush target
     victim.moveTarget = { lx: attacker.leptonX, ly: attacker.leptonY };
@@ -762,7 +1150,7 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // C++ techno.cpp:4988 — human house + !IsSmartDefense (PlayerReturnFire=no) blocks
   // retaliation, EXCEPT Tanya vs infantry.
   // rules.ini [General] PlayerReturnFire=no → Rule.IsSmartDefense = false.
-  if (isVictimPlayerControlled) {
+  if (isVictimHumanHouse) {
     const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
     if (!isTanyaVsInfantry) return;
   }
@@ -770,25 +1158,39 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // C++ techno.cpp:4993 — suicide team members cannot retaliate
   if (victim.isSuicide) return;
 
-  // C++ techno.cpp:5001-5019 — AI-only 50% threat comparison: if rolling 50%, keep
-  // the old target unless the new source is a greater threat. TS simplifies this to
-  // "keep existing valid target" (checked earlier, before the crush path).
+  // C++ techno.cpp:5027-5045 — AI-only 50% threat comparison. This consumes
+  // Percent_Chance(50) even when the unit keeps its existing TarCom. That call is
+  // visible in RNG traces during invisible-bullet BulletClass::AI, before
+  // Bullet_Explodes runs Coord_Scatter.
+  const currentTarget = victim.target && victim.target.alive ? victim.target : null;
+  // C++ techno.cpp:5001 calls Percent_Chance(50) for every non-human
+  // Is_Allowed_To_Retaliate check, before it knows whether TarCom is legal.
+  // If TarCom is empty, current_val remains 0 and the unit usually proceeds,
+  // but the RNG call has still happened.
+  if (!isVictimHumanHouse && ScenarioRandom.percentChance(50)) {
+    const overrides = ctx.warheadOverrides ?? {};
+    const sourceVal = attacker.weapon && victim.inRange(attacker)
+      ? getWarheadMult(attacker.weapon.warhead, victim.stats.armor, overrides)
+      : 0;
+    const currentVal = currentTarget?.weapon && victim.inRange(currentTarget)
+      ? getWarheadMult(currentTarget.weapon.warhead, victim.stats.armor, overrides)
+      : 0;
+    if (sourceVal <= currentVal) return;
+  }
 
   // C++ foot.cpp:1202-1206 — Assign_Target gated by In_Range(source, primary) || !IsHuman.
-  // Human houses (player-allied) only retarget if attacker is in weapon range. AI always
-  // retargets. For retaliation we've already blocked non-Tanya player units above, so
+  // Human houses only retarget if attacker is in weapon range. AI houses, including
+  // player-allied computer houses, always retarget. For retaliation we've already
+  // blocked non-Tanya player units above, so
   // this check only matters for the Tanya-vs-infantry exception.
-  if (isVictimPlayerControlled && !victim.inRange(attacker)) return;
+  if (isVictimHumanHouse && !victim.inRange(attacker)) return;
 
+  // C++ foot.cpp:1206 — Assign_Target(source->As_Target()).
+  // Assign_Target changes TarCom only; it does not force MISSION_ATTACK.
   victim.target = attacker;
-  victim.mission = Mission.ATTACK;
-  victim.animState = AnimState.ATTACK;
 
   // C++ foot.cpp:1209-1211 — MISSION_AMBUSH transitions to HUNT on retaliation.
-  // (AMBUSH's isRetaliate is true in TS, so we reach this branch.)
-  // victim.mission was just set to ATTACK above; only apply AMBUSH→HUNT if it was
-  // AMBUSH before. We capture prior mission via check above (mission changes only if
-  // we reach the assignment). In practice this is a no-op since we've set ATTACK.
+  if (priorMission === Mission.AMBUSH) assignMission(victim, Mission.HUNT);
 }
 
 /** Vehicle crush — heavy tracked vehicles (crusher=true) instantly kill crushable units on cell entry.
@@ -897,10 +1299,46 @@ export function checkWallCrush(ctx: CombatContext, vehicle: Entity): void {
 export function launchProjectile(
   ctx: CombatContext, attacker: Entity, target: Entity | null, weapon: WeaponStats,
   damage: number, impactX: number, impactY: number, directHit: boolean,
+  launchCoordOverride?: { lx: number; ly: number },
 ): void {
-  const dist = leptonDist(attacker.leptonX, attacker.leptonY, pixelToLepton(impactX), pixelToLepton(impactY));
-  const speed = weapon.projectileSpeed! * LEPTON_SIZE; // convert cells/tick to leptons/tick
-  const travelFrames = Math.max(1, Math.round(dist / speed));
+  // C++ techno.cpp:3124-3171 launches bullets from Fire_Coord(which), not
+  // Center_Coord(). The fire coordinate feeds projectile range, facing, fuse
+  // proximity, and the initial BulletClass::Unlimbo position.
+  const launchCoord = launchCoordOverride ?? (
+    typeof attacker.fireCoordForWeapon === 'function' ? attacker.fireCoordForWeapon(weapon) :
+      weapon === attacker.weapon && typeof attacker.fireCoordPrimary === 'function' ? attacker.fireCoordPrimary() :
+        { lx: attacker.leptonX, ly: attacker.leptonY }
+  );
+  const targetLX = pixelToLepton(impactX);
+  const targetLY = pixelToLepton(impactY);
+  const dist = leptonDist(launchCoord.lx, launchCoord.ly, targetLX, targetLY);
+  // C++ weapon Speed is an MPHType already expressed in lepton-speed units.
+  // Older TS projectileSpeed fields are cells/tick approximations; prefer the
+  // rules.ini Speed (`projSpeed`) whenever present.
+  const maxSpeed = weapon.projSpeed !== undefined
+    ? iniSpeedToMph(weapon.projSpeed)
+    : Math.max(1, Math.trunc(weapon.projectileSpeed! * LEPTON_SIZE));
+  // C++ bullet.cpp:736-771 — Speed=100/Inviso=yes bullets are placed at the
+  // target coordinate, converted to MPH_IMMOBILE for FlyClass, then armed with
+  // a normal fuse. They still exist as BulletClass objects; damage/scatter
+  // happens in BulletClass::AI, not inside InfantryClass::Fire_At.
+  const isLightSpeedInvisible = weapon.isInvisible && maxSpeed === LIGHT_SPEED;
+  const bulletStartLX = isLightSpeedInvisible ? targetLX : launchCoord.lx;
+  const bulletStartLY = isLightSpeedInvisible ? targetLY : launchCoord.ly;
+  const fuseDist = leptonDist(bulletStartLX, bulletStartLY, targetLX, targetLY);
+  let speed = isLightSpeedInvisible ? 0 : maxSpeed;
+  const travelFrames = Math.max(1, Math.trunc(fuseDist / maxSpeed) + 4);
+
+  // C++ bullet.cpp:756-771 — arcing projectile ground speed is adjusted by
+  // target distance after the fuse range is computed from MaxSpeed.
+  const isArcing = !!weapon.isArcing;
+  if (isArcing) {
+    speed = Math.max(maxSpeed + Math.trunc(fuseDist / 32), 25);
+  }
+
+  const speedAdd = isLightSpeedInvisible || speed === LIGHT_SPEED
+    ? 0
+    : Math.trunc((speed * 255 + 128) / 256);
 
   // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter on DETONATION.
   // Verified via WASM tag 50002 (Coord_Scatter dir pick) at SCG03EA tick 267 bullet[282].
@@ -912,14 +1350,12 @@ export function launchProjectile(
   // C++ bullet.cpp:783-789 — ballistic arc initialization for isArcing weapons
   // Riser = ((Distance/2) / (speed+1)) * Rule.Gravity, min 10
   // This gives enough upward velocity to keep the projectile airborne for ~travelFrames ticks.
-  const isArcing = !!weapon.isArcing;
   let arcHeight = 0;
   let arcRiser = 0;
   if (isArcing) {
     arcHeight = 1; // C++ bullet.cpp:786 — Height = 1
     // C++ formula: Riser = ((Distance(tcoord)/2) / (speed+1)) * Rule.Gravity
-    // In our units, travelFrames ≈ Distance/speed, so Riser ≈ (travelFrames/2) * Gravity
-    arcRiser = Math.max(10, Math.floor(travelFrames / 2) * RULE_GRAVITY);
+    arcRiser = Math.max(10, Math.trunc(Math.trunc(fuseDist / 2) / (speed + 1)) * RULE_GRAVITY);
   }
 
   // C++ infantry.cpp:3649-3654 — dog-rides-bullet: dog enters limbo when firing
@@ -947,12 +1383,12 @@ export function launchProjectile(
     isArcing,
     arcHeight,
     arcRiser,
-    startX: attacker.pos.x,
-    startY: attacker.pos.y,
+    startX: bulletStartLX * CELL_SIZE / LEPTON_SIZE,
+    startY: bulletStartLY * CELL_SIZE / LEPTON_SIZE,
     dogRiderId,
-    // C++ fuse.cpp — IsFueled: fuel timer = range = (distance/speed) + 4, capped at 0xFF
-    // When timer reaches 0 after arming delay, bullet force-explodes (runs out of fuel)
-    fuelTimer: Math.min(0xFF, travelFrames + 4),
+    // C++ fuse.cpp — Timer = range = (distance/speed) + 4, capped at 0xFF.
+    // `travelFrames` already includes bullet.cpp's +4 range bias.
+    fuelTimer: Math.min(0xFF, travelFrames),
     isFueled: !!weapon.isFueled,
     // C++ bullet.cpp:790-802 — IsDropping: start at FLIGHT_LEVEL, fall with gravity
     isDropping: !!weapon.isDropping,
@@ -960,7 +1396,139 @@ export function launchProjectile(
     // C++ bullet.cpp:377-386 — IsFlameEquipped: flame trail toggle
     isFlameEquipped: !!weapon.isFlameEquipped,
     flameToggle: false,  // C++ IsToAnimate starts false
+    logicalLX: bulletStartLX,
+    logicalLY: bulletStartLY,
+    headToLX: targetLX,
+    headToLY: targetLY,
+    facing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    speedAccum: 0,
+    speedAdd,
+    fuseTimer: Math.min(0xFF, travelFrames),
+    armingTimer: 0,
+    proximity: fuseDist,
   });
+}
+
+/** Launch a projectile from a defensive structure.
+ *  C++ BuildingClass::Fire_At still creates a BulletClass for invisible
+ *  electric weapons (TeslaZap). Damage/scatter happens in BulletClass::AI,
+ *  not synchronously in BuildingClass::Mission_Attack. */
+function launchStructureProjectile(
+  ctx: CombatContext,
+  s: MapStructure,
+  target: Entity,
+  weapon: StructureWeapon,
+): void {
+  const targetLX = target.leptonX;
+  const targetLY = target.leptonY;
+  const targetX = targetLX * CELL_SIZE / LEPTON_SIZE;
+  const targetY = targetLY * CELL_SIZE / LEPTON_SIZE;
+  const { lx: launchLX, ly: launchLY } = structureFireLeptons(s);
+  const maxSpeed = weapon.projSpeed !== undefined
+    ? iniSpeedToMph(weapon.projSpeed)
+    : LIGHT_SPEED;
+  const isInvisible = maxSpeed === LIGHT_SPEED;
+  const bulletStartLX = isInvisible ? targetLX : launchLX;
+  const bulletStartLY = isInvisible ? targetLY : launchLY;
+  const fuseDist = leptonDist(bulletStartLX, bulletStartLY, targetLX, targetLY);
+  const speed = isInvisible ? 0 : maxSpeed;
+  const travelFrames = Math.max(1, Math.trunc(fuseDist / maxSpeed) + 4);
+  const speedAdd = isInvisible || speed === LIGHT_SPEED
+    ? 0
+    : Math.trunc((speed * 255 + 128) / 256);
+
+  ctx.inflightProjectiles.push({
+    attackerId: -1,
+    attackerHouse: s.house,
+    targetId: target.id,
+    weapon: {
+      name: s.type === 'TSLA' ? 'TeslaZap' : s.type,
+      damage: weapon.damage,
+      rof: weapon.rof,
+      range: weapon.range,
+      warhead: (weapon.warhead ?? 'HE') as WarheadType,
+      splash: weapon.splash,
+      projSpeed: weapon.projSpeed,
+      isInvisible,
+      isAntiAir: weapon.isAntiAir,
+    },
+    damage: weapon.damage,
+    strength: weapon.damage,
+    speed,
+    travelFrames,
+    currentFrame: 0,
+    directHit: true,
+    impactX: targetX,
+    impactY: targetY,
+    attackerIsPlayer: ctx.isAllied(s.house, ctx.playerHouse),
+    isArcing: false,
+    arcHeight: 0,
+    arcRiser: 0,
+    startX: bulletStartLX * CELL_SIZE / LEPTON_SIZE,
+    startY: bulletStartLY * CELL_SIZE / LEPTON_SIZE,
+    dogRiderId: -1,
+    fuelTimer: Math.min(0xFF, travelFrames),
+    isFueled: false,
+    isDropping: false,
+    dropHeight: 0,
+    isFlameEquipped: false,
+    flameToggle: false,
+    logicalLX: bulletStartLX,
+    logicalLY: bulletStartLY,
+    headToLX: targetLX,
+    headToLY: targetLY,
+    facing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    speedAccum: 0,
+    speedAdd,
+    fuseTimer: Math.min(0xFF, travelFrames),
+    armingTimer: 0,
+    proximity: fuseDist,
+  });
+}
+
+function findCellTechno(ctx: CombatContext, cx: number, cy: number, paybackId: number): Entity | null {
+  // C++ CellClass::Cell_Techno() returns an object physically in this cell.
+  // Do not use TS occupancy here: it can contain track reservations and infantry
+  // destination claims, while torpedo collision only cares about actual technos.
+  for (const e of ctx.entities) {
+    if (!e.alive || e.inLimbo || e.id === paybackId) continue;
+    if (e.isAirUnit && e.flightAltitude > 0) continue;
+    if (e.cell.cx === cx && e.cell.cy === cy) return e;
+  }
+  return null;
+}
+
+function projectilePixelPosition(proj: InflightProjectile): WorldPos {
+  return {
+    x: proj.logicalLX * CELL_SIZE / LEPTON_SIZE,
+    y: proj.logicalLY * CELL_SIZE / LEPTON_SIZE,
+  };
+}
+
+function tickProjectilePhysics(proj: InflightProjectile): void {
+  if (proj.speedAdd <= 0) return;
+  const actualWithAccum = proj.speedAdd + proj.speedAccum;
+  const rem = actualWithAccum % PIXEL_LEPTON_W;
+  const actual = actualWithAccum - rem;
+  proj.speedAccum = rem;
+  if (actual <= 0) return;
+  proj.logicalLX += (COS_TABLE_256[proj.facing256] * actual) >> 7;
+  proj.logicalLY -= (SIN_TABLE_256[proj.facing256] * actual) >> 7;
+}
+
+function tickProjectileFuse(proj: InflightProjectile): boolean {
+  if (proj.fuseTimer > 0) proj.fuseTimer--;
+  if (proj.armingTimer > 0) {
+    proj.armingTimer--;
+    return false;
+  }
+  if (proj.fuseTimer <= 0) return true;
+
+  const proximity = leptonDist(proj.logicalLX, proj.logicalLY, proj.headToLX, proj.headToLY);
+  if (proximity < 0x0010) return true;
+  if (proximity < LEPTON_SIZE && proximity > proj.proximity) return true;
+  proj.proximity = proximity;
+  return false;
 }
 
 /** Advance in-flight projectiles; apply damage + splash on arrival */
@@ -1006,6 +1574,14 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       proj.flameToggle = !proj.flameToggle;  // C++ IsToAnimate = !IsToAnimate
     }
 
+    // C++ BulletClass::AI always runs FlyClass::Physics before fuse handling.
+    // Arcing projectiles are still normal BulletClass objects here: they move
+    // horizontally via FlyClass and only their Height/Riser is special.
+    const useFlyPhysicsCoord = !proj.isDropping;
+    if (useFlyPhysicsCoord) {
+      tickProjectilePhysics(proj);
+    }
+
     // C++ object.cpp:237-254 — ballistic arc gravity simulation
     // Each tick: Height += Riser; Riser -= Rule.Gravity
     // When Height <= 0, the bullet has landed → explode (bullet.cpp:359: forced = IsArcing && !IsFalling)
@@ -1039,8 +1615,9 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // calculate collision with terrain (such as walls)").
     if (!proj.weapon.isHigh && !proj.weapon.isDropping) {
       const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
-      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
+      const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
+      const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
       const cc = worldToCell(curX, curY);
       if (ctx.map.getWallType(cc.cx, cc.cy) !== '') {
         // Force-explode at wall cell center (C++ coord = Cell_Coord(Coord_Cell(coord)))
@@ -1056,13 +1633,31 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // Subsurface projectiles (torpedoes) check land type each frame and explode if they leave water.
     if (proj.weapon.isSubSurface) {
       const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
-      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
+      const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
+      const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
       const cc = worldToCell(curX, curY);
-      if (ctx.map.getTerrain(cc.cx, cc.cy) !== Terrain.WATER) {
-        // Force-explode at cell center when torpedo leaves water (C++ coord = Cell_Coord(Coord_Cell(coord)))
-        proj.impactX = cc.cx * CELL_SIZE + CELL_SIZE / 2;
-        proj.impactY = cc.cy * CELL_SIZE + CELL_SIZE / 2;
+      const curLX = pixelToLepton(curX);
+      const curLY = pixelToLepton(curY);
+      const fracLX = ((curLX % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+      const fracLY = ((curLY % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+      const centerDist = leptonDist(fracLX, fracLY, CELL_CENTER_LEPTON, CELL_CENTER_LEPTON);
+      const cellTechno = centerDist < TORPEDO_CENTER_HIT_RADIUS
+        ? findCellTechno(ctx, cc.cx, cc.cy, proj.attackerId)
+        : null;
+
+      if (ctx.map.getTerrain(cc.cx, cc.cy) !== Terrain.WATER || cellTechno) {
+        // C++ bullet.cpp:920-941: subsurface bullets force-explode when they
+        // leave water or pass through a cell center containing a techno object
+        // other than Payback. If Cell_Techno exists, explosion coord becomes
+        // that object's Target_Coord; otherwise it remains the bullet Coord.
+        if (cellTechno) {
+          proj.impactX = cellTechno.pos.x;
+          proj.impactY = cellTechno.pos.y;
+        } else {
+          proj.impactX = curX;
+          proj.impactY = curY;
+        }
         proj.travelFrames = proj.currentFrame; // land now
         arrived.push(proj);
         continue;
@@ -1073,8 +1668,9 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // Anti-air projectiles detonate when within half a cell (~0x0080 leptons) of an airborne target.
     if (proj.weapon.isAntiAir && target && target.alive && target.isAirUnit && target.flightAltitude > 0) {
       const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
-      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
+      const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
+      const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
       const distToTarget = Math.sqrt((curX - target.pos.x) ** 2 + (curY - target.pos.y) ** 2);
       // C++ Distance(TarCom) < 0x0080: 128 leptons = half a cell (CELL_LEPTON_W=256)
       if (distToTarget < CELL_SIZE / 2) {
@@ -1100,11 +1696,12 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       continue;
     }
 
-    // Landing check: arcing projectiles land when height <= 0 (C++ object.cpp:241);
-    // non-arcing projectiles land when travel frames are exhausted.
+    // C++ bullet.cpp:474 — only dropping projectiles bypass Fuse_Checkup.
+    // Arcing projectiles still use the normal proximity/timer fuse and explode
+    // at their current Coord; height<=0 is a forced explosion path.
     const hasLanded = proj.isArcing
-      ? (proj.arcHeight <= 0 && proj.currentFrame > 1)  // skip frame 1 since Height starts at 1
-      : (proj.currentFrame >= proj.travelFrames);
+      ? ((proj.arcHeight <= 0 && proj.currentFrame > 1) || tickProjectileFuse(proj))
+      : (!proj.isDropping ? tickProjectileFuse(proj) : (proj.currentFrame >= proj.travelFrames));
     if (hasLanded) {
       // C++ parity (bullet.cpp:446-483): arcing bullets detonate at their CURRENT
       // Coord when Height <= 0. The bullet moves horizontally by velocity each tick
@@ -1114,9 +1711,22 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
       // depending on how flight time (governed by Riser) compares to travel time
       // (dist/speed). Override impactX/Y to the bullet's actual current position.
       if (proj.isArcing) {
-        const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-        proj.impactX = proj.startX + (proj.impactX - proj.startX) * t;
-        proj.impactY = proj.startY + (proj.impactY - proj.startY) * t;
+        const cur = projectilePixelPosition(proj);
+        proj.impactX = cur.x;
+        proj.impactY = cur.y;
+      } else if (!proj.isDropping) {
+        // C++ bullet.cpp:981-985 — normal fuse detonations for non-homing,
+        // non-arcing projectiles snap Coord to Fuse_Target() before damage.
+        // The projectile's current Coord can be a few leptons away when the
+        // proximity fuse trips; damage still uses the stored target coord.
+        if ((proj.weapon.projectileROT ?? 0) === 0) {
+          proj.impactX = proj.headToLX * CELL_SIZE / LEPTON_SIZE;
+          proj.impactY = proj.headToLY * CELL_SIZE / LEPTON_SIZE;
+        } else {
+          const cur = projectilePixelPosition(proj);
+          proj.impactX = cur.x;
+          proj.impactY = cur.y;
+        }
       }
       arrived.push(proj);
     }
@@ -1124,18 +1734,25 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
 
   // Remove arrived projectiles
   ctx.inflightProjectiles = ctx.inflightProjectiles.filter(p => {
+    if (arrived.includes(p)) return false;
     // Dropping projectiles are removed when height reaches 0
     if (p.isDropping) return p.dropHeight > 0 || p.currentFrame === 0;
     // Fueled projectiles are removed when fuel runs out
     if (p.isFueled && p.fuelTimer <= 0) return false;
     if (p.isArcing) return p.arcHeight > 0 || p.currentFrame <= 1;
-    return p.currentFrame < p.travelFrames;
+    return !arrived.includes(p);
   });
 
   // Apply damage for arrived projectiles
   for (const proj of arrived) {
     const target = ctx.entityById.get(proj.targetId);
     const attacker = ctx.entityById.get(proj.attackerId);
+    // C++ BulletClass::Detach clears Payback when the firing object is detached
+    // (object.cpp Detach_All -> bullet.cpp:636-649). If the source object died
+    // before this projectile explodes, damage must see source=NULL; otherwise
+    // InfantryClass::Take_Damage scatters away from a dead object instead of
+    // using the no-threat Scatter(0) branch.
+    const liveAttacker = attacker?.alive && !attacker.inLimbo ? attacker : undefined;
 
     // C++ bullet.cpp:478-480 — use degraded strength (proj.strength) instead of original damage
     const impactDamage = proj.strength;
@@ -1144,7 +1761,7 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // the Coord_Scatter for invisible projectiles (line 1012). Damage uses un-scattered
     // position; only anim/effect display uses scattered position.
     {
-      const attackerHouse = attacker?.house ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+      const attackerHouse = liveAttacker?.house ?? proj.attackerHouse ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
       // C++ combat.cpp:176: range = ICON_LEPTON_W + (ICON_LEPTON_W >> 1) = 1.5 cells
       // Use weapon splash if defined, otherwise default to SPLASH_RADIUS (1.5 cells)
       const splashRadius = (proj.weapon.splash && proj.weapon.splash > 0)
@@ -1154,7 +1771,7 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
         ctx, { x: proj.impactX, y: proj.impactY },
         { damage: impactDamage, warhead: proj.weapon.warhead, splash: splashRadius },
         -1,  // No entity excluded from splash (firer is already excluded inside applySplashDamage)
-        attackerHouse, attacker ?? undefined,
+        attackerHouse, liveAttacker,
       );
     }
 
@@ -1162,6 +1779,9 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // Consumes 1 Random_Pick(DIR_N, DIR_MAX) via Coord_Scatter → Coord_Move.
     // Tag 50002 verified at SCG03EA tick 267 bullet[282].
     if (proj.weapon.isInvisible) {
+      if (ScenarioRandom._tagLogging) {
+        ScenarioRandom._sourceTag = 50002;
+      }
       const scatterDir256 = ScenarioRandom.nextInRange(0, 255);
       // 0x0020 leptons = 32 leptons = 32 * CELL_SIZE / LEPTON_SIZE pixels
       const scatterPx = 32 * CELL_SIZE / LEPTON_SIZE;
@@ -1183,6 +1803,12 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     const isScud = proj.weapon.name === 'SCUD';
     ctx.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
       frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 } as Effect);
+    // C++ travelling bullets are Logic objects. When BulletClass::AI explodes and
+    // creates an AnimClass, logic.cpp's dynamic Count() loop reaches the new anim
+    // later in that same tick and consumes its IsBrandNew skip immediately.
+    // TS batches projectile arrival after the object loop, so mark that first
+    // brand-new skip as already accounted for to preserve AnimClass stage timing.
+    spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, projImpactSprite, proj.impactX, proj.impactY, false, true);
     if (isScud) {
       ctx.screenShake = Math.max(ctx.screenShake, 12);
       ctx.playSoundAt('building_explode', proj.impactX, proj.impactY);
@@ -1249,35 +1875,52 @@ export function applySplashDamage(
   // at distance ~0, getting full warhead damage.
   const sourceId = attacker?.id ?? -1;
 
-  for (const other of ctx.entities) {
+  // C++ combat.cpp:188-222 first snapshots Cell_Occupier() pointers into
+  // objects[32], then applies damage. Death side effects may create new
+  // infantry, but those new objects are not part of the current explosion.
+  // Iterate a snapshot so vehicle crew spawned by handleUnitDeath cannot be
+  // damaged by the same blast that created it.
+  const entityDamageList = ctx.entities.slice();
+  for (const other of entityDamageList) {
     if (!other.alive || other.inLimbo || other.id === sourceId) continue;
     // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
     const isFriendly = ctx.isAllied(other.house, attackerHouse);
     const distLeptons = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), other.leptonX, other.leptonY);
+    const splashRangeLeptons = splashRange * LEPTON_SIZE;
+    // C++ combat.cpp:232 uses a strict bound: `distance < range`.
+    // range is ICON_LEPTON_W + ICON_LEPTON_W/2 = 384 leptons, so an object
+    // exactly 1.5 cells away is NOT damaged. TS previously used `>`, which
+    // included the boundary and over-damaged SCG07EA E1 at (26,58).
+    if (distLeptons >= splashRangeLeptons) continue;
     const distCells = distLeptons / LEPTON_SIZE;
-    if (distCells > splashRange) continue;
+
+    // C++ damage order is:
+    //   InfantryClass::Take_Damage prone bias (infantry.cpp:329)
+    //   -> TechnoClass bias
+    //   -> ObjectClass::Modify_Damage distance falloff (object.cpp:1581).
+    //
+    // This ordering matters for low splash damage: 15 SA against prone infantry
+    // at splash distance becomes 8 before falloff, then truncates to 0. Applying
+    // falloff before prone bias incorrectly produces 1 damage and a retaliation
+    // RNG call (SCG07EA t279).
+    let rawDamage = weapon.damage;
+    const proneBiasApplied =
+      rawDamage > 0 && other.stats.isInfantry && other.isProne;
+    if (proneBiasApplied) {
+      rawDamage = Math.round(rawDamage * PRONE_DAMAGE_BIAS);
+      if (rawDamage <= 0) continue;
+    }
 
     // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
     const distPixels = distCells * CELL_SIZE;
     const whMult = getWarheadMult(weapon.warhead, other.stats.armor, ctx.warheadOverrides);
-    const splashDmg = modifyDamage(weapon.damage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
-    if (splashDmg <= 0) continue;
-    const killed = damageEntity(ctx, other, splashDmg, weapon.warhead, attacker);
+    const splashDmg = modifyDamage(rawDamage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
+    if (splashDmg === 0) continue;
+    const killed = damageEntity(ctx, other, splashDmg, weapon.warhead, attacker, {
+      skipProneBias: proneBiasApplied,
+    });
     // Retaliation is now handled inside damageEntity (C++ FootClass::Take_Damage
     // unified entry point — foot.cpp:1166-1234).
-
-    // Infantry scatter: push nearby infantry away from explosion
-    if (other.alive && other.stats.isInfantry && distCells < splashRange * 0.8) {
-      const angle = Math.atan2(other.pos.y - center.y, other.pos.x - center.x);
-      const pushDist = CELL_SIZE * (1 - distCells / splashRange);
-      const scatterX = other.pos.x + Math.cos(angle) * pushDist;
-      const scatterY = other.pos.y + Math.sin(angle) * pushDist;
-      // Only scatter to passable terrain
-      const sc = worldToCell(scatterX, scatterY);
-      if (ctx.map.isPassable(sc.cx, sc.cy)) {
-        other.setPosition(scatterX, scatterY);
-      }
-    }
 
     if (killed) {
       if (!isFriendly && attacker) attacker.creditKill();
@@ -1288,6 +1931,7 @@ export function applySplashDamage(
         attackerIsPlayer: !isFriendly && attackerIsPlayerControlled,
         trackLoss: !isFriendly,
         friendlyFireLoss: isFriendly && attackerIsPlayerControlled,
+        attacker,
       });
     }
   }
@@ -1298,6 +1942,9 @@ export function applySplashDamage(
   const impactCell = worldToCell(center.x, center.y);
   for (const s of ctx.structures) {
     if (!s.alive) continue;
+    // Walls are C++ overlays, not ordinary BuildingClass damage targets in
+    // Explosion_Damage. They are handled by the impact-cell Reduce_Wall path below.
+    if (WALL_TYPES.has(s.type)) continue;
     const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
     // Structure world center (matches structureDamage explosion origin)
     const swx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
@@ -1313,6 +1960,14 @@ export function applySplashDamage(
       distCells = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), pixelToLepton(swx), pixelToLepton(swy)) / LEPTON_SIZE;
     }
     if (distCells > splashRange) continue;
+    if (attacker) {
+      // C++ combat.cpp:232-237 calls BuildingClass::Take_Damage for any
+      // in-range building with the raw explosion strength. building.cpp:1250
+      // then calls Base_Is_Attacked(source) before ObjectClass::Take_Damage
+      // applies armor/distance falloff. Preserve that ordering: base defense can
+      // suspend teams even when final structure HP damage is reduced to zero.
+      maybeSuspendTeamsForBaseAttack(ctx, attacker, s.house, Boolean(STRUCTURE_WEAPONS[s.type]));
+    }
     // Apply damage using per-building armor from rules.ini (C++ bdata.cpp)
     const distPixels = distCells * CELL_SIZE;
     const sArmor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
@@ -1320,6 +1975,53 @@ export function applySplashDamage(
     const splashDmg = modifyDamage(weapon.damage, weapon.warhead, sArmor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
     if (splashDmg <= 0) continue;
     structureDamage(ctx, s, splashDmg);
+  }
+
+  const whMeta = getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta);
+
+  // C++ combat.cpp:240-257 — overlay wall damage is impact-cell only.
+  // If the impact cell contains a wall and the warhead can damage that wall type,
+  // CellClass::Reduce_Wall(strength) either destroys immediately when strength is
+  // high enough, or consumes Random_Pick(0, DamagePoints) for probabilistic damage.
+  {
+    const wallType = ctx.map.getWallType(impactCell.cx, impactCell.cy);
+    const canDamageWall =
+      wallType !== '' &&
+      (whMeta.destroysWalls || (whMeta.destroysWood && WOODEN_WALL_TYPES.has(wallType)));
+
+    if (canDamageWall) {
+      const damagePoints = WALL_DAMAGE_POINTS[wallType] ?? 1;
+      const damageLevels = WALL_DAMAGE_LEVELS[wallType] ?? 1;
+      const reduced =
+        weapon.damage === -1 ||
+        weapon.damage >= damagePoints ||
+        ScenarioRandom.nextInRange(0, damagePoints) < weapon.damage;
+
+      if (reduced) {
+        const nextLevel = ctx.map.getWallDamageLevel(impactCell.cx, impactCell.cy) + 1;
+        const clearsWithUndamagedShape = nextLevel === damageLevels - 1;
+        if (weapon.damage === -1 || nextLevel >= damageLevels || clearsWithUndamagedShape) {
+          ctx.map.clearWallType(impactCell.cx, impactCell.cy);
+          ctx.map.addDecal(impactCell.cx, impactCell.cy, 4, 0.3);
+          const wallStruct = ctx.structures.find(s =>
+            s.alive && s.cx === impactCell.cx && s.cy === impactCell.cy && s.type === wallType);
+          if (wallStruct) {
+            wallStruct.alive = false;
+            wallStruct.rubble = true;
+            ctx.clearStructureFootprint(wallStruct);
+          }
+        } else {
+          ctx.map.setWallDamageLevel(impactCell.cx, impactCell.cy, nextLevel);
+        }
+      }
+    }
+  }
+
+  // C++ combat.cpp:242-246 — tiberium/ore overlay reduction is also impact-cell
+  // only. Wide_Area_Damage reaches multiple cells by calling Explosion_Damage for
+  // each cell, not by making one explosion reduce every ore cell in radius.
+  if (whMeta.destroysOre) {
+    ctx.map.reduceOreLevel(impactCell.cx, impactCell.cy);
   }
 
   // C++ combat.cpp:261-268 — bridge destruction from splash damage.
@@ -1345,8 +2047,7 @@ export function applySplashDamage(
     }
   }
 
-  // Terrain destruction: large explosions (splash >= 1.5) can destroy trees, walls, and ore in the blast radius
-  const whMeta = getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta);
+  // Terrain destruction: trees are TerrainClass objects and take radius damage.
   if (splashRange >= 1.5 && weapon.damage >= 30) {
     const cc = worldToCell(center.x, center.y);
     const r = Math.ceil(splashRange);
@@ -1387,24 +2088,6 @@ export function applySplashDamage(
             }
           }
         }
-        // CF8: Wall destruction from splash — warheads with IsWallDestroyer flag (C++ combat.cpp:244-270)
-        if (whMeta.destroysWalls && ctx.map.getWallType(tx, ty) !== '') {
-          ctx.map.clearWallType(tx, ty);
-          ctx.map.addDecal(tx, ty, 4, 0.3); // rubble decal
-          ctx.effects.push({
-            type: 'explosion',
-            x: tx * CELL_SIZE + CELL_SIZE / 2,
-            y: ty * CELL_SIZE + CELL_SIZE / 2,
-            frame: 0, maxFrames: 8, size: 6,
-            sprite: 'piffpiff', spriteStart: 0,
-          } as Effect);
-        }
-        // CF9: Ore destruction from splash — warheads with IsTiberiumDestroyer flag (C++ combat.cpp)
-        if (whMeta.destroysOre) {
-          if (tx >= 0 && tx < MAP_CELLS && ty >= 0 && ty < MAP_CELLS) {
-            ctx.map.reduceOreLevel(tx, ty);
-          }
-        }
       }
     }
   }
@@ -1414,8 +2097,9 @@ export function applySplashDamage(
  *  Extracted from Game class (index.ts) — handles HP reduction, destruction effects,
  *  AI base attack tracking, EVA alerts, gap generator unjam, footprint clearing,
  *  bridge destruction, and structure explosion blast damage to nearby units. */
-export function structureDamage(ctx: CombatContext, s: MapStructure, damage: number): boolean {
+export function structureDamage(ctx: CombatContext, s: MapStructure, damage: number, source?: Entity): boolean {
   if (!s.alive) return false;
+  if (source) maybeSuspendTeamsForBaseAttack(ctx, source, s.house, Boolean(STRUCTURE_WEAPONS[s.type]));
   // C++ house.cpp:2751 — Iron Curtain makes structures invulnerable (no damage taken)
   if (s.ironCurtainTicks && s.ironCurtainTicks > 0) return false;
   s.hp = Math.max(0, s.hp - damage);
@@ -1760,9 +2444,69 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
     if (crewType === UnitType.I_E1) {
       inf.isTechnician = true;
     }
+    inf.scenarioInitUnlimbo = true;
     ctx.entities.push(inf);
     ctx.entityById.set(inf.id, inf);
   }
+}
+
+/** C++ BuildingClass::Greatest_Threat path used by weapon-equipped Mission_Guard.
+ *  This is intentionally pure and RNG-free: C++ techno.cpp:2047-2210 scans
+ *  nearby objects and returns the highest-scoring target without consuming RNG.
+ */
+export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): Entity | null {
+    if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) return null;
+    const range = s.weapon.range;
+    let bestTarget: Entity | null = null;
+    let bestScore = -Infinity;
+    for (const e of ctx.entities) {
+      if (!e.alive || e.inLimbo) continue;
+      if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
+      // human-requested: SAMs are air-only. Do NOT revert this line.
+      if (s.weapon.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
+      if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon.isAntiAir) continue;
+      const { lx: structLX, ly: structLY } = structureFireLeptons(s);
+      const distLeptons = leptonDist(structLX, structLY, e.leptonX, e.leptonY);
+      const dist = distLeptons / LEPTON_SIZE;
+      // C++ techno.cpp:1519 In_Range uses <= (lepton distance <= weapon range in leptons).
+      // dist is in cells; range is cells. Use > to match C++ <= (reject only strictly out of range).
+      if (dist > range) continue;
+      // C++ Evaluate_Object (techno.cpp:1470-1763) does NOT check line-of-sight for buildings.
+      // C++ techno.cpp:1651-1752 Evaluate_Object threat scoring formula:
+      // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
+      const points = e.stats.points ?? e.stats.strength ?? 5;
+      const value = Math.trunc(points * 2) + (e.kills ?? 0);
+      const distCells = Math.floor(dist);
+      const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
+      if (score > bestScore) {
+        bestTarget = e;
+        bestScore = score;
+      }
+    }
+
+    // AA override: SAM/AGUN prefer airborne aircraft over ground targets
+    if (s.weapon.isAntiAir && bestTarget) {
+      let bestAirTarget: Entity | null = null;
+      let bestAirDist = Infinity;
+      for (const e of ctx.entities) {
+        if (!e.alive || e.inLimbo || !e.isAirUnit || e.flightAltitude <= 0) continue;
+        if (ctx.isAllied(s.house, e.house)) continue;
+        const { lx: structLX, ly: structLY } = structureFireLeptons(s);
+        const distAA = leptonDist(structLX, structLY, e.leptonX, e.leptonY) / LEPTON_SIZE;
+        if (distAA < range && distAA < bestAirDist) {
+          bestAirTarget = e;
+          bestAirDist = distAA;
+        }
+      }
+      if (bestAirTarget) bestTarget = bestAirTarget;
+    }
+    return bestTarget;
+}
+
+function getAssignedStructureTarget(ctx: CombatContext, s: MapStructure): Entity | null {
+  if (s.targetEntityId === undefined) return null;
+  const target = ctx.entityById.get(s.targetEntityId);
+  return target && target.alive && !target.inLimbo ? target : null;
 }
 
 /** Per-building combat tick — extracted so it can be called per-building right after its
@@ -1811,65 +2555,9 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       return;
     }
 
-    const sx = s.cx * CELL_SIZE + CELL_SIZE;
-    const sy = s.cy * CELL_SIZE + CELL_SIZE;
+    const { x: sx, y: sy } = structureFirePixels(s);
     const structPos: WorldPos = { x: sx, y: sy };
-    const range = s.weapon.range;
-
-    // C++ BuildingClass::Greatest_Threat (building.cpp:2338-2364) adds weapon Allowed_Threats()
-    // + THREAT_RANGE, and for human-owned buildings removes THREAT_BUILDINGS.
-    // TechnoClass::Greatest_Threat (techno.cpp:2047-2210) does a cell-by-cell range scan
-    // calling Evaluate_Object per cell occupant.  Evaluate_Object does NOT check line-of-sight.
-    // Note: ctx.entities contains only mobile units (infantry/vehicles/aircraft), not buildings,
-    // so THREAT_BUILDINGS removal for human buildings is implicit (no buildings in entity list).
-
-    // Find highest-threat enemy in range (C++ building.cpp — prioritize dangerous targets, not just closest)
-    let bestTarget: Entity | null = null;
-    let bestScore = -Infinity;
-    for (const e of ctx.entities) {
-      if (!e.alive || e.inLimbo) continue;
-      if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
-      // human-requested: SAMs are air-only. Do NOT revert this line.
-      if (s.weapon!.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
-      if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon!.isAntiAir) continue;
-      const structLX = s.cx * LEPTON_SIZE + LEPTON_SIZE;
-      const structLY = s.cy * LEPTON_SIZE + LEPTON_SIZE;
-      const distLeptons = leptonDist(structLX, structLY, e.leptonX, e.leptonY);
-      const dist = distLeptons / LEPTON_SIZE;
-      // C++ techno.cpp:1519 In_Range uses <= (lepton distance <= weapon range in leptons).
-      // dist is in cells; range is cells. Use > to match C++ <= (reject only strictly out of range).
-      if (dist > range) continue;
-      // C++ Evaluate_Object (techno.cpp:1470-1763) does NOT check line-of-sight for buildings.
-      // Removed LOS check here for C++ parity (same fix as missionAI.ts:813 guard scan).
-      // C++ techno.cpp:1651-1752 Evaluate_Object threat scoring formula
-      // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
-      const points = e.stats.points ?? e.stats.strength ?? 5;
-      const value = Math.trunc(points * 2) + (e.kills ?? 0);
-      const distCells = Math.floor(dist);
-      const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
-      if (score > bestScore) {
-        bestTarget = e;
-        bestScore = score;
-      }
-    }
-
-    // AA override: SAM/AGUN prefer airborne aircraft over ground targets
-    if (s.weapon.isAntiAir && bestTarget) {
-      let bestAirTarget: Entity | null = null;
-      let bestAirDist = Infinity;
-      for (const e of ctx.entities) {
-        if (!e.alive || e.inLimbo || !e.isAirUnit || e.flightAltitude <= 0) continue;
-        if (ctx.isAllied(s.house, e.house)) continue;
-        const distAA = leptonDist(s.cx * LEPTON_SIZE + LEPTON_SIZE, s.cy * LEPTON_SIZE + LEPTON_SIZE, e.leptonX, e.leptonY) / LEPTON_SIZE;
-        if (distAA < range && distAA < bestAirDist) {
-          bestAirTarget = e;
-          bestAirDist = distAA;
-        }
-      }
-      if (bestAirTarget) {
-        bestTarget = bestAirTarget;
-      }
-    }
+    const bestTarget = getAssignedStructureTarget(ctx, s) ?? findStructureThreatTarget(ctx, s);
 
     if (bestTarget) {
       // Update turret direction for turreted structures
@@ -1895,7 +2583,10 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       const houseBias = ctx.getFirepowerBias(s.house);
       let killed: boolean;
 
-      if (s.weapon.splash && s.weapon.splash > 0) {
+      if (s.type === 'TSLA' || s.type === 'QUEE') {
+        launchStructureProjectile(ctx, s, bestTarget, s.weapon);
+        killed = false;
+      } else if (s.weapon.splash && s.weapon.splash > 0) {
         // Splash weapons: ALL damage through applySplashDamage (matches C++ Explosion_Damage)
         const hpBefore = bestTarget.hp;
         applySplashDamage(
@@ -1927,6 +2618,14 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
           blendMode: 'screen',
         } as Effect);
         ctx.playSoundAt('teslazap', sx, sy);
+        if (s.type === 'TSLA') {
+          // C++ TechnoClass::Fire_At electric branch: firing a building
+          // TeslaZap clears IsCharged and stops the charge animation.
+          s.isCharged = false;
+          s.isCharging = false;
+          s.chargeStage = 0;
+          s.chargeRateCounter = 0;
+        }
       } else {
         // Projectile from structure to target — per-weapon projectile speed
         const structDistPx = Math.sqrt((bestTarget.pos.x - sx) ** 2 + (bestTarget.pos.y - sy) ** 2);
@@ -1969,6 +2668,7 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
           frame: 0, maxFrames: 10, size: 6,
           sprite: aaImpactSprite, spriteStart: 0,
         } as Effect);
+        spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, aaImpactSprite, bestTarget.pos.x, bestTarget.pos.y);
         // D5: Structure fire weapons (FTUR FireballLauncher) plant scorch marks at impact
         if (structLand === 'ground' && wh === 'Fire') {
           const impCell = worldToCell(bestTarget.pos.x, bestTarget.pos.y);

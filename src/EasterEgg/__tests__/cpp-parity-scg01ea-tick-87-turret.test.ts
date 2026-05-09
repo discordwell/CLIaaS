@@ -30,7 +30,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
-import { Entity, resetEntityIds } from '../engine/entity';
+import { Entity, dir256ToFacing8, dir256ToFacing32, resetEntityIds } from '../engine/entity';
 import {
   House, Mission, UnitType, CELL_SIZE, RESFACTOR, Dir,
   directionToLeptons256,
@@ -85,6 +85,17 @@ function callUpdateAttack(game: Game, entity: Entity): void {
   (game as unknown as { updateAttack(e: Entity): void }).updateAttack(entity);
 }
 
+function pendingInvisibleCount(game: Game): number {
+  const g = game as unknown as {
+    _pendingInvisibleScatters?: number;
+    _pendingInvisibleImpacts?: unknown[];
+    inflightProjectiles?: unknown[];
+  };
+  return (g._pendingInvisibleScatters ?? 0) +
+    (g._pendingInvisibleImpacts?.length ?? 0) +
+    (g.inflightProjectiles?.length ?? 0);
+}
+
 beforeAll(() => {
   vi.stubGlobal('Audio', FakeAudio);
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
@@ -125,7 +136,9 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     // turretFacing32 = 5 → turretFacing = floor(5/4) = 1 = Dir.NE.
     jeep.turretFacing = Dir.NE;
     jeep.turretFacing32 = 5;
+    jeep.turretFacing256 = 40;
     jeep.desiredTurretFacing = Dir.NE;
+    jeep.desiredTurretFacing256 = 32;
 
     // Sanity: 8-dir already aligned (coarse tickTurretRotation returns true).
     expect(jeep.turretFacing).toBe(Dir.NE);
@@ -140,16 +153,12 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     expect(diff, '256-step diff should be ≥ 8 in this setup').toBeGreaterThanOrEqual(8);
 
     const rngBefore = ScenarioRandom.callCount;
-    const pendingBefore = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingBefore = pendingInvisibleCount(game);
 
     callUpdateAttack(game, jeep);
 
     // The fine 256-step FIRE_FACING gate MUST block this fire.
-    const pendingAfter = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingAfter = pendingInvisibleCount(game);
     expect(pendingAfter,
       '256-step FIRE_FACING gate blocks fire when diff >= 8').toBe(pendingBefore);
     expect(ScenarioRandom.callCount,
@@ -172,7 +181,9 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     // Align turret on exact NE boundary. turretFacing32 = 4 → turret256 = 32.
     jeep.turretFacing = Dir.NE;
     jeep.turretFacing32 = 4;
+    jeep.turretFacing256 = 32;
     jeep.desiredTurretFacing = Dir.NE;
+    jeep.desiredTurretFacing256 = 32;
 
     // Sanity: 256-step diff should be 0 for a perfectly-aligned NE target.
     const dir256 = directionToLeptons256(
@@ -182,17 +193,46 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     expect(Math.abs(cppDiff256(dir256, turret256)),
       'perfectly aligned NE → diff = 0').toBeLessThan(8);
 
-    const pendingBefore = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingBefore = pendingInvisibleCount(game);
 
     callUpdateAttack(game, jeep);
 
-    const pendingAfter = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingAfter = pendingInvisibleCount(game);
     expect(pendingAfter,
       'perfectly aligned turret fires → invisible Coord_Scatter deferred').toBeGreaterThan(pendingBefore);
+  });
+
+  it('JEEP whose turret finishes rotating this tick still does NOT fire until next tick', () => {
+    // C++ UnitClass::AI order is Firing_AI before Rotation_AI. Can_Fire sees
+    // IsRotating from the previous Rotation_AI, so a non-homing turreted unit
+    // must skip this shot even if Rotation_AI would finish the turn later in
+    // the same tick. SCG06EA t91: the Greek JEEP reaches desired facing at tick
+    // end, then fires on t92; TS used to rotate and fire on t91.
+    const game = createGame();
+    const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 60, 50);
+    const target = placeInfantry(game, UnitType.I_E1, House.USSR, 62, 48);
+    jeep.mission = Mission.GUARD;
+    jeep.target = target;
+    jeep.attackCooldown = 0;
+
+    // Target direction is exact NE (32). Current turret is 26/256, old desired
+    // is NE. ROT+1 for JEEP is enough to complete this turn in one tick, but
+    // C++ FIRE_ROTATING still blocks before Rotation_AI runs.
+    jeep.turretFacing256 = 26;
+    jeep.turretFacing = dir256ToFacing8(jeep.turretFacing256);
+    jeep.turretFacing32 = dir256ToFacing32(jeep.turretFacing256);
+    jeep.desiredTurretFacing256 = 32;
+    jeep.desiredTurretFacing = dir256ToFacing8(jeep.desiredTurretFacing256);
+
+    const pendingBefore = pendingInvisibleCount(game);
+
+    callUpdateAttack(game, jeep);
+
+    const pendingAfter = pendingInvisibleCount(game);
+    expect(pendingAfter,
+      'pre-tick IsRotating blocks non-homing turret fire even when rotation completes').toBe(pendingBefore);
+    expect(jeep.turretFacing256,
+      'Rotation_AI equivalent still finishes the turn after Firing_AI blocks').toBe(32);
   });
 
   it('homing projectile (Bullet->ROT != 0) gets 4× tolerance via diff >>= 2', () => {
@@ -212,7 +252,9 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     // Same misalignment as test 1 (diff256 ≥ 8).
     jeep.turretFacing = Dir.NE;
     jeep.turretFacing32 = 5;
+    jeep.turretFacing256 = 40;
     jeep.desiredTurretFacing = Dir.NE;
+    jeep.desiredTurretFacing256 = 32;
 
     // Sanity: still misaligned at 256-step.
     const dir256 = directionToLeptons256(
@@ -231,16 +273,12 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
       (jeep.weapon as unknown as { projectileROT: number }).projectileROT = 1;
     }
 
-    const pendingBefore = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingBefore = pendingInvisibleCount(game);
 
     callUpdateAttack(game, jeep);
 
     // Homing path passes the gate. M60mg is invisible → deferred scatter.
-    const pendingAfter = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingAfter = pendingInvisibleCount(game);
     expect(pendingAfter,
       'homing projectile bypasses 256-step FIRE_FACING via diff>>=2').toBeGreaterThan(pendingBefore);
 
@@ -266,7 +304,9 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     // Exact S: turretFacing32 = 16 → turret256 = 128 = Dir.S in 256-step.
     jeep.turretFacing = Dir.S;
     jeep.turretFacing32 = 16;
+    jeep.turretFacing256 = 128;
     jeep.desiredTurretFacing = Dir.S;
+    jeep.desiredTurretFacing256 = 128;
 
     // Confirm 256-step diff < 8 for a directly-south target from same column.
     const dir256 = directionToLeptons256(
@@ -276,15 +316,11 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     const alignDiff = Math.abs(cppDiff256(dir256, turret256));
     expect(alignDiff, 'directly-south alignment: diff < 8').toBeLessThan(8);
 
-    const pendingBefore = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingBefore = pendingInvisibleCount(game);
 
     callUpdateAttack(game, jeep);
 
-    const pendingAfter = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingAfter = pendingInvisibleCount(game);
     expect(pendingAfter,
       'exactly-aligned turret fires → scatter deferred').toBeGreaterThan(pendingBefore);
   });
@@ -303,16 +339,12 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     jeep.turretFacing32 = 0;
     jeep.desiredTurretFacing = Dir.N; // will be updated to S by updateAttack.
 
-    const pendingBefore = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingBefore = pendingInvisibleCount(game);
     const rngBefore = ScenarioRandom.callCount;
 
     callUpdateAttack(game, jeep);
 
-    const pendingAfter = (game as unknown as {
-      _pendingInvisibleScatters: number;
-    })._pendingInvisibleScatters;
+    const pendingAfter = pendingInvisibleCount(game);
     expect(pendingAfter,
       '8-dir mismatch still blocks fire').toBe(pendingBefore);
     expect(ScenarioRandom.callCount,

@@ -44,6 +44,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   aiScatterOnDamage,
+  damageEntity,
 } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
 import { AI_BUILD_RULES } from '../engine/ai';
@@ -266,7 +267,7 @@ describe('Scatter distance: rules.ini [General] Stray=', () => {
   it('infantry scatter target is exactly 1 cell away (C++ tries 8 adjacent cells)', () => {
     const scatterDistances = new Set<number>();
     for (let i = 0; i < 200; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
@@ -289,16 +290,17 @@ describe('Scatter distance: rules.ini [General] Stray=', () => {
 // =============================================================================
 
 describe('Scatter triggers (infantry.cpp Take_Damage + Fear_AI)', () => {
-  // C++ infantry.cpp:439 — Scatter is called from TakeDamage
-  it('infantry scatters when taking damage (via aiScatterOnDamage)', () => {
+  // C++ infantry.cpp:439 calls Scatter(source_coord) with forced=false;
+  // infantry.cpp:1900 then requires forced || IsFraidyCat to execute.
+  it('FraidyCat infantry scatters when taking damage from a source', () => {
     let scattered = false;
     for (let i = 0; i < 50; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, e, attacker);
-      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+      if (e.missionQueue === Mission.MOVE && e.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -315,7 +317,7 @@ describe('Scatter triggers (infantry.cpp Take_Damage + Fear_AI)', () => {
       e.facing = Dir.N;
       const ctx = makeCombatCtx([e]);
       aiScatterOnDamage(ctx, e); // no attacker
-      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+      if (e.missionQueue === Mission.MOVE && e.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -333,6 +335,53 @@ describe('Scatter triggers (infantry.cpp Take_Damage + Fear_AI)', () => {
     aiScatterOnDamage(ctx, e, attacker);
     expect(e.mission).toBe(Mission.GUARD);
     expect(e.moveTarget).toBeNull();
+  });
+});
+
+// =============================================================================
+// 4b. Engineer damage special case: non-human E6 goes HUNT after scatter
+// =============================================================================
+
+describe('Engineer damage response (infantry.cpp:432-436)', () => {
+  it('damaged non-player engineer in GUARD queues HUNT after FootClass scatter', () => {
+    const engineer = entityAtCell(UnitType.I_E6, House.GoodGuy, 10, 10);
+    engineer.mission = Mission.GUARD;
+    engineer.weapon = null;
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 12);
+    const ctx = makeCombatCtx([engineer, attacker]);
+
+    damageEntity(ctx, engineer, 1, 'SA', attacker);
+
+    expect(engineer.moveTarget).not.toBeNull();
+    expect(engineer.mission).toBe(Mission.GUARD);
+    expect(engineer.missionQueue).toBe(Mission.HUNT);
+  });
+
+  it('player-house engineer does not take the non-human HUNT override', () => {
+    const engineer = entityAtCell(UnitType.I_E6, House.Spain, 10, 10);
+    engineer.mission = Mission.GUARD;
+    engineer.weapon = null;
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 10, 12);
+    const ctx = makeCombatCtx([engineer, attacker]);
+
+    damageEntity(ctx, engineer, 1, 'SA', attacker);
+
+    expect(engineer.mission).toBe(Mission.GUARD);
+    expect(engineer.missionQueue).not.toBe(Mission.HUNT);
+  });
+
+  it('ordinary non-player infantry keeps the FootClass scatter MOVE queue', () => {
+    const infantry = entityAtCell(UnitType.I_E1, House.GoodGuy, 10, 10);
+    infantry.mission = Mission.GUARD;
+    infantry.weapon = null;
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 12);
+    const ctx = makeCombatCtx([infantry, attacker]);
+
+    damageEntity(ctx, infantry, 1, 'SA', attacker);
+
+    expect(infantry.moveTarget).not.toBeNull();
+    expect(infantry.mission).toBe(Mission.GUARD);
+    expect(infantry.missionQueue).toBe(Mission.MOVE);
   });
 });
 
@@ -645,13 +694,13 @@ describe('IQ scatter threshold (rules.ini [IQ] Scatter=)', () => {
   it('IQ=3 allows scatter (meets Scatter= threshold)', () => {
     let scattered = false;
     for (let i = 0; i < 50; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       ctx.aiIQ = () => 3;
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, e, attacker);
-      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+      if (e.missionQueue === Mission.MOVE && e.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -856,7 +905,7 @@ describe('Scatter direction: away from threat (infantry.cpp:1888-1900)', () => {
   it('infantry scatters AWAY from attacker (northern arc when attacker is south)', () => {
     const scatterDirs = new Set<Dir>();
     for (let i = 0; i < 200; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 13);
@@ -875,7 +924,7 @@ describe('Scatter direction: away from threat (infantry.cpp:1888-1900)', () => {
   it('scatter direction has randomness (multiple unique directions)', () => {
     const scatterDirs = new Set<Dir>();
     for (let i = 0; i < 300; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 15, 10);
@@ -894,7 +943,7 @@ describe('Scatter direction: away from threat (infantry.cpp:1888-1900)', () => {
   it('blocked direction causes infantry to try alternate cells', () => {
     let scattered = false;
     for (let i = 0; i < 100; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 1, 1);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 1, 1);
       e.mission = Mission.GUARD;
       const ctx = makeCombatCtx([e]);
       ctx.map.setTerrain(0, 1, Terrain.ROCK); // block west cell
@@ -928,16 +977,17 @@ describe('Scatter condition interplay (infantry.cpp:1860-1885)', () => {
     expect(e.moveTarget).toBeNull();
   });
 
-  // ATTACK has isScatter=true (C++ default, no INI override) — infantry CAN scatter
-  it('infantry on ATTACK mission CAN scatter (isScatter=true per C++ defaults)', () => {
+  // ATTACK has isScatter=true (C++ default, no INI override), but source
+  // damage still requires forced || IsFraidyCat at infantry.cpp:1900.
+  it('FraidyCat infantry on ATTACK mission CAN scatter', () => {
     let scattered = false;
     for (let i = 0; i < 50; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.ATTACK;
       const ctx = makeCombatCtx([e]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, e, attacker);
-      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+      if (e.missionQueue === Mission.MOVE && e.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -945,16 +995,17 @@ describe('Scatter condition interplay (infantry.cpp:1860-1885)', () => {
     expect(scattered).toBe(true);
   });
 
-  // HUNT has isScatter=true (C++ default, no INI Scatter= override) — infantry CAN scatter
-  it('infantry on HUNT mission CAN scatter (isScatter=true per C++ defaults)', () => {
+  // HUNT has isScatter=true (C++ default, no INI Scatter= override), but source
+  // damage still requires forced || IsFraidyCat at infantry.cpp:1900.
+  it('FraidyCat infantry on HUNT mission CAN scatter', () => {
     let scattered = false;
     for (let i = 0; i < 50; i++) {
-      const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+      const e = entityAtCell(UnitType.I_C1, House.USSR, 10, 10);
       e.mission = Mission.HUNT;
       const ctx = makeCombatCtx([e]);
       const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
       aiScatterOnDamage(ctx, e, attacker);
-      if (e.mission === Mission.MOVE && e.moveTarget !== null) {
+      if (e.missionQueue === Mission.MOVE && e.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -979,12 +1030,12 @@ describe('Scatter condition interplay (infantry.cpp:1860-1885)', () => {
     expect(scattered).toBe(true);
   });
 
-  it('non-infantry on ATTACK does NOT scatter', () => {
+  it('non-infantry on ATTACK can scatter when C++ UnitClass scatter gates pass', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
     tank.mission = Mission.ATTACK;
     const ctx = makeCombatCtx([tank]);
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15);
     aiScatterOnDamage(ctx, tank, attacker);
-    expect(tank.moveTarget).toBeNull();
+    expect(tank.moveTarget).not.toBeNull();
   });
 });

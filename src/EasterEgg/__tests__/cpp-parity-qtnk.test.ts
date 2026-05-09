@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Dir, Mission, AnimState,
   UNIT_STATS, WARHEAD_VS_ARMOR, PRODUCTION_ITEMS,
-  buildDefaultAlliances, armorIndex,
+  buildDefaultAlliances, armorIndex, MPH_TO_PX,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -25,7 +25,9 @@ import {
 } from '../engine/combat';
 import {
   MAD_TANK_CHARGE_TICKS,
-  MAD_TANK_DAMAGE,
+  MAD_TANK_UNIT_DAMAGE_PERCENT,
+  MAD_TANK_BUILDING_DAMAGE_PERCENT,
+  MAD_TANK_INFANTRY_DAMAGE,
   MAD_TANK_RADIUS,
 } from '../engine/specialUnits';
 import { GameMap } from '../engine/map';
@@ -220,8 +222,10 @@ describe('QTNK deploy fields (entity.ts / unit.cpp:2667)', () => {
     expect(MAD_TANK_CHARGE_TICKS).toBe(120);
   });
 
-  it('MAD_TANK_DAMAGE constant is 600', () => {
-    expect(MAD_TANK_DAMAGE).toBe(600);
+  it('MAD Tank quake damage constants match aftrmath.ini percentages', () => {
+    expect(MAD_TANK_UNIT_DAMAGE_PERCENT).toBe(0.45);
+    expect(MAD_TANK_BUILDING_DAMAGE_PERCENT).toBe(0.40);
+    expect(MAD_TANK_INFANTRY_DAMAGE).toBe(0);
   });
 
   it('MAD_TANK_RADIUS constant is 20 cells (aftrmath.ini MTankDistance=20)', () => {
@@ -416,41 +420,54 @@ describe('QTNK stop-rotate-move (drive.cpp)', () => {
     expect(qtnk.facing).toBe(Dir.E);
   });
 
-  it('QTNK moves after rotation completes (arrived at close target)', () => {
+  it('QTNK moves after rotation completes using C++ speed accumulation', () => {
     const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
-    // Already facing the right direction
+    // Already facing the right direction in both public 8-dir state and the
+    // C++-authoritative 256-dir facing used by Rotation_Adjust.
     qtnk.facing = Dir.E;
     qtnk.desiredFacing = Dir.E;
+    qtnk.bodyFacing256 = Dir.E * 32;
+    qtnk.desiredFacing256 = Dir.E * 32;
     qtnk.bodyFacing32 = Dir.E * 4;
 
     const startX = qtnk.pos.x;
     const targetPos = { x: startX + 2, y: qtnk.pos.y }; // very close target
 
-    const arrived = qtnk.moveToward(targetPos, qtnk.stats.speed);
-    // speed 3 >= distance 2, should arrive (within lepton quantization tolerance)
+    // Speed=3 is rules.ini speed, not pixels/tick. Runtime movement converts it
+    // through MaxSpeed leptons and the 255/256 Speed throttle, so the first tick
+    // may only build SpeedAccum.
+    const speed = qtnk.stats.speed * MPH_TO_PX;
+    let arrived = qtnk.moveToward(targetPos, speed);
+    expect(arrived).toBe(false);
+
+    for (let i = 0; i < 8 && !arrived; i++) {
+      qtnk.rotTickedThisFrame = false;
+      arrived = qtnk.moveToward(targetPos, speed);
+    }
+
     expect(arrived).toBe(true);
-    // Lepton quantization: pos.x = leptonX * LP, may not exactly equal targetPos.x
-    expect(qtnk.pos.x).toBeCloseTo(targetPos.x, 1);
+    // Lepton quantization and the C++ 5-lepton arrival tolerance mean the
+    // reported arrival can be sub-pixel short of the exact target.
+    expect(Math.abs(qtnk.pos.x - targetPos.x)).toBeLessThan(1);
   });
 });
 
 // ── AI Scatter on Damage (techno.cpp) ────────────────────────────────────────
-// C++ techno.cpp — AI-controlled units on GUARD scatter when damaged
+// C++ foot.cpp/unit.cpp — AI-controlled vehicles on GUARD assign NavCom when scattering.
 
 describe('QTNK AI scatter on damage (techno.cpp)', () => {
-  it('AI-controlled QTNK on GUARD mission scatters when damaged (IQ >= 2)', () => {
-    let scattered = false;
-    for (let i = 0; i < 50; i++) {
-      const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
-      qtnk.mission = Mission.GUARD;
-      const ctx = makeCombatCtx([qtnk]);
-      aiScatterOnDamage(ctx, qtnk);
-      if (qtnk.mission === Mission.MOVE && qtnk.moveTarget !== null) {
-        scattered = true;
-        break;
-      }
-    }
-    expect(scattered).toBe(true);
+  it('AI-controlled QTNK on GUARD mission gets a scatter destination without changing mission', () => {
+    const qtnk = entityAtCell(UnitType.V_QTNK, House.USSR, 10, 10);
+    qtnk.mission = Mission.GUARD;
+    const ctx = makeCombatCtx([qtnk]);
+
+    aiScatterOnDamage(ctx, qtnk);
+
+    // UnitClass::Scatter(0,true) calls Assign_Destination(Nearby_Location(...)).
+    // It does not Assign_Mission(MOVE); DriveClass::AI drives while GUARD has a
+    // legal NavCom.
+    expect(qtnk.mission).toBe(Mission.GUARD);
+    expect(qtnk.moveTarget).not.toBeNull();
   });
 
   it('player-controlled QTNK does NOT scatter', () => {

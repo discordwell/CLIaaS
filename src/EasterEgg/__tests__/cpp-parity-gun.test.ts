@@ -479,10 +479,15 @@ describe('GUN threat-based targeting (building.cpp priority scoring)', () => {
     const truck = entityAtCell(UnitType.V_TRUK, House.USSR, 12, 10);
     // Armed tank — weapon gives higher threat score
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 11);
+    // Pre-align to the tank's southeast bearing. C++ Mission_Attack delays the
+    // shot if the turret must rotate, so this test isolates target priority.
+    gun.turretDir = 3;
+    gun.desiredTurretDir = 3;
     const ctx = makeCombatCtx([gun], [truck, tank]);
     updateStructureCombat(ctx);
-    // Tank should take damage (higher threat score), truck should be untouched
+    // Tank should be the direct target. The truck can still receive splash.
     expect(tank.hp).toBeLessThan(tank.maxHp);
+    expect(tank.maxHp - tank.hp).toBeGreaterThan(truck.maxHp - truck.hp);
   });
 });
 

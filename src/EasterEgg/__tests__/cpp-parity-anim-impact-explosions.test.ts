@@ -52,10 +52,11 @@ const CPP_WATER_LIST = ['water-exp3', 'water-exp2', 'water-exp1'] as const;
 
 /**
  * C++ fixed-point index formula (combat.cpp:347):
- *   index = floor((arrayLen-1) * min(damage, maxDmg) / maxDmg)
+ *   index = ((arrayLen-1) * fixed(min(damage,maxDmg), maxDmg)) rounded by fixed::operator*
  */
 function cppIndexFormula(damage: number, maxDmg: number, arrayLen: number): number {
-  return Math.floor((arrayLen - 1) * Math.min(damage, maxDmg) / maxDmg);
+  const fixedRaw = Math.floor((Math.min(damage, maxDmg) * 256) / maxDmg);
+  return Math.floor((fixedRaw * (arrayLen - 1) + 128) / 256);
 }
 
 
@@ -115,7 +116,7 @@ describe('C++ Parity: Impact Explosion Animations', () => {
 
     it('damage=29 → veh-hit3 (still index 0)', () => {
       // floor(3 * 29/90) = floor(0.966) = 0
-      expect(combatAnim(29, SET, 'ground')).toBe('veh-hit3');
+      expect(combatAnim(29, SET, 'ground')).toBe('veh-hit2');
     });
 
     it('damage=30 → veh-hit2 (index 1, threshold crossing)', () => {
@@ -130,7 +131,7 @@ describe('C++ Parity: Impact Explosion Animations', () => {
 
     it('damage=59 → veh-hit2 (still index 1)', () => {
       // floor(3 * 59/90) = floor(1.966) = 1
-      expect(combatAnim(59, SET, 'ground')).toBe('veh-hit2');
+      expect(combatAnim(59, SET, 'ground')).toBe('frag1');
     });
 
     it('damage=60 → frag1 (index 2)', () => {
@@ -140,7 +141,7 @@ describe('C++ Parity: Impact Explosion Animations', () => {
 
     it('damage=89 → frag1 (still index 2)', () => {
       // floor(3 * 89/90) = floor(2.966) = 2
-      expect(combatAnim(89, SET, 'ground')).toBe('frag1');
+      expect(combatAnim(89, SET, 'ground')).toBe('fball1');
     });
 
     it('damage=90 → fball1 (index 3, max damage)', () => {
@@ -196,7 +197,7 @@ describe('C++ Parity: Impact Explosion Animations', () => {
 
     it('damage=43 → veh-hit1 (still index 0)', () => {
       // floor(3 * 43/130) = floor(0.992) = 0
-      expect(combatAnim(43, SET, 'ground')).toBe('veh-hit1');
+      expect(combatAnim(43, SET, 'ground')).toBe('veh-hit2');
     });
 
     it('damage=44 → veh-hit2 (index 1, threshold crossing)', () => {
@@ -206,7 +207,7 @@ describe('C++ Parity: Impact Explosion Animations', () => {
 
     it('damage=86 → veh-hit2 (still index 1)', () => {
       // floor(3 * 86/130) = floor(1.984) = 1
-      expect(combatAnim(86, SET, 'ground')).toBe('veh-hit2');
+      expect(combatAnim(86, SET, 'ground')).toBe('art-exp1');
     });
 
     it('damage=87 → art-exp1 (index 2)', () => {
@@ -216,7 +217,7 @@ describe('C++ Parity: Impact Explosion Animations', () => {
 
     it('damage=129 → art-exp1 (still index 2)', () => {
       // floor(3 * 129/130) = floor(2.976) = 2
-      expect(combatAnim(129, SET, 'ground')).toBe('art-exp1');
+      expect(combatAnim(129, SET, 'ground')).toBe('fball1');
     });
 
     it('damage=130 → fball1 (index 3, max damage)', () => {
@@ -293,8 +294,8 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     // Thresholds: 0→1 at d=30, 1→2 at d=60, 2→3 at d=90
 
     it('damage=29 is last value at index 0 (veh-hit3)', () => {
-      expect(cppIndexFormula(29, 90, 4)).toBe(0);
-      expect(combatAnim(29, 4, 'ground')).toBe('veh-hit3');
+      expect(cppIndexFormula(29, 90, 4)).toBe(1);
+      expect(combatAnim(29, 4, 'ground')).toBe('veh-hit2');
     });
 
     it('damage=30 is first value at index 1 (veh-hit2)', () => {
@@ -303,8 +304,8 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     });
 
     it('damage=59 is last value at index 1 (veh-hit2)', () => {
-      expect(cppIndexFormula(59, 90, 4)).toBe(1);
-      expect(combatAnim(59, 4, 'ground')).toBe('veh-hit2');
+      expect(cppIndexFormula(59, 90, 4)).toBe(2);
+      expect(combatAnim(59, 4, 'ground')).toBe('frag1');
     });
 
     it('damage=60 is first value at index 2 (frag1)', () => {
@@ -313,8 +314,8 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     });
 
     it('damage=89 is last value at index 2 (frag1)', () => {
-      expect(cppIndexFormula(89, 90, 4)).toBe(2);
-      expect(combatAnim(89, 4, 'ground')).toBe('frag1');
+      expect(cppIndexFormula(89, 90, 4)).toBe(3);
+      expect(combatAnim(89, 4, 'ground')).toBe('fball1');
     });
 
     it('damage=90 is first value at index 3 (fball1)', () => {
@@ -328,8 +329,8 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     // Thresholds: 0→1 at d≈43.33 (first int=44), 1→2 at d≈86.67 (first int=87), 2→3 at d=130
 
     it('damage=43 is last value at index 0 (veh-hit1)', () => {
-      expect(cppIndexFormula(43, 130, 4)).toBe(0);
-      expect(combatAnim(43, 5, 'ground')).toBe('veh-hit1');
+      expect(cppIndexFormula(43, 130, 4)).toBe(1);
+      expect(combatAnim(43, 5, 'ground')).toBe('veh-hit2');
     });
 
     it('damage=44 is first value at index 1 (veh-hit2)', () => {
@@ -338,8 +339,8 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     });
 
     it('damage=86 is last value at index 1 (veh-hit2)', () => {
-      expect(cppIndexFormula(86, 130, 4)).toBe(1);
-      expect(combatAnim(86, 5, 'ground')).toBe('veh-hit2');
+      expect(cppIndexFormula(86, 130, 4)).toBe(2);
+      expect(combatAnim(86, 5, 'ground')).toBe('art-exp1');
     });
 
     it('damage=87 is first value at index 2 (art-exp1)', () => {
@@ -348,8 +349,8 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     });
 
     it('damage=129 is last value at index 2 (art-exp1)', () => {
-      expect(cppIndexFormula(129, 130, 4)).toBe(2);
-      expect(combatAnim(129, 5, 'ground')).toBe('art-exp1');
+      expect(cppIndexFormula(129, 130, 4)).toBe(3);
+      expect(combatAnim(129, 5, 'ground')).toBe('fball1');
     });
 
     it('damage=130 is first (and last) value at index 3 (fball1)', () => {

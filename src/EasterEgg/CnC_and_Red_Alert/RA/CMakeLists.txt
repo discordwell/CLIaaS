@@ -289,8 +289,8 @@ install(TARGETS rasdl)
 if(EMSCRIPTEN)
 	set_target_properties(rasdl PROPERTIES
 		SUFFIX ".html"
-		LINK_FLAGS "-sENVIRONMENT=web -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576 -sFORCE_FILESYSTEM -sINITIAL_MEMORY=128mb -sALLOW_MEMORY_GROWTH -sNO_EXIT_RUNTIME=1 -sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_inject_key','_inject_key_press','_inject_key_release','_inject_mouse_click','_inject_mouse_press','_inject_mouse_release','_inject_mouse_move','_input_diag','_set_autoplay','_set_agent_harness_mode','_set_startup_scenario','_set_custom_seed','_agent_get_state','_agent_command','_agent_step','_agent_vessel_produce','_agent_vessel_place','_agent_render'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8']"
-	)
+			LINK_FLAGS "-sENVIRONMENT=web -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576 -sFORCE_FILESYSTEM -sINITIAL_MEMORY=128mb -sALLOW_MEMORY_GROWTH -sNO_EXIT_RUNTIME=1 -sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_inject_key','_inject_key_press','_inject_key_release','_inject_mouse_click','_inject_mouse_press','_inject_mouse_release','_inject_mouse_move','_input_diag','_set_autoplay','_set_agent_harness_mode','_set_startup_scenario','_set_custom_seed','_agent_get_state','_agent_get_bullet_scatter_log','_agent_get_scg06_nearby_infantry','_agent_tick_only','_agent_command','_agent_step','_agent_vessel_produce','_agent_vessel_place','_agent_render'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8']"
+		)
 	# this does not include the files, that would require something like
 	# file_packager files.data --js-output=files.js --preload *.mix REDALERT.INI
 	# (which is huge if you include the movies)

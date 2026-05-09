@@ -48,7 +48,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -503,7 +503,7 @@ describe('STNK retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, stnk, attacker);
 
     expect(stnk.target).toBe(attacker);
-    expect(stnk.mission).toBe(Mission.ATTACK);
+    expect(stnk.mission).toBe(Mission.GUARD);
   });
 
   it('STNK CAN retaliate (has APTusk weapon)', () => {
@@ -550,7 +550,7 @@ describe('STNK AI scatter on damage (techno.cpp)', () => {
       stnk.mission = Mission.GUARD;
       const ctx = makeCombatCtx([stnk]);
       aiScatterOnDamage(ctx, stnk);
-      if (stnk.mission === Mission.MOVE && stnk.moveTarget !== null) {
+      if (stnk.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -563,6 +563,7 @@ describe('STNK AI scatter on damage (techno.cpp)', () => {
     stnk.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([stnk]);
+    ctx.playerHouse = House.Spain;
     aiScatterOnDamage(ctx, stnk);
 
     expect(stnk.mission).toBe(Mission.GUARD);

@@ -53,6 +53,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type CombatContext, triggerRetaliation, damageEntity } from '../engine/combat';
 import { GameMap } from '../engine/map';
+import { Team } from '../engine/team';
 import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
@@ -117,6 +118,18 @@ function makeMockCtx(overrides: Partial<CombatContext> = {}): CombatContext {
   } as CombatContext;
 }
 
+function makeMovingTeam(member: Entity): Team {
+  const team = new Team({
+    house: member.house,
+    desiredMembers: [{ type: member.type, count: 1 }],
+    missionList: [],
+    isReinforcable: false,
+  });
+  team.add(member);
+  team.isMoving = true;
+  return team;
+}
+
 describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1172)', () => {
   it('team member in MOVE sets TarCom but does NOT change mission (C++ team.cpp:1613 + 1715-1718)', () => {
     // Repro of the SCG06EA tick 65 event: a BadGuy E1 in MOVE mission, part of a
@@ -136,14 +149,16 @@ describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1
     victim.mission = Mission.MOVE;
     const originalTimer = 12;
     victim.missionTimer = originalTimer;
-    victim.teamRef = { id: 1 }; // any non-null placeholder for team membership
+    const team = makeMovingTeam(victim);
 
     const attacker = makeEntity(UnitType.I_E1, House.Greece, 19 * CELL_SIZE, 65 * CELL_SIZE);
 
     triggerRetaliation(ctx, victim, attacker);
 
-    // TarCom set to aggressor — mirrors C++ Coordinate_Attack propagation.
-    expect(victim.target).toBe(attacker);
+    // FootClass::Take_Damage delegates to Team::Took_Damage. That sets the
+    // collective Team target; individual TarCom is propagated later by team AI.
+    expect(team.targetEntityRef).toBe(attacker);
+    expect(victim.target).toBeNull();
     // Mission and timer MUST remain untouched — this is the critical tick-67
     // quiet-tick parity. A mission change would set missionTimer=0 via
     // Commence, triggering a rogue Mission_Move jitter RNG at the next tick.
@@ -163,7 +178,7 @@ describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1
     triggerRetaliation(ctx, victim, attacker);
 
     expect(victim.target).toBe(attacker);
-    expect(victim.mission).toBe(Mission.ATTACK);
+    expect(victim.mission).toBe(Mission.GUARD);
   });
 
   it('damageEntity honours the teamRef target-only path (unified entry point)', () => {
@@ -174,14 +189,14 @@ describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1
     const victim = makeEntity(UnitType.I_E1, House.BadGuy, 18 * CELL_SIZE, 68 * CELL_SIZE);
     victim.mission = Mission.MOVE;
     victim.missionTimer = 8;
-    victim.teamRef = { id: 1 };
+    const team = makeMovingTeam(victim);
     ctx.entities.push(victim);
 
     const attacker = makeEntity(UnitType.I_E1, House.Greece, 19 * CELL_SIZE, 65 * CELL_SIZE);
     damageEntity(ctx, victim, 15, 'SA', attacker);
 
-    // Target set (individual TarCom from team damage propagation).
-    expect(victim.target).toBe(attacker);
+    expect(team.targetEntityRef).toBe(attacker);
+    expect(victim.target).toBeNull();
     // Mission/timer preserved — no Commence cycle, no Mission_Move jitter RNG.
     expect(victim.mission).toBe(Mission.MOVE);
     expect(victim.missionTimer).toBe(8);
@@ -194,7 +209,7 @@ describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1
     const ctx = makeMockCtx();
     const victim = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
     victim.mission = Mission.ATTACK;
-    victim.teamRef = { id: 1 };
+    const team = makeMovingTeam(victim);
     const existingTarget = makeEntity(UnitType.I_E1, House.Greece, 200, 100);
     victim.target = existingTarget;
 
@@ -202,5 +217,6 @@ describe('SCG06EA tick 67 — team member retaliation delegation (C++ foot.cpp:1
     triggerRetaliation(ctx, victim, attacker);
 
     expect(victim.target).toBe(existingTarget);
+    expect(team.targetEntityRef).toBe(attacker);
   });
 });

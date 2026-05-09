@@ -403,14 +403,14 @@ describe('4. Turret rotation rate = ROT+1 per tick (unit.cpp:542)', () => {
     tank.desiredTurretFacing = Dir.E;
     tank.turretRotTickedThisFrame = false;
 
-    // First tick: accumulates ROT+1 = 6. 6 < 8 threshold, no step yet
-    tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(0);
-
-    // Second tick: acc = 6 + 6 = 12 >= 8 -> step. acc = 12 - 8 = 4.
-    tank.turretRotTickedThisFrame = false;
+    // First tick: C++ applies the full ROT+1 in 256-dir space; 6 rounds to visual step 1.
     tank.tickTurretRotation();
     expect(tank.turretFacing32).toBe(1);
+
+    // Second tick: 12 in 256-dir space rounds to visual step 2.
+    tank.turretRotTickedThisFrame = false;
+    tank.tickTurretRotation();
+    expect(tank.turretFacing32).toBe(2);
   });
 
   it('turret rotates faster than body for same unit (body=ROT, turret=ROT+1)', () => {
@@ -423,9 +423,10 @@ describe('4. Turret rotation rate = ROT+1 per tick (unit.cpp:542)', () => {
     tank.bodyFacing32 = 0;
     tank.desiredFacing = Dir.E;
     let bodyTicks = 0;
-    while (tank.facing !== Dir.E && bodyTicks < 100) {
+    let bodyDone = false;
+    while (!bodyDone && bodyTicks < 100) {
       tank.rotTickedThisFrame = false;
-      tank.tickRotation();
+      bodyDone = tank.tickRotation();
       bodyTicks++;
     }
 
@@ -435,9 +436,10 @@ describe('4. Turret rotation rate = ROT+1 per tick (unit.cpp:542)', () => {
     tank2.turretFacing32 = 0;
     tank2.desiredTurretFacing = Dir.E;
     let turretTicks = 0;
-    while (tank2.turretFacing !== Dir.E && turretTicks < 100) {
+    let turretDone = false;
+    while (!turretDone && turretTicks < 100) {
       tank2.turretRotTickedThisFrame = false;
-      tank2.tickTurretRotation();
+      turretDone = tank2.tickTurretRotation();
       turretTicks++;
     }
 
@@ -700,9 +702,10 @@ describe('8. Body rotation for non-turreted vehicles (unit.cpp:517-524)', () => 
     arty.desiredFacing = Dir.E;
 
     let tsTicks = 0;
-    while (arty.facing !== Dir.E && tsTicks < 100) {
+    let done = false;
+    while (!done && tsTicks < 100) {
       arty.rotTickedThisFrame = false;
-      arty.tickRotation();
+      done = arty.tickRotation();
       tsTicks++;
     }
 
@@ -729,8 +732,8 @@ describe('9. 32-step turret rotation ring: direction and timing', () => {
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
 
-    // Should have stepped CW (turretFacing32 increased)
-    expect(tank.turretFacing32).toBe(1);
+    // Should have stepped CW in exact 256-dir space.
+    expect(tank.turretFacing32).toBe(2);
   });
 
   it('turret rotates counter-clockwise (CCW) when diff >= 16 in 32-ring', () => {
@@ -793,9 +796,10 @@ describe('10. Turret 90-degree rotation tick counts per vehicle (ROT+1)', () => 
       entity.desiredTurretFacing = Dir.E;
 
       let tsTicks = 0;
-      while (entity.turretFacing !== Dir.E && tsTicks < 100) {
+      let done = false;
+      while (!done && tsTicks < 100) {
         entity.turretRotTickedThisFrame = false;
-        entity.tickTurretRotation();
+        done = entity.tickTurretRotation();
         tsTicks++;
       }
 
@@ -828,9 +832,10 @@ describe('10b. Body 90-degree rotation tick counts per vehicle (ROT)', () => {
       entity.desiredFacing = Dir.E;
 
       let tsTicks = 0;
-      while (entity.facing !== Dir.E && tsTicks < 100) {
+      let done = false;
+      while (!done && tsTicks < 100) {
         entity.rotTickedThisFrame = false;
-        entity.tickRotation();
+        done = entity.tickRotation();
         tsTicks++;
       }
 
@@ -949,9 +954,10 @@ describe('14. Naval turret rotation parity', () => {
       entity.desiredTurretFacing = Dir.E;
 
       let tsTicks = 0;
-      while (entity.turretFacing !== Dir.E && tsTicks < 100) {
+      let done = false;
+      while (!done && tsTicks < 100) {
         entity.turretRotTickedThisFrame = false;
-        entity.tickTurretRotation();
+        done = entity.tickTurretRotation();
         tsTicks++;
       }
 

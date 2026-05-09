@@ -162,7 +162,7 @@ describe('3TNK dual-weapon cadence (techno.cpp:2857)', () => {
     expect(selected).not.toBeNull();
   });
 
-  it('selectWeapon returns secondary when primary is on cooldown', () => {
+  it('selectWeapon still returns the 105mm while Arm is rearming', () => {
     const tank = make3TNK(100, 100);
     const target = makeTarget(UnitType.V_2TNK, House.Spain, 150, 100);
 
@@ -170,7 +170,7 @@ describe('3TNK dual-weapon cadence (techno.cpp:2857)', () => {
     tank.attackCooldown2 = 0;
 
     const selected = tank.selectWeapon(target, getWarheadMultiplier);
-    expect(selected).toBe(tank.weapon2);
+    expect(selected).toBe(tank.weapon);
   });
 
   it('selectWeapon returns primary when secondary is on cooldown', () => {
@@ -184,7 +184,7 @@ describe('3TNK dual-weapon cadence (techno.cpp:2857)', () => {
     expect(selected).toBe(tank.weapon);
   });
 
-  it('selectWeapon returns null when both weapons are on cooldown', () => {
+  it('selectWeapon does not return null when both cooldown mirrors are nonzero', () => {
     const tank = make3TNK(100, 100);
     const target = makeTarget(UnitType.V_2TNK, House.Spain, 150, 100);
 
@@ -192,7 +192,7 @@ describe('3TNK dual-weapon cadence (techno.cpp:2857)', () => {
     tank.attackCooldown2 = 50;
 
     const selected = tank.selectWeapon(target, getWarheadMultiplier);
-    expect(selected).toBeNull();
+    expect(selected).toBe(tank.weapon);
   });
 
   it('isSecondShot field starts false', () => {
@@ -335,19 +335,19 @@ describe('3TNK turret behavior', () => {
   it('turret rotates at ROT+1 speed (C++ unit.cpp:542)', () => {
     const tank = make3TNK();
     const rotRate = tank.stats.rot; // 5
-    // Turret rotation rate = ROT+1 = 6
-    // Accumulates 6 per tick, advances one 32-step when >= 8
-    // So first advance at tick 2 (accum: 6, 12 -> step at 8)
+    // Turret rotation rate = ROT+1 = 6 in full 256-dir space.
+    // C++ Dir_To_32(6) is already visual frame 1; there is no 32-step
+    // accumulator that waits until 8.
     tank.desiredTurretFacing = Dir.E; // 8 steps away in 32-step ring
 
-    // After 1 tick: accum=6, no step yet
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(0); // hasn't stepped yet
+    expect(tank.turretFacing256).toBe(6);
+    expect(tank.turretFacing32).toBe(1);
 
-    // After 2 ticks: accum=12-8=4, one step taken
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(1); // one 32-step forward
+    expect(tank.turretFacing256).toBe(12);
+    expect(tank.turretFacing32).toBe(2);
   });
 });
 

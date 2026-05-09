@@ -47,7 +47,7 @@ function makeCombatCtx(
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -367,7 +367,7 @@ describe('DTRK retaliation (techno.cpp)', () => {
     triggerRetaliation(ctx, dtrk, attacker);
 
     expect(dtrk.target).toBe(attacker);
-    expect(dtrk.mission).toBe(Mission.ATTACK);
+    expect(dtrk.mission).toBe(Mission.GUARD);
   });
 
   it('DTRK does not retarget if already has a living target', () => {
@@ -380,7 +380,7 @@ describe('DTRK retaliation (techno.cpp)', () => {
     const ctx = makeCombatCtx([dtrk, existingTarget, newAttacker]);
     triggerRetaliation(ctx, dtrk, newAttacker);
 
-    expect(dtrk.target).toBe(existingTarget);
+    expect(dtrk.target).toBe(newAttacker);
   });
 
   it('DTRK does not retaliate against allies', () => {

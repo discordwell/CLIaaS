@@ -54,7 +54,7 @@ describe('moveToward — overshoot prevention', () => {
     expect(arrived).toBe(true);
   });
 
-  it('returns true (arrived) when movement covers remaining distance', () => {
+  it('infantry direct Coord_Move can overshoot until the pre-move snap radius is reached', () => {
     const inf = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     const target = { x: 103, y: 100 };
 
@@ -64,11 +64,12 @@ describe('moveToward — overshoot prevention', () => {
     const arrived1 = inf.moveToward(target, 5);
     expect(arrived1).toBe(false);
 
-    // Second call: now within snap distance → snap to target
+    // C++ infantry.cpp applies Coord_Move without a post-move clamp. Low-level
+    // direct movement can overshoot a nearby target instead of reporting arrival.
     inf.rotTickedThisFrame = false;
     const arrived2 = inf.moveToward(target, 5);
-    expect(arrived2).toBe(true);
-    expect(inf.pos.x).toBeCloseTo(103, 0);
+    expect(arrived2).toBe(false);
+    expect(inf.pos.x).toBeLessThan(103);
   });
 });
 

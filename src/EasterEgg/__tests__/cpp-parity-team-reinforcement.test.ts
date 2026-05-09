@@ -42,7 +42,7 @@ import {
 } from '../engine/scenario';
 import {
   House, Mission, UnitType, CELL_SIZE, UNIT_STATS,
-  cellToWorld, type CellPos, cellToLepton,
+  cellToWorld, type CellPos, cellTargetToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -695,7 +695,7 @@ describe('Waypoint-based spawn locations (reinf.cpp:441)', () => {
     const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
     const mapBounds = { x: 20, y: 30, w: 80, h: 60 };
     const waypoints = new Map<number, CellPos>([[0, { cx: 60, cy: 70 }]]);
-    const originLepton = cellToLepton(60, 70);
+    const originLepton = cellTargetToLepton(60, 70);
     const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(
       action, teamTypes, waypoints, emptyGlobals, emptyTriggers,
@@ -1082,14 +1082,13 @@ describe('Team object AI behavior after spawn (team.cpp)', () => {
     team.ai();
     expect(team.isMoving, 'Team should activate on first tick').toBe(true);
 
-    // timeOut should be (5 * 90) - 1 = 449 after one tick of execution
-    // The initial value is data * 90 = 450 (C++ team.cpp:710: TICKS_PER_MINUTE/10 = 90)
-    // C++ team.cpp processes advance and execute in the same AI() call,
-    // so timeOut is set to data*90 then immediately decremented by 1.
+    // The initial value is data * 90 = 450 (C++ team.cpp:710: TICKS_PER_MINUTE/10 = 90).
+    // TimeOut is a CDTimerClass; assignment stores Started=Frame, so same-frame
+    // Value() remains full and the countdown drops on subsequent frames.
     expect(
       team.timeOut,
-      'Guard timeout = data*90 - 1 after advance+execute in same tick',
-    ).toBe(5 * 90 - 1);
+      'Guard timeout remains data*90 in the frame it is assigned',
+    ).toBe(5 * 90);
   });
 });
 
@@ -1645,11 +1644,11 @@ describe('Force_Active parity: IsUnderStrength=false (team.h:215)', () => {
 
     team.ai();
 
-    // Should have activated + advanced + executed GUARD in one tick
+    // Should have activated + advanced + executed GUARD in one tick.
     expect(team.isMoving).toBe(true);
     expect(team.currentMission).toBe(0);
-    // GUARD with data=3: timeOut = 3*90 = 270, then decremented once = 269
-    expect(team.timeOut).toBe(3 * 90 - 1);
+    // GUARD with data=3: TimeOut.Value() remains full on the assignment frame.
+    expect(team.timeOut).toBe(3 * 90);
   });
 });
 

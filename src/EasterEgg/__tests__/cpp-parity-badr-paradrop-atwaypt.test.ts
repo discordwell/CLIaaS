@@ -14,8 +14,8 @@
  *     Paradrop_Cargo() when Is_Something_Attached() returns true.
  *   - aircraft.cpp:3964-4013 — AircraftClass::Can_Fire — returns FIRE_OK for
  *     passenger aircraft when Distance(target) < 0x0200 leptons (2 cells).
- *   - aircraft.cpp:293 — Unlimbo: BADR always has IsALoaner=true, so after the
- *     last drop it Assigns MISSION_RETREAT and flies off-map.
+ *   - aircraft.cpp:802-818 — IsALoaner retreat happens later in the REGROUP
+ *     phase, not synchronously inside Paradrop_Cargo.
  *   - team.cpp:732-738 — TMISSION_ATT_WAYPT: Assign_Mission_Target(waypoint).
  *   - team.cpp:1636-1721 — Coordinate_Attack: assigns MISSION_ATTACK to members
  *     and sets Target=MissionTarget (the waypoint cell).
@@ -190,7 +190,8 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
     expect(badr.passengers.length).toBe(1);
     expect(ctx.entities.length).toBe(2); // BADR + 1 dropped E1
 
-    // Tick again: second passenger drops. BADR flips to RETREAT afterwards.
+    // Tick again: second passenger drops. BADR stays in ATTACK until the
+    // aircraft attack state reaches REGROUP.
     updateAircraft(ctx, badr);
     expect(badr.passengers.length).toBe(0);
     expect(ctx.entities.length).toBe(3); // BADR + 2 dropped E1s
@@ -240,7 +241,7 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
     expect(Math.abs(firstDropPos.y - dropTarget.y)).toBeLessThan(CELL * 2);
   });
 
-  it('after the last passenger is dropped, BADR switches to RETREAT (C++ IsALoaner)', () => {
+  it('after the last passenger is dropped, BADR does not immediately switch to RETREAT', () => {
     const ctx = makeCtx();
     const dropTarget = cellToWorld(30, 30);
     const { badr } = spawnBadrWithPassengers(
@@ -253,7 +254,8 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
     updateAircraft(ctx, badr); // drop #1
     expect(badr.mission).toBe(Mission.ATTACK); // still has passengers
     updateAircraft(ctx, badr); // drop #2 → last
-    expect(badr.mission).toBe(Mission.RETREAT); // C++ aircraft.cpp:293, 808-810
+    expect(badr.passengers.length).toBe(0);
+    expect(badr.mission).toBe(Mission.ATTACK);
   });
 
   it('BADR does NOT drop passengers while >2 cells from target (C++ Can_Fire 0x0200 range)', () => {

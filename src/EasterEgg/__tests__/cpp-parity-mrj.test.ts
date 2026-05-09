@@ -43,7 +43,7 @@ function makeCombatContext(entities: Entity[]): CombatContext {
     inflightProjectiles: [],
     effects: [] as Effect[],
     tick: 0,
-    playerHouse: House.Spain,
+    playerHouse: House.Greece,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
@@ -216,14 +216,14 @@ describe('MRJ cannot retaliate (C++ techno.cpp — unarmed check)', () => {
 
   it('contrast: armed JEEP DOES retaliate when attacked', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.USSR, 124, 100);
     jeep.mission = Mission.GUARD;
 
     const ctx = makeCombatContext([jeep, attacker]);
     triggerRetaliation(ctx, jeep, attacker);
 
     expect(jeep.target).toBe(attacker);
-    expect(jeep.mission).toBe(Mission.ATTACK);
+    expect(jeep.mission).toBe(Mission.GUARD);
   });
 });
 

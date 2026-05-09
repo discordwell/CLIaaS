@@ -197,6 +197,11 @@ export class GameMap {
   /** Wall type at each cell ('' = no wall, 'SBAG'/'FENC'/'BARB'/'BRIK' = wall type) */
   wallType: string[];
 
+  /** C++ CellClass::OverlayData damage-level component for walls.
+   *  TS renders wall connections independently, so this stores only the
+   *  accumulated Reduce_Wall() damage level. */
+  wallDamageLevel: Uint8Array;
+
   /** Tree type at each cell ('' = none, 't01'-'t17'/'tc01'-'tc05' = tree sprite, '_clump' = covered by nearby clump origin) */
   treeType: string[];
 
@@ -255,6 +260,7 @@ export class GameMap {
     this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.oreDensity = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.wallType = new Array(MAP_CELLS * MAP_CELLS).fill('');
+    this.wallDamageLevel = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.treeType = new Array(MAP_CELLS * MAP_CELLS).fill('');
     this.boundsX = 0;
     this.boundsY = 0;
@@ -294,14 +300,31 @@ export class GameMap {
   /** Set wall type at a cell */
   setWallType(cx: number, cy: number, type: string): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
-      this.wallType[cy * MAP_CELLS + cx] = type;
+      const idx = cy * MAP_CELLS + cx;
+      this.wallType[idx] = type;
+      this.wallDamageLevel[idx] = 0;
     }
   }
 
   /** Clear wall type at a cell */
   clearWallType(cx: number, cy: number): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
-      this.wallType[cy * MAP_CELLS + cx] = '';
+      const idx = cy * MAP_CELLS + cx;
+      this.wallType[idx] = '';
+      this.wallDamageLevel[idx] = 0;
+    }
+  }
+
+  /** Get accumulated wall damage levels (C++ OverlayData >> 4 approximation). */
+  getWallDamageLevel(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
+    return this.wallDamageLevel[cy * MAP_CELLS + cx] ?? 0;
+  }
+
+  /** Set accumulated wall damage levels. */
+  setWallDamageLevel(cx: number, cy: number, level: number): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.wallDamageLevel[cy * MAP_CELLS + cx] = Math.max(0, Math.min(255, level | 0));
     }
   }
 
@@ -372,7 +395,7 @@ export class GameMap {
     return this.trees.get(cy * MAP_CELLS + cx);
   }
 
-  /** Destroy a tree — clear its occupancy, terrain, and tree type.
+  /** Destroy a tree — clear its occupancy and tree type.
    *  cpp-parity: RA terrain.cpp Start_To_Crumble + destructor — removes tree from map. */
   destroyTree(tree: MapTree): void {
     // Clear occupancy
@@ -380,24 +403,18 @@ export class GameMap {
       this.treeOccupied.delete(cellIdx);
       this.treeCellToTree.delete(cellIdx);
     }
-    // Clear tree type and terrain on all cells this tree covers
+    // Clear tree type on all cells this tree covers. Do not change Terrain:
+    // C++ TerrainClass objects sit on top of the underlying template Land_Type.
     const originIdx = tree.cy * MAP_CELLS + tree.cx;
     this.trees.delete(originIdx);
-    // Clear origin cell
     this.clearTreeType(tree.cx, tree.cy);
-    if (this.getTerrain(tree.cx, tree.cy) === Terrain.TREE) {
-      this.setTerrain(tree.cx, tree.cy, Terrain.CLEAR);
-    }
-    // Clear satellite cells (clump _clump markers and TREE terrain)
+    // Clear satellite cells (clump _clump markers)
     const occupy = TREE_OCCUPY[tree.type];
     if (occupy) {
       for (const [dx, dy] of occupy) {
         const scx = tree.cx + dx, scy = tree.cy + dy;
         if (this.getTreeType(scx, scy) === '_clump' || this.getTreeType(scx, scy) === tree.type) {
           this.clearTreeType(scx, scy);
-        }
-        if (this.getTerrain(scx, scy) === Terrain.TREE) {
-          this.setTerrain(scx, scy, Terrain.CLEAR);
         }
       }
     }
@@ -441,6 +458,11 @@ export class GameMap {
   isTerrainPassable(cx: number, cy: number): boolean {
     if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
     if (this.isTreeOccupied(cx, cy) || this.isTerrainObjectOccupied(cx, cy)) return false;
+    // C++ CellClass::Is_Clear_To_Move (cell.cpp:2764-2784): wall overlays
+    // block normal ground movement-zone and path checks unless the caller is
+    // doing crusher/destroyer-specific wall handling. TS uses this predicate
+    // for ordinary ground movers and zone construction.
+    if (this.wallType[cy * MAP_CELLS + cx] !== '') return false;
     return true;
   }
 
@@ -571,6 +593,26 @@ export class GameMap {
       this.vehicleOccupancy.add(idx);
       this.occupancy[idx] = entityId;
     }
+  }
+
+  /** Move a vehicle's physical occupy bit during DriveClass movement.
+   *  C++ updates cell occupation as vehicles cross track cells inside the
+   *  object AI pass; pathfinding later in the same tick must see the new cell,
+   *  not the position from the tick-start occupancy rebuild. */
+  moveVehicleOccupancy(oldCx: number, oldCy: number, newCx: number, newCy: number, entityId: number): void {
+    if (oldCx === newCx && oldCy === newCy) return;
+    if (oldCx >= 0 && oldCx < MAP_CELLS && oldCy >= 0 && oldCy < MAP_CELLS) {
+      const oldIdx = oldCy * MAP_CELLS + oldCx;
+      this.vehicleOccupancy.delete(oldIdx);
+      if (this.occupancy[oldIdx] === entityId) {
+        this.refreshSubCellOccupancy(oldIdx);
+        if (this.occupancy[oldIdx] === 0) {
+          const reservedBy = this.vehicleTrackReservations.get(oldIdx);
+          if (reservedBy) this.occupancy[oldIdx] = reservedBy;
+        }
+      }
+    }
+    this.setVehicleOccupancy(newCx, newCy, entityId);
   }
 
   setVehicleTrackReservation(cellIdx: number, entityId: number): void {
@@ -887,46 +929,64 @@ export class GameMap {
     return count;
   }
 
-  // === Ore/Gem overlay constants (C++ overlay.cpp) ===
-  // Gold ore: 0x03 (GOLD01) through 0x0E (GOLD12) — visual variants
-  // Gems:     0x0F (GEM01) through 0x12 (GEM04) — visual variants
+  // === Ore/Gem overlay constants (C++ defines.h:1480-1508) ===
+  // Gold ore: OVERLAY_GOLD1..4 = 5..8 — visual variants
+  // Gems:     OVERLAY_GEMS1..4 = 9..12 — visual variants
   // Actual harvestable amount lives in CellClass::OverlayData.
   // No overlay: 0xFF
+  static readonly OVERLAY_GOLD1 = 5;
+  static readonly OVERLAY_GOLD2 = 6;
+  static readonly OVERLAY_GOLD3 = 7;
+  static readonly OVERLAY_GOLD4 = 8;
+  static readonly OVERLAY_GEMS1 = 9;
+  static readonly OVERLAY_GEMS2 = 10;
+  static readonly OVERLAY_GEMS3 = 11;
+  static readonly OVERLAY_GEMS4 = 12;
 
-  /** Ore regrowth interval in ticks — C++ map.cpp:1017 scans MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE)
-   *  = 16384 / (2 * 900) = 9 cells/tick. Full scan: ceil(16384/9) = 1821 ticks (~121s at 15 FPS). */
-  static readonly ORE_GROWTH_INTERVAL = 1821;
+  /** Ore regrowth interval in ticks — C++ map.cpp:1017 scans
+   *  MAP_CELL_TOTAL / (GrowthRate * TICKS_PER_MINUTE) = 9 cells/frame.
+   *  Because TiberiumScan is assigned to the boundary index after `break`,
+   *  the next frame reprocesses that cell and advances by 8 new cells. */
+  static readonly ORE_GROWTH_INTERVAL = 2048;
 
   /** C++ map.h:160 — MAP_CELL_W/2 = 128/2 = 64. Maximum cells processed per growth/spread cycle.
    *  When more eligible cells exist, reservoir sampling selects exactly this many. */
   static readonly RESERVOIR_SIZE = 64;
+
+  /** C++ MapClass::Logic incremental ore scan state (map.cpp:1017-1098). */
+  private tiberiumScan = 0;
+  private tiberiumGrowth: number[] = [];
+  private tiberiumSpread: number[] = [];
+  private tiberiumGrowthExcess = 0;
+  private tiberiumSpreadExcess = 0;
+  private oreLogicLastTick = 0;
 
   /** Minimum gold OverlayData level required for ore to spread (C++ Can_Tiberium_Spread: > 6). */
   static readonly ORE_SPREAD_MIN_DENSITY = 6;
 
   private static readonly ORE_DENSITY_UNKNOWN = 0xFF;
 
-  private static isGoldOverlay(ovl: number): boolean {
-    return ovl >= 0x03 && ovl <= 0x0E;
+  static isGoldOverlayId(ovl: number): boolean {
+    return ovl >= GameMap.OVERLAY_GOLD1 && ovl <= GameMap.OVERLAY_GOLD4;
   }
 
-  private static isGemOverlayId(ovl: number): boolean {
-    return ovl >= 0x0F && ovl <= 0x12;
+  static isGemOverlayId(ovl: number): boolean {
+    return ovl >= GameMap.OVERLAY_GEMS1 && ovl <= GameMap.OVERLAY_GEMS4;
   }
 
-  private static isOreOverlay(ovl: number): boolean {
-    return GameMap.isGoldOverlay(ovl) || GameMap.isGemOverlayId(ovl);
+  static isOreOverlayId(ovl: number): boolean {
+    return GameMap.isGoldOverlayId(ovl) || GameMap.isGemOverlayId(ovl);
   }
 
   private inferLegacyOreDensity(ovl: number): number {
-    if (GameMap.isGoldOverlay(ovl)) return ovl - 0x03;
-    if (GameMap.isGemOverlayId(ovl)) return ovl - 0x0F;
+    if (GameMap.isGoldOverlayId(ovl)) return ovl - GameMap.OVERLAY_GOLD1;
+    if (GameMap.isGemOverlayId(ovl)) return ovl - GameMap.OVERLAY_GEMS1;
     return 0;
   }
 
   private oreDataAt(idx: number): number {
     const ovl = this.overlay[idx];
-    if (!GameMap.isOreOverlay(ovl)) return 0;
+    if (!GameMap.isOreOverlayId(ovl)) return 0;
     const density = this.oreDensity[idx];
     if (density !== GameMap.ORE_DENSITY_UNKNOWN) return density;
     const inferred = this.inferLegacyOreDensity(ovl);
@@ -938,6 +998,18 @@ export class GameMap {
    *  Tiberium_Adjust(true) derives density from adjacent ore count; overlay IDs
    *  are visual variants, not the amount of harvestable ore. */
   initializeOreDensityFromOverlay(): void {
+    this.initializeOreDensity(false);
+  }
+
+  /** C++ MapClass::Overpass -> CellClass::Tiberium_Adjust(true).
+   *  At scenario load, C++ randomizes each ore/gem visual overlay inside the
+   *  playable map while also deriving OverlayData from adjacent ore count.
+   *  This is gameplay RNG, so the startup seed must consume these picks. */
+  applyScenarioOreOverpass(): void {
+    this.initializeOreDensity(true);
+  }
+
+  private initializeOreDensity(randomizeVisualVariants: boolean): void {
     const goldByAdj = [0, 1, 3, 4, 6, 7, 8, 10, 11];
     const gemByAdj = [0, 0, 0, 1, 1, 1, 2, 2, 2];
     const dirs: [number, number][] = [
@@ -946,21 +1018,34 @@ export class GameMap {
     ];
 
     this.oreDensity.fill(GameMap.ORE_DENSITY_UNKNOWN);
-    for (let cy = 0; cy < MAP_CELLS; cy++) {
-      for (let cx = 0; cx < MAP_CELLS; cx++) {
+    const minCx = randomizeVisualVariants ? this.boundsX : 0;
+    const minCy = randomizeVisualVariants ? this.boundsY : 0;
+    const maxCx = randomizeVisualVariants ? this.boundsX + this.boundsW : MAP_CELLS;
+    const maxCy = randomizeVisualVariants ? this.boundsY + this.boundsH : MAP_CELLS;
+
+    for (let cy = minCy; cy < maxCy; cy++) {
+      for (let cx = minCx; cx < maxCx; cx++) {
         const idx = cy * MAP_CELLS + cx;
         const ovl = this.overlay[idx];
-        if (!GameMap.isOreOverlay(ovl)) continue;
+        const isGold = GameMap.isGoldOverlayId(ovl);
+        const isGem = GameMap.isGemOverlayId(ovl);
+        if (!isGold && !isGem) continue;
+
+        if (randomizeVisualVariants) {
+          this.overlay[idx] = isGold
+            ? ScenarioRandom.nextInRange(GameMap.OVERLAY_GOLD1, GameMap.OVERLAY_GOLD4)
+            : ScenarioRandom.nextInRange(GameMap.OVERLAY_GEMS1, GameMap.OVERLAY_GEMS4);
+        }
 
         let count = 0;
         for (const [dx, dy] of dirs) {
           const nx = cx + dx;
           const ny = cy + dy;
           if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
-          if (GameMap.isOreOverlay(this.overlay[ny * MAP_CELLS + nx])) count++;
+          if (GameMap.isOreOverlayId(this.overlay[ny * MAP_CELLS + nx])) count++;
         }
 
-        this.oreDensity[idx] = GameMap.isGemOverlayId(ovl)
+        this.oreDensity[idx] = isGem
           ? Math.min(gemByAdj[count], 2)
           : goldByAdj[count];
         this.cells[idx] = Terrain.ORE;
@@ -970,96 +1055,109 @@ export class GameMap {
 
   /** Ore regrowth — C++ two-phase reservoir sampling model (map.cpp:1017-1098).
    *
-   *  Phase 1 (Scan): Iterate all map cells, collecting eligible cells into two arrays:
+   *  Phase 1 (Scan): each Map.Logic frame scans a small chunk of map cells,
+   *  collecting eligible cells into two arrays:
    *    - TiberiumGrowth[]: cells where Can_Tiberium_Grow() is true (gold, OverlayData < 11)
    *    - TiberiumSpread[]: cells where Can_Tiberium_Spread() is true (gold, OverlayData > 6)
-   *    If more than RESERVOIR_SIZE (64) eligible, use reservoir sampling to pick exactly 64.
+   *    If more than RESERVOIR_SIZE (64) eligible, use C++ reservoir sampling.
    *
-   *  Phase 2 (Apply): After full scan completes:
+   *  Phase 2 (Apply): after the incremental full scan completes:
    *    - Grow_Tiberium() on all growth-selected cells (deterministic OverlayData++, no random)
    *    - Spread_Tiberium() on all spread-selected cells (random start dir, first valid neighbor)
    *
    *  C++ refs: map.cpp:1028-1060 (reservoir), cell.cpp:2936-2944 (grow), cell.cpp:2963-2979 (spread)
-   *  EC6: Only gold overlays grow/spread — gems (0x0F-0x12) never grow or spread.
+   *  EC6: Only gold overlays grow/spread — gems (9..12) never grow or spread.
    *  EC7: Spread requires density > 6 and uses all 8 directions.
    *  @param tick Current game tick */
   growOre(tick: number): void {
-    // C++ map.cpp:1017-1098: Growth/spread fires once per full map scan.
-    // Full scan takes ceil(MAP_CELL_TOTAL / subcount) = ceil(16384/9) = 1821 ticks.
-    // Growth/spread actions fire when TiberiumScan >= MAP_CELL_TOTAL (map.cpp:1072).
-    if (tick === 0 || tick % GameMap.ORE_GROWTH_INTERVAL !== 0) return;
+    if (tick <= 0) return;
 
+    // In the game loop this is called once per TS tick (TS tick 1 == C++ Frame 0).
+    // Unit tests often jump directly to tick 2048; process the skipped C++ frames
+    // so a single jumped call still represents the same elapsed simulation time.
+    const targetTick = Math.floor(tick);
+    const steps = Math.max(0, targetTick - this.oreLogicLastTick);
+    for (let i = 0; i < steps; i++) {
+      this.processOreLogicFrame();
+    }
+    this.oreLogicLastTick = Math.max(this.oreLogicLastTick, targetTick);
+  }
+
+  private processOreLogicFrame(): void {
     const MAP_TOTAL = MAP_CELLS * MAP_CELLS;
-    const R = GameMap.RESERVOIR_SIZE;
+    const subcountTotal = Math.max(Math.floor(MAP_TOTAL / (2 * 900)), 1);
+    let subcount = subcountTotal;
+    let index = this.tiberiumScan;
 
-    // ── Phase 1: Full scan — collect eligible cells via reservoir sampling ──
-    // C++ map.cpp:1020-1064: scan all cells, reservoir sample into fixed-size arrays
-    const growthRes: number[] = [];
-    const spreadRes: number[] = [];
-    let growthExcess = 0;
-    let spreadExcess = 0;
+    // C++ map.cpp:1020-1064. The `break` leaves index at the last processed
+    // cell; assigning TiberiumScan=index intentionally reprocesses that boundary
+    // cell on the next frame, matching the original for-loop semantics.
+    for (; index < MAP_TOTAL; index++) {
+      if (this.inRadarIndex(index)) {
+        const ovl = this.overlay[index];
+        if (GameMap.isGoldOverlayId(ovl)) {
+          const density = this.oreDataAt(index);
 
-    for (let idx = 0; idx < MAP_TOTAL; idx++) {
-      const cx = idx % MAP_CELLS;
-      const cy = Math.floor(idx / MAP_CELLS);
+          if (density < 11) {
+            this.sampleOreCell(this.tiberiumGrowth, this.tiberiumGrowthExcess, index);
+            this.tiberiumGrowthExcess++;
+          }
 
-      // C++ map.cpp:1022: if (In_Radar(cell)) — only process in-bounds cells
-      if (cx < this.boundsX || cx >= this.boundsX + this.boundsW ||
-          cy < this.boundsY || cy >= this.boundsY + this.boundsH) continue;
-
-      const ovl = this.overlay[idx];
-      if (!GameMap.isGoldOverlay(ovl)) continue;
-      const density = this.oreDataAt(idx);
-
-      // Can_Tiberium_Grow (cell.cpp:2869-2884): gold overlay with OverlayData < 11
-      if (density < 11) {
-        // C++ map.cpp:1028-1044: reservoir sampling for growth
-        if (growthRes.length < R) {
-          growthRes.push(idx);
-        } else {
-          // C++ map.cpp:1034: Random_Pick(0, TGrowCount) — replace with probability R/(R+excess)
-          const slot = ScenarioRandom.nextInRange(0, growthExcess + R - 1);
-          if (slot < R) {
-            growthRes[slot] = idx;
+          if (density > GameMap.ORE_SPREAD_MIN_DENSITY) {
+            this.sampleOreCell(this.tiberiumSpread, this.tiberiumSpreadExcess, index);
+            this.tiberiumSpreadExcess++;
           }
         }
-        growthExcess++;
       }
 
-      // Can_Tiberium_Spread (cell.cpp:2904-2918): gold overlay with OverlayData > 6
-      if (density > GameMap.ORE_SPREAD_MIN_DENSITY) {
-        // C++ map.cpp:1046-1060: reservoir sampling for spread
-        if (spreadRes.length < R) {
-          spreadRes.push(idx);
-        } else {
-          const slot = ScenarioRandom.nextInRange(0, spreadExcess + R - 1);
-          if (slot < R) {
-            spreadRes[slot] = idx;
-          }
-        }
-        spreadExcess++;
-      }
+      subcount--;
+      if (subcount === 0) break;
     }
 
-    // ── Phase 2: Apply growth + spread (map.cpp:1072-1098) ──
+    this.tiberiumScan = index;
+    if (this.tiberiumScan >= MAP_TOTAL) {
+      this.tiberiumScan = 0;
+      this.applyOreGrowthAndSpread();
+    }
+  }
 
-    // C++ map.cpp:1078-1084: Grow_Tiberium() — OverlayData++ (no random)
-    for (const idx of growthRes) {
+  private inRadarIndex(idx: number): boolean {
+    const cx = idx % MAP_CELLS;
+    const cy = Math.floor(idx / MAP_CELLS);
+    return cx >= this.boundsX && cx < this.boundsX + this.boundsW &&
+      cy >= this.boundsY && cy < this.boundsY + this.boundsH;
+  }
+
+  private sampleOreCell(reservoir: number[], excess: number, cell: number): void {
+    // C++ map.cpp:1034/1052: Random_Pick(0, Excess) <= Count.
+    // Random_Pick(0,0) returns immediately without consuming RNG, just like C++.
+    if (ScenarioRandom.nextInRange(0, excess) <= reservoir.length) {
+      if (reservoir.length < GameMap.RESERVOIR_SIZE) {
+        reservoir.push(cell);
+      } else {
+        reservoir[ScenarioRandom.nextInRange(0, reservoir.length - 1)] = cell;
+      }
+    }
+  }
+
+  private applyOreGrowthAndSpread(): void {
+    for (const idx of this.tiberiumGrowth) {
       const ovl = this.overlay[idx];
       const density = this.oreDataAt(idx);
-      if (GameMap.isGoldOverlay(ovl) && density < 11) {
+      if (GameMap.isGoldOverlayId(ovl) && density < 11) {
         this.oreDensity[idx] = density + 1;
       }
     }
+    this.tiberiumGrowth.length = 0;
+    this.tiberiumGrowthExcess = 0;
 
-    // C++ map.cpp:1091-1094: Spread_Tiberium() — random start dir, first valid neighbor
     const dirs: [number, number][] = [
       [0, -1], [1, -1], [1, 0], [1, 1],
       [0, 1], [-1, 1], [-1, 0], [-1, -1],
     ];
     const bx = this.boundsX, by = this.boundsY;
     const bw = this.boundsW, bh = this.boundsH;
-    for (const idx of spreadRes) {
+    for (const idx of this.tiberiumSpread) {
       const sx = idx % MAP_CELLS, sy = Math.floor(idx / MAP_CELLS);
       const offset = ScenarioRandom.nextInRange(0, 7);
       for (let i = 0; i < 8; i++) {
@@ -1073,12 +1171,14 @@ export class GameMap {
         const tmpl = this.templateType[nidx];
         if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) continue;
         if (this.vehicleOccupancy.has(nidx)) continue;
-        this.overlay[nidx] = 0x03;
+        this.overlay[nidx] = ScenarioRandom.nextInRange(GameMap.OVERLAY_GOLD1, GameMap.OVERLAY_GOLD4);
         this.oreDensity[nidx] = 0;
         this.cells[nidx] = Terrain.ORE;
         break;
       }
     }
+    this.tiberiumSpread.length = 0;
+    this.tiberiumSpreadExcess = 0;
   }
 
   /** Find nearest ore/gem cell using C++ ring/diamond search pattern.
@@ -1092,62 +1192,34 @@ export class GameMap {
       const cidx = cy * MAP_CELLS + cx;
       const ovl = this.overlay[cidx];
       // C++ unit.cpp:2209-2212: center cell returns immediately — no Cell_Techno check
-      if (ovl >= 0x03 && ovl <= 0x12) return { cx, cy };
+      if (GameMap.isOreOverlayId(ovl)) return { cx, cy };
     }
 
-    // C++ unit.cpp:2218-2243: ring search — scan perimeter of each expanding ring.
-    // for (radius = 1; radius < rad; radius++)
-    //   for (x = -radius; x <= radius; x++)
-    //     check (x, -radius), (x, +radius), (-radius, x), (+radius, x)
-    // Returns FIRST valid cell found on any ring perimeter.
+    // C++ unit.cpp:2218-2243: ring search — scan each radius with the
+    // exact per-offset order:
+    //   top, bottom, left, right for x=-radius..+radius.
+    // This is not equivalent to scanning the full top edge, then full
+    // bottom edge, then sides. SCG01EA HARV at (69,53): C++ returns
+    // (70,52) from the x=-1 right-side check before reaching x=0 bottom
+    // (69,54).
+    //
+    // C++ loop condition is `radius < rad`, so maxRange is exclusive.
     // C++ unit.cpp:2179: `if (!Map[center].Cell_Techno() && ...)`
     // Skip ore cells occupied by buildings/vehicles.
     const r = maxRange;
-    for (let radius = 1; radius <= r; radius++) {
+    for (let radius = 1; radius < r; radius++) {
       for (let x = -radius; x <= radius; x++) {
-        // Top edge: (cx+x, cy-radius)
-        const ty = cy - radius;
-        if (ty >= 0 && ty < MAP_CELLS) {
-          const tx = cx + x;
-          if (tx >= 0 && tx < MAP_CELLS) {
-            const tidx = ty * MAP_CELLS + tx;
-            const ovl = this.overlay[tidx];
-            // C++ unit.cpp:2179: skip if building/vehicle on cell
-            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(tidx)) return { cx: tx, cy: ty };
-          }
-        }
-        // Bottom edge: (cx+x, cy+radius)
-        const by = cy + radius;
-        if (by >= 0 && by < MAP_CELLS) {
-          const bx = cx + x;
-          if (bx >= 0 && bx < MAP_CELLS) {
-            const bidx = by * MAP_CELLS + bx;
-            const ovl = this.overlay[bidx];
-            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(bidx)) return { cx: bx, cy: by };
-          }
-        }
-      }
-      // Left and right edges (exclude corners already checked by top/bottom)
-      for (let y = -radius + 1; y <= radius - 1; y++) {
-        // Left edge: (cx-radius, cy+y)
-        const lx = cx - radius;
-        if (lx >= 0 && lx < MAP_CELLS) {
-          const ly = cy + y;
-          if (ly >= 0 && ly < MAP_CELLS) {
-            const lidx = ly * MAP_CELLS + lx;
-            const ovl = this.overlay[lidx];
-            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(lidx)) return { cx: lx, cy: ly };
-          }
-        }
-        // Right edge: (cx+radius, cy+y)
-        const rx = cx + radius;
-        if (rx >= 0 && rx < MAP_CELLS) {
-          const ry = cy + y;
-          if (ry >= 0 && ry < MAP_CELLS) {
-            const ridx = ry * MAP_CELLS + rx;
-            const ovl = this.overlay[ridx];
-            if (ovl >= 0x03 && ovl <= 0x12 && !this.vehicleOccupancy.has(ridx)) return { cx: rx, cy: ry };
-          }
+        const checks: Array<[number, number]> = [
+          [cx + x, cy - radius],
+          [cx + x, cy + radius],
+          [cx - radius, cy + x],
+          [cx + radius, cy + x],
+        ];
+        for (const [tx, ty] of checks) {
+          if (tx < 0 || tx >= MAP_CELLS || ty < 0 || ty >= MAP_CELLS) continue;
+          const tidx = ty * MAP_CELLS + tx;
+          const ovl = this.overlay[tidx];
+          if (GameMap.isOreOverlayId(ovl) && !this.vehicleOccupancy.has(tidx)) return { cx: tx, cy: ty };
         }
       }
     }
@@ -1160,8 +1232,8 @@ export class GameMap {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
-    if (GameMap.isGoldOverlay(ovl)) {
-      // Gold ore (GOLD01-GOLD12) — 25 credits per bail (rules.ini GoldValue=25)
+    if (GameMap.isGoldOverlayId(ovl)) {
+      // Gold ore (OVERLAY_GOLD1..4) — 25 credits per bail (rules.ini GoldValue=25)
       const density = this.oreDataAt(idx);
       if (density > 0) {
         this.oreDensity[idx] = density - 1;
@@ -1191,7 +1263,7 @@ export class GameMap {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
-    if (!GameMap.isOreOverlay(ovl)) return;
+    if (!GameMap.isOreOverlayId(ovl)) return;
     const density = this.oreDataAt(idx);
     if (density > 0) {
       this.oreDensity[idx] = density - 1;
@@ -1202,11 +1274,11 @@ export class GameMap {
     }
   }
 
-  /** Check if overlay at a cell is a gem overlay (0x0F-0x12) */
+  /** Check if overlay at a cell is a gem overlay (OVERLAY_GEMS1..4 = 9..12) */
   isGemOverlay(cx: number, cy: number): boolean {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
     const ovl = this.overlay[cy * MAP_CELLS + cx];
-    return ovl >= 0x0F && ovl <= 0x12;
+    return GameMap.isGemOverlayId(ovl);
   }
 
   /** Find an adjacent water cell around a structure footprint (for naval production spawn).
@@ -1294,12 +1366,23 @@ export class GameMap {
     if (!naval && (this.treeOccupied.has(cy * MAP_CELLS + cx) || this.terrainObjectOccupied.has(cy * MAP_CELLS + cx))) {
       return MoveResult.IMPASSABLE;
     }
+    if (!naval && this.wallType[cy * MAP_CELLS + cx] !== '') {
+      return MoveResult.IMPASSABLE;
+    }
 
     // Infantry sub-cell check: infantry can enter if sub-cells are available
     if (isInfantry) {
       const idx = cy * MAP_CELLS + cx;
-      // Vehicle/building blocks all sub-cells
-      if (this.vehicleOccupancy.has(idx) || this.vehicleTrackReservations.has(idx)) return MoveResult.OCCUPIED;
+      // C++ InfantryClass::Can_Enter_Cell checks the Cell_Occupier chain first,
+      // then treats a bare Flag.Occupy.Vehicle bit as MOVE_NO (infantry.cpp:1490).
+      // Mark_Track reservations are exactly that bare occupy bit: no infantry-
+      // shareable object lives in the cell, so the pathfinder must not route
+      // through it as a temporary moving block.
+      if (this.vehicleTrackReservations.has(idx)) return MoveResult.IMPASSABLE;
+      // Physical vehicles/buildings block all infantry sub-cells. Full
+      // ally/enemy severity is entity-context dependent; callers with that
+      // context refine goal-cell handling in basicPathGoalMoveResult().
+      if (this.vehicleOccupancy.has(idx)) return MoveResult.OCCUPIED;
       // Check if any sub-cell is free
       if (this.hasAvailableSubCell(cx, cy)) return MoveResult.OK;
       return MoveResult.OCCUPIED; // all 5 sub-cells full
@@ -1308,6 +1391,12 @@ export class GameMap {
     const reservationOwner = this.getVehicleTrackReservation(cx, cy);
     const occupant = this.getOccupancy(cx, cy);
     if (occupant > 0 && occupant !== ignoreEntityId) {
+      // C++ VesselClass::Can_Enter_Cell (vessel.cpp:293-314) does not walk the
+      // Cell_Occupier chain and does not return MOVE_TEMP for stationary
+      // friendly vessels. Any vehicle occupy bit in a water cell is
+      // MOVE_MOVING_BLOCK, so DriveClass will not call CellClass::Incoming on
+      // naval blockers.
+      if (naval) return MoveResult.OCCUPIED;
       if (reservationOwner === occupant) return MoveResult.OCCUPIED;
       // C++ unit.cpp:3176-3194: moving ally → MOVE_MOVING_BLOCK(2), stationary ally → MOVE_TEMP(4)
       if (isMoving && isMoving(occupant)) return MoveResult.OCCUPIED;   // MOVE_MOVING_BLOCK(2)

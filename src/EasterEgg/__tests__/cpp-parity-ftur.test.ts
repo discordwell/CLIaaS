@@ -80,6 +80,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -239,8 +240,8 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([ftur], [enemy]);
     updateStructureCombat(ctx);
-    // Fire vs none = 0.9 mult, damage 125 * 0.9 = 112.5 -> Math.round = 113
-    expect(hpBefore - enemy.hp).toBe(113);
+    // Fire vs none uses C++ fixed 90%: 125 * fixed(90%) = 112.
+    expect(hpBefore - enemy.hp).toBe(112);
   });
 
   it('applies reduced damage to heavy armor (0.25x)', () => {
@@ -540,9 +541,9 @@ describe('FTUR fire effects (rendering parity)', () => {
     updateStructureCombat(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    // Structure center: cx * CELL_SIZE + CELL_SIZE = 10*24 + 24 = 264
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
+    // C++ BSIZE_11 CenterOffset = 0x80,0x80.
+    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
+    const expectedY = 10 * CELL_SIZE + CELL_SIZE / 2;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });
@@ -578,9 +579,9 @@ describe('FTUR vs PBOX damage comparison (cross-defense parity)', () => {
     updateStructureCombat(ctx2);
     const pboxDmg = 200 - pboxTarget.hp;
 
-    // FTUR: 125 * 0.9 = 113, PBOX: 40 * 1.0 = 40
+    // FTUR: 125 * fixed(90%) = 112, PBOX: 40 * 1.0 = 40
     expect(fturDmg).toBeGreaterThan(pboxDmg);
-    expect(fturDmg).toBe(113);
+    expect(fturDmg).toBe(112);
     expect(pboxDmg).toBe(40);
   });
 

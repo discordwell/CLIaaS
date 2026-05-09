@@ -463,11 +463,12 @@ describe('MEDI retaliation — medic has weapon so retaliates (techno.cpp)', () 
     medi.target = null;
 
     const ctx = makeCombatCtx([medi, attacker]);
+    ctx.playerHouse = House.Greece;
     triggerRetaliation(ctx, medi, attacker);
 
     // MEDI has a weapon (Heal), so retaliation kicks in
     expect(medi.target).toBe(attacker);
-    expect(medi.mission).toBe(Mission.ATTACK);
+    expect(medi.mission).toBe(Mission.GUARD);
   });
 
   it('MEDI has a weapon (Heal) — technically armed for retaliation purposes', () => {
@@ -517,7 +518,7 @@ describe('MEDI AI scatter on damage (techno.cpp)', () => {
       medi.mission = Mission.GUARD;
       const ctx = makeCombatCtx([medi]);
       aiScatterOnDamage(ctx, medi);
-      if (medi.mission === Mission.MOVE && medi.moveTarget !== null) {
+      if (medi.missionQueue === Mission.MOVE && medi.moveTarget !== null) {
         scattered = true;
         break;
       }
@@ -530,7 +531,8 @@ describe('MEDI AI scatter on damage (techno.cpp)', () => {
     medi.mission = Mission.GUARD;
 
     const ctx = makeCombatCtx([medi]);
-    aiScatterOnDamage(ctx, medi);
+    const attacker = entityAtCell(UnitType.I_E1, House.USSR, 11, 10);
+    aiScatterOnDamage(ctx, medi, attacker);
 
     expect(medi.mission).toBe(Mission.GUARD);
     expect(medi.moveTarget).toBeNull();

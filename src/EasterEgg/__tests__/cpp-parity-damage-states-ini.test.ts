@@ -140,6 +140,13 @@ describe('DS3: damageSpeedFactor — C++ drive.cpp:1157-1161 parity', () => {
     expect(factor).toBe(0.75);
     expect(factor).not.toBe(0.5);
   });
+
+  it('wounded infantry keeps full speed (infantry.cpp movement has no damage-speed tier)', () => {
+    const e = new Entity(UnitType.I_E1, House.Spain, 100, 100);
+    e.hp = Math.floor(e.maxHp * 0.4);
+    expect(e.stats.isInfantry).toBe(true);
+    expect(damageSpeedFactor(e)).toBe(1.0);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

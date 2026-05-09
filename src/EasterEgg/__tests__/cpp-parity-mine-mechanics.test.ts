@@ -174,7 +174,9 @@ function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Ent
 }
 
 function makeMinelayer(house: House = House.Spain, cx = 10, cy = 10): Entity {
-  return entityAtCell(UnitType.V_MNLY, house, cx, cy);
+  const mnly = entityAtCell(UnitType.V_MNLY, house, cx, cy);
+  mnly.mission = Mission.UNLOAD;
+  return mnly;
 }
 
 function makeInfantry(house: House = House.USSR, cx = 10, cy = 10): Entity {
@@ -422,6 +424,22 @@ describe('mine damage constants from rules.ini [General]', () => {
 // =============================================================================
 
 describe('mine placement: faction determines mine type', () => {
+  it('does not place or move mines during ordinary Mission.Move', () => {
+    const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, 10, 10);
+    mnly.mission = Mission.MOVE;
+    mnly.moveTarget = { lx: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
+    const start = { ...mnly.pos };
+    const startAmmo = mnly.ammo;
+    const ctx = makeContext({ entities: [mnly] });
+
+    updateMinelayer(ctx, mnly);
+
+    expect(ctx.mines).toHaveLength(0);
+    expect(mnly.pos).toEqual(start);
+    expect(mnly.ammo).toBe(startAmmo);
+    expect(mnly.mission).toBe(Mission.MOVE);
+  });
+
   it('Allied house (Spain) places AV mine', () => {
     const mnly = makeMinelayer(House.Spain, 10, 10);
     mnly.moveTarget = { lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
@@ -520,6 +538,9 @@ describe('mine placement: ammo mechanics', () => {
     for (let i = 0; i < maxAmmo; i++) {
       const cx = 10 + i;
       mnly.pos = { x: cx * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+      mnly.leptonX = pixelToLepton(mnly.pos.x);
+      mnly.leptonY = pixelToLepton(mnly.pos.y);
+      mnly.mission = Mission.UNLOAD;
       mnly.moveTarget = { lx: pixelToLepton(cx * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2) };
       const ctx = makeContext({ entities: [mnly], mines });
       updateMinelayer(ctx, mnly);
@@ -908,6 +929,7 @@ describe('mine placement stores correct cell coordinates', () => {
     const targetCx = 15;
     const targetCy = 20;
     const mnly = entityAtCell(UnitType.V_MNLY, House.Spain, targetCx, targetCy);
+    mnly.mission = Mission.UNLOAD;
     mnly.moveTarget = { lx: pixelToLepton(targetCx * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(targetCy * CELL_SIZE + CELL_SIZE / 2) };
     const ctx = makeContext({ entities: [mnly] });
     updateMinelayer(ctx, mnly);

@@ -452,9 +452,10 @@ describe('PBOX fire effects (rendering parity)', () => {
     updateStructureCombat(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    // Structure center: cx * CELL_SIZE + CELL_SIZE = 10*24 + 24 = 264
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE;
+    // PBOX is BSIZE_11; C++ CenterOffset[BSIZE_11] is 0x00800080,
+    // i.e. half a cell from the building's upper-left coordinate.
+    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
+    const expectedY = 10 * CELL_SIZE + CELL_SIZE / 2;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });

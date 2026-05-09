@@ -29,6 +29,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -93,6 +94,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -134,6 +136,13 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // 1. STRUCTURE_POWERED set membership
 //    C++ bdata.cpp:2836 — IsPowered defaults false, set via rules.ini Powered=yes
@@ -170,7 +179,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
     const hpBefore = target.hp;
     for (let i = 0; i < 30; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     // C++ building.cpp:2853 — IsPowered && Power_Fraction() < 1 → FIRE_BUSY
     // Tesla should not fire at all
@@ -185,7 +194,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
     const hpBefore = target.hp;
     for (let i = 0; i < 30; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBeLessThan(hpBefore);
   });
@@ -197,7 +206,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
     const hpBefore = aircraft.hp;
     for (let i = 0; i < 30; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(aircraft.hp).toBeLessThan(hpBefore);
   });
@@ -209,7 +218,7 @@ describe('powered defenses cannot fire when low power (C++ building.cpp:2853)', 
     const hpBefore = aircraft.hp;
     for (let i = 0; i < 30; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(aircraft.hp).toBe(hpBefore);
   });
@@ -229,7 +238,7 @@ describe('unpowered defenses fire regardless of power (C++ building.cpp:2853 —
     // Run enough ticks for at least one shot
     for (let i = 0; i < 60; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBeLessThan(hpBefore);
   });
@@ -248,7 +257,7 @@ describe('powered defenses fire when power is sufficient (C++ Power_Fraction() >
     const hpBefore = target.hp;
     for (let i = 0; i < 60; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBeLessThan(hpBefore);
   });
@@ -260,7 +269,7 @@ describe('powered defenses fire when power is sufficient (C++ Power_Fraction() >
     const hpBefore = aircraft.hp;
     for (let i = 0; i < 60; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(aircraft.hp).toBeLessThan(hpBefore);
   });
@@ -508,7 +517,7 @@ describe('low power is binary — any deficit disables (C++ Power_Fraction() < 1
     const hpBefore = target.hp;
     for (let i = 0; i < 30; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBe(hpBefore);
   });
@@ -521,7 +530,7 @@ describe('low power is binary — any deficit disables (C++ Power_Fraction() < 1
     const hpBefore = target.hp;
     for (let i = 0; i < 60; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBeLessThan(hpBefore);
   });
@@ -542,7 +551,7 @@ describe('zero drain = never low power (C++ house.cpp:4164)', () => {
     const hpBefore = target.hp;
     for (let i = 0; i < 60; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     // Pillbox is unpowered so fires regardless, but importantly the low power
     // check itself (powerConsumed > powerProduced) returns false when both are 0
@@ -747,7 +756,7 @@ describe('integration: mixed powered/unpowered structures during low power', () 
     const tslaTargetHpBefore = tslaTarget.hp;
     for (let i = 0; i < 60; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     // Pillbox (unpowered) should fire
     expect(pboxTarget.hp).toBeLessThan(pboxTargetHpBefore);
@@ -772,7 +781,7 @@ describe('power restoration re-enables defenses (C++ per-tick check)', () => {
     const hpBefore = target.hp;
     for (let i = 0; i < 30; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBe(hpBefore);
 
@@ -781,7 +790,7 @@ describe('power restoration re-enables defenses (C++ per-tick check)', () => {
     ctx.powerConsumed = 100;
     for (let i = 30; i < 90; i++) {
       ctx.tick = i;
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
     expect(target.hp).toBeLessThan(hpBefore);
   });

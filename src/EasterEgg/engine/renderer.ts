@@ -345,7 +345,7 @@ export class Renderer {
     retval = Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
     // C++ Draw_It HIRES rescaling (power.cpp:229): (raw * 153) / 107
     // At LORES (RESFACTOR=1), raw pixel height is used directly (no rescaling).
-    return RESFACTOR === 1 ? retval : Math.floor(retval * 153 / 107);
+    return (RESFACTOR as number) === 1 ? retval : Math.floor(retval * 153 / 107);
   }
 
   /** Update power bar bounce animation — call once per game tick (C++ PowerClass::AI) */
@@ -1123,6 +1123,7 @@ export class Renderer {
         }
 
         const terrain = map.getTerrain(cx, cy);
+        const treeType = map.getTreeType(cx, cy);
         const h = cellHash(cx, cy);
 
         // Use MapPack template data for richer variation when available
@@ -1135,12 +1136,12 @@ export class Renderer {
         let atlasDrawn = false;
         if (useTileset && tmpl > 0 && tmpl !== 0xFFFF) {
           if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
-            if (terrain !== Terrain.TREE) continue; // Tile drawn from atlas, skip procedural
+            if (terrain !== Terrain.TREE && !treeType) continue; // Tile drawn from atlas, skip procedural
             atlasDrawn = true; // Fall through to TREE case below
           } else {
             // ATLAS MISS — magenta checkerboard stub (no silent fallbacks)
             this.renderMissingTileStub(ctx, screen.x, screen.y, tmpl, icon);
-            if (terrain !== Terrain.TREE) continue;
+            if (terrain !== Terrain.TREE && !treeType) continue;
           }
         }
 
@@ -1152,6 +1153,16 @@ export class Renderer {
             if (terrain === Terrain.CLEAR) continue;
             atlasDrawn = true; // TREE cells need overlay on top
           }
+        }
+
+        // If the atlas already drew the underlying template and this cell only
+        // needs a tree overlay, defer the sprite and move on. C++ terrain
+        // objects do not replace Land_Type.
+        if (atlasDrawn && terrain !== Terrain.TREE) {
+          if (treeType && treeType !== '_clump' && assets.hasSheet(treeType)) {
+            deferredTrees.push({ name: treeType, x: screen.x, y: screen.y });
+          }
+          continue;
         }
 
         // Procedural rendering for base terrain types (type 0, 0xFFFF, or INTERIOR theatre)
@@ -1300,7 +1311,6 @@ export class Renderer {
               // Ground under tree — skip grass if atlas already drew the ground tile
               if (!atlasDrawn) this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
 
-              const treeType = map.getTreeType(cx, cy);
               if (treeType === '_clump') {
                 // Covered by a nearby clump origin sprite — just show grass
               } else if (treeType && assets.hasSheet(treeType)) {
@@ -1372,6 +1382,10 @@ export class Renderer {
             break;
           }
         }
+
+        if (terrain !== Terrain.TREE && treeType && treeType !== '_clump' && assets.hasSheet(treeType)) {
+          deferredTrees.push({ name: treeType, x: screen.x, y: screen.y });
+        }
       }
     }
 
@@ -1438,12 +1452,13 @@ export class Renderer {
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
         const h = cellHash(cx, cy);
 
-        if (ovl >= 0x03 && ovl <= 0x0E) {
-          // Gold ore — sprite from GOLD01-04.TEM, 12 density frames each
-          const density = ovl - 0x03; // 0-11 = frame index
-          const variant = (h % 4) + 1; // pick gold01-04
+        if (ovl >= 5 && ovl <= 8) {
+          // Gold ore — OVERLAY_GOLD1..4 visual type; density is OverlayData.
+          const density = map.oreDensity[cy * 128 + cx];
+          const frame = density !== 0xFF ? Math.min(density, 11) : 0;
+          const variant = ovl - 5 + 1;
           const sheetName = `gold0${variant}`;
-          assets.drawFrame(ctx, sheetName, density, screen.x, screen.y);
+          assets.drawFrame(ctx, sheetName, frame, screen.x, screen.y);
           // Animated sparkle overlay
           const sparklePhase = (tick + h * 3) % 40;
           if (sparklePhase < 6) {
@@ -1455,11 +1470,11 @@ export class Renderer {
             ctx.fillRect(sx - 1, sy + 1, 4, 1);
             ctx.fillRect(sx + 1, sy - 1, 1, 4);
           }
-        } else if (ovl >= 0x0F && ovl <= 0x12) {
-          // Gems — sprite from GEM01-04.TEM, 3 density frames each
-          const gemDensity = ovl - 0x0F; // 0-3
-          const frame = Math.min(gemDensity, 2); // gems have 3 frames (0-2)
-          const variant = (h % 4) + 1; // pick gem01-04
+        } else if (ovl >= 9 && ovl <= 12) {
+          // Gems — OVERLAY_GEMS1..4 visual type; density is OverlayData.
+          const gemDensity = map.oreDensity[cy * 128 + cx];
+          const frame = Math.min(gemDensity !== 0xFF ? gemDensity : 0, 2);
+          const variant = ovl - 9 + 1;
           const sheetName = `gem0${variant}`;
           assets.drawFrame(ctx, sheetName, frame, screen.x, screen.y);
           // Animated gem sparkle
@@ -3200,18 +3215,19 @@ export class Renderer {
         const py = mmY + (cy - oy) * scale;
         const ps = Math.max(scale * 2, 1);
 
+        const treeType = map.getTreeType(cx, cy);
         if (terrain === Terrain.WATER) {
           ctx.fillStyle = this.palColor(PAL_WATER_START + 2, vis === 2 ? 0 : -50);
-        } else if (terrain === Terrain.TREE) {
+        } else if (terrain === Terrain.TREE || treeType) {
           ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, vis === 2 ? 0 : -40);
         } else if (terrain === Terrain.ROCK || terrain === Terrain.WALL) {
           ctx.fillStyle = this.palColor(PAL_ROCK_START + 8, vis === 2 ? 0 : -40);
         } else {
           // Check for ore/gem overlay
           const ovl = map.overlay[cy * 128 + cx];
-          if (ovl >= 0x03 && ovl <= 0x0E) {
+          if (ovl >= 5 && ovl <= 8) {
             ctx.fillStyle = vis === 2 ? '#c8a030' : '#806020'; // gold ore dot
-          } else if (ovl >= 0x0F && ovl <= 0x12) {
+          } else if (ovl >= 9 && ovl <= 12) {
             ctx.fillStyle = vis === 2 ? '#3090d0' : '#205880'; // blue gem dot
           } else {
             ctx.fillStyle = this.palColor(PAL_GRASS_START + 6, vis === 2 ? 0 : -40);
@@ -3366,9 +3382,10 @@ export class Renderer {
         const py = centerY + (cy - oy) * scale;
         const ps = Math.max(scale, 1);
 
+        const treeType = map.getTreeType(cx, cy);
         if (terrain === Terrain.WATER) {
           ctx.fillStyle = vis === 2 ? '#1040a0' : '#081830';
-        } else if (terrain === Terrain.TREE) {
+        } else if (terrain === Terrain.TREE || treeType) {
           ctx.fillStyle = vis === 2 ? '#1a6020' : '#0d3010';
         } else if (terrain === Terrain.ROCK || terrain === Terrain.WALL) {
           ctx.fillStyle = vis === 2 ? '#707060' : '#383830';
@@ -3918,7 +3935,7 @@ export class Renderer {
   // Power bar (C++ power.h)
   static readonly POWER_Y = 88 * RESFACTOR;          // absolute Y
   static readonly POWER_HEIGHT = 110;                  // C++ POWER_HEIGHT (200-(7+70+13)) power.h:81-94 — resolution independent
-  static readonly POWER_BAR_RENDERED_HEIGHT = RESFACTOR === 1 ? 76 : 153; // LORES: raw 76px, HIRES: (76×2+1) rescaled
+  static readonly POWER_BAR_RENDERED_HEIGHT = (RESFACTOR as number) === 1 ? 76 : 153; // LORES: raw 76px, HIRES: (76×2+1) rescaled
   static readonly POWER_BAR_W = 5 * RESFACTOR;
   static readonly POWER_BAR_X_OFFSET = 1 * RESFACTOR;
 
@@ -4469,7 +4486,7 @@ export class Renderer {
       ctx.fill();
 
       // Label text
-      const maxChars = RESFACTOR === 1 ? 6 : 10;
+      const maxChars = (RESFACTOR as number) === 1 ? 6 : 10;
       const label = sw.def.name.length > maxChars ? sw.def.name.slice(0, maxChars - 1) + '.' : sw.def.name;
       this.drawBitmapText(assets, label, sidebarX + 11 * RESFACTOR, btnY + 1 * RESFACTOR, sw.ready ? '#4f4' : '#aaa', '6pt');
 
