@@ -31,12 +31,14 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, CELL_SIZE, COUNTRY_BONUSES,
+  UnitType, House, Mission, CELL_SIZE, LEPTON_SIZE, COUNTRY_BONUSES,
   buildDefaultAlliances, worldDist,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  findStructureThreatTarget,
+  handleUnitDeath,
   updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
@@ -77,8 +79,43 @@ function makeFTUR(cx: number, cy: number, house: House = House.USSR): MapStructu
   } as MapStructure;
 }
 
+function makeTSLA(cx: number, cy: number, house: House = House.USSR): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP['TSLA'] ?? 400;
+  return {
+    type: 'TSLA', image: 'tsla', house,
+    cx, cy, hp: maxHp, maxHp, alive: true, rubble: false,
+    weapon: { ...STRUCTURE_WEAPONS['TSLA'] },
+    attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    missionTimer: 0,
+  } as MapStructure;
+}
+
+function makeAGUN(cx: number, cy: number, house: House = House.Greece): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP['AGUN'] ?? 400;
+  return {
+    type: 'AGUN', image: 'agun', house,
+    cx, cy, hp: maxHp, maxHp, alive: true, rubble: false,
+    weapon: { ...STRUCTURE_WEAPONS['AGUN'] },
+    attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    turretDir: 0,
+    desiredTurretDir: 0,
+    turretFacing256: 0,
+    desiredTurretFacing256: 0,
+    missionTimer: 0,
+  } as MapStructure;
+}
+
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function entityAtLeptons(type: UnitType, house: House, lx: number, ly: number): Entity {
+  const e = new Entity(type, house, lx * CELL_SIZE / LEPTON_SIZE, ly * CELL_SIZE / LEPTON_SIZE);
+  e.leptonX = lx;
+  e.leptonY = ly;
+  e.pos = { x: lx * CELL_SIZE / LEPTON_SIZE, y: ly * CELL_SIZE / LEPTON_SIZE };
+  e.prevPos = { ...e.pos };
+  return e;
 }
 
 function makeCombatCtx(
@@ -149,6 +186,40 @@ function fireStructures(ctx: CombatContext): void {
   }
 }
 
+describe('building TarCom detach on target death (ObjectClass::Detach_All)', () => {
+  it('clears structure targetEntityId when the assigned target is destroyed', () => {
+    // C++ ObjectClass::Detach_All -> Detach_This_From_All(As_Target())
+    // reaches BuildingClass/TechnoClass::Detach and clears TarCom immediately.
+    const agun = makeAGUN(55, 100, House.Greece);
+    const otherAgun = makeAGUN(62, 100, House.Greece);
+    const yak = entityAtCell(UnitType.A_YAK, House.USSR, 58, 100);
+    const otherYak = entityAtCell(UnitType.A_YAK, House.USSR, 57, 100);
+    agun.mission = Mission.ATTACK;
+    agun.missionTimer = 1;
+    agun.targetEntityId = yak.id;
+    otherAgun.mission = Mission.ATTACK;
+    otherAgun.missionTimer = 1;
+    otherAgun.targetEntityId = otherYak.id;
+    const ctx = makeCombatCtx([agun, otherAgun], [yak, otherYak]);
+
+    yak.alive = false;
+    handleUnitDeath(ctx, yak, {
+      screenShake: 0,
+      explosionSize: 0,
+      debris: false,
+      decal: null,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    expect(agun.targetEntityId).toBeUndefined();
+    expect(agun.mission).toBe(Mission.ATTACK);
+    expect(agun.missionTimer).toBe(1);
+    expect(otherAgun.targetEntityId).toBe(otherYak.id);
+  });
+});
+
 // ============================================================
 // Section 1: No LOS check for building target acquisition
 //
@@ -206,6 +277,52 @@ describe('building targeting: no LOS check (C++ Evaluate_Object)', () => {
 // ============================================================
 
 describe('building targeting: range boundary inclusive (C++ In_Range <=)', () => {
+  it('AGUN guard scan uses aircraft Center_Coord for acquisition range', () => {
+    // C++ Evaluate_Object(range=0) calls In_Range(object, primary), and that
+    // object-pointer overload compares Fire_Coord to object->Center_Coord().
+    // Mission_Attack later rechecks TarCom/Target_Coord, so an airborne target
+    // can be acquired on one frame and rejected on the next as it crosses the
+    // AA edge. SCG08EA tick 597 depends on this split.
+    const agun = makeAGUN(10, 10);
+    const fireLX = 10 * LEPTON_SIZE + 0x80;
+    const fireLY = 10 * LEPTON_SIZE + 0xff;
+    const yak = entityAtLeptons(UnitType.V_YAK, House.USSR, fireLX + 1500, fireLY);
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    const ctx = makeCombatCtx([agun], [yak]);
+
+    expect(findStructureThreatTarget(ctx, agun)?.id).toBe(yak.id);
+  });
+
+  it('AGUN aircraft scan uses Evaluate_Object score, not closest-aircraft override', () => {
+    // SCG08EA tick 683: the lead YAK has the higher C++ Evaluate_Object score
+    // even though the trailing wounded YAK is slightly closer to the AGUN fire
+    // coord. BuildingClass::Greatest_Threat does not do a separate nearest-air
+    // override after scoring.
+    const agun = makeAGUN(62, 100, House.Greece);
+    const leadYak = entityAtLeptons(UnitType.V_YAK, House.USSR, 14860, 26571);
+    const trailingYak = entityAtLeptons(UnitType.V_YAK, House.USSR, 15036, 26827);
+    leadYak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    trailingYak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    trailingYak.hp = 15;
+    const ctx = makeCombatCtx([agun], [leadYak, trailingYak]);
+
+    expect(findStructureThreatTarget(ctx, agun)?.id).toBe(leadYak.id);
+  });
+
+  it('TSLA acquires SCG01EA C8 using bdata vertical Fire_Coord offset', () => {
+    // C++ oracle at SCG01EA tick 270:
+    // agent_debug_eval_target(TSLA at 71,59, C8 at 18763,13237) reports
+    // In_Range=true, Evaluate_Object=true, bestId=C8. Without TSLA's
+    // bdata.cpp VerticalOffset=0x00C8 in Fire_Coord, this edge target is
+    // measured outside TeslaZap range and the guard path rolls idle jitter.
+    const tsla = makeTSLA(71, 59, House.USSR);
+    const c8 = entityAtLeptons(UnitType.I_C8, House.England, 18763, 13237);
+    c8.mission = Mission.MOVE;
+    const ctx = makeCombatCtx([tsla], [c8]);
+
+    expect(findStructureThreatTarget(ctx, tsla)?.id).toBe(c8.id);
+  });
+
   it('FTUR hits target at exactly range=4 cells', () => {
     // FTUR range=4 cells. Place target exactly 4 cells away.
     const ftur = makeFTUR(10, 10, House.USSR);

@@ -1165,15 +1165,17 @@ describe('Terrain-mine forced spread — terrain.cpp:497-498', () => {
    * (cell.cpp:2965-2967), meaning the mine can spread ore regardless of the cell's
    * current overlay density.
    *
-   * TS does not implement ore mine terrain objects. This is a MISSING FEATURE,
-   * not a parity gap in the growOre implementation itself.
-   * Documenting for completeness.
+   * TS models this through GameMap.spreadTiberiumFromCell(..., true) and the
+   * terrain-mine Logic pass in Game.update().
    */
-  it('TS does not implement ore mine terrain forcing — feature gap', () => {
-    // This is a documentation test. The TS growOre function does not
-    // have special handling for ore mine terrain objects.
-    // C++ ore mines bypass the OverlayData > 6 spread check.
-    expect(true).toBe(true);
+  it('forced spread bypasses the source-cell ore density check', () => {
+    const map = new GameMap();
+    map.setBounds(40, 40, 50, 50);
+    map.initDefault();
+    ScenarioRandom.seed = 8; // direction N
+
+    expect(map.spreadTiberiumFromCell(50, 50, true)).toBe(true);
+    expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
 });
 
@@ -1197,13 +1199,12 @@ describe('Spread → germination integration', () => {
   /**
    * C++ cell.cpp:3000 — "if (Is_Bridge_Here()) return(false);"
    *
-   * Bridge cells cannot receive spread ore. TS does not have a bridge check
-   * in the spread logic — it only checks terrain type and wall type.
+   * Bridge cells cannot receive spread ore.
    *
    * PARITY FIXED: TS now checks templateType against bridge template IDs
    * (131, 133, 235, 236, 378, 379) during germination (map.ts:850-852).
    */
-  it('C++ rejects bridge cells for germination — TS lacks bridge check', () => {
+  it('C++ rejects bridge cells for germination', () => {
     // C++ cell.cpp:3000 — bridge cells cannot receive spread ore
     // TS now checks templateType against bridge template IDs (131, 133, 235, 236, 378, 379)
     setOverlay(map, 50, 50, 0x0C);
@@ -1225,20 +1226,27 @@ describe('Spread → germination integration', () => {
    * Cells with visible buildings cannot receive spread ore.
    * Invisible buildings (like the GPS satellite) DO allow germination.
    *
-   * PARITY FIXED: TS now checks vehicleOccupancy during germination (map.ts:854).
-   * Building footprint cells are marked as vehicle-occupied and rejected.
+   * TS represents visible structure footprint cells as non-buildable WALL terrain,
+   * so they are rejected by the same Ground[Land].Build gate.
    */
-  it('C++ rejects cells with visible buildings — TS lacks building check', () => {
+  it('C++ rejects cells with visible buildings', () => {
     // C++ cell.cpp:3007-3008 — cells with visible buildings cannot receive spread ore
-    // TS now checks vehicleOccupancy (building footprint cells are marked as vehicle-occupied)
+    // TS structure footprint cells use Terrain.WALL, which is not buildable.
     setOverlay(map, 50, 50, 0x0C);
-    // Mark north cell as occupied by a building (vehicle occupancy)
-    map.setVehicleOccupancy(50, 49, 999); // entity ID 999 = a building
+    map.setTerrain(50, 49, Terrain.WALL);
     // ScenarioRandom.nextInRange(0, 7) returns 0 = direction N (building cell)
     mockOreSpreadDirection(0);
     map.growOre(2048);
     // Building-occupied cell should NOT receive ore
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
+  });
+
+  it('vehicles do not block tiberium overlay mark-down', () => {
+    setOverlay(map, 50, 50, 0x0C);
+    map.setVehicleOccupancy(50, 49, 999);
+    mockOreSpreadDirection(0);
+    map.growOre(2048);
+    expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
 
   it('all 8 directions can receive spread when valid', () => {

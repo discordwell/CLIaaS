@@ -195,6 +195,9 @@ export interface Effect {
   loops?: number;  // number of times to loop (-1 = infinite)
   // Animation chaining (fire → smoke)
   followUp?: string;  // sprite name for follow-up effect
+  // C++ AnimClass objects also occupy Logic slots even when TS only needs a
+  // visual effect. These slots affect same-tick BulletClass scheduling.
+  cppLogicSlot?: boolean;
 }
 
 // Pseudo-random hash for terrain variation

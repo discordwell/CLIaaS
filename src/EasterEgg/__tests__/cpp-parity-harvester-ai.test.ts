@@ -817,25 +817,57 @@ describe('ArchiveTarget — unit.cpp:2794-2797 ore location memory', () => {
     expect(harv.archiveTarget).toEqual({ cx: 50, cy: 50 });
   });
 
-  it('idle harvester uses archiveTarget before scanning for new ore (C++ unit.cpp:2794-2796)', () => {
+  it('legal archiveTarget prevents LOOKING long scan because NavCom is already set (C++ unit.cpp:2794-2799, 2208)', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'idle';
     harv.mission = Mission.GUARD;
     harv.archiveTarget = { cx: 60, cy: 60 }; // remembered ore location
     ctx.entities.push(harv);
-    // Place ore at (52,50) nearby, but archiveTarget points to (60,60)
+    // C++ first assigns ArchiveTarget, then calls Goto_Tiberium. Goto_Tiberium
+    // only scans inside `if (!Target_Legal(NavCom))`, so a legal archive NavCom
+    // blocks the long scan instead of being overwritten by nearer ore.
     placeGold(ctx.map, 52, 50, 5);
     placeGold(ctx.map, 60, 60, 5);
 
     updateHarvester(ctx, harv);
-    // Should head to archiveTarget (60,60) first, not nearest ore (52,50)
     expect(harv.harvesterState).toBe('seeking');
     expect(harv.archiveTarget).toBeNull(); // cleared after use
-    // moveTarget should be at (60,60)
     expect(harv.moveTarget).toBeDefined();
     expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(60);
     expect(Math.floor(harv.moveTarget!.ly / 256)).toBe(60);
+  });
+
+  it('archiveTarget remains the destination when long scan finds no ore', () => {
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'idle';
+    harv.mission = Mission.GUARD;
+    harv.archiveTarget = { cx: 60, cy: 60 };
+    ctx.entities.push(harv);
+
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('seeking');
+    expect(harv.archiveTarget).toBeNull();
+    expect(harv.moveTarget).toBeDefined();
+    expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(60);
+    expect(Math.floor(harv.moveTarget!.ly / 256)).toBe(60);
+  });
+
+  it('partial-load short-scan failure clears archiveTarget before returning (C++ unit.cpp:2852-2854)', () => {
+    const ctx = makeCtx();
+    const harv = makeHarv(House.Spain, 50, 50);
+    harv.harvesterState = 'harvesting';
+    harv.mission = Mission.HARVEST;
+    primeHarvestReady(harv);
+    harv.oreLoad = 5;
+    harv.oreCreditValue = 5 * 25;
+    harv.archiveTarget = { cx: 60, cy: 60 };
+    ctx.entities.push(harv);
+
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('returning');
+    expect(harv.archiveTarget).toBeNull();
   });
 });
 
@@ -1342,6 +1374,7 @@ describe('harvesting bail extraction — harvester.ts:148-182', () => {
     primeHarvestReady(harv);
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('returning');
+    expect(harv.archiveTarget).toBeNull();
   });
 
   it('idle harvester with 0 ore and depleted cell stays idle', () => {

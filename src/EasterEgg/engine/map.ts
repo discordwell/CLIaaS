@@ -673,8 +673,9 @@ export class GameMap {
   }
 
   /** Restore an infantry destination claim by absolute cell index.
-   *  C++ InfantryClass::Start_Driver clears the current occupy bit and sets
-   *  the destination occupy bit while the infantry is in transit. */
+   *  C++ stores infantry sub-cell occupancy as anonymous bits, not owners.
+   *  TS keeps a representative id for diagnostics, so an already-occupied
+   *  slot still cannot be claimed by a different representative here. */
   occupyClaimedSubCell(cellIdx: number, entityId: number, subCell: number): boolean {
     if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return false;
     if (this.vehicleOccupancy.has(cellIdx) || this.vehicleTrackReservations.has(cellIdx)) return false;
@@ -691,11 +692,13 @@ export class GameMap {
     return true;
   }
 
-  /** Clear an infantry destination claim by absolute cell index. */
+  /** Clear an infantry destination claim by absolute cell index.
+   *  C++ Clear_Occupy_Bit clears by cell+spot only. If two infantry overlap
+   *  the same spot, clearing either one clears the bit for both. */
   vacateClaimedSubCell(cellIdx: number, entityId: number, subCell: number): void {
     if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return;
     const slots = this.subCellOccupancy.get(cellIdx);
-    if (slots && slots[subCell] === entityId) {
+    if (slots && slots[subCell] !== 0) {
       slots[subCell] = 0;
       this.refreshSubCellOccupancy(cellIdx);
     }
@@ -1140,6 +1143,62 @@ export class GameMap {
     }
   }
 
+  private canTiberiumSpreadFrom(idx: number): boolean {
+    const ovl = this.overlay[idx];
+    return GameMap.isGoldOverlayId(ovl) && this.oreDataAt(idx) > GameMap.ORE_SPREAD_MIN_DENSITY;
+  }
+
+  private canTiberiumGerminateAt(nx: number, ny: number): boolean {
+    if (nx < this.boundsX || nx >= this.boundsX + this.boundsW ||
+        ny < this.boundsY || ny >= this.boundsY + this.boundsH) return false;
+    const nidx = ny * MAP_CELLS + nx;
+    if (this.overlay[nidx] !== 0xFF) return false;
+    if (!BUILDABLE.has(this.cells[nidx])) return false;
+    if (this.wallType[nidx] !== '') return false;
+    const tmpl = this.templateType[nidx];
+    if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) return false;
+    return true;
+  }
+
+  private canMarkTiberiumOverlayAt(nx: number, ny: number): boolean {
+    if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) return false;
+    if (!PASSABLE.has(this.getTerrain(nx, ny))) return false;
+    return !this.isTreeOccupied(nx, ny) && !this.isTerrainObjectOccupied(nx, ny);
+  }
+
+  /** C++ CellClass::Spread_Tiberium.
+   *  `forced=true` is used by TERRAIN_MINE AI and bypasses Can_Tiberium_Spread. */
+  spreadTiberiumFromCell(cx: number, cy: number, forced = false): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    const sourceIdx = cy * MAP_CELLS + cx;
+    if (!forced && !this.canTiberiumSpreadFrom(sourceIdx)) return false;
+
+    const dirs: [number, number][] = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
+    const offset = ScenarioRandom.nextInRange(0, 7);
+    for (let i = 0; i < 8; i++) {
+      // C++ FacingType operator+ wraps with & 0x07 before Adjacent_Cell().
+      const dirIndex = (i + offset) & 7;
+      const [dx, dy] = dirs[dirIndex];
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!this.canTiberiumGerminateAt(nx, ny)) continue;
+      const nidx = ny * MAP_CELLS + nx;
+      const overlay = ScenarioRandom.nextInRange(GameMap.OVERLAY_GOLD1, GameMap.OVERLAY_GOLD4);
+      if (this.canMarkTiberiumOverlayAt(nx, ny)) {
+        this.overlay[nidx] = overlay;
+        this.oreDensity[nidx] = 0;
+        this.cells[nidx] = Terrain.ORE;
+      } else {
+        this.oreDensity[nidx] = 0;
+      }
+      return true;
+    }
+    return false;
+  }
+
   private applyOreGrowthAndSpread(): void {
     for (const idx of this.tiberiumGrowth) {
       const ovl = this.overlay[idx];
@@ -1151,31 +1210,9 @@ export class GameMap {
     this.tiberiumGrowth.length = 0;
     this.tiberiumGrowthExcess = 0;
 
-    const dirs: [number, number][] = [
-      [0, -1], [1, -1], [1, 0], [1, 1],
-      [0, 1], [-1, 1], [-1, 0], [-1, -1],
-    ];
-    const bx = this.boundsX, by = this.boundsY;
-    const bw = this.boundsW, bh = this.boundsH;
     for (const idx of this.tiberiumSpread) {
       const sx = idx % MAP_CELLS, sy = Math.floor(idx / MAP_CELLS);
-      const offset = ScenarioRandom.nextInRange(0, 7);
-      for (let i = 0; i < 8; i++) {
-        const [dx, dy] = dirs[(i + offset) % 8];
-        const nx = sx + dx, ny = sy + dy;
-        if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
-        const nidx = ny * MAP_CELLS + nx;
-        if (this.overlay[nidx] !== 0xFF) continue;
-        if (!BUILDABLE.has(this.cells[nidx])) continue;
-        if (this.wallType[nidx] !== '') continue;
-        const tmpl = this.templateType[nidx];
-        if (tmpl === 131 || tmpl === 133 || tmpl === 235 || tmpl === 236 || tmpl === 378 || tmpl === 379) continue;
-        if (this.vehicleOccupancy.has(nidx)) continue;
-        this.overlay[nidx] = ScenarioRandom.nextInRange(GameMap.OVERLAY_GOLD1, GameMap.OVERLAY_GOLD4);
-        this.oreDensity[nidx] = 0;
-        this.cells[nidx] = Terrain.ORE;
-        break;
-      }
+      this.spreadTiberiumFromCell(sx, sy);
     }
     this.tiberiumSpread.length = 0;
     this.tiberiumSpreadExcess = 0;
@@ -1258,20 +1295,30 @@ export class GameMap {
     return 0;
   }
 
-  /** Destroy one ore OverlayData level without awarding credits (combat splash). */
-  reduceOreLevel(cx: number, cy: number): void {
-    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+  /** Destroy ore OverlayData levels without awarding credits.
+  *  C++ CellClass::Reduce_Tiberium(levels) clears the overlay when the
+   *  requested reduction consumes the last available level. */
+  reduceOreLevels(cx: number, cy: number, levels: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
-    if (!GameMap.isOreOverlayId(ovl)) return;
+    if (!GameMap.isOreOverlayId(ovl)) return 0;
+    const reduction = Math.max(0, levels | 0);
+    if (reduction <= 0) return 0;
     const density = this.oreDataAt(idx);
-    if (density > 0) {
-      this.oreDensity[idx] = density - 1;
-    } else {
-      this.overlay[idx] = 0xFF;
-      this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
-      if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
+    if (density + 1 > reduction) {
+      this.oreDensity[idx] = density - reduction;
+      return reduction;
     }
+    this.overlay[idx] = 0xFF;
+    this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
+    if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
+    return density;
+  }
+
+  /** Destroy one ore OverlayData level without awarding credits (combat splash). */
+  reduceOreLevel(cx: number, cy: number): void {
+    this.reduceOreLevels(cx, cy, 1);
   }
 
   /** Check if overlay at a cell is a gem overlay (OVERLAY_GEMS1..4 = 9..12) */

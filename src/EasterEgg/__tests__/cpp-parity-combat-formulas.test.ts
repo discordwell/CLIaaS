@@ -18,7 +18,7 @@
  *   - rules.cpp:227       — MAX_DAMAGE = 1000
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, WEAPON_STATS,
   buildDefaultAlliances, Mission, AnimState,
@@ -39,6 +39,7 @@ import {
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -214,6 +215,111 @@ describe('Splash damage falloff curve (combat.cpp:107-130)', () => {
     const result = modifyDamage(100, 'SA', 'none', 3);
     // damage = 100 * 1.0 / 2 = 50; distFactor<4 → max(50,1)=50
     expect(result).toBe(50);
+  });
+});
+
+describe('Explosion_Damage zero-final-damage side effects', () => {
+  it('runs AI harvester Base_Is_Attacked even when armor reduces the HP damage to zero', () => {
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      seedLog: ScenarioRandom._seedLog,
+      taggedLog: ScenarioRandom._taggedLog,
+      sourceTag: ScenarioRandom._sourceTag,
+      entityTag: ScenarioRandom._entityTag,
+      tagLogging: ScenarioRandom._tagLogging,
+    };
+    try {
+      ScenarioRandom.seed = 0x12345678;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._seedLog = [];
+      ScenarioRandom._taggedLog = [];
+      ScenarioRandom._sourceTag = 0;
+      ScenarioRandom._entityTag = 0;
+      ScenarioRandom._tagLogging = true;
+
+      const attacker = entityAtCell(UnitType.I_C7, House.Spain, 10, 10);
+      const harvester = entityAtCell(UnitType.V_HARV, House.USSR, 11, 10);
+      const defenderA = entityAtCell(UnitType.I_C1, House.USSR, 20, 10);
+      const defenderB = entityAtCell(UnitType.I_C1, House.USSR, 21, 10);
+      defenderA.mission = Mission.GUARD;
+      defenderB.mission = Mission.GUARD;
+      defenderA.weapon = WEAPON_STATS.Pistol;
+      defenderB.weapon = WEAPON_STATS.Pistol;
+      const suspendTeamsByPriority = vi.fn();
+      const ctx = makeCombatCtx([attacker, harvester, defenderA, defenderB], [], {
+        playerHouse: House.Spain,
+        suspendTeamsByPriority,
+        houseTechLevel: () => 10,
+        movementSpeed: (e: Entity) => Math.max(1, e.stats.speed ?? 1),
+      } as Partial<CombatContext>);
+
+      const harvesterHpBefore = harvester.hp;
+      applySplashDamage(ctx, harvester.pos, WEAPON_STATS.Pistol, harvester.id, attacker.house, attacker);
+
+      expect(harvester.hp).toBe(harvesterHpBefore);
+      expect(suspendTeamsByPriority).toHaveBeenCalledWith(House.USSR, 20);
+      expect(defenderA.target).toBe(attacker);
+      expect(defenderB.target).toBe(attacker);
+      expect([Mission.RESCUE, Mission.AREA_GUARD]).toContain(defenderA.missionQueue);
+      expect([Mission.RESCUE, Mission.AREA_GUARD]).toContain(defenderB.missionQueue);
+      expect(ScenarioRandom.callCount).toBeGreaterThanOrEqual(2);
+      expect(ScenarioRandom._seedLog.map(([, tag]) => tag).every(tag => tag === 52028)).toBe(true);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._seedLog = saved.seedLog;
+      ScenarioRandom._taggedLog = saved.taggedLog;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._entityTag = saved.entityTag;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+    }
+  });
+
+  it('stores attacked harvester as object ArchiveTarget for AREA_GUARD defenders', () => {
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      seedLog: ScenarioRandom._seedLog,
+      taggedLog: ScenarioRandom._taggedLog,
+      sourceTag: ScenarioRandom._sourceTag,
+      entityTag: ScenarioRandom._entityTag,
+      tagLogging: ScenarioRandom._tagLogging,
+    };
+    try {
+      ScenarioRandom.seed = 0x12345678;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._seedLog = [];
+      ScenarioRandom._taggedLog = [];
+      ScenarioRandom._sourceTag = 0;
+      ScenarioRandom._entityTag = 0;
+      ScenarioRandom._tagLogging = true;
+
+      const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);
+      const harvester = entityAtCell(UnitType.V_HARV, House.USSR, 11, 10);
+      const defender = entityAtCell(UnitType.I_E2, House.USSR, 13, 10);
+      defender.mission = Mission.GUARD;
+      const ctx = makeCombatCtx([attacker, harvester, defender], [], {
+        playerHouse: House.Spain,
+        suspendTeamsByPriority: () => {},
+        houseTechLevel: () => 10,
+        movementSpeed: (e: Entity) => Math.max(1, e.stats.speed ?? 1),
+      } as Partial<CombatContext>);
+
+      damageEntity(ctx, harvester, 1, 'SA', attacker, { skipHouseArmorBias: true });
+
+      expect(defender.missionQueue).toBe(Mission.AREA_GUARD);
+      expect(defender.archiveTargetEntity).toBe(harvester);
+      expect(defender.archiveTargetLeptons).toBeNull();
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._seedLog = saved.seedLog;
+      ScenarioRandom._taggedLog = saved.taggedLog;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._entityTag = saved.entityTag;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+    }
   });
 });
 

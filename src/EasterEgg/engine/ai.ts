@@ -22,6 +22,7 @@ import {
 } from './scenario';
 import { type GameMap, Terrain } from './map';
 import { ScenarioRandom } from './random';
+import { Team, registerTeam } from './team';
 
 // ── Re-export the types that index.ts already defines locally ──────────────
 
@@ -176,6 +177,22 @@ const CPP_DEFAULT_MAX_INFANTRY = Math.floor(RULE_INFANTRY_MAX / 6);  // 83
 const CPP_DEFAULT_MAX_VESSEL   = Math.floor(RULE_VESSEL_MAX / 6);    // 16
 const CPP_DEFAULT_MAX_AIRCRAFT = Math.floor(RULE_UNIT_MAX / 6);      // 83 (C++ quirk: uses UnitMax!)
 
+const TICKS_PER_MINUTE = GAME_TICKS_PER_SEC * 60;
+
+function cppFixedRaw(whole: number, numerator: number, denominator: number): number {
+  return (whole << 8) + Math.floor((256 * numerator) / denominator);
+}
+
+function cppFixedMulInt(raw: number, value: number): number {
+  return Math.floor((raw * value + 128) / 256);
+}
+
+// C++ Rule.TeamDelay default/rules.ini value is ".6" (rules.cpp:130,
+// rules.ini [General]). fixed(".6") stores raw 153, then fixed*int rounds:
+// ((153 * 900) + 128) / 256 = 538 ticks.
+export const CPP_TEAM_DELAY_TICKS = cppFixedMulInt(cppFixedRaw(0, 6, 10), TICKS_PER_MINUTE);
+const CPP_INITIAL_TEAM_DELAY_TICKS = CPP_TEAM_DELAY_TICKS + 1;
+
 /** C++ rules.ini RepairStep=7, RepairPercent=20% (rules.cpp defaults overridden by rules.ini) */
 const REPAIR_STEP = 7;
 const REPAIR_PERCENT = 0.20;
@@ -227,6 +244,8 @@ export interface AIContext {
    *  to request replacement members for active under-strength teams. */
   activeTeams?: readonly {
     readonly house: House;
+    readonly typeName?: string | null;
+    readonly teamTypeIndex?: number | null;
     readonly desiredMembers: readonly { type: string; count: number }[];
     readonly isReinforcable: boolean;
     readonly isFullStrength: boolean;
@@ -264,6 +283,18 @@ function aiTeamNeedsProduction(
     (!team.isForcedActive && !team.isHasBeen && !team.isAltered);
 }
 
+function activeTeamTypeCount(ctx: AIContext, teamIdx: number): number {
+  const explicitCount = ctx.autocreateTeamCounts.get(teamIdx) ?? 0;
+  const ttype = ctx.teamTypes[teamIdx];
+  let registryCount = 0;
+  for (const team of ctx.activeTeams ?? []) {
+    if (team.teamTypeIndex === teamIdx || (ttype && team.typeName === ttype.name)) {
+      registryCount++;
+    }
+  }
+  return Math.max(explicitCount, registryCount);
+}
+
 function isRecruitableForAIProduction(entity: Entity, house: House): boolean {
   if (!entity.alive || entity.house !== house) return false;
   // C++ FootClass::Is_Recruitable rejects already-teamed foot objects before
@@ -271,6 +302,39 @@ function isRecruitableForAIProduction(entity: Entity, house: House): boolean {
   if (entity.teamRef) return false;
   if (entity.mission === Mission.NONE) return true;
   return MISSION_CONTROL[entity.mission]?.isRecruitable === true;
+}
+
+function aiInProgressFactoryProducts(ctx: AIContext, house: House, kind: 'unit' | 'infantry' | 'vessel' | 'aircraft' | 'building'): string[] {
+  const products: string[] = [];
+  for (const s of ctx.structures) {
+    const factory = s.aiFactory;
+    if (!s.alive || s.house !== house || !factory || factory.kind !== kind) continue;
+    products.push(factory.productType);
+  }
+  return products;
+}
+
+function aiCurUnitQuantity(ctx: AIContext, house: House): number {
+  let count = 0;
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) {
+      count++;
+    }
+  }
+  return count + aiInProgressFactoryProducts(ctx, house, 'unit').length;
+}
+
+function aiUnitQuantity(ctx: AIContext, house: House, type: string): number {
+  let count = 0;
+  for (const e of ctx.entities) {
+    if (e.alive && e.house === house && e.type === type && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) {
+      count++;
+    }
+  }
+  for (const productType of aiInProgressFactoryProducts(ctx, house, 'unit')) {
+    if (productType === type) count++;
+  }
+  return count;
 }
 
 function houseHasInfantryScanType(ctx: AIContext, house: House, type: string): boolean {
@@ -465,8 +529,9 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     buildStructure: null,
     buildAircraft: null,
     alertTimer: 0,
-    // C++ TeamTime init = Rule.TeamDelay * TICKS_PER_MINUTE. TeamDelay=5 → 5*60*15=4500
-    teamTimer: 5 * 60 * GAME_TICKS_PER_SEC,
+    // CDTimerClass is constructed before the first AI frame; the first logic
+    // check therefore expires one TS pre-decrement tick after the raw delay.
+    teamTimer: CPP_INITIAL_TEAM_DELAY_TICKS,
     // C++ house.cpp:525 DidRepair(0), RepairTimer(0)
     didRepair: false,
     repairTimer: 0,
@@ -2287,7 +2352,7 @@ export function suggestedNewTeam(
     }
 
     // C++ teamtype.cpp:440 — ttype->Number < maxnum
-    const activeCount = ctx.autocreateTeamCounts.get(teamIdx) ?? 0;
+    const activeCount = activeTeamTypeCount(ctx, teamIdx);
     if (activeCount < maxnum) {
       choices.push(teamIdx);
     }
@@ -2296,6 +2361,47 @@ export function suggestedNewTeam(
   if (choices.length === 0) return null;
   // C++ teamtype.cpp:492 — Random_Pick(0, choicecount-1)
   return choices[ScenarioRandom.nextInRange(0, choices.length - 1)];
+}
+
+/** C++ TeamTypeClass::Create_One_Of(): allocate a TeamClass object.
+ *  Member units are recruited later by TeamClass::AI; Create_One_Of itself
+ *  only increments TeamTypeClass::Number and registers the empty team. */
+function createTeamClassInstance(ctx: AIContext, teamIdx: number, house: House): void {
+  const teamType = ctx.teamTypes[teamIdx];
+  if (!teamType) return;
+
+  if (!ctx.activeTeams) {
+    ctx.autocreateTeamCounts.set(teamIdx, (ctx.autocreateTeamCounts.get(teamIdx) ?? 0) + 1);
+  }
+
+  let originPos: WorldPos | null = null;
+  if (teamType.origin >= 0) {
+    const wp = ctx.waypoints.get(teamType.origin);
+    if (wp) {
+      originPos = {
+        x: wp.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: wp.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+    }
+  }
+
+  registerTeam(new Team({
+    typeName: teamType.name,
+    teamTypeIndex: teamIdx,
+    house,
+    desiredMembers: teamType.members.map(m => ({
+      type: m.type.toUpperCase(),
+      count: m.count,
+    })),
+    missionList: teamType.missions.map(m => ({
+      mission: m.mission,
+      data: m.data,
+    })),
+    isReinforcable: !!(teamType.flags & 16),
+    isSuicide: !!(teamType.flags & 2),
+    origin: originPos,
+    forcedActive: false,
+  }));
 }
 
 /** Spawn a single team instance into the game world.
@@ -2441,20 +2547,17 @@ function aiPerTickUnit(ctx: AIContext, house: House, state: AIHouseState): void 
   // C++ house.cpp:5806: early return if already building
   if (state.buildUnit !== null) return;
   // C++ house.cpp:5807: early return at unit cap
-  let curUnits = 0;
-  for (const e of ctx.entities) {
-    if (e.alive && e.house === house && !e.stats.isInfantry && !e.stats.isVessel && !e.stats.isAircraft && !e.isAnt) curUnits++;
-  }
+  const curUnits = aiCurUnitQuantity(ctx, house);
   if (curUnits >= state.maxUnit) return;
 
   // C++ house.cpp:5813: harvester replacement (IQ >= IQHarvester=2, not hard difficulty)
   // This sets BuildUnit WITHOUT RNG and returns early.
   if (state.iq >= 2) {
     const refineries = aiCountStructure(ctx, house, 'PROC');
-    let harvesterCount = 0;
-    for (const e of ctx.entities) {
-      if (e.alive && e.house === house && e.type === 'HARV') harvesterCount++;
-    }
+    // C++ compares BQuantity[REFINERY] to UQuantity[HARVESTER]. UQuantity is
+    // incremented in the UnitClass constructor when FactoryClass::Set creates
+    // the limbo product, before BuildingClass::Exit_Object unlimboes it.
+    const harvesterCount = aiUnitQuantity(ctx, house, UnitType.V_HARV);
     if (refineries > harvesterCount) {
       state.buildUnit = 'HARV';
       return;
@@ -2646,17 +2749,44 @@ function aiPerTickVessel(ctx: AIContext, house: House, state: AIHouseState): voi
   }
 }
 
+function nextBaseBuildable(ctx: AIContext, house: House): { type: string; cell: number; house: House } | null {
+  if (ctx.baseBlueprint.length === 0) return null;
+
+  const aliveSet = new Set<string>();
+  for (const s of ctx.structures) {
+    if (s.alive) aliveSet.add(`${s.type}:${s.cx},${s.cy}`);
+  }
+
+  for (const bp of ctx.baseBlueprint) {
+    if (bp.house !== house) continue;
+    const cx = bp.cell % MAP_CELLS;
+    const cy = Math.floor(bp.cell / MAP_CELLS);
+    if (!aliveSet.has(`${bp.type}:${cx},${cy}`)) return bp;
+  }
+
+  return null;
+}
+
 /**
  * C++ AI_Building (house.cpp:5446-5785) — per-tick structure production decision.
- * Only active when IsBaseBuilding is true.
+ * This selects HouseClass::BuildStructure only. BuildingClass::Factory_AI later
+ * produces and places the object; AI_Building does not unlimbo a structure.
  */
-function aiPerTickBuilding(_ctx: AIContext, _house: House, state: AIHouseState): void {
+function aiPerTickBuilding(ctx: AIContext, house: House, state: AIHouseState): void {
   if (state.buildStructure !== null) return;
-  // C++ AI_Building only does meaningful work when IsBaseBuilding=true
-  // In GAME_NORMAL without IsBaseBuilding, it just returns TICKS_PER_SECOND
+
+  // C++ house.cpp:5456-5460: campaign [Base] nodes are build requests for
+  // the base owner. Pre-placed [STRUCTURES] entries count as already built.
+  const baseNode = nextBaseBuildable(ctx, house);
+  if (baseNode) {
+    state.buildStructure = baseNode.type;
+    return;
+  }
+
+  // C++ AI_Building also suggests arbitrary base-building choices when
+  // IsBaseBuilding is enabled. That path must feed BuildStructure/factories,
+  // not direct placement; leave it inert until the structure factory is ported.
   if (!state.isBaseBuilding) return;
-  // Building selection logic delegated to existing getAIBuildOrder when isBaseBuilding
-  // For now, this is a placeholder — IsBaseBuilding is rarely true in early campaign
 }
 
 /**
@@ -2702,10 +2832,12 @@ function aiPerTickTimers(ctx: AIContext, house: House, state: AIHouseState): voi
     const maxTeams = ScenarioRandom.nextInRange(2, maxTeamsUpper);
 
     for (let t = 0; t < maxTeams; t++) {
-      // C++ line 999: Suggested_New_Team(true) — 1 RNG call each
+      // C++ line 999: Suggested_New_Team(true), then Create_One_Of()
       if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 101;
-      suggestedNewTeam(ctx, house, true);
-      // Note: actual team spawning is separate; this just consumes RNG for parity
+      const teamIdx = suggestedNewTeam(ctx, house, true);
+      if (teamIdx !== null) {
+        createTeamClassInstance(ctx, teamIdx, house);
+      }
     }
 
     // C++ line 1007: AlertTime = Rule.AutocreateTime * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2)
@@ -2717,11 +2849,14 @@ function aiPerTickTimers(ctx: AIContext, house: House, state: AIHouseState): voi
 
   // C++ house.cpp:1061-1070: TeamTime handler (tag 103)
   if (!state.isAlerted && state.teamTimer <= 0) {
-    // C++ line 1064: Suggested_New_Team(false) — 1 RNG call
+    // C++ line 1064: Suggested_New_Team(false), then Create_One_Of()
     if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 103;
-    suggestedNewTeam(ctx, house, false);
+    const teamIdx = suggestedNewTeam(ctx, house, false);
+    if (teamIdx !== null) {
+      createTeamClassInstance(ctx, teamIdx, house);
+    }
     // C++ line 1069: TeamTime = Rule.TeamDelay * TICKS_PER_MINUTE
-    state.teamTimer = 5 * 60 * GAME_TICKS_PER_SEC; // TeamDelay=5
+    state.teamTimer = CPP_TEAM_DELAY_TICKS;
   }
 }
 

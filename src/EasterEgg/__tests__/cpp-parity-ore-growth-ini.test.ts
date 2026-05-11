@@ -352,8 +352,8 @@ describe('Spread threshold from C++ Can_Tiberium_Spread (cell.cpp:2904-2918)', (
 });
 
 // ============================================================
-// Section 5: Spread direction preference -- cell.cpp:2968-2969
-//   Random starting direction, iterate all 8, first valid cell wins.
+// Section 5: Spread direction preference -- cell.cpp:2968-2970
+//   Random starting direction, wrapping FacingType arithmetic.
 // ============================================================
 describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () => {
   let map: GameMap;
@@ -366,29 +366,22 @@ describe('Spread direction from C++ Spread_Tiberium (cell.cpp:2963-2979)', () =>
   });
 
   /**
-   * C++ cell.cpp:2968: "FacingType offset = Random_Pick(FACING_N, FACING_NW);"
-   * C++ cell.cpp:2969: "for (FacingType index = FACING_N; index < FACING_COUNT; index++)"
-   * Iterates 8 directions starting from random offset, wrapping around.
-   *
-   * TS map.ts:755-756:
-   *   const offset = Math.floor(Math.random() * 8);
-   *   for (let i = 0; i < 8; i++) { dirs[(i + offset) % 8] }
-   *
-   * PARITY MATCH: Both iterate 8 directions from random start.
+   * C++ cell.cpp:2970 passes `index + offset` directly to Adjacent_Cell().
+   * FacingType operator+ wraps with `& 0x07`, so the search tries every facing.
    */
-  it('spread iterates 8 directions from random offset', () => {
-    // Block all directions except W (-1,0)
+  it('spread wraps back to earlier facings after FACING_NW', () => {
+    // Leave only N open. With offset NE, C++ checks NE..NW and then wraps
+    // around to N via FacingType arithmetic.
     setOverlay(map, 50, 50, 0x0C);
     const allDirs: [number, number][] = [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]];
     for (const [dx, dy] of allDirs) {
-      if (dx === -1 && dy === 0) continue; // leave W open
+      if (dx === 0 && dy === -1) continue; // leave N open
       setOverlay(map, 50 + dx, 50 + dy, 0x01); // block with non-gold overlay
     }
-    // With reservoir sampling, only random call is spread direction offset
-    ScenarioRandom.seed = 8; // direction 0 (N) — start scanning from north
+    // With reservoir sampling, only random call is spread direction offset.
+    ScenarioRandom.seed = 6; // direction 1 (NE)
     map.growOre(2048);
-    // W is the only valid direction; wrapping finds it regardless of start
-    expect(getOverlay(map, 49, 50)).toBe(0x03);
+    expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
 
   /**
@@ -549,15 +542,23 @@ describe('Germination terrain from C++ Can_Tiberium_Germinate (cell.cpp:2996-301
   });
 
   /**
-   * C++ cell.cpp:3007-3008: visible buildings block germination.
-   * TS map.ts:768: "if (this.vehicleOccupancy.has(nidx)) continue;"
+   * C++ cell.cpp:3019: structure foundations are LAND_WALL in TS' map model,
+   * matching visible buildings rejecting germination before overlay RNG.
    */
-  it('ore canNOT spread to cells with building/vehicle occupancy', () => {
+  it('ore canNOT spread to structure footprint terrain', () => {
     setOverlay(map, 50, 50, 0x0C);
-    map.setVehicleOccupancy(50, 49, 999);
-    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by occupancy)
+    map.setTerrain(50, 49, Terrain.WALL);
+    ScenarioRandom.seed = 8; // direction 0 (N) — try to spread north (blocked by foundation)
     map.growOre(2048);
     expect(getOverlay(map, 50, 49)).toBe(0xFF);
+  });
+
+  it('vehicle occupancy does not block tiberium germination or mark-down', () => {
+    setOverlay(map, 50, 50, 0x0C);
+    map.setVehicleOccupancy(50, 49, 999);
+    ScenarioRandom.seed = 8; // direction 0 (N) — spread north under the vehicle
+    map.growOre(2048);
+    expect(getOverlay(map, 50, 49)).toBe(0x03);
   });
 
   /**
@@ -762,17 +763,17 @@ describe('Documented parity status summary', () => {
    * CLOSED #2: Spread probability model — TS now uses reservoir sampling + deterministic spread.
    * CLOSED #3: Two-phase processing — TS now defers newly spread ore to next cycle.
    *
-   * BLOCKED: Ore mine terrain (TERRAIN_MINE) forced spread
+   * CLOSED #5: Ore mine terrain (TERRAIN_MINE) forced spread
    *   C++ terrain.cpp:497 -- ore mines force-spread bypassing density threshold.
-   *   TS does not implement ore mine terrain objects.
-   *   Impact: Missing feature; ore mines don't exist in TS maps.
+   *   TS now schedules MINE terrain objects in Game.update and calls
+   *   spreadTiberiumFromCell(..., true).
    *
    * PARITY MATCH #1: Growth interval = 2048 ticks (from GrowthRate=2).
    * PARITY MATCH #2: Growth ceiling at density 11 (OverlayData < 11).
    * PARITY MATCH #3: Spread threshold at density 7 (OverlayData > 6).
    * PARITY MATCH #4: Gold-only growth/spread (gems excluded).
-   * PARITY MATCH #5: 8-direction spread from random offset.
-   * PARITY MATCH #6: Single-cell spread (first valid neighbor).
+   * PARITY MATCH #6: 8-direction spread from random offset.
+   * PARITY MATCH #7: Single-cell spread (first valid neighbor).
    * PARITY MATCH #7: Minimum density for new spread (OverlayData=0 / 0x03).
    * PARITY MATCH #8: Germination on CLEAR and ROAD terrain only.
    * PARITY MATCH #9: Pre-growth density used for spread eligibility.

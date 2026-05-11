@@ -178,11 +178,10 @@ describe('ParaBomb weapon — IsDropping + IsParachuted (bullet.cpp:790-802)', (
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('IsDropping projectile behavior (bullet.cpp:790-802)', () => {
-  it('dropping projectile starts at FLIGHT_LEVEL height of 24 pixels (bullet.cpp:792)', () => {
-    // C++ bullet.cpp:792: Height = FLIGHT_LEVEL; (commented: Pixel_To_Lepton(24))
-    // TS combat.ts:599: dropHeight: weapon.isDropping ? 24 : 0
-    const flightLevel = 24;
-    expect(flightLevel).toBe(24);
+  it('dropping projectile starts at FLIGHT_LEVEL height of 256 leptons (bullet.cpp:792)', () => {
+    // C++ object.h: FLIGHT_LEVEL=256. The old source comment notes this is
+    // Pixel_To_Lepton(24), but ObjectClass::Height stores leptons, not pixels.
+    expect(Entity.FLIGHT_LEVEL_LEPTONS).toBe(256);
   });
 
   it('dropping projectile Riser is 0 — pure vertical fall (bullet.cpp:794)', () => {
@@ -191,19 +190,38 @@ describe('IsDropping projectile behavior (bullet.cpp:790-802)', () => {
     expect(riser).toBe(0);
   });
 
-  it('RULE_GRAVITY is 3 — dropHeight decreases by 3 per tick (rules.cpp)', () => {
+  it('RULE_GRAVITY is 3 — non-parachuted drop riser changes by 3 per tick (rules.cpp)', () => {
     // C++ rules.cpp: Rule.Gravity default = 3
     // TS types.ts: RULE_GRAVITY = 3
     expect(RULE_GRAVITY).toBe(3);
   });
 
-  it('dropping projectile takes 8 ticks to fall from FLIGHT_LEVEL to ground (24 / 3)', () => {
-    // C++ bullet.cpp:790-802: Height starts at FLIGHT_LEVEL (24)
-    // C++ object.cpp:252: Height -= Rule.Gravity each tick
-    // 24 / 3 = 8 ticks to reach ground
-    const flightLevel = 24;
-    const ticksToFall = Math.ceil(flightLevel / RULE_GRAVITY);
-    expect(ticksToFall).toBe(8);
+  it('parachuted dropping projectile takes 88 ObjectClass::AI ticks to land', () => {
+    let height = Entity.FLIGHT_LEVEL_LEPTONS;
+    let riser = 0;
+    let ticks = 0;
+    while (height > 0) {
+      height += riser;
+      if (height <= 0) height = 0;
+      riser = Math.max(riser - 1, -3);
+      ticks++;
+    }
+
+    expect(ticks).toBe(88);
+  });
+
+  it('non-parachuted dropping projectile lands faster using Rule.Gravity riser', () => {
+    let height = Entity.FLIGHT_LEVEL_LEPTONS;
+    let riser = 0;
+    let ticks = 0;
+    while (height > 0) {
+      height += riser;
+      if (height <= 0) height = 0;
+      riser = Math.max(riser - RULE_GRAVITY, -100);
+      ticks++;
+    }
+
+    expect(ticks).toBe(14);
   });
 
   it('dropping projectile skips facing calculation (bullet.cpp:699)', () => {
@@ -319,7 +337,7 @@ describe('Parachute detach on landing (bullet.cpp:359-361)', () => {
 
   it('IsDropping projectile does NOT force-explode on first frame (currentFrame=0)', () => {
     // TS combat.ts:731: currentFrame > 0 guard prevents instant detonation
-    const dropHeight = 24;
+    const dropHeight = Entity.FLIGHT_LEVEL_LEPTONS;
     const isDropping = true;
     const currentFrame = 0;
     const shouldExplode = isDropping && dropHeight <= 0 && currentFrame > 0;
@@ -436,17 +454,20 @@ describe('BADR + ParaBomb integration — full attack chain', () => {
     expect(badr.ammo).toBe(5);
   });
 
-  it('ParaBomb drop height + gravity gives expected fall time', () => {
-    // C++ Height=FLIGHT_LEVEL(24), decreases by Rule.Gravity(3) each tick
-    const dropHeight = 24;
-    let height = dropHeight;
+  it('ParaBomb drop height + parachute riser gives expected fall time', () => {
+    // C++ IsParachuted attaches ANIM_PARA_BOMB, so ObjectClass::AI uses
+    // Riser -= 1 clamped to -3 instead of Rule.Gravity.
+    let height = Entity.FLIGHT_LEVEL_LEPTONS;
+    let riser = 0;
     let ticks = 0;
     while (height > 0) {
-      height -= RULE_GRAVITY;
+      height += riser;
+      if (height <= 0) height = 0;
+      riser = Math.max(riser - 1, -3);
       ticks++;
     }
-    expect(ticks).toBe(8);
-    expect(height).toBe(0); // 24 - 8*3 = 0 exactly
+    expect(ticks).toBe(88);
+    expect(height).toBe(0);
   });
 
   it('5 successive ParaBombs with ROF=4 take 16 ticks between first and last drop', () => {

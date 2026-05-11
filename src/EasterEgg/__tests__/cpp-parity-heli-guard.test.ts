@@ -14,7 +14,7 @@
  *   5. Return delay
  *
  * Find_Juicy_Target (house.cpp:6900-6927):
- *   - Searches ALL enemy units (not structures)
+ *   - Searches the C++ Units pool only: UnitClass vehicles, not infantry/vessels/aircraft
  *   - Filters: alive, !InLimbo, !allied, Which_Zone(unit) == ZONE_NONE (outside own base)
  *   - Distance scoring: closer is better
  *   - Harvester distance halved (priority)
@@ -32,10 +32,9 @@ import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   House, Mission, UnitType, CELL_SIZE, RESFACTOR,
-  UNIT_STATS, buildDefaultAlliances, worldDist,
 } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
-import { STRUCTURE_SIZE } from '../engine/scenario';
+import { RandomClass, ScenarioRandom } from '../engine/random';
 
 // ── Test infrastructure ──────────────────────────────────────────────────────
 
@@ -60,8 +59,16 @@ function createGame(): Game {
 }
 
 /** Access private _heliGuardScan via type cast */
-function callHeliGuardScan(game: Game, heli: Entity): void {
-  (game as unknown as { _heliGuardScan(heli: Entity): void })._heliGuardScan(heli);
+function callHeliGuardScan(game: Game, heli: Entity): boolean {
+  return (game as unknown as { _heliGuardScan(heli: Entity): boolean })._heliGuardScan(heli);
+}
+
+function runStructureLogic(game: Game): void {
+  const g = game as unknown as {
+    _combatCtx: unknown;
+    tickStructuresInterleaved(ctx: unknown): void;
+  };
+  g.tickStructuresInterleaved(g._combatCtx);
 }
 
 /** Place entity at cell center */
@@ -175,7 +182,7 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
 
     // Two enemy units at same distance, both outside base zone, within scan range
     // Medium tank at (13,10) — 3 cells away
-    const tank = entityAtCell(UnitType.V_MED, House.Greece, 13, 10);
+    const tank = entityAtCell(UnitType.V_2TNK, House.Greece, 13, 10);
     game.entities.push(tank);
     game.entityById.set(tank.id, tank);
 
@@ -231,6 +238,135 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     expect(hind.target).toBe(harvester);
   });
 
+  it('does not treat InfantryClass targets as Find_Juicy_Target hits', () => {
+    // C++ house.cpp:6911 iterates Units.Count()/UnitClass*, so infantry can be
+    // found later by Target_Something_Nearby but must not queue ATTACK as juicy.
+    const game = createGame();
+
+    const hpad = makeHPAD(House.USSR, 10, 10);
+    game.structures.push(hpad);
+
+    const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.mission = Mission.GUARD;
+    hind.aircraftState = 'landed';
+    game.entities.push(hind);
+    game.entityById.set(hind.id, hind);
+
+    const rifleman = entityAtCell(UnitType.I_E1, House.Greece, 13, 10);
+    game.entities.push(rifleman);
+    game.entityById.set(rifleman.id, rifleman);
+
+    const juicyFound = callHeliGuardScan(game, hind);
+
+    expect(juicyFound).toBe(false);
+    expect(hind.target).toBe(rifleman);
+  });
+
+  it('does not treat VesselClass targets as Find_Juicy_Target hits', () => {
+    // C++ vessels live in a separate object pool from Units. A far LST outside
+    // weapon range should therefore not queue ATTACK through the juicy-target path.
+    const game = createGame();
+
+    const hpad = makeHPAD(House.USSR, 10, 10);
+    game.structures.push(hpad);
+
+    const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.mission = Mission.GUARD;
+    hind.aircraftState = 'landed';
+    game.entities.push(hind);
+    game.entityById.set(hind.id, hind);
+
+    const transport = entityAtCell(UnitType.V_LST, House.Greece, 25, 10);
+    game.entities.push(transport);
+    game.entityById.set(transport.id, transport);
+
+    const juicyFound = callHeliGuardScan(game, hind);
+
+    expect(juicyFound).toBe(false);
+    expect(hind.target).toBeNull();
+  });
+
+  it('target found only by Target_Something_Nearby stays in GUARD until the next guard timer fire', () => {
+    // C++ aircraft.cpp:3793 checks Target_Legal(TarCom) before falling through
+    // to FootClass::Mission_Guard. A target first found by FootClass at
+    // foot.cpp:646 does not queue MISSION_ATTACK until a later guard fire.
+    const game = createGame();
+    game.playerHouse = House.Greece;
+
+    const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.mission = Mission.GUARD;
+    hind.missionTimer = 0;
+    hind.aircraftState = 'landed';
+    hind.flightAltitude = 0;
+    game.entities.push(hind);
+    game.entityById.set(hind.id, hind);
+
+    const hpad = makeHPAD(House.USSR, 10, 10);
+    hpad.hpadHelicopterId = hind.id;
+    hpad.missionTimer = 999;
+    game.structures.push(hpad);
+
+    const aiStates = (game as unknown as { aiStates: Map<House, { underAttack: boolean }> }).aiStates;
+    aiStates.set(House.USSR, { underAttack: true } as never);
+
+    const alliedBase = makeStructure('FACT', House.Greece, 13, 10);
+    alliedBase.missionTimer = 999;
+    game.structures.push(alliedBase);
+
+    const harvester = entityAtCell(UnitType.V_HARV, House.Greece, 13, 10);
+    game.entities.push(harvester);
+    game.entityById.set(harvester.id, harvester);
+
+    const savedSeed = ScenarioRandom.seed;
+    try {
+      ScenarioRandom.seed = 0x12345678;
+
+      runStructureLogic(game);
+
+      expect(hind.target).toBe(harvester);
+      expect(hind.mission).toBe(Mission.GUARD);
+      expect(hind.aircraftState).toBe('landed');
+      expect(hind.missionTimer).toBeGreaterThanOrEqual(41);
+      expect(hind.missionTimer).toBeLessThanOrEqual(43);
+    } finally {
+      ScenarioRandom.seed = savedSeed;
+    }
+  });
+
+  it('starts the returned guard delay on the same logic frame', () => {
+    // C++ MissionClass::AI assigns Timer = Mission_Guard() into a CDTimerClass
+    // started at the current Frame. The value visible after the same object AI
+    // has run is therefore returnedDelay - 1, not the full returnedDelay.
+    const game = createGame();
+
+    const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.mission = Mission.GUARD;
+    hind.missionTimer = 0;
+    hind.aircraftState = 'landed';
+    hind.flightAltitude = 0;
+    game.entities.push(hind);
+    game.entityById.set(hind.id, hind);
+
+    const hpad = makeHPAD(House.USSR, 10, 10);
+    hpad.hpadHelicopterId = hind.id;
+    hpad.missionTimer = 999;
+    game.structures.push(hpad);
+
+    const seed = 0x2468ace0;
+    const expectedJitter = new RandomClass(seed).nextInRange(0, 2);
+    const savedSeed = ScenarioRandom.seed;
+    try {
+      ScenarioRandom.seed = seed;
+
+      runStructureLogic(game);
+
+      expect(hind.mission).toBe(Mission.GUARD);
+      expect(hind.missionTimer).toBe(42 + expectedJitter - 1);
+    } finally {
+      ScenarioRandom.seed = savedSeed;
+    }
+  });
+
   it('clears out-of-range juicy target via Target_Something_Nearby validation', () => {
     // C++ techno.cpp:5261-5266: Target_Something_Nearby clears TarCom if out of weapon range
     const game = createGame();
@@ -270,24 +406,24 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     game.entities.push(hind);
     game.entityById.set(hind.id, hind);
 
-    // Rocket soldier (AA) at (12,10) — 2 cells, distance doubled to 4 via AA penalty
-    const rocket = entityAtCell(UnitType.I_E3, House.Greece, 12, 10);
-    game.entities.push(rocket);
-    game.entityById.set(rocket.id, rocket);
+    // Mammoth tank (AA secondary) at (12,10) — 2 cells, doubled to 4 via AA penalty
+    const mammoth = entityAtCell(UnitType.V_4TNK, House.Greece, 12, 10);
+    game.entities.push(mammoth);
+    game.entityById.set(mammoth.id, mammoth);
 
-    // Regular infantry at (13,10) — 3 cells, no penalty
-    const rifleman = entityAtCell(UnitType.I_E1, House.Greece, 13, 10);
-    game.entities.push(rifleman);
-    game.entityById.set(rifleman.id, rifleman);
+    // Medium tank at (13,10) — 3 cells, no penalty
+    const tank = entityAtCell(UnitType.V_2TNK, House.Greece, 13, 10);
+    game.entities.push(tank);
+    game.entityById.set(tank.id, tank);
 
     callHeliGuardScan(game, hind);
 
-    expect(rocket.weapon?.isAntiAir || rocket.weapon2?.isAntiAir).toBe(true);
-    expect(rifleman.weapon?.isAntiAir || rifleman.weapon2?.isAntiAir).toBeFalsy();
+    expect(mammoth.weapon?.isAntiAir || mammoth.weapon2?.isAntiAir).toBe(true);
+    expect(tank.weapon?.isAntiAir || tank.weapon2?.isAntiAir).toBeFalsy();
 
-    // Both are in scan range. Find_Juicy_Target should pick rifleman (3 < 4 after AA penalty).
+    // Both are in scan range. Find_Juicy_Target should pick the medium tank (3 < 4 after AA penalty).
     // Target_Something_Nearby then validates and keeps the existing in-range TarCom.
-    expect(hind.target).toBe(rifleman);
+    expect(hind.target).toBe(tank);
   });
 });
 
@@ -307,7 +443,7 @@ describe('HPAD helicopter guard — Target_Something_Nearby validation (techno.c
     game.entityById.set(hind.id, hind);
 
     // Pre-set a target that IS in weapon range
-    const tank = entityAtCell(UnitType.V_MED, House.Greece, 13, 10);
+    const tank = entityAtCell(UnitType.V_2TNK, House.Greece, 13, 10);
     game.entities.push(tank);
     game.entityById.set(tank.id, tank);
     hind.target = tank;
@@ -332,7 +468,7 @@ describe('HPAD helicopter guard — Target_Something_Nearby validation (techno.c
     game.entityById.set(hind.id, hind);
 
     // Pre-set a target that is OUT of weapon range
-    const farTank = entityAtCell(UnitType.V_MED, House.Greece, 30, 10);
+    const farTank = entityAtCell(UnitType.V_2TNK, House.Greece, 30, 10);
     game.entities.push(farTank);
     game.entityById.set(farTank.id, farTank);
     hind.target = farTank;

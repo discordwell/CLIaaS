@@ -17,7 +17,8 @@ import {
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
   COUNTRY_BONUSES,
   worldDist, worldToCell, buildDefaultAlliances, directionToLeptons256,
-pixelToLepton, leptonToCell, } from '../engine/types';
+  pixelToLepton, leptonToCell, coordTargetRoundTripLepton,
+} from '../engine/types';
 import {
   Entity, resetEntityIds, CloakState, setPlayerHouses,
   dir256ToFacing8, dir256ToFacing32,
@@ -251,6 +252,29 @@ describe('updateGuard', () => {
 
     expect(harv.mission).toBe(Mission.GUARD);
     expect(harv.target).toBeNull();
+  });
+});
+
+describe('updateAttack projectile fire gates', () => {
+  it('launches projectile weapons even when armor reduces final damage to zero', () => {
+    const shooter = makeEntity(UnitType.I_C7, House.Spain, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    const harvester = makeEntity(UnitType.V_HARV, House.USSR, 11 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    shooter.mission = Mission.ATTACK;
+    shooter.target = harvester;
+    shooter.ammo = 10;
+    shooter.weapon = WEAPON_STATS.Pistol;
+    shooter.firePrepActive = true;
+    shooter.firePrepStage = 2;
+    shooter.firePrepUsesDoingStage = false;
+
+    const ctx = makeMockContext({ entities: [shooter, harvester] });
+
+    updateAttack(ctx, shooter);
+
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(ctx.damageEntity).not.toHaveBeenCalled();
+    expect(shooter.target).toBe(harvester);
+    expect(shooter.ammo).toBe(9);
   });
 });
 
@@ -778,8 +802,8 @@ describe('updateAreaGuard', () => {
 
     // Should set moveTarget back toward origin and stay in AREA_GUARD
     expect(guard.moveTarget).not.toBeNull();
-    expect(guard.moveTarget!.lx).toBe(pixelToLepton(300));
-    expect(guard.moveTarget!.ly).toBe(pixelToLepton(300));
+    expect(guard.moveTarget!.lx).toBe(coordTargetRoundTripLepton(pixelToLepton(300)));
+    expect(guard.moveTarget!.ly).toBe(coordTargetRoundTripLepton(pixelToLepton(300)));
     expect(guard.animState).toBe(AnimState.WALK);
   });
 
@@ -798,7 +822,7 @@ describe('updateAreaGuard', () => {
     expect(guard.animState).toBe(AnimState.IDLE);
   });
 
-  it('entity engages enemy while returning home when too far', () => {
+  it('entity returns home instead of scanning around its current position', () => {
     const guard = makeEntity(UnitType.I_E1, House.Spain, 500, 500);
     guard.mission = Mission.AREA_GUARD;
     guard.guardOrigin = { x: 300, y: 300 };
@@ -810,9 +834,11 @@ describe('updateAreaGuard', () => {
 
     updateAreaGuard(ctx, guard);
 
-    // Should attack the enemy even while returning
-    expect(guard.mission).toBe(Mission.ATTACK);
-    expect(guard.target).toBe(enemy);
+    // C++ scans from ArchiveTarget/home after assigning the return destination.
+    // An enemy only near the current position is not acquired by this pass.
+    expect(guard.mission).toBe(Mission.AREA_GUARD);
+    expect(guard.target).toBeNull();
+    expect(guard.moveTarget).not.toBeNull();
   });
 });
 
@@ -1000,10 +1026,13 @@ describe('orderTransportEvacuate', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateAttackStructure', () => {
-  it('entity attacks target structure when in range', () => {
+  it('launches a projectile at a target structure when the fire animation reaches FireLaunch', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
     entity.attackCooldown = 0;
+    entity.firePrepActive = true;
+    entity.firePrepStage = 2;
+    entity.firePrepUsesDoingStage = false;
 
     // Place structure within weapon range (3 cells)
     const struct = makeStructure('POWR', House.USSR,
@@ -1012,7 +1041,8 @@ describe('updateAttackStructure', () => {
     const ctx = makeMockContext({ entities: [entity], structures: [struct] });
     updateAttackStructure(ctx, entity, struct);
 
-    expect(ctx.damageStructure).toHaveBeenCalled();
+    expect(ctx.launchProjectile).toHaveBeenCalled();
+    expect(ctx.damageStructure).not.toHaveBeenCalled();
     expect(entity.attackCooldown).toBeGreaterThan(0);
   });
 

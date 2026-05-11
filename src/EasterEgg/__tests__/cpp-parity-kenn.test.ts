@@ -13,6 +13,7 @@ import {
   STRUCTURE_SIZE,
   STRUCTURE_MAX_HP,
   STRUCTURE_WEAPONS,
+  getStructureOccupyCells,
 } from '../engine/scenario';
 import { PRODUCTION_ITEMS } from '../engine/types';
 
@@ -50,6 +51,19 @@ describe('KENN structure stats (rules.ini parity)', () => {
     const kenn = PRODUCTION_ITEMS.find(i => i.type === 'KENN');
     expect(kenn).toBeDefined();
     expect(kenn!.prerequisite).toBe('BARR');
+  });
+});
+
+describe('KENN active foundation cells (bdata.cpp Occupy_List parity)', () => {
+  it('occupies only its origin cell, matching BSIZE_11/List1', () => {
+    expect(getStructureOccupyCells('KENN', 71, 83)).toEqual([{ cx: 71, cy: 83 }]);
+  });
+
+  it('does not block adjacent waypoint cells outside the C++ Occupy_List', () => {
+    const occupied = getStructureOccupyCells('KENN', 71, 83);
+    expect(occupied).not.toContainEqual({ cx: 72, cy: 83 });
+    expect(occupied).not.toContainEqual({ cx: 71, cy: 84 });
+    expect(occupied).not.toContainEqual({ cx: 72, cy: 84 });
   });
 });
 

@@ -26,6 +26,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { Game } from '../engine/index';
+import { House } from '../engine/types';
 import {
   type TriggerAction,
   type TriggerActionResult,
@@ -71,6 +73,7 @@ function makeTrigger(overrides: Partial<ScenarioTrigger> = {}): ScenarioTrigger 
     fired: false,
     timerTick: 0,
     playerEntered: false,
+    playerEnteredHouse: -1,
     objectDiscovered: false,
     enteredZone: false,
     crossedHorizontal: false,
@@ -127,6 +130,47 @@ function makeGameState(globals: Set<number>, overrides: Partial<TriggerGameState
     pendingDestroyedCount: 0,
     ...overrides,
   };
+}
+
+function createTriggerGame(trigger: ScenarioTrigger, tick: number, globals: Set<number>): Game {
+  const game = Object.create(Game.prototype) as Game;
+  const g = game as unknown as Record<string, unknown>;
+  g.tick = tick;
+  g.globals = globals;
+  g.triggers = [trigger];
+  g.structures = [];
+  g.entities = [];
+  g.destroyedTriggerNames = new Set<string>();
+  g.builtStructureTypes = new Set<string>();
+  g.builtStructureTypesByHouse = new Map<number, Set<string>>();
+  g.teamTypes = [];
+  g.waypoints = new Map();
+  g.houseEdges = new Map();
+  g.map = { boundsX: 0, boundsY: 0, boundsW: 128, boundsH: 128 };
+  g.playerHouse = House.Spain;
+  g.powerConsumed = 0;
+  g.powerProduced = 0;
+  g.killCount = 0;
+  g.missionTimerExpired = false;
+  g.bridgeCellCount = 0;
+  g.unitsLeftMap = 0;
+  g.attackedTriggerNames = new Set<string>();
+  g.houseDiscovered = new Map<number, boolean>();
+  g.credits = 0;
+  g.nBuildingsDestroyedCount = 0;
+  g.civiliansEvacuated = 0;
+  g.builtUnitTypes = new Set<string>();
+  g.builtInfantryTypes = new Set<string>();
+  g.builtAircraftTypes = new Set<string>();
+  g.spiedBuildingTriggers = new Set<string>();
+  g.isThieved = false;
+  g.destroyedTeams = new Set<number>();
+  return game;
+}
+
+function springGlobal(game: Game, globalIndex: number): void {
+  (game as unknown as { springGlobalTriggers(globalIndex: number): void })
+    .springGlobalTriggers(globalIndex);
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────────
@@ -226,35 +270,40 @@ describe('C++ parity (#38): TEVENT_GLOBAL_SET/CLEAR constant values (TEVENT.H:47
   });
 });
 
-describe('C++ parity (#38): paired event timer reset on global change (scenario.cpp:277-284)', () => {
-  // C++ Set_Global_To scenario.cpp:277-284:
-  //   If Event1 is GLOBAL_SET/CLEAR matching the changed global → reset Event2 timer
-  //   If Event2 is GLOBAL_SET/CLEAR matching the changed global → reset Event1 timer
-  //
-  // In TS, springGlobalTriggers resets trigger.timerTick = this.tick for matching triggers.
-  // We test this by verifying that a TIME event paired with a GLOBAL_SET event
-  // re-evaluates correctly after the global changes (the timer should restart).
+describe('C++ parity (#38): global-change timer reset asymmetry (scenario.cpp:277-284)', () => {
+  // C++ calls Class->Event2.Reset(Event1) when Event1 is the matching global.
+  // Reset mutates the TDEventClass argument, so Event2's TIME timer is not reset.
+  // When Event2 is the matching global, C++ calls Class->Event1.Reset(Event1),
+  // which does reset an Event1 TIME timer.
 
-  it('trigger with GLOBAL_SET event1 and TIME event2: TIME event uses triggerStartTick (scenario.cpp:280)', () => {
-    // After global change, the paired timer resets. We can verify this by
-    // checking that the TIME event evaluates against the new timer tick.
-    const globals = new Set<number>([5]);
-    // With timerTick = 90 and gameTick = 100, elapsed = 10 ticks.
-    // TIME event with data=1 requires 90 ticks (1 * TIME_UNIT_TICKS).
-    // So the trigger should NOT fire because 10 < 90.
-    const stateAfterReset = makeGameState(globals, {
-      gameTick: 100,
-      triggerStartTick: 90, // timer just reset
+  it('event1=GLOBAL_SET + event2=TIME keeps the elapsed TIME timer and fires', () => {
+    const trigger = makeTrigger({
+      eventControl: 1,
+      event1: makeEvent(TEVENT_GLOBAL_SET, 1),
+      event2: makeEvent(TEVENT_TIME, 35),
+      timerTick: 0,
     });
-    const timeEvent = makeEvent(TEVENT_TIME, 1); // 1 time unit = 90 ticks
-    expect(checkTriggerEvent(timeEvent, stateAfterReset)).toBe(false);
+    const game = createTriggerGame(trigger, 3601, new Set([1]));
 
-    // But if enough time has passed (triggerStartTick = 0, gameTick = 100), it fires
-    const stateElapsed = makeGameState(globals, {
-      gameTick: 100,
-      triggerStartTick: 0,
+    springGlobal(game, 1);
+
+    expect(trigger.fired).toBe(true);
+    expect(trigger.timerTick).toBe(0);
+  });
+
+  it('event1=TIME + event2=GLOBAL_SET resets the Event1 TIME timer before evaluation', () => {
+    const trigger = makeTrigger({
+      eventControl: 1,
+      event1: makeEvent(TEVENT_TIME, 35),
+      event2: makeEvent(TEVENT_GLOBAL_SET, 1),
+      timerTick: 0,
     });
-    expect(checkTriggerEvent(timeEvent, stateElapsed)).toBe(true);
+    const game = createTriggerGame(trigger, 3601, new Set([1]));
+
+    springGlobal(game, 1);
+
+    expect(trigger.fired).toBe(false);
+    expect(trigger.timerTick).toBe(3601);
   });
 });
 

@@ -71,7 +71,7 @@ export interface SpecialUnitsContext {
 
 // === 1. Tanya C4 Placement ===
 
-/** Tanya moves to structure, plants C4 timer (45 ticks). */
+/** Tanya moves to structure, plants a C4 timer. */
 export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
   if (entity.type !== UnitType.I_TANYA || !entity.alive) return;
   if (!entity.targetStructure || !(entity.targetStructure as MapStructure).alive) return;
@@ -112,6 +112,7 @@ export function updateTanyaC4(ctx: SpecialUnitsContext, entity: Entity): void {
   const sAny = s as MapStructure & { c4Timer?: number };
   if (sAny.c4Timer === undefined || sAny.c4Timer <= 0) {
     sAny.c4Timer = 27; // C++ rules.ini C4Delay=0.03 min * 900 ticks/min = 27 ticks
+    s.whomToRepayEntityId = entity.id; // C++ BuildingClass::WhomToRepay, infantry.cpp:845
     ctx.playSoundAt('building_explode', scx, scy);
     ctx.evaMessages.push({ text: 'C4 PLANTED', tick: ctx.tick });
   }

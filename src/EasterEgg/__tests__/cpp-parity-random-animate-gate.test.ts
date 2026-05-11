@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * C++ Parity: Random_Animate gate (Phase 7A).
  *
  * Pins the C++ `InfantryClass::Is_Ready_To_Random_Animate` contract against
@@ -29,10 +31,27 @@
  *   - `src/EasterEgg/engine/perCellProcess.ts` RANDOM_ANIMATE_CPP_FAITHFUL  flip-switch
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
+import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { UnitType, House } from '../engine/types';
+import { UnitType, House, Mission } from '../engine/types';
 import { RANDOM_ANIMATE_CPP_FAITHFUL } from '../engine/perCellProcess';
+
+class FakeAudio {
+  src = ''; volume = 1; loop = false; preload = '';
+  play(): Promise<void> { return Promise.resolve(); }
+  pause(): void {}
+  load(): void {}
+  addEventListener(_event: string, _cb: () => void): void {}
+  removeEventListener(_event: string, _cb: () => void): void {}
+}
+
+function createCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  return canvas;
+}
 
 function mkInfantry(type: UnitType = UnitType.I_E1): Entity {
   const e = new Entity(type, House.USSR, 64 * 24 + 12, 64 * 24 + 12);
@@ -41,6 +60,13 @@ function mkInfantry(type: UnitType = UnitType.I_E1): Entity {
 }
 
 beforeEach(() => { resetEntityIds(); });
+
+beforeAll(() => {
+  vi.stubGlobal('Audio', FakeAudio);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
+    { fillRect: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), translate: vi.fn(), scale: vi.fn(), beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText: vi.fn(), measureText: vi.fn(() => ({ width: 10 })), createImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })), putImageData: vi.fn() } as unknown as CanvasRenderingContext2D
+  ));
+});
 
 describe('C++ Random_Animate gate (Phase 7A contract)', () => {
   it('blocks when idleAnimTimer > 0 (TechnoClass base gate — IdleTimer)', () => {
@@ -71,6 +97,24 @@ describe('C++ Random_Animate gate (Phase 7A contract)', () => {
     expect(e.isReadyToRandomAnimate()).toBe(false);
   });
 
+  it('clears the IsFiring gate when DO_FIRE_WEAPON completes', () => {
+    // C++ clears IsFiring once the fire StageClass has run out, before the next
+    // Mission_Hunt/Mission_Guard Random_Animate gate is evaluated.
+    const e = mkInfantry();
+    e.doing = 'fire';
+    e.doingStage = e.infantryFireDoingCount();
+    e.isFiringAnim = true;
+    e.firingAnimTicks = 2;
+    e.idleAnimTimer = 0;
+
+    e.doingAI();
+
+    expect(e.doing).toBe('stand_ready');
+    expect(e.isFiringAnim).toBe(false);
+    expect(e.firingAnimTicks).toBe(0);
+    expect(e.isReadyToRandomAnimate()).toBe(true);
+  });
+
   it('allows when doing === "stand_ready" and all other gates clear', () => {
     const e = mkInfantry();
     e.doing = 'stand_ready';
@@ -78,6 +122,25 @@ describe('C++ Random_Animate gate (Phase 7A contract)', () => {
     e.isDriving = false;
     e.isFiringAnim = false;
     expect(e.isReadyToRandomAnimate()).toBe(true);
+  });
+
+  it('reads IdleTimer before decrementing it for this object AI tick', () => {
+    const game = new Game(createCanvas());
+    game.map.setBounds(0, 0, 32, 32);
+    const e = new Entity(UnitType.I_E1, House.USSR, 10 * 64 + 32, 10 * 64 + 32);
+    e.mission = Mission.GUARD;
+    e.missionTimer = 0;
+    e.idleAnimTimer = 1;
+    e.doing = 'stand_ready';
+    game.entities.push(e);
+    game.entityById.set(e.id, e);
+
+    (game as unknown as { updateEntity(e: Entity): void }).updateEntity(e);
+
+    // C++ CDTimerClass::Value() is checked by Random_Animate before Frame++
+    // ticks IdleTimer down. A value of 1 must block Random_Animate this tick
+    // and become 0 only after object AI completes.
+    expect(e.idleAnimTimer).toBe(0);
   });
 
   it('blocks non-infantry entirely (Random_Animate is InfantryClass-only)', () => {

@@ -33,6 +33,13 @@ export function cellTargetToLepton(cx: number, cy: number): { lx: number; ly: nu
   return { lx: cx * 256 + 0x88, ly: cy * 256 + 0x88 };
 }
 
+/** Convert one lepton coordinate through C++ As_Target(COORDINATE) -> As_Coord(TARGET).
+ *  Coordinate TARGETs store only 16-lepton precision; As_Coord restores the
+ *  bucket center as `(stored << 4) + 8` (target.cpp:798 and target.cpp:487). */
+export function coordTargetRoundTripLepton(lepton: number): number {
+  return Math.trunc(lepton / 16) * 16 + 8;
+}
+
 /** Convert lepton position to cell coordinates */
 export function leptonToCell(lx: number, ly: number): { cx: number; cy: number } {
   return { cx: Math.floor(lx / 256), cy: Math.floor(ly / 256) };

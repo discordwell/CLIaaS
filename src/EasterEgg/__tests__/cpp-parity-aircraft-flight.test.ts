@@ -125,6 +125,18 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
 }
 
+const HUNT_FLY_TO_TARGET = 2;
+const HUNT_DROP_BOMBS = 3;
+const HUNT_REGROUP = 4;
+
+function setFixedWingAttackPhase(entity: Entity, phase: Entity['attackRunPhase']): void {
+  entity.attackRunPhase = phase;
+  entity.aircraftAttackStatus =
+    phase === 'dropBombs' ? HUNT_DROP_BOMBS :
+    phase === 'regroup' ? HUNT_REGROUP :
+    HUNT_FLY_TO_TARGET;
+}
+
 function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftContext {
   return {
     structures: [],
@@ -136,6 +148,7 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     idleMission: () => Mission.GUARD,
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
+    fireWeaponAtCoord: vi.fn(),
     getROFBias: () => 1.0,
     getPowerFraction: () => 1.0,
     ...overrides,
@@ -792,7 +805,7 @@ describe('rotary vs fixed-wing attack branching', () => {
   it('fixed-wing attack dispatches to updateFixedWingAttackRun with phases', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
     mig.aircraftState = 'attacking';
-    mig.attackRunPhase = 'flyToTarget';
+    setFixedWingAttackPhase(mig, 'flyToTarget');
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     mig.ammo = parseInt(ini['MIG']?.Ammo ?? '3', 10);
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 + 3 * CELL_SIZE);
@@ -823,7 +836,7 @@ describe('rotary vs fixed-wing attack branching', () => {
   it('fixed-wing transitions from dropBombs → regroup when ammo=0', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
     mig.aircraftState = 'attacking';
-    mig.attackRunPhase = 'dropBombs';
+    setFixedWingAttackPhase(mig, 'dropBombs');
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     mig.ammo = 0;
     mig.facing = 4; // S
@@ -838,7 +851,7 @@ describe('rotary vs fixed-wing attack branching', () => {
   it('fixed-wing re-enters flyToTarget from regroup when ammo > 0 and target alive', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
     mig.aircraftState = 'attacking';
-    mig.attackRunPhase = 'regroup';
+    setFixedWingAttackPhase(mig, 'regroup');
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     mig.ammo = 2;
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 5 * CELL_SIZE);
@@ -1381,7 +1394,7 @@ describe('fixed-wing anti-circle delay (aircraft.cpp:707-709)', () => {
   it('TS uses circleBreakTimer > 30 to force regroup (matches C++ 2-second delay)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
     mig.aircraftState = 'attacking';
-    mig.attackRunPhase = 'flyToTarget';
+    setFixedWingAttackPhase(mig, 'flyToTarget');
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     mig.ammo = parseInt(ini['MIG']?.Ammo ?? '3', 10);
     mig.circleBreakTimer = 31; // exceeded threshold

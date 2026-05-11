@@ -428,6 +428,75 @@ describe('Cell-based scan order — C++ techno.cpp:2108-2209', () => {
     expect(jeep.target).toBe(liveE1);
   });
 
+  it('dead infantry still in its C++ death animation can poison an early bailout scan', () => {
+    // InfantryDeath variants 1-4 remain active InfantryClass objects until their
+    // death animation completes. While still active, C++ Cell_Occupier can return
+    // the zero-strength object and Target_Something_Nearby stops at the bailout.
+    const jeep = makeEntity(UnitType.V_JEEP, House.Greece,
+      19 * CELL_SIZE + CELL_SIZE / 2,
+      64 * CELL_SIZE + CELL_SIZE / 2);
+    jeep.mission = Mission.GUARD;
+
+    // JEEP/M60mg range gives crange=5, so crange/2 bailout is radius 2.
+    const dying = makeEntity(UnitType.I_E1, House.USSR,
+      21 * CELL_SIZE + CELL_SIZE / 2,
+      64 * CELL_SIZE + CELL_SIZE / 2);
+    dying.alive = false;
+    dying.hp = 0;
+    dying.mission = Mission.DIE;
+    dying.deathVariant = 1;
+    dying.deathTick = 0;
+    dying.inLimbo = false;
+
+    const outerLive = makeEntity(UnitType.I_E1, House.USSR,
+      22 * CELL_SIZE + CELL_SIZE / 2,
+      66 * CELL_SIZE + CELL_SIZE / 2);
+    outerLive.mission = Mission.HUNT;
+
+    const ctx = makeCtx({ entities: [jeep, dying, outerLive] });
+    updateGuard(ctx, jeep);
+
+    expect(jeep.target).toBeNull();
+  });
+
+  it('completed dead infantry no longer occupies the scan cell and cannot hide a live target', () => {
+    // SCG06EA tick 1943 shape: C++ has removed a same-cell E1 corpse from
+    // Logic/Cell_Occupier, so the Greek JEEP sees the live USSR E1 in that cell.
+    const jeep = makeEntity(UnitType.V_JEEP, House.Greece,
+      19 * CELL_SIZE + CELL_SIZE / 2,
+      64 * CELL_SIZE + CELL_SIZE / 2);
+    jeep.mission = Mission.GUARD;
+    jeep.bodyFacing256 = 128;
+    jeep.facing = 4;
+    jeep.bodyFacing32 = 16;
+    jeep.turretFacing256 = 128;
+    jeep.turretFacing = 4;
+    jeep.turretFacing32 = 16;
+
+    const liveE1 = makeEntity(UnitType.I_E1, House.USSR,
+      22 * CELL_SIZE + CELL_SIZE / 2,
+      66 * CELL_SIZE + CELL_SIZE / 2);
+    liveE1.mission = Mission.HUNT;
+
+    const completedCorpse = makeEntity(UnitType.I_E1, House.USSR,
+      22 * CELL_SIZE + CELL_SIZE / 2 + 4,
+      66 * CELL_SIZE + CELL_SIZE / 2 + 4);
+    completedCorpse.alive = false;
+    completedCorpse.hp = 0;
+    completedCorpse.mission = Mission.DIE;
+    completedCorpse.deathVariant = 1;
+    completedCorpse.deathTick = completedCorpse.infantryDeathDurationTicks();
+    completedCorpse.inLimbo = false;
+
+    expect(completedCorpse.isInfantryDeathAnimationComplete()).toBe(true);
+    expect(liveE1.cell).toEqual(completedCorpse.cell);
+
+    const ctx = makeCtx({ entities: [jeep, liveE1, completedCorpse] });
+    updateGuard(ctx, jeep);
+
+    expect(jeep.target).toBe(liveE1);
+  });
+
   it('runs infantry Random_Animate after dead early-bailout candidate clears TarCom', () => {
     // C++ FootClass::Mission_Guard:
     //   if (!Target_Something_Nearby(THREAT_RANGE)) Random_Animate();

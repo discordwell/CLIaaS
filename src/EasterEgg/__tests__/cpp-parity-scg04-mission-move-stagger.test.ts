@@ -107,6 +107,13 @@ function placeVehicle(game: Game, type: UnitType, house: House, cx: number, cy: 
   return e;
 }
 
+function placeInfantry(game: Game, type: UnitType, house: House, cx: number, cy: number): Entity {
+  const e = new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+  game.entities.push(e);
+  game.entityById.set(e.id, e);
+  return e;
+}
+
 function tickEntity(game: Game, entity: Entity): void {
   (game as unknown as { updateEntity(e: Entity): void }).updateEntity(entity);
 }
@@ -354,5 +361,33 @@ describe('C++ SCG04EA tick-3 Mission_Move stagger', () => {
     // start the path or rotation but never pop Mission to MOVE.
     expect(tank.mission, 'isDriving=true: Mission stays GUARD').toBe(Mission.GUARD);
     expect(tank.missionQueue, 'isDriving=true: MissionQueue still MOVE').toBe(Mission.MOVE);
+  });
+});
+
+describe('C++ FootClass Mission_Attack parity', () => {
+  it('does not approach an in-range target just because primary facing differs', () => {
+    // C++ foot.cpp:947 gates Approach_Target on !In_Range(TarCom, primary)
+    // or !TechnoClass::IsLocked. IsLocked means "entered the map/radar area",
+    // not "PrimaryFacing is aimed at TarCom" (techno.h / techno.cpp:1059).
+    const game = createGame();
+    const attacker = placeInfantry(game, UnitType.I_E1, House.Greece, 10, 10);
+    const target = placeInfantry(game, UnitType.I_E1, House.BadGuy, 11, 10);
+
+    attacker.mission = Mission.ATTACK;
+    attacker.missionTimer = 0;
+    attacker.target = target;
+    attacker.facing = 0; // North; target is east, so the old facing-lock shim approaches.
+    attacker.bodyFacing256 = 0;
+
+    expect(attacker.inRange(target), 'test setup: target starts in weapon range').toBe(true);
+
+    tickEntity(game, attacker);
+
+    expect(attacker.mission, 'Mission_Attack remains active').toBe(Mission.ATTACK);
+    expect(attacker.moveTarget, 'in-range locked infantry should not get NavCom').toBeNull();
+    expect(attacker.path, 'Approach_Target should not build a path').toHaveLength(0);
+    expect(attacker.isDriving, 'Movement_AI should not start walking').toBe(false);
+    expect(attacker.missionTimer, 'Mission_Attack delay = 14 + Random_Pick(0,2)').toBeGreaterThanOrEqual(14);
+    expect(attacker.missionTimer, 'Mission_Attack delay = 14 + Random_Pick(0,2)').toBeLessThanOrEqual(16);
   });
 });

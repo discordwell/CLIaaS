@@ -69,6 +69,24 @@ extern "C" {
 		int g_cover_coord_move_mission_target_y = 0;
 		int g_agent_overlay_read_window[21] = {0};
 		int g_agent_team_remove_site = 0;
+		int g_agent_tarcom_count = 0;
+		int g_agent_tarcom_frame[128] = {0};
+		int g_agent_tarcom_tag_log[128] = {0};
+		int g_agent_tarcom_self_type[128] = {0};
+		int g_agent_tarcom_self_x[128] = {0};
+		int g_agent_tarcom_self_y[128] = {0};
+		int g_agent_tarcom_mission[128] = {0};
+		int g_agent_tarcom_prev_kind[128] = {0};
+		int g_agent_tarcom_prev_value[128] = {0};
+		int g_agent_tarcom_new_kind[128] = {0};
+		int g_agent_tarcom_new_value[128] = {0};
+		int g_agent_tarcom_target_rtti[128] = {0};
+		int g_agent_tarcom_target_type[128] = {0};
+		int g_agent_tarcom_target_x[128] = {0};
+		int g_agent_tarcom_target_y[128] = {0};
+		int g_agent_tarcom_fire_x[128] = {0};
+		int g_agent_tarcom_fire_y[128] = {0};
+		int g_agent_tarcom_in_range0[128] = {0};
 	}
 
 struct DebugBulletScatterEntry {
@@ -1033,7 +1051,10 @@ char* agent_get_state(void)
 			int lx = -1, ly = -1;
 			int hp = -1, mhp = -1, cloak = -1, cstage = -1, crate = -1, cdelay = -1;
 			int arm = -1, pulse = -1;
-			int tarx = 0, tary = 0;
+			int primary_current = -1, primary_desired = -1;
+				int tarx = 0, tary = 0;
+				int tar_kind = -1, tar_value = -1, tar_rtti = -1, tar_obj_index = -1;
+				int firex = 0, firey = 0, in_range0 = -1, can_fire0 = -1;
 			bool ready_cloak = false;
 			bool is_driving = false;
 			int doing = -1;
@@ -1051,12 +1072,26 @@ char* agent_get_state(void)
 				cdelay = (int)tt->CloakDelay.Value();
 				arm = (int)tt->Arm.Value();
 				ready_cloak = tt->Is_Ready_To_Cloak();
-				if (Target_Legal(tt->TarCom)) {
-					COORDINATE tc = As_Coord(tt->TarCom);
-					tarx = (int)Coord_X(tc);
-					tary = (int)Coord_Y(tc);
+					if (Target_Legal(tt->TarCom)) {
+						COORDINATE tc = As_Coord(tt->TarCom);
+						tarx = (int)Coord_X(tc);
+						tary = (int)Coord_Y(tc);
+						tar_kind = (int)Target_Kind(tt->TarCom);
+						tar_value = (int)Target_Value(tt->TarCom);
+						ObjectClass * tobj = As_Object(tt->TarCom);
+						if (tobj) {
+							tar_rtti = (int)tobj->What_Am_I();
+							tar_obj_index = agent_object_index(tobj, tobj->What_Am_I());
+						}
+						COORDINATE fc = tt->Fire_Coord(0);
+						firex = (int)Coord_X(fc);
+						firey = (int)Coord_Y(fc);
+						in_range0 = tt->In_Range(tt->TarCom, 0) ? 1 : 0;
+						can_fire0 = (int)tt->Can_Fire(tt->TarCom, 0);
+					}
+					primary_current = (int)tt->PrimaryFacing.Current();
+					primary_desired = (int)tt->PrimaryFacing.Desired();
 				}
-			}
 			if (rtti == RTTI_UNIT || rtti == RTTI_INFANTRY || rtti == RTTI_AIRCRAFT || rtti == RTTI_VESSEL) {
 				FootClass * foot = (FootClass *)lobj;
 				mission_timer = foot->Get_Mission_Timer_Value();
@@ -1071,14 +1106,43 @@ char* agent_get_state(void)
 				BuildingClass * b = (BuildingClass *)lobj;
 				mission_timer = b->Get_Mission_Timer_Value();
 			}
-				buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d]",
-					li, tname, hname, lcx, lcy, rtag,
-					aid, mission, mission_timer, mission_queue, is_driving ? "true" : "false",
-					doing, lx, ly, hp, mhp, cloak, cstage, crate, cdelay,
-					ready_cloak ? "true" : "false", tarx, tary, arm, pulse,
-					(int)((TechnoClass *)lobj)->Mission,
-					(int)((TechnoClass *)lobj)->MissionQueue,
-					(int)((TechnoClass *)lobj)->Status);
+					buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]",
+						li, tname, hname, lcx, lcy, rtag,
+						aid, mission, mission_timer, mission_queue, is_driving ? "true" : "false",
+						doing, lx, ly, hp, mhp, cloak, cstage, crate, cdelay,
+						ready_cloak ? "true" : "false", tarx, tary, arm, pulse,
+						(int)((TechnoClass *)lobj)->Mission,
+						(int)((TechnoClass *)lobj)->MissionQueue,
+						(int)((TechnoClass *)lobj)->Status,
+						primary_current, primary_desired,
+						tar_kind, tar_value, tar_rtti, tar_obj_index,
+						firex, firey, in_range0, can_fire0);
+		}
+	}
+	buf_cat("],");
+
+	buf_cat("\"tarcomLog\":[");
+	{
+		bool tfirst = true;
+		int count = g_agent_tarcom_count < 128 ? g_agent_tarcom_count : 128;
+		int start = g_agent_tarcom_count - count;
+		for (int i = 0; i < count; i++) {
+			int slot = (start + i) % 128;
+			if (!tfirst) buf_cat(",");
+			tfirst = false;
+			buf_cat("{\"frame\":%d,\"tag\":%d,\"stype\":%d,\"cell\":\"(%d,%d)\","
+				"\"mission\":%d,\"prevKind\":%d,\"prevValue\":%d,"
+				"\"newKind\":%d,\"newValue\":%d,\"trtti\":%d,\"ttype\":%d,"
+				"\"tcell\":\"(%d,%d)\",\"fire\":\"(%d,%d)\",\"inRange0\":%d}",
+				g_agent_tarcom_frame[slot], g_agent_tarcom_tag_log[slot],
+				g_agent_tarcom_self_type[slot], g_agent_tarcom_self_x[slot], g_agent_tarcom_self_y[slot],
+				g_agent_tarcom_mission[slot],
+				g_agent_tarcom_prev_kind[slot], g_agent_tarcom_prev_value[slot],
+				g_agent_tarcom_new_kind[slot], g_agent_tarcom_new_value[slot],
+				g_agent_tarcom_target_rtti[slot], g_agent_tarcom_target_type[slot],
+				g_agent_tarcom_target_x[slot], g_agent_tarcom_target_y[slot],
+				g_agent_tarcom_fire_x[slot], g_agent_tarcom_fire_y[slot],
+				g_agent_tarcom_in_range0[slot]);
 		}
 	}
 	buf_cat("],");
@@ -1958,9 +2022,11 @@ char* agent_get_cell_info(int cx, int cy, int infantry_id)
 	}
 
 	buf_cat("{\"cx\":%d,\"cy\":%d,\"cell\":%d,\"ttype\":%d,\"ticon\":%d,"
+		"\"overlay\":%d,\"overlayData\":%d,"
 		"\"land\":%d,\"footZero\":%s,\"inRadar\":%s,\"canEnter\":%d,"
 		"\"flag\":%d,\"infType\":%d}",
 		cx, cy, (int)cell, (int)cellptr->TType, (int)cellptr->TIcon,
+		(int)cellptr->Overlay, (int)cellptr->OverlayData,
 		(int)land, foot_zero ? "true" : "false", in_radar ? "true" : "false",
 		can_enter, (int)cellptr->Flag.Composite, (int)cellptr->InfType);
 	return s_cmd_buf;

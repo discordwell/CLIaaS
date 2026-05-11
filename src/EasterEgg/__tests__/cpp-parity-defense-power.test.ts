@@ -20,13 +20,14 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, CELL_SIZE,
+  UnitType, House, Mission, CELL_SIZE,
   COUNTRY_BONUSES, buildDefaultAlliances,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   updateInflightProjectiles,
+  updateSingleStructureCombat,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -394,6 +395,24 @@ describe('AGUN (AA Gun) does NOT fire during power deficit — rules.ini Powered
     // AGUN has Powered=true in rules.ini, so it does NOT fire during power deficit
     expect(aircraft.hp).toBe(aircraft.maxHp);
   });
+
+  it('still clears an out-of-range aircraft target before low-power FIRE_BUSY', () => {
+    // C++ TechnoClass::Can_Fire checks In_Range before BuildingClass::Can_Fire
+    // applies the Powered && Power_Fraction()<1 FIRE_BUSY gate. Mission_Attack
+    // therefore clears TarCom on FIRE_RANGE even while the AGUN is low power.
+    const agun = makeStructure('AGUN', 10, 10);
+    const aircraft = airborneAtCell(UnitType.V_BADR, House.USSR, 30, 10);
+    agun.mission = Mission.ATTACK;
+    agun.missionTimer = 1;
+    agun.targetEntityId = aircraft.id;
+    const ctx = makeCombatCtx([agun], [aircraft], { powerProduced: 50, powerConsumed: 200 });
+
+    updateSingleStructureCombat(ctx, agun, true);
+
+    expect(agun.targetEntityId).toBeUndefined();
+    expect(agun.mission).toBe(Mission.GUARD);
+    expect(aircraft.hp).toBe(aircraft.maxHp);
+  });
 });
 
 // ── Tesla Coil charging under power loss (building.cpp:5382-5413) ────────────
@@ -451,10 +470,10 @@ describe('Power boundary conditions', () => {
 
   it('multiple powered structures all silenced during power deficit', () => {
     const tsla = makeStructure('TSLA', 10, 10);
-    const sam = makeStructure('SAM', 14, 10);
+    const agun = makeStructure('AGUN', 14, 10);
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
-    const ctx = makeCombatCtx([tsla, sam], [aircraft, infantry], {
+    const ctx = makeCombatCtx([tsla, agun], [aircraft, infantry], {
       powerProduced: 50, powerConsumed: 500,
     });
     fireStructures(ctx);

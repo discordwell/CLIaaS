@@ -6,13 +6,13 @@
 import {
   type WorldPos, type WeaponStats, type LeptonPos,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
-  worldDist, directionTo, worldToCell, leptonDist, leptonToPixel, pixelToLepton, DIR_DX, DIR_DY,
-  CIVILIAN_UNIT_TYPES, cellTargetToLepton,
+  worldDist, directionTo, directionToLeptons256, worldToCell, leptonDist, leptonToPixel, pixelToLepton, DIR_DX, DIR_DY,
+  CIVILIAN_UNIT_TYPES, cellTargetToLepton, coordTargetRoundTripLepton,
   COS_TABLE_256, SIN_TABLE_256, SUBCELL_LEPTON_OFFSETS,
 } from './types';
 // Re-export tables for backward compatibility (canonical definitions now in types.ts).
 export { COS_TABLE_256, SIN_TABLE_256 };
-import { Entity, CloakState } from './entity';
+import { Entity, CloakState, dir256ToFacing8, dir256ToFacing32 } from './entity';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap, MoveResult } from './map';
@@ -21,7 +21,7 @@ import { assignMission } from './missionLifecycle';
 
 /** Helper: convert LeptonPos to WorldPos (pixel space) for rendering/distance APIs */
 function leptonPosToWorld(lp: LeptonPos): WorldPos {
-  return { x: leptonToPixel(lp.lx), y: leptonToPixel(lp.ly) };
+  return { x: lp.lx * CELL_SIZE / LEPTON_SIZE, y: lp.ly * CELL_SIZE / LEPTON_SIZE };
 }
 
 /** Convert world positions to a C++ 256-step DirType facing (0=N, 64=E, 128=S, 192=W).
@@ -106,6 +106,7 @@ export interface AircraftContext {
   idleMission(entity: Entity): Mission;
   fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void;
   fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void;
+  fireWeaponAtCoord?(attacker: Entity, weapon: WeaponStats, impact: WorldPos): void;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
   /** C++ house.cpp:4160: Power_Fraction() = Power/Drain, capped at 1.0.
@@ -160,7 +161,156 @@ export function getAircraftTargetPos(entity: Entity): WorldPos | null {
   return null;
 }
 
+function getFixedWingAttackTargetPos(entity: Entity): WorldPos | null {
+  const explicitTarget = getAircraftTargetPos(entity);
+  if (explicitTarget) return explicitTarget;
+  if (entity.isFixedWing &&
+      entity.moveTarget &&
+      (entity.mission === Mission.ATTACK || entity.mission === Mission.HUNT)) {
+    return leptonPosToWorld(entity.moveTarget);
+  }
+  return null;
+}
+
 // ── Internal helpers ───────────────────────────────────────────────────────────
+
+function currentAircraftFacing256(entity: Entity): number {
+  if (entity.facing256 >= 0) return entity.facing256 & 0xff;
+  if (entity.bodyFacing256 >= 0) return entity.bodyFacing256 & 0xff;
+  return (entity.facing * 32) & 0xff;
+}
+
+function currentFixedWingSecondaryFacing256(entity: Entity): number {
+  if (entity.turretFacing256 >= 0) return entity.turretFacing256 & 0xff;
+  return currentAircraftFacing256(entity);
+}
+
+function currentDesiredAircraftFacing256(entity: Entity): number {
+  if (entity.facing256 >= 0 && entity.desiredFacing256 >= 0) return entity.desiredFacing256 & 0xff;
+  if (entity.desiredFacing256 >= 0) return entity.desiredFacing256 & 0xff;
+  return (entity.desiredFacing * 32) & 0xff;
+}
+
+function facingDiff256(a: number, b: number): number {
+  let diff = (a - b) & 0xff;
+  if (diff > 127) diff -= 256;
+  return Math.abs(diff);
+}
+
+function syncFixedWingSecondaryFacing(entity: Entity): void {
+  if (!entity.isFixedWing) return;
+  const current = currentAircraftFacing256(entity);
+  const desired = currentDesiredAircraftFacing256(entity);
+  entity.turretFacing256 = current;
+  entity.desiredTurretFacing256 = desired;
+  entity.turretFacing = dir256ToFacing8(current);
+  entity.desiredTurretFacing = dir256ToFacing8(desired);
+  entity.turretFacing32 = dir256ToFacing32(current);
+}
+
+function setDesiredAircraftFacing256(entity: Entity, dir256: number): void {
+  const dir = dir256 & 0xff;
+  if (entity.facing256 >= 0) {
+    entity.desiredFacing256 = dir;
+    entity.desiredFacing = Math.round(dir / 32) & 7;
+  } else {
+    entity.desiredFacing256 = dir;
+    entity.desiredFacing = Math.round(dir / 32) & 7;
+  }
+}
+
+function fixedWingTargetLeptons(targetPos: WorldPos): { lx: number; ly: number } {
+  return { lx: pixelToLepton(targetPos.x), ly: pixelToLepton(targetPos.y) };
+}
+
+type FixedWingFireState = 'ok' | 'ammo' | 'rearm' | 'range' | 'facing';
+
+function fixedWingCanFire(entity: Entity, targetPos: WorldPos, weapon: WeaponStats): FixedWingFireState {
+  if (entity.attackCooldown > 0) return 'rearm';
+  if (entity.ammo === 0) return 'ammo';
+
+  const target = fixedWingTargetLeptons(targetPos);
+  const fireCoord = typeof entity.fireCoordForWeapon === 'function'
+    ? entity.fireCoordForWeapon(weapon)
+    : { lx: entity.leptonX, ly: entity.leptonY };
+  if (leptonDist(fireCoord.lx, fireCoord.ly, target.lx, target.ly) > weapon.range * LEPTON_SIZE) {
+    return 'range';
+  }
+
+  // C++ AircraftClass::Can_Fire: fixed-wing combat normally requires
+  // ABS(PrimaryFacing.Difference(Direction(TarCom))) <= 8 DirType units.
+  // Parachuted bullets set the C++ `fudge` flag and widen that to 16.
+  const targetDir = directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly);
+  const facingTolerance = weapon.isParachuted ? 16 : 8;
+  return facingDiff256(currentAircraftFacing256(entity), targetDir) > facingTolerance ? 'facing' : 'ok';
+}
+
+function fixedWingMissionHuntFinalDelay(entity: Entity): void {
+  const prevTag = ScenarioRandom._sourceTag;
+  ScenarioRandom._sourceTag = 40010;
+  const jitter = ScenarioRandom.nextInRange(0, 2);
+  ScenarioRandom._sourceTag = prevTag;
+  entity.missionTimer = 13 + jitter;
+}
+
+function enterFixedWingDockingMission(ctx: AircraftContext, entity: Entity): void {
+  if (entity.isALoaner) {
+    entity.mission = Mission.RETREAT;
+    entity.aircraftState = 'flying';
+    entity.aircraftDockingStructure = -1;
+    entity.moveTarget = null;
+    entity.missionQueue = null;
+    return;
+  }
+
+  const padIdx = findLandingPad(ctx, entity);
+  if (padIdx >= 0) {
+    entity.mission = Mission.ENTER;
+    entity.aircraftState = 'returning';
+    entity.aircraftEnterStatus = 0;
+    entity.aircraftDockingStructure = padIdx;
+  } else {
+    entity.mission = Mission.RETREAT;
+    entity.aircraftState = 'flying';
+    entity.aircraftDockingStructure = -1;
+  }
+  entity.moveTarget = null;
+  entity.missionQueue = null;
+}
+
+function fixedWingForwardImpact(entity: Entity, weapon: WeaponStats): WorldPos {
+  const distance = Math.max(0, Math.trunc(weapon.range * LEPTON_SIZE) - 0x0200);
+  const dir = currentFixedWingSecondaryFacing256(entity);
+  const rawLX = entity.leptonX + ((COS_TABLE_256[dir] * distance) >> 7);
+  const rawLY = entity.leptonY - ((SIN_TABLE_256[dir] * distance) >> 7);
+  const lx = coordTargetRoundTripLepton(rawLX);
+  const ly = coordTargetRoundTripLepton(rawLY);
+  return { x: lx * CELL_SIZE / LEPTON_SIZE, y: ly * CELL_SIZE / LEPTON_SIZE };
+}
+
+function fireFixedWingShot(
+  ctx: AircraftContext,
+  entity: Entity,
+  weapon: WeaponStats,
+  targetPos: WorldPos,
+): void {
+  const homing = (weapon.projectileROT ?? 0) > 0;
+  if (!homing) {
+    const impact = fixedWingForwardImpact(entity, weapon);
+    if (ctx.fireWeaponAtCoord) {
+      ctx.fireWeaponAtCoord(entity, weapon, impact);
+      return;
+    }
+  }
+
+  if (entity.target?.alive) {
+    ctx.fireWeaponAt(entity, entity.target, weapon);
+  } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+    ctx.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, weapon);
+  } else if (ctx.fireWeaponAtCoord) {
+    ctx.fireWeaponAtCoord(entity, weapon, targetPos);
+  }
+}
 
 /** C++ _Counts_As_Civ_Evac parity: checks CIVILIAN_UNIT_TYPES + IsTanyaEvac scenario flag.
  *  Source: aircraft.cpp:116-159. Tanya only counts when Scen.IsTanyaEvac is set. */
@@ -172,6 +322,14 @@ function countsAsCivEvac(ctx: AircraftContext, unitType: string): boolean {
 
 const LOANER_RETREAT_DELAY = 88;
 const TRANSPORT_GUARD_DELAY = TICKS_PER_SECOND * 3;
+const ENTER_INITIAL = 0;
+const ENTER_TAKEOFF = 1;
+const ENTER_ALTITUDE = 2;
+const ENTER_STACK = 3;
+const ENTER_DOWNWIND = 4;
+const ENTER_CROSSWIND = 5;
+const ENTER_TRAVEL = 6;
+const ENTER_LANDING = 7;
 
 const AIRCRAFT_EXIT_CELLS = [
   { dx: 0, dy: 1 },
@@ -193,6 +351,47 @@ function findAircraftExitCell(ctx: AircraftContext, transport: Entity, passenger
     }
   }
   return { ...transport.cell };
+}
+
+function xypCoordToLeptons(px: number, py: number): LeptonPos {
+  return {
+    lx: Math.trunc((px * LEPTON_SIZE) / CELL_SIZE),
+    ly: Math.trunc((py * LEPTON_SIZE) / CELL_SIZE),
+  };
+}
+
+function buildingCenterCell(s: MapStructure): { cx: number; cy: number } {
+  const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+  // C++ BuildingClass::Center_Coord uses CenterOffset[BSIZE_*]. Coord_Cell()
+  // floors 0xff sub-cell offsets back into the top/left cell for even sizes.
+  return {
+    cx: s.cx + Math.floor((w - 1) / 2),
+    cy: s.cy + Math.floor((h - 1) / 2),
+  };
+}
+
+function fixedWingLandingCheckpoint(ctx: AircraftContext, s: MapStructure, status: number): LeptonPos {
+  const center = buildingCenterCell(s);
+  let xoffset = 6;
+  let yoffset = 5;
+  if (status === ENTER_STACK) xoffset = 0;
+  if (status === ENTER_CROSSWIND) yoffset = 0;
+  if ((center.cx - ctx.map.boundsX) > ctx.map.boundsW / 2) xoffset = -xoffset;
+  if ((center.cy - ctx.map.boundsY) > ctx.map.boundsH / 2) yoffset = -yoffset;
+  return cellTargetToLepton(center.cx + xoffset, center.cy + yoffset);
+}
+
+function buildingDockingLeptons(s: MapStructure): LeptonPos {
+  if (s.type === 'AFLD') {
+    const off = xypCoordToLeptons(CELL_SIZE + CELL_SIZE / 2, 28);
+    return { lx: s.cx * LEPTON_SIZE + off.lx, ly: s.cy * LEPTON_SIZE + off.ly };
+  }
+  if (s.type === 'HPAD') {
+    const off = xypCoordToLeptons(24, 18);
+    return { lx: s.cx * LEPTON_SIZE + off.lx, ly: s.cy * LEPTON_SIZE + off.ly };
+  }
+  const center = buildingCenterCell(s);
+  return cellTargetToLepton(center.cx, center.cy);
 }
 
 /** C++ InfantryClass::Unlimbo calls CellClass::Closest_Free_Spot on the
@@ -298,16 +497,7 @@ function houseEdgeDirection256(ctx: AircraftContext, house: House): number {
   }
 }
 
-function aircraftFlyCurrentFacing(entity: Entity, baseSpeed: number): void {
-  // C++ Mission_Retreat FACE_MAP_EDGE sets Desired facing once; Movement_AI then
-  // rotates and applies Physics(Coord, PrimaryFacing) without a NavCom target.
-  entity.rotTickedThisFrame = false;
-  if (entity.facing256 >= 0) {
-    entity.tickRotation256();
-  } else {
-    entity.tickRotation();
-  }
-
+function moveAircraftCurrentFacing(entity: Entity, baseSpeed: number): void {
   const maxSpeedLeptons = Math.floor((baseSpeed * entity.speedBias) / LP);
   const speedAdd = aircraftSpeedAdd(maxSpeedLeptons, entity.aircraftSpeedFraction ?? 1.0);
   const actual = speedAdd + entity.speedAccum;
@@ -334,6 +524,164 @@ function aircraftFlyCurrentFacing(entity: Entity, baseSpeed: number): void {
     entity.leptonY += fdy * axisLeptons8;
     entity.syncPosFromLeptons();
   }
+}
+
+function aircraftFlyCurrentFacing(entity: Entity, baseSpeed: number): void {
+  // C++ Mission_Retreat FACE_MAP_EDGE sets Desired facing once; Movement_AI then
+  // rotates and applies Physics(Coord, PrimaryFacing) without a NavCom target.
+  entity.rotTickedThisFrame = false;
+  if (entity.facing256 >= 0) {
+    entity.tickRotation256();
+  } else {
+    entity.tickRotation();
+  }
+  // C++ aircraft.cpp:4294-4295 — fixed-wing Rotation_AI copies
+  // SecondaryFacing from PrimaryFacing before any secondary rotation.
+  syncFixedWingSecondaryFacing(entity);
+  moveAircraftCurrentFacing(entity, baseSpeed);
+}
+
+function fixedWingProcessFlyTo(ctx: AircraftContext, entity: Entity, target: LeptonPos, speedByte?: number): number {
+  if (speedByte !== undefined) {
+    entity.aircraftSpeedFraction = Math.max(0, Math.min(0xff, speedByte)) / 0xff;
+  }
+  const distance = leptonDist(entity.leptonX, entity.leptonY, target.lx, target.ly);
+  entity.rotTickedThisFrame = false;
+  const desired = directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly);
+  entity.desiredFacing256 = desired;
+  entity.desiredFacing = dir256ToFacing8(desired);
+  entity.tickRotation256();
+  syncFixedWingSecondaryFacing(entity);
+  moveAircraftCurrentFacing(entity, ctx.movementSpeed(entity));
+  return distance;
+}
+
+function resolveFixedWingDockingStructure(ctx: AircraftContext, entity: Entity): number {
+  const idx = entity.aircraftDockingStructure;
+  if (idx >= 0 && idx < ctx.structures.length) {
+    const s = ctx.structures[idx];
+    if (s.alive && ctx.isAllied(entity.house, s.house) && s.type === entity.stats.landingBuilding) {
+      return idx;
+    }
+  }
+  const next = findLandingPad(ctx, entity);
+  entity.aircraftDockingStructure = next;
+  return next;
+}
+
+function landedServicePad(ctx: AircraftContext, entity: Entity): MapStructure | null {
+  const idx = entity.landedAtStructure;
+  if (idx < 0 || idx >= ctx.structures.length) return null;
+  const pad = ctx.structures[idx];
+  if (!pad.alive || pad.type !== entity.stats.landingBuilding) return null;
+  return pad;
+}
+
+function enterPadRepairMission(ctx: AircraftContext, entity: Entity, pad: MapStructure, delay: number): void {
+  pad.dockedAircraft = entity.id;
+  pad.mission = Mission.REPAIR;
+  pad.repairMissionStatus = 1; // BuildingClass::Mission_Repair DURING
+  pad.missionTimer = delay;
+  entity.mission = Mission.SLEEP;
+  entity.missionQueue = null;
+}
+
+function leavePadRepairMission(ctx: AircraftContext, entity: Entity): void {
+  const pad = landedServicePad(ctx, entity);
+  if (!pad || pad.mission !== Mission.REPAIR || pad.dockedAircraft !== entity.id) return;
+  pad.mission = Mission.GUARD;
+  pad.repairMissionStatus = 0;
+  pad.missionTimer = 1;
+}
+
+function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): boolean {
+  if (entity.missionTimer > 0) {
+    entity.missionTimer--;
+    entity.animState = AnimState.WALK;
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+    return true;
+  }
+
+  entity.animState = AnimState.WALK;
+  const padIdx = resolveFixedWingDockingStructure(ctx, entity);
+  if (padIdx < 0) {
+    entity.mission = Mission.RETREAT;
+    entity.aircraftState = 'flying';
+    entity.aircraftDockingStructure = -1;
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+    return true;
+  }
+  const pad = ctx.structures[padIdx];
+
+  switch (entity.aircraftEnterStatus) {
+    case ENTER_INITIAL:
+      entity.aircraftEnterStatus = entity.flightAltitude < Entity.FLIGHT_ALTITUDE
+        ? ENTER_TAKEOFF
+        : ENTER_ALTITUDE;
+      aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      break;
+
+    case ENTER_TAKEOFF:
+      entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
+      entity.aircraftSpeedFraction = 1.0;
+      if (entity.landedAtStructure >= 0 && entity.landedAtStructure < ctx.structures.length) {
+        ctx.structures[entity.landedAtStructure].dockedAircraft = undefined;
+      }
+      entity.landedAtStructure = -1;
+      if (entity.flightAltitude >= Entity.FLIGHT_ALTITUDE) {
+        entity.aircraftEnterStatus = ENTER_ALTITUDE;
+      }
+      aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      break;
+
+    case ENTER_ALTITUDE:
+      entity.aircraftEnterStatus = ENTER_STACK;
+      aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      break;
+
+    case ENTER_STACK: {
+      const distance = fixedWingProcessFlyTo(ctx, entity, fixedWingLandingCheckpoint(ctx, pad, ENTER_STACK));
+      if (distance < 0x0080) entity.aircraftEnterStatus = ENTER_DOWNWIND;
+      break;
+    }
+
+    case ENTER_DOWNWIND: {
+      const distance = fixedWingProcessFlyTo(ctx, entity, fixedWingLandingCheckpoint(ctx, pad, ENTER_DOWNWIND), 200);
+      if (distance < 0x0080) entity.aircraftEnterStatus = ENTER_CROSSWIND;
+      break;
+    }
+
+    case ENTER_CROSSWIND: {
+      const distance = fixedWingProcessFlyTo(ctx, entity, fixedWingLandingCheckpoint(ctx, pad, ENTER_CROSSWIND), 140);
+      if (distance < 0x0080) entity.aircraftEnterStatus = ENTER_TRAVEL;
+      break;
+    }
+
+    case ENTER_TRAVEL: {
+      const distance = fixedWingProcessFlyTo(ctx, entity, buildingDockingLeptons(pad));
+      if (distance < 0x0400) {
+        entity.aircraftEnterStatus = ENTER_LANDING;
+        entity.aircraftState = 'landing';
+        entity.landedAtStructure = padIdx;
+        pad.dockedAircraft = entity.id;
+      }
+      break;
+    }
+
+    case ENTER_LANDING:
+      entity.aircraftState = 'landing';
+      entity.landedAtStructure = padIdx;
+      pad.dockedAircraft = entity.id;
+      aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      break;
+
+    default:
+      entity.aircraftEnterStatus = ENTER_INITIAL;
+      aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      break;
+  }
+  entity.missionTimer = 0;
+  return true;
 }
 
 /** C++ aircraft movement: rotate toward target, then move in CURRENT facing.
@@ -762,6 +1110,13 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         return updateFixedWingPassengerHunt(ctx, entity);
       }
 
+      if (entity.isFixedWing &&
+          entity.mission === Mission.ATTACK &&
+          getFixedWingAttackTargetPos(entity)) {
+        entity.aircraftState = 'attacking';
+        return updateFixedWingAttackRun(ctx, entity);
+      }
+
       // ── C++ Paradrop_Cargo (aircraft.cpp:1442-1468, 1489-1501) ────────────────
       // Fixed-wing passenger transports (BADR) paradrop passengers onto the
       // target cell instead of bombing. C++ Fire_At detects Is_Something_Attached()
@@ -821,7 +1176,9 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
 
       // If we have an attack target, close to weapon range
       if (entity.mission === Mission.ATTACK) {
-        const targetPos = getAircraftTargetPos(entity);
+        const targetPos = entity.isFixedWing
+          ? getFixedWingAttackTargetPos(entity)
+          : getAircraftTargetPos(entity);
         if (!targetPos) {
           // C++ team.cpp:1705 — Coordinate_Attack assigns MISSION_ATTACK but
           // leaves TarCom as the mission target (waypoint cell) for TMISSION_ATT_WAYPT.
@@ -843,6 +1200,13 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           entity.aircraftState = 'attacking';
           entity.attackRunPhase = 'flyToTarget';
           entity.circleBreakTimer = 0;
+          // C++ fixed-wing Mission_Hunt only re-checks Can_Fire on the
+          // MissionClass timer cadence while closing from out of range. This
+          // preserves that pending half-second dispatch instead of firing on
+          // the exact TS tick where the range threshold is crossed.
+          if (entity.isFixedWing && entity.missionTimer <= 0) {
+            entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2);
+          }
           return true;
         }
         // Fly toward target — C++ curved path via Rotation_AI + Physics(PrimaryFacing)
@@ -1144,6 +1508,9 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.aircraftState = 'flying';
         return true;
       }
+      if (entity.isFixedWing && entity.mission === Mission.ENTER) {
+        return updateFixedWingMissionEnter(ctx, entity);
+      }
       entity.animState = AnimState.WALK;
       // Find home pad
       const padIdx = findLandingPad(ctx, entity);
@@ -1215,6 +1582,10 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           // C++ building.cpp:4023-4025: building-driven rearm delay
           // time = Inverse(pfrac) * Rule.ReloadRate * TICKS_PER_MINUTE
           entity.rearmTimer = computeRearmDelay(ctx.getPowerFraction(entity.house));
+          const pad = landedServicePad(ctx, entity);
+          if (pad && (pad.type === 'AFLD' || pad.type === 'HPAD')) {
+            enterPadRepairMission(ctx, entity, pad, entity.rearmTimer);
+          }
         } else {
           entity.aircraftState = 'landed';
         }
@@ -1230,6 +1601,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // Check BEFORE increment — ammo must never exceed maxAmmo (C++ parity).
       if (entity.ammo >= entity.maxAmmo) {
         entity.aircraftState = 'landed';
+        leavePadRepairMission(ctx, entity);
         return true;
       }
       entity.rearmTimer--;
@@ -1237,9 +1609,14 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.ammo++;
         if (entity.ammo >= entity.maxAmmo) {
           entity.aircraftState = 'landed';
+          leavePadRepairMission(ctx, entity);
         } else {
           // C++ building.cpp:4023-4025: building-driven rearm delay
           entity.rearmTimer = computeRearmDelay(ctx.getPowerFraction(entity.house));
+          const pad = landedServicePad(ctx, entity);
+          if (pad && (pad.type === 'AFLD' || pad.type === 'HPAD')) {
+            enterPadRepairMission(ctx, entity, pad, entity.rearmTimer);
+          }
         }
       }
       return true;
@@ -1269,7 +1646,7 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
     return true;
   }
 
-  const targetPos = getAircraftTargetPos(entity);
+  const targetPos = getFixedWingAttackTargetPos(entity);
 
   if (!targetPos) {
     entity.aircraftState = 'returning';
@@ -1278,101 +1655,156 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
   }
 
   const speed = ctx.movementSpeed(entity);
-  const dist = worldDist(entity.pos, targetPos);
-  const weaponRange = entity.weapon?.range ?? 5;
+  const flyCurrentFacing = () => {
+    aircraftFlyCurrentFacing(entity, speed);
+  };
+
+  const LOOK_FOR_TARGET = 0;
+  const TAKE_OFF = 1;
+  const FLY_TO_TARGET = 2;
+  const DROP_BOMBS = 3;
+  const REGROUP = 4;
+
+  if (entity.missionTimer > 0) {
+    entity.missionTimer--;
+    flyCurrentFacing();
+    return true;
+  }
+
+  switch (entity.aircraftAttackStatus) {
+    case LOOK_FOR_TARGET:
+      entity.aircraftAttackStatus = TAKE_OFF;
+      entity.attackRunPhase = 'flyToTarget';
+      flyCurrentFacing();
+      return true;
+
+    case TAKE_OFF:
+      // Reinforcement fixed-wing aircraft are already airborne at flight level,
+      // so C++ Process_Take_Off succeeds immediately and advances to
+      // FLY_TO_TARGET after this one Mission_Hunt dispatch.
+      entity.aircraftAttackStatus = FLY_TO_TARGET;
+      entity.attackRunPhase = 'flyToTarget';
+      entity.aircraftSpeedFraction = 1.0;
+      flyCurrentFacing();
+      return true;
+  }
 
   switch (entity.attackRunPhase) {
     case 'flyToTarget': {
       // C++ FLY_TO_TARGET: fly toward target, check Can_Fire() result
       entity.animState = AnimState.WALK;
-      aircraftFlyInFacing(entity, targetPos, speed);
-
-      if (dist <= weaponRange) {
-        // Check facing alignment (C++ FIRE_FACING return — must face target within ~45°)
-        const targetDir = directionTo(entity.pos, targetPos);
-        const facingDiff = ((entity.facing - targetDir + 8) % 8 + 8) % 8;
-        const normalizedDiff = facingDiff > 4 ? 8 - facingDiff : facingDiff;
-
-        if (normalizedDiff <= 1) {
-          // Facing aligned — transition to dropBombs (C++ FIRE_OK)
-          entity.attackRunPhase = 'dropBombs';
-          entity.circleBreakTimer = 0;
-        } else {
-          // C++ anti-circle delay: in range but can't face target (tight circle)
-          // Wait ~30 ticks (2 seconds) then force regroup to break out
-          entity.circleBreakTimer++;
-          if (entity.circleBreakTimer > 30) {
-            entity.attackRunPhase = 'regroup';
-            entity.circleBreakTimer = 0;
-          }
-        }
-      } else {
-        entity.circleBreakTimer = 0;
+      const weapon = entity.weapon;
+      if (!weapon) {
+        entity.attackRunPhase = 'regroup';
+        entity.aircraftAttackStatus = REGROUP;
+        flyCurrentFacing();
+        break;
       }
+      const fireState = fixedWingCanFire(entity, targetPos, weapon);
+      switch (fireState) {
+        case 'ok':
+          entity.attackRunPhase = 'dropBombs';
+          entity.aircraftAttackStatus = DROP_BOMBS;
+          entity.circleBreakTimer = 0;
+          entity.missionTimer = 0;
+          break;
+
+        case 'ammo':
+          entity.attackRunPhase = 'regroup';
+          entity.aircraftAttackStatus = REGROUP;
+          entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2) - 1;
+          break;
+
+        case 'facing': {
+          const target = fixedWingTargetLeptons(targetPos);
+          const inRange = leptonDist(entity.leptonX, entity.leptonY, target.lx, target.ly) <= weapon.range * LEPTON_SIZE;
+          if (inRange) {
+            // C++ anti-circle path: return TICKS_PER_SECOND*2 without changing
+            // desired facing, giving the aircraft time to fly out of the turn.
+            entity.missionTimer = TICKS_PER_SECOND * 2 - 1;
+          } else if (currentAircraftFacing256(entity) === currentDesiredAircraftFacing256(entity)) {
+            setDesiredAircraftFacing256(entity, directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly));
+            entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2) - 1;
+          } else {
+            entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2) - 1;
+          }
+          break;
+        }
+
+        case 'range':
+        case 'rearm': {
+          const target = fixedWingTargetLeptons(targetPos);
+          if (currentAircraftFacing256(entity) === currentDesiredAircraftFacing256(entity)) {
+            setDesiredAircraftFacing256(entity, directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly));
+          }
+          entity.missionTimer = Math.floor(TICKS_PER_SECOND / 2) - 1;
+          break;
+        }
+      }
+      flyCurrentFacing();
       break;
     }
 
     case 'dropBombs': {
       // C++ DROP_BOMBS: fire at target when Can_Fire returns FIRE_OK
-      // Continuous fire — fire every tick cooldown allows (multi-shot per pass)
       entity.animState = AnimState.ATTACK;
-      // Keep moving forward (fixed-wing can't stop)
-      aircraftFlyInFacing(entity, targetPos, speed);
-
-      // Check facing alignment for continued firing
-      const targetDir = directionTo(entity.pos, targetPos);
-      const facingDiff = ((entity.facing - targetDir + 8) % 8 + 8) % 8;
-      const normalizedDiff = facingDiff > 4 ? 8 - facingDiff : facingDiff;
-
-      // Fire if cooldown ready and facing still OK (within 1 direction)
-      if (entity.attackCooldown <= 0 && entity.weapon && normalizedDiff <= 1) {
-        if (entity.target?.alive) {
-          ctx.fireWeaponAt(entity, entity.target, entity.weapon);
-        } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
-          ctx.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, entity.weapon);
-        }
-        // C++ house.cpp:293,303: ROFBias scales rearm delay
-        entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
-        if (entity.ammo > 0) entity.ammo--;
-      }
-
-      // Transition out: ammo depleted, target lost, or facing drifted too far
-      const targetLost = !(entity.target?.alive) &&
-        !(entity.targetStructure && (entity.targetStructure as MapStructure).alive);
-      if (entity.ammo === 0 || targetLost || normalizedDiff > 2) {
+      const weapon = entity.weapon;
+      if (!weapon) {
         entity.attackRunPhase = 'regroup';
+        entity.aircraftAttackStatus = REGROUP;
+        flyCurrentFacing();
+        break;
       }
+
+      const fireState = fixedWingCanFire(entity, targetPos, weapon);
+      if (fireState === 'ok') {
+        const shots = entity.isTwoShooter() ? 2 : 1;
+        let arm = Math.max(1, Math.round(weapon.rof * ctx.getROFBias(entity.house)));
+        for (let i = 0; i < shots; i++) {
+          fireFixedWingShot(ctx, entity, weapon, targetPos);
+          const isSecond = entity.isSecondShot;
+          arm = isSecond ? Math.max(1, Math.round(weapon.rof * ctx.getROFBias(entity.house))) : 3;
+          if (entity.isTwoShooter()) entity.isSecondShot = !entity.isSecondShot;
+          if (entity.ammo > 0) entity.ammo--;
+        }
+        entity.attackCooldown = arm;
+        entity.missionTimer = Math.max(0, arm - 1);
+      } else if (fireState === 'range' || fireState === 'facing') {
+        entity.attackRunPhase = 'flyToTarget';
+        entity.aircraftAttackStatus = FLY_TO_TARGET;
+        entity.missionTimer = TICKS_PER_SECOND * 4 - 1;
+      } else if (fireState === 'ammo') {
+        entity.attackRunPhase = 'regroup';
+        entity.aircraftAttackStatus = REGROUP;
+      }
+
+      const targetLost = !getFixedWingAttackTargetPos(entity);
+      if (targetLost) {
+        entity.attackRunPhase = 'regroup';
+        entity.aircraftAttackStatus = REGROUP;
+      }
+      flyCurrentFacing();
       break;
     }
 
     case 'regroup': {
-      // C++ REGROUP: fly straight ~3 cells past target, then re-engage or RTB
+      // C++ REGROUP does not use a geometric overshoot test. It resolves ammo,
+      // team removal and idle/docking mission assignment, then falls through to
+      // Mission_Hunt's final Normal_Delay + Random_Pick(0,2) return.
       entity.animState = AnimState.WALK;
-      const overshootDist = 3 * CELL_SIZE;
-      const dx = entity.pos.x - targetPos.x;
-      const dy = entity.pos.y - targetPos.y;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const overshootPos = {
-        x: targetPos.x + (dx / len) * overshootDist,
-        y: targetPos.y + (dy / len) * overshootDist,
-      };
-      aircraftFlyInFacing(entity, overshootPos, speed);
-      // worldDist returns cells; compare in cells (3 cells overshoot * 0.8 threshold)
-      if (worldDist(entity.pos, targetPos) > 3 * 0.8) {
-        const targetAlive = (entity.target?.alive) ||
-          (entity.targetStructure && (entity.targetStructure as MapStructure).alive);
-        if (entity.ammo > 0 && targetAlive) {
-          // Circle back for another pass (C++ re-enter LOOK_FOR_TARGET)
-          entity.attackRunPhase = 'flyToTarget';
-          entity.circleBreakTimer = 0;
-        } else {
-          // Out of ammo or target dead — RTB
-          entity.aircraftState = 'returning';
-          entity.mission = Mission.GUARD;
-          entity.target = null;
-          entity.targetStructure = null;
+      if (entity.ammo === 0) {
+        if (entity.teamRef) entity.teamRef.remove(entity);
+        if (!entity.teamRef) {
+          enterFixedWingDockingMission(ctx, entity);
         }
+      } else {
+        entity.attackRunPhase = 'flyToTarget';
+        entity.aircraftAttackStatus = LOOK_FOR_TARGET;
       }
+      entity.aircraftAttackStatus = LOOK_FOR_TARGET;
+      entity.attackRunPhase = 'flyToTarget';
+      fixedWingMissionHuntFinalDelay(entity);
+      flyCurrentFacing();
       break;
     }
   }

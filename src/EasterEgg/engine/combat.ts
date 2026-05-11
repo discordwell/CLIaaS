@@ -8,22 +8,23 @@ import {
   type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, WEAPON_STATS,
-  armorIndex, leptonDist, pixelToLepton, worldToCell, cellTargetToLepton, modifyDamage,
+  armorIndex, leptonDist, pixelToLepton, leptonToPixel, worldToCell, cellTargetToLepton, modifyDamage,
   directionTo, directionToLeptons, directionToLeptons256, calcProjectileTravelFrames, projectileVisualConfig,
   House, Mission, AnimState, UnitType, EXPLOSION_FRAMES,
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL, COS_TABLE_256, SIN_TABLE_256,
   HOUSE_FACTION, PRONE_DAMAGE_BIAS,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS } from './scenario';
+import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS, isStructureUnderConstruction, getStructureOccupyCells, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
-import { canTargetNaval } from './aircraft';
+import { type AircraftContext, canTargetNaval, closestInfantryUnlimboSpot } from './aircraft';
 import { AI_BUILD_RULES } from './ai';
-import { ScenarioRandom, NonCriticalRandom } from './random';
+import { ScenarioRandom } from './random';
 import { assignMission } from './missionLifecycle';
 import { type LogicAnim, spawnLogicAnim, spawnLogicAnimForSprite } from './logicAnim';
+import { getActiveTeams } from './team';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,9 @@ const CELL_CENTER_LEPTON = LEPTON_SIZE >> 1;
 const TORPEDO_CENTER_HIT_RADIUS = Math.trunc(LEPTON_SIZE / 3);
 const PIXEL_LEPTON_W = Math.trunc(LEPTON_SIZE / CELL_SIZE);
 const LIGHT_SPEED = 255;
+const AIRCRAFT_DROPPING_SPEED_ADD = Math.trunc((12 * 40 + 128) / 256);
+const BASE_DEFENSE_SUSPEND_PRIORITY = 20;
+const BASE_DEFENSE_DELAY_MINUTES = 0.25;
 
 /** C++ ini.cpp Get_MPHType: rules.ini Speed= is a percentage of 256
  *  leptons/tick, clamped at MPH_LIGHT_SPEED (255). Example: TorpTube
@@ -69,18 +73,43 @@ const TURRETED_STRUCTURES = new Set(['GUN', 'SAM', 'AGUN']);
  *   GUN:  DirType(208) → 208/32 = 6 (West)     — bdata.cpp:594
  *   SAM:  DIR_N (0)    → 0/32   = 0 (North)     — bdata.cpp:924
  *   AGUN: DIR_NE (32)  → 32/32  = 1 (NorthEast) — bdata.cpp:624
+ * Scenario-loaded buildings override this with the INI facing field.
  */
 const TURRET_DEFAULT_FACING: Record<string, number> = {
   GUN: 6,   // West  (DirType 208)
   SAM: 0,   // North (DIR_N)
-  AGUN: 1,  // NE    (DIR_NE)
+  AGUN: 1,  // NorthEast (DIR_NE)
 };
 
-/** C++ rules.ini ROT=5 for all turreted buildings (GUN, SAM, AGUN).
+const STRUCTURE_TURRET_DEFAULT_DIR256: Record<string, number> = {
+  GUN: 208,
+  SAM: 0,
+  AGUN: 32,
+};
+
+/** C++ bdata.cpp BuildingTypeClass fire-coordinate offsets.
+ *  TechnoClass::Fire_Coord first moves north by VerticalOffset + Height,
+ *  then applies lateral and primary muzzle offsets in turret-facing space. */
+const STRUCTURE_FIRE_COORD_OFFSETS: Record<string, { vertical: number; primary: number; lateral: number }> = {
+  PBOX: { vertical: 0x0010, primary: 0x0040, lateral: 0x0000 },
+  HBOX: { vertical: 0x0010, primary: 0x0040, lateral: 0x0000 },
+  TSLA: { vertical: 0x00c8, primary: 0x0000, lateral: 0x0000 },
+  GUN:  { vertical: 0x0030, primary: 0x0080, lateral: 0x0000 },
+  SAM:  { vertical: 0x0030, primary: 0x0080, lateral: 0x0000 },
+  AGUN: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000 },
+  FTUR: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000 },
+  QUEE: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000 },
+};
+
+/** C++ rules.ini ROT for turreted buildings.
  *  Used in Rotation_AI (building.cpp:5347-5363) via FacingClass::Rotation_Adjust(ROT).
- *  C++ 256-step DirType / 32-step visual = 8 accumulator units per visual step.
- *  ROT=5 means 90-degree rotation (8 steps) takes ceil(8 * 8/5) = 13 ticks, matching C++. */
-const STRUCTURE_TURRET_ROT = 5;
+ *  TS stores 8-way facings, so the accumulator carries the missing 256-step
+ *  sub-facing progress between visible 45-degree steps. */
+const STRUCTURE_TURRET_ROT: Record<string, number> = {
+  GUN: 12,
+  AGUN: 15,
+  SAM: 30,
+};
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -111,9 +140,11 @@ export interface InflightProjectile {
   // C++ fuse.cpp — IsFueled: fuel timer counts down; when 0, force-explode mid-air (bullet.cpp:710, fuse.h:62)
   fuelTimer: number;     // ticks remaining before fuel-forced explosion (0xFF max, 0 = explode now)
   isFueled: boolean;     // true if weapon has IsFueled flag (SCUD/V2)
-  // C++ bullet.cpp:790-802 — IsDropping: vertical drop from FLIGHT_LEVEL (parabombs)
+  // C++ bullet.cpp:790-802 — IsDropping: vertical drop from ObjectClass::FLIGHT_LEVEL.
   isDropping: boolean;   // true if weapon has IsDropping flag
-  dropHeight: number;    // current altitude in pixels; starts at FLIGHT_LEVEL(24), falls by RULE_GRAVITY each tick
+  dropHeight: number;    // current altitude in leptons; starts at FLIGHT_LEVEL(256)
+  dropRiser?: number;    // C++ ObjectClass::Riser; parachute-attached drops clamp at -3
+  dropHasAttachedAnim?: boolean; // C++ IsAnimAttached branch for IsParachuted bombs
   // C++ bullet.cpp:377-386 — IsFlameEquipped: flame/smoke trail every other tick
   isFlameEquipped: boolean;
   flameToggle: boolean;  // alternates each tick; trail spawns when true (C++ IsToAnimate)
@@ -128,34 +159,333 @@ export interface InflightProjectile {
   fuseTimer: number;
   armingTimer: number;
   proximity: number;
+  /** C++ Logic vector index at submit time, used to model DynamicVector ordering. */
+  logicIndexHint?: number;
+  /** Set when a partial Logic-cursor projectile flush has already run this bullet this tick. */
+  processedLogicTick?: number;
 }
 
-function structureFireLeptons(s: MapStructure): { lx: number; ly: number } {
-  const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-  // C++ building.cpp CenterOffset table. Building Coord is fixed to the
-  // upper-left cell corner by BuildingTypeClass::Coord_Fixup; Fire_Coord for
-  // structures with zero primary offset starts from Center_Coord.
-  const offsets: Record<string, { lx: number; ly: number }> = {
-    '1x1': { lx: 0x0080, ly: 0x0080 },
-    '2x1': { lx: 0x00ff, ly: 0x0080 },
-    '1x2': { lx: 0x0080, ly: 0x00ff },
-    '2x2': { lx: 0x00ff, ly: 0x00ff },
-    '2x3': { lx: 0x00ff, ly: 0x0180 },
-    '3x2': { lx: 0x0180, ly: 0x00ff },
-    '3x3': { lx: 0x0180, ly: 0x0180 },
-    '4x2': { lx: 0x0200, ly: 0x00ff },
-    '5x5': { lx: 0x0280, ly: 0x0280 },
-  };
-  const off = offsets[`${w}x${h}`] ?? { lx: Math.trunc((w * LEPTON_SIZE) / 2), ly: Math.trunc((h * LEPTON_SIZE) / 2) };
+function structureCenterLeptons(s: MapStructure): { lx: number; ly: number } {
+  return cppStructureCenterLeptons(s);
+}
+
+export function entityTargetLeptons(e: Entity): { lx: number; ly: number } {
+  return e.targetCoordLeptons();
+}
+
+export function entityTargetPixels(e: Entity): { x: number; y: number } {
+  const t = entityTargetLeptons(e);
   return {
-    lx: s.cx * LEPTON_SIZE + off.lx,
-    ly: s.cy * LEPTON_SIZE + off.ly,
+    x: t.lx * CELL_SIZE / LEPTON_SIZE,
+    y: t.ly * CELL_SIZE / LEPTON_SIZE,
   };
 }
 
-function structureFirePixels(s: MapStructure): { x: number; y: number } {
-  const p = structureFireLeptons(s);
+function moveCoordLeptons(coord: { lx: number; ly: number }, dir256: number, dist: number): { lx: number; ly: number } {
+  const dir = dir256 & 0xff;
+  return {
+    lx: coord.lx + ((COS_TABLE_256[dir] * dist) >> 7),
+    ly: coord.ly - ((SIN_TABLE_256[dir] * dist) >> 7),
+  };
+}
+
+function structureTurretFacing256(s: MapStructure, target?: Entity): number {
+  if (TURRETED_STRUCTURES.has(s.type)) {
+    if (s.turretFacing256 !== undefined) return s.turretFacing256 & 0xff;
+    if (s.turretDir !== undefined) return (s.turretDir * 32) & 0xff;
+    return STRUCTURE_TURRET_DEFAULT_DIR256[s.type] ?? 0;
+  }
+  if (target) {
+    const center = structureCenterLeptons(s);
+    const targetCoord = entityTargetLeptons(target);
+    return directionToLeptons256(center.lx, center.ly, targetCoord.lx, targetCoord.ly);
+  }
+  return 0;
+}
+
+function normalizeFacing256(value: number): number {
+  return ((value % 256) + 256) & 0xff;
+}
+
+function signedFacingDelta256(current: number, desired: number): number {
+  const delta = ((desired - current + 128) & 0xff) - 128;
+  return delta === -128 ? 128 : delta;
+}
+
+function syncStructureTurretFacingFields(s: MapStructure): void {
+  if (!TURRETED_STRUCTURES.has(s.type)) return;
+  if (s.turretFacing256 === undefined) {
+    s.turretFacing256 = s.turretDir !== undefined
+      ? normalizeFacing256(s.turretDir * 32)
+      : (STRUCTURE_TURRET_DEFAULT_DIR256[s.type] ?? 0);
+  }
+  if (s.desiredTurretFacing256 === undefined) {
+    s.desiredTurretFacing256 = s.desiredTurretDir !== undefined
+      ? normalizeFacing256(s.desiredTurretDir * 32)
+      : s.turretFacing256;
+  }
+  s.turretDir = ((s.turretFacing256 + 16) >> 5) & 7;
+  s.desiredTurretDir = ((s.desiredTurretFacing256 + 16) >> 5) & 7;
+}
+
+export function setStructureTurretDesired(s: MapStructure, target: Entity): void {
+  if (!TURRETED_STRUCTURES.has(s.type)) return;
+  syncStructureTurretFacingFields(s);
+  // C++ BuildingClass::Can_Fire/Mission_Attack use Direction(TarCom),
+  // which is Center_Coord() -> As_Coord(TarCom). Fire_Coord is only used
+  // later for range checks and projectile launch.
+  const center = structureCenterLeptons(s);
+  const targetCoord = entityTargetLeptons(target);
+  s.desiredTurretFacing256 = directionToLeptons256(center.lx, center.ly, targetCoord.lx, targetCoord.ly);
+  s.desiredTurretDir = ((s.desiredTurretFacing256 + 16) >> 5) & 7;
+  s.turretRotAccum = Math.abs(signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256));
+}
+
+function setStructureTurretDesiredToTargetNone(s: MapStructure): void {
+  if (!TURRETED_STRUCTURES.has(s.type)) return;
+  syncStructureTurretFacingFields(s);
+  const center = structureCenterLeptons(s);
+  s.desiredTurretFacing256 = directionToLeptons256(center.lx, center.ly, 0, 0);
+  s.desiredTurretDir = ((s.desiredTurretFacing256 + 16) >> 5) & 7;
+  s.turretRotAccum = Math.abs(signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256));
+}
+
+export function rotateStructureTurretTowardDesired(s: MapStructure): void {
+  if (!TURRETED_STRUCTURES.has(s.type)) return;
+  syncStructureTurretFacingFields(s);
+  const current = s.turretFacing256!;
+  const desired = s.desiredTurretFacing256!;
+  const delta = signedFacingDelta256(current, desired);
+  const rot = STRUCTURE_TURRET_ROT[s.type] ?? 5;
+  if (delta !== 0) {
+    const step = Math.min(Math.abs(delta), rot) * Math.sign(delta);
+    s.turretFacing256 = normalizeFacing256(current + step);
+  }
+  s.turretDir = ((s.turretFacing256! + 16) >> 5) & 7;
+  s.desiredTurretDir = ((s.desiredTurretFacing256! + 16) >> 5) & 7;
+  s.turretRotAccum = Math.abs(signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256!));
+}
+
+export function tickStructureTurretRotation(s: MapStructure, isLowPower: boolean): void {
+  if (!TURRETED_STRUCTURES.has(s.type)) return;
+  if (!s.alive || s.sellProgress !== undefined || isStructureUnderConstruction(s)) return;
+  // C++ BuildingClass::Rotation_AI skips powered turrets while the house is low power.
+  if (isLowPower && STRUCTURE_POWERED.has(s.type)) return;
+  rotateStructureTurretTowardDesired(s);
+  if (s.firingFlash !== undefined && s.firingFlash > 0) s.firingFlash--;
+}
+
+function structureTurretCanFire(s: MapStructure): boolean {
+  if (!TURRETED_STRUCTURES.has(s.type)) return true;
+  syncStructureTurretFacingFields(s);
+  // C++ BuildingClass::Can_Fire allows GUN/AGUN to fire when PrimaryFacing
+  // differs from Direction(TarCom) by at most 8 DirType units. SAM has a much
+  // wider cone, handled here too even though its state machine is simplified.
+  const tolerance = s.type === 'SAM' ? 64 : 8;
+  return Math.abs(signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256!)) <= tolerance;
+}
+
+export function structureFireLeptons(s: MapStructure, target?: Entity): { lx: number; ly: number } {
+  const offsets = STRUCTURE_FIRE_COORD_OFFSETS[s.type];
+  let coord = structureCenterLeptons(s);
+  if (!offsets) return coord;
+
+  coord = moveCoordLeptons(coord, 0, offsets.vertical);
+  const turret256 = structureTurretFacing256(s, target);
+  if (offsets.lateral !== 0) {
+    coord = moveCoordLeptons(coord, turret256 + 192, offsets.lateral);
+  }
+  if (offsets.primary !== 0) {
+    coord = moveCoordLeptons(coord, turret256, offsets.primary);
+  }
+  return coord;
+}
+
+function structureFirePixels(s: MapStructure, target?: Entity): { x: number; y: number } {
+  const p = structureFireLeptons(s, target);
   return { x: p.lx * CELL_SIZE / LEPTON_SIZE, y: p.ly * CELL_SIZE / LEPTON_SIZE };
+}
+
+function withScenarioRandomSourceTag<T>(tag: number, fn: () => T): T {
+  const saved = ScenarioRandom._sourceTag;
+  ScenarioRandom._sourceTag = tag;
+  try {
+    return fn();
+  } finally {
+    ScenarioRandom._sourceTag = saved;
+  }
+}
+
+function coordScatterFromCell(cellCx: number, cellCy: number, radiusLeptons: number): { x: number; y: number } {
+  const dir = withScenarioRandomSourceTag(50002, () => ScenarioRandom.nextInRange(0, 255));
+  const radiusPx = radiusLeptons * CELL_SIZE / LEPTON_SIZE;
+  const angle = dir * 2 * Math.PI / 256;
+  return {
+    x: cellCx * CELL_SIZE + Math.cos(angle) * radiusPx,
+    y: cellCy * CELL_SIZE + Math.sin(angle) * radiusPx,
+  };
+}
+
+function submitBuildingFireSmall(ctx: CombatContext, x: number, y: number, delay: number, loop: number): void {
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  logicAnims.push({
+    type: 'fire_small',
+    x,
+    y,
+    stage: 0,
+    timer: 1,
+    loops: Math.max(1, loop) * 2,
+    delay,
+    isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
+  });
+  ctx.effects.push({
+    type: 'explosion',
+    x,
+    y,
+    frame: -delay,
+    maxFrames: EXPLOSION_FRAMES.fire3 ?? 15,
+    size: 8,
+    sprite: 'fire3',
+    spriteStart: 0,
+  } as Effect);
+}
+
+function submitBuildingFireMedium(ctx: CombatContext, x: number, y: number, delay: number, loop: number): void {
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  logicAnims.push({
+    type: 'fire_med',
+    x,
+    y,
+    stage: 0,
+    timer: 1,
+    loops: Math.max(1, loop) * 3,
+    delay,
+    isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
+  });
+  submitBuildingFireEffect(ctx, 'fire2', x, y, delay, 12);
+}
+
+function submitBuildingFireEffect(ctx: CombatContext, sprite: string, x: number, y: number, delay: number, size: number): void {
+  ctx.effects.push({
+    type: 'explosion',
+    x,
+    y,
+    frame: -delay,
+    maxFrames: EXPLOSION_FRAMES[sprite] ?? 15,
+    size,
+    sprite,
+    spriteStart: 0,
+  } as Effect);
+}
+
+function isRenovatorSource(source?: Entity): boolean {
+  return source?.type === UnitType.I_MECH;
+}
+
+function runBuildingDamageStateEffects(ctx: CombatContext, s: MapStructure, warhead: WarheadType, source?: Entity): void {
+  const cells = getStructureOccupyCells(s.type, s.cx, s.cy);
+  const [width, height] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+
+  for (const cell of cells) {
+    if (warhead === 'Fire') {
+      switch (ScenarioRandom.nextInRange(0, 5 + width + height)) {
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+        case 5: {
+          const loop = ScenarioRandom.nextInRange(1, 3);
+          const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+          submitBuildingFireSmall(ctx, pos.x, pos.y, 0, loop);
+          break;
+        }
+        case 6:
+        case 7:
+        case 8: {
+          const loop = ScenarioRandom.nextInRange(1, 3);
+          const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+          submitBuildingFireMedium(ctx, pos.x, pos.y, 0, loop);
+          break;
+        }
+        case 9: {
+          const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+          submitBuildingFireEffect(ctx, 'fire1', pos.x, pos.y, 1, 16);
+          break;
+        }
+        default:
+          break;
+      }
+      continue;
+    }
+
+    if (!ScenarioRandom.percentChance(50)) continue;
+    if (isRenovatorSource(source)) continue;
+
+    // C++ building.cpp:1459 evaluates this constructor path in source order:
+    // Coord_Scatter, start frame, then loop multiplier.
+    // The SCG08EA tick 1309 WASM trace pins this ordering.
+    const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+    const delay = ScenarioRandom.nextInRange(0, 7);
+    const loop = ScenarioRandom.nextInRange(1, 3);
+    submitBuildingFireSmall(ctx, pos.x, pos.y, delay, loop);
+  }
+}
+
+function submitBuildingFballEffect(ctx: CombatContext, x: number, y: number, delay: number, size = 10): void {
+  ctx.effects.push({
+    type: 'explosion',
+    x,
+    y,
+    frame: -delay,
+    maxFrames: EXPLOSION_FRAMES.fball1 ?? 18,
+    size,
+    sprite: 'fball1',
+    spriteStart: 0,
+  } as Effect);
+}
+
+function submitBuildingSmokeEffect(ctx: CombatContext, x: number, y: number, startFrame: number, delay: number): void {
+  ctx.effects.push({
+    type: 'explosion',
+    x,
+    y,
+    frame: -delay,
+    maxFrames: 80,
+    size: 10,
+    sprite: 'smoke_m',
+    spriteStart: startFrame,
+    loopStart: 0,
+    loopEnd: 20,
+    loops: 4,
+  } as Effect);
+}
+
+function runBuildingDestroyedTakeDamageEffects(ctx: CombatContext, s: MapStructure): void {
+  for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
+    // C++ building.cpp:1301 — Random_Pick(SMUDGE_CRATER1, SMUDGE_CRATER6).
+    ScenarioRandom.nextInRange(1, 6);
+    ctx.map.addDecal(cell.cx, cell.cy, 10, 0.5);
+
+    if (ScenarioRandom.percentChance(50)) {
+      // C++ argument evaluation in this path is left-to-right:
+      // Coord_Scatter, start frame, then delay.
+      const smallPos = coordScatterFromCell(cell.cx, cell.cy, 0x0080);
+      const smallDelay = ScenarioRandom.nextInRange(0, 7);
+      const smallLoop = ScenarioRandom.nextInRange(1, 3);
+      submitBuildingFireSmall(ctx, smallPos.x, smallPos.y, smallDelay, smallLoop);
+
+      if (ScenarioRandom.percentChance(50)) {
+        const medPos = coordScatterFromCell(cell.cx, cell.cy, 0x0040);
+        const medDelay = ScenarioRandom.nextInRange(0, 7);
+        const medLoop = ScenarioRandom.nextInRange(1, 3);
+        submitBuildingFireMedium(ctx, medPos.x, medPos.y, medDelay, medLoop);
+      }
+    }
+
+    const fballPos = coordScatterFromCell(cell.cx, cell.cy, 0x0040);
+    const fballDelay = ScenarioRandom.nextInRange(0, 3);
+    submitBuildingFballEffect(ctx, fballPos.x, fballPos.y, fballDelay);
+  }
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -178,6 +508,8 @@ export interface CombatContext {
    *  current loop has already passed the anim phase in TS, their first
    *  brand-new skip must be considered consumed for parity. */
   logicAnimsAlreadyProcessed?: boolean;
+  /** Current C++-style Logic.Count() for a newly submitted sentient object. */
+  logicIndexHintForNewObject?: () => number;
   tick: number;
   playerHouse: House;
   scenarioId: string;
@@ -216,6 +548,10 @@ export interface CombatContext {
   playEva(name: string): void;
   minimapAlert(cx: number, cy: number): void;
   movementSpeed(entity: Entity): number;
+  /** C++ InfantryClass::Stop_Driver, used by InfantryClass::Assign_Destination. */
+  stopInfantryDriver?(entity: Entity): void;
+  /** C++ InfantryClass::Assign_Destination line 1046 clear-current-cell predicate. */
+  canStopInfantryDriverForAssignDestination?(entity: Entity): boolean;
   /** C++ TechnoClass::Unlimbo -> Enter_Idle_Mode(true) mission selection. */
   idleMission?(entity: Entity): Mission;
   /** C++ TechnoClass::Revealed(PlayerPtr) side effect for newly unlimboed objects. */
@@ -225,9 +561,13 @@ export interface CombatContext {
   getArmorBias(house: House): number;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
-  damageStructure(s: MapStructure, damage: number): boolean;
+  damageStructure(s: MapStructure, damage: number, source?: Entity, warhead?: WarheadType): boolean;
   /** C++ TeamClass::Suspend_Teams, triggered from TechnoClass::Base_Is_Attacked. */
   suspendTeamsByPriority?(house: House, priority: number): void;
+  /** C++ HouseClass::Control.TechLevel, used by TechnoClass::Base_Is_Attacked. */
+  houseTechLevel?(house: House): number;
+  /** C++ TechnoClass::Take_Damage object trigger spring for TEVENT_ATTACKED. */
+  springAttackedTriggerByName?(triggerName: string): void;
   aiIQ(house: House): number;
   warheadMuzzleColor(warhead: string): string;
 
@@ -343,9 +683,12 @@ export function combatAnim(damage: number, explosionSet: number, land: 'ground' 
 /** Damage-based speed reduction.
  *  C++ drive.cpp:1182-1187 applies this only in DriveClass speed setup.
  *  C++ infantry.cpp:4016-4049 computes infantry movement without a health
- *  multiplier, so wounded infantry stays at normal walking speed. */
+ *  multiplier, so wounded infantry stays at normal walking speed.
+ *  C++ aircraft.cpp:3560-3568 uses AircraftClass::Set_Speed/FlyClass with
+ *  Class->MaxSpeed and AirspeedBias; it does not apply DriveClass damage
+ *  throttle. */
 export function damageSpeedFactor(entity: Entity): number {
-  if (entity.stats.isInfantry) return 1.0;
+  if (entity.stats.isInfantry || entity.stats.isAircraft) return 1.0;
   const ratio = entity.hp / entity.maxHp;
   if (ratio <= CONDITION_YELLOW) return 0.75;
   return 1.0;
@@ -386,7 +729,7 @@ function scatterVehicleCrew(ctx: CombatContext, crew: Entity): void {
   if (fracX !== CELL_CENTER_LEPTON || fracY !== CELL_CENTER_LEPTON) {
     baseFacing = Math.round(Math.atan2(fracY - CELL_CENTER_LEPTON, fracX - CELL_CENTER_LEPTON) / (Math.PI / 4)) & 7;
   }
-  const offset = ScenarioRandom.nextInRange(0, 4) - 2;
+  const offset = withScenarioRandomSourceTag(53003, () => ScenarioRandom.nextInRange(0, 4)) - 2;
   const startFacing = ((baseFacing + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
 
   let chosen: { cx: number; cy: number } | null = null;
@@ -450,6 +793,13 @@ export function damageEntity(
   warhead: WarheadType, attacker?: Entity,
   options: { skipProneBias?: boolean; skipEntityArmorBias?: boolean; skipHouseArmorBias?: boolean } = {},
 ): boolean {
+  // C++ AircraftClass::Take_Damage halves positive damage while the aircraft
+  // has Height before FootClass/TechnoClass/ObjectClass apply the remaining
+  // damage pipeline. Integer division truncates.
+  if (amount > 0 && target.isAirUnit && target.flightAltitude > 0) {
+    amount = Math.trunc(amount / 2);
+  }
+  if (amount === 0) return false;
   // C++ parity: apply house-level armor bias from difficulty (house.cpp:292,302)
   // ArmorBias > 1 = tougher (less damage), < 1 = weaker (more damage)
   const houseArmorBias = ctx.getArmorBias(target.house);
@@ -461,7 +811,10 @@ export function damageEntity(
     skipProneBias: options.skipProneBias,
     skipArmorBias: options.skipEntityArmorBias,
   });
-  if (target.triggerName) ctx.attackedTriggerNames.add(target.triggerName);
+  if (target.triggerName) {
+    ctx.attackedTriggerNames.add(target.triggerName);
+    if (attacker && amount > 0) ctx.springAttackedTriggerByName?.(target.triggerName);
+  }
   // C++ negative damage is healing. TechnoClass::Take_Damage repairs strength,
   // but it must not flow into FootClass retaliation/scatter handling as if the
   // unit was attacked.
@@ -471,7 +824,7 @@ export function damageEntity(
   // for the harvester's house. This is the same base-defense hook used by
   // BuildingClass::Take_Damage, but UnitClass scopes it to UNIT_HARVESTER.
   if (!killed && target.alive && attacker && target.type === UnitType.V_HARV) {
-    maybeSuspendTeamsForBaseAttack(ctx, attacker, target.house, false);
+    maybeSuspendTeamsForBaseAttack(ctx, attacker, target.house, false, target);
   }
   if (!killed && target.alive) {
     // C++ damage-response order:
@@ -548,6 +901,32 @@ function shouldFootClassForcedScatter(ctx: CombatContext, victim: Entity, attack
   if (victim.isSuicide) return true;
 
   return false;
+}
+
+/** C++ InfantryClass::Assign_Destination for scatter-created cell targets.
+ *  Scatter itself only chooses the cell; assigning that cell must still stop an
+ *  active infantry driver when the current Coord is clear, clear Path[0], and
+ *  reset PathThreshhold before queueing MOVE. */
+function assignInfantryScatterDestination(ctx: CombatContext, entity: Entity, cell: { cx: number; cy: number }): void {
+  if (entity.stats.isInfantry) {
+    if (entity.isDriving && !entity.formationOffset &&
+        (ctx.canStopInfantryDriverForAssignDestination?.(entity) ?? true)) {
+      if (ctx.stopInfantryDriver) {
+        ctx.stopInfantryDriver(entity);
+      } else {
+        entity.isDriving = false;
+        entity.headToLX = 0;
+        entity.headToLY = 0;
+      }
+      if (entity.nonInterruptAnimTicks <= 0) {
+        entity.doing = 'stand_ready';
+      }
+    }
+    entity.path = [];
+    entity.pathIndex = 0;
+    entity.pathThreshold = 1; // C++ MOVE_CLOAK
+  }
+  entity.moveTarget = cellTargetToLepton(cell.cx, cell.cy);
 }
 
 /**
@@ -675,7 +1054,7 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
 
   // C++ infantry.cpp:1924-1927 — assign MOVE mission to best cell
   if (bestCell) {
-    entity.moveTarget = cellTargetToLepton(bestCell.cx, bestCell.cy);
+    assignInfantryScatterDestination(ctx, entity, bestCell);
     assignMission(entity, Mission.MOVE);
   }
 }
@@ -685,6 +1064,23 @@ export function fireWeaponAt(
   ctx: CombatContext, attacker: Entity, target: Entity, weapon: WeaponStats,
 ): void {
   const houseBias = ctx.getFirepowerBias(attacker.house);
+  if (weapon.projSpeed !== undefined || weapon.projectileSpeed !== undefined) {
+    // AircraftClass::Fire_At routes through FootClass/TechnoClass::Fire_At in
+    // C++, so even light-speed invisible aircraft weapons create BulletClass
+    // objects. Damage and Coord_Scatter happen during BulletClass::AI.
+    const impact = entityTargetPixels(target);
+    const strength = weapon.damage > 0
+      ? Math.max(1, Math.round(weapon.damage * houseBias))
+      : Math.round(weapon.damage * houseBias);
+    launchProjectile(ctx, attacker, target, weapon, strength, impact.x, impact.y, true);
+    ctx.effects.push({
+      type: 'muzzle',
+      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+    } as Effect);
+    return;
+  }
+
   const whMult = getWarheadMult(weapon.warhead, target.stats.armor, ctx.warheadOverrides);
   const damage = modifyDamage(weapon.damage, weapon.warhead, target.stats.armor, 0, houseBias, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
   const killed = damageEntity(ctx, target, damage, weapon.warhead, attacker);
@@ -707,6 +1103,46 @@ export function fireWeaponAt(
   } as Effect);
 }
 
+/** Fire weapon at a map coordinate target.
+ *  C++ fixed-wing DROP_BOMBS builds a coordinate TARGET in front of the
+ *  aircraft for non-homing weapons, then still routes through TechnoClass::
+ *  Fire_At. The target has no object id, but BulletClass detonation applies
+ *  normal Explosion_Damage around that coordinate. */
+export function fireWeaponAtCoord(
+  ctx: CombatContext,
+  attacker: Entity,
+  weapon: WeaponStats,
+  impact: WorldPos,
+): void {
+  const houseBias = ctx.getFirepowerBias(attacker.house);
+  if (weapon.projSpeed !== undefined || weapon.projectileSpeed !== undefined) {
+    const strength = weapon.damage > 0
+      ? Math.max(1, Math.round(weapon.damage * houseBias))
+      : Math.round(weapon.damage * houseBias);
+    launchProjectile(ctx, attacker, null, weapon, strength, impact.x, impact.y, true);
+    ctx.effects.push({
+      type: 'muzzle',
+      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+    } as Effect);
+    return;
+  }
+
+  applySplashDamage(
+    ctx,
+    impact,
+    { damage: Math.round(weapon.damage * houseBias), warhead: weapon.warhead, splash: weapon.splash },
+    -1,
+    attacker.house,
+    attacker,
+  );
+  ctx.effects.push({
+    type: 'muzzle',
+    x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
+    frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
+  } as Effect);
+}
+
 /** Fire weapon at structure target (helper for aircraft) — uses full damage pipeline */
 export function fireWeaponAtStructure(
   ctx: CombatContext, attacker: Entity, s: MapStructure, weapon: WeaponStats,
@@ -716,7 +1152,7 @@ export function fireWeaponAtStructure(
   const armor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
   const whMult = getWarheadMult(wh, armor, ctx.warheadOverrides);
   const damage = modifyDamage(weapon.damage, wh, armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
-  const destroyed = structureDamage(ctx, s, damage, attacker);
+  const destroyed = structureDamage(ctx, s, damage, attacker, wh);
   if (destroyed) attacker.creditKill();
   ctx.effects.push({
     type: 'muzzle',
@@ -730,14 +1166,16 @@ function maybeSuspendTeamsForBaseAttack(
   attacker: Entity,
   attackedHouse: House,
   attackedObjectHasPrimaryWeapon: boolean,
+  attackedObject?: Entity | MapStructure,
 ): void {
   // C++ BuildingClass::Take_Damage calls TechnoClass::Base_Is_Attacked(source)
-  // and UnitClass::Take_Damage does the same for surviving computer harvesters.
-  // before applying damage. Base_Is_Attacked returns unless:
+  // and UnitClass::Take_Damage does the same for surviving computer harvesters
+  // after DriveClass::Take_Damage returns. Base_Is_Attacked returns unless:
   //   - target house is AI/non-human,
   //   - source is an enemy FootClass of RTTI_INFANTRY or RTTI_UNIT,
   //   - building cannot defend itself,
-  // then TeamClass::Suspend_Teams(Rule.SuspendPriority=20, House).
+  // then TeamClass::Suspend_Teams(Rule.SuspendPriority=20, House) and recruits
+  // nearby armed defenders for RESCUE/GUARD_AREA.
   if (!ctx.suspendTeamsByPriority) return;
   if (attackedHouse === ctx.playerHouse) return;
   if (ctx.isAllied(attackedHouse, attacker.house)) return;
@@ -745,7 +1183,176 @@ function maybeSuspendTeamsForBaseAttack(
     attacker.stats.isInfantry || (!attacker.isAirUnit && !attacker.isNavalUnit);
   if (!attackerIsInfantryOrUnit) return;
   if (attackedObjectHasPrimaryWeapon) return;
-  ctx.suspendTeamsByPriority(attackedHouse, 20);
+  if (attacker.baseAttackTimer > 0) return;
+
+  ctx.suspendTeamsByPriority(attackedHouse, BASE_DEFENSE_SUSPEND_PRIORITY);
+  recruitBaseDefenders(ctx, attacker, attackedHouse, attackedObject);
+}
+
+function recruitBaseDefenders(
+  ctx: CombatContext,
+  attacker: Entity,
+  attackedHouse: House,
+  attackedObject?: Entity | MapStructure,
+): void {
+  let desired = technoRisk(attacker) * (ctx.houseTechLevel?.(attackedHouse) ?? 10);
+  if (desired <= 0) return;
+
+  const attackedCell = attackedObjectCell(attackedObject);
+  const zone = attackedCell ? movementZoneCellsForBaseDefense(ctx.map, attackedCell) : undefined;
+  const defenders: Array<{ entity: Entity; value: number }> = [];
+
+  desired += collectBaseDefenders(ctx, attacker, attackedHouse, attackedObject, attackedCell, zone, true, defenders);
+  if (desired <= 0) return;
+  desired += collectBaseDefenders(ctx, attacker, attackedHouse, attackedObject, attackedCell, zone, false, defenders);
+  if (desired <= 0) return;
+  if (defenders.length === 0) return;
+
+  defenders.sort((a, b) => b.value - a.value);
+  let riskTotal = 0;
+  const randomTag = takeDamageSourceTag(attackedObject);
+  for (const { entity } of defenders.slice(0, 6)) {
+    const rescue = randomTag !== undefined
+      ? withScenarioRandomSourceTag(randomTag, () => ScenarioRandom.percentChance(50))
+      : ScenarioRandom.percentChance(50);
+    if (rescue) {
+      assignMission(entity, Mission.RESCUE);
+    } else {
+      assignMission(entity, Mission.AREA_GUARD);
+      if (attackedObject instanceof Entity) {
+        entity.archiveTargetEntity = attackedObject;
+        entity.archiveTarget = { cx: attackedObject.cell.cx, cy: attackedObject.cell.cy };
+        entity.archiveTargetLeptons = null;
+      } else {
+        entity.archiveTargetEntity = null;
+        if (attackedCell) entity.archiveTarget = { cx: attackedCell.cx, cy: attackedCell.cy };
+        const archiveCoord = attackedObjectTargetLeptons(attackedObject);
+        entity.archiveTargetLeptons = archiveCoord;
+      }
+    }
+    entity.target = attacker;
+    riskTotal += technoRisk(entity);
+    if (riskTotal > desired) break;
+  }
+
+  if (riskTotal > desired) {
+    attacker.baseAttackTimer = Math.max(1, Math.round(ctx.gameTicksPerSec * 60 * BASE_DEFENSE_DELAY_MINUTES));
+  }
+}
+
+function collectBaseDefenders(
+  ctx: CombatContext,
+  attacker: Entity,
+  attackedHouse: House,
+  attackedObject: Entity | MapStructure | undefined,
+  attackedCell: { cx: number; cy: number } | undefined,
+  attackedZone: Set<number> | undefined,
+  infantryPass: boolean,
+  defenders: Array<{ entity: Entity; value: number }>,
+): number {
+  let desiredAdjustment = 0;
+  for (const entity of ctx.entities) {
+    if (!entity.alive || entity.inLimbo || entity.house !== attackedHouse) continue;
+    if (infantryPass) {
+      if (!entity.stats.isInfantry) continue;
+    } else {
+      if (entity.stats.isInfantry || entity.isAirUnit || entity.isNavalUnit) continue;
+    }
+    const weapon = entity.weapon;
+    if (!weapon) continue;
+    if (!MISSION_CONTROL[entity.mission]?.isRecruitable) continue;
+    if (getWarheadMult(weapon.warhead, attacker.stats.armor, ctx.warheadOverrides) === 0) continue;
+    if (attackedZone && !attackedZone.has(entity.cell.cy * MAP_CELLS + entity.cell.cx)) continue;
+
+    let threat = rescueMissionThreat(ctx, entity, attacker, weapon);
+    if (threat === 0) continue;
+    const isProtectingAttackedObject = attackedObject instanceof Entity
+      ? entity.archiveTargetEntity === attackedObject
+      : attackedCell && entity.archiveTarget?.cx === attackedCell.cx && entity.archiveTarget?.cy === attackedCell.cy;
+    if (isProtectingAttackedObject) {
+      threat *= infantryPass ? 100 : 10;
+    }
+    if (threat < 0) {
+      desiredAdjustment += threat;
+      continue;
+    }
+    defenders.push({ entity, value: threat });
+  }
+  return desiredAdjustment;
+}
+
+function rescueMissionThreat(ctx: CombatContext, defender: Entity, attacker: Entity, weapon: WeaponStats): number {
+  if (!attacker.alive || attacker.inLimbo) return 0;
+  const risk = technoRisk(defender);
+  if (risk <= 0) return 0;
+  if (defender.target === attacker) return -risk;
+  if (defender.target?.alive && defender.target.weapon) return 0;
+  if (defender.teamRef || defender.mission === Mission.HARVEST) return 0;
+
+  const target = attacker.targetCoordLeptons();
+  const dist = leptonDist(defender.leptonX, defender.leptonY, target.lx, target.ly) -
+    Math.round((weapon.range ?? 0) * LEPTON_SIZE);
+  let threat = risk * 1024;
+  if (dist > 0) {
+    const speed = Math.max(1, iniSpeedToMph(defender.stats.speed ?? 1));
+    const ratio = Math.max(Math.trunc(dist / speed), 1);
+    threat = Math.max(Math.trunc(threat / ratio), 1);
+  }
+  return threat;
+}
+
+function technoRisk(entity: Entity): number {
+  const points = entity.stats.points;
+  if (points !== undefined) return Math.max(0, Math.trunc(points));
+  const item = PRODUCTION_ITEMS.find(p => p.type === entity.type);
+  if (item?.points !== undefined) return Math.max(0, Math.trunc(item.points));
+  if (item?.cost !== undefined) return Math.max(1, Math.trunc(item.cost / 100));
+  return Math.max(1, Math.trunc(entity.maxHp / 50));
+}
+
+function attackedObjectCell(attackedObject?: Entity | MapStructure): { cx: number; cy: number } | undefined {
+  if (!attackedObject) return undefined;
+  if (attackedObject instanceof Entity) return attackedObject.cell;
+  return { cx: attackedObject.cx, cy: attackedObject.cy };
+}
+
+function attackedObjectTargetLeptons(attackedObject?: Entity | MapStructure): { lx: number; ly: number } | null {
+  if (!attackedObject) return null;
+  if (attackedObject instanceof Entity) return attackedObject.targetCoordLeptons();
+  return structureCenterLeptons(attackedObject);
+}
+
+function takeDamageSourceTag(attackedObject?: Entity | MapStructure): number | undefined {
+  if (!attackedObject) return undefined;
+  if (!(attackedObject instanceof Entity)) return 52005; // RTTI_BUILDING
+  if (attackedObject.stats.isInfantry) return 52013; // RTTI_INFANTRY
+  if (attackedObject.isAirUnit) return 52001; // RTTI_AIRCRAFT
+  if (attackedObject.isNavalUnit) return 52030; // RTTI_VESSEL
+  return 52028; // RTTI_UNIT
+}
+
+function movementZoneCellsForBaseDefense(map: GameMap, start: { cx: number; cy: number }): Set<number> {
+  const result = new Set<number>();
+  const startIdx = start.cy * MAP_CELLS + start.cx;
+  if (!map.isTerrainPassable(start.cx, start.cy)) {
+    result.add(startIdx);
+    return result;
+  }
+  const queue: Array<{ cx: number; cy: number }> = [start];
+  result.add(startIdx);
+  for (let qi = 0; qi < queue.length; qi++) {
+    const cur = queue[qi];
+    for (let dir = 0; dir < DIR_COUNT; dir += 2) {
+      const nx = cur.cx + DIR_DX[dir];
+      const ny = cur.cy + DIR_DY[dir];
+      const idx = ny * MAP_CELLS + nx;
+      if (result.has(idx)) continue;
+      if (!map.isTerrainPassable(nx, ny)) continue;
+      result.add(idx);
+      queue.push({ cx: nx, cy: ny });
+    }
+  }
+  return result;
 }
 
 function cppCoordDistanceUnits(dx: number, dy: number): number {
@@ -874,6 +1481,13 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   // C++ ObjectClass::Detach_All -> Detach_This_From_All(As_Target()) clears
   // every TarCom pointing at the destroyed object before death explosions and
   // post-death logic continue (object.cpp:1466-1483, techno.cpp:3872-3896).
+  // For FootClass descendants, Detach_All first removes the object from its
+  // team (foot.cpp:1844-1853). Dead team members must stop participating in
+  // TeamClass::AI immediately; otherwise attack teams can keep issuing orders
+  // to a zero-strength infantry object through the death-animation window.
+  if (victim.teamRef) {
+    victim.teamRef.remove(victim, ctx);
+  }
   // InfantryClass::Detach also drops IsFiring when TarCom is detached. Without
   // this, TS keeps stale object references to destroyed vehicles and later code
   // treats those references as live orders until the next mission timer happens
@@ -898,6 +1512,14 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
         entity.firingAnimTicks = 0;
       }
     }
+  }
+  for (const structure of ctx.structures) {
+    if (structure.targetEntityId === victim.id) {
+      structure.targetEntityId = undefined;
+    }
+  }
+  for (const team of getActiveTeams()) {
+    team.detachTargetEntity(victim);
   }
   for (const proj of ctx.inflightProjectiles) {
     // C++ BulletClass::Detach clears Payback when the firing object detaches
@@ -972,6 +1594,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       crewType = UnitType.I_E1;
     }
     const inf = new Entity(crewType, victim.house, kx, ky);
+    inf.logicIndexHint = ctx.logicIndexHintForNewObject?.();
     if (crewType === UnitType.I_C1) {
       // C++ unit.cpp:1051 — i->IsTechnician = true for unarmed vehicle crew.
       inf.isTechnician = true;
@@ -996,16 +1619,54 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     ctx.markDiscoveredIfPlayerVisible?.(inf);
   }
 
-  // C++ aircraft.cpp:1588-1594 — Aircraft parachute survivors on destruction
-  // Conditions: IsCrew=true, 90% probability, spawns E1 (no civilian variant)
-  if (victim.stats.crewed && victim.stats.isAircraft &&
-      ScenarioRandom.percentChance(90)) {
-    const inf = new Entity(UnitType.I_E1, victim.house, kx, ky);
-    // C++ aircraft survivors get full health (no HP reduction like vehicles)
-    inf.mission = Mission.GUARD;
-    ctx.entities.push(inf);
-    ctx.entityById.set(inf.id, inf);
-    ctx.markDiscoveredIfPlayerVisible?.(inf);
+  // C++ aircraft.cpp:1599-1604 — Aircraft parachute survivors on destruction.
+  // Conditions: IsCrew=true, 90% probability, clear foot-move cell, spawns E1
+  // through InfantryClass::Paradrop (not a ground-level Unlimbo).
+  if (victim.stats.crewed && victim.stats.isAircraft) {
+    const savedSourceTag = ScenarioRandom._sourceTag;
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 40060;
+    const shouldParadropCrew = ScenarioRandom.percentChance(90);
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedSourceTag;
+
+    const deathCell = victim.cell;
+    const canParadropAtDeathCell =
+      shouldParadropCrew &&
+      ctx.map.isTerrainPassable(deathCell.cx, deathCell.cy) &&
+      !ctx.map.hasVehicleOccupancy(deathCell.cx, deathCell.cy) &&
+      ctx.map.hasAvailableSubCell(deathCell.cx, deathCell.cy);
+
+    if (canParadropAtDeathCell) {
+      const inf = new Entity(UnitType.I_E1, victim.house, kx, ky);
+      inf.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+      const spot = closestInfantryUnlimboSpot(ctx as unknown as AircraftContext, inf, victim.leptonX, victim.leptonY);
+      inf.leptonX = spot.lx;
+      inf.leptonY = spot.ly;
+      inf.syncPosFromLeptons();
+      inf.subCell = spot.subCell;
+      inf.claimedCellIdx = spot.cellIdx;
+      inf.claimedSubCell = spot.subCell;
+
+      // C++ ObjectClass::Paradrop sets Height=FLIGHT_LEVEL and IsFalling before
+      // Unlimbo. TechnoClass::AI then returns early while this non-air infantry
+      // still has Height > 0, so a survivor appended to Logic mid-frame cannot
+      // immediately run Mission_Guard/HUNT RNG on the same tick.
+      inf.isFalling = true;
+      inf.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+      inf.fallRiser = 0;
+      inf.fallHasAttachedAnim = true;
+      inf.flightAltitude = leptonToPixel(inf.fallHeightLeptons);
+
+      // TechnoClass::Unlimbo performs Enter_Idle_Mode(true)+Commence, then
+      // InfantryClass::Paradrop queues the final human GUARD / AI HUNT mission.
+      inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
+      inf.missionTimer = 0;
+      inf.missionQueue = null;
+      assignMission(inf, inf.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
+
+      ctx.entities.push(inf);
+      ctx.entityById.set(inf.id, inf);
+      ctx.markDiscoveredIfPlayerVisible?.(inf);
+    }
   }
 }
 
@@ -1304,11 +1965,17 @@ export function launchProjectile(
   // C++ techno.cpp:3124-3171 launches bullets from Fire_Coord(which), not
   // Center_Coord(). The fire coordinate feeds projectile range, facing, fuse
   // proximity, and the initial BulletClass::Unlimbo position.
-  const launchCoord = launchCoordOverride ?? (
+  const fireCoord = launchCoordOverride ?? (
     typeof attacker.fireCoordForWeapon === 'function' ? attacker.fireCoordForWeapon(weapon) :
       weapon === attacker.weapon && typeof attacker.fireCoordPrimary === 'function' ? attacker.fireCoordPrimary() :
         { lx: attacker.leptonX, ly: attacker.leptonY }
   );
+  // C++ techno.cpp:3200-3204: IsDropping bullets are a special case. They use
+  // Center_Coord(), not Fire_Coord(), because they fall vertically from the
+  // firer instead of flying toward the target.
+  const launchCoord = weapon.isDropping
+    ? { lx: attacker.leptonX, ly: attacker.leptonY }
+    : fireCoord;
   const targetLX = pixelToLepton(impactX);
   const targetLY = pixelToLepton(impactY);
   const dist = leptonDist(launchCoord.lx, launchCoord.ly, targetLX, targetLY);
@@ -1327,7 +1994,10 @@ export function launchProjectile(
   const bulletStartLY = isLightSpeedInvisible ? targetLY : launchCoord.ly;
   const fuseDist = leptonDist(bulletStartLX, bulletStartLY, targetLX, targetLY);
   let speed = isLightSpeedInvisible ? 0 : maxSpeed;
-  const travelFrames = Math.max(1, Math.trunc(fuseDist / maxSpeed) + 4);
+  // C++ bullet.cpp:747-750 leaves range at 0xff for IsDropping bullets. They
+  // bypass Fuse_Checkup while falling and explode only through the forced
+  // `IsDropping && !IsFalling` path.
+  const travelFrames = weapon.isDropping ? 0xFF : Math.max(1, Math.trunc(fuseDist / maxSpeed) + 4);
 
   // C++ bullet.cpp:756-771 — arcing projectile ground speed is adjusted by
   // target distance after the fuse range is computed from MaxSpeed.
@@ -1336,9 +2006,13 @@ export function launchProjectile(
     speed = Math.max(maxSpeed + Math.trunc(fuseDist / 32), 25);
   }
 
-  const speedAdd = isLightSpeedInvisible || speed === LIGHT_SPEED
-    ? 0
-    : Math.trunc((speed * 255 + 128) / 256);
+  const speedAdd = weapon.isDropping
+    // C++ AircraftClass::Fire_At gives falling bullets drift after
+    // BulletClass::Unlimbo skips the normal Fly_Speed setup.
+    ? (attacker.isAirUnit ? AIRCRAFT_DROPPING_SPEED_ADD : 0)
+    : (isLightSpeedInvisible || speed === LIGHT_SPEED
+      ? 0
+      : Math.trunc((speed * 255 + 128) / 256));
 
   // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter on DETONATION.
   // Verified via WASM tag 50002 (Coord_Scatter dir pick) at SCG03EA tick 267 bullet[282].
@@ -1367,6 +2041,7 @@ export function launchProjectile(
     dogRiderId = attacker.id;
   }
 
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   ctx.inflightProjectiles.push({
     attackerId: attacker.id,
     targetId: target?.id ?? -1,
@@ -1390,9 +2065,13 @@ export function launchProjectile(
     // `travelFrames` already includes bullet.cpp's +4 range bias.
     fuelTimer: Math.min(0xFF, travelFrames),
     isFueled: !!weapon.isFueled,
-    // C++ bullet.cpp:790-802 — IsDropping: start at FLIGHT_LEVEL, fall with gravity
+    // C++ bullet.cpp:790-802 — IsDropping starts at ObjectClass::FLIGHT_LEVEL
+    // (256 leptons). IsParachuted attaches ANIM_PARA_BOMB, so ObjectClass::AI
+    // uses the IsAnimAttached fall branch: Riser -= 1, clamped to -3.
     isDropping: !!weapon.isDropping,
-    dropHeight: weapon.isDropping ? 24 : 0,  // C++ FLIGHT_LEVEL = 24 pixels
+    dropHeight: weapon.isDropping ? Entity.FLIGHT_LEVEL_LEPTONS : 0,
+    dropRiser: 0,
+    dropHasAttachedAnim: !!weapon.isParachuted,
     // C++ bullet.cpp:377-386 — IsFlameEquipped: flame trail toggle
     isFlameEquipped: !!weapon.isFlameEquipped,
     flameToggle: false,  // C++ IsToAnimate starts false
@@ -1406,43 +2085,48 @@ export function launchProjectile(
     fuseTimer: Math.min(0xFF, travelFrames),
     armingTimer: 0,
     proximity: fuseDist,
+    logicIndexHint,
   });
 }
 
 /** Launch a projectile from a defensive structure.
  *  C++ BuildingClass::Fire_At still creates a BulletClass for invisible
- *  electric weapons (TeslaZap). Damage/scatter happens in BulletClass::AI,
- *  not synchronously in BuildingClass::Mission_Attack. */
+ *  structure projectiles (Vulcan/Invisible, ZSU-23/Ack, TeslaZap/Invisible).
+ *  Damage/scatter happens in BulletClass::AI, not synchronously in
+ *  BuildingClass::Mission_Attack. */
 function launchStructureProjectile(
   ctx: CombatContext,
   s: MapStructure,
   target: Entity,
   weapon: StructureWeapon,
 ): void {
-  const targetLX = target.leptonX;
-  const targetLY = target.leptonY;
+  const targetCoord = entityTargetLeptons(target);
+  const targetLX = targetCoord.lx;
+  const targetLY = targetCoord.ly;
   const targetX = targetLX * CELL_SIZE / LEPTON_SIZE;
   const targetY = targetLY * CELL_SIZE / LEPTON_SIZE;
-  const { lx: launchLX, ly: launchLY } = structureFireLeptons(s);
+  const { lx: launchLX, ly: launchLY } = structureFireLeptons(s, target);
   const maxSpeed = weapon.projSpeed !== undefined
     ? iniSpeedToMph(weapon.projSpeed)
     : LIGHT_SPEED;
-  const isInvisible = maxSpeed === LIGHT_SPEED;
-  const bulletStartLX = isInvisible ? targetLX : launchLX;
-  const bulletStartLY = isInvisible ? targetLY : launchLY;
+  const isInvisible = !!weapon.isInvisible;
+  const isLightSpeedInvisible = isInvisible && maxSpeed === LIGHT_SPEED;
+  const bulletStartLX = isLightSpeedInvisible ? targetLX : launchLX;
+  const bulletStartLY = isLightSpeedInvisible ? targetLY : launchLY;
   const fuseDist = leptonDist(bulletStartLX, bulletStartLY, targetLX, targetLY);
-  const speed = isInvisible ? 0 : maxSpeed;
+  const speed = isLightSpeedInvisible ? 0 : maxSpeed;
   const travelFrames = Math.max(1, Math.trunc(fuseDist / maxSpeed) + 4);
-  const speedAdd = isInvisible || speed === LIGHT_SPEED
+  const speedAdd = isLightSpeedInvisible || speed === LIGHT_SPEED
     ? 0
     : Math.trunc((speed * 255 + 128) / 256);
 
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   ctx.inflightProjectiles.push({
     attackerId: -1,
     attackerHouse: s.house,
     targetId: target.id,
     weapon: {
-      name: s.type === 'TSLA' ? 'TeslaZap' : s.type,
+      name: weapon.weaponName ?? s.type,
       damage: weapon.damage,
       rof: weapon.rof,
       range: weapon.range,
@@ -1471,6 +2155,8 @@ function launchStructureProjectile(
     isFueled: false,
     isDropping: false,
     dropHeight: 0,
+    dropRiser: 0,
+    dropHasAttachedAnim: false,
     isFlameEquipped: false,
     flameToggle: false,
     logicalLX: bulletStartLX,
@@ -1483,6 +2169,7 @@ function launchStructureProjectile(
     fuseTimer: Math.min(0xFF, travelFrames),
     armingTimer: 0,
     proximity: fuseDist,
+    logicIndexHint,
   });
 }
 
@@ -1531,220 +2218,338 @@ function tickProjectileFuse(proj: InflightProjectile): boolean {
   return false;
 }
 
-/** Advance in-flight projectiles; apply damage + splash on arrival */
-export function updateInflightProjectiles(ctx: CombatContext): void {
-  const arrived: InflightProjectile[] = [];
+type LogicPredecessorSnapshot = {
+  entityIds: Set<number>;
+  structures: Set<MapStructure>;
+};
 
-  for (const proj of ctx.inflightProjectiles) {
-    proj.currentFrame++;
+function snapshotProjectilePredecessors(ctx: CombatContext): LogicPredecessorSnapshot {
+  return {
+    entityIds: new Set(ctx.entities.filter(entityOccupiesCppLogic).map(e => e.id)),
+    structures: new Set(ctx.structures.filter(s => s.alive)),
+  };
+}
 
-    // C++ bullet.cpp:478-480 — IsDegenerate: projectile loses 1 strength per tick during flight (min 5)
-    if (proj.weapon.isDegenerate && proj.strength > 5) {
-      proj.strength--;
+function entityOccupiesCppLogic(entity: Entity | undefined): entity is Entity {
+  return !!entity && entity.occupiesCppLogic();
+}
+
+function countLiveProjectilePredecessors(ctx: CombatContext, snapshot: LogicPredecessorSnapshot): number {
+  let live = 0;
+  for (const id of snapshot.entityIds) {
+    const e = ctx.entityById.get(id);
+    if (entityOccupiesCppLogic(e)) live++;
+  }
+  for (const s of snapshot.structures) {
+    if (s.alive) live++;
+  }
+  return live;
+}
+
+function projectileRemainsInLogic(proj: InflightProjectile): boolean {
+  if (proj.isDropping) return proj.dropHeight > 0 || proj.currentFrame === 0;
+  if (proj.isFueled && proj.fuelTimer <= 0) return false;
+  if (proj.isArcing) return proj.arcHeight > 0 || proj.currentFrame <= 1;
+  return true;
+}
+
+/** Advance one BulletClass logic step; return true when it detonates/deletes itself. */
+function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile): boolean {
+  proj.currentFrame++;
+
+  // C++ bullet.cpp:478-480 — IsDegenerate: projectile loses 1 strength per tick during flight (min 5)
+  if (proj.weapon.isDegenerate && proj.strength > 5) {
+    proj.strength--;
+  }
+
+  // C++ fuse.cpp:127 — fuel timer always decrements each tick (FuseClass::Fuse_Checkup)
+  if (proj.fuelTimer > 0) {
+    proj.fuelTimer--;
+  }
+
+  // C++ object.cpp:237-254 + bullet.cpp:790-802 — dropped bullets fall from
+  // FLIGHT_LEVEL. ParaBombs have an attached parachute animation, so their
+  // Riser decreases by 1 and clamps to -3; non-parachuted drops use Rule.Gravity.
+  if (proj.isDropping && proj.dropHeight > 0) {
+    const riser = proj.dropRiser ?? 0;
+    proj.dropHeight += riser;
+    if (proj.dropHeight <= 0) {
+      proj.dropHeight = 0;
     }
-
-    // C++ fuse.cpp:127 — fuel timer always decrements each tick (FuseClass::Fuse_Checkup)
-    if (proj.fuelTimer > 0) {
-      proj.fuelTimer--;
-    }
-
-    // C++ bullet.cpp:790-802 — IsDropping: vertical drop from FLIGHT_LEVEL with gravity
-    // dropHeight decreases by RULE_GRAVITY each tick; when it reaches 0, bullet lands
-    if (proj.isDropping && proj.dropHeight > 0) {
-      proj.dropHeight -= RULE_GRAVITY;
-    }
-
-    // C++ bullet.cpp:377-386 — IsFlameEquipped: spawn flame/smoke trail every other tick
-    if (proj.isFlameEquipped) {
-      if (proj.flameToggle) {
-        // Spawn visual flame trail at projectile's current interpolated position
-        const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-        const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
-        const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
-        ctx.effects.push({
-          type: 'explosion',
-          x: curX,
-          y: curY,
-          frame: 0,
-          maxFrames: 14,  // ANIM_FBALL_FADE frame count
-          size: 8,
-          sprite: 'napalm1',  // closest match to FBALL_FADE in our sprite set
-        });
-      }
-      proj.flameToggle = !proj.flameToggle;  // C++ IsToAnimate = !IsToAnimate
-    }
-
-    // C++ BulletClass::AI always runs FlyClass::Physics before fuse handling.
-    // Arcing projectiles are still normal BulletClass objects here: they move
-    // horizontally via FlyClass and only their Height/Riser is special.
-    const useFlyPhysicsCoord = !proj.isDropping;
-    if (useFlyPhysicsCoord) {
-      tickProjectilePhysics(proj);
-    }
-
-    // C++ object.cpp:237-254 — ballistic arc gravity simulation
-    // Each tick: Height += Riser; Riser -= Rule.Gravity
-    // When Height <= 0, the bullet has landed → explode (bullet.cpp:359: forced = IsArcing && !IsFalling)
-    if (proj.isArcing) {
-      proj.arcHeight += proj.arcRiser;
-      proj.arcRiser -= RULE_GRAVITY;
-      // C++ object.cpp:254 — clamp riser to prevent runaway negative velocity
-      proj.arcRiser = Math.max(proj.arcRiser, -100);
-    }
-
-    // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
-    // projectileROT = homing turn rate. C10: homing updates every other frame.
-    const target = ctx.entityById.get(proj.targetId);
-    if (target && target.alive) {
-      const rot = proj.weapon.projectileROT ?? 0;
-      if (rot > 0) {
-        // C10: Only update homing every other frame (C++ bullet.cpp:368)
-        if (proj.currentFrame % 2 === 0) {
-          // Homing: strong tracking based on ROT (higher ROT = better tracking)
-          const trackFactor = Math.min(1.0, rot * 0.15);
-          proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
-          proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
-        }
-      }
-      // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
-    }
-
-    // C++ bullet.cpp:903-913 — wall collision check (Is_Forced_To_Explode)
-    // Non-high bullets that enter a cell containing a wall (high overlay) explode on contact.
-    // Dropping projectiles skip this check (C++ type.h:1383: "Dropping projectiles do not
-    // calculate collision with terrain (such as walls)").
-    if (!proj.weapon.isHigh && !proj.weapon.isDropping) {
-      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
-      const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
-      const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
-      const cc = worldToCell(curX, curY);
-      if (ctx.map.getWallType(cc.cx, cc.cy) !== '') {
-        // Force-explode at wall cell center (C++ coord = Cell_Coord(Coord_Cell(coord)))
-        proj.impactX = cc.cx * CELL_SIZE + CELL_SIZE / 2;
-        proj.impactY = cc.cy * CELL_SIZE + CELL_SIZE / 2;
-        proj.travelFrames = proj.currentFrame; // land now
-        arrived.push(proj);
-        continue;
-      }
-    }
-
-    // C++ bullet.cpp:920-941 — torpedo water boundary check (Is_Forced_To_Explode)
-    // Subsurface projectiles (torpedoes) check land type each frame and explode if they leave water.
-    if (proj.weapon.isSubSurface) {
-      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
-      const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
-      const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
-      const cc = worldToCell(curX, curY);
-      const curLX = pixelToLepton(curX);
-      const curLY = pixelToLepton(curY);
-      const fracLX = ((curLX % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
-      const fracLY = ((curLY % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
-      const centerDist = leptonDist(fracLX, fracLY, CELL_CENTER_LEPTON, CELL_CENTER_LEPTON);
-      const cellTechno = centerDist < TORPEDO_CENTER_HIT_RADIUS
-        ? findCellTechno(ctx, cc.cx, cc.cy, proj.attackerId)
-        : null;
-
-      if (ctx.map.getTerrain(cc.cx, cc.cy) !== Terrain.WATER || cellTechno) {
-        // C++ bullet.cpp:920-941: subsurface bullets force-explode when they
-        // leave water or pass through a cell center containing a techno object
-        // other than Payback. If Cell_Techno exists, explosion coord becomes
-        // that object's Target_Coord; otherwise it remains the bullet Coord.
-        if (cellTechno) {
-          proj.impactX = cellTechno.pos.x;
-          proj.impactY = cellTechno.pos.y;
-        } else {
-          proj.impactX = curX;
-          proj.impactY = curY;
-        }
-        proj.travelFrames = proj.currentFrame; // land now
-        arrived.push(proj);
-        continue;
-      }
-    }
-
-    // C++ bullet.cpp:946-948 — AA proximity detonation (Is_Forced_To_Explode)
-    // Anti-air projectiles detonate when within half a cell (~0x0080 leptons) of an airborne target.
-    if (proj.weapon.isAntiAir && target && target.alive && target.isAirUnit && target.flightAltitude > 0) {
-      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
-      const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
-      const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
-      const distToTarget = Math.sqrt((curX - target.pos.x) ** 2 + (curY - target.pos.y) ** 2);
-      // C++ Distance(TarCom) < 0x0080: 128 leptons = half a cell (CELL_LEPTON_W=256)
-      if (distToTarget < CELL_SIZE / 2) {
-        proj.impactX = target.pos.x;
-        proj.impactY = target.pos.y;
-        proj.travelFrames = proj.currentFrame; // detonate now
-        arrived.push(proj);
-        continue;
-      }
-    }
-
-    // C++ bullet.cpp:359-361 — IsDropping: force-explode when dropHeight reaches 0
-    // (Class->IsDropping && !IsFalling): once height descends to 0, bullet lands
-    if (proj.isDropping && proj.dropHeight <= 0 && proj.currentFrame > 0) {
-      arrived.push(proj);
-      continue;
-    }
-
-    // C++ fuse.cpp:139 — IsFueled: force-explode when fuel timer reaches 0 (ran out of fuel mid-air)
-    // Fuse_Checkup returns true when Timer == 0 after arming delay expires
-    if (proj.isFueled && proj.fuelTimer <= 0) {
-      arrived.push(proj);
-      continue;
-    }
-
-    // C++ bullet.cpp:474 — only dropping projectiles bypass Fuse_Checkup.
-    // Arcing projectiles still use the normal proximity/timer fuse and explode
-    // at their current Coord; height<=0 is a forced explosion path.
-    const hasLanded = proj.isArcing
-      ? ((proj.arcHeight <= 0 && proj.currentFrame > 1) || tickProjectileFuse(proj))
-      : (!proj.isDropping ? tickProjectileFuse(proj) : (proj.currentFrame >= proj.travelFrames));
-    if (hasLanded) {
-      // C++ parity (bullet.cpp:446-483): arcing bullets detonate at their CURRENT
-      // Coord when Height <= 0. The bullet moves horizontally by velocity each tick
-      // via FlyClass::Physics, then ObjectClass::AI updates Height via Riser/Gravity.
-      // When Height <= 0 the bullet lands at whatever horizontal position it has
-      // reached — which can UNDERSHOOT or OVERSHOOT the original scattered tcoord
-      // depending on how flight time (governed by Riser) compares to travel time
-      // (dist/speed). Override impactX/Y to the bullet's actual current position.
-      if (proj.isArcing) {
-        const cur = projectilePixelPosition(proj);
-        proj.impactX = cur.x;
-        proj.impactY = cur.y;
-      } else if (!proj.isDropping) {
-        // C++ bullet.cpp:981-985 — normal fuse detonations for non-homing,
-        // non-arcing projectiles snap Coord to Fuse_Target() before damage.
-        // The projectile's current Coord can be a few leptons away when the
-        // proximity fuse trips; damage still uses the stored target coord.
-        if ((proj.weapon.projectileROT ?? 0) === 0) {
-          proj.impactX = proj.headToLX * CELL_SIZE / LEPTON_SIZE;
-          proj.impactY = proj.headToLY * CELL_SIZE / LEPTON_SIZE;
-        } else {
-          const cur = projectilePixelPosition(proj);
-          proj.impactX = cur.x;
-          proj.impactY = cur.y;
-        }
-      }
-      arrived.push(proj);
+    if (proj.dropHasAttachedAnim ?? !!proj.weapon.isParachuted) {
+      proj.dropRiser = Math.max(riser - 1, -3);
+    } else {
+      proj.dropRiser = Math.max(riser - RULE_GRAVITY, -100);
     }
   }
 
-  // Remove arrived projectiles
-  ctx.inflightProjectiles = ctx.inflightProjectiles.filter(p => {
-    if (arrived.includes(p)) return false;
-    // Dropping projectiles are removed when height reaches 0
-    if (p.isDropping) return p.dropHeight > 0 || p.currentFrame === 0;
-    // Fueled projectiles are removed when fuel runs out
-    if (p.isFueled && p.fuelTimer <= 0) return false;
-    if (p.isArcing) return p.arcHeight > 0 || p.currentFrame <= 1;
-    return !arrived.includes(p);
-  });
+  // C++ bullet.cpp:377-386 — IsFlameEquipped: spawn flame/smoke trail every other tick
+  if (proj.isFlameEquipped) {
+    if (proj.flameToggle) {
+      // Spawn visual flame trail at projectile's current interpolated position
+      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
+      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
+      ctx.effects.push({
+        type: 'explosion',
+        x: curX,
+        y: curY,
+        frame: 0,
+        // C++ bullet.cpp:382-384 creates ANIM_FBALL_FADE (adata.cpp:820,
+        // sprite FB2, 4 runtime frames), not a full napalm explosion.
+        maxFrames: 4,
+        size: 8,
+        sprite: 'napalm1',  // closest match to FBALL_FADE in our sprite set
+        cppLogicSlot: true,
+      });
+    }
+    proj.flameToggle = !proj.flameToggle;  // C++ IsToAnimate = !IsToAnimate
+  }
 
-  // Apply damage for arrived projectiles
-  for (const proj of arrived) {
+  // C++ BulletClass::AI always runs FlyClass::Physics before fuse handling.
+  // Arcing projectiles are still normal BulletClass objects here: they move
+  // horizontally via FlyClass and only their Height/Riser is special.
+  const useFlyPhysicsCoord = !proj.isDropping || proj.speedAdd > 0;
+  if (useFlyPhysicsCoord) {
+    tickProjectilePhysics(proj);
+  }
+
+  // C++ object.cpp:237-254 — ballistic arc gravity simulation
+  // Each tick: Height += Riser; Riser -= Rule.Gravity
+  // When Height <= 0, the bullet has landed → explode (bullet.cpp:359: forced = IsArcing && !IsFalling)
+  if (proj.isArcing) {
+    proj.arcHeight += proj.arcRiser;
+    proj.arcRiser -= RULE_GRAVITY;
+    // C++ object.cpp:254 — clamp riser to prevent runaway negative velocity
+    proj.arcRiser = Math.max(proj.arcRiser, -100);
+  }
+
+  // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
+  // projectileROT = homing turn rate. C10: homing updates every other frame.
+  const target = ctx.entityById.get(proj.targetId);
+  if (target && target.alive) {
+    const rot = proj.weapon.projectileROT ?? 0;
+    if (rot > 0) {
+      // C10: Only update homing every other frame (C++ bullet.cpp:368)
+      if (proj.currentFrame % 2 === 0) {
+        // Homing: strong tracking based on ROT (higher ROT = better tracking)
+        const trackFactor = Math.min(1.0, rot * 0.15);
+        proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
+        proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
+      }
+    }
+    // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
+  }
+
+  // C++ bullet.cpp:903-913 — wall collision check (Is_Forced_To_Explode)
+  // Non-high bullets that enter a cell containing a wall (high overlay) explode on contact.
+  // Dropping projectiles skip this check (C++ type.h:1383: "Dropping projectiles do not
+  // calculate collision with terrain (such as walls)").
+  if (!proj.weapon.isHigh && !proj.weapon.isDropping) {
+    const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+    const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
+    const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
+    const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
+    const cc = worldToCell(curX, curY);
+    if (ctx.map.getWallType(cc.cx, cc.cy) !== '') {
+      // Force-explode at wall cell center (C++ coord = Cell_Coord(Coord_Cell(coord)))
+      proj.impactX = cc.cx * CELL_SIZE + CELL_SIZE / 2;
+      proj.impactY = cc.cy * CELL_SIZE + CELL_SIZE / 2;
+      proj.travelFrames = proj.currentFrame; // land now
+      return true;
+    }
+  }
+
+  // C++ bullet.cpp:920-941 — torpedo water boundary check (Is_Forced_To_Explode)
+  // Subsurface projectiles (torpedoes) check land type each frame and explode if they leave water.
+  if (proj.weapon.isSubSurface) {
+    const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+    const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
+    const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
+    const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
+    const cc = worldToCell(curX, curY);
+    const curLX = pixelToLepton(curX);
+    const curLY = pixelToLepton(curY);
+    const fracLX = ((curLX % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+    const fracLY = ((curLY % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+    const centerDist = leptonDist(fracLX, fracLY, CELL_CENTER_LEPTON, CELL_CENTER_LEPTON);
+    const cellTechno = centerDist < TORPEDO_CENTER_HIT_RADIUS
+      ? findCellTechno(ctx, cc.cx, cc.cy, proj.attackerId)
+      : null;
+
+    if (ctx.map.getTerrain(cc.cx, cc.cy) !== Terrain.WATER || cellTechno) {
+      // C++ bullet.cpp:920-941: subsurface bullets force-explode when they
+      // leave water or pass through a cell center containing a techno object
+      // other than Payback. If Cell_Techno exists, explosion coord becomes
+      // that object's Target_Coord; otherwise it remains the bullet Coord.
+      if (cellTechno) {
+        proj.impactX = cellTechno.pos.x;
+        proj.impactY = cellTechno.pos.y;
+      } else {
+        proj.impactX = curX;
+        proj.impactY = curY;
+      }
+      proj.travelFrames = proj.currentFrame; // land now
+      return true;
+    }
+  }
+
+  // C++ bullet.cpp:946-948 — AA proximity detonation (Is_Forced_To_Explode)
+  // Anti-air projectiles detonate when within half a cell (~0x0080 leptons) of an airborne target.
+  if (proj.weapon.isAntiAir && target && target.alive && target.isAirUnit && target.flightAltitude > 0) {
+    const t = proj.currentFrame / Math.max(1, proj.travelFrames);
+    const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
+    const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
+    const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
+    const distToTarget = Math.sqrt((curX - target.pos.x) ** 2 + (curY - target.pos.y) ** 2);
+    // C++ Distance(TarCom) < 0x0080: 128 leptons = half a cell (CELL_LEPTON_W=256)
+    if (distToTarget < CELL_SIZE / 2) {
+      proj.impactX = target.pos.x;
+      proj.impactY = target.pos.y;
+      proj.travelFrames = proj.currentFrame; // detonate now
+      return true;
+    }
+  }
+
+  // C++ bullet.cpp:359-361 — IsDropping: force-explode when dropHeight reaches 0
+  // (Class->IsDropping && !IsFalling): once height descends to 0, bullet lands
+  if (proj.isDropping && proj.dropHeight <= 0 && proj.currentFrame > 0) {
+    // C++ Bullet_Explodes(forced=true) does not snap Coord to Fuse_Target().
+    // Damage is applied at the bullet's current Coord, i.e. the ground point
+    // under the firer where the bomb was dropped.
+    const cur = projectilePixelPosition(proj);
+    proj.impactX = cur.x;
+    proj.impactY = cur.y;
+    return true;
+  }
+
+  // C++ fuse.cpp:139 — IsFueled: force-explode when fuel timer reaches 0 (ran out of fuel mid-air)
+  // Fuse_Checkup returns true when Timer == 0 after arming delay expires
+  if (proj.isFueled && proj.fuelTimer <= 0) {
+    return true;
+  }
+
+  // C++ bullet.cpp:474 — only dropping projectiles bypass Fuse_Checkup.
+  // Arcing projectiles still use the normal proximity/timer fuse and explode
+  // at their current Coord; height<=0 is a forced explosion path.
+  const hasLanded = proj.isArcing
+    ? ((proj.arcHeight <= 0 && proj.currentFrame > 1) || tickProjectileFuse(proj))
+    : (!proj.isDropping ? tickProjectileFuse(proj) : false);
+  if (hasLanded) {
+    // C++ parity (bullet.cpp:446-483): arcing bullets detonate at their CURRENT
+    // Coord when Height <= 0. The bullet moves horizontally by velocity each tick
+    // via FlyClass::Physics, then ObjectClass::AI updates Height via Riser/Gravity.
+    // When Height <= 0 the bullet lands at whatever horizontal position it has
+    // reached — which can UNDERSHOOT or OVERSHOOT the original scattered tcoord
+    // depending on how flight time (governed by Riser) compares to travel time
+    // (dist/speed). Override impactX/Y to the bullet's actual current position.
+    if (proj.isArcing) {
+      const cur = projectilePixelPosition(proj);
+      proj.impactX = cur.x;
+      proj.impactY = cur.y;
+    } else if (!proj.isDropping) {
+      // C++ bullet.cpp:981-985 — normal fuse detonations for non-homing,
+      // non-arcing projectiles snap Coord to Fuse_Target() before damage.
+      // The projectile's current Coord can be a few leptons away when the
+      // proximity fuse trips; damage still uses the stored target coord.
+      if ((proj.weapon.projectileROT ?? 0) === 0) {
+        proj.impactX = proj.headToLX * CELL_SIZE / LEPTON_SIZE;
+        proj.impactY = proj.headToLY * CELL_SIZE / LEPTON_SIZE;
+      } else {
+        const cur = projectilePixelPosition(proj);
+        proj.impactX = cur.x;
+        proj.impactY = cur.y;
+      }
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/** Advance in-flight projectiles; apply damage + splash on arrival.
+ *  When `maxLogicIndexHint` is finite, only bullets submitted at or before
+ *  that C++ Logic index are eligible. This lets the TS batched projectile pass
+ *  run a BulletClass object before a later runtime-spawned infantry object,
+ *  matching LogicClass::AI's re-read of Count(). */
+export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint = Infinity): void {
+  const processAll = maxLogicIndexHint === Infinity;
+  const queue: InflightProjectile[] = [];
+  const deferred: InflightProjectile[] = [];
+  const alreadyProcessed: InflightProjectile[] = [];
+
+  for (const proj of ctx.inflightProjectiles) {
+    if (proj.processedLogicTick === ctx.tick) {
+      alreadyProcessed.push(proj);
+      continue;
+    }
+    if (processAll ||
+        (proj.logicIndexHint !== undefined && proj.logicIndexHint <= maxLogicIndexHint)) {
+      queue.push(proj);
+    } else {
+      deferred.push(proj);
+    }
+  }
+
+  const survivors: InflightProjectile[] = [...alreadyProcessed];
+  const predecessors = snapshotProjectilePredecessors(ctx);
+  let shiftedBehindCursor = 0;
+  let skipLogicHintThrough = -Infinity;
+
+  ctx.inflightProjectiles = [...survivors, ...deferred];
+
+  for (let i = 0; i < queue.length; i++) {
+    const proj = queue[i];
+    if (proj.logicIndexHint !== undefined && proj.logicIndexHint <= skipLogicHintThrough) {
+      survivors.push(proj);
+      continue;
+    }
+    if (proj.logicIndexHint === undefined && shiftedBehindCursor > 0) {
+      survivors.push(proj);
+      shiftedBehindCursor--;
+      continue;
+    }
+
+    const arrived = advanceProjectileOneTick(ctx, proj);
+    if (!processAll) {
+      proj.processedLogicTick = ctx.tick;
+    }
+    if (!arrived) {
+      if (projectileRemainsInLogic(proj)) survivors.push(proj);
+      continue;
+    }
+
+    const liveBefore = countLiveProjectilePredecessors(ctx, predecessors);
+    const unprocessed = queue.slice(i + 1);
+    const knownProjectiles = new Set<InflightProjectile>([...survivors, ...unprocessed, ...deferred]);
+    ctx.inflightProjectiles = [...survivors, ...unprocessed, ...deferred];
+
+    detonateProjectile(ctx, proj);
+
+    const spawnedProjectiles = ctx.inflightProjectiles.filter(p => !knownProjectiles.has(p));
+    for (const spawned of spawnedProjectiles) {
+      if (processAll ||
+          (spawned.logicIndexHint !== undefined && spawned.logicIndexHint <= maxLogicIndexHint)) {
+        queue.push(spawned);
+      } else {
+        deferred.push(spawned);
+      }
+    }
+    ctx.inflightProjectiles = [...survivors, ...deferred];
+
+    const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
+    const earlierDeletes = Math.max(0, liveBefore - liveAfter);
+    if (proj.logicIndexHint !== undefined) {
+      skipLogicHintThrough = Math.max(skipLogicHintThrough, proj.logicIndexHint + earlierDeletes);
+    } else {
+      shiftedBehindCursor += Math.min(earlierDeletes, unprocessed.length);
+    }
+  }
+
+  ctx.inflightProjectiles = [...survivors, ...deferred];
+}
+
+function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void {
     const target = ctx.entityById.get(proj.targetId);
     const attacker = ctx.entityById.get(proj.attackerId);
     // C++ BulletClass::Detach clears Payback when the firing object is detached
@@ -1760,8 +2565,33 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     // C++ bullet.cpp:991 — Bullet_Explodes calls Explosion_Damage at ORIGINAL coord, BEFORE
     // the Coord_Scatter for invisible projectiles (line 1012). Damage uses un-scattered
     // position; only anim/effect display uses scattered position.
-    {
-      const attackerHouse = liveAttacker?.house ?? proj.attackerHouse ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+    const attackerHouse = liveAttacker?.house ?? proj.attackerHouse ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+    const targetIsAirborneAircraft = !!(target && target.isAirUnit && target.flightAltitude > 0);
+    if (targetIsAirborneAircraft && target) {
+      // C++ bullet.cpp:996-1008: airborne aircraft targets bypass
+      // Explosion_Damage entirely. They take direct aircraft damage only when
+      // the bullet's current Coord is within 0x80 leptons of TarCom.
+      const targetCoord = entityTargetLeptons(target);
+      const impactLX = pixelToLepton(proj.impactX);
+      const impactLY = pixelToLepton(proj.impactY);
+      if (leptonDist(impactLX, impactLY, targetCoord.lx, targetCoord.ly) < 0x0080) {
+        const wh = proj.weapon.warhead;
+        const whMult = getWarheadMult(wh, target.stats.armor, ctx.warheadOverrides);
+        const houseBias = ctx.getFirepowerBias(attackerHouse);
+        const damage = modifyDamage(impactDamage, wh, target.stats.armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
+        const killed = damageEntity(ctx, target, damage, wh, liveAttacker);
+        if (killed) {
+          handleUnitDeath(ctx, target, {
+            screenShake: 4, explosionSize: 12, debris: false,
+            decal: null,
+            explodeLgSound: false,
+            attackerIsPlayer: ctx.isAllied(attackerHouse, ctx.playerHouse),
+            trackLoss: !ctx.isAllied(target.house, attackerHouse),
+            attacker: liveAttacker,
+          });
+        }
+      }
+    } else {
       // C++ combat.cpp:176: range = ICON_LEPTON_W + (ICON_LEPTON_W >> 1) = 1.5 cells
       // Use weapon splash if defined, otherwise default to SPLASH_RADIUS (1.5 cells)
       const splashRadius = (proj.weapon.splash && proj.weapon.splash > 0)
@@ -1798,17 +2628,28 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
     const projLand: 'ground' | 'water' | 'air' =
       (projTarget && projTarget.isAirUnit && projTarget.flightAltitude > 0) ? 'air' :
       (ctx.map.getTerrain(projImpactCell.cx, projImpactCell.cy) === Terrain.WATER) ? 'water' : 'ground';
-    const projImpactSprite = combatAnim(proj.strength, projExpSet, projLand) ?? 'veh-hit1';
+    const projImpactSprite = combatAnim(proj.strength, projExpSet, projLand);
     // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
     const isScud = proj.weapon.name === 'SCUD';
-    ctx.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
-      frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 } as Effect);
-    // C++ travelling bullets are Logic objects. When BulletClass::AI explodes and
-    // creates an AnimClass, logic.cpp's dynamic Count() loop reaches the new anim
-    // later in that same tick and consumes its IsBrandNew skip immediately.
-    // TS batches projectile arrival after the object loop, so mark that first
-    // brand-new skip as already accounted for to preserve AnimClass stage timing.
-    spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, projImpactSprite, proj.impactX, proj.impactY, false, true);
+    if (projImpactSprite) {
+      ctx.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
+        frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 } as Effect);
+      // C++ travelling bullets are Logic objects. When BulletClass::AI explodes and
+      // creates an AnimClass, logic.cpp's dynamic Count() loop reaches the new anim
+      // later in that same tick and consumes only its IsBrandNew skip. If TS has
+      // already passed its AnimClass phase, pre-clear that skip so the next tick
+      // starts at the same stage; otherwise leave IsBrandNew set for this tick's
+      // anim phase to consume.
+      spawnLogicAnimForSprite(
+        ctx.logicAnims,
+        ctx.effects,
+        projImpactSprite,
+        proj.impactX,
+        proj.impactY,
+        false,
+        ctx.logicAnimsAlreadyProcessed === true,
+      );
+    }
     if (isScud) {
       ctx.screenShake = Math.max(ctx.screenShake, 12);
       ctx.playSoundAt('building_explode', proj.impactX, proj.impactY);
@@ -1854,7 +2695,6 @@ export function updateInflightProjectiles(ctx: CombatContext): void {
         }
       }
     }
-  }
 }
 
 /** Apply AOE splash damage to entities near an impact point.
@@ -1866,8 +2706,10 @@ export function applySplashDamage(
 ): void {
   // CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2)
   const splashRange = SPLASH_RADIUS;
-  const splashRangePixels = splashRange * CELL_SIZE;
   const attackerIsPlayerControlled = ctx.isAllied(attackerHouse, ctx.playerHouse);
+  const impactCell = worldToCell(center.x, center.y);
+  const isInExplosionCellScan = (cx: number, cy: number): boolean =>
+    Math.abs(cx - impactCell.cx) <= 1 && Math.abs(cy - impactCell.cy) <= 1;
 
   // C++ combat.cpp:207 — splash excludes the FIRER (source), not the direct-hit target.
   // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path; there is no separate
@@ -1883,6 +2725,11 @@ export function applySplashDamage(
   const entityDamageList = ctx.entities.slice();
   for (const other of entityDamageList) {
     if (!other.alive || other.inLimbo || other.id === sourceId) continue;
+    // C++ combat.cpp:188-216 snapshots Cell_Occupier() chains only from
+    // the impact cell plus the eight adjacent cells before checking radius.
+    // A center can be within 384 leptons but still live two cells away from
+    // the impact cell; C++ never considers that object.
+    if (!isInExplosionCellScan(other.cell.cx, other.cell.cy)) continue;
     // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
     const isFriendly = ctx.isAllied(other.house, attackerHouse);
     const distLeptons = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), other.leptonX, other.leptonY);
@@ -1915,7 +2762,16 @@ export function applySplashDamage(
     const distPixels = distCells * CELL_SIZE;
     const whMult = getWarheadMult(weapon.warhead, other.stats.armor, ctx.warheadOverrides);
     const splashDmg = modifyDamage(rawDamage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
-    if (splashDmg === 0) continue;
+    if (splashDmg === 0) {
+      // C++ Explosion_Damage still calls UnitClass::Take_Damage with raw
+      // nonzero strength. ObjectClass may reduce HP damage to zero, but
+      // UnitClass post-call side effects still run; computer harvesters can
+      // trigger Base_Is_Attacked from harmless small-arms splash.
+      if (rawDamage > 0 && attacker && other.type === UnitType.V_HARV) {
+        maybeSuspendTeamsForBaseAttack(ctx, attacker, other.house, false, other);
+      }
+      continue;
+    }
     const killed = damageEntity(ctx, other, splashDmg, weapon.warhead, attacker, {
       skipProneBias: proneBiasApplied,
     });
@@ -1939,13 +2795,22 @@ export function applySplashDamage(
   // C++ parity: Explosion_Damage (combat.cpp:205-237) iterates Cell_Occupier() chains which
   // include buildings. Structures within splash radius take damage proportional to distance.
   // Buildings at the impact cell get distance=0 (full damage, combat.cpp:227-228).
-  const impactCell = worldToCell(center.x, center.y);
   for (const s of ctx.structures) {
     if (!s.alive) continue;
     // Walls are C++ overlays, not ordinary BuildingClass damage targets in
     // Explosion_Damage. They are handled by the impact-cell Reduce_Wall path below.
     if (WALL_TYPES.has(s.type)) continue;
     const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    let structureInScannedCell = false;
+    for (let fy = 0; fy < sh && !structureInScannedCell; fy++) {
+      for (let fx = 0; fx < sw; fx++) {
+        if (isInExplosionCellScan(s.cx + fx, s.cy + fy)) {
+          structureInScannedCell = true;
+          break;
+        }
+      }
+    }
+    if (!structureInScannedCell) continue;
     // Structure world center (matches structureDamage explosion origin)
     const swx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
     const swy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
@@ -1966,7 +2831,7 @@ export function applySplashDamage(
       // then calls Base_Is_Attacked(source) before ObjectClass::Take_Damage
       // applies armor/distance falloff. Preserve that ordering: base defense can
       // suspend teams even when final structure HP damage is reduced to zero.
-      maybeSuspendTeamsForBaseAttack(ctx, attacker, s.house, Boolean(STRUCTURE_WEAPONS[s.type]));
+      maybeSuspendTeamsForBaseAttack(ctx, attacker, s.house, Boolean(STRUCTURE_WEAPONS[s.type]), s);
     }
     // Apply damage using per-building armor from rules.ini (C++ bdata.cpp)
     const distPixels = distCells * CELL_SIZE;
@@ -1974,7 +2839,9 @@ export function applySplashDamage(
     const whMult = getWarheadMult(weapon.warhead, sArmor, ctx.warheadOverrides);
     const splashDmg = modifyDamage(weapon.damage, weapon.warhead, sArmor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
     if (splashDmg <= 0) continue;
-    structureDamage(ctx, s, splashDmg);
+    withScenarioRandomSourceTag(52005, () => {
+      structureDamage(ctx, s, splashDmg, attacker, weapon.warhead, { skipBaseAttack: true });
+    });
   }
 
   const whMeta = getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta);
@@ -2097,18 +2964,30 @@ export function applySplashDamage(
  *  Extracted from Game class (index.ts) — handles HP reduction, destruction effects,
  *  AI base attack tracking, EVA alerts, gap generator unjam, footprint clearing,
  *  bridge destruction, and structure explosion blast damage to nearby units. */
-export function structureDamage(ctx: CombatContext, s: MapStructure, damage: number, source?: Entity): boolean {
+export function structureDamage(
+  ctx: CombatContext,
+  s: MapStructure,
+  damage: number,
+  source?: Entity,
+  warhead: WarheadType = 'HE',
+  options?: { skipBaseAttack?: boolean },
+): boolean {
   if (!s.alive) return false;
-  if (source) maybeSuspendTeamsForBaseAttack(ctx, source, s.house, Boolean(STRUCTURE_WEAPONS[s.type]));
+  if (source && !options?.skipBaseAttack) maybeSuspendTeamsForBaseAttack(ctx, source, s.house, Boolean(STRUCTURE_WEAPONS[s.type]), s);
   // C++ house.cpp:2751 — Iron Curtain makes structures invulnerable (no damage taken)
   if (s.ironCurtainTicks && s.ironCurtainTicks > 0) return false;
+  const oldHp = s.hp;
+  const halfHp = s.maxHp >> 1;
   s.hp = Math.max(0, s.hp - damage);
   // C++ flasher.cpp:83-95 + house.cpp:2308 — Blushing damage flash.
   // Set FlashCount to 6 so 3 odd ticks (5, 3, 1) render the white "lightening" tint.
   // Keeps existing countdown if larger so repeated hits stack gracefully.
   s.flashCount = Math.max(s.flashCount ?? 0, 6);
   // Track attacked trigger names for TEVENT_ATTACKED
-  if (s.triggerName) ctx.attackedTriggerNames.add(s.triggerName);
+  if (s.triggerName) {
+    ctx.attackedTriggerNames.add(s.triggerName);
+    if (source && damage > 0) ctx.springAttackedTriggerByName?.(s.triggerName);
+  }
   // Record base attack for AI defense system
   const aiState = ctx.aiStates.get(s.house);
   if (aiState) {
@@ -2140,127 +3019,12 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     }
     // Clear terrain footprint so units can walk through rubble
     ctx.clearStructureFootprint(s);
-    // Spawn destruction explosion chain — small pops then big blast (like original RA)
     const wx = s.cx * CELL_SIZE + CELL_SIZE;
     const wy = s.cy * CELL_SIZE + CELL_SIZE;
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-    // Small pre-explosions scattered across the building footprint (scale with building size)
-    const numPreExplosions = Math.max(3, Math.min(6, fw * fh));
-    for (let i = 0; i < numPreExplosions; i++) {
-      const ox = (ScenarioRandom.float() - 0.5) * fw * CELL_SIZE;
-      const oy = (ScenarioRandom.float() - 0.5) * fh * CELL_SIZE;
-      ctx.effects.push({
-        type: 'explosion', x: wx + ox, y: wy + oy,
-        frame: -i * 3, maxFrames: 12, size: 8, // staggered start via negative frame
-        sprite: 'veh-hit1', spriteStart: 0,
-      } as Effect);
-    }
-    // C++ building.cpp:1442-1458 — per-cell fire scatter across the building footprint.
-    // For every occupied cell: 50% chance ANIM_FIRE_SMALL (fire1/fire2/fire3), then within
-    // that, 50% chance ANIM_FIRE_MED on top — yielding 50%/25% per cell.
-    // C++ Random_Pick(0, 7) chooses the start frame; Random_Pick(1, 3) sets delay.
-    const FIRE_SMALL_SPRITES = ['fire1', 'fire2', 'fire3']; // ANIM_FIRE_SMALL*
-    const FIRE_MED_SPRITES   = ['fire1', 'fire2'];          // ANIM_FIRE_MED variants
-    for (let cy = 0; cy < fh; cy++) {
-      for (let cx = 0; cx < fw; cx++) {
-        // C++ Coord_Scatter(0x0080) — half-cell random offset (0x0080 = 128 leptons = 0.5 cell)
-        const cellWx = (s.cx + cx) * CELL_SIZE + CELL_SIZE / 2;
-        const cellWy = (s.cy + cy) * CELL_SIZE + CELL_SIZE / 2;
-        if (ScenarioRandom.float() < 0.5) {
-          const sx = cellWx + (ScenarioRandom.float() - 0.5) * CELL_SIZE;
-          const sy = cellWy + (ScenarioRandom.float() - 0.5) * CELL_SIZE;
-          const sprite = FIRE_SMALL_SPRITES[ScenarioRandom.nextInRange(0, FIRE_SMALL_SPRITES.length - 1)];
-          ctx.effects.push({
-            type: 'explosion', x: sx, y: sy,
-            frame: -ScenarioRandom.nextInRange(1, 3), // staggered start (C++ delay)
-            maxFrames: EXPLOSION_FRAMES[sprite] ?? 14, size: 8,
-            sprite, spriteStart: 0,
-          } as Effect);
-          if (ScenarioRandom.float() < 0.5) {
-            const mx = cellWx + (ScenarioRandom.float() - 0.5) * (CELL_SIZE / 2);
-            const my = cellWy + (ScenarioRandom.float() - 0.5) * (CELL_SIZE / 2);
-            const msprite = FIRE_MED_SPRITES[ScenarioRandom.nextInRange(0, FIRE_MED_SPRITES.length - 1)];
-            ctx.effects.push({
-              type: 'explosion', x: mx, y: my,
-              frame: -ScenarioRandom.nextInRange(1, 3),
-              maxFrames: EXPLOSION_FRAMES[msprite] ?? 14, size: 12,
-              sprite: msprite, spriteStart: 0,
-            } as Effect);
-          }
-        }
-      }
-    }
-    // D4: SMOKE_M trailing smoke — 2-3 persistent ground-smoke puffs near the debris
-    // (C++ anim.cpp ANIM_SMOKE_M is a looping smoke column left on the ground).
-    const numSmoke = 2 + Math.floor(ScenarioRandom.float() * 2); // 2-3
-    for (let si = 0; si < numSmoke; si++) {
-      const sx = wx + (ScenarioRandom.float() - 0.5) * fw * CELL_SIZE;
-      const sy = wy + (ScenarioRandom.float() - 0.5) * fh * CELL_SIZE;
-      ctx.effects.push({
-        type: 'explosion', x: sx, y: sy,
-        frame: 0, maxFrames: 80, size: 10,
-        sprite: 'smoke_m', spriteStart: 0,
-        loopStart: 0, loopEnd: 20, loops: 4, // loop 4× so it persists ~80 ticks
-      } as Effect);
-    }
-    // Final large explosion — size-matched to building footprint (C++ parity)
-    const maxDimPx = Math.max(fw, fh) * CELL_SIZE;
-    const deathExplosionRadius = Math.round(maxDimPx * 0.6);
-    ctx.effects.push({
-      type: 'explosion', x: wx, y: wy,
-      frame: 0, maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: deathExplosionRadius,
-      sprite: 'fball1', spriteStart: 0,
-    } as Effect);
-    // C++ building.cpp:1257-1273 — per-footprint-cell destruction scatter:
-    // always a crater smudge + FBALL1 scattered 0x0040 leptons; 50% FIRE-SMALL
-    // scattered 0x0080, and within that 50% a FIRE-MED at 0x0040.
-    // 0x0040 leptons = 64/256 cell = 6px; 0x0080 leptons = 128/256 cell = 12px at CELL_SIZE=24.
-    // NOTE: scatter and fire chance use NonCriticalRandom to avoid disturbing the
-    // deterministic game RNG (ScenarioRandom) — C++ drives these via Scen.Random, but
-    // matching the full per-cell Random_Pick sequence is fragile and visual-only here.
-    const LEPTON_40_PX = (0x40 / 256) * CELL_SIZE; // 6px
-    const LEPTON_80_PX = (0x80 / 256) * CELL_SIZE; // 12px
-    for (let fy = 0; fy < fh; fy++) {
-      for (let fx = 0; fx < fw; fx++) {
-        const cellCx = s.cx + fx;
-        const cellCy = s.cy + fy;
-        const cellWx = cellCx * CELL_SIZE + CELL_SIZE / 2;
-        const cellWy = cellCy * CELL_SIZE + CELL_SIZE / 2;
-        // Always: crater smudge (C++ SmudgeClass SMUDGE_CRATER1..6)
-        ctx.map.addDecal(cellCx, cellCy, 10, 0.5);
-        // Always: scattered FBALL1 at this cell (C++ ANIM_FBALL1 scatter 0x0040)
-        const fbDx = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
-        const fbDy = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
-        ctx.effects.push({
-          type: 'explosion', x: cellWx + fbDx, y: cellWy + fbDy,
-          frame: -NonCriticalRandom.nextInRange(0, 3), // C++ Random_Pick(0,3) stagger
-          maxFrames: EXPLOSION_FRAMES['fball1'] ?? 18, size: 10,
-          sprite: 'fball1', spriteStart: 0,
-        } as Effect);
-        // 50% chance: FIRE-SMALL scattered 0x0080 (we reuse 'smokey' as the fire/smoke sprite)
-        if (NonCriticalRandom.float() < 0.5) {
-          const fsDx = (NonCriticalRandom.float() - 0.5) * LEPTON_80_PX * 2;
-          const fsDy = (NonCriticalRandom.float() - 0.5) * LEPTON_80_PX * 2;
-          ctx.effects.push({
-            type: 'explosion', x: cellWx + fsDx, y: cellWy + fsDy,
-            frame: -NonCriticalRandom.nextInRange(0, 7), // C++ Random_Pick(0,7) stagger
-            maxFrames: 14, size: 6,
-            sprite: 'smokey', spriteStart: 0,
-          } as Effect);
-          // Within that 50%: a second FIRE-MED at 0x0040 scatter
-          if (NonCriticalRandom.float() < 0.5) {
-            const fmDx = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
-            const fmDy = (NonCriticalRandom.float() - 0.5) * LEPTON_40_PX * 2;
-            ctx.effects.push({
-              type: 'explosion', x: cellWx + fmDx, y: cellWy + fmDy,
-              frame: -NonCriticalRandom.nextInRange(0, 7),
-              maxFrames: 14, size: 9,
-              sprite: 'smokey', spriteStart: 0,
-            } as Effect);
-          }
-        }
-      }
-    }
+    // C++ building.cpp:1299-1308 — immediate RESULT_DESTROYED visuals run
+    // during Take_Damage. Rubble smoke/survivors are delayed until Drop_Debris.
+    runBuildingDestroyedTakeDamageEffects(ctx, s);
     // Flying debris
     ctx.effects.push({
       type: 'debris', x: wx, y: wy,
@@ -2319,7 +3083,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
               targetCy >= s2.cy && targetCy < s2.cy + s2h) {
             const s2Armor: ArmorType = s2.armor ?? (STRUCTURE_ARMOR[s2.type] ?? 'wood');
             const fireVs = WARHEAD_VS_ARMOR['Fire'][armorIndex(s2Armor)];
-            structureDamage(ctx, s2, Math.max(1, Math.round(200 * fireVs)));
+            structureDamage(ctx, s2, Math.max(1, Math.round(200 * fireVs)), undefined, 'Fire');
           }
         }
       }
@@ -2342,7 +3106,7 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
         if (dist > structBlastRadius) continue;
         const falloff = 1 - (dist / structBlastRadius) * 0.6;
         const blastDmg = Math.max(1, Math.round(100 * falloff));
-        structureDamage(ctx, s2, blastDmg);
+        structureDamage(ctx, s2, blastDmg, undefined, 'HE');
       }
     }
     // Leave large scorch mark
@@ -2361,93 +3125,156 @@ export function structureDamage(ctx: CombatContext, s: MapStructure, damage: num
     if (s.type === 'KENN') {
       s.isSurvivorless = true;
     }
-    // C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors on destruction
-    // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — only Crewed=yes buildings spawn survivors
-    // C++ building.cpp:5593: if (IsSurvivorless || !Class->IsCrew) return 0
-    // Walls, barrels, kennels, silos, naval buildings etc. have no Crewed=yes in rules.ini.
-    if (CREWED_BUILDINGS.has(s.type) && !s.isSurvivorless) {
-      spawnDestructionSurvivors(ctx, s, wx, wy);
-    }
+    // C++ building.cpp:1317-1320 — destroyed buildings remain in Logic for
+    // CountDown frames. Drop_Debris (survivors, smoke, scorch/crater) runs
+    // later from BuildingClass::AI, not inside Take_Damage.
+    s.debrisCountdown = s.mission === Mission.DECONSTRUCTION ? 0 : 8;
+    s.debrisDropped = false;
     return true;
+  }
+  if ((oldHp >= halfHp && s.hp < halfHp) || s.hp === 1) {
+    runBuildingDamageStateEffects(ctx, s, warhead, source);
   }
   return false;
 }
 
-// ── Destruction Survivors ────────────────────────────────────────────────────
+// ── Delayed Drop_Debris ──────────────────────────────────────────────────────
 
-/** C++ building costs for survivor count calculation */
-const FACT_COST = 2500;  // rules.ini [FACT] Cost=2500
-const HARVESTER_COST = 1400;
-const HIND_COST = 1200;
-const SURVIVOR_FRACTION = 0.4;
+const SURVIVOR_FRACTION_RAW = 102; // C++ fixed(".4") => (256 * 4) / 10, truncated.
 const E1_COST = 100;
+const CIVILIAN_CREW_TYPES = [
+  UnitType.I_C1, UnitType.I_C2, UnitType.I_C3, UnitType.I_C4, UnitType.I_C5,
+  UnitType.I_C6, UnitType.I_C7, UnitType.I_C8, UnitType.I_C9,
+] as const;
 
-/**
- * C++ building.cpp:1663-1716 — Drop_Debris: spawn infantry survivors when a building is destroyed.
- * Uses same survivor count formula as sell (How_Many_Survivors), but spawning is probabilistic
- * per occupy cell (1/3 chance normally, simplified here to guaranteed spawning like sell path).
- * Only called for buildings with Crewed=yes (CREWED_BUILDINGS gate at call site).
- *
- * C++ Crew_Type per building (building.cpp:4667-4701):
- *   FACT → 25% E6 (1 max), else E1 | TENT/BARR → E1
- *   default → E1, with 15% civilian (C1/C7) if building has no weapon
- */
-function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: number, wy: number): void {
-  // Calculate survivor count: C++ How_Many_Survivors (building.cpp:5591-5600)
-  // C++ building.cpp:3444: if (!IsCrewAble()) return 0 — no min-1 fallback
-  const prodItem = PRODUCTION_ITEMS.find(p => p.type === s.type);
-  let buildCost = prodItem?.cost ?? (s.type === 'FACT' ? FACT_COST : 300);
-  if (s.type === 'PROC') buildCost -= HARVESTER_COST;
-  if (s.type === 'HPAD') buildCost -= (HIND_COST + HIND_COST) / 2;
-  // C++ building.cpp:5597: if (IsCaptured) divisor *= 2 — captured buildings halve survivor count
+function buildingRawCost(type: string): number {
+  const prodItem = PRODUCTION_ITEMS.find(p => p.type === type);
+  return prodItem?.rawCost ?? prodItem?.cost ?? 0;
+}
+
+function buildingSurvivorCount(s: MapStructure): number {
+  if (s.isSurvivorless || !CREWED_BUILDINGS.has(s.type)) return 0;
   const isCaptured = s.originalHouse !== undefined && s.originalHouse !== s.house;
   let divisor = E1_COST;
   if (isCaptured) divisor *= 2;
-  const survivorCount = Math.max(1, Math.min(5,
-    Math.floor((buildCost * SURVIVOR_FRACTION) / divisor)));
+  const survivorValue = Math.floor((buildingRawCost(s.type) * SURVIVOR_FRACTION_RAW + 128) / 256);
+  const count = Math.floor(survivorValue / divisor);
+  return Math.max(1, Math.min(5, count));
+}
 
-  // C++ building.cpp:3456-3463 — one engineer limit (applies to both sell and destruction)
-  let engineerSpawned = false;
-  const isUnarmed = !STRUCTURE_WEAPONS[s.type];
-
-  for (let si = 0; si < survivorCount; si++) {
-    let crewType: UnitType;
-    switch (s.type) {
-      case 'FACT':
-        // C++ building.cpp:4680-4684: captured ConYard NEVER spawns an engineer
-        if (!isCaptured && !engineerSpawned && ScenarioRandom.float() < 0.25) {
-          crewType = UnitType.I_E6;
-          engineerSpawned = true;
-        } else {
-          crewType = UnitType.I_E1;
-        }
-        break;
-      case 'TENT': case 'BARR':
-        crewType = UnitType.I_E1;
-        break;
-      default:
-        // C++ techno.cpp:4454-4465 — 15% civilian chance if building has no weapon
-        if (isUnarmed && ScenarioRandom.float() < 0.15) {
-          crewType = ScenarioRandom.float() < 0.5 ? UnitType.I_C1 : UnitType.I_C7;
-        } else {
-          crewType = UnitType.I_E1;
-        }
-        break;
-    }
-    const inf = new Entity(crewType, s.house, wx + (si % 3 - 1) * 6, wy + Math.floor(si / 3) * 6);
-    // C++ building.cpp:1701 — destruction survivors get random HP (5 to MaxStrength)
-    inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, inf.maxHp + 4));
-    inf.hp = Math.min(inf.hp, inf.maxHp);
-    inf.mission = Mission.GUARD;
-    // C++ building.cpp:1697 — IsTechnician: IsNominal infantry (E1) get technician star
-    // Only buildings with buildup data (most constructed buildings) set this flag
-    if (crewType === UnitType.I_E1) {
-      inf.isTechnician = true;
-    }
-    inf.scenarioInitUnlimbo = true;
-    ctx.entities.push(inf);
-    ctx.entityById.set(inf.id, inf);
+function buildingCrewType(ctx: CombatContext, s: MapStructure): UnitType | null {
+  const isCaptured = s.originalHouse !== undefined && s.originalHouse !== s.house;
+  switch (s.type) {
+    case 'SILO':
+      return ScenarioRandom.percentChance(50) ? UnitType.I_C1 : UnitType.I_C7;
+    case 'FACT':
+      if (!isCaptured && s.house === ctx.playerHouse && ScenarioRandom.percentChance(25)) {
+        return UnitType.I_E6;
+      }
+      break;
+    case 'KENN':
+      return ScenarioRandom.percentChance(50) ? UnitType.I_DOG : null;
+    case 'TENT':
+    case 'BARR':
+      return UnitType.I_E1;
+    default:
+      break;
   }
+
+  if (!CREWED_BUILDINGS.has(s.type)) return null;
+  if (s.house === House.Neutral || s.house === House.Turkey) {
+    return CIVILIAN_CREW_TYPES[ScenarioRandom.nextInRange(0, CIVILIAN_CREW_TYPES.length - 1)];
+  }
+  if (!STRUCTURE_WEAPONS[s.type] && ScenarioRandom.percentChance(15)) {
+    return ScenarioRandom.percentChance(50) ? UnitType.I_C1 : UnitType.I_C7;
+  }
+  return UnitType.I_E1;
+}
+
+function spawnDropDebrisSurvivor(ctx: CombatContext, s: MapStructure, cellCx: number, cellCy: number): void {
+  const crewType = buildingCrewType(ctx, s);
+  if (crewType == null) return;
+  const inf = new Entity(
+    crewType,
+    s.house,
+    cellCx * CELL_SIZE + CELL_SIZE / 2,
+    cellCy * CELL_SIZE + CELL_SIZE / 2,
+  );
+  inf.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  inf.scenarioInitUnlimbo = true;
+  inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
+  inf.missionTimer = 0;
+  inf.missionQueue = null;
+  if (crewType === UnitType.I_E1) {
+    inf.isTechnician = true;
+  }
+  // C++ building.cpp:1701 — full infantry MaxStrength, not vehicle half-health.
+  inf.hp = Math.min(inf.maxHp, ScenarioRandom.nextInRange(5, inf.maxHp));
+  scatterVehicleCrew(ctx, inf);
+
+  const source = s.whomToRepayEntityId !== undefined ? ctx.entityById.get(s.whomToRepayEntityId) : undefined;
+  if (source && source.alive && !ctx.isAllied(s.house, source.house)) {
+    inf.target = source;
+    assignMission(inf, Mission.ATTACK);
+  } else {
+    assignMission(inf, s.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
+  }
+
+  ctx.entities.push(inf);
+  ctx.entityById.set(inf.id, inf);
+  ctx.markDiscoveredIfPlayerVisible?.(inf);
+}
+
+function runBuildingDropDebris(ctx: CombatContext, s: MapStructure): void {
+  let count = buildingSurvivorCount(s);
+  let odds = 2;
+  const source = s.whomToRepayEntityId !== undefined ? ctx.entityById.get(s.whomToRepayEntityId) : undefined;
+  if (source && source.alive) odds -= 1;
+  if (s.originalHouse !== undefined && s.originalHouse !== s.house) odds += 6;
+
+  for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
+    if (count > 0 && ScenarioRandom.nextInRange(0, odds) === 1) {
+      const before = ctx.entities.length;
+      spawnDropDebrisSurvivor(ctx, s, cell.cx, cell.cy);
+      if (ctx.entities.length > before) count--;
+    }
+
+    if (!ctx.map.isTerrainPassable(cell.cx, cell.cy)) continue;
+
+    switch (ScenarioRandom.nextInRange(0, 5)) {
+      case 0:
+      case 1:
+      case 2: {
+        const smokePos = coordScatterFromCell(cell.cx, cell.cy, 0x0050);
+        const smokeStart = ScenarioRandom.nextInRange(0, 5);
+        const smokeDelay = ScenarioRandom.nextInRange(1, 2);
+        submitBuildingSmokeEffect(ctx, smokePos.x, smokePos.y, smokeStart, smokeDelay);
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (ScenarioRandom.percentChance(25)) {
+      ScenarioRandom.nextInRange(1, 6);
+      ctx.map.addDecal(cell.cx, cell.cy, 8, 0.4);
+    } else {
+      ScenarioRandom.nextInRange(1, 6);
+      coordScatterFromCell(cell.cx, cell.cy, 0x0080);
+      ctx.map.addDecal(cell.cx, cell.cy, 10, 0.5);
+    }
+  }
+}
+
+export function tickDestroyedStructureDebris(ctx: CombatContext, s: MapStructure): void {
+  if (s.alive || s.debrisDropped || s.debrisCountdown === undefined) return;
+  if (s.debrisCountdown > 0) {
+    s.debrisCountdown--;
+    if (s.debrisCountdown > 0) return;
+  }
+  runBuildingDropDebris(ctx, s);
+  s.debrisDropped = true;
+  s.debrisCountdown = undefined;
 }
 
 /** C++ BuildingClass::Greatest_Threat path used by weapon-equipped Mission_Guard.
@@ -2455,8 +3282,12 @@ function spawnDestructionSurvivors(ctx: CombatContext, s: MapStructure, wx: numb
  *  nearby objects and returns the highest-scoring target without consuming RNG.
  */
 export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): Entity | null {
-    if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) return null;
+    if (!s.alive || !s.weapon || s.sellProgress !== undefined ||
+        isStructureUnderConstruction(s)) return null;
     const range = s.weapon.range;
+    const rangeLeptons = Math.trunc(range * LEPTON_SIZE);
+    const fireCoord = structureFireLeptons(s);
+    const centerCoord = structureCenterLeptons(s);
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
     for (const e of ctx.entities) {
@@ -2465,18 +3296,23 @@ export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): 
       // human-requested: SAMs are air-only. Do NOT revert this line.
       if (s.weapon.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon.isAntiAir) continue;
-      const { lx: structLX, ly: structLY } = structureFireLeptons(s);
-      const distLeptons = leptonDist(structLX, structLY, e.leptonX, e.leptonY);
-      const dist = distLeptons / LEPTON_SIZE;
-      // C++ techno.cpp:1519 In_Range uses <= (lepton distance <= weapon range in leptons).
-      // dist is in cells; range is cells. Use > to match C++ <= (reject only strictly out of range).
-      if (dist > range) continue;
+      // C++ techno.cpp:1519-1526: THREAT_RANGE passes range=0, so
+      // Evaluate_Object gates candidates with In_Range(object, primary).
+      // That pointer overload checks target->Center_Coord(), not TarCom's
+      // Target_Coord(). Mission_Attack/Can_Fire rechecks Target_Coord later.
+      const rangeDistLeptons = leptonDist(fireCoord.lx, fireCoord.ly, e.leptonX, e.leptonY);
+      if (rangeDistLeptons > rangeLeptons) continue;
       // C++ Evaluate_Object (techno.cpp:1470-1763) does NOT check line-of-sight for buildings.
+      // C++ computes threat falloff from Distance(object), which uses this
+      // building's Center_Coord and the target object's Target_Coord.
+      const targetCoord = entityTargetLeptons(e);
+      const scoreDistLeptons = leptonDist(centerCoord.lx, centerCoord.ly, targetCoord.lx, targetCoord.ly);
+      const scoreDist = scoreDistLeptons / LEPTON_SIZE;
       // C++ techno.cpp:1651-1752 Evaluate_Object threat scoring formula:
-      // value = 2 * Points + kills, then distance falloff: (value * 32000) / (distCells + 1)
+      // value = Value() + kills, then distance falloff: (value * 32000) / (distCells + 1)
       const points = e.stats.points ?? e.stats.strength ?? 5;
       const value = Math.trunc(points * 2) + (e.kills ?? 0);
-      const distCells = Math.floor(dist);
+      const distCells = Math.floor(scoreDist);
       const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
       if (score > bestScore) {
         bestTarget = e;
@@ -2484,22 +3320,6 @@ export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): 
       }
     }
 
-    // AA override: SAM/AGUN prefer airborne aircraft over ground targets
-    if (s.weapon.isAntiAir && bestTarget) {
-      let bestAirTarget: Entity | null = null;
-      let bestAirDist = Infinity;
-      for (const e of ctx.entities) {
-        if (!e.alive || e.inLimbo || !e.isAirUnit || e.flightAltitude <= 0) continue;
-        if (ctx.isAllied(s.house, e.house)) continue;
-        const { lx: structLX, ly: structLY } = structureFireLeptons(s);
-        const distAA = leptonDist(structLX, structLY, e.leptonX, e.leptonY) / LEPTON_SIZE;
-        if (distAA < range && distAA < bestAirDist) {
-          bestAirTarget = e;
-          bestAirDist = distAA;
-        }
-      }
-      if (bestAirTarget) bestTarget = bestAirTarget;
-    }
     return bestTarget;
 }
 
@@ -2509,88 +3329,145 @@ function getAssignedStructureTarget(ctx: CombatContext, s: MapStructure): Entity
   return target && target.alive && !target.inLimbo ? target : null;
 }
 
+function structureWeaponCanTarget(s: MapStructure, target: Entity): boolean {
+  if (!s.weapon) return false;
+  if (s.weapon.isAntiAir && (!target.isAirUnit || target.flightAltitude <= 0)) return false;
+  if (target.isAirUnit && target.flightAltitude > 0 && !s.weapon.isAntiAir) return false;
+  return true;
+}
+
+function structureTargetInTarcomRange(s: MapStructure, target: Entity): boolean {
+  if (!s.weapon) return false;
+  const fire = structureFireLeptons(s, target);
+  const targetCoord = entityTargetLeptons(target);
+  return leptonDist(fire.lx, fire.ly, targetCoord.lx, targetCoord.ly) <= Math.trunc(s.weapon.range * LEPTON_SIZE);
+}
+
+function clearStructureAttackTargetAfterCanFireFailure(s: MapStructure): void {
+  s.targetEntityId = undefined;
+  s.mission = Mission.GUARD;
+  s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+  // C++ BuildingClass::Mission_Attack falls through after FIRE_RANGE/CANT:
+  // Assign_Target(TARGET_NONE), Assign_Mission(GUARD), then
+  // PrimaryFacing.Set_Desired(Direction(TarCom)). With TarCom now NONE,
+  // Direction resolves toward coordinate 0,0.
+  setStructureTurretDesiredToTargetNone(s);
+}
+
 /** Per-building combat tick — extracted so it can be called per-building right after its
  *  mission timer tick, matching C++ BuildingClass::AI() which runs timer + Firing_AI
  *  sequentially for each building before advancing to the next.
  *  C++ building.cpp:Firing_AI + building.cpp:5347 Rotation_AI */
 export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure, isLowPower: boolean): void {
-    if (!s.alive || !s.weapon || s.sellProgress !== undefined || s.buildProgress !== undefined) return;
-    // C++ parity PW1/PW3: powered defenses (TSLA, AGUN, GAP, PDOX, IRON, DOME) cannot fire during any power deficit.
-    // Unpowered defenses (GUN, PBOX, HBOX, FTUR) always fire regardless of power.
-    if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
-      return;
-    }
+    if (!s.alive || !s.weapon || s.sellProgress !== undefined ||
+        isStructureUnderConstruction(s)) return;
     // C++ building.cpp:882-883 — ammo instantly reloads to MaxAmmo each AI tick
     if (s.ammo === 0 && s.maxAmmo > 0) { s.ammo = s.maxAmmo; }
     if (s.ammo === 0) return; // out of ammo (shouldn't reach here after reload)
 
-    // Turret rotation tick (every frame, independent of cooldown)
-    // C++ building.cpp:5347-5363 Rotation_AI + facing.cpp:142-183 Rotation_Adjust:
-    //   256-step DirType, ROT=5 per tick → 90° (64 units) takes 13 ticks.
-    // TS uses 8-dir facing with ROT accumulator: each tick adds ROT (5) to accumulator,
-    // one 8-dir step (= 32 DirType units) fires when accumulator >= 32.
+    // Initialize turret facings before Mission_Attack logic. The actual
+    // Rotation_AI tick runs after the mission decision in BuildingClass::AI();
+    // callers invoke tickStructureTurretRotation() after this function.
     if (TURRETED_STRUCTURES.has(s.type)) {
       if (s.turretDir === undefined) s.turretDir = TURRET_DEFAULT_FACING[s.type] ?? 4; // C++ bdata.cpp per-building default
-      if (s.desiredTurretDir === undefined) s.desiredTurretDir = s.turretDir;
-      if (s.turretRotAccum === undefined) s.turretRotAccum = 0;
-      if (s.turretDir !== s.desiredTurretDir) {
-        // Accumulate ROT units each tick (C++ FacingClass::Rotation_Adjust)
-        s.turretRotAccum += STRUCTURE_TURRET_ROT;
-        // One 8-dir step = 32 DirType units in C++ 256-step system
-        if (s.turretRotAccum >= 32) {
-          s.turretRotAccum -= 32;
-          const diff = (s.desiredTurretDir - s.turretDir + 8) % 8;
-          s.turretDir = diff <= 4
-            ? (s.turretDir + 1) % 8
-            : (s.turretDir + 7) % 8;
-        }
-      } else {
-        s.turretRotAccum = 0; // Reset accumulator when aligned
-      }
-      if (s.firingFlash !== undefined && s.firingFlash > 0) s.firingFlash--;
+      syncStructureTurretFacingFields(s);
     }
 
     if (s.attackCooldown > 0) {
-      if (!isLowPower || ctx.tick % 2 === 0) s.attackCooldown--;
+      // C++ BuildingClass::Mission_Attack returns Arm for FIRE_REARM.
+      // Keep the mission dispatcher asleep for the same remaining arm delay;
+      // otherwise a target detached during rearm can force ATTACK->GUARD one
+      // frame before C++ re-enters Mission_Attack.
+      s.missionTimer = Math.max(s.missionTimer ?? 0, s.attackCooldown);
+      if (s.rearmFacingUpdatePending) {
+        const rearmTarget = getAssignedStructureTarget(ctx, s);
+        if (rearmTarget && TURRETED_STRUCTURES.has(s.type)) {
+          setStructureTurretDesired(s, rearmTarget);
+        }
+        s.rearmFacingUpdatePending = false;
+      }
       return;
     }
 
     const { x: sx, y: sy } = structureFirePixels(s);
-    const structPos: WorldPos = { x: sx, y: sy };
-    const bestTarget = getAssignedStructureTarget(ctx, s) ?? findStructureThreatTarget(ctx, s);
+    const assignedTarget = getAssignedStructureTarget(ctx, s);
+    if (s.targetEntityId !== undefined && !assignedTarget) {
+      s.targetEntityId = undefined;
+      s.mission = Mission.GUARD;
+      s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+      return;
+    }
+    if (assignedTarget &&
+        (!structureWeaponCanTarget(s, assignedTarget) || !structureTargetInTarcomRange(s, assignedTarget))) {
+      clearStructureAttackTargetAfterCanFireFailure(s);
+      return;
+    }
+    const bestTarget = assignedTarget ?? findStructureThreatTarget(ctx, s);
 
     if (bestTarget) {
+      const bestTargetPixels = entityTargetPixels(bestTarget);
       // Update turret direction for turreted structures
       if (TURRETED_STRUCTURES.has(s.type)) {
-        s.desiredTurretDir = directionTo(structPos, bestTarget.pos);
+        setStructureTurretDesired(s, bestTarget);
         // C++ Mission_Attack returns FIRE_FACING when turret is not aligned with target,
-        // delaying fire until turret finishes rotating (building.cpp:2312-2318).
-        // Both turretDir and desiredTurretDir are in 8-dir (0-7); compare directly.
-        if (s.turretDir !== undefined && s.turretDir !== s.desiredTurretDir) return; // turret not aligned — wait
+        // delaying fire until the 256-step facing is inside the firing cone
+        // (building.cpp:2312-2318). TS stores only 8-way buckets, so allow the
+        // adjacent bucket once accumulator progress indicates the true C++
+        // facing has moved into tolerance.
+        if (!structureTurretCanFire(s)) {
+          // C++ BuildingClass::Mission_Attack returns 2 on FIRE_FACING. The
+          // building mission timer, not the weapon arm timer, absorbs that
+          // one-frame retry delay while Rotation_AI continues to turn.
+          s.missionTimer = Math.max(s.missionTimer ?? 0, 2);
+          return;
+        }
+      }
+      // C++ BuildingClass::Can_Fire checks powered low-power FIRE_BUSY after
+      // TechnoClass::Can_Fire has already validated target legality/range and
+      // after the turret-facing gate. Low power blocks the shot, but it must
+      // not preserve an illegal or out-of-range TarCom.
+      if (isLowPower && STRUCTURE_POWERED.has(s.type)) {
+        s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+        return;
       }
       // H1: Buildings with Ammo>1 fire rapidly (1-tick rearm) then recharge (C++ techno.cpp:2861)
       // C++ house.cpp:293,303: ROFBias scales rearm delay
       const structRofBias = ctx.getROFBias(s.house);
-      if (s.ammo > 0) {
+      const isTwoShooter = !!s.weapon.secondaryWeaponName && s.weapon.secondaryWeaponName === s.weapon.weaponName;
+      if (isTwoShooter) {
+        // C++ TechnoClass::Rearm_Delay(second, which): true two-shooters
+        // (Primary == Secondary) get a quick 3-frame first rearm, then full
+        // weapon ROF after the second shot. Store the assigned Arm value here;
+        // decrementStructureCdTimersEndOfLogic models the post-frame CDTimer
+        // countdown independently of mission dispatch.
+        const second = s.isSecondShot ?? false;
+        const delay = second
+          ? Math.max(1, Math.round(s.weapon.rof * structRofBias))
+          : 3;
+        s.attackCooldown = delay;
+        s.isSecondShot = !second;
+      } else if (s.ammo > 0) {
         s.ammo--;
         s.attackCooldown = s.ammo > 0 ? 1 : Math.max(1, Math.round(s.weapon.rof * structRofBias)); // rapid-fire until last shot
       } else {
         s.attackCooldown = Math.max(1, Math.round(s.weapon.rof * structRofBias)); // unlimited ammo (-1) uses normal ROF
       }
       if (TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
+      s.rearmFacingUpdatePending = true;
       // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path for splash weapons.
       const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
       const houseBias = ctx.getFirepowerBias(s.house);
+      const launchedStructureProjectile = !!s.weapon.isInvisible || s.type === 'QUEE';
       let killed: boolean;
 
-      if (s.type === 'TSLA' || s.type === 'QUEE') {
+      if (launchedStructureProjectile) {
         launchStructureProjectile(ctx, s, bestTarget, s.weapon);
         killed = false;
       } else if (s.weapon.splash && s.weapon.splash > 0) {
         // Splash weapons: ALL damage through applySplashDamage (matches C++ Explosion_Damage)
         const hpBefore = bestTarget.hp;
         applySplashDamage(
-          ctx, bestTarget.pos,
+          ctx, bestTargetPixels,
           { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
           -1, s.house,
         );
@@ -2612,9 +3489,9 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       // Tesla coil and Queen Ant get special effect
       if (s.type === 'TSLA' || s.type === 'QUEE') {
         ctx.effects.push({
-          type: 'tesla', x: bestTarget.pos.x, y: bestTarget.pos.y,
+          type: 'tesla', x: bestTargetPixels.x, y: bestTargetPixels.y,
           frame: 0, maxFrames: 8, size: 12, sprite: 'piffpiff', spriteStart: 0,
-          startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
+          startX: sx, startY: sy, endX: bestTargetPixels.x, endY: bestTargetPixels.y,
           blendMode: 'screen',
         } as Effect);
         ctx.playSoundAt('teslazap', sx, sy);
@@ -2628,19 +3505,9 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
         }
       } else {
         // Projectile from structure to target — per-weapon projectile speed
-        const structDistPx = Math.sqrt((bestTarget.pos.x - sx) ** 2 + (bestTarget.pos.y - sy) ** 2);
+        const structDistPx = Math.sqrt((bestTargetPixels.x - sx) ** 2 + (bestTargetPixels.y - sy) ** 2);
         const structTravelFrames = calcProjectileTravelFrames(structDistPx, s.weapon.projSpeed);
-        // Map structure type → weapon name (STRUCTURE_WEAPONS doesn't carry weapon name).
-        // Traces rules.ini: HBOX/PBOX→Vulcan, GUN→TurretGun, SAM→Nike, AGUN→Ack(→AAMissile),
-        // FTUR→FireballLauncher, TSLA/QUEE→TeslaZap.
-        let structWeaponName = '';
-        switch (s.type) {
-          case 'GUN':  structWeaponName = 'TurretGun'; break;
-          case 'SAM':  structWeaponName = 'Nike'; break;
-          case 'AGUN': structWeaponName = 'TurretGun'; break;
-          case 'FTUR': structWeaponName = 'FireballLauncher'; break;
-          case 'HBOX': case 'PBOX': structWeaponName = 'Vulcan'; break;
-        }
+        const structWeaponName = s.weapon.weaponName ?? '';
         const structProjCfg = projectileVisualConfig(structWeaponName);
         // Pick projStyle by weapon family so procedural fallback still looks right.
         let structProjStyle: 'bullet' | 'fireball' | 'shell' | 'rocket' | 'grenade' = 'bullet';
@@ -2649,30 +3516,34 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
           case 'TurretGun': structProjStyle = 'shell'; break;
           case 'Nike': structProjStyle = 'rocket'; break;
         }
-        ctx.effects.push({
-          type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: structTravelFrames, size: 3,
-          startX: sx, startY: sy, endX: bestTarget.pos.x, endY: bestTarget.pos.y,
-          projStyle: structProjStyle,
-          ...structProjCfg,
-        } as Effect);
-        // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
-        // Non-AA: use C++ Combat_Anim damage-scaled selection
-        const structExpSet = getWarheadProps(wh, ctx.scenarioWarheadProps)?.explosionSet ?? 0;
-        const structLand: 'ground' | 'water' | 'air' =
-          (bestTarget.isAirUnit && bestTarget.flightAltitude > 0) ? 'air' : 'ground';
-        const aaImpactSprite = (s.weapon.isAntiAir && bestTarget.isAirUnit && bestTarget.flightAltitude > 0)
-          ? 'flak'
-          : (combatAnim(s.weapon.damage, structExpSet, structLand) ?? 'veh-hit1');
-        ctx.effects.push({
-          type: 'explosion', x: bestTarget.pos.x, y: bestTarget.pos.y,
-          frame: 0, maxFrames: 10, size: 6,
-          sprite: aaImpactSprite, spriteStart: 0,
-        } as Effect);
-        spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, aaImpactSprite, bestTarget.pos.x, bestTarget.pos.y);
-        // D5: Structure fire weapons (FTUR FireballLauncher) plant scorch marks at impact
-        if (structLand === 'ground' && wh === 'Fire') {
-          const impCell = worldToCell(bestTarget.pos.x, bestTarget.pos.y);
-          ctx.map.addDecal(impCell.cx, impCell.cy, 7, 0.3);
+        if (!launchedStructureProjectile) {
+          ctx.effects.push({
+            type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: structTravelFrames, size: 3,
+            startX: sx, startY: sy, endX: bestTargetPixels.x, endY: bestTargetPixels.y,
+            projStyle: structProjStyle,
+            ...structProjCfg,
+          } as Effect);
+          // AA weapons hitting aircraft use flak burst sprite (C++ FLAK.SHP)
+          // Non-AA: use C++ Combat_Anim damage-scaled selection
+          const structExpSet = getWarheadProps(wh, ctx.scenarioWarheadProps)?.explosionSet ?? 0;
+          const structLand: 'ground' | 'water' | 'air' =
+            (bestTarget.isAirUnit && bestTarget.flightAltitude > 0) ? 'air' : 'ground';
+          const aaImpactSprite = (s.weapon.isAntiAir && bestTarget.isAirUnit && bestTarget.flightAltitude > 0)
+            ? 'flak'
+            : combatAnim(s.weapon.damage, structExpSet, structLand);
+          if (aaImpactSprite) {
+            ctx.effects.push({
+              type: 'explosion', x: bestTargetPixels.x, y: bestTargetPixels.y,
+              frame: 0, maxFrames: 10, size: 6,
+              sprite: aaImpactSprite, spriteStart: 0,
+            } as Effect);
+            spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, aaImpactSprite, bestTargetPixels.x, bestTargetPixels.y);
+          }
+          // D5: Structure fire weapons (FTUR FireballLauncher) plant scorch marks at impact
+          if (structLand === 'ground' && wh === 'Fire') {
+            const impCell = worldToCell(bestTargetPixels.x, bestTargetPixels.y);
+            ctx.map.addDecal(impCell.cx, impCell.cy, 7, 0.3);
+          }
         }
         ctx.playSoundAt('machinegun', sx, sy);
       }
@@ -2691,6 +3562,15 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
     }
 }
 
+export function decrementStructureCdTimersEndOfLogic(s: MapStructure): void {
+  // C++ structure mission timers and TechnoClass::Arm are
+  // CDTimerClass<FrameTimerClass> values. MissionClass::AI sees the current
+  // frame's Value(); the countdown advances only after the building has had its
+  // AI pass for that frame.
+  if ((s.missionTimer ?? 0) > 0) s.missionTimer--;
+  if (s.attackCooldown > 0) s.attackCooldown--;
+}
+
 /** Structure auto-fire — pillboxes, guard towers, tesla coils, SAM/AGUN fire at nearby enemies.
  *  Bulk wrapper that calls updateSingleStructureCombat for each structure.
  *  NOTE: For C++ parity, prefer calling updateSingleStructureCombat per-building
@@ -2699,5 +3579,7 @@ export function updateStructureCombat(ctx: CombatContext): void {
   const isLowPower = ctx.powerConsumed > ctx.powerProduced;
   for (const s of ctx.structures) {
     updateSingleStructureCombat(ctx, s, isLowPower);
+    tickStructureTurretRotation(s, isLowPower);
+    decrementStructureCdTimersEndOfLogic(s);
   }
 }

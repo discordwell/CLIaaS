@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, CELL_SIZE,
+  UnitType, House, CELL_SIZE, Mission,
   WEAPON_STATS,
   buildDefaultAlliances,
 } from '../engine/types';
@@ -24,10 +24,15 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   type InflightProjectile,
+  fireWeaponAt,
+  handleUnitDeath,
   launchProjectile,
+  setStructureTurretDesired,
+  updateStructureCombat,
   updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
+import { type MapStructure, STRUCTURE_WEAPONS } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 import { COUNTRY_BONUSES } from '../engine/types';
 import { ScenarioRandom } from '../engine/random';
@@ -35,22 +40,29 @@ import { ScenarioRandom } from '../engine/random';
 beforeEach(() => {
   resetEntityIds();
   ScenarioRandom.seed = 0x12345678;
+  ScenarioRandom.callCount = 0;
 });
 
-function makeCombatCtx(entities: Entity[] = []): CombatContext {
+function makeCombatCtx(entities: Entity[] = [], structures: MapStructure[] = []): CombatContext {
   const map = new GameMap();
   const alliances = buildDefaultAlliances();
   return {
     entities,
     entityById: new Map(entities.map(e => [e.id, e])),
-    structures: [],
+    structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
     killCount: 0,
     lossCount: 0,
+    pointTotal: 0,
+    alliedUnitsLost: 0,
+    sovietUnitsLost: 0,
+    alliedBuildingsLost: 0,
+    sovietBuildingsLost: 0,
     warheadOverrides: {},
     scenarioWarheadMeta: {},
     scenarioWarheadProps: {},
@@ -87,6 +99,44 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
   } as CombatContext;
 }
 
+function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
+  return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function defenseStructureAtCell(
+  type: string,
+  house: House,
+  cx: number,
+  cy: number,
+  turretDir = 2,
+): MapStructure {
+  const weapon = STRUCTURE_WEAPONS[type];
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp: 400,
+    maxHp: 400,
+    alive: true,
+    rubble: false,
+    weapon,
+    attackCooldown: 0,
+    ammo: weapon ? 1 : -1,
+    maxAmmo: weapon ? 1 : -1,
+    turretDir,
+    desiredTurretDir: turretDir,
+  };
+}
+
+function alignStructureToTarget(s: MapStructure, target: Entity): void {
+  setStructureTurretDesired(s, target);
+  s.turretFacing256 = s.desiredTurretFacing256;
+  s.turretDir = s.desiredTurretDir;
+  s.turretRotAccum = 0;
+}
+
 function makeProjectile(overrides: Partial<InflightProjectile>): InflightProjectile {
   return {
     attackerId: 1,
@@ -113,6 +163,16 @@ function makeProjectile(overrides: Partial<InflightProjectile>): InflightProject
     dropHeight: 0,
     isFlameEquipped: false,
     flameToggle: false,
+    logicalLX: 100,
+    logicalLY: 100,
+    headToLX: 100,
+    headToLY: 100,
+    facing256: 0,
+    speedAccum: 0,
+    speedAdd: 0,
+    fuseTimer: 1,
+    armingTimer: 0,
+    proximity: 0,
     ...overrides,
   };
 }
@@ -182,6 +242,149 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(ScenarioRandom.seed).not.toBe(beforeDetonate);
   });
 
+  it('aircraft ChainGun fire creates an invisible BulletClass before damaging the target', () => {
+    // C++ AircraftClass::Fire_At delegates to FootClass::Fire_At, which creates
+    // a BulletClass even for Speed=100/Inviso=yes ChainGun shots. The Jeep
+    // damage and Coord_Scatter RNG happen later in BulletClass::AI, not inside
+    // AircraftClass::Fire_At itself.
+    const attacker = new Entity(UnitType.V_YAK, House.BadGuy, 100, 100);
+    const target = new Entity(UnitType.V_JEEP, House.Spain, 150, 100);
+    const ctx = makeCombatCtx([attacker, target]);
+    const hpBefore = target.hp;
+    const seedBefore = ScenarioRandom.seed;
+
+    fireWeaponAt(ctx, attacker, target, WEAPON_STATS.ChainGun);
+
+    expect(target.hp, 'Fire_At should not damage synchronously').toBe(hpBefore);
+    expect(ScenarioRandom.seed, 'Coord_Scatter is deferred to BulletClass::AI').toBe(seedBefore);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].weapon.name).toBe('ChainGun');
+    expect(ctx.inflightProjectiles[0].weapon.isInvisible).toBe(true);
+
+    updateInflightProjectiles(ctx);
+
+    expect(target.hp, 'BulletClass::AI applies the shot damage').toBeLessThan(hpBefore);
+    expect(ScenarioRandom.callCount, 'invisible bullet detonation scatters once').toBe(1);
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+  });
+
+  it('entity projectile fire impacts ObjectClass::Target_Coord for falling infantry', () => {
+    // C++ TechnoClass::Fire_At passes the target object to BulletClass; then
+    // As_Coord(TarCom) resolves ObjectClass::Target_Coord(), which subtracts
+    // current Height. Explosion_Damage still measures radius to Center_Coord,
+    // so a falling infantry target takes distance-falloff damage rather than a
+    // full center hit.
+    const attacker = new Entity(UnitType.I_E1, House.Greece, 100, 100);
+    attacker.leptonX = 14656;
+    attacker.leptonY = 25920;
+    attacker.syncPosFromLeptons();
+
+    const target = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    target.leptonX = 15168;
+    target.leptonY = 25664;
+    target.syncPosFromLeptons();
+    target.isFalling = true;
+    target.fallHeightLeptons = 154;
+    target.flightAltitude = 14;
+
+    const ctx = makeCombatCtx([attacker, target]);
+    const hpBefore = target.hp;
+
+    fireWeaponAt(ctx, attacker, target, WEAPON_STATS.M1Carbine);
+
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].impactY).toBe((target.leptonY - target.fallHeightLeptons) * CELL_SIZE / 256);
+
+    for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+      updateInflightProjectiles(ctx);
+    }
+
+    expect(hpBefore - target.hp).toBe(1);
+  });
+
+  it('AGUN ZSU-23 fire creates an Ack invisible BulletClass before damaging aircraft', () => {
+    // rules.ini: [AGUN] Primary=ZSU-23, [ZSU-23] Projectile=Ack,
+    // [Ack] Inviso=yes. C++ BuildingClass::Fire_At still submits a BulletClass;
+    // damage and Coord_Scatter happen when that bullet runs.
+    const agun = defenseStructureAtCell('AGUN', House.USSR, 10, 10, 2);
+    const yak = entityAtCell(UnitType.V_YAK, House.Spain, 12, 10);
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    alignStructureToTarget(agun, yak);
+    const hpBefore = yak.hp;
+    const ctx = makeCombatCtx([yak], [agun]);
+    const seedBefore = ScenarioRandom.seed;
+
+    updateStructureCombat(ctx);
+
+    expect(yak.hp, 'BuildingClass::Fire_At should not damage synchronously').toBe(hpBefore);
+    expect(ScenarioRandom.seed, 'Ack Coord_Scatter is deferred to BulletClass::AI').toBe(seedBefore);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].weapon.name).toBe('ZSU-23');
+    expect(ctx.inflightProjectiles[0].weapon.isInvisible).toBe(true);
+    expect(ctx.inflightProjectiles[0].impactY).toBe(yak.pos.y - yak.flightAltitude);
+
+    updateInflightProjectiles(ctx);
+
+    expect(yak.hp, 'Ack BulletClass::AI applies AGUN damage').toBeLessThan(hpBefore);
+    expect(ScenarioRandom.callCount, 'invisible Ack detonation scatters once').toBe(1);
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+  });
+
+  it('airborne aircraft targets bypass Explosion_Damage before invisible scatter', () => {
+    // C++ bullet.cpp:996-1014 skips Explosion_Damage for airborne aircraft
+    // targets. The direct aircraft damage happens at TarCom distance < 0x80,
+    // then the invisible projectile performs its single Coord_Scatter call.
+    const ctx = makeCombatCtx();
+    const wallCx = 12;
+    const wallCy = 10;
+    ctx.map.setWallType(wallCx, wallCy, 'BRIK');
+
+    const yak = entityAtCell(UnitType.V_YAK, House.Spain, wallCx, wallCy + 1);
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    ctx.entities = [yak];
+    ctx.entityById = new Map([[yak.id, yak]]);
+
+    const impactX = wallCx * CELL_SIZE + CELL_SIZE / 2;
+    const impactY = wallCy * CELL_SIZE + CELL_SIZE / 2;
+    const hpBefore = yak.hp;
+
+    ctx.inflightProjectiles.push(makeProjectile({
+      attackerId: -1,
+      attackerHouse: House.USSR,
+      targetId: yak.id,
+      weapon: {
+        ...WEAPON_STATS.M1Carbine,
+        name: 'ZSU-23',
+        damage: 25,
+        warhead: 'AP',
+        isAntiAir: true,
+        isInvisible: true,
+      },
+      damage: 25,
+      strength: 25,
+      speed: 0,
+      currentFrame: 0,
+      travelFrames: 1,
+      startX: impactX,
+      startY: impactY,
+      impactX,
+      impactY,
+      logicalLX: wallCx * 256 + 128,
+      logicalLY: wallCy * 256 + 128,
+      headToLX: wallCx * 256 + 128,
+      headToLY: wallCy * 256 + 128,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    // AircraftClass::Take_Damage halves airborne damage before AP/light armor
+    // modifies it: 25 / 2 = 12, then AP verses light armor = 75% => 9.
+    expect(hpBefore - yak.hp).toBe(9);
+    expect(ctx.map.getWallType(wallCx, wallCy)).toBe('BRIK');
+    expect(ctx.map.getWallDamageLevel(wallCx, wallCy)).toBe(0);
+    expect(ScenarioRandom.callCount).toBe(1);
+  });
+
   it('invisible projectile scatters impact position within 32-lepton radius', () => {
     const ctx = makeCombatCtx();
     const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
@@ -200,6 +403,267 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     const dy = Math.abs(proj.impactY - originalY);
     expect(dx).toBeLessThanOrEqual(3);
     expect(dy).toBeLessThanOrEqual(3);
+  });
+
+  it('defers the next adjacent bullet when detonation deletes an earlier vehicle Logic object', () => {
+    // C++ LogicClass::AI walks a compacting DynamicVector. If Bullet[N] deletes
+    // an object before N and then deletes itself, only one index-- compensation
+    // runs. The following pre-existing object can slide behind the cursor and
+    // skip its BulletClass::AI until the next tick.
+    const ctx = makeCombatCtx();
+    const attacker1 = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    const target1 = new Entity(UnitType.V_APC, House.Greece, 200, 100);
+    target1.hp = 1;
+    const attacker2 = new Entity(UnitType.I_E1, House.USSR, 100, 180);
+    const target2 = new Entity(UnitType.I_E1, House.Greece, 400, 180);
+    target2.hp = 1;
+    ctx.entities = [target1, attacker1, attacker2, target2];
+    ctx.entityById = new Map(ctx.entities.map(e => [e.id, e]));
+
+    launchProjectile(ctx, attacker1, target1, WEAPON_STATS.M1Carbine, 15, target1.pos.x, target1.pos.y, true);
+    launchProjectile(ctx, attacker2, target2, WEAPON_STATS.M1Carbine, 15, target2.pos.x, target2.pos.y, true);
+
+    updateInflightProjectiles(ctx);
+
+    expect(target1.alive).toBe(false);
+    expect(target2.hp).toBe(1);
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].targetId).toBe(target2.id);
+    expect(ctx.inflightProjectiles[0].currentFrame).toBe(0);
+    expect(ctx.inflightProjectiles[0].fuseTimer).toBe(4);
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(target2.alive).toBe(false);
+    expect(ScenarioRandom.callCount).toBe(2);
+  });
+
+  it('does not defer the next bullet when AP-killed infantry remains in Logic death animation', () => {
+    // C++ InfantryClass::Take_Damage does not delete InfantryDeath variants
+    // 1-4 immediately; it assigns a death action and the dead infantry remains
+    // an active Logic object until the animation completes. SCG01EA tick 212
+    // verifies that the next invisible bullet still receives same-tick AI.
+    const ctx = makeCombatCtx();
+    const attacker1 = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    const target1 = new Entity(UnitType.I_E1, House.Greece, 200, 100);
+    target1.hp = 1;
+    const attacker2 = new Entity(UnitType.I_E1, House.USSR, 100, 180);
+    const target2 = new Entity(UnitType.I_E1, House.Greece, 400, 180);
+    target2.hp = 1;
+    ctx.entities = [target1, attacker1, attacker2, target2];
+    ctx.entityById = new Map(ctx.entities.map(e => [e.id, e]));
+
+    launchProjectile(ctx, attacker1, target1, WEAPON_STATS.M1Carbine, 15, target1.pos.x, target1.pos.y, true);
+    launchProjectile(ctx, attacker2, target2, WEAPON_STATS.M1Carbine, 15, target2.pos.x, target2.pos.y, true);
+
+    updateInflightProjectiles(ctx);
+
+    expect(target1.alive).toBe(false);
+    expect(target1.mission).toBe(Mission.DIE);
+    expect(target1.deathVariant).toBeGreaterThanOrEqual(1);
+    expect(target1.deathVariant).toBeLessThanOrEqual(4);
+    expect(target2.alive).toBe(false);
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(ScenarioRandom.callCount).toBe(2);
+  });
+
+  it('processes a bullet submitted during BulletClass::AI later in the same Logic loop', () => {
+    // C++ LogicClass::AI re-reads Count() as BulletClass::AI runs. If a bullet
+    // detonation submits another BulletClass object, that new bullet can receive
+    // its own AI pass before later infantry submitted by the same explosion.
+    const ctx = makeCombatCtx();
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    const victim = new Entity(UnitType.I_E1, House.Greece, 200, 100);
+    const retaliator = new Entity(UnitType.I_E1, House.Greece, 180, 100);
+    const secondTarget = new Entity(UnitType.I_E1, House.USSR, 260, 100);
+    victim.hp = 1;
+    secondTarget.hp = 1;
+    ctx.entities = [victim, attacker, retaliator, secondTarget];
+    ctx.entityById = new Map(ctx.entities.map(e => [e.id, e]));
+
+    const originalTakeDamage = victim.takeDamage.bind(victim);
+    victim.takeDamage = ((amount, warhead, source, props, options) => {
+      launchProjectile(
+        ctx,
+        retaliator,
+        secondTarget,
+        WEAPON_STATS.M1Carbine,
+        15,
+        secondTarget.pos.x,
+        secondTarget.pos.y,
+        true
+      );
+      return originalTakeDamage(amount, warhead, source, props, options);
+    }) as typeof victim.takeDamage;
+
+    launchProjectile(ctx, attacker, victim, WEAPON_STATS.M1Carbine, 15, victim.pos.x, victim.pos.y, true);
+
+    updateInflightProjectiles(ctx);
+
+    expect(victim.alive).toBe(false);
+    expect(secondTarget.alive).toBe(false);
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(ScenarioRandom.callCount).toBeGreaterThan(1);
+  });
+
+  it('flame-equipped bullets submit 4-frame FBALL_FADE Logic anim slots', () => {
+    // C++ bullet.cpp:380-388 toggles IsToAnimate and submits ANIM_FBALL_FADE
+    // for FB1 flame bullets. adata.cpp defines FBALL_FADE as FB2 with four
+    // runtime frames; even though TS renders it with the closest available
+    // sprite, it still occupies a Logic slot for same-tick bullet ordering.
+    const ctx = makeCombatCtx();
+    ctx.inflightProjectiles.push(makeProjectile({
+      weapon: WEAPON_STATS.Flamer,
+      isFlameEquipped: true,
+      flameToggle: true,
+      currentFrame: 0,
+      travelFrames: 20,
+      fuelTimer: 20,
+      fuseTimer: 20,
+      speedAdd: 0,
+      speedAccum: 0,
+      logicalLX: 1000,
+      logicalLY: 1000,
+      headToLX: 3000,
+      headToLY: 1000,
+      proximity: 2000,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    const trail = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'napalm1');
+    expect(trail).toBeDefined();
+    expect(trail?.maxFrames).toBe(4);
+    expect(trail?.cppLogicSlot).toBe(true);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+  });
+
+  it('defers hinted bullets until the C++ Logic cursor reaches their slot', () => {
+    // C++ LogicClass::AI processes BulletClass objects in vector order. TS batches
+    // bullet AI, so partial flushes must leave later hinted bullets untouched until
+    // the cursor reaches that Logic index.
+    const ctx = makeCombatCtx();
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    const target = new Entity(UnitType.I_E1, House.Greece, 200, 100);
+    target.hp = 1;
+    ctx.entities = [attacker, target];
+    ctx.entityById = new Map(ctx.entities.map(e => [e.id, e]));
+
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.M1Carbine, 15, target.pos.x, target.pos.y, true);
+    const proj = ctx.inflightProjectiles[0];
+    proj.logicIndexHint = 51;
+    proj.currentFrame = 3;
+    proj.fuseTimer = 1;
+    ScenarioRandom.callCount = 0;
+
+    updateInflightProjectiles(ctx, 50);
+
+    expect(target.alive).toBe(true);
+    expect(proj.currentFrame).toBe(3);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ScenarioRandom.callCount).toBe(0);
+
+    updateInflightProjectiles(ctx, 51);
+
+    expect(target.alive).toBe(false);
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(ScenarioRandom.callCount).toBe(1);
+  });
+
+  it('does not run the same hinted BulletClass twice in one Logic tick', () => {
+    // C++ LogicClass::AI visits each BulletClass object once as the cursor reaches
+    // its vector slot. TS can flush bullets before later objects and again at the
+    // end of the tick; the already-flushed bullet must not age twice.
+    const ctx = makeCombatCtx();
+    ctx.tick = 100;
+    const proj = makeProjectile({
+      weapon: WEAPON_STATS['90mm'],
+      logicIndexHint: 10,
+      currentFrame: 0,
+      fuseTimer: 10,
+      travelFrames: 10,
+      logicalLX: 1000,
+      logicalLY: 1000,
+      headToLX: 5000,
+      headToLY: 1000,
+      proximity: 4000,
+    });
+    ctx.inflightProjectiles.push(proj);
+
+    updateInflightProjectiles(ctx, 10);
+    expect(proj.currentFrame).toBe(1);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+
+    updateInflightProjectiles(ctx);
+    expect(proj.currentFrame).toBe(1);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+
+    ctx.tick++;
+    updateInflightProjectiles(ctx);
+    expect(proj.currentFrame).toBe(2);
+  });
+
+  it('processes two bullets submitted by the current object in the same Logic pass', () => {
+    // C++ DynamicVectorClass::Add appends at ActiveCount; it does not reuse an
+    // earlier hole. A two-shooter aircraft can submit two invisible BulletClass
+    // objects from the current AircraftClass::AI pass, and both are reachable
+    // when LogicClass::AI later reaches the appended bullet slots.
+    const ctx = makeCombatCtx();
+    ctx.tick = 100;
+    let nextHint = 3;
+    ctx.logicIndexHintForNewObject = () => nextHint++;
+    (ctx as CombatContext & { isLogicIndexBehindCursor?: (hint: number) => boolean })
+      .isLogicIndexBehindCursor = (hint) => hint < 5;
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    ctx.entities = [attacker];
+    ctx.entityById = new Map(ctx.entities.map(e => [e.id, e]));
+
+    launchProjectile(ctx, attacker, null, WEAPON_STATS.M1Carbine, 15, 800, 100, true);
+    launchProjectile(ctx, attacker, null, WEAPON_STATS.M1Carbine, 15, 800, 100, true);
+    for (const proj of ctx.inflightProjectiles) {
+      proj.currentFrame = 3;
+      proj.fuseTimer = 1;
+    }
+    ScenarioRandom.callCount = 0;
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(ScenarioRandom.callCount).toBe(2);
+  });
+
+  it('vehicle death crew is appended after existing BulletClass Logic slots', () => {
+    // SCG04EA tick 1288: an invisible bullet submitted before a vehicle survivor
+    // must run before that new C1 gets Mission_Move. The survivor therefore keeps
+    // the next Logic index after already-submitted BulletClass objects.
+    const ctx = makeCombatCtx();
+    const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
+    const victim = new Entity(UnitType.V_MCV, House.Greece, 200, 100);
+    ctx.entities = [victim, attacker];
+    ctx.entityById = new Map(ctx.entities.map(e => [e.id, e]));
+    ctx.logicIndexHintForNewObject = () => 52;
+
+    ScenarioRandom.seed = 0; // first Percent_Chance(50) succeeds.
+    ScenarioRandom.callCount = 0;
+    victim.alive = false;
+    victim.hp = 0;
+
+    handleUnitDeath(ctx, victim, {
+      screenShake: 0,
+      explosionSize: 0,
+      debris: false,
+      decal: null,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+      attacker,
+    });
+
+    const crew = ctx.entities.find(e => e !== victim && e !== attacker);
+    expect(crew?.type).toBe(UnitType.I_C1);
+    expect(crew?.logicIndexHint).toBe(52);
   });
 
   it('RNG consumption is deterministic across runs with same seed', () => {

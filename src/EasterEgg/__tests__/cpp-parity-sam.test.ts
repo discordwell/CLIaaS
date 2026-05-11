@@ -365,8 +365,9 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
 
     updateStructureCombat(ctx);
 
-    // firingFlash set to 4 on fire
-    expect(sam.firingFlash).toBe(4);
+    // updateStructureCombat is a completed logic tick: Fire_At sets flash to 4,
+    // then BuildingClass::Rotation_AI / TS wrapper ticks it once.
+    expect(sam.firingFlash).toBe(3);
   });
 
   it('turret rotates via ROT accumulator toward desiredTurretDir', () => {
@@ -378,32 +379,32 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
     sam.attackCooldown = 50;
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
 
-    // C++ ROT=5, 32 DirType units per 8-dir step → first step after 7 ticks (accum 35 >= 32).
+    // SAM uses rules.ini ROT=30. In 256-facing space that reaches the South
+    // bucket after a few completed logic ticks.
     for (let i = 0; i < 7; i++) {
       const ctx = makeCombatCtx([sam], [hind]);
       updateStructureCombat(ctx);
     }
 
-    // turretDir should have moved one step clockwise toward 4
-    expect(sam.turretDir).toBe(1); // 0 -> 1 (clockwise) after 7 ticks
+    expect(sam.turretDir).toBe(4);
   });
 });
 
 // ── Cooldown & Attack Rate (building.cpp — ROF) ────────────────────────────
 //
-// C++ building.cpp: After firing, attackCooldown is set to weapon ROF.
-// Structure cannot fire while cooldown > 0.
+// C++ techno.cpp: Fire_At assigns Arm = Rearm_Delay(...). Arm is a
+// CDTimerClass<FrameTimerClass>, so the exported wrapper observes one frame of
+// countdown by the end of the completed logic tick.
 
 describe('SAM cooldown and ROF (building.cpp)', () => {
-  it('sets cooldown to weapon ROF after firing (ammo=-1 unlimited)', () => {
+  it('observes weapon ROF minus one after firing (ammo=-1 unlimited)', () => {
     const sam = makeSAM(10, 10);
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
     updateStructureCombat(ctx);
 
-    // With unlimited ammo (-1), cooldown = weapon.rof = 20
-    expect(sam.attackCooldown).toBe(STRUCTURE_WEAPONS['SAM'].rof);
+    expect(sam.attackCooldown).toBe(STRUCTURE_WEAPONS['SAM'].rof - 1);
   });
 
   it('does NOT fire while cooldown > 0', () => {
@@ -429,16 +430,17 @@ describe('SAM cooldown and ROF (building.cpp)', () => {
 // C++ building.cpp:882-883 — ammo reloads to MaxAmmo when depleted.
 
 describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
-  it('rapid-fire: cooldown=1 while ammo > 0 after shot', () => {
+  it('rapid-fire: 1-frame Arm has counted down after the completed tick', () => {
     const sam = makeSAMWithAmmo(10, 10, 3);
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
     updateStructureCombat(ctx);
 
-    // After firing: ammo decremented (3->2), cooldown=1 (rapid-fire since ammo still > 0)
+    // Fire_At assigned Arm=1 (rapid-fire since ammo remains), and the completed
+    // tick observes that CDTimer at 0.
     expect(sam.ammo).toBe(2);
-    expect(sam.attackCooldown).toBe(1);
+    expect(sam.attackCooldown).toBe(0);
   });
 
   it('full ROF cooldown on last ammo shot', () => {
@@ -448,7 +450,7 @@ describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     updateStructureCombat(ctx);
     expect(sam.ammo).toBe(1);
-    expect(sam.attackCooldown).toBe(1); // rapid-fire, more ammo left
+    expect(sam.attackCooldown).toBe(0); // Arm=1 counted down by the completed tick
 
     // Advance cooldown
     sam.attackCooldown = 0;
@@ -456,7 +458,7 @@ describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
     // Fire second (last) shot
     updateStructureCombat(ctx);
     expect(sam.ammo).toBe(0);
-    expect(sam.attackCooldown).toBe(STRUCTURE_WEAPONS['SAM'].rof); // full ROF on last shot
+    expect(sam.attackCooldown).toBe(STRUCTURE_WEAPONS['SAM'].rof - 1); // full ROF observed post-frame
   });
 
   it('reloads ammo to maxAmmo when depleted (building.cpp:882-883)', () => {

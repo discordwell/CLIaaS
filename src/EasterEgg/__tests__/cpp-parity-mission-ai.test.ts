@@ -19,14 +19,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Entity, CloakState, threatScore } from '../engine/entity';
 import {
   House, Mission, AnimState, UnitType, Stance,
-  CELL_SIZE, LEPTON_SIZE, worldDist,
+  CELL_SIZE, LEPTON_SIZE, MAP_CELLS, worldDist,
   WARHEAD_VS_ARMOR, armorIndex,
-  MISSION_CONTROL, pixelToLepton,
+  MISSION_CONTROL, pixelToLepton, cellTargetToLepton, coordTargetRoundTripLepton,
 } from '../engine/types';
 import {
   updateHunt, updateGuard, updateAreaGuard,
+  updateAttack, runFiringAI, infantryFireLaunch, movementZoneCells,
   type MissionAIContext,
 } from '../engine/missionAI';
+import { GameMap, Terrain } from '../engine/map';
+import { ScenarioRandom } from '../engine/random';
 
 
 // ── Test Helpers ────────────────────────────────────────────────────────
@@ -305,6 +308,36 @@ describe('Threat Scoring — C++ techno.cpp:1449-1763 Evaluate_Object', () => {
 });
 
 
+describe('Movement Zone Filters — C++ map.cpp Zone_Reset', () => {
+  it('does not let TS building-footprint terrain split C++ movement zones', () => {
+    // C++ Zone_Reset builds Map[cell].Zones with CellClass::Is_Clear_To_Move
+    // using ignorevehicles=true, so BuildingClass occupy bits do not split zones.
+    // TS stores building footprints as Terrain.WALL for pathing; zone filters
+    // must ignore those synthetic walls or TechnoClass::AI can clear a legal
+    // TarCom while a unit is walking through/near a friendly refinery footprint.
+    const map = new GameMap();
+    map.setBounds(0, 0, 64, 64);
+    const proc = {
+      alive: true,
+      type: 'PROC',
+      cx: 10,
+      cy: 10,
+      house: House.USSR,
+      hp: 900,
+      maxHp: 900,
+    } as any;
+
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [2, 1], [0, 2]]) {
+      map.setTerrain(proc.cx + dx, proc.cy + dy, Terrain.WALL);
+    }
+
+    const zone = movementZoneCells(map, { cx: 11, cy: 10 }, false, [proc]);
+
+    expect(zone[10 * MAP_CELLS + 15]).toBe(1);
+  });
+});
+
+
 // ============================================================
 // Section 2: Hunt Mode Scanning — C++ foot.cpp:654-703
 // ============================================================
@@ -486,6 +519,362 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
 
     // Dogs CAN target spies in hunt mode
     expect(dog.target).toBe(spy);
+  });
+
+  it('hunt lets occupied enemy buildings compete with mobile targets by C++ threat value', () => {
+    // C++ Mission_Hunt calls Target_Something_Nearby(THREAT_NORMAL), which
+    // scans Map.Layer[LAYER_GROUND]. Buildings and ground units are evaluated
+    // together by TechnoClass::Evaluate_Object rather than using structures
+    // only as a fallback when no mobile target exists. C++ zone fill ignores
+    // vehicle/building occupy bits, so a building's occupied footprint does not
+    // make its Center_Coord unreachable for this scan.
+    const hunter = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const farInfantry = makeEntity(
+      UnitType.I_E1,
+      House.Greece,
+      35 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const chronosphere = {
+      alive: true, cx: 19, cy: 17, house: House.Greece,
+      type: 'PDOX', hp: 400, maxHp: 400,
+    };
+
+    const blockedFootprint = new Set(['19,17', '20,17', '19,18', '20,18']);
+    const ctx = makeCtx({
+      entities: [hunter, farInfantry],
+      structures: [chronosphere] as any,
+      map: {
+        isPassable: () => true,
+        isTerrainPassable: (cx: number, cy: number) => !blockedFootprint.has(`${cx},${cy}`),
+        isWaterPassable: () => false,
+        canEnterCell: () => true,
+        hasLineOfSight: () => true,
+        getTerrain: () => 0,
+        addDecal: () => {},
+        boundsX: 0, boundsY: 0, boundsW: 64, boundsH: 64,
+      } as any,
+    });
+
+    hunter.mission = Mission.HUNT;
+    hunter.target = null;
+    hunter.targetStructure = null;
+    updateHunt(ctx, hunter);
+
+    expect(hunter.target).toBeNull();
+    expect(hunter.targetStructure).toBe(chronosphere);
+  });
+
+  it('hunt does not fall through past a zero-strength building still in the C++ ground layer', () => {
+    // C++ BuildingClass keeps a destroyed building active in
+    // Map.Layer[LAYER_GROUND] until CountDown reaches zero and BuildingClass::AI
+    // calls Limbo/delete. TechnoClass::Greatest_Threat can still return that
+    // zero-strength object; TechnoClass::Assign_Target then clears TarCom
+    // because Strength == 0 and Target_Something_Nearby does not retry.
+    const hunter = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const deadChronosphere = {
+      alive: false, rubble: true, debrisCountdown: 5, debrisDropped: false,
+      cx: 21, cy: 20, house: House.Greece,
+      type: 'PDOX', hp: 0, maxHp: 400,
+    };
+    const liveGap = {
+      alive: true, rubble: false,
+      cx: 40, cy: 20, house: House.Greece,
+      type: 'GAP', hp: 1000, maxHp: 1000,
+    };
+    const ctx = makeCtx({
+      entities: [hunter],
+      structures: [deadChronosphere, liveGap] as any,
+    });
+
+    hunter.mission = Mission.HUNT;
+    hunter.doing = 'stand_ready';
+    hunter.idleAnimTimer = 99;
+    hunter.target = null;
+    hunter.targetStructure = null;
+
+    updateHunt(ctx, hunter);
+
+    expect(hunter.target).toBeNull();
+    expect(hunter.targetStructure).toBeNull();
+    expect(hunter.mission).toBe(Mission.HUNT);
+  });
+
+  it('hunt scores south-foundation buildings against C++ Target_Coord', () => {
+    // C++ TechnoClass::Evaluate_Object computes distance with Distance(object),
+    // which resolves building candidates through BuildingClass::Target_Coord.
+    // GAP has FoundationFace=FACING_S, so its target coordinate is the snapped
+    // cell south of Center_Coord. Center-based scoring ties these two GAPs and
+    // picks the western one by map-layer order; Target_Coord makes the eastern
+    // GAP one distance bucket closer.
+    const hunter = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      25 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const westGap = {
+      alive: true, cx: 18, cy: 22, house: House.Greece,
+      type: 'GAP', hp: 1000, maxHp: 1000,
+    };
+    const eastGap = {
+      alive: true, cx: 21, cy: 22, house: House.Greece,
+      type: 'GAP', hp: 1000, maxHp: 1000,
+    };
+    const ctx = makeCtx({
+      entities: [hunter],
+      structures: [westGap, eastGap] as any,
+    });
+
+    hunter.mission = Mission.HUNT;
+    hunter.target = null;
+    hunter.targetStructure = null;
+
+    updateHunt(ctx, hunter);
+
+    expect(hunter.target).toBeNull();
+    expect(hunter.targetStructure).toBe(eastGap);
+  });
+
+  it('hunt checks a building candidate zone at C++ Center_Coord, not geometric center or perimeter', () => {
+    // C++ BuildingClass::Center_Coord uses CenterOffset[BSIZE_*]. For BSIZE_12
+    // (GAP/TSLA/AGUN), the center Y offset is 0x00ff, so Coord_Cell(center)
+    // is the top cell. TechnoClass::Evaluate_Object compares exactly that
+    // center cell's zone; it does not accept the footprint bottom cell or a
+    // reachable perimeter cell as a substitute.
+    const hunter = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      10 * CELL_SIZE + CELL_SIZE / 2,
+      11 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const gap = {
+      alive: true, cx: 12, cy: 10, house: House.Greece,
+      type: 'GAP', hp: 1000, maxHp: 1000,
+    };
+    const ctx = makeCtx({
+      entities: [hunter],
+      structures: [gap] as any,
+      map: {
+        isPassable: () => true,
+        isTerrainPassable: (_cx: number, cy: number) => cy >= 11,
+        isWaterPassable: () => false,
+        canEnterCell: () => true,
+        hasLineOfSight: () => true,
+        getTerrain: () => 0,
+        addDecal: () => {},
+        boundsX: 0, boundsY: 0, boundsW: 64, boundsH: 64,
+      } as any,
+    });
+
+    hunter.mission = Mission.HUNT;
+    hunter.doing = 'stand_ready';
+    hunter.idleAnimTimer = 0;
+    hunter.target = null;
+    hunter.targetStructure = null;
+
+    updateHunt(ctx, hunter);
+
+    expect(hunter.targetStructure).toBeNull();
+  });
+
+  it('hunt skips allied-to-player structures that PlayerPtr has not discovered', () => {
+    // C++ Evaluate_Object uses strict PlayerPtr visibility:
+    // IsOwnedByPlayer OR IsDiscoveredByPlayer. It does not treat a structure
+    // owned by a player ally as player-owned, and current revealed fog is not
+    // enough for object targeting.
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      tagLogging: ScenarioRandom._tagLogging,
+      sourceTag: ScenarioRandom._sourceTag,
+      entityTag: ScenarioRandom._entityTag,
+      seedLog: ScenarioRandom._seedLog,
+    };
+
+    try {
+      ScenarioRandom.seed = 0x12345678;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._sourceTag = 10026;
+      ScenarioRandom._entityTag = 10026;
+      ScenarioRandom._seedLog = [];
+
+      const hunter = makeEntity(UnitType.I_E1, House.USSR, 20 * CELL_SIZE, 20 * CELL_SIZE);
+      hunter.mission = Mission.HUNT;
+      hunter.doing = 'stand_ready';
+      hunter.idleAnimTimer = 0;
+      hunter.isDriving = false;
+
+      const alliedGap = {
+        alive: true, cx: 22, cy: 20, house: House.Greece,
+        type: 'GAP', hp: 1000, maxHp: 1000,
+      };
+
+      const ctx = makeCtx({
+        entities: [hunter],
+        structures: [alliedGap] as any,
+        playerHouse: House.Spain,
+        isRevealedToHouse: () => true,
+        isDiscoveredStructureByPlayer: () => false,
+      });
+
+      updateHunt(ctx, hunter);
+
+      const tags = ScenarioRandom._seedLog.map(([, tag]) => tag);
+      expect(hunter.targetStructure).toBeNull();
+      expect(tags).toContain(30001);
+      expect(tags).toContain(30002);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._entityTag = saved.entityTag;
+      ScenarioRandom._seedLog = saved.seedLog;
+    }
+  });
+
+  it('infantry structure attacks wait for FireLaunch then launch BulletClass', () => {
+    // C++ TechnoClass::Fire_At creates a BulletClass for a Speed weapon even
+    // when the target is a building. M1Carbine is Inviso/Speed=100, so damage
+    // and invisible Coord_Scatter happen on bullet detonation, not inside the
+    // infantry firing tick. TechnoClass::In_Range also adds
+    // (building width + height) * 64 leptons to weapon range for buildings.
+    // InfantryClass::Firing_AI still gates Fire_At on FireLaunch, just like it
+    // does for mobile TarCom targets.
+    const rifle = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      59 * CELL_SIZE + CELL_SIZE / 2,
+      105 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    rifle.leptonX = 15296;
+    rifle.leptonY = 27072;
+    rifle.syncPosFromLeptons();
+    const chronosphere = {
+      alive: true, cx: 58, cy: 102, house: House.Greece,
+      type: 'PDOX', hp: 400, maxHp: 400,
+    };
+    const launchProjectile = vi.fn();
+    const damageStructure = vi.fn(() => false);
+    const ctx = makeCtx({
+      entities: [rifle],
+      structures: [chronosphere] as any,
+      launchProjectile,
+      damageStructure,
+    });
+
+    rifle.mission = Mission.HUNT;
+    rifle.targetStructure = chronosphere as any;
+    rifle.attackCooldown = 0;
+    updateAttack(ctx, rifle);
+
+    expect(launchProjectile).not.toHaveBeenCalled();
+    expect(rifle.firePrepActive).toBe(true);
+    expect(rifle.animState).toBe(AnimState.ATTACK);
+
+    rifle.firePrepStage = infantryFireLaunch(rifle.type);
+    rifle.doingStage = infantryFireLaunch(rifle.type);
+    updateAttack(ctx, rifle);
+
+    expect(launchProjectile).toHaveBeenCalledOnce();
+    expect(launchProjectile.mock.calls[0][1]).toBeNull();
+    expect(launchProjectile.mock.calls[0][2]?.name).toBe('M1Carbine');
+    expect(damageStructure).not.toHaveBeenCalled();
+  });
+
+  it('infantry structure attacks launch projectiles at BuildingClass Target_Coord', () => {
+    // C++ TechnoClass::Fire_At(TARGET) passes object->Target_Coord to BulletClass.
+    // For south-foundation buildings like GAP, this is one snapped cell south
+    // of Center_Coord, not the visual center used for zone checks.
+    const rifle = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      25 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const gap = {
+      alive: true, cx: 21, cy: 22, house: House.Greece,
+      type: 'GAP', hp: 1000, maxHp: 1000,
+    };
+    const launchProjectile = vi.fn();
+    const ctx = makeCtx({
+      entities: [rifle],
+      structures: [gap] as any,
+      launchProjectile,
+    });
+
+    rifle.mission = Mission.HUNT;
+    rifle.targetStructure = gap as any;
+    rifle.attackCooldown = 0;
+    rifle.firePrepActive = true;
+    rifle.firePrepStage = infantryFireLaunch(rifle.type);
+    rifle.firePrepUsesDoingStage = false;
+    rifle.firePrepFacing256 = rifle.bodyFacing256;
+
+    updateAttack(ctx, rifle);
+
+    expect(launchProjectile).toHaveBeenCalledOnce();
+    const call = launchProjectile.mock.calls[0];
+    const targetLX = gap.cx * LEPTON_SIZE + LEPTON_SIZE / 2;
+    const targetLY = (gap.cy + 1) * LEPTON_SIZE + LEPTON_SIZE / 2;
+    expect(call[1]).toBeNull();
+    expect(call[4]).toBe(targetLX * CELL_SIZE / LEPTON_SIZE);
+    expect(call[5]).toBe(targetLY * CELL_SIZE / LEPTON_SIZE);
+  });
+
+  it('per-tick Firing_AI continues structure fire prep between hunt timer fires', () => {
+    // C++ InfantryClass::AI runs Firing_AI every object tick, independent of
+    // Mission_Hunt's Normal_Delay timer. Once Mission_Hunt assigns a building
+    // TarCom and starts DO_FIRE_WEAPON, later ticks must still reach Fire_At
+    // when Fetch_Stage()==FireLaunch.
+    const rifle = makeEntity(
+      UnitType.I_E1,
+      House.USSR,
+      59 * CELL_SIZE + CELL_SIZE / 2,
+      105 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    rifle.leptonX = 15296;
+    rifle.leptonY = 27072;
+    rifle.syncPosFromLeptons();
+    const chronosphere = {
+      alive: true, cx: 58, cy: 102, house: House.Greece,
+      type: 'PDOX', hp: 400, maxHp: 400,
+    };
+    const launchProjectile = vi.fn();
+    const ctx = makeCtx({
+      entities: [rifle],
+      structures: [chronosphere] as any,
+      launchProjectile,
+    });
+
+    rifle.mission = Mission.HUNT;
+    rifle.targetStructure = chronosphere as any;
+    rifle.missionTimer = 12;
+    rifle.attackCooldown = 0;
+    rifle.firePrepActive = true;
+    rifle.firePrepUsesDoingStage = true;
+    rifle.firePrepFacing256 = rifle.bodyFacing256;
+    rifle.doing = 'fire';
+    rifle.doingStage = infantryFireLaunch(rifle.type);
+    rifle.doingRate = 1;
+
+    runFiringAI(ctx, rifle);
+
+    expect(launchProjectile).toHaveBeenCalledOnce();
+    expect(launchProjectile.mock.calls[0][1]).toBeNull();
+    expect(launchProjectile.mock.calls[0][2]?.name).toBe('M1Carbine');
   });
 });
 
@@ -839,8 +1228,8 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
     // Should set moveTarget back to origin (return home)
     expect(guard.moveTarget).not.toBeNull();
     if (guard.moveTarget) {
-      expect(guard.moveTarget.lx).toBeCloseTo(pixelToLepton(200), 0);
-      expect(guard.moveTarget.ly).toBeCloseTo(pixelToLepton(200), 0);
+      expect(guard.moveTarget.lx).toBe(coordTargetRoundTripLepton(pixelToLepton(200)));
+      expect(guard.moveTarget.ly).toBe(coordTargetRoundTripLepton(pixelToLepton(200)));
     }
   });
 
@@ -908,9 +1297,10 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
     expect(guard.moveTarget).not.toBeNull();
   });
 
-  it('area guard still attacks enemies encountered while returning home', () => {
-    // C++ foot.cpp doesn't have this exact behavior (it uses Approach_Target on existing TarCom).
-    // TS missionAI.ts:827-838: explicitly checks for enemies while returning
+  it('does not scan from current position while returning to ArchiveTarget', () => {
+    // C++ foot.cpp:1072-1085 clears TarCom, assigns NavCom=ArchiveTarget, then
+    // scans from ArchiveTarget. An enemy only near the guard's current position
+    // is not acquired by this Mission_Guard_Area pass.
     const guard = makeEntity(UnitType.E1, House.USSR, 200, 200);
     guard.guardOrigin = { x: 200, y: 200 };
     guard.mission = Mission.AREA_GUARD;
@@ -931,10 +1321,85 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
 
     updateAreaGuard(ctx, guard);
 
-    // TS attacks enemies en route; C++ would just return home
-    // This tests current TS behavior
-    expect(guard.mission).toBe(Mission.ATTACK);
-    expect(guard.target?.id).toBe(enemy.id);
+    expect(guard.mission).toBe(Mission.AREA_GUARD);
+    expect(guard.target).toBeNull();
+    expect(guard.moveTarget).not.toBeNull();
+  });
+
+  it('returning guard scans from ArchiveTarget and uses the target-found return path', () => {
+    // SCG01EA tick 2644 root case:
+    // Base_Is_Attacked assigns MISSION_GUARD_AREA, ArchiveTarget=attacked object,
+    // and TarCom=attacker. On the first Mission_Guard_Area dispatch, C++ clears
+    // TarCom because the defender is outside the ArchiveTarget leash, assigns
+    // NavCom to ArchiveTarget, scans from ArchiveTarget, finds the attacker, and
+    // returns 1 with no Random_Pick(1,5) jitter.
+    const guard = makeEntity(UnitType.E2, House.USSR, 20 * CELL_SIZE + CELL_SIZE / 2, 40 * CELL_SIZE + CELL_SIZE / 2);
+    const attacker = makeEntity(UnitType.I_C7, House.Greece, 21 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+    guard.mission = Mission.AREA_GUARD;
+    guard.archiveTarget = { cx: 20, cy: 20 };
+    guard.target = attacker;
+
+    const ctx = makeCtx({
+      entities: [guard, attacker],
+      tick: 2644,
+    });
+
+    updateAreaGuard(ctx, guard);
+
+    const archiveCoord = cellTargetToLepton(20, 20);
+    expect(guard.moveTarget).toEqual(archiveCoord);
+    expect(guard.target).toBe(attacker);
+    expect(guard.missionTimer).toBe(1);
+  });
+
+  it('uses exact ArchiveTarget coordinates when they are available', () => {
+    // C++ ArchiveTarget can store a coordinate target, not just a cell target.
+    // The exact As_Coord target anchor matters for subsequent NavCom.
+    const guard = makeEntity(UnitType.E2, House.USSR, 20 * CELL_SIZE + CELL_SIZE / 2, 40 * CELL_SIZE + CELL_SIZE / 2);
+    guard.mission = Mission.AREA_GUARD;
+    guard.archiveTarget = { cx: 20, cy: 20 };
+    guard.archiveTargetLeptons = { lx: 20 * LEPTON_SIZE + LEPTON_SIZE / 2, ly: 20 * LEPTON_SIZE + LEPTON_SIZE / 2 };
+
+    const ctx = makeCtx({
+      entities: [guard],
+      tick: 2644,
+    });
+
+    updateAreaGuard(ctx, guard);
+
+    expect(guard.moveTarget).toEqual(guard.archiveTargetLeptons);
+  });
+
+  it('object ArchiveTarget follows a moved attacked techno for AREA_GUARD scans', () => {
+    // C++ stores Base_Is_Attacked ArchiveTarget as the attacked object's TARGET.
+    // Mission_Guard_Area resolves As_Coord(ArchiveTarget) at dispatch time, so
+    // defenders scan around the HARV's current position after it moves.
+    const guard = makeEntity(UnitType.E2, House.USSR,
+      33 * CELL_SIZE + CELL_SIZE / 2,
+      31 * CELL_SIZE + CELL_SIZE / 2);
+    const harvester = makeEntity(UnitType.V_HARV, House.USSR,
+      30 * CELL_SIZE + CELL_SIZE / 2,
+      33 * CELL_SIZE + CELL_SIZE / 2);
+    const jeep = makeEntity(UnitType.V_JEEP, House.Greece,
+      29 * CELL_SIZE + CELL_SIZE / 2,
+      33 * CELL_SIZE + CELL_SIZE / 2);
+    guard.mission = Mission.AREA_GUARD;
+    guard.archiveTarget = { cx: 34, cy: 27 };
+    guard.archiveTargetLeptons = {
+      lx: 34 * LEPTON_SIZE + LEPTON_SIZE / 2,
+      ly: 27 * LEPTON_SIZE + LEPTON_SIZE / 2,
+    };
+    guard.archiveTargetEntity = harvester;
+
+    const ctx = makeCtx({
+      entities: [guard, harvester, jeep],
+      tick: 3157,
+    });
+
+    updateAreaGuard(ctx, guard);
+
+    expect(guard.target).toBe(jeep);
+    expect(guard.missionTimer).toBe(1);
   });
 });
 

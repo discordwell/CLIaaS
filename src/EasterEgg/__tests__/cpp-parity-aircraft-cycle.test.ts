@@ -60,6 +60,18 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
 }
 
+const HUNT_FLY_TO_TARGET = 2;
+const HUNT_DROP_BOMBS = 3;
+const HUNT_REGROUP = 4;
+
+function setFixedWingAttackPhase(entity: Entity, phase: Entity['attackRunPhase']): void {
+  entity.attackRunPhase = phase;
+  entity.aircraftAttackStatus =
+    phase === 'dropBombs' ? HUNT_DROP_BOMBS :
+    phase === 'regroup' ? HUNT_REGROUP :
+    HUNT_FLY_TO_TARGET;
+}
+
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
 }
@@ -75,6 +87,7 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     idleMission: () => Mission.GUARD,
     fireWeaponAt: vi.fn(),
     fireWeaponAtStructure: vi.fn(),
+    fireWeaponAtCoord: vi.fn(),
     getROFBias: () => 1.0,
     getPowerFraction: () => 1.0,
     ...overrides,
@@ -245,24 +258,20 @@ describe('aircraft RTB when ammo=0 (aircraft.cpp:800-803)', () => {
     expect(heli.target).toBeNull();
   });
 
-  it('fixed-wing transitions to returning via regroup when ammo=0', () => {
+  it('fixed-wing assigns RETREAT via regroup when ammo=0 and no airfield is available', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
     mig.aircraftState = 'attacking';
-    mig.attackRunPhase = 'regroup';
+    setFixedWingAttackPhase(mig, 'regroup');
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     mig.ammo = 0;
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 4 * CELL_SIZE);
     mig.target = enemy;
 
     const ctx = makeAircraftCtx();
-    // Run until state changes from 'attacking'
-    for (let i = 0; i < 100; i++) {
-      if (mig.aircraftState !== 'attacking') break;
-      updateAircraft(ctx, mig);
-    }
+    updateAircraft(ctx, mig);
 
-    expect(mig.aircraftState).toBe('returning');
-    expect(mig.mission).toBe(Mission.GUARD);
+    expect(mig.aircraftState).toBe('flying');
+    expect(mig.mission).toBe(Mission.RETREAT);
   });
 
   it('helicopter with ammo > 0 does NOT RTB (continues attacking)', () => {
@@ -488,7 +497,7 @@ describe('fixed-wing vs rotary flight behavior (aadata.cpp, aircraft.cpp)', () =
   it('fixed-wing uses attack run state machine (flyToTarget/dropBombs/regroup)', () => {
     const mig = makeEntity(UnitType.V_MIG, House.USSR, 200, 200);
     mig.aircraftState = 'attacking';
-    mig.attackRunPhase = 'flyToTarget';
+    setFixedWingAttackPhase(mig, 'flyToTarget');
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     mig.facing = Dir.N;
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 2 * CELL_SIZE);
@@ -678,7 +687,7 @@ describe('weapon firing depletes ammo (techno.cpp:3186-3188)', () => {
     const fireWeaponAt = vi.fn();
     const yak = makeEntity(UnitType.V_YAK, House.USSR, 200, 200);
     yak.aircraftState = 'attacking';
-    yak.attackRunPhase = 'dropBombs';
+    setFixedWingAttackPhase(yak, 'dropBombs');
     yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
     yak.ammo = 15;
     yak.attackCooldown = 0;
@@ -686,11 +695,11 @@ describe('weapon firing depletes ammo (techno.cpp:3186-3188)', () => {
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 2 * CELL_SIZE);
     yak.target = enemy;
 
-    const ctx = makeAircraftCtx({ fireWeaponAt });
+    const ctx = makeAircraftCtx({ fireWeaponAtCoord: fireWeaponAt });
     updateAircraft(ctx, yak);
 
     if (fireWeaponAt.mock.calls.length > 0) {
-      expect(yak.ammo).toBe(14);
+      expect(yak.ammo).toBe(13);
     }
   });
 
@@ -712,14 +721,14 @@ describe('weapon firing depletes ammo (techno.cpp:3186-3188)', () => {
     const fireWeaponAt = vi.fn();
     const yak = makeEntity(UnitType.V_YAK, House.USSR, 200, 200);
     yak.aircraftState = 'attacking';
-    yak.attackRunPhase = 'dropBombs';
+    setFixedWingAttackPhase(yak, 'dropBombs');
     yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
     yak.attackCooldown = 0;
     yak.facing = Dir.N;
-    const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 8 * CELL_SIZE);
+    const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 4 * CELL_SIZE);
     yak.target = enemy;
 
-    const ctx = makeAircraftCtx({ fireWeaponAt });
+    const ctx = makeAircraftCtx({ fireWeaponAtCoord: fireWeaponAt });
 
     let shotsFired = 0;
     for (let tick = 0; tick < 60; tick++) {

@@ -61,7 +61,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission,
-  UNIT_STATS, WEAPON_STATS, worldDist,
+  UNIT_STATS, WEAPON_STATS, worldDist, directionToLeptons256,
+  cellTargetToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -665,6 +666,79 @@ describe('out-of-ammo return-to-base (aircraft.cpp REGROUP, line 800-803)', () =
     const distBefore = worldDist(posBefore, padCenter);
     const distAfter = worldDist(heli.pos, padCenter);
     expect(distAfter).toBeLessThan(distBefore);
+  });
+
+  it('fixed-wing MISSION_ENTER waits for its mission timer before steering to the airstrip', () => {
+    const map = new GameMap();
+    map.setBounds(23, 57, 87, 54);
+    const airstrip = makePadStructure('AFLD', House.USSR, 102, 58);
+    const yak = makeEntity(UnitType.V_YAK, House.USSR, 0, 0);
+    yak.leptonX = 16139;
+    yak.leptonY = 25946;
+    yak.syncPosFromLeptons();
+    yak.aircraftState = 'returning';
+    yak.mission = Mission.ENTER;
+    yak.missionTimer = 3;
+    yak.aircraftEnterStatus = 0;
+    yak.aircraftDockingStructure = 0;
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    yak.facing256 = 67;
+    yak.desiredFacing256 = 67;
+    yak._flyToTicks = 4;
+
+    const ctx = makeAircraftCtx({
+      structures: [airstrip],
+      map,
+      movementSpeed: e => e.stats.speed * CELL_SIZE / 100,
+    });
+
+    updateAircraft(ctx, yak);
+    expect([yak.leptonX, yak.leptonY]).toEqual([16178, 25949]);
+    updateAircraft(ctx, yak);
+    expect([yak.leptonX, yak.leptonY]).toEqual([16217, 25952]);
+    updateAircraft(ctx, yak);
+    expect([yak.leptonX, yak.leptonY]).toEqual([16256, 25955]);
+    expect(yak.missionTimer).toBe(0);
+    expect(yak.aircraftEnterStatus).toBe(0);
+    expect(yak.desiredFacing256).toBe(67);
+  });
+
+  it('fixed-wing MISSION_ENTER STACK flies to BuildingClass::Check_Point, not pad center', () => {
+    const map = new GameMap();
+    map.setBounds(23, 57, 87, 54);
+    const airstrip = makePadStructure('AFLD', House.USSR, 102, 58);
+    const yak = makeEntity(UnitType.V_YAK, House.USSR, 0, 0);
+    yak.leptonX = 16139;
+    yak.leptonY = 25946;
+    yak.syncPosFromLeptons();
+    yak.aircraftState = 'returning';
+    yak.mission = Mission.ENTER;
+    yak.missionTimer = 0;
+    yak.aircraftEnterStatus = 3; // STACK
+    yak.aircraftDockingStructure = 0;
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    yak.facing256 = 67;
+    yak.desiredFacing256 = 67;
+    yak._flyToTicks = 4;
+
+    const before = { lx: yak.leptonX, ly: yak.leptonY };
+    const stackCheckpoint = cellTargetToLepton(103, 63);
+    const oldPadCenter = { lx: Math.trunc((102 + 1.5) * 256), ly: Math.trunc((58 + 1) * 256) };
+    const ctx = makeAircraftCtx({
+      structures: [airstrip],
+      map,
+      movementSpeed: e => e.stats.speed * CELL_SIZE / 100,
+    });
+
+    updateAircraft(ctx, yak);
+
+    expect(yak.desiredFacing256).toBe(
+      directionToLeptons256(before.lx, before.ly, stackCheckpoint.lx, stackCheckpoint.ly),
+    );
+    expect(yak.desiredFacing256).not.toBe(
+      directionToLeptons256(before.lx, before.ly, oldPadCenter.lx, oldPadCenter.ly),
+    );
+    expect(yak.aircraftEnterStatus).toBe(3);
   });
 });
 

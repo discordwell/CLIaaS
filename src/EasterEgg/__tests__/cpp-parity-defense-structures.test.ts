@@ -609,7 +609,7 @@ describe('TSLA does NOT fire during power outage', () => {
 });
 
 // ============================================================================
-// Section 12: Cooldown Behavior — ROF from INI sets attackCooldown
+// Section 12: Cooldown Behavior — ROF from INI sets Arm, wrapper observes one frame elapsed
 // ============================================================================
 
 describe('Attack cooldown matches INI-parsed ROF', () => {
@@ -618,7 +618,7 @@ describe('Attack cooldown matches INI-parsed ROF', () => {
     if (!weaponName) continue;
     const iniROF = Number(ini[weaponName].ROF);
 
-    it(`${bldg} sets attackCooldown to ${iniROF} after firing (ROF from [${weaponName}])`, () => {
+    it(`${bldg} observes attackCooldown ${iniROF - 1} after firing (ROF from [${weaponName}])`, () => {
       const house = bldg === 'FTUR' || bldg === 'TSLA' ? House.USSR : House.Spain;
       const enemyHouse = house === House.USSR ? House.Spain : House.USSR;
       const s = makeDefenseStructure(bldg, house, 10, 10,
@@ -626,7 +626,7 @@ describe('Attack cooldown matches INI-parsed ROF', () => {
       const enemy = entityAtCell(UnitType.I_E1, enemyHouse, 12, 10);
       const ctx = makeCombatCtx([s], [enemy]);
       fireStructures(ctx);
-      expect(s.attackCooldown).toBe(iniROF);
+      expect(s.attackCooldown).toBe(iniROF - 1);
     });
   }
 });
@@ -843,13 +843,15 @@ describe('TSLA produces tesla-type effect when firing', () => {
     expect(teslaEffects.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('PBOX creates a projectile effect (not tesla)', () => {
+  it('PBOX creates an invisible bullet impact effect (not tesla or visible projectile)', () => {
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     fireStructures(ctx);
     const projEffects = ctx.effects.filter(e => e.type === 'projectile');
-    expect(projEffects.length).toBeGreaterThanOrEqual(1);
+    const impactEffects = ctx.effects.filter(e => e.type === 'explosion');
+    expect(projEffects.length).toBe(0);
+    expect(impactEffects.length).toBeGreaterThanOrEqual(1);
     const teslaEffects = ctx.effects.filter(e => e.type === 'tesla');
     expect(teslaEffects.length).toBe(0);
   });
@@ -1034,7 +1036,7 @@ describe('GUN turret must align before firing', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
     fireStructures(ctx);
-    expect(gun.firingFlash).toBe(4);
+    expect(gun.firingFlash).toBe(3);
   });
 });
 

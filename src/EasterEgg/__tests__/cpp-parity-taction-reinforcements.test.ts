@@ -134,6 +134,27 @@ describe('TACTION_REINFORCEMENTS basic spawn', () => {
     const result = executeTriggerAction(action, teamTypes, waypoints, emptyGlobals, emptyTriggers);
     expect(result.spawned.length).toBe(3);
   });
+
+  it('non-transport teams unlimbo in reversed linked-list order while team add order stays INI order', () => {
+    // C++ reinf.cpp:_Create_Group calls Team::Add(temp) in INI order, then
+    // prepends non-transport objects into the list Do_Reinforcements unlimboes:
+    // `temp->Next = object; object = temp`. SCG02EA rnf2 is E1:3,JEEP:1,
+    // so the JEEP enters the Logic array before the three E1s even though the
+    // team member creation/add order remains E1,E1,E1,JEEP.
+    const teamTypes = [makeTeam({
+      members: [
+        { type: 'E1', count: 3 },
+        { type: 'JEEP', count: 1 },
+      ],
+    })];
+    const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 50 }]]);
+    const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
+
+    const result = executeTriggerAction(action, teamTypes, waypoints, emptyGlobals, emptyTriggers);
+
+    expect(result.teamCreationOrder?.map(e => e.type)).toEqual(['E1', 'E1', 'E1', 'JEEP']);
+    expect(result.spawned.map(e => e.type)).toEqual(['JEEP', 'E1', 'E1', 'E1']);
+  });
 });
 
 // ============================================================================

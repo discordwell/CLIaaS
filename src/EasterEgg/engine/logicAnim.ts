@@ -1,6 +1,7 @@
 import { CELL_SIZE, LEPTON_SIZE, EXPLOSION_FRAMES } from './types';
 import { type Effect } from './renderer';
 import { ScenarioRandom } from './random';
+import type { GameMap } from './map';
 
 export type LogicAnimType =
   | 'napalm1'
@@ -9,7 +10,13 @@ export type LogicAnimType =
   | 'elect_die'
   | 'fire_small'
   | 'fire_med'
-  | 'fire_med2';
+  | 'fire_med2'
+  | 'fball1'
+  | 'frag1'
+  | 'veh-hit1'
+  | 'veh-hit2'
+  | 'art-exp1'
+  | 'atomsfx';
 
 export interface LogicAnim {
   type: LogicAnimType;
@@ -29,6 +36,7 @@ interface LogicAnimDef {
   loops: number;
   rate: number;
   scorcher: boolean;
+  crater?: boolean;
   loopStart?: number;
   loopEnd?: number;
   chainTo?: LogicAnimType;
@@ -47,6 +55,14 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   fire_small: { sprite: 'fire3', biggest: 0, stages: 15, loops: 2, rate: 1, scorcher: false },
   fire_med: { sprite: 'fire2', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true },
   fire_med2: { sprite: 'fire1', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true },
+  // C++ adata.cpp crater-forming combat animations. AnimClass::Middle calls
+  // CellClass::Reduce_Tiberium(6) and places SMUDGE_CRATER1.
+  fball1: { sprite: 'fball1', biggest: 6, stages: 18, loops: 1, rate: 1, scorcher: false, crater: true },
+  frag1: { sprite: 'frag1', biggest: 3, stages: 14, loops: 1, rate: 1, scorcher: false, crater: true },
+  'veh-hit1': { sprite: 'veh-hit1', biggest: 4, stages: 17, loops: 1, rate: 1, scorcher: false, crater: true },
+  'veh-hit2': { sprite: 'veh-hit2', biggest: 1, stages: 22, loops: 1, rate: 1, scorcher: false, crater: true },
+  'art-exp1': { sprite: 'art-exp1', biggest: 1, stages: 22, loops: 1, rate: 1, scorcher: false, crater: true },
+  atomsfx: { sprite: 'atomsfx', biggest: 19, stages: 27, loops: 0, rate: 1, scorcher: true, crater: true },
 };
 
 export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimType | null {
@@ -57,6 +73,12 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
     case 'fire1': return 'fire_med2';
     case 'fire2': return 'fire_med';
     case 'fire3': return 'fire_small';
+    case 'fball1': return 'fball1';
+    case 'frag1': return 'frag1';
+    case 'veh-hit1': return 'veh-hit1';
+    case 'veh-hit2': return 'veh-hit2';
+    case 'art-exp1': return 'art-exp1';
+    case 'atomsfx': return 'atomsfx';
     default: return null;
   }
 }
@@ -112,7 +134,7 @@ export function spawnLogicAnim(
   logicAnimStart(anim, logicAnims, effects);
 }
 
-export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[]): boolean {
+export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[], map?: GameMap): boolean {
   if (anim.isBrandNew) {
     // C++ anim.cpp:677-680 — brand-new anims skip their first Logic pass.
     anim.isBrandNew = false;
@@ -135,7 +157,7 @@ export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effec
   anim.timer = def.rate;
 
   if (def.biggest > 0 && anim.stage === def.biggest) {
-    logicAnimMiddle(anim, logicAnims, effects);
+    logicAnimMiddle(anim, logicAnims, effects, map);
   }
 
   // C++ anim.cpp:758 — while Loops > 1, loop at LoopEnd-Start; on the
@@ -157,7 +179,7 @@ export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effec
       anim.timer = chainDef.rate;
       anim.loops = chainDef.loops;
       anim.delay = 0;
-      logicAnimStart(anim, logicAnims, effects);
+      logicAnimStart(anim, logicAnims, effects, map);
       return true;
     }
     return false;
@@ -166,21 +188,28 @@ export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effec
   return true;
 }
 
-function logicAnimStart(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[]): void {
+function logicAnimStart(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[], map?: GameMap): void {
   const def = LOGIC_ANIM_DEFS[anim.type];
   // C++ anim.cpp:914-916 — animations whose Biggest stage is frame 0 run Middle
   // immediately from Start(), including FIRE_MED spawning FIRE_SMALL.
   if (def.biggest === 0) {
-    logicAnimMiddle(anim, logicAnims, effects);
+    logicAnimMiddle(anim, logicAnims, effects, map);
   }
 }
 
-function logicAnimMiddle(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[]): void {
+function logicAnimMiddle(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[], map?: GameMap): void {
   const def = LOGIC_ANIM_DEFS[anim.type];
 
   // C++ anim.cpp:954-956 — scorcher animations create a random scorch smudge.
   if (def.scorcher) {
     ScenarioRandom.nextInRange(1, 6);
+  }
+
+  if (def.crater && map) {
+    const cx = Math.floor(anim.x / CELL_SIZE);
+    const cy = Math.floor(anim.y / CELL_SIZE);
+    map.reduceOreLevels(cx, cy, 6);
+    map.addDecal(cx, cy, 10, 0.4);
   }
 
   switch (anim.type) {

@@ -35,6 +35,7 @@ import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
 import {
   STRUCTURE_MAX_HP, STRUCTURE_SIZE, STRUCTURE_ARMOR, getBibCells,
+  isStructureUnderConstruction, structureConstructionProgressTicks,
 } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 import {
@@ -469,6 +470,31 @@ describe('FACT properties after MCV deployment', () => {
     expect(ctx.structures[0].deployedFromMCV).toBe(true);
   });
 
+  it('deployed FACT construction completes on the C++ make-sheet cadence', () => {
+    // FACTMAKE has 32 buildup frames. In C++, the MCV creates the building
+    // after its Logic slot for that frame has passed, so the first Guard AI
+    // opportunity is the frame after those 32 TS progress ticks complete.
+    expect(structureConstructionProgressTicks('FACT')).toBe(32);
+
+    const progressAfter31Ticks = 31 / structureConstructionProgressTicks('FACT');
+    const progressAfter32Ticks = 32 / structureConstructionProgressTicks('FACT');
+    expect(progressAfter31Ticks).toBeLessThan(1);
+    expect(progressAfter32Ticks).toBe(1);
+  });
+
+  it('completed buildProgress=1 is no longer treated as under construction', () => {
+    const ctx = makePlacementCtx();
+    const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
+    ctx.entities.push(mcv);
+    ctx.entityById.set(mcv.id, mcv);
+
+    deployMCV(ctx, mcv);
+    const fact = ctx.structures[0];
+    expect(isStructureUnderConstruction(fact)).toBe(true);
+    fact.buildProgress = 1;
+    expect(isStructureUnderConstruction(fact)).toBe(false);
+  });
+
   it('FACT maxHp = 1000 (rules.ini [FACT] Strength=1000)', () => {
     const ctx = makePlacementCtx();
     const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
@@ -585,13 +611,11 @@ describe('ConYard sell → MCV reversion structural checks (building.cpp:3509-35
 
 describe('C++ deployment preconditions (unit.cpp:1482-1513)', () => {
 
-  it('C++ requires MCV to face DIR_SW (225 deg) before deploy completes', () => {
+  it('C++ requires MCV to face DIR_SW before deploy completes', () => {
     // unit.cpp:1509: if (PrimaryFacing.Current() != DIR_SW) { Do_Turn(DIR_SW); IsDeploying = true; }
-    // TS does not enforce facing requirement — MCV deploys instantly.
-    // This is an acceptable simplification: TS has no rotation-then-deploy state machine.
-    // Document the C++ behavior for parity awareness.
-    // DIR_SW = 224 (compass: southwest)
-    expect(true).toBe(true); // documents C++ behavior
+    // DIR_SW = 5 << 5 = 160.
+    expect(placementSource).toContain('MCV_DEPLOY_FACING256');
+    expect(placementSource).toContain('mcvIsDeploying');
   });
 
   it('C++ requires NavCom not legal and not rotating before Try_To_Deploy', () => {
@@ -603,8 +627,7 @@ describe('C++ deployment preconditions (unit.cpp:1482-1513)', () => {
 
   it('C++ deployment sets IsDeploying flag during rotation (unit.cpp:1512)', () => {
     // unit.cpp:1512: IsDeploying = true; — flags MCV for deploy-after-rotation
-    // TS has no equivalent; deployment is atomic.
-    expect(true).toBe(true);
+    expect(placementSource).toContain('entity.mcvIsDeploying = true');
   });
 });
 
@@ -734,13 +757,14 @@ describe('MCV deploy key binding integration (index.ts)', () => {
   });
 
   it('team mission TMISSION_DEPLOY handles MCV', () => {
-    // C++ team.cpp TMission_Deploy — AI teams can deploy MCVs
+    // C++ team.cpp TMission_Deploy — AI teams queue MISSION_UNLOAD for MCVs
     // Search for the case handler (not the constant definition)
     const deploySection = indexSource.indexOf('case Game.TMISSION_DEPLOY');
     expect(deploySection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(deploySection, deploySection + 500);
     expect(chunk).toContain('UnitType.V_MCV');
-    expect(chunk).toContain('deployMCV');
+    expect(chunk).toContain('Mission.UNLOAD');
+    expect(chunk).toContain('assignMission');
   });
 });
 
@@ -947,12 +971,13 @@ describe('AI MCV Mission_Hunt auto-deploy (unit.cpp:2947-2983)', () => {
 
   it('C++ AI MCV on HUNT mission searches for clear spot to deploy', () => {
     // unit.cpp:2960: if (Goto_Clear_Spot()) { if (Try_To_Deploy()) { Status = WAITING; } }
-    // AI MCVs automatically find a clear spot and deploy.
-    // TS handles this via TMISSION_DEPLOY in the team mission system.
+    // AI MCVs automatically find a clear spot and deploy from Mission_Hunt.
+    // Team TMISSION_DEPLOY queues Mission.UNLOAD; the unload handler deploys.
     const deploySection = indexSource.indexOf('case Game.TMISSION_DEPLOY');
     expect(deploySection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(deploySection, deploySection + 500);
-    expect(chunk).toContain('deployMCV');
+    expect(chunk).toContain('Mission.UNLOAD');
+    expect(chunk).toContain('assignMission');
   });
 
   it('C++ MCV MISSION_UNLOAD has 3 states: stop, try deploy, wait (unit.cpp:2546-2576)', () => {

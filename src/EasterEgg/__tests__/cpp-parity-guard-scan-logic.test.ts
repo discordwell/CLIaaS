@@ -12,7 +12,7 @@
  *   - techno.cpp:4543-4582  — Threat_Range(0) returns 0 for guard, Threat_Range(1) for area guard
  *
  * C++ parity differences fixed:
- *   1. Range check uses > (not >=) to match C++ In_Range <= boundary (inclusive)
+ *   1. THREAT_RANGE candidate checks use the selected weapon's In_Range <= boundary
  *   2. No terrain LOS check — C++ Evaluate_Object has no hasLineOfSight filter
  *   3. Area guard leash = min(weaponRange, 5), not min(weaponRange/2, 5)
  *   4. Area guard scan range = 2*weaponRange (Threat_Range(1)), not max(leash, sight)
@@ -20,12 +20,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { Entity } from '../engine/entity';
-import { updateGuard, updateAreaGuard, type MissionAIContext } from '../engine/missionAI';
+import { updateGuard, updateAreaGuard, updateHunt, updateAttack, type MissionAIContext } from '../engine/missionAI';
 import {
-  CELL_SIZE, LEPTON_SIZE, House, UnitType, Mission, Stance, AnimState,
-  UNIT_STATS, WEAPON_STATS, worldDist,
+  CELL_SIZE, LEPTON_SIZE, House, UnitType, Mission, Stance, AnimState, Dir,
+  UNIT_STATS, WEAPON_STATS, worldDist, leptonDist,
 } from '../engine/types';
 import { ScenarioRandom } from '../engine/random';
+import { MoveResult } from '../engine/map';
 
 // Helper to create entity
 function makeEntity(type: UnitType | string, house: House, x: number, y: number): Entity {
@@ -106,7 +107,52 @@ function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[]; t
   };
 }
 
-describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <=', () => {
+describe('Mission_Hunt no-threat Random_Animate fall-through — C++ foot.cpp:721-775', () => {
+  it('unarmed HUNT infantry still runs Random_Animate when Target_Something_Nearby has no legal mask', () => {
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      tagLogging: ScenarioRandom._tagLogging,
+      sourceTag: ScenarioRandom._sourceTag,
+      entityTag: ScenarioRandom._entityTag,
+      seedLog: ScenarioRandom._seedLog,
+    };
+
+    try {
+      ScenarioRandom.seed = 0x12345678;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._sourceTag = 10026;
+      ScenarioRandom._entityTag = 10026;
+      ScenarioRandom._seedLog = [];
+
+      const engineer = makeEntity(UnitType.I_E6, House.GoodGuy, 9 * CELL_SIZE, 55 * CELL_SIZE);
+      engineer.mission = Mission.HUNT;
+      engineer.missionTimer = 0;
+      engineer.doing = 'stand_ready';
+      engineer.idleAnimTimer = 0;
+      engineer.isDriving = false;
+
+      updateHunt(makeCtx({ entities: [engineer], playerHouse: House.Greece, tick: 1152 }), engineer);
+
+      const tags = ScenarioRandom._seedLog.map(([, tag]) => tag);
+      expect(tags).toContain(30001);
+      expect(tags).toContain(30002);
+      expect(engineer.idleAnimTimer).toBeGreaterThan(0);
+      expect(engineer.target).toBeNull();
+      expect(engineer.targetStructure).toBeNull();
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._entityTag = saved.entityTag;
+      ScenarioRandom._seedLog = saved.seedLog;
+    }
+  });
+});
+
+describe('Guard scan weapon range boundary — C++ techno.cpp:1539-1544 In_Range uses selected weapon', () => {
   // C++ parity note: FootClass::Mission_Guard calls Target_Something_Nearby(THREAT_RANGE)
   // → Greatest_Threat(THREAT_RANGE). Per techno.cpp:2013-2026, only DOGS / MEDICS / MECHANICS
   // get type bits added to the scan mask; regular infantry and vehicles get mask=0, which
@@ -114,37 +160,38 @@ describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <
   // These tests therefore use a DOG scanner, which gets THREAT_INFANTRY bits added and
   // can actually acquire infantry targets via Mission_Guard's cell-based scan.
 
-  it('target at EXACTLY guard scan range is included (C++ Distance <= scanRange)', () => {
-    // C++ In_Range: ::Distance(Fire_Coord, target->Center_Coord()) <= scanRange.
-    // Dog guardRange = 7 cells. Place the target exactly 7 cells from Fire_Coord,
-    // not from the dog's visual center.
+  it('target at EXACTLY selected weapon range is included (C++ In_Range <= weapon range)', () => {
+    // C++ Greatest_Threat's cell ring may scan farther than the weapon, but
+    // Evaluate_Object(range==0) accepts only if In_Range(object, selectedWeapon)
+    // is true. Place the target exactly one DogJaw range from Fire_Coord.
     const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    const dogScanRange = scanner.stats.guardRange!; // 7 cells
-    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + dogScanRange * CELL_SIZE, 100);
+    const dogWeaponRange = scanner.weapon!.range;
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + dogWeaponRange * CELL_SIZE, 100);
     const fireCoord = scanner.fireCoordForWeapon(scanner.weapon);
-    setLeptonPos(target, fireCoord.lx + dogScanRange * LEPTON_SIZE, fireCoord.ly);
+    setLeptonPos(target, fireCoord.lx + dogWeaponRange * LEPTON_SIZE, fireCoord.ly);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });
     updateGuard(ctx, scanner);
 
-    // C++ would include this target (<=), so TS should too
+    // C++ would include this target (<=), so TS should too.
     expect(scanner.target).toBe(target);
   });
 
-  it('target just beyond guard scan range is excluded (C++ Distance > scanRange)', () => {
+  it('target just beyond selected weapon range is excluded (C++ In_Range > weapon range)', () => {
     const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    const dogScanRange = scanner.stats.guardRange!; // 7 cells
-    // Place target just outside guardRange
-    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + (dogScanRange + 0.1) * CELL_SIZE, 100);
+    const dogWeaponRangeLeptons = scanner.weapon!.range * LEPTON_SIZE;
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
+    const fireCoord = scanner.fireCoordForWeapon(scanner.weapon);
+    setLeptonPos(target, fireCoord.lx + Math.floor(dogWeaponRangeLeptons) + 1, fireCoord.ly);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });
     updateGuard(ctx, scanner);
 
-    // Should NOT find this target — beyond guard scan range
+    // Should NOT find this target: it is inside the scan ring but outside DogJaw.
     expect(scanner.target).toBeNull();
   });
 
@@ -164,6 +211,142 @@ describe('Guard scan range boundary — C++ techno.cpp:1517-1523 In_Range uses <
     updateGuard(ctx, scanner);
 
     expect(scanner.target).toBe(target);
+  });
+
+  it('existing TarCom validation uses the C++ selected weapon range, not any weapon range', () => {
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      tagLogging: ScenarioRandom._tagLogging,
+      sourceTag: ScenarioRandom._sourceTag,
+      entityTag: ScenarioRandom._entityTag,
+      seedLog: ScenarioRandom._seedLog,
+    };
+
+    try {
+      ScenarioRandom.seed = 0x2468ace0;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._sourceTag = 10073;
+      ScenarioRandom._entityTag = 10073;
+      ScenarioRandom._seedLog = [];
+
+      const rocket = makeEntity(UnitType.I_E3, House.Greece, 0, 0);
+      const target = makeEntity(UnitType.I_E1, House.USSR, 0, 0);
+      setLeptonPos(rocket, 4160, 16576);
+      setLeptonPos(target, 4928, 17878);
+      rocket.mission = Mission.GUARD;
+      rocket.target = target;
+      rocket.doing = 'stand_ready';
+      rocket.idleAnimTimer = 0;
+      rocket.bodyFacing256 = Dir.S * 32;
+      rocket.bodyFacing32 = Dir.S * 4;
+      target.mission = Mission.HUNT;
+
+      expect(rocket.weapon?.name).toBe('RedEye');
+      expect(rocket.weapon2?.name).toBe('Dragon');
+      expect(rocket.inRangeWith(target, rocket.weapon!)).toBe(true);
+      expect(rocket.inRangeWith(target, rocket.weapon2!)).toBe(false);
+
+      updateGuard(makeCtx({ entities: [rocket, target], playerHouse: House.Greece }), rocket);
+
+      const tags = ScenarioRandom._seedLog.map(([, tag]) => tag);
+      expect(rocket.target).toBeNull();
+      expect(tags).toContain(30001);
+      expect(tags).toContain(30002);
+      expect(rocket.idleAnimTimer).toBeGreaterThan(0);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._entityTag = saved.entityTag;
+      ScenarioRandom._seedLog = saved.seedLog;
+    }
+  });
+
+  it('guard scan uses target center, but Firing_AI range uses falling Target_Coord', () => {
+    // SCG08EA tick 694 C++ fixture:
+    //   Greece E1[9] at (63,104), PrimaryFacing=64, Fire_Coord=(16335,26636)
+    //   USSR E1[13] at (63,101), Center_Coord=(16320,25920), Height=130
+    //
+    // TechnoClass::Evaluate_Object uses In_Range(Object*) against Center_Coord,
+    // so Mission_Guard acquires the falling target. InfantryClass::Firing_AI then
+    // calls Can_Fire(TARGET), whose In_Range(TARGET) uses As_Coord/Target_Coord
+    // = (16320,25790), outside M1Carbine's 768-lepton range. C++ therefore
+    // keeps TarCom but does not start DO_FIRE_WEAPON or launch a bullet.
+    const scanner = makeEntity(UnitType.I_E1, House.Greece, 0, 0);
+    setLeptonPos(scanner, 16320, 26688);
+    scanner.mission = Mission.GUARD;
+    scanner.missionTimer = 0;
+    scanner.facing = Dir.E;
+    scanner.desiredFacing = Dir.E;
+    scanner.bodyFacing256 = 64;
+    scanner.desiredFacing256 = 64;
+    scanner.bodyFacing32 = 8;
+    scanner.doing = 'stand_ready';
+
+    const target = makeEntity(UnitType.I_E1, House.USSR, 0, 0);
+    setLeptonPos(target, 16320, 25920);
+    target.mission = Mission.GUARD;
+    target.isFalling = true;
+    target.fallHeightLeptons = 130;
+    target.flightAltitude = 12;
+
+    expect(scanner.inRangeCoord(target.leptonX, target.leptonY),
+      'Object* center overload used by Evaluate_Object is in range').toBe(true);
+    expect(scanner.inRange(target),
+      'TARGET overload used by Can_Fire is out of range because Target_Coord subtracts Height').toBe(false);
+
+    const ctx = makeCtx({ entities: [scanner, target], tick: 694 });
+    updateGuard(ctx, scanner);
+
+    expect(scanner.target, 'Mission_Guard still assigns TarCom from center-based Evaluate_Object').toBe(target);
+
+    updateAttack(ctx, scanner);
+
+    expect(scanner.firePrepActive,
+      'Firing_AI must not start DO_FIRE_WEAPON while TARGET-coordinate range is false').toBe(false);
+    expect(scanner.attackCooldown).toBe(0);
+  });
+
+  it('infantry Firing_AI checks range before snapping PrimaryFacing to the target', () => {
+    // C++ infantry.cpp:3589-3635 calls Can_Fire(TarCom) before
+    // PrimaryFacing.Set(Direction8(...)). At this SCG06EA-shaped boundary,
+    // the old SE rifle muzzle is in range by one lepton, while the snapped S
+    // muzzle would be out of range by one lepton. C++ therefore starts
+    // DO_FIRE_WEAPON this tick, then snaps PrimaryFacing for the later launch.
+    const scanner = makeEntity(UnitType.I_E1, House.Greece, 0, 0);
+    setLeptonPos(scanner, 5312, 16448);
+    scanner.mission = Mission.GUARD;
+    scanner.missionTimer = 0;
+    scanner.facing = Dir.SE;
+    scanner.desiredFacing = Dir.SE;
+    scanner.bodyFacing256 = 96;
+    scanner.desiredFacing256 = 96;
+    scanner.bodyFacing32 = 12;
+    scanner.doing = 'stand_ready';
+    scanner.attackCooldown = 0;
+
+    const target = makeEntity(UnitType.I_E1, House.USSR, 0, 0);
+    setLeptonPos(target, 5382, 17146);
+    scanner.target = target;
+
+    const oldFire = scanner.fireCoordForWeapon(scanner.weapon!);
+    expect(leptonDist(oldFire.lx, oldFire.ly, target.leptonX, target.leptonY)).toBe(767);
+    scanner.bodyFacing256 = 128;
+    scanner.facing = Dir.S;
+    const snappedFire = scanner.fireCoordForWeapon(scanner.weapon!);
+    expect(leptonDist(snappedFire.lx, snappedFire.ly, target.leptonX, target.leptonY)).toBe(769);
+    scanner.bodyFacing256 = 96;
+    scanner.facing = Dir.SE;
+
+    updateAttack(makeCtx({ entities: [scanner, target], tick: 1724 }), scanner);
+
+    expect(scanner.firePrepActive).toBe(true);
+    expect(scanner.doing).toBe('fire');
+    expect(scanner.bodyFacing256).toBe(128);
+    expect(scanner.firePrepFacing256).toBe(128);
   });
 });
 
@@ -195,6 +378,61 @@ describe('Guard scan has no terrain LOS check — C++ Evaluate_Object parity', (
 
     // C++ parity: target should be found even with LOS blocked
     expect(scanner.target).toBe(target);
+  });
+});
+
+describe('Guard scan cell occupiers — C++ top-layer falling infantry exclusion', () => {
+  it('ignores parachuting infantry while they are still in the top layer', () => {
+    // C++ path:
+    //   ObjectClass::In_Which_Layer: Height >= FLIGHT_LEVEL - FLIGHT_LEVEL/3 => LAYER_TOP
+    //   FootClass::Mark: MARK_DOWN becomes MARK_CHANGE outside LAYER_GROUND
+    //   TechnoClass::Evaluate_Cell: reads Map[cell].Cell_Occupier(), so top-layer
+    //   falling infantry are not visible to Mission_Guard's ground cell scan.
+    const scanner = makeEntity(UnitType.I_E1, House.Greece, 57 * CELL_SIZE + CELL_SIZE / 2, 101 * CELL_SIZE + CELL_SIZE / 2);
+    scanner.mission = Mission.GUARD;
+    scanner.missionTimer = 0;
+    scanner.idleAnimTimer = 0;
+    scanner.doing = 'stand_ready';
+    scanner.isDriving = false;
+
+    const falling = makeEntity(UnitType.I_E1, House.USSR, 59 * CELL_SIZE + CELL_SIZE / 2, 100 * CELL_SIZE + CELL_SIZE / 2);
+    falling.mission = Mission.GUARD;
+    falling.isFalling = true;
+    falling.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+    falling.flightAltitude = Entity.FLIGHT_ALTITUDE;
+
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      tagLogging: ScenarioRandom._tagLogging,
+      sourceTag: ScenarioRandom._sourceTag,
+      entityTag: ScenarioRandom._entityTag,
+      seedLog: ScenarioRandom._seedLog,
+    };
+
+    try {
+      ScenarioRandom.seed = 0x12345678;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._sourceTag = 0;
+      ScenarioRandom._entityTag = scanner.id;
+      ScenarioRandom._seedLog = [];
+
+      updateGuard(makeCtx({ entities: [scanner, falling], playerHouse: House.Greece, tick: 612 }), scanner);
+
+      const tags = ScenarioRandom._seedLog.map(([, tag]) => tag);
+      expect(scanner.target).toBeNull();
+      expect(tags).toContain(30001);
+      expect(tags).toContain(30002);
+      expect(scanner.idleAnimTimer).toBeGreaterThan(0);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._entityTag = saved.entityTag;
+      ScenarioRandom._seedLog = saved.seedLog;
+    }
   });
 });
 
@@ -349,6 +587,54 @@ describe('Player-allied civilian Mission_Guard — C++ foot.cpp:594 Random_Anima
 
     expect(civ.target).toBeNull();
     expect(civ.mission).toBe(Mission.GUARD);
+  });
+
+  it('AI fraidy-cat civilian wander roll queues Scatter MOVE on Random_Animate case 8', () => {
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      sourceTag: ScenarioRandom._sourceTag,
+      tagLogging: ScenarioRandom._tagLogging,
+      seedLog: ScenarioRandom._seedLog,
+    };
+
+    try {
+      const civ = makeEntity(UnitType.I_C7, House.England, 76 * CELL_SIZE + 12, 48 * CELL_SIZE + 12);
+      civ.mission = Mission.GUARD;
+      civ.missionTimer = 0;
+      civ.idleAnimTimer = 0;
+      civ.doing = 'stand_ready';
+      civ.fear = 0;
+
+      // Seed 27 makes Random_Animate pick case 8 after the idle-timer roll.
+      ScenarioRandom.seed = 27;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._sourceTag = 0;
+      ScenarioRandom._tagLogging = true;
+      ScenarioRandom._seedLog = [];
+
+      const ctx = makeCtx({
+        entities: [civ],
+        playerHouse: House.Greece,
+        // Game.isPlayerControlled treats player allies as controlled for UI and
+        // target selection. C++ Random_Animate checks House->IsHuman instead,
+        // so an allied non-player house like SCG01EA England must still scatter.
+        isPlayerControlled: () => true,
+        infantryCanEnterCell: () => MoveResult.OK,
+      });
+      updateGuard(ctx, civ);
+
+      expect(civ.mission).toBe(Mission.GUARD);
+      expect(civ.missionQueue).toBe(Mission.MOVE);
+      expect(civ.moveTarget).not.toBeNull();
+      expect(ScenarioRandom._seedLog.map(([, tag]) => tag)).toContain(53003);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+      ScenarioRandom._seedLog = saved.seedLog;
+    }
   });
 
   it('player-allied civilian with nearby ant flees via Mission.MOVE', () => {

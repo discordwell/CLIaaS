@@ -1,0 +1,143 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * C++ Behavioral Parity: HouseClass Active*Scan for trigger events.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { Game } from '../engine/index';
+import { Entity, resetEntityIds } from '../engine/entity';
+import type { ScenarioTrigger } from '../engine/scenario';
+import { CELL_SIZE, House, Mission, RESFACTOR, UnitType } from '../engine/types';
+
+class FakeAudio {
+  src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  play(): Promise<void> { return Promise.resolve(); }
+  pause(): void {}
+  cloneNode(): FakeAudio { return new FakeAudio(); }
+}
+
+interface TriggerHouseSnapshot {
+  houseAlive: Map<number, boolean>;
+  houseUnitsAlive: Map<number, boolean>;
+}
+
+const HOUSE_GREECE = 1; // C++ HousesType index, used by TEVENT_ALL_DESTROYED data.
+
+function createCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320 * RESFACTOR;
+  canvas.height = 200 * RESFACTOR;
+  return canvas;
+}
+
+function createGame(): Game {
+  const game = new Game(createCanvas());
+  game.map.setBounds(0, 0, 128, 128);
+  return game;
+}
+
+function addEntity(game: Game, entity: Entity): void {
+  game.entities.push(entity);
+  game.entityById.set(entity.id, entity);
+}
+
+function buildTriggerSharedSnapshot(game: Game): TriggerHouseSnapshot {
+  return (game as unknown as {
+    buildTriggerSharedSnapshot(): TriggerHouseSnapshot;
+  }).buildTriggerSharedSnapshot();
+}
+
+function cleanupCompletedInfantryDeathAnimations(game: Game): void {
+  (game as unknown as {
+    cleanupCompletedInfantryDeathAnimations(): void;
+  }).cleanupCompletedInfantryDeathAnimations();
+}
+
+function updateGame(game: Game): void {
+  (game as unknown as { update(): void }).update();
+}
+
+function makeTrigger(overrides: Partial<ScenarioTrigger> = {}): ScenarioTrigger {
+  return {
+    name: 'lose',
+    persistence: 0,
+    house: 0,
+    eventControl: 0,
+    actionControl: 0,
+    event1: { type: 11, team: -1, data: HOUSE_GREECE },
+    event2: { type: 0, team: -1, data: 0 },
+    action1: { action: 2, team: -1, trigger: -1, data: 0 },
+    action2: { action: 0, team: -1, trigger: -1, data: 0 },
+    fired: false,
+    timerTick: 0,
+    playerEntered: false,
+    playerEnteredHouse: -1,
+    objectDiscovered: false,
+    enteredZone: false,
+    crossedHorizontal: false,
+    crossedVertical: false,
+    forceFirePending: false,
+    pendingDestroyedCount: 0,
+    triggeringEntityIds: [],
+    attachCount: 0,
+    remainingAttachCount: 0,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  resetEntityIds();
+  vi.restoreAllMocks();
+  vi.stubGlobal('Audio', FakeAudio);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
+    { imageSmoothingEnabled: false } as unknown as CanvasRenderingContext2D
+  ));
+});
+
+describe('Trigger house active scan parity', () => {
+  it('LogicTriggers.Spring(TEVENT_TIME) evaluates ALL_DESTROYED on non-15 ticks', () => {
+    const game = createGame();
+    game.state = 'playing';
+    (game as unknown as { tick: number }).tick = 199;
+    (game as unknown as { triggers: ScenarioTrigger[] }).triggers = [makeTrigger()];
+
+    updateGame(game);
+
+    expect((game as unknown as { isToLose: boolean }).isToLose).toBe(true);
+    expect((game as unknown as { borrowedTime: number }).borrowedTime).toBe(24);
+    expect((game as unknown as { triggers: ScenarioTrigger[] }).triggers[0].fired).toBe(true);
+  });
+
+  it('counts zero-strength infantry death animations as house-active until Logic removal', () => {
+    const game = createGame();
+    const corpse = new Entity(UnitType.I_E1, House.Greece, 70 * CELL_SIZE, 59 * CELL_SIZE);
+    corpse.alive = false;
+    corpse.hp = 0;
+    corpse.mission = Mission.DIE;
+    corpse.deathVariant = 1;
+    const deathDuration = corpse.infantryDeathDurationTicks();
+    expect(deathDuration).toBeGreaterThan(0);
+    corpse.deathTick = deathDuration - 1;
+    addEntity(game, corpse);
+
+    let snapshot = buildTriggerSharedSnapshot(game);
+
+    expect(corpse.occupiesCppLogic()).toBe(true);
+    expect(snapshot.houseAlive.get(HOUSE_GREECE)).toBe(true);
+    expect(snapshot.houseUnitsAlive.get(HOUSE_GREECE)).toBe(true);
+
+    corpse.deathTick = deathDuration;
+    cleanupCompletedInfantryDeathAnimations(game);
+    snapshot = buildTriggerSharedSnapshot(game);
+
+    expect(corpse.occupiesCppLogic()).toBe(false);
+    expect(game.entities).not.toContain(corpse);
+    expect(game.entityById.has(corpse.id)).toBe(false);
+    expect(snapshot.houseAlive.get(HOUSE_GREECE)).not.toBe(true);
+    expect(snapshot.houseUnitsAlive.get(HOUSE_GREECE)).not.toBe(true);
+  });
+});

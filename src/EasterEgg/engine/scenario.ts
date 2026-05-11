@@ -21,18 +21,18 @@ import { ScenarioRandom } from './random';
 // === RA Trigger/Team System (from TRIGGER.CPP, TEAMTYPE.CPP) ===
 
 // Trigger event types (TEventType — from TEVENT.H:46-83, C++ enum order)
-const TEVENT_NONE = 0;
-const TEVENT_PLAYER_ENTERED = 1;
-const TEVENT_SPIED = 2;                   // TR3/TR5: spy infiltrated building (C++ TEVENT_SPIED)
+export const TEVENT_NONE = 0;
+export const TEVENT_PLAYER_ENTERED = 1;
+export const TEVENT_SPIED = 2;            // TR3/TR5: spy infiltrated building (C++ TEVENT_SPIED)
 const TEVENT_THIEVED = 3;                 // TR5: fixed index (was 17, C++ = 3)
-const TEVENT_DISCOVERED = 4;
+export const TEVENT_DISCOVERED = 4;
 const TEVENT_HOUSE_DISCOVERED = 5;        // TR5: fixed index (was 3, C++ = 5)
-const TEVENT_ATTACKED = 6;
-const TEVENT_DESTROYED = 7;
-const TEVENT_ANY = 8;
-const TEVENT_UNITS_DESTROYED = 9;         // TR5: fixed index (was 26, C++ = 9) — all house's units destroyed
+export const TEVENT_ATTACKED = 6;
+export const TEVENT_DESTROYED = 7;
+export const TEVENT_ANY = 8;
+export const TEVENT_UNITS_DESTROYED = 9;  // TR5: fixed index (was 26, C++ = 9) — all house's units destroyed
 const TEVENT_BUILDINGS_DESTROYED = 10;    // TR3: all house's buildings destroyed (C++ = 10)
-const TEVENT_ALL_DESTROYED = 11;
+export const TEVENT_ALL_DESTROYED = 11;
 const TEVENT_CREDITS = 12;               // TR5: fixed index (was 30, C++ = 12)
 export const TEVENT_TIME = 13;
 export const TEVENT_MISSION_TIMER_EXPIRED = 14;
@@ -45,9 +45,9 @@ const TEVENT_BUILD_UNIT = 20;             // TR3: specified unit built (C++ TEVE
 const TEVENT_BUILD_INFANTRY = 21;         // TR3/TR5: infantry built (C++ = 21)
 const TEVENT_BUILD_AIRCRAFT = 22;         // TR3/TR5: aircraft built (C++ = 22)
 const TEVENT_LEAVES_MAP = 23;
-const TEVENT_ENTERS_ZONE = 24;
-const TEVENT_CROSS_HORIZONTAL = 25;       // TR5: fixed index (was 21, C++ = 25)
-const TEVENT_CROSS_VERTICAL = 26;         // TR5: fixed index (was 22, C++ = 26)
+export const TEVENT_ENTERS_ZONE = 24;
+export const TEVENT_CROSS_HORIZONTAL = 25; // TR5: fixed index (was 21, C++ = 25)
+export const TEVENT_CROSS_VERTICAL = 26;   // TR5: fixed index (was 22, C++ = 26)
 export const TEVENT_GLOBAL_SET = 27;
 export const TEVENT_GLOBAL_CLEAR = 28;
 const TEVENT_FAKES_DESTROYED = 29;        // TR3: all fake structures destroyed
@@ -1140,7 +1140,7 @@ export function calculateHouseEdgeSpawnCell(
   houseEdges: Map<House, string> | undefined,
   mapBounds: { x: number; y: number; w: number; h: number } | undefined,
   alignedCell?: CellPos,
-  random: () => number = () => ScenarioRandom.float(),
+  random?: () => number,
   /** Optional: when provided with naval=true, checks terrain for water cells.
    *  C++ display.cpp:2505-2527: Calculated_Cell with SPEED_FLOAT only returns WATER cells. */
   map?: GameMap,
@@ -1164,9 +1164,17 @@ export function calculateHouseEdgeSpawnCell(
   const { x, y, w, h } = mapBounds;
   // C++ Calculated_Cell: Random_Pick only called when trycell == -1 (no waypoint).
   // When alignedCell is provided, the spawn position is deterministic — don't consume RNG.
-  const randOffset = alignedCell ? 0 : Math.floor(random() * Math.max(w, h));
-  const alignedX = alignedCell ? Math.min(Math.max(alignedCell.cx, x), x + w - 1) : x + (randOffset % w);
-  const alignedY = alignedCell ? Math.min(Math.max(alignedCell.cy, y), y + h - 1) : y + (randOffset % h);
+  const randomOffset = (length: number): number => {
+    if (length <= 1) return 0;
+    if (random) return Math.floor(random() * length);
+    return ScenarioRandom.nextInRange(0, length - 1);
+  };
+  const alignedX = alignedCell
+    ? Math.min(Math.max(alignedCell.cx, x), x + w - 1)
+    : x + ((edge === 'north' || edge === 'south') ? randomOffset(w) : 0);
+  const alignedY = alignedCell
+    ? Math.min(Math.max(alignedCell.cy, y), y + h - 1)
+    : y + ((edge === 'east' || edge === 'west') ? randomOffset(h) : 0);
 
   // C++ display.cpp:2432-2498 (Calculated_Cell): spawn cells are 1 cell OUTSIDE
   // the map boundary. North: y = -1 → cy = MapCellY - 1. South: y = MapCellHeight
@@ -1285,7 +1293,7 @@ export function resolveTeamOriginCell(
   waypoints: Map<number, CellPos>,
   houseEdges?: Map<House, string>,
   mapBounds?: { x: number; y: number; w: number; h: number },
-  random: () => number = () => ScenarioRandom.float(),
+  random?: () => number,
 ): CellPos | null {
   return waypoints.get(origin) ?? calculateHouseEdgeSpawnCell(house, houseEdges, mapBounds, undefined, random);
 }
@@ -1297,12 +1305,15 @@ function isAntTeam(team: TeamType): boolean {
 
 /** A placed structure on the map (static building, not a unit) */
 export interface StructureWeapon {
+  weaponName?: string; // C++ rules.ini weapon section name
+  secondaryWeaponName?: string; // C++ rules.ini Secondary= weapon section name
   damage: number;
   range: number;     // range in cells
   rof: number;       // ticks between shots
   splash?: number;   // AOE radius in cells
   warhead?: string;  // warhead type for damage multiplier (default 'HE')
   projSpeed?: number; // projectile visual speed in cells/second (C++ BulletClass Speed)
+  isInvisible?: boolean; // Projectile=Invisible/Ack Inviso=yes
   isAntiAir?: boolean; // can target airborne aircraft
 }
 
@@ -1315,6 +1326,9 @@ export interface MapStructure {
   hp: number;         // current HP (0-256 scale)
   maxHp: number;      // max HP (256 = full)
   armor?: ArmorType;   // C++ bdata.cpp Armor= from rules.ini (wood/light/heavy per building)
+  /** C++ BuildingTypeClass::Power after scenario INI overrides.
+   *  Positive values produce power; negative values become Class->Drain. */
+  power?: number;
   alive: boolean;     // whether structure is still standing
   rubble: boolean;    // destroyed structure leaves rubble
   weapon?: StructureWeapon;  // defensive weapon (for HBOX, GUN, TSLA, SAM, AGUN)
@@ -1328,15 +1342,23 @@ export interface MapStructure {
   sellProgress?: number;     // 0-1 sell animation progress (undefined = not selling)
   sellHpAtStart?: number;    // HP when sell was initiated (for health-scaled refund)
   deployedFromMCV?: boolean; // C++ ArchiveTarget parity: ConYard was created by MCV deploy
-  turretDir?: number;        // 0-31 facing for turreted structures (GUN/SAM/AGUN) — 32-step C++ parity
-  desiredTurretDir?: number; // target turret facing in 8-dir (rotates toward this * 4 in 32-step)
-  turretRotAccum?: number;   // C++ FacingClass ROT accumulator for smooth rotation (building.cpp:5347)
+  turretDir?: number;        // displayed 8-way facing for turreted structures (GUN/SAM/AGUN)
+  desiredTurretDir?: number; // displayed target turret facing in 8-dir
+  turretFacing256?: number;  // C++ PrimaryFacing.Current() DirType (0=N, 64=E)
+  desiredTurretFacing256?: number; // C++ PrimaryFacing.Desired() DirType
+  turretRotAccum?: number;   // legacy/debug: remaining 256-step facing delta
   firingFlash?: number;      // ticks remaining for muzzle flash frame
   flashCount?: number;        // C++ flasher.cpp:83 — Blushing damage-flash countdown (ticks). Odd values = white tint visible.
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
   originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
   isSurvivorless?: boolean;    // C++ building.cpp:1298 — kennels and force-destroyed buildings get no survivors
+  /** C++ BuildingClass::CountDown after RESULT_DESTROYED.
+   *  Drop_Debris runs from BuildingClass::AI only after this frame timer reaches 0. */
+  debrisCountdown?: number;
+  debrisDropped?: boolean;
+  /** C++ BuildingClass::WhomToRepay — set only by Tanya C4 sabotage. */
+  whomToRepayEntityId?: number;
   /** C++ MissionClass::Timer — building mission timer for guard scan / RNG parity (building.cpp:3228-3306) */
   missionTimer: number;
   /** C++ BuildingClass::Factory — computer-controlled building-local factory.
@@ -1355,12 +1377,31 @@ export interface MapStructure {
   };
   /** C++ BuildingClass::PlacementDelay — retry delay when completed product cannot exit. */
   aiFactoryPlacementDelay?: number;
+  /** C++ BuildingClass radio contact with the factory product during WEAP Mission_Unload. */
+  aiFactoryContactEntityId?: number;
+  /** C++ BuildingClass::Status for WEAP Mission_Unload. */
+  weapUnloadStatus?: number;
+  /** C++ DoorClass::State for WEAP Mission_Unload.
+   *  0=closed, 1=opening, 2=open, 3=closing. */
+  weapDoorState?: number;
+  /** C++ DoorClass StageClass fetch stage for WEAP Mission_Unload. */
+  weapDoorStage?: number;
+  /** C++ DoorClass StageClass rate countdown for WEAP Mission_Unload. */
+  weapDoorTimer?: number;
   /** C++ MissionClass::Mission for buildings. Weapon buildings use GUARD to scan, then ATTACK to fire. */
   mission?: Mission;
+  /** C++ BuildingClass::Status for helipad/airstrip Mission_Repair.
+   *  0=INITIAL, 1=DURING. The docked aircraft remains in dockedAircraft. */
+  repairMissionStatus?: number;
   /** C++ TechnoClass::TarCom for weapon buildings. Mission_Guard assigns
    *  this target; Mission_Attack/Charging_AI use the assigned target rather
    *  than doing a fresh threat scan each tick. */
   targetEntityId?: number;
+  /** C++ TechnoClass::IsSecondShot for two-shooter buildings. */
+  isSecondShot?: boolean;
+  /** C++ Mission_Attack runs once on the frame after Fire_At, sees FIRE_REARM,
+   *  refreshes PrimaryFacing.Desired from TarCom, then sleeps on Arm. */
+  rearmFacingUpdatePending?: boolean;
   /** C++ BuildingClass::IsCharging for electric weapons (TeslaZap Charges=yes). */
   isCharging?: boolean;
   /** C++ BuildingClass::IsCharged gate checked by BuildingClass::Can_Fire. */
@@ -1392,14 +1433,14 @@ export interface MapStructure {
 
 /** Weapon stats for defensive structures */
 export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
-  HBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Camo Pillbox)
-  PBOX:  { damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100 },              // Vulcan (Pillbox)
-  GUN:   { damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },  // TurretGun
-  TSLA:  { damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100 }, // TeslaZap (rules.ini [TeslaZap] Damage=100)
-  SAM:   { damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, isAntiAir: true }, // Nike missile — air-only (Nike → AA=true, AG=false)
-  AGUN:  { damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isAntiAir: true },  // ZSU-23 flak — air-only (ZSU-23 → Ack → AA=true, AG=false)
-  FTUR:  { damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },            // FireballLauncher
-  QUEE:  { damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant (TeslaZap)
+  HBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true }, // Vulcan → Invisible
+  PBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true }, // Vulcan → Invisible
+  GUN:   { weaponName: 'TurretGun', damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },
+  TSLA:  { weaponName: 'TeslaZap', damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100, isInvisible: true },
+  SAM:   { weaponName: 'Nike', damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, isAntiAir: true },
+  AGUN:  { weaponName: 'ZSU-23', secondaryWeaponName: 'ZSU-23', damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isInvisible: true, isAntiAir: true },
+  FTUR:  { weaponName: 'FireballLauncher', damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },
+  QUEE:  { weaponName: 'TeslaZap', damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant
 };
 
 /** Per-building armor types from rules.ini (C++ bdata.cpp constructors parse Armor= at startup).
@@ -1517,6 +1558,117 @@ export const STRUCTURE_SIZE: Record<string, [number, number]> = {
   ...mapStructureSize(CIVILIAN_STRUCTURE_4X2, [4, 2]),
 };
 
+const STRUCTURE_CENTER_OFFSET_LEPTONS_BY_SIZE: Record<string, { lx: number; ly: number }> = {
+  // C++ building.cpp:122 BuildingClass::CenterOffset[BSIZE_*].
+  '1x1': { lx: 0x0080, ly: 0x0080 },
+  '2x1': { lx: 0x00ff, ly: 0x0080 },
+  '1x2': { lx: 0x0080, ly: 0x00ff },
+  '2x2': { lx: 0x00ff, ly: 0x00ff },
+  '2x3': { lx: 0x00ff, ly: 0x0180 },
+  '3x2': { lx: 0x0180, ly: 0x00ff },
+  '3x3': { lx: 0x0180, ly: 0x0180 },
+  '4x2': { lx: 0x0200, ly: 0x00ff },
+  '5x5': { lx: 0x0280, ly: 0x0280 },
+};
+
+const SOUTH_FOUNDATION_FACE_STRUCTURES = new Set([
+  'IRON', 'FCOM', 'TSLA', 'AGUN', 'GAP', 'AFLD', 'POWR', 'APWR', 'STEK',
+  'V01', 'V02', 'V03', 'V04', 'V20', 'V24', 'V25',
+]);
+
+export function structureCenterOffsetLeptons(type: string): { lx: number; ly: number } {
+  const [w, h] = STRUCTURE_SIZE[type] ?? [1, 1];
+  return STRUCTURE_CENTER_OFFSET_LEPTONS_BY_SIZE[`${w}x${h}`] ?? {
+    lx: Math.trunc((w * 256) / 2),
+    ly: Math.trunc((h * 256) / 2),
+  };
+}
+
+export function structureCenterLeptons(s: Pick<MapStructure, 'type' | 'cx' | 'cy'>): { lx: number; ly: number } {
+  const off = structureCenterOffsetLeptons(s.type);
+  return {
+    lx: s.cx * 256 + off.lx,
+    ly: s.cy * 256 + off.ly,
+  };
+}
+
+function snapLeptonsToCellCenter(lx: number, ly: number): { lx: number; ly: number } {
+  return {
+    lx: Math.floor(lx / 256) * 256 + 128,
+    ly: Math.floor(ly / 256) * 256 + 128,
+  };
+}
+
+export function structureTargetLeptons(s: Pick<MapStructure, 'type' | 'cx' | 'cy'>): { lx: number; ly: number } {
+  const center = structureCenterLeptons(s);
+  if (SOUTH_FOUNDATION_FACE_STRUCTURES.has(s.type)) {
+    // C++ BuildingClass::Target_Coord: Adjacent_Cell(Center_Coord(), FACING_S).
+    return snapLeptonsToCellCenter(center.lx, center.ly + 256);
+  }
+  return center;
+}
+
+/** C++ Get_Build_Frame_Count(*MAKE.SHP) values for building buildup animations.
+ *  Construction and sell timing come from the actual make-sheet frame count,
+ *  not a shared constant. These values mirror the extracted RA asset manifest.
+ */
+export const STRUCTURE_MAKE_FRAME_COUNT: Record<string, number> = {
+  FACT: 32,
+  WEAP: 15,
+  POWR: 13,
+  APWR: 13,
+  BARR: 13,
+  TENT: 13,
+  PROC: 10,
+  FIX: 14,
+  SILO: 14,
+  DOME: 17,
+  GUN: 20,
+  SAM: 18,
+  HBOX: 13,
+  TSLA: 13,
+  AGUN: 10,
+  GAP: 13,
+  PBOX: 13,
+  HPAD: 20,
+  AFLD: 11,
+  ATEK: 17,
+  STEK: 20,
+  PDOX: 18,
+  IRON: 14,
+  MSLO: 15,
+  KENN: 20,
+  SYRD: 18,
+  SPEN: 14,
+  BIO: 16,
+  HOSP: 20,
+};
+
+// C++ fixed(".06") * TICKS_PER_MINUTE = ((15 * 900) + 128) / 256 = 53.
+const CPP_BUILDUP_TICKS = 53;
+
+export function structureMakeFrameCount(type: string): number {
+  return STRUCTURE_MAKE_FRAME_COUNT[type] ?? 20;
+}
+
+export function structureBuildAnimationRate(type: string): number {
+  return Math.max(1, Math.floor(CPP_BUILDUP_TICKS / structureMakeFrameCount(type)));
+}
+
+/** Number of TS progress ticks needed to match C++ construction completion.
+ *  TS updates buildProgress on the placement tick after C++ has already passed
+ *  the new building's Logic slot, so the denominator includes the initial frame.
+ */
+export function structureConstructionProgressTicks(type: string): number {
+  const count = structureMakeFrameCount(type);
+  if (count <= 1) return 1;
+  return ((count - 1) * structureBuildAnimationRate(type)) + 1;
+}
+
+export function isStructureUnderConstruction(s: Pick<MapStructure, 'buildProgress'>): boolean {
+  return s.buildProgress !== undefined && s.buildProgress < 1;
+}
+
 type StructureOffset = readonly [number, number];
 
 const RECT_1X1: readonly StructureOffset[] = [[0, 0]];
@@ -1537,7 +1689,8 @@ const RECT_3X3: readonly StructureOffset[] = [
 export const STRUCTURE_OCCUPY_OFFSETS: Record<string, readonly StructureOffset[]> = {
   FACT: RECT_3X3, FACF: RECT_3X3,
   WEAP: RECT_3X2, WEAF: RECT_3X2,
-  POWR: RECT_2X2, BARR: RECT_2X2, TENT: RECT_2X2, DOME: RECT_2X2, KENN: RECT_2X2,
+  POWR: RECT_2X2, BARR: RECT_2X2, TENT: RECT_2X2, DOME: RECT_2X2,
+  KENN: RECT_1X1,
   AFLD: RECT_3X2,
   APWR: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
   STEK: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
@@ -1674,6 +1827,10 @@ export interface ScenarioResult {
    *  Each fires 2 RNGs every GrowthRate*TICKS_PER_MINUTE via C++ TerrainClass::AI
    *  → CellClass::Spread_Tiberium (terrain.cpp:497, cell.cpp:2963-2978). */
   terrainMineCount: number;
+  /** TERRAIN_MINE spread source cells and C++ Logic indices.
+   *  TerrainClass::Target_Coord uses CenterBase XYP_COORD(12,24), so the
+   *  forced spread source is one cell south of the INI origin. */
+  terrainMineSpreadCells: Array<{ cx: number; cy: number; logicIndex: number }>;
   name: string;
   briefing: string;
   waypoints: Map<number, CellPos>;
@@ -1955,6 +2112,15 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       attackCooldown: 0,
       ammo: -1,
       maxAmmo: -1,
+      // C++ BuildingClass::Read_INI passes the 5th structure field to
+      // Unlimbo(), which stores it in TechnoClass::PrimaryFacing. Turreted
+      // buildings therefore start from scenario facing, not bdata StartFace.
+      ...(['GUN', 'SAM', 'AGUN'].includes(s.type) ? {
+        turretFacing256: s.facing & 0xff,
+        desiredTurretFacing256: s.facing & 0xff,
+        turretDir: ((s.facing + 16) >> 5) & 7,
+        desiredTurretDir: ((s.facing + 16) >> 5) & 7,
+      } : {}),
 	      triggerName: trigName,
 	      mission: Mission.GUARD,
 	      missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick
@@ -2074,6 +2240,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       s.maxHp = newMax;
       s.hp = Math.round(hpRatio * newMax);
     }
+    if (section.has('Power')) {
+      s.power = parseInt(section.get('Power')!, 10);
+    }
   }
 
   // Patch all entities with scenario-local stats and weapons
@@ -2139,17 +2308,21 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // array with AI that calls Spread_Tiberium — 2 RNGs per mine at Frame=0 and every
   // GrowthRate*TICKS_PER_MINUTE. Three RA mine types: MINE (ore), GMINE (gem),
   // TC05 (also a mine variant in some themes). Match C++ TerrainTypeClass IsSpawnsTiberium.
-  let terrainMineCount = 0;
-  for (const t of data.terrain) {
+  const terrainMineSpreadCells: Array<{ cx: number; cy: number; logicIndex: number }> = [];
+  for (const [logicIndex, t] of data.terrain.entries()) {
     const up = t.type.toUpperCase();
-    if (up === 'MINE' || up === 'GMINE') terrainMineCount++;
+    if (up === 'MINE') {
+      const pos = cellIndexToPos(t.cell);
+      terrainMineSpreadCells.push({ cx: pos.cx, cy: pos.cy + 1, logicIndex });
+    }
   }
 
   return {
     map,
     entities,
     structures,
-    terrainMineCount,
+    terrainMineCount: terrainMineSpreadCells.length,
+    terrainMineSpreadCells,
     name: data.name,
     briefing: data.briefing,
     waypoints: data.waypoints,
@@ -2910,7 +3083,7 @@ export function executeTriggerAction(
       const groundEdgeCell = (houseEdges && mapBounds)
         ? calculateHouseEdgeSpawnCell(
             teamHouse, houseEdges, mapBounds, wp,
-            () => ScenarioRandom.float(),
+            undefined,
             isNavalTeam ? map : undefined,
             isNavalTeam,
             (cx, cy) => !!existingEntities?.some(e =>
@@ -2952,12 +3125,22 @@ export function executeTriggerAction(
             // Derive 8-dir facing for rendering/game-logic compatibility
             entity.facing = dir256ToFacing8(randomFacing256);
             entity.desiredFacing = entity.facing;
+            // C++ AircraftClass::Unlimbo sets SecondaryFacing to the unlimbo
+            // direction; fixed-wing Rotation_AI keeps it copied from PrimaryFacing.
+            entity.turretFacing256 = randomFacing256;
+            entity.desiredTurretFacing256 = randomFacing256;
+            entity.turretFacing = entity.facing;
+            entity.desiredTurretFacing = entity.facing;
           } else {
             entity.facing = spawnFacing as Dir;
             entity.desiredFacing = spawnFacing as Dir;
             entity.bodyFacing256 = (spawnFacing * 32) & 0xff;
           }
           entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256 >= 0 ? entity.bodyFacing256 : entity.facing * 32);
+          if (stats.isAircraft) {
+            entity.turretFacing32 = dir256ToFacing32(entity.turretFacing256);
+            entity.prevTurretFacing32 = entity.turretFacing32;
+          }
           // Assign team mission script to each member
           if (teamMissionScript) {
             entity.teamMissions = teamMissionScript;
@@ -3027,11 +3210,20 @@ export function executeTriggerAction(
             // only loads non-transport ground units as passengers.
             cargo.push(entity);
           }
-          result.spawned.push(entity);
           teamCreationOrder.push(entity);
+          result.spawned.push(entity);
         }
       }
       result.teamCreationOrder = teamCreationOrder;
+      // C++ reinf.cpp:_Create_Group builds the non-transport object list by
+      // prepending each newly-created member (`temp->Next = object; object = temp`).
+      // Do_Reinforcements then Unlimbo()s that linked list head-first, so runtime
+      // Logic insertion order for a non-transport team is the reverse of the INI
+      // creation order. Team creation order remains INI order because Team::Add()
+      // was called before the linked list reversal and itself prepends members.
+      if (!transport) {
+        result.spawned.reverse();
+      }
       // C++ team.cpp:627-652: Team activation gesture RNG (Percent_Chance(50)) is now
       // consumed by the Team instance in team.ts when it activates (forcedActive=true).
       // No manual RNG call needed here.

@@ -20,6 +20,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  setStructureTurretDesired,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -374,16 +375,15 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     expect(gun.desiredTurretDir).toBe(Dir.E);
     expect(gun.turretDir).toBe(4); // no rotation yet on first tick
 
-    // C++ ROT=5, 32 DirType units per 8-dir step → first step after 7 accumulation ticks.
-    // Tick 1 had turretDir===desiredTurretDir (no accumulation), targeting then set desired=2.
-    // So accumulation starts on tick 2. Need 7 more ticks (ticks 2-8) for accum=35 >= 32.
+    // GUN uses rules.ini ROT=12 in 256-facing space. After the initial tick
+    // sets the desired facing, seven more completed ticks are enough to reach
+    // the East bucket.
     for (let i = 0; i < 7; i++) {
       gun.attackCooldown = 5; // on cooldown, but turret rotation is independent
       const ctx2 = makeCombatCtx([gun], [enemy]);
       updateStructureCombat(ctx2);
     }
-    // After 8 ticks total (1 initial + 7 here), accumulator = 7*5 = 35 >= 32 → one step
-    expect(gun.turretDir).toBe(3); // one step CCW from South toward East (SE)
+    expect(gun.turretDir).toBe(Dir.E);
   });
 
   it('turretDir reaches desiredTurretDir after enough ticks', () => {
@@ -417,13 +417,13 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     expect(gun.turretDir).toBeDefined();
   });
 
-  it('sets firingFlash to 4 when firing', () => {
+  it('observes firingFlash after the completed fire tick', () => {
     const gun = makeGUN(10, 10);
     gun.firingFlash = 0;
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
     updateStructureCombat(ctx);
-    expect(gun.firingFlash).toBe(4);
+    expect(gun.firingFlash).toBe(3);
   });
 
   it('firingFlash decrements each tick', () => {
@@ -441,13 +441,13 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
 
 describe('GUN rate of fire (ROF=50, building.cpp)', () => {
 
-  it('sets attackCooldown to ROF (50) after firing', () => {
+  it('observes attackCooldown at ROF minus one after firing', () => {
     const gun = makeGUN(10, 10);
     expect(gun.attackCooldown).toBe(0);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
     updateStructureCombat(ctx);
-    expect(gun.attackCooldown).toBe(50);
+    expect(gun.attackCooldown).toBe(STRUCTURE_WEAPONS['GUN'].rof - 1);
   });
 
   it('does NOT fire while on cooldown', () => {
@@ -479,10 +479,12 @@ describe('GUN threat-based targeting (building.cpp priority scoring)', () => {
     const truck = entityAtCell(UnitType.V_TRUK, House.USSR, 12, 10);
     // Armed tank — weapon gives higher threat score
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 11);
-    // Pre-align to the tank's southeast bearing. C++ Mission_Attack delays the
-    // shot if the turret must rotate, so this test isolates target priority.
-    gun.turretDir = 3;
-    gun.desiredTurretDir = 3;
+    // Pre-align to the tank's exact bearing. C++ Mission_Attack delays the shot
+    // if the turret must rotate, so this test isolates target priority.
+    setStructureTurretDesired(gun, tank);
+    gun.turretFacing256 = gun.desiredTurretFacing256;
+    gun.turretDir = gun.desiredTurretDir;
+    gun.turretRotAccum = 0;
     const ctx = makeCombatCtx([gun], [truck, tank]);
     updateStructureCombat(ctx);
     // Tank should be the direct target. The truck can still receive splash.

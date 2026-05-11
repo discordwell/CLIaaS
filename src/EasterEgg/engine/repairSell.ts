@@ -130,21 +130,39 @@ export function powerOutput(type: string, hp: number, maxHp: number): number {
   return 0;
 }
 
+/** C++ bdata.cpp:3778-3781 lets scenario INI sections override Power= per
+ *  BuildingTypeClass. Positive Power generates output; negative Power becomes
+ *  Class->Drain and is not health-scaled. */
+export function structurePowerContribution(s: MapStructure): { produced: number; consumed: number } {
+  if (s.power !== undefined) {
+    if (s.power > 0) {
+      return { produced: fixedPowerOutput(s.power, s.hp, s.maxHp), consumed: 0 };
+    }
+    if (s.power < 0) {
+      return { produced: 0, consumed: -s.power };
+    }
+    return { produced: 0, consumed: 0 };
+  }
+
+  const produced = powerOutput(s.type, s.hp, s.maxHp);
+  return { produced, consumed: POWER_DRAIN[s.type] ?? 0 };
+}
+
 /** Calculate full power grid for player structures.
  *  Returns { produced, consumed }. */
 export function calculatePowerGrid(
   structures: MapStructure[],
   playerHouse: House,
-  isAllied: (a: House, b: House) => boolean,
+  _isAllied: (a: House, b: House) => boolean,
 ): { produced: number; consumed: number } {
   let produced = 0;
   let consumed = 0;
   for (const s of structures) {
-    if (!s.alive || s.sellProgress !== undefined || !isAllied(s.house, playerHouse)) continue;
-    if (s.type === 'POWR') produced += fixedPowerOutput(100, s.hp, s.maxHp);
-    else if (s.type === 'APWR') produced += fixedPowerOutput(200, s.hp, s.maxHp);
-    const drain = POWER_DRAIN[s.type];
-    if (drain) consumed += drain;
+    // C++ HouseClass tracks Power/Drain per house, not per alliance.
+    if (!s.alive || s.sellProgress !== undefined || s.house !== playerHouse) continue;
+    const power = structurePowerContribution(s);
+    produced += power.produced;
+    consumed += power.consumed;
   }
   return { produced, consumed };
 }

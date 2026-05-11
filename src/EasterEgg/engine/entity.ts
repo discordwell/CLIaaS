@@ -11,7 +11,7 @@ import {
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   CIVILIAN_UNIT_TYPES, worldToCell, leptonDist, directionTo, directionToLeptons,
   directionToLeptons256, DIR_DX, DIR_DY,
-  armorIndex, PRODUCTION_ITEMS, LEPTON_SIZE,
+  armorIndex, PRODUCTION_ITEMS, LEPTON_SIZE, pixelToLepton,
   COS_TABLE_256, SIN_TABLE_256,
 } from './types';
 import { LP, PIXEL_LEPTON_W } from './tracks';
@@ -73,7 +73,8 @@ const DOG_FIRE_COORD_OFFSETS: FireCoordOffsets = {
   secondaryLateral: 0x0000,
 };
 
-// C++ udata.cpp UnitTypeClass constructor offsets:
+// C++ udata.cpp UnitTypeClass constructor offsets and aadata.cpp
+// AircraftTypeClass constructor offsets:
 //   VerticalOffset, PrimaryOffset, PrimaryLateral, SecondaryOffset, SecondaryLateral.
 // TechnoClass::Fire_Coord uses these for vehicle launch/range coordinates.
 const UNIT_FIRE_COORD_OFFSETS: Partial<Record<UnitType, FireCoordOffsets>> = {
@@ -96,6 +97,13 @@ const UNIT_FIRE_COORD_OFFSETS: Partial<Record<UnitType, FireCoordOffsets>> = {
   [UnitType.V_QTNK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
   [UnitType.V_DTRK]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
   [UnitType.V_STNK]: { vertical: 0x0030, primary: 0x0030, lateral: 0x0000, secondary: 0x0030, secondaryLateral: 0x0000 },
+  [UnitType.V_BADR]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_U2]:   { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_MIG]:  { vertical: 0x0000, primary: 0x0020, lateral: 0x0020, secondary: 0x0020, secondaryLateral: 0x0020 },
+  [UnitType.V_YAK]:  { vertical: 0x0000, primary: 0x0020, lateral: 0x0020, secondary: 0x0020, secondaryLateral: 0x0020 },
+  [UnitType.V_TRAN]: { vertical: 0x0000, primary: 0x0000, lateral: 0x0000, secondary: 0x0000, secondaryLateral: 0x0000 },
+  [UnitType.V_HELI]: { vertical: 0x0000, primary: 0x0040, lateral: 0x0000, secondary: 0x0040, secondaryLateral: 0x0000 },
+  [UnitType.V_HIND]: { vertical: 0x0000, primary: 0x0040, lateral: 0x0000, secondary: 0x0040, secondaryLateral: 0x0000 },
 };
 
 // === Submarine Cloak State Machine ===
@@ -358,6 +366,8 @@ export class Entity {
   attackCooldownAtLogicStart = 0;
   attackCooldown2 = 0;
   attackCooldown2AtLogicStart = 0;
+  /** C++ FootClass::BaseAttackTimer suppresses repeated base-defense calls from the same attacker. */
+  baseAttackTimer = 0;
   weapon: WeaponStats | null;
   weapon2: WeaponStats | null = null;
   kills = 0;      // kills by this unit
@@ -435,6 +445,10 @@ export class Entity {
     // Doing_AI's `Fetch_Stage() >= DoControls[DO_GESTURE1].Count` check.
     const fireAnimComplete =
       this.doing === 'fire' && this.doingStage >= this.infantryFireDoingCount();
+    if (fireAnimComplete) {
+      this.isFiringAnim = false;
+      this.firingAnimTicks = 0;
+    }
     const canTransition =
       this.doing === 'nothing' ||
       this.doing === 'idle_anim' ||
@@ -536,6 +550,37 @@ export class Entity {
   /** C++ per-type DoControls[DO_GET_UP].Count. */
   infantryGetUpDoingCount(): number {
     return INFANTRY_ANIMS[this.type]?.getUp?.count ?? 1;
+  }
+
+  infantryDeathDurationTicks(): number {
+    if (!this.stats.isInfantry) return 0;
+    if (this.deathVariant === 0 || this.deathVariant === 5) {
+      // C++ InfantryClass::Take_Damage deletes instant/electro deaths as
+      // InfantryClass objects immediately; electro uses a separate AnimClass.
+      return 0;
+    }
+    const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
+    const dieInfo =
+      this.deathVariant === 1 ? (anim.die2 ?? anim.die1) :
+      this.deathVariant === 2 ? (anim.die3 ?? anim.die2 ?? anim.die1) :
+      this.deathVariant === 3 ? (anim.die4 ?? anim.die2 ?? anim.die1) :
+      this.deathVariant === 4 ? (anim.die5 ?? anim.die2 ?? anim.die1) :
+      anim.die1;
+    return Math.max(0, dieInfo.count * 2);
+  }
+
+  isInfantryDeathAnimationComplete(): boolean {
+    return this.stats.isInfantry && !this.alive && this.deathTick >= this.infantryDeathDurationTicks();
+  }
+
+  occupiesCppLogic(): boolean {
+    if (this.inLimbo) return false;
+    if (this.alive) return true;
+    return this.stats.isInfantry &&
+      this.mission === Mission.DIE &&
+      this.deathVariant >= 1 &&
+      this.deathVariant <= 4 &&
+      !this.isInfantryDeathAnimationComplete();
   }
 
   /** Start C++ DO_FIRE_WEAPON / DO_FIRE_PRONE for InfantryClass::Firing_AI.
@@ -691,6 +736,11 @@ export class Entity {
   /** C++ unit.cpp:2794-2797, 2851 — ArchiveTarget: remembers last known ore location.
    *  When returning to refinery, saves current cell. On next idle seek, heads there first. */
   archiveTarget: { cx: number; cy: number } | null = null;
+  /** C++ TARGET object form for ArchiveTarget. Used when Base_Is_Attacked stores
+   *  the guarded techno itself, so As_Coord(ArchiveTarget) follows moving units. */
+  archiveTargetEntity: Entity | null = null;
+  /** Exact ArchiveTarget coordinate when C++ stores an object/coordinate target rather than a cell target. */
+  archiveTargetLeptons: { lx: number; ly: number } | null = null;
   /** Harvester animation stage — C++ Fetch_Stage() while IsDumping/IsHarvesting.
    *  During 'unloading': advances 0..21 over 22 ticks (Harvester_Dump_List).
    *  During 'harvesting' (stationary at ore): advances 0..8 (Harvester_Load_List). */
@@ -795,6 +845,11 @@ export class Entity {
   /** C++ VesselClass::Mission_Unload Status enum:
    *  0 INITIAL_CHECK, 1 MANEUVERING, 2 OPENING_DOOR, 3 UNLOADING, 4 CLOSING_DOOR. */
   vesselUnloadStatus = 0;
+  /** C++ UnitClass::Mission_Unload Status for UNIT_MCV:
+   *  0 clear path, 1 try deploy when stopped, 2 wait for deploy rotation. */
+  mcvUnloadStatus = 0;
+  /** C++ FootClass::IsDeploying for UNIT_MCV deploy-after-rotation. */
+  mcvIsDeploying = false;
 
   // Agent 9: New unit special ability fields
   c4Timer = 0;              // C4 countdown on structures (Tanya)
@@ -809,6 +864,13 @@ export class Entity {
   maxAmmo = -1;
   landedAtStructure = -1;       // structure index, -1 = airborne
   aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' | 'unload_search' | 'unload_fly' | 'unload_land' | 'unload_wait' | 'unload_eject' = 'idle';
+  /** C++ AircraftClass::Mission_Enter Status for fixed-wing landing pattern:
+   *  INITIAL=0, TAKEOFF=1, ALTITUDE=2, STACK=3, DOWNWIND=4, CROSSWIND=5,
+   *  TRAVEL=6, LANDING=7. */
+  aircraftEnterStatus = 0;
+  /** C++ NavCom radio contact target for fixed-wing Mission_Enter. Separate from
+   *  landedAtStructure, which is only the pad the aircraft has actually touched. */
+  aircraftDockingStructure = -1;
   _unloadSearchTicks = 0; // C++ SEARCH_FOR_LZ delay counter
   _flyToTicks = 0; // C++ FLY_TO_LZ Process_Fly_To call interval counter
   rearmTimer = 0;
@@ -859,6 +921,10 @@ export class Entity {
    *  Informational only. C++ logic.cpp re-reads Logic.Count() while iterating,
    *  so transport cargo appended by Unlimbo can run later in the same frame. */
   unlimboTick = -1;
+  /** C++ Logic vector index at submit time for runtime-created techno objects.
+   *  Used to keep bullets/anims and later-spawned infantry in the same relative
+   *  order when TS has to batch parts of the Logic array. */
+  logicIndexHint?: number;
   /** C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter RNG parity.
    *  In C++, HPAD helicopters enter the Logic array right after their HPAD building
    *  and are processed interleaved with buildings, NOT in the aircraft pass.
@@ -1229,13 +1295,25 @@ export class Entity {
     return false;
   }
 
-  /** Check if target is in range of any weapon (primary or secondary) */
-  /** C++ techno.cpp:1313-1318 In_Range — integer lepton distance vs weapon range.
+  /** C++ ObjectClass::Target_Coord for this entity.
+   *  This differs from Center_Coord while falling/airborne: As_Coord(TARGET)
+   *  subtracts object Height, and TechnoClass::Can_Fire/In_Range(TARGET) use
+   *  that coordinate rather than the object center. */
+  targetCoordLeptons(): LeptonPos {
+    const height = this.fallHeightLeptons > 0
+      ? this.fallHeightLeptons
+      : (this.flightAltitude > 0 ? pixelToLepton(this.flightAltitude) : 0);
+    return { lx: this.leptonX, ly: this.leptonY - height };
+  }
+
+  /** C++ TechnoClass::In_Range(TARGET): Fire_Coord(which) to As_Coord(target).
    *  Uses C++ Fire_Coord(which), then Distance() octagonal approximation
-   *  (max+min/2) via leptonDist().
-   *  Compares directly in lepton space — no pixel conversion needed. */
+   *  (max+min/2) via leptonDist(). Evaluate_Object's Object* overload is
+   *  separate and uses target Center_Coord; guard scan code performs that
+   *  center check directly. */
   inRange(other: Entity): boolean {
-    return this.inRangeCoord(other.leptonX, other.leptonY);
+    const targetCoord = other.targetCoordLeptons();
+    return this.inRangeCoord(targetCoord.lx, targetCoord.ly);
   }
 
   /** C++ FootClass::Likely_Coord — use Head_To_Coord when a foot target is mid-hop. */
@@ -1267,7 +1345,8 @@ export class Entity {
 
   /** Check if target is in range of a specific weapon */
   inRangeWith(other: Entity, weapon: WeaponStats): boolean {
-    return this.inRangeWithCoord(other.leptonX, other.leptonY, weapon);
+    const targetCoord = other.targetCoordLeptons();
+    return this.inRangeWithCoord(targetCoord.lx, targetCoord.ly, weapon);
   }
 
   inRangeWithCoord(lx: number, ly: number, weapon: WeaponStats): boolean {
@@ -1384,9 +1463,12 @@ export class Entity {
     //   DIR_N in the 256-step facing table is index 0; CosTable[0]=0,
     //   SinTable[0]=127. x += calcx(0, d) = 0. y += calcy(127, d) = -d.
     //   (calcy returns -(v*d)>>7; with v=127, -(127*d)>>7 ≈ -d.)
-    // Height is 0 for ground vehicles (non-airborne); we use this.flightAltitude
-    // as a proxy, matching techno.cpp:508 Height field semantics.
-    const height = this.flightAltitude ?? 0;
+    // C++ Height is stored in leptons. TS keeps aircraft flightAltitude as the
+    // renderer-facing pixel value, while falling non-aircraft keep the exact
+    // ObjectClass::Height in fallHeightLeptons.
+    const height = this.stats.isAircraft
+      ? pixelToLepton(this.flightAltitude ?? 0)
+      : this.fallHeightLeptons;
     const dN = offsets.vertical + height;
     // calcy(SIN_TABLE_256[0]=127, dN) = -(127*dN)>>7
     ly += -((127 * dN) >> 7);
@@ -1551,6 +1633,7 @@ export class Entity {
       ? (this.animState === AnimState.WALK ? antWalk : this.animState === AnimState.ATTACK ? antAttack : defaultIdle)
       : this.animState === AnimState.WALK ? (typeAnim?.walkRate ?? defaultWalk) :
                  this.animState === AnimState.ATTACK ? (typeAnim?.attackRate ?? defaultAttack) :
+                 this.animState === AnimState.DIE ? 2 :
                  this.animState === AnimState.LIE_DOWN || this.animState === AnimState.GET_UP ? defaultTransition :
                  this.animState === AnimState.GESTURE ? defaultIdle :
                  (typeAnim?.idleRate ?? defaultIdle);

@@ -19,6 +19,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
   structureDamage,
 } from '../engine/combat';
@@ -123,6 +124,12 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
+}
+
 // -- Structure Stats (rules.ini parity) ---------------------------------------
 
 describe('HBOX structure stats (rules.ini)', () => {
@@ -192,6 +199,7 @@ describe('HBOX fires at ground enemies (building.cpp auto-fire)', () => {
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([hbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -201,6 +209,7 @@ describe('HBOX fires at ground enemies (building.cpp auto-fire)', () => {
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([hbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -209,6 +218,7 @@ describe('HBOX fires at ground enemies (building.cpp auto-fire)', () => {
     const ally = entityAtCell(UnitType.I_E1, House.Greece, 12, 10); // Greece is allied with Spain
     const ctx = makeCombatCtx([hbox], [ally]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(ally.hp).toBe(ally.maxHp);
   });
 
@@ -218,15 +228,17 @@ describe('HBOX fires at ground enemies (building.cpp auto-fire)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 18, 10); // 8 cells E
     const ctx = makeCombatCtx([hbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
-  it('sets attackCooldown to ROF after firing', () => {
+  it('observes attackCooldown at ROF minus one after firing', () => {
     const hbox = makeHBOX(10, 10, House.Spain);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([hbox], [enemy]);
     updateStructureCombat(ctx);
-    expect(hbox.attackCooldown).toBe(STRUCTURE_WEAPONS['HBOX'].rof);
+    resolveProjectiles(ctx);
+    expect(hbox.attackCooldown).toBe(STRUCTURE_WEAPONS['HBOX'].rof - 1);
   });
 
   it('does NOT fire while on cooldown', () => {
@@ -236,6 +248,7 @@ describe('HBOX fires at ground enemies (building.cpp auto-fire)', () => {
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([hbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 });
@@ -249,6 +262,7 @@ describe('HBOX does NOT target airborne aircraft (no isAntiAir)', () => {
     const heli = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const ctx = makeCombatCtx([hbox], [heli]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(heli.hp).toBe(heli.maxHp);
   });
 
@@ -257,6 +271,7 @@ describe('HBOX does NOT target airborne aircraft (no isAntiAir)', () => {
     const mig = airborneAtCell(UnitType.V_MIG, House.USSR, 12, 10);
     const ctx = makeCombatCtx([hbox], [mig]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(mig.hp).toBe(mig.maxHp);
   });
 
@@ -266,6 +281,7 @@ describe('HBOX does NOT target airborne aircraft (no isAntiAir)', () => {
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 14, 10); // 4 cells E, further
     const ctx = makeCombatCtx([hbox], [heli, infantry]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     // Helicopter should be untouched, infantry should be hit
     expect(heli.hp).toBe(heli.maxHp);
     expect(infantry.hp).toBeLessThan(infantry.maxHp);
@@ -286,6 +302,7 @@ describe('HBOX fires during power outage (PW2: not in STRUCTURE_POWERED)', () =>
       powerProduced: 100,
     });
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -298,6 +315,7 @@ describe('HBOX fires during power outage (PW2: not in STRUCTURE_POWERED)', () =>
       powerProduced: 0,
     });
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -352,6 +370,7 @@ describe('HBOX takes damage and destruction (structureDamage)', () => {
     expect(hbox.alive).toBe(false);
     const hpBefore = enemy.hp;
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -380,7 +399,9 @@ describe('HBOX vs PBOX weapon behavioral equivalence', () => {
     const ctxP = makeCombatCtx([pbox], [enemyP]);
 
     updateStructureCombat(ctxH);
+    resolveProjectiles(ctxH);
     updateStructureCombat(ctxP);
+    resolveProjectiles(ctxP);
 
     const hboxDmg = enemyH.maxHp - enemyH.hp;
     const pboxDmg = enemyP.maxHp - enemyP.hp;
@@ -401,6 +422,6 @@ describe('HBOX vs PBOX weapon behavioral equivalence', () => {
     updateStructureCombat(ctxP);
 
     expect(hbox.attackCooldown).toBe(pbox.attackCooldown);
-    expect(hbox.attackCooldown).toBe(40);
+    expect(hbox.attackCooldown).toBe(STRUCTURE_WEAPONS['HBOX'].rof - 1);
   });
 });

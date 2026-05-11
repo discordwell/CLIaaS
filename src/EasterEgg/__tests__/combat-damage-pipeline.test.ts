@@ -272,6 +272,35 @@ describe('damageEntity behavior (via Entity.takeDamage)', () => {
     damageEntity(ctx, target, 5, 'SA');
     expect(ctx.attackedTriggerNames.has('atk1')).toBe(true);
   });
+
+  it('damageEntity immediately springs attached ATTACKED triggers when a source exists', () => {
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 80, 100);
+    const target = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    target.triggerName = 'atk1';
+    const sprung: string[] = [];
+    const ctx = makeMockCombatContext({
+      springAttackedTriggerByName: (name) => sprung.push(name),
+    });
+    registerEntities(ctx, attacker, target);
+
+    damageEntity(ctx, target, 5, 'SA', attacker);
+
+    expect(sprung).toEqual(['atk1']);
+  });
+
+  it('damageEntity does not spring ATTACKED triggers without a source object', () => {
+    const target = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+    target.triggerName = 'atk1';
+    const sprung: string[] = [];
+    const ctx = makeMockCombatContext({
+      springAttackedTriggerByName: (name) => sprung.push(name),
+    });
+    registerEntities(ctx, target);
+
+    damageEntity(ctx, target, 5, 'SA');
+
+    expect(sprung).toEqual([]);
+  });
 });
 
 // =========================================================================

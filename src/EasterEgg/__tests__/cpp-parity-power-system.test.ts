@@ -752,6 +752,14 @@ describe('enemy structures excluded from player power grid', () => {
     expect(grid.produced).toBe(iniPowrPower);
     expect(grid.consumed).toBe(iniTentDrain);
   });
+
+  it('allied non-player structures do not affect player power', () => {
+    const alliedDome = makeStructFullHp('DOME', 5, 5, House.Germany);
+    const grid = calculatePowerGrid([alliedDome], House.Greece, () => true);
+
+    expect(grid.produced).toBe(0);
+    expect(grid.consumed).toBe(0);
+  });
 });
 
 // ============================================================

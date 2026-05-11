@@ -163,16 +163,21 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
         break;
       }
 
-      // C++ unit.cpp:2794-2796: if (Target_Legal(ArchiveTarget)) → head to last known ore first
+      // C++ unit.cpp:2794-2799 + Goto_Tiberium (unit.cpp:2208):
+      // ArchiveTarget assigns NavCom first, then Goto_Tiberium only scans if
+      // NavCom is illegal. A legal archive destination therefore blocks the
+      // long scan; it is not overwritten by nearer ore.
       if (entity.archiveTarget) {
         const at = entity.archiveTarget;
         entity.archiveTarget = null; // C++ clears ArchiveTarget after using it
+        entity.archiveTargetEntity = null;
+        entity.archiveTargetLeptons = null;
         entity.harvesterState = 'seeking';
         // C++ UnitClass::Mission_Harvest keeps Mission=HARVEST while
         // Assign_Destination(NavCom) makes DriveClass::AI move the unit.
         entity.mission = Mission.HARVEST;
         assignHarvesterDestination(ctx, entity, at);
-        break;
+        if (entity.moveTarget) break;
       }
 
       // Find nearest ore cell — AI harvesters spread to avoid clustering
@@ -319,6 +324,8 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
           if (entity.oreLoad >= Entity.BAIL_COUNT) {
             // C++ unit.cpp:2851: ArchiveTarget = ::As_Target(Coord_Cell(Coord));
             entity.archiveTarget = { cx: ec.cx, cy: ec.cy };
+            entity.archiveTargetEntity = null;
+            entity.archiveTargetLeptons = null;
             entity.isHarvesterMining = false;
             entity.harvesterState = 'returning';
           } else {
@@ -337,10 +344,15 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
               entity.mission = Mission.HARVEST;
               assignHarvesterDestination(ctx, entity, newOre);
             } else {
-              // No more ore nearby — return with whatever we have
+              // No more ore nearby — return with whatever we have.
+              // C++ unit.cpp:2852-2854 clears ArchiveTarget on this partial-load
+              // return path; only the full-load path above preserves the current
+              // ore cell as ArchiveTarget.
               entity.isHarvesterMining = false;
               if (entity.oreLoad > 0) {
-                entity.archiveTarget = { cx: ec.cx, cy: ec.cy };
+                entity.archiveTarget = null;
+                entity.archiveTargetEntity = null;
+                entity.archiveTargetLeptons = null;
                 entity.harvesterState = 'returning';
               } else {
                 entity.harvesterState = 'idle';

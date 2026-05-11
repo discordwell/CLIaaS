@@ -123,6 +123,8 @@ function makeProjectile(overrides: Partial<InflightProjectile>): InflightProject
     isFueled: false,
     isDropping: false,
     dropHeight: 0,
+    dropRiser: 0,
+    dropHasAttachedAnim: false,
     isFlameEquipped: false,
     flameToggle: false,
     logicalLX,
@@ -264,8 +266,8 @@ describe('IsDropping — vertical drop from FLIGHT_LEVEL (bullet.cpp:790-802)', 
     expect(WEAPON_STATS.SCUD.isDropping).toBeFalsy();
   });
 
-  it('launchProjectile initializes dropHeight=24 for dropping weapons (C++ FLIGHT_LEVEL)', () => {
-    const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 5, 5);
+  it('launchProjectile initializes dropping bullets from Center_Coord with range 0xff', () => {
+    const attacker = entityAtCell(UnitType.V_BADR, House.USSR, 5, 5);
     const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
     const ctx = makeCombatCtx([attacker, target]);
 
@@ -278,51 +280,193 @@ describe('IsDropping — vertical drop from FLIGHT_LEVEL (bullet.cpp:790-802)', 
 
     expect(ctx.inflightProjectiles.length).toBe(1);
     const proj = ctx.inflightProjectiles[0];
+    const fireCoord = attacker.fireCoordForWeapon(droppingWeapon);
+    expect(fireCoord.ly).not.toBe(attacker.leptonY);
+    expect(proj.logicalLX).toBe(attacker.leptonX);
+    expect(proj.logicalLY).toBe(attacker.leptonY);
+    expect(proj.travelFrames).toBe(0xFF);
+    expect(proj.fuseTimer).toBe(0xFF);
     expect(proj.isDropping).toBe(true);
-    expect(proj.dropHeight).toBe(24); // C++ FLIGHT_LEVEL = 24
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS);
+    expect(proj.dropRiser).toBe(0);
+    expect(proj.dropHasAttachedAnim).toBe(true);
   });
 
-  it('dropHeight decreases by RULE_GRAVITY each tick (bullet.cpp:790-802)', () => {
+  it('aircraft falling bullets get AircraftClass::Fire_At drift speed', () => {
+    const attacker = entityAtCell(UnitType.V_BADR, House.USSR, 5, 5);
+    const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.ParaBomb, 300,
+      target.pos.x, target.pos.y, true);
+
+    const proj = ctx.inflightProjectiles[0];
+    // C++ aircraft.cpp:1532-1537 — falling bullets move with
+    // Fly_Speed(40, MPH_MEDIUM_SLOW), i.e. ((12 * 40) + 128) / 256 = 2.
+    expect(proj.speedAdd).toBe(2);
+  });
+
+  it('parachuted drop uses attached-animation fall physics (object.cpp:237-254)', () => {
     const ctx = makeCombatCtx();
     const proj = makeProjectile({
       isDropping: true,
-      dropHeight: 24,
-      travelFrames: 100,
+      dropHeight: Entity.FLIGHT_LEVEL_LEPTONS,
+      dropRiser: 0,
+      dropHasAttachedAnim: true,
+      travelFrames: 255,
       weapon: WEAPON_STATS.ParaBomb,
     });
     ctx.inflightProjectiles.push(proj);
 
     updateInflightProjectiles(ctx);
-    expect(proj.dropHeight).toBe(24 - RULE_GRAVITY);
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS);
+    expect(proj.dropRiser).toBe(-1);
+
+    updateInflightProjectiles(ctx);
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS - 1);
+    expect(proj.dropRiser).toBe(-2);
+
+    updateInflightProjectiles(ctx);
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS - 3);
+    expect(proj.dropRiser).toBe(-3);
   });
 
-  it('dropping projectile detonates when dropHeight reaches 0 (bullet.cpp:359-361)', () => {
-    const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 5, 5);
-    const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
-    const ctx = makeCombatCtx([attacker, target]);
+  it('non-parachuted dropping projectile uses Rule.Gravity riser (object.cpp:250-254)', () => {
+    const ctx = makeCombatCtx();
+    const proj = makeProjectile({
+      isDropping: true,
+      dropHeight: Entity.FLIGHT_LEVEL_LEPTONS,
+      dropRiser: 0,
+      dropHasAttachedAnim: false,
+      travelFrames: 255,
+      weapon: WEAPON_STATS.Napalm,
+    });
+    ctx.inflightProjectiles.push(proj);
 
-    // dropHeight=24, RULE_GRAVITY=3 → takes 8 ticks to reach 0
+    updateInflightProjectiles(ctx);
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS);
+    expect(proj.dropRiser).toBe(-RULE_GRAVITY);
+
+    updateInflightProjectiles(ctx);
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS - RULE_GRAVITY);
+    expect(proj.dropRiser).toBe(-RULE_GRAVITY * 2);
+  });
+
+  it('parachuted ParaBomb forced impact damages current Coord, not Fuse_Target', () => {
+    const attacker = entityAtCell(UnitType.V_BADR, House.USSR, 5, 5);
+    const target = entityAtCell(UnitType.I_E1, House.Spain, 15, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+    const launchStructure = {
+      type: 'APWR',
+      image: 'apwr',
+      house: House.Spain,
+      cx: 5,
+      cy: 5,
+      hp: 700,
+      maxHp: 700,
+      armor: 'wood',
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      missionTimer: 0,
+    };
+    const targetStructure = {
+      ...launchStructure,
+      cx: 15,
+      hp: 700,
+      maxHp: 700,
+    };
+    ctx.structures.push(launchStructure as any, targetStructure as any);
+
     const proj = makeProjectile({
       attackerId: attacker.id,
       targetId: target.id,
       isDropping: true,
-      dropHeight: 24,
-      travelFrames: 100,  // would normally fly much longer
+      dropHeight: Entity.FLIGHT_LEVEL_LEPTONS,
+      dropRiser: 0,
+      dropHasAttachedAnim: true,
+      travelFrames: 20,
       weapon: WEAPON_STATS.ParaBomb,
       damage: 300,
       strength: 300,
+      startX: attacker.pos.x,
+      startY: attacker.pos.y,
+      impactX: target.pos.x,
+      impactY: target.pos.y,
+      headToLX: pixelToLepton(target.pos.x),
+      headToLY: pixelToLepton(target.pos.y),
     });
     ctx.inflightProjectiles.push(proj);
 
-    // Tick 7 times: dropHeight goes 24→21→18→15→12→9→6→3
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
       updateInflightProjectiles(ctx);
     }
-    expect(ctx.inflightProjectiles.length).toBe(1); // still alive at dropHeight=3
+    expect(ctx.inflightProjectiles.length).toBe(1);
+    expect(launchStructure.hp).toBe(700);
+    expect(targetStructure.hp).toBe(700);
 
-    // Tick 8: dropHeight goes 3→0, should detonate
-    updateInflightProjectiles(ctx);
+    for (let i = 8; i < 88; i++) {
+      updateInflightProjectiles(ctx);
+    }
     expect(ctx.inflightProjectiles.length).toBe(0);
+    expect(launchStructure.hp).toBeLessThan(700);
+    expect(targetStructure.hp).toBe(700);
+  });
+
+  it('falling bullet drift updates current Coord before forced impact damage', () => {
+    const attacker = entityAtCell(UnitType.V_BADR, House.USSR, 1, 1);
+    const ctx = makeCombatCtx([attacker]);
+    const nearMovedImpact = {
+      type: 'KENN',
+      image: 'kenn',
+      house: House.Spain,
+      cx: 12,
+      cy: 10,
+      hp: 400,
+      maxHp: 400,
+      armor: 'wood',
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      missionTimer: 0,
+    };
+    ctx.structures.push(nearMovedImpact as any);
+
+    const startLX = 10 * 256 + 250;
+    const startLY = 10 * 256 + 128;
+    ctx.inflightProjectiles.push(makeProjectile({
+      attackerId: attacker.id,
+      targetId: -1,
+      isDropping: true,
+      dropHeight: 1,
+      dropRiser: -3,
+      dropHasAttachedAnim: true,
+      currentFrame: 87,
+      travelFrames: 255,
+      weapon: WEAPON_STATS.ParaBomb,
+      damage: 999,
+      strength: 999,
+      startX: startLX * CELL_SIZE / 256,
+      startY: startLY * CELL_SIZE / 256,
+      impactX: startLX * CELL_SIZE / 256,
+      impactY: startLY * CELL_SIZE / 256,
+      logicalLX: startLX,
+      logicalLY: startLY,
+      headToLX: startLX,
+      headToLY: startLY,
+      facing256: 64,
+      speedAdd: 2,
+      speedAccum: 8,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(nearMovedImpact.hp).toBeLessThan(400);
   });
 
   it('dropping projectile bypasses wall collision (bullet.cpp:574-577)', () => {
@@ -513,7 +657,8 @@ describe('launchProjectile — combined feature initialization (bullet.cpp:783-8
     expect(proj.isFueled).toBe(false);
     expect(proj.isDropping).toBe(true);
     expect(proj.isFlameEquipped).toBe(false);
-    expect(proj.dropHeight).toBe(24);
+    expect(proj.dropHeight).toBe(Entity.FLIGHT_LEVEL_LEPTONS);
+    expect(proj.dropHasAttachedAnim).toBe(true);
   });
 
   it('normal projectile (90mm): all three features are false', () => {

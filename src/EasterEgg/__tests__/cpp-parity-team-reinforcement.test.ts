@@ -760,6 +760,22 @@ describe('House edge calculation (display.cpp:2467-2491)', () => {
     expect(cell!.cx).toBe(BOUNDS.x - 1);
   });
 
+  it('no-waypoint edge offset uses C++ Random_Pick range, not float scaling', () => {
+    // display.cpp:2489 uses Random_Pick(0, MapCellHeight - 1) for SOURCE_WEST.
+    // With seed 0, RandomClass::next() returns 12; Random_Pick(0, 79) accepts
+    // that value directly, so the west-edge y offset is 12. The old float-scaled
+    // path mapped the same 12/32768 draw to offset 0, putting reinforcements on
+    // the wrong edge row while consuming the same number of RNG calls.
+    ScenarioRandom.seed = 0;
+    ScenarioRandom.callCount = 0;
+    const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
+
+    const cell = calculateHouseEdgeSpawnCell(House.Greece, houseEdges, BOUNDS);
+
+    expect(cell).toEqual({ cx: BOUNDS.x - 1, cy: BOUNDS.y + 12 });
+    expect(ScenarioRandom.callCount).toBe(1);
+  });
+
   it('east edge (no waypoint): cx == boundsX + w (1 cell outside)', () => {
     // C++ display.cpp:2483: SOURCE_EAST x = MapCellWidth → cx = MapCellX + MapCellWidth
     const houseEdges = new Map<House, string>([[House.Greece, 'east']]);

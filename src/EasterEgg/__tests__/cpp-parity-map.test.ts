@@ -549,6 +549,22 @@ describe('Occupancy grid — entity ID per cell (cell.cpp)', () => {
     expect(map.subCellOccupancy.get(idx)?.[2]).toBe(43);
   });
 
+  it('infantry sub-cell claims use C++ bitmask semantics for same-spot overlap', () => {
+    const idx = 15 * MAP_CELLS + 15;
+    map.occupyClaimedSubCell(idx, 42, 2);
+
+    // C++ CellClass stores only anonymous sub-cell bits. The TS grid keeps a
+    // representative id, but Clear_Occupy_Bit must still clear by spot rather
+    // than by that representative owner.
+    expect(map.occupyClaimedSubCell(idx, 43, 2)).toBe(false);
+    expect(map.subCellOccupancy.get(idx)?.[2]).toBe(42);
+
+    map.vacateClaimedSubCell(idx, 999, 2);
+
+    expect(map.getOccupancy(15, 15)).toBe(0);
+    expect(map.subCellOccupancy.get(idx)?.[2]).toBe(0);
+  });
+
   it('infantry destination claims do not override vehicle occupancy', () => {
     const idx = 15 * MAP_CELLS + 15;
     map.setVehicleOccupancy(15, 15, 99);

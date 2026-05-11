@@ -586,28 +586,16 @@ describe('GlobalFlags array bounds (C++ scenario.h:197) — C++ parity', () => {
   });
 });
 
-describe('GLOBAL_SET/CLEAR as paired event with TIME — timer reset on change — C++ parity', () => {
+describe('TEVENT_TIME elapsed calculation for global/time trigger pairs — C++ parity', () => {
   /**
-   * C++ scenario.cpp:277-285 — Set_Global_To timer reset logic:
-   *   for (int index = 0; index < Triggers.Count(); index++) {
-   *     TriggerClass * tp = Triggers.Ptr(index);
-   *     if ((tp->Class->Event1.Event == TEVENT_GLOBAL_SET || == TEVENT_GLOBAL_CLEAR) && Event1.Data.Value == global) {
-   *       tp->Class->Event2.Reset(tp->Event1);  // Note: resets Event2's timer data into Event1
-   *     }
-   *     if ((tp->Class->Event2.Event == TEVENT_GLOBAL_SET || == TEVENT_GLOBAL_CLEAR) && Event2.Data.Value == global) {
-   *       tp->Class->Event1.Reset(tp->Event1);  // Note: resets Event1's timer data
-   *     }
-   *   }
-   *
-   * Purpose: When a global changes, any trigger with a paired TIME event gets
-   * its timer reset. This means: "After global X is set, wait N seconds."
-   *
-   * TS: springGlobalTriggers resets trigger.timerTick = this.tick for matching triggers.
+   * C++ tevent.cpp:251-253 — TEVENT_TIME fires when the event timer reaches 0.
+   * TS stores the event timer origin in trigger.timerTick and evaluates elapsed
+   * time from that origin. The asymmetric Set_Global_To slot reset itself is
+   * pinned in cpp-parity-global-trigger-spring.test.ts.
    */
 
-  it('trigger with event1=GLOBAL_SET + event2=TIME: TIME event uses timerTick for elapsed calculation', () => {
+  it('TIME event uses timerTick for elapsed calculation', () => {
     // The TIME event uses (gameTick - triggerStartTick) > requiredTicks
-    // After a global change, triggerStartTick (timerTick) is reset to current tick
     const timeEvent: TriggerEvent = { type: TEVENT_TIME, team: -1, data: 1 }; // 1 unit = 90 ticks
     const TIME_UNIT_TICKS = 90;
 
@@ -632,7 +620,7 @@ describe('GLOBAL_SET/CLEAR as paired event with TIME — timer reset on change �
     });
     expect(checkTriggerEvent(timeEvent, stateAfter)).toBe(true);
 
-    // After timer reset (simulating global change at tick 100)
+    // After timer origin reset (for example, after a persistent trigger re-fire)
     const stateReset = createState({
       gameTick: 150,
       triggerStartTick: 100, // reset at tick 100

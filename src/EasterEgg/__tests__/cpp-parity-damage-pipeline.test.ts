@@ -29,11 +29,13 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
-  applySplashDamage, damageEntity, getWarheadMult, getWarheadMeta,
+  applySplashDamage, damageEntity, getWarheadMult, getWarheadMeta, handleUnitDeath,
   SPLASH_RADIUS,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import { ScenarioRandom } from '../engine/random';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
+import { Team, TMISSION_ATTACK, clearAllTeams, resetTeamIds } from '../engine/team';
 
 // ── INI Parser ────────────────────────────────────────────────────────────────
 
@@ -124,7 +126,11 @@ const PIXEL_LEPTON_W = Math.floor(ICON_LEPTON_W / ICON_PIXEL_W); // 10
 
 const ARMOR_TYPES: ArmorType[] = ['none', 'wood', 'light', 'heavy', 'concrete'];
 
-beforeEach(() => resetEntityIds());
+beforeEach(() => {
+  resetEntityIds();
+  resetTeamIds();
+  clearAllTeams();
+});
 
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
@@ -138,6 +144,7 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     entityById: new Map(entities.map(e => [e.id, e])),
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [],
     tick: 0,
     playerHouse: House.Spain,
@@ -183,6 +190,24 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     powerConsumed: 0,
     powerProduced: 100,
   } as CombatContext;
+}
+
+function structureAtCell(type: string, house: House, cx: number, cy: number): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp: STRUCTURE_MAX_HP[type] ?? 400,
+    maxHp: STRUCTURE_MAX_HP[type] ?? 400,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
+  };
 }
 
 /**
@@ -703,6 +728,35 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     expect(target.hp).toBe(hpBefore);
   });
 
+  it('entity within radius but outside the impact plus adjacent cell scan takes no splash damage', () => {
+    // C++ combat.cpp:188-216 collects victims from Coord_Cell(impact) and
+    // the eight adjacent cells before applying Distance() < 384. This SCG04
+    // geometry is 380 leptons from the impact, but the infantry is two cells
+    // north of the impact cell, so C++ never adds it to the damage list.
+    const center = {
+      x: 18152 * CELL_SIZE / ICON_LEPTON_W,
+      y: 15656 * CELL_SIZE / ICON_LEPTON_W,
+    };
+    const target = new Entity(
+      UnitType.I_E1,
+      House.Greece,
+      18112 * CELL_SIZE / ICON_LEPTON_W,
+      15296 * CELL_SIZE / ICON_LEPTON_W,
+    );
+    const ctx = makeCombatCtx([target]);
+    const hpBefore = target.hp;
+
+    applySplashDamage(
+      ctx,
+      center,
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.BadGuy,
+    );
+
+    expect(target.hp).toBe(hpBefore);
+  });
+
   // ── 7c. Entity at distance 0 (point-blank) takes full splash damage ──
 
   it('entity at explosion center takes full warhead damage (distance=0)', () => {
@@ -874,6 +928,91 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
 
     expect(ctx.map.getWallType(11, 10)).toBe('SBAG');
   });
+
+  it('building RESULT_HALF damage state runs C++ occupy-list fire RNG under Take_Damage tag', () => {
+    const apwr = structureAtCell('APWR', House.USSR, 10, 10);
+    apwr.hp = 400;
+    const ctx = makeCombatCtx([]);
+    ctx.structures.push(apwr);
+
+    ScenarioRandom.seed = 2849928510;
+    ScenarioRandom.callCount = 0;
+    ScenarioRandom._seedLog = [];
+    ScenarioRandom._sourceTag = 60043;
+    ScenarioRandom._tagLogging = true;
+
+    try {
+      applySplashDamage(
+        ctx,
+        { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 11 * CELL_SIZE + CELL_SIZE / 2 },
+        { damage: 140, warhead: 'HE', splash: 1.5 },
+        -1,
+        House.Spain,
+      );
+    } finally {
+      ScenarioRandom._tagLogging = false;
+    }
+
+    expect(apwr.hp).toBeLessThan(apwr.maxHp >> 1);
+    expect(STRUCTURE_SIZE.APWR).toEqual([3, 3]);
+    // C++ building.cpp:1459 argument order is source order for this path:
+    // Percent_Chance, Coord_Scatter, Random_Pick(0,7), Random_Pick(1,3).
+    // SCG08EA tick 1309 pins this against the WASM oracle.
+    expect(ScenarioRandom._seedLog.map(([, tag]) => tag)).toEqual([
+      52005, 52005, 52005, 50002,
+      52005, 52005, 52005, 50002,
+      52005, 52005, 52005, 52005, 52005, 50002,
+      52005, 52005,
+    ]);
+    expect(ScenarioRandom.seed).toBe(2687543790);
+    expect(ScenarioRandom._sourceTag).toBe(60043);
+  });
+
+  it('building RESULT_DESTROYED uses C++ occupy-list explosion RNG and defers Drop_Debris', () => {
+    const apwr = structureAtCell('APWR', House.Greece, 10, 10);
+    const ctx = makeCombatCtx([]);
+    ctx.structures.push(apwr);
+
+    ScenarioRandom.seed = 4225763526;
+    ScenarioRandom.callCount = 0;
+    ScenarioRandom._seedLog = [];
+    ScenarioRandom._sourceTag = 60043;
+    ScenarioRandom._tagLogging = true;
+
+    try {
+      applySplashDamage(
+        ctx,
+        { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 11 * CELL_SIZE + CELL_SIZE / 2 },
+        { damage: 999, warhead: 'HE', splash: 1.5 },
+        -1,
+        House.USSR,
+      );
+    } finally {
+      ScenarioRandom._tagLogging = false;
+    }
+
+    expect(apwr.alive).toBe(false);
+    expect(ctx.entities).toHaveLength(0);
+    expect(apwr.debrisCountdown).toBe(8);
+    const mediumFire = ctx.logicAnims.filter(anim => anim.type === 'fire_med');
+    expect(mediumFire.map(anim => anim.delay)).toEqual([5, 2]);
+    expect(mediumFire.map(anim => anim.loops)).toEqual([3, 3]);
+    expect(ScenarioRandom._seedLog.map(([, tag]) => tag)).toEqual([
+      52005, 52005, 50002, 52005, 52005,
+      52005, 52005, 52005, 50002, 52005,
+      52005, 52005, 52005, 50002, 52005,
+      52005, 52005, 50002, 52005, 52005,
+      52005, 52005, 50002, 52005, 52005,
+      50002, 52005, 52005, 52005, 52005,
+      52005, 50002, 52005, 52005, 52005,
+      50002, 52005, 52005, 52005, 52005,
+      52005, 50002, 52005, 52005, 52005,
+      50002, 52005, 52005, 52005, 52005,
+      50002, 52005,
+    ]);
+    expect(ScenarioRandom.seed).toBe(292287586);
+    expect(ScenarioRandom._sourceTag).toBe(60043);
+  });
 });
 
 // =============================================================================
@@ -921,6 +1060,44 @@ describe('Overkill behavior: HP goes to 0 when damage exceeds current HP', () =>
     damageEntity(ctx, e, 9999, 'Super');
     // HP should be negative (entity.takeDamage does this.hp -= amount), but entity is dead
     expect(e.alive).toBe(false);
+  });
+});
+
+// =============================================================================
+// 9b. DEATH DETACH_ALL TEAM MEMBERSHIP (foot.cpp:1844-1853)
+// =============================================================================
+
+describe('Death Detach_All team membership parity (foot.cpp:1844-1853)', () => {
+  it('destroyed foot members are removed from their Team before death animation continues', () => {
+    const victim = entityAtCell(UnitType.I_E1, House.BadGuy, 5, 5);
+    const attacker = entityAtCell(UnitType.I_E1, House.Greece, 6, 5);
+    const team = new Team({
+      typeName: 'death-team',
+      house: House.BadGuy,
+      desiredMembers: [{ type: UnitType.I_E1, count: 1 }],
+      missionList: [{ mission: TMISSION_ATTACK, data: 2 }],
+      forcedActive: true,
+    });
+    team.add(victim);
+
+    const ctx = makeCombatCtx([victim, attacker]);
+    const killed = damageEntity(ctx, victim, victim.hp + 10, 'SA', attacker);
+    expect(killed).toBe(true);
+
+    handleUnitDeath(ctx, victim, {
+      screenShake: 4,
+      explosionSize: 12,
+      debris: false,
+      decal: null,
+      explodeLgSound: false,
+      attackerIsPlayer: true,
+      trackLoss: false,
+      attacker,
+    });
+
+    expect(victim.teamRef).toBeNull();
+    expect(team.members).not.toContain(victim);
+    expect((team as unknown as { isAltered: boolean }).isAltered).toBe(true);
   });
 });
 

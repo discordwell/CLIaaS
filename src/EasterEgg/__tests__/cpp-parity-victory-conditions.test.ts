@@ -336,7 +336,8 @@ describe('BorrowedTime savour delay — C++ house.cpp:945, 4071-4080', () => {
    *     }
    *   }
    *
-   * rules.ini SavourDelay=.03 → 0.03 * 900 = 27 ticks (~1.8s at 15 Hz).
+   * rules.ini SavourDelay=.03 is parsed as fixed raw 7/256:
+   * 900 * 7/256 rounds to 25 ticks.
    *
    * TS implementation: applyTriggerActionResult now sets isToWin/isToLose flags
    * and starts a borrowedTime countdown. applyDeferredWinLose() in the game tick
@@ -351,7 +352,7 @@ describe('BorrowedTime savour delay — C++ house.cpp:945, 4071-4080', () => {
     );
     expect(result.win).toBe(true);
     // C++ parity: BorrowedTime mechanism is now implemented in index.ts.
-    // applyTriggerActionResult sets isToWin=true + borrowedTime=27 ticks.
+    // applyTriggerActionResult sets isToWin=true + fixed-point savour delay.
     // applyDeferredWinLose decrements each tick; win fires when timer hits 0.
   });
 });
@@ -771,11 +772,11 @@ describe('TACTION_WIN timing — deferred via BorrowedTime (matching C++)', () =
    *
    * TS flow (now matching C++):
    *   1. Trigger fires → executeTriggerAction returns {win: true}
-   *   2. applyTriggerActionResult sets isToWin=true + borrowedTime=27
+   *   2. applyTriggerActionResult sets isToWin=true + fixed-point savour delay
    *   3. applyDeferredWinLose() decrements borrowedTime each tick
    *   4. When borrowedTime hits 0 AND allowWin <= 0 → state='won'
    *
-   * rules.ini SavourDelay=.03 → 27 ticks (~1.8s at 15 Hz).
+   * rules.ini SavourDelay=.03 is fixed raw 7/256 → 25 ticks.
    */
 
   it('TACTION_WIN result signals deferred win (applied by game loop timer)', () => {
@@ -783,7 +784,7 @@ describe('TACTION_WIN timing — deferred via BorrowedTime (matching C++)', () =
       makeAction(TACTION_WIN), [], new Map(), new Set(), []
     );
     expect(result.win).toBe(true);
-    // C++ parity: game engine defers win by BorrowedTime (27 ticks).
+    // C++ parity: game engine defers win by fixed-point BorrowedTime.
     // Other triggers can fire and override during the delay period.
   });
 });

@@ -23,6 +23,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -121,6 +122,12 @@ function makeCombatCtx(
     powerProduced: 100,
     ...overrides,
   } as CombatContext;
+}
+
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
 }
 
 // ── Structure Stats (rules.ini / building.cpp) ──────────────────────────────────
@@ -293,12 +300,12 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     expect(ally.hp).toBe(ally.maxHp);
   });
 
-  it('sets attackCooldown to ROF after firing', () => {
+  it('observes attackCooldown at ROF minus one after firing', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
     updateStructureCombat(ctx);
-    expect(ftur.attackCooldown).toBe(STRUCTURE_WEAPONS['FTUR'].rof);
+    expect(ftur.attackCooldown).toBe(STRUCTURE_WEAPONS['FTUR'].rof - 1);
   });
 
   it('does NOT fire while on cooldown', () => {
@@ -577,6 +584,7 @@ describe('FTUR vs PBOX damage comparison (cross-defense parity)', () => {
     pboxTarget.maxHp = 200;
     const ctx2 = makeCombatCtx([pbox], [pboxTarget]);
     updateStructureCombat(ctx2);
+    resolveProjectiles(ctx2);
     const pboxDmg = 200 - pboxTarget.hp;
 
     // FTUR: 125 * fixed(90%) = 112, PBOX: 40 * 1.0 = 40

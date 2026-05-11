@@ -42,10 +42,13 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
+import { Team } from '../engine/team';
 import {
   Dir, House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton,
 } from '../engine/types';
-import { Terrain } from '../engine/map';
+import { MoveResult, Terrain } from '../engine/map';
+import { ScenarioRandom } from '../engine/random';
+import { F_D, RAW_TRACKS, TRACK_CONTROL } from '../engine/tracks';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -276,5 +279,281 @@ describe('C++ DriveClass::AI drives-in-GUARD (drive.cpp:1376)', () => {
       expect(mcv.mission, `tick ${i}: mission stays GUARD (blockCommenceDrive)`).toBe(Mission.GUARD);
       expect(mcv.missionQueue, `tick ${i}: missionQueue intact`).toBe(Mission.MOVE);
     }
+  });
+
+  it('blocked close-enough MISSION_MOVE enters idle via DriveClass Assign_Destination(None)', () => {
+    // C++ drive.cpp:1114 calls Assign_Destination(TARGET_NONE) when
+    // Start_Of_Move cannot enter the next cell and NavCom is close enough.
+    // DriveClass::Assign_Destination then immediately re-enters Start_Of_Move
+    // for a non-driving unit; the no-NavCom guard queues Enter_Idle_Mode, and
+    // UnitClass::AI's post-Drive Commence pops GUARD in the same object tick.
+    const game = createGame();
+    const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 10, 10);
+    jeep.mission = Mission.MOVE;
+    jeep.missionTimer = 10;
+    jeep.missionQueue = null;
+    jeep.facing = Dir.SE;
+    jeep.desiredFacing = Dir.SE;
+    jeep.bodyFacing256 = Dir.SE * 32;
+    jeep.bodyFacing32 = Dir.SE * 4;
+    jeep.prevBodyFacing32 = jeep.bodyFacing32;
+    jeep.moveTarget = {
+      lx: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2),
+    };
+    jeep.path = [{ cx: 11, cy: 11 }];
+
+    const blocker = placeVehicle(game, UnitType.V_JEEP, House.Greece, 11, 11);
+    blocker.mission = Mission.GUARD;
+
+    tickEntity(game, jeep);
+
+    expect(jeep.moveTarget).toBeNull();
+    expect(jeep.path).toEqual([]);
+    expect(jeep.mission, 'post-Drive Commence popped queued idle mission').toBe(Mission.GUARD);
+    expect(jeep.missionQueue).toBeNull();
+    expect(jeep.missionTimer).toBe(0);
+  });
+
+  it('blocked close-enough vessel MISSION_MOVE enters idle via DriveClass Assign_Destination(None)', () => {
+    // C++ drive.cpp:1114-1115 is in DriveClass, so VesselClass inherits the same
+    // blocked close-enough behavior. SCG07EA tick 1134 BadGuy SS hits this path:
+    // Can_Enter_Cell fails, Assign_Destination(TARGET_NONE) re-enters
+    // Start_Of_Move while not driving, and Enter_Idle_Mode queues GUARD for the
+    // same-tick post-Drive Commence.
+    const game = createGame();
+    for (let y = 8; y <= 12; y++) {
+      for (let x = 8; x <= 12; x++) {
+        game.map.setTerrain(x, y, Terrain.WATER);
+      }
+    }
+
+    const sub = placeVehicle(game, UnitType.V_SS, House.BadGuy, 10, 10);
+    sub.mission = Mission.MOVE;
+    sub.missionTimer = 10;
+    sub.missionQueue = null;
+    sub.facing = Dir.E;
+    sub.desiredFacing = Dir.E;
+    sub.bodyFacing256 = Dir.E * 32;
+    sub.desiredFacing256 = Dir.E * 32;
+    sub.bodyFacing32 = Dir.E * 4;
+    sub.prevBodyFacing32 = sub.bodyFacing32;
+    sub.moveTarget = {
+      lx: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),
+    };
+    sub.path = [{ cx: 11, cy: 10 }];
+
+    const blocker = placeVehicle(game, UnitType.V_PT, House.Greece, 11, 10);
+    blocker.mission = Mission.GUARD;
+    game.map.setVehicleOccupancy(11, 10, blocker.id);
+
+    tickEntity(game, sub);
+
+    expect(sub.moveTarget).toBeNull();
+    expect(sub.path).toEqual([]);
+    expect(sub.mission, 'post-Drive Commence popped queued vessel idle mission').toBe(Mission.GUARD);
+    expect(sub.missionQueue).toBeNull();
+    expect(sub.missionTimer).toBe(0);
+  });
+
+  it('exhausted C++ Path does not preserve stale absolute path after track completion', () => {
+    // C++ DriveClass keeps Path[] as facings. After a long/curved track has
+    // consumed every facing, DriveClass::AI re-enters Start_Of_Move with
+    // Path[0] == FACING_NONE. A stale TS absolute path tail must not be treated
+    // as a real residual path; Basic_Path should fail against the occupied
+    // close-enough NavCom cell and Assign_Destination(TARGET_NONE) idles.
+    const game = createGame();
+    const jeep = placeVehicle(game, UnitType.V_JEEP, House.Greece, 10, 11);
+    jeep.mission = Mission.MOVE;
+    jeep.missionTimer = 3;
+    jeep.missionQueue = null;
+    jeep.facing = Dir.SE;
+    jeep.desiredFacing = Dir.SE;
+    jeep.bodyFacing256 = Dir.SE * 32;
+    jeep.desiredFacing256 = Dir.SE * 32;
+    jeep.bodyFacing32 = Dir.SE * 4;
+    jeep.prevBodyFacing32 = jeep.bodyFacing32;
+    jeep.leptonX = 10 * 256 + 112;
+    jeep.leptonY = 11 * 256 + 112;
+    jeep.syncPosFromLeptons();
+    jeep.moveTarget = {
+      lx: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),
+    };
+    jeep.headToLX = 10 * 256 + 128;
+    jeep.headToLY = 11 * 256 + 128;
+    jeep.isDriving = true;
+    jeep.trackNumber = 3;
+    jeep.trackControlIndex = 35;
+    jeep.trackIndex = 53;
+    jeep.trackCellSpan = 1;
+    jeep.speedAccum = 10;
+    jeep.driveSpeed = 153;
+    jeep.path = [{ cx: 9, cy: 10 }, { cx: 10, cy: 11 }];
+    jeep.pathIndex = 1;
+    jeep.drivePathFacings = [];
+
+    const blocker = new Entity(UnitType.I_E1, House.Greece, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    blocker.mission = Mission.GUARD;
+    game.entities.push(blocker);
+    game.entityById.set(blocker.id, blocker);
+
+    tickEntity(game, jeep);
+
+    expect(jeep.moveTarget).toBeNull();
+    expect(jeep.path).toEqual([]);
+    expect(jeep.drivePathFacings).toEqual([]);
+    expect(jeep.mission).toBe(Mission.GUARD);
+    expect(jeep.missionQueue).toBeNull();
+    expect(jeep.missionTimer).toBe(0);
+  });
+
+  it('active track jump uses mirrored C++ Path, not stale absolute path cells', () => {
+    // C++ DriveClass::While_Moving computes nextface from Path[0] at AI entry.
+    // If Start_Of_Move already consumed every Path[] facing for a long F_D
+    // track, Path[0] is FACING_NONE and the jump branch at drive.cpp:734 cannot
+    // fire. TS may still have an absolute path tail for bookkeeping; that tail
+    // must not invent a nextface during the active track.
+    const game = createGame();
+    const tank = placeVehicle(game, UnitType.V_3TNK, House.Greece, 10, 10);
+    const startControlIndex = 0 * 8 + 1; // N -> NE, raw track 3, F_D
+    const startControl = TRACK_CONTROL[startControlIndex];
+    const headCell = { cx: 11, cy: 8 };
+    const staleNextCell = { cx: 12, cy: 8 };
+
+    expect(startControl.track).toBe(3);
+    expect(startControl.flag & F_D).toBeTruthy();
+
+    tank.mission = Mission.MOVE;
+    tank.isDriving = true;
+    tank.moveTarget = { lx: 20 * 256 + 128, ly: 8 * 256 + 128 };
+    tank.trackNumber = startControl.track;
+    tank.trackControlIndex = startControlIndex;
+    tank.trackFlags = startControl.flag & ~F_D;
+    tank.trackIndex = RAW_TRACKS[startControl.track - 1].jump;
+    tank.trackCellSpan = 2;
+    tank.speedAccum = 11;
+    tank.driveSpeed = 1;
+    tank.headToLX = headCell.cx * 256 + 128;
+    tank.headToLY = headCell.cy * 256 + 128;
+    tank.path = [headCell, staleNextCell];
+    tank.pathIndex = 0;
+    tank.drivePathFacings = [];
+
+    (game as unknown as {
+      followTrackStep(e: Entity, speedThrottleRaw: number, targetX: number, targetY: number): boolean;
+    }).followTrackStep(
+      tank,
+      1,
+      headCell.cx * CELL_SIZE + CELL_SIZE / 2,
+      headCell.cy * CELL_SIZE + CELL_SIZE / 2,
+    );
+
+    expect(tank.trackNumber, 'no fabricated jump to the NE->E track').toBe(3);
+    expect(tank.trackIndex).toBe(RAW_TRACKS[2].jump + 1);
+    expect(tank.headToLX).toBe(headCell.cx * 256 + 128);
+    expect(tank.headToLY).toBe(headCell.cy * 256 + 128);
+    expect(tank.pathIndex).toBe(0);
+  });
+
+  it('team conscript Assign_Destination requests Start_Of_Move before same-tick DriveClass rotation', () => {
+    // C++ TeamClass::Coordinate_Conscript calls Assign_Destination(Zone).
+    // DriveClass::Assign_Destination immediately calls Start_Of_Move, which
+    // sets PrimaryFacing.Desired before this object's later DriveClass::AI pass.
+    // The same frame therefore spends one Rotation_Adjust step.
+    const game = createGame();
+    const leader = placeVehicle(game, UnitType.V_3TNK, House.USSR, 10, 10);
+    const conscript = placeVehicle(game, UnitType.V_3TNK, House.USSR, 10, 13);
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.V_3TNK, count: 2 }],
+      missionList: [],
+      forcedActive: true,
+    });
+
+    team.add(leader);
+    team.add(conscript);
+    leader.teamInitiated = true;
+    conscript.teamInitiated = false;
+    conscript.facing = Dir.W;
+    conscript.desiredFacing = Dir.W;
+    conscript.bodyFacing256 = Dir.W * 32;
+    conscript.desiredFacing256 = Dir.W * 32;
+    conscript.bodyFacing32 = Dir.W * 4;
+    team.zone = {
+      x: 10 * CELL_SIZE + CELL_SIZE / 2,
+      y: 10 * CELL_SIZE + CELL_SIZE / 2,
+    };
+    team.zoneLeptonX = 10 * 256 + 128;
+    team.zoneLeptonY = 10 * 256 + 128;
+
+    team.coordinateRegroup({
+      entities: game.entities,
+      map: game.map,
+      canEnterCell: (entity, cx, cy) =>
+        (game as unknown as {
+          canEnterTrackJumpCell(e: Entity, cx: number, cy: number): MoveResult;
+        }).canEnterTrackJumpCell(entity, cx, cy) === MoveResult.OK,
+      startDriveClassMove: unit =>
+        (game as unknown as { startDriveClassMove(e: Entity): void }).startDriveClassMove(unit),
+    });
+
+    expect(conscript.moveTarget).not.toBeNull();
+    expect(conscript.desiredFacing256).toBe(Dir.N * 32);
+    expect(conscript.path.length).toBeGreaterThan(0);
+
+    tickEntity(game, conscript);
+
+    expect(conscript.mission).toBe(Mission.MOVE);
+    expect(conscript.bodyFacing256).toBe((Dir.W * 32 + conscript.stats.rot) & 0xff);
+  });
+
+  it('GUARD return delay is overwritten by same-tick PCP Commence after track completion', () => {
+    // C++ order for UnitClass::AI:
+    //   MissionClass::AI -> Mission_Guard() returns a delay
+    //   DriveClass::AI -> Per_Cell_Process(PCP_END) -> Commence()
+    //
+    // Commence() resets Timer=0 after popping the queued MOVE. TS must not
+    // write the Mission_Guard return delay after the movement-side Commence.
+    const game = createGame();
+    const tank = placeVehicle(game, UnitType.V_JEEP, House.USSR, 10, 11);
+    tank.mission = Mission.GUARD;
+    tank.missionQueue = Mission.MOVE;
+    tank.missionTimer = 0;
+    tank.facing = Dir.SE;
+    tank.desiredFacing = Dir.SE;
+    tank.bodyFacing256 = Dir.SE * 32;
+    tank.desiredFacing256 = Dir.SE * 32;
+    tank.bodyFacing32 = Dir.SE * 4;
+    tank.prevBodyFacing32 = tank.bodyFacing32;
+    tank.leptonX = 10 * 256 + 112;
+    tank.leptonY = 11 * 256 + 112;
+    tank.syncPosFromLeptons();
+    tank.moveTarget = {
+      lx: pixelToLepton(11 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(12 * CELL_SIZE + CELL_SIZE / 2),
+    };
+    tank.headToLX = 11 * 256 + 128;
+    tank.headToLY = 12 * 256 + 128;
+    tank.isDriving = true;
+    tank.trackNumber = 3;
+    tank.trackControlIndex = 35;
+    tank.trackIndex = 53;
+    tank.trackCellSpan = 1;
+    tank.speedAccum = 10;
+    tank.driveSpeed = 153;
+    tank.path = [{ cx: 11, cy: 12 }];
+    tank.pathIndex = 0;
+    tank.drivePathFacings = [];
+
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+
+    tickEntity(game, tank);
+
+    expect(tank.mission, 'PCP Commence popped queued MOVE after Mission_Guard').toBe(Mission.MOVE);
+    expect(tank.missionQueue).toBeNull();
+    expect(tank.missionTimer, 'Commence Timer=0 must survive the guard dispatch').toBe(0);
   });
 });

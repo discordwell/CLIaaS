@@ -21,6 +21,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
@@ -120,6 +121,12 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+    updateInflightProjectiles(ctx);
+  }
+}
+
 // ── Structure Stats (rules.ini / building.cpp) ──────────────────────────────────
 
 describe('PBOX structure stats (rules.ini)', () => {
@@ -208,6 +215,7 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -217,6 +225,7 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     // SA vs none = 1.0 mult, damage 40, distance 0 (direct hit) => 40 damage
     expect(hpBefore - enemy.hp).toBe(40);
   });
@@ -228,6 +237,7 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([pbox], [tank]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     // SA vs heavy = 0.25 mult, damage 40 * 0.25 = 10
     expect(hpBefore - tank.hp).toBe(10);
   });
@@ -238,6 +248,7 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 16, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -247,15 +258,17 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const ally = entityAtCell(UnitType.I_E1, House.Greece, 12, 10);
     const ctx = makeCombatCtx([pbox], [ally]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(ally.hp).toBe(ally.maxHp);
   });
 
-  it('sets attackCooldown to ROF after firing', () => {
+  it('observes attackCooldown at ROF minus one after firing', () => {
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
-    expect(pbox.attackCooldown).toBe(STRUCTURE_WEAPONS['PBOX'].rof);
+    resolveProjectiles(ctx);
+    expect(pbox.attackCooldown).toBe(STRUCTURE_WEAPONS['PBOX'].rof - 1);
   });
 
   it('does NOT fire while on cooldown', () => {
@@ -263,6 +276,7 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -271,6 +285,7 @@ describe('PBOX fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(pbox.attackCooldown).toBe(4);
   });
 });
@@ -288,6 +303,7 @@ describe('PBOX fires during power outage (building.cpp: PW1/PW3)', () => {
       powerProduced: 100,
     });
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -300,6 +316,7 @@ describe('PBOX fires during power outage (building.cpp: PW1/PW3)', () => {
       powerProduced: 0,
     });
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -311,6 +328,7 @@ describe('PBOX fires during power outage (building.cpp: PW1/PW3)', () => {
       powerProduced: 100,
     });
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -323,6 +341,7 @@ describe('PBOX has no turret rotation (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(pbox.turretDir).toBeUndefined();
   });
 
@@ -331,6 +350,7 @@ describe('PBOX has no turret rotation (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(pbox.desiredTurretDir).toBeUndefined();
   });
 
@@ -339,6 +359,7 @@ describe('PBOX has no turret rotation (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(pbox.firingFlash).toBeUndefined();
   });
 });
@@ -352,6 +373,7 @@ describe('PBOX does NOT target airborne aircraft (building.cpp — AA gate)', ()
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE; // airborne
     const ctx = makeCombatCtx([pbox], [heli]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(heli.hp).toBe(heli.maxHp);
   });
 
@@ -361,6 +383,7 @@ describe('PBOX does NOT target airborne aircraft (building.cpp — AA gate)', ()
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const ctx = makeCombatCtx([pbox], [mig]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(mig.hp).toBe(mig.maxHp);
   });
 
@@ -370,6 +393,7 @@ describe('PBOX does NOT target airborne aircraft (building.cpp — AA gate)', ()
     heli.flightAltitude = 0; // landed
     const ctx = makeCombatCtx([pbox], [heli]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 });
@@ -384,6 +408,7 @@ describe('PBOX target selection — threat-based scoring (building.cpp)', () => 
     const farEnemy = entityAtCell(UnitType.I_E1, House.USSR, 14, 10);   // 4 cells
     const ctx = makeCombatCtx([pbox], [closeEnemy, farEnemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     // Closer enemy should be targeted (damaged)
     const closeDmg = closeEnemy.maxHp - closeEnemy.hp;
     const farDmg = farEnemy.maxHp - farEnemy.hp;
@@ -400,6 +425,7 @@ describe('PBOX target selection — threat-based scoring (building.cpp)', () => 
     deadEnemy.alive = false;
     const ctx = makeCombatCtx([pbox], [deadEnemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     // No target found — cooldown should remain 0
     expect(pbox.attackCooldown).toBe(0);
   });
@@ -410,6 +436,7 @@ describe('PBOX target selection — threat-based scoring (building.cpp)', () => 
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -425,6 +452,7 @@ describe('PBOX kill tracking (building.cpp)', () => {
     const ctx = makeCombatCtx([pbox], [weakEnemy]);
     expect(ctx.killCount).toBe(0);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     expect(weakEnemy.alive).toBe(false);
     // killCount should have incremented for player-allied kill
     expect(ctx.killCount).toBe(1);
@@ -434,29 +462,32 @@ describe('PBOX kill tracking (building.cpp)', () => {
 // ── Effects (rendering parity) ───────────────────────────────────────────────────
 
 describe('PBOX fire effects (rendering parity)', () => {
-  it('produces muzzle and projectile effects when firing', () => {
+  it('produces a muzzle flash and invisible bullet impact when firing', () => {
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     const muzzles = ctx.effects.filter(e => e.type === 'muzzle');
     const projectiles = ctx.effects.filter(e => e.type === 'projectile');
+    const impacts = ctx.effects.filter(e => e.type === 'explosion');
     expect(muzzles.length).toBeGreaterThanOrEqual(1);
-    expect(projectiles.length).toBeGreaterThanOrEqual(1);
+    expect(projectiles.length).toBe(0);
+    expect(impacts.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('muzzle effect originates from structure center', () => {
+  it('muzzle effect uses the C++ Fire_Coord offset above structure center', () => {
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const ctx = makeCombatCtx([pbox], [enemy]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    // PBOX is BSIZE_11; C++ CenterOffset[BSIZE_11] is 0x00800080,
-    // i.e. half a cell from the building's upper-left coordinate.
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
-    const expectedY = 10 * CELL_SIZE + CELL_SIZE / 2;
-    expect(muzzle!.x).toBe(expectedX);
-    expect(muzzle!.y).toBe(expectedY);
+    const centerX = 10 * CELL_SIZE + CELL_SIZE / 2;
+    const centerY = 10 * CELL_SIZE + CELL_SIZE / 2;
+    expect(muzzle!.x).toBe(centerX);
+    expect(muzzle!.y).toBeLessThan(centerY);
+    expect(muzzle!.y).toBeGreaterThan(centerY - CELL_SIZE / 2);
   });
 });

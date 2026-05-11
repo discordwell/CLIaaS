@@ -33,6 +33,9 @@ describe('Building RNG Interleaving — C++ parity', () => {
   const combatSource = fs.readFileSync(
     path.resolve(__dirname, '..', 'engine', 'combat.ts'), 'utf-8',
   );
+  const scenarioSource = fs.readFileSync(
+    path.resolve(__dirname, '..', 'engine', 'scenario.ts'), 'utf-8',
+  );
 
   it('tickStructuresInterleaved calls per-building combat after each timer tick', () => {
     // The interleaved method must exist
@@ -78,7 +81,12 @@ describe('Building RNG Interleaving — C++ parity', () => {
     expect(idx).toBeGreaterThan(-1);
     const chunk = combatSource.slice(idx, idx + 500);
     expect(chunk).toContain('sellProgress');
-    expect(chunk).toContain('buildProgress');
+    expect(chunk).toContain('isStructureUnderConstruction(s)');
+
+    const helperIdx = scenarioSource.indexOf('export function isStructureUnderConstruction');
+    expect(helperIdx).toBeGreaterThan(-1);
+    const helperChunk = scenarioSource.slice(helperIdx, helperIdx + 200);
+    expect(helperChunk).toContain('buildProgress');
   });
 
   it('interleaved loop processes timer jitter RNG before combat for each building', () => {
@@ -102,6 +110,21 @@ describe('Building RNG Interleaving — C++ parity', () => {
     expect(helperStart).toBeGreaterThan(-1);
     const helperBody = indexSource.slice(helperStart, helperStart + 2500);
     expect(helperBody).toContain('ScenarioRandom.nextInRange(0, 2)');
+  });
+
+  it('flushes earlier BulletClass logic slots before each building', () => {
+    // C++ LogicClass::AI is one vector: bullets appended before a building slot
+    // must run before that building's MissionClass timer jitter.
+    const phaseStart = indexSource.indexOf('Phase 2: ALL structures');
+    const phaseEnd = indexSource.indexOf('Phase 3: post-building entities');
+    expect(phaseStart).toBeGreaterThan(-1);
+    expect(phaseEnd).toBeGreaterThan(phaseStart);
+    const phaseBody = indexSource.slice(phaseStart, phaseEnd);
+    const flushIdx = phaseBody.indexOf('updateProjectilesThrough(effectiveLogicIdx - 1)');
+    const timerIdx = phaseBody.indexOf('dispatchStructureMissionTimer(');
+    expect(flushIdx).toBeGreaterThan(-1);
+    expect(timerIdx).toBeGreaterThan(-1);
+    expect(flushIdx).toBeLessThan(timerIdx);
   });
 
   it('updateStructureCombat wrapper delegates to updateSingleStructureCombat', () => {

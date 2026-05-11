@@ -5,7 +5,7 @@
 
 import {
   type ProductionItem,
-  CELL_SIZE,
+  CELL_SIZE, Dir,
   type House, UnitType, Mission,
 } from './types';
 import { getEffectiveCost } from './production';
@@ -13,6 +13,7 @@ import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS,
 import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type Effect } from './renderer';
+import { assignMission } from './missionLifecycle';
 
 // ── Local constants ──────────────────────────────────────────────────────────
 
@@ -27,6 +28,8 @@ const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 const ADJACENT_RANGE: Record<string, number> = {
   SYRD: 8, SPEN: 8, SYRF: 8, SPEF: 8,
 };
+
+const MCV_DEPLOY_FACING256 = (Dir.SW * 32) & 0xff; // C++ DIR_SW
 
 /** Get Adjacent= for a building type, defaulting to 1 (C++ bdata.cpp:2839). */
 export function getAdjacentRange(type: string): number {
@@ -257,4 +260,109 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     frame: 0, maxFrames: 15, size: 10, sprite: 'piffpiff', spriteStart: 0,
   });
   return true;
+}
+
+/** C++ unit.cpp:1490 — Legal_Placement for STRUCT_CONST at Adjacent_Cell(NW). */
+export function canDeployMCV(ctx: PlacementContext, entity: Entity): boolean {
+  if (entity.type !== UnitType.V_MCV || !entity.alive) return false;
+  const ec = entity.cell;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!ctx.map.isBuildable(ec.cx + dx, ec.cy + dy)) return false;
+    }
+  }
+  return true;
+}
+
+function currentBodyFacing256(entity: Entity): number {
+  return entity.bodyFacing256 >= 0 ? (entity.bodyFacing256 & 0xff) : ((entity.facing * 32) & 0xff);
+}
+
+/**
+ * C++ UnitClass::Try_To_Deploy for MCV facing behavior.
+ * Returns true when the deploy command was accepted (either deployment finished
+ * immediately or rotation toward DIR_SW has begun).
+ */
+export function tryStartMCVDeploy(ctx: PlacementContext, entity: Entity): boolean {
+  if (!canDeployMCV(ctx, entity)) {
+    entity.mcvIsDeploying = false;
+    return false;
+  }
+
+  entity.desiredFacing = Dir.SW;
+  entity.desiredFacing256 = MCV_DEPLOY_FACING256;
+  if (currentBodyFacing256(entity) !== MCV_DEPLOY_FACING256) {
+    entity.mcvIsDeploying = true;
+    return true;
+  }
+
+  entity.mcvIsDeploying = false;
+  return deployMCV(ctx, entity);
+}
+
+/** C++ UnitClass::Per_Cell_Process(PCP_ROTATION) deploy completion. */
+export function advanceMCVDeployRotation(ctx: PlacementContext, entity: Entity): boolean {
+  if (entity.type !== UnitType.V_MCV || !entity.alive || !entity.mcvIsDeploying) return false;
+  entity.desiredFacing = Dir.SW;
+  entity.desiredFacing256 = MCV_DEPLOY_FACING256;
+  if (!entity.tickRotation()) return false;
+  entity.mcvIsDeploying = false;
+  return deployMCV(ctx, entity);
+}
+
+/**
+ * C++ unit.cpp:2546-2576 — UnitClass::Mission_Unload for UNIT_MCV.
+ *
+ * Unlike the generic non-vessel Mission_Unload fallthrough, UNIT_MCV owns a
+ * three-state deploy machine and always returns 1. It does not consume the
+ * Normal_Delay + Random_Pick(0,2) jitter used by unrelated unit classes.
+ */
+export function updateMCVUnloadMission(ctx: PlacementContext, entity: Entity): number {
+  if (entity.type !== UnitType.V_MCV || !entity.alive) return 1;
+
+  switch (entity.mcvUnloadStatus) {
+    case 0:
+      // C++ Path[0] = FACING_NONE; keep IsDriving unchanged so an already
+      // active driver can finish/stop through the normal movement path.
+      entity.path = [];
+      entity.drivePathFacings = [];
+      entity.pathIndex = 0;
+      entity.moveTarget = null;
+      entity.mcvUnloadStatus = 1;
+      return 1;
+
+    case 1:
+      if (!entity.isDriving) {
+        const accepted = tryStartMCVDeploy(ctx, entity);
+        if (entity.alive) {
+          if (entity.mcvIsDeploying) {
+            entity.mcvUnloadStatus = 2;
+            // C++ UnitClass::Mission_Unload runs before DriveClass::AI in the
+            // same object tick. Do_Turn(DIR_SW) therefore gets one immediate
+            // PrimaryFacing::Rotation_Adjust before the next frame.
+            advanceMCVDeployRotation(ctx, entity);
+          } else if (!accepted) {
+            entity.mcvUnloadStatus = 0;
+            assignMission(entity, Mission.GUARD);
+          }
+        }
+      }
+      return 1;
+
+    case 2:
+      if (entity.mcvIsDeploying) {
+        advanceMCVDeployRotation(ctx, entity);
+      }
+      if (entity.alive) {
+        if (!entity.mcvIsDeploying) {
+          entity.mcvUnloadStatus = 0;
+          assignMission(entity, Mission.GUARD);
+        }
+      }
+      return 1;
+
+    default:
+      entity.mcvUnloadStatus = 0;
+      return 1;
+  }
 }

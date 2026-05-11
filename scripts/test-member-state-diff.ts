@@ -9,12 +9,13 @@ import { test } from '@playwright/test';
 const BASE = process.env.BASE_URL ?? 'https://cliaas.com';
 const TS_BASE = process.env.TS_BASE_URL ?? BASE;
 const SCENARIO = process.env.SCENARIO ?? 'SCG04EA';
+const START = Number(process.env.START ?? 0);
 const MAX = Number(process.env.MAX ?? 5);
 const TYPES = (process.env.TYPES ?? '3TNK,4TNK,MCV,SS,V_LST,TRAN,APC,1TNK,2TNK,ARTY,JEEP')
   .split(',').map(s => s.trim());
 
 interface UnitState {
-  id: number; type: string; cell: [number, number];
+  id: number; type: string; house?: string; cell: [number, number];
   mission: number; mt: number; mq: number; drv: boolean;
   arm: number; tlx?: number; tly?: number; nlx?: number; nly?: number;
 }
@@ -32,7 +33,7 @@ function fmtMission(m: any): string {
   return MISSION_NAMES[m] ?? `?${m}`;
 }
 
-test(`${SCENARIO} per-member state diff ticks 0-${MAX}`, async ({ browser }) => {
+test(`${SCENARIO} per-member state diff ticks ${START}-${START + MAX}`, async ({ browser }) => {
   test.setTimeout(10 * 60 * 1000);
   const wCtx = await browser.newContext();
   const tCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
@@ -54,6 +55,18 @@ test(`${SCENARIO} per-member state diff ticks 0-${MAX}`, async ({ browser }) => 
   });
   await tp.evaluate((s: number) => { (window as any).__syncRngSeed?.(s); }, wSeed);
 
+  if (START > 0) {
+    let remaining = START;
+    while (remaining > 0) {
+      const batch = Math.min(300, remaining);
+      await Promise.all([
+        wp.evaluate(async (n: number) => { const r = (window as any).__agentStep(n); if (r?.then) await r; }, batch),
+        tp.evaluate((n: number) => { (window as any).__agentStep?.(n); }, batch),
+      ]);
+      remaining -= batch;
+    }
+  }
+
   const collect = async (page: any, engine: 'W'|'T'): Promise<UnitState[]> => {
     return await page.evaluate((isWasm: boolean) => {
       if (isWasm) {
@@ -66,7 +79,7 @@ test(`${SCENARIO} per-member state diff ticks 0-${MAX}`, async ({ browser }) => 
           .concat(s.aircraft ?? [])
           .concat(s.neutrals ?? [])
           .map((u: any) => ({
-            id: u.id, type: u.t ?? '', cell: [u.cx ?? 0, u.cy ?? 0],
+            id: u.id, type: u.t ?? '', house: String(u.h ?? u.house ?? ''), cell: [u.cx ?? 0, u.cy ?? 0],
             mission: u.m ?? 0, mt: u.mt ?? 0, mq: u.mq ?? -1, drv: u.drv ?? false,
             arm: u.arm ?? 0, tlx: u.tlx, tly: u.tly, nlx: u.nlx, nly: u.nly,
           }));
@@ -74,7 +87,7 @@ test(`${SCENARIO} per-member state diff ticks 0-${MAX}`, async ({ browser }) => 
         const g = (window as any).__agentGame;
         if (!g) return [];
         return g.entities.filter((e: any) => e.alive).map((e: any) => ({
-          id: e.id, type: String(e.type ?? ''), cell: [e.cell?.cx ?? 0, e.cell?.cy ?? 0],
+          id: e.id, type: String(e.type ?? ''), house: String(e.house ?? ''), cell: [e.cell?.cx ?? 0, e.cell?.cy ?? 0],
           mission: e.mission ?? 0, mt: e.missionTimer ?? 0,
           mq: e.missionQueue ?? -1, drv: !!e.isDriving,
           arm: e.attackCooldown ?? 0,
@@ -87,7 +100,7 @@ test(`${SCENARIO} per-member state diff ticks 0-${MAX}`, async ({ browser }) => 
 
   console.log(`\n=== ${SCENARIO} per-member state diff ===\n`);
 
-  for (let t = 1; t <= MAX; t++) {
+  for (let t = START + 1; t <= START + MAX; t++) {
     await Promise.all([
       wp.evaluate(async () => { const r = (window as any).__agentStep(1); if (r?.then) await r; }),
       tp.evaluate(() => { (window as any).__agentStep?.(1); }),
@@ -105,7 +118,7 @@ test(`${SCENARIO} per-member state diff ticks 0-${MAX}`, async ({ browser }) => 
     const maxN = Math.max(wF.length, tF.length);
     for (let i = 0; i < maxN; i++) {
       const w = wF[i], tS = tF[i];
-      const fmt = (u?: UnitState) => u ? `${u.type.padEnd(5)} c=(${u.cell[0]},${u.cell[1]}) m=${fmtMission(u.mission).padEnd(10)} mq=${u.mq<0?'--':fmtMission(u.mq).padEnd(5)} mt=${String(u.mt).padStart(3)} drv=${u.drv?'T':'F'} nlx=${u.nlx??'-'} nly=${u.nly??'-'}` : '---';
+      const fmt = (u?: UnitState) => u ? `#${u.id} ${u.type.padEnd(5)} ${String(u.house ?? '').padEnd(7)} c=(${u.cell[0]},${u.cell[1]}) m=${fmtMission(u.mission).padEnd(10)} mq=${u.mq<0?'--':fmtMission(u.mq).padEnd(5)} mt=${String(u.mt).padStart(3)} drv=${u.drv?'T':'F'} nlx=${u.nlx??'-'} nly=${u.nly??'-'}` : '---';
       console.log(`  W[${i}]: ${fmt(w)}`);
       console.log(`  T[${i}]: ${fmt(tS)}`);
     }

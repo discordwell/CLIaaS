@@ -6,7 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { House, Mission, UnitType, CELL_SIZE, RESFACTOR, cellTargetToLepton, pixelToLepton, } from '../engine/types';
+import { Dir, House, Mission, UnitType, CELL_SIZE, RESFACTOR, cellTargetToLepton, pixelToLepton, } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
 
 class FakeAudio {
@@ -57,7 +57,7 @@ beforeEach(() => {
 });
 
 describe('Team mission parity hooks', () => {
-  it('TMISSION_DEPLOY turns an MCV into a FACT owned by the MCV house', () => {
+  it('TMISSION_DEPLOY queues MCV unload before Mission_Unload creates a FACT', () => {
     const game = createGame();
     game.playerHouse = House.Greece;
 
@@ -68,18 +68,44 @@ describe('Team mission parity hooks', () => {
 
     callUpdateTeamMission(game, mcv);
 
+    expect(mcv.alive).toBe(true);
+    expect(mcv.mission).toBe(Mission.GUARD);
+    expect(mcv.missionQueue).toBe(Mission.UNLOAD);
+    expect(mcv.teamMissionIndex).toBe(0);
+    expect(game.structures.some(s => s.type === 'FACT' && s.house === House.England)).toBe(false);
+
+    callUpdateEntity(game, mcv);
+    expect(mcv.alive).toBe(true);
+    expect(mcv.mission).toBe(Mission.UNLOAD);
+    expect(mcv.mcvUnloadStatus).toBe(1);
+
+    callUpdateEntity(game, mcv);
+
+    expect(mcv.alive).toBe(true);
+    expect(mcv.mission).toBe(Mission.UNLOAD);
+    expect(mcv.mcvUnloadStatus).toBe(2);
+    expect(mcv.mcvIsDeploying).toBe(true);
+    expect(game.structures.some(s => s.type === 'FACT' && s.house === House.England)).toBe(false);
+  });
+
+  it('MCV deploy rotation completes from DriveClass AI even while GUARD timer is waiting', () => {
+    const game = createGame();
+    const mcv = new Entity(UnitType.V_MCV, House.England, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    mcv.mission = Mission.GUARD;
+    mcv.missionTimer = 37;
+    mcv.mcvUnloadStatus = 2;
+    mcv.mcvIsDeploying = true;
+    mcv.facing = Dir.SW;
+    mcv.bodyFacing256 = Dir.SW * 32 - 2;
+    mcv.desiredFacing = Dir.SW;
+    mcv.desiredFacing256 = Dir.SW * 32;
+    game.entities.push(mcv);
+    game.entityById.set(mcv.id, mcv);
+
+    callUpdateEntity(game, mcv);
+
     expect(mcv.alive).toBe(false);
-    expect(mcv.teamMissionIndex).toBe(1);
-    expect(game.structures).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'FACT',
-          house: House.England,
-          cx: 9,
-          cy: 9,
-        }),
-      ]),
-    );
+    expect(game.structures.some(s => s.type === 'FACT' && s.house === House.England && s.cx === 9 && s.cy === 9)).toBe(true);
   });
 
   it('TMISSION_DEPLOY drops a minelayer mine at the current cell', () => {

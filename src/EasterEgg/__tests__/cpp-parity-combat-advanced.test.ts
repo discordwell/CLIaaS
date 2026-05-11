@@ -25,6 +25,7 @@ import {
   launchProjectile,
   updateInflightProjectiles,
 } from '../engine/combat';
+import { processLogicAnim, spawnLogicAnimForSprite } from '../engine/logicAnim';
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
@@ -50,6 +51,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -367,6 +369,98 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     const flamePuffs = ctx.effects.filter(e =>
       e.type === 'explosion' && (e as any).sprite === 'napalm1');
     expect(flamePuffs.length).toBe(0);
+  });
+
+  it('projectile impact anim keeps IsBrandNew when detonation happens before AnimClass phase', () => {
+    const attacker = entityAtCell(UnitType.I_E4, House.USSR, 2, 5);
+    const target = entityAtCell(UnitType.V_2TNK, House.Spain, 3, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+    ctx.logicAnimsAlreadyProcessed = false;
+
+    launchProjectile(ctx, attacker, target, { ...WEAPON_STATS.Flamer }, 70, target.pos.x, target.pos.y, true);
+    let ticks = 0;
+    while (ctx.inflightProjectiles.length > 0 && ticks++ < 50) {
+      updateInflightProjectiles(ctx);
+    }
+
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    const anim = ctx.logicAnims.find(a => a.type === 'napalm2');
+    expect(anim).toBeDefined();
+    expect(anim!.stage).toBe(0);
+    expect(anim!.isBrandNew).toBe(true);
+
+    expect(processLogicAnim(anim!, ctx.logicAnims, ctx.effects)).toBe(true);
+    expect(anim!.stage).toBe(0);
+    expect(anim!.isBrandNew).toBe(false);
+  });
+
+  it('projectile impact anim pre-clears IsBrandNew after TS has passed AnimClass phase', () => {
+    const attacker = entityAtCell(UnitType.I_E4, House.USSR, 2, 5);
+    const target = entityAtCell(UnitType.V_2TNK, House.Spain, 3, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+    ctx.logicAnimsAlreadyProcessed = true;
+
+    launchProjectile(ctx, attacker, target, { ...WEAPON_STATS.Flamer }, 70, target.pos.x, target.pos.y, true);
+    let ticks = 0;
+    while (ctx.inflightProjectiles.length > 0 && ticks++ < 50) {
+      updateInflightProjectiles(ctx);
+    }
+
+    const anim = ctx.logicAnims.find(a => a.type === 'napalm2');
+    expect(anim).toBeDefined();
+    expect(anim!.stage).toBe(0);
+    expect(anim!.isBrandNew).toBe(false);
+
+    expect(processLogicAnim(anim!, ctx.logicAnims, ctx.effects)).toBe(true);
+    expect(anim!.stage).toBe(1);
+  });
+
+  it('Super projectile impact does not fall back to a generic VEH-HIT anim', () => {
+    const attacker = entityAtCell(UnitType.V_TTNK, House.USSR, 5, 5);
+    const target = entityAtCell(UnitType.V_4TNK, House.Spain, 6, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+    const weapon = { ...WEAPON_STATS.TeslaCannon };
+
+    launchProjectile(ctx, attacker, target, weapon, weapon.damage, target.pos.x, target.pos.y, true);
+    let ticks = 0;
+    while (ctx.inflightProjectiles.length > 0 && ticks++ < 30) {
+      updateInflightProjectiles(ctx);
+    }
+
+    // C++ combat.cpp Combat_Anim returns ANIM_NONE for ExplosionSet=0
+    // (Super/Tesla). Do not synthesize VEH-HIT1 as a visual fallback because it
+    // becomes a crater-forming AnimClass and mutates ore.
+    expect(ctx.inflightProjectiles.length).toBe(0);
+    expect(ctx.effects.some(e => e.type === 'explosion' && e.sprite === 'veh-hit1')).toBe(false);
+    expect(ctx.logicAnims.some(a => a.type === 'veh-hit1')).toBe(false);
+  });
+
+  it('crater-forming impact anim reduces ore by six levels at Middle', () => {
+    const map = new GameMap();
+    map.setBounds(0, 0, 20, 20);
+    map.initDefault();
+    const idx = 10 * 128 + 10;
+    map.overlay[idx] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[idx] = 9;
+    map.cells[idx] = Terrain.ORE;
+
+    const effects: Effect[] = [];
+    const logicAnims = [] as ReturnType<typeof makeCombatCtx>['logicAnims'];
+    spawnLogicAnimForSprite(
+      logicAnims,
+      effects,
+      'art-exp1',
+      10 * CELL_SIZE + CELL_SIZE / 2,
+      10 * CELL_SIZE + CELL_SIZE / 2,
+      false,
+      true,
+    );
+
+    const anim = logicAnims[0];
+    expect(anim).toBeDefined();
+
+    expect(processLogicAnim(anim!, logicAnims, effects, map)).toBe(true);
+    expect(map.oreDensity[idx]).toBe(3);
   });
 });
 

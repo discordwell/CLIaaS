@@ -308,6 +308,41 @@ describe('Scatter triggers (infantry.cpp Take_Damage + Fear_AI)', () => {
     expect(scattered).toBe(true);
   });
 
+  it('scatter Assign_Destination stops an active infantry driver when current coord is clear', () => {
+    const civ = entityAtCell(UnitType.I_C7, House.USSR, 72, 49);
+    civ.mission = Mission.ATTACK;
+    civ.isDriving = true;
+    civ.doing = 'walk';
+    civ.headToLX = 71 * 256 + 128;
+    civ.headToLY = 50 * 256 + 128;
+    civ.moveTarget = { lx: 71 * 256 + 136, ly: 50 * 256 + 136 };
+    civ.path = [{ cx: 71, cy: 50 }];
+    civ.pathIndex = 0;
+
+    let stopCalls = 0;
+    const ctx = makeCombatCtx([civ]);
+    ctx.canStopInfantryDriverForAssignDestination = () => true;
+    ctx.stopInfantryDriver = (e) => {
+      stopCalls++;
+      e.isDriving = false;
+      e.headToLX = 0;
+      e.headToLY = 0;
+    };
+
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 72, 52);
+    aiScatterOnDamage(ctx, civ, attacker);
+
+    expect(stopCalls).toBe(1);
+    expect(civ.isDriving).toBe(false);
+    expect(civ.headToLX).toBe(0);
+    expect(civ.headToLY).toBe(0);
+    expect(civ.path).toEqual([]);
+    expect(civ.pathIndex).toBe(0);
+    expect(civ.doing).toBe('stand_ready');
+    expect(civ.missionQueue).toBe(Mission.MOVE);
+    expect(civ.moveTarget).not.toBeNull();
+  });
+
   // Scatter without attacker (explosion nearby, no direct source)
   it('infantry scatters without attacker source (uses facing direction)', () => {
     let scattered = false;

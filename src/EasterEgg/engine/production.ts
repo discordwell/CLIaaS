@@ -386,6 +386,8 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
     entity.guardOrigin = { x: rally.x, y: rally.y };
     // C++ building.cpp:2039: ArchiveTarget = rally position (used for return-to-rally leash)
     entity.archiveTarget = worldToCell(rally.x, rally.y);
+    entity.archiveTargetEntity = null;
+    entity.archiveTargetLeptons = null;
     entity.path = findPath(ctx.map, entity.cell, worldToCell(rally.x, rally.y), true, entity.isNavalUnit, entity.stats.speedClass);
     entity.pathIndex = 0;
   }

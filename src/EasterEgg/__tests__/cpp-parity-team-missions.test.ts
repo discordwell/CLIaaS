@@ -36,6 +36,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { House, Mission, UnitType, CELL_SIZE, LEPTON_SIZE, worldDistLeptons, STRAY_DISTANCE, cellTargetToLepton } from '../engine/types';
+import { GameMap } from '../engine/map';
 import {
   Team, resetTeamIds,
   TMISSION_MOVE, TMISSION_ATTACK, TMISSION_ATT_WAYPT, TMISSION_GUARD,
@@ -408,6 +409,184 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // Commence pops via STAGE A when !IsDriving on next entity tick.
       expect(team.currentMission).toBe(0);
       expect(e.missionQueue).toBe(Mission.ATTACK);
+    });
+
+    it('Coordinate_Attack retargets an already-attacking infantryman without clearing NavCom', () => {
+      // C++ team.cpp:1758-1764 only calls Assign_Target when TarCom changes.
+      // InfantryClass::Assign_Target clears Path[0], but it does not clear
+      // FootClass::NavCom; FootClass::Approach_Target is gated on !NavCom.
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_ATT_WAYPT, data: 0 }],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const oldTarget = makeEntity(UnitType.V_JEEP, House.Greece, 200, 200);
+      const newTarget = makeEntity(UnitType.V_JEEP, House.Greece, 300, 300);
+      const navCom = cellTargetToLepton(90, 51);
+
+      attacker.mission = Mission.ATTACK;
+      attacker.target = oldTarget;
+      attacker.moveTarget = { ...navCom };
+      team.add(attacker);
+      team.currentMission = 0;
+      (team as unknown as { setMissionTarget(t: { x: number; y: number }, c: null, e: Entity): void })
+        .setMissionTarget({ x: newTarget.pos.x, y: newTarget.pos.y }, null, newTarget);
+
+      team.coordinateAttack();
+
+      expect(attacker.target).toBe(newTarget);
+      expect(attacker.moveTarget).toEqual(navCom);
+    });
+
+    it('Coordinate_Attack clears NavCom when it first queues ATTACK from another mission', () => {
+      // C++ team.cpp:1749-1756 clears TarCom and NavCom only in the
+      // Mission != ATTACK/ENTER/CAPTURE branch.
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_ATT_WAYPT, data: 0 }],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const target = makeEntity(UnitType.V_JEEP, House.Greece, 300, 300);
+
+      attacker.mission = Mission.GUARD;
+      attacker.moveTarget = cellTargetToLepton(90, 51);
+      team.add(attacker);
+      team.currentMission = 0;
+      (team as unknown as { setMissionTarget(t: { x: number; y: number }, c: null, e: Entity): void })
+        .setMissionTarget({ x: target.pos.x, y: target.pos.y }, null, target);
+
+      team.coordinateAttack();
+
+      expect(attacker.missionQueue).toBe(Mission.ATTACK);
+      expect(attacker.target).toBe(target);
+      expect(attacker.moveTarget).toBeNull();
+    });
+
+    it('Detach clears both Target and MissionTarget for a removed object', () => {
+      // C++ TeamClass::Detach (team.cpp:1393-1412) clears both Target and
+      // MissionTarget when ObjectClass::Detach_All broadcasts the removed
+      // object's TARGET. Leaving MissionTarget stale makes one-mission ATTACK
+      // teams advance/dissolve instead of reacquiring a quarry next Team::AI.
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_ATTACK, data: 2 }],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const target = makeEntity(UnitType.I_E1, House.Greece, 200, 200);
+
+      team.add(attacker);
+      (team as unknown as { setMissionTarget(t: { x: number; y: number }, c: null, e: Entity): void })
+        .setMissionTarget({ x: target.pos.x, y: target.pos.y }, null, target);
+
+      team.detachTargetEntity(target);
+
+      expect(team.target).toBeNull();
+      expect((team as unknown as { missionTarget: unknown }).missionTarget).toBeNull();
+    });
+
+    it('TMISSION_ATTACK full-map scan can select zero-strength infantry still in C++ logic', () => {
+      // C++ TeamClass::TMission_Attack asks the leader for Greatest_Threat().
+      // Infantry playing a non-instant death animation remains in Map.Layer
+      // with Strength==0. The team can keep it as MissionTarget; member
+      // Assign_Target then converts that object TARGET to TARGET_NONE.
+      const team = makeTeam({
+        house: House.BadGuy,
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_ATTACK, data: 2 }],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const deadTarget = makeEntity(UnitType.I_E1, House.Greece, 120, 100);
+      deadTarget.alive = false;
+      deadTarget.hp = 0;
+      deadTarget.mission = Mission.DIE;
+      deadTarget.deathVariant = 1;
+      deadTarget.deathTick = 0;
+      team.add(attacker);
+
+      team.ai(undefined, {
+        entities: [attacker, deadTarget],
+        map: new GameMap(),
+        playerHouse: House.Greece,
+        entitiesAllied: (a, b) => a.house === b.house,
+        isPlayerControlled: e => e.house === House.Greece,
+        isDiscoveredByPlayer: () => true,
+        isRevealedToHouse: () => true,
+      });
+
+      expect(team.currentMission).toBe(0);
+      expect(team.isNextMission).toBe(false);
+      expect((team as unknown as { missionTargetEntityRef: Entity | null }).missionTargetEntityRef).toBe(deadTarget);
+      expect(attacker.target).toBeNull();
+      expect(attacker.targetStructure).toBeNull();
+      expect(attacker.forceFirePos).toBeNull();
+    });
+
+    it('Coordinate_Attack clears member TarCom when a cell target resolves to a zero-strength infantry object', () => {
+      // C++ Coordinate_Attack can resolve an attack-cell target through
+      // Cell_Object(), but every member still receives that TARGET through
+      // TechnoClass::Assign_Target, which converts zero-strength objects to
+      // TARGET_NONE (techno.cpp:2952-2958).
+      const team = makeTeam({
+        house: House.BadGuy,
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_ATT_WAYPT, data: 0 }],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const deadTarget = makeEntity(UnitType.I_E1, House.Greece, 120, 100);
+      deadTarget.alive = false;
+      deadTarget.hp = 0;
+      deadTarget.mission = Mission.DIE;
+      deadTarget.deathVariant = 1;
+      deadTarget.deathTick = 0;
+      team.add(attacker);
+      team.currentMission = 0;
+      (team as unknown as { setMissionTarget(t: { x: number; y: number }, c: null, e: Entity): void })
+        .setMissionTarget({ x: deadTarget.pos.x, y: deadTarget.pos.y }, null, deadTarget);
+
+      team.coordinateAttack();
+
+      expect(attacker.missionQueue).toBe(Mission.ATTACK);
+      expect(attacker.target).toBeNull();
+      expect(attacker.targetStructure).toBeNull();
+      expect(attacker.forceFirePos).toBeNull();
+    });
+
+    it('TMISSION_ATTACK ignores dead retained vehicle records outside C++ logic', () => {
+      // TS can retain destroyed drive-class entities for blockers/debug state.
+      // C++ full-map threat scans do not evaluate removed dead vehicle records,
+      // so a team must not choose them just because Strength==0 is otherwise
+      // legal for still-active objects.
+      const team = makeTeam({
+        house: House.BadGuy,
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_ATTACK, data: 2 }],
+        forcedActive: true,
+      });
+      const attacker = makeEntity(UnitType.I_E1, House.BadGuy, 100, 100);
+      const deadMcv = makeEntity(UnitType.V_MCV, House.Greece, 120, 100);
+      const liveJeep = makeEntity(UnitType.V_JEEP, House.Greece, 150, 100);
+      deadMcv.alive = false;
+      deadMcv.hp = 0;
+      deadMcv.mission = Mission.DIE;
+      team.add(attacker);
+
+      team.ai(undefined, {
+        entities: [attacker, deadMcv, liveJeep],
+        map: new GameMap(),
+        playerHouse: House.Greece,
+        entitiesAllied: (a, b) => a.house === b.house,
+        isPlayerControlled: e => e.house === House.Greece,
+        isDiscoveredByPlayer: () => true,
+        isRevealedToHouse: () => true,
+      });
+
+      expect((team as unknown as { missionTargetEntityRef: Entity | null }).missionTargetEntityRef).toBe(liveJeep);
+      expect(attacker.target).toBe(liveJeep);
     });
   });
 
@@ -1615,8 +1794,8 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
   // ==========================================================================
   // Section 19: DEPLOY mission (team.cpp:2987-3030 approximately)
-  // C++ TMission_Deploy tells MCVs/minelayers to deploy.
-  // TS tMissionDeploy sets Mission.UNLOAD and advances immediately.
+  // C++ TMission_Deploy tells MCVs/minelayers to enter MISSION_UNLOAD.
+  // It does not advance on the same call that queues UNLOAD.
   // ==========================================================================
   describe('DEPLOY mission dispatch (team.cpp:2987)', () => {
     it('DEPLOY assigns unload/deploy mission and advances immediately', () => {
@@ -1638,6 +1817,27 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       // DEPLOY advances immediately
       expect(team.currentMission).toBe(1);
+    });
+
+    it('MCV DEPLOY queues UNLOAD first and only advances after Mission is already UNLOAD', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_MCV, count: 1 }],
+      });
+      const mcv = makeEntity(UnitType.V_MCV, House.Greece, 100, 100);
+      team.add(mcv);
+      team.isNextMission = false;
+
+      team.tMissionDeploy();
+
+      expect(mcv.mission).toBe(Mission.GUARD);
+      expect(mcv.missionQueue).toBe(Mission.UNLOAD);
+      expect(team.isNextMission).toBe(false);
+
+      mcv.mission = Mission.UNLOAD;
+      mcv.missionQueue = null;
+      team.tMissionDeploy();
+
+      expect(team.isNextMission).toBe(true);
     });
   });
 
@@ -2375,6 +2575,55 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       highPriTeam.add(e);
       expect(e.teamRef).toBe(highPriTeam);
       expect(lowPriTeam.total).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // Section 33B: Recruit scans only the C++ RTTI list for the requested slot
+  // C++ team.cpp:1208-1322 switches by desired member RTTI and scans Infantry,
+  // Aircraft, Units, or Vessels arrays. Can_Add may redirect within that list,
+  // but a missing vehicle slot cannot recruit an infantry object.
+  // ==========================================================================
+  describe('Recruit RTTI list filtering — C++ team.cpp:1208-1322', () => {
+    it('missing vehicle member does not pull an extra infantry recruit', () => {
+      const team = makeTeam({
+        memberDefs: [
+          { type: UnitType.I_E1, count: 3 },
+          { type: UnitType.V_JEEP, count: 1 },
+        ],
+        origin: { x: 0, y: 0 },
+      });
+      const e1a = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+      const e1b = makeEntity(UnitType.I_E1, House.USSR, 110, 100);
+
+      team.recruit([e1a, e1b], { x: 0, y: 0 });
+
+      expect(team.total).toBe(1);
+      expect(team.members.every(m => m.stats.isInfantry)).toBe(true);
+    });
+
+    it('moving team above under-strength threshold does not recruit replacements', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 3 }],
+        missions: [{ mission: TMISSION_DO, data: 14 }],
+      });
+      const memberA = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+      const memberB = makeEntity(UnitType.I_E1, House.USSR, 110, 100);
+      const replacement = makeEntity(UnitType.I_E1, House.USSR, 120, 100);
+
+      team.add(memberA);
+      team.add(memberB);
+      team.isMoving = true;
+      team.isHasBeen = true;
+      team.isFullStrength = false;
+      team.isUnderStrength = false;
+      team.isAltered = false;
+      team.isNextMission = false;
+
+      team.ai(undefined, { entities: [memberA, memberB, replacement] });
+
+      expect(team.total).toBe(2);
+      expect(replacement.teamRef).toBeNull();
     });
   });
 

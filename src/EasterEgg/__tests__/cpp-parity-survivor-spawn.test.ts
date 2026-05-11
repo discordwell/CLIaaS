@@ -23,12 +23,17 @@
  * in rules.ini have IsCrew=true. No Crewed=yes → no survivors ever.
  */
 
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { PRODUCTION_ITEMS } from '../engine/types';
-import { CREWED_BUILDINGS } from '../engine/scenario';
+import { buildDefaultAlliances, CELL_SIZE, House, MAP_CELLS, Mission, PRODUCTION_ITEMS, UnitType } from '../engine/types';
+import { CREWED_BUILDINGS, type MapStructure } from '../engine/scenario';
+import { Entity, resetEntityIds } from '../engine/entity';
+import { type CombatContext, handleUnitDeath, structureDamage, tickDestroyedStructureDebris } from '../engine/combat';
+import { GameMap } from '../engine/map';
+import { ScenarioRandom } from '../engine/random';
+import type { Effect } from '../engine/renderer';
 
 // ---------------------------------------------------------------------------
 // Parse rules.ini at test time (authoritative source of truth)
@@ -84,6 +89,78 @@ function iniMaxPassengers(type: string): number {
 
 const iniSurvivorRate = parseFloat(generalSection['SurvivorRate'] ?? '0.4');
 const E1_COST = iniCost('E1'); // 100
+
+beforeEach(() => {
+  resetEntityIds();
+  ScenarioRandom.seed = 0;
+  ScenarioRandom.callCount = 0;
+  ScenarioRandom._sourceTag = 0;
+});
+
+function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
+  return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function makeCombatCtx(entities: Entity[] = [], playerHouse: House = House.Spain): CombatContext {
+  const map = new GameMap();
+  const alliances = buildDefaultAlliances();
+  return {
+    entities,
+    entityById: new Map(entities.map(e => [e.id, e])),
+    structures: [],
+    inflightProjectiles: [],
+    effects: [] as Effect[],
+    logicAnims: [],
+    tick: 0,
+    playerHouse,
+    scenarioId: 'TEST',
+    killCount: 0,
+    lossCount: 0,
+    pointTotal: 0,
+    alliedUnitsLost: 0,
+    sovietUnitsLost: 0,
+    alliedBuildingsLost: 0,
+    sovietBuildingsLost: 0,
+    warheadOverrides: {},
+    scenarioWarheadMeta: {},
+    scenarioWarheadProps: {},
+    attackedTriggerNames: new Set<string>(),
+    map,
+    aiStates: new Map(),
+    lastBaseAttackEva: -Infinity,
+    gameTicksPerSec: 15,
+    gapGeneratorCells: new Map(),
+    nBuildingsDestroyedCount: 0,
+    structuresLost: 0,
+    bridgeCellCount: 0,
+    powerConsumed: 0,
+    powerProduced: 100,
+    isAllied: (a: House, b: House) => alliances.get(a)?.has(b) ?? false,
+    entitiesAllied: (a: Entity, b: Entity) => alliances.get(a.house)?.has(b.house) ?? false,
+    isPlayerControlled: (e: Entity) => alliances.get(e.house)?.has(playerHouse) ?? false,
+    playSoundAt: () => {},
+    playEva: () => {},
+    minimapAlert: () => {},
+    movementSpeed: () => 1,
+    idleMission: (entity: Entity) => (
+      entity.stats.isInfantry &&
+      entity.house !== playerHouse &&
+      (entity.weapon != null || entity.weapon2 != null)
+    ) ? Mission.AREA_GUARD : Mission.GUARD,
+    markDiscoveredIfPlayerVisible: () => {},
+    getFirepowerBias: () => 1.0,
+    getArmorBias: () => 1.0,
+    getROFBias: () => 1.0,
+    damageStructure: () => false,
+    aiIQ: () => 3,
+    warheadMuzzleColor: () => '#fff',
+    clearStructureFootprint: () => {},
+    recalculateSiloCapacity: () => {},
+    showEvaMessage: () => {},
+    screenShake: 0,
+    screenFlash: 0,
+  } as CombatContext;
+}
 
 /**
  * C++ building.cpp:5591-5600 How_Many_Survivors formula.
@@ -372,12 +449,53 @@ describe('C++ aircraft crew spawning (aircraft.cpp:1580-1598)', () => {
     }
   });
 
-  it('FIXED: TS spawns crew from destroyed aircraft (90% chance)', () => {
-    // TS handleUnitDeath (combat.ts) now checks victim.stats.crewed &&
-    // victim.stats.isAircraft, rolling 90% probability to spawn an E1.
-    // Simplified from C++ parachute to ground-level spawn (no parachute anim yet).
-    // Crewed aircraft (YAK, HELI, HIND) have crewed:true in UNIT_STATS.
-    expect(true).toBe(true); // FIXED: aircraft crew spawning implemented
+  it('TS aircraft crew survivor is created through Paradrop falling state', () => {
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 58, 100);
+    yak.alive = false;
+    yak.hp = 0;
+    const ctx = makeCombatCtx([yak]);
+
+    handleUnitDeath(ctx, yak, {
+      screenShake: 0,
+      explosionSize: 12,
+      debris: false,
+      decal: null,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    const survivor = ctx.entities.find(e => e.type === UnitType.I_E1 && e.id !== yak.id);
+    expect(survivor).toBeDefined();
+    expect(survivor!.isFalling).toBe(true);
+    expect(survivor!.fallHeightLeptons).toBe(Entity.FLIGHT_LEVEL_LEPTONS);
+    expect(survivor!.fallHasAttachedAnim).toBe(true);
+    expect(survivor!.flightAltitude).toBeGreaterThan(0);
+    expect(survivor!.hp).toBe(survivor!.maxHp);
+    expect(survivor!.subCell).toBeGreaterThanOrEqual(0);
+    expect(survivor!.claimedCellIdx).toBe(yak.cell.cy * MAP_CELLS + yak.cell.cx);
+    expect(survivor!.mission).toBe(Mission.AREA_GUARD);
+    expect(survivor!.missionQueue).toBe(Mission.HUNT);
+  });
+
+  it('TS aircraft crew survivor is not spawned when the death cell blocks foot movement', () => {
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 58, 100);
+    yak.alive = false;
+    yak.hp = 0;
+    const ctx = makeCombatCtx([yak]);
+    ctx.map.setVehicleOccupancy(yak.cell.cx, yak.cell.cy, 999);
+
+    handleUnitDeath(ctx, yak, {
+      screenShake: 0,
+      explosionSize: 12,
+      debris: false,
+      decal: null,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    expect(ctx.entities.some(e => e.type === UnitType.I_E1)).toBe(false);
   });
 });
 
@@ -613,6 +731,117 @@ describe('TS destruction path gates on CREWED_BUILDINGS (matches C++ IsCrew)', (
 
     expect(CREWED_BUILDINGS.has('SILO')).toBe(false);
     expect(iniCrewed('SILO')).toBe(false);
+  });
+
+  it('destroyed building survivors unlimbo at Cell_Coord center before Scatter', () => {
+    const ctx = makeCombatCtx([], House.Greece);
+    const pbox: MapStructure = {
+      type: 'PBOX',
+      image: 'pbox',
+      house: House.Greece,
+      cx: 10,
+      cy: 20,
+      hp: 1,
+      maxHp: 400,
+      armor: 'wood',
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      missionTimer: 0,
+    };
+    ctx.structures.push(pbox);
+
+    structureDamage(ctx, pbox, 999, undefined, 'HE');
+    expect(pbox.alive).toBe(false);
+
+    ScenarioRandom.seed = 6; // first Drop_Debris Random_Pick(0,2) is 1: spawn survivor.
+    ScenarioRandom.callCount = 0;
+    pbox.debrisCountdown = 0;
+    tickDestroyedStructureDebris(ctx, pbox);
+
+    const survivor = ctx.entities.find(e => e.type === UnitType.I_E1);
+    expect(survivor).toBeDefined();
+    expect(survivor!.leptonX).toBe(10 * 256 + 128);
+    expect(survivor!.leptonY).toBe(20 * 256 + 128);
+    expect(survivor!.moveTarget).not.toBeNull();
+    expect(survivor!.mission).toBe(Mission.GUARD);
+    expect(survivor!.missionQueue).toBe(Mission.MOVE);
+  });
+
+  it('normal weapon destruction does not make survivors repay the damage source', () => {
+    const attacker = entityAtCell(UnitType.V_1TNK, House.USSR, 8, 20);
+    const ctx = makeCombatCtx([attacker], House.Greece);
+    const pbox: MapStructure = {
+      type: 'PBOX',
+      image: 'pbox',
+      house: House.Greece,
+      cx: 10,
+      cy: 20,
+      hp: 1,
+      maxHp: 400,
+      armor: 'wood',
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      missionTimer: 0,
+    };
+    ctx.structures.push(pbox);
+
+    structureDamage(ctx, pbox, 999, attacker, 'HE');
+    expect(pbox.alive).toBe(false);
+    expect(pbox.whomToRepayEntityId).toBeUndefined();
+
+    ScenarioRandom.seed = 6; // first Drop_Debris Random_Pick is 1 for both [0,2] and [0,1].
+    ScenarioRandom.callCount = 0;
+    pbox.debrisCountdown = 0;
+    tickDestroyedStructureDebris(ctx, pbox);
+
+    const survivor = ctx.entities.find(e => e.type === UnitType.I_E1);
+    expect(survivor).toBeDefined();
+    expect(survivor!.target).toBeNull();
+    expect(survivor!.mission).toBe(Mission.GUARD);
+    expect(survivor!.missionQueue).toBe(Mission.MOVE);
+  });
+
+  it('C4 sabotage WhomToRepay makes destroyed-building survivors attack the saboteur', () => {
+    const tanya = entityAtCell(UnitType.I_TANYA, House.USSR, 8, 20);
+    const ctx = makeCombatCtx([tanya], House.Greece);
+    const pbox: MapStructure = {
+      type: 'PBOX',
+      image: 'pbox',
+      house: House.Greece,
+      cx: 10,
+      cy: 20,
+      hp: 1,
+      maxHp: 400,
+      armor: 'wood',
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      missionTimer: 0,
+      whomToRepayEntityId: tanya.id,
+    };
+    ctx.structures.push(pbox);
+
+    structureDamage(ctx, pbox, 999, undefined, 'HE');
+    expect(pbox.alive).toBe(false);
+
+    ScenarioRandom.seed = 6;
+    ScenarioRandom.callCount = 0;
+    pbox.debrisCountdown = 0;
+    tickDestroyedStructureDebris(ctx, pbox);
+
+    const survivor = ctx.entities.find(e => e.type === UnitType.I_E1);
+    expect(survivor).toBeDefined();
+    expect(survivor!.target).toBe(tanya);
+    expect(survivor!.mission).toBe(Mission.GUARD);
+    expect(survivor!.missionQueue).toBe(Mission.ATTACK);
   });
 });
 
