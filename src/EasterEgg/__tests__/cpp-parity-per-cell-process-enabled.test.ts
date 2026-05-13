@@ -18,7 +18,8 @@
  *   - ✗ Mine blow (unit.cpp:1807-1838).
  *   - ✓ Ground transport RADIO_IM_IN / Limbo+Attach (Case B, unit.cpp:1657-1664).
  *     Covered by `cpp-parity-pcp-transport-imin.test.ts`.
- *   - ✗ Transport IM_IN Case A — building/service-depot scatter (unit.cpp:1635-1651).
+ *   - ✓ Transport IM_IN Case A — building/service-depot scatter (unit.cpp:1635-1651).
+ *     Covered by `cpp-parity-pcp-transport-imin-case-a.test.ts`.
  *   - ✗ Edge-of-world cull (unit.cpp:1726-1729).
  *   - ✗ PCP_ROTATION MCV deploy (unit.cpp:1623-1626).
  *

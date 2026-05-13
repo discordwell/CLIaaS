@@ -7529,6 +7529,129 @@ export class Game {
     return 'no_match';
   }
 
+  /** C++ `unit.cpp:1635-1651` Case A — PCP_END RADIO_IM_IN building entry
+   *  refusal. Invoked from `perCellNavComCheck` via the
+   *  `tryBuildingEntryScatter` callback supplied to `unitPerCellProcess`.
+   *
+   *  Mirrors:
+   *    TechnoClass * whom = Contact_With_Whom();
+   *    if (IsTethered && whom != NULL) {
+   *      if (whom->What_Am_I() == RTTI_BUILDING && Mission == MISSION_ENTER) {
+   *        if (whom == Map[CELL(cell-MAP_CELL_W)].Cell_Building()) {
+   *          switch (Transmit_Message(RADIO_IM_IN, whom)) {
+   *            case RADIO_ROGER: break;
+   *            case RADIO_ATTACH: break;
+   *            default: Scatter(0, true); break;
+   *          }
+   *        }
+   *      }
+   *    }
+   *
+   *  TS adaptation:
+   *    - TS does not model peer-to-peer `Contact_With_Whom()`. We approximate
+   *      "the building this vehicle is trying to enter is one cell north" by
+   *      looking up `findStructureAtCell(cx, cy-1)` directly. The C++ guard
+   *      `whom == Map[cell-MAP_CELL_W].Cell_Building()` collapses to "a
+   *      building footprint occupies (cx, cy-1)".
+   *    - The only building that returns a non-ROGER/non-ATTACH reply to a
+   *      vehicle in MISSION_ENTER is the service depot (`FIX`). PROC docking
+   *      is harvester-specific (handled by `_updateHarvester`) and never
+   *      reaches Case A's `cell-north` predicate because the harvester
+   *      enters from the south-center dock cell. FIX is the only structure
+   *      whose RADIO_IM_IN can return RADIO_NEGATIVE.
+   *    - "Depot would refuse" condition: another player-controlled vehicle is
+   *      already docked at this FIX (within the same 0x10 lepton distance
+   *      that `tickServiceDepot` uses to pick a dock occupant — see
+   *      repairSell.ts:280). C++ `BuildingClass::Receive_Message` returns
+   *      RADIO_NEGATIVE when the depot already has a tethered customer.
+   *    - On refusal, call `unitClassScatterNoThreat(entity, nokidding=false)`
+   *      which is the existing TS analog of C++ `UnitClass::Scatter(0, true)`.
+   *      C++ Scatter gates on `Target_Legal(NavCom) && !nokidding` (unit.cpp:4895),
+   *      so the move-target reassignment only fires when NavCom is illegal
+   *      (e.g. previously cleared). Under standard Case A timing, NavCom is
+   *      still legal — the call records the path but does not reassign
+   *      moveTarget. The TS helper mirrors that exact behavior.
+   *
+   *  Returns:
+   *    - `'scattered'` — the Case A refusal branch fired (C++ default switch).
+   *                      The Scatter call may have reassigned moveTarget
+   *                      (NavCom illegal case) or short-circuited internally
+   *                      (NavCom legal case — standard PCP_END timing).
+   *                      PCP_END continues normally; the caller does not need
+   *                      to short-circuit because C++ Scatter returns control
+   *                      to PCP_END.
+   *    - `'no_match'`  — Case A condition not met (wrong mission, no building
+   *                      one cell north, building accepts the dock). PCP_END
+   *                      continues normally. */
+  private tryPCPBuildingEntryScatter(entity: Entity): 'scattered' | 'no_match' {
+    // C++ unit.cpp:1636: `Mission == MISSION_ENTER` (the outer if's inner guard).
+    if ((entity.mission as Mission) !== Mission.ENTER) return 'no_match';
+    if (!entity.alive || entity.inLimbo) return 'no_match';
+    // Aircraft / infantry / vessel do not exercise this UnitClass branch — it
+    // lives in `UnitClass::Per_Cell_Process`, which only runs for ground vehicles.
+    if (entity.stats.isInfantry || entity.isAirUnit || entity.isNavalUnit) return 'no_match';
+
+    // C++ `Map[CELL(cell-MAP_CELL_W)].Cell_Building()`: the cell directly north
+    // of the vehicle's current cell. `MAP_CELL_W` is the row stride; in (cx,cy)
+    // form this is simply (cx, cy-1).
+    const northCx = entity.cell.cx;
+    const northCy = entity.cell.cy - 1;
+    if (northCy < 0) return 'no_match';
+    const whom = this.findStructureAtCell(northCx, northCy);
+    if (!whom) return 'no_match';
+
+    // C++ ports of the RADIO_IM_IN reply: the service depot is the only TS
+    // structure whose reply branches on busy-ness. PROC (refinery) has its
+    // own harvester flow that does not reach this PCP_END check because the
+    // harvester drives onto the south dock cell of PROC, not under it.
+    if (whom.type !== 'FIX') return 'no_match';
+    // C++ `BuildingClass::Receive_Message(RADIO_IM_IN, from)` rejects when
+    // the source's owner is not allied with the building owner.
+    if (!this.isAllied(whom.house, entity.house)) return 'no_match';
+
+    // C++ depot busy check: does another player-controlled vehicle already
+    // occupy this FIX's dock spot? Mirror `tickServiceDepot` (repairSell.ts:268-283)
+    // dock distance (0x10 leptons = 0.0625 cells from depot center+(CELL,CELL)).
+    const sx = whom.cx * CELL_SIZE + CELL_SIZE;
+    const sy = whom.cy * CELL_SIZE + CELL_SIZE;
+    let occupied = false;
+    for (const other of this.entities) {
+      if (other === entity) continue;
+      if (!other.alive || other.inLimbo) continue;
+      if (other.stats.isInfantry || other.isAirUnit || other.isNavalUnit) continue;
+      if (!this.isAllied(other.house, whom.house)) continue;
+      const dx = other.pos.x - sx;
+      const dy = other.pos.y - sy;
+      // 0.0625 cells = 0.0625 * CELL_SIZE pixels.
+      if (dx * dx + dy * dy < (0.0625 * CELL_SIZE) * (0.0625 * CELL_SIZE)) {
+        occupied = true;
+        break;
+      }
+    }
+    if (!occupied) {
+      // C++ `case RADIO_ROGER: break;` — depot accepts the dock. No scatter,
+      // PCP_END continues normally and the existing dock/repair flow runs.
+      return 'no_match';
+    }
+
+    // C++ unit.cpp:1646 `default: Scatter(0, true);` — forced=true,
+    // nokidding=false (default). The TS analog is
+    // `unitClassScatterNoThreat(entity, nokidding=false)`.
+    //
+    // Behavioral note (C++ unit.cpp:4895):
+    //   if (Target_Legal(NavCom) && !nokidding) return;
+    // Case A fires BEFORE `DriveClass::Per_Cell_Process` clears NavCom
+    // (drive.cpp:869-873), so the vehicle's NavCom is still legal when
+    // Scatter is invoked. With nokidding=false, C++ Scatter returns early
+    // without reassigning the destination. The TS helper mirrors that exact
+    // behavior — the side effect is observable only when NavCom is NOT
+    // legal (e.g. a downstream sub-case cleared it first, or NavCom was
+    // never legal in the first place). Tests assert the helper's return
+    // value rather than the moveTarget side effect for the standard case.
+    this.unitClassScatterNoThreat(entity, /*nokidding=*/ false);
+    return 'scattered';
+  }
+
   private isEntityMovingBlockerFor(mover: Entity, entityId: number): boolean {
     const occupant = this.entityById.get(entityId);
     return !!occupant?.alive &&
@@ -8903,6 +9026,10 @@ export class Game {
           hasLegalTarCom: liveTar,
           pathShortenEligible,
           targetInRange: inRangeNow,
+          // C++ unit.cpp:1635-1651 Case A — RADIO_IM_IN building entry
+          // refusal scatter. Runs first because the C++ `if` block at line
+          // 1635 sits before the Case B transport block at line 1657.
+          tryBuildingEntryScatter: () => this.tryPCPBuildingEntryScatter(entity),
           // C++ unit.cpp:1657-1664 Case B — RADIO_IM_IN ground transport
           // boarding. Fires BEFORE Commence, short-circuits remaining PCP_END
           // work when matched. The callback locates the transport and runs
@@ -10576,6 +10703,10 @@ export class Game {
 	                      entity.isDriving = true;
 	                      this.cutTransportTether(entity);
 	                      const r = unitPerCellProcess(entity, PCPType.PCP_END, {
+                            // C++ unit.cpp:1635-1651 Case A — building entry
+                            // refusal scatter (FIX / service depot). Runs at
+                            // every PCP_END boundary, including track-jump.
+                            tryBuildingEntryScatter: () => this.tryPCPBuildingEntryScatter(entity),
                             // C++ unit.cpp:1657-1664 — RADIO_IM_IN ground transport
                             // boarding can fire at any PCP_END (including track-jump)
                             // when the unit shares a cell with its NavCom transport.

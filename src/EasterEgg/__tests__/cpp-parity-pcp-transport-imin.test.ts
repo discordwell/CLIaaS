@@ -44,10 +44,10 @@
  *     queue. End-of-tick processing removes it from `entities`.
  *
  * Case A note (unit.cpp:1635-1651): the building/service-depot RADIO_IM_IN
- * scatter branch is NOT modelled here because the TS engine does not yet
- * carry a STRUCT_REPAIR / service-depot building object in the cell
- * occupancy graph. That branch is documented as a follow-up in the
- * `perCellProcess.ts` header.
+ * scatter branch (`default: Scatter(0, true)` when the depot refuses) is
+ * covered by the sibling file `cpp-parity-pcp-transport-imin-case-a.test.ts`.
+ * The engine helper is `Game.tryPCPBuildingEntryScatter`, wired via the
+ * `tryBuildingEntryScatter` callback in `UnitPerCellOptions`.
  */
 
 /**

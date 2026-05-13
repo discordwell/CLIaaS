@@ -934,12 +934,36 @@ export interface UnitPerCellOptions {
    *                    PCP_END.
    *   - `'no_match'` — No transport found at the unit's cell with the unit's
    *                    NavCom; PCP_END continues normally (Commence, etc.).
-   *
-   * C++ also has a `default: Scatter(0, true)` branch for Case A (building
-   * service-depot entry) — that path is not modelled here yet (no service
-   * depot in the TS engine) and is left as a follow-up.
    */
   tryBoardTransport?: () => 'boarded' | 'no_match';
+  /**
+   * C++ `unit.cpp:1635-1651` Case A — Mission_Enter + tethered + the building
+   * one cell north (`Map[CELL(cell-MAP_CELL_W)].Cell_Building()`) is the radio
+   * peer (`Contact_With_Whom()`): `Transmit_Message(RADIO_IM_IN, whom)`.
+   * When the reply is anything OTHER THAN `RADIO_ROGER` or `RADIO_ATTACH`
+   * (e.g. a service depot is already busy), the vehicle calls
+   * `Scatter(0, true)` — forced=true, nokidding=false.
+   *
+   * Callers supply this predicate to look up the cell-north building,
+   * decide whether it would refuse the radio message, and apply the forced
+   * scatter (the C++ side effect — assign a Nearby_Location destination).
+   *
+   * Ordering: this hook runs at PCP_END BEFORE Case B (transport boarding)
+   * because the C++ `if` block at unit.cpp:1635 precedes the Case B block
+   * at line 1657. Both gate on `Mission == MISSION_ENTER`, but the Case A
+   * check is for a building peer one cell north and the Case B check is for
+   * a transport peer in the same cell, so in practice only one matches at a
+   * time. The hook tolerates both predicates being present.
+   *
+   * Return value:
+   *   - `'scattered'` — the predicate triggered a forced scatter. The hook
+   *                     does NOT early-return from PCP_END because C++
+   *                     `Scatter(0,true)` returns control to PCP_END (it
+   *                     only assigns a new NavCom). Subsequent PCP_END steps
+   *                     (Commence, NavCom-clear, etc.) still run.
+   *   - `'no_match'`  — Case A condition not met; PCP_END continues normally.
+   */
+  tryBuildingEntryScatter?: () => 'scattered' | 'no_match';
 }
 
 /**
@@ -957,9 +981,11 @@ export interface UnitPerCellOptions {
  *   - TODO(flag port): flag pickup / flag-home (unit.cpp:1771-1802).
  *   - DONE: RADIO_IM_IN ground transport boarding (Case B, unit.cpp:1657-1664).
  *     Callers supply `tryBoardTransport` via `UnitPerCellOptions`.
- *   - TODO(transport port): RADIO_IM_IN building entry / Case A scatter
- *     (unit.cpp:1635-1651) — service depot / repair pad (no TS service depot
- *     yet, so this branch is a no-op).
+ *   - DONE: RADIO_IM_IN building entry / Case A scatter (unit.cpp:1635-1651) —
+ *     service depot / repair pad refusal triggers `Scatter(0, true)`.
+ *     Callers supply `tryBuildingEntryScatter`; the engine helper is
+ *     `Game.tryPCPBuildingEntryScatter` (sibling of `tryPCPBoardTransport`).
+ *     See `cpp-parity-pcp-transport-imin-case-a.test.ts`.
  *
  * The existing TS engine handles several of these (vehicle crush,
  * Look() fog reveal) directly in `followTrackStep`'s mid-cell branch
@@ -1004,6 +1030,26 @@ export function unitPerCellProcess<M>(
   // PCP_END: the main event. Order matches C++ UnitClass::Per_Cell_Process
   // + DriveClass::Per_Cell_Process call chain (unit.cpp:1882 hands off to
   // DriveClass::Per_Cell_Process after the UnitClass-specific work).
+
+  // ---- -1. RADIO_IM_IN building entry (unit.cpp:1635-1651, Case A) ----
+  // When a vehicle in MISSION_ENTER is tethered to a building one cell north
+  // (the service depot / FIX it is driving onto), it transmits RADIO_IM_IN
+  // to that building. Any reply other than RADIO_ROGER / RADIO_ATTACH triggers
+  // a forced `Scatter(0, true)` — the depot refuses to accept, so the vehicle
+  // backs off. C++ ordering: this `if` block sits BEFORE the Case B transport
+  // block at unit.cpp:1657, so the hook runs the building check first.
+  //
+  // The callback owns the cell-north building lookup, the refusal predicate,
+  // and the side-effect scatter (NavCom assignment via Nearby_Location).
+  // C++ Scatter() returns control here — it does NOT early-return from
+  // PCP_END — so Commence and NavCom-clear still run on the post-scatter
+  // state.
+  if (opts?.tryBuildingEntryScatter) {
+    opts.tryBuildingEntryScatter();
+    // The result is currently informational only; the side-effect (Scatter
+    // assigns a new NavCom on the entity) is what matters. Tests assert
+    // observable state on the entity.
+  }
 
   // ---- 0. RADIO_IM_IN transport boarding (unit.cpp:1657-1664, Case B) ----
   // Pre-Commence: a unit in MISSION_ENTER that has reached the same cell as
