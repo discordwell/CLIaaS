@@ -1429,6 +1429,11 @@ export interface MapStructure {
   /** C++ building.cpp Door_Stage() — war factory door animation frame (0=closed, 7=fully open).
    *  Animates 0→7 during production, stays open while unit exits, then closes 7→0. */
   doorFrame?: number;
+  /** C++ TechnoClass::IsLeader (techno.h:89) — true if this is the player's primary
+   *  factory/pad for its production category. Find_Docking_Bay (techno.cpp:5845) lets
+   *  any IsLeader candidate override distance-based selection. Toggled via
+   *  BuildingClass::Toggle_Primary (building.cpp:2918-2950). Default false. */
+  isLeader?: boolean;
 }
 
 /** Weapon stats for defensive structures */

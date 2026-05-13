@@ -18,6 +18,7 @@ import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap, MoveResult } from './map';
 import { ScenarioRandom } from './random';
 import { assignMission } from './missionLifecycle';
+import { findDockingBay } from './dockingBay';
 
 /** Helper: convert LeptonPos to WorldPos (pixel space) for rendering/distance APIs */
 function leptonPosToWorld(lp: LeptonPos): WorldPos {
@@ -129,26 +130,29 @@ export function canTargetNaval(scanner: Entity, target: Entity): boolean {
   return true;
 }
 
-/** Find a landing pad for this aircraft. Returns structure index or -1. */
+/** Find a landing pad for this aircraft. Returns structure index or -1.
+ *  C++ aircraft.cpp:1684 / :1928 / :2021 — `Find_Docking_Bay(Class->Building, false)`
+ *  for the home-pad seek; this TS variant always allows allied pads (`friendly=true`)
+ *  so cooperative players share helipads, matching long-standing engine behavior. */
 export function findLandingPad(ctx: AircraftContext, entity: Entity): number {
   const padType = entity.stats.landingBuilding;
   if (!padType) return -1;
-  let bestIdx = -1;
-  let bestDist = Infinity;
-  for (let i = 0; i < ctx.structures.length; i++) {
-    const s = ctx.structures[i];
-    if (!s.alive || s.type !== padType) continue;
-    if (!ctx.isAllied(entity.house, s.house)) continue;
-    if (s.dockedAircraft !== undefined && s.dockedAircraft > 0) continue; // occupied
-    const sx = s.cx * CELL_SIZE + CELL_SIZE;
-    const sy = s.cy * CELL_SIZE + CELL_SIZE;
-    const dist = worldDist(entity.pos, { x: sx, y: sy });
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
+  const kind = entity.isFixedWing ? 'aircraft-fixed' : 'aircraft-heli';
+  const best = findDockingBay(
+    { structures: ctx.structures, isAllied: ctx.isAllied },
+    {
+      house: entity.house,
+      cell: entity.cell,
+      leptonX: entity.leptonX,
+      leptonY: entity.leptonY,
+      isAirUnit: true,
+      kind,
+    },
+    padType,
+    true,
+  );
+  if (!best) return -1;
+  return ctx.structures.indexOf(best);
 }
 
 /** Get target position for an aircraft's current target (entity or structure) */
