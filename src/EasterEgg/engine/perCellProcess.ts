@@ -924,7 +924,14 @@ export interface UnitPerCellOptions {
  * Sub-cases not yet ported (see module header for the full C++ enumeration):
  *   - TODO(SCG04/11/13 port): Commence (unit.cpp:1756) — gated by
  *     PER_CELL_COMMENCE_ENABLED.
- *   - TODO(mine port): land-mine blow (unit.cpp:1807-1838).
+ *   - Land-mine blow (unit.cpp:1807-1838) — covered by the per-tick
+ *     `tickMines` scan in `specialUnits.ts:209` (called from
+ *     `Game.update` at `index.ts:2576`). The scan walks every mine
+ *     against every entity-cell each logic tick, so a unit that ends
+ *     a track-step on an AVMINE/APMINE cell takes mine damage on the
+ *     same tick — the same observable outcome as the C++ PCP_END hook.
+ *     Behavioral pins live in `cpp-parity-pcp-mine-blow.test.ts` and
+ *     `cpp-parity-mine-mechanics.test.ts`.
  *   - TODO(flag port): flag pickup / flag-home (unit.cpp:1771-1802).
  *   - TODO(transport port): RADIO_IM_IN / IM_IN (unit.cpp:1636-1665).
  *
