@@ -15621,6 +15621,7 @@ export class Game {
       if (state && state.iq >= 1) {
         // Start gate: C++ building.cpp:5494-5515.
         const credits = this.houseCredits.get(s.house) ?? 0;
+        const isCaptured = s.originalHouse !== undefined && s.originalHouse !== s.house;
         const REPAIR_THRESHHOLD = 100; // rules.ini [AI] CreditReserve.
         const canStart = !isStructureUnderConstruction(s)
           && s.sellProgress === undefined
@@ -15628,7 +15629,7 @@ export class Game {
           && credits >= REPAIR_THRESHHOLD
           && !state.didRepair
           && !s.isRepairing
-          && (s.isCaptured || s.isToRepair);
+          && (isCaptured || s.isToRepair);
         if (canStart) {
           state.didRepair = true;
           s.isRepairing = true;

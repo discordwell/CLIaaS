@@ -843,7 +843,7 @@ export interface PCPEntity<M = unknown> {
   mission: M;
   missionTimer: number;
   isDriving: boolean;
-  stats?: { isVessel?: boolean };
+  stats?: { isVessel?: boolean; isCanine?: boolean } | null;
   // Optional fields that full Commence port will touch (currently unused
   // by the NavCom-clear path, but documented here for future sub-cases).
   // status?: number;     // C++ Status — set to 0 by Commence
@@ -861,7 +861,7 @@ export interface FootPCPEntity<M = unknown> extends PCPEntity<M> {
   /** Unit type discriminator; used for C++ dog-specific path-shorten exclusion. */
   type?: string;
   /** Unit stats discriminator; used when callers provide Entity-like objects. */
-  stats?: { isCanine?: boolean } | null;
+  stats?: { isVessel?: boolean; isCanine?: boolean } | null;
   /** TarCom equivalent #1: live entity target. `null` when no target. */
   target?: { alive: boolean } | null;
   /** TarCom equivalent #2: structure target. `null` when no target. */

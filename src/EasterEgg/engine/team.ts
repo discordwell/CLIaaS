@@ -2424,7 +2424,7 @@ export class Team {
     scanBucket(candidate =>
       !candidate.stats.isInfantry && !candidate.stats.isAircraft && !candidate.stats.isVessel);
     scanBucket(candidate => candidate.stats.isInfantry);
-    scanBucket(candidate => candidate.stats.isVessel);
+    scanBucket(candidate => candidate.stats.isVessel === true);
 
     return closest;
   }
