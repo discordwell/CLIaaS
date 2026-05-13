@@ -1,7 +1,7 @@
 import { CELL_SIZE, LEPTON_SIZE, EXPLOSION_FRAMES } from './types';
 import { type Effect } from './renderer';
 import { ScenarioRandom } from './random';
-import type { GameMap } from './map';
+import { TREE_CENTER_OFFSET, type GameMap } from './map';
 
 export type LogicAnimType =
   | 'napalm1'
@@ -11,6 +11,16 @@ export type LogicAnimType =
   | 'fire_small'
   | 'fire_med'
   | 'fire_med2'
+  | 'burn_small'
+  | 'burn_med'
+  | 'burn_big'
+  | 'on_fire_small'
+  | 'on_fire_med'
+  | 'on_fire_big'
+  | 'oilfield_burn'
+  | 'smoke_m'
+  | 'smokey'
+  | 'fball_fade'
   | 'fball1'
   | 'frag1'
   | 'veh-hit1'
@@ -27,7 +37,15 @@ export interface LogicAnim {
   loops: number;
   delay: number;
   isBrandNew: boolean;
+  logicIndexHint?: number;
+  attachedStructureIndex?: number;
+  attachedTreeKey?: number;
+  deleteOnNextProcess?: boolean;
+  processedLogicTick?: number;
 }
+
+type AllocateLogicIndex = () => number | undefined;
+type ReserveAnimSlot = () => boolean;
 
 interface LogicAnimDef {
   sprite: string;
@@ -55,6 +73,26 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   fire_small: { sprite: 'fire3', biggest: 0, stages: 15, loops: 2, rate: 1, scorcher: false },
   fire_med: { sprite: 'fire2', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true },
   fire_med2: { sprite: 'fire1', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true },
+  // C++ adata.cpp: ANIM_BURN_* are generic burn anims used by TerrainClass::Catch_Fire.
+  // They use the same SHP files as ON_FIRE_* but do not chain down into smaller fires/smoke.
+  burn_small: { sprite: 'burn-s', biggest: 13, stages: 65, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62 },
+  burn_med: { sprite: 'burn-m', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62 },
+  burn_big: { sprite: 'burn-l', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: true, loopStart: 30, loopEnd: 62 },
+  // C++ adata.cpp: ANIM_ON_FIRE_* are attached building/vehicle burn anims.
+  // They are distinct from FIRE1/2/3: delayed frame rate, Biggest=13, long
+  // loop band, and chain down into smoke/smaller burn classes.
+  on_fire_small: { sprite: 'burn-s', biggest: 13, stages: 65, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, chainTo: 'smoke_m' },
+  on_fire_med: { sprite: 'burn-m', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, chainTo: 'on_fire_small' },
+  on_fire_big: { sprite: 'burn-l', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: true, loopStart: 30, loopEnd: 62, chainTo: 'on_fire_med' },
+  // C++ adata.cpp: ANIM_OILFIELD_BURN (FLMSPT) uses an unsigned-char loop
+  // counter, so Class->Loops=65535 is observed as 255 in the heap dump.
+  oilfield_burn: { sprite: 'flmspt', biggest: 58, stages: 66, loops: 255, rate: 1, scorcher: false, loopStart: 33, loopEnd: 99 },
+  smoke_m: { sprite: 'smoke_m', biggest: 30, stages: 91, loops: 6, rate: 1, scorcher: false, loopStart: 67, loopEnd: 91 },
+  // C++ bullet.cpp:381-385 projectile trail AnimClass objects. They are real
+  // Logic/Anim heap entries even though they have no gameplay Middle side
+  // effects; their lifetime affects later AnimClass allocation failure.
+  smokey: { sprite: 'smokey', biggest: 2, stages: 7, loops: 1, rate: 1, scorcher: false },
+  fball_fade: { sprite: 'napalm1', biggest: 1, stages: 4, loops: 1, rate: 1, scorcher: false },
   // C++ adata.cpp crater-forming combat animations. AnimClass::Middle calls
   // CellClass::Reduce_Tiberium(6) and places SMUDGE_CRATER1.
   fball1: { sprite: 'fball1', biggest: 6, stages: 18, loops: 1, rate: 1, scorcher: false, crater: true },
@@ -73,6 +111,12 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
     case 'fire1': return 'fire_med2';
     case 'fire2': return 'fire_med';
     case 'fire3': return 'fire_small';
+    case 'burn-s': return 'on_fire_small';
+    case 'burn-m': return 'on_fire_med';
+    case 'burn-l': return 'on_fire_big';
+    case 'flmspt': return 'oilfield_burn';
+    case 'smoke_m': return 'smoke_m';
+    case 'smokey': return 'smokey';
     case 'fball1': return 'fball1';
     case 'frag1': return 'frag1';
     case 'veh-hit1': return 'veh-hit1';
@@ -91,10 +135,16 @@ export function spawnLogicAnimForSprite(
   y: number,
   render = false,
   brandNewAlreadyProcessed = false,
-): void {
+  logicIndexHint?: number,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+): boolean {
   const type = logicAnimTypeForSprite(sprite);
-  if (!type) return;
-  spawnLogicAnim(logicAnims, effects, type, x, y, 1, render, brandNewAlreadyProcessed);
+  if (!type) return false;
+  return spawnLogicAnim(
+    logicAnims, effects, type, x, y, 1, render,
+    brandNewAlreadyProcessed, logicIndexHint, allocateLogicIndex, reserveAnimSlot,
+  );
 }
 
 export function spawnLogicAnim(
@@ -106,7 +156,16 @@ export function spawnLogicAnim(
   loop = 1,
   render = true,
   brandNewAlreadyProcessed = false,
-): void {
+  logicIndexHint?: number,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+  animSlotReserved = false,
+  attachedStructureIndex?: number,
+  delay = 0,
+  attachedTreeKey?: number,
+): boolean {
+  if (!animSlotReserved && reserveAnimSlot && !reserveAnimSlot()) return false;
+
   const def = LOGIC_ANIM_DEFS[type];
   const anim: LogicAnim = {
     type,
@@ -115,8 +174,11 @@ export function spawnLogicAnim(
     stage: 0,
     timer: def.rate,
     loops: Math.max(1, loop) * def.loops,
-    delay: 0,
+    delay,
     isBrandNew: !brandNewAlreadyProcessed,
+    logicIndexHint,
+    attachedStructureIndex,
+    attachedTreeKey,
   };
   logicAnims.push(anim);
   if (render) {
@@ -124,17 +186,30 @@ export function spawnLogicAnim(
       type: 'explosion',
       x,
       y,
-      frame: 0,
+      frame: -delay,
       maxFrames: EXPLOSION_FRAMES[def.sprite] ?? def.stages,
       size: type === 'fire_med' || type === 'fire_med2' ? 12 : 8,
       sprite: def.sprite,
       spriteStart: 0,
     } as Effect);
   }
-  logicAnimStart(anim, logicAnims, effects);
+  if (delay === 0) logicAnimStart(anim, logicAnims, effects, undefined, allocateLogicIndex, reserveAnimSlot);
+  return true;
 }
 
-export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[], map?: GameMap): boolean {
+export function processLogicAnim(
+  anim: LogicAnim,
+  logicAnims: LogicAnim[],
+  effects: Effect[],
+  map?: GameMap,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+): boolean {
+  if (anim.deleteOnNextProcess) {
+    fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+    return false;
+  }
+
   if (anim.isBrandNew) {
     // C++ anim.cpp:677-680 — brand-new anims skip their first Logic pass.
     anim.isBrandNew = false;
@@ -143,7 +218,7 @@ export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effec
 
   if (anim.delay > 0) {
     anim.delay--;
-    if (anim.delay === 0) logicAnimStart(anim, logicAnims, effects);
+    if (anim.delay === 0) logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
     return true;
   }
 
@@ -157,7 +232,7 @@ export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effec
   anim.timer = def.rate;
 
   if (def.biggest > 0 && anim.stage === def.biggest) {
-    logicAnimMiddle(anim, logicAnims, effects, map);
+    logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
   }
 
   // C++ anim.cpp:758 — while Loops > 1, loop at LoopEnd-Start; on the
@@ -179,25 +254,81 @@ export function processLogicAnim(anim: LogicAnim, logicAnims: LogicAnim[], effec
       anim.timer = chainDef.rate;
       anim.loops = chainDef.loops;
       anim.delay = 0;
-      logicAnimStart(anim, logicAnims, effects, map);
+      logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
       return true;
     }
+    fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
     return false;
   }
 
   return true;
 }
 
-function logicAnimStart(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[], map?: GameMap): void {
+function fireOutAttachedTree(
+  anim: LogicAnim,
+  logicAnims: LogicAnim[],
+  effects: Effect[],
+  map?: GameMap,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+): void {
+  if (anim.attachedTreeKey === undefined || !map) return;
+  const hasOtherAttachedAnim = logicAnims.some(other =>
+    other !== anim &&
+    other.attachedTreeKey === anim.attachedTreeKey &&
+    !other.deleteOnNextProcess);
+  if (hasOtherAttachedAnim) return;
+
+  const tree = map.trees.get(anim.attachedTreeKey);
+  if (!tree?.isOnFire) return;
+  tree.isOnFire = false;
+
+  if (!tree.isCrumbling && tree.hp <= 0) {
+    tree.isCrumbling = true;
+    const centerOff = TREE_CENTER_OFFSET[tree.type] ?? [CELL_SIZE / 2, CELL_SIZE / 2];
+    const x = tree.cx * CELL_SIZE + centerOff[0];
+    const y = tree.cy * CELL_SIZE + centerOff[1];
+    map.destroyTree(tree);
+    spawnLogicAnim(
+      logicAnims,
+      effects,
+      'smoke_m',
+      x,
+      y,
+      1,
+      true,
+      false,
+      allocateLogicIndex?.(),
+      allocateLogicIndex,
+      reserveAnimSlot,
+    );
+  }
+}
+
+function logicAnimStart(
+  anim: LogicAnim,
+  logicAnims: LogicAnim[],
+  effects: Effect[],
+  map?: GameMap,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+): void {
   const def = LOGIC_ANIM_DEFS[anim.type];
   // C++ anim.cpp:914-916 — animations whose Biggest stage is frame 0 run Middle
   // immediately from Start(), including FIRE_MED spawning FIRE_SMALL.
   if (def.biggest === 0) {
-    logicAnimMiddle(anim, logicAnims, effects, map);
+    logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
   }
 }
 
-function logicAnimMiddle(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effect[], map?: GameMap): void {
+function logicAnimMiddle(
+  anim: LogicAnim,
+  logicAnims: LogicAnim[],
+  effects: Effect[],
+  map?: GameMap,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+): void {
   const def = LOGIC_ANIM_DEFS[anim.type];
 
   // C++ anim.cpp:954-956 — scorcher animations create a random scorch smudge.
@@ -216,17 +347,24 @@ function logicAnimMiddle(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effe
     case 'napalm1':
     case 'napalm2':
     case 'napalm3': {
-      // C++ anim.cpp:984-994. The old C++ build evaluates constructor args in
-      // coordinate-then-loop order here; SCG07EA t182 verifies the RNG ordering.
-      const p1 = coordScatter(anim.x, anim.y, 0x0040);
-      spawnLogicAnim(logicAnims, effects, 'fire_small', p1.x, p1.y, ScenarioRandom.nextInRange(1, 2), true);
+      // C++ anim.cpp:986-993. AnimClass::operator new runs before constructor
+      // args; when allocation succeeds, the old compiler evaluates coordinate
+      // then loop RNG. SCG07EA t182 verifies the successful allocation ordering.
+      spawnScatteredLogicAnim(
+        logicAnims, effects, 'fire_small', anim.x, anim.y, 0x0040,
+        true, false, allocateLogicIndex, reserveAnimSlot,
+      );
       if (ScenarioRandom.percentChance(50)) {
-        const p2 = coordScatter(anim.x, anim.y, 0x00A0);
-        spawnLogicAnim(logicAnims, effects, 'fire_small', p2.x, p2.y, ScenarioRandom.nextInRange(1, 2), true);
+        spawnScatteredLogicAnim(
+          logicAnims, effects, 'fire_small', anim.x, anim.y, 0x00A0,
+          true, false, allocateLogicIndex, reserveAnimSlot,
+        );
       }
       if (ScenarioRandom.percentChance(50)) {
-        const p3 = coordScatter(anim.x, anim.y, 0x0070);
-        spawnLogicAnim(logicAnims, effects, 'fire_med', p3.x, p3.y, ScenarioRandom.nextInRange(1, 2), true);
+        spawnScatteredLogicAnim(
+          logicAnims, effects, 'fire_med', anim.x, anim.y, 0x0070,
+          true, false, allocateLogicIndex, reserveAnimSlot,
+        );
       }
       break;
     }
@@ -234,12 +372,94 @@ function logicAnimMiddle(anim: LogicAnim, logicAnims: LogicAnim[], effects: Effe
     case 'fire_med':
     case 'fire_med2':
       // C++ anim.cpp:998-1003 — medium fire chains into a small fire animation.
-      spawnLogicAnim(logicAnims, effects, 'fire_small', anim.x, anim.y, ScenarioRandom.nextInRange(1, 2), true);
+      spawnLogicAnimWithDeferredLoop(
+        logicAnims,
+        effects,
+        'fire_small',
+        anim.x,
+        anim.y,
+        () => ScenarioRandom.nextInRange(1, 2),
+        true,
+        false,
+        allocateLogicIndex?.(),
+        allocateLogicIndex,
+        reserveAnimSlot,
+        anim.attachedStructureIndex,
+      );
       break;
 
     default:
       break;
   }
+}
+
+function spawnScatteredLogicAnim(
+  logicAnims: LogicAnim[],
+  effects: Effect[],
+  type: LogicAnimType,
+  x: number,
+  y: number,
+  radiusLeptons: number,
+  render = true,
+  brandNewAlreadyProcessed = false,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+): boolean {
+  // C++ source in this repo passes Coord_Scatter(...) and Random_Pick(1,2)
+  // inline to new AnimClass(...). Allocation failure therefore skips both RNG
+  // arguments while the surrounding Percent_Chance gates still run.
+  if (reserveAnimSlot && !reserveAnimSlot()) return false;
+  const point = coordScatter(x, y, radiusLeptons);
+  const loop = ScenarioRandom.nextInRange(1, 2);
+  return spawnLogicAnim(
+    logicAnims,
+    effects,
+    type,
+    point.x,
+    point.y,
+    loop,
+    render,
+    brandNewAlreadyProcessed,
+    allocateLogicIndex?.(),
+    allocateLogicIndex,
+    reserveAnimSlot,
+    true,
+  );
+}
+
+function spawnLogicAnimWithDeferredLoop(
+  logicAnims: LogicAnim[],
+  effects: Effect[],
+  type: LogicAnimType,
+  x: number,
+  y: number,
+  loopFactory: () => number,
+  render = true,
+  brandNewAlreadyProcessed = false,
+  logicIndexHint?: number,
+  allocateLogicIndex?: AllocateLogicIndex,
+  reserveAnimSlot?: ReserveAnimSlot,
+  attachedStructureIndex?: number,
+): boolean {
+  // C++ new-expression allocation calls AnimClass::operator new before
+  // evaluating constructor arguments. FIRE_MED passes Random_Pick(1,2) inline,
+  // so a full AnimClass heap must skip that RNG call.
+  if (reserveAnimSlot && !reserveAnimSlot()) return false;
+  return spawnLogicAnim(
+    logicAnims,
+    effects,
+    type,
+    x,
+    y,
+    loopFactory(),
+    render,
+    brandNewAlreadyProcessed,
+    logicIndexHint,
+    allocateLogicIndex,
+    reserveAnimSlot,
+    true,
+    attachedStructureIndex,
+  );
 }
 
 function coordScatter(x: number, y: number, radiusLeptons: number): { x: number; y: number } {

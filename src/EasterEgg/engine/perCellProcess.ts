@@ -453,7 +453,10 @@ export const TEAM_START_DRIVER_REFACTOR = true;
  *   3. `moveTarget` present AND `path.length > pathIndex` (non-empty path).
  *   4. Next path cell is un-passable OR occupied by non-allied blocker AND
  *      a one-shot findPath from current cell to moveTarget returns empty.
- *   5. `missionQueue === null` (don't clobber a pending queue).
+ *   5. No active infantry Head_To_Coord driver is in progress; when C++
+ *      IsDriving is true, Mission_Move returns its jitter delay and
+ *      InfantryClass::Movement_AI advances the active hop later in the tick.
+ *   6. `missionQueue === null` (don't clobber a pending queue).
  *
  * When all five hold, clear moveTarget + path, and — mirroring
  * `footPerCellProcess`'s Enter_Idle_Mode sub-case — queue GUARD (or
@@ -840,6 +843,7 @@ export interface PCPEntity<M = unknown> {
   mission: M;
   missionTimer: number;
   isDriving: boolean;
+  stats?: { isVessel?: boolean };
   // Optional fields that full Commence port will touch (currently unused
   // by the NavCom-clear path, but documented here for future sub-cases).
   // status?: number;     // C++ Status — set to 0 by Commence
@@ -854,6 +858,10 @@ export interface PCPEntity<M = unknown> {
  * Keeping the shape loose mirrors `PCPEntity<M>` above — no Entity import.
  */
 export interface FootPCPEntity<M = unknown> extends PCPEntity<M> {
+  /** Unit type discriminator; used for C++ dog-specific path-shorten exclusion. */
+  type?: string;
+  /** Unit stats discriminator; used when callers provide Entity-like objects. */
+  stats?: { isCanine?: boolean } | null;
   /** TarCom equivalent #1: live entity target. `null` when no target. */
   target?: { alive: boolean } | null;
   /** TarCom equivalent #2: structure target. `null` when no target. */
@@ -914,12 +922,78 @@ export interface UnitPerCellOptions {
 }
 
 /**
+ * C++ parity hook: shared `DriveClass::Per_Cell_Process` →
+ * `FootClass::Per_Cell_Process` chain.
+ *
+ * Called from the track-advance loop each time a vehicle or vessel crosses a
+ * cell boundary. Vessels reach this path via
+ * `VesselClass::Per_Cell_Process` → `DriveClass::Per_Cell_Process`.
+ *
+ * This deliberately does NOT run UnitClass-specific sub-cases such as the
+ * unit.cpp:1756 `Commence()` call. Vessels are not UnitClass objects in C++;
+ * they use VesselClass's pre/post AI `Commence()` gates instead.
+ */
+function drivePerCellProcessImpl<M>(
+  entity: PCPEntity<M>,
+  why: PCPType,
+  opts?: UnitPerCellOptions,
+  trace = true,
+): PCPResult {
+  const result: PCPResult = { navComCleared: false, commenceFired: false };
+
+  const _pcpBefore = trace && _PCP_TRACE_ENABLED ? _pcpSnapshot(entity) : null;
+
+  if (why === PCPType.PCP_ROTATION || why === PCPType.PCP_DURING) {
+    if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+    return result;
+  }
+
+  // C++ drive.cpp:869-873: if the current cell matches As_Cell(NavCom),
+  // clear NavCom and Path[0]=FACING_NONE. This is shared by UnitClass and
+  // VesselClass through DriveClass::Per_Cell_Process.
+  if (entity.moveTarget) {
+    const navCellX = Math.floor(entity.moveTarget.lx / 256);
+    const navCellY = Math.floor(entity.moveTarget.ly / 256);
+    if (navCellX === entity.cell.cx && navCellY === entity.cell.cy) {
+      entity.moveTarget = null;
+      entity.path = [];
+      entity.pathIndex = 0;
+      result.navComCleared = true;
+    }
+  }
+
+  // FootClass::Per_Cell_Process path-shorten is shared by units and vessels:
+  // VesselClass -> DriveClass -> FootClass. If an attack-type mission reaches a
+  // cell where TarCom is in primary-weapon range, C++ clears NavCom and Path[0].
+  if (PCP_PATH_SHORTEN_ENABLED
+      && opts?.hasLegalTarCom === true
+      && opts.pathShortenEligible === true
+      && opts.targetInRange === true) {
+    entity.moveTarget = null;
+    entity.path = [];
+    entity.pathIndex = 0;
+    result.navComCleared = true;
+  }
+
+  if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+  return result;
+}
+
+export function drivePerCellProcess<M>(
+  entity: PCPEntity<M>,
+  why: PCPType,
+  opts?: UnitPerCellOptions,
+): PCPResult {
+  return drivePerCellProcessImpl(entity, why, opts);
+}
+
+/**
  * C++ parity hook: `UnitClass::Per_Cell_Process(PCPType)`, followed by the
  * shared `DriveClass::Per_Cell_Process` → `FootClass::Per_Cell_Process` chain.
  *
- * Called from the track-advance loop each time a vehicle or vessel crosses a
- * cell boundary. Vessels reach this same shared chain via
- * `VesselClass::Per_Cell_Process` → `DriveClass::Per_Cell_Process`.
+ * Called from the track-advance loop when a LAND vehicle crosses a cell
+ * boundary. Vessels must call `drivePerCellProcess` instead; their C++ class
+ * hierarchy never reaches UnitClass::Per_Cell_Process.
  *
  * Sub-cases not yet ported (see module header for the full C++ enumeration):
  *   - TODO(SCG04/11/13 port): Commence (unit.cpp:1756) — gated by
@@ -971,6 +1045,12 @@ export function unitPerCellProcess<M>(
   // PCP_END: the main event. Order matches C++ UnitClass::Per_Cell_Process
   // + DriveClass::Per_Cell_Process call chain (unit.cpp:1882 hands off to
   // DriveClass::Per_Cell_Process after the UnitClass-specific work).
+  if (entity.stats?.isVessel) {
+    const shared = drivePerCellProcessImpl(entity, why, opts, false);
+    result.navComCleared = shared.navComCleared;
+    if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+    return result;
+  }
 
   // ---- 1. Commence (unit.cpp:1756) — GATED ----
   // Pops MissionQueue mid-drive. This is the load-bearing piece for
@@ -990,37 +1070,8 @@ export function unitPerCellProcess<M>(
     result.commenceFired = true;
   }
 
-  // ---- 2. DriveClass::Per_Cell_Process NavCom-at-destination clear ----
-  // C++ drive.cpp:869-873: if the current cell matches As_Cell(NavCom),
-  // clear NavCom and Path[0]=FACING_NONE. This is the behavior the legacy
-  // inline `perCellNavComCheck` did, preserved exactly.
-  if (entity.moveTarget) {
-    const navCellX = Math.floor(entity.moveTarget.lx / 256);
-    const navCellY = Math.floor(entity.moveTarget.ly / 256);
-    if (navCellX === entity.cell.cx && navCellY === entity.cell.cy) {
-      entity.moveTarget = null;
-      entity.path = [];
-      entity.pathIndex = 0;
-      result.navComCleared = true;
-    }
-  }
-
-  // ---- 3. FootClass::Per_Cell_Process path-shorten ----
-  // C++ drive.cpp chains to foot.cpp after DriveClass-specific PCP_END work.
-  // This is not infantry-only: vessels inherit the same FootClass behavior via
-  // VesselClass -> DriveClass -> FootClass. If an attack-type mission reaches a
-  // cell where TarCom is in primary-weapon range, C++ clears NavCom and Path[0]
-  // so the object stops advancing and can fire instead of continuing toward the
-  // stale destination.
-  if (PCP_PATH_SHORTEN_ENABLED
-      && opts?.hasLegalTarCom === true
-      && opts.pathShortenEligible === true
-      && opts.targetInRange === true) {
-    entity.moveTarget = null;
-    entity.path = [];
-    entity.pathIndex = 0;
-    result.navComCleared = true;
-  }
+  const shared = drivePerCellProcessImpl(entity, why, opts, false);
+  result.navComCleared = shared.navComCleared;
 
   if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
   return result;
@@ -1184,8 +1235,12 @@ export function footPerCellProcess<M>(
     entity.mission === missions.huntMission ||
     entity.mission === missions.rescueMission ||
     entity.mission === missions.areaGuardMission;
+  const isDog = entity.type === 'DOG' || entity.stats?.isCanine === true;
   if (PCP_PATH_SHORTEN_ENABLED
       && ctx.hasLegalTarCom
+      // C++ foot.cpp:1471 excludes InfantryClass dogs from the shared
+      // FootClass path-shorten branch; their leap/maul flow keeps NavCom.
+      && !isDog
       && ctx.pathShortenEligible === true
       && pathShortenMissionEligible
       && ctx.targetInRange === true) {

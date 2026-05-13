@@ -183,6 +183,8 @@ interface PathState {
 function createPathState(startCx: number, startCy: number, maxLen: number): PathState {
   const overlap = new OverlapBitmap();
   const startIdx = cellIndex(startCx, startCy);
+  // RA findpath.cpp defines TEST in this build, so the active branch marks the
+  // true source cell in the overlap bitmap.
   overlap.set(startIdx);
   return {
     start: startIdx,
@@ -494,7 +496,9 @@ function followEdge(
       }
     }
 
-    if (!foundPassable) return false;
+    if (!foundPassable) {
+      return false;
+    }
 
     // Record the direction (C++ line 938-976)
     if (!forceout) {
@@ -873,21 +877,22 @@ export function findPath(
 
     if (!foundFarSide) break;
 
-    // Update startcell to the end of the found path
-    startcell_cx = path.startCx;
-    startcell_cy = path.startCy;
-    for (let i = 0; i < path.length; i++) {
-      const cmd = path.command[i];
-      if (cmd === FACING_NONE) break;
-      startcell_cx += FACING_DX[cmd & 7];
-      startcell_cy += FACING_DY[cmd & 7];
-    }
+    // C++ findpath.cpp:734 assigns `startcell = next`, where `next` is the
+    // far-side scan cell passed into Follow_Edge. Do not recompute this from
+    // the command list; Follow_Edge can return via forceout without registering
+    // the target cell, and C++ still continues from the scanned far side.
+    startcell_cx = scanCx;
+    startcell_cy = scanCy;
   }
 
   // Optimize moves (C++ line 746-747)
   optimizeMoves(path, map, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell);
 
-  return facingsToPath(start.cx, start.cy, path.command, path.length);
+  const result = facingsToPath(start.cx, start.cy, path.command, path.length) as CellPos[] & { facings?: number[] };
+  result.facings = path.command
+    .slice(0, path.length)
+    .filter(cmd => cmd !== FACING_NONE && cmd !== EMPTY_CMD);
+  return result;
 }
 
 // ============================================================================
@@ -920,10 +925,18 @@ function heuristic(ax: number, ay: number, bx: number, by: number): number {
 
 const MAX_SEARCH = 500;
 
+export type NearbyClearPredicate = (cx: number, cy: number) => boolean;
+
 /** C++ map.cpp:1653-1731 MapClass::Nearby_Location.
  *  Scans square rings, keeps the first ten clear cells on the first usable
  *  radius, then chooses one with Frame % count. */
-export function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean, frame = 0): CellPos | null {
+export function nearbyLocation(
+  map: GameMap,
+  cell: CellPos,
+  naval: boolean,
+  frame = 0,
+  clearToMoveOverride?: NearbyClearPredicate,
+): CellPos | null {
   const boundsX = map.boundsX ?? 0;
   const boundsY = map.boundsY ?? 0;
   const boundsW = map.boundsW ?? MAP_CELLS;
@@ -938,6 +951,7 @@ export function nearbyLocation(map: GameMap, cell: CellPos, naval: boolean, fram
     if (cx < boundsX || cx >= boundsX + boundsW || cy < boundsY || cy >= boundsY + boundsH) {
       return false;
     }
+    if (clearToMoveOverride) return clearToMoveOverride(cx, cy);
     if (typeof map.canEnterCell === 'function') {
       return map.canEnterCell(cx, cy, naval) === MoveResult.OK;
     }

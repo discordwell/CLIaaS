@@ -229,21 +229,27 @@ export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: n
  * C++ parity: TACTION_REVEAL_ZONE reveals every cell sharing the same
  * Zones[MZONE_CRUSHER] as the waypoint cell (taction.cpp lines 445-456).
  * Since MZONE_CRUSHER represents crusher-class passability, a BFS through
- * passable terrain from the waypoint is functionally equivalent.
+ * passable terrain from the waypoint is functionally equivalent for the
+ * terrain classes TS currently models. Returns the revealed-cell mask so the
+ * caller can mirror DisplayClass::Map_Cell's object discovery side effect.
  */
-export function revealZoneFloodFill(map: GameMap, cx: number, cy: number): void {
-  // If the starting cell itself is not passable, nothing to reveal
-  if (!map.isPassable(cx, cy)) return;
-
+export function revealZoneFloodFill(map: GameMap, cx: number, cy: number): Uint8Array {
   const visited = new Uint8Array(MAP_CELLS * MAP_CELLS);
+
+  // If the starting cell itself is not passable, nothing to reveal
+  if (!map.isTerrainPassable(cx, cy)) return visited;
+
   const queue: number[] = [];
   const startIdx = cy * MAP_CELLS + cx;
   visited[startIdx] = 1;
   queue.push(startIdx);
 
-  // 4-directional flood fill (N, S, E, W) — matches C++ zone connectivity
-  const dx = [0, 0, 1, -1];
-  const dy = [-1, 1, 0, 0];
+  // C++ MapClass::Zone_Span treats diagonals as adjacent when building zones.
+  const dirs: Array<[number, number]> = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0],           [1, 0],
+    [-1, 1],  [0, 1],  [1, 1],
+  ];
 
   let head = 0;
   while (head < queue.length) {
@@ -252,18 +258,20 @@ export function revealZoneFloodFill(map: GameMap, cx: number, cy: number): void 
     const cellY = (idx - cellX) / MAP_CELLS;
     map.setVisibility(cellX, cellY, 2);
 
-    for (let d = 0; d < 4; d++) {
-      const nx = cellX + dx[d];
-      const ny = cellY + dy[d];
+    for (const [dx, dy] of dirs) {
+      const nx = cellX + dx;
+      const ny = cellY + dy;
       if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
       const nIdx = ny * MAP_CELLS + nx;
       if (visited[nIdx]) continue;
       visited[nIdx] = 1;
-      if (map.isPassable(nx, ny)) {
+      if (map.isTerrainPassable(nx, ny)) {
         queue.push(nIdx);
       }
     }
   }
+
+  return visited;
 }
 
 /**

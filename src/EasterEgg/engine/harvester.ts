@@ -11,6 +11,7 @@ import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { GameMap, MoveResult } from './map';
 import { findPath } from './pathfinding';
+import { movementZoneCells } from './missionAI';
 
 // ---------------------------------------------------------------------------
 // Context interface — minimal fields needed by harvester functions
@@ -25,6 +26,7 @@ export interface HarvesterContext {
   // Callbacks
   isAllied(a: House, b: House): boolean;
   isPlayerControlled(e: Entity): boolean;
+  isMappedForPlayer?(cx: number, cy: number): boolean;
   playSound(name: string): void;
   addCredits(amount: number): void;
   /** C++ DriveClass::Assign_Destination immediately calls Start_Of_Move.
@@ -115,6 +117,49 @@ function nearestRefinery(ctx: HarvesterContext, entity: Entity): MapStructure | 
   return bestProc;
 }
 
+function hasAlliedRefinery(ctx: HarvesterContext, entity: Entity): boolean {
+  return nearestRefinery(ctx, entity) !== null;
+}
+
+function cellHasTechno(ctx: HarvesterContext, cx: number, cy: number): boolean {
+  if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return true;
+  const idx = cy * MAP_CELLS + cx;
+  if (ctx.map.occupancy[idx] > 0) return true;
+  if (ctx.map.vehicleOccupancy.has(idx)) return true;
+  const subCells = ctx.map.subCellOccupancy.get(idx);
+  return subCells ? subCells.some(id => id > 0) : false;
+}
+
+function isOreOverlay(ctx: HarvesterContext, cx: number, cy: number): boolean {
+  if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+  return GameMap.isOreOverlayId(ctx.map.overlay[cy * MAP_CELLS + cx]);
+}
+
+function tiberiumCheck(
+  ctx: HarvesterContext,
+  entity: Entity,
+  reachableZone: Uint8Array,
+  cx: number,
+  cy: number,
+): boolean {
+  // C++ unit.cpp:2167-2170: Tiberium_Check rejects cells outside the radar/map rectangle.
+  if (cx < ctx.map.boundsX || cx >= ctx.map.boundsX + ctx.map.boundsW) return false;
+  if (cy < ctx.map.boundsY || cy >= ctx.map.boundsY + ctx.map.boundsH) return false;
+
+  // C++ unit.cpp:2174: player-owned harvesters only consider mapped ore.
+  if (ctx.isPlayerControlled(entity) && ctx.isMappedForPlayer && !ctx.isMappedForPlayer(cx, cy)) {
+    return false;
+  }
+
+  // C++ unit.cpp:2175: candidate must be in the same movement zone.
+  if (reachableZone[cy * MAP_CELLS + cx] === 0) return false;
+
+  // C++ unit.cpp:2176-2179: occupied ore cells are not valid destinations.
+  if (cellHasTechno(ctx, cx, cy)) return false;
+
+  return isOreOverlay(ctx, cx, cy);
+}
+
 function refineryDockCell(proc: MapStructure): { cx: number; cy: number } {
   const [, procH] = STRUCTURE_SIZE[proc.type] ?? [3, 2];
   // C++ building.cpp:306 Adjacent_Cell(Center, DIR_S). For RA refineries,
@@ -141,15 +186,41 @@ function isAdjacentToStructure(entity: Entity, structure: MapStructure): boolean
 export function findHarvesterOre(
   ctx: HarvesterContext, entity: Entity, cx: number, cy: number, maxRange: number,
 ): { cx: number; cy: number } | null {
-  void entity;
-  // C++ UnitClass::Goto_Tiberium has no AI-only anti-clustering heuristic.
-  // It delegates to Tiberium_Check and returns the first legal cell in the
-  // ring order implemented by GameMap.findNearestOre (unit.cpp:2206-2245).
-  return ctx.map.findNearestOre(cx, cy, maxRange);
+  // C++ UnitClass::Goto_Tiberium checks the current cell first without the
+  // Tiberium_Check mapping/occupancy gates. Only ring candidates go through
+  // Tiberium_Check.
+  if (isOreOverlay(ctx, cx, cy)) return { cx, cy };
+
+  const reachableZone = movementZoneCells(ctx.map, { cx, cy }, entity.isNavalUnit, ctx.structures);
+  for (let radius = 1; radius < maxRange; radius++) {
+    for (let x = -radius; x <= radius; x++) {
+      const checks: Array<[number, number]> = [
+        [cx + x, cy - radius],
+        [cx + x, cy + radius],
+        [cx - radius, cy + x],
+        [cx + radius, cy + x],
+      ];
+      for (const [tx, ty] of checks) {
+        if (tiberiumCheck(ctx, entity, reachableZone, tx, ty)) {
+          return { cx: tx, cy: ty };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /** Harvester AI — seek ore, harvest, return to refinery, unload */
 export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTimerFired = true): void {
+  // C++ unit.cpp:2770-2774: no allied refinery means abort harvest and return 1.
+  if (missionTimerFired && !hasAlliedRefinery(ctx, entity)) {
+    entity.harvesterState = 'idle';
+    entity.isHarvesterMining = false;
+    entity.mission = Mission.GUARD;
+    entity.missionTimer = 1;
+    return;
+  }
+
   switch (entity.harvesterState) {
     case 'idle': {
       // Only start auto-harvest from idle mission (GUARD/AREA_GUARD), not during manual MOVE
@@ -199,7 +270,21 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
           // C++ Goto_Tiberium assigns NavCom but does not switch to MISSION_MOVE.
           assignHarvesterDestination(ctx, entity, oreCell);
         }
+      } else if (!entity.moveTarget && !entity.isDriving) {
+        // C++ unit.cpp:2813-2824: no legal Tiberium and no NavCom puts the
+        // harvester into GOINGTOIDLE and returns TICKS_PER_SECOND*7.
+        entity.harvesterState = 'goingtoidle';
+        entity.isHarvesterMining = false;
       }
+      break;
+    }
+    case 'goingtoidle': {
+      if (!missionTimerFired) break;
+      // C++ unit.cpp:2909-2918: GOINGTOIDLE assigns GUARD, then falls through
+      // to MissionControl[GUARD].Normal_Delay()+Random_Pick(0,2) in the caller.
+      entity.harvesterState = 'idle';
+      entity.isHarvesterMining = false;
+      entity.mission = Mission.GUARD;
       break;
     }
     case 'seeking': {
@@ -296,20 +381,22 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
         // is lifted, or Mission_Harvest falls through to its jitter path early.
         const canLiftBail = entity.oreLoad < Entity.BAIL_COUNT && wasOreOverlay;
         if (canLiftBail) {
-          const bailCredits = ctx.map.depleteOre(ec.cx, ec.cy);
-          if (bailCredits > 0) {
-            // EC3: bail-based capacity — track bail count, not credit amount
-            entity.oreLoad += 1;
-            entity.oreCreditValue += bailCredits;
-            // EC4: gem bonus bails — C++ unit.cpp:2306-2308, up to 3 extra bails per gem harvest
-            // C++ guards each bonus bail with (BailCount > Tiberium) to prevent exceeding capacity
-            if (bailCredits >= 50) {
-              const gemValue = 50; // rules.ini GemValue
-              for (let bonus = 0; bonus < 3; bonus++) {
-                if (entity.oreLoad >= Entity.BAIL_COUNT) break;
-                entity.oreLoad += 1;
-                entity.oreCreditValue += gemValue;
-              }
+          const depletion = ctx.map.depleteOreBail(ec.cx, ec.cy);
+          if (depletion.removed > 0) {
+            // EC3: bail-based capacity — track bail count, not credit amount.
+            entity.oreLoad += depletion.removed;
+            entity.oreCreditValue += depletion.credits;
+          }
+          // EC4: gem bonus bails — C++ unit.cpp:2301-2308 branches on the
+          // original overlay kind, not on Reduce_Tiberium's return value.
+          // A zero-density gem overlay removes 0 bails but still runs the
+          // three capacity-gated Gems++/Tiberium++ bonus checks.
+          if (depletion.isGem) {
+            const gemValue = 50; // rules.ini GemValue
+            for (let bonus = 0; bonus < 3; bonus++) {
+              if (entity.oreLoad >= Entity.BAIL_COUNT) break;
+              entity.oreLoad += 1;
+              entity.oreCreditValue += gemValue;
             }
           }
 

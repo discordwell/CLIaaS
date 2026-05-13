@@ -328,6 +328,7 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
     entity.mission = Mission.GUARD;
     entity.aircraftState = 'landed';
     entity.flightAltitude = 0;
+    entity.aircraftHeightLeptons = 0;
     // Dock at factory
     for (let i = 0; i < ctx.structures.length; i++) {
       if (ctx.structures[i] === factory) {

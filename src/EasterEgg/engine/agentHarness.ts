@@ -32,7 +32,9 @@ export interface AgentUnit {
   mt?: number;     // mission timer (debug/parity)
   mq?: string | null; // mission queue (debug/parity)
   drv?: boolean;   // IsDriving (debug/parity)
+  lock?: boolean;  // TechnoClass::IsLocked (debug/parity)
   init?: boolean;  // IsInitiated/team activation state (debug/parity)
+  hint?: number;   // C++ Logic index hint (debug/parity)
   tid?: number;    // target entity ID
   mtx?: number;    // move target cell x
   mty?: number;    // move target cell y
@@ -214,7 +216,9 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   u.mt = e.missionTimer;
   u.mq = e.missionQueue;
   u.drv = e.isDriving;
+  u.lock = e.isLocked;
   u.init = e.teamInitiated;
+  if (e.logicIndexHint !== undefined) u.hint = e.logicIndexHint;
   return u;
 }
 
@@ -772,15 +776,17 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
         }
 
         case 'set_global': {
-          // Debug/harness command: directly set a global (simulates cell trigger activation)
+          // Debug/harness command: directly set a global. Match C++
+          // ScenarioClass::Set_Global_To side effects; the next ordered
+          // LogicTriggers pass evaluates dependent GLOBAL_SET/CLEAR events.
           const globals = (game as unknown as { globals: Set<number> }).globals;
           if (globals && typeof c.data === 'number') {
-            globals.add(c.data);
-            // C++ parity: setting a global must immediately spring dependent triggers
-            // (e.g., global 18 triggers tnya which spawns Tanya)
-            const springFn = (game as unknown as { springGlobalTriggers(idx: number): void }).springGlobalTriggers;
-            if (typeof springFn === 'function') {
-              springFn.call(game, c.data);
+            if (!globals.has(c.data)) {
+              globals.add(c.data);
+              const noteFn = (game as unknown as { noteGlobalChanged(idx: number): void }).noteGlobalChanged;
+              if (typeof noteFn === 'function') {
+                noteFn.call(game, c.data);
+              }
             }
             results.push({ cmd: 'set_global', ok: true });
           } else {
@@ -927,11 +933,30 @@ export function installHarness(game: Game): void {
         inLimbo: e.inLimbo,
         cx: e.cell.cx,
         cy: e.cell.cy,
+        lx: e.leptonX,
+        ly: e.leptonY,
+        facing: e.facing,
+        desiredFacing: e.desiredFacing,
+        facing256: e.facing256,
+        desiredFacing256: e.desiredFacing256,
+        bodyFacing256: e.bodyFacing256,
+        desiredBodyFacing256: e.desiredFacing256,
+        turretFacing256: e.turretFacing256,
+        desiredTurretFacing256: e.desiredTurretFacing256,
         mission: e.mission,
         missionQueue: e.missionQueue,
         missionTimer: e.missionTimer,
+        attackCooldown: e.attackCooldown,
+        aircraftAttackStatus: e.aircraftAttackStatus,
+        targetId: e.target?.id ?? null,
+        hasTarget: !!e.target,
+        hasTargetStructure: !!e.targetStructure,
+        targetStructureType: e.targetStructure?.type ?? null,
         aircraftState: e.aircraftState,
         flightAltitude: e.flightAltitude,
+        landedAtStructure: e.landedAtStructure,
+        logicIndexHint: e.logicIndexHint,
+        processedInBuildingPass: e._processedInBuildingPass,
         cargo: e.passengers?.length ?? 0,
         moveTarget: e.moveTarget ? { lx: e.moveTarget.lx, ly: e.moveTarget.ly } : null,
         isAirUnit: e.isAirUnit,
@@ -949,16 +974,28 @@ export function installHarness(game: Game): void {
     return teams.map((t, i) => ({
       i,
       id: (t as unknown as { id: number }).id,
+      typeName: (t as unknown as { typeName: string | null }).typeName,
       house: (t as unknown as { house: number }).house,
       isMoving: (t as unknown as { isMoving: boolean }).isMoving,
       isFullStrength: (t as unknown as { isFullStrength: boolean }).isFullStrength,
       isForcedActive: (t as unknown as { isForcedActive: boolean }).isForcedActive,
       isUnderStrength: (t as unknown as { isUnderStrength: boolean }).isUnderStrength,
       isReforming: (t as unknown as { isReforming: boolean }).isReforming,
+      isNextMission: (t as unknown as { isNextMission: boolean }).isNextMission,
+      currentMission: (t as unknown as { currentMission: number }).currentMission,
+      zoneLeptonX: (t as unknown as { zoneLeptonX: number }).zoneLeptonX,
+      zoneLeptonY: (t as unknown as { zoneLeptonY: number }).zoneLeptonY,
       skipActivation: (t as unknown as { _skipActivationOnce: boolean })._skipActivationOnce,
       dissolved: (t as unknown as { dissolved: boolean }).dissolved,
       members: (t as unknown as { _members: Array<{ id: number; type: string; mission?: string }> })._members.length,
       memberTypes: (t as unknown as { _members: Array<{ type: string; mission?: string }> })._members.map(m => `${m.type}(${m.mission ?? '?'})`),
+      memberIds: (t as unknown as { _members: Array<{ id: number; type: string; mission?: string; missionQueue?: string | null; teamInitiated?: boolean }> })._members.map(m => ({
+        id: m.id,
+        type: m.type,
+        mission: m.mission ?? null,
+        missionQueue: m.missionQueue ?? null,
+        initiated: !!m.teamInitiated,
+      })),
       desired: (t as unknown as { desiredMembers?: Array<{ type: string; count: number }> }).desiredMembers?.map(d => `${d.type}:${d.count}`),
     }));
   };

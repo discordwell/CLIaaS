@@ -5,8 +5,8 @@
 
 import {
   type CellPos, type UnitStats, type WeaponStats, type ArmorType,
-  CELL_SIZE, cellIndexToPos, cellToWorld, worldToCell, pixelToLepton, cellTargetToLepton,
-  House, Mission, UnitType, AnimState, Dir,
+  CELL_SIZE, MAP_CELLS, cellIndexToPos, cellToWorld, worldToCell, cellToLepton, leptonDist,
+  House, Mission, UnitType, AnimState, Dir, DIR_DX, DIR_DY,
   CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
   SUBCELL_LEPTON_OFFSETS,
@@ -196,6 +196,8 @@ export interface ScenarioTrigger {
   forceFirePending: boolean; // set by FORCE_TRIGGER — fires on next check regardless of events
   pendingDestroyedCount: number; // C++ Spring() parity: count of unprocessed deaths (fires once per death)
   triggeringEntityIds: number[]; // C++ parity: entity IDs that triggered this (for DESTROY_OBJECT with cell triggers)
+  cell?: number; // C++ TriggerClass::Cell — last [CellTriggers] cell attached to this trigger
+  springCell?: number; // transient Spring(cell) argument used by TACTION_DESTROY_OBJECT bridge destruction
   attachCount?: number; // number of attached objects/cells at scenario start or after dynamic spawns
   remainingAttachCount?: number; // semi-persistent detach countdown before the trigger may execute
 }
@@ -903,6 +905,8 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
       const cellIdx = parseInt(key);
       if (!isNaN(cellIdx)) {
         cellTriggers.set(cellIdx, value);
+        const trigger = triggers.find(t => t.name === value);
+        if (trigger) trigger.cell = cellIdx;
       }
     }
   }
@@ -1135,6 +1139,60 @@ function inferClosestMapEdge(
   return relY < mapBounds.h / 2 ? 'north' : 'south';
 }
 
+function reinforcementNormalZoneCells(
+  map: GameMap,
+  start: CellPos,
+  mapBounds: { x: number; y: number; w: number; h: number },
+  structures?: readonly MapStructure[],
+): Uint8Array {
+  const structureCells = new Set<number>();
+  for (const s of structures ?? []) {
+    if (!s.alive) continue;
+    for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
+      structureCells.add(cell.cy * MAP_CELLS + cell.cx);
+    }
+  }
+
+  const inMapBounds = (cx: number, cy: number): boolean =>
+    cx >= mapBounds.x && cx < mapBounds.x + mapBounds.w &&
+    cy >= mapBounds.y && cy < mapBounds.y + mapBounds.h;
+  const zonePassable = (cx: number, cy: number): boolean => {
+    if (!inMapBounds(cx, cy)) return false;
+    // C++ Zone_Span calls Is_Clear_To_Move(SPEED_TRACK, true, true), so
+    // vehicle/building occupation is ignored for zone construction. TS encodes
+    // building Occupy_List cells as wall terrain; let zones pass through those
+    // cells while Good_Reinforcement_Cell's real movement check still rejects
+    // them as spawn slots below.
+    if (structureCells.has(cy * MAP_CELLS + cx)) return true;
+    return map.isTerrainPassable(cx, cy);
+  };
+
+  const seen = new Uint8Array(MAP_CELLS * MAP_CELLS);
+  if (!zonePassable(start.cx, start.cy)) return seen;
+
+  const qx: number[] = [start.cx];
+  const qy: number[] = [start.cy];
+  seen[start.cy * MAP_CELLS + start.cx] = 1;
+
+  for (let head = 0; head < qx.length; head++) {
+    const cx = qx[head];
+    const cy = qy[head];
+    for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= MAP_CELLS || ny < 0 || ny >= MAP_CELLS) continue;
+      const idx = ny * MAP_CELLS + nx;
+      if (seen[idx]) continue;
+      if (!zonePassable(nx, ny)) continue;
+      seen[idx] = 1;
+      qx.push(nx);
+      qy.push(ny);
+    }
+  }
+
+  return seen;
+}
+
 export function calculateHouseEdgeSpawnCell(
   house: House,
   houseEdges: Map<House, string> | undefined,
@@ -1147,6 +1205,7 @@ export function calculateHouseEdgeSpawnCell(
   naval = false,
   /** C++ Good_Reinforcement_Cell rejects occupied outcell or incell. */
   isOccupied?: (cx: number, cy: number) => boolean,
+  structures?: readonly MapStructure[],
 ): CellPos | null {
   if (!mapBounds) {
     return null;
@@ -1201,25 +1260,43 @@ export function calculateHouseEdgeSpawnCell(
       return null;
   }
 
-  // C++ display.cpp:2505-2527 + Good_Reinforcement_Cell: for naval (SPEED_FLOAT),
-  // only water cells are valid spawn locations. Scan along the edge if the
-  // aligned cell is not water.
-  // C++ Good_Reinforcement_Cell checks BOTH outcell (outside boundary) and incell
-  // (just inside boundary). Since the spawn cell is 1 cell outside the map boundary,
-  // we check the adjacent inside cell for water passability.
-  if (naval && map && candidate) {
-    // C++ display.cpp:2518: modifier = (y > MapCellY) ? -MAP_CELL_W : MAP_CELL_W
-    // The "inside" cell is 1 cell towards map center from the edge.
+  // C++ display.cpp:2505-2527 scans the chosen edge for the first
+  // Good_Reinforcement_Cell, not just naval water cells. Ground teams need this
+  // too: SCU10EA's Turkey convoy starts at east-edge y=58 because y=60's inside
+  // cell is occupied when the trigger fires.
+  if (map && candidate) {
     const isHorizontalEdge = edge === 'north' || edge === 'south';
-    const inCx = isHorizontalEdge ? candidate.cx : (edge === 'west' ? candidate.cx + 1 : candidate.cx - 1);
-    const inCy = isHorizontalEdge ? (edge === 'north' ? candidate.cy + 1 : candidate.cy - 1) : candidate.cy;
+    const insideCell = (outCx: number, outCy: number): CellPos => ({
+      cx: isHorizontalEdge ? outCx : (edge === 'west' ? outCx + 1 : outCx - 1),
+      cy: isHorizontalEdge ? (edge === 'north' ? outCy + 1 : outCy - 1) : outCy,
+    });
+    const inBounds128 = (cx: number, cy: number): boolean =>
+      cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS;
+    const passable = (outCx: number, outCy: number, inCx: number, inCy: number): boolean => {
+      if (!inBounds128(outCx, outCy) || !inBounds128(inCx, inCy)) return false;
+      if (naval) {
+        return map.isWaterPassableRelaxed(outCx, outCy) && map.isWaterPassable(inCx, inCy);
+      }
+      return map.isTerrainPassable(outCx, outCy) && map.isTerrainPassable(inCx, inCy);
+    };
+    // C++ display.cpp:2429-2434 records Map[trycell].Zones[MZONE_NORMAL],
+    // then Good_Reinforcement_Cell requires incell to match that zone. This is
+    // what makes SCU10EA skip the disconnected clear east-edge pocket at y=74.
+    const normalZone = (!naval && alignedCell)
+      ? reinforcementNormalZoneCells(map, alignedCell, mapBounds, structures)
+      : null;
+    const goodCell = (outCx: number, outCy: number): boolean => {
+      const incell = insideCell(outCx, outCy);
+      if (!passable(outCx, outCy, incell.cx, incell.cy)) return false;
+      if (normalZone && !normalZone[incell.cy * MAP_CELLS + incell.cx]) return false;
+      // Off-radar ground vehicles are not always marked into the outcell in C++,
+      // but an occupied inside cell must reject the edge candidate.
+      if (isOccupied?.(incell.cx, incell.cy)) return false;
+      if (naval && isOccupied?.(outCx, outCy)) return false;
+      return true;
+    };
 
-    // C++ Good_Reinforcement_Cell checks BOTH outcell AND incell for passability.
-    // The outcell is outside the map boundary — cells there may have different terrain
-    // (e.g., CLEAR land behind a water edge). Both must be water-passable.
-    const outWater = map.isWaterPassableRelaxed(candidate.cx, candidate.cy);
-    const occupied = isOccupied?.(candidate.cx, candidate.cy) || isOccupied?.(inCx, inCy);
-    if (!outWater || !map.isWaterPassable(inCx, inCy) || occupied) {
+    if (!goodCell(candidate.cx, candidate.cy)) {
       // Scan along the edge in C++ order, starting at the aligned waypoint
       // coordinate and wrapping forward. Do not choose nearest-by-distance:
       // display.cpp:2507-2520 uses `((y + index) % MapCellHeight)` /
@@ -1228,26 +1305,15 @@ export function calculateHouseEdgeSpawnCell(
       const scanStart = isHorizontalEdge ? x : y;
       const scanLen = isHorizontalEdge ? w : h;
       const alignCoord = isHorizontalEdge ? candidate.cx : candidate.cy;
-
       const alignOffset = ((alignCoord - scanStart) % scanLen + scanLen) % scanLen;
+
       for (let i = 0; i < scanLen; i++) {
         const sc = scanStart + ((alignOffset + i) % scanLen);
-        // C++ Good_Reinforcement_Cell: check BOTH outside AND inside cells
-        const checkCx = isHorizontalEdge ? sc : (edge === 'west' ? edgeCoord + 1 : edgeCoord - 1);
-        const checkCy = isHorizontalEdge ? (edge === 'north' ? edgeCoord + 1 : edgeCoord - 1) : sc;
         const outCx = isHorizontalEdge ? sc : edgeCoord;
         const outCy = isHorizontalEdge ? edgeCoord : sc;
-        if (map.isWaterPassable(checkCx, checkCy) &&
-            map.isWaterPassableRelaxed(outCx, outCy) &&
-            !isOccupied?.(outCx, outCy) &&
-            !isOccupied?.(checkCx, checkCy)) {
-          // Return the outside-edge spawn cell (aligned with this water cell)
-          const cx = isHorizontalEdge ? sc : edgeCoord;
-          const cy = isHorizontalEdge ? edgeCoord : sc;
-          return { cx, cy };
-        }
+        if (goodCell(outCx, outCy)) return { cx: outCx, cy: outCy };
       }
-      // No water found on this edge — fall back to candidate (C++ would also fail)
+      // No legal cell found — fall back to the calculated punt cell.
     }
   }
 
@@ -1303,6 +1369,53 @@ function isAntTeam(team: TeamType): boolean {
   return team.members.some(m => m.type.startsWith('ANT'));
 }
 
+function cellInsideMapBounds(cell: CellPos, mapBounds?: { x: number; y: number; w: number; h: number }): boolean {
+  if (!mapBounds) return false;
+  return cell.cx >= mapBounds.x && cell.cx < mapBounds.x + mapBounds.w &&
+    cell.cy >= mapBounds.y && cell.cy < mapBounds.y + mapBounds.h;
+}
+
+function isGroundReinforcementCellBlocked(
+  cell: CellPos,
+  existingEntities: Entity[] | undefined,
+): boolean {
+  const blocks = (entity: Entity): boolean =>
+    entity.alive &&
+    !entity.inLimbo &&
+    !entity.isAirUnit &&
+    !entity.stats.isInfantry &&
+    !entity.stats.isVessel &&
+    entity.cell.cx === cell.cx &&
+    entity.cell.cy === cell.cy;
+  return !!existingEntities?.some(blocks);
+}
+
+function findGroundReinforcementUnlimboCell(
+  startCell: CellPos,
+  existingEntities: Entity[] | undefined,
+  mapBounds?: { x: number; y: number; w: number; h: number },
+): CellPos | null {
+  let cell = startCell;
+
+  while (isGroundReinforcementCellBlocked(cell, existingEntities)) {
+    let foundAdjacent = false;
+    for (let facing = 0; facing < DIR_DX.length; facing++) {
+      const trycell = {
+        cx: cell.cx + DIR_DX[facing],
+        cy: cell.cy + DIR_DY[facing],
+      };
+      if (cellInsideMapBounds(trycell, mapBounds)) continue;
+      if (isGroundReinforcementCellBlocked(trycell, existingEntities)) continue;
+      cell = trycell;
+      foundAdjacent = true;
+      break;
+    }
+    if (!foundAdjacent) return null;
+  }
+
+  return cell;
+}
+
 /** A placed structure on the map (static building, not a unit) */
 export interface StructureWeapon {
   weaponName?: string; // C++ rules.ini weapon section name
@@ -1356,6 +1469,8 @@ export interface MapStructure {
   /** C++ BuildingClass::CountDown after RESULT_DESTROYED.
    *  Drop_Debris runs from BuildingClass::AI only after this frame timer reaches 0. */
   debrisCountdown?: number;
+  /** Absolute TS game tick mirroring C++ CDTimerClass expiry for CountDown. */
+  debrisDropTick?: number;
   debrisDropped?: boolean;
   /** C++ BuildingClass::WhomToRepay — set only by Tanya C4 sabotage. */
   whomToRepayEntityId?: number;
@@ -1390,6 +1505,14 @@ export interface MapStructure {
   weapDoorTimer?: number;
   /** C++ MissionClass::Mission for buildings. Weapon buildings use GUARD to scan, then ATTACK to fire. */
   mission?: Mission;
+  /** C++ MissionClass::MissionQueue for buildings. Assign_Mission queues here;
+   *  BuildingClass::AI promotes it through Commence() when IsReadyToCommence. */
+  missionQueue?: Mission | null;
+  /** C++ BuildingClass::IsReadyToCommence gate for queued building missions. */
+  isReadyToCommence?: boolean;
+  /** TS representation of the next pad animation readiness edge. The C++
+   *  flag is raised by BuildingClass::Animation_AI before Commence(). */
+  readyToCommenceTick?: number;
   /** C++ BuildingClass::Status for helipad/airstrip Mission_Repair.
    *  0=INITIAL, 1=DURING. The docked aircraft remains in dockedAircraft. */
   repairMissionStatus?: number;
@@ -1418,6 +1541,10 @@ export interface MapStructure {
    *  (non-human house; players use UI). Reset when Strength hits MaxStrength or Available_Money
    *  drops below Repair_Cost. */
   isRepairing?: boolean;
+  /** Terrain hidden by the structure footprint. C++ Limbo() removes occupancy
+   *  without changing CellClass::Land_Type; TS uses terrain as occupancy, so
+   *  teardown must restore the land/wall state captured before placement. */
+  footprintTerrain?: StructureFootprintTerrain[];
   /** C++ building.cpp:990-993 — Gap Generator Arm timer (CDTimerClass).
    *  When Arm==0, consumes Random_Pick(1, TICKS_PER_SECOND) and resets to
    *  TICKS_PER_MINUTE * GapRegenInterval + jitter. Only used for GAP buildings. */
@@ -1483,6 +1610,8 @@ export const STRUCTURE_ARMOR: Record<string, ArmorType> = {
   // barrel armor types (C++ default ARMOR_NONE)
   BARL: 'none',  // barrel — no Armor= in rules.ini, defaults to ARMOR_NONE
   BRL3: 'none',  // barrel (3-cell variant) — same default
+  MINP: 'none',  // mine — no Armor= in rules.ini, defaults to ARMOR_NONE
+  MINV: 'none',  // mine — no Armor= in rules.ini, defaults to ARMOR_NONE
   // wall armor types from rules.ini
   SBAG: 'none', FENC: 'none', BRIK: 'none', CYCL: 'none', WOOD: 'none',
   BARB: 'wood',  // rules.ini: Armor=wood (barbed wire)
@@ -1513,6 +1642,28 @@ export const STRUCTURE_IMAGES: Record<string, string> = {
   // Fake buildings (use real building sprites as fallback)
   FACF: 'fact', DOMF: 'dome', WEAF: 'weap',
 };
+
+// C++ BuildingTypeClass::IsLegalTarget. Most structures are legal targets;
+// mines are BuildingClass technos but bdata.cpp marks them false, so
+// TechnoClass::Evaluate_Object must reject them for auto-acquisition.
+export const NON_LEGAL_TARGET_STRUCTURES = new Set(['MINP', 'MINV']);
+export const MINE_STRUCTURE_TYPES = new Set(['MINP', 'MINV']);
+export const INSIGNIFICANT_STRUCTURE_TYPES = new Set([
+  'BARL', 'BRL3',
+  'MINV', 'MINP',
+  'V01', 'V02', 'V03', 'V04', 'V05', 'V06', 'V07', 'V08', 'V09',
+  'V10', 'V11', 'V12', 'V13', 'V14', 'V15', 'V16', 'V17', 'V18',
+  'SBAG', 'CYCL', 'BRIK', 'BARB', 'WOOD', 'FENC',
+  'LAR1', 'LAR2',
+]);
+
+export function isLegalStructureTarget(type: string): boolean {
+  return !NON_LEGAL_TARGET_STRUCTURES.has(type);
+}
+
+export function isMineStructureType(type: string): boolean {
+  return MINE_STRUCTURE_TYPES.has(type);
+}
 
 const CIVILIAN_STRUCTURE_2X2 = ['V01', 'V02', 'V03', 'V04', 'V20', 'V21', 'V24', 'V25'];
 const CIVILIAN_STRUCTURE_2X1 = ['V05', 'V06', 'V07', 'V22', 'V26', 'V30', 'V31', 'V32', 'V33'];
@@ -1584,8 +1735,8 @@ export function structureCenterOffsetLeptons(type: string): { lx: number; ly: nu
   };
 }
 
-export function structureCenterLeptons(s: Pick<MapStructure, 'type' | 'cx' | 'cy'>): { lx: number; ly: number } {
-  const off = structureCenterOffsetLeptons(s.type);
+export function structureCenterLeptons(s: Pick<MapStructure, 'cx' | 'cy'> & { type?: string }): { lx: number; ly: number } {
+  const off = structureCenterOffsetLeptons(s.type ?? '');
   return {
     lx: s.cx * 256 + off.lx,
     ly: s.cy * 256 + off.ly,
@@ -1599,9 +1750,9 @@ function snapLeptonsToCellCenter(lx: number, ly: number): { lx: number; ly: numb
   };
 }
 
-export function structureTargetLeptons(s: Pick<MapStructure, 'type' | 'cx' | 'cy'>): { lx: number; ly: number } {
+export function structureTargetLeptons(s: Pick<MapStructure, 'cx' | 'cy'> & { type?: string }): { lx: number; ly: number } {
   const center = structureCenterLeptons(s);
-  if (SOUTH_FOUNDATION_FACE_STRUCTURES.has(s.type)) {
+  if (s.type && SOUTH_FOUNDATION_FACE_STRUCTURES.has(s.type)) {
     // C++ BuildingClass::Target_Coord: Adjacent_Cell(Center_Coord(), FACING_S).
     return snapLeptonsToCellCenter(center.lx, center.ly + 256);
   }
@@ -1665,7 +1816,9 @@ export function structureConstructionProgressTicks(type: string): number {
   return ((count - 1) * structureBuildAnimationRate(type)) + 1;
 }
 
-export function isStructureUnderConstruction(s: Pick<MapStructure, 'buildProgress'>): boolean {
+export function isStructureUnderConstruction<T extends Pick<MapStructure, 'buildProgress'>>(
+  s: T,
+): s is T & { buildProgress: number } {
   return s.buildProgress !== undefined && s.buildProgress < 1;
 }
 
@@ -1732,8 +1885,9 @@ export function getStructureOccupyCells(type: string, cx: number, cy: number): C
 }
 
 // C++ bdata.cpp:3597-3629 Bib_And_Offset — buildings with IsBibbed=true in rules.ini.
-// Bibs are decorative ground tiles placed beneath certain buildings that make additional
-// cells impassable. The bib extends 1 row below the building footprint, with the same
+// Bibs are decorative smudges placed beneath certain buildings. They block later
+// building placement via CellClass::Is_Clear_To_Build, but they do not block
+// CellClass::Is_Clear_To_Move. The bib extends 1 row below the building footprint, with the same
 // width as the building. C++ only generates bibs for buildings with Width() >= 2
 // (Width 2 → SMUDGE_BIB3, Width 3 → SMUDGE_BIB2, Width 4 → SMUDGE_BIB1).
 export const BIBBED_BUILDINGS: ReadonlySet<string> = new Set([
@@ -1760,6 +1914,70 @@ export function getBibCells(type: string, cx: number, cy: number): CellPos[] {
     cells.push({ cx: cx + dx, cy: bibRow });
   }
   return cells;
+}
+
+export interface StructureFootprintTerrain {
+  cx: number;
+  cy: number;
+  terrain: Terrain;
+  wallType: string;
+  wallOwner: House | null;
+}
+
+/** Capture the land state hidden by a building footprint before TS marks those
+ *  cells as blocked. C++ stores building occupancy separately from Land_Type. */
+export function captureStructureFootprintTerrain(
+  map: GameMap,
+  type: string,
+  cx: number,
+  cy: number,
+  includeBib = false,
+): StructureFootprintTerrain[] {
+  const cells = includeBib
+    ? [...getStructureOccupyCells(type, cx, cy), ...getBibCells(type, cx, cy)]
+    : getStructureOccupyCells(type, cx, cy);
+  const seen = new Set<number>();
+  const captured: StructureFootprintTerrain[] = [];
+  for (const cell of cells) {
+    const key = cell.cy * 128 + cell.cx;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    captured.push({
+      cx: cell.cx,
+      cy: cell.cy,
+      terrain: map.getTerrain(cell.cx, cell.cy),
+      wallType: map.getWallType(cell.cx, cell.cy),
+      wallOwner: map.getWallOwner(cell.cx, cell.cy),
+    });
+  }
+  return captured;
+}
+
+const WALL_STRUCTURE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
+
+function assignOverlayWallOwners(map: GameMap, structures: MapStructure[]): void {
+  const ownerStructures = structures.filter(s =>
+    s.alive && !WALL_STRUCTURE_TYPES.has(s.type));
+
+  for (let cy = 0; cy < MAP_CELLS; cy++) {
+    for (let cx = 0; cx < MAP_CELLS; cx++) {
+      const wallType = map.getWallType(cx, cy);
+      if (!wallType || map.getWallOwner(cx, cy) !== null) continue;
+
+      let owner: House | null = null;
+      let bestDist = Number.MAX_SAFE_INTEGER;
+      const wallCoord = cellToLepton(cx, cy);
+      for (const structure of ownerStructures) {
+        const center = structureCenterLeptons(structure);
+        const dist = leptonDist(center.lx, center.ly, wallCoord.lx, wallCoord.ly);
+        if (dist < bestDist) {
+          bestDist = dist;
+          owner = structure.house;
+        }
+      }
+      map.setWallOwner(cx, cy, owner);
+    }
+  }
 }
 
 // Structure max HP overrides (default is 256)
@@ -1823,6 +2041,10 @@ export interface ScenarioResult {
   map: GameMap;
   entities: Entity[];
   structures: MapStructure[];
+  /** Count of [TERRAIN] objects from scenario INI that occupy C++ Logic slots.
+   *  TerrainClass objects are submitted before units/buildings, even when their
+   *  AI is inert for the current tick. */
+  terrainLogicCount: number;
   /** Count of TERRAIN_MINE entities (ore mines / gem blossoms) from scenario INI.
    *  Each fires 2 RNGs every GrowthRate*TICKS_PER_MINUTE via C++ TerrainClass::AI
    *  → CellClass::Spread_Tiberium (terrain.cpp:497, cell.cpp:2963-2978). */
@@ -2112,6 +2334,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       attackCooldown: 0,
       ammo: -1,
       maxAmmo: -1,
+      footprintTerrain: captureStructureFootprintTerrain(map, s.type, pos.cx, pos.cy),
       // C++ BuildingClass::Read_INI passes the 5th structure field to
       // Unlimbo(), which stores it in TechnoClass::PrimaryFacing. Turreted
       // buildings therefore start from scenario facing, not bdata StartFace.
@@ -2132,18 +2355,30 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     });
     // Mark C++ Occupy_List cells as impassable. The rendered footprint can be
     // larger than the active foundation; overlap cells remain passable.
-    for (const cell of getStructureOccupyCells(s.type, pos.cx, pos.cy)) {
-      map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+    // AP/AV mines are BuildingClass objects with an Occupy_List, but
+    // UnitClass/InfantryClass::Can_Enter_Cell has mine-specific passability
+    // rules. Encoding mines as wall terrain makes pathfinding route around
+    // them before those rules can run.
+    if (!isMineStructureType(s.type)) {
+      for (const cell of getStructureOccupyCells(s.type, pos.cx, pos.cy)) {
+        map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+      }
     }
-    // C++ bdata.cpp:3597-3629: Bib cells are impassable in C++ (rendered via BIB sprites).
-    // Without BIB sprite extraction, marking these as WALL causes dark gray boxes because
-    // the WALL terrain handler draws CLEAR1 tiles which are darker than regular ground.
-    // Leave bibs as CLEAR for now — structure body cells remain WALL for pathfinding.
+    // C++ building.cpp:785-790 creates a BIB smudge. Bibs reject building
+    // placement (cell.cpp:489) but do not participate in Is_Clear_To_Move.
+    for (const cell of getBibCells(s.type, pos.cx, pos.cy)) {
+      map.setBibSmudge(cell.cx, cell.cy, true);
+    }
     // Store wall type for auto-connection sprite rendering
     if (s.type === 'SBAG' || s.type === 'FENC' || s.type === 'BARB' || s.type === 'BRIK') {
-      map.setWallType(pos.cx, pos.cy, s.type);
+      map.setWallType(pos.cx, pos.cy, s.type, toHouse(s.house));
     }
   }
+
+  // C++ OverlayClass::Read_INI assigns OverlayPack wall cell ownership to the
+  // nearest already-unlimboed building. This owner is used by
+  // TechnoClass::Evaluate_Just_Cell to decide whether AI may auto-target walls.
+  assignOverlayWallOwners(map, structures);
 
   initializeTriggerAttachmentCounts(
     data.triggers,
@@ -2279,6 +2514,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
         heli.mission = Mission.GUARD;
         heli.aircraftState = 'landed';
         heli.flightAltitude = 0;
+        heli.aircraftHeightLeptons = 0;
         heli.landedAtStructure = si; // dock helicopter at this HPAD index
         // C++ building.cpp:2485 Assign_Mission(MISSION_GUARD) leaves MissionTimer=0 so
         // Mission_Guard fires on the first AI tick — Find_Juicy_Target may transition
@@ -2321,6 +2557,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     map,
     entities,
     structures,
+    terrainLogicCount: data.terrain.length,
     terrainMineCount: terrainMineSpreadCells.length,
     terrainMineSpreadCells,
     name: data.name,
@@ -2548,20 +2785,24 @@ export function classifyOutdoorTerrain(
   theatre = 'TEMPERATE',
   tilesetMeta?: TilesetMeta | null,
 ): void {
-  // C++ parity: classify terrain 1 cell beyond visible bounds on each side.
-  // C++ MapPack covers the full 128x128 grid — cells just outside bounds need
-  // terrain data for Good_Reinforcement_Cell (checks both outcell and incell).
-  const startY = Math.max(0, map.boundsY - 1);
-  const endY = Math.min(128, map.boundsY + map.boundsH + 1);
-  const startX = Math.max(0, map.boundsX - 1);
-  const endX = Math.min(128, map.boundsX + map.boundsW + 1);
+  // C++ parity: MapPack is a full 128x128 CellClass terrain layer. The [Map]
+  // rectangle controls scenario viewport/radar bounds, not the only cells that
+  // UnitClass::Can_Enter_Cell and Basic_Path may inspect. Reinforcement teams
+  // can path multiple cells outside the visible rectangle (SCG10EA west edge).
+  const startY = 0;
+  const endY = 128;
+  const startX = 0;
+  const endX = 128;
 
   for (let cy = startY; cy < endY; cy++) {
     for (let cx = startX; cx < endX; cx++) {
       const idx = cy * 128 + cx;
       const tmpl = templateType[idx];
 
-      if (tmpl === 0xFFFF || tmpl === 0x00) continue; // Clear (default)
+      if (tmpl === 0xFFFF || tmpl === 0x00 || tmpl === 0xFF) {
+        map.setTerrain(cx, cy, Terrain.CLEAR);
+        continue;
+      }
 
       // ── Per-icon classification (C++ parity) ──────────────────────
       // C++ cdata.cpp:3002-3032: Land_Type(icon) reads control map byte from TMP file,
@@ -2574,9 +2815,7 @@ export function classifyOutdoorTerrain(
           const landName = entry.lt ?? 'Clear'; // absent lt = Clear
           const terrain = LAND_NAME_TO_TERRAIN[landName] ?? Terrain.CLEAR;
 
-          if (terrain !== Terrain.CLEAR) {
-            map.setTerrain(cx, cy, terrain);
-          }
+          map.setTerrain(cx, cy, terrain);
           continue;
         }
       }
@@ -2611,8 +2850,15 @@ export function classifyInteriorTerrain(
       const idx = cy * 128 + cx;
       const tmpl = templateType[idx];
 
-      if (tmpl === 0xFFFF || tmpl === 0x00 || tmpl === 255) {
-        // Clear floor (default)
+      if (tmpl === 0xFFFF || tmpl === 0x00) {
+        // C++ CellClass::Recalc_Attributes: in INTERIOR theatre, no template
+        // and CLEAR1 are treated as impassable rock.
+        map.setTerrain(cx, cy, Terrain.ROCK);
+        continue;
+      }
+      if (tmpl === 255) {
+        // Historical sentinel: C++ skips template lookup and falls through to
+        // LAND_CLEAR. This is distinct from TEMPLATE_NONE (0xFFFF).
         continue;
       }
 
@@ -2738,12 +2984,16 @@ export interface TriggerGameState {
   houseUnitsAlive: Map<number, boolean>;
   // Per-house: any living BUILDINGS (structures only, excluding walls) — for BUILDINGS_DESTROYED
   houseBuildingsAlive: Map<number, boolean>;
+  // C++ HouseClass::UnitsLost/BuildingsLost, keyed by RA house index.
+  // TEVENT_N* checks the trigger owner's house, while event.data is the threshold.
+  unitsLostByHouse: Map<number, number>;
+  buildingsLostByHouse: Map<number, number>;
   isLowPower: boolean;        // player is low on power
   playerCredits: number;      // player's current credits
   // TR3: new event state fields
   buildingsDestroyedByHouse: Map<number, boolean>; // per-house: all buildings destroyed?
   nBuildingsDestroyed: number;   // total count of buildings destroyed
-  playerFactoriesExist: boolean; // does the player still have factories?
+  playerFactoriesExist: boolean; // legacy snapshot field; TEVENT_NOFACTORIES uses triggerHouse BScan
   civiliansEvacuated: number;    // count of civilians evacuated
   builtUnitTypes: Set<string>;     // unit types player has built
   builtInfantryTypes: Set<string>; // infantry types player has built
@@ -2801,8 +3051,9 @@ export function checkTriggerEvent(
       return !(state.houseAlive.get(houseIdx) ?? false);
     }
     case TEVENT_NUNITS_DESTROYED:
-      // N enemy units have been killed (event.data = threshold)
-      return state.enemyKillCount >= event.data;
+      // C++ tevent.cpp:408-410 checks HouseClass::UnitsLost for the trigger's
+      // own House field. Data.Value is the threshold, not a house selector.
+      return (state.unitsLostByHouse.get(state.triggerHouse) ?? 0) >= event.data;
     case TEVENT_DESTROYED:
       // C++ Spring() parity: fires once per death. pendingDestroyedCount tracks unprocessed deaths.
       return state.pendingDestroyedCount > 0 && state.destroyedTriggerNames.has(state.triggerName);
@@ -2837,7 +3088,8 @@ export function checkTriggerEvent(
       // C++ parity (#21): fires when a unit whose owner matches Data.House enters the same movement zone
       // as the trigger's attached cell. C++ tevent.cpp:290-293 checks object->Owner() == Data.House.
       // C++ foot.cpp:1447-1455 checks zone membership via Map[trigger->Cell].Zones[MZone].
-      return state.enteredZone;
+      if (!state.enteredZone) return false;
+      return state.playerEnteredHouse === undefined || state.playerEnteredHouse === event.data;
     case TEVENT_ATTACKED:
       // Attached object was attacked (damaged) — per-entity tracking via triggerName
       return state.attackedTriggerNames.has(state.triggerName);
@@ -2878,12 +3130,14 @@ export function checkTriggerEvent(
       // C++ parity (#21): fires when a unit whose owner matches Data.House crosses the Y row of the
       // trigger's cell. C++ foot.cpp:1419-1428 scans all cells in the row; tevent.cpp:290-293
       // checks object->Owner() == Data.House.
-      return state.crossedHorizontal;
+      if (!state.crossedHorizontal) return false;
+      return state.playerEnteredHouse === undefined || state.playerEnteredHouse === event.data;
     case TEVENT_CROSS_VERTICAL:
       // C++ parity (#21): fires when a unit whose owner matches Data.House crosses the X column of
       // the trigger's cell. C++ foot.cpp:1434-1442 scans all cells in the column; tevent.cpp:290-293
       // checks object->Owner() == Data.House.
-      return state.crossedVertical;
+      if (!state.crossedVertical) return false;
+      return state.playerEnteredHouse === undefined || state.playerEnteredHouse === event.data;
     case TEVENT_UNITS_DESTROYED:
       // All units of a house destroyed (event.data = RA house index)
       // C++ index 9: "all house's units destroyed" — checks units only, not structures
@@ -2901,11 +3155,21 @@ export function checkTriggerEvent(
       return state.buildingsDestroyedByHouse.get(bHouseIdx) ?? false;
     }
     case TEVENT_NBUILDINGS_DESTROYED:
-      // N buildings have been destroyed
-      return state.nBuildingsDestroyed >= event.data;
+      // C++ tevent.cpp:401-403 mirrors the units case with BuildingsLost for
+      // the trigger's own house.
+      return (state.buildingsLostByHouse.get(state.triggerHouse) ?? 0) >= event.data;
     case TEVENT_NOFACTORIES:
-      // No factories remaining for player
-      return !state.playerFactoriesExist;
+      // C++ tevent.cpp:340-341 checks the trigger house's BScan for
+      // CONST/TENT/BARRACKS/WEAP/AIRSTRIP. It does not check PlayerPtr.
+      {
+        const FACTORY_TYPES = new Set(['FACT', 'TENT', 'BARR', 'WEAP', 'AFLD']);
+        const houseStructs = state.structureTypesByHouse.get(state.triggerHouse);
+        if (!houseStructs) return true;
+        for (const type of FACTORY_TYPES) {
+          if (houseStructs.has(type)) return false;
+        }
+        return true;
+      }
     case TEVENT_EVAC_CIVILIAN:
       // A civilian has been evacuated
       return state.civiliansEvacuated > 0;
@@ -2970,12 +3234,13 @@ export interface TriggerActionResult {
   timerSubtract?: number;         // subtract time from mission timer (SUB_TIMER)
   oneSpecial?: boolean;           // charge one superweapon (1_SPECIAL)
   fullSpecial?: boolean;          // charge all superweapons (FULL_SPECIAL)
-  globalChanged?: number;         // C++ parity (#38): global index that was set/cleared (triggers immediate spring)
+  globalChanged?: number;         // C++ parity: global index changed; Set_Global_To reset side effects apply
   baseBuilding?: { house: number; enabled: boolean }; // C++ parity (#39): set IsBaseBuilding on/off for a house
   blockageDecrement?: boolean;    // C++ parity: trigger.cpp:175-178 — decrement Blockage counter (ALLOWWIN)
   createTeam?: {                  // C++ Create_Army — recruit existing idle units into team
     teamIdx: number;
     house: House;
+    recruitPriority: number;
     members: { type: string; count: number }[];
     missions: { mission: number; data: number }[];
   };
@@ -2996,6 +3261,7 @@ export function executeTriggerAction(
   playerHouseId?: number,
   map?: GameMap,
   existingEntities?: Entity[],
+  existingStructures?: readonly MapStructure[],
 ): TriggerActionResult {
   const result: TriggerActionResult = { spawned: [] };
 
@@ -3013,6 +3279,7 @@ export function executeTriggerAction(
       result.createTeam = {
         teamIdx: action.team,
         house: houseIdToHouse(createTeam.house),
+        recruitPriority: createTeam.recruitPriority ?? 7,
         members: createTeam.members.map(m => ({ type: m.type, count: m.count })),
         missions: createTeam.missions.map(m => ({ mission: m.mission, data: m.data })),
       };
@@ -3034,6 +3301,11 @@ export function executeTriggerAction(
       // is visible in WASM for SCG01EA's `tanya` team: the INI lists only
       // `8:0`, while TeamTypeClass at runtime has `[3:Origin, 8:0]`.
       const hasUnloadMission = team.missions.some(m => m.mission === 8); // TMISSION_UNLOAD = 8
+      const hasAnyTransportMember = team.members.some(m => {
+        const type = toUnitType(m.type);
+        if (!type) return false;
+        return !!UNIT_STATS[type]?.passengers;
+      });
       const hasTransportMember = team.members.some(m => {
         const type = toUnitType(m.type);
         if (!type) return false;
@@ -3054,6 +3326,7 @@ export function executeTriggerAction(
       const teamCreationOrder: Entity[] = [];
       let transport: Entity | null = null;
       const cargo: Entity[] = [];
+      const aircraftNeedingUnlimboFacing: Entity[] = [];
       // C++ reinf.cpp:428-439: facing derives from the RAW house source edge
       // (NOT the waypoint-inferred edge that Calculated_Cell uses for cell positioning).
       //   SourceType source = HouseClass::As_Pointer(teamtype->House)->Control.Edge;
@@ -3084,12 +3357,14 @@ export function executeTriggerAction(
         ? calculateHouseEdgeSpawnCell(
             teamHouse, houseEdges, mapBounds, wp,
             undefined,
-            isNavalTeam ? map : undefined,
+            map,
             isNavalTeam,
             (cx, cy) => !!existingEntities?.some(e =>
               e.alive && !e.inLimbo && e.cell.cx === cx && e.cell.cy === cy),
+            existingStructures,
           )
         : null;
+      let reinforcementNewCell = groundEdgeCell;
 
       for (const member of team.members) {
         for (let i = 0; i < member.count; i++) {
@@ -3103,12 +3378,31 @@ export function executeTriggerAction(
           let spawnY = world.y;
           const stats = UNIT_STATS[unitType] ?? UNIT_STATS.E1;
 
-          // C++ reinf.cpp:441,471 — ALL team members (aircraft + ground) spawn at the
-          // SAME Calculated_Cell. The cell is computed once and reused for every object.
-          // Aircraft do NOT get a separate spawn location.
+          // C++ reinf.cpp:441,471 — every object starts with the same
+          // Calculated_Cell. If Unlimbo cannot mark that cell because an
+          // already-existing ground vehicle occupies it, reinf.cpp:490-498
+          // retries adjacent cells that are still outside the radar/map bounds.
+          // Previous members of this same reinforcement team are not treated as
+          // blockers here: off-radar Unlimbo leaves IsLocked=false and the
+          // live SCG10EA C++ trace stacks all four opening 2TNKs at (23,98).
           if (groundEdgeCell) {
             // Ground units: spawn at edge cell (C++ reinf.cpp:471 Unlimbo at Calculated_Cell)
-            const edgeWorld = cellToWorld(groundEdgeCell.cx, groundEdgeCell.cy);
+            const unlimbosIntoWorld =
+              !stats.isAircraft &&
+              !stats.isInfantry &&
+              !stats.isVessel &&
+              (!!stats.passengers || !hasAnyTransportMember);
+            if (unlimbosIntoWorld && reinforcementNewCell) {
+              const unlimboCell = findGroundReinforcementUnlimboCell(
+                reinforcementNewCell,
+                existingEntities,
+                mapBounds,
+              );
+              if (!unlimboCell) continue;
+              reinforcementNewCell = unlimboCell;
+            }
+            const edgeCell = reinforcementNewCell ?? groundEdgeCell;
+            const edgeWorld = cellToWorld(edgeCell.cx, edgeCell.cy);
             spawnX = edgeWorld.x;
             spawnY = edgeWorld.y;
           }
@@ -3116,30 +3410,14 @@ export function executeTriggerAction(
           // C++ reinf.cpp:465-468: ground units face outward (source<<1),
           // aircraft get Random_Pick(DIR_N, DIR_MAX) — random facing.
           if (stats.isAircraft) {
-            // C++ reinf.cpp:466-468: desiredfacing = (DirType)Random_Pick(DIR_N, DIR_MAX)
-            // DIR_N=0, DIR_MAX=255 — full 256-step DirType range for precise curved flight paths.
-            const randomFacing256 = ScenarioRandom.nextInRange(0, 255);
-            entity.facing256 = randomFacing256;
-            entity.desiredFacing256 = randomFacing256;
-            entity.bodyFacing256 = randomFacing256;
-            // Derive 8-dir facing for rendering/game-logic compatibility
-            entity.facing = dir256ToFacing8(randomFacing256);
-            entity.desiredFacing = entity.facing;
-            // C++ AircraftClass::Unlimbo sets SecondaryFacing to the unlimbo
-            // direction; fixed-wing Rotation_AI keeps it copied from PrimaryFacing.
-            entity.turretFacing256 = randomFacing256;
-            entity.desiredTurretFacing256 = randomFacing256;
-            entity.turretFacing = entity.facing;
-            entity.desiredTurretFacing = entity.facing;
+            // C++ consumes the random aircraft facing in Unlimbo(), after the
+            // non-transport reinforcement linked list has been reversed.
+            aircraftNeedingUnlimboFacing.push(entity);
           } else {
             entity.facing = spawnFacing as Dir;
             entity.desiredFacing = spawnFacing as Dir;
             entity.bodyFacing256 = (spawnFacing * 32) & 0xff;
-          }
-          entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256 >= 0 ? entity.bodyFacing256 : entity.facing * 32);
-          if (stats.isAircraft) {
-            entity.turretFacing32 = dir256ToFacing32(entity.turretFacing256);
-            entity.prevTurretFacing32 = entity.turretFacing32;
+            entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
           }
           // Assign team mission script to each member
           if (teamMissionScript) {
@@ -3164,25 +3442,25 @@ export function executeTriggerAction(
           if (CIVILIAN_UNIT_TYPES.has(member.type)) {
             entity.invulnTick = 120;
           }
-          // Aircraft-specific: start airborne
+          // Aircraft-specific: start airborne.
           if (stats.isAircraft) {
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
+            entity.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
             entity.animState = AnimState.WALK;
-            // C++ parity: aircraft start with MISSION_MOVE (flying toward LZ), then
-            // team/Coordinate_Move transitions them to UNLOAD when close enough.
-            // On tick 1, Mission_Move handler consumes Random_Pick(0,2) for timer
-            // reset. Setting UNLOAD immediately skips that RNG call.
-            entity.aircraftState = entity.isTransport && hasUnloadMission ? 'unload_search' : 'flying';
-            entity.mission = Mission.MOVE;
-            entity.moveTarget = cellTargetToLepton(wp.cx, wp.cy);
+            // C++ reinf.cpp:479-481 assigns MISSION_GUARD only to non-aircraft.
+            // Aircraft keep MissionClass constructor state (MISSION_NONE) after
+            // AircraftClass::Unlimbo; TeamClass coordinates any later MOVE/ATTACK.
+            entity.aircraftState = 'flying';
+            entity.mission = Mission.NONE;
+            entity.moveTarget = null;
           } else {
             // C++ reinf.cpp:480 — ground units get MISSION_GUARD on spawn.
             // Team script (updateTeamMission) will assign TMISSION_MOVE on the next tick.
             entity.mission = Mission.GUARD;
             if (stats.isInfantry) {
               // C++ reinf.cpp:470-481 wraps Unlimbo in ScenarioInit++, so
-              // InfantryClass::Unlimbo keeps the exact Calculated_Cell coord
-              // even if the center infantry sub-spot is already occupied.
+              // InfantryClass::Unlimbo ignores occupancy while snapping the
+              // Calculated_Cell coord to its nearest infantry subcell.
               entity.scenarioInitUnlimbo = true;
             }
           }
@@ -3223,6 +3501,32 @@ export function executeTriggerAction(
       // was called before the linked list reversal and itself prepends members.
       if (!transport) {
         result.spawned.reverse();
+      }
+      const assignAircraftUnlimboFacing = (entity: Entity): void => {
+        // C++ reinf.cpp:466-468: desiredfacing = (DirType)Random_Pick(DIR_N, DIR_MAX)
+        // DIR_N=0, DIR_MAX=255 — full 256-step DirType range for precise curved flight paths.
+        const randomFacing256 = ScenarioRandom.nextInRange(0, 255);
+        entity.facing256 = randomFacing256;
+        entity.desiredFacing256 = randomFacing256;
+        entity.bodyFacing256 = randomFacing256;
+        // Derive 8-dir facing for rendering/game-logic compatibility.
+        entity.facing = dir256ToFacing8(randomFacing256);
+        entity.desiredFacing = entity.facing;
+        // C++ AircraftClass::Unlimbo sets SecondaryFacing to the unlimbo
+        // direction; fixed-wing Rotation_AI keeps it copied from PrimaryFacing.
+        entity.turretFacing256 = randomFacing256;
+        entity.desiredTurretFacing256 = randomFacing256;
+        entity.turretFacing = entity.facing;
+        entity.desiredTurretFacing = entity.facing;
+        entity.bodyFacing32 = dir256ToFacing32(randomFacing256);
+        entity.turretFacing32 = dir256ToFacing32(randomFacing256);
+        entity.prevTurretFacing32 = entity.turretFacing32;
+      };
+      const aircraftUnlimboOrder = transport
+        ? aircraftNeedingUnlimboFacing
+        : result.spawned.filter(e => e.stats.isAircraft);
+      for (const entity of aircraftUnlimboOrder) {
+        assignAircraftUnlimboFacing(entity);
       }
       // C++ team.cpp:627-652: Team activation gesture RNG (Percent_Chance(50)) is now
       // consumed by the Team instance in team.ts when it activates (forcedActive=true).
@@ -3267,7 +3571,7 @@ export function executeTriggerAction(
       // C++ scenario.cpp:268 — only cascade when previous != value
       if (action.data >= 0 && action.data <= 29 && !globals.has(action.data)) {
         globals.add(action.data);
-        result.globalChanged = action.data; // C++ parity (#38): immediate spring
+        result.globalChanged = action.data;
       }
       break;
 
@@ -3276,7 +3580,7 @@ export function executeTriggerAction(
       // C++ scenario.cpp:268 — only cascade when previous != value
       if (action.data >= 0 && action.data <= 29 && globals.has(action.data)) {
         globals.delete(action.data);
-        result.globalChanged = action.data; // C++ parity (#38): immediate spring
+        result.globalChanged = action.data;
       }
       break;
 

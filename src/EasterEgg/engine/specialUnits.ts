@@ -13,10 +13,11 @@ import {
   WARHEAD_META, modifyDamage, type WarheadType,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
-import { type MapStructure, STRUCTURE_SIZE } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, isMineStructureType } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap } from './map';
 import { ScenarioRandom } from './random';
+import { type LogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 
 // === Constants ===
 export const MAX_MINES_PER_HOUSE = 50;
@@ -32,6 +33,8 @@ export const MAD_TANK_RADIUS = 20;         // aftrmath.ini MTankDistance=20
 export const MAD_TANK_SCREEN_SHAKE = 8;    // logic.cpp:278 Shake_The_Screen(8)
 export const MECHANIC_HEAL_RANGE = 6;
 export const MECHANIC_HEAL_AMOUNT = 100; // C++ GoodWrench weapon Damage=-100 (heals 100 HP per application)
+export const AP_MINE_DAMAGE = 1000;
+export const AV_MINE_DAMAGE = 1200;
 
 // === Context Interface ===
 export interface SpecialUnitsContext {
@@ -41,6 +44,8 @@ export interface SpecialUnitsContext {
   mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }>;
   activeVortices: Array<{ x: number; y: number; angle: number; ticksLeft: number; id: number }>;
   effects: Effect[];
+  logicAnims?: LogicAnim[];
+  logicAnimsAlreadyProcessed?: boolean;
   tick: number;
   playerHouse: House;
   credits: number;
@@ -63,7 +68,20 @@ export interface SpecialUnitsContext {
     options?: { forced?: boolean },
   ): boolean;
   damageStructure(s: MapStructure, damage: number): boolean;
+  handleUnitDeath?(victim: Entity, opts: {
+    screenShake: number;
+    explosionSize: number;
+    debris: boolean;
+    decal: { infantry: number; vehicle: number; opacity: number } | null;
+    explodeLgSound: boolean;
+    attackerIsPlayer: boolean;
+    trackLoss: boolean;
+    friendlyFireLoss?: boolean;
+    attacker?: Entity;
+  }): void;
   addEntity(entity: Entity): void;
+  logicIndexHintForNewObject?(): number;
+  reserveAnimSlot?(): boolean;
 
   // Renderer
   screenShake: number;
@@ -188,7 +206,7 @@ export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void 
     const faction = HOUSE_FACTION[entity.house] ?? 'allied';
     const mineType: 'AP' | 'AV' = faction === 'soviet' ? 'AP' : 'AV';
     // C++ rules.ini: APMineDamage=1000, AVMineDamage=1200
-    const mineDamage = mineType === 'AP' ? 1000 : 1200;
+    const mineDamage = mineType === 'AP' ? AP_MINE_DAMAGE : AV_MINE_DAMAGE;
     ctx.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: mineDamage, type: mineType });
     entity.mineCount++;
     if (entity.ammo > 0) entity.ammo--;
@@ -198,6 +216,92 @@ export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void 
 
 // === 5. Mine Trigger ===
 
+type MineLike = { cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' };
+
+function handleMineDamage(ctx: SpecialUnitsContext, target: Entity, amount: number, warhead: WarheadType): void {
+  const killed = ctx.damageEntity(target, amount, warhead);
+  if (!killed) return;
+
+  // C++ mine detonation calls UnitClass/InfantryClass::Take_Damage with source=NULL.
+  // The death aftermath still runs: class explosion, detached targets, scoring/loss
+  // bookkeeping, and vehicle crew ejection for Crewed=yes non-transports.
+  ctx.handleUnitDeath?.(target, {
+    screenShake: target.stats.isInfantry ? 0 : 4,
+    explosionSize: target.stats.isInfantry ? 8 : 12,
+    debris: !target.stats.isInfantry,
+    decal: null,
+    explodeLgSound: false,
+    attackerIsPlayer: false,
+    trackLoss: ctx.isPlayerControlled(target),
+  });
+}
+
+function detonateMineOnEntity(ctx: SpecialUnitsContext, mine: MineLike, e: Entity): boolean {
+  if (!e.alive || ctx.isAllied(e.house, mine.house) || e.isAirUnit) return false;
+  if (e.cell.cx !== mine.cx || e.cell.cy !== mine.cy) return false;
+
+  const isInfantry = e.stats.isInfantry;
+
+  // C++ infantry.cpp:920: infantry only triggers AP mines (not AV)
+  if (isInfantry && mine.type === 'AV') return false;
+
+  const blastX = mine.cx * CELL_SIZE + CELL_SIZE / 2;
+  const blastY = mine.cy * CELL_SIZE + CELL_SIZE / 2;
+
+  // C++ unit.cpp:1823-1824 / infantry.cpp:923-924 creates ANIM_VEH_HIT2 at
+  // the mine cell before applying damage. This occupies a normal AnimClass
+  // Logic slot and must precede any death explosion/crew survivor objects.
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  spawnLogicAnimForSprite(
+    logicAnims,
+    ctx.effects,
+    'veh-hit2',
+    blastX,
+    blastY,
+    true,
+    ctx.logicAnimsAlreadyProcessed === true,
+    ctx.logicIndexHintForNewObject?.(),
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+  );
+
+  if (mine.type === 'AP' && isInfantry) {
+    // C++ infantry.cpp:928-936: AP mine splash damages all infantry within
+    // 0xC0 leptons, roughly three TS cells in this engine's world units.
+    // Each target still runs ObjectClass::Take_Damage, so WARHEAD_HE verses
+    // are applied before HP changes.
+    const SPLASH_RANGE = 3;
+    for (const other of ctx.entities) {
+      if (!other.alive || !other.stats.isInfantry || other.isAirUnit) continue;
+      const dist = worldDist(other.pos, { x: blastX, y: blastY });
+      if (dist <= SPLASH_RANGE) {
+        const damage = modifyDamage(mine.damage, 'HE', other.stats.armor, 0);
+        handleMineDamage(ctx, other, damage, 'HE');
+      }
+    }
+  } else if (!isInfantry) {
+    // C++ unit.cpp:1815-1837: vehicles trigger both mine types. AP mines use
+    // raw damage 10, then ObjectClass::Take_Damage applies WARHEAD_HE verses.
+    const rawDamage = mine.type === 'AV' ? mine.damage : 10;
+    const damage = modifyDamage(rawDamage, 'HE', e.stats.armor, 0);
+    handleMineDamage(ctx, e, damage, 'HE');
+  }
+
+  ctx.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
+  return true;
+}
+
+function structureMineAsMine(s: MapStructure): MineLike | null {
+  if (!s.alive || !isMineStructureType(s.type)) return null;
+  return {
+    cx: s.cx,
+    cy: s.cy,
+    house: s.house,
+    type: s.type === 'MINV' ? 'AV' : 'AP',
+    damage: s.type === 'MINV' ? AV_MINE_DAMAGE : AP_MINE_DAMAGE,
+  };
+}
+
 /** Mine trigger check — enemy enters mined cell.
  *  C++ parity (infantry.cpp:920-937, unit.cpp:1815-1837):
  *  - AP mines (STRUCT_APMINE) only trigger on infantry (infantry.cpp:920)
@@ -205,51 +309,44 @@ export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void 
  *  - Both use WARHEAD_HE (infantry.cpp:925, unit.cpp:1827)
  *  - Vehicles hitting AP mines take only 10 damage (unit.cpp:1829)
  *  - AP mine splash damages all infantry within 0xC0 leptons (~3 cells) (infantry.cpp:928-936)
+ *  - Scenario MINP/MINV are BuildingClass mines and use the same trigger
+ *    rules as minelayer-created mines.
  */
 export function tickMines(ctx: SpecialUnitsContext): void {
   for (let i = ctx.mines.length - 1; i >= 0; i--) {
     const mine = ctx.mines[i];
     for (const e of ctx.entities) {
-      if (!e.alive || ctx.isAllied(e.house, mine.house) || e.isAirUnit) continue;
-      const ec = e.cell;
-      if (ec.cx === mine.cx && ec.cy === mine.cy) {
-        const isInfantry = e.stats.isInfantry;
-
-        // C++ infantry.cpp:920: infantry only triggers AP mines (not AV)
-        if (isInfantry && mine.type === 'AV') continue;
-
-        const blastX = mine.cx * CELL_SIZE + CELL_SIZE / 2;
-        const blastY = mine.cy * CELL_SIZE + CELL_SIZE / 2;
-
-        if (mine.type === 'AP' && isInfantry) {
-          // C++ infantry.cpp:928-936: AP mine splash damages all infantry within 0xC0 leptons
-          // 0xC0 = 192 leptons. In our world scale: ~3 cells
-          const SPLASH_RANGE = 3;
-          for (const other of ctx.entities) {
-            if (!other.alive || !other.stats.isInfantry || other.isAirUnit) continue;
-            const dist = worldDist(other.pos, { x: blastX, y: blastY });
-            if (dist <= SPLASH_RANGE) {
-              ctx.damageEntity(other, mine.damage, 'HE');
-            }
-          }
-        } else if (!isInfantry) {
-          // C++ unit.cpp:1815-1837: vehicles trigger both mine types
-          if (mine.type === 'AV') {
-            // C++ unit.cpp:1825-1827: AV mine deals AVMineDamage (1200) with WARHEAD_HE
-            ctx.damageEntity(e, mine.damage, 'HE');
-          } else {
-            // C++ unit.cpp:1828-1830: AP mine deals only 10 damage to vehicles with WARHEAD_HE
-            ctx.damageEntity(e, 10, 'HE');
-          }
-        }
-
-        ctx.effects.push({ type: 'explosion', x: blastX, y: blastY, frame: 0, maxFrames: 12, size: 10 });
-        ctx.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
+      if (detonateMineOnEntity(ctx, mine, e)) {
         ctx.mines.splice(i, 1);
         break;
       }
     }
   }
+}
+
+/** C++ UnitClass/InfantryClass::Per_Cell_Process mine trigger.
+ *  Scenario MINP/MINV are BuildingClass mines, so they detonate when the
+ *  moving object reaches PCP_END, not from a global per-tick occupancy scan. */
+export function triggerMineAtCell(ctx: SpecialUnitsContext, e: Entity): boolean {
+  for (let i = ctx.mines.length - 1; i >= 0; i--) {
+    const mine = ctx.mines[i];
+    if (detonateMineOnEntity(ctx, mine, e)) {
+      ctx.mines.splice(i, 1);
+      return true;
+    }
+  }
+
+  for (const s of ctx.structures) {
+    const mine = structureMineAsMine(s);
+    if (!mine) continue;
+    if (detonateMineOnEntity(ctx, mine, e)) {
+      s.alive = false;
+      s.hp = 0;
+      s.rubble = false;
+      return true;
+    }
+  }
+  return false;
 }
 
 // === 6. Chrono Tank Cooldown ===

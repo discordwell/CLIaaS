@@ -10,16 +10,19 @@ import {
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
   leptonDist, pixelToLepton, directionTo, directionToLeptons, directionToLeptons256, worldToCell, DIR_DX, DIR_DY,
+  COS_TABLE_256, SIN_TABLE_256,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
-  PRODUCTION_ITEMS, STRUCTURE_POINTS,
-  getWarheadMultiplier, coordTargetRoundTripLepton, cellTargetToLepton,
+  PRODUCTION_ITEMS, STRUCTURE_POINTS, WARHEAD_META,
+  getWarheadMultiplier, coordTargetRoundTripLepton, cellTargetToLepton, cellToLepton,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8, dir256ToFacing32 } from './entity';
 import {
   type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS, STRUCTURE_SIZE,
+  STRUCTURE_ARMOR,
   getStructureOccupyCells, structureCenterLeptons as cppStructureCenterLeptons,
   structureTargetLeptons as cppStructureTargetLeptons,
+  isLegalStructureTarget,
 } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap, MoveResult, Terrain } from './map';
@@ -40,6 +43,9 @@ export interface MissionAIContext {
   structures: MapStructure[];
   effects: Effect[];
   logicAnims: LogicAnim[];
+  logicAnimsAlreadyProcessed?: boolean;
+  logicIndexHintForNewObject?: () => number;
+  reserveAnimSlot?: () => boolean;
   map: GameMap;
   tick: number;
   playerHouse: House;
@@ -53,6 +59,10 @@ export interface MissionAIContext {
   isAllied(a: House, b: House): boolean;
   entitiesAllied(a: Entity, b: Entity): boolean;
   isPlayerControlled(e: Entity): boolean;
+  /** C++ HouseClass::IsHuman gate. Defaults to strict playerHouse when absent. */
+  isHumanControlledHouse?(house: House): boolean;
+  /** C++ Rule.Diff[House->Difficulty].IsWallDestroyer gate for Evaluate_Just_Cell. */
+  isWallDestroyerDifficulty?(house: House): boolean;
 
   // Movement / speed
   movementSpeed(entity: Entity): number;
@@ -65,8 +75,8 @@ export interface MissionAIContext {
   /** C++ Movement_AI:3810 — validate next path cell, re-path if blocked */
   infantryValidatePath(entity: Entity): void;
   /** C++ FootClass::Approach_Target (foot.cpp:926) — find a passable cell within
-   *  weapon range of entity.target and assign it as moveTarget. Called when a
-   *  mission (HUNT, AREA_GUARD) has a legal TarCom but the target is out of range. */
+   *  weapon range of entity.target or entity.targetStructure and assign it as
+   *  moveTarget. Called when a mission has a legal TarCom but the target is out of range. */
   approachTarget(entity: Entity): void;
 
   // Sound
@@ -90,6 +100,8 @@ export interface MissionAIContext {
     attacker: Entity, target: Entity | null, weapon: WeaponStats,
     damage: number, impactX: number, impactY: number, directHit: boolean,
     launchCoord?: { lx: number; ly: number },
+    facing256?: number,
+    homingTargetCoord?: { lx: number; ly: number },
   ): void;
   /** C++ TechnoClass::Fire_At (techno.cpp:3263-3265) — if a non-player
    *  shooter fires while hidden from PlayerPtr, it reveals a 2-cell radius
@@ -99,6 +111,8 @@ export interface MissionAIContext {
     center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
     primaryTargetId: number, attackerHouse: House, attacker?: Entity,
   ): void;
+  /** C++ CellClass::Incoming(threat, forced=true) for slow infantry projectiles. */
+  incomingThreatScatterCell?(cx: number, cy: number, threat: Entity): void;
 
   // Warhead helpers
   getFirepowerBias(house: House): number;
@@ -116,6 +130,7 @@ export interface MissionAIContext {
   idleMission(entity: Entity): Mission;
   retreatFromTarget(entity: Entity, targetPos: WorldPos): void;
   threatScore(scanner: Entity, target: Entity, dist: number): number;
+  leaveMap?(entity: Entity): void;
 
   // Special unit delegation — these call back into Game class methods
   updateDemoTruck(entity: Entity): void;
@@ -157,11 +172,16 @@ export interface GreatestThreatRangeContext {
   map: GameMap;
   tick: number;
   playerHouse: House;
+  isAllied?(a: House, b: House): boolean;
   entitiesAllied(a: Entity, b: Entity): boolean;
   isPlayerControlled(e: Entity): boolean;
   isDiscoveredByPlayer?(entity: Entity): boolean;
+  isDiscoveredStructureByPlayer?(structure: MapStructure): boolean;
   isRevealedToHouse(cx: number, cy: number, houseIdx: number): boolean;
   getWarheadMult?(warhead: WarheadType, armor: ArmorType): number;
+  getWarheadMeta?(warhead: WarheadType): WarheadMeta;
+  isHumanControlledHouse?(house: House): boolean;
+  isWallDestroyerDifficulty?(house: House): boolean;
 }
 
 function weaponSelectionMult(
@@ -180,22 +200,160 @@ function selectedWeaponForTarget(
   return entity.selectWeapon(target, (warhead, armor) => weaponSelectionMult(ctx, warhead, armor));
 }
 
-function fireCoordForWeaponAtLatchedFacing(entity: Entity, weapon: WeaponStats, facing256: number): { lx: number; ly: number } {
-  if (!entity.stats.isInfantry || facing256 < 0) return entity.fireCoordForWeapon(weapon);
+function canWeaponTargetStructure(weapon: WeaponStats): boolean {
+  // BuildingClass objects have Height == 0. C++ TechnoClass::Can_Fire rejects
+  // AG=no projectiles such as RedEye/AAMissile before checking range or rearm.
+  return weapon.isAntiGround !== false;
+}
 
+function selectedWeaponForStructure(
+  ctx: GreatestThreatRangeContext,
+  entity: Entity,
+  structure: MapStructure,
+): WeaponStats | null {
+  const w1 = entity.weapon;
+  const w2 = entity.weapon2;
+  if (!w2) return w1;
+  if (!w1) return w2;
+
+  const armor = structure.armor ?? STRUCTURE_ARMOR[structure.type] ?? 'wood';
+  const target = structureTargetLeptons(structure);
+  const scoreWeapon = (weapon: WeaponStats): number => {
+    if (!canWeaponTargetStructure(weapon)) return 0;
+    let score = weaponSelectionMult(ctx, weapon.warhead, armor) * 1000;
+    const fireCoord = entity.fireCoordForWeapon(weapon);
+    const range = weapon.range * LEPTON_SIZE + structureRangeBonusLeptons(structure);
+    if (leptonDist(fireCoord.lx, fireCoord.ly, target.lx, target.ly) <= range) score *= 2;
+    return score;
+  };
+
+  const score1 = scoreWeapon(w1);
+  const score2 = scoreWeapon(w2);
+  return score2 > score1 ? w2 : w1;
+}
+
+function fireCoordForWeaponAtLatchedFacing(
+  entity: Entity,
+  weapon: WeaponStats,
+  facing256: number,
+  secondShot = entity.isSecondShot,
+): { lx: number; ly: number } {
   const savedBodyFacing256 = entity.bodyFacing256;
   const savedBodyFacing32 = entity.bodyFacing32;
   const savedFacing = entity.facing;
+  const savedSecondShot = entity.isSecondShot;
   try {
-    entity.bodyFacing256 = facing256 & 0xFF;
-    entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
-    entity.facing = dir256ToFacing8(entity.bodyFacing256);
+    entity.isSecondShot = secondShot;
+    if (entity.stats.isInfantry && facing256 >= 0) {
+      entity.bodyFacing256 = facing256 & 0xFF;
+      entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
+      entity.facing = dir256ToFacing8(entity.bodyFacing256);
+    }
     return entity.fireCoordForWeapon(weapon);
   } finally {
     entity.bodyFacing256 = savedBodyFacing256;
     entity.bodyFacing32 = savedBodyFacing32;
     entity.facing = savedFacing;
+    entity.isSecondShot = savedSecondShot;
   }
+}
+
+function currentBodyFacing256(entity: Entity): number {
+  return entity.bodyFacing256 >= 0 ? entity.bodyFacing256 & 0xFF : (entity.facing * 32) & 0xFF;
+}
+
+function currentTurretFacing256(entity: Entity): number {
+  return entity.turretFacing256 >= 0
+    && dir256ToFacing32(entity.turretFacing256) === entity.turretFacing32
+    && dir256ToFacing8(entity.turretFacing256) === entity.turretFacing
+          ? entity.turretFacing256 & 0xFF
+          : (entity.turretFacing32 * 8) & 0xFF;
+}
+
+function cppFireDirection256(entity: Entity, fireAtFacing256 = -1): number {
+  if (fireAtFacing256 >= 0) return fireAtFacing256 & 0xFF;
+  if (entity.hasTurret || entity.isAirUnit) return currentTurretFacing256(entity);
+  return currentBodyFacing256(entity);
+}
+
+function projectileInitialFacing256(
+  weapon: WeaponStats,
+  fireDirection256: number,
+  scatterFacing256?: number,
+): number | undefined {
+  return (weapon.projectileROT ?? 0) !== 0 || weapon.isDropping
+    ? fireDirection256 & 0xFF
+    : scatterFacing256;
+}
+
+function absFacingDiff256(desired256: number, current256: number): number {
+  let diff = (desired256 - current256) & 0xFF;
+  if (diff > 127) diff -= 256;
+  return Math.abs(diff);
+}
+
+function projectileFacingDiff(diff: number, weapon: WeaponStats): number {
+  return (weapon.projectileROT ?? 0) !== 0 ? diff >> 2 : diff;
+}
+
+/** C++ UnitClass/VesselClass::Can_Fire facing gates for non-object TARGETs.
+ *  Structure and cell targets still pass through the same class Can_Fire path
+ *  as object targets, so turret/body facing must be checked before Fire_At. */
+function canFireAtCoordFacingGate(entity: Entity, weapon: WeaponStats, targetLX: number, targetLY: number): boolean {
+  const targetDir256 = directionToLeptons256(entity.leptonX, entity.leptonY, targetLX, targetLY);
+  const projROT = weapon.projectileROT ?? 0;
+
+  if (entity.hasTurret) {
+    const preRotTurretFacing256 = currentTurretFacing256(entity);
+    const preRotTurretWasRotating = entity.turretIsRotating;
+
+    if (entity.isNavalUnit || !preRotTurretWasRotating) {
+      entity.desiredTurretFacing256 = targetDir256;
+      entity.desiredTurretFacing = dir256ToFacing8(targetDir256);
+    }
+    const turretReadyAfterRotation = entity.tickTurretRotation();
+
+    // UnitClass::AI runs Combat_AI before Rotation_AI; VesselClass::AI runs
+    // Rotation_AI before Combat_AI. Use the same class-order split as entity
+    // target firing.
+    const fireGateTurretFacing256 = entity.isNavalUnit
+      ? entity.turretFacing256 & 0xFF
+      : preRotTurretFacing256;
+    const fireGateTurretWasRotating = entity.isNavalUnit
+      ? !turretReadyAfterRotation
+      : preRotTurretWasRotating;
+
+    if (fireGateTurretWasRotating && projROT === 0) return false;
+
+    const diff = projectileFacingDiff(absFacingDiff256(targetDir256, fireGateTurretFacing256), weapon);
+    return entity.isNavalUnit ? diff <= 8 : diff < 8;
+  }
+
+  if (entity.isNavalUnit) {
+    if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xFF;
+    const fireGateBodyFacing256 = entity.bodyFacing256 & 0xFF;
+    const previousDesired256 = entity.desiredFacing256 >= 0
+      ? entity.desiredFacing256 & 0xFF
+      : fireGateBodyFacing256;
+    const bodyWasRotating = fireGateBodyFacing256 !== previousDesired256;
+    const diff = projectileFacingDiff(absFacingDiff256(targetDir256, fireGateBodyFacing256), weapon);
+    if (diff > 8) {
+      if (!bodyWasRotating) {
+        entity.desiredFacing256 = targetDir256;
+        entity.desiredFacing = dir256ToFacing8(targetDir256);
+      }
+      return false;
+    }
+    return true;
+  }
+
+  if (entity.stats.isInfantry) return true;
+
+  const fireGateBodyFacing256 = currentBodyFacing256(entity);
+  entity.desiredFacing256 = targetDir256;
+  entity.desiredFacing = dir256ToFacing8(targetDir256);
+  const diff = projectileFacingDiff(absFacingDiff256(targetDir256, fireGateBodyFacing256), weapon);
+  return diff < 8;
 }
 
 /** C++ InfantryClass::Random_Animate cases 6-10:
@@ -210,10 +368,10 @@ function setInfantryPrimaryFacingFromFacingType(entity: Entity, facing: number):
 }
 
 function canScatterInfantryTo(ctx: MissionAIContext, entity: Entity, cx: number, cy: number, facing: number): boolean {
-  const result: MoveResult | boolean = ctx.infantryCanEnterCell
+  const result = ctx.infantryCanEnterCell
     ? ctx.infantryCanEnterCell(entity, cx, cy, facing)
     : ctx.map.canEnterCell(cx, cy, entity.isNavalUnit, undefined, true, entity.id);
-  return result === MoveResult.OK || result === true;
+  return result === MoveResult.OK;
 }
 
 function scatterFraidyCatNoThreat(ctx: MissionAIContext, entity: Entity): void {
@@ -283,9 +441,7 @@ function runInfantryRandomAnimate(ctx: MissionAIContext, entity: Entity): boolea
       ScenarioRandom.nextInRange(0, 1);
       entity.doing = 'idle_anim';
     } else {
-      entity.nonInterruptAnimTicks = entity.infantryGestureDurationTicks();
-      entity.nonInterruptAnimSetTick = ctx.tick;
-      entity.doing = 'gesture';
+      entity.startGestureDoing(ctx.tick);
     }
   } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
     entity.doing = 'idle_anim';
@@ -384,18 +540,29 @@ function isAutoTargetableStructure(ctx: MissionAIContext, entity: Entity, s: Map
   if (!isStructureInCppThreatLayer(s)) return false;
   if (s.house === House.Neutral) return false;
   if (ctx.isAllied(entity.house, s.house)) return false;
+  if (!isLegalStructureTarget(s.type)) return false;
   // These scenario records represent overlay objects, not BuildingClass
   // Technos in C++, so Greatest_Threat never sees them as RTTI_BUILDING.
   if (OVERLAY_STRUCTURE_TYPES.has(s.type)) return false;
   return true;
 }
 
-function entityInRangeOfStructure(entity: Entity, s: MapStructure): boolean {
-  const range = (entity.weapon?.range ?? 2) * LEPTON_SIZE +
-    (entity.weapon ? structureRangeBonusLeptons(s) : 0);
+function entityInRangeOfStructure(ctx: GreatestThreatRangeContext, entity: Entity, s: MapStructure): boolean {
+  const weapon = selectedWeaponForStructure(ctx, entity, s);
+  if (!weapon || !canWeaponTargetStructure(weapon)) return false;
+  const range = weapon.range * LEPTON_SIZE + structureRangeBonusLeptons(s);
   const target = structureTargetLeptons(s);
-  const fireCoord = entity.weapon ? entity.fireCoordForWeapon(entity.weapon) : { lx: entity.leptonX, ly: entity.leptonY };
+  const fireCoord = entity.fireCoordForWeapon(weapon);
   return leptonDist(fireCoord.lx, fireCoord.ly, target.lx, target.ly) <= range;
+}
+
+function entityInGuardScanRangeOfStructure(ctx: GreatestThreatRangeContext, entity: Entity, s: MapStructure): boolean {
+  const weapon = selectedWeaponForStructure(ctx, entity, s);
+  if (!weapon || !canWeaponTargetStructure(weapon)) return false;
+  const range = weapon.range * LEPTON_SIZE + structureRangeBonusLeptons(s);
+  const center = structureCenterLeptons(s);
+  const fireCoord = entity.fireCoordForWeapon(weapon);
+  return leptonDist(fireCoord.lx, fireCoord.ly, center.lx, center.ly) <= range;
 }
 
 function structureMatchesReachableZone(reachableZone: Uint8Array | null, s: MapStructure, center: { lx: number; ly: number }): boolean {
@@ -404,6 +571,10 @@ function structureMatchesReachableZone(reachableZone: Uint8Array | null, s: MapS
   const centerCY = Math.floor(center.ly / LEPTON_SIZE);
   return centerCX >= 0 && centerCX < MAP_CELLS && centerCY >= 0 && centerCY < MAP_CELLS &&
     !!reachableZone[centerCY * MAP_CELLS + centerCX];
+}
+
+function isAssignableStructureTarget(target: MapStructure | null | undefined): target is MapStructure {
+  return !!target && target.alive && target.hp > 0 && isLegalStructureTarget(target.type);
 }
 
 function isAssignableObjectTarget(target: Entity | null | undefined): target is Entity {
@@ -420,14 +591,20 @@ function assignTargetForTechno(entity: Entity, target: Entity | null): void {
   // not clear NavCom. In TS, non-driving infantry need an empty path so the
   // InfantryClass::Movement_AI Basic_Path branch recomputes from moveTarget.
   //
-  // Do not touch active drivers here: C++ keeps the current Head_To_Coord hop
-  // alive even when Path[0] is cleared, and TS cannot safely invalidate the
-  // cached path mid-hop without stalling the in-flight driver representation.
+  // Do not remove the active hop here: C++ keeps Head_To_Coord alive even when
+  // Path[0] is cleared. Mark only the first cached facing as non-copyable; it is
+  // consumed when the hop completes, just like C++ memmove() shifts Path[1] into
+  // Path[0].
   if (entity.stats.isInfantry && !entity.isDriving) {
     entity.path = [];
     entity.pathIndex = 0;
+    entity.drivePathHeadCleared = false;
+  } else if (entity.stats.isInfantry && entity.isDriving) {
+    entity.drivePathHeadCleared = true;
   }
   entity.target = target;
+  entity.targetStructure = null;
+  entity.forceFirePos = null;
 }
 
 // ── Infantry FireLaunch (pre-fire animation stage gate) ────────────────────
@@ -480,6 +657,21 @@ export function infantryProneLaunch(type: string): number {
   }
 }
 
+const RULE_INCOMING_PROJECTILE_SPEED = 10;
+
+function maybeWarnIncomingSlowInfantryProjectile(
+  ctx: MissionAIContext,
+  entity: Entity,
+  targetCell: { cx: number; cy: number },
+): void {
+  if (!entity.stats.isInfantry) return;
+  // C++ InfantryClass::Firing_AI checks Class->PrimaryWeapon->MaxSpeed, not the
+  // selected secondary weapon. `projSpeed` is the rules.ini Speed/MaxSpeed value.
+  const primarySpeed = entity.weapon?.projSpeed;
+  if (primarySpeed === undefined || primarySpeed >= RULE_INCOMING_PROJECTILE_SPEED) return;
+  ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
+}
+
 // ── Exported mission functions ──────────────────────────────────────────────
 
 /**
@@ -517,9 +709,24 @@ export function runFiringAI(ctx: MissionAIContext, entity: Entity): void {
   if (!entity.weapon) return;
   if (entity.suppressFiringAITick === ctx.tick) return;
 
+  if (entity.target?.alive && entity.targetStructure) {
+    entity.targetStructure = null;
+  }
+
   if (entity.targetStructure?.alive) {
     if (entity.attackCooldown > 0) return;
-    if (!entityInRangeOfStructure(entity, entity.targetStructure as MapStructure)) return;
+    if (!entityInRangeOfStructure(ctx, entity, entity.targetStructure as MapStructure)) return;
+    updateAttack(ctx, entity);
+    return;
+  }
+
+  if (entity.forceFirePos && !entity.targetStructure?.alive && !entity.target?.alive) {
+    entity.target = null;
+    entity.targetStructure = null;
+    if (entity.attackCooldown > 0) return;
+    const targetLX = pixelToLepton(entity.forceFirePos.x);
+    const targetLY = pixelToLepton(entity.forceFirePos.y);
+    if (!entity.weapon || !entity.inRangeWithCoord(targetLX, targetLY, entity.weapon)) return;
     updateAttack(ctx, entity);
     return;
   }
@@ -562,6 +769,83 @@ function clearIllegalNegativeDamageTarget(entity: Entity): boolean {
   return false;
 }
 
+function cxxProjectileImpactAfterScatter(
+  weapon: WeaponStats,
+  fireCoord: { lx: number; ly: number },
+  targetCoord: { lx: number; ly: number },
+  targetPixels: WorldPos,
+  doScatter: boolean,
+  fireDirection256?: number,
+): { impactX: number; impactY: number; directHit: boolean; facing256?: number } {
+  let impactX = targetPixels.x;
+  let impactY = targetPixels.y;
+  let directHit = true;
+  let facing256: number | undefined;
+
+  if (!doScatter) {
+    return { impactX, impactY, directHit };
+  }
+
+  // C++ bullet.cpp:710-730. Note that Class->IsInaccurate is effectively
+  // never loaded because the INI key is misspelled as "Inaccuate" in bbdata.cpp;
+  // callers decide `doScatter` from the remaining C++ conditions.
+  const distLeptons = leptonDist(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
+  let scatterMax = Math.max(0, (distLeptons / 16) - 64);
+  // C++ bullet.cpp keeps the `Class->ROT != 0` CEP branch commented out, so
+  // only arcing projectiles use Rule.HomingScatter. Non-arcing homing projectiles
+  // still use the straight-line overshoot path capped by Rule.BallisticScatter.
+  const scatterCap = weapon.isArcing ? 512 : 256;
+  scatterMax = Math.min(scatterMax, scatterCap);
+  const scatterLeptonsInt = Math.max(0, Math.floor(scatterMax));
+
+  if (weapon.isArcing) {
+    // Arcing inaccurate scatter RNG order:
+    //   1. firing direction jitter (possibly multiple seeds due rejection)
+    //   2. scatter distance
+    //   3. Coord_Scatter direction (tagged separately in C++)
+    const baseDir256 = directionToLeptons256(
+      fireCoord.lx, fireCoord.ly,
+      targetCoord.lx, targetCoord.ly,
+    );
+    const jitter = ScenarioRandom.nextInRange(0, 10);
+    facing256 = (baseDir256 + jitter - 5) & 0xff;
+    const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt);
+    const savedTag = ScenarioRandom._sourceTag;
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 50002;
+    const scatterDir256 = ScenarioRandom.nextInRange(0, 255);
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+    const scattered = {
+      lx: targetCoord.lx + ((COS_TABLE_256[scatterDir256] * scatterDistLeptons) >> 7),
+      ly: targetCoord.ly - ((SIN_TABLE_256[scatterDir256] * scatterDistLeptons) >> 7),
+    };
+    impactX = scattered.lx * CELL_SIZE / LEPTON_SIZE;
+    impactY = scattered.ly * CELL_SIZE / LEPTON_SIZE;
+  } else {
+    const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt);
+    // C++ BulletClass::Unlimbo keeps Fire_At's Fire_Direction() for homing
+    // and dropping bullets. The target-vector facing is only substituted for
+    // ordinary non-homing projectiles.
+    const dir256 = ((weapon.projectileROT ?? 0) !== 0 || weapon.isDropping) && fireDirection256 !== undefined
+      ? fireDirection256 & 0xFF
+      : directionToLeptons256(
+          fireCoord.lx, fireCoord.ly,
+          targetCoord.lx, targetCoord.ly,
+        );
+    facing256 = dir256;
+    const scattered = {
+      lx: targetCoord.lx + ((COS_TABLE_256[dir256] * scatterDistLeptons) >> 7),
+      ly: targetCoord.ly - ((SIN_TABLE_256[dir256] * scatterDistLeptons) >> 7),
+    };
+    impactX = scattered.lx * CELL_SIZE / LEPTON_SIZE;
+    impactY = scattered.ly * CELL_SIZE / LEPTON_SIZE;
+  }
+
+  const dx = impactX - targetPixels.x;
+  const dy = impactY - targetPixels.y;
+  directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
+  return { impactX, impactY, directHit, facing256 };
+}
+
 /** Attack mission — main combat state machine for ground/naval units.
  *  Handles target acquisition, weapon selection, firing, projectiles, effects. */
 export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
@@ -569,6 +853,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
   if (entity.type === UnitType.V_DTRK) {
     ctx.updateDemoTruck(entity);
     return;
+  }
+
+  if (entity.target?.alive && entity.targetStructure) {
+    entity.targetStructure = null;
   }
 
   // Handle structure targets
@@ -692,6 +980,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // ammo, cloak, moving/NavCom, and facing. Target selection visibility is
     // handled earlier by Evaluate_Object/Target_Something_Nearby.
 
+    // C++ dog maul is a non-interruptible infantry Doing action. Area Guard may
+    // still assign TarCom while the maul animation is running, but Firing_AI
+    // cannot start another DogJaw shot until Doing_AI has cleared DO_DOG_MAUL.
+    // Movement may resume on the terminal-frame tick after Firing_AI, so this
+    // gate is intentionally stricter than isDogMaulMovementBlocking().
+    if (entity.doing === 'dog_maul') return;
+
     // C++ UnitClass::Can_Fire / VesselClass::Can_Fire moving gates:
     //   unit.cpp:4150-4153   IsNoFireWhileMoving && Target_Legal(NavCom)
     //   vessel.cpp:1109-1112 !IsTurretEquipped && Target_Legal(NavCom)
@@ -728,19 +1023,19 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         && dir256ToFacing8(entity.turretFacing256) === entity.turretFacing
         ? entity.turretFacing256 & 0xFF
         : (entity.turretFacing32 * 8) & 0xFF;
-      const preRotDesiredTurretFacing256 = entity.desiredTurretFacing256 >= 0
-        ? entity.desiredTurretFacing256 & 0xFF
-        : (entity.desiredTurretFacing * 32) & 0xFF;
       // C++ UnitClass::AI runs Firing_AI before Rotation_AI (unit.cpp:425,
       // :437). Can_Fire's FIRE_ROTATING gate therefore checks the IsRotating
       // state left by the previous tick's Rotation_AI, not whether rotation
       // happens to finish later in this tick. Preserve that pre-rotation flag.
-      const preRotTurretWasRotating = preRotTurretFacing256 !== preRotDesiredTurretFacing256;
-      entity.desiredTurretFacing256 = directionToLeptons256(
+      const preRotTurretWasRotating = entity.turretIsRotating;
+      const targetDir256 = directionToLeptons256(
         entity.leptonX, entity.leptonY,
         entity.target.leptonX, entity.target.leptonY,
       );
-      entity.desiredTurretFacing = dir256ToFacing8(entity.desiredTurretFacing256);
+      if (entity.isNavalUnit || !preRotTurretWasRotating) {
+        entity.desiredTurretFacing256 = targetDir256;
+        entity.desiredTurretFacing = dir256ToFacing8(targetDir256);
+      }
       const turretReadyAfterRotation = entity.tickTurretRotation();
 
       if (entity.isNavalUnit) {
@@ -855,14 +1150,6 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       entity.wasMoving = false; // consume the transition — only apply once
     }
 
-    // C1: Burst fire continuation (C++ weapon.cpp:78 Weapon.Burst)
-    // Between burst shots, count down burstDelay instead of using full ROF cooldown
-    if (entity.burstCount > 0 && entity.burstDelay > 0) {
-      entity.burstDelay--;
-      if (entity.burstDelay > 0) return; // waiting between burst shots
-      // burstDelay reached 0 — fire next burst shot (fall through to fire logic)
-    }
-
     // Dual-weapon selection (C++ TechnoClass::What_Weapon_Should_I_Use):
     // Select the best weapon by warhead score and range bonus. Rearm/range do
     // not change selection; Can_Fire gates actual shooting below.
@@ -870,8 +1157,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       entity.target, (wh, ar) => ctx.getWarheadMult(wh, ar),
     );
 
-    // If a burst is in progress, continue with the primary weapon (burst belongs to primary)
-    const activeWeapon = entity.burstCount > 0 ? entity.weapon : selectedWeapon;
+    const activeWeapon = selectedWeapon;
     const isSecondary = activeWeapon === entity.weapon2;
 
     if (!activeWeapon) return;
@@ -1064,33 +1350,27 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         entity.firePrepUsesDoingStage = false;
       }
 
-      // C1: Set burst count for multi-shot weapons (e.g. MammothTusk burst: 2)
-      const burst = activeWeapon.burst ?? 1;
-      if (entity.burstCount > 0) {
-        // Continuing burst — decrement
-        entity.burstCount--;
-        entity.burstDelay = 3; // 3 ticks between burst shots (C++ standard)
-      } else {
-        // C++ techno.cpp:2918-2930 / 3180-3183:
-        // TechnoClass has one shared Arm timer. IsSecondShot only applies to
-        // TechnoTypeClass::Is_Two_Shooter() (Primary==Secondary or primary Burst>1),
-        // not to ordinary primary/secondary pairs such as PT 2Inch+DepthCharge.
-        const rofBias = ctx.getROFBias(entity.house);
-        let rearmTime = Math.max(1, Math.round(activeWeapon.rof * rofBias));
-        if (entity.isTwoShooter()) {
-          if (!entity.isSecondShot) {
-            rearmTime = 3; // first shot: quick 3-tick rearm
-          }
-          entity.isSecondShot = !entity.isSecondShot;
-        } else {
-          entity.isSecondShot = true;
+      const fireAtSecondShot = entity.isSecondShot;
+
+      // C++ techno.cpp:2857-2870 / 3119-3122:
+      // TechnoClass has one shared Arm timer. Weapon.Burst is not a queued
+      // TS-style burst counter; it only makes TechnoTypeClass::Is_Two_Shooter()
+      // true, so land/vessel units alternate Arm=3 then Arm=ROF.
+      const rofBias = ctx.getROFBias(entity.house);
+      let rearmTime = Math.max(1, Math.round(activeWeapon.rof * rofBias));
+      if (entity.isTwoShooter()) {
+        if (!entity.isSecondShot) {
+          rearmTime = 3; // first shot: quick 3-tick rearm
         }
-        entity.attackCooldown = rearmTime;
-        // Legacy mirror for diagnostics/UI/tests. C++ has no Arm2.
-        if (entity.weapon2) entity.attackCooldown2 = rearmTime;
-        entity.burstCount = burst - 1; // remaining shots after this one
-        if (entity.burstCount > 0) entity.burstDelay = 3;
+        entity.isSecondShot = !entity.isSecondShot;
+      } else {
+        entity.isSecondShot = true;
       }
+      entity.attackCooldown = rearmTime;
+      // Legacy mirror for diagnostics/UI/tests. C++ has no Arm2.
+      if (entity.weapon2) entity.attackCooldown2 = rearmTime;
+      entity.burstCount = 0;
+      entity.burstDelay = 0;
       // M6: C++ techno.cpp:3114-3117 — recoil only for turreted units
       if (entity.hasTurret) entity.isInRecoilState = true;
 
@@ -1111,11 +1391,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       let impactX = targetPixels.x;
       let impactY = targetPixels.y;
       let directHit = true;
+      const targetCell = entity.target.cell;
       // C++ techno.cpp:3124 + bullet.cpp:700-730 — inaccurate bullet
       // scatter is computed from Fire_Coord(which), the same coordinate used
       // to Unlimbo the bullet. Center_Coord lags/shortens flame projectile
       // flights by several ticks in close-range infantry fire.
-      const fireCoord = fireCoordForWeaponAtLatchedFacing(entity, activeWeapon, fireAtFacing256);
+      const fireCoord = fireCoordForWeaponAtLatchedFacing(entity, activeWeapon, fireAtFacing256, fireAtSecondShot);
+      const fireDirection256 = cppFireDirection256(entity, fireAtFacing256);
       if (fireAtFacing256 >= 0) entity.firePrepFacing256 = -1;
       // C++ techno.cpp:3106-3108 — bullet.IsInaccurate=true when firer Is_Foot() && IsDriving.
       // C++ IsDriving is set by Start_Driver for all FootClass units; TS only sets it for
@@ -1123,49 +1405,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // flip the flag. To catch both cases, combine: isDriving OR visible movement.
       const isMovingPlatform = !!entity.isDriving ||
         entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
-      const isAPvsSoft = (activeWeapon.warhead === 'AP' || activeWeapon.isFueled) && entity.target.stats.isInfantry;
+      const isAPvsSoft = (activeWeapon.warhead === 'AP' || !!activeWeapon.isFueled) && entity.target.stats.isInfantry;
       const doScatter = isMovingPlatform || isAPvsSoft;
-      if (doScatter) {
-        // SC3: Exact C++ scatter formula (bullet.cpp:710-730)
-        // distance in leptons (1 cell = 256 leptons)
-        const distLeptons = leptonDist(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
-        // C++ formula: scatterMax = max(0, (distance / 16) - 64)
-        let scatterMax = Math.max(0, (distLeptons / 16) - 64);
-        // Cap at HomingScatter(512) for homing, BallisticScatter(256) for ballistic
-        const isHoming = (activeWeapon.projectileROT ?? 0) > 0;
-        const scatterCap = isHoming ? 512 : 256;
-        scatterMax = Math.min(scatterMax, scatterCap);
-        const scatterLeptonsInt = Math.max(0, Math.floor(scatterMax));
-        if (activeWeapon.isArcing) {
-          // C++ bullet.cpp:709-723 arcing inaccurate scatter, in exact RNG order:
-          //   [1] dir = (dir + (Random_Pick(0,10)-5)) & 0xFF  — firing dir jitter (cosmetic for arc)
-          //   [2] tcoord = Coord_Scatter(tcoord, Random_Pick(0, scatterdist))
-          //         Inside Coord_Scatter: Coord_Move(coord, Random_Pick(DIR_N=0, DIR_MAX=255), distance)
-          //   Order: dir jitter → distance → scatter direction.
-          ScenarioRandom.nextInRange(0, 10); // RNG #1: dir jitter (value discarded for arcing)
-          const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt); // RNG #2
-          const scatterDir256 = ScenarioRandom.nextInRange(0, 255); // RNG #3 via Coord_Scatter→Coord_Move
-          const angle = scatterDir256 * 2 * Math.PI / 256;
-          const distPx = scatterDistLeptons * CELL_SIZE / LEPTON_SIZE;
-          impactX += Math.cos(angle) * distPx;
-          impactY += Math.sin(angle) * distPx;
-        } else {
-          // Non-arcing ballistic: C++ Coord_Move(tcoord, dir, Random_Pick(0, scatterdist))
-          // Uses firing direction (no separate scatter direction RNG).
-          const scatterDistLeptons = ScenarioRandom.nextInRange(0, scatterLeptonsInt);
-          const distPx = scatterDistLeptons * CELL_SIZE / LEPTON_SIZE;
-          const firingAngle = Math.atan2(
-            targetCoord.ly - fireCoord.ly,
-            targetCoord.lx - fireCoord.lx,
-          );
-          impactX += Math.cos(firingAngle) * distPx;
-          impactY += Math.sin(firingAngle) * distPx;
-        }
-        // Check if scattered shot still hits the target (within half-cell)
-        const dx = impactX - targetPixels.x;
-        const dy = impactY - targetPixels.y;
-        directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
-      }
+      const scatter = cxxProjectileImpactAfterScatter(activeWeapon, fireCoord, targetCoord, targetPixels, doScatter, fireDirection256);
+      impactX = scatter.impactX;
+      impactY = scatter.impactY;
+      directHit = scatter.directHit;
+      const projectileFacing256 = projectileInitialFacing256(activeWeapon, fireDirection256, scatter.facing256);
 
       // CF7: Heal guard — negative damage weapons still fire normal C++ bullets.
       // C++ TechnoClass::Fire_At creates an Invisible BulletClass for Heal/
@@ -1187,10 +1433,11 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         }
         ctx.revealShooterFromFire?.(entity);
         if (activeWeapon.projSpeed !== undefined || activeWeapon.projectileSpeed !== undefined) {
-          ctx.launchProjectile(entity, entity.target, activeWeapon, activeWeapon.damage, impactX, impactY, directHit, fireCoord);
+          ctx.launchProjectile(entity, entity.target, activeWeapon, activeWeapon.damage, impactX, impactY, directHit, fireCoord, projectileFacing256);
         } else {
           ctx.damageEntity(entity.target, activeWeapon.damage, activeWeapon.warhead, entity);
         }
+        maybeWarnIncomingSlowInfantryProjectile(ctx, entity, targetCell);
         return;
       }
 
@@ -1229,7 +1476,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         // them at the target coord, arms a normal fuse, and processes damage +
         // Coord_Scatter in BulletClass::AI instead of inside Fire_At.
         const projStrength = Math.max(1, Math.round(activeWeapon.damage * houseBias));
-        ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit, fireCoord);
+        ctx.launchProjectile(entity, entity.target, activeWeapon, projStrength, impactX, impactY, directHit, fireCoord, projectileFacing256);
       } else {
         // Instant damage (melee, hitscan weapons).
         // C++ infantry.cpp:438-440 — Scatter fires exactly once per damage event
@@ -1261,6 +1508,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         }
       }
 
+      maybeWarnIncomingSlowInfantryProjectile(ctx, entity, targetCell);
       consumeAmmoAfterSuccessfulFire(entity);
 
       // Armor-based hit indicator at impact point (fires immediately regardless of projectile travel)
@@ -1334,7 +1582,18 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
             maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
             sprite: impactSprite, spriteStart: 0 } as Effect);
           if (!activeWeapon.projectileSpeed) {
-            spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, impactSprite, impactX, impactY);
+            spawnLogicAnimForSprite(
+              ctx.logicAnims,
+              ctx.effects,
+              impactSprite,
+              impactX,
+              impactY,
+              false,
+              ctx.logicAnimsAlreadyProcessed === true,
+              ctx.logicIndexHintForNewObject?.(),
+              ctx.logicIndexHintForNewObject,
+              ctx.reserveAnimSlot,
+            );
           }
         }
       }
@@ -1521,8 +1780,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     }
     if (bestTarget) {
       // Found a new target — continue hunting.
-      entity.target = bestTarget;
-      entity.targetStructure = null;
+      assignTargetForTechno(entity, bestTarget);
     } else {
       // C++ foot.cpp:688 — Random_Animate when no target found (on scan tick)
       runInfantryRandomAnimate(ctx, entity);
@@ -1535,7 +1793,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
   // happens later via class-specific Firing_AI/Combat_AI while Mission remains
   // HUNT, preserving future hunt timer scans.
   if (entity.targetStructure?.alive) {
-    entity.animState = entity.weapon && entityInRangeOfStructure(entity, entity.targetStructure)
+    entity.animState = entity.weapon && entityInRangeOfStructure(ctx, entity, entity.targetStructure as MapStructure)
       ? AnimState.ATTACK
       : AnimState.WALK;
     return;
@@ -1740,6 +1998,45 @@ function isCandidateVisibleToPlayer(ctx: GreatestThreatRangeContext, other: Enti
   return playerHouseIdx >= 0 && ctx.isRevealedToHouse(other.cell.cx, other.cell.cy, playerHouseIdx);
 }
 
+function isStructureVisibleToPlayerForThreat(ctx: GreatestThreatRangeContext, s: MapStructure, center: { lx: number; ly: number }): boolean {
+  if (s.house === ctx.playerHouse) return true;
+  if (ctx.isDiscoveredStructureByPlayer) return ctx.isDiscoveredStructureByPlayer(s);
+  const playerHouseIdx = _HOUSE_IDX[ctx.playerHouse] ?? -1;
+  return playerHouseIdx >= 0 && ctx.isRevealedToHouse(
+    Math.floor(center.lx / LEPTON_SIZE),
+    Math.floor(center.ly / LEPTON_SIZE),
+    playerHouseIdx,
+  );
+}
+
+function isStructureAlliedToScanner(ctx: GreatestThreatRangeContext, entity: Entity, s: MapStructure): boolean {
+  return ctx.isAllied ? ctx.isAllied(entity.house, s.house) : entity.house === s.house;
+}
+
+export interface TechnoTargetCleanupContext {
+  playerHouse: House;
+  isAllied(a: House, b: House): boolean;
+}
+
+/** C++ TechnoClass::AI target maintenance (techno.cpp:2390-2395).
+ *  After MissionClass::AI, computer-controlled techno clears TarCom when the
+ *  target's house considers the shooter allied. This uses the target house's
+ *  one-way alliance bitfield, not the shooter's. */
+export function clearTargetIfTargetHouseAlliesScanner(
+  ctx: TechnoTargetCleanupContext,
+  entity: Entity,
+): void {
+  if (entity.house === ctx.playerHouse) return;
+
+  if (entity.target && ctx.isAllied(entity.target.house, entity.house)) {
+    entity.target = null;
+  }
+  const targetStructureHouse = entity.targetStructure?.house as House | undefined;
+  if (targetStructureHouse && ctx.isAllied(targetStructureHouse, entity.house)) {
+    entity.targetStructure = null;
+  }
+}
+
 function structureZonePassableCells(structures?: MapStructure[]): Set<number> | null {
   if (!structures?.length) return null;
   const cells = new Set<number>();
@@ -1759,7 +2056,11 @@ export function movementZoneCells(
   structures?: MapStructure[],
 ): Uint8Array {
   const structureCells = !naval ? structureZonePassableCells(structures) : null;
+  const inMapBounds = (cx: number, cy: number) =>
+    cx >= map.boundsX && cx < map.boundsX + map.boundsW &&
+    cy >= map.boundsY && cy < map.boundsY + map.boundsH;
   const passable = (cx: number, cy: number) => {
+    if (!inMapBounds(cx, cy)) return false;
     if (!naval && structureCells?.has(cy * MAP_CELLS + cx)) return true;
     return naval ? map.isWaterPassable(cx, cy) : map.isTerrainPassable(cx, cy);
   };
@@ -1808,6 +2109,73 @@ export function movementZoneCells(
  *   2. Scan order determines tiebreaking (last in order wins, not highest score)
  *   3. Early bailout means inner-ring targets are strongly preferred
  */
+type CellScanTarget =
+  | { entity: Entity; structure?: never; cell?: never }
+  | { entity?: never; structure: MapStructure; cell?: never }
+  | CellOnlyScanTarget;
+type CellOnlyScanTarget = { entity?: never; structure?: never; cell: { cx: number; cy: number }; score: number };
+
+function cellTargetWorld(cx: number, cy: number): WorldPos {
+  const target = cellTargetToLepton(cx, cy);
+  return {
+    x: target.lx * CELL_SIZE / LEPTON_SIZE,
+    y: target.ly * CELL_SIZE / LEPTON_SIZE,
+  };
+}
+
+function wallOwnerAt(ctx: GreatestThreatRangeContext, cx: number, cy: number, wallType: string): House | null {
+  const mapOwner = ctx.map.getWallOwner?.(cx, cy);
+  if (mapOwner !== undefined && mapOwner !== null) return mapOwner;
+  const structure = ctx.structures?.find(s =>
+    s.alive && s.cx === cx && s.cy === cy && s.type === wallType);
+  return structure?.house ?? null;
+}
+
+function evaluateJustWallCell(
+  ctx: GreatestThreatRangeContext,
+  entity: Entity,
+  cx: number,
+  cy: number,
+  sourceLX: number,
+  sourceLY: number,
+): CellOnlyScanTarget | null {
+  // C++ TechnoClass::Evaluate_Just_Cell:
+  //   - vessels never scan walls
+  //   - human houses never auto-target walls
+  //   - Rule.Diff[House->Difficulty].IsWallDestroyer must be enabled
+  //   - the primary weapon must use an anti-ground, wall-destroying warhead
+  if (entity.isNavalUnit) return null;
+  const isHumanHouse = ctx.isHumanControlledHouse
+    ? ctx.isHumanControlledHouse(entity.house)
+    : entity.house === ctx.playerHouse;
+  if (isHumanHouse) return null;
+  if (ctx.isWallDestroyerDifficulty && !ctx.isWallDestroyerDifficulty(entity.house)) return null;
+
+  const wallType = ctx.map.getWallType?.(cx, cy) ?? '';
+  if (!wallType) return null;
+  const wallOwner = wallOwnerAt(ctx, cx, cy, wallType);
+  if (wallOwner !== null) {
+    const alliedWall = ctx.isAllied
+      ? ctx.isAllied(entity.house, wallOwner)
+      : entity.house === wallOwner;
+    if (alliedWall) return null;
+  }
+
+  const primary = entity.weapon;
+  if (!primary || primary.isAntiGround === false) return null;
+  const warheadMeta = ctx.getWarheadMeta?.(primary.warhead) ?? WARHEAD_META[primary.warhead] ?? { spreadFactor: 1 };
+  if (!warheadMeta.destroysWalls) return null;
+
+  const target = cellToLepton(cx, cy);
+  const fireCoord = entity.fireCoordPrimaryFrom(sourceLX, sourceLY);
+  if (leptonDist(fireCoord.lx, fireCoord.ly, target.lx, target.ly) > primary.range * LEPTON_SIZE) {
+    return null;
+  }
+
+  const score = primary.range * LEPTON_SIZE - leptonDist(sourceLX, sourceLY, target.lx, target.ly);
+  return score > 0 ? { cell: { cx, cy }, score } : null;
+}
+
 function cellBasedGuardScan(
   ctx: GreatestThreatRangeContext,
   entity: Entity,
@@ -1815,19 +2183,31 @@ function cellBasedGuardScan(
   rttiMask: number,
   opts?: {
     /** C++ TechnoClass::Greatest_Threat THREAT_AREA uses Threat_Range(1) directly.
-     *  THREAT_RANGE uses range==0 and computes crange = weapon range + 1. */
-    mode?: 'range' | 'area';
+     *  THREAT_RANGE normally uses range==0 and computes crange = weapon range + 1.
+     *  Unit types with GuardRange have Threat_Range(0)>0 and use an explicit
+     *  center-distance range instead of In_Range(). */
+    mode?: 'range' | 'threatRange' | 'area';
     /** Optional scan center/range source when C++ temporarily swaps Coord,
      *  e.g. FootClass::Mission_Guard_Area scans from ArchiveTarget. */
     sourceLX?: number;
     sourceLY?: number;
+    /** C++ TeamClass::TMission_Patrol stores Greatest_Threat's raw TARGET
+     *  before member Assign_Target gets a chance to reject zero-strength
+     *  objects. Ordinary guard/fire scans keep the stricter assignable filter. */
+    returnRawObjectTargets?: boolean;
+    /** Dog death records are normally skipped because C++ removes most dog
+     *  corpses from Cell_Occupier early. Team patrol's raw Greatest_Threat path
+     *  can still observe an active zero-strength dog before it is limboed. */
+    includeDeadDogs?: boolean;
   },
-): Entity | null {
+): CellScanTarget | null {
   // C++ techno.cpp:2048-2053:
   //   THREAT_RANGE: range==0 → crange = max weapon range in cells + 1.
+  //   THREAT_RANGE with GuardRange: range>0 → crange = explicit range in cells.
   //   THREAT_AREA:  range>0  → crange = Threat_Range(1) in cells.
   const mode = opts?.mode ?? 'range';
-  const crange = mode === 'area' ? Math.floor(scanRange) : Math.floor(scanRange) + 1;
+  const explicitRange = mode === 'area' || mode === 'threatRange';
+  const crange = explicitRange ? Math.floor(scanRange) : Math.floor(scanRange) + 1;
   const scanRangeLeptons = scanRange * LEPTON_SIZE;
   if (crange <= 0) return null;
 
@@ -1850,8 +2230,8 @@ function cellBasedGuardScan(
   //   current Coord. FootClass::Mission_Guard_Area temporarily sets Coord to
   //   ArchiveTarget before calling Target_Something_Nearby(THREAT_AREA), so
   //   range checks must use sourceLX/sourceLY, not the unit's live fire coord.
-  const rangeSrcLx = mode === 'area' ? sourceLX : scanFireCoord.lx;
-  const rangeSrcLy = mode === 'area' ? sourceLY : scanFireCoord.ly;
+  const rangeSrcLx = explicitRange ? sourceLX : scanFireCoord.lx;
+  const rangeSrcLy = explicitRange ? sourceLY : scanFireCoord.ly;
   const debugJeep = isScg01Jeep27DebugEnabled() && entity.type === UnitType.V_JEEP;
   const cellKey = (cx: number, cy: number) => cy * 128 + cx;
 
@@ -1896,7 +2276,7 @@ function cellBasedGuardScan(
   // ctx.entities is in INI/unlimbo order (oldest first). To match C++'s "most recently
   // unlimboed" selection, we always overwrite — the LAST entity per cell in our forward
   // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
-  const cellMap = new Map<number, Entity>();
+  const cellMap = new Map<number, CellScanTarget>();
   // C++ techno.cpp:1529 — visibility is checked on the candidate object:
   //   if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer && GAME_NORMAL)
   //       reject;
@@ -1928,7 +2308,7 @@ function cellBasedGuardScan(
     // AREA_GUARD units target husks C++ has already removed (SCG07EA t177).
     if (!other.alive && !other.stats.isInfantry) continue;
     if (!other.alive && other.stats.isInfantry && other.isInfantryDeathAnimationComplete()) continue;
-    if (!other.alive && other.type === UnitType.I_DOG) continue;
+    if (!other.alive && other.type === UnitType.I_DOG && !opts?.includeDeadDogs) continue;
     const allied = ctx.entitiesAllied(entity, other);
     if (isRepairWeapon) {
       // C++ techno.cpp:1836:
@@ -1982,13 +2362,100 @@ function cellBasedGuardScan(
     const key = cellKey(oc.cx, oc.cy);
     // C++ LIFO: last unlimboed = head of chain = picked by Evaluate_Cell.
     // TS forward iteration: always overwrite so last (= most recently unlimboed) wins.
-    cellMap.set(key, other);
+    cellMap.set(key, { entity: other });
   }
 
-  let bestObject: Entity | null = null;
+  // Buildings live in the same Cell_Occupier chain as foot objects for
+  // TechnoClass::Evaluate_Cell. C++ does not scan all mobiles first and then
+  // fall back to structures; an inner-ring building can be returned at crange/4
+  // before an outer-ring unit is ever examined.
+  if (rttiMask & RTTI.BUILDING) {
+    for (const s of ctx.structures ?? []) {
+      if (!isStructureInCppThreatLayer(s)) continue;
+      if (s.house === House.Neutral) continue;
+      if (isStructureAlliedToScanner(ctx, entity, s)) continue;
+      if (!isLegalStructureTarget(s.type)) continue;
+      if (OVERLAY_STRUCTURE_TYPES.has(s.type)) continue;
+      if (MISSION_CONTROL[s.mission ?? Mission.GUARD]?.isNoThreat) continue;
+      if (entity.house === ctx.playerHouse && !entity.teamRef && !STRUCTURE_WEAPONS[s.type]) continue;
+      if (entity.type === UnitType.V_SS || entity.type === UnitType.V_MSUB) {
+        if (s.type !== 'SPEN' && s.type !== 'SYRD') continue;
+      }
+
+      const center = structureCenterLeptons(s);
+      if (!structureMatchesReachableZone(reachableZone, s, center)) continue;
+      if (!isStructureVisibleToPlayerForThreat(ctx, s, center)) continue;
+      const inRange = mode === 'range'
+        ? entityInGuardScanRangeOfStructure(ctx, entity, s)
+        : leptonDist(rangeSrcLx, rangeSrcLy, center.lx, center.ly) <= scanRangeLeptons;
+      if (!inRange) continue;
+
+      for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
+        if (reachableZone && !reachableZone[cellKey(cell.cx, cell.cy)]) continue;
+        cellMap.set(cellKey(cell.cx, cell.cy), { structure: s });
+      }
+    }
+  }
+
+  const acceptCellCandidate = (candidate: CellScanTarget | undefined, cx: number, cy: number): CellScanTarget | null => {
+    if (!candidate) return null;
+    if (candidate.cell) return candidate;
+    if (candidate.structure) return candidate;
+
+    const ent = candidate.entity;
+    const selectedWeapon = mode === 'range'
+      ? selectedWeaponForTarget(ctx, entity, ent)
+      : null;
+    const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
+    const inRange = mode === 'range'
+      ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
+      : dist <= scanRangeLeptons;
+    if (debugJeep) {
+      // eslint-disable-next-line no-console
+      console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
+        `scanning (${cx},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
+        `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
+        `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
+        `accept=${inRange}`);
+    }
+    return inRange ? candidate : null;
+  };
+
+  let bestObject: CellScanTarget | null = null;
+  let bestCell: CellOnlyScanTarget | null = null;
+  let bestCellValue = 0;
   // C++ BUG: bestval is initialized to -1 and NEVER updated in the cell scan loop
   // (techno.cpp:2122-2124 sets bestobject but not bestval). This means every valid
   // target overwrites the previous one — effectively "last valid target in scan order wins".
+
+  const scanCell = (cx: number, cy: number): void => {
+    const accepted = acceptCellCandidate(cellMap.get(cellKey(cx, cy)), cx, cy);
+    if (accepted) {
+      bestObject = accepted;
+      return;
+    }
+    if (bestObject !== null) return;
+    const wallCell = evaluateJustWallCell(ctx, entity, cx, cy, sourceLX, sourceLY);
+    if (wallCell && wallCell.score > bestCellValue) {
+      bestCellValue = wallCell.score;
+      bestCell = wallCell;
+    }
+  };
+
+  const filteredFoundObject = (foundObject: CellScanTarget): CellScanTarget | null => {
+    if (foundObject.entity) {
+      return opts?.returnRawObjectTargets || isAssignableObjectTarget(foundObject.entity)
+        ? foundObject
+        : null;
+    }
+    if (foundObject.structure) {
+      return opts?.returnRawObjectTargets || isAssignableStructureTarget(foundObject.structure)
+        ? foundObject
+        : null;
+    }
+    if (foundObject.cell) return foundObject;
+    return null;
+  };
 
   // C++ techno.cpp:2108-2209: radiate outward ring by ring
   for (let radius = 0; radius < crange; radius++) {
@@ -2000,32 +2467,7 @@ function cellBasedGuardScan(
       // Top row: y = cellY - radius
       const topY = cellY - radius;
       if (topY >= mapY && topY < mapY + mapH) {
-        const ent = cellMap.get(cellKey(cx, topY));
-        if (ent) {
-          // C++ Evaluate_Object range check:
-          //   THREAT_RANGE range==0: What_Weapon_Should_I_Use(object), then
-          //     In_Range(object, selected weapon)
-          //   THREAT_AREA  range>0: Distance(scanner Coord, Center_Coord) <= range
-          const selectedWeapon = mode === 'range'
-            ? selectedWeaponForTarget(ctx, entity, ent)
-            : null;
-          const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
-          const inRange = mode === 'range'
-            ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
-            : dist <= scanRangeLeptons;
-          if (debugJeep) {
-            // eslint-disable-next-line no-console
-            console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
-              `scanning (${cx},${topY}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-              `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
-              `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
-              `accept=${inRange}`);
-          }
-          if (inRange) {
-            // C++ bestval < value is always true (bestval stays -1) → always overwrite
-            bestObject = ent;
-          }
-        }
+        scanCell(cx, topY);
       }
 
       // Bottom row: y = cellY + radius
@@ -2033,27 +2475,7 @@ function cellBasedGuardScan(
       if (botY >= mapY && botY < mapY + mapH) {
         // Avoid double-scanning center cell (radius==0: top==bottom)
         if (radius > 0 || x !== -radius) {
-          const ent = cellMap.get(cellKey(cx, botY));
-          if (ent) {
-            const selectedWeapon = mode === 'range'
-              ? selectedWeaponForTarget(ctx, entity, ent)
-              : null;
-            const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
-            const inRange = mode === 'range'
-              ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
-              : dist <= scanRangeLeptons;
-            if (debugJeep) {
-              // eslint-disable-next-line no-console
-              console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
-                `scanning (${cx},${botY}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-                `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
-                `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
-                `accept=${inRange}`);
-            }
-            if (inRange) {
-              bestObject = ent;
-            }
-          }
+          scanCell(cx, botY);
         }
       }
     }
@@ -2067,67 +2489,44 @@ function cellBasedGuardScan(
       // Left column: x = cellX - radius
       const leftX = cellX - radius;
       if (leftX >= mapX && leftX < mapX + mapW) {
-        const ent = cellMap.get(cellKey(leftX, cy));
-        if (ent) {
-          const selectedWeapon = mode === 'range'
-            ? selectedWeaponForTarget(ctx, entity, ent)
-            : null;
-          const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
-          const inRange = mode === 'range'
-            ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
-            : dist <= scanRangeLeptons;
-          if (debugJeep) {
-            // eslint-disable-next-line no-console
-            console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
-              `scanning (${leftX},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-              `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
-              `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
-              `accept=${inRange}`);
-          }
-          if (inRange) {
-            bestObject = ent;
-          }
-        }
+        scanCell(leftX, cy);
       }
 
       // Right column: x = cellX + radius
       const rightX = cellX + radius;
       if (rightX >= mapX && rightX < mapX + mapW) {
-        const ent = cellMap.get(cellKey(rightX, cy));
-        if (ent) {
-          const selectedWeapon = mode === 'range'
-            ? selectedWeaponForTarget(ctx, entity, ent)
-            : null;
-          const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
-          const inRange = mode === 'range'
-            ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
-            : dist <= scanRangeLeptons;
-          if (debugJeep) {
-            // eslint-disable-next-line no-console
-            console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
-              `scanning (${rightX},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
-              `rangeLeptons=${scanRangeLeptons} useFireCoord=true ` +
-              `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
-              `accept=${inRange}`);
-          }
-          if (inRange) {
-            bestObject = ent;
-          }
-        }
+        scanCell(rightX, cy);
       }
     }
 
     // C++ techno.cpp:2198-2205: Early bailout at crange/4 and crange/2
-    if (bestObject !== null) {
+    const foundObject = bestObject as CellScanTarget | null;
+    if (foundObject !== null) {
       const q = Math.floor(crange / 4);
       const h = Math.floor(crange / 2);
       if (radius === q || radius === h) {
-        return isAssignableObjectTarget(bestObject) ? bestObject : null;
+        return filteredFoundObject(foundObject);
       }
     }
+    if (bestCell !== null) return bestCell;
   }
 
-  return isAssignableObjectTarget(bestObject) ? bestObject : null;
+  const foundObject = bestObject as CellScanTarget | null;
+  if (foundObject) return filteredFoundObject(foundObject);
+  const foundCell = bestCell as CellOnlyScanTarget | null;
+  if (foundCell?.cell) return foundCell;
+  return null;
+}
+
+function threatRangeScanConfig(entity: Entity): { scanRange: number; mode: 'range' | 'threatRange' } {
+  const overrideRange = entity.stats.guardRange ?? 0;
+  if (overrideRange > 0) {
+    return { scanRange: overrideRange, mode: 'threatRange' };
+  }
+  return {
+    scanRange: Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0),
+    mode: 'range',
+  };
 }
 
 /** C++ TechnoClass::Target_Something_Nearby(THREAT_RANGE).
@@ -2135,31 +2534,51 @@ function cellBasedGuardScan(
  * Used by FootClass::Mission_Move (foot.cpp:530) and Mission_Guard.
  */
 export function greatestThreatRangeTarget(ctx: GreatestThreatRangeContext, entity: Entity): Entity | null {
-  const weaponMax = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
+  const { scanRange, mode } = threatRangeScanConfig(entity);
   const scanMask = guardScanMask(entity, ctx.isPlayerControlled(entity));
-  if (weaponMax <= 0 || scanMask === 0) return null;
-  return cellBasedGuardScan(ctx, entity, weaponMax, scanMask);
+  if (scanRange <= 0 || scanMask === 0) return null;
+  return cellBasedGuardScan(ctx, entity, scanRange, scanMask, {
+    mode,
+    returnRawObjectTargets: true,
+    includeDeadDogs: true,
+  })?.entity ?? null;
 }
 
 export function targetSomethingNearbyRange(ctx: MissionAIContext, entity: Entity): Entity | null {
-  const weaponMax = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
+  const { scanRange, mode } = threatRangeScanConfig(entity);
   const scanMask = guardScanMask(entity, ctx.isPlayerControlled(entity));
-  if (weaponMax <= 0 || scanMask === 0) {
+  if (scanRange <= 0 || scanMask === 0) {
     assignTargetForTechno(entity, null);
+    entity.targetStructure = null;
     return null;
   }
 
   if (isAssignableObjectTarget(entity.target)) {
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
     const selectedWeapon = selectedWeaponForTarget(ctx, entity, entity.target);
     if (selectedWeapon && entity.inRangeWith(entity.target, selectedWeapon)) return entity.target;
     assignTargetForTechno(entity, null);
+  } else if (entity.targetStructure?.alive) {
+    if (entityInRangeOfStructure(ctx, entity, entity.targetStructure as MapStructure)) return null;
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
+  } else if (entity.forceFirePos) {
+    const targetLX = pixelToLepton(entity.forceFirePos.x);
+    const targetLY = pixelToLepton(entity.forceFirePos.y);
+    if (entity.weapon && entity.inRangeWithCoord(targetLX, targetLY, entity.weapon)) return null;
+    entity.forceFirePos = null;
   } else {
     assignTargetForTechno(entity, null);
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
   }
 
-  const bestTarget = cellBasedGuardScan(ctx, entity, weaponMax, scanMask);
-  assignTargetForTechno(entity, bestTarget);
-  return bestTarget;
+  const bestTarget = cellBasedGuardScan(ctx, entity, scanRange, scanMask, { mode });
+  assignTargetForTechno(entity, bestTarget?.entity ?? null);
+  entity.targetStructure = bestTarget?.structure ?? null;
+  entity.forceFirePos = bestTarget?.cell ? cellTargetWorld(bestTarget.cell.cx, bestTarget.cell.cy) : null;
+  return bestTarget?.entity ?? null;
 }
 
 /** Guard mode — attack nearby enemies or auto-heal (rate-limited to every 15 ticks) */
@@ -2269,7 +2688,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       if (!other.alive || other.type !== UnitType.I_SPY) continue;
       if (ctx.entitiesAllied(entity, other)) continue;
       if (leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY) <= 768) { // 3 cells * 256 leptons/cell
-        entity.target = other;
+        assignTargetForTechno(entity, other);
         entity.mission = Mission.ATTACK;
         return;
       }
@@ -2289,18 +2708,21 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
   // causing them to find targets WASM never scans. Task #43 SCG13EA SPY (9,53)
   // at tick 43 fired Random_Animate in WASM (no target found) but auto-targeted
   // in TS (found target in sight), breaking RNG parity.
-  const weaponMax = Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
-  const weaponScanRange = weaponMax > 0 ? weaponMax : 1; // C++ +1 cell fallback
-  const baseRange = entity.stats.guardRange ?? weaponScanRange;
+  const threatRangeCfg = threatRangeScanConfig(entity);
+  const weaponScanRange = threatRangeCfg.scanRange > 0 ? threatRangeCfg.scanRange : 1; // C++ +1 cell fallback
+  const baseRange = weaponScanRange;
   const scanRange = entity.stance === Stance.DEFENSIVE
     ? Math.min(baseRange, (entity.weapon?.range ?? 2) + 1)
     : baseRange;
+  const scanMode = threatRangeCfg.mode;
 
   // ── C++ Target_Something_Nearby (techno.cpp:5251-5281) ──
   // Step 1: If existing target is still legal AND in range, KEEP IT — don't rescan.
   // C++ checks Target_Legal(TarCom) then In_Range(TarCom, primary).
   // Only if the existing target is invalid or out of range do we call Greatest_Threat.
   if (!spyPlayerSkipAutoTarget && isAssignableObjectTarget(entity.target)) {
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
     // C++ techno.cpp:5260-5266: check if existing target still in range (THREAT_RANGE mode)
     const selectedWeapon = selectedWeaponForTarget(ctx, entity, entity.target);
     if (selectedWeapon && entity.inRangeWith(entity.target, selectedWeapon)) {
@@ -2312,8 +2734,28 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     }
     // C++ techno.cpp:5263-5264: target out of range → Assign_Target(TARGET_NONE)
     entity.target = null;
+    entity.targetStructure = null;
+  } else if (!spyPlayerSkipAutoTarget && entity.targetStructure?.alive) {
+    if (entityInRangeOfStructure(ctx, entity, entity.targetStructure as MapStructure)) {
+      entity.target = null;
+      entity.forceFirePos = null;
+      return;
+    }
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
+  } else if (!spyPlayerSkipAutoTarget && entity.forceFirePos) {
+    const targetLX = pixelToLepton(entity.forceFirePos.x);
+    const targetLY = pixelToLepton(entity.forceFirePos.y);
+    if (entity.weapon && entity.inRangeWithCoord(targetLX, targetLY, entity.weapon)) {
+      entity.target = null;
+      entity.targetStructure = null;
+      return;
+    }
+    entity.forceFirePos = null;
   } else {
     entity.target = null;
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
   }
 
   // C++ infantry.cpp:2295-2297: Tanya does NOT auto-fire when human-controlled.
@@ -2352,54 +2794,26 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     : guardScanMask(entity, isHumanControlled);
   const bestTarget = scanMask === 0
     ? null
-    : cellBasedGuardScan(ctx, entity, scanRange, scanMask);
-  if (bestTarget) {
+    : cellBasedGuardScan(ctx, entity, scanRange, scanMask, { mode: scanMode });
+  if (bestTarget?.entity) {
     // C++ Mission_Guard calls Target_Something_Nearby → Assign_Target, then
     // the enclosing class AI runs Firing_AI once later in the same tick.
     // index.ts' Stage C/D class pass handles the follow-up fire after the
     // infantry Commence gate, preserving queued Scatter/MOVE/HUNT ordering.
-    entity.target = bestTarget;
+    assignTargetForTechno(entity, bestTarget.entity);
     return;
   }
-
-  // C++ parity: structure auto-target in Mission_Guard is enabled for armed
-  // non-human units whose weapon Allowed_Threats includes THREAT_BUILDINGS
-  // (anti-ground weapons). Human-controlled armed infantry have BUILDING
-  // cleared from the mask (infantry.cpp:2332-2334) so this block also no-ops
-  // for them. Dogs/medics have organic warhead clearing BUILDING, so no-op too.
-  //
-  // Sub-surface weapon restriction: torpedoes can only hit naval-accessible
-  // structures (sub pens, naval yards). The existing canTargetNaval filter
-  // handles the entity scan above; for structures, we need a parallel guard:
-  // skip the structure scan entirely for sub-surface-only weapons.
-  const isSubSurfaceOnly = !!(entity.weapon?.isSubSurface && !entity.weapon2);
-  if ((scanMask & RTTI.BUILDING) && entity.weapon && !isSubSurfaceOnly) {
-    let bestStruct: MapStructure | null = null;
-    let bestStructDist = Infinity;
-    for (const s of ctx.structures) {
-      if (!s.alive) continue;
-      // C++ Evaluate_Object only skips ALLIED buildings.
-      if (ctx.isAllied(entity.house, s.house)) continue;
-      // C++ parity: BARL/BRL3 are OverlayClass (overlay), not BuildingClass.
-      if (s.type === 'BARL' || s.type === 'BRL3') continue;
-      // C++ techno.cpp:1610-1618: human/player-controlled units skip unarmed buildings.
-      // (Guarded redundantly; for non-human mask already includes BUILDING.)
-      if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
-      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      const sLX = s.cx * LEPTON_SIZE + (fw * LEPTON_SIZE) / 2;
-      const sLY = s.cy * LEPTON_SIZE + (fh * LEPTON_SIZE) / 2;
-      const dist = leptonDist(entity.leptonX, entity.leptonY, sLX, sLY);
-      if (dist > scanRange * LEPTON_SIZE) continue;
-      if (dist < bestStructDist) {
-        bestStructDist = dist;
-        bestStruct = s;
-      }
-    }
-    if (bestStruct) {
-      entity.mission = Mission.ATTACK;
-      entity.targetStructure = bestStruct;
-      return;
-    }
+  if (bestTarget?.structure) {
+    entity.target = null;
+    entity.targetStructure = bestTarget.structure;
+    entity.forceFirePos = null;
+    return;
+  }
+  if (bestTarget?.cell) {
+    entity.target = null;
+    entity.targetStructure = null;
+    entity.forceFirePos = cellTargetWorld(bestTarget.cell.cx, bestTarget.cell.cy);
+    return;
   }
 
   // C++ foot.cpp:594 — Random_Animate() when no target found (on scan tick).
@@ -2433,12 +2847,9 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
         // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
         // idata.cpp supplies per-infantry Count (Tanya/dogs/civilians=1,
         // common combat infantry=3); MasterDoControls gesture Rate=2.
-        entity.nonInterruptAnimTicks = entity.infantryGestureDurationTicks();
-        entity.nonInterruptAnimSetTick = ctx.tick;
-        // Phase 7B: track Doing as 'gesture' so isDoingInterruptible() blocks
-        // Commence — mirrors C++ Do_Action(DO_GESTURE1/2 / DO_SALUTE1/2) all of
-        // which have Interrupt=false in MasterDoControls (infantry.cpp:115-118).
-        entity.doing = 'gesture';
+        // Phase 7B: track Doing as a staged gesture so isDoingInterruptible()
+        // blocks Commence and FireLaunch reads the active StageClass stage.
+        entity.startGestureDoing(ctx.tick);
       }
     } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
       // C++ cases 5/7 and dog case 0 call Do_Action(DO_IDLE*).
@@ -2500,12 +2911,16 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   // Only the "scan just found new target" path sets timer=1 (no RNG).
   const archiveOrigin = areaGuardArchiveOrigin(entity);
   const isDog = entity.type === UnitType.I_DOG;
-  // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2
-  // C++ techno.cpp:4573-4581: Threat_Range(1) = min(2*weaponRange, 0x0A00=10 cells)
-  // C++ foot.cpp:996: leash = Threat_Range(1)/2 = min(weaponRange, 5)
-  const weaponRange = entity.weapon?.range ?? entity.stats.sight;
-  const threatRange1 = Math.min(2 * weaponRange, 10); // C++ Threat_Range(1) in cells
-  const leashRange = threatRange1 / 2; // min(weaponRange, 5) — C++ foot.cpp:996
+  // AG1: C++ foot.cpp:996-1001 — leash = Threat_Range(1)/2.
+  // C++ techno.cpp:4700-4720 first uses the type ThreatRange override
+  // (rules.ini GuardRange), otherwise the longest equipped weapon range, then
+  // doubles and caps at 0x0A00 = 10 cells. Dogs rely on this: DogJaw range is
+  // short, but DOG GuardRange=7 yields an area scan capped at 10 cells.
+  const areaBaseRange = (entity.stats.guardRange ?? 0) > 0
+    ? entity.stats.guardRange!
+    : Math.max(entity.weapon?.range ?? 0, entity.weapon2?.range ?? 0);
+  const threatRange1 = Math.min(2 * areaBaseRange, 10); // C++ Threat_Range(1) in cells
+  const leashRange = threatRange1 / 2;
   // C++ Greatest_Threat with THREAT_AREA uses Threat_Range(1) as the scan radius
   // (passed as 'range' to Evaluate_Object, which checks dist > range).
   const scanRange = threatRange1;
@@ -2532,10 +2947,10 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     entity.animState = AnimState.WALK;
   }
 
-  if (entity.target?.alive || entity.targetStructure?.alive) {
+  if (entity.target?.alive || entity.targetStructure?.alive || entity.forceFirePos) {
     // C++ foot.cpp:1086-1088 — legal TarCom at entry takes the Approach_Target
     // branch and then falls through to the caller's dtime + Random_Pick(1,5).
-    if (entity.target?.alive && !entity.inRange(entity.target) && ctx.approachTarget && !entity.moveTarget) {
+    if ((entity.target?.alive || entity.targetStructure?.alive) && ctx.approachTarget && !entity.moveTarget) {
       ctx.approachTarget(entity);
     }
     return;
@@ -2556,8 +2971,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
       sourceLY: originLY,
     });
 
-  if (bestTarget) {
-    entity.target = bestTarget;
+  if (bestTarget?.entity) {
+    assignTargetForTechno(entity, bestTarget.entity);
     // C++ foot.cpp:1077-1084: when Target_Something_Nearby finds a new TarCom,
     // Mission_Guard_Area returns 1 immediately. The enclosing InfantryClass::AI
     // still runs Firing_AI later in the same object AI pass (infantry.cpp:1237),
@@ -2569,7 +2984,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
         entity.weapon &&
         entity.suppressFiringAITick !== ctx.tick &&
         entity.attackCooldown <= 0 &&
-        entity.inRange(bestTarget)) {
+        entity.inRange(bestTarget.entity)) {
       entity.mission = Mission.ATTACK;
       updateAttack(ctx, entity);
       if ((entity.mission as Mission) === Mission.ATTACK) {
@@ -2578,35 +2993,21 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     }
     return;
   }
-
-  // C++ Greatest_Threat also scans buildings at each cell (via Evaluate_Cell).
-  // Add structure scan matching the GUARD handler's M4 scan.
-  if (entity.weapon) {
-    let bestStruct: MapStructure | null = null;
-    let bestStructDist = Infinity;
-    for (const s of ctx.structures) {
-      if (!s.alive) continue;
-      if (ctx.isAllied(entity.house, s.house)) continue;
-      if (s.type === 'BARL' || s.type === 'BRL3') continue; // C++ OverlayClass, not BuildingClass
-      if (entity.isPlayerUnit && !STRUCTURE_WEAPONS[s.type]) continue;
-      // C++ Center_Coord: cell origin + half footprint. 1x1 buildings = +128, 2x2 = +256.
-      const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      const sLX = s.cx * LEPTON_SIZE + (fw * LEPTON_SIZE) / 2;
-      const sLY = s.cy * LEPTON_SIZE + (fh * LEPTON_SIZE) / 2;
-      const dist = leptonDist(originLX, originLY, sLX, sLY);
-      if (dist > scanRange * LEPTON_SIZE) continue;
-      if (dist < bestStructDist) {
-        bestStructDist = dist;
-        bestStruct = s;
-      }
-    }
-    if (bestStruct) {
-      // C++ parity: stay AREA_GUARD, set target. Newly-acquired target uses
-      // timer=1 and does not approach until the next timer fire.
-      entity.targetStructure = bestStruct;
-      entity.missionTimer = 1;
-      return;
-    }
+  if (bestTarget?.structure) {
+    // C++ parity: stay AREA_GUARD, set target. Newly-acquired target uses
+    // timer=1 and does not approach until the next timer fire.
+    entity.target = null;
+    entity.targetStructure = bestTarget.structure;
+    entity.forceFirePos = null;
+    entity.missionTimer = 1;
+    return;
+  }
+  if (bestTarget?.cell) {
+    entity.target = null;
+    entity.targetStructure = null;
+    entity.forceFirePos = cellTargetWorld(bestTarget.cell.cx, bestTarget.cell.cy);
+    entity.missionTimer = 1;
+    return;
   }
 
   // C++ foot.cpp:1081 — Random_Animate when no target found.
@@ -2633,10 +3034,8 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
         ScenarioRandom.nextInRange(0, 1);
         entity.doing = 'idle_anim';
       } else {
-        entity.nonInterruptAnimTicks = entity.infantryGestureDurationTicks();
-        entity.nonInterruptAnimSetTick = ctx.tick;
         // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
-        entity.doing = 'gesture';
+        entity.startGestureDoing(ctx.tick);
       }
     } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
       entity.doing = 'idle_anim';
@@ -2658,9 +3057,15 @@ export function updateRetreat(ctx: MissionAIContext, entity: Entity): void {
     entity.animState = AnimState.WALK;
     const arrived = entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
     if (arrived) {
-      // Reached map edge — remove entity
-      entity.alive = false;
-      entity.mission = Mission.DIE;
+      // Reached map edge. C++ limbos retreating objects; this is not a kill.
+      if (ctx.leaveMap) {
+        ctx.leaveMap(entity);
+      } else {
+        entity.triggerName = '';
+        entity.triggerDeathProcessed = true;
+        entity.alive = false;
+        entity.mission = Mission.DIE;
+      }
     }
     return;
   }
@@ -2733,7 +3138,7 @@ export function updateAmbush(ctx: MissionAIContext, entity: Entity): void {
     if (!ctx.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
     // Enemy spotted — switch to HUNT
     entity.mission = Mission.HUNT;
-    entity.target = other;
+    assignTargetForTechno(entity, other);
     return;
   }
 }
@@ -2778,22 +3183,36 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
   const structTarget = structureTargetLeptons(s);
   const structLX = structTarget.lx;
   const structLY = structTarget.ly;
-  const dist = leptonDist(entity.leptonX, entity.leptonY, structLX, structLY);
+  const structCell = worldToCell(structPos.x, structPos.y);
+  const activeWeapon = selectedWeaponForStructure(ctx, entity, s);
+  const activeWeaponCanTarget = !!activeWeapon && canWeaponTargetStructure(activeWeapon);
+  const rangeOrigin = activeWeapon
+    ? entity.fireCoordForWeapon(activeWeapon)
+    : { lx: entity.leptonX, ly: entity.leptonY };
+  const dist = leptonDist(rangeOrigin.lx, rangeOrigin.ly, structLX, structLY);
   // C++ parity: spies infiltrate from adjacent cells (building edge), not center.
   // Buildings are 2x2 or 3x2 cells, so the edge can be 2-3 cells from center.
   // Unarmed units (spies, engineers) need range 4 to reach from adjacent cells.
-  const range = entity.weapon?.range ?? 2;
-  const rangeLeptons = range * LEPTON_SIZE + (entity.weapon ? structureRangeBonusLeptons(s) : 0);
+  const range = activeWeapon?.range ?? 2;
+  const rangeLeptons = range * LEPTON_SIZE + (activeWeapon ? structureRangeBonusLeptons(s) : 0);
 
   // Minimum range check: artillery can't fire at point-blank structures
-  if (entity.weapon?.minRange && dist < entity.weapon.minRange * LEPTON_SIZE) {
+  if (activeWeapon?.minRange && dist < activeWeapon.minRange * LEPTON_SIZE) {
     ctx.retreatFromTarget(entity, structPos);
     return;
   }
 
-  if (dist <= rangeLeptons) {
-    // Engineer capture/damage (C++ infantry.cpp:598-637 — any house's engineer, not just player)
-    if (entity.type === UnitType.I_E6) {
+	  if (dist <= rangeLeptons) {
+	    // C++ InfantryClass::Can_Fire returns FIRE_MOVING while Start_Driver is
+	    // active, even when the target is already inside weapon range. Structure
+	    // TarCom goes through the same Can_Fire path as unit TarCom.
+	    if (entity.stats.isInfantry && entity.isDriving) {
+	      entity.animState = AnimState.WALK;
+	      return;
+	    }
+	
+	    // Engineer capture/damage (C++ infantry.cpp:598-637 — any house's engineer, not just player)
+	    if (entity.type === UnitType.I_E6) {
       // EN1: Friendly repair — C++ always takes Renovate() branch for allies (infantry.cpp:606-611)
       // Renovate() on a full-health building is a harmless no-op. Engineer is consumed.
       if (ctx.isAllied(s.house, entity.house)) {
@@ -2882,15 +3301,23 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       return;
     }
 
-    entity.desiredFacing = directionTo(entity.pos, structPos);
-    entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
-    entity.tickRotation();
-    if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
-      entity.animState = AnimState.IDLE;
-      return;
+    if (entity.stats.isInfantry) {
+      entity.desiredFacing = directionTo(entity.pos, structPos);
+      entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
+      entity.tickRotation();
+      if (entity.stats.noMovingFire && entity.facing !== entity.desiredFacing) {
+        entity.animState = AnimState.IDLE;
+        return;
+      }
     }
     entity.animState = AnimState.ATTACK;
-    if (entity.attackCooldown <= 0 && entity.weapon) {
+    if (!activeWeaponCanTarget) {
+      return;
+    }
+    if (activeWeapon && !canFireAtCoordFacingGate(entity, activeWeapon, structLX, structLY)) {
+      return;
+    }
+    if (entity.attackCooldown <= 0 && activeWeapon) {
       // C++ TechnoClass::Can_Fire returns FIRE_AMMO before Fire_At.
       if (entity.ammo === 0) return;
 
@@ -2920,27 +3347,68 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
 
       // C++ parity: use warhead-vs-armor lookup for instant damage. Projectile
       // weapons pass raw bullet strength and apply armor/distance on detonation.
-      const wh = entity.weapon.warhead as WarheadType;
+      const wh = activeWeapon.warhead as WarheadType;
       const mult = ctx.getWarheadMult(wh, 'concrete');
       const structHouseBias = ctx.getFirepowerBias(entity.house);
-      const damage = mult <= 0 ? 0 : Math.max(1, Math.round(entity.weapon.damage * mult * structHouseBias));
-      const projectileWeapon = entity.weapon.projSpeed !== undefined || entity.weapon.projectileSpeed !== undefined;
-      const fireCoord = fireCoordForWeaponAtLatchedFacing(entity, entity.weapon, fireAtFacing256);
+      const damage = mult <= 0 ? 0 : Math.max(1, Math.round(activeWeapon.damage * mult * structHouseBias));
+      const projectileWeapon = activeWeapon.projSpeed !== undefined || activeWeapon.projectileSpeed !== undefined;
+      const fireCoord = fireCoordForWeaponAtLatchedFacing(entity, activeWeapon, fireAtFacing256);
+      const fireDirection256 = cppFireDirection256(entity, fireAtFacing256);
       if (fireAtFacing256 >= 0) entity.firePrepFacing256 = -1;
+      let impactX = structPos.x;
+      let impactY = structPos.y;
+      let directHit = true;
+      let projectileFacing256: number | undefined;
+      if (projectileWeapon) {
+        // C++ TechnoClass::Fire_At marks bullets from moving FootClass objects
+        // inaccurate regardless of whether TarCom is a unit, building, or cell.
+        // The structure-target path used to skip this, so moving cruisers fired
+        // exact 8Inch shells while C++ scattered them during BulletClass::Unlimbo.
+        const isMovingPlatform = !!entity.isDriving ||
+          entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+        const scatter = cxxProjectileImpactAfterScatter(
+          activeWeapon,
+          fireCoord,
+          { lx: structLX, ly: structLY },
+          structPos,
+          isMovingPlatform,
+          fireDirection256,
+        );
+        impactX = scatter.impactX;
+        impactY = scatter.impactY;
+        directHit = scatter.directHit;
+        projectileFacing256 = projectileInitialFacing256(activeWeapon, fireDirection256, scatter.facing256);
+      }
       let destroyed = false;
       ctx.revealShooterFromFire?.(entity);
       if (projectileWeapon) {
-        const projStrength = Math.max(1, Math.round(entity.weapon.damage * structHouseBias));
+        const projStrength = Math.max(1, Math.round(activeWeapon.damage * structHouseBias));
         ctx.launchProjectile(
-          entity, null, entity.weapon, projStrength,
-          structPos.x, structPos.y, true,
+          entity, null, activeWeapon, projStrength,
+          impactX, impactY, directHit,
           fireCoord,
+          projectileFacing256,
+          { lx: structLX, ly: structLY },
         );
       } else {
         destroyed = ctx.damageStructure(s, damage);
       }
-      // C++ house.cpp:293,303: ROFBias scales rearm delay
-      entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
+      maybeWarnIncomingSlowInfantryProjectile(ctx, entity, structCell);
+      // C++ techno.cpp:2918-2930 / 3180-3183: TechnoClass has one
+      // shared Arm timer. Two-shooter units use a 3-tick first-shot rearm
+      // whether TarCom is an object, building, or cell target.
+      const rofBias = ctx.getROFBias(entity.house);
+      let rearmTime = Math.max(1, Math.round(activeWeapon.rof * rofBias));
+      if (entity.isTwoShooter()) {
+        if (!entity.isSecondShot) {
+          rearmTime = 3;
+        }
+        entity.isSecondShot = !entity.isSecondShot;
+      } else {
+        entity.isSecondShot = true;
+      }
+      entity.attackCooldown = rearmTime;
+      if (entity.weapon2) entity.attackCooldown2 = rearmTime;
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
       // C++ infantry.cpp:1190-1195: IsFiring stays true for the fire animation duration.
       // Infantry DO_FIRE_WEAPON animation: typically 4-8 frames at rate ~2.
@@ -2953,170 +3421,249 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
         entity.firingAnimTicks = 9;
       }
       consumeAmmoAfterSuccessfulFire(entity);
-      ctx.playSoundAt(ctx.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
+      ctx.playSoundAt(ctx.weaponSound(activeWeapon.name), entity.pos.x, entity.pos.y);
       // Muzzle + impact effects (color by warhead — C++ parity)
       ctx.effects.push({
         type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
         frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-        muzzleColor: ctx.warheadMuzzleColor(entity.weapon.warhead),
+        muzzleColor: ctx.warheadMuzzleColor(activeWeapon.warhead),
       } as Effect);
       if (projectileWeapon) {
-        const projStyle = ctx.weaponProjectileStyle(entity.weapon.name);
-        const projCfg = projectileVisualConfig(entity.weapon.name);
-        const projectileDist = leptonDist(entity.leptonX, entity.leptonY, structLX, structLY);
+        const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);
+        const projCfg = projectileVisualConfig(activeWeapon.name);
+        const projectileDist = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(impactX), pixelToLepton(impactY));
         if (projStyle !== 'bullet' || projectileDist > 512) {
-          const projDistPx = Math.sqrt((structPos.x - entity.pos.x) ** 2 + (structPos.y - entity.pos.y) ** 2);
-          const travelFrames = calcProjectileTravelFrames(projDistPx, entity.weapon.projSpeed);
+          const projDistPx = Math.sqrt((impactX - entity.pos.x) ** 2 + (impactY - entity.pos.y) ** 2);
+          const travelFrames = calcProjectileTravelFrames(projDistPx, activeWeapon.projSpeed);
           ctx.effects.push({
             type: 'projectile', x: entity.pos.x, y: entity.pos.y,
             frame: 0, maxFrames: travelFrames, size: 3,
             startX: entity.pos.x, startY: entity.pos.y,
-            endX: structPos.x, endY: structPos.y,
+            endX: impactX, endY: impactY,
             projStyle, ...projCfg,
           } as Effect);
         }
       } else {
         // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
-        const structAttackExpSet = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 0;
-        const structImpactSprite = combatAnim(entity.weapon.damage, structAttackExpSet, 'ground');
+        const structAttackExpSet = ctx.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 0;
+        const structImpactSprite = combatAnim(activeWeapon.damage, structAttackExpSet, 'ground');
         if (structImpactSprite) {
           ctx.effects.push({
             type: 'explosion', x: structPos.x, y: structPos.y,
             frame: 0, maxFrames: EXPLOSION_FRAMES[structImpactSprite] ?? 17, size: 8,
             sprite: structImpactSprite, spriteStart: 0,
           } as Effect);
-          spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, structImpactSprite, structPos.x, structPos.y);
+          spawnLogicAnimForSprite(
+            ctx.logicAnims,
+            ctx.effects,
+            structImpactSprite,
+            structPos.x,
+            structPos.y,
+            false,
+            ctx.logicAnimsAlreadyProcessed === true,
+            ctx.logicIndexHintForNewObject?.(),
+            ctx.logicIndexHintForNewObject,
+            ctx.reserveAnimSlot,
+          );
         }
         if (destroyed) {
           if (ctx.isPlayerControlled(entity)) ctx.killCount++;
         }
       }
-      // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)
-      if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
-        entity.targetStructure = null;
-        entity.mission = Mission.GUARD;
-        entity.animState = AnimState.IDLE;
-        return;
-      }
     }
-  } else {
-    entity.animState = AnimState.WALK;
-    // Follow A* path if available (set by harness attack_struct). This routes
-    // around buildings instead of moveToward's straight line which gets stuck.
-    if (entity.path && entity.path.length > 0 && entity.pathIndex < entity.path.length) {
-      const nextCell = entity.path[entity.pathIndex];
-      const wp = {
-        lx: nextCell.cx * 256 + 128,
-        ly: nextCell.cy * 256 + 128,
-      };
-      if (entity.moveToward(wp, ctx.movementSpeed(entity))) {
-        entity.pathIndex++;
-      }
-    } else {
-      entity.moveToward({ lx: pixelToLepton(structPos.x), ly: pixelToLepton(structPos.y) }, ctx.movementSpeed(entity));
-    }
-  }
+	  } else {
+	    entity.animState = AnimState.WALK;
+	    // C++ TechnoClass::Firing_AI does not drive toward out-of-range TarCom.
+	    // FootClass::Mission_Attack/Approach_Target assigns NavCom; Movement_AI
+	    // then consumes the path/Head_To_Coord. Moving here double-steps infantry
+	    // that are already in Start_Driver.
+	  }
   // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
 }
 
 /** Force-fire on ground — fire at a location with no target entity */
 export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): void {
-  const target = entity.forceFirePos!;
-  const dist = leptonDist(entity.leptonX, entity.leptonY, pixelToLepton(target.x), pixelToLepton(target.y));
-  const range = entity.weapon?.range ?? 2;
+  const target = entity.forceFirePos;
+  const activeWeapon = entity.weapon;
+  if (!target || !activeWeapon || activeWeapon.isAntiGround === false) return;
 
-  if (dist <= range * LEPTON_SIZE) {
-    entity.desiredFacing = directionTo(entity.pos, target);
-    entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
-    const facingReady = entity.tickRotation();
-    if (entity.stats.noMovingFire && !facingReady) {
-      entity.animState = AnimState.IDLE;
+  const targetLX = pixelToLepton(target.x);
+  const targetLY = pixelToLepton(target.y);
+
+  // TARGET_CELL TarComs go through the C++ cell Can_Fire/Fire_At path; there
+  // is no separate minimum-range retreat here. Close wall cells still rotate
+  // toward the cell and can fire when their facing gate opens.
+  if (!entity.inRangeWithCoord(targetLX, targetLY, activeWeapon)) {
+    entity.firePrepActive = false;
+    entity.firePrepStage = 0;
+    entity.firePrepUsesDoingStage = false;
+    entity.firePrepFacing256 = -1;
+    entity.animState = AnimState.WALK;
+    if (!entity.stats.isInfantry) {
+      entity.moveToward({ lx: targetLX, ly: targetLY }, ctx.movementSpeed(entity));
+    }
+    return;
+  }
+
+  if (entity.attackCooldown > 0) return;
+  if (entity.ammo === 0) return;
+
+  if (entity.stats.isCloakable && entity.cloakState !== CloakState.UNCLOAKED) {
+    if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+      entity.cloakState = CloakState.UNCLOAKING;
+      entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+    }
+    return;
+  }
+
+  if (entity.stats.isInfantry && entity.isDriving) {
+    entity.animState = AnimState.WALK;
+    return;
+  }
+
+  if (!entity.stats.isInfantry && entity.moveTarget) {
+    if ((entity.isNavalUnit && !entity.hasTurret) || entity.stats.noMovingFire) {
       return;
     }
-    entity.animState = AnimState.ATTACK;
+  }
 
-    if (entity.attackCooldown <= 0 && entity.weapon) {
-      // C++ TechnoClass::Can_Fire returns FIRE_AMMO before Fire_At.
-      if (entity.ammo === 0) return;
-      // C++ house.cpp:293,303: ROFBias scales rearm delay
-      entity.attackCooldown = Math.max(1, Math.round(entity.weapon.rof * ctx.getROFBias(entity.house)));
-      if (entity.hasTurret) entity.isInRecoilState = true; // M6
-      // C++ infantry.cpp:3609: IsFiring = true during weapon fire animation
-      if (entity.stats.isInfantry) {
-        entity.isFiringAnim = true;
-        // E1 DO_FIRE_WEAPON: 8 frames at Rate=1 = 8 ticks, +1 tick for Doing_AI
-        // transition to DO_STAND_READY (Rate=0) which clears IsFiring.
-        // idata.cpp E1DoControls: DO_FIRE_WEAPON = {64, 8, 8} (Count=8).
-        entity.firingAnimTicks = 9;
-      }
-      consumeAmmoAfterSuccessfulFire(entity);
+  entity.animState = AnimState.ATTACK;
+  if (!canFireAtCoordFacingGate(entity, activeWeapon, targetLX, targetLY)) return;
 
-      // Apply scatter
-      let impactX = target.x;
-      let impactY = target.y;
-      if (entity.weapon.inaccuracy && entity.weapon.inaccuracy > 0) {
-        const scatter = entity.weapon.inaccuracy * CELL_SIZE;
-        const angle = ScenarioRandom.float() * Math.PI * 2;
-        const d = ScenarioRandom.float() * scatter;
-        impactX += Math.cos(angle) * d;
-        impactY += Math.sin(angle) * d;
-      }
+  let fireAtFacing256 = -1;
+  if (entity.stats.isInfantry) {
+    const fireLaunch = entity.isProne
+      ? infantryProneLaunch(entity.type)
+      : infantryFireLaunch(entity.type);
+    if (!entity.firePrepActive) {
+      entity.firePrepActive = true;
+      entity.firePrepStage = 0;
+      const startedFireDoing = entity.startFireDoing(ctx.tick);
+      entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
 
-      // Splash damage at impact
-      if (entity.weapon.splash && entity.weapon.splash > 0) {
-        ctx.applySplashDamage(
-          { x: impactX, y: impactY }, entity.weapon, -1,
-          entity.house, entity,
-        );
-      }
+      const fireFacing = directionToLeptons(entity.leptonX, entity.leptonY, targetLX, targetLY);
+      entity.facing = fireFacing;
+      entity.desiredFacing = fireFacing;
+      entity.bodyFacing256 = (fireFacing * 32) & 0xFF;
+      entity.desiredFacing256 = entity.bodyFacing256;
+      entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
+      entity.firePrepFacing256 = entity.bodyFacing256;
 
-      // Weapon sound + effects (spatially positioned)
-      ctx.playSoundAt(ctx.weaponSound(entity.weapon.name), entity.pos.x, entity.pos.y);
-      const sx = entity.pos.x;
-      const sy = entity.pos.y;
-      ctx.effects.push({
-        type: 'muzzle', x: sx, y: sy,
-        frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-        muzzleColor: ctx.warheadMuzzleColor(entity.weapon.warhead),
-      } as Effect);
-      const projStyle = ctx.weaponProjectileStyle(entity.weapon.name);
-      const ffProjCfg = projectileVisualConfig(entity.weapon.name);
-      // Per-weapon projectile speed: compute travel frames from distance and projSpeed
-      const ffDistPx = Math.sqrt((impactX - sx) ** 2 + (impactY - sy) ** 2);
-      const travelFrames = calcProjectileTravelFrames(ffDistPx, entity.weapon.projSpeed);
-      ctx.effects.push({
-        type: 'projectile', x: sx, y: sy, frame: 0, maxFrames: travelFrames, size: 3,
-        startX: sx, startY: sy, endX: impactX, endY: impactY, projStyle,
-        ...ffProjCfg,
-      } as Effect);
-      // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
-      const ffExpSet = ctx.getWarheadProps(entity.weapon.warhead)?.explosionSet ?? 0;
-      const ffCell = worldToCell(impactX, impactY);
-      const ffLand: 'ground' | 'water' | 'air' =
-        (ctx.map.getTerrain(ffCell.cx, ffCell.cy) === Terrain.WATER) ? 'water' : 'ground';
-      const ffImpactSprite = combatAnim(entity.weapon.damage, ffExpSet, ffLand);
-      if (ffImpactSprite) {
-        ctx.effects.push({
-          type: 'explosion', x: impactX, y: impactY,
-          frame: 0, maxFrames: EXPLOSION_FRAMES[ffImpactSprite] ?? 17, size: 8, sprite: ffImpactSprite, spriteStart: 0,
-        } as Effect);
-        if (!entity.weapon.projectileSpeed) {
-          spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, ffImpactSprite, impactX, impactY);
-        }
-      }
-      const tc = worldToCell(impactX, impactY);
-      ctx.map.addDecal(tc.cx, tc.cy, 3, 0.3);
-      // Out of ammo — stop attacking (C++ parity: unit must rearm at service depot)
-      if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
-        entity.target = null;
-        entity.mission = Mission.GUARD;
-        entity.animState = AnimState.IDLE;
-        return;
+      if (entity.moveTarget &&
+          entity.moveTarget.lx === targetLX &&
+          entity.moveTarget.ly === targetLY) {
+        entity.moveTarget = null;
+        entity.path = [];
+        entity.pathIndex = 0;
+        entity.navComClearedTick = ctx.tick;
       }
     }
+    const prepStage = entity.firePrepUsesDoingStage ? entity.doingStage : entity.firePrepStage;
+    if (prepStage < fireLaunch) {
+      return;
+    }
+    fireAtFacing256 = entity.firePrepFacing256;
+    entity.firePrepActive = false;
+    entity.firePrepStage = 0;
+    entity.firePrepUsesDoingStage = false;
+  }
+
+  const fireAtSecondShot = entity.isSecondShot;
+  const rofBias = ctx.getROFBias(entity.house);
+  let rearmTime = Math.max(1, Math.round(activeWeapon.rof * rofBias));
+  if (entity.isTwoShooter()) {
+    if (!entity.isSecondShot) {
+      rearmTime = 3;
+    }
+    entity.isSecondShot = !entity.isSecondShot;
   } else {
-    entity.animState = AnimState.WALK;
-    entity.moveToward({ lx: pixelToLepton(target.x), ly: pixelToLepton(target.y) }, ctx.movementSpeed(entity));
+    entity.isSecondShot = true;
+  }
+  entity.attackCooldown = rearmTime;
+  if (entity.weapon2) entity.attackCooldown2 = rearmTime;
+  entity.burstCount = 0;
+  entity.burstDelay = 0;
+
+  if (entity.hasTurret) entity.isInRecoilState = true;
+  if (entity.disguisedAs) entity.disguisedAs = null;
+
+  const fireCoord = fireCoordForWeaponAtLatchedFacing(
+    entity, activeWeapon, fireAtFacing256, fireAtSecondShot,
+  );
+  const fireDirection256 = cppFireDirection256(entity, fireAtFacing256);
+  if (fireAtFacing256 >= 0) entity.firePrepFacing256 = -1;
+  const isMovingPlatform = !!entity.isDriving ||
+    entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+  const doScatter = isMovingPlatform || activeWeapon.warhead === 'AP' || !!activeWeapon.isFueled;
+  const scatter = cxxProjectileImpactAfterScatter(
+    activeWeapon,
+    fireCoord,
+    { lx: targetLX, ly: targetLY },
+    target,
+    doScatter,
+    fireDirection256,
+  );
+  const impactX = scatter.impactX;
+  const impactY = scatter.impactY;
+  const directHit = scatter.directHit;
+  const houseBias = ctx.getFirepowerBias(entity.house);
+  const projectileWeapon = activeWeapon.projSpeed !== undefined || activeWeapon.projectileSpeed !== undefined;
+
+  ctx.revealShooterFromFire?.(entity);
+
+  if (projectileWeapon) {
+    const projStrength = Math.max(1, Math.round(activeWeapon.damage * houseBias));
+    const projectileFacing256 = projectileInitialFacing256(activeWeapon, fireDirection256, scatter.facing256);
+    ctx.launchProjectile(
+      entity, null, activeWeapon, projStrength,
+      impactX, impactY, directHit,
+      fireCoord,
+      projectileFacing256,
+      { lx: targetLX, ly: targetLY },
+    );
+  } else {
+    if (activeWeapon.splash && activeWeapon.splash > 0) {
+      ctx.applySplashDamage(
+        { x: impactX, y: impactY }, activeWeapon, -1,
+        entity.house, entity,
+      );
+    }
+  }
+
+  maybeWarnIncomingSlowInfantryProjectile(ctx, entity, worldToCell(target.x, target.y));
+  consumeAmmoAfterSuccessfulFire(entity);
+
+  ctx.playSoundAt(ctx.weaponSound(activeWeapon.name), entity.pos.x, entity.pos.y);
+  ctx.effects.push({
+    type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
+    frame: 0, maxFrames: 4, size: 5,
+    sprite: (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'gunfire' : 'piff',
+    spriteStart: 0,
+    muzzleColor: ctx.warheadMuzzleColor(activeWeapon.warhead),
+    blendMode: (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'screen' : undefined,
+  } as Effect);
+
+  if (projectileWeapon) {
+    const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);
+    const projCfg = projectileVisualConfig(activeWeapon.name);
+    if (projStyle !== 'bullet' || leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY) > 512) {
+      const projDistPx = Math.sqrt((impactX - entity.pos.x) ** 2 + (impactY - entity.pos.y) ** 2);
+      const travelFrames = calcProjectileTravelFrames(projDistPx, activeWeapon.projSpeed);
+      ctx.effects.push({
+        type: 'projectile', x: entity.pos.x, y: entity.pos.y,
+        frame: 0, maxFrames: travelFrames, size: 3,
+        startX: entity.pos.x, startY: entity.pos.y,
+        endX: impactX, endY: impactY,
+        projStyle,
+        ...projCfg,
+      } as Effect);
+    }
+  }
+
+  if (entity.ammo === 0 && entity.maxAmmo > 0 && !entity.isAirUnit) {
+    entity.forceFirePos = null;
+    entity.mission = Mission.GUARD;
+    entity.animState = AnimState.IDLE;
   }
   // Cooldown decrement handled at index.ts:3814 (per-tick, all entities).
 }

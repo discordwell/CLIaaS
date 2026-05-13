@@ -14,16 +14,17 @@ import {
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL, COS_TABLE_256, SIN_TABLE_256,
   HOUSE_FACTION, PRONE_DAMAGE_BIAS,
 } from './types';
-import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS, isStructureUnderConstruction, getStructureOccupyCells, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, attachFallingParachuteAnim } from './entity';
+import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS, INSIGNIFICANT_STRUCTURE_TYPES, isStructureUnderConstruction, getStructureOccupyCells, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
 import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
+import { nearbyLocation } from './pathfinding';
 import { type AircraftContext, canTargetNaval, closestInfantryUnlimboSpot } from './aircraft';
 import { AI_BUILD_RULES } from './ai';
 import { ScenarioRandom } from './random';
-import { assignMission } from './missionLifecycle';
-import { type LogicAnim, spawnLogicAnim, spawnLogicAnimForSprite } from './logicAnim';
+import { assignMission, commence } from './missionLifecycle';
+import { type LogicAnim, type LogicAnimType, spawnLogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 import { getActiveTeams } from './team';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -49,13 +50,27 @@ const WALL_DAMAGE_LEVELS: Record<string, number> = {
   FENC: 2,
 };
 const WOODEN_WALL_TYPES = new Set(['WOOD']);
+// C++ odata.cpp OverlayTypeClass::IsHigh: among RA wall overlays, only BRIK
+// stops low-level bullets in BulletClass::Is_Forced_To_Explode.
+const HIGH_WALL_TYPES = new Set(['BRIK']);
 const CELL_CENTER_LEPTON = LEPTON_SIZE >> 1;
 const TORPEDO_CENTER_HIT_RADIUS = Math.trunc(LEPTON_SIZE / 3);
 const PIXEL_LEPTON_W = Math.trunc(LEPTON_SIZE / CELL_SIZE);
 const LIGHT_SPEED = 255;
+const BARREL_BULLET_SPEED = 30; // C++ MPH_MEDIUM_FAST used by BARL/BRL3 death bullets.
 const AIRCRAFT_DROPPING_SPEED_ADD = Math.trunc((12 * 40 + 128) / 256);
 const BASE_DEFENSE_SUSPEND_PRIORITY = 20;
 const BASE_DEFENSE_DELAY_MINUTES = 0.25;
+const OBJECT_TOP_LAYER_MIN_HEIGHT = Entity.FLIGHT_LEVEL_LEPTONS - Math.trunc(Entity.FLIGHT_LEVEL_LEPTONS / 3);
+const OBJECT_TOP_LAYER_MIN_PIXEL = leptonToPixel(OBJECT_TOP_LAYER_MIN_HEIGHT);
+const BARREL_FIRE_WEAPON: WeaponStats = {
+  name: 'BarrelFire',
+  damage: 200,
+  rof: 0,
+  range: 1,
+  warhead: 'Fire',
+  isInvisible: true,
+};
 
 /** C++ ini.cpp Get_MPHType: rules.ini Speed= is a percentage of 256
  *  leptons/tick, clamped at MPH_LIGHT_SPEED (255). Example: TorpTube
@@ -117,6 +132,10 @@ const STRUCTURE_TURRET_ROT: Record<string, number> = {
 export interface InflightProjectile {
   attackerId: number;
   attackerHouse?: House;  // structure-fired bullets have no Entity Payback in TS
+  /** C++ BulletClass::Payback can point at a BuildingClass; preserve object identity across ctx.structures splices. */
+  attackerStructure?: MapStructure;
+  /** Launch-time structure slot retained for legacy callers and diagnostics; not authoritative when attackerStructure exists. */
+  attackerStructureIndex?: number;
   targetId: number;
   weapon: WeaponStats;
   damage: number;
@@ -147,13 +166,17 @@ export interface InflightProjectile {
   dropHasAttachedAnim?: boolean; // C++ IsAnimAttached branch for IsParachuted bombs
   // C++ bullet.cpp:377-386 — IsFlameEquipped: flame/smoke trail every other tick
   isFlameEquipped: boolean;
+  flameTrailAnim?: 'smoke_puff' | 'fball_fade';
   flameToggle: boolean;  // alternates each tick; trail spawns when true (C++ IsToAnimate)
   // C++ FlyClass/FuseClass state for ordinary projectiles.
   logicalLX: number;
   logicalLY: number;
   headToLX: number;
   headToLY: number;
+  homingTargetLX?: number;
+  homingTargetLY?: number;
   facing256: number;
+  desiredFacing256?: number;
   speedAccum: number;
   speedAdd: number;
   fuseTimer: number;
@@ -163,6 +186,30 @@ export interface InflightProjectile {
   logicIndexHint?: number;
   /** Set when a partial Logic-cursor projectile flush has already run this bullet this tick. */
   processedLogicTick?: number;
+}
+
+type DamageSource = Entity | MapStructure;
+
+function isEntitySource(source: DamageSource): source is Entity {
+  return source instanceof Entity;
+}
+
+function sourceHouse(source: DamageSource): House {
+  return source.house;
+}
+
+function sourceIsAlive(source: DamageSource): boolean {
+  return source.alive && (!isEntitySource(source) || !source.inLimbo);
+}
+
+function sourceWeapon(source: DamageSource): WeaponStats | StructureWeapon | undefined {
+  return isEntitySource(source) ? source.weapon ?? undefined : source.weapon;
+}
+
+function sourceArmor(source: DamageSource): ArmorType {
+  return isEntitySource(source)
+    ? source.stats.armor
+    : (source.armor ?? STRUCTURE_ARMOR[source.type] ?? 'wood');
 }
 
 function structureCenterLeptons(s: MapStructure): { lx: number; ly: number } {
@@ -187,6 +234,90 @@ function moveCoordLeptons(coord: { lx: number; ly: number }, dir256: number, dis
     lx: coord.lx + ((COS_TABLE_256[dir] * dist) >> 7),
     ly: coord.ly - ((SIN_TABLE_256[dir] * dist) >> 7),
   };
+}
+
+function aircraftFireDirection256(attacker: Entity, weapon: WeaponStats, targetCoord: { lx: number; ly: number }): number {
+  if ((weapon.projectileROT ?? 0) !== 0 || weapon.isDropping) {
+    if (attacker.turretFacing256 >= 0) return attacker.turretFacing256 & 0xff;
+    if (attacker.facing256 >= 0) return attacker.facing256 & 0xff;
+    return (attacker.facing * 32) & 0xff;
+  }
+
+  const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
+    ? attacker.fireCoordForWeapon(weapon)
+    : { lx: attacker.leptonX, ly: attacker.leptonY };
+  return directionToLeptons256(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
+}
+
+function aircraftProjectileImpactAfterScatter(
+  attacker: Entity,
+  weapon: WeaponStats,
+  fireCoord: { lx: number; ly: number },
+  targetCoord: { lx: number; ly: number },
+  targetPixels: WorldPos,
+  targetIsInfantryOrCell: boolean,
+): { impactX: number; impactY: number; directHit: boolean; facing256?: number } {
+  const baseFireDir = aircraftFireDirection256(attacker, weapon, targetCoord);
+  const projectileHasFireDirection = (weapon.projectileROT ?? 0) !== 0 || !!weapon.isDropping;
+  let facing256: number | undefined = projectileHasFireDirection ? baseFireDir : undefined;
+  let impactX = targetPixels.x;
+  let impactY = targetPixels.y;
+  let directHit = true;
+
+  // C++ bullet.cpp:709-730. Aircraft helpers enter through TechnoClass::Fire_At
+  // just like ground units, but they bypass missionAI.ts where ground projectile
+  // scatter is precomputed. The INI typo in bbdata.cpp reads "Inaccuate", so
+  // rules.ini "Inaccurate=yes" does not set Class->IsInaccurate; coordinate and
+  // infantry AP/fueled shots still scatter through the explicit target-kind gate.
+  // C++ TechnoClass::Fire_At marks moving-platform inaccuracy from
+  // FootClass::IsDriving only. Fixed-wing aircraft can physically move while
+  // attacking with IsDriving=false, so position deltas are not equivalent here.
+  const movingPlatform = !!attacker.isDriving;
+  const doScatter =
+    movingPlatform ||
+    (targetIsInfantryOrCell && (weapon.warhead === 'AP' || !!weapon.isFueled));
+
+  if (!doScatter) {
+    return { impactX, impactY, directHit, facing256 };
+  }
+
+  const savedTag = ScenarioRandom._sourceTag;
+  if (attacker.isAirUnit) ScenarioRandom._sourceTag = 40001;
+  try {
+    const distLeptons = leptonDist(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
+    let scatterMax = Math.trunc(distLeptons / 16) - 0x0040;
+    scatterMax = Math.max(0, scatterMax);
+    scatterMax = Math.min(scatterMax, weapon.isArcing ? 0x0200 : 0x0100);
+
+    if (weapon.isArcing) {
+      const jitter = ScenarioRandom.nextInRange(0, 10);
+      facing256 = (baseFireDir + jitter - 5) & 0xff;
+      const scatterDist = ScenarioRandom.nextInRange(0, scatterMax);
+      const coordScatterSavedTag = ScenarioRandom._sourceTag;
+      ScenarioRandom._sourceTag = 50002;
+      const scatterDir = ScenarioRandom.nextInRange(0, 255);
+      ScenarioRandom._sourceTag = coordScatterSavedTag;
+      const scattered = moveCoordLeptons(targetCoord, scatterDir, scatterDist);
+      impactX = scattered.lx * CELL_SIZE / LEPTON_SIZE;
+      impactY = scattered.ly * CELL_SIZE / LEPTON_SIZE;
+    } else {
+      const scatterDist = ScenarioRandom.nextInRange(0, scatterMax);
+      const scatterDir = projectileHasFireDirection
+        ? baseFireDir
+        : directionToLeptons256(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
+      facing256 = scatterDir;
+      const scattered = moveCoordLeptons(targetCoord, scatterDir, scatterDist);
+      impactX = scattered.lx * CELL_SIZE / LEPTON_SIZE;
+      impactY = scattered.ly * CELL_SIZE / LEPTON_SIZE;
+    }
+  } finally {
+    ScenarioRandom._sourceTag = savedTag;
+  }
+
+  const dx = impactX - targetPixels.x;
+  const dy = impactY - targetPixels.y;
+  directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
+  return { impactX, impactY, directHit, facing256 };
 }
 
 function structureTurretFacing256(s: MapStructure, target?: Entity): number {
@@ -316,6 +447,44 @@ function withScenarioRandomSourceTag<T>(tag: number, fn: () => T): T {
   }
 }
 
+function splashTrace(event: Record<string, unknown>): void {
+  const trace = (globalThis as { __easterSplashTrace?: Array<Record<string, unknown>> }).__easterSplashTrace;
+  if (trace) trace.push(event);
+}
+
+function projectileTrace(event: Record<string, unknown>): void {
+  const trace = (globalThis as { __easterProjectileTrace?: Array<Record<string, unknown>> }).__easterProjectileTrace;
+  if (trace) trace.push(event);
+}
+
+function damageTrace(event: Record<string, unknown>): void {
+  const trace = (globalThis as { __easterDamageTrace?: Array<Record<string, unknown>> }).__easterDamageTrace;
+  if (trace) {
+    trace.push({
+      ...event,
+      stack: new Error().stack?.split('\n').slice(2, 7).map(line => line.trim()),
+    });
+  }
+}
+
+function entityInTopLayer(entity: Entity): boolean {
+  // C++ AircraftClass::In_Which_Layer forces fixed-wing aircraft into TOP
+  // for any nonzero Height. Non-fixed aircraft use ObjectClass' 2/3
+  // FLIGHT_LEVEL threshold; TS stores their aircraft height in pixels.
+  if (entity.stats.isAircraft) {
+    if (entity.stats.isFixedWing) return entity.flightAltitude > 0;
+    return entity.flightAltitude >= OBJECT_TOP_LAYER_MIN_PIXEL;
+  }
+  return entity.fallHeightLeptons >= OBJECT_TOP_LAYER_MIN_HEIGHT;
+}
+
+function entityOccupiesCellForExplosionDamage(entity: Entity): boolean {
+  // Explosion_Damage snapshots Cell_Occupier() chains. Top-layer FootClass
+  // objects are redrawn/submitted to the render layer, but MARK_DOWN does not
+  // Place_Down into Cell_Occupier, so ground explosions cannot collect them.
+  return !entityInTopLayer(entity);
+}
+
 function coordScatterFromCell(cellCx: number, cellCy: number, radiusLeptons: number): { x: number; y: number } {
   const dir = withScenarioRandomSourceTag(50002, () => ScenarioRandom.nextInRange(0, 255));
   const radiusPx = radiusLeptons * CELL_SIZE / LEPTON_SIZE;
@@ -326,8 +495,33 @@ function coordScatterFromCell(cellCx: number, cellCy: number, radiusLeptons: num
   };
 }
 
-function submitBuildingFireSmall(ctx: CombatContext, x: number, y: number, delay: number, loop: number): void {
+function reserveBuildingAnimSlot(ctx: CombatContext): boolean {
+  return !ctx.reserveAnimSlot || ctx.reserveAnimSlot();
+}
+
+function submitBuildingFireSmall(
+  ctx: CombatContext,
+  x: number,
+  y: number,
+  delay: number,
+  loop: number,
+  animSlotReserved = false,
+  attachedStructureIndex?: number,
+): void {
+  if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
   const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  if (delay === 0) {
+    spawnLogicAnim(
+      logicAnims, ctx.effects, 'fire_small', x, y, loop, true,
+      ctx.logicAnimsAlreadyProcessed === true,
+      ctx.logicIndexHintForNewObject?.(),
+      ctx.logicIndexHintForNewObject,
+      ctx.reserveAnimSlot,
+      true,
+      attachedStructureIndex,
+    );
+    return;
+  }
   logicAnims.push({
     type: 'fire_small',
     x,
@@ -337,6 +531,8 @@ function submitBuildingFireSmall(ctx: CombatContext, x: number, y: number, delay
     loops: Math.max(1, loop) * 2,
     delay,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    attachedStructureIndex,
   });
   ctx.effects.push({
     type: 'explosion',
@@ -350,8 +546,29 @@ function submitBuildingFireSmall(ctx: CombatContext, x: number, y: number, delay
   } as Effect);
 }
 
-function submitBuildingFireMedium(ctx: CombatContext, x: number, y: number, delay: number, loop: number): void {
+function submitBuildingFireMedium(
+  ctx: CombatContext,
+  x: number,
+  y: number,
+  delay: number,
+  loop: number,
+  animSlotReserved = false,
+  attachedStructureIndex?: number,
+): void {
+  if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
   const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  if (delay === 0) {
+    spawnLogicAnim(
+      logicAnims, ctx.effects, 'fire_med', x, y, loop, true,
+      ctx.logicAnimsAlreadyProcessed === true,
+      ctx.logicIndexHintForNewObject?.(),
+      ctx.logicIndexHintForNewObject,
+      ctx.reserveAnimSlot,
+      true,
+      attachedStructureIndex,
+    );
+    return;
+  }
   logicAnims.push({
     type: 'fire_med',
     x,
@@ -361,6 +578,8 @@ function submitBuildingFireMedium(ctx: CombatContext, x: number, y: number, dela
     loops: Math.max(1, loop) * 3,
     delay,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    attachedStructureIndex,
   });
   submitBuildingFireEffect(ctx, 'fire2', x, y, delay, 12);
 }
@@ -378,13 +597,82 @@ function submitBuildingFireEffect(ctx: CombatContext, sprite: string, x: number,
   } as Effect);
 }
 
+function submitBuildingAttachedLogicAnim(
+  ctx: CombatContext,
+  type: LogicAnimType,
+  x: number,
+  y: number,
+  loop: number,
+  attachedStructureIndex: number | undefined,
+  animSlotReserved = false,
+): void {
+  if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  spawnLogicAnim(
+    logicAnims,
+    ctx.effects,
+    type,
+    x,
+    y,
+    loop,
+    true,
+    ctx.logicAnimsAlreadyProcessed === true,
+    ctx.logicIndexHintForNewObject?.(),
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+    true,
+    attachedStructureIndex,
+  );
+}
+
+function submitOilfieldBurn(
+  ctx: CombatContext,
+  s: MapStructure,
+  attachedStructureIndex: number | undefined,
+): void {
+  if (!reserveBuildingAnimSlot(ctx)) return;
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  // C++ building.cpp:1409: Coord_Add(Coord, 0x00400130L). In RA's packed
+  // coordinate this is +0x0130 leptons X and +0x0040 leptons Y.
+  const x = s.cx * CELL_SIZE + 0x0130 * CELL_SIZE / LEPTON_SIZE;
+  const y = s.cy * CELL_SIZE + 0x0040 * CELL_SIZE / LEPTON_SIZE;
+  logicAnims.push({
+    type: 'oilfield_burn',
+    x,
+    y,
+    stage: 0,
+    timer: 1,
+    loops: 255,
+    delay: 1,
+    isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    attachedStructureIndex,
+  });
+  ctx.effects.push({
+    type: 'explosion',
+    x,
+    y,
+    frame: -1,
+    maxFrames: EXPLOSION_FRAMES.flmspt ?? 66,
+    size: 16,
+    sprite: 'flmspt',
+    spriteStart: 0,
+  } as Effect);
+}
+
 function isRenovatorSource(source?: Entity): boolean {
   return source?.type === UnitType.I_MECH;
 }
 
-function runBuildingDamageStateEffects(ctx: CombatContext, s: MapStructure, warhead: WarheadType, source?: Entity): void {
+function runBuildingDamageStateEffects(ctx: CombatContext, s: MapStructure, warhead: WarheadType, source: Entity | undefined, isResultHalf: boolean): void {
   const cells = getStructureOccupyCells(s.type, s.cx, s.cy);
   const [width, height] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+  const attachedStructureIndex = ctx.structures.indexOf(s);
+  const attachedIndex = attachedStructureIndex >= 0 ? attachedStructureIndex : undefined;
+
+  if (isResultHalf && s.type === 'V19') {
+    submitOilfieldBurn(ctx, s, attachedIndex);
+  }
 
   for (const cell of cells) {
     if (warhead === 'Fire') {
@@ -394,22 +682,28 @@ function runBuildingDamageStateEffects(ctx: CombatContext, s: MapStructure, warh
         case 3:
         case 4:
         case 5: {
-          const loop = ScenarioRandom.nextInRange(1, 3);
-          const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
-          submitBuildingFireSmall(ctx, pos.x, pos.y, 0, loop);
+          if (reserveBuildingAnimSlot(ctx)) {
+            const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+            const loop = ScenarioRandom.nextInRange(1, 3);
+            submitBuildingAttachedLogicAnim(ctx, 'on_fire_small', pos.x, pos.y, loop, attachedIndex, true);
+          }
           break;
         }
         case 6:
         case 7:
         case 8: {
-          const loop = ScenarioRandom.nextInRange(1, 3);
-          const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
-          submitBuildingFireMedium(ctx, pos.x, pos.y, 0, loop);
+          if (reserveBuildingAnimSlot(ctx)) {
+            const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+            const loop = ScenarioRandom.nextInRange(1, 3);
+            submitBuildingAttachedLogicAnim(ctx, 'on_fire_med', pos.x, pos.y, loop, attachedIndex, true);
+          }
           break;
         }
         case 9: {
-          const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
-          submitBuildingFireEffect(ctx, 'fire1', pos.x, pos.y, 1, 16);
+          if (reserveBuildingAnimSlot(ctx)) {
+            const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+            submitBuildingAttachedLogicAnim(ctx, 'on_fire_big', pos.x, pos.y, 1, attachedIndex, true);
+          }
           break;
         }
         default:
@@ -421,17 +715,162 @@ function runBuildingDamageStateEffects(ctx: CombatContext, s: MapStructure, warh
     if (!ScenarioRandom.percentChance(50)) continue;
     if (isRenovatorSource(source)) continue;
 
-    // C++ building.cpp:1459 evaluates this constructor path in source order:
-    // Coord_Scatter, start frame, then loop multiplier.
-    // The SCG08EA tick 1309 WASM trace pins this ordering.
-    const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
-    const delay = ScenarioRandom.nextInRange(0, 7);
-    const loop = ScenarioRandom.nextInRange(1, 3);
-    submitBuildingFireSmall(ctx, pos.x, pos.y, delay, loop);
+    // C++ AnimClass::operator new runs before constructor arguments; when the
+    // fixed heap is full, Coord_Scatter/start-frame/loop RNG are skipped.
+    if (reserveBuildingAnimSlot(ctx)) {
+      const pos = coordScatterFromCell(cell.cx, cell.cy, 0x0060);
+      const delay = ScenarioRandom.nextInRange(0, 7);
+      const loop = ScenarioRandom.nextInRange(1, 3);
+      submitBuildingFireSmall(ctx, pos.x, pos.y, delay, loop, true, attachedIndex);
+    }
   }
 }
 
-function submitBuildingFballEffect(ctx: CombatContext, x: number, y: number, delay: number, size = 10): void {
+function detachStructureAttachedAnims(ctx: CombatContext, s: MapStructure): void {
+  const attachedStructureIndex = ctx.structures.indexOf(s);
+  if (attachedStructureIndex < 0) return;
+  for (const anim of ctx.logicAnims ?? []) {
+    if (anim.attachedStructureIndex === attachedStructureIndex) {
+      anim.deleteOnNextProcess = true;
+    }
+  }
+}
+
+function detachStructureFromTargeting(ctx: CombatContext, s: MapStructure): void {
+  s.targetEntityId = undefined;
+  const structureIndex = ctx.structures.indexOf(s);
+  for (const proj of ctx.inflightProjectiles) {
+    const sourceMatches =
+      proj.attackerStructure === s ||
+      (!proj.attackerStructure && structureIndex >= 0 && proj.attackerStructureIndex === structureIndex);
+    if (sourceMatches) {
+      proj.attackerStructure = undefined;
+      proj.attackerStructureIndex = undefined;
+    }
+  }
+  for (const entity of ctx.entities) {
+    if (entity.targetStructure !== s) continue;
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
+    entity.firePrepActive = false;
+    entity.firePrepStage = 0;
+    entity.firePrepUsesDoingStage = false;
+    if (entity.stats.isInfantry) {
+      entity.isFiringAnim = false;
+      entity.firingAnimTicks = 0;
+    }
+  }
+  for (const team of getActiveTeams()) {
+    team.detachTargetStructure(s);
+  }
+}
+
+function isCellTargetWorld(pos: WorldPos, cx: number, cy: number): boolean {
+  const target = cellTargetToLepton(cx, cy);
+  return pixelToLepton(pos.x) === target.lx && pixelToLepton(pos.y) === target.ly;
+}
+
+function detachCellTargetFromTargeting(ctx: CombatContext, cx: number, cy: number): void {
+  const target = cellTargetToLepton(cx, cy);
+  for (const entity of ctx.entities) {
+    let detachedTarCom = false;
+    if (entity.forceFirePos && isCellTargetWorld(entity.forceFirePos, cx, cy)) {
+      entity.forceFirePos = null;
+      detachedTarCom = true;
+    }
+    if (entity.moveTarget?.lx === target.lx && entity.moveTarget.ly === target.ly) {
+      entity.moveTarget = null;
+      entity.path = [];
+      entity.pathIndex = 0;
+    }
+    if (detachedTarCom) {
+      entity.firePrepActive = false;
+      entity.firePrepStage = 0;
+      entity.firePrepUsesDoingStage = false;
+      entity.firePrepFacing256 = -1;
+      if (entity.stats.isInfantry) {
+        entity.isFiringAnim = false;
+        entity.firingAnimTicks = 0;
+      }
+    }
+  }
+  for (const team of getActiveTeams()) {
+    team.detachTargetCell({ cx, cy });
+  }
+}
+
+function clearSuspendedMission(entity: Entity): void {
+  entity.suspendedMission = null;
+  entity.suspendedTarget = null;
+  entity.suspendedTargetStructure = null;
+  entity.suspendedForceFirePos = null;
+  entity.suspendedMoveTarget = null;
+  entity.suspendedMoveTargetEntityRef = null;
+}
+
+function restoreSuspendedMissionAfterDetach(ctx: CombatContext, entity: Entity, detached: Entity): void {
+  if (entity.suspendedTarget === detached) {
+    clearSuspendedMission(entity);
+    return;
+  }
+  if (entity.suspendedMission === null) return;
+
+  const mission = entity.suspendedMission;
+  const target = entity.suspendedTarget;
+  const targetStructure = entity.suspendedTargetStructure;
+  const forceFirePos = entity.suspendedForceFirePos;
+  const moveTarget = entity.suspendedMoveTarget;
+  const moveTargetEntityRef = entity.suspendedMoveTargetEntityRef;
+  const moveTargetEntityRefLX = entity.suspendedMoveTargetEntityRefLX;
+  const moveTargetEntityRefLY = entity.suspendedMoveTargetEntityRefLY;
+  clearSuspendedMission(entity);
+
+  assignMission(entity, mission);
+  entity.target = target && target.alive && !target.inLimbo ? target : null;
+  entity.targetStructure = targetStructure?.alive ? targetStructure : null;
+  entity.forceFirePos = forceFirePos ? { ...forceFirePos } : null;
+  if (moveTargetEntityRef && moveTargetEntityRef.alive && !moveTargetEntityRef.inLimbo) {
+    entity.moveTargetEntityRef = moveTargetEntityRef;
+    entity.moveTarget = { lx: moveTargetEntityRef.leptonX, ly: moveTargetEntityRef.leptonY };
+    entity.moveTargetEntityRefLX = moveTargetEntityRef.leptonX;
+    entity.moveTargetEntityRefLY = moveTargetEntityRef.leptonY;
+  } else if (moveTarget) {
+    entity.moveTarget = { ...moveTarget };
+    entity.moveTargetEntityRef = null;
+    entity.moveTargetEntityRefLX = moveTargetEntityRefLX;
+    entity.moveTargetEntityRefLY = moveTargetEntityRefLY;
+  } else {
+    entity.moveTarget = null;
+    entity.moveTargetEntityRef = null;
+  }
+  entity.path = [];
+  entity.pathIndex = 0;
+  if (!entity.stats.isInfantry && !entity.isAirUnit && entity.moveTarget) {
+    ctx.startDriveClassMove?.(entity);
+  }
+}
+
+function submitBuildingFballEffect(
+  ctx: CombatContext,
+  x: number,
+  y: number,
+  delay: number,
+  size = 10,
+  animSlotReserved = false,
+): void {
+  if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  logicAnims.push({
+    type: 'fball1',
+    x,
+    y,
+    stage: 0,
+    timer: 1,
+    loops: 1,
+    delay,
+    isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+  });
   ctx.effects.push({
     type: 'explosion',
     x,
@@ -444,20 +883,78 @@ function submitBuildingFballEffect(ctx: CombatContext, x: number, y: number, del
   } as Effect);
 }
 
-function submitBuildingSmokeEffect(ctx: CombatContext, x: number, y: number, startFrame: number, delay: number): void {
+function submitBuildingSmokeEffect(
+  ctx: CombatContext,
+  x: number,
+  y: number,
+  delay: number,
+  loop: number,
+  animSlotReserved = false,
+): void {
+  if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
   ctx.effects.push({
     type: 'explosion',
     x,
     y,
     frame: -delay,
-    maxFrames: 80,
+    maxFrames: EXPLOSION_FRAMES.smoke_m ?? 91,
     size: 10,
     sprite: 'smoke_m',
-    spriteStart: startFrame,
-    loopStart: 0,
-    loopEnd: 20,
-    loops: 4,
+    spriteStart: 0,
+    loopStart: 67,
+    loopEnd: EXPLOSION_FRAMES.smoke_m ?? 91,
+    loops: Math.max(1, loop) * 6,
+    cppLogicSlot: true,
   } as Effect);
+}
+
+function treeKey(tree: MapTree): number {
+  return tree.cy * MAP_CELLS + tree.cx;
+}
+
+function terrainBurnCoord(tree: MapTree, yOffsetLeptons: number): { x: number; y: number } {
+  const centerOff = TREE_CENTER_OFFSET[tree.type] ?? [CELL_SIZE / 2, CELL_SIZE / 2];
+  return {
+    x: tree.cx * CELL_SIZE + centerOff[0],
+    y: tree.cy * CELL_SIZE + centerOff[1] + yOffsetLeptons * CELL_SIZE / LEPTON_SIZE,
+  };
+}
+
+function submitTreeBurnAnim(ctx: CombatContext, tree: MapTree, type: LogicAnimType, yOffsetLeptons: number, delay: number): void {
+  if (ctx.reserveAnimSlot && !ctx.reserveAnimSlot()) return;
+  const pos = terrainBurnCoord(tree, yOffsetLeptons);
+  spawnLogicAnim(
+    ctx.logicAnims,
+    ctx.effects,
+    type,
+    pos.x,
+    pos.y,
+    1,
+    true,
+    ctx.logicAnimsAlreadyProcessed === true,
+    ctx.logicIndexHintForNewObject?.(),
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+    true,
+    undefined,
+    delay,
+    treeKey(tree),
+  );
+}
+
+function catchTreeFire(ctx: CombatContext, tree: MapTree): boolean {
+  if (tree.isCrumbling || tree.isOnFire || tree.immune) return false;
+  submitTreeBurnAnim(ctx, tree, 'burn_big', -0x50, 0);
+  submitTreeBurnAnim(ctx, tree, 'burn_med', -0xE0, 15);
+  tree.isOnFire = true;
+  return true;
+}
+
+function shortenTreeAttachedAnims(ctx: CombatContext, tree: MapTree): void {
+  const key = treeKey(tree);
+  for (const anim of ctx.logicAnims) {
+    if (anim.attachedTreeKey === key) anim.loops = 0;
+  }
 }
 
 function runBuildingDestroyedTakeDamageEffects(ctx: CombatContext, s: MapStructure): void {
@@ -467,25 +964,79 @@ function runBuildingDestroyedTakeDamageEffects(ctx: CombatContext, s: MapStructu
     ctx.map.addDecal(cell.cx, cell.cy, 10, 0.5);
 
     if (ScenarioRandom.percentChance(50)) {
-      // C++ argument evaluation in this path is left-to-right:
-      // Coord_Scatter, start frame, then delay.
-      const smallPos = coordScatterFromCell(cell.cx, cell.cy, 0x0080);
-      const smallDelay = ScenarioRandom.nextInRange(0, 7);
-      const smallLoop = ScenarioRandom.nextInRange(1, 3);
-      submitBuildingFireSmall(ctx, smallPos.x, smallPos.y, smallDelay, smallLoop);
+      // C++ allocation happens before constructor arguments, so a full heap
+      // skips Coord_Scatter/start-frame/loop RNG for this AnimClass only.
+      if (reserveBuildingAnimSlot(ctx)) {
+        const smallPos = coordScatterFromCell(cell.cx, cell.cy, 0x0080);
+        const smallDelay = ScenarioRandom.nextInRange(0, 7);
+        const smallLoop = ScenarioRandom.nextInRange(1, 3);
+        submitBuildingFireSmall(ctx, smallPos.x, smallPos.y, smallDelay, smallLoop, true);
+      }
 
       if (ScenarioRandom.percentChance(50)) {
-        const medPos = coordScatterFromCell(cell.cx, cell.cy, 0x0040);
-        const medDelay = ScenarioRandom.nextInRange(0, 7);
-        const medLoop = ScenarioRandom.nextInRange(1, 3);
-        submitBuildingFireMedium(ctx, medPos.x, medPos.y, medDelay, medLoop);
+        if (reserveBuildingAnimSlot(ctx)) {
+          const medPos = coordScatterFromCell(cell.cx, cell.cy, 0x0040);
+          const medDelay = ScenarioRandom.nextInRange(0, 7);
+          const medLoop = ScenarioRandom.nextInRange(1, 3);
+          submitBuildingFireMedium(ctx, medPos.x, medPos.y, medDelay, medLoop, true);
+        }
       }
     }
 
-    const fballPos = coordScatterFromCell(cell.cx, cell.cy, 0x0040);
-    const fballDelay = ScenarioRandom.nextInRange(0, 3);
-    submitBuildingFballEffect(ctx, fballPos.x, fballPos.y, fballDelay);
+    if (reserveBuildingAnimSlot(ctx)) {
+      const fballPos = coordScatterFromCell(cell.cx, cell.cy, 0x0040);
+      const fballDelay = ScenarioRandom.nextInRange(0, 3);
+      submitBuildingFballEffect(ctx, fballPos.x, fballPos.y, fballDelay, 10, true);
+    }
   }
+}
+
+function launchBarrelDeathBullet(ctx: CombatContext, s: MapStructure, dx: number, dy: number): void {
+  const start = structureCenterLeptons(s);
+  const target = cellTargetToLepton(s.cx + dx, s.cy + dy);
+  const fuseDist = leptonDist(start.lx, start.ly, target.lx, target.ly);
+  const travelFrames = Math.min(0xFF, Math.max(1, Math.trunc(fuseDist / BARREL_BULLET_SPEED) + 4));
+  const speedAdd = Math.trunc((BARREL_BULLET_SPEED * 255 + 128) / 256);
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+
+  ctx.inflightProjectiles.push({
+    attackerId: -1,
+    attackerHouse: s.house,
+    targetId: -1,
+    weapon: BARREL_FIRE_WEAPON,
+    damage: BARREL_FIRE_WEAPON.damage,
+    strength: BARREL_FIRE_WEAPON.damage,
+    speed: BARREL_BULLET_SPEED,
+    travelFrames,
+    currentFrame: 0,
+    directHit: true,
+    impactX: target.lx * CELL_SIZE / LEPTON_SIZE,
+    impactY: target.ly * CELL_SIZE / LEPTON_SIZE,
+    attackerIsPlayer: false,
+    isArcing: false,
+    arcHeight: 0,
+    arcRiser: 0,
+    startX: start.lx * CELL_SIZE / LEPTON_SIZE,
+    startY: start.ly * CELL_SIZE / LEPTON_SIZE,
+    dogRiderId: -1,
+    fuelTimer: travelFrames,
+    isFueled: false,
+    isDropping: false,
+    dropHeight: 0,
+    isFlameEquipped: false,
+    flameToggle: false,
+    logicalLX: start.lx,
+    logicalLY: start.ly,
+    headToLX: target.lx,
+    headToLY: target.ly,
+    facing256: directionToLeptons256(start.lx, start.ly, target.lx, target.ly),
+    speedAccum: 0,
+    speedAdd,
+    fuseTimer: travelFrames,
+    armingTimer: 0,
+    proximity: fuseDist,
+    logicIndexHint,
+  });
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -493,6 +1044,7 @@ export interface AiStateSlice {
   lastBaseAttackTick: number;
   underAttack: boolean;
   iq: number;
+  isBaseBuilding?: boolean;
 }
 
 /** Context object providing combat functions access to game state and callbacks */
@@ -510,6 +1062,10 @@ export interface CombatContext {
   logicAnimsAlreadyProcessed?: boolean;
   /** Current C++-style Logic.Count() for a newly submitted sentient object. */
   logicIndexHintForNewObject?: () => number;
+  /** Move an existing object to the end of the C++ Logic order after Unlimbo. */
+  resubmitEntityToLogicEnd?: (entity: Entity) => void;
+  /** Reserve one C++ AnimClass heap slot. Returns false when Rule.AnimMax is full. */
+  reserveAnimSlot?: () => boolean;
   tick: number;
   playerHouse: House;
   scenarioId: string;
@@ -525,6 +1081,9 @@ export interface CombatContext {
   scenarioWarheadMeta: Record<string, WarheadMeta>;
   scenarioWarheadProps: Record<string, WarheadProps>;
   attackedTriggerNames: Set<string>;
+  /** C++ ObjectClass::IsToDamage reentrancy guard for nested Explosion_Damage. */
+  explosionDamageReservedEntityIds?: Set<number>;
+  explosionDamageReservedStructures?: Set<MapStructure>;
   map: GameMap;
 
   // damageStructure state
@@ -541,6 +1100,8 @@ export interface CombatContext {
   powerProduced: number;
 
   // Callbacks
+  recordUnitLost?(house: House): void;
+  recordBuildingLost?(house: House): void;
   isAllied(a: House, b: House): boolean;
   entitiesAllied(a: Entity, b: Entity): boolean;
   isPlayerControlled(e: Entity): boolean;
@@ -552,6 +1113,8 @@ export interface CombatContext {
   stopInfantryDriver?(entity: Entity): void;
   /** C++ InfantryClass::Assign_Destination line 1046 clear-current-cell predicate. */
   canStopInfantryDriverForAssignDestination?(entity: Entity): boolean;
+  /** C++ DriveClass::Assign_Destination immediate Start_Of_Move hook. */
+  startDriveClassMove?(entity: Entity): void;
   /** C++ TechnoClass::Unlimbo -> Enter_Idle_Mode(true) mission selection. */
   idleMission?(entity: Entity): Mission;
   /** C++ TechnoClass::Revealed(PlayerPtr) side effect for newly unlimboed objects. */
@@ -561,7 +1124,7 @@ export interface CombatContext {
   getArmorBias(house: House): number;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
-  damageStructure(s: MapStructure, damage: number, source?: Entity, warhead?: WarheadType): boolean;
+  damageStructure(s: MapStructure, damage: number, source?: Entity, warhead?: WarheadType, options?: StructureDamageOptions): boolean;
   /** C++ TeamClass::Suspend_Teams, triggered from TechnoClass::Base_Is_Attacked. */
   suspendTeamsByPriority?(house: House, priority: number): void;
   /** C++ HouseClass::Control.TechLevel, used by TechnoClass::Base_Is_Attacked. */
@@ -579,6 +1142,12 @@ export interface CombatContext {
   // Renderer access
   screenShake: number;
   screenFlash: number;
+}
+
+export interface StructureDamageOptions {
+  skipBaseAttack?: boolean;
+  /** C++ BuildingClass::Take_Damage(..., forced): forced destruction suppresses survivors. */
+  forced?: boolean;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
@@ -791,7 +1360,12 @@ export function killBridgeOccupants(ctx: CombatContext, cx: number, cy: number, 
 export function damageEntity(
   ctx: CombatContext, target: Entity, amount: number,
   warhead: WarheadType, attacker?: Entity,
-  options: { skipProneBias?: boolean; skipEntityArmorBias?: boolean; skipHouseArmorBias?: boolean } = {},
+  options: {
+    skipProneBias?: boolean;
+    skipEntityArmorBias?: boolean;
+    skipHouseArmorBias?: boolean;
+    sourceStructure?: MapStructure;
+  } = {},
 ): boolean {
   // C++ AircraftClass::Take_Damage halves positive damage while the aircraft
   // has Height before FootClass/TechnoClass/ObjectClass apply the remaining
@@ -806,10 +1380,36 @@ export function damageEntity(
   if (!options.skipHouseArmorBias && houseArmorBias !== 1.0 && amount > 0) {
     amount = Math.max(1, Math.round(amount / houseArmorBias));
   }
+  const hpBefore = target.hp;
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
+  const passengerHouses = target.passengers.map(p => p.house);
   const killed = target.takeDamage(amount, warhead, attacker, whProps, {
     skipProneBias: options.skipProneBias,
     skipArmorBias: options.skipEntityArmorBias,
+  });
+  if (killed) {
+    ctx.recordUnitLost?.(target.house);
+    for (const passengerHouse of passengerHouses) ctx.recordUnitLost?.(passengerHouse);
+  }
+  damageTrace({
+    tick: ctx.tick,
+    targetId: target.id,
+    targetType: target.type,
+    targetHouse: target.house,
+    targetCx: target.cell.cx,
+    targetCy: target.cell.cy,
+    amount,
+    warhead,
+    hpBefore,
+    hpAfter: target.hp,
+    killed,
+    attackerId: attacker?.id,
+    attackerType: attacker?.type,
+    attackerHouse: attacker?.house,
+    sourceStructureType: options.sourceStructure?.type,
+    sourceStructureHouse: options.sourceStructure?.house,
+    sourceStructureCx: options.sourceStructure?.cx,
+    sourceStructureCy: options.sourceStructure?.cy,
   });
   if (target.triggerName) {
     ctx.attackedTriggerNames.add(target.triggerName);
@@ -828,14 +1428,15 @@ export function damageEntity(
   }
   if (!killed && target.alive) {
     // C++ damage-response order:
-    //   1. FootClass::Take_Damage handles retaliation / team damage. If
-    //      retaliation is not allowed and the unit has no TarCom/NavCom, it
-    //      calls Scatter(0,true).
+	    //   1. FootClass::Take_Damage handles retaliation / team damage. If
+	    //      retaliation is not allowed and the unit has no TarCom/NavCom, it
+	    //      calls Scatter(0,true).
     //   2. InfantryClass::Take_Damage then calls Scatter(source_coord), whose
     //      Target_Legal(TarCom) guard suppresses voluntary scatter after a
     //      successful retaliation target assignment.
-    const didFootForcedScatter = shouldFootClassForcedScatter(ctx, target, attacker);
-    if (didFootForcedScatter) aiScatterOnDamage(ctx, target);
+	    const damageSource: DamageSource | undefined = attacker ?? options.sourceStructure;
+	    const didFootForcedScatter = shouldFootClassForcedScatter(ctx, target, damageSource);
+	    if (didFootForcedScatter) aiScatterOnDamage(ctx, target);
     // C++ infantry.cpp:432-436 — damaged non-human engineers guarding the
     // battlefield are forced into HUNT after FootClass::Take_Damage has run.
     // This ordering is important: FootClass may have queued a MOVE scatter, and
@@ -848,17 +1449,30 @@ export function damageEntity(
         (target.mission === Mission.GUARD || target.mission === Mission.AREA_GUARD)) {
       assignMission(target, Mission.HUNT);
     }
-    if (attacker) triggerRetaliation(ctx, target, attacker);
-    if (attacker || !didFootForcedScatter) aiScatterOnDamage(ctx, target, attacker);
-  }
-  return killed;
-}
+	    let didPostRetaliationForcedScatter = false;
+	    if (damageSource) {
+	      triggerRetaliation(ctx, target, damageSource);
+	      // C++ FootClass::Take_Damage calls Scatter(0,true) after
+	      // Is_Allowed_To_Retaliate(source) returns false. That predicate can
+	      // fail after its 50% threat-comparison RNG, so it cannot be fully
+	      // predicted by shouldFootClassForcedScatter before triggerRetaliation.
+	      if (shouldFootClassFallbackScatterNow(ctx, target)) {
+	        aiScatterOnDamage(ctx, target);
+	        didPostRetaliationForcedScatter = true;
+	      }
+	    }
+	    if (attacker && !didPostRetaliationForcedScatter) {
+	      aiScatterOnDamage(ctx, target, attacker);
+	    }
+	  }
+	  return killed;
+	}
 
 /** C++ foot.cpp:1228-1230 fallback scatter gate.
  *  This is distinct from InfantryClass::Take_Damage's later source scatter:
  *  FootClass calls Scatter(0,true) only when individual retaliation is not
  *  allowed and the unit is free to move. */
-function shouldFootClassForcedScatter(ctx: CombatContext, victim: Entity, attacker?: Entity): boolean {
+function shouldFootClassForcedScatter(ctx: CombatContext, victim: Entity, attacker?: DamageSource): boolean {
   // Current TS non-infantry scatter is handled by the existing virtual scatter
   // path below. Keep this helper scoped to the infantry RNG path (53003).
   if (!victim.stats.isInfantry) return false;
@@ -866,41 +1480,53 @@ function shouldFootClassForcedScatter(ctx: CombatContext, victim: Entity, attack
   // individual retaliation/scatter fallback.
   if (victim.teamRef) return false;
 
-  const mc = MISSION_CONTROL[victim.mission];
-  if (!mc?.isScatter) return false;
-  if (victim.isDriving) return false;
-  if (victim.target?.alive || victim.targetStructure?.alive || victim.moveTarget) return false;
-  if (victim.isAirUnit || victim.isNavalUnit) return false;
+	  const mc = MISSION_CONTROL[victim.mission];
+	  if (!mc?.isScatter) return false;
+	  if (victim.isTethered || victim.isDriving) return false;
+	  if (victim.target?.alive || victim.targetStructure?.alive || victim.moveTarget) return false;
+	  if (victim.isAirUnit || victim.isNavalUnit) return false;
   // Rule.IsScatter defaults false; only non-human houses take this fallback.
   if (victim.house === ctx.playerHouse) return false;
 
   // If C++ Is_Allowed_To_Retaliate would pass, FootClass does not take the
   // fallback branch. Keep this deterministic; the later AI threat-comparison
   // RNG is intentionally not consumed from this predicate.
-  if (!attacker || !attacker.alive) return true;
-  if (ctx.entitiesAllied(victim, attacker)) return true;
+  if (!attacker || !sourceIsAlive(attacker)) return true;
+  if (ctx.isAllied(victim.house, sourceHouse(attacker))) return true;
   if (!MISSION_CONTROL[victim.mission]?.isRetaliate) return true;
   if (victim.stats.isAircraft && victim.stats.isFixedWing) return true;
 
   const isVictimHumanHouse = victim.house === ctx.playerHouse;
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
-  if (shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) return false;
+  if (isEntitySource(attacker) && shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) return false;
 
   if (!victim.weapon) return true;
-  if (getWarheadMult(victim.weapon.warhead, attacker.stats.armor, ctx.warheadOverrides ?? {}) <= 0) return true;
-  if (attacker.stats.isCanine || attacker.type === UnitType.I_DOG) return true;
-  if (attacker.isAirUnit && attacker.flightAltitude > 0) {
+  if (getWarheadMult(victim.weapon.warhead, sourceArmor(attacker), ctx.warheadOverrides ?? {}) <= 0) return true;
+  if (isEntitySource(attacker) && (attacker.stats.isCanine || attacker.type === UnitType.I_DOG)) return true;
+  if (isEntitySource(attacker) && attacker.isAirUnit && attacker.flightAltitude > 0) {
     const hasAA = victim.weapon?.isAntiAir || victim.weapon2?.isAntiAir;
     if (!hasAA) return true;
   }
-  if (!canTargetNaval(victim, attacker)) return true;
+  if (isEntitySource(attacker) && !canTargetNaval(victim, attacker)) return true;
   if (isVictimHumanHouse) {
-    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
+    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && isEntitySource(attacker) && attacker.stats.isInfantry;
     if (!isTanyaVsInfantry) return true;
   }
   if (victim.isSuicide) return true;
 
-  return false;
+	  return false;
+	}
+
+function shouldFootClassFallbackScatterNow(ctx: CombatContext, victim: Entity): boolean {
+  if (victim.teamRef) return false;
+  const mc = MISSION_CONTROL[victim.mission];
+  if (!mc?.isScatter) return false;
+  if (victim.isTethered || victim.isDriving) return false;
+  if (victim.target?.alive || victim.targetStructure?.alive || victim.moveTarget) return false;
+  if (victim.isAirUnit || victim.isNavalUnit) return false;
+  // rules.ini PlayerScatter=no, so only non-human houses take this fallback.
+  if (victim.house === ctx.playerHouse) return false;
+  return true;
 }
 
 /** C++ InfantryClass::Assign_Destination for scatter-created cell targets.
@@ -917,9 +1543,7 @@ function assignInfantryScatterDestination(ctx: CombatContext, entity: Entity, ce
         entity.isDriving = false;
         entity.headToLX = 0;
         entity.headToLY = 0;
-      }
-      if (entity.nonInterruptAnimTicks <= 0) {
-        entity.doing = 'stand_ready';
+        entity.doStopDriverAction(ctx.tick);
       }
     }
     entity.path = [];
@@ -941,37 +1565,39 @@ function assignInfantryScatterDestination(ctx: CombatContext, entity: Entity, ce
  *  - Must be forced OR IsFraidyCat to actually execute scatter (line 1885)
  *  - Calculate direction AWAY from threat with random +-2 facing offset
  *  - Try 8 directions starting from away-direction, pick first passable cell
- *  - Only infantry scatters directionally (non-infantry uses old random scatter)
+ *  - Infantry scatters directionally; UnitClass zero-threat scatter uses
+ *    Map.Nearby_Location and does not consume Scenario RNG.
  */
 export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?: Entity): void {
   // Only infantry uses directional scatter (C++ infantry.cpp override)
   if (!entity.stats.isInfantry) {
     // C++ FootClass::Take_Damage fallback scatter for DriveClass descendants
-    // (foot.cpp:1221-1227) only fires when the object did not retaliate, has no
-    // TarCom/NavCom, is not driving, is not aircraft/vessel, and its mission is
-    // scatterable. DriveClass::Scatter(0,true) then consumes exactly one
-    // Random_Pick(0,2) facing offset and Assign_Destination(cell); it does not
-    // switch the mission to MOVE.
+    // calls virtual Scatter(0,true). UnitClass overrides the zero-threat branch:
+    // Assign_Destination(As_Target(Map.Nearby_Location(...))) with no Scenario
+    // RNG. Threat-based DriveClass::Scatter is used only when threat != 0.
     if (entity.teamRef) return;
     if (entity.isAirUnit || entity.isNavalUnit) return;
     const mc = MISSION_CONTROL[entity.mission];
-    if (mc && !mc.isScatter) return;
-    if (entity.isDriving || entity.target?.alive || entity.moveTarget) return;
+    if (mc && (!mc.isScatter || mc.isParalyzed)) return;
+    if (entity.isDriving ||
+        entity.target?.alive ||
+        entity.targetStructure?.alive ||
+        entity.forceFirePos ||
+        entity.moveTarget) return;
     if (entity.house === ctx.playerHouse) return;
+    if (entity.bodyFacing256 >= 0 &&
+        entity.desiredFacing256 >= 0 &&
+        entity.bodyFacing256 !== entity.desiredFacing256) return;
 
-    const offset = ScenarioRandom.nextInRange(0, 2) - 1;
-    const startFacing = ((entity.facing + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
-    const cx = entity.cell.cx;
-    const cy = entity.cell.cy;
-    for (let face = 0; face < DIR_COUNT; face++) {
-      const dir = (startFacing + face) % DIR_COUNT;
-      const ncx = cx + DIR_DX[dir];
-      const ncy = cy + DIR_DY[dir];
-      if (ncx >= 0 && ncx < MAP_CELLS && ncy >= 0 && ncy < MAP_CELLS &&
-          ctx.map.isPassable(ncx, ncy)) {
-        entity.moveTarget = cellTargetToLepton(ncx, ncy);
-        break;
-      }
+    const cell = nearbyLocation(
+      ctx.map,
+      entity.cell,
+      entity.isNavalUnit,
+      Math.max(0, ctx.tick - 1),
+    );
+    if (cell) {
+      entity.moveTarget = cellTargetToLepton(cell.cx, cell.cy);
+      entity.pathThreshold = 1;
     }
     return;
   }
@@ -1068,11 +1694,34 @@ export function fireWeaponAt(
     // AircraftClass::Fire_At routes through FootClass/TechnoClass::Fire_At in
     // C++, so even light-speed invisible aircraft weapons create BulletClass
     // objects. Damage and Coord_Scatter happen during BulletClass::AI.
+    const targetCoord = entityTargetLeptons(target);
     const impact = entityTargetPixels(target);
+    const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
+      ? attacker.fireCoordForWeapon(weapon)
+      : { lx: attacker.leptonX, ly: attacker.leptonY };
+    const scatter = aircraftProjectileImpactAfterScatter(
+      attacker,
+      weapon,
+      fireCoord,
+      targetCoord,
+      impact,
+      target.stats.isInfantry,
+    );
     const strength = weapon.damage > 0
       ? Math.max(1, Math.round(weapon.damage * houseBias))
       : Math.round(weapon.damage * houseBias);
-    launchProjectile(ctx, attacker, target, weapon, strength, impact.x, impact.y, true);
+    launchProjectile(
+      ctx,
+      attacker,
+      target,
+      weapon,
+      strength,
+      scatter.impactX,
+      scatter.impactY,
+      scatter.directHit,
+      fireCoord,
+      scatter.facing256,
+    );
     ctx.effects.push({
       type: 'muzzle',
       x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
@@ -1116,10 +1765,34 @@ export function fireWeaponAtCoord(
 ): void {
   const houseBias = ctx.getFirepowerBias(attacker.house);
   if (weapon.projSpeed !== undefined || weapon.projectileSpeed !== undefined) {
+    const targetCoord = { lx: pixelToLepton(impact.x), ly: pixelToLepton(impact.y) };
+    const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
+      ? attacker.fireCoordForWeapon(weapon)
+      : { lx: attacker.leptonX, ly: attacker.leptonY };
+    const scatter = aircraftProjectileImpactAfterScatter(
+      attacker,
+      weapon,
+      fireCoord,
+      targetCoord,
+      impact,
+      true,
+    );
     const strength = weapon.damage > 0
       ? Math.max(1, Math.round(weapon.damage * houseBias))
       : Math.round(weapon.damage * houseBias);
-    launchProjectile(ctx, attacker, null, weapon, strength, impact.x, impact.y, true);
+    launchProjectile(
+      ctx,
+      attacker,
+      null,
+      weapon,
+      strength,
+      scatter.impactX,
+      scatter.impactY,
+      scatter.directHit,
+      fireCoord,
+      scatter.facing256,
+      targetCoord,
+    );
     ctx.effects.push({
       type: 'muzzle',
       x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
@@ -1183,6 +1856,9 @@ function maybeSuspendTeamsForBaseAttack(
     attacker.stats.isInfantry || (!attacker.isAirUnit && !attacker.isNavalUnit);
   if (!attackerIsInfantryOrUnit) return;
   if (attackedObjectHasPrimaryWeapon) return;
+  if (!(attackedObject instanceof Entity) &&
+      attackedObject &&
+      INSIGNIFICANT_STRUCTURE_TYPES.has(attackedObject.type)) return;
   if (attacker.baseAttackTimer > 0) return;
 
   ctx.suspendTeamsByPriority(attackedHouse, BASE_DEFENSE_SUSPEND_PRIORITY);
@@ -1230,7 +1906,7 @@ function recruitBaseDefenders(
         entity.archiveTargetLeptons = archiveCoord;
       }
     }
-    entity.target = attacker;
+    assignEntityTarCom(entity, attacker);
     riskTotal += technoRisk(entity);
     if (riskTotal > desired) break;
   }
@@ -1331,6 +2007,12 @@ function takeDamageSourceTag(attackedObject?: Entity | MapStructure): number | u
   return 52028; // RTTI_UNIT
 }
 
+function assignEntityTarCom(entity: Entity, target: Entity | null): void {
+  entity.target = target;
+  entity.targetStructure = null;
+  entity.forceFirePos = null;
+}
+
 function movementZoneCellsForBaseDefense(map: GameMap, start: { cx: number; cy: number }): Set<number> {
   const result = new Set<number>();
   const startIdx = start.cy * MAP_CELLS + start.cx;
@@ -1426,11 +2108,39 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   trackLoss: boolean;
   friendlyFireLoss?: boolean;
   attacker?: Entity;
-}): void {
-  const kx = victim.pos.x;
-  const ky = victim.pos.y;
-  ctx.effects.push({ type: 'explosion', x: kx, y: ky, frame: 0, maxFrames: 18,
-    size: opts.explosionSize, sprite: 'fball1', spriteStart: 0 } as Effect);
+	}): void {
+	  const kx = victim.pos.x;
+	  const ky = victim.pos.y;
+	  const isGroundVehicle = !victim.stats.isInfantry && !victim.stats.isAircraft && !victim.stats.isVessel;
+	  const deathExplosionSprite = isGroundVehicle ? 'frag1' : 'fball1';
+	  if (isGroundVehicle) {
+	    // C++ unit.cpp:1009-1020 creates UnitTypeClass::Explosion before
+	    // crew/passenger ejection. RA's vehicle classes use ANIM_FRAG1 in udata.cpp,
+	    // and the AnimClass occupies a Logic slot even when the renderer also draws
+	    // a simple explosion effect.
+	    spawnLogicAnimForSprite(
+	      ctx.logicAnims,
+	      ctx.effects,
+	      deathExplosionSprite,
+	      kx,
+	      ky,
+	      false,
+	      ctx.logicAnimsAlreadyProcessed === true,
+	      ctx.logicIndexHintForNewObject?.(),
+	      ctx.logicIndexHintForNewObject,
+	      ctx.reserveAnimSlot,
+	    );
+	  }
+	  ctx.effects.push({
+	    type: 'explosion',
+	    x: kx,
+	    y: ky,
+	    frame: 0,
+	    maxFrames: EXPLOSION_FRAMES[deathExplosionSprite] ?? 18,
+	    size: opts.explosionSize,
+	    sprite: deathExplosionSprite,
+	    spriteStart: 0,
+	  } as Effect);
   if (opts.debris && !victim.stats.isInfantry) {
     ctx.effects.push({ type: 'debris', x: kx, y: ky, frame: 0, maxFrames: 12, size: 18 } as Effect);
   }
@@ -1449,7 +2159,13 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     // Random_Pick(SMUDGE_SCORCH1, SMUDGE_SCORCH6) before BulletClass does its
     // invisible Coord_Scatter.
     if (victim.deathVariant === 5) {
-      spawnLogicAnim(ctx.logicAnims, ctx.effects, 'elect_die', kx, ky, 1, true);
+      spawnLogicAnim(
+        ctx.logicAnims, ctx.effects, 'elect_die', kx, ky, 1, true,
+        false,
+        ctx.logicIndexHintForNewObject?.(),
+        ctx.logicIndexHintForNewObject,
+        ctx.reserveAnimSlot,
+      );
     }
   }
   else ctx.playSoundAt('die_vehicle', kx, ky);
@@ -1488,6 +2204,15 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   if (victim.teamRef) {
     victim.teamRef.remove(victim, ctx);
   }
+  if (victim.isAirUnit) {
+    for (const structure of ctx.structures) {
+      if (structure.dockedAircraft === victim.id) {
+        structure.dockedAircraft = undefined;
+      }
+    }
+    victim.landedAtStructure = -1;
+    victim.aircraftDockingStructure = -1;
+  }
   // InfantryClass::Detach also drops IsFiring when TarCom is detached. Without
   // this, TS keeps stale object references to destroyed vehicles and later code
   // treats those references as live orders until the next mission timer happens
@@ -1495,6 +2220,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   victim.target = null;
   victim.targetStructure = null;
   victim.moveTarget = null;
+  victim.moveTargetEntityRef = null;
   victim.path = [];
   victim.pathIndex = 0;
   victim.firePrepActive = false;
@@ -1507,10 +2233,18 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       entity.firePrepActive = false;
       entity.firePrepStage = 0;
       entity.firePrepUsesDoingStage = false;
+      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
       if (entity.stats.isInfantry) {
         entity.isFiringAnim = false;
         entity.firingAnimTicks = 0;
       }
+    }
+    if (entity.moveTargetEntityRef === victim) {
+      entity.moveTarget = null;
+      entity.moveTargetEntityRef = null;
+      entity.path = [];
+      entity.pathIndex = 0;
+      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
     }
   }
   for (const structure of ctx.structures) {
@@ -1574,6 +2308,9 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       ky,
       true,
       ctx.logicAnimsAlreadyProcessed === true,
+      ctx.logicIndexHintForNewObject?.(),
+      ctx.logicIndexHintForNewObject,
+      ctx.reserveAnimSlot,
     );
     const radiusLeptons = Math.trunc(explosionDamage * EXP_SPREAD); // C++ fixed int multiply
     wideAreaDamage(ctx, victim.leptonX, victim.leptonY, radiusLeptons, explosionDamage, opts.attacker, explosionWarhead);
@@ -1653,7 +2390,6 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       inf.isFalling = true;
       inf.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
       inf.fallRiser = 0;
-      inf.fallHasAttachedAnim = true;
       inf.flightAltitude = leptonToPixel(inf.fallHeightLeptons);
 
       // TechnoClass::Unlimbo performs Enter_Idle_Mode(true)+Commence, then
@@ -1665,6 +2401,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
 
       ctx.entities.push(inf);
       ctx.entityById.set(inf.id, inf);
+      attachFallingParachuteAnim(inf, ctx.logicIndexHintForNewObject, ctx.reserveAnimSlot);
       ctx.markDiscoveredIfPlayerVisible?.(inf);
     }
   }
@@ -1729,9 +2466,9 @@ export function shouldCrushIt(
  *   - techno.cpp:4924-5030 TechnoClass::Is_Allowed_To_Retaliate — full gate chain.
  *
  *  All C++ gates (techno.cpp:4924-5030, in order) are enforced here. */
-export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker: Entity): void {
+export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker: DamageSource): void {
   // C++ techno.cpp:4929 — source == NULL (implied by null-check before call)
-  if (!victim.alive || !attacker.alive) return;
+  if (!victim.alive || !sourceIsAlive(attacker)) return;
 
   const priorMission = victim.mission;
 
@@ -1745,7 +2482,7 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   if (victim.stats.isAircraft && victim.stats.isFixedWing) return;
 
   // C++ techno.cpp:4947 — House->Is_Ally(source) blocks retaliation
-  if (ctx.entitiesAllied(victim, attacker)) return;
+  if (ctx.isAllied(victim.house, sourceHouse(attacker))) return;
 
   // C++ foot.cpp:1172 — FootClass::Take_Damage delegates team members to
   // Team->Took_Damage and returns. It does NOT run the individual
@@ -1771,8 +2508,8 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
 
   // C++ unit.cpp:1124-1161: auto-crush retaliation path.
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
-  if (shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) {
-    victim.target = attacker;
+  if (isEntitySource(attacker) && shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) {
+    assignEntityTarCom(victim, attacker);
     victim.mission = Mission.MOVE; // C++ unit.cpp:1137-1139: MISSION_MOVE to crush target
     victim.moveTarget = { lx: attacker.leptonX, ly: attacker.leptonY };
     return;
@@ -1785,34 +2522,33 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // Use primary weapon warhead (PrimaryWeapon->WarheadPtr->Modifier[source->armor]).
   {
     const overrides = ctx.warheadOverrides ?? {};
-    const whMult = getWarheadMult(victim.weapon.warhead, attacker.stats.armor, overrides);
+    const whMult = getWarheadMult(victim.weapon.warhead, sourceArmor(attacker), overrides);
     if (whMult <= 0) return;
   }
 
   // C++ techno.cpp:4968 — source is dog blocks retaliation
-  if (attacker.stats.isCanine || attacker.type === UnitType.I_DOG) return;
+  if (isEntitySource(attacker) && (attacker.stats.isCanine || attacker.type === UnitType.I_DOG)) return;
 
   // C++ techno.cpp:4973 — source is aircraft, victim must have AA.
   // TS refinement: only block when aircraft is AIRBORNE (altitude > 0). Landed
   // aircraft are valid ground targets in TS (matching the pre-existing behavior
   // and covering unit test semantics: HPAD-landed HIND is treated as ground).
-  if (attacker.isAirUnit && attacker.flightAltitude > 0) {
+  if (isEntitySource(attacker) && attacker.isAirUnit && attacker.flightAltitude > 0) {
     const hasAA = victim.weapon?.isAntiAir || victim.weapon2?.isAntiAir;
     if (!hasAA) return;
   }
 
   // Naval gate: can't retaliate against untargetable naval units
-  if (!canTargetNaval(victim, attacker)) return;
+  if (isEntitySource(attacker) && !canTargetNaval(victim, attacker)) return;
 
   // C++ techno.cpp:4980-4983 — human-controlled Tanya (IsBomber) cannot retaliate
-  // against buildings. TS doesn't target structures via triggerRetaliation (they are
-  // MapStructure, not Entity), so this gate is structurally satisfied.
+  // against buildings.
 
   // C++ techno.cpp:4988 — human house + !IsSmartDefense (PlayerReturnFire=no) blocks
   // retaliation, EXCEPT Tanya vs infantry.
   // rules.ini [General] PlayerReturnFire=no → Rule.IsSmartDefense = false.
   if (isVictimHumanHouse) {
-    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && attacker.stats.isInfantry;
+    const isTanyaVsInfantry = victim.type === UnitType.I_TANYA && isEntitySource(attacker) && attacker.stats.isInfantry;
     if (!isTanyaVsInfantry) return;
   }
 
@@ -1830,8 +2566,9 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // but the RNG call has still happened.
   if (!isVictimHumanHouse && ScenarioRandom.percentChance(50)) {
     const overrides = ctx.warheadOverrides ?? {};
-    const sourceVal = attacker.weapon && victim.inRange(attacker)
-      ? getWarheadMult(attacker.weapon.warhead, victim.stats.armor, overrides)
+    const source = sourceWeapon(attacker);
+    const sourceVal = source && (isEntitySource(attacker) ? victim.inRange(attacker) : true)
+      ? getWarheadMult((source.warhead ?? 'HE') as WarheadType, victim.stats.armor, overrides)
       : 0;
     const currentVal = currentTarget?.weapon && victim.inRange(currentTarget)
       ? getWarheadMult(currentTarget.weapon.warhead, victim.stats.armor, overrides)
@@ -1844,11 +2581,16 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // player-allied computer houses, always retarget. For retaliation we've already
   // blocked non-Tanya player units above, so
   // this check only matters for the Tanya-vs-infantry exception.
-  if (isVictimHumanHouse && !victim.inRange(attacker)) return;
+  if (isVictimHumanHouse && isEntitySource(attacker) && !victim.inRange(attacker)) return;
 
   // C++ foot.cpp:1206 — Assign_Target(source->As_Target()).
   // Assign_Target changes TarCom only; it does not force MISSION_ATTACK.
-  victim.target = attacker;
+  if (isEntitySource(attacker)) {
+    assignEntityTarCom(victim, attacker);
+  } else {
+    victim.target = null;
+    victim.targetStructure = attacker;
+  }
 
   // C++ foot.cpp:1209-1211 — MISSION_AMBUSH transitions to HUNT on retaliation.
   if (priorMission === Mission.AMBUSH) assignMission(victim, Mission.HUNT);
@@ -1870,13 +2612,9 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
     if (ctx.isAllied(vehicle.house, other.house)) continue; // C++ IsAFriend — don't crush allies
     const oc = other.cell;
     if (oc.cx !== vc.cx || oc.cy !== vc.cy) continue;
-    // C++ unit.cpp:4408 — Distance(object->Center_Coord()) < CELL_LEPTON_W/2
-    // Sub-cell distance check: crush only if within half a cell (C++ CELL_LEPTON_W/2 = 128 leptons)
-    const dx = vehicle.pos.x - other.pos.x;
-    const dy = vehicle.pos.y - other.pos.y;
-    const distSq = dx * dx + dy * dy;
-    const halfCell = CELL_SIZE / 2;
-    if (distSq >= halfCell * halfCell) continue;
+    // C++ unit.cpp:4407 — Distance(object->Center_Coord()) < CELL_LEPTON_W/2.
+    // coord.cpp:124 Distance is the integer octagonal metric, not Euclidean distance.
+    if (leptonDist(vehicle.leptonX, vehicle.leptonY, other.leptonX, other.leptonY) >= (LEPTON_SIZE >> 1)) continue;
     {
       damageEntity(ctx, other, other.hp + 10, 'Super'); // instant kill, always die2
       vehicle.creditKill();
@@ -1942,6 +2680,7 @@ export function checkWallCrush(ctx: CombatContext, vehicle: Entity): void {
 
   // Destroy the wall overlay on the map
   ctx.map.clearWallType(vc.cx, vc.cy);
+  detachCellTargetFromTargeting(ctx, vc.cx, vc.cy);
   ctx.map.addDecal(vc.cx, vc.cy, 4, 0.3);
 
   // Destroy the corresponding wall structure (mark dead, clear footprint)
@@ -1961,6 +2700,8 @@ export function launchProjectile(
   ctx: CombatContext, attacker: Entity, target: Entity | null, weapon: WeaponStats,
   damage: number, impactX: number, impactY: number, directHit: boolean,
   launchCoordOverride?: { lx: number; ly: number },
+  facing256Override?: number,
+  homingTargetCoordOverride?: { lx: number; ly: number },
 ): void {
   // C++ techno.cpp:3124-3171 launches bullets from Fire_Coord(which), not
   // Center_Coord(). The fire coordinate feeds projectile range, facing, fuse
@@ -1978,6 +2719,7 @@ export function launchProjectile(
     : fireCoord;
   const targetLX = pixelToLepton(impactX);
   const targetLY = pixelToLepton(impactY);
+  const staticHomingTarget = homingTargetCoordOverride ?? (target === null ? { lx: targetLX, ly: targetLY } : undefined);
   const dist = leptonDist(launchCoord.lx, launchCoord.ly, targetLX, targetLY);
   // C++ weapon Speed is an MPHType already expressed in lepton-speed units.
   // Older TS projectileSpeed fields are cells/tick approximations; prefer the
@@ -2013,6 +2755,7 @@ export function launchProjectile(
     : (isLightSpeedInvisible || speed === LIGHT_SPEED
       ? 0
       : Math.trunc((speed * 255 + 128) / 256));
+  const flameTrailAnim = projectileTrailAnimForWeapon(weapon);
 
   // C++ bullet.cpp:1012-1014 — invisible projectiles Coord_Scatter on DETONATION.
   // Verified via WASM tag 50002 (Coord_Scatter dir pick) at SCG03EA tick 267 bullet[282].
@@ -2037,7 +2780,17 @@ export function launchProjectile(
   // and rides the bullet to the target. On impact, the dog unlimbos at the impact point.
   let dogRiderId = -1;
   if (attacker.type === UnitType.I_DOG && attacker.alive) {
+    if (attacker.claimedCellIdx >= 0 && attacker.claimedSubCell >= 0) {
+      ctx.map.vacateClaimedSubCell(attacker.claimedCellIdx, attacker.id, attacker.claimedSubCell);
+    }
+    ctx.map.vacateSubCell(attacker.cell.cx, attacker.cell.cy, attacker.id);
+    attacker.claimedCellIdx = -1;
+    attacker.claimedSubCell = -1;
+    attacker.isDriving = false;
+    attacker.headToLX = 0;
+    attacker.headToLY = 0;
     attacker.inLimbo = true;
+    attacker.dogRiderLimboStartTick = ctx.tick;
     dogRiderId = attacker.id;
   }
 
@@ -2073,13 +2826,21 @@ export function launchProjectile(
     dropRiser: 0,
     dropHasAttachedAnim: !!weapon.isParachuted,
     // C++ bullet.cpp:377-386 — IsFlameEquipped: flame trail toggle
-    isFlameEquipped: !!weapon.isFlameEquipped,
+    isFlameEquipped: flameTrailAnim !== undefined,
+    flameTrailAnim,
     flameToggle: false,  // C++ IsToAnimate starts false
     logicalLX: bulletStartLX,
     logicalLY: bulletStartLY,
     headToLX: targetLX,
     headToLY: targetLY,
-    facing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    homingTargetLX: staticHomingTarget?.lx,
+    homingTargetLY: staticHomingTarget?.ly,
+    facing256: facing256Override !== undefined
+      ? (facing256Override & 0xff)
+      : directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    desiredFacing256: facing256Override !== undefined
+      ? (facing256Override & 0xff)
+      : directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
     speedAccum: 0,
     speedAdd,
     fuseTimer: Math.min(0xFF, travelFrames),
@@ -2119,11 +2880,15 @@ function launchStructureProjectile(
   const speedAdd = isLightSpeedInvisible || speed === LIGHT_SPEED
     ? 0
     : Math.trunc((speed * 255 + 128) / 256);
+  const flameTrailAnim = projectileTrailAnimForWeaponName(weapon.weaponName ?? s.type);
 
   const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  const attackerStructureIndex = ctx.structures.indexOf(s);
   ctx.inflightProjectiles.push({
     attackerId: -1,
     attackerHouse: s.house,
+    attackerStructure: s,
+    attackerStructureIndex: attackerStructureIndex >= 0 ? attackerStructureIndex : undefined,
     targetId: target.id,
     weapon: {
       name: weapon.weaponName ?? s.type,
@@ -2157,13 +2922,15 @@ function launchStructureProjectile(
     dropHeight: 0,
     dropRiser: 0,
     dropHasAttachedAnim: false,
-    isFlameEquipped: false,
+    isFlameEquipped: flameTrailAnim !== undefined,
+    flameTrailAnim,
     flameToggle: false,
     logicalLX: bulletStartLX,
     logicalLY: bulletStartLY,
     headToLX: targetLX,
     headToLY: targetLY,
     facing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    desiredFacing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
     speedAccum: 0,
     speedAdd,
     fuseTimer: Math.min(0xFF, travelFrames),
@@ -2192,6 +2959,71 @@ function projectilePixelPosition(proj: InflightProjectile): WorldPos {
   };
 }
 
+function projectileTrailAnimForWeaponName(weaponName: string): InflightProjectile['flameTrailAnim'] {
+  const visual = projectileVisualConfig(weaponName);
+  if (!visual.projFlameTrail) return undefined;
+  return visual.projImage === 'fball1' ? 'fball_fade' : 'smoke_puff';
+}
+
+function projectileTrailAnimForWeapon(weapon: WeaponStats): InflightProjectile['flameTrailAnim'] {
+  return weapon.isFlameEquipped
+    ? (projectileVisualConfig(weapon.name).projImage === 'fball1' ? 'fball_fade' : 'smoke_puff')
+    : projectileTrailAnimForWeaponName(weapon.name);
+}
+
+function spawnProjectileTrailAnim(ctx: CombatContext, proj: InflightProjectile): void {
+  const pos = projectilePixelPosition(proj);
+  const anim = proj.flameTrailAnim ??
+    (projectileVisualConfig(proj.weapon.name).projImage === 'fball1' ? 'fball_fade' : 'smoke_puff');
+  const isFballFade = anim === 'fball_fade';
+  const type: LogicAnimType = isFballFade ? 'fball_fade' : 'smokey';
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  const spawned = spawnLogicAnim(
+    ctx.logicAnims,
+    ctx.effects,
+    type,
+    pos.x,
+    pos.y,
+    1,
+    true,
+    false,
+    logicIndexHint,
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+    false,
+    undefined,
+    1,
+  );
+  if (!spawned) {
+    projectileTrace({
+      event: 'trail-skip-full',
+      tick: ctx.tick,
+      weapon: proj.weapon.name,
+      hint: proj.logicIndexHint,
+      trailHint: logicIndexHint,
+      currentFrame: proj.currentFrame,
+      logicalLX: proj.logicalLX,
+      logicalLY: proj.logicalLY,
+    });
+    return;
+  }
+  projectileTrace({
+    event: 'trail',
+    tick: ctx.tick,
+    weapon: proj.weapon.name,
+    hint: proj.logicIndexHint,
+    trailHint: logicIndexHint,
+    currentFrame: proj.currentFrame,
+    logicalLX: proj.logicalLX,
+    logicalLY: proj.logicalLY,
+    x: pos.x,
+    y: pos.y,
+    lx: pixelToLepton(pos.x),
+    ly: pixelToLepton(pos.y),
+    anim,
+  });
+}
+
 function tickProjectilePhysics(proj: InflightProjectile): void {
   if (proj.speedAdd <= 0) return;
   const actualWithAccum = proj.speedAdd + proj.speedAccum;
@@ -2201,6 +3033,17 @@ function tickProjectilePhysics(proj: InflightProjectile): void {
   if (actual <= 0) return;
   proj.logicalLX += (COS_TABLE_256[proj.facing256] * actual) >> 7;
   proj.logicalLY -= (SIN_TABLE_256[proj.facing256] * actual) >> 7;
+}
+
+function rotateFacing256(current: number, desired: number, rate: number): number {
+  const cappedRate = Math.min(rate, 127);
+  if (cappedRate <= 0) return current & 0xff;
+  let diff = (desired - current) & 0xff;
+  if (diff > 127) diff -= 256;
+  if (Math.abs(diff) < cappedRate) return desired & 0xff;
+  return diff < 0
+    ? (current - cappedRate + 256) & 0xff
+    : (current + cappedRate) & 0xff;
 }
 
 function tickProjectileFuse(proj: InflightProjectile): boolean {
@@ -2226,12 +3069,19 @@ type LogicPredecessorSnapshot = {
 function snapshotProjectilePredecessors(ctx: CombatContext): LogicPredecessorSnapshot {
   return {
     entityIds: new Set(ctx.entities.filter(entityOccupiesCppLogic).map(e => e.id)),
-    structures: new Set(ctx.structures.filter(s => s.alive)),
+    structures: new Set(ctx.structures.filter(structureOccupiesCppLogic)),
   };
 }
 
 function entityOccupiesCppLogic(entity: Entity | undefined): entity is Entity {
   return !!entity && entity.occupiesCppLogic();
+}
+
+function structureOccupiesCppLogic(s: MapStructure): boolean {
+  // BuildingClass::Take_Damage leaves destroyed buildings in the Logic list
+  // until BuildingClass::AI reaches Drop_Debris/Limbo. They must not count as
+  // earlier Logic deletions while CountDown is still pending.
+  return s.alive || (!s.debrisDropped && s.debrisCountdown !== undefined);
 }
 
 function countLiveProjectilePredecessors(ctx: CombatContext, snapshot: LogicPredecessorSnapshot): number {
@@ -2241,7 +3091,7 @@ function countLiveProjectilePredecessors(ctx: CombatContext, snapshot: LogicPred
     if (entityOccupiesCppLogic(e)) live++;
   }
   for (const s of snapshot.structures) {
-    if (s.alive) live++;
+    if (structureOccupiesCppLogic(s)) live++;
   }
   return live;
 }
@@ -2256,6 +3106,7 @@ function projectileRemainsInLogic(proj: InflightProjectile): boolean {
 /** Advance one BulletClass logic step; return true when it detonates/deletes itself. */
 function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile): boolean {
   proj.currentFrame++;
+  const target = ctx.entityById.get(proj.targetId);
 
   // C++ bullet.cpp:478-480 — IsDegenerate: projectile loses 1 strength per tick during flight (min 5)
   if (proj.weapon.isDegenerate && proj.strength > 5) {
@@ -2286,24 +3137,32 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
   // C++ bullet.cpp:377-386 — IsFlameEquipped: spawn flame/smoke trail every other tick
   if (proj.isFlameEquipped) {
     if (proj.flameToggle) {
-      // Spawn visual flame trail at projectile's current interpolated position
-      const t = proj.currentFrame / Math.max(1, proj.travelFrames);
-      const curX = proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1);
-      const curY = proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1);
-      ctx.effects.push({
-        type: 'explosion',
-        x: curX,
-        y: curY,
-        frame: 0,
-        // C++ bullet.cpp:382-384 creates ANIM_FBALL_FADE (adata.cpp:820,
-        // sprite FB2, 4 runtime frames), not a full napalm explosion.
-        maxFrames: 4,
-        size: 8,
-        sprite: 'napalm1',  // closest match to FBALL_FADE in our sprite set
-        cppLogicSlot: true,
-      });
+      // C++ bullet.cpp:380-385 creates ANIM_FBALL_FADE only for FB1
+      // projectiles; other Animates=yes bullets create ANIM_SMOKE_PUFF.
+      spawnProjectileTrailAnim(ctx, proj);
     }
     proj.flameToggle = !proj.flameToggle;  // C++ IsToAnimate = !IsToAnimate
+  }
+
+  // C++ bullet.cpp:368-397 — homing projectiles update DesiredFacing toward
+  // TarCom on every other frame, then Rotation_Adjust happens before physics.
+  // FuseClass::HeadTo is separate and remains the scattered impact coordinate.
+  const rot = proj.weapon.projectileROT ?? 0;
+  if (rot > 0) {
+    const homingTarget = target && target.alive
+      ? entityTargetLeptons(target)
+      : (proj.homingTargetLX !== undefined && proj.homingTargetLY !== undefined
+        ? { lx: proj.homingTargetLX, ly: proj.homingTargetLY }
+        : null);
+    if ((proj.currentFrame & 0x01) && homingTarget) {
+      proj.desiredFacing256 = directionToLeptons256(
+        proj.logicalLX, proj.logicalLY,
+        homingTarget.lx, homingTarget.ly,
+      );
+    }
+    if (proj.desiredFacing256 !== undefined && proj.facing256 !== (proj.desiredFacing256 & 0xff)) {
+      proj.facing256 = rotateFacing256(proj.facing256, proj.desiredFacing256 & 0xff, rot);
+    }
   }
 
   // C++ BulletClass::AI always runs FlyClass::Physics before fuse handling.
@@ -2324,25 +3183,8 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
     proj.arcRiser = Math.max(proj.arcRiser, -100);
   }
 
-  // C9/C10: Homing projectile tracking (C++ bullet.cpp:368,517)
-  // projectileROT = homing turn rate. C10: homing updates every other frame.
-  const target = ctx.entityById.get(proj.targetId);
-  if (target && target.alive) {
-    const rot = proj.weapon.projectileROT ?? 0;
-    if (rot > 0) {
-      // C10: Only update homing every other frame (C++ bullet.cpp:368)
-      if (proj.currentFrame % 2 === 0) {
-        // Homing: strong tracking based on ROT (higher ROT = better tracking)
-        const trackFactor = Math.min(1.0, rot * 0.15);
-        proj.impactX += (target.pos.x - proj.impactX) * trackFactor;
-        proj.impactY += (target.pos.y - proj.impactY) * trackFactor;
-      }
-    }
-    // Non-homing projectiles (rot=0) fly straight — no tracking (C++ bullet.cpp)
-  }
-
-  // C++ bullet.cpp:903-913 — wall collision check (Is_Forced_To_Explode)
-  // Non-high bullets that enter a cell containing a wall (high overlay) explode on contact.
+  // C++ bullet.cpp:903-914 — wall collision check (Is_Forced_To_Explode)
+  // Non-high bullets that enter a cell containing an IsHigh overlay explode on contact.
   // Dropping projectiles skip this check (C++ type.h:1383: "Dropping projectiles do not
   // calculate collision with terrain (such as walls)").
   if (!proj.weapon.isHigh && !proj.weapon.isDropping) {
@@ -2351,7 +3193,7 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
     const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
     const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
     const cc = worldToCell(curX, curY);
-    if (ctx.map.getWallType(cc.cx, cc.cy) !== '') {
+    if (HIGH_WALL_TYPES.has(ctx.map.getWallType(cc.cx, cc.cy))) {
       // Force-explode at wall cell center (C++ coord = Cell_Coord(Coord_Cell(coord)))
       proj.impactX = cc.cx * CELL_SIZE + CELL_SIZE / 2;
       proj.impactY = cc.cy * CELL_SIZE + CELL_SIZE / 2;
@@ -2448,11 +3290,12 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
       proj.impactX = cur.x;
       proj.impactY = cur.y;
     } else if (!proj.isDropping) {
-      // C++ bullet.cpp:981-985 — normal fuse detonations for non-homing,
+      // C++ bullet.cpp:981-991 — normal fuse detonations for non-homing,
       // non-arcing projectiles snap Coord to Fuse_Target() before damage.
+      // DogJaw has ROT but still takes this snap path because Payback is dog.
       // The projectile's current Coord can be a few leptons away when the
       // proximity fuse trips; damage still uses the stored target coord.
-      if ((proj.weapon.projectileROT ?? 0) === 0) {
+      if (proj.dogRiderId >= 0 || (proj.weapon.projectileROT ?? 0) === 0) {
         proj.impactX = proj.headToLX * CELL_SIZE / LEPTON_SIZE;
         proj.impactY = proj.headToLY * CELL_SIZE / LEPTON_SIZE;
       } else {
@@ -2495,22 +3338,70 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
   const predecessors = snapshotProjectilePredecessors(ctx);
   let shiftedBehindCursor = 0;
   let skipLogicHintThrough = -Infinity;
+  const spawnedThisPass = new Set<InflightProjectile>();
 
   ctx.inflightProjectiles = [...survivors, ...deferred];
 
   for (let i = 0; i < queue.length; i++) {
     const proj = queue[i];
-    if (proj.logicIndexHint !== undefined && proj.logicIndexHint <= skipLogicHintThrough) {
+    if (!spawnedThisPass.has(proj) &&
+        proj.logicIndexHint !== undefined &&
+        proj.logicIndexHint <= skipLogicHintThrough) {
+      projectileTrace({
+        event: 'skip-shifted',
+        tick: ctx.tick,
+        weapon: proj.weapon.name,
+        hint: proj.logicIndexHint,
+        currentFrame: proj.currentFrame,
+        fuelTimer: proj.fuelTimer,
+        fuseTimer: proj.fuseTimer,
+        skipLogicHintThrough,
+      });
+      proj.processedLogicTick = ctx.tick;
       survivors.push(proj);
       continue;
     }
     if (proj.logicIndexHint === undefined && shiftedBehindCursor > 0) {
+      projectileTrace({
+        event: 'skip-unhinted',
+        tick: ctx.tick,
+        weapon: proj.weapon.name,
+        currentFrame: proj.currentFrame,
+        fuelTimer: proj.fuelTimer,
+        fuseTimer: proj.fuseTimer,
+        shiftedBehindCursor,
+      });
+      proj.processedLogicTick = ctx.tick;
       survivors.push(proj);
       shiftedBehindCursor--;
       continue;
     }
 
+    projectileTrace({
+      event: 'advance',
+      tick: ctx.tick,
+      weapon: proj.weapon.name,
+      hint: proj.logicIndexHint,
+      currentFrame: proj.currentFrame,
+      fuelTimer: proj.fuelTimer,
+      fuseTimer: proj.fuseTimer,
+      headToLX: proj.headToLX,
+      headToLY: proj.headToLY,
+    });
     const arrived = advanceProjectileOneTick(ctx, proj);
+    projectileTrace({
+      event: arrived ? 'arrived' : 'survived',
+      tick: ctx.tick,
+      weapon: proj.weapon.name,
+      hint: proj.logicIndexHint,
+      currentFrame: proj.currentFrame,
+      fuelTimer: proj.fuelTimer,
+      fuseTimer: proj.fuseTimer,
+      logicalLX: proj.logicalLX,
+      logicalLY: proj.logicalLY,
+      impactLX: pixelToLepton(proj.impactX),
+      impactLY: pixelToLepton(proj.impactY),
+    });
     if (!processAll) {
       proj.processedLogicTick = ctx.tick;
     }
@@ -2528,6 +3419,18 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
 
     const spawnedProjectiles = ctx.inflightProjectiles.filter(p => !knownProjectiles.has(p));
     for (const spawned of spawnedProjectiles) {
+      spawnedThisPass.add(spawned);
+      projectileTrace({
+        event: 'spawned',
+        tick: ctx.tick,
+        weapon: spawned.weapon.name,
+        hint: spawned.logicIndexHint,
+        currentFrame: spawned.currentFrame,
+        fuelTimer: spawned.fuelTimer,
+        fuseTimer: spawned.fuseTimer,
+        headToLX: spawned.headToLX,
+        headToLY: spawned.headToLY,
+      });
       if (processAll ||
           (spawned.logicIndexHint !== undefined && spawned.logicIndexHint <= maxLogicIndexHint)) {
         queue.push(spawned);
@@ -2541,6 +3444,14 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     const earlierDeletes = Math.max(0, liveBefore - liveAfter);
     if (proj.logicIndexHint !== undefined) {
       skipLogicHintThrough = Math.max(skipLogicHintThrough, proj.logicIndexHint + earlierDeletes);
+      projectileTrace({
+        event: 'delete-shift',
+        tick: ctx.tick,
+        weapon: proj.weapon.name,
+        hint: proj.logicIndexHint,
+        earlierDeletes,
+        skipLogicHintThrough,
+      });
     } else {
       shiftedBehindCursor += Math.min(earlierDeletes, unprocessed.length);
     }
@@ -2549,15 +3460,60 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
   ctx.inflightProjectiles = [...survivors, ...deferred];
 }
 
+function dogUnlimboEnterIdleMode(ctx: CombatContext, dog: Entity): void {
+  // C++ TechnoClass::Unlimbo calls InfantryClass::Enter_Idle_Mode(true) and
+  // Commence() before BulletClass::~BulletClass starts DO_DOG_MAUL.
+  const hasTarCom = !!(dog.target?.alive && !dog.target.inLimbo) ||
+    !!(dog.targetStructure && dog.targetStructure.alive !== false);
+
+  if (hasTarCom) {
+    assignMission(dog, Mission.ATTACK);
+    commence(dog, 'dog-unlimbo-enter-idle-target');
+    return;
+  }
+
+  dog.target = null;
+  dog.targetStructure = null;
+  dog.forceFirePos = null;
+
+  if (dog.moveTarget) {
+    assignMission(dog, Mission.MOVE);
+    commence(dog, 'dog-unlimbo-enter-idle-navcom');
+    return;
+  }
+
+  const control = MISSION_CONTROL[dog.mission];
+  if (dog.mission !== Mission.GUARD &&
+      dog.mission !== Mission.AREA_GUARD &&
+      !(dog.mission !== Mission.NONE && (control?.isParalyzed || control?.isZombie))) {
+    const idle = ctx.idleMission?.(dog) ?? (ctx.isPlayerControlled(dog) || dog.teamRef ? Mission.GUARD : Mission.AREA_GUARD);
+    if (idle === Mission.AREA_GUARD && dog.type === UnitType.I_DOG && !ctx.isPlayerControlled(dog) && !dog.teamRef) {
+      dog.archiveTarget = { cx: dog.cell.cx, cy: dog.cell.cy };
+      dog.archiveTargetEntity = null;
+      dog.archiveTargetLeptons = null;
+    }
+    assignMission(dog, idle);
+  }
+
+  commence(dog, 'dog-unlimbo-enter-idle');
+}
+
 function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void {
     const target = ctx.entityById.get(proj.targetId);
     const attacker = ctx.entityById.get(proj.attackerId);
+    const attackerStructure =
+      proj.attackerStructure ??
+      (proj.attackerStructureIndex !== undefined
+        ? ctx.structures[proj.attackerStructureIndex]
+        : undefined);
     // C++ BulletClass::Detach clears Payback when the firing object is detached
     // (object.cpp Detach_All -> bullet.cpp:636-649). If the source object died
     // before this projectile explodes, damage must see source=NULL; otherwise
     // InfantryClass::Take_Damage scatters away from a dead object instead of
     // using the no-threat Scatter(0) branch.
-    const liveAttacker = attacker?.alive && !attacker.inLimbo ? attacker : undefined;
+    const dogRiderPayback = proj.dogRiderId >= 0 && attacker?.id === proj.dogRiderId;
+    const liveAttacker = attacker?.alive && (!attacker.inLimbo || dogRiderPayback) ? attacker : undefined;
+    const liveAttackerStructure = attackerStructure?.alive ? attackerStructure : undefined;
 
     // C++ bullet.cpp:478-480 — use degraded strength (proj.strength) instead of original damage
     const impactDamage = proj.strength;
@@ -2565,9 +3521,9 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
     // C++ bullet.cpp:991 — Bullet_Explodes calls Explosion_Damage at ORIGINAL coord, BEFORE
     // the Coord_Scatter for invisible projectiles (line 1012). Damage uses un-scattered
     // position; only anim/effect display uses scattered position.
-    const attackerHouse = liveAttacker?.house ?? proj.attackerHouse ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
-    const targetIsAirborneAircraft = !!(target && target.isAirUnit && target.flightAltitude > 0);
-    if (targetIsAirborneAircraft && target) {
+    const attackerHouse = liveAttacker?.house ?? liveAttackerStructure?.house ?? proj.attackerHouse ?? (proj.attackerIsPlayer ? ctx.playerHouse : House.USSR);
+    const targetIsTopLayerAircraft = !!(target && target.isAirUnit && entityInTopLayer(target));
+    if (targetIsTopLayerAircraft && target) {
       // C++ bullet.cpp:996-1008: airborne aircraft targets bypass
       // Explosion_Damage entirely. They take direct aircraft damage only when
       // the bullet's current Coord is within 0x80 leptons of TarCom.
@@ -2579,7 +3535,9 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         const whMult = getWarheadMult(wh, target.stats.armor, ctx.warheadOverrides);
         const houseBias = ctx.getFirepowerBias(attackerHouse);
         const damage = modifyDamage(impactDamage, wh, target.stats.armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
-        const killed = damageEntity(ctx, target, damage, wh, liveAttacker);
+        const killed = damageEntity(ctx, target, damage, wh, liveAttacker, {
+          sourceStructure: liveAttackerStructure,
+        });
         if (killed) {
           handleUnitDeath(ctx, target, {
             screenShake: 4, explosionSize: 12, debris: false,
@@ -2601,7 +3559,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         ctx, { x: proj.impactX, y: proj.impactY },
         { damage: impactDamage, warhead: proj.weapon.warhead, splash: splashRadius },
         -1,  // No entity excluded from splash (firer is already excluded inside applySplashDamage)
-        attackerHouse, liveAttacker,
+        attackerHouse, liveAttacker, liveAttackerStructure,
       );
     }
 
@@ -2626,7 +3584,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
     const projImpactCell = worldToCell(proj.impactX, proj.impactY);
     const projTarget = ctx.entityById.get(proj.targetId);
     const projLand: 'ground' | 'water' | 'air' =
-      (projTarget && projTarget.isAirUnit && projTarget.flightAltitude > 0) ? 'air' :
+      (projTarget && projTarget.isAirUnit && entityInTopLayer(projTarget)) ? 'air' :
       (ctx.map.getTerrain(projImpactCell.cx, projImpactCell.cy) === Terrain.WATER) ? 'water' : 'ground';
     const projImpactSprite = combatAnim(proj.strength, projExpSet, projLand);
     // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
@@ -2648,6 +3606,9 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         proj.impactY,
         false,
         ctx.logicAnimsAlreadyProcessed === true,
+        ctx.logicIndexHintForNewObject?.(),
+        ctx.logicIndexHintForNewObject,
+        ctx.reserveAnimSlot,
       );
     }
     if (isScud) {
@@ -2674,15 +3635,53 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         const offsets: [number, number][] = [
           [0, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0],
         ];
-        for (const [dx, dy] of offsets) {
+        for (let i = 0; i < offsets.length; i++) {
+          const [dx, dy] = offsets[i];
           const cx = impactCell.cx + dx;
           const cy = impactCell.cy + dy;
           if (ctx.map.inBounds(cx, cy) && ctx.map.isPassable(cx, cy)) {
+            const candidate = i === 0
+              ? { lx: pixelToLepton(proj.impactX), ly: pixelToLepton(proj.impactY) }
+              : cellTargetToLepton(cx, cy);
+            const spot = closestInfantryUnlimboSpot(
+              ctx as unknown as AircraftContext,
+              dog,
+              candidate.lx,
+              candidate.ly,
+              true,
+            );
+            let slots = ctx.map.subCellOccupancy.get(spot.cellIdx);
+            if (!slots) {
+              slots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
+              ctx.map.subCellOccupancy.set(spot.cellIdx, slots);
+            }
+            slots[spot.subCell] = dog.id;
+            if (ctx.map.occupancy[spot.cellIdx] === 0) ctx.map.occupancy[spot.cellIdx] = dog.id;
             dog.inLimbo = false;
-            dog.setPosition(cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
-            // C++ bullet.cpp:152 — Do_Action(DO_DOG_MAUL, true): dog performs maul animation after landing
-            dog.animState = AnimState.ATTACK;
-            dog.animFrame = 0;
+            if (dog.dogRiderLimboStartTick >= 0) {
+              const elapsed = Math.max(0, ctx.tick - dog.dogRiderLimboStartTick);
+              dog.missionTimer = Math.max(0, dog.missionTimer - elapsed);
+              dog.attackCooldown = Math.max(0, dog.attackCooldown - elapsed);
+              dog.attackCooldown2 = Math.max(0, dog.attackCooldown2 - elapsed);
+              dog.dogRiderLimboStartTick = -1;
+            }
+            dog.leptonX = spot.lx;
+            dog.leptonY = spot.ly;
+            dog.syncPosFromLeptons();
+            dog.subCell = spot.subCell;
+            dog.claimedCellIdx = spot.cellIdx;
+            dog.claimedSubCell = spot.subCell;
+            dog.firePrepActive = false;
+            dog.firePrepStage = 0;
+            dog.firePrepUsesDoingStage = false;
+            dog.isFiringAnim = false;
+            dog.firingAnimTicks = 0;
+            dogUnlimboEnterIdleMode(ctx, dog);
+            // ObjectClass::Unlimbo submits the dog back into Logic at the
+            // current end rather than restoring its original Infantry slot.
+            ctx.resubmitEntityToLogicEnd?.(dog);
+            // C++ bullet.cpp:152 — Do_Action(DO_DOG_MAUL, true).
+            dog.startDogMaulDoing(ctx.tick);
             unlimboed = true;
             break;
           }
@@ -2691,6 +3690,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         if (!unlimboed) {
           dog.alive = false;
           dog.inLimbo = false;
+          dog.dogRiderLimboStartTick = -1;
           dog.mission = Mission.DIE;
         }
       }
@@ -2702,14 +3702,15 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
 export function applySplashDamage(
   ctx: CombatContext,
   center: WorldPos, weapon: { damage: number; warhead: WarheadType; splash?: number },
-  primaryTargetId: number, attackerHouse: House, attacker?: Entity,
+  primaryTargetId: number, attackerHouse: House, attacker?: Entity, attackerStructure?: MapStructure,
 ): void {
   // CF3: Universal 1.5-cell splash radius (C++ Explosion_Damage uses ICON_LEPTON_W + ICON_LEPTON_W/2)
   const splashRange = SPLASH_RADIUS;
   const attackerIsPlayerControlled = ctx.isAllied(attackerHouse, ctx.playerHouse);
   const impactCell = worldToCell(center.x, center.y);
-  const isInExplosionCellScan = (cx: number, cy: number): boolean =>
-    Math.abs(cx - impactCell.cx) <= 1 && Math.abs(cy - impactCell.cy) <= 1;
+  const centerLX = pixelToLepton(center.x);
+  const centerLY = pixelToLepton(center.y);
+  const splashRangeLeptons = splashRange * LEPTON_SIZE;
 
   // C++ combat.cpp:207 — splash excludes the FIRER (source), not the direct-hit target.
   // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path; there is no separate
@@ -2717,28 +3718,16 @@ export function applySplashDamage(
   // at distance ~0, getting full warhead damage.
   const sourceId = attacker?.id ?? -1;
 
-  // C++ combat.cpp:188-222 first snapshots Cell_Occupier() pointers into
-  // objects[32], then applies damage. Death side effects may create new
-  // infantry, but those new objects are not part of the current explosion.
-  // Iterate a snapshot so vehicle crew spawned by handleUnitDeath cannot be
-  // damaged by the same blast that created it.
-  const entityDamageList = ctx.entities.slice();
-  for (const other of entityDamageList) {
-    if (!other.alive || other.inLimbo || other.id === sourceId) continue;
-    // C++ combat.cpp:188-216 snapshots Cell_Occupier() chains only from
-    // the impact cell plus the eight adjacent cells before checking radius.
-    // A center can be within 384 leptons but still live two cells away from
-    // the impact cell; C++ never considers that object.
-    if (!isInExplosionCellScan(other.cell.cx, other.cell.cy)) continue;
+  const damageEntityVictim = (other: Entity): void => {
+    if (!other.alive || other.inLimbo || other.id === sourceId) return;
     // H2: Splash damage hits ALL units in radius including friendlies (C++ Explosion_Damage)
     const isFriendly = ctx.isAllied(other.house, attackerHouse);
-    const distLeptons = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), other.leptonX, other.leptonY);
-    const splashRangeLeptons = splashRange * LEPTON_SIZE;
+    const distLeptons = leptonDist(centerLX, centerLY, other.leptonX, other.leptonY);
     // C++ combat.cpp:232 uses a strict bound: `distance < range`.
     // range is ICON_LEPTON_W + ICON_LEPTON_W/2 = 384 leptons, so an object
     // exactly 1.5 cells away is NOT damaged. TS previously used `>`, which
     // included the boundary and over-damaged SCG07EA E1 at (26,58).
-    if (distLeptons >= splashRangeLeptons) continue;
+    if (distLeptons >= splashRangeLeptons) return;
     const distCells = distLeptons / LEPTON_SIZE;
 
     // C++ damage order is:
@@ -2755,13 +3744,27 @@ export function applySplashDamage(
       rawDamage > 0 && other.stats.isInfantry && other.isProne;
     if (proneBiasApplied) {
       rawDamage = Math.round(rawDamage * PRONE_DAMAGE_BIAS);
-      if (rawDamage <= 0) continue;
+      if (rawDamage <= 0) return;
     }
 
     // CF2: C++ inverse-proportional falloff via modifyDamage (combat.cpp:106-125)
     const distPixels = distCells * CELL_SIZE;
     const whMult = getWarheadMult(weapon.warhead, other.stats.armor, ctx.warheadOverrides);
     const splashDmg = modifyDamage(rawDamage, weapon.warhead, other.stats.armor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
+    const hpBefore = other.hp;
+    splashTrace({
+      event: 'damage-entity',
+      tick: ctx.tick,
+      centerLX,
+      centerLY,
+      victim: `${other.type}#${other.id}`,
+      cell: `${other.cell.cx},${other.cell.cy}`,
+      rawDamage,
+      splashDmg,
+      distLeptons,
+      hpBefore,
+      seed: ScenarioRandom.seed >>> 0,
+    });
     if (splashDmg === 0) {
       // C++ Explosion_Damage still calls UnitClass::Take_Damage with raw
       // nonzero strength. ObjectClass may reduce HP damage to zero, but
@@ -2770,10 +3773,21 @@ export function applySplashDamage(
       if (rawDamage > 0 && attacker && other.type === UnitType.V_HARV) {
         maybeSuspendTeamsForBaseAttack(ctx, attacker, other.house, false, other);
       }
-      continue;
+      return;
     }
     const killed = damageEntity(ctx, other, splashDmg, weapon.warhead, attacker, {
       skipProneBias: proneBiasApplied,
+      sourceStructure: attackerStructure,
+    });
+    splashTrace({
+      event: 'damaged-entity',
+      tick: ctx.tick,
+      victim: `${other.type}#${other.id}`,
+      hpBefore,
+      hpAfter: other.hp,
+      alive: other.alive,
+      killed,
+      seed: ScenarioRandom.seed >>> 0,
     });
     // Retaliation is now handled inside damageEntity (C++ FootClass::Take_Damage
     // unified entry point — foot.cpp:1166-1234).
@@ -2790,41 +3804,18 @@ export function applySplashDamage(
         attacker,
       });
     }
-  }
+  };
 
-  // C++ parity: Explosion_Damage (combat.cpp:205-237) iterates Cell_Occupier() chains which
-  // include buildings. Structures within splash radius take damage proportional to distance.
-  // Buildings at the impact cell get distance=0 (full damage, combat.cpp:227-228).
-  for (const s of ctx.structures) {
-    if (!s.alive) continue;
+  const damageStructureVictim = (s: MapStructure, directImpactHead: boolean): void => {
+    if (!s.alive) return;
     // Walls are C++ overlays, not ordinary BuildingClass damage targets in
     // Explosion_Damage. They are handled by the impact-cell Reduce_Wall path below.
-    if (WALL_TYPES.has(s.type)) continue;
-    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-    let structureInScannedCell = false;
-    for (let fy = 0; fy < sh && !structureInScannedCell; fy++) {
-      for (let fx = 0; fx < sw; fx++) {
-        if (isInExplosionCellScan(s.cx + fx, s.cy + fy)) {
-          structureInScannedCell = true;
-          break;
-        }
-      }
-    }
-    if (!structureInScannedCell) continue;
-    // Structure world center (matches structureDamage explosion origin)
-    const swx = s.cx * CELL_SIZE + (sw * CELL_SIZE) / 2;
-    const swy = s.cy * CELL_SIZE + (sh * CELL_SIZE) / 2;
-    // C++ combat.cpp:227-228: if building occupies the impact cell, distance = 0
-    const occupiesImpactCell =
-      impactCell.cx >= s.cx && impactCell.cx < s.cx + sw &&
-      impactCell.cy >= s.cy && impactCell.cy < s.cy + sh;
-    let distCells: number;
-    if (occupiesImpactCell) {
-      distCells = 0;
-    } else {
-      distCells = leptonDist(pixelToLepton(center.x), pixelToLepton(center.y), pixelToLepton(swx), pixelToLepton(swy)) / LEPTON_SIZE;
-    }
-    if (distCells > splashRange) continue;
+    if (WALL_TYPES.has(s.type)) return;
+    const structureCenter = structureCenterLeptons(s);
+    const distLeptons = directImpactHead
+      ? 0
+      : leptonDist(centerLX, centerLY, structureCenter.lx, structureCenter.ly);
+    if (distLeptons >= splashRangeLeptons) return;
     if (attacker) {
       // C++ combat.cpp:232-237 calls BuildingClass::Take_Damage for any
       // in-range building with the raw explosion strength. building.cpp:1250
@@ -2834,14 +3825,171 @@ export function applySplashDamage(
       maybeSuspendTeamsForBaseAttack(ctx, attacker, s.house, Boolean(STRUCTURE_WEAPONS[s.type]), s);
     }
     // Apply damage using per-building armor from rules.ini (C++ bdata.cpp)
-    const distPixels = distCells * CELL_SIZE;
+    const distPixels = distLeptons * CELL_SIZE / LEPTON_SIZE;
     const sArmor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
     const whMult = getWarheadMult(weapon.warhead, sArmor, ctx.warheadOverrides);
     const splashDmg = modifyDamage(weapon.damage, weapon.warhead, sArmor, distPixels, 1.0, whMult, getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta).spreadFactor);
-    if (splashDmg <= 0) continue;
+    if (splashDmg <= 0) return;
+    const hpBefore = s.hp;
+    splashTrace({
+      event: 'damage-structure',
+      tick: ctx.tick,
+      centerLX,
+      centerLY,
+      victim: `${s.type}@${s.cx},${s.cy}`,
+      rawDamage: weapon.damage,
+      splashDmg,
+      distLeptons,
+      directImpactHead,
+      hpBefore,
+      seed: ScenarioRandom.seed >>> 0,
+    });
     withScenarioRandomSourceTag(52005, () => {
       structureDamage(ctx, s, splashDmg, attacker, weapon.warhead, { skipBaseAttack: true });
     });
+    splashTrace({
+      event: 'damaged-structure',
+      tick: ctx.tick,
+      victim: `${s.type}@${s.cx},${s.cy}`,
+      hpBefore,
+      hpAfter: s.hp,
+      alive: s.alive,
+      seed: ScenarioRandom.seed >>> 0,
+    });
+  };
+
+  type SplashObject =
+    | { kind: 'entity'; entity: Entity }
+    | { kind: 'structure'; structure: MapStructure };
+
+  const sameSplashObject = (a: SplashObject | null, b: SplashObject): boolean => {
+    if (!a || a.kind !== b.kind) return false;
+    if (a.kind === 'entity' && b.kind === 'entity') return a.entity === b.entity;
+    if (a.kind === 'structure' && b.kind === 'structure') return a.structure === b.structure;
+    return false;
+  };
+
+  const objectSortKey = (entity: Entity): number => entity.logicIndexHint ?? entity.id;
+  const reservedEntityIds = ctx.explosionDamageReservedEntityIds ??= new Set<number>();
+  const reservedStructures = ctx.explosionDamageReservedStructures ??= new Set<MapStructure>();
+  const cellStructureCache = new Map<number, MapStructure[]>();
+  const structuresInCell = (cx: number, cy: number): MapStructure[] => {
+    const key = cy * MAP_CELLS + cx;
+    const cached = cellStructureCache.get(key);
+    if (cached) return cached;
+    const found = ctx.structures.filter(s =>
+      structureOccupiesCppLogic(s) &&
+      !WALL_TYPES.has(s.type) &&
+      getStructureOccupyCells(s.type, s.cx, s.cy).some(cell => cell.cx === cx && cell.cy === cy));
+    cellStructureCache.set(key, found);
+    return found;
+  };
+
+  const cellChain = (cx: number, cy: number): SplashObject[] => {
+    const cellEntities = ctx.entities
+      .filter(e =>
+        e.alive && !e.inLimbo &&
+        entityOccupiesCellForExplosionDamage(e) &&
+        e.cell.cx === cx && e.cell.cy === cy)
+      // C++ CellClass::Occupy_Down prepends non-buildings, so the newest
+      // object to occupy a cell is encountered first.
+      .sort((a, b) => objectSortKey(b) - objectSortKey(a))
+      .map(entity => ({ kind: 'entity' as const, entity }));
+    const cellStructures = structuresInCell(cx, cy)
+      // C++ appends buildings at the tail of the Cell_Occupier chain.
+      .map(structure => ({ kind: 'structure' as const, structure }));
+    return [...cellEntities, ...cellStructures];
+  };
+
+  const scanOffsets = [
+    { dx: 0, dy: 0 },
+    { dx: 0, dy: -1 },
+    { dx: 1, dy: -1 },
+    { dx: 1, dy: 0 },
+    { dx: 1, dy: 1 },
+    { dx: 0, dy: 1 },
+    { dx: -1, dy: 1 },
+    { dx: -1, dy: 0 },
+    { dx: -1, dy: -1 },
+  ];
+
+  // C++ combat.cpp:188-222 first snapshots Cell_Occupier() pointers into
+  // objects[32], then applies damage. Death side effects may create new
+  // infantry, but those new objects are not part of the current explosion.
+  const victims: SplashObject[] = [];
+  const seenEntities = new Set<number>();
+  const seenStructures = new Set<MapStructure>();
+  let impactHead: SplashObject | null = null;
+
+  for (const offset of scanOffsets) {
+    const cx = impactCell.cx + offset.dx;
+    const cy = impactCell.cy + offset.dy;
+    if (!ctx.map.inBounds(cx, cy)) continue;
+    const chain = cellChain(cx, cy);
+    if (offset.dx === 0 && offset.dy === 0) {
+      impactHead = chain[0] ?? null;
+    }
+    for (const object of chain) {
+      if (object.kind === 'entity') {
+        if (object.entity.id === sourceId ||
+            seenEntities.has(object.entity.id) ||
+            reservedEntityIds.has(object.entity.id)) continue;
+        seenEntities.add(object.entity.id);
+      } else {
+        if (seenStructures.has(object.structure) || reservedStructures.has(object.structure)) continue;
+        seenStructures.add(object.structure);
+      }
+      victims.push(object);
+      if (object.kind === 'entity') {
+        reservedEntityIds.add(object.entity.id);
+      } else {
+        reservedStructures.add(object.structure);
+      }
+      if (victims.length >= 32) break;
+    }
+    if (victims.length >= 32) break;
+  }
+
+  splashTrace({
+    event: 'victims',
+    tick: ctx.tick,
+    centerLX,
+    centerLY,
+    damage: weapon.damage,
+    warhead: weapon.warhead,
+    victims: victims.map(v => v.kind === 'entity'
+      ? `E:${v.entity.type}#${v.entity.id}@${v.entity.cell.cx},${v.entity.cell.cy}`
+      : `S:${v.structure.type}@${v.structure.cx},${v.structure.cy}`),
+    seed: ScenarioRandom.seed >>> 0,
+  });
+
+  const releaseVictim = (victim: SplashObject): void => {
+    if (victim.kind === 'entity') {
+      reservedEntityIds.delete(victim.entity.id);
+    } else {
+      reservedStructures.delete(victim.structure);
+    }
+  };
+
+  try {
+    for (const victim of victims) {
+      // C++ clears ObjectClass::IsToDamage immediately before calling
+      // Take_Damage. Nested death explosions can include the current object, but
+      // must still skip later outer-list victims until their turn arrives.
+      releaseVictim(victim);
+      if (victim.kind === 'entity') {
+        damageEntityVictim(victim.entity);
+      } else {
+        // C++ combat.cpp:227-228 gives distance=0 only when the impact cell's
+        // Cell_Occupier head is this building, not merely when the footprint
+        // includes the impact cell.
+        damageStructureVictim(victim.structure, sameSplashObject(impactHead, victim));
+      }
+    }
+  } finally {
+    for (const victim of victims) {
+      releaseVictim(victim);
+    }
   }
 
   const whMeta = getWarheadMeta(weapon.warhead, ctx.scenarioWarheadMeta);
@@ -2869,6 +4017,7 @@ export function applySplashDamage(
         const clearsWithUndamagedShape = nextLevel === damageLevels - 1;
         if (weapon.damage === -1 || nextLevel >= damageLevels || clearsWithUndamagedShape) {
           ctx.map.clearWallType(impactCell.cx, impactCell.cy);
+          detachCellTargetFromTargeting(ctx, impactCell.cx, impactCell.cy);
           ctx.map.addDecal(impactCell.cx, impactCell.cy, 4, 0.3);
           const wallStruct = ctx.structures.find(s =>
             s.alive && s.cx === impactCell.cx && s.cy === impactCell.cy && s.type === wallType);
@@ -2904,11 +4053,35 @@ export function applySplashDamage(
       // C++ combat.cpp:267 — Random_Pick(1, Rule.BridgeStrength) < strength
       // BridgeStrength sourced from AI_BUILD_RULES (rules.ini [General] BridgeStrength=1000)
       if (ScenarioRandom.nextInRange(1, AI_BUILD_RULES.bridgeStrength) < weapon.damage) {
-        const destroyed = ctx.map.destroyBridge(impactCell.cx, impactCell.cy, 3);
-        if (destroyed > 0) {
-          killBridgeOccupants(ctx, impactCell.cx, impactCell.cy, 3);
+        const bridgeResult = ctx.map.destroyBridgeAtCellIndex(bridgeIdx);
+        if (bridgeResult.changedCells > 0) {
+          if (bridgeResult.animationCell && Array.isArray(ctx.logicAnims) && Array.isArray(ctx.effects)) {
+            spawnLogicAnim(
+              ctx.logicAnims,
+              ctx.effects,
+              'napalm3',
+              bridgeResult.animationCell.cx * CELL_SIZE + CELL_SIZE / 2,
+              bridgeResult.animationCell.cy * CELL_SIZE + CELL_SIZE / 2,
+              1,
+              true,
+              ctx.logicAnimsAlreadyProcessed ?? false,
+              ctx.logicIndexHintForNewObject?.(),
+              ctx.logicIndexHintForNewObject,
+              ctx.reserveAnimSlot,
+            );
+          }
+          if (bridgeResult.fullyDestroyed) {
+            killBridgeOccupants(ctx, impactCell.cx, impactCell.cy, 3);
+            ctx.showEvaMessage(7); // "Bridge destroyed."
+          }
           ctx.bridgeCellCount = ctx.map.countBridgeCells();
-          ctx.showEvaMessage(7); // "Bridge destroyed."
+        } else {
+          const destroyed = ctx.map.destroyBridge(impactCell.cx, impactCell.cy, 3);
+          if (destroyed > 0) {
+            killBridgeOccupants(ctx, impactCell.cx, impactCell.cy, 3);
+            ctx.bridgeCellCount = ctx.map.countBridgeCells();
+            ctx.showEvaMessage(7); // "Bridge destroyed."
+          }
         }
       }
     }
@@ -2926,32 +4099,47 @@ export function applySplashDamage(
         const ty = cc.cy + dy;
         // C++ parity: tree damage — deterministic HP-based (RA terrain.cpp:108-151).
         // Trees have 600 HP and ARMOR_WOOD. Immune trees (clumps) skip damage.
-        // SA warhead cannot destroy terrain (terrain.cpp:118).
+        // SA warhead cannot destroy terrain; non-fire hits do not damage a tree
+        // that is already burning.
         const hitTree = ctx.map.getTreeAtCell(tx, ty);
-        if (hitTree && !hitTree.immune && hitTree.hp > 0 && weapon.warhead !== 'SA' && !damagedTrees.has(hitTree)) {
+        if (
+          hitTree &&
+          !hitTree.immune &&
+          hitTree.hp > 0 &&
+          weapon.warhead !== 'SA' &&
+          (!hitTree.isOnFire || weapon.warhead === 'Fire') &&
+          !damagedTrees.has(hitTree)
+        ) {
           damagedTrees.add(hitTree);
           // C++ terrain.cpp Center_Coord: distance from explosion to tree center (not origin).
           // XYP_COORD gives pixel offset from origin cell's top-left to tree center.
           const centerOff = TREE_CENTER_OFFSET[hitTree.type];
           const treeCenterX = hitTree.cx * CELL_SIZE + (centerOff ? centerOff[0] : CELL_SIZE / 2);
           const treeCenterY = hitTree.cy * CELL_SIZE + (centerOff ? centerOff[1] : CELL_SIZE / 2);
-          const distPixels = Math.sqrt(
-            (center.x - treeCenterX) ** 2 + (center.y - treeCenterY) ** 2,
-          );
+          const distLeptons = leptonDist(centerLX, centerLY, pixelToLepton(treeCenterX), pixelToLepton(treeCenterY));
+          if (distLeptons >= splashRangeLeptons) continue;
+          const distPixels = distLeptons * CELL_SIZE / LEPTON_SIZE;
           const treeDmg = modifyDamage(weapon.damage, weapon.warhead, 'wood', distPixels);
           if (treeDmg > 0) {
             hitTree.hp = Math.max(0, hitTree.hp - treeDmg);
+            if (weapon.warhead === 'Fire') {
+              catchTreeFire(ctx, hitTree);
+            }
             if (hitTree.hp <= 0) {
-              // Tree destroyed — clear from map (C++ terrain.cpp Start_To_Crumble + destructor)
-              ctx.map.destroyTree(hitTree);
-              ctx.map.addDecal(hitTree.cx, hitTree.cy, 6, 0.4); // stump/scorch mark
-              ctx.effects.push({
-                type: 'explosion',
-                x: hitTree.cx * CELL_SIZE + CELL_SIZE / 2,
-                y: hitTree.cy * CELL_SIZE + CELL_SIZE / 2,
-                frame: 0, maxFrames: 10, size: 8,
-                sprite: 'piffpiff', spriteStart: 0,
-              } as Effect);
+              if (hitTree.isOnFire) {
+                shortenTreeAttachedAnims(ctx, hitTree);
+              } else {
+                // Tree destroyed — clear from map (C++ terrain.cpp Start_To_Crumble + destructor)
+                ctx.map.destroyTree(hitTree);
+                ctx.map.addDecal(hitTree.cx, hitTree.cy, 6, 0.4); // stump/scorch mark
+                ctx.effects.push({
+                  type: 'explosion',
+                  x: hitTree.cx * CELL_SIZE + CELL_SIZE / 2,
+                  y: hitTree.cy * CELL_SIZE + CELL_SIZE / 2,
+                  frame: 0, maxFrames: 10, size: 8,
+                  sprite: 'piffpiff', spriteStart: 0,
+                } as Effect);
+              }
             }
           }
         }
@@ -2970,29 +4158,39 @@ export function structureDamage(
   damage: number,
   source?: Entity,
   warhead: WarheadType = 'HE',
-  options?: { skipBaseAttack?: boolean },
+  options?: StructureDamageOptions,
 ): boolean {
-  if (!s.alive) return false;
+  if (!s.alive || s.hp <= 0) return false;
   if (source && !options?.skipBaseAttack) maybeSuspendTeamsForBaseAttack(ctx, source, s.house, Boolean(STRUCTURE_WEAPONS[s.type]), s);
   // C++ house.cpp:2751 — Iron Curtain makes structures invulnerable (no damage taken)
   if (s.ironCurtainTicks && s.ironCurtainTicks > 0) return false;
   const oldHp = s.hp;
   const halfHp = s.maxHp >> 1;
   s.hp = Math.max(0, s.hp - damage);
+  const destroyedByThisHit = oldHp > 0 && s.hp <= 0;
+  if (destroyedByThisHit) {
+    // C++ ObjectClass::Take_Damage applies Strength=0 before Record_The_Kill()
+    // springs ATTACKED/DESTROYED triggers. TACTION_DESTROY_OBJECT can then see
+    // the triggering object as already dead and will not destroy it a second time.
+    s.alive = false;
+  }
   // C++ flasher.cpp:83-95 + house.cpp:2308 — Blushing damage flash.
   // Set FlashCount to 6 so 3 odd ticks (5, 3, 1) render the white "lightening" tint.
   // Keeps existing countdown if larger so repeated hits stack gracefully.
   s.flashCount = Math.max(s.flashCount ?? 0, 6);
-  // Track attacked trigger names for TEVENT_ATTACKED
-  if (s.triggerName) {
+  // Track attacked trigger names for TEVENT_ATTACKED. C++ only springs ATTACKED
+  // when a real source object is supplied; source-less forced trigger damage
+  // should not arm another ATTACKED event.
+  if (s.triggerName && source && damage > 0) {
     ctx.attackedTriggerNames.add(s.triggerName);
-    if (source && damage > 0) ctx.springAttackedTriggerByName?.(s.triggerName);
   }
-  // Record base attack for AI defense system
-  const aiState = ctx.aiStates.get(s.house);
+  // C++ BuildingClass::Take_Damage updates House->LATime when a real source
+  // TechnoClass is supplied. House->State is not changed here; the ATTACKED
+  // transition is part of HouseClass::Expert_AI, which only runs for houses
+  // with IsBaseBuilding enabled.
+  const aiState = source ? ctx.aiStates.get(s.house) : undefined;
   if (aiState) {
     aiState.lastBaseAttackTick = ctx.tick;
-    aiState.underAttack = true;
   }
   // EVA "base under attack" for player structures (throttled)
   if (ctx.isAllied(s.house, ctx.playerHouse) &&
@@ -3001,8 +4199,17 @@ export function structureDamage(
     ctx.playEva('eva_base_attack');
     ctx.minimapAlert(s.cx, s.cy);
   }
-  if (s.hp <= 0) {
-    s.alive = false;
+  if (s.triggerName && source && damage > 0) {
+    ctx.springAttackedTriggerByName?.(s.triggerName);
+  }
+  if (!destroyedByThisHit && !s.alive) {
+    return true;
+  }
+  if (destroyedByThisHit) {
+    // C++ ObjectClass::Take_Damage calls Detach_All() after Record_The_Kill()
+    // and before RESULT_DESTROYED effects. Clear every TarCom/Team target that
+    // points at this building so mission logic cannot keep attacking rubble.
+    detachStructureFromTargeting(ctx, s);
     s.rubble = true;
     // GAP1: unjam shroud when Gap Generator is destroyed
     if (s.type === 'GAP') {
@@ -3017,11 +4224,17 @@ export function structureDamage(
     if (!ctx.isAllied(s.house, ctx.playerHouse) && !WALL_TYPES.has(s.type)) {
       ctx.nBuildingsDestroyedCount++;
     }
+    if (!WALL_TYPES.has(s.type) && !INSIGNIFICANT_STRUCTURE_TYPES.has(s.type)) {
+      ctx.recordBuildingLost?.(s.house);
+    }
     // Clear terrain footprint so units can walk through rubble
     ctx.clearStructureFootprint(s);
     const wx = s.cx * CELL_SIZE + CELL_SIZE;
     const wy = s.cy * CELL_SIZE + CELL_SIZE;
     const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
+    // Attached AnimClass fires stay in the fixed Anims heap until their next
+    // AI pass, but are marked to delete without running further logic.
+    detachStructureAttachedAnims(ctx, s);
     // C++ building.cpp:1299-1308 — immediate RESULT_DESTROYED visuals run
     // during Take_Damage. Rubble smoke/survivors are delayed until Drop_Debris.
     runBuildingDestroyedTakeDamageEffects(ctx, s);
@@ -3052,8 +4265,9 @@ export function structureDamage(
         ctx.recalculateSiloCapacity();
       }
     }
-    // C++ parity: Barrel explosions use directional fire-bullet mechanic,
-    // non-barrel structures use generic radial HE blast.
+    // C++ building.cpp:1380-1405 — only BARL/BRL3 destruction creates
+    // gameplay damage bullets. Ordinary building destruction is visual-only
+    // here; it does not damage adjacent structures or units.
     if (s.type === 'BARL' || s.type === 'BRL3') {
       // C++ building.cpp:1344-1369 — 4 invisible WARHEAD_FIRE bullets,
       // 200 damage each, cardinal directions only (N/E/S/W, 1 cell away)
@@ -3064,76 +4278,29 @@ export function structureDamage(
         { dx: -1, dy: 0 }, // W
       ];
       for (const off of cardinalOffsets) {
-        const targetCx = s.cx + off.dx;
-        const targetCy = s.cy + off.dy;
-        // Damage entities in cardinal cell — flat 200 Fire damage, no falloff
-        for (const e of ctx.entities) {
-          if (!e.alive || e.inLimbo) continue;
-          const ec = e.cell;
-          if (ec.cx === targetCx && ec.cy === targetCy) {
-            damageEntity(ctx, e, 200, 'Fire');
-          }
-        }
-        // Damage structures whose footprint overlaps cardinal cell (chain explosions)
-        // C++ applies Fire warhead vs armor modifier before structure damage
-        for (const s2 of ctx.structures) {
-          if (!s2.alive || s2 === s) continue;
-          const [s2w, s2h] = STRUCTURE_SIZE[s2.type] ?? [2, 2];
-          if (targetCx >= s2.cx && targetCx < s2.cx + s2w &&
-              targetCy >= s2.cy && targetCy < s2.cy + s2h) {
-            const s2Armor: ArmorType = s2.armor ?? (STRUCTURE_ARMOR[s2.type] ?? 'wood');
-            const fireVs = WARHEAD_VS_ARMOR['Fire'][armorIndex(s2Armor)];
-            structureDamage(ctx, s2, Math.max(1, Math.round(200 * fireVs)), undefined, 'Fire');
-          }
-        }
-      }
-    } else {
-      // Non-barrel: building death explosions are visual-only for entities.
-      // C++ building.cpp death anims (FBALL1) don't create warhead damage circles
-      // against units — only barrels have the cardinal-direction bullet mechanic.
-      // Structure-to-structure chain damage still applies.
-      // Non-barrel: structure-to-structure chain damage (2-cell radius)
-      const structBlastRadius = 2;
-      for (const s2 of ctx.structures) {
-        if (!s2.alive || s2 === s) continue;
-        // Structure centers in leptons for distance check
-        const s2lx = s2.cx * LEPTON_SIZE + LEPTON_SIZE;
-        const s2ly = s2.cy * LEPTON_SIZE + LEPTON_SIZE;
-        const wlx = s.cx * LEPTON_SIZE + LEPTON_SIZE;
-        const wly = s.cy * LEPTON_SIZE + LEPTON_SIZE;
-        const distLeptons = leptonDist(wlx, wly, s2lx, s2ly);
-        const dist = distLeptons / LEPTON_SIZE;
-        if (dist > structBlastRadius) continue;
-        const falloff = 1 - (dist / structBlastRadius) * 0.6;
-        const blastDmg = Math.max(1, Math.round(100 * falloff));
-        structureDamage(ctx, s2, blastDmg, undefined, 'HE');
+        launchBarrelDeathBullet(ctx, s, off.dx, off.dy);
       }
     }
     // Leave large scorch mark
     ctx.map.addDecal(s.cx, s.cy, 14, 0.6);
-    // Barrel explosion: barrels always explode. Only destroy bridge if barrel is near bridge cells.
-    if (s.type === 'BARL' || s.type === 'BRL3') {
-      const destroyed = ctx.map.destroyBridge(s.cx, s.cy, 3);
-      if (destroyed > 0) {
-        killBridgeOccupants(ctx, s.cx, s.cy, 3);
-        ctx.bridgeCellCount = ctx.map.countBridgeCells();
-        ctx.showEvaMessage(7); // "Bridge destroyed."
-      }
-    }
-    // C++ building.cpp:1298 — IsSurvivorless: kennels and force-destroyed buildings get no survivors
-    // C++ sets IsSurvivorless = true when (forced || *this == STRUCT_KENNEL)
-    if (s.type === 'KENN') {
+    // C++ building.cpp:1330-1334 — force-destroyed buildings and kennels
+    // do not generate Drop_Debris survivors.
+    if (options?.forced || s.type === 'KENN') {
       s.isSurvivorless = true;
     }
     // C++ building.cpp:1317-1320 — destroyed buildings remain in Logic for
     // CountDown frames. Drop_Debris (survivors, smoke, scorch/crater) runs
     // later from BuildingClass::AI, not inside Take_Damage.
+    // C++ CDTimerClass starts counting from the frame CountDown is assigned.
+    // BuildingClass::AI can run later in that same frame without elapsing a tick.
     s.debrisCountdown = s.mission === Mission.DECONSTRUCTION ? 0 : 8;
+    s.debrisDropTick = ctx.tick + s.debrisCountdown;
     s.debrisDropped = false;
     return true;
   }
-  if ((oldHp >= halfHp && s.hp < halfHp) || s.hp === 1) {
-    runBuildingDamageStateEffects(ctx, s, warhead, source);
+  const isResultHalf = oldHp >= halfHp && s.hp < halfHp;
+  if (isResultHalf || s.hp === 1) {
+    runBuildingDamageStateEffects(ctx, s, warhead, source, isResultHalf);
   }
   return false;
 }
@@ -3214,7 +4381,7 @@ function spawnDropDebrisSurvivor(ctx: CombatContext, s: MapStructure, cellCx: nu
 
   const source = s.whomToRepayEntityId !== undefined ? ctx.entityById.get(s.whomToRepayEntityId) : undefined;
   if (source && source.alive && !ctx.isAllied(s.house, source.house)) {
-    inf.target = source;
+    assignEntityTarCom(inf, source);
     assignMission(inf, Mission.ATTACK);
   } else {
     assignMission(inf, s.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
@@ -3245,10 +4412,14 @@ function runBuildingDropDebris(ctx: CombatContext, s: MapStructure): void {
       case 0:
       case 1:
       case 2: {
-        const smokePos = coordScatterFromCell(cell.cx, cell.cy, 0x0050);
-        const smokeStart = ScenarioRandom.nextInRange(0, 5);
-        const smokeDelay = ScenarioRandom.nextInRange(1, 2);
-        submitBuildingSmokeEffect(ctx, smokePos.x, smokePos.y, smokeStart, smokeDelay);
+        if (reserveBuildingAnimSlot(ctx)) {
+          // C++ new-expression evaluation for this call site allocates first,
+          // then evaluates constructor args right-to-left: loop, delay, coord.
+          const smokeLoop = ScenarioRandom.nextInRange(1, 2);
+          const smokeDelay = ScenarioRandom.nextInRange(0, 5);
+          const smokePos = coordScatterFromCell(cell.cx, cell.cy, 0x0050);
+          submitBuildingSmokeEffect(ctx, smokePos.x, smokePos.y, smokeDelay, smokeLoop, true);
+        }
         break;
       }
       default:
@@ -3266,15 +4437,50 @@ function runBuildingDropDebris(ctx: CombatContext, s: MapStructure): void {
   }
 }
 
-export function tickDestroyedStructureDebris(ctx: CombatContext, s: MapStructure): void {
-  if (s.alive || s.debrisDropped || s.debrisCountdown === undefined) return;
-  if (s.debrisCountdown > 0) {
+export function tickDestroyedStructureDebris(ctx: CombatContext, s: MapStructure): boolean {
+  if (s.alive || s.debrisDropped || s.debrisCountdown === undefined) return false;
+
+  if (s.debrisDropTick !== undefined) {
+    const remaining = s.debrisDropTick - ctx.tick;
+    if (remaining > 0) {
+      s.debrisCountdown = remaining;
+      return false;
+    }
+  } else if (s.debrisCountdown > 0) {
     s.debrisCountdown--;
-    if (s.debrisCountdown > 0) return;
+    if (s.debrisCountdown > 0) return false;
   }
+  // C++ BuildingClass::AI removes a zero-strength building by calling Limbo(),
+  // and ObjectClass::Limbo calls Detach_All again at that removal point. Teams
+  // can reacquire the dead building through Cell_Object during the CountDown
+  // window, so the delayed detach is required in addition to the damage-time
+  // detach.
+  detachStructureFromTargeting(ctx, s);
   runBuildingDropDebris(ctx, s);
   s.debrisDropped = true;
   s.debrisCountdown = undefined;
+  s.debrisDropTick = undefined;
+  return true;
+}
+
+function structureThreatScanEntities(ctx: CombatContext): Entity[] {
+  const airborneAircraft: Entity[] = [];
+  const remaining: Entity[] = [];
+
+  for (const entity of ctx.entities) {
+    if (entity.stats.isAircraft && entityInTopLayer(entity)) {
+      airborneAircraft.push(entity);
+    } else {
+      remaining.push(entity);
+    }
+  }
+
+  // C++ TechnoClass::Greatest_Threat(THREAT_RANGE) scans airborne aircraft
+  // through Aircraft.Count() before any cell/ring scan. Reinforcement Logic
+  // order can be the reverse of the Aircraft pool order, so using ctx.entities
+  // directly breaks equal-score target ties.
+  airborneAircraft.sort((a, b) => a.id - b.id);
+  return [...airborneAircraft, ...remaining];
 }
 
 /** C++ BuildingClass::Greatest_Threat path used by weapon-equipped Mission_Guard.
@@ -3290,9 +4496,16 @@ export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): 
     const centerCoord = structureCenterLeptons(s);
     let bestTarget: Entity | null = null;
     let bestScore = -Infinity;
-    for (const e of ctx.entities) {
-      if (!e.alive || e.inLimbo) continue;
-      if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
+    for (const e of structureThreatScanEntities(ctx)) {
+	      if (!e.alive || e.inLimbo) continue;
+	      if (!e.isAirUnit && entityInTopLayer(e)) continue;
+	      if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
+	      // C++ techno.cpp:1476-1479 Evaluate_Object rejects objects whose
+	      // current MissionControl entry has NoThreat=yes (e.g. HARMLESS dogs).
+	      if (MISSION_CONTROL[e.mission]?.isNoThreat) continue;
+	      // C++ techno.cpp:1579-1586 — spies are not legal auto-targets
+	      // unless the scanner is a dog. Buildings are never dogs.
+	      if (e.type === UnitType.I_SPY) continue;
       // human-requested: SAMs are air-only. Do NOT revert this line.
       if (s.weapon.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
       if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon.isAntiAir) continue;
@@ -3457,7 +4670,10 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path for splash weapons.
       const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
       const houseBias = ctx.getFirepowerBias(s.house);
-      const launchedStructureProjectile = !!s.weapon.isInvisible || s.type === 'QUEE';
+      const launchedStructureProjectile =
+        s.weapon.projSpeed !== undefined ||
+        !!s.weapon.isInvisible ||
+        s.type === 'QUEE';
       let killed: boolean;
 
       if (launchedStructureProjectile) {
@@ -3469,14 +4685,16 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
         applySplashDamage(
           ctx, bestTargetPixels,
           { damage: s.weapon.damage, warhead: wh, splash: s.weapon.splash },
-          -1, s.house,
+          -1, s.house, undefined, s,
         );
         killed = !bestTarget.alive || bestTarget.hp <= 0;
       } else {
         // Non-splash weapons: direct hit only
         const whMult = getWarheadMult(wh, bestTarget.stats.armor, ctx.warheadOverrides);
         const damage = modifyDamage(s.weapon.damage, wh, bestTarget.stats.armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
-        killed = damageEntity(ctx, bestTarget, damage, wh);
+        killed = damageEntity(ctx, bestTarget, damage, wh, undefined, {
+          sourceStructure: s,
+        });
       }
 
       // Fire effects — color by warhead type (C++ parity)
@@ -3537,7 +4755,18 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
               frame: 0, maxFrames: 10, size: 6,
               sprite: aaImpactSprite, spriteStart: 0,
             } as Effect);
-            spawnLogicAnimForSprite(ctx.logicAnims, ctx.effects, aaImpactSprite, bestTargetPixels.x, bestTargetPixels.y);
+            spawnLogicAnimForSprite(
+              ctx.logicAnims,
+              ctx.effects,
+              aaImpactSprite,
+              bestTargetPixels.x,
+              bestTargetPixels.y,
+              false,
+              ctx.logicAnimsAlreadyProcessed === true,
+              ctx.logicIndexHintForNewObject?.(),
+              ctx.logicIndexHintForNewObject,
+              ctx.reserveAnimSlot,
+            );
           }
           // D5: Structure fire weapons (FTUR FireballLauncher) plant scorch marks at impact
           if (structLand === 'ground' && wh === 'Fire') {

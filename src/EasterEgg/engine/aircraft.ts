@@ -12,7 +12,7 @@ import {
 } from './types';
 // Re-export tables for backward compatibility (canonical definitions now in types.ts).
 export { COS_TABLE_256, SIN_TABLE_256 };
-import { Entity, CloakState, dir256ToFacing8, dir256ToFacing32 } from './entity';
+import { Entity, CloakState, dir256ToFacing8, dir256ToFacing32, attachFallingParachuteAnim } from './entity';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap, MoveResult } from './map';
@@ -25,17 +25,14 @@ function leptonPosToWorld(lp: LeptonPos): WorldPos {
 }
 
 /** Convert world positions to a C++ 256-step DirType facing (0=N, 64=E, 128=S, 192=W).
- *  C++ Direction() in facing.h: atan2-based conversion to 256-step byte. */
+ *  C++ Direction() routes through Desired_Facing256: integer lepton math, not atan2. */
 export function directionTo256(from: WorldPos, to: WorldPos): number {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (dx === 0 && dy === 0) return 0;
-  // atan2(dx, -dy): dx as "east" component, -dy as "north" component
-  // gives 0 for north, PI/2 for east, etc. — matching C++ DirType convention
-  const angle = Math.atan2(dx, -dy); // radians, 0=north, positive=clockwise
-  // Convert to 0-255: full circle = 2*PI maps to 256
-  const dir256 = Math.round(((angle + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI) * 256) & 0xFF;
-  return dir256;
+  return directionToLeptons256(
+    pixelToLepton(from.x),
+    pixelToLepton(from.y),
+    pixelToLepton(to.x),
+    pixelToLepton(to.y),
+  );
 }
 
 // ── C++ Hover Jitter (aircraft.cpp:441-445) ──────────────────────────────────
@@ -107,11 +104,19 @@ export interface AircraftContext {
   fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void;
   fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void;
   fireWeaponAtCoord?(attacker: Entity, weapon: WeaponStats, impact: WorldPos): void;
+  /** C++ CellClass::Incoming(threat, forced=true) for aircraft fire/drop target cells. */
+  incomingThreatScatterCell?(cx: number, cy: number, threat: Entity): void;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
+  /** C++ house.cpp:291,301: AirspeedBias; fixed-wing landing speed divides by this. */
+  getAirspeedBias?(house: House): number;
   /** C++ house.cpp:4160: Power_Fraction() = Power/Drain, capped at 1.0.
    *  Used by building.cpp:4023 for rearm delay scaling. */
   getPowerFraction(house: House): number;
+  /** Current C++-style Logic.Count() for a newly submitted object. */
+  logicIndexHintForNewObject?: () => number;
+  /** Reserve one C++ AnimClass heap slot. */
+  reserveAnimSlot?: () => boolean;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
@@ -139,7 +144,11 @@ export function findLandingPad(ctx: AircraftContext, entity: Entity): number {
     const s = ctx.structures[i];
     if (!s.alive || s.type !== padType) continue;
     if (!ctx.isAllied(entity.house, s.house)) continue;
-    if (s.dockedAircraft !== undefined && s.dockedAircraft > 0) continue; // occupied
+    if (s.dockedAircraft !== undefined && s.dockedAircraft > 0 && s.dockedAircraft !== entity.id) {
+      const occupant = ctx.entityById.get(s.dockedAircraft);
+      if (occupant && occupant.alive && !occupant.inLimbo) continue; // occupied by another aircraft
+      s.dockedAircraft = undefined;
+    }
     const sx = s.cx * CELL_SIZE + CELL_SIZE;
     const sy = s.cy * CELL_SIZE + CELL_SIZE;
     const dist = worldDist(entity.pos, { x: sx, y: sy });
@@ -269,6 +278,7 @@ function enterFixedWingDockingMission(ctx: AircraftContext, entity: Entity): voi
     entity.aircraftState = 'returning';
     entity.aircraftEnterStatus = 0;
     entity.aircraftDockingStructure = padIdx;
+    ctx.structures[padIdx].dockedAircraft = entity.id;
   } else {
     entity.mission = Mission.RETREAT;
     entity.aircraftState = 'flying';
@@ -330,6 +340,33 @@ const ENTER_DOWNWIND = 4;
 const ENTER_CROSSWIND = 5;
 const ENTER_TRAVEL = 6;
 const ENTER_LANDING = 7;
+const MOVE_VALIDATE_LZ = 0;
+const MOVE_TAKE_OFF = 1;
+const MOVE_FLY_TO_LZ = 2;
+const MOVE_LAND = 3;
+const AIRCRAFT_HEIGHT_STEP_LEPTONS = Math.trunc((LEPTON_SIZE + CELL_SIZE / 2) / CELL_SIZE);
+const AIRCRAFT_GROUND_LAYER_HEIGHT =
+  Entity.FLIGHT_LEVEL_LEPTONS - Math.trunc(Entity.FLIGHT_LEVEL_LEPTONS / 3);
+
+function aircraftHeightToPixel(height: number): number {
+  return Math.trunc((height * CELL_SIZE + LEPTON_SIZE / 2) / LEPTON_SIZE);
+}
+
+function pixelToAircraftHeight(pixel: number): number {
+  return Math.trunc((pixel * LEPTON_SIZE + CELL_SIZE / 2) / CELL_SIZE);
+}
+
+function setAircraftHeight(entity: Entity, height: number): void {
+  const clamped = Math.max(0, Math.min(Entity.FLIGHT_LEVEL_LEPTONS, Math.trunc(height)));
+  entity.aircraftHeightLeptons = clamped;
+  entity.flightAltitude = aircraftHeightToPixel(clamped);
+}
+
+function ensureAircraftHeight(entity: Entity): void {
+  if (aircraftHeightToPixel(entity.aircraftHeightLeptons) !== entity.flightAltitude) {
+    setAircraftHeight(entity, pixelToAircraftHeight(entity.flightAltitude));
+  }
+}
 
 const AIRCRAFT_EXIT_CELLS = [
   { dx: 0, dy: 1 },
@@ -404,6 +441,7 @@ export function closestInfantryUnlimboSpot(
   passenger: Entity,
   lx: number,
   ly: number,
+  ignoreOccupancy = false,
 ): { lx: number; ly: number; subCell: number; cellIdx: number } {
   const cx = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(lx / LEPTON_SIZE)));
   const cy = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(ly / LEPTON_SIZE)));
@@ -418,17 +456,29 @@ export function closestInfantryUnlimboSpot(
     preferred += 1;
   }
 
-  const slots = ctx.map.subCellOccupancy.get(cellIdx);
-  const order: number[][] = [
-    [0, 1, 2, 3, 4],
-    [1, 0, 2, 3, 4],
-    [2, 0, 1, 4, 3],
-    [3, 0, 1, 4, 2],
-    [4, 0, 2, 3, 1],
+  const slots = ignoreOccupancy ? undefined : ctx.map.subCellOccupancy.get(cellIdx);
+  const sequence: number[][] = [
+    [1, 2, 3, 4],
+    [0, 2, 3, 4],
+    [0, 1, 4, 3],
+    [0, 1, 4, 2],
+    [0, 2, 3, 1],
+  ];
+  const alternate: number[][] = [
+    [1, 2, 3, 4],
+    [2, 3, 4, 1],
+    [3, 4, 1, 2],
+    [4, 1, 2, 3],
   ];
   let subCell = preferred;
   if (slots?.[subCell] && slots[subCell] !== passenger.id) {
-    for (const candidate of order[preferred]) {
+    // C++ cell.cpp:1847-1850 randomizes the equidistant corner order only
+    // when the requested center spot is occupied. The call inherits the current
+    // source tag; for aircraft paradrops this shows up under Aircraft_FootAI.
+    const candidates = preferred === 0
+      ? alternate[ScenarioRandom.nextInRange(0, 3)]
+      : sequence[preferred];
+    for (const candidate of candidates) {
       if (!slots[candidate] || slots[candidate] === passenger.id) {
         subCell = candidate;
         break;
@@ -457,10 +507,19 @@ function aircraftCanCommence(entity: Entity): boolean {
 function commenceAircraft(ctx: AircraftContext, entity: Entity): void {
   if (entity.missionQueue === null || !aircraftCanCommence(entity)) return;
   if (ctx.tick !== undefined && entity.missionQueueSetTick === ctx.tick) return;
+  const queuedMission = entity.missionQueue;
   entity.mission = entity.missionQueue;
   entity.missionQueue = null;
   entity.missionQueueSetTick = -1;
   entity.missionTimer = 0;
+  if (queuedMission === Mission.MOVE) {
+    entity.aircraftMoveStatus = MOVE_TAKE_OFF;
+    entity._flyToTicks = 0;
+    const savedTag = ScenarioRandom._sourceTag;
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 40040;
+    entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+    if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+  }
 }
 
 function beginTransportMissionUnload(entity: Entity): void {
@@ -481,6 +540,12 @@ function beginTransportMissionUnload(entity: Entity): void {
 function aircraftSpeedAdd(maxSpeedLeptons: number, speedFraction = 1.0): number {
   const speedByte = Math.max(0, Math.min(0xFF, Math.round(speedFraction * 0xFF)));
   return Math.floor((maxSpeedLeptons * speedByte + 128) / 256);
+}
+
+function fixedWingLandingSpeedFraction(ctx: AircraftContext, entity: Entity): number {
+  const airspeedBias = ctx.getAirspeedBias?.(entity.house) ?? 1.0;
+  const speedByte = Math.trunc((entity.stats.landingSpeed ?? 0xFF) / airspeedBias);
+  return Math.max(0, Math.min(0xFF, speedByte)) / 0xFF;
 }
 
 function houseEdgeDirection256(ctx: AircraftContext, house: House): number {
@@ -594,6 +659,18 @@ function leavePadRepairMission(ctx: AircraftContext, entity: Entity): void {
   pad.missionTimer = 1;
 }
 
+function enterPadRepairHandoff(ctx: AircraftContext, entity: Entity): void {
+  const pad = landedServicePad(ctx, entity);
+  if (!pad || (pad.type !== 'AFLD' && pad.type !== 'HPAD')) return;
+  // C++ BuildingClass::Receive_Message(RADIO_IM_IN) calls Assign_Mission,
+  // so the pad keeps its current mission/timer until BuildingClass::AI
+  // Commence() promotes MissionQueue into MISSION_REPAIR.
+  pad.dockedAircraft = entity.id;
+  pad.missionQueue = Mission.REPAIR;
+  pad.isReadyToCommence = false;
+  pad.readyToCommenceTick = (ctx.tick ?? 0) + 2;
+}
+
 function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): boolean {
   if (entity.missionTimer > 0) {
     entity.missionTimer--;
@@ -615,6 +692,7 @@ function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): bool
 
   switch (entity.aircraftEnterStatus) {
     case ENTER_INITIAL:
+      ensureAircraftHeight(entity);
       entity.aircraftEnterStatus = entity.flightAltitude < Entity.FLIGHT_ALTITUDE
         ? ENTER_TAKEOFF
         : ENTER_ALTITUDE;
@@ -622,13 +700,14 @@ function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): bool
       break;
 
     case ENTER_TAKEOFF:
-      entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
+      ensureAircraftHeight(entity);
+      setAircraftHeight(entity, entity.aircraftHeightLeptons + AIRCRAFT_HEIGHT_STEP_LEPTONS);
       entity.aircraftSpeedFraction = 1.0;
       if (entity.landedAtStructure >= 0 && entity.landedAtStructure < ctx.structures.length) {
         ctx.structures[entity.landedAtStructure].dockedAircraft = undefined;
       }
       entity.landedAtStructure = -1;
-      if (entity.flightAltitude >= Entity.FLIGHT_ALTITUDE) {
+      if (entity.aircraftHeightLeptons >= Entity.FLIGHT_LEVEL_LEPTONS) {
         entity.aircraftEnterStatus = ENTER_ALTITUDE;
       }
       aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
@@ -673,6 +752,7 @@ function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): bool
       entity.landedAtStructure = padIdx;
       pad.dockedAircraft = entity.id;
       aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      applyAircraftLandingHeightStep(ctx, entity);
       break;
 
     default:
@@ -696,7 +776,12 @@ function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): bool
  *  @param target  World position to fly toward
  *  @param baseSpeed  Base movement speed in px/tick (from ctx.movementSpeed)
  *  @returns true if arrived at target */
-function aircraftFlyInFacing(entity: Entity, target: WorldPos | LeptonPos, baseSpeed: number): boolean {
+function aircraftFlyInFacing(
+  entity: Entity,
+  target: WorldPos | LeptonPos,
+  baseSpeed: number,
+  flyToIntervalOverride?: number,
+): boolean {
   const targetLX = 'lx' in target ? target.lx : pixelToLepton(target.x);
   const targetLY = 'ly' in target ? target.ly : pixelToLepton(target.y);
   // Keep fractional pixel precision for facing. C++ Direction() receives a
@@ -726,7 +811,7 @@ function aircraftFlyInFacing(entity: Entity, target: WorldPos | LeptonPos, baseS
   entity.rotTickedThisFrame = false;
 
   // C++ Process_Fly_To runs every 5 ticks when far (dist>=256 leptons), 1 tick when close
-  const flyToInterval = distLeptons >= 256 ? 5 : 1;
+  const flyToInterval = flyToIntervalOverride ?? (distLeptons >= 256 ? 5 : 1);
   if (!entity._flyToTicks) entity._flyToTicks = 0;
   entity._flyToTicks++;
   const updateDesired = entity._flyToTicks >= flyToInterval;
@@ -847,6 +932,18 @@ function handleMapExit(ctx: AircraftContext, entity: Entity): void {
   }
 }
 
+function startParadropFall(ctx: AircraftContext, passenger: Entity): void {
+  passenger.isFalling = true;
+  passenger.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+  passenger.fallRiser = 0;
+  attachFallingParachuteAnim(
+    passenger,
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+  );
+  passenger.flightAltitude = leptonToPixel(passenger.fallHeightLeptons);
+}
+
 function paradropOnePassenger(ctx: AircraftContext, entity: Entity): void {
   const passenger = entity.passengers.shift()!;
   passenger.alive = true;
@@ -867,21 +964,18 @@ function paradropOnePassenger(ctx: AircraftContext, entity: Entity): void {
   passenger.transportRef = null;
   passenger.isTethered = false;
   passenger.inLimbo = false;
+  passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  ctx.entities.push(passenger);
+  ctx.entityById.set(passenger.id, passenger);
   // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
   // Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
-  passenger.isFalling = true;
-  passenger.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
-  passenger.fallRiser = 0;
-  passenger.fallHasAttachedAnim = true;
-  passenger.flightAltitude = leptonToPixel(passenger.fallHeightLeptons);
+  startParadropFall(ctx, passenger);
   // C++ AircraftClass::Paradrop_Cargo removes the passenger from the team,
   // then (bug-compatible unqualified call) assigns the aircraft GUARD/HUNT.
   if (entity.teamRef && passenger.teamRef) {
     passenger.teamRef.remove(passenger);
   }
   assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
-  ctx.entities.push(passenger);
-  ctx.entityById.set(passenger.id, passenger);
   if (entity.teamRef) {
     entity.mission = passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT;
   }
@@ -936,27 +1030,29 @@ function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boo
         break;
       }
 
-      // C++ Mission_Hunt FLY_TO_TARGET: when Can_Fire does not produce FIRE_OK
-      // and PrimaryFacing is not already rotating, set desired facing toward
-      // TarCom during the mission dispatch. Rotation_AI then applies this in
-      // the same AircraftClass::AI pass before Movement_AI.
-      if (entity.facing256 >= 0) {
-        if (entity.facing256 === entity.desiredFacing256) {
-          const targetWorld = leptonPosToWorld(entity.moveTarget);
-          entity.desiredFacing256 = directionTo256(entity.pos, targetWorld);
-          entity.desiredFacing = entity.facing;
-        }
-      } else if (entity.facing === entity.desiredFacing) {
-        entity.desiredFacing = directionTo(entity.pos, leptonPosToWorld(entity.moveTarget));
-      }
-
       const dist = leptonDist(
         entity.leptonX, entity.leptonY,
         entity.moveTarget.lx, entity.moveTarget.ly,
       );
       if (dist < 0x0200) {
+        // C++ Can_Fire returns FIRE_OK here. Mission_Hunt immediately switches
+        // to DROP_BOMBS and returns, so it does not refresh PrimaryFacing
+        // desired on the same dispatch.
         entity.aircraftAttackStatus = DROP_BOMBS;
       } else {
+        // C++ Mission_Hunt FLY_TO_TARGET: when Can_Fire does not produce FIRE_OK
+        // and PrimaryFacing is not already rotating, set desired facing toward
+        // TarCom during the mission dispatch. Rotation_AI then applies this in
+        // the same AircraftClass::AI pass before Movement_AI.
+        if (entity.facing256 >= 0) {
+          if (entity.facing256 === entity.desiredFacing256) {
+            const targetWorld = leptonPosToWorld(entity.moveTarget);
+            entity.desiredFacing256 = directionTo256(entity.pos, targetWorld);
+            entity.desiredFacing = entity.facing;
+          }
+        } else if (entity.facing === entity.desiredFacing) {
+          entity.desiredFacing = directionTo(entity.pos, leptonPosToWorld(entity.moveTarget));
+        }
         // C++ FLY_TO_TARGET returns TICKS_PER_SECOND/2. Because this TS
         // aircraft handler owns the countdown directly, store the end-of-frame
         // value observed after the C++ CDTimer tick.
@@ -969,7 +1065,25 @@ function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boo
     case DROP_BOMBS:
       if (entity.passengers.length > 0 &&
           leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 0x0200) {
+        const missionAtDispatch = entity.mission;
+        const targetCell = worldToCell(
+          leptonToPixel(entity.moveTarget.lx),
+          leptonToPixel(entity.moveTarget.ly),
+        );
+        if (missionAtDispatch === Mission.HUNT) {
+          // C++ AircraftClass::Mission_Hunt calls Incoming(TarCom) before
+          // Fire_At(), so the newly detached passenger is not in the occupier
+          // list for this scatter pass.
+          ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
+        }
         paradropOnePassenger(ctx, entity);
+        if (missionAtDispatch !== Mission.HUNT) {
+          // C++ AircraftClass::Mission_Attack calls Fire_At() first, then
+          // Incoming(TarCom). Passenger aircraft route Fire_At through
+          // Paradrop_Cargo, so the dropped infantry can be part of the same
+          // CellClass::Incoming scatter.
+          ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
+        }
       }
       entity.aircraftAttackStatus = LOOK_FOR_TARGET;
       entity.missionTimer = 0;
@@ -1009,6 +1123,62 @@ function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boo
 
 // ── State Machine ──────────────────────────────────────────────────────────────
 
+function applyAircraftLandingHeightStep(ctx: AircraftContext, entity: Entity): void {
+  ensureAircraftHeight(entity);
+  setAircraftHeight(entity, entity.aircraftHeightLeptons - AIRCRAFT_HEIGHT_STEP_LEPTONS);
+
+  // C++ aircraft.cpp:4104-4111 — LZ blocked check at LAYER_GROUND transition.
+  // TS does not model render layers separately, but the LZ legality guard belongs
+  // to the exact Height value, not the rounded visible altitude.
+  if (entity.isHelicopter &&
+      entity.aircraftHeightLeptons > 0 &&
+      entity.aircraftHeightLeptons < AIRCRAFT_GROUND_LAYER_HEIGHT) {
+    const { cx, cy } = entity.cell;
+    const cellKey = cy * MAP_CELLS + cx;
+    if (ctx.map.vehicleOccupancy.has(cellKey)) {
+      setAircraftHeight(entity, entity.aircraftHeightLeptons + AIRCRAFT_HEIGHT_STEP_LEPTONS);
+      entity.aircraftState = 'takeoff';
+      entity.aircraftSpeedFraction = 1.0;
+      return;
+    }
+  }
+
+  // C++ aircraft.cpp:2982-2998 — helicopter landing speed staging.
+  if (entity.isHelicopter) {
+    const halfLevel = Math.round(Entity.FLIGHT_ALTITUDE / 2);
+    if (entity.flightAltitude <= halfLevel) {
+      entity.aircraftSpeedFraction = 0;
+    }
+  }
+
+  if (entity.aircraftHeightLeptons > 0) return;
+
+  setAircraftHeight(entity, 0);
+  // C++ aircraft.cpp:4062-4068 — fixed-wing crash on open ground.
+  if (entity.isFixedWing && entity.landedAtStructure < 0) {
+    entity.hp = 0;
+    entity.alive = false;
+    entity.mission = Mission.DIE;
+    return;
+  }
+
+  entity.aircraftSpeedFraction = 1.0;
+  if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
+    entity.aircraftState = 'rearming';
+    entity.rearmTimer = computeRearmDelay(ctx.getPowerFraction(entity.house));
+    const pad = landedServicePad(ctx, entity);
+    if (pad && (pad.type === 'AFLD' || pad.type === 'HPAD')) {
+      enterPadRepairMission(ctx, entity, pad, entity.rearmTimer);
+    }
+  } else {
+    entity.aircraftState = 'landed';
+    enterPadRepairHandoff(ctx, entity);
+  }
+  if (entity.missionQueue === null) {
+    entity.mission = Mission.GUARD;
+  }
+}
+
 /** Aircraft state machine — returns true if aircraft handled this tick (skip normal update) */
 export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
   // Only process aircraft with active state
@@ -1030,12 +1200,16 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
   switch (entity.aircraftState) {
     case 'landed': {
       // On pad, flightAltitude=0. Wait for attack/move order
-      entity.flightAltitude = 0;
+      setAircraftHeight(entity, 0);
       entity.animState = AnimState.IDLE;
       if (entity.mission === Mission.ATTACK && (entity.target?.alive || entity.targetStructure)) {
         entity.aircraftState = 'takeoff';
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
-        entity.aircraftState = 'takeoff';
+        if (entity.missionTimer > 0) {
+          entity.missionTimer--;
+        } else {
+          entity.aircraftState = 'takeoff';
+        }
       } else if (entity.mission === Mission.RETREAT) {
         // C++ aircraft.cpp:1309-1367 Mission_Retreat: TAKE_OFF stage
         // Loaner transport has finished unloading — take off to fly off-map
@@ -1045,8 +1219,10 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     }
 
     case 'takeoff': {
-      // Ascend 1px/tick until at flight altitude (C++ AIRCRAFT.CPP — 24 ticks to reach altitude)
-      entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
+      // C++ Landing_Takeoff_AI stores exact Height in leptons and derives the
+      // visible offset with rounded Lepton_To_Pixel.
+      ensureAircraftHeight(entity);
+      setAircraftHeight(entity, entity.aircraftHeightLeptons + AIRCRAFT_HEIGHT_STEP_LEPTONS);
       entity.animState = AnimState.WALK;
       // Undock from pad
       if (entity.landedAtStructure >= 0 && entity.landedAtStructure < ctx.structures.length) {
@@ -1086,7 +1262,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         // C++ aircraft.cpp:2893-2897 — fixed-wing: full speed immediately on takeoff
         entity.aircraftSpeedFraction = 1.0;
       }
-      if (entity.flightAltitude >= Entity.FLIGHT_ALTITUDE) {
+      if (entity.aircraftHeightLeptons >= Entity.FLIGHT_LEVEL_LEPTONS) {
         entity.aircraftState = 'flying';
         entity.aircraftSpeedFraction = 1.0;
       }
@@ -1148,22 +1324,19 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           passenger.transportRef = null;
           passenger.isTethered = false;
           passenger.inLimbo = false;
+          passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+          ctx.entities.push(passenger);
+          ctx.entityById.set(passenger.id, passenger);
           // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
           //   Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
           // C++ TechnoClass::AI (techno.cpp:2346) returns early for non-aircraft
           // while Height > 0, so the newly appended passenger can enter Logic this
           // same tick without running infantry MissionClass::AI/RNG.
-          passenger.isFalling = true;
-          passenger.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
-          passenger.fallRiser = 0;
-          passenger.fallHasAttachedAnim = true;
-          passenger.flightAltitude = leptonToPixel(passenger.fallHeightLeptons);
+          startParadropFall(ctx, passenger);
           // C++ InfantryClass::Paradrop (infantry.cpp:4183-4194):
           // human player → MISSION_GUARD, AI → MISSION_HUNT. Route through
           // Assign_Mission so Commence timing remains C++-faithful after landing.
           assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
-          ctx.entities.push(passenger);
-          ctx.entityById.set(passenger.id, passenger);
 
           // Do not force RETREAT after the last drop. C++ Paradrop_Cargo only
           // detaches the passenger (and may assign a mission through the normal
@@ -1262,8 +1435,61 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           handleMapExit(ctx, entity);
           return true;
         }
-        // Simple move — fly to destination (C++ curved path)
-        if (aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity))) {
+
+        if (!entity.isFixedWing) {
+          // C++ helicopter Mission_Move is a timer-driven state machine:
+          // VALIDATE_LZ consumes the normal-delay jitter, TAKE_OFF runs after
+          // that timer expires, and only then does FLY_TO_LZ call Process_Fly_To
+          // every tick. During the delay the aircraft keeps drifting on its
+          // current facing; steering early makes transports reach the LZ too soon.
+          if (entity.missionTimer > 0) {
+            entity.missionTimer--;
+            aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+            return true;
+          }
+
+          if (entity.aircraftMoveStatus === MOVE_VALIDATE_LZ) {
+            entity.aircraftMoveStatus = MOVE_TAKE_OFF;
+            const savedTag = ScenarioRandom._sourceTag;
+            if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 40040;
+            entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
+            if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+            aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+            return true;
+          }
+
+          if (entity.aircraftMoveStatus === MOVE_TAKE_OFF) {
+            ensureAircraftHeight(entity);
+            if (entity.aircraftHeightLeptons < Entity.FLIGHT_LEVEL_LEPTONS) {
+              entity.aircraftState = 'takeoff';
+              return true;
+            }
+            entity.aircraftMoveStatus = MOVE_FLY_TO_LZ;
+            entity.aircraftSpeedFraction = 1.0;
+            aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+            return true;
+          }
+
+          const distance = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
+          aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity), 1);
+          if (distance < 0x0080) {
+            if (distance < 0x0010) {
+              const arrCell = worldToCell(leptonToPixel(entity.moveTarget.lx), leptonToPixel(entity.moveTarget.ly));
+              if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
+                handleMapExit(ctx, entity);
+                return true;
+	              }
+	              entity.aircraftMoveStatus = MOVE_LAND;
+	              entity.moveTarget = null;
+	              entity.aircraftState = 'landing';
+	              // C++ Mission_Move only changes Status to LAND on this dispatch
+	              // (aircraft.cpp:1813-1816). Process_Landing, which sets
+	              // IsLanding and lets Landing_Takeoff_AI lower Height, starts on
+	              // the next mission dispatch.
+	            }
+	            return true;
+	          }
+        } else if (aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity))) {
           // Arrived — check if destination was out of bounds (aircraft map exit)
           const arrCell = worldToCell(leptonToPixel(entity.moveTarget.lx), leptonToPixel(entity.moveTarget.ly));
           if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
@@ -1278,6 +1504,16 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
             entity.aircraftState = 'returning';
           }
         }
+      } else if (entity.mission === Mission.NONE) {
+        // C++ MissionClass::AI default branch calls Mission_Sleep() for
+        // MISSION_NONE, then AircraftClass::Movement_AI still advances airborne
+        // aircraft at their current facing (aircraft.cpp:887-911, mission.cpp:232-236).
+        if (entity.missionTimer > 0) {
+          entity.missionTimer--;
+        } else {
+          entity.missionTimer = TICKS_PER_SECOND * 30 - 1;
+        }
+        aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
       } else {
         // No mission — return to base
         entity.aircraftState = 'returning';
@@ -1344,12 +1580,14 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     }
 
     case 'unload_land': {
-      // C++ LAND_ON_LZ (lines 1144-1152): descend. Height decrements each tick.
-      if (entity.flightAltitude > 0) {
-        entity.flightAltitude--;
+      // C++ LAND_ON_LZ/Landing_Takeoff_AI: descend by Pixel_To_Lepton(1)
+      // in exact Height leptons; visible pixels can skip near ground.
+      ensureAircraftHeight(entity);
+      if (entity.aircraftHeightLeptons > 0) {
+        setAircraftHeight(entity, entity.aircraftHeightLeptons - AIRCRAFT_HEIGHT_STEP_LEPTONS);
       }
-      if (entity.flightAltitude <= 0) {
-        entity.flightAltitude = 0;
+      if (entity.aircraftHeightLeptons <= 0) {
+        setAircraftHeight(entity, 0);
         entity.aircraftSpeedFraction = 0;
         // C++ aircraft.cpp:1837-1848 Mission_Move LAND:
         // Process_Landing clears IsLanding. If no queue is pending, it enters
@@ -1475,12 +1713,12 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           entity.mission = Mission.RETREAT;
           entity.missionTimer = LOANER_RETREAT_DELAY;
           entity.aircraftState = 'unload_eject';
-          entity.flightAltitude = 0;
+          setAircraftHeight(entity, 0);
           entity.aircraftSpeedFraction = 0;
         } else {
           entity.mission = ctx.idleMission(entity);
           entity.aircraftState = 'returning';
-          entity.flightAltitude = 1; // start climbing
+          setAircraftHeight(entity, AIRCRAFT_HEIGHT_STEP_LEPTONS); // start climbing
         }
       } else {
         entity.missionTimer = nextUnloadDelay;
@@ -1520,6 +1758,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         if (entity.isTransport) {
           entity.aircraftState = 'landing';
           entity.landedAtStructure = -1;
+          applyAircraftLandingHeightStep(ctx, entity);
         }
         // Combat aircraft orbit in place
         return true;
@@ -1533,6 +1772,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         entity.aircraftState = 'landing';
         entity.landedAtStructure = padIdx;
         pad.dockedAircraft = entity.id;
+        applyAircraftLandingHeightStep(ctx, entity);
       } else {
         aircraftFlyInFacing(entity, padPos, ctx.movementSpeed(entity));
       }
@@ -1540,62 +1780,22 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
     }
 
     case 'landing': {
-      // Descend 1px/tick (C++ AIRCRAFT.CPP — matches takeoff rate)
-      entity.flightAltitude = Math.max(0, entity.flightAltitude - 1);
-      entity.animState = AnimState.IDLE;
-      // C++ aircraft.cpp:4104-4111 — LZ blocked check at LAYER_GROUND transition.
-      // When helicopter enters ground layer (altitude < 16px) and the LZ is occupied,
-      // abort landing and retake off. Does NOT apply to fixed-wing.
-      const LAYER_GROUND_THRESHOLD = Math.round(Entity.FLIGHT_ALTITUDE * 2 / 3); // 16px (C++ FLIGHT_LEVEL - FLIGHT_LEVEL/3 = 171 leptons)
-      if (entity.isHelicopter && entity.flightAltitude > 0 && entity.flightAltitude < LAYER_GROUND_THRESHOLD) {
-        const { cx, cy } = entity.cell;
-        const cellKey = cy * MAP_CELLS + cx;
-        if (ctx.map.vehicleOccupancy.has(cellKey)) {
-          // LZ blocked — abort landing, take back off
-          entity.flightAltitude = Math.min(Entity.FLIGHT_ALTITUDE, entity.flightAltitude + 1);
-          entity.aircraftState = 'takeoff';
-          entity.aircraftSpeedFraction = 1.0;
-          return true;
-        }
+      ensureAircraftHeight(entity);
+      // C++ AircraftClass::AI runs Movement_AI while IsLanding is true. Fixed-wing
+      // aircraft keep moving forward at their LandingSpeed until touchdown.
+      if (entity.isFixedWing && entity.aircraftHeightLeptons > 0) {
+        entity.animState = AnimState.WALK;
+        entity.aircraftSpeedFraction = fixedWingLandingSpeedFraction(ctx, entity);
+        aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+      } else {
+        entity.animState = AnimState.IDLE;
       }
-      // C++ aircraft.cpp:2982-2998 — helicopter landing speed staging
-      // At half flight level (12px), helicopter stops horizontal movement
-      if (entity.isHelicopter) {
-        const halfLevel = Math.round(Entity.FLIGHT_ALTITUDE / 2); // 12px
-        if (entity.flightAltitude <= halfLevel) {
-          entity.aircraftSpeedFraction = 0; // Set_Speed(0) — stop horizontal movement
-        }
-      }
-      if (entity.flightAltitude <= 0) {
-        entity.flightAltitude = 0;
-        // C++ aircraft.cpp:4062-4068 — fixed-wing crash on open ground
-        // Fixed-wing aircraft that touch down without an airstrip are destroyed
-        if (entity.isFixedWing && entity.landedAtStructure < 0) {
-          entity.hp = 0;
-          entity.alive = false;
-          entity.mission = Mission.DIE;
-          return true;
-        }
-        entity.aircraftSpeedFraction = 1.0; // reset speed for landed state
-        if (entity.ammo >= 0 && entity.ammo < entity.maxAmmo) {
-          entity.aircraftState = 'rearming';
-          // C++ building.cpp:4023-4025: building-driven rearm delay
-          // time = Inverse(pfrac) * Rule.ReloadRate * TICKS_PER_MINUTE
-          entity.rearmTimer = computeRearmDelay(ctx.getPowerFraction(entity.house));
-          const pad = landedServicePad(ctx, entity);
-          if (pad && (pad.type === 'AFLD' || pad.type === 'HPAD')) {
-            enterPadRepairMission(ctx, entity, pad, entity.rearmTimer);
-          }
-        } else {
-          entity.aircraftState = 'landed';
-        }
-        entity.mission = Mission.GUARD;
-      }
+      applyAircraftLandingHeightStep(ctx, entity);
       return true;
     }
 
     case 'rearming': {
-      entity.flightAltitude = 0;
+      setAircraftHeight(entity, 0);
       entity.animState = AnimState.IDLE;
       // C++ techno.cpp:965: if (Ammo == MaxAmmo) return(RADIO_NEGATIVE);
       // Check BEFORE increment — ammo must never exceed maxAmmo (C++ parity).

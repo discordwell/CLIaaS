@@ -364,11 +364,11 @@ export interface InfantryAnim {
   fireProne?: DoInfo; // DO_FIRE_PRONE — firing while prone
   lieDown?: DoInfo;   // DO_LIE_DOWN — transition to prone
   getUp?: DoInfo;     // DO_GET_UP — transition from prone
-  die1: DoInfo;       // DO_GUN_DEATH (InfDeath=0)
-  die2?: DoInfo;      // DO_EXPLOSION_DEATH (InfDeath=1)
-  die3?: DoInfo;      // DO_EXPLOSION2_DEATH (InfDeath=2)
+  die1: DoInfo;       // DO_GUN_DEATH (InfDeath=1)
+  die2?: DoInfo;      // DO_EXPLOSION_DEATH (InfDeath=2)
+  die3?: DoInfo;      // DO_EXPLOSION2_DEATH (not selected by RA InfDeath)
   die4?: DoInfo;      // DO_GRENADE_DEATH (InfDeath=3)
-  die5?: DoInfo;      // DO_FIRE_DEATH (InfDeath=4 — burn; InfDeath=5 electro also maps here)
+  die5?: DoInfo;      // DO_FIRE_DEATH (InfDeath=4 — burn; InfDeath=5 electro deletes + anim)
   idle?: DoInfo;      // DO_IDLE1
   idle2?: DoInfo;     // DO_IDLE2
   // G8: Gesture/Salute animations (C++ idata.cpp DO_GESTURE1/2, DO_SALUTE1/2)
@@ -391,8 +391,9 @@ export const INFANTRY_SHAPE: number[] = [0, 7, 6, 5, 4, 3, 2, 1];
 
 // Infantry animation layouts per type — exact C++ idata.cpp DoControls values.
 // Frame formula: frame + INFANTRY_SHAPE[dir] * jump + animFrame % count
-// die1..die5 map to InfDeath 0..4 (C++ DO_GUN_DEATH, DO_EXPLOSION_DEATH, DO_EXPLOSION2_DEATH,
-// DO_GRENADE_DEATH, DO_FIRE_DEATH). InfDeath=5 (electro) also maps to die5 in warhead.cpp.
+// C++ infantry.cpp maps InfDeath 1..4 to DO_GUN_DEATH, DO_EXPLOSION_DEATH,
+// DO_GRENADE_DEATH, DO_FIRE_DEATH. InfDeath 0 deletes immediately; InfDeath 5
+// creates an electro AnimClass and deletes immediately.
 export const INFANTRY_ANIMS: Record<string, InfantryAnim> = {
   E1: { // E1DoControls (idata.cpp:80)
     ready:     { frame: 0,   count: 1,  jump: 1 },
@@ -739,6 +740,7 @@ export interface UnitStats {
   isFixedWing?: boolean;     // cannot hover, always moves forward
   isRotorEquipped?: boolean; // has rotor animation (helicopters)
   landingBuilding?: string;  // preferred pad type ('AFLD' or 'HPAD')
+  landingSpeed?: number;     // C++ AircraftTypeClass LandingSpeed byte
   maxAmmo?: number;          // ammo capacity (rearm at pad)
   owner?: 'allied' | 'soviet' | 'both';  // faction ownership (for production/tech tree)
   cost?: number;             // base credit cost (also in PRODUCTION_ITEMS)
@@ -819,8 +821,12 @@ export const EXPLOSION_FRAMES: Record<string, number> = {
   'water-exp1': 10, 'water-exp2': 10, 'water-exp3': 10,
   // Building death fire scatter (C++ ANIM_FIRE_SMALL / ANIM_FIRE_MED — fire1/2/3.shp)
   fire1: 15, fire2: 15, fire3: 15, fire4: 15,
+  // C++ ANIM_BURN_* / ANIM_ON_FIRE_* use Stages=-1, resolved from SHP frame counts.
+  'burn-s': 65, 'burn-m': 67, 'burn-l': 67,
   // Persistent ground smoke column (C++ ANIM_SMOKE_M) — 91-frame looped smoke
   smoke_m: 91,
+  // Projectile smoke puff trail (C++ ANIM_SMOKE_PUFF / SMOKEY.SHP)
+  smokey: 7,
   // Chronosphere warp box (C++ ANIM_CHRONO_BOX — CHRONBOX.SHP)
   chronbox: 25,
 };
@@ -937,7 +943,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30, crewed: true },  // rules.ini Tracked=yes
   MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 40, crewed: true },  // C++ udata.cpp:265 IsCrusher=true
   // Transport vehicles
-  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, points: 35 },  // C++ aadata.cpp:168: STRUCT_NONE — lands anywhere via Good_LZ(), not at HPAD
+  TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingSpeed: 0xFF, points: 35 },  // C++ aadata.cpp:168: STRUCT_NONE — lands anywhere via Good_LZ(), not at HPAD
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true, points: 25 },
   // Naval vessels (C++ vdata.cpp MPH values)
   SS: { type: UnitType.V_SS, name: 'Submarine', image: 'ss', strength: 120, armor: 'light', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'TorpTube', isVessel: true, isCloakable: true, points: 45 },
@@ -947,12 +953,12 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   MSUB: { type: UnitType.V_MSUB, name: 'Missile Sub', image: 'msub', strength: 150, armor: 'light', speed: 5, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'SubSCUD', isVessel: true, isCloakable: true, points: 45 },
   CARR: { type: UnitType.V_CARR, name: 'Helicarrier', image: 'carr', strength: 350, armor: 'heavy', speed: 6, speedClass: SpeedClass.FLOAT, sight: 6, rot: 7, isInfantry: false, primaryWeapon: 'AirAssault', isVessel: true, passengers: 5, points: 25 },
   // Aircraft (C++ aadata.cpp MPH values)
-  BADR: { type: UnitType.V_BADR, name: 'Badger', image: 'badr', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ParaBomb', passengers: 5, isAircraft: true, isFixedWing: true, maxAmmo: 5, owner: 'soviet', cost: 10, points: 20 },
-  U2:   { type: UnitType.V_U2, name: 'Spy Plane', image: 'u2', strength: 2000, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 0, rot: 7, isInfantry: false, primaryWeapon: 'Camera', isAircraft: true, isFixedWing: true, maxAmmo: 1, owner: 'soviet', cost: 10, points: 5 },
-  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 3, guardRange: 30, points: 50 },
-  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', maxAmmo: 15, guardRange: 30, points: 25, crewed: true },
-  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 6, guardRange: 30, points: 50, crewed: true },
-  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', maxAmmo: 12, guardRange: 30, points: 40, crewed: true },
+  BADR: { type: UnitType.V_BADR, name: 'Badger', image: 'badr', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ParaBomb', passengers: 5, isAircraft: true, isFixedWing: true, landingSpeed: 0xFF, maxAmmo: 5, owner: 'soviet', cost: 10, points: 20 },
+  U2:   { type: UnitType.V_U2, name: 'Spy Plane', image: 'u2', strength: 2000, armor: 'heavy', speed: 40, speedClass: SpeedClass.WINGED, sight: 0, rot: 7, isInfantry: false, primaryWeapon: 'Camera', isAircraft: true, isFixedWing: true, landingSpeed: 0xFF, maxAmmo: 1, owner: 'soviet', cost: 10, points: 5 },
+  MIG:  { type: UnitType.V_MIG, name: 'MiG', image: 'mig', strength: 50, armor: 'light', speed: 20, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'Maverick', secondaryWeapon: 'Maverick', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', landingSpeed: 0xC0, maxAmmo: 3, guardRange: 30, points: 50 },
+  YAK:  { type: UnitType.V_YAK, name: 'Yak', image: 'yak', strength: 60, armor: 'light', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: 'ChainGun', secondaryWeapon: 'ChainGun', isAircraft: true, isFixedWing: true, landingBuilding: 'AFLD', landingSpeed: 0xFF, maxAmmo: 15, guardRange: 30, points: 25, crewed: true },
+  HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', landingSpeed: 0xFF, maxAmmo: 6, guardRange: 30, points: 50, crewed: true },
+  HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', landingSpeed: 0xFF, maxAmmo: 12, guardRange: 30, points: 40, crewed: true },
   // Tanya & Thief (new infantry)
   E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25, isCrawling: true },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 10 },  // NO Fraidycat=yes in rules.ini
@@ -1487,7 +1493,7 @@ export function projectileVisualConfig(weaponName: string): ProjectileVisualConf
   switch (weaponName) {
     // HeatSeeker projectile (Image=DRAGON, Rotates=yes, Translucent=yes, Animates=yes, Shadow=no)
     // rules.ini:2525-2537
-    case 'Dragon': case 'RedEye': case 'Maverick': case 'Hellfire': case 'SubSCUD': case 'MammothTusk': case 'APTusk':
+    case 'Dragon': case 'Maverick': case 'Hellfire': case 'SubSCUD': case 'MammothTusk': case 'APTusk':
       return { projImage: 'dragon', projRotates: true, projTranslucent: true, projFlameTrail: true };
     // Stinger: LaserGuided projectile (Image=DRAGON, Rotates=yes, Translucent=yes, Animates=yes)
     // rules.ini:2540-2551
@@ -1495,11 +1501,11 @@ export function projectileVisualConfig(weaponName: string): ProjectileVisualConf
       return { projImage: 'dragon', projRotates: true, projTranslucent: true, projFlameTrail: true };
     // AAMissile: Image=MISSILE, Rotates=yes, Translucent=yes, Animates=yes, AA=yes, AG=no
     // rules.ini:2554-2566 (used by AGUN, SAM)
-    case 'Nike': case 'TurretGun':
+    case 'Nike': case 'RedEye':
       return { projImage: 'missile', projRotates: true, projTranslucent: true, projFlameTrail: true };
     // Cannon projectile (Image=120MM, no rotation/tumble — single frame shell)
     // rules.ini:2494-2496
-    case '75mm': case '90mm': case '105mm': case '120mm': case '2Inch':
+    case '75mm': case '90mm': case '105mm': case '120mm': case '2Inch': case 'TurretGun':
       return { projImage: '120mm', projShadow: true };
     // Ballistic projectile (Image=120MM, Arcing=yes, High=yes, Inaccurate=yes)
     // rules.ini:2599-2603 — used by 155mm, 8Inch

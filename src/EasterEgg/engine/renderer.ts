@@ -195,8 +195,9 @@ export interface Effect {
   loops?: number;  // number of times to loop (-1 = infinite)
   // Animation chaining (fire → smoke)
   followUp?: string;  // sprite name for follow-up effect
-  // C++ AnimClass objects also occupy Logic slots even when TS only needs a
-  // visual effect. These slots affect same-tick BulletClass scheduling.
+  // C++ AnimClass objects also occupy Logic slots and the fixed AnimClass heap
+  // even when TS only needs a visual effect. These slots affect same-tick
+  // BulletClass scheduling and allocation failure behavior.
   cppLogicSlot?: boolean;
 }
 
@@ -228,7 +229,17 @@ export class Renderer {
   private scoreAnimStartTime = 0; // timestamp when score screen first appeared
   private scoreAnimActive = false; // whether score animation is running
   repairingStructures = new Set<number>(); // indices of structures being repaired
-  corpses: Array<{ x: number; y: number; type: UnitType; facing: number; isInfantry: boolean; isAnt: boolean; alpha: number; deathVariant: number }> = [];
+  corpses: Array<{
+    x: number;
+    y: number;
+    type: UnitType;
+    facing: number;
+    isInfantry: boolean;
+    isAnt: boolean;
+    alpha: number;
+    deathVariant: number;
+    cppAnimStartTick?: number;
+  }> = [];
   showHelp = false;     // F1 help overlay
   difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   idleCount = 0;        // number of idle player units

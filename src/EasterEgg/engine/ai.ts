@@ -17,7 +17,8 @@ import { Entity, dir256ToFacing32 } from './entity';
 import { nearbyLocation } from './pathfinding';
 import {
   type MapStructure, type TeamType,
-  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_ARMOR, getBibCells, getStructureOccupyCells,
+  houseIdToHouse, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_ARMOR,
+  captureStructureFootprintTerrain, getBibCells, getStructureOccupyCells,
   applyScenarioOverrides,
 } from './scenario';
 import { type GameMap, Terrain } from './map';
@@ -91,6 +92,8 @@ export interface AIHouseState {
   repairTimerSetTick: number;
   /** C++ Rule.Diff[handicap].RepairDelay — fixed-point, default .02 for all three difficulty sections in rules.ini. */
   repairDelay: number;
+  /** C++ HouseClass::DamageTime — low-power building damage countdown. */
+  damageTimer: number;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -192,6 +195,7 @@ function cppFixedMulInt(raw: number, value: number): number {
 // ((153 * 900) + 128) / 256 = 538 ticks.
 export const CPP_TEAM_DELAY_TICKS = cppFixedMulInt(cppFixedRaw(0, 6, 10), TICKS_PER_MINUTE);
 const CPP_INITIAL_TEAM_DELAY_TICKS = CPP_TEAM_DELAY_TICKS + 1;
+export const CPP_DAMAGE_DELAY_TICKS = TICKS_PER_MINUTE;
 
 /** C++ rules.ini RepairStep=7, RepairPercent=20% (rules.cpp defaults overridden by rules.ini) */
 const REPAIR_STEP = 7;
@@ -541,6 +545,7 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     // (fixed(5)*TICKS_PER_MINUTE*2).to_int() = (5*1800+128)/256 = 36.
     // Store in fixed-point-matching form: the lo/hi range the Random_Pick spans.
     repairDelay: 0.02,
+    damageTimer: CPP_DAMAGE_DELAY_TICKS,
   };
 }
 
@@ -994,15 +999,17 @@ export function spawnAIStructure(ctx: AIContext, type: string, house: House, cx:
     ammo: -1,
     maxAmmo: -1,
     missionTimer: 0,
+    footprintTerrain: captureStructureFootprintTerrain(ctx.map, type, cx, cy),
     buildProgress: 0,
   });
 
   for (const cell of getStructureOccupyCells(type, cx, cy)) {
     ctx.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
   }
-  // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
+  // C++ building.cpp:789 creates bib smudges. They block building placement,
+  // but CellClass::Is_Clear_To_Move ignores them.
   for (const bc of getBibCells(type, cx, cy)) {
-    ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    ctx.map.setBibSmudge(bc.cx, bc.cy, true);
   }
 }
 
@@ -1139,19 +1146,15 @@ export function aiFireSale(ctx: AIContext, house: House): boolean {
   let sold = false;
   for (const s of ctx.structures) {
     if (!s.alive || s.house !== house) continue;
-    // C++ sells back every building: b->Sell_Back(1)
-    // In TS, we mark as dead/rubble and give partial refund
-    const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type && p.isStructure);
-    if (prodItem) {
-      // C++ Fire_Sale → Sell_Back(1) → Refund_Amount: AI (IsHuman=false) gets 100%,
-      // no RefundPercent penalty, no health scaling (techno.cpp:5743-5761)
-      const refund = prodItem.cost;
-      const current = ctx.houseCredits.get(house) ?? 0;
-      ctx.houseCredits.set(house, current + refund);
-    }
-    s.alive = false;
-    s.rubble = true;
-    ctx.clearStructureFootprint(s);
+    if (s.sellProgress !== undefined || s.mission === Mission.DECONSTRUCTION) continue;
+    // C++ HouseClass::Fire_Sale calls BuildingClass::Sell_Back(1), which
+    // queues MISSION_DECONSTRUCTION. Refund, footprint removal, survivors, and
+    // object deletion happen later when Mission_Deconstruction completes.
+    s.mission = Mission.DECONSTRUCTION;
+    s.missionTimer = 0;
+    s.sellProgress = 0;
+    s.sellHpAtStart = s.hp;
+    s.isRepairing = false;
     sold = true;
   }
   return sold;
@@ -1473,6 +1476,27 @@ export function updateAIStrategicPlanner(ctx: AIContext): void {
   if ((ctx.tick - 1) % 150 !== 0) return;
 
   for (const [house, state] of ctx.aiStates) {
+    // C++ HouseClass::AI only calls Expert_AI when IsBaseBuilding && AITimer==0.
+    // Non-base-building houses only execute the separate STATE_ENDGAME cleanup
+    // branch, so low-IQ defensive/civilian houses do not immediately fire-sale
+    // and send all units hunting just because they own no factories.
+    if (!state.isBaseBuilding) {
+      if (state.endgame) {
+        aiFireSale(ctx, house);
+        aiDoAllToHunt(ctx, house);
+      }
+      continue;
+    }
+
+    if (state.underAttack && state.lastBaseAttackTick + TICKS_PER_MINUTE < ctx.tick) {
+      state.underAttack = false;
+    }
+    if (!state.underAttack &&
+        state.lastBaseAttackTick > 0 &&
+        state.lastBaseAttackTick + TICKS_PER_MINUTE > ctx.tick) {
+      state.underAttack = true;
+    }
+
     if (state.iq === 0) continue;
     state.harvesterCount = 0;
     state.refineryCount = 0;
@@ -1485,10 +1509,6 @@ export function updateAIStrategicPlanner(ctx: AIContext): void {
       if (s.alive && s.house === house && s.type === 'PROC') {
         state.refineryCount++;
       }
-    }
-
-    if (state.underAttack && ctx.tick - state.lastBaseAttackTick > 150) {
-      state.underAttack = false;
     }
 
     // ── C++ dynamic cap increase (house.cpp:4648-4740) ──────────────────
@@ -2197,6 +2217,7 @@ export function updateAIProduction(ctx: AIContext): void {
           const unit = spawnAIUnit(ctx, house, heliType, 'HPAD', iq >= 4 ? Mission.AREA_GUARD : Mission.GUARD);
           if (unit) {
             unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
+            unit.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
             unit.aircraftState = 'landed';
             ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - heliCost);
           }
@@ -2212,6 +2233,7 @@ export function updateAIProduction(ctx: AIContext): void {
           const unit = spawnAIUnit(ctx, house, jetType, 'AFLD', iq >= 4 ? Mission.AREA_GUARD : Mission.GUARD);
           if (unit) {
             unit.flightAltitude = Entity.FLIGHT_ALTITUDE;
+            unit.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
             unit.aircraftState = 'landed';
             ctx.houseCredits.set(house, (ctx.houseCredits.get(house) ?? 0) - jetCost);
           }
@@ -2397,6 +2419,7 @@ function createTeamClassInstance(ctx: AIContext, teamIdx: number, house: House):
       mission: m.mission,
       data: m.data,
     })),
+    recruitPriority: teamType.recruitPriority ?? 7,
     isReinforcable: !!(teamType.flags & 16),
     isSuicide: !!(teamType.flags & 2),
     origin: originPos,
@@ -2525,6 +2548,48 @@ const HOUSE_ORDER: House[] = [
   House.GoodGuy, House.BadGuy, House.Neutral,
 ];
 
+// C++ enum iteration order used by HouseClass::AI_Unit/AI_Infantry/AI_Vessel.
+// This order is observable because the original best-list logic appends later
+// buildable types even when their counter is lower than the current best value.
+const CPP_AI_UNIT_ORDER: readonly string[] = [
+  UnitType.V_4TNK, UnitType.V_3TNK, UnitType.V_2TNK, UnitType.V_1TNK,
+  UnitType.V_APC, UnitType.V_MNLY, UnitType.V_JEEP, UnitType.V_HARV,
+  UnitType.V_ARTY, UnitType.V_MRJ, UnitType.V_MGG, UnitType.V_MCV,
+  UnitType.V_V2RL, UnitType.V_TRUK,
+  UnitType.ANT1, UnitType.ANT2, UnitType.ANT3,
+  UnitType.V_CTNK, UnitType.V_TTNK, UnitType.V_QTNK, UnitType.V_DTRK,
+  UnitType.V_STNK,
+];
+
+const CPP_AI_INFANTRY_ORDER: readonly string[] = [
+  UnitType.I_E1, UnitType.I_E2, UnitType.I_E3, UnitType.I_E4,
+  UnitType.I_E6, UnitType.I_TANYA, UnitType.I_SPY, UnitType.I_THF,
+  UnitType.I_MEDI, UnitType.I_GNRL, UnitType.I_DOG,
+  UnitType.I_C1, UnitType.I_C2, UnitType.I_C3, UnitType.I_C4, UnitType.I_C5,
+  UnitType.I_C6, UnitType.I_C7, UnitType.I_C8, UnitType.I_C9, UnitType.I_C10,
+  UnitType.I_EINSTEIN, UnitType.I_DELPHI, UnitType.I_CHAN,
+  UnitType.I_SHOK, UnitType.I_MECH,
+];
+
+const CPP_AI_VESSEL_ORDER: readonly string[] = [
+  UnitType.V_SS, UnitType.V_DD, UnitType.V_CA, UnitType.V_LST,
+  UnitType.V_PT, UnitType.V_MSUB, UnitType.V_CARR,
+];
+
+function counterTypesInCppOrder(counter: Record<string, number>, order: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const type of order) {
+    if (counter[type] === undefined) continue;
+    seen.add(type);
+    result.push(type);
+  }
+  for (const type of Object.keys(counter)) {
+    if (!seen.has(type)) result.push(type);
+  }
+  return result;
+}
+
 /**
  * Classify a unit type string as unit (vehicle), infantry, vessel, or aircraft.
  * Matches C++ RTTI_UNITTYPE / RTTI_INFANTRYTYPE / RTTI_VESSELTYPE / RTTI_AIRCRAFTTYPE.
@@ -2603,19 +2668,20 @@ function aiPerTickUnit(ctx: AIContext, house: House, state: AIHouseState): void 
     }
   }
 
-  // C++ 5878-5896: pick from candidates with highest need
+  // C++ 5878-5896: pick from candidates. The code resets bestcount when a
+  // higher counter appears, but then still appends the current type. That means
+  // later lower-need buildable enum values remain in the random list.
   let bestval = -1;
   const bestlist: string[] = [];
-  for (const [utype, count] of Object.entries(counter)) {
+  for (const utype of counterTypesInCppOrder(counter, CPP_AI_UNIT_ORDER)) {
+    const count = counter[utype] ?? 0;
     if (count <= 0) continue;
     // C++ checks Can_Build and Cost_Of <= Available_Money — simplified for RNG parity
     if (bestval === -1 || bestval < count) {
       bestval = count;
       bestlist.length = 0;
     }
-    if (count === bestval) {
-      bestlist.push(utype);
-    }
+    bestlist.push(utype);
   }
 
   if (bestlist.length > 0) {
@@ -2668,10 +2734,12 @@ function aiPerTickInfantry(ctx: AIContext, house: House, state: AIHouseState): v
     }
   }
 
-  // Pick with highest need
+  // Pick with C++'s best-list quirk: later lower-need enum values are still
+  // appended after a bestcount reset.
   let bestval = -1;
   const bestlist: string[] = [];
-  for (const [itype, count] of Object.entries(counter)) {
+  for (const itype of counterTypesInCppOrder(counter, CPP_AI_INFANTRY_ORDER)) {
+    const count = counter[itype] ?? 0;
     if (count <= 0) continue;
     // C++ house.cpp:6127 — dogs are skipped when IScan already contains
     // INFANTRYF_DOG. IScan is the house existence bit, not recruitability, so
@@ -2683,7 +2751,7 @@ function aiPerTickInfantry(ctx: AIContext, house: House, state: AIHouseState): v
       bestval = count;
       bestlist.length = 0;
     }
-    if (count === bestval) bestlist.push(itype);
+    bestlist.push(itype);
   }
 
   if (bestlist.length > 0) {
@@ -2735,13 +2803,14 @@ function aiPerTickVessel(ctx: AIContext, house: House, state: AIHouseState): voi
 
   let bestval = -1;
   const bestlist: string[] = [];
-  for (const [vtype, count] of Object.entries(counter)) {
+  for (const vtype of counterTypesInCppOrder(counter, CPP_AI_VESSEL_ORDER)) {
+    const count = counter[vtype] ?? 0;
     if (count <= 0) continue;
     if (bestval === -1 || bestval < count) {
       bestval = count;
       bestlist.length = 0;
     }
-    if (count === bestval) bestlist.push(vtype);
+    bestlist.push(vtype);
   }
 
   if (bestlist.length > 0) {
@@ -2877,6 +2946,13 @@ export function aiPerTick(ctx: AIContext): void {
     }
 
     // C++ execution order within House::AI():
+    // 0. STATE_ENDGAME fire-sale/all-hunt check happens after Logic objects
+    //    have run for the frame, but before AI_Building.
+    if (state.endgame) {
+      aiFireSale(ctx, house);
+      aiDoAllToHunt(ctx, house);
+    }
+
     // 1. AI_Building (tag 110)
     if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 110;
     aiPerTickBuilding(ctx, house, state);

@@ -692,7 +692,8 @@ export default function AntGame({ onExit }: AntGameProps) {
       const canvas = canvasRef.current;
       const game = new Game(canvas);
       gameRef.current = game;
-      game.fogDisabled = true;
+      const preserveSourceFog = params.get('fog') === 'source' || params.get('disableFog') === '0';
+      game.fogDisabled = !preserveSourceFog;
 
       game.onLoadProgress = (loaded, total) => {
         setLoadProgress(Math.round((loaded / total) * 100));
@@ -705,7 +706,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       import('./engine/agentHarness').then(({ installHarness }) => {
         game.start(scenarioId, diff).then(() => {
           game.pause();
-          game.disableFog();
+          if (!preserveSourceFog) game.disableFog();
           // C++ parity: scenario load has already consumed init-time RNG.
           // Mark the debug-log boundary before gameplay ticks begin.
           game.consumeInitRNG();

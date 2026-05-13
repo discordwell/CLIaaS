@@ -9,7 +9,16 @@ import {
   type House, UnitType, Mission,
 } from './types';
 import { getEffectiveCost } from './production';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, getBibCells, getStructureOccupyCells } from './scenario';
+import {
+  type MapStructure,
+  STRUCTURE_SIZE,
+  STRUCTURE_MAX_HP,
+  STRUCTURE_WEAPONS,
+  STRUCTURE_ARMOR,
+  captureStructureFootprintTerrain,
+  getBibCells,
+  getStructureOccupyCells,
+} from './scenario';
 import { Entity } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type Effect } from './renderer';
@@ -151,6 +160,7 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     ammo: -1,
     maxAmmo: -1,
     missionTimer: 0,
+    footprintTerrain: captureStructureFootprintTerrain(ctx.map, item.type, cx, cy),
     buildProgress: isWall ? undefined : 0, // walls appear instantly
   };
   ctx.structures.push(newStruct);
@@ -158,13 +168,14 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
   for (const cell of getStructureOccupyCells(item.type, cx, cy)) {
     ctx.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
   }
-  // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below building)
+  // C++ building.cpp:789 creates bib smudges. They block building placement,
+  // but CellClass::Is_Clear_To_Move does not treat them as terrain blockers.
   for (const bc of getBibCells(item.type, cx, cy)) {
-    ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    ctx.map.setBibSmudge(bc.cx, bc.cy, true);
   }
   // Store wall type for auto-connection sprite rendering
   if (isWall) {
-    ctx.map.setWallType(cx, cy, item.type);
+    ctx.map.setWallType(cx, cy, item.type, ctx.playerHouse);
   }
   // For walls: keep pendingPlacement active for continuous placement
   if (isWall) {
@@ -236,6 +247,7 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     maxAmmo: -1,
     missionTimer: 0,
     deployedFromMCV: true, // C++ ArchiveTarget parity: tracks MCV origin for sell reversion
+    footprintTerrain: captureStructureFootprintTerrain(ctx.map, 'FACT', cx, cy),
     // C++ bdata.cpp:3131 Init_Anim(BSTATE_CONSTRUCTION): MCV deploy plays the MAKE buildup anim.
     // The renderer (renderer.ts:1555) watches buildProgress < 1 and draws factmake frames.
     buildProgress: 0,
@@ -245,9 +257,9 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
   for (const cell of getStructureOccupyCells('FACT', cx, cy)) {
     ctx.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
   }
-  // C++ bdata.cpp:3597-3629: Mark bib cells as impassable (1 row below FACT)
+  // C++ building.cpp:789 creates a bib smudge below the ConYard footprint.
   for (const bc of getBibCells('FACT', cx, cy)) {
-    ctx.map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    ctx.map.setBibSmudge(bc.cx, bc.cy, true);
   }
   // C++ unit.cpp:1549: House->IsStarted = true — MCV deploy enables production
   if (ctx.aiStates) {

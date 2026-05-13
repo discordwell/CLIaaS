@@ -130,6 +130,7 @@ export interface StructureRef {
   alive: boolean;
   cx: number;
   cy: number;
+  type?: string;
   house?: string; // optional house for defense targeting retaliation check
 }
 
@@ -212,6 +213,11 @@ export class Entity {
   targetStructure: StructureRef | null = null; // for attacking buildings
   forceFirePos: WorldPos | null = null; // force-fire ground position (Ctrl+right-click)
   moveTarget: LeptonPos | null = null;
+  /** C++ NavCom can hold an object TARGET. `moveTarget` is the current
+   *  coordinate view of that target; this ref preserves the TARGET identity. */
+  moveTargetEntityRef: Entity | null = null;
+  moveTargetEntityRefLX = 0;
+  moveTargetEntityRefLY = 0;
   moveQueue: LeptonPos[] = []; // shift+click waypoint queue (C++ NavQueue[10] — capped at 10)
   static readonly NAV_QUEUE_MAX = 10; // C++ foot.h:189: TARGET NavQueue[10]
   navQueueLoop = false;               // C++ foot.h:146: IsNavQueueLoop — patrol loop mode
@@ -223,6 +229,11 @@ export class Entity {
    *  stores the remaining FacingType commands that C++ consumes with memmove()
    *  in DriveClass::Start_Of_Move and While_Moving track jumps. */
   drivePathFacings: number[] = [];
+  /** C++ can clear Path[0] while an infantry Head_To_Coord hop remains active
+   *  (for example InfantryClass::Assign_Target during Mission_Move). TS keeps
+   *  the active hop's facing so arrival can still consume it, but this flag marks
+   *  that the first stored facing is not copyable as C++ Path[0]. */
+  drivePathHeadCleared = false;
 
   // W1 deleted (Step 3): patrolBlockedTargetLX/LY was a sticky flag used
   // by team.coordinatePatrol to skip Mission_Move jitter RNG on re-assignment
@@ -260,7 +271,7 @@ export class Entity {
   // C++ MasterDoControls.Interrupt=false for all gesture types. Used by the
   // STAGE A/E Commence gate to defer MissionQueue pop until animation
   // completes (infantry.cpp:1208 — `Doing == DO_NOTHING || Interrupt`).
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' | 'gesture' | 'lie_down' | 'prone' | 'get_up' = 'nothing';
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' | 'gesture' | 'lie_down' | 'prone' | 'get_up' | 'dog_maul' = 'nothing';
   // C++ StageClass backing the current infantry Doing animation. Only a subset
   // of Doing values currently need logic, but the fields mirror Stage/Rate/Timer
   // so Firing_AI can read Fetch_Stage() even when Do_Action(DO_FIRE_*) is blocked
@@ -271,6 +282,9 @@ export class Entity {
   doingSetTick = -1;
   // C++ foot.h IsDriving — true while infantry is moving cell-to-cell
   isDriving = false;
+  // C++ TechnoClass::IsLocked — false for off-map reinforcements until the
+  // object enters the playable radar rectangle, then remains true.
+  isLocked = false;
   // C++ HeadToCoord — the sub-cell lepton position the infantry is walking to.
   // Set by infantryStartDriver, used by movement code for waypoint target.
   headToLX = 0;
@@ -346,6 +360,10 @@ export class Entity {
   turretFacing256 = -1; // lazy init from turretFacing/turretFacing32
   desiredTurretFacing256 = -1;
   turretFacing32 = 0; // 0-31, initialized to turretFacing * 4
+  // Mirrors UnitClass::IsRotating as left by the previous Rotation_AI pass.
+  // Can_Fire reads this stored flag before this tick updates a drifting target
+  // direction, so it is not always equivalent to Current()!=Desired.
+  turretIsRotating = false;
   prevTurretFacing32 = 0; // previous tick turretFacing32 for visual interpolation
 
   // Recoil (C++ unit.cpp:125 Recoil_Adjust — 1-tick visual kickback on fire)
@@ -374,8 +392,10 @@ export class Entity {
   suppressFiringAITick = -1; // C++ Arm-return path: block same-tick TS post-decrement fire
 
   // Burst fire (C++ weapon.cpp:78 Weapon.Burst — multiple shots per trigger pull)
-  burstCount = 0;   // remaining shots in current burst
-  burstDelay = 0;   // ticks between burst shots (3 ticks between each)
+  // Legacy diagnostics only. C++ does not keep a separate queued burst state;
+  // Weapon.Burst only participates through TechnoTypeClass::Is_Two_Shooter().
+  burstCount = 0;
+  burstDelay = 0;
 
   // C++ TechnoClass::IsSecondShot. This is NOT a primary/secondary cooldown
   // selector: C++ has one shared Arm timer. IsSecondShot only gives a quick
@@ -429,6 +449,13 @@ export class Entity {
       this.doingRateTimer = 0;
       return;
     }
+    if (this.doing === 'dog_maul' && this.doingStage >= this.infantryDogMaulDoingCount()) {
+      this.doing = 'stand_ready';
+      this.doingStage = 0;
+      this.doingRate = 0;
+      this.doingRateTimer = 0;
+      return;
+    }
     // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed.
     // Phase 7A flag ON: include 'walk' so stopping infantry transitions back to
     // DO_STAND_READY, enabling Random_Animate on subsequent Mission_Guard ticks.
@@ -459,8 +486,14 @@ export class Entity {
     if (canTransition) {
       if (this.isDriving) {
         this.doing = 'walk';
+        this.doingStage = 0;
+        this.doingRate = 2;
+        this.doingRateTimer = 2;
       } else {
         this.doing = 'stand_ready';
+        this.doingStage = 0;
+        this.doingRate = 0;
+        this.doingRateTimer = 0;
       }
     }
   }
@@ -476,7 +509,37 @@ export class Entity {
   isDoingInterruptible(): boolean {
     if (this.doing === 'gesture') return false;
     if (this.doing === 'lie_down' || this.doing === 'get_up') return false;
+    if (this.doing === 'dog_maul') return false;
     return true;
+  }
+
+  /** C++ InfantryClass::Stop_Driver -> Do_Action(DO_STAND_READY/DO_PRONE).
+   *  Do_Action only replaces the current Doing state when it is interruptible;
+   *  gestures and other locked actions continue to gate Commence().
+   */
+  doStopDriverAction(tick: number): void {
+    if (!this.stats.isInfantry) return;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    this.doing = this.type === UnitType.I_DOG || !this.isProne ? 'stand_ready' : 'prone';
+    this.doingStage = 0;
+    this.doingRate = 0;
+    this.doingRateTimer = 0;
+    this.doingSetTick = tick;
+  }
+
+  /** C++ InfantryClass::Start_Driver -> Do_Action(DO_WALK). */
+  doWalkAction(tick: number): void {
+    if (!this.stats.isInfantry) return;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    this.doing = 'walk';
+    this.doingStage = 0;
+    this.doingRate = 2;
+    this.doingRateTimer = 2;
+    this.doingSetTick = tick;
+  }
+
+  isDogMaulMovementBlocking(): boolean {
+    return this.doing === 'dog_maul' && this.doingStage < this.infantryDogMaulDoingCount();
   }
 
   /** C++ InfantryClass::Do_Action gesture/salute effective duration.
@@ -488,6 +551,18 @@ export class Entity {
     const anim = INFANTRY_ANIMS[this.type];
     const count = anim?.gesture1?.count ?? anim?.gesture2?.count ?? 1;
     return Math.max(1, count * 2);
+  }
+
+  startGestureDoing(tick: number, gestureDoInfo?: { frame: number; count: number; jump: number } | null): void {
+    if (!this.stats.isInfantry) return;
+    this.gestureDoInfo = gestureDoInfo ?? this.gestureDoInfo;
+    this.nonInterruptAnimTicks = this.infantryGestureDurationTicks();
+    this.nonInterruptAnimSetTick = tick;
+    this.doing = 'gesture';
+    this.doingStage = 0;
+    this.doingRate = 2;
+    this.doingRateTimer = 2;
+    this.doingSetTick = tick;
   }
 
   /** C++ infantry.cpp:878-889 tether cut.
@@ -510,16 +585,10 @@ export class Entity {
 
     const anim = INFANTRY_ANIMS[this.type];
     const sovietSide = this.house === House.USSR || this.house === House.Ukraine;
-    this.gestureDoInfo = sovietSide
+    const gesture = sovietSide
       ? (anim?.gesture1 ?? anim?.gesture2 ?? null)
       : (anim?.gesture2 ?? anim?.gesture1 ?? null);
-    this.nonInterruptAnimTicks = this.infantryGestureDurationTicks();
-    this.nonInterruptAnimSetTick = tick;
-    this.doing = 'gesture';
-    this.doingStage = 0;
-    this.doingRate = 2;
-    this.doingRateTimer = 2;
-    this.doingSetTick = tick;
+    this.startGestureDoing(tick, gesture);
   }
 
   /** C++ StageClass::Graphic_Logic for infantry Doing animations. */
@@ -538,6 +607,11 @@ export class Entity {
     if (!anim) return 0;
     if (this.isProne) return (anim.fireProne ?? anim.fire).count;
     return anim.fire.count;
+  }
+
+  /** C++ DOG DoControls[DO_DOG_MAUL] at idata.cpp:77: {106, 12, 14}. */
+  infantryDogMaulDoingCount(): number {
+    return this.type === UnitType.I_DOG ? 12 : 1;
   }
 
   /** C++ per-type DoControls[DO_LIE_DOWN].Count.
@@ -561,8 +635,8 @@ export class Entity {
     }
     const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
     const dieInfo =
-      this.deathVariant === 1 ? (anim.die2 ?? anim.die1) :
-      this.deathVariant === 2 ? (anim.die3 ?? anim.die2 ?? anim.die1) :
+      this.deathVariant === 1 ? anim.die1 :
+      this.deathVariant === 2 ? (anim.die2 ?? anim.die1) :
       this.deathVariant === 3 ? (anim.die4 ?? anim.die2 ?? anim.die1) :
       this.deathVariant === 4 ? (anim.die5 ?? anim.die2 ?? anim.die1) :
       anim.die1;
@@ -604,6 +678,18 @@ export class Entity {
     this.doingRateTimer = 1;
     this.doingSetTick = tick;
     return true;
+  }
+
+  /** Start C++ DO_DOG_MAUL (MasterDoControls rate=2, DOG count=12). */
+  startDogMaulDoing(tick: number): void {
+    if (!this.stats.isInfantry || this.type !== UnitType.I_DOG) return;
+    this.doing = 'dog_maul';
+    this.doingStage = 0;
+    this.doingRate = 2;
+    this.doingRateTimer = 2;
+    this.doingSetTick = tick;
+    this.animState = AnimState.ATTACK;
+    this.animFrame = 0;
   }
 
   /** Start C++ DO_LIE_DOWN (MasterDoControls rate=2, E1 DoControls count=2). */
@@ -677,6 +763,10 @@ export class Entity {
   // C++ DriveClass::Mark_Track reservation bits. Stores absolute cell indices
   // currently marked by this unit so Stop_Driver can clear them.
   trackReservationCells: number[] = [];
+  /** Cell where DriveClass::Mark_Track(MARK_UP) cleared the shared vehicle
+   *  occupancy flag while the physical occupier can still matter to
+   *  UnitClass::Can_Enter_Cell. Used by CellClass::Is_Clear_To_Move parity. */
+  driveTrackFlagClearedCellIdx = -1;
 
   // === PCP refactor debug/dedup fields (Session 1 — track-jump PCP) ===
   // Reset at top of updateEntity each tick. Instrumented via DEBUG_PCP_LOG env
@@ -713,6 +803,18 @@ export class Entity {
   // When an AI unit spots an enemy during MOVE, it switches to ATTACK but saves its destination
   savedMoveTarget: LeptonPos | null = null;
 
+  /** C++ MissionClass/TechnoClass/FootClass suspended state for
+   *  Override_Mission, used when DriveClass temporarily attacks a destroyable
+   *  blocker and later restores the interrupted order on Detach. */
+  suspendedMission: Mission | null = null;
+  suspendedTarget: Entity | null = null;
+  suspendedTargetStructure: StructureRef | null = null;
+  suspendedForceFirePos: WorldPos | null = null;
+  suspendedMoveTarget: LeptonPos | null = null;
+  suspendedMoveTargetEntityRef: Entity | null = null;
+  suspendedMoveTargetEntityRefLX = 0;
+  suspendedMoveTargetEntityRefLY = 0;
+
   // Wave coordination: ants from the same trigger share a waveId
   waveId = 0;              // 0 = no wave group
   waveRallyTick = 0;       // tick when wave should start attacking (rally delay)
@@ -731,7 +833,7 @@ export class Entity {
   oreCreditValue = 0;              // total credit value of carried bails
   static readonly BAIL_COUNT = 28; // max bails per trip (C++ UnitTypeClass::Max_Pips)
   static readonly ORE_CAPACITY = 28; // alias for BAIL_COUNT (backward compat)
-  harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'headinghome' | 'unloading' = 'idle';
+  harvesterState: 'idle' | 'seeking' | 'harvesting' | 'returning' | 'headinghome' | 'goingtoidle' | 'unloading' = 'idle';
   harvestTick = 0;                 // legacy mirror of harvesterAnimStage while loading
   /** C++ unit.cpp:2794-2797, 2851 — ArchiveTarget: remembers last known ore location.
    *  When returning to refinery, saves current cell. On next idle seek, heads there first. */
@@ -868,6 +970,9 @@ export class Entity {
    *  INITIAL=0, TAKEOFF=1, ALTITUDE=2, STACK=3, DOWNWIND=4, CROSSWIND=5,
    *  TRAVEL=6, LANDING=7. */
   aircraftEnterStatus = 0;
+  /** C++ AircraftClass::Mission_Move Status for helicopter movement:
+   *  VALIDATE_LZ=0, TAKE_OFF=1, FLY_TO_LZ=2, LAND=3. */
+  aircraftMoveStatus = 0;
   /** C++ NavCom radio contact target for fixed-wing Mission_Enter. Separate from
    *  landedAtStructure, which is only the pad the aircraft has actually touched. */
   aircraftDockingStructure = -1;
@@ -906,10 +1011,11 @@ export class Entity {
 
   /** C++ ScenarioInit Unlimbo semantics.
    *  InfantryClass::Unlimbo calls Closest_Free_Spot(coord, ScenarioInit). When
-   *  ScenarioInit is true, C++ returns the requested coord even if that infantry
-   *  sub-spot is already occupied. Trigger reinforcements and building survivor
-   *  spawns use this path, so several infantry can briefly share the same exact
-   *  lepton coord until Start_Driver claims their first walking sub-cell. */
+   *  ScenarioInit is true, C++ ignores occupancy but still snaps the requested
+   *  coordinate to the nearest StoppingCoordAbs infantry sub-cell. Trigger
+   *  reinforcements and building survivor spawns use this path, so several
+   *  infantry can briefly share the same stopping coord until Start_Driver
+   *  claims their first walking sub-cell. */
   scenarioInitUnlimbo = false;
   /** C++ UnitClass::IsToScatter.
    *  VesselClass::Mission_Unload sets this on RTTI_UNIT passengers after they
@@ -921,6 +1027,10 @@ export class Entity {
    *  Informational only. C++ logic.cpp re-reads Logic.Count() while iterating,
    *  so transport cargo appended by Unlimbo can run later in the same frame. */
   unlimboTick = -1;
+  /** Last frame this object ran active LogicClass AI. In-limbo visits do not count. */
+  lastLogicProcessedTick = -1;
+  /** Tick when a dog entered the dog-rides-bullet limbo path. */
+  dogRiderLimboStartTick = -1;
   /** C++ Logic vector index at submit time for runtime-created techno objects.
    *  Used to keep bullets/anims and later-spawned infantry in the same relative
    *  order when TS has to batch parts of the Logic array. */
@@ -970,6 +1080,7 @@ export class Entity {
     if (this.stats.isAircraft) {
       this.aircraftState = 'flying';
       this.flightAltitude = Entity.FLIGHT_ALTITUDE;
+      this.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
     }
   }
 
@@ -1042,9 +1153,12 @@ export class Entity {
     return this.invulnTick > 0 || this.ironCurtainTick > 0;
   }
 
-  /** Flight altitude offset (pixels) — visual only, for rendering above ground */
+  /** Flight altitude offset (pixels) — renderer-facing value derived from C++ Height. */
   flightAltitude = 0;
   static readonly FLIGHT_ALTITUDE = 24; // pixels above ground when airborne (C++ FLIGHT_LEVEL = 24)
+  /** C++ AircraftClass/ObjectClass::Height for aircraft, stored in leptons.
+   *  flightAltitude is the rounded Lepton_To_Pixel view of this value. */
+  aircraftHeightLeptons = 0;
   /** C++ ObjectClass::Height while IsFalling, stored in leptons.
    *  ObjectClass::FLIGHT_LEVEL is 256 leptons; renderer-facing
    *  flightAltitude is derived with Lepton_To_Pixel. */
@@ -1057,6 +1171,15 @@ export class Entity {
   /** C++ ObjectClass::Paradrop attaches an AnimClass parachute, so falling
    *  uses the IsAnimAttached branch: Riser -= 1, clamped to -3. */
   fallHasAttachedAnim = false;
+  /** C++ ANIM_PARACHUTE attached to paradropped infantry. It occupies the
+   *  fixed AnimClass heap/Logic vector even though TS renders falling directly
+   *  from object height. */
+  fallParachuteAnimActive = false;
+  fallParachuteAnimLogicIndexHint?: number;
+  fallParachuteAnimStage = 0;
+  fallParachuteAnimTimer = 4;
+  fallParachuteAnimLoops = 15;
+  fallParachuteAnimIsBrandNew = false;
   static readonly FLIGHT_LEVEL_LEPTONS = 256; // C++ object.h: FLIGHT_LEVEL
 
   get hasTurret(): boolean {
@@ -1131,15 +1254,14 @@ export class Entity {
           return d.frame + sdir * d.jump + (this.animFrame % d.count);
         }
         case AnimState.DIE: {
-          // C++ InfantryDeath 0-5 → die1..die5 (warhead.cpp InfDeath mapping):
-          //   0=GUN_DEATH (die1), 1=EXPLOSION_DEATH (die2), 2=EXPLOSION2_DEATH (die3),
-          //   3=GRENADE_DEATH (die4), 4=FIRE_DEATH (die5), 5=electro → reuses die5.
-          // Falls back through die2→die1 if a specific variant is missing.
+          // C++ infantry.cpp:383-416 InfDeath mapping:
+          //   0=delete immediately, 1=DO_GUN_DEATH, 2=DO_EXPLOSION_DEATH,
+          //   3=DO_GRENADE_DEATH, 4=DO_FIRE_DEATH, 5=electro anim + delete.
+          // The DIE state should normally only render variants 1..4.
           let d: { frame: number; count: number; jump: number } | undefined;
           switch (this.deathVariant) {
-            case 0: d = anim.die1; break;
-            case 1: d = anim.die2 ?? anim.die1; break;
-            case 2: d = anim.die3 ?? anim.die2 ?? anim.die1; break;
+            case 1: d = anim.die1; break;
+            case 2: d = anim.die2 ?? anim.die1; break;
             case 3: d = anim.die4 ?? anim.die2 ?? anim.die1; break;
             case 4: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
             case 5: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
@@ -1273,9 +1395,10 @@ export class Entity {
       this.animFrame = 0;
       this.animTick = 0;
       this.deathTick = 0;
-      // R7: Use warhead's infantryDeath property from C++ warhead.cpp InfantryDeath
-      // Pass through the full C++ InfDeath value (0-5) for 6 distinct death animations:
-      //   0=instant (die1), 1=twirl (die2), 2=explode (die2), 3=flying (die2), 4=burn (die2), 5=electro (die2)
+      // R7: Use warhead's infantryDeath property from C++ warhead.cpp InfantryDeath.
+      // Pass through the full C++ InfDeath value:
+      //   0=instant delete, 1=DO_GUN_DEATH, 2=DO_EXPLOSION_DEATH,
+      //   3=DO_GRENADE_DEATH, 4=DO_FIRE_DEATH, 5=electro anim + delete.
       const whProps = warheadPropsOverride ?? (warhead ? WARHEAD_PROPS[warhead as WarheadType] : undefined);
       if (whProps !== undefined) {
         this.deathVariant = whProps.infantryDeath; // full 0-5 range from C++
@@ -1300,9 +1423,11 @@ export class Entity {
    *  subtracts object Height, and TechnoClass::Can_Fire/In_Range(TARGET) use
    *  that coordinate rather than the object center. */
   targetCoordLeptons(): LeptonPos {
-    const height = this.fallHeightLeptons > 0
-      ? this.fallHeightLeptons
-      : (this.flightAltitude > 0 ? pixelToLepton(this.flightAltitude) : 0);
+    const height = this.stats.isAircraft
+      ? this.aircraftHeightLeptons
+      : (this.fallHeightLeptons > 0
+          ? this.fallHeightLeptons
+          : (this.flightAltitude > 0 ? pixelToLepton(this.flightAltitude) : 0));
     return { lx: this.leptonX, ly: this.leptonY - height };
   }
 
@@ -1463,11 +1588,10 @@ export class Entity {
     //   DIR_N in the 256-step facing table is index 0; CosTable[0]=0,
     //   SinTable[0]=127. x += calcx(0, d) = 0. y += calcy(127, d) = -d.
     //   (calcy returns -(v*d)>>7; with v=127, -(127*d)>>7 ≈ -d.)
-    // C++ Height is stored in leptons. TS keeps aircraft flightAltitude as the
-    // renderer-facing pixel value, while falling non-aircraft keep the exact
-    // ObjectClass::Height in fallHeightLeptons.
+    // C++ Height is stored in leptons. Aircraft keep exact Height in
+    // aircraftHeightLeptons; falling non-aircraft use fallHeightLeptons.
     const height = this.stats.isAircraft
-      ? pixelToLepton(this.flightAltitude ?? 0)
+      ? this.aircraftHeightLeptons
       : this.fallHeightLeptons;
     const dN = offsets.vertical + height;
     // calcy(SIN_TABLE_256[0]=127, dN) = -(127*dN)>>7
@@ -1799,13 +1923,14 @@ export class Entity {
     const desired256 = this.desiredTurretFacing256 & 0xff;
     if (this.turretFacing256 === desired256) {
       this.turretRotAccumulator = 0;
+      this.turretIsRotating = false;
       this.turretFacing = dir256ToFacing8(this.turretFacing256);
       this.desiredTurretFacing = dir256ToFacing8(desired256);
       this.turretFacing32 = dir256ToFacing32(this.turretFacing256);
       return true;
     }
     // Guard against double-accumulation in the same game tick
-    if (this.turretRotTickedThisFrame) return this.turretFacing256 === desired256;
+    if (this.turretRotTickedThisFrame) return !this.turretIsRotating;
     this.turretRotTickedThisFrame = true;
 
     // C++ FacingClass::Rotation_Adjust: clamp to 127, then apply the full rate
@@ -1826,7 +1951,8 @@ export class Entity {
     this.turretFacing = dir256ToFacing8(this.turretFacing256);
     this.desiredTurretFacing = dir256ToFacing8(desired256);
     this.turretFacing32 = dir256ToFacing32(this.turretFacing256);
-    return this.turretFacing256 === desired256;
+    this.turretIsRotating = this.turretFacing256 !== desired256;
+    return !this.turretIsRotating;
   }
 
   /** Move toward a world position at the unit's speed.
@@ -1840,7 +1966,7 @@ export class Entity {
    *    - x += (CosTable[dir] * distance) >> 7
    *    - y -= (SinTable[dir] * distance) >> 7
    *  All arithmetic is integer; no floating point in the movement path. */
-  moveToward(target: LeptonPos | WorldPos, speed: number): boolean {
+  moveToward(target: LeptonPos | WorldPos, speed: number, preserveDrivingOnArrival = false): boolean {
     // M7: Apply crate speed bias multiplier
     const effectiveSpeed = speed * this.speedBias;
 
@@ -1860,7 +1986,7 @@ export class Entity {
       this.leptonY = targetLeptonY;
       this.syncPosFromLeptons();
       this.speedAccum = 0;
-      this.isDriving = false; // C++ Stop_Driver
+      if (!preserveDrivingOnArrival) this.isDriving = false;
       return true;
     }
 
@@ -1995,6 +2121,73 @@ export class Entity {
     const movedL = Math.abs(finalLX) + Math.abs(finalLY);
     return Math.abs(dxL) + Math.abs(dyL) <= movedL + 5;
   }
+}
+
+export function clearFallingParachuteAnim(entity: Entity): void {
+  entity.fallParachuteAnimActive = false;
+  entity.fallParachuteAnimLogicIndexHint = undefined;
+  entity.fallParachuteAnimStage = 0;
+  entity.fallParachuteAnimTimer = 4;
+  entity.fallParachuteAnimLoops = 15;
+  entity.fallParachuteAnimIsBrandNew = false;
+  entity.fallHasAttachedAnim = false;
+}
+
+export function attachFallingParachuteAnim(
+  entity: Entity,
+  logicIndexHintForNewObject?: () => number | undefined,
+  reserveAnimSlot?: () => boolean,
+): boolean {
+  if (reserveAnimSlot && !reserveAnimSlot()) {
+    clearFallingParachuteAnim(entity);
+    return false;
+  }
+
+  entity.fallHasAttachedAnim = true;
+  entity.fallParachuteAnimActive = true;
+  entity.fallParachuteAnimLogicIndexHint = logicIndexHintForNewObject?.();
+  entity.fallParachuteAnimStage = 0;
+  entity.fallParachuteAnimTimer = 4;
+  entity.fallParachuteAnimLoops = 15;
+  entity.fallParachuteAnimIsBrandNew = true;
+  return true;
+}
+
+/** C++ Shorten_Attached_Anims sets attached AnimClass::Loops to 0 when the
+ * paradropped object lands. The parachute remains in the fixed AnimClass heap
+ * until its current pass reaches the final frame. */
+export function shortenFallingParachuteAnim(entity: Entity): void {
+  if (entity.fallParachuteAnimActive) {
+    entity.fallParachuteAnimLoops = 0;
+  }
+  entity.fallHasAttachedAnim = false;
+}
+
+export function processFallingParachuteAnim(entity: Entity): void {
+  if (!entity.fallParachuteAnimActive) return;
+
+  if (entity.fallParachuteAnimIsBrandNew) {
+    entity.fallParachuteAnimIsBrandNew = false;
+    return;
+  }
+
+  if (entity.fallParachuteAnimTimer > 0) entity.fallParachuteAnimTimer--;
+  if (entity.fallParachuteAnimTimer > 0) return;
+  entity.fallParachuteAnimTimer = 4;
+  entity.fallParachuteAnimStage++;
+
+  if (entity.fallParachuteAnimStage >= 16) {
+    if (entity.fallParachuteAnimLoops > 0) entity.fallParachuteAnimLoops--;
+    if (entity.fallParachuteAnimLoops > 0) {
+      entity.fallParachuteAnimStage = 7;
+    } else {
+      clearFallingParachuteAnim(entity);
+    }
+  }
+}
+
+export function activeFallingParachuteAnimCount(entities: Entity[]): number {
+  return entities.filter(entity => entity.fallParachuteAnimActive).length;
 }
 
 /** Recoil pixel offsets per 8-dir facing (C++ unit.cpp Recoil_Adjust, collapsed from 32-entry).

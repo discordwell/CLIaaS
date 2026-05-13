@@ -3,7 +3,7 @@
  * The map is 128×128 cells but only a portion (typically 50×50) is playable.
  */
 
-import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED } from './types';
+import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED, House } from './types';
 import { ScenarioRandom } from './random';
 
 /** C++ MoveType enum (defines.h:828-837) — Can_Enter_Cell() return values for pathfinding.
@@ -31,6 +31,35 @@ export enum Terrain {
   ROUGH = 7,
   RIVER = 8,
   TREE = 9,   // TS extension — C++ has no TREE LandType; trees are TerrainClass objects on CLEAR cells
+}
+
+const TEMPLATE_WATER = 1;
+const TEMPLATE_BRIDGE1 = 131;
+const TEMPLATE_BRIDGE1D = 132;
+const TEMPLATE_BRIDGE2 = 133;
+const TEMPLATE_BRIDGE2D = 134;
+const TEMPLATE_BRIDGE1H = 378;
+const TEMPLATE_BRIDGE2H = 379;
+
+const SIMPLE_BRIDGE_INFO = new Map<number, { width: number; height: number; replacement: number; fullyDestroyed: boolean }>([
+  // C++ iconset map dimensions: BRIDGE1/1H/1D are 5x3; BRIDGE2/2H/2D are 3x5.
+  [TEMPLATE_BRIDGE1, { width: 5, height: 3, replacement: TEMPLATE_BRIDGE1H, fullyDestroyed: false }],
+  [TEMPLATE_BRIDGE1H, { width: 5, height: 3, replacement: TEMPLATE_BRIDGE1D, fullyDestroyed: true }],
+  [TEMPLATE_BRIDGE2, { width: 3, height: 5, replacement: TEMPLATE_BRIDGE2H, fullyDestroyed: false }],
+  [TEMPLATE_BRIDGE2H, { width: 3, height: 5, replacement: TEMPLATE_BRIDGE2D, fullyDestroyed: true }],
+]);
+
+export interface BridgeDestroyResult {
+  changedCells: number;
+  animationCell?: CellPos;
+  fullyDestroyed: boolean;
+}
+
+export interface OreDepletionResult {
+  removed: number;
+  credits: number;
+  isGold: boolean;
+  isGem: boolean;
 }
 
 // C++ parity: trees (TerrainClass) are placed on CLEAR ground — infantry can
@@ -74,6 +103,8 @@ export interface MapTree {
   hp: number;           // current HP
   maxHp: number;        // max HP (600 for all trees)
   immune: boolean;      // C++ IsImmune — true for clumps
+  isOnFire?: boolean;   // C++ TerrainClass::IsOnFire
+  isCrumbling?: boolean; // C++ TerrainClass::IsCrumbling
   occupyCells: number[]; // cell indices this tree occupies (blocks ground movement)
 }
 
@@ -196,6 +227,8 @@ export class GameMap {
 
   /** Wall type at each cell ('' = no wall, 'SBAG'/'FENC'/'BARB'/'BRIK' = wall type) */
   wallType: string[];
+  /** C++ CellClass::Owner for wall overlays. null mirrors HOUSE_NONE. */
+  wallOwner: Array<House | null>;
 
   /** C++ CellClass::OverlayData damage-level component for walls.
    *  TS renders wall connections independently, so this stores only the
@@ -225,6 +258,11 @@ export class GameMap {
 
   /** Reverse lookup: cell index → terrain object occupying it. */
   private terrainObjectCellToObject = new Map<number, MapTerrainObject>();
+
+  /** Non-rendered movement blockers for explicit impassable cells. */
+  private movementBlocked = new Set<number>();
+  /** C++ building bib smudges. They block building placement, not movement. */
+  private bibSmudges = new Set<number>();
 
   /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
   decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
@@ -260,6 +298,7 @@ export class GameMap {
     this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.oreDensity = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
     this.wallType = new Array(MAP_CELLS * MAP_CELLS).fill('');
+    this.wallOwner = new Array(MAP_CELLS * MAP_CELLS).fill(null);
     this.wallDamageLevel = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.treeType = new Array(MAP_CELLS * MAP_CELLS).fill('');
     this.boundsX = 0;
@@ -298,11 +337,25 @@ export class GameMap {
   }
 
   /** Set wall type at a cell */
-  setWallType(cx: number, cy: number, type: string): void {
+  setWallType(cx: number, cy: number, type: string, owner?: House | null): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       const idx = cy * MAP_CELLS + cx;
       this.wallType[idx] = type;
+      if (owner !== undefined) this.wallOwner[idx] = owner;
       this.wallDamageLevel[idx] = 0;
+    }
+  }
+
+  /** Get C++ CellClass::Owner for a wall cell. null mirrors HOUSE_NONE. */
+  getWallOwner(cx: number, cy: number): House | null {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return null;
+    return this.wallOwner[cy * MAP_CELLS + cx] ?? null;
+  }
+
+  /** Set C++ CellClass::Owner for a wall cell. null mirrors HOUSE_NONE. */
+  setWallOwner(cx: number, cy: number, owner: House | null): void {
+    if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
+      this.wallOwner[cy * MAP_CELLS + cx] = owner;
     }
   }
 
@@ -311,8 +364,33 @@ export class GameMap {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       const idx = cy * MAP_CELLS + cx;
       this.wallType[idx] = '';
+      this.wallOwner[idx] = null;
       this.wallDamageLevel[idx] = 0;
     }
+  }
+
+  setMovementBlocked(cx: number, cy: number, blocked: boolean): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    if (blocked) this.movementBlocked.add(idx);
+    else this.movementBlocked.delete(idx);
+  }
+
+  isMovementBlocked(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return true;
+    return this.movementBlocked.has(cy * MAP_CELLS + cx);
+  }
+
+  setBibSmudge(cx: number, cy: number, present: boolean): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    if (present) this.bibSmudges.add(idx);
+    else this.bibSmudges.delete(idx);
+  }
+
+  hasBibSmudge(cx: number, cy: number): boolean {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+    return this.bibSmudges.has(cy * MAP_CELLS + cx);
   }
 
   /** Get accumulated wall damage levels (C++ OverlayData >> 4 approximation). */
@@ -440,16 +518,16 @@ export class GameMap {
   }
 
   /** Check if a cell is passable (terrain + occupancy).
-   *  C++ parity: pathfinding extends 1 cell beyond map bounds.
-   *  Map bounds define the visible area, not the pathfinding boundary. */
+   *  C++ parity: MapPack is a full 128x128 movement layer. The scenario [Map]
+   *  bounds define the visible/radar rectangle, not the pathfinding boundary. */
   isPassable(cx: number, cy: number): boolean {
-    if (cx < this.boundsX - 1 || cx >= this.boundsX + this.boundsW + 1 ||
-        cy < this.boundsY - 1 || cy >= this.boundsY + this.boundsH + 1) {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) {
       return false;
     }
     if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
     // C++ parity: TerrainClass Occupy_List cells block ground movement.
     if (this.isTreeOccupied(cx, cy) || this.isTerrainObjectOccupied(cx, cy)) return false;
+    if (this.isMovementBlocked(cx, cy)) return false;
     return true;
   }
 
@@ -458,6 +536,7 @@ export class GameMap {
   isTerrainPassable(cx: number, cy: number): boolean {
     if (!PASSABLE.has(this.getTerrain(cx, cy))) return false;
     if (this.isTreeOccupied(cx, cy) || this.isTerrainObjectOccupied(cx, cy)) return false;
+    if (this.isMovementBlocked(cx, cy)) return false;
     // C++ CellClass::Is_Clear_To_Move (cell.cpp:2764-2784): wall overlays
     // block normal ground movement-zone and path checks unless the caller is
     // doing crusher/destroyer-specific wall handling. TS uses this predicate
@@ -469,6 +548,7 @@ export class GameMap {
   /** C++ cell.cpp:498-503 Is_Clear_To_Build — check if a cell allows building placement.
    *  Only CLEAR terrain is buildable (C++ Ground[land].Build).
    *  ORE, ROUGH, BEACH are passable for movement but NOT buildable.
+   *  C++ cell.cpp:489 rejects bib smudges for building placement only.
    *  C++ cell.cpp:498-501 — Is_Bridge_Here() prohibits building on bridge cells.
    *  cpp-parity: rules.cpp:864, cell.cpp:453-513, cell.cpp:498-501 */
   isBuildable(cx: number, cy: number): boolean {
@@ -476,6 +556,7 @@ export class GameMap {
         cy < this.boundsY || cy >= this.boundsY + this.boundsH) {
       return false;
     }
+    if (this.hasBibSmudge(cx, cy)) return false;
     if (!BUILDABLE.has(this.getTerrain(cx, cy))) return false;
     // C++ cell.cpp:498-501 — Is_Bridge_Here(): bridge template cells block building placement
     if (this.isBridgeCell(cx, cy)) return false;
@@ -586,33 +667,62 @@ export class GameMap {
   }
 
   /** Mark a vehicle/building as occupying a cell (blocks all sub-cells).
-   *  C++ cell.h: Flag.Occupy.Vehicle = true */
-  setVehicleOccupancy(cx: number, cy: number, entityId: number): void {
+   *  C++ cell.h: Flag.Occupy.Vehicle = true
+   *  Returns any DriveClass reservation owner clobbered by the shared bit. */
+  setVehicleOccupancy(cx: number, cy: number, entityId: number): { cellIdx: number; ownerId: number } | null {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       const idx = cy * MAP_CELLS + cx;
+      // C++ has one CellClass::Flag.Occupy.Vehicle bit. A physical
+      // Occupy_Down cannot coexist with a distinct Mark_Track reservation in
+      // the same cell, so collapse TS's owner-tracked reservation side table
+      // when a vehicle is physically present there.
+      const clobberedOwner = this.vehicleTrackReservations.get(idx) ?? 0;
+      this.vehicleTrackReservations.delete(idx);
       this.vehicleOccupancy.add(idx);
       this.occupancy[idx] = entityId;
+      return clobberedOwner > 0 ? { cellIdx: idx, ownerId: clobberedOwner } : null;
     }
+    return null;
   }
 
   /** Move a vehicle's physical occupy bit during DriveClass movement.
    *  C++ updates cell occupation as vehicles cross track cells inside the
    *  object AI pass; pathfinding later in the same tick must see the new cell,
    *  not the position from the tick-start occupancy rebuild. */
-  moveVehicleOccupancy(oldCx: number, oldCy: number, newCx: number, newCy: number, entityId: number): void {
-    if (oldCx === newCx && oldCy === newCy) return;
+  moveVehicleOccupancy(oldCx: number, oldCy: number, newCx: number, newCy: number, entityId: number): Array<{ cellIdx: number; ownerId: number }> {
+    const clobbered: Array<{ cellIdx: number; ownerId: number }> = [];
+    if (oldCx === newCx && oldCy === newCy) {
+      if (oldCx >= 0 && oldCx < MAP_CELLS && oldCy >= 0 && oldCy < MAP_CELLS) {
+        const idx = oldCy * MAP_CELLS + oldCx;
+        // DriveClass movement picks the object up and puts it back down even
+        // while its center remains in the same cell. Occupy_Up clears the
+        // shared Vehicle bit, which clobbers any same-cell Mark_Track
+        // reservation before Occupy_Down restores physical occupation.
+        const ownerId = this.vehicleTrackReservations.get(idx) ?? 0;
+        if (ownerId > 0) clobbered.push({ cellIdx: idx, ownerId });
+        this.vehicleTrackReservations.delete(idx);
+        this.vehicleOccupancy.add(idx);
+        if (this.occupancy[idx] === 0) this.occupancy[idx] = entityId;
+      }
+      return clobbered;
+    }
     if (oldCx >= 0 && oldCx < MAP_CELLS && oldCy >= 0 && oldCy < MAP_CELLS) {
       const oldIdx = oldCy * MAP_CELLS + oldCx;
       this.vehicleOccupancy.delete(oldIdx);
+      // C++ CellClass has one boolean Flag.Occupy.Vehicle bit shared by normal
+      // unit occupation and DriveClass::Mark_Track reservations. Occupy_Up()
+      // clears that bit without owner/ref-count protection, so a moving unit's
+      // physical pickup can clobber a reservation in the same cell.
+      const ownerId = this.vehicleTrackReservations.get(oldIdx) ?? 0;
+      if (ownerId > 0) clobbered.push({ cellIdx: oldIdx, ownerId });
+      this.vehicleTrackReservations.delete(oldIdx);
       if (this.occupancy[oldIdx] === entityId) {
         this.refreshSubCellOccupancy(oldIdx);
-        if (this.occupancy[oldIdx] === 0) {
-          const reservedBy = this.vehicleTrackReservations.get(oldIdx);
-          if (reservedBy) this.occupancy[oldIdx] = reservedBy;
-        }
       }
     }
-    this.setVehicleOccupancy(newCx, newCy, entityId);
+    const newClobber = this.setVehicleOccupancy(newCx, newCy, entityId);
+    if (newClobber) clobbered.push(newClobber);
+    return clobbered;
   }
 
   setVehicleTrackReservation(cellIdx: number, entityId: number): void {
@@ -621,17 +731,15 @@ export class GameMap {
     if (this.occupancy[cellIdx] === 0) this.occupancy[cellIdx] = entityId;
   }
 
-  clearVehicleTrackReservation(cellIdx: number, entityId: number): void {
-    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS) return;
-    if (this.vehicleTrackReservations.get(cellIdx) !== entityId) return;
+  clearVehicleTrackReservation(cellIdx: number, _entityId: number): number {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS) return 0;
+    const reservationOwner = this.vehicleTrackReservations.get(cellIdx);
+    if (!reservationOwner) return 0;
     this.vehicleTrackReservations.delete(cellIdx);
-    if (this.occupancy[cellIdx] === entityId && !this.vehicleOccupancy.has(cellIdx)) {
+    if (this.occupancy[cellIdx] === reservationOwner && !this.vehicleOccupancy.has(cellIdx)) {
       this.refreshSubCellOccupancy(cellIdx);
-      if (this.occupancy[cellIdx] === 0) {
-        const reservedBy = this.vehicleTrackReservations.get(cellIdx);
-        if (reservedBy) this.occupancy[cellIdx] = reservedBy;
-      }
     }
+    return reservationOwner;
   }
 
   getVehicleTrackReservation(cx: number, cy: number): number {
@@ -891,6 +999,58 @@ export class GameMap {
       }
     }
     return count;
+  }
+
+  /** C++ MapClass::Destroy_Bridge_At(cell) for simple BRIDGE1/BRIDGE2 templates.
+   *  Uses the cell's template icon to recover the template origin, applies the
+   *  next bridge damage template over that footprint, and returns the NAPALM3
+   *  animation cell C++ computes from origin + width/2 + height/2.
+   */
+  destroyBridgeAtCellIndex(cellIdx: number): BridgeDestroyResult {
+    if (cellIdx <= 0 || cellIdx >= MAP_CELLS * MAP_CELLS) {
+      return { changedCells: 0, fullyDestroyed: false };
+    }
+    const ttype = this.templateType[cellIdx];
+    const info = SIMPLE_BRIDGE_INFO.get(ttype);
+    if (!info) return { changedCells: 0, fullyDestroyed: false };
+
+    const icon = this.templateIcon[cellIdx] ?? 0;
+    const originIdx = cellIdx - (icon % info.width) - MAP_CELLS * Math.floor(icon / info.width);
+    const originCx = originIdx % MAP_CELLS;
+    const originCy = Math.floor(originIdx / MAP_CELLS);
+    if (originCx < 0 || originCy < 0 || originCx >= MAP_CELLS || originCy >= MAP_CELLS) {
+      return { changedCells: 0, fullyDestroyed: false };
+    }
+
+    let changedCells = 0;
+    for (let y = 0; y < info.height; y++) {
+      const cy = originCy + y;
+      if (cy < 0 || cy >= MAP_CELLS) continue;
+      for (let x = 0; x < info.width; x++) {
+        const cx = originCx + x;
+        if (cx < 0 || cx >= MAP_CELLS) continue;
+        const idx = cy * MAP_CELLS + cx;
+        if (this.templateType[idx] !== ttype) continue;
+        this.templateType[idx] = info.replacement;
+        if (info.fullyDestroyed) {
+          // C++ TemplateClass(TEMPLATE_BRIDGE?D) recalculates these cells as
+          // LAND_RIVER, not LAND_WATER. Fire impacts over the wreck therefore
+          // still use napalm animations instead of water splashes.
+          this.setTerrain(cx, cy, Terrain.RIVER);
+        }
+        changedCells++;
+      }
+    }
+
+    if (changedCells === 0) return { changedCells: 0, fullyDestroyed: false };
+    return {
+      changedCells,
+      fullyDestroyed: info.fullyDestroyed,
+      animationCell: {
+        cx: originCx + Math.floor(info.width / 2),
+        cy: originCy + Math.floor(info.height / 2),
+      },
+    };
   }
 
   /** Destroy bridge cells in a radius (set to WATER) — returns number destroyed */
@@ -1263,10 +1423,12 @@ export class GameMap {
     return null;
   }
 
-  /** Deplete one bail of ore/gem at a cell. Returns credit value per bail (0 if empty).
-   *  C++ parity: gold ore = 25 credits/bail (rules.ini GoldValue=25), gems = 50 credits/bail (rules.ini GemValue=50). */
-  depleteOre(cx: number, cy: number): number {
-    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
+  /** Deplete one bail of ore/gem at a cell, preserving the pre-clear overlay type.
+   *  C++ parity: CellClass::Reduce_Tiberium returns the removed OverlayData count;
+   *  UnitClass::Harvesting still branches on the original overlay kind. */
+  depleteOreBail(cx: number, cy: number): OreDepletionResult {
+    const empty = { removed: 0, credits: 0, isGold: false, isGem: false };
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return empty;
     const idx = cy * MAP_CELLS + cx;
     const ovl = this.overlay[idx];
     if (GameMap.isGoldOverlayId(ovl)) {
@@ -1274,25 +1436,31 @@ export class GameMap {
       const density = this.oreDataAt(idx);
       if (density > 0) {
         this.oreDensity[idx] = density - 1;
-        return 25;
+        return { removed: 1, credits: 25, isGold: true, isGem: false };
       }
       this.overlay[idx] = 0xFF;
       this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
       if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
-      return 0;
+      return { removed: 0, credits: 0, isGold: true, isGem: false };
     } else if (GameMap.isGemOverlayId(ovl)) {
       // Gems (GEM01-GEM04) — 50 credits per bail (rules.ini GemValue=50)
       const density = this.oreDataAt(idx);
       if (density > 0) {
         this.oreDensity[idx] = density - 1;
-        return 50;
+        return { removed: 1, credits: 50, isGold: false, isGem: true };
       }
       this.overlay[idx] = 0xFF;
       this.oreDensity[idx] = GameMap.ORE_DENSITY_UNKNOWN;
       if (this.cells[idx] === Terrain.ORE) this.cells[idx] = Terrain.CLEAR;
-      return 0;
+      return { removed: 0, credits: 0, isGold: false, isGem: true };
     }
-    return 0;
+    return empty;
+  }
+
+  /** Deplete one bail of ore/gem at a cell. Returns credit value per bail (0 if empty).
+   *  C++ parity: gold ore = 25 credits/bail (rules.ini GoldValue=25), gems = 50 credits/bail (rules.ini GemValue=50). */
+  depleteOre(cx: number, cy: number): number {
+    return this.depleteOreBail(cx, cy).credits;
   }
 
   /** Destroy ore OverlayData levels without awarding credits.
@@ -1400,9 +1568,8 @@ export class GameMap {
    *  @param isMoving Optional callback: given occupant entity ID, returns true if that entity is currently moving
    *  @param isInfantry If true, cell is passable if sub-cells are available (C++ infantry sub-cell system) */
   canEnterCell(cx: number, cy: number, naval = false, isMoving?: (entityId: number) => boolean, isInfantry = false, ignoreEntityId = 0): MoveResult {
-    // C++ parity: pathfinding extends 1 cell beyond map bounds.
-    if (cx < this.boundsX - 1 || cx >= this.boundsX + this.boundsW + 1 ||
-        cy < this.boundsY - 1 || cy >= this.boundsY + this.boundsH + 1) {
+    // C++ parity: Can_Enter_Cell uses the full 128x128 CellClass terrain map.
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) {
       return MoveResult.IMPASSABLE;
     }
     const passable = naval ? this.getTerrain(cx, cy) === Terrain.WATER : PASSABLE.has(this.getTerrain(cx, cy));
@@ -1413,6 +1580,7 @@ export class GameMap {
     if (!naval && (this.treeOccupied.has(cy * MAP_CELLS + cx) || this.terrainObjectOccupied.has(cy * MAP_CELLS + cx))) {
       return MoveResult.IMPASSABLE;
     }
+    if (!naval && this.isMovementBlocked(cx, cy)) return MoveResult.IMPASSABLE;
     if (!naval && this.wallType[cy * MAP_CELLS + cx] !== '') {
       return MoveResult.IMPASSABLE;
     }
