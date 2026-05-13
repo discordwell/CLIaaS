@@ -744,6 +744,8 @@ async function main(): Promise<void> {
   // Extract campaign mission INIs from all MIX archives
   log('Extracting campaign mission INIs...');
   let campaignFound = 0;
+  let campaignUpdated = 0;
+  let campaignUnchanged = 0;
   const campaignScenarios: string[] = [];
   // Allied campaign: SCG01EA-SCG14EA (+ EB variants for alternate paths)
   for (let i = 1; i <= 14; i++) {
@@ -769,13 +771,18 @@ async function main(): Promise<void> {
   for (const scenario of campaignScenarios) {
     const iniName = `${scenario}.INI`;
     const outPath = join(OUTPUT_DIR, `${scenario}.ini`);
-    if (existsSync(outPath)) continue; // already extracted (e.g. from ant missions)
     let found = false;
     for (const [mName, mix] of mixParsed) {
       const iniData = mix.readFile(iniName);
       if (iniData) {
-        writeFileSync(outPath, iniData);
-        log(`  ${iniName}: ${iniData.length} bytes (from ${mName})`);
+        const unchanged = existsSync(outPath) && readFileSync(outPath).equals(iniData);
+        if (unchanged) {
+          campaignUnchanged++;
+        } else {
+          writeFileSync(outPath, iniData);
+          campaignUpdated++;
+          log(`  ${iniName}: ${iniData.length} bytes (from ${mName})`);
+        }
         campaignFound++;
         found = true;
         break;
@@ -783,7 +790,7 @@ async function main(): Promise<void> {
     }
     // Don't log skips for probed ranges — too noisy
   }
-  log(`  Found ${campaignFound} campaign mission INIs`);
+  log(`  Found ${campaignFound} campaign mission INIs (${campaignUpdated} updated, ${campaignUnchanged} unchanged)`);
 
   // Extract Aftermath rules from EXPAND2.MIX (unit overrides, not mission maps)
   const expand2Mix = mixParsed.get('EXPAND2.MIX');

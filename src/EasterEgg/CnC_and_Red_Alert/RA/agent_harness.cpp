@@ -515,6 +515,26 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 		if (Target_Legal(foot->NavCom)) {
 			COORDINATE nc = As_Coord(foot->NavCom);
 			buf_cat(",\"nlx\":%d,\"nly\":%d", (int)Coord_X(nc), (int)Coord_Y(nc));
+			CELL ncell = As_Cell(foot->NavCom);
+			int nav_zone = (int)Map[ncell].Zones[move_zone];
+			int nav_enter = -1;
+			if (rtti == RTTI_INFANTRY) {
+				nav_enter = (int)((InfantryClass*)obj)->Can_Enter_Cell(ncell);
+			} else if (rtti == RTTI_UNIT) {
+				nav_enter = (int)((UnitClass*)obj)->Can_Enter_Cell(ncell);
+			} else if (rtti == RTTI_VESSEL) {
+				nav_enter = (int)((VesselClass*)obj)->Can_Enter_Cell(ncell);
+			}
+			int bp_dist = (int)foot->Distance(foot->NavCom);
+			int bp_checkdist = foot->Team.Is_Valid() ? Rule.StrayDistance : Rule.CloseEnoughDistance;
+			CELL bp_near = 0;
+			if (nav_enter > MOVE_CLOAK && bp_dist > bp_checkdist) {
+				bp_near = Map.Nearby_Location(ncell, tech->Techno_Type_Class()->Speed,
+					Map[Coord_Cell(tech->Center_Coord())].Zones[move_zone], move_zone);
+			}
+			buf_cat(",\"ncx\":%d,\"ncy\":%d,\"nzone\":%d,\"nenter\":%d,\"bpdist\":%d,\"bpcheck\":%d,\"bpnx\":%d,\"bpny\":%d",
+				Cell_X(ncell), Cell_Y(ncell), nav_zone, nav_enter, bp_dist, bp_checkdist,
+				bp_near ? Cell_X(bp_near) : -1, bp_near ? Cell_Y(bp_near) : -1);
 		}
 		COORDINATE hc = foot->Head_To_Coord();
 		if (hc) {
@@ -539,12 +559,15 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 			secondaryCurrent = (int)((AircraftClass*)obj)->SecondaryFacing.Current();
 			secondaryDesired = (int)((AircraftClass*)obj)->SecondaryFacing.Desired();
 		}
-					buf_cat(",\"mt\":%d,\"status\":%d,\"arm\":%d,\"drv\":%s,\"rot\":%s,\"mq\":%d,\"init\":%s,\"p0\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,\"p9\":%d,\"p10\":%d,\"p11\":%d,\"p12\":%d,\"p13\":%d,\"p14\":%d,\"p15\":%d,\"spd\":%d,\"pf\":%d,\"pfd\":%d,\"sf\":%d,\"sfd\":%d,\"tur\":%s,\"ms\":%d,\"gsb\":%d,\"sb\":%d,\"fm\":%s,\"fsp\":%d,\"fms\":%d,\"mx\":%d,\"add\":%d,\"plw\":%d,\"adsc\":%d",
+					buf_cat(",\"mt\":%d,\"status\":%d,\"arm\":%d,\"drv\":%s,\"rot\":%s,\"mq\":%d,\"pth\":%d,\"try\":%d,\"init\":%s,\"recruit\":%s,\"p0\":%d,\"p1\":%d,\"p2\":%d,\"p3\":%d,\"p4\":%d,\"p5\":%d,\"p6\":%d,\"p7\":%d,\"p8\":%d,\"p9\":%d,\"p10\":%d,\"p11\":%d,\"p12\":%d,\"p13\":%d,\"p14\":%d,\"p15\":%d,\"spd\":%d,\"pf\":%d,\"pfd\":%d,\"sf\":%d,\"sfd\":%d,\"tur\":%s,\"ms\":%d,\"gsb\":%d,\"sb\":%d,\"fm\":%s,\"fsp\":%d,\"fms\":%d,\"mx\":%d,\"add\":%d,\"plw\":%d,\"adsc\":%d",
 						foot->Get_Mission_Timer_Value(), (int)foot->Status, (int)foot->Arm.Value(),
 						foot->IsDriving ? "true" : "false",
 						foot->IsRotating ? "true" : "false",
 						(int)foot->MissionQueue,
+						(int)foot->PathThreshhold,
+						(int)foot->TryTryAgain,
 					foot->IsInitiated ? "true" : "false",
+					foot->Is_Recruitable(foot->House) ? "true" : "false",
 				(int)foot->Path[0],
 			(int)foot->Path[1],
 				(int)foot->Path[2],
@@ -609,6 +632,12 @@ static void serialize_obj(ObjectClass* obj, RTTIType rtti, int idx, bool ally, b
 					inf->IsProne ? "true" : "false",
 					(int)inf->Fear,
 					(int)inf->Height);
+		} else if (rtti == RTTI_AIRCRAFT) {
+			AircraftClass* air = (AircraftClass*)obj;
+			buf_cat(",\"hgt\":%d,\"landing\":%s,\"takingOff\":%s",
+				air->Agent_Height(),
+				air->Agent_Is_Landing() ? "true" : "false",
+				air->Agent_Is_Taking_Off() ? "true" : "false");
 		}
 	}
 
@@ -857,6 +886,7 @@ char* agent_get_bullet_scatter_log(void)
 			e.frame, e.bulletId, e.bulletType, e.warhead, e.paybackRtti, e.maxSpeed,
 			e.coordX, e.coordY, e.targetX, e.targetY, e.paybackX, e.paybackY);
 	}
+
 	buf_cat("]}");
 	return s_state_buf;
 }
@@ -967,7 +997,7 @@ char* agent_get_state(void)
 	// Entity tag identifies WHICH entity a call belongs to, regardless of granular
 	// source tag override (e.g., 30001, 60043). Task #43+ diagnostic infrastructure.
 	extern int g_rng_entity_log[];
-	for (int li = 0; li < g_rng_log_count && li < 290; li++) {
+	for (int li = 0; li < g_rng_log_count && li < 1024; li++) {
 		if (li > 0) buf_cat(",");
 		buf_cat("[%lu,%d,%d]", g_rng_seed_log[li], g_rng_source_log[li], g_rng_entity_log[li]);
 	}
@@ -1058,6 +1088,9 @@ char* agent_get_state(void)
 			bool ready_cloak = false;
 			bool is_driving = false;
 			int doing = -1;
+			int height = -1;
+			bool is_landing = false;
+			bool is_taking_off = false;
 			{
 				TechnoClass * tt = (TechnoClass *)lobj;
 				COORDINATE cc = tt->Coord;
@@ -1101,12 +1134,17 @@ char* agent_get_state(void)
 					doing = (int)((InfantryClass *)lobj)->Doing;
 				} else if (rtti == RTTI_VESSEL) {
 					pulse = (int)((VesselClass *)lobj)->PulseCountDown.Value();
+				} else if (rtti == RTTI_AIRCRAFT) {
+					AircraftClass * air = (AircraftClass *)lobj;
+					height = air->Agent_Height();
+					is_landing = air->Agent_Is_Landing();
+					is_taking_off = air->Agent_Is_Taking_Off();
 				}
 			} else if (rtti == RTTI_BUILDING) {
 				BuildingClass * b = (BuildingClass *)lobj;
 				mission_timer = b->Get_Mission_Timer_Value();
 			}
-					buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]",
+					buf_cat("[%d,\"%s\",\"%s\",%d,%d,\"%c\",%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s]",
 						li, tname, hname, lcx, lcy, rtag,
 						aid, mission, mission_timer, mission_queue, is_driving ? "true" : "false",
 						doing, lx, ly, hp, mhp, cloak, cstage, crate, cdelay,
@@ -1116,7 +1154,8 @@ char* agent_get_state(void)
 						(int)((TechnoClass *)lobj)->Status,
 						primary_current, primary_desired,
 						tar_kind, tar_value, tar_rtti, tar_obj_index,
-						firex, firey, in_range0, can_fire0);
+						firex, firey, in_range0, can_fire0,
+						height, is_landing ? "true" : "false", is_taking_off ? "true" : "false");
 		}
 	}
 	buf_cat("],");
@@ -1153,16 +1192,23 @@ char* agent_get_state(void)
 		for (int ai = 0; ai < Anims.Count(); ai++) {
 			AnimClass * a = Anims.Ptr(ai);
 			if (!a || !a->IsActive) continue;
+			int logic_index = -1;
+			for (int li = 0; li < Logic.Count(); li++) {
+				if (Logic[li] == a) {
+					logic_index = li;
+					break;
+				}
+			}
 			AnimType atype = (AnimType)(*a);
 			AnimTypeClass const & aclass = (AnimTypeClass const &)a->Class_Of();
 			COORDINATE ac = a->Center_Coord();
 			if (!afirst) buf_cat(",");
 			afirst = false;
-			buf_cat("{\"i\":%d,\"id\":%d,\"name\":\"%s\",\"type\":%d,"
+			buf_cat("{\"i\":%d,\"logicIndex\":%d,\"id\":%d,\"name\":\"%s\",\"type\":%d,"
 				"\"cx\":%d,\"cy\":%d,\"lx\":%d,\"ly\":%d,"
 				"\"stage\":%d,\"rate\":%d,\"about\":%s,"
 				"\"biggest\":%d,\"stages\":%d,\"loopStart\":%d,\"loopEnd\":%d,\"loops\":%d}",
-				ai, AGENT_ID(RTTI_ANIM, ai), Anim_Name(atype), (int)atype,
+				ai, logic_index, AGENT_ID(RTTI_ANIM, ai), Anim_Name(atype), (int)atype,
 				Coord_XCell(ac), Coord_YCell(ac), Coord_X(ac), Coord_Y(ac),
 				a->Fetch_Stage(), a->Fetch_Rate(), a->About_To_Change() ? "true" : "false",
 				aclass.Biggest, aclass.Stages, aclass.LoopStart, aclass.LoopEnd, (int)a->Loops);
@@ -1377,20 +1423,58 @@ char* agent_get_state(void)
 		if (!first) buf_cat(",");
 		first = false;
 		const char* build_inf = NULL;
+		const char* build_unit = NULL;
+		const char* build_vessel = NULL;
+		const char* build_aircraft = NULL;
+		if (h->BuildUnit != UNIT_NONE) {
+			build_unit = UnitTypeClass::As_Reference(h->BuildUnit).Name();
+		}
 		if (h->BuildInfantry != INFANTRY_NONE) {
 			build_inf = InfantryTypeClass::As_Reference(h->BuildInfantry).Name();
 		}
-		buf_cat("{\"i\":%d,\"house\":\"%s\",\"iscan\":%lu,\"aiscan\":%lu,"
+		if (h->BuildVessel != VESSEL_NONE) {
+			build_vessel = VesselTypeClass::As_Reference(h->BuildVessel).Name();
+		}
+		if (h->BuildAircraft != AIRCRAFT_NONE) {
+			build_aircraft = AircraftTypeClass::As_Reference(h->BuildAircraft).Name();
+		}
+		buf_cat("{\"i\":%d,\"house\":\"%s\",\"actLike\":\"%s\",\"human\":%s,\"playerControl\":%s,"
+			"\"state\":%d,\"latime\":%d,\"laenemy\":\"%s\","
+			"\"techLevel\":%d,\"bscan\":%lu,\"activeBScan\":%lu,\"oldBScan\":%lu,"
+			"\"iscan\":%lu,\"aiscan\":%lu,"
+			"\"buildUnit\":%d,\"buildUnitName\":\"%s\","
 			"\"buildInf\":%d,\"buildInfName\":\"%s\",\"curInf\":%u,\"maxInf\":%u,"
+			"\"buildVessel\":%d,\"buildVesselName\":\"%s\",\"curVessel\":%u,\"maxVessel\":%u,"
+			"\"buildAircraft\":%d,\"buildAircraftName\":\"%s\",\"curAircraft\":%u,\"maxAircraft\":%u,"
 			"\"started\":%s,\"base\":%s,\"alerted\":%s,\"iq\":%d,\"money\":%d,\"infFac\":%d}",
 			hi,
 			agent_house_name(h->Class->House),
+			agent_house_name(h->ActLike),
+			h->IsHuman ? "true" : "false",
+			h->IsPlayerControl ? "true" : "false",
+			(int)h->State,
+			(int)h->LATime,
+			agent_house_name(h->LAEnemy),
+			(int)h->Control.TechLevel,
+			(unsigned long)h->BScan,
+			(unsigned long)h->ActiveBScan,
+			(unsigned long)h->OldBScan,
 			(unsigned long)h->IScan,
 			(unsigned long)h->ActiveIScan,
+			(int)h->BuildUnit,
+			build_unit ? build_unit : "",
 			(int)h->BuildInfantry,
 			build_inf ? build_inf : "",
 			h->CurInfantry,
 			h->Control.MaxInfantry,
+			(int)h->BuildVessel,
+			build_vessel ? build_vessel : "",
+			h->CurVessels,
+			h->Control.MaxVessel,
+			(int)h->BuildAircraft,
+			build_aircraft ? build_aircraft : "",
+			h->CurAircraft,
+			h->Control.MaxAircraft,
 			h->IsStarted ? "true" : "false",
 			h->IsBaseBuilding ? "true" : "false",
 			h->IsAlerted ? "true" : "false",
@@ -1729,6 +1813,41 @@ char* agent_get_state(void)
 			buf_cat("]}");
 		}
 	}
+
+	/* --- TeamTypes (static scenario parse, for AI production parity) --- */
+	buf_cat("],\"teamTypes\":[");
+	{
+		bool ttfirst = true;
+		for (int tti = 0; tti < TeamTypes.Count(); tti++) {
+			TeamTypeClass* tt = TeamTypes.Ptr(tti);
+			if (!tt || !tt->IsActive) continue;
+			if (!ttfirst) buf_cat(",");
+			ttfirst = false;
+			buf_cat("{\"i\":%d,\"name\":\"%s\",\"house\":\"%s\","
+				"\"prebuilt\":%s,\"autocreate\":%s,\"reinforcable\":%s,"
+				"\"transient\":%s,\"number\":%d,\"init\":%u,\"max\":%u,"
+				"\"members\":[",
+				tti,
+				tt->IniName,
+				agent_house_name(tt->House),
+				tt->IsPrebuilt ? "true" : "false",
+				tt->IsAutocreate ? "true" : "false",
+				tt->IsReinforcable ? "true" : "false",
+				tt->IsTransient ? "true" : "false",
+				tt->Number,
+				(unsigned)tt->InitNum,
+				(unsigned)tt->MaxAllowed);
+			for (int mi = 0; mi < tt->ClassCount; mi++) {
+				if (mi > 0) buf_cat(",");
+				TechnoTypeClass const * wantType = tt->Members[mi].Class;
+				buf_cat("{\"type\":\"%s\",\"want\":%d,\"rtti\":%d}",
+					wantType ? wantType->IniName : "?",
+					tt->Members[mi].Quantity,
+					wantType ? (int)wantType->What_Am_I() : -1);
+			}
+			buf_cat("]}");
+		}
+	}
 	buf_cat("]}");
 	// Don't reset here — debugMoves persist until agent_step runs next tick
 
@@ -2029,6 +2148,42 @@ char* agent_get_cell_info(int cx, int cy, int infantry_id)
 		(int)cellptr->Overlay, (int)cellptr->OverlayData,
 		(int)land, foot_zero ? "true" : "false", in_radar ? "true" : "false",
 		can_enter, (int)cellptr->Flag.Composite, (int)cellptr->InfType);
+	return s_cmd_buf;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_debug_find_path(int foot_id, int cx, int cy, int threshold)
+{
+	buf_init(s_cmd_buf, CMD_BUF_SIZE);
+	TechnoClass* tech = agent_lookup(foot_id);
+	if (tech == NULL || !tech->Is_Foot()) {
+		buf_cat("{\"error\":\"foot-not-found\",\"id\":%d}", foot_id);
+		return s_cmd_buf;
+	}
+	if (cx < 0 || cx >= MAP_CELL_W || cy < 0 || cy >= MAP_CELL_H) {
+		buf_cat("{\"error\":\"out-of-bounds\",\"cx\":%d,\"cy\":%d}", cx, cy);
+		return s_cmd_buf;
+	}
+
+	FootClass* foot = (FootClass*)tech;
+	FacingType workpath[200];
+	for (int i = 0; i < 200; i++) workpath[i] = FACING_NONE;
+	PathType* path = foot->Agent_Debug_Find_Path(XY_Cell(cx, cy), &workpath[0], sizeof(workpath), (MoveType)threshold);
+	if (path == NULL) {
+		buf_cat("{\"id\":%d,\"threshold\":%d,\"path\":null}", foot_id, threshold);
+		return s_cmd_buf;
+	}
+
+	buf_cat("{\"id\":%d,\"threshold\":%d,\"cost\":%d,\"length\":%d,\"path\":[",
+		foot_id, threshold, path->Cost, path->Length);
+	int limit = path->Length < 80 ? path->Length : 80;
+	for (int i = 0; i < limit; i++) {
+		if (i) buf_cat(",");
+		buf_cat("%d", (int)workpath[i]);
+	}
+	buf_cat("]}");
 	return s_cmd_buf;
 }
 

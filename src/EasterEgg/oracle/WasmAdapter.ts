@@ -116,9 +116,13 @@ export interface WasmAdapterConfig {
   ants?: boolean;
   /** Run browser headless. Default: true */
   headless?: boolean;
+  /** Optional deterministic seed query parameter for the WASM harness. */
+  seed?: number;
 }
 
-const DEFAULTS: Required<WasmAdapterConfig> = {
+type ResolvedWasmAdapterConfig = Required<Omit<WasmAdapterConfig, 'seed'>> & { seed?: number };
+
+const DEFAULTS: ResolvedWasmAdapterConfig = {
   url: '',
   scenario: 'SCG01EA',
   autoplay: true,
@@ -145,7 +149,7 @@ const MIME_TYPES: Record<string, string> = {
 export class WasmAdapter {
   readonly name = 'ra-wasm';
   private static readonly MAX_AGENT_STEP_TICKS = 15;
-  private config: Required<WasmAdapterConfig>;
+  private config: ResolvedWasmAdapterConfig;
   private browser: Browser | null = null;
   private page: Page | null = null;
   private serverUrl = '';
@@ -177,6 +181,9 @@ export class WasmAdapter {
       url.searchParams.set('autoplay', this.config.ants ? 'ants' : '1');
     }
     url.searchParams.set('agentharness', '1');
+    if (this.config.seed !== undefined) {
+      url.searchParams.set('seed', String(this.config.seed >>> 0));
+    }
     if (this.config.scenario) {
       // Ensure .INI extension — the compiled WASM's URL parser may not append it
       let scenario = this.config.scenario;

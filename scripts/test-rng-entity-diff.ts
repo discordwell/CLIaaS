@@ -27,6 +27,20 @@ const scenario = process.env.SCENARIO ?? 'SCG08EA';
 const startTick = Number(process.env.START ?? 89);
 const endTick = Number(process.env.END ?? 100);
 const HARNESS_SALT = process.env.HARNESS_SALT ?? 'anti-shim-v1';
+const DUMP_SPLASH = process.env.DUMP_SPLASH === '1';
+const DUMP_PROJECTILES = process.env.DUMP_PROJECTILES === '1';
+const DUMP_VESSELS = process.env.DUMP_VESSELS === '1';
+const DUMP_AIRCRAFT = process.env.DUMP_AIRCRAFT === '1';
+const DUMP_HOUSES = process.env.DUMP_HOUSES === '1';
+const DUMP_UNITS = process.env.DUMP_UNITS === '1';
+const DUMP_ANIMS = process.env.DUMP_ANIMS === '1';
+const DUMP_PRE_ANIMS = process.env.DUMP_PRE_ANIMS === '1';
+const DUMP_WASM_DEBUG = process.env.DUMP_WASM_DEBUG === '1';
+const DUMP_TRIGGERS = process.env.DUMP_TRIGGERS === '1';
+// agent_harness.cpp serializes at most this many RNG log entries. Past the cap,
+// a matching post-tick seed means RNG parity held, but log length comparisons
+// are incomplete on the C++ side.
+const WASM_RNG_LOG_CAP = 1024;
 
 const MULT_CONSTANT = 0x41C64E6D;
 const ADD_CONSTANT = 0x00003039;
@@ -215,7 +229,9 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     wasmPage.waitForFunction(() => {
       try {
         const M = (window as any).Module;
-        return M?.ccall && JSON.parse(M.ccall('agent_get_state', 'string', [], [])).units?.length > 0;
+        if (!M?.ccall) return false;
+        const s = JSON.parse(M.ccall('agent_get_state', 'string', [], []));
+        return (s.units?.length ?? 0) + (s.enemies?.length ?? 0) + (s.structures?.length ?? 0) > 0;
       } catch { return false; }
     }, { timeout: 180_000, polling: 2000 }),
     tsPage.waitForFunction(
@@ -291,7 +307,7 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
   // Capture TS console.log for debugging
   tsPage.on('console', (msg) => {
     const t = msg.text();
-    if (t.includes('INVISIBLE_SCATTER') || t.includes('[FIRE_AT]')) {
+    if (t.includes('INVISIBLE_SCATTER') || t.includes('[FIRE_AT]') || t.includes('[TRIGGER]')) {
       console.log(`    [TS-LOG] ${t}`);
     }
   });
@@ -308,12 +324,117 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
   for (let tick = startTick; tick <= endTick; tick++) {
     // Reset TS log before stepping
     await tsPage.evaluate(() => { (window as any).__rngTagControl('reset'); });
-
+    if (DUMP_TRIGGERS) {
+      await tsPage.evaluate(() => {
+        const game = (window as any).__agentGame;
+        if (game) game.debugTriggers = true;
+      });
+    }
+    if (DUMP_SPLASH) {
+      await tsPage.evaluate(() => {
+        (globalThis as any).__easterSplashTrace = [];
+        (globalThis as any).__easterDamageTrace = [];
+      });
+    }
+    if (DUMP_PROJECTILES) {
+      await tsPage.evaluate(() => { (globalThis as any).__easterProjectileTrace = []; });
+    }
     // Dump PRE-STEP aircraft state (for debugging tick-by-tick transitions)
     const preAircraft = await tsPage.evaluate(() => {
       const dbg = (window as any).__agentAircraft;
       return dbg ? dbg() : [];
     });
+    const preAnimData = DUMP_ANIMS || DUMP_PRE_ANIMS ? await Promise.all([
+      wasmPage.evaluate(() => {
+        const M = (window as any).Module;
+        const s = JSON.parse(M.ccall('agent_get_state', 'string', [], []));
+        return {
+          tick: s.tick as number,
+          seed: s.rngState as number,
+          anims: (s.anims ?? []) as any[],
+        };
+      }),
+      tsPage.evaluate(() => {
+        const game = (window as any).__agentGame;
+        const logicAnims = ((game?.logicAnims ?? []) as any[]).map((a, i) => ({
+          slot: i,
+          type: a.type,
+          x: a.x,
+          y: a.y,
+          cx: Math.floor((a.x ?? 0) / 24),
+          cy: Math.floor((a.y ?? 0) / 24),
+          stage: a.stage,
+          timer: a.timer,
+          loops: a.loops,
+          delay: a.delay,
+          isBrandNew: a.isBrandNew,
+          logicIndexHint: a.logicIndexHint,
+        }));
+        const effects = ((game?.effects ?? []) as any[]).map((e, i) => ({
+          slot: i,
+          type: e.type,
+          sprite: e.sprite,
+          x: e.x,
+          y: e.y,
+          cx: Math.floor((e.x ?? 0) / 24),
+          cy: Math.floor((e.y ?? 0) / 24),
+          frame: e.frame,
+          maxFrames: e.maxFrames,
+          loops: e.loops,
+          loopStart: e.loopStart,
+          loopEnd: e.loopEnd,
+          followUp: e.followUp,
+          cppLogicSlot: e.cppLogicSlot,
+        }));
+        const attachedSmoke = ((game?.entities ?? []) as any[])
+          .filter(e => e.damageSmokeStartTick >= 0)
+          .map(e => ({ id: e.id, type: e.type, house: e.house, start: e.damageSmokeStartTick }));
+        const attachedParachutes = ((game?.entities ?? []) as any[])
+          .filter(e => e.fallParachuteAnimActive === true)
+          .map(e => ({
+            id: e.id,
+            type: e.type,
+            house: e.house,
+            stage: e.fallParachuteAnimStage,
+            timer: e.fallParachuteAnimTimer,
+            loops: e.fallParachuteAnimLoops,
+            hint: e.fallParachuteAnimLogicIndexHint,
+          }));
+        const corpses = ((game?.corpses ?? []) as any[]).map((c, i) => ({
+          slot: i,
+          type: c.type,
+          x: c.x,
+          y: c.y,
+          deathVariant: c.deathVariant,
+          isInfantry: c.isInfantry,
+          alpha: c.alpha,
+          cppAnimStartTick: c.cppAnimStartTick,
+        }));
+        const activeCppCorpses = corpses.filter(c =>
+          c.isInfantry === true &&
+          c.type !== 'DOG' &&
+          c.deathVariant >= 0 &&
+          c.deathVariant <= 3 &&
+          c.cppAnimStartTick !== undefined &&
+          (game?.tick ?? 0) - c.cppAnimStartTick < 30 * 6
+        );
+        return {
+          tick: game?.tick ?? null,
+          seed: (window as any).__rngTagControl('read').seed as number,
+          logicAnims,
+          effects,
+          attachedSmoke,
+          attachedParachutes,
+          corpses,
+          cppSlotCount:
+            logicAnims.length +
+            effects.filter(e => e.cppLogicSlot === true).length +
+            attachedSmoke.length +
+            attachedParachutes.length +
+            activeCppCorpses.length,
+        };
+      }),
+    ]) : null;
 
     // Step both engines 1 tick — capture rngLog from step return (not separate agent_get_state)
     const [wasmStepResult, _] = await Promise.all([
@@ -328,7 +449,13 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           calls: s.rngCalls as number,
           log: (s.rngLog ?? []) as [number, number, number][],
           logicLayer: (s.logicLayer ?? []) as [number, string, string, number, number][],
+          houses: (s.houses ?? []) as any[],
           structures: (s.structures ?? []) as any[],
+          units: (s.units ?? []) as any[],
+          enemies: (s.enemies ?? []) as any[],
+          bullets: (s.bullets ?? []) as any[],
+          anims: (s.anims ?? []) as any[],
+          debugMoves: (s.debugMoves ?? []) as number[][],
         };
       }),
       tsPage.evaluate(() => { (window as any).__agentStep?.(1); }),
@@ -351,12 +478,138 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
         calls: r.callCount as number,
         log: (r.seedLog ?? []) as [number, number][],
         taggedLog: (r.taggedLog ?? []) as string[],
+        units: s.units ?? [],
+        enemies: s.enemies ?? [],
         aircraft: dbg ? dbg() : [],
+        houses: Array.from((((window as any).__agentGame?.aiStates ?? new Map()) as Map<any, any>).entries())
+          .map(([house, state]) => ({
+            house,
+            phase: state.phase,
+            underAttack: state.underAttack,
+            lastBaseAttackTick: state.lastBaseAttackTick,
+            iq: state.iq,
+          })),
+        vessels: (((window as any).__agentGame?.entities ?? []) as any[])
+          .filter(e => e.isNavalUnit)
+          .map(e => ({
+            id: e.id,
+            type: e.type,
+            house: e.house,
+            alive: e.alive,
+            inLimbo: e.inLimbo,
+            cx: e.cell?.cx,
+            cy: e.cell?.cy,
+            mission: e.mission,
+            missionQueue: e.missionQueue,
+            missionTimer: e.missionTimer,
+            moveTarget: e.moveTarget ? { lx: e.moveTarget.lx, ly: e.moveTarget.ly } : null,
+            isDriving: e.isDriving,
+            pathLength: e.path?.length ?? 0,
+            pathIndex: e.pathIndex,
+            attackCooldown: e.attackCooldown,
+            targetId: e.target?.id ?? null,
+            targetStructureType: e.targetStructure?.type ?? null,
+            leptonX: e.leptonX,
+            leptonY: e.leptonY,
+            bodyFacing256: e.bodyFacing256,
+            turretFacing256: e.turretFacing256,
+            facing: e.facing,
+            turretFacing: e.turretFacing,
+            isSecondShot: e.isSecondShot,
+            fireCoord: e.weapon && typeof e.fireCoordForWeapon === 'function'
+              ? e.fireCoordForWeapon(e.weapon)
+              : null,
+          })),
+        debugFoot: (((window as any).__agentGame?.entities ?? []) as any[])
+          .filter(e => !e.isAirUnit && !e.isNavalUnit)
+          .map(e => ({
+            id: e.id,
+            type: e.type,
+            house: e.house,
+            alive: e.alive,
+            inLimbo: e.inLimbo,
+            cx: e.cell?.cx,
+            cy: e.cell?.cy,
+            lx: e.leptonX,
+            ly: e.leptonY,
+            mission: e.mission,
+            missionQueue: e.missionQueue,
+            missionTimer: e.missionTimer,
+            attackCooldown: e.attackCooldown,
+            targetId: e.target?.id ?? null,
+            targetType: e.target?.type ?? null,
+            targetStructureIndex: e.targetStructure
+              ? ((window as any).__agentGame?.structures ?? []).indexOf(e.targetStructure)
+              : null,
+            targetStructureType: e.targetStructure?.type ?? null,
+            targetStructureCell: e.targetStructure
+              ? { cx: e.targetStructure.cx, cy: e.targetStructure.cy }
+              : null,
+            bodyFacing256: e.bodyFacing256,
+            desiredFacing256: e.desiredFacing256,
+            turretFacing256: e.turretFacing256,
+            desiredTurretFacing256: e.desiredTurretFacing256,
+            hasTurret: e.hasTurret,
+            weapon: e.weapon?.name ?? null,
+            fireCoord: e.weapon && typeof e.fireCoordForWeapon === 'function'
+              ? e.fireCoordForWeapon(e.weapon)
+              : null,
+          })),
+        projectiles: (((window as any).__agentGame?.inflightProjectiles ?? []) as any[]).map(p => ({
+          weapon: p.weapon?.name,
+          hint: p.logicIndexHint,
+          currentFrame: p.currentFrame,
+          travelFrames: p.travelFrames,
+          fuelTimer: p.fuelTimer,
+          fuseTimer: p.fuseTimer,
+          proximity: p.proximity,
+          logicalLX: p.logicalLX,
+          logicalLY: p.logicalLY,
+          headToLX: p.headToLX,
+          headToLY: p.headToLY,
+          impactX: p.impactX,
+          impactY: p.impactY,
+        })),
+        anims: (((window as any).__agentGame?.logicAnims ?? []) as any[]).map((a, i) => ({
+          slot: i,
+          type: a.type,
+          x: a.x,
+          y: a.y,
+          cx: Math.floor((a.x ?? 0) / 24),
+          cy: Math.floor((a.y ?? 0) / 24),
+          stage: a.stage,
+          timer: a.timer,
+          loops: a.loops,
+          delay: a.delay,
+          isBrandNew: a.isBrandNew,
+          logicIndexHint: a.logicIndexHint,
+        })),
+        effects: (((window as any).__agentGame?.effects ?? []) as any[]).map((e, i) => ({
+          slot: i,
+          type: e.type,
+          sprite: e.sprite,
+          x: e.x,
+          y: e.y,
+          cx: Math.floor((e.x ?? 0) / 24),
+          cy: Math.floor((e.y ?? 0) / 24),
+          frame: e.frame,
+          maxFrames: e.maxFrames,
+          loops: e.loops,
+          loopStart: e.loopStart,
+          loopEnd: e.loopEnd,
+          followUp: e.followUp,
+          cppLogicSlot: e.cppLogicSlot,
+        })),
+        splashTrace: (globalThis as any).__easterSplashTrace ?? [],
+        damageTrace: (globalThis as any).__easterDamageTrace ?? [],
+        projectileTrace: (globalThis as any).__easterProjectileTrace ?? [],
       };
     });
 
     const seedMatch = (wasmData.seed >>> 0) === (tsData.seed >>> 0);
     const callDiff = wasmData.log.length - tsData.log.length;
+    const wasmLogCapped = wasmData.rawLog.length >= WASM_RNG_LOG_CAP;
+    const callCountReliable = !(seedMatch && wasmLogCapped);
 
     // Check for tracked building calls (building[139] in WASM = building[39] in TS)
     const TRACK_WASM = [139, 146]; // WASM Logic indices to track
@@ -368,15 +621,16 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
       : '';
 
     // Always print tick header
-    const marker = seedMatch && callDiff === 0 ? '✓' : '✗';
+    const marker = seedMatch && (!callCountReliable || callDiff === 0) ? '✓' : '✗';
     const rawNote = wasmData.rawLog.length === wasmData.log.length ? '' : ` rawWASM=${wasmData.rawLog.length}`;
+    const capNote = wasmLogCapped ? ` wasmLogCap=${WASM_RNG_LOG_CAP}${callCountReliable ? '' : ' seed-only'}` : '';
     console.log(
-      `tick ${tick}: ${marker}  WASM(${wasmData.log.length} scenario calls, seed=${wasmData.seed >>> 0})  TS(${tsData.log.length} calls, seed=${tsData.seed >>> 0})  Δcalls=${callDiff}${rawNote}${trackInfo}`,
+      `tick ${tick}: ${marker}  WASM(${wasmData.log.length} scenario calls, seed=${wasmData.seed >>> 0})  TS(${tsData.log.length} calls, seed=${tsData.seed >>> 0})  Δcalls=${callDiff}${rawNote}${capNote}${trackInfo}`,
     );
 
     const ALWAYS_DUMP = process.env.DUMP_ALL === '1';
-    if (!seedMatch || callDiff !== 0 || ALWAYS_DUMP) {
-      if (!seedMatch || callDiff !== 0) totalDivergences++;
+    if (!seedMatch || (callCountReliable && callDiff !== 0) || ALWAYS_DUMP) {
+      if (!seedMatch || (callCountReliable && callDiff !== 0)) totalDivergences++;
 
       // Print side-by-side log comparison
       const maxLen = Math.max(wasmData.log.length, tsData.log.length);
@@ -404,22 +658,227 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
     }
 
     // Also dump entity info at divergent ticks for context
-    if ((!seedMatch || callDiff !== 0) && !ALWAYS_DUMP) {
-      console.log(`  WASM Logic layer (${wasmData.logicLayer.length} entities):`);
-      for (const [idx, type, house, cx, cy] of wasmData.logicLayer) {
-        console.log(`    [${idx}] ${type} (${house}) cell(${cx},${cy})`);
+    if (!seedMatch || (callCountReliable && callDiff !== 0) || ALWAYS_DUMP) {
+      if (!ALWAYS_DUMP) {
+        console.log(`  WASM Logic layer (${wasmData.logicLayer.length} entities):`);
+        for (const [idx, type, house, cx, cy] of wasmData.logicLayer) {
+          console.log(`    [${idx}] ${type} (${house}) cell(${cx},${cy})`);
+        }
       }
       console.log(`  TS aircraft PRE-STEP (${preAircraft.length}):`);
       for (const a of preAircraft) {
-        console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
+        console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) lx=${a.lx ?? '-'} ly=${a.ly ?? '-'} f=${a.facing256 ?? '-'} fd=${a.desiredFacing256 ?? '-'} sf=${a.turretFacing256 ?? '-'} sfd=${a.desiredTurretFacing256 ?? '-'} mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} arm=${a.attackCooldown ?? '-'} ast=${a.aircraftAttackStatus ?? '-'} target=${a.targetId ?? a.targetStructureType ?? '-'} hasT=${a.hasTarget ?? '-'} hasS=${a.hasTargetStructure ?? '-'} land=${a.landedAtStructure ?? '-'} hint=${a.logicIndexHint ?? '-'} proc=${a.processedInBuildingPass ?? '-'} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
       }
       console.log(`  TS aircraft POST-STEP (${(tsData as any).aircraft?.length ?? 0}):`);
       for (const a of (tsData as any).aircraft ?? []) {
-        console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
+        console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) lx=${a.lx ?? '-'} ly=${a.ly ?? '-'} f=${a.facing256 ?? '-'} fd=${a.desiredFacing256 ?? '-'} sf=${a.turretFacing256 ?? '-'} sfd=${a.desiredTurretFacing256 ?? '-'} mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} arm=${a.attackCooldown ?? '-'} ast=${a.aircraftAttackStatus ?? '-'} target=${a.targetId ?? a.targetStructureType ?? '-'} hasT=${a.hasTarget ?? '-'} hasS=${a.hasTargetStructure ?? '-'} land=${a.landedAtStructure ?? '-'} hint=${a.logicIndexHint ?? '-'} proc=${a.processedInBuildingPass ?? '-'} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
       }
       console.log(`  TS taggedLog (stack frames):`);
       for (let i = 0; i < (tsData as any).taggedLog.length; i++) {
         console.log(`    [${i}] ${(tsData as any).taggedLog[i]}`);
+      }
+      if (DUMP_SPLASH) {
+        console.log(`  TS splashTrace:`);
+        for (const entry of (tsData as any).splashTrace ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS damageTrace:`);
+        for (const entry of (tsData as any).damageTrace ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_PROJECTILES) {
+        console.log(`  WASM bullets:`);
+        for (const entry of (wasmData as any).bullets ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS projectiles:`);
+        for (const entry of (tsData as any).projectiles ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS projectileTrace:`);
+        for (const entry of (tsData as any).projectileTrace ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_ANIMS) {
+        if (preAnimData) {
+          console.log(`  WASM anims PRE tick ${preAnimData[0].tick} seed=${preAnimData[0].seed}:`);
+          for (const entry of (preAnimData[0] as any).anims ?? []) {
+            console.log(`    ${JSON.stringify(entry)}`);
+          }
+          console.log(`  TS anim slots PRE tick ${(preAnimData[1] as any).tick} seed=${(preAnimData[1] as any).seed} cppSlotCount=${(preAnimData[1] as any).cppSlotCount}:`);
+          for (const entry of (preAnimData[1] as any).logicAnims ?? []) {
+            console.log(`    ${JSON.stringify(entry)}`);
+          }
+          console.log(`  TS cpp effects PRE:`);
+          for (const entry of ((preAnimData[1] as any).effects ?? []).filter((e: any) => e.cppLogicSlot === true)) {
+            console.log(`    ${JSON.stringify(entry)}`);
+          }
+          console.log(`  TS attached smokes PRE:`);
+          for (const entry of (preAnimData[1] as any).attachedSmoke ?? []) {
+            console.log(`    ${JSON.stringify(entry)}`);
+          }
+          console.log(`  TS attached parachutes PRE:`);
+          for (const entry of (preAnimData[1] as any).attachedParachutes ?? []) {
+            console.log(`    ${JSON.stringify(entry)}`);
+          }
+          console.log(`  TS corpses PRE (${((preAnimData[1] as any).corpses ?? []).length}):`);
+          for (const entry of (preAnimData[1] as any).corpses ?? []) {
+            console.log(`    ${JSON.stringify(entry)}`);
+          }
+        }
+        console.log(`  WASM anims:`);
+        for (const entry of (wasmData as any).anims ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS logicAnims:`);
+        for (const entry of (tsData as any).anims ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS effects:`);
+        for (const entry of (tsData as any).effects ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_VESSELS) {
+        console.log(`  WASM vessels:`);
+        for (const entry of (wasmData.logicLayer as any[]).filter(e => e[5] === 'V')) {
+          console.log(`    ${JSON.stringify({
+            logicIndex: entry[0],
+            type: entry[1],
+            house: entry[2],
+            cx: entry[3],
+            cy: entry[4],
+            aid: entry[6],
+            mission: entry[7],
+            missionTimer: entry[8],
+            missionQueue: entry[9],
+            isDriving: entry[10],
+            lx: entry[12],
+            ly: entry[13],
+            arm: entry[23],
+            pulse: entry[24],
+            technoMission: entry[25],
+            technoMissionQueue: entry[26],
+            status: entry[27],
+            targetKind: entry[30],
+            targetValue: entry[31],
+            targetRtti: entry[32],
+            targetIndex: entry[33],
+            firex: entry[34],
+            firey: entry[35],
+            inRange0: entry[36],
+            canFire0: entry[37],
+            primaryCurrent: entry[28],
+            primaryDesired: entry[29],
+          })}`);
+        }
+        console.log(`  TS vessels:`);
+        for (const entry of (tsData as any).vessels ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_AIRCRAFT) {
+        console.log(`  WASM aircraft:`);
+        for (const entry of (wasmData.logicLayer as any[]).filter(e => e[5] === 'A')) {
+          console.log(`    ${JSON.stringify({
+            logicIndex: entry[0],
+            type: entry[1],
+            house: entry[2],
+            cx: entry[3],
+            cy: entry[4],
+            aid: entry[6],
+            mission: entry[7],
+            missionTimer: entry[8],
+            missionQueue: entry[9],
+            isDriving: entry[10],
+            lx: entry[12],
+            ly: entry[13],
+            hp: entry[14],
+            arm: entry[23],
+            technoMission: entry[25],
+            technoMissionQueue: entry[26],
+            status: entry[27],
+            primaryCurrent: entry[28],
+            primaryDesired: entry[29],
+            targetKind: entry[30],
+            targetValue: entry[31],
+            targetRtti: entry[32],
+            targetIndex: entry[33],
+            firex: entry[34],
+            firey: entry[35],
+            inRange0: entry[36],
+            canFire0: entry[37],
+            height: entry[38],
+            landing: entry[39],
+            takingOff: entry[40],
+          })}`);
+        }
+      }
+      if (DUMP_HOUSES) {
+        console.log(`  WASM houses:`);
+        for (const entry of (wasmData as any).houses ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS houses:`);
+        for (const entry of (tsData as any).houses ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_UNITS) {
+        console.log(`  WASM foot units:`);
+        for (const entry of (wasmData.logicLayer as any[]).filter(e => e[5] === 'U' || e[5] === 'I')) {
+          console.log(`    ${JSON.stringify({
+            logicIndex: entry[0],
+            type: entry[1],
+            house: entry[2],
+            cx: entry[3],
+            cy: entry[4],
+            kind: entry[5],
+            aid: entry[6],
+            mission: entry[7],
+            missionTimer: entry[8],
+            missionQueue: entry[9],
+            isDriving: entry[10],
+            doing: entry[11],
+            lx: entry[12],
+            ly: entry[13],
+            hp: entry[14],
+            arm: entry[23],
+            technoMission: entry[25],
+            technoMissionQueue: entry[26],
+            status: entry[27],
+            primaryCurrent: entry[28],
+            primaryDesired: entry[29],
+            targetKind: entry[30],
+            targetValue: entry[31],
+            targetRtti: entry[32],
+            targetIndex: entry[33],
+            firex: entry[34],
+            firey: entry[35],
+            inRange0: entry[36],
+            canFire0: entry[37],
+          })}`);
+        }
+        console.log(`  WASM foot state:`);
+        for (const entry of [...((wasmData as any).units ?? []), ...((wasmData as any).enemies ?? [])]) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS foot units:`);
+        for (const entry of [...((tsData as any).units ?? []), ...((tsData as any).enemies ?? [])]) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS debug foot:`);
+        for (const entry of (tsData as any).debugFoot ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_WASM_DEBUG) {
+        console.log(`  WASM debugMoves:`);
+        for (const entry of (wasmData as any).debugMoves ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
       }
       console.log('');
     }

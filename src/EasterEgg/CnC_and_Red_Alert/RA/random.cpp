@@ -91,7 +91,7 @@ unsigned long g_rng_call_count = 0;
 bool g_rng_tracking = false;
 
 // Per-tick RNG call log for parity debugging
-#define RNG_LOG_SIZE 300
+#define RNG_LOG_SIZE 1024
 unsigned long g_rng_seed_log[RNG_LOG_SIZE];
 int g_rng_source_log[RNG_LOG_SIZE]; // source tag for each call (granular, e.g., 30001 or 60043)
 int g_rng_entity_log[RNG_LOG_SIZE]; // entity tag for each call (e.g., 10000+infantry_index)
@@ -206,4 +206,3 @@ int RandomClass::operator() (int minval, int maxval)
 	*/
 	return(pick + minval);
 }
-

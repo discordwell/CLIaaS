@@ -19,6 +19,7 @@ declare global {
     __agentState?: () => AgentState;
     __agentCommand?: (commands: AgentCommand[]) => CommandResult[];
     __agentStep?: (ticks: number, commands?: AgentCommand[]) => StepResult;
+    __syncRngSeed?: (targetSeed: number) => void;
   }
 }
 
@@ -81,6 +82,16 @@ export class TsAgentAdapter {
   async observe(): Promise<AgentState> {
     this.ensurePage();
     return this.page!.evaluate(() => window.__agentState!());
+  }
+
+  async syncRngSeed(seed: number): Promise<void> {
+    this.ensurePage();
+    await this.page!.evaluate((targetSeed) => {
+      if (typeof window.__syncRngSeed !== 'function') {
+        throw new Error('__syncRngSeed is not installed');
+      }
+      window.__syncRngSeed(targetSeed);
+    }, seed >>> 0);
   }
 
   async command(commands: AgentCommand[]): Promise<CommandResult[]> {

@@ -1584,6 +1584,78 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
 })();
 </script>
 <script src="gamedata.js"></script>
+<script>
+// The packaged freeware data set contains the base MIX archives, but the TS
+// parity harness loads loose mission INIs from public/ra/assets/. Mount the
+// expansion INIs into Emscripten's root FS as well so C++ and TS can compare
+// Counterstrike/Aftermath scenarios without changing gameplay behavior.
+(function() {
+  var looseIniFiles = [
+    'AFTRMATH.INI',
+    'MISSION.INI',
+    'SCA01EA.INI',
+    'SCA02EA.INI',
+    'SCA03EA.INI',
+    'SCA04EA.INI',
+    'SCG20EA.INI',
+    'SCG21EA.INI',
+    'SCG22EA.INI',
+    'SCG23EA.INI',
+    'SCG24EA.INI',
+    'SCG26EA.INI',
+    'SCG27EA.INI',
+    'SCG28EA.INI',
+    'SCU31EA.INI',
+    'SCU32EA.INI',
+    'SCU33EA.INI',
+    'SCU34EA.INI',
+    'SCU35EA.INI',
+    'SCU36EA.INI',
+    'SCU37EA.INI',
+    'SCU38EA.INI'
+  ];
+
+  Module.preRun = Module.preRun || [];
+  Module.preRun.push(function mountLooseRaIniFiles() {
+    if (!Module.addRunDependency || !Module.removeRunDependency) return;
+    Module.addRunDependency('loose-ra-ini-files');
+
+    Promise.all(looseIniFiles.map(async function(name) {
+      var assetName = name.toLowerCase();
+      var response = await fetch('assets/' + assetName);
+      if (!response.ok) {
+        console.warn('[RA FS] loose INI not available: ' + assetName);
+        return false;
+      }
+      var data = new Uint8Array(await response.arrayBuffer());
+      var targetName = name.toUpperCase();
+      try {
+        if (typeof FS !== 'undefined' && FS.analyzePath('/' + targetName).exists) {
+          return false;
+        }
+        var createFile = Module.FS_createDataFile ||
+          (typeof FS_createDataFile === 'function' ? FS_createDataFile : null);
+        if (!createFile) {
+          console.warn('[RA FS] FS_createDataFile unavailable for ' + targetName);
+          return false;
+        }
+        createFile('/', targetName, data, true, true, true);
+        return true;
+      } catch (err) {
+        console.warn('[RA FS] failed to mount ' + targetName + ': ' + (err && err.message ? err.message : err));
+        return false;
+      }
+    })).then(function(results) {
+      var count = results.filter(Boolean).length;
+      console.log('[RA FS] mounted ' + count + ' loose expansion INI file(s)');
+    }).catch(function(err) {
+      console.warn('[RA FS] loose INI mount failed: ' + (err && err.message ? err.message : err));
+    }).finally(function() {
+      Module.removeRunDependency('loose-ra-ini-files');
+    });
+  });
+})();
+</script>
 <script async src="rasdl.js?v=20260502initprobe"></script>
 </body>
 </html>

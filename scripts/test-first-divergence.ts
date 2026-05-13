@@ -14,6 +14,10 @@ const ALL = ['SCG01EA','SCG03EA','SCG04EA','SCG06EA','SCG07EA','SCG11EA','SCG13E
 const scenarios = process.env.SCENARIOS?.split(',') ?? ALL;
 const maxTicks = Number(process.env.MAX ?? 500);
 const HARNESS_SALT = process.env.HARNESS_SALT ?? 'anti-shim-v1';
+// agent_harness.cpp currently serializes at most this many per-tick RNG log
+// entries. When C++ hits the cap, a matching seed is authoritative but a shorter
+// C++ log length is not.
+const WASM_RNG_LOG_CAP = 1024;
 
 const MULT_CONSTANT = 0x41C64E6D;
 const ADD_CONSTANT = 0x00003039;
@@ -83,10 +87,25 @@ for (const scenario of scenarios) {
       wp.goto(wasmUrl(BASE_URL, scenario), { waitUntil: 'load' }),
       tp.goto(tsUrl(TS_BASE_URL, scenario), { waitUntil: 'load' }),
     ]);
-    await Promise.all([
-      wp.waitForFunction(() => { try { const M=(window as any).Module; return M?.ccall && JSON.parse(M.ccall('agent_get_state','string',[],[])).units?.length>0; } catch { return false; } }, { timeout: 180_000, polling: 2000 }),
+    const [wasmReady] = await Promise.all([
+      wp.waitForFunction(() => {
+        try {
+          const M = (window as any).Module;
+          if (!M?.ccall) return false;
+          const s = JSON.parse(M.ccall('agent_get_state', 'string', [], []));
+          if (s.error) {
+            return document.title.includes('SCENARIO_FAILED') ? { error: s.error } : false;
+          }
+          const count = (s.units?.length ?? 0) + (s.enemies?.length ?? 0) + (s.structures?.length ?? 0);
+          return count > 0 ? { count } : false;
+        } catch { return false; }
+      }, { timeout: 180_000, polling: 2000 }),
       tp.waitForFunction(() => (window as any).__agentReady === true, { timeout: 120_000, polling: 1000 }),
     ]);
+    const wasmReadyState = await wasmReady.jsonValue() as { count?: number; error?: string };
+    if (wasmReadyState.error) {
+      throw new Error(`${scenario}: WASM scenario did not load: ${wasmReadyState.error}`);
+    }
     const wasmSeed = await wp.evaluate(() => {
       const M = (window as any).Module;
       return JSON.parse(M.ccall('agent_get_state','string',[],[])).rngState;
@@ -99,6 +118,7 @@ for (const scenario of scenarios) {
 
     let firstDivergentTick = -1;
     let divergenceReason = '';
+    let cappedRngTicks = 0;
     for (let tick = 1; tick <= maxTicks; tick++) {
       // Reset TS log before the step so the read returns only this tick's
       // entries (WASM's agent_get_state resets its log after each read).
@@ -119,16 +139,21 @@ for (const scenario of scenarios) {
       });
       const seedMatch = (wRes.seed >>> 0) === (tRes.seed >>> 0);
       const callDiff = wScenarioLog.length - tRes.log.length;
-      if (!seedMatch || callDiff !== 0) {
+      const wasmLogCapped = (wRes.log as unknown[]).length >= WASM_RNG_LOG_CAP;
+      const callCountReliable = !(seedMatch && wasmLogCapped);
+      if (wasmLogCapped) cappedRngTicks++;
+      if (!seedMatch || (callCountReliable && callDiff !== 0)) {
         firstDivergentTick = tick;
         const rawNote = wScenarioLog.length === wRes.log.length ? '' : ` rawWASM=${wRes.log.length}`;
-        divergenceReason = `WASM(${wScenarioLog.length}, seed=${wRes.seed >>> 0}) TS(${tRes.log.length}, seed=${tRes.seed >>> 0}) Δcalls=${callDiff}${rawNote}`;
+        const capNote = wasmLogCapped ? ` wasmLogCap=${WASM_RNG_LOG_CAP}` : '';
+        divergenceReason = `WASM(${wScenarioLog.length}, seed=${wRes.seed >>> 0}) TS(${tRes.log.length}, seed=${tRes.seed >>> 0}) Δcalls=${callDiff}${rawNote}${capNote}`;
         break;
       }
       wasmScenarioSeed = wRes.seed >>> 0;
     }
     if (firstDivergentTick === -1) {
-      console.log(`${scenario}: no divergence in ${maxTicks} ticks ✓`);
+      const capNote = cappedRngTicks > 0 ? ` (${cappedRngTicks} capped C++ RNG log tick${cappedRngTicks === 1 ? '' : 's'} compared by seed)` : '';
+      console.log(`${scenario}: no divergence in ${maxTicks} ticks ✓${capNote}`);
     } else {
       console.log(`${scenario}: first divergence @ tick ${firstDivergentTick} — ${divergenceReason}`);
     }

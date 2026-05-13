@@ -15,9 +15,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const BASE_URL = process.env.COMPARE_URL || 'https://cliaas.com';
-const OUT_DIR = path.join(process.cwd(), 'test-results', 'gameplay-compare');
+const OUT_DIR = process.env.OUT_DIR ?? path.join(process.cwd(), 'artifacts', 'gameplay-compare');
 const SEED = 0;
 const HARNESS_SALT = process.env.HARNESS_SALT ?? 'anti-shim-v1';
+const ALLOW_DIVERGENCE = process.env.ALLOW_DIVERGENCE === '1';
 
 // Tick checkpoints — passive observation, no commands
 const SCENARIO = process.env.PARITY_SCENARIO || 'SCG01EA';
@@ -322,7 +323,7 @@ async function wasmStep(page: Page, n: number): Promise<Record<string, unknown> 
         }
       }
     } catch (e) {
-      console.log(`WASM: Step chunk failed at remaining=${remaining}: ${e}`);
+      console.log(`WASM: Step chunk failed for chunk=${chunk}: ${e}`);
       return lastState;
     }
   }
@@ -405,7 +406,7 @@ test.describe(`State Parity: ${SCENARIO} seed=0`, () => {
         if (!Module?.ccall) return false;
         const json = Module.ccall('agent_get_state', 'string', [], []);
         const state = JSON.parse(json as string);
-        return Array.isArray(state.units) && state.units.length > 0;
+        return (state.units?.length ?? 0) + (state.enemies?.length ?? 0) + (state.structures?.length ?? 0) > 0;
       } catch { return false; }
     }, { timeout: 60_000, polling: 500 });
 
@@ -546,7 +547,9 @@ test.describe(`State Parity: ${SCENARIO} seed=0`, () => {
     await wasmCtx.close();
     await tsCtx.close();
 
-    // Fail test if any checkpoint diverged
-    expect(totalClean, `${totalCheckpoints - totalClean} checkpoints diverged`).toBe(totalCheckpoints);
+    // Fail test if any checkpoint diverged, unless this is an exploratory run.
+    if (!ALLOW_DIVERGENCE) {
+      expect(totalClean, `${totalCheckpoints - totalClean} checkpoints diverged`).toBe(totalCheckpoints);
+    }
   });
 });
