@@ -11,6 +11,7 @@ import { Entity } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { GameMap, MoveResult } from './map';
 import { findPath } from './pathfinding';
+import { findDockingBay } from './dockingBay';
 
 // ---------------------------------------------------------------------------
 // Context interface — minimal fields needed by harvester functions
@@ -98,21 +99,23 @@ function assignHarvesterDestination(ctx: HarvesterContext, entity: Entity, targe
 }
 
 function nearestRefinery(ctx: HarvesterContext, entity: Entity): MapStructure | null {
-  const ec = entity.cell;
-  let bestProc: MapStructure | null = null;
-  let bestDist = Infinity;
-  for (const s of ctx.structures) {
-    if (!s.alive || s.type !== 'PROC') continue;
-    if (!ctx.isAllied(s.house, entity.house)) continue;
-    const dx = s.cx - ec.cx;
-    const dy = s.cy - ec.cy;
-    const dist = dx * dx + dy * dy;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestProc = s;
-    }
-  }
-  return bestProc;
+  // C++ unit.cpp:1149 / :2874 / :2887 / :4001 — harvesters seek refineries via
+  // TechnoClass::Find_Docking_Bay(STRUCT_REFINERY, friendly). The `friendly=true`
+  // variant (line 4001 Goto_Clear_Spot path) matches long-standing TS behavior of
+  // accepting allied refineries. The C++ Distance() octagonal metric replaces the
+  // prior squared-cell heuristic.
+  return findDockingBay(
+    { structures: ctx.structures, isAllied: ctx.isAllied },
+    {
+      house: entity.house,
+      cell: entity.cell,
+      leptonX: entity.leptonX,
+      leptonY: entity.leptonY,
+      kind: 'unit-harvester',
+    },
+    'PROC',
+    true,
+  );
 }
 
 function refineryDockCell(proc: MapStructure): { cx: number; cy: number } {
