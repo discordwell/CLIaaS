@@ -183,6 +183,7 @@ import {
   updateHelicopterAttack as _updateHelicopterAttack,
   advanceAircraftFrame as _advanceAircraftFrame,
   computeRearmDelay as _computeRearmDelay,
+  seekAircraftServiceDocking as _seekAircraftServiceDocking,
 } from './aircraft';
 import {
   type CrateContext,
@@ -1073,6 +1074,13 @@ export class Game {
       fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
       getROFBias: (h) => this.getROFBias(h),
       getPowerFraction: (h) => this._housePowerFraction(h),
+      // C++ house.cpp:2022 — HouseClass::Available_Money() = Tiberium + Credits.
+      // TS folds harvested tiberium into the silo-capped credits pool, so the
+      // per-house money is the player's `credits` for the player house and the
+      // `houseCredits` map for AI houses.
+      availableMoney: (h) => h === this.playerHouse
+        ? this.credits
+        : (this.houseCredits.get(h) ?? 0),
     };
   }
 
@@ -2181,6 +2189,7 @@ export class Game {
 	                // from the current value and applies that countdown below.
 	                const timerFired = heli.missionTimer <= 0;
 	                if (timerFired) {
+                  if (this._handleLandedAircraftServiceSeek(heli)) continue;
                   const hasTarget = (heli.target?.alive) ||
                     (heli.targetStructure && (heli.targetStructure as MapStructure).alive);
                   if (hasTarget) {
@@ -9489,6 +9498,20 @@ export class Game {
    *  base defense zone (Which_Zone == ZONE_NONE), preferring harvesters.
    *  Target_Something_Nearby (techno.cpp:5251) then validates/overrides within
    *  weapon range. */
+  /** C++ aircraft.cpp:3737-3789 — service-seek branches run BEFORE Target_Legal
+   *  (TarCom). Returns true when MISSION_ENTER was queued (caller should skip the
+   *  rest of Mission_Guard and finalize the tick). Sequence: (1) repair-seek if
+   *  damaged + money, (2) helipad-seek if ammo=0 + weapon. Both delegate to
+   *  seekAircraftServiceDocking in aircraft.ts. */
+  private _handleLandedAircraftServiceSeek(heli: Entity): boolean {
+    if (!this._runAircraft(ctx => _seekAircraftServiceDocking(ctx, heli))) return false;
+    this.updateEntity(heli);
+    if (heli.missionTimer > 0) heli.missionTimer--;
+    heli.tickAnimation();
+    heli._processedInBuildingPass = true;
+    return true;
+  }
+
   /** Returns true if Find_Juicy_Target (Step 7) located a juicy enemy — even if
    *  downstream range-validation (Step 8) clears heli.target later. Callers use
    *  this to trigger MISSION_ATTACK transition, mirroring C++ AircraftClass::
@@ -14469,6 +14492,7 @@ export class Game {
 	              // current value and applies that countdown below.
 	              const timerFired = heli.missionTimer <= 0;
 	              if (timerFired) {
+                if (this._handleLandedAircraftServiceSeek(heli)) continue;
                 // C++ aircraft.cpp:3773: if (Target_Legal(TarCom)) → ATTACK, return 1
                 // Previous scan set entity.target/targetStructure — helicopter takes off.
                 const hasTarget = (heli.target?.alive) ||

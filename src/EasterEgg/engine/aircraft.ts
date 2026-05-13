@@ -113,6 +113,11 @@ export interface AircraftContext {
   /** C++ house.cpp:4160: Power_Fraction() = Power/Drain, capped at 1.0.
    *  Used by building.cpp:4023 for rearm delay scaling. */
   getPowerFraction(house: House): number;
+  /** C++ house.cpp:2022 — HouseClass::Available_Money() = Tiberium + Credits.
+   *  In TS the silo-capped `credits` pool already merges harvested tiberium and
+   *  unspent cash, so for parity we expose the per-house pool here for AI
+   *  service-seek decisions (aircraft.cpp:3741 House->Available_Money >= 100). */
+  availableMoney?(house: House): number;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
@@ -255,6 +260,157 @@ function fixedWingMissionHuntFinalDelay(entity: Entity): void {
   const jitter = ScenarioRandom.nextInRange(0, 2);
   ScenarioRandom._sourceTag = prevTag;
   entity.missionTimer = 13 + jitter;
+}
+
+/** C++ rules.cpp:234 — Rule.ConditionYellow default (50%). rules.ini overrides
+ *  via [General] ConditionYellow=50%. The runtime value matches CONDITION_YELLOW
+ *  in types.ts (0.5). Exposed locally for the service-seek branch (aircraft.cpp:3741). */
+const CONDITION_YELLOW_THRESHOLD = 0.5;
+
+/** C++ aircraft.cpp:3737-3789 AircraftClass::Mission_Guard — AI-controlled aircraft
+ *  service-seek branches that run before the FootClass::Mission_Guard target hunt.
+ *
+ *  Two ordered branches:
+ *    1. (aircraft.cpp:3741-3755) House->Available_Money() >= 100 && Health_Ratio() <=
+ *       Rule.ConditionYellow → Find_Docking_Bay(STRUCT_REPAIR, true). Outer "in-progress"
+ *       guard at aircraft.cpp:3742-3744: skip when already heading to a repair bay
+ *       (In_Radio_Contact and either airborne or already contacting a STRUCT_REPAIR).
+ *    2. (aircraft.cpp:3762-3787) Ammo == 0 && Is_Weapon_Equipped() → Find_Docking_Bay
+ *       (STRUCT_HELIPAD, false). Only fires when !In_Radio_Contact() and only same-house
+ *       pads are considered (note `friendly=false`).
+ *
+ *  Each branch on success: Assign_Destination(building->As_Target()); Assign_Target
+ *  (TARGET_NONE); Assign_Mission(MISSION_ENTER); return(1).
+ *
+ *  Skipped: FIXIT_CARRIER block (aircraft.cpp:3766-3779) — Aftermath VESSEL_CARRIER
+ *  fallback for non-fixed-wing aircraft out of ammo. TODO: revisit when carriers are
+ *  modeled in TS (currently not — `VESSEL_CARRIER` has no TS representation).
+ *
+ *  Returns true if a transition was queued (caller should return immediately to
+ *  match C++ `return(1)`). */
+export function seekAircraftServiceDocking(ctx: AircraftContext, entity: Entity): boolean {
+  if (!entity.stats.isAircraft) return false;
+  // C++ aircraft.cpp:3735 — humans return before this block. Only AI runs the seek.
+  if (entity.isPlayerUnit) return false;
+
+  // ── Branch 1: damaged → Find_Docking_Bay(STRUCT_REPAIR, true) ─────────────
+  // C++ aircraft.cpp:3741: House->Available_Money() >= 100 (Tiberium + Credits).
+  const money = ctx.availableMoney ? ctx.availableMoney(entity.house) : 0;
+  const ratio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 0;
+  if (money >= 100 && ratio <= CONDITION_YELLOW_THRESHOLD) {
+    // C++ aircraft.cpp:3742-3744: skip if already in radio contact AND either
+    // airborne or already contacting a STRUCT_REPAIR building.
+    //
+    // TS model of In_Radio_Contact for aircraft: the helper uses
+    // `entity.aircraftDockingStructure >= 0` (an in-flight docking destination)
+    // OR a docked pad (`entity.landedAtStructure >= 0` with the aircraft sitting
+    // on it) to mirror the C++ link to Contact_With_Whom().
+    const dockingIdx = entity.aircraftDockingStructure;
+    const landedIdx = entity.landedAtStructure;
+    const inRadioContact = dockingIdx >= 0 || (landedIdx >= 0 && entity.aircraftState === 'landed');
+    const heightZero = entity.flightAltitude === 0;
+    const contactStructure: MapStructure | null =
+      dockingIdx >= 0 && dockingIdx < ctx.structures.length ? ctx.structures[dockingIdx]
+      : landedIdx >= 0 && landedIdx < ctx.structures.length ? ctx.structures[landedIdx]
+      : null;
+    const contactIsRepair = contactStructure?.type === 'FIX';
+    const shouldSeekRepair = !inRadioContact || (heightZero && !contactIsRepair);
+    if (shouldSeekRepair) {
+      const repair = findDockingBay(
+        { structures: ctx.structures, isAllied: ctx.isAllied },
+        {
+          house: entity.house,
+          cell: entity.cell,
+          leptonX: entity.leptonX,
+          leptonY: entity.leptonY,
+          isAirUnit: true,
+          // C++ default RADIO_CAN_LOAD for STRUCT_REPAIR (building.cpp:188-194)
+          // accepts both helicopters and fixed-wing. Match the seeker kind to
+          // the aircraft's class so the FIX building's `dockedAircraft` check
+          // still applies. Note: FIX accepts UNIT, AIRCRAFT_FIXED, AIRCRAFT_HELI.
+          kind: entity.isFixedWing ? 'aircraft-fixed' : 'aircraft-heli',
+        },
+        'FIX',
+        true, // C++ aircraft.cpp:3747 — friendly=true (allied repair bays OK)
+      );
+      if (repair) {
+        const idx = ctx.structures.indexOf(repair);
+        queueAircraftEnterMission(entity, repair, idx);
+        return true;
+      }
+    }
+  }
+
+  // ── Branch 2: out of ammo → Find_Docking_Bay(STRUCT_HELIPAD, false) ───────
+  // C++ aircraft.cpp:3762: Ammo == 0 && Is_Weapon_Equipped().
+  // Is_Weapon_Equipped (techno.cpp:3676-3681) returns PrimaryWeapon != NULL.
+  if (entity.ammo === 0 && entity.weapon != null) {
+    // C++ aircraft.cpp:3763: !In_Radio_Contact() — no pending dock.
+    const inRadioContact = entity.aircraftDockingStructure >= 0 ||
+      (entity.landedAtStructure >= 0 && entity.aircraftState === 'landed');
+    if (!inRadioContact) {
+      const padType = entity.stats.landingBuilding ?? 'HPAD';
+      const pad = findDockingBay(
+        { structures: ctx.structures, isAllied: ctx.isAllied },
+        {
+          house: entity.house,
+          cell: entity.cell,
+          leptonX: entity.leptonX,
+          leptonY: entity.leptonY,
+          isAirUnit: true,
+          kind: entity.isFixedWing ? 'aircraft-fixed' : 'aircraft-heli',
+        },
+        // C++ aircraft.cpp:3764 hard-codes STRUCT_HELIPAD. Fixed-wing aircraft
+        // have AFLD as their landing pad — but Mission_Guard's ammo branch only
+        // queries HELIPAD. In TS we use the aircraft's landingBuilding so the
+        // resolved pad type matches the seeker's docking machine; this also
+        // covers AFLD-using fixed-wings (BADR/MIG/YAK) in the same code path.
+        padType,
+        false, // C++ aircraft.cpp:3764 — friendly=false (own-house pads only)
+      );
+      // TODO (aircraft.cpp:3766-3779 FIXIT_CARRIER): when VESSEL_CARRIER is
+      // modeled in TS, prefer the nearest carrier (own house, IsActive, !InLimbo,
+      // How_Many() < Max_Passengers()) over a helipad for non-fixed-wing aircraft.
+      // Skipped because TS does not yet expose carrier slots.
+      if (pad) {
+        const idx = ctx.structures.indexOf(pad);
+        queueAircraftEnterMission(entity, pad, idx);
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/** Shared transition for the C++ aircraft.cpp:3749-3752 / 3782-3785 success path:
+ *  Assign_Destination(building->As_Target()); Assign_Target(TARGET_NONE);
+ *  Assign_Mission(MISSION_ENTER); */
+function queueAircraftEnterMission(entity: Entity, target: MapStructure, idx: number): void {
+  entity.mission = Mission.ENTER;
+  entity.missionQueue = null;
+  entity.missionQueueSetTick = -1;
+  entity.target = null;
+  entity.targetStructure = null;
+  entity.moveTarget = buildingDockingLeptons(target);
+  entity.moveQueue = [];
+  // Aircraft uses aircraftDockingStructure for the C++ NavCom binding to the
+  // pad. The 'returning' state machine reads this to resolve the destination.
+  entity.aircraftDockingStructure = idx;
+  entity.aircraftEnterStatus = 0;
+  // C++ MissionClass::Set_Mission resets Timer=0 via Commence on the next AI.
+  entity.missionTimer = 0;
+  // Airborne aircraft are already flying — route through 'returning' state so
+  // the existing landing pipeline takes over. Landed aircraft (Height==0) get
+  // the same docking-target wiring; the takeoff state machine will lift them
+  // before the 'returning' descent activates.
+  if (entity.aircraftState === 'landed') {
+    entity.aircraftState = 'takeoff';
+  } else if (entity.aircraftState !== 'returning' &&
+             entity.aircraftState !== 'landing' &&
+             entity.aircraftState !== 'rearming') {
+    entity.aircraftState = 'returning';
+  }
 }
 
 function enterFixedWingDockingMission(ctx: AircraftContext, entity: Entity): void {
@@ -1283,7 +1439,16 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           }
         }
       } else {
-        // No mission — return to base
+        // No mission — Mission_Guard fallthrough. C++ aircraft.cpp:3737-3789
+        // runs two service-seek branches for AI aircraft before defaulting to
+        // RTB / juicy-target hunt. Both branches transition to MISSION_ENTER and
+        // return(1) — TS mirrors that by handing the docking pipeline a queued
+        // ENTER mission and breaking out of the no-mission RTB path.
+        if (entity.mission === Mission.GUARD &&
+            seekAircraftServiceDocking(ctx, entity)) {
+          return true;
+        }
+        // No mission AND no service-seek target — RTB.
         entity.aircraftState = 'returning';
       }
       return true;
