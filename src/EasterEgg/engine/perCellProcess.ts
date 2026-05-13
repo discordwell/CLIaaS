@@ -921,9 +921,12 @@ export interface UnitPerCellOptions {
  * cell boundary. Vessels reach this same shared chain via
  * `VesselClass::Per_Cell_Process` → `DriveClass::Per_Cell_Process`.
  *
+ * Sub-cases ported:
+ *   - Commence (unit.cpp:1754-1756) — pops MissionQueue → Mission + Timer=0
+ *     (mission.cpp:343-358). Enabled by `PER_CELL_COMMENCE_ENABLED = true`;
+ *     callers may pass `opts.skipCommence` to defer the pop (see Session 16).
+ *
  * Sub-cases not yet ported (see module header for the full C++ enumeration):
- *   - TODO(SCG04/11/13 port): Commence (unit.cpp:1756) — gated by
- *     PER_CELL_COMMENCE_ENABLED.
  *   - TODO(mine port): land-mine blow (unit.cpp:1807-1838).
  *   - TODO(flag port): flag pickup / flag-home (unit.cpp:1771-1802).
  *   - TODO(transport port): RADIO_IM_IN / IM_IN (unit.cpp:1636-1665).
@@ -972,10 +975,13 @@ export function unitPerCellProcess<M>(
   // + DriveClass::Per_Cell_Process call chain (unit.cpp:1882 hands off to
   // DriveClass::Per_Cell_Process after the UnitClass-specific work).
 
-  // ---- 1. Commence (unit.cpp:1756) — GATED ----
-  // Pops MissionQueue mid-drive. This is the load-bearing piece for
-  // SCG04/11/13 but is gated off by default (see PER_CELL_COMMENCE_ENABLED
-  // docstring for the three blocking reasons).
+  // ---- 1. Commence (C++ unit.cpp:1754-1756) ----
+  // Pops MissionQueue mid-drive. C++ `if (!IsDumping) Commence();` runs at
+  // every PCP_END (unit.cpp:1756); `MissionClass::Commence` (mission.cpp:343-358)
+  // swaps MissionQueue → Mission, clears the queue, zeros Timer (and Status).
+  // The load-bearing piece for SCG04/11/13 mid-drive Mission_Move dispatch.
+  // See `PER_CELL_COMMENCE_ENABLED` docstring above for the rationale that
+  // unblocked the gate.
   //
   // Session 16: `skipCommence` option lets chain-loop callers defer the
   // Commence pop to STAGE E (post-Movement) or next tick's STAGE A.
