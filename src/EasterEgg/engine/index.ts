@@ -5665,7 +5665,7 @@ export class Game {
           this.cutInfantryTransportTether(entity);
           const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
           const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-          footPerCellProcess(
+          const fpcpResult = footPerCellProcess(
             entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
             PCPType.PCP_END,
             {
@@ -5673,6 +5673,10 @@ export class Game {
               inRadioContact: false,
               pathShortenEligible: true,
               targetInRange: inRangeNow,
+              // C++ infantry.cpp:823-832 — RADIO_IM_IN ground transport
+              // boarding. The callback locates an APC/LST at the unit's
+              // cell whose NavCom matches and performs Limbo+Attach.
+              tryBoardTransport: () => this.tryPCPBoardTransport(entity),
             },
             {
               guardMission: Mission.GUARD,
@@ -5682,6 +5686,10 @@ export class Game {
               rescueMission: Mission.RESCUE,
             }
           );
+          // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach. The
+          // unit is now in limbo (will be removed by _pendingTransportLoads at
+          // end of tick) so skip the rest of this PCP arrival sequence.
+          if (fpcpResult.boarded) return;
         }
         // C++ infantry.cpp:4004-4010 — after PCP_END and Stop_Driver, arrival
         // at NavCom clears the destination. If Mission is MOVE, Enter_Idle_Mode
@@ -7429,6 +7437,221 @@ export class Game {
     this.cutTransportTether(entity);
   }
 
+  /** C++ `unit.cpp:1657-1664` Case B — PCP_END RADIO_IM_IN ground transport
+   *  boarding. Invoked from `perCellNavComCheck` via the
+   *  `tryBoardTransport` callback supplied to `unitPerCellProcess`.
+   *
+   *  Mirrors:
+   *    if (Mission == MISSION_ENTER && techno && Coord_Cell(Coord) ==
+   *        Coord_Cell(techno->Coord) && techno == As_Techno(NavCom)) {
+   *      if (Transmit_Message(RADIO_IM_IN) == RADIO_ATTACH) {
+   *        Limbo();
+   *        techno->Attach(this);
+   *      }
+   *      return; // early — short-circuits remaining PCP_END work
+   *    }
+   *
+   *  Receiver replies:
+   *    unit.cpp:761-766 (APC), vessel.cpp:1388-1400 (LST) — RADIO_IM_IN
+   *    returns RADIO_ATTACH when capacity remains. When full it falls
+   *    through to base-class handling (defaults to RADIO_STATIC), so
+   *    `Limbo()+Attach` does NOT run. C++ still issues the early return.
+   *
+   *  Returns `'boarded'` when the unit was attached + limbo'd (caller stops
+   *  further PCP_END work this tick), `'no_match'` when no eligible transport
+   *  was found at the unit's cell. */
+  private tryPCPBoardTransport(entity: Entity): 'boarded' | 'no_match' {
+    if ((entity.mission as Mission) !== Mission.ENTER) return 'no_match';
+    if (!entity.alive || entity.inLimbo) return 'no_match';
+    if (!entity.moveTarget) return 'no_match';
+
+    // C++ As_Techno(NavCom): the transport's cell must equal NavCom's cell.
+    const navCellX = Math.floor(entity.moveTarget.lx / LEPTON_SIZE);
+    const navCellY = Math.floor(entity.moveTarget.ly / LEPTON_SIZE);
+
+    // C++ Coord_Cell(Coord) == Coord_Cell(techno->Coord): the entity must
+    // share a cell with the transport. The unit's cell is its current
+    // single-cell coordinate (updated by track-step before PCP_END fires).
+    const ex = entity.cell.cx;
+    const ey = entity.cell.cy;
+
+    // Find a transport at the entity's cell that is also at the NavCom cell.
+    // Iterate this.entities — the array is short (hundreds at most) and this
+    // path fires only when a unit completes a cell-crossing track. Filter on
+    // isTransport first to keep the hot path cheap.
+    for (const other of this.entities) {
+      if (!other.alive || other.inLimbo || other === entity) continue;
+      if (!other.isTransport) continue;
+      // C++ ground transport class check: APC and LST. Aircraft/harvester
+      // docking has separate Per_Cell paths (aircraft.cpp / mission_harvest).
+      if (other.isAirUnit) continue;
+      if (other.cell.cx !== ex || other.cell.cy !== ey) continue;
+      if (other.cell.cx !== navCellX || other.cell.cy !== navCellY) continue;
+      // C++ House->Is_Ally(from->Owner()) check inside RADIO_CAN_LOAD/IM_IN.
+      if (!this.isAllied(other.house, entity.house)) continue;
+
+      // RADIO_IM_IN reply: RADIO_ATTACH when capacity remains; otherwise
+      // base-class default (no Attach). C++ still issues the early return
+      // either way (unit.cpp:1663-1664 — `return` is OUTSIDE the if-attach
+      // block).
+      const willAttach = other.passengers.length < other.maxPassengers;
+      if (willAttach) {
+        // C++ Attach (cargo.cpp:87-123): push passenger, set transportRef.
+        other.passengers.push(entity);
+        entity.transportRef = other;
+        entity.isTethered = false;
+        entity.selected = false;
+        this.selectedIds.delete(entity.id);
+        // LST visual door animation on load (vessel.cpp DoorShutCountDown).
+        if (other.type === UnitType.V_LST) {
+          other.doorOpen = true;
+          other.doorTimer = 60;
+        }
+        // C++ Limbo(): remove from active list + clear cell occupancy.
+        // Mirror the existing transport-load deferral (line 6273-6316 path
+        // uses `_pendingTransportLoads`) so end-of-tick cleanup is uniform.
+        entity.mission = Mission.SLEEP;
+        this.map.setOccupancy(entity.cell.cx, entity.cell.cy, 0);
+        if (entity.stats.isInfantry) {
+          this.map.vacateSubCell(entity.cell.cx, entity.cell.cy, entity.id);
+        }
+        this._pendingTransportLoads.push(entity.id);
+        // C++ ground APC/LST does NOT auto-evacuate when civilian boards —
+        // that branch is aircraft-only (aircraft.cpp:2749-2761). Mirror the
+        // existing line 6307-6311 civilian-aircraft hook only if a future
+        // aircraft RADIO_IM_IN port reuses this code path.
+      }
+      // C++ unit.cpp:1663 — `return;` after the if block, regardless of
+      // whether Attach actually fired. The reply may be RADIO_STATIC (full),
+      // but the unit still short-circuits the rest of PCP_END.
+      return 'boarded';
+    }
+    return 'no_match';
+  }
+
+  /** C++ `unit.cpp:1635-1651` Case A — PCP_END RADIO_IM_IN building entry
+   *  refusal. Invoked from `perCellNavComCheck` via the
+   *  `tryBuildingEntryScatter` callback supplied to `unitPerCellProcess`.
+   *
+   *  Mirrors:
+   *    TechnoClass * whom = Contact_With_Whom();
+   *    if (IsTethered && whom != NULL) {
+   *      if (whom->What_Am_I() == RTTI_BUILDING && Mission == MISSION_ENTER) {
+   *        if (whom == Map[CELL(cell-MAP_CELL_W)].Cell_Building()) {
+   *          switch (Transmit_Message(RADIO_IM_IN, whom)) {
+   *            case RADIO_ROGER: break;
+   *            case RADIO_ATTACH: break;
+   *            default: Scatter(0, true); break;
+   *          }
+   *        }
+   *      }
+   *    }
+   *
+   *  TS adaptation:
+   *    - TS does not model peer-to-peer `Contact_With_Whom()`. We approximate
+   *      "the building this vehicle is trying to enter is one cell north" by
+   *      looking up `findStructureAtCell(cx, cy-1)` directly. The C++ guard
+   *      `whom == Map[cell-MAP_CELL_W].Cell_Building()` collapses to "a
+   *      building footprint occupies (cx, cy-1)".
+   *    - The only building that returns a non-ROGER/non-ATTACH reply to a
+   *      vehicle in MISSION_ENTER is the service depot (`FIX`). PROC docking
+   *      is harvester-specific (handled by `_updateHarvester`) and never
+   *      reaches Case A's `cell-north` predicate because the harvester
+   *      enters from the south-center dock cell. FIX is the only structure
+   *      whose RADIO_IM_IN can return RADIO_NEGATIVE.
+   *    - "Depot would refuse" condition: another player-controlled vehicle is
+   *      already docked at this FIX (within the same 0x10 lepton distance
+   *      that `tickServiceDepot` uses to pick a dock occupant — see
+   *      repairSell.ts:280). C++ `BuildingClass::Receive_Message` returns
+   *      RADIO_NEGATIVE when the depot already has a tethered customer.
+   *    - On refusal, call `unitClassScatterNoThreat(entity, nokidding=false)`
+   *      which is the existing TS analog of C++ `UnitClass::Scatter(0, true)`.
+   *      C++ Scatter gates on `Target_Legal(NavCom) && !nokidding` (unit.cpp:4895),
+   *      so the move-target reassignment only fires when NavCom is illegal
+   *      (e.g. previously cleared). Under standard Case A timing, NavCom is
+   *      still legal — the call records the path but does not reassign
+   *      moveTarget. The TS helper mirrors that exact behavior.
+   *
+   *  Returns:
+   *    - `'scattered'` — the Case A refusal branch fired (C++ default switch).
+   *                      The Scatter call may have reassigned moveTarget
+   *                      (NavCom illegal case) or short-circuited internally
+   *                      (NavCom legal case — standard PCP_END timing).
+   *                      PCP_END continues normally; the caller does not need
+   *                      to short-circuit because C++ Scatter returns control
+   *                      to PCP_END.
+   *    - `'no_match'`  — Case A condition not met (wrong mission, no building
+   *                      one cell north, building accepts the dock). PCP_END
+   *                      continues normally. */
+  private tryPCPBuildingEntryScatter(entity: Entity): 'scattered' | 'no_match' {
+    // C++ unit.cpp:1636: `Mission == MISSION_ENTER` (the outer if's inner guard).
+    if ((entity.mission as Mission) !== Mission.ENTER) return 'no_match';
+    if (!entity.alive || entity.inLimbo) return 'no_match';
+    // Aircraft / infantry / vessel do not exercise this UnitClass branch — it
+    // lives in `UnitClass::Per_Cell_Process`, which only runs for ground vehicles.
+    if (entity.stats.isInfantry || entity.isAirUnit || entity.isNavalUnit) return 'no_match';
+
+    // C++ `Map[CELL(cell-MAP_CELL_W)].Cell_Building()`: the cell directly north
+    // of the vehicle's current cell. `MAP_CELL_W` is the row stride; in (cx,cy)
+    // form this is simply (cx, cy-1).
+    const northCx = entity.cell.cx;
+    const northCy = entity.cell.cy - 1;
+    if (northCy < 0) return 'no_match';
+    const whom = this.findStructureAtCell(northCx, northCy);
+    if (!whom) return 'no_match';
+
+    // C++ ports of the RADIO_IM_IN reply: the service depot is the only TS
+    // structure whose reply branches on busy-ness. PROC (refinery) has its
+    // own harvester flow that does not reach this PCP_END check because the
+    // harvester drives onto the south dock cell of PROC, not under it.
+    if (whom.type !== 'FIX') return 'no_match';
+    // C++ `BuildingClass::Receive_Message(RADIO_IM_IN, from)` rejects when
+    // the source's owner is not allied with the building owner.
+    if (!this.isAllied(whom.house, entity.house)) return 'no_match';
+
+    // C++ depot busy check: does another player-controlled vehicle already
+    // occupy this FIX's dock spot? Mirror `tickServiceDepot` (repairSell.ts:268-283)
+    // dock distance (0x10 leptons = 0.0625 cells from depot center+(CELL,CELL)).
+    const sx = whom.cx * CELL_SIZE + CELL_SIZE;
+    const sy = whom.cy * CELL_SIZE + CELL_SIZE;
+    let occupied = false;
+    for (const other of this.entities) {
+      if (other === entity) continue;
+      if (!other.alive || other.inLimbo) continue;
+      if (other.stats.isInfantry || other.isAirUnit || other.isNavalUnit) continue;
+      if (!this.isAllied(other.house, whom.house)) continue;
+      const dx = other.pos.x - sx;
+      const dy = other.pos.y - sy;
+      // 0.0625 cells = 0.0625 * CELL_SIZE pixels.
+      if (dx * dx + dy * dy < (0.0625 * CELL_SIZE) * (0.0625 * CELL_SIZE)) {
+        occupied = true;
+        break;
+      }
+    }
+    if (!occupied) {
+      // C++ `case RADIO_ROGER: break;` — depot accepts the dock. No scatter,
+      // PCP_END continues normally and the existing dock/repair flow runs.
+      return 'no_match';
+    }
+
+    // C++ unit.cpp:1646 `default: Scatter(0, true);` — forced=true,
+    // nokidding=false (default). The TS analog is
+    // `unitClassScatterNoThreat(entity, nokidding=false)`.
+    //
+    // Behavioral note (C++ unit.cpp:4895):
+    //   if (Target_Legal(NavCom) && !nokidding) return;
+    // Case A fires BEFORE `DriveClass::Per_Cell_Process` clears NavCom
+    // (drive.cpp:869-873), so the vehicle's NavCom is still legal when
+    // Scatter is invoked. With nokidding=false, C++ Scatter returns early
+    // without reassigning the destination. The TS helper mirrors that exact
+    // behavior — the side effect is observable only when NavCom is NOT
+    // legal (e.g. a downstream sub-case cleared it first, or NavCom was
+    // never legal in the first place). Tests assert the helper's return
+    // value rather than the moveTarget side effect for the standard case.
+    this.unitClassScatterNoThreat(entity, /*nokidding=*/ false);
+    return 'scattered';
+  }
+
   private isEntityMovingBlockerFor(mover: Entity, entityId: number): boolean {
     const occupant = this.entityById.get(entityId);
     return !!occupant?.alive &&
@@ -8424,7 +8647,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-            footPerCellProcess(
+            const fpcpResult = footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
@@ -8432,6 +8655,8 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // C++ infantry.cpp:823-832 — RADIO_IM_IN boarding at PCP_END.
+                tryBoardTransport: () => this.tryPCPBoardTransport(entity),
               },
               {
                 guardMission: Mission.GUARD,
@@ -8441,6 +8666,10 @@ export class Game {
                 rescueMission: Mission.RESCUE,
               }
             );
+            // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach. Skip
+            // the rest of this arrival sequence (finishMove, etc.) because the
+            // unit is now a passenger.
+            if (fpcpResult.boarded) return;
           }
 
           if (entity.moveTarget &&
@@ -8489,7 +8718,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-            footPerCellProcess(
+            const fpcpResult = footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
@@ -8497,6 +8726,9 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // C++ infantry.cpp:823-832 — RADIO_IM_IN boarding at PCP_END
+                // along the IsDriving path-walk arrival branch.
+                tryBoardTransport: () => this.tryPCPBoardTransport(entity),
               },
               {
                 guardMission: Mission.GUARD,
@@ -8506,6 +8738,8 @@ export class Game {
                 rescueMission: Mission.RESCUE,
               }
             );
+            // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach.
+            if (fpcpResult.boarded) return;
           }
 
           // C++ infantry.cpp:3992-4008 — after reaching Head_To_Coord,
@@ -8792,8 +9026,21 @@ export class Game {
           hasLegalTarCom: liveTar,
           pathShortenEligible,
           targetInRange: inRangeNow,
+          // C++ unit.cpp:1635-1651 Case A — RADIO_IM_IN building entry
+          // refusal scatter. Runs first because the C++ `if` block at line
+          // 1635 sits before the Case B transport block at line 1657.
+          tryBuildingEntryScatter: () => this.tryPCPBuildingEntryScatter(entity),
+          // C++ unit.cpp:1657-1664 Case B — RADIO_IM_IN ground transport
+          // boarding. Fires BEFORE Commence, short-circuits remaining PCP_END
+          // work when matched. The callback locates the transport and runs
+          // the Limbo + Attach path (see `tryPCPBoardTransport`).
+          tryBoardTransport: () => this.tryPCPBoardTransport(entity),
         });
         if (r.commenceFired) entity._commenceFiredThisTick = true;
+        // C++ unit.cpp:1664 `return;` — when boarding fires, the rest of the
+        // track loop must not continue this tick (the entity is now in limbo
+        // and will be removed by `_pendingTransportLoads` at end of tick).
+        if (r.boarded) return true;
         return r.navComCleared;
       };
 
@@ -9061,7 +9308,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-            footPerCellProcess(
+            const fpcpResult = footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
@@ -9069,6 +9316,9 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // C++ infantry.cpp:823-832 — RADIO_IM_IN boarding fires at every
+                // infantry PCP_END boundary, including this free-form-walk arrival.
+                tryBoardTransport: () => this.tryPCPBoardTransport(entity),
               },
               {
                 guardMission: Mission.GUARD,
@@ -9078,6 +9328,8 @@ export class Game {
                 rescueMission: Mission.RESCUE,
               }
             );
+            // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach.
+            if (fpcpResult.boarded) return;
           }
         }
       }
@@ -10450,7 +10702,16 @@ export class Game {
 	                      // C++ IsDriving=true bracket (drive.cpp:773-775)
 	                      entity.isDriving = true;
 	                      this.cutTransportTether(entity);
-	                      const r = unitPerCellProcess(entity, PCPType.PCP_END);
+	                      const r = unitPerCellProcess(entity, PCPType.PCP_END, {
+                            // C++ unit.cpp:1635-1651 Case A — building entry
+                            // refusal scatter (FIX / service depot). Runs at
+                            // every PCP_END boundary, including track-jump.
+                            tryBuildingEntryScatter: () => this.tryPCPBuildingEntryScatter(entity),
+                            // C++ unit.cpp:1657-1664 — RADIO_IM_IN ground transport
+                            // boarding can fire at any PCP_END (including track-jump)
+                            // when the unit shares a cell with its NavCom transport.
+                            tryBoardTransport: () => this.tryPCPBoardTransport(entity),
+                          });
 	                      entity.isDriving = false;
                       if (r.commenceFired) {
                         entity._commenceFiredBoundaries.add(boundaryKey);
