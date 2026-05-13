@@ -5665,7 +5665,7 @@ export class Game {
           this.cutInfantryTransportTether(entity);
           const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
           const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-          footPerCellProcess(
+          const fpcpResult = footPerCellProcess(
             entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
             PCPType.PCP_END,
             {
@@ -5673,6 +5673,10 @@ export class Game {
               inRadioContact: false,
               pathShortenEligible: true,
               targetInRange: inRangeNow,
+              // C++ infantry.cpp:823-832 — RADIO_IM_IN ground transport
+              // boarding. The callback locates an APC/LST at the unit's
+              // cell whose NavCom matches and performs Limbo+Attach.
+              tryBoardTransport: () => this.tryPCPBoardTransport(entity),
             },
             {
               guardMission: Mission.GUARD,
@@ -5682,6 +5686,10 @@ export class Game {
               rescueMission: Mission.RESCUE,
             }
           );
+          // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach. The
+          // unit is now in limbo (will be removed by _pendingTransportLoads at
+          // end of tick) so skip the rest of this PCP arrival sequence.
+          if (fpcpResult.boarded) return;
         }
         // C++ infantry.cpp:4004-4010 — after PCP_END and Stop_Driver, arrival
         // at NavCom clears the destination. If Mission is MOVE, Enter_Idle_Mode
@@ -7429,6 +7437,98 @@ export class Game {
     this.cutTransportTether(entity);
   }
 
+  /** C++ `unit.cpp:1657-1664` Case B — PCP_END RADIO_IM_IN ground transport
+   *  boarding. Invoked from `perCellNavComCheck` via the
+   *  `tryBoardTransport` callback supplied to `unitPerCellProcess`.
+   *
+   *  Mirrors:
+   *    if (Mission == MISSION_ENTER && techno && Coord_Cell(Coord) ==
+   *        Coord_Cell(techno->Coord) && techno == As_Techno(NavCom)) {
+   *      if (Transmit_Message(RADIO_IM_IN) == RADIO_ATTACH) {
+   *        Limbo();
+   *        techno->Attach(this);
+   *      }
+   *      return; // early — short-circuits remaining PCP_END work
+   *    }
+   *
+   *  Receiver replies:
+   *    unit.cpp:761-766 (APC), vessel.cpp:1388-1400 (LST) — RADIO_IM_IN
+   *    returns RADIO_ATTACH when capacity remains. When full it falls
+   *    through to base-class handling (defaults to RADIO_STATIC), so
+   *    `Limbo()+Attach` does NOT run. C++ still issues the early return.
+   *
+   *  Returns `'boarded'` when the unit was attached + limbo'd (caller stops
+   *  further PCP_END work this tick), `'no_match'` when no eligible transport
+   *  was found at the unit's cell. */
+  private tryPCPBoardTransport(entity: Entity): 'boarded' | 'no_match' {
+    if ((entity.mission as Mission) !== Mission.ENTER) return 'no_match';
+    if (!entity.alive || entity.inLimbo) return 'no_match';
+    if (!entity.moveTarget) return 'no_match';
+
+    // C++ As_Techno(NavCom): the transport's cell must equal NavCom's cell.
+    const navCellX = Math.floor(entity.moveTarget.lx / LEPTON_SIZE);
+    const navCellY = Math.floor(entity.moveTarget.ly / LEPTON_SIZE);
+
+    // C++ Coord_Cell(Coord) == Coord_Cell(techno->Coord): the entity must
+    // share a cell with the transport. The unit's cell is its current
+    // single-cell coordinate (updated by track-step before PCP_END fires).
+    const ex = entity.cell.cx;
+    const ey = entity.cell.cy;
+
+    // Find a transport at the entity's cell that is also at the NavCom cell.
+    // Iterate this.entities — the array is short (hundreds at most) and this
+    // path fires only when a unit completes a cell-crossing track. Filter on
+    // isTransport first to keep the hot path cheap.
+    for (const other of this.entities) {
+      if (!other.alive || other.inLimbo || other === entity) continue;
+      if (!other.isTransport) continue;
+      // C++ ground transport class check: APC and LST. Aircraft/harvester
+      // docking has separate Per_Cell paths (aircraft.cpp / mission_harvest).
+      if (other.isAirUnit) continue;
+      if (other.cell.cx !== ex || other.cell.cy !== ey) continue;
+      if (other.cell.cx !== navCellX || other.cell.cy !== navCellY) continue;
+      // C++ House->Is_Ally(from->Owner()) check inside RADIO_CAN_LOAD/IM_IN.
+      if (!this.isAllied(other.house, entity.house)) continue;
+
+      // RADIO_IM_IN reply: RADIO_ATTACH when capacity remains; otherwise
+      // base-class default (no Attach). C++ still issues the early return
+      // either way (unit.cpp:1663-1664 — `return` is OUTSIDE the if-attach
+      // block).
+      const willAttach = other.passengers.length < other.maxPassengers;
+      if (willAttach) {
+        // C++ Attach (cargo.cpp:87-123): push passenger, set transportRef.
+        other.passengers.push(entity);
+        entity.transportRef = other;
+        entity.isTethered = false;
+        entity.selected = false;
+        this.selectedIds.delete(entity.id);
+        // LST visual door animation on load (vessel.cpp DoorShutCountDown).
+        if (other.type === UnitType.V_LST) {
+          other.doorOpen = true;
+          other.doorTimer = 60;
+        }
+        // C++ Limbo(): remove from active list + clear cell occupancy.
+        // Mirror the existing transport-load deferral (line 6273-6316 path
+        // uses `_pendingTransportLoads`) so end-of-tick cleanup is uniform.
+        entity.mission = Mission.SLEEP;
+        this.map.setOccupancy(entity.cell.cx, entity.cell.cy, 0);
+        if (entity.stats.isInfantry) {
+          this.map.vacateSubCell(entity.cell.cx, entity.cell.cy, entity.id);
+        }
+        this._pendingTransportLoads.push(entity.id);
+        // C++ ground APC/LST does NOT auto-evacuate when civilian boards —
+        // that branch is aircraft-only (aircraft.cpp:2749-2761). Mirror the
+        // existing line 6307-6311 civilian-aircraft hook only if a future
+        // aircraft RADIO_IM_IN port reuses this code path.
+      }
+      // C++ unit.cpp:1663 — `return;` after the if block, regardless of
+      // whether Attach actually fired. The reply may be RADIO_STATIC (full),
+      // but the unit still short-circuits the rest of PCP_END.
+      return 'boarded';
+    }
+    return 'no_match';
+  }
+
   private isEntityMovingBlockerFor(mover: Entity, entityId: number): boolean {
     const occupant = this.entityById.get(entityId);
     return !!occupant?.alive &&
@@ -8424,7 +8524,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-            footPerCellProcess(
+            const fpcpResult = footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
@@ -8432,6 +8532,8 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // C++ infantry.cpp:823-832 — RADIO_IM_IN boarding at PCP_END.
+                tryBoardTransport: () => this.tryPCPBoardTransport(entity),
               },
               {
                 guardMission: Mission.GUARD,
@@ -8441,6 +8543,10 @@ export class Game {
                 rescueMission: Mission.RESCUE,
               }
             );
+            // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach. Skip
+            // the rest of this arrival sequence (finishMove, etc.) because the
+            // unit is now a passenger.
+            if (fpcpResult.boarded) return;
           }
 
           if (entity.moveTarget &&
@@ -8489,7 +8595,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-            footPerCellProcess(
+            const fpcpResult = footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
@@ -8497,6 +8603,9 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // C++ infantry.cpp:823-832 — RADIO_IM_IN boarding at PCP_END
+                // along the IsDriving path-walk arrival branch.
+                tryBoardTransport: () => this.tryPCPBoardTransport(entity),
               },
               {
                 guardMission: Mission.GUARD,
@@ -8506,6 +8615,8 @@ export class Game {
                 rescueMission: Mission.RESCUE,
               }
             );
+            // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach.
+            if (fpcpResult.boarded) return;
           }
 
           // C++ infantry.cpp:3992-4008 — after reaching Head_To_Coord,
@@ -8792,8 +8903,17 @@ export class Game {
           hasLegalTarCom: liveTar,
           pathShortenEligible,
           targetInRange: inRangeNow,
+          // C++ unit.cpp:1657-1664 Case B — RADIO_IM_IN ground transport
+          // boarding. Fires BEFORE Commence, short-circuits remaining PCP_END
+          // work when matched. The callback locates the transport and runs
+          // the Limbo + Attach path (see `tryPCPBoardTransport`).
+          tryBoardTransport: () => this.tryPCPBoardTransport(entity),
         });
         if (r.commenceFired) entity._commenceFiredThisTick = true;
+        // C++ unit.cpp:1664 `return;` — when boarding fires, the rest of the
+        // track loop must not continue this tick (the entity is now in limbo
+        // and will be removed by `_pendingTransportLoads` at end of tick).
+        if (r.boarded) return true;
         return r.navComCleared;
       };
 
@@ -9061,7 +9181,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = !!(entity.target?.alive) && entity.inRangeOfLikelyCoord(entity.target);
-            footPerCellProcess(
+            const fpcpResult = footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
               {
@@ -9069,6 +9189,9 @@ export class Game {
                 inRadioContact: false,
                 pathShortenEligible,
                 targetInRange: inRangeNow,
+                // C++ infantry.cpp:823-832 — RADIO_IM_IN boarding fires at every
+                // infantry PCP_END boundary, including this free-form-walk arrival.
+                tryBoardTransport: () => this.tryPCPBoardTransport(entity),
               },
               {
                 guardMission: Mission.GUARD,
@@ -9078,6 +9201,8 @@ export class Game {
                 rescueMission: Mission.RESCUE,
               }
             );
+            // C++ infantry.cpp:830-831 — `return;` after Limbo+Attach.
+            if (fpcpResult.boarded) return;
           }
         }
       }
@@ -10450,7 +10575,12 @@ export class Game {
 	                      // C++ IsDriving=true bracket (drive.cpp:773-775)
 	                      entity.isDriving = true;
 	                      this.cutTransportTether(entity);
-	                      const r = unitPerCellProcess(entity, PCPType.PCP_END);
+	                      const r = unitPerCellProcess(entity, PCPType.PCP_END, {
+                            // C++ unit.cpp:1657-1664 — RADIO_IM_IN ground transport
+                            // boarding can fire at any PCP_END (including track-jump)
+                            // when the unit shares a cell with its NavCom transport.
+                            tryBoardTransport: () => this.tryPCPBoardTransport(entity),
+                          });
 	                      entity.isDriving = false;
                       if (r.commenceFired) {
                         entity._commenceFiredBoundaries.add(boundaryKey);

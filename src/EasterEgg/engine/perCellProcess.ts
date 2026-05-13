@@ -899,6 +899,15 @@ export interface PCPResult {
    * `updateEntity` (index.ts:3997) to avoid double-pop.
    */
   commenceFired: boolean;
+
+  /**
+   * True when the unit was attached to a transport (RADIO_IM_IN/ATTACH path)
+   * at PCP_END and removed from the active entity set (Limbo). When `true`,
+   * callers must stop further movement/per-cell work this tick because the
+   * unit no longer exists on the map. Matches C++ `unit.cpp:1657-1664` early
+   * return after `Limbo() + Attach(this)`.
+   */
+  boarded: boolean;
 }
 
 export interface UnitPerCellOptions {
@@ -911,6 +920,26 @@ export interface UnitPerCellOptions {
   hasLegalTarCom?: boolean;
   pathShortenEligible?: boolean;
   targetInRange?: boolean;
+  /**
+   * C++ `unit.cpp:1657-1664` Case B — Mission_Enter + same cell + transport ==
+   * As_Techno(NavCom): Transmit_Message(RADIO_IM_IN) → if RADIO_ATTACH then
+   * `Limbo()` + `techno->Attach(this)` + early return. Callers supply this
+   * predicate to model the radio handshake against the live entity graph
+   * (transport lookup, capacity check, passenger array push, limbo
+   * bookkeeping). The hook itself is allocation-free and unit-testable.
+   *
+   * Return value:
+   *   - `'boarded'`  — RADIO_ATTACH path; unit was attached and limbo'd. Hook
+   *                    returns `boarded: true`, short-circuiting the rest of
+   *                    PCP_END.
+   *   - `'no_match'` — No transport found at the unit's cell with the unit's
+   *                    NavCom; PCP_END continues normally (Commence, etc.).
+   *
+   * C++ also has a `default: Scatter(0, true)` branch for Case A (building
+   * service-depot entry) — that path is not modelled here yet (no service
+   * depot in the TS engine) and is left as a follow-up.
+   */
+  tryBoardTransport?: () => 'boarded' | 'no_match';
 }
 
 /**
@@ -926,7 +955,11 @@ export interface UnitPerCellOptions {
  *     PER_CELL_COMMENCE_ENABLED.
  *   - TODO(mine port): land-mine blow (unit.cpp:1807-1838).
  *   - TODO(flag port): flag pickup / flag-home (unit.cpp:1771-1802).
- *   - TODO(transport port): RADIO_IM_IN / IM_IN (unit.cpp:1636-1665).
+ *   - DONE: RADIO_IM_IN ground transport boarding (Case B, unit.cpp:1657-1664).
+ *     Callers supply `tryBoardTransport` via `UnitPerCellOptions`.
+ *   - TODO(transport port): RADIO_IM_IN building entry / Case A scatter
+ *     (unit.cpp:1635-1651) — service depot / repair pad (no TS service depot
+ *     yet, so this branch is a no-op).
  *
  * The existing TS engine handles several of these (vehicle crush,
  * Look() fog reveal) directly in `followTrackStep`'s mid-cell branch
@@ -943,7 +976,7 @@ export function unitPerCellProcess<M>(
   why: PCPType,
   opts?: UnitPerCellOptions,
 ): PCPResult {
-  const result: PCPResult = { navComCleared: false, commenceFired: false };
+  const result: PCPResult = { navComCleared: false, commenceFired: false, boarded: false };
 
   // Phase 0 DEBUG_PCP_TRACE — single bool check when flag unset (zero cost).
   const _pcpBefore = _PCP_TRACE_ENABLED ? _pcpSnapshot(entity) : null;
@@ -971,6 +1004,25 @@ export function unitPerCellProcess<M>(
   // PCP_END: the main event. Order matches C++ UnitClass::Per_Cell_Process
   // + DriveClass::Per_Cell_Process call chain (unit.cpp:1882 hands off to
   // DriveClass::Per_Cell_Process after the UnitClass-specific work).
+
+  // ---- 0. RADIO_IM_IN transport boarding (unit.cpp:1657-1664, Case B) ----
+  // Pre-Commence: a unit in MISSION_ENTER that has reached the same cell as
+  // its NavCom-targeted transport sends RADIO_IM_IN; on RADIO_ATTACH reply,
+  // the unit is Limbo'd and attached to the transport, then PCP_END returns
+  // early. C++ ordering: this fires BEFORE Commence (line 1756) and before
+  // every later sub-case, so we run it first.
+  //
+  // The hook only invokes the predicate when supplied. Callers wire the
+  // predicate to the live entity graph (transport occupancy, passenger
+  // capacity, _pendingTransportLoads); the hook stays self-contained.
+  if (opts?.tryBoardTransport) {
+    const boardResult = opts.tryBoardTransport();
+    if (boardResult === 'boarded') {
+      result.boarded = true;
+      if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+      return result; // C++ unit.cpp:1664 — `return;` after Limbo+Attach.
+    }
+  }
 
   // ---- 1. Commence (unit.cpp:1756) — GATED ----
   // Pops MissionQueue mid-drive. This is the load-bearing piece for
@@ -1111,10 +1163,17 @@ export function footPerCellProcess<M>(
      * `entity.inRange(entity.target)` or similar.
      */
     targetInRange?: boolean;
+    /**
+     * C++ `infantry.cpp:823-832` — InfantryClass::Per_Cell_Process Case B
+     * RADIO_IM_IN handler. Mirrors the vehicle path
+     * (`unitPerCellProcess.tryBoardTransport`). When the predicate returns
+     * `'boarded'` the unit was Limbo'd + Attached and the hook short-circuits.
+     */
+    tryBoardTransport?: () => 'boarded' | 'no_match';
   },
   missions: EnterIdleModeOptions<M>
 ): PCPResult {
-  const result: PCPResult = { navComCleared: false, commenceFired: false };
+  const result: PCPResult = { navComCleared: false, commenceFired: false, boarded: false };
 
   // Phase 0 DEBUG_PCP_TRACE — single bool check when flag unset (zero cost).
   const _pcpBefore = _PCP_TRACE_ENABLED ? _pcpSnapshot(entity) : null;
@@ -1130,6 +1189,20 @@ export function footPerCellProcess<M>(
   if (!FOOT_PER_CELL_ENABLED) {
     if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
     return result;
+  }
+
+  // ---- 0. RADIO_IM_IN transport boarding (infantry.cpp:823-832, Case B) ----
+  // C++ ordering: this fires BEFORE Enter_Idle_Mode (line 808-817), before
+  // Commence (line 914 in the file), and before the chained
+  // FootClass::Per_Cell_Process. When Attach succeeds the unit is Limbo'd
+  // and PCP_END returns early via `BEnd(BENCH_PCP); return;`.
+  if (ctx.tryBoardTransport) {
+    const boardResult = ctx.tryBoardTransport();
+    if (boardResult === 'boarded') {
+      result.boarded = true;
+      if (_PCP_TRACE_ENABLED && _pcpBefore) _pcpTraceRecord(entity, why, _pcpBefore, result);
+      return result;
+    }
   }
 
   // ---- 1. Enter_Idle_Mode (infantry.cpp:911) ----
