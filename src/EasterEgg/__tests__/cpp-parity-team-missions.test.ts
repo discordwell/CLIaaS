@@ -37,6 +37,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { House, Mission, UnitType, CELL_SIZE, LEPTON_SIZE, worldDistLeptons, STRAY_DISTANCE, cellTargetToLepton } from '../engine/types';
 import { GameMap } from '../engine/map';
+import { type MapStructure, STRUCTURE_MAX_HP } from '../engine/scenario';
 import {
   Team, resetTeamIds,
   TMISSION_MOVE, TMISSION_ATTACK, TMISSION_ATT_WAYPT, TMISSION_GUARD,
@@ -59,6 +60,24 @@ function makeEntity(type: UnitType, house: House, x: number, y: number): Entity 
   e.facing = 0;
   e.bodyFacing32 = 0;
   return e;
+}
+
+function makeStructure(type: string, house: House, cx: number, cy: number, hp = STRUCTURE_MAX_HP[type] ?? 256): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp,
+    maxHp: hp,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
+  } as MapStructure;
 }
 
 function makeTeam(opts: {
@@ -345,6 +364,48 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // Queued via missionQueue; Commence processes when !IsFiring.
       expect(e.missionQueue).toBe(Mission.GUARD);
     });
+
+    it('released fixed-wing aircraft enter airstrip docking, not generic GUARD', () => {
+      // C++ TeamClass::~TeamClass -> Remove() -> AircraftClass::Enter_Idle_Mode.
+      // For airborne, non-loaner fixed-wing aircraft, aircraft.cpp:1924-1938 finds
+      // an owned airstrip and commits MISSION_ENTER immediately via Commence().
+      const team = makeTeam({
+        house: House.USSR,
+        memberDefs: [{ type: UnitType.V_YAK, count: 1 }],
+        missions: [{ mission: TMISSION_ATTACK, data: 11 }],
+        forcedActive: true,
+      });
+      const yak = makeEntity(UnitType.V_YAK, House.USSR, 31 * CELL_SIZE + 12, 70 * CELL_SIZE + 12);
+      yak.mission = Mission.NONE;
+      yak.aircraftState = 'flying';
+      yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+      const afld = makeStructure('AFLD', House.USSR, 40, 78);
+      team.add(yak);
+
+      const ctx = {
+        structures: [afld],
+        entities: [yak],
+        map: new GameMap(),
+        playerHouse: House.Greece,
+        entitiesAllied: (a: Entity, b: Entity) => a.house === b.house,
+        housesAllied: (a: House, b: House) => a === b,
+        isPlayerControlled: (e: Entity) => e.house === House.Greece,
+        isDiscoveredByPlayer: () => true,
+        isDiscoveredStructureByPlayer: () => true,
+        isRevealedToHouse: () => true,
+      };
+
+      team.ai(undefined, ctx);
+      team.ai(undefined, ctx);
+
+      expect(team.dissolved).toBe(true);
+      expect(yak.teamRef).toBeNull();
+      expect(yak.mission).toBe(Mission.ENTER);
+      expect(yak.missionQueue).toBeNull();
+      expect(yak.aircraftState).toBe('returning');
+      expect(yak.aircraftDockingStructure).toBe(0);
+      expect(afld.dockedAircraft).toBe(yak.id);
+    });
   });
 
   // ==========================================================================
@@ -587,6 +648,75 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       expect((team as unknown as { missionTargetEntityRef: Entity | null }).missionTargetEntityRef).toBe(liveJeep);
       expect(attacker.target).toBe(liveJeep);
+    });
+
+    it('aircraft TMISSION_ATTACK with QUARRY_FAKES does not broaden through weapon threats', () => {
+      // C++ TeamClass::TMission_Attack calls candidate->Greatest_Threat(THREAT_FAKES).
+      // Aircraft do not override Greatest_Threat to OR in PrimaryWeapon->Allowed_Threats,
+      // so the YAK team from SCU01EA must not select an enemy vehicle just because
+      // ChainGun can hit ground units. With no fake building target, MissionTarget
+      // remains TARGET_NONE (team.cpp:2807-2814, techno.cpp:2058).
+      const team = makeTeam({
+        house: House.USSR,
+        memberDefs: [{ type: UnitType.V_YAK, count: 1 }],
+        missions: [{ mission: TMISSION_ATTACK, data: 11 }],
+        forcedActive: true,
+      });
+      const yak = makeEntity(UnitType.V_YAK, House.USSR, 32 * CELL_SIZE + 12, 72 * CELL_SIZE + 12);
+      const jeep = makeEntity(UnitType.V_JEEP, House.Greece, 45 * CELL_SIZE + 12, 75 * CELL_SIZE + 12);
+      const barrel = makeStructure('BARL', House.Greece, 40, 72);
+      team.add(yak);
+
+      team.ai(undefined, {
+        entities: [yak, jeep],
+        structures: [barrel],
+        map: new GameMap(),
+        playerHouse: House.Greece,
+        entitiesAllied: (a, b) => a.house === b.house,
+        housesAllied: (a, b) => a === b,
+        isPlayerControlled: e => e.house === House.Greece,
+        isDiscoveredByPlayer: () => true,
+        isDiscoveredStructureByPlayer: () => true,
+        isRevealedToHouse: () => true,
+      });
+
+      expect((team as unknown as { missionTargetEntityRef: Entity | null }).missionTargetEntityRef).toBeNull();
+      expect((team as unknown as { missionTargetStructureRef: MapStructure | null }).missionTargetStructureRef).toBeNull();
+      expect(yak.target).toBeNull();
+      expect(yak.targetStructure).toBeNull();
+    });
+
+    it('aircraft TMISSION_ATTACK with QUARRY_BUILDINGS can select a structure target', () => {
+      // C++ THREAT_BUILDINGS builds a building RTTI mask in TechnoClass::Greatest_Threat
+      // and scans the ground layer, which includes BuildingClass objects. The TS team
+      // attack picker must therefore be able to assign a structure Target, not only
+      // Entity TarComs.
+      const team = makeTeam({
+        house: House.USSR,
+        memberDefs: [{ type: UnitType.V_YAK, count: 1 }],
+        missions: [{ mission: TMISSION_ATTACK, data: 2 }],
+        forcedActive: true,
+      });
+      const yak = makeEntity(UnitType.V_YAK, House.USSR, 32 * CELL_SIZE + 12, 72 * CELL_SIZE + 12);
+      const powerPlant = makeStructure('POWR', House.Greece, 36, 72);
+      team.add(yak);
+
+      team.ai(undefined, {
+        entities: [yak],
+        structures: [powerPlant],
+        map: new GameMap(),
+        playerHouse: House.Greece,
+        entitiesAllied: (a, b) => a.house === b.house,
+        housesAllied: (a, b) => a === b,
+        isPlayerControlled: e => e.house === House.Greece,
+        isDiscoveredByPlayer: () => true,
+        isDiscoveredStructureByPlayer: () => true,
+        isRevealedToHouse: () => true,
+      });
+
+      expect((team as unknown as { missionTargetStructureRef: MapStructure | null }).missionTargetStructureRef).toBe(powerPlant);
+      expect(yak.target).toBeNull();
+      expect(yak.targetStructure).toBe(powerPlant);
     });
   });
 
@@ -856,6 +986,24 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // C++ Assign_Mission queues; Commence dequeues when !IsFiring.
       // team.ai() queues but doesn't process Commence — check missionQueue.
       expect(e.missionQueue).toBe(Mission.AREA_GUARD);
+    });
+
+    it('DO with data=9 queues Mission.HARVEST instead of collapsing to GUARD', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [
+          { mission: TMISSION_DO, data: 9 },
+        ],
+        forcedActive: true,
+      });
+
+      const e = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+      team.add(e);
+
+      team.coordinateDo({ mission: TMISSION_DO, data: 9 });
+
+      expect(e.missionQueue).toBe(Mission.HARVEST);
+      expect(e.mission).toBe(Mission.GUARD);
     });
 
     it('DO does not advance the team mission (team.cpp:1813-1860)', () => {
@@ -1274,6 +1422,133 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // Should still be on MOVE team-mission (the first entry in the team's mission list)
       expect(team.currentMission).toBe(0);
     });
+
+    it('orders flying non-fixed aircraft to MOVE when outside the target cell even inside aircraft stray distance', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_TRAN, count: 1 }],
+        missions: [
+          { mission: TMISSION_MOVE, data: 0 },
+          { mission: TMISSION_UNLOAD, data: 0 },
+        ],
+        forcedActive: true,
+      });
+      const tran = makeEntity(UnitType.V_TRAN, House.Greece, 10 * CELL_SIZE + 12, 10 * CELL_SIZE + 12);
+      tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+      tran.aircraftState = 'flying';
+      tran.mission = Mission.NONE;
+      tran.missionQueue = null;
+      team.add(tran);
+      team.isMoving = true;
+      (team as unknown as { currentMission: number }).currentMission = 0;
+
+      const targetCell = { cx: 13, cy: 10 }; // within 3x aircraft stray, but not same cell
+      const targetWorld = {
+        x: targetCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: targetCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+      (team as unknown as {
+        setMissionTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+        setTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+      }).setMissionTarget(targetWorld, targetCell);
+      (team as unknown as {
+        setTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+      }).setTarget(targetWorld, targetCell);
+
+      team.coordinateMove();
+
+      expect(tran.missionQueue).toBe(Mission.MOVE);
+      expect(tran.moveTarget).toEqual(cellTargetToLepton(targetCell.cx, targetCell.cy));
+      expect(team.currentMission).toBe(0);
+    });
+
+    it('allows a landing transport at the target cell to advance the MOVE team mission', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_TRAN, count: 1 }],
+        missions: [
+          { mission: TMISSION_MOVE, data: 0 },
+          { mission: TMISSION_UNLOAD, data: 0 },
+        ],
+        forcedActive: true,
+      });
+      const targetCell = { cx: 63, cy: 47 };
+      const tran = makeEntity(
+        UnitType.V_TRAN,
+        House.Greece,
+        targetCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        targetCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      );
+      tran.flightAltitude = 1;
+      tran.aircraftState = 'landing';
+      tran.mission = Mission.MOVE;
+      tran.missionQueue = null;
+      tran.moveTarget = null;
+      team.add(tran);
+      team.isMoving = true;
+      (team as unknown as { currentMission: number; isNextMission: boolean }).currentMission = 0;
+      (team as unknown as { isNextMission: boolean }).isNextMission = false;
+
+      const targetWorld = {
+        x: targetCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: targetCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+      (team as unknown as {
+        setMissionTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+        setTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+      }).setMissionTarget(targetWorld, targetCell);
+      (team as unknown as {
+        setTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+      }).setTarget(targetWorld, targetCell);
+
+      team.coordinateMove();
+
+      expect((team as unknown as { isNextMission: boolean }).isNextMission).toBe(true);
+      expect(tran.missionQueue).toBe(Mission.GUARD);
+      expect(team.currentMission).toBe(0);
+    });
+
+    it('keeps Coordinate_Move unfinished once the following UNLOAD mission is queued', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.V_TRAN, count: 1 }],
+        missions: [
+          { mission: TMISSION_MOVE, data: 0 },
+          { mission: TMISSION_UNLOAD, data: 0 },
+        ],
+        forcedActive: true,
+      });
+      const targetCell = { cx: 63, cy: 47 };
+      const tran = makeEntity(
+        UnitType.V_TRAN,
+        House.Greece,
+        targetCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        targetCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      );
+      tran.flightAltitude = 12;
+      tran.aircraftState = 'landing';
+      tran.mission = Mission.GUARD;
+      tran.missionQueue = Mission.UNLOAD;
+      tran.moveTarget = null;
+      team.add(tran);
+      team.isMoving = true;
+      (team as unknown as { currentMission: number; isNextMission: boolean }).currentMission = 0;
+      (team as unknown as { isNextMission: boolean }).isNextMission = false;
+
+      const targetWorld = {
+        x: targetCell.cx * CELL_SIZE + CELL_SIZE / 2,
+        y: targetCell.cy * CELL_SIZE + CELL_SIZE / 2,
+      };
+      (team as unknown as {
+        setMissionTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+        setTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+      }).setMissionTarget(targetWorld, targetCell);
+      (team as unknown as {
+        setTarget(target: typeof targetWorld, cell: typeof targetCell): void;
+      }).setTarget(targetWorld, targetCell);
+
+      team.coordinateMove();
+
+      expect((team as unknown as { isNextMission: boolean }).isNextMission).toBe(false);
+      expect(tran.missionQueue).toBe(Mission.UNLOAD);
+    });
   });
 
   describe('Coordinate_Move target legality (team.cpp:1887-1890)', () => {
@@ -1393,6 +1668,87 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       // But attack mission should NOT have been dispatched during reform
       expect(e1.mission).not.toBe(Mission.ATTACK);
     });
+
+    it('Calc_Center falls back to closest member CELL target when averaged center is MOVE_OK', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 2 }],
+        missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      });
+
+      const north = makeEntity(
+        UnitType.I_E1,
+        House.USSR,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+      );
+      const south = makeEntity(
+        UnitType.I_E1,
+        House.USSR,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+        13 * CELL_SIZE + CELL_SIZE / 2,
+      );
+      const waypoints = new Map([[0, { cx: 20, cy: 20 }]]);
+      const ctx = {
+        entities: [north, south],
+        canEnterCell: (_unit: Entity, _cx: number, _cy: number) => true,
+      };
+
+      team.add(north);
+      team.add(south);
+      team.ai(waypoints, ctx);
+
+      expect(team.isMoving).toBe(true);
+      expect(team.isReforming).toBe(true);
+      expect(team.currentMission).toBe(-1);
+      expect(team.zoneLeptonX).toBe(cellTargetToLepton(10, 10).lx);
+      expect(team.zoneLeptonY).toBe(cellTargetToLepton(10, 10).ly);
+      expect(north.missionQueue).not.toBe(Mission.MOVE);
+      expect(south.missionQueue).toBe(Mission.MOVE);
+      expect(south.moveTarget).toEqual(cellTargetToLepton(10, 10));
+
+      team.ai(waypoints, ctx);
+
+      expect(team.isReforming).toBe(false);
+      expect(team.currentMission).toBe(-1);
+    });
+
+    it('Calc_Center keeps averaged center when Can_Enter_Cell returns non-OK', () => {
+      const team = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 2 }],
+        missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      });
+
+      const north = makeEntity(
+        UnitType.I_E1,
+        House.USSR,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+      );
+      const south = makeEntity(
+        UnitType.I_E1,
+        House.USSR,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+        13 * CELL_SIZE + CELL_SIZE / 2,
+      );
+      const waypoints = new Map([[0, { cx: 20, cy: 20 }]]);
+      const ctx = {
+        entities: [north, south],
+        canEnterCell: (_unit: Entity, _cx: number, _cy: number) => false,
+      };
+
+      team.add(north);
+      team.add(south);
+      team.ai(waypoints, ctx);
+
+      expect(team.isMoving).toBe(true);
+      expect(team.isReforming).toBe(false);
+      expect(team.currentMission).toBe(-1);
+      expect(team.zoneLeptonX).toBe(10 * LEPTON_SIZE + 0x80);
+      expect(team.zoneLeptonY).toBe(12 * LEPTON_SIZE);
+      expect(north.missionQueue).not.toBe(Mission.MOVE);
+      expect(south.missionQueue).not.toBe(Mission.MOVE);
+    });
+
   });
 
   // ==========================================================================
@@ -2488,9 +2844,9 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       expect(team.total).toBe(1);
     });
 
-    it('add() transfers entity from old team to new (C++ team.cpp:904-906)', () => {
-      const team1 = makeTeam({});
-      const team2 = makeTeam({});
+    it('add() transfers entity from lower-priority old team to higher-priority new team (C++ team.cpp:904-906)', () => {
+      const team1 = makeTeam({ recruitPriority: 5 });
+      const team2 = makeTeam({ recruitPriority: 10 });
       const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
 
       team1.add(e);
@@ -2576,6 +2932,44 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
       expect(e.teamRef).toBe(highPriTeam);
       expect(lowPriTeam.total).toBe(0);
     });
+
+    it('recruit() steals from a lower-priority team', () => {
+      const lowPriTeam = makeTeam({
+        recruitPriority: 5,
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+      });
+      const highPriTeam = makeTeam({
+        recruitPriority: 10,
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        origin: { x: 0, y: 0 },
+      });
+      const e = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+
+      lowPriTeam.add(e);
+
+      highPriTeam.recruit([e], { x: 0, y: 0 });
+
+      expect(e.teamRef).toBe(highPriTeam);
+      expect(lowPriTeam.total).toBe(0);
+      expect(highPriTeam.total).toBe(1);
+    });
+
+    it('equal or lower priority team cannot steal an existing member', () => {
+      const incumbent = makeTeam({ recruitPriority: 10 });
+      const equalPri = makeTeam({ recruitPriority: 10 });
+      const lowerPri = makeTeam({ recruitPriority: 5 });
+      const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
+
+      incumbent.add(e);
+
+      expect(equalPri.add(e)).toBe(false);
+      expect(e.teamRef).toBe(incumbent);
+      expect(lowerPri.add(e)).toBe(false);
+      expect(e.teamRef).toBe(incumbent);
+      expect(incumbent.total).toBe(1);
+      expect(equalPri.total).toBe(0);
+      expect(lowerPri.total).toBe(0);
+    });
   });
 
   // ==========================================================================
@@ -2600,6 +2994,38 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       expect(team.total).toBe(1);
       expect(team.members.every(m => m.stats.isInfantry)).toBe(true);
+    });
+
+    it('vehicle recruit prefilters to the requested class before Can_Add', () => {
+      const team = makeTeam({
+        house: House.Greece,
+        memberDefs: [
+          { type: UnitType.V_2TNK, count: 3 },
+          { type: UnitType.V_ARTY, count: 2 },
+          { type: UnitType.V_MGG, count: 1 },
+        ],
+      });
+      const atCell = (type: UnitType, cx: number, cy: number) =>
+        makeEntity(type, House.Greece, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+
+      const mgg = atCell(UnitType.V_MGG, 78, 60);
+      const tankA = atCell(UnitType.V_2TNK, 78, 59);
+      const tankB = atCell(UnitType.V_2TNK, 79, 59);
+      const tankC = atCell(UnitType.V_2TNK, 79, 60);
+      const artyA = atCell(UnitType.V_ARTY, 78, 61);
+      const artyB = atCell(UnitType.V_ARTY, 77, 60);
+
+      team.recruit([mgg, tankA, tankB, tankC, artyA, artyB], { x: 0, y: 0 });
+
+      expect(team.members.filter(m => m.type === UnitType.V_2TNK)).toHaveLength(1);
+      expect(team.members.filter(m => m.type === UnitType.V_ARTY)).toHaveLength(2);
+      expect(team.members.filter(m => m.type === UnitType.V_MGG)).toHaveLength(1);
+      expect(tankA.teamRef).toBe(team);
+      expect(tankB.teamRef).toBeNull();
+      expect(tankC.teamRef).toBeNull();
+      expect(artyA.teamRef).toBe(team);
+      expect(artyB.teamRef).toBe(team);
+      expect(mgg.teamRef).toBe(team);
     });
 
     it('moving team above under-strength threshold does not recruit replacements', () => {

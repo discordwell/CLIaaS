@@ -543,8 +543,10 @@ describe('Team mission assignment after reinforcement spawn (reinf.cpp:480)', ()
     }
   });
 
-  it('aircraft receive MISSION_MOVE on spawn to fly to origin', () => {
-    // C++ reinf.cpp:482-490 — aircraft spawn at edge, fly to origin
+  it('aircraft keep MISSION_NONE on spawn; team coordination supplies later orders', () => {
+    // C++ reinf.cpp:479-481 — Assign_Mission(MISSION_GUARD) is inside
+    // `if (object->What_Am_I() != RTTI_AIRCRAFT)`. Aircraft keep the
+    // MissionClass constructor state after Unlimbo.
     const teamTypes = [makeTeamType({
       house: 2,  // USSR
       members: [{ type: 'YAK', count: 2 }],
@@ -563,12 +565,12 @@ describe('Team mission assignment after reinforcement spawn (reinf.cpp:480)', ()
       if (UNIT_STATS[entity.type]?.isAircraft) {
         expect(
           entity.mission,
-          `Aircraft ${entity.type} should have MISSION_MOVE to fly to origin`,
-        ).toBe(Mission.MOVE);
+          `Aircraft ${entity.type} should keep MISSION_NONE after Unlimbo`,
+        ).toBe(Mission.NONE);
         expect(
           entity.moveTarget,
-          'Aircraft should have moveTarget set to origin waypoint',
-        ).toBeDefined();
+          'Aircraft should not get a spawn-time NavCom; TeamClass assigns it later',
+        ).toBeNull();
       }
     }
   });
@@ -686,7 +688,7 @@ describe('Waypoint-based spawn locations (reinf.cpp:441)', () => {
     }
   });
 
-  it('aircraft spawn at edge and have moveTarget toward origin', () => {
+  it('aircraft spawn at edge without a spawn-time NavCom', () => {
     const teamTypes = [makeTeamType({
       house: 2,
       members: [{ type: 'MIG', count: 1 }],
@@ -695,7 +697,6 @@ describe('Waypoint-based spawn locations (reinf.cpp:441)', () => {
     const houseEdges = new Map<House, string>([[House.USSR, 'north']]);
     const mapBounds = { x: 20, y: 30, w: 80, h: 60 };
     const waypoints = new Map<number, CellPos>([[0, { cx: 60, cy: 70 }]]);
-    const originLepton = cellTargetToLepton(60, 70);
     const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: 0 };
     const result = executeTriggerAction(
       action, teamTypes, waypoints, emptyGlobals, emptyTriggers,
@@ -704,9 +705,8 @@ describe('Waypoint-based spawn locations (reinf.cpp:441)', () => {
 
     expect(result.spawned.length).toBe(1);
     const mig = result.spawned[0];
-    expect(mig.moveTarget, 'Aircraft moveTarget should be set to origin waypoint').toBeDefined();
-    expect(mig.moveTarget!.lx).toBe(originLepton.lx);
-    expect(mig.moveTarget!.ly).toBe(originLepton.ly);
+    expect(mig.mission).toBe(Mission.NONE);
+    expect(mig.moveTarget, 'Aircraft NavCom is assigned later by TeamClass').toBeNull();
   });
 });
 
@@ -1233,7 +1233,8 @@ describe('Edge cases in reinforcement spawn', () => {
     expect(result.spawned.length).toBe(3);
     for (const entity of result.spawned) {
       expect(entity.aircraftState).toBe('flying');
-      expect(entity.mission).toBe(Mission.MOVE);
+      expect(entity.mission).toBe(Mission.NONE);
+      expect(entity.moveTarget).toBeNull();
     }
   });
 
@@ -1866,5 +1867,39 @@ describe('Vessel GUARD→MOVE transition: forcedActive team (reinf.cpp + vessel.
       expect(pts[i].missionQueue, `PT[${i}] missionQueue should be MOVE`).toBe(Mission.MOVE);
       expect(pts[i].moveTarget, `PT[${i}] moveTarget (NavCom) should be set`).not.toBeNull();
     }
+  });
+
+  it('Coordinate_Move waits for close members to clear legal NavCom', () => {
+    // C++ team.cpp:2032-2040 explicitly treats a valid NavCom as unfinished
+    // movement work, even after the member is within StrayDistance. The
+    // SCG07EA cover drift is therefore not fixed by ignoring NavCom here; the
+    // root is stale NavCom clearing in the movement/PCP path.
+    const waypoints = new Map<number, { cx: number; cy: number }>();
+    waypoints.set(0, { cx: 14, cy: 53 });
+    waypoints.set(1, { cx: 20, cy: 53 });
+
+    const team = new Team({
+      house: House.GREECE,
+      desiredMembers: [{ type: UnitType.V_PT, count: 1 }],
+      missionList: [
+        { mission: TMISSION_MOVE, data: 0 },
+        { mission: TMISSION_MOVE, data: 1 },
+      ],
+      forcedActive: true,
+    });
+    const pt = makeEntity(UnitType.V_PT, House.GREECE, 14, 53);
+    pt.mission = Mission.MOVE;
+    pt.moveTarget = cellTargetToLepton(14, 53);
+    team.add(pt);
+
+    team.isMoving = true;
+    team.currentMission = 0;
+    team.isNextMission = false;
+    team.target = cellToWorld({ cx: 14, cy: 53 });
+
+    team.coordinateMove(waypoints);
+
+    expect(team.isNextMission).toBe(false);
+    expect(pt.moveTarget).toEqual(cellTargetToLepton(14, 53));
   });
 });

@@ -454,11 +454,11 @@ describe('scan/timing constants — C++ parity', () => {
     expect(cppTickRate).toBe(15);
   });
 
-  it('C++ guard area leash = Threat_Range(1)/2 = min(weaponRange, 5 cells)', () => {
+  it('C++ guard area leash = Threat_Range(1)/2, capped at 5 cells', () => {
     // C++ foot.cpp:996: leash = Threat_Range(1) / 2
-    // Threat_Range(1) = min(2 * weaponRange, 0x0A00)
+    // Threat_Range(1) = min(2 * (GuardRange || weaponRange), 0x0A00)
     // 0x0A00 = 2560 leptons = 10 cells (at 256 leptons/cell)
-    // So leash = min(2*weaponRange, 10cells) / 2 = min(weaponRange, 5cells)
+    // So the leash caps at 5 cells, while types like DOG use GuardRange first.
     const maxThreatRange = 10; // cells
     const maxLeash = maxThreatRange / 2; // 5 cells
     expect(maxLeash).toBe(5);

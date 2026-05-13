@@ -13,7 +13,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
-import { CELL_SIZE, House, MAP_CELLS, RESFACTOR, UnitType } from '../engine/types';
+import { CELL_SIZE, House, MAP_CELLS, Mission, RESFACTOR, UnitType } from '../engine/types';
+import { clearAllTeams, getActiveTeams } from '../engine/team';
+import type { ScenarioTrigger, TeamType } from '../engine/scenario';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -49,7 +51,10 @@ beforeAll(() => {
   ));
 });
 
-beforeEach(() => resetEntityIds());
+beforeEach(() => {
+  resetEntityIds();
+  clearAllTeams();
+});
 
 describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
   it('discovers newly unlimboed player-allied non-PlayerPtr objects in PlayerPtr visible cells', () => {
@@ -111,5 +116,72 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
 
     const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
     expect(discovered.has(ussr.id)).toBe(false);
+  });
+
+  it('springs attached DISCOVERED triggers immediately when an object is revealed', () => {
+    const game = createGame();
+    game.playerHouse = House.Greece;
+
+    const player = new Entity(
+      UnitType.I_E1,
+      House.Greece,
+      50 * CELL_SIZE + CELL_SIZE / 2,
+      50 * CELL_SIZE + CELL_SIZE / 2
+    );
+    const enemy = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      51 * CELL_SIZE + CELL_SIZE / 2,
+      50 * CELL_SIZE + CELL_SIZE / 2
+    );
+    enemy.mission = Mission.GUARD;
+    enemy.triggerName = 'spot';
+    game.entities.push(player, enemy);
+    game.entityById.set(player.id, player);
+    game.entityById.set(enemy.id, enemy);
+
+    const teamTypes: TeamType[] = [{
+      name: 'spotteam',
+      house: 2,
+      flags: 0,
+      maxAllowed: 5,
+      origin: 0,
+      trigger: -1,
+      members: [{ type: 'E1', count: 1 }],
+      missions: [{ mission: 3, data: 4 }],
+    }];
+    const trigger: ScenarioTrigger = {
+      name: 'spot',
+      persistence: 0,
+      house: 2,
+      eventControl: 0,
+      actionControl: 0,
+      event1: { type: 4, team: -1, data: 0 },
+      event2: { type: 0, team: -1, data: 0 },
+      action1: { action: 4, team: 0, trigger: -1, data: -1 },
+      action2: { action: 0, team: -1, trigger: -1, data: 0 },
+      fired: false,
+      timerTick: 0,
+      playerEntered: false,
+      playerEnteredHouse: -1,
+      objectDiscovered: false,
+      enteredZone: false,
+      crossedHorizontal: false,
+      crossedVertical: false,
+      forceFirePending: false,
+      pendingDestroyedCount: 0,
+      triggeringEntityIds: [],
+    };
+    (game as unknown as { teamTypes: TeamType[] }).teamTypes = teamTypes;
+    (game as unknown as { triggers: ScenarioTrigger[] }).triggers = [trigger];
+    (game as unknown as { waypoints: Map<number, { cx: number; cy: number }> }).waypoints =
+      new Map([[0, { cx: 51, cy: 50 }], [4, { cx: 52, cy: 50 }]]);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    expect(trigger.objectDiscovered).toBe(true);
+    expect(trigger.fired).toBe(true);
+    expect(getActiveTeams()).toHaveLength(1);
+    expect(getActiveTeams()[0].typeName).toBe('spotteam');
   });
 });

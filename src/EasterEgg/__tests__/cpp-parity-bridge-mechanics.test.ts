@@ -238,7 +238,7 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
   it('damage >= 1001 should always destroy bridge (roll max is 1000, always < 1001)', () => {
     // C++ Random_Pick(1, 1000) returns maximum 1000.
     // Check: 1000 < 1001 is true. So damage >= 1001 ALWAYS destroys.
-    // Two-phase: first hit → half-destroyed, second → WATER.
+    // Two-phase: first hit -> half-destroyed, second -> destroyed bridge river.
     const ctx = makeCombatCtx();
     setBridgeTemplate(ctx.map, 20, 20, TEMPLATE_BRIDGE1, 6);
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
@@ -251,10 +251,10 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
     expect(ctx.map.templateType[idx]).toBe(TEMPLATE_BRIDGE1H);
     expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.CLEAR);
 
-    // Phase 2: half-destroyed → WATER
+    // Phase 2: half-destroyed -> BRIDGE1D with LAND_RIVER.
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
     applySplashDamage(ctx, impactPos, { damage: 1001, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
-    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.WATER);
+    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.RIVER);
   });
 
   it('damage=1000 should almost always destroy bridge (999/1000 chance)', () => {
@@ -270,7 +270,7 @@ describe('Bridge damage probability formula — C++ combat.cpp:267', () => {
       applySplashDamage(ctx, impactPos, { damage: 1000, warhead: 'HE', splash: 1.5 }, -1, House.Spain);
     }
 
-    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.WATER);
+    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.RIVER);
   });
 });
 
@@ -781,7 +781,7 @@ describe('Warhead filtering for bridge damage — C++ combat.cpp:261-268', () =>
       const impactPos = { x: 20 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 };
       applySplashDamage(ctx, impactPos, { damage: 1500, warhead: wh, splash: 1.5 }, -1, House.Spain);
 
-      expect(ctx.map.getTerrain(20, 20), `${wh} warhead should destroy bridge`).toBe(Terrain.WATER);
+      expect(ctx.map.getTerrain(20, 20), `${wh} warhead should destroy bridge`).toBe(Terrain.RIVER);
     }
 
     for (const wh of rejectedWarheads) {

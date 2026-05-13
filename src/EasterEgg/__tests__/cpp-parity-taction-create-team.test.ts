@@ -163,6 +163,24 @@ describe('TACTION_CREATE_TEAM (action=4) — C++ ScenarioClass::Create_Army pari
       expect(result.createTeam!.house).toBe(House.Greece);
     });
 
+    it('preserves RecruitPriority for runtime TeamClass construction', () => {
+      const teamTypes: TeamType[] = [{
+        name: 'priority-team',
+        house: 9, // BadGuy
+        flags: 0,
+        recruitPriority: 10,
+        origin: -1,
+        trigger: -1,
+        members: [{ type: 'E1', count: 2 }, { type: 'TRUK', count: 1 }],
+        missions: [{ mission: 3, data: 31 }],
+      }];
+
+      const result = execCreateTeam(teamTypes);
+
+      expect(result.createTeam).toBeDefined();
+      expect(result.createTeam!.recruitPriority).toBe(10);
+    });
+
     it('assigns team mission script in createTeam descriptor', () => {
       const teamTypes: TeamType[] = [{
         name: 'scripted',

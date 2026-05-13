@@ -23,8 +23,10 @@
  *    list. The newest SS is processed first during regroup.
  *
  * 2. C++ activation leaves IsReforming=true and runs Coordinate_Regroup, not
- *    the main TMISSION_MOVE. Regroup anchors to the newest/closest member and
- *    queues MOVE only for the two far subs; the close sub stays GUARD.
+ *    the main TMISSION_MOVE. Calc_Center first averages playing members, then
+ *    falls back to the closest member CELL target because the C++ source checks
+ *    `!Can_Enter_Cell(...)`; MOVE_OK is enum value 0. Regroup queues MOVE only
+ *    for the two far subs; the close sub stays GUARD.
  *
  * 3. C++ Coordinate_Regroup returns false only while assigning fresh NavCom.
  *    On the following tick, the two far subs already have NavCom, so reforming
@@ -35,6 +37,7 @@
  *   - team.cpp:495-572     TeamClass::AI composition check (IsReforming xsition)
  *   - team.cpp:627-652     TeamClass::AI activation (Percent_Chance Tag 1)
  *   - team.cpp:891-914     TeamClass::Add (newest-first Member chain)
+ *   - team.cpp:1390-1551   Calc_Center
  *   - team.cpp:1744-1792   Coordinate_Regroup
  *   - foot.cpp:520-539     FootClass::Mission_Move (Random_Pick(0,2) tag 60010)
  *   - mission.cpp:343-358  MissionClass::Commence (pops MissionQueue, Timer=0)
@@ -97,11 +100,21 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     return { team, subs };
   }
 
+  function scg07NavalCtx(subs: Entity[]) {
+    return {
+      entities: subs,
+      // The averaged center of this three-sub cluster is cell (100,50). C++
+      // VesselClass::Can_Enter_Cell returns MOVE_OK there, and TeamClass::
+      // Calc_Center falls back because it negates the raw MoveType enum.
+      canEnterCell: (_unit: Entity, _cx: number, _cy: number) => true,
+    };
+  }
+
   it('activates into reforming regroup, not main mission advance', () => {
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
 
-    updateAllTeams(wps, { entities: subs });
+    updateAllTeams(wps, scg07NavalCtx(subs));
 
     const tAny = team as unknown as {
       isMoving: boolean;
@@ -117,14 +130,14 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     expect(tAny.isReforming, 'C++ leaves IsReforming true after tick-4 regroup assigned NavCom').toBe(true);
     expect(tAny.currentMission, 'main mission has not advanced while reforming').toBe(-1);
     expect(tAny.missionTarget, 'mission target not set until reforming clears').toBeNull();
-    expect(tAny.zoneLeptonX).toBe(99 * 256 + 128);
-    expect(tAny.zoneLeptonY).toBe(48 * 256 + 128);
+    expect(tAny.zoneLeptonX).toBe(99 * 256 + 0x88);
+    expect(tAny.zoneLeptonY).toBe(48 * 256 + 0x88);
   });
 
   it('queues MOVE only on the two far subs during Coordinate_Regroup', () => {
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
-    updateAllTeams(wps, { entities: subs });
+    updateAllTeams(wps, scg07NavalCtx(subs));
 
     expect(team.members.map(m => m.id)).toEqual([subs[2].id, subs[1].id, subs[0].id]);
     expect(subs[0].mission === Mission.MOVE || subs[0].missionQueue === Mission.MOVE).toBe(true);
@@ -137,10 +150,10 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
   it('clears reforming on the next Team::AI once far subs already have NavCom', () => {
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
-    updateAllTeams(wps, { entities: subs });
+    updateAllTeams(wps, scg07NavalCtx(subs));
     expect((team as unknown as { isReforming: boolean }).isReforming).toBe(true);
 
-    updateAllTeams(wps, { entities: subs });
+    updateAllTeams(wps, scg07NavalCtx(subs));
 
     const tAny = team as unknown as { isReforming: boolean; currentMission: number };
     expect(tAny.isReforming).toBe(false);
@@ -154,7 +167,7 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     // nonInterruptAnimTicks shim.
     const { team, subs } = setupSubzLike();
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
-    updateAllTeams(wps, { entities: subs });
+    updateAllTeams(wps, scg07NavalCtx(subs));
 
     expect(subs[0].nonInterruptAnimTicks).toBe(0);
     expect(subs[1].nonInterruptAnimTicks).toBe(0);
@@ -185,7 +198,7 @@ describe('SCG07EA tick 4 subz activation — non-reinforceable VESSEL team Missi
     (team as unknown as { isFullStrength: boolean }).isFullStrength = false;
 
     const wps = new Map([[14, { cx: 68, cy: 46 }]]);
-    updateAllTeams(wps, { entities: ss });
+    updateAllTeams(wps, scg07NavalCtx(ss));
 
     // No last-member delay for reinforceable teams — the regroup path
     // handles them via Coordinate_Regroup.

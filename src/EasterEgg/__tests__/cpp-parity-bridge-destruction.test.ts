@@ -348,12 +348,11 @@ describe('Bridge passability changes after destruction', () => {
 
 // ── Barrel explosion triggers bridge destruction ────────────────────────────
 
-describe('Barrel explosion bridge destruction (structureDamage → destroyBridge)', () => {
+describe('Barrel explosion bridge non-destruction (building.cpp BARL/BRL3)', () => {
 
-  it('barrel (BARL) destruction destroys nearby half-destroyed bridge cells', () => {
-    // C++ building.cpp barrel explosion chain → map.cpp Destroy_Bridge_At
-    // TS: structureDamage for BARL/BRL3 calls map.destroyBridge(cx, cy, 3)
-    // With two-phase, barrel on half-destroyed bridge → water (Phase 2).
+  it('barrel (BARL) destruction does not directly destroy nearby half-destroyed bridge cells', () => {
+    // C++ building.cpp:1380-1405 only creates four invisible Fire bullets.
+    // Fire warheads do not pass combat.cpp's AP/HE bridge destruction gate.
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
     setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
@@ -364,12 +363,12 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
     structureDamage(ctx, barrel, 100);
 
     expect(barrel.alive).toBe(false);
-    expect(ctx.map.getTerrain(21, 20)).toBe(Terrain.WATER);
-    expect(ctx.map.getTerrain(22, 20)).toBe(Terrain.WATER);
-    expect(ctx.bridgeCellCount).toBe(0);
+    expect(ctx.map.templateType[20 * MAP_CELLS + 21]).toBe(TEMPLATE_BRIDGE1H);
+    expect(ctx.map.templateType[20 * MAP_CELLS + 22]).toBe(TEMPLATE_BRIDGE1H);
+    expect(ctx.bridgeCellCount).toBe(2);
   });
 
-  it('BRL3 barrel also triggers bridge destruction on half-destroyed bridges', () => {
+  it('BRL3 barrel also does not directly destroy half-destroyed bridges', () => {
     const barrel = makeBarrel(20, 20, 'BRL3');
     const ctx = makeCombatCtx([], [barrel]);
     setBridgeTemplate(ctx.map, 19, 20, TEMPLATE_BRIDGE2H, 6); // half-destroyed
@@ -378,11 +377,11 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
     structureDamage(ctx, barrel, 100);
 
     expect(barrel.alive).toBe(false);
-    expect(ctx.map.getTerrain(19, 20)).toBe(Terrain.WATER);
-    expect(ctx.bridgeCellCount).toBe(0);
+    expect(ctx.map.templateType[20 * MAP_CELLS + 19]).toBe(TEMPLATE_BRIDGE2H);
+    expect(ctx.bridgeCellCount).toBe(1);
   });
 
-  it('EVA message 7 ("Bridge destroyed.") plays when bridge is destroyed by barrel', () => {
+  it('EVA message 7 ("Bridge destroyed.") does not play for barrel death alone', () => {
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
     setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1, 6);
@@ -393,7 +392,7 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
 
     structureDamage(ctx, barrel, 100);
 
-    expect(evaMessages).toContain(7);
+    expect(evaMessages).not.toContain(7);
   });
 
   it('no EVA message when barrel explodes but no bridge cells are nearby', () => {
@@ -409,7 +408,7 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
     expect(evaMessages).not.toContain(7);
   });
 
-  it('bridgeCellCount is recalculated after barrel destroys half-destroyed bridge', () => {
+  it('bridgeCellCount remains unchanged after barrel death alone', () => {
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
     setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
@@ -420,8 +419,7 @@ describe('Barrel explosion bridge destruction (structureDamage → destroyBridge
 
     structureDamage(ctx, barrel, 100);
 
-    // Near bridge fully destroyed (Phase 2), far one remains
-    expect(ctx.bridgeCellCount).toBe(1);
+    expect(ctx.bridgeCellCount).toBe(2);
   });
 });
 
@@ -454,8 +452,9 @@ describe('Splash damage bridge destruction (combat.cpp:261-268)', () => {
       );
     }
 
-    // Bridge should be destroyed after 50 hits with ~20% chance each
-    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.WATER);
+    // Simple bridge destruction installs BRIDGE1D, whose C++ Land_Type is RIVER
+    // (impassable, but not LAND_WATER for Combat_Anim).
+    expect(ctx.map.getTerrain(20, 20)).toBe(Terrain.RIVER);
   });
 
   it('AP/HE splash on multi-part bridge templates 2A/2B/3A/3B destroys bridge', () => {
@@ -544,7 +543,7 @@ describe('PARITY FIXED: Two-phase bridge destruction (map.cpp:1797-1864)', () =>
 
 describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
 
-  it('barrel explosion on half-destroyed bridge kills all units standing on destroyed cells', () => {
+  it('AP/HE destruction on half-destroyed bridge kills all units standing on destroyed cells', () => {
     // C++ map.cpp:1843 — obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true)
     // Units on the bridge when it's fully destroyed are killed instantly.
     // Occupant killing only happens on Phase 2 (half-destroyed → WATER).
@@ -553,13 +552,17 @@ describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
       21 * CELL_SIZE + CELL_SIZE / 2,
       20 * CELL_SIZE + CELL_SIZE / 2,
     );
-    const barrel = makeBarrel(20, 20, 'BARL');
-    const ctx = makeCombatCtx([infantryOnBridge], [barrel]);
+    const ctx = makeCombatCtx([infantryOnBridge], []);
     setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
-    // Destroy barrel — triggers Phase 2 bridge destruction and occupant killing
-    structureDamage(ctx, barrel, 100);
+    applySplashDamage(
+      ctx,
+      { x: 21 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 1500, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.Spain,
+    );
 
     // Infantry on the bridge cell should be dead (fell into water)
     expect(infantryOnBridge.alive).toBe(false);
@@ -571,14 +574,17 @@ describe('Bridge destruction kills occupants (map.cpp:1837-1861)', () => {
       25 * CELL_SIZE + CELL_SIZE / 2,
       20 * CELL_SIZE + CELL_SIZE / 2,
     );
-    const barrel = makeBarrel(20, 20, 'BARL');
-    const ctx = makeCombatCtx([infantryOffBridge], [barrel]);
+    const ctx = makeCombatCtx([infantryOffBridge], []);
     setBridgeTemplate(ctx.map, 21, 20, TEMPLATE_BRIDGE1H, 6); // half-destroyed
     ctx.bridgeCellCount = ctx.map.countBridgeCells();
 
-    const hpBefore = infantryOffBridge.hp;
-
-    structureDamage(ctx, barrel, 100);
+    applySplashDamage(
+      ctx,
+      { x: 21 * CELL_SIZE + CELL_SIZE / 2, y: 20 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 1500, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.Spain,
+    );
 
     // Infantry far from bridge should be alive (may take blast damage but not bridge-kill)
     // The bridge occupant killer only kills units on cells that became water
@@ -629,7 +635,7 @@ describe('PARITY FIXED: Building placement on bridges (cell.cpp:499)', () => {
 
 describe('Barrel chain explosions near bridges', () => {
 
-  it('barrel explosion chain can destroy multiple bridge sections', () => {
+  it('barrel death queues chain bullets without directly destroying bridge sections', () => {
     // C++ barrel explosions fire 4 cardinal bullets (building.cpp:1344-1369).
     // If another barrel is in a cardinal cell, it chains. TS replicates this.
     const barrel1 = makeBarrel(20, 20, 'BARL');
@@ -643,16 +649,15 @@ describe('Barrel chain explosions near bridges', () => {
 
     expect(ctx.bridgeCellCount).toBe(2);
 
-    // Destroy first barrel — it should chain to second barrel
+    // Destroy first barrel — C++ queues bullets; the second barrel is not damaged
+    // until those BulletClass objects run later.
     structureDamage(ctx, barrel1, 100);
 
-    // Both barrels should be destroyed (chain explosion)
     expect(barrel1.alive).toBe(false);
-    expect(barrel2.alive).toBe(false);
+    expect(barrel2.alive).toBe(true);
 
-    // Both bridge sections should be destroyed
-    expect(ctx.map.getTerrain(19, 20)).toBe(Terrain.WATER);
-    expect(ctx.map.getTerrain(22, 20)).toBe(Terrain.WATER);
+    expect(ctx.map.templateType[20 * MAP_CELLS + 19]).toBe(TEMPLATE_BRIDGE1);
+    expect(ctx.map.templateType[20 * MAP_CELLS + 22]).toBe(TEMPLATE_BRIDGE1);
   });
 });
 
@@ -660,10 +665,9 @@ describe('Barrel chain explosions near bridges', () => {
 
 describe('Bridge count tracking (Scen.BridgeCount / ctx.bridgeCellCount)', () => {
 
-  it('bridgeCellCount updates after barrel destroys bridge', () => {
-    // C++ map.cpp:1828 — Scen.BridgeCount-- on full bridge destruction
-    // TS recalculates count from scratch after barrel explosion
-    // Use half-destroyed bridges near barrel for Phase 2 destruction.
+  it('bridgeCellCount remains unchanged after barrel death alone', () => {
+    // C++ BARL/BRL3 death queues Fire bullets and does not call
+    // Map.Destroy_Bridge_At, so the bridge counter cannot change here.
     const barrel = makeBarrel(20, 20, 'BARL');
     const ctx = makeCombatCtx([], [barrel]);
 
@@ -676,8 +680,7 @@ describe('Bridge count tracking (Scen.BridgeCount / ctx.bridgeCellCount)', () =>
 
     structureDamage(ctx, barrel, 100);
 
-    // Near bridge cells fully destroyed (Phase 2), far one remains
-    expect(ctx.bridgeCellCount).toBe(1);
+    expect(ctx.bridgeCellCount).toBe(3);
   });
 
   it('multiple bridge count: each bridge section tracked independently', () => {

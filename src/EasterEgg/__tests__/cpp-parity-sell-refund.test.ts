@@ -598,9 +598,9 @@ describe('sell animation duration (bdata.cpp:3125-3131)', () => {
 });
 
 // ============================================================
-// Section 12: Fire Sale — AI sells all buildings at 100%
+// Section 12: Fire Sale — AI starts sell-back, refund later at completion
 // C++ house.cpp:7322-7335: Fire_Sale calls Sell_Back(1) on each building
-// AI gets 100% refund — no RefundPercent, no health scaling.
+// Refund_Amount is paid by Mission_Deconstruction when the sell completes.
 // ============================================================
 describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
   function makeFireSaleContext(buildings: Array<{
@@ -644,8 +644,7 @@ describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
     } as any;
   }
 
-  it('AI fire sale gives 100% refund (full cost) — matches C++', () => {
-    // C++ AI Refund_Amount: cost = Raw_Cost * CostBias (no RefundPercent)
+  it('AI fire sale queues deconstruction without immediate refund', () => {
     const powrCost = iniCost('POWR');
     const ctx = makeFireSaleContext([
       { type: 'POWR', hp: iniStrength('POWR'), maxHp: iniStrength('POWR'), house: 'Soviet', cost: powrCost },
@@ -654,26 +653,28 @@ describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
     aiFireSale(ctx, 'Soviet' as any);
 
     const credits = ctx.houseCredits.get('Soviet' as any) ?? 0;
-    // C++ expected: full cost (AI gets 100%)
-    expect(credits).toBe(powrCost);
+    expect(credits).toBe(0);
+    expect(ctx.structures[0].alive).toBe(true);
+    expect(ctx.structures[0].mission).toBe(Mission.DECONSTRUCTION);
+    expect(ctx.structures[0].sellProgress).toBe(0);
   });
 
-  it('AI fire sale at half health — C++ still gives 100%', () => {
-    // C++ Refund_Amount has NO health scaling
+  it('captures HP at sell start for the later deconstruction completion', () => {
     const procCost = iniCost('PROC');
     const procHp = iniStrength('PROC');
+    const hp = Math.floor(procHp / 2);
     const ctx = makeFireSaleContext([
-      { type: 'PROC', hp: Math.floor(procHp / 2), maxHp: procHp, house: 'Soviet', cost: procCost },
+      { type: 'PROC', hp, maxHp: procHp, house: 'Soviet', cost: procCost },
     ]);
 
     aiFireSale(ctx, 'Soviet' as any);
 
     const credits = ctx.houseCredits.get('Soviet' as any) ?? 0;
-    // C++ expected: full cost regardless of health
-    expect(credits).toBe(procCost);
+    expect(credits).toBe(0);
+    expect(ctx.structures[0].sellHpAtStart).toBe(hp);
   });
 
-  it('AI fire sale multiple buildings — cumulative 100%', () => {
+  it('AI fire sale queues multiple buildings without immediate cumulative refund', () => {
     const powrCost = iniCost('POWR');
     const barrCost = iniCost('BARR');
     const weapCost = iniCost('WEAP');
@@ -686,7 +687,12 @@ describe('AI Fire_Sale (house.cpp:7322-7335)', () => {
     aiFireSale(ctx, 'Soviet' as any);
 
     const credits = ctx.houseCredits.get('Soviet' as any) ?? 0;
-    expect(credits).toBe(powrCost + barrCost + weapCost);
+    expect(credits).toBe(0);
+    expect(ctx.structures.map(s => s.mission)).toEqual([
+      Mission.DECONSTRUCTION,
+      Mission.DECONSTRUCTION,
+      Mission.DECONSTRUCTION,
+    ]);
   });
 });
 

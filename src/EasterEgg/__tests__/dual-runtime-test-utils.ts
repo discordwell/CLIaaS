@@ -54,6 +54,10 @@ export interface DualStepResult {
   wasm: AgentStepResult;
 }
 
+export interface DualScenarioOptions {
+  wasmSeed?: number;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -205,6 +209,7 @@ export async function stopParityServer(handle: ParityServerHandle | undefined): 
 export async function withDualScenario<T>(
   scenario: string,
   fn: (handle: DualRuntimeHandle) => Promise<T>,
+  options: DualScenarioOptions = {},
 ): Promise<T> {
   const ts = new TsAgentAdapter({ url: RA_PARITY_BASE_URL, headless: true });
   const wasm = new WasmAdapter({
@@ -212,6 +217,7 @@ export async function withDualScenario<T>(
     headless: true,
     autoplay: true,
     url: new URL('/ra/original.html', RA_PARITY_BASE_URL).toString(),
+    seed: options.wasmSeed,
   });
 
   await ts.connect();

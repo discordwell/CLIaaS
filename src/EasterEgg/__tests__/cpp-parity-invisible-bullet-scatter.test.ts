@@ -17,6 +17,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, Mission,
+  pixelToLepton,
   WEAPON_STATS,
   buildDefaultAlliances,
 } from '../engine/types';
@@ -127,6 +128,24 @@ function defenseStructureAtCell(
     maxAmmo: weapon ? 1 : -1,
     turretDir,
     desiredTurretDir: turretDir,
+  };
+}
+
+function structureAtCell(type: string, house: House, cx: number, cy: number, hp: number): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp,
+    maxHp: hp,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
   };
 }
 
@@ -385,6 +404,79 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(ScenarioRandom.callCount).toBe(1);
   });
 
+  it('does not force-explode non-high bullets on non-high wall overlays', () => {
+    // C++ bullet.cpp:914 checks OverlayTypeClass::IsHigh, not IsWall. In
+    // odata.cpp, FENC/SBAG/BARB/WOOD/CYCL are walls but do not stop low bullets.
+    const ctx = makeCombatCtx();
+    const wallCx = 20;
+    const wallCy = 18;
+    const lx = wallCx * 256 + 128;
+    const ly = wallCy * 256 + 128;
+    ctx.map.setWallType(wallCx, wallCy, 'FENC');
+    ScenarioRandom.callCount = 0;
+
+    ctx.inflightProjectiles.push(makeProjectile({
+      weapon: { ...WEAPON_STATS.M1Carbine, isHigh: false, isDropping: false },
+      speed: 0,
+      speedAdd: 0,
+      currentFrame: 0,
+      travelFrames: 30,
+      fuelTimer: 30,
+      fuseTimer: 30,
+      proximity: 512,
+      startX: wallCx * CELL_SIZE + CELL_SIZE / 2,
+      startY: wallCy * CELL_SIZE + CELL_SIZE / 2,
+      impactX: (wallCx + 2) * CELL_SIZE + CELL_SIZE / 2,
+      impactY: wallCy * CELL_SIZE + CELL_SIZE / 2,
+      logicalLX: lx,
+      logicalLY: ly,
+      headToLX: lx + 512,
+      headToLY: ly,
+      facing256: 64,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].currentFrame).toBe(1);
+    expect(ScenarioRandom.callCount).toBe(0);
+  });
+
+  it('force-explodes non-high bullets on high brick overlays', () => {
+    const ctx = makeCombatCtx();
+    const wallCx = 20;
+    const wallCy = 18;
+    const lx = wallCx * 256 + 128;
+    const ly = wallCy * 256 + 128;
+    ctx.map.setWallType(wallCx, wallCy, 'BRIK');
+    ScenarioRandom.callCount = 0;
+
+    ctx.inflightProjectiles.push(makeProjectile({
+      weapon: { ...WEAPON_STATS.M1Carbine, isHigh: false, isDropping: false },
+      speed: 0,
+      speedAdd: 0,
+      currentFrame: 0,
+      travelFrames: 30,
+      fuelTimer: 30,
+      fuseTimer: 30,
+      proximity: 512,
+      startX: wallCx * CELL_SIZE + CELL_SIZE / 2,
+      startY: wallCy * CELL_SIZE + CELL_SIZE / 2,
+      impactX: (wallCx + 2) * CELL_SIZE + CELL_SIZE / 2,
+      impactY: wallCy * CELL_SIZE + CELL_SIZE / 2,
+      logicalLX: lx,
+      logicalLY: ly,
+      headToLX: lx + 512,
+      headToLY: ly,
+      facing256: 64,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(0);
+    expect(ScenarioRandom.callCount).toBe(1);
+  });
+
   it('invisible projectile scatters impact position within 32-lepton radius', () => {
     const ctx = makeCombatCtx();
     const attacker = new Entity(UnitType.I_E1, House.USSR, 100, 100);
@@ -433,6 +525,13 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(ctx.inflightProjectiles[0].currentFrame).toBe(0);
     expect(ctx.inflightProjectiles[0].fuseTimer).toBe(4);
 
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(target2.alive).toBe(true);
+    expect(ScenarioRandom.callCount).toBe(1);
+
+    ctx.tick++;
     updateInflightProjectiles(ctx);
 
     expect(ctx.inflightProjectiles).toHaveLength(0);
@@ -508,11 +607,10 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(ScenarioRandom.callCount).toBeGreaterThan(1);
   });
 
-  it('flame-equipped bullets submit 4-frame FBALL_FADE Logic anim slots', () => {
+  it('flame-equipped bullets submit delayed FBALL_FADE Logic anim slots', () => {
     // C++ bullet.cpp:380-388 toggles IsToAnimate and submits ANIM_FBALL_FADE
-    // for FB1 flame bullets. adata.cpp defines FBALL_FADE as FB2 with four
-    // runtime frames; even though TS renders it with the closest available
-    // sprite, it still occupies a Logic slot for same-tick bullet ordering.
+    // for FB1 flame bullets. TS tracks that as a real Logic anim for same-tick
+    // bullet ordering, then renders it with the closest available napalm1 sprite.
     const ctx = makeCombatCtx();
     ctx.inflightProjectiles.push(makeProjectile({
       weapon: WEAPON_STATS.Flamer,
@@ -535,8 +633,12 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
 
     const trail = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'napalm1');
     expect(trail).toBeDefined();
-    expect(trail?.maxFrames).toBe(4);
-    expect(trail?.cppLogicSlot).toBe(true);
+    expect(trail?.maxFrames).toBe(14);
+    expect(trail?.cppLogicSlot).toBeUndefined();
+    const logicTrail = ctx.logicAnims.find(a => a.type === 'fball_fade');
+    expect(logicTrail).toBeDefined();
+    expect(logicTrail?.delay).toBe(1);
+    expect(logicTrail?.isBrandNew).toBe(true);
     expect(ctx.inflightProjectiles).toHaveLength(1);
   });
 
@@ -605,6 +707,65 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(proj.currentFrame).toBe(2);
   });
 
+  it('keeps a deletion-shift skipped BulletClass idle through later same-tick flushes', () => {
+    // C++ logic.cpp:284-313 decrements the Logic cursor when the current
+    // BulletClass deletes itself after removing an earlier Logic predecessor.
+    // The object that shifted into the skipped slot is not processed until the
+    // next frame; TS partial projectile flushes must preserve that skip through
+    // the final end-of-tick flush.
+    const victim = entityAtCell(UnitType.V_JEEP, House.Greece, 10, 10);
+    victim.hp = 1;
+    const ctx = makeCombatCtx([victim]);
+    ctx.tick = 368;
+
+    const victimLX = pixelToLepton(victim.pos.x);
+    const victimLY = pixelToLepton(victim.pos.y);
+    const killingProjectile = makeProjectile({
+      attackerId: -1,
+      targetId: victim.id,
+      weapon: WEAPON_STATS['90mm'],
+      damage: 50,
+      strength: 50,
+      logicIndexHint: 10,
+      impactX: victim.pos.x,
+      impactY: victim.pos.y,
+      logicalLX: victimLX,
+      logicalLY: victimLY,
+      headToLX: victimLX,
+      headToLY: victimLY,
+      fuseTimer: 1,
+      fuelTimer: 1,
+      proximity: 0,
+    });
+    const shiftedProjectile = makeProjectile({
+      weapon: WEAPON_STATS['105mm'],
+      logicIndexHint: 11,
+      currentFrame: 0,
+      fuseTimer: 10,
+      fuelTimer: 10,
+      logicalLX: 25429,
+      logicalLY: 24577,
+      headToLX: 25408,
+      headToLY: 24128,
+      proximity: 459,
+    });
+    ctx.inflightProjectiles.push(killingProjectile, shiftedProjectile);
+
+    updateInflightProjectiles(ctx, 11);
+
+    expect(victim.alive).toBe(false);
+    expect(ctx.inflightProjectiles).toContain(shiftedProjectile);
+    expect(shiftedProjectile.currentFrame).toBe(0);
+    expect(shiftedProjectile.processedLogicTick).toBe(368);
+
+    updateInflightProjectiles(ctx);
+    expect(shiftedProjectile.currentFrame).toBe(0);
+
+    ctx.tick++;
+    updateInflightProjectiles(ctx);
+    expect(shiftedProjectile.currentFrame).toBe(1);
+  });
+
   it('processes two bullets submitted by the current object in the same Logic pass', () => {
     // C++ DynamicVectorClass::Add appends at ActiveCount; it does not reuse an
     // earlier hole. A two-shooter aircraft can submit two invisible BulletClass
@@ -632,6 +793,85 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
 
     expect(ctx.inflightProjectiles).toHaveLength(0);
     expect(ScenarioRandom.callCount).toBe(2);
+  });
+
+  it('processes barrel bullets appended after a projectile deletes an earlier Logic object', () => {
+    // C++ LogicClass::AI re-reads Count() after BulletClass::AI. If that bullet
+    // destroys a barrel, Take_Damage first appends its RESULT_DESTROYED AnimClass
+    // effects, then appends the four barrel BulletClass objects. Those fresh
+    // appends can run in the same pass; deletion-shift handling must not
+    // classify them as old objects behind the cursor.
+    const barrel = structureAtCell('BARL', House.USSR, 10, 10, 10);
+    const ctx = makeCombatCtx([], [barrel]);
+    let nextHint = 11;
+    ctx.logicIndexHintForNewObject = () => nextHint++;
+    ctx.inflightProjectiles.push(makeProjectile({
+      weapon: { ...WEAPON_STATS['8Inch'], isInvisible: false },
+      damage: 500,
+      strength: 500,
+      logicIndexHint: 10,
+      impactX: 10 * CELL_SIZE + CELL_SIZE / 2,
+      impactY: 10 * CELL_SIZE + CELL_SIZE / 2,
+      logicalLX: 10 * 256 + 128,
+      logicalLY: 10 * 256 + 128,
+      headToLX: 10 * 256 + 128,
+      headToLY: 10 * 256 + 128,
+      fuseTimer: 1,
+      fuelTimer: 1,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    const barrelBullets = ctx.inflightProjectiles.filter(p => p.weapon.name === 'BarrelFire');
+    expect(barrel.alive).toBe(false);
+    expect(barrelBullets).toHaveLength(4);
+    expect(barrelBullets.map(p => p.logicIndexHint)).toEqual([12, 13, 14, 15]);
+    expect(barrelBullets.every(p => p.currentFrame === 1)).toBe(true);
+  });
+
+  it('does not treat pending Drop_Debris buildings as deleted Logic predecessors', () => {
+    // C++ BuildingClass::Take_Damage leaves destroyed buildings active in Logic
+    // until BuildingClass::AI runs Drop_Debris. A bullet that destroys a barrel
+    // therefore must not cause the following BulletClass slot to be skipped.
+    const barrel = structureAtCell('BARL', House.USSR, 10, 10, 10);
+    const ctx = makeCombatCtx([], [barrel]);
+    let nextHint = 20;
+    ctx.logicIndexHintForNewObject = () => nextHint++;
+    ctx.inflightProjectiles.push(makeProjectile({
+      weapon: { ...WEAPON_STATS['8Inch'], isInvisible: false },
+      damage: 500,
+      strength: 500,
+      logicIndexHint: 10,
+      impactX: 10 * CELL_SIZE + CELL_SIZE / 2,
+      impactY: 10 * CELL_SIZE + CELL_SIZE / 2,
+      logicalLX: 10 * 256 + 128,
+      logicalLY: 10 * 256 + 128,
+      headToLX: 10 * 256 + 128,
+      headToLY: 10 * 256 + 128,
+      fuseTimer: 1,
+      fuelTimer: 1,
+    }));
+    ctx.inflightProjectiles.push(makeProjectile({
+      weapon: { ...WEAPON_STATS['8Inch'], isInvisible: false },
+      damage: 1,
+      strength: 1,
+      logicIndexHint: 11,
+      impactX: 20 * CELL_SIZE + CELL_SIZE / 2,
+      impactY: 20 * CELL_SIZE + CELL_SIZE / 2,
+      logicalLX: 20 * 256 + 128,
+      logicalLY: 20 * 256 + 128,
+      headToLX: 20 * 256 + 128,
+      headToLY: 20 * 256 + 128,
+      fuseTimer: 1,
+      fuelTimer: 1,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    expect(barrel.alive).toBe(false);
+    expect(barrel.debrisCountdown).toBe(8);
+    expect(ctx.inflightProjectiles.some(p => p.logicIndexHint === 11)).toBe(false);
+    expect(ctx.inflightProjectiles.filter(p => p.weapon.name === 'BarrelFire')).toHaveLength(4);
   });
 
   it('vehicle death crew is appended after existing BulletClass Logic slots', () => {

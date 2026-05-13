@@ -18,7 +18,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { Terrain } from '../engine/map';
-import { CELL_SIZE, House, MAP_CELLS, Mission, RESFACTOR, UnitType, cellTargetToLepton, pixelToLepton } from '../engine/types';
+import { CELL_SIZE, House, LEPTON_SIZE, MAP_CELLS, Mission, RESFACTOR, UnitType, cellTargetToLepton, pixelToLepton } from '../engine/types';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -632,6 +632,146 @@ describe('InfantryClass::Movement_AI NavCom path continuation', () => {
     expect(e1.isDriving).toBe(true);
     expect(e1.headToLX).toBeGreaterThan(0);
     expect(e1.headToLY).toBeGreaterThan(0);
+  });
+
+  it('Basic_Path copies another same-cell infantry Path[] for the same NavCom', () => {
+    const game = createGame();
+    const navCom = cellTargetToLepton(25, 20);
+    const leader = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2
+    );
+    leader.mission = Mission.MOVE;
+    leader.missionTimer = 10;
+    leader.moveTarget = navCom;
+    leader.path = [
+      { cx: 20, cy: 21 },
+      { cx: 21, cy: 21 },
+      { cx: 22, cy: 20 },
+      { cx: 23, cy: 20 },
+      { cx: 24, cy: 20 },
+      { cx: 25, cy: 20 },
+    ];
+    leader.pathIndex = 0;
+    leader.isDriving = true;
+    leader.headToLX = 20 * LEPTON_SIZE + 128;
+    leader.headToLY = 21 * LEPTON_SIZE + 128;
+    leader.doing = 'walk';
+
+    const follower = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2
+    );
+    follower.mission = Mission.MOVE;
+    follower.missionTimer = 10;
+    follower.moveTarget = navCom;
+    follower.path = [];
+    follower.pathIndex = 0;
+    follower.pathDelay = 0;
+    follower.isDriving = false;
+    follower.doing = 'stand_ready';
+
+    for (const e of [leader, follower]) {
+      game.entities.push(e);
+      game.entityById.set(e.id, e);
+    }
+
+    tickEntity(game, follower);
+
+    expect(follower.path.slice(0, 5)).toEqual(leader.path.slice(0, 5));
+    expect(Math.floor(follower.headToLX / LEPTON_SIZE)).toBe(20);
+    expect(Math.floor(follower.headToLY / LEPTON_SIZE)).toBe(21);
+    expect(follower.isDriving).toBe(true);
+  });
+
+  it('same-cell infantry Path[] copy preserves facings when materialized cells are stale', () => {
+    const game = createGame();
+    const navCom = cellTargetToLepton(18, 19);
+    const leader = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2
+    );
+    leader.mission = Mission.MOVE;
+    leader.missionTimer = 10;
+    leader.moveTarget = navCom;
+    leader.path = [
+      { cx: 20, cy: 20 },
+      { cx: 19, cy: 19 },
+      { cx: 18, cy: 19 },
+    ];
+    leader.drivePathFacings = [7, 6]; // NW, W — the C++ Path[] command stream.
+    leader.pathIndex = 0;
+    leader.isDriving = true;
+    leader.headToLX = 19 * LEPTON_SIZE + 128;
+    leader.headToLY = 19 * LEPTON_SIZE + 128;
+    leader.doing = 'walk';
+
+    const follower = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2
+    );
+    follower.mission = Mission.MOVE;
+    follower.missionTimer = 10;
+    follower.moveTarget = navCom;
+    follower.pathDelay = 0;
+
+    for (const e of [leader, follower]) {
+      game.entities.push(e);
+      game.entityById.set(e.id, e);
+    }
+
+    tickEntity(game, follower);
+
+    expect(follower.path[0]).toEqual({ cx: 19, cy: 19 });
+    expect(follower.drivePathFacings[0]).toBe(7);
+    expect(Math.floor(follower.headToLX / LEPTON_SIZE)).toBe(19);
+    expect(Math.floor(follower.headToLY / LEPTON_SIZE)).toBe(19);
+  });
+
+  it('cached infantry Path[] facings are consumed from current Coord, not stale absolute cells', () => {
+    const game = createGame(128, 128);
+    const rifle = new Entity(
+      UnitType.I_E1,
+      House.BadGuy,
+      30 * CELL_SIZE + CELL_SIZE / 2,
+      57 * CELL_SIZE + CELL_SIZE / 2
+    );
+    // C++ SCG20EA trace shape after a W,NW path prefix has been consumed:
+    // FootClass::Path[] still stores the remaining facings, so InfantryClass::
+    // Movement_AI applies Path[0] with Adjacent_Cell(Coord, Path[0]). The next
+    // facing is W, even though the pre-materialized absolute path cell at the
+    // same cursor is the old SW target.
+    placeAtLeptons(rifle, 30 * LEPTON_SIZE + 192, 57 * LEPTON_SIZE + 192);
+    rifle.mission = Mission.MOVE;
+    rifle.missionTimer = 10;
+    rifle.moveTarget = cellTargetToLepton(17, 57);
+    rifle.path = [
+      { cx: 31, cy: 58 },
+      { cx: 30, cy: 57 },
+      { cx: 29, cy: 58 },
+      { cx: 28, cy: 58 },
+    ];
+    rifle.pathIndex = 2;
+    rifle.drivePathFacings = [6, 5, 6]; // W, SW, W — C++ remaining Path[].
+    rifle.pathDelay = 0;
+    rifle.isDriving = false;
+
+    game.entities.push(rifle);
+    game.entityById.set(rifle.id, rifle);
+
+    tickEntity(game, rifle);
+
+    expect(rifle.isDriving).toBe(true);
+    expect(Math.floor(rifle.headToLX / LEPTON_SIZE)).toBe(29);
+    expect(Math.floor(rifle.headToLY / LEPTON_SIZE)).toBe(57);
   });
 
 });

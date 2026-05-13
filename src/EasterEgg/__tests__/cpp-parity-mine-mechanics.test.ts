@@ -74,11 +74,14 @@ import {
   worldToCell, worldDist,
   GAME_TICKS_PER_SEC,
   buildDefaultAlliances,
-pixelToLepton, } from '../engine/types';
+  pixelToLepton,
+  modifyDamage,
+} from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   updateMinelayer,
   tickMines,
+  triggerMineAtCell,
   MAX_MINES_PER_HOUSE,
   type SpecialUnitsContext,
 } from '../engine/specialUnits';
@@ -190,19 +193,21 @@ function makeVehicle(house: House = House.USSR, cx = 10, cy = 10): Entity {
 const alliances = buildDefaultAlliances();
 
 function makeContext(overrides: Partial<SpecialUnitsContext> = {}): SpecialUnitsContext {
-  const entities: Entity[] = overrides.entities ?? [];
-  const mines: SpecialUnitsContext['mines'] = overrides.mines ?? [];
-  const effects: Effect[] = overrides.effects ?? [];
-  const damaged: Array<{ entity: Entity; amount: number; warhead: string }> = [];
+	const entities: Entity[] = overrides.entities ?? [];
+	const mines: SpecialUnitsContext['mines'] = overrides.mines ?? [];
+	const effects: Effect[] = overrides.effects ?? [];
+	const logicAnims = overrides.logicAnims ?? [];
+	const damaged: Array<{ entity: Entity; amount: number; warhead: string }> = [];
 
   return {
     entities,
     entityById: new Map(entities.map(e => [e.id, e])),
     structures: [],
     mines,
-    activeVortices: [],
-    effects,
-    tick: 100,
+	    activeVortices: [],
+	    effects,
+	    logicAnims,
+	    tick: 100,
     playerHouse: House.Spain,
     credits: 10000,
     houseCredits: new Map(),
@@ -598,7 +603,7 @@ describe('mine limit per house', () => {
 // =============================================================================
 
 describe('mine detonation: vehicle triggers', () => {
-  it('AV mine deals AVMineDamage to vehicle — C++ unit.cpp:1825-1827', () => {
+  it('AV mine deals WARHEAD_HE-modified AVMineDamage to vehicle — C++ unit.cpp:1825-1827 + object.cpp:1575', () => {
     const vehicle = makeVehicle(House.USSR, 10, 10);
     const mines: SpecialUnitsContext['mines'] = [
       { cx: 10, cy: 10, house: House.Spain, damage: AV_MINE_DAMAGE, type: 'AV' },
@@ -607,12 +612,12 @@ describe('mine detonation: vehicle triggers', () => {
     tickMines(ctx);
 
     expect(ctx._damaged).toHaveLength(1);
-    expect(ctx._damaged[0].amount).toBe(AV_MINE_DAMAGE);
+    expect(ctx._damaged[0].amount).toBe(modifyDamage(AV_MINE_DAMAGE, 'HE', vehicle.stats.armor, 0));
     expect(ctx._damaged[0].warhead).toBe('HE');
     expect(mines).toHaveLength(0); // mine consumed
   });
 
-  it('AP mine deals only 10 damage to vehicle — C++ unit.cpp:1829-1830', () => {
+  it('AP mine uses raw 10 damage before WARHEAD_HE armor verses — C++ unit.cpp:1829-1830', () => {
     const vehicle = makeVehicle(House.USSR, 10, 10);
     const mines: SpecialUnitsContext['mines'] = [
       { cx: 10, cy: 10, house: House.Spain, damage: AP_MINE_DAMAGE, type: 'AP' },
@@ -621,7 +626,7 @@ describe('mine detonation: vehicle triggers', () => {
     tickMines(ctx);
 
     expect(ctx._damaged).toHaveLength(1);
-    expect(ctx._damaged[0].amount).toBe(10); // hardcoded 10 in C++
+    expect(ctx._damaged[0].amount).toBe(modifyDamage(10, 'HE', vehicle.stats.armor, 0));
     expect(ctx._damaged[0].warhead).toBe('HE');
     expect(mines).toHaveLength(0);
   });
@@ -637,9 +642,9 @@ describe('mine detonation: vehicle triggers', () => {
     expect(mines).toHaveLength(0);
   });
 
-  it('explosion effect is created at mine location', () => {
-    const vehicle = makeVehicle(House.USSR, 10, 10);
-    const mines: SpecialUnitsContext['mines'] = [
+	  it('explosion effect is created at mine location', () => {
+	    const vehicle = makeVehicle(House.USSR, 10, 10);
+	    const mines: SpecialUnitsContext['mines'] = [
       { cx: 10, cy: 10, house: House.Spain, damage: AV_MINE_DAMAGE, type: 'AV' },
     ];
     const effects: Effect[] = [];
@@ -648,8 +653,68 @@ describe('mine detonation: vehicle triggers', () => {
 
     expect(effects).toHaveLength(1);
     expect(effects[0].type).toBe('explosion');
-    expect(effects[0].x).toBe(10 * CELL_SIZE + CELL_SIZE / 2);
-    expect(effects[0].y).toBe(10 * CELL_SIZE + CELL_SIZE / 2);
+	    expect(effects[0].x).toBe(10 * CELL_SIZE + CELL_SIZE / 2);
+	    expect(effects[0].y).toBe(10 * CELL_SIZE + CELL_SIZE / 2);
+	  });
+
+	  it('mine detonation creates the C++ ANIM_VEH_HIT2 logic object', () => {
+	    const vehicle = makeVehicle(House.USSR, 10, 10);
+	    const mines: SpecialUnitsContext['mines'] = [
+	      { cx: 10, cy: 10, house: House.Spain, damage: AV_MINE_DAMAGE, type: 'AV' },
+	    ];
+	    const ctx = makeContext({ entities: [vehicle], mines });
+	    tickMines(ctx);
+
+	    expect(ctx.logicAnims?.map(anim => anim.type)).toContain('veh-hit2');
+	  });
+
+	  it('global mine tick does not detonate scenario BuildingClass mines before PCP_END', () => {
+    const vehicle = makeVehicle(House.USSR, 10, 10);
+    const mine = {
+      type: 'MINV',
+      house: House.Spain,
+      cx: 10,
+      cy: 10,
+      hp: 1,
+      maxHp: 1,
+      alive: true,
+      rubble: false,
+    } as any;
+    const ctx = makeContext({
+      entities: [vehicle],
+      structures: [mine],
+    }) as SpecialUnitsContext & { _damaged: any[] };
+
+    tickMines(ctx);
+
+    expect(ctx._damaged).toHaveLength(0);
+    expect(mine.alive).toBe(true);
+  });
+
+  it('scenario BuildingClass MINV detonates at UnitClass::Per_Cell_Process PCP_END', () => {
+    const vehicle = makeVehicle(House.USSR, 10, 10);
+    const mine = {
+      type: 'MINV',
+      house: House.Spain,
+      cx: 10,
+      cy: 10,
+      hp: 1,
+      maxHp: 1,
+      alive: true,
+      rubble: false,
+    } as any;
+    const ctx = makeContext({
+      entities: [vehicle],
+      structures: [mine],
+    }) as SpecialUnitsContext & { _damaged: any[] };
+
+    triggerMineAtCell(ctx, vehicle);
+
+    expect(ctx._damaged).toHaveLength(1);
+    expect(ctx._damaged[0].amount).toBe(modifyDamage(AV_MINE_DAMAGE, 'HE', vehicle.stats.armor, 0));
+    expect(ctx._damaged[0].warhead).toBe('HE');
+    expect(mine.alive).toBe(false);
+    expect(mine.hp).toBe(0);
   });
 });
 
@@ -699,7 +764,7 @@ describe('mine detonation: infantry triggers', () => {
     expect(damagedEntities).toContain(inf2.id);
   });
 
-  it('AP mine deals APMineDamage from rules.ini — C++ infantry.cpp:933', () => {
+  it('AP mine uses APMineDamage before WARHEAD_HE armor verses — C++ infantry.cpp:933 + object.cpp:1575', () => {
     const inf = makeInfantry(House.USSR, 10, 10);
     const mines: SpecialUnitsContext['mines'] = [
       { cx: 10, cy: 10, house: House.Spain, damage: AP_MINE_DAMAGE, type: 'AP' },
@@ -709,7 +774,7 @@ describe('mine detonation: infantry triggers', () => {
 
     const infDamage = ctx._damaged.find(d => d.entity.id === inf.id);
     expect(infDamage).toBeDefined();
-    expect(infDamage!.amount).toBe(AP_MINE_DAMAGE);
+    expect(infDamage!.amount).toBe(modifyDamage(AP_MINE_DAMAGE, 'HE', inf.stats.armor, 0));
     expect(infDamage!.warhead).toBe('HE');
   });
 });
@@ -966,18 +1031,17 @@ describe('mine placement state reset', () => {
 // =============================================================================
 
 describe('vehicle AP mine minimal damage — C++ hardcoded 10', () => {
-  it('heavy tank running over AP mine takes exactly 10 damage, not APMineDamage', () => {
+  it('heavy tank running over AP mine takes raw 10 modified by HE verses, not APMineDamage', () => {
     const tank = makeVehicle(House.USSR, 10, 10);
-    const initialHp = tank.hp;
     const mines: SpecialUnitsContext['mines'] = [
       { cx: 10, cy: 10, house: House.Spain, damage: AP_MINE_DAMAGE, type: 'AP' },
     ];
     const ctx = makeContext({ entities: [tank], mines }) as SpecialUnitsContext & { _damaged: any[] };
     tickMines(ctx);
 
-    // The damage to vehicle from AP mine is hardcoded 10 in C++, NOT Rule.APMineDamage
-    expect(ctx._damaged[0].amount).toBe(10);
+    // UnitClass uses raw 10 for AP mine vehicle hits; ObjectClass then applies HE armor verses.
+    expect(ctx._damaged[0].amount).toBe(modifyDamage(10, 'HE', tank.stats.armor, 0));
     // Verify this is NOT the full AP mine damage
-    expect(10).not.toBe(AP_MINE_DAMAGE);
+    expect(ctx._damaged[0].amount).not.toBe(AP_MINE_DAMAGE);
   });
 });

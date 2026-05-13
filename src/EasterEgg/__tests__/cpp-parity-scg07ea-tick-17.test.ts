@@ -144,7 +144,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { PCPType, PER_CELL_COMMENCE_ENABLED, unitPerCellProcess } from '../engine/perCellProcess';
+import { PCPType, PER_CELL_COMMENCE_ENABLED, drivePerCellProcess, unitPerCellProcess } from '../engine/perCellProcess';
 
 describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
   it('documents the pre-tick-17 shared state (seeds match through tick 16)', () => {
@@ -224,30 +224,21 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
     expect(phase7a.phaseBUnlocked).toBe(5);
   });
 
-  it('documents the DriveClass::AI double-Commence vessel Mission_Move blocker', () => {
-    // Vessel[182] fires Mission_Move jitter TWICE in one WASM tick; vessel[183]
-    // fires it THREE times. C++ Mission_Move consumes exactly one Random_Pick
-    // per call. The same vessel must therefore enter MissionClass::AI multiple
-    // times within one VesselClass::AI invocation, via DriveClass::AI's
-    // While_Moving → Start_Of_Move → While_Moving cycle when the current
-    // track ends with more path remaining (drive.cpp:1340-1345).
+  it('documents that vessel PCP does not use the UnitClass Commence branch', () => {
+    // VesselClass::Per_Cell_Process chains to DriveClass::Per_Cell_Process,
+    // which then chains to FootClass::Per_Cell_Process. It does not pass
+    // through UnitClass::Per_Cell_Process, so unit.cpp:1756 cannot be the
+    // mechanism for vessel MissionQueue pops. Vessel queues pop at the
+    // VesselClass::AI pre/post Commence gates instead (vessel.cpp:606,673).
     const blocker = {
-      mechanism: 'DriveClass::AI double-cycle Per_Cell_Process Commence',
-      cppRefs: ['drive.cpp:1304-1399', 'drive.cpp:1340-1345', 'vessel.cpp:593', 'vessel.cpp:659'],
-      tsScaffolding: 'src/EasterEgg/engine/perCellProcess.ts',
-      scaffoldingGate: 'PER_CELL_COMMENCE_ENABLED',
-      currentGateState: true, // partial port landed
+      rejectedMechanism: 'UnitClass::Per_Cell_Process Commence for vessels',
+      cppRefs: ['vessel.cpp:696-760', 'drive.cpp:858-879', 'foot.cpp:1438-1505', 'unit.cpp:1815'],
+      tsSharedHook: 'drivePerCellProcess',
+      unitHookGateState: true,
       sharedWith: ['cpp-parity-scg11ea-tick-28.test.ts', 'cpp-parity-scg04ea-tick-36.test.ts'],
-      vesselDoubleFiresAtTick17: 2, // 2 extra Mission_Move calls vs single-fire TS
-      // Residual blocker after partial port: the double-fire portion is
-      // NOT yet ported. The single-Commence per PCP_END now works; the
-      // DriveClass::AI drive.cpp:1340-1345 re-entrant double-cycle is not.
     };
-    expect(blocker.currentGateState).toBe(PER_CELL_COMMENCE_ENABLED);
-    expect(blocker.vesselDoubleFiresAtTick17).toBe(2);
+    expect(blocker.unitHookGateState).toBe(PER_CELL_COMMENCE_ENABLED);
 
-    // Verify the hook's Commence branch is now active: MissionQueue=MOVE
-    // at PCP_END pops → Mission=MOVE, Timer=0, Status=0.
     type M = 'MOVE' | 'GUARD';
     const vessel = {
       moveTarget: { lx: 100 * 256 + 128, ly: 100 * 256 + 128 },
@@ -258,12 +249,17 @@ describe('SCG07EA tick-17 first-divergence (architectural blocker)', () => {
       mission: 'GUARD' as M,
       missionTimer: 5,
       isDriving: true,
+      stats: { isVessel: true },
     };
-    const r = unitPerCellProcess(vessel, PCPType.PCP_END);
-    expect(r.commenceFired).toBe(true); // enabled
-    expect(vessel.mission).toBe('MOVE');
-    expect(vessel.missionQueue).toBe(null);
-    expect(vessel.missionTimer).toBe(0);
+    const r = drivePerCellProcess(vessel, PCPType.PCP_END);
+    expect(r.commenceFired).toBe(false);
+    expect(vessel.mission).toBe('GUARD');
+    expect(vessel.missionQueue).toBe('MOVE');
+    expect(vessel.missionTimer).toBe(5);
+
+    const accidentalUnitRoute = unitPerCellProcess(vessel, PCPType.PCP_END);
+    expect(accidentalUnitRoute.commenceFired).toBe(false);
+    expect(vessel.mission).toBe('GUARD');
   });
 
   it('documents the Random_Animate gating divergence', () => {

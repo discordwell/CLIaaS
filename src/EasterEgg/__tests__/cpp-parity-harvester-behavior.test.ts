@@ -115,7 +115,10 @@ function makeContext(overrides: Partial<HarvesterContext> = {}): HarvesterContex
   const map = makeMap();
   return {
     entities: [],
-    structures: [],
+    structures: [
+      makeRefinery(House.Spain, 45, 45),
+      makeRefinery(House.USSR, 46, 45),
+    ],
     houseCredits: new Map(),
     map,
     isAllied: (a, b) => a === b,
@@ -226,7 +229,9 @@ describe('Ore scan ranges — rules.ini [AI] OreNearScan=6, OreFarScan=48', () =
     // Place gold 49 cells away — beyond 48-cell range
     placeGold(map, 99, 50, 0x0E);
     updateHarvester(ctx, harv);
-    expect(harv.harvesterState).toBe('idle'); // no ore found
+    expect(harv.harvesterState).toBe('goingtoidle'); // C++ GOINGTOIDLE after failed long scan
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('idle');
   });
 
   it('short scan (6 cells) finds ore within range', () => {
@@ -327,6 +332,26 @@ describe('Harvest bail mechanics — C++ unit.cpp Harvesting()', () => {
     // Total: 1 base + 3 bonus = 4 bails, credit = 50 + 150 = 200
     expect(harv.oreLoad).toBe(4);
     expect(harv.oreCreditValue).toBe(200);
+  });
+
+  it('zero-density gem overlay still grants the 3 C++ bonus bails', () => {
+    // C++ unit.cpp:2301-2308:
+    //   reducer = Reduce_Tiberium(...) can be 0 for GEM01/OverlayData=0,
+    //   but the Gems++ bonus block is keyed by the original gem overlay and
+    //   still runs up to three capacity checks.
+    const map = makeMap();
+    placeGem(map, 50, 50, 0x0F);
+    const ctx = makeContext({ map, structures: [makeRefinery(House.Spain, 45, 45)] });
+    const harv = makeHarvester(House.Spain, 50, 50);
+    harv.harvesterState = 'harvesting';
+    primeHarvestReady(harv);
+    ctx.entities.push(harv);
+
+    updateHarvester(ctx, harv);
+
+    expect(harv.oreLoad).toBe(3);
+    expect(harv.oreCreditValue).toBe(150);
+    expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 
   it('gem bonus bails are capacity-gated at 26/28 load', () => {
@@ -721,6 +746,16 @@ describe('depleteOre — C++ cell.cpp Reduce_Tiberium parity', () => {
     placeGem(map, 50, 50, 0x0F); // GEM01 — single bail
     const credits = map.depleteOre(50, 50);
     expect(credits).toBe(0);
+    expect(getOverlay(map, 50, 50)).toBe(0xFF);
+  });
+
+  it('depleteOreBail preserves gem identity when Reduce_Tiberium removes 0 bails', () => {
+    const map = makeMap();
+    placeGem(map, 50, 50, 0x0F);
+
+    const result = map.depleteOreBail(50, 50);
+
+    expect(result).toEqual({ removed: 0, credits: 0, isGold: false, isGem: true });
     expect(getOverlay(map, 50, 50)).toBe(0xFF);
   });
 

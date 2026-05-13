@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, CELL_SIZE, POWER_DRAIN, COUNTRY_BONUSES,
+  UnitType, House, Mission, CELL_SIZE, POWER_DRAIN, COUNTRY_BONUSES,
   buildDefaultAlliances, worldDist,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
@@ -28,7 +28,7 @@ import {
 import {
   powerOutput, calculatePowerGrid, sellRefund, repairCostPerStep,
 } from '../engine/repairSell';
-import { findLandingPad, type AircraftContext } from '../engine/aircraft';
+import { findLandingPad, updateAircraft, type AircraftContext } from '../engine/aircraft';
 import type { Effect } from '../engine/renderer';
 
 beforeEach(() => resetEntityIds());
@@ -351,6 +351,15 @@ describe('AFLD as landing pad for fixed-wing aircraft (findLandingPad)', () => {
     expect(padIdx).toBe(-1);
   });
 
+  it('findLandingPad keeps an AFLD reserved for the same aircraft', () => {
+    const afld = makeAFLD(10, 10, 1000, House.USSR);
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 12, 12);
+    afld.dockedAircraft = yak.id;
+    const ctx = makeAircraftCtx([afld]);
+    const padIdx = findLandingPad(ctx, yak);
+    expect(padIdx).toBe(0);
+  });
+
   it('findLandingPad picks closest AFLD when multiple available', () => {
     const farAfld = makeAFLD(30, 30, 1000, House.USSR);
     const nearAfld = makeAFLD(12, 12, 1000, House.USSR);
@@ -372,13 +381,60 @@ describe('AFLD as landing pad for fixed-wing aircraft (findLandingPad)', () => {
 
   it('findLandingPad returns -1 when all AFLDs are occupied', () => {
     const afld1 = makeAFLD(10, 10, 1000, House.USSR);
-    afld1.dockedAircraft = 1;
+    afld1.dockedAircraft = 99;
     const afld2 = makeAFLD(20, 20, 1000, House.USSR);
-    afld2.dockedAircraft = 2;
+    afld2.dockedAircraft = 100;
     const mig = entityAtCell(UnitType.V_MIG, House.USSR, 15, 15);
     const ctx = makeAircraftCtx([afld1, afld2]);
     const padIdx = findLandingPad(ctx, mig);
     expect(padIdx).toBe(-1);
+  });
+
+  it('fixed-wing MISSION_ENTER reacquires its own reserved AFLD after structure removal shifts indices', () => {
+    const afld = makeAFLD(35, 81, 1000, House.USSR);
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 40, 76);
+    afld.dockedAircraft = yak.id;
+
+    yak.mission = Mission.ENTER;
+    yak.aircraftState = 'returning';
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    yak.aircraftEnterStatus = 3; // C++ Mission_Enter STACK
+    yak.aircraftDockingStructure = 5; // stale index after DynamicVector deletion
+
+    const ctx = makeAircraftCtx([afld], [yak]);
+    updateAircraft(ctx, yak);
+
+    expect(yak.mission).toBe(Mission.ENTER);
+    expect(yak.aircraftState).toBe('returning');
+    expect(yak.aircraftDockingStructure).toBe(0);
+    expect(afld.dockedAircraft).toBe(yak.id);
+  });
+
+  it('full-ammo fixed-wing landing still hands the AFLD through Mission_Repair', () => {
+    const afld = makeAFLD(35, 81, 1000, House.USSR);
+    afld.mission = Mission.GUARD;
+    afld.missionTimer = 23;
+
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 40, 81);
+    yak.mission = Mission.ENTER;
+    yak.aircraftState = 'landing';
+    yak.flightAltitude = 1;
+    yak.landedAtStructure = 0;
+    yak.aircraftDockingStructure = 0;
+    yak.ammo = yak.maxAmmo;
+
+    const ctx = makeAircraftCtx([afld], [yak]);
+    ctx.tick = 100;
+    updateAircraft(ctx, yak);
+
+    expect(yak.aircraftState).toBe('landed');
+    expect(yak.mission).toBe(Mission.GUARD);
+    expect(afld.dockedAircraft).toBe(yak.id);
+    expect(afld.mission).toBe(Mission.GUARD);
+    expect(afld.missionQueue).toBe(Mission.REPAIR);
+    expect(afld.isReadyToCommence).toBe(false);
+    expect(afld.readyToCommenceTick).toBe(102);
+    expect(afld.missionTimer).toBe(23);
   });
 });
 
@@ -504,12 +560,12 @@ describe('AFLD destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const afld = makeAFLD(10, 10, 50, House.USSR);
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([afld, nearby]);
     structureDamage(ctx, afld, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

@@ -407,11 +407,12 @@ describe('DD dual weapon system (techno.cpp:Can_Fire)', () => {
   });
 });
 
-// -- Burst Fire: Stinger (weapon.cpp:78) ----------------------------------------
-// C++ weapon.cpp -- Stinger has Burst=2 (fires two shots per trigger pull)
+// -- Two-Shooter Data: Stinger (weapon.cpp:78) ----------------------------------
+// C++ weapon.cpp -- Stinger has Burst=2; vessel firing cadence uses
+// TechnoTypeClass::Is_Two_Shooter/IsSecondShot, not a queued burst counter.
 
-describe('DD Stinger burst fire (weapon.cpp:78)', () => {
-  it('Stinger burst is 2 (two shots per trigger pull)', () => {
+describe('DD Stinger two-shooter data (weapon.cpp:78)', () => {
+  it('Stinger burst is 2', () => {
     expect(WEAPON_STATS.Stinger.burst).toBe(2);
   });
 

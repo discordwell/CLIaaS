@@ -30,7 +30,7 @@ import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR,
   SuperweaponType, SUPERWEAPON_DEFS,
   armorIndex, worldToCell, buildDefaultAlliances,
-pixelToLepton, } from '../engine/types';
+} from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { parseIniSections, parseIniInt } from '../engine/parseIni';
 import {
@@ -1023,8 +1023,8 @@ describe('Paradrop drop pattern and spacing', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Section 17: Aircraft Reinforcement Arrival — Spawn at Edge, Fly to Target
-// C++ scenario.ts:2415-2465 — aircraft spawn at map edge, fly to origin
+// Section 17: Aircraft Reinforcement Arrival — Spawn at Edge
+// C++ reinf.cpp:466-481 — aircraft spawn airborne and keep MISSION_NONE
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('Aircraft reinforcement arrival mechanics (scenario.ts)', () => {
@@ -1042,13 +1042,13 @@ describe('Aircraft reinforcement arrival mechanics (scenario.ts)', () => {
     expect(Entity.FLIGHT_ALTITUDE).toBe(24);
   });
 
-  it('reinforcement aircraft get MISSION_MOVE to origin waypoint', () => {
-    // TS scenario.ts:2464-2465: mission = Mission.MOVE, moveTarget = world
+  it('reinforcement aircraft keep MISSION_NONE until TeamClass assigns orders', () => {
+    // C++ reinf.cpp:479-481 only assigns MISSION_GUARD for non-aircraft.
     const tran = entityAtCell(UnitType.V_TRAN, House.USSR, 1, 1);
-    tran.mission = Mission.MOVE;
-    tran.moveTarget = { lx: pixelToLepton(15 * CELL_SIZE), ly: pixelToLepton(15 * CELL_SIZE) };
-    expect(tran.mission).toBe(Mission.MOVE);
-    expect(tran.moveTarget).not.toBeNull();
+    tran.mission = Mission.NONE;
+    tran.moveTarget = null;
+    expect(tran.mission).toBe(Mission.NONE);
+    expect(tran.moveTarget).toBeNull();
   });
 
   it('transport with TMISSION_UNLOAD gets IsALoaner flag', () => {

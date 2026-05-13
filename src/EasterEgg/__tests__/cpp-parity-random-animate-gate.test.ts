@@ -115,6 +115,30 @@ describe('C++ Random_Animate gate (Phase 7A contract)', () => {
     expect(e.isReadyToRandomAnimate()).toBe(true);
   });
 
+  it('clears stale IsFiring before InfantryClass::AI Commence pops MissionQueue', () => {
+    const game = new Game(createCanvas());
+    game.map.setBounds(0, 0, 128, 128);
+    const e = mkInfantry(UnitType.I_E3);
+    e.mission = Mission.GUARD;
+    e.missionQueue = Mission.ATTACK;
+    e.missionTimer = 4;
+    e.doing = 'stand_ready';
+    e.doingStage = 0;
+    e.doingRate = 0;
+    e.isFiringAnim = true;
+    e.firingAnimTicks = 5;
+    game.entities.push(e);
+    game.entityById.set(e.id, e);
+
+    (game as unknown as { updateEntity(e: Entity): void }).updateEntity(e);
+
+    expect(e.isFiringAnim).toBe(false);
+    expect(e.firingAnimTicks).toBe(0);
+    expect(e.mission).toBe(Mission.ATTACK);
+    expect(e.missionQueue).toBeNull();
+    expect(e.missionTimer).toBe(0);
+  });
+
   it('allows when doing === "stand_ready" and all other gates clear', () => {
     const e = mkInfantry();
     e.doing = 'stand_ready';
@@ -141,6 +165,43 @@ describe('C++ Random_Animate gate (Phase 7A contract)', () => {
     // ticks IdleTimer down. A value of 1 must block Random_Animate this tick
     // and become 0 only after object AI completes.
     expect(e.idleAnimTimer).toBe(0);
+  });
+
+  it('runs the InfantryClass tail while paradropping, before landing-tick Random_Animate', () => {
+    const game = new Game(createCanvas());
+    game.map.setBounds(0, 0, 128, 128);
+    const e = new Entity(UnitType.I_E2, House.USSR, 37 * 64 + 32, 39 * 64 + 32);
+    e.mission = Mission.GUARD;
+    e.missionTimer = 0;
+    e.doing = 'nothing';
+    e.fear = Entity.FEAR_ANXIOUS + 12;
+    e.isFalling = true;
+    e.fallHasAttachedAnim = true;
+    e.fallHeightLeptons = 4;
+    e.fallRiser = -3;
+    e.flightAltitude = 1;
+    game.entities.push(e);
+    game.entityById.set(e.id, e);
+
+    (game as unknown as { updateEntity(e: Entity): void }).updateEntity(e);
+
+    // C++ MissionClass::AI returns while Height > 0, but InfantryClass::AI
+    // still runs Fear_AI and Doing_AI. The infantry must be standing-ready
+    // before the later landing tick so Random_Animate can pass its C++ gate.
+    expect(e.isFalling).toBe(true);
+    expect(e.fallHeightLeptons).toBe(1);
+    expect(e.fear).toBe(Entity.FEAR_ANXIOUS + 11);
+    expect(e.isProne).toBe(false);
+    expect(e.doing).toBe('stand_ready');
+    expect(e.missionTimer).toBe(0);
+
+    (game as unknown as { updateEntity(e: Entity): void }).updateEntity(e);
+
+    expect(e.isFalling).toBe(false);
+    expect(e.idleAnimTimer).toBeGreaterThan(0);
+    expect(e.missionTimer).toBeGreaterThan(0);
+    expect(e.isProne).toBe(true);
+    expect(e.doing).toBe('lie_down');
   });
 
   it('blocks non-infantry entirely (Random_Animate is InfantryClass-only)', () => {

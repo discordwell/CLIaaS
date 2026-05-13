@@ -328,41 +328,27 @@ describe('4TNK weapon selection (techno.cpp:Can_Fire)', () => {
   });
 });
 
-// == Burst Fire (weapon.cpp:78 Weapon.Burst) =================================
-// C++ weapon.cpp -- Burst=2 means 2 shots per trigger pull for both weapons
+// == Two-Shooter Cadence (weapon.cpp:78 Weapon.Burst) ========================
+// C++ TechnoTypeClass::Is_Two_Shooter only checks primary Burst>1. There is no
+// separate gameplay burst counter for land units; Fire_At alternates Arm=3 then
+// Arm=weapon ROF through IsSecondShot.
 
-describe('4TNK burst fire (weapon.cpp:78 Weapon.Burst)', () => {
-  it('Entity starts with burstCount=0 (no active burst)', () => {
+describe('4TNK two-shooter cadence (weapon.cpp:78 Weapon.Burst)', () => {
+  it('legacy burst diagnostics start at zero', () => {
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
     expect(mammoth.burstCount).toBe(0);
-  });
-
-  it('setting burstCount to 2 simulates start of 120mm burst', () => {
-    const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
-    mammoth.burstCount = WEAPON_STATS['120mm'].burst!;
-    expect(mammoth.burstCount).toBe(2);
-  });
-
-  it('setting burstCount to 2 simulates start of MammothTusk burst', () => {
-    const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
-    mammoth.burstCount = WEAPON_STATS.MammothTusk.burst!;
-    expect(mammoth.burstCount).toBe(2);
-  });
-
-  it('decrementing burstCount simulates firing each shot in burst', () => {
-    const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
-    mammoth.burstCount = 2;
-    // Fire first shot
-    mammoth.burstCount--;
-    expect(mammoth.burstCount).toBe(1);
-    // Fire second shot
-    mammoth.burstCount--;
-    expect(mammoth.burstCount).toBe(0);
-  });
-
-  it('burstDelay starts at 0 (3-tick gap between burst shots set by combat system)', () => {
-    const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
     expect(mammoth.burstDelay).toBe(0);
+  });
+
+  it('120mm primary Burst=2 makes 4TNK a C++ two-shooter', () => {
+    const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
+    expect(WEAPON_STATS['120mm'].burst).toBe(2);
+    expect(mammoth.isTwoShooter()).toBe(true);
+    expect(mammoth.isSecondShot).toBe(false);
+  });
+
+  it('MammothTusk retains Burst=2 data but does not create a separate burst queue', () => {
+    expect(WEAPON_STATS.MammothTusk.burst).toBe(2);
   });
 });
 

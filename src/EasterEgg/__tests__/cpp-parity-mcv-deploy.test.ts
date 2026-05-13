@@ -520,7 +520,7 @@ describe('FACT properties after MCV deployment', () => {
     }
   });
 
-  it('FACT bib cells also marked impassable', () => {
+  it('FACT bib cells are build-blocking smudges after deployment', () => {
     const ctx = makePlacementCtx();
     const mcv = entityAtCell(UnitType.V_MCV, House.Spain, 10, 10);
     ctx.entities.push(mcv);
@@ -531,7 +531,10 @@ describe('FACT properties after MCV deployment', () => {
     const bibs = getBibCells('FACT', 9, 9);
     expect(bibs.length).toBe(3);
     for (const bc of bibs) {
-      expect(ctx.map.getTerrain(bc.cx, bc.cy)).toBe(Terrain.WALL);
+      expect(ctx.map.hasBibSmudge(bc.cx, bc.cy)).toBe(true);
+      expect(ctx.map.getTerrain(bc.cx, bc.cy)).not.toBe(Terrain.WALL);
+      expect(ctx.map.isPassable(bc.cx, bc.cy)).toBe(true);
+      expect(ctx.map.isBuildable(bc.cx, bc.cy)).toBe(false);
     }
   });
 });

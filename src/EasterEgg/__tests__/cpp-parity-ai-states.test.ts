@@ -33,6 +33,7 @@ import {
   createAIHouseState,
   updateAIStrategicPlanner,
   updateAIConstruction,
+  aiPerTick,
   aiCountStructure,
   aiHasPrereq,
   aiFireSale,
@@ -87,7 +88,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
 
 function addAIHouse(ctx: AIContext, house: House, overrides: Partial<AIHouseState> = {}): AIHouseState {
   const state = createAIHouseState(ctx, house);
-  Object.assign(state, overrides);
+  Object.assign(state, { isBaseBuilding: true }, overrides);
   ctx.aiStates.set(house, state);
   return state;
 }
@@ -230,6 +231,30 @@ describe('BROKE state — money < 25 stops building (house.cpp:4753-4761)', () =
 // =============================================================================
 
 describe('ENDGAME state — no production buildings triggers fire-sale + all-hunt', () => {
+  it('does not run Expert_AI fire-sale for a non-base-building low-IQ house', () => {
+    const ctx = makeMockAIContext({ tick: 1 });
+    const state = addAIHouse(ctx, House.Germany, {
+      iq: 3,
+      phase: 'buildup',
+      isBaseBuilding: false,
+    });
+    ctx.houseCredits.set(House.Germany, 1000);
+    ctx.structures.push(
+      makeStructure('HBOX', House.Germany, 56, 56),
+      makeStructure('POWR', House.Germany, 58, 56),
+    );
+    const mcv = new Entity(UnitType.V_MCV, House.Germany, 66 * CELL_SIZE, 33 * CELL_SIZE);
+    mcv.mission = Mission.GUARD;
+    ctx.entities.push(mcv);
+    ctx.entityById.set(mcv.id, mcv);
+
+    updateAIStrategicPlanner(ctx);
+
+    expect(state.endgame).toBe(false);
+    expect(mcv.mission).toBe(Mission.GUARD);
+    expect(ctx.structures.every(s => s.mission !== Mission.DECONSTRUCTION)).toBe(true);
+  });
+
   it('AI enters ENDGAME when no ConYard, no Barracks, no War Factory remain', () => {
     const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
@@ -388,7 +413,7 @@ describe('ENDGAME state — no production buildings triggers fire-sale + all-hun
 // =============================================================================
 
 describe('Fire Sale — sell all buildings (house.cpp:7322-7335)', () => {
-  it('marks all buildings as dead with rubble', () => {
+  it('starts deconstruction instead of immediately deleting buildings', () => {
     const ctx = makeMockAIContext();
     ctx.structures.push(
       makeStructure('POWR', House.USSR, 50, 50),
@@ -400,12 +425,16 @@ describe('Fire Sale — sell all buildings (house.cpp:7322-7335)', () => {
 
     expect(result).toBe(true);
     for (const s of ctx.structures) {
-      expect(s.alive).toBe(false);
-      expect(s.rubble).toBe(true);
+      expect(s.alive).toBe(true);
+      expect(s.rubble).toBe(false);
+      expect(s.mission).toBe(Mission.DECONSTRUCTION);
+      expect(s.missionTimer).toBe(0);
+      expect(s.sellProgress).toBe(0);
+      expect(s.sellHpAtStart).toBe(s.hp);
     }
   });
 
-  it('calls clearStructureFootprint for each sold building', () => {
+  it('does not clear footprints until deconstruction completes', () => {
     const clearFn = vi.fn();
     const ctx = makeMockAIContext({ clearStructureFootprint: clearFn });
     ctx.structures.push(
@@ -415,25 +444,18 @@ describe('Fire Sale — sell all buildings (house.cpp:7322-7335)', () => {
 
     aiFireSale(ctx, House.USSR);
 
-    expect(clearFn).toHaveBeenCalledTimes(2);
+    expect(clearFn).not.toHaveBeenCalled();
   });
 
-  it('gives partial refund for each building sold', () => {
+  it('defers refunds until deconstruction completes', () => {
     const ctx = makeMockAIContext();
     ctx.houseCredits.set(House.USSR, 0);
-    const powrItem = PRODUCTION_ITEMS.find(p => p.type === 'POWR' && p.isStructure);
     ctx.structures.push(makeStructure('POWR', House.USSR, 50, 50));
 
     aiFireSale(ctx, House.USSR);
 
     const credits = ctx.houseCredits.get(House.USSR) ?? 0;
-    // C++ Fire_Sale → Sell_Back(1): AI (IsHuman=false) gets 100% refund (techno.cpp:5743-5761)
-    if (powrItem) {
-      expect(credits).toBe(powrItem.cost);
-    } else {
-      // No prod item found — credits should still be 0
-      expect(credits).toBe(0);
-    }
+    expect(credits).toBe(0);
   });
 
   it('returns false when no buildings to sell', () => {
@@ -453,10 +475,13 @@ describe('Fire Sale — sell all buildings (house.cpp:7322-7335)', () => {
 
     aiFireSale(ctx, House.USSR);
 
-    // USSR building should be dead
-    expect(ctx.structures[0].alive).toBe(false);
-    // Spain building should still be alive
+    // USSR building should be deconstructing
+    expect(ctx.structures[0].alive).toBe(true);
+    expect(ctx.structures[0].mission).toBe(Mission.DECONSTRUCTION);
+    expect(ctx.structures[0].sellProgress).toBe(0);
+    // Spain building should be untouched
     expect(ctx.structures[1].alive).toBe(true);
+    expect(ctx.structures[1].sellProgress).toBeUndefined();
   });
 
   it('does not sell already-dead buildings', () => {
@@ -469,8 +494,9 @@ describe('Fire Sale — sell all buildings (house.cpp:7322-7335)', () => {
 
     aiFireSale(ctx, House.USSR);
 
-    // Only 1 building was alive to sell
-    expect(clearFn).toHaveBeenCalledTimes(1);
+    expect(clearFn).not.toHaveBeenCalled();
+    expect(ctx.structures[0].sellProgress).toBe(0);
+    expect(ctx.structures[1].sellProgress).toBeUndefined();
   });
 });
 
@@ -546,7 +572,7 @@ describe('Do All To Hunt — send all units to HUNT (house.cpp:7354-7393)', () =
 // =============================================================================
 
 describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () => {
-  it('entering ENDGAME sells all buildings', () => {
+  it('entering ENDGAME queues all buildings for deconstruction', () => {
     const ctx = makeMockAIContext({ tick: 1 });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup' });
     ctx.houseCredits.set(House.USSR, 1000);
@@ -561,10 +587,13 @@ describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () =
 
     updateAIStrategicPlanner(ctx);
 
-    // All buildings sold
+    // Fire_Sale calls Sell_Back(1); buildings are removed later by
+    // Mission_Deconstruction, not immediately in this planner pass.
     for (const s of ctx.structures) {
       if (s.house === House.USSR) {
-        expect(s.alive).toBe(false);
+        expect(s.alive).toBe(true);
+        expect(s.mission).toBe(Mission.DECONSTRUCTION);
+        expect(s.sellProgress).toBe(0);
       }
     }
   });
@@ -588,7 +617,7 @@ describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () =
     expect(e2.mission).toBe(Mission.HUNT);
   });
 
-  it('already-endgame state re-triggers fire-sale and all-hunt each tick', () => {
+  it('House AI endgame starts fire-sale and all-hunt after object logic', () => {
     const clearFn = vi.fn();
     const ctx = makeMockAIContext({ tick: 1, clearStructureFootprint: clearFn });
     const state = addAIHouse(ctx, House.USSR, { iq: 3, phase: 'buildup', endgame: true });
@@ -599,10 +628,13 @@ describe('ENDGAME integrated — triggers fire-sale + all-hunt in planner', () =
     e1.mission = Mission.GUARD;
     ctx.entities.push(e1);
 
-    updateAIStrategicPlanner(ctx);
+    aiPerTick(ctx);
 
-    // Fire-sale should have run
-    expect(ctx.structures[0].alive).toBe(false);
+    // Fire-sale queues deconstruction; actual removal/refund is deferred.
+    expect(ctx.structures[0].alive).toBe(true);
+    expect(ctx.structures[0].mission).toBe(Mission.DECONSTRUCTION);
+    expect(ctx.structures[0].sellProgress).toBe(0);
+    expect(clearFn).not.toHaveBeenCalled();
     expect(e1.mission).toBe(Mission.HUNT);
     // Phase transitions should be skipped (endgame short-circuits)
     expect(state.endgame).toBe(true);

@@ -66,6 +66,9 @@ describe('FootClass::Approach_Target — FLOAT passability and TARGET cell coord
     (game as unknown as { approachTarget(e: Entity): void }).approachTarget(sub);
 
     expect(sub.moveTarget).toEqual(cellTargetToLepton(17, 53));
+    // C++ FootClass::Approach_Target only Assign_Destination()s NavCom.
+    // DriveClass::AI builds Basic_Path later from that destination.
+    (game as unknown as { runDriveClassAI(e: Entity): void }).runDriveClassAI(sub);
     expect(sub.path[0]).toEqual({ cx: 20, cy: 53 });
   });
 });

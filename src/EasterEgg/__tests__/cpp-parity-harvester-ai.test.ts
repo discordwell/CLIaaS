@@ -43,10 +43,30 @@ function makeHarv(house: House = House.Spain, cx = 50, cy = 50): Entity {
   return new Entity(UnitType.V_HARV, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
 }
 
+function makeRefinery(house: House = House.Spain, cx = 45, cy = 45): any {
+  return {
+    type: 'PROC',
+    image: 'proc',
+    house,
+    cx,
+    cy,
+    hp: 500,
+    maxHp: 500,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+  };
+}
+
 function makeCtx(overrides?: Partial<HarvesterContext>): HarvesterContext {
   return {
     entities: [],
-    structures: [],
+    structures: [
+      makeRefinery(House.Spain, 45, 45),
+      makeRefinery(House.USSR, 46, 45),
+    ],
     houseCredits: new Map(),
     map: makeMap(),
     isAllied: (a, b) => a === b,
@@ -758,17 +778,18 @@ describe('Mission_Harvest state machine — unit.cpp:2749-2923', () => {
     const rulesIniFarScan = 48;
 
     // TS harvester.ts uses findHarvesterOre with range 48 matching rules.ini
-    // Verify: idle harvester finds ore at 40 cells (within OreFarScan=48)
+    // Verify: idle harvester finds ore inside the map rectangle and within OreFarScan=48.
+    // Default bounds are x=40..89; C++ Tiberium_Check rejects candidates outside them.
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'idle';
     harv.mission = Mission.GUARD;
     ctx.entities.push(harv);
-    placeGold(ctx.map, 50 + 40, 50, 5); // 40 cells east — within 48 range
+    placeGold(ctx.map, 88, 50, 5); // 38 cells east — within 48 range and map bounds
 
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('seeking');
-    expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(90);
+    expect(Math.floor(harv.moveTarget!.lx / 256)).toBe(88);
   });
 });
 
@@ -1226,7 +1247,7 @@ describe('idle → seeking transition — harvester.ts:109-122', () => {
     expect(harv.mission).toBe(Mission.HARVEST);
   });
 
-  it('idle harvester with no ore stays idle', () => {
+  it('idle harvester with no ore enters GOINGTOIDLE, then idle', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'idle';
@@ -1234,6 +1255,8 @@ describe('idle → seeking transition — harvester.ts:109-122', () => {
     ctx.entities.push(harv);
     // No ore on map
 
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('goingtoidle');
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
   });
@@ -1435,12 +1458,10 @@ describe('GOINGTOIDLE — useless harvester — unit.cpp:2910-2919', () => {
    *   }
    *   Assign_Mission(MISSION_GUARD);
    *
-   * TS has no equivalent — harvesters stay in 'idle' when no ore found.
-   * No repair bay seeking or hunt mission for idle harvesters.
+   * TS implements the initial GOINGTOIDLE handoff but has no repair bay
+   * seeking or hunt mission for useless idle harvesters.
    */
-  it('C++ useless harvester goes to repair or hunt; TS stays idle — no equivalent', () => {
-    // TS harvesters simply remain in 'idle' state when no ore is found.
-    // They keep re-checking for ore each frame (via updateHarvester from idle state).
+  it('C++ useless harvester first enters GOINGTOIDLE; TS then returns to idle', () => {
     const ctx = makeCtx();
     const harv = makeHarv(House.Spain, 50, 50);
     harv.harvesterState = 'idle';
@@ -1448,6 +1469,8 @@ describe('GOINGTOIDLE — useless harvester — unit.cpp:2910-2919', () => {
     ctx.entities.push(harv);
     // No ore anywhere
 
+    updateHarvester(ctx, harv);
+    expect(harv.harvesterState).toBe('goingtoidle');
     updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
     expect(harv.mission).toBe(Mission.GUARD);

@@ -157,19 +157,16 @@ describe('Guard scan weapon range boundary — C++ techno.cpp:1539-1544 In_Range
   // → Greatest_Threat(THREAT_RANGE). Per techno.cpp:2013-2026, only DOGS / MEDICS / MECHANICS
   // get type bits added to the scan mask; regular infantry and vehicles get mask=0, which
   // makes Evaluate_Object (techno.cpp:1539) reject every candidate — the scan is a no-op.
-  // These tests therefore use a DOG scanner, which gets THREAT_INFANTRY bits added and
-  // can actually acquire infantry targets via Mission_Guard's cell-based scan.
-
   it('target at EXACTLY selected weapon range is included (C++ In_Range <= weapon range)', () => {
     // C++ Greatest_Threat's cell ring may scan farther than the weapon, but
     // Evaluate_Object(range==0) accepts only if In_Range(object, selectedWeapon)
-    // is true. Place the target exactly one DogJaw range from Fire_Coord.
-    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    // is true. Place the target exactly one M1Carbine range from Fire_Coord.
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    const dogWeaponRange = scanner.weapon!.range;
-    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + dogWeaponRange * CELL_SIZE, 100);
+    const weaponRange = scanner.weapon!.range;
+    const target = makeEntity(UnitType.I_E1, House.Greece, 100 + weaponRange * CELL_SIZE, 100);
     const fireCoord = scanner.fireCoordForWeapon(scanner.weapon);
-    setLeptonPos(target, fireCoord.lx + dogWeaponRange * LEPTON_SIZE, fireCoord.ly);
+    setLeptonPos(target, fireCoord.lx + weaponRange * LEPTON_SIZE, fireCoord.ly);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });
@@ -180,18 +177,18 @@ describe('Guard scan weapon range boundary — C++ techno.cpp:1539-1544 In_Range
   });
 
   it('target just beyond selected weapon range is excluded (C++ In_Range > weapon range)', () => {
-    const scanner = makeEntity(UnitType.I_DOG, House.USSR, 100, 100);
+    const scanner = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     scanner.mission = Mission.GUARD;
-    const dogWeaponRangeLeptons = scanner.weapon!.range * LEPTON_SIZE;
+    const weaponRangeLeptons = scanner.weapon!.range * LEPTON_SIZE;
     const target = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
     const fireCoord = scanner.fireCoordForWeapon(scanner.weapon);
-    setLeptonPos(target, fireCoord.lx + Math.floor(dogWeaponRangeLeptons) + 1, fireCoord.ly);
+    setLeptonPos(target, fireCoord.lx + Math.floor(weaponRangeLeptons) + 1, fireCoord.ly);
     target.mission = Mission.GUARD;
 
     const ctx = makeCtx({ entities: [scanner, target] });
     updateGuard(ctx, scanner);
 
-    // Should NOT find this target: it is inside the scan ring but outside DogJaw.
+    // Should NOT find this target: it is inside the scan ring but outside M1Carbine.
     expect(scanner.target).toBeNull();
   });
 

@@ -16,12 +16,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Entity, CloakState, threatScore } from '../engine/entity';
+import { Entity, CloakState, dir256ToFacing8, dir256ToFacing32, threatScore } from '../engine/entity';
 import {
   House, Mission, AnimState, UnitType, Stance,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, worldDist,
   WARHEAD_VS_ARMOR, armorIndex,
   MISSION_CONTROL, pixelToLepton, cellTargetToLepton, coordTargetRoundTripLepton,
+  WARHEAD_META, directionToLeptons256,
 } from '../engine/types';
 import {
   updateHunt, updateGuard, updateAreaGuard,
@@ -335,6 +336,19 @@ describe('Movement Zone Filters — C++ map.cpp Zone_Reset', () => {
 
     expect(zone[10 * MAP_CELLS + 15]).toBe(1);
   });
+
+  it('clips full-map HUNT movement-zone scans to the scenario Map rectangle', () => {
+    // C++ MapClass::Zone_Span rejects cells outside MapCellX/Y/Width/Height
+    // before assigning Map[cell].Zones. SCG04EA has X=37, Width=56, so x=93 is
+    // just outside the legal movement zone even though it is on clear terrain.
+    const map = new GameMap();
+    map.setBounds(37, 21, 56, 65);
+
+    const zone = movementZoneCells(map, { cx: 45, cy: 35 }, false, []);
+
+    expect(zone[42 * MAP_CELLS + 92], 'last in-bounds clear cell is reachable').toBe(1);
+    expect(zone[42 * MAP_CELLS + 93], 'first out-of-bounds clear cell is not zoned').toBe(0);
+  });
 });
 
 
@@ -385,6 +399,38 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
 
     // C++ THREAT_NORMAL has no range limit — TS now matches
     expect(hunter.target).not.toBeNull(); // C++ parity: unlimited range
+  });
+
+  it('hunt rejects a higher-value target outside the scanner movement zone', () => {
+    // SCG04EA tick 21 root case: USSR E1s scan with THREAT_NORMAL, but
+    // TechnoClass::Greatest_Threat still applies the scanner's movement zone.
+    // The Greek MNLY at x=93 is outside the scenario [Map] rectangle
+    // (X=37 Width=56), so C++ rejects it and chooses the in-zone JEEP.
+    const map = new GameMap();
+    map.setBounds(37, 21, 56, 65);
+
+    const hunter = makeEntity(UnitType.I_E1, House.USSR,
+      45 * CELL_SIZE + CELL_SIZE / 2,
+      35 * CELL_SIZE + CELL_SIZE / 2);
+    const jeep = makeEntity(UnitType.V_JEEP, House.Greece,
+      70 * CELL_SIZE + CELL_SIZE / 2,
+      60 * CELL_SIZE + CELL_SIZE / 2);
+    const mineLayer = makeEntity(UnitType.V_MNLY, House.Greece,
+      93 * CELL_SIZE + CELL_SIZE / 2,
+      42 * CELL_SIZE + CELL_SIZE / 2);
+
+    const ctx = makeCtx({
+      map,
+      entities: [hunter, jeep, mineLayer],
+      entitiesAllied: (a, b) => a.house === b.house,
+    });
+
+    hunter.mission = Mission.HUNT;
+    hunter.target = null;
+    updateHunt(ctx, hunter);
+
+    expect(threatScore(hunter, mineLayer, 49)).toBeGreaterThan(threatScore(hunter, jeep, 36));
+    expect(hunter.target).toBe(jeep);
   });
 
   it('hunt acquires closest enemy within scan range', () => {
@@ -834,6 +880,44 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     expect(call[5]).toBe(targetLY * CELL_SIZE / LEPTON_SIZE);
   });
 
+  it('E3 structure attacks use Dragon secondary instead of RedEye AA primary', () => {
+    // C++ InfantryClass::Firing_AI calls What_Weapon_Should_I_Use(TarCom)
+    // before Fire_At. RedEye uses AAMissile AG=no, so BuildingClass targets
+    // zero its primary score and E3 fires Dragon/HeatSeeker at ground objects.
+    const rocket = makeEntity(
+      UnitType.I_E3,
+      House.Greece,
+      73 * CELL_SIZE + CELL_SIZE / 2,
+      35 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const barrel = {
+      alive: true, cx: 72, cy: 31, house: House.BadGuy,
+      type: 'BARL', hp: 10, maxHp: 10, armor: 'wood',
+    };
+    const launchProjectile = vi.fn();
+    const ctx = makeCtx({
+      entities: [rocket],
+      structures: [barrel] as any,
+      launchProjectile,
+    });
+
+    rocket.mission = Mission.ATTACK;
+    rocket.targetStructure = barrel as any;
+    rocket.attackCooldown = 0;
+    rocket.firePrepActive = true;
+    rocket.firePrepStage = infantryFireLaunch(rocket.type);
+    rocket.firePrepUsesDoingStage = false;
+
+    updateAttack(ctx, rocket);
+
+    expect(launchProjectile).toHaveBeenCalledOnce();
+    const [, targetEntity, weapon, damage] = launchProjectile.mock.calls[0];
+    expect(targetEntity).toBeNull();
+    expect(weapon?.name).toBe('Dragon');
+    expect(damage).toBe(35);
+    expect(rocket.attackCooldown).toBe(50);
+  });
+
   it('per-tick Firing_AI continues structure fire prep between hunt timer fires', () => {
     // C++ InfantryClass::AI runs Firing_AI every object tick, independent of
     // Mission_Hunt's Normal_Delay timer. Once Mission_Hunt assigns a building
@@ -1015,9 +1099,71 @@ describe('Guard Mode — C++ foot.cpp:589-635', () => {
     guard.lastGuardScan = 0;
     updateGuard(ctx, guard);
 
-    // AI vehicle targets the enemy armed structure.
+    // AI vehicle targets the enemy armed structure. C++ Target_Something_Nearby
+    // only assigns TarCom; the unit remains in GUARD and class Firing_AI handles
+    // any same-tick fire later in UnitClass/InfantryClass::AI.
     expect(guard.targetStructure).toBe(enemyStruct);
-    expect(guard.mission).toBe(Mission.ATTACK);
+    expect(guard.mission).toBe(Mission.GUARD);
+  });
+
+  it('AI guard does NOT auto-target mines marked IsLegalTarget=false (C++ techno.cpp:1571)', () => {
+    // SCG20EA manifestation: BadGuy 3TNK at (31,58) must not acquire Greek
+    // MINV mines at (29,58). In C++, MINV/MINP are BuildingClass objects but
+    // bdata.cpp marks their type IsLegalTarget=false, and Evaluate_Object rejects
+    // them before TarCom assignment.
+    const guard = makeEntity(
+      UnitType.V_3TNK,
+      House.BadGuy,
+      31 * CELL_SIZE + CELL_SIZE / 2,
+      58 * CELL_SIZE + CELL_SIZE / 2,
+    );
+
+    const mine = {
+      alive: true, cx: 29, cy: 58, house: House.Greece,
+      type: 'MINV', hp: 1, maxHp: 1,
+    };
+
+    const ctx = makeCtx({
+      entities: [guard],
+      structures: [mine] as any,
+      tick: 200,
+    });
+
+    guard.mission = Mission.GUARD;
+    guard.lastGuardScan = 0;
+    updateGuard(ctx, guard);
+
+    expect(guard.targetStructure).toBeNull();
+    expect(guard.target).toBeNull();
+    expect(guard.mission).toBe(Mission.GUARD);
+  });
+
+  it('AI guard still auto-targets legal enemy buildings at the same range', () => {
+    const guard = makeEntity(
+      UnitType.V_3TNK,
+      House.BadGuy,
+      31 * CELL_SIZE + CELL_SIZE / 2,
+      58 * CELL_SIZE + CELL_SIZE / 2,
+    );
+
+    const pillbox = {
+      alive: true, cx: 29, cy: 58, house: House.Greece,
+      type: 'PBOX', hp: 400, maxHp: 400,
+    };
+
+    const ctx = makeCtx({
+      entities: [guard],
+      structures: [pillbox] as any,
+      tick: 200,
+    });
+
+    guard.mission = Mission.GUARD;
+    guard.lastGuardScan = 0;
+    updateGuard(ctx, guard);
+
+    expect(guard.targetStructure).toBe(pillbox);
+    expect(guard.target).toBeNull();
+    expect(guard.mission).toBe(Mission.GUARD);
   });
 });
 
@@ -1108,8 +1254,10 @@ describe('Spy target exclusion in guard scan — C++ techno.cpp:1554-1564', () =
     dog.lastGuardScan = 0;
     updateGuard(ctx, dog);
 
-    // Dog can still target spy via normal Evaluate_Object path (sight=5 > 4 cells)
-    // C++ techno.cpp:1558: dogs pass the spy check, so they proceed to normal evaluation
+    // Dog can still target spy via normal Evaluate_Object path. C++ uses the
+    // DOG GuardRange override in TechnoClass::Threat_Range(0), so this is an
+    // explicit 7-cell center-distance scan, not DogJaw weapon range.
+    // C++ techno.cpp:1558: dogs pass the spy check, so they proceed to normal evaluation.
     // C++ parity: guard fires inline then restores GUARD
     expect(dog.target).toBe(spy);
     expect(dog.mission).toBe(Mission.GUARD);
@@ -1400,6 +1548,188 @@ describe('Area Guard Leash — C++ foot.cpp:950-1021', () => {
 
     expect(guard.target).toBe(jeep);
     expect(guard.missionTimer).toBe(1);
+  });
+
+  it('AI AREA_GUARD can acquire an enemy wall cell target via Evaluate_Just_Cell', () => {
+    // C++ TechnoClass::Greatest_Threat(THREAT_AREA) evaluates empty cells when
+    // no techno object has been found. For non-human AI houses on normal/hard
+    // difficulty, Evaluate_Just_Cell returns ::As_Target(cell) for enemy walls
+    // that the primary weapon can destroy. Mission_Guard_Area then returns 1,
+    // exactly like an object target.
+    const map = new GameMap();
+    map.setWallType(22, 20, 'BRIK');
+    map.setWallOwner(22, 20, House.USSR);
+    map.setTerrain(22, 20, Terrain.WALL);
+
+    const guard = makeEntity(
+      UnitType.V_2TNK,
+      House.Greece,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    guard.guardOrigin = { x: guard.pos.x, y: guard.pos.y };
+    guard.mission = Mission.AREA_GUARD;
+
+    const ctx = makeCtx({
+      entities: [guard],
+      map,
+      playerHouse: House.USSR,
+      isPlayerControlled: (e) => e.house === House.USSR,
+      isAllied: (a, b) => a === b || b === House.Neutral,
+      isWallDestroyerDifficulty: () => true,
+      getWarheadMeta: (w) => WARHEAD_META[w],
+    } as Partial<MissionAIContext>);
+
+    updateAreaGuard(ctx, guard);
+
+    expect(guard.target).toBeNull();
+    expect(guard.targetStructure).toBeNull();
+    const target = cellTargetToLepton(22, 20);
+    expect(guard.forceFirePos).toEqual({
+      x: target.lx * CELL_SIZE / LEPTON_SIZE,
+      y: target.ly * CELL_SIZE / LEPTON_SIZE,
+    });
+    expect(guard.missionTimer).toBe(1);
+  });
+
+  it('Firing_AI fires at an acquired wall cell TarCom', () => {
+    // C++ UnitClass::Firing_AI accepts TARGET_CELL TarComs. SCU06EA's front-line
+    // AREA_GUARD tanks acquire wall cells through Evaluate_Just_Cell; if the
+    // firing path only accepts object/building targets, those units never arm
+    // or launch bullets and later Mission_Guard RNG diverges.
+    const map = new GameMap();
+    map.setWallType(22, 20, 'BRIK');
+    map.setWallOwner(22, 20, House.USSR);
+    map.setTerrain(22, 20, Terrain.WALL);
+
+    const guard = makeEntity(
+      UnitType.V_2TNK,
+      House.Greece,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    guard.guardOrigin = { x: guard.pos.x, y: guard.pos.y };
+    guard.mission = Mission.AREA_GUARD;
+
+    const launches: Array<{
+      target: Entity | null;
+      weaponName: string;
+      impactX: number;
+      impactY: number;
+      launchCoord?: { lx: number; ly: number };
+    }> = [];
+    const ctx = makeCtx({
+      entities: [guard],
+      map,
+      playerHouse: House.USSR,
+      isPlayerControlled: (e) => e.house === House.USSR,
+      isAllied: (a, b) => a === b || b === House.Neutral,
+      isWallDestroyerDifficulty: () => true,
+      getWarheadMeta: (w) => WARHEAD_META[w],
+      launchProjectile: (attacker, target, weapon, damage, impactX, impactY, directHit, launchCoord) => {
+        launches.push({ target, weaponName: weapon.name, impactX, impactY, launchCoord });
+      },
+    } as Partial<MissionAIContext>);
+
+    updateAreaGuard(ctx, guard);
+
+    const target = cellTargetToLepton(22, 20);
+    const targetX = target.lx * CELL_SIZE / LEPTON_SIZE;
+    const targetY = target.ly * CELL_SIZE / LEPTON_SIZE;
+    const targetDir = directionToLeptons256(guard.leptonX, guard.leptonY, target.lx, target.ly);
+    guard.turretFacing256 = targetDir;
+    guard.desiredTurretFacing256 = targetDir;
+    guard.turretFacing = dir256ToFacing8(targetDir);
+    guard.desiredTurretFacing = guard.turretFacing;
+    guard.turretFacing32 = dir256ToFacing32(targetDir);
+    guard.attackCooldown = 0;
+
+    runFiringAI(ctx, guard);
+
+    expect(launches).toHaveLength(1);
+    expect(launches[0].target).toBeNull();
+    expect(launches[0].weaponName).toBe(guard.weapon?.name);
+    expect(launches[0].impactX).toBe(targetX);
+    expect(launches[0].impactY).toBe(targetY);
+    expect(launches[0].launchCoord).toEqual(guard.fireCoordForWeapon(guard.weapon));
+    expect(guard.attackCooldown).toBeGreaterThan(0);
+  });
+
+  it('Firing_AI aims at close wall cell TarComs without min-range retreat', () => {
+    // C++ TARGET_CELL TarComs do not run the TS structure/object retreat helper.
+    // In SCU06EA, ARTY units acquire adjacent wall cells via Evaluate_Just_Cell
+    // and rotate/fire at those cells even though the TS weapon data has a
+    // 155mm minRange. A generic minRange retreat here changes NavCom/facing and
+    // skips the C++ firing path.
+    const arty = makeEntity(
+      UnitType.V_ARTY,
+      House.Greece,
+      74 * CELL_SIZE + CELL_SIZE / 2,
+      33 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const target = cellTargetToLepton(74, 34);
+    arty.forceFirePos = {
+      x: target.lx * CELL_SIZE / LEPTON_SIZE,
+      y: target.ly * CELL_SIZE / LEPTON_SIZE,
+    };
+    arty.bodyFacing256 = 0;
+    arty.desiredFacing256 = 0;
+    arty.facing = dir256ToFacing8(0);
+    arty.desiredFacing = arty.facing;
+    arty.bodyFacing32 = dir256ToFacing32(0);
+    arty.attackCooldown = 0;
+
+    let retreated = false;
+    let launches = 0;
+    const ctx = makeCtx({
+      entities: [arty],
+      retreatFromTarget: () => { retreated = true; },
+      launchProjectile: () => { launches++; },
+    } as Partial<MissionAIContext>);
+
+    runFiringAI(ctx, arty);
+
+    const targetDir = directionToLeptons256(arty.leptonX, arty.leptonY, target.lx, target.ly);
+    expect(retreated).toBe(false);
+    expect(arty.moveTarget).toBeNull();
+    expect(arty.desiredFacing256).toBe(targetDir);
+    expect(launches).toBe(0);
+    expect(arty.attackCooldown).toBe(0);
+  });
+
+  it('AI AREA_GUARD does not acquire allied or neutral-owned wall cells', () => {
+    // C++ techno.cpp:1973 blocks wall-cell TarCom when
+    // House->Is_Ally(cellptr->Owner). Every house allies Neutral during
+    // HouseClass::Read_INI, so neutral walls are not auto-targeted.
+    const map = new GameMap();
+    map.setWallType(22, 20, 'BRIK', House.Neutral);
+    map.setTerrain(22, 20, Terrain.WALL);
+
+    const guard = makeEntity(
+      UnitType.V_2TNK,
+      House.Greece,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    guard.guardOrigin = { x: guard.pos.x, y: guard.pos.y };
+    guard.mission = Mission.AREA_GUARD;
+
+    const ctx = makeCtx({
+      entities: [guard],
+      map,
+      playerHouse: House.USSR,
+      isPlayerControlled: (e) => e.house === House.USSR,
+      isAllied: (a, b) => a === b || b === House.Neutral,
+      isWallDestroyerDifficulty: () => true,
+      getWarheadMeta: (w) => WARHEAD_META[w],
+    } as Partial<MissionAIContext>);
+
+    updateAreaGuard(ctx, guard);
+
+    expect(guard.target).toBeNull();
+    expect(guard.targetStructure).toBeNull();
+    expect(guard.forceFirePos).toBeNull();
+    expect(guard.missionTimer).toBe(0);
   });
 });
 

@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * C++ Behavioral Parity: BADR paratrooper drop on TMISSION_ATT_WAYPT
  *
  * Verifies that a fixed-wing passenger transport (Badger bomber) ejects its
@@ -28,7 +30,7 @@
  * a ±3 divergence in the late-game enemy unit count.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -38,8 +40,33 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type AircraftContext, updateAircraft } from '../engine/aircraft';
 import { GameMap } from '../engine/map';
+import { Game } from '../engine/index';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
+
+class FakeAudio {
+  src = ''; volume = 1; loop = false; preload = '';
+  play(): Promise<void> { return Promise.resolve(); }
+  pause(): void {}
+  load(): void {}
+  addEventListener(_event: string, _cb: () => void): void {}
+  removeEventListener(_event: string, _cb: () => void): void {}
+}
+
+function createCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  return canvas;
+}
+
+beforeAll(() => {
+  vi.stubGlobal('Audio', FakeAudio);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
+    { fillRect: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), translate: vi.fn(), scale: vi.fn(), beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText: vi.fn(), measureText: vi.fn(() => ({ width: 10 })), createImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })), putImageData: vi.fn() } as unknown as CanvasRenderingContext2D
+  ));
+});
 
 // ── INI Fixture (rules.ini is God — parse expected values) ──────────────────
 
@@ -104,6 +131,8 @@ function spawnBadrWithPassengers(
   const badr = new Entity(UnitType.V_BADR, House.USSR, startWorld.x, startWorld.y);
   badr.flightAltitude = Entity.FLIGHT_ALTITUDE;
   badr.aircraftState = 'flying';
+  badr.aircraftPassengerCarrier = true;
+  badr.ammo = 0;
   // C++ team.cpp:1705 — Coordinate_Attack assigns MISSION_ATTACK, leaving
   // Target (the ATT_WAYPT waypoint cell) carried through moveTarget.
   badr.mission = Mission.ATTACK;
@@ -131,6 +160,12 @@ function spawnBadrWithPassengers(
   ctx.entities.push(badr);
   ctx.entityById.set(badr.id, badr);
   return { badr, passengers };
+}
+
+function stepUntilPassengerCount(ctx: AircraftContext, badr: Entity, count: number, maxTicks = 20): void {
+  for (let i = 0; i < maxTicks && badr.passengers.length !== count; i++) {
+    updateAircraft(ctx, badr);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -185,14 +220,13 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
     expect(badr.passengers.length).toBe(2);
     expect(ctx.entities.length).toBe(1); // just the BADR, passengers are loaded
 
-    // Tick once: BADR is within 2 cells — first passenger drops.
-    updateAircraft(ctx, badr);
+    // C++ Mission_Hunt first transitions FLY_TO_TARGET -> DROP_BOMBS, then
+    // drops on the next dispatch.
+    stepUntilPassengerCount(ctx, badr, 1);
     expect(badr.passengers.length).toBe(1);
     expect(ctx.entities.length).toBe(2); // BADR + 1 dropped E1
 
-    // Tick again: second passenger drops. BADR stays in ATTACK until the
-    // aircraft attack state reaches REGROUP.
-    updateAircraft(ctx, badr);
+    stepUntilPassengerCount(ctx, badr, 0);
     expect(badr.passengers.length).toBe(0);
     expect(ctx.entities.length).toBe(3); // BADR + 2 dropped E1s
   });
@@ -207,8 +241,7 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
       2,
     );
 
-    updateAircraft(ctx, badr);
-    updateAircraft(ctx, badr);
+    stepUntilPassengerCount(ctx, badr, 0);
 
     // Each dropped passenger is in the world
     for (const p of passengers) {
@@ -223,6 +256,126 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
     }
   });
 
+  it('dropped paratroopers allocate attached PARACH AnimClass slots after Unlimbo', () => {
+    const ctx = makeCtx();
+    let nextHint = 100;
+    ctx.logicIndexHintForNewObject = () => nextHint++;
+    ctx.reserveAnimSlot = vi.fn(() => true);
+    const dropTarget = cellToWorld(30, 30);
+    const { badr, passengers } = spawnBadrWithPassengers(
+      ctx,
+      { cx: 30, cy: 31 },
+      dropTarget,
+      1,
+    );
+
+    stepUntilPassengerCount(ctx, badr, 0);
+
+    const dropped = passengers[0];
+    expect(dropped.logicIndexHint).toBe(100);
+    expect(dropped.isFalling).toBe(true);
+    expect(dropped.fallHasAttachedAnim).toBe(true);
+    expect(dropped.fallParachuteAnimActive).toBe(true);
+    expect(dropped.fallParachuteAnimLogicIndexHint).toBe(101);
+    expect(ctx.reserveAnimSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it('dropped paratroopers fall without attached animation when the AnimClass heap is full', () => {
+    const ctx = makeCtx();
+    ctx.logicIndexHintForNewObject = vi.fn(() => 7);
+    ctx.reserveAnimSlot = vi.fn(() => false);
+    const dropTarget = cellToWorld(30, 30);
+    const { badr, passengers } = spawnBadrWithPassengers(
+      ctx,
+      { cx: 30, cy: 31 },
+      dropTarget,
+      1,
+    );
+
+    stepUntilPassengerCount(ctx, badr, 0);
+
+    const dropped = passengers[0];
+    expect(dropped.isFalling).toBe(true);
+    expect(dropped.fallHasAttachedAnim).toBe(false);
+    expect(dropped.fallParachuteAnimActive).toBe(false);
+    expect(dropped.fallParachuteAnimLogicIndexHint).toBeUndefined();
+    expect(ctx.reserveAnimSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it('paradropping into an occupied center sub-cell uses CellClass::Closest_Free_Spot alternate RNG', () => {
+    const ctx = makeCtx();
+    const dropTarget = cellToWorld(30, 30);
+    const centerBlocker = new Entity(UnitType.I_E2, House.USSR, dropTarget.x, dropTarget.y);
+    centerBlocker.subCell = 0;
+    centerBlocker.claimedCellIdx = 30 * 128 + 30;
+    centerBlocker.claimedSubCell = 0;
+    ctx.entities.push(centerBlocker);
+    ctx.entityById.set(centerBlocker.id, centerBlocker);
+    expect(ctx.map.occupySubCell(30, 30, centerBlocker.id, 0)).toBe(0);
+
+    const { badr, passengers } = spawnBadrWithPassengers(
+      ctx,
+      { cx: 30, cy: 30 },
+      dropTarget,
+      1,
+    );
+    badr.aircraftAttackStatus = 3; // drop on this dispatch
+
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+    updateAircraft(ctx, badr);
+
+    const dropped = passengers[0];
+    expect(dropped.inLimbo).toBe(false);
+    expect(dropped.subCell).not.toBe(0);
+    expect(dropped.claimedSubCell).toBe(dropped.subCell);
+    // C++ cell.cpp:1849 Random_Pick(0,3) picks the alternate corner order
+    // when the requested center StoppingCoordAbs is occupied.
+    expect(ScenarioRandom.callCount).toBe(1);
+  });
+
+  it('Mission_Attack paradrop runs CellClass::Incoming and forced-scatters the dropped infantry', () => {
+    const game = new Game(createCanvas());
+    game.map.setBounds(0, 0, 64, 64);
+
+    const dropTarget = cellToWorld(30, 30);
+    const badr = new Entity(UnitType.V_BADR, House.USSR, dropTarget.x, dropTarget.y);
+    badr.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    badr.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+    badr.aircraftState = 'flying';
+    badr.aircraftPassengerCarrier = true;
+    badr.mission = Mission.ATTACK;
+    badr.missionTimer = 0;
+    badr.aircraftAttackStatus = 3; // C++ Mission_Attack FIRE_AT_TARGET
+    badr.moveTarget = { lx: pixelToLepton(dropTarget.x), ly: pixelToLepton(dropTarget.y) };
+    badr.facing256 = 0;
+    badr.desiredFacing256 = 0;
+
+    const passenger = new Entity(UnitType.I_E2, House.USSR, dropTarget.x, dropTarget.y);
+    passenger.transportRef = badr;
+    passenger.inLimbo = true;
+    badr.passengers.push(passenger);
+    game.entities.push(badr);
+    game.entityById.set(badr.id, badr);
+
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+    const callsBefore = ScenarioRandom.callCount;
+
+    (game as unknown as { updateEntity(e: Entity): void }).updateEntity(badr);
+
+    expect(badr.passengers.length).toBe(0);
+    expect(passenger.inLimbo).toBe(false);
+    expect(passenger.isFalling).toBe(true);
+    // C++ AircraftClass::Mission_Attack calls Fire_At() first, then
+    // Map[As_Cell(TarCom)].Incoming(Coord,true). For passenger aircraft,
+    // Fire_At() is Paradrop_Cargo(), so the dropped infantry itself receives
+    // a forced InfantryClass::Scatter(threat,true) and queues MOVE.
+    expect(passenger.missionQueue).toBe(Mission.MOVE);
+    expect(passenger.moveTarget).not.toBeNull();
+    expect(ScenarioRandom.callCount - callsBefore).toBe(1);
+  });
+
   it('dropped passengers land near the BADR flight path (drop on impact cell)', () => {
     const ctx = makeCtx();
     const dropTarget = cellToWorld(30, 30);
@@ -233,7 +386,7 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
       2,
     );
 
-    updateAircraft(ctx, badr);
+    stepUntilPassengerCount(ctx, badr, 1);
     const firstDropPos = { ...passengers[0].pos };
     // First drop should be close to the drop target (within 2 cells)
     const CELL = CELL_SIZE;
@@ -251,9 +404,9 @@ describe('BADR paradrop-on-ATT_WAYPT (aircraft.cpp:1442-1468 Paradrop_Cargo)', (
       2,
     );
 
-    updateAircraft(ctx, badr); // drop #1
+    stepUntilPassengerCount(ctx, badr, 1);
     expect(badr.mission).toBe(Mission.ATTACK); // still has passengers
-    updateAircraft(ctx, badr); // drop #2 → last
+    stepUntilPassengerCount(ctx, badr, 0);
     expect(badr.passengers.length).toBe(0);
     expect(badr.mission).toBe(Mission.ATTACK);
   });

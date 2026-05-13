@@ -28,7 +28,7 @@ import * as path from 'path';
 
 import {
   CELL_SIZE, House, UnitType, WARHEAD_META, PRODUCTION_ITEMS,
-  buildDefaultAlliances,
+  buildDefaultAlliances, LEPTON_SIZE, cellTargetToLepton,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -443,6 +443,56 @@ describe('Splash damage clears wall overlay from map (combat.cpp:244-270)', () =
     applySplashDamage(ctx, center, weapon, -1, House.Spain);
     expect(ctx.map.getWallType(10, 10)).toBe(type === 'WOOD' ? '' : type);
   });
+
+  it('destroyed wall cells detach matching TarCom and NavCom references', () => {
+    // C++ CellClass::Reduce_Wall clears the overlay, then calls
+    // Detach_This_From_All(As_Target(cell)). Units holding that TARGET_CELL as
+    // TarCom or NavCom must drop it immediately instead of firing at cleared
+    // ground on later ticks.
+    const guard = entityAtCell(UnitType.V_2TNK, House.Greece, 5, 5);
+    const other = entityAtCell(UnitType.V_2TNK, House.Greece, 5, 6);
+    const ctx = makeCombatCtx([], [guard, other]);
+    ctx.map.setWallType(10, 10, 'SBAG');
+
+    const target = cellTargetToLepton(10, 10);
+    guard.forceFirePos = {
+      x: target.lx * CELL_SIZE / LEPTON_SIZE,
+      y: target.ly * CELL_SIZE / LEPTON_SIZE,
+    };
+    guard.moveTarget = { ...target };
+    guard.path = [{ cx: 10, cy: 10 }];
+    guard.firePrepActive = true;
+    guard.firePrepStage = 2;
+    guard.firePrepUsesDoingStage = true;
+    guard.firePrepFacing256 = 64;
+
+    const otherTarget = cellTargetToLepton(11, 10);
+    other.forceFirePos = {
+      x: otherTarget.lx * CELL_SIZE / LEPTON_SIZE,
+      y: otherTarget.ly * CELL_SIZE / LEPTON_SIZE,
+    };
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 100, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.Spain,
+    );
+
+    expect(ctx.map.getWallType(10, 10)).toBe('');
+    expect(guard.forceFirePos).toBeNull();
+    expect(guard.moveTarget).toBeNull();
+    expect(guard.path).toEqual([]);
+    expect(guard.firePrepActive).toBe(false);
+    expect(guard.firePrepStage).toBe(0);
+    expect(guard.firePrepUsesDoingStage).toBe(false);
+    expect(guard.firePrepFacing256).toBe(-1);
+    expect(other.forceFirePos).toEqual({
+      x: otherTarget.lx * CELL_SIZE / LEPTON_SIZE,
+      y: otherTarget.ly * CELL_SIZE / LEPTON_SIZE,
+    });
+  });
 });
 
 // =============================================================================
@@ -484,9 +534,9 @@ describe('Walls block unit movement (Terrain.WALL is impassable)', () => {
 // =============================================================================
 //  9. Wall blocks projectiles (non-high projectiles stop at walls)
 // =============================================================================
-// C++ bullet.cpp:903-913: Is_Forced_To_Explode — non-high, non-dropping
-// projectiles entering a cell with a wall (getWallType != '') explode at
-// wall cell center. High projectiles (missiles, rockets) fly over.
+// C++ bullet.cpp:903-914: Is_Forced_To_Explode — non-high, non-dropping
+// projectiles entering a cell with an OverlayTypeClass::IsHigh obstacle explode
+// at wall cell center. In RA odata.cpp, BRIK is the wall overlay with IsHigh.
 
 describe('Non-high projectiles explode on wall contact (bullet.cpp:903-913)', () => {
   it('map cell with wall type returns non-empty string (wall exists)', () => {
@@ -500,10 +550,9 @@ describe('Non-high projectiles explode on wall contact (bullet.cpp:903-913)', ()
     expect(map.getWallType(10, 10)).toBe('');
   });
 
-  // The actual projectile-wall collision logic is in tickProjectiles which
-  // checks: if (!proj.weapon.isHigh && !proj.weapon.isDropping) and
-  // map.getWallType(cc.cx, cc.cy) !== '' then force-explode.
-  // We verify the wall detection primitive works correctly.
+  // The actual projectile-wall collision logic is covered in
+  // cpp-parity-invisible-bullet-scatter.test.ts. This suite verifies the wall
+  // detection primitive works correctly.
   it.each(WALL_SECTIONS)('%s: getWallType returns type string when wall present', (type) => {
     const map = new GameMap();
     map.setWallType(15, 15, type);

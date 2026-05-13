@@ -372,6 +372,26 @@ describe('APC crusher (drive.cpp:Ok_To_Move)', () => {
     expect(e1.alive).toBe(false);
   });
 
+  it('APC does NOT crush enemy infantry that shares the cell but is outside C++ overrun distance', () => {
+    const apc = entityAtCell(UnitType.V_APC, House.Spain, 37, 41);
+    const e1 = entityAtCell(UnitType.I_E1, House.USSR, 37, 41);
+    // SCU12-style offset: both objects are in cell (37,41), but C++ Distance()
+    // is 107 + floor(64 / 2) = 139 leptons, outside the <128 overrun radius.
+    apc.leptonX = 9600;
+    apc.leptonY = 10581;
+    apc.syncPosFromLeptons();
+    e1.leptonX = 9536;
+    e1.leptonY = 10688;
+    e1.syncPosFromLeptons();
+    expect(apc.cell).toEqual({ cx: 37, cy: 41 });
+    expect(e1.cell).toEqual({ cx: 37, cy: 41 });
+
+    const ctx = makeCombatCtx([apc, e1]);
+    checkVehicleCrush(ctx, apc);
+    expect(e1.alive).toBe(true);
+    expect(e1.hp).toBe(e1.maxHp);
+  });
+
   it('APC does NOT crush allied infantry', () => {
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 10, 10);
     const e1 = entityAtCell(UnitType.I_E1, House.Spain, 10, 10);

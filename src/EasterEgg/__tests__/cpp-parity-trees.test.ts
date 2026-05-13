@@ -23,7 +23,87 @@ import {
   TREE_OCCUPY, TREE_MAX_HP, TREE_CENTER_OFFSET,
   type MapTree,
 } from '../engine/map';
-import { modifyDamage, CELL_SIZE } from '../engine/types';
+import { applySplashDamage, SPLASH_RADIUS, type CombatContext } from '../engine/combat';
+import { modifyDamage, CELL_SIZE, House, buildDefaultAlliances } from '../engine/types';
+import type { Entity } from '../engine/entity';
+import type { Effect } from '../engine/renderer';
+
+function makeTree(type: string, cx: number, cy: number, hp = TREE_MAX_HP): MapTree {
+  const occupyCells = (TREE_OCCUPY[type] ?? []).map(([dx, dy]) => (cx + dx) + (cy + dy) * 128);
+  return {
+    type, cx, cy,
+    hp, maxHp: TREE_MAX_HP,
+    immune: type.startsWith('tc'),
+    occupyCells,
+  };
+}
+
+function makeCombatCtx(map: GameMap): CombatContext {
+  const alliances = buildDefaultAlliances();
+  return {
+    entities: [] as Entity[],
+    entityById: new Map<number, Entity>(),
+    structures: [],
+    inflightProjectiles: [],
+    effects: [] as Effect[],
+    logicAnims: [],
+    tick: 0,
+    playerHouse: House.Spain,
+    scenarioId: 'TEST',
+    killCount: 0,
+    lossCount: 0,
+    pointTotal: 0,
+    alliedUnitsLost: 0,
+    sovietUnitsLost: 0,
+    alliedBuildingsLost: 0,
+    sovietBuildingsLost: 0,
+    warheadOverrides: {},
+    scenarioWarheadMeta: {},
+    scenarioWarheadProps: {},
+    attackedTriggerNames: new Set<string>(),
+    explosionDamageReservedEntityIds: new Set<number>(),
+    explosionDamageReservedStructures: new Set(),
+    map,
+    aiStates: new Map(),
+    lastBaseAttackEva: -Infinity,
+    gameTicksPerSec: 15,
+    gapGeneratorCells: new Map(),
+    nBuildingsDestroyedCount: 0,
+    structuresLost: 0,
+    bridgeCellCount: 0,
+    powerConsumed: 0,
+    powerProduced: 0,
+    isAllied: (a: House, b: House) => alliances.get(a)?.has(b) ?? false,
+    entitiesAllied: (a: Entity, b: Entity) => alliances.get(a.house)?.has(b.house) ?? false,
+    isPlayerControlled: (e: Entity) => alliances.get(e.house)?.has(House.Spain) ?? false,
+    playSoundAt: () => {},
+    playEva: () => {},
+    minimapAlert: () => {},
+    movementSpeed: () => 1,
+    getFirepowerBias: () => 1,
+    getArmorBias: () => 1,
+    getROFBias: () => 1,
+    damageStructure: () => false,
+    aiIQ: () => 3,
+    warheadMuzzleColor: () => '#fff',
+    clearStructureFootprint: () => {},
+    recalculateSiloCapacity: () => {},
+    showEvaMessage: () => {},
+    screenShake: 0,
+    screenFlash: 0,
+  } as CombatContext;
+}
+
+function damageTreeWithSplash(ctx: CombatContext, tree: MapTree, damage: number, warhead: 'Fire' | 'HE' | 'SA'): void {
+  const off = TREE_CENTER_OFFSET[tree.type] ?? [CELL_SIZE / 2, CELL_SIZE / 2];
+  applySplashDamage(
+    ctx,
+    { x: tree.cx * CELL_SIZE + off[0], y: tree.cy * CELL_SIZE + off[1] },
+    { damage, warhead },
+    -1,
+    House.Spain,
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════
 // 1. Tree HP constants
@@ -254,7 +334,109 @@ describe('Tree damage — C++ terrain.cpp:108-151, ARMOR_WOOD', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 6. Tree destruction clears occupancy
+// 6. Tree fire — TerrainClass::Catch_Fire
+// ════════════════════════════════════════════════════════════════════
+
+describe('Tree fire — C++ terrain.cpp Catch_Fire', () => {
+  function makeMapWithBurnableTree(): { map: GameMap; tree: MapTree; ctx: CombatContext } {
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    const tree = makeTree('t01', 10, 10);
+    map.setTreeType(tree.cx, tree.cy, tree.type);
+    map.addTree(tree);
+    return { map, tree, ctx: makeCombatCtx(map) };
+  }
+
+  it('Fire damage catches a wood tree on fire with generic BURN-L and delayed BURN-M anims', () => {
+    const { tree, ctx } = makeMapWithBurnableTree();
+
+    damageTreeWithSplash(ctx, tree, 80, 'Fire');
+
+    expect(tree.isOnFire).toBe(true);
+    expect(ctx.logicAnims.map(anim => anim.type)).toEqual(['burn_big', 'burn_med']);
+    expect(ctx.logicAnims.some(anim => anim.type === 'on_fire_big' || anim.type === 'on_fire_med')).toBe(false);
+
+    const burnBig = ctx.logicAnims.find(anim => anim.type === 'burn_big')!;
+    const burnMed = ctx.logicAnims.find(anim => anim.type === 'burn_med')!;
+    const off = TREE_CENTER_OFFSET[tree.type]!;
+    const treeKey = tree.cy * 128 + tree.cx;
+
+    expect(burnBig.delay).toBe(0);
+    expect(burnBig.attachedTreeKey).toBe(treeKey);
+    expect(burnBig.x).toBeCloseTo(tree.cx * CELL_SIZE + off[0]);
+    expect(burnBig.y).toBeCloseTo(tree.cy * CELL_SIZE + off[1] - 0x50 * CELL_SIZE / 256);
+
+    expect(burnMed.delay).toBe(15);
+    expect(burnMed.attachedTreeKey).toBe(treeKey);
+    expect(burnMed.x).toBeCloseTo(burnBig.x);
+    expect(burnMed.y).toBeCloseTo(tree.cy * CELL_SIZE + off[1] - 0xE0 * CELL_SIZE / 256);
+  });
+
+  it('Fire damage does not submit duplicate terrain burn anims while the tree is already on fire', () => {
+    const { tree, ctx } = makeMapWithBurnableTree();
+
+    damageTreeWithSplash(ctx, tree, 80, 'Fire');
+    damageTreeWithSplash(ctx, tree, 80, 'Fire');
+
+    expect(ctx.logicAnims.filter(anim => anim.type === 'burn_big')).toHaveLength(1);
+    expect(ctx.logicAnims.filter(anim => anim.type === 'burn_med')).toHaveLength(1);
+  });
+
+  it('SA damage does not damage or ignite terrain even though SA has a wood armor multiplier', () => {
+    const { tree, ctx } = makeMapWithBurnableTree();
+
+    damageTreeWithSplash(ctx, tree, 80, 'SA');
+
+    expect(tree.hp).toBe(TREE_MAX_HP);
+    expect(tree.isOnFire).toBeUndefined();
+    expect(ctx.logicAnims).toHaveLength(0);
+  });
+
+  it('strict splash range gates tree damage before Modify_Damage', () => {
+    const { tree, ctx } = makeMapWithBurnableTree();
+    const off = TREE_CENTER_OFFSET[tree.type]!;
+
+    applySplashDamage(
+      ctx,
+      {
+        x: tree.cx * CELL_SIZE + off[0] + SPLASH_RADIUS * CELL_SIZE,
+        y: tree.cy * CELL_SIZE + off[1],
+      },
+      { damage: 80, warhead: 'Fire' },
+      -1,
+      House.Spain,
+    );
+
+    expect(tree.hp).toBe(TREE_MAX_HP);
+    expect(tree.isOnFire).toBeUndefined();
+    expect(ctx.logicAnims).toHaveLength(0);
+  });
+
+  it('non-fire damage is ignored while a tree is already burning', () => {
+    const { tree, ctx } = makeMapWithBurnableTree();
+
+    damageTreeWithSplash(ctx, tree, 80, 'Fire');
+    const hpAfterFire = tree.hp;
+    damageTreeWithSplash(ctx, tree, 200, 'HE');
+
+    expect(tree.hp).toBe(hpAfterFire);
+    expect(tree.isOnFire).toBe(true);
+  });
+
+  it('lethal Fire damage leaves the burning tree on the map until attached fire goes out', () => {
+    const { map, tree, ctx } = makeMapWithBurnableTree();
+
+    damageTreeWithSplash(ctx, tree, 1000, 'Fire');
+
+    expect(tree.hp).toBe(0);
+    expect(tree.isOnFire).toBe(true);
+    expect(map.getTreeAtOrigin(tree.cx, tree.cy)).toBe(tree);
+    expect(map.getTreeAtCell(tree.cx, tree.cy + 1)).toBe(tree);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 7. Tree destruction clears occupancy
 // ════════════════════════════════════════════════════════════════════
 
 describe('Tree destruction — C++ terrain.cpp Start_To_Crumble + destructor', () => {
@@ -343,7 +525,7 @@ describe('Tree destruction — C++ terrain.cpp Start_To_Crumble + destructor', (
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 7. Clump immunity
+// 8. Clump immunity
 // ════════════════════════════════════════════════════════════════════
 
 describe('Clump immunity — C++ RA/tdata.cpp IsImmune=true', () => {
@@ -378,7 +560,7 @@ describe('Clump immunity — C++ RA/tdata.cpp IsImmune=true', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 8. Tree center offsets — C++ XYP_COORD (RA tdata.cpp)
+// 9. Tree center offsets — C++ XYP_COORD (RA tdata.cpp)
 // ════════════════════════════════════════════════════════════════════
 
 describe('Tree center offsets — C++ RA/tdata.cpp XYP_COORD', () => {

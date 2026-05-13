@@ -100,17 +100,18 @@ describe('C++ parity: 256-step aircraft facing', () => {
   });
 
   describe('directionTo256 matches C++ Direction()', () => {
-    // C++ Direction: 0=N, 64=E, 128=S, 192=W
+    // C++ Direction uses Desired_Facing256 integer sectors. Axis boundaries
+    // are not perfectly symmetric: east is 63 and south is 127.
     it('due north = 0', () => {
       expect(directionTo256({ x: 100, y: 100 }, { x: 100, y: 0 })).toBe(0);
     });
 
-    it('due east = 64', () => {
-      expect(directionTo256({ x: 100, y: 100 }, { x: 200, y: 100 })).toBe(64);
+    it('due east = 63', () => {
+      expect(directionTo256({ x: 100, y: 100 }, { x: 200, y: 100 })).toBe(63);
     });
 
-    it('due south = 128', () => {
-      expect(directionTo256({ x: 100, y: 100 }, { x: 100, y: 200 })).toBe(128);
+    it('due south = 127', () => {
+      expect(directionTo256({ x: 100, y: 100 }, { x: 100, y: 200 })).toBe(127);
     });
 
     it('due west = 192', () => {
@@ -119,6 +120,14 @@ describe('C++ parity: 256-step aircraft facing', () => {
 
     it('northeast = 32', () => {
       expect(directionTo256({ x: 100, y: 100 }, { x: 200, y: 0 })).toBe(32);
+    });
+
+    it('uses integer Desired_Facing256 for oblique aircraft headings', () => {
+      // C++ SCU12EA BADR tick 114: Direction(Center_Coord(), TarCom)
+      // from (9919,9389) to cell-target (9352,10376) is 146.
+      const from = { x: 9919 * CELL_SIZE / 256, y: 9389 * CELL_SIZE / 256 };
+      const to = { x: 9352 * CELL_SIZE / 256, y: 10376 * CELL_SIZE / 256 };
+      expect(directionTo256(from, to)).toBe(146);
     });
 
     it('same position returns 0', () => {

@@ -28,7 +28,7 @@ import type { Effect } from '../engine/renderer';
 
 describe('projectileVisualConfig — rules.ini BulletTypeClass parity', () => {
   describe('HeatSeeker family (Image=DRAGON, Rotates=yes, Translucent=yes)', () => {
-    const heatSeekerWeapons = ['Dragon', 'RedEye', 'Maverick', 'Hellfire', 'SubSCUD', 'MammothTusk', 'APTusk'];
+    const heatSeekerWeapons = ['Dragon', 'Maverick', 'Hellfire', 'SubSCUD', 'MammothTusk', 'APTusk'];
     for (const w of heatSeekerWeapons) {
       it(`${w} uses dragon sprite with rotation + translucency`, () => {
         const cfg = projectileVisualConfig(w);
@@ -50,7 +50,7 @@ describe('projectileVisualConfig — rules.ini BulletTypeClass parity', () => {
   });
 
   describe('AAMissile family (Image=MISSILE, Rotates=yes, Translucent=yes, AA=yes, AG=no)', () => {
-    const aaWeapons = ['Nike', 'TurretGun'];
+    const aaWeapons = ['Nike', 'RedEye'];
     for (const w of aaWeapons) {
       it(`${w} uses missile sprite with rotation + translucency`, () => {
         const cfg = projectileVisualConfig(w);
@@ -61,7 +61,7 @@ describe('projectileVisualConfig — rules.ini BulletTypeClass parity', () => {
   });
 
   describe('Cannon/Ballistic family (Image=120MM)', () => {
-    const cannonWeapons = ['75mm', '90mm', '105mm', '120mm', '2Inch', '155mm', '8Inch'];
+    const cannonWeapons = ['75mm', '90mm', '105mm', '120mm', '2Inch', '155mm', '8Inch', 'TurretGun'];
     for (const w of cannonWeapons) {
       it(`${w} uses 120mm shell sprite`, () => {
         const cfg = projectileVisualConfig(w);

@@ -345,36 +345,22 @@ describe('MSUB massive range -- 14.0 cells (rules.ini)', () => {
   });
 });
 
-// == Burst Fire (weapon.cpp:78 Weapon.Burst) ==================================
-// C++ weapon.cpp -- burst=2 means two shots per trigger pull
+// == Two-Shooter Cadence (weapon.cpp:78 Weapon.Burst) =========================
+// C++ uses Burst through TechnoTypeClass::Is_Two_Shooter; there is no separate
+// queued burstCount/burstDelay gameplay state for vessels.
 
-describe('MSUB burst fire -- SubSCUD burst=2 (weapon.cpp:78)', () => {
-  it('burstCount starts at 0 (no active burst)', () => {
+describe('MSUB two-shooter cadence -- SubSCUD burst=2 (weapon.cpp:78)', () => {
+  it('legacy burst diagnostics start at zero', () => {
     const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
     expect(msub.burstCount).toBe(0);
-  });
-
-  it('burstDelay starts at 0', () => {
-    const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
     expect(msub.burstDelay).toBe(0);
   });
 
-  it('weapon burst value is 2', () => {
+  it('primary weapon Burst=2 makes MSUB a C++ two-shooter', () => {
     const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
     expect(msub.weapon!.burst).toBe(2);
-  });
-
-  it('setting burstCount to burst-1 simulates first shot fired, one remaining', () => {
-    const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
-    msub.burstCount = msub.weapon!.burst! - 1;
-    expect(msub.burstCount).toBe(1);
-  });
-
-  it('burstCount decrements to 0 after second shot (volley complete)', () => {
-    const msub = entityAtCell(UnitType.V_MSUB, House.USSR, 10, 10);
-    msub.burstCount = 1; // one shot remaining
-    msub.burstCount--;
-    expect(msub.burstCount).toBe(0);
+    expect(msub.isTwoShooter()).toBe(true);
+    expect(msub.isSecondShot).toBe(false);
   });
 });
 

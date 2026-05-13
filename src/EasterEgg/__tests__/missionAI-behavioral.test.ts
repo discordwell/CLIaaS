@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-  UnitType, House, Mission, AnimState, CELL_SIZE, Stance, Dir,
+  UnitType, House, Mission, AnimState, CELL_SIZE, LEPTON_SIZE, Stance, Dir,
   UNIT_STATS, WEAPON_STATS, CONDITION_RED,
   type WarheadType, type ArmorType,
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
@@ -25,9 +25,10 @@ import {
 } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
-import { STRUCTURE_MAX_HP } from '../engine/scenario';
+import { STRUCTURE_MAX_HP, structureTargetLeptons as scenarioStructureTargetLeptons } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 import type { MissionAIContext } from '../engine/missionAI';
+import { ScenarioRandom } from '../engine/random';
 import {
   updateGuard, updateAttack, updateHunt, updateRetreat,
   updateAreaGuard, updateAmbush, updateRepairMission,
@@ -52,6 +53,23 @@ function advanceInfantryFirePrep(ctx: MissionAIContext, entity: Entity): void {
   ctx.tick++;
   entity.advanceDoingStage(ctx.tick);
   updateAttack(ctx, entity);
+}
+
+function advanceInfantryForceFirePrep(ctx: MissionAIContext, entity: Entity): void {
+  ctx.tick++;
+  entity.advanceDoingStage(ctx.tick);
+  updateForceFireGround(ctx, entity);
+}
+
+function advanceInfantryForceFireUntil(
+  ctx: MissionAIContext,
+  entity: Entity,
+  launched: () => boolean,
+  maxTicks = 80,
+): void {
+  for (let i = 0; i < maxTicks && !launched(); i++) {
+    advanceInfantryForceFirePrep(ctx, entity);
+  }
 }
 
 function makeStructure(
@@ -86,6 +104,7 @@ function makeMockContext(overrides: Partial<MissionAIContext> = {}): MissionAICo
     entities: [],
     structures: [],
     effects: [] as Effect[],
+    logicAnims: [],
     map,
     tick: 100,
     playerHouse: House.Spain,
@@ -192,6 +211,48 @@ describe('updateGuard', () => {
     expect(player.target).toBe(enemy);
   });
 
+  it('vessel in GUARD keeps guard mission when acquiring a structure target', () => {
+    // C++ FootClass::Mission_Guard calls Target_Something_Nearby, which assigns
+    // TarCom only. VesselClass::AI then runs Combat_AI/Firing_AI while the mission
+    // remains GUARD; SCG12EA's England cruiser against France V19 follows this path.
+    const cruiser = makeEntity(UnitType.V_CA, House.England, 30 * CELL_SIZE, 30 * CELL_SIZE);
+    cruiser.mission = Mission.GUARD;
+    cruiser.attackCooldown = 0;
+
+    const target = makeStructure('APWR', House.USSR, 32, 30);
+    const ctx = makeMockContext({
+      entities: [cruiser],
+      structures: [target],
+      isDiscoveredStructureByPlayer: (s) => s === target,
+    });
+
+    updateGuard(ctx, cruiser, /*timerFired=*/ true);
+
+    expect(cruiser.mission).toBe(Mission.GUARD);
+    expect(cruiser.target).toBeNull();
+    expect(cruiser.targetStructure).toBe(target);
+  });
+
+  it('vessel in GUARD keeps an existing in-range structure target instead of rescanning', () => {
+    // C++ Target_Something_Nearby first checks an existing TarCom and returns
+    // true when it is still in range. It does not clear a building TarCom just
+    // because the new Greatest_Threat scan would not rediscover that structure.
+    const cruiser = makeEntity(UnitType.V_CA, House.England, 30 * CELL_SIZE, 30 * CELL_SIZE);
+    cruiser.mission = Mission.GUARD;
+    cruiser.targetStructure = makeStructure('V19', House.France, 32, 30);
+
+    const ctx = makeMockContext({
+      entities: [cruiser],
+      structures: [cruiser.targetStructure],
+      isDiscoveredStructureByPlayer: () => false,
+    });
+
+    updateGuard(ctx, cruiser, /*timerFired=*/ true);
+
+    expect(cruiser.mission).toBe(Mission.GUARD);
+    expect(cruiser.targetStructure).toBe(ctx.structures[0]);
+  });
+
   it('civilian in GUARD flees from nearby enemy', () => {
     // Place civilian well within map bounds so flee clamping doesn't interfere
     const civ = makeEntity(UnitType.I_C1, House.Spain, 35 * CELL_SIZE, 35 * CELL_SIZE);
@@ -256,6 +317,44 @@ describe('updateGuard', () => {
 });
 
 describe('updateAttack projectile fire gates', () => {
+  it('slow infantry projectiles run CellClass::Incoming on the target cell after Fire_At', () => {
+    const grenadier = makeEntity(
+      UnitType.I_E2,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const target = makeEntity(
+      UnitType.I_E1,
+      House.Greece,
+      22 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    grenadier.mission = Mission.ATTACK;
+    grenadier.attackCooldown = 0;
+    grenadier.target = target;
+
+    const incomingThreatScatterCell = vi.fn();
+    const ctx = makeMockContext({
+      entities: [grenadier, target],
+      incomingThreatScatterCell,
+    });
+    ScenarioRandom.seed = 0x12345678;
+
+    updateAttack(ctx, grenadier);
+    for (let i = 0; i < 20 && !(ctx.launchProjectile as any).mock.calls.length; i++) {
+      advanceInfantryFirePrep(ctx, grenadier);
+    }
+
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(incomingThreatScatterCell).toHaveBeenCalledTimes(1);
+    expect(incomingThreatScatterCell).toHaveBeenCalledWith(
+      target.cell.cx,
+      target.cell.cy,
+      grenadier,
+    );
+  });
+
   it('launches projectile weapons even when armor reduces final damage to zero', () => {
     const shooter = makeEntity(UnitType.I_C7, House.Spain, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
     const harvester = makeEntity(UnitType.V_HARV, House.USSR, 11 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
@@ -365,6 +464,158 @@ describe('updateAttack', () => {
 
     expect(entity.mission).toBe(Mission.GUARD);
     expect(entity.targetStructure).toBeNull();
+  });
+
+  it('CA first two-shooter launch uses the pre-toggle fire coordinate', () => {
+    // C++ TechnoClass::Fire_At computes Fire_Coord(which), Unlimbo's the bullet,
+    // then sets Arm and toggles IsSecondShot. A cruiser must therefore launch
+    // the first shell from the fore barrel even though IsSecondShot is true
+    // after the call returns.
+    const cruiser = makeEntity(UnitType.V_CA, House.England, 20 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+    cruiser.mission = Mission.ATTACK;
+    cruiser.attackCooldown = 0;
+    cruiser.bodyFacing256 = 192; // west
+    cruiser.bodyFacing32 = dir256ToFacing32(192);
+    cruiser.facing = dir256ToFacing8(192);
+    cruiser.isSecondShot = false;
+
+    const target = makeEntity(UnitType.V_3TNK, House.USSR, 25 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+    cruiser.target = target;
+    const targetDir = directionToLeptons256(cruiser.leptonX, cruiser.leptonY, target.leptonX, target.leptonY);
+    cruiser.turretFacing256 = targetDir;
+    cruiser.turretFacing32 = dir256ToFacing32(targetDir);
+    cruiser.turretFacing = dir256ToFacing8(targetDir);
+    cruiser.desiredTurretFacing256 = targetDir;
+    cruiser.desiredTurretFacing = cruiser.turretFacing;
+
+    const expectedLaunchCoord = cruiser.fireCoordForWeapon(cruiser.weapon);
+    const ctx = makeMockContext({ entities: [cruiser, target] });
+
+    updateAttack(ctx, cruiser);
+
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    const launchCoord = (ctx.launchProjectile as any).mock.calls[0][7];
+    expect(launchCoord).toEqual(expectedLaunchCoord);
+    expect(cruiser.isSecondShot).toBe(true);
+    expect(cruiser.fireCoordForWeapon(cruiser.weapon)).not.toEqual(expectedLaunchCoord);
+  });
+
+  it('two-shooter second eligible shot writes full ROF immediately', () => {
+    // C++ land/vessel Firing_AI calls TechnoClass::Fire_At once per eligible
+    // frame. Weapon.Burst only makes TechnoTypeClass::Is_Two_Shooter true:
+    // first Fire_At writes Arm=3, second Fire_At writes weapon ROF.
+    const mammoth = makeEntity(
+      UnitType.V_4TNK,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    mammoth.mission = Mission.ATTACK;
+    mammoth.attackCooldown = 0;
+
+    const target = makeEntity(
+      UnitType.V_3TNK,
+      House.Greece,
+      23 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    mammoth.target = target;
+    const targetDir = directionToLeptons256(
+      mammoth.leptonX,
+      mammoth.leptonY,
+      target.leptonX,
+      target.leptonY,
+    );
+    mammoth.turretFacing256 = targetDir;
+    mammoth.turretFacing32 = dir256ToFacing32(targetDir);
+    mammoth.turretFacing = dir256ToFacing8(targetDir);
+    mammoth.desiredTurretFacing256 = targetDir;
+    mammoth.desiredTurretFacing = mammoth.turretFacing;
+
+    const ctx = makeMockContext({ entities: [mammoth, target] });
+
+    updateAttack(ctx, mammoth);
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(mammoth.attackCooldown).toBe(3);
+    expect(mammoth.isSecondShot).toBe(true);
+
+    // Simulate the three-frame Arm countdown reaching zero. The next eligible
+    // Firing_AI call is the second shot of the same C++ two-shooter cadence.
+    mammoth.attackCooldown = 0;
+    mammoth.burstDelay = 0;
+    (ctx.launchProjectile as any).mockClear();
+
+    updateAttack(ctx, mammoth);
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(mammoth.attackCooldown).toBe(WEAPON_STATS['120mm'].rof);
+    expect(mammoth.isSecondShot).toBe(false);
+  });
+
+  it('moving CA arcing scatter uses C++ Coord_Scatter integer movement', () => {
+    // SCG12EA tick 165 geometry. The C++ shell starts from the cruiser muzzle,
+    // applies Random_Pick(0,10), Random_Pick(0,scatterdist), then
+    // Coord_Scatter(target, distance). Coord_Scatter uses the 256-entry integer
+    // trig table, not floating-point screen angles.
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      sourceTag: ScenarioRandom._sourceTag,
+      tagLogging: ScenarioRandom._tagLogging,
+    };
+
+    try {
+      ScenarioRandom.seed = 1926610988;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._sourceTag = 0;
+      ScenarioRandom._tagLogging = false;
+
+      const cruiser = makeEntity(UnitType.V_CA, House.England, 0, 0);
+      cruiser.leptonX = 21021;
+      cruiser.leptonY = 22400;
+      cruiser.syncPosFromLeptons();
+      cruiser.prevPos = { ...cruiser.pos };
+      cruiser.mission = Mission.ATTACK;
+      cruiser.attackCooldown = 0;
+      cruiser.isDriving = true;
+      cruiser.bodyFacing256 = 192;
+      cruiser.bodyFacing32 = dir256ToFacing32(192);
+      cruiser.facing = dir256ToFacing8(192);
+      cruiser.isSecondShot = false;
+
+      const target = makeEntity(UnitType.V_3TNK, House.BadGuy, 0, 0);
+      target.leptonX = 20864;
+      target.leptonY = 19840;
+      target.syncPosFromLeptons();
+      cruiser.target = target;
+
+      const targetDir = directionToLeptons256(cruiser.leptonX, cruiser.leptonY, target.leptonX, target.leptonY);
+      cruiser.turretFacing256 = targetDir;
+      cruiser.turretFacing32 = dir256ToFacing32(targetDir);
+      cruiser.turretFacing = dir256ToFacing8(targetDir);
+      cruiser.desiredTurretFacing256 = targetDir;
+      cruiser.desiredTurretFacing = cruiser.turretFacing;
+
+      const ctx = makeMockContext({ entities: [cruiser, target] });
+      updateAttack(ctx, cruiser);
+
+      expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+      expect(ScenarioRandom.callCount).toBe(3);
+      expect(ScenarioRandom.seed).toBe(2797688571);
+
+      const call = (ctx.launchProjectile as any).mock.calls[0];
+      const impactX = call[4] as number;
+      const impactY = call[5] as number;
+      expect({ lx: pixelToLepton(impactX), ly: pixelToLepton(impactY) }).toEqual({
+        lx: 20884,
+        ly: 19852,
+      });
+      expect(call[8]).toBe(6);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+    }
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -765,6 +1016,41 @@ describe('updateRetreat', () => {
     expect(entity.alive).toBe(false);
     expect(entity.mission).toBe(Mission.DIE);
   });
+
+  it('retreat exit clears attached destroyed trigger state', () => {
+    const entity = makeEntity(UnitType.V_LST, House.Greece, 300, 300);
+    entity.mission = Mission.RETREAT;
+    entity.triggerName = 'los3';
+    entity.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
+
+    const ctx = makeMockContext({ entities: [entity] });
+    updateRetreat(ctx, entity);
+
+    expect(entity.alive).toBe(false);
+    expect(entity.mission).toBe(Mission.DIE);
+    expect(entity.triggerName).toBe('');
+    expect(entity.triggerDeathProcessed).toBe(true);
+  });
+
+  it('retreat exit delegates map-leave accounting when provided', () => {
+    const entity = makeEntity(UnitType.V_LST, House.Greece, 300, 300);
+    entity.mission = Mission.RETREAT;
+    entity.triggerName = 'los3';
+    entity.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
+    const leaveMap = vi.fn((e: Entity) => {
+      e.triggerName = '';
+      e.triggerDeathProcessed = true;
+      e.alive = false;
+      e.mission = Mission.DIE;
+    });
+
+    const ctx = makeMockContext({ entities: [entity], leaveMap });
+    updateRetreat(ctx, entity);
+
+    expect(leaveMap).toHaveBeenCalledWith(entity);
+    expect(entity.triggerName).toBe('');
+    expect(entity.triggerDeathProcessed).toBe(true);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1026,6 +1312,148 @@ describe('orderTransportEvacuate', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateAttackStructure', () => {
+  it('turreted vessels wait for SecondaryFacing before firing at structures', () => {
+    // C++ VesselClass::AI runs Rotation_AI before Combat_AI, then
+    // VesselClass::Can_Fire returns FIRE_ROTATING for non-homing weapons while
+    // SecondaryFacing is still rotating. Building targets use the same TarCom
+    // Can_Fire path as unit targets.
+    const cruiser = makeEntity(UnitType.V_CA, House.England, 20 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+    cruiser.mission = Mission.ATTACK;
+    cruiser.attackCooldown = 0;
+    cruiser.bodyFacing256 = 64;
+    cruiser.bodyFacing32 = dir256ToFacing32(64);
+    cruiser.facing = dir256ToFacing8(64);
+
+    const struct = makeStructure('POWR', House.USSR, 25, 20);
+    const target = scenarioStructureTargetLeptons(struct);
+    const targetDir = directionToLeptons256(cruiser.leptonX, cruiser.leptonY, target.lx, target.ly);
+    const startDir = (targetDir + 64) & 0xFF;
+    cruiser.turretFacing256 = startDir;
+    cruiser.turretFacing = dir256ToFacing8(startDir);
+    cruiser.turretFacing32 = dir256ToFacing32(startDir);
+    cruiser.desiredTurretFacing256 = startDir;
+    cruiser.desiredTurretFacing = cruiser.turretFacing;
+    cruiser.turretRotTickedThisFrame = false;
+
+    const ctx = makeMockContext({ entities: [cruiser], structures: [struct] });
+    updateAttackStructure(ctx, cruiser, struct);
+
+    expect(ctx.launchProjectile).not.toHaveBeenCalled();
+    expect(cruiser.attackCooldown).toBe(0);
+    expect(cruiser.desiredTurretFacing256).toBe(targetDir);
+    expect(cruiser.turretFacing256).not.toBe(startDir);
+  });
+
+  it('turreted vessels fire at structures on the tick vessel Rotation_AI finishes', () => {
+    const cruiser = makeEntity(UnitType.V_CA, House.England, 20 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+    cruiser.mission = Mission.ATTACK;
+    cruiser.attackCooldown = 0;
+    cruiser.bodyFacing256 = 64;
+    cruiser.bodyFacing32 = dir256ToFacing32(64);
+    cruiser.facing = dir256ToFacing8(64);
+
+    const struct = makeStructure('POWR', House.USSR, 25, 20);
+    const target = scenarioStructureTargetLeptons(struct);
+    const targetDir = directionToLeptons256(cruiser.leptonX, cruiser.leptonY, target.lx, target.ly);
+    const startDir = (targetDir - (cruiser.stats.rot + 1) + 256) & 0xFF;
+    cruiser.turretFacing256 = startDir;
+    cruiser.turretFacing = dir256ToFacing8(startDir);
+    cruiser.turretFacing32 = dir256ToFacing32(startDir);
+    cruiser.desiredTurretFacing256 = targetDir;
+    cruiser.desiredTurretFacing = dir256ToFacing8(targetDir);
+    cruiser.turretRotTickedThisFrame = false;
+
+    const ctx = makeMockContext({ entities: [cruiser], structures: [struct] });
+    updateAttackStructure(ctx, cruiser, struct);
+
+    expect(cruiser.turretFacing256).toBe(targetDir);
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    const [, targetEntity, weapon] = (ctx.launchProjectile as any).mock.calls[0];
+    expect(targetEntity).toBeNull();
+    expect(weapon.name).toBe('8Inch');
+  });
+
+  it('two-shooter units use the 3-tick first-shot rearm against structures', () => {
+    const cruiser = makeEntity(UnitType.V_CA, House.England, 20 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+    cruiser.mission = Mission.ATTACK;
+    cruiser.attackCooldown = 0;
+
+    const struct = makeStructure('V19', House.USSR, 25, 20);
+    const target = scenarioStructureTargetLeptons(struct);
+    const targetDir = directionToLeptons256(cruiser.leptonX, cruiser.leptonY, target.lx, target.ly);
+    cruiser.turretFacing256 = targetDir;
+    cruiser.turretFacing = dir256ToFacing8(targetDir);
+    cruiser.turretFacing32 = dir256ToFacing32(targetDir);
+    cruiser.desiredTurretFacing256 = targetDir;
+    cruiser.desiredTurretFacing = cruiser.turretFacing;
+    expect(cruiser.isTwoShooter()).toBe(true);
+    expect(cruiser.isSecondShot).toBe(false);
+
+    const ctx = makeMockContext({ entities: [cruiser], structures: [struct] });
+    updateAttackStructure(ctx, cruiser, struct);
+
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(cruiser.attackCooldown).toBe(3);
+    expect(cruiser.attackCooldown2).toBe(3);
+    expect(cruiser.isSecondShot).toBe(true);
+  });
+
+  it('moving projectile platforms scatter structure shots during Fire_At', () => {
+    // C++ TechnoClass::Fire_At sets BulletClass::IsInaccurate for moving
+    // FootClass shooters before BulletClass::Unlimbo, regardless of target kind.
+    // SCG12EA tick 5 hits this with a moving CA firing 8Inch at a France V19.
+    const saved = {
+      seed: ScenarioRandom.seed,
+      callCount: ScenarioRandom.callCount,
+      sourceTag: ScenarioRandom._sourceTag,
+      tagLogging: ScenarioRandom._tagLogging,
+    };
+
+    try {
+      ScenarioRandom.seed = 1624842842;
+      ScenarioRandom.callCount = 0;
+      ScenarioRandom._sourceTag = 0;
+      ScenarioRandom._tagLogging = false;
+
+      const cruiser = makeEntity(UnitType.V_CA, House.England, 20 * CELL_SIZE + CELL_SIZE / 2, 20 * CELL_SIZE + CELL_SIZE / 2);
+      cruiser.mission = Mission.GUARD;
+      cruiser.attackCooldown = 0;
+      cruiser.isDriving = true;
+      cruiser.isSecondShot = true;
+
+      const struct = makeStructure('V19', House.USSR, 35, 20);
+      const target = scenarioStructureTargetLeptons(struct);
+      const targetDir = directionToLeptons256(cruiser.leptonX, cruiser.leptonY, target.lx, target.ly);
+      cruiser.turretFacing256 = targetDir;
+      cruiser.turretFacing = dir256ToFacing8(targetDir);
+      cruiser.turretFacing32 = dir256ToFacing32(targetDir);
+      cruiser.desiredTurretFacing256 = targetDir;
+      cruiser.desiredTurretFacing = cruiser.turretFacing;
+
+      const ctx = makeMockContext({ entities: [cruiser], structures: [struct] });
+      updateAttackStructure(ctx, cruiser, struct);
+
+      expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+      // The first Random_Pick(0,10) rejects once for this seed, so the arcing
+      // scatter sequence consumes four raw seeds: two jitter attempts, distance,
+      // then Coord_Scatter direction.
+      expect(ScenarioRandom.callCount).toBe(4);
+      expect(ScenarioRandom.seed).toBe(1995901478);
+
+      const call = (ctx.launchProjectile as any).mock.calls[0];
+      const impactX = call[4] as number;
+      const impactY = call[5] as number;
+      const targetX = target.lx * CELL_SIZE / LEPTON_SIZE;
+      const targetY = target.ly * CELL_SIZE / LEPTON_SIZE;
+      expect(Math.hypot(impactX - targetX, impactY - targetY)).toBeGreaterThan(0.1);
+    } finally {
+      ScenarioRandom.seed = saved.seed;
+      ScenarioRandom.callCount = saved.callCount;
+      ScenarioRandom._sourceTag = saved.sourceTag;
+      ScenarioRandom._tagLogging = saved.tagLogging;
+    }
+  });
+
   it('launches a projectile at a target structure when the fire animation reaches FireLaunch', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
@@ -1046,20 +1474,23 @@ describe('updateAttackStructure', () => {
     expect(entity.attackCooldown).toBeGreaterThan(0);
   });
 
-  it('entity moves toward structure when out of range', () => {
+  it('out-of-range structure TarCom does not move inside Firing_AI', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
 
     // Place structure far away (20 cells)
     const struct = makeStructure('POWR', House.USSR, 40, 40);
     const startX = entity.pos.x;
+    const startY = entity.pos.y;
 
     const ctx = makeMockContext({ entities: [entity], structures: [struct] });
     updateAttackStructure(ctx, entity, struct);
 
     expect(entity.animState).toBe(AnimState.WALK);
-    // Entity should have moved toward the structure
-    expect(entity.pos.x).toBeGreaterThan(startX);
+    // C++ Firing_AI does not call Coord_Move. Approach_Target assigns NavCom and
+    // Movement_AI consumes it later in the object AI pass.
+    expect(entity.pos.x).toBe(startX);
+    expect(entity.pos.y).toBe(startY);
   });
 
   it('engineer captures enemy structure at red health', () => {
@@ -1136,7 +1567,7 @@ describe('updateAttackStructure', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateForceFireGround', () => {
-  it('entity fires at ground position when in range', () => {
+  it('infantry force-fire launches only when FireLaunch stage is reached', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
     entity.attackCooldown = 0;
@@ -1146,16 +1577,29 @@ describe('updateForceFireGround', () => {
     updateForceFireGround(ctx, entity);
 
     expect(entity.animState).toBe(AnimState.ATTACK);
+    expect(entity.firePrepActive).toBe(true);
+    expect(entity.attackCooldown).toBe(0);
+    expect(ctx.playSoundAt).not.toHaveBeenCalled();
+
+    advanceInfantryForceFirePrep(ctx, entity);
+    expect(entity.attackCooldown).toBe(0);
+    advanceInfantryForceFirePrep(ctx, entity);
+
     expect(entity.attackCooldown).toBeGreaterThan(0);
     expect(ctx.playSoundAt).toHaveBeenCalled();
-    // Effects should be created (muzzle + projectile + explosion)
-    expect(ctx.effects.length).toBeGreaterThanOrEqual(2);
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(ctx.effects.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('entity moves toward target if out of range', () => {
-    const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
+  it('vehicle moves toward force-fire target if out of range', () => {
+    const entity = makeEntity(UnitType.V_1TNK, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
     entity.forceFirePos = { x: 600, y: 300 }; // ~12.5 cells away, out of range
+    entity.bodyFacing256 = 64; // east, already aligned with force-fire target
+    entity.bodyFacing32 = dir256ToFacing32(64);
+    entity.facing = dir256ToFacing8(64);
+    entity.desiredFacing256 = 64;
+    entity.desiredFacing = entity.facing;
 
     const ctx = makeMockContext({ entities: [entity] });
     const startX = entity.pos.x;
@@ -1177,13 +1621,20 @@ describe('updateForceFireGround', () => {
     const ctx = makeMockContext({ entities: [entity] });
     updateForceFireGround(ctx, entity);
 
-    // E1 fires and consumes last ammo
+    advanceInfantryForceFireUntil(
+      ctx,
+      entity,
+      () => (ctx.launchProjectile as any).mock.calls.length > 0,
+    );
+
+    // E1 fires at FireLaunch and consumes last ammo.
     expect(entity.ammo).toBe(0);
     expect(entity.mission).toBe(Mission.GUARD);
   });
 
-  it('applies splash damage when weapon has splash', () => {
-    // Use a unit with splash weapon — grenadier (E2) has Grenade with splash 1.5
+  it('launches splash projectile instead of applying splash inside Fire_At', () => {
+    // Grenade is a projectile+splash weapon. C++ applies splash when the
+    // BulletClass explodes, not inside InfantryClass::Firing_AI/Fire_At.
     const entity = makeEntity(UnitType.I_E2, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
     entity.attackCooldown = 0;
@@ -1191,11 +1642,17 @@ describe('updateForceFireGround', () => {
 
     const ctx = makeMockContext({ entities: [entity] });
     updateForceFireGround(ctx, entity);
+    advanceInfantryForceFireUntil(
+      ctx,
+      entity,
+      () => (ctx.launchProjectile as any).mock.calls.length > 0,
+    );
 
-    expect(ctx.applySplashDamage).toHaveBeenCalled();
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(ctx.applySplashDamage).not.toHaveBeenCalled();
   });
 
-  it('adds terrain decal at impact', () => {
+  it('does not add terrain decal before projectile impact resolves', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.ATTACK;
     entity.attackCooldown = 0;
@@ -1204,7 +1661,13 @@ describe('updateForceFireGround', () => {
     const ctx = makeMockContext({ entities: [entity] });
     const decalsBefore = ctx.map.decals.length;
     updateForceFireGround(ctx, entity);
+    advanceInfantryForceFireUntil(
+      ctx,
+      entity,
+      () => (ctx.launchProjectile as any).mock.calls.length > 0,
+    );
 
-    expect(ctx.map.decals.length).toBeGreaterThan(decalsBefore);
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(ctx.map.decals.length).toBe(decalsBefore);
   });
 });

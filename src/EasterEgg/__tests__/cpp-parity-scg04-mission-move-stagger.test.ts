@@ -64,6 +64,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   House, Mission, UnitType, CELL_SIZE, RESFACTOR,
 } from '../engine/types';
+import { type MapStructure } from '../engine/scenario';
 import {
   Team,
   TMISSION_MOVE,
@@ -112,6 +113,26 @@ function placeInfantry(game: Game, type: UnitType, house: House, cx: number, cy:
   game.entities.push(e);
   game.entityById.set(e.id, e);
   return e;
+}
+
+function placeStructure(game: Game, type: string, house: House, cx: number, cy: number, hp = 256): MapStructure {
+  const s: MapStructure = {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp,
+    maxHp: hp,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
+  };
+  game.structures.push(s);
+  return s;
 }
 
 function tickEntity(game: Game, entity: Entity): void {
@@ -389,5 +410,94 @@ describe('C++ FootClass Mission_Attack parity', () => {
     expect(attacker.isDriving, 'Movement_AI should not start walking').toBe(false);
     expect(attacker.missionTimer, 'Mission_Attack delay = 14 + Random_Pick(0,2)').toBeGreaterThanOrEqual(14);
     expect(attacker.missionTimer, 'Mission_Attack delay = 14 + Random_Pick(0,2)').toBeLessThanOrEqual(16);
+  });
+
+  it('approaches an out-of-range structure TarCom before firing', () => {
+    // C++ foot.cpp:604-619 treats a building target as the same legal TarCom
+    // path as a unit target: Mission_Attack calls Approach_Target, then
+    // InfantryClass::AI Movement_AI consumes the assigned NavCom.
+    const game = createGame();
+    const attacker = placeInfantry(game, UnitType.I_E1, House.USSR, 10, 20);
+    const barrel = placeStructure(game, 'BRL3', House.Greece, 16, 19, 10);
+
+    attacker.mission = Mission.ATTACK;
+    attacker.missionTimer = 0;
+    attacker.target = null;
+    attacker.targetStructure = barrel;
+
+    tickEntity(game, attacker);
+
+    expect(attacker.mission, 'Mission_Attack remains active').toBe(Mission.ATTACK);
+    expect(attacker.targetStructure, 'structure TarCom is retained').toBe(barrel);
+    expect(attacker.moveTarget, 'out-of-range building target should get NavCom').not.toBeNull();
+    expect(attacker.missionTimer, 'Mission_Attack sleeps after the timer dispatch').toBeGreaterThan(0);
+  });
+
+  it('does not fire at an in-range structure while an infantry driver is active', () => {
+    // C++ infantry.cpp:1639 returns FIRE_MOVING while IsDriving is set. This
+    // applies to building TarCom too because TechnoClass::Can_Fire handles the
+    // structure range check after InfantryClass::Can_Fire's moving gate.
+    const game = createGame();
+    const attacker = placeInfantry(game, UnitType.I_E1, House.USSR, 10, 20);
+    const barrel = placeStructure(game, 'BRL3', House.Greece, 13, 20, 10);
+    const headTo = { lx: 11 * 256 + 128, ly: 20 * 256 + 128 };
+
+    attacker.mission = Mission.ATTACK;
+    attacker.missionTimer = 10;
+    attacker.target = null;
+    attacker.targetStructure = barrel;
+    attacker.moveTarget = headTo;
+    attacker.path = [{ cx: 11, cy: 20 }, { cx: 12, cy: 20 }];
+    attacker.pathIndex = 0;
+    attacker.isDriving = true;
+    attacker.headToLX = headTo.lx;
+    attacker.headToLY = headTo.ly;
+    attacker.doing = 'walk';
+    attacker.doingRate = 2;
+    attacker.doingRateTimer = 2;
+
+    for (let i = 0; i < 3; i++) tickEntity(game, attacker);
+
+    expect(attacker.isDriving, 'test setup: infantry should still be in Start_Driver movement').toBe(true);
+    expect(barrel.alive, 'FIRE_MOVING should prevent an early structure hit').toBe(true);
+    expect(barrel.hp, 'structure HP should not change while infantry is driving').toBe(10);
+    expect(attacker.firePrepActive, 'fire animation should not start while driving').toBe(false);
+    expect(attacker.attackCooldown, 'weapon Arm should not be set while driving').toBe(0);
+  });
+
+  it('does not direct-walk toward an out-of-range structure during Firing_AI', () => {
+    // C++ infantry.cpp:1237-1247 runs Firing_AI before Movement_AI, but
+    // Firing_AI only evaluates Can_Fire/Fire_At. It never calls Coord_Move
+    // toward TarCom. A moving infantryman must consume exactly one movement step:
+    // the active Head_To_Coord hop in Movement_AI.
+    const game = createGame();
+    const attacker = placeInfantry(game, UnitType.I_E1, House.USSR, 10, 10);
+    const barrel = placeStructure(game, 'BRL3', House.Greece, 20, 10, 10);
+    const startLX = 10 * 256 + 100;
+    const startLY = 10 * 256 + 192;
+    const headTo = { lx: 11 * 256 + 64, ly: startLY };
+
+    attacker.leptonX = startLX;
+    attacker.leptonY = startLY;
+    attacker.syncPosFromLeptons();
+    attacker.mission = Mission.ATTACK;
+    attacker.missionTimer = 10;
+    attacker.target = null;
+    attacker.targetStructure = barrel;
+    attacker.moveTarget = { lx: 20 * 256 + 128, ly: 10 * 256 + 128 };
+    attacker.path = [{ cx: 11, cy: 10 }];
+    attacker.pathIndex = 0;
+    attacker.isDriving = true;
+    attacker.headToLX = headTo.lx;
+    attacker.headToLY = headTo.ly;
+    attacker.doing = 'walk';
+
+    tickEntity(game, attacker);
+
+    expect(attacker.leptonY, 'only the due-east Head_To_Coord hop should move').toBe(startLY);
+    expect(attacker.leptonX, 'one Coord_Move step toward Head_To_Coord').toBeGreaterThan(startLX);
+    expect(attacker.leptonX, 'Firing_AI must not add a second path-center move').toBeLessThan(headTo.lx);
+    expect(attacker.isDriving).toBe(true);
+    expect(barrel.hp).toBe(10);
   });
 });

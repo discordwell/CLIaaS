@@ -755,6 +755,55 @@ describe('C++ parity: edge-follow picks shorter CW/CCW path (findpath.cpp:700-71
   });
 });
 
+describe('C++ parity: Find_Path returns the FootClass::Path[] facing stream', () => {
+  it('preserves C++ facings when materialized cells cannot represent later off-center hops', () => {
+    const map = makeMap(0, 0, 128, 128);
+    for (const [cx, cy, terrain] of [
+      [31, 58, Terrain.ROAD],
+      [30, 58, Terrain.ROUGH],
+      [31, 57, Terrain.CLEAR],
+      [30, 57, Terrain.ROAD],
+      [29, 57, Terrain.ROAD],
+      [29, 58, Terrain.CLEAR],
+    ] as const) {
+      map.setTerrain(cx, cy, terrain);
+    }
+    map.setVehicleOccupancy(31, 58, 99);
+    map.setVehicleTrackReservation(30 + 58 * MAP_CELLS, 99);
+
+    const path = findPath(
+      map,
+      { cx: 33, cy: 58 },
+      { cx: 17, cy: 57 },
+      false,
+      false,
+      SpeedClass.FOOT,
+      id => id === 99,
+      undefined,
+      undefined,
+      true,
+      MoveResult.CLOAK,
+      (cx, cy) => {
+        if ((cx === 31 && cy === 58) || (cx === 30 && cy === 58)) return MoveResult.OCCUPIED;
+        return MoveResult.OK;
+      },
+    ) as CellPos[] & { facings?: number[] };
+
+    expect(path.slice(0, 6)).toEqual([
+      { cx: 32, cy: 58 },
+      { cx: 31, cy: 57 },
+      { cx: 30, cy: 57 },
+      { cx: 29, cy: 58 },
+      { cx: 28, cy: 58 },
+      { cx: 27, cy: 58 },
+    ]);
+    // C++ SCG20EA Basic_Path debug for this shape logs Path[] as
+    // W,NW,W,SW,W,W. InfantryClass later applies those facings to the
+    // current Coord, not to these pre-materialized cells.
+    expect(path.facings?.slice(0, 6)).toEqual([6, 7, 6, 5, 6, 6]);
+  });
+});
+
 // ============================================================================
 // 10. Optimize_Moves — C++ findpath.cpp:1038-1203
 //

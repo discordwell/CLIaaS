@@ -91,7 +91,7 @@ function wallItem(type: string = 'BRIK', cost: number = 25): ProductionItem {
 }
 
 /**
- * Mark a structure's footprint and bibs as impassable on the map,
+ * Mark a structure's footprint and bib smudges on the map,
  * simulating what the scenario loader does.
  */
 function stampStructure(map: GameMap, type: string, cx: number, cy: number): void {
@@ -102,7 +102,7 @@ function stampStructure(map: GameMap, type: string, cx: number, cy: number): voi
     }
   }
   for (const bc of getBibCells(type, cx, cy)) {
-    map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    map.setBibSmudge(bc.cx, bc.cy, true);
   }
 }
 
@@ -701,7 +701,7 @@ describe('Section 5: Bib cells (bdata.cpp:3597-3629)', () => {
     //   if (Smudge != SMUDGE_NONE && SmudgeTypeClass::As_Reference(Smudge).IsBib)
     //     return(false);
     //
-    // After placing FACT at (10,10), bib cells at row 13 should be impassable.
+    // After placing FACT at (10,10), bib smudges at row 13 block placement.
     // A subsequent building cannot be placed overlapping those bib cells.
     const existing = makeStructure('FACT', House.Greece, 10, 10);
     const map = makeMap();
@@ -719,9 +719,8 @@ describe('Section 5: Bib cells (bdata.cpp:3597-3629)', () => {
     expect(result).toBe(false);
   });
 
-  it('placement.ts marks bib cells as Terrain.WALL when placing structure', () => {
+  it('placement.ts marks bib cells as build-blocking smudges when placing structure', () => {
     // C++ building.cpp:789: Class->Bib_And_Offset(bib, newcell) → creates smudge
-    // TS placement.ts:103-106: marks bib cells as Terrain.WALL
     const existing = makeStructure('FACT', House.Greece, 5, 5);
     const ctx = makePlacementCtx({
       structures: [existing],
@@ -733,7 +732,10 @@ describe('Section 5: Bib cells (bdata.cpp:3597-3629)', () => {
     const bibs = getBibCells('POWR', 8, 5);
     expect(bibs.length).toBeGreaterThan(0);
     for (const b of bibs) {
-      expect(ctx.map.getTerrain(b.cx, b.cy), `bib at (${b.cx},${b.cy})`).toBe(Terrain.WALL);
+      expect(ctx.map.hasBibSmudge(b.cx, b.cy), `bib smudge at (${b.cx},${b.cy})`).toBe(true);
+      expect(ctx.map.getTerrain(b.cx, b.cy), `bib terrain at (${b.cx},${b.cy})`).not.toBe(Terrain.WALL);
+      expect(ctx.map.isPassable(b.cx, b.cy), `bib passable at (${b.cx},${b.cy})`).toBe(true);
+      expect(ctx.map.isBuildable(b.cx, b.cy), `bib buildable at (${b.cx},${b.cy})`).toBe(false);
     }
   });
 
@@ -753,7 +755,6 @@ describe('Section 5: Bib cells (bdata.cpp:3597-3629)', () => {
 
   it('MCV deployment also creates bib cells for FACT', () => {
     // C++ building.cpp:789: Bib_And_Offset applies to all buildings, including FACT
-    // TS placement.ts:182-185: marks FACT bib cells as WALL
     const mcv = new Entity(UnitType.V_MCV, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
     const ctx = makePlacementCtx();
     deployMCV(ctx, mcv);
@@ -762,7 +763,10 @@ describe('Section 5: Bib cells (bdata.cpp:3597-3629)', () => {
     const bibs = getBibCells('FACT', 49, 49);
     expect(bibs).toHaveLength(3);
     for (const b of bibs) {
-      expect(ctx.map.getTerrain(b.cx, b.cy), `FACT bib at (${b.cx},${b.cy})`).toBe(Terrain.WALL);
+      expect(ctx.map.hasBibSmudge(b.cx, b.cy), `FACT bib at (${b.cx},${b.cy})`).toBe(true);
+      expect(ctx.map.getTerrain(b.cx, b.cy), `FACT bib terrain at (${b.cx},${b.cy})`).not.toBe(Terrain.WALL);
+      expect(ctx.map.isPassable(b.cx, b.cy), `FACT bib passable at (${b.cx},${b.cy})`).toBe(true);
+      expect(ctx.map.isBuildable(b.cx, b.cy), `FACT bib buildable at (${b.cx},${b.cy})`).toBe(false);
     }
   });
 });
@@ -1093,17 +1097,17 @@ describe('Section 10: Bib width mapping (bdata.cpp:3602-3617)', () => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Section 11: Placement terrain marking — structure footprint → WALL
+// Section 11: Placement terrain marking — footprint wall, bib smudge
 //
 // C++ building.cpp:793: Map.Place_Down(cell, this)
 // This marks cells as occupied, preventing future placement.
 //
-// TS placement.ts:97-106: sets Terrain.WALL for footprint + bib cells
+// TS placement.ts: sets Terrain.WALL for footprint cells and bib smudges below.
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Section 11: Footprint terrain marking (building.cpp:793)', () => {
 
-  it('placing POWR (2x2) marks exactly 4 footprint cells + 2 bib cells as WALL', () => {
+  it('placing POWR (2x2) marks 4 footprint WALL cells and 2 bib smudges', () => {
     const existing = makeStructure('FACT', House.Greece, 5, 5);
     const ctx = makePlacementCtx({
       structures: [existing],
@@ -1117,7 +1121,10 @@ describe('Section 11: Footprint terrain marking (building.cpp:793)', () => {
     }
     // Bib: (8,7), (9,7) → 2 cells
     for (const [x, y] of [[8, 7], [9, 7]]) {
-      expect(ctx.map.getTerrain(x, y), `bib (${x},${y})`).toBe(Terrain.WALL);
+      expect(ctx.map.hasBibSmudge(x, y), `bib smudge (${x},${y})`).toBe(true);
+      expect(ctx.map.getTerrain(x, y), `bib terrain (${x},${y})`).not.toBe(Terrain.WALL);
+      expect(ctx.map.isPassable(x, y), `bib passable (${x},${y})`).toBe(true);
+      expect(ctx.map.isBuildable(x, y), `bib buildable (${x},${y})`).toBe(false);
     }
     // Adjacent clear cell should remain CLEAR
     expect(ctx.map.getTerrain(10, 5)).toBe(Terrain.CLEAR);

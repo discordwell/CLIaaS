@@ -333,51 +333,58 @@ describe('Refinery counting — alive PROC structures for house', () => {
 });
 
 // =============================================================================
-// 5. UnderAttack Timeout (C++ HOUSE.CPP: base-under-attack flag timeout)
+// 5. UnderAttack Timeout (C++ HOUSE.CPP: Expert_AI STATE_ATTACKED transitions)
 // =============================================================================
 
-describe('UnderAttack timeout — clears after 150 ticks since last base attack', () => {
-  it('clears underAttack when tick - lastBaseAttackTick > 150', () => {
-    const ctx = makeMockAIContext({ tick: 451 });
+describe('UnderAttack timeout — Expert_AI mirrors LATime with a one-minute window', () => {
+  it('clears underAttack when tick - lastBaseAttackTick > TICKS_PER_MINUTE', () => {
+    const ctx = makeMockAIContext({ tick: 1051 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 3, underAttack: true, lastBaseAttackTick: 200,
+      iq: 3, isBaseBuilding: true, underAttack: true, lastBaseAttackTick: 100,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 451 - 200 = 251 > 150 => clear
+    // C++: LATime + TICKS_PER_MINUTE < Frame clears STATE_ATTACKED.
     expect(state.underAttack).toBe(false);
   });
 
-  it('keeps underAttack true when tick - lastBaseAttackTick === 150 (not > 150)', () => {
-    const ctx = makeMockAIContext({ tick: 451 });
+  it('keeps underAttack true when tick - lastBaseAttackTick === TICKS_PER_MINUTE', () => {
+    const ctx = makeMockAIContext({ tick: 1051 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 3, underAttack: true, lastBaseAttackTick: 301,
+      iq: 3, isBaseBuilding: true, underAttack: true, lastBaseAttackTick: 151,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 451 - 301 = 150, condition is > 150, so stays true
     expect(state.underAttack).toBe(true);
   });
 
-  it('keeps underAttack true when within 150 ticks of last attack', () => {
+  it('keeps underAttack true when within TICKS_PER_MINUTE of last attack', () => {
     const ctx = makeMockAIContext({ tick: 301 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 3, underAttack: true, lastBaseAttackTick: 200,
+      iq: 3, isBaseBuilding: true, underAttack: true, lastBaseAttackTick: 200,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 301 - 200 = 101 < 150 => stays true
     expect(state.underAttack).toBe(true);
   });
 
-  it('does not set underAttack to true when already false', () => {
+  it('enters underAttack for base-building houses with fresh LATime', () => {
     const ctx = makeMockAIContext({ tick: 451 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 3, underAttack: false, lastBaseAttackTick: 200,
+      iq: 3, isBaseBuilding: true, underAttack: false, lastBaseAttackTick: 200,
     });
 
     updateAIStrategicPlanner(ctx);
-    // Already false, function only clears — never sets true
+    expect(state.underAttack).toBe(true);
+  });
+
+  it('does not enter underAttack for non-base-building houses with fresh LATime', () => {
+    const ctx = makeMockAIContext({ tick: 451 });
+    const state = addAIHouse(ctx, House.USSR, {
+      iq: 3, isBaseBuilding: false, underAttack: false, lastBaseAttackTick: 200,
+    });
+
+    updateAIStrategicPlanner(ctx);
     expect(state.underAttack).toBe(false);
   });
 });
@@ -795,14 +802,13 @@ describe('Edge cases and boundary conditions', () => {
     expect(state.phase).toBe('buildup');
   });
 
-  it('underAttack boundary: clears at exactly 151 ticks elapsed', () => {
-    const ctx = makeMockAIContext({ tick: 301 });
+  it('underAttack boundary: clears only after the 900-tick C++ minute expires', () => {
+    const ctx = makeMockAIContext({ tick: 1051 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 3, underAttack: true, lastBaseAttackTick: 149,
+      iq: 3, isBaseBuilding: true, underAttack: true, lastBaseAttackTick: 149,
     });
 
     updateAIStrategicPlanner(ctx);
-    // 301 - 149 = 152 > 150 => clear
     expect(state.underAttack).toBe(false);
   });
 });

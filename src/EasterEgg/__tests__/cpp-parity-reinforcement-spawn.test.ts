@@ -47,8 +47,10 @@ import {
   type TriggerAction,
   type ScenarioTrigger,
 } from '../engine/scenario';
-import { House, Dir, Mission, type CellPos } from '../engine/types';
+import { House, Dir, Mission, UnitType, type CellPos } from '../engine/types';
 import { Entity } from '../engine/entity';
+import { RandomClass, ScenarioRandom } from '../engine/random';
+import { GameMap, Terrain } from '../engine/map';
 
 // ============================================================
 // C++ constants reproduced for reference
@@ -214,6 +216,95 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
         expect(edgeCell!.cy).toBeGreaterThanOrEqual(MAP_BOUNDS.y);
         expect(edgeCell!.cy).toBeLessThanOrEqual(MAP_BOUNDS.y + MAP_BOUNDS.h - 1);
       }
+    });
+
+    it('ground transport reinforcements retry adjacent outside cells when the edge cell is occupied', () => {
+      // C++ reinf.cpp:470-498 wraps each Unlimbo in ScenarioInit. The initial
+      // Can_Enter_Cell gate is bypassed, but MARK_DOWN can still fail when a
+      // previous ground vehicle occupies the Calculated_Cell. The retry scan
+      // checks Adjacent_Cell in FACING_N..NW order and requires !Map.In_Radar.
+      const bounds = { x: 5, y: 1, w: 93, h: 53 };
+      const houseEdges = new Map<House, string>([[House.USSR, 'south']]);
+      const waypoints = new Map<number, CellPos>([[0, { cx: 53, cy: 53 }]]);
+      const team = makeTeam({
+        house: 2,
+        members: [{ type: 'APC', count: 1 }],
+      });
+      const triggers: ScenarioTrigger[] = [makeTrigger()];
+
+      const first = executeTriggerAction(
+        makeAction(0),
+        [team],
+        waypoints,
+        new Set(),
+        triggers,
+        0,
+        houseEdges,
+        bounds,
+      );
+      const second = executeTriggerAction(
+        makeAction(0),
+        [team],
+        waypoints,
+        new Set(),
+        triggers,
+        0,
+        houseEdges,
+        bounds,
+        -1,
+        undefined,
+        first.spawned,
+      );
+
+      expect(first.spawned).toHaveLength(1);
+      expect(second.spawned).toHaveLength(1);
+      expect(first.spawned[0].cell).toEqual({ cx: 53, cy: 54 });
+      expect(second.spawned[0].cell).toEqual({ cx: 54, cy: 54 });
+    });
+
+    it('naval reinforcements scan for an open edge cell but do not fan out same-team vessels', () => {
+      // C++ Calculated_Cell/Good_Reinforcement_Cell scans along the water edge
+      // when another vessel occupies the initially aligned outcell/incell pair.
+      // The later reinf.cpp Unlimbo retry path is ground-vehicle-specific in
+      // practice: same-team PTs can occupy the same reinforcement cell.
+      const bounds = { x: 10, y: 44, w: 98, h: 40 };
+      const houseEdges = new Map<House, string>([[House.Greece, 'west']]);
+      const waypoints = new Map<number, CellPos>([[0, { cx: 10, cy: 53 }]]);
+      const map = new GameMap();
+      map.setBounds(bounds.x, bounds.y, bounds.w, bounds.h);
+      for (const cell of [
+        { cx: 9, cy: 53 }, { cx: 10, cy: 53 },
+        { cx: 9, cy: 54 }, { cx: 10, cy: 54 },
+      ]) {
+        map.setTerrain(cell.cx, cell.cy, Terrain.WATER);
+      }
+
+      const existingLst = new Entity(UnitType.V_LST, House.Greece, 9 * 24 + 12, 53 * 24 + 12);
+      const team = makeTeam({
+        members: [{ type: 'PT', count: 3 }],
+      });
+      const triggers: ScenarioTrigger[] = [makeTrigger()];
+
+      const result = executeTriggerAction(
+        makeAction(0),
+        [team],
+        waypoints,
+        new Set(),
+        triggers,
+        0,
+        houseEdges,
+        bounds,
+        -1,
+        map,
+        [existingLst],
+      );
+
+      expect(result.spawned).toHaveLength(3);
+      expect(result.spawned.map(entity => entity.cell)).toEqual([
+        { cx: 9, cy: 54 },
+        { cx: 9, cy: 54 },
+        { cx: 9, cy: 54 },
+      ]);
     });
 
     it('clamps aligned coordinate to map bounds when waypoint is out of range', () => {
@@ -388,6 +479,50 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
         `C++ reinf.cpp:466-468 assigns Random_Pick(DIR_N, DIR_MAX) to aircraft.`
       ).toBeGreaterThan(1);
     });
+
+    it('non-transport aircraft teams consume facing RNG in reversed Unlimbo order', () => {
+      // C++ _Create_Group prepends non-transport members, then Do_Reinforcements
+      // Unlimbo()s that reversed list. Aircraft Random_Pick happens inside
+      // Unlimbo, so the runtime Logic order gets the RNG sequence.
+      const seed = 0x12345678;
+      const expectedRng = new RandomClass(seed);
+      const expectedFacing256 = [
+        expectedRng.nextInRange(0, 255),
+        expectedRng.nextInRange(0, 255),
+        expectedRng.nextInRange(0, 255),
+      ];
+      const savedSeed = ScenarioRandom.seed;
+      const savedCallCount = ScenarioRandom.callCount;
+      try {
+        ScenarioRandom.seed = seed;
+        ScenarioRandom.callCount = 0;
+        const houseEdges = new Map<House, string>([[House.Greece, 'north']]);
+        const team = makeTeam({
+          origin: 0,
+          members: [{ type: 'YAK', count: 3 }],
+          missions: [{ mission: 0, data: 11 }],
+        });
+        const waypoints = new Map<number, CellPos>([[0, { cx: 50, cy: 80 }]]);
+
+        const result = executeTriggerAction(
+          makeAction(0),
+          [team],
+          waypoints,
+          new Set(),
+          [makeTrigger()],
+          0,
+          houseEdges,
+          MAP_BOUNDS,
+        );
+
+        expect(result.spawned).toHaveLength(3);
+        expect(result.spawned.map(entity => entity.facing256)).toEqual(expectedFacing256);
+        expect(ScenarioRandom.callCount).toBe(3);
+      } finally {
+        ScenarioRandom.seed = savedSeed;
+        ScenarioRandom.callCount = savedCallCount;
+      }
+    });
   });
 
   // ============================================================
@@ -428,9 +563,9 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
   });
 
   // ============================================================
-  // SECTION 7: Aircraft spawn at edge and fly to origin
+  // SECTION 7: Aircraft spawn at edge without a spawn-time mission
   // C++ reinf.cpp:466-471 — aircraft are placed at edge cell
-  // but the team mission directs them to the origin waypoint
+  // C++ reinf.cpp:479-481 — only non-aircraft get MISSION_GUARD here
   // ============================================================
   describe('Aircraft spawn at edge — C++ reinf.cpp:466-471', () => {
     it('aircraft spawn at map edge, not at origin waypoint', () => {
@@ -467,6 +602,8 @@ describe('Reinforcement spawn — C++ parity (edge, facing, transport)', () => {
           `Aircraft should spawn at north edge (world y = ${edgeWorldY}), ` +
           `not at origin waypoint (world y = ${80 * 24 + 12})`
         ).toBe(edgeWorldY);
+        expect(entity.mission).toBe(Mission.NONE);
+        expect(entity.moveTarget).toBeNull();
       }
     });
   });

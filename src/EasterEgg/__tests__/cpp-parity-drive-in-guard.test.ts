@@ -44,7 +44,7 @@ import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { Team } from '../engine/team';
 import {
-  Dir, House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton,
+  Dir, House, Mission, UnitType, CELL_SIZE, RESFACTOR, pixelToLepton, cellTargetToLepton,
 } from '../engine/types';
 import { MoveResult, Terrain } from '../engine/map';
 import { ScenarioRandom } from '../engine/random';
@@ -407,6 +407,45 @@ describe('C++ DriveClass::AI drives-in-GUARD (drive.cpp:1376)', () => {
     expect(jeep.mission).toBe(Mission.GUARD);
     expect(jeep.missionQueue).toBeNull();
     expect(jeep.missionTimer).toBe(0);
+  });
+
+  it('Basic_Path friendly blocker close-enough clears NavCom before turning', () => {
+    // C++ drive.cpp:1052-1067 runs this immediately after Basic_Path succeeds,
+    // before Do_Turn. A stationary allied unit in Path[0] is MOVE_TEMP; when
+    // NavCom is already close enough, Assign_Destination(TARGET_NONE) re-enters
+    // Start_Of_Move and queues the idle mission for the post-Drive Commence.
+    const game = createGame();
+    const tank = placeVehicle(game, UnitType.V_4TNK, House.USSR, 55, 60);
+    const blocker = placeVehicle(game, UnitType.V_4TNK, House.USSR, 56, 59);
+
+    blocker.mission = Mission.GUARD;
+    blocker.missionQueue = null;
+    blocker.isDriving = false;
+    blocker.moveTarget = null;
+
+    tank.mission = Mission.MOVE;
+    tank.missionTimer = 8;
+    tank.missionQueue = null;
+    tank.isDriving = false;
+    tank.trackNumber = -1;
+    tank.trackControlIndex = -1;
+    tank.path = [];
+    tank.pathIndex = 0;
+    tank.pathDelay = 0;
+    tank.facing = Dir.N;
+    tank.desiredFacing = Dir.N;
+    tank.bodyFacing256 = Dir.N * 32;
+    tank.desiredFacing256 = Dir.N * 32;
+    tank.moveTarget = cellTargetToLepton(56, 59);
+
+    tickEntity(game, tank);
+
+    expect(tank.moveTarget).toBeNull();
+    expect(tank.path).toEqual([]);
+    expect(tank.mission, 'post-Drive Commence should pop queued GUARD').toBe(Mission.GUARD);
+    expect(tank.missionQueue).toBeNull();
+    expect(tank.missionTimer).toBe(0);
+    expect(tank.desiredFacing256, 'no pre-idle Do_Turn toward the blocked cell').toBe(Dir.N * 32);
   });
 
   it('active track jump uses mirrored C++ Path, not stale absolute path cells', () => {

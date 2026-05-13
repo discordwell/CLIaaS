@@ -23,18 +23,39 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Entity, resetEntityIds } from '../engine/entity';
+import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import { updateGuard, updateHunt, type MissionAIContext } from '../engine/missionAI';
 import { ScenarioRandom } from '../engine/random';
 import {
   CELL_SIZE, House, UnitType, Mission, Stance,
   worldDist,
 } from '../engine/types';
+import type { MapStructure } from '../engine/scenario';
 
-beforeEach(() => resetEntityIds());
+beforeEach(() => {
+  resetEntityIds();
+  setPlayerHouses(new Set([House.Spain, House.Greece]));
+});
 
 function makeEntity(type: UnitType | string, house: House, x: number, y: number): Entity {
   return new Entity(type as UnitType, house, x, y);
+}
+
+function makeStructure(type: string, house: House, cx: number, cy: number, hp = 400): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp,
+    maxHp: hp,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+  } as MapStructure;
 }
 
 function makeCtx(overrides: Partial<MissionAIContext> & { entities?: Entity[] }): MissionAIContext {
@@ -373,6 +394,86 @@ describe('Cell-based scan order — C++ techno.cpp:2108-2209', () => {
     // Early bailout at crange/4=2 means innerTarget (found at ring 2) is returned
     // before outerTarget (ring 5) is ever checked.
     expect(scanner.target).toBe(innerTarget);
+  });
+
+  it('buildings participate in the same radial cell scan as mobile targets', () => {
+    // C++ Evaluate_Cell reads Map[cell].Cell_Occupier(), which includes
+    // BuildingClass objects. Structures are not a fallback after all mobile
+    // targets: an inner-ring building can trigger the crange/4 early bailout
+    // before an outer tank is ever scanned. This is the SCG12EA cruiser shape:
+    // C++ targets the V19/barrel cluster area while TS used to skip structures
+    // until after selecting an outer 3TNK.
+    const cruiser = makeEntity(
+      UnitType.V_CA,
+      House.England,
+      50 * CELL_SIZE + CELL_SIZE / 2,
+      50 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    cruiser.mission = Mission.GUARD;
+    cruiser.target = null;
+    cruiser.targetStructure = null;
+    setPlayerHouses(new Set([House.Greece, House.England])); // player-allied, but not strict PlayerPtr-owned
+
+    const fireCoord = cruiser.fireCoordPrimary();
+    const scanCX = Math.floor(fireCoord.lx / 256);
+    const scanCY = Math.floor(fireCoord.ly / 256);
+
+    // 8Inch range=22 -> crange=23, so crange/4 is radius 5.
+    const innerBuilding = makeStructure('V19', House.France, scanCX, scanCY - 5);
+    const outerTank = makeEntity(
+      UnitType.V_3TNK,
+      House.BadGuy,
+      (scanCX - 3) * CELL_SIZE + CELL_SIZE / 2,
+      (scanCY - 10) * CELL_SIZE + CELL_SIZE / 2,
+    );
+    outerTank.mission = Mission.GUARD;
+
+    const ctx = makeCtx({
+      entities: [cruiser, outerTank],
+      structures: [innerBuilding],
+      playerHouse: House.Greece,
+      isAllied: (a, b) => a === b || (a === House.Greece && b === House.England) || (a === House.England && b === House.Greece),
+    });
+    updateGuard(ctx, cruiser);
+
+    expect(cruiser.target).toBeNull();
+    expect(cruiser.targetStructure).toBe(innerBuilding);
+  });
+
+  it('uses building Center_Coord, not Target_Coord, for guard-scan range acceptance', () => {
+    // C++ TechnoClass::Evaluate_Object receives an ObjectClass pointer from
+    // Evaluate_Cell, so its range==0 path calls In_Range(ObjectClass const*).
+    // That overload checks the building's Center_Coord. Later Can_Fire checks
+    // TarCom/Target_Coord, so a building can be selected by Greatest_Threat even
+    // when it cannot be fired at yet. SCU01EA tick 1: the French JEEP at (44,76)
+    // selects AFLD[40], not the later DOME[50], because the AFLD center is in
+    // scan range and its occupy cells overwrite DOME in the radius-4 left column.
+    const jeep = makeEntity(UnitType.V_JEEP, House.France, 0, 0);
+    jeep.mission = Mission.GUARD;
+    jeep.target = null;
+    jeep.targetStructure = null;
+    jeep.leptonX = 11392;
+    jeep.leptonY = 19584;
+    jeep.syncPosFromLeptons();
+    jeep.bodyFacing256 = 32;
+    jeep.desiredFacing256 = 32;
+    jeep.turretFacing256 = 32;
+    jeep.desiredTurretFacing256 = 32;
+    jeep.facing = 1;
+    jeep.turretFacing = 1;
+
+    const afld = makeStructure('AFLD', House.USSR, 39, 77, 1000);
+    const dome = makeStructure('DOME', House.USSR, 45, 79, 1000);
+
+    const ctx = makeCtx({
+      entities: [jeep],
+      structures: [afld, dome],
+      playerHouse: House.USSR,
+    });
+    updateGuard(ctx, jeep);
+
+    expect(jeep.target).toBeNull();
+    expect(jeep.targetStructure).toBe(afld);
   });
 
   it('dead object at early bailout poisons scan instead of selecting outer live target', () => {

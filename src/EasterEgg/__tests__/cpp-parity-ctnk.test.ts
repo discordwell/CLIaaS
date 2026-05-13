@@ -164,7 +164,7 @@ describe('CTNK weapon — APTusk (weapon.cpp / rules.ini)', () => {
     expect(weapon.range).toBe(5.0);
   });
 
-  it('APTusk burst is 2 (fires two shots per trigger pull)', () => {
+  it('APTusk burst is 2 (marks primary as C++ two-shooter)', () => {
     expect(weapon.burst).toBe(2);
   });
 
@@ -677,22 +677,19 @@ describe('CTNK crate bias interactions (crate.cpp)', () => {
 });
 
 // -- Burst Fire System (weapon.cpp) -------------------------------------------
-// C++ weapon.cpp — APTusk Burst=2 fires two shots per trigger pull
+// C++ weapon.cpp — APTusk Burst=2 makes the primary weapon a two-shooter.
 
-describe('CTNK burst fire system (weapon.cpp)', () => {
-  it('burstCount starts at 0 (no burst in progress)', () => {
+describe('CTNK two-shooter cadence (weapon.cpp)', () => {
+  it('legacy burst diagnostics start at zero', () => {
     const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 10, 10);
     expect(ctnk.burstCount).toBe(0);
-  });
-
-  it('burstCount can be set to weapon burst value', () => {
-    const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 10, 10);
-    ctnk.burstCount = ctnk.weapon!.burst!;
-    expect(ctnk.burstCount).toBe(2);
-  });
-
-  it('burstDelay starts at 0', () => {
-    const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 10, 10);
     expect(ctnk.burstDelay).toBe(0);
+  });
+
+  it('primary weapon Burst=2 makes CTNK a C++ two-shooter', () => {
+    const ctnk = entityAtCell(UnitType.V_CTNK, House.Spain, 10, 10);
+    expect(ctnk.weapon!.burst).toBe(2);
+    expect(ctnk.isTwoShooter()).toBe(true);
+    expect(ctnk.isSecondShot).toBe(false);
   });
 });

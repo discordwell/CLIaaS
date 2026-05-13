@@ -37,6 +37,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PCPType,
   PER_CELL_COMMENCE_ENABLED,
+  drivePerCellProcess,
   unitPerCellProcess,
   type PCPEntity,
 } from '../engine/perCellProcess';
@@ -132,6 +133,40 @@ describe('Per_Cell_Process Commence gate ENABLED (C++ unit.cpp:1756 parity)', ()
     expect(mcv.moveTarget).toBe(null);
     expect(mcv.path).toEqual([]);
     expect(mcv.pathIndex).toBe(0);
+  });
+
+  it('vessel PCP_END uses VesselClass -> DriveClass -> FootClass and does not pop MissionQueue', () => {
+    // C++ VesselClass::Per_Cell_Process (vessel.cpp:696-760) chains to
+    // DriveClass::Per_Cell_Process, not UnitClass::Per_Cell_Process. Therefore
+    // the unit.cpp:1756 Commence branch is land-vehicle-only. Vessel queues pop
+    // only at the VesselClass::AI pre/post gates (vessel.cpp:606,673), both
+    // gated by !IsDriving.
+    const cruiser = makeVehicle({
+      stats: { isVessel: true },
+      moveTarget: { lx: 84 * 256 + 128, ly: 84 * 256 + 128 },
+      cell: { cx: 84, cy: 87 },
+      path: [{ cx: 84, cy: 86 }, { cx: 84, cy: 85 }, { cx: 84, cy: 84 }],
+      pathIndex: 0,
+      missionQueue: 'MOVE',
+      mission: 'GUARD',
+      missionTimer: 35,
+      isDriving: true,
+    });
+
+    const directShared = drivePerCellProcess(cruiser, PCPType.PCP_END);
+
+    expect(directShared.commenceFired).toBe(false);
+    expect(directShared.navComCleared).toBe(false);
+    expect(cruiser.mission).toBe('GUARD');
+    expect(cruiser.missionQueue).toBe('MOVE');
+    expect(cruiser.missionTimer).toBe(35);
+
+    // Guard against accidental routing through unitPerCellProcess with a real
+    // Entity-like vessel: it must still skip the UnitClass-only Commence branch.
+    const accidentalUnitRoute = unitPerCellProcess(cruiser, PCPType.PCP_END);
+    expect(accidentalUnitRoute.commenceFired).toBe(false);
+    expect(cruiser.mission).toBe('GUARD');
+    expect(cruiser.missionQueue).toBe('MOVE');
   });
 
   // ──────────────────────────────────────────────────────────────────────

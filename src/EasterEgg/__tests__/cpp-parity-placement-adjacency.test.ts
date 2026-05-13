@@ -142,7 +142,7 @@ function makeItem(type: string, cost = 300): ProductionItem {
   } as any;
 }
 
-/** Mark a structure's footprint + bibs on the map as WALL terrain. */
+/** Mark a structure's footprint as WALL terrain and bibs as smudges. */
 function stampStructure(map: GameMap, type: string, cx: number, cy: number): void {
   const [fw, fh] = STRUCTURE_SIZE[type] ?? [2, 2];
   for (let dy = 0; dy < fh; dy++) {
@@ -151,7 +151,7 @@ function stampStructure(map: GameMap, type: string, cx: number, cy: number): voi
     }
   }
   for (const bc of getBibCells(type, cx, cy)) {
-    map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    map.setBibSmudge(bc.cx, bc.cy, true);
   }
 }
 

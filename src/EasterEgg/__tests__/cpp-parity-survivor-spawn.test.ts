@@ -759,6 +759,7 @@ describe('TS destruction path gates on CREWED_BUILDINGS (matches C++ IsCrew)', (
     ScenarioRandom.seed = 6; // first Drop_Debris Random_Pick(0,2) is 1: spawn survivor.
     ScenarioRandom.callCount = 0;
     pbox.debrisCountdown = 0;
+    pbox.debrisDropTick = ctx.tick;
     tickDestroyedStructureDebris(ctx, pbox);
 
     const survivor = ctx.entities.find(e => e.type === UnitType.I_E1);
@@ -798,6 +799,7 @@ describe('TS destruction path gates on CREWED_BUILDINGS (matches C++ IsCrew)', (
     ScenarioRandom.seed = 6; // first Drop_Debris Random_Pick is 1 for both [0,2] and [0,1].
     ScenarioRandom.callCount = 0;
     pbox.debrisCountdown = 0;
+    pbox.debrisDropTick = ctx.tick;
     tickDestroyedStructureDebris(ctx, pbox);
 
     const survivor = ctx.entities.find(e => e.type === UnitType.I_E1);
@@ -835,6 +837,7 @@ describe('TS destruction path gates on CREWED_BUILDINGS (matches C++ IsCrew)', (
     ScenarioRandom.seed = 6;
     ScenarioRandom.callCount = 0;
     pbox.debrisCountdown = 0;
+    pbox.debrisDropTick = ctx.tick;
     tickDestroyedStructureDebris(ctx, pbox);
 
     const survivor = ctx.entities.find(e => e.type === UnitType.I_E1);

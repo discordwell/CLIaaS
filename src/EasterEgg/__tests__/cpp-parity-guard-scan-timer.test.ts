@@ -98,13 +98,13 @@ describe('Guard/AreaGuard scan timer parity', () => {
     expect(source).toContain('this.updateAreaGuard(entity, missionTimerFired)');
   });
 
-  it('STICKY mission uses its own Normal_Delay (14), not GUARD Normal_Delay (42)', async () => {
+  it('STICKY mission starts from its own Normal_Delay (14), before class overrides', async () => {
     // C++ foot.cpp:597: dtime = MissionControl[Mission].Normal_Delay()
     // For STICKY mission, rules.ini [Sticky] Rate=.016 → Normal_Delay=14
     // For GUARD mission, rules.ini [Guard] Rate=.050 → Normal_Delay=42
-    // The GUARD/STICKY case in the mission switch must differentiate:
-    //   STICKY: guardDelay = 14 (all entity types)
-    //   GUARD:  guardDelay = isE1/E3 ? 14 (AA_Delay) : 42 (Normal_Delay)
+    // The GUARD/STICKY case in the mission switch must differentiate the
+    // base mission delay before FootClass applies vessel/infantry overrides.
+    // Example: CA on STICKY doubles this 14-tick base to 28 before jitter.
     const fs = await import('fs');
     const path = await import('path');
     const indexPath = path.resolve(__dirname, '../engine/index.ts');

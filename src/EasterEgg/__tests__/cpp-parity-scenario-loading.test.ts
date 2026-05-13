@@ -387,10 +387,11 @@ describe('C++ Parity: TemplateType enum (defines.h:1693-2106)', () => {
     expect(CPP_TEMPLATE_NONE).toBe(0xFFFF);
   });
 
-  it('TS classifies TEMPLATE_NONE (0xFFFF) and TEMPLATE_CLEAR1 (0) as clear terrain', () => {
+  it('TS keeps TEMPLATE_NONE and TEMPLATE_CLEAR1 as uint16 template sentinels', () => {
     // C++ cell.cpp:113: TType(TEMPLATE_NONE) — default template
-    // TS scenario.ts:1954: if (tmpl === 0xFFFF || tmpl === 0x00) → clear
-    // Both 0 and 0xFFFF are treated as clear ground.
+    // Outdoor CellClass::Recalc_Attributes treats no-template cells as clear.
+    // Interior theatre is the C++ exception: TEMPLATE_NONE and CLEAR1 become
+    // LAND_ROCK. Terrain theatre classification tests cover that branch.
     const map = new GameMap();
     map.boundsX = 10; map.boundsY = 10; map.boundsW = 5; map.boundsH = 5;
     // Cells default to CLEAR
@@ -601,12 +602,11 @@ Theater=TEMPERATE
 });
 
 describe('C++ Parity: CellClass Constructor Defaults (cell.cpp:101-131)', () => {
-  it('default template type is 0 (TEMPLATE_CLEAR1) — functionally equivalent to C++ TEMPLATE_NONE', () => {
+  it('default template type is 0 (TEMPLATE_CLEAR1) in TS storage', () => {
     // C++ cell.cpp:113: TType(TEMPLATE_NONE) — default is 0xFFFF
     // TS: Uint16Array defaults to 0 (TEMPLATE_CLEAR1)
-    // Both are classified as CLEAR terrain by the terrain classifier:
-    //   scenario.ts:1954: if (tmpl === 0xFFFF || tmpl === 0x00) → clear
-    // So the TS default (0) and C++ default (0xFFFF) are functionally equivalent.
+    // They are not universally equivalent: INTERIOR Recalc_Attributes makes
+    // both impassable rock, while outdoor no-template cells are clear.
     const map = new GameMap();
     expect(map.templateType[0]).toBe(0); // TS defaults to 0, not 0xFFFF
     expect(map.templateType[CPP_MAP_CELL_TOTAL - 1]).toBe(0);

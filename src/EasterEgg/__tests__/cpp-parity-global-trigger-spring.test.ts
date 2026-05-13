@@ -1,22 +1,22 @@
 /**
- * C++ Behavioral Parity (#38): Immediate Trigger Spring on Global Variable Change
+ * C++ Behavioral Parity (#38): Ordered Global Trigger Evaluation
  *
  * C++ behavior (scenario.cpp:263-290 Set_Global_To, logic.cpp:218-221):
  *   When a global variable is set or cleared, the C++ engine:
  *   1. Sets IsGlobalChanged = true
  *   2. Resets the paired event timer for triggers depending on that global
- *   3. On the very next logic tick (NOT deferred 15 ticks), springs all triggers
- *      with TEVENT_GLOBAL_SET or TEVENT_GLOBAL_CLEAR matching that global
+ *   3. Continues the current LogicTriggers pass in order; later triggers can
+ *      observe the new flag, earlier triggers wait for the next pass.
  *
  * Pre-fix TS behavior:
  *   Global changes took up to 15 ticks to fire dependent triggers because
  *   processTriggers() only ran every 15 ticks.
  *
- * Post-fix TS behavior:
+ * TS behavior:
  *   executeTriggerAction returns globalChanged in TriggerActionResult.
- *   applyTriggerActionResult calls springGlobalTriggers() which immediately
- *   evaluates and fires any trigger with TEVENT_GLOBAL_SET/CLEAR on that global.
- *   TMISSION_SET_GLOBAL also calls springGlobalTriggers() directly.
+ *   applyTriggerActionResult records Set_Global_To side effects only. The
+ *   normal ordered processTriggers(TEVENT_TIME) scan evaluates GLOBAL_SET/CLEAR
+ *   events, matching C++ TriggerClass::Spring's event predicate behavior.
  *
  * Source refs:
  *   - scenario.cpp:263-290 (Set_Global_To)
@@ -132,12 +132,12 @@ function makeGameState(globals: Set<number>, overrides: Partial<TriggerGameState
   };
 }
 
-function createTriggerGame(trigger: ScenarioTrigger, tick: number, globals: Set<number>): Game {
+function createTriggerGame(trigger: ScenarioTrigger | ScenarioTrigger[], tick: number, globals: Set<number>): Game {
   const game = Object.create(Game.prototype) as Game;
   const g = game as unknown as Record<string, unknown>;
   g.tick = tick;
   g.globals = globals;
-  g.triggers = [trigger];
+  g.triggers = Array.isArray(trigger) ? trigger : [trigger];
   g.structures = [];
   g.entities = [];
   g.destroyedTriggerNames = new Set<string>();
@@ -168,9 +168,14 @@ function createTriggerGame(trigger: ScenarioTrigger, tick: number, globals: Set<
   return game;
 }
 
-function springGlobal(game: Game, globalIndex: number): void {
-  (game as unknown as { springGlobalTriggers(globalIndex: number): void })
-    .springGlobalTriggers(globalIndex);
+function noteGlobalChanged(game: Game, globalIndex: number): void {
+  (game as unknown as { noteGlobalChanged(globalIndex: number): void })
+    .noteGlobalChanged(globalIndex);
+}
+
+function processLogicTriggers(game: Game): void {
+  (game as unknown as { processTriggers(springEvent?: number): void })
+    .processTriggers(TEVENT_TIME);
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────────
@@ -206,8 +211,8 @@ describe('C++ parity (#38): SET_GLOBAL/CLEAR_GLOBAL returns globalChanged in res
   });
 });
 
-describe('C++ parity (#38): TEVENT_GLOBAL_SET springs immediately when global becomes set', () => {
-  // C++ logic.cpp:218-221 — when IsGlobalChanged, Spring(TEVENT_GLOBAL_SET) is called.
+describe('C++ parity (#38): TEVENT_GLOBAL_SET evaluates from global state', () => {
+  // C++ tevent.cpp:238-240 checks Scen.GlobalFlags[Data.Value].
   // The TS checkTriggerEvent function checks globals.has(event.data).
 
   it('TEVENT_GLOBAL_SET returns true when global is in the set (logic.cpp:219)', () => {
@@ -234,8 +239,8 @@ describe('C++ parity (#38): TEVENT_GLOBAL_SET springs immediately when global be
   });
 });
 
-describe('C++ parity (#38): TEVENT_GLOBAL_CLEAR springs immediately when global becomes cleared', () => {
-  // C++ logic.cpp:220 — Spring(TEVENT_GLOBAL_CLEAR) checks !GlobalFlags[global].
+describe('C++ parity (#38): TEVENT_GLOBAL_CLEAR evaluates from global state', () => {
+  // C++ tevent.cpp:242-244 checks !Scen.GlobalFlags[Data.Value].
 
   it('TEVENT_GLOBAL_CLEAR returns true when global is NOT in the set (logic.cpp:220)', () => {
     const globals = new Set<number>();
@@ -276,7 +281,7 @@ describe('C++ parity (#38): global-change timer reset asymmetry (scenario.cpp:27
   // When Event2 is the matching global, C++ calls Class->Event1.Reset(Event1),
   // which does reset an Event1 TIME timer.
 
-  it('event1=GLOBAL_SET + event2=TIME keeps the elapsed TIME timer and fires', () => {
+  it('event1=GLOBAL_SET + event2=TIME keeps the elapsed TIME timer without firing recursively', () => {
     const trigger = makeTrigger({
       eventControl: 1,
       event1: makeEvent(TEVENT_GLOBAL_SET, 1),
@@ -285,9 +290,9 @@ describe('C++ parity (#38): global-change timer reset asymmetry (scenario.cpp:27
     });
     const game = createTriggerGame(trigger, 3601, new Set([1]));
 
-    springGlobal(game, 1);
+    noteGlobalChanged(game, 1);
 
-    expect(trigger.fired).toBe(true);
+    expect(trigger.fired).toBe(false);
     expect(trigger.timerTick).toBe(0);
   });
 
@@ -300,25 +305,24 @@ describe('C++ parity (#38): global-change timer reset asymmetry (scenario.cpp:27
     });
     const game = createTriggerGame(trigger, 3601, new Set([1]));
 
-    springGlobal(game, 1);
+    noteGlobalChanged(game, 1);
 
     expect(trigger.fired).toBe(false);
     expect(trigger.timerTick).toBe(3601);
   });
 });
 
-describe('C++ parity (#38): trigger chain — SET_GLOBAL action immediately springs GLOBAL_SET trigger', () => {
-  // This is the core behavioral difference between C++ and the old TS code.
-  // In C++, a trigger action that sets a global immediately causes dependent triggers to spring.
-  // In old TS, the dependent trigger would not fire until the next processTriggers() cycle (up to 15 ticks).
+describe('C++ parity (#38): ordered trigger chain around SET_GLOBAL actions', () => {
+  // C++ LogicClass::AI iterates LogicTriggers once. A SET_GLOBAL action mutates
+  // Scen.GlobalFlags immediately, so later triggers in the same pass can fire.
+  // Triggers already visited are not revisited recursively.
 
-  it('SET_GLOBAL action signals globalChanged so springGlobalTriggers can fire', () => {
+  it('SET_GLOBAL action exposes global state for later LogicTriggers', () => {
     // Trigger A: action = SET_GLOBAL(5)
     // Trigger B: event = TEVENT_GLOBAL_SET(5), action = WIN
     //
     // When A fires, it sets global 5 and returns globalChanged=5.
-    // applyTriggerActionResult then calls springGlobalTriggers(5),
-    // which should immediately evaluate and fire trigger B.
+    // Later LogicTriggers in the same ordered pass can evaluate trigger B.
     //
     // We verify that SET_GLOBAL returns the globalChanged marker.
     const globals = new Set<number>();
@@ -344,7 +348,7 @@ describe('C++ parity (#38): trigger chain — SET_GLOBAL action immediately spri
     expect(checkTriggerEvent(triggerB.event1, state)).toBe(true);
   });
 
-  it('CLEAR_GLOBAL action signals globalChanged so springGlobalTriggers can fire', () => {
+  it('CLEAR_GLOBAL action exposes global state for later LogicTriggers', () => {
     // Trigger A: action = CLEAR_GLOBAL(3)
     // Trigger B: event = TEVENT_GLOBAL_CLEAR(3)
     //
@@ -366,6 +370,53 @@ describe('C++ parity (#38): trigger chain — SET_GLOBAL action immediately spri
 
     const state = makeGameState(globals);
     expect(checkTriggerEvent(triggerB.event1, state)).toBe(true);
+  });
+
+  it('does not revisit earlier GLOBAL_SET triggers when a later trigger sets the global', () => {
+    const globals = new Set<number>();
+    const dependent = makeTrigger({
+      name: 'dependent-before-setter',
+      event1: makeEvent(TEVENT_GLOBAL_SET, 3),
+      action1: makeAction(TACTION_NONE),
+    });
+    const setter = makeTrigger({
+      name: 'setter',
+      event1: makeEvent(TEVENT_TIME, 0),
+      action1: makeAction(TACTION_SET_GLOBAL, 3),
+    });
+    const game = createTriggerGame([dependent, setter], 100, globals);
+
+    processLogicTriggers(game);
+
+    expect(setter.fired).toBe(true);
+    expect(globals.has(3)).toBe(true);
+    expect(dependent.fired).toBe(false);
+
+    (game as unknown as { tick: number }).tick = 101;
+    processLogicTriggers(game);
+
+    expect(dependent.fired).toBe(true);
+  });
+
+  it('allows later GLOBAL_SET triggers to fire after an earlier trigger sets the global', () => {
+    const globals = new Set<number>();
+    const setter = makeTrigger({
+      name: 'setter',
+      event1: makeEvent(TEVENT_TIME, 0),
+      action1: makeAction(TACTION_SET_GLOBAL, 3),
+    });
+    const dependent = makeTrigger({
+      name: 'dependent-after-setter',
+      event1: makeEvent(TEVENT_GLOBAL_SET, 3),
+      action1: makeAction(TACTION_NONE),
+    });
+    const game = createTriggerGame([setter, dependent], 100, globals);
+
+    processLogicTriggers(game);
+
+    expect(setter.fired).toBe(true);
+    expect(globals.has(3)).toBe(true);
+    expect(dependent.fired).toBe(true);
   });
 });
 
@@ -399,7 +450,7 @@ describe('C++ parity (#38): volatile vs persistent triggers on global change', (
       fired: true, // already fired
     });
 
-    // springGlobalTriggers skips triggers where fired && persistence <= 1
+    // processTriggers skips triggers where fired && persistence <= 1
     expect(trigger.fired).toBe(true);
     expect(trigger.persistence).toBe(0);
     // This is the guard: trigger.fired && trigger.persistence <= 1 → skip
@@ -414,7 +465,7 @@ describe('C++ parity (#38): volatile vs persistent triggers on global change', (
       fired: true, // already fired once
     });
 
-    // springGlobalTriggers does NOT skip persistent triggers even when fired
+    // processTriggers does NOT skip persistent triggers even when fired
     expect(trigger.fired && trigger.persistence <= 1).toBe(false);
   });
 });

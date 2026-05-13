@@ -30,13 +30,48 @@ import {
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
 import { COUNTRY_BONUSES } from '../engine/types';
+import {
+  STRUCTURE_MAX_HP,
+  STRUCTURE_WEAPONS,
+  structureCenterLeptons,
+  type MapStructure,
+} from '../engine/scenario';
+import {
+  Team,
+  clearAllTeams,
+  registerTeam,
+  TMISSION_MOVE,
+} from '../engine/team';
 
-beforeEach(() => resetEntityIds());
+beforeEach(() => {
+  resetEntityIds();
+  clearAllTeams();
+});
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
+}
+
+function structureAtCell(type: string, house: House, cx: number, cy: number): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP[type] ?? 256;
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp: maxHp,
+    maxHp,
+    alive: true,
+    rubble: false,
+    weapon: STRUCTURE_WEAPONS[type],
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
+  };
 }
 
 function makeCombatCtx(entities: Entity[] = []): CombatContext {
@@ -140,6 +175,155 @@ function makeProjectile(overrides: Partial<InflightProjectile>): InflightProject
     ...overrides,
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Building Payback — techno.cpp:3229, bullet.cpp:991, foot.cpp:1178
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Building-fired projectile payback', () => {
+  it('passes the firing structure through explosion damage so moving teams retarget it', () => {
+    const tank = entityAtCell(UnitType.V_3TNK, House.USSR, 10, 10);
+    const gun = structureAtCell('GUN', House.Greece, 25, 25);
+    const ctx = makeCombatCtx([tank]);
+    ctx.structures.push(gun);
+
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.V_3TNK, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+    team.add(tank);
+    team.isMoving = true;
+    team.isFullStrength = true;
+    team.isHasBeen = true;
+    (team as any).setMissionTarget(
+      { x: 4 * CELL_SIZE + CELL_SIZE / 2, y: 4 * CELL_SIZE + CELL_SIZE / 2 },
+      { cx: 4, cy: 4 },
+    );
+    registerTeam(team);
+
+    const gunCenter = structureCenterLeptons(gun);
+    const impactX = tank.pos.x;
+    const impactY = tank.pos.y;
+    const weapon = STRUCTURE_WEAPONS.GUN;
+    ctx.inflightProjectiles.push(makeProjectile({
+      attackerId: -1,
+      attackerHouse: gun.house,
+      attackerStructureIndex: 0,
+      targetId: tank.id,
+      weapon: {
+        name: weapon.weaponName ?? 'GUN',
+        damage: weapon.damage,
+        rof: weapon.rof,
+        range: weapon.range,
+        warhead: 'AP',
+        splash: weapon.splash,
+        projSpeed: weapon.projSpeed,
+      } as WeaponStats,
+      damage: weapon.damage,
+      strength: weapon.damage,
+      startX: gunCenter.lx * CELL_SIZE / 256,
+      startY: gunCenter.ly * CELL_SIZE / 256,
+      impactX,
+      impactY,
+      logicalLX: pixelToLepton(impactX),
+      logicalLY: pixelToLepton(impactY),
+      headToLX: pixelToLepton(impactX),
+      headToLY: pixelToLepton(impactY),
+      travelFrames: 1,
+      fuseTimer: 1,
+      fuelTimer: 1,
+      proximity: 0x7fffffff,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    expect((team as any).targetStructureRef).toBe(gun);
+
+    team.coordinateMove(undefined, ctx as any);
+    expect(tank.moveTarget).toEqual({
+      lx: gunCenter.lx,
+      ly: gunCenter.ly,
+    });
+  });
+
+  it('keeps building payback stable when structure slots shift before impact', () => {
+    const tank = entityAtCell(UnitType.V_3TNK, House.USSR, 10, 10);
+    const removedBeforeImpact = structureAtCell('GUN', House.Spain, 1, 1);
+    const firingGun = structureAtCell('GUN', House.Greece, 25, 25);
+    const wrongGun = structureAtCell('GUN', House.Greece, 5, 5);
+    const ctx = makeCombatCtx([tank]);
+    ctx.structures.push(removedBeforeImpact, firingGun, wrongGun);
+
+    const team = new Team({
+      house: House.USSR,
+      desiredMembers: [{ type: UnitType.V_3TNK, count: 1 }],
+      missionList: [{ mission: TMISSION_MOVE, data: 0 }],
+      forcedActive: true,
+    });
+    team.add(tank);
+    team.isMoving = true;
+    team.isFullStrength = true;
+    team.isHasBeen = true;
+    (team as any).setMissionTarget(
+      { x: 4 * CELL_SIZE + CELL_SIZE / 2, y: 4 * CELL_SIZE + CELL_SIZE / 2 },
+      { cx: 4, cy: 4 },
+    );
+    registerTeam(team);
+
+    const firingGunCenter = structureCenterLeptons(firingGun);
+    const impactX = tank.pos.x;
+    const impactY = tank.pos.y;
+    const weapon = STRUCTURE_WEAPONS.GUN;
+    const projectileOverrides = {
+      attackerId: -1,
+      attackerHouse: firingGun.house,
+      // C++ BulletClass::Payback stores a BuildingClass pointer. The slot is
+      // only a TS diagnostic hint and must not become authoritative after splice.
+      attackerStructure: firingGun,
+      attackerStructureIndex: 1,
+      targetId: tank.id,
+      weapon: {
+        name: weapon.weaponName ?? 'GUN',
+        damage: weapon.damage,
+        rof: weapon.rof,
+        range: weapon.range,
+        warhead: 'AP',
+        splash: weapon.splash,
+        projSpeed: weapon.projSpeed,
+      } as WeaponStats,
+      damage: weapon.damage,
+      strength: weapon.damage,
+      startX: firingGunCenter.lx * CELL_SIZE / 256,
+      startY: firingGunCenter.ly * CELL_SIZE / 256,
+      impactX,
+      impactY,
+      logicalLX: pixelToLepton(impactX),
+      logicalLY: pixelToLepton(impactY),
+      headToLX: pixelToLepton(impactX),
+      headToLY: pixelToLepton(impactY),
+      travelFrames: 1,
+      fuseTimer: 1,
+      fuelTimer: 1,
+      proximity: 0x7fffffff,
+    } as Partial<InflightProjectile> & { attackerStructure: MapStructure };
+    ctx.inflightProjectiles.push(makeProjectile(projectileOverrides));
+
+    ctx.structures.splice(0, 1);
+    expect(ctx.structures[1]).toBe(wrongGun);
+
+    updateInflightProjectiles(ctx);
+
+    expect((team as any).targetStructureRef).toBe(firingGun);
+
+    team.coordinateMove(undefined, ctx as any);
+    expect(tank.moveTarget).toEqual({
+      lx: firingGunCenter.lx,
+      ly: firingGunCenter.ly,
+    });
+  });
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. IsFueled — fuse.cpp:139, bullet.cpp:710
@@ -357,8 +541,8 @@ describe('IsDropping — vertical drop from FLIGHT_LEVEL (bullet.cpp:790-802)', 
     const target = entityAtCell(UnitType.I_E1, House.Spain, 15, 5);
     const ctx = makeCombatCtx([attacker, target]);
     const launchStructure = {
-      type: 'APWR',
-      image: 'apwr',
+      type: 'HBOX',
+      image: 'hbox',
       house: House.Spain,
       cx: 5,
       cy: 5,
@@ -589,6 +773,64 @@ describe('IsFlameEquipped — flame/smoke trail (bullet.cpp:377-386)', () => {
 
     const flameEffects = ctx.effects.filter(e => e.type === 'explosion' && (e as any).sprite === 'napalm1');
     expect(flameEffects.length).toBeGreaterThanOrEqual(1);
+    const flameAnims = ctx.logicAnims.filter(a => a.type === 'fball_fade');
+    expect(flameAnims).toHaveLength(1);
+    expect(flameAnims[0].delay).toBe(1);
+    expect(flameAnims[0].isBrandNew).toBe(true);
+  });
+
+  it('HeatSeeker weapons launch with SMOKE_PUFF trail slots (rules.ini Animates=yes)', () => {
+    const attacker = entityAtCell(UnitType.V_MIG, House.USSR, 5, 5);
+    const target = entityAtCell(UnitType.U_1TNK, House.Spain, 12, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.Maverick, 50,
+      target.pos.x, target.pos.y, true);
+
+    const proj = ctx.inflightProjectiles[0];
+    expect(proj.isFlameEquipped).toBe(true);
+    expect(proj.flameTrailAnim).toBe('smoke_puff');
+
+    proj.flameToggle = true;
+    proj.speedAdd = 0;
+    proj.fuseTimer = 20;
+    proj.fuelTimer = 20;
+    updateInflightProjectiles(ctx);
+
+    const smoke = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'smokey');
+    expect(smoke).toBeDefined();
+    expect(smoke?.maxFrames).toBe(7);
+    expect(smoke?.cppLogicSlot).toBeUndefined();
+    const smokeAnim = ctx.logicAnims.find(a => a.type === 'smokey');
+    expect(smokeAnim).toBeDefined();
+    expect(smokeAnim?.delay).toBe(1);
+    expect(smokeAnim?.isBrandNew).toBe(true);
+  });
+
+  it('flame trail AnimClass allocation failure skips the trail object', () => {
+    const ctx = makeCombatCtx();
+    ctx.reserveAnimSlot = () => false;
+    ctx.inflightProjectiles.push(makeProjectile({
+      isFlameEquipped: true,
+      flameTrailAnim: 'smoke_puff',
+      flameToggle: true,
+      travelFrames: 20,
+      fuelTimer: 20,
+      fuseTimer: 20,
+      speedAdd: 0,
+      speedAccum: 0,
+      logicalLX: 1000,
+      logicalLY: 1000,
+      headToLX: 3000,
+      headToLY: 1000,
+      proximity: 2000,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.logicAnims).toHaveLength(0);
+    expect(ctx.effects.filter(e => e.cppLogicSlot).length).toBe(0);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
   });
 
   it('non-flame projectile does NOT spawn trail effects', () => {
@@ -615,7 +857,7 @@ describe('IsFlameEquipped — flame/smoke trail (bullet.cpp:377-386)', () => {
 
 describe('launchProjectile — combined feature initialization (bullet.cpp:783-802)', () => {
 
-  it('SCUD projectile: isFueled=true, isDropping=false, isFlameEquipped=false', () => {
+  it('SCUD projectile: isFueled=true, isDropping=false, isFlameEquipped=true', () => {
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 5, 5);
     const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -626,7 +868,8 @@ describe('launchProjectile — combined feature initialization (bullet.cpp:783-8
     const proj = ctx.inflightProjectiles[0];
     expect(proj.isFueled).toBe(true);
     expect(proj.isDropping).toBe(false);
-    expect(proj.isFlameEquipped).toBe(false);
+    expect(proj.isFlameEquipped).toBe(true);
+    expect(proj.flameTrailAnim).toBe('smoke_puff');
     expect(proj.dropHeight).toBe(0);
   });
 

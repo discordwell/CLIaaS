@@ -12,7 +12,7 @@
  *   trigger.cpp:341-353  — Volatile/semi-persistent triggers delete after fire; persistent triggers reset events
  *
  * TS implementation:
- *   engine/index.ts — checkCellTriggers(), processTriggers(), springGlobalTriggers(), applyTriggerActionResult()
+ *   engine/index.ts — checkCellTriggers(), processTriggers(), applyTriggerActionResult()
  *   engine/scenario.ts — checkTriggerEvent(), executeTriggerAction(), consumeSemiPersistentAttachment()
  */
 
@@ -242,7 +242,7 @@ describe('Global variable cascading (Set_Global_To) — C++ parity', () => {
    * This ensures that when a global changes, any trigger with a paired TIME event
    * gets its timer reset — so the TIME event must elapse again from this point.
    *
-   * TS: springGlobalTriggers() does this reset via trigger.timerTick = this.tick
+   * TS: noteGlobalChanged() does this reset via trigger.timerTick = this.tick
    */
 
   it('TEVENT_GLOBAL_SET fires when the matching global is in the set', () => {
@@ -300,8 +300,8 @@ describe('Cell trigger → SET_GLOBAL → GLOBAL_SET cascade chain — C++ parit
    *
    * TS mechanism:
    *   - executeTriggerAction returns result.globalChanged=5
-   *   - applyTriggerActionResult calls springGlobalTriggers(5)
-   *   - springGlobalTriggers scans triggers for GLOBAL_SET/CLEAR on index 5 and fires them
+   *   - applyTriggerActionResult records Set_Global_To side effects
+   *   - the ordered processTriggers pass evaluates GLOBAL_SET/CLEAR from the new state
    */
 
   it('SET_GLOBAL enables a GLOBAL_SET-dependent trigger to fire', () => {
@@ -824,7 +824,7 @@ describe('TEVENT_GLOBAL_SET/CLEAR attach type — C++ parity', () => {
    * not to cells or objects. They are evaluated every logic tick.
    *
    * In C++, these triggers are in the LogicTriggers list (evaluated by logic.cpp).
-   * In TS, they're evaluated in processTriggers and springGlobalTriggers.
+   * In TS, they're evaluated in processTriggers.
    *
    * This test verifies that GLOBAL_SET/CLEAR events don't require playerEntered or
    * any other cell/object-specific state.

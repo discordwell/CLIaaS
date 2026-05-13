@@ -305,7 +305,7 @@ function makeItem(type: string, cost = 300): ProductionItem {
   return { type, cost, buildTime: 100, prerequisites: [], side: 'allies', category: 'structure' } as any;
 }
 
-/** Mark a structure's footprint + bibs on the map as WALL terrain. */
+/** Mark a structure's footprint as WALL terrain and bibs as smudges. */
 function stampStructure(map: GameMap, type: string, cx: number, cy: number): void {
   const [fw, fh] = STRUCTURE_SIZE[type] ?? [2, 2];
   for (let dy = 0; dy < fh; dy++) {
@@ -314,7 +314,7 @@ function stampStructure(map: GameMap, type: string, cx: number, cy: number): voi
     }
   }
   for (const bc of getBibCells(type, cx, cy)) {
-    map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+    map.setBibSmudge(bc.cx, bc.cy, true);
   }
 }
 
@@ -1017,12 +1017,11 @@ describe('C++ Parity: Wall placement rules (building.cpp:1062-1098)', () => {
 
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Section 9: Placement marks terrain as WALL (impassable)
+// Section 9: Placement marks footprint as WALL and bibs as smudges
 //
 // C++ building.cpp:740-797 BuildingClass::Mark(MARK_DOWN):
 //   Marks each foundation cell as owned + blocked.
-// C++ bdata.cpp:3597-3629: bib cells also marked impassable.
-// TS placement.ts:105-113: setTerrain to WALL for footprint + bibs
+// C++ building.cpp:785-790 creates a bib smudge below bibbed structures.
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('C++ Parity: Placement terrain marking', () => {
@@ -1045,9 +1044,8 @@ describe('C++ Parity: Placement terrain marking', () => {
     }
   });
 
-  it('placed bibbed building marks bib cells as WALL', () => {
-    // bdata.cpp:3597-3629: bib row below footprint is also impassable
-    // TS placement.ts:111-113: marks bib cells as WALL
+  it('placed bibbed building marks bib cells as build-blocking smudges', () => {
+    // building.cpp:785-790 creates a bib smudge below the footprint.
     const fact = makeFriendlyStructure('FACT', 10, 10);
     const ctx = makePlacementCtx({
       structures: [fact],
@@ -1058,8 +1056,14 @@ describe('C++ Parity: Placement terrain marking', () => {
     expect(INI_BIBBED_BUILDINGS.has('POWR')).toBe(true);
     const bibCells = getBibCells('POWR', 13, 10);
     for (const bc of bibCells) {
+      expect(ctx.map.hasBibSmudge(bc.cx, bc.cy),
+        `bib cell (${bc.cx},${bc.cy}) should have smudge`).toBe(true);
       expect(ctx.map.getTerrain(bc.cx, bc.cy),
-        `bib cell (${bc.cx},${bc.cy}) should be WALL`).toBe(Terrain.WALL);
+        `bib cell (${bc.cx},${bc.cy}) should not alter terrain`).not.toBe(Terrain.WALL);
+      expect(ctx.map.isPassable(bc.cx, bc.cy),
+        `bib cell (${bc.cx},${bc.cy}) should remain passable`).toBe(true);
+      expect(ctx.map.isBuildable(bc.cx, bc.cy),
+        `bib cell (${bc.cx},${bc.cy}) should block placement`).toBe(false);
     }
   });
 
@@ -1173,7 +1177,7 @@ describe('C++ Parity: MCV deployment (unit.cpp:1477-1589)', () => {
     expect(ctx.structures[0].hp).toBe(expectedHp);
   });
 
-  it('MCV deployment marks 3x3 footprint + bib cells as WALL', () => {
+  it('MCV deployment marks 3x3 footprint as WALL and bib cells as smudges', () => {
     const mcv = new Entity(UnitType.V_MCV, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
     const ctx = makePlacementCtx();
     deployMCV(ctx, mcv);
@@ -1187,7 +1191,10 @@ describe('C++ Parity: MCV deployment (unit.cpp:1477-1589)', () => {
     const bibCells = getBibCells('FACT', 49, 49);
     expect(bibCells.length).toBe(3);
     for (const bc of bibCells) {
-      expect(ctx.map.getTerrain(bc.cx, bc.cy)).toBe(Terrain.WALL);
+      expect(ctx.map.hasBibSmudge(bc.cx, bc.cy)).toBe(true);
+      expect(ctx.map.getTerrain(bc.cx, bc.cy)).not.toBe(Terrain.WALL);
+      expect(ctx.map.isPassable(bc.cx, bc.cy)).toBe(true);
+      expect(ctx.map.isBuildable(bc.cx, bc.cy)).toBe(false);
     }
   });
 

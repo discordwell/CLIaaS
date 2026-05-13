@@ -301,14 +301,14 @@ describe('spriteFrame uses correct death animation based on deathVariant', () =>
     expect(unit.spriteFrame).toBe(288 + 7);
   });
 
-  it('deathVariant=1 → die2 frame for E1 (SA warhead twirl)', () => {
+  it('deathVariant=1 → die1 frame for E1 (SA warhead / DO_GUN_DEATH)', () => {
     const unit = new Entity(UnitType.I_E1, House.England, 100, 100);
     unit.alive = false;
     unit.animState = AnimState.DIE;
     unit.deathVariant = 1;
     unit.animFrame = 0;
-    // die2.frame = 304
-    expect(unit.spriteFrame).toBe(304);
+    // infantry.cpp: InfDeath=1 -> DO_GUN_DEATH -> die1.frame = 288
+    expect(unit.spriteFrame).toBe(288);
   });
 
   it('deathVariant=2 → die2 frame for E1 (HE warhead explode)', () => {
@@ -340,23 +340,23 @@ describe('spriteFrame uses correct death animation based on deathVariant', () =>
     expect(dog.spriteFrame).toBe(235);
   });
 
-  it('DOG deathVariant=1 → die2 frame (242, count=9)', () => {
+  it('DOG deathVariant=1 → die1 frame (235, count=7)', () => {
     const dog = new Entity(UnitType.I_DOG, House.USSR, 100, 100);
     dog.alive = false;
     dog.animState = AnimState.DIE;
     dog.deathVariant = 1;
     dog.animFrame = 0;
-    expect(dog.spriteFrame).toBe(242);
+    expect(dog.spriteFrame).toBe(235);
   });
 
-  it('DOG die2 last frame is 242 + 8 = 250', () => {
+  it('DOG die1 last frame is 235 + 6 = 241', () => {
     const dog = new Entity(UnitType.I_DOG, House.USSR, 100, 100);
     dog.alive = false;
     dog.animState = AnimState.DIE;
     dog.deathVariant = 1;
     dog.animFrame = 50; // past end
-    // die2.frame=242, count=9, min(50, 8) = 8 → 242+8 = 250
-    expect(dog.spriteFrame).toBe(242 + 8);
+    // die1.frame=235, count=7, min(50, 6) = 6 -> 235+6 = 241
+    expect(dog.spriteFrame).toBe(235 + 6);
   });
 });
 
@@ -565,13 +565,13 @@ describe('Tanya uses E7 animation data (I_TANYA = "E7" UnitType)', () => {
     expect(anim.die2!.count).toBe(8);
   });
 
-  it('Tanya death via SA warhead (Colt45) sets deathVariant=1 → die2', () => {
+  it('Tanya death via SA warhead (Colt45) sets deathVariant=1 → die1', () => {
     const tanya = new Entity(UnitType.I_TANYA, House.England, 100, 100);
     tanya.takeDamage(9999, 'SA');
     expect(tanya.deathVariant).toBe(1);
     tanya.animFrame = 0;
-    // deathVariant=1 > 0 → die2.frame = 270
-    expect(tanya.spriteFrame).toBe(270);
+    // infantry.cpp: InfDeath=1 -> DO_GUN_DEATH -> die1.frame = 262
+    expect(tanya.spriteFrame).toBe(262);
   });
 });
 
@@ -723,12 +723,12 @@ describe('E6 (Engineer) has death animations despite no fire animation', () => {
     expect(INFANTRY_ANIMS.E6.die2!.count).toBe(8);
   });
 
-  it('engineer killed by HE gets deathVariant=2 and plays die3 (EXPLOSION2_DEATH)', () => {
+  it('engineer killed by HE gets deathVariant=2 and plays die2 (EXPLOSION_DEATH)', () => {
     const eng = new Entity(UnitType.I_E6, House.England, 100, 100);
     eng.takeDamage(9999, 'HE');
     expect(eng.deathVariant).toBe(2);
     eng.animFrame = 0;
-    // G2: deathVariant=2 → die3 (EXPLOSION2_DEATH). C++ E6DoControls die3 = 162.
-    expect(eng.spriteFrame).toBe(162);
+    // infantry.cpp: InfDeath=2 -> DO_EXPLOSION_DEATH. C++ E6DoControls die2 = 154.
+    expect(eng.spriteFrame).toBe(154);
   });
 });

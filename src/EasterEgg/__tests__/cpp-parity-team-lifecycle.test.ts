@@ -682,6 +682,36 @@ describe('C++ parity: Team lifecycle (team.cpp)', () => {
       expect(e1.teamRef).toBeNull();
     });
 
+    it('skips the next registry slot when a team deletes itself during LogicClass::AI', () => {
+      const deleting = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_GUARD, data: 100 }],
+      });
+      deleting.isHasBeen = true;
+
+      const shifted = makeTeam({
+        memberDefs: [{ type: UnitType.I_E1, count: 1 }],
+        missions: [{ mission: TMISSION_MOVE, data: 0 }],
+      });
+      const recruit = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
+
+      registerTeam(deleting);
+      registerTeam(shifted);
+
+      updateAllTeams(undefined, { entities: [recruit] });
+
+      expect(deleting.dissolved).toBe(true);
+      expect(getActiveTeams()).toEqual([shifted]);
+      expect(shifted.total).toBe(0);
+      expect(shifted.isAltered).toBe(true);
+      expect(recruit.teamRef).toBeNull();
+
+      updateAllTeams(undefined, { entities: [recruit] });
+
+      expect(shifted.total).toBe(1);
+      expect(recruit.teamRef).toBe(shifted);
+    });
+
     it('preserves an attacking infantry member queue when dissolve enters idle mode (infantry.cpp:1663)', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.I_E1, count: 1 }],

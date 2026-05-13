@@ -360,6 +360,20 @@ describe('Scatter triggers (infantry.cpp Take_Damage + Fear_AI)', () => {
     expect(scattered).toBe(true);
   });
 
+  it('source-less damage does not run InfantryClass source scatter when FootClass fallback is blocked', () => {
+    const e = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
+    const target = entityAtCell(UnitType.I_E1, House.Spain, 11, 10);
+    e.mission = Mission.GUARD;
+    e.target = target;
+    const ctx = makeCombatCtx([e, target]);
+
+    damageEntity(ctx, e, 1, 'SA');
+
+    expect(e.moveTarget).toBeNull();
+    expect(e.missionQueue).toBeNull();
+    expect(e.mission).toBe(Mission.GUARD);
+  });
+
   // Player-controlled units do NOT auto-scatter
   // C++ infantry.cpp:1883: if House->IsHuman && !forced && !Team → return
   it('player-controlled infantry does NOT scatter (C++ human house check)', () => {

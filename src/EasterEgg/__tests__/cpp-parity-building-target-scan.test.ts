@@ -79,6 +79,17 @@ function makeFTUR(cx: number, cy: number, house: House = House.USSR): MapStructu
   } as MapStructure;
 }
 
+function makePBOX(cx: number, cy: number, house: House = House.Greece): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP['PBOX'] ?? 400;
+  return {
+    type: 'PBOX', image: 'pbox', house,
+    cx, cy, hp: maxHp, maxHp, alive: true, rubble: false,
+    weapon: { ...STRUCTURE_WEAPONS['PBOX'] },
+    attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    missionTimer: 0,
+  } as MapStructure;
+}
+
 function makeTSLA(cx: number, cy: number, house: House = House.USSR): MapStructure {
   const maxHp = STRUCTURE_MAX_HP['TSLA'] ?? 400;
   return {
@@ -217,6 +228,52 @@ describe('building TarCom detach on target death (ObjectClass::Detach_All)', () 
     expect(agun.mission).toBe(Mission.ATTACK);
     expect(agun.missionTimer).toBe(1);
     expect(otherAgun.targetEntityId).toBe(otherYak.id);
+  });
+});
+
+describe('building targeting: MissionControl NoThreat gate (C++ Evaluate_Object)', () => {
+  it('PBOX ignores enemies on MISSION_HARMLESS', () => {
+    // C++ techno.cpp:1476-1479:
+    //   if (MissionControl[object->Mission].IsNoThreat) return false;
+    // SCU07EA tick 1 depends on this for HARMLESS dogs near the player PBOX.
+    const pbox = makePBOX(83, 81, House.Greece);
+    const dog = entityAtCell(UnitType.I_DOG, House.USSR, 84, 83);
+    dog.mission = Mission.HARMLESS;
+    const ctx = makeCombatCtx([pbox], [dog], House.Greece);
+
+    expect(findStructureThreatTarget(ctx, pbox)).toBeNull();
+  });
+
+  it('PBOX can acquire the same enemy once it is no longer NoThreat', () => {
+    const pbox = makePBOX(83, 81, House.Greece);
+    const dog = entityAtCell(UnitType.I_DOG, House.USSR, 84, 83);
+    dog.mission = Mission.GUARD;
+    const ctx = makeCombatCtx([pbox], [dog], House.Greece);
+
+    expect(findStructureThreatTarget(ctx, pbox)?.id).toBe(dog.id);
+  });
+});
+
+describe('building targeting: ground-layer cell scan', () => {
+  it('ground defenses ignore parachuting infantry while ObjectClass keeps them in LAYER_TOP', () => {
+    // C++ TechnoClass::Greatest_Threat scans aircraft separately, then scans
+    // Map.Layer[LAYER_GROUND]/Cell_Occupier for ground targets. Non-air falling
+    // objects are absent from that ground scan until ObjectClass::In_Which_Layer
+    // changes at FLIGHT_LEVEL - FLIGHT_LEVEL/3.
+    const gun = makeGUN(32, 42, House.Greece);
+    const trooper = entityAtCell(UnitType.I_E2, House.USSR, 36, 40);
+    trooper.isFalling = true;
+    trooper.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+    trooper.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    const ctx = makeCombatCtx([gun], [trooper], House.Greece);
+
+    expect(findStructureThreatTarget(ctx, gun)).toBeNull();
+
+    trooper.fallHeightLeptons =
+      Entity.FLIGHT_LEVEL_LEPTONS - Math.trunc(Entity.FLIGHT_LEVEL_LEPTONS / 3) - 1;
+    trooper.flightAltitude = 15;
+
+    expect(findStructureThreatTarget(ctx, gun)?.id).toBe(trooper.id);
   });
 });
 

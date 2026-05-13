@@ -22,13 +22,15 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   type InflightProjectile,
+  handleUnitDeath,
   launchProjectile,
   updateInflightProjectiles,
 } from '../engine/combat';
-import { processLogicAnim, spawnLogicAnimForSprite } from '../engine/logicAnim';
+import { processLogicAnim, spawnLogicAnim, spawnLogicAnimForSprite } from '../engine/logicAnim';
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -91,6 +93,13 @@ function makeCombatCtx(
     powerConsumed: 0,
     powerProduced: 100,
   } as CombatContext;
+}
+
+function resetScenarioRandom(seed = 0x12345678): void {
+  ScenarioRandom.seed = seed >>> 0;
+  ScenarioRandom.callCount = 0;
+  ScenarioRandom._seedLog = [];
+  ScenarioRandom._taggedLog = [];
 }
 
 // ============================================================
@@ -415,6 +424,32 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     expect(anim!.stage).toBe(1);
   });
 
+  it('ELECTRO death anim keeps IsBrandNew when created after the AnimClass phase', () => {
+    const victim = entityAtCell(UnitType.I_E1, House.USSR, 3, 5);
+    victim.deathVariant = 5;
+    const ctx = makeCombatCtx([victim]);
+    ctx.logicAnimsAlreadyProcessed = true;
+
+    handleUnitDeath(ctx, victim, {
+      screenShake: 0,
+      explosionSize: 8,
+      debris: false,
+      decal: null,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    const anim = ctx.logicAnims.find(a => a.type === 'elect_die');
+    expect(anim).toBeDefined();
+    expect(anim!.stage).toBe(0);
+    expect(anim!.isBrandNew).toBe(true);
+
+    expect(processLogicAnim(anim!, ctx.logicAnims, ctx.effects)).toBe(true);
+    expect(anim!.stage).toBe(0);
+    expect(anim!.isBrandNew).toBe(false);
+  });
+
   it('Super projectile impact does not fall back to a generic VEH-HIT anim', () => {
     const attacker = entityAtCell(UnitType.V_TTNK, House.USSR, 5, 5);
     const target = entityAtCell(UnitType.V_4TNK, House.Spain, 6, 5);
@@ -465,7 +500,92 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
 });
 
 // ============================================================
-// Section 3: Dog-rides-bullet — C++ bullet.cpp:96-175
+// Section 3: AnimClass heap allocation order — anim.cpp:512,568,1128-1148
+// ============================================================
+
+describe('AnimClass heap allocation order (anim.cpp)', () => {
+  it('failed parent allocation does not run AnimClass constructor side effects', () => {
+    resetScenarioRandom(0x12345678);
+    const effects: Effect[] = [];
+    const logicAnims: ReturnType<typeof makeCombatCtx>['logicAnims'] = [];
+
+    const spawned = spawnLogicAnim(
+      logicAnims,
+      effects,
+      'fire_med',
+      10 * CELL_SIZE,
+      10 * CELL_SIZE,
+      1,
+      true,
+      false,
+      undefined,
+      undefined,
+      () => false,
+    );
+
+    expect(spawned).toBe(false);
+    expect(ScenarioRandom.callCount).toBe(0);
+    expect(logicAnims).toHaveLength(0);
+    expect(effects).toHaveLength(0);
+  });
+
+  it('FIRE_MED skips inline child loop RNG when the AnimClass heap is full', () => {
+    resetScenarioRandom(0x12345678);
+    const effects: Effect[] = [];
+    const logicAnims: ReturnType<typeof makeCombatCtx>['logicAnims'] = [];
+    let reserveCalls = 0;
+
+    const spawned = spawnLogicAnim(
+      logicAnims,
+      effects,
+      'fire_med',
+      10 * CELL_SIZE,
+      10 * CELL_SIZE,
+      1,
+      true,
+      false,
+      undefined,
+      undefined,
+      () => reserveCalls++ === 0,
+    );
+
+    expect(spawned).toBe(true);
+    expect(reserveCalls).toBe(2);
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(logicAnims.map(a => a.type)).toEqual(['fire_med']);
+  });
+
+  it('NAPALM skips inline child coord/loop RNG after failed child allocation', () => {
+    resetScenarioRandom(3863793494);
+    const effects: Effect[] = [];
+    const logicAnims: ReturnType<typeof makeCombatCtx>['logicAnims'] = [{
+      type: 'napalm3',
+      x: 82 * CELL_SIZE,
+      y: 78 * CELL_SIZE,
+      stage: 4,
+      timer: 1,
+      loops: 1,
+      delay: 0,
+      isBrandNew: false,
+    }];
+
+    expect(processLogicAnim(
+      logicAnims[0],
+      logicAnims,
+      effects,
+      undefined,
+      undefined,
+      () => false,
+    )).toBe(true);
+
+    expect(ScenarioRandom.callCount).toBe(4);
+    expect(logicAnims).toHaveLength(1);
+    expect(effects).toHaveLength(0);
+  });
+});
+
+// ============================================================
+// Section 4: Dog-rides-bullet — C++ bullet.cpp:96-175
 // ============================================================
 //
 // C++ bullet.cpp constructor (line 85): IsToAnimate(false)

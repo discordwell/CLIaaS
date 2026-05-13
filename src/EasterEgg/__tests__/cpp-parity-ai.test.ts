@@ -43,6 +43,7 @@ import {
   updateAIIncome, updateAIProduction, updateAIAutocreateTeams,
   launchAIAttack, aiRecallDefenders, aiPerTick,
 } from '../engine/ai';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -3200,6 +3201,105 @@ describe('AI edge cases', () => {
     aiPerTick(ctx);
 
     expect(state.buildInfantry).toBe(UnitType.I_DOG);
+  });
+
+  it('AI_Infantry keeps later lower-need candidates in the C++ random pick list', () => {
+    // C++ house.cpp:6133-6144 resets bestcount when a higher counter appears,
+    // but then unconditionally appends the current buildable type. In SCU37EA,
+    // GoodGuy's pool team yields E1:2, E3:3, MEDI:1; MEDI stays in bestlist
+    // after E3 becomes the best value, so Random_Pick(0,1) is consumed.
+    ScenarioRandom.seed = 1;
+    ScenarioRandom.callCount = 0;
+    const state = makeAIState({
+      house: House.GoodGuy,
+      buildInfantry: null,
+      isAlerted: false,
+      maxInfantry: 99,
+    });
+    const poolTeam: TeamType = {
+      name: 'pool', house: 8, flags: 0x0008, origin: -1, trigger: -1,
+      maxAllowed: 1,
+      members: [
+        { type: 'E1', count: 2 },
+        { type: 'E3', count: 3 },
+        { type: 'MEDI', count: 1 },
+      ],
+      missions: [],
+    };
+    const ctx = makeAIContext({
+      tick: 1,
+      entities: [],
+      aiStates: new Map([[House.GoodGuy, state]]),
+      houseCredits: new Map([[House.GoodGuy, 10000]]),
+      teamTypes: [poolTeam],
+    });
+
+    aiPerTick(ctx);
+
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(state.buildInfantry).toBe(UnitType.I_MEDI);
+  });
+
+  it('AI_Unit keeps later lower-need candidates in the C++ random pick list', () => {
+    ScenarioRandom.seed = 1;
+    ScenarioRandom.callCount = 0;
+    const state = makeAIState({
+      house: House.USSR,
+      buildUnit: null,
+      maxUnit: 99,
+    });
+    const armorTeam: TeamType = {
+      name: 'armor', house: 2, flags: 0x0008, origin: -1, trigger: -1,
+      maxAllowed: 1,
+      members: [
+        { type: '4TNK', count: 3 },
+        { type: '3TNK', count: 1 },
+      ],
+      missions: [],
+    };
+    const ctx = makeAIContext({
+      tick: 1,
+      entities: [],
+      aiStates: new Map([[House.USSR, state]]),
+      houseCredits: new Map([[House.USSR, 10000]]),
+      teamTypes: [armorTeam],
+    });
+
+    aiPerTick(ctx);
+
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(state.buildUnit).toBe(UnitType.V_3TNK);
+  });
+
+  it('AI_Vessel keeps later lower-need candidates in the C++ random pick list', () => {
+    ScenarioRandom.seed = 1;
+    ScenarioRandom.callCount = 0;
+    const state = makeAIState({
+      house: House.Greece,
+      buildVessel: null,
+      maxVessel: 99,
+    });
+    const navalTeam: TeamType = {
+      name: 'naval', house: 1, flags: 0x0008, origin: -1, trigger: -1,
+      maxAllowed: 1,
+      members: [
+        { type: 'SS', count: 3 },
+        { type: 'DD', count: 1 },
+      ],
+      missions: [],
+    };
+    const ctx = makeAIContext({
+      tick: 1,
+      entities: [],
+      aiStates: new Map([[House.Greece, state]]),
+      houseCredits: new Map([[House.Greece, 10000]]),
+      teamTypes: [navalTeam],
+    });
+
+    aiPerTick(ctx);
+
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(state.buildVessel).toBe(UnitType.V_DD);
   });
 
   it('multiple AI houses operate independently', () => {

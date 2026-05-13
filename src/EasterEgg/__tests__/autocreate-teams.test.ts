@@ -48,23 +48,32 @@ describe('CPP_MISSION_MAP coverage', () => {
     [0,  'MISSION_SLEEP',       Mission.SLEEP],
     [1,  'MISSION_ATTACK',      Mission.ATTACK],
     [2,  'MISSION_MOVE',        Mission.MOVE],
-    [3,  'MISSION_QMOVE',       Mission.MOVE],
-    [4,  'MISSION_RETREAT',     Mission.MOVE],
+    [3,  'MISSION_QMOVE',       Mission.QMOVE],
+    [4,  'MISSION_RETREAT',     Mission.RETREAT],
     [5,  'MISSION_GUARD',       Mission.GUARD],
-    [7,  'MISSION_ENTER',       Mission.MOVE],
-    [8,  'MISSION_CAPTURE',     Mission.ATTACK],
-    [9,  'MISSION_HARVEST',     Mission.GUARD],
+    [6,  'MISSION_STICKY',      Mission.STICKY],
+    [7,  'MISSION_ENTER',       Mission.ENTER],
+    [8,  'MISSION_CAPTURE',     Mission.CAPTURE],
+    [9,  'MISSION_HARVEST',     Mission.HARVEST],
     [10, 'MISSION_GUARD_AREA',  Mission.AREA_GUARD],
-    [11, 'MISSION_RETURN',      Mission.MOVE],
-    [12, 'MISSION_STOP',        Mission.GUARD],
-    [13, 'MISSION_AMBUSH',      Mission.AREA_GUARD],
+    [11, 'MISSION_RETURN',      Mission.RETURN],
+    [12, 'MISSION_STOP',        Mission.STOP],
+    [13, 'MISSION_AMBUSH',      Mission.AMBUSH],
     [14, 'MISSION_HUNT',        Mission.HUNT],
+    [15, 'MISSION_UNLOAD',      Mission.UNLOAD],
+    [16, 'MISSION_SABOTAGE',    Mission.SABOTAGE],
+    [17, 'MISSION_CONSTRUCTION', Mission.CONSTRUCTION],
+    [18, 'MISSION_DECONSTRUCTION', Mission.DECONSTRUCTION],
+    [19, 'MISSION_REPAIR',      Mission.REPAIR],
+    [20, 'MISSION_RESCUE',      Mission.RESCUE],
+    [21, 'MISSION_MISSILE',     Mission.MISSILE],
+    [22, 'MISSION_HARMLESS',    Mission.HARMLESS],
   ];
 
-  it('covers all 14 used C++ mission indices', () => {
+  it('covers all 23 C++ mission indices', () => {
     // We can't access the private static CPP_MISSION_MAP directly,
     // so we verify via the enum constants that each expected Mission target exists
-    expect(EXPECTED_MAPPINGS.length).toBe(14);
+    expect(EXPECTED_MAPPINGS.length).toBe(23);
   });
 
   it('each C++ mission index maps to a valid TS Mission enum value', () => {
@@ -74,29 +83,29 @@ describe('CPP_MISSION_MAP coverage', () => {
     }
   });
 
-  it('MISSION_RETREAT (4), MISSION_ENTER (7), MISSION_RETURN (11) all map to MOVE', () => {
-    const moveIndices = EXPECTED_MAPPINGS.filter(([_, __, m]) => m === Mission.MOVE);
-    const moveIndexNumbers = moveIndices.map(([i]) => i);
-    expect(moveIndexNumbers).toContain(4);  // RETREAT
-    expect(moveIndexNumbers).toContain(7);  // ENTER
-    expect(moveIndexNumbers).toContain(11); // RETURN
+  it('MISSION_QMOVE, RETREAT, ENTER, RETURN remain distinct mission values', () => {
+    expect(EXPECTED_MAPPINGS.find(([i]) => i === 3)![2]).toBe(Mission.QMOVE);
+    expect(EXPECTED_MAPPINGS.find(([i]) => i === 4)![2]).toBe(Mission.RETREAT);
+    expect(EXPECTED_MAPPINGS.find(([i]) => i === 7)![2]).toBe(Mission.ENTER);
+    expect(EXPECTED_MAPPINGS.find(([i]) => i === 11)![2]).toBe(Mission.RETURN);
   });
 
-  it('MISSION_CAPTURE (8) maps to ATTACK', () => {
+  it('MISSION_CAPTURE (8) maps to CAPTURE', () => {
     const capture = EXPECTED_MAPPINGS.find(([i]) => i === 8);
     expect(capture).toBeDefined();
-    expect(capture![2]).toBe(Mission.ATTACK);
+    expect(capture![2]).toBe(Mission.CAPTURE);
   });
 
-  it('MISSION_AMBUSH (13) maps to AREA_GUARD', () => {
+  it('MISSION_AMBUSH (13) maps to AMBUSH', () => {
     const ambush = EXPECTED_MAPPINGS.find(([i]) => i === 13);
     expect(ambush).toBeDefined();
-    expect(ambush![2]).toBe(Mission.AREA_GUARD);
+    expect(ambush![2]).toBe(Mission.AMBUSH);
   });
 
-  it('index 6 (MISSION_STICKY_GUARD) is intentionally not mapped — not used by TMISSION_DO', () => {
-    const mapped = EXPECTED_MAPPINGS.find(([i]) => i === 6);
-    expect(mapped).toBeUndefined();
+  it('MISSION_HARVEST (9) maps to HARVEST', () => {
+    const harvest = EXPECTED_MAPPINGS.find(([i]) => i === 9);
+    expect(harvest).toBeDefined();
+    expect(harvest![2]).toBe(Mission.HARVEST);
   });
 });
 

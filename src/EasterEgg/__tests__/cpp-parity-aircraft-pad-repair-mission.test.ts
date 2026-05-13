@@ -63,6 +63,47 @@ beforeEach(() => {
 });
 
 describe('aircraft pad Mission_Repair', () => {
+  it('full-ammo AFLD repair handoff runs through Commence without guard jitter', () => {
+    const game = new Game(createCanvas());
+    const afld = makeStructure('AFLD', House.USSR, 39, 77);
+    game.structures.push(afld);
+
+    const yak = new Entity(UnitType.V_YAK, House.USSR, 40 * 24, 78 * 24);
+    yak.aircraftState = 'landed';
+    yak.flightAltitude = 0;
+    yak.landedAtStructure = 0;
+    yak.ammo = yak.maxAmmo;
+    yak.mission = Mission.GUARD;
+    game.entities.push(yak);
+    game.entityById.set(yak.id, yak);
+
+    afld.dockedAircraft = yak.id;
+    afld.mission = Mission.GUARD;
+    afld.missionQueue = Mission.REPAIR;
+    afld.isReadyToCommence = true;
+    afld.repairMissionStatus = 0;
+    afld.missionTimer = 23;
+
+    const ranAttack = (game as unknown as {
+      readonly _combatCtx: unknown;
+      dispatchStructureMissionTimer(s: MapStructure, combatCtx: unknown, guardNormalDelay: number, guardAADelay: number): boolean;
+    }).dispatchStructureMissionTimer(
+      afld,
+      (game as unknown as { readonly _combatCtx: unknown })._combatCtx,
+      42,
+      14,
+    );
+
+    expect(ranAttack).toBe(false);
+    expect(ScenarioRandom.callCount).toBe(0);
+    expect(afld.mission).toBe(Mission.REPAIR);
+    expect(afld.missionQueue).toBe(Mission.GUARD);
+    expect(afld.isReadyToCommence).toBe(true);
+    expect(afld.repairMissionStatus).toBe(0);
+    expect(afld.missionTimer).toBe(3);
+    expect(yak.mission).toBe(Mission.GUARD);
+  });
+
   it('docked rearming AFLD does not fall through to non-weapon guard jitter', () => {
     const game = new Game(createCanvas());
     const afld = makeStructure('AFLD', House.USSR, 102, 58);

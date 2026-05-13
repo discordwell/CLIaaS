@@ -13,10 +13,17 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { aiPerTick, createAIHouseState, type AIContext } from '../engine/ai';
-import { decrementStructureCdTimersEndOfLogic } from '../engine/combat';
+import { decrementStructureCdTimersEndOfLogic, type CombatContext, type InflightProjectile } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
-import { type MapStructure, STRUCTURE_MAX_HP, STRUCTURE_SIZE, STRUCTURE_WEAPONS } from '../engine/scenario';
-import { House, Mission, RESFACTOR, UnitType } from '../engine/types';
+import {
+  type MapStructure,
+  STRUCTURE_MAX_HP,
+  STRUCTURE_SIZE,
+  STRUCTURE_WEAPONS,
+  captureStructureFootprintTerrain,
+  getStructureOccupyCells,
+} from '../engine/scenario';
+import { House, Mission, RESFACTOR, UnitType, WEAPON_STATS } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { ScenarioRandom } from '../engine/random';
 
@@ -62,6 +69,46 @@ function markStructureFootprint(map: GameMap, structure: MapStructure): void {
   }
 }
 
+function makeProjectile(overrides: Partial<InflightProjectile>): InflightProjectile {
+  return {
+    attackerId: -1,
+    targetId: -1,
+    weapon: WEAPON_STATS.M1Carbine,
+    damage: 15,
+    strength: 15,
+    speed: 100,
+    travelFrames: 1,
+    currentFrame: 0,
+    directHit: true,
+    impactX: 100,
+    impactY: 100,
+    attackerIsPlayer: false,
+    isArcing: false,
+    arcHeight: 0,
+    arcRiser: 0,
+    startX: 100,
+    startY: 100,
+    dogRiderId: -1,
+    fuelTimer: 1,
+    isFueled: false,
+    isDropping: false,
+    dropHeight: 0,
+    isFlameEquipped: false,
+    flameToggle: false,
+    logicalLX: 1000,
+    logicalLY: 1000,
+    headToLX: 1000,
+    headToLY: 1000,
+    facing256: 0,
+    speedAccum: 0,
+    speedAdd: 0,
+    fuseTimer: 1,
+    armingTimer: 0,
+    proximity: 0,
+    ...overrides,
+  };
+}
+
 beforeAll(() => {
   vi.stubGlobal('Audio', FakeAudio);
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
@@ -74,6 +121,58 @@ beforeEach(() => {
 });
 
 describe('runtime AI construction path', () => {
+  it('restores underlying terrain when a structure footprint is cleared', () => {
+    const game = new Game(createCanvas());
+    const access = game as unknown as {
+      clearStructureFootprint(structure: MapStructure): void;
+    };
+    const structure = makeStructure('MISS', House.BadGuy, 78, 27);
+
+    for (const cell of getStructureOccupyCells(structure.type, structure.cx, structure.cy)) {
+      game.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+    }
+    game.map.setWallType(structure.cx, structure.cy, 'BRIK');
+    structure.footprintTerrain = captureStructureFootprintTerrain(
+      game.map,
+      structure.type,
+      structure.cx,
+      structure.cy,
+    );
+
+    for (const cell of getStructureOccupyCells(structure.type, structure.cx, structure.cy)) {
+      game.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+    }
+
+    access.clearStructureFootprint(structure);
+
+    for (const cell of getStructureOccupyCells(structure.type, structure.cx, structure.cy)) {
+      expect(game.map.getTerrain(cell.cx, cell.cy)).toBe(Terrain.WALL);
+      expect(game.map.isTerrainPassable(cell.cx, cell.cy)).toBe(false);
+    }
+    expect(game.map.getWallType(structure.cx, structure.cy)).toBe('BRIK');
+  });
+
+  it('deleting a debris-dropped building processes the shifted structure in the same Logic frame', () => {
+    const game = new Game(createCanvas());
+    const access = game as unknown as { update(): void };
+    const first = makeStructure('MISS', House.BadGuy, 78, 27);
+    const second = makeStructure('MISS', House.BadGuy, 82, 27);
+    for (const s of [first, second]) {
+      s.alive = false;
+      s.hp = 0;
+      s.rubble = true;
+      s.debrisCountdown = 0;
+    }
+    game.structures.push(first, second);
+
+    ScenarioRandom.seed = 0x12345678;
+    access.update();
+
+    expect(game.structures).not.toContain(first);
+    expect(game.structures).not.toContain(second);
+    expect(second.debrisDropped).toBe(true);
+  });
+
   it('does not direct-spawn a queued structure during the House::AI frame', () => {
     const game = new Game(createCanvas());
     game.map.setBounds(40, 40, 30, 30);
@@ -376,6 +475,99 @@ describe('runtime AI construction path', () => {
     expect(produced).toBeDefined();
     expect(produced!.logicIndexHint).toBe(43);
     expect(access.logicIndexHintForNewObject()).toBe(44);
+  });
+
+  it('combat logic-index hints count projectiles appended to the active combat context', () => {
+    // C++ DynamicVectorClass::Add appends bullets to the currently active Logic
+    // vector. TS combat code can replace ctx.inflightProjectiles while processing
+    // BulletClass::AI, so the hint callback must read that active ctx array, not
+    // the stale Game.inflightProjectiles snapshot.
+    const game = new Game(createCanvas());
+    const access = game as unknown as { readonly _combatCtx: CombatContext };
+    const ctx = access._combatCtx;
+    ctx.inflightProjectiles = [];
+
+    const firstHint = ctx.logicIndexHintForNewObject?.();
+    expect(firstHint).toBeDefined();
+    ctx.inflightProjectiles.push(makeProjectile({ logicIndexHint: firstHint }));
+
+    expect(ctx.logicIndexHintForNewObject?.()).toBe(firstHint! + 1);
+  });
+
+  it('combat logic-index hints count active AnimClass slots', () => {
+    // C++ BulletClass and AnimClass share the same Logic DynamicVector. Runtime
+    // bullets appended while fire animations are active must be ordered after
+    // those AnimClass slots unless they already have lower Logic hints.
+    const game = new Game(createCanvas());
+    const access = game as unknown as { readonly _combatCtx: CombatContext };
+    const ctx = access._combatCtx;
+    ctx.logicAnims.push({
+      type: 'napalm1',
+      x: 100,
+      y: 100,
+      stage: 0,
+      timer: 1,
+      loops: 1,
+      delay: 0,
+      isBrandNew: false,
+      logicIndexHint: 77,
+    });
+
+    expect(ctx.logicIndexHintForNewObject?.()).toBe(78);
+  });
+
+  it('combat logic-index hints count attached parachute AnimClass slots', () => {
+    // C++ ObjectClass::Paradrop submits an ANIM_PARACHUTE object after the
+    // paradropped infantry. TS renders falling from object state, but the
+    // fixed AnimClass heap and Logic slot still affect later allocation/order.
+    const game = new Game(createCanvas());
+    const para = new Entity(UnitType.I_E1, House.USSR, 20 * 24, 20 * 24);
+    para.logicIndexHint = 12;
+    para.fallParachuteAnimActive = true;
+    para.fallParachuteAnimLogicIndexHint = 13;
+    game.entities.push(para);
+    game.entityById.set(para.id, para);
+
+    const access = game as unknown as { logicIndexHintForNewObject(): number };
+    expect(access.logicIndexHintForNewObject()).toBe(14);
+  });
+
+  it('combat logic-index hints count active C++ corpse AnimClass slots', () => {
+    // C++ infantry.cpp creates CORPSE1/2/3 as AnimClass objects after terminal
+    // infantry death animations. TS renders corpses separately, but they still
+    // occupy the fixed Anims heap and Logic order while the corpse anim decays.
+    const game = new Game(createCanvas());
+    game.corpses.push({
+      x: 100,
+      y: 100,
+      type: UnitType.I_E2,
+      facing: 0,
+      isInfantry: true,
+      isAnt: false,
+      alpha: 0.5,
+      deathVariant: 2,
+      cppAnimStartTick: 0,
+    });
+
+    const access = game as unknown as { logicIndexHintForNewObject(): number };
+    expect(access.logicIndexHintForNewObject()).toBe(1);
+  });
+
+  it('combat logic-index hints count destroyed buildings until Drop_Debris limbos them', () => {
+    const game = new Game(createCanvas());
+    const access = game as unknown as { readonly _combatCtx: CombatContext };
+    const ctx = access._combatCtx;
+    ctx.structures.push({
+      ...makeStructure('BARL', House.USSR, 10, 10),
+      alive: false,
+      debrisDropped: false,
+      debrisCountdown: 4,
+    });
+
+    expect(ctx.logicIndexHintForNewObject?.()).toBe(1);
+    ctx.structures[0].debrisDropped = true;
+    ctx.structures[0].debrisCountdown = undefined;
+    expect(ctx.logicIndexHintForNewObject?.()).toBe(0);
   });
 
   it('WEAP Mission_Unload INITIAL forces the contacted unit through GUARD and returns unload jitter', () => {

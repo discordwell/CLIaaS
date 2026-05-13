@@ -33,6 +33,8 @@ import {
 const TEVENT_PLAYER_ENTERED = 1;
 const TEVENT_DISCOVERED = 4;
 const TEVENT_HOUSE_DISCOVERED = 5;
+const TEVENT_NBUILDINGS_DESTROYED = 15;
+const TEVENT_NUNITS_DESTROYED = 16;
 const TEVENT_ENTERS_ZONE = 24;
 const TEVENT_CROSS_HORIZONTAL = 25;
 const TEVENT_CROSS_VERTICAL = 26;
@@ -72,6 +74,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     houseAlive: new Map(),
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
+    unitsLostByHouse: new Map(),
+    buildingsLostByHouse: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -134,6 +138,50 @@ describe('TEVENT_DISCOVERED (type=4) — C++ tevent.cpp:270-283, techno.cpp:786'
 });
 
 // ============================================================================
+// TEVENT_NUNITS_DESTROYED / TEVENT_NBUILDINGS_DESTROYED
+// ============================================================================
+
+describe('Destroyed-count events use trigger-house loss counters — C++ tevent.cpp:401-410', () => {
+  it('NUNITS_DESTROYED checks UnitsLost for trigger.house, not global enemy kills', () => {
+    const state = createState({
+      triggerHouse: 8,
+      enemyKillCount: 5,
+      unitsLostByHouse: new Map([[1, 5], [8, 0]]),
+    });
+
+    expect(checkTriggerEvent(makeEvent(TEVENT_NUNITS_DESTROYED, 1), state)).toBe(false);
+  });
+
+  it('NUNITS_DESTROYED fires when the trigger house has lost enough units', () => {
+    const state = createState({
+      triggerHouse: 8,
+      unitsLostByHouse: new Map([[8, 1]]),
+    });
+
+    expect(checkTriggerEvent(makeEvent(TEVENT_NUNITS_DESTROYED, 1), state)).toBe(true);
+  });
+
+  it('NBUILDINGS_DESTROYED checks BuildingsLost for trigger.house, not global building kills', () => {
+    const state = createState({
+      triggerHouse: 9,
+      nBuildingsDestroyed: 4,
+      buildingsLostByHouse: new Map([[2, 4], [9, 0]]),
+    });
+
+    expect(checkTriggerEvent(makeEvent(TEVENT_NBUILDINGS_DESTROYED, 1), state)).toBe(false);
+  });
+
+  it('NBUILDINGS_DESTROYED fires when the trigger house has lost enough buildings', () => {
+    const state = createState({
+      triggerHouse: 9,
+      buildingsLostByHouse: new Map([[9, 2]]),
+    });
+
+    expect(checkTriggerEvent(makeEvent(TEVENT_NBUILDINGS_DESTROYED, 2), state)).toBe(true);
+  });
+});
+
+// ============================================================================
 // TEVENT_HOUSE_DISCOVERED (type=5)
 // ============================================================================
 
@@ -187,6 +235,12 @@ describe('TEVENT_ENTERS_ZONE (type=24) — C++ tevent.cpp:290-293, foot.cpp:1447
     expect(checkTriggerEvent(makeEvent(TEVENT_ENTERS_ZONE), state)).toBe(true);
   });
 
+  it('requires the entering object house to match Data.House when present', () => {
+    const state = createState({ enteredZone: true, playerEnteredHouse: 1 });
+    expect(checkTriggerEvent(makeEvent(TEVENT_ENTERS_ZONE, 1), state)).toBe(true);
+    expect(checkTriggerEvent(makeEvent(TEVENT_ENTERS_ZONE, 2), state)).toBe(false);
+  });
+
   it('does NOT fire when enteredZone is false', () => {
     const state = createState({ enteredZone: false });
     expect(checkTriggerEvent(makeEvent(TEVENT_ENTERS_ZONE), state)).toBe(false);
@@ -216,6 +270,12 @@ describe('TEVENT_CROSS_HORIZONTAL (type=25) — C++ tevent.cpp:290-293, foot.cpp
     expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_HORIZONTAL), state)).toBe(true);
   });
 
+  it('requires the crossing object house to match Data.House when present', () => {
+    const state = createState({ crossedHorizontal: true, playerEnteredHouse: 1 });
+    expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_HORIZONTAL, 1), state)).toBe(true);
+    expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_HORIZONTAL, 2), state)).toBe(false);
+  });
+
   it('does NOT fire when crossedHorizontal is false', () => {
     const state = createState({ crossedHorizontal: false });
     expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_HORIZONTAL), state)).toBe(false);
@@ -241,6 +301,12 @@ describe('TEVENT_CROSS_VERTICAL (type=26) — C++ tevent.cpp:290-293, foot.cpp:1
   it('fires when crossedVertical is true', () => {
     const state = createState({ crossedVertical: true });
     expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_VERTICAL), state)).toBe(true);
+  });
+
+  it('requires the crossing object house to match Data.House when present', () => {
+    const state = createState({ crossedVertical: true, playerEnteredHouse: 1 });
+    expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_VERTICAL, 1), state)).toBe(true);
+    expect(checkTriggerEvent(makeEvent(TEVENT_CROSS_VERTICAL, 2), state)).toBe(false);
   });
 
   it('does NOT fire when crossedVertical is false', () => {

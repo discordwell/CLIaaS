@@ -702,7 +702,7 @@ describe('Naval reinforcement — C++ parity', () => {
 
   // ============================================================
   // 10. C++ reinf.cpp:480 — ground/naval units get MISSION_GUARD
-  // Aircraft DON'T get MISSION_GUARD (they get MISSION_MOVE).
+  // Aircraft do not get a spawn-time mission here; they remain MISSION_NONE.
   // ============================================================
   describe('spawn mission assignment', () => {
     const MAP_BOUNDS = { x: 0, y: 0, w: 64, h: 64 };

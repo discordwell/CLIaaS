@@ -160,26 +160,26 @@ describe('Burst fire stats from rules.ini (weapon.cpp:78,208)', () => {
 });
 
 // ===========================================================================
-// 3. Burst fire timing — 3 ticks between burst shots
+// 3. Two-shooter timing — first shot writes Arm=3
 // ===========================================================================
 // C++ techno.cpp:2869: return(3); — first shot (second=false) gets 3-tick rearm
-// The burst inter-shot delay is implemented as the "first shot" rearm of 3 ticks.
-// TS missionAI.ts:304: entity.burstDelay = 3; // 3 ticks between burst shots
+// Weapon.Burst does not create a separate queued burst state for land/vessel
+// units. It only makes TechnoTypeClass::Is_Two_Shooter() true, so Fire_At
+// alternates IsSecondShot and writes Arm=3 then Arm=weapon ROF.
 
-describe('Burst fire inter-shot timing (techno.cpp:2869)', () => {
-  it('burst inter-shot delay = 3 ticks (C++ Rearm_Delay(false) = 3)', () => {
+describe('Two-shooter inter-shot timing (techno.cpp:2869)', () => {
+  it('first two-shooter rearm = 3 ticks (C++ Rearm_Delay(false) = 3)', () => {
     // C++ techno.cpp:2869 returns 3 for first shot
-    // TS missionAI.ts:304 uses burstDelay = 3
     const BURST_INTER_SHOT_DELAY = 3;
     expect(BURST_INTER_SHOT_DELAY).toBe(3);
   });
 
-  it('Entity.burstDelay initializes to 0 (entity.ts:166)', () => {
+  it('Entity.burstDelay remains legacy diagnostics state, initialized to 0', () => {
     const e = new Entity(1, 'E1', { x: 0, y: 0 }, 'GoodGuy' as any, null as any);
     expect(e.burstDelay).toBe(0);
   });
 
-  it('Entity.burstCount initializes to 0 (entity.ts:165)', () => {
+  it('Entity.burstCount remains legacy diagnostics state, initialized to 0', () => {
     const e = new Entity(1, 'E1', { x: 0, y: 0 }, 'GoodGuy' as any, null as any);
     expect(e.burstCount).toBe(0);
   });
@@ -484,41 +484,26 @@ describe('Weapon damage values match rules.ini (weapon.cpp:209)', () => {
 // ===========================================================================
 // 11. End-to-end: Mammoth Tank fire cycle sequence
 // ===========================================================================
-// C++ Mammoth Tank (4TNK): Primary=120mm (Burst=2), Secondary=MammothTusk (Burst=2)
-// Fire cycle for primary 120mm with burst=2:
-//   tick 0: Fire shot 1, burstCount=1, burstDelay=3
-//   tick 1-3: burstDelay counts down (3,2,1)
-//   tick 3: burstDelay=0, Fire shot 2, rearmTime=ROF*bias=80, burstCount=0
-//   tick 4-83: attackCooldown counts down (80 ticks)
-//   tick 83: ready to fire again
+// C++ Mammoth Tank (4TNK): Primary=120mm (Burst=2), Secondary=MammothTusk (Burst=2).
+// For land units Burst only feeds Is_Two_Shooter:
+//   Fire_At #1: IsSecondShot=false -> Arm=3, toggle true
+//   Fire_At #2: IsSecondShot=true  -> Arm=ROF, toggle false
 
 describe('Mammoth Tank 120mm fire cycle sequence (end-to-end)', () => {
-  it('burst=2 fires two shots with 3-tick inter-shot delay, then 80-tick reload', () => {
+  it('burst=2 two-shooter cadence writes 3 then 80, without queued burst state', () => {
     const weapon = WEAPON_STATS['120mm'];
     const burst = weapon.burst ?? 1;
     expect(burst).toBe(2);
 
-    const INTER_SHOT_DELAY = 3; // C++ Rearm_Delay(false) = 3
-    const RELOAD_DELAY = weapon.rof; // C++ Rearm_Delay(true) = ROF * 1.0 = 80
+    let isSecondShot = false;
+    const firstRearm = isSecondShot ? weapon.rof : 3;
+    isSecondShot = !isSecondShot;
+    const secondRearm = isSecondShot ? weapon.rof : 3;
+    isSecondShot = !isSecondShot;
 
-    // Simulate fire cycle
-    let burstCount = burst - 1; // after first shot, 1 remaining
-    expect(burstCount).toBe(1);
-
-    let burstDelay = INTER_SHOT_DELAY;
-    // Count down inter-shot delay
-    while (burstDelay > 0) burstDelay--;
-    expect(burstDelay).toBe(0);
-
-    // Second shot fires, set rearm to full ROF
-    burstCount--;
-    expect(burstCount).toBe(0);
-    const rearmTime = Math.max(1, Math.round(RELOAD_DELAY * 1.0));
-    expect(rearmTime).toBe(80);
-
-    // Total cycle: 3 ticks inter-shot + 80 ticks reload = 83 ticks for 2 shots
-    const totalCycle = INTER_SHOT_DELAY + RELOAD_DELAY;
-    expect(totalCycle).toBe(83);
+    expect(firstRearm).toBe(3);
+    expect(secondRearm).toBe(80);
+    expect(isSecondShot).toBe(false);
   });
 
   it('MammothTusk secondary also has burst=2 with same timing pattern', () => {
@@ -526,9 +511,10 @@ describe('Mammoth Tank 120mm fire cycle sequence (end-to-end)', () => {
     expect(weapon.burst).toBe(2);
     expect(weapon.rof).toBe(80);
 
-    // Same pattern: 3-tick inter-shot + 80-tick reload
-    const totalCycle = 3 + weapon.rof;
-    expect(totalCycle).toBe(83);
+    const firstRearm = 3;
+    const secondRearm = weapon.rof;
+    expect(firstRearm).toBe(3);
+    expect(secondRearm).toBe(80);
   });
 });
 

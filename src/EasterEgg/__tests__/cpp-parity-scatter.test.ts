@@ -26,6 +26,7 @@ import {
 } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -200,31 +201,19 @@ describe('Infantry directional scatter (C++ infantry.cpp:1852-1929)', () => {
     expect(scattered).toBe(true);
   });
 
-  // Non-infantry uses old random scatter, not directional
-  it('non-infantry units use random scatter (not directional)', () => {
+  it('non-infantry zero-threat scatter uses Nearby_Location without Scenario RNG', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
     tank.mission = Mission.GUARD;
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 10, 15); // south
+    const ctx = makeCombatCtx([tank]);
 
-    // Run many times; non-infantry should still scatter but with random directions
-    const scatterDirs = new Set<Dir>();
-    let scatterCount = 0;
-    for (let i = 0; i < 200; i++) {
-      const t = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 10);
-      t.mission = Mission.GUARD;
-      const ctx = makeCombatCtx([t]);
-      aiScatterOnDamage(ctx, t, attacker);
-      if (t.moveTarget) {
-        scatterCount++;
-        const tcx = Math.floor(t.moveTarget.lx / 256);
-        const tcy = Math.floor(t.moveTarget.ly / 256);
-        scatterDirs.add(cellDir(10, 10, tcx, tcy));
-      }
-    }
-    // Non-infantry should scatter (at least sometimes — random dx/dy can be 0,0)
-    expect(scatterCount).toBeGreaterThan(0);
-    // Should have multiple directions (random, not directional)
-    expect(scatterDirs.size).toBeGreaterThan(1);
+    ScenarioRandom.seed = 0x12345678;
+    const seedBefore = ScenarioRandom.seed;
+
+    aiScatterOnDamage(ctx, tank, attacker);
+
+    expect(tank.moveTarget).not.toBeNull();
+    expect(ScenarioRandom.seed).toBe(seedBefore);
   });
 
   it('vessels do not use the FootClass damage scatter fallback', async () => {

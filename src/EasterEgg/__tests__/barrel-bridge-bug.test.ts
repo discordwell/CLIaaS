@@ -1,12 +1,12 @@
 /**
  * Barrel explosion vs bridge destruction bug fix.
  *
- * Bug: ALL barrel (BARL/BRL3) structures unconditionally called destroyBridge()
- * and showed "Bridge destroyed" EVA. In C++ RA, barrels explode with area damage
- * but only destroy bridges when actually adjacent to bridge cells.
+ * Bug: BARL/BRL3 destruction called destroyBridge() directly.
+ * In C++ RA, barrels only create four invisible Fire bullets; Fire warheads do
+ * not pass combat.cpp's AP/HE bridge-damage gate.
  *
- * Fix: Gate the EVA message and bridgeCellCount update on whether destroyBridge()
- * actually destroyed any cells (returns count > 0).
+ * Fix: barrel death must not directly mutate bridge templates or announce bridge
+ * destruction. Any later bridge damage must come from real projectile/combat rules.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -18,6 +18,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   structureDamage,
+  updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -45,6 +46,7 @@ function makeMockCombatContext(overrides: Partial<CombatContext> = {}): CombatCo
     structures: [],
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'SCG01EA',
@@ -85,6 +87,13 @@ function makeMockCombatContext(overrides: Partial<CombatContext> = {}): CombatCo
   };
 }
 
+function advanceProjectiles(ctx: CombatContext, ticks = 20): void {
+  for (let i = 0; i < ticks; i++) {
+    ctx.tick++;
+    updateInflightProjectiles(ctx);
+  }
+}
+
 describe('Barrel explosion bridge destruction fix', () => {
   it('does NOT show "Bridge destroyed" EVA when barrel explodes away from bridge', () => {
     const showEvaMessage = vi.fn();
@@ -104,7 +113,7 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(bridgeCalls).toHaveLength(0);
   });
 
-  it('shows "Bridge destroyed" EVA when barrel explodes near bridge cells', () => {
+  it('does NOT show "Bridge destroyed" EVA when barrel explodes near bridge cells', () => {
     const showEvaMessage = vi.fn();
     const map = new GameMap();
     // Plant bridge template cells near the barrel position (10,10)
@@ -118,11 +127,12 @@ describe('Barrel explosion bridge destruction fix', () => {
     const destroyed = structureDamage(ctx, barrel, 100);
     expect(destroyed).toBe(true);
 
-    // showEvaMessage SHOULD have been called with 7 ("Bridge destroyed")
+    // BARL/BRL3 death only queues Fire bullets; it does not call Map.Destroy_Bridge_At.
     const bridgeCalls = showEvaMessage.mock.calls.filter(
       (args: [number]) => args[0] === 7,
     );
-    expect(bridgeCalls).toHaveLength(1);
+    expect(bridgeCalls).toHaveLength(0);
+    expect(map.templateType[idx]).toBe(235);
   });
 
   it('updates bridgeCellCount only when bridge cells were destroyed', () => {
@@ -152,7 +162,7 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(bridgeCalls).toHaveLength(0);
   });
 
-  it('barrels chain-explode along cardinal line (C++ parity)', () => {
+  it('barrels queue invisible fire bullets before chain damage resolves', () => {
     const ctx = makeMockCombatContext();
     // Three barrels in a cardinal line (E-W), 1 cell apart
     const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
@@ -160,17 +170,22 @@ describe('Barrel explosion bridge destruction fix', () => {
     const b3 = makeBarrel({ cx: 12, cy: 10, hp: 1 });
     ctx.structures.push(b1, b2, b3);
 
-    // Destroy first barrel — b1→E hits b2→E hits b3
     structureDamage(ctx, b1, 100);
 
     expect(b1.alive).toBe(false);
+    expect(b2.alive).toBe(true);
+    expect(b3.alive).toBe(true);
+    expect(ctx.inflightProjectiles).toHaveLength(4);
+
+    // C++ creates BulletClass objects; the chain happens from their later AI
+    // detonation, not inside BuildingClass::Take_Damage.
+    advanceProjectiles(ctx);
     expect(b2.alive).toBe(false);
     expect(b3.alive).toBe(false);
   });
 
-  it('barrels do NOT chain-explode diagonally (C++ cardinal-only)', () => {
+  it('barrel death bullets do not apply same-tick diagonal damage', () => {
     const ctx = makeMockCombatContext();
-    // Two barrels diagonally — not cardinal adjacent
     const b1 = makeBarrel({ cx: 10, cy: 10, hp: 1 });
     const b2 = makeBarrel({ cx: 11, cy: 11, hp: 1 });
     ctx.structures.push(b1, b2);
@@ -178,7 +193,8 @@ describe('Barrel explosion bridge destruction fix', () => {
     structureDamage(ctx, b1, 100);
 
     expect(b1.alive).toBe(false);
-    expect(b2.alive).toBe(true); // diagonal = no chain
+    expect(b2.alive).toBe(true);
+    expect(ctx.inflightProjectiles).toHaveLength(4);
   });
 
   it('barrels do NOT chain-explode when far apart', () => {
@@ -194,26 +210,28 @@ describe('Barrel explosion bridge destruction fix', () => {
     expect(b2.alive).toBe(true);
   });
 
-  it('barrel damages entity at cardinal cell (N) but NOT diagonal', () => {
+  it('barrel fire bullets damage units after projectile detonation', () => {
     const ctx = makeMockCombatContext();
     const barrel = makeBarrel({ cx: 10, cy: 10, hp: 1 });
     ctx.structures.push(barrel);
 
-    // Entity at North (10,9) — should be damaged
     const northEntity = new Entity(UnitType.I_E1, House.USSR,
       10 * CELL_SIZE + CELL_SIZE / 2, 9 * CELL_SIZE + CELL_SIZE / 2);
-    // Entity at diagonal (11,11) — should NOT be damaged
-    const diagEntity = new Entity(UnitType.I_E1, House.USSR,
-      11 * CELL_SIZE + CELL_SIZE / 2, 11 * CELL_SIZE + CELL_SIZE / 2);
+    const farEntity = new Entity(UnitType.I_E1, House.USSR,
+      14 * CELL_SIZE + CELL_SIZE / 2, 14 * CELL_SIZE + CELL_SIZE / 2);
 
     const northHpBefore = northEntity.hp;
-    const diagHpBefore = diagEntity.hp;
-    ctx.entities.push(northEntity, diagEntity);
+    const farHpBefore = farEntity.hp;
+    ctx.entities.push(northEntity, farEntity);
 
     structureDamage(ctx, barrel, 100);
+    expect(northEntity.hp).toBe(northHpBefore);
+    expect(farEntity.hp).toBe(farHpBefore);
 
-    expect(northEntity.hp).toBeLessThan(northHpBefore); // took 200 Fire damage
-    expect(diagEntity.hp).toBe(diagHpBefore); // untouched
+    advanceProjectiles(ctx);
+
+    expect(northEntity.hp).toBeLessThan(northHpBefore);
+    expect(farEntity.hp).toBe(farHpBefore);
   });
 
   it('barrel uses Fire warhead with 200 damage (C++ WARHEAD_FIRE parity)', () => {
@@ -230,9 +248,11 @@ describe('Barrel explosion bridge destruction fix', () => {
     structureDamage(ctx, barrel, 100);
 
     expect(barrel.alive).toBe(false);
-    // C++ applies Fire warhead vs armor modifier: BARL armor=none, Fire vs none=0.9
-    // 200 * 0.9 = 180 damage → 500 - 180 = 320
-    expect(building.hp).toBe(320);
+    expect(building.hp).toBe(500);
+    advanceProjectiles(ctx);
+    // C++ applies the 200-strength Fire warhead through BulletClass AI, not
+    // synchronously inside BuildingClass::Take_Damage.
+    expect(building.hp).toBeLessThan(500);
   });
 
   it('barrel blast damages adjacent non-barrel structure but does not destroy it', () => {
@@ -249,6 +269,8 @@ describe('Barrel explosion bridge destruction fix', () => {
 
     expect(barrel.alive).toBe(false);
     expect(building.alive).toBe(true);
+    expect(building.hp).toBe(256);
+    advanceProjectiles(ctx);
     expect(building.hp).toBeLessThan(256); // took 200 Fire damage: 256-200=56
   });
 
@@ -272,6 +294,27 @@ describe('Barrel explosion bridge destruction fix', () => {
 
     expect(structure.alive).toBe(false);
     expect(diagEntity.hp).toBe(hpBefore); // C++ parity: visual-only, no entity damage
+  });
+
+  it('non-barrel structure does NOT damage adjacent structures on destruction', () => {
+    const ctx = makeMockCombatContext();
+    const structure: MapStructure = {
+      type: 'V19', image: 'v19', house: House.France,
+      cx: 10, cy: 10, hp: 50, maxHp: 400, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    };
+    const adjacent: MapStructure = {
+      type: 'V19', image: 'v19', house: House.France,
+      cx: 11, cy: 10, hp: 400, maxHp: 400, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    };
+    ctx.structures.push(structure, adjacent);
+
+    structureDamage(ctx, structure, 100);
+
+    expect(structure.alive).toBe(false);
+    expect(adjacent.alive).toBe(true);
+    expect(adjacent.hp).toBe(400);
   });
 
   it('non-barrel structure destruction never triggers bridge logic', () => {

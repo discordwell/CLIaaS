@@ -95,18 +95,20 @@ describe('SCG13EA Mission_Move path-failure short-circuit — foot.cpp:520-540',
     //   2. entity.stats.isInfantry === true
     //   3. entity.moveTarget != null
     //   4. entity.missionQueue == null (don't clobber a pending queue)
-    //   5. entity.path.length > 0 && pathIndex < path.length
+    //   5. no active infantry Head_To_Coord driver is in progress
+    //   6. entity.path.length > 0 && pathIndex < path.length
     // Listed here as documentation. Any guard change in the engine must update
     // these test expectations.
-    const fiveGuards = [
+    const guards = [
       'MISSION_MOVE_PATH_FAILURE',
       'entity.stats.isInfantry',
       'entity.moveTarget != null',
       'entity.missionQueue == null',
+      'no active infantry Head_To_Coord driver',
       'path non-empty with pathIndex in range',
     ];
-    expect(fiveGuards.length).toBe(5);
-    expect(fiveGuards[0]).toBe('MISSION_MOVE_PATH_FAILURE');
+    expect(guards.length).toBe(6);
+    expect(guards[0]).toBe('MISSION_MOVE_PATH_FAILURE');
   });
 
   it('no-path-reachable check: one-shot findPath must return empty to trigger', () => {

@@ -35,6 +35,7 @@ function makeCombatCtx(overrides?: Partial<CombatContext>): CombatContext {
     structures: [],
     inflightProjectiles,
     effects: [],
+    logicAnims: [],
     tick: 0,
     playerHouse: 'Spain' as any,
     scenarioId: 'test',
@@ -44,7 +45,7 @@ function makeCombatCtx(overrides?: Partial<CombatContext>): CombatContext {
     scenarioWarheadMeta: {},
     scenarioWarheadProps: {},
     attackedTriggerNames: new Set(),
-    map: { isPassable: () => true, addDecal: () => {}, getTerrain: () => 0, setTerrain: () => {}, clearTreeType: () => {}, getTreeAtCell: () => undefined, getWallType: () => '', clearWallType: () => {}, overlay: new Uint8Array(128 * 128).fill(0xFF), hasLineOfSight: () => true, unjamRadius: () => {}, destroyBridge: () => 0, countBridgeCells: () => 0 } as any,
+    map: { isPassable: () => true, inBounds: () => true, addDecal: () => {}, getTerrain: () => 0, setTerrain: () => {}, clearTreeType: () => {}, getTreeAtCell: () => undefined, getWallType: () => '', clearWallType: () => {}, overlay: new Uint8Array(128 * 128).fill(0xFF), hasLineOfSight: () => true, unjamRadius: () => {}, destroyBridge: () => 0, countBridgeCells: () => 0 } as any,
     aiStates: new Map(),
     lastBaseAttackEva: 0,
     gameTicksPerSec: 20,
@@ -215,6 +216,36 @@ describe('launchProjectile arc initialization (bullet.cpp:783-789)', () => {
 
     expect(ctx.inflightProjectiles).toHaveLength(1);
     expect(ctx.inflightProjectiles[0].logicalLX).toBeGreaterThan(startLX);
+  });
+
+  it('arcing projectile flight uses the C++ launch heading, not the scattered fuse target heading', () => {
+    // SCG12EA tick 165 CA shell. C++ applies arcing jitter to PrimaryFacing,
+    // then separately scatters the fuse target. FlyClass physics moves along
+    // PrimaryFacing=6, producing the first post-AI position below.
+    const ctx = makeCombatCtx();
+    const attacker = makeEntity(1, 0, 0, 'England' as any);
+    const target = makeEntity(2, 0, 0, 'BadGuy' as any);
+    attacker.leptonX = 21021;
+    attacker.leptonY = 22400;
+    attacker.pos = { x: attacker.leptonX * 24 / 256, y: attacker.leptonY * 24 / 256 };
+    target.leptonX = 20864;
+    target.leptonY = 19840;
+    target.pos = { x: target.leptonX * 24 / 256, y: target.leptonY * 24 / 256 };
+    ctx.entityById.set(1, attacker);
+    ctx.entityById.set(2, target);
+
+    launchProjectile(
+      ctx, attacker, target, WEAPON_STATS['8Inch'], 500,
+      20884 * 24 / 256, 19852 * 24 / 256, true,
+      { lx: 20766, ly: 22290 },
+      6,
+    );
+
+    updateInflightProjectiles(ctx);
+
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].logicalLX).toBe(20778);
+    expect(ctx.inflightProjectiles[0].logicalLY).toBe(22203);
   });
 });
 

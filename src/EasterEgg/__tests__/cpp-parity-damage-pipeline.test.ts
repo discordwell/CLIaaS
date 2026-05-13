@@ -21,8 +21,8 @@ import * as path from 'path';
 import {
   modifyDamage, armorIndex,
   WARHEAD_VS_ARMOR, WARHEAD_META, WARHEAD_PROPS,
-  CELL_SIZE, MAX_DAMAGE, PRONE_DAMAGE_BIAS,
-  UNIT_STATS, UnitType, House,
+  CELL_SIZE, LEPTON_SIZE, MAX_DAMAGE, PRONE_DAMAGE_BIAS,
+  UNIT_STATS, UnitType, House, WEAPON_STATS,
   buildDefaultAlliances,
   type WarheadType, type ArmorType,
 } from '../engine/types';
@@ -30,7 +30,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   applySplashDamage, damageEntity, getWarheadMult, getWarheadMeta, handleUnitDeath,
-  SPLASH_RADIUS,
+  SPLASH_RADIUS, structureDamage, tickDestroyedStructureDebris,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import { ScenarioRandom } from '../engine/random';
@@ -757,6 +757,169 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     expect(target.hp).toBe(hpBefore);
   });
 
+  it('Explosion_Damage does not collect top-layer fixed-wing aircraft', () => {
+    // C++ combat.cpp snapshots Cell_Occupier() chains. FootClass::Mark converts
+    // MARK_DOWN to MARK_CHANGE for top-layer objects, so an airborne fixed-wing
+    // aircraft is not in Cell_Occupier and cannot be hit by ground splash.
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 10, 10);
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    const ctx = makeCombatCtx([yak]);
+    const hpBefore = yak.hp;
+
+    applySplashDamage(
+      ctx,
+      yak.pos,
+      { damage: 200, warhead: 'Fire', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    expect(yak.hp).toBe(hpBefore);
+  });
+
+  it('Explosion_Damage collects grounded fixed-wing aircraft', () => {
+    // Once a fixed-wing aircraft reaches Height=0, AircraftClass::In_Which_Layer
+    // returns ground and Cell_Occupier splash can damage it like other FootClass
+    // objects.
+    const yak = entityAtCell(UnitType.V_YAK, House.USSR, 10, 10);
+    yak.flightAltitude = 0;
+    yak.aircraftState = 'landed';
+    const ctx = makeCombatCtx([yak]);
+    const hpBefore = yak.hp;
+
+    applySplashDamage(
+      ctx,
+      yak.pos,
+      { damage: 200, warhead: 'Fire', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    expect(yak.hp).toBeLessThan(hpBefore);
+  });
+
+  it('Explosion_Damage only collects helicopters after they enter the ground layer', () => {
+    // Non-fixed aircraft use ObjectClass::In_Which_Layer: Height >=
+    // FLIGHT_LEVEL - FLIGHT_LEVEL/3 is top layer. With TS' pixel altitude,
+    // 16px is still top-layer; 15px is ground-layer.
+    const topLayerHeli = entityAtCell(UnitType.V_HELI, House.USSR, 10, 10);
+    topLayerHeli.flightAltitude = 16;
+    const topCtx = makeCombatCtx([topLayerHeli]);
+    const topHpBefore = topLayerHeli.hp;
+
+    applySplashDamage(
+      topCtx,
+      topLayerHeli.pos,
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    expect(topLayerHeli.hp).toBe(topHpBefore);
+
+    const groundLayerHeli = entityAtCell(UnitType.V_HELI, House.USSR, 10, 10);
+    groundLayerHeli.flightAltitude = 15;
+    const groundCtx = makeCombatCtx([groundLayerHeli]);
+    const groundHpBefore = groundLayerHeli.hp;
+
+    applySplashDamage(
+      groundCtx,
+      groundLayerHeli.pos,
+      { damage: 200, warhead: 'HE', splash: 1.5 },
+      -1, House.Spain,
+    );
+
+    expect(groundLayerHeli.hp).toBeLessThan(groundHpBefore);
+  });
+
+  it('Explosion_Damage processes cell occupier order, not all infantry before buildings', () => {
+    // SCG12EA tick 25: the first cruiser shell hits V19 at (84,82).
+    // C++ snapshots Cell_Occupier chains in center/N/NE/E/SE/S/SW/W/NW order.
+    // That destroys the adjacent barrels before the E2 death explosion can
+    // cascade extra structure damage into the northern V19/BRL3.
+    const attacker = entityAtCell(UnitType.V_CA, House.USSR, 10, 10);
+    const e2 = entityAtCell(UnitType.I_E2, House.Spain, 83, 82);
+    const e1North = entityAtCell(UnitType.I_E1, House.Spain, 82, 80);
+    const e1Mid = entityAtCell(UnitType.I_E1, House.Spain, 82, 81);
+    const ctx = makeCombatCtx([attacker, e2, e1North, e1Mid]);
+
+    const v19North = structureAtCell('V19', House.Spain, 83, 80);
+    const targetV19 = structureAtCell('V19', House.Spain, 84, 82);
+    const brl3 = structureAtCell('BRL3', House.Spain, 84, 80);
+    const barlNorth = structureAtCell('BARL', House.Spain, 84, 81);
+    const barlWest = structureAtCell('BARL', House.Spain, 83, 81);
+    const barlSouth = structureAtCell('BARL', House.Spain, 84, 83);
+    ctx.structures.push(v19North, targetV19, brl3, barlNorth, barlWest, barlSouth);
+
+    applySplashDamage(
+      ctx,
+      { x: 21625 * CELL_SIZE / LEPTON_SIZE, y: 21095 * CELL_SIZE / LEPTON_SIZE },
+      WEAPON_STATS['8Inch'],
+      -1,
+      attacker.house,
+      attacker,
+    );
+
+    expect(targetV19.alive).toBe(false);
+    expect(barlNorth.alive).toBe(false);
+    expect(barlWest.alive).toBe(false);
+    expect(barlSouth.alive).toBe(false);
+    expect(v19North.hp).toBe(396);
+    expect(brl3.hp).toBe(5);
+  });
+
+  it('pending Drop_Debris buildings still occupy an Explosion_Damage object slot', () => {
+    // C++ BuildingClass::Take_Damage leaves a zero-strength building in
+    // Cell_Occupier until BuildingClass::AI calls Drop_Debris. Explosion_Damage
+    // snapshots at most 32 objects, so pending debris must still consume a slot.
+    const centerEntities = Array.from({ length: 31 }, () =>
+      entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10));
+    const cappedOutTarget = entityAtCell(UnitType.V_4TNK, House.USSR, 11, 9);
+    const ctx = makeCombatCtx([...centerEntities, cappedOutTarget]);
+    const pendingDebris = structureAtCell('V19', House.Spain, 10, 9);
+    pendingDebris.hp = 0;
+    pendingDebris.alive = false;
+    pendingDebris.rubble = true;
+    pendingDebris.debrisCountdown = 8;
+    pendingDebris.debrisDropped = false;
+    ctx.structures.push(pendingDebris);
+
+    const targetHpBefore = cappedOutTarget.hp;
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 100, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.Spain,
+    );
+
+    expect(cappedOutTarget.hp).toBe(targetHpBefore);
+  });
+
+  it('nested Explosion_Damage skips objects already reserved by the outer damage list', () => {
+    // C++ uses ObjectClass::IsToDamage while building objects[32]. A grenadier
+    // killed by the outer explosion can run Wide_Area_Damage before the outer
+    // loop reaches later victims, and those pending victims must be skipped by
+    // the nested explosion until the outer loop clears their IsToDamage flag.
+    const attacker = entityAtCell(UnitType.V_CA, House.England, 20, 20);
+    const grenadier = entityAtCell(UnitType.I_E2, House.USSR, 10, 10);
+    const ctx = makeCombatCtx([attacker, grenadier]);
+    const pendingStructure = structureAtCell('V19', House.USSR, 10, 9);
+    pendingStructure.hp = 20;
+    ctx.structures.push(pendingStructure);
+
+    applySplashDamage(
+      ctx,
+      grenadier.pos,
+      { damage: 100, warhead: 'HE', splash: 1.5 },
+      -1,
+      attacker.house,
+      attacker,
+    );
+
+    expect(grenadier.alive).toBe(false);
+    expect(pendingStructure.alive).toBe(true);
+    expect(pendingStructure.hp).toBe(11);
+  });
+
   // ── 7c. Entity at distance 0 (point-blank) takes full splash damage ──
 
   it('entity at explosion center takes full warhead damage (distance=0)', () => {
@@ -1012,6 +1175,136 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     ]);
     expect(ScenarioRandom.seed).toBe(292287586);
     expect(ScenarioRandom._sourceTag).toBe(60043);
+  });
+
+  it('destroyed building CountDown does not elapse in the frame it is assigned', () => {
+    const apwr = structureAtCell('APWR', House.Greece, 10, 10);
+    const ctx = makeCombatCtx([]);
+    ctx.tick = 100;
+    ctx.structures.push(apwr);
+
+    applySplashDamage(
+      ctx,
+      { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 11 * CELL_SIZE + CELL_SIZE / 2 },
+      { damage: 999, warhead: 'HE', splash: 1.5 },
+      -1,
+      House.USSR,
+    );
+
+    expect(apwr.alive).toBe(false);
+    expect(apwr.debrisCountdown).toBe(8);
+
+    tickDestroyedStructureDebris(ctx, apwr);
+    expect(apwr.debrisDropped).toBe(false);
+    expect(apwr.debrisCountdown).toBe(8);
+
+    for (let frame = 101; frame < 108; frame++) {
+      ctx.tick = frame;
+      tickDestroyedStructureDebris(ctx, apwr);
+      expect(apwr.debrisDropped).toBe(false);
+      expect(apwr.debrisCountdown).toBe(108 - frame);
+    }
+
+    ctx.tick = 108;
+    tickDestroyedStructureDebris(ctx, apwr);
+    expect(apwr.debrisDropped).toBe(true);
+    expect(apwr.debrisCountdown).toBeUndefined();
+  });
+
+  it('Drop_Debris smoke uses C++ AnimClass argument order', () => {
+    const barrel = structureAtCell('BRL3', House.Turkey, 107, 77);
+    const ctx = makeCombatCtx([]);
+    ctx.structures.push(barrel);
+    barrel.alive = false;
+    barrel.hp = 0;
+    barrel.rubble = true;
+    barrel.debrisCountdown = 0;
+    barrel.debrisDropped = false;
+
+    // SCG14EA tick 137: C++ Drop_Debris for this BRL3 consumes the smoke
+    // switch, then AnimClass constructor args as loop, delay, Coord_Scatter.
+    ScenarioRandom.seed = 1974182732;
+    ScenarioRandom.callCount = 0;
+    ScenarioRandom._seedLog = [];
+    ScenarioRandom._sourceTag = 12239;
+    ScenarioRandom._tagLogging = true;
+    try {
+      expect(tickDestroyedStructureDebris(ctx, barrel)).toBe(true);
+    } finally {
+      ScenarioRandom._tagLogging = false;
+    }
+
+    expect(ScenarioRandom._seedLog.map(([, tag]) => tag).slice(0, 5)).toEqual([
+      12239, 12239, 12239, 12239, 50002,
+    ]);
+    expect(ScenarioRandom._seedLog.map(([seed]) => seed).slice(0, 5)).toEqual([
+      4271759253, 1167444138, 2707844251, 1217767480, 3561611281,
+    ]);
+    expect(ctx.logicAnims).toHaveLength(0);
+    expect(ctx.effects.find(e => e.sprite === 'smoke_m')).toMatchObject({
+      frame: -2,
+      spriteStart: 0,
+      loops: 12,
+      cppLogicSlot: true,
+    });
+    expect(ctx.map.decals).toHaveLength(1);
+  });
+
+  it('Drop_Debris skips smoke constructor RNG when the C++ AnimClass heap is full', () => {
+    const barrel = structureAtCell('BRL3', House.Turkey, 107, 77);
+    const ctx = makeCombatCtx([]);
+    ctx.reserveAnimSlot = () => false;
+    ctx.structures.push(barrel);
+    barrel.alive = false;
+    barrel.hp = 0;
+    barrel.rubble = true;
+    barrel.debrisCountdown = 0;
+    barrel.debrisDropped = false;
+
+    ScenarioRandom.seed = 1974182732;
+    ScenarioRandom.callCount = 0;
+    ScenarioRandom._seedLog = [];
+    ScenarioRandom._sourceTag = 12239;
+    ScenarioRandom._tagLogging = true;
+    try {
+      expect(tickDestroyedStructureDebris(ctx, barrel)).toBe(true);
+    } finally {
+      ScenarioRandom._tagLogging = false;
+    }
+
+    // Allocation fails before constructor arguments are evaluated. The two
+    // switch calls are followed by the ground-scar Percent_Chance, smudge pick,
+    // and crater Coord_Scatter. The old TS path consumed smoke scatter/delay/loop
+    // anyway, which matched only by spending RNG in the wrong call site.
+    expect(ScenarioRandom._seedLog.map(([seed, tag]) => [seed, tag])).toEqual([
+      [4271759253, 12239],
+      [1167444138, 12239],
+      [2707844251, 12239],
+      [1217767480, 12239],
+      [3561611281, 50002],
+    ]);
+    expect(ctx.effects.find(e => e.sprite === 'smoke_m')).toBeUndefined();
+    expect(ctx.map.decals).toHaveLength(1);
+  });
+
+  it('forced building destruction suppresses Drop_Debris survivors', () => {
+    const apwr = structureAtCell('APWR', House.BadGuy, 10, 10);
+    const ctx = makeCombatCtx([]);
+    ctx.structures.push(apwr);
+    ScenarioRandom.seed = 12345;
+    ScenarioRandom.callCount = 0;
+
+    const destroyed = structureDamage(ctx, apwr, apwr.maxHp + 1, undefined, 'AP', { forced: true });
+    expect(destroyed).toBe(true);
+    expect(apwr.isSurvivorless).toBe(true);
+
+    ctx.tick = 8;
+    tickDestroyedStructureDebris(ctx, apwr);
+
+    expect(apwr.debrisDropped).toBe(true);
+    expect(ctx.entities).toHaveLength(0);
+    expect(ScenarioRandom.callCount).toBe(79);
+    expect(ScenarioRandom.seed).toBe(2490222064);
   });
 });
 

@@ -81,10 +81,22 @@ import {
 } from '../engine/aircraft';
 import type { MapStructure } from '../engine/scenario';
 import { GameMap } from '../engine/map';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => { resetEntityIds(); resetAircraftFrame(); });
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+const CPP_FLIGHT_LEVEL_LEPTONS = 256;
+const CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS = Math.trunc((1 * 256 + 12) / 24);
+
+function cppLeptonToPixel(leptons: number): number {
+  return Math.trunc((leptons * 24 + 128) / 256);
+}
+
+function cppPixelToLepton(pixels: number): number {
+  return Math.trunc((pixels * 256 + 12) / 24);
+}
 
 function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
@@ -122,6 +134,60 @@ function makePadStructure(
   };
 }
 
+describe('aircraft Mission_Move dispatch', () => {
+  it('queued MOVE on an airborne transport commences and consumes the C++ Mission_Move delay jitter', () => {
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 10 * CELL_SIZE + 12, 10 * CELL_SIZE + 12);
+    tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    tran.aircraftState = 'flying';
+    tran.mission = Mission.NONE;
+    tran.missionQueue = Mission.MOVE;
+    tran.moveTarget = {
+      lx: pixelToLepton(13 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),
+    };
+
+    updateAircraft(makeAircraftCtx({ tick: 10 }), tran);
+
+    expect(tran.mission).toBe(Mission.MOVE);
+    expect(tran.missionQueue).toBeNull();
+    expect(ScenarioRandom.callCount).toBe(1);
+    // C++ stores the returned 14-16 tick delay, then the CDTimer has already
+    // elapsed one frame by the post-tick harness snapshot.
+    expect(tran.missionTimer).toBeGreaterThanOrEqual(13);
+    expect(tran.missionTimer).toBeLessThanOrEqual(15);
+  });
+
+  it('helicopter MOVE keeps drifting on current facing until the initial delay expires', () => {
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 63 * CELL_SIZE + 12, 44 * CELL_SIZE + 12);
+    tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    tran.aircraftState = 'flying';
+    tran.mission = Mission.NONE;
+    tran.missionQueue = Mission.MOVE;
+    tran.facing256 = 162;
+    tran.desiredFacing256 = 162;
+    tran.moveTarget = {
+      lx: pixelToLepton(63 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(47 * CELL_SIZE + CELL_SIZE / 2),
+    };
+
+    const ctx = makeAircraftCtx({ tick: 10 });
+    for (let i = 0; i < 5; i++) {
+      updateAircraft(ctx, tran);
+    }
+
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(tran.missionTimer).toBeGreaterThan(0);
+    expect(tran.desiredFacing256).toBe(162);
+    expect(tran.aircraftState).toBe('flying');
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 1: FLIGHT_LEVEL / FLIGHT_ALTITUDE Constant
 // C++ object.h:252: FLIGHT_LEVEL=256 leptons
@@ -157,7 +223,7 @@ describe('FLIGHT_LEVEL constant (object.h:252, display.h:45-47)', () => {
 // C++ Landing_Takeoff_AI:4079-4086: Height += Pixel_To_Lepton(1) each tick
 // Pixel_To_Lepton(1) = (1*256+12)/24 = 11 leptons
 // 256 / 11 = 23.27 → 24 ticks to reach FLIGHT_LEVEL
-// TS: flightAltitude += 1 each tick → 24 ticks
+// TS stores the same lepton Height and derives flightAltitude with Lepton_To_Pixel.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('ascent timing — takeoff tick count (aircraft.cpp:4079-4086)', () => {
@@ -185,8 +251,8 @@ describe('ascent timing — takeoff tick count (aircraft.cpp:4079-4086)', () => 
     expect(ticks).toBe(24); // ceil(256/11) = 24
   });
 
-  it('TS takes 24 ticks to ascend from 0 to FLIGHT_ALTITUDE (24/1 = 24)', () => {
-    // TS aircraft.ts:132: flightAltitude = min(FLIGHT_ALTITUDE, flightAltitude + 1)
+  it('TS takes 24 ticks to ascend from 0 to FLIGHT_LEVEL', () => {
+    // TS mirrors C++ Height += Pixel_To_Lepton(1); flightAltitude is derived.
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'takeoff';
     heli.flightAltitude = 0;
@@ -210,10 +276,9 @@ describe('ascent timing — takeoff tick count (aircraft.cpp:4079-4086)', () => 
 
   it('ascent/descent parity: both C++ and TS take 24 ticks', () => {
     // C++: 256 leptons / 11 leptons per tick = ceil to 24 ticks
-    // TS: 24 pixels / 1 pixel per tick = 24 ticks
-    // Parity confirmed — same timing through different numerical representations
+    // TS stores the C++ lepton Height directly.
     const cppTicks = Math.ceil(256 / 11); // 24
-    const tsTicks = Math.ceil(24 / 1);    // 24
+    const tsTicks = Math.ceil(Entity.FLIGHT_LEVEL_LEPTONS / CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS);
     expect(cppTicks).toBe(tsTicks);
   });
 });
@@ -221,7 +286,7 @@ describe('ascent timing — takeoff tick count (aircraft.cpp:4079-4086)', () => 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Section 3: Descent Timing — Landing Tick Count
 // C++ Landing_Takeoff_AI:4044-4048: Height -= Pixel_To_Lepton(1) each tick
-// TS aircraft.ts:244: flightAltitude = max(0, flightAltitude - 1)
+// TS stores exact Height and derives flightAltitude with Lepton_To_Pixel.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('descent timing — landing tick count (aircraft.cpp:4044-4048)', () => {
@@ -259,11 +324,10 @@ describe('descent timing — landing tick count (aircraft.cpp:4044-4048)', () =>
     expect(ticks).toBe(24);
   });
 
-  it('descent rate is symmetric with ascent rate — 1 px/tick both ways', () => {
+  it('descent/ascent rate is symmetric in exact lepton height', () => {
     // C++ aircraft.cpp:4046 (landing): Height -= Pixel_To_Lepton(1)
     // C++ aircraft.cpp:4082 (takeoff): Height += Pixel_To_Lepton(1)
-    // Same delta in both directions
-    // TS: -1 (landing) and +1 (takeoff) per tick — same symmetry
+    // Same 11-lepton delta in both directions.
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'landing';
     heli.flightAltitude = 10;
@@ -273,6 +337,7 @@ describe('descent timing — landing tick count (aircraft.cpp:4044-4048)', () =>
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);
     expect(heli.flightAltitude).toBe(9); // descended by 1
+    expect(heli.aircraftHeightLeptons).toBe(cppPixelToLepton(10) - CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS);
 
     const heli2 = makeEntity(UnitType.V_HELI, House.Spain);
     heli2.aircraftState = 'takeoff';
@@ -280,6 +345,7 @@ describe('descent timing — landing tick count (aircraft.cpp:4044-4048)', () =>
 
     updateAircraft(ctx, heli2);
     expect(heli2.flightAltitude).toBe(11); // ascended by 1
+    expect(heli2.aircraftHeightLeptons).toBe(cppPixelToLepton(10) + CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS);
   });
 });
 
@@ -444,7 +510,64 @@ describe('fixed-wing landing behavior (aircraft.cpp:2958-2980, 4062-4068)', () =
     const cppYakLandingSpeed = 0xFF;
     expect(cppMigLandingSpeed).toBe(192);
     expect(cppYakLandingSpeed).toBe(255);
-    // TS does not model per-type landing speeds
+    expect(UNIT_STATS.MIG.landingSpeed).toBe(cppMigLandingSpeed);
+    expect(UNIT_STATS.YAK.landingSpeed).toBe(cppYakLandingSpeed);
+  });
+
+  it('fixed-wing aircraft keep moving horizontally while landing', () => {
+    // C++ AircraftClass::Process_Landing leaves IsLanding=true and Set_Speed()
+    // nonzero while Height > 0; Movement_AI still advances the aircraft before
+    // Landing_Takeoff_AI lowers Height.
+    const yak = makeEntity(UnitType.V_YAK, House.USSR, 100, 100);
+    yak.aircraftState = 'landing';
+    yak.flightAltitude = 10;
+    yak.facing256 = 64; // east
+    yak.desiredFacing256 = 64;
+
+    const startX = yak.leptonX;
+    const startY = yak.leptonY;
+    updateAircraft(makeAircraftCtx(), yak);
+
+    expect(yak.flightAltitude).toBe(9);
+    expect(yak.aircraftState).toBe('landing');
+    expect(yak.leptonX).toBeGreaterThan(startX);
+    expect(yak.leptonY).toBe(startY);
+  });
+
+  it('fixed-wing landing movement uses per-type LandingSpeed', () => {
+    const ctx = makeAircraftCtx({ movementSpeed: () => 2 });
+    const yak = makeEntity(UnitType.V_YAK, House.USSR, 100, 100);
+    const mig = makeEntity(UnitType.V_MIG, House.USSR, 100, 100);
+    for (const aircraft of [yak, mig]) {
+      aircraft.aircraftState = 'landing';
+      aircraft.flightAltitude = 10;
+      aircraft.facing256 = 64;
+      aircraft.desiredFacing256 = 64;
+    }
+
+    const yakStartX = yak.leptonX;
+    const migStartX = mig.leptonX;
+    updateAircraft(ctx, yak);
+    updateAircraft(ctx, mig);
+
+    expect(yak.leptonX - yakStartX).toBeGreaterThan(mig.leptonX - migStartX);
+  });
+
+  it('fixed-wing ENTER arrival arms landing status without same-tick height loss', () => {
+    const pad = makePadStructure('AFLD', House.USSR, 10, 10);
+    const yak = makeEntity(UnitType.V_YAK, House.USSR, 11 * CELL_SIZE, 11 * CELL_SIZE);
+    yak.aircraftState = 'returning';
+    yak.mission = Mission.ENTER;
+    yak.aircraftEnterStatus = 6; // C++ ENTER_TRAVEL status
+    yak.aircraftDockingStructure = 0;
+    yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    yak.aircraftHeightLeptons = CPP_FLIGHT_LEVEL_LEPTONS;
+
+    updateAircraft(makeAircraftCtx({ structures: [pad] }), yak);
+
+    expect(yak.aircraftState).toBe('landing');
+    expect(yak.aircraftHeightLeptons).toBe(CPP_FLIGHT_LEVEL_LEPTONS);
+    expect(yak.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
   });
 
   it('FIXED: fixed-wing crash-lands on open ground (destroyed)', () => {
@@ -770,6 +893,41 @@ describe('altitude clamping (aircraft.cpp:4046-4048, 4082-4084)', () => {
     expect(heli.aircraftState).not.toBe('landing');
     expect(['rearming', 'landed']).toContain(heli.aircraftState);
   });
+
+  it('MOVE arrival starts C++ landing height loss on the same tick', () => {
+    const tran = makeEntity(UnitType.V_TRAN, House.Spain, 200, 200);
+    tran.aircraftState = 'flying';
+    tran.mission = Mission.MOVE;
+    tran.aircraftMoveStatus = 2; // C++ FLY_TO_LZ status
+    tran.moveTarget = { lx: tran.leptonX, ly: tran.leptonY };
+    tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    tran.aircraftHeightLeptons = CPP_FLIGHT_LEVEL_LEPTONS;
+
+    updateAircraft(makeAircraftCtx(), tran);
+
+    expect(tran.aircraftState).toBe('landing');
+    expect(tran.aircraftHeightLeptons).toBe(
+      CPP_FLIGHT_LEVEL_LEPTONS - CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS,
+    );
+    expect(tran.flightAltitude).toBe(cppLeptonToPixel(tran.aircraftHeightLeptons));
+  });
+
+  it('touchdown preserves a queued mission until AircraftClass::AI can Commence it', () => {
+    const tran = makeEntity(UnitType.V_TRAN, House.Spain);
+    tran.aircraftState = 'landing';
+    tran.mission = Mission.MOVE;
+    tran.missionQueue = Mission.UNLOAD;
+    tran.flightAltitude = 1;
+    tran.aircraftHeightLeptons = CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS;
+    tran.ammo = tran.maxAmmo;
+
+    updateAircraft(makeAircraftCtx(), tran);
+
+    expect(tran.aircraftHeightLeptons).toBe(0);
+    expect(tran.aircraftState).toBe('landed');
+    expect(tran.mission).toBe(Mission.MOVE);
+    expect(tran.missionQueue).toBe(Mission.UNLOAD);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -850,34 +1008,59 @@ describe('full takeoff → fly → land altitude cycle', () => {
     }
   });
 
-  it('altitude increases by exactly 1 each takeoff tick (no gaps)', () => {
+  it('takeoff uses exact C++ lepton height; visible pixels can skip near full altitude', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'takeoff';
     heli.flightAltitude = 0;
+    heli.aircraftHeightLeptons = 0;
 
     const ctx = makeAircraftCtx();
-    for (let tick = 0; tick < 24; tick++) {
-      const before = heli.flightAltitude;
+    let expectedHeight = 0;
+    for (let tick = 1; tick <= 23; tick++) {
+      expectedHeight = Math.min(
+        CPP_FLIGHT_LEVEL_LEPTONS,
+        expectedHeight + CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS,
+      );
       updateAircraft(ctx, heli);
-      expect(heli.flightAltitude).toBe(before + 1);
+      expect(heli.aircraftHeightLeptons).toBe(expectedHeight);
+      expect(heli.flightAltitude).toBe(cppLeptonToPixel(expectedHeight));
     }
+
+    expect(heli.aircraftHeightLeptons).toBe(253);
     expect(heli.flightAltitude).toBe(24);
+    expect(heli.aircraftState).toBe('takeoff');
+
+    updateAircraft(ctx, heli);
+    expect(heli.aircraftHeightLeptons).toBe(CPP_FLIGHT_LEVEL_LEPTONS);
+    expect(heli.flightAltitude).toBe(24);
+    expect(heli.aircraftState).toBe('flying');
   });
 
-  it('altitude decreases by exactly 1 each landing tick (no gaps)', () => {
+  it('landing uses exact C++ lepton height; visible pixels can reach 0 before touchdown', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain);
     heli.aircraftState = 'landing';
     heli.flightAltitude = 24;
+    heli.aircraftHeightLeptons = CPP_FLIGHT_LEVEL_LEPTONS;
     heli.ammo = 0;
     heli.maxAmmo = 6;
 
     const ctx = makeAircraftCtx();
-    for (let tick = 0; tick < 24; tick++) {
-      const before = heli.flightAltitude;
+    let expectedHeight = CPP_FLIGHT_LEVEL_LEPTONS;
+    for (let tick = 1; tick <= 23; tick++) {
+      expectedHeight = Math.max(0, expectedHeight - CPP_AIRCRAFT_HEIGHT_STEP_LEPTONS);
       updateAircraft(ctx, heli);
-      expect(heli.flightAltitude).toBe(before - 1);
+      expect(heli.aircraftHeightLeptons).toBe(expectedHeight);
+      expect(heli.flightAltitude).toBe(cppLeptonToPixel(expectedHeight));
     }
+
+    expect(heli.aircraftHeightLeptons).toBe(3);
     expect(heli.flightAltitude).toBe(0);
+    expect(heli.aircraftState).toBe('landing');
+
+    updateAircraft(ctx, heli);
+    expect(heli.aircraftHeightLeptons).toBe(0);
+    expect(heli.flightAltitude).toBe(0);
+    expect(heli.aircraftState).not.toBe('landing');
   });
 });
 

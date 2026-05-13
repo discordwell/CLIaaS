@@ -22,8 +22,8 @@
  *   - Sets TarCom + mission=ATTACK, but does NOT return — falls through
  *
  * Target_Something_Nearby (techno.cpp:5251-5281):
- *   - If TarCom valid: check if in weapon range. If not, clear TarCom.
- *   - If no TarCom: Greatest_Threat(THREAT_RANGE) — scan within weapon range.
+ *   - If TarCom valid: check if in selected weapon range. If not, clear TarCom.
+ *   - If no TarCom: Greatest_Threat(THREAT_RANGE) using Threat_Range(0).
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,6 +54,7 @@ function createCanvas(): HTMLCanvasElement {
 
 function createGame(): Game {
   const game = new Game(createCanvas());
+  game.playerHouse = House.Greece;
   game.map.setBounds(0, 0, 48, 48); // larger map for distance tests
   return game;
 }
@@ -148,8 +149,8 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     game.entities.push(hind);
     game.entityById.set(hind.id, hind);
 
-    // Allied base near (12,10) — within 10 cells of harvester
-    const allyBase = makeStructure('FACT', House.Greece, 12, 10);
+    // Allied base near (16,10) — within 10 cells of harvester
+    const allyBase = makeStructure('FACT', House.Greece, 16, 10);
     game.structures.push(allyBase);
 
     // Harvester at (13,10) — near its own FACT → inside base zone
@@ -157,14 +158,46 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     game.entities.push(harvester);
     game.entityById.set(harvester.id, harvester);
 
-    callHeliGuardScan(game, hind);
+    const juicyFound = callHeliGuardScan(game, hind);
 
     // Harvester is inside its own base zone → Find_Juicy_Target skips it.
-    // But Target_Something_Nearby (Greatest_Threat) should still find it in range.
-    // The target should be the harvester (found via Greatest_Threat, not Find_Juicy_Target).
-    // This test verifies the base-zone filter works.
-    // Note: the harvester IS in weapon range, so Greatest_Threat finds it anyway.
-    expect(hind.target).toBe(harvester);
+    // Target_Something_Nearby may still pick a nearby building from the same
+    // base, but that must not be reported as a juicy harvester hit.
+    expect(juicyFound).toBe(false);
+    expect(hind.target).not.toBe(harvester);
+  });
+
+  it('uses C++ weighted base radius instead of nearest-building distance for Which_Zone', () => {
+    // C++ HouseClass::Recalc_Center weights building centers by Cost_Of() and
+    // computes one base radius. A unit can be more than 10 cells from every
+    // individual structure and still be inside its house's base zone.
+    const game = createGame();
+
+    const hpad = makeHPAD(House.USSR, 10, 10);
+    game.structures.push(hpad);
+
+    const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.mission = Mission.GUARD;
+    hind.aircraftState = 'landed';
+    game.entities.push(hind);
+    game.entityById.set(hind.id, hind);
+
+    // Two equal-cost FACTs create a center at (18.5,21.5), radius 4 cells
+    // after C++'s weighted-count division, and an outer zone of 16 cells.
+    game.structures.push(makeStructure('FACT', House.Greece, 5, 20));
+    game.structures.push(makeStructure('FACT', House.Greece, 29, 20));
+
+    // This harvester is 14 cells from the C++ base center, so Which_Zone is
+    // not ZONE_NONE. It is still over 10 cells from both FACTs, which exposed
+    // the old per-structure approximation as a false juicy target.
+    const harvester = entityAtCell(UnitType.V_HARV, House.Greece, 18, 35);
+    game.entities.push(harvester);
+    game.entityById.set(harvester.id, harvester);
+
+    const juicyFound = callHeliGuardScan(game, hind);
+
+    expect(juicyFound).toBe(false);
+    expect(hind.target).not.toBe(harvester);
   });
 
   it('prioritizes harvesters over other units at same distance', () => {
@@ -238,6 +271,35 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     expect(hind.target).toBe(harvester);
   });
 
+  it('uses GuardRange for HPAD helicopter FootClass Target_Something_Nearby', () => {
+    // C++ TechnoClass::Threat_Range(0) returns type GuardRange when it is set.
+    // Scenario overrides such as SCG12EA [HIND] GuardRange=18 therefore widen
+    // FootClass::Mission_Guard beyond HIND's ChainGun range.
+    const game = createGame();
+
+    const hpad = makeHPAD(House.USSR, 10, 10);
+    game.structures.push(hpad);
+
+    const hind = entityAtCell(UnitType.V_HIND, House.USSR, 10, 10);
+    hind.mission = Mission.GUARD;
+    hind.aircraftState = 'landed';
+    hind.stats = { ...hind.stats, guardRange: 18 };
+    game.entities.push(hind);
+    game.entityById.set(hind.id, hind);
+
+    const aiStates = (game as unknown as { aiStates: Map<House, { underAttack: boolean }> }).aiStates;
+    aiStates.set(House.USSR, { underAttack: true } as never);
+
+    const rifleman = entityAtCell(UnitType.I_E1, House.Greece, 24, 10);
+    game.entities.push(rifleman);
+    game.entityById.set(rifleman.id, rifleman);
+
+    const juicyFound = callHeliGuardScan(game, hind);
+
+    expect(juicyFound).toBe(false);
+    expect(hind.target).toBe(rifleman);
+  });
+
   it('does not treat InfantryClass targets as Find_Juicy_Target hits', () => {
     // C++ house.cpp:6911 iterates Units.Count()/UnitClass*, so infantry can be
     // found later by Target_Something_Nearby but must not queue ATTACK as juicy.
@@ -263,8 +325,8 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
   });
 
   it('does not treat VesselClass targets as Find_Juicy_Target hits', () => {
-    // C++ vessels live in a separate object pool from Units. A far LST outside
-    // weapon range should therefore not queue ATTACK through the juicy-target path.
+    // C++ vessels live in a separate object pool from Units. FootClass's
+    // Target_Something_Nearby can still find them through the ordinary threat scan.
     const game = createGame();
 
     const hpad = makeHPAD(House.USSR, 10, 10);
@@ -283,7 +345,7 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     const juicyFound = callHeliGuardScan(game, hind);
 
     expect(juicyFound).toBe(false);
-    expect(hind.target).toBeNull();
+    expect(hind.target).toBe(transport);
   });
 
   it('target found only by Target_Something_Nearby stays in GUARD until the next guard timer fire', () => {
@@ -309,13 +371,9 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     const aiStates = (game as unknown as { aiStates: Map<House, { underAttack: boolean }> }).aiStates;
     aiStates.set(House.USSR, { underAttack: true } as never);
 
-    const alliedBase = makeStructure('FACT', House.Greece, 13, 10);
-    alliedBase.missionTimer = 999;
-    game.structures.push(alliedBase);
-
-    const harvester = entityAtCell(UnitType.V_HARV, House.Greece, 13, 10);
-    game.entities.push(harvester);
-    game.entityById.set(harvester.id, harvester);
+    const rifleman = entityAtCell(UnitType.I_E1, House.Greece, 13, 10);
+    game.entities.push(rifleman);
+    game.entityById.set(rifleman.id, rifleman);
 
     const savedSeed = ScenarioRandom.seed;
     try {
@@ -323,7 +381,7 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
 
       runStructureLogic(game);
 
-      expect(hind.target).toBe(harvester);
+      expect(hind.target).toBe(rifleman);
       expect(hind.mission).toBe(Mission.GUARD);
       expect(hind.aircraftState).toBe('landed');
       expect(hind.missionTimer).toBeGreaterThanOrEqual(41);
@@ -367,8 +425,54 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     }
   });
 
-  it('clears out-of-range juicy target via Target_Something_Nearby validation', () => {
-    // C++ techno.cpp:5261-5266: Target_Something_Nearby clears TarCom if out of weapon range
+  it('player-owned docked helicopters skip AI guard scan and RNG jitter', () => {
+    // C++ aircraft.cpp:3737: if (House->IsHuman) return Normal_Delay().
+    // This happens before TarCom validation, Find_Juicy_Target, and the
+    // FootClass::Mission_Guard Random_Pick(0,2) delay jitter.
+    const game = createGame();
+    game.playerHouse = House.Greece;
+
+    const heli = entityAtCell(UnitType.V_HELI, House.Greece, 10, 10);
+    heli.mission = Mission.GUARD;
+    heli.missionTimer = 0;
+    heli.aircraftState = 'landed';
+    heli.flightAltitude = 0;
+    game.entities.push(heli);
+    game.entityById.set(heli.id, heli);
+
+    const hpad = makeHPAD(House.Greece, 10, 10);
+    hpad.hpadHelicopterId = heli.id;
+    hpad.dockedAircraft = heli.id;
+    hpad.missionTimer = 999;
+    game.structures.push(hpad);
+
+    const harvester = entityAtCell(UnitType.V_HARV, House.USSR, 13, 10);
+    game.entities.push(harvester);
+    game.entityById.set(harvester.id, harvester);
+
+    const savedSeed = ScenarioRandom.seed;
+    const savedCalls = ScenarioRandom.callCount;
+    try {
+      ScenarioRandom.seed = 0x13579bdf;
+      ScenarioRandom.callCount = 0;
+
+      runStructureLogic(game);
+
+      expect(ScenarioRandom.callCount).toBe(0);
+      expect(ScenarioRandom.seed).toBe(0x13579bdf);
+      expect(heli.target).toBeNull();
+      expect(heli.mission).toBe(Mission.GUARD);
+      expect(heli.missionTimer).toBe(41);
+    } finally {
+      ScenarioRandom.seed = savedSeed;
+      ScenarioRandom.callCount = savedCalls;
+    }
+  });
+
+  it('clears juicy target outside Threat_Range via Target_Something_Nearby validation', () => {
+    // C++ techno.cpp:5261-5266 clears out-of-weapon-range TarCom, then
+    // Greatest_Threat(THREAT_RANGE) can only reacquire it if it is inside
+    // TechnoClass::Threat_Range(0).
     const game = createGame();
 
     const hpad = makeHPAD(House.USSR, 10, 10);
@@ -380,16 +484,16 @@ describe('HPAD helicopter guard — Find_Juicy_Target (house.cpp:6900)', () => {
     game.entities.push(hind);
     game.entityById.set(hind.id, hind);
 
-    // Enemy harvester at (25,10) — 15 cells from HIND, outside base zone,
-    // but FAR outside weapon scan range (5 cells)
-    const harvester = entityAtCell(UnitType.V_HARV, House.Greece, 25, 10);
+    // Enemy harvester at (45,10) — outside base zone and outside HIND GuardRange.
+    const harvester = entityAtCell(UnitType.V_HARV, House.Greece, 45, 10);
     game.entities.push(harvester);
     game.entityById.set(harvester.id, harvester);
 
-    callHeliGuardScan(game, hind);
+    const juicyFound = callHeliGuardScan(game, hind);
 
     // Find_Juicy_Target found the harvester, but Target_Something_Nearby
-    // cleared it (out of weapon range 5 cells). Greatest_Threat found nothing.
+    // cleared it and Greatest_Threat could not reacquire it outside GuardRange.
+    expect(juicyFound).toBe(true);
     expect(hind.target).toBeNull();
   });
 
@@ -454,8 +558,10 @@ describe('HPAD helicopter guard — Target_Something_Nearby validation (techno.c
     expect(hind.target).not.toBeNull();
   });
 
-  it('clears existing target if out of weapon range', () => {
-    // C++ techno.cpp:5264: Assign_Target(TARGET_NONE) when out of range
+  it('clears existing target if outside Threat_Range', () => {
+    // C++ techno.cpp:5264: Assign_Target(TARGET_NONE) when out of weapon range.
+    // With GuardRange, the follow-up Greatest_Threat scan can reacquire targets
+    // inside Threat_Range(0), so this target must be outside GuardRange too.
     const game = createGame();
 
     const hpad = makeHPAD(House.USSR, 10, 10);
@@ -467,8 +573,8 @@ describe('HPAD helicopter guard — Target_Something_Nearby validation (techno.c
     game.entities.push(hind);
     game.entityById.set(hind.id, hind);
 
-    // Pre-set a target that is OUT of weapon range
-    const farTank = entityAtCell(UnitType.V_2TNK, House.Greece, 30, 10);
+    // Pre-set a target that is outside HIND GuardRange.
+    const farTank = entityAtCell(UnitType.V_2TNK, House.Greece, 45, 10);
     game.entities.push(farTank);
     game.entityById.set(farTank.id, farTank);
     hind.target = farTank;

@@ -227,38 +227,22 @@ describe('STNK weapon effectiveness — AP warhead (combat.cpp warhead tables)',
   });
 });
 
-// ── Burst Fire (weapon.cpp:78 Weapon.Burst) ─────────────────────────────────
-// C++ weapon.cpp — burst=2 means two shots per trigger pull, with burstDelay ticks between
+// ── Two-Shooter Cadence (weapon.cpp:78 Weapon.Burst) ────────────────────────
+// C++ uses Burst through TechnoTypeClass::Is_Two_Shooter. Land units do not
+// keep a separate queued burstCount/burstDelay gameplay state.
 
-describe('STNK burst fire — APTusk burst=2 (weapon.cpp:78)', () => {
-  it('burstCount starts at 0 (no active burst)', () => {
+describe('STNK two-shooter cadence — APTusk burst=2 (weapon.cpp:78)', () => {
+  it('legacy burst diagnostics start at zero', () => {
     const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
     expect(stnk.burstCount).toBe(0);
-  });
-
-  it('burstDelay starts at 0', () => {
-    const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
     expect(stnk.burstDelay).toBe(0);
   });
 
-  it('weapon burst value is 2', () => {
+  it('primary weapon Burst=2 makes STNK a C++ two-shooter', () => {
     const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
     expect(stnk.weapon!.burst).toBe(2);
-  });
-
-  it('setting burstCount to burst-1 simulates first shot fired, one remaining', () => {
-    const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
-    // Simulate first shot fired: burst=2, first shot fires, burstCount = 1 remaining
-    stnk.burstCount = stnk.weapon!.burst! - 1;
-    expect(stnk.burstCount).toBe(1);
-  });
-
-  it('burstCount decrements to 0 after second shot (volley complete)', () => {
-    const stnk = entityAtCell(UnitType.V_STNK, House.Spain, 10, 10);
-    stnk.burstCount = 1; // one shot remaining
-    // Second shot fires
-    stnk.burstCount--;
-    expect(stnk.burstCount).toBe(0);
+    expect(stnk.isTwoShooter()).toBe(true);
+    expect(stnk.isSecondShot).toBe(false);
   });
 });
 

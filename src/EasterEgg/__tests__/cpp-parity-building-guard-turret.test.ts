@@ -60,6 +60,27 @@ function makeAgun(cx: number, cy: number): MapStructure {
   };
 }
 
+function makeFtur(cx: number, cy: number): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP.FTUR;
+  return {
+    type: 'FTUR',
+    image: 'ftur',
+    house: House.BadGuy,
+    cx,
+    cy,
+    hp: maxHp,
+    maxHp,
+    alive: true,
+    rubble: false,
+    weapon: STRUCTURE_WEAPONS.FTUR,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    mission: Mission.GUARD,
+    missionTimer: 0,
+  };
+}
+
 function airborneYak(cx: number, cy: number): Entity {
   const yak = new Entity(UnitType.V_YAK, House.USSR, cx * 24 + 12, cy * 24 + 12);
   yak.flightAltitude = Entity.FLIGHT_ALTITUDE;
@@ -143,6 +164,38 @@ describe('BuildingClass::Mission_Guard turret timing', () => {
     expect(ranAttack).toBe(false);
     expect(agun.mission).toBe(Mission.ATTACK);
     expect(agun.targetEntityId).toBeUndefined();
+  });
+
+  it('ignores spies during defensive building auto-target scans', () => {
+    const game = new Game(createCanvas());
+    const ftur = makeFtur(75, 32);
+    const spy = new Entity(
+      UnitType.I_SPY,
+      House.GoodGuy,
+      77 * CELL_SIZE + CELL_SIZE / 2,
+      29 * CELL_SIZE + CELL_SIZE / 2,
+    );
+
+    game.structures.push(ftur);
+    game.entities.push(spy);
+    game.entityById.set(spy.id, spy);
+
+    const ranAttack = (game as unknown as {
+      readonly _combatCtx: unknown;
+      dispatchStructureMissionTimer(s: MapStructure, combatCtx: unknown, guardNormalDelay: number, guardAADelay: number): boolean;
+    }).dispatchStructureMissionTimer(
+      ftur,
+      (game as unknown as { readonly _combatCtx: unknown })._combatCtx,
+      42,
+      14,
+    );
+
+    expect(ranAttack).toBe(false);
+    expect(ftur.mission).toBe(Mission.GUARD);
+    expect(ftur.targetEntityId).toBeUndefined();
+    expect(ftur.missionTimer).toBeGreaterThanOrEqual(14);
+    expect(ftur.missionTimer).toBeLessThanOrEqual(16);
+    expect(ScenarioRandom.callCount).toBe(1);
   });
 
   it('aims at TARGET_NONE after Mission_Attack clears an out-of-range assigned target', () => {

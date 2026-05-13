@@ -16,11 +16,12 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  UnitType, House, CELL_SIZE, COUNTRY_BONUSES,
+  UnitType, House, Mission, CELL_SIZE, COUNTRY_BONUSES,
   buildDefaultAlliances, worldDist, modifyDamage,
   WARHEAD_VS_ARMOR,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
+import { ScenarioRandom } from '../engine/random';
 import {
   type CombatContext,
   applySplashDamage,
@@ -152,11 +153,12 @@ describe('Structure at adjacent cell takes reduced splash damage (combat.cpp:229
     expect(impactDmg).toBeGreaterThan(adjacentDmg);
   });
 
-  it('structure diagonally adjacent (within 1.5 cell radius) takes reduced damage', () => {
+  it('structure diagonally adjacent takes reduced damage when impact is inside strict splash radius', () => {
     const structure = makeStructure('SILO', 11, 11, 500);
     const ctx = makeCombatCtx([structure]);
-    // Splash at center of cell (10,10) — diagonal distance ~1.41 cells
-    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    // Shift the impact toward the diagonal cell. A cell-center diagonal is
+    // exactly 384 leptons by C++ Distance() and is excluded by `distance < range`.
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2 + 6, y: 10 * CELL_SIZE + CELL_SIZE / 2 + 6 };
     applySplashDamage(ctx, center, { damage: 100, warhead: 'HE', splash: 1 }, -1, House.Spain);
     expect(structure.hp).toBeLessThan(500);
   });
@@ -201,7 +203,7 @@ describe('Multiple structures in radius all take appropriate damage (combat.cpp:
     const oneAway = makeStructure('SILO', 11, 10, 500);
     const diagAway = makeStructure('SILO', 11, 11, 500);
     const ctx = makeCombatCtx([atImpact, oneAway, diagAway]);
-    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2 + 6, y: 10 * CELL_SIZE + CELL_SIZE / 2 + 6 };
     applySplashDamage(ctx, center, { damage: 100, warhead: 'HE', splash: 1 }, -1, House.Spain);
 
     const impactDmg = 500 - atImpact.hp;
@@ -315,5 +317,57 @@ describe('Splash hits both entities and structures simultaneously (combat.cpp:20
     applySplashDamage(ctx, center, { damage: 100, warhead: 'HE', splash: 1 }, -1, House.Spain);
     expect(structure.hp).toBeLessThan(500);
     expect(entity.hp).toBeLessThan(entity.maxHp);
+  });
+});
+
+// ── Mine Armor Defaults ────────────────────────────────────────────────────
+
+describe('Mine structures use C++ ARMOR_NONE defaults for splash falloff', () => {
+  it('adjacent MINV survives low AP splash that falls to zero vs ARMOR_NONE', () => {
+    const mine = makeStructure('MINV', 11, 10, 1);
+    const ctx = makeCombatCtx([mine]);
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+
+    applySplashDamage(ctx, center, { damage: 30, warhead: 'AP', splash: 1 }, -1, House.Spain);
+
+    expect(STRUCTURE_ARMOR['MINV']).toBe('none');
+    expect(mine.hp).toBe(1);
+    expect(mine.alive).toBe(true);
+  });
+
+  it('adjacent MINP survives low AP splash that falls to zero vs ARMOR_NONE', () => {
+    const mine = makeStructure('MINP', 11, 10, 1);
+    const ctx = makeCombatCtx([mine]);
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+
+    applySplashDamage(ctx, center, { damage: 30, warhead: 'AP', splash: 1 }, -1, House.Spain);
+
+    expect(STRUCTURE_ARMOR['MINP']).toBe('none');
+    expect(mine.hp).toBe(1);
+    expect(mine.alive).toBe(true);
+  });
+
+  it('insignificant mines do not trigger Base_Is_Attacked recruitment RNG on zero-damage splash', () => {
+    const mine = makeStructure('MINV', 11, 10, 1, House.USSR);
+    const attacker = new Entity(UnitType.I_E1, House.Spain, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    const defender = new Entity(UnitType.I_E3, House.USSR, 12 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    defender.mission = Mission.GUARD;
+    const ctx = makeCombatCtx([mine], [attacker, defender]);
+    let suspendCalls = 0;
+    ctx.suspendTeamsByPriority = () => { suspendCalls++; };
+
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+    const center = { x: 10 * CELL_SIZE + CELL_SIZE / 2, y: 10 * CELL_SIZE + CELL_SIZE / 2 };
+
+    applySplashDamage(ctx, center, { damage: 30, warhead: 'AP', splash: 1 }, -1, attacker.house, attacker);
+
+    expect(STRUCTURE_ARMOR['MINV']).toBe('none');
+    expect(mine.hp).toBe(1);
+    expect(mine.alive).toBe(true);
+    expect(suspendCalls).toBe(0);
+    expect(defender.target).toBeNull();
+    expect(defender.mission).toBe(Mission.GUARD);
+    expect(ScenarioRandom.callCount).toBe(0);
   });
 });

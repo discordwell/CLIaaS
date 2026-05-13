@@ -31,6 +31,8 @@ import {
   checkVehicleCrush, launchProjectile,
   updateInflightProjectiles, applySplashDamage,
 } from '../engine/combat';
+import { processLogicAnim, type LogicAnim } from '../engine/logicAnim';
+import { ScenarioRandom } from '../engine/random';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_ARMOR } from '../engine/scenario';
@@ -345,15 +347,63 @@ describe('damageStructure behavior', () => {
     expect(result).toBe(false);
   });
 
-  it('records AI base attack on structure damage', () => {
+  it('fatal ATTACKED destroy-object triggers do not destroy the same barrel twice', () => {
+    const barrel = makeStructure({
+      type: 'BARL',
+      image: 'barl',
+      hp: 10,
+      maxHp: 10,
+      armor: 'none',
+      triggerName: 'flt2',
+    });
+    const attacker = makeEntity(UnitType.I_E3, House.Greece);
+    let ctx!: CombatContext;
+    const sprung: string[] = [];
+    ctx = makeMockCombatContext({
+      structures: [barrel],
+      springAttackedTriggerByName: (name) => {
+        sprung.push(name);
+        for (const s of ctx.structures) {
+          if (s.alive && s.triggerName === name) {
+            structureDamage(ctx, s, s.maxHp + 1, undefined, 'AP', { forced: true });
+          }
+        }
+      },
+    });
+
+    const destroyed = structureDamage(ctx, barrel, 10, attacker, 'AP');
+
+    expect(destroyed).toBe(true);
+    expect(sprung).toEqual(['flt2']);
+    expect(barrel.alive).toBe(false);
+    expect(ctx.inflightProjectiles).toHaveLength(4);
+  });
+
+  it('does not record AI base attack for source-less structure damage', () => {
     const s = makeStructure({ house: House.USSR });
     const aiState = { lastBaseAttackTick: -1, underAttack: false, iq: 3 };
     const aiStates = new Map<House, { lastBaseAttackTick: number; underAttack: boolean; iq: number }>();
     aiStates.set(House.USSR, aiState);
     const ctx = makeMockCombatContext({ aiStates, tick: 42 });
+
     structureDamage(ctx, s, 10);
+
+    expect(aiState.lastBaseAttackTick).toBe(-1);
+    expect(aiState.underAttack).toBe(false);
+  });
+
+  it('records LATime but does not directly enter STATE_ATTACKED for real-source structure damage', () => {
+    const s = makeStructure({ house: House.USSR });
+    const attacker = makeEntity(UnitType.I_E1, House.Greece);
+    const aiState = { lastBaseAttackTick: -1, underAttack: false, iq: 3 };
+    const aiStates = new Map<House, { lastBaseAttackTick: number; underAttack: boolean; iq: number }>();
+    aiStates.set(House.USSR, aiState);
+    const ctx = makeMockCombatContext({ aiStates, tick: 42 });
+
+    structureDamage(ctx, s, 10, attacker);
+
     expect(aiState.lastBaseAttackTick).toBe(42);
-    expect(aiState.underAttack).toBe(true);
+    expect(aiState.underAttack).toBe(false);
   });
 
   it('destroyed structure explosion does NOT damage nearby units (visual-only, C++ parity)', () => {
@@ -368,6 +418,87 @@ describe('damageStructure behavior', () => {
     expect(destroyed).toBe(true);
     // C++ parity: FBALL1 death anim is visual-only, no entity damage
     expect(nearby.hp).toBe(hpBefore);
+  });
+
+  it('destroyed structure fireball occupies a C++ AnimClass logic slot', () => {
+    const s = makeStructure({ type: 'BRIK', hp: 10, cx: 5, cy: 5 });
+    const ctx = makeMockCombatContext();
+
+    const destroyed = structureDamage(ctx, s, 100);
+
+    expect(destroyed).toBe(true);
+    expect(ctx.logicAnims.filter(a => a.type === 'fball1')).toHaveLength(1);
+    expect(ctx.effects.filter(e => e.type === 'explosion' && e.sprite === 'fball1')).toHaveLength(1);
+  });
+
+  it('destroyed structure fireball is skipped when the C++ AnimClass heap is full', () => {
+    const s = makeStructure({ type: 'BRIK', hp: 10, cx: 5, cy: 5 });
+    const ctx = makeMockCombatContext({
+      reserveAnimSlot: () => false,
+    });
+
+    const destroyed = structureDamage(ctx, s, 100);
+
+    expect(destroyed).toBe(true);
+    expect(ctx.logicAnims.some(a => a.type === 'fball1')).toBe(false);
+    expect(ctx.effects.some(e => e.type === 'explosion' && e.sprite === 'fball1')).toBe(false);
+  });
+
+  it('destroyed structure detaches attached fire anims without freeing heap slots early', () => {
+    const s = makeStructure({ type: 'BRIK', hp: 10, cx: 5, cy: 5 });
+    const ctx = makeMockCombatContext();
+    ctx.structures.push(s);
+
+    for (let i = 0; i < 99; i++) {
+      ctx.logicAnims.push({
+        type: 'fire_small',
+        x: 0,
+        y: 0,
+        stage: 0,
+        timer: 1,
+        loops: 2,
+        delay: 0,
+        isBrandNew: false,
+      });
+    }
+    const attachedFire: LogicAnim = {
+      type: 'fire_small',
+      x: 5 * CELL_SIZE,
+      y: 5 * CELL_SIZE,
+      stage: 0,
+      timer: 1,
+      loops: 2,
+      delay: 0,
+      isBrandNew: false,
+      attachedStructureIndex: 0,
+    };
+    ctx.logicAnims.push(attachedFire);
+    ctx.reserveAnimSlot = () => ctx.logicAnims.length < 100;
+
+    const destroyed = structureDamage(ctx, s, 100);
+
+    expect(destroyed).toBe(true);
+    expect(attachedFire.deleteOnNextProcess).toBe(true);
+    expect(ctx.logicAnims).toContain(attachedFire);
+    expect(ctx.logicAnims.some(a => a.type === 'fball1')).toBe(false);
+    expect(processLogicAnim(attachedFire, ctx.logicAnims, ctx.effects, ctx.map)).toBe(false);
+  });
+
+  it('fire damage uses C++ ON_FIRE and oilfield AnimClass slots for pumps', () => {
+    const s = makeStructure({ type: 'V19', image: 'v19', hp: 400, maxHp: 400, cx: 84, cy: 78 });
+    const ctx = makeMockCombatContext();
+    ctx.structures.push(s);
+    ScenarioRandom.seed = 6;
+    ScenarioRandom.callCount = 0;
+
+    const destroyed = structureDamage(ctx, s, 303, undefined, 'Fire');
+
+    expect(destroyed).toBe(false);
+    expect(s.hp).toBe(97);
+    expect(ctx.logicAnims.some(a => a.type === 'oilfield_burn')).toBe(true);
+    expect(ctx.logicAnims.some(a => a.type === 'on_fire_small')).toBe(true);
+    expect(ctx.logicAnims.some(a => a.type === 'fire_small')).toBe(false);
+    expect(ctx.logicAnims.every(a => a.attachedStructureIndex === 0)).toBe(true);
   });
 
   it('fireWeaponAtStructure uses per-building armor for warhead mult (POWR=wood)', () => {

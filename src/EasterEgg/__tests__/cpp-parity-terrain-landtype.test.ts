@@ -520,6 +520,25 @@ describe('classifyOutdoorTerrain with tilesetMeta (per-icon C++ parity)', () => 
 });
 
 describe('classifyInteriorTerrain with tilesetMeta (per-icon C++ parity)', () => {
+  it('classifies INTERIOR TEMPLATE_NONE and CLEAR1 as ROCK', () => {
+    for (const tmpl of [0xFFFF, 0x00]) {
+      const map = new GameMap();
+      map.setBounds(2, 2, 10, 10);
+      map.initDefault();
+
+      const templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
+      const templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
+      const idx = 5 * MAP_CELLS + 5;
+      templateType[idx] = tmpl;
+
+      map.templateType = templateType;
+      map.templateIcon = templateIcon;
+      classifyInteriorTerrain(map, templateType, templateIcon, interiorTilesetMeta);
+
+      expect(map.getTerrain(5, 5)).toBe(Terrain.ROCK);
+    }
+  });
+
   it('classifies INTERIOR template 397 icon 1 as ROCK, not broad-range CLEAR', () => {
     const map = new GameMap();
     map.setBounds(2, 2, 10, 10);

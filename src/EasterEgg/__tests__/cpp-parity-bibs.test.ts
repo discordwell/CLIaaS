@@ -6,8 +6,9 @@
  *     ground pad ("bib") that extends 1 row below the building footprint.
  *   - Bib width matches building width (2→BIB3, 3→BIB2, 4→BIB1).
  *   - Width < 2 or > 4 → no bib (SMUDGE_NONE).
- *   - Bib cells are impassable (part of Occupy_List when placement=true).
- *   - When building is destroyed/sold, bib cells are cleared to passable.
+ *   - Bib cells are decorative smudges: passable for movement, but rejected
+ *     by Is_Clear_To_Build when placement checks hit cell.cpp:489.
+ *   - When building is destroyed/sold, bib smudges are removed.
  *
  * C++ source: building.cpp:734-740 (MARK_UP — clear bib on removal)
  * C++ source: building.cpp:785-790 (MARK_DOWN — place bib on construction)
@@ -117,9 +118,9 @@ describe('C++ parity: getBibCells (bdata.cpp:3597-3629)', () => {
   });
 });
 
-// ── Terrain marking integration tests ──────────────────────────────────────
+// ── Smudge marking integration tests ───────────────────────────────────────
 
-describe('C++ parity: bib terrain marking (building.cpp:785-790)', () => {
+describe('C++ parity: bib smudge marking (building.cpp:785-790)', () => {
   function makeMap(w = 64, h = 64): GameMap {
     const map = new GameMap();
     map.setBounds(0, 0, w, h);
@@ -132,7 +133,7 @@ describe('C++ parity: bib terrain marking (building.cpp:785-790)', () => {
     return map;
   }
 
-  it('placing a WEAP marks footprint + bib row as impassable', () => {
+  it('placing a WEAP marks footprint as impassable and bib row as build-blocking', () => {
     const map = makeMap();
     const cx = 10, cy = 10;
     const [fw, fh] = STRUCTURE_SIZE['WEAP']!; // 3x2
@@ -143,9 +144,9 @@ describe('C++ parity: bib terrain marking (building.cpp:785-790)', () => {
         map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
       }
     }
-    // Mark bib cells
+    // Mark bib smudges
     for (const bc of getBibCells('WEAP', cx, cy)) {
-      map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+      map.setBibSmudge(bc.cx, bc.cy, true);
     }
 
     // Building footprint cells are impassable
@@ -154,13 +155,16 @@ describe('C++ parity: bib terrain marking (building.cpp:785-790)', () => {
         expect(map.isPassable(cx + dx, cy + dy), `footprint (${cx + dx},${cy + dy})`).toBe(false);
       }
     }
-    // Bib row is also impassable
+    // Bib row remains passable for movement but blocks future placement.
     for (let dx = 0; dx < fw; dx++) {
-      expect(map.isPassable(cx + dx, cy + fh), `bib (${cx + dx},${cy + fh})`).toBe(false);
+      expect(map.hasBibSmudge(cx + dx, cy + fh), `bib smudge (${cx + dx},${cy + fh})`).toBe(true);
+      expect(map.isPassable(cx + dx, cy + fh), `bib passable (${cx + dx},${cy + fh})`).toBe(true);
+      expect(map.isBuildable(cx + dx, cy + fh), `bib buildable (${cx + dx},${cy + fh})`).toBe(false);
     }
-    // Cell below bib is still passable
+    // Cell below bib is still passable/buildable.
     for (let dx = 0; dx < fw; dx++) {
       expect(map.isPassable(cx + dx, cy + fh + 1), `below bib (${cx + dx},${cy + fh + 1})`).toBe(true);
+      expect(map.isBuildable(cx + dx, cy + fh + 1), `below bib buildable (${cx + dx},${cy + fh + 1})`).toBe(true);
     }
   });
 
@@ -170,35 +174,38 @@ describe('C++ parity: bib terrain marking (building.cpp:785-790)', () => {
     const [fw, fh] = STRUCTURE_SIZE['PROC']!; // 3x2
     const bibCells = getBibCells('PROC', cx, cy);
 
-    // Place building + bib
+    // Place building + bib smudge
     for (let dy = 0; dy < fh; dy++) {
       for (let dx = 0; dx < fw; dx++) {
         map.setTerrain(cx + dx, cy + dy, Terrain.WALL);
       }
     }
     for (const bc of bibCells) {
-      map.setTerrain(bc.cx, bc.cy, Terrain.WALL);
+      map.setBibSmudge(bc.cx, bc.cy, true);
     }
 
-    // Verify bib is impassable
+    // Verify bib blocks placement without blocking movement.
     for (const bc of bibCells) {
-      expect(map.isPassable(bc.cx, bc.cy)).toBe(false);
+      expect(map.hasBibSmudge(bc.cx, bc.cy)).toBe(true);
+      expect(map.isPassable(bc.cx, bc.cy)).toBe(true);
+      expect(map.isBuildable(bc.cx, bc.cy)).toBe(false);
     }
 
-    // Clear footprint + bib (simulating destruction)
+    // Clear footprint + bib smudge (simulating destruction)
     for (let dy = 0; dy < fh; dy++) {
       for (let dx = 0; dx < fw; dx++) {
         map.setTerrain(cx + dx, cy + dy, Terrain.CLEAR);
       }
     }
     for (const bc of bibCells) {
-      map.setTerrain(bc.cx, bc.cy, Terrain.CLEAR);
+      map.setBibSmudge(bc.cx, bc.cy, false);
     }
 
-    // All cells (footprint + bib) should be passable now
+    // All cells (footprint + bib row) should be passable/buildable now.
     for (let dy = 0; dy <= fh; dy++) {
       for (let dx = 0; dx < fw; dx++) {
         expect(map.isPassable(cx + dx, cy + dy), `cleared (${cx + dx},${cy + dy})`).toBe(true);
+        expect(map.isBuildable(cx + dx, cy + dy), `cleared buildable (${cx + dx},${cy + dy})`).toBe(true);
       }
     }
   });

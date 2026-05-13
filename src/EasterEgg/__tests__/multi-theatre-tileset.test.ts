@@ -121,13 +121,19 @@ describe('INTERIOR terrain classification', () => {
     }
   });
 
-  it('clear/0xFFFF treated as passable floor in INTERIOR', () => {
+  it('INTERIOR no-template and CLEAR1 cells are impassable rock', () => {
     setup();
     const idx = 50 * MAP_CELLS + 50;
     map.templateType[idx] = 0xFFFF;
     classifyInterior(map);
-    expect(map.getTerrain(50, 50)).toBe(Terrain.CLEAR);
+    expect(map.getTerrain(50, 50)).toBe(Terrain.ROCK);
 
+    setup();
+    map.templateType[idx] = 0;
+    classifyInterior(map);
+    expect(map.getTerrain(50, 50)).toBe(Terrain.ROCK);
+
+    setup();
     map.templateType[idx] = 255;
     classifyInterior(map);
     expect(map.getTerrain(50, 50)).toBe(Terrain.CLEAR);
