@@ -84,6 +84,13 @@ try {
 } catch {
   combatSource = '';
 }
+const REPAIRSELL_PATH = join(process.cwd(), 'src', 'EasterEgg', 'engine', 'repairSell.ts');
+let repairSellSource: string;
+try {
+  repairSellSource = readFileSync(REPAIRSELL_PATH, 'utf-8');
+} catch {
+  repairSellSource = '';
+}
 const PLACEMENT_PATH = join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts');
 let placementSource: string;
 try {
@@ -509,13 +516,13 @@ describe('Power plant repair — power output restoration', () => {
   });
 
   it('power calculation uses fixedPowerOutput in source', () => {
-    // Source: _fixedPowerOutput(100, s.hp, s.maxHp) for POWR (C++ 8.8 fixed-point)
-    const powerSection = indexSource.indexOf('Calculate power balance');
-    expect(powerSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(powerSection, powerSection + 700);
-    expect(chunk).toContain('fixedPowerOutput');
-    expect(chunk).toContain("'POWR'");
-    expect(chunk).toContain("'APWR'");
+    // Source: _calculatePowerGrid (in repairSell.ts) iterates structures and
+    // routes POWR/APWR through fixedPowerOutput (C++ 8.8 fixed-point).
+    expect(repairSellSource).toContain('export function fixedPowerOutput');
+    expect(repairSellSource).toContain("type === 'POWR'");
+    expect(repairSellSource).toContain("type === 'APWR'");
+    // index.ts wires the grid call up via the imported alias.
+    expect(indexSource).toContain('_calculatePowerGrid(');
   });
 
   it('repairing a damaged POWR gradually restores power output', () => {
@@ -530,10 +537,11 @@ describe('Power plant repair — power output restoration', () => {
   });
 
   it('power recalculation excludes structures being sold', () => {
-    const powerSection = indexSource.indexOf('Calculate power balance');
-    expect(powerSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(powerSection, powerSection + 300);
-    expect(chunk).toContain('sellProgress !== undefined');
+    // _calculatePowerGrid skips structures with sellProgress set so a sold
+    // power plant immediately stops contributing — covers Group 5 string-grep.
+    expect(repairSellSource).toContain('export function calculatePowerGrid');
+    const gridFn = repairSellSource.slice(repairSellSource.indexOf('export function calculatePowerGrid'));
+    expect(gridFn).toContain('sellProgress !== undefined');
   });
 });
 
@@ -630,9 +638,10 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
   it('sell progress rate is 1/SELL_DURATION per tick (C++ make sheet parity)', () => {
     const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
     const chunk = indexSource.slice(sellSection, sellSection + 800);
-    // C++ parity: duration computed from make sheet frame count (20),
-    // not BUILDING_FRAME_TABLE damageFrame
-    expect(chunk).toContain('MAKE_FRAME_COUNT');
+    // C++ parity: sell duration uses the same per-type make-sheet cadence as
+    // construction (commit 90e5d0de replaced the shared MAKE_FRAME_COUNT
+    // constant with the per-type helper structureConstructionProgressTicks).
+    expect(chunk).toContain('structureConstructionProgressTicks(s.type)');
     expect(chunk).toContain('SELL_DURATION');
   });
 
@@ -687,7 +696,9 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
   it('sell finalization spawns infantry survivors (SL4)', () => {
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection, sellSection + 1500);
+    // Survivor block is ~24 lines / ~2300 chars after the SL4 banner once you
+    // include the Crew_Type switch — bump the slice to cover it.
+    const chunk = indexSource.slice(sellSection, sellSection + 2500);
     expect(chunk).toContain('SURVIVOR_FRACTION');
     expect(chunk).toContain('survivorCount');
     // Survivor count: (buildCost * 0.4) / E1_cost, clamped 0-5
@@ -735,10 +746,12 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
 // =========================================================================
 describe('Power grid after selling power plant', () => {
   it('power calculation loop skips selling structures', () => {
-    // When a power plant has sellProgress set, it is excluded from power calc
-    const powerSection = indexSource.indexOf('Calculate power balance');
-    const chunk = indexSource.slice(powerSection, powerSection + 300);
-    expect(chunk).toContain('sellProgress !== undefined');
+    // When a power plant has sellProgress set, _calculatePowerGrid skips it,
+    // so a sold POWR/APWR no longer contributes to powerProduced. (Logic now
+    // lives in repairSell.ts; index.ts just calls _calculatePowerGrid.)
+    expect(repairSellSource).toContain('export function calculatePowerGrid');
+    const gridFn = repairSellSource.slice(repairSellSource.indexOf('export function calculatePowerGrid'));
+    expect(gridFn).toContain('sellProgress !== undefined');
   });
 
   it('POWR power drain = 0 (produces, does not consume)', () => {

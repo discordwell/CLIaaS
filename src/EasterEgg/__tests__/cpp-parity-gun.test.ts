@@ -74,6 +74,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',

@@ -297,7 +297,10 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
     fireStructures(ctx);
-    expect(tsla.attackCooldown).toBe(120);
+    // C++ CDTimerClass decrements end-of-frame after the fire; rules.ini ROF=120
+    // sets the timer to 120 at fire time, then the same logic frame decrements
+    // it to 119 (combat.ts decrementStructureCdTimersEndOfLogic).
+    expect(tsla.attackCooldown).toBe(119);
   });
 
   it('does NOT fire while on cooldown', () => {
@@ -474,15 +477,24 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     expect(projectiles.length).toBe(0);
   });
 
-  it('tesla effect has startX/startY at structure center', () => {
+  it('tesla effect has startX/startY at structure fire coord', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
     fireStructures(ctx);
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
-    const expectedY = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
+    // C++ bdata.cpp TSLA fire-coord offsets: vertical=0x00c8 NORTH (dir256=0).
+    // structureFireLeptons walks center → moveCoordLeptons(0, 0x00c8):
+    //   lx unchanged (COS_TABLE_256[0]=0)
+    //   ly -= (SIN_TABLE_256[0]=127 * 200) >> 7 = 198 leptons
+    // TSLA is 1x2; center offset is (0x80, 0xff). Cell anchor at (10,10).
+    const centerLx = 10 * 256 + 0x80;
+    const centerLy = 10 * 256 + 0xff;
+    const fireLx = centerLx; // unchanged
+    const fireLy = centerLy - ((127 * 0x00c8) >> 7);
+    const expectedX = (fireLx * CELL_SIZE) / 256;
+    const expectedY = (fireLy * CELL_SIZE) / 256;
     expect((tesla as any).startX).toBe(expectedX);
     expect((tesla as any).startY).toBe(expectedY);
   });
@@ -677,16 +689,21 @@ describe('TSLA has the slowest defense fire rate (rules.ini)', () => {
 
 // -- Muzzle Effect (rendering parity) -----------------------------------------
 
-describe('TSLA muzzle effect originates from structure center (rendering parity)', () => {
-  it('muzzle effect originates from structure center', () => {
+describe('TSLA muzzle effect originates from structure fire coord (rendering parity)', () => {
+  it('muzzle effect originates from structure fire coord', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
     fireStructures(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
-    const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
-    const expectedY = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
+    // Mirror structureFireLeptons: vertical=0x00c8 NORTH on a 1x2 TSLA.
+    const centerLx = 10 * 256 + 0x80;
+    const centerLy = 10 * 256 + 0xff;
+    const fireLx = centerLx;
+    const fireLy = centerLy - ((127 * 0x00c8) >> 7);
+    const expectedX = (fireLx * CELL_SIZE) / 256;
+    const expectedY = (fireLy * CELL_SIZE) / 256;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });

@@ -22,7 +22,7 @@ import { type Effect } from '../engine/renderer';
 // Subsystem imports
 import {
   fireWeaponAt, applySplashDamage, checkVehicleCrush, damageEntity,
-  damageSpeedFactor,
+  damageSpeedFactor, updateInflightProjectiles,
   type CombatContext,
 } from '../engine/combat';
 import {
@@ -115,6 +115,7 @@ function makeCombatContext(overrides?: Partial<CombatContext>): CombatContext {
     structures: [],
     inflightProjectiles: [],
     effects: [],
+    logicAnims: [],
     tick: 100,
     playerHouse: House.Spain,
     scenarioId: 'SCG01EA',
@@ -1222,7 +1223,12 @@ describe('updateFogOfWar with entities at map boundaries', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('fireWeaponAt self-targeting', () => {
-  it('entity can damage itself via fireWeaponAt', () => {
+  it('firer cannot damage itself via fireWeaponAt projectile splash (C++ combat.cpp:207)', () => {
+    // C++ Explosion_Damage skips the firer (source) — see applySplashDamage:
+    // `if (... other.id === sourceId) continue`. Since every WEAPON_STATS entry
+    // is projectile-based (projSpeed/projectileSpeed set), fireWeaponAt always
+    // routes through launchProjectile + applySplashDamage, so self-damage
+    // never lands.
     const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
     const ctx = makeCombatContext({
       entities: [tank],
@@ -1231,24 +1237,32 @@ describe('fireWeaponAt self-targeting', () => {
 
     const hpBefore = tank.hp;
     fireWeaponAt(ctx, tank, tank, tank.weapon!);
+    let guard = 0;
+    while (ctx.inflightProjectiles.length > 0 && guard++ < 200) {
+      updateInflightProjectiles(ctx);
+    }
 
-    // Self-damage should go through — the function does not check attacker===target
-    expect(tank.hp).toBeLessThan(hpBefore);
+    expect(tank.hp).toBe(hpBefore);
+    expect(tank.alive).toBe(true);
   });
 
-  it('self-kill tracks kill credit', () => {
+  it('self-targeted fireWeaponAt yields no kill credit (firer excluded by splash)', () => {
     const e1 = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const ctx = makeCombatContext({
       entities: [e1],
       entityById: new Map([[e1.id, e1]]),
     });
 
-    // Give it a high-damage weapon to guarantee kill
+    // Even with a huge damage value, the splash gate excludes the firer (C++ parity).
     const bigWeapon = { ...e1.weapon!, damage: 9999 };
     fireWeaponAt(ctx, e1, e1, bigWeapon);
+    let guard = 0;
+    while (ctx.inflightProjectiles.length > 0 && guard++ < 200) {
+      updateInflightProjectiles(ctx);
+    }
 
-    expect(e1.alive).toBe(false);
-    expect(e1.kills).toBe(1); // credited kill to itself
+    expect(e1.alive).toBe(true);
+    expect(e1.kills).toBe(0);
   });
 });
 

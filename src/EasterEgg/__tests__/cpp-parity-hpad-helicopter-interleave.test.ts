@@ -86,16 +86,18 @@ describe('HPAD Auto-Helicopter Interleaving — C++ parity', () => {
     expect(heliIdx).toBeGreaterThan(combatIdx);
   });
 
-  it('Phase 4 skips entities with _processedInBuildingPass and resets flag', () => {
-    const pass4Start = indexSource.indexOf('Phase 4: aircraft');
-    expect(pass4Start).toBeGreaterThan(-1);
-    const pass4Section = indexSource.slice(pass4Start, pass4Start + 1000);
+  it('post-building phase skips entities with _processedInBuildingPass and resets flag', () => {
+    // Phase 4 (aircraft) was folded into Phase 3 (post-building runtime objects)
+    // — runtime aircraft now interleave with ground objects by Logic position.
+    const phaseStart = indexSource.indexOf('Phase 3: post-building runtime objects');
+    expect(phaseStart).toBeGreaterThan(-1);
+    const phaseSection = indexSource.slice(phaseStart, phaseStart + 1500);
     // Must check _processedInBuildingPass
-    expect(pass4Section).toContain('entity._processedInBuildingPass');
+    expect(phaseSection).toContain('entity._processedInBuildingPass');
     // Must reset the flag
-    expect(pass4Section).toContain('_processedInBuildingPass = false');
+    expect(phaseSection).toContain('_processedInBuildingPass = false');
     // Must continue (skip) when flag is set
-    expect(pass4Section).toMatch(/if\s*\(entity\._processedInBuildingPass\)/);
+    expect(phaseSection).toMatch(/if\s*\(entity\._processedInBuildingPass\)/);
   });
 
   // ── Entity field tests ──
