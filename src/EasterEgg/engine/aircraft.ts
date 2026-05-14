@@ -1270,13 +1270,6 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         return updateFixedWingPassengerHunt(ctx, entity);
       }
 
-      if (entity.isFixedWing &&
-          entity.mission === Mission.ATTACK &&
-          getFixedWingAttackTargetPos(entity)) {
-        entity.aircraftState = 'attacking';
-        return updateFixedWingAttackRun(ctx, entity);
-      }
-
       // ── C++ Paradrop_Cargo (aircraft.cpp:1442-1468, 1489-1501) ────────────────
       // Fixed-wing passenger transports (BADR) paradrop passengers onto the
       // target cell instead of bombing. C++ Fire_At detects Is_Something_Attached()
@@ -1289,6 +1282,16 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // 2 cells of the drop cell, eject one passenger per tick. After the last
       // passenger is dropped, switch to RETREAT so the BADR (IsALoaner) flies
       // off-map instead of trying to land at a non-existent airfield.
+      //
+      // ORDERING: this block MUST run before the attack-run flip below. C++
+      // Fire_At (aircraft.cpp:1505-1512) short-circuits on Is_Something_Attached()
+      // and calls Paradrop_Cargo() instead of normal weapon fire — the
+      // attack-run state (TS-equivalent of FIRE_AT_TARGET) is bypassed entirely
+      // for a loaded fixed-wing. Without this ordering, a loaded BADR whose
+      // aircraftPassengerCarrier flag is absent (direct-spawn / non-team path)
+      // would enter updateFixedWingAttackRun, which has its own passengers>0
+      // guard (aircraft.ts:1809-1816) that bounces back to 'flying' and never
+      // reaches the drop, producing an endless flip-flop.
       if (entity.isFixedWing && entity.passengers.length > 0 && entity.moveTarget) {
         const dropDist = worldDist(entity.pos, leptonPosToWorld(entity.moveTarget));
         if (dropDist <= 2) { // worldDist returns cells; 2 cells ≈ 0x0200 leptons
@@ -1334,6 +1337,21 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         }
       }
 
+      // C++ aircraft.cpp:2414-2416 — Mission_Attack delegates to Mission_Hunt
+      // for fixed-wing. Empty (no-passenger) fixed-wings on MISSION_ATTACK go
+      // through the state-machine attack-run path that handles take-off/fly-to/
+      // fire-at-target. Loaded fixed-wings paradropped above; if any passengers
+      // remain, fall through to the in-range flight path so the BADR keeps
+      // flying toward the drop cell (the attack-run path's own passenger guard
+      // at aircraft.ts:1809-1816 would bounce it back).
+      if (entity.isFixedWing &&
+          entity.passengers.length === 0 &&
+          entity.mission === Mission.ATTACK &&
+          getFixedWingAttackTargetPos(entity)) {
+        entity.aircraftState = 'attacking';
+        return updateFixedWingAttackRun(ctx, entity);
+      }
+
       // If we have an attack target, close to weapon range
       if (entity.mission === Mission.ATTACK) {
         const targetPos = entity.isFixedWing
@@ -1356,7 +1374,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         }
         const dist = worldDist(entity.pos, targetPos);
         const weaponRange = entity.weapon?.range ?? 5;
-        if (dist <= weaponRange) {
+        // C++ aircraft.cpp:1505-1512 — Fire_At short-circuits to Paradrop_Cargo
+        // when Is_Something_Attached(). Loaded fixed-wings must never enter the
+        // weapon-firing attack-run state; they keep flying toward the drop cell.
+        const isLoadedFixedWing = entity.isFixedWing && entity.passengers.length > 0;
+        if (dist <= weaponRange && !isLoadedFixedWing) {
           entity.aircraftState = 'attacking';
           entity.attackRunPhase = 'flyToTarget';
           entity.circleBreakTimer = 0;
