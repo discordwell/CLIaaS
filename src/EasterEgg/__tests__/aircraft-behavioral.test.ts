@@ -532,6 +532,10 @@ describe('updateFixedWingAttackRun', () => {
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 2 * 24);
     mig.target = enemy;
     mig.attackRunPhase = 'dropBombs';
+    // aircraft.ts:1843 fans out on aircraftAttackStatus FIRST and early-returns
+    // for LOOK_FOR_TARGET(0)/TAKE_OFF(1). To exercise the attackRunPhase switch
+    // we have to be past those — DROP_BOMBS = 3.
+    mig.aircraftAttackStatus = 3;
     mig.attackCooldown = 0;
 
     updateFixedWingAttackRun(ctx, mig);

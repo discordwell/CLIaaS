@@ -35,6 +35,7 @@ function makeCombatCtx(overrides?: Partial<CombatContext>): CombatContext {
     structures: [],
     inflightProjectiles,
     effects: [],
+    logicAnims: [],
     tick: 0,
     playerHouse: 'Spain' as any,
     scenarioId: 'test',

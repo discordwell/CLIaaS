@@ -276,7 +276,8 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
     fireStructures(ctx);
-    expect(quee.attackCooldown).toBe(30);
+    // C++ CDTimerClass decrement runs end-of-frame, so 30 is observed as 29.
+    expect(quee.attackCooldown).toBe(29);
   });
 
   it('does NOT fire while on cooldown', () => {

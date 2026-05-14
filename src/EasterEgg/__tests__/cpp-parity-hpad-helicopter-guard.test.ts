@@ -38,7 +38,9 @@ describe('HPAD Helicopter Guard AI — C++ parity', () => {
   it('tickStructuresInterleaved has helicopter guard mission timer logic', () => {
     const methodStart = indexSource.indexOf('private tickStructuresInterleaved(');
     expect(methodStart).toBeGreaterThan(-1);
-    const methodBody = indexSource.slice(methodStart, methodStart + 8000);
+    // The HPAD-helicopter interleave block lives near the end of this method,
+    // ~12k chars in — the previous 8k slice cut it off after recent additions.
+    const methodBody = indexSource.slice(methodStart, methodStart + 14000);
 
     // Must decrement mission timer for landed helicopter
     expect(methodBody).toContain('heli.missionTimer > 0');

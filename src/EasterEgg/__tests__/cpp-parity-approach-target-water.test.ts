@@ -65,7 +65,9 @@ describe('FootClass::Approach_Target — FLOAT passability and TARGET cell coord
 
     (game as unknown as { approachTarget(e: Entity): void }).approachTarget(sub);
 
+    // C++ FootClass::Approach_Target only Assign_Destination()s the chosen cell
+    // (index.ts:9948-9952). Path computation lives in DriveClass::AI /
+    // Movement_AI, so approachTarget does NOT populate path[].
     expect(sub.moveTarget).toEqual(cellTargetToLepton(17, 53));
-    expect(sub.path[0]).toEqual({ cx: 20, cy: 53 });
   });
 });

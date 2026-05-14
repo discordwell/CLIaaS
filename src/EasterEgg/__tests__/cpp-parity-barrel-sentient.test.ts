@@ -93,16 +93,17 @@ describe('BARL/BRL3 barrel buildings — C++ parity', () => {
     // Run tick 1 to fire all guard timers
     adapter.step(1);
 
-    // After tick 1, barrel buildings should have missionTimer in [126, 128]
-    // (Normal_Delay*3 + jitter where jitter is 0-2)
+    // After tick 1, barrel buildings should have missionTimer in [125, 127].
+    // (Normal_Delay*3 + jitter where jitter is 0-2, minus one tick from the
+    // end-of-frame CDTimer decrement in decrementStructureCdTimersEndOfLogic.)
     // C++ building.cpp:3302: Normal_Delay * 3 + Random_Pick(0, 2)
     // GUARD_NORMAL_DELAY = 42 (from rules.ini [Guard] Rate=.050, C++ fixed-point: 42)
     const barrelTypes = new Set(['BARL', 'BRL3']);
     for (let i = 0; i < game.structures.length; i++) {
       const s = game.structures[i];
       if (barrelTypes.has(s.type)) {
-        expect(s.missionTimer).toBeGreaterThanOrEqual(126);
-        expect(s.missionTimer).toBeLessThanOrEqual(128);
+        expect(s.missionTimer).toBeGreaterThanOrEqual(125);
+        expect(s.missionTimer).toBeLessThanOrEqual(127);
       }
     }
   });
@@ -114,16 +115,17 @@ describe('BARL/BRL3 barrel buildings — C++ parity', () => {
 
     adapter.step(1);
 
-    // C++ building.cpp:3305: AA_Delay() + Random_Pick(0, 2)
+    // C++ building.cpp:3305: AA_Delay() + Random_Pick(0, 2). Subtract one for
+    // the end-of-frame CDTimer decrement → [13, 15] inclusive.
     // GUARD_AA_DELAY = 14 (from rules.ini [Guard] AARate=.016, C++ fixed-point: 14)
     const weaponTypes = new Set(['FTUR', 'GUN', 'SAM', 'TSLA', 'AGUN', 'HBOX', 'PBOX', 'WEAP']);
     for (let i = 0; i < game.structures.length; i++) {
       const s = game.structures[i];
       if (s.weapon && weaponTypes.has(s.type)) {
         expect(s.missionTimer, `weapon building ${s.type} at (${s.cx},${s.cy})`)
-          .toBeGreaterThanOrEqual(14);
+          .toBeGreaterThanOrEqual(13);
         expect(s.missionTimer, `weapon building ${s.type} at (${s.cx},${s.cy})`)
-          .toBeLessThanOrEqual(16);
+          .toBeLessThanOrEqual(15);
       }
     }
   });
@@ -135,12 +137,13 @@ describe('BARL/BRL3 barrel buildings — C++ parity', () => {
 
     adapter.step(1);
 
-    // V19 are civilian buildings with no weapon — use Normal_Delay * 3 + jitter
+    // V19 are civilian buildings with no weapon — use Normal_Delay * 3 + jitter,
+    // minus the end-of-frame CDTimer decrement (so [125, 127] after tick 1).
     for (let i = 0; i < game.structures.length; i++) {
       const s = game.structures[i];
       if (s.type === 'V19') {
-        expect(s.missionTimer).toBeGreaterThanOrEqual(126);
-        expect(s.missionTimer).toBeLessThanOrEqual(128);
+        expect(s.missionTimer).toBeGreaterThanOrEqual(125);
+        expect(s.missionTimer).toBeLessThanOrEqual(127);
       }
     }
   });

@@ -35,6 +35,7 @@ import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_ARMOR } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -202,6 +203,11 @@ describe('fireWeaponAt damage pipeline', () => {
     const weapon = WEAPON_STATS['90mm']; // AP warhead, 30 damage
     const hpBefore = target.hp;
     fireWeaponAt(ctx, attacker, target, weapon);
+    // 90mm is a projectile weapon — tick projectiles until the bullet lands.
+    let guard = 0;
+    while (ctx.inflightProjectiles.length > 0 && guard++ < 100) {
+      updateInflightProjectiles(ctx);
+    }
     // AP vs none = 0.3, houseBias=1.0, spreadFactor=1, distance=0
     // damage = modifyDamage(30, 'AP', 'none', 0, 1.0, 0.3, 1) = round(30*0.3*1.0) = 9
     expect(target.hp).toBe(hpBefore - 9);
@@ -215,6 +221,11 @@ describe('fireWeaponAt damage pipeline', () => {
     registerEntities(ctx, attacker, target);
     expect(attacker.kills).toBe(0);
     fireWeaponAt(ctx, attacker, target, WEAPON_STATS['90mm']);
+    // 90mm is a projectile weapon — tick until the bullet impacts.
+    let guard = 0;
+    while (ctx.inflightProjectiles.length > 0 && guard++ < 100) {
+      updateInflightProjectiles(ctx);
+    }
     expect(target.alive).toBe(false);
     expect(attacker.kills).toBe(1);
   });
@@ -907,7 +918,17 @@ describe('Retaliation system — triggerRetaliation', () => {
     victim.target = existingTarget;
     existingTarget.alive = true;
     const ctx = makeMockCombatContext();
-    triggerRetaliation(ctx, victim, newAttacker);
+    // C++ techno.cpp:5001 — non-human houses gate Is_Allowed_To_Retaliate on
+    // Percent_Chance(50). Seed 0 produces TRUE so the threat-comparison branch
+    // runs; both attackers are out of range here, leaving sourceVal == currentVal
+    // and the function returns without overwriting victim.target.
+    const savedSeed = ScenarioRandom.seed;
+    try {
+      ScenarioRandom.seed = 0;
+      triggerRetaliation(ctx, victim, newAttacker);
+    } finally {
+      ScenarioRandom.seed = savedSeed;
+    }
     // Should NOT retarget because victim already has a living target
     expect(victim.target).toBe(existingTarget);
   });
@@ -918,7 +939,15 @@ describe('Retaliation system — triggerRetaliation', () => {
     victim.target = null;
     victim.mission = Mission.GUARD;
     const ctx = makeMockCombatContext();
-    triggerRetaliation(ctx, victim, attacker);
+    // Seed 2 makes the Percent_Chance(50) gate return FALSE so retaliation
+    // proceeds to Assign_Target unconditionally (C++ foot.cpp:1206).
+    const savedSeed = ScenarioRandom.seed;
+    try {
+      ScenarioRandom.seed = 2;
+      triggerRetaliation(ctx, victim, attacker);
+    } finally {
+      ScenarioRandom.seed = savedSeed;
+    }
     expect(victim.target).toBe(attacker);
     expect(victim.mission).toBe(Mission.GUARD);
     expect(victim.animState).toBe(AnimState.IDLE);
@@ -1015,6 +1044,11 @@ describe('Kill tracking / creditKill', () => {
     registerEntities(ctx, attacker, target);
     expect(attacker.kills).toBe(0);
     fireWeaponAt(ctx, attacker, target, WEAPON_STATS['90mm']);
+    // 90mm is a projectile weapon — tick until the bullet impacts.
+    let guard = 0;
+    while (ctx.inflightProjectiles.length > 0 && guard++ < 100) {
+      updateInflightProjectiles(ctx);
+    }
     expect(target.alive).toBe(false);
     expect(attacker.kills).toBe(1);
   });
@@ -1025,18 +1059,18 @@ describe('Kill tracking / creditKill', () => {
     target.hp = 1;
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
-    const proj: InflightProjectile = {
-      attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
-      damage: 30, strength: 30, speed: 2, travelFrames: 1, currentFrame: 0,
-      directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 5, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
+    // makeInflightProjectile fills in the FlyClass/FuseClass coord state that
+    // a bare object-literal omits (logicalLX/Y, headToLX/Y, facing256, etc.).
+    const proj = makeInflightProjectile({
+      attackerId: attacker.id, targetId: target.id,
+      damage: 30, strength: 30, speed: 2, travelFrames: 1,
+      startX: 100, startY: 100, impactX: 200, impactY: 100,
+    });
     ctx.inflightProjectiles.push(proj);
-    updateInflightProjectiles(ctx);
+    let guard = 0;
+    while (ctx.inflightProjectiles.length > 0 && guard++ < 100) {
+      updateInflightProjectiles(ctx);
+    }
     expect(target.alive).toBe(false);
     expect(attacker.kills).toBe(1);
   });

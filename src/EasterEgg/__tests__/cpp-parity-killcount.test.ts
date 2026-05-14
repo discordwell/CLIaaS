@@ -23,6 +23,7 @@ import {
   type CombatContext,
   fireWeaponAt,
   handleUnitDeath,
+  updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
@@ -88,7 +89,17 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     screenFlash: 0,
     powerConsumed: 0,
     powerProduced: 100,
+    logicAnims: [],
   } as CombatContext;
+}
+
+/** Tick projectiles until none remain (90mm + 122mm + most cannons fire bullets,
+ * not hitscan — damage lands when BulletClass::AI completes). */
+function drainProjectiles(ctx: CombatContext, maxIterations = 200): void {
+  let i = 0;
+  while (ctx.inflightProjectiles.length > 0 && i++ < maxIterations) {
+    updateInflightProjectiles(ctx);
+  }
 }
 
 // =========================================================================
@@ -105,6 +116,7 @@ describe('KC1: fireWeaponAt increments killCount when player unit kills enemy', 
     expect(ctx.killCount).toBe(0);
     const weapon = WEAPON_STATS[UNIT_STATS['2TNK'].primaryWeapon!];
     fireWeaponAt(ctx, attacker, target, weapon);
+    drainProjectiles(ctx);
 
     expect(target.alive).toBe(false);
     expect(ctx.killCount).toBe(1);
@@ -119,6 +131,7 @@ describe('KC1: fireWeaponAt increments killCount when player unit kills enemy', 
 
     const weapon = WEAPON_STATS[UNIT_STATS['3TNK'].primaryWeapon!];
     fireWeaponAt(ctx, attacker, target, weapon);
+    drainProjectiles(ctx);
 
     expect(target.alive).toBe(false);
     // killCount tracks player kills only — enemy killing player does not increment
@@ -144,8 +157,11 @@ describe('KC2: Multiple kills accumulate within the same context', () => {
     const weapon = WEAPON_STATS[UNIT_STATS['2TNK'].primaryWeapon!];
 
     fireWeaponAt(ctx, attacker, t1, weapon);
+    drainProjectiles(ctx);
     fireWeaponAt(ctx, attacker, t2, weapon);
+    drainProjectiles(ctx);
     fireWeaponAt(ctx, attacker, t3, weapon);
+    drainProjectiles(ctx);
 
     expect(ctx.killCount).toBe(3);
     expect(attacker.kills).toBe(3);
@@ -166,6 +182,7 @@ describe('KC3: lossCount increments when player-controlled unit dies', () => {
     expect(ctx.lossCount).toBe(0);
     const weapon = WEAPON_STATS[UNIT_STATS['3TNK'].primaryWeapon!];
     fireWeaponAt(ctx, attacker, victim, weapon);
+    drainProjectiles(ctx);
 
     expect(victim.alive).toBe(false);
     expect(ctx.lossCount).toBe(1);
@@ -179,6 +196,7 @@ describe('KC3: lossCount increments when player-controlled unit dies', () => {
 
     const weapon = WEAPON_STATS[UNIT_STATS['2TNK'].primaryWeapon!];
     fireWeaponAt(ctx, attacker, target, weapon);
+    drainProjectiles(ctx);
 
     expect(target.alive).toBe(false);
     expect(ctx.lossCount).toBe(0);
