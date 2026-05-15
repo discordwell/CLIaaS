@@ -292,12 +292,12 @@ describe('TSLA fires at enemy in range (building.cpp)', () => {
     expect(ally.hp).toBe(ally.maxHp);
   });
 
-  it('sets attackCooldown to ROF 120 after firing', () => {
+  it('observes attackCooldown as ROF 120 minus the end-of-logic tick after firing', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
     fireStructures(ctx);
-    expect(tsla.attackCooldown).toBe(120);
+    expect(tsla.attackCooldown).toBe(119);
   });
 
   it('does NOT fire while on cooldown', () => {
@@ -474,7 +474,7 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     expect(projectiles.length).toBe(0);
   });
 
-  it('tesla effect has startX/startY at structure center', () => {
+  it('tesla effect starts at TechnoClass::Fire_Coord with TSLA vertical offset', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
@@ -482,7 +482,9 @@ describe('TSLA produces tesla effect — not projectile (building.cpp)', () => {
     const tesla = ctx.effects.find(e => e.type === 'tesla');
     expect(tesla).toBeDefined();
     const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
-    const expectedY = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
+    // BSIZE_12 center offset is 0x00ff; Coord_Move(DIR_N, 0x00c8)
+    // advances 0x00c6 leptons with the C++ 256-direction table.
+    const expectedY = 10 * CELL_SIZE + ((0xff - 0xc6) * CELL_SIZE) / 256;
     expect((tesla as any).startX).toBe(expectedX);
     expect((tesla as any).startY).toBe(expectedY);
   });
@@ -677,8 +679,8 @@ describe('TSLA has the slowest defense fire rate (rules.ini)', () => {
 
 // -- Muzzle Effect (rendering parity) -----------------------------------------
 
-describe('TSLA muzzle effect originates from structure center (rendering parity)', () => {
-  it('muzzle effect originates from structure center', () => {
+describe('TSLA muzzle effect originates from Fire_Coord (rendering parity)', () => {
+  it('muzzle effect originates from TechnoClass::Fire_Coord', () => {
     const tsla = makeDefenseStructure('TSLA', House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 13, 10);
     const ctx = makeCombatCtx([tsla], [enemy]);
@@ -686,7 +688,7 @@ describe('TSLA muzzle effect originates from structure center (rendering parity)
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
     const expectedX = 10 * CELL_SIZE + CELL_SIZE / 2;
-    const expectedY = 10 * CELL_SIZE + (0xff * CELL_SIZE) / 256;
+    const expectedY = 10 * CELL_SIZE + ((0xff - 0xc6) * CELL_SIZE) / 256;
     expect(muzzle!.x).toBe(expectedX);
     expect(muzzle!.y).toBe(expectedY);
   });

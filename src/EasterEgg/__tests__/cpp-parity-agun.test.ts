@@ -369,7 +369,9 @@ describe('AGUN rapid fire — ROF 10 (building.cpp)', () => {
 
     expect(ctx.inflightProjectiles).toHaveLength(0);
     expect(heli.hp).toBe(hpBefore);
-    expect(agun.missionTimer).toBe(2);
+    // updateStructureCombat includes the post-AI CDTimer tick, so C++'s
+    // FIRE_FACING return value 2 is observed as 1 at end of logic.
+    expect(agun.missionTimer).toBe(1);
   });
 
   it('sets quick first-shot rearm for Primary=Secondary ZSU-23', () => {

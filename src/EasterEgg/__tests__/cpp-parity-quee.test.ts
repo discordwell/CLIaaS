@@ -271,12 +271,12 @@ describe('QUEE fires at enemy in range (building.cpp)', () => {
     expect(ally.hp).toBe(ally.maxHp);
   });
 
-  it('sets attackCooldown to ROF 30 after firing', () => {
+  it('observes attackCooldown as ROF 30 minus the end-of-logic tick after firing', () => {
     const quee = makeDefenseStructure('QUEE', House.BadGuy, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([quee], [enemy]);
     fireStructures(ctx);
-    expect(quee.attackCooldown).toBe(30);
+    expect(quee.attackCooldown).toBe(29);
   });
 
   it('does NOT fire while on cooldown', () => {
