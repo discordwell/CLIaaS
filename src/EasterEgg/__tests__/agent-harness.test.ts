@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Entity, setPlayerHouses, resetEntityIds } from '../engine/entity';
-import { House, UnitType, Mission, CELL_SIZE, type SpeedClass, pixelToLepton, } from '../engine/types';
+import { House, UnitType, Mission, CELL_SIZE, type SpeedClass, pixelToLepton, cellTargetToLepton, } from '../engine/types';
 import type { MapStructure } from '../engine/scenario';
 import {
   serializeState, processCommands,
@@ -62,6 +62,15 @@ function makeGame(overrides: Partial<MockGame> = {}): MockGame {
     deployMCV: vi.fn().mockReturnValue(true),
     sellStructureByIndex: vi.fn().mockReturnValue(true),
     toggleRepair: vi.fn().mockReturnValue(true),
+    startDriveClassMove: vi.fn((entity: Entity) => {
+      if (!entity.moveTarget) return;
+      entity.path = [{
+        cx: Math.floor(entity.moveTarget.lx / 256),
+        cy: Math.floor(entity.moveTarget.ly / 256),
+      }];
+      entity.pathIndex = 0;
+      entity.isDriving = true;
+    }),
     isStructureRepairing(idx: number) { return this._repairing.has(idx); },
     step: vi.fn(),
     ...overrides,
@@ -245,7 +254,7 @@ describe('processCommands — move', () => {
     expect(unit.isDriving).toBe(true);
   });
 
-  it('paths to nearby passable cell when distant destination is impassable', () => {
+  it('passes the requested destination to DriveClass when the final cell is impassable', () => {
     const game = makeGame();
     (game as unknown as { map: MockGame['map'] }).map = {
       ...game.map,
@@ -259,11 +268,8 @@ describe('processCommands — move', () => {
     const results = processCommands(game as unknown as Parameters<typeof processCommands>[0], cmds);
 
     expect(results[0].ok).toBe(true);
-    expect(unit.moveTarget).toEqual({
-      lx: 55 * 256 + 128,
-      ly: 55 * 256 + 128,
-    });
-    expect(unit.path).toEqual([{ cx: 56, cy: 55 }]);
+    expect(unit.moveTarget).toEqual(cellTargetToLepton(55, 55));
+    expect(game.startDriveClassMove).toHaveBeenCalledWith(unit);
   });
 
   it('reports error for invalid unit ID', () => {
@@ -289,10 +295,7 @@ describe('processCommands — aircraft move', () => {
     expect(results[0].ok).toBe(true);
     expect(tran.mission).toBe(Mission.MOVE);
     expect(tran.path).toEqual([{ cx: 85, cy: 47 }]);
-    expect(tran.moveTarget).toEqual({
-      lx: 85 * 256 + 128,
-      ly: 47 * 256 + 128,
-    });
+    expect(tran.moveTarget).toEqual(cellTargetToLepton(85, 47));
   });
 });
 

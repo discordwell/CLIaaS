@@ -395,6 +395,11 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const destLX = dest.lx;
             const destLY = dest.ly;
 
+            if (e.moveTarget?.lx === destLX && e.moveTarget.ly === destLY &&
+                (e.isDriving || e.mission === Mission.MOVE || e.missionQueue === Mission.MOVE)) {
+              continue;
+            }
+
             clearTeamScripts(e);
             if (e.stats.isInfantry && e.isDriving) {
               const stopInfantryDriver = (game as unknown as {
