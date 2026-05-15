@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   UnitType, House, Mission, AnimState, UNIT_STATS, CELL_SIZE,
-  cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES, cellTargetToLepton,
+  cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES,
 } from '../engine/types';
 import {
   calculateHouseEdgeSpawnCell,
@@ -199,12 +199,12 @@ describe('Aircraft reinforcement edge spawn', () => {
     // Should be airborne in flying state
     expect(heli.aircraftState).toBe('flying');
     expect(heli.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
-    expect(heli.mission).toBe(Mission.MOVE);
-
-    // Move target should be the origin waypoint (WP23)
-    const wp23Lepton = cellTargetToLepton(WP23.cx, WP23.cy);
-    expect(heli.moveTarget!.lx).toBe(wp23Lepton.lx);
-    expect(heli.moveTarget!.ly).toBe(wp23Lepton.ly);
+    // C++ reinf.cpp assigns MISSION_GUARD only to non-aircraft. TeamClass::AI
+    // later consumes this script and assigns MOVE toward WP23.
+    expect(heli.mission).toBe(Mission.NONE);
+    expect(heli.moveTarget).toBeNull();
+    expect(heli.teamMissions).toEqual(heliTeam.missions);
+    expect(heli.teamMissionIndex).toBe(0);
   });
 
   it('team with infantry spawns aircraft at edge (tanya team flies in)', () => {
@@ -242,15 +242,18 @@ describe('Aircraft reinforcement edge spawn', () => {
     expect(tran!.pos.x).toBe(spawnWorld.x);
     expect(tran!.pos.y).toBe(spawnWorld.y);
 
-    // Should be airborne — transports with UNLOAD mission start in 'unload_search'
-    // (C++ Mission_Unload SEARCH_FOR_LZ state: 14-16 tick delay before controlled approach)
-    expect(tran!.aircraftState).toBe('unload_search');
+    // Should be airborne. TeamClass::AI assigns the injected MOVE and later
+    // TMISSION_UNLOAD enters the aircraft unload state machine.
+    expect(tran!.aircraftState).toBe('flying');
     expect(tran!.flightAltitude).toBe(Entity.FLIGHT_ALTITUDE);
 
-    // Move target should be the origin waypoint (WP0)
-    const wp0Lepton = cellTargetToLepton(WP0.cx, WP0.cy);
-    expect(tran!.moveTarget!.lx).toBe(wp0Lepton.lx);
-    expect(tran!.moveTarget!.ly).toBe(wp0Lepton.ly);
+    expect(tran!.mission).toBe(Mission.NONE);
+    expect(tran!.moveTarget).toBeNull();
+    expect(tran!.teamMissions).toEqual([
+      { mission: 3, data: 0 },
+      { mission: 8, data: 0 },
+    ]);
+    expect(tran!.teamMissionIndex).toBe(0);
 
     // E7 (Tanya) should be loaded into TRAN (not in spawned list)
     expect(tran!.passengers.length).toBe(1);

@@ -680,7 +680,7 @@ const extendedCampaignMissionAgents: MissionAuditAgent[] = [
 
       const win2 = ctx.requireTrigger('win2');
       if (win2) {
-        ctx.expectEvent('win2', win2.event1, 15, 12);
+        ctx.expectEvent('win2', win2.event1, 15, 13);
         ctx.expectAction('win2', win2.action1, 1);
       }
 
@@ -704,7 +704,7 @@ const extendedCampaignMissionAgents: MissionAuditAgent[] = [
         ctx.expectAction('rsp2', rsp2.action2, 7);
       }
 
-      ctx.fact('win-chain', 'win1: ALL_DESTROYED house 6 -> ALLOWWIN; win2: NBUILDINGS_DESTROYED 12 -> WIN');
+      ctx.fact('win-chain', 'win1: ALL_DESTROYED house 6 -> ALLOWWIN; win2: NBUILDINGS_DESTROYED 13 -> WIN');
       ctx.fact('loss-chain', 'lose: ALL_DESTROYED house 2 -> LOSE');
       ctx.fact('counterattacks', 'rspd and rsp2 both answer ATTACKED with reinforcements');
     },
