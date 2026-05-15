@@ -110,6 +110,23 @@ function registerEntities(ctx: CombatContext, ...ents: Entity[]): void {
   for (const e of ents) ctx.entityById.set(e.id, e);
 }
 
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
+    updateInflightProjectiles(ctx);
+  }
+  expect(ctx.inflightProjectiles.length).toBe(0);
+}
+
+function fireWeaponAtAndResolve(
+  ctx: CombatContext,
+  attacker: Entity,
+  target: Entity,
+  weapon: WeaponStats,
+): void {
+  fireWeaponAt(ctx, attacker, target, weapon);
+  resolveProjectiles(ctx);
+}
+
 function makeInflightProjectile(overrides: Partial<InflightProjectile> = {}): InflightProjectile {
   const startX = overrides.startX ?? 100;
   const startY = overrides.startY ?? 100;
@@ -203,7 +220,7 @@ describe('fireWeaponAt damage pipeline', () => {
     registerEntities(ctx, attacker, target);
     const weapon = WEAPON_STATS['90mm']; // AP warhead, 30 damage
     const hpBefore = target.hp;
-    fireWeaponAt(ctx, attacker, target, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, target, weapon);
     // AP vs none = 0.3, houseBias=1.0, spreadFactor=1, distance=0
     // damage = modifyDamage(30, 'AP', 'none', 0, 1.0, 0.3, 1) = round(30*0.3*1.0) = 9
     expect(target.hp).toBe(hpBefore - 9);
@@ -216,7 +233,7 @@ describe('fireWeaponAt damage pipeline', () => {
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
     expect(attacker.kills).toBe(0);
-    fireWeaponAt(ctx, attacker, target, WEAPON_STATS['90mm']);
+    fireWeaponAtAndResolve(ctx, attacker, target, WEAPON_STATS['90mm']);
     expect(target.alive).toBe(false);
     expect(attacker.kills).toBe(1);
   });
@@ -780,16 +797,22 @@ describe('Projectile lifecycle', () => {
       directHit: true, impactX: 180, impactY: 100, attackerIsPlayer: true,
     });
     ctx.inflightProjectiles.push(proj);
-    // Move target to a new position
-    target.pos.x = 250;
-    // Advance two frames (homing updates on even frames)
+    const initialFacing = proj.facing256;
+    // Move target to a new lepton coordinate; C++ Target_Coord is lepton-backed.
+    target.leptonX = pixelToLepton(250);
+    target.leptonY = pixelToLepton(150);
+    target.syncPosFromLeptons();
+    // Advance two frames; the first completed frame refreshes DesiredFacing.
     updateInflightProjectiles(ctx);
     updateInflightProjectiles(ctx);
-    // impactX should have moved toward target's new position (250)
-    expect(ctx.inflightProjectiles[0].impactX).toBeGreaterThan(180);
+    // Homing changes facing toward TarCom; FuseClass::HeadTo / impact coord stays stable.
+    expect(ctx.inflightProjectiles[0].desiredFacing256).toBeDefined();
+    expect(ctx.inflightProjectiles[0].desiredFacing256).not.toBe(initialFacing);
+    expect(ctx.inflightProjectiles[0].facing256).not.toBe(initialFacing);
+    expect(ctx.inflightProjectiles[0].impactX).toBe(180);
   });
 
-  it('homing updates only every other frame (C++ bullet.cpp:368)', () => {
+  it('homing target direction updates only every other frame (C++ bullet.cpp:368)', () => {
     const attacker = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
     const target = makeEntity(UnitType.I_E1, House.USSR, 300, 100);
     const ctx = makeMockCombatContext();
@@ -801,15 +824,19 @@ describe('Projectile lifecycle', () => {
       directHit: true, impactX: 150, impactY: 100, attackerIsPlayer: true,
     });
     ctx.inflightProjectiles.push(proj);
-    target.pos.x = 350; // move target away
-    // Frame 1 (odd) — no homing update
+    target.leptonX = pixelToLepton(350);
+    target.leptonY = pixelToLepton(150);
+    target.syncPosFromLeptons();
+    // Frame 1 (after increment to odd) updates DesiredFacing.
     updateInflightProjectiles(ctx);
-    const afterOdd = ctx.inflightProjectiles[0].impactX;
-    expect(afterOdd).toBe(150); // unchanged on odd frame
-    // Frame 2 (even) — homing update applies
+    const afterOddDesired = ctx.inflightProjectiles[0].desiredFacing256;
+    expect(afterOddDesired).toBeDefined();
+    target.leptonX = pixelToLepton(350);
+    target.leptonY = pixelToLepton(200);
+    target.syncPosFromLeptons();
+    // Frame 2 (even) skips the Target_Coord refresh, so DesiredFacing is unchanged.
     updateInflightProjectiles(ctx);
-    const afterEven = ctx.inflightProjectiles[0].impactX;
-    expect(afterEven).toBeGreaterThan(150); // moved toward target on even frame
+    expect(ctx.inflightProjectiles[0].desiredFacing256).toBe(afterOddDesired);
   });
 });
 
@@ -1031,7 +1058,7 @@ describe('Retaliation system — triggerRetaliation', () => {
     expect(victim.mission).not.toBe(Mission.ATTACK);
   });
 
-  it('only retargets if no current living target', () => {
+  it('AI retaliation can retarget even with a current living target when threat compare is skipped', () => {
     const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
     const existingTarget = makeEntity(UnitType.I_E1, House.Spain, 150, 150);
     const newAttacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
@@ -1039,8 +1066,9 @@ describe('Retaliation system — triggerRetaliation', () => {
     existingTarget.alive = true;
     const ctx = makeMockCombatContext();
     triggerRetaliation(ctx, victim, newAttacker);
-    // Should NOT retarget because victim already has a living target
-    expect(victim.target).toBe(existingTarget);
+    // C++ non-human retaliation always consumes the 50% threat-comparison RNG.
+    // When that comparison is skipped, FootClass assigns the new attacker TarCom.
+    expect(victim.target).toBe(newAttacker);
   });
 
   it('sets target to attacker without forcing mission ATTACK', () => {
@@ -1145,7 +1173,7 @@ describe('Kill tracking / creditKill', () => {
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
     expect(attacker.kills).toBe(0);
-    fireWeaponAt(ctx, attacker, target, WEAPON_STATS['90mm']);
+    fireWeaponAtAndResolve(ctx, attacker, target, WEAPON_STATS['90mm']);
     expect(target.alive).toBe(false);
     expect(attacker.kills).toBe(1);
   });
@@ -1156,18 +1184,13 @@ describe('Kill tracking / creditKill', () => {
     target.hp = 1;
     const ctx = makeMockCombatContext();
     registerEntities(ctx, attacker, target);
-    const proj: InflightProjectile = {
+    const proj = makeInflightProjectile({
       attackerId: attacker.id, targetId: target.id, weapon: WEAPON_STATS['90mm'],
       damage: 30, strength: 30, speed: 2, travelFrames: 1, currentFrame: 0,
       directHit: true, impactX: 200, impactY: 100, attackerIsPlayer: true,
-      isArcing: false, arcHeight: 0, arcRiser: 0,
-      startX: 100, startY: 100, dogRiderId: -1,
-      fuelTimer: 5, isFueled: false,
-      isDropping: false, dropHeight: 0,
-      isFlameEquipped: false, flameToggle: false,
-    };
+    });
     ctx.inflightProjectiles.push(proj);
-    updateInflightProjectiles(ctx);
+    resolveProjectiles(ctx);
     expect(target.alive).toBe(false);
     expect(attacker.kills).toBe(1);
   });

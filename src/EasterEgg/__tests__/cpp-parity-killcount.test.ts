@@ -23,6 +23,7 @@ import {
   type CombatContext,
   fireWeaponAt,
   handleUnitDeath,
+  updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
@@ -45,6 +46,7 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     structures: [],
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -91,6 +93,23 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
   } as CombatContext;
 }
 
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
+    updateInflightProjectiles(ctx);
+  }
+  expect(ctx.inflightProjectiles.length).toBe(0);
+}
+
+function fireWeaponAtAndResolve(
+  ctx: CombatContext,
+  attacker: Entity,
+  target: Entity,
+  weapon: NonNullable<Entity['weapon']>,
+): void {
+  fireWeaponAt(ctx, attacker, target, weapon);
+  resolveProjectiles(ctx);
+}
+
 // =========================================================================
 // KC1: fireWeaponAt increments killCount on player-controlled kill
 // C++ techno.cpp — Record_Is_Killed; score.cpp:546-597
@@ -104,7 +123,7 @@ describe('KC1: fireWeaponAt increments killCount when player unit kills enemy', 
 
     expect(ctx.killCount).toBe(0);
     const weapon = WEAPON_STATS[UNIT_STATS['2TNK'].primaryWeapon!];
-    fireWeaponAt(ctx, attacker, target, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, target, weapon);
 
     expect(target.alive).toBe(false);
     expect(ctx.killCount).toBe(1);
@@ -118,7 +137,7 @@ describe('KC1: fireWeaponAt increments killCount when player unit kills enemy', 
     const ctx = makeCombatCtx([attacker, target]);
 
     const weapon = WEAPON_STATS[UNIT_STATS['3TNK'].primaryWeapon!];
-    fireWeaponAt(ctx, attacker, target, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, target, weapon);
 
     expect(target.alive).toBe(false);
     // killCount tracks player kills only — enemy killing player does not increment
@@ -143,9 +162,9 @@ describe('KC2: Multiple kills accumulate within the same context', () => {
     const ctx = makeCombatCtx([attacker, t1, t2, t3]);
     const weapon = WEAPON_STATS[UNIT_STATS['2TNK'].primaryWeapon!];
 
-    fireWeaponAt(ctx, attacker, t1, weapon);
-    fireWeaponAt(ctx, attacker, t2, weapon);
-    fireWeaponAt(ctx, attacker, t3, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, t1, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, t2, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, t3, weapon);
 
     expect(ctx.killCount).toBe(3);
     expect(attacker.kills).toBe(3);
@@ -165,7 +184,7 @@ describe('KC3: lossCount increments when player-controlled unit dies', () => {
 
     expect(ctx.lossCount).toBe(0);
     const weapon = WEAPON_STATS[UNIT_STATS['3TNK'].primaryWeapon!];
-    fireWeaponAt(ctx, attacker, victim, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, victim, weapon);
 
     expect(victim.alive).toBe(false);
     expect(ctx.lossCount).toBe(1);
@@ -178,7 +197,7 @@ describe('KC3: lossCount increments when player-controlled unit dies', () => {
     const ctx = makeCombatCtx([attacker, target]);
 
     const weapon = WEAPON_STATS[UNIT_STATS['2TNK'].primaryWeapon!];
-    fireWeaponAt(ctx, attacker, target, weapon);
+    fireWeaponAtAndResolve(ctx, attacker, target, weapon);
 
     expect(target.alive).toBe(false);
     expect(ctx.lossCount).toBe(0);

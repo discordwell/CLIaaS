@@ -22,7 +22,7 @@ import { type Effect } from '../engine/renderer';
 // Subsystem imports
 import {
   fireWeaponAt, applySplashDamage, checkVehicleCrush, damageEntity,
-  damageSpeedFactor,
+  damageSpeedFactor, updateInflightProjectiles,
   type CombatContext,
 } from '../engine/combat';
 import {
@@ -58,6 +58,13 @@ beforeEach(() => {
 
 function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
+}
+
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
+    updateInflightProjectiles(ctx);
+  }
+  expect(ctx.inflightProjectiles.length).toBe(0);
 }
 
 function makeStructure(
@@ -114,6 +121,7 @@ function makeCombatContext(overrides?: Partial<CombatContext>): CombatContext {
     entityById: new Map(),
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [],
     tick: 100,
     playerHouse: House.Spain,
@@ -1218,11 +1226,11 @@ describe('updateFogOfWar with entities at map boundaries', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 15. COMBAT: fireWeaponAt with attacker === target (self-damage)
+// 15. COMBAT: fireWeaponAt with attacker === target (splash source exclusion)
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('fireWeaponAt self-targeting', () => {
-  it('entity can damage itself via fireWeaponAt', () => {
+  it('projectile splash excludes the firer even when self-targeted', () => {
     const tank = makeEntity(UnitType.V_2TNK, House.Spain, 100, 100);
     const ctx = makeCombatContext({
       entities: [tank],
@@ -1231,24 +1239,27 @@ describe('fireWeaponAt self-targeting', () => {
 
     const hpBefore = tank.hp;
     fireWeaponAt(ctx, tank, tank, tank.weapon!);
+    resolveProjectiles(ctx);
 
-    // Self-damage should go through — the function does not check attacker===target
-    expect(tank.hp).toBeLessThan(hpBefore);
+    // C++ Explosion_Damage excludes object == source while collecting victims.
+    expect(tank.hp).toBe(hpBefore);
   });
 
-  it('self-kill tracks kill credit', () => {
+  it('self-target projectile does not award a self-kill through splash', () => {
     const e1 = makeEntity(UnitType.I_E1, House.Spain, 100, 100);
     const ctx = makeCombatContext({
       entities: [e1],
       entityById: new Map([[e1.id, e1]]),
     });
 
-    // Give it a high-damage weapon to guarantee kill
+    // Even high splash damage skips the source object.
     const bigWeapon = { ...e1.weapon!, damage: 9999 };
     fireWeaponAt(ctx, e1, e1, bigWeapon);
+    resolveProjectiles(ctx);
 
-    expect(e1.alive).toBe(false);
-    expect(e1.kills).toBe(1); // credited kill to itself
+    expect(e1.alive).toBe(true);
+    expect(e1.hp).toBe(e1.stats.strength);
+    expect(e1.kills).toBe(0);
   });
 });
 
