@@ -4615,6 +4615,9 @@ function entityLogicOrderKey(entity: Entity): number {
 }
 
 function structureThreatCandidateVisible(ctx: CombatContext, e: Entity): boolean {
+  // C++ techno.cpp:1551 skips the IsDiscoveredByPlayer visibility gate for
+  // RTTI_AIRCRAFT candidates.
+  if (e.isAirUnit) return true;
   if (e.house === ctx.playerHouse) return true;
   if (ctx.isDiscoveredByPlayer) return ctx.isDiscoveredByPlayer(e);
   const playerHouseIdx = COMBAT_HOUSE_IDX[ctx.playerHouse] ?? -1;

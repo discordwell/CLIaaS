@@ -2046,6 +2046,9 @@ function isCppFullMapThreatLayerCandidate(other: Entity): boolean {
 }
 
 function isCandidateVisibleToPlayer(ctx: GreatestThreatRangeContext, other: Entity, playerHouseIdx: number): boolean {
+  // C++ techno.cpp:1551 skips the IsDiscoveredByPlayer visibility gate for
+  // RTTI_AIRCRAFT candidates.
+  if (other.isAirUnit) return true;
   // C++ techno.cpp:624 + 1529: IsOwnedByPlayer is strict PlayerPtr ownership,
   // not "player allied". Non-PlayerPtr candidates require IsDiscoveredByPlayer.
   if (other.house === ctx.playerHouse) return true;

@@ -139,6 +139,7 @@ describe('TechnoClass::AI one-way target-house ally clear', () => {
     game.structures.push(tower);
     game.entities.push(infantry);
     game.entityById.set(infantry.id, infantry);
+    (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds.add(infantry.id);
 
     runStructureLogic(game);
 

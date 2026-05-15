@@ -195,7 +195,7 @@ describe('Mission_Guard scan mask — C++ InfantryClass/UnitClass::Greatest_Thre
     updateGuard(ctx, scanner);
 
     expect(scanner.targetStructure).toBe(enemyStruct);
-    expect(scanner.mission).toBe(Mission.ATTACK);
+    expect(scanner.mission).toBe(Mission.GUARD);
   });
 
   it('HUMAN-controlled armed infantry (E1) does NOT auto-acquire enemy STRUCTURE (BUILDINGS cleared)', () => {
