@@ -52,8 +52,10 @@ export default async function CustomerDetailPage({
     );
   }
 
-  const activities = getCustomerActivities(customer.id);
-  const notes = getCustomerNotes(customer.id);
+  const [activities, notes] = await Promise.all([
+    getCustomerActivities(customer.id),
+    getCustomerNotes(customer.id),
+  ]);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-4xl px-6 py-12 text-zinc-950">

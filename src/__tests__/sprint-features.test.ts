@@ -58,6 +58,7 @@ describe('Customer 360 Enrichment', () => {
       name: 'VIP Customers',
       description: 'High-value customers',
       query: { plan: 'enterprise' },
+      customerCount: 0,
     });
     expect(segment.id).toBeTruthy();
     expect(segment.name).toBe('VIP Customers');
@@ -158,6 +159,7 @@ describe('Community Forums', () => {
       name: 'Bug Reports',
       description: 'Report bugs here',
       slug: 'bug-reports',
+      position: 0,
     });
     expect(cat.id).toBeTruthy();
     expect(cat.slug).toBe('bug-reports');

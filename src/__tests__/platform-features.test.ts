@@ -672,13 +672,13 @@ describe('Plan 2 — Routing', () => {
       const ticket = {
         id: 'tk-1', subject: 'Test', status: 'open' as const, priority: 'low' as const,
         requester: 'user@test.com', tags: [], createdAt: '', updatedAt: '',
-        externalId: '', source: 'email' as const,
+        externalId: '', source: 'zendesk' as const,
       };
 
       const result = evaluateConditions({
         any: [
           { field: 'priority', operator: 'is', value: 'urgent' },
-          { field: 'source', operator: 'is', value: 'email' },
+          { field: 'source', operator: 'is', value: 'zendesk' },
         ],
       }, ticket);
       expect(result).toBe(true);
@@ -1520,10 +1520,10 @@ describe('Plan 5 — WFM', () => {
       const fourMinAgo = new Date(now.getTime() - 4 * 60000).toISOString();
 
       const result = calculateUtilization(
-        [{ id: '1', ticketId: 't1', userId: 'u1', userName: 'Test', startTime: fiveMinAgo, durationMinutes: 60, notes: '' }],
+        [{ id: '1', ticketId: 't1', userId: 'u1', userName: 'Test', startTime: fiveMinAgo, endTime: null, durationMinutes: 60, billable: false, notes: '' }],
         [
-          { userId: 'u1', userName: 'Test', status: 'online' as const, startedAt: fiveMinAgo, reason: '' },
-          { userId: 'u1', userName: 'Test', status: 'offline' as const, startedAt: fourMinAgo, reason: '' },
+          { id: 's1', userId: 'u1', userName: 'Test', status: 'online' as const, startedAt: fiveMinAgo, reason: '' },
+          { id: 's2', userId: 'u1', userName: 'Test', status: 'offline' as const, startedAt: fourMinAgo, reason: '' },
         ],
         [],
       );
@@ -1536,7 +1536,7 @@ describe('Plan 5 — WFM', () => {
     it('returns 0% occupancy when no available time', async () => {
       const { calculateUtilization } = await import('@/lib/wfm/utilization');
       const result = calculateUtilization(
-        [{ id: '1', ticketId: 't1', userId: 'u1', userName: 'Test', startTime: new Date().toISOString(), durationMinutes: 30, notes: '' }],
+        [{ id: '1', ticketId: 't1', userId: 'u1', userName: 'Test', startTime: new Date().toISOString(), endTime: null, durationMinutes: 30, billable: false, notes: '' }],
         [],
         [],
       );

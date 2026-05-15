@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requirePerm } from '@/lib/rbac';
 import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
+import type { ViewQuery } from '@/lib/views/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +58,7 @@ export async function PATCH(
   const parsed = await parseJsonBody<{
     name?: string;
     description?: string;
-    query?: unknown;
+    query?: ViewQuery;
     active?: boolean;
     position?: number;
   }>(request);

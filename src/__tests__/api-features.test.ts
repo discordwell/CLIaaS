@@ -156,7 +156,7 @@ describe('Comprehensive API Feature Tests', () => {
           }),
         }));
         const { GET } = await import('@/app/api/auth/me/route');
-        const res = await GET();
+        const res = await GET(new Request(`${BASE}/api/auth/me`));
         expect(res.status).toBe(401);
         expect((await res.json()).user).toBeNull();
       });
@@ -173,7 +173,7 @@ describe('Comprehensive API Feature Tests', () => {
           }),
         }));
         const { GET } = await import('@/app/api/auth/me/route');
-        const res = await GET();
+        const res = await GET(new Request(`${BASE}/api/auth/me`));
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.user.id).toBe(TEST_USER.id);

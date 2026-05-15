@@ -152,7 +152,7 @@ describe('Intercom source tagging', () => {
     const manifest = await exportIntercom({ accessToken: 'test-token' }, tmpDir);
 
     // Check manifest object returned
-    const manifestObj = manifest as Record<string, unknown>;
+    const manifestObj = manifest as unknown as Record<string, unknown>;
     expect(manifestObj.sourceTagging).toBeDefined();
     const tagging = manifestObj.sourceTagging as { enabled: boolean; field: string; values: string[] };
     expect(tagging.enabled).toBe(true);

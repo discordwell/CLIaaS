@@ -227,7 +227,17 @@ Return ONLY the JSON object, no other text.`;
       if (tickets.length === 0) return errorResult('No tickets found.');
 
       const thresholdFrac = threshold / 100;
-      const groups: Array<{ tickets: Array<{ id: string; externalId: string; subject: string; status: string; priority: string }>; similarity: number }> = [];
+      const groups: Array<{
+        tickets: Array<{
+          id: string;
+          externalId: string;
+          subject: string;
+          status: string;
+          priority: string;
+          createdAt: string;
+        }>;
+        similarity: number;
+      }> = [];
       const seen = new Set<string>();
 
       for (let i = 0; i < tickets.length; i++) {
@@ -258,6 +268,7 @@ Return ONLY the JSON object, no other text.`;
               subject: t.subject,
               status: t.status,
               priority: t.priority,
+              createdAt: t.createdAt,
             })),
             similarity: Math.round((totalSim / pairs) * 100),
           });

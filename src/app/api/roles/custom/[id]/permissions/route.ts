@@ -118,6 +118,7 @@ export async function PUT(
       if (permissions.length > 0) {
         await tx.insert(customRolePermissions).values(
           permissions.map((p: { key: string; granted: boolean }) => ({
+            workspaceId: auth.user.workspaceId,
             customRoleId: id,
             permissionKey: p.key,
             granted: p.granted,

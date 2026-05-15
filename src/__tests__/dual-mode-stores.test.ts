@@ -92,7 +92,7 @@ describe('Phase 2: Dual-Mode Data Layer', () => {
 
     it('withRls returns null on failure', () => {
       // The catch block should return null
-      expect(source).toMatch(/catch\s*\{[^}]*return\s+null/s);
+      expect(source).toMatch(/catch\s*\{[\s\S]*?return\s+null/);
     });
 
     it('exports tryDb function', () => {

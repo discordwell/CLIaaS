@@ -726,10 +726,8 @@ describe('5.3 PII -> Compliance -> Audit', () => {
 
   it('detectPii respects custom sensitivity rules', async () => {
     const { detectPiiRegex } = await import('@/lib/compliance/pii-detector');
-    const type = await import('@/lib/compliance/pii-detector');
-
     // Disable SSN detection, enable only email
-    const rules: type.PiiSensitivityRule[] = [
+    const rules: import('@/lib/compliance/pii-detector').PiiSensitivityRule[] = [
       { piiType: 'email', enabled: true, autoRedact: false, maskingStyle: 'full' },
       { piiType: 'ssn', enabled: false, autoRedact: false, maskingStyle: 'full' },
     ];

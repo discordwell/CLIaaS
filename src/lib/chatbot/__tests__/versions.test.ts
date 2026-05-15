@@ -18,7 +18,6 @@ vi.mock('../../jsonl-store', () => {
 import { publishChatbot, rollbackChatbot, getChatbotVersions, getChatbotVersion } from '../versions';
 import { upsertChatbot, getChatbot } from '../store';
 import type { ChatbotFlow } from '../types';
-import { readJsonlFile } from '../../jsonl-store';
 
 function makeFlow(overrides?: Partial<ChatbotFlow>): ChatbotFlow {
   return {
@@ -39,10 +38,8 @@ function makeFlow(overrides?: Partial<ChatbotFlow>): ChatbotFlow {
 
 describe('chatbot versions (JSONL mode)', () => {
   beforeEach(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (readJsonlFile as any).__resetStore?.();
     // Reset the mock store
-    const mod = vi.mocked(await import('../../jsonl-store'));
+    const mod = await import('../../jsonl-store') as typeof import('../../jsonl-store') & { __resetStore?: () => void };
     mod.__resetStore?.();
   });
 
@@ -108,8 +105,8 @@ describe('chatbot versions (JSONL mode)', () => {
 
   it('store backward compat: flows without version/status get defaults', async () => {
     const flow = makeFlow();
-    delete (flow as Record<string, unknown>).version;
-    delete (flow as Record<string, unknown>).status;
+    delete (flow as unknown as Record<string, unknown>).version;
+    delete (flow as unknown as Record<string, unknown>).status;
     await upsertChatbot(flow);
 
     const loaded = await getChatbot('flow-1');

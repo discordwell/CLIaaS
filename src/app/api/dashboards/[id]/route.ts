@@ -115,6 +115,7 @@ export async function PUT(
           if (d.widgets!.length > 0) {
             await tx.insert(schema.dashboardWidgets).values(
               d.widgets!.map((w) => ({
+                workspaceId: auth.user.workspaceId,
                 dashboardId: id,
                 reportId: w.reportId,
                 gridX: w.gridX,

@@ -100,7 +100,7 @@ describe('Auth API routes', () => {
       }));
 
       const { GET } = await import('@/app/api/auth/me/route');
-      const res = await GET();
+      const res = await GET(new Request('http://localhost/api/auth/me'));
       expect(res.status).toBe(401);
       const body = await res.json();
       expect(body.user).toBeNull();
@@ -124,7 +124,7 @@ describe('Auth API routes', () => {
       }));
 
       const { GET } = await import('@/app/api/auth/me/route');
-      const res = await GET();
+      const res = await GET(new Request('http://localhost/api/auth/me'));
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.user).toBeDefined();

@@ -7,6 +7,7 @@
  * - macro: agent-initiated batch of actions
  * - automation: time-based rules (run periodically)
  * - sla: deadline-based escalation
+ * - assignment: routing/assignment rules imported from source platforms
  */
 
 import { evaluateConditions, type RuleConditions } from './conditions';
@@ -14,7 +15,7 @@ import { executeActions, type RuleAction } from './actions';
 
 export interface Rule {
   id: string;
-  type: 'trigger' | 'macro' | 'automation' | 'sla';
+  type: 'trigger' | 'macro' | 'automation' | 'sla' | 'assignment';
   name: string;
   enabled: boolean;
   conditions: RuleConditions;
@@ -94,7 +95,7 @@ export function evaluateRule(
 export function runRules(
   rules: Rule[],
   ticket: TicketContext,
-  type?: 'trigger' | 'automation' | 'sla'
+  type?: 'trigger' | 'automation' | 'sla' | 'assignment'
 ): ExecutionResult[] {
   const applicable = type ? rules.filter(r => r.type === type) : rules;
   const results: ExecutionResult[] = [];

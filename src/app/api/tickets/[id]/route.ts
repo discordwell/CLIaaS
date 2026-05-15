@@ -63,33 +63,39 @@ export async function PATCH(
   if ('error' in parsed) return parsed.error;
   const { status, priority, addTags, removeTags } = parsed.data;
 
-  const VALID_STATUSES = ['open', 'pending', 'on_hold', 'solved', 'closed'];
-  const VALID_PRIORITIES = ['urgent', 'high', 'normal', 'low'];
+  const VALID_STATUSES = ['open', 'pending', 'on_hold', 'solved', 'closed'] as const;
+  const VALID_PRIORITIES = ['urgent', 'high', 'normal', 'low'] as const;
+  const typedStatus = status && VALID_STATUSES.includes(status as typeof VALID_STATUSES[number])
+    ? status as typeof VALID_STATUSES[number]
+    : undefined;
+  const typedPriority = priority && VALID_PRIORITIES.includes(priority as typeof VALID_PRIORITIES[number])
+    ? priority as typeof VALID_PRIORITIES[number]
+    : undefined;
 
   if (!status && !priority && !addTags?.length && !removeTags?.length) {
     return NextResponse.json({ error: "No updates provided" }, { status: 400 });
   }
-  if (status && !VALID_STATUSES.includes(status)) {
+  if (status && !typedStatus) {
     return NextResponse.json({ error: `Invalid status: ${status}` }, { status: 400 });
   }
-  if (priority && !VALID_PRIORITIES.includes(priority)) {
+  if (priority && !typedPriority) {
     return NextResponse.json({ error: `Invalid priority: ${priority}` }, { status: 400 });
   }
 
   // Try DataProvider path first (works for DB mode and JSONL mode)
   try {
     const { updateTicket } = await import("@/lib/data");
-    await updateTicket(id, { status, priority, addTags, removeTags });
+    await updateTicket(id, { status: typedStatus, priority: typedPriority, addTags, removeTags });
 
     const updates: Record<string, unknown> = {};
-    if (status) updates.status = status;
-    if (priority) updates.priority = priority;
+    if (typedStatus) updates.status = typedStatus;
+    if (typedPriority) updates.priority = typedPriority;
     if (addTags?.length) updates.addTags = addTags;
     if (removeTags?.length) updates.removeTags = removeTags;
 
     ticketUpdated({ ticketId: id, ...updates });
-    if (status === 'solved' || status === 'closed') {
-      ticketResolved({ ticketId: id, status: status as string });
+    if (typedStatus === 'solved' || typedStatus === 'closed') {
+      ticketResolved({ ticketId: id, status: typedStatus });
     }
     return NextResponse.json({ status: 'ok', updated: updates });
   } catch {

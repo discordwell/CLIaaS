@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRoutingConfig, setRoutingConfig } from '@/lib/routing/store';
+import type { RoutingStrategy } from '@/lib/routing/types';
 import { requirePerm } from '@/lib/rbac';
 
 export async function GET(request: NextRequest) {
@@ -19,8 +20,13 @@ export async function PUT(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
+  const strategies: RoutingStrategy[] = ['round_robin', 'load_balanced', 'skill_match', 'priority_weighted'];
+  const requestedStrategy = body.defaultStrategy;
+  const defaultStrategy = typeof requestedStrategy === 'string' && strategies.includes(requestedStrategy as RoutingStrategy)
+    ? requestedStrategy as RoutingStrategy
+    : 'skill_match';
   const config = {
-    defaultStrategy: (body.defaultStrategy as string) ?? 'skill_match',
+    defaultStrategy,
     enabled: (body.enabled as boolean) ?? true,
     autoRouteOnCreate: (body.autoRouteOnCreate as boolean) ?? true,
     llmEnhanced: (body.llmEnhanced as boolean) ?? false,

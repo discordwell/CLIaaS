@@ -21,6 +21,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
-  const skills = setAgentSkills(id, (body.workspaceId as string) ?? '', (body.skills as string[]) ?? []);
+  const rawSkills = Array.isArray(body.skills) ? body.skills : [];
+  const skillInputs = rawSkills.flatMap((skill): Array<{ skillName: string; proficiency?: number }> => {
+    if (typeof skill === 'string') return [{ skillName: skill }];
+    if (!skill || typeof skill !== 'object') return [];
+    const candidate = skill as Record<string, unknown>;
+    if (typeof candidate.skillName !== 'string') return [];
+    return [{
+      skillName: candidate.skillName,
+      ...(typeof candidate.proficiency === 'number' ? { proficiency: candidate.proficiency } : {}),
+    }];
+  });
+  const skills = setAgentSkills(id, (body.workspaceId as string) ?? '', skillInputs);
   return NextResponse.json(skills, { status: 201 });
 }

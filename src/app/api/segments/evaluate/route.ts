@@ -21,16 +21,19 @@ export async function POST(request: NextRequest) {
   // Load customers from the data provider
   let customers: EvaluableCustomer[];
   try {
-    const { getDataProvider } = await import('@/lib/data');
-    const provider = getDataProvider();
+    const { getDataProvider } = await import('@/lib/data-provider/index');
+    const provider = await getDataProvider();
     const rawCustomers = await provider.loadCustomers();
-    customers = rawCustomers.map(c => ({
-      id: c.id,
-      email: c.email,
-      name: c.name,
-      tags: c.tags,
-      ...((c as Record<string, unknown>).customAttributes ? { customAttributes: (c as Record<string, unknown>).customAttributes as Record<string, unknown> } : {}),
-    }));
+    customers = rawCustomers.map(c => {
+      const extra = c as typeof c & { tags?: unknown };
+      return {
+        id: c.id,
+        email: c.email,
+        name: c.name,
+        tags: Array.isArray(extra.tags) ? extra.tags.filter((tag): tag is string => typeof tag === 'string') : undefined,
+        ...(c.customAttributes ? { customAttributes: c.customAttributes } : {}),
+      };
+    });
   } catch {
     customers = [];
   }

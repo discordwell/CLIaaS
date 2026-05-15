@@ -79,8 +79,8 @@ describe('Freshdesk agent pagination', () => {
     expect(last.name).toBe('Agent 150');
 
     // Verify that pagination was used (check for page=2 in the fetch calls)
-    const agentCalls = mockFetch.mock.calls.filter(
-      (call: [string, ...unknown[]]) => (call[0] as string).includes('/api/v2/agents'),
+    const agentCalls = mockFetch.mock.calls.filter(call =>
+      String(call[0]).includes('/api/v2/agents'),
     );
     expect(agentCalls.length).toBe(2);
     expect(agentCalls[0][0]).toContain('page=1');
@@ -124,8 +124,8 @@ describe('Freshdesk agent pagination', () => {
     expect(manifest.counts.customers).toBe(5);
 
     // Only one agent fetch call (no second page)
-    const agentCalls = mockFetch.mock.calls.filter(
-      (call: [string, ...unknown[]]) => (call[0] as string).includes('/api/v2/agents'),
+    const agentCalls = mockFetch.mock.calls.filter(call =>
+      String(call[0]).includes('/api/v2/agents'),
     );
     expect(agentCalls.length).toBe(1);
 

@@ -43,11 +43,16 @@ export function registerSyncCommands(program: Command): void {
           process.exit(1);
         }
 
+        const ingestStats = stats as typeof stats & {
+          ingested?: boolean;
+          ingestSkipped?: boolean;
+          ingestError?: string;
+        };
         const ingestInfo = 'ingested' in stats
           ? {
-              ingested: (stats as { ingested: boolean }).ingested,
-              ingestSkipped: (stats as { ingestSkipped: boolean }).ingestSkipped,
-              ingestError: (stats as { ingestError?: string }).ingestError,
+              ingested: ingestStats.ingested ?? false,
+              ingestSkipped: ingestStats.ingestSkipped ?? false,
+              ingestError: ingestStats.ingestError,
             }
           : undefined;
 

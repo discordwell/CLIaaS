@@ -282,7 +282,8 @@ describe('SSO Admin Page', () => {
     });
 
     // Verify POST was called
-    const postCalls = fetchSpy.mock.calls.filter(([url, opts]) => {
+    const postCalls = fetchSpy.mock.calls.filter((call: Parameters<typeof fetch>) => {
+      const [url, opts] = call;
       const u = typeof url === 'string' ? url : (url as Request).url;
       return u.includes('/api/auth/sso/providers') && (opts as RequestInit)?.method === 'POST';
     });
@@ -528,7 +529,8 @@ describe('SCIM Admin Page', () => {
     });
 
     // Should have fetched the token from /api/settings/scim-token
-    const tokenCalls = fetchSpy.mock.calls.filter(([input]) => {
+    const tokenCalls = fetchSpy.mock.calls.filter((call: Parameters<typeof fetch>) => {
+      const [input] = call;
       const url = typeof input === 'string' ? input : (input as Request).url;
       return url.includes('/api/settings/scim-token');
     });
@@ -536,7 +538,8 @@ describe('SCIM Admin Page', () => {
 
     // After token is loaded, SCIM calls should have the Authorization header
     await waitFor(() => {
-      const callsWithAuth = fetchSpy.mock.calls.filter(([, opts]) => {
+      const callsWithAuth = fetchSpy.mock.calls.filter((call: Parameters<typeof fetch>) => {
+        const [, opts] = call;
         const headers = (opts as RequestInit)?.headers;
         if (headers && typeof headers === 'object' && 'Authorization' in headers) {
           return (headers as Record<string, string>).Authorization.includes('Bearer');

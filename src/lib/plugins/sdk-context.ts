@@ -61,6 +61,19 @@ function denied(perm: PluginPermission): never {
   throw new Error(`Permission denied: ${perm} not granted`);
 }
 
+function logPluginMessage(
+  level: 'info' | 'warn' | 'error',
+  workspaceId: string,
+  args: unknown[],
+): void {
+  const [first, ...rest] = args;
+  if (typeof first === 'string') {
+    logger[level]({ workspaceId, args: rest }, first);
+    return;
+  }
+  logger[level]({ workspaceId, args }, 'Plugin log');
+}
+
 export function createPluginSDK(
   permissions: PluginPermission[],
   config: Record<string, unknown>,
@@ -128,9 +141,9 @@ export function createPluginSDK(
     },
 
     log: {
-      info: (...args: unknown[]) => logger.info({ workspaceId }, ...args),
-      warn: (...args: unknown[]) => logger.warn({ workspaceId }, ...args),
-      error: (...args: unknown[]) => logger.error({ workspaceId }, ...args),
+      info: (...args: unknown[]) => logPluginMessage('info', workspaceId, args),
+      warn: (...args: unknown[]) => logPluginMessage('warn', workspaceId, args),
+      error: (...args: unknown[]) => logPluginMessage('error', workspaceId, args),
     },
   };
 }

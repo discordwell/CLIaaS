@@ -71,7 +71,7 @@ function createSpyServer() {
 // Module map: file name -> { registerFn, importPath }
 const TOOL_MODULES: Array<{
   name: string;
-  importFn: () => Promise<{ [key: string]: (server: unknown) => void }>;
+  importFn: () => Promise<Record<string, unknown>>;
 }> = [
   { name: 'tickets', importFn: () => import('@cli/mcp/tools/tickets.js') },
   { name: 'analysis', importFn: () => import('@cli/mcp/tools/analysis.js') },
@@ -169,7 +169,7 @@ beforeAll(async () => {
         loadErrors.push({ module: mod.name, error: `Export "${fnName}" not found or not a function` });
         continue;
       }
-      registerFn(server);
+      (registerFn as (server: ReturnType<typeof createSpyServer>) => void)(server);
     } catch (err) {
       loadErrors.push({ module: mod.name, error: err instanceof Error ? err.message : String(err) });
     }

@@ -19,6 +19,7 @@ import {
   BackgroundVariant,
   Panel,
   ReactFlowProvider,
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -527,7 +528,7 @@ function WorkflowBuilderInner({
             defaultEdgeOptions={{
               type: "smoothstep",
               style: { strokeWidth: 2, stroke: "#71717a" },
-              markerEnd: { type: "arrowclosed" as unknown as string, color: "#71717a" },
+              markerEnd: { type: MarkerType.ArrowClosed, color: "#71717a" },
             }}
           >
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d4d4d8" />

@@ -167,7 +167,9 @@ describe('demo-data fixtures integrity', () => {
       .split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
 
     const customerExternalIds = new Set(customers.map((c: { externalId: string }) => c.externalId));
-    const assigneeIds = new Set(tickets.map((t: { assignee?: string }) => t.assignee).filter(Boolean));
+    const assigneeIds = new Set(
+      tickets.flatMap((t: { assignee?: string }) => t.assignee ? [t.assignee] : []),
+    );
 
     for (const assignee of assigneeIds) {
       expect(

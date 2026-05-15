@@ -50,7 +50,7 @@ function mockDbWithRows(rows: typeof dbRuleRow[]) {
     }),
   });
   mockedTryDb.mockResolvedValue({
-    db: { select: mockSelect } as unknown as ReturnType<typeof import('@/db')['getDb']>,
+    db: { select: mockSelect } as unknown as NonNullable<ReturnType<typeof import('@/db')['getDb']>>,
     schema: {
       rules: {
         enabled: 'enabled',

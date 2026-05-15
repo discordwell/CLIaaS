@@ -492,13 +492,13 @@ export function registerActionTools(server: McpServer): void {
             if (!macroRow) return { error: `Macro "${macroId}" not found` };
 
             const { applyMacro } = await import('@/lib/automation/engine.js');
-            const macroRule = {
+            const macroRule: Parameters<typeof applyMacro>[0] = {
               id: macroRow.id,
               type: 'macro' as const,
               name: macroRow.name,
               enabled: true,
               conditions: (macroRow.conditions ?? {}) as Record<string, unknown>,
-              actions: (macroRow.actions ?? []) as Array<Record<string, unknown>>,
+              actions: (macroRow.actions ?? []) as Parameters<typeof applyMacro>[0]['actions'],
               workspaceId: macroRow.workspaceId,
             };
 
@@ -514,7 +514,7 @@ export function registerActionTools(server: McpServer): void {
               updatedAt: ticket.updatedAt ?? new Date().toISOString(),
             };
 
-            const execResult = applyMacro(macroRule as Parameters<typeof applyMacro>[0], ticketCtx);
+            const execResult = applyMacro(macroRule, ticketCtx);
 
             // Apply changes to in-memory ticket
             if (execResult.changes.status) ticket.status = execResult.changes.status as TicketStatus;

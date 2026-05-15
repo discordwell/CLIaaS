@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import type { ViewCondition, ViewQuery } from '@/lib/views/types.js';
 
 export function registerViewCommands(program: Command): void {
   const views = program.command('views').description('Manage saved views');
@@ -75,11 +76,11 @@ export function registerViewCommands(program: Command): void {
     .option('--type <type>', 'View type: shared or personal', 'shared')
     .action(async (opts: { name: string; description?: string; field?: string; op?: string; val?: string; type?: string }) => {
       try {
-        const conditions = [];
+        const conditions: ViewCondition[] = [];
         if (opts.field && opts.op) {
-          conditions.push({ field: opts.field, operator: opts.op, value: opts.val });
+          conditions.push({ field: opts.field, operator: opts.op as ViewCondition['operator'], value: opts.val });
         }
-        const query = { conditions, combineMode: 'and' as const };
+        const query: ViewQuery = { conditions, combineMode: 'and' };
 
         const { tryDb, getDefaultWorkspaceId } = await import('@/lib/store-helpers.js');
         const conn = await tryDb();

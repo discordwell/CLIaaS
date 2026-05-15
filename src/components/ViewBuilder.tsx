@@ -48,7 +48,7 @@ export default function ViewBuilder({ initialQuery, onQueryChange, showPreview =
   const [sort, setSort] = useState<ViewSort>(initialQuery?.sort ?? { field: "updated_at", direction: "desc" });
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buildQuery = useCallback((): ViewQuery => ({
     conditions,
