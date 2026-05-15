@@ -51,7 +51,7 @@ async function wasmYakSnapshot(adapter: unknown) {
         firex: r[34],
         firey: r[35],
       }));
-    const shooter = yaks.find((y: any) => y.logicIndex === 112);
+    const shooter = yaks.find((y: any) => y.cx === 68 && y.cy === 58 && y.status === 3);
     if (!shooter) throw new Error('C++ SCG04EA YAK shooter not found');
     return { tick: state.tick, rngState: state.rngState, shooter, yaks };
   });
@@ -76,7 +76,7 @@ async function tsYakSnapshot(adapter: unknown) {
         arm: e.attackCooldown,
         status: e.aircraftAttackStatus,
       }));
-    const shooter = yaks.find((y: any) => y.hint === 55);
+    const shooter = yaks.find((y: any) => y.cx === 68 && y.cy === 58 && y.status === 3);
     if (!shooter) throw new Error('TS SCG04EA YAK shooter not found');
     return {
       tick: game.tick,

@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import {
   UnitType, House, CELL_SIZE, POWER_DRAIN, PRODUCTION_ITEMS,
   UNIT_STATS, Mission, AnimState,
@@ -119,6 +120,8 @@ function makeAircraftCtx(
   const map = new GameMap();
   const alliances = buildDefaultAlliances();
   return {
+    entities,
+    entityById: new Map(entities.map(e => [e.id, e])),
     structures,
     map,
     unitsLeftMap: 0,
@@ -300,13 +303,14 @@ describe('HPAD dockedAircraft field', () => {
 
   it('occupied HPAD (dockedAircraft > 0) blocks other aircraft landing', () => {
     const hpad = makeHPAD(10, 10, 800, House.Spain);
-    hpad.dockedAircraft = 42; // occupied
+    const docked = entityAtCell(UnitType.V_HELI, House.Spain, 10, 10);
+    hpad.dockedAircraft = docked.id;
 
     const heli = entityAtCell(UnitType.V_HELI, House.Spain, 12, 10);
     heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
 
-    const ctx = makeAircraftCtx([heli], [hpad]);
+    const ctx = makeAircraftCtx([heli, docked], [hpad]);
     const padIdx = findLandingPad(ctx, heli);
 
     expect(padIdx).toBe(-1); // no free pad
@@ -443,10 +447,11 @@ describe('HPAD as landing pad for helicopters (aircraft.cpp findLandingPad)', ()
     heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const occupiedPad = makeHPAD(12, 10, 800, House.Spain);
-    occupiedPad.dockedAircraft = 99;
+    const docked = entityAtCell(UnitType.V_HELI, House.Spain, 12, 10);
+    occupiedPad.dockedAircraft = docked.id;
     const freePad = makeHPAD(14, 10, 800, House.Spain);
 
-    const ctx = makeAircraftCtx([heli], [occupiedPad, freePad]);
+    const ctx = makeAircraftCtx([heli, docked], [occupiedPad, freePad]);
     expect(findLandingPad(ctx, heli)).toBe(1); // freePad is index 1
   });
 
@@ -455,11 +460,13 @@ describe('HPAD as landing pad for helicopters (aircraft.cpp findLandingPad)', ()
     heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const pad1 = makeHPAD(12, 10, 800, House.Spain);
-    pad1.dockedAircraft = 99;
+    const docked1 = entityAtCell(UnitType.V_HELI, House.Spain, 12, 10);
+    pad1.dockedAircraft = docked1.id;
     const pad2 = makeHPAD(14, 10, 800, House.Spain);
-    pad2.dockedAircraft = 100;
+    const docked2 = entityAtCell(UnitType.V_HELI, House.Spain, 14, 10);
+    pad2.dockedAircraft = docked2.id;
 
-    const ctx = makeAircraftCtx([heli], [pad1, pad2]);
+    const ctx = makeAircraftCtx([heli, docked1, docked2], [pad1, pad2]);
     expect(findLandingPad(ctx, heli)).toBe(-1);
   });
 
@@ -577,18 +584,17 @@ describe('HPAD destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does not damage adjacent structures', () => {
     const hpad = makeHPAD(10, 10, 50, House.USSR);
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([hpad, nearby]);
     structureDamage(ctx, hpad, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // HPAD has no weapon; barrel explosions hit ONLY cardinal cells
-    // with flat 200 damage. HPAD should use radial HE with falloff instead --
-    // diagonals should take damage (unlike barrels where diagonals are immune).
+    // with flat 200 damage. Ordinary building explosions are visual-only.
     const hpad = makeHPAD(10, 10, 50, House.USSR);
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);
     const ctx = makeCombatCtx([hpad], [diagonal]);
@@ -630,9 +636,9 @@ describe('HPAD as production prerequisite for helicopters', () => {
     expect(item!.prerequisite).toBe('DOME');
   });
 
-  it('HPAD build time is 1080 ticks (C++ cost-based: floor(1500 * 0.72))', () => {
+  it('HPAD build time uses C++ 8.8 fixed-point production timing', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'HPAD' && p.isStructure);
     expect(item).toBeDefined();
-    expect(item!.buildTime).toBe(1080);
+    expect(item!.buildTime).toBe(cppTechnoTypeBuildTime(1500));
   });
 });

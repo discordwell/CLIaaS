@@ -17,6 +17,7 @@
  *   - Edge-of-world cull (unit.cpp:1726-1729)
  *   - Look()/Shroud_Regen (unit.cpp:1737-1750)
  *   - **Commence() — pop MissionQueue mid-drive (unit.cpp:1756)**
+ *   - NoFireWhileMoving setup Arm delay (unit.cpp:1760-1764)
  *   - Flag pickup / flag-home scoring (unit.cpp:1771-1802)
  *   - Land-mine trigger (unit.cpp:1807-1838)
  *   - Impassable-cell suicide (unit.cpp:1846-1852)
@@ -843,7 +844,9 @@ export interface PCPEntity<M = unknown> {
   mission: M;
   missionTimer: number;
   isDriving: boolean;
-  stats?: { isVessel?: boolean; isCanine?: boolean } | null;
+  stats?: { isVessel?: boolean; isCanine?: boolean; noMovingFire?: boolean } | null;
+  weapon?: { rof: number } | null;
+  attackCooldown?: number;
   // Optional fields that full Commence port will touch (currently unused
   // by the NavCom-clear path, but documented here for future sub-cases).
   // status?: number;     // C++ Status — set to 0 by Commence
@@ -911,6 +914,8 @@ export interface PCPResult {
 
 export interface UnitPerCellOptions {
   skipCommence?: boolean;
+  /** C++ House->ROFBias used by TechnoClass::Rearm_Delay(true). */
+  rofBias?: number;
   /**
    * C++ FootClass::Per_Cell_Process path-shorten inputs. DriveClass chains to
    * FootClass after its own PCP_END work, and VesselClass chains through
@@ -919,6 +924,29 @@ export interface UnitPerCellOptions {
   hasLegalTarCom?: boolean;
   pathShortenEligible?: boolean;
   targetInRange?: boolean;
+}
+
+function applyNoMovingFireSetupDelay<M>(
+  entity: PCPEntity<M>,
+  opts?: UnitPerCellOptions,
+): void {
+  // C++ unit.cpp:1760-1764 runs before DriveClass::Per_Cell_Process clears
+  // NavCom at destination:
+  //   if (!Target_Legal(NavCom) && Path[0] == FACING_NONE)
+  //     Arm = Rearm_Delay(true) / 4;
+  //
+  // Do not apply this from Firing_AI based on a stale "was moving" flag. A unit
+  // that has been stationary for many ticks and only now finds a guard target
+  // must fire immediately, as in SCU14EA's stationary V2 at (89,84).
+  if (!entity.stats?.noMovingFire || !entity.weapon || typeof entity.attackCooldown !== 'number') {
+    return;
+  }
+  const navComLegal = entity.moveTarget !== null;
+  const path0Legal = entity.path.length > 0 && entity.pathIndex < entity.path.length;
+  if (navComLegal || path0Legal) return;
+
+  const rofBias = opts?.rofBias ?? 1;
+  entity.attackCooldown = Math.floor(entity.weapon.rof * rofBias / 4);
 }
 
 /**
@@ -1069,6 +1097,8 @@ export function unitPerCellProcess<M>(
     entity.missionTimer = 0; // C++ mission.cpp:354
     result.commenceFired = true;
   }
+
+  applyNoMovingFireSetupDelay(entity, opts);
 
   const shared = drivePerCellProcessImpl(entity, why, opts, false);
   result.navComCleared = shared.navComCleared;

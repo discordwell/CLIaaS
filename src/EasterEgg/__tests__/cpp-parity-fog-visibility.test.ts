@@ -39,6 +39,7 @@ function makeEntity(overrides: Partial<Entity> & { pos: { x: number; y: number }
   return {
     alive: true,
     isPlayerUnit: true,
+    house: 'Greece' as any,
     hp: 100,
     maxHp: 100,
     pos: overrides.pos,

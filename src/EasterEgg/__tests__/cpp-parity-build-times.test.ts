@@ -12,42 +12,44 @@
  *
  * TS engine now runs at 15 Hz (matching C++ TICKS_PER_SECOND), no scaling needed.
  *
- * Formula: buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
+ * Formula uses C++ 8.8 fixed-point operator rounding:
+ *   Cost * fixed(.8) * fixed(900, 1000)
  */
 
 import { describe, it, expect } from 'vitest';
 import { PRODUCTION_ITEMS } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 
 function cppBuildTime(cost: number): number {
-  return Math.floor(cost * 0.8 * 900 / 1000);
+  return cppTechnoTypeBuildTime(cost);
 }
 
 describe('Production build times — C++ parity', () => {
   it('POWR buildTime matches C++ formula', () => {
     const powr = PRODUCTION_ITEMS.find(i => i.type === 'POWR');
     expect(powr).toBeDefined();
-    expect(powr!.buildTime).toBe(cppBuildTime(300)); // 288
+    expect(powr!.buildTime).toBe(cppBuildTime(300));
   });
 
   it('E3 buildTime matches C++ formula', () => {
     const e3 = PRODUCTION_ITEMS.find(i => i.type === 'E3');
     expect(e3).toBeDefined();
-    expect(e3!.buildTime).toBe(cppBuildTime(300)); // 288
+    expect(e3!.buildTime).toBe(cppBuildTime(300));
   });
 
   it('2TNK buildTime matches C++ formula', () => {
     const tank = PRODUCTION_ITEMS.find(i => i.type === '2TNK');
     expect(tank).toBeDefined();
-    expect(tank!.buildTime).toBe(cppBuildTime(800)); // 768
+    expect(tank!.buildTime).toBe(cppBuildTime(800));
   });
 
   it('WEAP buildTime matches C++ formula', () => {
     const weap = PRODUCTION_ITEMS.find(i => i.type === 'WEAP');
     expect(weap).toBeDefined();
-    expect(weap!.buildTime).toBe(cppBuildTime(2000)); // 1920
+    expect(weap!.buildTime).toBe(cppBuildTime(2000));
   });
 
-  it('all items have buildTime = floor(cost * 0.72)', () => {
+  it('all items have fixed-point C++ buildTime', () => {
     for (const item of PRODUCTION_ITEMS) {
       const expected = cppBuildTime(item.cost);
       expect(item.buildTime, `${item.type} (cost=${item.cost})`).toBe(expected);

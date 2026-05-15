@@ -52,6 +52,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { GameMap, Terrain } from '../engine/map';
 import {
   MAP_CELLS,
@@ -489,42 +490,40 @@ describe('Power fraction for production — factory.cpp:434 parity', () => {
 //   BuildSpeedBias = 0.8 (rules.ini BuildSpeed=.8)
 //   TICKS_PER_MINUTE = 900 (15Hz * 60)
 //   fixed(900, 1000) = floor(900*256/1000) = 230
-//   So: Time_To_Build = Cost * 0.8 * (230/256) = Cost * 0.71875 (at 15Hz)
+//   BuildSpeed=.8 is also fixed-point raw 204/256, so C++ applies two
+//   rounded int*fixed operations rather than one floating multiply.
 //
 //   TS runs at 15Hz (matching C++), no scaling needed.
-//   TS formula: floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
+//   TS formula: cppTechnoTypeBuildTime(cost)
 // ============================================================
 describe('Production speed — techno.cpp:6077 Time_To_Build', () => {
   /**
    * C++ at 15Hz: Time_To_Build = Cost * BuildSpeedBias * fixed(TICKS_PER_MINUTE, 1000)
    *   = Cost * 0.8 * fixed(900, 1000)
    *
-   * TS now runs at 15Hz (matching C++), no scaling needed.
-   * Formula: floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
+   * TS runs at 15Hz (matching C++), no scaling needed.
+   * Formula uses C++ 8.8 fixed-point rounding at each operator.
    */
-  const CPP_BUILD_SPEED_BIAS = 0.8;
-  const CPP_TICKS_PER_MINUTE = 900; // 15Hz * 60
-
   function expectedBuildTime(cost: number): number {
-    return Math.floor(cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000);
+    return cppTechnoTypeBuildTime(cost);
   }
 
   // Import production items to verify computed buildTime values
   // We'll check a few representative items
-  it('POWR (cost=300) buildTime = floor(300 * 0.72) = 216', () => {
-    expect(expectedBuildTime(300)).toBe(216);
+  it('POWR (cost=300) buildTime uses fixed-point rounding', () => {
+    expect(expectedBuildTime(300)).toBe(215);
   });
 
-  it('PROC (cost=2000) buildTime = floor(2000 * 0.72) = 1440', () => {
-    expect(expectedBuildTime(2000)).toBe(1440);
+  it('PROC (cost=2000) buildTime uses fixed-point rounding', () => {
+    expect(expectedBuildTime(2000)).toBe(1432);
   });
 
-  it('SILO (cost=150) buildTime = floor(150 * 0.72) = 108', () => {
+  it('SILO (cost=150) buildTime uses fixed-point rounding', () => {
     expect(expectedBuildTime(150)).toBe(108);
   });
 
-  it('TSLA (cost=1500) buildTime = floor(1500 * 0.72) = 1080', () => {
-    expect(expectedBuildTime(1500)).toBe(1080);
+  it('TSLA (cost=1500) buildTime uses fixed-point rounding', () => {
+    expect(expectedBuildTime(1500)).toBe(1074);
   });
 });
 

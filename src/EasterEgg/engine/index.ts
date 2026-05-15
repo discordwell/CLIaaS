@@ -35,8 +35,16 @@ import {
   dir256ToFacing8, dir256ToFacing32, activeFallingParachuteAnimCount,
   processFallingParachuteAnim, shortenFallingParachuteAnim,
 } from './entity';
-import { GameMap, Terrain, MoveResult } from './map';
+import { GameMap, Terrain, MoveResult, type MapTree, type MapTerrainObject } from './map';
 import { ScenarioRandom } from './random';
+import {
+  CPP_FIXED_ONE_RAW,
+  cppFixedInverseRaw,
+  cppFixedMulInt,
+  cppFixedRaw,
+  cppFixedRawFromNumber,
+  cppIntDivFixed,
+} from './fixedPoint';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
 import { type LogicAnim, processLogicAnim, spawnLogicAnim } from './logicAnim';
 import { findPath, nearbyLocation } from './pathfinding';
@@ -51,6 +59,9 @@ import {
   type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, houseIdToHouse, houseToId, consumeSemiPersistentAttachment,
 	  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_ARMOR, STRUCTURE_MAX_HP, getBibCells, getStructureOccupyCells,
+	  calculateHouseEdgeSpawnCell,
+	  captureStructureFootprintTerrain,
+	  STRUCTURE_IMAGES,
 	  isStructureUnderConstruction, structureConstructionProgressTicks,
 	  isMineStructureType,
 	  structureCenterLeptons as scenarioStructureCenterLeptons,
@@ -237,6 +248,7 @@ import {
   type AIHouseState,
   DIFFICULTY_MODS,
   AI_DIFFICULTY_MODS,
+  AI_BUILD_RULES,
   CPP_DAMAGE_DELAY_TICKS,
   createAIHouseState as _createAIHouseState,
   updateAIIQGates as _updateAIIQGates,
@@ -246,17 +258,17 @@ import {
   launchAIAttack as _launchAIAttack,
   aiPickAttackTarget as _aiPickAttackTarget,
   updateAIDefense as _updateAIDefense,
-  updateAISellDamaged as _updateAISellDamaged,
   updateAIIncome as _updateAIIncome,
   updateAIProduction as _updateAIProduction,
   updateAIAutocreateTeams as _updateAIAutocreateTeams,
   spawnAIUnit as _spawnAIUnit,
+  aiPlaceStructure as _aiPlaceStructure,
   aiPerTick as _aiPerTick,
   aiPowerProduced as _aiPowerProduced,
   aiPowerConsumed as _aiPowerConsumed,
 } from './ai';
 import {
-  Team as TeamInstance, registerTeam, updateAllTeams as _updateAllTeams,
+  Team as TeamInstance, type TeamAIContext, registerTeam, updateAllTeams as _updateAllTeams,
   clearAllTeams as _clearAllTeams, getActiveTeams, suspendTeamsByPriority,
   shouldDelayCreateTeamFirstAi,
 } from './team';
@@ -283,7 +295,7 @@ import {
 // preserve behavior while establishing the future port's hook point.
 // See perCellProcess.ts docstring + cpp-parity-scg11ea-tick-28.test.ts.
 import { PCPType, unitPerCellProcess, drivePerCellProcess, footPerCellProcess, PER_CELL_TRACK_JUMP_ENABLED, FOOT_PER_CELL_ENABLED, MISSION_MOVE_PATH_FAILURE, MOVEMENT_AI_MOVE_NAVCOM_GUARD, DISPATCH_ORDER_REFACTOR, PCP_DOUBLE_CYCLE_ENABLED, DRIVE_CLASS_AI_PORT } from './perCellProcess';
-import { assignMission } from './missionLifecycle';
+import { assignMission, commence } from './missionLifecycle';
 
 // === PCP refactor diagnostic flag (Session 1 / plan §5) ===
 // When set (env `DEBUG_PCP_LOG=1` under Node, or `globalThis.__DEBUG_PCP_LOG`
@@ -431,7 +443,7 @@ const CPP_ANIM_MAX = 100;
 // C++ CORPSE1/2/3 are AnimClass objects with normalized rate 30 and six SHP
 // frames in the WASM harness; they occupy the fixed animation heap while decaying.
 const CPP_CORPSE_ANIM_SLOT_TICKS = 30 * 6;
-type AIFactoryKind = 'infantry' | 'unit' | 'vessel';
+type AIFactoryKind = 'building' | 'infantry' | 'unit' | 'vessel';
 
 export class Game {
   // Core systems
@@ -595,6 +607,8 @@ export class Game {
   private logicAnims: LogicAnim[] = [];
   /** Whether this tick's AnimClass Logic pass has already run. */
   private logicAnimsProcessedThisTick = false;
+  /** Logic slots deleted by BulletClass/AnimClass objects, applied before the next frame. */
+  private pendingCppLogicSlotReleases: number[] = [];
   /** Persistent corpses left by dead units (capped to prevent memory growth) */
   corpses: Array<{
     x: number;
@@ -606,6 +620,8 @@ export class Game {
     alpha: number;
     deathVariant: number;
     cppAnimStartTick?: number;
+    logicIndexHint?: number;
+    cppLogicReleased?: boolean;
   }> = [];
   private static readonly MAX_CORPSES = 100;
   state: GameState = 'loading';
@@ -804,6 +820,8 @@ export class Game {
       playEva: (n) => this.playEva(n as SoundName),
       minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
       movementSpeed: (e) => this.movementSpeed(e),
+      isDiscoveredByPlayer: (e) => e.house === this.playerHouse || this.discoveredEntityIds.has(e.id),
+      isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
       stopInfantryDriver: (e) => this.stopInfantryDriver(e),
       canStopInfantryDriverForAssignDestination: (e) => this.canStopInfantryDriverForAssignDestination(e),
       startDriveClassMove: (e) => this.startDriveClassMove(e),
@@ -839,7 +857,208 @@ export class Game {
       ctx.logicAnims,
       ctx.effects,
     );
+    ctx.releaseLogicSlotForEntity = (entity) => this.releaseCppLogicSlotForEntity(
+      entity,
+      ctx.inflightProjectiles,
+      ctx.logicAnims,
+      ctx.effects,
+    );
+    ctx.releaseTerrainLogicSlot = (terrain) => this.releaseTerrainLogicSlot(terrain);
+    ctx.deferLogicSlotRelease = (logicIndexHint) => this.deferCppLogicSlotRelease(logicIndexHint);
     return ctx;
+  }
+
+  private deferCppLogicSlotRelease(logicIndexHint: number | undefined): void {
+    if (logicIndexHint !== undefined) {
+      this.traceCppLogicRelease('defer', logicIndexHint);
+      this.pendingCppLogicSlotReleases.push(logicIndexHint);
+    }
+  }
+
+  private applyPendingCppLogicSlotReleases(): void {
+    if (this.pendingCppLogicSlotReleases.length === 0) return;
+    const releases = this.pendingCppLogicSlotReleases
+      .filter(hint => Number.isFinite(hint))
+      .sort((a, b) => a - b);
+    this.pendingCppLogicSlotReleases = [];
+
+    let applied = 0;
+    for (const originalHint of releases) {
+      const shiftedHint = originalHint - applied;
+      if (shiftedHint < 0) continue;
+      this.traceCppLogicRelease('apply-pending', shiftedHint, { originalHint, applied });
+      this.shiftCppLogicHintsAfter(shiftedHint);
+      applied++;
+    }
+  }
+
+  private traceCppLogicRelease(kind: string, deletedHint: number, extra: Record<string, unknown> = {}): void {
+    if ((globalThis as any).__traceLogicAlloc !== true || this.scenarioId !== 'SCU12EA') return;
+    if (deletedHint < 0 || deletedHint > 350) return;
+    console.log('[logicRelease]', JSON.stringify({
+      tick: this.tick,
+      kind,
+      deletedHint,
+      ...extra,
+    }));
+  }
+
+  private shiftCppLogicHintsAfter(
+    deletedHint: number,
+    excludedEntity?: Entity,
+    inflightProjectiles = this.inflightProjectiles,
+    logicAnims = this.logicAnims,
+    effects = this.effects,
+  ): void {
+    for (let i = 0; i < this.pendingCppLogicSlotReleases.length; i++) {
+      if (this.pendingCppLogicSlotReleases[i] > deletedHint) {
+        this.pendingCppLogicSlotReleases[i]--;
+      }
+    }
+    for (const tree of this.map.trees.values()) {
+      if (tree.logicIndexHint !== undefined && tree.logicIndexHint > deletedHint) {
+        tree.logicIndexHint--;
+      }
+    }
+    for (const terrain of this.map.terrainObjects.values()) {
+      if (terrain.logicIndexHint !== undefined && terrain.logicIndexHint > deletedHint) {
+        terrain.logicIndexHint--;
+      }
+    }
+    for (const entity of this.entities) {
+      if (entity !== excludedEntity &&
+          entity.logicIndexHint !== undefined &&
+          entity.logicIndexHint > deletedHint) {
+        entity.logicIndexHint--;
+      }
+      if (entity.fallParachuteAnimLogicIndexHint !== undefined &&
+          entity.fallParachuteAnimLogicIndexHint > deletedHint) {
+        entity.fallParachuteAnimLogicIndexHint--;
+      }
+      if (entity.damageSmokeLogicIndexHint !== undefined &&
+          entity.damageSmokeLogicIndexHint > deletedHint) {
+        entity.damageSmokeLogicIndexHint--;
+      }
+    }
+    for (const projectile of inflightProjectiles) {
+      if (projectile.logicIndexHint !== undefined && projectile.logicIndexHint > deletedHint) {
+        projectile.logicIndexHint--;
+      }
+    }
+    for (const anim of logicAnims) {
+      if (anim.logicIndexHint !== undefined && anim.logicIndexHint > deletedHint) {
+        anim.logicIndexHint--;
+      }
+    }
+    for (const effect of effects) {
+      if (effect.logicIndexHint !== undefined && effect.logicIndexHint > deletedHint) {
+        effect.logicIndexHint--;
+      }
+    }
+    for (const corpse of this.corpses) {
+      if (corpse.logicIndexHint !== undefined && corpse.logicIndexHint > deletedHint) {
+        corpse.logicIndexHint--;
+      }
+    }
+  }
+
+  private releaseCppLogicSlotForEntity(
+    entity: Entity,
+    inflightProjectiles = this.inflightProjectiles,
+    logicAnims = this.logicAnims,
+    effects = this.effects,
+  ): void {
+    const deletedHint = entity.logicIndexHint;
+    if (deletedHint === undefined) return;
+
+    this.traceCppLogicRelease('entity', deletedHint, {
+      id: entity.id,
+      type: entity.type,
+      house: entity.house,
+      alive: entity.alive,
+      inLimbo: entity.inLimbo,
+      mission: entity.mission,
+      cell: entity.cell ? [entity.cell.cx, entity.cell.cy] : undefined,
+    });
+    entity.logicIndexHint = undefined;
+    this.shiftCppLogicHintsAfter(deletedHint, entity, inflightProjectiles, logicAnims, effects);
+  }
+
+  private releaseInactiveEntityLogicSlots(): void {
+    while (true) {
+      let candidate: Entity | undefined;
+      let bestHint = Infinity;
+      for (const entity of this.entities) {
+        if (entity.logicIndexHint === undefined || entity.occupiesCppLogic()) continue;
+        if (entity.logicIndexHint < bestHint) {
+          bestHint = entity.logicIndexHint;
+          candidate = entity;
+        }
+      }
+      if (!candidate) return;
+      this.releaseCppLogicSlotForEntity(candidate);
+    }
+  }
+
+  private releaseCppLogicSlotForCorpse(corpse: (typeof this.corpses)[number]): void {
+    const deletedHint = corpse.logicIndexHint;
+    if (deletedHint === undefined || corpse.cppLogicReleased) return;
+
+    this.traceCppLogicRelease('corpse', deletedHint, {
+      type: corpse.type,
+      deathVariant: corpse.deathVariant,
+    });
+    corpse.logicIndexHint = undefined;
+    corpse.cppLogicReleased = true;
+    this.shiftCppLogicHintsAfter(deletedHint);
+  }
+
+  private releaseInactiveCppCorpseLogicSlots(): void {
+    while (true) {
+      let candidate: (typeof this.corpses)[number] | undefined;
+      let bestHint = Infinity;
+      for (const corpse of this.corpses) {
+        if (corpse.logicIndexHint === undefined || corpse.cppLogicReleased) continue;
+        if (this.corpseOccupiesCppAnimSlot(corpse)) continue;
+        if (corpse.logicIndexHint < bestHint) {
+          bestHint = corpse.logicIndexHint;
+          candidate = corpse;
+        }
+      }
+      if (!candidate) return;
+      this.releaseCppLogicSlotForCorpse(candidate);
+    }
+  }
+
+  private releaseTerrainLogicSlot(terrain: MapTree | MapTerrainObject): void {
+    const deletedHint = terrain.logicIndexHint;
+    if (deletedHint === undefined) return;
+
+    this.traceCppLogicRelease('terrain', deletedHint, {
+      type: terrain.type,
+      cell: [terrain.cx, terrain.cy],
+    });
+    terrain.logicIndexHint = undefined;
+    this._terrainLogicCount = Math.max(0, this._terrainLogicCount - 1);
+    this.shiftCppLogicHintsAfter(deletedHint);
+  }
+
+  private initializeScenarioLogicIndexHints(): void {
+    let logicIdx = this._terrainLogicCount;
+
+    for (let i = 0; i < this._preBuildingEntityCount; i++) {
+      const entity = this.entities[i];
+      if (!entity || entity.isAirUnit || !entity.occupiesCppLogic()) continue;
+      entity.logicIndexHint = logicIdx++;
+    }
+
+    for (const structure of this.structures) {
+      logicIdx++;
+      if (structure.hpadHelicopterId === undefined) continue;
+      const heli = this.entityById.get(structure.hpadHelicopterId);
+      if (!heli || !heli.isAirUnit || !heli.occupiesCppLogic()) continue;
+      heli.logicIndexHint = logicIdx++;
+    }
   }
 
   private resubmitEntityToLogicEnd(
@@ -855,6 +1074,7 @@ export class Game {
         this._preBuildingEntityCount = Math.max(0, this._preBuildingEntityCount - 1);
       }
     }
+    this.releaseCppLogicSlotForEntity(entity, inflightProjectiles, logicAnims, effects);
     entity.logicIndexHint = this.logicIndexHintForNewObject(inflightProjectiles, logicAnims, effects);
     entity.unlimboTick = this.tick;
     this.entities.push(entity);
@@ -882,9 +1102,6 @@ export class Game {
     }
     count += inflightProjectiles.length;
     count += logicAnims.length;
-    count += effects.filter(effect => effect.cppLogicSlot === true).length;
-    count += this.entities.filter(entity => entity.damageSmokeStartTick >= 0).length;
-    count += this.activeCppCorpseAnimCount();
     count += activeFallingParachuteAnimCount(this.entities);
 
     for (const projectile of inflightProjectiles) {
@@ -897,9 +1114,49 @@ export class Game {
         maxExistingHint = Math.max(maxExistingHint, anim.logicIndexHint);
       }
     }
+    for (const effect of effects) {
+      if (effect.cppLogicSlot !== true) continue;
+      count++;
+      if (effect.logicIndexHint !== undefined) {
+        maxExistingHint = Math.max(maxExistingHint, effect.logicIndexHint);
+      }
+    }
     for (const entity of this.entities) {
       if (entity.fallParachuteAnimActive && entity.fallParachuteAnimLogicIndexHint !== undefined) {
         maxExistingHint = Math.max(maxExistingHint, entity.fallParachuteAnimLogicIndexHint);
+      }
+      if (entity.damageSmokeStartTick >= 0) {
+        count++;
+        if (entity.damageSmokeLogicIndexHint !== undefined) {
+          maxExistingHint = Math.max(maxExistingHint, entity.damageSmokeLogicIndexHint);
+        }
+      }
+    }
+    for (const corpse of this.corpses) {
+      if (!this.corpseOccupiesCppAnimSlot(corpse)) continue;
+      count++;
+      if (corpse.logicIndexHint !== undefined) {
+        maxExistingHint = Math.max(maxExistingHint, corpse.logicIndexHint);
+      }
+    }
+    if ((globalThis as any).__traceLogicAlloc === true && this.scenarioId === 'SCU12EA') {
+      const hint = Math.max(count, maxExistingHint + 1);
+      if (hint >= 280 && hint <= 305) {
+        console.log('[logicAlloc]', JSON.stringify({
+          tick: this.tick,
+          hint,
+          count,
+          maxExistingHint,
+          terrain: this._terrainLogicCount,
+          entities: this.entities.filter(entity => entity.occupiesCppLogic()).length,
+          structures: this.structures.filter(structure => structure.alive || (!structure.debrisDropped && structure.debrisCountdown !== undefined)).length,
+          projectiles: inflightProjectiles.length,
+          logicAnims: logicAnims.length,
+          effects: effects.filter(effect => effect.cppLogicSlot === true).length,
+          damageSmokes: this.entities.filter(entity => entity.damageSmokeStartTick >= 0).length,
+          corpses: this.activeCppCorpseAnimCount(),
+          parachutes: activeFallingParachuteAnimCount(this.entities),
+        }));
       }
     }
     return Math.max(count, maxExistingHint + 1);
@@ -1253,6 +1510,7 @@ export class Game {
       getAirspeedBias: (h) => this.getAirspeedBias(h),
       getPowerFraction: (h) => this._housePowerFraction(h),
       logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
+      releaseLogicSlotForEntity: (e) => this.releaseCppLogicSlotForEntity(e),
       reserveAnimSlot: () => this.reserveCppAnimSlot(),
     };
   }
@@ -1444,6 +1702,8 @@ export class Game {
       weaponProjectileStyle: (n) => this.weaponProjectileStyle(n),
       idleMission: (e) => this.idleMission(e),
       retreatFromTarget: (e, p) => this.retreatFromTarget(e, p),
+      retreatEdgeCell: (e) => this.retreatEdgeCell(e),
+      removeFromTeamForRetreat: (e) => this.removeFromTeamForRetreat(e),
       threatScore: (s, t, d) => this.threatScore(s, t, d),
       leaveMap: (e) => this.markEntityLeftMap(e),
       isDiscoveredByPlayer: (e) => e.house === this.playerHouse || this.discoveredEntityIds.has(e.id),
@@ -1464,13 +1724,75 @@ export class Game {
     };
   }
 
+  private get _teamRemovalCtx(): TeamAIContext {
+    return {
+      entities: this.entities,
+      map: this.map,
+      tick: this.tick,
+      canEnterCell: (entity, cx, cy) => this.teamFootCanEnterCell(entity, cx, cy),
+      startDriveClassMove: (entity) => this.startDriveClassMove(entity),
+      stopInfantryDriver: (entity) => this.stopInfantryDriver(entity),
+      canStopInfantryDriverForAssignDestination: (entity) => this.canStopInfantryDriverForAssignDestination(entity),
+    };
+  }
+
+  private retreatEdgeCell(entity: Entity): CellPos | null {
+    const mapBounds = {
+      x: this.map.boundsX,
+      y: this.map.boundsY,
+      w: this.map.boundsW,
+      h: this.map.boundsH,
+    };
+    const isOccupied = (cx: number, cy: number): boolean =>
+      this.entities.some(other =>
+        other.alive &&
+        !other.inLimbo &&
+        !other.isAirUnit &&
+        other.cell.cx === cx &&
+        other.cell.cy === cy);
+    const originCell = entity.teamRef?.origin
+      ? worldToCell(entity.teamRef.origin.x, entity.teamRef.origin.y)
+      : null;
+
+    if (originCell) {
+      const fromTeamOrigin = calculateHouseEdgeSpawnCell(
+        entity.house,
+        this.houseEdges,
+        mapBounds,
+        originCell,
+        undefined,
+        this.map,
+        entity.isNavalUnit,
+        isOccupied,
+      );
+      if (fromTeamOrigin) return fromTeamOrigin;
+    }
+
+    return calculateHouseEdgeSpawnCell(
+      entity.house,
+      this.houseEdges,
+      mapBounds,
+      entity.cell,
+      undefined,
+      this.map,
+      entity.isNavalUnit,
+      isOccupied,
+    );
+  }
+
+  private removeFromTeamForRetreat(entity: Entity): void {
+    entity.teamRef?.remove(entity, this._teamRemovalCtx);
+  }
+
   private markEntityLeftMap(entity: Entity): void {
     if (!entity.alive) return;
+    const occupiedLogicBefore = entity.occupiesCppLogic();
     if (entity.teamRef) entity.teamRef.isLeaveMap = true;
     entity.triggerName = '';
     entity.triggerDeathProcessed = true;
     entity.alive = false;
     entity.mission = Mission.DIE;
+    if (occupiedLogicBefore && !entity.occupiesCppLogic()) this.releaseCppLogicSlotForEntity(entity);
     this.unitsLeftMap++;
     if (CIVILIAN_UNIT_TYPES.has(entity.type) || (this.isTanyaEvac && entity.type === 'E7')) {
       this.civiliansEvacuated++;
@@ -1540,6 +1862,7 @@ export class Game {
       this.refreshTechnoLock(e);
       this.entityById.set(e.id, e);
     }
+    this.initializeScenarioLogicIndexHints();
     this.missionName = scenario.name;
     this.missionBriefing = scenario.briefing;
     this.waypoints = scenario.waypoints;
@@ -2033,6 +2356,9 @@ export class Game {
   private update(): void {
     this.tick++;
     this.logicAnimsProcessedThisTick = false;
+    this.applyPendingCppLogicSlotReleases();
+    this.releaseInactiveEntityLogicSlots();
+    this.releaseInactiveCppCorpseLogicSlots();
     (globalThis as any).__currentGameTick = this.tick;
     (globalThis as any).__missionTimerTrace = true;
     _advanceAircraftFrame(); // C++ ::Frame parity — advance hover jitter index
@@ -2124,6 +2450,7 @@ export class Game {
     // entity's later AI pass.
     for (const entity of this.entities) {
       if (entity.pathDelay > 0) entity.pathDelay--;
+      if (entity.reloadTimer > 0) entity.reloadTimer--;
     }
 
     // Update occupancy grid and assign infantry sub-cell positions
@@ -2241,6 +2568,12 @@ export class Game {
       },
       isRevealedToHouse: (cx, cy, houseIdx) => this.isRevealedToHouse(cx, cy, houseIdx),
       threatScore: (scanner, target, distCells) => this.threatScore(scanner, target, distCells),
+      setGlobal: (globalIndex) => {
+        if (globalIndex >= 0 && globalIndex <= 29 && !this.globals.has(globalIndex)) {
+          this.globals.add(globalIndex);
+          this.noteGlobalChanged(globalIndex);
+        }
+      },
       // C++ FootClass::Can_Enter_Cell is virtual. Team center/closest-member
       // logic must ask the infantry override for infantry and the drive-class
       // path for vehicles/vessels.
@@ -2292,10 +2625,23 @@ export class Game {
         _updateInflightProjectiles(ctx, maxLogicIndexHint);
         this.inflightProjectiles = ctx.inflightProjectiles;
       };
-      const processLogicAnimsThrough = (maxLogicIndexHint: number) => {
-        const processAll = maxLogicIndexHint === Infinity;
-        while (true) {
-          let bestIndex = -1;
+      const skipShiftedLogicObject = (effectiveLogicIdx: number): boolean => {
+        const skipThrough = ctx.shiftedLogicSkipHintThrough;
+        if (skipThrough === undefined || effectiveLogicIdx > skipThrough) return false;
+        logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
+        return true;
+      };
+	      const processLogicAnimsThrough = (maxLogicIndexHint: number) => {
+	        const processAll = maxLogicIndexHint === Infinity;
+	        const releaseProcessedLogicObject = (logicIndexHint: number | undefined, kind: string) => {
+	          if (logicIndexHint === undefined) return;
+	          this.traceCppLogicRelease(kind, logicIndexHint);
+	          this.shiftCppLogicHintsAfter(logicIndexHint);
+	          logicIdx = Math.min(logicIdx, logicIndexHint);
+	        };
+	        while (true) {
+          let bestAnimIndex = -1;
+          let bestParachuteEntity: Entity | undefined;
           let bestLogicIdx = Infinity;
           for (let i = 0; i < this.logicAnims.length; i++) {
             const anim = this.logicAnims[i];
@@ -2304,31 +2650,70 @@ export class Game {
             if (!processAll && effectiveLogicIdx > maxLogicIndexHint) continue;
             if (effectiveLogicIdx < bestLogicIdx) {
               bestLogicIdx = effectiveLogicIdx;
-              bestIndex = i;
+              bestAnimIndex = i;
+              bestParachuteEntity = undefined;
             }
           }
-          if (bestIndex < 0) break;
+          for (const entity of this.entities) {
+            if (!entity.fallParachuteAnimActive ||
+                entity.fallParachuteAnimProcessedTick === this.tick) {
+              continue;
+            }
+            const effectiveLogicIdx = entity.fallParachuteAnimLogicIndexHint ??
+              (processAll ? logicIdx : Infinity);
+            if (!processAll && effectiveLogicIdx > maxLogicIndexHint) continue;
+            if (effectiveLogicIdx < bestLogicIdx) {
+              bestLogicIdx = effectiveLogicIdx;
+              bestAnimIndex = -1;
+              bestParachuteEntity = entity;
+            }
+          }
+          if (bestAnimIndex < 0 && !bestParachuteEntity) break;
 
-          const anim = this.logicAnims[bestIndex];
-          const effectiveLogicIdx = anim.logicIndexHint ?? logicIdx;
+          const anim = bestAnimIndex >= 0 ? this.logicAnims[bestAnimIndex] : undefined;
+          const effectiveLogicIdx = anim
+            ? (anim.logicIndexHint ?? logicIdx)
+            : (bestParachuteEntity!.fallParachuteAnimLogicIndexHint ?? logicIdx);
           updateProjectilesThrough(effectiveLogicIdx - 1);
+          if (skipShiftedLogicObject(effectiveLogicIdx)) {
+            if (anim) {
+              anim.processedLogicTick = this.tick;
+            } else {
+              bestParachuteEntity!.fallParachuteAnimProcessedTick = this.tick;
+            }
+            continue;
+          }
           if (ScenarioRandom._tagLogging) {
             ScenarioRandom._sourceTag = 16000 + effectiveLogicIdx;
             ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
           }
           logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
-          if (!processLogicAnim(
-            anim,
-            this.logicAnims,
-            this.effects,
-            this.map,
-            () => this.logicIndexHintForNewObject(),
-            () => this.reserveCppAnimSlot(),
-          )) {
-            this.logicAnims.splice(bestIndex, 1);
-          } else {
-            anim.processedLogicTick = this.tick;
-          }
+          if (anim) {
+            if (!processLogicAnim(
+              anim,
+              this.logicAnims,
+              this.effects,
+              this.map,
+              () => this.logicIndexHintForNewObject(),
+              () => this.reserveCppAnimSlot(),
+              (terrain) => this.releaseTerrainLogicSlot(terrain),
+	            )) {
+	              const deletedHint = anim.logicIndexHint;
+	              anim.logicIndexHint = undefined;
+	              this.logicAnims.splice(bestAnimIndex, 1);
+	              releaseProcessedLogicObject(deletedHint, 'anim');
+	            } else {
+	              anim.processedLogicTick = this.tick;
+	            }
+	          } else {
+	            const parachuteEntity = bestParachuteEntity!;
+	            const parachuteHint = parachuteEntity.fallParachuteAnimLogicIndexHint;
+	            processFallingParachuteAnim(parachuteEntity);
+	            parachuteEntity.fallParachuteAnimProcessedTick = this.tick;
+	            if (parachuteHint !== undefined && !parachuteEntity.fallParachuteAnimActive) {
+	              releaseProcessedLogicObject(parachuteHint, 'parachute');
+	            }
+	          }
         }
         if (!processAll) updateProjectilesThrough(maxLogicIndexHint);
       };
@@ -2341,8 +2726,13 @@ export class Game {
       for (let i = 0; i < this._preBuildingEntityCount; i++) {
         const entity = this.entities[i];
         if (!entity || entity.isAirUnit) continue;
+        if (!entity.occupiesCppLogic()) continue;
         const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
         updateProjectilesThrough(effectiveLogicIdx - 1);
+        if (skipShiftedLogicObject(effectiveLogicIdx)) {
+          entity.lastLogicProcessedTick = this.tick;
+          continue;
+        }
 		        if (ScenarioRandom._tagLogging) {
 		          ScenarioRandom._sourceTag = entity.stats.isInfantry
 		            ? 10000 + effectiveLogicIdx
@@ -2367,6 +2757,7 @@ export class Game {
         const s = this.structures[structureIndex];
         const effectiveLogicIdx = logicIdx;
         updateProjectilesThrough(effectiveLogicIdx - 1);
+        if (skipShiftedLogicObject(effectiveLogicIdx)) continue;
 		        if (ScenarioRandom._tagLogging) {
 		          ScenarioRandom._sourceTag = 12000 + effectiveLogicIdx;
 		          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
@@ -2379,6 +2770,18 @@ export class Game {
             // LogicClass::AI decrements its loop index when the current object
             // moved itself out. The shifted object is processed this frame at
             // the same Logic index/source tag.
+	            this.traceCppLogicRelease('structure', effectiveLogicIdx, {
+	              type: s.type,
+	              house: s.house,
+	              cell: [s.cx, s.cy],
+	            });
+            this.shiftCppLogicHintsAfter(
+              effectiveLogicIdx,
+              undefined,
+              ctx.inflightProjectiles,
+              ctx.logicAnims,
+              ctx.effects,
+            );
             this.structures.splice(structureIndex, 1);
             structureIndex--;
             logicIdx--;
@@ -2439,6 +2842,10 @@ export class Game {
           if (heli && heli.alive && heli.isAirUnit) {
             const effectiveLogicIdx = heli.logicIndexHint ?? logicIdx;
             updateProjectilesThrough(effectiveLogicIdx - 1);
+            if (skipShiftedLogicObject(effectiveLogicIdx)) {
+              heli.lastLogicProcessedTick = this.tick;
+              continue;
+            }
 		            if (ScenarioRandom._tagLogging) {
 		              ScenarioRandom._sourceTag = 13000 + effectiveLogicIdx;
 		              ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
@@ -2589,13 +2996,17 @@ export class Game {
           if (!entity) continue;
 
           if (entity.isAirUnit) {
-            if (!entity.alive) continue;
+            if (!entity.occupiesCppLogic()) continue;
             if (entity._processedInBuildingPass) {
               entity._processedInBuildingPass = false; // reset for next tick
               continue;
             }
             const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
             processLogicAnimsThrough(effectiveLogicIdx - 1);
+            if (skipShiftedLogicObject(effectiveLogicIdx)) {
+              entity.lastLogicProcessedTick = this.tick;
+              continue;
+            }
             if (ScenarioRandom._tagLogging) {
               ScenarioRandom._sourceTag = 13000 + effectiveLogicIdx;
               ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
@@ -2610,8 +3021,14 @@ export class Game {
             continue;
           }
 
+          if (!entity.occupiesCppLogic()) continue;
+
           const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
           processLogicAnimsThrough(effectiveLogicIdx - 1);
+          if (skipShiftedLogicObject(effectiveLogicIdx)) {
+            entity.lastLogicProcessedTick = this.tick;
+            continue;
+          }
 			        if (ScenarioRandom._tagLogging) {
 			          ScenarioRandom._sourceTag = entity.stats.isInfantry
 			            ? 10000 + effectiveLogicIdx
@@ -2632,6 +3049,10 @@ export class Game {
 
           const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
           processLogicAnimsThrough(effectiveLogicIdx - 1);
+          if (skipShiftedLogicObject(effectiveLogicIdx)) {
+            entity.lastLogicProcessedTick = this.tick;
+            continue;
+          }
           if (ScenarioRandom._tagLogging) {
             ScenarioRandom._sourceTag = entity.stats.isInfantry
               ? 10000 + effectiveLogicIdx
@@ -2666,9 +3087,6 @@ export class Game {
         }
       }
       this.logicAnimsProcessedThisTick = true;
-      for (const entity of this.entities) {
-        processFallingParachuteAnim(entity);
-      }
 
       // Clear source tag after Phase 4 so any post-Logic RNG calls (e.g. the
       // pendingInvisibleScatters flush at line ~2320) don't inherit the final
@@ -2791,13 +3209,25 @@ export class Game {
         if (e.followUp) {
           const pendingCppAnimSlots = followUpEffects.filter(effect => effect.cppLogicSlot === true).length;
           if (this.cppAnimSlotCount() + pendingCppAnimSlots < CPP_ANIM_MAX) {
+            const effectsForHint = followUpEffects.length > 0
+              ? [...this.effects, ...followUpEffects]
+              : this.effects;
             followUpEffects.push({
               type: 'explosion', x: e.x, y: e.y,
               frame: 0, maxFrames: 20, size: e.size,
               sprite: e.followUp, spriteStart: 0,
               cppLogicSlot: true,
+              logicIndexHint: this.logicIndexHintForNewObject(
+                this.inflightProjectiles,
+                this.logicAnims,
+                effectsForHint,
+              ),
             });
           }
+        }
+        if (e.cppLogicSlot === true) {
+          this.deferCppLogicSlotRelease(e.logicIndexHint);
+          e.logicIndexHint = undefined;
         }
         return false;
       }
@@ -2974,11 +3404,6 @@ export class Game {
     // selections instead of running this duplicate strategic layer.
     this.updateAIIncome();
     this.updateAIAutocreateTeams();
-
-    // C++ BuildingClass::Repair_AI runs during each building's Logic pass. The
-    // old late AI repair sweep repaired by a separate 80% threshold and could
-    // leave lightly damaged structures permanently in IsRepairing.
-    this.updateAISellDamaged();
 
     // Base discovery — check if a player unit is near any player structure
     this.checkBaseDiscovery();
@@ -4547,13 +4972,21 @@ export class Game {
     if (!entity.alive && entity.stats.isCloakable) {
       this.updateSubCloak(entity);
     }
-    // LST door auto-close timer
+    // LST door auto-close/animation timers.
     if (entity.alive && entity.doorOpen && entity.doorTimer > 0) {
       entity.doorTimer--;
-      if (entity.doorTimer <= 0) entity.doorOpen = false;
+      if (entity.doorTimer <= 0) {
+        entity.doorClosingTicks = 5 * (6 - 1);
+      }
     }
     if (entity.alive && entity.doorOpeningTicks > 0) {
       entity.doorOpeningTicks--;
+    }
+    if (entity.alive && entity.doorClosingTicks > 0) {
+      entity.doorClosingTicks--;
+      if (entity.doorClosingTicks <= 0) {
+        entity.doorOpen = false;
+      }
     }
     // Sonar pulse timer decrement
     if (entity.sonarPulseTimer > 0) entity.sonarPulseTimer--;
@@ -4847,10 +5280,12 @@ export class Game {
       // idle so the new mission's handler fires under STAGE B this tick.
       if (!entity.stats.isInfantry && !entity.isAirUnit &&
           entity.missionQueue !== null && !entity.isDriving &&
+          !(entity.stats.isVessel && entity.doorOpen) &&
           !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
         entity.mission = entity.missionQueue;
         entity.missionQueue = null;
         entity.missionTimer = 0;
+        if (entity.mission === Mission.RETREAT) entity.retreatStatus = 0;
         missionTimerFired = true;
       }
 
@@ -5077,7 +5512,8 @@ export class Game {
         !entity.isAirUnit &&
         ((entity.mission as Mission) === Mission.HUNT ||
          (entity.mission as Mission) === Mission.RESCUE ||
-         (entity.mission as Mission) === Mission.AREA_GUARD);
+         (entity.mission as Mission) === Mission.AREA_GUARD ||
+         (entity.mission as Mission) === Mission.RETREAT);
       if ((!missionHandlerRan || runPostHandlerInfantryGuardMovement || runPostHandlerInfantryNavComAfterCommence || runPostHandlerInfantryAttackNavCom || runPostHandlerInfantryHuntMovement || runPostHandlerInfantryAreaGuardMovement || runPostHandlerInfantryMoveMovement || runPostHandlerHarvesterMovement || runPostHandlerDriveClassMove || runPostHandlerDriveClassAttack || runPostHandlerDriveClassEnter || runPostHandlerDriveClassUnload || runPostHandlerDriveClassHunt) && !entity.isAirUnit) {
         if (entity.stats.isInfantry) {
           this.runInfantryMovementAI(entity);
@@ -5094,6 +5530,8 @@ export class Game {
         this._runMissionAI(ctx => _runFiringAI(ctx, entity));
       }
 
+      this.runUnitReloadAI(entity);
+
       // C++ Doing_AI + firing-anim countdown — unchanged from legacy flow.
       entity.doingAI();
       if (entity.isFiringAnim) {
@@ -5107,13 +5545,15 @@ export class Game {
       // Commence remains inside footPerCellProcess.
       if (!entity.stats.isInfantry && entity.missionQueue !== null &&
           !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 &&
-          !(entity.isDriving && !entity.isAirUnit)) {
+          !(entity.isDriving && !entity.isAirUnit) &&
+          !(entity.stats.isVessel && entity.doorOpen)) {
         const popFromA2 =
           entity.missionQueue === Mission.MOVE &&
           entity.mission === Mission.ATTACK &&
           entity.savedMoveTarget !== null;
         entity.mission = entity.missionQueue;
         entity.missionQueue = null;
+        if (entity.mission === Mission.RETREAT) entity.retreatStatus = 0;
         if (popFromA2) {
           entity.savedMoveTarget = null;
         } else {
@@ -5135,10 +5575,12 @@ export class Game {
     // ── Legacy flow (DISPATCH_ORDER_REFACTOR=false) ────────────────────────
     if (!entity.stats.isInfantry && !entity.isAirUnit &&
         entity.missionQueue !== null && !entity.isDriving &&
+        !(entity.stats.isVessel && entity.doorOpen) &&
         !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0) {
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
       entity.missionTimer = 0;
+      if (entity.mission === Mission.RETREAT) entity.retreatStatus = 0;
       missionTimerFired = true;
     }
 
@@ -5173,7 +5615,8 @@ export class Game {
     // coordinateMove for parity — otherwise Mission_Move would fire 1 tick earlier
     // than WASM for reinforcement MCVs (SCG11EA drift).
     const blockCommenceDrive = !entity.stats.isInfantry && !entity.isAirUnit && entity.isDriving;
-    if (entity.missionQueue !== null && !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive) {
+    const blockCommenceDoor = entity.stats.isVessel && entity.doorOpen;
+    if (entity.missionQueue !== null && !entity.firePrepActive && !entity.isFiringAnim && entity.nonInterruptAnimTicks <= 0 && !blockCommenceDrive && !blockCommenceDoor) {
       // A2 restore: if popping back to MOVE from a TS-only ATTACK the A2 scan created
       // (signaled by savedMoveTarget != null), keep the current missionTimer instead of
       // resetting to 0. Without this, the unit's Mission_Move fires on the next tick and
@@ -5186,6 +5629,7 @@ export class Game {
         entity.savedMoveTarget !== null;
       entity.mission = entity.missionQueue;
       entity.missionQueue = null;
+      if (entity.mission === Mission.RETREAT) entity.retreatStatus = 0;
       if (popFromA2) {
         entity.savedMoveTarget = null;
         // Timer preserved from prior ATTACK — continues the C++-aligned countdown.
@@ -5198,9 +5642,28 @@ export class Game {
       this.runInfantryFearAI(entity, infantryDrivingAtLogicStart);
     }
 
+    this.runUnitReloadAI(entity);
+
     this._updateEntityPostDispatch(entity, missionTimerFired);
     this.decrementEntityCdTimersEndOfLogic(entity);
     return;
+  }
+
+  /** C++ UnitClass::Reload_AI — V2 launchers reload one rocket when stationary
+   *  and their Reload CDTimer reaches zero. While driving, Reload is incremented
+   *  after the frame decrement, effectively pausing the reload countdown. */
+  private runUnitReloadAI(entity: Entity): void {
+    if (entity.type !== UnitType.V_V2RL || entity.ammo >= entity.maxAmmo) return;
+    if (entity.isDriving) {
+      entity.reloadTimer++;
+      return;
+    }
+    if (entity.reloadTimer === 0) {
+      entity.ammo++;
+      if (entity.ammo < entity.maxAmmo) {
+        entity.reloadTimer = GAME_TICKS_PER_SEC * 30;
+      }
+    }
   }
 
   /** C++ infantry.cpp:1190-1195 clears IsFiring once the firing Doing sequence
@@ -5552,7 +6015,10 @@ export class Game {
         }
         // C++ foot.cpp:570: Mission_Attack returns Normal_Delay+Random_Pick(0,2)
         if (missionTimerFired) {
+          const savedTag = ScenarioRandom._sourceTag;
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60030;
           const delay = 14 + ScenarioRandom.nextInRange(0, 2);
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
           // Commence() runs after Mission_Attack and resets Timer=0 if it pops
           // a queued mission. Do not pop here; InfantryClass::AI's normal
           // !IsDriving/!IsFiring/Doing gate owns that transition.
@@ -5905,8 +6371,9 @@ export class Game {
         }
         break;
       case Mission.RETREAT:
-        // Move to nearest map edge and exit the map
-        this.updateRetreat(entity);
+        if (missionTimerFired) {
+          entity.missionTimer = this.updateRetreat(entity);
+        }
         break;
       case Mission.AMBUSH:
         // Sleep until enemy enters sight range, then switch to HUNT
@@ -6329,6 +6796,8 @@ export class Game {
     //   vessel.cpp:659       post-DriveClass::AI Commence (gated IsDoorClosed)
     if (entity.stats.isInfantry) return; // Handled by runInfantryMovementAI
     const m0 = entity.mission as Mission;
+    const skipZoneCheckThisPass = entity.skipDriveZoneCheckOnce;
+    entity.skipDriveZoneCheckOnce = false;
 
     // Phase 3 (JOINT-REFACTOR §3.2) — DriveClass::AI close-enough NavCom clear +
     // Basic_Path regeneration. Gated on DRIVE_CLASS_AI_PORT. See the flag
@@ -6391,6 +6860,10 @@ export class Game {
       entity.pathIndex = 0;
     }
 
+    if (DRIVE_CLASS_AI_PORT && this.repairDriveCurrentCellPathRotation(entity)) {
+      return;
+    }
+
     // C++ drive.cpp:1369-1379 — stationary drive-class objects rotate before
     // Start_Of_Move/Basic_Path is considered. This applies even when Path[0] is
     // FACING_NONE and PathDelay is active; an earlier Do_Turn request continues
@@ -6420,9 +6893,10 @@ export class Game {
         && !entity.isDriving
         && entity.trackNumber <= 0
         && this.refreshTechnoLock(entity)
-        && entity.moveTarget
-        && m0 !== Mission.ENTER
-        && m0 !== Mission.UNLOAD) {
+	        && entity.moveTarget
+	        && m0 !== Mission.ENTER
+	        && m0 !== Mission.UNLOAD
+	        && !skipZoneCheckThisPass) {
       const destCell = {
         cx: Math.floor(entity.moveTarget.lx / 256),
         cy: Math.floor(entity.moveTarget.ly / 256),
@@ -6584,7 +7058,7 @@ export class Game {
 
       if (m === Mission.MOVE) {
         this.updateMove(entity, false, driveClassTrackReentry, skipObjectNavComPathShorten);
-      } else if (m === Mission.HUNT || m === Mission.RESCUE || m === Mission.ATTACK || m === Mission.AREA_GUARD) {
+      } else if (m === Mission.HUNT || m === Mission.RESCUE || m === Mission.ATTACK || m === Mission.AREA_GUARD || m === Mission.RETREAT) {
         // DriveClass::AI is mission-agnostic for active NavCom/Path movement.
         // Keep the mission intact; only Mission_MOVE arrival enters idle.
         if (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving) {
@@ -6928,6 +7402,7 @@ export class Game {
             if (other.type === UnitType.V_LST) {
               other.doorOpen = true;
               other.doorTimer = 60; // 4 seconds auto-close
+              other.doorClosingTicks = 0;
             }
             // Mark for removal from world (will be re-added on unload)
             entity.mission = Mission.SLEEP;
@@ -7067,6 +7542,7 @@ export class Game {
           entity.doorOpen = true;
           entity.doorTimer = 60;
           entity.doorOpeningTicks = 5 * (6 - 1); // LST_Open_Door Open_Door(5, 6)
+          entity.doorClosingTicks = 0;
         }
         entity.vesselUnloadStatus = 2;
         return 1;
@@ -7096,12 +7572,18 @@ export class Game {
         return 14;
 
       case 4: // CLOSING_DOOR
-        entity.doorOpen = false;
-        entity.doorTimer = 0;
-        entity.doorOpeningTicks = 0;
+        if (entity.type === UnitType.V_LST && entity.doorOpen) {
+          entity.doorTimer = 0;
+          entity.doorOpeningTicks = 0;
+          if (entity.doorClosingTicks <= 0) {
+            entity.doorClosingTicks = 5 * (6 - 1); // LST_Close_Door Close_Door(5, 6)
+          }
+          return 14;
+        }
         entity.vesselUnloadStatus = 0;
         if (entity.isALoaner) {
           entity.mission = Mission.RETREAT;
+          entity.retreatStatus = 0;
           entity.teamMissions = [];
           entity.teamMissionIndex = 0;
         } else {
@@ -7131,6 +7613,7 @@ export class Game {
     if (entity.type === UnitType.V_LST) {
       entity.doorOpen = true;
       entity.doorTimer = 60;
+      entity.doorClosingTicks = 0;
     }
 
     const passenger = entity.passengers.pop()!;
@@ -7507,7 +7990,10 @@ export class Game {
           // shore placement shim for LSTs here.
           if (entity.passengers.length > 0) {
             entity.doorOpen = entity.type === UnitType.V_LST ? true : entity.doorOpen;
-            if (entity.type === UnitType.V_LST) entity.doorTimer = 60;
+            if (entity.type === UnitType.V_LST) {
+              entity.doorTimer = 60;
+              entity.doorClosingTicks = 0;
+            }
             if (entity.mission !== Mission.UNLOAD) {
               entity.mission = Mission.UNLOAD;
               entity.missionTimer = 0;
@@ -7524,6 +8010,7 @@ export class Game {
           if (entity.type === UnitType.V_LST) {
             entity.doorOpen = true;
             entity.doorTimer = 60;
+            entity.doorClosingTicks = 0;
           }
           // For naval units, find shore cells to unload onto
           const isNaval = entity.isNavalUnit;
@@ -7598,6 +8085,7 @@ export class Game {
           // This causes the aircraft to take off and fly off the nearest map edge.
           if (entity.isALoaner) {
             entity.mission = Mission.RETREAT;
+            entity.retreatStatus = 0;
             entity.teamMissions = []; // clear team script so it doesn't override retreat
             entity.teamMissionIndex = 0;
             // Clear old moveTarget (was the unload waypoint) so updateRetreat
@@ -8267,8 +8755,11 @@ export class Game {
     if (anyContact) {
       transport.isTethered = false;
       if (!transport.isAirUnit) {
-        transport.doorOpen = false;
-        transport.doorOpeningTicks = 0;
+        if (transport.type !== UnitType.V_LST) {
+          transport.doorOpen = false;
+          transport.doorOpeningTicks = 0;
+          transport.doorClosingTicks = 0;
+        }
       }
     }
   }
@@ -8904,6 +9395,83 @@ export class Game {
       entity.pathIndex = 0;
     }
     return advanced;
+  }
+
+  /**
+   * TS stores DriveClass paths as absolute cells, while C++ stores Path[] as
+   * facings. After a track finishes, the TS cursor can still point at the cell
+   * the object already occupies even though C++ still has residual Path[0]
+   * facings and is rotating toward the next one. Normalize that stale current
+   * cell before the DriveClass::AI zone-abort check; if doing so reveals a
+   * next facing that C++ would already be rotating toward, spend this tick's
+   * Rotation_Adjust budget instead of clearing NavCom early.
+   */
+  private repairDriveCurrentCellPathRotation(entity: Entity): boolean {
+    if (!this.isDriveClassPathEntity(entity)) return false;
+    if (entity.isDriving || entity.trackNumber > 0 || !entity.moveTarget) return false;
+    if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) return false;
+
+    const body256 = entity.bodyFacing256 >= 0
+      ? (entity.bodyFacing256 & 0xff)
+      : ((entity.facing * 32) & 0xff);
+    const desired256 = entity.desiredFacing256 >= 0
+      ? (entity.desiredFacing256 & 0xff)
+      : (((entity.desiredFacing ?? entity.facing) * 32) & 0xff);
+    if (body256 !== desired256) return false;
+
+    const current = entity.path[entity.pathIndex];
+    if (!current || current.cx !== entity.cell.cx || current.cy !== entity.cell.cy) return false;
+
+    const savedPathThreshold = entity.pathThreshold;
+    const savedTryCount = entity.tryCount;
+    const advanced = this.skipDrivePathCurrentCell(entity);
+    if (!advanced) return false;
+
+    if ((entity.path.length === 0 || entity.pathIndex >= entity.path.length) && entity.pathDelay <= 0) {
+      const destCell = {
+        cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+        cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+      };
+      if (destCell.cx !== entity.cell.cx || destCell.cy !== entity.cell.cy) {
+        const pathGoal = this.resolveBasicPathGoal(entity, destCell);
+        const regenerated = this.findDriveClassBasicPath(entity, pathGoal);
+        if (regenerated.length > 0) {
+          this.setDrivePath(entity, regenerated);
+          // This repair reconstructs a residual C++ Path[] after TS missed the
+          // Start_Of_Move/Basic_Path call that produced it on the prior frame.
+          // Basic_Path also starts PathDelay; by the time this repair observes
+          // the residual turn, one frame of that CDTimer has already elapsed.
+          entity.pathDelay = Math.max(entity.pathDelay, PATH_DELAY_TICKS - 1);
+        } else {
+          entity.pathThreshold = savedPathThreshold;
+          entity.tryCount = savedTryCount;
+        }
+      }
+    }
+
+    if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) return false;
+
+    const next = entity.path[entity.pathIndex];
+    const facing8 = entity.drivePathFacings[0] ??
+      directionTo(
+        {
+          x: entity.cell.cx * CELL_SIZE + CELL_SIZE / 2,
+          y: entity.cell.cy * CELL_SIZE + CELL_SIZE / 2,
+        },
+        {
+          x: next.cx * CELL_SIZE + CELL_SIZE / 2,
+          y: next.cy * CELL_SIZE + CELL_SIZE / 2,
+        },
+      );
+    if (facing8 < 0 || facing8 >= DIR_DX.length) return false;
+
+    const nextDesired256 = (facing8 * 32) & 0xff;
+    entity.desiredFacing = facing8;
+    entity.desiredFacing256 = nextDesired256;
+    if (body256 === nextDesired256) return false;
+
+    entity.tickRotation();
+    return true;
   }
 
   /**
@@ -9761,15 +10329,6 @@ export class Game {
     driveClassTrackReentry = false,
     skipObjectNavComPathShorten = false,
   ): void {
-    // C++ vessel.cpp:592, 658 — vessel transports can't Commence (start moving)
-    // until Is_Door_Closed() returns true. LST spawned with cargo has door open
-    // and must wait for it to close (~25 ticks). Without this delay, LST reaches
-    // unload point ~25 ticks early in TS, breaking SCG09EA et al.
-    if (entity.stats.isVessel && entity.isTransport && entity.doorOpen) {
-      entity.animState = AnimState.IDLE;
-      return;
-    }
-
     const hasInfantryHeadTo =
       entity.stats.isInfantry && entity.isDriving && entity.headToLX > 0 && entity.headToLY > 0;
 
@@ -10448,6 +11007,7 @@ export class Game {
         const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
         const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
           skipCommence,
+          rofBias: this.getROFBias(entity.house),
           hasLegalTarCom: liveTar,
           pathShortenEligible,
           targetInRange: inRangeNow,
@@ -11133,6 +11693,7 @@ export class Game {
       // Persist trigger name before entity is removed from array.
       if (e.triggerName) this.destroyedTriggerNames.add(e.triggerName);
       this.detachEntityFromTargeting(e, true);
+      this.releaseCppLogicSlotForEntity(e);
 
       const createsCppCorpseAnim = e.stats.isInfantry &&
         !e.isAnt &&
@@ -11141,12 +11702,16 @@ export class Game {
         e.deathVariant >= 1 &&
         e.deathVariant <= 4;
       if (createsCppCorpseAnim && this.reserveCppAnimSlot()) {
-        if (this.corpses.length >= Game.MAX_CORPSES) this.corpses.shift();
+        if (this.corpses.length >= Game.MAX_CORPSES) {
+          const dropped = this.corpses.shift();
+          if (dropped) this.releaseCppLogicSlotForCorpse(dropped);
+        }
         this.corpses.push({
           x: e.pos.x, y: e.pos.y, type: e.type, facing: e.facing,
           isInfantry: e.stats.isInfantry, isAnt: e.isAnt, alpha: 0.5,
           deathVariant: e.deathVariant,
           cppAnimStartTick: this.tick,
+          logicIndexHint: this.logicIndexHintForNewObject(),
         });
       }
     }
@@ -11360,7 +11925,8 @@ export class Game {
 	    // C++ FootClass::Approach_Target is gated by !Target_Legal(NavCom).
 	    if (entity.moveTarget) return false;
 	
-	    if (entity.target?.alive && entity.weapon) {
+	    if (entity.target?.alive) {
+	      if (!entity.weapon) return true;
 	      if (!entity.inRange(entity.target)) return true;
 	
 	      // C++ foot.cpp:947 uses TechnoClass::IsLocked here. That flag means the
@@ -11373,7 +11939,8 @@ export class Game {
 	    if (entity.targetStructure?.alive) {
 	      const structure = entity.targetStructure as MapStructure;
 	      const weapon = this.selectedWeaponForStructureTarget(entity, structure);
-	      if (!weapon || !this.canWeaponTargetStructure(weapon)) return false;
+	      if (!weapon) return true;
+	      if (!this.canWeaponTargetStructure(weapon)) return false;
 	      if (!this.entityInRangeOfStructureTarget(entity, structure, weapon)) return true;
 	      return !this.map.inBounds(entity.cell.cx, entity.cell.cy);
 	    }
@@ -11386,17 +11953,18 @@ export class Game {
 	
 	    let targetLX: number;
 	    let targetLY: number;
-	    let weapon: WeaponStats;
+	    let weaponRangeLeptons = 0;
 	    let structureRangeBonus = 0;
-	    if (entity.target?.alive && entity.weapon) {
-	      weapon = entity.weapon;
+	    if (entity.target?.alive) {
+	      const weapon = entity.weapon;
+	      if (weapon) weaponRangeLeptons = weapon.range * LEPTON_SIZE;
 	      targetLX = entity.target.leptonX;
 	      targetLY = entity.target.leptonY;
 	    } else if (entity.targetStructure?.alive) {
 	      const structure = entity.targetStructure as MapStructure;
 	      const structureWeapon = this.selectedWeaponForStructureTarget(entity, structure);
-	      if (!structureWeapon || !this.canWeaponTargetStructure(structureWeapon)) return;
-	      weapon = structureWeapon;
+	      if (structureWeapon && !this.canWeaponTargetStructure(structureWeapon)) return;
+	      if (structureWeapon) weaponRangeLeptons = structureWeapon.range * LEPTON_SIZE;
 	      const target = scenarioStructureTargetLeptons(structure);
 	      targetLX = target.lx;
 	      targetLY = target.ly;
@@ -11408,7 +11976,7 @@ export class Game {
 	    // C++ foot.cpp:856-946 — exact Approach_Target implementation.
 	    // maxrange = Weapon_Range - 0x00B7 (183 leptons), with BuildingClass
 	    // targets adding (Width + Height) * 0x40 before the safety subtraction.
-	    const weaponRangeLeptons = weapon.range * LEPTON_SIZE + structureRangeBonus;
+	    weaponRangeLeptons += structureRangeBonus;
 	    let maxrange = weaponRangeLeptons - 0xB7; // 768-183=585
 	    maxrange = Math.max(maxrange, 0);
 
@@ -11443,20 +12011,28 @@ export class Game {
           // object's SpeedType. FLOAT vessels must evaluate WATER terrain here;
           // using land passability makes naval Approach_Target miss valid water
           // cells and fall back near the target (SCG07EA opening sub chase).
-          const cellIdx = tryCY * 128 + tryCX;
-          const terrainClear = entity.isNavalUnit
-            ? this.map.isWaterPassable(tryCX, tryCY)
-            : this.map.isTerrainPassable(tryCX, tryCY);
-          const vehicleReservation = this.map.getVehicleTrackReservation(tryCX, tryCY);
-          if (tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128 &&
-              terrainClear &&
-              !this.map.vehicleOccupancy.has(cellIdx) &&
-              this.map.occupancy[cellIdx] === 0 &&
-              vehicleReservation === 0) {
-            bestCX = tryCX;
-            bestCY = tryCY;
-            found = true;
-            break;
+          //
+          // Is_Clear_To_Move also rejects cells with a BuildingClass occupier.
+          // Keep that in the generic candidate predicate so HUNT/attack approach
+          // cannot assign a NavCom into a live structure footprint.
+          const inRadar = tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128;
+          if (inRadar) {
+            const cellIdx = tryCY * 128 + tryCX;
+            const terrainClear = entity.isNavalUnit
+              ? this.map.isWaterPassable(tryCX, tryCY)
+              : this.map.isTerrainPassable(tryCX, tryCY);
+            const vehicleReservation = this.map.getVehicleTrackReservation(tryCX, tryCY);
+            const structureClear = !this.structures.some(s => this.structureOccupiesCell(s, tryCX, tryCY));
+            if (terrainClear &&
+                structureClear &&
+                !this.map.vehicleOccupancy.has(cellIdx) &&
+                this.map.occupancy[cellIdx] === 0 &&
+                vehicleReservation === 0) {
+              bestCX = tryCX;
+              bestCY = tryCY;
+              found = true;
+              break;
+            }
           }
         }
       }
@@ -11489,11 +12065,11 @@ export class Game {
   }
 
   /** Retreat — delegates to missionAI.ts */
-  private updateRetreat(entity: Entity): void {
+  private updateRetreat(entity: Entity): number {
     if (entity.stats.isVessel && entity.isTransport && entity.moveTarget === null) {
       this.abortTransportRadioContactForNewDestination(entity);
     }
-    this._runMissionAI(ctx => _updateRetreat(ctx, entity));
+    return this._runMissionAI(ctx => _updateRetreat(ctx, entity));
   }
 
   /** Transport evacuate — delegates to missionAI.ts */
@@ -11756,16 +12332,17 @@ export class Game {
    * then multiplies this throttle by TechnoType::MaxSpeed in While_Moving.
    */
   private driveSpeedThrottleRaw(entity: Entity, speedCell: { cx: number; cy: number } = entity.cell): number {
+    const speedClass = entity.isFormationMove ? entity.formationSpeedClass : entity.stats.speedClass;
     const terrainMult = entity.stats.isInfantry
       ? 1.0
-      : this.map.getSpeedMultiplier(speedCell.cx, speedCell.cy, entity.stats.speedClass);
+      : this.map.getSpeedMultiplier(speedCell.cx, speedCell.cy, speedClass);
     const authorizedStructureMult =
       !entity.stats.isInfantry &&
       !entity.isAirUnit &&
       !entity.isNavalUnit &&
       (this.isAuthorizedFactoryTetherCell(entity, speedCell.cx, speedCell.cy) ||
         this.isAuthorizedBuildingEnterCell(entity, speedCell.cx, speedCell.cy))
-        ? (TERRAIN_SPEED.Clear[entity.stats.speedClass] ?? 1.0)
+        ? (TERRAIN_SPEED.Clear[speedClass] ?? 1.0)
         : null;
     let speed = Math.floor((authorizedStructureMult ?? terrainMult) * 256);
     if (speed <= 0 && entity.stats.speed > 0) {
@@ -11783,6 +12360,11 @@ export class Game {
 
   /** C++ drive.cpp:684 — integer MaxSpeed before applying FootClass::Speed. */
   private driveClassMaxSpeedLeptons(entity: Entity): number {
+    if (entity.isFormationMove && entity.formationMaxSpeed > 0) {
+      // drive.cpp:684-685 replaces the biased type max speed outright when
+      // IsFormationMove is set; it does not apply house/speed bias again.
+      return Math.min(255, Math.floor(entity.formationMaxSpeed));
+    }
     const iniSpeed = Math.max(0, Math.min(100, entity.stats.speed));
     const typeMaxSpeed = Math.min(255, Math.floor((iniSpeed * 256) / 100));
     const biased = typeMaxSpeed * entity.speedBias * this.getGroundspeedBias(entity.house);
@@ -12257,7 +12839,9 @@ export class Game {
 		                      if (this.edgeOfWorldAI(entity)) return false;
 		                      this.cutTransportTether(entity);
 			                      const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
-			                      const r = runClassPerCellProcess(entity, PCPType.PCP_END);
+				                      const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
+				                        rofBias: this.getROFBias(entity.house),
+				                      });
 			                      const killedByMine = this.triggerMineAtCell(entity) === true && !entity.alive;
 			                      entity.isDriving = false;
 		                      if (killedByMine) return false;
@@ -12595,7 +13179,7 @@ export class Game {
     };
 
     for (const e of this.entities) {
-      if (!e.alive || !e.isPlayerUnit) continue;
+      if (!e.alive || e.house !== this.playerHouse) continue;
       if (inSight(Math.floor(e.pos.x / CELL_SIZE), Math.floor(e.pos.y / CELL_SIZE), e.stats.sight)) {
         return true;
       }
@@ -12650,9 +13234,23 @@ export class Game {
     // when the object's current cell is Map[cell].IsVisible. In TS that live
     // visibility can come from player-controlled/allied sight, but debug
     // fogDisabled reveal-all must not synthesize IsDiscoveredByPlayer.
-    return this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy) ||
-      this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy) ||
-      this.infantryOverlapTouchesPlayerMappedCell(entity);
+    if (this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy) ||
+        this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy) ||
+        this.infantryOverlapTouchesPlayerMappedCell(entity)) {
+      return true;
+    }
+
+    // C++ TechnoClass::Per_Cell_Process checks Map[cell].IsVisible, not strict
+    // PlayerPtr sight. Player-allied, non-PlayerPtr units can therefore discover
+    // themselves when their cell is visible to the player house. This is not a
+    // blanket allied-sight reveal for enemies; only the object whose own house is
+    // allied to PlayerPtr gets this fallback.
+    if (this.isAllied(entity.house, this.playerHouse)) {
+      const playerIdx = Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1;
+      return playerIdx >= 0 && this.isRevealedToHouse(entity.cell.cx, entity.cell.cy, playerIdx);
+    }
+
+    return false;
   }
 
   private isCellTrulySeen(cx: number, cy: number): boolean {
@@ -13400,6 +13998,7 @@ export class Game {
           type: 'marker', x: world.x, y: world.y,
           frame: 0, maxFrames: 90, size: 6,
           cppLogicSlot: true,
+          logicIndexHint: this.logicIndexHintForNewObject(),
         });
         this.minimapAlert(wp.cx, wp.cy);
         this.audio.play('eva_reinforcements');
@@ -13762,7 +14361,9 @@ export class Game {
         for (const eid of trigger.triggeringEntityIds) {
           const te = this.entityById.get(eid);
           if (te && te.alive) {
+            const occupiedLogicBefore = te.occupiesCppLogic();
             te.takeDamage(9999);
+            if (occupiedLogicBefore && !te.occupiesCppLogic()) this.releaseCppLogicSlotForEntity(te);
             this.effects.push({
               type: 'explosion', x: te.pos.x, y: te.pos.y,
               frame: 0, maxFrames: 18, size: 12,
@@ -13781,7 +14382,9 @@ export class Game {
       // object sweep.
       for (const e of this.entities) {
         if (e.alive && e.triggerName === trigger.name) {
+          const occupiedLogicBefore = e.occupiesCppLogic();
           e.takeDamage(9999);
+          if (occupiedLogicBefore && !e.occupiesCppLogic()) this.releaseCppLogicSlotForEntity(e);
           this.effects.push({
             type: 'explosion', x: e.pos.x, y: e.pos.y,
             frame: 0, maxFrames: 18, size: 12,
@@ -14676,6 +15279,8 @@ export class Game {
    *  building, not by the old TS instant-spawn helper. */
   private aiFactoryKindForStructure(s: MapStructure): AIFactoryKind | null {
     switch (s.type) {
+      case 'FACT':
+        return 'building';
       case 'BARR':
       case 'TENT':
       case 'KENN':
@@ -14707,16 +15312,26 @@ export class Game {
     return produced >= consumed ? 1 : Math.max(0, produced / consumed);
   }
 
+  private aiProductionPowerFractionRaw(house: House): number {
+    const ctx = this._aiCtx;
+    const consumed = _aiPowerConsumed(ctx, house);
+    if (consumed <= 0) return CPP_FIXED_ONE_RAW;
+    const produced = _aiPowerProduced(ctx, house);
+    if (produced >= consumed) return CPP_FIXED_ONE_RAW;
+    if (produced > 0) return cppFixedRaw(produced, consumed);
+    return 0;
+  }
+
   private aiFactoryBuildTime(item: ProductionItem, house: House, kind: AIFactoryKind): number {
     const mods = AI_DIFFICULTY_MODS[this.difficulty] ?? AI_DIFFICULTY_MODS.normal;
-    let time = Math.trunc(item.buildTime * mods.buildSpeedBias);
+    let time = cppFixedMulInt(cppFixedRawFromNumber(mods.buildSpeedBias), item.buildTime);
 
     // C++ TechnoClass::Time_To_Build power quantization (techno.cpp:677-682).
-    let power = this.aiProductionPowerFraction(house);
-    if (power > 1) power = 1;
-    if (power < 1 && power > 0.75) power = 0.75;
-    if (power < 0.5) power = 0.5;
-    time = Math.trunc(time / power);
+    let power = this.aiProductionPowerFractionRaw(house);
+    if (power > CPP_FIXED_ONE_RAW) power = CPP_FIXED_ONE_RAW;
+    if (power < CPP_FIXED_ONE_RAW && power > cppFixedRaw(3, 4)) power = cppFixedRaw(3, 4);
+    if (power < cppFixedRaw(1, 2)) power = cppFixedRaw(1, 2);
+    time = cppFixedMulInt(cppFixedInverseRaw(power), time);
 
     if (kind === 'infantry') {
       time = Math.trunc(time / this.aiInfantryFactoryCount(house));
@@ -14726,7 +15341,10 @@ export class Game {
     // (factory.cpp:430-431), MaxIQ default=5.
     if (mods.isBuildSlowdown) {
       const iq = this.houseIQs.get(house) ?? 3;
-      time = Math.trunc(time * 10 / (iq + 5));
+      time = cppFixedMulInt(
+        cppFixedInverseRaw(cppFixedRaw(iq + 5, 10)),
+        time,
+      );
     }
 
     return Math.max(1, time);
@@ -14734,8 +15352,8 @@ export class Game {
 
   private aiFactoryRate(item: ProductionItem, house: House, kind: AIFactoryKind): number {
     const time = this.aiFactoryBuildTime(item, house, kind);
-    const startPower = Math.max(1 / 16, Math.min(1, this.aiProductionPowerFraction(house)));
-    const powerAdjusted = Math.trunc(time / startPower);
+    const startPower = Math.max(cppFixedRaw(1, 16), Math.min(CPP_FIXED_ONE_RAW, this.aiProductionPowerFractionRaw(house)));
+    const powerAdjusted = cppIntDivFixed(time, startPower);
     return Math.max(1, Math.min(255, Math.trunc(powerAdjusted / AI_FACTORY_STEP_COUNT)));
   }
 
@@ -14751,9 +15369,15 @@ export class Game {
     const findByKind = (type: string): ProductionItem | null =>
       this.scenarioProductionItems.find(item =>
         item.type === type &&
-        !item.isStructure &&
+        (kind === 'building' ? item.isStructure : !item.isStructure) &&
         getFactoryType(item) === kind,
       ) ?? null;
+
+    if (kind === 'building') {
+      const type = state.buildStructure;
+      if (!type) return null;
+      return findByKind(type);
+    }
 
     if (kind === 'infantry') {
       const type = state.buildInfantry;
@@ -14848,6 +15472,8 @@ export class Game {
       state.buildUnit = null;
     } else if (state && kind === 'vessel' && state.buildVessel === item.type) {
       state.buildVessel = null;
+    } else if (state && kind === 'building' && state.buildStructure === item.type) {
+      state.buildStructure = null;
     }
   }
 
@@ -14887,6 +15513,112 @@ export class Game {
         factory.timer = 0;
       }
     }
+  }
+
+  private nextBaseBuildableNode(house: House, type?: string): { type: string; cell: number; house: House } | null {
+    const aliveSet = new Set<string>();
+    for (const s of this.structures) {
+      if (!s.alive) continue;
+      aliveSet.add(`${s.type}:${s.cx},${s.cy}`);
+    }
+
+    for (const bp of this.baseBlueprint) {
+      if (bp.house !== house) continue;
+      if (type !== undefined && bp.type !== type) continue;
+      const cx = bp.cell % MAP_CELLS;
+      const cy = Math.floor(bp.cell / MAP_CELLS);
+      if (!aliveSet.has(`${bp.type}:${cx},${cy}`)) return bp;
+    }
+
+    return null;
+  }
+
+  private aiStructurePlacementHasMobileBlocker(type: string, cx: number, cy: number): boolean {
+    const cells = new Set(getStructureOccupyCells(type, cx, cy).map(cell => `${cell.cx},${cell.cy}`));
+    for (const e of this.entities) {
+      if (!e.alive || e.inLimbo) continue;
+      if (cells.has(`${e.cell.cx},${e.cell.cy}`)) return true;
+    }
+    return false;
+  }
+
+  private canPlaceAIStructure(type: string, cx: number, cy: number): boolean {
+    for (const cell of getStructureOccupyCells(type, cx, cy)) {
+      if (cell.cx < this.map.boundsX || cell.cy < this.map.boundsY ||
+          cell.cx >= this.map.boundsX + this.map.boundsW ||
+          cell.cy >= this.map.boundsY + this.map.boundsH) {
+        return false;
+      }
+      if (!this.map.isBuildable(cell.cx, cell.cy)) return false;
+    }
+    return true;
+  }
+
+  private spawnAIProducedStructure(type: string, house: House, cx: number, cy: number): MapStructure {
+    const maxHp = STRUCTURE_MAX_HP[type] ?? 256;
+    const structure: MapStructure = {
+      type,
+      image: STRUCTURE_IMAGES[type] ?? type.toLowerCase(),
+      house,
+      cx,
+      cy,
+      hp: maxHp,
+      maxHp,
+      armor: STRUCTURE_ARMOR[type] ?? 'wood',
+      alive: true,
+      rubble: false,
+      weapon: STRUCTURE_WEAPONS[type],
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      mission: Mission.CONSTRUCTION,
+      missionTimer: 0,
+      footprintTerrain: captureStructureFootprintTerrain(this.map, type, cx, cy),
+      // C++ TechnoClass::Unlimbo immediately calls Enter_Idle_Mode(true) and
+      // Commence() for the factory product, so its construction state has
+      // consumed the initial frame before the next visible Logic snapshot.
+      buildProgress: 1 / structureConstructionProgressTicks(type),
+      ...(type === 'TSLA' ? { isCharging: false, isCharged: false, chargeStage: 0, chargeRateCounter: 0 } : {}),
+      ...(type === 'GAP' ? { gapArmTimer: 0 } : {}),
+      ...(type === 'FACT' || type === 'CONS' ? { isToRepair: true } : {}),
+    };
+
+    this.structures.push(structure);
+    for (const cell of getStructureOccupyCells(type, cx, cy)) {
+      this.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+    }
+    for (const bc of getBibCells(type, cx, cy)) {
+      this.map.setBibSmudge(bc.cx, bc.cy, true);
+    }
+
+    return structure;
+  }
+
+  /** C++ BuildingClass::Exit_Object RTTI_BUILDING branch (building.cpp:2120-2150). */
+  private exitAIBuildingFactoryProduct(s: MapStructure): 0 | 1 | 2 {
+    const factory = s.aiFactory;
+    if (!factory || factory.kind !== 'building') return 0;
+
+    const node = this.nextBaseBuildableNode(s.house, factory.productType);
+    const pos = node
+      ? { cx: node.cell % MAP_CELLS, cy: Math.floor(node.cell / MAP_CELLS) }
+      : _aiPlaceStructure(this._aiCtx, s.house, factory.productType);
+    if (!pos) return 0;
+
+    if (this.aiStructurePlacementHasMobileBlocker(factory.productType, pos.cx, pos.cy)) {
+      return 1;
+    }
+    if (!this.canPlaceAIStructure(factory.productType, pos.cx, pos.cy)) {
+      return 0;
+    }
+
+    this.spawnAIProducedStructure(factory.productType, s.house, pos.cx, pos.cy);
+
+    const state = this.aiStates.get(s.house);
+    if (node && state?.buildStructure === factory.productType) {
+      state.buildStructure = null;
+    }
+    return 2;
   }
 
   private findInfantryFactoryExitCell(s: MapStructure, product: string): CellPos | null {
@@ -15113,6 +15845,8 @@ export class Game {
     const factory = s.aiFactory;
     if (!factory) return 0;
     switch (factory.kind) {
+      case 'building':
+        return this.exitAIBuildingFactoryProduct(s);
       case 'infantry':
         return this.exitAIInfantryFactoryProduct(s);
       case 'unit':
@@ -15618,15 +16352,14 @@ export class Game {
   private _repairAITick(s: MapStructure): void {
     if (!this.isAllied(s.house, this.playerHouse)) {
       const state = this.houseRuntimeStates.get(s.house) ?? this.ensureHouseRuntimeState(s.house);
-      if (state && state.iq >= 1) {
+      if (state && state.iq >= AI_BUILD_RULES.iqRepairSell) {
         // Start gate: C++ building.cpp:5494-5515.
         const credits = this.houseCredits.get(s.house) ?? 0;
         const isCaptured = s.originalHouse !== undefined && s.originalHouse !== s.house;
-        const REPAIR_THRESHHOLD = 100; // rules.ini [AI] CreditReserve.
         const canStart = !isStructureUnderConstruction(s)
           && s.sellProgress === undefined
           && s.hp < s.maxHp
-          && credits >= REPAIR_THRESHHOLD
+          && credits >= AI_BUILD_RULES.creditReserve
           && !state.didRepair
           && !s.isRepairing
           && (isCaptured || s.isToRepair);
@@ -15647,16 +16380,30 @@ export class Game {
           state.repairTimer = ScenarioRandom.nextInRange(lo, hi);
           if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
           state.repairTimerSetTick = this.tick;
+        } else if (s.hp < s.maxHp &&
+                   credits < AI_BUILD_RULES.creditReserve &&
+                   (s.isAllowedToSell ?? false) &&
+                   (s.isTickedOff ?? false) &&
+                   state.techLevel >= AI_BUILD_RULES.iqSellBack &&
+                   !s.triggerName &&
+                   s.type !== 'FACT' &&
+                   s.hp / s.maxHp < CONDITION_RED) {
+          const savedTag = ScenarioRandom._sourceTag;
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70021;
+          const shouldSell = ScenarioRandom.nextInRange(0, 50) < state.techLevel;
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+          if (shouldSell) {
+            s.mission = Mission.DECONSTRUCTION;
+            s.missionTimer = 0;
+            s.sellProgress = 0;
+            s.sellHpAtStart = s.hp;
+            s.isRepairing = false;
+          }
         }
       }
     }
 
     this._applyStructureRepairPulse(s);
-  }
-
-  /** AI auto-sell — IQ >= 3 houses sell near-death structures for partial refund */
-  private updateAISellDamaged(): void {
-    this._runAI(ctx => _updateAISellDamaged(ctx));
   }
 
   /** AI passive income — AI houses earn credits from refineries */
@@ -15945,6 +16692,20 @@ export class Game {
     if (s.missionTimer > 0) return false;
 
     const mission = s.mission ?? Mission.GUARD;
+    if (mission === Mission.CONSTRUCTION) {
+      // C++ BuildingClass::Mission_Construction handles the ready edge, then
+      // Assign_Mission(MISSION_GUARD) without running Guard jitter that frame.
+      if (!isStructureUnderConstruction(s)) {
+        s.mission = Mission.GUARD;
+        s.missionQueue = null;
+        s.missionTimer = 0;
+        s.isReadyToCommence = false;
+        s.readyToCommenceTick = undefined;
+      } else {
+        s.missionTimer = 1;
+      }
+      return false;
+    }
     if (mission === Mission.REPAIR && (s.type === 'AFLD' || s.type === 'HPAD')) {
       return this.updateAircraftPadRepairMission(s);
     }
@@ -16181,9 +16942,12 @@ export class Game {
 
     if (status === INITIAL) {
       if (unit && unit.alive && !unit.inLimbo) {
-        unit.mission = Mission.GUARD;
-        unit.missionQueue = null;
-        unit.missionTimer = 0;
+        // C++ building.cpp Mission_Unload INITIAL calls
+        // Assign_Mission(MISSION_GUARD) followed by Commence(). Assign_Mission
+        // is a no-op when the product is already in GUARD, preserving the
+        // timer consumed by its creation-tick Mission_Guard dispatch.
+        assignMission(unit, Mission.GUARD);
+        commence(unit, 'weap-unload-initial');
       }
       this.openWeapDoor(s);
       s.weapUnloadStatus = CLEAR_BIB;

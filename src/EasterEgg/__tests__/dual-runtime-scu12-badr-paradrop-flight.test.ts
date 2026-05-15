@@ -24,6 +24,7 @@ const serverUp = isDevServerAvailable();
 let serverHandle: ParityServerHandle | undefined;
 
 type DropPos = { cx: number; cy: number; lx: number; ly: number };
+type BadrState = { cx: number; cy: number; lx: number; ly: number; cargo: number | undefined; mission: number | string; timer: number | undefined };
 
 function sortDropPositions(rows: DropPos[]): DropPos[] {
   return [...rows].sort((a, b) => (a.ly - b.ly) || (a.lx - b.lx) || (a.cx - b.cx) || (a.cy - b.cy));
@@ -47,6 +48,18 @@ function wasmParadroppedE2s(state: RAGameState): DropPos[] {
   return sortDropPositions(wasmUnits(state)
     .filter(u => u.t === 'E2' && (u.lx ?? 0) >= 8800 && (u.lx ?? 0) <= 9700 && (u.ly ?? 0) >= 9800 && (u.ly ?? 0) <= 10900)
     .map(u => ({ cx: u.cx, cy: u.cy, lx: u.lx!, ly: u.ly! })));
+}
+
+function tsBadr(state: AgentState): BadrState {
+  const badr = tsUnits(state).find(u => u.t === 'BADR' && u.h === 'USSR');
+  expect(badr, 'TS SCU12 BADR').toBeDefined();
+  return { cx: badr!.cx, cy: badr!.cy, lx: badr!.lx!, ly: badr!.ly!, cargo: badr!.cargo, mission: badr!.m, timer: badr!.mt };
+}
+
+function wasmBadr(state: RAGameState): BadrState {
+  const badr = wasmUnits(state).find(u => u.t === 'BADR' && u.house === 'USSR');
+  expect(badr, 'C++ SCU12 BADR').toBeDefined();
+  return { cx: badr!.cx, cy: badr!.cy, lx: badr!.lx!, ly: badr!.ly!, cargo: badr!.cargo, mission: badr!.m, timer: badr!.mt };
 }
 
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU12 BADR paradrop flight path', () => {
@@ -78,6 +91,27 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU12 BADR paradrop flight 
 
       expect(wasmDrops).toHaveLength(5);
       expect(tsDrops).toEqual(wasmDrops);
-    });
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('reattaches cargo when C++ rejects a paradrop into an enemy-occupied cell', async () => {
+    await withDualScenario('SCU12EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState);
+
+      const result = await stepBoth(handle, 159);
+
+      expect(tsBadr(result.ts.state)).toEqual({
+        ...wasmBadr(result.wasm.state),
+        mission: 'ATTACK',
+      });
+      expect(wasmParadroppedE2s(result.wasm.state)).toHaveLength(4);
+      expect(tsParadroppedE2s(result.ts.state)).toEqual(wasmParadroppedE2s(result.wasm.state));
+
+      const afterRangeExit = await stepBoth(handle, 3);
+      expect(tsBadr(afterRangeExit.ts.state)).toEqual({
+        ...wasmBadr(afterRangeExit.wasm.state),
+        mission: 'ATTACK',
+      });
+    }, { wasmSeed: 3 });
   }, 300_000);
 });

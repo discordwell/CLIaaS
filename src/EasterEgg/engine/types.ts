@@ -3,6 +3,8 @@
  * Based on SCA01EA-04EA.INI scenario data from the original game.
  */
 
+import { cppTechnoTypeBuildTime } from './fixedPoint';
+
 // === Resolution Factor ===
 // C++ Red Alert supports LORES (320×200, RESFACTOR=1) and HIRES (640×400, RESFACTOR=2).
 // LORES matches the WASM 320×200 reference output: 10 cells × 8 cells visible game area.
@@ -1228,16 +1230,8 @@ export const STRUCTURE_POINTS: Record<string, number> = {
   MISS:  5,  // Tech Center (civilian)
 };
 
-// C++ parity (techno.cpp:6077): Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
-// At 15 Hz: TICKS_PER_MINUTE = 900, BuildSpeedBias = 0.8 (rules.ini BuildSpeed=.8)
-// Formula: buildTime = Math.floor(Cost * 0.8 * 900 / 1000) = Math.floor(Cost * 0.72)
-const CPP_BUILD_SPEED_BIAS = 0.8;
-const CPP_TICKS_PER_MINUTE = 900; // 15 Hz * 60
-
 for (const item of PRODUCTION_ITEMS) {
-  item.buildTime = Math.floor(
-    item.cost * CPP_BUILD_SPEED_BIAS * CPP_TICKS_PER_MINUTE / 1000
-  );
+  item.buildTime = cppTechnoTypeBuildTime(item.cost);
 }
 
 // === Sidebar Strip Categories (C++ parity: two visual strips) ===

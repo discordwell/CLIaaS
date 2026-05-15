@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import {
   UnitType, House, CELL_SIZE, POWER_DRAIN, PRODUCTION_ITEMS,
   COUNTRY_BONUSES, buildDefaultAlliances, worldDist,
@@ -142,10 +143,10 @@ describe('DOME stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(1000);
   });
 
-  it('build time is 720 ticks (C++ cost-based: floor(1000 * 0.72))', () => {
+  it('build time uses C++ 8.8 fixed-point production timing', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'DOME');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(720);
+    expect(prodItem!.buildTime).toBe(cppTechnoTypeBuildTime(1000));
   });
 
   it('prerequisite is PROC (Refinery)', () => {
@@ -386,19 +387,18 @@ describe('DOME destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does not damage adjacent structures', () => {
     const dome = makeDOME(10, 10, 50);
     dome.house = House.USSR;
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([dome, nearby]);
     structureDamage(ctx, dome, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // Barrel explosions hit ONLY cardinal cells with flat 200 damage.
-    // DOME should use radial HE with falloff instead — diagonals should
-    // take damage (unlike barrels where diagonals are immune).
+    // Ordinary building explosions are visual-only.
     const dome = makeDOME(10, 10, 50);
     dome.house = House.USSR;
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);

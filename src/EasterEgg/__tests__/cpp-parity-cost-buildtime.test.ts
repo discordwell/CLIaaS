@@ -18,8 +18,8 @@
  *   TICKS_PER_MINUTE = 15 * 60 = 900  (defines.h:3032, 15 Hz tick rate)
  *   Rule.BuildSpeedBias = 0.8          (rules.ini [General] BuildSpeed=.8)
  *
- * Derived formula:
- *   buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
+ * Derived formula uses C++ 8.8 fixed-point operators:
+ *   Cost * fixed(.8) * fixed(900, 1000)
  *
  * Country cost biases (rules.ini [CountryName] Cost=):
  *   getEffectiveCost = max(1, round(baseCost * countryBonus.costMult))
@@ -35,6 +35,7 @@ import {
   COUNTRY_BONUSES,
   UNIT_STATS,
 } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { getEffectiveCost } from '../engine/production';
 
 // ---------------------------------------------------------------------------
@@ -90,11 +91,10 @@ const iniBuildSpeed = parseFloat(ini['General']?.['BuildSpeed'] ?? '0.8');
 const TICKS_PER_MINUTE = 900;
 
 /**
- * C++ techno.cpp:6077 build time formula, using INI-parsed BuildSpeed.
- * buildTime = floor(Cost * BuildSpeed * TICKS_PER_MINUTE / 1000)
+ * C++ techno.cpp build time formula, using 8.8 fixed-point operators.
  */
 function cppBuildTime(cost: number): number {
-  return Math.floor(cost * iniBuildSpeed * TICKS_PER_MINUTE / 1000);
+  return cppTechnoTypeBuildTime(cost);
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +121,8 @@ describe('1. INI [General] BuildSpeed constant', () => {
     expect(TICKS_PER_MINUTE).toBe(900);
   });
 
-  it('build time multiplier should be 0.72 (0.8 * 900 / 1000)', () => {
-    const multiplier = iniBuildSpeed * TICKS_PER_MINUTE / 1000;
-    expect(multiplier).toBeCloseTo(0.72, 10);
+  it('1000-credit build time uses C++ fixed-point rounding', () => {
+    expect(cppBuildTime(1000)).toBe(716);
   });
 });
 
@@ -161,11 +160,11 @@ describe('2. PRODUCTION_ITEMS cost vs INI Cost= for every item', () => {
 // 3. EVERY PRODUCTION_ITEMS buildTime vs C++ formula using INI-parsed cost
 // ===========================================================================
 
-describe('3. PRODUCTION_ITEMS buildTime vs C++ formula floor(INI_Cost * BuildSpeed * 900 / 1000)', () => {
+describe('3. PRODUCTION_ITEMS buildTime vs C++ fixed-point Time_To_Build formula', () => {
   for (const item of PRODUCTION_ITEMS) {
     const expectedBuildTime = cppBuildTime(item.cost);
 
-    it(`${item.type} (${item.name}): buildTime=${item.buildTime} should equal floor(${item.cost} * ${iniBuildSpeed} * ${TICKS_PER_MINUTE} / 1000) = ${expectedBuildTime}`, () => {
+    it(`${item.type} (${item.name}): buildTime=${item.buildTime} should equal fixed-point Time_To_Build(${item.cost}) = ${expectedBuildTime}`, () => {
       expect(
         item.buildTime,
         `${item.type} buildTime mismatch: TS=${item.buildTime}, expected=${expectedBuildTime}`
@@ -179,7 +178,7 @@ describe('3. PRODUCTION_ITEMS buildTime vs C++ formula floor(INI_Cost * BuildSpe
 //    (verify that if INI cost and TS cost differ, the build time uses TS cost)
 // ===========================================================================
 
-describe('4. buildTime derivation consistency: buildTime = floor(item.cost * 0.72)', () => {
+describe('4. buildTime derivation consistency: fixed-point Time_To_Build(item.cost)', () => {
   for (const item of PRODUCTION_ITEMS) {
     it(`${item.type}: buildTime should be internally consistent with its own cost`, () => {
       const expected = cppBuildTime(item.cost);
@@ -380,7 +379,7 @@ describe('11. Infantry costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }
@@ -414,7 +413,7 @@ describe('12. Vehicle costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }
@@ -444,7 +443,7 @@ describe('13. Naval unit costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }
@@ -474,7 +473,7 @@ describe('14. Aircraft costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }
@@ -510,7 +509,7 @@ describe('15. Building/structure costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }
@@ -540,7 +539,7 @@ describe('16. Wall costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }
@@ -570,7 +569,7 @@ describe('17. Fake building costs (individual verification)', () => {
       expect(prodItem.cost).toBe(iniCost);
     });
 
-    it(`${type}: buildTime=${prodItem.buildTime} matches formula floor(${iniCost} * 0.72) = ${cppBuildTime(iniCost)}`, () => {
+    it(`${type}: buildTime=${prodItem.buildTime} matches fixed-point formula = ${cppBuildTime(iniCost)}`, () => {
       expect(prodItem.buildTime).toBe(cppBuildTime(iniCost));
     });
   }

@@ -13,15 +13,15 @@
  *   aftrmath.ini -- Aftermath/Counterstrike expansion overrides
  *
  * C++ build time formula (techno.cpp:6075-6078):
- *   Time_To_Build = Cost * Rule.BuildSpeedBias * TICKS_PER_MINUTE / 1000
- *   With BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 (15Hz):
- *   buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
+ *   Time_To_Build = Cost * Rule.BuildSpeedBias * fixed(TICKS_PER_MINUTE, 1000)
+ *   Both fixed values use C++ 8.8 operator rounding.
  */
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { UNIT_STATS, PRODUCTION_ITEMS } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 
 // ---------------------------------------------------------------------------
 // INI Parser (same pattern as ini-parity.test.ts)
@@ -93,9 +93,7 @@ function iniOwnerToFaction(ownerStr: string): 'allied' | 'soviet' | 'both' {
 // ---------------------------------------------------------------------------
 
 function cppBuildTime(cost: number): number {
-  // techno.cpp:6077: Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
-  // BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 (15Hz, no scaling needed)
-  return Math.floor(cost * 0.8 * 900 / 1000);
+  return cppTechnoTypeBuildTime(cost);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,12 +177,12 @@ describe('4. PRODUCTION_ITEMS faction vs INI Owner=', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Build times: PRODUCTION_ITEMS.buildTime vs C++ formula floor(Cost*0.72)
+// 5. Build times: PRODUCTION_ITEMS.buildTime vs C++ fixed-point formula
 // ---------------------------------------------------------------------------
 
 describe('5. Build times: PRODUCTION_ITEMS.buildTime vs C++ formula', () => {
   for (const item of PRODUCTION_ITEMS) {
-    it(`${item.type}: buildTime=${item.buildTime} should equal floor(${item.cost} * 0.72) = ${cppBuildTime(item.cost)}`, () => {
+    it(`${item.type}: buildTime=${item.buildTime} should equal fixed-point Time_To_Build(${item.cost}) = ${cppBuildTime(item.cost)}`, () => {
       expect(item.buildTime, `${item.type} buildTime mismatch`).toBe(cppBuildTime(item.cost));
     });
   }

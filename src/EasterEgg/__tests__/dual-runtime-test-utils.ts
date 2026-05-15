@@ -211,18 +211,19 @@ export async function withDualScenario<T>(
   fn: (handle: DualRuntimeHandle) => Promise<T>,
   options: DualScenarioOptions = {},
 ): Promise<T> {
+  const wasmSeed = options.wasmSeed ?? 0;
   const ts = new TsAgentAdapter({ url: RA_PARITY_BASE_URL, headless: true });
   const wasm = new WasmAdapter({
     scenario,
     headless: true,
     autoplay: true,
     url: new URL('/ra/original.html', RA_PARITY_BASE_URL).toString(),
-    seed: options.wasmSeed,
+    seed: wasmSeed,
   });
 
   await ts.connect();
   try {
-    const tsState = await ts.loadScenario(scenario);
+    const tsState = await ts.loadScenario(scenario, 'normal', { seed: wasmSeed });
     await wasm.connect();
     try {
       const wasmState = await wasm.observe();

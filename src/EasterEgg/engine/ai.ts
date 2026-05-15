@@ -2103,42 +2103,30 @@ export function updateAIRepair(ctx: AIContext): void {
   }
 }
 
-/** AI auto-sell -- IQ >= 1 houses sell near-death structures for full refund
- *  C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty)
- *  rules.ini [IQ] RepairSell=1 (rules.cpp default was 3) */
+/** AI sell-back helper matching BuildingClass::Repair_AI's low-money branch.
+ *  This is a behavioral helper for tests and callers without Game._repairAITick.
+ *  The main game invokes the same gate per building during BuildingClass::AI. */
 export function updateAISellDamaged(ctx: AIContext): void {
-  if ((ctx.tick - 1) % 75 !== 0) return; // C++ parity: Frame starts at 0, TS tick starts at 1
-
   for (const [house, state] of ctx.aiStates) {
-    if (state.iq < 1) continue;
+    if (state.iq < AI_BUILD_RULES.iqRepairSell) continue;
+    if (state.techLevel < AI_BUILD_RULES.iqSellBack) continue;
+    if ((ctx.houseCredits.get(house) ?? 0) >= AI_BUILD_RULES.creditReserve) continue;
 
     for (const s of ctx.structures) {
       if (!s.alive || s.house !== house) continue;
       if (s.sellProgress !== undefined) continue;
-      if (s.hp >= s.maxHp * CONDITION_RED) continue;
-
+      if (!(s.isAllowedToSell ?? false)) continue;
+      if (!(s.isTickedOff ?? false)) continue;
       if (s.type === 'FACT') continue;
+      if (s.triggerName) continue;
+      if (s.hp / s.maxHp >= CONDITION_RED) continue;
+      if (ScenarioRandom.nextInRange(0, 50) >= state.techLevel) continue;
 
-      if (s.type === 'POWR' || s.type === 'APWR') {
-        let powerCount = 0;
-        for (const ps of ctx.structures) {
-          if (ps.alive && ps.house === house && (ps.type === 'POWR' || ps.type === 'APWR')) {
-            powerCount++;
-          }
-        }
-        if (powerCount <= 1) continue;
-      }
-
-      const prodItem = ctx.scenarioProductionItems.find(p => p.type === s.type && p.isStructure);
-      if (prodItem) {
-        // C++ techno.cpp:5743-5761: AI gets full refund (no 50% penalty)
-        const refund = prodItem.cost;
-        const current = ctx.houseCredits.get(house) ?? 0;
-        ctx.houseCredits.set(house, current + refund);
-      }
-      s.alive = false;
-      s.rubble = true;
-      ctx.clearStructureFootprint(s);
+      s.mission = Mission.DECONSTRUCTION;
+      s.missionTimer = 0;
+      s.sellProgress = 0;
+      s.sellHpAtStart = s.hp;
+      s.isRepairing = false;
     }
   }
 }

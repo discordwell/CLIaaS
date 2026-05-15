@@ -59,6 +59,7 @@ export function commence(entity: Entity, reason: string): boolean {
   entity.mission = entity.missionQueue;
   entity.missionQueue = null;
   entity.missionTimer = 0;
+  if (entity.mission === Mission.RETREAT) entity.retreatStatus = 0;
   return true;
 }
 

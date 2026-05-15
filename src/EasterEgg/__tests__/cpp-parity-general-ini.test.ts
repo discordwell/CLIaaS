@@ -119,6 +119,7 @@ import { Entity } from '../engine/entity';
 import { CRATE_RADIUS } from '../engine/crates';
 import { CHRONO_DURATION_TICKS } from '../engine/superweapon';
 import { GAP_RADIUS } from '../engine/fog';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 
 // ---------------------------------------------------------------------------
 // Parse rules.ini
@@ -430,9 +431,8 @@ describe('Income & Production constants match rules.ini [General]', () => {
   it('BuildSpeed=.8 -> CPP_BUILD_SPEED_BIAS (used in production calc)', () => {
     const ini = parseFloat_(general.get('BuildSpeed')!);
     expect(ini).toBeCloseTo(0.8, 6);
-    // TS formula: buildTime = floor(Cost * 0.8 * 900 / 1000) = floor(Cost * 0.72)
-    // Verify via a sample: E1 costs 100 -> floor(100 * 0.8 * 900 / 1000) = floor(72) = 72
-    const e1BuildTime = Math.floor(100 * ini * TICKS_PER_MINUTE / 1000);
+    // C++ uses 8.8 fixed-point multiplies for Cost * BuildSpeed * fixed(TICKS_PER_MINUTE,1000).
+    const e1BuildTime = cppTechnoTypeBuildTime(100);
     expect(e1BuildTime).toBe(72);
   });
 

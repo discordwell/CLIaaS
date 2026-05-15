@@ -57,6 +57,38 @@ beforeEach(() => {
 });
 
 describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
+  it('does not let allied non-PlayerPtr unit sight reveal or discover enemy objects', () => {
+    const game = createGame();
+    const englandScout = new Entity(
+      UnitType.V_JEEP,
+      House.England,
+      30 * CELL_SIZE + CELL_SIZE / 2,
+      30 * CELL_SIZE + CELL_SIZE / 2
+    );
+    const ussrTank = new Entity(
+      UnitType.V_2TNK,
+      House.USSR,
+      34 * CELL_SIZE + CELL_SIZE / 2,
+      30 * CELL_SIZE + CELL_SIZE / 2
+    );
+    // Moving objects can call Revealed(PlayerPtr) from Per_Cell_Process when
+    // they enter a currently PlayerPtr-visible or mapped cell. England is
+    // player-allied here, but it is not the strict PlayerPtr house.
+    ussrTank.isDriving = true;
+    game.entities.push(englandScout, ussrTank);
+    game.entityById.set(englandScout.id, englandScout);
+    game.entityById.set(ussrTank.id, ussrTank);
+
+    (game as unknown as { updateFogOfWar(): void }).updateFogOfWar();
+
+    expect(game.map.getVisibility(34, 30)).toBe(0);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(ussrTank.id)).toBe(false);
+  });
+
   it('discovers newly unlimboed player-allied non-PlayerPtr objects in PlayerPtr visible cells', () => {
     const game = createGame();
     const england = new Entity(
@@ -75,6 +107,28 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
 
     const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
     expect(discovered.has(england.id)).toBe(true);
+  });
+
+  it('discovers moving player-allied non-PlayerPtr objects in player-house revealed cells', () => {
+    const game = createGame();
+    const englandTank = new Entity(
+      UnitType.V_2TNK,
+      House.England,
+      27 * CELL_SIZE + CELL_SIZE / 2,
+      58 * CELL_SIZE + CELL_SIZE / 2
+    );
+    englandTank.isDriving = true;
+    game.entities.push(englandTank);
+    game.entityById.set(englandTank.id, englandTank);
+    game.fogDisabled = true;
+    game.map.setVisibility(27, 58, 2);
+    (game as unknown as { _houseRevealed: Map<number, Set<number>> })._houseRevealed =
+      new Map([[1, new Set([58 * MAP_CELLS + 27])]]);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(englandTank.id)).toBe(true);
   });
 
   it('does not let fogDisabled reveal-all debug state discover the map', () => {

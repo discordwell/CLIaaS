@@ -199,6 +199,7 @@ export interface Effect {
   // even when TS only needs a visual effect. These slots affect same-tick
   // BulletClass scheduling and allocation failure behavior.
   cppLogicSlot?: boolean;
+  logicIndexHint?: number;
 }
 
 // Pseudo-random hash for terrain variation
@@ -239,6 +240,8 @@ export class Renderer {
     alpha: number;
     deathVariant: number;
     cppAnimStartTick?: number;
+    logicIndexHint?: number;
+    cppLogicReleased?: boolean;
   }> = [];
   showHelp = false;     // F1 help overlay
   difficulty: 'easy' | 'normal' | 'hard' = 'normal';

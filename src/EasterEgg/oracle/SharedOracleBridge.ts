@@ -205,8 +205,8 @@ export function normalizeTsState(state: AgentState): TsStateBridge {
       missionTimer: state.missionTimer,
       missionTimerActive: state.missionTimer > 0,
       civEvacuated: state.civiliansEvacuated > 0,
-      winPending: state.state === 'won',
-      losePending: state.state === 'lost',
+      winPending: Boolean(state.winPending || state.state === 'won'),
+      losePending: Boolean(state.losePending || state.state === 'lost'),
       power: {
         produced: state.power.produced,
         consumed: state.power.consumed,

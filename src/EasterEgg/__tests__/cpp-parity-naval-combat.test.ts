@@ -21,6 +21,7 @@ import {
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, PRODUCTION_ITEMS,
   buildDefaultAlliances, armorIndex, CONDITION_RED,
 } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 
 // INI parser for source-of-truth verification
 function parseINI(content: string): Record<string, Record<string, string>> {
@@ -1391,16 +1392,14 @@ describe('Naval production prerequisites (rules.ini)', () => {
     expect(item!.techPrereq).toBeFalsy();
   });
 
-  it('build times match C++ formula: floor(cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000)', () => {
-    // C++ techno.cpp:6077: Time_To_Build = Cost * 0.8 * 900 / 1000 = Cost * 0.72
-    // BuildSpeedBias=0.8 (rules.ini BuildSpeed=.8), TICKS_PER_MINUTE=900 (15Hz * 60)
-    const cppBuildTime = (cost: number) => Math.floor(cost * 0.8 * 900 / 1000);
+  it('build times match C++ fixed-point Time_To_Build formula', () => {
+    const cppBuildTime = (cost: number) => cppTechnoTypeBuildTime(cost);
     const expected: Record<string, number> = {
-      PT: cppBuildTime(500),     // 360
-      DD: cppBuildTime(1000),    // 720
-      CA: cppBuildTime(2000),    // 1440
-      SS: cppBuildTime(950),     // 684
-      MSUB: cppBuildTime(1650),  // 1188
+      PT: cppBuildTime(500),
+      DD: cppBuildTime(1000),
+      CA: cppBuildTime(2000),
+      SS: cppBuildTime(950),
+      MSUB: cppBuildTime(1650),
     };
     for (const [type, time] of Object.entries(expected)) {
       const item = PRODUCTION_ITEMS.find(p => p.type === type);

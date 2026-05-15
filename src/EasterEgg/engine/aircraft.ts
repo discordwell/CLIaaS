@@ -6,7 +6,7 @@
 import {
   type WorldPos, type WeaponStats, type LeptonPos,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, Mission, AnimState, House, UnitType,
-  worldDist, directionTo, directionToLeptons256, worldToCell, leptonDist, leptonToPixel, pixelToLepton, DIR_DX, DIR_DY,
+  worldDist, directionTo, directionToLeptons256, worldToCell, leptonDist, leptonToPixel, pixelToLepton, leptonToCell, DIR_DX, DIR_DY,
   CIVILIAN_UNIT_TYPES, cellTargetToLepton, coordTargetRoundTripLepton,
   COS_TABLE_256, SIN_TABLE_256, SUBCELL_LEPTON_OFFSETS,
 } from './types';
@@ -51,6 +51,14 @@ export function advanceAircraftFrame(): void { _aircraftFrame++; }
 export function getAircraftFrame(): number { return _aircraftFrame; }
 /** Reset frame counter (for tests). */
 export function resetAircraftFrame(): void { _aircraftFrame = 0; }
+
+const ATTACK_VALIDATE_AZ = 0;
+const ATTACK_PICK_ATTACK_LOCATION = 1;
+const ATTACK_TAKE_OFF = 2;
+const ATTACK_FLY_TO_POSITION = 3;
+const ATTACK_FIRE_AT_TARGET = 4;
+const ATTACK_FIRE_AT_TARGET2 = 5;
+const ATTACK_RETURN_TO_BASE = 6;
 
 // ── C++ Rearm Constants (rules.ini / defines.h) ─────────────────────────────
 
@@ -115,6 +123,8 @@ export interface AircraftContext {
   getPowerFraction(house: House): number;
   /** Current C++-style Logic.Count() for a newly submitted object. */
   logicIndexHintForNewObject?: () => number;
+  /** Release an object's current C++ Logic slot when Limbo/delete removes it. */
+  releaseLogicSlotForEntity?: (entity: Entity) => void;
   /** Reserve one C++ AnimClass heap slot. */
   reserveAnimSlot?: () => boolean;
 }
@@ -442,7 +452,7 @@ export function closestInfantryUnlimboSpot(
   lx: number,
   ly: number,
   ignoreOccupancy = false,
-): { lx: number; ly: number; subCell: number; cellIdx: number } {
+): { lx: number; ly: number; subCell: number; cellIdx: number } | null {
   const cx = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(lx / LEPTON_SIZE)));
   const cy = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(ly / LEPTON_SIZE)));
   const cellIdx = cy * MAP_CELLS + cx;
@@ -457,6 +467,7 @@ export function closestInfantryUnlimboSpot(
   }
 
   const slots = ignoreOccupancy ? undefined : ctx.map.subCellOccupancy.get(cellIdx);
+  if (!ignoreOccupancy && ctx.map.hasVehicleOccupancy(cx, cy)) return null;
   const sequence: number[][] = [
     [1, 2, 3, 4],
     [0, 2, 3, 4],
@@ -484,9 +495,25 @@ export function closestInfantryUnlimboSpot(
         break;
       }
     }
+    if (slots[subCell] && slots[subCell] !== passenger.id) return null;
   }
 
   const spot = SUBCELL_LEPTON_OFFSETS[subCell];
+  if (!ignoreOccupancy) {
+    if (ctx.map.canEnterCell(cx, cy, false, undefined, true, passenger.id) !== MoveResult.OK) {
+      return null;
+    }
+    const occupiedSlots = ctx.map.subCellOccupancy.get(cellIdx);
+    if (occupiedSlots) {
+      for (const occupantId of occupiedSlots) {
+        if (occupantId === 0 || occupantId === passenger.id) continue;
+        const occupant = ctx.entityById.get(occupantId);
+        if (occupant?.stats.isInfantry && !ctx.isAllied(passenger.house, occupant.house)) {
+          return null;
+        }
+      }
+    }
+  }
   return {
     lx: cx * LEPTON_SIZE + spot.lx,
     ly: cy * LEPTON_SIZE + spot.ly,
@@ -519,6 +546,267 @@ function commenceAircraft(ctx: AircraftContext, entity: Entity): void {
     if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 40040;
     entity.missionTimer = 14 + ScenarioRandom.nextInRange(0, 2);
     if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+  }
+}
+
+function aircraftMissionAttackFinalDelay(entity: Entity): void {
+  const savedTag = ScenarioRandom._sourceTag;
+  if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 40050;
+  // Aircraft timers are maintained inside the aircraft state machine instead of
+  // the normal end-of-logic entity timer pass. Store the post-frame CDTimer value
+  // C++ exposes after Mission_Attack returns Normal_Delay + Random_Pick(0, 2).
+  entity.missionTimer = 13 + ScenarioRandom.nextInRange(0, 2);
+  if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+}
+
+function aircraftTargetLeptons(entity: Entity): LeptonPos | null {
+  if (entity.target?.alive) {
+    return { lx: entity.target.leptonX, ly: entity.target.leptonY };
+  }
+  const targetPos = getAircraftTargetPos(entity);
+  return targetPos ? { lx: pixelToLepton(targetPos.x), ly: pixelToLepton(targetPos.y) } : null;
+}
+
+function coordMoveLeptons(coord: LeptonPos, dir256: number, distance: number): LeptonPos {
+  const dir = dir256 & 0xff;
+  return {
+    lx: coord.lx + ((COS_TABLE_256[dir] * distance) >> 7),
+    ly: coord.ly - ((SIN_TABLE_256[dir] * distance) >> 7),
+  };
+}
+
+function aircraftCellSeemsOk(ctx: AircraftContext, entity: Entity, cx: number, cy: number, strict: boolean): boolean {
+  for (const other of ctx.entities) {
+    if (!other.alive || other.inLimbo || !other.isAirUnit) continue;
+    if (!strict && other.id === entity.id) continue;
+    if (other.cell.cx === cx && other.cell.cy === cy) return false;
+    if (other.moveTarget) {
+      const navCell = leptonToCell(other.moveTarget.lx, other.moveTarget.ly);
+      if (navCell.cx === cx && navCell.cy === cy) return false;
+    }
+  }
+  return true;
+}
+
+function goodFireLocation(ctx: AircraftContext, entity: Entity): LeptonPos | null {
+  const target = aircraftTargetLeptons(entity);
+  if (!target) return null;
+
+  const range = Math.trunc((entity.weapon?.range ?? 5) * LEPTON_SIZE);
+  let altcoord: LeptonPos | null = null;
+  if (entity.target?.alive && entity.target.moveTarget) {
+    altcoord = entity.target.moveTarget;
+  }
+
+  let bestCell: { cx: number; cy: number } | null = null;
+  let best2Cell: { cx: number; cy: number } | null = null;
+  let bestVal = -1;
+  let best2Val = -1;
+
+  for (let r = range - LEPTON_SIZE; r > LEPTON_SIZE; r -= LEPTON_SIZE) {
+    for (let face = 0; face < 255; face += 16) {
+      const newcoord = coordMoveLeptons(target, face, r);
+      const newcell = leptonToCell(newcoord.lx, newcoord.ly);
+      if (!ctx.map.inBounds(newcell.cx, newcell.cy)) continue;
+      if (!aircraftCellSeemsOk(ctx, entity, newcell.cx, newcell.cy, true)) continue;
+
+      const dist = altcoord
+        ? leptonDist(newcoord.lx, newcoord.ly, altcoord.lx, altcoord.ly)
+        : leptonDist(entity.leptonX, entity.leptonY, newcoord.lx, newcoord.ly);
+      if (bestVal === -1 || dist < bestVal) {
+        best2Val = bestVal;
+        best2Cell = bestCell;
+        bestVal = dist;
+        bestCell = newcell;
+      }
+    }
+    if (bestVal !== -1) break;
+  }
+
+  if (!bestCell) return null;
+  if (best2Val === -1 || !best2Cell) best2Cell = bestCell;
+
+  const savedTag = ScenarioRandom._sourceTag;
+  ScenarioRandom._sourceTag = 40080;
+  const chosen = ScenarioRandom.percentChance(50) ? bestCell : best2Cell;
+  ScenarioRandom._sourceTag = savedTag;
+  return cellTargetToLepton(chosen.cx, chosen.cy);
+}
+
+function setHelicopterAttackFacing(entity: Entity): void {
+  const target = aircraftTargetLeptons(entity);
+  if (!target) return;
+  const dir = directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly);
+  entity.desiredFacing256 = dir;
+  entity.desiredTurretFacing256 = dir;
+  entity.desiredFacing = Math.round(dir / 32) & 7;
+  entity.desiredTurretFacing = entity.desiredFacing;
+}
+
+function fireHelicopterWeapon(ctx: AircraftContext, entity: Entity): boolean {
+  const weapon = entity.weapon;
+  const target = aircraftTargetLeptons(entity);
+  if (!weapon || !target || entity.attackCooldown > 0 || entity.ammo === 0) return false;
+  if (leptonDist(entity.leptonX, entity.leptonY, target.lx, target.ly) > weapon.range * LEPTON_SIZE) return false;
+
+  if (entity.target?.alive) {
+    ctx.fireWeaponAt(entity, entity.target, weapon);
+  } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+    ctx.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, weapon);
+  } else {
+    return false;
+  }
+
+  const targetCell = leptonToCell(target.lx, target.ly);
+  ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
+  entity.attackCooldown = Math.max(1, Math.round(weapon.rof * ctx.getROFBias(entity.house)));
+  if (entity.ammo > 0) entity.ammo--;
+  return true;
+}
+
+function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): boolean {
+  const flyCurrentFacing = () => {
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+  };
+
+  if (entity.missionTimer > 0) {
+    entity.missionTimer--;
+    flyCurrentFacing();
+    return true;
+  }
+
+  const hasTarget = !!getAircraftTargetPos(entity);
+
+  switch (entity.aircraftAttackStatus) {
+    case ATTACK_VALIDATE_AZ:
+      entity.aircraftAttackStatus = hasTarget
+        ? ATTACK_PICK_ATTACK_LOCATION
+        : ATTACK_RETURN_TO_BASE;
+      aircraftMissionAttackFinalDelay(entity);
+      flyCurrentFacing();
+      return true;
+
+    case ATTACK_PICK_ATTACK_LOCATION: {
+      if (!hasTarget) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+      } else {
+        const fireLocation = goodFireLocation(ctx, entity);
+        entity.moveTarget = fireLocation;
+        entity.moveTargetEntityRef = null;
+        entity.aircraftAttackStatus = fireLocation
+          ? ATTACK_TAKE_OFF
+          : ATTACK_RETURN_TO_BASE;
+      }
+      aircraftMissionAttackFinalDelay(entity);
+      flyCurrentFacing();
+      return true;
+    }
+
+    case ATTACK_TAKE_OFF:
+      if (!hasTarget) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+        aircraftMissionAttackFinalDelay(entity);
+        flyCurrentFacing();
+        return true;
+      }
+      ensureAircraftHeight(entity);
+      if (entity.aircraftHeightLeptons < Entity.FLIGHT_LEVEL_LEPTONS) {
+        entity.aircraftState = 'takeoff';
+        flyCurrentFacing();
+        return true;
+      }
+      entity.aircraftAttackStatus = ATTACK_FLY_TO_POSITION;
+      if (entity.moveTarget) {
+        const dir = directionToLeptons256(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
+        entity.facing256 = currentAircraftFacing256(entity);
+        entity.desiredFacing256 = dir;
+        entity.desiredFacing = Math.round(dir / 32) & 7;
+      }
+      flyCurrentFacing();
+      return true;
+
+    case ATTACK_FLY_TO_POSITION:
+      if (!hasTarget) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+        flyCurrentFacing();
+        return true;
+      }
+      if (!entity.moveTarget) {
+        entity.aircraftAttackStatus = ATTACK_PICK_ATTACK_LOCATION;
+        flyCurrentFacing();
+        return true;
+      }
+      aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity), 1);
+      {
+        const distance = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
+        if (distance < 0x0200) setHelicopterAttackFacing(entity);
+        if (distance < 0x0010) {
+          entity.aircraftAttackStatus = ATTACK_FIRE_AT_TARGET;
+          entity.moveTarget = null;
+          entity.moveTargetEntityRef = null;
+        }
+      }
+      return true;
+
+    case ATTACK_FIRE_AT_TARGET:
+      if (!hasTarget) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+        flyCurrentFacing();
+        return true;
+      }
+      setHelicopterAttackFacing(entity);
+      if (fireHelicopterWeapon(ctx, entity)) {
+        entity.aircraftAttackStatus = ATTACK_FIRE_AT_TARGET2;
+      } else if (entity.ammo === 0) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+      }
+      flyCurrentFacing();
+      return true;
+
+    case ATTACK_FIRE_AT_TARGET2:
+      if (!hasTarget) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+        flyCurrentFacing();
+        return true;
+      }
+      setHelicopterAttackFacing(entity);
+      if (fireHelicopterWeapon(ctx, entity)) {
+        entity.aircraftAttackStatus = entity.ammo > 0
+          ? ATTACK_FIRE_AT_TARGET
+          : ATTACK_RETURN_TO_BASE;
+      } else if (entity.ammo === 0) {
+        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+      } else {
+        const targetLeptons = aircraftTargetLeptons(entity);
+        entity.aircraftAttackStatus =
+          targetLeptons &&
+          leptonDist(entity.leptonX, entity.leptonY, targetLeptons.lx, targetLeptons.ly) > (entity.weapon?.range ?? 5) * LEPTON_SIZE
+            ? ATTACK_PICK_ATTACK_LOCATION
+            : ATTACK_FIRE_AT_TARGET;
+      }
+      aircraftMissionAttackFinalDelay(entity);
+      flyCurrentFacing();
+      return true;
+
+    case ATTACK_RETURN_TO_BASE:
+      if (!hasTarget) {
+        entity.target = null;
+        entity.targetStructure = null;
+        entity.forceFirePos = null;
+        entity.mission = ctx.idleMission(entity);
+        entity.missionQueue = null;
+        entity.aircraftAttackStatus = ATTACK_VALIDATE_AZ;
+        aircraftMissionAttackFinalDelay(entity);
+        flyCurrentFacing();
+        return true;
+      }
+      entity.aircraftAttackStatus = ATTACK_PICK_ATTACK_LOCATION;
+      aircraftMissionAttackFinalDelay(entity);
+      flyCurrentFacing();
+      return true;
+
+    default:
+      return false;
   }
 }
 
@@ -913,8 +1201,10 @@ function handleMapExit(ctx: AircraftContext, entity: Entity): void {
   // Leaving the map is evacuation/escape, not destruction. Keep leave-map
   // counters, but disarm TEVENT_DESTROYED attachments before marking dead.
   entity.triggerName = '';
+  const occupiedLogicBefore = entity.occupiesCppLogic();
   entity.alive = false;
   entity.mission = Mission.DIE;
+  if (occupiedLogicBefore && !entity.occupiesCppLogic()) ctx.releaseLogicSlotForEntity?.(entity);
   ctx.unitsLeftMap++;
   if (countsAsCivEvac(ctx, entity.type)) {
     ctx.civiliansEvacuated++;
@@ -944,20 +1234,32 @@ function startParadropFall(ctx: AircraftContext, passenger: Entity): void {
   passenger.flightAltitude = leptonToPixel(passenger.fallHeightLeptons);
 }
 
-function paradropOnePassenger(ctx: AircraftContext, entity: Entity): void {
-  const passenger = entity.passengers.shift()!;
-  passenger.alive = true;
+function paradropOnePassenger(ctx: AircraftContext, entity: Entity): boolean {
+  const passenger = entity.passengers[0];
+  if (!passenger) return false;
+
+  let spot: ReturnType<typeof closestInfantryUnlimboSpot> = null;
   if (passenger.stats.isInfantry) {
     // C++ AircraftClass::Paradrop_Cargo passes Center_Coord() to
     // InfantryClass::Paradrop, which runs InfantryClass::Unlimbo and snaps the
     // passenger to CellClass::Closest_Free_Spot before the falling AI begins.
-    const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
-    passenger.leptonX = spot.lx;
-    passenger.leptonY = spot.ly;
+    // If all sub-cells are occupied, Paradrop() fails and Paradrop_Cargo
+    // re-attaches the passenger instead of forcing a mission-specific drop.
+    spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+    if (!spot) return false;
+  }
+
+  entity.passengers.shift();
+  passenger.alive = true;
+  if (passenger.stats.isInfantry) {
+    const infantrySpot = spot;
+    if (!infantrySpot) return false;
+    passenger.leptonX = infantrySpot.lx;
+    passenger.leptonY = infantrySpot.ly;
     passenger.syncPosFromLeptons();
-    passenger.subCell = spot.subCell;
-    passenger.claimedCellIdx = spot.cellIdx;
-    passenger.claimedSubCell = spot.subCell;
+    passenger.subCell = infantrySpot.subCell;
+    passenger.claimedCellIdx = infantrySpot.cellIdx;
+    passenger.claimedSubCell = infantrySpot.subCell;
   } else {
     passenger.setPosition(entity.pos.x, entity.pos.y);
   }
@@ -979,6 +1281,7 @@ function paradropOnePassenger(ctx: AircraftContext, entity: Entity): void {
   if (entity.teamRef) {
     entity.mission = passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT;
   }
+  return true;
 }
 
 function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boolean {
@@ -1063,8 +1366,14 @@ function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boo
     }
 
     case DROP_BOMBS:
-      if (entity.passengers.length > 0 &&
-          leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 0x0200) {
+      if (entity.passengers.length > 0) {
+        if (leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) >= 0x0200) {
+          entity.aircraftAttackStatus = FLY_TO_TARGET;
+          entity.missionTimer = TICKS_PER_SECOND * 4 - 1;
+          handled = true;
+          break;
+        }
+
         const missionAtDispatch = entity.mission;
         const targetCell = worldToCell(
           leptonToPixel(entity.moveTarget.lx),
@@ -1076,13 +1385,19 @@ function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boo
           // list for this scatter pass.
           ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
         }
-        paradropOnePassenger(ctx, entity);
+        const dropped = paradropOnePassenger(ctx, entity);
         if (missionAtDispatch !== Mission.HUNT) {
           // C++ AircraftClass::Mission_Attack calls Fire_At() first, then
           // Incoming(TarCom). Passenger aircraft route Fire_At through
           // Paradrop_Cargo, so the dropped infantry can be part of the same
           // CellClass::Incoming scatter.
           ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
+        }
+        if (!dropped) {
+          entity.aircraftAttackStatus = DROP_BOMBS;
+          entity.missionTimer = 0;
+          handled = true;
+          break;
         }
       }
       entity.aircraftAttackStatus = LOOK_FOR_TARGET;
@@ -1293,6 +1608,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         return updateFixedWingAttackRun(ctx, entity);
       }
 
+      if (!entity.isFixedWing && entity.mission === Mission.ATTACK) {
+        const handled = updateHelicopterMissionAttack(ctx, entity);
+        if (handled) return true;
+      }
+
       // ── C++ Paradrop_Cargo (aircraft.cpp:1442-1468, 1489-1501) ────────────────
       // Fixed-wing passenger transports (BADR) paradrop passengers onto the
       // target cell instead of bombing. C++ Fire_At detects Is_Something_Attached()
@@ -1308,35 +1628,45 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       if (entity.isFixedWing && entity.passengers.length > 0 && entity.moveTarget) {
         const dropDist = worldDist(entity.pos, leptonPosToWorld(entity.moveTarget));
         if (dropDist <= 2) { // worldDist returns cells; 2 cells ≈ 0x0200 leptons
-          const passenger = entity.passengers.shift()!;
-          passenger.alive = true;
+          const passenger = entity.passengers[0]!;
+          let canDrop = true;
+          let spot: ReturnType<typeof closestInfantryUnlimboSpot> = null;
           if (passenger.stats.isInfantry) {
-            const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
-            passenger.leptonX = spot.lx;
-            passenger.leptonY = spot.ly;
-            passenger.syncPosFromLeptons();
-            passenger.subCell = spot.subCell;
-            passenger.claimedCellIdx = spot.cellIdx;
-            passenger.claimedSubCell = spot.subCell;
-          } else {
-            passenger.setPosition(entity.pos.x, entity.pos.y);
+            spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+            canDrop = !!spot;
           }
-          passenger.transportRef = null;
-          passenger.isTethered = false;
-          passenger.inLimbo = false;
-          passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
-          ctx.entities.push(passenger);
-          ctx.entityById.set(passenger.id, passenger);
-          // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
-          //   Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
-          // C++ TechnoClass::AI (techno.cpp:2346) returns early for non-aircraft
-          // while Height > 0, so the newly appended passenger can enter Logic this
-          // same tick without running infantry MissionClass::AI/RNG.
-          startParadropFall(ctx, passenger);
-          // C++ InfantryClass::Paradrop (infantry.cpp:4183-4194):
-          // human player → MISSION_GUARD, AI → MISSION_HUNT. Route through
-          // Assign_Mission so Commence timing remains C++-faithful after landing.
-          assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
+          if (canDrop) {
+            entity.passengers.shift();
+            passenger.alive = true;
+            if (passenger.stats.isInfantry) {
+              const infantrySpot = spot;
+              if (!infantrySpot) return true;
+              passenger.leptonX = infantrySpot.lx;
+              passenger.leptonY = infantrySpot.ly;
+              passenger.syncPosFromLeptons();
+              passenger.subCell = infantrySpot.subCell;
+              passenger.claimedCellIdx = infantrySpot.cellIdx;
+              passenger.claimedSubCell = infantrySpot.subCell;
+            } else {
+              passenger.setPosition(entity.pos.x, entity.pos.y);
+            }
+            passenger.transportRef = null;
+            passenger.isTethered = false;
+            passenger.inLimbo = false;
+            passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+            ctx.entities.push(passenger);
+            ctx.entityById.set(passenger.id, passenger);
+            // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
+            //   Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
+            // C++ TechnoClass::AI (techno.cpp:2346) returns early for non-aircraft
+            // while Height > 0, so the newly appended passenger can enter Logic this
+            // same tick without running infantry MissionClass::AI/RNG.
+            startParadropFall(ctx, passenger);
+            // C++ InfantryClass::Paradrop (infantry.cpp:4183-4194):
+            // human player → MISSION_GUARD, AI → MISSION_HUNT. Route through
+            // Assign_Mission so Commence timing remains C++-faithful after landing.
+            assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
+          }
 
           // Do not force RETREAT after the last drop. C++ Paradrop_Cargo only
           // detaches the passenger (and may assign a mission through the normal
@@ -1643,7 +1973,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         return true;
       }
       if (entity.passengers.length > 0) {
-        const passenger = entity.passengers.shift()!;
+        const passenger = entity.passengers[0]!;
         const exitCell = findAircraftExitCell(ctx, entity, passenger);
         const exitTarget = {
           lx: exitCell.cx * LEPTON_SIZE + LEPTON_SIZE / 2,
@@ -1655,6 +1985,13 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         passenger.alive = true;
         if (passenger.stats.isInfantry) {
           const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+          if (!spot) {
+            entity.passengers.shift();
+            passenger.alive = false;
+            passenger.transportRef = null;
+            entity.missionTimer = nextUnloadDelay;
+            return true;
+          }
           passenger.leptonX = spot.lx;
           passenger.leptonY = spot.ly;
           passenger.syncPosFromLeptons();
@@ -1664,6 +2001,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         } else {
           passenger.setPosition(entity.pos.x, entity.pos.y);
         }
+        entity.passengers.shift();
         // C++ TechnoClass::Unlimbo runs Enter_Idle_Mode(true) + Commence before
         // AircraftClass::Exit_Object queues MISSION_MOVE. This resets stale
         // cargo animation state (for example a team-activation gesture) and

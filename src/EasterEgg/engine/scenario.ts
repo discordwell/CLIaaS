@@ -1537,6 +1537,10 @@ export interface MapStructure {
    *  for all Construction Yards (FACT/CONS) so Repair_AI auto-repairs them when damaged.
    *  Used at building.cpp:5495 inner repair condition. */
   isToRepair?: boolean;
+  /** C++ BuildingClass::IsAllowedToSell — scenario INI structure field 7. */
+  isAllowedToSell?: boolean;
+  /** C++ TechnoClass::IsTickedOff — set when an enemy source damages the building. */
+  isTickedOff?: boolean;
   /** C++ building.cpp:5497 BuildingClass::IsRepairing — true once Repair(1) was called
    *  (non-human house; players use UI). Reset when Strength hits MaxStrength or Available_Money
    *  drops below Repair_Cost. */
@@ -2179,7 +2183,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   }
 
   // Apply terrain features from [TERRAIN] section
-  for (const t of data.terrain) {
+  for (const [logicIndex, t] of data.terrain.entries()) {
     const pos = cellIndexToPos(t.cell);
     const type = t.type.toLowerCase();
     if (type.includes('water') || type.includes('river')) {
@@ -2212,6 +2216,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
         hp: TREE_MAX_HP,
         maxHp: TREE_MAX_HP,
         immune: isClump,  // C++ RA tdata.cpp: all clumps have IsImmune=true
+        logicIndexHint: logicIndex,
         occupyCells,
       };
       map.addTree(tree);
@@ -2237,7 +2242,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       // Example: SCG13EA BOXES02 at cell 8737 (82,75) blocks C++ infantry
       // pathing via TerrainTypeClass::Occupy_List (_List10), so TS must
       // register the same blocker instead of treating it as decoration.
-      map.addTerrainObject(type, pos.cx, pos.cy, TERRAIN_OBJECT_OCCUPY[type]);
+      map.addTerrainObject(type, pos.cx, pos.cy, TERRAIN_OBJECT_OCCUPY[type], logicIndex);
     }
   }
 
@@ -2334,6 +2339,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       attackCooldown: 0,
       ammo: -1,
       maxAmmo: -1,
+      isAllowedToSell: !!s.sellable,
       footprintTerrain: captureStructureFootprintTerrain(map, s.type, pos.cx, pos.cy),
       // C++ BuildingClass::Read_INI passes the 5th structure field to
       // Unlimbo(), which stores it in TechnoClass::PrimaryFacing. Turreted

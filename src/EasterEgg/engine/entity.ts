@@ -7,6 +7,7 @@ import {
   type WarheadProps, type WarheadType, type ArmorType, type LeptonPos,
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
+  SpeedClass,
   INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   CIVILIAN_UNIT_TYPES, worldToCell, leptonDist, directionTo, directionToLeptons,
@@ -423,6 +424,14 @@ export class Entity {
     this.pos.y = this.leptonY * LP;
   }
 
+  private clearFirePrepLatchedToBlockedDoing(): void {
+    if (!this.firePrepActive || !this.firePrepUsesDoingStage) return;
+    this.firePrepActive = false;
+    this.firePrepStage = 0;
+    this.firePrepUsesDoingStage = false;
+    this.firePrepFacing256 = -1;
+  }
+
   /** C++ InfantryClass::Doing_AI — transition Doing state when animation completes.
    *  Called once per tick after mission processing. Doing=DO_NOTHING transitions
    *  to DO_STAND_READY (idle pose) if not driving.
@@ -436,6 +445,11 @@ export class Entity {
   doingAI(): void {
     if (!this.stats.isInfantry) return;
     if (this.doing === 'lie_down' && this.doingStage >= this.infantryLieDownDoingCount()) {
+      // Firing_AI can latch IsFiring while Do_Action(DO_FIRE_*) is blocked by
+      // a non-interruptible animation. If that animation finishes before the
+      // launch frame, C++ starts a fresh fire Doing on a later tick rather than
+      // reading the reset prone/ready stage forever.
+      this.clearFirePrepLatchedToBlockedDoing();
       this.doing = 'prone';
       this.doingStage = 0;
       this.doingRate = 0;
@@ -443,6 +457,7 @@ export class Entity {
       return;
     }
     if (this.doing === 'get_up' && this.doingStage >= this.infantryGetUpDoingCount()) {
+      this.clearFirePrepLatchedToBlockedDoing();
       this.doing = 'stand_ready';
       this.doingStage = 0;
       this.doingRate = 0;
@@ -484,6 +499,9 @@ export class Entity {
       (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk') ||
       (this.doing === 'gesture' && this.nonInterruptAnimTicks <= 0);
     if (canTransition) {
+      if (this.doing === 'gesture') {
+        this.clearFirePrepLatchedToBlockedDoing();
+      }
       if (this.isDriving) {
         this.doing = 'walk';
         this.doingStage = 0;
@@ -748,6 +766,11 @@ export class Entity {
 
   // U3: Formation movement offset (C++ foot.h:139-175 XFormOffset/YFormOffset)
   formationOffset: WorldPos | null = null;
+  // C++ FootClass formation movement fields. TeamClass::TMission_Formation
+  // sets these so DriveClass movement can use the team's slowest speed.
+  isFormationMove = false;
+  formationSpeedClass: SpeedClass = SpeedClass.FOOT;
+  formationMaxSpeed = 0;
 
   // MV1: Track-table movement state (C++ drive.cpp — vehicles follow pre-computed turn tracks)
   trackNumber = -1;    // C++ track number (1-13), -1 = not on a track
@@ -902,6 +925,8 @@ export class Entity {
   // attached SMOKE_M damage anim was spawned. -1 means no smoke attached (i.e. !IsAnimAttached).
   // Renderer anchors frame advancement to this tick so the sprite plays as one continuous anim.
   damageSmokeStartTick = -1;
+  damageSmokeLogicIndexHint?: number;
+  damageSmokeCppLogicReleased = false;
 
   // Moebius return fields (C++ drive.h:62-74 — IsMoebius, MoebiusCountDown, MoebiusCell)
   // After chronoshift, unit saves origin cell and returns after ChronoDuration expires.
@@ -944,9 +969,16 @@ export class Entity {
   doorOpen = false;
   doorTimer = 0;          // countdown to auto-close
   doorOpeningTicks = 0;   // C++ DoorClass Open_Door(5, 6): 5 * (6 - 1)
+  doorClosingTicks = 0;   // C++ DoorClass Close_Door(5, 6): 5 * (6 - 1)
   /** C++ VesselClass::Mission_Unload Status enum:
    *  0 INITIAL_CHECK, 1 MANEUVERING, 2 OPENING_DOOR, 3 UNLOADING, 4 CLOSING_DOOR. */
   vesselUnloadStatus = 0;
+  /** C++ FootClass/VesselClass::Mission_Retreat Status:
+   *  0 PICK_RETREAT_POINT/FIND_EDGE, 1 TRAVEL. */
+  retreatStatus = 0;
+  /** C++ DriveClass::Assign_Destination calls Start_Of_Move immediately before
+   *  DriveClass::AI's same-zone guard can run. */
+  skipDriveZoneCheckOnce = false;
   /** C++ UnitClass::Mission_Unload Status for UNIT_MCV:
    *  0 clear path, 1 try deploy when stopped, 2 wait for deploy rotation. */
   mcvUnloadStatus = 0;
@@ -964,6 +996,8 @@ export class Entity {
   // Aircraft state machine
   ammo = -1;                    // -1 = unlimited
   maxAmmo = -1;
+  /** C++ UnitClass::Reload CDTimer. Used by V2 launchers between rockets. */
+  reloadTimer = 0;
   landedAtStructure = -1;       // structure index, -1 = airborne
   aircraftState: 'idle' | 'takeoff' | 'flying' | 'attacking' | 'returning' | 'landing' | 'landed' | 'rearming' | 'unload_search' | 'unload_fly' | 'unload_land' | 'unload_wait' | 'unload_eject' = 'idle';
   /** C++ AircraftClass::Mission_Enter Status for fixed-wing landing pattern:
@@ -1180,6 +1214,7 @@ export class Entity {
   fallParachuteAnimTimer = 4;
   fallParachuteAnimLoops = 15;
   fallParachuteAnimIsBrandNew = false;
+  fallParachuteAnimProcessedTick = -1;
   static readonly FLIGHT_LEVEL_LEPTONS = 256; // C++ object.h: FLIGHT_LEVEL
 
   get hasTurret(): boolean {
@@ -1342,7 +1377,7 @@ export class Entity {
     warhead?: string,
     attacker?: Entity,
     warheadPropsOverride?: WarheadProps,
-    options: { skipArmorBias?: boolean; skipProneBias?: boolean } = {},
+    options: { skipArmorBias?: boolean; skipProneBias?: boolean; hasDamageSource?: boolean } = {},
   ): boolean {
     if (!this.alive) return false;
     if (this.isInvulnerable) return false; // invulnerability (crate or Iron Curtain)
@@ -1377,7 +1412,7 @@ export class Entity {
     // Branch A: known attacker + low fear → jump to SCARED/PANIC
     // Branch B: no attacker OR already scared → incremental moreFear
     if (this.stats.isInfantry && amount > 0) {
-      if (attacker && this.fear < Entity.FEAR_SCARED) {
+      if ((attacker || options.hasDamageSource) && this.fear < Entity.FEAR_SCARED) {
         this.fear = this.stats.isFraidyCat ? Entity.FEAR_PANIC : Entity.FEAR_SCARED;
       } else {
         let moreFear = Entity.FEAR_ANXIOUS;
@@ -2130,6 +2165,7 @@ export function clearFallingParachuteAnim(entity: Entity): void {
   entity.fallParachuteAnimTimer = 4;
   entity.fallParachuteAnimLoops = 15;
   entity.fallParachuteAnimIsBrandNew = false;
+  entity.fallParachuteAnimProcessedTick = -1;
   entity.fallHasAttachedAnim = false;
 }
 
@@ -2143,13 +2179,15 @@ export function attachFallingParachuteAnim(
     return false;
   }
 
+  const logicIndexHint = logicIndexHintForNewObject?.();
   entity.fallHasAttachedAnim = true;
   entity.fallParachuteAnimActive = true;
-  entity.fallParachuteAnimLogicIndexHint = logicIndexHintForNewObject?.();
+  entity.fallParachuteAnimLogicIndexHint = logicIndexHint;
   entity.fallParachuteAnimStage = 0;
   entity.fallParachuteAnimTimer = 4;
   entity.fallParachuteAnimLoops = 15;
   entity.fallParachuteAnimIsBrandNew = true;
+  entity.fallParachuteAnimProcessedTick = -1;
   return true;
 }
 

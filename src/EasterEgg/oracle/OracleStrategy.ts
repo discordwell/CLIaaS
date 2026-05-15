@@ -3477,9 +3477,8 @@ export class OracleStrategy {
       );
       const gapOpen = corridorDogs.length <= 1; // sprint with at most 1 dog in corridor
 
-      // Always send move commands — engine-level dedup in agentHarness
-      // skips path reset when destination hasn't changed, so repeated
-      // sends are harmless (no stutter-stepping).
+      // Always send move commands. The C++ harness applies each click via
+      // Assign_Destination, even when the destination cell has not changed.
       const sendMove = (cx: number, cy: number, reason: string) => {
         commands.push({ cmd: 'move', ids: [spy.id], cx, cy });
         reasons.push(reason);

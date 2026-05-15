@@ -105,6 +105,7 @@ export interface MapTree {
   immune: boolean;      // C++ IsImmune — true for clumps
   isOnFire?: boolean;   // C++ TerrainClass::IsOnFire
   isCrumbling?: boolean; // C++ TerrainClass::IsCrumbling
+  logicIndexHint?: number;
   occupyCells: number[]; // cell indices this tree occupies (blocks ground movement)
 }
 
@@ -116,6 +117,7 @@ export interface MapTerrainObject {
   type: string;
   cx: number;
   cy: number;
+  logicIndexHint?: number;
   occupyCells: number[];
 }
 
@@ -442,7 +444,7 @@ export class GameMap {
 
   /** Register a non-tree TerrainClass object on the map.
    *  cpp-parity: RA terrain.cpp TerrainClass::Unlimbo + tdata.cpp Occupy_List. */
-  addTerrainObject(type: string, cx: number, cy: number, occupyOffsets: [number, number][]): void {
+  addTerrainObject(type: string, cx: number, cy: number, occupyOffsets: [number, number][], logicIndexHint?: number): void {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
     const occupyCells: number[] = [];
     for (const [dx, dy] of occupyOffsets) {
@@ -452,7 +454,7 @@ export class GameMap {
         occupyCells.push(ocy * MAP_CELLS + ocx);
       }
     }
-    const object: MapTerrainObject = { type, cx, cy, occupyCells };
+    const object: MapTerrainObject = { type, cx, cy, logicIndexHint, occupyCells };
     this.terrainObjects.set(cy * MAP_CELLS + cx, object);
     for (const cellIdx of occupyCells) {
       this.terrainObjectOccupied.add(cellIdx);
@@ -683,6 +685,34 @@ export class GameMap {
       return clobberedOwner > 0 ? { cellIdx: idx, ownerId: clobberedOwner } : null;
     }
     return null;
+  }
+
+  /** Clear a physical vehicle/building occupy bit for a specific unit.
+   *  C++ UnitClass death calls Mark(MARK_UP) before deletion, so later objects
+   *  in the same Logic pass see the cell as clear. */
+  clearVehicleOccupancy(cx: number, cy: number, entityId: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    if (!this.vehicleOccupancy.has(idx)) return;
+    if (this.occupancy[idx] !== entityId) return;
+    this.vehicleOccupancy.delete(idx);
+    this.refreshSubCellOccupancy(idx);
+  }
+
+  /** Release all DriveClass::Mark_Track reservations owned by an entity. */
+  clearVehicleTrackReservationsForEntity(entityId: number): void {
+    const cleared: number[] = [];
+    for (const [idx, ownerId] of this.vehicleTrackReservations) {
+      if (ownerId === entityId) {
+        this.vehicleTrackReservations.delete(idx);
+        cleared.push(idx);
+      }
+    }
+    for (const idx of cleared) {
+      if (this.occupancy[idx] === entityId && !this.vehicleOccupancy.has(idx)) {
+        this.refreshSubCellOccupancy(idx);
+      }
+    }
   }
 
   /** Move a vehicle's physical occupy bit during DriveClass movement.

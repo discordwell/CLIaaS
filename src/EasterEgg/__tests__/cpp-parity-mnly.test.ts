@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import {
   UnitType, House, CELL_SIZE, Dir, Mission, AnimState,
   UNIT_STATS, WEAPON_STATS, WARHEAD_VS_ARMOR, PRODUCTION_ITEMS,
@@ -551,9 +552,9 @@ describe('MNLY production identity (rules.ini)', () => {
     expect(item.cost).toBe(800);
   });
 
-  it('buildTime is 576 (C++ cost-based: floor(800 * 0.72))', () => {
+  it('buildTime uses C++ 8.8 fixed-point production timing', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MNLY')!;
-    expect(item.buildTime).toBe(576);
+    expect(item.buildTime).toBe(cppTechnoTypeBuildTime(800));
   });
 
   it('prerequisite is WEAP (War Factory)', () => {

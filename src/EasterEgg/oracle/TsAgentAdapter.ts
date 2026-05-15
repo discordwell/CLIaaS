@@ -13,6 +13,10 @@ export interface TsAgentAdapterConfig {
   viewport?: { width: number; height: number };
 }
 
+export interface TsLoadScenarioOptions {
+  seed?: number;
+}
+
 declare global {
   interface Window {
     __agentReady?: boolean;
@@ -60,12 +64,19 @@ export class TsAgentAdapter {
     }
   }
 
-  async loadScenario(scenario: string, difficulty = 'normal'): Promise<AgentState> {
+  async loadScenario(
+    scenario: string,
+    difficulty = 'normal',
+    options: TsLoadScenarioOptions = {},
+  ): Promise<AgentState> {
     this.ensurePage();
     const url = new URL(this.config.url);
     url.searchParams.set('anttest', 'agent');
     url.searchParams.set('scenario', scenario);
     url.searchParams.set('difficulty', difficulty);
+    if (options.seed != null) {
+      url.searchParams.set('seed', String(options.seed >>> 0));
+    }
 
     await this.page!.goto(url.toString(), { waitUntil: 'load', timeout: 120_000 });
     await this.page!.waitForSelector('canvas', { state: 'attached', timeout: 30_000 });

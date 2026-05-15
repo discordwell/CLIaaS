@@ -1,7 +1,7 @@
-import { CELL_SIZE, LEPTON_SIZE, EXPLOSION_FRAMES } from './types';
+import { CELL_SIZE, LEPTON_SIZE, EXPLOSION_FRAMES, COS_TABLE_256, SIN_TABLE_256 } from './types';
 import { type Effect } from './renderer';
 import { ScenarioRandom } from './random';
-import { TREE_CENTER_OFFSET, type GameMap } from './map';
+import { TREE_CENTER_OFFSET, type GameMap, type MapTree } from './map';
 
 export type LogicAnimType =
   | 'napalm1'
@@ -46,6 +46,7 @@ export interface LogicAnim {
 
 type AllocateLogicIndex = () => number | undefined;
 type ReserveAnimSlot = () => boolean;
+type ReleaseTerrainLogicSlot = (terrain: MapTree) => void;
 
 interface LogicAnimDef {
   sprite: string;
@@ -204,9 +205,10 @@ export function processLogicAnim(
   map?: GameMap,
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
+  releaseTerrainLogicSlot?: ReleaseTerrainLogicSlot,
 ): boolean {
   if (anim.deleteOnNextProcess) {
-    fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+    fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
     return false;
   }
 
@@ -257,7 +259,7 @@ export function processLogicAnim(
       logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
       return true;
     }
-    fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+    fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
     return false;
   }
 
@@ -271,6 +273,7 @@ function fireOutAttachedTree(
   map?: GameMap,
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
+  releaseTerrainLogicSlot?: ReleaseTerrainLogicSlot,
 ): void {
   if (anim.attachedTreeKey === undefined || !map) return;
   const hasOtherAttachedAnim = logicAnims.some(other =>
@@ -289,6 +292,7 @@ function fireOutAttachedTree(
     const x = tree.cx * CELL_SIZE + centerOff[0];
     const y = tree.cy * CELL_SIZE + centerOff[1];
     map.destroyTree(tree);
+    releaseTerrainLogicSlot?.(tree);
     spawnLogicAnim(
       logicAnims,
       effects,
@@ -468,10 +472,12 @@ function coordScatter(x: number, y: number, radiusLeptons: number): { x: number;
   const dir = ScenarioRandom.nextInRange(0, 255);
   if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
 
-  const radiusPx = radiusLeptons * CELL_SIZE / LEPTON_SIZE;
-  const angle = dir * 2 * Math.PI / 256;
+  const startLX = Math.trunc(x * LEPTON_SIZE / CELL_SIZE);
+  const startLY = Math.trunc(y * LEPTON_SIZE / CELL_SIZE);
+  const lx = startLX + ((COS_TABLE_256[dir] * radiusLeptons) >> 7);
+  const ly = startLY - ((SIN_TABLE_256[dir] * radiusLeptons) >> 7);
   return {
-    x: x + Math.cos(angle) * radiusPx,
-    y: y + Math.sin(angle) * radiusPx,
+    x: lx * CELL_SIZE / LEPTON_SIZE,
+    y: ly * CELL_SIZE / LEPTON_SIZE,
   };
 }

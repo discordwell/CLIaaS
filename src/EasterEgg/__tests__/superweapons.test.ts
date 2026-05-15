@@ -9,6 +9,7 @@ import {
   UnitType, House, UNIT_STATS, CELL_SIZE,
   SuperweaponType, SUPERWEAPON_DEFS, PRODUCTION_ITEMS,
 } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
 
 beforeEach(() => resetEntityIds());
@@ -137,7 +138,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'ATEK');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1500);
-    expect(item!.buildTime).toBe(Math.floor(1500 * 0.72)); // C++ parity: floor(cost * 0.72)
+    expect(item!.buildTime).toBe(cppTechnoTypeBuildTime(1500));
     expect(item!.prerequisite).toBe('WEAP');
     expect(item!.faction).toBe('allied');
     expect(item!.isStructure).toBe(true);
@@ -147,7 +148,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'STEK');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(1500);
-    expect(item!.buildTime).toBe(Math.floor(1500 * 0.72)); // C++ parity: floor(cost * 0.72)
+    expect(item!.buildTime).toBe(cppTechnoTypeBuildTime(1500));
     expect(item!.prerequisite).toBe('WEAP');
     expect(item!.faction).toBe('soviet');
     expect(item!.isStructure).toBe(true);
@@ -157,7 +158,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'PDOX');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(2800);
-    expect(item!.buildTime).toBe(Math.floor(2800 * 0.72)); // C++ parity: floor(cost * 0.72)
+    expect(item!.buildTime).toBe(cppTechnoTypeBuildTime(2800));
     expect(item!.prerequisite).toBe('ATEK');
     expect(item!.faction).toBe('allied');
   });
@@ -166,7 +167,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'IRON');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(2800);
-    expect(item!.buildTime).toBe(Math.floor(2800 * 0.72)); // C++ parity: floor(cost * 0.72)
+    expect(item!.buildTime).toBe(cppTechnoTypeBuildTime(2800));
     expect(item!.prerequisite).toBe('STEK');
     expect(item!.faction).toBe('soviet');
   });
@@ -175,7 +176,7 @@ describe('Superweapon structure config', () => {
     const item = PRODUCTION_ITEMS.find(p => p.type === 'MSLO');
     expect(item).toBeDefined();
     expect(item!.cost).toBe(2500);
-    expect(item!.buildTime).toBe(Math.floor(2500 * 0.72)); // C++ parity: floor(cost * 0.72)
+    expect(item!.buildTime).toBe(cppTechnoTypeBuildTime(2500));
     expect(item!.prerequisite).toBe('STEK');
     expect(item!.faction).toBe('both');
   });

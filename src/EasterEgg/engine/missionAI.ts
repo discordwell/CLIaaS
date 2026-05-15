@@ -5,9 +5,9 @@
  */
 
 import {
-  type WorldPos, type WeaponStats, type ArmorType,
+  type WorldPos, type CellPos, type WeaponStats, type ArmorType,
   type WarheadType, type WarheadMeta, type WarheadProps,
-  CELL_SIZE, LEPTON_SIZE, MAP_CELLS,
+  CELL_SIZE, GAME_TICKS_PER_SEC, LEPTON_SIZE, MAP_CELLS,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
   leptonDist, pixelToLepton, directionTo, directionToLeptons, directionToLeptons256, worldToCell, DIR_DX, DIR_DY,
   COS_TABLE_256, SIN_TABLE_256,
@@ -16,7 +16,7 @@ import {
   PRODUCTION_ITEMS, STRUCTURE_POINTS, WARHEAD_META,
   getWarheadMultiplier, coordTargetRoundTripLepton, cellTargetToLepton, cellToLepton,
 } from './types';
-import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8, dir256ToFacing32 } from './entity';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8, dir256ToFacing32, threatScore as baseThreatScore } from './entity';
 import {
   type MapStructure, CAPTURABLE_BUILDINGS, STRUCTURE_WEAPONS, STRUCTURE_SIZE,
   STRUCTURE_ARMOR,
@@ -129,6 +129,10 @@ export interface MissionAIContext {
   // Mission helpers
   idleMission(entity: Entity): Mission;
   retreatFromTarget(entity: Entity, targetPos: WorldPos): void;
+  /** C++ FootClass/VesselClass::Mission_Retreat edge destination. */
+  retreatEdgeCell?(entity: Entity): CellPos | null;
+  /** C++ VesselClass::Mission_Retreat removes retreating vessels from teams. */
+  removeFromTeamForRetreat?(entity: Entity): void;
   threatScore(scanner: Entity, target: Entity, dist: number): number;
   leaveMap?(entity: Entity): void;
 
@@ -158,6 +162,12 @@ export interface MissionAIContext {
 function consumeAmmoAfterSuccessfulFire(entity: Entity): void {
   if (entity.ammo > 0) entity.ammo--;
 
+  // C++ UnitClass::Fire_At starts a 30-second Reload CDTimer for V2 rockets
+  // after the BulletClass is successfully created.
+  if (entity.type === UnitType.V_V2RL && entity.reloadTimer === 0) {
+    entity.reloadTimer = GAME_TICKS_PER_SEC * 30;
+  }
+
   if (entity.stats.isInfantry && entity.stats.isFraidyCat && entity.ammo === 0) {
     entity.fear = Entity.FEAR_MAXIMUM;
     if (entity.mission === Mission.ATTACK || entity.mission === Mission.HUNT) {
@@ -182,6 +192,7 @@ export interface GreatestThreatRangeContext {
   getWarheadMeta?(warhead: WarheadType): WarheadMeta;
   isHumanControlledHouse?(house: House): boolean;
   isWallDestroyerDifficulty?(house: House): boolean;
+  threatScore?(scanner: Entity, target: Entity, dist: number): number;
 }
 
 function weaponSelectionMult(
@@ -655,6 +666,13 @@ export function infantryProneLaunch(type: string): number {
     // Civilians, Delphi: ProneLaunch=0 (CivilianDoControls, idata.cpp:603-854)
     default: return 0;
   }
+}
+
+function beginInfantryFirePrep(entity: Entity, tick: number): void {
+  entity.firePrepActive = true;
+  entity.firePrepStage = 0;
+  const startedFireDoing = entity.startFireDoing(tick);
+  entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
 }
 
 const RULE_INCOMING_PROJECTILE_SPEED = 10;
@@ -1138,18 +1156,6 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
     entity.animState = AnimState.ATTACK;
 
-    // S5: NoMovingFire setup time (C++ unit.cpp:1760-1764 — Arm = Rearm_Delay(true)/4 when stopping)
-    // C++ Rearm_Delay(true) = weapon->ROF * House->ROFBias (techno.cpp:2867)
-    // So setup = (ROF * ROFBias) / 4
-    if (entity.stats.noMovingFire && entity.wasMoving && entity.weapon) {
-      const rofBias = ctx.getROFBias(entity.house);
-      const setupTime = Math.floor(entity.weapon.rof * rofBias / 4);
-      if (entity.attackCooldown < setupTime) {
-        entity.attackCooldown = setupTime;
-      }
-      entity.wasMoving = false; // consume the transition — only apply once
-    }
-
     // Dual-weapon selection (C++ TechnoClass::What_Weapon_Should_I_Use):
     // Select the best weapon by warhead score and range bonus. Rearm/range do
     // not change selection; Can_Fire gates actual shooting below.
@@ -1295,8 +1301,6 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         if (!entity.firePrepActive) {
           // C++ !IsFiring case: start firing animation. No bullet launch this tick
           // (unless FireLaunch==0 — Einstein and unarmed types).
-          entity.firePrepActive = true;
-          entity.firePrepStage = 0;
           // C++ InfantryClass::Firing_AI starts DO_FIRE_WEAPON / DO_FIRE_PRONE
           // through Do_Action, then gates Fire_At on StageClass::Fetch_Stage().
           // If Do_Action is blocked by an active non-interruptible sequence
@@ -1304,8 +1308,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           // existing StageClass stage. TS follows that path by using doingStage
           // whenever either the fire Do_Action succeeds or another Doing
           // animation is already running.
-          const startedFireDoing = entity.startFireDoing(ctx.tick);
-          entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
+          beginInfantryFirePrep(entity, ctx.tick);
           if (entity.target?.alive) {
             const targetCoord = entity.target.targetCoordLeptons();
             const fireFacing = directionToLeptons(
@@ -1696,7 +1699,7 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     let bestScore = -Infinity;
     let bestSortKey = Infinity;
     for (const other of ctx.entities) {
-      if (!other.alive || other.inLimbo || ctx.entitiesAllied(entity, other)) continue;
+      if (!isCppFullMapThreatLayerCandidate(other) || ctx.entitiesAllied(entity, other)) continue;
       if (!isInCppGroundThreatLayer(other)) continue;
       // C++ Target_Something_Nearby delegates through class Greatest_Threat.
       // InfantryClass::Greatest_Threat ORs weapon Allowed_Threats, then clears
@@ -1779,6 +1782,16 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
       return;
     }
     if (bestTarget) {
+      if (!isAssignableObjectTarget(bestTarget)) {
+        // C++ Evaluate_Object can return an active zero-strength infantryman
+        // while it remains in Map.Layer[LAYER_GROUND]. TechnoClass::
+        // Assign_Target rejects it and Target_Something_Nearby returns false
+        // without rescanning lower-value live targets.
+        entity.target = null;
+        entity.targetStructure = null;
+        runInfantryRandomAnimate(ctx, entity);
+        return;
+      }
       // Found a new target — continue hunting.
       assignTargetForTechno(entity, bestTarget);
     } else {
@@ -1978,6 +1991,27 @@ function entityRttiBit(other: Entity): number {
 const CXX_GROUND_LAYER_HEIGHT_LEPTONS =
   Entity.FLIGHT_LEVEL_LEPTONS - Math.trunc(Entity.FLIGHT_LEVEL_LEPTONS / 3);
 
+function aircraftLayerHeightLeptons(other: Entity): number {
+  if (!other.isAirUnit) return 0;
+  if (other.aircraftHeightLeptons > 0) return other.aircraftHeightLeptons;
+  return other.flightAltitude > 0 ? pixelToLepton(other.flightAltitude) : 0;
+}
+
+function isInCppAircraftTopThreatLayer(other: Entity): boolean {
+  if (!other.isAirUnit) return false;
+  const height = aircraftLayerHeightLeptons(other);
+  // C++ AircraftClass::In_Which_Layer forces fixed-wing aircraft into
+  // LAYER_TOP for any nonzero Height. Helicopters fall back to ObjectClass:
+  // Height >= FLIGHT_LEVEL - FLIGHT_LEVEL/3 is LAYER_TOP.
+  if (other.isFixedWing) return height > 0;
+  return height >= CXX_GROUND_LAYER_HEIGHT_LEPTONS;
+}
+
+function isInCppCellOccupierThreatLayer(other: Entity): boolean {
+  if (other.isAirUnit) return !isInCppAircraftTopThreatLayer(other);
+  return isInCppGroundThreatLayer(other);
+}
+
 function isInCppGroundThreatLayer(other: Entity): boolean {
   // C++ ObjectClass::In_Which_Layer keeps non-air falling objects in LAYER_TOP
   // while Height >= FLIGHT_LEVEL - FLIGHT_LEVEL/3. FootClass::Mark converts
@@ -1987,6 +2021,28 @@ function isInCppGroundThreatLayer(other: Entity): boolean {
   if (other.isAirUnit) return true;
   if (!other.isFalling) return true;
   return other.fallHeightLeptons < CXX_GROUND_LAYER_HEIGHT_LEPTONS;
+}
+
+function hasThreatAirMethod(entity: Entity): boolean {
+  // C++ subclass Greatest_Threat methods OR weapon Allowed_Threats before
+  // TechnoClass::Greatest_Threat builds its RTTI mask. The later
+  // THREAT_VEHICLES -> RTTI_AIRCRAFT expansion is for landed/ground-layer
+  // aircraft only; it does not trigger the Aircraft.Count() pre-scan.
+  if (entity.type === UnitType.I_DOG) return false;
+  if (entity.type === UnitType.I_MEDI) return false;
+  if (entity.type === UnitType.I_MECH) return true;
+  return !!(entity.weapon?.isAntiAir || entity.weapon2?.isAntiAir);
+}
+
+function isCppFullMapThreatLayerCandidate(other: Entity): boolean {
+  if (other.inLimbo) return false;
+  if (other.alive) return true;
+  // C++ leaves most infantry death animations active in Map.Layer[LAYER_GROUND].
+  // TechnoClass::Greatest_Threat can select them, then Assign_Target clears the
+  // zero-strength target without retrying. Dogs are removed earlier in the
+  // observed C++ occupier/layer path, matching the range-scan dead-dog guard.
+  if (!other.stats.isInfantry || other.type === UnitType.I_DOG) return false;
+  return !other.isInfantryDeathAnimationComplete();
 }
 
 function isCandidateVisibleToPlayer(ctx: GreatestThreatRangeContext, other: Entity, playerHouseIdx: number): boolean {
@@ -2013,27 +2069,100 @@ function isStructureAlliedToScanner(ctx: GreatestThreatRangeContext, entity: Ent
   return ctx.isAllied ? ctx.isAllied(entity.house, s.house) : entity.house === s.house;
 }
 
-export interface TechnoTargetCleanupContext {
-  playerHouse: House;
+export interface TechnoTargetCleanupContext extends GreatestThreatRangeContext {
   isAllied(a: House, b: House): boolean;
+}
+
+function targetCellFromLeptons(lx: number, ly: number): { cx: number; cy: number } {
+  return {
+    cx: Math.floor(lx / LEPTON_SIZE),
+    cy: Math.floor(ly / LEPTON_SIZE),
+  };
+}
+
+function isTargetCellInSameMovementZone(
+  ctx: TechnoTargetCleanupContext,
+  entity: Entity,
+  targetCell: { cx: number; cy: number },
+): boolean {
+  if (targetCell.cx < ctx.map.boundsX ||
+      targetCell.cx >= ctx.map.boundsX + ctx.map.boundsW ||
+      targetCell.cy < ctx.map.boundsY ||
+      targetCell.cy >= ctx.map.boundsY + ctx.map.boundsH) {
+    return false;
+  }
+
+  const sourceCell = entity.cell;
+  const reachableZone = movementZoneCells(ctx.map, sourceCell, entity.isNavalUnit, ctx.structures);
+  return !!reachableZone[targetCell.cy * MAP_CELLS + targetCell.cx];
+}
+
+function targetObjectInTargetRange(
+  ctx: TechnoTargetCleanupContext,
+  entity: Entity,
+  target: Entity,
+): boolean {
+  const selectedWeapon = selectedWeaponForTarget(ctx, entity, target);
+  if (!selectedWeapon) return false;
+  const targetCoord = target.targetCoordLeptons();
+  return entity.inRangeWithCoord(targetCoord.lx, targetCoord.ly, selectedWeapon);
 }
 
 /** C++ TechnoClass::AI target maintenance (techno.cpp:2390-2395).
  *  After MissionClass::AI, computer-controlled techno clears TarCom when the
  *  target's house considers the shooter allied. This uses the target house's
- *  one-way alliance bitfield, not the shooter's. */
+ *  one-way alliance bitfield, not the shooter's.
+ *
+ *  The following block mirrors techno.cpp:2402-2406: non-air technos that are
+ *  not currently owned by a team clear TarCom when the target is outside their
+ *  movement zone and the height-adjusted TARGET-overload range check fails.
+ *  The guard scan itself uses Evaluate_Object's Object* overload (Center_Coord);
+ *  C++ can therefore acquire an aircraft, then immediately clear it here before
+ *  InfantryClass::Firing_AI runs. */
 export function clearTargetIfTargetHouseAlliesScanner(
   ctx: TechnoTargetCleanupContext,
   entity: Entity,
 ): void {
-  if (entity.house === ctx.playerHouse) return;
-
-  if (entity.target && ctx.isAllied(entity.target.house, entity.house)) {
-    entity.target = null;
+  if (entity.house !== ctx.playerHouse) {
+    if (entity.target && ctx.isAllied(entity.target.house, entity.house)) {
+      entity.target = null;
+    }
+    const targetStructureHouse = entity.targetStructure?.house as House | undefined;
+    if (targetStructureHouse && ctx.isAllied(targetStructureHouse, entity.house)) {
+      entity.targetStructure = null;
+    }
   }
-  const targetStructureHouse = entity.targetStructure?.house as House | undefined;
-  if (targetStructureHouse && ctx.isAllied(targetStructureHouse, entity.house)) {
-    entity.targetStructure = null;
+
+  if (entity.isAirUnit || entity.teamRef) return;
+
+  if (entity.target?.alive) {
+    const targetCoord = entity.target.targetCoordLeptons();
+    const targetCell = targetCellFromLeptons(targetCoord.lx, targetCoord.ly);
+    if (!isTargetCellInSameMovementZone(ctx, entity, targetCell) &&
+        !targetObjectInTargetRange(ctx, entity, entity.target)) {
+      assignTargetForTechno(entity, null);
+    }
+    return;
+  }
+
+  if (entity.targetStructure?.alive) {
+    const targetCoord = structureTargetLeptons(entity.targetStructure as MapStructure);
+    const targetCell = targetCellFromLeptons(targetCoord.lx, targetCoord.ly);
+    if (!isTargetCellInSameMovementZone(ctx, entity, targetCell) &&
+        !entityInRangeOfStructure(ctx, entity, entity.targetStructure as MapStructure)) {
+      entity.targetStructure = null;
+    }
+    return;
+  }
+
+  if (entity.forceFirePos) {
+    const targetLX = pixelToLepton(entity.forceFirePos.x);
+    const targetLY = pixelToLepton(entity.forceFirePos.y);
+    const targetCell = targetCellFromLeptons(targetLX, targetLY);
+    if (!isTargetCellInSameMovementZone(ctx, entity, targetCell) &&
+        (!entity.weapon || !entity.inRangeWithCoord(targetLX, targetLY, entity.weapon))) {
+      entity.forceFirePos = null;
+    }
   }
 }
 
@@ -2288,6 +2417,69 @@ function cellBasedGuardScan(
   const playerHouseIdx = _HOUSE_IDX[ctx.playerHouse] ?? -1;
   const isDog = entity.type === UnitType.I_DOG;
   const isRepairWeapon = (entity.weapon?.damage ?? 0) < 0;
+  const scoreEntityCandidate = (ent: Entity): number => {
+    const dist = leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY);
+    return (ctx.threatScore ?? baseThreatScore)(entity, ent, dist / LEPTON_SIZE);
+  };
+  const scoreStructureCandidate = (s: MapStructure): number => {
+    const center = structureCenterLeptons(s);
+    const dist = leptonDist(entity.leptonX, entity.leptonY, center.lx, center.ly);
+    return structureThreatScore(s, dist);
+  };
+  const entityIsInScanRange = (ent: Entity): boolean => {
+    const selectedWeapon = mode === 'range'
+      ? selectedWeaponForTarget(ctx, entity, ent)
+      : null;
+    const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
+    const inRange = mode === 'range'
+      ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
+      : dist <= scanRangeLeptons;
+    if (!inRange) return false;
+    if (ent.isAirUnit && ent.flightAltitude > 0 && mode === 'range') {
+      return selectedWeapon?.isAntiAir === true;
+    }
+    return true;
+  };
+
+  let bestObject: CellScanTarget | null = null;
+  let bestObjectValue = -1;
+
+  // C++ techno.cpp:2087-2104 scans top-layer Aircraft.Count() entries before
+  // the cell-ring walk. Those objects are not Cell_Occupier() entries, so they
+  // seed bestobject/bestval by Evaluate_Object score instead of participating
+  // in ring order. The later ring walk still has the C++ bestval bug below.
+  if ((rttiMask & RTTI.AIRCRAFT) && hasThreatAirMethod(entity)) {
+    const aircraft = ctx.entities
+      .filter(other => other.isAirUnit && isInCppAircraftTopThreatLayer(other))
+      .sort((a, b) => a.id - b.id);
+    for (const other of aircraft) {
+      if (other.inLimbo || !other.alive) continue;
+      const allied = ctx.entitiesAllied(entity, other);
+      if (isRepairWeapon) {
+        if (!allied) continue;
+        if (other.hp >= other.maxHp) continue;
+      } else if (allied) {
+        continue;
+      }
+      if (!(entityRttiBit(other) & rttiMask)) continue;
+      if (other.type === UnitType.I_SPY && !isDog) continue;
+      if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+      if (other.cloakState === CloakState.CLOAKED) continue;
+      if (!canTargetNaval(entity, other)) continue;
+      // C++ techno.cpp:2092-2103 top-layer Aircraft.Count() pre-scan calls
+      // Evaluate_Object(method, mask, range, object, value) without the `zone`
+      // argument. Movement-zone filtering only applies to the later
+      // Evaluate_Cell ring walk, not airborne aircraft.
+      if (!entityIsInScanRange(other)) continue;
+
+      const score = scoreEntityCandidate(other);
+      if (score > bestObjectValue) {
+        bestObject = { entity: other };
+        bestObjectValue = score;
+      }
+    }
+  }
+
   for (const other of ctx.entities) {
     // C++ Evaluate_Object does NOT reject zero-strength ACTIVE objects. It can
     // select an object that is still in the Cell_Occupier chain with Strength=0;
@@ -2300,7 +2492,7 @@ function cellBasedGuardScan(
     // a dead DOG record at (63,52) must not block the JEEP from selecting the
     // live E1 behind it, while SCG06EA t132 still needs a dead E1 blocker.
     if (other.inLimbo) continue;
-    if (!isInCppGroundThreatLayer(other)) continue;
+    if (!isInCppCellOccupierThreatLayer(other)) continue;
     // C++ infantry can remain in Cell_Occupier while playing death animation,
     // which is why dead non-dog infantry must still be visible to the scan in
     // a few parity cases. Destroyed vehicles/buildings are not valid occupiers
@@ -2340,7 +2532,7 @@ function cellBasedGuardScan(
     // match; otherwise candidate must be IsDiscoveredByPlayer. Per-house sight
     // is not enough; SCG07EA England JEEP is player-allied but not PlayerPtr
     // and must not acquire undiscovered USSR E4s through its own allied sight.
-    if (!isCandidateVisibleToPlayer(ctx, other, playerHouseIdx)) continue;
+    if (!other.isAirUnit && !isCandidateVisibleToPlayer(ctx, other, playerHouseIdx)) continue;
     // Naval combat filtering
     if (!canTargetNaval(entity, other)) continue;
     // Air combat filtering: airborne aircraft require AA weapon. Already covered
@@ -2397,20 +2589,25 @@ function cellBasedGuardScan(
     }
   }
 
-  const acceptCellCandidate = (candidate: CellScanTarget | undefined, cx: number, cy: number): CellScanTarget | null => {
+  const scoreCellCandidate = (candidate: CellScanTarget): number => {
+    if (candidate.entity) return scoreEntityCandidate(candidate.entity);
+    if (candidate.structure) return scoreStructureCandidate(candidate.structure);
+    return candidate.score;
+  };
+
+  const acceptCellCandidate = (
+    candidate: CellScanTarget | undefined,
+    cx: number,
+    cy: number,
+  ): { target: CellScanTarget; score: number } | null => {
     if (!candidate) return null;
-    if (candidate.cell) return candidate;
-    if (candidate.structure) return candidate;
+    if (candidate.cell) return { target: candidate, score: candidate.score };
+    if (candidate.structure) return { target: candidate, score: scoreCellCandidate(candidate) };
 
     const ent = candidate.entity;
-    const selectedWeapon = mode === 'range'
-      ? selectedWeaponForTarget(ctx, entity, ent)
-      : null;
-    const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
-    const inRange = mode === 'range'
-      ? !!selectedWeapon && entity.inRangeWithCoord(ent.leptonX, ent.leptonY, selectedWeapon)
-      : dist <= scanRangeLeptons;
+    const inRange = entityIsInScanRange(ent);
     if (debugJeep) {
+      const dist = leptonDist(rangeSrcLx, rangeSrcLy, ent.leptonX, ent.leptonY);
       // eslint-disable-next-line no-console
       console.debug(`[SCG01_JEEP] tick=${ctx.tick} jeep@(${cellX},${cellY}) ` +
         `scanning (${cx},${cy}) cand=${ent.type}#${ent.id} dist=${dist} ` +
@@ -2418,20 +2615,24 @@ function cellBasedGuardScan(
         `centerDist=${leptonDist(entity.leptonX, entity.leptonY, ent.leptonX, ent.leptonY)} ` +
         `accept=${inRange}`);
     }
-    return inRange ? candidate : null;
+    return inRange ? { target: candidate, score: scoreCellCandidate(candidate) } : null;
   };
 
-  let bestObject: CellScanTarget | null = null;
   let bestCell: CellOnlyScanTarget | null = null;
   let bestCellValue = 0;
-  // C++ BUG: bestval is initialized to -1 and NEVER updated in the cell scan loop
-  // (techno.cpp:2122-2124 sets bestobject but not bestval). This means every valid
-  // target overwrites the previous one — effectively "last valid target in scan order wins".
+  // C++ BUG: after the Aircraft.Count() pre-scan seeds bestval, the cell scan
+  // loop compares against that value but NEVER updates it when a cell target
+  // wins (techno.cpp:2137-2190 sets bestobject but not bestval). With no
+  // aircraft seed, bestval stays -1 and every valid cell target overwrites the
+  // previous one. With an aircraft seed, any cell target above the aircraft
+  // score can overwrite, and later above-seed cell targets can overwrite too.
 
   const scanCell = (cx: number, cy: number): void => {
     const accepted = acceptCellCandidate(cellMap.get(cellKey(cx, cy)), cx, cy);
     if (accepted) {
-      bestObject = accepted;
+      if (accepted.score > bestObjectValue) {
+        bestObject = accepted.target;
+      }
       return;
     }
     if (bestObject !== null) return;
@@ -3050,40 +3251,83 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
   }
 }
 
-/** AI1: RETREAT mission — move to nearest map edge and exit the map (C++ foot.cpp) */
-export function updateRetreat(ctx: MissionAIContext, entity: Entity): void {
-  // If already at a move target, continue moving
-  if (entity.moveTarget) {
-    entity.animState = AnimState.WALK;
-    const arrived = entity.moveToward(entity.moveTarget, ctx.movementSpeed(entity));
-    if (arrived) {
-      // Reached map edge. C++ limbos retreating objects; this is not a kill.
-      if (ctx.leaveMap) {
-        ctx.leaveMap(entity);
-      } else {
-        entity.triggerName = '';
-        entity.triggerDeathProcessed = true;
-        entity.alive = false;
-        entity.mission = Mission.DIE;
-      }
-    }
-    return;
-  }
-  // Find nearest map edge
+// rules.ini [Retreat] Rate=.1 is parsed as fixed-point raw 25, so the
+// MissionControl delay is ((25 * 900) + 128) / 256 = 88 ticks.
+const RETREAT_NORMAL_DELAY = 88;
+
+function retreatDelay(entity: Entity): number {
+  if (entity.stats.isVessel) return RETREAT_NORMAL_DELAY;
+  const savedTag = ScenarioRandom._sourceTag;
+  ScenarioRandom._sourceTag = 60070;
+  const jitter = ScenarioRandom.nextInRange(0, 2);
+  ScenarioRandom._sourceTag = savedTag;
+  return RETREAT_NORMAL_DELAY + jitter;
+}
+
+function fallbackRetreatEdgeCell(ctx: MissionAIContext, entity: Entity): CellPos {
   const ec = entity.cell;
   const distLeft = ec.cx - ctx.map.boundsX;
   const distRight = (ctx.map.boundsX + ctx.map.boundsW - 1) - ec.cx;
   const distTop = ec.cy - ctx.map.boundsY;
   const distBottom = (ctx.map.boundsY + ctx.map.boundsH - 1) - ec.cy;
   const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-  let tx = ec.cx, ty = ec.cy;
-  if (minDist === distLeft) tx = ctx.map.boundsX;
-  else if (minDist === distRight) tx = ctx.map.boundsX + ctx.map.boundsW - 1;
-  else if (minDist === distTop) ty = ctx.map.boundsY;
-  else ty = ctx.map.boundsY + ctx.map.boundsH - 1;
-  entity.moveTarget = { lx: tx * 256 + 128, ly: ty * 256 + 128 };
-  entity.path = findPath(ctx.map, ec, { cx: tx, cy: ty }, true, entity.isNavalUnit, entity.stats.speedClass);
+  const tx = Math.max(ctx.map.boundsX, Math.min(ctx.map.boundsX + ctx.map.boundsW - 1, ec.cx));
+  const ty = Math.max(ctx.map.boundsY, Math.min(ctx.map.boundsY + ctx.map.boundsH - 1, ec.cy));
+
+  if (minDist === distLeft) return { cx: ctx.map.boundsX - 1, cy: ty };
+  if (minDist === distRight) return { cx: ctx.map.boundsX + ctx.map.boundsW, cy: ty };
+  if (minDist === distTop) return { cx: tx, cy: ctx.map.boundsY - 1 };
+  return { cx: tx, cy: ctx.map.boundsY + ctx.map.boundsH };
+}
+
+/** AI1: RETREAT mission — assign an off-map edge NavCom (C++ foot.cpp/vessel.cpp). */
+export function updateRetreat(ctx: MissionAIContext, entity: Entity): number {
+  const PICK_RETREAT_POINT = 0;
+  const TRAVEL = 1;
+  entity.animState = AnimState.WALK;
+
+  if (!ctx.map.inBounds(entity.cell.cx, entity.cell.cy)) {
+    if (ctx.leaveMap) {
+      ctx.leaveMap(entity);
+    } else {
+      entity.triggerName = '';
+      entity.triggerDeathProcessed = true;
+      entity.alive = false;
+      entity.mission = Mission.DIE;
+    }
+    return retreatDelay(entity);
+  }
+
+  if (entity.retreatStatus === TRAVEL) {
+    if (!entity.moveTarget) entity.retreatStatus = PICK_RETREAT_POINT;
+    return retreatDelay(entity);
+  }
+
+  if (entity.moveTarget) {
+    entity.retreatStatus = TRAVEL;
+    return entity.stats.isVessel ? 1 : retreatDelay(entity);
+  }
+
+  const edgeCell = ctx.retreatEdgeCell?.(entity) ?? fallbackRetreatEdgeCell(ctx, entity);
+  if (entity.stats.isVessel) entity.isALoaner = true;
+  entity.target = null;
+  entity.targetStructure = null;
+  entity.forceFirePos = null;
+  entity.moveTarget = cellTargetToLepton(edgeCell.cx, edgeCell.cy);
+  entity.moveTargetEntityRef = null;
+  entity.path = [];
   entity.pathIndex = 0;
+  entity.drivePathFacings = [];
+  entity.pathThreshold = MoveResult.CLOAK;
+  entity.retreatStatus = TRAVEL;
+  entity.skipDriveZoneCheckOnce = true;
+
+  if (entity.stats.isVessel) {
+    ctx.removeFromTeamForRetreat?.(entity);
+    return 1;
+  }
+
+  return retreatDelay(entity);
 }
 
 /** C++ parity: transport auto-evacuates when a civilian/VIP boards.
@@ -3327,10 +3571,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
           ? infantryProneLaunch(entity.type)
           : infantryFireLaunch(entity.type);
         if (!entity.firePrepActive) {
-          entity.firePrepActive = true;
-          entity.firePrepStage = 0;
-          const startedFireDoing = entity.startFireDoing(ctx.tick);
-          entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
+          beginInfantryFirePrep(entity, ctx.tick);
           entity.firePrepFacing256 = entity.bodyFacing256 >= 0
             ? entity.bodyFacing256 & 0xFF
             : (entity.facing * 32) & 0xFF;
@@ -3536,10 +3777,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
       ? infantryProneLaunch(entity.type)
       : infantryFireLaunch(entity.type);
     if (!entity.firePrepActive) {
-      entity.firePrepActive = true;
-      entity.firePrepStage = 0;
-      const startedFireDoing = entity.startFireDoing(ctx.tick);
-      entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
+      beginInfantryFirePrep(entity, ctx.tick);
 
       const fireFacing = directionToLeptons(entity.leptonX, entity.leptonY, targetLX, targetLY);
       entity.facing = fireFacing;

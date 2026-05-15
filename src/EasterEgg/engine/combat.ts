@@ -18,7 +18,7 @@ import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, attachFallingParachuteAnim
 import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS, INSIGNIFICANT_STRUCTURE_TYPES, isStructureUnderConstruction, getStructureOccupyCells, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
-import { type GameMap, type MapTree, Terrain, TREE_CENTER_OFFSET } from './map';
+import { type GameMap, type MapTree, MoveResult, Terrain, TREE_CENTER_OFFSET } from './map';
 import { nearbyLocation } from './pathfinding';
 import { type AircraftContext, canTargetNaval, closestInfantryUnlimboSpot } from './aircraft';
 import { AI_BUILD_RULES } from './ai';
@@ -210,6 +210,15 @@ function sourceArmor(source: DamageSource): ArmorType {
   return isEntitySource(source)
     ? source.stats.armor
     : (source.armor ?? STRUCTURE_ARMOR[source.type] ?? 'wood');
+}
+
+function sourcePos(source: DamageSource): WorldPos {
+  if (isEntitySource(source)) return source.pos;
+  const center = structureCenterLeptons(source);
+  return {
+    x: center.lx * CELL_SIZE / LEPTON_SIZE,
+    y: center.ly * CELL_SIZE / LEPTON_SIZE,
+  };
 }
 
 function structureCenterLeptons(s: MapStructure): { lx: number; ly: number } {
@@ -487,11 +496,11 @@ function entityOccupiesCellForExplosionDamage(entity: Entity): boolean {
 
 function coordScatterFromCell(cellCx: number, cellCy: number, radiusLeptons: number): { x: number; y: number } {
   const dir = withScenarioRandomSourceTag(50002, () => ScenarioRandom.nextInRange(0, 255));
-  const radiusPx = radiusLeptons * CELL_SIZE / LEPTON_SIZE;
-  const angle = dir * 2 * Math.PI / 256;
+  const lx = cellCx * LEPTON_SIZE + CELL_CENTER_LEPTON + ((COS_TABLE_256[dir] * radiusLeptons) >> 7);
+  const ly = cellCy * LEPTON_SIZE + CELL_CENTER_LEPTON - ((SIN_TABLE_256[dir] * radiusLeptons) >> 7);
   return {
-    x: cellCx * CELL_SIZE + Math.cos(angle) * radiusPx,
-    y: cellCy * CELL_SIZE + Math.sin(angle) * radiusPx,
+    x: lx * CELL_SIZE / LEPTON_SIZE,
+    y: ly * CELL_SIZE / LEPTON_SIZE,
   };
 }
 
@@ -905,6 +914,7 @@ function submitBuildingSmokeEffect(
     loopEnd: EXPLOSION_FRAMES.smoke_m ?? 91,
     loops: Math.max(1, loop) * 6,
     cppLogicSlot: true,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
   } as Effect);
 }
 
@@ -1045,6 +1055,10 @@ export interface AiStateSlice {
   underAttack: boolean;
   iq: number;
   isBaseBuilding?: boolean;
+  /** C++ HouseClass::LAEnemy — house of the last building attacker. */
+  lastAttackerEnemy?: House | null;
+  /** C++ HouseClass::Enemy — persistent designated enemy for threat scoring. */
+  designatedEnemy?: House | null;
 }
 
 /** Context object providing combat functions access to game state and callbacks */
@@ -1064,6 +1078,14 @@ export interface CombatContext {
   logicIndexHintForNewObject?: () => number;
   /** Move an existing object to the end of the C++ Logic order after Unlimbo. */
   resubmitEntityToLogicEnd?: (entity: Entity) => void;
+  /** Release an object's current C++ Logic slot when Limbo/delete removes it. */
+  releaseLogicSlotForEntity?: (entity: Entity) => void;
+  /** Release a TerrainClass Logic slot when a tree/terrain object deletes. */
+  releaseTerrainLogicSlot?: (terrain: MapTree) => void;
+  /** Release a non-entity C++ Logic slot after its BulletClass/AnimClass deletes. */
+  deferLogicSlotRelease?: (logicIndexHint: number | undefined) => void;
+  /** Highest original Logic index shifted behind the active C++ cursor this tick. */
+  shiftedLogicSkipHintThrough?: number;
   /** Reserve one C++ AnimClass heap slot. Returns false when Rule.AnimMax is full. */
   reserveAnimSlot?: () => boolean;
   tick: number;
@@ -1109,6 +1131,9 @@ export interface CombatContext {
   playEva(name: string): void;
   minimapAlert(cx: number, cy: number): void;
   movementSpeed(entity: Entity): number;
+  /** C++ TechnoClass::Evaluate_Object visibility gate: PlayerPtr-owned or discovered by PlayerPtr. */
+  isDiscoveredByPlayer?(entity: Entity): boolean;
+  isRevealedToHouse?(cx: number, cy: number, houseIdx: number): boolean;
   /** C++ InfantryClass::Stop_Driver, used by InfantryClass::Assign_Destination. */
   stopInfantryDriver?(entity: Entity): void;
   /** C++ InfantryClass::Assign_Destination line 1046 clear-current-cell predicate. */
@@ -1151,6 +1176,46 @@ export interface StructureDamageOptions {
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
+
+function recordStructureSourceAttack(ctx: CombatContext, s: MapStructure, source: Entity): void {
+  const aiState = ctx.aiStates.get(s.house);
+  if (!aiState) return;
+
+  // C++ building.cpp:1240-1249 records LATime/LAEnemy before low-level damage
+  // assessment. Non-allied building attackers also become House->Enemy, which
+  // TechnoClass::Evaluate_Object later uses as the designated-enemy threat bonus.
+  aiState.lastBaseAttackTick = ctx.tick;
+  aiState.lastAttackerEnemy = source.house;
+  if (!ctx.isAllied(s.house, source.house)) {
+    aiState.designatedEnemy = source.house;
+  }
+}
+
+function maybeAssignStructureReturnFireTarget(
+  ctx: CombatContext,
+  s: MapStructure,
+  source: Entity | undefined,
+): void {
+  if (!source || !s.weapon) return;
+  if (s.type === 'SAM' || s.type === 'AGUN') return;
+  if (ctx.isAllied(s.house, source.house)) return;
+
+  const currentTarget = s.targetEntityId !== undefined
+    ? ctx.entityById.get(s.targetEntityId)
+    : undefined;
+  const hasLegalTarget = !!(currentTarget && currentTarget.alive && !currentTarget.inLimbo);
+  if (hasLegalTarget && structureTargetInTarcomRange(s, currentTarget)) return;
+
+  // C++ building.cpp:1496-1512 — weapon buildings snap their TarCom to the
+  // non-aircraft source that damaged them when the existing TarCom is illegal
+  // or out of range. PlayerReturnFire is disabled in rules.ini, so only the
+  // actual human house declines this automatic retargeting.
+  if (source.isAirUnit) return;
+  if (s.house === ctx.playerHouse) return;
+  if (!source.alive || source.inLimbo) return;
+
+  s.targetEntityId = source.id;
+}
 
 /** Warhead vs armor multiplier — checks scenario overrides first */
 export function getWarheadMult(
@@ -1380,16 +1445,21 @@ export function damageEntity(
   if (!options.skipHouseArmorBias && houseArmorBias !== 1.0 && amount > 0) {
     amount = Math.max(1, Math.round(amount / houseArmorBias));
   }
+  const occupiedLogicBefore = target.occupiesCppLogic();
   const hpBefore = target.hp;
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
   const passengerHouses = target.passengers.map(p => p.house);
   const killed = target.takeDamage(amount, warhead, attacker, whProps, {
     skipProneBias: options.skipProneBias,
     skipArmorBias: options.skipEntityArmorBias,
+    hasDamageSource: attacker !== undefined || options.sourceStructure !== undefined,
   });
   if (killed) {
     ctx.recordUnitLost?.(target.house);
     for (const passengerHouse of passengerHouses) ctx.recordUnitLost?.(passengerHouse);
+    if (occupiedLogicBefore && !target.occupiesCppLogic()) {
+      ctx.releaseLogicSlotForEntity?.(target);
+    }
   }
   damageTrace({
     tick: ctx.tick,
@@ -1461,8 +1531,8 @@ export function damageEntity(
 	        didPostRetaliationForcedScatter = true;
 	      }
 	    }
-	    if (attacker && !didPostRetaliationForcedScatter) {
-	      aiScatterOnDamage(ctx, target, attacker);
+	    if (damageSource && !didPostRetaliationForcedScatter) {
+	      aiScatterOnDamage(ctx, target, damageSource);
 	    }
 	  }
 	  return killed;
@@ -1553,6 +1623,27 @@ function assignInfantryScatterDestination(ctx: CombatContext, entity: Entity, ce
   entity.moveTarget = cellTargetToLepton(cell.cx, cell.cy);
 }
 
+function structureOccupiesClearToMoveCell(s: MapStructure, cx: number, cy: number): boolean {
+  if (!s.alive || s.rubble) return false;
+  return getStructureOccupyCells(s.type, s.cx, s.cy).some(cell =>
+    cell.cx === cx && cell.cy === cy);
+}
+
+function scatterNearbyCellIsClear(ctx: CombatContext, entity: Entity, cx: number, cy: number): boolean {
+  if (ctx.structures.some(s => structureOccupiesClearToMoveCell(s, cx, cy))) {
+    return false;
+  }
+  return ctx.map.canEnterCell(cx, cy, entity.isNavalUnit) === MoveResult.OK;
+}
+
+function releaseDestroyedUnitOccupancy(ctx: CombatContext, victim: Entity): void {
+  if (victim.stats.isInfantry || victim.stats.isVessel) return;
+  if (victim.isAirUnit && victim.flightAltitude > 0) return;
+  ctx.map.clearVehicleTrackReservationsForEntity(victim.id);
+  ctx.map.clearVehicleOccupancy(victim.cell.cx, victim.cell.cy, victim.id);
+  victim.driveTrackFlagClearedCellIdx = -1;
+}
+
 /**
  * AI scatter — infantry scatter per C++ infantry.cpp:1852-1929 (InfantryClass::Scatter).
  *
@@ -1568,7 +1659,7 @@ function assignInfantryScatterDestination(ctx: CombatContext, entity: Entity, ce
  *  - Infantry scatters directionally; UnitClass zero-threat scatter uses
  *    Map.Nearby_Location and does not consume Scenario RNG.
  */
-export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?: Entity): void {
+export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?: DamageSource): void {
   // Only infantry uses directional scatter (C++ infantry.cpp override)
   if (!entity.stats.isInfantry) {
     // C++ FootClass::Take_Damage fallback scatter for DriveClass descendants
@@ -1594,6 +1685,7 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
       entity.cell,
       entity.isNavalUnit,
       Math.max(0, ctx.tick - 1),
+      (cx, cy) => scatterNearbyCellIsClear(ctx, entity, cx, cy),
     );
     if (cell) {
       entity.moveTarget = cellTargetToLepton(cell.cx, cell.cy);
@@ -1643,7 +1735,7 @@ export function aiScatterOnDamage(ctx: CombatContext, entity: Entity, attacker?:
   if (attacker) {
     // C++ infantry.cpp:1889 — Dir_Facing(Direction8(threat, Coord))
     // Direction from threat to infantry = away from threat
-    awayDir = directionTo(attacker.pos, entity.pos);
+    awayDir = directionTo(sourcePos(attacker), entity.pos);
   } else {
     // C++ infantry.cpp:1893-1897 — no threat source uses cell-fraction
     // direction unless the infantry is exactly at cell center.
@@ -2249,6 +2341,9 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   }
   for (const structure of ctx.structures) {
     if (structure.targetEntityId === victim.id) {
+      // C++ TechnoClass::Detach only clears TarCom here. Mission_Attack later
+      // notices TARGET_NONE, falls back to GUARD, and only then does a normal
+      // guard scan pick the next target.
       structure.targetEntityId = undefined;
     }
   }
@@ -2316,6 +2411,8 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     wideAreaDamage(ctx, victim.leptonX, victim.leptonY, radiusLeptons, explosionDamage, opts.attacker, explosionWarhead);
   }
 
+  releaseDestroyedUnitOccupancy(ctx, victim);
+
   // C++ unit.cpp:1046-1069 — Vehicle crew spawning on destruction
   // Conditions: IsCrew=true, Max_Passengers==0 (not a transport), 50% probability
   if (victim.stats.crewed && !victim.stats.isAircraft && !victim.stats.isInfantry &&
@@ -2376,33 +2473,35 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       const inf = new Entity(UnitType.I_E1, victim.house, kx, ky);
       inf.logicIndexHint = ctx.logicIndexHintForNewObject?.();
       const spot = closestInfantryUnlimboSpot(ctx as unknown as AircraftContext, inf, victim.leptonX, victim.leptonY);
-      inf.leptonX = spot.lx;
-      inf.leptonY = spot.ly;
-      inf.syncPosFromLeptons();
-      inf.subCell = spot.subCell;
-      inf.claimedCellIdx = spot.cellIdx;
-      inf.claimedSubCell = spot.subCell;
+      if (spot) {
+        inf.leptonX = spot.lx;
+        inf.leptonY = spot.ly;
+        inf.syncPosFromLeptons();
+        inf.subCell = spot.subCell;
+        inf.claimedCellIdx = spot.cellIdx;
+        inf.claimedSubCell = spot.subCell;
 
-      // C++ ObjectClass::Paradrop sets Height=FLIGHT_LEVEL and IsFalling before
-      // Unlimbo. TechnoClass::AI then returns early while this non-air infantry
-      // still has Height > 0, so a survivor appended to Logic mid-frame cannot
-      // immediately run Mission_Guard/HUNT RNG on the same tick.
-      inf.isFalling = true;
-      inf.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
-      inf.fallRiser = 0;
-      inf.flightAltitude = leptonToPixel(inf.fallHeightLeptons);
+        // C++ ObjectClass::Paradrop sets Height=FLIGHT_LEVEL and IsFalling before
+        // Unlimbo. TechnoClass::AI then returns early while this non-air infantry
+        // still has Height > 0, so a survivor appended to Logic mid-frame cannot
+        // immediately run Mission_Guard/HUNT RNG on the same tick.
+        inf.isFalling = true;
+        inf.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+        inf.fallRiser = 0;
+        inf.flightAltitude = leptonToPixel(inf.fallHeightLeptons);
 
-      // TechnoClass::Unlimbo performs Enter_Idle_Mode(true)+Commence, then
-      // InfantryClass::Paradrop queues the final human GUARD / AI HUNT mission.
-      inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
-      inf.missionTimer = 0;
-      inf.missionQueue = null;
-      assignMission(inf, inf.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
+        // TechnoClass::Unlimbo performs Enter_Idle_Mode(true)+Commence, then
+        // InfantryClass::Paradrop queues the final human GUARD / AI HUNT mission.
+        inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
+        inf.missionTimer = 0;
+        inf.missionQueue = null;
+        assignMission(inf, inf.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
 
-      ctx.entities.push(inf);
-      ctx.entityById.set(inf.id, inf);
-      attachFallingParachuteAnim(inf, ctx.logicIndexHintForNewObject, ctx.reserveAnimSlot);
-      ctx.markDiscoveredIfPlayerVisible?.(inf);
+        ctx.entities.push(inf);
+        ctx.entityById.set(inf.id, inf);
+        attachFallingParachuteAnim(inf, ctx.logicIndexHintForNewObject, ctx.reserveAnimSlot);
+        ctx.markDiscoveredIfPlayerVisible?.(inf);
+      }
     }
   }
 }
@@ -2790,6 +2889,7 @@ export function launchProjectile(
     attacker.headToLX = 0;
     attacker.headToLY = 0;
     attacker.inLimbo = true;
+    ctx.releaseLogicSlotForEntity?.(attacker);
     attacker.dogRiderLimboStartTick = ctx.tick;
     dogRiderId = attacker.id;
   }
@@ -3406,7 +3506,11 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
       proj.processedLogicTick = ctx.tick;
     }
     if (!arrived) {
-      if (projectileRemainsInLogic(proj)) survivors.push(proj);
+      if (projectileRemainsInLogic(proj)) {
+        survivors.push(proj);
+      } else {
+        ctx.deferLogicSlotRelease?.(proj.logicIndexHint);
+      }
       continue;
     }
 
@@ -3416,6 +3520,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     ctx.inflightProjectiles = [...survivors, ...unprocessed, ...deferred];
 
     detonateProjectile(ctx, proj);
+    ctx.deferLogicSlotRelease?.(proj.logicIndexHint);
 
     const spawnedProjectiles = ctx.inflightProjectiles.filter(p => !knownProjectiles.has(p));
     for (const spawned of spawnedProjectiles) {
@@ -3444,6 +3549,10 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     const earlierDeletes = Math.max(0, liveBefore - liveAfter);
     if (proj.logicIndexHint !== undefined) {
       skipLogicHintThrough = Math.max(skipLogicHintThrough, proj.logicIndexHint + earlierDeletes);
+      ctx.shiftedLogicSkipHintThrough = Math.max(
+        ctx.shiftedLogicSkipHintThrough ?? -Infinity,
+        skipLogicHintThrough,
+      );
       projectileTrace({
         event: 'delete-shift',
         tick: ctx.tick,
@@ -3650,6 +3759,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
               candidate.ly,
               true,
             );
+            if (!spot) continue;
             let slots = ctx.map.subCellOccupancy.get(spot.cellIdx);
             if (!slots) {
               slots = [0, 0, 0, 0, 0] as [number, number, number, number, number];
@@ -3822,6 +3932,7 @@ export function applySplashDamage(
       // then calls Base_Is_Attacked(source) before ObjectClass::Take_Damage
       // applies armor/distance falloff. Preserve that ordering: base defense can
       // suspend teams even when final structure HP damage is reduced to zero.
+      recordStructureSourceAttack(ctx, s, attacker);
       maybeSuspendTeamsForBaseAttack(ctx, attacker, s.house, Boolean(STRUCTURE_WEAPONS[s.type]), s);
     }
     // Apply damage using per-building armor from rules.ini (C++ bdata.cpp)
@@ -4131,6 +4242,7 @@ export function applySplashDamage(
               } else {
                 // Tree destroyed — clear from map (C++ terrain.cpp Start_To_Crumble + destructor)
                 ctx.map.destroyTree(hitTree);
+                ctx.releaseTerrainLogicSlot?.(hitTree);
                 ctx.map.addDecal(hitTree.cx, hitTree.cy, 6, 0.4); // stump/scorch mark
                 ctx.effects.push({
                   type: 'explosion',
@@ -4161,12 +4273,19 @@ export function structureDamage(
   options?: StructureDamageOptions,
 ): boolean {
   if (!s.alive || s.hp <= 0) return false;
+  if (source) recordStructureSourceAttack(ctx, s, source);
   if (source && !options?.skipBaseAttack) maybeSuspendTeamsForBaseAttack(ctx, source, s.house, Boolean(STRUCTURE_WEAPONS[s.type]), s);
   // C++ house.cpp:2751 — Iron Curtain makes structures invulnerable (no damage taken)
   if (s.ironCurtainTicks && s.ironCurtainTicks > 0) return false;
   const oldHp = s.hp;
   const halfHp = s.maxHp >> 1;
+  if (source && damage > 0 && !ctx.isAllied(s.house, source.house)) {
+    s.isTickedOff = true;
+  }
   s.hp = Math.max(0, s.hp - damage);
+  if (damage > 0) {
+    maybeAssignStructureReturnFireTarget(ctx, s, source);
+  }
   const destroyedByThisHit = oldHp > 0 && s.hp <= 0;
   if (destroyedByThisHit) {
     // C++ ObjectClass::Take_Damage applies Strength=0 before Record_The_Kill()
@@ -4184,14 +4303,9 @@ export function structureDamage(
   if (s.triggerName && source && damage > 0) {
     ctx.attackedTriggerNames.add(s.triggerName);
   }
-  // C++ BuildingClass::Take_Damage updates House->LATime when a real source
-  // TechnoClass is supplied. House->State is not changed here; the ATTACKED
-  // transition is part of HouseClass::Expert_AI, which only runs for houses
-  // with IsBaseBuilding enabled.
-  const aiState = source ? ctx.aiStates.get(s.house) : undefined;
-  if (aiState) {
-    aiState.lastBaseAttackTick = ctx.tick;
-  }
+  // House attack state was recorded at function entry to match C++ ordering:
+  // BuildingClass::Take_Damage updates LATime/LAEnemy/Enemy before applying
+  // armor, immunity, or low-level ObjectClass damage.
   // EVA "base under attack" for player structures (throttled)
   if (ctx.isAllied(s.house, ctx.playerHouse) &&
       ctx.tick - ctx.lastBaseAttackEva > ctx.gameTicksPerSec * 60) {
@@ -4413,8 +4527,9 @@ function runBuildingDropDebris(ctx: CombatContext, s: MapStructure): void {
       case 1:
       case 2: {
         if (reserveBuildingAnimSlot(ctx)) {
-          // C++ new-expression evaluation for this call site allocates first,
-          // then evaluates constructor args right-to-left: loop, delay, coord.
+          // C++/WASM evaluates this AnimClass argument list right-to-left here:
+          // loop, delay, then Coord_Scatter. The AnimClass allocation itself is
+          // reserved first; if it fails, none of these constructor args run.
           const smokeLoop = ScenarioRandom.nextInRange(1, 2);
           const smokeDelay = ScenarioRandom.nextInRange(0, 5);
           const smokePos = coordScatterFromCell(cell.cx, cell.cy, 0x0050);
@@ -4483,57 +4598,170 @@ function structureThreatScanEntities(ctx: CombatContext): Entity[] {
   return [...airborneAircraft, ...remaining];
 }
 
+const COMBAT_HOUSE_IDX: Record<string, number> = {
+  [House.Spain]: 0, [House.Greece]: 1, [House.USSR]: 2,
+  [House.England]: 3, [House.Ukraine]: 4, [House.Germany]: 5,
+  [House.France]: 6, [House.Turkey]: 7,
+  [House.GoodGuy]: 8, [House.BadGuy]: 9, [House.Neutral]: 10,
+};
+
+function structureThreatCellKey(cx: number, cy: number): number {
+  return cy * MAP_CELLS + cx;
+}
+
+function entityLogicOrderKey(entity: Entity): number {
+  return entity.logicIndexHint ?? entity.id;
+}
+
+function structureThreatCandidateVisible(ctx: CombatContext, e: Entity): boolean {
+  if (e.house === ctx.playerHouse) return true;
+  if (ctx.isDiscoveredByPlayer) return ctx.isDiscoveredByPlayer(e);
+  const playerHouseIdx = COMBAT_HOUSE_IDX[ctx.playerHouse] ?? -1;
+  if (playerHouseIdx >= 0 && ctx.isRevealedToHouse) {
+    return ctx.isRevealedToHouse(e.cell.cx, e.cell.cy, playerHouseIdx);
+  }
+  return true;
+}
+
+function structureThreatScore(s: MapStructure, e: Entity): number {
+  const centerCoord = structureCenterLeptons(s);
+  const targetCoord = entityTargetLeptons(e);
+  const scoreDistLeptons = leptonDist(centerCoord.lx, centerCoord.ly, targetCoord.lx, targetCoord.ly);
+  const points = e.stats.points ?? e.stats.strength ?? 5;
+  const value = Math.trunc(points * 2) + (e.kills ?? 0);
+  return Math.max(Math.trunc((value * 32000) / (Math.floor(scoreDistLeptons / LEPTON_SIZE) + 1)), 1);
+}
+
+function structureThreatObjectIsEligible(
+  ctx: CombatContext,
+  s: MapStructure,
+  e: Entity,
+  fireCoord: { lx: number; ly: number },
+  rangeLeptons: number,
+): boolean {
+  if (!s.weapon) return false;
+  if (!e.alive || e.inLimbo) return false;
+  if (!e.isAirUnit && entityInTopLayer(e)) return false;
+  if (ctx.isAllied(s.house, e.house)) return false;
+  if (MISSION_CONTROL[e.mission]?.isNoThreat) return false;
+  if (e.cloakState === CloakState.CLOAKED) return false;
+  // C++ techno.cpp:1579-1586 — spies are not legal auto-targets unless the
+  // scanner is a dog. Buildings are never dogs.
+  if (e.type === UnitType.I_SPY) return false;
+  if (!structureThreatCandidateVisible(ctx, e)) return false;
+
+  // Preserve the existing SAM/AGUN behavior: structure AA weapons in this
+  // engine are air-only. Ground-capable building weapons use the cell ring scan.
+  if (s.weapon.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) return false;
+  if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon.isAntiAir) return false;
+
+  // C++ THREAT_RANGE passes range=0 into Evaluate_Object, which calls the
+  // Object* In_Range overload: Fire_Coord(primary) to target Center_Coord().
+  return leptonDist(fireCoord.lx, fireCoord.ly, e.leptonX, e.leptonY) <= rangeLeptons;
+}
+
+function structureThreatAirTarget(ctx: CombatContext, s: MapStructure): Entity | null {
+  if (!s.weapon?.isAntiAir) return null;
+  const fireCoord = structureFireLeptons(s);
+  const rangeLeptons = Math.trunc(s.weapon.range * LEPTON_SIZE);
+  let bestTarget: Entity | null = null;
+  let bestScore = -Infinity;
+
+  for (const e of structureThreatScanEntities(ctx)) {
+    if (!e.isAirUnit || e.flightAltitude <= 0) continue;
+    if (!structureThreatObjectIsEligible(ctx, s, e, fireCoord, rangeLeptons)) continue;
+    const score = structureThreatScore(s, e);
+    if (score > bestScore) {
+      bestTarget = e;
+      bestScore = score;
+    }
+  }
+
+  return bestTarget;
+}
+
 /** C++ BuildingClass::Greatest_Threat path used by weapon-equipped Mission_Guard.
  *  This is intentionally pure and RNG-free: C++ techno.cpp:2047-2210 scans
- *  nearby objects and returns the highest-scoring target without consuming RNG.
+ *  nearby objects without consuming RNG.
  */
 export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): Entity | null {
-    if (!s.alive || !s.weapon || s.sellProgress !== undefined ||
-        isStructureUnderConstruction(s)) return null;
-    const range = s.weapon.range;
-    const rangeLeptons = Math.trunc(range * LEPTON_SIZE);
-    const fireCoord = structureFireLeptons(s);
-    const centerCoord = structureCenterLeptons(s);
-    let bestTarget: Entity | null = null;
-    let bestScore = -Infinity;
-    for (const e of structureThreatScanEntities(ctx)) {
-	      if (!e.alive || e.inLimbo) continue;
-	      if (!e.isAirUnit && entityInTopLayer(e)) continue;
-	      if (ctx.isAllied(s.house, e.house)) continue; // don't shoot friendlies
-	      // C++ techno.cpp:1476-1479 Evaluate_Object rejects objects whose
-	      // current MissionControl entry has NoThreat=yes (e.g. HARMLESS dogs).
-	      if (MISSION_CONTROL[e.mission]?.isNoThreat) continue;
-	      // C++ techno.cpp:1579-1586 — spies are not legal auto-targets
-	      // unless the scanner is a dog. Buildings are never dogs.
-	      if (e.type === UnitType.I_SPY) continue;
-      // human-requested: SAMs are air-only. Do NOT revert this line.
-      if (s.weapon.isAntiAir && (!e.isAirUnit || e.flightAltitude <= 0)) continue;
-      if (e.isAirUnit && e.flightAltitude > 0 && !s.weapon.isAntiAir) continue;
-      // C++ techno.cpp:1519-1526: THREAT_RANGE passes range=0, so
-      // Evaluate_Object gates candidates with In_Range(object, primary).
-      // That pointer overload checks target->Center_Coord(), not TarCom's
-      // Target_Coord(). Mission_Attack/Can_Fire rechecks Target_Coord later.
-      const rangeDistLeptons = leptonDist(fireCoord.lx, fireCoord.ly, e.leptonX, e.leptonY);
-      if (rangeDistLeptons > rangeLeptons) continue;
-      // C++ Evaluate_Object (techno.cpp:1470-1763) does NOT check line-of-sight for buildings.
-      // C++ computes threat falloff from Distance(object), which uses this
-      // building's Center_Coord and the target object's Target_Coord.
-      const targetCoord = entityTargetLeptons(e);
-      const scoreDistLeptons = leptonDist(centerCoord.lx, centerCoord.ly, targetCoord.lx, targetCoord.ly);
-      const scoreDist = scoreDistLeptons / LEPTON_SIZE;
-      // C++ techno.cpp:1651-1752 Evaluate_Object threat scoring formula:
-      // value = Value() + kills, then distance falloff: (value * 32000) / (distCells + 1)
-      const points = e.stats.points ?? e.stats.strength ?? 5;
-      const value = Math.trunc(points * 2) + (e.kills ?? 0);
-      const distCells = Math.floor(scoreDist);
-      const score = Math.max(Math.trunc((value * 32000) / (distCells + 1)), 1);
-      if (score > bestScore) {
-        bestTarget = e;
-        bestScore = score;
-      }
+  if (!s.alive || !s.weapon || s.sellProgress !== undefined ||
+      isStructureUnderConstruction(s)) return null;
+
+  // Current structure AA weapons are air-only in TS; keep their existing
+  // aircraft-pool scoring path. Ground-capable buildings use C++'s cell scan.
+  if (s.weapon.isAntiAir) return structureThreatAirTarget(ctx, s);
+
+  const range = s.weapon.range;
+  const rangeLeptons = Math.trunc(range * LEPTON_SIZE);
+  const fireCoord = structureFireLeptons(s);
+  const scanCellX = Math.floor(fireCoord.lx / LEPTON_SIZE);
+  const scanCellY = Math.floor(fireCoord.ly / LEPTON_SIZE);
+  const crange = Math.floor(range) + 1;
+  if (crange <= 0) return null;
+
+  // C++ Evaluate_Cell walks Cell_Occupier() and stops at the first non-allied
+  // techno in the LIFO chain. If that object then fails Evaluate_Object, C++
+  // does not look behind it in the same cell. Build exactly that per-cell head.
+  const cellHead = new Map<number, Entity>();
+  const ordered = [...ctx.entities].sort((a, b) => entityLogicOrderKey(a) - entityLogicOrderKey(b));
+  for (const e of ordered) {
+    if (!e.alive || e.inLimbo) continue;
+    if (!e.isAirUnit && entityInTopLayer(e)) continue;
+    if (e.isAirUnit && e.flightAltitude > 0) continue;
+    if (ctx.isAllied(s.house, e.house)) continue;
+    cellHead.set(structureThreatCellKey(e.cell.cx, e.cell.cy), e);
+  }
+
+  const mapX = ctx.map.boundsX;
+  const mapY = ctx.map.boundsY;
+  const mapW = ctx.map.boundsW;
+  const mapH = ctx.map.boundsH;
+  let bestTarget: Entity | null = null;
+
+  const scanCell = (cx: number, cy: number): void => {
+    const candidate = cellHead.get(structureThreatCellKey(cx, cy));
+    if (!candidate) return;
+    if (structureThreatObjectIsEligible(ctx, s, candidate, fireCoord, rangeLeptons)) {
+      // C++ cell-scan bug: bestval is initialized before the ring scan but is
+      // never updated when a cell candidate wins, so every later valid
+      // positive-valued cell target overwrites the previous one until an early
+      // bailout radius is reached.
+      bestTarget = candidate;
+    }
+  };
+
+  for (let radius = 0; radius < crange; radius++) {
+    for (let x = -radius; x <= radius; x++) {
+      const cx = scanCellX + x;
+      if (cx < mapX || cx >= mapX + mapW) continue;
+
+      const topY = scanCellY - radius;
+      if (topY >= mapY && topY < mapY + mapH) scanCell(cx, topY);
+
+      const bottomY = scanCellY + radius;
+      if (bottomY >= mapY && bottomY < mapY + mapH) scanCell(cx, bottomY);
     }
 
-    return bestTarget;
+    for (let y = -(radius - 1); y < radius; y++) {
+      const cy = scanCellY + y;
+      if (cy < mapY || cy >= mapY + mapH) continue;
+
+      const leftX = scanCellX - radius;
+      if (leftX >= mapX && leftX < mapX + mapW) scanCell(leftX, cy);
+
+      const rightX = scanCellX + radius;
+      if (rightX >= mapX && rightX < mapX + mapW) scanCell(rightX, cy);
+    }
+
+    if (bestTarget) {
+      const quarter = Math.floor(crange / 4);
+      const half = Math.floor(crange / 2);
+      if (radius === quarter || radius === half) return bestTarget;
+    }
+  }
+
+  return bestTarget;
 }
 
 function getAssignedStructureTarget(ctx: CombatContext, s: MapStructure): Entity | null {

@@ -60,7 +60,7 @@ export interface FogContext {
 // ---------------------------------------------------------------------------
 
 /**
- * Recalculate fog-of-war visibility for all player units and structures.
+ * Recalculate fog-of-war visibility for strict PlayerPtr units and structures.
  * C++ techno.cpp:5903-5913: Look() uses SightRange directly with NO health check.
  * C++ map.cpp:296: if (!sightrange || sightrange > 10) return — caps at 10.
  */
@@ -81,7 +81,7 @@ export function updateFogOfWar(ctx: FogContext): void {
   const units: Array<{ x: number; y: number; sight: number }> = [];
 
   for (const e of ctx.entities) {
-    if (e.alive && e.isPlayerUnit) {
+    if (e.alive && e.house === ctx.playerHouse) {
       // C++ techno.cpp:5908: sight_range = Techno_Type_Class()->SightRange
       // No health-based reduction — sight is always the type's SightRange.
       const sight = e.stats.sight;

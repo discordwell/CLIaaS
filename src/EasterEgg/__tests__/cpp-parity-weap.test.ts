@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import {
   UnitType, House, CELL_SIZE, POWER_DRAIN, COUNTRY_BONUSES,
   PRODUCTION_ITEMS, type ProductionItem,
@@ -147,10 +148,10 @@ describe('WEAP stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(2000);
   });
 
-  it('build time is 1440 ticks (C++ cost-based: floor(2000 * 0.72))', () => {
+  it('build time uses C++ 8.8 fixed-point production timing', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'WEAP');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(1440);
+    expect(prodItem!.buildTime).toBe(cppTechnoTypeBuildTime(2000));
   });
 
   it('requires PROC (Refinery) as prerequisite', () => {
@@ -429,20 +430,18 @@ describe('WEAP destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does not damage adjacent structures', () => {
     const weap = makeWEAP(10, 10, 50);
     weap.house = House.USSR;
-    // SILO at (12,10) overlaps with WEAP footprint edge — well within blast radius
     const nearby = makeBuilding('SILO', 12, 10, 300);
     const ctx = makeCombatCtx([weap, nearby]);
     structureDamage(ctx, weap, 100);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // Barrel explosions hit ONLY cardinal cells with flat 200 damage.
-    // WEAP should use radial HE with falloff instead — diagonals should
-    // take damage (unlike barrels where diagonals are immune).
+    // Ordinary building explosions are visual-only.
     const weap = makeWEAP(10, 10, 50);
     weap.house = House.USSR;
     const diagonal = entityAtCell(UnitType.I_E1, House.USSR, 11, 11);

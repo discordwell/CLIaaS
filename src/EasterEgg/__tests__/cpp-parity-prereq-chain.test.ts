@@ -20,6 +20,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { PRODUCTION_ITEMS, type ProductionItem } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 
 // ---------------------------------------------------------------------------
 // INI Parser
@@ -919,19 +920,18 @@ describe('C++ parity: prerequisite/tech tree chain audit', () => {
   });
 
   // ========================================================================
-  // 19. buildTime formula: floor(Cost * 0.72) per C++ techno.cpp:6077
-  //     buildTime = floor(Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000)
-  //     BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 => floor(Cost * 0.72)
+  // 19. buildTime formula: C++ TechnoTypeClass::Time_To_Build
+  //     Cost * fixed(.8) * fixed(TICKS_PER_MINUTE, 1000), rounded by 8.8 fixed-point multiplication.
   // ========================================================================
 
-  describe('19. buildTime formula parity: floor(INI_Cost * 0.72)', () => {
+  describe('19. buildTime formula parity: C++ 8.8 fixed-point timing', () => {
     for (const item of PRODUCTION_ITEMS) {
       const cost = iniCost(item.type);
       if (cost === undefined || cost === 0) continue;
 
-      const expectedBuildTime = Math.floor(cost * 0.72);
+      const expectedBuildTime = cppTechnoTypeBuildTime(cost);
 
-      it(`${item.type}: buildTime=${item.buildTime} should equal floor(${cost} * 0.72) = ${expectedBuildTime}`, () => {
+      it(`${item.type}: buildTime=${item.buildTime} should equal C++ fixed-point timing for cost ${cost} = ${expectedBuildTime}`, () => {
         expect(item.buildTime, `${item.type} buildTime`).toBe(expectedBuildTime);
       });
     }

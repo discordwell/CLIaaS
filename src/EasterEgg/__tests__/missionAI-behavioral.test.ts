@@ -987,7 +987,7 @@ describe('updateHunt', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateRetreat', () => {
-  it('entity moves toward map edge', () => {
+  it('assigns an off-map edge NavCom', () => {
     // Place entity near left edge of bounds (boundsX=10, so cell 12 is 2 from left edge)
     const entity = makeEntity(UnitType.I_E1, House.Spain, 12 * CELL_SIZE + 12, 35 * CELL_SIZE + 12);
     entity.mission = Mission.RETREAT;
@@ -998,30 +998,28 @@ describe('updateRetreat', () => {
 
     // Should have set a move target toward the nearest map edge
     expect(entity.moveTarget).not.toBeNull();
-    // Nearest edge should be left (boundsX=10) since entity is at cx=12
+    // Nearest exit is one cell beyond the left playable bound (boundsX=10).
     const targetCell = leptonToCell(entity.moveTarget!.lx, entity.moveTarget!.ly);
-    expect(targetCell.cx).toBe(10); // left edge
+    expect(targetCell.cx).toBe(9);
+    expect(entity.alive).toBe(true);
   });
 
-  it('entity removed when reaching edge', () => {
+  it('does not remove an in-bounds entity just because it already has NavCom', () => {
     const entity = makeEntity(UnitType.I_E1, House.Spain, 300, 300);
     entity.mission = Mission.RETREAT;
-    // Set moveTarget to current position (simulating arrival)
     entity.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
 
     const ctx = makeMockContext({ entities: [entity] });
     updateRetreat(ctx, entity);
 
-    // moveToward returns true when at target, so entity should be removed
-    expect(entity.alive).toBe(false);
-    expect(entity.mission).toBe(Mission.DIE);
+    expect(entity.alive).toBe(true);
+    expect(entity.mission).toBe(Mission.RETREAT);
   });
 
   it('retreat exit clears attached destroyed trigger state', () => {
-    const entity = makeEntity(UnitType.V_LST, House.Greece, 300, 300);
+    const entity = makeEntity(UnitType.V_LST, House.Greece, 9 * CELL_SIZE + 12, 35 * CELL_SIZE + 12);
     entity.mission = Mission.RETREAT;
     entity.triggerName = 'los3';
-    entity.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
 
     const ctx = makeMockContext({ entities: [entity] });
     updateRetreat(ctx, entity);
@@ -1033,10 +1031,9 @@ describe('updateRetreat', () => {
   });
 
   it('retreat exit delegates map-leave accounting when provided', () => {
-    const entity = makeEntity(UnitType.V_LST, House.Greece, 300, 300);
+    const entity = makeEntity(UnitType.V_LST, House.Greece, 9 * CELL_SIZE + 12, 35 * CELL_SIZE + 12);
     entity.mission = Mission.RETREAT;
     entity.triggerName = 'los3';
-    entity.moveTarget = { lx: pixelToLepton(300), ly: pixelToLepton(300) };
     const leaveMap = vi.fn((e: Entity) => {
       e.triggerName = '';
       e.triggerDeathProcessed = true;

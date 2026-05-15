@@ -4,21 +4,22 @@
  *
  * buildTime is computed per C++ techno.cpp:6077:
  *   Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
- * With BuildSpeedBias=0.8, TICKS_PER_MINUTE=900 (15Hz):
- *   buildTime = floor(Cost * 0.72)
+ * BuildSpeedBias and fixed(TICKS_PER_MINUTE, 1000) are C++ 8.8 fixed-point
+ * values, so this is not equivalent to a single floating cost * 0.72.
  */
 import { describe, it, expect } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
 const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
-/** Compute C++ parity build time: floor(cost * 0.8 * 900 / 1000) = floor(cost * 0.72) */
+/** Compute C++ parity build time with fixed-point operator rounding. */
 function cppBuildTime(cost: number): number {
-  return Math.floor(cost * 0.8 * 900 / 1000);
+  return cppTechnoTypeBuildTime(cost);
 }
 
 // Expected data for all 70 production items, derived from types.ts PRODUCTION_ITEMS
 // which mirrors RULES.INI Cost=, Speed= (buildTime), Prerequisite=, TechLevel=, Owner= values.
-// buildTime values use the C++ formula: floor(cost * 0.72)
+// buildTime values use C++ TechnoTypeClass::Time_To_Build fixed-point math.
 const EXPECTED_ITEMS: {
   type: string; cost: number; buildTime: number; prerequisite: string;
   faction: string; techLevel?: number; techPrereq?: string; isStructure?: boolean;

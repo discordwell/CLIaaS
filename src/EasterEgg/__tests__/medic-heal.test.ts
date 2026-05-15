@@ -12,6 +12,7 @@ import {
   UNIT_STATS, WEAPON_STATS, worldDist,
   CELL_SIZE, INFANTRY_ANIMS, PRODUCTION_ITEMS,
 } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 
 beforeEach(() => resetEntityIds());
 
@@ -303,12 +304,12 @@ describe('Medic auto-heal behavior', () => {
     expect(healWeapon.warhead).toBe('Organic');
   });
 
-  it('medic cost is 800 credits with 576 tick build time (C++ cost-based: floor(800 * 0.72))', () => {
+  it('medic cost is 800 credits with C++ fixed-point build time', () => {
     const mediProd = PRODUCTION_ITEMS.find((p) => p.type === 'MEDI');
     expect(mediProd).toBeDefined();
-    expect(mediProd.cost).toBe(800);
-    expect(mediProd.buildTime).toBe(576);
-    expect(mediProd.faction).toBe('allied');
+    expect(mediProd!.cost).toBe(800);
+    expect(mediProd!.buildTime).toBe(cppTechnoTypeBuildTime(800));
+    expect(mediProd!.faction).toBe('allied');
   });
 });
 

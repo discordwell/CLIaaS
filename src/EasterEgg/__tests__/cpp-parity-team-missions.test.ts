@@ -1038,11 +1038,11 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
   //   IsNextMission = true;
   // ==========================================================================
   describe('SET_GLOBAL advances immediately (team.cpp:2919-2925)', () => {
-    it('SET_GLOBAL sets isNextMission and advances to next mission', () => {
+    it('SET_GLOBAL sets the scenario global and advances to next mission', () => {
       const team = makeTeam({
         memberDefs: [{ type: UnitType.V_3TNK, count: 1 }],
         missions: [
-          { mission: TMISSION_SET_GLOBAL, data: 42 },
+          { mission: TMISSION_SET_GLOBAL, data: 2 },
           { mission: TMISSION_GUARD, data: 100 },
         ],
         forcedActive: true,
@@ -1050,11 +1050,13 @@ describe('C++ parity: Team mission dispatch (team.cpp)', () => {
 
       const e = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
       team.add(e);
+      const globals: number[] = [];
 
       for (let i = 0; i < 5; i++) {
-        team.ai();
+        team.ai(undefined, { setGlobal: (globalIndex) => globals.push(globalIndex) });
       }
 
+      expect(globals).toContain(2);
       // Should have advanced past SET_GLOBAL to GUARD
       expect(team.currentMission).toBe(1);
     });

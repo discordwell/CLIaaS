@@ -16,6 +16,7 @@ import {
   PRODUCTION_ITEMS, type ProductionItem,
   buildDefaultAlliances, worldDist,
 } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
@@ -143,10 +144,10 @@ describe('SYRD stats (rules.ini parity)', () => {
     expect(prodItem!.cost).toBe(650);
   });
 
-  it('has build time 468 (C++ cost-based: floor(650 * 0.72))', () => {
+  it('has C++ fixed-point build time for Cost=650', () => {
     const prodItem = PRODUCTION_ITEMS.find(p => p.type === 'SYRD');
     expect(prodItem).toBeDefined();
-    expect(prodItem!.buildTime).toBe(468);
+    expect(prodItem!.buildTime).toBe(cppTechnoTypeBuildTime(650));
   });
 
   it('prerequisite is POWR', () => {
@@ -427,21 +428,18 @@ describe('SYRD destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does not damage adjacent structures', () => {
     const syrd = makeSYRD(10, 10, 50);
     syrd.house = House.USSR;
-    // SILO at (12,10): its center wx=12*CELL_SIZE+CELL_SIZE, blast center wx=11*CELL_SIZE.
-    // Distance = 2*CELL_SIZE / CELL_SIZE = 2.0 cells — at the edge of 2-cell radius.
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([syrd, nearby]);
     structureDamage(ctx, syrd, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
     // Barrel explosions hit ONLY cardinal cells with flat 200 damage.
-    // SYRD should use radial HE with falloff instead — diagonals should
-    // take damage (unlike barrels where diagonals are immune).
+    // Ordinary building explosions are visual-only.
     const syrd = makeSYRD(10, 10, 50);
     syrd.house = House.USSR;
     // Place diagonal entity at (11,11) — within blast radius of center at (11*CELL_SIZE, 11*CELL_SIZE)

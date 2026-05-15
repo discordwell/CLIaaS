@@ -53,6 +53,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { parseIniSections, parseIniInt } from '../engine/parseIni';
 
 // TS engine imports — these are what we're auditing
@@ -574,22 +575,20 @@ describe('build time formula (techno.cpp:6077)', () => {
     expect(INI_BUILD_SPEED).toBeCloseTo(0.8, 6);
   });
 
-  it('formula: buildTime = floor(Cost * BuildSpeed * TICKS_PER_MINUTE / 1000)', () => {
-    const cost = 1000;
-    const buildTime = Math.floor(cost * INI_BUILD_SPEED * TICKS_PER_MINUTE / 1000);
-    expect(buildTime).toBe(720); // 1000-credit item takes 720 ticks = 48 seconds
+  it('formula: buildTime uses C++ fixed-point Time_To_Build', () => {
+    expect(cppTechnoTypeBuildTime(1000)).toBe(716);
   });
 
-  it('300-credit item: floor(300 * 0.8 * 900 / 1000) = 216 ticks', () => {
-    const buildTime = Math.floor(300 * INI_BUILD_SPEED * TICKS_PER_MINUTE / 1000);
-    expect(buildTime).toBe(216);
-    expect(buildTime / TICKS_PER_SECOND).toBeCloseTo(14.4, 5);
+  it('300-credit item uses fixed-point rounding', () => {
+    const buildTime = cppTechnoTypeBuildTime(300);
+    expect(buildTime).toBe(215);
+    expect(buildTime / TICKS_PER_SECOND).toBeCloseTo(215 / 15, 5);
   });
 
-  it('2000-credit item: floor(2000 * 0.8 * 900 / 1000) = 1440 ticks = 96 seconds', () => {
-    const buildTime = Math.floor(2000 * INI_BUILD_SPEED * TICKS_PER_MINUTE / 1000);
-    expect(buildTime).toBe(1440);
-    expect(buildTime / TICKS_PER_SECOND).toBe(96);
+  it('2000-credit item uses fixed-point rounding', () => {
+    const buildTime = cppTechnoTypeBuildTime(2000);
+    expect(buildTime).toBe(1432);
+    expect(buildTime / TICKS_PER_SECOND).toBeCloseTo(1432 / 15, 5);
   });
 });
 

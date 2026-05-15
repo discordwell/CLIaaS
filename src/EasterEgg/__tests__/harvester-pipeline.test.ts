@@ -20,6 +20,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import { findPath } from '../engine/pathfinding';
 import { MAP_CELLS, CELL_SIZE, UnitType, House, Mission, AnimState, UNIT_STATS, cellToLepton } from '../engine/types';
 import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 const PRODUCTION_ITEMS = getCanonicalProductionItems();
 import type { MapStructure } from '../engine/scenario';
 
@@ -1448,9 +1449,9 @@ describe('Harvester Pipeline', () => {
       expect(harvItem.techPrereq).toBe('PROC');
     });
 
-    it('HARV build time is 1008 ticks (C++ cost-based: floor(1400 * 0.72))', () => {
+    it('HARV build time uses C++ 8.8 fixed-point production timing', () => {
       const harvItem = PRODUCTION_ITEMS.find((p: { type: string }) => p.type === 'HARV');
-      expect(harvItem.buildTime).toBe(1008);
+      expect(harvItem.buildTime).toBe(cppTechnoTypeBuildTime(1400));
     });
 
     it('HARV is available to both factions', () => {

@@ -19,7 +19,7 @@
  *   house.cpp:788     — Can_Build(): ActiveBScan & Prerequisite bitmask
  *   house.cpp:2398    — Begin_Production(): one factory per RTTI type
  *   house.cpp:6957    — Fetch_Factory(): separate factory for unit/infantry/aircraft/vessel/building
- *   techno.cpp:6075   — Time_To_Build = Cost * BuildSpeedBias * TICKS_PER_MINUTE / 1000
+ *   techno.cpp:6228   — Time_To_Build = Cost * BuildSpeedBias * fixed(TICKS_PER_MINUTE,1000)
  *   defines.h:3032    — TICKS_PER_MINUTE = 15 * 60 = 900
  */
 
@@ -43,6 +43,7 @@ import {
   type Faction,
   getFactoryType,
 } from '../engine/types';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { parseIniSections, parseIniInt, type IniSections } from '../engine/parseIni';
 import type { MapStructure } from '../engine/scenario';
 import type { GameMap } from '../engine/map';
@@ -125,9 +126,9 @@ function getIniTechLevel(type: string): number {
 const BUILD_SPEED_BIAS = parseIniFloat(INI.get('General')?.get('BuildSpeed'), 0.8);
 const TICKS_PER_MINUTE = 900; // defines.h:3032 — 15 Hz * 60s
 
-/** C++ build time formula: techno.cpp:6075-6078 */
+/** C++ build time formula: TechnoTypeClass::Time_To_Build fixed-point math. */
 function cppBuildTime(cost: number): number {
-  return Math.floor(cost * BUILD_SPEED_BIAS * TICKS_PER_MINUTE / 1000);
+  return cppTechnoTypeBuildTime(cost);
 }
 
 // ── Test helpers ────────────────────────────────────────────────────────────
@@ -217,7 +218,7 @@ function tickNTimes(ctx: ProductionContext, n: number): void {
 }
 
 // ============================================================
-// Section 1: Build time formula — floor(Cost * 0.72)
+// Section 1: Build time formula — Cost * BuildSpeedBias * fixed(TPM,1000)
 // techno.cpp:6075-6078, rules.ini BuildSpeed=.8
 // All costs parsed from rules.ini at test time.
 // ============================================================
@@ -228,7 +229,7 @@ describe('C++ parity: build time formula (techno.cpp:6075-6078)', () => {
     expect(BUILD_SPEED_BIAS).toBe(0.8);
   });
 
-  it('all PRODUCTION_ITEMS have buildTime = floor(Cost * BuildSpeed * 900/1000)', () => {
+  it('all PRODUCTION_ITEMS have C++ fixed-point buildTime from Cost', () => {
     // techno.cpp:6077: Time_To_Build = Cost * Rule.BuildSpeedBias * fixed(TICKS_PER_MINUTE, 1000)
     // Parse Cost from rules.ini for each item and verify TS buildTime matches.
     for (const item of PRODUCTION_ITEMS) {
@@ -237,7 +238,7 @@ describe('C++ parity: build time formula (techno.cpp:6075-6078)', () => {
       const expectedBuildTime = cppBuildTime(iniCost);
       expect(
         item.buildTime,
-        `${item.type}: INI Cost=${iniCost}, expected buildTime=${expectedBuildTime}, got ${item.buildTime}`,
+        `${item.type}: INI Cost=${iniCost}, expected fixed-point buildTime=${expectedBuildTime}, got ${item.buildTime}`,
       ).toBe(expectedBuildTime);
     }
   });
@@ -1214,7 +1215,7 @@ describe('C++ parity: aftermath expansion unit costs (aftrmath.ini)', () => {
 
       expect(
         tsItem!.buildTime,
-        `${type}: buildTime should be floor(${iniCost} * ${BUILD_SPEED_BIAS} * 900 / 1000) = ${expectedBuildTime}`,
+        `${type}: buildTime should use C++ fixed-point Time_To_Build = ${expectedBuildTime}`,
       ).toBe(expectedBuildTime);
     });
   }

@@ -7,8 +7,8 @@
 
 import { type Game } from './index';
 import { type Entity } from './entity';
-import { House, Mission, CELL_SIZE, worldToCell, worldDist, pixelToLepton, leptonToPixel, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType, WEAPON_STATS } from './types';
-import { findPath, nearbyLocation } from './pathfinding';
+import { House, Mission, CELL_SIZE, worldToCell, pixelToLepton, leptonToPixel, cellTargetToLepton, type ProductionItem, SUPERWEAPON_DEFS, getStripSide, type FactoryType, getFactoryType, WEAPON_STATS } from './types';
+import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
 import { powerMultiplier } from './repairSell';
@@ -105,6 +105,8 @@ export interface AgentSuperweapon {
 export interface AgentState {
   tick: number;
   state: string;
+  winPending?: boolean;
+  losePending?: boolean;
   playerHouse: string;
   alliedHouses: string[];
   credits: number;
@@ -325,6 +327,8 @@ export function serializeState(game: Game): AgentState {
   return {
     tick: game.tick,
     state: game.state,
+    winPending: Boolean(((game as unknown as Record<string, unknown>).isToWin as boolean) || game.state === 'won'),
+    losePending: Boolean(((game as unknown as Record<string, unknown>).isToLose as boolean) || game.state === 'lost'),
     playerHouse: game.playerHouse,
     alliedHouses,
     credits: game.credits,
@@ -375,40 +379,6 @@ function clearTeamScripts(e: Entity): void {
   e.guardOrigin = null;
 }
 
-function isMovingBlocker(game: Game, mover: Entity, entityId: number): boolean {
-  const occupant = game.entityById.get(entityId);
-  if (!occupant?.alive) return false;
-  const gameAllies = game as unknown as { isAllied?: (a: House, b: House) => boolean };
-  const allied = typeof gameAllies.isAllied === 'function'
-    ? gameAllies.isAllied.call(game, mover.house, occupant.house)
-    : mover.isPlayerUnit === occupant.isPlayerUnit;
-  return allied && (occupant.isDriving || occupant.trackNumber > 0 || occupant.moveTarget !== null);
-}
-
-function resolveBasicPathGoal(game: Game, e: Entity, goal: { cx: number; cy: number }): { cx: number; cy: number } {
-  const map = game.map as unknown as {
-    canEnterCell?: (cx: number, cy: number, naval?: boolean, isMoving?: (entityId: number) => boolean) => number;
-    isTerrainPassable: (cx: number, cy: number) => boolean;
-    isWaterPassable?: (cx: number, cy: number) => boolean;
-  };
-  const moveResult = typeof map.canEnterCell === 'function'
-    ? map.canEnterCell(goal.cx, goal.cy, e.isNavalUnit, id => isMovingBlocker(game, e, id))
-    : (e.isNavalUnit
-      ? (map.isWaterPassable?.(goal.cx, goal.cy) ? 0 : 5)
-      : (map.isTerrainPassable(goal.cx, goal.cy) ? 0 : 5));
-
-  if (moveResult <= 1) return goal;
-
-  const goalWorld = {
-    x: goal.cx * CELL_SIZE + CELL_SIZE / 2,
-    y: goal.cy * CELL_SIZE + CELL_SIZE / 2,
-  };
-  // rules.ini [General] CloseEnough=2.75; worldDist returns cells.
-  if (worldDist(e.pos, goalWorld) <= 2.75) return goal;
-
-  return nearbyLocation(game.map, goal, e.isNavalUnit, game.tick) ?? goal;
-}
-
 export function processCommands(game: Game, commands: AgentCommand[]): CommandResult[] {
   const results: CommandResult[] = [];
 
@@ -421,19 +391,24 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) { errs.push(`unit ${id} invalid`); continue; }
 
-            const destLX = c.cx * 256 + 128;
-            const destLY = c.cy * 256 + 128;
-
-            // Skip path reset if already moving to the same destination —
-            // resending a move to the same cell restarts pathfinding from
-            // waypoint 0 which causes visible stutter-stepping.
-            if (e.moveTarget && e.moveTarget.lx === destLX && e.moveTarget.ly === destLY
-                && (e.mission === Mission.MOVE || e.missionQueue === Mission.MOVE)
-                && e.path && e.path.length > 0) {
-              continue;
-            }
+            const dest = cellTargetToLepton(c.cx, c.cy);
+            const destLX = dest.lx;
+            const destLY = dest.ly;
 
             clearTeamScripts(e);
+            if (e.stats.isInfantry && e.isDriving) {
+              const stopInfantryDriver = (game as unknown as {
+                stopInfantryDriver?: (entity: typeof e) => void;
+              }).stopInfantryDriver;
+              const canStopInfantryDriverForAssignDestination = (game as unknown as {
+                canStopInfantryDriverForAssignDestination?: (entity: typeof e) => boolean;
+              }).canStopInfantryDriverForAssignDestination;
+              if (typeof stopInfantryDriver === 'function'
+                  && typeof canStopInfantryDriverForAssignDestination === 'function'
+                  && canStopInfantryDriverForAssignDestination.call(game, e)) {
+                stopInfantryDriver.call(game, e);
+              }
+            }
             e.moveTarget = { lx: destLX, ly: destLY };
             if (e.stats.isAircraft) {
               e.mission = Mission.MOVE;
@@ -443,25 +418,19 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
               e.pathIndex = 0;
             } else {
               // C++ agent_harness.cpp uses Assign_Destination(dest) followed
-              // by Assign_Mission(MOVE). DriveClass::Assign_Destination resets
-              // Path[] and starts the driver immediately, then Assign_Mission
-              // queues MOVE so UnitClass::AI keeps the current mission until
-              // IsDriving clears.
+              // by Assign_Mission(MOVE). DriveClass starts vehicle movement
+              // immediately, but InfantryClass only clears Path[] and records
+              // NavCom; Mission_Move/Movement_AI builds Basic_Path later.
               assignMission(e, Mission.MOVE);
               const driveClassMove = (game as unknown as { startDriveClassMove?: (entity: typeof e) => void }).startDriveClassMove;
               if (!e.stats.isInfantry && !e.isAirUnit && typeof driveClassMove === 'function') {
                 driveClassMove.call(game, e);
               } else {
                 e.pathThreshold = 1;
-                const pathGoal = resolveBasicPathGoal(game, e, { cx: c.cx, cy: c.cy });
-                e.path = findPath(
-                  game.map, e.cell, pathGoal, false, e.isNavalUnit, e.stats.speedClass,
-                  id => isMovingBlocker(game, e, id), undefined, undefined, e.stats.isInfantry,
-                );
+                e.path = [];
                 e.pathIndex = 0;
-                if (!e.stats.isInfantry && e.path.length > 0) {
-                  e.isDriving = true;
-                }
+                e.drivePathFacings = [];
+                e.drivePathHeadCleared = false;
               }
             }
           }

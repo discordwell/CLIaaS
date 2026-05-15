@@ -119,7 +119,7 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: Stop_Driver gesture gate', 
       expect(ts.tick).toBe(cpp.tick);
       expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
       expect(cpp.infantry.logicIndex).toBe(109);
-      expect(ts.infantry.logicIndexHint).toBe(152);
+      expect(ts.infantry.logicIndexHint).toBe(cpp.infantry.logicIndex);
       expect(cpp.infantry.mission).toBe(2);
       expect(ts.infantry.mission).toBe('MOVE');
       expect(ts.infantry.missionTimer).toBe(cpp.infantry.missionTimer);

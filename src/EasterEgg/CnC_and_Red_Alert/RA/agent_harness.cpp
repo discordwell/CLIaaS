@@ -2061,7 +2061,8 @@ char* agent_get_cell_occupiers(int cx, int cy)
 
 	CELL cell = XY_Cell(cx, cy);
 	CellClass* cellptr = &Map[cell];
-	buf_cat("{\"cx\":%d,\"cy\":%d,\"cell\":%d,\"occ\":[", cx, cy, (int)cell);
+	buf_cat("{\"tick\":%ld,\"rngState\":%lu,\"cx\":%d,\"cy\":%d,\"cell\":%d,\"occ\":[",
+		Frame, (unsigned long)Scen.RandomNumber.Seed, cx, cy, (int)cell);
 	bool first = true;
 	ObjectClass* object = cellptr->Cell_Occupier();
 	int depth = 0;
@@ -2081,6 +2082,11 @@ char* agent_get_cell_occupiers(int cx, int cy)
 		bool owned_player = false;
 		bool discovered_player = false;
 		int strength = -1;
+		int mission_timer = -1;
+		int mission_queue = -1;
+		bool is_driving = false;
+		int tarx = 0, tary = 0, tar_kind = -1, tar_value = -1, tar_rtti = -1, tar_obj_index = -1;
+		int navx = 0, navy = 0, nav_kind = -1, nav_value = -1;
 		if (is_techno) {
 			TechnoClass* tech = (TechnoClass*)object;
 			hname = agent_house_name(tech->Owner());
@@ -2091,16 +2097,47 @@ char* agent_get_cell_occupiers(int cx, int cy)
 			owned_player = tech->IsOwnedByPlayer;
 			discovered_player = tech->IsDiscoveredByPlayer;
 			strength = (int)tech->Strength;
+			if (rtti == RTTI_INFANTRY || rtti == RTTI_UNIT || rtti == RTTI_AIRCRAFT || rtti == RTTI_VESSEL) {
+				FootClass* foot = (FootClass*)object;
+				mission_timer = foot->Get_Mission_Timer_Value();
+				mission_queue = (int)foot->MissionQueue;
+				is_driving = foot->IsDriving;
+				if (Target_Legal(foot->TarCom)) {
+					COORDINATE tc = As_Coord(foot->TarCom);
+					tarx = (int)Coord_X(tc);
+					tary = (int)Coord_Y(tc);
+					tar_kind = (int)Target_Kind(foot->TarCom);
+					tar_value = (int)Target_Value(foot->TarCom);
+					ObjectClass* tobj = As_Object(foot->TarCom);
+					if (tobj) {
+						tar_rtti = (int)tobj->What_Am_I();
+						tar_obj_index = agent_object_index(tobj, tobj->What_Am_I());
+					}
+				}
+				if (Target_Legal(foot->NavCom)) {
+					COORDINATE nc = As_Coord(foot->NavCom);
+					navx = (int)Coord_X(nc);
+					navy = (int)Coord_Y(nc);
+					nav_kind = (int)Target_Kind(foot->NavCom);
+					nav_value = (int)Target_Value(foot->NavCom);
+				}
+			}
 		}
 		buf_cat("{\"d\":%d,\"id\":%d,\"rtti\":%d,\"t\":\"%s\",\"house\":\"%s\","
-			"\"tech\":%s,\"down\":%s,\"toDamage\":%s,\"limbo\":%s,\"m\":%d,\"lx\":%d,\"ly\":%d,\"hp\":%d,"
+			"\"tech\":%s,\"down\":%s,\"toDamage\":%s,\"limbo\":%s,"
+			"\"m\":%d,\"mt\":%d,\"mq\":%d,\"drv\":%s,\"lx\":%d,\"ly\":%d,\"hp\":%d,"
+			"\"tarX\":%d,\"tarY\":%d,\"tarKind\":%d,\"tarValue\":%d,\"tarRtti\":%d,\"tarIdx\":%d,"
+			"\"navX\":%d,\"navY\":%d,\"navKind\":%d,\"navValue\":%d,"
 			"\"op\":%s,\"dp\":%s}",
 			depth, aid, (int)rtti, tname, hname,
 			is_techno ? "true" : "false",
 			object->IsDown ? "true" : "false",
 			object->IsToDamage ? "true" : "false",
 			in_limbo ? "true" : "false",
-			mission, lx, ly, strength,
+			mission, mission_timer, mission_queue, is_driving ? "true" : "false",
+			lx, ly, strength,
+			tarx, tary, tar_kind, tar_value, tar_rtti, tar_obj_index,
+			navx, navy, nav_kind, nav_value,
 			owned_player ? "true" : "false",
 			discovered_player ? "true" : "false");
 		object = object->Next;

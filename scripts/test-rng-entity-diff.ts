@@ -33,10 +33,14 @@ const DUMP_VESSELS = process.env.DUMP_VESSELS === '1';
 const DUMP_AIRCRAFT = process.env.DUMP_AIRCRAFT === '1';
 const DUMP_HOUSES = process.env.DUMP_HOUSES === '1';
 const DUMP_UNITS = process.env.DUMP_UNITS === '1';
+const DUMP_FOOT = process.env.DUMP_FOOT === '1';
 const DUMP_ANIMS = process.env.DUMP_ANIMS === '1';
 const DUMP_PRE_ANIMS = process.env.DUMP_PRE_ANIMS === '1';
 const DUMP_WASM_DEBUG = process.env.DUMP_WASM_DEBUG === '1';
 const DUMP_TRIGGERS = process.env.DUMP_TRIGGERS === '1';
+const DUMP_STRUCTURES = process.env.DUMP_STRUCTURES === '1';
+const DUMP_LOGIC_LAYER = process.env.DUMP_LOGIC_LAYER !== '0';
+const DUMP_TAGGED = process.env.DUMP_TAGGED !== '0';
 // agent_harness.cpp serializes at most this many RNG log entries. Past the cap,
 // a matching post-tick seed means RNG parity held, but log length comparisons
 // are incomplete on the C++ side.
@@ -248,8 +252,25 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
   await tsPage.evaluate((s: number) => { (window as any).__syncRngSeed?.(s); }, wasmSeed);
   console.log(`Synced seed: ${wasmSeed}\n`);
 
+  // Capture TS console.log for debugging
+  tsPage.on('console', (msg) => {
+    const t = msg.text();
+    if (
+      t.includes('INVISIBLE_SCATTER') ||
+      t.includes('[FIRE_AT]') ||
+      t.includes('[TRIGGER]') ||
+      t.includes('[logicAlloc]') ||
+      t.includes('[logicRelease]')
+    ) {
+      console.log(`    [TS-LOG] ${t}`);
+    }
+  });
+
   // Enable TS tag logging
   await tsPage.evaluate(() => { (window as any).__rngTagControl('enable'); });
+  if (process.env.DUMP_ALLOC === '1') {
+    await tsPage.evaluate(() => { (window as any).__traceLogicAlloc = true; });
+  }
 
   // Step both to startTick. NO_BULK=1 is slower but keeps the harness on the
   // same one-frame path as test-first-divergence for late-tick investigations.
@@ -303,14 +324,6 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
   ]);
   console.log(`Pre-loop seeds — WASM: ${wasmPreSeed >>> 0}, TS: ${tsPreSeed >>> 0}, match: ${(wasmPreSeed >>> 0) === (tsPreSeed >>> 0)}\n`);
   let wasmScenarioSeed = wasmPreSeed >>> 0;
-
-  // Capture TS console.log for debugging
-  tsPage.on('console', (msg) => {
-    const t = msg.text();
-    if (t.includes('INVISIBLE_SCATTER') || t.includes('[FIRE_AT]') || t.includes('[TRIGGER]')) {
-      console.log(`    [TS-LOG] ${t}`);
-    }
-  });
 
   // Enable invisible-scatter debug
   await tsPage.evaluate(() => {
@@ -385,10 +398,11 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           loopEnd: e.loopEnd,
           followUp: e.followUp,
           cppLogicSlot: e.cppLogicSlot,
+          logicIndexHint: e.logicIndexHint,
         }));
         const attachedSmoke = ((game?.entities ?? []) as any[])
           .filter(e => e.damageSmokeStartTick >= 0)
-          .map(e => ({ id: e.id, type: e.type, house: e.house, start: e.damageSmokeStartTick }));
+          .map(e => ({ id: e.id, type: e.type, house: e.house, start: e.damageSmokeStartTick, hint: e.damageSmokeLogicIndexHint }));
         const attachedParachutes = ((game?.entities ?? []) as any[])
           .filter(e => e.fallParachuteAnimActive === true)
           .map(e => ({
@@ -409,12 +423,13 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           isInfantry: c.isInfantry,
           alpha: c.alpha,
           cppAnimStartTick: c.cppAnimStartTick,
+          logicIndexHint: c.logicIndexHint,
         }));
         const activeCppCorpses = corpses.filter(c =>
           c.isInfantry === true &&
           c.type !== 'DOG' &&
-          c.deathVariant >= 0 &&
-          c.deathVariant <= 3 &&
+          c.deathVariant >= 1 &&
+          c.deathVariant <= 4 &&
           c.cppAnimStartTick !== undefined &&
           (game?.tick ?? 0) - c.cppAnimStartTick < 30 * 6
         );
@@ -528,6 +543,13 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
             house: e.house,
             alive: e.alive,
             inLimbo: e.inLimbo,
+            hp: e.hp,
+            maxHp: e.maxHp,
+            fear: e.fear,
+            isProne: e.isProne,
+            logicIndexHint: e.logicIndexHint,
+            unlimboTick: e.unlimboTick,
+            lastLogicProcessedTick: e.lastLogicProcessedTick,
             cx: e.cell?.cx,
             cy: e.cell?.cy,
             lx: e.leptonX,
@@ -535,6 +557,15 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
             mission: e.mission,
             missionQueue: e.missionQueue,
             missionTimer: e.missionTimer,
+            doing: e.doing,
+            doingStage: e.doingStage,
+            doingRate: e.doingRate,
+            randomAnimateTimer: e.randomAnimateTimer,
+            randomAnimateReady: typeof e.isReadyToRandomAnimate === 'function'
+              ? e.isReadyToRandomAnimate()
+              : undefined,
+            teamId: e.teamRef?.id ?? null,
+            teamName: e.teamRef?.name ?? e.teamRef?.teamTypeName ?? null,
             attackCooldown: e.attackCooldown,
             targetId: e.target?.id ?? null,
             targetType: e.target?.type ?? null,
@@ -599,6 +630,19 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           loopEnd: e.loopEnd,
           followUp: e.followUp,
           cppLogicSlot: e.cppLogicSlot,
+          logicIndexHint: e.logicIndexHint,
+        })),
+        structuresDebug: (((window as any).__agentGame?.structures ?? []) as any[]).map((s, i) => ({
+          index: i,
+          type: s.type,
+          house: s.house,
+          cx: s.cx,
+          cy: s.cy,
+          alive: s.alive,
+          hp: s.hp,
+          debrisCountdown: s.debrisCountdown,
+          debrisDropped: s.debrisDropped,
+          sellProgress: s.sellProgress,
         })),
         splashTrace: (globalThis as any).__easterSplashTrace ?? [],
         damageTrace: (globalThis as any).__easterDamageTrace ?? [],
@@ -659,7 +703,7 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
 
     // Also dump entity info at divergent ticks for context
     if (!seedMatch || (callCountReliable && callDiff !== 0) || ALWAYS_DUMP) {
-      if (!ALWAYS_DUMP) {
+      if (DUMP_LOGIC_LAYER) {
         console.log(`  WASM Logic layer (${wasmData.logicLayer.length} entities):`);
         for (const [idx, type, house, cx, cy] of wasmData.logicLayer) {
           console.log(`    [${idx}] ${type} (${house}) cell(${cx},${cy})`);
@@ -673,9 +717,11 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
       for (const a of (tsData as any).aircraft ?? []) {
         console.log(`    ${a.type}#${a.id} (h=${a.house}) cell(${a.cx},${a.cy}) lx=${a.lx ?? '-'} ly=${a.ly ?? '-'} f=${a.facing256 ?? '-'} fd=${a.desiredFacing256 ?? '-'} sf=${a.turretFacing256 ?? '-'} sfd=${a.desiredTurretFacing256 ?? '-'} mission=${a.mission} mq=${a.missionQueue} mt=${a.missionTimer} arm=${a.attackCooldown ?? '-'} ast=${a.aircraftAttackStatus ?? '-'} target=${a.targetId ?? a.targetStructureType ?? '-'} hasT=${a.hasTarget ?? '-'} hasS=${a.hasTargetStructure ?? '-'} land=${a.landedAtStructure ?? '-'} hint=${a.logicIndexHint ?? '-'} proc=${a.processedInBuildingPass ?? '-'} alive=${a.alive} inLimbo=${a.inLimbo} aircraftState=${a.aircraftState} alt=${a.flightAltitude} cargo=${a.cargo} moveTarget=${a.moveTarget ? `(${a.moveTarget.lx},${a.moveTarget.ly})` : '-'} team=${a.teamRef} tmi=${a.teamMissionIndex}/${a.teamMissions}`);
       }
-      console.log(`  TS taggedLog (stack frames):`);
-      for (let i = 0; i < (tsData as any).taggedLog.length; i++) {
-        console.log(`    [${i}] ${(tsData as any).taggedLog[i]}`);
+      if (DUMP_TAGGED) {
+        console.log(`  TS taggedLog (stack frames):`);
+        for (let i = 0; i < (tsData as any).taggedLog.length; i++) {
+          console.log(`    [${i}] ${(tsData as any).taggedLog[i]}`);
+        }
       }
       if (DUMP_SPLASH) {
         console.log(`  TS splashTrace:`);
@@ -698,6 +744,14 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
         }
         console.log(`  TS projectileTrace:`);
         for (const entry of (tsData as any).projectileTrace ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
+      if (DUMP_FOOT) {
+        const minLogic = Number(process.env.DUMP_FOOT_MIN_LOGIC ?? 0);
+        console.log(`  TS foot entities:`);
+        for (const entry of ((tsData as any).debugFoot ?? [])
+          .filter((e: any) => (e.logicIndexHint ?? 0) >= minLogic)) {
           console.log(`    ${JSON.stringify(entry)}`);
         }
       }
@@ -826,9 +880,20 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           console.log(`    ${JSON.stringify(entry)}`);
         }
       }
+      if (DUMP_STRUCTURES) {
+        console.log(`  WASM structures:`);
+        for (const entry of (wasmData as any).structures ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+        console.log(`  TS structures:`);
+        for (const entry of (tsData as any).structuresDebug ?? []) {
+          console.log(`    ${JSON.stringify(entry)}`);
+        }
+      }
       if (DUMP_UNITS) {
+        const minLogic = Number(process.env.DUMP_UNIT_MIN_LOGIC ?? 0);
         console.log(`  WASM foot units:`);
-        for (const entry of (wasmData.logicLayer as any[]).filter(e => e[5] === 'U' || e[5] === 'I')) {
+        for (const entry of (wasmData.logicLayer as any[]).filter(e => (e[5] === 'U' || e[5] === 'I') && e[0] >= minLogic)) {
           console.log(`    ${JSON.stringify({
             logicIndex: entry[0],
             type: entry[1],
@@ -862,15 +927,18 @@ test(`${scenario} per-entity RNG diff ticks ${startTick}-${endTick}`, async ({ b
           })}`);
         }
         console.log(`  WASM foot state:`);
-        for (const entry of [...((wasmData as any).units ?? []), ...((wasmData as any).enemies ?? [])]) {
+        for (const entry of [...((wasmData as any).units ?? []), ...((wasmData as any).enemies ?? [])]
+          .filter((e: any) => (e.id ?? 0) >= minLogic)) {
           console.log(`    ${JSON.stringify(entry)}`);
         }
         console.log(`  TS foot units:`);
-        for (const entry of [...((tsData as any).units ?? []), ...((tsData as any).enemies ?? [])]) {
+        for (const entry of [...((tsData as any).units ?? []), ...((tsData as any).enemies ?? [])]
+          .filter((e: any) => (e.id ?? 0) >= minLogic)) {
           console.log(`    ${JSON.stringify(entry)}`);
         }
         console.log(`  TS debug foot:`);
-        for (const entry of (tsData as any).debugFoot ?? []) {
+        for (const entry of ((tsData as any).debugFoot ?? [])
+          .filter((e: any) => (e.logicIndexHint ?? 0) >= minLogic)) {
           console.log(`    ${JSON.stringify(entry)}`);
         }
       }

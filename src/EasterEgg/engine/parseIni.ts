@@ -6,6 +6,7 @@
  * without circular dependencies.
  */
 
+import { cppTechnoTypeBuildTime } from './fixedPoint';
 import type { Faction, ProductionItem } from './types';
 
 // ─── INI Section Parser ──────────────────────────────────────────────
@@ -196,6 +197,9 @@ export function patchProductionItems(
       const interp = interpretProductionPrerequisites(patched, section.get('Prerequisite'));
       patched.prerequisite = interp.prerequisite;
       patched.techPrereq = interp.techPrereq;
+    }
+    if (section.has('Cost')) {
+      patched.buildTime = cppTechnoTypeBuildTime(patched.cost);
     }
     return patched;
   });

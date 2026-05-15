@@ -22,7 +22,7 @@
  */
 
 import { Entity, CloakState, threatScore as computeThreatScore, type TeamMissionEntry } from './entity';
-import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, pixelToLepton, leptonToPixel, cellTargetToLepton, cellIndexToPos, PRODUCTION_ITEMS } from './types';
+import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, SpeedClass, pixelToLepton, leptonToPixel, cellTargetToLepton, cellIndexToPos, PRODUCTION_ITEMS } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
 import { ScenarioRandom } from './random';
 import { MoveResult, type GameMap } from './map';
@@ -64,6 +64,7 @@ function facingFromCellStep(from: { cx: number; cy: number }, to: { cx: number; 
  *                    foot.cpp:313-500).
  * `startDriveClassMove` — C++ DriveClass::Assign_Destination immediate
  *                    Start_Of_Move hook for vehicles/vessels.
+ * `setGlobal`      — C++ TeamClass::TMission_Set_Global side effect.
  */
 export interface TeamAIContext {
   structures?: MapStructure[];
@@ -87,6 +88,8 @@ export interface TeamAIContext {
   isRevealedToHouse?: (cx: number, cy: number, houseIdx: number) => boolean;
   /** C++ TechnoClass::Evaluate_Object value calculation, including AI house bias. */
   threatScore?: (scanner: Entity, target: Entity, distCells: number) => number;
+  /** C++ ScenarioClass::Set_Global_To(true) used by TMISSION_SET_GLOBAL. */
+  setGlobal?: (globalIndex: number) => void;
   /** Game tick counter — used by TMission_Patrol for periodic threat scan
    *  (C++ team.cpp:2965 — Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0).
    *  Rule.PatrolTime=.016, TICKS_PER_MINUTE=900 → fires every 14 ticks. */
@@ -133,6 +136,9 @@ const QUARRY_DEFENSE = 8;
 const QUARRY_THREAT = 9;
 const QUARRY_POWER = 10;
 const QUARRY_FAKES = 11;
+
+const MPH_SLOW_ISH = 10;
+const MPH_LIGHT_SPEED = 255;
 
 /** RTTI flags matching C++ RTTIType bit positions used by TechnoClass::Greatest_Threat. */
 const enum TeamThreatRTTI {
@@ -484,7 +490,7 @@ export class Team {
       if (!unit.moveTarget) {
         assignMission(unit, Mission.MOVE);
         unit.target = null;
-        unit.formationOffset = null;
+        this.clearFormationMove(unit);
         // C++ Coordinate_Conscript calls Assign_Destination(Zone). For
         // DriveClass members that immediately clears Path[0] and calls
         // Start_Of_Move, so the same object AI tick can spend a rotation step.
@@ -651,7 +657,7 @@ export class Team {
     entity.teamRef = null;
     entity.teamInitiated = false;
     // C++ team.cpp:2285-2289 — clears IsFormationMove when member is removed/dies
-    entity.formationOffset = null;
+    this.clearFormationMove(entity);
     this.isAltered = true;
 
     // C++ team.cpp:1139 — a member that breaks off a team immediately runs
@@ -662,6 +668,13 @@ export class Team {
     this.enterIdleAfterTeamRelease(entity, ctx);
 
     return true;
+  }
+
+  private clearFormationMove(entity: Entity): void {
+    entity.formationOffset = null;
+    entity.isFormationMove = false;
+    entity.formationSpeedClass = SpeedClass.FOOT;
+    entity.formationMaxSpeed = 0;
   }
 
   // ── Main AI loop (C++ TeamClass::AI, team.cpp:470-870) ──
@@ -711,7 +724,7 @@ export class Team {
       for (const m of this._members) {
         if (!m.alive) {
           m.teamRef = null;
-          m.formationOffset = null;
+          this.clearFormationMove(m);
         }
       }
       this._members = this._members.filter(m => m.alive);
@@ -1003,6 +1016,10 @@ export class Team {
           this.coordinateMove(waypoints, ctx);
           break;
 
+        case TMISSION_FORMATION:
+          this.tMissionFormation(mission.data);
+          break;
+
         case TMISSION_GUARD:
           this.coordinateRegroup(ctx);
           // C++ team.cpp:856-858 — guard times out when CDTimer value is 0.
@@ -1032,7 +1049,8 @@ export class Team {
           break;
 
         case TMISSION_SET_GLOBAL:
-          // Set global handled externally; advance mission
+          // C++ team.cpp:2987-2992 — set the scenario global, then advance.
+          ctx?.setGlobal?.(mission.data);
           this.isNextMission = true;
           break;
 
@@ -1268,6 +1286,155 @@ export class Team {
   }
 
   /**
+   * C++ TeamClass::TMission_Formation (team.cpp:2548-2733).
+   *
+   * Formation offsets are per-member, but DriveClass speed also becomes a
+   * team-level value: every non-infantry member receives the slowest
+   * UNIT/VESSEL max speed and that member's terrain speed class.
+   */
+  private tMissionFormation(formation: number): void {
+    const members = this._members;
+    const offsets = this.formationOffsets(formation, members.length);
+
+    if (formation === 0) {
+      for (const member of members) {
+        this.clearFormationMove(member);
+      }
+    } else if (offsets) {
+      for (let i = 0; i < members.length; i++) {
+        const offset = offsets[i] ?? { x: 0, y: 0 };
+        members[i].formationOffset = offset;
+        members[i].isFormationMove = true;
+      }
+    }
+
+    if (formation !== 0) {
+      let teamSpeedClass = SpeedClass.WHEEL;
+      let teamMaxSpeed = MPH_LIGHT_SPEED;
+
+      for (const member of members) {
+        if (member.isAirUnit) continue;
+
+        const memberSpeedClass = member.stats.isInfantry ? SpeedClass.FOOT : member.stats.speedClass;
+        const memberMaxSpeed = this.formationMemberMaxSpeed(member);
+        if (memberMaxSpeed < teamMaxSpeed) {
+          teamMaxSpeed = memberMaxSpeed;
+          teamSpeedClass = memberSpeedClass;
+        }
+      }
+
+      for (const member of members) {
+        if (member.stats.isInfantry) {
+          member.formationSpeedClass = SpeedClass.FOOT;
+          member.formationMaxSpeed = MPH_SLOW_ISH;
+        } else {
+          member.formationSpeedClass = teamSpeedClass;
+          member.formationMaxSpeed = teamMaxSpeed;
+        }
+      }
+    }
+
+    this.isNextMission = true;
+  }
+
+  private formationMemberMaxSpeed(member: Entity): number {
+    const iniSpeed = Math.max(0, Math.min(100, member.stats.speed));
+    return Math.min(MPH_LIGHT_SPEED, Math.floor((iniSpeed * 256) / 100));
+  }
+
+  private formationOffsets(formation: number, count: number): Array<WorldPos | null> | null {
+    switch (formation) {
+      case 0:
+        return Array.from({ length: count }, () => null);
+      case 1:
+        return Array.from({ length: count }, () => ({ x: 0, y: 0 }));
+      case 2:
+        // C++ FORMATION_LOOSE has an empty switch case: existing offsets and
+        // IsFormationMove are left untouched, but speed fields are still set.
+        return null;
+      default:
+        break;
+    }
+
+    const offsets: WorldPos[] = [];
+    let xdir = 0;
+    let ydir = 0;
+    let evenOdd = true;
+    const pushOffset = (x: number, y: number): void => {
+      offsets.push({ x: x * CELL_SIZE, y: y * CELL_SIZE });
+    };
+
+    switch (formation) {
+      case 3:
+        ydir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          xdir = -xdir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir -= 2;
+            ydir += 2;
+          }
+        }
+        break;
+      case 4:
+        xdir = Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          ydir = -ydir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir -= 2;
+            ydir -= 2;
+          }
+        }
+        break;
+      case 5:
+        ydir = Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          xdir = -xdir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir -= 2;
+            ydir -= 2;
+          }
+        }
+        break;
+      case 6:
+        xdir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, ydir);
+          ydir = -ydir;
+          evenOdd = !evenOdd;
+          if (!evenOdd) {
+            xdir += 2;
+            ydir -= 2;
+          }
+        }
+        break;
+      case 7:
+        ydir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(0, ydir);
+          ydir += 2;
+        }
+        break;
+      case 8:
+        xdir = -Math.floor(count / 2);
+        while (offsets.length < count) {
+          pushOffset(xdir, 0);
+          xdir += 2;
+        }
+        break;
+      default:
+        return Array.from({ length: count }, () => ({ x: 0, y: 0 }));
+    }
+
+    return offsets;
+  }
+
+  /**
    * C++ TMission_Attack (team.cpp:2704-2766).
    *
    * If MissionTarget is empty, the team leader runs Greatest_Threat() with the
@@ -1348,6 +1515,7 @@ export class Team {
       if (other.type === UnitType.I_SPY && scanner.type !== UnitType.I_DOG) continue;
       if (!(this.teamThreatRttiBit(other) & mask)) continue;
       if (quarry === QUARRY_HARVESTERS && other.type !== UnitType.V_HARV) continue;
+      if (quarry === QUARRY_DEFENSE && !other.weapon) continue;
       if (useZone && zone && !zone[other.cell.cy * MAP_CELLS + other.cell.cx]) continue;
       if (!this.isVisibleToPlayerForThreat(ctx, other)) continue;
       if (other.isAirUnit && other.flightAltitude > 0 && !(scanner.weapon?.isAntiAir || scanner.weapon2?.isAntiAir)) continue;
@@ -1583,6 +1751,12 @@ export class Team {
       if (unit.mission !== Mission.ATTACK &&
           unit.mission !== Mission.ENTER &&
           unit.mission !== Mission.CAPTURE) {
+        const hadDriveClassNavCom =
+          !unit.stats.isInfantry &&
+          !unit.isAirUnit &&
+          !unit.isDriving &&
+          unit.mission === Mission.MOVE &&
+          unit.moveTarget !== null;
         assignMission(unit, Mission.ATTACK);
         unit.moveTarget = null;
         unit.moveTargetEntityRef = null;
@@ -1593,6 +1767,13 @@ export class Team {
         if (!unit.isDriving) {
           unit.path = [];
           unit.pathIndex = 0;
+        }
+        // C++ DriveClass::Assign_Destination(TARGET_NONE) sets Path[0] to
+        // FACING_NONE and immediately calls Start_Of_Move when the unit is not
+        // already driving. If the active mission is still MOVE, Start_Of_Move
+        // calls Enter_Idle_Mode(), which queues GUARD over the pending ATTACK.
+        if (hadDriveClassNavCom) {
+          assignMission(unit, Mission.GUARD);
         }
       }
 
@@ -1925,6 +2106,7 @@ export class Team {
     let finished = true;
     for (const unit of this._members) {
       if (!unit.alive) continue;
+      this.coordinateConscript(unit, ctx);
       if (unit.passengers && unit.passengers.length > 0) {
         // C++ team.cpp:2148-2152: do this even while aircraft are landing.
         // AircraftClass::AI's Commence gate handles IsLanding/IsTakingOff; the
@@ -1950,6 +2132,14 @@ export class Team {
       }
     }
     if (finished) {
+      if (this.currentMission + 1 < this.missionList.length) {
+        for (const unit of this._members) {
+          if (!unit.alive) continue;
+          if (unit.stats.isInfantry || unit.isAirUnit || unit.isNavalUnit) continue;
+          if (unit.moveTarget || unit.isDriving) continue;
+          unit.isToScatter = false;
+        }
+      }
       this.isNextMission = true;
     }
   }

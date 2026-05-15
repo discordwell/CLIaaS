@@ -41,6 +41,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { cppTechnoTypeBuildTime } from '../engine/fixedPoint';
 import { computePowerMult, powerFraction, timeToBuildSpeedFactor, factoryStartSpeedFactor } from '../engine/production';
 import { powerMultiplier } from '../engine/repairSell';
 
@@ -447,9 +448,9 @@ describe('C++ parity: STEP_COUNT = 54 (factory.h:92)', () => {
     const STEP_COUNT = 54;
 
     // Example: Medium Tank, cost=800, full power
-    // TechnoTypeClass::Time_To_Build = floor(800 * 0.8 * 900/1000) = 576
-    // TechnoClass::Time_To_Build at full power = 576 (no penalty)
-    const baseTicks = 576;
+    // TechnoTypeClass::Time_To_Build uses C++ fixed-point:
+    // 800 * fixed(.8) * fixed(900,1000) = 573
+    const baseTicks = cppTechnoTypeBuildTime(800);
     const power = 1.0;
 
     const rateRaw = baseTicks / cppBound(power, 1 / 16, 1);
@@ -457,7 +458,7 @@ describe('C++ parity: STEP_COUNT = 54 (factory.h:92)', () => {
     const rate = cppBound(ratePerStep, 1, 255);
 
     // Total build time = rate * STEP_COUNT = 10 * 54 = 540 ticks
-    // (vs original 576; granularity loss from integer division)
+    // (vs original 573; granularity loss from integer division)
     expect(rate).toBe(10);
     expect(rate * STEP_COUNT).toBe(540);
   });
@@ -465,11 +466,11 @@ describe('C++ parity: STEP_COUNT = 54 (factory.h:92)', () => {
   it('C++ rate at 50% power example: doubled rate due to mechanism 2', () => {
     const STEP_COUNT = 54;
     // Medium Tank at 50% power:
-    // Mechanism 1: 0.5 → 1/0.5 = 2x → time = 576 * 2 = 1152
-    // Mechanism 2: rate = 1152 / 0.5 = 2304; rate/54 = 42; Bound(42,1,255) = 42
-    // Total = 42 * 54 = 2268 ticks (vs 576 normal)
+    // Mechanism 1: 0.5 → 1/0.5 = 2x → time = 573 * 2 = 1146
+    // Mechanism 2: rate = 1146 / 0.5 = 2292; rate/54 = 42; Bound(42,1,255) = 42
+    // Total = 42 * 54 = 2268 ticks (vs 573 normal)
     // Slowdown factor = 2268/540 = 4.2x
-    const baseTicks = 576;
+    const baseTicks = cppTechnoTypeBuildTime(800);
     const powerFraction = 0.5;
 
     // Mechanism 1
@@ -483,7 +484,7 @@ describe('C++ parity: STEP_COUNT = 54 (factory.h:92)', () => {
     const totalTicks = rate * STEP_COUNT;
 
     expect(timeMult).toBe(2.0);
-    expect(adjustedTime).toBe(1152);
+    expect(adjustedTime).toBe(1146);
     expect(rate).toBe(42);
     expect(totalTicks).toBe(2268);
   });
@@ -550,11 +551,11 @@ describe('Summary: production speed parity status', () => {
     // C++ divides build time into 54 steps with integer tick rates (1-255).
     // TS uses fractional progress incremented by powerMult each tick.
     // Impact: Small rounding differences in total build time. For full power,
-    // C++ Medium Tank is 540 ticks (10*54) vs TS 576 ticks (exact buildTime).
-    const cppTicks = 10 * 54; // rate=floor(576/54)=10, total=10*54=540
-    const tsBuildTime = 576;  // exact cost-based formula
+    // C++ Medium Tank is 540 ticks (10*54) vs TS 573 ticks (fixed-point buildTime).
+    const cppTicks = 10 * 54; // rate=floor(573/54)=10, total=10*54=540
+    const tsBuildTime = cppTechnoTypeBuildTime(800);
     expect(cppTicks).not.toBe(tsBuildTime);
-    expect(tsBuildTime - cppTicks).toBe(36); // TS is 36 ticks slower at full power
+    expect(tsBuildTime - cppTicks).toBe(33); // TS is 33 ticks slower at full power
   });
 
   it('NO GAP: power-fraction combined floor of 1/32 matches C++ at 0% power', () => {

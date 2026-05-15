@@ -14,6 +14,7 @@ import { TestRunner, type TestLogEntry } from './engine/testRunner';
 import { QATestRunner, type QALogEntry, type QAReport } from './engine/qaTestRunner';
 import { resolvePreset } from './engine/turbo';
 import { BriefingRenderer } from './engine/briefing';
+import { ScenarioRandom } from './engine/random';
 
 interface AntGameProps {
   onExit: () => void;
@@ -702,6 +703,13 @@ export default function AntGame({ onExit }: AntGameProps) {
 
       const scenarioId = params.get('scenario') || 'SCA01EA';
       const diff = (params.get('difficulty') || 'normal') as Difficulty;
+      const seedParam = params.get('seed');
+      if (seedParam != null) {
+        const seed = Number(seedParam);
+        if (Number.isFinite(seed)) {
+          ScenarioRandom.seed = seed >>> 0;
+        }
+      }
 
       import('./engine/agentHarness').then(({ installHarness }) => {
         game.start(scenarioId, diff).then(() => {
