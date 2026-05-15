@@ -38,6 +38,7 @@ import {
 } from '../engine/placement';
 import { GameMap, Terrain } from '../engine/map';
 import { sellRefund } from '../engine/repairSell';
+import { aiFireSale } from '../engine/ai';
 
 // ---------------------------------------------------------------------------
 // Source inspection — read the game loop code to verify structure
@@ -403,12 +404,15 @@ describe('AI ConYard sell does NOT get MCV reversion', () => {
     expect(isAllied(House.Spain, House.Spain)).toBe(true);
   });
 
-  it('fire sale code starts sell on AI structures without MCV flag', () => {
-    // Fire sale: s.sellProgress = 0 — no special MCV handling
-    const fireSaleSection = indexSource.indexOf('fireSale');
-    expect(fireSaleSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(fireSaleSection, fireSaleSection + 300);
-    expect(chunk).toContain('s.sellProgress = 0');
+  it('fire sale queues AI ConYard deconstruction without immediate MCV reversion', () => {
+    const fact = makeFACT(10, 10, FACT_MAX_HP, House.USSR, true);
+    const ctx = { structures: [fact] };
+
+    const sold = aiFireSale(ctx as any, House.USSR);
+
+    expect(sold).toBe(true);
+    expect(fact.mission).toBe(Mission.DECONSTRUCTION);
+    expect(fact.sellProgress).toBe(0);
   });
 });
 

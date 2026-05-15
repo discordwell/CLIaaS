@@ -40,6 +40,7 @@ import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 import {
   type PlacementContext,
+  placeStructure,
   deployMCV,
 } from '../engine/placement';
 import { GameMap, Terrain } from '../engine/map';
@@ -1044,21 +1045,21 @@ describe('Structure placement validation', () => {
   });
 
   it('PROC placement spawns a free harvester', () => {
-    // In placeStructure: if item.type === 'PROC', spawn a HARV entity
     const item = findItem('PROC');
-    expect(item.type).toBe('PROC');
-    expect(item.isStructure).toBe(true);
-    // The free harvester spawn is verified by source inspection
-    const { readFileSync } = require('fs');
-    const { join } = require('path');
-    const src = readFileSync(
-      join(process.cwd(), 'src', 'EasterEgg', 'engine', 'placement.ts'), 'utf-8',
-    );
-    const placeIdx = src.indexOf('placeStructure(ctx: PlacementContext, cx: number, cy: number)');
-    expect(placeIdx).toBeGreaterThan(-1);
-    const chunk = src.slice(placeIdx, placeIdx + 5000);
-    expect(chunk).toContain("'PROC'");
-    expect(chunk).toContain('V_HARV');
+    const ctx = makePlacementCtx({
+      playerHouse: House.Spain,
+      pendingPlacement: item,
+      structures: [makeStructure('FACT', House.Spain, 10, 10)],
+      cachedAvailableItems: [item],
+    });
+
+    const placed = placeStructure(ctx, 13, 10);
+
+    expect(placed).toBe(true);
+    expect(ctx.structures.some(s => s.type === 'PROC' && s.cx === 13 && s.cy === 10)).toBe(true);
+    expect(ctx.entities).toHaveLength(1);
+    expect(ctx.entities[0].type).toBe(UnitType.V_HARV);
+    expect(ctx.entityById.get(ctx.entities[0].id)).toBe(ctx.entities[0]);
   });
 });
 
