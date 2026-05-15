@@ -223,6 +223,10 @@ describe('C++ UnitClass::Can_Fire 256-step FIRE_FACING gate (SCG01EA tick 87 res
     jeep.turretFacing32 = dir256ToFacing32(jeep.turretFacing256);
     jeep.desiredTurretFacing256 = 32;
     jeep.desiredTurretFacing = dir256ToFacing8(jeep.desiredTurretFacing256);
+    // C++ Rotation_AI would have left IsRotating set while SecondaryFacing is
+    // still short of Desired; Can_Fire reads this pre-tick flag before the
+    // next Rotation_AI can finish the turn.
+    jeep.turretIsRotating = true;
 
     const pendingBefore = pendingInvisibleCount(game);
 
