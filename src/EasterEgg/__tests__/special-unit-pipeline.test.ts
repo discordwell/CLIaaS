@@ -15,7 +15,8 @@ import {
   UnitType, House, Mission, AnimState, UNIT_STATS, WEAPON_STATS,
   CELL_SIZE, worldDist, worldToCell, CONDITION_RED,
   CHRONO_SHIFT_VISUAL_TICKS,
-pixelToLepton, } from '../engine/types';
+  modifyDamage, pixelToLepton,
+} from '../engine/types';
 import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
 import {
   type SpecialUnitsContext,
@@ -1172,8 +1173,9 @@ describe('Mine System — tickMines proximity detonation', () => {
       isAllied: (a, b) => a === b,
     });
     tickMines(ctx);
-    // C++ unit.cpp:1826-1827: AV mine deals AVMineDamage with WARHEAD_HE
-    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, 1200, 'HE');
+    // C++ unit.cpp:1826-1827 starts from AVMineDamage; TS passes the
+    // post-ObjectClass WARHEAD_HE amount into damageEntity.
+    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, modifyDamage(1200, 'HE', enemy.stats.armor, 0), 'HE');
     expect(ctx.mines.length).toBe(0); // mine consumed
   });
 
@@ -1208,7 +1210,7 @@ describe('Mine System — tickMines proximity detonation', () => {
       entities: [enemy],
     });
     tickMines(ctx);
-    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, mine.damage, 'HE');
+    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, modifyDamage(mine.damage, 'HE', enemy.stats.armor, 0), 'HE');
   });
 
   it('tickMines removes mine after detonation', () => {
@@ -1247,7 +1249,7 @@ describe('Mine System — tickMines proximity detonation', () => {
       entities: [enemy],
     });
     tickMines(ctx);
-    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, 1200, 'HE');
+    expect(ctx.damageEntity).toHaveBeenCalledWith(enemy, modifyDamage(1200, 'HE', enemy.stats.armor, 0), 'HE');
   });
 
   it('mine data structure has cx, cy, house, damage, type fields', () => {

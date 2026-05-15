@@ -22,7 +22,8 @@ import {
   UnitType, House, CELL_SIZE, Mission, AnimState,
   UNIT_STATS, CONDITION_RED,
   buildDefaultAlliances,
-pixelToLepton, } from '../engine/types';
+  modifyDamage, pixelToLepton,
+} from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { type MapStructure, STRUCTURE_SIZE } from '../engine/scenario';
 import {
@@ -385,8 +386,9 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
 
     tickMines(ctx);
 
-    // C++ unit.cpp:1829: AP mine does only 10 damage to vehicles
-    expect(recordedDamage).toBe(10);
+    // C++ unit.cpp:1829 starts from raw 10; TS passes the post-ObjectClass
+    // WARHEAD_HE amount into its shared damageEntity hook.
+    expect(recordedDamage).toBe(modifyDamage(10, 'HE', enemy.stats.armor, 0));
     expect(mines.length).toBe(0);
   });
 
@@ -436,7 +438,7 @@ describe('Mine detonation trigger conditions (specialUnits.ts tickMines)', () =>
 
     tickMines(ctx);
 
-    expect(recordedDamage).toBe(1000);
+    expect(recordedDamage).toBe(modifyDamage(1000, 'HE', enemy.stats.armor, 0));
   });
 
   it('mine is consumed (removed from array) after detonation', () => {
