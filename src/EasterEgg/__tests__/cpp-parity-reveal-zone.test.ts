@@ -243,8 +243,8 @@ describe('TACTION_REVEAL_ZONE — zone flood fill (taction.cpp:445-456)', () => 
     expect(isRevealed(map, 5, 4)).toBe(false);
   });
 
-  it('uses 4-directional connectivity — diagonal-only path does NOT connect', () => {
-    // C++ MZONE_CRUSHER zones use 4-directional adjacency
+  it('uses 8-directional connectivity — diagonal-only path connects', () => {
+    // C++ map.cpp:1535 and 1616-1624: Zone_Span treats diagonals as adjacent.
     const map = makeTestMap(0, 0, 5, 5);
     // Fill with rock except a diagonal path: (0,0) -> (1,1) -> (2,2) -> (3,3) -> (4,4)
     for (let cy = 0; cy < 5; cy++) {
@@ -260,10 +260,11 @@ describe('TACTION_REVEAL_ZONE — zone flood fill (taction.cpp:445-456)', () => 
 
     revealZoneFloodFill(map, 0, 0);
 
-    // Only (0,0) should be revealed — no 4-connected neighbors are passable
+    // The diagonal clear cells share one C++ movement zone.
     expect(isRevealed(map, 0, 0)).toBe(true);
-    expect(isRevealed(map, 1, 1)).toBe(false);
-    expect(isRevealed(map, 4, 4)).toBe(false);
+    expect(isRevealed(map, 1, 1)).toBe(true);
+    expect(isRevealed(map, 4, 4)).toBe(true);
+    expect(isRevealed(map, 0, 1)).toBe(false);
   });
 
   it('reveals large connected area far from waypoint (no radius limit)', () => {
