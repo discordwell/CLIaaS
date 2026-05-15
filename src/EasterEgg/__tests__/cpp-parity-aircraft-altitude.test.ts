@@ -894,7 +894,7 @@ describe('altitude clamping (aircraft.cpp:4046-4048, 4082-4084)', () => {
     expect(['rearming', 'landed']).toContain(heli.aircraftState);
   });
 
-  it('MOVE arrival starts C++ landing height loss on the same tick', () => {
+  it('MOVE arrival starts C++ landing height loss on the next LAND dispatch', () => {
     const tran = makeEntity(UnitType.V_TRAN, House.Spain, 200, 200);
     tran.aircraftState = 'flying';
     tran.mission = Mission.MOVE;
@@ -902,6 +902,11 @@ describe('altitude clamping (aircraft.cpp:4046-4048, 4082-4084)', () => {
     tran.moveTarget = { lx: tran.leptonX, ly: tran.leptonY };
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.aircraftHeightLeptons = CPP_FLIGHT_LEVEL_LEPTONS;
+
+    updateAircraft(makeAircraftCtx(), tran);
+
+    expect(tran.aircraftState).toBe('landing');
+    expect(tran.aircraftHeightLeptons).toBe(CPP_FLIGHT_LEVEL_LEPTONS);
 
     updateAircraft(makeAircraftCtx(), tran);
 

@@ -3343,11 +3343,12 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
     const cur = useFlyPhysicsCoord ? projectilePixelPosition(proj) : null;
     const curX = cur?.x ?? (proj.startX + (proj.impactX - proj.startX) * Math.min(t, 1));
     const curY = cur?.y ?? (proj.startY + (proj.impactY - proj.startY) * Math.min(t, 1));
-    const distToTarget = Math.sqrt((curX - target.pos.x) ** 2 + (curY - target.pos.y) ** 2);
+    const targetCoord = entityTargetPixels(target);
+    const distToTarget = Math.sqrt((curX - targetCoord.x) ** 2 + (curY - targetCoord.y) ** 2);
     // C++ Distance(TarCom) < 0x0080: 128 leptons = half a cell (CELL_LEPTON_W=256)
     if (distToTarget < CELL_SIZE / 2) {
-      proj.impactX = target.pos.x;
-      proj.impactY = target.pos.y;
+      proj.impactX = targetCoord.x;
+      proj.impactY = targetCoord.y;
       proj.travelFrames = proj.currentFrame; // detonate now
       return true;
     }

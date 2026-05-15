@@ -22,6 +22,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   type InflightProjectile,
+  entityTargetPixels,
   handleUnitDeath,
   launchProjectile,
   updateInflightProjectiles,
@@ -800,14 +801,14 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     const weapon = { ...WEAPON_STATS['RedEye'] };
     expect(weapon.isAntiAir).toBe(true);
 
-    // Aim at the aircraft's current position
-    launchProjectile(ctx, samSite, aircraft, weapon, 50, aircraft.pos.x, aircraft.pos.y, true);
-    const proj = ctx.inflightProjectiles[0];
+    // C++ Fire_At aims at As_Coord(target), which subtracts aircraft Height.
+    const initialTargetCoord = entityTargetPixels(aircraft);
+    launchProjectile(ctx, samSite, aircraft, weapon, 50, initialTargetCoord.x, initialTargetCoord.y, true);
 
     // Now move the aircraft slightly off the original aim point.
     // The homing ROT will adjust, but AA proximity should trigger when the
     // projectile gets within CELL_SIZE/2 of the aircraft's new position.
-    aircraft.pos.y += CELL_SIZE * 0.3;  // shift aircraft slightly south
+    aircraft.setPosition(aircraft.pos.x, aircraft.pos.y + CELL_SIZE * 0.3);  // shift aircraft slightly south
 
     let ticks = 0;
     while (ctx.inflightProjectiles.length > 0 && ticks < 100) {
@@ -822,12 +823,15 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     expect(explosions.length).toBeGreaterThan(0);
 
-    // The impact position should be near the aircraft (within 1 cell),
+    // The final detonation should be near the aircraft (within 1 cell);
+    // RedEye smoke puffs are also recorded as explosion effects.
     // not at some distant point. This confirms proximity-based early detonation.
-    const impactX = explosions[0].x;
-    const impactY = explosions[0].y;
+    const detonation = explosions[explosions.length - 1];
+    const impactX = detonation.x;
+    const impactY = detonation.y;
+    const targetCoord = entityTargetPixels(aircraft);
     const distFromAircraft = Math.sqrt(
-      (impactX - aircraft.pos.x) ** 2 + (impactY - aircraft.pos.y) ** 2,
+      (impactX - targetCoord.x) ** 2 + (impactY - targetCoord.y) ** 2,
     );
     // C++ proximity is half-cell; with homing, impact should be very close to aircraft
     expect(distFromAircraft).toBeLessThan(CELL_SIZE * 2);
@@ -854,7 +858,8 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     // since the target is not an aircraft
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     expect(explosions.length).toBeGreaterThan(0);
-    const impactCell = worldToCell(explosions[0].x, explosions[0].y);
+    const detonation = explosions[explosions.length - 1];
+    const impactCell = worldToCell(detonation.x, detonation.y);
     expect(impactCell.cx).toBe(6);
   });
 

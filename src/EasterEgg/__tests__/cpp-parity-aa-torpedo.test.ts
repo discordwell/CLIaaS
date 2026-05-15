@@ -24,6 +24,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   type InflightProjectile,
+  entityTargetPixels,
   updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
@@ -189,7 +190,9 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     const attacker = entityAtWorld(UnitType.I_E1, House.Spain, 5 * CELL_SIZE, 5 * CELL_SIZE);
     // Aircraft target — must be airborne
     const target = entityAtWorld(UnitType.V_HELI, House.USSR, 10 * CELL_SIZE, 5 * CELL_SIZE);
-    target.flightAltitude = 100; // airborne
+    target.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    target.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+    const targetCoord = entityTargetPixels(target);
 
     const ctx = makeCombatCtx([attacker, target]);
 
@@ -198,7 +201,7 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     const proj = makeProjectile(
       attacker.id, target.id, WEAPON_STATS.RedEye,
       attacker.pos.x, attacker.pos.y,
-      target.pos.x, target.pos.y,
+      targetCoord.x, targetCoord.y,
       20,
     );
     ctx.inflightProjectiles.push(proj);
@@ -228,7 +231,9 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     const attacker = entityAtWorld(UnitType.I_E1, House.Spain, 5 * CELL_SIZE, 5 * CELL_SIZE);
     // Aircraft target
     const target = entityAtWorld(UnitType.V_HELI, House.USSR, 10 * CELL_SIZE, 5 * CELL_SIZE);
-    target.flightAltitude = 100;
+    target.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    target.aircraftHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
+    const targetCoord = entityTargetPixels(target);
 
     const ctx = makeCombatCtx([attacker, target]);
 
@@ -236,7 +241,7 @@ describe('AA proximity detonation (bullet.cpp:946-948)', () => {
     const proj = makeProjectile(
       attacker.id, target.id, WEAPON_STATS['90mm'],
       attacker.pos.x, attacker.pos.y,
-      target.pos.x, target.pos.y,
+      targetCoord.x, targetCoord.y,
       20,
     );
     ctx.inflightProjectiles.push(proj);

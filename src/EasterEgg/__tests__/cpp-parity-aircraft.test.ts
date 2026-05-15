@@ -835,6 +835,7 @@ describe('Structure AA targeting (building.cpp AA gate)', () => {
 
     const ctx = makeCombatCtx([gun], [mig]);
     updateStructureCombat(ctx);
+    resolveProjectiles(ctx);
 
     expect(mig.hp).toBeLessThan(hpBefore); // GUN CAN target grounded aircraft
   });
