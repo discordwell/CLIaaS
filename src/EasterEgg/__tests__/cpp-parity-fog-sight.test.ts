@@ -28,7 +28,7 @@ import {
   STRUCTURE_SIGHT,
   type FogContext,
 } from '../engine/fog';
-import { CELL_SIZE, MAP_CELLS, UNIT_STATS } from '../engine/types';
+import { CELL_SIZE, MAP_CELLS, UNIT_STATS, House } from '../engine/types';
 import { CloakState } from '../engine/entity';
 import type { Entity } from '../engine/entity';
 import { GameMap } from '../engine/map';
@@ -42,6 +42,7 @@ function makeEntity(overrides: Partial<Entity> & { pos: { x: number; y: number }
   return {
     alive: true,
     isPlayerUnit: true,
+    house: (overrides as any).house ?? ((overrides as any).isPlayerUnit === false ? House.USSR : House.Greece),
     hp: 100,
     maxHp: 100,
     pos: overrides.pos,
