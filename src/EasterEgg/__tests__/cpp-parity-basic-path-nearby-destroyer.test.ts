@@ -72,7 +72,7 @@ describe('C++ parity: Basic_Path Nearby_Location movement zone', () => {
     setCell(game, 38, 43, Terrain.WALL, 'BRIK');
     setCell(game, 39, 43, Terrain.ROCK);
     setCell(game, 39, 42, Terrain.ROCK);
-    game.map.setOccupancy(37, 41, 999);
+    game.map.setVehicleOccupancy(37, 41, 999);
 
     (game as unknown as { tick: number }).tick = 173; // TS tick maps to C++ Frame tick-1.
 

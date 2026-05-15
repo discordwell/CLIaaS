@@ -889,9 +889,14 @@ export function findPath(
   optimizeMoves(path, map, naval, ignoreOccupancy, isMoving, cellClaims, claimingEntityId, isInfantry, threshold, start, canEnterCell);
 
   const result = facingsToPath(start.cx, start.cy, path.command, path.length) as CellPos[] & { facings?: number[] };
-  result.facings = path.command
-    .slice(0, path.length)
-    .filter(cmd => cmd !== FACING_NONE && cmd !== EMPTY_CMD);
+  Object.defineProperty(result, 'facings', {
+    value: path.command
+      .slice(0, path.length)
+      .filter(cmd => cmd !== FACING_NONE && cmd !== EMPTY_CMD),
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
   return result;
 }
 
