@@ -99,21 +99,30 @@ describe('RNG loop order — SCG02EA tick-by-tick trace', () => {
     adapter.step(1);
 
     // The update() at tick 1 enables tag logging and populates _seedLog.
-    // Find the last building call and the first post-building entity call.
+    // Find the last building call and the first runtime entity call. Source
+    // tags encode C++ logicIndexHint, not entities[] array index, so use the
+    // spawned entities' hints rather than _preBuildingEntityCount as a tag
+    // threshold.
     let lastBuildingLogIdx = -1;
     let firstPostBuildingUnitLogIdx = -1;
+    const postBuildingEntityHints = new Set<number>(
+      game.entities
+        .slice(preCount)
+        .map((entity: { logicIndexHint?: number }) => entity.logicIndexHint)
+        .filter((hint: number | undefined): hint is number => hint !== undefined),
+    );
 
     for (let i = 0; i < ScenarioRandom._seedLog.length; i++) {
       const [, tag] = ScenarioRandom._seedLog[i];
       if (tag >= 12000 && tag < 13000) {
         lastBuildingLogIdx = i;
       }
-      // Post-building ground entity: uses _entityIdx >= preCount
-      // For units: tag = 11000 + _entityIdx >= 11000 + preCount
-      // For infantry: tag = 10000 + _entityIdx >= 10000 + preCount
-      const unitThreshold = 11000 + preCount;
-      const infThreshold = 10000 + preCount;
-      if ((tag >= unitThreshold && tag < 12000) || (tag >= infThreshold && tag < 11000)) {
+      const logicHint =
+        tag >= 10000 && tag < 11000 ? tag - 10000 :
+        tag >= 11000 && tag < 12000 ? tag - 11000 :
+        tag >= 14000 && tag < 15000 ? tag - 14000 :
+        undefined;
+      if (logicHint !== undefined && postBuildingEntityHints.has(logicHint)) {
         if (firstPostBuildingUnitLogIdx < 0) firstPostBuildingUnitLogIdx = i;
       }
     }
@@ -121,6 +130,7 @@ describe('RNG loop order — SCG02EA tick-by-tick trace', () => {
     console.log(`_preBuildingEntityCount = ${preCount}`);
     console.log(`entities after step = ${game.entities.length}`);
     console.log(`seedLog entries = ${ScenarioRandom._seedLog.length}`);
+    console.log(`post-building logic hints = ${[...postBuildingEntityHints].join(', ')}`);
     console.log(`Last building RNG call at seedLog index ${lastBuildingLogIdx}`);
     console.log(`First post-building entity RNG call at seedLog index ${firstPostBuildingUnitLogIdx}`);
 
