@@ -1,10 +1,6 @@
 /**
  * C++ Behavioral Parity: V19 Neutral Building Damage Investigation (SCG01EA)
  *
- * Problem: In the SCG01EA parity test at tick 300:
- *   WASM: V19 at (59,57) has HP=400 (full, no damage)
- *   TS:   V19 at (59,57) has HP=160 (lost 240 HP)
- *
  * V19 is a 1x1 civilian tech center (Neutral house, wood armor, 400 HP).
  * It should NOT be directly targeted by the player's units because:
  *   1. All houses consider Neutral an ally (types.ts buildAlliancesFromINI line 1312)
@@ -27,25 +23,17 @@
  *     - It fires 4 cardinal Fire bullets (200 damage each)
  *     - West bullet targets cell (59,57) = V19 position
  *     - Fire vs wood = 1.0 (rules.ini [Fire] Verses=90%,100%,60%,25%,50%)
- *     - V19 takes Math.round(200 * 1.0) = 200 damage
- *     - Additionally, the chain explosions from N=(60,56) and S=(60,58) barrels
- *       cause further structural chain damage (non-barrel 2-cell radius blast)
- *     - Total: 200 (direct fire) + ~40 (splash from initial projectile/chain) = 240
+ *     - V19 takes the direct hit, then additional adjacent Fire splash from
+ *       the rest of the barrel chain. A fully propagated local cluster can
+ *       destroy V19.
  *
- *   In WASM (C++), the same barrel cluster does NOT explode by tick 300 because
- *   the combat timing diverges slightly — player units position and engage enemies
- *   at different ticks, so the stray projectile/splash that triggers the barrel
- *   chain in TS hasn't happened yet in WASM.
- *
- *   Evidence: WASM has 4 BARL + 2 BRL3 intact. TS has only 2 BARL + 0 BRL3,
- *   confirming the barrel cluster at (60,56)-(60,58) exploded in TS but not WASM.
- *
- * Conclusion: This is a combat timing divergence, NOT a targeting or alliance bug.
+ * Conclusion: V19 damage is a combat timing symptom, NOT a targeting or
+ * alliance bug. If one engine triggers the barrels and the other does not, fix
+ * the upstream movement/combat timing that changes when the barrels are hit.
  *   Both engines correctly:
  *     - Skip Neutral buildings in auto-target selection
  *     - Apply splash/chain damage to ALL structures regardless of alliance
  *       (C++ Explosion_Damage, combat.cpp:205-237, does not check alliances)
- *   The difference is only in WHEN barrels are triggered by nearby combat.
  *
  * C++ source references:
  *   - building.cpp:1344-1369 — barrel fire bullets (4 cardinal, 200 Fire each)
@@ -69,6 +57,7 @@ import {
   type CombatContext,
   structureDamage,
   applySplashDamage,
+  updateInflightProjectiles,
   getWarheadMult,
   getWarheadMeta,
   SPLASH_RADIUS,
@@ -190,6 +179,13 @@ function makeCombatCtx(
     powerConsumed: 0,
     powerProduced: 100,
   } as CombatContext;
+}
+
+function drainProjectiles(ctx: CombatContext, maxTicks = 96): void {
+  for (let i = 0; i < maxTicks && ctx.inflightProjectiles.length > 0; i++) {
+    ctx.tick++;
+    updateInflightProjectiles(ctx);
+  }
 }
 
 // ── SCG01EA V19 Scenario Layout ──────────────────────────────────────────────
@@ -384,9 +380,10 @@ describe('barrel chain explosion damages V19 (the actual damage source)', () => 
 
     // Destroy the BRL3 at (60,57) — triggers chain explosion
     structureDamage(ctx, brl3_60_57, 100); // 100 > 10 HP, so it dies
+    drainProjectiles(ctx);
 
-    // V19 should have taken 200 damage from the West fire bullet
-    // Fire vs wood = 1.0, round(200 * 1.0) = 200
+    // V19 should take at least the direct 200 damage from the west fire bullet;
+    // adjacent barrel splash may add more as the local chain propagates.
     expect(brl3_60_57.alive).toBe(false);
     expect(v19.hp).toBeLessThan(400);
     // V19 took at least 200 damage (may be more from chain effects)
@@ -403,6 +400,7 @@ describe('barrel chain explosion damages V19 (the actual damage source)', () => 
     const ctx = makeCombatCtx(structures);
 
     structureDamage(ctx, brl3_60_57, 100);
+    drainProjectiles(ctx);
 
     // BRL3(60,57) fires N → BARL(60,56) dies (chain)
     expect(barl_60_56.alive).toBe(false);
@@ -410,7 +408,7 @@ describe('barrel chain explosion damages V19 (the actual damage source)', () => 
     expect(brl3_60_58.alive).toBe(false);
   });
 
-  it('V19 total damage from full cluster chain = 200 HP (barrel fire bullet only)', () => {
+  it('full cluster chain destroys V19 through direct fire plus adjacent splash', () => {
     // Full SCG01EA cluster near V19
     const v19 = makeV19(59, 57);
     const brl3_60_57 = makeBarrel('BRL3', 60, 57);
@@ -424,42 +422,28 @@ describe('barrel chain explosion damages V19 (the actual damage source)', () => 
     const ctx = makeCombatCtx(structures);
 
     structureDamage(ctx, brl3_60_57, 100);
+    drainProjectiles(ctx);
 
     // V19 damage trace:
-    //   BRL3(60,57) fires W → (59,57) = V19: round(200 * 1.0) = 200 damage
-    //   BARL(60,56) fires W → (59,56) — NOT V19's cell
-    //   BRL3(60,58) fires W → (59,58) — NOT V19's cell
-    //   BARL(61,56) fires W → (60,56) — already dead barrel
-    //   No secondary barrel chain hits V19's cell (59,57)
-    //
-    // V19 takes exactly 200 damage from the barrel chain alone.
-    // The remaining 40 damage (to reach observed HP=160 in TS) comes from
-    // splash damage from the player's weapons (JEEPs' M60mg SA warhead)
-    // hitting nearby enemies, whose splash radius reaches the barrel or V19.
+    //   BRL3(60,57) fires W → (59,57) = V19: direct Fire damage.
+    //   The N/S barrel impacts and secondary barrel bullets then run through
+    //   C++ Explosion_Damage, which scans adjacent cells (1.5-cell radius).
+    //   Several non-direct Fire impacts therefore also splash V19.
     const damageTaken = 400 - v19.hp;
-    expect(damageTaken).toBe(200); // exactly 200 from BRL3(60,57) West fire
-    expect(v19.hp).toBe(200);
-    expect(v19.alive).toBe(true); // V19 has 400 HP, survives the chain
+    expect(damageTaken).toBe(400);
+    expect(v19.hp).toBe(0);
+    expect(v19.alive).toBe(false);
   });
 
-  it('remaining 40 damage (200 → 160) comes from weapon splash, not barrel chain', () => {
-    // The observed TS value is HP=160, meaning 240 total damage.
-    // Barrel chain contributes 200 (proven above).
-    // The remaining 40 damage is from SA weapon splash hitting V19.
-    //
-    // Example: JEEP M60mg (damage=15, SA warhead) fires at an enemy near V19.
-    // SA vs wood = 0.5. At 1 cell distance with SA spread factor:
-    // modifyDamage(15, 'SA', 'wood', distPx, 1.0, 0.5, spreadFactor=4)
-    //
-    // Even a few glancing SA hits accumulate to 40 damage over hundreds of ticks.
-    // This is normal C++ behavior — Explosion_Damage hits nearby structures.
-    //
-    // In WASM, these SA hits don't happen near V19 because units are positioned
-    // differently by tick 300 (the upstream timing divergence).
+  it('nearby weapon splash can trigger a low-HP barrel chain', () => {
+    // A JEEP M60mg hit near the cluster can kill a 10-HP barrel through normal
+    // C++ Explosion_Damage. The parity issue is when nearby combat reaches the
+    // cluster, not whether the resulting barrel chain should damage V19.
     const saVsWood = WARHEAD_VS_ARMOR.SA[1]; // index 1 = wood
     expect(saVsWood).toBe(0.5);
-    // SA damage 15 * 0.5 = 7.5, at close range with low falloff ≈ 5-7 per hit
-    // ~6-8 stray splash hits over 300 ticks = 30-56 damage, consistent with 40
+    const saVsNone = WARHEAD_VS_ARMOR.SA[0]; // barrels use none armor
+    expect(saVsNone).toBe(1.0);
+    expect(modifyDamage(15, 'SA' as any, 'none', 0)).toBeGreaterThanOrEqual(10);
   });
 });
 
@@ -514,21 +498,11 @@ describe('splash damage hits structures regardless of alliance (C++ parity)', ()
 
 describe('root cause: combat timing divergence explains V19 damage', () => {
 
-  it('V19 damage (240 HP) is consistent with barrel chain + splash', () => {
-    // WASM at tick 300: 4 BARL + 2 BRL3 intact → V19 HP=400 (no barrel chain)
-    // TS at tick 300:   2 BARL + 0 BRL3 intact → V19 HP=160 (barrel chain happened)
-    //
-    // Missing structures in TS:
-    //   2 BARL destroyed (60,56) and one other
-    //   2 BRL3 destroyed (60,57) and (60,58)
-    //
-    // This cluster is exactly the one adjacent to V19.
-    // The chain starts when something (stray projectile splash from nearby combat)
-    // damages the BRL3 at (60,57) — it only has 10 HP, so even minimal splash kills it.
-
+  it('nearby combat can start the adjacent barrel chain', () => {
+    // The cluster is adjacent to V19. If nearby combat damages BRL3(60,57),
+    // the barrel has only 10 HP, so a normal close SA splash can start the chain.
     // Verify: a single SA bullet (damage 15) can destroy a barrel via splash
     const barrel = makeBarrel('BRL3', 60, 57);
-    const ctx = makeCombatCtx([barrel]);
 
     // SA warhead vs none (barrel armor) = 1.0... wait, SA vs none = 1.0
     // Actually SA vs none from the WARHEAD_VS_ARMOR table:
