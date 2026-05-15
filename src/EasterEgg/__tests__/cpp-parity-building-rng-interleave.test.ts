@@ -50,7 +50,7 @@ describe('Building RNG Interleaving — C++ parity', () => {
     // tickStructureMissionTimers + _updateStructureCombat pattern must NOT appear.
     const gameLoopSection = indexSource.slice(
       indexSource.indexOf('Phase 1: pre-building'),
-      indexSource.indexOf('Phase 4: aircraft'),
+      indexSource.indexOf('Phase 5: C++ AnimClass'),
     );
     // Building timer+combat is inlined in Phase 2 (no longer delegated to tickStructuresInterleaved)
     expect(gameLoopSection).toContain('_updateSingleStructureCombat(ctx, s, isLowPower)');
@@ -94,7 +94,7 @@ describe('Building RNG Interleaving — C++ parity', () => {
     // (timer jitter) must appear BEFORE _updateSingleStructureCombat for the
     // same building iteration.
     const phaseStart = indexSource.indexOf('Phase 2: ALL structures');
-    const phaseEnd = indexSource.indexOf('Phase 3: post-building entities');
+    const phaseEnd = indexSource.indexOf('Phase 3: post-building runtime objects');
     expect(phaseStart).toBeGreaterThan(-1);
     expect(phaseEnd).toBeGreaterThan(phaseStart);
     const phaseBody = indexSource.slice(phaseStart, phaseEnd);
@@ -116,7 +116,7 @@ describe('Building RNG Interleaving — C++ parity', () => {
     // C++ LogicClass::AI is one vector: bullets appended before a building slot
     // must run before that building's MissionClass timer jitter.
     const phaseStart = indexSource.indexOf('Phase 2: ALL structures');
-    const phaseEnd = indexSource.indexOf('Phase 3: post-building entities');
+    const phaseEnd = indexSource.indexOf('Phase 3: post-building runtime objects');
     expect(phaseStart).toBeGreaterThan(-1);
     expect(phaseEnd).toBeGreaterThan(phaseStart);
     const phaseBody = indexSource.slice(phaseStart, phaseEnd);
