@@ -922,16 +922,16 @@ describe('Out-of-bounds terrain handling', () => {
     expect(map.getSpeedMultiplier(-1, -1, SpeedClass.WHEEL)).toBe(1.0);
   });
 
-  it('canEnterCell returns IMPASSABLE beyond pathfinding bounds', () => {
+  it('canEnterCell ignores scenario bounds inside the full 128x128 MapPack', () => {
     const map = new GameMap();
     map.setBounds(10, 10, 30, 30);
-    // C++ parity: pathfinding extends 1 cell beyond map bounds
-    // So boundsX-2 should be IMPASSABLE
+    // C++ CellClass::Is_Clear_To_Move is a full MapPack query; callers that
+    // need radar bounds perform Map.In_Radar checks separately.
     const result = map.canEnterCell(7, 7, false);
-    expect(result).toBe(MoveResult.IMPASSABLE);
+    expect(result).toBe(MoveResult.OK);
   });
 
-  it('C++ parity: pathfinding allows 1 cell beyond bounds', () => {
+  it('C++ parity: pathfinding allows cells outside scenario bounds', () => {
     const map = new GameMap();
     map.setBounds(10, 10, 30, 30);
     map.setTerrain(9, 9, Terrain.CLEAR);

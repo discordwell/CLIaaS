@@ -730,18 +730,16 @@ describe('Out-of-bounds terrain behavior', () => {
     expect(map.getTerrain(0, 128)).toBe(Terrain.ROCK);
   });
 
-  it('isPassable extends 1 cell beyond bounds for pathfinding (C++ parity)', () => {
-    // C++ parity: pathfinding extends 1 cell beyond map bounds.
+  it('isPassable uses the full 128x128 MapPack, not scenario radar bounds', () => {
+    // C++ CellClass::Is_Clear_To_Move does not check Map.In_Radar; callers
+    // that need visible/radar bounds gate that separately.
     const map = new GameMap();
     map.setBounds(10, 10, 20, 20);
-    // Cell at bounds edge: passable
     map.setTerrain(10, 10, Terrain.CLEAR);
     expect(map.isPassable(10, 10)).toBe(true);
-    // Cell 1 beyond bounds: still passable for pathfinding
     map.setTerrain(9, 10, Terrain.CLEAR);
     expect(map.isPassable(9, 10)).toBe(true);
-    // Cell 2 beyond bounds: NOT passable
     map.setTerrain(8, 10, Terrain.CLEAR);
-    expect(map.isPassable(8, 10)).toBe(false);
+    expect(map.isPassable(8, 10)).toBe(true);
   });
 });

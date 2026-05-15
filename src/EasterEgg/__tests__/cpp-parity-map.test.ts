@@ -231,22 +231,18 @@ describe('isPassable — terrain + bounds check (C++ Is_Passable)', () => {
     expect(map.isPassable(15, 15)).toBe(false);
   });
 
-  it('CLEAR terrain outside bounds is NOT passable', () => {
+  it('CLEAR terrain outside scenario bounds is still passable inside the 128x128 MapPack', () => {
     map.setTerrain(5, 5, Terrain.CLEAR);
-    expect(map.isPassable(5, 5)).toBe(false);
+    expect(map.isPassable(5, 5)).toBe(true);
   });
 
-  it('passability respects bounds boundary with 1-cell extension (C++ parity)', () => {
-    // Just inside bounds
+  it('passability ignores scenario bounds and only rejects cells outside the 128x128 grid', () => {
     map.setTerrain(10, 10, Terrain.CLEAR);
     expect(map.isPassable(10, 10)).toBe(true);
-    // C++ parity: pathfinding extends 1 cell beyond map bounds,
-    // so (9, 10) is passable (boundsX-1 = 9)
     map.setTerrain(9, 10, Terrain.CLEAR);
     expect(map.isPassable(9, 10)).toBe(true);
-    // 2 cells outside bounds is NOT passable
     map.setTerrain(8, 10, Terrain.CLEAR);
-    expect(map.isPassable(8, 10)).toBe(false);
+    expect(map.isPassable(8, 10)).toBe(true);
   });
 });
 
@@ -393,9 +389,9 @@ describe('canEnterCell — C++ Can_Enter_Cell() for pathfinding (findpath.cpp)',
 
   // -- Out-of-bounds --
 
-  it('cell outside bounds → MoveResult.IMPASSABLE', () => {
+  it('cell outside scenario bounds but inside MapPack → MoveResult.OK', () => {
     map.setTerrain(5, 5, Terrain.CLEAR);
-    expect(map.canEnterCell(5, 5)).toBe(MoveResult.IMPASSABLE);
+    expect(map.canEnterCell(5, 5)).toBe(MoveResult.OK);
   });
 
   // -- Naval mode --
@@ -915,10 +911,10 @@ describe('isShoreCell — land cell adjacent to water (cell.cpp)', () => {
     expect(map.isShoreCell(15, 15)).toBe(false);
   });
 
-  it('cell outside bounds is NOT a shore cell (isPassable fails)', () => {
+  it('cell outside scenario bounds can still be a shore cell inside MapPack', () => {
     map.setTerrain(5, 5, Terrain.CLEAR);
     map.setTerrain(6, 5, Terrain.WATER);
-    expect(map.isShoreCell(5, 5)).toBe(false);
+    expect(map.isShoreCell(5, 5)).toBe(true);
   });
 });
 
