@@ -344,7 +344,7 @@ describe('PROC destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const proc = makePROC(10, 10, 50);
     proc.house = House.USSR;
     // PROC center: (10*24+24, 10*24+24) = (264, 264). Place SILO at (12,10)
@@ -352,7 +352,7 @@ describe('PROC destruction blast -- visual-only (C++ parity: no entity damage)',
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([proc, nearby]);
     structureDamage(ctx, proc, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

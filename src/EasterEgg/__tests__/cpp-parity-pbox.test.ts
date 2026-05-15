@@ -122,9 +122,10 @@ function makeCombatCtx(
 }
 
 function resolveProjectiles(ctx: CombatContext): void {
-  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
     updateInflightProjectiles(ctx);
   }
+  expect(ctx.inflightProjectiles.length).toBe(0);
 }
 
 // ── Structure Stats (rules.ini / building.cpp) ──────────────────────────────────
@@ -391,6 +392,8 @@ describe('PBOX does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
     const heli = entityAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     heli.flightAltitude = 0; // landed
+    heli.aircraftHeightLeptons = 0;
+    heli.aircraftState = 'landed';
     const ctx = makeCombatCtx([pbox], [heli]);
     updateStructureCombat(ctx);
     resolveProjectiles(ctx);

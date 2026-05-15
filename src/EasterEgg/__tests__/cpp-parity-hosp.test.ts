@@ -286,13 +286,13 @@ describe('HOSP destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const hosp = makeHOSP(10, 10, 50);
     hosp.house = House.USSR;
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([hosp, nearby]);
     structureDamage(ctx, hosp, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
@@ -384,8 +384,9 @@ describe('HOSP trigger integration', () => {
     const hosp = makeHOSP(10, 10, 400);
     hosp.house = House.USSR;
     hosp.triggerName = 'HospAttacked';
-    const ctx = makeCombatCtx([hosp]);
-    structureDamage(ctx, hosp, 50);
+    const attacker = entityAtCell(UnitType.I_E1, House.Spain, 8, 10);
+    const ctx = makeCombatCtx([hosp], [attacker]);
+    structureDamage(ctx, hosp, 50, attacker);
     expect(ctx.attackedTriggerNames.has('HospAttacked')).toBe(true);
   });
 

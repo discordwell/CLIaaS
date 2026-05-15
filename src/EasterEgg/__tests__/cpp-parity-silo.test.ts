@@ -540,24 +540,24 @@ describe('SILO destruction effects (1x1 building)', () => {
     expect(silo.rubble).toBe(true);
   });
 
-  it('1x1 building has fewer pre-explosions than 2x2 building', () => {
-    // 1x1: max(3, min(6, 1*1)) = 3 pre-explosions
-    // 2x2: max(3, min(6, 2*2)) = 4 pre-explosions
+  it('1x1 building has fewer RESULT_DESTROYED fireballs than 2x2 building', () => {
+    // C++ building.cpp:1299-1308 runs RESULT_DESTROYED effects once per occupy cell.
+    // SILO occupies 1 cell; POWR occupies 4 cells.
     const silo = makeSILO(10, 10, 50, House.USSR);
     const ctxSilo = makeCombatCtx([silo]);
     structureDamage(ctxSilo, silo, 100);
     const siloPreExplosions = ctxSilo.effects.filter(
-      (e: Effect) => e.type === 'explosion' && e.sprite === 'veh-hit1'
+      (e: Effect) => e.type === 'explosion' && e.sprite === 'fball1'
     );
 
     const powr = makeBuilding('POWR', 20, 20, 50, House.USSR);
     const ctxPowr = makeCombatCtx([powr]);
     structureDamage(ctxPowr, powr, 100);
     const powrPreExplosions = ctxPowr.effects.filter(
-      (e: Effect) => e.type === 'explosion' && e.sprite === 'veh-hit1'
+      (e: Effect) => e.type === 'explosion' && e.sprite === 'fball1'
     );
 
-    expect(siloPreExplosions.length).toBe(3);
+    expect(siloPreExplosions.length).toBe(1);
     expect(powrPreExplosions.length).toBe(4);
     expect(siloPreExplosions.length).toBeLessThan(powrPreExplosions.length);
   });
@@ -569,13 +569,13 @@ describe('SILO destruction effects (1x1 building)', () => {
 
 describe('SILO destruction damages adjacent structures', () => {
 
-  it('damages adjacent structure on destruction', () => {
+  it('does NOT damage adjacent structure on destruction', () => {
     const silo = makeSILO(10, 10, 50);
     silo.house = House.USSR;
     const nearby = makeBuilding('POWR', 11, 10, 400);
     const ctx = makeCombatCtx([silo, nearby]);
     structureDamage(ctx, silo, 100);
-    expect(nearby.hp).toBeLessThan(400);
+    expect(nearby.hp).toBe(400);
   });
 
   it('does not damage distant structures', () => {

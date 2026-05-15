@@ -22,6 +22,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   updateStructureCombat,
   structureDamage,
 } from '../engine/combat';
@@ -86,6 +87,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -125,6 +127,18 @@ function makeCombatCtx(
     powerConsumed: opts.powerConsumed ?? 0,
     powerProduced: opts.powerProduced ?? 100,
   } as CombatContext;
+}
+
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
+    updateInflightProjectiles(ctx);
+  }
+  expect(ctx.inflightProjectiles.length).toBe(0);
+}
+
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  resolveProjectiles(ctx);
 }
 
 // ── Structure Stats (rules.ini [SAM]) ───────────────────────────────────────
@@ -189,7 +203,7 @@ describe('SAM anti-air targeting (building.cpp AA gate)', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBeLessThan(hpBefore);
   });
@@ -200,7 +214,7 @@ describe('SAM anti-air targeting (building.cpp AA gate)', () => {
     const ctx = makeCombatCtx([sam], [mig]);
     const hpBefore = mig.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(mig.hp).toBeLessThan(hpBefore);
   });
@@ -212,7 +226,7 @@ describe('SAM anti-air targeting (building.cpp AA gate)', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBe(hpBefore);
   });
@@ -224,7 +238,7 @@ describe('SAM anti-air targeting (building.cpp AA gate)', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBe(hpBefore);
   });
@@ -248,7 +262,7 @@ describe('SAM AA override — prefers airborne over ground (building.cpp)', () =
     const tankHpBefore = tank.hp;
     const hindHpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // SAM should prefer the airborne aircraft
     expect(hind.hp).toBeLessThan(hindHpBefore);
@@ -262,7 +276,7 @@ describe('SAM AA override — prefers airborne over ground (building.cpp)', () =
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [tank]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // SAM is air-only — cannot target ground units
     expect(tank.hp).toBe(tank.maxHp);
@@ -278,7 +292,7 @@ describe('SAM AA override — prefers airborne over ground (building.cpp)', () =
     const farHpBefore = farHind.hp;
     const closeHpBefore = closeHind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // Should target the closer aircraft
     expect(closeHind.hp).toBeLessThan(closeHpBefore);
@@ -300,7 +314,7 @@ describe('SAM fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     });
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // SAM fires even during power deficit (not in STRUCTURE_POWERED)
     expect(hind.hp).toBeLessThan(hpBefore);
@@ -315,7 +329,7 @@ describe('SAM fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     });
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBeLessThan(hpBefore);
   });
@@ -337,7 +351,7 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
     // turretDir starts undefined, gets set to default 0 (North for SAM) on first tick
     expect(sam.turretDir).toBeUndefined();
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(sam.turretDir).toBeDefined();
   });
@@ -350,7 +364,7 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 17, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // desiredTurretDir should point toward the target (East = 2)
     expect(sam.desiredTurretDir).toBeDefined();
@@ -363,7 +377,7 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // updateStructureCombat is a completed logic tick: Fire_At sets flash to 4,
     // then BuildingClass::Rotation_AI / TS wrapper ticks it once.
@@ -383,7 +397,7 @@ describe('SAM turret rotation (building.cpp turreted structures)', () => {
     // bucket after a few completed logic ticks.
     for (let i = 0; i < 7; i++) {
       const ctx = makeCombatCtx([sam], [hind]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
     }
 
     expect(sam.turretDir).toBe(4);
@@ -402,7 +416,7 @@ describe('SAM cooldown and ROF (building.cpp)', () => {
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(sam.attackCooldown).toBe(STRUCTURE_WEAPONS['SAM'].rof - 1);
   });
@@ -414,7 +428,7 @@ describe('SAM cooldown and ROF (building.cpp)', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // Should not fire — still on cooldown
     expect(hind.hp).toBe(hpBefore);
@@ -435,7 +449,7 @@ describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // Fire_At assigned Arm=1 (rapid-fire since ammo remains), and the completed
     // tick observes that CDTimer at 0.
@@ -448,7 +462,7 @@ describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
     // Fire first shot
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(sam.ammo).toBe(1);
     expect(sam.attackCooldown).toBe(0); // Arm=1 counted down by the completed tick
 
@@ -456,7 +470,7 @@ describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
     sam.attackCooldown = 0;
 
     // Fire second (last) shot
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(sam.ammo).toBe(0);
     expect(sam.attackCooldown).toBe(STRUCTURE_WEAPONS['SAM'].rof - 1); // full ROF observed post-frame
   });
@@ -467,7 +481,7 @@ describe('SAM ammo system (building.cpp:882-883, techno.cpp:2861)', () => {
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // ammo should reload from 0 to maxAmmo=2, then fire (2->1)
     expect(sam.ammo).toBe(1);
@@ -495,7 +509,7 @@ describe('SAM 2x1 footprint (building.cpp)', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBeLessThan(hpBefore);
   });
@@ -567,7 +581,7 @@ describe('SAM flak burst effect on AA hit (C++ FLAK.SHP)', () => {
     const hind = makeAircraft(UnitType.V_HIND, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [hind]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // Check effects for a flak explosion sprite
     const flakEffects = ctx.effects.filter(
@@ -582,7 +596,7 @@ describe('SAM flak burst effect on AA hit (C++ FLAK.SHP)', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 13, 10);
     const ctx = makeCombatCtx([sam], [tank]);
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     const flakEffects = ctx.effects.filter(
       e => e.type === 'explosion' && (e as any).sprite === 'flak'
@@ -610,7 +624,7 @@ describe('SAM targets through terrain (C++ parity — no LOS in Evaluate_Object)
     }
 
     const hpBefore = hind.hp;
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     // C++ parity: building DOES fire — LOS not checked in Evaluate_Object
     expect(hind.hp).toBeLessThan(hpBefore);
@@ -627,7 +641,7 @@ describe('SAM inactive states', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBe(hpBefore);
   });
@@ -639,7 +653,7 @@ describe('SAM inactive states', () => {
     const ctx = makeCombatCtx([sam], [hind]);
     const hpBefore = hind.hp;
 
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
 
     expect(hind.hp).toBe(hpBefore);
   });

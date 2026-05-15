@@ -583,14 +583,14 @@ describe('Fake destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('fake destruction can chain-damage adjacent structures', () => {
+  it('fake destruction does NOT chain-damage adjacent structures', () => {
     // FACF blast center: (cx+1)*CELL_SIZE, (cy+1)*CELL_SIZE = cell (11,11)
     // Place SILO at (12,10) so its center is cell (13,11), distance = 2 cells (within radius)
     const fake = makeFake('FACF', 10, 10, undefined, House.USSR);
     const nearby = makeBuilding('SILO', 12, 10, 300, House.USSR);
     const ctx = makeCombatCtx([fake, nearby]);
     structureDamage(ctx, fake, 100);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 });
 

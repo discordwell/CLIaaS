@@ -20,6 +20,7 @@ import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
   structureDamage,
+  tickDestroyedStructureDebris,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import {
@@ -388,14 +389,14 @@ describe('FACT destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const fact = makeFACT(10, 10, 50);
     fact.house = House.USSR;
     // Place a building adjacent (within 2-cell radius of blast center)
     const nearby = makeBuilding('SILO', 12, 10, 300);
     const ctx = makeCombatCtx([fact, nearby]);
     structureDamage(ctx, fact, 100);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
@@ -476,10 +477,12 @@ describe('FACT 3x3 destruction effects scaling', () => {
     fact.house = House.USSR;
     const ctx = makeCombatCtx([fact]);
     structureDamage(ctx, fact, 100);
+    expect(ctx.effects.filter(e => e.sprite === 'smoke_m')).toHaveLength(0);
+    ctx.tick = fact.debrisDropTick ?? 8;
+    tickDestroyedStructureDebris(ctx, fact);
     const smoke = ctx.effects.filter(e => e.sprite === 'smoke_m');
-    // 2-3 SMOKE_M effects scattered across debris
-    expect(smoke.length).toBeGreaterThanOrEqual(2);
-    expect(smoke.length).toBeLessThanOrEqual(3);
+    // C++ Drop_Debris runs later from BuildingClass::AI and may create smoke on each footprint cell.
+    expect(smoke.length).toBeGreaterThan(0);
     // Each should be a looping effect
     for (const s of smoke) {
       expect(s.loopEnd).toBeDefined();

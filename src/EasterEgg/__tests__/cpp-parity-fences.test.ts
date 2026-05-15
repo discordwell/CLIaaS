@@ -356,12 +356,12 @@ describe('Fence destruction blast -- visual-only (C++ parity: no entity damage)'
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('fence destruction can chain-damage adjacent structures', () => {
+  it('fence destruction does NOT chain-damage adjacent structures', () => {
     const fence = makeFence('CYCL', 10, 10, undefined, House.USSR);
     const nearby = makeBuilding('SILO', 11, 10, 300, House.USSR);
     const ctx = makeCombatCtx([fence, nearby]);
     structureDamage(ctx, fence, 10);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 });
 

@@ -493,7 +493,7 @@ describe('FIX destruction blast -- visual-only (C++ parity: no entity damage)', 
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const fix = makeFIX(10, 10, 50);
     fix.house = House.USSR;
     // FIX blast center is (cx+1, cy+1) in cell-scale.
@@ -501,7 +501,7 @@ describe('FIX destruction blast -- visual-only (C++ parity: no entity damage)', 
     const nearby = makeBuilding('SILO', 12, 10, 300);
     const ctx = makeCombatCtx([fix, nearby]);
     structureDamage(ctx, fix, 100);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

@@ -372,13 +372,13 @@ describe('ATEK destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const atek = makeATEK(10, 10, 50);
     atek.house = House.USSR;
     const nearby = makeBuilding('SILO', 12, 10, 256);
     const ctx = makeCombatCtx([atek, nearby]);
     structureDamage(ctx, atek, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

@@ -192,9 +192,10 @@ function makeCombatCtx(
 
 function fireStructures(ctx: CombatContext): void {
   updateStructureCombat(ctx);
-  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
     updateInflightProjectiles(ctx);
   }
+  expect(ctx.inflightProjectiles.length).toBe(0);
 }
 
 describe('building TarCom detach on target death (ObjectClass::Detach_All)', () => {

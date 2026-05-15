@@ -375,7 +375,7 @@ describe('SPEN destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const spen = makeSPEN(10, 10, 50);
     spen.house = House.USSR;
     // Blast center is at (cx*CELL_SIZE+CELL_SIZE, cy*CELL_SIZE+CELL_SIZE) = cell (11,11).
@@ -385,7 +385,7 @@ describe('SPEN destruction blast -- visual-only (C++ parity: no entity damage)',
     const nearby = makeBuilding('SILO', 11, 9, 300);
     const ctx = makeCombatCtx([spen, nearby]);
     structureDamage(ctx, spen, 100);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

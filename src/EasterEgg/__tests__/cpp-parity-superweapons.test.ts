@@ -903,13 +903,13 @@ describe('MSLO destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('damages adjacent structures on destruction', () => {
+  it('does NOT damage adjacent structures on destruction', () => {
     const mslo = makeStructure('MSLO', 10, 10, 50, House.USSR);
     const nearby = makeStructure('SILO', 12, 10, undefined, House.USSR);
     const ctx = makeCombatCtx([mslo, nearby]);
     const origHp = nearby.hp;
     structureDamage(ctx, mslo, 100);
-    expect(nearby.hp).toBeLessThan(origHp);
+    expect(nearby.hp).toBe(origHp);
   });
 });
 

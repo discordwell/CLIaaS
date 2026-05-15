@@ -216,12 +216,12 @@ describe('FCOM destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const fcom = makeFCOM(10, 10, 50, House.USSR);
     const nearby = makeStructure('SILO', 12, 10, 256, House.USSR);
     const ctx = makeCombatCtx([fcom, nearby]);
     structureDamage(ctx, fcom, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {
@@ -374,13 +374,13 @@ describe('MISS destruction blast -- visual-only (C++ parity: no entity damage)',
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('destruction blast damages adjacent structures', () => {
+  it('destruction blast does NOT damage adjacent structures', () => {
     const miss = makeMISS(10, 10, 50, House.USSR);
     // Place SILO at (12, 10) — overlapping the 3x2 footprint's east edge
     const nearby = makeStructure('SILO', 12, 10, 256, House.USSR);
     const ctx = makeCombatCtx([miss, nearby]);
     structureDamage(ctx, miss, 100);
-    expect(nearby.hp).toBeLessThan(256);
+    expect(nearby.hp).toBe(256);
   });
 
   it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

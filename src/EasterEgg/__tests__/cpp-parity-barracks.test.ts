@@ -399,12 +399,12 @@ for (const { type, faction } of BARRACKS_TYPES) {
       expect(victim.hp).toBe(victim.maxHp);
     });
 
-    it('destruction blast damages adjacent structures', () => {
+    it('destruction blast does NOT damage adjacent structures', () => {
       const barracks = makeBarracks(type, 10, 10, 50, enemyHouse);
       const nearby = makeBuilding('SILO', 12, 10, 256);
       const ctx = makeCombatCtx([barracks, nearby]);
       structureDamage(ctx, barracks, 100);
-      expect(nearby.hp).toBeLessThan(256);
+      expect(nearby.hp).toBe(256);
     });
 
     it('no barrel cardinal mechanic AND no radial entity damage (visual-only)', () => {

@@ -438,12 +438,12 @@ describe('Larvae destruction blast -- visual-only (C++ parity: no entity damage)
     expect(victim.hp).toBe(victim.maxHp);
   });
 
-  it('larvae destruction can chain-damage adjacent structures', () => {
+  it('larvae destruction does NOT chain-damage adjacent structures', () => {
     const larva = makeLarva('LAR2', 10, 10, undefined, House.USSR);
     const nearby = makeBuilding('SILO', 11, 10, 300, House.USSR);
     const ctx = makeCombatCtx([larva, nearby]);
     structureDamage(ctx, larva, 100);
-    expect(nearby.hp).toBeLessThan(300);
+    expect(nearby.hp).toBe(300);
   });
 });
 
