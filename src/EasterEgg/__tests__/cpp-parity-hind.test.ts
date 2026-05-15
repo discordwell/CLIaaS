@@ -28,6 +28,8 @@ beforeEach(() => resetEntityIds());
 
 // -- Helpers ----------------------------------------------------------------
 
+const ATTACK_PICK_ATTACK_LOCATION = 1;
+
 /** Place an entity at the center of a cell */
 function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Entity {
   return new Entity(type, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
@@ -65,8 +67,18 @@ function makeAircraftCtx(
 ): AircraftContext {
   const map = new GameMap();
   const alliances = buildDefaultAlliances();
+  const entityById = new Map(entities.map(e => [e.id, e]));
+  for (const s of structures) {
+    if (s.dockedAircraft !== undefined && s.dockedAircraft > 0 && !entityById.has(s.dockedAircraft)) {
+      const docked = entityAtCell(UnitType.V_HIND, s.house, s.cx, s.cy);
+      docked.id = s.dockedAircraft;
+      entityById.set(docked.id, docked);
+    }
+  }
   return {
     structures,
+    entities,
+    entityById,
     map,
     unitsLeftMap: 0,
     civiliansEvacuated: 0,
@@ -547,7 +559,7 @@ describe('HIND aircraft state machine (aircraft.cpp)', () => {
     expect(hind.aircraftState).toBe('flying');
   });
 
-  it('flying HIND transitions to attacking when in weapon range', () => {
+  it('flying HIND starts C++ Mission_Attack by validating target zone', () => {
     const hind = airborneHind(House.USSR, 10, 10);
     hind.mission = Mission.ATTACK;
     const target = entityAtCell(UnitType.I_E1, House.Spain, 11, 10); // in range
@@ -556,7 +568,8 @@ describe('HIND aircraft state machine (aircraft.cpp)', () => {
     const ctx = makeAircraftCtx([hind, target]);
     updateAircraft(ctx, hind);
 
-    expect(hind.aircraftState).toBe('attacking');
+    expect(hind.aircraftState).toBe('flying');
+    expect(hind.aircraftAttackStatus).toBe(ATTACK_PICK_ATTACK_LOCATION);
   });
 
   it('attacking HIND uses helicopter attack (not fixed-wing)', () => {

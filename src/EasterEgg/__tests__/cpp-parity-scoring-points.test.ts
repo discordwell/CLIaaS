@@ -156,6 +156,7 @@ function makeCombatCtx(entities: Entity[] = []): CombatContext {
     entityById: new Map(entities.map(e => [e.id, e])),
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [] as any,
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,

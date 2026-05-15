@@ -47,6 +47,8 @@ describe('Extended Trigger Events', () => {
     houseAlive: new Map(),
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
+    unitsLostByHouse: new Map(),
+    buildingsLostByHouse: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -219,6 +221,8 @@ describe('TriggerGameState Interface', () => {
       houseAlive: new Map(),
       houseUnitsAlive: new Map([[2, true]]),
       houseBuildingsAlive: new Map([[2, true]]),
+      unitsLostByHouse: new Map(),
+      buildingsLostByHouse: new Map(),
       isLowPower: true,
       playerCredits: 5000,
       buildingsDestroyedByHouse: new Map(),
@@ -266,6 +270,8 @@ describe('Trigger Audit Fixes', () => {
     houseAlive: new Map(),
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
+    unitsLostByHouse: new Map(),
+    buildingsLostByHouse: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -285,6 +291,7 @@ describe('Trigger Audit Fixes', () => {
   const emptyWaypoints = new Map<number, CellPos>();
   const emptyGlobals = new Set<number>();
   const emptyTriggers: ScenarioTrigger[] = [];
+  const buildingsLost = (count: number, house = 1): Map<number, number> => new Map([[house, count]]);
 
   // --- Event fixes ---
 
@@ -321,11 +328,11 @@ describe('Trigger Audit Fixes', () => {
 
   it('TEVENT_NBUILDINGS_DESTROYED (15): fires when count >= threshold', () => {
     const event: TriggerEvent = { type: 15, team: -1, data: 5 };
-    const stateBelowThreshold = createState({ nBuildingsDestroyed: 4 });
+    const stateBelowThreshold = createState({ buildingsLostByHouse: buildingsLost(4) });
     expect(checkTriggerEvent(event, stateBelowThreshold)).toBe(false);
-    const stateAtThreshold = createState({ nBuildingsDestroyed: 5 });
+    const stateAtThreshold = createState({ buildingsLostByHouse: buildingsLost(5) });
     expect(checkTriggerEvent(event, stateAtThreshold)).toBe(true);
-    const stateAboveThreshold = createState({ nBuildingsDestroyed: 10 });
+    const stateAboveThreshold = createState({ buildingsLostByHouse: buildingsLost(10) });
     expect(checkTriggerEvent(event, stateAboveThreshold)).toBe(true);
   });
 

@@ -7,7 +7,7 @@
  *
  * TypeScript implementation (scenario.ts):
  *   case TEVENT_NBUILDINGS_DESTROYED:
- *     return state.nBuildingsDestroyed >= event.data;
+ *     return state.buildingsLostByHouse.get(state.triggerHouse) >= event.data;
  *
  * Tests verify: false when count < threshold, true when ==, true when >,
  * threshold=0 always true, and the constant is 15.
@@ -48,6 +48,8 @@ const createState = (overrides: Partial<TriggerGameState> = {}): TriggerGameStat
   houseAlive: new Map(),
   houseUnitsAlive: new Map(),
   houseBuildingsAlive: new Map(),
+  unitsLostByHouse: new Map(),
+  buildingsLostByHouse: new Map(),
   isLowPower: false,
   playerCredits: 0,
   buildingsDestroyedByHouse: new Map(),
@@ -71,6 +73,8 @@ const makeEvent = (threshold: number): TriggerEvent => ({
   data: threshold,
 });
 
+const buildingsLost = (count: number, house = 1): Map<number, number> => new Map([[house, count]]);
+
 describe('TEVENT_NBUILDINGS_DESTROYED (type=15) — C++ parity', () => {
   it('constant value is 15 (matches C++ TEVENT_NBUILDINGS_DESTROYED enum)', () => {
     expect(TEVENT_NBUILDINGS_DESTROYED).toBe(15);
@@ -78,19 +82,19 @@ describe('TEVENT_NBUILDINGS_DESTROYED (type=15) — C++ parity', () => {
 
   it('returns false when nBuildingsDestroyed < threshold', () => {
     const event = makeEvent(5);
-    const state = createState({ nBuildingsDestroyed: 4 });
+    const state = createState({ buildingsLostByHouse: buildingsLost(4) });
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
   it('returns true when nBuildingsDestroyed == threshold (exact match)', () => {
     const event = makeEvent(5);
-    const state = createState({ nBuildingsDestroyed: 5 });
+    const state = createState({ buildingsLostByHouse: buildingsLost(5) });
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
   it('returns true when nBuildingsDestroyed > threshold (overshoot)', () => {
     const event = makeEvent(5);
-    const state = createState({ nBuildingsDestroyed: 10 });
+    const state = createState({ buildingsLostByHouse: buildingsLost(10) });
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
@@ -100,29 +104,29 @@ describe('TEVENT_NBUILDINGS_DESTROYED (type=15) — C++ parity', () => {
     const stateZero = createState({ nBuildingsDestroyed: 0 });
     expect(checkTriggerEvent(event, stateZero)).toBe(true);
     // And with some buildings destroyed, still true
-    const stateSome = createState({ nBuildingsDestroyed: 3 });
+    const stateSome = createState({ buildingsLostByHouse: buildingsLost(3) });
     expect(checkTriggerEvent(event, stateSome)).toBe(true);
   });
 
   it('threshold=1 with count=0 returns false', () => {
     const event = makeEvent(1);
-    const state = createState({ nBuildingsDestroyed: 0 });
+    const state = createState({ buildingsLostByHouse: buildingsLost(0) });
     expect(checkTriggerEvent(event, state)).toBe(false);
   });
 
   it('threshold=1 with count=1 returns true', () => {
     const event = makeEvent(1);
-    const state = createState({ nBuildingsDestroyed: 1 });
+    const state = createState({ buildingsLostByHouse: buildingsLost(1) });
     expect(checkTriggerEvent(event, state)).toBe(true);
   });
 
   it('large threshold requires matching large count', () => {
     const event = makeEvent(100);
-    const stateLow = createState({ nBuildingsDestroyed: 99 });
+    const stateLow = createState({ buildingsLostByHouse: buildingsLost(99) });
     expect(checkTriggerEvent(event, stateLow)).toBe(false);
-    const stateExact = createState({ nBuildingsDestroyed: 100 });
+    const stateExact = createState({ buildingsLostByHouse: buildingsLost(100) });
     expect(checkTriggerEvent(event, stateExact)).toBe(true);
-    const stateHigh = createState({ nBuildingsDestroyed: 200 });
+    const stateHigh = createState({ buildingsLostByHouse: buildingsLost(200) });
     expect(checkTriggerEvent(event, stateHigh)).toBe(true);
   });
 });

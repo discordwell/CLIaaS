@@ -111,8 +111,18 @@ function makeCombatCtx(
 function makeAircraftCtx(structures: MapStructure[], entities: Entity[] = []): AircraftContext {
   const map = new GameMap();
   const alliances = buildDefaultAlliances();
+  const entityById = new Map(entities.map(e => [e.id, e]));
+  for (const s of structures) {
+    if (s.dockedAircraft !== undefined && s.dockedAircraft > 0 && !entityById.has(s.dockedAircraft)) {
+      const docked = entityAtCell(UnitType.V_HIND, s.house, s.cx, s.cy);
+      docked.id = s.dockedAircraft;
+      entityById.set(docked.id, docked);
+    }
+  }
   return {
     structures,
+    entities,
+    entityById,
     map,
     unitsLeftMap: 0,
     civiliansEvacuated: 0,
@@ -474,6 +484,9 @@ describe('AFLD dockedAircraft field', () => {
 
     // Occupy
     afld.dockedAircraft = 99;
+    const occupant = entityAtCell(UnitType.V_YAK, House.USSR, 10, 10);
+    occupant.id = 99;
+    ctx.entityById.set(occupant.id, occupant);
     expect(findLandingPad(ctx, mig)).toBe(-1);
 
     // Clear

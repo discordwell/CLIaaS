@@ -29,7 +29,7 @@
  *   - Power grid recalculation after selling power plant
  *   - Service depot: vehicle repair cost, rearm, insufficient funds eject
  *   - AI repair (IQ >= 1, houseCredits deduction, 80% threshold)
- *   - AI sell (IQ >= 1, CONDITION_RED threshold, ConYard/last-power exemptions)
+ *   - AI sell (IQ >= 1, CONDITION_RED threshold, ConYard exemption)
  *   - Fire sale: all structures begin selling, units switch to HUNT
  *   - Wall sell: instant removal, 50% refund
  *   - Edge cases: repair + damage race, sell already-selling, zero-credit repair
@@ -47,7 +47,10 @@ import {
 } from '../engine/types';
 import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import type { MapStructure } from '../engine/scenario';
-import { STRUCTURE_MAX_HP, STRUCTURE_SIZE } from '../engine/scenario';
+import {
+  STRUCTURE_MAX_HP, STRUCTURE_SIZE,
+  structureConstructionProgressTicks, structureMakeFrameCount,
+} from '../engine/scenario';
 import { BUILDING_FRAME_TABLE } from '../engine/renderer';
 import type { Effect } from '../engine/renderer';
 import {
@@ -64,7 +67,11 @@ import {
   tickServiceDepot,
   repairCostPerStep as _repairCostPerStep,
   sellRefund as _sellRefund,
+  fixedPowerOutput as _fixedPowerOutput,
+  powerOutput as _powerOutput,
+  calculatePowerGrid as _calculatePowerGrid,
 } from '../engine/repairSell';
+import { updateAISellDamaged, aiFireSale, aiDoAllToHunt } from '../engine/ai';
 
 // =========================================================================
 // Helpers — mirror Game internals for isolated unit testing
@@ -118,6 +125,8 @@ function makeStructure(
     alive?: boolean; hp?: number; maxHp?: number;
     buildProgress?: number; sellProgress?: number;
     sellHpAtStart?: number;
+    isAllowedToSell?: boolean; isTickedOff?: boolean;
+    mission?: Mission; triggerName?: string; power?: number;
   } = {},
 ): MapStructure {
   const maxHp = opts.maxHp ?? STRUCTURE_MAX_HP[type] ?? 256;
@@ -136,6 +145,11 @@ function makeStructure(
     buildProgress: opts.buildProgress,
     sellProgress: opts.sellProgress,
     sellHpAtStart: opts.sellHpAtStart,
+    isAllowedToSell: opts.isAllowedToSell,
+    isTickedOff: opts.isTickedOff,
+    mission: opts.mission,
+    triggerName: opts.triggerName,
+    power: opts.power,
   };
 }
 
@@ -247,6 +261,31 @@ function makeMockRepairSellContext(overrides: Partial<RepairSellContext> = {}): 
     _clearedFootprints: MapStructure[];
     _addedCredits: { amount: number; bypass: boolean }[];
   };
+}
+
+function makeAISellCtx(
+  structures: MapStructure[],
+  state: { iq?: number; techLevel?: number } = {},
+  credits = 0,
+) {
+  const houseState = {
+    iq: 3,
+    techLevel: 51,
+    ...state,
+  };
+  return {
+    aiStates: new Map([[House.USSR, houseState]]),
+    structures,
+    houseCredits: new Map([[House.USSR, credits]]),
+  } as any;
+}
+
+function sellableStructure(type: string, hp = 1): MapStructure {
+  return makeStructure(type, House.USSR, 10, 10, {
+    hp,
+    isAllowedToSell: true,
+    isTickedOff: true,
+  });
 }
 
 // =========================================================================
@@ -508,14 +547,9 @@ describe('Power plant repair — power output restoration', () => {
     expect(powerOutput('APWR', 350, 700)).toBe(100);
   });
 
-  it('power calculation uses fixedPowerOutput in source', () => {
-    // Source: _fixedPowerOutput(100, s.hp, s.maxHp) for POWR (C++ 8.8 fixed-point)
-    const powerSection = indexSource.indexOf('Calculate power balance');
-    expect(powerSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(powerSection, powerSection + 700);
-    expect(chunk).toContain('fixedPowerOutput');
-    expect(chunk).toContain("'POWR'");
-    expect(chunk).toContain("'APWR'");
+  it('power calculation uses C++ fixed-point output for POWR/APWR', () => {
+    expect(_powerOutput('POWR', 207, 400)).toBe(_fixedPowerOutput(100, 207, 400));
+    expect(_powerOutput('APWR', 351, 700)).toBe(_fixedPowerOutput(200, 351, 700));
   });
 
   it('repairing a damaged POWR gradually restores power output', () => {
@@ -530,10 +564,10 @@ describe('Power plant repair — power output restoration', () => {
   });
 
   it('power recalculation excludes structures being sold', () => {
-    const powerSection = indexSource.indexOf('Calculate power balance');
-    expect(powerSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(powerSection, powerSection + 300);
-    expect(chunk).toContain('sellProgress !== undefined');
+    const selling = makeStructure('POWR', House.Spain, 10, 10, { sellProgress: 0.5 });
+    const active = makeStructure('APWR', House.Spain, 14, 10);
+    const grid = _calculatePowerGrid([selling, active], House.Spain, (a, b) => a === b);
+    expect(grid.produced).toBe(_powerOutput('APWR', active.hp, active.maxHp));
   });
 });
 
@@ -627,28 +661,19 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
     expect(chunk).toContain('SELL_DURATION');
   });
 
-  it('sell progress rate is 1/SELL_DURATION per tick (C++ make sheet parity)', () => {
-    const sellSection = indexSource.indexOf('Sell: play make-sheet frames');
-    const chunk = indexSource.slice(sellSection, sellSection + 800);
-    // C++ parity: duration computed from make sheet frame count (20),
-    // not BUILDING_FRAME_TABLE damageFrame
-    expect(chunk).toContain('MAKE_FRAME_COUNT');
-    expect(chunk).toContain('SELL_DURATION');
+  it('sell progress duration comes from the structure make-sheet frame count', () => {
+    expect(structureMakeFrameCount('POWR')).toBe(13);
+    expect(structureConstructionProgressTicks('POWR')).toBe(49);
+    expect(structureConstructionProgressTicks('FACT')).toBe(32);
   });
 
-  it('sell duration is constant 38 ticks for all buildings (C++ make sheet parity)', () => {
-    // C++ parity: all buildings use 20-frame make sheet
-    // timedelay = floor(0.06 * 900 / 20) = floor(54/20) = 2, duration = (20-1) * 2 = 38
-    const MAKE_FRAME_COUNT = 20;
-    const SELL_DURATION = (MAKE_FRAME_COUNT - 1) * Math.floor((0.06 * 900) / MAKE_FRAME_COUNT);
-    expect(SELL_DURATION).toBe(38);
-    // All building types sell in 38 ticks regardless of damageFrame
+  it('sell duration is independent of damageFrame and varies by make-sheet data', () => {
     const factEntry = BUILDING_FRAME_TABLE['fact'];
     const powrEntry = BUILDING_FRAME_TABLE['powr'];
     expect(factEntry).toBeDefined();
     expect(powrEntry).toBeDefined();
-    // Both use the same constant sell duration
-    expect(SELL_DURATION).toBe(38);
+    expect(structureConstructionProgressTicks('FACT')).not.toBe(factEntry.damageFrame);
+    expect(structureConstructionProgressTicks('POWR')).not.toBe(powrEntry.damageFrame);
   });
 
   it('sell finalizes when sellProgress >= 1', () => {
@@ -687,7 +712,7 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
   it('sell finalization spawns infantry survivors (SL4)', () => {
     const sellSection = indexSource.indexOf('SL4: Spawn infantry survivors');
     expect(sellSection).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(sellSection, sellSection + 1500);
+    const chunk = indexSource.slice(sellSection, sellSection + 2500);
     expect(chunk).toContain('SURVIVOR_FRACTION');
     expect(chunk).toContain('survivorCount');
     // Survivor count: (buildCost * 0.4) / E1_cost, clamped 0-5
@@ -735,10 +760,10 @@ describe('Sell Animation — structure -> rubble -> gone', () => {
 // =========================================================================
 describe('Power grid after selling power plant', () => {
   it('power calculation loop skips selling structures', () => {
-    // When a power plant has sellProgress set, it is excluded from power calc
-    const powerSection = indexSource.indexOf('Calculate power balance');
-    const chunk = indexSource.slice(powerSection, powerSection + 300);
-    expect(chunk).toContain('sellProgress !== undefined');
+    const selling = makeStructure('POWR', House.Spain, 10, 10, { sellProgress: 0.5 });
+    const active = makeStructure('POWR', House.Spain, 14, 10);
+    const grid = _calculatePowerGrid([selling, active], House.Spain, (a, b) => a === b);
+    expect(grid.produced).toBe(_powerOutput('POWR', active.hp, active.maxHp));
   });
 
   it('POWR power drain = 0 (produces, does not consume)', () => {
@@ -1142,17 +1167,18 @@ describe('AI Auto-Repair — updateAIRepair', () => {
 // =========================================================================
 describe('AI Auto-Sell — updateAISellDamaged', () => {
   it('AI sell requires IQ >= 1 (rules.ini [IQ] RepairSell=1)', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = aiSource.slice(idx, idx + 1500);
-    expect(chunk).toContain('state.iq < 1');
+    const s = sellableStructure('WEAP');
+    const ctx = makeAISellCtx([s], { iq: 0, techLevel: 51 });
+    updateAISellDamaged(ctx);
+    expect(s.sellProgress).toBeUndefined();
   });
 
-  it('AI sell runs every 75 ticks (5 seconds)', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 200);
-    // C++ parity: uses (ctx.tick - 1) % 75 for frame-0 alignment
-    expect(chunk).toContain('% 75 !== 0');
+  it('AI sell is a per-building Repair_AI branch, not a 75-tick house timer', () => {
+    const s = sellableStructure('WEAP');
+    const ctx = { ...makeAISellCtx([s], { techLevel: 51 }), tick: 74 } as any;
+    updateAISellDamaged(ctx);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.sellProgress).toBe(0);
   });
 
   it('AI sells structures at CONDITION_RED HP threshold', () => {
@@ -1163,40 +1189,36 @@ describe('AI Auto-Sell — updateAISellDamaged', () => {
   });
 
   it('AI never sells Construction Yard (FACT)', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 1500);
-    expect(chunk).toContain("s.type === 'FACT'");
-    expect(chunk).toContain('continue');
+    const s = sellableStructure('FACT');
+    const ctx = makeAISellCtx([s], { techLevel: 51 });
+    updateAISellDamaged(ctx);
+    expect(s.sellProgress).toBeUndefined();
   });
 
-  it('AI never sells last power plant', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 1500);
-    expect(chunk).toContain("s.type === 'POWR' || s.type === 'APWR'");
-    expect(chunk).toContain('powerCount <= 1');
+  it('AI sell has no last-power-plant exemption in C++ Repair_AI', () => {
+    const s = sellableStructure('POWR');
+    const ctx = makeAISellCtx([s], { techLevel: 51 });
+    updateAISellDamaged(ctx);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.sellProgress).toBe(0);
   });
 
-  it('AI sell refund = prodItem.cost (100% refund, no 50% penalty — C++ techno.cpp:5743-5761)', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 2000);
-    // AI gets full refund: prodItem.cost (no 0.5 multiplier, no hpRatio scaling)
-    expect(chunk).toContain('prodItem.cost');
-    expect(chunk).not.toContain('prodItem.cost * 0.5');
+  it('AI sell queues deconstruction before the full-cost refund is paid', () => {
+    const s = sellableStructure('WEAP');
+    const ctx = makeAISellCtx([s], { techLevel: 51 }, 0);
+    updateAISellDamaged(ctx);
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
+    expect(s.sellHpAtStart).toBe(1);
   });
 
-  it('AI sell grants refund to houseCredits (not player credits)', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 2000);
-    expect(chunk).toContain('houseCredits.set');
-    expect(chunk).toContain('current + refund');
-  });
-
-  it('AI sell is instant (no animation), sets rubble=true', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 2000);
-    expect(chunk).toContain('s.alive = false');
-    expect(chunk).toContain('s.rubble = true');
-    expect(chunk).toContain('clearStructureFootprint');
+  it('AI sell starts animation instead of deleting the building immediately', () => {
+    const s = sellableStructure('WEAP');
+    const ctx = makeAISellCtx([s], { techLevel: 51 });
+    updateAISellDamaged(ctx);
+    expect(s.alive).toBe(true);
+    expect(s.rubble).toBe(false);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.sellProgress).toBe(0);
   });
 
   it('AI sell refund calculation: POWR at any HP (cost=300) — gets full 300', () => {
@@ -1213,29 +1235,36 @@ describe('AI Auto-Sell — updateAISellDamaged', () => {
 });
 
 // =========================================================================
-// 15. Fire Sale — trigger-based sell-all
+// 15. Fire Sale — sell-all and all-hunt
 // =========================================================================
 describe('Fire Sale — trigger-based sell all structures', () => {
-  it('fire sale sets sellProgress=0 on all alive structures of trigger house', () => {
-    const idx = indexSource.indexOf('result.fireSale');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 400);
-    expect(chunk).toContain('s.sellProgress === undefined');
-    expect(chunk).toContain('s.sellProgress = 0');
+  it('aiFireSale queues deconstruction on all alive structures of the house', () => {
+    const structures = [
+      makeStructure('POWR', House.USSR),
+      makeStructure('WEAP', House.USSR),
+      makeStructure('POWR', House.Spain),
+    ];
+    aiFireSale({ structures } as any, House.USSR);
+    expect(structures[0].sellProgress).toBe(0);
+    expect(structures[0].mission).toBe(Mission.DECONSTRUCTION);
+    expect(structures[1].sellProgress).toBe(0);
+    expect(structures[2].sellProgress).toBeUndefined();
   });
 
-  it('fire sale sets all units of trigger house to HUNT mission', () => {
-    const idx = indexSource.indexOf('result.fireSale');
-    const chunk = indexSource.slice(idx, idx + 600);
-    expect(chunk).toContain('Mission.HUNT');
-    expect(chunk).toContain('e.house === saleHouse');
+  it('aiDoAllToHunt sends all units of the house to HUNT', () => {
+    const friendly = new Entity(UnitType.V_2TNK, House.USSR, 10, 10);
+    const enemy = new Entity(UnitType.V_2TNK, House.Spain, 20, 20);
+    friendly.mission = Mission.GUARD;
+    enemy.mission = Mission.GUARD;
+    aiDoAllToHunt({ entities: [friendly, enemy] } as any, House.USSR);
+    expect(friendly.mission).toBe(Mission.HUNT);
+    expect(enemy.mission).toBe(Mission.GUARD);
   });
 
-  it('fire sale skips already-selling structures', () => {
-    const idx = indexSource.indexOf('result.fireSale');
-    expect(idx).toBeGreaterThan(-1);
-    const chunk = indexSource.slice(idx, idx + 400);
-    expect(chunk).toContain('s.sellProgress === undefined');
+  it('aiFireSale skips already-selling structures', () => {
+    const selling = makeStructure('POWR', House.USSR, 10, 10, { sellProgress: 0.5 });
+    aiFireSale({ structures: [selling] } as any, House.USSR);
+    expect(selling.sellProgress).toBe(0.5);
   });
 });
 
@@ -1313,7 +1342,7 @@ describe('Edge Cases', () => {
     const queenSection = indexSource.indexOf('Queen Ant self-healing');
     expect(queenSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(queenSection, queenSection + 500);
-    expect(chunk).toContain('tick % 14 === 0');
+    expect(chunk).toContain('isCppRepairRateFrame(this.tick)');
     expect(chunk).toContain("s.type === 'QUEE'");
     expect(chunk).toContain('s.hp + 1');
   });
@@ -1456,37 +1485,31 @@ describe('Repair/Sell Economics — comprehensive cost verification', () => {
 // =========================================================================
 describe('Sell Animation Duration', () => {
   const structureTypes = [
-    { image: 'fact', expectedDamageFrame: 26 },
-    { image: 'weap', expectedDamageFrame: 16 },
-    { image: 'barr', expectedDamageFrame: 10 },
-    { image: 'tent', expectedDamageFrame: 10 },
-    { image: 'powr', expectedDamageFrame: 4 },
-    { image: 'proc', expectedDamageFrame: 16 },
-    { image: 'fix', expectedDamageFrame: 12 },
-    { image: 'dome', expectedDamageFrame: 8 },
-    { image: 'silo', expectedDamageFrame: 5 },
-    { image: 'tsla', expectedDamageFrame: 10 },
-    { image: 'hbox', expectedDamageFrame: 1 },
+    { type: 'FACT', expectedMakeFrames: 32, expectedTicks: 32 },
+    { type: 'WEAP', expectedMakeFrames: 15, expectedTicks: 43 },
+    { type: 'BARR', expectedMakeFrames: 13, expectedTicks: 49 },
+    { type: 'TENT', expectedMakeFrames: 13, expectedTicks: 49 },
+    { type: 'POWR', expectedMakeFrames: 13, expectedTicks: 49 },
+    { type: 'PROC', expectedMakeFrames: 10, expectedTicks: 46 },
+    { type: 'FIX', expectedMakeFrames: 14, expectedTicks: 40 },
+    { type: 'DOME', expectedMakeFrames: 17, expectedTicks: 49 },
+    { type: 'SILO', expectedMakeFrames: 14, expectedTicks: 40 },
+    { type: 'TSLA', expectedMakeFrames: 13, expectedTicks: 49 },
+    { type: 'HBOX', expectedMakeFrames: 13, expectedTicks: 49 },
   ];
 
-  for (const { image, expectedDamageFrame } of structureTypes) {
-    it(`${image} sell duration = ${Math.max(expectedDamageFrame, 1) * 2} ticks`, () => {
-      const entry = BUILDING_FRAME_TABLE[image];
-      expect(entry, `${image} should be in BUILDING_FRAME_TABLE`).toBeDefined();
-      expect(entry.damageFrame).toBe(expectedDamageFrame);
-      const duration = Math.max(entry.damageFrame, 1) * 2;
-      expect(duration).toBe(Math.max(expectedDamageFrame, 1) * 2);
+  for (const { type, expectedMakeFrames, expectedTicks } of structureTypes) {
+    it(`${type} sell duration follows its make-sheet frame count`, () => {
+      expect(structureMakeFrameCount(type)).toBe(expectedMakeFrames);
+      expect(structureConstructionProgressTicks(type)).toBe(expectedTicks);
     });
   }
 
-  it('sell rate formula: sellProgress += 1 / (sellFrameCount * 2)', () => {
-    // For a building with damageFrame=10, sellFrameCount=10
-    // Each tick: 1/(10*2) = 0.05 → 20 ticks to complete
-    const sellFrameCount = 10;
-    const rate = 1 / (sellFrameCount * 2);
-    expect(rate).toBeCloseTo(0.05);
-    const ticksToComplete = Math.ceil(1 / rate);
-    expect(ticksToComplete).toBe(20);
+  it('sell progress increments by one construction-progress duration per tick', () => {
+    const duration = structureConstructionProgressTicks('PROC');
+    const rate = 1 / duration;
+    expect(duration).toBe(46);
+    expect(Math.ceil(1 / rate)).toBe(duration);
   });
 });
 
@@ -1645,11 +1668,11 @@ describe('Timing Constants', () => {
     expect(count).toBeGreaterThanOrEqual(2); // structure repair + depot repair
   });
 
-  it('AI sell check interval is 75 ticks (5 seconds)', () => {
-    const idx = aiSource.indexOf('export function updateAISellDamaged');
-    const chunk = aiSource.slice(idx, idx + 200);
-    // C++ parity: TS tick starts at 1 (Frame starts at 0), so uses (ctx.tick - 1) % 75
-    expect(chunk).toContain('% 75 !== 0');
+  it('AI sell check is not a 75-tick timer', () => {
+    const s = sellableStructure('WEAP');
+    const ctx = { ...makeAISellCtx([s], { techLevel: 51 }), tick: 74 } as any;
+    updateAISellDamaged(ctx);
+    expect(s.sellProgress).toBe(0);
   });
 
   it('AI repair interval uses difficulty-scaled repairDelay (C++ house.cpp:295)', () => {
@@ -1664,7 +1687,7 @@ describe('Timing Constants', () => {
     const queenSection = indexSource.indexOf('Queen Ant self-healing');
     expect(queenSection).toBeGreaterThan(-1);
     const chunk = indexSource.slice(queenSection, queenSection + 500);
-    expect(chunk).toContain('tick % 14 === 0');
+    expect(chunk).toContain('isCppRepairRateFrame(this.tick)');
   });
 
   it('depot rearm rate is 36 ticks per ammo', () => {

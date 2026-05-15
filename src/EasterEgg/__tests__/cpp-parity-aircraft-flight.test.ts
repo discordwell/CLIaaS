@@ -128,6 +128,8 @@ function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
 const HUNT_FLY_TO_TARGET = 2;
 const HUNT_DROP_BOMBS = 3;
 const HUNT_REGROUP = 4;
+const ATTACK_PICK_ATTACK_LOCATION = 1;
+const ATTACK_RETURN_TO_BASE = 6;
 
 function setFixedWingAttackPhase(entity: Entity, phase: Entity['attackRunPhase']): void {
   entity.attackRunPhase = phase;
@@ -138,8 +140,19 @@ function setFixedWingAttackPhase(entity: Entity, phase: Entity['attackRunPhase']
 }
 
 function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftContext {
+  const structures = overrides.structures ?? [];
+  const entities = overrides.entities ?? [];
+  const entityById = overrides.entityById ?? new Map(entities.map(e => [e.id, e]));
+  if (!overrides.entityById) {
+    for (const s of structures) {
+      if (s.dockedAircraft !== undefined && s.dockedAircraft > 0 && !entityById.has(s.dockedAircraft)) {
+        const docked = makeEntity(UnitType.V_HIND, s.house);
+        docked.id = s.dockedAircraft;
+        entityById.set(docked.id, docked);
+      }
+    }
+  }
   return {
-    structures: [],
     map: new GameMap(),
     unitsLeftMap: 0,
     civiliansEvacuated: 0,
@@ -152,6 +165,9 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     getROFBias: () => 1.0,
     getPowerFraction: () => 1.0,
     ...overrides,
+    structures,
+    entities,
+    entityById,
   };
 }
 
@@ -678,7 +694,7 @@ describe('aircraft state machine lifecycle transitions', () => {
     expect(heli.landedAtStructure).toBe(-1);
   });
 
-  it('flying → attacking when within weapon range of target', () => {
+  it('flying helicopter starts C++ Mission_Attack by validating target zone', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
@@ -689,15 +705,14 @@ describe('aircraft state machine lifecycle transitions', () => {
     heli.target = enemy;
 
     const ctx = makeAircraftCtx();
-    // Run until state changes
-    for (let i = 0; i < 50; i++) {
-      updateAircraft(ctx, heli);
-      if (heli.aircraftState === 'attacking') break;
-    }
-    expect(heli.aircraftState).toBe('attacking');
+    updateAircraft(ctx, heli);
+    expect(heli.aircraftState).toBe('flying');
+    expect(heli.aircraftAttackStatus).toBe(ATTACK_PICK_ATTACK_LOCATION);
+    expect(heli.missionTimer).toBeGreaterThanOrEqual(13);
+    expect(heli.missionTimer).toBeLessThanOrEqual(15);
   });
 
-  it('flying → returning when target lost', () => {
+  it('flying helicopter enters Mission_Attack return-to-base status when target is lost', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
@@ -707,7 +722,8 @@ describe('aircraft state machine lifecycle transitions', () => {
 
     const ctx = makeAircraftCtx();
     updateAircraft(ctx, heli);
-    expect(heli.aircraftState).toBe('returning');
+    expect(heli.aircraftState).toBe('flying');
+    expect(heli.aircraftAttackStatus).toBe(ATTACK_RETURN_TO_BASE);
   });
 
   it('returning → landing when near pad', () => {
@@ -1276,25 +1292,28 @@ describe('helicopter takeoff speed staging (aircraft.cpp:2899-2928)', () => {
     const stage4 = Math.round(FA * 204 / 256); // 19
 
     const ctx = makeAircraftCtx();
-    const speedLog: number[] = [];
+    const speedLog: { alt: number; speed: number }[] = [];
     for (let i = 0; i < 24; i++) {
       updateAircraft(ctx, heli);
-      speedLog.push(heli.aircraftSpeedFraction);
+      speedLog.push({ alt: heli.flightAltitude, speed: heli.aircraftSpeedFraction });
     }
-    // Stage 1-2: speed=0 for altitudes 1..11 (below halfLevel=12)
-    for (let i = 0; i < halfLevel - 1; i++) {
-      expect(speedLog[i], `alt=${i + 1}`).toBe(0);
+    const expectedSpeed = (alt: number) =>
+      alt < halfLevel ? 0 :
+      alt < stage3 ? 0 :
+      alt < stage4 ? 0x20 / 0xFF :
+      alt < FA ? 0x40 / 0xFF :
+      1.0;
+
+    // Visible altitude can skip pixel values because C++ Height advances in
+    // Pixel_To_Lepton(1) steps, so assert against the actual recorded altitude.
+    for (const entry of speedLog) {
+      expect(entry.speed, `alt=${entry.alt}`).toBeCloseTo(expectedSpeed(entry.alt), 3);
     }
-    // Stage 3: speed=0x20/0xFF for altitudes 16..18 (stage3 to stage4-1)
-    for (let i = stage3 - 1; i < stage4 - 1; i++) {
-      expect(speedLog[i], `alt=${i + 1}`).toBeCloseTo(0x20 / 0xFF, 3);
-    }
-    // Stage 4: speed=0x40/0xFF for altitudes 19..23 (stage4 to FA-1)
-    for (let i = stage4 - 1; i < FA - 1; i++) {
-      expect(speedLog[i], `alt=${i + 1}`).toBeCloseTo(0x40 / 0xFF, 3);
-    }
+    expect(speedLog.some(entry => entry.speed === 0)).toBe(true);
+    expect(speedLog.some(entry => Math.abs(entry.speed - 0x20 / 0xFF) < 0.0005)).toBe(true);
+    expect(speedLog.some(entry => Math.abs(entry.speed - 0x40 / 0xFF) < 0.0005)).toBe(true);
     // Stage 5: at FLIGHT_ALTITUDE — full speed
-    expect(speedLog[FA - 1]).toBe(1.0);
+    expect(speedLog.at(-1)?.speed).toBe(1.0);
     expect(heli.aircraftState).toBe('flying');
   });
 

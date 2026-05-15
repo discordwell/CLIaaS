@@ -77,8 +77,19 @@ function entityAtCell(type: UnitType, house: House, cx: number, cy: number): Ent
 }
 
 function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftContext {
+  const structures = overrides.structures ?? [];
+  const entities = overrides.entities ?? [];
+  const entityById = overrides.entityById ?? new Map(entities.map(e => [e.id, e]));
+  if (!overrides.entityById) {
+    for (const s of structures) {
+      if (s.dockedAircraft !== undefined && s.dockedAircraft > 0 && !entityById.has(s.dockedAircraft)) {
+        const docked = entityAtCell(UnitType.V_HIND, s.house, s.cx, s.cy);
+        docked.id = s.dockedAircraft;
+        entityById.set(docked.id, docked);
+      }
+    }
+  }
   return {
-    structures: [],
     map: new GameMap(),
     unitsLeftMap: 0,
     civiliansEvacuated: 0,
@@ -91,6 +102,9 @@ function makeAircraftCtx(overrides: Partial<AircraftContext> = {}): AircraftCont
     getROFBias: () => 1.0,
     getPowerFraction: () => 1.0,
     ...overrides,
+    structures,
+    entities,
+    entityById,
   };
 }
 

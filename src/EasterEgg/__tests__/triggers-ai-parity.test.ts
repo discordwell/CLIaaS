@@ -52,6 +52,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     houseAlive: new Map(),
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
+    unitsLostByHouse: new Map(),
+    buildingsLostByHouse: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -72,6 +74,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
 function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
 }
+
+const buildingsLost = (count: number, house = 1): Map<number, number> => new Map([[house, count]]);
 
 // Empty trigger helpers for executeTriggerAction
 const emptyTeamTypes: TeamType[] = [];
@@ -102,9 +106,9 @@ describe('TR3: New trigger event constants', () => {
 
   it('TEVENT_NBUILDINGS_DESTROYED (15) fires when N buildings destroyed', () => {
     const event: TriggerEvent = { type: 15, team: -1, data: 5 };
-    const stateBelow = createState({ nBuildingsDestroyed: 4 });
-    const stateAtThreshold = createState({ nBuildingsDestroyed: 5 });
-    const stateAbove = createState({ nBuildingsDestroyed: 8 });
+    const stateBelow = createState({ buildingsLostByHouse: buildingsLost(4) });
+    const stateAtThreshold = createState({ buildingsLostByHouse: buildingsLost(5) });
+    const stateAbove = createState({ buildingsLostByHouse: buildingsLost(8) });
 
     expect(checkTriggerEvent(event, stateBelow)).toBe(false);
     expect(checkTriggerEvent(event, stateAtThreshold)).toBe(true);
@@ -113,8 +117,8 @@ describe('TR3: New trigger event constants', () => {
 
   it('TEVENT_NOFACTORIES (17) fires when no factories remain', () => {
     const event: TriggerEvent = { type: 17, team: -1, data: 0 };
-    const stateHasFactory = createState({ playerFactoriesExist: true });
-    const stateNoFactory = createState({ playerFactoriesExist: false });
+    const stateHasFactory = createState({ structureTypesByHouse: new Map([[1, new Set(['FACT'])]]) });
+    const stateNoFactory = createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) });
 
     expect(checkTriggerEvent(event, stateHasFactory)).toBe(false);
     expect(checkTriggerEvent(event, stateNoFactory)).toBe(true);

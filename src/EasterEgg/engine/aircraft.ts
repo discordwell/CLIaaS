@@ -789,18 +789,17 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
       return true;
 
     case ATTACK_RETURN_TO_BASE:
-      if (!hasTarget) {
+      if (!hasTarget || (entity.ammo === 0 && (entity.isALoaner || entity.isPlayerUnit))) {
         entity.target = null;
         entity.targetStructure = null;
         entity.forceFirePos = null;
-        entity.mission = ctx.idleMission(entity);
-        entity.missionQueue = null;
-        entity.aircraftAttackStatus = ATTACK_VALIDATE_AZ;
-        aircraftMissionAttackFinalDelay(entity);
-        flyCurrentFacing();
-        return true;
       }
-      entity.aircraftAttackStatus = ATTACK_PICK_ATTACK_LOCATION;
+      entity.moveTarget = null;
+      entity.moveTargetEntityRef = null;
+      entity.mission = ctx.idleMission(entity);
+      entity.missionQueue = null;
+      entity.aircraftState = 'returning';
+      entity.aircraftAttackStatus = ATTACK_VALIDATE_AZ;
       aircraftMissionAttackFinalDelay(entity);
       flyCurrentFacing();
       return true;

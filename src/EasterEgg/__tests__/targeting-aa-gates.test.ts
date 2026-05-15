@@ -22,6 +22,7 @@ beforeEach(() => resetEntityIds());
 /** Minimal CombatContext mock for triggerRetaliation (only needs entitiesAllied) */
 function mockCombatCtx() {
   return {
+    isAllied: (a: House, b: House) => a === b,
     entitiesAllied: (a: Entity, b: Entity) => a.house === b.house,
   } as any;
 }

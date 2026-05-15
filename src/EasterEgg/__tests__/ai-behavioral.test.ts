@@ -24,6 +24,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP, type MapStructure } from '../engine/scenario';
+import { ScenarioRandom } from '../engine/random';
 import {
   type AIContext, type AIHouseState, type Difficulty,
   AI_DIFFICULTY_MODS, DIFFICULTY_MODS,
@@ -339,112 +340,148 @@ describe('updateAIRepair', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateAISellDamaged', () => {
-  it('only runs on tick % 75 === 0', () => {
+  it('skips structures that C++ would not allow to sell back', () => {
     const ctx = makeMockAIContext({ tick: 10 });
-    const s = makeStructure('BARR', House.USSR, 50, 50, { hp: 10, maxHp: 800 });
-    ctx.structures.push(s);
-    addAIHouse(ctx, House.USSR, { iq: 3 });
-
-    updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // should not sell, wrong tick
-  });
-
-  it('sells structures below CONDITION_RED HP (25%)', () => {
-    const ctx = makeMockAIContext({ tick: 76 });
-    const maxHp = 800;
-    const s = makeStructure('BARR', House.USSR, 50, 50, { hp: Math.floor(maxHp * 0.24), maxHp });
-    ctx.structures.push(s);
+    const notAllowed = makeStructure('BARR', House.USSR, 50, 50, {
+      hp: 10, maxHp: 800, isAllowedToSell: false, isTickedOff: true,
+    });
+    const notTickedOff = makeStructure('BARR', House.USSR, 52, 50, {
+      hp: 10, maxHp: 800, isAllowedToSell: true, isTickedOff: false,
+    });
+    ctx.structures.push(notAllowed, notTickedOff);
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(false);
-    expect(s.rubble).toBe(true);
+    expect(notAllowed.mission).toBeUndefined();
+    expect(notTickedOff.mission).toBeUndefined();
+  });
+
+  it('queues deconstruction for sellable structures below CONDITION_RED HP (25%)', () => {
+    const ctx = makeMockAIContext({ tick: 76 });
+    const maxHp = 800;
+    const hp = Math.floor(maxHp * 0.24);
+    const s = makeStructure('BARR', House.USSR, 50, 50, {
+      hp,
+      maxHp,
+      isAllowedToSell: true,
+      isTickedOff: true,
+      isRepairing: true,
+    });
+    ctx.structures.push(s);
+    ctx.houseCredits.set(House.USSR, 0);
+    addAIHouse(ctx, House.USSR, { iq: 3 });
+
+    ScenarioRandom.seed = 3;
+    updateAISellDamaged(ctx);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.missionTimer).toBe(0);
+    expect(s.sellProgress).toBe(0);
+    expect(s.sellHpAtStart).toBe(hp);
+    expect(s.isRepairing).toBe(false);
+    expect(s.alive).toBe(true);
+    expect(s.rubble).toBe(false);
   });
 
   it('skips houses with IQ < 1 (rules.ini [IQ] RepairSell=1)', () => {
     const ctx = makeMockAIContext({ tick: 76 });
-    const s = makeStructure('BARR', House.USSR, 50, 50, { hp: 10, maxHp: 800 });
+    const s = makeStructure('BARR', House.USSR, 50, 50, {
+      hp: 10, maxHp: 800, isAllowedToSell: true, isTickedOff: true,
+    });
     ctx.structures.push(s);
     addAIHouse(ctx, House.USSR, { iq: 0 });
 
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // IQ too low
+    expect(s.mission).toBeUndefined();
   });
 
   it('never sells FACT (Construction Yard)', () => {
     const ctx = makeMockAIContext({ tick: 76 });
-    const s = makeStructure('FACT', House.USSR, 50, 50, { hp: 10, maxHp: 1000 });
+    const s = makeStructure('FACT', House.USSR, 50, 50, {
+      hp: 10, maxHp: 1000, isAllowedToSell: true, isTickedOff: true,
+    });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // FACT is never sold
+    expect(s.mission).toBeUndefined();
   });
 
-  it('never sells last power plant', () => {
+  it('does not special-case the last power plant', () => {
     const ctx = makeMockAIContext({ tick: 76 });
-    // Only one POWR for this house
-    const s = makeStructure('POWR', House.USSR, 50, 50, { hp: 10, maxHp: 400 });
+    const s = makeStructure('POWR', House.USSR, 50, 50, {
+      hp: 10, maxHp: 400, isAllowedToSell: true, isTickedOff: true,
+    });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
+    ScenarioRandom.seed = 3;
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // last power plant, won't sell
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.alive).toBe(true);
   });
 
   it('sells a damaged power plant when another exists', () => {
     const ctx = makeMockAIContext({ tick: 76 });
-    const s1 = makeStructure('POWR', House.USSR, 50, 50, { hp: 10, maxHp: 400 });
+    const s1 = makeStructure('POWR', House.USSR, 50, 50, {
+      hp: 10, maxHp: 400, isAllowedToSell: true, isTickedOff: true,
+    });
     const s2 = makeStructure('POWR', House.USSR, 52, 50); // healthy second power plant
     ctx.structures.push(s1, s2);
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
+    ScenarioRandom.seed = 3;
     updateAISellDamaged(ctx);
-    expect(s1.alive).toBe(false); // sold because there's another
+    expect(s1.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s1.alive).toBe(true);
   });
 
-  it('grants full refund to houseCredits (C++ techno.cpp:5743-5761)', () => {
+  it('defers the sell refund until deconstruction completes', () => {
     const ctx = makeMockAIContext({ tick: 76 });
     const maxHp = 800;
     const hp = Math.floor(maxHp * 0.20); // 20% HP, below 25% CONDITION_RED
-    const s = makeStructure('BARR', House.USSR, 50, 50, { hp, maxHp });
+    const s = makeStructure('BARR', House.USSR, 50, 50, {
+      hp, maxHp, isAllowedToSell: true, isTickedOff: true,
+    });
     ctx.structures.push(s);
-    ctx.houseCredits.set(House.USSR, 100);
+    ctx.houseCredits.set(House.USSR, 50);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
-    // C++ parity: AI gets full refund (no 50% penalty, no health scaling)
-    const barrItem = PRODUCTION_ITEMS.find(p => p.type === 'BARR' && p.isStructure);
-    const expectedRefund = barrItem?.cost ?? 300;
-
+    ScenarioRandom.seed = 3;
     updateAISellDamaged(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(100 + expectedRefund);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(ctx.houseCredits.get(House.USSR)).toBe(50);
   });
 
-  it('calls clearStructureFootprint on sell', () => {
+  it('does not clear the footprint until deconstruction completes', () => {
     const ctx = makeMockAIContext({ tick: 76 });
-    const s = makeStructure('BARR', House.USSR, 50, 50, { hp: 10, maxHp: 800 });
+    const s = makeStructure('BARR', House.USSR, 50, 50, {
+      hp: 10, maxHp: 800, isAllowedToSell: true, isTickedOff: true,
+    });
     ctx.structures.push(s);
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
+    ScenarioRandom.seed = 3;
     updateAISellDamaged(ctx);
-    expect(ctx.clearStructureFootprint).toHaveBeenCalledWith(s);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(ctx.clearStructureFootprint).not.toHaveBeenCalled();
   });
 
   it('skips structures being sold (sellProgress !== undefined)', () => {
     const ctx = makeMockAIContext({ tick: 76 });
     const s = makeStructure('BARR', House.USSR, 50, 50, {
-      hp: 10, maxHp: 800, sellProgress: 0.5,
+      hp: 10, maxHp: 800, sellProgress: 0.5, isAllowedToSell: true, isTickedOff: true,
     });
     ctx.structures.push(s);
     addAIHouse(ctx, House.USSR, { iq: 3 });
 
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // already being sold
+    expect(s.mission).toBeUndefined();
+    expect(s.sellProgress).toBe(0.5);
   });
 });
 

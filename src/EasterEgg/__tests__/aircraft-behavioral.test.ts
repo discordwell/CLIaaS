@@ -37,6 +37,10 @@ beforeEach(() => resetEntityIds());
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
+const ATTACK_PICK_ATTACK_LOCATION = 1;
+const ATTACK_DROP_BOMBS = 3;
+const ATTACK_RETURN_TO_BASE = 6;
+
 function makeEntity(type: UnitType, house: House, x = 100, y = 100): Entity {
   return new Entity(type, house, x, y);
 }
@@ -64,8 +68,19 @@ function makeStructure(
 }
 
 function makeAircraftContext(overrides: Partial<AircraftContext> = {}): AircraftContext {
+  const structures = overrides.structures ?? [];
+  const entities = overrides.entities ?? [];
+  const entityById = overrides.entityById ?? new Map(entities.map(e => [e.id, e]));
+  if (!overrides.entityById) {
+    for (const s of structures) {
+      if (s.dockedAircraft !== undefined && s.dockedAircraft > 0 && !entityById.has(s.dockedAircraft)) {
+        const docked = makeEntity(UnitType.V_HIND, s.house);
+        docked.id = s.dockedAircraft;
+        entityById.set(docked.id, docked);
+      }
+    }
+  }
   return {
-    structures: [],
     map: new GameMap(),
     unitsLeftMap: 0,
     civiliansEvacuated: 0,
@@ -77,6 +92,9 @@ function makeAircraftContext(overrides: Partial<AircraftContext> = {}): Aircraft
     getROFBias: () => 1.0,
     getPowerFraction: () => 1.0,
     ...overrides,
+    structures,
+    entities,
+    entityById,
   };
 }
 
@@ -356,7 +374,7 @@ describe('updateAircraft — state machine', () => {
     expect(heli.aircraftState).toBe('flying');
   });
 
-  it('flying aircraft with attack target transitions to attacking when in range', () => {
+  it('flying helicopter starts C++ Mission_Attack by validating target zone', () => {
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'flying';
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
@@ -370,10 +388,13 @@ describe('updateAircraft — state machine', () => {
 
     updateAircraft(ctx, heli);
 
-    expect(heli.aircraftState).toBe('attacking');
+    expect(heli.aircraftState).toBe('flying');
+    expect(heli.aircraftAttackStatus).toBe(ATTACK_PICK_ATTACK_LOCATION);
+    expect(heli.missionTimer).toBeGreaterThanOrEqual(13);
+    expect(heli.missionTimer).toBeLessThanOrEqual(15);
   });
 
-  it('flying aircraft returns to base when attack target is lost', () => {
+  it('flying helicopter enters Mission_Attack return-to-base status when target is lost', () => {
     const ctx = makeAircraftContext();
     const heli = makeEntity(UnitType.V_HELI, House.Spain, 200, 200);
     heli.aircraftState = 'flying';
@@ -383,7 +404,8 @@ describe('updateAircraft — state machine', () => {
 
     updateAircraft(ctx, heli);
 
-    expect(heli.aircraftState).toBe('returning');
+    expect(heli.aircraftState).toBe('flying');
+    expect(heli.aircraftAttackStatus).toBe(ATTACK_RETURN_TO_BASE);
   });
 
   it('aircraft in returning state seeks landing pad', () => {
@@ -532,6 +554,7 @@ describe('updateFixedWingAttackRun', () => {
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 2 * 24);
     mig.target = enemy;
     mig.attackRunPhase = 'dropBombs';
+    mig.aircraftAttackStatus = ATTACK_DROP_BOMBS;
     mig.attackCooldown = 0;
 
     updateFixedWingAttackRun(ctx, mig);

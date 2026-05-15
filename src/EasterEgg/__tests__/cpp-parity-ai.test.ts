@@ -128,6 +128,7 @@ function makeAIState(overrides: Partial<AIHouseState> & { house: House }): AIHou
     maxInfantry: -1,
     maxBuilding: -1,
     isAlerted: true,
+    isBaseBuilding: true,
     ...overrides,
   };
 }
@@ -779,10 +780,10 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
     expect(state.refineryCount).toBe(2);
   });
 
-  it('clears underAttack if 150 ticks have passed since last base attack', () => {
+  it('clears underAttack after the C++ one-minute LATime window expires', () => {
     const state = makeAIState({ house: House.USSR, underAttack: true, lastBaseAttackTick: 0 });
     const ctx = makeAIContext({
-      tick: 301, // (tick-1) % 150 === 0; 301 - 0 = 301 > 150
+      tick: 1051, // (tick-1) % 150 === 0; 1051 - 0 > TICKS_PER_MINUTE
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -790,10 +791,10 @@ describe('updateAIStrategicPlanner — phase transitions (HOUSE.CPP)', () => {
     expect(state.underAttack).toBe(false);
   });
 
-  it('keeps underAttack if less than 150 ticks since last base attack', () => {
+  it('keeps underAttack within the C++ one-minute LATime window', () => {
     const state = makeAIState({ house: House.USSR, underAttack: true, lastBaseAttackTick: 200 });
     const ctx = makeAIContext({
-      tick: 301, // (tick-1) % 150 === 0; 301 - 200 = 101 < 150
+      tick: 301, // (tick-1) % 150 === 0; 301 - 200 is still within TICKS_PER_MINUTE
       aiStates: new Map([[House.USSR, state]]),
       structures: [],
     });
@@ -988,10 +989,12 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
     expect(dying.alive).toBe(true); // not sold
   });
 
-  it('IQ >= 1 sells near-death structures', () => {
-    const state = makeAIState({ house: House.USSR, iq: 1 });
-    const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
-    const dying = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1 });
+  it('IQ >= 1 queues near-death structures for sell-back', () => {
+    const state = makeAIState({ house: House.USSR, iq: 1, techLevel: 51 });
+    const dying = makeStructure({
+      type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1,
+      isAllowedToSell: true, isTickedOff: true,
+    });
     const ctx = makeAIContext({
       tick: 76, // (tick-1) % 75 === 0
       aiStates: new Map([[House.USSR, state]]),
@@ -999,8 +1002,9 @@ describe('IQ-gated AI behaviors (HOUSE.CPP IQ thresholds)', () => {
       houseCredits: new Map([[House.USSR, 0]]),
     });
     updateAISellDamaged(ctx);
-    expect(dying.alive).toBe(false);
-    expect(dying.rubble).toBe(true);
+    expect(dying.alive).toBe(true);
+    expect(dying.mission).toBe(Mission.DECONSTRUCTION);
+    expect(dying.sellProgress).toBe(0);
   });
 
   it('IQ < 2 skips autocreate teams', () => {
@@ -2031,10 +2035,13 @@ describe('updateAIRepair (rules.ini REPAIR_STEP=7, REPAIR_PERCENT=0.20)', () => 
 });
 
 describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
-  it('sells structures below CONDITION_RED (25% HP)', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
+  it('queues structures below CONDITION_RED (25% HP) for deconstruction', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3, techLevel: 51 });
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
-    const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.10) });
+    const s = makeStructure({
+      type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: Math.floor(maxHp * 0.10),
+      isAllowedToSell: true, isTickedOff: true,
+    });
     let footprintCleared = false;
     const ctx = makeAIContext({
       tick: 76, // (tick-1) % 75 === 0
@@ -2044,16 +2051,21 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
       clearStructureFootprint: () => { footprintCleared = true; },
     });
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(false);
-    expect(s.rubble).toBe(true);
-    expect(footprintCleared).toBe(true);
+    expect(s.alive).toBe(true);
+    expect(s.rubble).toBe(false);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.sellProgress).toBe(0);
+    expect(footprintCleared).toBe(false);
   });
 
-  it('gives partial credit refund based on HP ratio', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
+  it('defers the AI full-cost refund until deconstruction completes', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3, techLevel: 51 });
     const maxHp = STRUCTURE_MAX_HP['WEAP'] ?? 1000;
     const hp = Math.floor(maxHp * 0.20); // just below 25%
-    const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp });
+    const s = makeStructure({
+      type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp,
+      isAllowedToSell: true, isTickedOff: true,
+    });
     const ctx = makeAIContext({
       tick: 76, // (tick-1) % 75 === 0
       aiStates: new Map([[House.USSR, state]]),
@@ -2062,9 +2074,8 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
     });
     updateAISellDamaged(ctx);
     const credits = ctx.houseCredits.get(House.USSR) ?? 0;
-    // C++ techno.cpp:5743-5761: AI gets 100% refund (no Rule.RefundPercent penalty)
-    const weapCost = TEST_PRODUCTION_ITEMS.find(p => p.type === 'WEAP')!.cost;
-    expect(credits).toBe(weapCost);
+    expect(credits).toBe(0);
+    expect(s.sellHpAtStart).toBe(hp);
   });
 
   it('never sells FACT', () => {
@@ -2081,10 +2092,12 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
     expect(s.alive).toBe(true);
   });
 
-  it('does not sell last power plant', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
-    const maxHp = STRUCTURE_MAX_HP['POWR'] ?? 400;
-    const s = makeStructure({ type: 'POWR', house: House.USSR, cx: 10, cy: 10, hp: 1 });
+  it('does not special-case the last power plant in the Repair_AI sell-back branch', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3, techLevel: 51 });
+    const s = makeStructure({
+      type: 'POWR', house: House.USSR, cx: 10, cy: 10, hp: 1,
+      isAllowedToSell: true, isTickedOff: true,
+    });
     const ctx = makeAIContext({
       tick: 75,
       aiStates: new Map([[House.USSR, state]]),
@@ -2092,13 +2105,17 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
       houseCredits: new Map([[House.USSR, 0]]),
     });
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // only power plant, won't sell
+    expect(s.alive).toBe(true);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.sellProgress).toBe(0);
   });
 
-  it('sells damaged power plant when another exists', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
-    const maxHp = STRUCTURE_MAX_HP['POWR'] ?? 400;
-    const damaged = makeStructure({ type: 'POWR', house: House.USSR, cx: 10, cy: 10, hp: 1 });
+  it('queues damaged power plant when another exists', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3, techLevel: 51 });
+    const damaged = makeStructure({
+      type: 'POWR', house: House.USSR, cx: 10, cy: 10, hp: 1,
+      isAllowedToSell: true, isTickedOff: true,
+    });
     const healthy = makeStructure({ type: 'POWR', house: House.USSR, cx: 14, cy: 10 });
     const ctx = makeAIContext({
       tick: 76, // (tick-1) % 75 === 0
@@ -2107,7 +2124,9 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
       houseCredits: new Map([[House.USSR, 0]]),
     });
     updateAISellDamaged(ctx);
-    expect(damaged.alive).toBe(false);
+    expect(damaged.alive).toBe(true);
+    expect(damaged.mission).toBe(Mission.DECONSTRUCTION);
+    expect(damaged.sellProgress).toBe(0);
   });
 
   it('does not sell structures above CONDITION_RED', () => {
@@ -3386,9 +3405,12 @@ describe('AI edge cases', () => {
     expect(s.hp).toBe(hpBefore); // not repaired, tick not aligned
   });
 
-  it('updateAISellDamaged only runs on tick % 75 === 0', () => {
-    const state = makeAIState({ house: House.USSR, iq: 3 });
-    const s = makeStructure({ type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1 });
+  it('updateAISellDamaged is a per-building Repair_AI branch, not a 75-tick gate', () => {
+    const state = makeAIState({ house: House.USSR, iq: 3, techLevel: 51 });
+    const s = makeStructure({
+      type: 'WEAP', house: House.USSR, cx: 10, cy: 10, hp: 1,
+      isAllowedToSell: true, isTickedOff: true,
+    });
     const ctx = makeAIContext({
       tick: 74,
       aiStates: new Map([[House.USSR, state]]),
@@ -3396,7 +3418,9 @@ describe('AI edge cases', () => {
       houseCredits: new Map([[House.USSR, 0]]),
     });
     updateAISellDamaged(ctx);
-    expect(s.alive).toBe(true); // not sold, tick not aligned
+    expect(s.alive).toBe(true);
+    expect(s.mission).toBe(Mission.DECONSTRUCTION);
+    expect(s.sellProgress).toBe(0);
   });
 
   it('updateAIConstruction skips when productionEnabled is false', () => {

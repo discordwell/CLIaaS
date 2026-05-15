@@ -79,7 +79,7 @@ function makeMockAIContext(overrides: Partial<AIContext> = {}): AIContext {
 
 function addAIHouse(ctx: AIContext, house: House, overrides: Partial<AIHouseState> = {}): AIHouseState {
   const state = createAIHouseState(ctx, house);
-  Object.assign(state, overrides);
+  Object.assign(state, { isBaseBuilding: true }, overrides);
   ctx.aiStates.set(house, state);
   return state;
 }
@@ -165,7 +165,7 @@ describe('Tick gating — only runs on (tick-1) % 150 === 0', () => {
 describe('IQ=0 houses are skipped entirely', () => {
   it('does not transition phase when IQ is 0', () => {
     const ctx = makeMockAIContext({ tick: 151 });
-    const state = addAIHouse(ctx, House.USSR, { iq: 0, phase: 'economy' });
+    const state = addAIHouse(ctx, House.USSR, { iq: 0, phase: 'economy', isBaseBuilding: false });
     addEconomyPrereqs(ctx, House.USSR);
 
     updateAIStrategicPlanner(ctx);
@@ -174,7 +174,7 @@ describe('IQ=0 houses are skipped entirely', () => {
 
   it('does not update harvesterCount when IQ is 0', () => {
     const ctx = makeMockAIContext({ tick: 151 });
-    const state = addAIHouse(ctx, House.USSR, { iq: 0, harvesterCount: 5 });
+    const state = addAIHouse(ctx, House.USSR, { iq: 0, harvesterCount: 5, isBaseBuilding: false });
     ctx.entities.push(new Entity(UnitType.V_HARV, House.USSR, 200, 200));
 
     updateAIStrategicPlanner(ctx);
@@ -184,7 +184,7 @@ describe('IQ=0 houses are skipped entirely', () => {
 
   it('does not update refineryCount when IQ is 0', () => {
     const ctx = makeMockAIContext({ tick: 151 });
-    const state = addAIHouse(ctx, House.USSR, { iq: 0, refineryCount: 3 });
+    const state = addAIHouse(ctx, House.USSR, { iq: 0, refineryCount: 3, isBaseBuilding: false });
     ctx.structures.push(makeStructure('PROC', House.USSR));
 
     updateAIStrategicPlanner(ctx);
@@ -194,7 +194,7 @@ describe('IQ=0 houses are skipped entirely', () => {
   it('does not clear underAttack when IQ is 0', () => {
     const ctx = makeMockAIContext({ tick: 451 });
     const state = addAIHouse(ctx, House.USSR, {
-      iq: 0, underAttack: true, lastBaseAttackTick: 100,
+      iq: 0, underAttack: true, lastBaseAttackTick: 100, isBaseBuilding: false,
     });
 
     updateAIStrategicPlanner(ctx);

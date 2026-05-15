@@ -239,6 +239,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     houseAlive: new Map(),
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
+    unitsLostByHouse: new Map(),
+    buildingsLostByHouse: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -265,6 +267,9 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
 function makeEvent(type: number, data = 0): TriggerEvent {
   return { type, team: -1, data };
 }
+
+const unitsLost = (count: number, house = 1): Map<number, number> => new Map([[house, count]]);
+const buildingsLost = (count: number, house = 1): Map<number, number> => new Map([[house, count]]);
 
 function makeAction(action: number, data = 0, team = -1, trigger = -1): TriggerAction {
   return { action, team, trigger, data };
@@ -783,22 +788,22 @@ describe('checkTriggerEvent — C++ tevent.cpp operator() parity', () => {
   // --- TEVENT_NBUILDINGS_DESTROYED (15) ---
   // C++ tevent.cpp:401-402: if (hptr->BuildingsLost < Data.Value) return(false);
   it('TEVENT_NBUILDINGS_DESTROYED fires when count >= threshold', () => {
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NBUILDINGS_DESTROYED, 5), createState({ nBuildingsDestroyed: 4 }))).toBe(false);
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NBUILDINGS_DESTROYED, 5), createState({ nBuildingsDestroyed: 5 }))).toBe(true);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NBUILDINGS_DESTROYED, 5), createState({ buildingsLostByHouse: buildingsLost(4) }))).toBe(false);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NBUILDINGS_DESTROYED, 5), createState({ buildingsLostByHouse: buildingsLost(5) }))).toBe(true);
   });
 
   // --- TEVENT_NUNITS_DESTROYED (16) ---
   // C++ tevent.cpp:408-409: if (hptr->UnitsLost < Data.Value) return(false);
   it('TEVENT_NUNITS_DESTROYED fires when kill count >= threshold', () => {
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NUNITS_DESTROYED, 10), createState({ enemyKillCount: 9 }))).toBe(false);
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NUNITS_DESTROYED, 10), createState({ enemyKillCount: 10 }))).toBe(true);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NUNITS_DESTROYED, 10), createState({ unitsLostByHouse: unitsLost(9) }))).toBe(false);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NUNITS_DESTROYED, 10), createState({ unitsLostByHouse: unitsLost(10) }))).toBe(true);
   });
 
   // --- TEVENT_NOFACTORIES (17) ---
   // C++ tevent.cpp:340-341: if (hptr->BScan & (STRUCTF_AIRSTRIP|STRUCTF_TENT|STRUCTF_WEAP|STRUCTF_BARRACKS|STRUCTF_CONST)) return(false);
   it('TEVENT_NOFACTORIES fires when no factories exist', () => {
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NOFACTORIES), createState({ playerFactoriesExist: true }))).toBe(false);
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NOFACTORIES), createState({ playerFactoriesExist: false }))).toBe(true);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NOFACTORIES), createState({ structureTypesByHouse: new Map([[1, new Set(['FACT'])]]) }))).toBe(false);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.NOFACTORIES), createState({ structureTypesByHouse: new Map([[1, new Set<string>()]]) }))).toBe(true);
   });
 
   // --- TEVENT_EVAC_CIVILIAN (18) ---

@@ -59,6 +59,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [] as CombatContext['logicAnims'],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -144,7 +145,7 @@ describe('Non-high projectile hits wall (bullet.cpp:903-913)', () => {
     expect(impactCell.cy).toBe(5);
   });
 
-  it('works with different wall types (SBAG, FENC, BARB, WOOD, CYCL)', () => {
+  it('only high wall overlays force low-level projectiles to explode', () => {
     const wallTypes = ['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL'];
 
     for (const wallType of wallTypes) {
@@ -167,8 +168,9 @@ describe('Non-high projectile hits wall (bullet.cpp:903-913)', () => {
 
       const explosions = ctx.effects.filter(e => e.type === 'explosion');
       expect(explosions.length, `${wallType} wall should cause explosion`).toBeGreaterThan(0);
-      const impactCell = worldToCell(explosions[0].x, explosions[0].y);
-      expect(impactCell.cx, `projectile should stop at ${wallType} wall cell`).toBe(5);
+      const impactExplosion = explosions[explosions.length - 1];
+      const impactCell = worldToCell(impactExplosion.x, impactExplosion.y);
+      expect(impactCell.cx, `${wallType} collision cell`).toBe(wallType === 'BRIK' ? 5 : 8);
     }
   });
 });
@@ -201,7 +203,8 @@ describe('High projectile flies over walls (bullet.cpp:911, type.h:1365)', () =>
     // The missile should reach the target, not the wall
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     expect(explosions.length).toBeGreaterThan(0);
-    const impactCell = worldToCell(explosions[0].x, explosions[0].y);
+    const impactExplosion = explosions[explosions.length - 1];
+    const impactCell = worldToCell(impactExplosion.x, impactExplosion.y);
     expect(impactCell.cx).toBe(8); // target cell, not wall cell 5
     expect(impactCell.cy).toBe(5);
 
@@ -256,17 +259,18 @@ describe('Projectile with no wall in path reaches target (baseline)', () => {
 
 // ── Wall takes damage from projectile explosion splash ──────────────────────
 
-describe('Wall takes splash damage from projectile collision (combat.cpp:244-270)', () => {
+describe('Wall takes impact-cell damage from projectile collision (combat.cpp:244-270)', () => {
 
-  it('wall in splash radius is destroyed by HE warhead splash', () => {
+  it('wall in the impact cell is destroyed by HE wall damage', () => {
     const attacker = entityAtCell(UnitType.V_ARTY, House.Spain, 2, 5);
-    const target = entityAtCell(UnitType.V_2TNK, House.USSR, 8, 5);
+    const target = entityAtCell(UnitType.V_2TNK, House.USSR, 5, 5);
     const ctx = makeCombatCtx([attacker, target]);
 
-    // Place a sandbag wall in the projectile path
+    // Place a sandbag wall in the impact cell. SBAG does not force early bullet
+    // detonation, but combat.cpp still applies wall damage at the final impact.
     ctx.map.setWallType(5, 5, 'SBAG');
 
-    // 155mm artillery: HE warhead with splash, isHigh=false so it stops at the wall
+    // 155mm artillery: HE warhead with destroysWalls=true (WARHEAD_META)
     // HE warhead has destroysWalls=true (WARHEAD_META)
     const weapon = { ...WEAPON_STATS['155mm'], projectileSpeed: 1.0, isArcing: false, isHigh: false };
     launchProjectile(ctx, attacker, target, weapon, 150, target.pos.x, target.pos.y, true);
@@ -277,8 +281,7 @@ describe('Wall takes splash damage from projectile collision (combat.cpp:244-270
       ticks++;
     }
 
-    // The HE splash with destroysWalls=true should clear the wall
-    // (handled by applySplashDamage terrain destruction code)
+    // Wall damage is impact-cell only; this clears because the impact cell has SBAG.
     expect(ctx.map.getWallType(5, 5)).toBe('');
   });
 });

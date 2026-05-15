@@ -115,6 +115,7 @@ function makeCombatContext(overrides: Partial<CombatContext> = {}): CombatContex
     entityById: new Map(),
     structures: [],
     inflightProjectiles: [],
+    logicAnims: [],
     effects: [] as Effect[],
     tick: 0,
     playerHouse: House.Spain,

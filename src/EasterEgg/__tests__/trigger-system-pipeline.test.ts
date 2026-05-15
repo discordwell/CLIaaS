@@ -66,6 +66,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
     houseAlive: new Map(),
     houseUnitsAlive: new Map(),
     houseBuildingsAlive: new Map(),
+    unitsLostByHouse: new Map(),
+    buildingsLostByHouse: new Map(),
     isLowPower: false,
     playerCredits: 0,
     buildingsDestroyedByHouse: new Map(),
@@ -88,6 +90,8 @@ function createState(overrides: Partial<TriggerGameState> = {}): TriggerGameStat
   }
   return merged;
 }
+
+const unitsLost = (count: number, house = 1): Map<number, number> => new Map([[house, count]]);
 
 /** Create a ScenarioTrigger with defaults */
 function createTrigger(overrides: Partial<ScenarioTrigger> = {}): ScenarioTrigger {
@@ -229,9 +233,9 @@ describe('checkTriggerEvent — full event coverage', () => {
   // TEVENT_NUNITS_DESTROYED (16) — kill count threshold
   it('TEVENT_NUNITS_DESTROYED (16) fires when kill count >= threshold', () => {
     const event: TriggerEvent = { type: 16, team: -1, data: 10 };
-    expect(checkTriggerEvent(event, createState({ enemyKillCount: 9 }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ enemyKillCount: 10 }))).toBe(true);
-    expect(checkTriggerEvent(event, createState({ enemyKillCount: 50 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ unitsLostByHouse: unitsLost(9) }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({ unitsLostByHouse: unitsLost(10) }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ unitsLostByHouse: unitsLost(50) }))).toBe(true);
   });
 
   // TEVENT_DESTROYED (7) — attached object destroyed
@@ -1385,7 +1389,7 @@ describe('Edge cases', () => {
 
   it('TEVENT_NUNITS_DESTROYED with data=0 fires immediately (0 kills required)', () => {
     const event: TriggerEvent = { type: 16, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ enemyKillCount: 0 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({ unitsLostByHouse: unitsLost(0) }))).toBe(true);
   });
 
   it('BEGIN_PRODUCTION uses action.data regardless of triggerHouse (C++ parity)', () => {
