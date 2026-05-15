@@ -643,9 +643,11 @@ describe('Dynamic cap increase (C++ house.cpp:4726-4740)', () => {
     //   enemyAvg = 40
     //   Since 5 < 40+10=50, Soviet.MaxUnit becomes 50
 
-    // Tick must be divisible by 150 for updateAIStrategicPlanner to run
+    // Tick must be divisible by 150 for updateAIStrategicPlanner to run, and
+    // C++ HouseClass::AI only calls Expert_AI while IsBaseBuilding is true.
     const ctx = makeMockAIContext({ tick: 151 });
     const state = setupProductionBase(ctx, House.USSR, 50000);
+    state.isBaseBuilding = true;
     state.maxUnit = 5;
 
     // Simulate: player (Spain) has 40 vehicles
