@@ -125,9 +125,15 @@ function makeCombatCtx(
 }
 
 function resolveProjectiles(ctx: CombatContext): void {
-  for (let i = 0; i < 10 && ctx.inflightProjectiles.length > 0; i++) {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
     updateInflightProjectiles(ctx);
   }
+  expect(ctx.inflightProjectiles.length).toBe(0);
+}
+
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  resolveProjectiles(ctx);
 }
 
 // ── Structure Stats (rules.ini / building.cpp) ──────────────────────────────────
@@ -234,19 +240,19 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
   it('applies Fire warhead multiplier — 0.9x damage to none armor infantry', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
-    // Use a high-HP infantry so it survives the hit (E1 has only 50 HP which is < 113 damage)
+    // Use a high-HP infantry so it survives the hit (E1 has only 50 HP which is < 112 damage)
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     enemy.hp = 200;
     enemy.maxHp = 200;
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Fire vs none uses C++ fixed 90%: 125 * fixed(90%) = 112.
     expect(hpBefore - enemy.hp).toBe(112);
   });
@@ -257,7 +263,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 12, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([ftur], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Fire vs heavy = 0.25 mult, damage 125 * 0.25 = 31.25 -> Math.round = 31
     expect(hpBefore - tank.hp).toBe(31);
   });
@@ -268,7 +274,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const jeep = entityAtCell(UnitType.V_JEEP, House.Spain, 12, 10);
     const hpBefore = jeep.hp;
     const ctx = makeCombatCtx([ftur], [jeep]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Fire vs light = 0.6 mult, damage 125 * 0.6 = 75
     expect(hpBefore - jeep.hp).toBe(75);
   });
@@ -278,7 +284,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     // Enemy 5 cells east — beyond range 4
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 15, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -287,7 +293,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     // Enemy 3 cells east — inside range 4
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 
@@ -296,7 +302,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     // Ukraine is allied with USSR
     const ally = entityAtCell(UnitType.I_E1, House.Ukraine, 12, 10);
     const ctx = makeCombatCtx([ftur], [ally]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ally.hp).toBe(ally.maxHp);
   });
 
@@ -304,7 +310,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ftur.attackCooldown).toBe(STRUCTURE_WEAPONS['FTUR'].rof - 1);
   });
 
@@ -312,7 +318,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10, { cooldown: 10 });
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 
@@ -320,7 +326,7 @@ describe('FTUR fires at enemy in range (building.cpp)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10, { cooldown: 5 });
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ftur.attackCooldown).toBe(4);
   });
 });
@@ -337,7 +343,7 @@ describe('FTUR fires during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 200,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -349,19 +355,21 @@ describe('FTUR fires during power outage (building.cpp: PW1/PW3)', () => {
       powerConsumed: 100,
       powerProduced: 0,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
-  it('powered structure (GUN) does NOT fire during power outage — contrast with FTUR', () => {
+  it('GUN also fires during power outage because it is not power-dependent', () => {
     const gun = makeDefenseStructure('GUN', House.USSR, 10, 10);
+    gun.turretDir = 2;
+    gun.desiredTurretDir = 2;
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy], {
       powerConsumed: 200,
       powerProduced: 100,
     });
-    updateStructureCombat(ctx);
-    expect(enemy.hp).toBe(enemy.maxHp);
+    fireStructures(ctx);
+    expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
 
@@ -372,7 +380,7 @@ describe('FTUR has no turret rotation (building.cpp)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ftur.turretDir).toBeUndefined();
   });
 
@@ -380,7 +388,7 @@ describe('FTUR has no turret rotation (building.cpp)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ftur.desiredTurretDir).toBeUndefined();
   });
 
@@ -388,7 +396,7 @@ describe('FTUR has no turret rotation (building.cpp)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ftur.firingFlash).toBeUndefined();
   });
 });
@@ -401,7 +409,7 @@ describe('FTUR does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const heli = entityAtCell(UnitType.V_HIND, House.Spain, 12, 10);
     heli.flightAltitude = Entity.FLIGHT_ALTITUDE; // airborne
     const ctx = makeCombatCtx([ftur], [heli]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(heli.hp).toBe(heli.maxHp);
   });
 
@@ -410,7 +418,7 @@ describe('FTUR does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const mig = entityAtCell(UnitType.V_MIG, House.Spain, 12, 10);
     mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
     const ctx = makeCombatCtx([ftur], [mig]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(mig.hp).toBe(mig.maxHp);
   });
 
@@ -418,8 +426,10 @@ describe('FTUR does NOT target airborne aircraft (building.cpp — AA gate)', ()
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const heli = entityAtCell(UnitType.V_HIND, House.Spain, 12, 10);
     heli.flightAltitude = 0; // landed
+    heli.aircraftHeightLeptons = 0;
+    heli.aircraftState = 'landed';
     const ctx = makeCombatCtx([ftur], [heli]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(heli.hp).toBeLessThan(heli.maxHp);
   });
 });
@@ -448,14 +458,14 @@ describe('FTUR short range — only 4 cells (rules.ini)', () => {
     const ftur1 = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const close = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);
     const ctx1 = makeCombatCtx([ftur1], [close]);
-    updateStructureCombat(ctx1);
+    fireStructures(ctx1);
     expect(close.hp).toBeLessThan(close.maxHp);
 
     // Outside range
     const ftur2 = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const far = entityAtCell(UnitType.I_E1, House.Spain, 15, 10);
     const ctx2 = makeCombatCtx([ftur2], [far]);
-    updateStructureCombat(ctx2);
+    fireStructures(ctx2);
     expect(far.hp).toBe(far.maxHp);
   });
 });
@@ -469,7 +479,7 @@ describe('FTUR target selection — threat-based scoring (building.cpp)', () => 
     const closeEnemy = entityAtCell(UnitType.I_E1, House.Spain, 11, 10); // 1 cell
     const farEnemy = entityAtCell(UnitType.I_E1, House.Spain, 13, 10);   // 3 cells
     const ctx = makeCombatCtx([ftur], [closeEnemy, farEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Closer enemy should be targeted (damaged)
     const closeDmg = closeEnemy.maxHp - closeEnemy.hp;
     const farDmg = farEnemy.maxHp - farEnemy.hp;
@@ -485,7 +495,7 @@ describe('FTUR target selection — threat-based scoring (building.cpp)', () => 
     deadEnemy.hp = 0;
     deadEnemy.alive = false;
     const ctx = makeCombatCtx([ftur], [deadEnemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // No target found — cooldown should remain 0
     expect(ftur.attackCooldown).toBe(0);
   });
@@ -495,7 +505,7 @@ describe('FTUR target selection — threat-based scoring (building.cpp)', () => 
     ftur.alive = false;
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(enemy.maxHp);
   });
 });
@@ -506,23 +516,23 @@ describe('FTUR kill tracking (building.cpp)', () => {
   it('increments killCount when player-allied FTUR kills an enemy', () => {
     // FTUR owned by player-allied house (Spain)
     const ftur = makeDefenseStructure('FTUR', House.Spain, 10, 10);
-    // Weak enemy that will die from 113 Fire damage (125 * 0.9 vs none)
+    // Weak enemy that will die from 112 Fire damage (125 * fixed 90% vs none)
     const weakEnemy = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
-    weakEnemy.hp = 1; // will die from 113 damage
+    weakEnemy.hp = 1; // will die from 112 damage
     const ctx = makeCombatCtx([ftur], [weakEnemy]);
     expect(ctx.killCount).toBe(0);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(weakEnemy.alive).toBe(false);
     expect(ctx.killCount).toBe(1);
   });
 
-  it('one-shots standard infantry (50 HP) — 113 Fire damage vs none armor', () => {
+  it('one-shots standard infantry (50 HP) — 112 Fire damage vs none armor', () => {
     const ftur = makeDefenseStructure('FTUR', House.Spain, 10, 10);
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
-    // E1 has 50 HP, FTUR does 113 damage vs none armor
+    // E1 has 50 HP, FTUR does 112 damage vs none armor
     expect(infantry.maxHp).toBe(50);
     const ctx = makeCombatCtx([ftur], [infantry]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(infantry.alive).toBe(false);
   });
 });
@@ -530,22 +540,23 @@ describe('FTUR kill tracking (building.cpp)', () => {
 // ── Effects (rendering parity) ───────────────────────────────────────────────────
 
 describe('FTUR fire effects (rendering parity)', () => {
-  it('produces muzzle and projectile effects when firing', () => {
+  it('produces muzzle effect and creates an in-flight fireball projectile when firing', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
     updateStructureCombat(ctx);
     const muzzles = ctx.effects.filter(e => e.type === 'muzzle');
-    const projectiles = ctx.effects.filter(e => e.type === 'projectile');
     expect(muzzles.length).toBeGreaterThanOrEqual(1);
-    expect(projectiles.length).toBeGreaterThanOrEqual(1);
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].weapon.name).toBe('FireballLauncher');
+    expect(ctx.inflightProjectiles[0].targetId).toBe(enemy.id);
   });
 
   it('muzzle effect originates from structure center', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
     // C++ BSIZE_11 CenterOffset = 0x80,0x80.
@@ -559,7 +570,7 @@ describe('FTUR fire effects (rendering parity)', () => {
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     const ctx = makeCombatCtx([ftur], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const teslaEffects = ctx.effects.filter(e => e.type === 'tesla');
     expect(teslaEffects.length).toBe(0);
   });
@@ -568,14 +579,14 @@ describe('FTUR fire effects (rendering parity)', () => {
 // ── Damage Comparison vs PBOX (cross-defense parity) ──────────────────────────────
 
 describe('FTUR vs PBOX damage comparison (cross-defense parity)', () => {
-  it('FTUR does more damage to infantry than PBOX (113 vs 40)', () => {
+  it('FTUR does more damage to infantry than PBOX (112 vs 40)', () => {
     // Use high-HP targets so they survive and we can measure exact damage
     const ftur = makeDefenseStructure('FTUR', House.USSR, 10, 10);
     const fturTarget = entityAtCell(UnitType.I_E1, House.Spain, 12, 10);
     fturTarget.hp = 200;
     fturTarget.maxHp = 200;
     const ctx1 = makeCombatCtx([ftur], [fturTarget]);
-    updateStructureCombat(ctx1);
+    fireStructures(ctx1);
     const fturDmg = 200 - fturTarget.hp;
 
     const pbox = makeDefenseStructure('PBOX', House.Spain, 10, 10);
@@ -583,8 +594,7 @@ describe('FTUR vs PBOX damage comparison (cross-defense parity)', () => {
     pboxTarget.hp = 200;
     pboxTarget.maxHp = 200;
     const ctx2 = makeCombatCtx([pbox], [pboxTarget]);
-    updateStructureCombat(ctx2);
-    resolveProjectiles(ctx2);
+    fireStructures(ctx2);
     const pboxDmg = 200 - pboxTarget.hp;
 
     // FTUR: 125 * fixed(90%) = 112, PBOX: 40 * 1.0 = 40

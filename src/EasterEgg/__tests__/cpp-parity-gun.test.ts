@@ -20,6 +20,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
+  updateInflightProjectiles,
   setStructureTurretDesired,
   updateStructureCombat,
 } from '../engine/combat';
@@ -74,6 +75,7 @@ function makeCombatCtx(
     structures,
     inflightProjectiles: [],
     effects: [] as Effect[],
+    logicAnims: [],
     tick: 0,
     playerHouse: House.Spain,
     scenarioId: 'TEST',
@@ -116,6 +118,18 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function resolveProjectiles(ctx: CombatContext): void {
+  for (let i = 0; ctx.inflightProjectiles.length > 0 && i < 512; i++) {
+    updateInflightProjectiles(ctx);
+  }
+  expect(ctx.inflightProjectiles.length).toBe(0);
+}
+
+function fireStructures(ctx: CombatContext): void {
+  updateStructureCombat(ctx);
+  resolveProjectiles(ctx);
+}
+
 // -- Structure Stats (RULES.INI / BTYPE.H) ------------------------------------
 
 describe('GUN structure stats (RULES.INI)', () => {
@@ -156,7 +170,7 @@ describe('GUN fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     const ctx = makeCombatCtx([gun], [enemy], {
       powerConsumed: 50, powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -167,7 +181,7 @@ describe('GUN fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     const ctx = makeCombatCtx([gun], [enemy], {
       powerConsumed: 150, powerProduced: 100, // deficit
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -178,7 +192,7 @@ describe('GUN fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     const ctx = makeCombatCtx([gun], [enemy], {
       powerConsumed: 101, powerProduced: 100,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -189,7 +203,7 @@ describe('GUN fires regardless of power state (not in STRUCTURE_POWERED)', () =>
     const ctx = makeCombatCtx([gun], [enemy], {
       powerConsumed: 0, powerProduced: 0,
     });
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 });
@@ -204,7 +218,7 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 15, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(hpBefore);
   });
 
@@ -214,7 +228,7 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 17, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -224,7 +238,7 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const ally = entityAtCell(UnitType.V_2TNK, House.Spain, 12, 10);
     const hpBefore = ally.hp;
     const ctx = makeCombatCtx([gun], [ally]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(ally.hp).toBe(hpBefore);
   });
 
@@ -233,7 +247,7 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const aircraft = airborneAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     const hpBefore = aircraft.hp;
     const ctx = makeCombatCtx([gun], [aircraft]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(aircraft.hp).toBe(hpBefore);
   });
 
@@ -242,11 +256,12 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const aircraft = entityAtCell(UnitType.V_HIND, House.USSR, 12, 10);
     // Simulate a landed aircraft (constructor defaults to airborne)
     aircraft.flightAltitude = 0;
+    aircraft.aircraftHeightLeptons = 0;
     aircraft.aircraftState = 'landed';
     expect(aircraft.flightAltitude).toBe(0);
     const hpBefore = aircraft.hp;
     const ctx = makeCombatCtx([gun], [aircraft]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(aircraft.hp).toBeLessThan(hpBefore);
   });
 
@@ -256,7 +271,7 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -266,7 +281,7 @@ describe('GUN targeting — ground-only, range-limited (building.cpp)', () => {
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 });
@@ -281,7 +296,7 @@ describe('GUN AP warhead vs armor classes (RULES.INI)', () => {
     const tank = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = tank.hp;
     const ctx = makeCombatCtx([gun], [tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ bullet.cpp:991 — Explosion_Damage is sole damage path. Target at dist=0 gets full damage.
     // AP vs heavy = 1.0, base 40 => modifyDamage(40, AP, heavy, 0) = 40
     expect(hpBefore - tank.hp).toBe(40);
@@ -293,7 +308,7 @@ describe('GUN AP warhead vs armor classes (RULES.INI)', () => {
     const infantry = entityAtCell(UnitType.I_E1, House.USSR, 12, 10);
     const hpBefore = infantry.hp;
     const ctx = makeCombatCtx([gun], [infantry]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ bullet.cpp:991 — Explosion_Damage is sole damage path.
     // AP vs none = 0.3, base 40 => modifyDamage(40, AP, none, 0) = 12
     expect(hpBefore - infantry.hp).toBe(12);
@@ -305,7 +320,7 @@ describe('GUN AP warhead vs armor classes (RULES.INI)', () => {
     const jeep = entityAtCell(UnitType.V_JEEP, House.USSR, 12, 10);
     const hpBefore = jeep.hp;
     const ctx = makeCombatCtx([gun], [jeep]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // C++ bullet.cpp:991 — Explosion_Damage is sole damage path.
     // AP vs light = 0.75, base 40 => modifyDamage(40, AP, light, 0) = 30
     expect(hpBefore - jeep.hp).toBe(30);
@@ -323,7 +338,7 @@ describe('GUN splash damage (splash=0.5, CF2/CF3)', () => {
     // Splash victim right next to primary (same cell)
     const splash = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [primary, splash]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Primary takes direct hit; splash victim takes splash damage
     expect(primary.hp).toBeLessThan(primary.maxHp);
     // Splash victim should also take damage (within 1.5-cell splash radius)
@@ -337,7 +352,7 @@ describe('GUN splash damage (splash=0.5, CF2/CF3)', () => {
     // Bystander 3 cells away from primary — well beyond 1.5-cell splash
     const bystander = entityAtCell(UnitType.V_2TNK, House.USSR, 15, 10);
     const ctx = makeCombatCtx([gun], [primary, bystander]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Primary hit, bystander should be untouched (>1.5 cells from impact)
     expect(primary.hp).toBeLessThan(primary.maxHp);
     expect(bystander.hp).toBe(bystander.maxHp);
@@ -355,7 +370,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     // Place enemy to the North
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 10, 7);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // desiredTurretDir should point toward the enemy (North = 0)
     expect(gun.desiredTurretDir).toBe(Dir.N);
   });
@@ -371,7 +386,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
 
     // First tick: turret rotation runs first (turretDir==desiredTurretDir, no rotation yet),
     // then targeting sets desiredTurretDir to East. turretDir stays at 4 (South).
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(gun.desiredTurretDir).toBe(Dir.E);
     expect(gun.turretDir).toBe(4); // no rotation yet on first tick
 
@@ -381,7 +396,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     for (let i = 0; i < 7; i++) {
       gun.attackCooldown = 5; // on cooldown, but turret rotation is independent
       const ctx2 = makeCombatCtx([gun], [enemy]);
-      updateStructureCombat(ctx2);
+      fireStructures(ctx2);
     }
     expect(gun.turretDir).toBe(Dir.E);
   });
@@ -399,7 +414,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     // Run enough ticks with cooldown reset to allow full rotation.
     for (let i = 0; i < 20; i++) {
       const ctx = makeCombatCtx([gun], [enemy]);
-      updateStructureCombat(ctx);
+      fireStructures(ctx);
       gun.attackCooldown = 0; // reset cooldown to allow re-targeting
     }
     // After enough ticks, turret should have reached East (2)
@@ -412,7 +427,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     gun.desiredTurretDir = undefined;
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // After first tick, turretDir should have been initialized and then stepped
     expect(gun.turretDir).toBeDefined();
   });
@@ -422,7 +437,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     gun.firingFlash = 0;
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(gun.firingFlash).toBe(3);
   });
 
@@ -432,7 +447,7 @@ describe('GUN turret rotation (building.cpp — TURRETED_STRUCTURES)', () => {
     gun.attackCooldown = 5; // on cooldown, won't fire but will tick turret
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(gun.firingFlash).toBe(2);
   });
 });
@@ -446,7 +461,7 @@ describe('GUN rate of fire (ROF=50, building.cpp)', () => {
     expect(gun.attackCooldown).toBe(0);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(gun.attackCooldown).toBe(STRUCTURE_WEAPONS['GUN'].rof - 1);
   });
 
@@ -456,7 +471,7 @@ describe('GUN rate of fire (ROF=50, building.cpp)', () => {
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const hpBefore = enemy.hp;
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBe(hpBefore);
   });
 
@@ -464,7 +479,7 @@ describe('GUN rate of fire (ROF=50, building.cpp)', () => {
     const gun = makeGUN(10, 10);
     gun.attackCooldown = 10;
     const ctx = makeCombatCtx([gun], []);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(gun.attackCooldown).toBe(9);
   });
 });
@@ -486,7 +501,7 @@ describe('GUN threat-based targeting (building.cpp priority scoring)', () => {
     gun.turretDir = gun.desiredTurretDir;
     gun.turretRotAccum = 0;
     const ctx = makeCombatCtx([gun], [truck, tank]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Tank should be the direct target. The truck can still receive splash.
     expect(tank.hp).toBeLessThan(tank.maxHp);
     expect(tank.maxHp - tank.hp).toBeGreaterThan(truck.maxHp - truck.hp);
@@ -501,25 +516,26 @@ describe('GUN visual effects on fire (building.cpp)', () => {
     const gun = makeGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const muzzle = ctx.effects.find(e => e.type === 'muzzle');
     expect(muzzle).toBeDefined();
   });
 
-  it('produces projectile effect toward target', () => {
+  it('creates an in-flight BulletClass projectile toward target', () => {
     const gun = makeGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
     updateStructureCombat(ctx);
-    const proj = ctx.effects.find(e => e.type === 'projectile');
-    expect(proj).toBeDefined();
+    expect(ctx.inflightProjectiles).toHaveLength(1);
+    expect(ctx.inflightProjectiles[0].weapon.name).toBe('TurretGun');
+    expect(ctx.inflightProjectiles[0].targetId).toBe(enemy.id);
   });
 
   it('produces explosion effect at target position', () => {
     const gun = makeGUN(10, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10);
     const ctx = makeCombatCtx([gun], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     const explosion = ctx.effects.find(e => e.type === 'explosion');
     expect(explosion).toBeDefined();
   });
@@ -537,7 +553,7 @@ describe('GUN kill tracking (building.cpp)', () => {
     enemy.hp = 1; // will die from any damage
     const ctx = makeCombatCtx([gun], [enemy]);
     expect(ctx.killCount).toBe(0);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.alive).toBe(false);
     // Kill should be tracked since GUN owner (Spain) is allied with playerHouse (Spain)
     // Note: the handleUnitDeath in structure combat sets attackerIsPlayer based on alliance
@@ -554,7 +570,7 @@ describe('GUN integration — multiple turrets', () => {
     const enemy1 = entityAtCell(UnitType.V_2TNK, House.USSR, 12, 10); // near gun1
     const enemy2 = entityAtCell(UnitType.V_2TNK, House.USSR, 22, 10); // near gun2
     const ctx = makeCombatCtx([gun1, gun2], [enemy1, enemy2]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     // Both enemies should take damage
     expect(enemy1.hp).toBeLessThan(enemy1.maxHp);
     expect(enemy2.hp).toBeLessThan(enemy2.maxHp);
@@ -566,7 +582,7 @@ describe('GUN integration — multiple turrets', () => {
     const gun2 = makeGUN(20, 10);
     const enemy = entityAtCell(UnitType.V_2TNK, House.USSR, 22, 10); // only near gun2
     const ctx = makeCombatCtx([gun1, gun2], [enemy]);
-    updateStructureCombat(ctx);
+    fireStructures(ctx);
     expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
