@@ -35,7 +35,8 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
   type CombatContext,
-  structureDamage,
+  structureDamage as rawStructureDamage,
+  updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
@@ -133,6 +134,23 @@ function makeCombatCtx(
   } as CombatContext;
 }
 
+function flushProjectiles(ctx: CombatContext): void {
+  for (let guard = 0; ctx.inflightProjectiles.length > 0 && guard < 512; guard++) {
+    updateInflightProjectiles(ctx);
+  }
+  expect(ctx.inflightProjectiles.length).toBe(0);
+}
+
+function structureDamage(
+  ctx: CombatContext,
+  s: MapStructure,
+  damage: number,
+): boolean {
+  const destroyed = rawStructureDamage(ctx, s, damage);
+  flushProjectiles(ctx);
+  return destroyed;
+}
+
 // ── rules.ini Barrel Properties (BARL/BRL3) ─────────────────────────────────
 // C++ source: object.cpp:1963 — ObjectTypeClass constructor sets Armor=ARMOR_NONE
 // rules.ini [BARL]: Strength=10, Repairable=false, Adjacent=0, BaseNormal=no
@@ -209,12 +227,13 @@ describe('Barrel explosion: 200 Fire damage, cardinal directions (building.cpp:1
   it('barrel explosion deals Fire-warhead-modified damage to cardinal structures', () => {
     // C++ fires 200-damage WARHEAD_FIRE bullets at N/E/S/W cells
     // C++ applies Modify_Damage(200, WARHEAD_FIRE, target.Armor, distance)
-    // BARL armor = none, Fire vs none = 0.9 → round(200 * 0.9) = 180
+    // Direct east bullet deals 180, and the north/south bullets' edge splash
+    // adds 20 more in this 1x1 building layout.
     const barrel = makeBarrel(10, 10);
     const eastTarget = makeBarrel(11, 10, 500); // high HP to survive
     const ctx = makeCombatCtx([barrel, eastTarget]);
     structureDamage(ctx, barrel, 100);
-    expect(eastTarget.hp).toBe(320); // 500 - 180 = 320
+    expect(eastTarget.hp).toBe(300);
   });
 
   it('4 cardinal directions all receive damage simultaneously', () => {
@@ -225,13 +244,13 @@ describe('Barrel explosion: 200 Fire damage, cardinal directions (building.cpp:1
     const west = makeBarrel(9, 10, 500);
     const ctx = makeCombatCtx([barrel, north, east, south, west]);
     structureDamage(ctx, barrel, 100);
-    // Fire vs none = 0.9 → 200 * 0.9 = 180 damage each
-    for (const t of [north, east, south, west]) {
-      expect(t.hp, `target at (${t.cx},${t.cy})`).toBe(320);
-    }
+    expect(north.hp, `target at (${north.cx},${north.cy})`).toBe(320);
+    expect(east.hp, `target at (${east.cx},${east.cy})`).toBe(300);
+    expect(south.hp, `target at (${south.cx},${south.cy})`).toBe(300);
+    expect(west.hp, `target at (${west.cx},${west.cy})`).toBe(320);
   });
 
-  it('diagonal structures receive NO barrel explosion damage', () => {
+  it('diagonal structures receive edge splash damage', () => {
     const barrel = makeBarrel(10, 10);
     const ne = makeBarrel(11, 9, 500);
     const se = makeBarrel(11, 11, 500);
@@ -240,16 +259,16 @@ describe('Barrel explosion: 200 Fire damage, cardinal directions (building.cpp:1
     const ctx = makeCombatCtx([barrel, ne, se, sw, nw]);
     structureDamage(ctx, barrel, 100);
     for (const t of [ne, se, sw, nw]) {
-      expect(t.hp, `diagonal at (${t.cx},${t.cy})`).toBe(500);
+      expect(t.hp, `diagonal at (${t.cx},${t.cy})`).toBe(440);
     }
   });
 
-  it('structures 2+ cells away on cardinal receive NO damage', () => {
+  it('structures two cells away on cardinal receive edge splash damage', () => {
     const barrel = makeBarrel(10, 10);
     const far = makeBarrel(12, 10, 500); // 2 cells east
     const ctx = makeCombatCtx([barrel, far]);
     structureDamage(ctx, barrel, 100);
-    expect(far.hp).toBe(500);
+    expect(far.hp).toBe(470);
   });
 });
 
@@ -316,22 +335,22 @@ describe('Chain reactions: barrel-to-barrel propagation', () => {
     }
   });
 
-  it('diagonal barrels do NOT chain', () => {
+  it('diagonal barrels chain through projectile splash', () => {
     const b1 = makeBarrel(10, 10);
     const b2 = makeBarrel(11, 11); // SE diagonal
     const ctx = makeCombatCtx([b1, b2]);
     structureDamage(ctx, b1, 100);
     expect(b1.alive).toBe(false);
-    expect(b2.alive).toBe(true); // diagonal = no chain
+    expect(b2.alive).toBe(false);
   });
 
-  it('barrels 2 cells apart on cardinal do NOT chain', () => {
+  it('barrels 2 cells apart on cardinal chain through projectile splash', () => {
     const b1 = makeBarrel(10, 10);
     const b2 = makeBarrel(12, 10); // 2 cells east — gap between
     const ctx = makeCombatCtx([b1, b2]);
     structureDamage(ctx, b1, 100);
     expect(b1.alive).toBe(false);
-    expect(b2.alive).toBe(true);
+    expect(b2.alive).toBe(false);
   });
 
   it('BARL chains to BRL3 and vice-versa (mixed barrel types)', () => {
@@ -468,15 +487,16 @@ describe('Barrel entity damage uses Fire warhead (infantry armor=none)', () => {
     expect(tank.hp).toBeLessThan(hpBefore);
   });
 
-  it('entity in same cell as barrel (cx,cy) takes NO damage (barrel is not self-adjacent)', () => {
-    // C++ barrel fire-bullets target N/E/S/W cells only (1 cell away)
-    // An entity sitting on top of the barrel's own cell is NOT hit
+  it('entity in same cell as barrel takes splash damage from adjacent bullets', () => {
+    // The barrel bullets target N/E/S/W cells, but each impact uses the normal
+    // Explosion_Damage splash scan. Since the bullet source is null, an entity
+    // in the barrel cell is not excluded as the source object.
     const barrel = makeBarrel(10, 10);
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const hpBefore = victim.hp;
     const ctx = makeCombatCtx([barrel], [victim]);
     structureDamage(ctx, barrel, 100);
-    expect(victim.hp).toBe(hpBefore); // no damage at barrel's own cell
+    expect(victim.hp).toBeLessThan(hpBefore);
   });
 });
 
