@@ -61,11 +61,18 @@ function makeRefinery(house: House = House.Spain, cx = 55, cy = 55): MapStructur
   } as MapStructure;
 }
 
+function defaultRefineries(): MapStructure[] {
+  return [
+    makeRefinery(House.Spain, 70, 70),
+    makeRefinery(House.USSR, 74, 70),
+  ];
+}
+
 function makeContext(overrides: Partial<HarvesterContext> = {}): HarvesterContext {
   const map = makeMap();
   return {
     entities: [],
-    structures: [],
+    structures: defaultRefineries(),
     houseCredits: new Map(),
     map,
     isAllied: (a, b) => a === b,
@@ -546,7 +553,7 @@ describe('state machine: idle -> seeking', () => {
     expect(harv.mission).toBe(Mission.HARVEST);
   });
 
-  it('idle harvester stays idle when no ore exists', () => {
+  it('idle harvester enters GOINGTOIDLE when no ore exists', () => {
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
@@ -556,6 +563,8 @@ describe('state machine: idle -> seeking', () => {
 
     updateHarvester(ctx, harv);
 
+    expect(harv.harvesterState).toBe('goingtoidle');
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
   });
 
@@ -999,7 +1008,7 @@ describe('all ore depleted behavior', () => {
     expect(harv.oreLoad).toBe(10);
   });
 
-  it('idle harvester with no ore anywhere stays idle', () => {
+  it('idle harvester with no ore anywhere enters GOINGTOIDLE', () => {
     const map = makeMap();
     const ctx = makeContext({ map });
     const harv = makeHarvester(House.Spain, 50, 50);
@@ -1011,6 +1020,8 @@ describe('all ore depleted behavior', () => {
 
     updateHarvester(ctx, harv);
 
+    expect(harv.harvesterState).toBe('goingtoidle');
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
   });
 });
@@ -1385,18 +1396,27 @@ describe('ore spread rejection — C++ cell.cpp:3000-3008', () => {
     expect(map.overlay[50 * MAP_CELLS + 51]).toBe(0xFF);
   });
 
-  it('ore does not spread to vehicle-occupied cells', () => {
+  it('ore can spread to vehicle-occupied cells', () => {
     const map = makeMap();
     placeGold(map, 50, 50, 0x0E);
     map.setTerrain(51, 50, Terrain.CLEAR);
     map.overlay[50 * MAP_CELLS + 51] = 0xFF;
     map.vehicleOccupancy.add(50 * MAP_CELLS + 51);
 
-    for (let i = 1; i <= 200; i++) {
-      map.growOre(GameMap.ORE_GROWTH_INTERVAL * i);
+    // C++ Can_Tiberium_Germinate rejects bridges, visible buildings,
+    // non-buildable terrain, and non-empty overlay. It does not reject
+    // transient vehicle occupancy.
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (dx === 1 && dy === 0) continue;
+        map.wallType[(50 + dy) * MAP_CELLS + (50 + dx)] = 'BRIK';
+      }
     }
 
-    expect(map.overlay[50 * MAP_CELLS + 51]).toBe(0xFF);
+    expect(map.spreadTiberiumFromCell(50, 50)).toBe(true);
+    expect(map.overlay[50 * MAP_CELLS + 51]).not.toBe(0xFF);
+    expect(map.vehicleOccupancy.has(50 * MAP_CELLS + 51)).toBe(true);
   });
 });
 

@@ -56,6 +56,13 @@ function makeStructure(
   } as MapStructure;
 }
 
+function defaultRefineries(): MapStructure[] {
+  return [
+    makeStructure('PROC', House.Spain, 70, 70),
+    makeStructure('PROC', House.USSR, 74, 70),
+  ];
+}
+
 /** Create a GameMap with ore placed at specific cells */
 function makeMapWithOre(oreCells: { cx: number; cy: number; value?: number }[]): GameMap {
   const map = new GameMap();
@@ -86,7 +93,7 @@ function primeHarvestReady(entity: Entity): void {
 function makeHarvesterContext(overrides: Partial<HarvesterContext> = {}): HarvesterContext {
   return {
     entities: [],
-    structures: [],
+    structures: defaultRefineries(),
     houseCredits: new Map(),
     map: new GameMap(),
     isAllied: (a, b) => a === b,
@@ -219,7 +226,7 @@ describe('updateHarvester — state transitions', () => {
     expect(harv.moveTarget).not.toBeNull();
   });
 
-  it('idle harvester stays idle when no ore exists', () => {
+  it('idle harvester enters GOINGTOIDLE when no ore exists', () => {
     const map = new GameMap(); // no ore anywhere
     const harv = makeEntity(UnitType.V_HARV, House.Spain, 50 * CELL_SIZE + CELL_SIZE / 2, 50 * CELL_SIZE + CELL_SIZE / 2);
     harv.harvesterState = 'idle';
@@ -229,6 +236,8 @@ describe('updateHarvester — state transitions', () => {
 
     updateHarvester(ctx, harv);
 
+    expect(harv.harvesterState).toBe('goingtoidle');
+    updateHarvester(ctx, harv);
     expect(harv.harvesterState).toBe('idle');
   });
 

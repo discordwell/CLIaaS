@@ -40,6 +40,7 @@ import {
 import { Entity, resetEntityIds } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import { updateHarvester, type HarvesterContext } from '../engine/harvester';
+import { STRUCTURE_MAX_HP, type MapStructure } from '../engine/scenario';
 
 // ---------------------------------------------------------------------------
 // Parse rules.ini at test time (authoritative source of truth)
@@ -126,10 +127,35 @@ function makeHarv(house: House = House.Spain, cx = 50, cy = 50): Entity {
   return new Entity(UnitType.V_HARV, house, cx * CELL_SIZE + CELL_SIZE / 2, cy * CELL_SIZE + CELL_SIZE / 2);
 }
 
+function makeRefinery(house: House = House.Spain, cx = 70, cy = 70): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP['PROC'] ?? 400;
+  return {
+    type: 'PROC',
+    image: 'proc',
+    house,
+    cx,
+    cy,
+    hp: maxHp,
+    maxHp,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+  } as MapStructure;
+}
+
+function defaultRefineries(): MapStructure[] {
+  return [
+    makeRefinery(House.Spain, 70, 70),
+    makeRefinery(House.USSR, 74, 70),
+  ];
+}
+
 function makeCtx(overrides?: Partial<HarvesterContext>): HarvesterContext {
   return {
     entities: [],
-    structures: [],
+    structures: defaultRefineries(),
     houseCredits: new Map(),
     map: makeMap(),
     isAllied: (a, b) => a === b,
