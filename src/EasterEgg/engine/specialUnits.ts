@@ -268,23 +268,21 @@ function detonateMineOnEntity(ctx: SpecialUnitsContext, mine: MineLike, e: Entit
   if (mine.type === 'AP' && isInfantry) {
     // C++ infantry.cpp:928-936: AP mine splash damages all infantry within
     // 0xC0 leptons, roughly three TS cells in this engine's world units.
-    // Each target still runs ObjectClass::Take_Damage, so WARHEAD_HE verses
-    // are applied before HP changes.
+    // Each target still runs ObjectClass::Take_Damage, so pass the raw
+    // Rule.APMineDamage value and let damageEntity apply WARHEAD_HE verses.
     const SPLASH_RANGE = 3;
     for (const other of ctx.entities) {
       if (!other.alive || !other.stats.isInfantry || other.isAirUnit) continue;
       const dist = worldDist(other.pos, { x: blastX, y: blastY });
       if (dist <= SPLASH_RANGE) {
-        const damage = modifyDamage(mine.damage, 'HE', other.stats.armor, 0);
-        handleMineDamage(ctx, other, damage, 'HE');
+        handleMineDamage(ctx, other, mine.damage, 'HE');
       }
     }
   } else if (!isInfantry) {
     // C++ unit.cpp:1815-1837: vehicles trigger both mine types. AP mines use
     // raw damage 10, then ObjectClass::Take_Damage applies WARHEAD_HE verses.
     const rawDamage = mine.type === 'AV' ? mine.damage : 10;
-    const damage = modifyDamage(rawDamage, 'HE', e.stats.armor, 0);
-    handleMineDamage(ctx, e, damage, 'HE');
+    handleMineDamage(ctx, e, rawDamage, 'HE');
   }
 
   ctx.playSoundAt('building_explode', mine.cx * CELL_SIZE, mine.cy * CELL_SIZE);
