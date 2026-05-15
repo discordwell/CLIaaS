@@ -170,12 +170,11 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
     expect(approachCalled).toBe(true);
   });
 
-  it('does NOT call approachTarget when target is already in range', () => {
+  it('still calls approachTarget when target is already in range', () => {
     // Unit at (21,64) with Greek target at (20,64) — distance 1 cell, well
     // within weapon range 3 cells. C++ still calls Approach_Target; the C++
     // implementation's In_Range check at line 943 short-circuits the NavCom
-    // assignment. TS's approachTarget is gated externally to skip when
-    // inRange (matches net effect: no movement needed).
+    // assignment. The mission handler should not add a TS-only pre-check here.
     const guard = makeEntity(UnitType.I_E1, House.USSR, 21, 64);
     guard.mission = Mission.AREA_GUARD;
     guard.guardOrigin = { x: guard.pos.x, y: guard.pos.y };
@@ -191,7 +190,7 @@ describe('SCG06EA tick 76 — Mission_Guard_Area Approach_Target (C++ foot.cpp:1
 
     updateAreaGuard(ctx, guard, /* timerFired */ true);
 
-    expect(approachCalled).toBe(false);
+    expect(approachCalled).toBe(true);
   });
 
   it('does NOT call approachTarget when moveTarget is already set', () => {
