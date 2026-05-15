@@ -327,6 +327,7 @@ describe('Scatter triggers (infantry.cpp Take_Damage + Fear_AI)', () => {
       e.isDriving = false;
       e.headToLX = 0;
       e.headToLY = 0;
+      e.doStopDriverAction(ctx.tick);
     };
 
     const attacker = entityAtCell(UnitType.I_E1, House.Spain, 72, 52);
