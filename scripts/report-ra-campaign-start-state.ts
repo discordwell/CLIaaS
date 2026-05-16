@@ -79,10 +79,17 @@ function normalizeHouse(name: string): House {
     case 'turkey': return House.Turkey;
     case 'goodguy': return House.GoodGuy;
     case 'badguy': return House.BadGuy;
-    case 'neutral':
-    case 'special':
-    default:
-      return House.Neutral;
+    case 'special': return House.Special;
+    case 'neutral': return House.Neutral;
+    case 'multi1': return House.Multi1;
+    case 'multi2': return House.Multi2;
+    case 'multi3': return House.Multi3;
+    case 'multi4': return House.Multi4;
+    case 'multi5': return House.Multi5;
+    case 'multi6': return House.Multi6;
+    case 'multi7': return House.Multi7;
+    case 'multi8': return House.Multi8;
+    default: return House.Neutral;
   }
 }
 
@@ -255,15 +262,30 @@ function buildExpectedStructurePlacements(scenarioId: string): StructurePlacemen
     });
   }
 
-  for (const baseStructure of data.baseStructures) {
-    const pos = cellIndexToPos(baseStructure.cell);
+  return expected;
+}
+
+function buildExpectedAutoAircraftPlacements(scenarioId: string): EntityPlacement[] {
+  const text = fs.readFileSync(path.join(ASSETS_DIR, `${scenarioId}.ini`), 'utf8');
+  const data = parseScenarioINI(text);
+  const expected: EntityPlacement[] = [];
+
+  for (const structure of data.structures) {
+    if (structure.type !== 'HPAD' || structure.hp <= 0) {
+      continue;
+    }
+
+    const house = normalizeHouse(structure.house);
+    const isSoviet = house === House.USSR || house === House.Ukraine || house === House.BadGuy;
+    const pos = cellIndexToPos(structure.cell);
     expected.push({
-      type: baseStructure.type,
-      house: normalizeHouse(baseStructure.house),
-      cx: pos.cx,
+      type: isSoviet ? 'HIND' : 'HELI',
+      house,
+      cx: pos.cx + 1,
       cy: pos.cy,
+      facing: 0,
+      subCell: -1,
       trigger: '',
-      alive: true,
     });
   }
 
@@ -273,6 +295,7 @@ function buildExpectedStructurePlacements(scenarioId: string): StructurePlacemen
 async function auditScenarioStartState(scenarioId: string): Promise<StartStateReport> {
   const issues: StartStateIssue[] = [];
   const expectedEntities = buildExpectedEntityPlacements(scenarioId);
+  const expectedAutoAircraft = buildExpectedAutoAircraftPlacements(scenarioId);
   const expectedStructures = buildExpectedStructurePlacements(scenarioId);
   const scenario = await loadScenarioFromDisk(scenarioId);
 
@@ -307,7 +330,7 @@ async function auditScenarioStartState(scenarioId: string): Promise<StartStateRe
   }));
 
   const entityDiff = diffPlacements(
-    expectedEntities.supported.map(entityPlacementKey),
+    [...expectedEntities.supported, ...expectedAutoAircraft].map(entityPlacementKey),
     actualEntities.map(entityPlacementKey),
   );
   const structureDiff = diffPlacements(
@@ -348,7 +371,7 @@ async function auditScenarioStartState(scenarioId: string): Promise<StartStateRe
     scenarioId,
     issues,
     counts: {
-      expectedEntities: expectedEntities.supported.length,
+      expectedEntities: expectedEntities.supported.length + expectedAutoAircraft.length,
       actualEntities: actualEntities.length,
       expectedStructures: expectedStructures.length,
       actualStructures: actualStructures.length,

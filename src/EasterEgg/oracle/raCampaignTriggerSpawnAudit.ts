@@ -6,7 +6,6 @@ import {
   executeTriggerAction,
   houseIdToHouse,
   parseScenarioINI,
-  resolveTeamOriginCell,
   type ScenarioTrigger,
   type TeamMission,
   type TeamType,
@@ -70,10 +69,17 @@ function normalizeHouse(name: string): House {
     case 'turkey': return House.Turkey;
     case 'goodguy': return House.GoodGuy;
     case 'badguy': return House.BadGuy;
-    case 'neutral':
-    case 'special':
-    default:
-      return House.Neutral;
+    case 'special': return House.Special;
+    case 'neutral': return House.Neutral;
+    case 'multi1': return House.Multi1;
+    case 'multi2': return House.Multi2;
+    case 'multi3': return House.Multi3;
+    case 'multi4': return House.Multi4;
+    case 'multi5': return House.Multi5;
+    case 'multi6': return House.Multi6;
+    case 'multi7': return House.Multi7;
+    case 'multi8': return House.Multi8;
+    default: return House.Neutral;
   }
 }
 
@@ -202,15 +208,12 @@ function getFirstSupportedTransportCapacity(team: TeamType): number {
  */
 function countSupportedCargo(team: TeamType): number {
   let total = 0;
-  let foundTransport = false;
   for (const member of team.members) {
     const stats = UNIT_STATS[member.type];
     if (!stats) continue;
     for (let i = 0; i < member.count; i++) {
       const isTransport = (stats.passengers ?? 0) > 0;
-      if (isTransport && !foundTransport) {
-        foundTransport = true; // first transport is the carrier
-      } else if (!stats.isAircraft) {
+      if (!isTransport && !stats.isAircraft) {
         total += 1;
       }
     }
@@ -246,15 +249,19 @@ function resolveOriginCell(
   houseEdges: Map<House, string>,
 ): { cell?: { cx: number; cy: number }; entryCell?: { cx: number; cy: number }; issue?: string } {
   const house = houseIdToHouse(team.house);
-  const cell = resolveTeamOriginCell(team.origin, house, data.waypoints, houseEdges, data.mapBounds, () => 0.5);
-  if (cell) {
+  const waypoint = data.waypoints.get(team.origin);
+  if (waypoint) {
     return {
-      cell,
-      entryCell: calculateHouseEdgeSpawnCell(house, houseEdges, data.mapBounds, cell, () => 0.5) ?? cell,
+      cell: waypoint,
+      entryCell: withFixedRandom(() =>
+        calculateHouseEdgeSpawnCell(house, houseEdges, data.mapBounds, waypoint),
+      ) ?? waypoint,
     };
   }
 
-  const fallback = calculateHouseEdgeSpawnCell(house, houseEdges, data.mapBounds, undefined, () => 0.5);
+  const fallback = withFixedRandom(() =>
+    calculateHouseEdgeSpawnCell(house, houseEdges, data.mapBounds),
+  );
   if (fallback) {
     return { cell: fallback, entryCell: fallback };
   }
@@ -536,26 +543,27 @@ function auditSpawnCheck(
     });
   }
 
-  if (origin.cell) {
+  const expectedSpawnCell = origin.entryCell ?? origin.cell;
+  if (expectedSpawnCell) {
     for (const entity of visibleEntities) {
       const cell = worldToCell(entity.pos.x, entity.pos.y);
       if (entity.stats.isAircraft) {
-        if (origin.entryCell && !cellsEqual(cell, origin.entryCell)) {
+        if (!cellsEqual(cell, expectedSpawnCell)) {
           issues.push({
             severity: 'error',
             code: 'aircraft-spawn-position-mismatch',
-            message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of (${origin.entryCell.cx},${origin.entryCell.cy})`,
+            message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> aircraft team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of (${expectedSpawnCell.cx},${expectedSpawnCell.cy})`,
           });
         }
         // C++ reinf.cpp:479-481 assigns MISSION_GUARD/Commence only to
         // non-aircraft. Aircraft reinforcements spawn airborne with their
         // constructor mission state; TeamClass::AI assigns MOVE/UNLOAD later
         // from the team mission script already checked above.
-      } else if (!cellsEqual(cell, origin.cell)) {
+      } else if (!cellsEqual(cell, expectedSpawnCell)) {
         issues.push({
           severity: 'error',
           code: 'ground-spawn-position-mismatch',
-          message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of (${origin.cell.cx},${origin.cell.cy})`,
+          message: `${scenarioId}: trigger "${trigger.name}" ${slot} -> team "${team.name}" spawned ${entity.type} at (${cell.cx},${cell.cy}) instead of (${expectedSpawnCell.cx},${expectedSpawnCell.cy})`,
         });
       }
     }
