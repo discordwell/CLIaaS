@@ -1983,7 +1983,26 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         // and Assign_Destination(adjacent cell) so the unit clears the LZ.
         passenger.alive = true;
         if (passenger.stats.isInfantry) {
-          const spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+          // C++ aircraft.cpp:1175-1186 picks the landed transport up from the
+          // map before Exit_Object(), then places it down again afterwards.
+          // That clears Flag.Occupy.Vehicle just for Closest_Free_Spot so the
+          // passenger can unlimbo into a legal infantry sub-cell under the LZ.
+          const transportCell = entity.cell;
+          const pickedUpTransport =
+            entity.flightAltitude === 0 &&
+            ctx.map.getOccupancy(transportCell.cx, transportCell.cy) === entity.id &&
+            ctx.map.hasVehicleOccupancy(transportCell.cx, transportCell.cy);
+          if (pickedUpTransport) {
+            ctx.map.clearVehicleOccupancy(transportCell.cx, transportCell.cy, entity.id);
+          }
+          let spot: ReturnType<typeof closestInfantryUnlimboSpot>;
+          try {
+            spot = closestInfantryUnlimboSpot(ctx, passenger, entity.leptonX, entity.leptonY);
+          } finally {
+            if (pickedUpTransport) {
+              ctx.map.setVehicleOccupancy(transportCell.cx, transportCell.cy, entity.id);
+            }
+          }
           if (!spot) {
             entity.passengers.shift();
             passenger.alive = false;

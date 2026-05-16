@@ -595,12 +595,10 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           for (const id of c.unitIds) {
             const e = game.entityById.get(id);
             if (!e?.alive || !e.isPlayerUnit) continue;
-            clearTeamScripts(e);
-            e.mission = Mission.GUARD;
-            e.target = null;
-            e.moveTarget = null;
-            e.path = [];
-            e.pathIndex = 0;
+            // C++ agent_harness.cpp handles stop as Assign_Mission(MISSION_GUARD)
+            // only. It does not clear TarCom/NavCom or force an immediate mission
+            // transition, so rearming units keep their current target.
+            assignMission(e, Mission.GUARD);
           }
           results.push({ cmd: 'stop', ok: true });
           break;

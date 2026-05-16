@@ -19,6 +19,8 @@ import {
   UnitType, House, Mission, AnimState, UNIT_STATS, CELL_SIZE,
   cellToWorld, worldToCell, worldDist, CIVILIAN_UNIT_TYPES,
 } from '../engine/types';
+import { type AircraftContext, updateAircraft } from '../engine/aircraft';
+import { GameMap } from '../engine/map';
 import {
   calculateHouseEdgeSpawnCell,
   checkTriggerEvent,
@@ -282,6 +284,53 @@ describe('Transport helicopter landing without helipad', () => {
 
     expect(tran.passengers.length).toBe(1);
     expect(tran.passengers[0].type).toBe(UnitType.I_EINSTEIN);
+  });
+
+  it('landed TRAN temporarily clears its occupy bit while unloading infantry', () => {
+    const map = new GameMap();
+    const entities: Entity[] = [];
+    const entityById = new Map<number, Entity>();
+    const ctx: AircraftContext = {
+      entities,
+      entityById,
+      structures: [],
+      map,
+      unitsLeftMap: 0,
+      civiliansEvacuated: 0,
+      isAllied: (a, b) => a === b,
+      movementSpeed: (entity) => entity.stats.speed * 0.375,
+      idleMission: () => Mission.GUARD,
+      fireWeaponAt: () => {},
+      fireWeaponAtStructure: () => {},
+      getROFBias: () => 1.0,
+      getPowerFraction: () => 1.0,
+    };
+
+    const landing = cellToWorld(63, 47);
+    const tran = new Entity(UnitType.V_TRAN, House.Greece, landing.x, landing.y);
+    tran.aircraftState = 'unload_eject';
+    tran.flightAltitude = 0;
+    tran.mission = Mission.UNLOAD;
+    tran.missionTimer = 0;
+    tran.isALoaner = true;
+    const tanya = new Entity(UnitType.I_TANYA, House.Greece, landing.x, landing.y);
+    tanya.inLimbo = true;
+    tanya.alive = true;
+    tanya.transportRef = tran;
+    tran.passengers.push(tanya);
+    entities.push(tran);
+    entityById.set(tran.id, tran);
+    map.setVehicleOccupancy(tran.cell.cx, tran.cell.cy, tran.id);
+
+    updateAircraft(ctx, tran);
+
+    expect(tran.passengers).toHaveLength(0);
+    expect(tanya.alive).toBe(true);
+    expect(tanya.inLimbo).toBe(false);
+    expect(tanya.transportRef).toBe(tran);
+    expect(entities).toContain(tanya);
+    expect(map.hasVehicleOccupancy(tran.cell.cx, tran.cell.cy)).toBe(true);
+    expect(map.getOccupancy(tran.cell.cx, tran.cell.cy)).toBe(tran.id);
   });
 });
 

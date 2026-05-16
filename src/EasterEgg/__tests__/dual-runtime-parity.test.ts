@@ -40,6 +40,17 @@ function singleWasmUnit(
   return matches[0];
 }
 
+function topLeftUnit<T extends { t: string; cx: number; cy: number; id: number }>(
+  units: T[],
+  type: string,
+): T {
+  const match = units
+    .filter(unit => unit.t === type)
+    .sort((a, b) => a.cy - b.cy || a.cx - b.cx || a.id - b.id)[0];
+  expect(match, `expected at least one ${type}`).toBeDefined();
+  return match;
+}
+
 function hasAlliedStructure(state: AgentState | RAGameState, type: string): boolean {
   return state.structures.some((structure) => structure.ally && structure.t === type);
 }
@@ -93,6 +104,46 @@ describe.skipIf(!serverUp)('Dual Runtime Parity', () => {
       expect(wasmStoppedJeep.cx).toBe(45);
       expect(wasmStoppedJeep.cy).toBe(84);
       expect(tsStoppedJeep.hp).toBe(wasmStoppedJeep.hp);
+    });
+  }, 300_000);
+
+  it('keeps SCG01EA stop command from clearing a rearming JEEP target', async () => {
+    await withDualScenario('SCG01EA', async (handle) => {
+      const idle = await stepBoth(handle, 60);
+      const tsMoveJeep = topLeftUnit(idle.ts.state.units, 'JEEP');
+      const wasmMoveJeep = topLeftUnit(idle.wasm.state.units, 'JEEP');
+
+      const moved = await stepBoth(
+        handle,
+        120,
+        [{ cmd: 'move', unitIds: [tsMoveJeep.id], cx: 45, cy: 84 }],
+        [{ cmd: 'move', ids: [wasmMoveJeep.id], cx: 45, cy: 84 }],
+      );
+      const tsStopJeep = topLeftUnit(moved.ts.state.units, 'JEEP');
+      const wasmStopJeep = topLeftUnit(moved.wasm.state.units, 'JEEP');
+
+      const stopped = await stepBoth(
+        handle,
+        1,
+        [{ cmd: 'stop', unitIds: [tsStopJeep.id] }],
+        [{ cmd: 'stop', ids: [wasmStopJeep.id] }],
+      );
+
+      const tsAfter = stopped.ts.state.units.find(unit => unit.id === tsStopJeep.id);
+      const wasmAfter = stopped.wasm.state.units.find(unit => unit.id === wasmStopJeep.id) as
+        | (RAEntity & { tlx?: number; tly?: number })
+        | undefined;
+      expect(tsAfter).toBeDefined();
+      expect(wasmAfter).toBeDefined();
+      expect(wasmAfter?.tlx, 'C++ stop preserves TarCom target x').toBeGreaterThan(0);
+      expect(wasmAfter?.tly, 'C++ stop preserves TarCom target y').toBeGreaterThan(0);
+      expect(tsAfter?.tid, 'TS stop must preserve TarCom like Assign_Mission(GUARD)').toBeDefined();
+
+      const tsTarget = stopped.ts.state.enemies.find(unit => unit.id === tsAfter!.tid);
+      expect(tsTarget, 'TS preserved target remains alive').toBeDefined();
+      expect(tsTarget?.t).toBe('E1');
+      expect(tsTarget?.cx).toBe(Math.floor((wasmAfter!.tlx ?? 0) / 256));
+      expect(tsTarget?.cy).toBe(Math.floor((wasmAfter!.tly ?? 0) / 256));
     });
   }, 300_000);
 
