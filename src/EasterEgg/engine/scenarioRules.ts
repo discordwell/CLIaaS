@@ -2,6 +2,7 @@ import {
   type ArmorType,
   type ProductionItem,
   PRODUCTION_ITEMS,
+  SpeedClass,
   type UnitStats,
   UNIT_STATS,
   type WarheadMeta,
@@ -100,6 +101,12 @@ export function buildScenarioRuleOverrides(
     if (section.has('GuardRange')) base.guardRange = Number.parseInt(section.get('GuardRange')!, 10);
     if (section.has('Ammo')) base.maxAmmo = Number.parseInt(section.get('Ammo')!, 10);
     if (section.has('Cost')) base.cost = Number.parseInt(section.get('Cost')!, 10);
+    if (section.has('Tracked') && !base.isInfantry && !base.isAircraft && !base.isVessel) {
+      const tracked = parseIniBool(section.get('Tracked'));
+      if (tracked !== undefined) {
+        base.speedClass = tracked ? SpeedClass.TRACK : SpeedClass.WHEEL;
+      }
+    }
     if (section.has('Owner')) {
       const owner = normalizeOwnerToFaction(section.get('Owner'));
       if (owner !== undefined) base.owner = owner;

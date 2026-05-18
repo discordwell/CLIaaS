@@ -678,11 +678,11 @@ export const ANT_ANIM = {
   deathBase: 104, deathCount: 8,
 };
 
-// === Speed Classes (C++ defines.h:3043-3054, udata.cpp:865 forces all vehicles to WHEEL) ===
+// === Speed Classes (C++ defines.h:3043-3054, UnitTypeClass::Read_INI Tracked= override) ===
 export enum SpeedClass {
   FOOT = 0,    // Bipedal (infantry & dogs)
-  TRACK = 1,   // Tracked locomotion (unused — udata.cpp:865 overrides all to WHEEL)
-  WHEEL = 2,   // All vehicles including tanks, ants, jeep, trucks
+  TRACK = 1,   // Tracked locomotion when scenario Tracked=yes overrides the default
+  WHEEL = 2,   // Default vehicle locomotion including tanks, ants, jeep, trucks
   WINGED = 3,  // Aircraft (helicopters, transports)
   FLOAT = 4,   // Ships (LST)
 }
