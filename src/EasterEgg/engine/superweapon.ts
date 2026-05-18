@@ -14,7 +14,7 @@ import {
   worldDist, worldToCell, type WarheadType,
   WEAPON_STATS,
 } from './types';
-import { Entity } from './entity';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type Effect } from './renderer';
 import { Terrain, type GameMap } from './map';
@@ -33,6 +33,15 @@ const CHRONO_VORTEX_CHANCE = 0.2;
 
 /** C++ rules.cpp:204 QuakeChance=0.2 → 20% chance per chronoshift */
 const CHRONO_QUAKE_CHANCE = 0.2;
+
+function applySonarPulseReveal(entity: Entity, duration: number): void {
+  entity.sonarPulseTimer = duration;
+  // C++ house.cpp:2645-2646: PulseCountDown is set, then Do_Uncloak().
+  if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+    entity.cloakState = CloakState.UNCLOAKING;
+    entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Context interface — everything the superweapon functions need from Game
@@ -178,7 +187,7 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
         for (const e of ctx.entities) {
           if (!e.alive || !e.stats.isCloakable) continue;
           if (ctx.isAllied(e.house, s.house)) continue;
-          e.sonarPulseTimer = SONAR_REVEAL_TICKS;
+          applySonarPulseReveal(e, SONAR_REVEAL_TICKS);
         }
         state.ready = false;
         state.chargeTick = 0;
@@ -228,7 +237,7 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
       for (const e of ctx.entities) {
         if (!e.alive || !e.stats.isCloakable) continue;
         if (ctx.isAllied(e.house, state.house as House)) continue;
-        e.sonarPulseTimer = SONAR_REVEAL_TICKS;
+        applySonarPulseReveal(e, SONAR_REVEAL_TICKS);
       }
       state.ready = false;
       state.chargeTick = 0;

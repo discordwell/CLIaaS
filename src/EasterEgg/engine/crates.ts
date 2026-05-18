@@ -10,7 +10,7 @@ import {
   EXPLOSION_FRAMES, WEAPON_STATS,
 } from './types';
 import { ScenarioRandom } from './random';
-import { Entity, SONAR_PULSE_DURATION } from './entity';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
 import { type GameMap } from './map';
 import { type Effect } from './renderer';
 import { type MapStructure } from './scenario';
@@ -467,6 +467,10 @@ export function pickupCrate(ctx: CrateContext, crate: Crate, unit: Entity): void
         if (!e.alive || !e.stats.isCloakable) continue;
         if (ctx.isAllied(e.house, unit.house)) continue;
         e.sonarPulseTimer = SONAR_PULSE_DURATION;
+        if (e.cloakState === CloakState.CLOAKED || e.cloakState === CloakState.CLOAKING) {
+          e.cloakState = CloakState.UNCLOAKING;
+          e.cloakTimer = CLOAK_TRANSITION_FRAMES;
+        }
       }
       ctx.playSound('cannon'); // sonar ping
       ctx.evaMessages.push({ text: 'SONAR PULSE', tick: ctx.tick });

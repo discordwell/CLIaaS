@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { Entity, resetEntityIds, SONAR_PULSE_DURATION } from '../engine/entity';
+import { Entity, resetEntityIds, SONAR_PULSE_DURATION, CloakState, CLOAK_TRANSITION_FRAMES } from '../engine/entity';
 import {
   UnitType, House, CELL_SIZE, Mission,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponState,
@@ -1074,13 +1074,14 @@ describe('Sonar Pulse — submarine detection mechanics', () => {
     expect(sub.sonarPulseTimer).toBe(0);
   });
 
-  it('sonarPulseTimer is set to SONAR_REVEAL_TICKS on activation', () => {
+  it('sonarPulseTimer is set and cloaked subs are forced to uncloak on activation', () => {
     const ctx = makeMockSuperweaponContext();
     // Create an SPEN building for sonar pulse
     const struct = makeStructure('SPEN', House.Spain, 5, 5);
     ctx.structures.push(struct);
     // Create a cloakable enemy sub
     const sub = makeEntity(UnitType.V_SS, House.USSR, 200, 200);
+    sub.cloakState = CloakState.CLOAKED;
     ctx.entities.push(sub);
     // Set up superweapon state as ready
     const state = makeSwState(SuperweaponType.SONAR_PULSE, House.Spain, {
@@ -1090,6 +1091,8 @@ describe('Sonar Pulse — submarine detection mechanics', () => {
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.SONAR_PULSE}`, state);
     updateSuperweapons(ctx);
     expect(sub.sonarPulseTimer).toBe(SONAR_REVEAL_TICKS);
+    expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
+    expect(sub.cloakTimer).toBe(CLOAK_TRANSITION_FRAMES);
   });
 
   it('sonar pulse only reveals cloakable enemy units', () => {

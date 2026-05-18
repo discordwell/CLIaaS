@@ -5,9 +5,9 @@
 
 import {
   CELL_SIZE, MAP_CELLS,
-  House, worldDist,
+  House,
 } from './types';
-import { type Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
+import { type Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
 
@@ -118,23 +118,22 @@ export function updateFogOfWar(ctx: FogContext): void {
 }
 
 /**
- * Detect submerged/cloaked units using two C++ mechanisms:
+ * Detect submerged/cloaked units using the C++ scanner-adjacency mechanism:
  *
- * 1. Global sonar sweep (C++ house.cpp:2622-2632 — SPC_SONAR_PULSE):
- *    When the player has any anti-sub unit alive, ALL enemy cloakable entities
- *    are detected regardless of distance. The C++ sonar pulse iterates all
- *    vessels with no range check.
+ * C++ foot.cpp:1452-1465:
+ *   A cloaked unit checks the 8 adjacent cells for enemy scanner units and calls
+ *   Do_Shimmer(), which is compiled to Do_Uncloak() in techno.cpp:4266-4277.
+ *   Detection range is exactly 1 cell, not the scanner's sight range.
  *
- * 2. Scanner adjacency (C++ foot.cpp:1373-1386):
- *    A cloaked unit checks the 8 adjacent cells for enemy IsScanner units.
- *    Detection range is exactly 1 cell (adjacency), NOT the scanner's sight range.
+ * C++ house.cpp:2628-2647 global sonar is a separate superweapon path handled
+ * by the superweapon/crate systems; ordinary anti-sub units do not create a
+ * per-tick global sonar sweep.
  */
 export function updateSubDetection(ctx: FogContext): void {
-  // Collect all anti-sub detectors for scanner adjacency and global sonar checks.
-  const playerAntiSubs: Entity[] = [];
+  const scanners: Entity[] = [];
   for (const dd of ctx.entities) {
     if (dd.alive && dd.stats.isAntiSub) {
-      playerAntiSubs.push(dd);
+      scanners.push(dd);
     }
   }
 
@@ -143,13 +142,10 @@ export function updateSubDetection(ctx: FogContext): void {
     if (!sub.alive || !sub.stats.isCloakable) continue;
     if (sub.cloakState !== CloakState.CLOAKED && sub.cloakState !== CloakState.CLOAKING) continue;
 
-    let detected = false;
-    let nearScanner = false;
-
     const subCx = Math.floor(sub.pos.x / CELL_SIZE);
     const subCy = Math.floor(sub.pos.y / CELL_SIZE);
 
-    for (const dd of playerAntiSubs) {
+    for (const dd of scanners) {
       if (ctx.entitiesAllied(dd, sub)) continue;
 
       const ddCx = Math.floor(dd.pos.x / CELL_SIZE);
@@ -157,32 +153,11 @@ export function updateSubDetection(ctx: FogContext): void {
       const cellDx = Math.abs(subCx - ddCx);
       const cellDy = Math.abs(subCy - ddCy);
 
-      // C++ foot.cpp:1373-1386: scanner adjacency — check 8 adjacent cells (1-cell range)
       if (cellDx <= 1 && cellDy <= 1 && (cellDx + cellDy > 0)) {
-        detected = true;
+        sub.cloakState = CloakState.UNCLOAKING;
+        sub.cloakTimer = CLOAK_TRANSITION_FRAMES;
         break;
       }
-
-      // Track if this sub is within any scanner's sight range.
-      // When a scanner IS nearby, adjacency is the only detection path —
-      // the global sonar sweep defers to scanner adjacency.
-      const dist = worldDist(dd.pos, sub.pos);
-      if (dist <= dd.stats.sight) {
-        nearScanner = true;
-      }
-    }
-
-    // C++ house.cpp:2622-2632: global sonar sweep — when the player has anti-sub
-    // units, enemy subs NOT in any scanner's detection zone are detected globally.
-    // Subs within a scanner's sight range use adjacency-only detection (foot.cpp).
-    if (!detected && !nearScanner && playerAntiSubs.some(dd => !ctx.entitiesAllied(dd, sub))) {
-      detected = true;
-    }
-
-    if (detected) {
-      sub.sonarPulseTimer = SONAR_PULSE_DURATION;
-      sub.cloakState = CloakState.UNCLOAKING;
-      sub.cloakTimer = CLOAK_TRANSITION_FRAMES;
     }
   }
 }

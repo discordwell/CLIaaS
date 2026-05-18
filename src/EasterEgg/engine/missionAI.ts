@@ -976,15 +976,6 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
   }
 
-  // C++ techno.cpp:2747 — cannot fire unless fully UNCLOAKED. Start uncloaking and wait.
-  if (entity.stats.isCloakable && entity.cloakState !== CloakState.UNCLOAKED && entity.target) {
-    if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
-      entity.cloakState = CloakState.UNCLOAKING;
-      entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
-    }
-    return; // wait until fully uncloaked before firing
-  }
-
   // Minimum range check: artillery can't fire at point-blank
   if (entity.weapon?.minRange && entity.target) {
     const dist = leptonDist(entity.leptonX, entity.leptonY, entity.target.leptonX, entity.target.leptonY);
@@ -1198,6 +1189,21 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       return;
     }
 
+    // C++ TechnoClass::Can_Fire checks self-cloak only after target legality,
+    // weapon, Arm, range, and ammo gates. UnitClass returns FIRE_CLOAKED before
+    // turret/body-facing checks, while VesselClass continues through its
+    // NavCom/facing gates even when TechnoClass returned FIRE_CLOAKED. Handle
+    // non-vessels here; vessels are handled after their class-specific gates.
+    if (!entity.isNavalUnit &&
+        entity.stats.isCloakable &&
+        entity.cloakState !== CloakState.UNCLOAKED) {
+      if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+        entity.cloakState = CloakState.UNCLOAKING;
+        entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+      }
+      return;
+    }
+
     // C++ UnitClass::Can_Fire (unit.cpp:4159-4181) — FIRE_ROTATING / FIRE_FACING gate.
     // C++ UnitClass::AI order: Firing_AI (unit.cpp:425) runs BEFORE Rotation_AI
     // (unit.cpp:437). That means Can_Fire checks the turret facing from END of
@@ -1282,6 +1288,19 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       if (diff >= 8) {
         return; // FIRE_FACING (unit.cpp requires diff < 8)
       }
+    }
+
+    // C++ VesselClass::Can_Fire runs its vessel gates even when TechnoClass has
+    // returned FIRE_CLOAKED, so submarines do not begin surfacing until the
+    // target is in range and NavCom/facing no longer block the shot.
+    if (entity.isNavalUnit &&
+        entity.stats.isCloakable &&
+        entity.cloakState !== CloakState.UNCLOAKED) {
+      if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+        entity.cloakState = CloakState.UNCLOAKING;
+        entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+      }
+      return;
     }
 
     if (activeWeapon && entity.attackCooldown <= 0) {

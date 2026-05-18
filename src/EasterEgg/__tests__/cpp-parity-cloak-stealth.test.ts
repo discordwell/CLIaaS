@@ -603,9 +603,9 @@ describe('Vessel Is_Allowed_To_Recloak (vessel.cpp:1951-1954)', () => {
 });
 
 // #############################################################################
-// SECTION 15: Sonar Detection — Global Sweep + Scanner Adjacency
-// C++ house.cpp:2622-2632 — Global sonar: all anti-sub alive -> detect all cloaked vessels
-// C++ foot.cpp:1373-1386 — Scanner adjacency: 8 adjacent cells for IsScanner
+// SECTION 15: Sonar Detection — Scanner Adjacency
+// C++ foot.cpp:1452-1465 — Scanner adjacency: 8 adjacent cells for IsScanner
+// C++ house.cpp:2628-2647 — Global sonar is a superweapon path, not passive DD sight.
 // #############################################################################
 
 describe('Sonar detection mechanisms (house.cpp:2622, foot.cpp:1373)', () => {
@@ -623,7 +623,8 @@ describe('Sonar detection mechanisms (house.cpp:2622, foot.cpp:1373)', () => {
 
     // Scanner adjacency detection should force uncloak
     expect(ss.cloakState).toBe(CloakState.UNCLOAKING);
-    expect(ss.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(ss.cloakTimer).toBe(CLOAK_TRANSITION_FRAMES);
+    expect(ss.sonarPulseTimer).toBe(0);
   });
 
   it('submarine far from scanner is NOT detected by adjacency alone', () => {
@@ -638,18 +639,8 @@ describe('Sonar detection mechanisms (house.cpp:2622, foot.cpp:1373)', () => {
 
     updateSubDetection(ctx);
 
-    // No global sonar triggered (need sonarSpiedTarget or special mechanism)
-    // Far scanner should not detect via adjacency
-    // Note: the actual detection depends on whether global sonar sweep is active
-    // If DD exists alive, global sweep detects ALL cloaked vessels in C++
-    // TS implementation may differ — test what TS actually does
-    if (ss.cloakState === CloakState.UNCLOAKING) {
-      // Global sonar sweep detected it (C++ parity: any anti-sub alive = detect all)
-      expect(ss.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
-    } else {
-      // No global sonar in TS — only adjacency-based
-      expect(ss.cloakState).toBe(CloakState.CLOAKED);
-    }
+    expect(ss.cloakState).toBe(CloakState.CLOAKED);
+    expect(ss.sonarPulseTimer).toBe(0);
   });
 
   it('allied scanner does NOT detect own submarine', () => {
