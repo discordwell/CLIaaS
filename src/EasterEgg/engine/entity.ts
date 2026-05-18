@@ -753,29 +753,33 @@ export class Entity {
   }
 
   /** Start C++ DO_LIE_DOWN (MasterDoControls rate=2, E1 DoControls count=2). */
-  startLieDownDoing(tick: number): void {
-    if (!this.stats.isInfantry) return;
-    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+  startLieDownDoing(tick: number): boolean {
+    if (!this.stats.isInfantry) return false;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return false;
     const previous = this.doing;
     this.doing = 'lie_down';
     this.doingStage = 0;
     this.doingRate = 2;
     this.doingRateTimer = 2;
     this.doingSetTick = tick;
+    this.isProne = true;
     this.noteDoingOverlapDown(previous, tick);
+    return true;
   }
 
   /** Start C++ DO_GET_UP (MasterDoControls rate=3, E1 DoControls count=2). */
-  startGetUpDoing(tick: number): void {
-    if (!this.stats.isInfantry) return;
-    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+  startGetUpDoing(tick: number): boolean {
+    if (!this.stats.isInfantry) return false;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return false;
     const previous = this.doing;
     this.doing = 'get_up';
     this.doingStage = 0;
     this.doingRate = 3;
     this.doingRateTimer = 3;
     this.doingSetTick = tick;
+    this.isProne = false;
     this.noteDoingOverlapDown(previous, tick);
+    return true;
   }
 
   /** C++ InfantryClass::Is_Ready_To_Random_Animate — checks all gates.

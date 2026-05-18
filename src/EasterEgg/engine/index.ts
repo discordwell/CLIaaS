@@ -5813,7 +5813,6 @@ export class Game {
 
     if (entity.isProne) {
       if (entity.fear < Entity.FEAR_ANXIOUS) {
-        entity.isProne = false;
         entity.startGetUpDoing(this.tick);
       }
     } else if (
@@ -5826,7 +5825,6 @@ export class Game {
       !drivingAtLogicStart &&
       entity.navComClearedTick !== this.tick
     ) {
-      entity.isProne = true;
       entity.startLieDownDoing(this.tick);
     }
 
@@ -13749,16 +13747,6 @@ export class Game {
     // but only on the frame that MARK_DOWN/MARK_OVERLAP_DOWN actually runs.
     if (overlapPlacementEvent && this.infantryOverlapTouchesPlayerMappedCell(entity)) return true;
 
-    // C++ TechnoClass::Per_Cell_Process checks Map[cell].IsVisible, not strict
-    // PlayerPtr sight. Player-allied, non-PlayerPtr units can therefore discover
-    // themselves when their cell is visible to the player house. This is not a
-    // blanket allied-sight reveal for enemies; only the object whose own house is
-    // allied to PlayerPtr gets this fallback.
-    if (occupierPlacementEvent && this.isAllied(entity.house, this.playerHouse)) {
-      const playerIdx = Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1;
-      return playerIdx >= 0 && this.isRevealedToHouse(entity.cell.cx, entity.cell.cy, playerIdx);
-    }
-
     return false;
   }
 
@@ -13881,11 +13869,9 @@ export class Game {
     if (!entity.alive || entity.house === this.playerHouse) return;
     if (this.discoveredEntityIds.has(entity.id)) return;
 
-    const playerIdx = Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1;
     const visible =
-      this.isAllied(entity.house, this.playerHouse)
-        ? playerIdx >= 0 && this.isRevealedToHouse(entity.cell.cx, entity.cell.cy, playerIdx)
-        : this.isCellTrulySeen(entity.cell.cx, entity.cell.cy);
+      this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy) ||
+      this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy);
     if (!visible) return;
 
     this.markEntityDiscoveredByPlayer(entity);

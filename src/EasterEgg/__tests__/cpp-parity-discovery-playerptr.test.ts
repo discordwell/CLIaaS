@@ -117,6 +117,25 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
     );
     game.entities.push(england);
     game.entityById.set(england.id, england);
+    game.map.setVisibility(27, 58, 2);
+
+    (game as unknown as { markDiscoveredIfPlayerVisible(e: Entity): void })
+      .markDiscoveredIfPlayerVisible(england);
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(england.id)).toBe(true);
+  });
+
+  it('does not discover player-allied non-PlayerPtr objects from allied-house fog alone', () => {
+    const game = createGame();
+    const england = new Entity(
+      UnitType.I_E1,
+      House.England,
+      27 * CELL_SIZE + CELL_SIZE / 2,
+      58 * CELL_SIZE + CELL_SIZE / 2
+    );
+    game.entities.push(england);
+    game.entityById.set(england.id, england);
     (game as unknown as { _houseRevealed: Map<number, Set<number>> })._houseRevealed =
       new Map([[1, new Set([58 * MAP_CELLS + 27])]]);
 
@@ -124,7 +143,7 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
       .markDiscoveredIfPlayerVisible(england);
 
     const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
-    expect(discovered.has(england.id)).toBe(true);
+    expect(discovered.has(england.id)).toBe(false);
   });
 
   it('discovers moving player-allied non-PlayerPtr objects in player-house revealed cells', () => {
@@ -138,10 +157,7 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
     englandTank.isDriving = true;
     game.entities.push(englandTank);
     game.entityById.set(englandTank.id, englandTank);
-    game.fogDisabled = true;
     game.map.setVisibility(27, 58, 2);
-    (game as unknown as { _houseRevealed: Map<number, Set<number>> })._houseRevealed =
-      new Map([[1, new Set([58 * MAP_CELLS + 27])]]);
 
     (game as unknown as { markEntityCellOccupierDown(e: Entity): void })
       .markEntityCellOccupierDown(englandTank);
