@@ -7126,11 +7126,11 @@ export class Game {
           cy: Math.floor(entity.moveTarget.ly / 256),
         };
 
-        // If already at destination cell, clear NavCom without enterIdleMode
-        // — the next-tick Mission_Move handler handles the idle transition.
+        // C++ DriveClass::Assign_Destination(TARGET_NONE) clears NavCom and,
+        // when the unit is no longer driving, immediately re-enters
+        // Start_Of_Move. That top guard queues Enter_Idle_Mode for MISSION_MOVE.
         if (destCell.cx === entity.cell.cx && destCell.cy === entity.cell.cy) {
-          entity.moveTarget = null;
-          this.clearDrivePath(entity);
+          this.assignDriveDestinationNone(entity);
           return;
         }
 
@@ -9480,8 +9480,7 @@ export class Game {
     };
 
     if (destCell.cx === entity.cell.cx && destCell.cy === entity.cell.cy) {
-      entity.moveTarget = null;
-      this.clearDrivePath(entity);
+      this.assignDriveDestinationNone(entity);
       return false;
     }
 
@@ -10221,17 +10220,6 @@ export class Game {
         !authorizedBuildingEnter &&
         !authorizedFactoryTether) return move;
 
-    const reservationOwner = this.map.getVehicleTrackReservation(cx, cy);
-    // C++ UnitClass::Can_Enter_Cell ignores `obj == this` only while walking
-    // the physical Cell_Occupier chain. The later cell flag check at
-    // unit.cpp:3268-3274 treats Flag.Occupy.Vehicle as MOVE_MOVING_BLOCK
-    // without an owner/self exception. Mark_Track stores DriveClass
-    // reservations in that same vehicle occupancy flag, so a self-reserved
-    // destination cell still blocks Start_Of_Move/track-jump entry.
-    if (reservationOwner > 0) {
-      return MoveResult.OCCUPIED;
-    }
-
     // C++ VesselClass::Can_Enter_Cell is occupancy-flag based: vehicle
     // occupancy in water returns MOVE_MOVING_BLOCK, never MOVE_TEMP. The land
     // UnitClass physical occupier scan below is what distinguishes stationary
@@ -10239,32 +10227,29 @@ export class Game {
     if (entity.isNavalUnit) return move;
 
     // C++ UnitClass::Can_Enter_Cell first walks the physical Cell_Occupier()
-    // chain, then separately checks occupy/reservation bits. TS infantry
-    // claims live in the destination sub-cell grid while their physical cell
-    // can still block a drive-class track jump this tick.
+    // chain, then separately checks occupy/reservation bits only if the
+    // physical scan left retval at MOVE_OK. TS infantry claims can live in the
+    // destination sub-cell grid while their physical Cell_Occupier is still in
+    // an adjacent cell, so defer those claim bits until after the physical scan.
     let sawCrushableOnly = false;
+    let physicalMove = MoveResult.OK;
+    let deferredInfantryFlagMove: MoveResult | null = null;
+    const reservationOwner = this.map.getVehicleTrackReservation(cx, cy);
     const occupantId = this.map.getOccupancy(cx, cy);
     if (occupantId > 0 && occupantId !== entity.id) {
       const occupant = this.entityById.get(occupantId);
       if (occupant && this.entityOccupiesDriveCell(occupant)) {
         const physicalOccupier = occupant.cell.cx === cx && occupant.cell.cy === cy;
         if (occupant.stats.isInfantry && !physicalOccupier) {
-          // C++ UnitClass::Can_Enter_Cell walks Cell_Occupier() for physical
-          // objects in this cell, then checks cell flag bits. TS getOccupancy()
-          // is also fed by infantry sub-cell claims; a moving infantry can claim
-          // a sub-cell in the target cell while its physical Cell_Occupier cell is
-          // still adjacent. C++ unit.cpp:3268-3294 treats these flags as
-          // MOVE_MOVING_BLOCK for allies, MOVE_DESTROYABLE for armed non-crushers,
-          // and passable only for crushers.
           if (this.entitiesAllied(entity, occupant)) {
-            return MoveResult.OCCUPIED;
-          }
-          if (entity.stats.crusher) {
+            deferredInfantryFlagMove = MoveResult.OCCUPIED;
+          } else if (entity.stats.crusher) {
             sawCrushableOnly = true;
+            deferredInfantryFlagMove = MoveResult.OK;
           } else if (entity.weapon && entity.weapon.isAntiGround !== false) {
-            return MoveResult.DESTROYABLE;
+            deferredInfantryFlagMove = MoveResult.DESTROYABLE;
           } else {
-            return MoveResult.IMPASSABLE;
+            deferredInfantryFlagMove = MoveResult.IMPASSABLE;
           }
         } else
         if (this.entitiesAllied(entity, occupant)) {
@@ -10284,7 +10269,7 @@ export class Game {
             // DriveClass::Start_Of_Move must not call CellClass::Incoming.
             return MoveResult.IMPASSABLE;
           }
-          return moving ? MoveResult.OCCUPIED : MoveResult.TEMP_BLOCKED;
+          physicalMove = Math.max(physicalMove, moving ? MoveResult.OCCUPIED : MoveResult.TEMP_BLOCKED);
         }
         else if (entity.stats.crusher && occupant.stats.isInfantry) {
           // C++ unit.cpp:3281-3294: enemy infantry occupy/reserve bits do not
@@ -10313,7 +10298,8 @@ export class Game {
         )) {
           return MoveResult.IMPASSABLE;
         }
-        return moving ? MoveResult.OCCUPIED : MoveResult.TEMP_BLOCKED;
+        physicalMove = Math.max(physicalMove, moving ? MoveResult.OCCUPIED : MoveResult.TEMP_BLOCKED);
+        continue;
       }
       if (entity.stats.crusher && other.stats.isInfantry) {
         // C++ UnitClass::Can_Enter_Cell allows crusher vehicles to enter
@@ -10323,6 +10309,22 @@ export class Game {
         continue;
       }
       return MoveResult.DESTROYABLE;
+    }
+
+    if (physicalMove !== MoveResult.OK) {
+      return physicalMove;
+    }
+
+    // C++ unit.cpp:3268-3294 consults cell occupy flags only when no physical
+    // Cell_Occupier made retval stricter. Mark_Track reservations map to
+    // Flag.Occupy.Vehicle and remain MOVE_MOVING_BLOCK even for self-reserved
+    // drive-class destinations.
+    if (!sawCrushableOnly && reservationOwner > 0) {
+      return MoveResult.OCCUPIED;
+    }
+
+    if (deferredInfantryFlagMove !== null) {
+      return deferredInfantryFlagMove;
     }
 
     return move === MoveResult.OK || authorizedBuildingEnter || authorizedFactoryTether || sawCrushableOnly
