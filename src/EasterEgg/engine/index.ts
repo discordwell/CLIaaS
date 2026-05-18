@@ -10079,6 +10079,34 @@ export class Game {
     return true;
   }
 
+  /** C++ DriveClass::Force_Track for special building-egress tracks. */
+  private forceDriveTrackControl(entity: Entity, trackControlIndex: number, headTo: LeptonPos): void {
+    const ctrl = TRACK_CONTROL[trackControlIndex];
+    const trackNumber = ctrl ? getEffectiveTrack(ctrl) : -1;
+    if (!ctrl || trackNumber <= 0) {
+      this.stopDriveTrack(entity);
+      entity.trackNumber = -1;
+      entity.trackControlIndex = -1;
+      entity.trackCellSpan = 1;
+      return;
+    }
+
+    this.clearDrivePath(entity);
+    entity.pathIndex = 0;
+    entity.pathDelay = 0;
+    entity.trackNumber = trackNumber;
+    entity.trackFlags = ctrl.flag & ~F_D;
+    entity.trackIndex = 0;
+    entity.trackCellSpan = 1;
+    entity.trackControlIndex = trackControlIndex;
+
+    if (!this.startDriveTrack(entity, headTo.lx, headTo.ly)) {
+      entity.trackNumber = -1;
+      entity.trackControlIndex = -1;
+      entity.trackCellSpan = 1;
+    }
+  }
+
   /** C++ DriveClass::Stop_Driver: unmark reserved track bits, clear HeadToCoord/IsDriving. */
   private stopDriveTrack(entity: Entity): void {
     this.clearDriveTrackReservations(entity);
@@ -17342,17 +17370,15 @@ export class Game {
   }
 
   private commandWeapProductOut(s: MapStructure, unit: Entity, trackCell: CellPos): void {
-    unit.mission = Mission.MOVE;
-    unit.missionQueue = null;
-    unit.missionTimer = 0;
-    unit.moveTarget = cellTargetToLepton(trackCell.cx, trackCell.cy);
+    assignMission(unit, Mission.MOVE);
+    unit.moveTarget = null;
     unit.path = [];
     unit.pathIndex = 0;
     unit.pathDelay = 0;
 
     const iq = this.houseIQs.get(s.house) ?? (s.house === this.playerHouse ? 0 : 3);
     if (iq >= 4) {
-      unit.missionQueue = Mission.AREA_GUARD;
+      assignMission(unit, Mission.AREA_GUARD);
       const rally = this.rallyPoints.get('WEAP');
       if (rally) {
         unit.guardOrigin = { x: rally.x, y: rally.y };
@@ -17362,7 +17388,8 @@ export class Game {
       }
     }
 
-    this.startDriveClassMove(unit);
+    this.forceDriveTrackControl(unit, 66, cellTargetToLepton(trackCell.cx, trackCell.cy));
+    unit.driveSpeed = 128;
   }
 
   /** C++ BuildingClass::Mission_Unload WEAP status machine

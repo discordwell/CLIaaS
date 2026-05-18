@@ -166,6 +166,130 @@ async function tsGreek2TnkAt(adapter: unknown, cx: number, cy: number) {
   }>;
 }
 
+const CPP_MISSION_NAMES: Record<number, string | null> = {
+  [-1]: null,
+  0: 'SLEEP',
+  1: 'ATTACK',
+  2: 'MOVE',
+  3: 'MOVE',
+  4: 'RETREAT',
+  5: 'GUARD',
+  6: 'STICKY',
+  7: 'ENTER',
+  8: 'CAPTURE',
+  9: 'HARVEST',
+  10: 'AREA_GUARD',
+  11: 'RETURN',
+  12: 'STOP',
+  13: 'AMBUSH',
+  14: 'HUNT',
+  15: 'UNLOAD',
+  16: 'SABOTAGE',
+  17: 'CONSTRUCTION',
+  18: 'DECONSTRUCTION',
+  19: 'REPAIR',
+  20: 'RESCUE',
+  21: 'MISSILE',
+  22: 'HARMLESS',
+};
+
+async function wasmGreekWeapExitTanks(adapter: unknown) {
+  return adapterPage(adapter).evaluate((args: {
+    cells: Array<{ cx: number; cy: number }>;
+    missionNames: Record<string, string | null>;
+  }) => {
+    const { cells, missionNames } = args;
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const wanted = new Set(cells.map(cell => `${cell.cx},${cell.cy}`));
+    const tanks = [...(state.units ?? []), ...(state.enemies ?? [])]
+      .filter((unit: any) =>
+        unit.t === '2TNK' &&
+        unit.house === 'Greece' &&
+        wanted.has(`${unit.cx},${unit.cy}`))
+      .map((unit: any) => ({
+        type: unit.t,
+        house: unit.house,
+        cell: { cx: unit.cx, cy: unit.cy },
+        lx: unit.lx,
+        ly: unit.ly,
+        mission: missionNames[String(unit.m)] ?? String(unit.m),
+        missionQueue: missionNames[String(unit.mq)] ?? String(unit.mq),
+        missionTimer: unit.mt,
+        isDriving: unit.drv === true,
+      }))
+      .sort((a: any, b: any) => a.cell.cx - b.cell.cx);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      tanks,
+    };
+  }, {
+    cells: [{ cx: 50, cy: 62 }, { cx: 57, cy: 62 }],
+    missionNames: CPP_MISSION_NAMES,
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    tanks: Array<{
+      type: string;
+      house: string;
+      cell: { cx: number; cy: number };
+      lx: number;
+      ly: number;
+      mission: string | null;
+      missionQueue: string | null;
+      missionTimer: number;
+      isDriving: boolean;
+    }>;
+  }>;
+}
+
+async function tsGreekWeapExitTanks(adapter: unknown) {
+  return adapterPage(adapter).evaluate((cells: Array<{ cx: number; cy: number }>) => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const wanted = new Set(cells.map(cell => `${cell.cx},${cell.cy}`));
+    const tanks = (game.entities ?? [])
+      .filter((entity: any) =>
+        entity.alive !== false &&
+        entity.type === '2TNK' &&
+        entity.house === 'Greece' &&
+        wanted.has(`${entity.cell?.cx},${entity.cell?.cy}`))
+      .map((entity: any) => ({
+        type: entity.type,
+        house: entity.house,
+        cell: { cx: entity.cell.cx, cy: entity.cell.cy },
+        lx: entity.leptonX,
+        ly: entity.leptonY,
+        mission: entity.mission,
+        missionQueue: entity.missionQueue ?? null,
+        missionTimer: entity.missionTimer,
+        isDriving: entity.isDriving === true,
+      }))
+      .sort((a: any, b: any) => a.cell.cx - b.cell.cx);
+
+    return {
+      tick: game.tick,
+      rngState: state.rngState,
+      tanks,
+    };
+  }, [{ cx: 50, cy: 62 }, { cx: 57, cy: 62 }]) as Promise<{
+    tick: number;
+    rngState: number;
+    tanks: Array<{
+      type: string;
+      house: string;
+      cell: { cx: number; cy: number };
+      lx: number;
+      ly: number;
+      mission: string;
+      missionQueue: string | null;
+      missionTimer: number;
+      isDriving: boolean;
+    }>;
+  }>;
+}
+
 async function wasmGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
   return adapterPage(adapter).evaluate((hint: number) => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
@@ -668,6 +792,45 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
       expect(tsTank.tick).toBe(cppTank.tick);
       expect(tsTank.rngState >>> 0).toBe(cppTank.rngState >>> 0);
       expect(tsTank.unit).toEqual(cppTank.unit);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('queues MOVE while WEAP products drive out on the C++ factory track', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 429);
+      const cpp = await wasmGreekWeapExitTanks(handle.wasm);
+      const ts = await tsGreekWeapExitTanks(handle.ts);
+
+      expect(cpp.tick).toBe(429);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(cpp.tanks).toEqual([
+        {
+          type: '2TNK',
+          house: 'Greece',
+          cell: { cx: 50, cy: 62 },
+          lx: 12928,
+          ly: 15872,
+          mission: 'GUARD',
+          missionQueue: 'MOVE',
+          missionTimer: 35,
+          isDriving: true,
+        },
+        {
+          type: '2TNK',
+          house: 'Greece',
+          cell: { cx: 57, cy: 62 },
+          lx: 14720,
+          ly: 15872,
+          mission: 'GUARD',
+          missionQueue: 'MOVE',
+          missionTimer: 36,
+          isDriving: true,
+        },
+      ]);
+      expect(ts.tanks).toEqual(cpp.tanks);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
     }, { wasmSeed: 0 });
   }, 300_000);
 
