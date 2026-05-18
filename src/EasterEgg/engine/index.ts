@@ -14733,8 +14733,11 @@ export class Game {
         }
       }
     }
+    const createdEntities = result.teamCreationOrder ?? result.spawned;
+    if (createdEntities.length > 0) {
+      applyScenarioOverrides(createdEntities, this.scenarioUnitStats, this.scenarioWeaponStats);
+    }
     if (result.spawned.length > 0) {
-      applyScenarioOverrides(result.spawned, this.scenarioUnitStats, this.scenarioWeaponStats);
       // C++ parity: if reinforcement units spawned on impassable terrain (water, rock),
       // relocate to nearest passable cell. C++ uses Nearest_Free_Cell() in reinf.cpp.
       // Aircraft skip this check — they spawn OUTSIDE the map boundary intentionally

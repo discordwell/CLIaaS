@@ -1161,149 +1161,152 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
 
     if (!activeWeapon) return;
 
-    // C++ TechnoClass::Can_Fire gates that do not affect What_Weapon_Should_I_Use:
-    // FIRE_REARM and FIRE_RANGE stop this tick's shot but leave the selected
-    // weapon intact for approach/path-shortening decisions.
-    if (!entity.canWeaponTarget(entity.target, activeWeapon)) return;
-    if (entity.attackCooldown > 0) return;
-    if (!entity.inRangeWith(entity.target, activeWeapon)) return;
+    const pendingInfantryFire = entity.stats.isInfantry && entity.firePrepActive;
+    if (!pendingInfantryFire) {
+      // C++ TechnoClass::Can_Fire gates that do not affect What_Weapon_Should_I_Use:
+      // FIRE_REARM and FIRE_RANGE stop this tick's shot but leave the selected
+      // weapon intact for approach/path-shortening decisions.
+      if (!entity.canWeaponTarget(entity.target, activeWeapon)) return;
+      if (entity.attackCooldown > 0) return;
+      if (!entity.inRangeWith(entity.target, activeWeapon)) return;
 
-    // C++ TechnoClass::Can_Fire (techno.cpp:2754): Ammo == 0 returns
-    // FIRE_AMMO before InfantryClass::Firing_AI can start a firing action.
-    // Unlimited ammo is represented as -1 in both C++ and TS.
-    if (entity.ammo === 0) {
-      return;
-    }
-
-    // C++ InfantryClass::Can_Fire (infantry.cpp:1636-1641) — FIRE_MOVING gate.
-    // Infantry cannot fire while IsDriving is set (actively moving between
-    // sub-cells via Start_Driver). This is an infantry-only restriction —
-    // UnitClass::Can_Fire has no IsDriving check, so vehicles fire on the
-    // move. Without this gate, TS infantry fire during HUNT/GUARD movement
-    // frames that C++ would reject with FIRE_MOVING.
-    // SCG01EA tick 80: USSR E1 in HUNT with isDriving=true fires one shot
-    // WASM never produces — the shot's invisible-bullet Coord_Scatter RNG
-    // appears 5 ticks early vs WASM's later Mission_Guard-initiated fire.
-    // C++ ref: infantry.cpp:1639 `if (IsDriving || ...) return(FIRE_MOVING);`
-    if (entity.stats.isInfantry && entity.isDriving) {
-      return;
-    }
-
-    // C++ TechnoClass::Can_Fire checks self-cloak only after target legality,
-    // weapon, Arm, range, and ammo gates. UnitClass returns FIRE_CLOAKED before
-    // turret/body-facing checks, while VesselClass continues through its
-    // NavCom/facing gates even when TechnoClass returned FIRE_CLOAKED. Handle
-    // non-vessels here; vessels are handled after their class-specific gates.
-    if (!entity.isNavalUnit &&
-        entity.stats.isCloakable &&
-        entity.cloakState !== CloakState.UNCLOAKED) {
-      if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
-        entity.cloakState = CloakState.UNCLOAKING;
-        entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
-      }
-      return;
-    }
-
-    // C++ UnitClass::Can_Fire (unit.cpp:4159-4181) — FIRE_ROTATING / FIRE_FACING gate.
-    // C++ UnitClass::AI order: Firing_AI (unit.cpp:425) runs BEFORE Rotation_AI
-    // (unit.cpp:437). That means Can_Fire checks the turret facing from END of
-    // LAST tick's Rotation_AI — THIS tick's rotation has not happened yet.
-    //
-    // The gate is two-part:
-    //   (A) FIRE_ROTATING (unit.cpp:4159): if the turret is still rotating toward
-    //       the OLD desired facing AND the weapon is non-homing (Bullet->ROT==0),
-    //       block fire.
-    //   (B) FIRE_FACING  (unit.cpp:4163-4181): compute 256-step diff between target
-    //       direction and CURRENT turret (pre-rotation this tick). If diff >= 8
-    //       (with diff >>= 2 for homing), block fire.
-    //
-    // SCG01EA tick 87: Greek JEEP (63,50) acquires DOG target S via Mission_Guard.
-    // In WASM, Firing_AI sees turret still facing body-dir (N or NE) — diff >> 8 →
-    // FIRE_FACING. Rotation_AI then rotates the turret one step. Fire happens a
-    // tick later.
-    //
-    // TS used to call tickTurretRotation() BEFORE this gate, allowing turret to
-    // rotate AND fire in the same tick. Now the pre-rotation 256-step
-    // SecondaryFacing (preRotTurretFacing256) is captured above and used here.
-    if (entity.hasTurret && activeWeapon) {
-      const projROT = (activeWeapon.projectileROT ?? 0) as number;
-      // (A) FIRE_ROTATING: if the turret was still rotating at Firing_AI entry,
-      // non-homing weapons must wait even if Rotation_AI would finish this tick.
-      if (fireGateTurretWasRotating && projROT === 0) {
+      // C++ TechnoClass::Can_Fire (techno.cpp:2754): Ammo == 0 returns
+      // FIRE_AMMO before InfantryClass::Firing_AI can start a firing action.
+      // Unlimited ammo is represented as -1 in both C++ and TS.
+      if (entity.ammo === 0) {
         return;
       }
-      // (B) 256-step FIRE_FACING gate. Land units use pre-rotation facing;
-      // vessels use post-rotation facing, matching their different C++ AI order.
-      const dir256 = directionToLeptons256(
-        entity.leptonX, entity.leptonY,
-        entity.target.leptonX, entity.target.leptonY,
-      );
-      const turret256 = fireGateTurretFacing256 & 0xFF;
-      // C++ facing.h:70 Difference: (int)(signed char)(desired - current).
-      let diff = (dir256 - turret256) & 0xFF;
-      if (diff > 127) diff -= 256;
-      diff = Math.abs(diff);
-      // Homing projectiles get 4× tolerance (diff >>= 2 → diff < 32 effective).
-      if (projROT !== 0) diff >>= 2;
-      if (diff >= 8) {
-        return; // FIRE_FACING
+
+      // C++ InfantryClass::Can_Fire (infantry.cpp:1636-1641) — FIRE_MOVING gate.
+      // Infantry cannot fire while IsDriving is set (actively moving between
+      // sub-cells via Start_Driver). This is an infantry-only restriction —
+      // UnitClass::Can_Fire has no IsDriving check, so vehicles fire on the
+      // move. Without this gate, TS infantry fire during HUNT/GUARD movement
+      // frames that C++ would reject with FIRE_MOVING.
+      // SCG01EA tick 80: USSR E1 in HUNT with isDriving=true fires one shot
+      // WASM never produces — the shot's invisible-bullet Coord_Scatter RNG
+      // appears 5 ticks early vs WASM's later Mission_Guard-initiated fire.
+      // C++ ref: infantry.cpp:1639 `if (IsDriving || ...) return(FIRE_MOVING);`
+      if (entity.stats.isInfantry && entity.isDriving) {
+        return;
       }
-    } else if (entity.isNavalUnit && activeWeapon) {
-      // C++ VesselClass::Can_Fire (vessel.cpp:1124-1136) also gates
-      // non-turret vessels on PrimaryFacing. VesselClass::AI runs
-      // DriveClass::AI before Combat_AI, so use the post-DriveClass body facing
-      // captured above. On FIRE_FACING, VesselClass::Combat_AI sets
-      // PrimaryFacing.Desired(Direction(TarCom)) but does not rotate or fire
-      // until a later pass.
-      const projROT = (activeWeapon.projectileROT ?? 0) as number;
-      const dir256 = directionToLeptons256(
-        entity.leptonX, entity.leptonY,
-        entity.target.leptonX, entity.target.leptonY,
-      );
-      let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
-      if (diff > 127) diff -= 256;
-      diff = Math.abs(diff);
-      if (projROT !== 0) diff >>= 2;
-      if (diff > 8) {
-        if (!fireGateBodyWasRotating) {
-          entity.desiredFacing256 = dir256;
-          entity.desiredFacing = dir256ToFacing8(dir256);
+
+      // C++ TechnoClass::Can_Fire checks self-cloak only after target legality,
+      // weapon, Arm, range, and ammo gates. UnitClass returns FIRE_CLOAKED before
+      // turret/body-facing checks, while VesselClass continues through its
+      // NavCom/facing gates even when TechnoClass returned FIRE_CLOAKED. Handle
+      // non-vessels here; vessels are handled after their class-specific gates.
+      if (!entity.isNavalUnit &&
+          entity.stats.isCloakable &&
+          entity.cloakState !== CloakState.UNCLOAKED) {
+        if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+          entity.cloakState = CloakState.UNCLOAKING;
+          entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
         }
-        return; // FIRE_FACING (vessel.cpp uses strict > 8)
+        return;
       }
-    } else if (!entity.stats.isInfantry && activeWeapon) {
-      // C++ UnitClass::Can_Fire fixed-body path (unit.cpp:4167-4180):
-      // compare target direction against PrimaryFacing as it existed when
-      // Firing_AI began. UnitClass::Rotation_AI updates desired facing later,
-      // but does not rotate PrimaryFacing until the next DriveClass::AI pass.
-      const projROT = (activeWeapon.projectileROT ?? 0) as number;
-      const dir256 = directionToLeptons256(
-        entity.leptonX, entity.leptonY,
-        entity.target.leptonX, entity.target.leptonY,
-      );
-      let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
-      if (diff > 127) diff -= 256;
-      diff = Math.abs(diff);
-      if (projROT !== 0) diff >>= 2;
-      if (diff >= 8) {
-        return; // FIRE_FACING (unit.cpp requires diff < 8)
+
+      // C++ UnitClass::Can_Fire (unit.cpp:4159-4181) — FIRE_ROTATING / FIRE_FACING gate.
+      // C++ UnitClass::AI order: Firing_AI (unit.cpp:425) runs BEFORE Rotation_AI
+      // (unit.cpp:437). That means Can_Fire checks the turret facing from END of
+      // LAST tick's Rotation_AI — THIS tick's rotation has not happened yet.
+      //
+      // The gate is two-part:
+      //   (A) FIRE_ROTATING (unit.cpp:4159): if the turret is still rotating toward
+      //       the OLD desired facing AND the weapon is non-homing (Bullet->ROT==0),
+      //       block fire.
+      //   (B) FIRE_FACING  (unit.cpp:4163-4181): compute 256-step diff between target
+      //       direction and CURRENT turret (pre-rotation this tick). If diff >= 8
+      //       (with diff >>= 2 for homing), block fire.
+      //
+      // SCG01EA tick 87: Greek JEEP (63,50) acquires DOG target S via Mission_Guard.
+      // In WASM, Firing_AI sees turret still facing body-dir (N or NE) — diff >> 8 →
+      // FIRE_FACING. Rotation_AI then rotates the turret one step. Fire happens a
+      // tick later.
+      //
+      // TS used to call tickTurretRotation() BEFORE this gate, allowing turret to
+      // rotate AND fire in the same tick. Now the pre-rotation 256-step
+      // SecondaryFacing (preRotTurretFacing256) is captured above and used here.
+      if (entity.hasTurret && activeWeapon) {
+        const projROT = (activeWeapon.projectileROT ?? 0) as number;
+        // (A) FIRE_ROTATING: if the turret was still rotating at Firing_AI entry,
+        // non-homing weapons must wait even if Rotation_AI would finish this tick.
+        if (fireGateTurretWasRotating && projROT === 0) {
+          return;
+        }
+        // (B) 256-step FIRE_FACING gate. Land units use pre-rotation facing;
+        // vessels use post-rotation facing, matching their different C++ AI order.
+        const dir256 = directionToLeptons256(
+          entity.leptonX, entity.leptonY,
+          entity.target.leptonX, entity.target.leptonY,
+        );
+        const turret256 = fireGateTurretFacing256 & 0xFF;
+        // C++ facing.h:70 Difference: (int)(signed char)(desired - current).
+        let diff = (dir256 - turret256) & 0xFF;
+        if (diff > 127) diff -= 256;
+        diff = Math.abs(diff);
+        // Homing projectiles get 4× tolerance (diff >>= 2 → diff < 32 effective).
+        if (projROT !== 0) diff >>= 2;
+        if (diff >= 8) {
+          return; // FIRE_FACING
+        }
+      } else if (entity.isNavalUnit && activeWeapon) {
+        // C++ VesselClass::Can_Fire (vessel.cpp:1124-1136) also gates
+        // non-turret vessels on PrimaryFacing. VesselClass::AI runs
+        // DriveClass::AI before Combat_AI, so use the post-DriveClass body facing
+        // captured above. On FIRE_FACING, VesselClass::Combat_AI sets
+        // PrimaryFacing.Desired(Direction(TarCom)) but does not rotate or fire
+        // until a later pass.
+        const projROT = (activeWeapon.projectileROT ?? 0) as number;
+        const dir256 = directionToLeptons256(
+          entity.leptonX, entity.leptonY,
+          entity.target.leptonX, entity.target.leptonY,
+        );
+        let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
+        if (diff > 127) diff -= 256;
+        diff = Math.abs(diff);
+        if (projROT !== 0) diff >>= 2;
+        if (diff > 8) {
+          if (!fireGateBodyWasRotating) {
+            entity.desiredFacing256 = dir256;
+            entity.desiredFacing = dir256ToFacing8(dir256);
+          }
+          return; // FIRE_FACING (vessel.cpp uses strict > 8)
+        }
+      } else if (!entity.stats.isInfantry && activeWeapon) {
+        // C++ UnitClass::Can_Fire fixed-body path (unit.cpp:4167-4180):
+        // compare target direction against PrimaryFacing as it existed when
+        // Firing_AI began. UnitClass::Rotation_AI updates desired facing later,
+        // but does not rotate PrimaryFacing until the next DriveClass::AI pass.
+        const projROT = (activeWeapon.projectileROT ?? 0) as number;
+        const dir256 = directionToLeptons256(
+          entity.leptonX, entity.leptonY,
+          entity.target.leptonX, entity.target.leptonY,
+        );
+        let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
+        if (diff > 127) diff -= 256;
+        diff = Math.abs(diff);
+        if (projROT !== 0) diff >>= 2;
+        if (diff >= 8) {
+          return; // FIRE_FACING (unit.cpp requires diff < 8)
+        }
+      }
+
+      // C++ VesselClass::Can_Fire runs its vessel gates even when TechnoClass has
+      // returned FIRE_CLOAKED, so submarines do not begin surfacing until the
+      // target is in range and NavCom/facing no longer block the shot.
+      if (entity.isNavalUnit &&
+          entity.stats.isCloakable &&
+          entity.cloakState !== CloakState.UNCLOAKED) {
+        if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+          entity.cloakState = CloakState.UNCLOAKING;
+          entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+        }
+        return;
       }
     }
 
-    // C++ VesselClass::Can_Fire runs its vessel gates even when TechnoClass has
-    // returned FIRE_CLOAKED, so submarines do not begin surfacing until the
-    // target is in range and NavCom/facing no longer block the shot.
-    if (entity.isNavalUnit &&
-        entity.stats.isCloakable &&
-        entity.cloakState !== CloakState.UNCLOAKED) {
-      if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
-        entity.cloakState = CloakState.UNCLOAKING;
-        entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
-      }
-      return;
-    }
-
-    if (activeWeapon && entity.attackCooldown <= 0) {
+    if (activeWeapon && (pendingInfantryFire || entity.attackCooldown <= 0)) {
       let fireAtFacing256 = -1;
       // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) pre-fire animation gate:
       //   Tick N:  !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.

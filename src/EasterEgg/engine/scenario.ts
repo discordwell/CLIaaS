@@ -7,7 +7,6 @@ import {
   type CellPos, type UnitStats, type WeaponStats, type ArmorType,
   CELL_SIZE, MAP_CELLS, cellIndexToPos, cellToWorld, worldToCell, cellToLepton, leptonDist,
   House, Mission, UnitType, AnimState, Dir, DIR_DX, DIR_DY,
-  CIVILIAN_UNIT_TYPES,
   UNIT_STATS,
   SUBCELL_LEPTON_OFFSETS,
 } from './types';
@@ -3498,11 +3497,6 @@ export function executeTriggerAction(
             entity.triggerName = triggers[team.trigger].name;
             noteTriggerAttachment(triggers, entity.triggerName);
           }
-          // VIP spawn protection — civilians/VIPs spawned in hostile zones get brief invulnerability
-          // so they can start moving before being killed (C++ building-exit protection equivalent).
-          if (CIVILIAN_UNIT_TYPES.has(member.type)) {
-            entity.invulnTick = 120;
-          }
           // Aircraft-specific: start airborne.
           if (stats.isAircraft) {
             entity.flightAltitude = Entity.FLIGHT_ALTITUDE;
@@ -3547,7 +3541,12 @@ export function executeTriggerAction(
           } else if (!stats.isAircraft && !entity.isTransport) {
             // Additional transports beyond the first are NOT cargo — C++ reinf.cpp
             // only loads non-transport ground units as passengers.
-            cargo.push(entity);
+            //
+            // _Create_Group prepends each normal object into a linked list
+            // (`temp->Next = object; object = temp`), and CargoClass::Attach
+            // attaches that list head-first. Detach_Object/Paradrop_Cargo then
+            // unload the newest non-transport member first.
+            cargo.unshift(entity);
           }
           teamCreationOrder.push(entity);
           result.spawned.push(entity);

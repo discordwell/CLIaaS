@@ -184,6 +184,81 @@ async function tsBadrSnapshot(adapter: unknown) {
   }>;
 }
 
+async function wasmSuperTeamSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    return [237, 239].map((logicIndex) => {
+      const row = (state.logicLayer ?? []).find((entry: any[]) => entry[0] === logicIndex);
+      if (!row) throw new Error(`C++ SCU35EA super-team logic ${logicIndex} missing`);
+      const infantry = [...(state.units ?? []), ...(state.enemies ?? [])]
+        .find((entry: any) => entry.id === row[6]);
+      if (!infantry) throw new Error(`C++ SCU35EA super-team detail ${logicIndex} missing`);
+      return {
+        logicIndex,
+        type: infantry.t,
+        cx: infantry.cx,
+        cy: infantry.cy,
+        lx: infantry.lx,
+        ly: infantry.ly,
+        hp: infantry.hp,
+        maxHp: infantry.mhp,
+        mission: row[7],
+        missionTimer: row[8],
+        targetRtti: row[32],
+        targetIndex: row[33],
+      };
+    });
+  }) as Promise<Array<{
+    logicIndex: number;
+    type: string;
+    cx: number;
+    cy: number;
+    lx: number;
+    ly: number;
+    hp: number;
+    maxHp: number;
+    mission: number;
+    missionTimer: number;
+    targetRtti: number;
+    targetIndex: number;
+  }>>;
+}
+
+async function tsSuperTeamSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    return [237, 239].map((logicIndex) => {
+      const entity = game.entities.find((e: any) => e.logicIndexHint === logicIndex);
+      if (!entity) throw new Error(`TS SCU35EA super-team logic ${logicIndex} missing`);
+      return {
+        logicIndex,
+        type: entity.type,
+        cx: entity.cell.cx,
+        cy: entity.cell.cy,
+        lx: entity.leptonX,
+        ly: entity.leptonY,
+        hp: entity.hp,
+        maxHp: entity.maxHp,
+        mission: entity.mission,
+        missionTimer: entity.missionTimer,
+        targetType: entity.target?.type ?? null,
+      };
+    });
+  }) as Promise<Array<{
+    logicIndex: number;
+    type: string;
+    cx: number;
+    cy: number;
+    lx: number;
+    ly: number;
+    hp: number;
+    maxHp: number;
+    mission: string;
+    missionTimer: number;
+    targetType: string | null;
+  }>>;
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall destroyer', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -281,6 +356,83 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
       expect(ts.bodyFacing).toBe(cpp.primaryFacing);
       expect(ts.desiredFacing).toBe(cpp.primaryDesiredFacing);
       expect(ts.arm).toBe(cpp.arm);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('launches a pending infantry shot at FireLaunch after the target has landed', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 160);
+      const cpp = await wasmGreekE3Snapshot(handle.wasm, 105);
+      const ts = await tsGreekE3Snapshot(handle.ts, 105);
+
+      expect(cpp.tick).toBe(160);
+      expect(cpp.doing).toBe(4); // DO_FIRE_WEAPON
+      expect(cpp.arm).toBeGreaterThan(0);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.arm).toBe(cpp.arm);
+      expect(ts.firePrepActive).toBe(false);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('paradrops BADR cargo in C++ linked-list order with scenario overrides', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 154);
+      const cpp = await wasmSuperTeamSnapshot(handle.wasm);
+      const ts = await tsSuperTeamSnapshot(handle.ts);
+
+      expect(cpp).toEqual([
+        expect.objectContaining({
+          logicIndex: 237,
+          type: 'DOG',
+          cx: 21,
+          cy: 83,
+          hp: 999,
+          maxHp: 1000,
+          mission: 5, // MISSION_GUARD
+          missionTimer: 41,
+        }),
+        expect.objectContaining({
+          logicIndex: 239,
+          type: 'GNRL',
+          cx: 21,
+          cy: 82,
+          hp: 2492,
+          maxHp: 2500,
+          mission: 5,
+          missionTimer: 0,
+        }),
+      ]);
+
+      expect(ts).toEqual([
+        expect.objectContaining({
+          logicIndex: 237,
+          type: cpp[0].type,
+          cx: cpp[0].cx,
+          cy: cpp[0].cy,
+          lx: cpp[0].lx,
+          ly: cpp[0].ly,
+          hp: cpp[0].hp,
+          maxHp: cpp[0].maxHp,
+          mission: 'GUARD',
+          missionTimer: cpp[0].missionTimer,
+        }),
+        expect.objectContaining({
+          logicIndex: 239,
+          type: cpp[1].type,
+          cx: cpp[1].cx,
+          cy: cpp[1].cy,
+          lx: cpp[1].lx,
+          ly: cpp[1].ly,
+          hp: cpp[1].hp,
+          maxHp: cpp[1].maxHp,
+          mission: 'GUARD',
+          missionTimer: cpp[1].missionTimer,
+        }),
+      ]);
     }, { wasmSeed: 0 });
   }, 300_000);
 });

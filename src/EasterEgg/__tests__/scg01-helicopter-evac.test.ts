@@ -143,7 +143,7 @@ describe('SCG01EA Trigger Chain', () => {
     expect(globals.has(1)).toBe(true);
   });
 
-  it('Einstein reinforcement receives the full TS spawn-protection window', () => {
+  it('Einstein reinforcement is not granted TS-only spawn protection', () => {
     const action: TriggerAction = { action: 7, team: 0, trigger: -1, data: -1 };
     const teams: TeamType[] = [{
       name: 'einst',
@@ -158,7 +158,9 @@ describe('SCG01EA Trigger Chain', () => {
     const result = executeTriggerAction(action, teams, waypoints, new Set(), []);
     expect(result.spawned).toHaveLength(1);
     expect(result.spawned[0].type).toBe(UnitType.I_EINSTEIN);
-    expect(result.spawned[0].invulnTick).toBe(120);
+    // C++ Do_Reinforcements only wraps Unlimbo in ScenarioInit and assigns
+    // MISSION_GUARD; it does not set IronCurtainCountDown or another damage gate.
+    expect(result.spawned[0].invulnTick).toBe(0);
   });
 });
 
