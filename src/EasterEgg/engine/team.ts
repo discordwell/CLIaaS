@@ -22,7 +22,7 @@
  */
 
 import { Entity, CloakState, threatScore as computeThreatScore, type TeamMissionEntry } from './entity';
-import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, SpeedClass, pixelToLepton, leptonToPixel, cellTargetToLepton, cellIndexToPos, PRODUCTION_ITEMS } from './types';
+import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, SpeedClass, pixelToLepton, leptonToPixel, cellTargetToLepton, coordTargetRoundTripLepton, cellIndexToPos, PRODUCTION_ITEMS } from './types';
 import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
 import { ScenarioRandom } from './random';
 import { MoveResult, type GameMap } from './map';
@@ -69,6 +69,10 @@ function clearFootPath(unit: Entity): void {
  *                    semantics that only fire `Start_Driver` when Basic_Path's
  *                    first cell is enterable (drive.cpp:638-640 +
  *                    foot.cpp:313-500).
+ * `canEnterCellResult` — raw C++ MoveType-style result for Calc_Center's
+ *                    `!Can_Enter_Cell(...)` check, where MOVE_OK is the only
+ *                    falsey value and any blockage preserves the averaged
+ *                    center.
  * `startDriveClassMove` — C++ DriveClass::Assign_Destination immediate
  *                    Start_Of_Move hook for vehicles/vessels.
  * `setGlobal`      — C++ TeamClass::TMission_Set_Global side effect.
@@ -78,6 +82,7 @@ export interface TeamAIContext {
   entities?: Entity[];
   map?: GameMap;
   canEnterCell?: (entity: Entity, cx: number, cy: number) => boolean;
+  canEnterCellResult?: (entity: Entity, cx: number, cy: number) => MoveResult;
   startDriveClassMove?: (entity: Entity) => void;
   /** C++ InfantryClass::Stop_Driver — clear Head_To_Coord claim, occupy current coord. */
   stopInfantryDriver?: (entity: Entity) => void;
@@ -2607,17 +2612,23 @@ export class Team {
         closestDist = d;
       }
     }
-    lx = Math.trunc(lx / playing.length);
-    ly = Math.trunc(ly / playing.length);
+    // C++ stores the averaged COORDINATE through As_Target(COORDINATE).
+    // Reading Team::Zone back with As_Coord restores the center of the 16-lepton
+    // target bucket, not the raw average.
+    lx = coordTargetRoundTripLepton(Math.trunc(lx / playing.length));
+    ly = coordTargetRoundTripLepton(Math.trunc(ly / playing.length));
 
     // C++ team.cpp:1578 — this is intentionally inverted by the C++ source:
     // `if (!closest->Can_Enter_Cell(As_Cell(center)))`. MOVE_OK is enum value
     // 0, so an enterable averaged center falls back to the closest member's
     // CELL target, while non-OK results keep the averaged center.
-    if (closest && ctx?.canEnterCell) {
+    if (closest && (ctx?.canEnterCellResult || ctx?.canEnterCell)) {
       const centerCx = Math.floor(leptonToPixel(lx) / CELL_SIZE);
       const centerCy = Math.floor(leptonToPixel(ly) / CELL_SIZE);
-      if (ctx.canEnterCell(closest, centerCx, centerCy)) {
+      const moveResult = ctx.canEnterCellResult
+        ? ctx.canEnterCellResult(closest, centerCx, centerCy)
+        : ctx.canEnterCell?.(closest, centerCx, centerCy) ? MoveResult.OK : MoveResult.IMPASSABLE;
+      if (moveResult === MoveResult.OK) {
         const closestCellTarget = cellTargetToLepton(closest.cell.cx, closest.cell.cy);
         lx = closestCellTarget.lx;
         ly = closestCellTarget.ly;

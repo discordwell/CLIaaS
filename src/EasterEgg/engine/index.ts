@@ -1768,6 +1768,7 @@ export class Game {
       map: this.map,
       tick: this.tick,
       canEnterCell: (entity, cx, cy) => this.teamFootCanEnterCell(entity, cx, cy),
+      canEnterCellResult: (entity, cx, cy) => this.teamFootCanEnterCellResultForCalcCenter(entity, cx, cy),
       startDriveClassMove: (entity) => this.startDriveClassMove(entity),
       stopInfantryDriver: (entity) => this.stopInfantryDriver(entity),
       canStopInfantryDriverForAssignDestination: (entity) => this.canStopInfantryDriverForAssignDestination(entity),
@@ -2623,6 +2624,7 @@ export class Game {
       // logic must ask the infantry override for infantry and the drive-class
       // path for vehicles/vessels.
         canEnterCell: (entity, cx, cy) => this.teamFootCanEnterCell(entity, cx, cy),
+        canEnterCellResult: (entity, cx, cy) => this.teamFootCanEnterCellResultForCalcCenter(entity, cx, cy),
         startDriveClassMove: (entity) => this.startDriveClassMove(entity),
         stopInfantryDriver: (entity) => this.stopInfantryDriver(entity),
         canStopInfantryDriverForAssignDestination: (entity) => this.canStopInfantryDriverForAssignDestination(entity),
@@ -9179,6 +9181,23 @@ export class Game {
     return entity.stats.isInfantry
       ? this.infantryCanEnterCell(entity, cx, cy) === MoveResult.OK
       : this.canEnterTrackJumpCell(entity, cx, cy) === MoveResult.OK;
+  }
+
+  private teamFootCanEnterCellResultForCalcCenter(entity: Entity, cx: number, cy: number): MoveResult {
+    if (entity.stats.isInfantry) {
+      return this.infantryCanEnterCell(entity, cx, cy);
+    }
+
+    const cellIdx = cy * MAP_CELLS + cx;
+    // C++ Unit/Vessel Can_Enter_Cell ignores `this` in the Cell_Occupier chain,
+    // but then checks the shared CellClass::Flag.Occupy.Vehicle bit. When
+    // TeamClass::Calc_Center probes a one-vehicle team's own cell, that bit makes
+    // the raw MoveType non-MOVE_OK, so Calc_Center keeps the averaged coordinate.
+    if (this.map.vehicleOccupancy.has(cellIdx) && this.map.getOccupancy(cx, cy) === entity.id) {
+      return MoveResult.OCCUPIED;
+    }
+
+    return this.canEnterTrackJumpCell(entity, cx, cy);
   }
 
   private basicPathGoalMoveResult(entity: Entity, goal: CellPos): MoveResult {
