@@ -100,15 +100,53 @@ function assignHarvesterDestination(ctx: HarvesterContext, entity: Entity, targe
   entity.pathIndex = 0;
 }
 
-function nearestRefinery(ctx: HarvesterContext, entity: Entity): MapStructure | null {
+function refineryCenterCell(proc: MapStructure): { cx: number; cy: number } {
+  const [procW, procH] = STRUCTURE_SIZE[proc.type] ?? [3, 2];
+  return { cx: proc.cx + Math.trunc(procW / 2), cy: proc.cy + Math.trunc(procH / 2) };
+}
+
+function clearHarvesterRefineryContact(ctx: HarvesterContext, entity: Entity): void {
+  for (const s of ctx.structures) {
+    if (s.refineryContactEntityId === entity.id) {
+      s.refineryContactEntityId = undefined;
+    }
+  }
+}
+
+function currentRefineryContact(ctx: HarvesterContext, entity: Entity): MapStructure | null {
+  for (const s of ctx.structures) {
+    if (s.refineryContactEntityId !== entity.id) continue;
+    if (s.alive && s.type === 'PROC' && ctx.isAllied(s.house, entity.house)) {
+      return s;
+    }
+    s.refineryContactEntityId = undefined;
+  }
+  return null;
+}
+
+function refineryContactIsBusy(ctx: HarvesterContext, proc: MapStructure, entity: Entity): boolean {
+  const contactId = proc.refineryContactEntityId;
+  if (contactId === undefined || contactId === entity.id) return false;
+  const contact = ctx.entities.find(e => e.id === contactId && e.alive);
+  if (contact?.type === UnitType.V_HARV) return true;
+  proc.refineryContactEntityId = undefined;
+  return false;
+}
+
+function nearestAvailableRefinery(ctx: HarvesterContext, entity: Entity): MapStructure | null {
   const ec = entity.cell;
   let bestProc: MapStructure | null = null;
   let bestDist = Infinity;
+  const reachableZone = movementZoneCells(ctx.map, entity.cell, entity.isNavalUnit, ctx.structures);
   for (const s of ctx.structures) {
     if (!s.alive || s.type !== 'PROC') continue;
     if (!ctx.isAllied(s.house, entity.house)) continue;
-    const dx = s.cx - ec.cx;
-    const dy = s.cy - ec.cy;
+    if (refineryContactIsBusy(ctx, s, entity)) continue;
+    const center = refineryCenterCell(s);
+    if (center.cx < 0 || center.cx >= MAP_CELLS || center.cy < 0 || center.cy >= MAP_CELLS) continue;
+    if (reachableZone[center.cy * MAP_CELLS + center.cx] === 0) continue;
+    const dx = center.cx - ec.cx;
+    const dy = center.cy - ec.cy;
     const dist = dx * dx + dy * dy;
     if (dist < bestDist) {
       bestDist = dist;
@@ -119,7 +157,21 @@ function nearestRefinery(ctx: HarvesterContext, entity: Entity): MapStructure | 
 }
 
 function hasAlliedRefinery(ctx: HarvesterContext, entity: Entity): boolean {
-  return nearestRefinery(ctx, entity) !== null;
+  return ctx.structures.some(s =>
+    s.alive &&
+    s.type === 'PROC' &&
+    ctx.isAllied(s.house, entity.house));
+}
+
+function claimRefineryContact(ctx: HarvesterContext, entity: Entity): MapStructure | null {
+  const current = currentRefineryContact(ctx, entity);
+  if (current) return current;
+
+  const proc = nearestAvailableRefinery(ctx, entity);
+  if (!proc) return null;
+  clearHarvesterRefineryContact(ctx, entity);
+  proc.refineryContactEntityId = entity.id;
+  return proc;
 }
 
 function clearHarvesterTargetAndDestination(entity: Entity): void {
@@ -163,6 +215,7 @@ function enterHarvesterIdleMode(ctx: HarvesterContext, entity: Entity, initial =
     initial || !ctx.isPlayerControlled(entity) || isOreOverlay(ctx, ec.cx, ec.cy)
       ? Mission.HARVEST
       : Mission.GUARD;
+  clearHarvesterRefineryContact(ctx, entity);
   clearHarvesterTargetAndDestination(entity);
   assignMission(entity, order);
 }
@@ -246,6 +299,7 @@ export function findHarvesterOre(
 export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTimerFired = true): void {
   // C++ unit.cpp:2770-2774: no allied refinery means abort harvest and return 1.
   if (missionTimerFired && !hasAlliedRefinery(ctx, entity)) {
+    clearHarvesterRefineryContact(ctx, entity);
     entity.harvesterState = 'idle';
     entity.isHarvesterMining = false;
     entity.mission = Mission.GUARD;
@@ -502,9 +556,10 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
       // FootClass::Mission_Enter docking radio reply provides the destination.
       if (entity.mission === Mission.HARVEST) {
         if (!missionTimerFired) break;
-        if (nearestRefinery(ctx, entity)) {
+        if (claimRefineryContact(ctx, entity)) {
           entity.harvesterState = 'headinghome';
         } else {
+          clearHarvesterRefineryContact(ctx, entity);
           entity.harvesterState = 'idle';
         }
         break;
@@ -523,9 +578,10 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
       // When move completes (mission returns to GUARD/AREA_GUARD), transition to unloading or re-seek
       if (!isArrivalMission(entity.mission)) break; // still moving, wait
       // Check if we're near a refinery
-      const bestProc = nearestRefinery(ctx, entity);
+      const bestProc = claimRefineryContact(ctx, entity);
       if (!bestProc) {
         // No refinery — idle with ore
+        clearHarvesterRefineryContact(ctx, entity);
         entity.harvesterState = 'idle';
         break;
       }
@@ -553,8 +609,9 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
       break;
     }
     case 'headinghome': {
-      const bestProc = nearestRefinery(ctx, entity);
+      const bestProc = currentRefineryContact(ctx, entity) ?? claimRefineryContact(ctx, entity);
       if (!bestProc) {
+        clearHarvesterRefineryContact(ctx, entity);
         entity.harvesterState = 'idle';
         break;
       }
@@ -664,6 +721,7 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
         entity.harvesterAnimStage = 0;
         entity.harvesterState = 'idle';
         entity.harvestTick = 0;
+        clearHarvesterRefineryContact(ctx, entity);
         // C++ unit.cpp:2386-2389 — after the dump completes, the harvester
         // transmits RADIO_OVER_OUT and Assign_Mission(MISSION_HARVEST). The
         // Mission_Unload handler still consumed its normal delay+jitter before

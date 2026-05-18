@@ -302,6 +302,115 @@ async function tsGreekWeapExitTanks(
   }>;
 }
 
+async function wasmGreekHarvesterByLogic(adapter: unknown, logicIndex: number) {
+  return adapterPage(adapter).evaluate((args: {
+    logicIndex: number;
+    missionNames: Record<string, string | null>;
+  }) => {
+    const { logicIndex, missionNames } = args;
+    const missionName = (mission: number) => {
+      const key = String(mission);
+      return Object.prototype.hasOwnProperty.call(missionNames, key)
+        ? missionNames[key]
+        : key;
+    };
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = (state.logicLayer ?? []).find((entry: any[]) => entry[0] === logicIndex);
+    if (!row) throw new Error(`C++ SCU35EA logic ${logicIndex} missing`);
+    const unit = [...(state.units ?? []), ...(state.enemies ?? [])]
+      .find((entry: any) => entry.id === row[6]);
+    if (!unit) throw new Error(`C++ SCU35EA logic ${logicIndex} unit detail missing`);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      harvester: {
+        logicIndex,
+        type: unit.t,
+        house: unit.house,
+        cell: { cx: unit.cx, cy: unit.cy },
+        lx: unit.lx,
+        ly: unit.ly,
+        mission: missionName(row[7]),
+        missionQueue: missionName(row[9]),
+        missionTimer: row[8],
+        isDriving: row[10] === true,
+        navCell: unit.nlx === undefined || unit.nly === undefined
+          ? null
+          : { cx: Math.floor(unit.nlx / 256), cy: Math.floor(unit.nly / 256) },
+      },
+    };
+  }, {
+    logicIndex,
+    missionNames: CPP_MISSION_NAMES,
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    harvester: {
+      logicIndex: number;
+      type: string;
+      house: string;
+      cell: { cx: number; cy: number };
+      lx: number;
+      ly: number;
+      mission: string | null;
+      missionQueue: string | null;
+      missionTimer: number;
+      isDriving: boolean;
+      navCell: { cx: number; cy: number } | null;
+    };
+  }>;
+}
+
+async function tsGreekHarvesterByLogic(adapter: unknown, logicIndex: number) {
+  return adapterPage(adapter).evaluate((logicIndex: number) => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const entity = (game.entities ?? []).find((e: any) =>
+      e.alive !== false &&
+      e.logicIndexHint === logicIndex &&
+      e.type === 'HARV' &&
+      e.house === 'Greece');
+    if (!entity) throw new Error(`TS SCU35EA Greek HARV logic ${logicIndex} missing`);
+
+    return {
+      tick: game.tick,
+      rngState: state.rngState,
+      harvester: {
+        logicIndex,
+        type: entity.type,
+        house: entity.house,
+        cell: { cx: entity.cell.cx, cy: entity.cell.cy },
+        lx: entity.leptonX,
+        ly: entity.leptonY,
+        mission: entity.mission,
+        missionQueue: entity.missionQueue ?? null,
+        missionTimer: entity.missionTimer,
+        isDriving: entity.isDriving === true,
+        navCell: entity.moveTarget
+          ? { cx: Math.floor(entity.moveTarget.lx / 256), cy: Math.floor(entity.moveTarget.ly / 256) }
+          : null,
+      },
+    };
+  }, logicIndex) as Promise<{
+    tick: number;
+    rngState: number;
+    harvester: {
+      logicIndex: number;
+      type: string;
+      house: string;
+      cell: { cx: number; cy: number };
+      lx: number;
+      ly: number;
+      mission: string;
+      missionQueue: string | null;
+      missionTimer: number;
+      isDriving: boolean;
+      navCell: { cx: number; cy: number } | null;
+    };
+  }>;
+}
+
 async function wasmGreekWeapExitTankFacings(
   adapter: unknown,
   cells: Array<{ cx: number; cy: number }> = [{ cx: 50, cy: 63 }, { cx: 57, cy: 63 }],
@@ -1003,6 +1112,35 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
         },
       ]);
       expect(ts.tanks).toEqual(cpp.tanks);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('keeps the full Greek harvester locked to the C++ refinery contact', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 900);
+      await stepBoth(handle, 234);
+      const cpp = await wasmGreekHarvesterByLogic(handle.wasm, 59);
+      const ts = await tsGreekHarvesterByLogic(handle.ts, 59);
+
+      expect(cpp.tick).toBe(1134);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(cpp.harvester).toEqual({
+        logicIndex: 59,
+        type: 'HARV',
+        house: 'Greece',
+        cell: { cx: 70, cy: 49 },
+        lx: 18069,
+        ly: 12627,
+        mission: 'ENTER',
+        missionQueue: null,
+        missionTimer: 14,
+        isDriving: true,
+        navCell: { cx: 76, cy: 47 },
+      });
+      expect(ts.harvester).toEqual(cpp.harvester);
       expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
     }, { wasmSeed: 0 });
   }, 300_000);

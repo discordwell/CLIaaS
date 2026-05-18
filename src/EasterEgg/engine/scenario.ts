@@ -1511,6 +1511,8 @@ export interface MapStructure {
   aiFactoryPlacementDelay?: number;
   /** C++ BuildingClass radio contact with the factory product during WEAP Mission_Unload. */
   aiFactoryContactEntityId?: number;
+  /** C++ BuildingClass radio contact with a harvester during refinery docking. */
+  refineryContactEntityId?: number;
   /** C++ BuildingClass::Status for WEAP Mission_Unload. */
   weapUnloadStatus?: number;
   /** C++ DoorClass::State for WEAP Mission_Unload.
