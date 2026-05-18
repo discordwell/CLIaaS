@@ -302,6 +302,98 @@ async function tsGreekWeapExitTanks(
   }>;
 }
 
+async function wasmGreekWeapExitTankFacings(
+  adapter: unknown,
+  cells: Array<{ cx: number; cy: number }> = [{ cx: 50, cy: 63 }, { cx: 57, cy: 63 }],
+) {
+  return adapterPage(adapter).evaluate((cells: Array<{ cx: number; cy: number }>) => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const wanted = new Set(cells.map(cell => `${cell.cx},${cell.cy}`));
+    const tanks = [...(state.units ?? []), ...(state.enemies ?? [])]
+      .filter((unit: any) =>
+        unit.t === '2TNK' &&
+        unit.house === 'Greece' &&
+        wanted.has(`${unit.cx},${unit.cy}`))
+      .map((unit: any) => ({
+        cell: { cx: unit.cx, cy: unit.cy },
+        lx: unit.lx,
+        ly: unit.ly,
+        mission: unit.m,
+        missionTimer: unit.mt,
+        isDriving: unit.drv === true,
+        bodyFacing: unit.pf,
+        desiredFacing: unit.pfd,
+      }))
+      .sort((a: any, b: any) => a.cell.cx - b.cell.cx);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      tanks,
+    };
+  }, cells) as Promise<{
+    tick: number;
+    rngState: number;
+    tanks: Array<{
+      cell: { cx: number; cy: number };
+      lx: number;
+      ly: number;
+      mission: number;
+      missionTimer: number;
+      isDriving: boolean;
+      bodyFacing: number;
+      desiredFacing: number;
+    }>;
+  }>;
+}
+
+async function tsGreekWeapExitTankFacings(
+  adapter: unknown,
+  cells: Array<{ cx: number; cy: number }> = [{ cx: 50, cy: 63 }, { cx: 57, cy: 63 }],
+) {
+  return adapterPage(adapter).evaluate((cells: Array<{ cx: number; cy: number }>) => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const wanted = new Set(cells.map(cell => `${cell.cx},${cell.cy}`));
+    const tanks = (game.entities ?? [])
+      .filter((entity: any) =>
+        entity.alive !== false &&
+        entity.type === '2TNK' &&
+        entity.house === 'Greece' &&
+        wanted.has(`${entity.cell?.cx},${entity.cell?.cy}`))
+      .map((entity: any) => ({
+        cell: { cx: entity.cell.cx, cy: entity.cell.cy },
+        lx: entity.leptonX,
+        ly: entity.leptonY,
+        mission: entity.mission === 'MOVE' ? 2 : entity.mission,
+        missionTimer: entity.missionTimer,
+        isDriving: entity.isDriving === true,
+        bodyFacing: entity.bodyFacing256,
+        desiredFacing: entity.desiredFacing256,
+      }))
+      .sort((a: any, b: any) => a.cell.cx - b.cell.cx);
+
+    return {
+      tick: game.tick,
+      rngState: state.rngState,
+      tanks,
+    };
+  }, cells) as Promise<{
+    tick: number;
+    rngState: number;
+    tanks: Array<{
+      cell: { cx: number; cy: number };
+      lx: number;
+      ly: number;
+      mission: number | string;
+      missionTimer: number;
+      isDriving: boolean;
+      bodyFacing: number;
+      desiredFacing: number;
+    }>;
+  }>;
+}
+
 async function wasmGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
   return adapterPage(adapter).evaluate((hint: number) => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
@@ -879,6 +971,43 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
           missionQueue: null,
           missionTimer: 15,
           isDriving: false,
+        },
+      ]);
+      expect(ts.tanks).toEqual(cpp.tanks);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('waits until the next DriveClass pass to rotate after a factory track finishes', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 465);
+      const cpp = await wasmGreekWeapExitTankFacings(handle.wasm);
+      const ts = await tsGreekWeapExitTankFacings(handle.ts);
+
+      expect(cpp.tick).toBe(465);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(cpp.tanks).toEqual([
+        {
+          cell: { cx: 50, cy: 63 },
+          lx: 12928,
+          ly: 16256,
+          mission: 2,
+          missionTimer: 0,
+          isDriving: false,
+          bodyFacing: 128,
+          desiredFacing: 64,
+        },
+        {
+          cell: { cx: 57, cy: 63 },
+          lx: 14720,
+          ly: 16256,
+          mission: 2,
+          missionTimer: 0,
+          isDriving: false,
+          bodyFacing: 128,
+          desiredFacing: 64,
         },
       ]);
       expect(ts.tanks).toEqual(cpp.tanks);

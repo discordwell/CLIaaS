@@ -5547,6 +5547,11 @@ export class Game {
         !entity.stats.isInfantry &&
         !entity.isAirUnit &&
         (entity.mission as Mission) === Mission.MOVE;
+      const runPostHandlerDriveClassGuard =
+        missionHandlerRan &&
+        !entity.stats.isInfantry &&
+        !entity.isAirUnit &&
+        (missionBeforeStageB === Mission.GUARD || missionBeforeStageB === Mission.STICKY);
       const driveClassAttackNeedsRotation =
         !entity.stats.isInfantry &&
         !entity.isAirUnit &&
@@ -5588,7 +5593,7 @@ export class Game {
          (entity.mission as Mission) === Mission.RESCUE ||
          (entity.mission as Mission) === Mission.AREA_GUARD ||
          (entity.mission as Mission) === Mission.RETREAT);
-      if ((!missionHandlerRan || runPostHandlerInfantryGuardMovement || runPostHandlerInfantryNavComAfterCommence || runPostHandlerInfantryAttackNavCom || runPostHandlerInfantryHuntMovement || runPostHandlerInfantryAreaGuardMovement || runPostHandlerInfantryCaptureMovement || runPostHandlerInfantryMoveMovement || runPostHandlerHarvesterMovement || runPostHandlerDriveClassMove || runPostHandlerDriveClassAttack || runPostHandlerDriveClassEnter || runPostHandlerDriveClassUnload || runPostHandlerDriveClassHunt) && !entity.isAirUnit) {
+      if ((!missionHandlerRan || runPostHandlerInfantryGuardMovement || runPostHandlerInfantryNavComAfterCommence || runPostHandlerInfantryAttackNavCom || runPostHandlerInfantryHuntMovement || runPostHandlerInfantryAreaGuardMovement || runPostHandlerInfantryCaptureMovement || runPostHandlerInfantryMoveMovement || runPostHandlerHarvesterMovement || runPostHandlerDriveClassMove || runPostHandlerDriveClassGuard || runPostHandlerDriveClassAttack || runPostHandlerDriveClassEnter || runPostHandlerDriveClassUnload || runPostHandlerDriveClassHunt) && !entity.isAirUnit) {
         if (entity.stats.isInfantry) {
           this.runInfantryMovementAI(entity);
         } else {
@@ -6260,11 +6265,11 @@ export class Game {
           }
           }
         }
-        // C++ UnitClass::AI calls DriveClass::AI after MissionClass::AI even when
-        // Mission_Guard just fired. This matters for non-moving rotation too:
-        // drive.cpp:1359 rotates PrimaryFacing before considering NavCom/path.
-        // SCG11EA t15 4TNK enters GUARD and still snaps body facing 68→64.
-        if (!entity.stats.isInfantry && !entity.isAirUnit) {
+        // Legacy flow only: the refactored object AI runs the single C++
+        // DriveClass::AI pass from STAGE D after MissionClass::AI. Running it
+        // inline here as well gives vehicles a duplicate same-tick rotation
+        // budget when a PCP_END Commence changes GUARD to MOVE.
+        if (!DISPATCH_ORDER_REFACTOR && !entity.stats.isInfantry && !entity.isAirUnit) {
           if (entity.trackNumber <= 0) {
             if (entity.bodyFacing256 < 0) entity.bodyFacing256 = (entity.facing * 32) & 0xff;
             const desiredFacing256 = entity.desiredFacing256 >= 0
