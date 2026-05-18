@@ -2650,6 +2650,16 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // C++ techno.cpp:4929 — source == NULL (implied by null-check before call)
   if (!victim.alive || !sourceIsAlive(attacker)) return;
 
+  // C++ foot.cpp:1176-1179 — team members delegate to Team->Took_Damage
+  // immediately after TechnoClass::Take_Damage returns a non-NONE result. This
+  // happens before the individual Is_Allowed_To_Retaliate gates below, so same-
+  // house splash, non-retaliating missions, and other otherwise-blocked sources
+  // can still update Team::Target.
+  if (victim.teamRef) {
+    victim.teamRef.tookDamage(victim, attacker, ctx);
+    return;
+  }
+
   const priorMission = victim.mission;
 
   // C++ techno.cpp:4934 — MissionControl[Mission].IsRetaliate must be true
@@ -2663,16 +2673,6 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
 
   // C++ techno.cpp:4947 — House->Is_Ally(source) blocks retaliation
   if (ctx.isAllied(victim.house, sourceHouse(attacker))) return;
-
-  // C++ foot.cpp:1172 — FootClass::Take_Damage delegates team members to
-  // Team->Took_Damage and returns. It does NOT run the individual
-  // Is_Allowed_To_Retaliate/TarCom path for team members. Team->Took_Damage
-  // may change Team->Target to the attacker (team.cpp:1613), after which
-  // Coordinate_Move/Attack reassigns member NavCom/TarCom through the team.
-  if (victim.teamRef) {
-    victim.teamRef.tookDamage(victim, attacker, ctx);
-    return;
-  }
 
   // C++ techno.cpp:4952 — Combat_Damage() <= 0 || !Is_Weapon_Equipped() blocks.
   // Unarmed TS exception: crusher vehicles without a weapon (HARV-style) still

@@ -236,6 +236,91 @@ async function tsDeadInfantryBlockerAnt11164(adapter: unknown) {
   });
 }
 
+async function wasmPatrolTeamAnt11165(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const antRow = (state.logicLayer ?? []).find((row: any[]) => row[0] === 94);
+    if (!antRow) throw new Error('C++ SCA04EA patrol ANT3 logic row not found');
+    const fullAnt = [
+      ...(state.units ?? []),
+      ...(state.enemies ?? []),
+      ...(state.vessels ?? []),
+    ].find((unit: any) => unit.id === antRow[6]);
+    const team = (state.teams ?? []).find((candidate: any) =>
+      candidate.cls === 'ptrl2' &&
+      (candidate.members ?? []).some((member: any) => (member.ids ?? []).includes(antRow[6])));
+    if (!team) throw new Error('C++ SCA04EA ptrl2 team not found');
+    const targetCell = team.tgtX || team.tgtY
+      ? { cx: Math.floor(team.tgtX / 256), cy: Math.floor(team.tgtY / 256) }
+      : null;
+    const missionTargetCell = team.mtgtX || team.mtgtY
+      ? { cx: Math.floor(team.mtgtX / 256), cy: Math.floor(team.mtgtY / 256) }
+      : null;
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      ant: {
+        mission: antRow[7],
+        missionTimer: antRow[8],
+        targetCell: fullAnt?.tlx || fullAnt?.tly
+          ? { cx: Math.floor(fullAnt.tlx / 256), cy: Math.floor(fullAnt.tly / 256) }
+          : null,
+        navCell: fullAnt?.nlx || fullAnt?.nly
+          ? { cx: fullAnt.ncx, cy: fullAnt.ncy }
+          : null,
+      },
+      team: {
+        currentMission: team.cur,
+        targetCell,
+        missionTargetCell,
+      },
+    };
+  });
+}
+
+async function tsPatrolTeamAnt11165(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const ant = game.entities.find((entity: any) => entity.logicIndexHint === 94);
+    if (!ant?.teamRef) throw new Error('TS SCA04EA patrol ANT3/team not found');
+    const team = ant.teamRef;
+    const targetCell = team.targetEntityRef
+      ? { cx: team.targetEntityRef.cell.cx, cy: team.targetEntityRef.cell.cy }
+      : team.targetCell
+        ? { cx: team.targetCell.cx, cy: team.targetCell.cy }
+        : team.target
+          ? { cx: Math.floor(team.target.x / 24), cy: Math.floor(team.target.y / 24) }
+          : null;
+    const missionTargetCell = team.missionTargetEntityRef
+      ? { cx: team.missionTargetEntityRef.cell.cx, cy: team.missionTargetEntityRef.cell.cy }
+      : team.missionTargetCell
+        ? { cx: team.missionTargetCell.cx, cy: team.missionTargetCell.cy }
+        : team.missionTarget
+          ? { cx: Math.floor(team.missionTarget.x / 24), cy: Math.floor(team.missionTarget.y / 24) }
+          : null;
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      ant: {
+        mission: ant.mission,
+        missionTimer: ant.missionTimer,
+        target: ant.target
+          ? { type: ant.target.type, house: ant.target.house, cx: ant.target.cell.cx, cy: ant.target.cell.cy }
+          : null,
+        moveTarget: ant.moveTarget
+          ? { cx: Math.floor(ant.moveTarget.lx / 256), cy: Math.floor(ant.moveTarget.ly / 256) }
+          : null,
+      },
+      team: {
+        currentMission: team.currentMission,
+        targetCell,
+        missionTargetCell,
+      },
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -374,6 +459,39 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
       expect(ts.pathThreshold).toBe(cpp.pathThreshold);
       expect(ts.moveTarget).toBeNull();
       expect(ts.target).toBeNull();
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('keeps the patrol team on the same-house splash damage target before resuming waypoints', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 104);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmPatrolTeamAnt11165(handle.wasm);
+      const ts = await tsPatrolTeamAnt11165(handle.ts);
+
+      expect(cpp.tick).toBe(104);
+      expect(cpp.team).toEqual({
+        currentMission: 0,
+        targetCell: { cx: 111, cy: 64 },
+        missionTargetCell: null,
+      });
+      expect(cpp.ant).toMatchObject({
+        mission: 14, // MISSION_HUNT after the friendly target is rejected by Attack AI
+        missionTimer: 14,
+        targetCell: null,
+        navCell: { cx: 115, cy: 63 },
+      });
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.team).toEqual(cpp.team);
+      expect(ts.ant.mission).toBe('HUNT');
+      expect(ts.ant.missionTimer).toBe(cpp.ant.missionTimer);
+      expect(ts.ant.target).toBeNull();
+      expect(ts.ant.moveTarget).toEqual(cpp.ant.navCell);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);
