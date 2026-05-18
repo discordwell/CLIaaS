@@ -4960,6 +4960,12 @@ export class Game {
       this.isAllied(structure.house, entity.house);
   }
 
+  private factoryRadioContactStructure(entity: Entity): MapStructure | null {
+    return this.structures.find(s =>
+      s.aiFactoryContactEntityId === entity.id &&
+      this.isAllied(s.house, entity.house)) ?? null;
+  }
+
   /** Clear a structure's footprint occupancy while preserving underlying land. */
   private clearStructureFootprint(s: MapStructure): void {
     if (s.footprintTerrain?.length) {
@@ -8964,6 +8970,11 @@ export class Game {
   private cutTransportTether(entity: Entity): void {
     if (!entity.isTethered) return;
     const transport = entity.transportRef;
+    const factoryContact = this.factoryRadioContactStructure(entity);
+    const factoryRunAway =
+      factoryContact !== null &&
+      (factoryContact.type === 'WEAP' || factoryContact.type === 'AFLD' || factoryContact.type === 'FIX');
+    const hadNavCom = entity.moveTarget !== null;
     entity.isTethered = false;
     entity.transportRef = null;
     if (transport && !this.hasTransportRadioContact(transport)) {
@@ -8971,6 +8982,8 @@ export class Game {
     }
     if (entity.stats.isInfantry) {
       entity.startTransportUnloadGesture(this.tick);
+    } else if (factoryRunAway && !hadNavCom && !entity.isAirUnit) {
+      this.unitClassScatterNoThreat(entity, true);
     }
   }
 
@@ -10091,9 +10104,6 @@ export class Game {
       return;
     }
 
-    this.clearDrivePath(entity);
-    entity.pathIndex = 0;
-    entity.pathDelay = 0;
     entity.trackNumber = trackNumber;
     entity.trackFlags = ctrl.flag & ~F_D;
     entity.trackIndex = 0;
@@ -17371,10 +17381,6 @@ export class Game {
 
   private commandWeapProductOut(s: MapStructure, unit: Entity, trackCell: CellPos): void {
     assignMission(unit, Mission.MOVE);
-    unit.moveTarget = null;
-    unit.path = [];
-    unit.pathIndex = 0;
-    unit.pathDelay = 0;
 
     const iq = this.houseIQs.get(s.house) ?? (s.house === this.playerHouse ? 0 : 3);
     if (iq >= 4) {
