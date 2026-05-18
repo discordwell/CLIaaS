@@ -5081,6 +5081,7 @@ export class Game {
       shortenFallingParachuteAnim(entity);
 
       if (entity.stats.isInfantry && FOOT_PER_CELL_ENABLED) {
+        if (this.handleInfantryBuildingEntryCell(entity)) return true;
         const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
         const inRangeNow = this.footPerCellTargetInRange(entity);
         const pathShortenEligible =
@@ -5483,6 +5484,8 @@ export class Game {
           (entity.mission as Mission) === Mission.HUNT ||
           (entity.mission as Mission) === Mission.RESCUE ||
           (entity.mission as Mission) === Mission.ATTACK ||
+          (entity.mission as Mission) === Mission.CAPTURE ||
+          (entity.mission as Mission) === Mission.SABOTAGE ||
           (entity.mission as Mission) === Mission.AREA_GUARD
         );
       const runPostHandlerInfantryAttackNavCom =
@@ -5502,6 +5505,12 @@ export class Game {
         entity.stats.isInfantry &&
         missionBeforeStageB === Mission.AREA_GUARD &&
         (entity.mission as Mission) === Mission.AREA_GUARD &&
+        (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving);
+      const runPostHandlerInfantryCaptureMovement =
+        missionHandlerRan &&
+        entity.stats.isInfantry &&
+        (missionBeforeStageB === Mission.CAPTURE || missionBeforeStageB === Mission.SABOTAGE) &&
+        ((entity.mission as Mission) === Mission.CAPTURE || (entity.mission as Mission) === Mission.SABOTAGE) &&
         (entity.moveTarget !== null || entity.pathIndex < entity.path.length || entity.isDriving);
       const runPostHandlerInfantryMoveMovement =
         missionHandlerRan &&
@@ -5561,7 +5570,7 @@ export class Game {
          (entity.mission as Mission) === Mission.RESCUE ||
          (entity.mission as Mission) === Mission.AREA_GUARD ||
          (entity.mission as Mission) === Mission.RETREAT);
-      if ((!missionHandlerRan || runPostHandlerInfantryGuardMovement || runPostHandlerInfantryNavComAfterCommence || runPostHandlerInfantryAttackNavCom || runPostHandlerInfantryHuntMovement || runPostHandlerInfantryAreaGuardMovement || runPostHandlerInfantryMoveMovement || runPostHandlerHarvesterMovement || runPostHandlerDriveClassMove || runPostHandlerDriveClassAttack || runPostHandlerDriveClassEnter || runPostHandlerDriveClassUnload || runPostHandlerDriveClassHunt) && !entity.isAirUnit) {
+      if ((!missionHandlerRan || runPostHandlerInfantryGuardMovement || runPostHandlerInfantryNavComAfterCommence || runPostHandlerInfantryAttackNavCom || runPostHandlerInfantryHuntMovement || runPostHandlerInfantryAreaGuardMovement || runPostHandlerInfantryCaptureMovement || runPostHandlerInfantryMoveMovement || runPostHandlerHarvesterMovement || runPostHandlerDriveClassMove || runPostHandlerDriveClassAttack || runPostHandlerDriveClassEnter || runPostHandlerDriveClassUnload || runPostHandlerDriveClassHunt) && !entity.isAirUnit) {
         if (entity.stats.isInfantry) {
           this.runInfantryMovementAI(entity);
         } else {
@@ -6032,7 +6041,8 @@ export class Game {
         }
         break;
       }
-      case Mission.ATTACK:
+      case Mission.ATTACK: {
+        let attackHandlerReturnedEarly = false;
         if (DISPATCH_ORDER_REFACTOR && entity.stats.isInfantry) {
           // C++ InfantryClass::AI order is MissionClass::AI -> Commence ->
           // Firing_AI -> Movement_AI (infantry.cpp:1208-1247). The
@@ -6044,7 +6054,16 @@ export class Game {
           // which blocks a queued MOVE from being popped. SCG06EA logic[67]
           // then stays ATTACK+mq=MOVE instead of the C++ MOVE+mq=ATTACK chain.
           if (missionTimerFired) {
-            if (entity.target?.alive || entity.targetStructure?.alive || entity.forceFirePos) {
+            const targetStructure = entity.targetStructure?.alive
+              ? entity.targetStructure as MapStructure
+              : null;
+            if (targetStructure && this.assignInfantryBuildingEntryMission(entity, targetStructure)) {
+              // C++ InfantryClass::Mission_Attack returns 1 after queuing
+              // CAPTURE/SABOTAGE; it does not run FootClass::Mission_Attack's
+              // Random_Pick(0,2) jitter.
+              attackHandlerReturnedEarly = true;
+              entity.missionTimer = 1;
+            } else if (entity.target?.alive || targetStructure || entity.forceFirePos) {
               if (this.shouldMissionAttackApproach(entity)) {
                 this.approachTarget(entity);
               }
@@ -6065,11 +6084,11 @@ export class Game {
         // Head_To_Coord hop. Without this, attacking infantry can remain frozen
         // mid-hop in TS while C++ finishes the sub-cell move, goes prone, and
         // fires on schedule (SCG06EA tick-100 bullet[121]).
-        if (!DISPATCH_ORDER_REFACTOR && entity.stats.isInfantry && !entity.firePrepActive) {
+        if (!attackHandlerReturnedEarly && !DISPATCH_ORDER_REFACTOR && entity.stats.isInfantry && !entity.firePrepActive) {
           this._infantryWalkStep(entity);
         }
         // C++ foot.cpp:570: Mission_Attack returns Normal_Delay+Random_Pick(0,2)
-        if (missionTimerFired) {
+        if (!attackHandlerReturnedEarly && missionTimerFired) {
           const savedTag = ScenarioRandom._sourceTag;
           if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60030;
           const delay = 14 + ScenarioRandom.nextInRange(0, 2);
@@ -6080,6 +6099,7 @@ export class Game {
           entity.missionTimer = delay;
         }
         break;
+      }
       case Mission.HUNT:
         // C++ DriveClass::AI / MissionClass::AI runs Mission_Hunt when the
         // mission timer fires, even if TarCom is already in range. The
@@ -6292,6 +6312,7 @@ export class Game {
                   this.cutInfantryTransportTether(entity);
                   const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
                   const inRangeNow = this.footPerCellTargetInRange(entity);
+                  if (this.handleInfantryBuildingEntryCell(entity)) return;
                   footPerCellProcess(
                     entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
                     PCPType.PCP_END,
@@ -6356,8 +6377,29 @@ export class Game {
         }
         break;
       case Mission.CAPTURE:
-        // Engineer capture — handled by updateAttack with targetStructure
-        this.updateAttack(entity);
+      case Mission.SABOTAGE:
+        // C++ mission.cpp dispatches both CAPTURE and SABOTAGE through
+        // FootClass::Mission_Capture. The handler moves toward NavCom and always
+        // returns Normal_Delay + Random_Pick(0,2); building entry is handled by
+        // InfantryClass::Per_Cell_Process, not by firing at the building.
+        if (missionTimerFired) {
+          if (entity.stats.isInfantry &&
+              entity.stats.hasC4 &&
+              entity.targetStructure?.alive &&
+              !entity.moveTarget) {
+            this.assignInfantryDestinationToStructure(entity, entity.targetStructure as MapStructure);
+          }
+          if (!entity.moveTarget) {
+            assignMission(entity, this.infantryEnterIdleMission(entity));
+          }
+          const savedTag = ScenarioRandom._sourceTag;
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 60020;
+          const captureDelay = 14 + ScenarioRandom.nextInRange(0, 2);
+          if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
+          if (entity.mission === Mission.CAPTURE || entity.mission === Mission.SABOTAGE) {
+            entity.missionTimer = captureDelay;
+          }
+        }
         break;
       case Mission.HARVEST:
         entity.animState = AnimState.IDLE;
@@ -6481,7 +6523,6 @@ export class Game {
         this.updateHunt(entity);
         break;
       case Mission.MISSILE:
-      case Mission.SABOTAGE:
       case Mission.CONSTRUCTION:
       case Mission.DECONSTRUCTION:
         // Stub missions — handled by specific subsystems
@@ -6544,7 +6585,11 @@ export class Game {
       return;
     }
 
-    if (m === Mission.ATTACK || m === Mission.HUNT || m === Mission.RESCUE) {
+    if (m === Mission.ATTACK ||
+        m === Mission.HUNT ||
+        m === Mission.RESCUE ||
+        m === Mission.CAPTURE ||
+        m === Mission.SABOTAGE) {
       // ATTACK/HUNT per-tick walk loop. C++ InfantryClass::AI always runs
       // Movement_AI after Firing_AI (infantry.cpp:1237-1247), including while
       // Mission==ATTACK. When Can_Fire returns FIRE_MOVING, no fire animation
@@ -6734,6 +6779,7 @@ export class Game {
           this.cutInfantryTransportTether(entity);
           const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
           const inRangeNow = this.footPerCellTargetInRange(entity);
+          if (this.handleInfantryBuildingEntryCell(entity)) return;
           footPerCellProcess(
             entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
             PCPType.PCP_END,
@@ -8755,6 +8801,9 @@ export class Game {
    *  back to GUARD/AREA_GUARD (infantry.cpp:1663-1720). */
   private infantryEnterIdleMission(entity: Entity): Mission {
     if (entity.target?.alive || entity.targetStructure?.alive) {
+      if (entity.mission === Mission.CAPTURE || entity.mission === Mission.SABOTAGE) {
+        return entity.mission;
+      }
       return Mission.ATTACK;
     }
     if (entity.moveTarget) {
@@ -8764,6 +8813,121 @@ export class Game {
       return Mission.MOVE;
     }
     return this.idleMission(entity);
+  }
+
+  private assignInfantryDestinationToStructure(entity: Entity, structure: MapStructure): void {
+    if (entity.stats.isInfantry &&
+        entity.isDriving &&
+        this.canStopInfantryDriverForAssignDestination(entity)) {
+      this.stopInfantryDriver(entity);
+    }
+    entity.moveTarget = scenarioStructureTargetLeptons(structure);
+    entity.moveTargetEntityRef = null;
+    this.clearDrivePath(entity);
+    resetPathThreshold(entity);
+  }
+
+  private infantryBuildingEntryStructure(entity: Entity): MapStructure | null {
+    const targetStructure = entity.targetStructure?.alive
+      ? entity.targetStructure as MapStructure
+      : null;
+    if (targetStructure) return targetStructure;
+    if (!entity.moveTarget) return null;
+    return this.findStructureAtCell(
+      Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+      Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+    );
+  }
+
+  private infantryBuildingEntryTarget(entity: Entity, cx = entity.cell.cx, cy = entity.cell.cy): MapStructure | null {
+    if (!entity.stats.isInfantry) return null;
+    if ((entity.mission as Mission) !== Mission.CAPTURE &&
+        (entity.mission as Mission) !== Mission.SABOTAGE) {
+      return null;
+    }
+    const structure = this.infantryBuildingEntryStructure(entity);
+    if (!structure || !this.structureOccupiesCell(structure, cx, cy)) return null;
+    return structure;
+  }
+
+  /** C++ InfantryClass::Per_Cell_Process building-entry branch (infantry.cpp:593-706). */
+  private handleInfantryBuildingEntryCell(entity: Entity): boolean {
+    const structure = this.infantryBuildingEntryTarget(entity);
+    if (!structure) return false;
+    entity.targetStructure = structure;
+
+    if ((entity.mission as Mission) === Mission.SABOTAGE) {
+      this.updateAttackStructure(entity, structure);
+      return !entity.alive;
+    }
+
+    if ((entity.mission as Mission) !== Mission.CAPTURE) return false;
+
+    if (entity.type === UnitType.I_E6) {
+      this.updateAttackStructure(entity, structure);
+      return !entity.alive;
+    }
+
+    if (entity.type === UnitType.I_THF) {
+      this.updateThief(entity);
+      return !entity.alive;
+    }
+
+    if (entity.type === UnitType.I_SPY) {
+      this.spyInfiltrate(entity, structure);
+      if (!entity.alive) return true;
+    }
+
+    // GNRL and any other non-engineer infiltrator follows the C++ fallthrough:
+    // the building entry consumes the infantry object even when there is no
+    // spy/thief/engineer special effect for its concrete type.
+    this.consumeBuildingEntryInfantry(entity);
+    return true;
+  }
+
+  private consumeBuildingEntryInfantry(entity: Entity): void {
+    const occupiedLogicBefore = entity.occupiesCppLogic();
+    if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
+      this.clearInfantryOccupyBit(entity.claimedCellIdx, entity.claimedSubCell);
+    }
+    entity.claimedCellIdx = -1;
+    entity.claimedSubCell = -1;
+    entity.isDriving = false;
+    entity.headToLX = 0;
+    entity.headToLY = 0;
+    entity.moveTarget = null;
+    entity.moveTargetEntityRef = null;
+    this.clearDrivePath(entity);
+    entity.target = null;
+    entity.targetStructure = null;
+    entity.forceFirePos = null;
+    entity.triggerName = undefined;
+    entity.triggerDeathProcessed = true;
+    entity.alive = false;
+    entity.mission = Mission.DIE;
+    entity.animState = AnimState.DIE;
+    entity.animFrame = 0;
+    entity.deathTick = 0;
+    entity.deathVariant = 0;
+    entity.disguisedAs = null;
+    if (occupiedLogicBefore && !entity.occupiesCppLogic()) {
+      this.releaseCppLogicSlotForEntity(entity);
+    }
+  }
+
+  /** C++ InfantryClass::Mission_Attack override (infantry.cpp:3142-3157). */
+  private assignInfantryBuildingEntryMission(entity: Entity, structure: MapStructure): boolean {
+    if (!entity.stats.isInfantry) return false;
+    const entryMission = entity.stats.hasC4
+      ? Mission.SABOTAGE
+      : entity.stats.isInfiltrate
+        ? Mission.CAPTURE
+        : null;
+    if (!entryMission) return false;
+
+    this.assignInfantryDestinationToStructure(entity, structure);
+    assignMission(entity, entryMission);
+    return true;
   }
 
   /** C++ RadioClass In_Radio_Contact for transport unloads. */
@@ -8902,6 +9066,10 @@ export class Game {
   private infantryCanEnterCell(entity: Entity, cx: number, cy: number, _facing = -1): MoveResult {
     if (!this.map.inBounds(cx, cy) && !this.isAllowedToLeaveMap(entity)) {
       return MoveResult.IMPASSABLE;
+    }
+
+    if (this.infantryBuildingEntryTarget(entity, cx, cy)) {
+      return MoveResult.OK;
     }
 
     const mine = !entity.isNavalUnit ? this.mineStructureAt(cx, cy) : undefined;
@@ -10698,6 +10866,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = this.footPerCellTargetInRange(entity);
+            if (this.handleInfantryBuildingEntryCell(entity)) return;
             footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
@@ -10785,6 +10954,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = this.footPerCellTargetInRange(entity);
+            if (this.handleInfantryBuildingEntryCell(entity)) return;
             footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
@@ -11427,6 +11597,7 @@ export class Game {
                                         || m === Mission.ATTACK;
             const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
             const inRangeNow = this.footPerCellTargetInRange(entity);
+            if (this.handleInfantryBuildingEntryCell(entity)) return;
             footPerCellProcess(
               entity as unknown as Parameters<typeof footPerCellProcess<Mission>>[0],
               PCPType.PCP_END,
@@ -16674,7 +16845,7 @@ export class Game {
     if (spy.type !== UnitType.I_SPY || !spy.alive) return;
 
     const targetHouse = structure.house;
-    if (this.isAllied(targetHouse, this.playerHouse)) return;
+    if (this.isAllied(targetHouse, spy.house)) return;
 
     // C++ infantry.cpp:646: housespy = (1 << (House->Class->House))
     // We use the House enum string, so store as a Set-based approach via spiedHouses.
@@ -16737,10 +16908,7 @@ export class Game {
     // Clear trigger name before death so TEVENT_DESTROYED doesn't
     // fire for the spy. Without this, the spy's death triggers a loss condition
     // (los3) before the infiltration trigger chain (SPYS->frc5->Tanya) completes.
-    spy.triggerName = undefined;
-    spy.alive = false;
-    spy.mission = Mission.DIE;
-    spy.disguisedAs = null;
+    this.consumeBuildingEntryInfantry(spy);
     this.audio.play('eva_acknowledged');
   }
 

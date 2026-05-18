@@ -1046,6 +1046,10 @@ export class Team {
           this.tMissionFollow(ctx);
           break;
 
+        case TMISSION_SPY:
+          this.tMissionSpy(ctx);
+          break;
+
         case TMISSION_SET_GLOBAL:
           // C++ team.cpp:2987-2992 — set the scenario global, then advance.
           ctx?.setGlobal?.(mission.data);
@@ -1460,6 +1464,37 @@ export class Team {
         this.setMissionTarget(null);
         this.isNextMission = true;
       }
+    }
+
+    this.coordinateAttack(ctx);
+  }
+
+  /**
+   * C++ TeamClass::TMission_Spy (team.cpp:2838-2892).
+   *
+   * The mission target is normally a waypoint cell. If that cell resolves to a
+   * building, C++ rewrites MissionTarget to the building object TARGET and then
+   * runs Coordinate_Attack. The member's InfantryClass::Mission_Attack later
+   * turns infiltrating infantry into MISSION_CAPTURE.
+   */
+  private tMissionSpy(ctx?: TeamAIContext): void {
+    if (this.missionTargetCell) {
+      const structure = this.structureAtCell(ctx?.structures, this.missionTargetCell);
+      if (structure) {
+        const [w, h] = STRUCTURE_SIZE[structure.type] ?? [1, 1];
+        this.setMissionTarget({
+          x: (structure.cx + w / 2) * CELL_SIZE,
+          y: (structure.cy + h / 2) * CELL_SIZE,
+        }, null, null, structure);
+        this.coordinateAttack(ctx);
+      }
+      return;
+    }
+
+    if (!this.isMissionTargetLegal()) {
+      this.setMissionTarget(null);
+      this.isNextMission = true;
+      return;
     }
 
     this.coordinateAttack(ctx);
