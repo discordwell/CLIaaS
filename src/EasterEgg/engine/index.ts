@@ -6600,6 +6600,9 @@ export class Game {
           entity.mission = savedMission;
         }
       }
+      if (!entity.isDriving && this.clearInfantryNavComIfOutsideMovementZone(entity)) {
+        return;
+      }
       this.updateMove(entity);
       return;
     }
@@ -6635,10 +6638,45 @@ export class Game {
       // Movement_AI after Commence, not inside FootClass::Mission_Move.
       if (!entity.isDriving && entity.missionQueue === null && entity.moveTarget) {
         entity.moveTarget = null;
-        entity.pathThreshold = 1; // C++ Assign_Destination(TARGET_NONE)
+        this.clearDrivePath(entity);
+        entity.pathThreshold = MOVE_CLOAK; // C++ Assign_Destination(TARGET_NONE)
+        return;
+      }
+      // C++ infantry.cpp:3804-3810 runs the movement-zone abort before the
+      // `Mission != GUARD` pathing guard. Team regroup can therefore queue
+      // MOVE while Mission remains GUARD and still have NavCom cleared in the
+      // same object AI pass if the regroup cell is outside the infantry zone.
+      if (!entity.isDriving && this.clearInfantryNavComIfOutsideMovementZone(entity)) {
+        return;
       }
       return;
     }
+  }
+
+  private clearInfantryNavComIfOutsideMovementZone(entity: Entity): boolean {
+    if (!entity.stats.isInfantry || entity.isDriving || entity.isTethered || !entity.moveTarget) {
+      return false;
+    }
+    if ((entity.mission as Mission) === Mission.ENTER || entity.stats.isInfiltrate) {
+      return false;
+    }
+    if (!this.refreshTechnoLock(entity)) return false;
+
+    const destCell = {
+      cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
+      cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
+    };
+    if (cellsInSameMovementZone(this.map, entity.cell, destCell, entity.isNavalUnit, this.structures)) {
+      return false;
+    }
+
+    entity.moveTarget = null;
+    entity.moveTargetEntityRef = null;
+    entity.moveTargetEntityRefLX = 0;
+    entity.moveTargetEntityRefLY = 0;
+    this.clearDrivePath(entity);
+    entity.pathThreshold = MOVE_CLOAK;
+    return true;
   }
 
   /**
@@ -6686,6 +6724,8 @@ export class Game {
       return;
     }
     if (!entity.isDriving) {
+      if (this.clearInfantryNavComIfOutsideMovementZone(entity)) return;
+
       if (entity.stats.isInfantry && entity.moveTarget) {
         this.skipInfantryPathCurrentCell(entity);
         this.shortenInfantryPathToNavComDistance(entity);

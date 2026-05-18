@@ -1114,13 +1114,19 @@ export class Team {
         }
       } else {
         // Close enough — guard (C++ team.cpp:1783 Assign_Mission(MISSION_GUARD))
-        // Session 23: route through queue instead of direct Mission set to
-        // match C++ mission.cpp:388 Assign_Mission semantics. moveTarget=null
-        // mirrors Assign_Destination(TARGET_NONE).
-        if (unit.mission !== Mission.AREA_GUARD && unit.mission !== Mission.GUARD) {
+        // Session 23: route through queue instead of direct Mission set to match
+        // C++ mission.cpp:388 Assign_Mission semantics. C++ still calls
+        // Assign_Destination(TARGET_NONE) even when Assign_Mission(GUARD) is a
+        // no-op because Mission is already GUARD, so a queued MOVE can remain
+        // while NavCom is cleared.
+        if (unit.mission !== Mission.AREA_GUARD) {
           assignMission(unit, Mission.GUARD);
           unit.moveTarget = null;
           unit.moveTargetEntityRef = null;
+          unit.moveTargetEntityRefLX = 0;
+          unit.moveTargetEntityRefLY = 0;
+          unit.path = [];
+          unit.pathIndex = 0;
         }
       }
     }
