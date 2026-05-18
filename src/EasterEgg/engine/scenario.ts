@@ -599,6 +599,8 @@ interface ScenarioData {
   playerHouse: string; // house name from [Basic] Player= (e.g. 'Spain')
   /** Per-house Allies= fields from scenario INI (house name → list of allied house names) */
   houseAllies: Map<string, string[]>;
+  /** Per-house PlayerControl= flag from scenario INI. */
+  housePlayerControl: Map<string, boolean>;
   /** Per-house Credits= from scenario INI (house name → credits value before ×100) */
   houseCredits: Map<string, number>;
   /** Per-house Edge= from scenario INI (house name → edge direction string) */
@@ -963,7 +965,8 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     }
   }
 
-  // Parse per-house Credits=, Edge=, IQ=, TechLevel=, MaxUnit=, MaxInfantry=, MaxBuilding= fields
+  // Parse per-house PlayerControl=, Credits=, Edge=, IQ=, TechLevel=, MaxUnit=, MaxInfantry=, MaxBuilding= fields
+  const housePlayerControl = new Map<string, boolean>();
   const houseCreditsMap = new Map<string, number>();
   const houseEdges = new Map<string, string>();
   const houseIQ = new Map<string, number>();
@@ -972,6 +975,10 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
   const houseMaxInfantry = new Map<string, number>();
   const houseMaxBuilding = new Map<string, number>();
   for (const houseName of houseNames) {
+    const playerControlRaw = get(houseName, 'PlayerControl', '');
+    if (playerControlRaw) {
+      housePlayerControl.set(houseName, parseIniBool(playerControlRaw, false));
+    }
     const hCredits = parseInt(get(houseName, 'Credits', ''));
     if (!isNaN(hCredits) && hCredits > 0 && houseName !== playerHouse) {
       houseCreditsMap.set(houseName, hCredits);
@@ -1020,6 +1027,7 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     rawSections: sections,
     playerHouse,
     houseAllies,
+    housePlayerControl,
     houseCredits: houseCreditsMap,
     houseEdges,
     houseIQ,
@@ -2098,6 +2106,8 @@ export interface ScenarioResult {
   playerTechLevel: number;
   /** Per-house alliance data from scenario INI (used for campaign missions) */
   houseAllies: Map<House, House[]>;
+  /** Per-house PlayerControl= flag from scenario INI. */
+  housePlayerControl: Map<House, boolean>;
   /** Per-house initial credits from scenario INI (×100 applied) */
   houseCredits: Map<House, number>;
   /** Per-house reinforcement edge direction from scenario INI */
@@ -2609,6 +2619,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     playerTechLevel: data.playerTechLevel,
     houseAllies: new Map(
       Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.flatMap(expandAllyToken)])
+    ),
+    housePlayerControl: new Map(
+      Array.from(data.housePlayerControl.entries()).map(([k, v]) => [toHouse(k), v])
     ),
     houseCredits: new Map(
       Array.from(data.houseCredits.entries()).map(([k, v]) => [toHouse(k), v * 100])

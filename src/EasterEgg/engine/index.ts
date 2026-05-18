@@ -516,6 +516,8 @@ export class Game {
   houseCredits = new Map<House, number>();
   /** Per-house reinforcement entry edge from scenario INI (Gap #5) */
   private houseEdges = new Map<House, string>();
+  /** Per-house PlayerControl= from scenario INI. */
+  private housePlayerControls = new Map<House, boolean>();
   /** Per-house IQ from scenario INI (C++ IQ system, 0-3) */
   private houseIQs = new Map<House, number>();
   /** Per-house TechLevel from scenario INI (gates production items) */
@@ -2014,6 +2016,7 @@ export class Game {
     }
     // Store house edges for reinforcement spawning
     this.houseEdges = scenario.houseEdges;
+    this.housePlayerControls = scenario.housePlayerControl;
     // Store per-house IQ, TechLevel, and unit caps from scenario INI
     this.houseIQs = scenario.houseIQ;
     this.houseTechLevels = scenario.houseTechLevels;
@@ -5875,7 +5878,7 @@ export class Game {
         const hasLegalTarCom = (entity.target?.alive ?? false) || (entity.targetStructure?.alive ?? false);
         if (missionTimerFired &&
             !hasLegalTarCom &&
-            entity.house !== this.playerHouse &&
+            !this.isHouseHumanOrPlayerControl(entity.house) &&
             !entity.teamRef?.isSuicide) {
           this._runMissionAI(ctx => _targetSomethingNearbyRange(ctx, entity));
         }
@@ -13058,6 +13061,11 @@ export class Game {
   /** Check if an entity is player-controlled (allied to playerHouse) */
   private isPlayerControlled(e: Entity): boolean {
     return this.isAllied(e.house, this.playerHouse);
+  }
+
+  /** C++ HouseClass::IsHuman || IsPlayerControl, not player-allied UI ownership. */
+  private isHouseHumanOrPlayerControl(house: House): boolean {
+    return house === this.playerHouse || (this.housePlayerControls.get(house) ?? false);
   }
 
   /** Launch a projectile — delegates to combat.ts */

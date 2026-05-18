@@ -75,6 +75,59 @@ async function tsBadGuyAttackTank(adapter: unknown) {
   }, undefined);
 }
 
+async function wasmBadGuyMoveScanTanks(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const tanks = ((state.logicLayer ?? []) as any[][])
+      .filter((row) => row[0] === 290 || row[0] === 291)
+      .map((row) => ({
+        logicIndex: row[0],
+        type: row[1],
+        house: row[2],
+        mission: row[7],
+        missionTimer: row[8],
+        isDriving: row[10],
+        targetRtti: row[32],
+        targetObjectIndex: row[33],
+        canFire0: row[37],
+        arm: row[23],
+      }));
+    if (tanks.length !== 2) throw new Error('C++ SCU10EA BadGuy 3TNK pair not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      tanks,
+    };
+  }, undefined);
+}
+
+async function tsBadGuyMoveScanTanks(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const tanks = game.entities
+      .filter((entity: any) => entity.logicIndexHint === 290 || entity.logicIndexHint === 291)
+      .map((entity: any) => ({
+        logicIndex: entity.logicIndexHint,
+        type: entity.type,
+        house: entity.house,
+        mission: entity.mission,
+        missionTimer: entity.missionTimer,
+        isDriving: entity.isDriving,
+        targetLogicIndex: entity.target?.logicIndexHint ?? null,
+        targetType: entity.target?.type ?? null,
+        targetHouse: entity.target?.house ?? null,
+        attackCooldown: entity.attackCooldown,
+      }));
+    if (tanks.length !== 2) throw new Error('TS SCU10EA BadGuy 3TNK pair not found');
+    return {
+      tick: game.tick,
+      rngState: state.rngState,
+      tanks,
+    };
+  }, undefined);
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU10 attack DriveClass re-entry', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -113,4 +166,34 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU10 attack DriveClass re-
       expect(cpp333.missionQueue).toBe(-1);
     }, { wasmSeed: 0 });
   }, 180_000);
+
+  it('skips Mission_Move target scan for PlayerControl houses', async () => {
+    await withDualScenario('SCU10EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 214);
+      const cpp214 = await wasmBadGuyMoveScanTanks(handle.wasm);
+      const ts214 = await tsBadGuyMoveScanTanks(handle.ts);
+
+      expect(cpp214.tanks).toEqual([
+        expect.objectContaining({ logicIndex: 290, type: '3TNK', house: 'BadGuy', targetRtti: -1, targetObjectIndex: -1 }),
+        expect.objectContaining({ logicIndex: 291, type: '3TNK', house: 'BadGuy', targetRtti: -1, targetObjectIndex: -1 }),
+      ]);
+      expect(ts214.tanks).toEqual([
+        expect.objectContaining({ logicIndex: 290, type: '3TNK', house: 'BadGuy', targetLogicIndex: null }),
+        expect.objectContaining({ logicIndex: 291, type: '3TNK', house: 'BadGuy', targetLogicIndex: null }),
+      ]);
+
+      await stepBoth(handle, 1);
+      const cpp215 = await wasmBadGuyMoveScanTanks(handle.wasm);
+      const ts215 = await tsBadGuyMoveScanTanks(handle.ts);
+
+      expect(ts215.tick).toBe(cpp215.tick);
+      expect(ts215.rngState >>> 0).toBe(cpp215.rngState >>> 0);
+      expect(ts215.tanks).toEqual([
+        expect.objectContaining({ logicIndex: 290, targetLogicIndex: null, attackCooldown: 0 }),
+        expect.objectContaining({ logicIndex: 291, targetLogicIndex: null, attackCooldown: 0 }),
+      ]);
+    }, { wasmSeed: 0 });
+  }, 300_000);
 });
