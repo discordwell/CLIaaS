@@ -90,6 +90,24 @@ const DIR_SW = 160;
 const DIR_NW = 224;
 const REPAIR_RATE_TICKS = 14;
 const CONDITION_YELLOW_RAW = Math.floor(CONDITION_YELLOW * 256);
+const CXX_ICON_PIXEL_W = CELL_SIZE;
+
+const CXX_GIGUNDO_UNIT_TYPES = new Set<UnitType>([
+  UnitType.V_V2RL,
+  UnitType.V_2TNK,
+  UnitType.V_3TNK,
+  UnitType.V_4TNK,
+  UnitType.V_MGG,
+  UnitType.V_HARV,
+  UnitType.V_MCV,
+  UnitType.ANT1,
+  UnitType.ANT2,
+  UnitType.ANT3,
+  UnitType.V_CTNK,
+  UnitType.V_TTNK,
+  UnitType.V_QTNK,
+  UnitType.V_STNK,
+]);
 
 function isCppRepairRateFrame(tick: number): boolean {
   // C++ self-healing TechnoClass objects pulse on their first AI tick and then
@@ -13762,6 +13780,91 @@ export class Game {
     return false;
   }
 
+  private cxxFootOverlapCellOffsets(entity: Entity): number[] {
+    if (entity.stats.isInfantry) return [];
+    if (entity.isAirUnit && entity.flightAltitude > 0) return [];
+
+    const maxsize = entity.stats.isVessel
+      ? 56
+      : CXX_GIGUNDO_UNIT_TYPES.has(entity.type)
+        ? CXX_ICON_PIXEL_W * 2
+        : CXX_ICON_PIXEL_W;
+
+    return this.cxxCoordSpillageOffsets(entity, maxsize).slice(1);
+  }
+
+  private cxxCoordSpillageOffsets(entity: Entity, maxsizePixels: number): number[] {
+    if (maxsizePixels > CXX_ICON_PIXEL_W * 2) {
+      return [
+        -((2 * MAP_CELLS) - 2), -((2 * MAP_CELLS) - 1), -(2 * MAP_CELLS), -((2 * MAP_CELLS) + 1), -((2 * MAP_CELLS) + 2),
+        -((1 * MAP_CELLS) - 2), -((1 * MAP_CELLS) - 1), -(1 * MAP_CELLS), -((1 * MAP_CELLS) + 1), -((1 * MAP_CELLS) + 2),
+        2, 1, 0, -1, -2,
+        (1 * MAP_CELLS) - 2, (1 * MAP_CELLS) - 1, (1 * MAP_CELLS), (1 * MAP_CELLS) + 1, (1 * MAP_CELLS) + 2,
+        (2 * MAP_CELLS) - 2, (2 * MAP_CELLS) - 1, (2 * MAP_CELLS), (2 * MAP_CELLS) + 1, (2 * MAP_CELLS) + 2,
+      ];
+    }
+
+    const subLX = ((entity.leptonX % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+    const subLY = ((entity.leptonY % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+
+    if (maxsizePixels > CXX_ICON_PIXEL_W) {
+      const halfSize = Math.trunc(Math.min(maxsizePixels, CXX_ICON_PIXEL_W * 2) / 2);
+      const x = Math.trunc((CXX_ICON_PIXEL_W * subLX) / LEPTON_SIZE);
+      const y = Math.trunc((CXX_ICON_PIXEL_W * subLY) / LEPTON_SIZE);
+      const left = x - halfSize;
+      const right = x + halfSize;
+      const top = y - halfSize;
+      const bottom = y + halfSize;
+      const offsets = [0];
+      if (left < 0) offsets.push(-1);
+      if (right >= CXX_ICON_PIXEL_W) offsets.push(1);
+      if (top < 0) offsets.push(-MAP_CELLS);
+      if (bottom >= CXX_ICON_PIXEL_W) offsets.push(MAP_CELLS);
+      if (left < 0 && top < 0) offsets.push(-(MAP_CELLS + 1));
+      if (right >= CXX_ICON_PIXEL_W && bottom >= CXX_ICON_PIXEL_W) offsets.push(MAP_CELLS + 1);
+      if (left < 0 && bottom >= CXX_ICON_PIXEL_W) offsets.push(MAP_CELLS - 1);
+      if (right >= CXX_ICON_PIXEL_W && top < 0) offsets.push(-(MAP_CELLS - 1));
+      return offsets;
+    }
+
+    const posval = this.cxxPixelToLepton(Math.trunc((CXX_ICON_PIXEL_W - maxsizePixels) / 2));
+    const x = subLX - Math.trunc(LEPTON_SIZE / 2);
+    const y = subLY - Math.trunc(LEPTON_SIZE / 2);
+    let index = 0;
+    if (y > posval) index |= 0x08;
+    if (y < -posval) index |= 0x04;
+    if (x > posval) index |= 0x02;
+    if (x < -posval) index |= 0x01;
+
+    const spillTable = [8, 6, 2, -1, 0, 7, 1, -1, 4, 5, 3, -1, -1, -1, -1, -1];
+    const moveSpillage = [
+      [0, -MAP_CELLS],
+      [0, -MAP_CELLS, 1, -(MAP_CELLS - 1)],
+      [0, 1],
+      [0, 1, MAP_CELLS, MAP_CELLS + 1],
+      [0, MAP_CELLS],
+      [0, -1, MAP_CELLS, MAP_CELLS - 1],
+      [0, -1],
+      [0, -1, -MAP_CELLS, -(MAP_CELLS + 1)],
+      [0],
+    ];
+    const tableIndex = spillTable[index];
+    return tableIndex >= 0 ? moveSpillage[tableIndex] : [0];
+  }
+
+  private footOverlapTouchesPlayerMappedCell(entity: Entity): boolean {
+    if (entity.stats.isInfantry) return this.infantryOverlapTouchesPlayerMappedCell(entity);
+    const baseCell = entity.cell.cy * MAP_CELLS + entity.cell.cx;
+    for (const offset of this.cxxFootOverlapCellOffsets(entity)) {
+      const cell = baseCell + offset;
+      if (cell < 0 || cell >= MAP_CELLS * MAP_CELLS) continue;
+      const cx = cell % MAP_CELLS;
+      const cy = Math.floor(cell / MAP_CELLS);
+      if (this.isCellMappedForPlayer(cx, cy)) return true;
+    }
+    return false;
+  }
+
   private isMappedPlacementRevealCandidate(entity: Entity): boolean {
     // C++ CellClass::Occupy_Down / Overlap_Down reveal objects only when they
     // are actually marked down into already mapped terrain. A stationary object
@@ -13783,10 +13886,10 @@ export class Game {
       return true;
     }
 
-    // MapClass::Place_Down marks both occupy and overlap lists. Infantry can
-    // therefore be discovered through an already mapped adjacent overlap cell,
-    // but only on the frame that MARK_DOWN/MARK_OVERLAP_DOWN actually runs.
-    if (overlapPlacementEvent && this.infantryOverlapTouchesPlayerMappedCell(entity)) return true;
+    // MapClass::Place_Down marks both Occupy_List and Overlap_List. Foot objects
+    // can therefore be discovered through an already mapped overlap cell, but
+    // only on the frame that MARK_DOWN/MARK_OVERLAP_DOWN actually runs.
+    if (overlapPlacementEvent && this.footOverlapTouchesPlayerMappedCell(entity)) return true;
 
     return false;
   }
