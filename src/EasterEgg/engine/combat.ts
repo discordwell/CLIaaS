@@ -1493,7 +1493,7 @@ function scatterVehicleCrew(ctx: CombatContext, crew: Entity): void {
   const fracY = ((crew.leptonY % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
   let baseFacing = crew.facing;
   if (fracX !== CELL_CENTER_LEPTON || fracY !== CELL_CENTER_LEPTON) {
-    baseFacing = Math.round(Math.atan2(fracY - CELL_CENTER_LEPTON, fracX - CELL_CENTER_LEPTON) / (Math.PI / 4)) & 7;
+    baseFacing = directionToLeptons(CELL_CENTER_LEPTON, CELL_CENTER_LEPTON, fracX, fracY);
   }
   const offset = withScenarioRandomSourceTag(53003, () => ScenarioRandom.nextInRange(0, 4)) - 2;
   const startFacing = ((baseFacing + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
@@ -2633,29 +2633,43 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       crewType = UnitType.I_E1;
     }
     const inf = new Entity(crewType, victim.house, kx, ky);
-    inf.logicIndexHint = ctx.logicIndexHintForNewObject?.();
-    if (crewType === UnitType.I_C1) {
-      // C++ unit.cpp:1051 — i->IsTechnician = true for unarmed vehicle crew.
-      inf.isTechnician = true;
+    const spot = closestInfantryUnlimboSpot(ctx as unknown as AircraftContext, inf, victim.leptonX, victim.leptonY);
+    if (spot) {
+      inf.leptonX = spot.lx;
+      inf.leptonY = spot.ly;
+      inf.syncPosFromLeptons();
+      inf.subCell = spot.subCell;
+      if (ctx.map.occupyClaimedSubCell(spot.cellIdx, inf.id, spot.subCell)) {
+        inf.claimedCellIdx = spot.cellIdx;
+        inf.claimedSubCell = spot.subCell;
+      } else {
+        inf.claimedCellIdx = -1;
+        inf.claimedSubCell = -1;
+      }
+      inf.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+      if (crewType === UnitType.I_C1) {
+        // C++ unit.cpp:1051 — i->IsTechnician = true for unarmed vehicle crew.
+        inf.isTechnician = true;
+      }
+      // C++ new InfantryClass starts at MISSION_NONE, but Unlimbo immediately
+      // calls TechnoClass::Enter_Idle_Mode(true) + Commence() before UnitClass
+      // death code sets crew HP, Scatter(), and Assign_Mission(HUNT/GUARD).
+      //
+      // That current idle mission matters: on the same Logic.AI pass that
+      // re-reads Logic.Count(), the newly spawned infantry dispatches
+      // Mission_Guard before Commence pops the queued HUNT from below.
+      inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
+      inf.missionTimer = 0;
+      inf.missionQueue = null;
+      // C++ unit.cpp:1058: i->Strength = Random_Pick(5, (int)i->Class->MaxStrength/2)
+      inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, Math.floor(inf.maxHp / 2)));
+      inf.hp = Math.min(inf.hp, inf.maxHp);
+      scatterVehicleCrew(ctx, inf);
+      assignMission(inf, inf.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
+      ctx.entities.push(inf);
+      ctx.entityById.set(inf.id, inf);
+      ctx.markDiscoveredIfPlayerVisible?.(inf);
     }
-    // C++ new InfantryClass starts at MISSION_NONE, but Unlimbo immediately
-    // calls TechnoClass::Enter_Idle_Mode(true) + Commence() before UnitClass
-    // death code sets crew HP, Scatter(), and Assign_Mission(HUNT/GUARD).
-    //
-    // That current idle mission matters: on the same Logic.AI pass that
-    // re-reads Logic.Count(), the newly spawned infantry dispatches
-    // Mission_Guard before Commence pops the queued HUNT from below.
-    inf.mission = ctx.idleMission?.(inf) ?? Mission.GUARD;
-    inf.missionTimer = 0;
-    inf.missionQueue = null;
-    // C++ unit.cpp:1058: i->Strength = Random_Pick(5, (int)i->Class->MaxStrength/2)
-    inf.hp = Math.max(5, ScenarioRandom.nextInRange(5, Math.floor(inf.maxHp / 2)));
-    inf.hp = Math.min(inf.hp, inf.maxHp);
-    scatterVehicleCrew(ctx, inf);
-    assignMission(inf, inf.house === ctx.playerHouse ? Mission.GUARD : Mission.HUNT);
-    ctx.entities.push(inf);
-    ctx.entityById.set(inf.id, inf);
-    ctx.markDiscoveredIfPlayerVisible?.(inf);
   }
 
   // C++ aircraft.cpp:1599-1604 — Aircraft parachute survivors on destruction.
