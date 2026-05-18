@@ -11421,15 +11421,19 @@ export class Game {
                 && entity.moveTarget) {
               let clearedCloseEnoughNavCom = false;
               if (clearsCloseEnoughNavCom) {
-                // drive.cpp:1114-1158: blocked track-start while close enough
-                // calls Assign_Destination(TARGET_NONE), which can immediately
-                // queue Enter_Idle_Mode through Start_Of_Move when not driving.
+                // drive.cpp:1114-1151 snapshots `cando`, clears NavCom when
+                // close enough, then still handles the saved block result
+                // below. A MOVE_DESTROYABLE blocker must therefore override
+                // the queued idle mission with ATTACK in the same Start_Of_Move.
                 this.assignDriveDestinationNone(entity);
                 clearedCloseEnoughNavCom = true;
               }
+              if (entryMove === MoveResult.DESTROYABLE &&
+                  this.overrideDriveDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
+                break;
+              }
               if (clearedCloseEnoughNavCom) break;
-            }
-            if (entryMove === MoveResult.DESTROYABLE &&
+            } else if (entryMove === MoveResult.DESTROYABLE &&
                 this.overrideDriveDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
               break;
             }
