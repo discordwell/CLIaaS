@@ -79,6 +79,14 @@ function clearFootPath(entity: Entity): void {
   entity.drivePathHeadCleared = false;
 }
 
+function clearInfantryAssignTargetPathHead(entity: Entity): void {
+  if (entity.stats.isInfantry && entity.isDriving) {
+    entity.drivePathHeadCleared = true;
+    return;
+  }
+  clearFootPath(entity);
+}
+
 /** C++ ini.cpp Get_MPHType: rules.ini Speed= is a percentage of 256
  *  leptons/tick, clamped at MPH_LIGHT_SPEED (255). Example: TorpTube
  *  Speed=15 becomes MaxSpeed=38, matching BulletClass::MaxSpeed in WASM. */
@@ -2524,7 +2532,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
         // C++ ObjectClass::Detach_All reaches InfantryClass::Assign_Target
         // through TechnoClass::Detach; assigning TARGET_NONE clears Path[0]
         // without stopping the active Head_To_Coord hop.
-        clearFootPath(entity);
+        clearInfantryAssignTargetPathHead(entity);
         entity.isFiringAnim = false;
         entity.firingAnimTicks = 0;
       }
